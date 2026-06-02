@@ -15,18 +15,18 @@ export async function POST(req: NextRequest) {
 
   const cookieOpts = {
     path: "/",
-    maxAge: 60 * 60 * 24 * 7, // 7 days
+    maxAge: 60 * 60 * 24 * 7,
     sameSite: "lax" as const,
     secure: process.env.NODE_ENV === "production",
   };
 
-  // httpOnly JWT — used by middleware for access control
+  // httpOnly JWT — usado pelo middleware
   res.cookies.set("auth-token", token, { ...cookieOpts, httpOnly: true });
 
-  // Readable by JS — used by client components to show name/role in the UI
+  // Legível pelo JS — usado pela UI (sem double encoding)
   res.cookies.set(
     "auth-user",
-    encodeURIComponent(JSON.stringify({ name: user.name, role: user.role })),
+    JSON.stringify({ name: user.name, role: user.role }),
     { ...cookieOpts, httpOnly: false }
   );
 
