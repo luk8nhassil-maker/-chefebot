@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import NavBar from '@/components/NavBar'
 
 type Status = 'novo' | 'em_preparo' | 'saiu_entrega' | 'entregue' | 'cancelado'
 
@@ -46,8 +45,17 @@ export default function PedidosPage() {
   const [pedidos, setPedidos] = useState<Pedido[]>([])
   const [filtro, setFiltro] = useState<Status | 'todos'>('todos')
   const [loading, setLoading] = useState(true)
+  const [userName, setUserName] = useState('')
 
   useEffect(() => {
+    const cookie = document.cookie.split(';').find(c => c.trim().startsWith('auth-user='))
+    if (cookie) {
+      try {
+        const user = JSON.parse(decodeURIComponent(cookie.split('=')[1]))
+        setUserName(user.name || '')
+      } catch {}
+    }
+
     fetch('/api/orders')
       .then(r => {
         if (r.status === 401) { router.push('/login?callbackUrl=/pedidos'); return null }
@@ -70,82 +78,99 @@ export default function PedidosPage() {
   const pedidosFiltrados = filtro === 'todos' ? pedidos : pedidos.filter(p => p.status === filtro)
   const ativos = pedidos.filter(p => !['entregue', 'cancelado'].includes(p.status)).length
 
-  if (loading) return (
-    <div className="min-h-screen bg-gray-50">
-      <NavBar />
-      <div className="flex items-center justify-center h-64">
-        <p className="text-gray-500">Carregando pedidos...</p>
-      </div>
-    </div>
-  )
-
   return (
     <div className="min-h-screen bg-gray-50">
-      <NavBar />
-      <div className="max-w-4xl mx-auto px-4 py-6">
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-gray-900">📋 Gestão de Pedidos</h1>
-          <p className="text-sm text-gray-500">{ativos} pedido{ativos !== 1 ? 's' : ''} ativo{ativos !== 1 ? 's' : ''}</p>
+      {/* Header */}
+      <div className="bg-white border-b border-gray-100 px-4 py-3 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="text-xl">🍕</span>
+          <span className="font-bold text-gray-900">ChefBot</span>
         </div>
-
-        <div className="flex gap-2 flex-wrap mb-6">
-          {(['todos', 'novo', 'em_preparo', 'saiu_entrega', 'entregue', 'cancelado'] as const).map(s => (
+        {userName && (
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-gray-600">Olá, <strong>{userName}</strong></span>
             <button
-              key={s}
-              onClick={() => setFiltro(s)}
-              className={`px-3 py-1 rounded-full text-sm font-medium transition-all ${
-                filtro === s ? 'bg-red-600 text-white' : 'bg-white text-gray-600 border border-gray-200 hover:border-red-300'
-              }`}
+              onClick={() => fetch('/api/auth/logout', { method: 'POST' }).then(() => router.push('/login'))}
+              className="text-sm text-gray-400 hover:text-gray-600"
             >
-              {s === 'todos' ? `Todos (${pedidos.length})` : STATUS_LABEL[s]}
+              Sair
             </button>
-          ))}
-        </div>
+          </div>
+        )}
+      </div>
 
-        <div className="space-y-3">
-          {pedidosFiltrados.length === 0 && (
-            <div className="text-center py-12 text-gray-400">Nenhum pedido encontrado</div>
-          )}
-          {pedidosFiltrados.map(pedido => (
-            <div key={pedido.id} className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="font-semibold text-gray-900">{pedido.cliente}</span>
-                    <span className="text-xs text-gray-400">{pedido.horario}</span>
-                  </div>
-                  <p className="text-sm text-gray-500 mb-1">📱 {pedido.telefone}</p>
-                  <p className="text-sm text-gray-500 mb-2">📍 {pedido.endereco}</p>
-                  <div className="text-sm text-gray-700 mb-2">
-                    {pedido.itens.map((item, i) => <span key={i} className="mr-2">• {item}</span>)}
-                  </div>
-                  <p className="font-bold text-gray-900">R$ {pedido.total.toFixed(2)}</p>
-                </div>
-                <div className="flex flex-col items-end gap-2">
-                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${STATUS_COR[pedido.status]}`}>
-                    {STATUS_LABEL[pedido.status]}
-                  </span>
-                  {PROXIMO_STATUS[pedido.status] && (
-                    <button
-                      onClick={() => avancarStatus(pedido.id, PROXIMO_STATUS[pedido.status]!)}
-                      className="text-xs bg-red-600 text-white px-3 py-1 rounded-lg hover:bg-red-700 transition-colors"
-                    >
-                      Avançar →
-                    </button>
-                  )}
-                  {pedido.status === 'novo' && (
-                    <button
-                      onClick={() => avancarStatus(pedido.id, 'cancelado')}
-                      className="text-xs text-red-400 hover:text-red-600"
-                    >
-                      Cancelar
-                    </button>
-                  )}
-                </div>
-              </div>
+      <div className="max-w-4xl mx-auto px-4 py-6">
+        {loading ? (
+          <div className="flex items-center justify-center h-64">
+            <p className="text-gray-500">Carregando pedidos...</p>
+          </div>
+        ) : (
+          <>
+            <div className="mb-6">
+              <h1 className="text-2xl font-bold text-gray-900">📋 Gestão de Pedidos</h1>
+              <p className="text-sm text-gray-500">{ativos} pedido{ativos !== 1 ? 's' : ''} ativo{ativos !== 1 ? 's' : ''}</p>
             </div>
-          ))}
-        </div>
+
+            <div className="flex gap-2 flex-wrap mb-6">
+              {(['todos', 'novo', 'em_preparo', 'saiu_entrega', 'entregue', 'cancelado'] as const).map(s => (
+                <button
+                  key={s}
+                  onClick={() => setFiltro(s)}
+                  className={`px-3 py-1 rounded-full text-sm font-medium transition-all ${
+                    filtro === s ? 'bg-red-600 text-white' : 'bg-white text-gray-600 border border-gray-200 hover:border-red-300'
+                  }`}
+                >
+                  {s === 'todos' ? `Todos (${pedidos.length})` : STATUS_LABEL[s]}
+                </button>
+              ))}
+            </div>
+
+            <div className="space-y-3">
+              {pedidosFiltrados.length === 0 && (
+                <div className="text-center py-12 text-gray-400">Nenhum pedido encontrado</div>
+              )}
+              {pedidosFiltrados.map(pedido => (
+                <div key={pedido.id} className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="font-semibold text-gray-900">{pedido.cliente}</span>
+                        <span className="text-xs text-gray-400">{pedido.horario}</span>
+                      </div>
+                      <p className="text-sm text-gray-500 mb-1">📱 {pedido.telefone}</p>
+                      <p className="text-sm text-gray-500 mb-2">📍 {pedido.endereco}</p>
+                      <div className="text-sm text-gray-700 mb-2">
+                        {pedido.itens.map((item, i) => <span key={i} className="mr-2">• {item}</span>)}
+                      </div>
+                      <p className="font-bold text-gray-900">R$ {pedido.total.toFixed(2)}</p>
+                    </div>
+                    <div className="flex flex-col items-end gap-2">
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${STATUS_COR[pedido.status]}`}>
+                        {STATUS_LABEL[pedido.status]}
+                      </span>
+                      {PROXIMO_STATUS[pedido.status] && (
+                        <button
+                          onClick={() => avancarStatus(pedido.id, PROXIMO_STATUS[pedido.status]!)}
+                          className="text-xs bg-red-600 text-white px-3 py-1 rounded-lg hover:bg-red-700 transition-colors"
+                        >
+                          Avançar →
+                        </button>
+                      )}
+                      {pedido.status === 'novo' && (
+                        <button
+                          onClick={() => avancarStatus(pedido.id, 'cancelado')}
+                          className="text-xs text-red-400 hover:text-red-600"
+                        >
+                          Cancelar
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
       </div>
     </div>
   )
