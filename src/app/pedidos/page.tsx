@@ -51,7 +51,8 @@ export default function PedidosPage() {
     const cookie = document.cookie.split(';').find(c => c.trim().startsWith('auth-user='))
     if (cookie) {
       try {
-        const user = JSON.parse(decodeURIComponent(cookie.split('=')[1]))
+        const raw = cookie.split('=').slice(1).join('=')
+const user = JSON.parse(decodeURIComponent(decodeURIComponent(raw)))
         setUserName(user.name || '')
       } catch {}
     }
