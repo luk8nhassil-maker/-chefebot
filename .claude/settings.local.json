@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm --version)",
+      "Bash(npx create-next-app@latest *)",
+      "Bash(npm install *)",
+      "Bash(npx prisma *)",
+      "Bash(npx tsc *)",
+      "Bash(npm search *)",
+      "Bash(npm run *)",
+      "Bash(curl -s http://localhost:3000)",
+      "Bash(curl -s -X POST http://localhost:3000/api/bot -H 'Content-Type: application/json' -d '{\"message\":\"1\",\"session\":{\"step\":\"size\",\"cart\":[],\"deliveryFee\":0},\"phone\":\"5511999999999\"}')",
+      "Bash(python3 -m json.tool)",
+      "Bash(curl -s -X POST http://localhost:3000/api/bot -H \"Content-Type: application/json\" -d '{\"message\":\"1\",\"session\":{\"step\":\"size\",\"cart\":[],\"deliveryFee\":0},\"phone\":\"5511999999999\"}')",
+      "Bash(npx kill-port *)",
+      "Bash(npm list *)",
+      "Bash(curl -s -X POST http://localhost:3000/api/bot -H 'Content-Type: application/json' -d '{\"message\":\"1\",\"session\":{\"step\":\"flavor\",\"cart\":[],\"deliveryFee\":0,\"currentSize\":\"P\"},\"phone\":\"5511999999999\"}')",
+      "Bash(curl -s -X POST http://localhost:3000/api/bot -H 'Content-Type: application/json' -d '{\"message\":\"1\",\"session\":__TRACKED_VAR__,\"phone\":\"5511999999999\"}')",
+      "Bash(curl -s -X POST http://localhost:3000/api/bot -H 'Content-Type: application/json' -d '{\"message\":\"1\",\"session\":{\"step\":\"payment\",\"cart\":[{\"size\":\"P\",\"flavor\":\"Calabresa\",\"border\":\"Borda recheada\",\"price\":43}],\"deliveryFee\":3,\"deliveryType\":\"delivery\",\"neighborhood\":\"Centro\"},\"phone\":\"5511999999999\"}')",
+      "Bash(git init *)",
+      "Bash(gh auth *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git config *)",
+      "Bash(npm uninstall *)"
+    ]
+  }
+}
