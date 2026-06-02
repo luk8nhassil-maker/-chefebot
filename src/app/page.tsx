@@ -1,27 +1,10 @@
 import Link from "next/link";
+import { NavBar } from "@/components/NavBar";
 
 export default function HomePage() {
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
-      <header className="bg-white border-b border-gray-200 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <span className="text-2xl">🍕</span>
-            <div>
-              <h1 className="font-bold text-gray-800 text-lg leading-none">ChefBot</h1>
-              <p className="text-gray-400 text-xs">Chefe da Pizza</p>
-            </div>
-          </div>
-          <nav className="flex gap-4 text-sm">
-            <Link href="/" className="text-green-700 font-semibold border-b-2 border-green-600">
-              Dashboard
-            </Link>
-            <Link href="/simulador" className="text-gray-500 hover:text-gray-700 transition">
-              Simulador
-            </Link>
-          </nav>
-        </div>
-      </header>
+      <NavBar currentPage="dashboard" />
 
       <main className="flex-1 max-w-7xl mx-auto px-4 py-12 w-full">
         <div className="text-center mb-12">
@@ -52,27 +35,41 @@ export default function HomePage() {
             </div>
           </Link>
 
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 opacity-60">
-            <div className="text-4xl mb-3">📋</div>
-            <h3 className="font-bold text-gray-800 text-lg mb-2">Gestão de Pedidos</h3>
-            <p className="text-gray-500 text-sm">
-              Painel com todos os pedidos em tempo real, status e histórico.
-            </p>
-            <div className="mt-4 inline-flex items-center text-gray-400 text-sm font-medium">
-              Em breve
+          <Link href="/pedidos">
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 hover:shadow-md hover:border-blue-200 transition cursor-pointer group">
+              <div className="text-4xl mb-3">📋</div>
+              <h3 className="font-bold text-gray-800 text-lg mb-2 group-hover:text-blue-700 transition">
+                Gestão de Pedidos
+              </h3>
+              <p className="text-gray-500 text-sm">
+                Painel com todos os pedidos em tempo real, status e histórico.
+              </p>
+              <div className="mt-4 inline-flex items-center text-blue-600 text-sm font-medium gap-1">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                </svg>
+                Atendente ou Admin
+              </div>
             </div>
-          </div>
+          </Link>
 
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 opacity-60">
-            <div className="text-4xl mb-3">📊</div>
-            <h3 className="font-bold text-gray-800 text-lg mb-2">Relatórios</h3>
-            <p className="text-gray-500 text-sm">
-              Análise de vendas, sabores mais pedidos, horários de pico e mais.
-            </p>
-            <div className="mt-4 inline-flex items-center text-gray-400 text-sm font-medium">
-              Em breve
+          <Link href="/relatorios">
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 hover:shadow-md hover:border-purple-200 transition cursor-pointer group">
+              <div className="text-4xl mb-3">📊</div>
+              <h3 className="font-bold text-gray-800 text-lg mb-2 group-hover:text-purple-700 transition">
+                Relatórios
+              </h3>
+              <p className="text-gray-500 text-sm">
+                Análise de vendas, sabores mais pedidos, horários de pico e faturamento.
+              </p>
+              <div className="mt-4 inline-flex items-center text-purple-600 text-sm font-medium gap-1">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                </svg>
+                Somente Admin
+              </div>
             </div>
-          </div>
+          </Link>
         </div>
 
         <div className="mt-10 grid grid-cols-2 md:grid-cols-4 gap-4">
