@@ -23,16 +23,18 @@ export default function RelatoriosPage() {
     }
   }, [router])
 
-  const pedidos = [
-    { id: '1', sabor: 'Calabresa', tamanho: 'G', horario: '19:42', bairro: 'Centro', status: 'entregue' },
-    { id: '2', sabor: 'Frango', tamanho: 'G', horario: '19:35', bairro: 'Frei Serafim', status: 'entregue' },
-    { id: '3', sabor: 'Marguerita', tamanho: 'M', horario: '19:35', bairro: 'Frei Serafim', status: 'entregue' },
-    { id: '4', sabor: '4 Queijos', tamanho: 'G', horario: '19:10', bairro: 'Coelho Rodrigues', status: 'entregue' },
-    { id: '5', sabor: 'Pepperoni', tamanho: 'M', horario: '18:50', bairro: 'Lizandro Nogueira', status: 'entregue' },
-    { id: '6', sabor: 'Calabresa', tamanho: 'M', horario: '18:30', bairro: 'Centro', status: 'cancelado' },
-    { id: '7', sabor: 'Frango', tamanho: 'G', horario: '18:10', bairro: 'Centro', status: 'entregue' },
-    { id: '8', sabor: 'Calabresa', tamanho: 'G', horario: '17:55', bairro: 'Frei Serafim', status: 'entregue' },
-  ]
+const pedidos = [
+  { id: '1', sabor: 'Calabresa', tamanho: 'G', horario: '19:42', bairro: 'Centro', status: 'entregue' },
+  { id: '2', sabor: 'Frango c/ Catupiry', tamanho: 'G', horario: '19:35', bairro: 'Centro', status: 'entregue' },
+  { id: '3', sabor: 'Portuguesa', tamanho: 'M', horario: '19:35', bairro: 'Centro', status: 'entregue' },
+  { id: '4', sabor: '4 Queijos', tamanho: 'G', horario: '19:10', bairro: 'Ilhotas', status: 'entregue' },
+  { id: '5', sabor: 'Pepperoni', tamanho: 'M', horario: '18:50', bairro: 'Vermelha', status: 'entregue' },
+  { id: '6', sabor: 'Calabresa', tamanho: 'M', horario: '18:30', bairro: 'Centro', status: 'cancelado' },
+  { id: '7', sabor: 'Frango c/ Catupiry', tamanho: 'G', horario: '18:10', bairro: 'Ilhotas', status: 'entregue' },
+  { id: '8', sabor: 'Baiana', tamanho: 'G', horario: '17:55', bairro: 'Vermelha', status: 'entregue' },
+  { id: '9', sabor: 'Marguerita', tamanho: 'M', horario: '17:40', bairro: 'Centro', status: 'entregue' },
+  { id: '10', sabor: 'Calabresa', tamanho: 'G', horario: '17:20', bairro: 'Ilhotas', status: 'entregue' },
+]
 
   const entregues = pedidos.filter(p => p.status === 'entregue')
   const cancelados = pedidos.filter(p => p.status === 'cancelado')
