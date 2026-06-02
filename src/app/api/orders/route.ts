@@ -25,26 +25,31 @@ function getToken(req: NextRequest) {
   return req.cookies.get('auth-token')?.value ?? null
 }
 
-export async function GET(req: NextRequest) {
+async function checkAuth(req: NextRequest) {
   const token = getToken(req)
-  if (!token) return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
+  if (!token) return null
   const payload = await verifyToken(token)
-  if (!payload || !['atendente', 'admin'].includes(payload.role as string)) {
-    return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
-  }
+  if (!payload || !['atendente', 'admin'].includes(payload.role as string)) return null
+  return payload
+}
+
+export async function GET(req: NextRequest) {
+  const auth = await checkAuth(req)
+  if (!auth) return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
   return NextResponse.json(pedidos)
 }
 
 export async function PATCH(req: NextRequest) {
-  const token = getToken(req)
-  if (!token) return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
-  const payload = await verifyToken(token)
-  if (!payload || !['atendente', 'admin'].includes(payload.role as string)) {
-    return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
-  }
-  const { id, status } = await req.json()
-  const pedido = pedidos.find(p => p.id === id)
-  if (!pedido) return NextResponse.json({ error: 'Pedido não encontrado' }, { status: 404 })
-  pedido.status = status
-  return NextResponse.json(pedido)
+  const auth = await checkAuth(req)
+  if (!auth) return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
+  
+  const body = await req.json()
+  const { id, status } = body
+  
+  const index = pedidos.findIndex(p => p.id === id)
+  if (index === -1) return NextResponse.json({ error: 'Pedido não encontrado' }, { status: 404 })
+  
+  pedidos[index] = { ...pedidos[index], status }
+  
+  return NextResponse.json(pedidos[index])
 }
