@@ -70,6 +70,16 @@ function tocarSom() {
   } catch {}
 }
 
+function enviarNotificacaoNavegador(pedido: Pedido) {
+  if (!('Notification' in window)) return
+  if (Notification.permission === 'granted') {
+    new Notification('🍕 Novo pedido — ChefBot', {
+      body: `${pedido.cliente} | ${pedido.itens[0]} | R$ ${pedido.total.toFixed(2)} | ${pedido.endereco}`,
+      icon: '/favicon.ico',
+    })
+  }
+}
+
 export default function PedidosPage() {
   const router = useRouter()
   const [pedidos, setPedidos] = useState<Pedido[]>([])
@@ -83,6 +93,7 @@ export default function PedidosPage() {
   const [botAtivo, setBotAtivo] = useState(true)
   const [salvandoBot, setSalvandoBot] = useState(false)
   const [manuais, setManuais] = useState<Record<string, boolean>>({})
+  const [permissaoNotif, setPermissaoNotif] = useState<NotificationPermission | 'unsupported'>('default')
   const prevIdsRef = useRef<string[]>([])
 
   useEffect(() => {
@@ -94,11 +105,34 @@ export default function PedidosPage() {
         setUserName(user.name || '')
       } catch {}
     }
+
+    // Verifica suporte a notificações
+    if (!('Notification' in window)) {
+      setPermissaoNotif('unsupported')
+    } else {
+      setPermissaoNotif(Notification.permission)
+      // Pede permissão automaticamente se ainda não foi decidido
+      if (Notification.permission === 'default') {
+        Notification.requestPermission().then(p => setPermissaoNotif(p))
+      }
+    }
+
     carregarPedidos()
     carregarStatusBot()
     const intervalo = setInterval(carregarPedidos, 10000)
     return () => clearInterval(intervalo)
   }, [router])
+
+  const pedirPermissaoNotificacao = () => {
+    if (!('Notification' in window)) return
+    Notification.requestPermission().then(p => {
+      setPermissaoNotif(p)
+      if (p === 'granted') {
+        setNotificacao('🔔 Notificações ativadas!')
+        setTimeout(() => setNotificacao(''), 3000)
+      }
+    })
+  }
 
   const carregarStatusBot = async () => {
     try {
@@ -168,6 +202,7 @@ export default function PedidosPage() {
             const chegaram = data.filter((p: Pedido) => !anteriores.includes(p.id))
             if (chegaram.length > 0) {
               tocarSom()
+              chegaram.forEach((p: Pedido) => enviarNotificacaoNavegador(p))
               setNotificacao(`🔔 ${chegaram.length} novo${chegaram.length > 1 ? 's' : ''} pedido${chegaram.length > 1 ? 's' : ''}!`)
               setTimeout(() => setNotificacao(''), 4000)
             }
@@ -243,6 +278,27 @@ export default function PedidosPage() {
               </p>
               {erro && <p className="text-sm text-red-500 mt-1">{erro}</p>}
             </div>
+
+            {/* Aviso notificação bloqueada */}
+            {permissaoNotif === 'denied' && (
+              <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-xl flex items-center gap-3">
+                <span>🔕</span>
+                <p className="text-sm text-yellow-800">Notificações bloqueadas. Ative nas configurações do navegador para ser avisada de novos pedidos.</p>
+              </div>
+            )}
+
+            {/* Botão ativar notificações */}
+            {permissaoNotif === 'default' && (
+              <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-xl flex items-center justify-between gap-3">
+                <p className="text-sm text-blue-800">🔔 Ative as notificações para receber alertas de novos pedidos mesmo com o painel minimizado.</p>
+                <button
+                  onClick={pedirPermissaoNotificacao}
+                  className="text-xs px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 whitespace-nowrap"
+                >
+                  Ativar
+                </button>
+              </div>
+            )}
 
             <div className={`mb-6 p-4 rounded-xl border-2 flex items-center justify-between ${
               botAtivo ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'
