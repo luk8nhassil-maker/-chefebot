@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { NavBar } from "@/components/NavBar";
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 
 type Status = "novo" | "em_preparo" | "saiu_entrega" | "entregue" | "cancelado";
 
@@ -19,7 +18,6 @@ type Pedido = {
 };
 
 export default function HomePage() {
-  const router = useRouter();
   const [pedidos, setPedidos] = useState<Pedido[]>([]);
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -37,21 +35,13 @@ export default function HomePage() {
     }
 
     fetch("/api/orders")
-      .then(r => {
-        if (r.status === 401) { setLoading(false); return null; }
-        return r.json();
-      })
-      .then(data => {
-        if (data) setPedidos(data);
-        setLoading(false);
-      })
+      .then(r => { if (r.status === 401) { setLoading(false); return null; } return r.json(); })
+      .then(data => { if (data) setPedidos(data); setLoading(false); })
       .catch(() => setLoading(false));
   }, []);
 
   const pedidosHoje = pedidos.length;
-  const faturamento = pedidos
-    .filter(p => p.status !== "cancelado")
-    .reduce((sum, p) => sum + p.total, 0);
+  const faturamento = pedidos.filter(p => p.status !== "cancelado").reduce((sum, p) => sum + p.total, 0);
   const ativos = pedidos.filter(p => !["entregue", "cancelado"].includes(p.status)).length;
 
   const saboresCount: Record<string, number> = {};
@@ -71,33 +61,9 @@ export default function HomePage() {
   ];
 
   const cards = [
-    {
-      href: "/simulador",
-      icon: "💬",
-      title: "Simulador de Bot",
-      desc: "Simule conversas com o ChefBot e teste o fluxo completo de pedidos via WhatsApp.",
-      label: "Abrir simulador",
-      color: "#22c55e",
-      border: "rgba(34,197,94,0.3)",
-    },
-    {
-      href: "/pedidos",
-      icon: "📋",
-      title: "Gestão de Pedidos",
-      desc: "Painel com todos os pedidos em tempo real, status e histórico.",
-      label: "Atendente ou Admin",
-      color: "#3b82f6",
-      border: "rgba(59,130,246,0.3)",
-    },
-    ...(isAdmin ? [{
-      href: "/relatorios",
-      icon: "📊",
-      title: "Relatórios",
-      desc: "Análise de vendas, sabores mais pedidos, horários de pico e faturamento.",
-      label: "Somente Admin",
-      color: "#a855f7",
-      border: "rgba(168,85,247,0.3)",
-    }] : []),
+    { href: "/simulador", icon: "💬", title: "Simulador de Bot", desc: "Simule conversas com o ChefBot e teste o fluxo completo de pedidos via WhatsApp.", label: "Abrir simulador", color: "#22c55e" },
+    { href: "/pedidos", icon: "📋", title: "Gestão de Pedidos", desc: "Painel com todos os pedidos em tempo real, status e histórico.", label: "Atendente ou Admin", color: "#3b82f6" },
+    ...(isAdmin ? [{ href: "/relatorios", icon: "📊", title: "Relatórios", desc: "Análise de vendas, sabores mais pedidos, horários de pico e faturamento.", label: "Somente Admin", color: "#a855f7" }] : []),
   ];
 
   return (
@@ -107,67 +73,33 @@ export default function HomePage() {
       <div style={{ position: "fixed", inset: 0, backgroundImage: "radial-gradient(circle at 20% 50%, rgba(220,38,38,0.08) 0%, transparent 50%), radial-gradient(circle at 80% 20%, rgba(251,146,60,0.06) 0%, transparent 50%)", pointerEvents: "none", zIndex: 0 }} />
 
       <main style={{ maxWidth: "1100px", margin: "0 auto", padding: "48px 24px", position: "relative", zIndex: 1 }}>
-        {/* Header */}
         <div style={{ textAlign: "center", marginBottom: "48px" }}>
-          <div style={{
-            width: "80px", height: "80px",
-            background: "linear-gradient(135deg, #dc2626, #ea580c)",
-            borderRadius: "24px",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: "40px", margin: "0 auto 20px",
-            boxShadow: "0 8px 32px rgba(220,38,38,0.4)",
-          }}>🍕</div>
-          <h1 style={{ color: "white", fontSize: "36px", fontWeight: 700, margin: "0 0 8px", letterSpacing: "-0.5px" }}>
-            Sistema ChefBot
-          </h1>
+          <div style={{ width: "80px", height: "80px", background: "linear-gradient(135deg, #dc2626, #ea580c)", borderRadius: "24px", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "40px", margin: "0 auto 20px", boxShadow: "0 8px 32px rgba(220,38,38,0.4)" }}>🍕</div>
+          <h1 style={{ color: "white", fontSize: "36px", fontWeight: 700, margin: "0 0 8px", letterSpacing: "-0.5px" }}>Sistema ChefBot</h1>
           <p style={{ color: "rgba(255,255,255,0.4)", fontSize: "15px", margin: 0 }}>
             Plataforma de atendimento automático via WhatsApp para a <span style={{ color: "rgba(251,146,60,0.8)" }}>Chefe da Pizza</span>
           </p>
         </div>
 
-        {/* Métricas */}
         {isLoggedIn && (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "16px", marginBottom: "40px" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "16px", marginBottom: "40px" }}>
             {stats.map((stat) => (
-              <div key={stat.label} style={{
-                background: "rgba(255,255,255,0.05)",
-                backdropFilter: "blur(20px)",
-                border: "1px solid rgba(255,255,255,0.1)",
-                borderRadius: "20px",
-                padding: "24px",
-                textAlign: "center",
-              }}>
-                <div style={{ fontSize: "32px", marginBottom: "8px" }}>{stat.icon}</div>
-                <div style={{ color: stat.color, fontSize: "24px", fontWeight: 700, marginBottom: "4px" }}>
-                  {stat.value}
-                </div>
-                <div style={{ color: "rgba(255,255,255,0.4)", fontSize: "12px" }}>{stat.label}</div>
+              <div key={stat.label} style={{ background: "rgba(255,255,255,0.05)", backdropFilter: "blur(20px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "20px", padding: "24px 16px", textAlign: "center" }}>
+                <div style={{ fontSize: "28px", marginBottom: "8px" }}>{stat.icon}</div>
+                <div style={{ color: stat.color, fontSize: "22px", fontWeight: 700, marginBottom: "4px", wordBreak: "break-word" }}>{stat.value}</div>
+                <div style={{ color: "rgba(255,255,255,0.4)", fontSize: "11px" }}>{stat.label}</div>
               </div>
             ))}
           </div>
         )}
 
-        {/* Cards */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "20px" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "20px" }}>
           {cards.map((card) => (
             <Link href={card.href} key={card.href} style={{ textDecoration: "none" }}>
-              <div style={{
-                background: "rgba(255,255,255,0.05)",
-                backdropFilter: "blur(20px)",
-                border: `1px solid rgba(255,255,255,0.1)`,
-                borderRadius: "24px",
-                padding: "28px",
-                cursor: "pointer",
-                transition: "all 0.2s",
-              }}
-                onMouseEnter={e => {
-                  (e.currentTarget as HTMLDivElement).style.border = `1px solid ${card.border}`;
-                  (e.currentTarget as HTMLDivElement).style.transform = "translateY(-2px)";
-                }}
-                onMouseLeave={e => {
-                  (e.currentTarget as HTMLDivElement).style.border = "1px solid rgba(255,255,255,0.1)";
-                  (e.currentTarget as HTMLDivElement).style.transform = "translateY(0)";
-                }}
+              <div
+                style={{ background: "rgba(255,255,255,0.05)", backdropFilter: "blur(20px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "24px", padding: "28px", cursor: "pointer", transition: "all 0.2s" }}
+                onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.transform = "translateY(-3px)"; (e.currentTarget as HTMLDivElement).style.background = "rgba(255,255,255,0.08)"; }}
+                onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.transform = "translateY(0)"; (e.currentTarget as HTMLDivElement).style.background = "rgba(255,255,255,0.05)"; }}
               >
                 <div style={{ fontSize: "40px", marginBottom: "16px" }}>{card.icon}</div>
                 <h3 style={{ color: "white", fontSize: "18px", fontWeight: 700, margin: "0 0 8px" }}>{card.title}</h3>
@@ -180,17 +112,7 @@ export default function HomePage() {
 
         {!isLoggedIn && (
           <div style={{ textAlign: "center", marginTop: "40px" }}>
-            <Link href="/login" style={{
-              display: "inline-block",
-              background: "linear-gradient(135deg, #dc2626, #b91c1c)",
-              color: "white",
-              padding: "14px 32px",
-              borderRadius: "12px",
-              textDecoration: "none",
-              fontWeight: 600,
-              fontSize: "15px",
-              boxShadow: "0 4px 16px rgba(220,38,38,0.4)",
-            }}>
+            <Link href="/login" style={{ display: "inline-block", background: "linear-gradient(135deg, #dc2626, #b91c1c)", color: "white", padding: "14px 32px", borderRadius: "12px", textDecoration: "none", fontWeight: 600, fontSize: "15px", boxShadow: "0 4px 16px rgba(220,38,38,0.4)" }}>
               Fazer login
             </Link>
           </div>
