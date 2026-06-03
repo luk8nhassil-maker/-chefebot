@@ -46,32 +46,22 @@ function tocarSom() {
     const master = ctx.createGain()
     master.gain.setValueAtTime(0.7, ctx.currentTime)
     master.connect(ctx.destination)
-
-    // Campainha: 3 toques com vibrato
     const toques = [0, 0.7, 1.4]
-
     toques.forEach((startTime) => {
-      // Oscilador principal
       const osc1 = ctx.createOscillator()
       const osc2 = ctx.createOscillator()
       const gain = ctx.createGain()
-
       osc1.connect(gain)
       osc2.connect(gain)
       gain.connect(master)
-
       osc1.type = 'sine'
       osc2.type = 'sine'
-
       osc1.frequency.setValueAtTime(900, ctx.currentTime + startTime)
       osc2.frequency.setValueAtTime(1800, ctx.currentTime + startTime)
-
-      // Envelope: ataque rápido, sustain longo, decay suave
       gain.gain.setValueAtTime(0, ctx.currentTime + startTime)
       gain.gain.linearRampToValueAtTime(0.8, ctx.currentTime + startTime + 0.02)
       gain.gain.setValueAtTime(0.6, ctx.currentTime + startTime + 0.1)
       gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + startTime + 0.55)
-
       osc1.start(ctx.currentTime + startTime)
       osc1.stop(ctx.currentTime + startTime + 0.6)
       osc2.start(ctx.currentTime + startTime)
@@ -90,6 +80,8 @@ export default function PedidosPage() {
   const [erro, setErro] = useState('')
   const [atualizando, setAtualizando] = useState<string | null>(null)
   const [notificacao, setNotificacao] = useState('')
+  const [botAtivo, setBotAtivo] = useState(true)
+  const [salvandoBot, setSalvandoBot] = useState(false)
   const prevIdsRef = useRef<string[]>([])
 
   useEffect(() => {
@@ -101,11 +93,39 @@ export default function PedidosPage() {
         setUserName(user.name || '')
       } catch {}
     }
-
     carregarPedidos()
+    carregarStatusBot()
     const intervalo = setInterval(carregarPedidos, 10000)
     return () => clearInterval(intervalo)
   }, [router])
+
+  const carregarStatusBot = async () => {
+    try {
+      const res = await fetch('/api/bot-status')
+      if (res.ok) {
+        const data = await res.json()
+        setBotAtivo(data.ativo)
+      }
+    } catch {}
+  }
+
+  const alternarBot = async () => {
+    setSalvandoBot(true)
+    try {
+      const novoStatus = !botAtivo
+      const res = await fetch('/api/bot-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ativo: novoStatus }),
+      })
+      if (res.ok) {
+        setBotAtivo(novoStatus)
+        setNotificacao(novoStatus ? '🤖 Bot ativado!' : '⏸️ Bot pausado!')
+        setTimeout(() => setNotificacao(''), 3000)
+      }
+    } catch {}
+    setSalvandoBot(false)
+  }
 
   const carregarPedidos = () => {
     fetch('/api/orders')
@@ -195,6 +215,32 @@ export default function PedidosPage() {
                 {ultimaAtualizacao && <span className="text-xs text-gray-400"> · atualizado às {ultimaAtualizacao}</span>}
               </p>
               {erro && <p className="text-sm text-red-500 mt-1">{erro}</p>}
+            </div>
+
+            <div className={`mb-6 p-4 rounded-xl border-2 flex items-center justify-between ${
+              botAtivo ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'
+            }`}>
+              <div>
+                <p className="font-semibold text-gray-900">
+                  {botAtivo ? '🤖 Bot ativo' : '⏸️ Bot pausado'}
+                </p>
+                <p className="text-sm text-gray-500">
+                  {botAtivo
+                    ? 'Respondendo clientes automaticamente'
+                    : 'Atendimento manual — bot não responde'}
+                </p>
+              </div>
+              <button
+                onClick={alternarBot}
+                disabled={salvandoBot}
+                className={`relative inline-flex h-8 w-14 items-center rounded-full transition-colors focus:outline-none ${
+                  salvandoBot ? 'opacity-50 cursor-not-allowed' : ''
+                } ${botAtivo ? 'bg-green-500' : 'bg-red-400'}`}
+              >
+                <span className={`inline-block h-6 w-6 transform rounded-full bg-white shadow transition-transform ${
+                  botAtivo ? 'translate-x-7' : 'translate-x-1'
+                }`} />
+              </button>
             </div>
 
             <div className="flex gap-2 flex-wrap mb-6">
