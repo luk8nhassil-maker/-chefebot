@@ -82,7 +82,7 @@ export default function PedidosPage() {
     return () => clearInterval(intervalo)
   }, [router])
 
-  const Status = async (id: string, novoStatus: Status) => {
+  const avancarStatus = async (id: string, novoStatus: Status) => {
   setAtualizando(id)
   const res = await fetch('/api/orders', {
     method: 'PATCH',
