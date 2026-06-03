@@ -49,21 +49,33 @@ export default function PedidosPage() {
   const [ultimaAtualizacao, setUltimaAtualizacao] = useState('')
 
   useEffect(() => {
+    const carregarPedidos = () => {
+      fetch('/api/orders')
+        .then(r => {
+          if (r.status === 401) { router.push('/login?callbackUrl=/pedidos'); return null }
+          return r.json()
+        })
+        .then(data => {
+          if (data) {
+            setPedidos(data)
+            setLoading(false)
+            setUltimaAtualizacao(new Date().toLocaleTimeString('pt-BR'))
+          }
+        })
+    }
+
     const cookie = document.cookie.split(';').find(c => c.trim().startsWith('auth-user='))
     if (cookie) {
       try {
         const raw = cookie.split('=').slice(1).join('=')
-const user = JSON.parse(decodeURIComponent(decodeURIComponent(raw)))
+        const user = JSON.parse(decodeURIComponent(decodeURIComponent(raw)))
         setUserName(user.name || '')
       } catch {}
     }
 
-    fetch('/api/orders')
-      .then(r => {
-        if (r.status === 401) { router.push('/login?callbackUrl=/pedidos'); return null }
-        return r.json()
-      })
-      .then(data => { if (data) { setPedidos(data); setLoading(false); setUltimaAtualizacao(new Date().toLocaleTimeString('pt-BR')) } })
+    carregarPedidos()
+    const intervalo = setInterval(carregarPedidos, 30000)
+    return () => clearInterval(intervalo)
   }, [router])
 
   const avancarStatus = async (id: string, novoStatus: Status) => {
@@ -74,6 +86,7 @@ const user = JSON.parse(decodeURIComponent(decodeURIComponent(raw)))
     })
     if (res.ok) {
       setPedidos(prev => prev.map(p => p.id === id ? { ...p, status: novoStatus } : p))
+      setUltimaAtualizacao(new Date().toLocaleTimeString('pt-BR'))
     }
   }
 
@@ -82,7 +95,6 @@ const user = JSON.parse(decodeURIComponent(decodeURIComponent(raw)))
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
       <div className="bg-white border-b border-gray-100 px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="text-xl">🍕</span>
@@ -110,7 +122,10 @@ const user = JSON.parse(decodeURIComponent(decodeURIComponent(raw)))
           <>
             <div className="mb-6">
               <h1 className="text-2xl font-bold text-gray-900">📋 Gestão de Pedidos</h1>
-              <p className="text-sm text-gray-500">{ativos} pedido{ativos !== 1 ? 's' : ''} ativo{ativos !== 1 ? 's' : ''} {ultimaAtualizacao && <span className="text-xs text-gray-400">· atualizado às {ultimaAtualizacao}</span>}</p>
+              <p className="text-sm text-gray-500">
+                {ativos} pedido{ativos !== 1 ? 's' : ''} ativo{ativos !== 1 ? 's' : ''}
+                {ultimaAtualizacao && <span className="text-xs text-gray-400"> · atualizado às {ultimaAtualizacao}</span>}
+              </p>
             </div>
 
             <div className="flex gap-2 flex-wrap mb-6">
