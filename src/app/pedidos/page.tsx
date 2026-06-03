@@ -14,6 +14,7 @@ type Pedido = {
   status: Status
   horario: string
   endereco: string
+  escalonado?: boolean
 }
 
 const STATUS_LABEL: Record<Status, string> = {
@@ -73,10 +74,13 @@ function tocarSom() {
 function enviarNotificacaoNavegador(pedido: Pedido) {
   if (!('Notification' in window)) return
   if (Notification.permission === 'granted') {
-    new Notification('🍕 Novo pedido — ChefBot', {
-      body: `${pedido.cliente} | ${pedido.itens[0]} | R$ ${pedido.total.toFixed(2)} | ${pedido.endereco}`,
-      icon: '/favicon.ico',
-    })
+    const titulo = pedido.escalonado
+      ? '⚠️ Atendimento solicitado — ChefBot'
+      : '🍕 Novo pedido — ChefBot'
+    const corpo = pedido.escalonado
+      ? `${pedido.cliente} precisa de atendimento humano!`
+      : `${pedido.cliente} | ${pedido.itens[0]} | R$ ${pedido.total.toFixed(2)} | ${pedido.endereco}`
+    new Notification(titulo, { body: corpo, icon: '/favicon.ico' })
   }
 }
 
@@ -105,18 +109,14 @@ export default function PedidosPage() {
         setUserName(user.name || '')
       } catch {}
     }
-
-    // Verifica suporte a notificações
     if (!('Notification' in window)) {
       setPermissaoNotif('unsupported')
     } else {
       setPermissaoNotif(Notification.permission)
-      // Pede permissão automaticamente se ainda não foi decidido
       if (Notification.permission === 'default') {
         Notification.requestPermission().then(p => setPermissaoNotif(p))
       }
     }
-
     carregarPedidos()
     carregarStatusBot()
     const intervalo = setInterval(carregarPedidos, 10000)
@@ -203,7 +203,12 @@ export default function PedidosPage() {
             if (chegaram.length > 0) {
               tocarSom()
               chegaram.forEach((p: Pedido) => enviarNotificacaoNavegador(p))
-              setNotificacao(`🔔 ${chegaram.length} novo${chegaram.length > 1 ? 's' : ''} pedido${chegaram.length > 1 ? 's' : ''}!`)
+              const temEscalonado = chegaram.some((p: Pedido) => p.escalonado)
+              if (temEscalonado) {
+                setNotificacao('⚠️ Cliente precisa de atendimento!')
+              } else {
+                setNotificacao(`🔔 ${chegaram.length} novo${chegaram.length > 1 ? 's' : ''} pedido${chegaram.length > 1 ? 's' : ''}!`)
+              }
               setTimeout(() => setNotificacao(''), 4000)
             }
           }
@@ -236,11 +241,14 @@ export default function PedidosPage() {
 
   const pedidosFiltrados = filtro === 'todos' ? pedidos : pedidos.filter(p => p.status === filtro)
   const ativos = pedidos.filter(p => !['entregue', 'cancelado'].includes(p.status)).length
+  const escalonados = pedidos.filter(p => p.escalonado && p.status === 'novo').length
 
   return (
     <div className="min-h-screen bg-gray-50">
       {notificacao && (
-        <div className="fixed top-4 right-4 z-50 bg-green-600 text-white px-4 py-3 rounded-xl shadow-lg font-semibold animate-bounce">
+        <div className={`fixed top-4 right-4 z-50 text-white px-4 py-3 rounded-xl shadow-lg font-semibold animate-bounce ${
+          notificacao.includes('⚠️') ? 'bg-orange-500' : 'bg-green-600'
+        }`}>
           {notificacao}
         </div>
       )}
@@ -279,18 +287,26 @@ export default function PedidosPage() {
               {erro && <p className="text-sm text-red-500 mt-1">{erro}</p>}
             </div>
 
-            {/* Aviso notificação bloqueada */}
-            {permissaoNotif === 'denied' && (
-              <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-xl flex items-center gap-3">
-                <span>🔕</span>
-                <p className="text-sm text-yellow-800">Notificações bloqueadas. Ative nas configurações do navegador para ser avisada de novos pedidos.</p>
+            {/* Alerta escalonamentos pendentes */}
+            {escalonados > 0 && (
+              <div className="mb-4 p-3 bg-orange-50 border-2 border-orange-300 rounded-xl flex items-center gap-3">
+                <span className="text-2xl">⚠️</span>
+                <p className="text-sm font-semibold text-orange-800">
+                  {escalonados} cliente{escalonados > 1 ? 's' : ''} aguardando atendimento humano!
+                </p>
               </div>
             )}
 
-            {/* Botão ativar notificações */}
+            {permissaoNotif === 'denied' && (
+              <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-xl flex items-center gap-3">
+                <span>🔕</span>
+                <p className="text-sm text-yellow-800">Notificações bloqueadas. Ative nas configurações do navegador.</p>
+              </div>
+            )}
+
             {permissaoNotif === 'default' && (
               <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-xl flex items-center justify-between gap-3">
-                <p className="text-sm text-blue-800">🔔 Ative as notificações para receber alertas de novos pedidos mesmo com o painel minimizado.</p>
+                <p className="text-sm text-blue-800">🔔 Ative as notificações para receber alertas mesmo com o painel minimizado.</p>
                 <button
                   onClick={pedirPermissaoNotificacao}
                   className="text-xs px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 whitespace-nowrap"
@@ -308,9 +324,7 @@ export default function PedidosPage() {
                   {botAtivo ? '🤖 Bot ativo' : '⏸️ Bot pausado'}
                 </p>
                 <p className="text-sm text-gray-500">
-                  {botAtivo
-                    ? 'Respondendo clientes automaticamente'
-                    : 'Atendimento manual — bot não responde'}
+                  {botAtivo ? 'Respondendo clientes automaticamente' : 'Atendimento manual — bot não responde'}
                 </p>
               </div>
               <button
@@ -356,16 +370,26 @@ export default function PedidosPage() {
               )}
               {pedidosFiltrados.map(pedido => {
                 const emManual = manuais[pedido.telefone] === true
+                const isEscalonado = pedido.escalonado === true
                 return (
-                  <div key={pedido.id} className={`rounded-xl border shadow-sm p-4 ${
-                    emManual ? 'bg-blue-50 border-blue-200' : 'bg-white border-gray-100'
+                  <div key={pedido.id} className={`rounded-xl border-2 shadow-sm p-4 ${
+                    isEscalonado
+                      ? 'bg-orange-50 border-orange-300'
+                      : emManual
+                        ? 'bg-blue-50 border-blue-200'
+                        : 'bg-white border-gray-100'
                   }`}>
                     <div className="flex items-start justify-between gap-4">
                       <div className="flex-1">
                         <div className="flex items-center gap-2 mb-1">
                           <span className="font-semibold text-gray-900">{pedido.cliente}</span>
                           <span className="text-xs text-gray-400">{pedido.horario}</span>
-                          {emManual && (
+                          {isEscalonado && (
+                            <span className="text-xs bg-orange-200 text-orange-800 px-2 py-0.5 rounded-full font-bold">
+                              ⚠️ Atendimento solicitado
+                            </span>
+                          )}
+                          {!isEscalonado && emManual && (
                             <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">
                               👤 Manual
                             </span>
@@ -376,13 +400,17 @@ export default function PedidosPage() {
                         <div className="text-sm text-gray-700 mb-2">
                           {pedido.itens.map((item, i) => <span key={i} className="mr-2">• {item}</span>)}
                         </div>
-                        <p className="font-bold text-gray-900">R$ {pedido.total.toFixed(2)}</p>
+                        {pedido.total > 0 && (
+                          <p className="font-bold text-gray-900">R$ {pedido.total.toFixed(2)}</p>
+                        )}
                       </div>
                       <div className="flex flex-col items-end gap-2">
-                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${STATUS_COR[pedido.status]}`}>
-                          {STATUS_LABEL[pedido.status]}
-                        </span>
-                        {emManual ? (
+                        {!isEscalonado && (
+                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${STATUS_COR[pedido.status]}`}>
+                            {STATUS_LABEL[pedido.status]}
+                          </span>
+                        )}
+                        {emManual || isEscalonado ? (
                           <button
                             onClick={() => devolverAoBot(pedido.telefone)}
                             className="text-xs px-3 py-1 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors"
@@ -397,7 +425,7 @@ export default function PedidosPage() {
                             👤 Assumir
                           </button>
                         )}
-                        {PROXIMO_STATUS[pedido.status] && (
+                        {!isEscalonado && PROXIMO_STATUS[pedido.status] && (
                           <button
                             onClick={() => avancarStatus(pedido.id, PROXIMO_STATUS[pedido.status]!)}
                             disabled={atualizando === pedido.id}
@@ -410,7 +438,7 @@ export default function PedidosPage() {
                             {atualizando === pedido.id ? 'Salvando...' : 'Avançar →'}
                           </button>
                         )}
-                        {pedido.status === 'novo' && (
+                        {!isEscalonado && pedido.status === 'novo' && (
                           <button
                             onClick={() => avancarStatus(pedido.id, 'cancelado')}
                             className="text-xs text-red-400 hover:text-red-600"

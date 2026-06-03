@@ -12,7 +12,8 @@ export type BotStep =
   | "address"
   | "payment"
   | "confirm"
-  | "done";
+  | "done"
+  | "escalado";
 
 export interface CartItem {
   size: string;
@@ -32,11 +33,25 @@ export interface BotSession {
   address?: string;
   deliveryFee: number;
   paymentMethod?: string;
+  escalado?: boolean;
 }
 
 export interface BotResponse {
   messages: string[];
   session: BotSession;
+  escalar?: boolean;
+}
+
+const PALAVRAS_ESCALONAMENTO = [
+  "atendente", "atendimento", "humano", "pessoa", "ajuda",
+  "problema", "erro", "reclamação", "reclamacao", "cancelar",
+  "errado", "wronge", "falar com alguem", "falar com alguém",
+  "nao consigo", "não consigo", "socorro", "urgente",
+];
+
+function precisaEscalar(texto: string): boolean {
+  const lower = texto.toLowerCase();
+  return PALAVRAS_ESCALONAMENTO.some(p => lower.includes(p));
 }
 
 function formatCurrency(value: number): string {
@@ -77,7 +92,25 @@ export function processMessage(input: string, session: BotSession): BotResponse 
   const text = input.trim();
   const lower = text.toLowerCase();
 
+  // Detecta pedido de atendimento humano em qualquer etapa
+  if (session.step !== "escalado" && precisaEscalar(text)) {
+    return {
+      messages: [
+        `Entendido! 🙋 Vou chamar nossa atendente para te ajudar.\n\nA *Kellyne* já foi notificada e entrará em contato em breve pelo WhatsApp.\n\nAguarde um momento! 😊`,
+      ],
+      session: { ...session, step: "escalado", escalado: true },
+      escalar: true,
+    };
+  }
+
   switch (session.step) {
+    case "escalado": {
+      return {
+        messages: [`Nossa atendente já foi notificada e entrará em contato em breve. Por favor, aguarde. 😊`],
+        session,
+      };
+    }
+
     case "welcome": {
       return {
         messages: [`Olá! 👋 Bem-vindo à *Chefe da Pizza*! 🍕\n\nSou o ChefBot e vou te ajudar a fazer seu pedido.\n\nQual o seu nome?`],

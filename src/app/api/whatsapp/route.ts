@@ -11,6 +11,7 @@ type Pedido = {
   status: "novo" | "em_preparo" | "saiu_entrega" | "entregue" | "cancelado";
   horario: string;
   endereco: string;
+  escalonado?: boolean;
 };
 
 async function salvarPedido(session: BotSession, phone: string) {
@@ -38,6 +39,32 @@ async function salvarPedido(session: BotSession, phone: string) {
       minute: "2-digit",
     }),
     endereco,
+  };
+  await redis.set("pedidos", [...pedidos, novoPedido]);
+}
+
+async function salvarEscalonamento(phone: string, session: BotSession) {
+  const pedidos = (await redis.get<Pedido[]>("pedidos")) || [];
+
+  // Verifica se já tem pedido escalonado para esse cliente
+  const jaExiste = pedidos.some(
+    (p) => p.telefone === phone && p.escalonado === true
+  );
+  if (jaExiste) return;
+
+  const novoPedido: Pedido = {
+    id: Date.now().toString(),
+    cliente: session.customerName || phone,
+    telefone: phone,
+    itens: ["⚠️ Cliente solicitou atendimento humano"],
+    total: 0,
+    status: "novo",
+    horario: new Date().toLocaleTimeString("pt-BR", {
+      hour: "2-digit",
+      minute: "2-digit",
+    }),
+    endereco: "—",
+    escalonado: true,
   };
   await redis.set("pedidos", [...pedidos, novoPedido]);
 }
@@ -97,12 +124,19 @@ export async function POST(req: NextRequest) {
 
     const result = processMessage(messageText, currentSession);
 
+    // Salva pedido se confirmado
     if (
       currentSession.step === "confirm" &&
       (messageText.trim() === "1" ||
         messageText.trim().toLowerCase() === "sim")
     ) {
       await salvarPedido(currentSession, phone);
+    }
+
+    // Escalonamento para atendimento humano
+    if (result.escalar) {
+      await salvarEscalonamento(phone, currentSession);
+      await redis.set(`manual:${phone}`, true, { ex: 3600 });
     }
 
     await redis.set(sessionKey, result.session, { ex: 1800 });
