@@ -6,6 +6,12 @@ interface ChatBubbleProps {
   timestamp?: string;
 }
 
+function formatMessage(text: string) {
+  return text
+    .replace(/\*(.*?)\*/g, "<strong>$1</strong>")
+    .replace(/\n/g, "<br />");
+}
+
 export default function ChatBubble({ message, sender, timestamp }: ChatBubbleProps) {
   const isCustomer = sender === "customer";
   const time = timestamp || new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
@@ -19,12 +25,12 @@ export default function ChatBubble({ message, sender, timestamp }: ChatBubblePro
           borderRadius: isCustomer ? "12px 0px 12px 12px" : "0px 12px 12px 12px",
           padding: "6px 10px 4px 10px",
           boxShadow: "0 1px 1px rgba(0,0,0,0.13)",
-          position: "relative",
         }}
       >
-        <p style={{ fontSize: "14px", color: "#111", margin: 0, lineHeight: "19px", whiteSpace: "pre-wrap" }}>
-          {message}
-        </p>
+        <p
+          style={{ fontSize: "14px", color: "#111", margin: 0, lineHeight: "19px", whiteSpace: "pre-wrap" }}
+          dangerouslySetInnerHTML={{ __html: formatMessage(message) }}
+        />
         <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: "3px", marginTop: "2px" }}>
           <span style={{ fontSize: "11px", color: "#888", lineHeight: 1 }}>{time}</span>
           {isCustomer && (
