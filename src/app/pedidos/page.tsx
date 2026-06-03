@@ -20,7 +20,7 @@ type Pedido = {
 const STATUS_LABEL: Record<Status, string> = {
   novo: '🆕 Novo',
   em_preparo: '🍕 Em preparo',
-  saiu_entrega: '🛵 Saiu pra entrega',
+  saiu_entrega: '🛵 Entrega',
   entregue: '✅ Entregue',
   cancelado: '❌ Cancelado',
 }
@@ -246,24 +246,25 @@ export default function PedidosPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       {notificacao && (
-        <div className={`fixed top-4 right-4 z-50 text-white px-4 py-3 rounded-xl shadow-lg font-semibold animate-bounce ${
+        <div className={`fixed top-4 left-4 right-4 z-50 text-white px-4 py-3 rounded-xl shadow-lg font-semibold text-center ${
           notificacao.includes('⚠️') ? 'bg-orange-500' : 'bg-green-600'
         }`}>
           {notificacao}
         </div>
       )}
 
-      <div className="bg-white border-b border-gray-100 px-4 py-3 flex items-center justify-between">
+      {/* Header */}
+      <div className="bg-white border-b border-gray-100 px-4 py-3 flex items-center justify-between sticky top-0 z-40">
         <div className="flex items-center gap-2">
           <span className="text-xl">🍕</span>
           <span className="font-bold text-gray-900">ChefBot</span>
         </div>
         {userName && (
-          <div className="flex items-center gap-3">
-            <span className="text-sm text-gray-600">Olá, <strong>{userName}</strong></span>
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-gray-600 hidden sm:inline">Olá, <strong>{userName}</strong></span>
             <button
               onClick={() => fetch('/api/auth/logout', { method: 'POST' }).then(() => router.push('/login'))}
-              className="text-sm text-gray-400 hover:text-gray-600"
+              className="text-sm text-gray-400 hover:text-gray-600 border border-gray-200 rounded-lg px-2 py-1"
             >
               Sair
             </button>
@@ -271,66 +272,66 @@ export default function PedidosPage() {
         )}
       </div>
 
-      <div className="max-w-4xl mx-auto px-4 py-6">
+      <div className="max-w-4xl mx-auto px-3 py-4">
         {loading ? (
           <div className="flex items-center justify-center h-64">
             <p className="text-gray-500">Carregando pedidos...</p>
           </div>
         ) : (
           <>
-            <div className="mb-6">
-              <h1 className="text-2xl font-bold text-gray-900">📋 Gestão de Pedidos</h1>
-              <p className="text-sm text-gray-500">
-                {ativos} pedido{ativos !== 1 ? 's' : ''} ativo{ativos !== 1 ? 's' : ''}
-                {ultimaAtualizacao && <span className="text-xs text-gray-400"> · atualizado às {ultimaAtualizacao}</span>}
+            <div className="mb-4">
+              <h1 className="text-xl font-bold text-gray-900">📋 Gestão de Pedidos</h1>
+              <p className="text-xs text-gray-500">
+                {ativos} ativo{ativos !== 1 ? 's' : ''}
+                {ultimaAtualizacao && <span className="text-gray-400"> · {ultimaAtualizacao}</span>}
               </p>
-              {erro && <p className="text-sm text-red-500 mt-1">{erro}</p>}
+              {erro && <p className="text-xs text-red-500 mt-1">{erro}</p>}
             </div>
 
-            {/* Alerta escalonamentos pendentes */}
             {escalonados > 0 && (
-              <div className="mb-4 p-3 bg-orange-50 border-2 border-orange-300 rounded-xl flex items-center gap-3">
-                <span className="text-2xl">⚠️</span>
+              <div className="mb-3 p-3 bg-orange-50 border-2 border-orange-300 rounded-xl flex items-center gap-2">
+                <span className="text-xl">⚠️</span>
                 <p className="text-sm font-semibold text-orange-800">
-                  {escalonados} cliente{escalonados > 1 ? 's' : ''} aguardando atendimento humano!
+                  {escalonados} cliente{escalonados > 1 ? 's' : ''} aguardando atendimento!
                 </p>
               </div>
             )}
 
             {permissaoNotif === 'denied' && (
-              <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-xl flex items-center gap-3">
+              <div className="mb-3 p-3 bg-yellow-50 border border-yellow-200 rounded-xl flex items-center gap-2">
                 <span>🔕</span>
-                <p className="text-sm text-yellow-800">Notificações bloqueadas. Ative nas configurações do navegador.</p>
+                <p className="text-xs text-yellow-800">Notificações bloqueadas. Ative nas configurações do navegador.</p>
               </div>
             )}
 
             {permissaoNotif === 'default' && (
-              <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-xl flex items-center justify-between gap-3">
-                <p className="text-sm text-blue-800">🔔 Ative as notificações para receber alertas mesmo com o painel minimizado.</p>
+              <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-xl flex items-center justify-between gap-2">
+                <p className="text-xs text-blue-800">🔔 Ative notificações para alertas de novos pedidos.</p>
                 <button
                   onClick={pedirPermissaoNotificacao}
-                  className="text-xs px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 whitespace-nowrap"
+                  className="text-xs px-3 py-1.5 bg-blue-600 text-white rounded-lg whitespace-nowrap"
                 >
                   Ativar
                 </button>
               </div>
             )}
 
-            <div className={`mb-6 p-4 rounded-xl border-2 flex items-center justify-between ${
+            {/* Toggle Bot */}
+            <div className={`mb-4 p-3 rounded-xl border-2 flex items-center justify-between ${
               botAtivo ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'
             }`}>
               <div>
-                <p className="font-semibold text-gray-900">
+                <p className="font-semibold text-gray-900 text-sm">
                   {botAtivo ? '🤖 Bot ativo' : '⏸️ Bot pausado'}
                 </p>
-                <p className="text-sm text-gray-500">
-                  {botAtivo ? 'Respondendo clientes automaticamente' : 'Atendimento manual — bot não responde'}
+                <p className="text-xs text-gray-500">
+                  {botAtivo ? 'Respondendo automaticamente' : 'Atendimento manual'}
                 </p>
               </div>
               <button
                 onClick={alternarBot}
                 disabled={salvandoBot}
-                className={`relative inline-flex h-8 w-14 items-center rounded-full transition-colors focus:outline-none ${
+                className={`relative inline-flex h-8 w-14 items-center rounded-full transition-colors focus:outline-none flex-shrink-0 ${
                   salvandoBot ? 'opacity-50 cursor-not-allowed' : ''
                 } ${botAtivo ? 'bg-green-500' : 'bg-red-400'}`}
               >
@@ -340,20 +341,29 @@ export default function PedidosPage() {
               </button>
             </div>
 
-            <div className="flex gap-2 flex-wrap mb-6">
+            {/* Filtros com scroll horizontal */}
+            <div className="flex gap-2 mb-4 overflow-x-auto pb-1 scrollbar-hide">
               {(['todos', 'novo', 'em_preparo', 'saiu_entrega', 'entregue', 'cancelado'] as const).map(s => {
                 const count = contagem(s)
+                const labels: Record<string, string> = {
+                  todos: 'Todos',
+                  novo: '🆕 Novo',
+                  em_preparo: '🍕 Preparo',
+                  saiu_entrega: '🛵 Entrega',
+                  entregue: '✅ Entregue',
+                  cancelado: '❌ Cancelado',
+                }
                 return (
                   <button
                     key={s}
                     onClick={() => setFiltro(s)}
-                    className={`relative px-3 py-1 rounded-full text-sm font-medium transition-all ${
-                      filtro === s ? 'bg-red-600 text-white' : 'bg-white text-gray-600 border border-gray-200 hover:border-red-300'
+                    className={`relative px-3 py-1.5 rounded-full text-xs font-medium transition-all whitespace-nowrap flex-shrink-0 ${
+                      filtro === s ? 'bg-red-600 text-white' : 'bg-white text-gray-600 border border-gray-200'
                     }`}
                   >
-                    {s === 'todos' ? 'Todos' : STATUS_LABEL[s]}
+                    {labels[s]}
                     {count > 0 && (
-                      <span className={`ml-1.5 inline-flex items-center justify-center w-5 h-5 text-xs font-bold rounded-full ${
+                      <span className={`ml-1 inline-flex items-center justify-center w-4 h-4 text-xs font-bold rounded-full ${
                         filtro === s ? 'bg-white text-red-600' : 'bg-red-600 text-white'
                       }`}>
                         {count}
@@ -364,6 +374,7 @@ export default function PedidosPage() {
               })}
             </div>
 
+            {/* Cards */}
             <div className="space-y-3">
               {pedidosFiltrados.length === 0 && (
                 <div className="text-center py-12 text-gray-400">Nenhum pedido encontrado</div>
@@ -372,81 +383,84 @@ export default function PedidosPage() {
                 const emManual = manuais[pedido.telefone] === true
                 const isEscalonado = pedido.escalonado === true
                 return (
-                  <div key={pedido.id} className={`rounded-xl border-2 shadow-sm p-4 ${
+                  <div key={pedido.id} className={`rounded-xl border-2 shadow-sm p-3 ${
                     isEscalonado
                       ? 'bg-orange-50 border-orange-300'
                       : emManual
                         ? 'bg-blue-50 border-blue-200'
                         : 'bg-white border-gray-100'
                   }`}>
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="font-semibold text-gray-900">{pedido.cliente}</span>
-                          <span className="text-xs text-gray-400">{pedido.horario}</span>
-                          {isEscalonado && (
-                            <span className="text-xs bg-orange-200 text-orange-800 px-2 py-0.5 rounded-full font-bold">
-                              ⚠️ Atendimento solicitado
-                            </span>
-                          )}
-                          {!isEscalonado && emManual && (
-                            <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">
-                              👤 Manual
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-sm text-gray-500 mb-1">📱 {pedido.telefone}</p>
-                        <p className="text-sm text-gray-500 mb-2">📍 {pedido.endereco}</p>
-                        <div className="text-sm text-gray-700 mb-2">
-                          {pedido.itens.map((item, i) => <span key={i} className="mr-2">• {item}</span>)}
-                        </div>
-                        {pedido.total > 0 && (
-                          <p className="font-bold text-gray-900">R$ {pedido.total.toFixed(2)}</p>
-                        )}
-                      </div>
-                      <div className="flex flex-col items-end gap-2">
-                        {!isEscalonado && (
-                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${STATUS_COR[pedido.status]}`}>
-                            {STATUS_LABEL[pedido.status]}
+                    {/* Linha 1: cliente + horario + badges */}
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-semibold text-gray-900">{pedido.cliente}</span>
+                        <span className="text-xs text-gray-400">{pedido.horario}</span>
+                        {isEscalonado && (
+                          <span className="text-xs bg-orange-200 text-orange-800 px-2 py-0.5 rounded-full font-bold">
+                            ⚠️ Atendimento
                           </span>
                         )}
-                        {emManual || isEscalonado ? (
-                          <button
-                            onClick={() => devolverAoBot(pedido.telefone)}
-                            className="text-xs px-3 py-1 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors"
-                          >
-                            🤖 Devolver ao bot
-                          </button>
-                        ) : (
-                          <button
-                            onClick={() => assumirConversa(pedido.telefone)}
-                            className="text-xs px-3 py-1 rounded-lg bg-gray-200 text-gray-700 hover:bg-gray-300 transition-colors"
-                          >
-                            👤 Assumir
-                          </button>
-                        )}
-                        {!isEscalonado && PROXIMO_STATUS[pedido.status] && (
-                          <button
-                            onClick={() => avancarStatus(pedido.id, PROXIMO_STATUS[pedido.status]!)}
-                            disabled={atualizando === pedido.id}
-                            className={`text-xs px-3 py-1 rounded-lg transition-colors ${
-                              atualizando === pedido.id
-                                ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                                : 'bg-red-600 text-white hover:bg-red-700'
-                            }`}
-                          >
-                            {atualizando === pedido.id ? 'Salvando...' : 'Avançar →'}
-                          </button>
-                        )}
-                        {!isEscalonado && pedido.status === 'novo' && (
-                          <button
-                            onClick={() => avancarStatus(pedido.id, 'cancelado')}
-                            className="text-xs text-red-400 hover:text-red-600"
-                          >
-                            Cancelar
-                          </button>
+                        {!isEscalonado && emManual && (
+                          <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">
+                            👤 Manual
+                          </span>
                         )}
                       </div>
+                      {!isEscalonado && (
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium flex-shrink-0 ${STATUS_COR[pedido.status]}`}>
+                          {STATUS_LABEL[pedido.status]}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Linha 2: info */}
+                    <p className="text-xs text-gray-500 mb-0.5">📱 {pedido.telefone}</p>
+                    <p className="text-xs text-gray-500 mb-1">📍 {pedido.endereco}</p>
+                    <div className="text-xs text-gray-700 mb-1">
+                      {pedido.itens.map((item, i) => <span key={i} className="mr-2">• {item}</span>)}
+                    </div>
+                    {pedido.total > 0 && (
+                      <p className="font-bold text-gray-900 text-sm mb-2">R$ {pedido.total.toFixed(2)}</p>
+                    )}
+
+                    {/* Linha 3: botões em linha */}
+                    <div className="flex gap-2 flex-wrap">
+                      {emManual || isEscalonado ? (
+                        <button
+                          onClick={() => devolverAoBot(pedido.telefone)}
+                          className="flex-1 text-xs py-2 rounded-lg bg-blue-600 text-white font-medium"
+                        >
+                          🤖 Devolver ao bot
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => assumirConversa(pedido.telefone)}
+                          className="flex-1 text-xs py-2 rounded-lg bg-gray-200 text-gray-700 font-medium"
+                        >
+                          👤 Assumir
+                        </button>
+                      )}
+                      {!isEscalonado && PROXIMO_STATUS[pedido.status] && (
+                        <button
+                          onClick={() => avancarStatus(pedido.id, PROXIMO_STATUS[pedido.status]!)}
+                          disabled={atualizando === pedido.id}
+                          className={`flex-1 text-xs py-2 rounded-lg font-medium ${
+                            atualizando === pedido.id
+                              ? 'bg-gray-300 text-gray-500'
+                              : 'bg-red-600 text-white'
+                          }`}
+                        >
+                          {atualizando === pedido.id ? 'Salvando...' : 'Avançar →'}
+                        </button>
+                      )}
+                      {!isEscalonado && pedido.status === 'novo' && (
+                        <button
+                          onClick={() => avancarStatus(pedido.id, 'cancelado')}
+                          className="text-xs py-2 px-3 rounded-lg text-red-500 border border-red-200"
+                        >
+                          Cancelar
+                        </button>
+                      )}
                     </div>
                   </div>
                 )
