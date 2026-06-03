@@ -48,6 +48,7 @@ export default function PedidosPage() {
   const [userName, setUserName] = useState('')
   const [ultimaAtualizacao, setUltimaAtualizacao] = useState('')
   const [erro, setErro] = useState('')
+  const [atualizando, setAtualizando] = useState<string | null>(null)
 
   useEffect(() => {
     const carregarPedidos = () => {
@@ -81,17 +82,19 @@ export default function PedidosPage() {
     return () => clearInterval(intervalo)
   }, [router])
 
-  const avancarStatus = async (id: string, novoStatus: Status) => {
-    const res = await fetch('/api/orders', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, status: novoStatus }),
-    })
-    if (res.ok) {
-      setPedidos(prev => prev.map(p => p.id === id ? { ...p, status: novoStatus } : p))
-      setUltimaAtualizacao(new Date().toLocaleTimeString('pt-BR'))
-    }
+  const Status = async (id: string, novoStatus: Status) => {
+  setAtualizando(id)
+  const res = await fetch('/api/orders', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id, status: novoStatus }),
+  })
+  if (res.ok) {
+    setPedidos(prev => prev.map(p => p.id === id ? { ...p, status: novoStatus } : p))
+    setUltimaAtualizacao(new Date().toLocaleTimeString('pt-BR'))
   }
+  setAtualizando(null)
+}
 
   const pedidosFiltrados = filtro === 'todos' ? pedidos : pedidos.filter(p => p.status === filtro)
   const ativos = pedidos.filter(p => !['entregue', 'cancelado'].includes(p.status)).length
@@ -169,13 +172,18 @@ export default function PedidosPage() {
                         {STATUS_LABEL[pedido.status]}
                       </span>
                       {PROXIMO_STATUS[pedido.status] && (
-                        <button
-                          onClick={() => avancarStatus(pedido.id, PROXIMO_STATUS[pedido.status]!)}
-                          className="text-xs bg-red-600 text-white px-3 py-1 rounded-lg hover:bg-red-700 transition-colors"
-                        >
-                          Avançar →
-                        </button>
-                      )}
+  <button
+    onClick={() => avancarStatus(pedido.id, PROXIMO_STATUS[pedido.status]!)}
+    disabled={atualizando === pedido.id}
+    className={`text-xs px-3 py-1 rounded-lg transition-colors ${
+      atualizando === pedido.id
+        ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+        : 'bg-red-600 text-white hover:bg-red-700'
+    }`}
+  >
+    {atualizando === pedido.id ? 'Salvando...' : 'Avançar →'}
+  </button>
+)}
                       {pedido.status === 'novo' && (
                         <button
                           onClick={() => avancarStatus(pedido.id, 'cancelado')}
