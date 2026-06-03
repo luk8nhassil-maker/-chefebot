@@ -12,10 +12,7 @@ interface Message {
 }
 
 function now() {
-  return new Date().toLocaleTimeString("pt-BR", {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
 }
 
 function uid() {
@@ -26,228 +23,131 @@ export function Simulator() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [session, setSession] = useState<BotSession | null>(null);
   const [input, setInput] = useState("");
-  const [phone, setPhone] = useState("5511999999999");
+  const [phone] = useState("55119999999999");
   const [loading, setLoading] = useState(false);
   const [started, setStarted] = useState(false);
+  const [typing, setTyping] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  }, [messages, typing]);
 
-  const startConversation = useCallback(() => {
+  const addBotMessages = useCallback((texts: string[]) => {
+    setTyping(true);
+    setTimeout(() => {
+      setTyping(false);
+      const botMsgs: Message[] = texts.map((content) => ({
+        id: uid(),
+        content,
+        sender: "bot",
+        time: now(),
+      }));
+      setMessages((prev) => [...prev, ...botMsgs]);
+    }, 800);
+  }, []);
+
+  const handleStart = useCallback(() => {
     const welcome = getWelcomeMessages();
-    const botMessages: Message[] = welcome.map((m) => ({
-      id: uid(),
-      content: m,
-      sender: "bot",
-      time: now(),
-    }));
-    setMessages(botMessages);
-    setSession({ step: "size", cart: [], deliveryFee: 0 });
     setStarted(true);
-  }, []);
+    addBotMessages(welcome.messages);
+    setSession(welcome.session);
+  }, [addBotMessages]);
 
-  const resetConversation = useCallback(() => {
-    setMessages([]);
-    setSession(null);
-    setStarted(false);
-  }, []);
-
-  const sendMessage = useCallback(async () => {
-    if (!input.trim() || loading) return;
-
-    const userMsg: Message = {
-      id: uid(),
-      content: input.trim(),
-      sender: "customer",
-      time: now(),
-    };
-
+  const handleSend = useCallback(async () => {
+    if (!input.trim() || loading || !session) return;
+    const userMsg: Message = { id: uid(), content: input.trim(), sender: "customer", time: now() };
     setMessages((prev) => [...prev, userMsg]);
-    const sentInput = input.trim();
     setInput("");
     setLoading(true);
-
     try {
       const res = await fetch("/api/bot", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: sentInput,
-          session,
-          phone,
-        }),
+        body: JSON.stringify({ message: input.trim(), session, phone }),
       });
-
       const data = await res.json();
       setSession(data.session);
-
-      const botMessages: Message[] = data.messages.map((m: string) => ({
-        id: uid(),
-        content: m,
-        sender: "bot",
-        time: now(),
-      }));
-
-      setMessages((prev) => [...prev, ...botMessages]);
+      addBotMessages(data.messages);
     } catch {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: uid(),
-          content: "Erro ao processar mensagem. Tente novamente.",
-          sender: "bot",
-          time: now(),
-        },
-      ]);
+      addBotMessages(["Erro ao conectar. Tente novamente."]);
     } finally {
       setLoading(false);
     }
-  }, [input, loading, session, phone]);
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      sendMessage();
-    }
-  };
-
-  const stepLabel: Record<string, string> = {
-    welcome: "Boas-vindas",
-    size: "Tamanho",
-    flavor: "Sabor",
-    border: "Borda",
-    add_more: "Mais itens",
-    delivery_type: "Tipo de entrega",
-    neighborhood: "Bairro",
-    payment: "Pagamento",
-    confirm: "Confirmação",
-    done: "Concluído",
-  };
+  }, [input, loading, session, phone, addBotMessages]);
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="bg-green-700 text-white px-4 py-3 flex items-center gap-3 shadow-md">
-        <div className="w-10 h-10 rounded-full bg-white flex items-center justify-center text-2xl">
-          🍕
-        </div>
-        <div className="flex-1">
-          <div className="font-bold text-base">Chefe da Pizza</div>
-          <div className="text-green-200 text-xs">
-            {session
-              ? `Etapa: ${stepLabel[session.step] ?? session.step}`
-              : "Simulador de Atendimento"}
-          </div>
-        </div>
-        <div className="flex gap-2">
-          {started && (
-            <button
-              type="button"
-              onClick={resetConversation}
-              className="text-xs bg-green-600 hover:bg-green-500 px-3 py-1 rounded-full transition"
-              style={{ touchAction: "manipulation" }}
-            >
-              Reiniciar
-            </button>
-          )}
+    <div style={{ display: "flex", flexDirection: "column", height: "600px", maxWidth: "400px", margin: "0 auto", borderRadius: "16px", overflow: "hidden", boxShadow: "0 4px 24px rgba(0,0,0,0.12)", border: "1px solid #e0e0e0" }}>
+      
+      {/* Header estilo WhatsApp */}
+      <div style={{ background: "#075E54", padding: "12px 16px", display: "flex", alignItems: "center", gap: "12px" }}>
+        <div style={{ width: "40px", height: "40px", borderRadius: "50%", background: "#25D366", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "20px" }}>🍕</div>
+        <div>
+          <p style={{ color: "white", fontWeight: 600, fontSize: "15px", margin: 0 }}>Chefe da Pizza</p>
+          <p style={{ color: "#B2DFDB", fontSize: "12px", margin: 0 }}>{started ? (typing ? "digitando..." : "online") : "Atendimento via WhatsApp"}</p>
         </div>
       </div>
 
-      {/* Phone input */}
-      <div className="bg-green-50 border-b border-green-100 px-4 py-2 flex items-center gap-2">
-        <span className="text-xs text-gray-500">Telefone:</span>
-        <input
-          type="text"
-          value={phone}
-          onChange={(e) => setPhone(e.target.value)}
-          className="text-xs border border-gray-200 rounded px-2 py-1 w-40 font-mono"
-          placeholder="5511999999999"
-          disabled={started}
-        />
-      </div>
-
-      {/* Chat area */}
-      <div className="flex-1 overflow-y-auto p-4 bg-[#e5ddd5] bg-opacity-50" style={{ WebkitOverflowScrolling: "touch" }}>
-        {!started ? (
-          <div className="flex flex-col items-center justify-center h-full gap-4">
-            <div className="text-6xl">🍕</div>
-            <div className="text-center">
-              <h2 className="text-xl font-bold text-gray-700">
-                Simulador ChefBot
-              </h2>
-              <p className="text-gray-500 text-sm mt-1">
-                Simule o atendimento via WhatsApp da Chefe da Pizza
-              </p>
-            </div>
+      {/* Área de mensagens */}
+      <div style={{ flex: 1, overflowY: "auto", padding: "12px 16px", background: "#ECE5DD", display: "flex", flexDirection: "column", gap: "4px" }}>
+        {!started && (
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", gap: "12px" }}>
+            <div style={{ fontSize: "48px" }}>🍕</div>
+            <p style={{ color: "#666", fontSize: "14px", textAlign: "center", maxWidth: "260px" }}>Simule um pedido pelo WhatsApp da Chefe da Pizza</p>
             <button
               type="button"
-              onClick={startConversation}
-              className="bg-green-600 hover:bg-green-700 text-white font-semibold px-6 py-3 rounded-full shadow-lg transition"
-              style={{ touchAction: "manipulation" }}
+              onClick={handleStart}
+              style={{ background: "#25D366", color: "white", border: "none", borderRadius: "24px", padding: "12px 28px", fontSize: "15px", fontWeight: 600, cursor: "pointer" }}
             >
-              Iniciar Conversa
+              Iniciar conversa
             </button>
           </div>
-        ) : (
-          <>
-            {messages.map((msg) => (
-              <ChatBubble
-                key={msg.id}
-                message={msg.content}
-                sender={msg.sender}
-                time={msg.time}
-              />
-            ))}
-            {loading && (
-              <div className="flex justify-start mb-2">
-                <div className="w-8 h-8 rounded-full bg-green-600 flex items-center justify-center text-white text-xs font-bold mr-2 mt-1">
-                  🍕
-                </div>
-                <div className="bg-white rounded-2xl rounded-tl-none px-4 py-3 shadow-sm">
-                  <div className="flex gap-1">
-                    <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-                    <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-                    <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
-                  </div>
-                </div>
-              </div>
-            )}
-            <div ref={bottomRef} />
-          </>
         )}
+
+        {messages.map((msg) => (
+          <ChatBubble key={msg.id} message={msg.content} sender={msg.sender} time={msg.time} />
+        ))}
+
+        {typing && (
+          <div style={{ display: "flex", alignItems: "center", gap: "4px", padding: "8px 12px", background: "white", borderRadius: "12px", borderBottomLeftRadius: "4px", alignSelf: "flex-start", maxWidth: "80px" }}>
+            <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#999", animation: "bounce 1s infinite" }}></span>
+            <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#999", animation: "bounce 1s infinite 0.2s" }}></span>
+            <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#999", animation: "bounce 1s infinite 0.4s" }}></span>
+          </div>
+        )}
+
+        <div ref={bottomRef} />
       </div>
 
       {/* Input */}
       {started && (
-        <div className="bg-gray-100 border-t border-gray-200 p-3 flex items-center gap-2">
+        <div style={{ background: "#F0F0F0", padding: "8px 12px", display: "flex", alignItems: "center", gap: "8px" }}>
           <input
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            disabled={loading || session?.step === "done"}
-            placeholder={
-              session?.step === "done"
-                ? "Pedido finalizado — reinicie para novo pedido"
-                : "Digite sua mensagem..."
-            }
-            className="flex-1 bg-white border border-gray-200 rounded-full px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400 disabled:bg-gray-50 disabled:text-gray-400"
+            onKeyDown={(e) => e.key === "Enter" && handleSend()}
+            placeholder="Digite uma mensagem"
+            disabled={loading || typing}
+            style={{ flex: 1, border: "none", borderRadius: "24px", padding: "10px 16px", fontSize: "14px", outline: "none", background: "white" }}
           />
           <button
             type="button"
-            onClick={sendMessage}
-            disabled={loading || !input.trim() || session?.step === "done"}
-            className="w-10 h-10 rounded-full bg-green-600 hover:bg-green-700 disabled:bg-gray-300 flex items-center justify-center transition shadow-sm"
-            style={{ touchAction: "manipulation" }}
+            onClick={handleSend}
+            disabled={loading || typing || !input.trim()}
+            style={{ width: "40px", height: "40px", borderRadius: "50%", background: input.trim() ? "#25D366" : "#ccc", border: "none", cursor: input.trim() ? "pointer" : "not-allowed", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "18px" }}
           >
-            <svg className="w-5 h-5 text-white" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M2 21l21-9L2 3v7l15 2-15 2v7z" />
-            </svg>
+            ➤
           </button>
         </div>
       )}
+
+      <style>{`
+        @keyframes bounce {
+          0%, 60%, 100% { transform: translateY(0); }
+          30% { transform: translateY(-6px); }
+        }
+      `}</style>
     </div>
   );
 }
