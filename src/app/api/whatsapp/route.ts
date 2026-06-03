@@ -81,13 +81,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
-    // Verifica pausa global
     const botAtivo = await redis.get<boolean>("bot_ativo");
     if (botAtivo === false) {
       return NextResponse.json({ ok: true });
     }
 
-    // Verifica pausa por cliente
     const emManual = await redis.get<boolean>(`manual:${phone}`);
     if (emManual === true) {
       return NextResponse.json({ ok: true });
@@ -114,4 +112,9 @@ export async function POST(req: NextRequest) {
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
 
-    return NextRe
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    console.error("Webhook error:", error);
+    return NextResponse.json({ ok: true });
+  }
+}
