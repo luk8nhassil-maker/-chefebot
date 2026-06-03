@@ -1,4 +1,4 @@
-import { MENU, getBorderPrice, getDeliveryFee, getSizePrice } from "./menu";
+import { MENU, getBorderPrice, getSizePrice } from "./menu";
 
 export type BotStep =
   | "welcome"
@@ -56,7 +56,7 @@ function buildReceipt(session: BotSession): string {
   const total = subtotal + session.deliveryFee;
   const delivery =
     session.deliveryType === "delivery"
-      ? `\n  Entrega: ${session.address}\n  Taxa: ${formatCurrency(session.deliveryFee)}`
+      ? `\n  Entrega: ${session.address} (${session.neighborhood})\n  Taxa: ${formatCurrency(session.deliveryFee)}`
       : "\n  Retirada no local: grátis";
   return (
     lines.join("\n") +
@@ -65,6 +65,12 @@ function buildReceipt(session: BotSession): string {
     `\n  *Total: ${formatCurrency(total)}*` +
     `\n  Pagamento: ${session.paymentMethod}`
   );
+}
+
+function neighborhoodList(): string {
+  return MENU.neighborhoods
+    .map((n, i) => `  ${i + 1}. ${n.name} — ${formatCurrency(n.fee)}`)
+    .join("\n");
 }
 
 export function processMessage(input: string, session: BotSession): BotResponse {
@@ -88,9 +94,7 @@ export function processMessage(input: string, session: BotSession): BotResponse 
       }
       const firstName = text.split(" ")[0];
       return {
-        messages: [
-          `Que ótimo, *${firstName}*! 🍕\n\nQual o tamanho da pizza?\n\n  1. Pequena (P) — R$ 35,00\n  2. Média (M) — R$ 40,00\n  3. Grande (G) — R$ 50,00\n  4. Família (F) — R$ 55,00\n\nDigite o número ou a letra (P, M, G ou F):`,
-        ],
+        messages: [`Que ótimo, *${firstName}*! 🍕\n\nQual o tamanho da pizza?\n\n  1. Pequena (P) — R$ 35,00\n  2. Média (M) — R$ 40,00\n  3. Grande (G) — R$ 50,00\n  4. Família (F) — R$ 55,00\n\nDigite o número ou a letra (P, M, G ou F):`],
         session: { ...session, step: "size", customerName: text },
       };
     }
@@ -150,9 +154,7 @@ export function processMessage(input: string, session: BotSession): BotResponse 
       const newCart = [...session.cart, newItem];
       const subtotal = cartSubtotal(newCart);
       return {
-        messages: [
-          `Pizza adicionada ao carrinho! ✅\n\n🛒 *Seu pedido até agora:*\n${newCart.map((item, i) => `  ${i + 1}. ${item.size} ${item.flavor}${item.border !== "Sem borda" ? " + " + item.border : ""} — ${formatCurrency(item.price)}`).join("\n")}\n\n  Subtotal: ${formatCurrency(subtotal)}\n\nDeseja adicionar mais uma pizza?\n\n  1. Sim, adicionar mais\n  2. Não, finalizar pedido`,
-        ],
+        messages: [`Pizza adicionada! ✅\n\n🛒 *Seu pedido até agora:*\n${newCart.map((item, i) => `  ${i + 1}. ${item.size} ${item.flavor}${item.border !== "Sem borda" ? " + " + item.border : ""} — ${formatCurrency(item.price)}`).join("\n")}\n\n  Subtotal: ${formatCurrency(subtotal)}\n\nDeseja adicionar mais uma pizza?\n\n  1. Sim, adicionar mais\n  2. Não, finalizar pedido`],
         session: { ...session, step: "add_more", cart: newCart, currentSize: undefined, currentFlavor: undefined },
       };
     }
@@ -174,9 +176,8 @@ export function processMessage(input: string, session: BotSession): BotResponse 
     case "delivery_type": {
       const isDelivery = lower === "1" || lower === "entrega" || lower === "delivery" || lower.includes("entrega");
       if (isDelivery) {
-        const list = MENU.neighborhoods.map((n, i) => `  ${i + 1}. ${n.group} — ${formatCurrency(n.fee)}`).join("\n");
         return {
-          messages: [`Qual é o seu bairro?\n\n${list}\n\nDigite o número ou o nome do bairro:`],
+          messages: [`Qual é o seu bairro?\n\n${neighborhoodList()}\n\nDigite o número ou o nome do bairro:`],
           session: { ...session, step: "neighborhood", deliveryType: "delivery" },
         };
       }
@@ -188,30 +189,29 @@ export function processMessage(input: string, session: BotSession): BotResponse 
     }
 
     case "neighborhood": {
-      let found: (typeof MENU.neighborhoods)[0] | undefined;
       const num = parseInt(text);
+      let found: { name: string; fee: number } | undefined;
       if (!isNaN(num) && num >= 1 && num <= MENU.neighborhoods.length) {
         found = MENU.neighborhoods[num - 1];
       } else {
-        found = MENU.neighborhoods.find((n) => n.areas.some((a) => a.toLowerCase() === lower) || n.group.toLowerCase().includes(lower));
+        found = MENU.neighborhoods.find((n) => n.name.toLowerCase().includes(lower));
       }
       if (!found) {
-        const list = MENU.neighborhoods.map((n, i) => `  ${i + 1}. ${n.group} — ${formatCurrency(n.fee)}`).join("\n");
         return {
-          messages: [`Bairro não encontrado. Escolha pelo número ou nome:\n\n${list}`],
+          messages: [`Bairro não encontrado. Escolha pelo número ou nome:\n\n${neighborhoodList()}`],
           session,
         };
       }
       return {
-        messages: [`Região *${found.group}* — Taxa: ${formatCurrency(found.fee)} 🛵\n\nAgora me diga o endereço completo para entrega:\n_(Rua, número e complemento)_`],
-        session: { ...session, step: "address", neighborhood: found.areas[0], deliveryFee: found.fee },
+        messages: [`Bairro *${found.name}* — Taxa: ${formatCurrency(found.fee)} 🛵\n\nAgora me diga o endereço completo:\n_(Rua, número e complemento)_`],
+        session: { ...session, step: "address", neighborhood: found.name, deliveryFee: found.fee },
       };
     }
 
     case "address": {
       if (!text || text.length < 5) {
         return {
-          messages: [`Por favor, informe o endereço completo. Exemplo: *Rua das Flores, 123, Apto 2*`],
+          messages: [`Por favor, informe o endereço completo.\nExemplo: *Rua das Flores, 123, Apto 2*`],
           session,
         };
       }
@@ -255,7 +255,7 @@ export function processMessage(input: string, session: BotSession): BotResponse 
         };
       }
       return {
-        messages: [`Pedido cancelado. 😔\n\nSe mudar de ideia, é só mandar uma mensagem! Estamos aqui para te atender. 🍕`],
+        messages: [`Pedido cancelado. 😔\n\nSe mudar de ideia, é só mandar uma mensagem! 🍕`],
         session: { ...session, step: "done" },
       };
     }
