@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { processMessage, createInitialSession, BotSession } from "@/lib/bot";
+import { processMessage, createInitialSession, createReturningSession, BotSession, ClienteHistorico } from "@/lib/bot";
 import { redis } from "@/lib/redis";
 
 type Pedido = {
@@ -41,17 +41,22 @@ async function salvarPedido(session: BotSession, phone: string) {
     endereco,
   };
   await redis.set("pedidos", [...pedidos, novoPedido]);
+
+  // Salva histórico do cliente
+  const historico: ClienteHistorico = {
+    nome: session.customerName || phone,
+    ultimoPedido: itens,
+    ultimoTotal: total,
+  };
+  await redis.set(`cliente:${phone}`, historico, { ex: 30 * 24 * 60 * 60 }); // 30 dias
 }
 
 async function salvarEscalonamento(phone: string, session: BotSession) {
   const pedidos = (await redis.get<Pedido[]>("pedidos")) || [];
-
-  // Verifica se já tem pedido escalonado para esse cliente
   const jaExiste = pedidos.some(
     (p) => p.telefone === phone && p.escalonado === true
   );
   if (jaExiste) return;
-
   const novoPedido: Pedido = {
     id: Date.now().toString(),
     cliente: session.customerName || phone,
@@ -120,7 +125,30 @@ export async function POST(req: NextRequest) {
 
     const sessionKey = `session:${phone}`;
     const savedSession = await redis.get<BotSession>(sessionKey);
-    const currentSession = savedSession ?? createInitialSession();
+
+    let currentSession: BotSession;
+
+    if (!savedSession) {
+      // Cliente novo ou sessão expirada — verifica histórico
+      const historico = await redis.get<ClienteHistorico>(`cliente:${phone}`);
+      if (historico) {
+        // Cliente que já pediu antes
+        const firstName = historico.nome.split(" ")[0];
+        const ultimoPedido = historico.ultimoPedido.join(", ");
+        currentSession = createReturningSession(historico);
+        // Envia mensagem de boas vindas de retorno
+        await enviarMensagem(
+          phone,
+          `Olá de novo, *${firstName}*! 👋\n\nSeu último pedido foi: *${ultimoPedido}*\n\nQuer fazer um novo pedido?\n\n  1. Sim, quero pedir\n  2. Não, obrigado`
+        );
+        await redis.set(sessionKey, currentSession, { ex: 1800 });
+        return NextResponse.json({ ok: true });
+      } else {
+        currentSession = createInitialSession();
+      }
+    } else {
+      currentSession = savedSession;
+    }
 
     const result = processMessage(messageText, currentSession);
 

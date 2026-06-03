@@ -2,6 +2,7 @@ import { MENU, getBorderPrice, getSizePrice } from "./menu";
 
 export type BotStep =
   | "welcome"
+  | "returning"
   | "name"
   | "size"
   | "flavor"
@@ -22,6 +23,12 @@ export interface CartItem {
   price: number;
 }
 
+export interface ClienteHistorico {
+  nome: string;
+  ultimoPedido: string[];
+  ultimoTotal: number;
+}
+
 export interface BotSession {
   step: BotStep;
   cart: CartItem[];
@@ -34,6 +41,7 @@ export interface BotSession {
   deliveryFee: number;
   paymentMethod?: string;
   escalado?: boolean;
+  historico?: ClienteHistorico;
 }
 
 export interface BotResponse {
@@ -45,7 +53,7 @@ export interface BotResponse {
 const PALAVRAS_ESCALONAMENTO = [
   "atendente", "atendimento", "humano", "pessoa", "ajuda",
   "problema", "erro", "reclamação", "reclamacao", "cancelar",
-  "errado", "wronge", "falar com alguem", "falar com alguém",
+  "errado", "falar com alguem", "falar com alguém",
   "nao consigo", "não consigo", "socorro", "urgente",
 ];
 
@@ -115,6 +123,31 @@ export function processMessage(input: string, session: BotSession): BotResponse 
       return {
         messages: [`Olá! 👋 Bem-vindo à *Chefe da Pizza*! 🍕\n\nSou o ChefBot e vou te ajudar a fazer seu pedido.\n\nQual o seu nome?`],
         session: { ...session, step: "name" },
+      };
+    }
+
+    case "returning": {
+      const historico = session.historico!
+      const firstName = historico.nome.split(" ")[0]
+      const ultimoPedido = historico.ultimoPedido.join(", ")
+
+      if (lower === "1" || lower === "sim" || lower === "s") {
+        // Vai direto para tamanho com nome já preenchido
+        return {
+          messages: [`Ótimo, *${firstName}*! 🍕\n\nQual o tamanho da pizza?\n\n  1. Pequena (P) — R$ 35,00\n  2. Média (M) — R$ 40,00\n  3. Grande (G) — R$ 50,00\n  4. Família (F) — R$ 55,00\n\nDigite o número ou a letra (P, M, G ou F):`],
+          session: { ...session, step: "size", customerName: historico.nome },
+        };
+      }
+      if (lower === "2" || lower === "não" || lower === "nao" || lower === "n") {
+        return {
+          messages: [`Tudo bem! Qual o seu nome?`],
+          session: { ...session, step: "name", historico: undefined },
+        };
+      }
+      // Se digitou outra coisa, repete a pergunta
+      return {
+        messages: [`Olá de novo, *${firstName}*! 👋\n\nSeu último pedido foi: *${ultimoPedido}*\n\nQuer fazer um novo pedido?\n\n  1. Sim, quero pedir\n  2. Não, obrigado`],
+        session,
       };
     }
 
@@ -310,6 +343,10 @@ export function processMessage(input: string, session: BotSession): BotResponse 
 
 export function createInitialSession(): BotSession {
   return { step: "welcome", cart: [], deliveryFee: 0 };
+}
+
+export function createReturningSession(historico: ClienteHistorico): BotSession {
+  return { step: "returning", cart: [], deliveryFee: 0, historico };
 }
 
 export function getWelcomeMessages(): string[] {
