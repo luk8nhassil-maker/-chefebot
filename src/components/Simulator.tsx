@@ -18,7 +18,7 @@ function uid() {
   return Math.random().toString(36).slice(2);
 }
 
-export function Simulator() {
+export function Simulator({ fullScreen = false }: { fullScreen?: boolean }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [session, setSession] = useState<BotSession | null>(null);
   const [input, setInput] = useState("");
@@ -75,8 +75,12 @@ export function Simulator() {
     }
   }, [input, loading, session, phone, addBotMessages]);
 
+  const containerStyle = fullScreen
+    ? { display: "flex", flexDirection: "column" as const, height: "100%", width: "100%" }
+    : { display: "flex", flexDirection: "column" as const, height: "600px", maxWidth: "400px", margin: "0 auto", borderRadius: "16px", overflow: "hidden", boxShadow: "0 4px 24px rgba(0,0,0,0.12)", border: "1px solid #e0e0e0" };
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "600px", maxWidth: "400px", margin: "0 auto", borderRadius: "16px", overflow: "hidden", boxShadow: "0 4px 24px rgba(0,0,0,0.12)", border: "1px solid #e0e0e0" }}>
+    <div style={containerStyle}>
       <div style={{ background: "#075E54", padding: "12px 16px", display: "flex", alignItems: "center", gap: "12px" }}>
         <div style={{ width: "40px", height: "40px", borderRadius: "50%", background: "#25D366", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "20px" }}>🍕</div>
         <div>

@@ -7,7 +7,13 @@ export default function SimuladorPage() {
     <div className="min-h-screen bg-gray-50">
       <NavBar currentPage="simulador" />
 
-      <main className="max-w-7xl mx-auto px-4 py-6">
+      {/* Mobile: simulador em tela cheia */}
+      <div className="lg:hidden h-[calc(100vh-64px)]">
+        <Simulator fullScreen />
+      </div>
+
+      {/* Desktop: layout com cardápio */}
+      <main className="hidden lg:block max-w-7xl mx-auto px-4 py-6">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[calc(100vh-120px)]">
           <div className="lg:col-span-2 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col">
             <Simulator />
