@@ -20,6 +20,11 @@ async function salvarPedido(session: BotSession, phone: string) {
     return `Pizza ${item.flavor} ${item.size}${border}`;
   });
   const total = session.cart.reduce((sum, item) => sum + item.price, 0) + session.deliveryFee;
+
+  const endereco = session.deliveryType === "delivery"
+    ? `${session.address} — ${session.neighborhood}`
+    : "Retirada na loja";
+
   const novoPedido: Pedido = {
     id: Date.now().toString(),
     cliente: session.customerName || phone,
@@ -28,7 +33,7 @@ async function salvarPedido(session: BotSession, phone: string) {
     total,
     status: "novo",
     horario: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
-    endereco: session.neighborhood || "Retirada na loja",
+    endereco,
   };
   await redis.set("pedidos", [...pedidos, novoPedido]);
 }
@@ -52,4 +57,9 @@ export async function POST(req: NextRequest) {
   }
 
   return NextResponse.json(result);
+}
+
+export async function DELETE(req: NextRequest) {
+  await redis.del("pedidos");
+  return NextResponse.json({ ok: true });
 }
