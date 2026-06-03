@@ -76,8 +76,12 @@ export function Simulator({ fullScreen = false }: { fullScreen?: boolean }) {
   }, [input, loading, session, phone, addBotMessages]);
 
   const containerStyle = fullScreen
-    ? { display: "flex", flexDirection: "column" as const, height: "100%", width: "100%", position: "relative" as const }
+    ? { display: "flex", flexDirection: "column" as const, height: "100%", width: "100%" }
     : { display: "flex", flexDirection: "column" as const, height: "600px", maxWidth: "400px", margin: "0 auto", borderRadius: "16px", overflow: "hidden", boxShadow: "0 4px 24px rgba(0,0,0,0.12)", border: "1px solid #e0e0e0" };
+
+  const inputBarStyle = fullScreen
+    ? { position: "fixed" as const, bottom: 0, left: 0, right: 0, background: "#F0F0F0", padding: "10px 12px", display: "flex", alignItems: "center", gap: "8px", borderTop: "1px solid #ddd", zIndex: 100 }
+    : { background: "#F0F0F0", padding: "10px 12px", display: "flex", alignItems: "center", gap: "8px", borderTop: "1px solid #ddd", flexShrink: 0 as const };
 
   return (
     <div style={containerStyle}>
@@ -91,7 +95,7 @@ export function Simulator({ fullScreen = false }: { fullScreen?: boolean }) {
       </div>
 
       {/* Mensagens */}
-      <div style={{ flex: 1, overflowY: "auto", padding: "12px 16px", background: "#ECE5DD", display: "flex", flexDirection: "column", gap: "4px", paddingBottom: started ? "80px" : "12px" }}>
+      <div style={{ flex: 1, overflowY: "auto", padding: "12px 16px", background: "#ECE5DD", display: "flex", flexDirection: "column", gap: "4px", paddingBottom: started && fullScreen ? "80px" : "12px" }}>
         {!started && (
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", gap: "12px" }}>
             <div style={{ fontSize: "48px" }}>🍕</div>
@@ -118,9 +122,9 @@ export function Simulator({ fullScreen = false }: { fullScreen?: boolean }) {
         <div ref={bottomRef} />
       </div>
 
-      {/* Input fixo no fundo */}
+      {/* Input */}
       {started && (
-        <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "#F0F0F0", padding: "10px 12px", display: "flex", alignItems: "center", gap: "8px", borderTop: "1px solid #ddd" }}>
+        <div style={inputBarStyle}>
           <input
             type="text"
             value={input}
