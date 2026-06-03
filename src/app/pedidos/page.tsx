@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 
 type Status = 'novo' | 'em_preparo' | 'saiu_entrega' | 'entregue' | 'cancelado'
@@ -49,25 +49,10 @@ export default function PedidosPage() {
   const [ultimaAtualizacao, setUltimaAtualizacao] = useState('')
   const [erro, setErro] = useState('')
   const [atualizando, setAtualizando] = useState<string | null>(null)
+  const [notificacao, setNotificacao] = useState('')
+  const prevIdsRef = useRef<string[]>([])
 
   useEffect(() => {
-    const carregarPedidos = () => {
-      fetch('/api/orders')
-        .then(r => {
-          if (r.status === 401) { router.push('/login?callbackUrl=/pedidos'); return null }
-          return r.json()
-        })
-        .then(data => {
-          if (data) {
-            setPedidos(data)
-            setLoading(false)
-            setErro('')
-            setUltimaAtualizacao(new Date().toLocaleTimeString('pt-BR'))
-          }
-        })
-        .catch(() => setErro('Erro ao carregar pedidos. Tentando novamente...'))
-    }
-
     const cookie = document.cookie.split(';').find(c => c.trim().startsWith('auth-user='))
     if (cookie) {
       try {
@@ -82,25 +67,61 @@ export default function PedidosPage() {
     return () => clearInterval(intervalo)
   }, [router])
 
-  const avancarStatus = async (id: string, novoStatus: Status) => {
-  setAtualizando(id)
-  const res = await fetch('/api/orders', {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id, status: novoStatus }),
-  })
-  if (res.ok) {
-    setPedidos(prev => prev.map(p => p.id === id ? { ...p, status: novoStatus } : p))
-    setUltimaAtualizacao(new Date().toLocaleTimeString('pt-BR'))
+  const carregarPedidos = () => {
+    fetch('/api/orders')
+      .then(r => {
+        if (r.status === 401) { router.push('/login?callbackUrl=/pedidos'); return null }
+        return r.json()
+      })
+      .then(data => {
+        if (data) {
+          const novosIds = data.map((p: Pedido) => p.id)
+          const anteriores = prevIdsRef.current
+          if (anteriores.length > 0) {
+            const chegaram = data.filter((p: Pedido) => !anteriores.includes(p.id))
+            if (chegaram.length > 0) {
+              setNotificacao(`🔔 ${chegaram.length} novo${chegaram.length > 1 ? 's' : ''} pedido${chegaram.length > 1 ? 's' : ''}!`)
+              setTimeout(() => setNotificacao(''), 4000)
+            }
+          }
+          prevIdsRef.current = novosIds
+          setPedidos(data)
+          setLoading(false)
+          setErro('')
+          setUltimaAtualizacao(new Date().toLocaleTimeString('pt-BR'))
+        }
+      })
+      .catch(() => setErro('Erro ao carregar pedidos. Tentando novamente...'))
   }
-  setAtualizando(null)
-}
+
+  const avancarStatus = async (id: string, novoStatus: Status) => {
+    setAtualizando(id)
+    const res = await fetch('/api/orders', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, status: novoStatus }),
+    })
+    if (res.ok) {
+      setPedidos(prev => prev.map(p => p.id === id ? { ...p, status: novoStatus } : p))
+      setUltimaAtualizacao(new Date().toLocaleTimeString('pt-BR'))
+    }
+    setAtualizando(null)
+  }
+
+  const contagem = (s: Status | 'todos') =>
+    s === 'todos' ? pedidos.length : pedidos.filter(p => p.status === s).length
 
   const pedidosFiltrados = filtro === 'todos' ? pedidos : pedidos.filter(p => p.status === filtro)
   const ativos = pedidos.filter(p => !['entregue', 'cancelado'].includes(p.status)).length
 
   return (
     <div className="min-h-screen bg-gray-50">
+      {notificacao && (
+        <div className="fixed top-4 right-4 z-50 bg-green-600 text-white px-4 py-3 rounded-xl shadow-lg font-semibold animate-bounce">
+          {notificacao}
+        </div>
+      )}
+
       <div className="bg-white border-b border-gray-100 px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="text-xl">🍕</span>
@@ -132,20 +153,31 @@ export default function PedidosPage() {
                 {ativos} pedido{ativos !== 1 ? 's' : ''} ativo{ativos !== 1 ? 's' : ''}
                 {ultimaAtualizacao && <span className="text-xs text-gray-400"> · atualizado às {ultimaAtualizacao}</span>}
               </p>
+              {erro && <p className="text-sm text-red-500 mt-1">{erro}</p>}
             </div>
 
             <div className="flex gap-2 flex-wrap mb-6">
-              {(['todos', 'novo', 'em_preparo', 'saiu_entrega', 'entregue', 'cancelado'] as const).map(s => (
-                <button
-                  key={s}
-                  onClick={() => setFiltro(s)}
-                  className={`px-3 py-1 rounded-full text-sm font-medium transition-all ${
-                    filtro === s ? 'bg-red-600 text-white' : 'bg-white text-gray-600 border border-gray-200 hover:border-red-300'
-                  }`}
-                >
-                  {s === 'todos' ? `Todos (${pedidos.length})` : STATUS_LABEL[s]}
-                </button>
-              ))}
+              {(['todos', 'novo', 'em_preparo', 'saiu_entrega', 'entregue', 'cancelado'] as const).map(s => {
+                const count = contagem(s)
+                return (
+                  <button
+                    key={s}
+                    onClick={() => setFiltro(s)}
+                    className={`relative px-3 py-1 rounded-full text-sm font-medium transition-all ${
+                      filtro === s ? 'bg-red-600 text-white' : 'bg-white text-gray-600 border border-gray-200 hover:border-red-300'
+                    }`}
+                  >
+                    {s === 'todos' ? 'Todos' : STATUS_LABEL[s]}
+                    {count > 0 && (
+                      <span className={`ml-1.5 inline-flex items-center justify-center w-5 h-5 text-xs font-bold rounded-full ${
+                        filtro === s ? 'bg-white text-red-600' : 'bg-red-600 text-white'
+                      }`}>
+                        {count}
+                      </span>
+                    )}
+                  </button>
+                )
+              })}
             </div>
 
             <div className="space-y-3">
@@ -172,18 +204,18 @@ export default function PedidosPage() {
                         {STATUS_LABEL[pedido.status]}
                       </span>
                       {PROXIMO_STATUS[pedido.status] && (
-  <button
-    onClick={() => avancarStatus(pedido.id, PROXIMO_STATUS[pedido.status]!)}
-    disabled={atualizando === pedido.id}
-    className={`text-xs px-3 py-1 rounded-lg transition-colors ${
-      atualizando === pedido.id
-        ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-        : 'bg-red-600 text-white hover:bg-red-700'
-    }`}
-  >
-    {atualizando === pedido.id ? 'Salvando...' : 'Avançar →'}
-  </button>
-)}
+                        <button
+                          onClick={() => avancarStatus(pedido.id, PROXIMO_STATUS[pedido.status]!)}
+                          disabled={atualizando === pedido.id}
+                          className={`text-xs px-3 py-1 rounded-lg transition-colors ${
+                            atualizando === pedido.id
+                              ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                              : 'bg-red-600 text-white hover:bg-red-700'
+                          }`}
+                        >
+                          {atualizando === pedido.id ? 'Salvando...' : 'Avançar →'}
+                        </button>
+                      )}
                       {pedido.status === 'novo' && (
                         <button
                           onClick={() => avancarStatus(pedido.id, 'cancelado')}
