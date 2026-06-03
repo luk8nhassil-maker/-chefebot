@@ -9,11 +9,18 @@ export interface AuthUser {
 }
 
 const USERS: Record<string, { password: string; name: string; role: Role }> = {
-  kellyne: { password: "kellyne123", name: "Kellyne", role: "atendente" },
-  brito: { password: "admin123", name: "Brito", role: "admin" },
+  kellyne: {
+    password: process.env.KELLYNE_PASSWORD ?? "kellyne123",
+    name: "Kellyne",
+    role: "atendente",
+  },
+  brito: {
+    password: process.env.ADMIN_PASSWORD ?? "admin123",
+    name: "Brito",
+    role: "admin",
+  },
 };
 
-// Routes and the minimum roles allowed to access them
 export const ROUTE_ROLES: Array<{ path: string; roles: Role[] }> = [
   { path: "/relatorios", roles: ["admin"] },
   { path: "/pedidos", roles: ["admin", "atendente"] },
@@ -42,17 +49,17 @@ export async function createToken(user: AuthUser): Promise<string> {
     .sign(getSecret());
 }
 
-export async function verifyToken(token: string): Promise<AuthUser | null> {
+export async function verifyToken(token: string): Promise<{ username: string; name: string; role: string } | null> {
   try {
     const { payload } = await jwtVerify(token, getSecret());
-    return payload as unknown as AuthUser;
+    return payload as { username: string; name: string; role: string };
   } catch {
     return null;
   }
 }
 
 export function canAccess(role: Role, path: string): boolean {
-  const rule = ROUTE_ROLES.find((r) => path.startsWith(r.path));
-  if (!rule) return true;
-  return rule.roles.includes(role);
+  const route = ROUTE_ROLES.find((r) => path.startsWith(r.path));
+  if (!route) return true;
+  return route.roles.includes(role);
 }
