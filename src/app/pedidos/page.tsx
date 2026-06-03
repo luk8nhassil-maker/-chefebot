@@ -40,6 +40,23 @@ const PROXIMO_STATUS: Record<Status, Status | null> = {
   cancelado: null,
 }
 
+function tocarSom() {
+  try {
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)()
+    const oscillator = ctx.createOscillator()
+    const gainNode = ctx.createGain()
+    oscillator.connect(gainNode)
+    gainNode.connect(ctx.destination)
+    oscillator.frequency.setValueAtTime(880, ctx.currentTime)
+    oscillator.frequency.setValueAtTime(660, ctx.currentTime + 0.1)
+    oscillator.frequency.setValueAtTime(880, ctx.currentTime + 0.2)
+    gainNode.gain.setValueAtTime(0.3, ctx.currentTime)
+    gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4)
+    oscillator.start(ctx.currentTime)
+    oscillator.stop(ctx.currentTime + 0.4)
+  } catch {}
+}
+
 export default function PedidosPage() {
   const router = useRouter()
   const [pedidos, setPedidos] = useState<Pedido[]>([])
@@ -63,7 +80,7 @@ export default function PedidosPage() {
     }
 
     carregarPedidos()
-    const intervalo = setInterval(carregarPedidos, 30000)
+    const intervalo = setInterval(carregarPedidos, 10000)
     return () => clearInterval(intervalo)
   }, [router])
 
@@ -80,6 +97,7 @@ export default function PedidosPage() {
           if (anteriores.length > 0) {
             const chegaram = data.filter((p: Pedido) => !anteriores.includes(p.id))
             if (chegaram.length > 0) {
+              tocarSom()
               setNotificacao(`🔔 ${chegaram.length} novo${chegaram.length > 1 ? 's' : ''} pedido${chegaram.length > 1 ? 's' : ''}!`)
               setTimeout(() => setNotificacao(''), 4000)
             }
