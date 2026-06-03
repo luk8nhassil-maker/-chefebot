@@ -50,7 +50,7 @@ export function Simulator({ fullScreen = false }: { fullScreen?: boolean }) {
     const welcome = getWelcomeMessages();
     setStarted(true);
     addBotMessages(welcome);
-    setSession({ step: "size", cart: [], deliveryFee: 0 });
+    setSession({ step: "name", cart: [], deliveryFee: 0 });
   }, [addBotMessages]);
 
   const handleSend = useCallback(async () => {
