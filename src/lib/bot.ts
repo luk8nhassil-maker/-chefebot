@@ -9,6 +9,7 @@ export type BotStep =
   | "add_more"
   | "delivery_type"
   | "neighborhood"
+  | "address"
   | "payment"
   | "confirm"
   | "done";
@@ -28,6 +29,7 @@ export interface BotSession {
   currentFlavor?: string;
   deliveryType?: "delivery" | "pickup";
   neighborhood?: string;
+  address?: string;
   deliveryFee: number;
   paymentMethod?: string;
 }
@@ -54,7 +56,7 @@ function buildReceipt(session: BotSession): string {
   const total = subtotal + session.deliveryFee;
   const delivery =
     session.deliveryType === "delivery"
-      ? `\n  Entrega (${session.neighborhood}): ${formatCurrency(session.deliveryFee)}`
+      ? `\n  Entrega: ${session.address}\n  Taxa: ${formatCurrency(session.deliveryFee)}`
       : "\n  Retirada no local: grátis";
   return (
     lines.join("\n") +
@@ -200,10 +202,23 @@ export function processMessage(input: string, session: BotSession): BotResponse 
           session,
         };
       }
+      return {
+        messages: [`Região *${found.group}* — Taxa: ${formatCurrency(found.fee)} 🛵\n\nAgora me diga o endereço completo para entrega:\n_(Rua, número e complemento)_`],
+        session: { ...session, step: "address", neighborhood: found.areas[0], deliveryFee: found.fee },
+      };
+    }
+
+    case "address": {
+      if (!text || text.length < 5) {
+        return {
+          messages: [`Por favor, informe o endereço completo. Exemplo: *Rua das Flores, 123, Apto 2*`],
+          session,
+        };
+      }
       const payList = MENU.payments.map((p, i) => `  ${i + 1}. ${p}`).join("\n");
       return {
-        messages: [`Entrega para região *${found.group}*. Taxa: ${formatCurrency(found.fee)} 🛵\n\nQual a forma de pagamento?\n\n${payList}`],
-        session: { ...session, step: "payment", neighborhood: found.areas[0], deliveryFee: found.fee },
+        messages: [`Endereço anotado! 📍\n\nQual a forma de pagamento?\n\n${payList}`],
+        session: { ...session, step: "payment", address: text },
       };
     }
 
