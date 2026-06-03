@@ -47,6 +47,7 @@ export default function PedidosPage() {
   const [loading, setLoading] = useState(true)
   const [userName, setUserName] = useState('')
   const [ultimaAtualizacao, setUltimaAtualizacao] = useState('')
+  const [erro, setErro] = useState('')
 
   useEffect(() => {
     const carregarPedidos = () => {
@@ -59,9 +60,11 @@ export default function PedidosPage() {
           if (data) {
             setPedidos(data)
             setLoading(false)
+            setErro('')
             setUltimaAtualizacao(new Date().toLocaleTimeString('pt-BR'))
           }
         })
+        .catch(() => setErro('Erro ao carregar pedidos. Tentando novamente...'))
     }
 
     const cookie = document.cookie.split(';').find(c => c.trim().startsWith('auth-user='))
