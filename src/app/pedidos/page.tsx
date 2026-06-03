@@ -44,28 +44,38 @@ function tocarSom() {
   try {
     const ctx = new (window.AudioContext || (window as any).webkitAudioContext)()
     const master = ctx.createGain()
-    master.gain.setValueAtTime(0.6, ctx.currentTime)
+    master.gain.setValueAtTime(0.7, ctx.currentTime)
     master.connect(ctx.destination)
 
-    const notas = [
-      { freq: 1318.5, start: 0, duration: 0.12 },
-      { freq: 1174.7, start: 0.13, duration: 0.08 },
-      { freq: 1318.5, start: 0.22, duration: 0.12 },
-      { freq: 1567.9, start: 0.35, duration: 0.25 },
-    ]
+    // Campainha: 3 toques com vibrato
+    const toques = [0, 0.7, 1.4]
 
-    notas.forEach(({ freq, start, duration }) => {
-      const osc = ctx.createOscillator()
+    toques.forEach((startTime) => {
+      // Oscilador principal
+      const osc1 = ctx.createOscillator()
+      const osc2 = ctx.createOscillator()
       const gain = ctx.createGain()
-      osc.connect(gain)
+
+      osc1.connect(gain)
+      osc2.connect(gain)
       gain.connect(master)
-      osc.type = 'sine'
-      osc.frequency.setValueAtTime(freq, ctx.currentTime + start)
-      gain.gain.setValueAtTime(0, ctx.currentTime + start)
-      gain.gain.linearRampToValueAtTime(0.8, ctx.currentTime + start + 0.01)
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + start + duration)
-      osc.start(ctx.currentTime + start)
-      osc.stop(ctx.currentTime + start + duration + 0.05)
+
+      osc1.type = 'sine'
+      osc2.type = 'sine'
+
+      osc1.frequency.setValueAtTime(900, ctx.currentTime + startTime)
+      osc2.frequency.setValueAtTime(1800, ctx.currentTime + startTime)
+
+      // Envelope: ataque rápido, sustain longo, decay suave
+      gain.gain.setValueAtTime(0, ctx.currentTime + startTime)
+      gain.gain.linearRampToValueAtTime(0.8, ctx.currentTime + startTime + 0.02)
+      gain.gain.setValueAtTime(0.6, ctx.currentTime + startTime + 0.1)
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + startTime + 0.55)
+
+      osc1.start(ctx.currentTime + startTime)
+      osc1.stop(ctx.currentTime + startTime + 0.6)
+      osc2.start(ctx.currentTime + startTime)
+      osc2.stop(ctx.currentTime + startTime + 0.6)
     })
   } catch {}
 }
