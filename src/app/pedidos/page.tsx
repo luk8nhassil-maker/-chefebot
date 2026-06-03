@@ -82,6 +82,7 @@ export default function PedidosPage() {
   const [notificacao, setNotificacao] = useState('')
   const [botAtivo, setBotAtivo] = useState(true)
   const [salvandoBot, setSalvandoBot] = useState(false)
+  const [manuais, setManuais] = useState<Record<string, boolean>>({})
   const prevIdsRef = useRef<string[]>([])
 
   useEffect(() => {
@@ -125,6 +126,32 @@ export default function PedidosPage() {
       }
     } catch {}
     setSalvandoBot(false)
+  }
+
+  const assumirConversa = async (phone: string) => {
+    try {
+      await fetch('/api/bot-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone, ativo: false }),
+      })
+      setManuais(prev => ({ ...prev, [phone]: true }))
+      setNotificacao('👤 Conversa assumida — responda no celular')
+      setTimeout(() => setNotificacao(''), 3000)
+    } catch {}
+  }
+
+  const devolverAoBot = async (phone: string) => {
+    try {
+      await fetch('/api/bot-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone, ativo: true }),
+      })
+      setManuais(prev => ({ ...prev, [phone]: false }))
+      setNotificacao('🤖 Bot retomou a conversa')
+      setTimeout(() => setNotificacao(''), 3000)
+    } catch {}
   }
 
   const carregarPedidos = () => {
@@ -271,50 +298,75 @@ export default function PedidosPage() {
               {pedidosFiltrados.length === 0 && (
                 <div className="text-center py-12 text-gray-400">Nenhum pedido encontrado</div>
               )}
-              {pedidosFiltrados.map(pedido => (
-                <div key={pedido.id} className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="font-semibold text-gray-900">{pedido.cliente}</span>
-                        <span className="text-xs text-gray-400">{pedido.horario}</span>
+              {pedidosFiltrados.map(pedido => {
+                const emManual = manuais[pedido.telefone] === true
+                return (
+                  <div key={pedido.id} className={`rounded-xl border shadow-sm p-4 ${
+                    emManual ? 'bg-blue-50 border-blue-200' : 'bg-white border-gray-100'
+                  }`}>
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="font-semibold text-gray-900">{pedido.cliente}</span>
+                          <span className="text-xs text-gray-400">{pedido.horario}</span>
+                          {emManual && (
+                            <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">
+                              👤 Manual
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-sm text-gray-500 mb-1">📱 {pedido.telefone}</p>
+                        <p className="text-sm text-gray-500 mb-2">📍 {pedido.endereco}</p>
+                        <div className="text-sm text-gray-700 mb-2">
+                          {pedido.itens.map((item, i) => <span key={i} className="mr-2">• {item}</span>)}
+                        </div>
+                        <p className="font-bold text-gray-900">R$ {pedido.total.toFixed(2)}</p>
                       </div>
-                      <p className="text-sm text-gray-500 mb-1">📱 {pedido.telefone}</p>
-                      <p className="text-sm text-gray-500 mb-2">📍 {pedido.endereco}</p>
-                      <div className="text-sm text-gray-700 mb-2">
-                        {pedido.itens.map((item, i) => <span key={i} className="mr-2">• {item}</span>)}
+                      <div className="flex flex-col items-end gap-2">
+                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${STATUS_COR[pedido.status]}`}>
+                          {STATUS_LABEL[pedido.status]}
+                        </span>
+                        {emManual ? (
+                          <button
+                            onClick={() => devolverAoBot(pedido.telefone)}
+                            className="text-xs px-3 py-1 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors"
+                          >
+                            🤖 Devolver ao bot
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => assumirConversa(pedido.telefone)}
+                            className="text-xs px-3 py-1 rounded-lg bg-gray-200 text-gray-700 hover:bg-gray-300 transition-colors"
+                          >
+                            👤 Assumir
+                          </button>
+                        )}
+                        {PROXIMO_STATUS[pedido.status] && (
+                          <button
+                            onClick={() => avancarStatus(pedido.id, PROXIMO_STATUS[pedido.status]!)}
+                            disabled={atualizando === pedido.id}
+                            className={`text-xs px-3 py-1 rounded-lg transition-colors ${
+                              atualizando === pedido.id
+                                ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                : 'bg-red-600 text-white hover:bg-red-700'
+                            }`}
+                          >
+                            {atualizando === pedido.id ? 'Salvando...' : 'Avançar →'}
+                          </button>
+                        )}
+                        {pedido.status === 'novo' && (
+                          <button
+                            onClick={() => avancarStatus(pedido.id, 'cancelado')}
+                            className="text-xs text-red-400 hover:text-red-600"
+                          >
+                            Cancelar
+                          </button>
+                        )}
                       </div>
-                      <p className="font-bold text-gray-900">R$ {pedido.total.toFixed(2)}</p>
-                    </div>
-                    <div className="flex flex-col items-end gap-2">
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${STATUS_COR[pedido.status]}`}>
-                        {STATUS_LABEL[pedido.status]}
-                      </span>
-                      {PROXIMO_STATUS[pedido.status] && (
-                        <button
-                          onClick={() => avancarStatus(pedido.id, PROXIMO_STATUS[pedido.status]!)}
-                          disabled={atualizando === pedido.id}
-                          className={`text-xs px-3 py-1 rounded-lg transition-colors ${
-                            atualizando === pedido.id
-                              ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                              : 'bg-red-600 text-white hover:bg-red-700'
-                          }`}
-                        >
-                          {atualizando === pedido.id ? 'Salvando...' : 'Avançar →'}
-                        </button>
-                      )}
-                      {pedido.status === 'novo' && (
-                        <button
-                          onClick={() => avancarStatus(pedido.id, 'cancelado')}
-                          className="text-xs text-red-400 hover:text-red-600"
-                        >
-                          Cancelar
-                        </button>
-                      )}
                     </div>
                   </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           </>
         )}
