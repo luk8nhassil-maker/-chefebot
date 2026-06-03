@@ -7,7 +7,24 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const { ativo } = await req.json();
-  await redis.set("bot_ativo", ativo);
-  return NextResponse.json({ ok: true, ativo });
+  const body = await req.json();
+
+  // Pausa global
+  if (typeof body.ativo === "boolean" && !body.phone) {
+    await redis.set("bot_ativo", body.ativo);
+    return NextResponse.json({ ok: true, ativo: body.ativo });
+  }
+
+  // Pausa por cliente
+  if (body.phone) {
+    const chave = `manual:${body.phone}`;
+    if (body.ativo === false) {
+      await redis.set(chave, true, { ex: 3600 }); // expira em 1h
+    } else {
+      await redis.del(chave);
+    }
+    return NextResponse.json({ ok: true, phone: body.phone, manual: body.ativo === false });
+  }
+
+  return NextResponse.json({ ok: false }, { status: 400 });
 }
