@@ -1,5 +1,4 @@
 "use client";
-
 import { useState, useRef, useEffect, useCallback } from "react";
 import ChatBubble from "./ChatBubble";
 import { BotSession, getWelcomeMessages } from "@/lib/bot";
@@ -50,8 +49,8 @@ export function Simulator() {
   const handleStart = useCallback(() => {
     const welcome = getWelcomeMessages();
     setStarted(true);
-    addBotMessages(welcome.messages);
-    setSession(welcome.session);
+    addBotMessages(welcome);
+    setSession({ step: "size", cart: [], deliveryFee: 0 });
   }, [addBotMessages]);
 
   const handleSend = useCallback(async () => {
@@ -78,8 +77,6 @@ export function Simulator() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "600px", maxWidth: "400px", margin: "0 auto", borderRadius: "16px", overflow: "hidden", boxShadow: "0 4px 24px rgba(0,0,0,0.12)", border: "1px solid #e0e0e0" }}>
-      
-      {/* Header estilo WhatsApp */}
       <div style={{ background: "#075E54", padding: "12px 16px", display: "flex", alignItems: "center", gap: "12px" }}>
         <div style={{ width: "40px", height: "40px", borderRadius: "50%", background: "#25D366", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "20px" }}>🍕</div>
         <div>
@@ -87,8 +84,6 @@ export function Simulator() {
           <p style={{ color: "#B2DFDB", fontSize: "12px", margin: 0 }}>{started ? (typing ? "digitando..." : "online") : "Atendimento via WhatsApp"}</p>
         </div>
       </div>
-
-      {/* Área de mensagens */}
       <div style={{ flex: 1, overflowY: "auto", padding: "12px 16px", background: "#ECE5DD", display: "flex", flexDirection: "column", gap: "4px" }}>
         {!started && (
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", gap: "12px" }}>
@@ -103,11 +98,9 @@ export function Simulator() {
             </button>
           </div>
         )}
-
         {messages.map((msg) => (
-          <ChatBubble key={msg.id} message={msg.content} sender={msg.sender} time={msg.time} />
+          <ChatBubble key={msg.id} message={msg.content} sender={msg.sender} timestamp={msg.time} />
         ))}
-
         {typing && (
           <div style={{ display: "flex", alignItems: "center", gap: "4px", padding: "8px 12px", background: "white", borderRadius: "12px", borderBottomLeftRadius: "4px", alignSelf: "flex-start", maxWidth: "80px" }}>
             <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#999", animation: "bounce 1s infinite" }}></span>
@@ -115,11 +108,8 @@ export function Simulator() {
             <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#999", animation: "bounce 1s infinite 0.4s" }}></span>
           </div>
         )}
-
         <div ref={bottomRef} />
       </div>
-
-      {/* Input */}
       {started && (
         <div style={{ background: "#F0F0F0", padding: "8px 12px", display: "flex", alignItems: "center", gap: "8px" }}>
           <input
@@ -141,7 +131,6 @@ export function Simulator() {
           </button>
         </div>
       )}
-
       <style>{`
         @keyframes bounce {
           0%, 60%, 100% { transform: translateY(0); }
