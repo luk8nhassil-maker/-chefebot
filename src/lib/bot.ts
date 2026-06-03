@@ -355,9 +355,15 @@ export function processMessage(input: string, session: BotSession): BotResponse 
           session: { ...session, step: "category" },
         };
       }
+      if (lower === "3" || lower.includes("nao") || lower.includes("finalizar") || lower.includes("nao")) {
+        return {
+          messages: [`Como prefere receber seu pedido?\n\n  1. Entrega (delivery)\n  2. Retirar na loja`],
+          session: { ...session, step: "delivery_type" },
+        };
+      }
       return {
-        messages: [`Como prefere receber seu pedido?\n\n  1. Entrega (delivery)\n  2. Retirar na loja`],
-        session: { ...session, step: "delivery_type" },
+        messages: [`Opcao invalida. Escolha:\n\n  1. Mais uma pizza\n  2. Outro produto\n  3. Nao, finalizar pedido`],
+        session,
       };
     }
 
@@ -601,3 +607,4 @@ export function createReturningSession(historico: ClienteHistorico): BotSession 
 export function getWelcomeMessages(): string[] {
   return [`Ola! Bem-vindo a *Chefe da Pizza*!\n\nSou o ChefBot e vou te ajudar a fazer seu pedido.\n\nQual o seu nome?`];
 }
+
