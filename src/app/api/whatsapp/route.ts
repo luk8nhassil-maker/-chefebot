@@ -14,7 +14,44 @@ type Pedido = {
   escalonado?: boolean;
 };
 
-async function salvarPedido(session: BotSession, phone: string) {
+type ConfigPizzaria = {
+  nomePizzaria: string;
+  horaAbertura: number;
+  horaFechamento: number;
+  chavePix: string;
+};
+
+const CONFIG_PADRAO: ConfigPizzaria = {
+  nomePizzaria: "Chefe da Pizza",
+  horaAbertura: 18,
+  horaFechamento: 23,
+  chavePix: "",
+};
+
+async function getConfig(): Promise<ConfigPizzaria> {
+  const config = await redis.get<ConfigPizzaria>("config:pizzaria");
+  return config ?? CONFIG_PADRAO;
+}
+
+function estaAberto(config: ConfigPizzaria): boolean {
+  const agora = new Date();
+  const brasilia = new Date(agora.toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
+  const hora = brasilia.getHours();
+  return hora >= config.horaAbertura && hora < config.horaFechamento;
+}
+
+function mensagemFechado(config: ConfigPizzaria): string {
+  const agora = new Date();
+  const brasilia = new Date(agora.toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
+  const hora = brasilia.getHours();
+
+  if (hora >= config.horaFechamento) {
+    return `Olá! 🍕 Obrigado por entrar em contato com a *${config.nomePizzaria}*!\n\nInfelizmente já encerramos as operações de hoje. 😔\n\n⏰ Nosso horário de funcionamento é:\n*Todos os dias das ${config.horaAbertura}h às ${config.horaFechamento}h*\n\nAmanhã estaremos aqui para te atender! Até lá! 😊`;
+  }
+  return `Olá! 🍕 Obrigado por entrar em contato com a *${config.nomePizzaria}*!\n\nAinda não abrimos hoje. 😔\n\n⏰ Nosso horário de funcionamento é:\n*Todos os dias das ${config.horaAbertura}h às ${config.horaFechamento}h*\n\nVolte mais tarde e faremos uma pizza incrível para você! 😊`;
+}
+
+async function salvarPedido(session: BotSession, phone: string, config: ConfigPizzaria) {
   const pedidos = (await redis.get<Pedido[]>("pedidos")) || [];
   const itens = session.cart.map((item) => {
     const border = item.border !== "Sem borda" ? ` + ${item.border}` : "";
@@ -42,13 +79,12 @@ async function salvarPedido(session: BotSession, phone: string) {
   };
   await redis.set("pedidos", [...pedidos, novoPedido]);
 
-  // Salva histórico do cliente
   const historico: ClienteHistorico = {
     nome: session.customerName || phone,
     ultimoPedido: itens,
     ultimoTotal: total,
   };
-  await redis.set(`cliente:${phone}`, historico, { ex: 30 * 24 * 60 * 60 }); // 30 dias
+  await redis.set(`cliente:${phone}`, historico, { ex: 30 * 24 * 60 * 60 });
 }
 
 async function salvarEscalonamento(phone: string, session: BotSession) {
@@ -123,20 +159,33 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
+    // Lê configurações
+    const config = await getConfig();
+
+    // Verifica horário de funcionamento
+    if (!estaAberto(config)) {
+      const jaAvisado = await redis.get<boolean>(`fechado:${phone}`);
+      if (!jaAvisado) {
+        await enviarMensagem(phone, mensagemFechado(config));
+        await redis.set(`fechado:${phone}`, true, { ex: 3600 });
+      }
+      return NextResponse.json({ ok: true });
+    }
+
+    // Limpa flag de fechado quando abre
+    await redis.del(`fechado:${phone}`);
+
     const sessionKey = `session:${phone}`;
     const savedSession = await redis.get<BotSession>(sessionKey);
 
     let currentSession: BotSession;
 
     if (!savedSession) {
-      // Cliente novo ou sessão expirada — verifica histórico
       const historico = await redis.get<ClienteHistorico>(`cliente:${phone}`);
       if (historico) {
-        // Cliente que já pediu antes
         const firstName = historico.nome.split(" ")[0];
         const ultimoPedido = historico.ultimoPedido.join(", ");
         currentSession = createReturningSession(historico);
-        // Envia mensagem de boas vindas de retorno
         await enviarMensagem(
           phone,
           `Olá de novo, *${firstName}*! 👋\n\nSeu último pedido foi: *${ultimoPedido}*\n\nQuer fazer um novo pedido?\n\n  1. Sim, quero pedir\n  2. Não, obrigado`
@@ -152,16 +201,14 @@ export async function POST(req: NextRequest) {
 
     const result = processMessage(messageText, currentSession);
 
-    // Salva pedido se confirmado
     if (
       currentSession.step === "confirm" &&
       (messageText.trim() === "1" ||
         messageText.trim().toLowerCase() === "sim")
     ) {
-      await salvarPedido(currentSession, phone);
+      await salvarPedido(currentSession, phone, config);
     }
 
-    // Escalonamento para atendimento humano
     if (result.escalar) {
       await salvarEscalonamento(phone, currentSession);
       await redis.set(`manual:${phone}`, true, { ex: 3600 });
@@ -170,7 +217,11 @@ export async function POST(req: NextRequest) {
     await redis.set(sessionKey, result.session, { ex: 1800 });
 
     for (const msg of result.messages) {
-      await enviarMensagem(phone, msg);
+      // Substitui chave Pix hardcoded pela configuração
+      const msgFinal = config.chavePix
+        ? msg.replace("11999999999", config.chavePix)
+        : msg;
+      await enviarMensagem(phone, msgFinal);
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
 

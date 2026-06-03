@@ -1,0 +1,33 @@
+import { NextRequest, NextResponse } from "next/server";
+import { redis } from "@/lib/redis";
+
+export type ConfigPizzaria = {
+  nomePizzaria: string;
+  horaAbertura: number;
+  horaFechamento: number;
+  chavePix: string;
+};
+
+const CONFIG_PADRAO: ConfigPizzaria = {
+  nomePizzaria: "Chefe da Pizza",
+  horaAbertura: 18,
+  horaFechamento: 23,
+  chavePix: "",
+};
+
+export async function GET() {
+  const config = await redis.get<ConfigPizzaria>("config:pizzaria");
+  return NextResponse.json(config ?? CONFIG_PADRAO);
+}
+
+export async function POST(req: NextRequest) {
+  const body = await req.json();
+  const config: ConfigPizzaria = {
+    nomePizzaria: body.nomePizzaria || CONFIG_PADRAO.nomePizzaria,
+    horaAbertura: Number(body.horaAbertura) ?? CONFIG_PADRAO.horaAbertura,
+    horaFechamento: Number(body.horaFechamento) ?? CONFIG_PADRAO.horaFechamento,
+    chavePix: body.chavePix || "",
+  };
+  await redis.set("config:pizzaria", config);
+  return NextResponse.json({ ok: true, config });
+}
