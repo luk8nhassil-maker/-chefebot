@@ -76,19 +76,22 @@ export function Simulator({ fullScreen = false }: { fullScreen?: boolean }) {
   }, [input, loading, session, phone, addBotMessages]);
 
   const containerStyle = fullScreen
-    ? { display: "flex", flexDirection: "column" as const, height: "100%", width: "100%" }
+    ? { display: "flex", flexDirection: "column" as const, height: "100%", width: "100%", position: "relative" as const }
     : { display: "flex", flexDirection: "column" as const, height: "600px", maxWidth: "400px", margin: "0 auto", borderRadius: "16px", overflow: "hidden", boxShadow: "0 4px 24px rgba(0,0,0,0.12)", border: "1px solid #e0e0e0" };
 
   return (
     <div style={containerStyle}>
-      <div style={{ background: "#075E54", padding: "12px 16px", display: "flex", alignItems: "center", gap: "12px" }}>
+      {/* Header */}
+      <div style={{ background: "#075E54", padding: "12px 16px", display: "flex", alignItems: "center", gap: "12px", flexShrink: 0 }}>
         <div style={{ width: "40px", height: "40px", borderRadius: "50%", background: "#25D366", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "20px" }}>🍕</div>
         <div>
           <p style={{ color: "white", fontWeight: 600, fontSize: "15px", margin: 0 }}>Chefe da Pizza</p>
           <p style={{ color: "#B2DFDB", fontSize: "12px", margin: 0 }}>{started ? (typing ? "digitando..." : "online") : "Atendimento via WhatsApp"}</p>
         </div>
       </div>
-      <div style={{ flex: 1, overflowY: "auto", padding: "12px 16px", background: "#ECE5DD", display: "flex", flexDirection: "column", gap: "4px" }}>
+
+      {/* Mensagens */}
+      <div style={{ flex: 1, overflowY: "auto", padding: "12px 16px", background: "#ECE5DD", display: "flex", flexDirection: "column", gap: "4px", paddingBottom: started ? "80px" : "12px" }}>
         {!started && (
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", gap: "12px" }}>
             <div style={{ fontSize: "48px" }}>🍕</div>
@@ -114,8 +117,10 @@ export function Simulator({ fullScreen = false }: { fullScreen?: boolean }) {
         )}
         <div ref={bottomRef} />
       </div>
+
+      {/* Input fixo no fundo */}
       {started && (
-        <div style={{ background: "#F0F0F0", padding: "8px 12px", display: "flex", alignItems: "center", gap: "8px" }}>
+        <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "#F0F0F0", padding: "10px 12px", display: "flex", alignItems: "center", gap: "8px", borderTop: "1px solid #ddd" }}>
           <input
             type="text"
             value={input}
@@ -123,18 +128,19 @@ export function Simulator({ fullScreen = false }: { fullScreen?: boolean }) {
             onKeyDown={(e) => e.key === "Enter" && handleSend()}
             placeholder="Digite uma mensagem"
             disabled={loading || typing}
-            style={{ flex: 1, border: "none", borderRadius: "24px", padding: "10px 16px", fontSize: "14px", outline: "none", background: "white" }}
+            style={{ flex: 1, border: "none", borderRadius: "24px", padding: "12px 16px", fontSize: "16px", outline: "none", background: "white" }}
           />
           <button
             type="button"
             onClick={handleSend}
             disabled={loading || typing || !input.trim()}
-            style={{ width: "40px", height: "40px", borderRadius: "50%", background: input.trim() ? "#25D366" : "#ccc", border: "none", cursor: input.trim() ? "pointer" : "not-allowed", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "18px" }}
+            style={{ width: "48px", height: "48px", borderRadius: "50%", background: input.trim() ? "#25D366" : "#ccc", border: "none", cursor: input.trim() ? "pointer" : "not-allowed", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "20px", flexShrink: 0 }}
           >
             ➤
           </button>
         </div>
       )}
+
       <style>{`
         @keyframes bounce {
           0%, 60%, 100% { transform: translateY(0); }
