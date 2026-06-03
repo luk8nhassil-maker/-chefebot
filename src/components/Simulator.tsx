@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { ChatBubble } from "./ChatBubble";
+import ChatBubble from "./ChatBubble";
 import { BotSession, getWelcomeMessages } from "@/lib/bot";
 
 interface Message {
