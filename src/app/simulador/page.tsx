@@ -4,11 +4,11 @@ import { NavBar } from "@/components/NavBar";
 
 export default function SimuladorPage() {
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="bg-gray-50">
       <NavBar currentPage="simulador" />
 
       {/* Mobile: simulador em tela cheia */}
-      <div className="lg:hidden h-[calc(100vh-64px)]">
+      <div className="lg:hidden" style={{ height: "calc(100dvh - 57px)" }}>
         <Simulator fullScreen />
       </div>
 
