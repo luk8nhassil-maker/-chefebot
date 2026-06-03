@@ -46,6 +46,7 @@ export default function PedidosPage() {
   const [filtro, setFiltro] = useState<Status | 'todos'>('todos')
   const [loading, setLoading] = useState(true)
   const [userName, setUserName] = useState('')
+  const [ultimaAtualizacao, setUltimaAtualizacao] = useState('')
 
   useEffect(() => {
     const cookie = document.cookie.split(';').find(c => c.trim().startsWith('auth-user='))
@@ -62,7 +63,7 @@ const user = JSON.parse(decodeURIComponent(decodeURIComponent(raw)))
         if (r.status === 401) { router.push('/login?callbackUrl=/pedidos'); return null }
         return r.json()
       })
-      .then(data => { if (data) { setPedidos(data); setLoading(false) } })
+      .then(data => { if (data) { setPedidos(data); setLoading(false); setUltimaAtualizacao(new Date().toLocaleTimeString('pt-BR')) } })
   }, [router])
 
   const avancarStatus = async (id: string, novoStatus: Status) => {
@@ -109,7 +110,7 @@ const user = JSON.parse(decodeURIComponent(decodeURIComponent(raw)))
           <>
             <div className="mb-6">
               <h1 className="text-2xl font-bold text-gray-900">📋 Gestão de Pedidos</h1>
-              <p className="text-sm text-gray-500">{ativos} pedido{ativos !== 1 ? 's' : ''} ativo{ativos !== 1 ? 's' : ''}</p>
+              <p className="text-sm text-gray-500">{ativos} pedido{ativos !== 1 ? 's' : ''} ativo{ativos !== 1 ? 's' : ''} {ultimaAtualizacao && <span className="text-xs text-gray-400">· atualizado às {ultimaAtualizacao}</span>}</p>
             </div>
 
             <div className="flex gap-2 flex-wrap mb-6">
