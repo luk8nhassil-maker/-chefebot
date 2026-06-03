@@ -22,7 +22,7 @@ async function salvarPedido(session: BotSession, phone: string) {
   const total = session.cart.reduce((sum, item) => sum + item.price, 0) + session.deliveryFee;
   const novoPedido: Pedido = {
     id: Date.now().toString(),
-    cliente: phone,
+    cliente: session.customerName || phone,
     telefone: phone,
     itens,
     total,
@@ -44,7 +44,6 @@ export async function POST(req: NextRequest) {
   const currentSession = session ?? createInitialSession();
   const result = processMessage(message, currentSession);
 
-  // Salva no Redis quando o pedido é confirmado
   if (
     currentSession.step === "confirm" &&
     (message.trim() === "1" || message.trim().toLowerCase() === "sim")
