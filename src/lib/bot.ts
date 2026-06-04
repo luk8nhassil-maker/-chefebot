@@ -260,13 +260,13 @@ export function processMessage(input: string, session: BotSession): BotResponse 
       const historico = session.historico!;
       const firstName = historico.nome.split(" ")[0];
       const ultimoPedido = historico.ultimoPedido.join(", ");
-      if (lower === "1" || lower === "sim" || lower === "s") {
+      if (lower === "1" || lower === "sim" || lower === "s" || lower.includes("sim") || lower.includes("bora") || lower.includes("quero")) {
         return {
           messages: [`Que bom te ver de novo, *${firstName}*! Bora la!\n\n${mensagemCategorias()}`],
           session: resetaTentativas({ ...session, step: "category", customerName: historico.nome }),
         };
       }
-      if (lower === "2" || lower === "nao" || lower === "n") {
+      if (lower === "2" || lower === "nao" || lower === "n" || lower.includes("nao")) {
         return { messages: [`Tudo bem! Me fala seu nome?`], session: resetaTentativas({ ...session, step: "name", historico: undefined }) };
       }
       return {
@@ -301,11 +301,11 @@ export function processMessage(input: string, session: BotSession): BotResponse 
       return { ...handleCategory(category, session), session: resetaTentativas(handleCategory(category, session).session) };
     }
     case "confirmando_mudanca": {
-      if (lower === "1" || lower.includes("manter") || lower.includes("sim")) {
+      if (lower === "1" || lower.includes("manter") || lower.includes("sim") || lower.includes("quero") || lower.includes("continua")) {
         const categoriaAtual = session.currentCategory ?? "pizza";
         return { ...handleCategory(categoriaAtual, { ...session, step: "category", pendingCategory: undefined }), session: resetaTentativas(handleCategory(categoriaAtual, { ...session, step: "category", pendingCategory: undefined }).session) };
       }
-      if (lower === "2" || lower.includes("ir") || lower.includes("nao")) {
+      if (lower === "2" || lower.includes("ir") || lower.includes("nao") || lower.includes("troca") || lower.includes("muda")) {
         const pendingCategory = session.pendingCategory ?? "pizza";
         return { ...handleCategory(pendingCategory, { ...session, pendingCategory: undefined }), session: resetaTentativas(handleCategory(pendingCategory, { ...session, pendingCategory: undefined }).session) };
       }
@@ -318,6 +318,8 @@ export function processMessage(input: string, session: BotSession): BotResponse 
         "1": "P", "2": "M", "3": "G", "4": "F",
         p: "P", m: "M", g: "G", f: "F",
         pequena: "P", media: "M", grande: "G", familia: "F",
+        pequeno: "P", medio: "M", "tamanho p": "P", "tamanho m": "M",
+        "tamanho g": "G", "tamanho f": "F",
       };
       const size = sizeMap[lower];
       if (!size) return respostaInvalida(`  1. Pequena (P) - R$ 35,00\n  2. Media (M) - R$ 40,00\n  3. Grande (G) - R$ 50,00\n  4. Familia (F) - R$ 55,00`, session);
@@ -337,7 +339,7 @@ export function processMessage(input: string, session: BotSession): BotResponse 
       if (!isNaN(num) && num >= 1 && num <= allFlavors.length) {
         flavor = allFlavors[num - 1];
       } else {
-        flavor = allFlavors.find((f) => f.toLowerCase() === lower);
+        flavor = allFlavors.find((f) => lower.includes(f.toLowerCase()));
       }
       if (!flavor) {
         const saltyList = MENU.saltyFlavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n");
@@ -353,12 +355,16 @@ export function processMessage(input: string, session: BotSession): BotResponse 
     case "border": {
       const mudanca = tentaMudanca(text, session);
       if (mudanca) return mudanca;
-      if (lower !== "1" && lower !== "2" && lower !== "sim" && lower !== "s" && lower !== "nao" && lower !== "n" && !lower.includes("sim") && !lower.includes("nao")) {
+      const querBorda = lower === "1" || lower === "sim" || lower === "s" ||
+        lower.includes("sim") || lower.includes("quero") || lower.includes("com borda") ||
+        lower.includes("pode") || lower.includes("bora") || lower.includes("claro");
+      const naoBorda = lower === "2" || lower === "nao" || lower === "n" ||
+        lower.includes("nao") || lower.includes("sem borda") || lower.includes("nao quero");
+      if (!querBorda && !naoBorda) {
         return respostaInvalida(`  1. Sim - ${formatCurrency(getBorderPrice(session.currentSize!))}\n  2. Nao`, session);
       }
-      const wantsBorder = lower === "1" || lower === "sim" || lower === "s" || lower.includes("sim");
-      const border = wantsBorder ? "Borda recheada" : "Sem borda";
-      const borderPrice = wantsBorder ? getBorderPrice(session.currentSize!) : 0;
+      const border = querBorda ? "Borda recheada" : "Sem borda";
+      const borderPrice = querBorda ? getBorderPrice(session.currentSize!) : 0;
       const basePrice = getSizePrice(session.currentSize!);
       const itemPrice = basePrice + borderPrice;
       const newItem: CartItem = { category: "pizza", name: "Pizza", size: session.currentSize!, flavor: session.currentFlavor!, border, price: itemPrice };
@@ -370,22 +376,28 @@ export function processMessage(input: string, session: BotSession): BotResponse 
       };
     }
     case "add_more": {
-      if (lower === "1" || lower.includes("pizza")) {
+      if (lower === "1" || lower.includes("mais pizza") || lower.includes("outra pizza") || lower.includes("mais uma")) {
         return { messages: [`Qual o tamanho da proxima pizza?\n\n  1. Pequena (P) - R$ 35,00\n  2. Media (M) - R$ 40,00\n  3. Grande (G) - R$ 50,00\n  4. Familia (F) - R$ 55,00`], session: resetaTentativas({ ...session, step: "size", currentCategory: "pizza" }) };
       }
-      if (lower === "2" || lower.includes("outro") || lower.includes("mais")) {
+      if (lower === "2" || lower.includes("outro") || lower.includes("mais alguma") || lower.includes("adicionar")) {
         return { messages: [`Claro! O que mais vai querer?\n\n${mensagemCategorias()}`], session: resetaTentativas({ ...session, step: "category" }) };
       }
-      if (lower === "3" || lower.includes("nao") || lower.includes("finalizar") || lower.includes("fechar")) {
+      if (lower === "3" || lower.includes("nao") || lower.includes("finalizar") || lower.includes("fechar") ||
+          lower.includes("so isso") || lower.includes("pode fechar") || lower.includes("e so") ||
+          lower.includes("chega") || lower.includes("encerra") || lower === "nao obrigado" || lower === "nao, obrigado") {
         return {
           messages: [`Anotado! Tem alguma observacao pro seu pedido?\n\nEx: _tirar cebola, sem borda, mal passado..._\n\nSe nao tiver, e so digitar *0*`],
           session: resetaTentativas({ ...session, step: "observacao" }),
         };
       }
+      const intencaoDireta = detectaIntencaoDireta(text);
+      if (intencaoDireta) {
+        return { messages: [`Claro! O que mais vai querer?\n\n${mensagemCategorias()}`], session: resetaTentativas({ ...session, step: "category" }) };
+      }
       return respostaInvalida(`  1. Mais uma pizza\n  2. Outro produto\n  3. Nao, pode fechar`, session);
     }
     case "observacao": {
-      const semObservacao = lower === "0" || lower === "nao" || lower === "n" || lower === "nenhuma" || lower === "nao tenho" || lower === "sem observacao";
+      const semObservacao = lower === "0" || lower === "nao" || lower === "n" || lower === "nenhuma" || lower === "nao tenho" || lower === "sem observacao" || lower === "nada" || lower === "nenhum";
       if (semObservacao) {
         return {
           messages: [`Combinado! Como prefere receber?\n\n  1. Entrega (delivery)\n  2. Buscar na loja`],
@@ -398,10 +410,10 @@ export function processMessage(input: string, session: BotSession): BotResponse 
       };
     }
     case "delivery_type": {
-      if (lower === "1" || lower.includes("entrega") || lower.includes("delivery")) {
+      if (lower === "1" || lower.includes("entrega") || lower.includes("delivery") || lower.includes("entregar") || lower.includes("minha casa")) {
         return { messages: [`Certo! Qual seu bairro?\n\n${neighborhoodList()}`], session: resetaTentativas({ ...session, step: "neighborhood", deliveryType: "delivery" }) };
       }
-      if (lower === "2" || lower.includes("retirar") || lower.includes("loja") || lower.includes("buscar")) {
+      if (lower === "2" || lower.includes("retirar") || lower.includes("loja") || lower.includes("buscar") || lower.includes("pegar") || lower.includes("retiro")) {
         const payList = MENU.payments.map((p, i) => `  ${i + 1}. ${p}`).join("\n");
         return { messages: [`Combinado, voce retira aqui na loja! Como vai pagar?\n\n${payList}`], session: resetaTentativas({ ...session, step: "payment", deliveryType: "pickup", deliveryFee: 0, neighborhood: undefined }) };
       }
@@ -424,6 +436,8 @@ export function processMessage(input: string, session: BotSession): BotResponse 
       const payMap: Record<string, string> = {
         "1": "Pix", "2": "Dinheiro", "3": "Cartao",
         pix: "Pix", dinheiro: "Dinheiro", cartao: "Cartao", credito: "Cartao", debito: "Cartao",
+        transferencia: "Pix", chave: "Pix", "cartao de credito": "Cartao", "cartao de debito": "Cartao",
+        especie: "Dinheiro", cash: "Dinheiro", "no cartao": "Cartao", "no pix": "Pix", "em dinheiro": "Dinheiro",
       };
       const payment = payMap[lower];
       if (!payment) return respostaInvalida(MENU.payments.map((p, i) => `  ${i + 1}. ${p}`).join("\n"), session);
@@ -432,12 +446,17 @@ export function processMessage(input: string, session: BotSession): BotResponse 
       return { messages: [`Perfeito! Da uma conferida no pedido:\n\n${receipt}\n\nTa certinho?\n\n  1. Sim, confirmar\n  2. Retirar`], session: resetaTentativas({ ...updatedSession, step: "confirm" }) };
     }
     case "confirm": {
-      if (lower === "1" || lower === "sim" || lower === "s" || lower.includes("sim")) {
+      const confirma = lower === "1" || lower === "sim" || lower === "s" || lower.includes("sim") ||
+        lower.includes("confirmar") || lower.includes("correto") || lower.includes("ta bom") ||
+        lower.includes("pode ser") || lower.includes("isso") || lower.includes("certo") ||
+        lower.includes("ok") || lower.includes("beleza") || lower.includes("pode") || lower.includes("fechou");
+      const retira = lower === "2" || lower.includes("retirar") || lower.includes("nao") || lower.includes("cancela") || lower.includes("errado");
+      if (confirma) {
         const timeMsg = session.deliveryType === "delivery" ? "40-60 minutos" : "20-30 minutos";
         const pixMsg = session.paymentMethod === "Pix" ? `\n\nChave Pix: (configurada pelo admin)` : "";
         return { messages: [`Pedido confirmado! Ja passamos pra cozinha!\n\nObrigado, *${session.customerName?.split(" ")[0]}*! Tempo estimado: *${timeMsg}*${pixMsg}\n\nQualquer duvida e so chamar. Bom apetite!`], session: { ...session, step: "done" } };
       }
-      if (lower === "2" || lower.includes("retirar") || lower.includes("nao")) {
+      if (retira) {
         return { messages: [`Tudo bem, pedido retirado! Se mudar de ideia e so chamar.`], session: { ...session, step: "done" } };
       }
       return respostaInvalida(`  1. Sim, confirmar\n  2. Retirar`, session);
