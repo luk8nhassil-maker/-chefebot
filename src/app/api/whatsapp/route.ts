@@ -46,23 +46,23 @@ function mensagemFechado(config: ConfigPizzaria): string {
   const hora = brasilia.getHours();
 
   if (hora >= config.horaFechamento) {
-    return `OlÃ¡! ðŸ• Obrigado por entrar em contato com a *${config.nomePizzaria}*!\n\nInfelizmente jÃ¡ encerramos as operaÃ§Ãµes de hoje. ðŸ˜”\n\nâ° Nosso horÃ¡rio de funcionamento Ã©:\n*Todos os dias das ${config.horaAbertura}h Ã s ${config.horaFechamento}h*\n\nAmanhÃ£ estaremos aqui para te atender! AtÃ© lÃ¡! ðŸ˜Š`;
+    return `Ola! Obrigado por entrar em contato com a *${config.nomePizzaria}*!\n\nInfelizmente ja encerramos as operacoes de hoje.\n\nNosso horario de funcionamento e:\n*Todos os dias das ${config.horaAbertura}h as ${config.horaFechamento}h*\n\nAmanha estaremos aqui para te atender!`;
   }
-  return `OlÃ¡! ðŸ• Obrigado por entrar em contato com a *${config.nomePizzaria}*!\n\nAinda nÃ£o abrimos hoje. ðŸ˜”\n\nâ° Nosso horÃ¡rio de funcionamento Ã©:\n*Todos os dias das ${config.horaAbertura}h Ã s ${config.horaFechamento}h*\n\nVolte mais tarde e faremos uma pizza incrÃ­vel para vocÃª! ðŸ˜Š`;
+  return `Ola! Obrigado por entrar em contato com a *${config.nomePizzaria}*!\n\nAinda nao abrimos hoje.\n\nNosso horario de funcionamento e:\n*Todos os dias das ${config.horaAbertura}h as ${config.horaFechamento}h*\n\nVolte mais tarde e faremos uma pizza incrivel para voce!`;
 }
 
 async function salvarPedido(session: BotSession, phone: string, config: ConfigPizzaria) {
   const pedidos = (await redis.get<Pedido[]>("pedidos")) || [];
   const itens = session.cart.map((item) => {
-    const border = item.border !== "Sem borda" ? ` + ${item.border}` : "";
-    return `Pizza ${item.flavor} ${item.size}${border}`;
+    const border = item.border && item.border !== "Sem borda" ? ` + ${item.border}` : "";
+    const size = item.size ? ` ${item.size}` : "";
+    const flavor = item.flavor ? ` ${item.flavor}` : "";
+    return `${item.name}${size}${flavor}${border}`;
   });
-  const total =
-    session.cart.reduce((sum, item) => sum + item.price, 0) +
-    session.deliveryFee;
+  const total = session.cart.reduce((sum, item) => sum + item.price, 0) + session.deliveryFee;
   const endereco =
     session.deliveryType === "delivery"
-      ? `${session.address} â€” ${session.neighborhood}`
+      ? `${session.address} - ${session.neighborhood}`
       : "Retirada na loja";
   const novoPedido: Pedido = {
     id: Date.now().toString(),
@@ -71,10 +71,7 @@ async function salvarPedido(session: BotSession, phone: string, config: ConfigPi
     itens,
     total,
     status: "novo",
-    horario: new Date().toLocaleTimeString("pt-BR", {
-      hour: "2-digit",
-      minute: "2-digit",
-    }),
+    horario: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
     endereco,
   };
   await redis.set("pedidos", [...pedidos, novoPedido]);
@@ -89,22 +86,17 @@ async function salvarPedido(session: BotSession, phone: string, config: ConfigPi
 
 async function salvarEscalonamento(phone: string, session: BotSession) {
   const pedidos = (await redis.get<Pedido[]>("pedidos")) || [];
-  const jaExiste = pedidos.some(
-    (p) => p.telefone === phone && p.escalonado === true
-  );
+  const jaExiste = pedidos.some((p) => p.telefone === phone && p.escalonado === true);
   if (jaExiste) return;
   const novoPedido: Pedido = {
     id: Date.now().toString(),
     cliente: session.customerName || phone,
     telefone: phone,
-    itens: ["âš ï¸ Cliente solicitou atendimento humano"],
+    itens: ["Cliente solicitou atendimento humano"],
     total: 0,
     status: "novo",
-    horario: new Date().toLocaleTimeString("pt-BR", {
-      hour: "2-digit",
-      minute: "2-digit",
-    }),
-    endereco: "â€”",
+    horario: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
+    endereco: "-",
     escalonado: true,
   };
   await redis.set("pedidos", [...pedidos, novoPedido]);
@@ -159,10 +151,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
-    // LÃª configuraÃ§Ãµes
     const config = await getConfig();
 
-    // Verifica horÃ¡rio de funcionamento
     if (!estaAberto(config)) {
       const jaAvisado = await redis.get<boolean>(`fechado:${phone}`);
       if (!jaAvisado) {
@@ -172,7 +162,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
-    // Limpa flag de fechado quando abre
     await redis.del(`fechado:${phone}`);
 
     const sessionKey = `session:${phone}`;
@@ -188,7 +177,7 @@ export async function POST(req: NextRequest) {
         currentSession = createReturningSession(historico);
         await enviarMensagem(
           phone,
-          `OlÃ¡ de novo, *${firstName}*! ðŸ‘‹\n\nSeu Ãºltimo pedido foi: *${ultimoPedido}*\n\nQuer fazer um novo pedido?\n\n  1. Sim, quero pedir\n  2. NÃ£o, obrigado`
+          `Ei *${firstName}*, que saudade! Seu ultimo pedido foi: *${ultimoPedido}*\n\nVai querer pedir mais?\n\n  1. Sim, bora!\n  2. Nao, valeu`
         );
         await redis.set(sessionKey, currentSession, { ex: 1800 });
         return NextResponse.json({ ok: true });
@@ -203,8 +192,7 @@ export async function POST(req: NextRequest) {
 
     if (
       currentSession.step === "confirm" &&
-      (messageText.trim() === "1" ||
-        messageText.trim().toLowerCase() === "sim")
+      (messageText.trim() === "1" || messageText.trim().toLowerCase() === "sim")
     ) {
       await salvarPedido(currentSession, phone, config);
     }
@@ -217,9 +205,8 @@ export async function POST(req: NextRequest) {
     await redis.set(sessionKey, result.session, { ex: 1800 });
 
     for (const msg of result.messages) {
-      // Substitui chave Pix hardcoded pela configuraÃ§Ã£o
       const msgFinal = config.chavePix
-        ? msg.replace("11999999999", config.chavePix)
+        ? msg.replace("(configurada pelo admin)", config.chavePix)
         : msg;
       await enviarMensagem(phone, msgFinal);
       await new Promise((resolve) => setTimeout(resolve, 500));
