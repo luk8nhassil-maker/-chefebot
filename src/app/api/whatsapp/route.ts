@@ -86,13 +86,13 @@ async function salvarPedido(session: BotSession, phone: string, config: ConfigPi
 
 async function salvarEscalonamento(phone: string, session: BotSession) {
   const pedidos = (await redis.get<Pedido[]>("pedidos")) || [];
-  const jaExiste = pedidos.some((p) => p.telefone === phone && p.escalonado === true);
-  if (jaExiste) return;
+  const jaExisteAberto = pedidos.some((p) => p.telefone === phone && p.escalonado === true && p.status === "novo");
+  if (jaExisteAberto) return;
   const novoPedido: Pedido = {
     id: Date.now().toString(),
     cliente: session.customerName || phone,
     telefone: phone,
-    itens: ["Cliente solicitou atendimento humano"],
+    itens: ["Cliente precisa de atendimento humano"],
     total: 0,
     status: "novo",
     horario: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
@@ -212,4 +212,5 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 }
+
 
