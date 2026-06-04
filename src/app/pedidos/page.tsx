@@ -74,12 +74,10 @@ function tocarSom() {
 function enviarNotificacaoNavegador(pedido: Pedido) {
   if (!("Notification" in window)) return
   if (Notification.permission === "granted") {
-    const titulo = pedido.escalonado
-      ? "Atendimento solicitado - ChefBot"
-      : "Novo pedido - ChefBot"
+    const titulo = pedido.escalonado ? "URGENTE - Atendimento solicitado!" : "Novo pedido - ChefBot"
     const corpo = pedido.escalonado
-      ? `${pedido.cliente} precisa de atendimento humano!`
-      : `${pedido.cliente} | ${pedido.itens[0]} | R$ ${pedido.total.toFixed(2)} | ${pedido.endereco}`
+      ? `${pedido.cliente} precisa de atendimento humano AGORA!`
+      : `${pedido.cliente} | ${pedido.itens[0]} | R$ ${pedido.total.toFixed(2)}`
     new Notification(titulo, { body: corpo, icon: "/favicon.ico" })
   }
 }
@@ -98,7 +96,10 @@ export default function PedidosPage() {
   const [salvandoBot, setSalvandoBot] = useState(false)
   const [manuais, setManuais] = useState<Record<string, boolean>>({})
   const [permissaoNotif, setPermissaoNotif] = useState<NotificationPermission | "unsupported">("default")
+  const [alertaPiscando, setAlertaPiscando] = useState(false)
   const prevIdsRef = useRef<string[]>([])
+  const piscarRef = useRef<NodeJS.Timeout | null>(null)
+  const tituloOriginalRef = useRef(typeof document !== "undefined" ? document.title : "ChefBot")
 
   useEffect(() => {
     const cookie = document.cookie.split(";").find(c => c.trim().startsWith("auth-user="))
@@ -120,8 +121,30 @@ export default function PedidosPage() {
     carregarPedidos()
     carregarStatusBot()
     const intervalo = setInterval(carregarPedidos, 10000)
-    return () => clearInterval(intervalo)
+    return () => {
+      clearInterval(intervalo)
+      if (piscarRef.current) clearInterval(piscarRef.current)
+      document.title = tituloOriginalRef.current
+    }
   }, [router])
+
+  const iniciarPiscar = () => {
+    if (piscarRef.current) return
+    let estado = false
+    piscarRef.current = setInterval(() => {
+      estado = !estado
+      document.title = estado ? "ðŸš¨ ATENDIMENTO URGENTE!" : tituloOriginalRef.current
+    }, 800)
+  }
+
+  const pararPiscar = () => {
+    if (piscarRef.current) {
+      clearInterval(piscarRef.current)
+      piscarRef.current = null
+    }
+    document.title = tituloOriginalRef.current
+    setAlertaPiscando(false)
+  }
 
   const pedirPermissaoNotificacao = () => {
     if (!("Notification" in window)) return
@@ -172,6 +195,7 @@ export default function PedidosPage() {
       setManuais(prev => ({ ...prev, [phone]: true }))
       setNotificacao("Conversa assumida - abrindo WhatsApp...")
       setTimeout(() => setNotificacao(""), 3000)
+      pararPiscar()
       window.open("https://wa.me/" + phone, "_blank")
     } catch {}
   }
@@ -206,11 +230,13 @@ export default function PedidosPage() {
               chegaram.forEach((p: Pedido) => enviarNotificacaoNavegador(p))
               const temEscalonado = chegaram.some((p: Pedido) => p.escalonado)
               if (temEscalonado) {
-                setNotificacao("Cliente precisa de atendimento!")
+                setNotificacao("URGENTE! Cliente precisa de atendimento!")
+                setAlertaPiscando(true)
+                iniciarPiscar()
               } else {
                 setNotificacao(`${chegaram.length} novo${chegaram.length > 1 ? "s" : ""} pedido${chegaram.length > 1 ? "s" : ""}!`)
+                setTimeout(() => setNotificacao(""), 4000)
               }
-              setTimeout(() => setNotificacao(""), 4000)
             }
           }
           prevIdsRef.current = novosIds
@@ -218,6 +244,9 @@ export default function PedidosPage() {
           setLoading(false)
           setErro("")
           setUltimaAtualizacao(new Date().toLocaleTimeString("pt-BR"))
+
+          const temEscalado = data.some((p: Pedido) => p.escalonado && p.status === "novo")
+          if (!temEscalado) pararPiscar()
         }
       })
       .catch(() => setErro("Erro ao carregar pedidos. Tentando novamente..."))
@@ -247,10 +276,13 @@ export default function PedidosPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       {notificacao && (
-        <div className={`fixed top-4 left-4 right-4 z-50 text-white px-4 py-3 rounded-xl shadow-lg font-semibold text-center ${
-          notificacao.includes("atendimento") ? "bg-orange-500" : "bg-green-600"
+        <div className={`fixed top-4 left-4 right-4 z-50 text-white px-4 py-3 rounded-xl shadow-lg font-semibold text-center transition-all ${
+          notificacao.includes("URGENTE") ? "bg-red-600 animate-pulse" : "bg-green-600"
         }`}>
           {notificacao}
+          {notificacao.includes("URGENTE") && (
+            <button onClick={pararPiscar} className="ml-3 text-xs underline opacity-80">Dispensar</button>
+          )}
         </div>
       )}
 
@@ -258,6 +290,11 @@ export default function PedidosPage() {
         <div className="flex items-center gap-2">
           <span className="text-xl">ðŸ•</span>
           <span className="font-bold text-gray-900">ChefBot</span>
+          {escalonados > 0 && (
+            <span className="animate-pulse bg-red-600 text-white text-xs font-bold px-2 py-0.5 rounded-full">
+              {escalonados} URGENTE{escalonados > 1 ? "S" : ""}
+            </span>
+          )}
         </div>
         {userName && (
           <div className="flex items-center gap-2">
@@ -289,16 +326,21 @@ export default function PedidosPage() {
             </div>
 
             {escalonados > 0 && (
-              <div className="mb-3 p-3 bg-orange-50 border-2 border-orange-300 rounded-xl flex items-center gap-2">
-                <span className="text-xl">âš ï¸</span>
-                <p className="text-sm font-semibold text-orange-800">
-                  {escalonados} cliente{escalonados > 1 ? "s" : ""} aguardando atendimento!
-                </p>
+              <div className="mb-3 p-4 bg-red-50 border-2 border-red-400 rounded-xl animate-pulse">
+                <div className="flex items-center gap-3">
+                  <span className="text-2xl">ðŸš¨</span>
+                  <div className="flex-1">
+                    <p className="text-sm font-bold text-red-800">
+                      {escalonados} cliente{escalonados > 1 ? "s" : ""} precisando de atendimento AGORA!
+                    </p>
+                    <p className="text-xs text-red-600 mt-0.5">Clique em "Assumir conversa" no card abaixo</p>
+                  </div>
+                </div>
               </div>
             )}
 
             {permissaoNotif === "denied" && (
-              <div className="mb-3 p-3 bg-yellow-50 border border-yellow-200 rounded-xl flex items-center gap-2">
+              <div className="mb-3 p-3 bg-yellow-50 border border-yellow-200 rounded-xl">
                 <p className="text-xs text-yellow-800">Notificacoes bloqueadas. Ative nas configuracoes do navegador.</p>
               </div>
             )}
@@ -306,36 +348,23 @@ export default function PedidosPage() {
             {permissaoNotif === "default" && (
               <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-xl flex items-center justify-between gap-2">
                 <p className="text-xs text-blue-800">Ative notificacoes para alertas de novos pedidos.</p>
-                <button
-                  onClick={pedirPermissaoNotificacao}
-                  className="text-xs px-3 py-1.5 bg-blue-600 text-white rounded-lg whitespace-nowrap"
-                >
+                <button onClick={pedirPermissaoNotificacao} className="text-xs px-3 py-1.5 bg-blue-600 text-white rounded-lg whitespace-nowrap">
                   Ativar
                 </button>
               </div>
             )}
 
-            <div className={`mb-4 p-3 rounded-xl border-2 flex items-center justify-between ${
-              botAtivo ? "bg-green-50 border-green-200" : "bg-red-50 border-red-200"
-            }`}>
+            <div className={`mb-4 p-3 rounded-xl border-2 flex items-center justify-between ${botAtivo ? "bg-green-50 border-green-200" : "bg-red-50 border-red-200"}`}>
               <div>
-                <p className="font-semibold text-gray-900 text-sm">
-                  {botAtivo ? "Bot ativo" : "Bot pausado"}
-                </p>
-                <p className="text-xs text-gray-500">
-                  {botAtivo ? "Respondendo automaticamente" : "Atendimento manual"}
-                </p>
+                <p className="font-semibold text-gray-900 text-sm">{botAtivo ? "Bot ativo" : "Bot pausado"}</p>
+                <p className="text-xs text-gray-500">{botAtivo ? "Respondendo automaticamente" : "Atendimento manual"}</p>
               </div>
               <button
                 onClick={alternarBot}
                 disabled={salvandoBot}
-                className={`relative inline-flex h-8 w-14 items-center rounded-full transition-colors focus:outline-none flex-shrink-0 ${
-                  salvandoBot ? "opacity-50 cursor-not-allowed" : ""
-                } ${botAtivo ? "bg-green-500" : "bg-red-400"}`}
+                className={`relative inline-flex h-8 w-14 items-center rounded-full transition-colors focus:outline-none flex-shrink-0 ${salvandoBot ? "opacity-50 cursor-not-allowed" : ""} ${botAtivo ? "bg-green-500" : "bg-red-400"}`}
               >
-                <span className={`inline-block h-6 w-6 transform rounded-full bg-white shadow transition-transform ${
-                  botAtivo ? "translate-x-7" : "translate-x-1"
-                }`} />
+                <span className={`inline-block h-6 w-6 transform rounded-full bg-white shadow transition-transform ${botAtivo ? "translate-x-7" : "translate-x-1"}`} />
               </button>
             </div>
 
@@ -343,26 +372,18 @@ export default function PedidosPage() {
               {(["todos", "novo", "em_preparo", "saiu_entrega", "entregue", "cancelado"] as const).map(s => {
                 const count = contagem(s)
                 const labels: Record<string, string> = {
-                  todos: "Todos",
-                  novo: "Novo",
-                  em_preparo: "Preparo",
-                  saiu_entrega: "Entrega",
-                  entregue: "Entregue",
-                  cancelado: "Cancelado",
+                  todos: "Todos", novo: "Novo", em_preparo: "Preparo",
+                  saiu_entrega: "Entrega", entregue: "Entregue", cancelado: "Cancelado",
                 }
                 return (
                   <button
                     key={s}
                     onClick={() => setFiltro(s)}
-                    className={`relative px-3 py-1.5 rounded-full text-xs font-medium transition-all whitespace-nowrap flex-shrink-0 ${
-                      filtro === s ? "bg-red-600 text-white" : "bg-white text-gray-600 border border-gray-200"
-                    }`}
+                    className={`relative px-3 py-1.5 rounded-full text-xs font-medium transition-all whitespace-nowrap flex-shrink-0 ${filtro === s ? "bg-red-600 text-white" : "bg-white text-gray-600 border border-gray-200"}`}
                   >
                     {labels[s]}
                     {count > 0 && (
-                      <span className={`ml-1 inline-flex items-center justify-center w-4 h-4 text-xs font-bold rounded-full ${
-                        filtro === s ? "bg-white text-red-600" : "bg-red-600 text-white"
-                      }`}>
+                      <span className={`ml-1 inline-flex items-center justify-center w-4 h-4 text-xs font-bold rounded-full ${filtro === s ? "bg-white text-red-600" : "bg-red-600 text-white"}`}>
                         {count}
                       </span>
                     )}
@@ -380,25 +401,19 @@ export default function PedidosPage() {
                 const isEscalonado = pedido.escalonado === true
                 return (
                   <div key={pedido.id} className={`rounded-xl border-2 shadow-sm p-3 ${
-                    isEscalonado
-                      ? "bg-orange-50 border-orange-300"
-                      : emManual
-                        ? "bg-blue-50 border-blue-200"
-                        : "bg-white border-gray-100"
+                    isEscalonado ? "bg-red-50 border-red-400 animate-pulse" : emManual ? "bg-blue-50 border-blue-200" : "bg-white border-gray-100"
                   }`}>
                     <div className="flex items-center justify-between mb-1">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-semibold text-gray-900">{pedido.cliente}</span>
                         <span className="text-xs text-gray-400">{pedido.horario}</span>
                         {isEscalonado && (
-                          <span className="text-xs bg-orange-200 text-orange-800 px-2 py-0.5 rounded-full font-bold">
-                            Atendimento
+                          <span className="text-xs bg-red-500 text-white px-2 py-0.5 rounded-full font-bold animate-pulse">
+                            ðŸš¨ URGENTE
                           </span>
                         )}
                         {!isEscalonado && emManual && (
-                          <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">
-                            Manual
-                          </span>
+                          <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">Manual</span>
                         )}
                       </div>
                       {!isEscalonado && (
@@ -419,12 +434,20 @@ export default function PedidosPage() {
 
                     <div className="flex gap-2 flex-wrap">
                       {emManual || isEscalonado ? (
-                        <button
-                          onClick={() => devolverAoBot(pedido.telefone)}
-                          className="flex-1 text-xs py-2 rounded-lg bg-blue-600 text-white font-medium"
-                        >
-                          Devolver ao bot
-                        </button>
+                        <>
+                          <button
+                            onClick={() => assumirConversa(pedido.telefone)}
+                            className={`flex-1 text-xs py-2 rounded-lg font-bold ${isEscalonado ? "bg-red-600 text-white" : "bg-orange-500 text-white"}`}
+                          >
+                            {isEscalonado ? "ðŸš¨ Assumir AGORA" : "Assumir conversa"}
+                          </button>
+                          <button
+                            onClick={() => devolverAoBot(pedido.telefone)}
+                            className="flex-1 text-xs py-2 rounded-lg bg-blue-600 text-white font-medium"
+                          >
+                            Devolver ao bot
+                          </button>
+                        </>
                       ) : (
                         <button
                           onClick={() => assumirConversa(pedido.telefone)}
@@ -437,11 +460,7 @@ export default function PedidosPage() {
                         <button
                           onClick={() => avancarStatus(pedido.id, PROXIMO_STATUS[pedido.status]!)}
                           disabled={atualizando === pedido.id}
-                          className={`flex-1 text-xs py-2 rounded-lg font-medium ${
-                            atualizando === pedido.id
-                              ? "bg-gray-300 text-gray-500"
-                              : "bg-red-600 text-white"
-                          }`}
+                          className={`flex-1 text-xs py-2 rounded-lg font-medium ${atualizando === pedido.id ? "bg-gray-300 text-gray-500" : "bg-red-600 text-white"}`}
                         >
                           {atualizando === pedido.id ? "Salvando..." : "Avancar"}
                         </button>
