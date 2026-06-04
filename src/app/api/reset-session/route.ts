@@ -1,18 +1,5 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
 import { redis } from "@/lib/redis";
-import { cookies } from "next/headers";
-
-function isAdmin(): boolean {
-  try {
-    const cookieStore = cookies();
-    const cookie = cookieStore.get("auth-user");
-    if (!cookie) return false;
-    const user = JSON.parse(decodeURIComponent(cookie.value));
-    return user.role === "admin";
-  } catch {
-    return false;
-  }
-}
 
 export async function POST(req: NextRequest) {
   try {
@@ -23,13 +10,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "phone obrigatorio" }, { status: 400 });
     }
 
-    const sessionKey = `session:${phone}`;
-    const manualKey = `manual:${phone}`;
-    const fechadoKey = `fechado:${phone}`;
-
-    await redis.del(sessionKey);
-    await redis.del(manualKey);
-    await redis.del(fechadoKey);
+    await redis.del(`session:${phone}`);
+    await redis.del(`manual:${phone}`);
+    await redis.del(`fechado:${phone}`);
 
     return NextResponse.json({ ok: true, phone, message: "Sessao resetada com sucesso" });
   } catch (error) {
