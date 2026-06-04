@@ -129,6 +129,14 @@ function detectaIntencaoDireta(text: string): { category: string; label: string 
   }
   return null;
 }
+function detectaTamanho(lower: string): string | null {
+  if (lower === "1" || lower.includes("pequen")) return "P";
+  if (lower === "2" || lower.includes("medi") || lower === "m") return "M";
+  if (lower === "3" || lower.includes("grand") || lower === "g") return "G";
+  if (lower === "4" || lower.includes("famil") || lower === "f") return "F";
+  if (lower === "p") return "P";
+  return null;
+}
 function nomeCategoriaAtual(step: BotStep, currentCategory?: string): string {
   if (currentCategory === "pizza" || step === "size" || step === "flavor" || step === "border") return "pizza";
   if (currentCategory === "lanche" || step === "lanche_escolha" || step === "lanche_flavor" || step === "lanche_macarronada_size") return "lanche";
@@ -314,14 +322,7 @@ export function processMessage(input: string, session: BotSession): BotResponse 
     case "size": {
       const mudanca = tentaMudanca(text, session);
       if (mudanca) return mudanca;
-      const sizeMap: Record<string, string> = {
-        "1": "P", "2": "M", "3": "G", "4": "F",
-        p: "P", m: "M", g: "G", f: "F",
-        pequena: "P", media: "M", grande: "G", familia: "F",
-        pequeno: "P", medio: "M", "tamanho p": "P", "tamanho m": "M",
-        "tamanho g": "G", "tamanho f": "F",
-      };
-      const size = sizeMap[lower];
+      const size = detectaTamanho(lower);
       if (!size) return respostaInvalida(`  1. Pequena (P) - R$ 35,00\n  2. Media (M) - R$ 40,00\n  3. Grande (G) - R$ 50,00\n  4. Familia (F) - R$ 55,00`, session);
       const saltyList = MENU.saltyFlavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n");
       const sweetList = MENU.sweetFlavors.map((f, i) => `  ${MENU.saltyFlavors.length + i + 1}. ${f}`).join("\n");
@@ -439,7 +440,12 @@ export function processMessage(input: string, session: BotSession): BotResponse 
         transferencia: "Pix", chave: "Pix", "cartao de credito": "Cartao", "cartao de debito": "Cartao",
         especie: "Dinheiro", cash: "Dinheiro", "no cartao": "Cartao", "no pix": "Pix", "em dinheiro": "Dinheiro",
       };
-      const payment = payMap[lower];
+      let payment = payMap[lower];
+      if (!payment) {
+        if (lower.includes("pix") || lower.includes("transfer")) payment = "Pix";
+        else if (lower.includes("dinheiro") || lower.includes("especie") || lower.includes("cash")) payment = "Dinheiro";
+        else if (lower.includes("cartao") || lower.includes("credito") || lower.includes("debito")) payment = "Cartao";
+      }
       if (!payment) return respostaInvalida(MENU.payments.map((p, i) => `  ${i + 1}. ${p}`).join("\n"), session);
       const updatedSession = { ...session, paymentMethod: payment };
       const receipt = buildReceipt(updatedSession);
