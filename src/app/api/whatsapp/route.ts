@@ -153,6 +153,12 @@ export async function POST(req: NextRequest) {
 
     const config = await getConfig();
 
+    if (!estaAberto(config)) {
+      await redis.del(`session:${phone}`);
+      await enviarMensagem(phone, mensagemFechado(config));
+      return NextResponse.json({ ok: true });
+    }
+
     const sessionKey = `session:${phone}`;
     const savedSession = await redis.get<BotSession>(sessionKey);
 
@@ -207,6 +213,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 }
+
 
 
 
