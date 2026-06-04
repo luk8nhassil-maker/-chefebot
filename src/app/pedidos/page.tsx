@@ -1,10 +1,7 @@
 ﻿"use client"
-
 import { useEffect, useState, useRef } from "react"
 import { useRouter } from "next/navigation"
-
 type Status = "novo" | "em_preparo" | "saiu_entrega" | "entregue" | "cancelado"
-
 type Pedido = {
   id: string
   cliente: string
@@ -15,8 +12,8 @@ type Pedido = {
   horario: string
   endereco: string
   escalonado?: boolean
+  cancelamentoSolicitado?: boolean
 }
-
 const STATUS_LABEL: Record<Status, string> = {
   novo: "Novo",
   em_preparo: "Em preparo",
@@ -24,7 +21,6 @@ const STATUS_LABEL: Record<Status, string> = {
   entregue: "Entregue",
   cancelado: "Cancelado",
 }
-
 const STATUS_COR: Record<Status, string> = {
   novo: "bg-yellow-100 text-yellow-800",
   em_preparo: "bg-orange-100 text-orange-800",
@@ -32,7 +28,6 @@ const STATUS_COR: Record<Status, string> = {
   entregue: "bg-green-100 text-green-800",
   cancelado: "bg-red-100 text-red-800",
 }
-
 const PROXIMO_STATUS: Record<Status, Status | null> = {
   novo: "em_preparo",
   em_preparo: "saiu_entrega",
@@ -40,7 +35,6 @@ const PROXIMO_STATUS: Record<Status, Status | null> = {
   entregue: null,
   cancelado: null,
 }
-
 function tocarSom() {
   try {
     const ctx = new (window.AudioContext || (window as any).webkitAudioContext)()
@@ -70,18 +64,22 @@ function tocarSom() {
     })
   } catch {}
 }
-
 function enviarNotificacaoNavegador(pedido: Pedido) {
   if (!("Notification" in window)) return
   if (Notification.permission === "granted") {
-    const titulo = pedido.escalonado ? "URGENTE - Atendimento solicitado!" : "Novo pedido - ChefBot"
+    const titulo = pedido.escalonado
+      ? "URGENTE - Atendimento solicitado!"
+      : pedido.cancelamentoSolicitado
+      ? "Cancelamento solicitado!"
+      : "Novo pedido - ChefBot"
     const corpo = pedido.escalonado
       ? `${pedido.cliente} precisa de atendimento humano AGORA!`
+      : pedido.cancelamentoSolicitado
+      ? `${pedido.cliente} quer cancelar o pedido`
       : `${pedido.cliente} | ${pedido.itens[0]} | R$ ${pedido.total.toFixed(2)}`
     new Notification(titulo, { body: corpo, icon: "/favicon.ico" })
   }
 }
-
 export default function PedidosPage() {
   const router = useRouter()
   const [pedidos, setPedidos] = useState<Pedido[]>([])
@@ -100,7 +98,6 @@ export default function PedidosPage() {
   const prevIdsRef = useRef<string[]>([])
   const piscarRef = useRef<NodeJS.Timeout | null>(null)
   const tituloOriginalRef = useRef(typeof document !== "undefined" ? document.title : "ChefBot")
-
   useEffect(() => {
     const cookie = document.cookie.split(";").find(c => c.trim().startsWith("auth-user="))
     if (cookie) {
@@ -127,16 +124,14 @@ export default function PedidosPage() {
       document.title = tituloOriginalRef.current
     }
   }, [router])
-
   const iniciarPiscar = () => {
     if (piscarRef.current) return
     let estado = false
     piscarRef.current = setInterval(() => {
       estado = !estado
-      document.title = estado ? "ðŸš¨ ATENDIMENTO URGENTE!" : tituloOriginalRef.current
+      document.title = estado ? "🚨 ATENDIMENTO URGENTE!" : tituloOriginalRef.current
     }, 800)
   }
-
   const pararPiscar = () => {
     if (piscarRef.current) {
       clearInterval(piscarRef.current)
@@ -145,7 +140,6 @@ export default function PedidosPage() {
     document.title = tituloOriginalRef.current
     setAlertaPiscando(false)
   }
-
   const pedirPermissaoNotificacao = () => {
     if (!("Notification" in window)) return
     Notification.requestPermission().then(p => {
@@ -156,7 +150,6 @@ export default function PedidosPage() {
       }
     })
   }
-
   const carregarStatusBot = async () => {
     try {
       const res = await fetch("/api/bot-status")
@@ -166,7 +159,6 @@ export default function PedidosPage() {
       }
     } catch {}
   }
-
   const alternarBot = async () => {
     setSalvandoBot(true)
     try {
@@ -184,7 +176,6 @@ export default function PedidosPage() {
     } catch {}
     setSalvandoBot(false)
   }
-
   const assumirConversa = async (phone: string) => {
     try {
       await fetch("/api/bot-status", {
@@ -199,7 +190,6 @@ export default function PedidosPage() {
       window.open("https://wa.me/" + phone, "_blank")
     } catch {}
   }
-
   const devolverAoBot = async (phone: string) => {
     try {
       await fetch("/api/bot-status", {
@@ -212,7 +202,6 @@ export default function PedidosPage() {
       setTimeout(() => setNotificacao(""), 3000)
     } catch {}
   }
-
   const carregarPedidos = () => {
     fetch("/api/orders")
       .then(r => {
@@ -229,10 +218,14 @@ export default function PedidosPage() {
               tocarSom()
               chegaram.forEach((p: Pedido) => enviarNotificacaoNavegador(p))
               const temEscalonado = chegaram.some((p: Pedido) => p.escalonado)
+              const temCancelamento = chegaram.some((p: Pedido) => p.cancelamentoSolicitado)
               if (temEscalonado) {
                 setNotificacao("URGENTE! Cliente precisa de atendimento!")
                 setAlertaPiscando(true)
                 iniciarPiscar()
+              } else if (temCancelamento) {
+                setNotificacao("Cliente solicitou cancelamento!")
+                setTimeout(() => setNotificacao(""), 5000)
               } else {
                 setNotificacao(`${chegaram.length} novo${chegaram.length > 1 ? "s" : ""} pedido${chegaram.length > 1 ? "s" : ""}!`)
                 setTimeout(() => setNotificacao(""), 4000)
@@ -244,14 +237,12 @@ export default function PedidosPage() {
           setLoading(false)
           setErro("")
           setUltimaAtualizacao(new Date().toLocaleTimeString("pt-BR"))
-
           const temEscalado = data.some((p: Pedido) => p.escalonado && p.status === "novo")
           if (!temEscalado) pararPiscar()
         }
       })
       .catch(() => setErro("Erro ao carregar pedidos. Tentando novamente..."))
   }
-
   const avancarStatus = async (id: string, novoStatus: Status) => {
     setAtualizando(id)
     const res = await fetch("/api/orders", {
@@ -265,19 +256,31 @@ export default function PedidosPage() {
     }
     setAtualizando(null)
   }
-
+  const confirmarCancelamento = async (id: string) => {
+    setAtualizando(id)
+    const res = await fetch("/api/orders", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, status: "cancelado" }),
+    })
+    if (res.ok) {
+      setPedidos(prev => prev.map(p => p.id === id ? { ...p, status: "cancelado", cancelamentoSolicitado: false } : p))
+      setNotificacao("Pedido cancelado e cliente notificado!")
+      setTimeout(() => setNotificacao(""), 4000)
+    }
+    setAtualizando(null)
+  }
   const contagem = (s: Status | "todos") =>
     s === "todos" ? pedidos.length : pedidos.filter(p => p.status === s).length
-
   const pedidosFiltrados = filtro === "todos" ? pedidos : pedidos.filter(p => p.status === filtro)
   const ativos = pedidos.filter(p => !["entregue", "cancelado"].includes(p.status)).length
   const escalonados = pedidos.filter(p => p.escalonado && p.status === "novo").length
-
+  const cancelamentos = pedidos.filter(p => p.cancelamentoSolicitado && p.status === "novo").length
   return (
     <div className="min-h-screen bg-gray-50">
       {notificacao && (
         <div className={`fixed top-4 left-4 right-4 z-50 text-white px-4 py-3 rounded-xl shadow-lg font-semibold text-center transition-all ${
-          notificacao.includes("URGENTE") ? "bg-red-600 animate-pulse" : "bg-green-600"
+          notificacao.includes("URGENTE") ? "bg-red-600 animate-pulse" : notificacao.includes("cancelamento") ? "bg-orange-500" : "bg-green-600"
         }`}>
           {notificacao}
           {notificacao.includes("URGENTE") && (
@@ -285,14 +288,18 @@ export default function PedidosPage() {
           )}
         </div>
       )}
-
       <div className="bg-white border-b border-gray-100 px-4 py-3 flex items-center justify-between sticky top-0 z-40">
         <div className="flex items-center gap-2">
-          <span className="text-xl">ðŸ•</span>
+          <span className="text-xl">🍕</span>
           <span className="font-bold text-gray-900">ChefBot</span>
           {escalonados > 0 && (
             <span className="animate-pulse bg-red-600 text-white text-xs font-bold px-2 py-0.5 rounded-full">
               {escalonados} URGENTE{escalonados > 1 ? "S" : ""}
+            </span>
+          )}
+          {cancelamentos > 0 && (
+            <span className="bg-orange-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
+              {cancelamentos} CANCELAMENTO{cancelamentos > 1 ? "S" : ""}
             </span>
           )}
         </div>
@@ -308,7 +315,6 @@ export default function PedidosPage() {
           </div>
         )}
       </div>
-
       <div className="max-w-4xl mx-auto px-3 py-4">
         {loading ? (
           <div className="flex items-center justify-center h-64">
@@ -324,11 +330,10 @@ export default function PedidosPage() {
               </p>
               {erro && <p className="text-xs text-red-500 mt-1">{erro}</p>}
             </div>
-
             {escalonados > 0 && (
               <div className="mb-3 p-4 bg-red-50 border-2 border-red-400 rounded-xl animate-pulse">
                 <div className="flex items-center gap-3">
-                  <span className="text-2xl">ðŸš¨</span>
+                  <span className="text-2xl">🚨</span>
                   <div className="flex-1">
                     <p className="text-sm font-bold text-red-800">
                       {escalonados} cliente{escalonados > 1 ? "s" : ""} precisando de atendimento AGORA!
@@ -338,13 +343,24 @@ export default function PedidosPage() {
                 </div>
               </div>
             )}
-
+            {cancelamentos > 0 && (
+              <div className="mb-3 p-4 bg-orange-50 border-2 border-orange-400 rounded-xl">
+                <div className="flex items-center gap-3">
+                  <span className="text-2xl">⚠️</span>
+                  <div className="flex-1">
+                    <p className="text-sm font-bold text-orange-800">
+                      {cancelamentos} cliente{cancelamentos > 1 ? "s" : ""} solicitou cancelamento!
+                    </p>
+                    <p className="text-xs text-orange-600 mt-0.5">Confirme o cancelamento no card abaixo</p>
+                  </div>
+                </div>
+              </div>
+            )}
             {permissaoNotif === "denied" && (
               <div className="mb-3 p-3 bg-yellow-50 border border-yellow-200 rounded-xl">
                 <p className="text-xs text-yellow-800">Notificacoes bloqueadas. Ative nas configuracoes do navegador.</p>
               </div>
             )}
-
             {permissaoNotif === "default" && (
               <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-xl flex items-center justify-between gap-2">
                 <p className="text-xs text-blue-800">Ative notificacoes para alertas de novos pedidos.</p>
@@ -353,7 +369,6 @@ export default function PedidosPage() {
                 </button>
               </div>
             )}
-
             <div className={`mb-4 p-3 rounded-xl border-2 flex items-center justify-between ${botAtivo ? "bg-green-50 border-green-200" : "bg-red-50 border-red-200"}`}>
               <div>
                 <p className="font-semibold text-gray-900 text-sm">{botAtivo ? "Bot ativo" : "Bot pausado"}</p>
@@ -367,7 +382,6 @@ export default function PedidosPage() {
                 <span className={`inline-block h-6 w-6 transform rounded-full bg-white shadow transition-transform ${botAtivo ? "translate-x-7" : "translate-x-1"}`} />
               </button>
             </div>
-
             <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
               {(["todos", "novo", "em_preparo", "saiu_entrega", "entregue", "cancelado"] as const).map(s => {
                 const count = contagem(s)
@@ -391,7 +405,6 @@ export default function PedidosPage() {
                 )
               })}
             </div>
-
             <div className="space-y-3">
               {pedidosFiltrados.length === 0 && (
                 <div className="text-center py-12 text-gray-400">Nenhum pedido encontrado</div>
@@ -399,9 +412,13 @@ export default function PedidosPage() {
               {pedidosFiltrados.map(pedido => {
                 const emManual = manuais[pedido.telefone] === true
                 const isEscalonado = pedido.escalonado === true
+                const isCancelamento = pedido.cancelamentoSolicitado === true
                 return (
                   <div key={pedido.id} className={`rounded-xl border-2 shadow-sm p-3 ${
-                    isEscalonado ? "bg-red-50 border-red-400 animate-pulse" : emManual ? "bg-blue-50 border-blue-200" : "bg-white border-gray-100"
+                    isEscalonado ? "bg-red-50 border-red-400 animate-pulse"
+                    : isCancelamento ? "bg-orange-50 border-orange-400"
+                    : emManual ? "bg-blue-50 border-blue-200"
+                    : "bg-white border-gray-100"
                   }`}>
                     <div className="flex items-center justify-between mb-1">
                       <div className="flex items-center gap-2 flex-wrap">
@@ -409,10 +426,15 @@ export default function PedidosPage() {
                         <span className="text-xs text-gray-400">{pedido.horario}</span>
                         {isEscalonado && (
                           <span className="text-xs bg-red-500 text-white px-2 py-0.5 rounded-full font-bold animate-pulse">
-                            ðŸš¨ URGENTE
+                            🚨 URGENTE
                           </span>
                         )}
-                        {!isEscalonado && emManual && (
+                        {isCancelamento && !isEscalonado && (
+                          <span className="text-xs bg-orange-500 text-white px-2 py-0.5 rounded-full font-bold">
+                            ⚠️ CANCELAMENTO
+                          </span>
+                        )}
+                        {!isEscalonado && !isCancelamento && emManual && (
                           <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">Manual</span>
                         )}
                       </div>
@@ -422,7 +444,6 @@ export default function PedidosPage() {
                         </span>
                       )}
                     </div>
-
                     <p className="text-xs text-gray-500 mb-0.5">Tel: {pedido.telefone}</p>
                     <p className="text-xs text-gray-500 mb-1">End: {pedido.endereco}</p>
                     <div className="text-xs text-gray-700 mb-1">
@@ -431,15 +452,30 @@ export default function PedidosPage() {
                     {pedido.total > 0 && (
                       <p className="font-bold text-gray-900 text-sm mb-2">R$ {pedido.total.toFixed(2)}</p>
                     )}
-
                     <div className="flex gap-2 flex-wrap">
-                      {emManual || isEscalonado ? (
+                      {isCancelamento && !isEscalonado ? (
+                        <>
+                          <button
+                            onClick={() => confirmarCancelamento(pedido.id)}
+                            disabled={atualizando === pedido.id}
+                            className="flex-1 text-xs py-2 rounded-lg bg-orange-500 text-white font-bold"
+                          >
+                            {atualizando === pedido.id ? "Cancelando..." : "Confirmar cancelamento"}
+                          </button>
+                          <button
+                            onClick={() => assumirConversa(pedido.telefone)}
+                            className="flex-1 text-xs py-2 rounded-lg bg-gray-200 text-gray-700 font-medium"
+                          >
+                            Falar com cliente
+                          </button>
+                        </>
+                      ) : emManual || isEscalonado ? (
                         <>
                           <button
                             onClick={() => assumirConversa(pedido.telefone)}
                             className={`flex-1 text-xs py-2 rounded-lg font-bold ${isEscalonado ? "bg-red-600 text-white" : "bg-orange-500 text-white"}`}
                           >
-                            {isEscalonado ? "ðŸš¨ Assumir AGORA" : "Assumir conversa"}
+                            {isEscalonado ? "🚨 Assumir AGORA" : "Assumir conversa"}
                           </button>
                           <button
                             onClick={() => devolverAoBot(pedido.telefone)}
@@ -456,7 +492,7 @@ export default function PedidosPage() {
                           Assumir conversa
                         </button>
                       )}
-                      {!isEscalonado && PROXIMO_STATUS[pedido.status] && (
+                      {!isEscalonado && !isCancelamento && PROXIMO_STATUS[pedido.status] && (
                         <button
                           onClick={() => avancarStatus(pedido.id, PROXIMO_STATUS[pedido.status]!)}
                           disabled={atualizando === pedido.id}
@@ -465,7 +501,7 @@ export default function PedidosPage() {
                           {atualizando === pedido.id ? "Salvando..." : "Avancar"}
                         </button>
                       )}
-                      {!isEscalonado && pedido.status === "novo" && (
+                      {!isEscalonado && !isCancelamento && pedido.status === "novo" && (
                         <button
                           onClick={() => avancarStatus(pedido.id, "cancelado")}
                           className="text-xs py-2 px-3 rounded-lg text-red-500 border border-red-200"
