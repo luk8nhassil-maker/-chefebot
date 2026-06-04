@@ -12,6 +12,7 @@ type Pedido = {
   endereco: string;
   escalonado?: boolean;
   cancelamentoSolicitado?: boolean;
+  observacao?: string;
 };
 type ConfigPizzaria = {
   nomePizzaria: string;
@@ -77,6 +78,7 @@ async function salvarPedido(session: BotSession, phone: string, config: ConfigPi
     status: "novo",
     horario: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
     endereco,
+    ...(session.observacao ? { observacao: session.observacao } : {}),
   };
   await redis.set("pedidos", [...pedidos, novoPedido]);
   const historico: ClienteHistorico = {
@@ -165,7 +167,6 @@ export async function POST(req: NextRequest) {
     } else {
       currentSession = savedSession;
     }
-    // Intercepta cancelamento do cliente
     if (querCancelar(messageText) && currentSession.step === "done" && (currentSession as any).pedidoId) {
       const pedidoId = (currentSession as any).pedidoId;
       const pedidos = (await redis.get<Pedido[]>("pedidos")) || [];
@@ -187,7 +188,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true });
     }
     const result = processMessage(messageText, currentSession);
-    // Salva pedido e guarda o ID na sessao
     if (
       currentSession.step === "confirm" &&
       (messageText.trim() === "1" || messageText.trim().toLowerCase() === "sim")

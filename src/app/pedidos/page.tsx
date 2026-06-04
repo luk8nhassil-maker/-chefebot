@@ -13,6 +13,7 @@ type Pedido = {
   endereco: string
   escalonado?: boolean
   cancelamentoSolicitado?: boolean
+  observacao?: string
 }
 const STATUS_LABEL: Record<Status, string> = {
   novo: "Novo",
@@ -449,6 +450,11 @@ export default function PedidosPage() {
                     <div className="text-xs text-gray-700 mb-1">
                       {pedido.itens.map((item, i) => <span key={i} className="mr-2">- {item}</span>)}
                     </div>
+                    {pedido.observacao && (
+                      <div className="mb-2 px-2 py-1.5 bg-yellow-50 border border-yellow-300 rounded-lg">
+                        <p className="text-xs font-bold text-yellow-800">Obs: {pedido.observacao}</p>
+                      </div>
+                    )}
                     {pedido.total > 0 && (
                       <p className="font-bold text-gray-900 text-sm mb-2">R$ {pedido.total.toFixed(2)}</p>
                     )}
