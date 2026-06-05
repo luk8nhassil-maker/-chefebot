@@ -1,4 +1,4 @@
-﻿import { MENU, getBorderPrice, getBorderByIndex, getSizePrice, getMacarronadaPrice } from "./menu";
+import { MENU, getBorderPrice, getBorderByIndex, getSizePrice, getMacarronadaPrice } from "./menu";
 export type BotStep =
   | "welcome"
   | "returning"
@@ -647,6 +647,22 @@ export function processMessage(input: string, session: BotSession): BotResponse 
     case "bebida_escolha": {
       const mudanca = tentaMudanca(text, session);
       if (mudanca) return mudanca;
+      const nums = n.match(/\d+/g);
+      if (nums && nums.length >= 2) {
+        const i1 = parseInt(nums[0]) - 1;
+        const i2 = parseInt(nums[1]) - 1;
+        if (i1 >= 0 && i1 < MENU.bebidas.length && i2 >= 0 && i2 < MENU.bebidas.length) {
+          const b1 = MENU.bebidas[i1];
+          const b2 = MENU.bebidas[i2];
+          const novosItens: CartItem[] = [
+            { category: "bebida", name: b1.name, price: b1.price },
+            { category: "bebida", name: b2.name, price: b2.price },
+          ];
+          const newCart = [...session.cart, ...novosItens];
+          const subtotal = cartSubtotal(newCart);
+          return { messages: [`*${b1.name}* e *${b2.name}* anotadas! 😋\n\n🛒 *Carrinho atualizado!*\n\n${resumoCarrinho(newCart)}\n\n  Subtotal: ${formatCurrency(subtotal)}\n\nVai querer mais alguma coisa?\n\n  1. Mais uma pizza\n  2. Quero mais alguma coisa\n  3. Nao, pode fechar`], session: resetaTentativas({ ...session, step: "add_more", cart: newCart }) };
+        }
+      }
       const num = parseInt(text);
       let bebida = MENU.bebidas.find(b => normalizar(b.name).includes(n));
       if (!bebida && !isNaN(num) && num >= 1 && num <= MENU.bebidas.length) bebida = MENU.bebidas[num - 1];
@@ -654,11 +670,27 @@ export function processMessage(input: string, session: BotSession): BotResponse 
       const newItem: CartItem = { category: "bebida", name: bebida.name, price: bebida.price };
       const newCart = [...session.cart, newItem];
       const subtotal = cartSubtotal(newCart);
-      return { messages: [`🛒 *Carrinho atualizado!*\n\n${resumoCarrinho(newCart)}\n\n  Subtotal: ${formatCurrency(subtotal)}\n\nVai querer mais alguma coisa?\n\n  1. Mais uma pizza\n  2. Outro produto\n  3. Nao, pode fechar`], session: resetaTentativas({ ...session, step: "add_more", cart: newCart }) };
+      return { messages: [`🛒 *Carrinho atualizado!*\n\n${resumoCarrinho(newCart)}\n\n  Subtotal: ${formatCurrency(subtotal)}\n\nVai querer mais alguma coisa?\n\n  1. Mais uma pizza\n  2. Quero mais alguma coisa\n  3. Nao, pode fechar`], session: resetaTentativas({ ...session, step: "add_more", cart: newCart }) };
     }
     case "suco_escolha": {
       const mudanca = tentaMudanca(text, session);
       if (mudanca) return mudanca;
+      const nums = n.match(/\d+/g);
+      if (nums && nums.length >= 2) {
+        const i1 = parseInt(nums[0]) - 1;
+        const i2 = parseInt(nums[1]) - 1;
+        if (i1 >= 0 && i1 < MENU.sucos.length && i2 >= 0 && i2 < MENU.sucos.length) {
+          const s1 = MENU.sucos[i1];
+          const s2 = MENU.sucos[i2];
+          const novosItens: CartItem[] = [
+            { category: "suco", name: s1.name, price: s1.price },
+            { category: "suco", name: s2.name, price: s2.price },
+          ];
+          const newCart = [...session.cart, ...novosItens];
+          const subtotal = cartSubtotal(newCart);
+          return { messages: [`*${s1.name}* e *${s2.name}* anotados! 😋\n\n🛒 *Carrinho atualizado!*\n\n${resumoCarrinho(newCart)}\n\n  Subtotal: ${formatCurrency(subtotal)}\n\nVai querer mais alguma coisa?\n\n  1. Mais uma pizza\n  2. Quero mais alguma coisa\n  3. Nao, pode fechar`], session: resetaTentativas({ ...session, step: "add_more", cart: newCart }) };
+        }
+      }
       const num = parseInt(text);
       let suco = MENU.sucos.find(s => normalizar(s.name).includes(n));
       if (!suco && !isNaN(num) && num >= 1 && num <= MENU.sucos.length) suco = MENU.sucos[num - 1];
@@ -666,7 +698,7 @@ export function processMessage(input: string, session: BotSession): BotResponse 
       const newItem: CartItem = { category: "suco", name: suco.name, price: suco.price };
       const newCart = [...session.cart, newItem];
       const subtotal = cartSubtotal(newCart);
-      return { messages: [`🛒 *Carrinho atualizado!*\n\n${resumoCarrinho(newCart)}\n\n  Subtotal: ${formatCurrency(subtotal)}\n\nVai querer mais alguma coisa?\n\n  1. Mais uma pizza\n  2. Outro produto\n  3. Nao, pode fechar`], session: resetaTentativas({ ...session, step: "add_more", cart: newCart }) };
+      return { messages: [`🛒 *Carrinho atualizado!*\n\n${resumoCarrinho(newCart)}\n\n  Subtotal: ${formatCurrency(subtotal)}\n\nVai querer mais alguma coisa?\n\n  1. Mais uma pizza\n  2. Quero mais alguma coisa\n  3. Nao, pode fechar`], session: resetaTentativas({ ...session, step: "add_more", cart: newCart }) };
     }
     case "done": {
       return { messages: [`Oi de novo! ${mensagemCategorias()}`], session: resetaTentativas({ step: "category", cart: [], deliveryFee: 0, customerName: session.customerName }) };
