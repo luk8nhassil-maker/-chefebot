@@ -71,13 +71,13 @@ function resolvido(texto: string): boolean {
 function eDespedida(texto: string): boolean {
   const n = normalizar(texto);
   const palavras = [
-    "tchau", "flw", "ate mais", "ate logo", "fui", "foi",
-    "abraco", "bjs", "beijinho", "adeus", "xau",
+    "tchau", "flw", "ate mais", "ate logo", "fui", "adeus", "xau",
+    "abraco", "bjs", "beijinho",
     "ta bom obrigado", "valeu obrigado", "ok obrigado",
     "nao obrigado", "nao, obrigado", "nao precisa obrigado",
-    "ta otimo", "ta certo", "ok valeu", "beleza obrigado",
+    "ta otimo", "ok valeu", "beleza obrigado",
     "obrigado tchau", "obrigado ate mais", "valeu tchau",
-    "tudo bem obrigado", "ja ta bom", "pode ser isso",
+    "tudo bem obrigado", "ja ta bom", "nao obg",
   ];
   return palavras.some(p => n.includes(p));
 }
@@ -183,7 +183,6 @@ export async function POST(req: NextRequest) {
         await redis.del(`manual:${phone}`);
         await fecharEscalonamento(phone);
         await redis.del(`session:${phone}`);
-        const config = await getConfig();
         await enviarMensagem(phone, `Disponha! Se precisar de mais alguma coisa e so chamar. 😊`);
       } else {
         await enviarMensagem(phone, "Pode falar! Estou aqui pra te ajudar. 😊");
@@ -191,18 +190,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true });
     }
     const config = await getConfig();
-    // Detector de despedida - responde levemente e nao abre nenhum fluxo
-    if (eDespedida(messageText)) {
+    // Detector de despedida - so ativa se houver sessao ativa
+    const sessionKey = `session:${phone}`;
+    const savedSession = await redis.get<BotSession>(sessionKey);
+    if (eDespedida(messageText) && savedSession) {
+      await redis.del(sessionKey);
       await enviarMensagem(phone, `Ate mais! 😊`);
       return NextResponse.json({ ok: true });
     }
     if (!estaAberto(config)) {
-      await redis.del(`session:${phone}`);
+      await redis.del(sessionKey);
       await enviarMensagem(phone, mensagemFechado(config));
       return NextResponse.json({ ok: true });
     }
-    const sessionKey = `session:${phone}`;
-    const savedSession = await redis.get<BotSession>(sessionKey);
     let currentSession: BotSession;
     if (!savedSession) {
       const historico = await redis.get<ClienteHistorico>(`cliente:${phone}`);
