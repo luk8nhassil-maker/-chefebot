@@ -3,8 +3,21 @@ import { redis } from "@/lib/redis";
 export async function POST(req: NextRequest) {
   const { phone } = await req.json();
   if (!phone) return NextResponse.json({ ok: false }, { status: 400 });
-  await redis.del(`session:${phone}`);
-  await redis.del(`manual:${phone}`);
-  await redis.del(`resolvendo:${phone}`);
-  return NextResponse.json({ ok: true });
+  const digits = phone.replace(/\D/g, "");
+  const variantes = [
+    digits,
+    "55" + digits,
+    digits.replace(/^55/, ""),
+    digits.replace(/^5555/, "55"),
+  ];
+  const chaves: string[] = [];
+  for (const v of variantes) {
+    chaves.push(`session:${v}`);
+    chaves.push(`manual:${v}`);
+    chaves.push(`resolvendo:${v}`);
+  }
+  for (const chave of chaves) {
+    await redis.del(chave);
+  }
+  return NextResponse.json({ ok: true, limpas: chaves });
 }
