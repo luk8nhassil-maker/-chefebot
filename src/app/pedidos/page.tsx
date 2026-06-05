@@ -94,6 +94,7 @@ export default function PedidosPage() {
   const [botAtivo, setBotAtivo] = useState(true)
   const [salvandoBot, setSalvandoBot] = useState(false)
   const [manuais, setManuais] = useState<Record<string, boolean>>({})
+  const [resolvendo, setResolvendo] = useState<Record<string, boolean>>({})
   const [permissaoNotif, setPermissaoNotif] = useState<NotificationPermission | "unsupported">("default")
   const [alertaPiscando, setAlertaPiscando] = useState(false)
   const prevIdsRef = useRef<string[]>([])
@@ -201,6 +202,23 @@ export default function PedidosPage() {
       setManuais(prev => ({ ...prev, [phone]: false }))
       setNotificacao("Bot retomou a conversa")
       setTimeout(() => setNotificacao(""), 3000)
+    } catch {}
+  }
+  const marcarResolvido = async (phone: string, pedidoId: string) => {
+    try {
+      await fetch("/api/resolver", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone }),
+      })
+      setResolvendo(prev => ({ ...prev, [phone]: true }))
+      setManuais(prev => ({ ...prev, [phone]: false }))
+      setPedidos(prev => prev.map(p =>
+        p.id === pedidoId ? { ...p, escalonado: false, status: "entregue" } : p
+      ))
+      pararPiscar()
+      setNotificacao("Resolvido! Bot perguntou ao cliente se precisa de mais ajuda.")
+      setTimeout(() => setNotificacao(""), 5000)
     } catch {}
   }
   const carregarPedidos = () => {
@@ -339,7 +357,7 @@ export default function PedidosPage() {
                     <p className="text-sm font-bold text-red-800">
                       {escalonados} cliente{escalonados > 1 ? "s" : ""} precisando de atendimento AGORA!
                     </p>
-                    <p className="text-xs text-red-600 mt-0.5">Clique em "Assumir conversa" no card abaixo</p>
+                    <p className="text-xs text-red-600 mt-0.5">Clique em "Assumir AGORA" e depois "Resolvido" quando terminar</p>
                   </div>
                 </div>
               </div>
@@ -414,9 +432,11 @@ export default function PedidosPage() {
                 const emManual = manuais[pedido.telefone] === true
                 const isEscalonado = pedido.escalonado === true
                 const isCancelamento = pedido.cancelamentoSolicitado === true
+                const isResolvendo = resolvendo[pedido.telefone] === true
                 return (
                   <div key={pedido.id} className={`rounded-xl border-2 shadow-sm p-3 ${
                     isEscalonado ? "bg-red-50 border-red-400 animate-pulse"
+                    : isResolvendo ? "bg-blue-50 border-blue-300"
                     : isCancelamento ? "bg-orange-50 border-orange-400"
                     : emManual ? "bg-blue-50 border-blue-200"
                     : "bg-white border-gray-100"
@@ -430,12 +450,17 @@ export default function PedidosPage() {
                             🚨 URGENTE
                           </span>
                         )}
+                        {isResolvendo && !isEscalonado && (
+                          <span className="text-xs bg-blue-500 text-white px-2 py-0.5 rounded-full font-bold">
+                            ⏳ Aguardando cliente
+                          </span>
+                        )}
                         {isCancelamento && !isEscalonado && (
                           <span className="text-xs bg-orange-500 text-white px-2 py-0.5 rounded-full font-bold">
                             ⚠️ CANCELAMENTO
                           </span>
                         )}
-                        {!isEscalonado && !isCancelamento && emManual && (
+                        {!isEscalonado && !isCancelamento && !isResolvendo && emManual && (
                           <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">Manual</span>
                         )}
                       </div>
@@ -475,13 +500,28 @@ export default function PedidosPage() {
                             Falar com cliente
                           </button>
                         </>
-                      ) : emManual || isEscalonado ? (
+                      ) : isEscalonado ? (
                         <>
                           <button
                             onClick={() => assumirConversa(pedido.telefone)}
-                            className={`flex-1 text-xs py-2 rounded-lg font-bold ${isEscalonado ? "bg-red-600 text-white" : "bg-orange-500 text-white"}`}
+                            className="flex-1 text-xs py-2 rounded-lg bg-red-600 text-white font-bold"
                           >
-                            {isEscalonado ? "🚨 Assumir AGORA" : "Assumir conversa"}
+                            🚨 Assumir AGORA
+                          </button>
+                          <button
+                            onClick={() => marcarResolvido(pedido.telefone, pedido.id)}
+                            className="flex-1 text-xs py-2 rounded-lg bg-green-600 text-white font-bold"
+                          >
+                            ✅ Resolvido
+                          </button>
+                        </>
+                      ) : emManual ? (
+                        <>
+                          <button
+                            onClick={() => assumirConversa(pedido.telefone)}
+                            className="flex-1 text-xs py-2 rounded-lg bg-orange-500 text-white font-bold"
+                          >
+                            Assumir conversa
                           </button>
                           <button
                             onClick={() => devolverAoBot(pedido.telefone)}

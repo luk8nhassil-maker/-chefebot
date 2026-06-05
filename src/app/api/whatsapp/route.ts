@@ -46,14 +46,24 @@ function mensagemFechado(config: ConfigPizzaria): string {
   return `Ola! Obrigado por entrar em contato com a *${config.nomePizzaria}*!\n\nAinda nao abrimos hoje.\n\nNosso horario de funcionamento e:\n*Todos os dias das ${config.horaAbertura}h as ${config.horaFechamento}h*\n\nVolte mais tarde e faremos uma pizza incrivel para voce!`;
 }
 function querCancelar(texto: string): boolean {
-  const lower = texto.toLowerCase();
+  const lower = texto.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
   const palavras = [
     "cancelar", "cancela", "cancelamento", "desisti", "desistir",
-    "nao quero mais", "esquece", "deixa pra la", "deixa pra la",
-    "nao quero", "cancelem", "cancele", "para", "pare",
+    "nao quero mais", "esquece", "deixa pra la",
+    "nao quero", "cancelem", "cancele",
     "nao vai mais", "mudei de ideia", "mudei de opiniao",
   ];
   return palavras.some(p => lower.includes(p));
+}
+function resolvido(texto: string): boolean {
+  const n = texto.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const palavras = [
+    "nao", "nao obrigado", "nao preciso", "nao tenho", "pode ser",
+    "ta bom", "tudo bem", "obrigado", "valeu", "ok", "beleza",
+    "nao precisa", "so isso", "era isso", "resolvido", "sim obrigado",
+    "nao mais", "chega", "tranquilo", "por enquanto nao",
+  ];
+  return palavras.some(p => n.includes(p));
 }
 async function salvarPedido(session: BotSession, phone: string, config: ConfigPizzaria): Promise<string> {
   const pedidos = (await redis.get<Pedido[]>("pedidos")) || [];
@@ -113,6 +123,15 @@ async function salvarCancelamentoSolicitado(phone: string, session: BotSession, 
   pedidos[index] = { ...pedidos[index], cancelamentoSolicitado: true };
   await redis.set("pedidos", pedidos);
 }
+async function fecharEscalonamento(phone: string) {
+  const pedidos = (await redis.get<Pedido[]>("pedidos")) || [];
+  const atualizados = pedidos.map(p =>
+    p.telefone === phone && p.escalonado === true && p.status === "novo"
+      ? { ...p, status: "entregue" as const, escalonado: false }
+      : p
+  );
+  await redis.set("pedidos", atualizados);
+}
 async function enviarMensagem(phone: string, message: string) {
   const url = `https://${process.env.EVOLUTION_API_URL}/message/sendText/chefe`;
   await fetch(url, {
@@ -138,6 +157,21 @@ export async function POST(req: NextRequest) {
     if (!phone || !messageText) return NextResponse.json({ ok: true });
     const botAtivo = await redis.get<boolean>("bot_ativo");
     if (botAtivo === false) return NextResponse.json({ ok: true });
+    // Verifica se esta aguardando resposta de encerramento
+    const resolvendo = await redis.get<boolean>(`resolvendo:${phone}`);
+    if (resolvendo === true) {
+      if (resolvido(messageText)) {
+        await redis.del(`resolvendo:${phone}`);
+        await redis.del(`manual:${phone}`);
+        await fecharEscalonamento(phone);
+        await redis.del(`session:${phone}`);
+        const config = await getConfig();
+        await enviarMensagem(phone, `Que bom! Fico feliz em ter ajudado. 😊\n\nSe quiser fazer um pedido e so chamar!\n\n${config.nomePizzaria} agradece a preferencia!`);
+      } else {
+        await enviarMensagem(phone, "Pode falar! Estou aqui para te ajudar. 😊");
+      }
+      return NextResponse.json({ ok: true });
+    }
     const emManual = await redis.get<boolean>(`manual:${phone}`);
     if (emManual === true) return NextResponse.json({ ok: true });
     const config = await getConfig();
