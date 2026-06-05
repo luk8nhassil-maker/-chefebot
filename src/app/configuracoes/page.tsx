@@ -1,15 +1,12 @@
-'use client'
-
+﻿'use client'
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-
 type Config = {
   nomePizzaria: string
   horaAbertura: number
   horaFechamento: number
   chavePix: string
 }
-
 export default function ConfiguracoesPage() {
   const router = useRouter()
   const [config, setConfig] = useState<Config>({
@@ -21,7 +18,7 @@ export default function ConfiguracoesPage() {
   const [loading, setLoading] = useState(true)
   const [salvando, setSalvando] = useState(false)
   const [mensagem, setMensagem] = useState('')
-
+  const is24h = config.horaAbertura === 0 && config.horaFechamento === 24
   useEffect(() => {
     fetch('/api/configuracoes')
       .then(r => {
@@ -35,7 +32,26 @@ export default function ConfiguracoesPage() {
         }
       })
   }, [router])
-
+  const ativar24h = async () => {
+    const novaConfig = { ...config, horaAbertura: 0, horaFechamento: 24 }
+    setConfig(novaConfig)
+    setSalvando(true)
+    try {
+      const res = await fetch('/api/configuracoes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(novaConfig),
+      })
+      if (res.ok) {
+        setMensagem('✅ Estabelecimento aberto 24h!')
+        setTimeout(() => setMensagem(''), 3000)
+      }
+    } catch {
+      setMensagem('❌ Erro ao salvar.')
+      setTimeout(() => setMensagem(''), 3000)
+    }
+    setSalvando(false)
+  }
   const salvar = async () => {
     setSalvando(true)
     try {
@@ -54,7 +70,6 @@ export default function ConfiguracoesPage() {
     }
     setSalvando(false)
   }
-
   if (loading) {
     return (
       <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #1a0a00 0%, #2d0a0a 50%, #1a0505 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -62,12 +77,9 @@ export default function ConfiguracoesPage() {
       </div>
     )
   }
-
   return (
     <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #1a0a00 0%, #2d0a0a 50%, #1a0505 100%)', padding: '40px 16px' }}>
       <div style={{ maxWidth: 500, margin: '0 auto' }}>
-
-        {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 32 }}>
           <button
             onClick={() => router.push('/')}
@@ -77,11 +89,7 @@ export default function ConfiguracoesPage() {
           </button>
           <h1 style={{ color: '#fff', fontSize: 24, fontWeight: 700, margin: 0 }}>⚙️ Configurações</h1>
         </div>
-
-        {/* Card */}
         <div style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 16, padding: 24, display: 'flex', flexDirection: 'column', gap: 20 }}>
-
-          {/* Nome da pizzaria */}
           <div>
             <label style={{ color: 'rgba(255,255,255,0.7)', fontSize: 13, fontWeight: 500, display: 'block', marginBottom: 8 }}>
               🍕 Nome da Pizzaria
@@ -93,12 +101,33 @@ export default function ConfiguracoesPage() {
               style={{ width: '100%', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 10, padding: '12px 14px', color: '#fff', fontSize: 15, outline: 'none', boxSizing: 'border-box' }}
             />
           </div>
-
-          {/* Horários */}
           <div>
             <label style={{ color: 'rgba(255,255,255,0.7)', fontSize: 13, fontWeight: 500, display: 'block', marginBottom: 8 }}>
               ⏰ Horário de Funcionamento
             </label>
+            {/* Botão 24h */}
+            <button
+              onClick={ativar24h}
+              disabled={salvando}
+              style={{
+                width: '100%',
+                background: is24h ? 'linear-gradient(135deg, #38a169, #276749)' : 'rgba(255,255,255,0.08)',
+                border: is24h ? '2px solid #38a169' : '2px solid rgba(255,255,255,0.15)',
+                borderRadius: 10,
+                padding: '12px 14px',
+                color: '#fff',
+                fontSize: 14,
+                fontWeight: 700,
+                cursor: salvando ? 'not-allowed' : 'pointer',
+                marginBottom: 12,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 8,
+              }}
+            >
+              {is24h ? '✅ Aberto 24 horas (ativo)' : '🕐 Ativar funcionamento 24 horas'}
+            </button>
             <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
               <div style={{ flex: 1 }}>
                 <label style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12, display: 'block', marginBottom: 4 }}>Abre às</label>
@@ -117,7 +146,7 @@ export default function ConfiguracoesPage() {
                 <input
                   type="number"
                   min={0}
-                  max={23}
+                  max={24}
                   value={config.horaFechamento}
                   onChange={e => setConfig(prev => ({ ...prev, horaFechamento: Number(e.target.value) }))}
                   style={{ width: '100%', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 10, padding: '12px 14px', color: '#fff', fontSize: 15, outline: 'none', boxSizing: 'border-box' }}
@@ -128,8 +157,6 @@ export default function ConfiguracoesPage() {
               Horário de Brasília. Fora desse horário o bot avisa que está fechado.
             </p>
           </div>
-
-          {/* Chave Pix */}
           <div>
             <label style={{ color: 'rgba(255,255,255,0.7)', fontSize: 13, fontWeight: 500, display: 'block', marginBottom: 8 }}>
               💸 Chave Pix
@@ -145,8 +172,6 @@ export default function ConfiguracoesPage() {
               Aparece automaticamente no WhatsApp quando cliente escolher Pix.
             </p>
           </div>
-
-          {/* Botão salvar */}
           <button
             onClick={salvar}
             disabled={salvando}
@@ -164,7 +189,6 @@ export default function ConfiguracoesPage() {
           >
             {salvando ? 'Salvando...' : 'Salvar Configurações'}
           </button>
-
           {mensagem && (
             <p style={{ textAlign: 'center', color: mensagem.includes('✅') ? '#68d391' : '#fc8181', fontWeight: 600 }}>
               {mensagem}
