@@ -6,6 +6,7 @@ export type BotStep =
   | "category"
   | "size"
   | "flavor"
+  | "segundo_sabor"
   | "border"
   | "add_more"
   | "lanche_escolha"
@@ -103,12 +104,32 @@ function atingiuLimite(session: BotSession): boolean {
 }
 function respostaEscaladaPorLoop(): BotResponse {
   return {
-    messages: [
-      "Parece que estou tendo dificuldade em te ajudar com isso. Vou chamar a Kellyne para te atender pessoalmente!",
-    ],
+    messages: ["Parece que estou tendo dificuldade em te ajudar com isso. Vou chamar a Kellyne para te atender pessoalmente!"],
     session: {} as BotSession,
     escalar: true,
   };
+}
+function permiteMeioAMeio(size?: string): boolean {
+  return size === "M" || size === "G" || size === "F";
+}
+function detectaDoisSabores(n: string, allFlavors: string[]): [string, string] | null {
+  const encontrados: string[] = [];
+  for (const f of allFlavors) {
+    if (n.includes(normalizar(f))) {
+      encontrados.push(f);
+      if (encontrados.length === 2) break;
+    }
+  }
+  if (encontrados.length === 2) return [encontrados[0], encontrados[1]];
+  const nums = n.match(/\d+/g);
+  if (nums && nums.length >= 2) {
+    const i1 = parseInt(nums[0]) - 1;
+    const i2 = parseInt(nums[1]) - 1;
+    if (i1 >= 0 && i1 < allFlavors.length && i2 >= 0 && i2 < allFlavors.length && i1 !== i2) {
+      return [allFlavors[i1], allFlavors[i2]];
+    }
+  }
+  return null;
 }
 function detectaIntencaoDireta(text: string): { category: string; label: string } | null {
   const n = normalizar(text);
@@ -147,7 +168,7 @@ function detectaTamanho(n: string): string | null {
   return null;
 }
 function nomeCategoriaAtual(step: BotStep, currentCategory?: string): string {
-  if (currentCategory === "pizza" || step === "size" || step === "flavor" || step === "border") return "pizza";
+  if (currentCategory === "pizza" || step === "size" || step === "flavor" || step === "segundo_sabor" || step === "border") return "pizza";
   if (currentCategory === "lanche" || step === "lanche_escolha" || step === "lanche_flavor" || step === "lanche_macarronada_size") return "lanche";
   if (currentCategory === "bebida" || step === "bebida_escolha") return "bebida";
   if (currentCategory === "suco" || step === "suco_escolha") return "suco";
@@ -196,9 +217,7 @@ function buildReceipt(session: BotSession): string {
   );
 }
 function neighborhoodList(): string {
-  return MENU.neighborhoods
-    .map((n, i) => `  ${i + 1}. ${n.name} - ${formatCurrency(n.fee)}`)
-    .join("\n");
+  return MENU.neighborhoods.map((n, i) => `  ${i + 1}. ${n.name} - ${formatCurrency(n.fee)}`).join("\n");
 }
 function handleCategory(category: string, session: BotSession): BotResponse {
   if (category === "pizza") {
@@ -225,10 +244,7 @@ function handleCategory(category: string, session: BotSession): BotResponse {
       session: { ...session, step: "suco_escolha", currentCategory: "suco", currentSize: undefined, currentFlavor: undefined, currentLanche: undefined },
     };
   }
-  return {
-    messages: [mensagemCategorias()],
-    session: { ...session, step: "category" },
-  };
+  return { messages: [mensagemCategorias()], session: { ...session, step: "category" } };
 }
 function tentaMudanca(text: string, session: BotSession): BotResponse | null {
   const intencao = detectaIntencaoDireta(text);
@@ -292,9 +308,7 @@ export function processMessage(input: string, session: BotSession): BotResponse 
       };
     }
     case "name": {
-      if (!text || text.length < 2) {
-        return respostaInvalida("Me fala seu nome pra eu te atender melhor!", session);
-      }
+      if (!text || text.length < 2) return respostaInvalida("Me fala seu nome pra eu te atender melhor!", session);
       const firstName = text.split(" ")[0];
       const intencao = detectaIntencaoDireta(text);
       if (intencao) {
@@ -333,8 +347,20 @@ export function processMessage(input: string, session: BotSession): BotResponse 
       if (mudanca) return mudanca;
       const size = detectaTamanho(n);
       if (!size) return respostaInvalida(`  1. Pequena (P) - R$ 35,00\n  2. Media (M) - R$ 40,00\n  3. Grande (G) - R$ 50,00\n  4. Familia (F) - R$ 55,00`, session);
+      const allFlavors = [...MENU.saltyFlavors, ...MENU.sweetFlavors];
       const saltyList = MENU.saltyFlavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n");
       const sweetList = MENU.sweetFlavors.map((f, i) => `  ${MENU.saltyFlavors.length + i + 1}. ${f}`).join("\n");
+      if (permiteMeioAMeio(size)) {
+        const dois = detectaDoisSabores(n, allFlavors);
+        if (dois) {
+          const flavorFinal = `${dois[0]}/${dois[1]}`;
+          const borderPrice = getBorderPrice(size);
+          return {
+            messages: [`Pizza *${size}* meio a meio *${dois[0]}* e *${dois[1]}*! Vai querer borda recheada?\n\n  1. Sim - ${formatCurrency(borderPrice)}\n  2. Nao`],
+            session: resetaTentativas({ ...session, step: "border", currentSize: size, currentFlavor: flavorFinal }),
+          };
+        }
+      }
       return {
         messages: [`Pizza *${size}* anotada! Agora escolhe o sabor:\n\nSalgadas\n${saltyList}\n\nDoces\n${sweetList}`],
         session: resetaTentativas({ ...session, step: "flavor", currentSize: size }),
@@ -344,6 +370,17 @@ export function processMessage(input: string, session: BotSession): BotResponse 
       const mudanca = tentaMudanca(text, session);
       if (mudanca) return mudanca;
       const allFlavors = [...MENU.saltyFlavors, ...MENU.sweetFlavors];
+      if (permiteMeioAMeio(session.currentSize)) {
+        const dois = detectaDoisSabores(n, allFlavors);
+        if (dois) {
+          const flavorFinal = `${dois[0]}/${dois[1]}`;
+          const borderPrice = getBorderPrice(session.currentSize!);
+          return {
+            messages: [`Meio a meio *${dois[0]}* e *${dois[1]}*! Vai querer borda recheada?\n\n  1. Sim - ${formatCurrency(borderPrice)}\n  2. Nao`],
+            session: resetaTentativas({ ...session, step: "border", currentFlavor: flavorFinal }),
+          };
+        }
+      }
       let flavor: string | undefined;
       const num = parseInt(text);
       if (!isNaN(num) && num >= 1 && num <= allFlavors.length) {
@@ -356,10 +393,61 @@ export function processMessage(input: string, session: BotSession): BotResponse 
         const sweetList = MENU.sweetFlavors.map((f, i) => `  ${MENU.saltyFlavors.length + i + 1}. ${f}`).join("\n");
         return respostaInvalida(`Salgadas\n${saltyList}\n\nDoces\n${sweetList}`, session);
       }
+      if (permiteMeioAMeio(session.currentSize)) {
+        return {
+          messages: [`*${flavor}*, otima escolha! Vai querer meio a meio?\n\n  1. Sim, quero dois sabores\n  2. Nao, so esse sabor`],
+          session: resetaTentativas({ ...session, step: "segundo_sabor", currentFlavor: flavor }),
+        };
+      }
       const borderPrice = getBorderPrice(session.currentSize!);
       return {
         messages: [`*${flavor}*, otima escolha! Vai querer borda recheada?\n\n  1. Sim - ${formatCurrency(borderPrice)}\n  2. Nao`],
         session: resetaTentativas({ ...session, step: "border", currentFlavor: flavor }),
+      };
+    }
+    case "segundo_sabor": {
+      const allFlavors = [...MENU.saltyFlavors, ...MENU.sweetFlavors];
+      const naoQuerSegundo = n === "2" || n === "nao" || n === "n" ||
+        n.includes("nao") || n.includes("so esse") || n.includes("apenas esse") || n.includes("so um");
+      if (naoQuerSegundo) {
+        const borderPrice = getBorderPrice(session.currentSize!);
+        return {
+          messages: [`Combinado! Vai querer borda recheada?\n\n  1. Sim - ${formatCurrency(borderPrice)}\n  2. Nao`],
+          session: resetaTentativas({ ...session, step: "border" }),
+        };
+      }
+      if (n === "1" || n.includes("sim") || n.includes("quero") || n.includes("dois") || n.includes("meio")) {
+        const saltyList = MENU.saltyFlavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n");
+        const sweetList = MENU.sweetFlavors.map((f, i) => `  ${MENU.saltyFlavors.length + i + 1}. ${f}`).join("\n");
+        return {
+          messages: [`Qual o segundo sabor?\n\nSalgadas\n${saltyList}\n\nDoces\n${sweetList}`],
+          session: resetaTentativas({ ...session, step: "segundo_sabor" }),
+        };
+      }
+      let flavor2: string | undefined;
+      const num = parseInt(text);
+      if (!isNaN(num) && num >= 1 && num <= allFlavors.length) {
+        flavor2 = allFlavors[num - 1];
+      } else {
+        flavor2 = allFlavors.find((f) => n.includes(normalizar(f)));
+      }
+      if (!flavor2) {
+        const saltyList = MENU.saltyFlavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n");
+        const sweetList = MENU.sweetFlavors.map((f, i) => `  ${MENU.saltyFlavors.length + i + 1}. ${f}`).join("\n");
+        return respostaInvalida(`Salgadas\n${saltyList}\n\nDoces\n${sweetList}`, session);
+      }
+      if (flavor2 === session.currentFlavor) {
+        const borderPrice = getBorderPrice(session.currentSize!);
+        return {
+          messages: [`Esse e o mesmo sabor! Vou considerar so *${flavor2}* entao. Vai querer borda recheada?\n\n  1. Sim - ${formatCurrency(borderPrice)}\n  2. Nao`],
+          session: resetaTentativas({ ...session, step: "border" }),
+        };
+      }
+      const flavorFinal = `${session.currentFlavor}/${flavor2}`;
+      const borderPrice = getBorderPrice(session.currentSize!);
+      return {
+        messages: [`Meio a meio *${session.currentFlavor}* e *${flavor2}*! Vai querer borda recheada?\n\n  1. Sim - ${formatCurrency(borderPrice)}\n  2. Nao`],
+        session: resetaTentativas({ ...session, step: "border", currentFlavor: flavorFinal }),
       };
     }
     case "border": {
