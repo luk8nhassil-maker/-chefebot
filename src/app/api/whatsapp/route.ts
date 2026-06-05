@@ -45,23 +45,39 @@ function mensagemFechado(config: ConfigPizzaria): string {
   }
   return `Ola! Obrigado por entrar em contato com a *${config.nomePizzaria}*!\n\nAinda nao abrimos hoje.\n\nNosso horario de funcionamento e:\n*Todos os dias das ${config.horaAbertura}h as ${config.horaFechamento}h*\n\nVolte mais tarde e faremos uma pizza incrivel para voce!`;
 }
+function normalizar(texto: string): string {
+  return texto.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
 function querCancelar(texto: string): boolean {
-  const lower = texto.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const n = normalizar(texto);
   const palavras = [
     "cancelar", "cancela", "cancelamento", "desisti", "desistir",
     "nao quero mais", "esquece", "deixa pra la",
     "nao quero", "cancelem", "cancele",
     "nao vai mais", "mudei de ideia", "mudei de opiniao",
   ];
-  return palavras.some(p => lower.includes(p));
+  return palavras.some(p => n.includes(p));
 }
 function resolvido(texto: string): boolean {
-  const n = texto.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const n = normalizar(texto);
   const palavras = [
     "nao", "nao obrigado", "nao preciso", "nao tenho", "pode ser",
     "ta bom", "tudo bem", "obrigado", "valeu", "ok", "beleza",
     "nao precisa", "so isso", "era isso", "resolvido", "sim obrigado",
     "nao mais", "chega", "tranquilo", "por enquanto nao",
+  ];
+  return palavras.some(p => n.includes(p));
+}
+function eDespedida(texto: string): boolean {
+  const n = normalizar(texto);
+  const palavras = [
+    "tchau", "flw", "ate mais", "ate logo", "fui", "foi",
+    "abraco", "bjs", "beijinho", "adeus", "xau",
+    "ta bom obrigado", "valeu obrigado", "ok obrigado",
+    "nao obrigado", "nao, obrigado", "nao precisa obrigado",
+    "ta otimo", "ta certo", "ok valeu", "beleza obrigado",
+    "obrigado tchau", "obrigado ate mais", "valeu tchau",
+    "tudo bem obrigado", "ja ta bom", "pode ser isso",
   ];
   return palavras.some(p => n.includes(p));
 }
@@ -157,6 +173,8 @@ export async function POST(req: NextRequest) {
     if (!phone || !messageText) return NextResponse.json({ ok: true });
     const botAtivo = await redis.get<boolean>("bot_ativo");
     if (botAtivo === false) return NextResponse.json({ ok: true });
+    const emManual = await redis.get<boolean>(`manual:${phone}`);
+    if (emManual === true) return NextResponse.json({ ok: true });
     // Verifica se esta aguardando resposta de encerramento
     const resolvendo = await redis.get<boolean>(`resolvendo:${phone}`);
     if (resolvendo === true) {
@@ -166,15 +184,18 @@ export async function POST(req: NextRequest) {
         await fecharEscalonamento(phone);
         await redis.del(`session:${phone}`);
         const config = await getConfig();
-        await enviarMensagem(phone, `Que bom! Fico feliz em ter ajudado. 😊\n\nSe quiser fazer um pedido e so chamar!\n\n${config.nomePizzaria} agradece a preferencia!`);
+        await enviarMensagem(phone, `Disponha! Se precisar de mais alguma coisa e so chamar. 😊`);
       } else {
-        await enviarMensagem(phone, "Pode falar! Estou aqui para te ajudar. 😊");
+        await enviarMensagem(phone, "Pode falar! Estou aqui pra te ajudar. 😊");
       }
       return NextResponse.json({ ok: true });
     }
-    const emManual = await redis.get<boolean>(`manual:${phone}`);
-    if (emManual === true) return NextResponse.json({ ok: true });
     const config = await getConfig();
+    // Detector de despedida - responde levemente e nao abre nenhum fluxo
+    if (eDespedida(messageText)) {
+      await enviarMensagem(phone, `Ate mais! 😊`);
+      return NextResponse.json({ ok: true });
+    }
     if (!estaAberto(config)) {
       await redis.del(`session:${phone}`);
       await enviarMensagem(phone, mensagemFechado(config));
@@ -191,7 +212,7 @@ export async function POST(req: NextRequest) {
         currentSession = createReturningSession(historico);
         await enviarMensagem(
           phone,
-          `Ei *${firstName}*, que saudade! Seu ultimo pedido foi: *${ultimoPedido}*\n\nVai querer pedir mais?\n\n  1. Sim, bora!\n  2. Nao, valeu`
+          `Ei *${firstName}*, que saudade! 😊 Seu ultimo pedido foi: *${ultimoPedido}*\n\nVai querer pedir mais?\n\n  1. Sim, bora!\n  2. Nao, valeu`
         );
         await redis.set(sessionKey, currentSession, { ex: 1800 });
         return NextResponse.json({ ok: true });
@@ -211,14 +232,14 @@ export async function POST(req: NextRequest) {
       }
       if (pedido.status === "novo") {
         await salvarCancelamentoSolicitado(phone, currentSession, pedidoId);
-        await enviarMensagem(phone, `Entendido! Solicitei o cancelamento do seu pedido para a nossa equipe. Assim que confirmado, voce recebe a mensagem aqui. Se tiver qualquer duvida e so chamar!`);
+        await enviarMensagem(phone, `Entendido! Solicitei o cancelamento pra nossa equipe. Assim que confirmado voce recebe a mensagem aqui. Qualquer duvida e so chamar!`);
         return NextResponse.json({ ok: true });
       }
       if (pedido.status === "em_preparo") {
-        await enviarMensagem(phone, `Que pena! Seu pedido ja esta em preparo e nao e possivel cancelar neste momento. Se precisar de ajuda, posso chamar a Kellyne pra voce!`);
+        await enviarMensagem(phone, `Que pena! Seu pedido ja esta em preparo e nao da pra cancelar agora. Posso chamar a Kellyne pra te ajudar?`);
         return NextResponse.json({ ok: true });
       }
-      await enviarMensagem(phone, `Seu pedido ja esta em andamento e nao e possivel cancelar. Qualquer duvida e so chamar!`);
+      await enviarMensagem(phone, `Seu pedido ja esta em andamento e nao da pra cancelar. Qualquer duvida e so chamar!`);
       return NextResponse.json({ ok: true });
     }
     const result = processMessage(messageText, currentSession);
