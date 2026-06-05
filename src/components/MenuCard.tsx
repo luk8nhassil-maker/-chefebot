@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 import { MENU } from "@/lib/menu";
 export function MenuCard() {
   return (
