@@ -212,7 +212,7 @@ export async function POST(req: NextRequest) {
         currentSession = createReturningSession(historico);
         await enviarMensagem(
           phone,
-          `Ei *${firstName}*, que saudade! 😊 Seu ultimo pedido foi: *${ultimoPedido}*\n\nVai querer pedir mais?\n\n  1. Sim, bora!\n  2. Nao, valeu`
+          `Ei *${firstName}*! 😊 Da ultima vez voce pediu *${ultimoPedido}* — vai querer repetir ou montar um novo?\n\n  1. Repetir o mesmo\n  2. Quero outra coisa`
         );
         await redis.set(sessionKey, currentSession, { ex: 1800 });
         return NextResponse.json({ ok: true });
