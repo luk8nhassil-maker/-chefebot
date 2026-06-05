@@ -290,6 +290,10 @@ function eNegativa(n: string): boolean {
     n.includes("nao vai") || n.includes("nao mais") || n.includes("ta bom assim") ||
     n.includes("assim ta bom");
 }
+function eConfusao(n: string): boolean {
+  const palavras = ["nao entendi", "nao entendeu", "nao percebi", "nao compreendi", "como assim", "que isso", "que e isso", "nao to entendendo", "nao estou entendendo", "confuso", "confused", "o que", "oque", "hein", "ha", "nao sei", "pode explicar", "explica"];
+  return palavras.some(p => n.includes(p));
+}
 function ePositiva(n: string): boolean {
   return n === "sim" || n === "s" || n === "1" || n.includes("sim") ||
     n.includes("quero") || n.includes("pode") || n.includes("bora") ||
@@ -305,6 +309,23 @@ export function processMessage(input: string, session: BotSession): BotResponse 
       session: { ...session, step: "escalado", escalado: true },
       escalar: true,
     };
+  }
+  if (session.step !== "escalado" && session.step !== "name" && session.step !== "address" && session.step !== "observacao" && eConfusao(n)) {
+    const dicas: Partial<Record<BotStep, string>> = {
+      category: `Sem estresse! E so escolher o que vai querer:\n\n${mensagemCategorias()}`,
+      size: `E so escolher o tamanho da pizza:\n\n  1. Pequena (P) - R$ 35,00\n  2. Media (M) - R$ 40,00\n  3. Grande (G) - R$ 50,00\n  4. Familia (F) - R$ 55,00`,
+      flavor: `E so digitar o numero ou o nome do sabor que voce quer! 😋`,
+      border_escolha: `E so escolher o numero da borda ou digitar o nome. Se nao quiser borda e so digitar o numero ${MENU.borders.length + 1}!`,
+      add_more: `E so escolher uma opcao:\n\n  1. Mais uma pizza\n  2. Quero mais alguma coisa\n  3. Nao, pode fechar`,
+      delivery_type: `E so me dizer como prefere receber:\n\n  1. Entrega (delivery) 🛵\n  2. Buscar na loja 🏪`,
+      neighborhood: `E so digitar o numero ou o nome do seu bairro!`,
+      payment: `E so escolher como vai pagar:\n\n  1. Pix 💸\n  2. Dinheiro\n  3. Cartao`,
+      confirm: `E so confirmar o pedido:\n\n  1. Sim, confirmar\n  2. Nao, retirar`,
+    };
+    const dica = dicas[session.step];
+    if (dica) {
+      return { messages: [`Opa, deixa eu explicar melhor! 😊\n\n${dica}`], session: resetaTentativas(session) };
+    }
   }
   switch (session.step) {
     case "escalado": {
