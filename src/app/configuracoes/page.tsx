@@ -17,7 +17,11 @@ function getUserRole(): string | null {
       const trimmed = c.trim()
       if (trimmed.startsWith('auth-user=')) {
         const raw = trimmed.substring('auth-user='.length)
-        const decoded = decodeURIComponent(raw)
+        let decoded = raw
+        try { decoded = decodeURIComponent(raw) } catch { decoded = raw }
+        if (decoded.startsWith('%7B')) {
+          try { decoded = decodeURIComponent(decoded) } catch {}
+        }
         const user = JSON.parse(decoded)
         return user?.role ?? null
       }
