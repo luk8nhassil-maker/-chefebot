@@ -11,12 +11,19 @@ type Config = {
 
 function getUserRole(): string | null {
   if (typeof document === 'undefined') return null
-  const cookie = document.cookie.split(';').find(c => c.trim().startsWith('auth-user='))
-  if (!cookie) return null
   try {
-    const val = decodeURIComponent(cookie.split('=').slice(1).join('='))
-    return JSON.parse(val)?.role ?? null
+    const cookies = document.cookie.split(';')
+    for (const c of cookies) {
+      const trimmed = c.trim()
+      if (trimmed.startsWith('auth-user=')) {
+        const raw = trimmed.substring('auth-user='.length)
+        const decoded = decodeURIComponent(raw)
+        const user = JSON.parse(decoded)
+        return user?.role ?? null
+      }
+    }
   } catch { return null }
+  return null
 }
 
 export default function ConfiguracoesPage() {
@@ -28,6 +35,7 @@ export default function ConfiguracoesPage() {
     chavePix: '',
   })
   const [loading, setLoading] = useState(true)
+  const [checking, setChecking] = useState(true)
   const [salvando, setSalvando] = useState(false)
   const [mensagem, setMensagem] = useState('')
   const [isAdmin, setIsAdmin] = useState(false)
@@ -36,7 +44,7 @@ export default function ConfiguracoesPage() {
   useEffect(() => {
     const role = getUserRole()
     setIsAdmin(role === 'admin')
-
+    setChecking(false)
     fetch('/api/configuracoes')
       .then(r => {
         if (r.status === 401) { router.push('/login?callbackUrl=/configuracoes'); return null }
@@ -50,8 +58,10 @@ export default function ConfiguracoesPage() {
       })
   }, [router])
 
-  const ativar24h = async () => {
-    const novaConfig = { ...config, horaAbertura: 0, horaFechamento: 24 }
+  const toggle24h = async () => {
+    const novaConfig = is24h
+      ? { ...config, horaAbertura: 18, horaFechamento: 23 }
+      : { ...config, horaAbertura: 0, horaFechamento: 24 }
     setConfig(novaConfig)
     setSalvando(true)
     try {
@@ -61,7 +71,7 @@ export default function ConfiguracoesPage() {
         body: JSON.stringify(novaConfig),
       })
       if (res.ok) {
-        setMensagem('✅ Estabelecimento aberto 24h!')
+        setMensagem(is24h ? '✅ Horário padrão restaurado!' : '✅ Estabelecimento aberto 24h!')
         setTimeout(() => setMensagem(''), 3000)
       }
     } catch {
@@ -90,7 +100,7 @@ export default function ConfiguracoesPage() {
     setSalvando(false)
   }
 
-  if (loading) {
+  if (checking || loading) {
     return (
       <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #1a0a00 0%, #2d0a0a 50%, #1a0505 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <p style={{ color: '#fff' }}>Carregando...</p>
@@ -102,7 +112,6 @@ export default function ConfiguracoesPage() {
     <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #1a0a00 0%, #2d0a0a 50%, #1a0505 100%)', padding: '40px 16px' }}>
       <div style={{ maxWidth: 500, margin: '0 auto' }}>
 
-        {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 32 }}>
           <button
             onClick={() => router.push('/admin')}
@@ -115,7 +124,6 @@ export default function ConfiguracoesPage() {
 
         <div style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 16, padding: 24, display: 'flex', flexDirection: 'column', gap: 20 }}>
 
-          {/* Nome da Pizzaria */}
           <div>
             <label style={{ color: 'rgba(255,255,255,0.7)', fontSize: 13, fontWeight: 500, display: 'block', marginBottom: 8 }}>
               🍕 Nome da Pizzaria
@@ -128,13 +136,12 @@ export default function ConfiguracoesPage() {
             />
           </div>
 
-          {/* Horário */}
           <div>
             <label style={{ color: 'rgba(255,255,255,0.7)', fontSize: 13, fontWeight: 500, display: 'block', marginBottom: 8 }}>
               ⏰ Horário de Funcionamento
             </label>
             <button
-              onClick={ativar24h}
+              onClick={toggle24h}
               disabled={salvando}
               style={{
                 width: '100%',
@@ -145,7 +152,7 @@ export default function ConfiguracoesPage() {
                 display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
               }}
             >
-              {is24h ? '✅ Aberto 24 horas (ativo)' : '🕐 Ativar funcionamento 24 horas'}
+              {is24h ? '✅ Aberto 24 horas (ativo) — clique para desativar' : '🕐 Ativar funcionamento 24 horas'}
             </button>
             <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
               <div style={{ flex: 1 }}>
@@ -171,7 +178,6 @@ export default function ConfiguracoesPage() {
             </p>
           </div>
 
-          {/* Chave Pix — somente admin */}
           {isAdmin && (
             <div style={{ background: 'rgba(255,215,0,0.05)', border: '1px solid rgba(255,215,0,0.2)', borderRadius: 12, padding: 16 }}>
               <label style={{ color: 'rgba(255,220,100,0.9)', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
@@ -191,7 +197,6 @@ export default function ConfiguracoesPage() {
             </div>
           )}
 
-          {/* Botão Salvar */}
           <button
             onClick={salvar}
             disabled={salvando}
