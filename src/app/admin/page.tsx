@@ -23,6 +23,13 @@ type Config = {
   chavePix: string
 }
 
+type Funcionario = {
+  username: string
+  name: string
+  password: string
+  ativo: boolean
+}
+
 type Periodo = 'hoje' | 'ontem' | 'semana'
 
 function getUserRole(): string | null {
@@ -73,12 +80,16 @@ export default function AdminPage() {
   const router = useRouter()
   const [pedidos, setPedidos] = useState<Pedido[]>([])
   const [config, setConfig] = useState<Config>({ nomePizzaria: '', horaAbertura: 18, horaFechamento: 23, chavePix: '' })
+  const [funcionarios, setFuncionarios] = useState<Funcionario[]>([])
   const [loading, setLoading] = useState(true)
   const [checking, setChecking] = useState(true)
   const [periodo, setPeriodo] = useState<Periodo>('hoje')
   const [showConfig, setShowConfig] = useState(false)
   const [salvando, setSalvando] = useState(false)
+  const [salvandoFunc, setSalvandoFunc] = useState<string | null>(null)
   const [mensagem, setMensagem] = useState('')
+  const [senhas, setSenhas] = useState<Record<string, string>>({})
+  const [nomes, setNomes] = useState<Record<string, string>>({})
   const is24h = config.horaAbertura === 0 && config.horaFechamento === 24
 
   useEffect(() => {
@@ -91,9 +102,18 @@ export default function AdminPage() {
     Promise.all([
       fetch('/api/orders').then(r => r.json()),
       fetch('/api/configuracoes').then(r => r.json()),
-    ]).then(([ped, cfg]) => {
+      fetch('/api/funcionarios').then(r => r.json()),
+    ]).then(([ped, cfg, funcs]) => {
       setPedidos(Array.isArray(ped) ? ped : [])
       setConfig(cfg)
+      if (Array.isArray(funcs)) {
+        setFuncionarios(funcs)
+        const s: Record<string, string> = {}
+        const n: Record<string, string> = {}
+        funcs.forEach((f: Funcionario) => { s[f.username] = ''; n[f.username] = f.name })
+        setSenhas(s)
+        setNomes(n)
+      }
       setLoading(false)
     })
   }, [router])
@@ -149,6 +169,37 @@ export default function AdminPage() {
     setSalvando(false)
   }
 
+  const salvarFuncionario = async (username: string) => {
+    setSalvandoFunc(username)
+    try {
+      await fetch('/api/funcionarios', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password: senhas[username], name: nomes[username] }),
+      })
+      setSenhas(prev => ({ ...prev, [username]: '' }))
+      setMensagem('✅ Funcionário atualizado!')
+      setTimeout(() => setMensagem(''), 3000)
+    } catch {
+      setMensagem('❌ Erro ao salvar.')
+      setTimeout(() => setMensagem(''), 3000)
+    }
+    setSalvandoFunc(null)
+  }
+
+  const toggleFuncionario = async (username: string, ativo: boolean) => {
+    setSalvandoFunc(username)
+    try {
+      await fetch('/api/funcionarios', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, ativo }),
+      })
+      setFuncionarios(prev => prev.map(f => f.username === username ? { ...f, ativo } : f))
+    } catch {}
+    setSalvandoFunc(null)
+  }
+
   const statusColor: Record<string, string> = {
     novo: '#f6ad55', em_preparo: '#63b3ed', saiu_entrega: '#9f7aea', entregue: '#68d391', cancelado: '#fc8181',
   }
@@ -166,7 +217,6 @@ export default function AdminPage() {
     <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #0a0a1a 0%, #1a1000 100%)', padding: '24px 16px', position: 'relative' }}>
       <div style={{ maxWidth: 600, margin: '0 auto' }}>
 
-        {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 28 }}>
           <div>
             <h1 style={{ color: '#ffd700', fontSize: 22, fontWeight: 800, margin: 0 }}>👑 Painel do Dono</h1>
@@ -182,7 +232,6 @@ export default function AdminPage() {
           </div>
         </div>
 
-        {/* Filtro período */}
         <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
           {(['hoje', 'ontem', 'semana'] as Periodo[]).map(p => (
             <button key={p} onClick={() => setPeriodo(p)} style={{
@@ -195,7 +244,6 @@ export default function AdminPage() {
           ))}
         </div>
 
-        {/* Métricas */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 24 }}>
           <div style={{ background: 'rgba(255,215,0,0.08)', border: '1px solid rgba(255,215,0,0.25)', borderRadius: 14, padding: 18 }}>
             <p style={{ color: 'rgba(255,215,0,0.6)', fontSize: 11, margin: '0 0 6px', fontWeight: 700, textTransform: 'uppercase' }}>💰 Faturamento</p>
@@ -215,7 +263,6 @@ export default function AdminPage() {
           </div>
         </div>
 
-        {/* Lista de pedidos */}
         <div style={{ marginBottom: 28 }}>
           <h2 style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12, fontWeight: 700, marginBottom: 12, textTransform: 'uppercase', letterSpacing: 1 }}>
             Pedidos — {periodo === 'hoje' ? 'Hoje' : periodo === 'ontem' ? 'Ontem' : 'Esta semana'}
@@ -252,29 +299,24 @@ export default function AdminPage() {
         </p>
       </div>
 
-      {/* Modal de Configurações */}
       {showConfig && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', justifyContent: 'flex-end' }}>
-          {/* Overlay */}
           <div onClick={() => setShowConfig(false)} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }} />
-          {/* Painel */}
           <div style={{ position: 'relative', width: '100%', maxWidth: 420, background: 'linear-gradient(180deg, #1a1000 0%, #0a0a1a 100%)', borderLeft: '1px solid rgba(255,215,0,0.15)', padding: '24px 20px', overflowY: 'auto', zIndex: 1001 }}>
 
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 28 }}>
               <h2 style={{ color: '#ffd700', fontSize: 18, fontWeight: 800, margin: 0 }}>⚙️ Configurações</h2>
-              <button onClick={() => setShowConfig(false)} style={{ background: 'rgba(255,255,255,0.08)', border: 'none', color: '#fff', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontSize: 18, lineHeight: 1 }}>✕</button>
+              <button onClick={() => setShowConfig(false)} style={{ background: 'rgba(255,255,255,0.08)', border: 'none', color: '#fff', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontSize: 18 }}>✕</button>
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
 
-              {/* Nome */}
               <div>
                 <label style={{ color: 'rgba(255,255,255,0.6)', fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 8 }}>🍕 Nome da Pizzaria</label>
                 <input type="text" value={config.nomePizzaria} onChange={e => setConfig(p => ({ ...p, nomePizzaria: e.target.value }))}
                   style={{ width: '100%', background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 10, padding: '11px 14px', color: '#fff', fontSize: 14, outline: 'none', boxSizing: 'border-box' }} />
               </div>
 
-              {/* Chave Pix */}
               <div style={{ background: 'rgba(255,215,0,0.04)', border: '1px solid rgba(255,215,0,0.15)', borderRadius: 12, padding: 14 }}>
                 <label style={{ color: 'rgba(255,220,100,0.9)', fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 8 }}>💸 Chave Pix</label>
                 <input type="text" placeholder="Ex: 11999999999 ou email@email.com" value={config.chavePix} onChange={e => setConfig(p => ({ ...p, chavePix: e.target.value }))}
@@ -282,7 +324,6 @@ export default function AdminPage() {
                 <p style={{ color: 'rgba(255,215,0,0.4)', fontSize: 11, margin: '6px 0 0' }}>Aparece no WhatsApp quando cliente escolher Pix.</p>
               </div>
 
-              {/* Horário */}
               <div>
                 <label style={{ color: 'rgba(255,255,255,0.6)', fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 8 }}>⏰ Horário de Funcionamento</label>
                 <button onClick={toggle24h} disabled={salvando} style={{
@@ -311,7 +352,6 @@ export default function AdminPage() {
                 <p style={{ color: 'rgba(255,255,255,0.3)', fontSize: 11, marginTop: 6 }}>Horário de Brasília.</p>
               </div>
 
-              {/* Salvar */}
               <button onClick={salvarConfig} disabled={salvando} style={{
                 background: salvando ? 'rgba(255,255,255,0.1)' : 'linear-gradient(135deg, #b7950b, #ffd700)',
                 border: 'none', borderRadius: 12, padding: '14px 0',
@@ -323,6 +363,58 @@ export default function AdminPage() {
               </button>
 
               {mensagem && <p style={{ textAlign: 'center', color: mensagem.includes('✅') ? '#68d391' : '#fc8181', fontWeight: 600, margin: 0 }}>{mensagem}</p>}
+
+              <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: 20 }}>
+                <label style={{ color: 'rgba(255,255,255,0.6)', fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 14, textTransform: 'uppercase', letterSpacing: 1 }}>👥 Funcionários</label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {funcionarios.map(f => (
+                    <div key={f.username} style={{ background: f.ativo ? 'rgba(104,211,145,0.05)' : 'rgba(252,129,129,0.05)', border: `1px solid ${f.ativo ? 'rgba(104,211,145,0.2)' : 'rgba(252,129,129,0.2)'}`, borderRadius: 12, padding: 14 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                        <div>
+                          <p style={{ color: '#fff', fontWeight: 700, fontSize: 14, margin: 0 }}>{f.name}</p>
+                          <p style={{ color: 'rgba(255,255,255,0.35)', fontSize: 11, margin: '2px 0 0' }}>@{f.username}</p>
+                        </div>
+                        <button
+                          onClick={() => toggleFuncionario(f.username, !f.ativo)}
+                          disabled={salvandoFunc === f.username}
+                          style={{
+                            background: f.ativo ? 'rgba(104,211,145,0.15)' : 'rgba(252,129,129,0.15)',
+                            border: `1px solid ${f.ativo ? 'rgba(104,211,145,0.4)' : 'rgba(252,129,129,0.4)'}`,
+                            color: f.ativo ? '#68d391' : '#fc8181',
+                            borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 700,
+                          }}
+                        >
+                          {salvandoFunc === f.username ? '...' : f.ativo ? '✅ Ativo' : '🔒 Bloqueado'}
+                        </button>
+                      </div>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <input
+                          type="text"
+                          placeholder="Nome"
+                          value={nomes[f.username] ?? f.name}
+                          onChange={e => setNomes(prev => ({ ...prev, [f.username]: e.target.value }))}
+                          style={{ flex: 1, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '8px 10px', color: '#fff', fontSize: 13, outline: 'none' }}
+                        />
+                        <input
+                          type="password"
+                          placeholder="Nova senha"
+                          value={senhas[f.username] ?? ''}
+                          onChange={e => setSenhas(prev => ({ ...prev, [f.username]: e.target.value }))}
+                          style={{ flex: 1, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '8px 10px', color: '#fff', fontSize: 13, outline: 'none' }}
+                        />
+                        <button
+                          onClick={() => salvarFuncionario(f.username)}
+                          disabled={salvandoFunc === f.username}
+                          style={{ background: 'rgba(255,215,0,0.12)', border: '1px solid rgba(255,215,0,0.3)', color: '#ffd700', borderRadius: 8, padding: '8px 12px', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}
+                        >
+                          💾
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
             </div>
           </div>
         </div>
