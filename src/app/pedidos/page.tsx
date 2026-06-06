@@ -325,6 +325,30 @@ export default function PedidosPage() {
         {userName && (
           <div className="flex items-center gap-2">
             <span className="text-sm text-gray-600 hidden sm:inline">Ola, <strong>{userName}</strong></span>
+            {(() => {
+              try {
+                const cookie = document.cookie.split(';').find(c => c.trim().startsWith('auth-user='))
+                if (cookie) {
+                  const raw = cookie.split('=').slice(1).join('=')
+                  let decoded = raw
+                  try { decoded = decodeURIComponent(raw) } catch {}
+                  if (decoded.startsWith('%7B')) try { decoded = decodeURIComponent(decoded) } catch {}
+                  const user = JSON.parse(decoded)
+                  if (user?.role === 'admin') {
+                    return (
+                      <button
+                        onClick={() => { window.location.href = '/admin' }}
+                        className="text-sm font-bold border rounded-lg px-2 py-1"
+                        style={{ color: '#b7950b', borderColor: '#b7950b', background: 'rgba(255,215,0,0.08)' }}
+                      >
+                        👑 Admin
+                      </button>
+                    )
+                  }
+                }
+              } catch {}
+              return null
+            })()}
             <button
               onClick={() => fetch("/api/auth/logout", { method: "POST" }).then(() => router.push("/login"))}
               className="text-sm text-gray-400 hover:text-gray-600 border border-gray-200 rounded-lg px-2 py-1"

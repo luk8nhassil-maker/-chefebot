@@ -14,6 +14,11 @@ const USERS: Record<string, { password: string; name: string; role: Role }> = {
     name: "Kellyne",
     role: "atendente",
   },
+  salao: {
+    password: process.env.SALAO_PASSWORD ?? "salao123",
+    name: "Atendente Salão",
+    role: "atendente",
+  },
   brito: {
     password: process.env.ADMIN_PASSWORD ?? "admin123",
     name: "Brito",
@@ -22,6 +27,7 @@ const USERS: Record<string, { password: string; name: string; role: Role }> = {
 };
 
 export const ROUTE_ROLES: Array<{ path: string; roles: Role[] }> = [
+  { path: "/admin", roles: ["admin"] },
   { path: "/relatorios", roles: ["admin"] },
   { path: "/pedidos", roles: ["admin", "atendente"] },
   { path: "/api/orders", roles: ["admin", "atendente"] },
