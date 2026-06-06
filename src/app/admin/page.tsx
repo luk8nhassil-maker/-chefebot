@@ -41,8 +41,6 @@ function filtraPorPeriodo(pedidos: Pedido[], periodo: Periodo): Pedido[] {
   const ontem = new Date(agora)
   ontem.setDate(ontem.getDate() - 1)
   const ontemStr = ontem.toLocaleDateString('pt-BR')
-  const semanaAtras = new Date(agora)
-  semanaAtras.setDate(semanaAtras.getDate() - 7)
 
   if (periodo === 'hoje') {
     return pedidos.filter(p => {
@@ -67,9 +65,6 @@ export default function AdminPage() {
   const [config, setConfig] = useState<Config>({ nomePizzaria: '', horaAbertura: 18, horaFechamento: 23, chavePix: '' })
   const [loading, setLoading] = useState(true)
   const [periodo, setPeriodo] = useState<Periodo>('hoje')
-  const [salvando, setSalvando] = useState(false)
-  const [mensagem, setMensagem] = useState('')
-  const is24h = config.horaAbertura === 0 && config.horaFechamento === 24
 
   useEffect(() => {
     const role = getUserRole()
@@ -96,35 +91,6 @@ export default function AdminPage() {
     return acc
   }, {})
   const recorrentes = Object.values(telefonesTotal).filter(v => v > 1).length
-
-  const salvarConfig = async () => {
-    setSalvando(true)
-    try {
-      const res = await fetch('/api/configuracoes', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(config),
-      })
-      if (res.ok) {
-        setMensagem('✅ Configurações salvas!')
-        setTimeout(() => setMensagem(''), 3000)
-      }
-    } catch {
-      setMensagem('❌ Erro ao salvar.')
-      setTimeout(() => setMensagem(''), 3000)
-    }
-    setSalvando(false)
-  }
-
-  const ativar24h = async () => {
-    const nova = { ...config, horaAbertura: 0, horaFechamento: 24 }
-    setConfig(nova)
-    setSalvando(true)
-    await fetch('/api/configuracoes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(nova) })
-    setMensagem('✅ Aberto 24 horas!')
-    setTimeout(() => setMensagem(''), 3000)
-    setSalvando(false)
-  }
 
   const statusColor: Record<string, string> = {
     novo: '#f6ad55',
@@ -157,9 +123,14 @@ export default function AdminPage() {
             <h1 style={{ color: '#ffd700', fontSize: 22, fontWeight: 800, margin: 0 }}>👑 Painel do Dono</h1>
             <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 13, margin: '4px 0 0' }}>{config.nomePizzaria}</p>
           </div>
-          <button onClick={() => router.push('/pedidos')} style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', borderRadius: 8, padding: '8px 12px', cursor: 'pointer', fontSize: 13 }}>
-            📋 Pedidos
-          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={() => router.push('/pedidos')} style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', borderRadius: 8, padding: '8px 12px', cursor: 'pointer', fontSize: 13 }}>
+              📋 Pedidos
+            </button>
+            <button onClick={() => router.push('/configuracoes')} style={{ background: 'rgba(255,215,0,0.12)', border: '1px solid rgba(255,215,0,0.3)', color: '#ffd700', borderRadius: 8, padding: '8px 12px', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>
+              ⚙️ Config
+            </button>
+          </div>
         </div>
 
         {/* Filtro período */}
@@ -227,63 +198,10 @@ export default function AdminPage() {
           )}
         </div>
 
-        {/* Configurações admin */}
-        <div style={{ background: 'rgba(255,215,0,0.03)', border: '1px solid rgba(255,215,0,0.12)', borderRadius: 16, padding: 24, marginBottom: 24 }}>
-          <h2 style={{ color: '#ffd700', fontSize: 14, fontWeight: 700, margin: '0 0 20px', display: 'flex', alignItems: 'center', gap: 8 }}>
-            ⚙️ Configurações
-            <span style={{ fontSize: 11, background: 'rgba(255,215,0,0.12)', padding: '2px 8px', borderRadius: 20, color: 'rgba(255,215,0,0.6)' }}>Somente Admin</span>
-          </h2>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <div>
-              <label style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 6 }}>🍕 Nome da Pizzaria</label>
-              <input type="text" value={config.nomePizzaria} onChange={e => setConfig(p => ({ ...p, nomePizzaria: e.target.value }))}
-                style={{ width: '100%', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, padding: '11px 14px', color: '#fff', fontSize: 14, outline: 'none', boxSizing: 'border-box' }} />
-            </div>
-            <div>
-              <label style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 6 }}>💸 Chave Pix</label>
-              <input type="text" placeholder="Ex: 11999999999 ou email@email.com" value={config.chavePix} onChange={e => setConfig(p => ({ ...p, chavePix: e.target.value }))}
-                style={{ width: '100%', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,215,0,0.2)', borderRadius: 10, padding: '11px 14px', color: '#fff', fontSize: 14, outline: 'none', boxSizing: 'border-box' }} />
-              <p style={{ color: 'rgba(255,215,0,0.35)', fontSize: 11, margin: '5px 0 0' }}>Aparece no WhatsApp quando cliente escolher Pix.</p>
-            </div>
-            <div>
-              <label style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 6 }}>⏰ Horário de Funcionamento</label>
-              <button onClick={ativar24h} disabled={salvando} style={{
-                width: '100%', background: is24h ? 'linear-gradient(135deg, #38a169, #276749)' : 'rgba(255,255,255,0.06)',
-                border: is24h ? '2px solid #38a169' : '2px solid rgba(255,255,255,0.1)', borderRadius: 10,
-                padding: '11px 14px', color: '#fff', fontSize: 13, fontWeight: 700, cursor: 'pointer', marginBottom: 10,
-              }}>
-                {is24h ? '✅ Aberto 24 horas (ativo)' : '🕐 Ativar 24 horas'}
-              </button>
-              <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                <div style={{ flex: 1 }}>
-                  <label style={{ color: 'rgba(255,255,255,0.3)', fontSize: 11, display: 'block', marginBottom: 4 }}>Abre às</label>
-                  <input type="number" min={0} max={23} value={config.horaAbertura} onChange={e => setConfig(p => ({ ...p, horaAbertura: Number(e.target.value) }))}
-                    style={{ width: '100%', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, padding: '11px 14px', color: '#fff', fontSize: 14, outline: 'none', boxSizing: 'border-box' }} />
-                </div>
-                <span style={{ color: 'rgba(255,255,255,0.25)', fontSize: 18, paddingTop: 18 }}>→</span>
-                <div style={{ flex: 1 }}>
-                  <label style={{ color: 'rgba(255,255,255,0.3)', fontSize: 11, display: 'block', marginBottom: 4 }}>Fecha às</label>
-                  <input type="number" min={0} max={24} value={config.horaFechamento} onChange={e => setConfig(p => ({ ...p, horaFechamento: Number(e.target.value) }))}
-                    style={{ width: '100%', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, padding: '11px 14px', color: '#fff', fontSize: 14, outline: 'none', boxSizing: 'border-box' }} />
-                </div>
-              </div>
-            </div>
-            <button onClick={salvarConfig} disabled={salvando} style={{
-              background: salvando ? 'rgba(255,255,255,0.1)' : 'linear-gradient(135deg, #b7950b, #ffd700)',
-              border: 'none', borderRadius: 12, padding: '14px 0',
-              color: salvando ? '#fff' : '#000', fontSize: 15, fontWeight: 800,
-              cursor: salvando ? 'not-allowed' : 'pointer',
-              boxShadow: salvando ? 'none' : '0 4px 15px rgba(255,215,0,0.25)',
-            }}>
-              {salvando ? 'Salvando...' : '💾 Salvar Configurações'}
-            </button>
-            {mensagem && <p style={{ textAlign: 'center', color: mensagem.includes('✅') ? '#68d391' : '#fc8181', fontWeight: 600, margin: 0 }}>{mensagem}</p>}
-          </div>
-        </div>
-
-        <p style={{ textAlign: 'center', color: 'rgba(255,255,255,0.15)', fontSize: 11, marginTop: 8 }}>
+        <p style={{ textAlign: 'center', color: 'rgba(255,255,255,0.15)', fontSize: 11, marginTop: 8, marginBottom: 24 }}>
           ChefeBot · Painel Admin
         </p>
+
       </div>
     </div>
   )
