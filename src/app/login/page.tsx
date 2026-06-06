@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
-  const callbackUrl = params.get("callbackUrl") ?? "/";
+  const callbackUrl = params.get("callbackUrl") ?? null;
 
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -15,7 +15,14 @@ function LoginForm() {
 
   useEffect(() => {
     const match = document.cookie.match(/(?:^|;\s*)auth-user=([^;]+)/);
-    if (match) router.replace(callbackUrl);
+    if (match) {
+      try {
+        const user = JSON.parse(decodeURIComponent(match[1]));
+        router.replace(callbackUrl ?? (user.role === 'admin' ? '/admin' : '/pedidos'));
+      } catch {
+        router.replace(callbackUrl ?? '/pedidos');
+      }
+    }
   }, [callbackUrl, router]);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -33,7 +40,7 @@ function LoginForm() {
         setError(data.error ?? "Usuário ou senha incorretos.");
         return;
       }
-      router.replace(callbackUrl);
+      router.replace(callbackUrl ?? '/pedidos');
       router.refresh();
     } catch {
       setError("Erro de conexão. Tente novamente.");
