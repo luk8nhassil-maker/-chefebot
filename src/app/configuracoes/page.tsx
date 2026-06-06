@@ -105,7 +105,7 @@ export default function ConfiguracoesPage() {
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 32 }}>
           <button
-            onClick={() => router.push(isAdmin ? '/admin' : '/pedidos')}
+            onClick={() => router.push('/admin')}
             style={{ background: 'rgba(255,255,255,0.1)', border: 'none', color: '#fff', borderRadius: 8, padding: '8px 12px', cursor: 'pointer', fontSize: 14 }}
           >
             ← Voltar
