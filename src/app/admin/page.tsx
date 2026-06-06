@@ -42,9 +42,7 @@ function getUserRole(): string | null {
         const raw = trimmed.substring('auth-user='.length)
         let decoded = raw
         try { decoded = decodeURIComponent(raw) } catch { decoded = raw }
-        if (decoded.startsWith('%7B')) {
-          try { decoded = decodeURIComponent(decoded) } catch {}
-        }
+        if (decoded.startsWith('%7B')) try { decoded = decodeURIComponent(decoded) } catch {}
         const user = JSON.parse(decoded)
         return user?.role ?? null
       }
@@ -90,14 +88,14 @@ export default function AdminPage() {
   const [mensagem, setMensagem] = useState('')
   const [senhas, setSenhas] = useState<Record<string, string>>({})
   const [nomes, setNomes] = useState<Record<string, string>>({})
+  const [showNovoFunc, setShowNovoFunc] = useState(false)
+  const [novoFunc, setNovoFunc] = useState({ name: '', username: '', password: '' })
+  const [criando, setCriando] = useState(false)
   const is24h = config.horaAbertura === 0 && config.horaFechamento === 24
 
   useEffect(() => {
     const role = getUserRole()
-    if (role !== 'admin') {
-      router.push('/login?callbackUrl=/admin')
-      return
-    }
+    if (role !== 'admin') { router.push('/login?callbackUrl=/admin'); return }
     setChecking(false)
     Promise.all([
       fetch('/api/orders').then(r => r.json()),
@@ -128,84 +126,79 @@ export default function AdminPage() {
   const recorrentes = Object.values(telefonesTotal).filter(v => v > 1).length
 
   const toggle24h = async () => {
-    const novaConfig = is24h
-      ? { ...config, horaAbertura: 18, horaFechamento: 23 }
-      : { ...config, horaAbertura: 0, horaFechamento: 24 }
+    const novaConfig = is24h ? { ...config, horaAbertura: 18, horaFechamento: 23 } : { ...config, horaAbertura: 0, horaFechamento: 24 }
     setConfig(novaConfig)
     setSalvando(true)
     try {
-      const res = await fetch('/api/configuracoes', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(novaConfig),
-      })
-      if (res.ok) {
-        setMensagem(is24h ? '✅ Horário padrão restaurado!' : '✅ Aberto 24 horas!')
-        setTimeout(() => setMensagem(''), 3000)
-      }
-    } catch {
-      setMensagem('❌ Erro ao salvar.')
-      setTimeout(() => setMensagem(''), 3000)
-    }
+      const res = await fetch('/api/configuracoes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(novaConfig) })
+      if (res.ok) { setMensagem(is24h ? '✅ Horário padrão restaurado!' : '✅ Aberto 24 horas!'); setTimeout(() => setMensagem(''), 3000) }
+    } catch { setMensagem('❌ Erro ao salvar.'); setTimeout(() => setMensagem(''), 3000) }
     setSalvando(false)
   }
 
   const salvarConfig = async () => {
     setSalvando(true)
     try {
-      const res = await fetch('/api/configuracoes', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(config),
-      })
-      if (res.ok) {
-        setMensagem('✅ Configurações salvas!')
-        setTimeout(() => setMensagem(''), 3000)
-      }
-    } catch {
-      setMensagem('❌ Erro ao salvar.')
-      setTimeout(() => setMensagem(''), 3000)
-    }
+      const res = await fetch('/api/configuracoes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(config) })
+      if (res.ok) { setMensagem('✅ Configurações salvas!'); setTimeout(() => setMensagem(''), 3000) }
+    } catch { setMensagem('❌ Erro ao salvar.'); setTimeout(() => setMensagem(''), 3000) }
     setSalvando(false)
   }
 
   const salvarFuncionario = async (username: string) => {
     setSalvandoFunc(username)
     try {
-      await fetch('/api/funcionarios', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password: senhas[username], name: nomes[username] }),
-      })
+      await fetch('/api/funcionarios', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password: senhas[username], name: nomes[username] }) })
       setSenhas(prev => ({ ...prev, [username]: '' }))
-      setMensagem('✅ Funcionário atualizado!')
-      setTimeout(() => setMensagem(''), 3000)
-    } catch {
-      setMensagem('❌ Erro ao salvar.')
-      setTimeout(() => setMensagem(''), 3000)
-    }
+      setMensagem('✅ Funcionário atualizado!'); setTimeout(() => setMensagem(''), 3000)
+    } catch { setMensagem('❌ Erro ao salvar.'); setTimeout(() => setMensagem(''), 3000) }
     setSalvandoFunc(null)
   }
 
   const toggleFuncionario = async (username: string, ativo: boolean) => {
     setSalvandoFunc(username)
     try {
-      await fetch('/api/funcionarios', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, ativo }),
-      })
+      await fetch('/api/funcionarios', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, ativo }) })
       setFuncionarios(prev => prev.map(f => f.username === username ? { ...f, ativo } : f))
     } catch {}
     setSalvandoFunc(null)
   }
 
-  const statusColor: Record<string, string> = {
-    novo: '#f6ad55', em_preparo: '#63b3ed', saiu_entrega: '#9f7aea', entregue: '#68d391', cancelado: '#fc8181',
+  const excluirFuncionario = async (username: string, name: string) => {
+    if (!confirm(`Excluir ${name}? Esta ação não pode ser desfeita.`)) return
+    setSalvandoFunc(username)
+    try {
+      await fetch('/api/funcionarios', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'excluir', username }) })
+      setFuncionarios(prev => prev.filter(f => f.username !== username))
+      setMensagem('✅ Funcionário removido!'); setTimeout(() => setMensagem(''), 3000)
+    } catch { setMensagem('❌ Erro ao excluir.'); setTimeout(() => setMensagem(''), 3000) }
+    setSalvandoFunc(null)
   }
-  const statusLabel: Record<string, string> = {
-    novo: 'Novo', em_preparo: 'Em preparo', saiu_entrega: 'Saiu p/ entrega', entregue: 'Entregue', cancelado: 'Cancelado',
+
+  const criarFuncionario = async () => {
+    if (!novoFunc.name || !novoFunc.username || !novoFunc.password) {
+      setMensagem('❌ Preencha todos os campos.'); setTimeout(() => setMensagem(''), 3000); return
+    }
+    setCriando(true)
+    try {
+      const res = await fetch('/api/funcionarios', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'criar', ...novoFunc }) })
+      const data = await res.json()
+      if (!res.ok) { setMensagem(`❌ ${data.error}`); setTimeout(() => setMensagem(''), 3000) }
+      else {
+        const novo = { username: novoFunc.username.toLowerCase().trim(), name: novoFunc.name.trim(), password: novoFunc.password, ativo: true }
+        setFuncionarios(prev => [...prev, novo])
+        setSenhas(prev => ({ ...prev, [novo.username]: '' }))
+        setNomes(prev => ({ ...prev, [novo.username]: novo.name }))
+        setNovoFunc({ name: '', username: '', password: '' })
+        setShowNovoFunc(false)
+        setMensagem('✅ Funcionário criado!'); setTimeout(() => setMensagem(''), 3000)
+      }
+    } catch { setMensagem('❌ Erro ao criar.'); setTimeout(() => setMensagem(''), 3000) }
+    setCriando(false)
   }
+
+  const statusColor: Record<string, string> = { novo: '#f6ad55', em_preparo: '#63b3ed', saiu_entrega: '#9f7aea', entregue: '#68d391', cancelado: '#fc8181' }
+  const statusLabel: Record<string, string> = { novo: 'Novo', em_preparo: 'Em preparo', saiu_entrega: 'Saiu p/ entrega', entregue: 'Entregue', cancelado: 'Cancelado' }
 
   if (checking || loading) return (
     <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #0a0a1a 0%, #1a1000 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -223,22 +216,14 @@ export default function AdminPage() {
             <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 13, margin: '4px 0 0' }}>{config.nomePizzaria}</p>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={() => router.push('/pedidos')} style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', borderRadius: 8, padding: '8px 12px', cursor: 'pointer', fontSize: 13 }}>
-              📋 Pedidos
-            </button>
-            <button onClick={() => setShowConfig(true)} style={{ background: 'rgba(255,215,0,0.12)', border: '1px solid rgba(255,215,0,0.3)', color: '#ffd700', borderRadius: 8, padding: '8px 12px', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>
-              ⚙️ Config
-            </button>
+            <button onClick={() => router.push('/pedidos')} style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', borderRadius: 8, padding: '8px 12px', cursor: 'pointer', fontSize: 13 }}>📋 Pedidos</button>
+            <button onClick={() => setShowConfig(true)} style={{ background: 'rgba(255,215,0,0.12)', border: '1px solid rgba(255,215,0,0.3)', color: '#ffd700', borderRadius: 8, padding: '8px 12px', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>⚙️ Config</button>
           </div>
         </div>
 
         <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
           {(['hoje', 'ontem', 'semana'] as Periodo[]).map(p => (
-            <button key={p} onClick={() => setPeriodo(p)} style={{
-              flex: 1, padding: '10px 0', borderRadius: 10, border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: 13,
-              background: periodo === p ? 'linear-gradient(135deg, #b7950b, #ffd700)' : 'rgba(255,255,255,0.07)',
-              color: periodo === p ? '#000' : 'rgba(255,255,255,0.6)',
-            }}>
+            <button key={p} onClick={() => setPeriodo(p)} style={{ flex: 1, padding: '10px 0', borderRadius: 10, border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: 13, background: periodo === p ? 'linear-gradient(135deg, #b7950b, #ffd700)' : 'rgba(255,255,255,0.07)', color: periodo === p ? '#000' : 'rgba(255,255,255,0.6)' }}>
               {p === 'hoje' ? 'Hoje' : p === 'ontem' ? 'Ontem' : 'Semana'}
             </button>
           ))}
@@ -294,9 +279,7 @@ export default function AdminPage() {
           )}
         </div>
 
-        <p style={{ textAlign: 'center', color: 'rgba(255,255,255,0.15)', fontSize: 11, marginTop: 8, marginBottom: 24 }}>
-          ChefeBot · Painel Admin
-        </p>
+        <p style={{ textAlign: 'center', color: 'rgba(255,255,255,0.15)', fontSize: 11, marginTop: 8, marginBottom: 24 }}>ChefeBot · Painel Admin</p>
       </div>
 
       {showConfig && (
@@ -326,14 +309,7 @@ export default function AdminPage() {
 
               <div>
                 <label style={{ color: 'rgba(255,255,255,0.6)', fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 8 }}>⏰ Horário de Funcionamento</label>
-                <button onClick={toggle24h} disabled={salvando} style={{
-                  width: '100%',
-                  background: is24h ? 'linear-gradient(135deg, #38a169, #276749)' : 'rgba(255,255,255,0.07)',
-                  border: is24h ? '2px solid #38a169' : '2px solid rgba(255,255,255,0.12)',
-                  borderRadius: 10, padding: '11px 14px', color: '#fff', fontSize: 13, fontWeight: 700,
-                  cursor: salvando ? 'not-allowed' : 'pointer', marginBottom: 10,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-                }}>
+                <button onClick={toggle24h} disabled={salvando} style={{ width: '100%', background: is24h ? 'linear-gradient(135deg, #38a169, #276749)' : 'rgba(255,255,255,0.07)', border: is24h ? '2px solid #38a169' : '2px solid rgba(255,255,255,0.12)', borderRadius: 10, padding: '11px 14px', color: '#fff', fontSize: 13, fontWeight: 700, cursor: salvando ? 'not-allowed' : 'pointer', marginBottom: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
                   {is24h ? '✅ Aberto 24h (ativo) — toque para desativar' : '🕐 Ativar 24 horas'}
                 </button>
                 <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
@@ -352,20 +328,40 @@ export default function AdminPage() {
                 <p style={{ color: 'rgba(255,255,255,0.3)', fontSize: 11, marginTop: 6 }}>Horário de Brasília.</p>
               </div>
 
-              <button onClick={salvarConfig} disabled={salvando} style={{
-                background: salvando ? 'rgba(255,255,255,0.1)' : 'linear-gradient(135deg, #b7950b, #ffd700)',
-                border: 'none', borderRadius: 12, padding: '14px 0',
-                color: salvando ? '#fff' : '#000', fontSize: 15, fontWeight: 800,
-                cursor: salvando ? 'not-allowed' : 'pointer',
-                boxShadow: salvando ? 'none' : '0 4px 15px rgba(255,215,0,0.25)',
-              }}>
+              <button onClick={salvarConfig} disabled={salvando} style={{ background: salvando ? 'rgba(255,255,255,0.1)' : 'linear-gradient(135deg, #b7950b, #ffd700)', border: 'none', borderRadius: 12, padding: '14px 0', color: salvando ? '#fff' : '#000', fontSize: 15, fontWeight: 800, cursor: salvando ? 'not-allowed' : 'pointer', boxShadow: salvando ? 'none' : '0 4px 15px rgba(255,215,0,0.25)' }}>
                 {salvando ? 'Salvando...' : '💾 Salvar Configurações'}
               </button>
 
               {mensagem && <p style={{ textAlign: 'center', color: mensagem.includes('✅') ? '#68d391' : '#fc8181', fontWeight: 600, margin: 0 }}>{mensagem}</p>}
 
+              {/* Funcionários */}
               <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: 20 }}>
-                <label style={{ color: 'rgba(255,255,255,0.6)', fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 14, textTransform: 'uppercase', letterSpacing: 1 }}>👥 Funcionários</label>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+                  <label style={{ color: 'rgba(255,255,255,0.6)', fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>👥 Funcionários</label>
+                  <button onClick={() => setShowNovoFunc(!showNovoFunc)} style={{ background: 'rgba(99,179,237,0.12)', border: '1px solid rgba(99,179,237,0.3)', color: '#63b3ed', borderRadius: 8, padding: '5px 10px', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>
+                    {showNovoFunc ? '✕ Cancelar' : '+ Novo'}
+                  </button>
+                </div>
+
+                {/* Formulário novo funcionário */}
+                {showNovoFunc && (
+                  <div style={{ background: 'rgba(99,179,237,0.05)', border: '1px solid rgba(99,179,237,0.2)', borderRadius: 12, padding: 14, marginBottom: 12 }}>
+                    <p style={{ color: '#63b3ed', fontSize: 12, fontWeight: 700, margin: '0 0 10px' }}>Novo Funcionário</p>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      <input type="text" placeholder="Nome completo" value={novoFunc.name} onChange={e => setNovoFunc(p => ({ ...p, name: e.target.value }))}
+                        style={{ width: '100%', background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 8, padding: '9px 12px', color: '#fff', fontSize: 13, outline: 'none', boxSizing: 'border-box' }} />
+                      <input type="text" placeholder="Usuário (sem espaços)" value={novoFunc.username} onChange={e => setNovoFunc(p => ({ ...p, username: e.target.value.toLowerCase().replace(/\s/g, '') }))}
+                        style={{ width: '100%', background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 8, padding: '9px 12px', color: '#fff', fontSize: 13, outline: 'none', boxSizing: 'border-box' }} />
+                      <input type="password" placeholder="Senha" value={novoFunc.password} onChange={e => setNovoFunc(p => ({ ...p, password: e.target.value }))}
+                        style={{ width: '100%', background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 8, padding: '9px 12px', color: '#fff', fontSize: 13, outline: 'none', boxSizing: 'border-box' }} />
+                      <button onClick={criarFuncionario} disabled={criando} style={{ background: criando ? 'rgba(255,255,255,0.1)' : 'linear-gradient(135deg, #2b6cb0, #63b3ed)', border: 'none', borderRadius: 8, padding: '10px 0', color: '#fff', fontSize: 13, fontWeight: 700, cursor: criando ? 'not-allowed' : 'pointer' }}>
+                        {criando ? 'Criando...' : '✅ Criar Funcionário'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Lista funcionários */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                   {funcionarios.map(f => (
                     <div key={f.username} style={{ background: f.ativo ? 'rgba(104,211,145,0.05)' : 'rgba(252,129,129,0.05)', border: `1px solid ${f.ativo ? 'rgba(104,211,145,0.2)' : 'rgba(252,129,129,0.2)'}`, borderRadius: 12, padding: 14 }}>
@@ -374,39 +370,21 @@ export default function AdminPage() {
                           <p style={{ color: '#fff', fontWeight: 700, fontSize: 14, margin: 0 }}>{f.name}</p>
                           <p style={{ color: 'rgba(255,255,255,0.35)', fontSize: 11, margin: '2px 0 0' }}>@{f.username}</p>
                         </div>
-                        <button
-                          onClick={() => toggleFuncionario(f.username, !f.ativo)}
-                          disabled={salvandoFunc === f.username}
-                          style={{
-                            background: f.ativo ? 'rgba(104,211,145,0.15)' : 'rgba(252,129,129,0.15)',
-                            border: `1px solid ${f.ativo ? 'rgba(104,211,145,0.4)' : 'rgba(252,129,129,0.4)'}`,
-                            color: f.ativo ? '#68d391' : '#fc8181',
-                            borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 700,
-                          }}
-                        >
-                          {salvandoFunc === f.username ? '...' : f.ativo ? '✅ Ativo' : '🔒 Bloqueado'}
-                        </button>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <button onClick={() => toggleFuncionario(f.username, !f.ativo)} disabled={salvandoFunc === f.username} style={{ background: f.ativo ? 'rgba(104,211,145,0.15)' : 'rgba(252,129,129,0.15)', border: `1px solid ${f.ativo ? 'rgba(104,211,145,0.4)' : 'rgba(252,129,129,0.4)'}`, color: f.ativo ? '#68d391' : '#fc8181', borderRadius: 8, padding: '5px 10px', cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>
+                            {salvandoFunc === f.username ? '...' : f.ativo ? '✅ Ativo' : '🔒 Bloq.'}
+                          </button>
+                          <button onClick={() => excluirFuncionario(f.username, f.name)} disabled={salvandoFunc === f.username} style={{ background: 'rgba(252,129,129,0.1)', border: '1px solid rgba(252,129,129,0.3)', color: '#fc8181', borderRadius: 8, padding: '5px 10px', cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>
+                            🗑️
+                          </button>
+                        </div>
                       </div>
                       <div style={{ display: 'flex', gap: 8 }}>
-                        <input
-                          type="text"
-                          placeholder="Nome"
-                          value={nomes[f.username] ?? f.name}
-                          onChange={e => setNomes(prev => ({ ...prev, [f.username]: e.target.value }))}
-                          style={{ flex: 1, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '8px 10px', color: '#fff', fontSize: 13, outline: 'none' }}
-                        />
-                        <input
-                          type="password"
-                          placeholder="Nova senha"
-                          value={senhas[f.username] ?? ''}
-                          onChange={e => setSenhas(prev => ({ ...prev, [f.username]: e.target.value }))}
-                          style={{ flex: 1, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '8px 10px', color: '#fff', fontSize: 13, outline: 'none' }}
-                        />
-                        <button
-                          onClick={() => salvarFuncionario(f.username)}
-                          disabled={salvandoFunc === f.username}
-                          style={{ background: 'rgba(255,215,0,0.12)', border: '1px solid rgba(255,215,0,0.3)', color: '#ffd700', borderRadius: 8, padding: '8px 12px', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}
-                        >
+                        <input type="text" placeholder="Nome" value={nomes[f.username] ?? f.name} onChange={e => setNomes(prev => ({ ...prev, [f.username]: e.target.value }))}
+                          style={{ flex: 1, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '8px 10px', color: '#fff', fontSize: 13, outline: 'none' }} />
+                        <input type="password" placeholder="Nova senha" value={senhas[f.username] ?? ''} onChange={e => setSenhas(prev => ({ ...prev, [f.username]: e.target.value }))}
+                          style={{ flex: 1, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '8px 10px', color: '#fff', fontSize: 13, outline: 'none' }} />
+                        <button onClick={() => salvarFuncionario(f.username)} disabled={salvandoFunc === f.username} style={{ background: 'rgba(255,215,0,0.12)', border: '1px solid rgba(255,215,0,0.3)', color: '#ffd700', borderRadius: 8, padding: '8px 12px', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>
                           💾
                         </button>
                       </div>
