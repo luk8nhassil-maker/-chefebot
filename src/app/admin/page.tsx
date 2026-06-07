@@ -51,6 +51,25 @@ function getUserRole(): string | null {
   return null
 }
 
+function getUserName(): string | null {
+  if (typeof document === 'undefined') return null
+  try {
+    const cookies = document.cookie.split(';')
+    for (const c of cookies) {
+      const trimmed = c.trim()
+      if (trimmed.startsWith('auth-user=')) {
+        const raw = trimmed.substring('auth-user='.length)
+        let decoded = raw
+        try { decoded = decodeURIComponent(raw) } catch { decoded = raw }
+        if (decoded.startsWith('%7B')) try { decoded = decodeURIComponent(decoded) } catch {}
+        const user = JSON.parse(decoded)
+        return user?.name ?? null
+      }
+    }
+  } catch { return null }
+  return null
+}
+
 function filtraPorPeriodo(pedidos: Pedido[], periodo: Periodo): Pedido[] {
   const agora = new Date()
   const hojeStr = agora.toLocaleDateString('pt-BR')
@@ -91,11 +110,14 @@ export default function AdminPage() {
   const [showNovoFunc, setShowNovoFunc] = useState(false)
   const [novoFunc, setNovoFunc] = useState({ name: '', username: '', password: '' })
   const [criando, setCriando] = useState(false)
+  const [nomeUsuario, setNomeUsuario] = useState('')
   const is24h = config.horaAbertura === 0 && config.horaFechamento === 24
 
   useEffect(() => {
     const role = getUserRole()
     if (role !== 'admin') { router.push('/login?callbackUrl=/admin'); return }
+    const nome = getUserName()
+    if (nome) setNomeUsuario(nome)
     setChecking(false)
     Promise.all([
       fetch('/api/orders').then(r => r.json()),
@@ -212,7 +234,7 @@ export default function AdminPage() {
 
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 28 }}>
           <div>
-            <h1 style={{ color: '#ffd700', fontSize: 22, fontWeight: 800, margin: 0 }}>👑 Painel do Dono</h1>
+            <h1 style={{ color: '#ffd700', fontSize: 22, fontWeight: 800, margin: 0 }}>👑 Bem-vindo, {nomeUsuario || 'Brito'}</h1>
             <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 13, margin: '4px 0 0' }}>{config.nomePizzaria}</p>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
@@ -231,19 +253,19 @@ export default function AdminPage() {
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 24 }}>
           <div style={{ background: 'rgba(255,215,0,0.08)', border: '1px solid rgba(255,215,0,0.25)', borderRadius: 14, padding: 18 }}>
-            <p style={{ color: 'rgba(255,215,0,0.6)', fontSize: 11, margin: '0 0 6px', fontWeight: 700, textTransform: 'uppercase' }}>💰 Faturamento</p>
+            <p style={{ color: 'rgba(255,215,0,0.6)', fontSize: 11, margin: '0 0 6px', fontWeight: 700, textTransform: 'uppercase' }}>💰 Você ganhou hoje</p>
             <p style={{ color: '#ffd700', fontSize: 22, fontWeight: 800, margin: 0 }}>R$ {faturamento.toFixed(2).replace('.', ',')}</p>
           </div>
           <div style={{ background: 'rgba(99,179,237,0.08)', border: '1px solid rgba(99,179,237,0.25)', borderRadius: 14, padding: 18 }}>
-            <p style={{ color: 'rgba(99,179,237,0.6)', fontSize: 11, margin: '0 0 6px', fontWeight: 700, textTransform: 'uppercase' }}>📦 Pedidos</p>
+            <p style={{ color: 'rgba(99,179,237,0.6)', fontSize: 11, margin: '0 0 6px', fontWeight: 700, textTransform: 'uppercase' }}>🍕 Pizzas vendidas</p>
             <p style={{ color: '#63b3ed', fontSize: 22, fontWeight: 800, margin: 0 }}>{pedidosFiltrados.length}</p>
           </div>
           <div style={{ background: 'rgba(159,122,234,0.08)', border: '1px solid rgba(159,122,234,0.25)', borderRadius: 14, padding: 18 }}>
-            <p style={{ color: 'rgba(159,122,234,0.6)', fontSize: 11, margin: '0 0 6px', fontWeight: 700, textTransform: 'uppercase' }}>🎯 Ticket Médio</p>
+            <p style={{ color: 'rgba(159,122,234,0.6)', fontSize: 11, margin: '0 0 6px', fontWeight: 700, textTransform: 'uppercase' }}>🎯 Por pizza em média</p>
             <p style={{ color: '#9f7aea', fontSize: 22, fontWeight: 800, margin: 0 }}>R$ {ticketMedio.toFixed(2).replace('.', ',')}</p>
           </div>
           <div style={{ background: 'rgba(104,211,145,0.08)', border: '1px solid rgba(104,211,145,0.25)', borderRadius: 14, padding: 18 }}>
-            <p style={{ color: 'rgba(104,211,145,0.6)', fontSize: 11, margin: '0 0 6px', fontWeight: 700, textTransform: 'uppercase' }}>👥 Recorrentes</p>
+            <p style={{ color: 'rgba(104,211,145,0.6)', fontSize: 11, margin: '0 0 6px', fontWeight: 700, textTransform: 'uppercase' }}>❤️ Clientes fiéis</p>
             <p style={{ color: '#68d391', fontSize: 22, fontWeight: 800, margin: 0 }}>{recorrentes} <span style={{ fontSize: 12, fontWeight: 400 }}>clientes</span></p>
           </div>
         </div>
@@ -254,7 +276,7 @@ export default function AdminPage() {
           </h2>
           {pedidosFiltrados.length === 0 ? (
             <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 24, textAlign: 'center' }}>
-              <p style={{ color: 'rgba(255,255,255,0.25)', margin: 0 }}>Nenhum pedido neste período.</p>
+              <p style={{ color: 'rgba(255,255,255,0.25)', margin: 0 }}>Nenhuma pizza vendida ainda. O dia ainda vai começar! 🍕</p>
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -334,7 +356,6 @@ export default function AdminPage() {
 
               {mensagem && <p style={{ textAlign: 'center', color: mensagem.includes('✅') ? '#68d391' : '#fc8181', fontWeight: 600, margin: 0 }}>{mensagem}</p>}
 
-              {/* Funcionários */}
               <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: 20 }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
                   <label style={{ color: 'rgba(255,255,255,0.6)', fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>👥 Funcionários</label>
@@ -343,7 +364,6 @@ export default function AdminPage() {
                   </button>
                 </div>
 
-                {/* Formulário novo funcionário */}
                 {showNovoFunc && (
                   <div style={{ background: 'rgba(99,179,237,0.05)', border: '1px solid rgba(99,179,237,0.2)', borderRadius: 12, padding: 14, marginBottom: 12 }}>
                     <p style={{ color: '#63b3ed', fontSize: 12, fontWeight: 700, margin: '0 0 10px' }}>Novo Funcionário</p>
@@ -361,7 +381,6 @@ export default function AdminPage() {
                   </div>
                 )}
 
-                {/* Lista funcionários */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                   {funcionarios.map(f => (
                     <div key={f.username} style={{ background: f.ativo ? 'rgba(104,211,145,0.05)' : 'rgba(252,129,129,0.05)', border: `1px solid ${f.ativo ? 'rgba(104,211,145,0.2)' : 'rgba(252,129,129,0.2)'}`, borderRadius: 12, padding: 14 }}>

@@ -43,9 +43,9 @@ const PROXIMO_STATUS: Record<Status, Status | null> = {
 }
 
 const PROXIMO_LABEL: Record<Status, string> = {
-  novo: "▶ Iniciar preparo",
-  em_preparo: "🛵 Saiu p/ entrega",
-  saiu_entrega: "✅ Entregue",
+  novo: "🔥 Começar a preparar",
+  em_preparo: "🛵 Saiu para entregar",
+  saiu_entrega: "✅ Confirmar entrega",
   entregue: "",
   cancelado: "",
 }
@@ -74,7 +74,7 @@ function tocarSom() {
   } catch {}
 }
 
-function getUserRole(): { name: string; role: string } | null {
+function getUserInfo(): { name: string; role: string } | null {
   if (typeof document === "undefined") return null
   try {
     const cookies = document.cookie.split(";")
@@ -107,17 +107,14 @@ export default function PedidosPage() {
   const [salvandoBot, setSalvandoBot] = useState(false)
   const [manuais, setManuais] = useState<Record<string, boolean>>({})
   const [resolvendo, setResolvendo] = useState<Record<string, boolean>>({})
-  const [alertaPiscando, setAlertaPiscando] = useState(false)
   const prevIdsRef = useRef<string[]>([])
   const piscarRef = useRef<NodeJS.Timeout | null>(null)
-  const tituloOriginalRef = useRef(typeof document !== "undefined" ? document.title : "ChefBot")
+  const tituloOriginalRef = useRef(typeof document !== "undefined" ? document.title : "Cozinha")
 
   useEffect(() => {
-    const user = getUserRole()
+    const user = getUserInfo()
     if (user) { setUserName(user.name); setIsAdmin(user.role === "admin") }
-    if ("Notification" in window && Notification.permission === "default") {
-      Notification.requestPermission()
-    }
+    if ("Notification" in window && Notification.permission === "default") Notification.requestPermission()
     carregarPedidos()
     carregarStatusBot()
     const intervalo = setInterval(carregarPedidos, 10000)
@@ -140,7 +137,6 @@ export default function PedidosPage() {
   const pararPiscar = () => {
     if (piscarRef.current) { clearInterval(piscarRef.current); piscarRef.current = null }
     document.title = tituloOriginalRef.current
-    setAlertaPiscando(false)
   }
 
   const carregarStatusBot = async () => {
@@ -155,7 +151,7 @@ export default function PedidosPage() {
     try {
       const novoStatus = !botAtivo
       const res = await fetch("/api/bot-status", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ativo: novoStatus }) })
-      if (res.ok) { setBotAtivo(novoStatus); setNotificacao(novoStatus ? "✅ Bot ativado!" : "⏸️ Bot pausado!"); setTimeout(() => setNotificacao(""), 3000) }
+      if (res.ok) { setBotAtivo(novoStatus); setNotificacao(novoStatus ? "🤖 Robô atendendo!" : "⏸️ Robô em pausa!"); setTimeout(() => setNotificacao(""), 3000) }
     } catch {}
     setSalvandoBot(false)
   }
@@ -164,8 +160,7 @@ export default function PedidosPage() {
     try {
       await fetch("/api/bot-status", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phone, ativo: false }) })
       setManuais(prev => ({ ...prev, [phone]: true }))
-      setNotificacao("📱 Abrindo WhatsApp...")
-      setTimeout(() => setNotificacao(""), 3000)
+      setNotificacao("📱 Abrindo WhatsApp..."); setTimeout(() => setNotificacao(""), 3000)
       pararPiscar()
       window.open("https://wa.me/" + phone, "_blank")
     } catch {}
@@ -175,7 +170,7 @@ export default function PedidosPage() {
     try {
       await fetch("/api/bot-status", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phone, ativo: true }) })
       setManuais(prev => ({ ...prev, [phone]: false }))
-      setNotificacao("🤖 Bot retomou a conversa"); setTimeout(() => setNotificacao(""), 3000)
+      setNotificacao("🤖 Robô retomou a conversa"); setTimeout(() => setNotificacao(""), 3000)
     } catch {}
   }
 
@@ -186,7 +181,7 @@ export default function PedidosPage() {
       setManuais(prev => ({ ...prev, [phone]: false }))
       setPedidos(prev => prev.map(p => p.id === pedidoId ? { ...p, escalonado: false, status: "entregue" } : p))
       pararPiscar()
-      setNotificacao("✅ Resolvido!"); setTimeout(() => setNotificacao(""), 4000)
+      setNotificacao("✅ Resolvido! Cliente foi notificado."); setTimeout(() => setNotificacao(""), 4000)
     } catch {}
   }
 
@@ -203,9 +198,9 @@ export default function PedidosPage() {
               tocarSom()
               const temEscalonado = chegaram.some((p: Pedido) => p.escalonado)
               const temCancelamento = chegaram.some((p: Pedido) => p.cancelamentoSolicitado)
-              if (temEscalonado) { setNotificacao("🚨 URGENTE! Cliente precisa de você!"); setAlertaPiscando(true); iniciarPiscar() }
+              if (temEscalonado) { setNotificacao("🚨 URGENTE! Cliente precisa de você!"); iniciarPiscar() }
               else if (temCancelamento) { setNotificacao("⚠️ Cancelamento solicitado!"); setTimeout(() => setNotificacao(""), 5000) }
-              else { setNotificacao(`🆕 ${chegaram.length} novo${chegaram.length > 1 ? "s" : ""} pedido${chegaram.length > 1 ? "s" : ""}!`); setTimeout(() => setNotificacao(""), 4000) }
+              else { setNotificacao(`🍕 ${chegaram.length} novo${chegaram.length > 1 ? "s" : ""} pedido${chegaram.length > 1 ? "s" : ""}!`); setTimeout(() => setNotificacao(""), 4000) }
             }
           }
           prevIdsRef.current = novosIds
@@ -260,30 +255,20 @@ export default function PedidosPage() {
   return (
     <div style={{ minHeight: "100vh", background: "#f8f8f8", paddingBottom: 32 }}>
 
-      {/* Toast de notificação */}
       {notificacao && (
-        <div style={{ position: "fixed", top: 16, left: 16, right: 16, zIndex: 9999, background: notificacao.includes("URGENTE") ? "#dc2626" : notificacao.includes("⚠️") ? "#ea580c" : "#16a34a", color: "#fff", padding: "14px 16px", borderRadius: 14, fontWeight: 700, fontSize: 15, textAlign: "center", boxShadow: "0 4px 20px rgba(0,0,0,0.2)", animation: notificacao.includes("URGENTE") ? "pulse 1s infinite" : "none" }}>
+        <div style={{ position: "fixed", top: 16, left: 16, right: 16, zIndex: 9999, background: notificacao.includes("URGENTE") ? "#dc2626" : notificacao.includes("⚠️") ? "#ea580c" : "#16a34a", color: "#fff", padding: "14px 16px", borderRadius: 14, fontWeight: 700, fontSize: 15, textAlign: "center", boxShadow: "0 4px 20px rgba(0,0,0,0.2)" }}>
           {notificacao}
         </div>
       )}
 
-      {/* Header */}
       <div style={{ background: "#fff", borderBottom: "1px solid #eee", padding: "12px 16px", position: "sticky", top: 0, zIndex: 100, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ fontSize: 22 }}>🍕</span>
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ fontWeight: 800, fontSize: 16, color: "#111" }}>Pedidos</span>
-              {escalonados > 0 && (
-                <span style={{ background: "#dc2626", color: "#fff", fontSize: 11, fontWeight: 800, padding: "2px 8px", borderRadius: 20, animation: "pulse 1s infinite" }}>
-                  {escalonados} URGENTE
-                </span>
-              )}
-              {cancelamentos > 0 && (
-                <span style={{ background: "#ea580c", color: "#fff", fontSize: 11, fontWeight: 800, padding: "2px 8px", borderRadius: 20 }}>
-                  {cancelamentos} CANCEL.
-                </span>
-              )}
+              <span style={{ fontWeight: 800, fontSize: 16, color: "#111" }}>Cozinha</span>
+              {escalonados > 0 && <span style={{ background: "#dc2626", color: "#fff", fontSize: 11, fontWeight: 800, padding: "2px 8px", borderRadius: 20 }}>{escalonados} URGENTE</span>}
+              {cancelamentos > 0 && <span style={{ background: "#ea580c", color: "#fff", fontSize: 11, fontWeight: 800, padding: "2px 8px", borderRadius: 20 }}>{cancelamentos} CANCEL.</span>}
             </div>
             <p style={{ fontSize: 11, color: "#999", margin: 0 }}>{ativos} ativo{ativos !== 1 ? "s" : ""} {ultimaAtualizacao && `· ${ultimaAtualizacao}`}</p>
           </div>
@@ -302,10 +287,8 @@ export default function PedidosPage() {
 
       <div style={{ maxWidth: 600, margin: "0 auto", padding: "12px 12px 0" }}>
 
-        {/* Erro */}
         {erro && <div style={{ background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 12, padding: "10px 14px", marginBottom: 12, fontSize: 13, color: "#dc2626" }}>{erro}</div>}
 
-        {/* Alertas urgentes */}
         {escalonados > 0 && (
           <div style={{ background: "#fef2f2", border: "2px solid #dc2626", borderRadius: 14, padding: "14px 16px", marginBottom: 12 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -318,18 +301,16 @@ export default function PedidosPage() {
           </div>
         )}
 
-        {/* Toggle bot */}
         <div style={{ background: botAtivo ? "#f0fdf4" : "#fef2f2", border: `1px solid ${botAtivo ? "#86efac" : "#fca5a5"}`, borderRadius: 14, padding: "12px 16px", marginBottom: 12, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div>
-            <p style={{ fontWeight: 700, fontSize: 14, color: "#111", margin: 0 }}>{botAtivo ? "🤖 Bot ativo" : "⏸️ Bot pausado"}</p>
-            <p style={{ fontSize: 12, color: "#666", margin: "2px 0 0" }}>{botAtivo ? "Respondendo automaticamente" : "Atendimento manual"}</p>
+            <p style={{ fontWeight: 700, fontSize: 14, color: "#111", margin: 0 }}>{botAtivo ? "🤖 Robô atendendo" : "⏸️ Robô em pausa"}</p>
+            <p style={{ fontSize: 12, color: "#666", margin: "2px 0 0" }}>{botAtivo ? "Nenhum cliente fica sem resposta" : "Você está no controle"}</p>
           </div>
           <button onClick={alternarBot} disabled={salvandoBot} style={{ position: "relative", width: 52, height: 30, borderRadius: 15, border: "none", cursor: salvandoBot ? "not-allowed" : "pointer", background: botAtivo ? "#16a34a" : "#ef4444", transition: "background 0.2s", flexShrink: 0 }}>
             <span style={{ position: "absolute", top: 3, left: botAtivo ? 25 : 3, width: 24, height: 24, borderRadius: "50%", background: "#fff", transition: "left 0.2s", boxShadow: "0 1px 4px rgba(0,0,0,0.2)" }} />
           </button>
         </div>
 
-        {/* Filtros */}
         <div style={{ display: "flex", gap: 8, marginBottom: 14, overflowX: "auto", paddingBottom: 4 }}>
           {(["todos", "novo", "em_preparo", "saiu_entrega", "entregue", "cancelado"] as const).map(s => {
             const count = contagem(s)
@@ -344,11 +325,10 @@ export default function PedidosPage() {
           })}
         </div>
 
-        {/* Lista de pedidos */}
         {pedidosFiltrados.length === 0 ? (
           <div style={{ textAlign: "center", padding: "48px 0", color: "#bbb" }}>
             <p style={{ fontSize: 40, margin: "0 0 8px" }}>🍕</p>
-            <p style={{ fontSize: 15, fontWeight: 600 }}>Nenhum pedido aqui</p>
+            <p style={{ fontSize: 15, fontWeight: 600 }}>Tudo tranquilo por aqui. 🍕</p>
           </div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -358,11 +338,8 @@ export default function PedidosPage() {
               const isCancelamento = pedido.cancelamentoSolicitado === true
               const proximoStatus = PROXIMO_STATUS[pedido.status]
               const cor = STATUS_COR[pedido.status]
-
               return (
                 <div key={pedido.id} style={{ background: isEscalonado ? "#fef2f2" : isCancelamento ? "#fff7ed" : "#fff", border: `2px solid ${isEscalonado ? "#dc2626" : isCancelamento ? "#ea580c" : cor.border}`, borderRadius: 16, overflow: "hidden", boxShadow: "0 2px 8px rgba(0,0,0,0.06)" }}>
-
-                  {/* Header do card */}
                   <div style={{ padding: "14px 16px 10px", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                     <div style={{ flex: 1 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -376,8 +353,6 @@ export default function PedidosPage() {
                       {isEscalonado ? "Urgente" : STATUS_LABEL[pedido.status]}
                     </span>
                   </div>
-
-                  {/* Itens */}
                   <div style={{ padding: "0 16px 10px" }}>
                     <p style={{ fontSize: 13, color: "#444", margin: 0, lineHeight: 1.5 }}>{pedido.itens.join(" · ")}</p>
                     {pedido.observacao && (
@@ -387,11 +362,7 @@ export default function PedidosPage() {
                     )}
                     <p style={{ fontSize: 18, fontWeight: 800, color: "#111", margin: "8px 0 0" }}>R$ {pedido.total.toFixed(2).replace(".", ",")}</p>
                   </div>
-
-                  {/* Ações */}
                   <div style={{ padding: "10px 16px 14px", borderTop: "1px solid #f0f0f0", display: "flex", flexDirection: "column", gap: 8 }}>
-
-                    {/* Urgente */}
                     {isEscalonado && (
                       <div style={{ display: "flex", gap: 8 }}>
                         <button onClick={() => assumirConversa(pedido.telefone)} style={{ flex: 1, padding: "13px 0", background: "#dc2626", color: "#fff", border: "none", borderRadius: 12, fontSize: 14, fontWeight: 800, cursor: "pointer" }}>
@@ -402,27 +373,21 @@ export default function PedidosPage() {
                         </button>
                       </div>
                     )}
-
-                    {/* Cancelamento */}
                     {isCancelamento && !isEscalonado && (
                       <button onClick={() => confirmarCancelamento(pedido.id)} disabled={atualizando === pedido.id} style={{ width: "100%", padding: "13px 0", background: "#ea580c", color: "#fff", border: "none", borderRadius: 12, fontSize: 14, fontWeight: 800, cursor: atualizando === pedido.id ? "not-allowed" : "pointer", opacity: atualizando === pedido.id ? 0.7 : 1 }}>
                         {atualizando === pedido.id ? "Cancelando..." : "⚠️ Confirmar cancelamento"}
                       </button>
                     )}
-
-                    {/* Avançar status — botão principal */}
                     {!isEscalonado && proximoStatus && (
                       <button onClick={() => avancarStatus(pedido.id, proximoStatus)} disabled={atualizando === pedido.id} style={{ width: "100%", padding: "15px 0", background: pedido.status === "novo" ? "#dc2626" : pedido.status === "em_preparo" ? "#2563eb" : "#16a34a", color: "#fff", border: "none", borderRadius: 12, fontSize: 15, fontWeight: 800, cursor: atualizando === pedido.id ? "not-allowed" : "pointer", opacity: atualizando === pedido.id ? 0.7 : 1, boxShadow: "0 3px 10px rgba(0,0,0,0.15)" }}>
                         {atualizando === pedido.id ? "Salvando..." : PROXIMO_LABEL[pedido.status]}
                       </button>
                     )}
-
-                    {/* Conversa manual */}
                     {!isEscalonado && (
                       <div style={{ display: "flex", gap: 8 }}>
                         {emManual ? (
                           <button onClick={() => devolverAoBot(pedido.telefone)} style={{ flex: 1, padding: "10px 0", background: "#f5f5f5", color: "#666", border: "1px solid #eee", borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
-                            🤖 Devolver ao bot
+                            🤖 Devolver ao robô
                           </button>
                         ) : (
                           <button onClick={() => assumirConversa(pedido.telefone)} style={{ flex: 1, padding: "10px 0", background: "#f5f5f5", color: "#666", border: "1px solid #eee", borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
@@ -440,10 +405,7 @@ export default function PedidosPage() {
       </div>
 
       <style>{`
-        @keyframes pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.6; }
-        }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
       `}</style>
     </div>
   )
