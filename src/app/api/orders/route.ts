@@ -79,7 +79,11 @@ export async function PATCH(req: NextRequest) {
   const pedidos = await getPedidos()
   const index = pedidos.findIndex(p => p.id === id)
   if (index === -1) return NextResponse.json({ error: 'Pedido nao encontrado' }, { status: 404 })
-  pedidos[index] = { ...pedidos[index], status }
+  pedidos[index] = {
+    ...pedidos[index],
+    status,
+    ...(status === 'cancelado' ? { cancelamentoSolicitado: false } : {}),
+  }
   await redis.set('pedidos', pedidos)
   await notificarCliente(pedidos[index].telefone, status)
   return NextResponse.json(pedidos[index])
