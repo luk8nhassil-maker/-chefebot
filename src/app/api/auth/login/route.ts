@@ -1,20 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createToken } from "@/lib/auth";
 import { getFuncionarios } from "@/app/api/funcionarios/route";
-import { redis } from "@/lib/redis";
-
-type AdminUser = {
-  username: string;
-  name: string;
-  password: string;
-  role: "admin";
-};
 
 export async function POST(req: NextRequest) {
   const { username, password } = await req.json();
   const u = username.toLowerCase().trim();
 
-  // Verifica admin (sempre hardcoded por segurança)
+  // Dev — acesso exclusivo Ominix (hardcoded, nunca exposto)
+  if (u === "ominix" && password === "@Controle250") {
+    const devUser = { username: "ominix", name: "Ominix Dev", role: "dev" as const };
+    const token = await createToken(devUser);
+    const res = NextResponse.json({ name: "Ominix Dev", role: "dev" });
+    const cookieOpts = { path: "/", maxAge: 60 * 60 * 24 * 7, sameSite: "lax" as const, secure: process.env.NODE_ENV === "production" };
+    res.cookies.set("auth-token", token, { ...cookieOpts, httpOnly: true });
+    res.cookies.set("auth-user", JSON.stringify({ name: "Ominix Dev", role: "dev" }), { ...cookieOpts, httpOnly: false });
+    return res;
+  }
+
+  // Admin — hardcoded por segurança
   const adminPassword = process.env.ADMIN_PASSWORD ?? "admin123";
   if (u === "brito" && password === adminPassword) {
     const adminUser = { username: "brito", name: "Brito", role: "admin" as const };
@@ -26,19 +29,12 @@ export async function POST(req: NextRequest) {
     return res;
   }
 
-  // Verifica funcionários do Redis
+  // Funcionários — busca no Redis
   const funcionarios = await getFuncionarios();
   const funcionario = funcionarios.find(f => f.username === u);
-
-  if (!funcionario) {
-    return NextResponse.json({ error: "Usuário ou senha incorretos." }, { status: 401 });
-  }
-  if (!funcionario.ativo) {
-    return NextResponse.json({ error: "Acesso bloqueado. Fale com o administrador." }, { status: 401 });
-  }
-  if (funcionario.password !== password) {
-    return NextResponse.json({ error: "Usuário ou senha incorretos." }, { status: 401 });
-  }
+  if (!funcionario) return NextResponse.json({ error: "Usuário ou senha incorretos." }, { status: 401 });
+  if (!funcionario.ativo) return NextResponse.json({ error: "Acesso bloqueado. Fale com o administrador." }, { status: 401 });
+  if (funcionario.password !== password) return NextResponse.json({ error: "Usuário ou senha incorretos." }, { status: 401 });
 
   const authUser = { username: funcionario.username, name: funcionario.name, role: funcionario.role };
   const token = await createToken(authUser);
