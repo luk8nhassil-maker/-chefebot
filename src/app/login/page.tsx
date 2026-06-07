@@ -1,7 +1,13 @@
 "use client";
-
 import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+
+function getDestino(role: string, callbackUrl: string | null): string {
+  if (callbackUrl) return callbackUrl;
+  if (role === 'dev') return '/dev';
+  if (role === 'admin') return '/admin';
+  return '/pedidos';
+}
 
 function LoginForm() {
   const router = useRouter();
@@ -18,7 +24,7 @@ function LoginForm() {
     if (match) {
       try {
         const user = JSON.parse(decodeURIComponent(match[1]));
-        router.replace(callbackUrl ?? (user.role === 'admin' ? '/admin' : '/pedidos'));
+        router.replace(getDestino(user.role, callbackUrl));
       } catch {
         router.replace(callbackUrl ?? '/pedidos');
       }
@@ -40,7 +46,8 @@ function LoginForm() {
         setError(data.error ?? "Usuário ou senha incorretos.");
         return;
       }
-      router.replace(callbackUrl ?? '/pedidos');
+      const data = await res.json();
+      router.replace(getDestino(data.role, callbackUrl));
       router.refresh();
     } catch {
       setError("Erro de conexão. Tente novamente.");
@@ -59,7 +66,6 @@ function LoginForm() {
       padding: "24px",
       fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
     }}>
-      {/* Padrão de fundo sutil */}
       <div style={{
         position: "fixed",
         inset: 0,
@@ -68,7 +74,6 @@ function LoginForm() {
       }} />
 
       <div style={{ width: "100%", maxWidth: "380px", position: "relative" }}>
-        {/* Logo */}
         <div style={{ textAlign: "center", marginBottom: "40px" }}>
           <div style={{
             width: "72px",
@@ -85,14 +90,13 @@ function LoginForm() {
             🍕
           </div>
           <h1 style={{ color: "white", fontSize: "28px", fontWeight: 700, margin: "0 0 4px", letterSpacing: "-0.5px" }}>
-            ChefBot
+            ChefeBot
           </h1>
           <p style={{ color: "rgba(255,255,255,0.4)", fontSize: "13px", margin: 0 }}>
-            Chefe da Pizza • Área restrita
+            Sua pizzaria está esperando por você.
           </p>
         </div>
 
-        {/* Card */}
         <div style={{
           background: "rgba(255,255,255,0.05)",
           backdropFilter: "blur(20px)",
@@ -101,7 +105,6 @@ function LoginForm() {
           padding: "32px",
         }}>
           <form onSubmit={handleSubmit}>
-            {/* Campo usuário */}
             <div style={{ marginBottom: "16px" }}>
               <label style={{ display: "block", color: "rgba(255,255,255,0.6)", fontSize: "12px", fontWeight: 500, marginBottom: "8px", letterSpacing: "0.5px", textTransform: "uppercase" }}>
                 Usuário
@@ -110,7 +113,7 @@ function LoginForm() {
                 type="text"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                placeholder="kellyne ou brito"
+                placeholder="seu usuário"
                 autoCapitalize="none"
                 autoCorrect="off"
                 required
@@ -131,7 +134,6 @@ function LoginForm() {
               />
             </div>
 
-            {/* Campo senha */}
             <div style={{ marginBottom: "24px" }}>
               <label style={{ display: "block", color: "rgba(255,255,255,0.6)", fontSize: "12px", fontWeight: 500, marginBottom: "8px", letterSpacing: "0.5px", textTransform: "uppercase" }}>
                 Senha
@@ -159,7 +161,6 @@ function LoginForm() {
               />
             </div>
 
-            {/* Erro */}
             {error && (
               <div style={{
                 background: "rgba(220,38,38,0.15)",
@@ -174,7 +175,6 @@ function LoginForm() {
               </div>
             )}
 
-            {/* Botão */}
             <button
               type="submit"
               disabled={loading}
@@ -198,7 +198,6 @@ function LoginForm() {
           </form>
         </div>
 
-        {/* Link simulador */}
         <p style={{ textAlign: "center", color: "rgba(255,255,255,0.3)", fontSize: "12px", marginTop: "24px" }}>
           O simulador é público e não exige login.{" "}
           <a href="/simulador" style={{ color: "rgba(251,146,60,0.8)", textDecoration: "none" }}>
