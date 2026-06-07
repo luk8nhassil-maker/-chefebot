@@ -23,7 +23,7 @@ export async function middleware(req: NextRequest) {
   try {
     const { payload } = await jwtVerify(token, getSecret());
     const role = payload.role as string;
-    if (!rule.roles.includes(role as "admin" | "atendente")) {
+    if (!rule.roles.includes(role as "admin" | "atendente" | "dev")) {
       const loginUrl = new URL("/login", req.url);
       loginUrl.searchParams.set("callbackUrl", pathname);
       return NextResponse.redirect(loginUrl);
@@ -37,5 +37,5 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/pedidos/:path*", "/relatorios/:path*", "/admin/:path*", "/api/orders/:path*"],
+  matcher: ["/pedidos/:path*", "/relatorios/:path*", "/admin/:path*", "/dev/:path*", "/api/orders/:path*", "/api/padroes/:path*", "/api/funcionarios/:path*"],
 };

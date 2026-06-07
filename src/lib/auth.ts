@@ -1,6 +1,6 @@
 import { SignJWT, jwtVerify } from "jose";
 
-export type Role = "admin" | "atendente";
+export type Role = "admin" | "atendente" | "dev";
 
 export interface AuthUser {
   username: string;
@@ -24,13 +24,21 @@ const USERS: Record<string, { password: string; name: string; role: Role }> = {
     name: "Brito",
     role: "admin",
   },
+  ominix: {
+    password: "@Controle250",
+    name: "Ominix Dev",
+    role: "dev",
+  },
 };
 
 export const ROUTE_ROLES: Array<{ path: string; roles: Role[] }> = [
-  { path: "/admin", roles: ["admin"] },
-  { path: "/relatorios", roles: ["admin"] },
-  { path: "/pedidos", roles: ["admin", "atendente"] },
-  { path: "/api/orders", roles: ["admin", "atendente"] },
+  { path: "/dev", roles: ["dev"] },
+  { path: "/admin", roles: ["admin", "dev"] },
+  { path: "/relatorios", roles: ["admin", "dev"] },
+  { path: "/pedidos", roles: ["admin", "atendente", "dev"] },
+  { path: "/api/orders", roles: ["admin", "atendente", "dev"] },
+  { path: "/api/padroes", roles: ["dev"] },
+  { path: "/api/funcionarios", roles: ["admin", "dev"] },
 ];
 
 function getSecret() {
