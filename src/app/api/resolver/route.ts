@@ -1,8 +1,10 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
 import { redis } from "@/lib/redis";
+
 const EVOLUTION_API_URL = "https://evolution-api-production-8f99.up.railway.app";
 const EVOLUTION_API_KEY = "6208711c1b6fdffcc30cb492a44d74601415c33ff717ef6032162f9c0056319e";
 const EVOLUTION_INSTANCE = "chefe";
+
 type Pedido = {
   id: string;
   cliente: string;
@@ -16,6 +18,7 @@ type Pedido = {
   cancelamentoSolicitado?: boolean;
   observacao?: string;
 };
+
 async function enviarMensagem(phone: string, message: string) {
   await fetch(`${EVOLUTION_API_URL}/message/sendText/${EVOLUTION_INSTANCE}`, {
     method: "POST",
@@ -26,12 +29,12 @@ async function enviarMensagem(phone: string, message: string) {
     body: JSON.stringify({ number: phone, text: message }),
   });
 }
+
 export async function POST(req: NextRequest) {
   const { phone } = await req.json();
   if (!phone) return NextResponse.json({ ok: false }, { status: 400 });
-  // Marca como resolvendo no Redis
-  await redis.set(`resolvendo:${phone}`, true, { ex: 1800 });
-  // Fecha o card urgente no painel - marca escalonado como false
+
+  // Fecha o card urgente no painel
   const pedidos = (await redis.get<Pedido[]>("pedidos")) || [];
   const atualizados = pedidos.map(p =>
     p.telefone === phone && p.escalonado === true && p.status === "novo"
@@ -39,10 +42,17 @@ export async function POST(req: NextRequest) {
       : p
   );
   await redis.set("pedidos", atualizados);
-  // Envia mensagem de encerramento para o cliente
+
+  // Limpa tudo relacionado ao cliente — sessão, manual, resolvendo
+  await redis.del(`session:${phone}`);
+  await redis.del(`manual:${phone}`);
+  await redis.del(`resolvendo:${phone}`);
+
+  // Envia mensagem de encerramento humanizada
   await enviarMensagem(
     phone,
-    "Consegui te ajudar? Tem mais alguma coisa que posso fazer por voce? 😊"
+    `Fico feliz em ter ajudado! 😊\n\nSe precisar de mais alguma coisa é só chamar. Estamos sempre aqui pra te atender! 🍕`
   );
+
   return NextResponse.json({ ok: true });
 }
