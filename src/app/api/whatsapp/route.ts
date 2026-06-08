@@ -57,6 +57,16 @@ function normalizar(texto: string): string {
   return texto.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
 
+function eSaudacao(texto: string): boolean {
+  const n = normalizar(texto);
+  const palavras = [
+    "boa noite", "boa tarde", "bom dia", "oi", "ola", "hello",
+    "oi boa noite", "oi boa tarde", "oi bom dia", "boa", "oii", "oiii",
+    "ei", "hey", "iae", "eai", "e ai", "tudo bem", "tudo bom",
+  ];
+  return palavras.some(p => n === p || n.startsWith(p + " ") || n.endsWith(" " + p));
+}
+
 function querCancelar(texto: string): boolean {
   const n = normalizar(texto);
   const palavras = [
@@ -80,6 +90,9 @@ function resolvido(texto: string): boolean {
     "nao quero mais nada", "so queria isso", "era so isso",
     "foi isso", "e isso", "isso mesmo", "perfeito obrigado",
     "muito obrigado", "mto obg", "mt obg", "grato", "agradeco",
+    "esta tudo certo", "ta tudo certo", "tudo certo", "tudo ok",
+    "ficou otimo", "ficou bom", "muito bom", "perfeito",
+    "esta otimo", "ta otimo", "otimo obg", "otimo valeu",
   ];
   return palavras.some(p => n.includes(p));
 }
@@ -98,6 +111,8 @@ function eDespedida(texto: string): boolean {
     "flw obg", "obg flw", "ate", "ate mais nao",
     "ajudou muito obg", "ajudou obg", "era isso obg",
     "foi otimo", "adorei", "perfeito tchau",
+    "esta tudo certo", "ta tudo certo", "tudo certo obg",
+    "tudo certo valeu", "esta tudo bem", "ta tudo bem",
   ];
   return palavras.some(p => n.includes(p));
 }
@@ -218,7 +233,7 @@ export async function POST(req: NextRequest) {
     const emManual = await redis.get<boolean>(`manual:${phone}`);
     if (emManual === true) return NextResponse.json({ ok: true });
 
-    // Verifica se está no modo pós-atendimento
+    // Modo pós-atendimento
     const resolvendo = await redis.get<boolean>(`resolvendo:${phone}`);
     if (resolvendo === true) {
       if (resolvido(messageText) || eDespedida(messageText)) {
@@ -249,9 +264,26 @@ export async function POST(req: NextRequest) {
     }
 
     const config = await getConfig();
-
     const sessionKey = `session:${phone}`;
     const savedSession = await redis.get<BotSession>(sessionKey);
+
+    // Saudação sem sessão ativa — inicia o bot normalmente
+    if (eSaudacao(messageText) && !savedSession) {
+      const historico = await redis.get<ClienteHistorico>(`cliente:${phone}`);
+      if (historico) {
+        const firstName = historico.nome.split(" ")[0];
+        const ultimoPedido = historico.ultimoPedido.join(", ");
+        const currentSession = createReturningSession(historico);
+        await enviarMensagem(phone, `Ei *${firstName}*! 😊 Da ultima vez voce pediu *${ultimoPedido}* — vai querer repetir ou montar um novo?\n\n  1. Repetir o mesmo\n  2. Quero outra coisa`);
+        await redis.set(sessionKey, currentSession, { ex: 1800 });
+        return NextResponse.json({ ok: true });
+      } else {
+        const currentSession = createInitialSession();
+        await enviarMensagem(phone, `Olá! Seja bem-vindo à *Chefe da Pizza*! 🍕\n\nPra começar, me fala seu nome?`);
+        await redis.set(sessionKey, currentSession, { ex: 1800 });
+        return NextResponse.json({ ok: true });
+      }
+    }
 
     if (eDespedida(messageText) && savedSession) {
       await redis.del(sessionKey);
@@ -272,10 +304,7 @@ export async function POST(req: NextRequest) {
         const firstName = historico.nome.split(" ")[0];
         const ultimoPedido = historico.ultimoPedido.join(", ");
         currentSession = createReturningSession(historico);
-        await enviarMensagem(
-          phone,
-          `Ei *${firstName}*! 😊 Da ultima vez voce pediu *${ultimoPedido}* — vai querer repetir ou montar um novo?\n\n  1. Repetir o mesmo\n  2. Quero outra coisa`
-        );
+        await enviarMensagem(phone, `Ei *${firstName}*! 😊 Da ultima vez voce pediu *${ultimoPedido}* — vai querer repetir ou montar um novo?\n\n  1. Repetir o mesmo\n  2. Quero outra coisa`);
         await redis.set(sessionKey, currentSession, { ex: 1800 });
         return NextResponse.json({ ok: true });
       } else {
@@ -306,7 +335,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
-    // Tenta processar normalmente primeiro
+    // Tenta processar normalmente
     let mensagemProcessada = messageText;
     const resultTeste = processMessage(messageText, currentSession);
     const botConfuso = resultTeste.messages.some(m =>
@@ -320,7 +349,6 @@ export async function POST(req: NextRequest) {
       m.includes("nao tem isso")
     );
 
-    // Se bot ficou confuso, chama Claude para interpretar
     if (botConfuso) {
       const opcoes = getOpcoesPorStep(currentSession.step);
       if (opcoes.length > 0) {
