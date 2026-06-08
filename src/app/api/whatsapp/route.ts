@@ -263,6 +263,30 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
+    // Captura avaliação de satisfação
+    const aguardandoAvaliacao = await redis.get<boolean>(`avaliacao:${phone}`);
+    if (aguardandoAvaliacao === true) {
+      const nota = parseInt(messageText.trim());
+      if (nota >= 1 && nota <= 5) {
+        await redis.del(`avaliacao:${phone}`);
+        // Salva a avaliação
+        const avaliacoes = await redis.get<Array<{phone: string, nota: number, data: string}>>('avaliacoes') || [];
+        avaliacoes.push({ phone, nota, data: new Date().toISOString() });
+        await redis.set('avaliacoes', avaliacoes);
+        const estrelas = '⭐'.repeat(nota);
+        const mensagens = [
+          `${estrelas} Obrigado pela avaliação, *${nota}/5*! 😊\n\nSeu feedback é muito importante pra gente. Volte sempre! 🍕`,
+          `${estrelas} Que bom saber! Obrigado por avaliar, *${nota}/5*! 🙏\n\nTe esperamos na próxima! 🍕`,
+          `${estrelas} Valeu pelo feedback! *${nota}/5* anotado. 😊\n\nAté a próxima! 🍕`,
+        ];
+        const msg = mensagens[Math.floor(Math.random() * mensagens.length)];
+        await enviarMensagem(phone, msg);
+        return NextResponse.json({ ok: true });
+      } else {
+        // Nota inválida — ignora e continua o fluxo normal
+        await redis.del(`avaliacao:${phone}`);
+      }
+    }
     const config = await getConfig();
     const sessionKey = `session:${phone}`;
     const savedSession = await redis.get<BotSession>(sessionKey);

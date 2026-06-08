@@ -91,5 +91,30 @@ export async function PATCH(req: NextRequest) {
   }
   await redis.set('pedidos', pedidos)
   await notificarCliente(pedidos[index].telefone, status, pedidos[index].cliente)
+
+  // Dispara pesquisa de satisfação após entrega
+  if (status === 'entregue') {
+    const phone = sanitizePhone(pedidos[index].telefone)
+    await redis.set(`avaliacao:${phone}`, true, { ex: 3600 })
+    setTimeout(async () => {
+      try {
+        const firstName = pedidos[index].cliente.split(' ')[0]
+        await fetch(`${EVOLUTION_API_URL}/message/sendText/${EVOLUTION_INSTANCE}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': EVOLUTION_API_KEY,
+          },
+          body: JSON.stringify({
+            number: phone,
+            text: `*${firstName}*, como foi sua experiência hoje? 😊\n\nAvalia nossa pizza de 1 a 5:\n\n  ⭐ 1 — Ruim\n  ⭐⭐ 2 — Regular\n  ⭐⭐⭐ 3 — Bom\n  ⭐⭐⭐⭐ 4 — Muito bom\n  ⭐⭐⭐⭐⭐ 5 — Excelente\n\nÉ só digitar o número! 😄`,
+          }),
+        })
+      } catch (err) {
+        console.error('[ChefeBot] Erro ao enviar pesquisa:', err)
+      }
+    }, 60000) // 1 minuto após entrega
+  }
+
   return NextResponse.json(pedidos[index])
 }
