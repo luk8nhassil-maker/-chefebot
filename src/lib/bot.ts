@@ -231,6 +231,14 @@ function buildReceipt(session: BotSession): string {
 function neighborhoodList(): string {
   return MENU.neighborhoods.map((n, i) => `  ${i + 1}. ${n.name} - ${formatCurrency(n.fee)}`).join("\n");
 }
+function eVoltar(n: string): boolean {
+  return n === "voltar" || n === "volta" || n === "errei" ||
+    n.includes("quero mudar") || n.includes("mudei") || n.includes("voltar") ||
+    n.includes("volta") || n.includes("errei") || n.includes("corrigir") ||
+    n.includes("corrige") || n.includes("muda isso") || n.includes("nao era isso") ||
+    n.includes("nao e isso") || n.includes("troquei") || n.includes("me enganei") ||
+    n.includes("me equivoquei") || n.includes("errou") || n.includes("trocei");
+}
 function handleCategory(category: string, session: BotSession): BotResponse {
   if (category === "pizza") {
     return {
@@ -327,6 +335,40 @@ export function processMessage(input: string, session: BotSession): BotResponse 
       return { messages: [`Opa, deixa eu explicar melhor! 😊\n\n${dica}`], session: resetaTentativas(session) };
     }
   }
+
+  // Detector global de voltar
+  if (eVoltar(n) && !["welcome", "name", "returning", "category", "escalado", "done", "add_more", "lanche_escolha", "bebida_escolha", "suco_escolha"].includes(session.step)) {
+    switch (session.step) {
+      case "flavor":
+        return { messages: [`Tudo bem! Qual o tamanho da pizza então? 😊\n\n  1. Pequena (P) - R$ 35,00\n  2. Média (M) - R$ 40,00\n  3. Grande (G) - R$ 50,00\n  4. Família (F) - R$ 55,00`], session: resetaTentativas({ ...session, step: "size", currentFlavor: undefined }) };
+      case "border_escolha":
+      case "segundo_sabor": {
+        const saltyList = MENU.saltyFlavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n");
+        const sweetList = MENU.sweetFlavors.map((f, i) => `  ${MENU.saltyFlavors.length + i + 1}. ${f}`).join("\n");
+        return { messages: [`Tudo bem! Qual o sabor então? 😊\n\nSalgadas\n${saltyList}\n\nDoces\n${sweetList}`], session: resetaTentativas({ ...session, step: "flavor", currentFlavor: undefined }) };
+      }
+      case "observacao":
+        return { messages: [`Tudo bem! Vai querer mais alguma coisa? 😊\n\n  1. Mais uma pizza\n  2. Outro produto\n  3. Não, pode fechar`], session: resetaTentativas({ ...session, step: "add_more" }) };
+      case "delivery_type":
+        return { messages: [`Tudo bem! Tem algum detalhe especial pro pedido? ✏️\n\nSe não tiver é só digitar *0*`], session: resetaTentativas({ ...session, step: "observacao" }) };
+      case "neighborhood":
+        return { messages: [`Tudo bem! Como prefere receber? 😊\n\n  1. Entrega (delivery) 🛵\n  2. Buscar na loja 🏪`], session: resetaTentativas({ ...session, step: "delivery_type" }) };
+      case "address":
+        return { messages: [`Tudo bem! Qual seu bairro? 🛵\n\n${neighborhoodList()}`], session: resetaTentativas({ ...session, step: "neighborhood" }) };
+      case "payment":
+        if (session.deliveryType === "pickup") {
+          return { messages: [`Tudo bem! Como prefere receber? 😊\n\n  1. Entrega (delivery) 🛵\n  2. Buscar na loja 🏪`], session: resetaTentativas({ ...session, step: "delivery_type" }) };
+        }
+        return { messages: [`Tudo bem! Me passa o endereço completo:\n_(Rua, número e complemento)_`], session: resetaTentativas({ ...session, step: "address" }) };
+      case "confirm": {
+        const payList = MENU.payments.map((p, i) => `  ${i + 1}. ${p}`).join("\n");
+        return { messages: [`Tudo bem! Como vai pagar? 💸\n\n${payList}`], session: resetaTentativas({ ...session, step: "payment", paymentMethod: undefined }) };
+      }
+      default:
+        return { messages: [`Tudo bem! ${mensagemCategorias()}`], session: resetaTentativas({ ...session, step: "category" }) };
+    }
+  }
+
   switch (session.step) {
     case "escalado": {
       return { messages: [`Já avisamos e vêm aí em breve! Só aguarda. 😊`], session };
