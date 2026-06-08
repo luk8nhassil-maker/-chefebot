@@ -1,6 +1,7 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
 import { processMessage, createInitialSession, createReturningSession, BotSession, ClienteHistorico } from "@/lib/bot";
 import { redis } from "@/lib/redis";
+import { interpretarMensagem } from "@/lib/claude";
 
 type Pedido = {
   id: string;
@@ -99,6 +100,20 @@ function eDespedida(texto: string): boolean {
     "foi otimo", "adorei", "perfeito tchau",
   ];
   return palavras.some(p => n.includes(p));
+}
+
+function getOpcoesPorStep(step: string): string[] {
+  const opcoes: Record<string, string[]> = {
+    category: ["pizza", "lanche", "bebida", "suco"],
+    size: ["Pequena", "Media", "Grande", "Familia"],
+    add_more: ["mais uma pizza", "outro produto", "nao pode fechar"],
+    delivery_type: ["entrega", "retirada"],
+    payment: ["Pix", "Dinheiro", "Cartao"],
+    confirm: ["sim confirmar", "nao retirar"],
+    border_escolha: ["Catupiry", "Chocolate", "Cheddar", "Catupiry com Cheddar", "sem borda"],
+    returning: ["repetir o mesmo", "quero outra coisa"],
+  };
+  return opcoes[step] || [];
 }
 
 async function salvarPedido(session: BotSession, phone: string, config: ConfigPizzaria): Promise<string> {
@@ -203,18 +218,16 @@ export async function POST(req: NextRequest) {
     const emManual = await redis.get<boolean>(`manual:${phone}`);
     if (emManual === true) return NextResponse.json({ ok: true });
 
-    // Verifica se está no modo pós-atendimento (resolvendo)
+    // Verifica se está no modo pós-atendimento
     const resolvendo = await redis.get<boolean>(`resolvendo:${phone}`);
     if (resolvendo === true) {
       if (resolvido(messageText) || eDespedida(messageText)) {
-        // Cliente confirmou que está satisfeito — limpa tudo e encerra
         await redis.del(`resolvendo:${phone}`);
         await redis.del(`manual:${phone}`);
         await redis.del(`session:${phone}`);
         await fecharEscalonamento(phone);
         await enviarMensagem(phone, `Fico feliz em ter ajudado! 😊\n\nQualquer coisa é só chamar. Estamos sempre aqui! 🍕`);
       } else {
-        // Cliente quer continuar — volta ao bot normalmente
         await redis.del(`resolvendo:${phone}`);
         await redis.del(`manual:${phone}`);
         await redis.del(`session:${phone}`);
@@ -237,9 +250,9 @@ export async function POST(req: NextRequest) {
 
     const config = await getConfig();
 
-    // Detector de despedida - só ativa se houver sessão ativa
     const sessionKey = `session:${phone}`;
     const savedSession = await redis.get<BotSession>(sessionKey);
+
     if (eDespedida(messageText) && savedSession) {
       await redis.del(sessionKey);
       await enviarMensagem(phone, `Ate mais! Volte sempre! 😊🍕`);
@@ -293,7 +306,32 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
-    const result = processMessage(messageText, currentSession);
+    // Tenta processar normalmente primeiro
+    let mensagemProcessada = messageText;
+    const resultTeste = processMessage(messageText, currentSession);
+    const botConfuso = resultTeste.messages.some(m =>
+      m.includes("nao entendi") ||
+      m.includes("nao achei") ||
+      m.includes("Ops") ||
+      m.includes("Eita") ||
+      m.includes("Opa") ||
+      m.includes("nao peguei") ||
+      m.includes("Hmm") ||
+      m.includes("nao tem isso")
+    );
+
+    // Se bot ficou confuso, chama Claude para interpretar
+    if (botConfuso) {
+      const opcoes = getOpcoesPorStep(currentSession.step);
+      if (opcoes.length > 0) {
+        const interpretado = await interpretarMensagem(messageText, currentSession.step, opcoes);
+        if (interpretado) {
+          mensagemProcessada = interpretado;
+        }
+      }
+    }
+
+    const result = processMessage(mensagemProcessada, currentSession);
 
     if (
       currentSession.step === "confirm" &&
