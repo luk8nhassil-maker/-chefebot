@@ -403,13 +403,19 @@ export function processMessage(input: string, session: BotSession): BotResponse 
         if (dois) {
           const flavorFinal = `${dois[0]}/${dois[1]}`;
           return {
-            messages: [`Pizza *${size}* meio a meio *${dois[0]}* e *${dois[1]}*! Ótima pedida! 😋\n\nVai querer borda recheada? Olha as opções 👇\n\n${listaBordas(size)}`],
+            messages: [
+              `Pizza *${size}* meio a meio *${dois[0]}* e *${dois[1]}*! Ótima pedida! 😋`,
+              `Vai querer borda recheada? Olha as opções 👇\n\n${listaBordas(size)}`
+            ],
             session: resetaTentativas({ ...session, step: "border_escolha", currentSize: size, currentFlavor: flavorFinal }),
           };
         }
       }
       return {
-        messages: [`Pizza *${size}* anotada! 👌 Agora me conta — qual o sabor?\n\nSalgadas\n${saltyList}\n\nDoces\n${sweetList}`],
+        messages: [
+          `Pizza *${size}* anotada! 👌`,
+          `Agora me conta — qual o sabor? 😋\n\nSalgadas\n${saltyList}\n\nDoces\n${sweetList}`
+        ],
         session: resetaTentativas({ ...session, step: "flavor", currentSize: size }),
       };
     }
@@ -422,7 +428,10 @@ export function processMessage(input: string, session: BotSession): BotResponse 
         if (dois) {
           const flavorFinal = `${dois[0]}/${dois[1]}`;
           return {
-            messages: [`Meio a meio *${dois[0]}* e *${dois[1]}*! Que combinação! 😋\n\nVai querer borda recheada? Olha as opções 👇\n\n${listaBordas(session.currentSize!)}`],
+            messages: [
+              `Meio a meio *${dois[0]}* e *${dois[1]}*! Que combinação! 😋`,
+              `Vai querer borda recheada? Olha as opções 👇\n\n${listaBordas(session.currentSize!)}`
+            ],
             session: resetaTentativas({ ...session, step: "border_escolha", currentFlavor: flavorFinal }),
           };
         }
@@ -440,7 +449,10 @@ export function processMessage(input: string, session: BotSession): BotResponse 
         return respostaInvalida(`Salgadas\n${saltyList}\n\nDoces\n${sweetList}`, session);
       }
       return {
-        messages: [`*${flavor}*! Excelente escolha! 🤤\n\nVai querer borda recheada? Olha as opções 👇\n\n${listaBordas(session.currentSize!)}`],
+        messages: [
+          `*${flavor}*! Excelente escolha! 🤤`,
+          `Vai querer borda recheada? Olha as opções 👇\n\n${listaBordas(session.currentSize!)}`
+        ],
         session: resetaTentativas({ ...session, step: "border_escolha", currentFlavor: flavor }),
       };
     }
@@ -481,7 +493,10 @@ export function processMessage(input: string, session: BotSession): BotResponse 
       }
       const flavorFinal = `${session.currentFlavor}/${flavor2}`;
       return {
-        messages: [`Meio a meio *${session.currentFlavor}* e *${flavor2}*! Que combinação! 😋\n\nVai querer borda recheada?\n\n${listaBordas(session.currentSize!)}`],
+        messages: [
+          `Meio a meio *${session.currentFlavor}* e *${flavor2}*! Que combinação! 😋`,
+          `Vai querer borda recheada?\n\n${listaBordas(session.currentSize!)}`
+        ],
         session: resetaTentativas({ ...session, step: "border_escolha", currentFlavor: flavorFinal }),
       };
     }
@@ -496,7 +511,10 @@ export function processMessage(input: string, session: BotSession): BotResponse 
         const newCart = [...session.cart, newItem];
         const subtotal = cartSubtotal(newCart);
         return {
-          messages: [`Combinado, sem borda! 😄\n\n🛒 *Anotado no seu pedido!*\n\n${resumoCarrinho(newCart)}\n\n  Subtotal: ${formatCurrency(subtotal)}\n\nVai querer mais alguma coisa? Aproveita! 😄\n\n  1. Mais uma pizza\n  2. Outro produto\n  3. Não, pode fechar`],
+          messages: [
+            `Combinado, sem borda! 😄`,
+            `🛒 *Anotado no seu pedido!*\n\n${resumoCarrinho(newCart)}\n\n  Subtotal: ${formatCurrency(subtotal)}\n\nVai querer mais alguma coisa? Aproveita! 😄\n\n  1. Mais uma pizza\n  2. Outro produto\n  3. Não, pode fechar`
+          ],
           session: resetaTentativas({ ...session, step: "add_more", cart: newCart, currentSize: undefined, currentFlavor: undefined }),
         };
       }
@@ -522,7 +540,10 @@ export function processMessage(input: string, session: BotSession): BotResponse 
       const newCart = [...session.cart, newItem];
       const subtotal = cartSubtotal(newCart);
       return {
-        messages: [`Borda de *${borderLabel}* anotada! 🤤\n\n🛒 *Anotado no seu pedido!*\n\n${resumoCarrinho(newCart)}\n\n  Subtotal: ${formatCurrency(subtotal)}\n\nVai querer mais alguma coisa? Aproveita! 😄\n\n  1. Mais uma pizza\n  2. Outro produto\n  3. Não, pode fechar`],
+        messages: [
+          `Borda de *${borderLabel}* anotada! 🤤`,
+          `🛒 *Anotado no seu pedido!*\n\n${resumoCarrinho(newCart)}\n\n  Subtotal: ${formatCurrency(subtotal)}\n\nVai querer mais alguma coisa? Aproveita! 😄\n\n  1. Mais uma pizza\n  2. Outro produto\n  3. Não, pode fechar`
+        ],
         session: resetaTentativas({ ...session, step: "add_more", cart: newCart, currentSize: undefined, currentFlavor: undefined }),
       };
     }
