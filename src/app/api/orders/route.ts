@@ -21,18 +21,23 @@ const PEDIDOS_INICIAIS: Pedido[] = [
 const EVOLUTION_API_URL = 'https://evolution-api-production-8f99.up.railway.app'
 const EVOLUTION_API_KEY = '6208711c1b6fdffcc30cb492a44d74601415c33ff717ef6032162f9c0056319e'
 const EVOLUTION_INSTANCE = 'chefe'
-const MENSAGENS_STATUS: Partial<Record<Status, string>> = {
-  em_preparo: 'Boa noticia! Seu pedido ja esta sendo preparado. Em breve fica prontinho!',
-  saiu_entrega: 'Seu pedido saiu para entrega! Ja ja esta ai. Obrigado pela preferencia!',
-  entregue: 'Pedido entregue! Esperamos que tenha gostado. Volte sempre!',
+function getMensagemStatus(status: Status, nomeCliente: string): string | null {
+  const firstName = nomeCliente.split(' ')[0];
+  const mensagens: Partial<Record<Status, string>> = {
+    em_preparo: `*${firstName}*, boa notícia! 🍕 Seu pedido já está sendo preparado com muito carinho.\n\nEm breve fica prontinho!`,
+    saiu_entrega: `*${firstName}*, seu pedido saiu pra entrega! 🛵\n\nJá já chega aí. Obrigado pela preferência!`,
+    entregue: `*${firstName}*, pedido entregue! 😊\n\nEsperamos que tenha curtido muito. Volte sempre que quiser — estamos aqui! 🍕`,
+    cancelado: `*${firstName}*, seu pedido foi cancelado conforme solicitado.\n\nQualquer dúvida é só chamar. 😊`,
+  };
+  return mensagens[status] ?? null;
 }
 function sanitizePhone(telefone: string): string {
   const digits = telefone.replace(/\D/g, '')
   if (digits.startsWith('55') && digits.length >= 12) return digits
   return '55' + digits
 }
-async function notificarCliente(telefone: string, status: Status): Promise<void> {
-  const mensagem = MENSAGENS_STATUS[status]
+async function notificarCliente(telefone: string, status: Status, nomeCliente: string): Promise<void> {
+  const mensagem = getMensagemStatus(status, nomeCliente)
   if (!mensagem) return
   const phone = sanitizePhone(telefone)
   try {
@@ -85,6 +90,6 @@ export async function PATCH(req: NextRequest) {
     ...(status === 'cancelado' ? { cancelamentoSolicitado: false } : {}),
   }
   await redis.set('pedidos', pedidos)
-  await notificarCliente(pedidos[index].telefone, status)
+  await notificarCliente(pedidos[index].telefone, status, pedidos[index].cliente)
   return NextResponse.json(pedidos[index])
 }
