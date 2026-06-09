@@ -187,14 +187,17 @@ export default function AdminPage() {
     })
   }, [router])
 
-  const pedidosFiltrados = filtraPorPeriodo(pedidos, periodo).filter(p => !p.escalonado)
-  const faturamento = pedidosFiltrados.reduce((s, p) => s + (p.total || 0), 0)
-  const ticketMedio = pedidosFiltrados.length > 0 ? faturamento / pedidosFiltrados.length : 0
-  const telefonesTotal = pedidos.filter(p => !p.escalonado).reduce((acc: Record<string, number>, p) => {
+  const pedidosFiltrados = filtraPorPeriodo(pedidos, periodo).filter(p => !p.escalonado && p.status !== 'cancelado')
+  const faturamento = pedidosFiltrados.filter(p => p.status === 'entregue').reduce((s, p) => s + (p.total || 0), 0)
+  const ticketMedio = pedidosFiltrados.filter(p => p.status === 'entregue').length > 0
+    ? faturamento / pedidosFiltrados.filter(p => p.status === 'entregue').length
+    : 0
+  const telefonesTotal = pedidos.filter(p => !p.escalonado && p.status === 'entregue').reduce((acc: Record<string, number>, p) => {
     acc[p.telefone] = (acc[p.telefone] || 0) + 1
     return acc
   }, {})
   const recorrentes = Object.values(telefonesTotal).filter(v => v > 1).length
+  const totalEntregues = pedidosFiltrados.filter(p => p.status === 'entregue').length
 
   const toggle24h = async () => {
     const novaConfig = is24h ? { ...config, horaAbertura: 18, horaFechamento: 23 } : { ...config, horaAbertura: 0, horaFechamento: 24 }
@@ -329,17 +332,18 @@ export default function AdminPage() {
           ))}
         </div>
 
+        {/* Métricas */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 24 }}>
           <div style={{ background: 'rgba(255,215,0,0.08)', border: '1px solid rgba(255,215,0,0.25)', borderRadius: 14, padding: 18 }}>
-            <p style={{ color: 'rgba(255,215,0,0.6)', fontSize: 11, margin: '0 0 6px', fontWeight: 700, textTransform: 'uppercase' }}>💰 Voce ganhou hoje</p>
+            <p style={{ color: 'rgba(255,215,0,0.6)', fontSize: 11, margin: '0 0 6px', fontWeight: 700, textTransform: 'uppercase' }}>💰 Voce ganhou</p>
             <p style={{ color: '#ffd700', fontSize: 22, fontWeight: 800, margin: 0 }}>R$ {faturamento.toFixed(2).replace('.', ',')}</p>
           </div>
           <div style={{ background: 'rgba(99,179,237,0.08)', border: '1px solid rgba(99,179,237,0.25)', borderRadius: 14, padding: 18 }}>
-            <p style={{ color: 'rgba(99,179,237,0.6)', fontSize: 11, margin: '0 0 6px', fontWeight: 700, textTransform: 'uppercase' }}>🍕 Pizzas vendidas</p>
-            <p style={{ color: '#63b3ed', fontSize: 22, fontWeight: 800, margin: 0 }}>{pedidosFiltrados.length}</p>
+            <p style={{ color: 'rgba(99,179,237,0.6)', fontSize: 11, margin: '0 0 6px', fontWeight: 700, textTransform: 'uppercase' }}>🍕 Pizzas entregues</p>
+            <p style={{ color: '#63b3ed', fontSize: 22, fontWeight: 800, margin: 0 }}>{totalEntregues}</p>
           </div>
           <div style={{ background: 'rgba(159,122,234,0.08)', border: '1px solid rgba(159,122,234,0.25)', borderRadius: 14, padding: 18 }}>
-            <p style={{ color: 'rgba(159,122,234,0.6)', fontSize: 11, margin: '0 0 6px', fontWeight: 700, textTransform: 'uppercase' }}>🎯 Por pizza em media</p>
+            <p style={{ color: 'rgba(159,122,234,0.6)', fontSize: 11, margin: '0 0 6px', fontWeight: 700, textTransform: 'uppercase' }}>🎯 Ticket medio</p>
             <p style={{ color: '#9f7aea', fontSize: 22, fontWeight: 800, margin: 0 }}>R$ {ticketMedio.toFixed(2).replace('.', ',')}</p>
           </div>
           <div style={{ background: 'rgba(104,211,145,0.08)', border: '1px solid rgba(104,211,145,0.25)', borderRadius: 14, padding: 18 }}>
@@ -370,46 +374,10 @@ export default function AdminPage() {
           </div>
         </div>
 
-        <div style={{ marginBottom: 28 }}>
-          <h2 style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12, fontWeight: 700, marginBottom: 12, textTransform: 'uppercase', letterSpacing: 1 }}>
-            Pedidos — {periodo === 'hoje' ? 'Hoje' : periodo === 'ontem' ? 'Ontem' : 'Esta semana'}
-          </h2>
-          {loading ? (
-            <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 24, textAlign: 'center' }}>
-              <p style={{ color: 'rgba(255,255,255,0.25)', margin: 0 }}>Carregando...</p>
-            </div>
-          ) : pedidosFiltrados.length === 0 ? (
-            <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 24, textAlign: 'center' }}>
-              <p style={{ color: 'rgba(255,255,255,0.25)', margin: 0 }}>Nenhuma pizza vendida ainda. O dia ainda vai comecar! 🍕</p>
-            </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {[...pedidosFiltrados].reverse().map(p => (
-                <div key={p.id} style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 12, padding: 16 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
-                    <div>
-                      <p style={{ color: '#fff', fontWeight: 700, margin: 0, fontSize: 14 }}>{p.cliente}</p>
-                      <p style={{ color: 'rgba(255,255,255,0.35)', fontSize: 12, margin: '2px 0 0' }}>{p.horario} · {p.endereco}</p>
-                    </div>
-                    <span style={{ background: (statusColor[p.status] || '#888') + '22', color: statusColor[p.status] || '#888', fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20, whiteSpace: 'nowrap', marginLeft: 8 }}>
-                      {statusLabel[p.status] || p.status}
-                    </span>
-                  </div>
-                  <p style={{ color: 'rgba(255,255,255,0.45)', fontSize: 12, margin: '0 0 6px' }}>{p.itens.join(', ')}</p>
-                  {p.observacao && <p style={{ color: '#f6e05e', fontSize: 12, margin: '0 0 6px' }}>✏️ {p.observacao}</p>}
-                  {p.cancelamentoSolicitado && <p style={{ color: '#fc8181', fontSize: 12, margin: '0 0 6px' }}>⚠️ Cancelamento solicitado</p>}
-                  <p style={{ color: '#ffd700', fontWeight: 800, fontSize: 15, margin: 0 }}>R$ {(p.total || 0).toFixed(2).replace('.', ',')}</p>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
+        {/* Ranking */}
         {ranking.length > 0 && (
-          <div style={{ marginBottom: 28 }}>
-            <h2 style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12, fontWeight: 700, marginBottom: 12, textTransform: 'uppercase', letterSpacing: 1 }}>
-              🏆 Mais Pedidos
-            </h2>
+          <div style={{ marginBottom: 24 }}>
+            <h2 style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12, fontWeight: 700, marginBottom: 12, textTransform: 'uppercase', letterSpacing: 1 }}>🏆 Mais Pedidos</h2>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {ranking.slice(0, 5).map((item, i) => (
                 <div key={i} style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 12, padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
