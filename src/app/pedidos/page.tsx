@@ -1,4 +1,4 @@
-﻿"use client"
+"use client"
 import { useEffect, useState, useRef } from "react"
 import { useRouter } from "next/navigation"
 
@@ -49,21 +49,85 @@ function tempoDesde(horario: string): string {
   } catch { return "" }
 }
 
-function tocarSom() {
+// Contexto de áudio global — desbloqueado no primeiro toque do usuário
+let audioCtx: AudioContext | null = null
+
+function getAudioContext(): AudioContext | null {
+  if (typeof window === "undefined") return null
+  if (!audioCtx) {
+    try {
+      audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)()
+    } catch { return null }
+  }
+  // Resume se estava suspenso (mobile)
+  if (audioCtx.state === "suspended") {
+    audioCtx.resume().catch(() => {})
+  }
+  return audioCtx
+}
+
+function desbloquearAudio() {
+  // Cria e toca um buffer silencioso para desbloquear o AudioContext no mobile
+  const ctx = getAudioContext()
+  if (!ctx) return
   try {
-    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)()
-    const master = ctx.createGain(); master.gain.setValueAtTime(0.7, ctx.currentTime); master.connect(ctx.destination)
-    ;[0, 0.7, 1.4].forEach(t => {
-      const o1 = ctx.createOscillator(), o2 = ctx.createOscillator(), g = ctx.createGain()
-      o1.connect(g); o2.connect(g); g.connect(master)
-      o1.type = "sine"; o2.type = "sine"
-      o1.frequency.setValueAtTime(900, ctx.currentTime + t); o2.frequency.setValueAtTime(1800, ctx.currentTime + t)
-      g.gain.setValueAtTime(0, ctx.currentTime + t)
-      g.gain.linearRampToValueAtTime(0.8, ctx.currentTime + t + 0.02)
-      g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + t + 0.55)
-      o1.start(ctx.currentTime + t); o1.stop(ctx.currentTime + t + 0.6)
-      o2.start(ctx.currentTime + t); o2.stop(ctx.currentTime + t + 0.6)
-    })
+    const buf = ctx.createBuffer(1, 1, 22050)
+    const src = ctx.createBufferSource()
+    src.buffer = buf
+    src.connect(ctx.destination)
+    src.start(0)
+  } catch {}
+}
+
+function tocarSom(urgente = false) {
+  try {
+    const ctx = getAudioContext()
+    if (!ctx) return
+
+    const master = ctx.createGain()
+    master.gain.setValueAtTime(0.75, ctx.currentTime)
+    master.connect(ctx.destination)
+
+    if (urgente) {
+      // Som urgente (escalonado): 4 bipes rápidos e agressivos
+      ;[0, 0.18, 0.36, 0.54].forEach(t => {
+        const o = ctx.createOscillator()
+        const g = ctx.createGain()
+        o.connect(g); g.connect(master)
+        o.type = "square"
+        o.frequency.setValueAtTime(880, ctx.currentTime + t)
+        o.frequency.exponentialRampToValueAtTime(1200, ctx.currentTime + t + 0.08)
+        g.gain.setValueAtTime(0, ctx.currentTime + t)
+        g.gain.linearRampToValueAtTime(0.9, ctx.currentTime + t + 0.01)
+        g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + t + 0.15)
+        o.start(ctx.currentTime + t)
+        o.stop(ctx.currentTime + t + 0.16)
+      })
+    } else {
+      // Som Pavlov — 3 notas ascendentes (Dó5 → Mi5 → Sol#5)
+      // Condicionamento positivo: "pedido chegou!"
+      const notas = [
+        { freq: 523.25, t: 0.0 },   // Dó5
+        { freq: 659.25, t: 0.18 },  // Mi5
+        { freq: 830.61, t: 0.36 },  // Sol#5
+      ]
+      notas.forEach(({ freq, t }) => {
+        // Oscilador principal (sine) + harmônico (triangle) para timbre de sino
+        const o1 = ctx.createOscillator()
+        const o2 = ctx.createOscillator()
+        const g = ctx.createGain()
+        o1.connect(g); o2.connect(g); g.connect(master)
+        o1.type = "sine"
+        o2.type = "triangle"
+        o1.frequency.setValueAtTime(freq, ctx.currentTime + t)
+        o2.frequency.setValueAtTime(freq * 2.01, ctx.currentTime + t) // leve batimento
+        g.gain.setValueAtTime(0, ctx.currentTime + t)
+        g.gain.linearRampToValueAtTime(0.85, ctx.currentTime + t + 0.015) // ataque rápido
+        g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + t + 0.55) // ressonância
+        o1.start(ctx.currentTime + t); o1.stop(ctx.currentTime + t + 0.6)
+        o2.start(ctx.currentTime + t); o2.stop(ctx.currentTime + t + 0.6)
+      })
+    }
   } catch {}
 }
 
@@ -116,6 +180,12 @@ export default function PedidosPage() {
     const user = getUserInfo()
     if (user) setIsAdmin(user.role === "admin" || user.role === "dev")
     if ("Notification" in window && Notification.permission === "default") Notification.requestPermission()
+
+    // Desbloqueia o AudioContext no primeiro toque/clique (obrigatório no mobile)
+    const unlock = () => { desbloquearAudio(); window.removeEventListener("touchstart", unlock); window.removeEventListener("click", unlock) }
+    window.addEventListener("touchstart", unlock, { once: true })
+    window.addEventListener("click", unlock, { once: true })
+
     carregarPedidos()
     carregarStatusBot()
     const intervalo = setInterval(carregarPedidos, 10000)
@@ -174,9 +244,9 @@ export default function PedidosPage() {
           if (anteriores.length > 0) {
             const chegaram = data.filter((p: Pedido) => !anteriores.includes(p.id))
             if (chegaram.length > 0) {
-              tocarSom()
               const temEsc = chegaram.some((p: Pedido) => p.escalonado)
               const temCanc = chegaram.some((p: Pedido) => p.cancelamentoSolicitado)
+              tocarSom(temEsc) // urgente = true se houver escalação
               if (temEsc) { addToast("🚨 URGENTE! Cliente precisa de você!", "error"); iniciarPiscar() }
               else if (temCanc) addToast("⚠️ Cancelamento solicitado!", "warning")
               else addToast(`🍕 ${chegaram.length} novo${chegaram.length > 1 ? "s" : ""} pedido${chegaram.length > 1 ? "s" : ""}!`, "success")
