@@ -568,13 +568,13 @@ export default function AdminPage() {
                         </button>
                       </div>
                     </div>
-                    <div style={{ display: 'flex', gap: 8 }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                       <input type="text" placeholder="Nome" value={nomes[f.username] ?? f.name} onChange={e => setNomes(prev => ({ ...prev, [f.username]: e.target.value }))}
-                        style={{ flex: 1, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '8px 10px', color: '#fff', fontSize: 13, outline: 'none' }} />
+                        style={{ width: '100%', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '8px 10px', color: '#fff', fontSize: 13, outline: 'none', boxSizing: 'border-box' }} />
                       <input type="password" placeholder="Nova senha" value={senhas[f.username] ?? ''} onChange={e => setSenhas(prev => ({ ...prev, [f.username]: e.target.value }))}
-                        style={{ flex: 1, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '8px 10px', color: '#fff', fontSize: 13, outline: 'none' }} />
-                      <button onClick={() => salvarFuncionario(f.username)} disabled={salvandoFunc === f.username} style={{ background: 'rgba(255,215,0,0.12)', border: '1px solid rgba(255,215,0,0.3)', color: '#ffd700', borderRadius: 8, padding: '8px 12px', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>
-                        {salvandoFunc === f.username ? '⏳' : '💾'}
+                        style={{ width: '100%', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '8px 10px', color: '#fff', fontSize: 13, outline: 'none', boxSizing: 'border-box' }} />
+                      <button onClick={() => salvarFuncionario(f.username)} disabled={salvandoFunc === f.username} style={{ width: '100%', background: 'linear-gradient(135deg, #b7950b, #ffd700)', border: 'none', color: '#000', borderRadius: 8, padding: '10px', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>
+                        {salvandoFunc === f.username ? 'Salvando...' : '💾 Salvar'}
                       </button>
                     </div>
                   </div>
