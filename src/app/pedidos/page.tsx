@@ -103,7 +103,7 @@ function getUserInfo(): { name: string; role: string } | null {
 export default function PedidosPage() {
   const router = useRouter()
   const [pedidos, setPedidos] = useState<Pedido[]>([])
-  const [filtro, setFiltro] = useState<Status | "todos">("todos")
+  const [filtro, setFiltro] = useState<Status | "todos">("novo")
   const [loading, setLoading] = useState(true)
   const [userName, setUserName] = useState("")
   const [isAdmin, setIsAdmin] = useState(false)
@@ -236,7 +236,9 @@ export default function PedidosPage() {
     }
     setAtualizando(null)
   }
-  const contagem = (s: Status | "todos") => s === "todos" ? pedidos.filter(p => !p.escalonado).length : pedidos.filter(p => p.status === s && !p.escalonado).length
+  const contagem = (s: Status | "todos") => s === "todos"
+    ? pedidos.filter(p => !p.escalonado).length
+    : pedidos.filter(p => p.status === s && !p.escalonado).length
   const pedidosFiltrados = (filtro === "todos" ? pedidos : pedidos.filter(p => p.status === filtro)).sort((a, b) => {
     if (a.escalonado && !b.escalonado) return -1
     if (!a.escalonado && b.escalonado) return 1
@@ -246,21 +248,23 @@ export default function PedidosPage() {
   const ativos = pedidos.filter(p => !["entregue", "cancelado"].includes(p.status) && !p.escalonado).length
   const escalonados = pedidos.filter(p => p.escalonado && p.status === "novo").length
   const cancelamentos = pedidos.filter(p => p.cancelamentoSolicitado && p.status !== "cancelado").length
+  const eAtivo = (s: Status) => !["entregue", "cancelado"].includes(s)
 
   if (loading) return (
     <div style={{ minHeight: "100vh", background: "#111", display: "flex", alignItems: "center", justifyContent: "center" }}>
       <p style={{ color: "#fff" }}>Carregando...</p>
     </div>
   )
+
   return (
-    <div style={{ minHeight: "100vh", background: "#f8f8f8", paddingBottom: 32 }}>
+    <div style={{ minHeight: "100vh", background: "#f3f4f6", paddingBottom: 32 }}>
       {notificacao && (
         <div style={{ position: "fixed", top: 16, left: 16, right: 16, zIndex: 9999, background: notificacao.includes("URGENTE") ? "#dc2626" : notificacao.includes("⚠️") ? "#ea580c" : "#16a34a", color: "#fff", padding: "14px 16px", borderRadius: 14, fontWeight: 700, fontSize: 15, textAlign: "center", boxShadow: "0 4px 20px rgba(0,0,0,0.2)" }}>
           {notificacao}
         </div>
       )}
 
-      <div style={{ background: "#fff", borderBottom: "1px solid #eee", padding: "12px 16px", position: "sticky", top: 0, zIndex: 100, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+      <div style={{ background: "#fff", borderBottom: "1px solid #e5e7eb", padding: "12px 16px", position: "sticky", top: 0, zIndex: 100, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ fontSize: 22 }}>🍕</span>
           <div>
@@ -269,7 +273,10 @@ export default function PedidosPage() {
               {escalonados > 0 && <span style={{ background: "#dc2626", color: "#fff", fontSize: 11, fontWeight: 800, padding: "2px 8px", borderRadius: 20 }}>{escalonados} URGENTE</span>}
               {cancelamentos > 0 && <span style={{ background: "#ea580c", color: "#fff", fontSize: 11, fontWeight: 800, padding: "2px 8px", borderRadius: 20 }}>{cancelamentos} CANCEL.</span>}
             </div>
-            <p style={{ fontSize: 11, color: "#999", margin: 0 }}>{ativos} ativo{ativos !== 1 ? "s" : ""} {ultimaAtualizacao && `· ${ultimaAtualizacao}`}</p>
+            <p style={{ fontSize: 11, color: "#9ca3af", margin: 0 }}>
+              {ativos} ativo{ativos !== 1 ? "s" : ""}
+              {ultimaAtualizacao && ` · atualizado ${ultimaAtualizacao}`}
+            </p>
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -278,7 +285,7 @@ export default function PedidosPage() {
               👑
             </button>
           )}
-          <button onClick={() => fetch("/api/auth/logout", { method: "POST" }).then(() => router.push("/login"))} style={{ background: "#f5f5f5", border: "1px solid #eee", color: "#666", borderRadius: 8, padding: "6px 10px", cursor: "pointer", fontSize: 12 }}>
+          <button onClick={() => fetch("/api/auth/logout", { method: "POST" }).then(() => router.push("/login"))} style={{ background: "#f5f5f5", border: "1px solid #e5e7eb", color: "#666", borderRadius: 8, padding: "6px 10px", cursor: "pointer", fontSize: 12 }}>
             Sair
           </button>
         </div>
@@ -303,7 +310,7 @@ export default function PedidosPage() {
         <div style={{ background: botAtivo ? "#f0fdf4" : "#fef2f2", border: `1px solid ${botAtivo ? "#86efac" : "#fca5a5"}`, borderRadius: 14, padding: "12px 16px", marginBottom: 12, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div>
             <p style={{ fontWeight: 700, fontSize: 14, color: "#111", margin: 0 }}>{botAtivo ? "🤖 Robô atendendo" : "⏸️ Robô em pausa"}</p>
-            <p style={{ fontSize: 12, color: "#666", margin: "2px 0 0" }}>{botAtivo ? "Nenhum cliente fica sem resposta" : "Você está no controle"}</p>
+            <p style={{ fontSize: 12, color: "#6b7280", margin: "2px 0 0" }}>{botAtivo ? "Nenhum cliente fica sem resposta" : "Você está no controle"}</p>
           </div>
           <button onClick={alternarBot} disabled={salvandoBot} style={{ position: "relative", width: 52, height: 30, borderRadius: 15, border: "none", cursor: salvandoBot ? "not-allowed" : "pointer", background: botAtivo ? "#16a34a" : "#ef4444", transition: "background 0.2s", flexShrink: 0 }}>
             <span style={{ position: "absolute", top: 3, left: botAtivo ? 25 : 3, width: 24, height: 24, borderRadius: "50%", background: "#fff", transition: "left 0.2s", boxShadow: "0 1px 4px rgba(0,0,0,0.2)" }} />
@@ -311,13 +318,21 @@ export default function PedidosPage() {
         </div>
 
         <div style={{ display: "flex", gap: 8, marginBottom: 14, overflowX: "auto", paddingBottom: 4 }}>
-          {(["todos", "novo", "em_preparo", "saiu_entrega", "entregue", "cancelado"] as const).map(s => {
-            const count = contagem(s)
-            const labels: Record<string, string> = { todos: "Todos", novo: "Novos", em_preparo: "Preparo", saiu_entrega: "Entrega", entregue: "Entregues", cancelado: "Cancelados" }
-            const ativo = filtro === s
+          {([
+            { key: "novo", label: "🔥 Novos" },
+            { key: "em_preparo", label: "👨‍🍳 Preparo" },
+            { key: "saiu_entrega", label: "🛵 Entrega" },
+            { key: "entregue", label: "✅ Entregues" },
+            { key: "cancelado", label: "❌ Cancelados" },
+            { key: "todos", label: "📋 Todos" },
+          ] as { key: Status | "todos"; label: string }[]).map(({ key, label }) => {
+            const count = contagem(key)
+            const ativo = filtro === key
+            const temUrgencia = key === "novo" && (escalonados > 0 || cancelamentos > 0)
+            const borderFiltro = temUrgencia && !ativo ? "2px solid #fca5a5" : "none"
             return (
-              <button key={s} onClick={() => setFiltro(s)} style={{ flexShrink: 0, padding: "7px 14px", borderRadius: 20, border: "none", cursor: "pointer", fontWeight: 700, fontSize: 13, background: ativo ? "#dc2626" : "#fff", color: ativo ? "#fff" : "#666", boxShadow: ativo ? "0 2px 8px rgba(220,38,38,0.3)" : "0 1px 3px rgba(0,0,0,0.08)", display: "flex", alignItems: "center", gap: 5 }}>
-                {labels[s]}
+              <button key={key} onClick={() => setFiltro(key)} style={{ flexShrink: 0, padding: "8px 14px", borderRadius: 20, border: borderFiltro, cursor: "pointer", fontWeight: 700, fontSize: 13, background: ativo ? "#dc2626" : temUrgencia ? "#fff3f3" : "#fff", color: ativo ? "#fff" : temUrgencia ? "#dc2626" : "#555", boxShadow: ativo ? "0 2px 8px rgba(220,38,38,0.3)" : "0 1px 3px rgba(0,0,0,0.08)", display: "flex", alignItems: "center", gap: 5 }}>
+                {label}
                 {count > 0 && <span style={{ background: ativo ? "#fff" : "#dc2626", color: ativo ? "#dc2626" : "#fff", fontSize: 11, fontWeight: 800, padding: "1px 6px", borderRadius: 10 }}>{count}</span>}
               </button>
             )
@@ -327,7 +342,9 @@ export default function PedidosPage() {
         {pedidosFiltrados.length === 0 ? (
           <div style={{ textAlign: "center", padding: "48px 0", color: "#bbb" }}>
             <p style={{ fontSize: 40, margin: "0 0 8px" }}>🍕</p>
-            <p style={{ fontSize: 15, fontWeight: 600 }}>Tudo tranquilo por aqui. 🍕</p>
+            <p style={{ fontSize: 15, fontWeight: 600, color: "#9ca3af" }}>
+              {filtro === "novo" ? "Nenhum pedido novo. Tudo em dia! 😊" : "Nenhum pedido nessa categoria."}
+            </p>
           </div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -338,8 +355,12 @@ export default function PedidosPage() {
               const proximoStatus = PROXIMO_STATUS[pedido.status]
               const cor = STATUS_COR[pedido.status]
               const tempo = tempoDesde(pedido.horario)
+              const ativo = eAtivo(pedido.status)
               return (
-                <div key={pedido.id} style={{ background: isEscalonado ? "#fef2f2" : isCancelamento ? "#fff7ed" : "#fff", border: `2px solid ${isEscalonado ? "#dc2626" : isCancelamento ? "#ea580c" : cor.border}`, borderRadius: 16, overflow: "hidden", boxShadow: "0 2px 8px rgba(0,0,0,0.06)" }}>
+                <div key={pedido.id} style={{ background: isEscalonado ? "#fff5f5" : isCancelamento ? "#fff7ed" : ativo ? "#fff" : "#fafafa", border: `2px solid ${isEscalonado ? "#dc2626" : isCancelamento ? "#ea580c" : ativo ? cor.border : "#e5e7eb"}`, borderRadius: 16, overflow: "hidden", boxShadow: ativo ? "0 2px 8px rgba(0,0,0,0.08)" : "none", opacity: ativo ? 1 : 0.7 }}>
+                  {ativo && !isEscalonado && (
+                    <div style={{ height: 4, background: cor.border, width: "100%" }} />
+                  )}
                   <div style={{ padding: "14px 16px 10px", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                     <div style={{ flex: 1 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -347,63 +368,67 @@ export default function PedidosPage() {
                         {isEscalonado && <span style={{ background: "#dc2626", color: "#fff", fontSize: 11, fontWeight: 800, padding: "2px 8px", borderRadius: 20 }}>🚨 URGENTE</span>}
                         {isCancelamento && !isEscalonado && <span style={{ background: "#ea580c", color: "#fff", fontSize: 11, fontWeight: 800, padding: "2px 8px", borderRadius: 20 }}>⚠️ CANCELAMENTO</span>}
                       </div>
-                      <p style={{ fontSize: 12, color: "#888", margin: "3px 0 0" }}>
+                      <p style={{ fontSize: 12, color: "#9ca3af", margin: "3px 0 0" }}>
                         {pedido.horario}
-                        {tempo && <span style={{ color: pedido.status === "novo" ? "#dc2626" : "#aaa", fontWeight: pedido.status === "novo" ? 700 : 400 }}> · {tempo}</span>}
-                        {" · "}{pedido.endereco}
+                        {tempo && <span style={{ color: pedido.status === "novo" ? "#dc2626" : "#9ca3af", fontWeight: pedido.status === "novo" ? 700 : 400 }}> · {tempo}</span>}
+                        {pedido.endereco && pedido.endereco !== "-" && ` · ${pedido.endereco}`}
                       </p>
                     </div>
                     <span style={{ background: isEscalonado ? "#dc2626" : cor.bg, color: isEscalonado ? "#fff" : cor.text, border: `1px solid ${isEscalonado ? "#dc2626" : cor.border}`, fontSize: 12, fontWeight: 700, padding: "4px 10px", borderRadius: 20, whiteSpace: "nowrap", marginLeft: 8 }}>
                       {isEscalonado ? "Urgente" : STATUS_LABEL[pedido.status]}
                     </span>
                   </div>
-                  <div style={{ padding: "0 16px 10px" }}>
-                    <p style={{ fontSize: 13, color: "#444", margin: 0, lineHeight: 1.5 }}>{pedido.itens.join(" · ")}</p>
+                  <div style={{ padding: "0 16px 12px" }}>
+                    <p style={{ fontSize: 13, color: "#374151", margin: 0, lineHeight: 1.6, fontWeight: ativo ? 600 : 400 }}>{pedido.itens.join(" · ")}</p>
                     {pedido.observacao && (
                       <div style={{ background: "#fffbeb", border: "1px solid #fcd34d", borderRadius: 8, padding: "6px 10px", marginTop: 8 }}>
-                        <p style={{ fontSize: 12, color: "#92400e", margin: 0 }}>✏️ {pedido.observacao}</p>
+                        <p style={{ fontSize: 12, color: "#92400e", margin: 0, fontWeight: 600 }}>✏️ {pedido.observacao}</p>
                       </div>
                     )}
-                    <p style={{ fontSize: 18, fontWeight: 800, color: "#111", margin: "8px 0 0" }}>R$ {pedido.total.toFixed(2).replace(".", ",")}</p>
+                    <p style={{ fontSize: 17, fontWeight: 800, color: ativo ? "#111" : "#9ca3af", margin: "8px 0 0" }}>
+                      R$ {pedido.total.toFixed(2).replace(".", ",")}
+                    </p>
                   </div>
-                  <div style={{ padding: "10px 16px 14px", borderTop: "1px solid #f0f0f0", display: "flex", flexDirection: "column", gap: 8 }}>
-                    {isEscalonado && (
-                      <div style={{ display: "flex", gap: 8 }}>
-                        <button onClick={() => assumirConversa(pedido.telefone)} style={{ flex: 1, padding: "13px 0", background: "#dc2626", color: "#fff", border: "none", borderRadius: 12, fontSize: 14, fontWeight: 800, cursor: "pointer" }}>
-                          📱 Atender agora
-                        </button>
-                        <button onClick={() => marcarResolvido(pedido.telefone, pedido.id)} style={{ flex: 1, padding: "13px 0", background: "#16a34a", color: "#fff", border: "none", borderRadius: 12, fontSize: 14, fontWeight: 800, cursor: "pointer" }}>
-                          ✅ Resolvido
-                        </button>
-                      </div>
-                    )}
-                    {isCancelamento && !isEscalonado && (
-                      <button onClick={() => confirmarCancelamento(pedido.id)} disabled={atualizando === pedido.id} style={{ width: "100%", padding: "13px 0", background: "#ea580c", color: "#fff", border: "none", borderRadius: 12, fontSize: 14, fontWeight: 800, cursor: atualizando === pedido.id ? "not-allowed" : "pointer", opacity: atualizando === pedido.id ? 0.7 : 1 }}>
-                        {atualizando === pedido.id ? "Cancelando..." : "⚠️ Confirmar cancelamento"}
-                      </button>
-                    )}
-                    {!isEscalonado && proximoStatus && (
-                      <button onClick={() => avancarStatus(pedido.id, proximoStatus)} disabled={atualizando === pedido.id} style={{ width: "100%", padding: "13px 0", background: "#dc2626", color: "#fff", border: "none", borderRadius: 12, fontSize: 14, fontWeight: 800, cursor: atualizando === pedido.id ? "not-allowed" : "pointer", opacity: atualizando === pedido.id ? 0.7 : 1 }}>
-                        {atualizando === pedido.id ? "Atualizando..." : PROXIMO_LABEL[pedido.status]}
-                      </button>
-                    )}
-                    {!isEscalonado && (
-                      <div style={{ display: "flex", gap: 8 }}>
-                        <button onClick={() => window.open("https://wa.me/" + pedido.telefone, "_blank")} style={{ flex: 1, padding: "10px 0", background: "#f0fdf4", color: "#16a34a", border: "1px solid #86efac", borderRadius: 12, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
-                          💬 Abrir conversa
-                        </button>
-                        {emManual ? (
-                          <button onClick={() => devolverAoBot(pedido.telefone)} style={{ flex: 1, padding: "10px 0", background: "#eff6ff", color: "#1d4ed8", border: "1px solid #93c5fd", borderRadius: 12, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
-                            🤖 Devolver ao bot
+                  {(ativo || isEscalonado) && (
+                    <div style={{ padding: "10px 16px 14px", borderTop: "1px solid #f3f4f6", display: "flex", flexDirection: "column", gap: 8 }}>
+                      {isEscalonado && (
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <button onClick={() => assumirConversa(pedido.telefone)} style={{ flex: 1, padding: "13px 0", background: "#dc2626", color: "#fff", border: "none", borderRadius: 12, fontSize: 14, fontWeight: 800, cursor: "pointer" }}>
+                            📱 Atender agora
                           </button>
-                        ) : (
-                          <button onClick={() => assumirConversa(pedido.telefone)} style={{ flex: 1, padding: "10px 0", background: "#fef2f2", color: "#dc2626", border: "1px solid #fca5a5", borderRadius: 12, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
-                            📱 Assumir conversa
+                          <button onClick={() => marcarResolvido(pedido.telefone, pedido.id)} style={{ flex: 1, padding: "13px 0", background: "#16a34a", color: "#fff", border: "none", borderRadius: 12, fontSize: 14, fontWeight: 800, cursor: "pointer" }}>
+                            ✅ Resolvido
                           </button>
-                        )}
-                      </div>
-                    )}
-                  </div>
+                        </div>
+                      )}
+                      {isCancelamento && !isEscalonado && (
+                        <button onClick={() => confirmarCancelamento(pedido.id)} disabled={atualizando === pedido.id} style={{ width: "100%", padding: "13px 0", background: "#ea580c", color: "#fff", border: "none", borderRadius: 12, fontSize: 14, fontWeight: 800, cursor: atualizando === pedido.id ? "not-allowed" : "pointer", opacity: atualizando === pedido.id ? 0.7 : 1 }}>
+                          {atualizando === pedido.id ? "Cancelando..." : "⚠️ Confirmar cancelamento"}
+                        </button>
+                      )}
+                      {!isEscalonado && proximoStatus && (
+                        <button onClick={() => avancarStatus(pedido.id, proximoStatus)} disabled={atualizando === pedido.id} style={{ width: "100%", padding: "14px 0", background: "linear-gradient(135deg, #dc2626, #b91c1c)", color: "#fff", border: "none", borderRadius: 12, fontSize: 15, fontWeight: 800, cursor: atualizando === pedido.id ? "not-allowed" : "pointer", opacity: atualizando === pedido.id ? 0.7 : 1, boxShadow: "0 3px 10px rgba(220,38,38,0.3)" }}>
+                          {atualizando === pedido.id ? "Atualizando..." : PROXIMO_LABEL[pedido.status]}
+                        </button>
+                      )}
+                      {!isEscalonado && (
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <button onClick={() => window.open("https://wa.me/" + pedido.telefone, "_blank")} style={{ flex: 1, padding: "10px 0", background: "#f0fdf4", color: "#16a34a", border: "1px solid #86efac", borderRadius: 12, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+                            💬 Abrir conversa
+                          </button>
+                          {emManual ? (
+                            <button onClick={() => devolverAoBot(pedido.telefone)} style={{ flex: 1, padding: "10px 0", background: "#eff6ff", color: "#1d4ed8", border: "1px solid #93c5fd", borderRadius: 12, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+                              🤖 Devolver ao bot
+                            </button>
+                          ) : (
+                            <button onClick={() => assumirConversa(pedido.telefone)} style={{ flex: 1, padding: "10px 0", background: "#fef2f2", color: "#dc2626", border: "1px solid #fca5a5", borderRadius: 12, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+                              📱 Assumir conversa
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )
             })}
