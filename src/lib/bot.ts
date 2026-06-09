@@ -542,30 +542,72 @@ export function processMessage(input: string, session: BotSession): BotResponse 
       const mudanca = tentaMudanca(text, session);
       if (mudanca) return mudanca;
       const size = detectaTamanho(n);
-      if (!size) return respostaInvalida(`  1. Pequena (P) - R$ 35,00\n  2. Média (M) - R$ 40,00\n  3. Grande (G) - R$ 50,00\n  4. Família (F) - R$ 55,00`, session);
       const allFlavors = [...MENU.saltyFlavors, ...MENU.sweetFlavors];
       const saltyList = MENU.saltyFlavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n");
       const sweetList = MENU.sweetFlavors.map((f, i) => `  ${MENU.saltyFlavors.length + i + 1}. ${f}`).join("\n");
-      if (permiteMeioAMeio(size)) {
-        const dois = detectaDoisSabores(n, allFlavors);
-        if (dois) {
-          const flavorFinal = `${dois[0]}/${dois[1]}`;
+
+      if (size) {
+        const saborJunto = detectaSaborDaMensagem(n);
+        if (saborJunto) {
+          const bordaJunta = detectaBordaDaMensagem(n);
+          if (bordaJunta) {
+            const basePrice = getSizePrice(size);
+            const borderPrice = bordaJunta !== "Sem borda" ? getBorderPrice(size) : 0;
+            const itemPrice = basePrice + borderPrice;
+            const newItem: CartItem = { category: "pizza", name: "Pizza", size, flavor: saborJunto, border: bordaJunta, price: itemPrice };
+            const newCart = [...session.cart, newItem];
+            const subtotal = cartSubtotal(newCart);
+            return {
+              messages: [
+                `Pizza *${size}* de *${saborJunto}* com borda de *${bordaJunta}*! 🤤`,
+                `🛒 *Anotado no seu pedido!*\n\n${resumoCarrinho(newCart)}\n\n  Subtotal: ${formatCurrency(subtotal)}\n\nVai querer mais alguma coisa? Aproveita! 😄\n\n  1. Mais uma pizza\n  2. Outro produto\n  3. Não, pode fechar`
+              ],
+              session: resetaTentativas({ ...session, step: "add_more", cart: newCart, currentSize: undefined, currentFlavor: undefined }),
+            };
+          }
           return {
             messages: [
-              `Pizza *${size}* meio a meio *${dois[0]}* e *${dois[1]}*! Ótima pedida! 😋`,
+              `Pizza *${size}* de *${saborJunto}*! 😋`,
               `Vai querer borda recheada? Olha as opções 👇\n\n${listaBordas(size)}`
             ],
-            session: resetaTentativas({ ...session, step: "border_escolha", currentSize: size, currentFlavor: flavorFinal }),
+            session: resetaTentativas({ ...session, step: "border_escolha", currentSize: size, currentFlavor: saborJunto }),
           };
         }
+        if (permiteMeioAMeio(size)) {
+          const dois = detectaDoisSabores(n, allFlavors);
+          if (dois) {
+            const flavorFinal = `${dois[0]}/${dois[1]}`;
+            return {
+              messages: [
+                `Pizza *${size}* meio a meio *${dois[0]}* e *${dois[1]}*! Ótima pedida! 😋`,
+                `Vai querer borda recheada? Olha as opções 👇\n\n${listaBordas(size)}`
+              ],
+              session: resetaTentativas({ ...session, step: "border_escolha", currentSize: size, currentFlavor: flavorFinal }),
+            };
+          }
+        }
+        return {
+          messages: [
+            `Pizza *${size}* anotada! 👌`,
+            `Agora me conta — qual o sabor? 😋\n\nSalgadas\n${saltyList}\n\nDoces\n${sweetList}`
+          ],
+          session: resetaTentativas({ ...session, step: "flavor", currentSize: size }),
+        };
       }
-      return {
-        messages: [
-          `Pizza *${size}* anotada! 👌`,
-          `Agora me conta — qual o sabor? 😋\n\nSalgadas\n${saltyList}\n\nDoces\n${sweetList}`
-        ],
-        session: resetaTentativas({ ...session, step: "flavor", currentSize: size }),
-      };
+
+      // Cliente digitou só o sabor sem tamanho
+      const saborSemTamanho = detectaSaborDaMensagem(n);
+      if (saborSemTamanho) {
+        return {
+          messages: [
+            `*${saborSemTamanho}*, ótima escolha! 😋`,
+            `Qual o tamanho da pizza?\n\n  1. Pequena (P) - R$ 35,00\n  2. Média (M) - R$ 40,00\n  3. Grande (G) - R$ 50,00\n  4. Família (F) - R$ 55,00`
+          ],
+          session: resetaTentativas({ ...session, step: "size", currentFlavor: saborSemTamanho }),
+        };
+      }
+
+      return respostaInvalida(`  1. Pequena (P) - R$ 35,00\n  2. Média (M) - R$ 40,00\n  3. Grande (G) - R$ 50,00\n  4. Família (F) - R$ 55,00`, session);
     }
     case "flavor": {
       const mudanca = tentaMudanca(text, session);
@@ -595,6 +637,10 @@ export function processMessage(input: string, session: BotSession): BotResponse 
         const saltyList = MENU.saltyFlavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n");
         const sweetList = MENU.sweetFlavors.map((f, i) => `  ${MENU.saltyFlavors.length + i + 1}. ${f}`).join("\n");
         return respostaInvalida(`Salgadas\n${saltyList}\n\nDoces\n${sweetList}`, session);
+      }
+      // Se já tem sabor salvo (veio do size), usa o tamanho do size
+      if (session.currentFlavor && !flavor) {
+        flavor = session.currentFlavor;
       }
       return {
         messages: [
