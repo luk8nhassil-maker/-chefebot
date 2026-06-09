@@ -2,6 +2,7 @@
 import { processMessage, createInitialSession, createReturningSession, BotSession, ClienteHistorico } from "@/lib/bot";
 import { redis } from "@/lib/redis";
 import { interpretarMensagem } from "@/lib/claude";
+import { log } from "@/lib/logger";
 
 type Pedido = {
   id: string;
@@ -463,6 +464,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
   } catch (error) {
     console.error("Webhook error:", error);
+    await log('erro', 'Erro no webhook WhatsApp', String(error));
     return NextResponse.json({ ok: true });
   }
 }
