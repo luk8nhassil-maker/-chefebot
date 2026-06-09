@@ -23,6 +23,7 @@ type ConfigPizzaria = {
   horaAbertura: number;
   horaFechamento: number;
   chavePix: string;
+  limitePico: number;
 };
 
 const CONFIG_PADRAO: ConfigPizzaria = {
@@ -30,6 +31,7 @@ const CONFIG_PADRAO: ConfigPizzaria = {
   horaAbertura: 18,
   horaFechamento: 23,
   chavePix: "",
+  limitePico: 0,
 };
 
 async function getConfig(): Promise<ConfigPizzaria> {
@@ -256,7 +258,7 @@ export async function POST(req: NextRequest) {
     const emManual = await redis.get<boolean>(`manual:${phone}`);
     if (emManual === true) return NextResponse.json({ ok: true });
 
-    // Protecao contra spam — max 3 mensagens por segundo por numero
+    // Protecao contra spam
     const spamKey = `spam:${phone}`;
     const spamCount = await redis.get<number>(spamKey) || 0;
     if (spamCount >= 3) return NextResponse.json({ ok: true });
@@ -301,7 +303,6 @@ export async function POST(req: NextRequest) {
         const avaliacoes = await redis.get<Array<{phone: string, nota: number, data: string}>>('avaliacoes') || [];
         avaliacoes.push({ phone, nota, data: new Date().toISOString() });
         await redis.set('avaliacoes', avaliacoes);
-        const estrelas = 'estrela'.repeat(nota);
         const mensagens = [
           `Obrigado pela avaliacao, *${nota}/5*! 😊\n\nSeu feedback e muito importante pra gente. Volte sempre! 🍕`,
           `Que bom saber! Obrigado por avaliar, *${nota}/5*! 🙏\n\nTe esperamos na proxima! 🍕`,
@@ -417,12 +418,24 @@ export async function POST(req: NextRequest) {
     const stepAnterior = currentSession.step;
     const result = processMessage(mensagemProcessada, currentSession);
 
-    if (
-      currentSession.step === "confirm" &&
-      (messageText.trim() === "1" || messageText.trim().toLowerCase() === "sim")
-    ) {
+    // Verifica pico e injeta mensagem na confirmacao
+    if (currentSession.step === "confirm" &&
+      (messageText.trim() === "1" || messageText.trim().toLowerCase() === "sim")) {
       const pedidoId = await salvarPedido(currentSession, phone, config);
       result.session = { ...result.session, pedidoId } as any;
+
+      // Verificar horario de pico
+      if (config.limitePico > 0) {
+        const pedidosAtivos = (await redis.get<Pedido[]>("pedidos") || [])
+          .filter(p => p.status === "em_preparo" && !p.escalonado).length;
+        if (pedidosAtivos >= config.limitePico) {
+          result.messages = result.messages.map(msg =>
+            msg.includes("Pedido confirmado") ?
+              msg + `\n\n🔥 *Estamos com bastante movimento agora!* Seu pedido pode demorar um pouquinho mais que o normal. Obrigado pela paciencia! 😊`
+              : msg
+          );
+        }
+      }
     }
 
     if (result.escalar) {
