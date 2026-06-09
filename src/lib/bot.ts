@@ -165,6 +165,51 @@ function detectaTamanho(n: string): string | null {
   if (n === "f") return "F";
   return null;
 }
+function detectaTamanhoDaMensagem(n: string): string | null {
+  if (n.includes("pequen") || n.includes(" p ") || n.includes(" p,") || n.includes(" p.")) return "P";
+  if (n.includes("medi") || n.includes(" m ") || n.includes(" m,") || n.includes(" m.")) return "M";
+  if (n.includes("grand") || n.includes(" g ") || n.includes(" g,") || n.includes(" g.")) return "G";
+  if (n.includes("famil") || n.includes(" f ") || n.includes(" f,") || n.includes(" f.")) return "F";
+  return null;
+}
+function detectaBordaDaMensagem(n: string): string | null {
+  if (n.includes("catupiry com cheddar") || n.includes("catupiry cheddar")) return "Catupiry com Cheddar";
+  if (n.includes("catupiry")) return "Catupiry";
+  if (n.includes("chocolate")) return "Chocolate";
+  if (n.includes("cheddar")) return "Cheddar";
+  if (n.includes("sem borda") || n.includes("nao quero borda") || n.includes("sem bord")) return "Sem borda";
+  return null;
+}
+function detectaSaborDaMensagem(n: string): string | null {
+  const allFlavors = [...MENU.saltyFlavors, ...MENU.sweetFlavors];
+  return allFlavors.find(f => n.includes(normalizar(f))) ?? null;
+}
+type PedidoCompleto = {
+  size: string;
+  flavor: string;
+  border: string;
+}
+function detectaPedidoCompleto(text: string): PedidoCompleto | null {
+  const n = normalizar(text);
+  const size = detectaTamanhoDaMensagem(n);
+  const flavor = detectaSaborDaMensagem(n);
+  if (!size || !flavor) return null;
+  const border = detectaBordaDaMensagem(n) ?? "Sem borda";
+  return { size, flavor, border };
+}
+type PedidoParcial = {
+  size?: string;
+  flavor?: string;
+  border?: string;
+}
+function detectaPedidoParcial(text: string): PedidoParcial | null {
+  const n = normalizar(text);
+  const size = detectaTamanhoDaMensagem(n);
+  const flavor = detectaSaborDaMensagem(n);
+  const border = detectaBordaDaMensagem(n);
+  if (!size && !flavor && !border) return null;
+  return { size: size ?? undefined, flavor: flavor ?? undefined, border: border ?? undefined };
+}
 function nomeCategoriaAtual(step: BotStep, currentCategory?: string): string {
   if (currentCategory === "pizza" || step === "size" || step === "flavor" || step === "segundo_sabor" || step === "border" || step === "border_escolha") return "pizza";
   if (currentCategory === "lanche" || step === "lanche_escolha" || step === "lanche_flavor" || step === "lanche_macarronada_size") return "lanche";
@@ -400,6 +445,24 @@ export function processMessage(input: string, session: BotSession): BotResponse 
     case "name": {
       if (!text || text.length < 2) return respostaInvalida("Me fala seu nome pra eu te atender melhor!", session);
       const firstName = text.split(" ")[0];
+      const pedidoCompleto = detectaPedidoCompleto(text);
+      if (pedidoCompleto) {
+        const { size, flavor, border } = pedidoCompleto;
+        const basePrice = getSizePrice(size);
+        const borderPrice = border !== "Sem borda" ? getBorderPrice(size) : 0;
+        const itemPrice = basePrice + borderPrice;
+        const newItem: CartItem = { category: "pizza", name: "Pizza", size, flavor, border, price: itemPrice };
+        const newCart = [newItem];
+        const subtotal = cartSubtotal(newCart);
+        return {
+          messages: [
+            `Prazer, *${firstName}*! 😊`,
+            `Pizza *${size}* de *${flavor}* com borda de *${border}* anotada! 🤤`,
+            `🛒 *Anotado no seu pedido!*\n\n${resumoCarrinho(newCart)}\n\n  Subtotal: ${formatCurrency(subtotal)}\n\nVai querer mais alguma coisa? Aproveita! 😄\n\n  1. Mais uma pizza\n  2. Outro produto\n  3. Não, pode fechar`
+          ],
+          session: resetaTentativas({ ...session, step: "add_more", cart: newCart, customerName: text, currentCategory: "pizza" }),
+        };
+      }
       const intencao = detectaIntencaoDireta(text);
       if (intencao) {
         const response = handleCategory(intencao.category, { ...session, step: "category", customerName: text });
@@ -419,6 +482,49 @@ export function processMessage(input: string, session: BotSession): BotResponse 
       else if (n === "4" || n.includes("suco") || n.includes("vitamina")) category = "suco";
       else if (intencao) category = intencao.category;
       if (!category) return respostaInvalida(mensagemCategorias(), session);
+
+      if (category === "pizza") {
+        const pedidoCompleto = detectaPedidoCompleto(text);
+        if (pedidoCompleto) {
+          const { size, flavor, border } = pedidoCompleto;
+          const basePrice = getSizePrice(size);
+          const borderPrice = border !== "Sem borda" ? getBorderPrice(size) : 0;
+          const itemPrice = basePrice + borderPrice;
+          const newItem: CartItem = { category: "pizza", name: "Pizza", size, flavor, border, price: itemPrice };
+          const newCart = [...session.cart, newItem];
+          const subtotal = cartSubtotal(newCart);
+          return {
+            messages: [
+              `Pizza *${size}* de *${flavor}* com borda de *${border}* anotada! 🤤`,
+              `🛒 *Anotado no seu pedido!*\n\n${resumoCarrinho(newCart)}\n\n  Subtotal: ${formatCurrency(subtotal)}\n\nVai querer mais alguma coisa? Aproveita! 😄\n\n  1. Mais uma pizza\n  2. Outro produto\n  3. Não, pode fechar`
+            ],
+            session: resetaTentativas({ ...session, step: "add_more", cart: newCart, currentCategory: "pizza", currentSize: undefined, currentFlavor: undefined }),
+          };
+        }
+        const pedidoParcial = detectaPedidoParcial(text);
+        if (pedidoParcial?.size && pedidoParcial?.flavor) {
+          const { size, flavor } = pedidoParcial;
+          return {
+            messages: [
+              `Pizza *${size}* de *${flavor}*! 😋`,
+              `Vai querer borda recheada? Olha as opções 👇\n\n${listaBordas(size)}`
+            ],
+            session: resetaTentativas({ ...session, step: "border_escolha", currentCategory: "pizza", currentSize: size, currentFlavor: flavor }),
+          };
+        }
+        if (pedidoParcial?.size) {
+          const { size } = pedidoParcial;
+          const saltyList = MENU.saltyFlavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n");
+          const sweetList = MENU.sweetFlavors.map((f, i) => `  ${MENU.saltyFlavors.length + i + 1}. ${f}`).join("\n");
+          return {
+            messages: [
+              `Pizza *${size}* anotada! 👌`,
+              `Agora me conta — qual o sabor? 😋\n\nSalgadas\n${saltyList}\n\nDoces\n${sweetList}`
+            ],
+            session: resetaTentativas({ ...session, step: "flavor", currentCategory: "pizza", currentSize: size }),
+          };
+        }
+      }
       return { ...handleCategory(category, session), session: resetaTentativas(handleCategory(category, session).session) };
     }
     case "confirmando_mudanca": {
