@@ -21,6 +21,7 @@ type Config = {
   horaAbertura: number
   horaFechamento: number
   chavePix: string
+  nomeTitularPix?: string
   limitePico?: number
 }
 
@@ -235,6 +236,7 @@ export default function AdminPage() {
       const senha = senhas[username]
       const res = await fetch('/api/funcionarios', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, name: nome, password: senha || undefined }) })
       if (res.ok) { setMensagem('✅ Funcionario atualizado!'); setTimeout(() => setMensagem(''), 3000) }
+      else { setMensagem('❌ Erro ao salvar.'); setTimeout(() => setMensagem(''), 3000) }
     } catch { setMensagem('❌ Erro ao salvar.'); setTimeout(() => setMensagem(''), 3000) }
     finally { setSalvandoFunc(null) }
   }
@@ -341,7 +343,6 @@ export default function AdminPage() {
           ))}
         </div>
 
-        {/* Métricas */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 24 }}>
           <div style={{ background: 'rgba(255,215,0,0.08)', border: '1px solid rgba(255,215,0,0.25)', borderRadius: 14, padding: 18 }}>
             <p style={{ color: 'rgba(255,215,0,0.6)', fontSize: 11, margin: '0 0 6px', fontWeight: 700, textTransform: 'uppercase' }}>💰 Voce ganhou</p>
@@ -367,23 +368,16 @@ export default function AdminPage() {
                 <p style={{ color: 'rgba(255,255,255,0.3)', fontSize: 11, margin: '2px 0 0' }}>{avaliacoes.total} avaliacoes</p>
               </div>
               <div style={{ flex: 1 }}>
-                {avaliacoes.media > 0 && (
-                  <p style={{ color: '#ffd700', fontSize: 18, margin: '0 0 6px' }}>{'⭐'.repeat(Math.round(avaliacoes.media))}</p>
-                )}
+                {avaliacoes.media > 0 && <p style={{ color: '#ffd700', fontSize: 18, margin: '0 0 6px' }}>{'⭐'.repeat(Math.round(avaliacoes.media))}</p>}
                 {avaliacoes.ultimas.slice(0, 3).map((a, i) => (
-                  <p key={i} style={{ color: 'rgba(255,255,255,0.3)', fontSize: 11, margin: '2px 0' }}>
-                    {'⭐'.repeat(a.nota)} · {new Date(a.data).toLocaleDateString('pt-BR')}
-                  </p>
+                  <p key={i} style={{ color: 'rgba(255,255,255,0.3)', fontSize: 11, margin: '2px 0' }}>{'⭐'.repeat(a.nota)} · {new Date(a.data).toLocaleDateString('pt-BR')}</p>
                 ))}
-                {avaliacoes.total === 0 && (
-                  <p style={{ color: 'rgba(255,255,255,0.2)', fontSize: 12, margin: 0 }}>Nenhuma avaliacao ainda</p>
-                )}
+                {avaliacoes.total === 0 && <p style={{ color: 'rgba(255,255,255,0.2)', fontSize: 12, margin: 0 }}>Nenhuma avaliacao ainda</p>}
               </div>
             </div>
           </div>
         </div>
 
-        {/* Ranking */}
         {ranking.length > 0 && (
           <div style={{ marginBottom: 24 }}>
             <h2 style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12, fontWeight: 700, marginBottom: 12, textTransform: 'uppercase', letterSpacing: 1 }}>🏆 Mais Pedidos</h2>
@@ -394,19 +388,16 @@ export default function AdminPage() {
                     {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`}
                   </span>
                   <p style={{ color: '#fff', fontSize: 13, fontWeight: 600, margin: 0, flex: 1 }}>{item.nome}</p>
-                  <span style={{ background: 'rgba(255,215,0,0.1)', border: '1px solid rgba(255,215,0,0.3)', color: '#ffd700', fontSize: 12, fontWeight: 800, padding: '3px 10px', borderRadius: 20 }}>
-                    {item.total}x
-                  </span>
+                  <span style={{ background: 'rgba(255,215,0,0.1)', border: '1px solid rgba(255,215,0,0.3)', color: '#ffd700', fontSize: 12, fontWeight: 800, padding: '3px 10px', borderRadius: 20 }}>{item.total}x</span>
                 </div>
               ))}
             </div>
           </div>
         )}
 
-        {/* Grafico de pico */}
         {graficoPico.length > 0 && (
           <div style={{ marginBottom: 24 }}>
-            <h2 style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12, fontWeight: 700, marginBottom: 16, textTransform: 'uppercase', letterSpacing: 1 }}>📊 Horário de Pico</h2>
+            <h2 style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12, fontWeight: 700, marginBottom: 16, textTransform: 'uppercase', letterSpacing: 1 }}>📊 Horario de Pico</h2>
             <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 14, padding: '16px 12px' }}>
               <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6, height: 80, justifyContent: 'space-between' }}>
                 {graficoPico.map((item, i) => {
@@ -414,10 +405,8 @@ export default function AdminPage() {
                   const isPico = item.total === maxPico && maxPico > 0
                   return (
                     <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-                      <p style={{ color: isPico ? '#ffd700' : 'rgba(255,255,255,0.3)', fontSize: 9, margin: 0, fontWeight: isPico ? 800 : 400 }}>
-                        {item.total > 0 ? item.total : ''}
-                      </p>
-                      <div style={{ width: '100%', height: `${altura}%`, background: isPico ? 'linear-gradient(180deg, #ffd700, #b7950b)' : 'rgba(255,255,255,0.15)', borderRadius: '4px 4px 0 0', minHeight: 4, transition: 'height 0.3s' }} />
+                      <p style={{ color: isPico ? '#ffd700' : 'rgba(255,255,255,0.3)', fontSize: 9, margin: 0, fontWeight: isPico ? 800 : 400 }}>{item.total > 0 ? item.total : ''}</p>
+                      <div style={{ width: '100%', height: `${altura}%`, background: isPico ? 'linear-gradient(180deg, #ffd700, #b7950b)' : 'rgba(255,255,255,0.15)', borderRadius: '4px 4px 0 0', minHeight: 4 }} />
                     </div>
                   )
                 })}
@@ -429,7 +418,7 @@ export default function AdminPage() {
               </div>
               {maxPico > 0 && (
                 <p style={{ color: 'rgba(255,215,0,0.5)', fontSize: 11, margin: '10px 0 0', textAlign: 'center' }}>
-                  🔥 Pico às {graficoPico.find(g => g.total === maxPico)?.hora} com {maxPico} pedido{maxPico > 1 ? 's' : ''}
+                  🔥 Pico as {graficoPico.find(g => g.total === maxPico)?.hora} com {maxPico} pedido{maxPico > 1 ? 's' : ''}
                 </p>
               )}
             </div>
@@ -467,7 +456,7 @@ export default function AdminPage() {
                 <input type="text" placeholder="Ex: 11999999999 ou email@email.com" value={config.chavePix} onChange={e => setConfig(p => ({ ...p, chavePix: e.target.value }))}
                   style={{ width: '100%', background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,215,0,0.2)', borderRadius: 10, padding: '11px 14px', color: '#fff', fontSize: 14, outline: 'none', boxSizing: 'border-box', marginBottom: 8 }} />
                 <label style={{ color: 'rgba(255,220,100,0.9)', fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 8 }}>👤 Nome do Titular da Conta</label>
-                <input type="text" placeholder="Ex: João Silva" value={(config as any).nomeTitularPix || ''} onChange={e => setConfig(p => ({ ...p, nomeTitularPix: e.target.value } as any))}
+                <input type="text" placeholder="Ex: Joao Silva" value={(config as any).nomeTitularPix || ''} onChange={e => setConfig(p => ({ ...p, nomeTitularPix: e.target.value } as any))}
                   style={{ width: '100%', background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,215,0,0.2)', borderRadius: 10, padding: '11px 14px', color: '#fff', fontSize: 14, outline: 'none', boxSizing: 'border-box' }} />
                 <p style={{ color: 'rgba(255,215,0,0.4)', fontSize: 11, margin: '6px 0 0' }}>Usado para validar comprovantes de Pix automaticamente.</p>
               </div>
@@ -495,8 +484,7 @@ export default function AdminPage() {
 
               <div style={{ background: 'rgba(255,100,0,0.04)', border: '1px solid rgba(255,100,0,0.15)', borderRadius: 12, padding: 14 }}>
                 <label style={{ color: 'rgba(255,150,50,0.9)', fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 8 }}>🔥 Alerta de Horario de Pico</label>
-                <input type="number" min={0} max={100} value={limitePico} onChange={e => setLimitePico(Number(e.target.value))}
-                  placeholder="0 = desativado"
+                <input type="number" min={0} max={100} value={limitePico} onChange={e => setLimitePico(Number(e.target.value))} placeholder="0 = desativado"
                   style={{ width: '100%', background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,100,0,0.2)', borderRadius: 10, padding: '11px 14px', color: '#fff', fontSize: 14, outline: 'none', boxSizing: 'border-box' }} />
                 <p style={{ color: 'rgba(255,150,50,0.4)', fontSize: 11, margin: '6px 0 0' }}>
                   {limitePico > 0 ? `Cliente sera avisado quando houver ${limitePico} ou mais pedidos em preparo.` : 'Digite um numero para ativar o aviso de pico. 0 = desativado.'}
@@ -532,9 +520,7 @@ export default function AdminPage() {
                         )}
                         <div style={{ flex: 1 }}>
                           <p style={{ color: '#fff', fontSize: 13, fontWeight: 600, margin: '0 0 4px' }}>{cat.label}</p>
-                          <p style={{ color: 'rgba(255,255,255,0.3)', fontSize: 11, margin: 0 }}>
-                            {imagens[cat.key as keyof ImagensCardapio] ? 'Imagem carregada ✅' : 'Sem imagem - vai usar texto'}
-                          </p>
+                          <p style={{ color: 'rgba(255,255,255,0.3)', fontSize: 11, margin: 0 }}>{imagens[cat.key as keyof ImagensCardapio] ? 'Imagem carregada ✅' : 'Sem imagem - vai usar texto'}</p>
                         </div>
                         <button onClick={() => cat.ref.current?.click()} disabled={uploadando === cat.key}
                           style={{ background: 'rgba(255,215,0,0.1)', border: '1px solid rgba(255,215,0,0.3)', color: '#ffd700', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}>
@@ -588,7 +574,7 @@ export default function AdminPage() {
                       <input type="password" placeholder="Nova senha" value={senhas[f.username] ?? ''} onChange={e => setSenhas(prev => ({ ...prev, [f.username]: e.target.value }))}
                         style={{ flex: 1, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '8px 10px', color: '#fff', fontSize: 13, outline: 'none' }} />
                       <button onClick={() => salvarFuncionario(f.username)} disabled={salvandoFunc === f.username} style={{ background: 'rgba(255,215,0,0.12)', border: '1px solid rgba(255,215,0,0.3)', color: '#ffd700', borderRadius: 8, padding: '8px 12px', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>
-                        💾
+                        {salvandoFunc === f.username ? '⏳' : '💾'}
                       </button>
                     </div>
                   </div>
