@@ -349,19 +349,39 @@ export async function POST(req: NextRequest) {
     const sessionKey = `session:${phone}`;
     const savedSession = await redis.get<BotSession>(sessionKey);
 
-    if (eSaudacao(messageText) && !savedSession) {
+    if (!savedSession) {
       const historico = await redis.get<ClienteHistorico>(`cliente:${phone}`);
       if (historico) {
         const firstName = historico.nome.split(" ")[0];
         const ultimoPedido = historico.ultimoPedido.join(", ");
         const currentSession = createReturningSession(historico);
-        await enviarMensagem(phone, `Ei *${firstName}*! 😊 Da ultima vez voce pediu *${ultimoPedido}* - vai querer repetir ou montar um novo?\n\n  1. Repetir o mesmo\n  2. Quero outra coisa`);
         await redis.set(sessionKey, currentSession, { ex: 1800 });
+        if (eSaudacao(messageText)) {
+          await enviarMensagem(phone, `Ei *${firstName}*! 😊 Da ultima vez voce pediu *${ultimoPedido}* - vai querer repetir ou montar um novo?\n\n  1. Repetir o mesmo\n  2. Quero outra coisa`);
+          return NextResponse.json({ ok: true });
+        }
+        // Processa a mensagem direto na sessão returning
+        const result = processMessage(messageText, currentSession);
+        await redis.set(sessionKey, result.session, { ex: 1800 });
+        for (const msg of result.messages) {
+          await enviarMensagem(phone, msg);
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
         return NextResponse.json({ ok: true });
       } else {
         const currentSession = createInitialSession();
-        await enviarMensagem(phone, `Ola! Seja bem-vindo a *Chefe da Pizza*! 🍕\n\nPra comecar, me fala seu nome?`);
         await redis.set(sessionKey, currentSession, { ex: 1800 });
+        if (eSaudacao(messageText)) {
+          await enviarMensagem(phone, `Ola! Seja bem-vindo a *Chefe da Pizza*! 🍕\n\nPra comecar, me fala seu nome?`);
+          return NextResponse.json({ ok: true });
+        }
+        // Processa a mensagem direto
+        const result = processMessage(messageText, currentSession);
+        await redis.set(sessionKey, result.session, { ex: 1800 });
+        for (const msg of result.messages) {
+          await enviarMensagem(phone, msg);
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
         return NextResponse.json({ ok: true });
       }
     }
