@@ -3,6 +3,7 @@ import { processMessage, createInitialSession, createReturningSession, BotSessio
 import { redis } from "@/lib/redis";
 import { interpretarMensagem } from "@/lib/claude";
 import { log } from "@/lib/logger";
+import { analisarComprovantePix } from "@/lib/analisarComprovante";
 
 type Pedido = {
   id: string;
@@ -16,6 +17,7 @@ type Pedido = {
   escalonado?: boolean;
   cancelamentoSolicitado?: boolean;
   observacao?: string;
+  pixConfirmado?: boolean;
 };
 
 type ConfigPizzaria = {
@@ -23,6 +25,7 @@ type ConfigPizzaria = {
   horaAbertura: number;
   horaFechamento: number;
   chavePix: string;
+  nomeTitularPix: string;
   limitePico: number;
 };
 
@@ -31,6 +34,7 @@ const CONFIG_PADRAO: ConfigPizzaria = {
   horaAbertura: 18,
   horaFechamento: 23,
   chavePix: "",
+  nomeTitularPix: "",
   limitePico: 0,
 };
 
@@ -62,61 +66,25 @@ function normalizar(texto: string): string {
 
 function eSaudacao(texto: string): boolean {
   const n = normalizar(texto);
-  const palavras = [
-    "boa noite", "boa tarde", "bom dia", "oi", "ola", "hello",
-    "oi boa noite", "oi boa tarde", "oi bom dia", "boa", "oii", "oiii",
-    "ei", "hey", "iae", "eai", "e ai", "tudo bem", "tudo bom",
-  ];
+  const palavras = ["boa noite", "boa tarde", "bom dia", "oi", "ola", "hello", "oi boa noite", "oi boa tarde", "oi bom dia", "boa", "oii", "oiii", "ei", "hey", "iae", "eai", "e ai", "tudo bem", "tudo bom"];
   return palavras.some(p => n === p || n.startsWith(p + " ") || n.endsWith(" " + p));
 }
 
 function querCancelar(texto: string): boolean {
   const n = normalizar(texto);
-  const palavras = [
-    "cancelar", "cancela", "cancelamento", "desisti", "desistir",
-    "nao quero mais", "esquece", "deixa pra la",
-    "nao quero", "cancelem", "cancele",
-    "nao vai mais", "mudei de ideia", "mudei de opiniao",
-  ];
+  const palavras = ["cancelar", "cancela", "cancelamento", "desisti", "desistir", "nao quero mais", "esquece", "deixa pra la", "nao quero", "cancelem", "cancele", "nao vai mais", "mudei de ideia", "mudei de opiniao"];
   return palavras.some(p => n.includes(p));
 }
 
 function resolvido(texto: string): boolean {
   const n = normalizar(texto);
-  const palavras = [
-    "nao obrigado", "nao preciso", "pode ser",
-    "ta bom", "tudo bem", "obrigado", "valeu", "ok", "beleza",
-    "nao precisa", "so isso", "era isso", "resolvido", "sim obrigado",
-    "nao mais", "chega", "tranquilo", "por enquanto nao",
-    "nao obg", "obg", "vlw", "tmj", "ajudou", "ajudou muito",
-    "era isso mesmo", "ja ta bom", "pode fechar", "encerrar",
-    "nao quero mais nada", "so queria isso", "era so isso",
-    "foi isso", "e isso", "isso mesmo", "perfeito obrigado",
-    "muito obrigado", "mto obg", "mt obg", "grato", "agradeco",
-    "esta tudo certo", "ta tudo certo", "tudo certo", "tudo ok",
-    "ficou otimo", "ficou bom", "muito bom", "perfeito",
-    "esta otimo", "ta otimo", "otimo obg", "otimo valeu",
-  ];
+  const palavras = ["nao obrigado", "nao preciso", "pode ser", "ta bom", "tudo bem", "obrigado", "valeu", "ok", "beleza", "nao precisa", "so isso", "era isso", "resolvido", "sim obrigado", "nao mais", "chega", "tranquilo", "por enquanto nao", "nao obg", "obg", "vlw", "tmj", "ajudou", "ajudou muito", "era isso mesmo", "ja ta bom", "pode fechar", "encerrar", "nao quero mais nada", "so queria isso", "era so isso", "foi isso", "e isso", "isso mesmo", "perfeito obrigado", "muito obrigado", "mto obg", "mt obg", "grato", "agradeco", "esta tudo certo", "ta tudo certo", "tudo certo", "tudo ok", "ficou otimo", "ficou bom", "muito bom", "perfeito", "esta otimo", "ta otimo", "otimo obg", "otimo valeu"];
   return palavras.some(p => n.includes(p));
 }
 
 function eDespedida(texto: string): boolean {
   const n = normalizar(texto);
-  const palavras = [
-    "tchau", "flw", "ate mais", "ate logo", "fui", "adeus", "xau",
-    "abraco", "bjs", "beijinho", "tchauzinho", "tchauuu", "xauzinho",
-    "ta bom obrigado", "valeu obrigado", "ok obrigado",
-    "nao obrigado", "nao, obrigado", "nao precisa obrigado",
-    "ta otimo", "ok valeu", "beleza obrigado",
-    "obrigado tchau", "obrigado ate mais", "valeu tchau",
-    "tudo bem obrigado", "ja ta bom", "nao obg",
-    "obg tchau", "vlw tchau", "tmj tchau", "falou",
-    "flw obg", "obg flw", "ate", "ate mais nao",
-    "ajudou muito obg", "ajudou obg", "era isso obg",
-    "foi otimo", "adorei", "perfeito tchau",
-    "esta tudo certo", "ta tudo certo", "tudo certo obg",
-    "tudo certo valeu", "esta tudo bem", "ta tudo bem",
-  ];
+  const palavras = ["tchau", "flw", "ate mais", "ate logo", "fui", "adeus", "xau", "abraco", "bjs", "beijinho", "tchauzinho", "tchauuu", "xauzinho", "ta bom obrigado", "valeu obrigado", "ok obrigado", "nao obrigado", "nao, obrigado", "nao precisa obrigado", "ta otimo", "ok valeu", "beleza obrigado", "obrigado tchau", "obrigado ate mais", "valeu tchau", "tudo bem obrigado", "ja ta bom", "nao obg", "obg tchau", "vlw tchau", "tmj tchau", "falou", "flw obg", "obg flw", "ate", "ate mais nao", "ajudou muito obg", "ajudou obg", "era isso obg", "foi otimo", "adorei", "perfeito tchau", "esta tudo certo", "ta tudo certo", "tudo certo obg", "tudo certo valeu", "esta tudo bem", "ta tudo bem"];
   return palavras.some(p => n.includes(p));
 }
 
@@ -143,29 +111,22 @@ async function salvarPedido(session: BotSession, phone: string, config: ConfigPi
     return `${item.name}${size}${flavor}${border}`;
   });
   const total = session.cart.reduce((sum, item) => sum + item.price, 0) + session.deliveryFee;
-  const endereco =
-    session.deliveryType === "delivery"
-      ? `${session.address} - ${session.neighborhood}`
-      : "Retirada na loja";
+  const endereco = session.deliveryType === "delivery" ? `${session.address} - ${session.neighborhood}` : "Retirada na loja";
   const pedidoId = Date.now().toString();
-  const novoPedido: Pedido = {
+  const novoPedido = {
     id: pedidoId,
     cliente: session.customerName || phone,
     telefone: phone,
     itens,
     total,
-    status: "novo",
+    status: "novo" as const,
     horario: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
     endereco,
     data: new Date().toLocaleDateString("pt-BR"),
     ...(session.observacao ? { observacao: session.observacao } : {}),
-  } as any;
-  await redis.set("pedidos", [...pedidos, novoPedido]);
-  const historico: ClienteHistorico = {
-    nome: session.customerName || phone,
-    ultimoPedido: itens,
-    ultimoTotal: total,
   };
+  await redis.set("pedidos", [...pedidos, novoPedido]);
+  const historico: ClienteHistorico = { nome: session.customerName || phone, ultimoPedido: itens, ultimoTotal: total };
   await redis.set(`cliente:${phone}`, historico, { ex: 30 * 24 * 60 * 60 });
   return pedidoId;
 }
@@ -210,10 +171,7 @@ async function enviarMensagem(phone: string, message: string) {
   const url = `https://${process.env.EVOLUTION_API_URL}/message/sendText/chefe`;
   await fetch(url, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      apikey: process.env.EVOLUTION_API_KEY!,
-    },
+    headers: { "Content-Type": "application/json", apikey: process.env.EVOLUTION_API_KEY! },
     body: JSON.stringify({ number: phone, text: message }),
   });
 }
@@ -223,19 +181,79 @@ async function enviarImagem(phone: string, imageUrl: string) {
     const url = `https://${process.env.EVOLUTION_API_URL}/message/sendMedia/chefe`;
     await fetch(url, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        apikey: process.env.EVOLUTION_API_KEY!,
-      },
-      body: JSON.stringify({
-        number: phone,
-        mediatype: "image",
-        media: imageUrl,
-        caption: "",
-      }),
+      headers: { "Content-Type": "application/json", apikey: process.env.EVOLUTION_API_KEY! },
+      body: JSON.stringify({ number: phone, mediatype: "image", media: imageUrl, caption: "" }),
     });
   } catch (err) {
     console.error("[ChefeBot] Erro ao enviar imagem:", err);
+  }
+}
+
+async function processarComprovante(phone: string, data: any, config: ConfigPizzaria, isImagem: boolean) {
+  try {
+    const pedidos = await redis.get<Pedido[]>("pedidos") || [];
+    const pedidoAtivo = pedidos
+      .filter(p => p.telefone === phone && p.status === "novo" && !p.escalonado)
+      .sort((a, b) => b.id.localeCompare(a.id))[0];
+
+    if (!pedidoAtivo) return;
+
+    const sessionKey = `session:${phone}`;
+    const session = await redis.get<BotSession>(sessionKey);
+    const isPix = session?.paymentMethod === "Pix";
+    if (!isPix) return;
+
+    await enviarMensagem(phone, `Comprovante recebido! 🔍 Verificando o pagamento...`);
+
+    let imagemBase64 = "";
+    let mediaType: "image/jpeg" | "image/png" | "image/webp" | "application/pdf" = isImagem ? "image/jpeg" : "application/pdf";
+
+    try {
+      const downloadUrl = `https://${process.env.EVOLUTION_API_URL}/chat/getBase64FromMediaMessage/chefe`;
+      const downloadRes = await fetch(downloadUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", apikey: process.env.EVOLUTION_API_KEY! },
+        body: JSON.stringify({ message: data.message }),
+      });
+      if (downloadRes.ok) {
+        const downloadData = await downloadRes.json();
+        imagemBase64 = downloadData.base64 || "";
+        if (downloadData.mimetype) mediaType = downloadData.mimetype;
+      }
+    } catch (err) {
+      await log("aviso", "Erro ao baixar comprovante", String(err));
+    }
+
+    if (!imagemBase64) {
+      await enviarMensagem(phone, `Comprovante recebido! 📄 Nossa equipe vai verificar em instantes. ✅`);
+      await salvarEscalonamento(phone, session || { step: "done", cart: [], deliveryFee: 0, customerName: pedidoAtivo.cliente });
+      return;
+    }
+
+    const resultado = await analisarComprovantePix(
+      imagemBase64,
+      mediaType as any,
+      pedidoAtivo.total,
+      config.chavePix,
+      config.nomeTitularPix || config.nomePizzaria
+    );
+
+    if (resultado.valido) {
+      const pedidosAtualizados = pedidos.map(p =>
+        p.id === pedidoAtivo.id ? { ...p, pixConfirmado: true } : p
+      );
+      await redis.set("pedidos", pedidosAtualizados);
+      const firstName = pedidoAtivo.cliente.split(" ")[0];
+      await enviarMensagem(phone, `Pagamento confirmado! ✅🎉\n\nObrigado, *${firstName}*! Seu pedido ja foi enviado para a cozinha. Aguarda que vem ai! 🍕`);
+      await log("info", `Pix confirmado automaticamente para ${firstName}`, `Valor: R$ ${resultado.valorEncontrado}`);
+    } else {
+      await enviarMensagem(phone, `Comprovante recebido! 📄 Nossa equipe vai verificar o pagamento manualmente. Em instantes confirmamos! 😊`);
+      await salvarEscalonamento(phone, session || { step: "done", cart: [], deliveryFee: 0, customerName: pedidoAtivo.cliente });
+      await log("aviso", `Comprovante Pix nao validado automaticamente`, `Phone: ${phone}, Valor esperado: R$ ${pedidoAtivo.total}`);
+    }
+  } catch (err) {
+    await log("erro", "Erro ao processar comprovante", String(err));
+    await enviarMensagem(phone, `Comprovante recebido! 📄 Nossa equipe vai verificar em instantes. ✅`);
   }
 }
 
@@ -246,11 +264,27 @@ export async function POST(req: NextRequest) {
     const data = body.data;
     if (data?.key?.fromMe) return NextResponse.json({ ok: true });
     const phone = data?.key?.remoteJid?.replace("@s.whatsapp.net", "");
+    if (!phone) return NextResponse.json({ ok: true });
+
     const messageText =
       data?.message?.conversation ||
       data?.message?.extendedTextMessage?.text ||
       "";
-    if (!phone || !messageText) return NextResponse.json({ ok: true });
+
+    const config = await getConfig();
+
+    // Detecta imagem ou PDF (comprovante Pix)
+    const isImagem = !!data?.message?.imageMessage;
+    const isPDF = !!data?.message?.documentMessage &&
+      (data?.message?.documentMessage?.mimetype === "application/pdf" ||
+       data?.message?.documentMessage?.fileName?.endsWith(".pdf"));
+
+    if (isImagem || isPDF) {
+      await processarComprovante(phone, data, config, isImagem);
+      return NextResponse.json({ ok: true });
+    }
+
+    if (!messageText) return NextResponse.json({ ok: true });
 
     const botAtivo = await redis.get<boolean>("bot_ativo");
     if (botAtivo === false) return NextResponse.json({ ok: true });
@@ -258,13 +292,11 @@ export async function POST(req: NextRequest) {
     const emManual = await redis.get<boolean>(`manual:${phone}`);
     if (emManual === true) return NextResponse.json({ ok: true });
 
-    // Protecao contra spam
     const spamKey = `spam:${phone}`;
     const spamCount = await redis.get<number>(spamKey) || 0;
     if (spamCount >= 3) return NextResponse.json({ ok: true });
     await redis.set(spamKey, spamCount + 1, { ex: 1 });
 
-    // Modo pos-atendimento
     const resolvendo = await redis.get<boolean>(`resolvendo:${phone}`);
     if (resolvendo === true) {
       if (resolvido(messageText) || eDespedida(messageText)) {
@@ -294,7 +326,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
-    // Captura avaliacao de satisfacao
     const aguardandoAvaliacao = await redis.get<boolean>(`avaliacao:${phone}`);
     if (aguardandoAvaliacao === true) {
       const nota = parseInt(messageText.trim());
@@ -308,19 +339,16 @@ export async function POST(req: NextRequest) {
           `Que bom saber! Obrigado por avaliar, *${nota}/5*! 🙏\n\nTe esperamos na proxima! 🍕`,
           `Valeu pelo feedback! *${nota}/5* anotado. 😊\n\nAte a proxima! 🍕`,
         ];
-        const msg = mensagens[Math.floor(Math.random() * mensagens.length)];
-        await enviarMensagem(phone, msg);
+        await enviarMensagem(phone, mensagens[Math.floor(Math.random() * mensagens.length)]);
         return NextResponse.json({ ok: true });
       } else {
         await redis.del(`avaliacao:${phone}`);
       }
     }
 
-    const config = await getConfig();
     const sessionKey = `session:${phone}`;
     const savedSession = await redis.get<BotSession>(sessionKey);
 
-    // Saudacao sem sessao ativa
     if (eSaudacao(messageText) && !savedSession) {
       const historico = await redis.get<ClienteHistorico>(`cliente:${phone}`);
       if (historico) {
@@ -357,10 +385,7 @@ export async function POST(req: NextRequest) {
         const firstName = historico.nome.split(" ")[0];
         const ultimoPedido = historico.ultimoPedido.join(", ");
         currentSession = createReturningSession(historico);
-        await enviarMensagem(
-          phone,
-          `Ei *${firstName}*! 😊 Da ultima vez voce pediu *${ultimoPedido}* - vai querer repetir ou montar um novo?\n\n  1. Repetir o mesmo\n  2. Quero outra coisa`
-        );
+        await enviarMensagem(phone, `Ei *${firstName}*! 😊 Da ultima vez voce pediu *${ultimoPedido}* - vai querer repetir ou montar um novo?\n\n  1. Repetir o mesmo\n  2. Quero outra coisa`);
         await redis.set(sessionKey, currentSession, { ex: 1800 });
         return NextResponse.json({ ok: true });
       } else {
@@ -391,40 +416,30 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
-    // Tenta processar normalmente
     let mensagemProcessada = messageText;
     const resultTeste = processMessage(messageText, currentSession);
     const botConfuso = resultTeste.messages.some(m =>
-      m.includes("nao entendi") ||
-      m.includes("nao achei") ||
-      m.includes("Ops") ||
-      m.includes("Eita") ||
-      m.includes("Opa") ||
-      m.includes("nao peguei") ||
-      m.includes("Hmm") ||
-      m.includes("nao tem isso")
+      m.includes("nao entendi") || m.includes("nao achei") || m.includes("Ops") ||
+      m.includes("Eita") || m.includes("Opa") || m.includes("nao peguei") ||
+      m.includes("Hmm") || m.includes("nao tem isso")
     );
 
     if (botConfuso) {
       const opcoes = getOpcoesPorStep(currentSession.step);
       if (opcoes.length > 0) {
         const interpretado = await interpretarMensagem(messageText, currentSession.step, opcoes);
-        if (interpretado) {
-          mensagemProcessada = interpretado;
-        }
+        if (interpretado) mensagemProcessada = interpretado;
       }
     }
 
     const stepAnterior = currentSession.step;
     const result = processMessage(mensagemProcessada, currentSession);
 
-    // Verifica pico e injeta mensagem na confirmacao
     if (currentSession.step === "confirm" &&
       (messageText.trim() === "1" || messageText.trim().toLowerCase() === "sim")) {
       const pedidoId = await salvarPedido(currentSession, phone, config);
       result.session = { ...result.session, pedidoId } as any;
 
-      // Verificar horario de pico
       if (config.limitePico > 0) {
         const pedidosAtivos = (await redis.get<Pedido[]>("pedidos") || [])
           .filter(p => p.status === "em_preparo" && !p.escalonado).length;
@@ -445,7 +460,6 @@ export async function POST(req: NextRequest) {
 
     await redis.set(sessionKey, result.session, { ex: 1800 });
 
-    // Envia imagem do cardapio ao entrar em nova categoria
     const stepAtual = result.session.step;
     const stepsComImagem = ["size", "flavor", "lanche_escolha", "bebida_escolha", "suco_escolha"];
     const entrouNaCategoria = !stepsComImagem.includes(stepAnterior) && stepsComImagem.includes(stepAtual);

@@ -6,6 +6,7 @@ export type ConfigPizzaria = {
   horaAbertura: number;
   horaFechamento: number;
   chavePix: string;
+  nomeTitularPix: string;
   limitePico: number;
 };
 
@@ -14,6 +15,7 @@ const CONFIG_PADRAO: ConfigPizzaria = {
   horaAbertura: 18,
   horaFechamento: 23,
   chavePix: "",
+  nomeTitularPix: "",
   limitePico: 0,
 };
 
@@ -29,6 +31,7 @@ export async function POST(req: NextRequest) {
     horaAbertura: Number(body.horaAbertura) ?? CONFIG_PADRAO.horaAbertura,
     horaFechamento: Number(body.horaFechamento) ?? CONFIG_PADRAO.horaFechamento,
     chavePix: body.chavePix || "",
+    nomeTitularPix: body.nomeTitularPix || "",
     limitePico: Number(body.limitePico) || 0,
   };
   await redis.set("config:pizzaria", config);
