@@ -16,6 +16,24 @@ async function checkAuth(req: NextRequest) {
   return user?.role === 'admin' || user?.role === 'dev'
 }
 
+function normalizarNomeItem(nome: string): string {
+  // Remove tamanhos do nome para agrupar corretamente
+  return nome
+    .replace(/\b(Pizza\s+)?(P|M|G|F|Pequena|Media|Grande|Familia)\b/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function isPizzaValida(nome: string): boolean {
+  if (!nome) return false
+  if (nome === 'Cliente precisa de atendimento humano') return false
+  if (nome.startsWith('Borda')) return false
+  if (/^(Coca|Guarana|Suco|Agua|Cerveja|Pepsi|Refrigerante|Vitamina)/i.test(nome)) return false
+  if (nome.includes('indefinida')) return false
+  if (nome.length < 3) return false
+  return true
+}
+
 export async function GET(req: NextRequest) {
   if (!await checkAuth(req)) return NextResponse.json({ error: 'Nao autorizado' }, { status: 401 })
 
@@ -29,10 +47,10 @@ export async function GET(req: NextRequest) {
       const subitens = itemRaw.includes(',') ? itemRaw.split(',') : [itemRaw]
       for (const item of subitens) {
         const nome = item.trim()
-        if (!nome || nome === 'Cliente precisa de atendimento humano') continue
-        if (nome.startsWith('Borda')) continue
-        if (nome.includes('Coca') || nome.includes('Guarana') || nome.includes('Suco') || nome.includes('Agua') || nome.includes('Cerveja')) continue
-        contagem[nome] = (contagem[nome] || 0) + 1
+        if (!isPizzaValida(nome)) continue
+        const nomeNormalizado = normalizarNomeItem(nome)
+        if (!nomeNormalizado || nomeNormalizado.length < 3) continue
+        contagem[nomeNormalizado] = (contagem[nomeNormalizado] || 0) + 1
       }
     }
   }
