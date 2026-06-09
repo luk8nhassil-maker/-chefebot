@@ -148,6 +148,7 @@ export default function AdminPage() {
   const [nomeUsuario, setNomeUsuario] = useState('')
   const [imagens, setImagens] = useState<ImagensCardapio>({ ativo: true })
   const [avaliacoes, setAvaliacoes] = useState<AvaliacoesData>({ total: 0, media: 0, ultimas: [] })
+  const [ranking, setRanking] = useState<Array<{ nome: string; total: number }>>([])
   const [uploadando, setUploadando] = useState<string | null>(null)
   const inputPizzaRef = useRef<HTMLInputElement>(null)
   const inputLancheRef = useRef<HTMLInputElement>(null)
@@ -167,11 +168,13 @@ export default function AdminPage() {
       fetch('/api/funcionarios').then(r => r.json()),
       fetch('/api/cardapio-imagens').then(r => r.json()).catch(() => ({ ativo: true })),
       fetch('/api/avaliacoes').then(r => r.json()).catch(() => ({ total: 0, media: 0, ultimas: [] })),
-    ]).then(([ped, cfg, funcs, imgs, avals]) => {
+      fetch('/api/ranking').then(r => r.json()).catch(() => []),
+    ]).then(([ped, cfg, funcs, imgs, avals, rank]) => {
       setPedidos(Array.isArray(ped) ? ped : [])
       setConfig(cfg)
       setImagens(imgs || { ativo: true })
       setAvaliacoes(avals || { total: 0, media: 0, ultimas: [] })
+      setRanking(Array.isArray(rank) ? rank : [])
       if (Array.isArray(funcs)) {
         setFuncionarios(funcs)
         const s: Record<string, string> = {}
@@ -401,6 +404,27 @@ export default function AdminPage() {
             </div>
           )}
         </div>
+
+        {ranking.length > 0 && (
+          <div style={{ marginBottom: 28 }}>
+            <h2 style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12, fontWeight: 700, marginBottom: 12, textTransform: 'uppercase', letterSpacing: 1 }}>
+              🏆 Mais Pedidos
+            </h2>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {ranking.slice(0, 5).map((item, i) => (
+                <div key={i} style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 12, padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <span style={{ fontSize: 18, fontWeight: 800, color: i === 0 ? '#ffd700' : i === 1 ? '#c0c0c0' : i === 2 ? '#cd7f32' : 'rgba(255,255,255,0.3)', minWidth: 28 }}>
+                    {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`}
+                  </span>
+                  <p style={{ color: '#fff', fontSize: 13, fontWeight: 600, margin: 0, flex: 1 }}>{item.nome}</p>
+                  <span style={{ background: 'rgba(255,215,0,0.1)', border: '1px solid rgba(255,215,0,0.3)', color: '#ffd700', fontSize: 12, fontWeight: 800, padding: '3px 10px', borderRadius: 20 }}>
+                    {item.total}x
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         <p style={{ textAlign: 'center', color: 'rgba(255,255,255,0.15)', fontSize: 11, marginTop: 8, marginBottom: 24 }}>ChefeBot · Painel Admin</p>
       </div>
