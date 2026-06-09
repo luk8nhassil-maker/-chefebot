@@ -301,8 +301,8 @@ export default function PedidosPage() {
               </button>
             )
           })}
-          {/* Padding direito para mostrar metade do próximo botão */}
-          <div style={{ flexShrink: 0, width: 40 }} />
+          {/* Padding direito minimo */}
+          <div style={{ flexShrink: 0, width: 16 }} />
         </div>
 
         {/* Cards */}
