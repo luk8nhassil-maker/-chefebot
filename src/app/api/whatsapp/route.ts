@@ -254,6 +254,12 @@ export async function POST(req: NextRequest) {
     const emManual = await redis.get<boolean>(`manual:${phone}`);
     if (emManual === true) return NextResponse.json({ ok: true });
 
+    // Protecao contra spam — max 3 mensagens por segundo por numero
+    const spamKey = `spam:${phone}`;
+    const spamCount = await redis.get<number>(spamKey) || 0;
+    if (spamCount >= 3) return NextResponse.json({ ok: true });
+    await redis.set(spamKey, spamCount + 1, { ex: 1 });
+
     // Modo pos-atendimento
     const resolvendo = await redis.get<boolean>(`resolvendo:${phone}`);
     if (resolvendo === true) {
