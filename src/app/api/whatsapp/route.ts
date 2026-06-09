@@ -398,22 +398,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
-    let currentSession: BotSession;
-    if (!savedSession) {
-      const historico = await redis.get<ClienteHistorico>(`cliente:${phone}`);
-      if (historico) {
-        const firstName = historico.nome.split(" ")[0];
-        const ultimoPedido = historico.ultimoPedido.join(", ");
-        currentSession = createReturningSession(historico);
-        await enviarMensagem(phone, `Ei *${firstName}*! 😊 Da ultima vez voce pediu *${ultimoPedido}* - vai querer repetir ou montar um novo?\n\n  1. Repetir o mesmo\n  2. Quero outra coisa`);
-        await redis.set(sessionKey, currentSession, { ex: 1800 });
-        return NextResponse.json({ ok: true });
-      } else {
-        currentSession = createInitialSession();
-      }
-    } else {
-      currentSession = savedSession;
-    }
+    let currentSession: BotSession = savedSession!;
 
     if (querCancelar(messageText) && currentSession.step === "done" && (currentSession as any).pedidoId) {
       const pedidoId = (currentSession as any).pedidoId;
