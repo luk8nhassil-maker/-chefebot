@@ -938,7 +938,7 @@ export function processMessage(input: string, session: BotSession): BotResponse 
   }
 }
 export function createInitialSession(): BotSession {
-  return { step: "welcome", cart: [], deliveryFee: 0, tentativasInvalidas: 0 };
+  return { step: "name", cart: [], deliveryFee: 0, tentativasInvalidas: 0 };
 }
 export function createReturningSession(historico: ClienteHistorico): BotSession {
   return { step: "returning", cart: [], deliveryFee: 0, historico, tentativasInvalidas: 0 };
