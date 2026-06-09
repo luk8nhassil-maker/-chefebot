@@ -1,9 +1,7 @@
 ﻿"use client"
 import { useEffect, useState, useRef } from "react"
 import { useRouter } from "next/navigation"
-
 type Status = "novo" | "em_preparo" | "saiu_entrega" | "entregue" | "cancelado"
-
 type Pedido = {
   id: string
   cliente: string
@@ -17,7 +15,6 @@ type Pedido = {
   cancelamentoSolicitado?: boolean
   observacao?: string
 }
-
 const STATUS_LABEL: Record<Status, string> = {
   novo: "Novo",
   em_preparo: "Preparando",
@@ -25,7 +22,6 @@ const STATUS_LABEL: Record<Status, string> = {
   entregue: "Entregue",
   cancelado: "Cancelado",
 }
-
 const STATUS_COR: Record<Status, { bg: string; text: string; border: string }> = {
   novo: { bg: "#fff8e6", text: "#b45309", border: "#fcd34d" },
   em_preparo: { bg: "#fff3e6", text: "#c2410c", border: "#fb923c" },
@@ -33,7 +29,6 @@ const STATUS_COR: Record<Status, { bg: string; text: string; border: string }> =
   entregue: { bg: "#f0fdf4", text: "#15803d", border: "#86efac" },
   cancelado: { bg: "#fef2f2", text: "#dc2626", border: "#fca5a5" },
 }
-
 const PROXIMO_STATUS: Record<Status, Status | null> = {
   novo: "em_preparo",
   em_preparo: "saiu_entrega",
@@ -41,7 +36,6 @@ const PROXIMO_STATUS: Record<Status, Status | null> = {
   entregue: null,
   cancelado: null,
 }
-
 const PROXIMO_LABEL: Record<Status, string> = {
   novo: "🔥 Começar a preparar",
   em_preparo: "🛵 Saiu para entregar",
@@ -49,7 +43,23 @@ const PROXIMO_LABEL: Record<Status, string> = {
   entregue: "",
   cancelado: "",
 }
-
+function tempoDesde(horario: string): string {
+  try {
+    const [h, m] = horario.split(":").map(Number)
+    const agora = new Date()
+    const pedidoTime = new Date()
+    pedidoTime.setHours(h, m, 0, 0)
+    const diffMs = agora.getTime() - pedidoTime.getTime()
+    const diffMin = Math.floor(diffMs / 60000)
+    if (diffMin < 1) return "agora"
+    if (diffMin < 60) return `há ${diffMin} min`
+    const horas = Math.floor(diffMin / 60)
+    const mins = diffMin % 60
+    return mins > 0 ? `há ${horas}h ${mins}min` : `há ${horas}h`
+  } catch {
+    return ""
+  }
+}
 function tocarSom() {
   try {
     const ctx = new (window.AudioContext || (window as any).webkitAudioContext)()
@@ -73,7 +83,6 @@ function tocarSom() {
     })
   } catch {}
 }
-
 function getUserInfo(): { name: string; role: string } | null {
   if (typeof document === "undefined") return null
   try {
@@ -91,7 +100,6 @@ function getUserInfo(): { name: string; role: string } | null {
   } catch {}
   return null
 }
-
 export default function PedidosPage() {
   const router = useRouter()
   const [pedidos, setPedidos] = useState<Pedido[]>([])
@@ -107,19 +115,22 @@ export default function PedidosPage() {
   const [salvandoBot, setSalvandoBot] = useState(false)
   const [manuais, setManuais] = useState<Record<string, boolean>>({})
   const [resolvendo, setResolvendo] = useState<Record<string, boolean>>({})
+  const [agora, setAgora] = useState(new Date())
   const prevIdsRef = useRef<string[]>([])
   const piscarRef = useRef<NodeJS.Timeout | null>(null)
   const tituloOriginalRef = useRef(typeof document !== "undefined" ? document.title : "Cozinha")
 
   useEffect(() => {
     const user = getUserInfo()
-    if (user) { setUserName(user.name); setIsAdmin(user.role === "admin") }
+    if (user) { setUserName(user.name); setIsAdmin(user.role === "admin" || user.role === "dev") }
     if ("Notification" in window && Notification.permission === "default") Notification.requestPermission()
     carregarPedidos()
     carregarStatusBot()
     const intervalo = setInterval(carregarPedidos, 10000)
+    const relogio = setInterval(() => setAgora(new Date()), 30000)
     return () => {
       clearInterval(intervalo)
+      clearInterval(relogio)
       if (piscarRef.current) clearInterval(piscarRef.current)
       document.title = tituloOriginalRef.current
     }
@@ -133,19 +144,16 @@ export default function PedidosPage() {
       document.title = estado ? "🚨 URGENTE!" : tituloOriginalRef.current
     }, 800)
   }
-
   const pararPiscar = () => {
     if (piscarRef.current) { clearInterval(piscarRef.current); piscarRef.current = null }
     document.title = tituloOriginalRef.current
   }
-
   const carregarStatusBot = async () => {
     try {
       const res = await fetch("/api/bot-status")
       if (res.ok) { const data = await res.json(); setBotAtivo(data.ativo) }
     } catch {}
   }
-
   const alternarBot = async () => {
     setSalvandoBot(true)
     try {
@@ -155,7 +163,6 @@ export default function PedidosPage() {
     } catch {}
     setSalvandoBot(false)
   }
-
   const assumirConversa = async (phone: string) => {
     try {
       await fetch("/api/bot-status", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phone, ativo: false }) })
@@ -165,7 +172,6 @@ export default function PedidosPage() {
       window.open("https://wa.me/" + phone, "_blank")
     } catch {}
   }
-
   const devolverAoBot = async (phone: string) => {
     try {
       await fetch("/api/bot-status", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phone, ativo: true }) })
@@ -173,7 +179,6 @@ export default function PedidosPage() {
       setNotificacao("🤖 Robô retomou a conversa"); setTimeout(() => setNotificacao(""), 3000)
     } catch {}
   }
-
   const marcarResolvido = async (phone: string, pedidoId: string) => {
     try {
       await fetch("/api/resolver", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phone }) })
@@ -184,7 +189,6 @@ export default function PedidosPage() {
       setNotificacao("✅ Resolvido! Cliente foi notificado."); setTimeout(() => setNotificacao(""), 4000)
     } catch {}
   }
-
   const carregarPedidos = () => {
     fetch("/api/orders")
       .then(r => { if (r.status === 401) { router.push("/login?callbackUrl=/pedidos"); return null } return r.json() })
@@ -214,7 +218,6 @@ export default function PedidosPage() {
       })
       .catch(() => setErro("Erro ao carregar. Tentando novamente..."))
   }
-
   const avancarStatus = async (id: string, novoStatus: Status) => {
     setAtualizando(id)
     const res = await fetch("/api/orders", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, status: novoStatus }) })
@@ -224,7 +227,6 @@ export default function PedidosPage() {
     }
     setAtualizando(null)
   }
-
   const confirmarCancelamento = async (id: string) => {
     setAtualizando(id)
     const res = await fetch("/api/orders", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, status: "cancelado" }) })
@@ -234,7 +236,6 @@ export default function PedidosPage() {
     }
     setAtualizando(null)
   }
-
   const contagem = (s: Status | "todos") => s === "todos" ? pedidos.filter(p => !p.escalonado).length : pedidos.filter(p => p.status === s && !p.escalonado).length
   const pedidosFiltrados = (filtro === "todos" ? pedidos : pedidos.filter(p => p.status === filtro)).sort((a, b) => {
     if (a.escalonado && !b.escalonado) return -1
@@ -251,10 +252,8 @@ export default function PedidosPage() {
       <p style={{ color: "#fff" }}>Carregando...</p>
     </div>
   )
-
   return (
     <div style={{ minHeight: "100vh", background: "#f8f8f8", paddingBottom: 32 }}>
-
       {notificacao && (
         <div style={{ position: "fixed", top: 16, left: 16, right: 16, zIndex: 9999, background: notificacao.includes("URGENTE") ? "#dc2626" : notificacao.includes("⚠️") ? "#ea580c" : "#16a34a", color: "#fff", padding: "14px 16px", borderRadius: 14, fontWeight: 700, fontSize: 15, textAlign: "center", boxShadow: "0 4px 20px rgba(0,0,0,0.2)" }}>
           {notificacao}
@@ -338,6 +337,7 @@ export default function PedidosPage() {
               const isCancelamento = pedido.cancelamentoSolicitado === true
               const proximoStatus = PROXIMO_STATUS[pedido.status]
               const cor = STATUS_COR[pedido.status]
+              const tempo = tempoDesde(pedido.horario)
               return (
                 <div key={pedido.id} style={{ background: isEscalonado ? "#fef2f2" : isCancelamento ? "#fff7ed" : "#fff", border: `2px solid ${isEscalonado ? "#dc2626" : isCancelamento ? "#ea580c" : cor.border}`, borderRadius: 16, overflow: "hidden", boxShadow: "0 2px 8px rgba(0,0,0,0.06)" }}>
                   <div style={{ padding: "14px 16px 10px", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
@@ -347,7 +347,11 @@ export default function PedidosPage() {
                         {isEscalonado && <span style={{ background: "#dc2626", color: "#fff", fontSize: 11, fontWeight: 800, padding: "2px 8px", borderRadius: 20 }}>🚨 URGENTE</span>}
                         {isCancelamento && !isEscalonado && <span style={{ background: "#ea580c", color: "#fff", fontSize: 11, fontWeight: 800, padding: "2px 8px", borderRadius: 20 }}>⚠️ CANCELAMENTO</span>}
                       </div>
-                      <p style={{ fontSize: 12, color: "#888", margin: "3px 0 0" }}>{pedido.horario} · {pedido.endereco}</p>
+                      <p style={{ fontSize: 12, color: "#888", margin: "3px 0 0" }}>
+                        {pedido.horario}
+                        {tempo && <span style={{ color: pedido.status === "novo" ? "#dc2626" : "#aaa", fontWeight: pedido.status === "novo" ? 700 : 400 }}> · {tempo}</span>}
+                        {" · "}{pedido.endereco}
+                      </p>
                     </div>
                     <span style={{ background: isEscalonado ? "#dc2626" : cor.bg, color: isEscalonado ? "#fff" : cor.text, border: `1px solid ${isEscalonado ? "#dc2626" : cor.border}`, fontSize: 12, fontWeight: 700, padding: "4px 10px", borderRadius: 20, whiteSpace: "nowrap", marginLeft: 8 }}>
                       {isEscalonado ? "Urgente" : STATUS_LABEL[pedido.status]}
@@ -379,19 +383,22 @@ export default function PedidosPage() {
                       </button>
                     )}
                     {!isEscalonado && proximoStatus && (
-                      <button onClick={() => avancarStatus(pedido.id, proximoStatus)} disabled={atualizando === pedido.id} style={{ width: "100%", padding: "15px 0", background: pedido.status === "novo" ? "#dc2626" : pedido.status === "em_preparo" ? "#2563eb" : "#16a34a", color: "#fff", border: "none", borderRadius: 12, fontSize: 15, fontWeight: 800, cursor: atualizando === pedido.id ? "not-allowed" : "pointer", opacity: atualizando === pedido.id ? 0.7 : 1, boxShadow: "0 3px 10px rgba(0,0,0,0.15)" }}>
-                        {atualizando === pedido.id ? "Salvando..." : PROXIMO_LABEL[pedido.status]}
+                      <button onClick={() => avancarStatus(pedido.id, proximoStatus)} disabled={atualizando === pedido.id} style={{ width: "100%", padding: "13px 0", background: "#dc2626", color: "#fff", border: "none", borderRadius: 12, fontSize: 14, fontWeight: 800, cursor: atualizando === pedido.id ? "not-allowed" : "pointer", opacity: atualizando === pedido.id ? 0.7 : 1 }}>
+                        {atualizando === pedido.id ? "Atualizando..." : PROXIMO_LABEL[pedido.status]}
                       </button>
                     )}
                     {!isEscalonado && (
                       <div style={{ display: "flex", gap: 8 }}>
+                        <button onClick={() => window.open("https://wa.me/" + pedido.telefone, "_blank")} style={{ flex: 1, padding: "10px 0", background: "#f0fdf4", color: "#16a34a", border: "1px solid #86efac", borderRadius: 12, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+                          💬 Abrir conversa
+                        </button>
                         {emManual ? (
-                          <button onClick={() => devolverAoBot(pedido.telefone)} style={{ flex: 1, padding: "10px 0", background: "#f5f5f5", color: "#666", border: "1px solid #eee", borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
-                            🤖 Devolver ao robô
+                          <button onClick={() => devolverAoBot(pedido.telefone)} style={{ flex: 1, padding: "10px 0", background: "#eff6ff", color: "#1d4ed8", border: "1px solid #93c5fd", borderRadius: 12, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+                            🤖 Devolver ao bot
                           </button>
                         ) : (
-                          <button onClick={() => assumirConversa(pedido.telefone)} style={{ flex: 1, padding: "10px 0", background: "#f5f5f5", color: "#666", border: "1px solid #eee", borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
-                            💬 Abrir conversa
+                          <button onClick={() => assumirConversa(pedido.telefone)} style={{ flex: 1, padding: "10px 0", background: "#fef2f2", color: "#dc2626", border: "1px solid #fca5a5", borderRadius: 12, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+                            📱 Assumir conversa
                           </button>
                         )}
                       </div>
@@ -403,10 +410,6 @@ export default function PedidosPage() {
           </div>
         )}
       </div>
-
-      <style>{`
-        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
-      `}</style>
     </div>
   )
 }
