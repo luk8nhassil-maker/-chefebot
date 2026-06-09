@@ -216,7 +216,13 @@ export default function PedidosPage() {
           if (!temEscalado) pararPiscar()
         }
       })
-      .catch(() => setErro("Erro ao carregar. Tentando novamente..."))
+      .catch(() => {
+        setErro("Atualizando...")
+        setTimeout(() => {
+          setErro("")
+          carregarPedidos()
+        }, 3000)
+      })
   }
   const avancarStatus = async (id: string, novoStatus: Status) => {
     setAtualizando(id)
