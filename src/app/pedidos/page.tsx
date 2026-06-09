@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 import { useEffect, useState, useRef } from "react"
 import { useRouter } from "next/navigation"
 
@@ -168,6 +168,7 @@ export default function PedidosPage() {
   const tituloOriginalRef = useRef(typeof document !== "undefined" ? document.title : "Cozinha")
   const toastIdRef = useRef(0)
   const filtrosRef = useRef<HTMLDivElement>(null)
+  const [somAtivado, setSomAtivado] = useState(false)
   const botoesRef = useRef<(HTMLButtonElement | null)[]>([])
 
   const addToast = (message: string, type: Toast["type"] = "success") => {
@@ -182,7 +183,7 @@ export default function PedidosPage() {
     if ("Notification" in window && Notification.permission === "default") Notification.requestPermission()
 
     // Desbloqueia o AudioContext no primeiro toque/clique (obrigatório no mobile)
-    const unlock = () => { desbloquearAudio(); window.removeEventListener("touchstart", unlock); window.removeEventListener("click", unlock) }
+    const unlock = () => { desbloquearAudio(); setSomAtivado(true); window.removeEventListener("touchstart", unlock); window.removeEventListener("click", unlock) }
     window.addEventListener("touchstart", unlock, { once: true })
     window.addEventListener("click", unlock, { once: true })
 
@@ -330,6 +331,18 @@ export default function PedidosPage() {
 
       <div style={{ padding: "10px 14px 0" }}>
 
+        {/* Banner ativar som */}
+      {!somAtivado && (
+        <div onClick={() => { desbloquearAudio(); setSomAtivado(true) }} style={{ background: "#0d1a0d", border: "1px solid #16a34a40", borderRadius: 14, padding: "12px 14px", marginBottom: 10, display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+          <span style={{ fontSize: 20 }}>🔔</span>
+          <div>
+            <p style={{ fontWeight: 800, color: "#4ade80", margin: 0, fontSize: 13 }}>Toque aqui para ativar o som</p>
+            <p style={{ fontSize: 11, color: "#4ade8060", margin: "2px 0 0" }}>Necessário para notificações no celular</p>
+          </div>
+        </div>
+      )}
+
+      {/* Alerta urgente */}
         {/* Alerta urgente */}
         {escalonados > 0 && (
           <div style={{ background: "#1a0505", border: "1px solid #f8717130", borderRadius: 14, padding: "12px 14px", marginBottom: 10, display: "flex", alignItems: "center", gap: 10 }}>
@@ -517,3 +530,5 @@ export default function PedidosPage() {
     </div>
   )
 }
+
+
