@@ -111,8 +111,12 @@ function filtraPorPeriodo(pedidos: Pedido[], periodo: Periodo): Pedido[] {
   const ontem = new Date(agora)
   ontem.setDate(ontem.getDate() - 1)
   const ontemStr = ontem.toLocaleDateString('pt-BR')
+  const semanaAtras = new Date(agora)
+  semanaAtras.setDate(semanaAtras.getDate() - 7)
+
   if (periodo === 'hoje') {
     return pedidos.filter(p => {
+      if ((p as any).data) return (p as any).data === hojeStr
       const [h, m] = p.horario.split(':').map(Number)
       const d = new Date(); d.setHours(h, m, 0, 0)
       return d.toLocaleDateString('pt-BR') === hojeStr
@@ -120,6 +124,7 @@ function filtraPorPeriodo(pedidos: Pedido[], periodo: Periodo): Pedido[] {
   }
   if (periodo === 'ontem') {
     return pedidos.filter(p => {
+      if ((p as any).data) return (p as any).data === ontemStr
       const [h, m] = p.horario.split(':').map(Number)
       const d = new Date(); d.setHours(h, m, 0, 0)
       return d.toLocaleDateString('pt-BR') === ontemStr

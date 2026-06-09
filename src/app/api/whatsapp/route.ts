@@ -154,8 +154,9 @@ async function salvarPedido(session: BotSession, phone: string, config: ConfigPi
     status: "novo",
     horario: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
     endereco,
+    data: new Date().toLocaleDateString("pt-BR"),
     ...(session.observacao ? { observacao: session.observacao } : {}),
-  };
+  } as any;
   await redis.set("pedidos", [...pedidos, novoPedido]);
   const historico: ClienteHistorico = {
     nome: session.customerName || phone,
