@@ -439,7 +439,7 @@ export default function AdminPage() {
             </div>
 
             {mensagem && (
-              <div style={{ background: mensagem.includes('✅') ? 'rgba(104,211,145,0.1)' : 'rgba(252,129,129,0.1)', border: `1px solid ${mensagem.includes('✅') ? 'rgba(104,211,145,0.3)' : 'rgba(252,129,129,0.3)'}`, borderRadius: 10, padding: '10px 14px', marginBottom: 16, color: mensagem.includes('✅') ? '#68d391' : '#fc8181', fontWeight: 600, fontSize: 14 }}>
+              <div style={{ position: 'sticky', top: 0, zIndex: 1002, background: mensagem.includes('✅') ? 'rgba(104,211,145,0.95)' : 'rgba(252,129,129,0.95)', borderRadius: 10, padding: '12px 14px', marginBottom: 16, color: '#fff', fontWeight: 700, fontSize: 14, textAlign: 'center', backdropFilter: 'blur(4px)' }}>
                 {mensagem}
               </div>
             )}
