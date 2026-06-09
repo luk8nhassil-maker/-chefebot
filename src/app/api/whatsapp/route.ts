@@ -342,10 +342,15 @@ export async function POST(req: NextRequest) {
           await enviarMensagem(phone, mensagemFechado(config));
           return NextResponse.json({ ok: true });
         }
-        currentSession = createInitialSession();
+        if (eSaudacao(messageText)) {
+          currentSession = createInitialSession();
+          await redis.set(sessionKey, currentSession, { ex: 1800 });
+          await enviarMensagem(phone, `Ola! Seja bem-vindo a *${config.nomePizzaria}*! 🍕\n\nPra comecar, me fala seu nome?`);
+          return NextResponse.json({ ok: true });
+        }
+        // Nao e saudacao — cria sessao no step name e processa direto
+        currentSession = { step: "name", cart: [], deliveryFee: 0, tentativasInvalidas: 0 };
         await redis.set(sessionKey, currentSession, { ex: 1800 });
-        await enviarMensagem(phone, `Ola! Seja bem-vindo a *${config.nomePizzaria}*! 🍕\n\nPra comecar, me fala seu nome?`);
-        return NextResponse.json({ ok: true });
       }
     }
 
