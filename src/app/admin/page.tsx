@@ -465,8 +465,11 @@ export default function AdminPage() {
               <div style={{ background: 'rgba(255,215,0,0.04)', border: '1px solid rgba(255,215,0,0.15)', borderRadius: 12, padding: 14 }}>
                 <label style={{ color: 'rgba(255,220,100,0.9)', fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 8 }}>💸 Chave Pix</label>
                 <input type="text" placeholder="Ex: 11999999999 ou email@email.com" value={config.chavePix} onChange={e => setConfig(p => ({ ...p, chavePix: e.target.value }))}
+                  style={{ width: '100%', background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,215,0,0.2)', borderRadius: 10, padding: '11px 14px', color: '#fff', fontSize: 14, outline: 'none', boxSizing: 'border-box', marginBottom: 8 }} />
+                <label style={{ color: 'rgba(255,220,100,0.9)', fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 8 }}>👤 Nome do Titular da Conta</label>
+                <input type="text" placeholder="Ex: João Silva" value={(config as any).nomeTitularPix || ''} onChange={e => setConfig(p => ({ ...p, nomeTitularPix: e.target.value } as any))}
                   style={{ width: '100%', background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,215,0,0.2)', borderRadius: 10, padding: '11px 14px', color: '#fff', fontSize: 14, outline: 'none', boxSizing: 'border-box' }} />
-                <p style={{ color: 'rgba(255,215,0,0.4)', fontSize: 11, margin: '6px 0 0' }}>Aparece no WhatsApp quando cliente escolher Pix.</p>
+                <p style={{ color: 'rgba(255,215,0,0.4)', fontSize: 11, margin: '6px 0 0' }}>Usado para validar comprovantes de Pix automaticamente.</p>
               </div>
 
               <div>
