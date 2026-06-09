@@ -1,6 +1,7 @@
 ﻿"use client"
 import { useEffect, useState, useRef } from "react"
 import { useRouter } from "next/navigation"
+
 type Status = "novo" | "em_preparo" | "saiu_entrega" | "entregue" | "cancelado"
 type Pedido = {
   id: string
@@ -22,12 +23,12 @@ const STATUS_LABEL: Record<Status, string> = {
   entregue: "Entregue",
   cancelado: "Cancelado",
 }
-const STATUS_COR: Record<Status, { bg: string; text: string; border: string }> = {
-  novo: { bg: "#fff8e6", text: "#b45309", border: "#fcd34d" },
-  em_preparo: { bg: "#fff3e6", text: "#c2410c", border: "#fb923c" },
-  saiu_entrega: { bg: "#eff6ff", text: "#1d4ed8", border: "#93c5fd" },
-  entregue: { bg: "#f0fdf4", text: "#15803d", border: "#86efac" },
-  cancelado: { bg: "#fef2f2", text: "#dc2626", border: "#fca5a5" },
+const STATUS_COR: Record<Status, { bg: string; text: string; border: string; accent: string }> = {
+  novo: { bg: "#1a1200", text: "#ffd700", border: "#3a2e00", accent: "#ffd700" },
+  em_preparo: { bg: "#1a0d00", text: "#fb923c", border: "#3a1f00", accent: "#fb923c" },
+  saiu_entrega: { bg: "#001a3a", text: "#60a5fa", border: "#003380", accent: "#60a5fa" },
+  entregue: { bg: "#001a0d", text: "#4ade80", border: "#003319", accent: "#4ade80" },
+  cancelado: { bg: "#1a0000", text: "#f87171", border: "#3a0000", accent: "#f87171" },
 }
 const PROXIMO_STATUS: Record<Status, Status | null> = {
   novo: "em_preparo",
@@ -37,9 +38,9 @@ const PROXIMO_STATUS: Record<Status, Status | null> = {
   cancelado: null,
 }
 const PROXIMO_LABEL: Record<Status, string> = {
-  novo: "🔥 Começar a preparar",
-  em_preparo: "🛵 Saiu para entregar",
-  saiu_entrega: "✅ Confirmar entrega",
+  novo: "🔥 Iniciar preparo",
+  em_preparo: "🛵 Saiu para entrega",
+  saiu_entrega: "✅ Entrega confirmada",
   entregue: "",
   cancelado: "",
 }
@@ -52,13 +53,11 @@ function tempoDesde(horario: string): string {
     const diffMs = agora.getTime() - pedidoTime.getTime()
     const diffMin = Math.floor(diffMs / 60000)
     if (diffMin < 1) return "agora"
-    if (diffMin < 60) return `há ${diffMin} min`
+    if (diffMin < 60) return `${diffMin}min`
     const horas = Math.floor(diffMin / 60)
     const mins = diffMin % 60
-    return mins > 0 ? `há ${horas}h ${mins}min` : `há ${horas}h`
-  } catch {
-    return ""
-  }
+    return mins > 0 ? `${horas}h${mins}m` : `${horas}h`
+  } catch { return "" }
 }
 function tocarSom() {
   try {
@@ -100,29 +99,36 @@ function getUserInfo(): { name: string; role: string } | null {
   } catch {}
   return null
 }
+
+type Toast = { id: number; message: string; type: 'success' | 'error' | 'warning' | 'info' }
+
 export default function PedidosPage() {
   const router = useRouter()
   const [pedidos, setPedidos] = useState<Pedido[]>([])
   const [filtro, setFiltro] = useState<Status | "todos">("novo")
   const [loading, setLoading] = useState(true)
-  const [userName, setUserName] = useState("")
   const [isAdmin, setIsAdmin] = useState(false)
   const [ultimaAtualizacao, setUltimaAtualizacao] = useState("")
-  const [erro, setErro] = useState("")
   const [atualizando, setAtualizando] = useState<string | null>(null)
-  const [notificacao, setNotificacao] = useState("")
+  const [toasts, setToasts] = useState<Toast[]>([])
   const [botAtivo, setBotAtivo] = useState(true)
   const [salvandoBot, setSalvandoBot] = useState(false)
   const [manuais, setManuais] = useState<Record<string, boolean>>({})
-  const [resolvendo, setResolvendo] = useState<Record<string, boolean>>({})
   const [agora, setAgora] = useState(new Date())
   const prevIdsRef = useRef<string[]>([])
   const piscarRef = useRef<NodeJS.Timeout | null>(null)
   const tituloOriginalRef = useRef(typeof document !== "undefined" ? document.title : "Cozinha")
+  const toastIdRef = useRef(0)
+
+  const addToast = (message: string, type: Toast['type'] = 'success') => {
+    const id = ++toastIdRef.current
+    setToasts(prev => [...prev, { id, message, type }])
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3500)
+  }
 
   useEffect(() => {
     const user = getUserInfo()
-    if (user) { setUserName(user.name); setIsAdmin(user.role === "admin" || user.role === "dev") }
+    if (user) setIsAdmin(user.role === "admin" || user.role === "dev")
     if ("Notification" in window && Notification.permission === "default") Notification.requestPermission()
     carregarPedidos()
     carregarStatusBot()
@@ -159,7 +165,7 @@ export default function PedidosPage() {
     try {
       const novoStatus = !botAtivo
       const res = await fetch("/api/bot-status", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ativo: novoStatus }) })
-      if (res.ok) { setBotAtivo(novoStatus); setNotificacao(novoStatus ? "🤖 Robô atendendo!" : "⏸️ Robô em pausa!"); setTimeout(() => setNotificacao(""), 3000) }
+      if (res.ok) { setBotAtivo(novoStatus); addToast(novoStatus ? "🤖 Robô atendendo!" : "⏸️ Robô em pausa!", novoStatus ? 'success' : 'warning') }
     } catch {}
     setSalvandoBot(false)
   }
@@ -167,7 +173,6 @@ export default function PedidosPage() {
     try {
       await fetch("/api/bot-status", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phone, ativo: false }) })
       setManuais(prev => ({ ...prev, [phone]: true }))
-      setNotificacao("📱 Abrindo WhatsApp..."); setTimeout(() => setNotificacao(""), 3000)
       pararPiscar()
       window.open("https://wa.me/" + phone, "_blank")
     } catch {}
@@ -176,17 +181,16 @@ export default function PedidosPage() {
     try {
       await fetch("/api/bot-status", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phone, ativo: true }) })
       setManuais(prev => ({ ...prev, [phone]: false }))
-      setNotificacao("🤖 Robô retomou a conversa"); setTimeout(() => setNotificacao(""), 3000)
+      addToast("🤖 Robô retomou a conversa", 'info')
     } catch {}
   }
   const marcarResolvido = async (phone: string, pedidoId: string) => {
     try {
       await fetch("/api/resolver", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phone }) })
-      setResolvendo(prev => ({ ...prev, [phone]: true }))
       setManuais(prev => ({ ...prev, [phone]: false }))
       setPedidos(prev => prev.map(p => p.id === pedidoId ? { ...p, escalonado: false, status: "entregue" } : p))
       pararPiscar()
-      setNotificacao("✅ Resolvido! Cliente foi notificado."); setTimeout(() => setNotificacao(""), 4000)
+      addToast("✅ Resolvido! Cliente foi notificado.", 'success')
     } catch {}
   }
   const carregarPedidos = () => {
@@ -202,34 +206,27 @@ export default function PedidosPage() {
               tocarSom()
               const temEscalonado = chegaram.some((p: Pedido) => p.escalonado)
               const temCancelamento = chegaram.some((p: Pedido) => p.cancelamentoSolicitado)
-              if (temEscalonado) { setNotificacao("🚨 URGENTE! Cliente precisa de você!"); iniciarPiscar() }
-              else if (temCancelamento) { setNotificacao("⚠️ Cancelamento solicitado!"); setTimeout(() => setNotificacao(""), 5000) }
-              else { setNotificacao(`🍕 ${chegaram.length} novo${chegaram.length > 1 ? "s" : ""} pedido${chegaram.length > 1 ? "s" : ""}!`); setTimeout(() => setNotificacao(""), 4000) }
+              if (temEscalonado) { addToast("🚨 URGENTE! Cliente precisa de você!", 'error'); iniciarPiscar() }
+              else if (temCancelamento) { addToast("⚠️ Cancelamento solicitado!", 'warning') }
+              else { addToast(`🍕 ${chegaram.length} novo${chegaram.length > 1 ? "s" : ""} pedido${chegaram.length > 1 ? "s" : ""}!`, 'success') }
             }
           }
           prevIdsRef.current = novosIds
           setPedidos(data)
           setLoading(false)
-          setErro("")
           setUltimaAtualizacao(new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }))
           const temEscalado = data.some((p: Pedido) => p.escalonado && p.status === "novo")
           if (!temEscalado) pararPiscar()
         }
       })
-      .catch(() => {
-        setErro("Atualizando...")
-        setTimeout(() => {
-          setErro("")
-          carregarPedidos()
-        }, 3000)
-      })
+      .catch(() => setTimeout(carregarPedidos, 3000))
   }
   const avancarStatus = async (id: string, novoStatus: Status) => {
     setAtualizando(id)
     const res = await fetch("/api/orders", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, status: novoStatus }) })
     if (res.ok) {
       setPedidos(prev => prev.map(p => p.id === id ? { ...p, status: novoStatus } : p))
-      setUltimaAtualizacao(new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }))
+      addToast(`${STATUS_LABEL[novoStatus]}! ✅`, 'success')
     }
     setAtualizando(null)
   }
@@ -238,10 +235,11 @@ export default function PedidosPage() {
     const res = await fetch("/api/orders", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, status: "cancelado" }) })
     if (res.ok) {
       setPedidos(prev => prev.map(p => p.id === id ? { ...p, status: "cancelado", cancelamentoSolicitado: false } : p))
-      setNotificacao("Pedido cancelado!"); setTimeout(() => setNotificacao(""), 4000)
+      addToast("Pedido cancelado", 'warning')
     }
     setAtualizando(null)
   }
+
   const contagem = (s: Status | "todos") => s === "todos"
     ? pedidos.filter(p => !p.escalonado).length
     : pedidos.filter(p => p.status === s && !p.escalonado).length
@@ -253,77 +251,105 @@ export default function PedidosPage() {
   })
   const ativos = pedidos.filter(p => !["entregue", "cancelado"].includes(p.status) && !p.escalonado).length
   const escalonados = pedidos.filter(p => p.escalonado && p.status === "novo").length
-  const cancelamentos = pedidos.filter(p => p.cancelamentoSolicitado && p.status !== "cancelado").length
   const eAtivo = (s: Status) => !["entregue", "cancelado"].includes(s)
 
   if (loading) return (
-    <div style={{ minHeight: "100vh", background: "#111", display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <p style={{ color: "#fff" }}>Carregando...</p>
+    <div style={{ minHeight: "100vh", background: "#080808", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ textAlign: "center" }}>
+        <div style={{ fontSize: 32, marginBottom: 12 }}>🍕</div>
+        <p style={{ color: "rgba(255,255,255,0.4)", fontSize: 14 }}>Carregando...</p>
+      </div>
     </div>
   )
 
-  return (
-    <div style={{ minHeight: "100vh", background: "#f3f4f6", paddingBottom: 32 }}>
-      {notificacao && (
-        <div style={{ position: "fixed", top: 16, left: 16, right: 16, zIndex: 9999, background: notificacao.includes("URGENTE") ? "#dc2626" : notificacao.includes("⚠️") ? "#ea580c" : "#16a34a", color: "#fff", padding: "14px 16px", borderRadius: 14, fontWeight: 700, fontSize: 15, textAlign: "center", boxShadow: "0 4px 20px rgba(0,0,0,0.2)" }}>
-          {notificacao}
-        </div>
-      )}
+  const toastColors: Record<Toast['type'], string> = {
+    success: '#4ade80',
+    error: '#f87171',
+    warning: '#fb923c',
+    info: '#60a5fa',
+  }
 
-      <div style={{ background: "#fff", borderBottom: "1px solid #e5e7eb", padding: "12px 16px", position: "sticky", top: 0, zIndex: 100, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+  return (
+    <div style={{ minHeight: "100vh", background: "#080808", paddingBottom: 80, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>
+
+      {/* Toast notifications */}
+      <div style={{ position: "fixed", bottom: 24, left: 16, right: 16, zIndex: 9999, display: "flex", flexDirection: "column", gap: 8, pointerEvents: "none" }}>
+        {toasts.map(toast => (
+          <div key={toast.id} style={{
+            background: "rgba(20,20,20,0.96)",
+            border: `1px solid ${toastColors[toast.type]}40`,
+            borderLeft: `3px solid ${toastColors[toast.type]}`,
+            borderRadius: 12,
+            padding: "12px 16px",
+            color: "#fff",
+            fontSize: 14,
+            fontWeight: 600,
+            backdropFilter: "blur(20px)",
+            boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
+            animation: "slideUp 0.3s ease",
+          }}>
+            {toast.message}
+          </div>
+        ))}
+      </div>
+
+      <style>{`
+        @keyframes slideUp {
+          from { opacity: 0; transform: translateY(20px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+      `}</style>
+
+      {/* Header */}
+      <div style={{ background: "#111", borderBottom: "1px solid #1a1a1a", padding: "14px 16px", position: "sticky", top: 0, zIndex: 100, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ fontSize: 22 }}>🍕</span>
+          <span style={{ fontSize: 20 }}>🍕</span>
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ fontWeight: 800, fontSize: 16, color: "#111" }}>Cozinha</span>
-              {escalonados > 0 && <span style={{ background: "#dc2626", color: "#fff", fontSize: 11, fontWeight: 800, padding: "2px 8px", borderRadius: 20 }}>{escalonados} URGENTE</span>}
-              {cancelamentos > 0 && <span style={{ background: "#ea580c", color: "#fff", fontSize: 11, fontWeight: 800, padding: "2px 8px", borderRadius: 20 }}>{cancelamentos} CANCEL.</span>}
+              <span style={{ fontWeight: 800, fontSize: 15, color: "#fff" }}>Cozinha</span>
+              {escalonados > 0 && <span style={{ background: "#f87171", color: "#fff", fontSize: 10, fontWeight: 800, padding: "2px 7px", borderRadius: 20 }}>{escalonados} URGENTE</span>}
             </div>
-            <p style={{ fontSize: 11, color: "#9ca3af", margin: 0 }}>
-              {ativos} ativo{ativos !== 1 ? "s" : ""}
-              {ultimaAtualizacao && ` · atualizado ${ultimaAtualizacao}`}
-            </p>
+            <p style={{ fontSize: 11, color: "#444", margin: 0 }}>{ativos} ativo{ativos !== 1 ? "s" : ""}{ultimaAtualizacao && ` · ${ultimaAtualizacao}`}</p>
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           {isAdmin && (
-            <button onClick={() => { window.location.href = "/admin" }} style={{ background: "rgba(255,215,0,0.15)", border: "1px solid rgba(255,215,0,0.5)", color: "#b45309", borderRadius: 8, padding: "6px 10px", cursor: "pointer", fontSize: 12, fontWeight: 700 }}>
+            <button onClick={() => window.location.href = "/admin"} style={{ background: "#1a1500", border: "1px solid #3a2e00", color: "#ffd700", borderRadius: 8, padding: "7px 10px", cursor: "pointer", fontSize: 12, fontWeight: 700 }}>
               👑
             </button>
           )}
-          <button onClick={() => fetch("/api/auth/logout", { method: "POST" }).then(() => router.push("/login"))} style={{ background: "#f5f5f5", border: "1px solid #e5e7eb", color: "#666", borderRadius: 8, padding: "6px 10px", cursor: "pointer", fontSize: 12 }}>
+          <button onClick={() => fetch("/api/auth/logout", { method: "POST" }).then(() => router.push("/login"))} style={{ background: "#1a1a1a", border: "1px solid #2a2a2a", color: "#666", borderRadius: 8, padding: "7px 10px", cursor: "pointer", fontSize: 12 }}>
             Sair
           </button>
         </div>
       </div>
 
-      <div style={{ maxWidth: 600, margin: "0 auto", padding: "12px 12px 0" }}>
+      <div style={{ padding: "12px 16px 0" }}>
 
-        {erro && <div style={{ background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 12, padding: "10px 14px", marginBottom: 12, fontSize: 13, color: "#dc2626" }}>{erro}</div>}
+        {/* Toggle robo */}
+        <div style={{ background: "#111", border: "1px solid #1a1a1a", borderRadius: 14, padding: "12px 16px", marginBottom: 12, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div>
+            <p style={{ fontWeight: 700, fontSize: 13, color: "#fff", margin: 0 }}>{botAtivo ? "🤖 Robô atendendo" : "⏸️ Robô pausado"}</p>
+            <p style={{ fontSize: 11, color: "#444", margin: "2px 0 0" }}>{botAtivo ? "Respondendo automaticamente" : "Você está no controle"}</p>
+          </div>
+          <button onClick={alternarBot} disabled={salvandoBot} style={{ position: "relative", width: 48, height: 28, borderRadius: 14, border: "none", cursor: "pointer", background: botAtivo ? "#16a34a" : "#333", transition: "background 0.2s", flexShrink: 0 }}>
+            <span style={{ position: "absolute", top: 2, left: botAtivo ? 22 : 2, width: 24, height: 24, borderRadius: "50%", background: "#fff", transition: "left 0.2s", boxShadow: "0 1px 4px rgba(0,0,0,0.3)" }} />
+          </button>
+        </div>
 
+        {/* Alerta urgente */}
         {escalonados > 0 && (
-          <div style={{ background: "#fef2f2", border: "2px solid #dc2626", borderRadius: 14, padding: "14px 16px", marginBottom: 12 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <span style={{ fontSize: 24 }}>🚨</span>
-              <div>
-                <p style={{ fontWeight: 800, color: "#dc2626", margin: 0, fontSize: 14 }}>{escalonados} cliente{escalonados > 1 ? "s" : ""} precisando de você AGORA!</p>
-                <p style={{ fontSize: 12, color: "#ef4444", margin: "2px 0 0" }}>Veja os cards vermelhos abaixo</p>
-              </div>
+          <div style={{ background: "#1a0000", border: "1px solid #f8717140", borderRadius: 14, padding: "12px 16px", marginBottom: 12, display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ fontSize: 20 }}>🚨</span>
+            <div>
+              <p style={{ fontWeight: 800, color: "#f87171", margin: 0, fontSize: 13 }}>{escalonados} cliente{escalonados > 1 ? "s" : ""} precisando de você AGORA</p>
+              <p style={{ fontSize: 11, color: "#f8717180", margin: "2px 0 0" }}>Veja os cards abaixo</p>
             </div>
           </div>
         )}
 
-        <div style={{ background: botAtivo ? "#f0fdf4" : "#fef2f2", border: `1px solid ${botAtivo ? "#86efac" : "#fca5a5"}`, borderRadius: 14, padding: "12px 16px", marginBottom: 12, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <div>
-            <p style={{ fontWeight: 700, fontSize: 14, color: "#111", margin: 0 }}>{botAtivo ? "🤖 Robô atendendo" : "⏸️ Robô em pausa"}</p>
-            <p style={{ fontSize: 12, color: "#6b7280", margin: "2px 0 0" }}>{botAtivo ? "Nenhum cliente fica sem resposta" : "Você está no controle"}</p>
-          </div>
-          <button onClick={alternarBot} disabled={salvandoBot} style={{ position: "relative", width: 52, height: 30, borderRadius: 15, border: "none", cursor: salvandoBot ? "not-allowed" : "pointer", background: botAtivo ? "#16a34a" : "#ef4444", transition: "background 0.2s", flexShrink: 0 }}>
-            <span style={{ position: "absolute", top: 3, left: botAtivo ? 25 : 3, width: 24, height: 24, borderRadius: "50%", background: "#fff", transition: "left 0.2s", boxShadow: "0 1px 4px rgba(0,0,0,0.2)" }} />
-          </button>
-        </div>
-
-        <div style={{ display: "flex", gap: 8, marginBottom: 14, overflowX: "auto", paddingBottom: 4 }}>
+        {/* Filtros */}
+        <div style={{ display: "flex", gap: 6, marginBottom: 14, overflowX: "auto", paddingBottom: 4 }}>
           {([
             { key: "novo", label: "🔥 Novos" },
             { key: "em_preparo", label: "👨‍🍳 Preparo" },
@@ -334,22 +360,21 @@ export default function PedidosPage() {
           ] as { key: Status | "todos"; label: string }[]).map(({ key, label }) => {
             const count = contagem(key)
             const ativo = filtro === key
-            const temUrgencia = key === "novo" && (escalonados > 0 || cancelamentos > 0)
-            const borderFiltro = temUrgencia && !ativo ? "2px solid #fca5a5" : "none"
             return (
-              <button key={key} onClick={() => setFiltro(key)} style={{ flexShrink: 0, padding: "8px 14px", borderRadius: 20, border: borderFiltro, cursor: "pointer", fontWeight: 700, fontSize: 13, background: ativo ? "#dc2626" : temUrgencia ? "#fff3f3" : "#fff", color: ativo ? "#fff" : temUrgencia ? "#dc2626" : "#555", boxShadow: ativo ? "0 2px 8px rgba(220,38,38,0.3)" : "0 1px 3px rgba(0,0,0,0.08)", display: "flex", alignItems: "center", gap: 5 }}>
+              <button key={key} onClick={() => setFiltro(key)} style={{ flexShrink: 0, padding: "7px 12px", borderRadius: 20, border: ativo ? "none" : "1px solid #1a1a1a", cursor: "pointer", fontWeight: 700, fontSize: 12, background: ativo ? "#fff" : "#111", color: ativo ? "#000" : "#555", display: "flex", alignItems: "center", gap: 4 }}>
                 {label}
-                {count > 0 && <span style={{ background: ativo ? "#fff" : "#dc2626", color: ativo ? "#dc2626" : "#fff", fontSize: 11, fontWeight: 800, padding: "1px 6px", borderRadius: 10 }}>{count}</span>}
+                {count > 0 && <span style={{ background: ativo ? "#000" : "#333", color: ativo ? "#fff" : "#aaa", fontSize: 10, fontWeight: 800, padding: "0px 5px", borderRadius: 10 }}>{count}</span>}
               </button>
             )
           })}
         </div>
 
+        {/* Lista */}
         {pedidosFiltrados.length === 0 ? (
-          <div style={{ textAlign: "center", padding: "48px 0", color: "#bbb" }}>
-            <p style={{ fontSize: 40, margin: "0 0 8px" }}>🍕</p>
-            <p style={{ fontSize: 15, fontWeight: 600, color: "#9ca3af" }}>
-              {filtro === "novo" ? "Nenhum pedido novo. Tudo em dia! 😊" : "Nenhum pedido nessa categoria."}
+          <div style={{ textAlign: "center", padding: "60px 0" }}>
+            <p style={{ fontSize: 36, margin: "0 0 8px" }}>🍕</p>
+            <p style={{ fontSize: 14, color: "#333", fontWeight: 600 }}>
+              {filtro === "novo" ? "Nenhum pedido novo. Tudo em dia!" : "Nenhum pedido aqui."}
             </p>
           </div>
         ) : (
@@ -363,43 +388,41 @@ export default function PedidosPage() {
               const tempo = tempoDesde(pedido.horario)
               const ativo = eAtivo(pedido.status)
               return (
-                <div key={pedido.id} style={{ background: isEscalonado ? "#fff5f5" : isCancelamento ? "#fff7ed" : ativo ? "#fff" : "#fafafa", border: `2px solid ${isEscalonado ? "#dc2626" : isCancelamento ? "#ea580c" : ativo ? cor.border : "#e5e7eb"}`, borderRadius: 16, overflow: "hidden", boxShadow: ativo ? "0 2px 8px rgba(0,0,0,0.08)" : "none", opacity: ativo ? 1 : 0.7 }}>
-                  {ativo && !isEscalonado && (
-                    <div style={{ height: 4, background: cor.border, width: "100%" }} />
-                  )}
+                <div key={pedido.id} style={{ background: "#111", border: `1px solid ${isEscalonado ? "#f8717130" : isCancelamento ? "#fb923c30" : "#1a1a1a"}`, borderRadius: 16, overflow: "hidden", opacity: ativo ? 1 : 0.5 }}>
+                  {ativo && <div style={{ height: 3, background: cor.accent, width: "100%" }} />}
                   <div style={{ padding: "14px 16px 10px", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                     <div style={{ flex: 1 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                        <span style={{ fontWeight: 800, fontSize: 16, color: "#111" }}>{pedido.cliente}</span>
-                        {isEscalonado && <span style={{ background: "#dc2626", color: "#fff", fontSize: 11, fontWeight: 800, padding: "2px 8px", borderRadius: 20 }}>🚨 URGENTE</span>}
-                        {isCancelamento && !isEscalonado && <span style={{ background: "#ea580c", color: "#fff", fontSize: 11, fontWeight: 800, padding: "2px 8px", borderRadius: 20 }}>⚠️ CANCELAMENTO</span>}
+                        <span style={{ fontWeight: 800, fontSize: 15, color: "#fff" }}>{pedido.cliente}</span>
+                        {isEscalonado && <span style={{ background: "#f87171", color: "#fff", fontSize: 10, fontWeight: 800, padding: "2px 7px", borderRadius: 20 }}>🚨 URGENTE</span>}
+                        {isCancelamento && !isEscalonado && <span style={{ background: "#fb923c", color: "#fff", fontSize: 10, fontWeight: 800, padding: "2px 7px", borderRadius: 20 }}>⚠️ CANCEL.</span>}
                       </div>
-                      <p style={{ fontSize: 12, color: "#9ca3af", margin: "3px 0 0" }}>
+                      <p style={{ fontSize: 11, color: "#444", margin: "3px 0 0" }}>
                         {pedido.horario}
-                        {tempo && <span style={{ color: pedido.status === "novo" ? "#dc2626" : "#9ca3af", fontWeight: pedido.status === "novo" ? 700 : 400 }}> · {tempo}</span>}
-                        {pedido.endereco && pedido.endereco !== "-" && ` · ${pedido.endereco}`}
+                        {tempo && <span style={{ color: pedido.status === "novo" ? "#f87171" : "#333", fontWeight: pedido.status === "novo" ? 700 : 400 }}> · {tempo}</span>}
+                        {pedido.endereco && pedido.endereco !== "-" && <span> · {pedido.endereco}</span>}
                       </p>
                     </div>
-                    <span style={{ background: isEscalonado ? "#dc2626" : cor.bg, color: isEscalonado ? "#fff" : cor.text, border: `1px solid ${isEscalonado ? "#dc2626" : cor.border}`, fontSize: 12, fontWeight: 700, padding: "4px 10px", borderRadius: 20, whiteSpace: "nowrap", marginLeft: 8 }}>
+                    <span style={{ background: cor.bg, color: cor.text, border: `1px solid ${cor.border}`, fontSize: 11, fontWeight: 700, padding: "3px 9px", borderRadius: 20, whiteSpace: "nowrap", marginLeft: 8 }}>
                       {isEscalonado ? "Urgente" : STATUS_LABEL[pedido.status]}
                     </span>
                   </div>
                   <div style={{ padding: "0 16px 12px" }}>
-                    <p style={{ fontSize: 13, color: "#374151", margin: 0, lineHeight: 1.6, fontWeight: ativo ? 600 : 400 }}>{pedido.itens.join(" · ")}</p>
+                    <p style={{ fontSize: 13, color: ativo ? "#ccc" : "#555", margin: 0, lineHeight: 1.5, fontWeight: ativo ? 500 : 400 }}>{pedido.itens.join(" · ")}</p>
                     {pedido.observacao && (
-                      <div style={{ background: "#fffbeb", border: "1px solid #fcd34d", borderRadius: 8, padding: "6px 10px", marginTop: 8 }}>
-                        <p style={{ fontSize: 12, color: "#92400e", margin: 0, fontWeight: 600 }}>✏️ {pedido.observacao}</p>
+                      <div style={{ background: "#1a1400", border: "1px solid #3a2e00", borderRadius: 8, padding: "6px 10px", marginTop: 8 }}>
+                        <p style={{ fontSize: 12, color: "#fbbf24", margin: 0 }}>✏️ {pedido.observacao}</p>
                       </div>
                     )}
-                    <p style={{ fontSize: 17, fontWeight: 800, color: ativo ? "#111" : "#9ca3af", margin: "8px 0 0" }}>
+                    <p style={{ fontSize: 16, fontWeight: 800, color: ativo ? "#fff" : "#444", margin: "8px 0 0" }}>
                       R$ {pedido.total.toFixed(2).replace(".", ",")}
                     </p>
                   </div>
                   {(ativo || isEscalonado) && (
-                    <div style={{ padding: "10px 16px 14px", borderTop: "1px solid #f3f4f6", display: "flex", flexDirection: "column", gap: 8 }}>
+                    <div style={{ padding: "10px 16px 14px", borderTop: "1px solid #1a1a1a", display: "flex", flexDirection: "column", gap: 8 }}>
                       {isEscalonado && (
                         <div style={{ display: "flex", gap: 8 }}>
-                          <button onClick={() => assumirConversa(pedido.telefone)} style={{ flex: 1, padding: "13px 0", background: "#dc2626", color: "#fff", border: "none", borderRadius: 12, fontSize: 14, fontWeight: 800, cursor: "pointer" }}>
+                          <button onClick={() => assumirConversa(pedido.telefone)} style={{ flex: 1, padding: "13px 0", background: "#f87171", color: "#fff", border: "none", borderRadius: 12, fontSize: 14, fontWeight: 800, cursor: "pointer" }}>
                             📱 Atender agora
                           </button>
                           <button onClick={() => marcarResolvido(pedido.telefone, pedido.id)} style={{ flex: 1, padding: "13px 0", background: "#16a34a", color: "#fff", border: "none", borderRadius: 12, fontSize: 14, fontWeight: 800, cursor: "pointer" }}>
@@ -408,27 +431,27 @@ export default function PedidosPage() {
                         </div>
                       )}
                       {isCancelamento && !isEscalonado && (
-                        <button onClick={() => confirmarCancelamento(pedido.id)} disabled={atualizando === pedido.id} style={{ width: "100%", padding: "13px 0", background: "#ea580c", color: "#fff", border: "none", borderRadius: 12, fontSize: 14, fontWeight: 800, cursor: atualizando === pedido.id ? "not-allowed" : "pointer", opacity: atualizando === pedido.id ? 0.7 : 1 }}>
+                        <button onClick={() => confirmarCancelamento(pedido.id)} disabled={atualizando === pedido.id} style={{ width: "100%", padding: "13px 0", background: "#fb923c", color: "#fff", border: "none", borderRadius: 12, fontSize: 14, fontWeight: 800, cursor: "pointer" }}>
                           {atualizando === pedido.id ? "Cancelando..." : "⚠️ Confirmar cancelamento"}
                         </button>
                       )}
                       {!isEscalonado && proximoStatus && (
-                        <button onClick={() => avancarStatus(pedido.id, proximoStatus)} disabled={atualizando === pedido.id} style={{ width: "100%", padding: "14px 0", background: "linear-gradient(135deg, #dc2626, #b91c1c)", color: "#fff", border: "none", borderRadius: 12, fontSize: 15, fontWeight: 800, cursor: atualizando === pedido.id ? "not-allowed" : "pointer", opacity: atualizando === pedido.id ? 0.7 : 1, boxShadow: "0 3px 10px rgba(220,38,38,0.3)" }}>
+                        <button onClick={() => avancarStatus(pedido.id, proximoStatus)} disabled={atualizando === pedido.id} style={{ width: "100%", padding: "14px 0", background: "#fff", color: "#000", border: "none", borderRadius: 12, fontSize: 14, fontWeight: 800, cursor: "pointer" }}>
                           {atualizando === pedido.id ? "Atualizando..." : PROXIMO_LABEL[pedido.status]}
                         </button>
                       )}
                       {!isEscalonado && (
                         <div style={{ display: "flex", gap: 8 }}>
-                          <button onClick={() => window.open("https://wa.me/" + pedido.telefone, "_blank")} style={{ flex: 1, padding: "10px 0", background: "#f0fdf4", color: "#16a34a", border: "1px solid #86efac", borderRadius: 12, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
-                            💬 Abrir conversa
+                          <button onClick={() => window.open("https://wa.me/" + pedido.telefone, "_blank")} style={{ flex: 1, padding: "10px 0", background: "#111", color: "#4ade80", border: "1px solid #16a34a40", borderRadius: 12, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+                            💬 WhatsApp
                           </button>
                           {emManual ? (
-                            <button onClick={() => devolverAoBot(pedido.telefone)} style={{ flex: 1, padding: "10px 0", background: "#eff6ff", color: "#1d4ed8", border: "1px solid #93c5fd", borderRadius: 12, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
-                              🤖 Devolver ao bot
+                            <button onClick={() => devolverAoBot(pedido.telefone)} style={{ flex: 1, padding: "10px 0", background: "#111", color: "#60a5fa", border: "1px solid #1d4ed840", borderRadius: 12, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+                              🤖 Devolver bot
                             </button>
                           ) : (
-                            <button onClick={() => assumirConversa(pedido.telefone)} style={{ flex: 1, padding: "10px 0", background: "#fef2f2", color: "#dc2626", border: "1px solid #fca5a5", borderRadius: 12, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
-                              📱 Assumir conversa
+                            <button onClick={() => assumirConversa(pedido.telefone)} style={{ flex: 1, padding: "10px 0", background: "#111", color: "#f87171", border: "1px solid #f8717140", borderRadius: 12, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+                              📱 Assumir
                             </button>
                           )}
                         </div>
