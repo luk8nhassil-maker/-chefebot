@@ -103,6 +103,8 @@ export default function PedidosPage() {
   const piscarRef = useRef<NodeJS.Timeout | null>(null)
   const tituloOriginalRef = useRef(typeof document !== "undefined" ? document.title : "Cozinha")
   const toastIdRef = useRef(0)
+  const filtrosRef = useRef<HTMLDivElement>(null)
+  const botoesRef = useRef<(HTMLButtonElement | null)[]>([])
 
   const addToast = (message: string, type: Toast["type"] = "success") => {
     const id = ++toastIdRef.current
@@ -270,7 +272,8 @@ export default function PedidosPage() {
         )}
 
         {/* Filtros */}
-        <div style={{ display: "flex", gap: 6, marginBottom: 12, overflowX: "auto", paddingBottom: 2 }}>
+        <div ref={filtrosRef} style={{ display: "flex", gap: 6, marginBottom: 12, overflowX: "auto", paddingBottom: 2, scrollBehavior: "smooth", msOverflowStyle: "none", scrollbarWidth: "none" }}>
+          <style>{`div::-webkit-scrollbar { display: none; }`}</style>
           {([
             { key: "novo", label: "🔥 Novos", color: "#fbbf24" },
             { key: "em_preparo", label: "👨‍🍳 Preparo", color: "#fb923c" },
@@ -278,16 +281,28 @@ export default function PedidosPage() {
             { key: "entregue", label: "✅ Entregues", color: "#4ade80" },
             { key: "cancelado", label: "❌ Cancel.", color: "#f87171" },
             { key: "todos", label: "Todos", color: "#888" },
-          ] as { key: Status | "todos"; label: string; color: string }[]).map(({ key, label, color }) => {
+          ] as { key: Status | "todos"; label: string; color: string }[]).map(({ key, label, color }, index) => {
             const count = contagem(key)
             const ativo = filtro === key
             return (
-              <button key={key} onClick={() => setFiltro(key)} style={{ flexShrink: 0, padding: "6px 12px", borderRadius: 20, border: ativo ? "none" : "1px solid #1a1a1a", cursor: "pointer", fontWeight: 700, fontSize: 12, background: ativo ? color : "#111", color: ativo ? "#000" : "#555", display: "flex", alignItems: "center", gap: 4, transition: "all 0.15s" }}>
+              <button key={key} ref={el => { botoesRef.current[index] = el }} onClick={() => {
+                setFiltro(key)
+                const btn = botoesRef.current[index]
+                const container = filtrosRef.current
+                if (btn && container) {
+                  const btnLeft = btn.offsetLeft
+                  const btnWidth = btn.offsetWidth
+                  const containerWidth = container.offsetWidth
+                  container.scrollTo({ left: btnLeft - (containerWidth / 2) + (btnWidth / 2), behavior: "smooth" })
+                }
+              }} style={{ flexShrink: 0, padding: "7px 14px", borderRadius: 20, border: ativo ? "none" : "1px solid #1a1a1a", cursor: "pointer", fontWeight: 700, fontSize: 12, background: ativo ? color : "#111", color: ativo ? "#000" : "#555", display: "flex", alignItems: "center", gap: 4, transition: "all 0.2s", transform: ativo ? "scale(1.05)" : "scale(1)" }}>
                 {label}
                 {count > 0 && <span style={{ background: ativo ? "rgba(0,0,0,0.2)" : "#222", color: ativo ? "#000" : "#666", fontSize: 10, fontWeight: 800, padding: "0 5px", borderRadius: 10 }}>{count}</span>}
               </button>
             )
           })}
+          {/* Padding direito para mostrar metade do próximo botão */}
+          <div style={{ flexShrink: 0, width: 40 }} />
         </div>
 
         {/* Cards */}
