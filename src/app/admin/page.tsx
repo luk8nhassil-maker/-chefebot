@@ -21,6 +21,7 @@ type Config = {
   horaAbertura: number
   horaFechamento: number
   chavePix: string
+  limitePico?: number
 }
 
 type Funcionario = {
@@ -51,21 +52,6 @@ type AvaliacoesData = {
 }
 
 type Periodo = 'hoje' | 'ontem' | 'semana'
-
-const statusColor: Record<string, string> = {
-  novo: '#f6e05e',
-  em_preparo: '#f6ad55',
-  saiu_entrega: '#63b3ed',
-  entregue: '#68d391',
-  cancelado: '#fc8181',
-}
-const statusLabel: Record<string, string> = {
-  novo: 'Novo',
-  em_preparo: 'Em preparo',
-  saiu_entrega: 'Saiu p/ entrega',
-  entregue: 'Entregue',
-  cancelado: 'Cancelado',
-}
 
 function getUserRole(): string | null {
   if (typeof document === 'undefined') return null
@@ -111,9 +97,6 @@ function filtraPorPeriodo(pedidos: Pedido[], periodo: Periodo): Pedido[] {
   const ontem = new Date(agora)
   ontem.setDate(ontem.getDate() - 1)
   const ontemStr = ontem.toLocaleDateString('pt-BR')
-  const semanaAtras = new Date(agora)
-  semanaAtras.setDate(semanaAtras.getDate() - 7)
-
   if (periodo === 'hoje') {
     return pedidos.filter(p => {
       if ((p as any).data) return (p as any).data === hojeStr
@@ -131,6 +114,24 @@ function filtraPorPeriodo(pedidos: Pedido[], periodo: Periodo): Pedido[] {
     })
   }
   return pedidos
+}
+
+function calcularGraficoPico(pedidos: Pedido[]): { hora: string; total: number }[] {
+  const contagem: Record<number, number> = {}
+  for (const p of pedidos) {
+    if (p.status === 'cancelado' || p.escalonado) continue
+    const hora = parseInt(p.horario.split(':')[0])
+    if (!isNaN(hora)) contagem[hora] = (contagem[hora] || 0) + 1
+  }
+  const horas = Object.keys(contagem).map(Number).sort((a, b) => a - b)
+  if (horas.length === 0) return []
+  const min = Math.min(...horas)
+  const max = Math.max(...horas)
+  const resultado = []
+  for (let h = min; h <= max; h++) {
+    resultado.push({ hora: `${String(h).padStart(2, '0')}h`, total: contagem[h] || 0 })
+  }
+  return resultado
 }
 
 export default function AdminPage() {
@@ -154,6 +155,7 @@ export default function AdminPage() {
   const [imagens, setImagens] = useState<ImagensCardapio>({ ativo: true })
   const [avaliacoes, setAvaliacoes] = useState<AvaliacoesData>({ total: 0, media: 0, ultimas: [] })
   const [ranking, setRanking] = useState<Array<{ nome: string; total: number }>>([])
+  const [limitePico, setLimitePico] = useState(0)
   const [uploadando, setUploadando] = useState<string | null>(null)
   const inputPizzaRef = useRef<HTMLInputElement>(null)
   const inputLancheRef = useRef<HTMLInputElement>(null)
@@ -177,6 +179,7 @@ export default function AdminPage() {
     ]).then(([ped, cfg, funcs, imgs, avals, rank]) => {
       setPedidos(Array.isArray(ped) ? ped : [])
       setConfig(cfg)
+      setLimitePico(cfg.limitePico || 0)
       setImagens(imgs || { ativo: true })
       setAvaliacoes(avals || { total: 0, media: 0, ultimas: [] })
       setRanking(Array.isArray(rank) ? rank : [])
@@ -192,7 +195,7 @@ export default function AdminPage() {
     })
   }, [router])
 
- const pedidosFiltrados = filtraPorPeriodo(pedidos, periodo).filter(p => !p.escalonado && p.status !== 'cancelado')
+  const pedidosFiltrados = filtraPorPeriodo(pedidos, periodo).filter(p => !p.escalonado && p.status !== 'cancelado')
   const pedidosEntregues = pedidosFiltrados.filter(p => p.status === 'entregue')
   const faturamento = pedidosEntregues.reduce((s, p) => s + (Number(p.total) || 0), 0)
   const totalEntregues = pedidosEntregues.length
@@ -202,13 +205,15 @@ export default function AdminPage() {
     return acc
   }, {})
   const recorrentes = Object.values(telefonesTotal).filter(v => v > 1).length
+  const graficoPico = calcularGraficoPico(pedidosFiltrados)
+  const maxPico = graficoPico.length > 0 ? Math.max(...graficoPico.map(g => g.total)) : 1
 
   const toggle24h = async () => {
     const novaConfig = is24h ? { ...config, horaAbertura: 18, horaFechamento: 23 } : { ...config, horaAbertura: 0, horaFechamento: 24 }
     setConfig(novaConfig)
     setSalvando(true)
     try {
-      const res = await fetch('/api/configuracoes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(novaConfig) })
+      const res = await fetch('/api/configuracoes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...novaConfig, limitePico }) })
       if (res.ok) { setMensagem(is24h ? '✅ Horario padrao restaurado!' : '✅ Aberto 24 horas!'); setTimeout(() => setMensagem(''), 3000) }
     } catch { setMensagem('❌ Erro ao salvar.'); setTimeout(() => setMensagem(''), 3000) }
     finally { setSalvando(false) }
@@ -217,7 +222,7 @@ export default function AdminPage() {
   const salvarConfig = async () => {
     setSalvando(true)
     try {
-      const res = await fetch('/api/configuracoes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(config) })
+      const res = await fetch('/api/configuracoes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...config, limitePico }) })
       if (res.ok) { setMensagem('✅ Configuracoes salvas!'); setTimeout(() => setMensagem(''), 3000) }
     } catch { setMensagem('❌ Erro ao salvar.'); setTimeout(() => setMensagem(''), 3000) }
     finally { setSalvando(false) }
@@ -398,6 +403,39 @@ export default function AdminPage() {
           </div>
         )}
 
+        {/* Grafico de pico */}
+        {graficoPico.length > 0 && (
+          <div style={{ marginBottom: 24 }}>
+            <h2 style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12, fontWeight: 700, marginBottom: 16, textTransform: 'uppercase', letterSpacing: 1 }}>📊 Horário de Pico</h2>
+            <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 14, padding: '16px 12px' }}>
+              <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6, height: 80, justifyContent: 'space-between' }}>
+                {graficoPico.map((item, i) => {
+                  const altura = maxPico > 0 ? Math.max((item.total / maxPico) * 100, 8) : 8
+                  const isPico = item.total === maxPico && maxPico > 0
+                  return (
+                    <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                      <p style={{ color: isPico ? '#ffd700' : 'rgba(255,255,255,0.3)', fontSize: 9, margin: 0, fontWeight: isPico ? 800 : 400 }}>
+                        {item.total > 0 ? item.total : ''}
+                      </p>
+                      <div style={{ width: '100%', height: `${altura}%`, background: isPico ? 'linear-gradient(180deg, #ffd700, #b7950b)' : 'rgba(255,255,255,0.15)', borderRadius: '4px 4px 0 0', minHeight: 4, transition: 'height 0.3s' }} />
+                    </div>
+                  )
+                })}
+              </div>
+              <div style={{ display: 'flex', gap: 6, justifyContent: 'space-between', marginTop: 6 }}>
+                {graficoPico.map((item, i) => (
+                  <p key={i} style={{ flex: 1, color: 'rgba(255,255,255,0.3)', fontSize: 9, margin: 0, textAlign: 'center' }}>{item.hora}</p>
+                ))}
+              </div>
+              {maxPico > 0 && (
+                <p style={{ color: 'rgba(255,215,0,0.5)', fontSize: 11, margin: '10px 0 0', textAlign: 'center' }}>
+                  🔥 Pico às {graficoPico.find(g => g.total === maxPico)?.hora} com {maxPico} pedido{maxPico > 1 ? 's' : ''}
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+
         <p style={{ textAlign: 'center', color: 'rgba(255,255,255,0.15)', fontSize: 11, marginTop: 8, marginBottom: 24 }}>ChefeBot · Painel Admin</p>
       </div>
 
@@ -450,6 +488,16 @@ export default function AdminPage() {
                     </div>
                   </div>
                 )}
+              </div>
+
+              <div style={{ background: 'rgba(255,100,0,0.04)', border: '1px solid rgba(255,100,0,0.15)', borderRadius: 12, padding: 14 }}>
+                <label style={{ color: 'rgba(255,150,50,0.9)', fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 8 }}>🔥 Alerta de Horario de Pico</label>
+                <input type="number" min={0} max={100} value={limitePico} onChange={e => setLimitePico(Number(e.target.value))}
+                  placeholder="0 = desativado"
+                  style={{ width: '100%', background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,100,0,0.2)', borderRadius: 10, padding: '11px 14px', color: '#fff', fontSize: 14, outline: 'none', boxSizing: 'border-box' }} />
+                <p style={{ color: 'rgba(255,150,50,0.4)', fontSize: 11, margin: '6px 0 0' }}>
+                  {limitePico > 0 ? `Cliente sera avisado quando houver ${limitePico} ou mais pedidos em preparo.` : 'Digite um numero para ativar o aviso de pico. 0 = desativado.'}
+                </p>
               </div>
 
               <button onClick={salvarConfig} disabled={salvando} style={{ width: '100%', background: 'linear-gradient(135deg, #b7950b, #ffd700)', border: 'none', borderRadius: 10, padding: '13px', color: '#000', fontSize: 14, fontWeight: 700, cursor: salvando ? 'not-allowed' : 'pointer' }}>
