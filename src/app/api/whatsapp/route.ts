@@ -214,6 +214,27 @@ async function enviarMensagem(phone: string, message: string) {
   });
 }
 
+async function enviarImagem(phone: string, imageUrl: string) {
+  try {
+    const url = `https://${process.env.EVOLUTION_API_URL}/message/sendMedia/chefe`;
+    await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: process.env.EVOLUTION_API_KEY!,
+      },
+      body: JSON.stringify({
+        number: phone,
+        mediatype: "image",
+        media: imageUrl,
+        caption: "",
+      }),
+    });
+  } catch (err) {
+    console.error("[ChefeBot] Erro ao enviar imagem:", err);
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -233,7 +254,7 @@ export async function POST(req: NextRequest) {
     const emManual = await redis.get<boolean>(`manual:${phone}`);
     if (emManual === true) return NextResponse.json({ ok: true });
 
-    // Modo pós-atendimento
+    // Modo pos-atendimento
     const resolvendo = await redis.get<boolean>(`resolvendo:${phone}`);
     if (resolvendo === true) {
       if (resolvido(messageText) || eDespedida(messageText)) {
@@ -241,7 +262,7 @@ export async function POST(req: NextRequest) {
         await redis.del(`manual:${phone}`);
         await redis.del(`session:${phone}`);
         await fecharEscalonamento(phone);
-        await enviarMensagem(phone, `Fico feliz em ter ajudado! 😊\n\nQualquer coisa é só chamar. Estamos sempre aqui! 🍕`);
+        await enviarMensagem(phone, `Fico feliz em ter ajudado! 😊\n\nQualquer coisa e so chamar. Estamos sempre aqui! 🍕`);
       } else {
         await redis.del(`resolvendo:${phone}`);
         await redis.del(`manual:${phone}`);
@@ -253,7 +274,7 @@ export async function POST(req: NextRequest) {
           novaSession = createReturningSession(historico);
           const firstName = historico.nome.split(" ")[0];
           const ultimoPedido = historico.ultimoPedido.join(", ");
-          await enviarMensagem(phone, `Ei *${firstName}*! 😊 Da ultima vez voce pediu *${ultimoPedido}* — vai querer repetir ou montar um novo?\n\n  1. Repetir o mesmo\n  2. Quero outra coisa`);
+          await enviarMensagem(phone, `Ei *${firstName}*! 😊 Da ultima vez voce pediu *${ultimoPedido}* - vai querer repetir ou montar um novo?\n\n  1. Repetir o mesmo\n  2. Quero outra coisa`);
         } else {
           novaSession = createInitialSession();
           await enviarMensagem(phone, `Oi! Bem-vindo a *Chefe da Pizza*! 👋\n\nMe fala seu nome pra gente comecar?`);
@@ -263,47 +284,46 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
-    // Captura avaliação de satisfação
+    // Captura avaliacao de satisfacao
     const aguardandoAvaliacao = await redis.get<boolean>(`avaliacao:${phone}`);
     if (aguardandoAvaliacao === true) {
       const nota = parseInt(messageText.trim());
       if (nota >= 1 && nota <= 5) {
         await redis.del(`avaliacao:${phone}`);
-        // Salva a avaliação
         const avaliacoes = await redis.get<Array<{phone: string, nota: number, data: string}>>('avaliacoes') || [];
         avaliacoes.push({ phone, nota, data: new Date().toISOString() });
         await redis.set('avaliacoes', avaliacoes);
-        const estrelas = '⭐'.repeat(nota);
+        const estrelas = 'estrela'.repeat(nota);
         const mensagens = [
-          `${estrelas} Obrigado pela avaliação, *${nota}/5*! 😊\n\nSeu feedback é muito importante pra gente. Volte sempre! 🍕`,
-          `${estrelas} Que bom saber! Obrigado por avaliar, *${nota}/5*! 🙏\n\nTe esperamos na próxima! 🍕`,
-          `${estrelas} Valeu pelo feedback! *${nota}/5* anotado. 😊\n\nAté a próxima! 🍕`,
+          `Obrigado pela avaliacao, *${nota}/5*! 😊\n\nSeu feedback e muito importante pra gente. Volte sempre! 🍕`,
+          `Que bom saber! Obrigado por avaliar, *${nota}/5*! 🙏\n\nTe esperamos na proxima! 🍕`,
+          `Valeu pelo feedback! *${nota}/5* anotado. 😊\n\nAte a proxima! 🍕`,
         ];
         const msg = mensagens[Math.floor(Math.random() * mensagens.length)];
         await enviarMensagem(phone, msg);
         return NextResponse.json({ ok: true });
       } else {
-        // Nota inválida — ignora e continua o fluxo normal
         await redis.del(`avaliacao:${phone}`);
       }
     }
+
     const config = await getConfig();
     const sessionKey = `session:${phone}`;
     const savedSession = await redis.get<BotSession>(sessionKey);
 
-    // Saudação sem sessão ativa — inicia o bot normalmente
+    // Saudacao sem sessao ativa
     if (eSaudacao(messageText) && !savedSession) {
       const historico = await redis.get<ClienteHistorico>(`cliente:${phone}`);
       if (historico) {
         const firstName = historico.nome.split(" ")[0];
         const ultimoPedido = historico.ultimoPedido.join(", ");
         const currentSession = createReturningSession(historico);
-        await enviarMensagem(phone, `Ei *${firstName}*! 😊 Da ultima vez voce pediu *${ultimoPedido}* — vai querer repetir ou montar um novo?\n\n  1. Repetir o mesmo\n  2. Quero outra coisa`);
+        await enviarMensagem(phone, `Ei *${firstName}*! 😊 Da ultima vez voce pediu *${ultimoPedido}* - vai querer repetir ou montar um novo?\n\n  1. Repetir o mesmo\n  2. Quero outra coisa`);
         await redis.set(sessionKey, currentSession, { ex: 1800 });
         return NextResponse.json({ ok: true });
       } else {
         const currentSession = createInitialSession();
-        await enviarMensagem(phone, `Olá! Seja bem-vindo à *Chefe da Pizza*! 🍕\n\nPra começar, me fala seu nome?`);
+        await enviarMensagem(phone, `Ola! Seja bem-vindo a *Chefe da Pizza*! 🍕\n\nPra comecar, me fala seu nome?`);
         await redis.set(sessionKey, currentSession, { ex: 1800 });
         return NextResponse.json({ ok: true });
       }
@@ -328,7 +348,10 @@ export async function POST(req: NextRequest) {
         const firstName = historico.nome.split(" ")[0];
         const ultimoPedido = historico.ultimoPedido.join(", ");
         currentSession = createReturningSession(historico);
-        await enviarMensagem(phone, `Ei *${firstName}*! 😊 Da ultima vez voce pediu *${ultimoPedido}* — vai querer repetir ou montar um novo?\n\n  1. Repetir o mesmo\n  2. Quero outra coisa`);
+        await enviarMensagem(
+          phone,
+          `Ei *${firstName}*! 😊 Da ultima vez voce pediu *${ultimoPedido}* - vai querer repetir ou montar um novo?\n\n  1. Repetir o mesmo\n  2. Quero outra coisa`
+        );
         await redis.set(sessionKey, currentSession, { ex: 1800 });
         return NextResponse.json({ ok: true });
       } else {
@@ -348,11 +371,11 @@ export async function POST(req: NextRequest) {
       }
       if (pedido.status === "novo") {
         await salvarCancelamentoSolicitado(phone, currentSession, pedidoId);
-        await enviarMensagem(phone, `Entendido! Solicitei o cancelamento pra nossa equipe. Assim que confirmado voce recebe a mensagem aqui. Qualquer duvida e so chamar!`);
+        await enviarMensagem(phone, `Entendido! Solicitei o cancelamento pra nossa equipe. Assim que confirmado voce recebe a mensagem aqui.`);
         return NextResponse.json({ ok: true });
       }
       if (pedido.status === "em_preparo") {
-        await enviarMensagem(phone, `Que pena! Seu pedido ja esta em preparo e nao da pra cancelar agora. Posso chamar a Kellyne pra te ajudar?`);
+        await enviarMensagem(phone, `Que pena! Seu pedido ja esta em preparo e nao da pra cancelar agora.`);
         return NextResponse.json({ ok: true });
       }
       await enviarMensagem(phone, `Seu pedido ja esta em andamento e nao da pra cancelar. Qualquer duvida e so chamar!`);
@@ -383,6 +406,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    const stepAnterior = currentSession.step;
     const result = processMessage(mensagemProcessada, currentSession);
 
     if (
@@ -399,6 +423,27 @@ export async function POST(req: NextRequest) {
     }
 
     await redis.set(sessionKey, result.session, { ex: 1800 });
+
+    // Envia imagem do cardapio ao entrar em nova categoria
+    const stepAtual = result.session.step;
+    const stepsComImagem = ["size", "flavor", "lanche_escolha", "bebida_escolha", "suco_escolha"];
+    const entrouNaCategoria = !stepsComImagem.includes(stepAnterior) && stepsComImagem.includes(stepAtual);
+
+    if (entrouNaCategoria) {
+      try {
+        const imagens = await redis.get<{pizza?: string, lanche?: string, bebida?: string, suco?: string, ativo?: boolean}>("cardapio:imagens");
+        if (imagens?.ativo !== false) {
+          const categoria = result.session.currentCategory ?? "";
+          const imagemUrl = imagens?.[categoria as keyof typeof imagens] as string | undefined;
+          if (imagemUrl && typeof imagemUrl === "string") {
+            await enviarImagem(phone, imagemUrl);
+            await new Promise((resolve) => setTimeout(resolve, 800));
+          }
+        }
+      } catch (err) {
+        console.error("[ChefeBot] Erro ao buscar imagem:", err);
+      }
+    }
 
     for (const msg of result.messages) {
       const msgFinal = config.chavePix

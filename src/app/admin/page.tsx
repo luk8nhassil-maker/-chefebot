@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 
 type Pedido = {
@@ -30,7 +30,30 @@ type Funcionario = {
   ativo: boolean
 }
 
+type ImagensCardapio = {
+  pizza?: string
+  lanche?: string
+  bebida?: string
+  suco?: string
+  ativo: boolean
+}
+
 type Periodo = 'hoje' | 'ontem' | 'semana'
+
+const statusColor: Record<string, string> = {
+  novo: '#f6e05e',
+  em_preparo: '#f6ad55',
+  saiu_entrega: '#63b3ed',
+  entregue: '#68d391',
+  cancelado: '#fc8181',
+}
+const statusLabel: Record<string, string> = {
+  novo: 'Novo',
+  em_preparo: 'Em preparo',
+  saiu_entrega: 'Saiu p/ entrega',
+  entregue: 'Entregue',
+  cancelado: 'Cancelado',
+}
 
 function getUserRole(): string | null {
   if (typeof document === 'undefined') return null
@@ -111,11 +134,17 @@ export default function AdminPage() {
   const [novoFunc, setNovoFunc] = useState({ name: '', username: '', password: '' })
   const [criando, setCriando] = useState(false)
   const [nomeUsuario, setNomeUsuario] = useState('')
+  const [imagens, setImagens] = useState<ImagensCardapio>({ ativo: true })
+  const [uploadando, setUploadando] = useState<string | null>(null)
+  const inputPizzaRef = useRef<HTMLInputElement>(null)
+  const inputLancheRef = useRef<HTMLInputElement>(null)
+  const inputBebidaRef = useRef<HTMLInputElement>(null)
+  const inputSucoRef = useRef<HTMLInputElement>(null)
   const is24h = config.horaAbertura === 0 && config.horaFechamento === 24
 
   useEffect(() => {
     const role = getUserRole()
-    if (role !== 'admin') { router.push('/login?callbackUrl=/admin'); return }
+    if (role !== 'admin' && role !== 'dev') { router.push('/login?callbackUrl=/admin'); return }
     const nome = getUserName()
     if (nome) setNomeUsuario(nome)
     setChecking(false)
@@ -123,9 +152,11 @@ export default function AdminPage() {
       fetch('/api/orders').then(r => r.json()),
       fetch('/api/configuracoes').then(r => r.json()),
       fetch('/api/funcionarios').then(r => r.json()),
-    ]).then(([ped, cfg, funcs]) => {
+      fetch('/api/cardapio-imagens').then(r => r.json()).catch(() => ({ ativo: true })),
+    ]).then(([ped, cfg, funcs, imgs]) => {
       setPedidos(Array.isArray(ped) ? ped : [])
       setConfig(cfg)
+      setImagens(imgs || { ativo: true })
       if (Array.isArray(funcs)) {
         setFuncionarios(funcs)
         const s: Record<string, string> = {}
@@ -155,7 +186,7 @@ export default function AdminPage() {
       const res = await fetch('/api/configuracoes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(novaConfig) })
       if (res.ok) { setMensagem(is24h ? '✅ Horário padrão restaurado!' : '✅ Aberto 24 horas!'); setTimeout(() => setMensagem(''), 3000) }
     } catch { setMensagem('❌ Erro ao salvar.'); setTimeout(() => setMensagem(''), 3000) }
-    setSalvando(false)
+    finally { setSalvando(false) }
   }
 
   const salvarConfig = async () => {
@@ -164,84 +195,113 @@ export default function AdminPage() {
       const res = await fetch('/api/configuracoes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(config) })
       if (res.ok) { setMensagem('✅ Configurações salvas!'); setTimeout(() => setMensagem(''), 3000) }
     } catch { setMensagem('❌ Erro ao salvar.'); setTimeout(() => setMensagem(''), 3000) }
-    setSalvando(false)
+    finally { setSalvando(false) }
   }
 
   const salvarFuncionario = async (username: string) => {
     setSalvandoFunc(username)
     try {
-      await fetch('/api/funcionarios', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password: senhas[username], name: nomes[username] }) })
-      setSenhas(prev => ({ ...prev, [username]: '' }))
-      setMensagem('✅ Funcionário atualizado!'); setTimeout(() => setMensagem(''), 3000)
+      const nome = nomes[username]
+      const senha = senhas[username]
+      const res = await fetch('/api/funcionarios', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, name: nome, password: senha || undefined }) })
+      if (res.ok) { setMensagem('✅ Funcionário atualizado!'); setTimeout(() => setMensagem(''), 3000) }
     } catch { setMensagem('❌ Erro ao salvar.'); setTimeout(() => setMensagem(''), 3000) }
-    setSalvandoFunc(null)
+    finally { setSalvandoFunc(null) }
   }
 
-  const toggleFuncionario = async (username: string, ativo: boolean) => {
-    setSalvandoFunc(username)
+  const bloquearFuncionario = async (username: string, ativo: boolean) => {
     try {
-      await fetch('/api/funcionarios', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, ativo }) })
-      setFuncionarios(prev => prev.map(f => f.username === username ? { ...f, ativo } : f))
-    } catch {}
-    setSalvandoFunc(null)
+      await fetch('/api/funcionarios', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, ativo: !ativo }) })
+      setFuncionarios(prev => prev.map(f => f.username === username ? { ...f, ativo: !ativo } : f))
+      setMensagem(!ativo ? '✅ Acesso liberado!' : '🔒 Acesso bloqueado!'); setTimeout(() => setMensagem(''), 3000)
+    } catch { setMensagem('❌ Erro.'); setTimeout(() => setMensagem(''), 3000) }
   }
 
-  const excluirFuncionario = async (username: string, name: string) => {
-    if (!confirm(`Excluir ${name}? Esta ação não pode ser desfeita.`)) return
-    setSalvandoFunc(username)
+  const excluirFuncionario = async (username: string) => {
+    if (!confirm(`Excluir funcionário ${username}?`)) return
     try {
-      await fetch('/api/funcionarios', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'excluir', username }) })
+      await fetch('/api/funcionarios', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username }) })
       setFuncionarios(prev => prev.filter(f => f.username !== username))
       setMensagem('✅ Funcionário removido!'); setTimeout(() => setMensagem(''), 3000)
-    } catch { setMensagem('❌ Erro ao excluir.'); setTimeout(() => setMensagem(''), 3000) }
-    setSalvandoFunc(null)
+    } catch { setMensagem('❌ Erro.'); setTimeout(() => setMensagem(''), 3000) }
   }
 
   const criarFuncionario = async () => {
-    if (!novoFunc.name || !novoFunc.username || !novoFunc.password) {
-      setMensagem('❌ Preencha todos os campos.'); setTimeout(() => setMensagem(''), 3000); return
-    }
+    if (!novoFunc.name || !novoFunc.username || !novoFunc.password) { setMensagem('❌ Preencha todos os campos.'); setTimeout(() => setMensagem(''), 3000); return }
     setCriando(true)
     try {
-      const res = await fetch('/api/funcionarios', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'criar', ...novoFunc }) })
-      const data = await res.json()
-      if (!res.ok) { setMensagem(`❌ ${data.error}`); setTimeout(() => setMensagem(''), 3000) }
-      else {
-        const novo = { username: novoFunc.username.toLowerCase().trim(), name: novoFunc.name.trim(), password: novoFunc.password, ativo: true }
+      const res = await fetch('/api/funcionarios', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(novoFunc) })
+      if (res.ok) {
+        const novo = await res.json()
         setFuncionarios(prev => [...prev, novo])
-        setSenhas(prev => ({ ...prev, [novo.username]: '' }))
-        setNomes(prev => ({ ...prev, [novo.username]: novo.name }))
         setNovoFunc({ name: '', username: '', password: '' })
         setShowNovoFunc(false)
         setMensagem('✅ Funcionário criado!'); setTimeout(() => setMensagem(''), 3000)
       }
     } catch { setMensagem('❌ Erro ao criar.'); setTimeout(() => setMensagem(''), 3000) }
-    setCriando(false)
+    finally { setCriando(false) }
   }
 
-  const statusColor: Record<string, string> = { novo: '#f6ad55', em_preparo: '#63b3ed', saiu_entrega: '#9f7aea', entregue: '#68d391', cancelado: '#fc8181' }
-  const statusLabel: Record<string, string> = { novo: 'Novo', em_preparo: 'Em preparo', saiu_entrega: 'Saiu p/ entrega', entregue: 'Entregue', cancelado: 'Cancelado' }
+  const uploadImagem = async (categoria: string, arquivo: File) => {
+    setUploadando(categoria)
+    try {
+      const formData = new FormData()
+      formData.append('file', arquivo)
+      formData.append('categoria', categoria)
+      const res = await fetch('/api/cardapio-imagens', { method: 'POST', body: formData })
+      if (res.ok) {
+        const data = await res.json()
+        setImagens(prev => ({ ...prev, [categoria]: data.url }))
+        setMensagem(`✅ Imagem de ${categoria} atualizada!`); setTimeout(() => setMensagem(''), 3000)
+      } else {
+        setMensagem('❌ Erro ao fazer upload.'); setTimeout(() => setMensagem(''), 3000)
+      }
+    } catch { setMensagem('❌ Erro ao fazer upload.'); setTimeout(() => setMensagem(''), 3000) }
+    finally { setUploadando(null) }
+  }
 
-  if (checking || loading) return (
-    <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #0a0a1a 0%, #1a1000 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <p style={{ color: '#fff' }}>Carregando...</p>
-    </div>
-  )
+  const toggleImagens = async () => {
+    const novo = { ...imagens, ativo: !imagens.ativo }
+    setImagens(novo)
+    try {
+      await fetch('/api/cardapio-imagens', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ativo: novo.ativo }) })
+      setMensagem(novo.ativo ? '✅ Imagens ativadas!' : '✅ Imagens desativadas!'); setTimeout(() => setMensagem(''), 3000)
+    } catch { setMensagem('❌ Erro.'); setTimeout(() => setMensagem(''), 3000) }
+  }
+
+  if (checking) return null
+
+  const categorias = [
+    { key: 'pizza', label: '🍕 Pizzas', ref: inputPizzaRef },
+    { key: 'lanche', label: '🥪 Lanches', ref: inputLancheRef },
+    { key: 'bebida', label: '🥤 Bebidas', ref: inputBebidaRef },
+    { key: 'suco', label: '🧃 Sucos', ref: inputSucoRef },
+  ]
 
   return (
-    <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #0a0a1a 0%, #1a1000 100%)', padding: '24px 16px', position: 'relative' }}>
-      <div style={{ maxWidth: 600, margin: '0 auto' }}>
+    <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #1a0a00 0%, #0d0d1a 100%)', padding: '20px 16px', fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", paddingBottom: 40 }}>
+      <div style={{ maxWidth: 480, margin: '0 auto' }}>
 
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 28 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
           <div>
-            <h1 style={{ color: '#ffd700', fontSize: 22, fontWeight: 800, margin: 0 }}>👑 Bem-vindo, {nomeUsuario || 'Brito'}</h1>
-            <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 13, margin: '4px 0 0' }}>{config.nomePizzaria}</p>
+            <h1 style={{ color: '#ffd700', fontSize: 20, fontWeight: 800, margin: 0 }}>👑 Bem-vindo, {nomeUsuario || 'Admin'}</h1>
+            <p style={{ color: 'rgba(255,255,255,0.35)', fontSize: 13, margin: '2px 0 0' }}>Pizzaria</p>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={() => router.push('/pedidos')} style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', borderRadius: 8, padding: '8px 12px', cursor: 'pointer', fontSize: 13 }}>📋 Pedidos</button>
-            <button onClick={() => setShowConfig(true)} style={{ background: 'rgba(255,215,0,0.12)', border: '1px solid rgba(255,215,0,0.3)', color: '#ffd700', borderRadius: 8, padding: '8px 12px', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>⚙️ Config</button>
+            <button onClick={() => router.push('/pedidos')} style={{ background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', color: '#fff', borderRadius: 10, padding: '8px 14px', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
+              📋 Pedidos
+            </button>
+            <button onClick={() => setShowConfig(true)} style={{ background: 'linear-gradient(135deg, #b7950b, #ffd700)', border: 'none', color: '#000', borderRadius: 10, padding: '8px 14px', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>
+              ⚙️ Config
+            </button>
           </div>
         </div>
+
+        {mensagem && (
+          <div style={{ background: mensagem.includes('✅') ? 'rgba(104,211,145,0.1)' : 'rgba(252,129,129,0.1)', border: `1px solid ${mensagem.includes('✅') ? 'rgba(104,211,145,0.3)' : 'rgba(252,129,129,0.3)'}`, borderRadius: 10, padding: '10px 14px', marginBottom: 16, color: mensagem.includes('✅') ? '#68d391' : '#fc8181', fontWeight: 600, fontSize: 14 }}>
+            {mensagem}
+          </div>
+        )}
 
         <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
           {(['hoje', 'ontem', 'semana'] as Periodo[]).map(p => (
@@ -274,7 +334,11 @@ export default function AdminPage() {
           <h2 style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12, fontWeight: 700, marginBottom: 12, textTransform: 'uppercase', letterSpacing: 1 }}>
             Pedidos — {periodo === 'hoje' ? 'Hoje' : periodo === 'ontem' ? 'Ontem' : 'Esta semana'}
           </h2>
-          {pedidosFiltrados.length === 0 ? (
+          {loading ? (
+            <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 24, textAlign: 'center' }}>
+              <p style={{ color: 'rgba(255,255,255,0.25)', margin: 0 }}>Carregando...</p>
+            </div>
+          ) : pedidosFiltrados.length === 0 ? (
             <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 24, textAlign: 'center' }}>
               <p style={{ color: 'rgba(255,255,255,0.25)', margin: 0 }}>Nenhuma pizza vendida ainda. O dia ainda vai começar! 🍕</p>
             </div>
@@ -287,7 +351,7 @@ export default function AdminPage() {
                       <p style={{ color: '#fff', fontWeight: 700, margin: 0, fontSize: 14 }}>{p.cliente}</p>
                       <p style={{ color: 'rgba(255,255,255,0.35)', fontSize: 12, margin: '2px 0 0' }}>{p.horario} · {p.endereco}</p>
                     </div>
-                    <span style={{ background: statusColor[p.status] + '22', color: statusColor[p.status], fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20, whiteSpace: 'nowrap', marginLeft: 8 }}>
+                    <span style={{ background: (statusColor[p.status] || '#888') + '22', color: statusColor[p.status] || '#888', fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20, whiteSpace: 'nowrap', marginLeft: 8 }}>
                       {statusLabel[p.status] || p.status}
                     </span>
                   </div>
@@ -314,6 +378,12 @@ export default function AdminPage() {
               <button onClick={() => setShowConfig(false)} style={{ background: 'rgba(255,255,255,0.08)', border: 'none', color: '#fff', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontSize: 18 }}>✕</button>
             </div>
 
+            {mensagem && (
+              <div style={{ background: mensagem.includes('✅') ? 'rgba(104,211,145,0.1)' : 'rgba(252,129,129,0.1)', border: `1px solid ${mensagem.includes('✅') ? 'rgba(104,211,145,0.3)' : 'rgba(252,129,129,0.3)'}`, borderRadius: 10, padding: '10px 14px', marginBottom: 16, color: mensagem.includes('✅') ? '#68d391' : '#fc8181', fontWeight: 600, fontSize: 14 }}>
+                {mensagem}
+              </div>
+            )}
+
             <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
 
               <div>
@@ -332,84 +402,130 @@ export default function AdminPage() {
               <div>
                 <label style={{ color: 'rgba(255,255,255,0.6)', fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 8 }}>⏰ Horário de Funcionamento</label>
                 <button onClick={toggle24h} disabled={salvando} style={{ width: '100%', background: is24h ? 'linear-gradient(135deg, #38a169, #276749)' : 'rgba(255,255,255,0.07)', border: is24h ? '2px solid #38a169' : '2px solid rgba(255,255,255,0.12)', borderRadius: 10, padding: '11px 14px', color: '#fff', fontSize: 13, fontWeight: 700, cursor: salvando ? 'not-allowed' : 'pointer', marginBottom: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-                  {is24h ? '✅ Aberto 24h (ativo) — toque para desativar' : '🕐 Ativar 24 horas'}
+                  {is24h ? '✅ Aberto 24h (ativo) — toque para desativar' : '🕐 Ativar modo 24 horas'}
                 </button>
-                <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                  <div style={{ flex: 1 }}>
-                    <label style={{ color: 'rgba(255,255,255,0.35)', fontSize: 11, display: 'block', marginBottom: 4 }}>Abre às</label>
-                    <input type="number" min={0} max={23} value={config.horaAbertura} onChange={e => setConfig(p => ({ ...p, horaAbertura: Number(e.target.value) }))}
-                      style={{ width: '100%', background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, padding: '11px 14px', color: '#fff', fontSize: 14, outline: 'none', boxSizing: 'border-box' }} />
-                  </div>
-                  <span style={{ color: 'rgba(255,255,255,0.25)', fontSize: 18, paddingTop: 18 }}>→</span>
-                  <div style={{ flex: 1 }}>
-                    <label style={{ color: 'rgba(255,255,255,0.35)', fontSize: 11, display: 'block', marginBottom: 4 }}>Fecha às</label>
-                    <input type="number" min={0} max={24} value={config.horaFechamento} onChange={e => setConfig(p => ({ ...p, horaFechamento: Number(e.target.value) }))}
-                      style={{ width: '100%', background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, padding: '11px 14px', color: '#fff', fontSize: 14, outline: 'none', boxSizing: 'border-box' }} />
-                  </div>
-                </div>
-                <p style={{ color: 'rgba(255,255,255,0.3)', fontSize: 11, marginTop: 6 }}>Horário de Brasília.</p>
-              </div>
-
-              <button onClick={salvarConfig} disabled={salvando} style={{ background: salvando ? 'rgba(255,255,255,0.1)' : 'linear-gradient(135deg, #b7950b, #ffd700)', border: 'none', borderRadius: 12, padding: '14px 0', color: salvando ? '#fff' : '#000', fontSize: 15, fontWeight: 800, cursor: salvando ? 'not-allowed' : 'pointer', boxShadow: salvando ? 'none' : '0 4px 15px rgba(255,215,0,0.25)' }}>
-                {salvando ? 'Salvando...' : '💾 Salvar Configurações'}
-              </button>
-
-              {mensagem && <p style={{ textAlign: 'center', color: mensagem.includes('✅') ? '#68d391' : '#fc8181', fontWeight: 600, margin: 0 }}>{mensagem}</p>}
-
-              <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: 20 }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-                  <label style={{ color: 'rgba(255,255,255,0.6)', fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>👥 Funcionários</label>
-                  <button onClick={() => setShowNovoFunc(!showNovoFunc)} style={{ background: 'rgba(99,179,237,0.12)', border: '1px solid rgba(99,179,237,0.3)', color: '#63b3ed', borderRadius: 8, padding: '5px 10px', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>
-                    {showNovoFunc ? '✕ Cancelar' : '+ Novo'}
-                  </button>
-                </div>
-
-                {showNovoFunc && (
-                  <div style={{ background: 'rgba(99,179,237,0.05)', border: '1px solid rgba(99,179,237,0.2)', borderRadius: 12, padding: 14, marginBottom: 12 }}>
-                    <p style={{ color: '#63b3ed', fontSize: 12, fontWeight: 700, margin: '0 0 10px' }}>Novo Funcionário</p>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                      <input type="text" placeholder="Nome completo" value={novoFunc.name} onChange={e => setNovoFunc(p => ({ ...p, name: e.target.value }))}
-                        style={{ width: '100%', background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 8, padding: '9px 12px', color: '#fff', fontSize: 13, outline: 'none', boxSizing: 'border-box' }} />
-                      <input type="text" placeholder="Usuário (sem espaços)" value={novoFunc.username} onChange={e => setNovoFunc(p => ({ ...p, username: e.target.value.toLowerCase().replace(/\s/g, '') }))}
-                        style={{ width: '100%', background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 8, padding: '9px 12px', color: '#fff', fontSize: 13, outline: 'none', boxSizing: 'border-box' }} />
-                      <input type="password" placeholder="Senha" value={novoFunc.password} onChange={e => setNovoFunc(p => ({ ...p, password: e.target.value }))}
-                        style={{ width: '100%', background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 8, padding: '9px 12px', color: '#fff', fontSize: 13, outline: 'none', boxSizing: 'border-box' }} />
-                      <button onClick={criarFuncionario} disabled={criando} style={{ background: criando ? 'rgba(255,255,255,0.1)' : 'linear-gradient(135deg, #2b6cb0, #63b3ed)', border: 'none', borderRadius: 8, padding: '10px 0', color: '#fff', fontSize: 13, fontWeight: 700, cursor: criando ? 'not-allowed' : 'pointer' }}>
-                        {criando ? 'Criando...' : '✅ Criar Funcionário'}
-                      </button>
+                {!is24h && (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                    <div>
+                      <label style={{ color: 'rgba(255,255,255,0.4)', fontSize: 11, display: 'block', marginBottom: 4 }}>Abre às</label>
+                      <input type="number" min={0} max={23} value={config.horaAbertura} onChange={e => setConfig(p => ({ ...p, horaAbertura: Number(e.target.value) }))}
+                        style={{ width: '100%', background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 10, padding: '10px 12px', color: '#fff', fontSize: 14, outline: 'none', boxSizing: 'border-box' }} />
+                    </div>
+                    <div>
+                      <label style={{ color: 'rgba(255,255,255,0.4)', fontSize: 11, display: 'block', marginBottom: 4 }}>Fecha às</label>
+                      <input type="number" min={0} max={24} value={config.horaFechamento} onChange={e => setConfig(p => ({ ...p, horaFechamento: Number(e.target.value) }))}
+                        style={{ width: '100%', background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 10, padding: '10px 12px', color: '#fff', fontSize: 14, outline: 'none', boxSizing: 'border-box' }} />
                     </div>
                   </div>
                 )}
+              </div>
+
+              <button onClick={salvarConfig} disabled={salvando} style={{ width: '100%', background: 'linear-gradient(135deg, #b7950b, #ffd700)', border: 'none', borderRadius: 10, padding: '13px', color: '#000', fontSize: 14, fontWeight: 700, cursor: salvando ? 'not-allowed' : 'pointer' }}>
+                {salvando ? 'Salvando...' : '💾 Salvar Configurações'}
+              </button>
+
+              {/* Seção de Cardápio por Imagem */}
+              <div style={{ border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, padding: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+                  <div>
+                    <p style={{ color: '#fff', fontWeight: 700, fontSize: 14, margin: 0 }}>📸 Cardápio por Imagem</p>
+                    <p style={{ color: 'rgba(255,255,255,0.35)', fontSize: 12, margin: '2px 0 0' }}>Bot envia a foto ao cliente</p>
+                  </div>
+                  <button onClick={toggleImagens} style={{ background: imagens.ativo ? 'linear-gradient(135deg, #38a169, #276749)' : 'rgba(255,255,255,0.07)', border: 'none', borderRadius: 20, padding: '6px 14px', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                    {imagens.ativo ? '✅ Ativo' : '⏸️ Inativo'}
+                  </button>
+                </div>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  {funcionarios.map(f => (
-                    <div key={f.username} style={{ background: f.ativo ? 'rgba(104,211,145,0.05)' : 'rgba(252,129,129,0.05)', border: `1px solid ${f.ativo ? 'rgba(104,211,145,0.2)' : 'rgba(252,129,129,0.2)'}`, borderRadius: 12, padding: 14 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-                        <div>
-                          <p style={{ color: '#fff', fontWeight: 700, fontSize: 14, margin: 0 }}>{f.name}</p>
-                          <p style={{ color: 'rgba(255,255,255,0.35)', fontSize: 11, margin: '2px 0 0' }}>@{f.username}</p>
+                  {categorias.map(cat => (
+                    <div key={cat.key}>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        ref={cat.ref}
+                        style={{ display: 'none' }}
+                        onChange={e => {
+                          const file = e.target.files?.[0]
+                          if (file) uploadImagem(cat.key, file)
+                        }}
+                      />
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        {imagens[cat.key as keyof ImagensCardapio] && typeof imagens[cat.key as keyof ImagensCardapio] === 'string' ? (
+                          <img src={imagens[cat.key as keyof ImagensCardapio] as string} alt={cat.label} style={{ width: 52, height: 52, borderRadius: 8, objectFit: 'cover', border: '1px solid rgba(255,255,255,0.1)' }} />
+                        ) : (
+                          <div style={{ width: 52, height: 52, borderRadius: 8, background: 'rgba(255,255,255,0.05)', border: '1px dashed rgba(255,255,255,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }}>
+                            {cat.label.split(' ')[0]}
+                          </div>
+                        )}
+                        <div style={{ flex: 1 }}>
+                          <p style={{ color: '#fff', fontSize: 13, fontWeight: 600, margin: '0 0 4px' }}>{cat.label}</p>
+                          <p style={{ color: 'rgba(255,255,255,0.3)', fontSize: 11, margin: 0 }}>
+                            {imagens[cat.key as keyof ImagensCardapio] ? 'Imagem carregada ✅' : 'Sem imagem — vai usar texto'}
+                          </p>
                         </div>
-                        <div style={{ display: 'flex', gap: 6 }}>
-                          <button onClick={() => toggleFuncionario(f.username, !f.ativo)} disabled={salvandoFunc === f.username} style={{ background: f.ativo ? 'rgba(104,211,145,0.15)' : 'rgba(252,129,129,0.15)', border: `1px solid ${f.ativo ? 'rgba(104,211,145,0.4)' : 'rgba(252,129,129,0.4)'}`, color: f.ativo ? '#68d391' : '#fc8181', borderRadius: 8, padding: '5px 10px', cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>
-                            {salvandoFunc === f.username ? '...' : f.ativo ? '✅ Ativo' : '🔒 Bloq.'}
-                          </button>
-                          <button onClick={() => excluirFuncionario(f.username, f.name)} disabled={salvandoFunc === f.username} style={{ background: 'rgba(252,129,129,0.1)', border: '1px solid rgba(252,129,129,0.3)', color: '#fc8181', borderRadius: 8, padding: '5px 10px', cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>
-                            🗑️
-                          </button>
-                        </div>
-                      </div>
-                      <div style={{ display: 'flex', gap: 8 }}>
-                        <input type="text" placeholder="Nome" value={nomes[f.username] ?? f.name} onChange={e => setNomes(prev => ({ ...prev, [f.username]: e.target.value }))}
-                          style={{ flex: 1, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '8px 10px', color: '#fff', fontSize: 13, outline: 'none' }} />
-                        <input type="password" placeholder="Nova senha" value={senhas[f.username] ?? ''} onChange={e => setSenhas(prev => ({ ...prev, [f.username]: e.target.value }))}
-                          style={{ flex: 1, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '8px 10px', color: '#fff', fontSize: 13, outline: 'none' }} />
-                        <button onClick={() => salvarFuncionario(f.username)} disabled={salvandoFunc === f.username} style={{ background: 'rgba(255,215,0,0.12)', border: '1px solid rgba(255,215,0,0.3)', color: '#ffd700', borderRadius: 8, padding: '8px 12px', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>
-                          💾
+                        <button
+                          onClick={() => cat.ref.current?.click()}
+                          disabled={uploadando === cat.key}
+                          style={{ background: 'rgba(255,215,0,0.1)', border: '1px solid rgba(255,215,0,0.3)', color: '#ffd700', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}
+                        >
+                          {uploadando === cat.key ? '⏳' : '📤 Upload'}
                         </button>
                       </div>
                     </div>
                   ))}
                 </div>
+              </div>
+
+              {/* Funcionários */}
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                  <label style={{ color: 'rgba(255,255,255,0.6)', fontSize: 12, fontWeight: 600 }}>👥 Funcionários</label>
+                  <button onClick={() => setShowNovoFunc(!showNovoFunc)} style={{ background: 'rgba(104,211,145,0.1)', border: '1px solid rgba(104,211,145,0.3)', color: '#68d391', borderRadius: 8, padding: '5px 10px', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>
+                    + Novo
+                  </button>
+                </div>
+
+                {showNovoFunc && (
+                  <div style={{ background: 'rgba(104,211,145,0.05)', border: '1px solid rgba(104,211,145,0.15)', borderRadius: 10, padding: 12, marginBottom: 12 }}>
+                    <input type="text" placeholder="Nome completo" value={novoFunc.name} onChange={e => setNovoFunc(p => ({ ...p, name: e.target.value }))}
+                      style={{ width: '100%', background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '8px 10px', color: '#fff', fontSize: 13, outline: 'none', boxSizing: 'border-box', marginBottom: 8 }} />
+                    <input type="text" placeholder="Usuário (sem espaços)" value={novoFunc.username} onChange={e => setNovoFunc(p => ({ ...p, username: e.target.value.toLowerCase().replace(/\s/g, '') }))}
+                      style={{ width: '100%', background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '8px 10px', color: '#fff', fontSize: 13, outline: 'none', boxSizing: 'border-box', marginBottom: 8 }} />
+                    <input type="password" placeholder="Senha" value={novoFunc.password} onChange={e => setNovoFunc(p => ({ ...p, password: e.target.value }))}
+                      style={{ width: '100%', background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '8px 10px', color: '#fff', fontSize: 13, outline: 'none', boxSizing: 'border-box', marginBottom: 8 }} />
+                    <button onClick={criarFuncionario} disabled={criando} style={{ width: '100%', background: 'linear-gradient(135deg, #276749, #38a169)', border: 'none', borderRadius: 8, padding: '10px', color: '#fff', fontSize: 13, fontWeight: 700, cursor: criando ? 'not-allowed' : 'pointer' }}>
+                      {criando ? 'Criando...' : 'Criar funcionário'}
+                    </button>
+                  </div>
+                )}
+
+                {funcionarios.map(f => (
+                  <div key={f.username} style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 10, padding: 12, marginBottom: 8 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                      <div>
+                        <p style={{ color: '#fff', fontWeight: 700, fontSize: 13, margin: 0 }}>{f.name}</p>
+                        <p style={{ color: 'rgba(255,255,255,0.3)', fontSize: 11, margin: '2px 0 0' }}>@{f.username}</p>
+                      </div>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button onClick={() => bloquearFuncionario(f.username, f.ativo)} style={{ background: f.ativo ? 'rgba(252,129,129,0.1)' : 'rgba(104,211,145,0.1)', border: `1px solid ${f.ativo ? 'rgba(252,129,129,0.3)' : 'rgba(104,211,145,0.3)'}`, color: f.ativo ? '#fc8181' : '#68d391', borderRadius: 8, padding: '4px 8px', cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>
+                          {f.ativo ? '🔒' : '🔓'}
+                        </button>
+                        <button onClick={() => excluirFuncionario(f.username)} style={{ background: 'rgba(252,129,129,0.1)', border: '1px solid rgba(252,129,129,0.3)', color: '#fc8181', borderRadius: 8, padding: '4px 8px', cursor: 'pointer', fontSize: 11 }}>
+                          🗑️
+                        </button>
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <input type="text" placeholder="Nome" value={nomes[f.username] ?? f.name} onChange={e => setNomes(prev => ({ ...prev, [f.username]: e.target.value }))}
+                        style={{ flex: 1, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '8px 10px', color: '#fff', fontSize: 13, outline: 'none' }} />
+                      <input type="password" placeholder="Nova senha" value={senhas[f.username] ?? ''} onChange={e => setSenhas(prev => ({ ...prev, [f.username]: e.target.value }))}
+                        style={{ flex: 1, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '8px 10px', color: '#fff', fontSize: 13, outline: 'none' }} />
+                      <button onClick={() => salvarFuncionario(f.username)} disabled={salvandoFunc === f.username} style={{ background: 'rgba(255,215,0,0.12)', border: '1px solid rgba(255,215,0,0.3)', color: '#ffd700', borderRadius: 8, padding: '8px 12px', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>
+                        💾
+                      </button>
+                    </div>
+                  </div>
+                ))}
               </div>
 
             </div>
