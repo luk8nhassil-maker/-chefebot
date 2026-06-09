@@ -192,17 +192,16 @@ export default function AdminPage() {
     })
   }, [router])
 
-  const pedidosFiltrados = filtraPorPeriodo(pedidos, periodo).filter(p => !p.escalonado && p.status !== 'cancelado')
-  const faturamento = pedidosFiltrados.filter(p => p.status === 'entregue').reduce((s, p) => s + (p.total || 0), 0)
-  const ticketMedio = pedidosFiltrados.filter(p => p.status === 'entregue').length > 0
-    ? faturamento / pedidosFiltrados.filter(p => p.status === 'entregue').length
-    : 0
-  const telefonesTotal = pedidos.filter(p => !p.escalonado && p.status === 'entregue').reduce((acc: Record<string, number>, p) => {
+ const pedidosFiltrados = filtraPorPeriodo(pedidos, periodo).filter(p => !p.escalonado && p.status !== 'cancelado')
+  const pedidosEntregues = pedidosFiltrados.filter(p => p.status === 'entregue')
+  const faturamento = pedidosEntregues.reduce((s, p) => s + (Number(p.total) || 0), 0)
+  const totalEntregues = pedidosEntregues.length
+  const ticketMedio = totalEntregues > 0 ? faturamento / totalEntregues : 0
+  const telefonesTotal = pedidosEntregues.reduce((acc: Record<string, number>, p) => {
     acc[p.telefone] = (acc[p.telefone] || 0) + 1
     return acc
   }, {})
   const recorrentes = Object.values(telefonesTotal).filter(v => v > 1).length
-  const totalEntregues = pedidosFiltrados.filter(p => p.status === 'entregue').length
 
   const toggle24h = async () => {
     const novaConfig = is24h ? { ...config, horaAbertura: 18, horaFechamento: 23 } : { ...config, horaAbertura: 0, horaFechamento: 24 }
