@@ -21,6 +21,7 @@ export type BotStep =
   | "neighborhood"
   | "address"
   | "payment"
+  | "troco"
   | "confirm"
   | "done"
   | "escalado";
@@ -56,6 +57,7 @@ export interface BotSession {
   tentativasInvalidas?: number;
   observacao?: string;
   pedidoId?: string;
+  troco?: string;
 }
 export interface BotResponse {
   messages: string[];
@@ -264,13 +266,17 @@ function buildReceipt(session: BotSession): string {
       ? `\n  Entrega: ${session.address} (${session.neighborhood})\n  Taxa: ${formatCurrency(session.deliveryFee)}`
       : "\n  Retirada na loja: gratuitinha 🏪";
   const obs = session.observacao ? `\n  ✏️ Obs: ${session.observacao}` : "";
+  const trocoInfo = session.troco && session.troco !== "Sem troco"
+    ? `\n  💵 ${session.troco}`
+    : session.troco === "Sem troco" ? `\n  💵 Sem troco` : "";
   return (
     lines.join("\n") +
     `\n\n  Subtotal: ${formatCurrency(subtotal)}` +
     delivery +
     obs +
     `\n  *Total: ${formatCurrency(total)}*` +
-    `\n  Pagamento: ${session.paymentMethod}`
+    `\n  Pagamento: ${session.paymentMethod}` +
+    trocoInfo
   );
 }
 function neighborhoodList(): string {
@@ -381,7 +387,6 @@ export function processMessage(input: string, session: BotSession): BotResponse 
     }
   }
 
-  // Detector global de voltar
   if (eVoltar(n) && !["welcome", "name", "returning", "category", "escalado", "done", "add_more", "lanche_escolha", "bebida_escolha", "suco_escolha"].includes(session.step)) {
     switch (session.step) {
       case "flavor":
@@ -405,6 +410,10 @@ export function processMessage(input: string, session: BotSession): BotResponse 
           return { messages: [`Tudo bem! Como prefere receber? 😊\n\n  1. Entrega (delivery) 🛵\n  2. Buscar na loja 🏪`], session: resetaTentativas({ ...session, step: "delivery_type" }) };
         }
         return { messages: [`Tudo bem! Me passa o endereço completo:\n_(Rua, número e complemento)_`], session: resetaTentativas({ ...session, step: "address" }) };
+      case "troco": {
+        const payList = MENU.payments.map((p, i) => `  ${i + 1}. ${p}`).join("\n");
+        return { messages: [`Tudo bem! Como vai pagar? 💸\n\n${payList}`], session: resetaTentativas({ ...session, step: "payment", paymentMethod: undefined, troco: undefined }) };
+      }
       case "confirm": {
         const payList = MENU.payments.map((p, i) => `  ${i + 1}. ${p}`).join("\n");
         return { messages: [`Tudo bem! Como vai pagar? 💸\n\n${payList}`], session: resetaTentativas({ ...session, step: "payment", paymentMethod: undefined }) };
@@ -482,7 +491,6 @@ export function processMessage(input: string, session: BotSession): BotResponse 
       else if (n === "4" || n.includes("suco") || n.includes("vitamina")) category = "suco";
       else if (intencao) category = intencao.category;
       if (!category) return respostaInvalida(mensagemCategorias(), session);
-
       if (category === "pizza") {
         const pedidoCompleto = detectaPedidoCompleto(text);
         if (pedidoCompleto) {
@@ -545,7 +553,6 @@ export function processMessage(input: string, session: BotSession): BotResponse 
       const allFlavors = [...MENU.saltyFlavors, ...MENU.sweetFlavors];
       const saltyList = MENU.saltyFlavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n");
       const sweetList = MENU.sweetFlavors.map((f, i) => `  ${MENU.saltyFlavors.length + i + 1}. ${f}`).join("\n");
-
       if (size) {
         const saborJunto = detectaSaborDaMensagem(n);
         if (saborJunto) {
@@ -594,8 +601,6 @@ export function processMessage(input: string, session: BotSession): BotResponse 
           session: resetaTentativas({ ...session, step: "flavor", currentSize: size }),
         };
       }
-
-      // Cliente digitou só o sabor sem tamanho
       const saborSemTamanho = detectaSaborDaMensagem(n);
       if (saborSemTamanho) {
         return {
@@ -606,7 +611,6 @@ export function processMessage(input: string, session: BotSession): BotResponse 
           session: resetaTentativas({ ...session, step: "size", currentFlavor: saborSemTamanho }),
         };
       }
-
       return respostaInvalida(`  1. Pequena (P) - R$ 35,00\n  2. Média (M) - R$ 40,00\n  3. Grande (G) - R$ 50,00\n  4. Família (F) - R$ 55,00`, session);
     }
     case "flavor": {
@@ -638,7 +642,6 @@ export function processMessage(input: string, session: BotSession): BotResponse 
         const sweetList = MENU.sweetFlavors.map((f, i) => `  ${MENU.saltyFlavors.length + i + 1}. ${f}`).join("\n");
         return respostaInvalida(`Salgadas\n${saltyList}\n\nDoces\n${sweetList}`, session);
       }
-      // Se já tem sabor salvo (veio do size), usa o tamanho do size
       if (session.currentFlavor && !flavor) {
         flavor = session.currentFlavor;
       }
@@ -809,8 +812,29 @@ export function processMessage(input: string, session: BotSession): BotResponse 
       else if (n === "3" || n.includes("cartao") || n.includes("credito") || n.includes("debito")) payment = "Cartão";
       if (!payment) return respostaInvalida(MENU.payments.map((p, i) => `  ${i + 1}. ${p}`).join("\n"), session);
       const updatedSession = { ...session, paymentMethod: payment };
+      if (payment === "Dinheiro") {
+        return { messages: [`Combinado! 💵 Vai precisar de troco?\n\nSe sim, me diz o valor que vai pagar. Ex: *100*\nSe não, é só digitar *não*`], session: resetaTentativas({ ...updatedSession, step: "troco", paymentMethod: "Dinheiro" }) };
+      }
       const receipt = buildReceipt(updatedSession);
       return { messages: [`Perfeito! Dá uma olhadinha no pedido pra confirmar: 🛒\n\n${receipt}\n\nTá certinho?\n\n  1. Sim, confirmar ✅\n  2. Não, cancelar`], session: resetaTentativas({ ...updatedSession, step: "confirm" }) };
+    }
+    case "troco": {
+      const total = cartSubtotal(session.cart) + session.deliveryFee;
+      let troco = "";
+      const naoQuerTroco = n.includes("nao") || n.includes("sem troco") || n === "0" || n.includes("exato") || n.includes("nao precisa");
+      if (naoQuerTroco) {
+        troco = "Sem troco";
+      } else {
+        const valor = parseFloat(n.replace(",", ".").replace(/[^0-9.]/g, ""));
+        if (isNaN(valor) || valor < total) {
+          return respostaInvalida(`O total é ${formatCurrency(total)}. Me diz um valor maior ou igual ao total, ou digita *não* se não precisar de troco.`, session);
+        }
+        const valorTroco = valor - total;
+        troco = `Troco de ${formatCurrency(valorTroco)} para ${formatCurrency(valor)}`;
+      }
+      const updatedSession = { ...session, troco };
+      const receipt = buildReceipt(updatedSession);
+      return { messages: [`Anotado! 💵 ${troco === "Sem troco" ? "Sem troco então!" : troco + " ✅"}\n\nDá uma olhadinha no pedido pra confirmar: 🛒\n\n${receipt}\n\nTá certinho?\n\n  1. Sim, confirmar ✅\n  2. Não, cancelar`], session: resetaTentativas({ ...updatedSession, step: "confirm" }) };
     }
     case "confirm": {
       const confirma = ePositiva(n) || n.includes("confirmar") || n.includes("correto") ||
