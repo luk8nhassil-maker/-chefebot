@@ -639,6 +639,14 @@ export default function AdminPage() {
               </div>
             </div>
             <div style={card}>
+              <p style={sectionTitle}>📞 Suporte técnico</p>
+              <p style={{ color: '#555', fontSize: 12, margin: '0 0 12px' }}>Precisa de ajuda? Entre em contato com a Ominx.</p>
+              <button onClick={() => window.open('https://wa.me/5599974000691?text=Olá! Preciso de suporte com o ChefeBot.', '_blank')} style={{ width: '100%', background: '#14532d', border: '1px solid #16a34a40', borderRadius: 10, padding: '13px', color: '#4ade80', fontSize: 14, fontWeight: 700, cursor: 'pointer', marginBottom: 8 }}>
+                💬 Falar com suporte no WhatsApp
+              </button>
+            </div>
+
+            <div style={card}>
               <p style={sectionTitle}>🔄 Reset de sessão</p>
               <label style={{ color: '#555', fontSize: 11, display: 'block', marginBottom: 6 }}>Número do cliente (com DDI)</label>
               <div style={{ display: 'flex', gap: 8 }}>
@@ -665,7 +673,7 @@ export default function AdminPage() {
           { key: 'dashboard', icon: '📊', label: 'Dashboard' },
           { key: 'cardapio', icon: '🍕', label: 'Cardápio' },
           { key: 'config', icon: '⚙️', label: 'Config' },
-          { key: 'dev', icon: '🔧', label: 'Dev' },
+          { key: 'dev', icon: '🛠️', label: 'Suporte' },
         ] as { key: Aba; icon: string; label: string }[]).map(({ key, icon, label }) => (
           <button key={key} onClick={() => setAba(key)} style={{ flex: 1, background: 'none', border: 'none', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, padding: '6px 0' }}>
             <span style={{ fontSize: 20, opacity: aba === key ? 1 : 0.3 }}>{icon}</span>
