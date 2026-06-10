@@ -291,6 +291,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
+    // Detecta áudio
+    const isAudio = !!data?.message?.audioMessage || !!data?.message?.pttMessage
+    if (isAudio) {
+      await enviarMensagem(phone, `Oi! 😊 Não consigo ouvir áudios por aqui, mas posso te atender super bem pelo texto!\n\nMe conta o que você quer? 🍕`)
+      return NextResponse.json({ ok: true })
+    }
+
     const messageText = data?.message?.conversation || data?.message?.extendedTextMessage?.text || "";
     if (!messageText) return NextResponse.json({ ok: true });
 
