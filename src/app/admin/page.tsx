@@ -631,13 +631,15 @@ export default function AdminPage() {
         {/* ABA DEV */}
         {aba === 'dev' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <div style={card}>
-              <p style={sectionTitle}>🔧 Ferramentas</p>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <button onClick={() => router.push('/dev')} style={{ background: '#1a1a1a', border: '1px solid #2a2a2a', color: '#e0e0e0', borderRadius: 10, padding: '12px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 600, textAlign: 'left' }}>📊 Logs do sistema</button>
-                <button onClick={() => router.push('/relatorios')} style={{ background: '#1a1a1a', border: '1px solid #2a2a2a', color: '#e0e0e0', borderRadius: 10, padding: '12px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 600, textAlign: 'left' }}>📈 Relatórios</button>
+            {getUserInfo()?.role === 'dev' && (
+              <div style={card}>
+                <p style={sectionTitle}>🔧 Ferramentas dev</p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <button onClick={() => router.push('/dev')} style={{ background: '#1a1a1a', border: '1px solid #2a2a2a', color: '#e0e0e0', borderRadius: 10, padding: '12px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 600, textAlign: 'left' }}>📊 Logs do sistema</button>
+                  <button onClick={() => router.push('/relatorios')} style={{ background: '#1a1a1a', border: '1px solid #2a2a2a', color: '#e0e0e0', borderRadius: 10, padding: '12px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 600, textAlign: 'left' }}>📈 Relatórios</button>
+                </div>
               </div>
-            </div>
+            )}
             <div style={card}>
               <p style={sectionTitle}>📞 Suporte técnico</p>
               <p style={{ color: '#555', fontSize: 12, margin: '0 0 12px' }}>Precisa de ajuda? Entre em contato com a Ominx.</p>
