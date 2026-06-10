@@ -25,6 +25,8 @@ export async function getMENUDinamico() {
       bebidas: cardapio.bebidas?.length ? cardapio.bebidas : MENU.bebidas,
       sucos: cardapio.sucos?.length ? cardapio.sucos : MENU.sucos,
       neighborhoods: cardapio.neighborhoods?.length ? cardapio.neighborhoods : MENU.neighborhoods,
+      sizes: cardapio.sizes?.length ? cardapio.sizes : MENU.sizes,
+      borders: cardapio.borders?.length ? cardapio.borders : MENU.borders,
     }
   } catch {
     return MENU

@@ -17,6 +17,8 @@ type Cardapio = {
   bebidas: ItemCardapio[]
   sucos: ItemCardapio[]
   neighborhoods: { name: string; fee: number }[]
+  sizes: { code: string; label: string; price: number }[]
+  borders: { label: string; priceSmall: number; priceLarge: number }[]
 }
 
 function getUserRole(): string | null {
@@ -42,7 +44,7 @@ export default function ConfiguracoesPage() {
   const router = useRouter()
   const [aba, setAba] = useState<'geral' | 'cardapio'>('geral')
   const [config, setConfig] = useState<Config>({ nomePizzaria: 'Chefe da Pizza', horaAbertura: 18, horaFechamento: 23, chavePix: '' })
-  const [cardapio, setCardapio] = useState<Cardapio>({ saltyFlavors: [], sweetFlavors: [], bebidas: [], sucos: [], neighborhoods: [] })
+  const [cardapio, setCardapio] = useState<Cardapio>({ saltyFlavors: [], sweetFlavors: [], bebidas: [], sucos: [], neighborhoods: [], sizes: [], borders: [] })
   const [loading, setLoading] = useState(true)
   const [checking, setChecking] = useState(true)
   const [salvando, setSalvando] = useState(false)
@@ -69,6 +71,8 @@ export default function ConfiguracoesPage() {
           bebidas: data.bebidas || [],
           sucos: data.sucos || [],
           neighborhoods: data.neighborhoods || [],
+          sizes: data.sizes || [],
+          borders: data.borders || [],
         })
       })
   }, [router])
@@ -297,6 +301,44 @@ export default function ConfiguracoesPage() {
                 <input placeholder="Bairro" value={novoItem} onChange={e => setNovoItem(e.target.value)} style={{ ...inputStyle, flex: 2 }} />
                 <input placeholder="Taxa" value={novoTaxa} onChange={e => setNovoTaxa(e.target.value)} style={{ ...inputStyle, flex: 1 }} />
                 <button onClick={adicionarBairro} style={btnAdicionar}>+ Add</button>
+              </div>
+            </div>
+
+            {/* Tamanhos de Pizza */}
+            <div style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 16, padding: 20 }}>
+              <p style={{ color: '#fff', fontWeight: 700, fontSize: 15, margin: '0 0 12px' }}>🍕 Preços das Pizzas</p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {cardapio.sizes.map((s, i) => (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ color: '#fff', fontSize: 13, fontWeight: 700, width: 80 }}>{s.label} ({s.code})</span>
+                    <input
+                      type="number"
+                      value={s.price}
+                      onChange={e => setCardapio(prev => ({ ...prev, sizes: prev.sizes.map((sz, idx) => idx === i ? { ...sz, price: parseFloat(e.target.value) || 0 } : sz) }))}
+                      style={{ ...inputStyle, width: 100 }}
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Bordas */}
+            <div style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 16, padding: 20 }}>
+              <p style={{ color: '#fff', fontWeight: 700, fontSize: 15, margin: '0 0 12px' }}>🧀 Preços das Bordas</p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {cardapio.borders.map((b, i) => (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <span style={{ color: '#fff', fontSize: 13, fontWeight: 700, flex: 1, minWidth: 120 }}>{b.label}</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <label style={{ color: 'rgba(255,255,255,0.5)', fontSize: 11 }}>P/M</label>
+                      <input type="number" value={b.priceSmall} onChange={e => setCardapio(prev => ({ ...prev, borders: prev.borders.map((bd, idx) => idx === i ? { ...bd, priceSmall: parseFloat(e.target.value) || 0 } : bd) }))} style={{ ...inputStyle, width: 70 }} />
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <label style={{ color: 'rgba(255,255,255,0.5)', fontSize: 11 }}>G/F</label>
+                      <input type="number" value={b.priceLarge} onChange={e => setCardapio(prev => ({ ...prev, borders: prev.borders.map((bd, idx) => idx === i ? { ...bd, priceLarge: parseFloat(e.target.value) || 0 } : bd) }))} style={{ ...inputStyle, width: 70 }} />
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
 
