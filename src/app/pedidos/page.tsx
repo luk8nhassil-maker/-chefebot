@@ -15,6 +15,7 @@ type Pedido = {
   escalonado?: boolean
   cancelamentoSolicitado?: boolean
   observacao?: string
+  pagamento?: string
 }
 
 const STATUS_CONFIG: Record<Status, { label: string; color: string; bg: string; border: string; btnBg: string; btnColor: string }> = {
@@ -49,6 +50,15 @@ function tempoDesde(horario: string): string {
   } catch { return "" }
 }
 
+function tocarSom(urgente = false) {
+  try {
+    const arquivo = urgente ? "/urgente.mp3" : "/pavlov.mp3"
+    const audio = new Audio(arquivo)
+    audio.volume = 1.0
+    audio.play().catch(() => {})
+  } catch {}
+}
+
 function getUserInfo(): { name: string; role: string } | null {
   if (typeof document === "undefined") return null
   try {
@@ -69,7 +79,6 @@ function getUserInfo(): { name: string; role: string } | null {
 
 type Toast = { id: number; message: string; type: "success" | "error" | "warning" | "info" }
 
-// Sons pre-carregados globalmente apos interacao do usuario
 let audioPavlov: HTMLAudioElement | null = null
 let audioUrgente: HTMLAudioElement | null = null
 
@@ -86,6 +95,7 @@ export default function PedidosPage() {
   const [salvandoBot, setSalvandoBot] = useState(false)
   const [manuais, setManuais] = useState<Record<string, boolean>>({})
   const [somAtivado, setSomAtivado] = useState(false)
+  const [resumoPedido, setResumoPedido] = useState<Pedido | null>(null)
   const prevIdsRef = useRef<string[]>([])
   const piscarRef = useRef<NodeJS.Timeout | null>(null)
   const tituloOriginalRef = useRef(typeof document !== "undefined" ? document.title : "Cozinha")
@@ -99,7 +109,6 @@ export default function PedidosPage() {
     setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3500)
   }
 
-  // Chamado diretamente pelo toque do usuario no banner — unico jeito de desbloquear audio no Chrome mobile
   const ativarSom = () => {
     try {
       audioPavlov = new Audio("/pavlov.mp3")
@@ -107,18 +116,16 @@ export default function PedidosPage() {
       audioPavlov.pause()
       audioPavlov.currentTime = 0
       audioPavlov.volume = 1.0
-
       audioUrgente = new Audio("/urgente.mp3")
       audioUrgente.play().catch(() => {})
       audioUrgente.pause()
       audioUrgente.currentTime = 0
       audioUrgente.volume = 1.0
-
       setSomAtivado(true)
     } catch {}
   }
 
-  const tocarSom = (urgente = false) => {
+  const tocarSomLocal = (urgente = false) => {
     try {
       const audio = urgente ? audioUrgente : audioPavlov
       if (!audio) return
@@ -191,7 +198,7 @@ export default function PedidosPage() {
             if (chegaram.length > 0) {
               const temEsc = chegaram.some((p: Pedido) => p.escalonado)
               const temCanc = chegaram.some((p: Pedido) => p.cancelamentoSolicitado)
-              tocarSom(temEsc)
+              tocarSomLocal(temEsc)
               if (temEsc) { addToast("🚨 URGENTE! Cliente precisa de você!", "error"); iniciarPiscar() }
               else if (temCanc) addToast("⚠️ Cancelamento solicitado!", "warning")
               else addToast(`🍕 ${chegaram.length} novo${chegaram.length > 1 ? "s" : ""} pedido${chegaram.length > 1 ? "s" : ""}!`, "success")
@@ -233,13 +240,63 @@ export default function PedidosPage() {
   )
 
   const toastColors: Record<Toast["type"], string> = { success: "#4ade80", error: "#f87171", warning: "#fb923c", info: "#60a5fa" }
-
   return (
     <div style={{ minHeight: "100vh", background: "#080808", paddingBottom: 80, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>
       <style>{`
         @keyframes slideUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.5; } }
+        @keyframes sheetUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
       `}</style>
+
+      {/* Bottom Sheet Resumo */}
+      {resumoPedido && (
+        <div onClick={() => setResumoPedido(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 1000, display: "flex", alignItems: "flex-end" }}>
+          <div onClick={e => e.stopPropagation()} style={{ width: "100%", background: "#111", borderRadius: "20px 20px 0 0", padding: "20px 20px 40px", animation: "sheetUp 0.25s ease", maxHeight: "80vh", overflowY: "auto" }}>
+            <div style={{ width: 40, height: 4, background: "#333", borderRadius: 2, margin: "0 auto 20px" }} />
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+              <div>
+                <p style={{ fontWeight: 900, fontSize: 20, color: "#fff", margin: 0, letterSpacing: -0.5 }}>{resumoPedido.cliente}</p>
+                <p style={{ fontSize: 12, color: "#444", margin: "2px 0 0" }}>{resumoPedido.horario} · #{resumoPedido.id.slice(-4)}</p>
+              </div>
+              <button onClick={() => setResumoPedido(null)} style={{ background: "#1e1e1e", border: "none", color: "#666", borderRadius: 10, width: 36, height: 36, fontSize: 18, cursor: "pointer" }}>✕</button>
+            </div>
+            <div style={{ background: "#0d0d0d", borderRadius: 14, padding: "14px 16px", marginBottom: 12 }}>
+              <p style={{ fontSize: 11, color: "#444", fontWeight: 700, margin: "0 0 10px", letterSpacing: 0.5, textTransform: "uppercase" }}>Pedido</p>
+              {resumoPedido.itens.map((item, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                  <span style={{ color: "#fbbf24", fontSize: 12 }}>•</span>
+                  <p style={{ fontSize: 14, color: "#e0e0e0", margin: 0, fontWeight: 600 }}>{item}</p>
+                </div>
+              ))}
+              {resumoPedido.observacao && (
+                <div style={{ marginTop: 10, background: "#1a1400", borderRadius: 8, padding: "8px 10px", display: "flex", gap: 6 }}>
+                  <span style={{ fontSize: 12 }}>✏️</span>
+                  <p style={{ fontSize: 12, color: "#fbbf24", margin: 0 }}>{resumoPedido.observacao}</p>
+                </div>
+              )}
+            </div>
+            <div style={{ background: "#0d0d0d", borderRadius: 14, padding: "14px 16px", marginBottom: 12 }}>
+              <p style={{ fontSize: 11, color: "#444", fontWeight: 700, margin: "0 0 6px", letterSpacing: 0.5, textTransform: "uppercase" }}>Entrega</p>
+              <p style={{ fontSize: 14, color: "#e0e0e0", margin: 0, fontWeight: 600 }}>📍 {resumoPedido.endereco || "—"}</p>
+            </div>
+            <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
+              <div style={{ flex: 1, background: "#0d0d0d", borderRadius: 14, padding: "14px 16px" }}>
+                <p style={{ fontSize: 11, color: "#444", fontWeight: 700, margin: "0 0 6px", letterSpacing: 0.5, textTransform: "uppercase" }}>Pagamento</p>
+                <p style={{ fontSize: 14, color: "#e0e0e0", margin: 0, fontWeight: 700 }}>
+                  {resumoPedido.pagamento === "Pix" ? "💛 Pix" : resumoPedido.pagamento === "Dinheiro" ? "💵 Dinheiro" : resumoPedido.pagamento === "Cartao" ? "💳 Cartão" : "—"}
+                </p>
+              </div>
+              <div style={{ flex: 1, background: "#0d0d0d", borderRadius: 14, padding: "14px 16px" }}>
+                <p style={{ fontSize: 11, color: "#444", fontWeight: 700, margin: "0 0 6px", letterSpacing: 0.5, textTransform: "uppercase" }}>Total</p>
+                <p style={{ fontSize: 18, color: "#4ade80", margin: 0, fontWeight: 900 }}>R$ {resumoPedido.total.toFixed(2).replace(".", ",")}</p>
+              </div>
+            </div>
+            <button onClick={() => window.open("https://wa.me/" + resumoPedido.telefone, "_blank")} style={{ width: "100%", padding: "14px", background: "#0d1a0d", border: "1px solid #16a34a25", borderRadius: 14, color: "#4ade80", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
+              💬 Abrir WhatsApp
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Toasts */}
       <div style={{ position: "fixed", bottom: 20, left: 16, right: 16, zIndex: 9999, display: "flex", flexDirection: "column-reverse", gap: 8, pointerEvents: "none" }}>
@@ -273,8 +330,6 @@ export default function PedidosPage() {
       </div>
 
       <div style={{ padding: "10px 14px 0" }}>
-
-        {/* Banner ativar som */}
         {!somAtivado && (
           <div onClick={ativarSom} style={{ background: "#0d1a0d", border: "1px solid #16a34a40", borderRadius: 14, padding: "12px 14px", marginBottom: 10, display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
             <span style={{ fontSize: 20 }}>🔔</span>
@@ -284,8 +339,6 @@ export default function PedidosPage() {
             </div>
           </div>
         )}
-
-        {/* Alerta urgente */}
         {escalonados > 0 && (
           <div style={{ background: "#1a0505", border: "1px solid #f8717130", borderRadius: 14, padding: "12px 14px", marginBottom: 10, display: "flex", alignItems: "center", gap: 10 }}>
             <span style={{ fontSize: 22 }}>🚨</span>
@@ -295,8 +348,6 @@ export default function PedidosPage() {
             </div>
           </div>
         )}
-
-        {/* Filtros */}
         <div ref={filtrosRef} style={{ display: "flex", gap: 6, marginBottom: 12, overflowX: "auto", paddingBottom: 2, scrollBehavior: "smooth", msOverflowStyle: "none", scrollbarWidth: "none" }}>
           <style>{`div::-webkit-scrollbar { display: none; }`}</style>
           {([
@@ -327,8 +378,6 @@ export default function PedidosPage() {
             )
           })}
         </div>
-
-        {/* Cards */}
         {pedidosFiltrados.length === 0 ? (
           <div style={{ textAlign: "center", padding: "60px 0" }}>
             <p style={{ fontSize: 36, margin: "0 0 10px" }}>🍕</p>
@@ -346,7 +395,6 @@ export default function PedidosPage() {
               const tempo = tempoDesde(pedido.horario)
               const ativo = eAtivo(pedido.status)
               const tempoUrgente = pedido.status === "novo"
-
               return (
                 <div key={pedido.id} style={{ background: isEsc ? "#110505" : ativo ? "#0d0d0d" : "#090909", border: `1px solid ${isEsc ? "#f8717125" : isCanc ? "#fb923c25" : ativo ? cfg.border : "#111"}`, borderRadius: 16, overflow: "hidden", opacity: ativo ? 1 : 0.45, transition: "opacity 0.2s" }}>
                   {ativo && <div style={{ height: 3, background: isEsc ? "#f87171" : cfg.color, width: "100%" }} />}
@@ -370,9 +418,14 @@ export default function PedidosPage() {
                           )}
                         </div>
                       </div>
-                      <span style={{ background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.border}`, fontSize: 11, fontWeight: 800, padding: "4px 10px", borderRadius: 20, whiteSpace: "nowrap", marginLeft: 8, letterSpacing: 0.2 }}>
-                        {isEsc ? "Urgente" : cfg.label}
-                      </span>
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
+                        <span style={{ background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.border}`, fontSize: 11, fontWeight: 800, padding: "4px 10px", borderRadius: 20, whiteSpace: "nowrap", marginLeft: 8, letterSpacing: 0.2 }}>
+                          {isEsc ? "Urgente" : cfg.label}
+                        </span>
+                        <button onClick={() => setResumoPedido(pedido)} style={{ background: "#1a1a1a", border: "1px solid #2a2a2a", color: "#666", borderRadius: 8, padding: "3px 8px", fontSize: 10, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>
+                          📋 Resumo
+                        </button>
+                      </div>
                     </div>
                     <div style={{ marginBottom: 8 }}>
                       {pedido.itens.map((item, i) => (
