@@ -322,33 +322,64 @@ export default function PedidosPage() {
         </div>
       )}
 
-      {/* Banner Urgência */}
+      {/* Card Urgência Gamer */}
       {escalonados > 0 && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 9999, padding: '0 16px' }}>
+        <div style={{ position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
           <style>{`
-            @keyframes urgentPulse { 0%,100% { transform: scaleX(1); opacity: 1; } 50% { transform: scaleX(1.01); opacity: 0.95; } }
-            @keyframes urgentSlideDown { from { transform: translateY(-100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-            @keyframes urgentShake { 0%,100% { transform: translateX(0); } 20% { transform: translateX(-4px); } 40% { transform: translateX(4px); } 60% { transform: translateX(-4px); } 80% { transform: translateX(4px); } }
-            @keyframes urgentGlow { 0%,100% { box-shadow: 0 0 20px rgba(239,68,68,0.4), 0 4px 24px rgba(0,0,0,0.5); } 50% { box-shadow: 0 0 40px rgba(239,68,68,0.8), 0 4px 24px rgba(0,0,0,0.5); } }
+            @keyframes cardIn { from { transform: scale(0.8) translateY(20px); opacity: 0; } to { transform: scale(1) translateY(0); opacity: 1; } }
+            @keyframes bgPulse { 0%,100% { background: rgba(0,0,0,0.85); } 50% { background: rgba(80,0,0,0.9); } }
+            @keyframes shake { 0%,100% { transform: translateX(0); } 15% { transform: translateX(-6px) rotate(-1deg); } 30% { transform: translateX(6px) rotate(1deg); } 45% { transform: translateX(-4px); } 60% { transform: translateX(4px); } 75% { transform: translateX(-2px); } }
+            @keyframes glowPulse { 0%,100% { box-shadow: 0 0 30px rgba(239,68,68,0.5), 0 0 60px rgba(239,68,68,0.2), inset 0 1px 0 rgba(255,255,255,0.1); } 50% { box-shadow: 0 0 60px rgba(239,68,68,0.9), 0 0 100px rgba(239,68,68,0.4), inset 0 1px 0 rgba(255,255,255,0.1); } }
+            @keyframes scanline { 0% { transform: translateY(-100%); } 100% { transform: translateY(400%); } }
+            @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+            @keyframes borderRotate { 0% { background-position: 0% 50%; } 100% { background-position: 200% 50%; } }
           `}</style>
-          <div style={{ background: 'linear-gradient(135deg, #7f1d1d 0%, #991b1b 50%, #7f1d1d 100%)', border: '1px solid #ef444460', borderTop: 'none', borderRadius: '0 0 20px 20px', padding: '14px 20px', animation: 'urgentSlideDown 0.3s ease, urgentGlow 1.5s infinite, urgentPulse 1.5s infinite', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <div style={{ fontSize: 28, animation: 'urgentShake 0.5s infinite' }}>🚨</div>
-              <div>
-                <p style={{ color: '#fca5a5', fontSize: 13, fontWeight: 900, margin: 0, letterSpacing: 0.5, textTransform: 'uppercase' }}>
-                  {escalonados} cliente{escalonados > 1 ? 's' : ''} precisando de você AGORA
+          <div style={{ position: 'absolute', inset: 0, animation: 'bgPulse 1.5s infinite', backdropFilter: 'blur(8px)' }} />
+          <div style={{ position: 'relative', width: '100%', maxWidth: 360, animation: 'cardIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)' }}>
+            {/* Borda animada */}
+            <div style={{ position: 'absolute', inset: -2, borderRadius: 24, background: 'linear-gradient(90deg, #ef4444, #ff6b00, #ef4444, #ff0000, #ef4444)', backgroundSize: '200% 100%', animation: 'borderRotate 2s linear infinite', zIndex: -1 }} />
+            <div style={{ background: 'linear-gradient(160deg, #1a0505 0%, #0d0d0d 40%, #1a0a00 100%)', borderRadius: 22, padding: '28px 24px', position: 'relative', overflow: 'hidden', animation: 'glowPulse 1.5s infinite' }}>
+              {/* Scanline effect */}
+              <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '20%', background: 'linear-gradient(transparent, rgba(239,68,68,0.05), transparent)', animation: 'scanline 3s linear infinite', pointerEvents: 'none' }} />
+              {/* Header */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 20 }}>
+                <span style={{ fontSize: 32, animation: 'shake 0.6s infinite' }}>🚨</span>
+                <div style={{ textAlign: 'center' }}>
+                  <p style={{ color: '#ef4444', fontSize: 11, fontWeight: 900, margin: 0, letterSpacing: 3, textTransform: 'uppercase', animation: 'blink 1s infinite' }}>● ATENÇÃO URGENTE</p>
+                  <p style={{ color: '#fff', fontSize: 20, fontWeight: 900, margin: '4px 0 0', letterSpacing: -0.5 }}>Cliente Esperando!</p>
+                </div>
+                <span style={{ fontSize: 32, animation: 'shake 0.6s infinite' }}>🚨</span>
+              </div>
+              {/* Info */}
+              <div style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 14, padding: '14px 16px', marginBottom: 20 }}>
+                <p style={{ color: '#fca5a5', fontSize: 13, fontWeight: 700, margin: '0 0 6px', textAlign: 'center' }}>
+                  {escalonados} cliente{escalonados > 1 ? 's' : ''} precisando de atendimento humano agora
                 </p>
-                <p style={{ color: '#ef444480', fontSize: 11, margin: '2px 0 0', fontWeight: 500 }}>
-                  Role para ver os cards vermelhos ↓
-                </p>
+                {pedidos.filter(p => p.escalonado && p.status === 'novo').slice(0, 2).map((p, i) => (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, background: 'rgba(0,0,0,0.3)', borderRadius: 8, padding: '8px 10px' }}>
+                    <span style={{ fontSize: 14 }}>👤</span>
+                    <div>
+                      <p style={{ color: '#fff', fontSize: 13, fontWeight: 700, margin: 0 }}>{p.cliente}</p>
+                      <p style={{ color: '#666', fontSize: 11, margin: 0 }}>{p.horario} · aguardando</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {/* Botões */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {pedidos.filter(p => p.escalonado && p.status === 'novo').slice(0, 1).map(p => (
+                  <button key={p.id} onClick={() => { assumirConversa(p.telefone); }} style={{ width: '100%', padding: '16px', background: 'linear-gradient(135deg, #ef4444, #dc2626)', border: 'none', borderRadius: 14, color: '#fff', fontSize: 15, fontWeight: 900, cursor: 'pointer', letterSpacing: 0.3, position: 'relative', overflow: 'hidden' }}>
+                    <span style={{ position: 'relative', zIndex: 1 }}>📱 Atender {p.cliente.split(' ')[0]} agora</span>
+                  </button>
+                ))}
+                <button onClick={() => {
+                  const el = document.querySelector('[data-urgente="true"]')
+                  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                }} style={{ width: '100%', padding: '14px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 14, color: '#aaa', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>
+                  👀 Ver no painel
+                </button>
               </div>
             </div>
-            <button onClick={() => {
-              const el = document.querySelector('[data-urgente="true"]')
-              if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-            }} style={{ background: '#ef4444', border: 'none', color: '#fff', borderRadius: 10, padding: '8px 14px', cursor: 'pointer', fontSize: 12, fontWeight: 800, whiteSpace: 'nowrap', flexShrink: 0 }}>
-              Ver agora →
-            </button>
           </div>
         </div>
       )}
