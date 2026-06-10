@@ -14,6 +14,7 @@ type Pedido = {
   endereco: string
   pagamento?: string
   troco?: string
+  entregador?: { id: string; nome: string; telefone: string }
 }
 
 const PEDIDOS_INICIAIS: Pedido[] = [
@@ -90,7 +91,7 @@ export async function PATCH(req: NextRequest) {
   const auth = await checkAuth(req)
   if (!auth) return NextResponse.json({ error: 'Nao autorizado' }, { status: 401 })
 
-  const { id, status } = await req.json()
+  const { id, status, entregador } = await req.json()
   const pedidos = await getPedidos()
   const index = pedidos.findIndex(p => p.id === id)
   if (index === -1) return NextResponse.json({ error: 'Pedido nao encontrado' }, { status: 404 })
@@ -101,8 +102,33 @@ export async function PATCH(req: NextRequest) {
     ...(status === 'cancelado' ? { cancelamentoSolicitado: false } : {}),
   }
 
+  // Salva entregador no pedido se informado
+  if (entregador) {
+    pedidos[index] = { ...pedidos[index], entregador }
+  }
   await redis.set('pedidos', pedidos)
   await notificarCliente(pedidos[index].telefone, status, pedidos[index].cliente)
+
+  // Notifica entregador no WhatsApp quando pedido sai para entrega
+  if (status === 'saiu_entrega' && entregador?.telefone) {
+    const pedido = pedidos[index]
+    const phone = entregador.telefone.replace(/\D/g, '')
+    const phoneFormatado = phone.startsWith('55') ? phone : '55' + phone
+    const troco = (pedido as any).troco && (pedido as any).troco !== 'Sem troco' ? `\n💵 ${(pedido as any).troco}` : ''
+    const pagamento = (pedido as any).pagamento ? `\n💳 ${(pedido as any).pagamento}${troco}` : ''
+    try {
+      await fetch(`${EVOLUTION_API_URL}/message/sendText/${EVOLUTION_INSTANCE}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'apikey': EVOLUTION_API_KEY },
+        body: JSON.stringify({
+          number: phoneFormatado,
+          text: `🛵 *Novo pedido pra você, ${entregador.nome}!*\n\n👤 Cliente: *${pedido.cliente}*\n📍 Endereço: *${pedido.endereco}*\n💰 Total: *R$ ${pedido.total.toFixed(2).replace('.', ',')}*${pagamento}\n\nResponda *1* quando entregar.`,
+        }),
+      })
+      // Salva no Redis que entregador está aguardando confirmação deste pedido
+      await redis.set(`entregador_aguardando:${phoneFormatado}`, pedido.id, { ex: 3 * 60 * 60 })
+    } catch {}
+  }
 
   if (status === 'entregue') {
     const phone = sanitizePhone(pedidos[index].telefone)
