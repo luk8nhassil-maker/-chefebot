@@ -87,6 +87,7 @@ export default function PedidosPage() {
   const [botAtivo, setBotAtivo] = useState(true)
   const [salvandoBot, setSalvandoBot] = useState(false)
   const [manuais, setManuais] = useState<Record<string, boolean>>({})
+  const [cardUrgenciaFechado, setCardUrgenciaFechado] = useState(false)
   const [somAtivado, setSomAtivado] = useState(false)
   const [resumoPedido, setResumoPedido] = useState<Pedido | null>(null)
   const [entregadores, setEntregadores] = useState<{id: string; nome: string; telefone: string; ativo: boolean}[]>([])
@@ -323,7 +324,7 @@ export default function PedidosPage() {
       )}
 
       {/* Card Urgência Gamer */}
-      {escalonados > 0 && (
+      {escalonados > 0 && !cardUrgenciaFechado && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
           <style>{`
             @keyframes cardIn { from { transform: scale(0.8) translateY(20px); opacity: 0; } to { transform: scale(1) translateY(0); opacity: 1; } }
@@ -368,13 +369,16 @@ export default function PedidosPage() {
               {/* Botões */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {pedidos.filter(p => p.escalonado && p.status === 'novo').slice(0, 1).map(p => (
-                  <button key={p.id} onClick={() => { assumirConversa(p.telefone); }} style={{ width: '100%', padding: '16px', background: 'linear-gradient(135deg, #ef4444, #dc2626)', border: 'none', borderRadius: 14, color: '#fff', fontSize: 15, fontWeight: 900, cursor: 'pointer', letterSpacing: 0.3, position: 'relative', overflow: 'hidden' }}>
+                  <button key={p.id} onClick={() => { assumirConversa(p.telefone); setCardUrgenciaFechado(true); }} style={{ width: '100%', padding: '16px', background: 'linear-gradient(135deg, #ef4444, #dc2626)', border: 'none', borderRadius: 14, color: '#fff', fontSize: 15, fontWeight: 900, cursor: 'pointer', letterSpacing: 0.3, position: 'relative', overflow: 'hidden' }}>
                     <span style={{ position: 'relative', zIndex: 1 }}>📱 Atender {p.cliente.split(' ')[0]} agora</span>
                   </button>
                 ))}
                 <button onClick={() => {
-                  const el = document.querySelector('[data-urgente="true"]')
-                  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                  setCardUrgenciaFechado(true)
+                  setTimeout(() => {
+                    const el = document.querySelector('[data-urgente="true"]')
+                    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                  }, 100)
                 }} style={{ width: '100%', padding: '14px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 14, color: '#aaa', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>
                   👀 Ver no painel
                 </button>
