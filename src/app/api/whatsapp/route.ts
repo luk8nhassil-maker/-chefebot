@@ -5,6 +5,7 @@ import { redis } from "@/lib/redis";
 import { interpretarMensagem } from "@/lib/claude";
 import { log } from "@/lib/logger";
 import { analisarComprovantePix } from "@/lib/analisarComprovante";
+import { transcreverAudio } from "@/lib/transcribeAudio";
 
 type Pedido = {
   id: string;
@@ -294,7 +295,42 @@ export async function POST(req: NextRequest) {
     // Detecta áudio
     const isAudio = !!data?.message?.audioMessage || !!data?.message?.pttMessage
     if (isAudio) {
-      await enviarMensagem(phone, `Oi! 😊 Não consigo ouvir áudios por aqui, mas posso te atender super bem pelo texto!\n\nMe conta o que você quer? 🍕`)
+      try {
+        const downloadUrl = `https://${process.env.EVOLUTION_API_URL}/chat/getBase64FromMediaMessage/chefe`
+        const downloadRes = await fetch(downloadUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', apikey: process.env.EVOLUTION_API_KEY! },
+          body: JSON.stringify({ message: data.message }),
+        })
+        if (downloadRes.ok) {
+          const downloadData = await downloadRes.json()
+          const base64 = downloadData.base64 || ''
+          const mimeType = downloadData.mimetype || 'audio/ogg'
+          if (base64) {
+            const transcricao = await transcreverAudio(base64, mimeType)
+            if (transcricao) {
+              await enviarMensagem(phone, `🎤 _"${transcricao}"_`)
+              // Processa o texto transcrito como se o cliente tivesse digitado
+              const fakeData = { ...data, message: { conversation: transcricao } }
+              // Continua o fluxo normalmente com o texto transcrito
+              const sessionKey = `session:${phone}`
+              const currentSession = await redis.get<BotSession>(sessionKey)
+              if (currentSession) {
+                const { processMessage: pm } = await import('@/lib/bot')
+                const result = pm(transcricao, currentSession)
+                await redis.set(sessionKey, result.session, { ex: 1800 })
+                for (const msg of result.messages) {
+                  const msgFinal = config.chavePix ? msg.replace('(configurada pelo admin)', config.chavePix) : msg
+                  await enviarMensagem(phone, msgFinal)
+                  await new Promise(r => setTimeout(r, 500))
+                }
+                return NextResponse.json({ ok: true })
+              }
+            }
+          }
+        }
+      } catch {}
+      await enviarMensagem(phone, `Oi! 😊 Não consegui entender o áudio. Me conta pelo texto o que você quer? 🍕`)
       return NextResponse.json({ ok: true })
     }
 
