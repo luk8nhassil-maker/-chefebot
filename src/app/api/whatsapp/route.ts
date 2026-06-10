@@ -225,6 +225,17 @@ async function processarComprovante(phone: string, data: any, config: ConfigPizz
       await salvarEscalonamento(phone, session || { step: "done", cart: [], deliveryFee: 0, customerName: pedidoAtivo.cliente });
       return;
     }
+    // Verifica se comprovante ja foi usado antes (anti-reutilizacao)
+    const hashComprovante = imagemBase64.slice(0, 64)
+    const chaveHash = `pix_usado:${hashComprovante}`
+    const jaUsado = await redis.get(chaveHash)
+    if (jaUsado) {
+      await enviarMensagem(phone, `⚠️ Este comprovante já foi utilizado anteriormente. Por favor, envie o comprovante correto ou entre em contato conosco.`)
+      await salvarEscalonamento(phone, session || { step: "done", cart: [], deliveryFee: 0, customerName: pedidoAtivo.cliente })
+      await log("aviso", `Comprovante Pix reutilizado detectado`, `Phone: ${phone}`)
+      return
+    }
+
     const resultado = await analisarComprovantePix(
       imagemBase64, mediaType as any, pedidoAtivo.total,
       config.chavePix, config.nomeTitularPix || config.nomePizzaria
@@ -234,6 +245,7 @@ async function processarComprovante(phone: string, data: any, config: ConfigPizz
       await redis.set("pedidos", pedidosAtualizados);
       const firstName = pedidoAtivo.cliente.split(" ")[0];
       await enviarMensagem(phone, `Pagamento confirmado! ✅🎉\n\nObrigado, *${firstName}*! Seu pedido ja foi enviado para a cozinha. Aguarda que vem ai! 🍕`);
+     await redis.set(chaveHash, true, { ex: 30 * 24 * 60 * 60 }) // 30 dias
       await log("info", `Pix confirmado automaticamente para ${firstName}`, `Valor: R$ ${resultado.valorEncontrado}`);
     } else {
       await enviarMensagem(phone, `Comprovante recebido! 📄 Nossa equipe vai verificar o pagamento manualmente. Em instantes confirmamos! 😊`);
