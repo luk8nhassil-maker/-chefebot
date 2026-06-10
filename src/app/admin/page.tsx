@@ -12,6 +12,7 @@ type Config = {
   chavePix: string; nomeTitularPix?: string; limitePico?: number
 }
 type Funcionario = { username: string; name: string; password: string; ativo: boolean }
+type Entregador = { id: string; nome: string; telefone: string; ativo: boolean }
 type ImagensCardapio = { pizza?: string; lanche?: string; bebida?: string; suco?: string; ativo: boolean }
 type Avaliacao = { phone: string; nota: number; data: string }
 type AvaliacoesData = { total: number; media: number; ultimas: Avaliacao[] }
@@ -125,6 +126,9 @@ export default function AdminPage() {
   const [limitePico, setLimitePico] = useState(0)
   const [uploadando, setUploadando] = useState<string | null>(null)
   const [novoSabor, setNovoSabor] = useState('')
+  const [entregadores, setEntregadores] = useState<Entregador[]>([])
+  const [novoEntregador, setNovoEntregador] = useState({ nome: '', telefone: '' })
+  const [salvandoEntregador, setSalvandoEntregador] = useState(false)
   const [novaBebida, setNovaBebida] = useState({ name: '', price: '' })
   const [novoBairro, setNovoBairro] = useState({ name: '', fee: '' })
   const inputPizzaRef = useRef<HTMLInputElement>(null)
@@ -145,7 +149,9 @@ export default function AdminPage() {
       fetch('/api/avaliacoes').then(r => r.json()).catch(() => ({ total: 0, media: 0, ultimas: [] })),
       fetch('/api/ranking').then(r => r.json()).catch(() => []),
       fetch('/api/cardapio').then(r => r.json()).catch(() => null),
-    ]).then(([ped, cfg, funcs, imgs, avals, rank, card]) => {
+      fetch('/api/entregadores').then(r => r.json()).catch(() => []),
+    ]).then(([ped, cfg, funcs, imgs, avals, rank, card, entreg]) => {
+      setEntregadores(Array.isArray(entreg) ? entreg : [])
       setPedidos(Array.isArray(ped) ? ped : [])
       setConfig(cfg)
       setLimitePico(cfg.limitePico || 0)
@@ -624,6 +630,49 @@ export default function AdminPage() {
                   </div>
                 ))}
               </div>
+            </div>
+
+            {/* Entregadores */}
+            <div style={card}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                <p style={sectionTitle}>🛵 Entregadores</p>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
+                {entregadores.map(e => (
+                  <div key={e.id} style={{ background: '#0d0d0d', borderRadius: 10, padding: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div>
+                      <p style={{ color: '#fff', fontSize: 13, fontWeight: 700, margin: 0 }}>{e.nome}</p>
+                      <p style={{ color: '#444', fontSize: 11, margin: '2px 0 0' }}>{e.telefone}</p>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button onClick={async () => {
+                        await fetch('/api/entregadores', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: e.id, ativo: !e.ativo }) })
+                        setEntregadores(prev => prev.map(x => x.id === e.id ? { ...x, ativo: !x.ativo } : x))
+                      }} style={{ background: e.ativo ? '#14532d' : '#1a1a1a', border: `1px solid ${e.ativo ? '#16a34a40' : '#2a2a2a'}`, color: e.ativo ? '#4ade80' : '#666', borderRadius: 8, padding: '4px 10px', cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>
+                        {e.ativo ? 'Ativo' : 'Inativo'}
+                      </button>
+                      <button onClick={async () => {
+                        await fetch('/api/entregadores', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: e.id }) })
+                        setEntregadores(prev => prev.filter(x => x.id !== e.id))
+                      }} style={{ background: '#1a1a1a', border: '1px solid #2a2a2a', color: '#f87171', borderRadius: 8, padding: '4px 10px', cursor: 'pointer', fontSize: 11 }}>✕</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                <input placeholder="Nome" value={novoEntregador.nome} onChange={e => setNovoEntregador(prev => ({ ...prev, nome: e.target.value }))} style={{ ...inp, flex: 1 }} />
+                <input placeholder="Telefone" value={novoEntregador.telefone} onChange={e => setNovoEntregador(prev => ({ ...prev, telefone: e.target.value }))} style={{ ...inp, flex: 1 }} />
+              </div>
+              <button onClick={async () => {
+                if (!novoEntregador.nome || !novoEntregador.telefone) return
+                setSalvandoEntregador(true)
+                const res = await fetch('/api/entregadores', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(novoEntregador) })
+                const d = await res.json()
+                if (d.ok) { setEntregadores(prev => [...prev, d.entregador]); setNovoEntregador({ nome: '', telefone: '' }); msg('✅ Entregador adicionado!') }
+                setSalvandoEntregador(false)
+              }} disabled={salvandoEntregador} style={{ width: '100%', background: '#ff6b00', border: 'none', borderRadius: 10, padding: '11px', color: '#fff', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>
+                {salvandoEntregador ? 'Salvando...' : '+ Adicionar entregador'}
+              </button>
             </div>
           </div>
         )}
