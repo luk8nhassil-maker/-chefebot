@@ -156,7 +156,7 @@ export default function PedidosPage() {
   }
   const iniciarSomRepetido = () => {
     if (somRepetidoRef.current) return
-    somRepetidoRef.current = setInterval(() => { tocarSomLocal(true) }, 8000)
+    somRepetidoRef.current = setInterval(() => { tocarSomLocal(true) }, 3000)
   }
   const pararSomRepetido = () => {
     if (somRepetidoRef.current) { clearInterval(somRepetidoRef.current); somRepetidoRef.current = null }
