@@ -15,6 +15,8 @@ export async function POST(req: NextRequest) {
     chaves.push(`session:${v}`);
     chaves.push(`manual:${v}`);
     chaves.push(`resolvendo:${v}`);
+    chaves.push(`avaliacao:${v}`);
+    chaves.push(`aguardando_avaliacao:${v}`);
   }
   for (const chave of chaves) {
     await redis.del(chave);
