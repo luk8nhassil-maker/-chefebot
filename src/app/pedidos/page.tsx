@@ -16,6 +16,8 @@ type Pedido = {
   cancelamentoSolicitado?: boolean
   observacao?: string
   pagamento?: string
+  troco?: string
+  pixConfirmado?: boolean
 }
 
 const STATUS_CONFIG: Record<Status, { label: string; color: string; bg: string; border: string; btnBg: string; btnColor: string }> = {
@@ -48,15 +50,6 @@ function tempoDesde(horario: string): string {
     const hr = Math.floor(diff / 60), mn = diff % 60
     return mn > 0 ? `${hr}h${mn}m` : `${hr}h`
   } catch { return "" }
-}
-
-function tocarSom(urgente = false) {
-  try {
-    const arquivo = urgente ? "/urgente.mp3" : "/pavlov.mp3"
-    const audio = new Audio(arquivo)
-    audio.volume = 1.0
-    audio.play().catch(() => {})
-  } catch {}
 }
 
 function getUserInfo(): { name: string; role: string } | null {
@@ -283,8 +276,10 @@ export default function PedidosPage() {
               <div style={{ flex: 1, background: "#0d0d0d", borderRadius: 14, padding: "14px 16px" }}>
                 <p style={{ fontSize: 11, color: "#444", fontWeight: 700, margin: "0 0 6px", letterSpacing: 0.5, textTransform: "uppercase" }}>Pagamento</p>
                 <p style={{ fontSize: 14, color: "#e0e0e0", margin: 0, fontWeight: 700 }}>
-                  {resumoPedido.pagamento === "Pix" ? "💛 Pix" : resumoPedido.pagamento === "Dinheiro" ? "💵 Dinheiro" : resumoPedido.pagamento === "Cartao" ? "💳 Cartão" : "—"}
+                  {resumoPedido.pagamento === "Pix" ? "💛 Pix" : resumoPedido.pagamento === "Dinheiro" ? "💵 Dinheiro" : resumoPedido.pagamento === "Cartão" ? "💳 Cartão" : "—"}
                 </p>
+                {resumoPedido.troco && <p style={{ fontSize: 12, color: "#fbbf24", margin: "4px 0 0", fontWeight: 600 }}>{resumoPedido.troco}</p>}
+                {resumoPedido.pixConfirmado && <p style={{ fontSize: 12, color: "#4ade80", margin: "4px 0 0", fontWeight: 700 }}>✅ Pix confirmado</p>}
               </div>
               <div style={{ flex: 1, background: "#0d0d0d", borderRadius: 14, padding: "14px 16px" }}>
                 <p style={{ fontSize: 11, color: "#444", fontWeight: 700, margin: "0 0 6px", letterSpacing: 0.5, textTransform: "uppercase" }}>Total</p>
@@ -422,6 +417,14 @@ export default function PedidosPage() {
                         <span style={{ background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.border}`, fontSize: 11, fontWeight: 800, padding: "4px 10px", borderRadius: 20, whiteSpace: "nowrap", marginLeft: 8, letterSpacing: 0.2 }}>
                           {isEsc ? "Urgente" : cfg.label}
                         </span>
+                        {pedido.pixConfirmado && (
+                          <span style={{ background: "#14532d", color: "#4ade80", border: "1px solid #16a34a40", borderRadius: 8, padding: "3px 8px", fontSize: 10, fontWeight: 800, whiteSpace: "nowrap" }}>✅ Pago</span>
+                        )}
+                        {pedido.pagamento && !pedido.pixConfirmado && (
+                          <span style={{ background: "#1a1a1a", color: pedido.pagamento === "Dinheiro" ? "#fbbf24" : pedido.pagamento === "Cartão" ? "#60a5fa" : "#a78bfa", border: "1px solid #2a2a2a", borderRadius: 8, padding: "3px 8px", fontSize: 10, fontWeight: 700, whiteSpace: "nowrap" }}>
+                            {pedido.pagamento === "Pix" ? "💛 Pix" : pedido.pagamento === "Dinheiro" ? "💵 Dinheiro" : "💳 Cartão"}
+                          </span>
+                        )}
                         <button onClick={() => setResumoPedido(pedido)} style={{ background: "#1a1a1a", border: "1px solid #2a2a2a", color: "#666", borderRadius: 8, padding: "3px 8px", fontSize: 10, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>
                           📋 Resumo
                         </button>
@@ -436,6 +439,12 @@ export default function PedidosPage() {
                       <div style={{ background: "#1a1400", border: "1px solid #fbbf2420", borderRadius: 8, padding: "6px 10px", marginBottom: 8, display: "flex", alignItems: "flex-start", gap: 6 }}>
                         <span style={{ fontSize: 12 }}>✏️</span>
                         <p style={{ fontSize: 12, color: "#fbbf24", margin: 0, fontWeight: 500 }}>{pedido.observacao}</p>
+                      </div>
+                    )}
+                    {pedido.troco && pedido.troco !== "Sem troco" && (
+                      <div style={{ background: "#1a1400", border: "1px solid #fbbf2420", borderRadius: 8, padding: "6px 10px", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
+                        <span style={{ fontSize: 12 }}>💵</span>
+                        <p style={{ fontSize: 12, color: "#fbbf24", margin: 0, fontWeight: 600 }}>{pedido.troco}</p>
                       </div>
                     )}
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>

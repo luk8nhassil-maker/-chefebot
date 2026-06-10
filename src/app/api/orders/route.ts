@@ -12,6 +12,8 @@ type Pedido = {
   status: Status
   horario: string
   endereco: string
+  pagamento?: string
+  troco?: string
 }
 
 const PEDIDOS_INICIAIS: Pedido[] = [
