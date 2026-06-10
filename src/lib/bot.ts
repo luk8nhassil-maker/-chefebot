@@ -43,6 +43,11 @@ export interface ClienteHistorico {
   nome: string;
   ultimoPedido: string[];
   ultimoTotal: number;
+  ultimoCart?: CartItem[];
+  ultimoDeliveryFee?: number;
+  ultimoEndereco?: string;
+  ultimoNeighborhood?: string;
+  ultimoDeliveryType?: string;
 }
 export interface BotSession {
   step: BotStep;
@@ -443,14 +448,38 @@ export function processMessage(input: string, session: BotSession): BotResponse 
       const historico = session.historico!;
       const firstName = historico.nome.split(" ")[0];
       const ultimoPedido = historico.ultimoPedido.join(", ");
-      if (ePositiva(n)) {
+      if (ePositiva(n) || n === "1") {
+        if (historico.ultimoCart && historico.ultimoCart.length > 0) {
+          const cart = historico.ultimoCart;
+          const subtotal = cartSubtotal(cart);
+          const deliveryFee = historico.ultimoDeliveryFee || 0;
+          const total = subtotal + deliveryFee;
+          const updatedSession: BotSession = {
+            ...session,
+            step: "confirm",
+            cart,
+            customerName: historico.nome,
+            deliveryFee,
+            deliveryType: historico.ultimoDeliveryType as any || "delivery",
+            address: historico.ultimoEndereco,
+            neighborhood: historico.ultimoNeighborhood,
+          };
+          const receipt = buildReceipt(updatedSession);
+          return {
+            messages: [
+              `Ótimo, *${firstName}*! 😊 Mesmo pedido de antes:`,
+              `🛒 *Confirmação do pedido:*\n\n${receipt}\n\nTá certinho?\n\n  1. Sim, confirmar ✅\n  2. Não, cancelar`
+            ],
+            session: resetaTentativas(updatedSession),
+          };
+        }
         return {
           messages: [`Que bom te ver de novo, *${firstName}*! 😊\n\n${mensagemCategorias()}`],
           session: resetaTentativas({ ...session, step: "category", customerName: historico.nome }),
         };
       }
-      if (eNegativa(n)) {
-        return { messages: [`Tudo bem! Me fala seu nome?`], session: resetaTentativas({ ...session, step: "name", historico: undefined }) };
+      if (eNegativa(n) || n === "2") {
+        return { messages: [`Tudo bem! ${mensagemCategorias()}`], session: resetaTentativas({ ...session, step: "category", customerName: historico.nome, historico: undefined }) };
       }
       return {
         messages: [`Ei *${firstName}*! 😊 Da última vez você pediu *${ultimoPedido}* — vai querer repetir ou montar um novo?\n\n  1. Repetir o mesmo\n  2. Quero outra coisa`],
