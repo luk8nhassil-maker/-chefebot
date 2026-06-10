@@ -279,6 +279,7 @@ export async function POST(req: NextRequest) {
     const config = await getConfig();
     const menuDinamico = await getMENUDinamico();
     setMenuDinamico(menuDinamico);
+    await redis.set(`session_ts:${phone}`, Date.now(), { ex: 3600 })
 
     // Detecta imagem ou PDF (comprovante Pix)
     const isImagem = !!data?.message?.imageMessage;
