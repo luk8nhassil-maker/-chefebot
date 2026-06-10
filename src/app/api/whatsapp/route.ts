@@ -279,7 +279,7 @@ export async function POST(req: NextRequest) {
     const config = await getConfig();
     const menuDinamico = await getMENUDinamico();
     setMenuDinamico(menuDinamico);
-    await redis.set(`session_ts:${phone}`, Date.now(), { ex: 3600 })
+    
 
     // Detecta imagem ou PDF (comprovante Pix)
     const isImagem = !!data?.message?.imageMessage;
@@ -293,6 +293,59 @@ export async function POST(req: NextRequest) {
 
     const messageText = data?.message?.conversation || data?.message?.extendedTextMessage?.text || "";
     if (!messageText) return NextResponse.json({ ok: true });
+
+    // Verifica se é entregador confirmando entrega
+    const pedidoEntregadorId = await redis.get<string>(`entregador_aguardando:${phone}`)
+    if (pedidoEntregadorId) {
+      const msgNormalizada = messageText.trim()
+      if (msgNormalizada === '1') {
+        const pedidos = await redis.get<any[]>('pedidos') || []
+        const index = pedidos.findIndex(p => p.id === pedidoEntregadorId)
+        if (index !== -1 && pedidos[index].status === 'saiu_entrega') {
+          pedidos[index] = { ...pedidos[index], status: 'entregue' }
+          await redis.set('pedidos', pedidos)
+          await redis.del(`entregador_aguardando:${phone}`)
+          const pedido = pedidos[index]
+          const firstName = pedido.cliente.split(' ')[0]
+          await enviarMensagem(pedido.telefone, `*${firstName}*, pedido entregue! 😊\n\nEsperamos que tenha curtido muito. Volte sempre que quiser — estamos aqui! 🍕`)
+          const chaveAvaliacao = `avaliacao_enviada:${pedido.id}`
+          const jaEnviou = await redis.get(chaveAvaliacao)
+          if (!jaEnviou) {
+            await redis.set(chaveAvaliacao, true, { ex: 86400 })
+            await redis.set(`avaliacao:${pedido.telefone}`, true, { ex: 3600 })
+            await enviarMensagem(pedido.telefone, `*${firstName}*, como foi sua experiência hoje? 😊\n\nAvalia nossa pizza de 1 a 5:\n\n  ⭐ 1 — Ruim\n  ⭐⭐ 2 — Regular\n  ⭐⭐⭐ 3 — Bom\n  ⭐⭐⭐⭐ 4 — Muito bom\n  ⭐⭐⭐⭐⭐ 5 — Excelente\n\nÉ só digitar o número! 😄`)
+          }
+          const maisEntregas = pedidos.filter((p: any) => p.status === 'saiu_entrega' && p.entregador?.telefone?.replace(/\D/g, '') === phone.replace(/\D/g, ''))
+          if (maisEntregas.length > 0) {
+            const lista = maisEntregas.map((p: any, i: number) => `${i + 1}. *${p.cliente}* — ${p.endereco}\n💰 R$ ${p.total.toFixed(2).replace('.', ',')}`).join('\n\n')
+            await enviarMensagem(phone, `✅ Entrega confirmada!\n\nVocê ainda tem *${maisEntregas.length}* entrega${maisEntregas.length > 1 ? 's' : ''} pendente${maisEntregas.length > 1 ? 's' : ''}:\n\n${lista}\n\nQual vai primeiro? Responda o número.`)
+            await redis.set(`entregador_aguardando:${phone}`, maisEntregas[0].id, { ex: 3 * 60 * 60 })
+            await redis.set(`entregador_escolhendo:${phone}`, JSON.stringify(maisEntregas.map((p: any) => p.id)), { ex: 3 * 60 * 60 })
+          } else {
+            await enviarMensagem(phone, `✅ Entrega confirmada!\n\n🎉 Todas as entregas concluídas! Pode voltar para a pizzaria. 🍕`)
+          }
+        }
+        return NextResponse.json({ ok: true })
+      }
+      const escolhendoStr = await redis.get<string>(`entregador_escolhendo:${phone}`)
+      if (escolhendoStr) {
+        const ids = JSON.parse(escolhendoStr)
+        const num = parseInt(messageText.trim()) - 1
+        if (num >= 0 && num < ids.length) {
+          await redis.set(`entregador_aguardando:${phone}`, ids[num], { ex: 3 * 60 * 60 })
+          await redis.del(`entregador_escolhendo:${phone}`)
+          const pedidos = await redis.get<any[]>('pedidos') || []
+          const pedido = pedidos.find((p: any) => p.id === ids[num])
+          if (pedido) {
+            const troco = pedido.troco && pedido.troco !== 'Sem troco' ? `\n💵 ${pedido.troco}` : ''
+            await enviarMensagem(phone, `👍 Próxima entrega:\n\n📍 *${pedido.cliente}* — ${pedido.endereco}\n💰 R$ ${pedido.total.toFixed(2).replace('.', ',')}${troco}\n\nResponda *1* quando entregar.`)
+            const firstName = pedido.cliente.split(' ')[0]
+            await enviarMensagem(pedido.telefone, `🛵 *${firstName}*, boa notícia!\n\nSeu pedido é o próximo da fila. Já já chega! 🍕`)
+          }
+        }
+        return NextResponse.json({ ok: true })
+      }
+    }
 
     const botAtivo = await redis.get<boolean>("bot_ativo");
     if (botAtivo === false) return NextResponse.json({ ok: true });
