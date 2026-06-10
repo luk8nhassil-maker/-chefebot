@@ -319,7 +319,9 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ ok: true });
       } else {
         await redis.del(`avaliacao:${phone}`);
+        // continua fluxo normalmente abaixo
       }
+      return NextResponse.json({ ok: true });
     }
 
     const sessionKey = `session:${phone}`;
