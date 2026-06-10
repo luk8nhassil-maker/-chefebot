@@ -493,6 +493,9 @@ export default function AdminPage() {
 
               <button onClick={salvarConfig} disabled={salvando} style={{ width: '100%', background: 'linear-gradient(135deg, #b7950b, #ffd700)', border: 'none', borderRadius: 10, padding: '13px', color: '#000', fontSize: 14, fontWeight: 700, cursor: salvando ? 'not-allowed' : 'pointer' }}>
                 {salvando ? 'Salvando...' : '💾 Salvar Configuracoes'}
+                </button>
+                <button onClick={() => { window.location.href = '/configuracoes' }} style={{ width: '100%', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 10, padding: '13px', color: '#fff', fontSize: 14, fontWeight: 700, cursor: 'pointer', marginTop: 8 }}>
+                  {'🍕 Gerenciar Cardápio'}
               </button>
 
               <div style={{ border: '1px solid rgba(255,255,255,0.08)', borderRadius: 14, padding: 16 }}>
