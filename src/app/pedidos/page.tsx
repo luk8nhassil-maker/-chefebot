@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 import { useEffect, useState, useRef } from "react"
 import { useRouter } from "next/navigation"
 
@@ -102,18 +102,17 @@ export default function PedidosPage() {
   // Chamado diretamente pelo toque do usuario no banner — unico jeito de desbloquear audio no Chrome mobile
   const ativarSom = () => {
     try {
-      // Pre-carrega e toca silenciosamente para desbloquear
       audioPavlov = new Audio("/pavlov.mp3")
-      audioPavlov.volume = 0.001
-      audioPavlov.play().then(() => {
-        if (audioPavlov) { audioPavlov.pause(); audioPavlov.currentTime = 0; audioPavlov.volume = 1.0 }
-      }).catch(() => {})
+      audioPavlov.play().catch(() => {})
+      audioPavlov.pause()
+      audioPavlov.currentTime = 0
+      audioPavlov.volume = 1.0
 
       audioUrgente = new Audio("/urgente.mp3")
-      audioUrgente.volume = 0.001
-      audioUrgente.play().then(() => {
-        if (audioUrgente) { audioUrgente.pause(); audioUrgente.currentTime = 0; audioUrgente.volume = 1.0 }
-      }).catch(() => {})
+      audioUrgente.play().catch(() => {})
+      audioUrgente.pause()
+      audioUrgente.currentTime = 0
+      audioUrgente.volume = 1.0
 
       setSomAtivado(true)
     } catch {}
