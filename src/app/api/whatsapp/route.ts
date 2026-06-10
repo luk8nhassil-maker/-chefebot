@@ -330,7 +330,10 @@ export async function POST(req: NextRequest) {
           }
         }
       } catch {}
-      await enviarMensagem(phone, `Oi! 😊 Não consegui entender o áudio. Me conta pelo texto o que você quer? 🍕`)
+      // Não conseguiu transcrever — escala para Kellyne
+      await enviarMensagem(phone, `Recebi seu áudio! 😊 Já chamo alguém para te atender melhor. Um instante!`)
+      const sessionAudio = await redis.get<BotSession>(`session:${phone}`) || { step: "escalado" as any, cart: [], deliveryFee: 0 }
+      await salvarEscalonamento(phone, sessionAudio)
       return NextResponse.json({ ok: true })
     }
 
