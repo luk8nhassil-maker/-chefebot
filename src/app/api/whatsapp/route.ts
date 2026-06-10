@@ -389,10 +389,33 @@ export async function POST(req: NextRequest) {
         await enviarMensagem(phone, msgs[Math.floor(Math.random() * msgs.length)]);
         return NextResponse.json({ ok: true });
       } else {
-        await redis.del(`avaliacao:${phone}`);
-        // continua fluxo normalmente abaixo
+        await redis.del(`avaliacao:${phone}`)
+        if (!isNaN(parseInt(messageText.trim()))) {
+          await redis.set(`avaliacao:${phone}`, true, { ex: 3600 })
+          await enviarMensagem(phone, `Por favor, manda um número de 1 a 5! 😊`)
+          return NextResponse.json({ ok: true })
+        }
+        await enviarMensagem(phone, `Posso te ajudar com mais alguma coisa? 😊`)
+        await redis.set(`aguardando_resposta:${phone}`, true, { ex: 600 })
+        return NextResponse.json({ ok: true })
       }
       return NextResponse.json({ ok: true });
+    }
+
+    const aguardandoResposta = await redis.get<boolean>(`aguardando_resposta:${phone}`)
+    if (aguardandoResposta === true) {
+      await redis.del(`aguardando_resposta:${phone}`)
+      const nResp = messageText.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim()
+      const querMais = ["sim", "quero", "pode", "vai", "bora", "oi", "ola", "bom dia", "boa tarde", "boa noite", "olá"].some(p => nResp.includes(p))
+      if (querMais) {
+        const cats = `O que vai ser hoje? 😊\n\n  1. Pizza\n  2. Lanches\n  3. Bebidas\n  4. Sucos e Vitaminas`
+        await enviarMensagem(phone, `Ótimo! 😄\n\n${cats}`)
+        const newSession = createInitialSession()
+        await redis.set(`session:${phone}`, { ...newSession, customerName: undefined }, { ex: 1800 })
+      } else {
+        await enviarMensagem(phone, `Até a próxima! Foi um prazer te atender. 🍕😊`)
+      }
+      return NextResponse.json({ ok: true })
     }
 
     const sessionKey = `session:${phone}`;
