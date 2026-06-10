@@ -88,6 +88,7 @@ export default function PedidosPage() {
   const [salvandoBot, setSalvandoBot] = useState(false)
   const [manuais, setManuais] = useState<Record<string, boolean>>({})
   const [cardUrgenciaFechado, setCardUrgenciaFechado] = useState(false)
+  const prevEscalonadosRef = useRef(0)
   const [somAtivado, setSomAtivado] = useState(false)
   const [resumoPedido, setResumoPedido] = useState<Pedido | null>(null)
   const [entregadores, setEntregadores] = useState<{id: string; nome: string; telefone: string; ativo: boolean}[]>([])
@@ -202,6 +203,9 @@ export default function PedidosPage() {
             }
           }
           prevIdsRef.current = novosIds; setPedidos(data); setLoading(false)
+          const novosEscalonados = data.filter((p: Pedido) => p.escalonado && p.status === 'novo').length
+          if (novosEscalonados > prevEscalonadosRef.current) setCardUrgenciaFechado(false)
+          prevEscalonadosRef.current = novosEscalonados
           setUltimaAtualizacao(new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }))
           if (!data.some((p: Pedido) => p.escalonado && p.status === "novo")) pararPiscar()
         }
