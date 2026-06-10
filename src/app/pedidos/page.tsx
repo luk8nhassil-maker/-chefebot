@@ -322,6 +322,37 @@ export default function PedidosPage() {
         </div>
       )}
 
+      {/* Banner Urgência */}
+      {escalonados > 0 && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 9999, padding: '0 16px' }}>
+          <style>{`
+            @keyframes urgentPulse { 0%,100% { transform: scaleX(1); opacity: 1; } 50% { transform: scaleX(1.01); opacity: 0.95; } }
+            @keyframes urgentSlideDown { from { transform: translateY(-100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+            @keyframes urgentShake { 0%,100% { transform: translateX(0); } 20% { transform: translateX(-4px); } 40% { transform: translateX(4px); } 60% { transform: translateX(-4px); } 80% { transform: translateX(4px); } }
+            @keyframes urgentGlow { 0%,100% { box-shadow: 0 0 20px rgba(239,68,68,0.4), 0 4px 24px rgba(0,0,0,0.5); } 50% { box-shadow: 0 0 40px rgba(239,68,68,0.8), 0 4px 24px rgba(0,0,0,0.5); } }
+          `}</style>
+          <div style={{ background: 'linear-gradient(135deg, #7f1d1d 0%, #991b1b 50%, #7f1d1d 100%)', border: '1px solid #ef444460', borderTop: 'none', borderRadius: '0 0 20px 20px', padding: '14px 20px', animation: 'urgentSlideDown 0.3s ease, urgentGlow 1.5s infinite, urgentPulse 1.5s infinite', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ fontSize: 28, animation: 'urgentShake 0.5s infinite' }}>🚨</div>
+              <div>
+                <p style={{ color: '#fca5a5', fontSize: 13, fontWeight: 900, margin: 0, letterSpacing: 0.5, textTransform: 'uppercase' }}>
+                  {escalonados} cliente{escalonados > 1 ? 's' : ''} precisando de você AGORA
+                </p>
+                <p style={{ color: '#ef444480', fontSize: 11, margin: '2px 0 0', fontWeight: 500 }}>
+                  Role para ver os cards vermelhos ↓
+                </p>
+              </div>
+            </div>
+            <button onClick={() => {
+              const el = document.querySelector('[data-urgente="true"]')
+              if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+            }} style={{ background: '#ef4444', border: 'none', color: '#fff', borderRadius: 10, padding: '8px 14px', cursor: 'pointer', fontSize: 12, fontWeight: 800, whiteSpace: 'nowrap', flexShrink: 0 }}>
+              Ver agora →
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Toasts */}
       <div style={{ position: "fixed", bottom: 20, left: 16, right: 16, zIndex: 9999, display: "flex", flexDirection: "column-reverse", gap: 8, pointerEvents: "none" }}>
         {toasts.map(t => (
@@ -420,7 +451,7 @@ export default function PedidosPage() {
               const ativo = eAtivo(pedido.status)
               const tempoUrgente = pedido.status === "novo"
               return (
-                <div key={pedido.id} style={{ background: isEsc ? "#110505" : ativo ? "#0d0d0d" : "#090909", border: `1px solid ${isEsc ? "#f8717125" : isCanc ? "#fb923c25" : ativo ? cfg.border : "#111"}`, borderRadius: 16, overflow: "hidden", opacity: ativo ? 1 : 0.45, transition: "opacity 0.2s" }}>
+                <div key={pedido.id} data-urgente={isEsc ? "true" : undefined} style={{ background: isEsc ? "#110505" : ativo ? "#0d0d0d" : "#090909", border: `1px solid ${isEsc ? "#f8717125" : isCanc ? "#fb923c25" : ativo ? cfg.border : "#111"}`, borderRadius: 16, overflow: "hidden", opacity: ativo ? 1 : 0.45, transition: "opacity 0.2s" }}>
                   {ativo && <div style={{ height: 3, background: isEsc ? "#f87171" : cfg.color, width: "100%" }} />}
                   <div style={{ padding: "14px 16px 12px" }}>
                     <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 6 }}>
