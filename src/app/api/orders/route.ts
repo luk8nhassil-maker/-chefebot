@@ -1,6 +1,7 @@
 ﻿import { NextRequest, NextResponse } from 'next/server'
 import { verifyToken } from '@/lib/auth'
 import { redis } from '@/lib/redis'
+
 type Status = 'novo' | 'em_preparo' | 'saiu_entrega' | 'entregue' | 'cancelado'
 type Pedido = {
   id: string
@@ -12,15 +13,18 @@ type Pedido = {
   horario: string
   endereco: string
 }
+
 const PEDIDOS_INICIAIS: Pedido[] = [
   { id: '1', cliente: 'Ana Lima', telefone: '(86) 99801-1234', itens: ['Pizza Calabresa G', 'Borda Catupiry G', 'Coca 2L'], total: 72.00, status: 'entregue', horario: '19:42', endereco: 'Rua Lizandro Nogueira, 210 - Centro' },
   { id: '2', cliente: 'Carlos Sousa', telefone: '(86) 99700-5678', itens: ['Pizza Frango c/ Catupiry G', 'Pizza Portuguesa M'], total: 90.00, status: 'entregue', horario: '19:35', endereco: 'Av. Frei Serafim, 1200 - Centro' },
   { id: '3', cliente: 'Juliana Costa', telefone: '(86) 98800-9012', itens: ['Pizza 4 Queijos G', 'Borda Chocolate G'], total: 62.00, status: 'entregue', horario: '19:10', endereco: 'Rua Coelho Rodrigues, 45 - Ilhotas' },
   { id: '4', cliente: 'Marcos Oliveira', telefone: '(86) 99600-3456', itens: ['Pizza Pepperoni M', 'Suco de Laranja 1L'], total: 52.00, status: 'entregue', horario: '18:50', endereco: 'Rua Gabriel Ferreira, 88 - Vermelha' },
 ]
+
 const EVOLUTION_API_URL = 'https://evolution-api-production-8f99.up.railway.app'
 const EVOLUTION_API_KEY = '6208711c1b6fdffcc30cb492a44d74601415c33ff717ef6032162f9c0056319e'
 const EVOLUTION_INSTANCE = 'chefe'
+
 function getMensagemStatus(status: Status, nomeCliente: string): string | null {
   const firstName = nomeCliente.split(' ')[0];
   const mensagens: Partial<Record<Status, string>> = {
@@ -31,11 +35,13 @@ function getMensagemStatus(status: Status, nomeCliente: string): string | null {
   };
   return mensagens[status] ?? null;
 }
+
 function sanitizePhone(telefone: string): string {
   const digits = telefone.replace(/\D/g, '')
   if (digits.startsWith('55') && digits.length >= 12) return digits
   return '55' + digits
 }
+
 async function notificarCliente(telefone: string, status: Status, nomeCliente: string): Promise<void> {
   const mensagem = getMensagemStatus(status, nomeCliente)
   if (!mensagem) return
@@ -47,15 +53,13 @@ async function notificarCliente(telefone: string, status: Status, nomeCliente: s
         'Content-Type': 'application/json',
         'apikey': EVOLUTION_API_KEY,
       },
-      body: JSON.stringify({
-        number: phone,
-        text: mensagem,
-      }),
+      body: JSON.stringify({ number: phone, text: mensagem }),
     })
   } catch (err) {
     console.error('[ChefeBot] Erro ao notificar cliente:', err)
   }
 }
+
 async function getPedidos(): Promise<Pedido[]> {
   const data = await redis.get<Pedido[]>('pedidos')
   if (!data) {
@@ -64,6 +68,7 @@ async function getPedidos(): Promise<Pedido[]> {
   }
   return data
 }
+
 async function checkAuth(req: NextRequest) {
   const token = req.cookies.get('auth-token')?.value ?? null
   if (!token) return null
@@ -71,34 +76,41 @@ async function checkAuth(req: NextRequest) {
   if (!payload || !['atendente', 'admin'].includes(payload.role as string)) return null
   return payload
 }
+
 export async function GET(req: NextRequest) {
   const auth = await checkAuth(req)
   if (!auth) return NextResponse.json({ error: 'Nao autorizado' }, { status: 401 })
   const pedidos = await getPedidos()
   return NextResponse.json([...pedidos].reverse())
 }
+
 export async function PATCH(req: NextRequest) {
   const auth = await checkAuth(req)
   if (!auth) return NextResponse.json({ error: 'Nao autorizado' }, { status: 401 })
+
   const { id, status } = await req.json()
   const pedidos = await getPedidos()
   const index = pedidos.findIndex(p => p.id === id)
   if (index === -1) return NextResponse.json({ error: 'Pedido nao encontrado' }, { status: 404 })
+
   pedidos[index] = {
     ...pedidos[index],
     status,
     ...(status === 'cancelado' ? { cancelamentoSolicitado: false } : {}),
   }
+
   await redis.set('pedidos', pedidos)
   await notificarCliente(pedidos[index].telefone, status, pedidos[index].cliente)
 
-  // Dispara pesquisa de satisfação após entrega
   if (status === 'entregue') {
     const phone = sanitizePhone(pedidos[index].telefone)
-    await redis.set(`avaliacao:${phone}`, true, { ex: 3600 })
-    setTimeout(async () => {
+    const chaveAvaliacao = `avaliacao_enviada:${id}`
+    const jaEnviou = await redis.get(chaveAvaliacao)
+    if (!jaEnviou) {
+      await redis.set(chaveAvaliacao, true, { ex: 86400 })
+      await redis.set(`avaliacao:${phone}`, true, { ex: 3600 })
+      const firstName = pedidos[index].cliente.split(' ')[0]
       try {
-        const firstName = pedidos[index].cliente.split(' ')[0]
         await fetch(`${EVOLUTION_API_URL}/message/sendText/${EVOLUTION_INSTANCE}`, {
           method: 'POST',
           headers: {
@@ -113,7 +125,7 @@ export async function PATCH(req: NextRequest) {
       } catch (err) {
         console.error('[ChefeBot] Erro ao enviar pesquisa:', err)
       }
-    }, 60000) // 1 minuto após entrega
+    }
   }
 
   return NextResponse.json(pedidos[index])
