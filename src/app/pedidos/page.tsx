@@ -49,15 +49,6 @@ function tempoDesde(horario: string): string {
   } catch { return "" }
 }
 
-function tocarSom(urgente = false) {
-  try {
-    const arquivo = urgente ? "/urgente.mp3" : "/pavlov.mp3"
-    const audio = new Audio(arquivo)
-    audio.volume = 1.0
-    audio.play().catch(() => {})
-  } catch {}
-}
-
 function getUserInfo(): { name: string; role: string } | null {
   if (typeof document === "undefined") return null
   try {
@@ -77,6 +68,10 @@ function getUserInfo(): { name: string; role: string } | null {
 }
 
 type Toast = { id: number; message: string; type: "success" | "error" | "warning" | "info" }
+
+// Sons pre-carregados globalmente apos interacao do usuario
+let audioPavlov: HTMLAudioElement | null = null
+let audioUrgente: HTMLAudioElement | null = null
 
 export default function PedidosPage() {
   const router = useRouter()
@@ -104,13 +99,33 @@ export default function PedidosPage() {
     setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3500)
   }
 
+  // Chamado diretamente pelo toque do usuario no banner — unico jeito de desbloquear audio no Chrome mobile
   const ativarSom = () => {
-    setSomAtivado(true)
-    // Toca silenciosamente para desbloquear o Audio no mobile
     try {
-      const audio = new Audio("/pavlov.mp3")
-      audio.volume = 0
-      audio.play().then(() => { audio.pause(); audio.currentTime = 0 }).catch(() => {})
+      // Pre-carrega e toca silenciosamente para desbloquear
+      audioPavlov = new Audio("/pavlov.mp3")
+      audioPavlov.volume = 0.001
+      audioPavlov.play().then(() => {
+        if (audioPavlov) { audioPavlov.pause(); audioPavlov.currentTime = 0; audioPavlov.volume = 1.0 }
+      }).catch(() => {})
+
+      audioUrgente = new Audio("/urgente.mp3")
+      audioUrgente.volume = 0.001
+      audioUrgente.play().then(() => {
+        if (audioUrgente) { audioUrgente.pause(); audioUrgente.currentTime = 0; audioUrgente.volume = 1.0 }
+      }).catch(() => {})
+
+      setSomAtivado(true)
+    } catch {}
+  }
+
+  const tocarSom = (urgente = false) => {
+    try {
+      const audio = urgente ? audioUrgente : audioPavlov
+      if (!audio) return
+      audio.currentTime = 0
+      audio.volume = 1.0
+      audio.play().catch(() => {})
     } catch {}
   }
 
@@ -222,7 +237,6 @@ export default function PedidosPage() {
 
   return (
     <div style={{ minHeight: "100vh", background: "#080808", paddingBottom: 80, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>
-
       <style>{`
         @keyframes slideUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.5; } }
@@ -336,9 +350,7 @@ export default function PedidosPage() {
 
               return (
                 <div key={pedido.id} style={{ background: isEsc ? "#110505" : ativo ? "#0d0d0d" : "#090909", border: `1px solid ${isEsc ? "#f8717125" : isCanc ? "#fb923c25" : ativo ? cfg.border : "#111"}`, borderRadius: 16, overflow: "hidden", opacity: ativo ? 1 : 0.45, transition: "opacity 0.2s" }}>
-
                   {ativo && <div style={{ height: 3, background: isEsc ? "#f87171" : cfg.color, width: "100%" }} />}
-
                   <div style={{ padding: "14px 16px 12px" }}>
                     <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 6 }}>
                       <div style={{ flex: 1 }}>
@@ -363,44 +375,30 @@ export default function PedidosPage() {
                         {isEsc ? "Urgente" : cfg.label}
                       </span>
                     </div>
-
                     <div style={{ marginBottom: 8 }}>
                       {pedido.itens.map((item, i) => (
-                        <p key={i} style={{ fontSize: 14, color: ativo ? "#e0e0e0" : "#333", margin: "2px 0", fontWeight: ativo ? 600 : 400, lineHeight: 1.4 }}>
-                          {item}
-                        </p>
+                        <p key={i} style={{ fontSize: 14, color: ativo ? "#e0e0e0" : "#333", margin: "2px 0", fontWeight: ativo ? 600 : 400, lineHeight: 1.4 }}>{item}</p>
                       ))}
                     </div>
-
                     {pedido.observacao && (
                       <div style={{ background: "#1a1400", border: "1px solid #fbbf2420", borderRadius: 8, padding: "6px 10px", marginBottom: 8, display: "flex", alignItems: "flex-start", gap: 6 }}>
                         <span style={{ fontSize: 12 }}>✏️</span>
                         <p style={{ fontSize: 12, color: "#fbbf24", margin: 0, fontWeight: 500 }}>{pedido.observacao}</p>
                       </div>
                     )}
-
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                       <p style={{ fontSize: 18, fontWeight: 900, color: ativo ? "#fff" : "#333", margin: 0, letterSpacing: -0.5 }}>
                         R$ {pedido.total.toFixed(2).replace(".", ",")}
                       </p>
-                      {ativo && (
-                        <span style={{ fontSize: 11, color: "#333" }}>
-                          {pedido.itens.length} item{pedido.itens.length !== 1 ? "ns" : ""}
-                        </span>
-                      )}
+                      {ativo && <span style={{ fontSize: 11, color: "#333" }}>{pedido.itens.length} item{pedido.itens.length !== 1 ? "ns" : ""}</span>}
                     </div>
                   </div>
-
                   {(ativo || isEsc) && (
                     <div style={{ padding: "0 12px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
                       {isEsc && (
                         <div style={{ display: "flex", gap: 8 }}>
-                          <button onClick={() => assumirConversa(pedido.telefone)} style={{ flex: 1, padding: "14px 0", background: "#f87171", color: "#fff", border: "none", borderRadius: 12, fontSize: 14, fontWeight: 800, cursor: "pointer" }}>
-                            📱 Atender agora
-                          </button>
-                          <button onClick={() => marcarResolvido(pedido.telefone, pedido.id)} style={{ flex: 1, padding: "14px 0", background: "#16a34a", color: "#fff", border: "none", borderRadius: 12, fontSize: 14, fontWeight: 800, cursor: "pointer" }}>
-                            ✅ Resolvido
-                          </button>
+                          <button onClick={() => assumirConversa(pedido.telefone)} style={{ flex: 1, padding: "14px 0", background: "#f87171", color: "#fff", border: "none", borderRadius: 12, fontSize: 14, fontWeight: 800, cursor: "pointer" }}>📱 Atender agora</button>
+                          <button onClick={() => marcarResolvido(pedido.telefone, pedido.id)} style={{ flex: 1, padding: "14px 0", background: "#16a34a", color: "#fff", border: "none", borderRadius: 12, fontSize: 14, fontWeight: 800, cursor: "pointer" }}>✅ Resolvido</button>
                         </div>
                       )}
                       {isCanc && !isEsc && (
@@ -415,17 +413,11 @@ export default function PedidosPage() {
                       )}
                       {!isEsc && (
                         <div style={{ display: "flex", gap: 8 }}>
-                          <button onClick={() => window.open("https://wa.me/" + pedido.telefone, "_blank")} style={{ flex: 1, padding: "11px 0", background: "#111", color: "#4ade80", border: "1px solid #16a34a25", borderRadius: 12, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
-                            💬 WhatsApp
-                          </button>
+                          <button onClick={() => window.open("https://wa.me/" + pedido.telefone, "_blank")} style={{ flex: 1, padding: "11px 0", background: "#111", color: "#4ade80", border: "1px solid #16a34a25", borderRadius: 12, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>💬 WhatsApp</button>
                           {emManual ? (
-                            <button onClick={() => devolverAoBot(pedido.telefone)} style={{ flex: 1, padding: "11px 0", background: "#111", color: "#60a5fa", border: "1px solid #1d4ed825", borderRadius: 12, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
-                              🤖 Devolver bot
-                            </button>
+                            <button onClick={() => devolverAoBot(pedido.telefone)} style={{ flex: 1, padding: "11px 0", background: "#111", color: "#60a5fa", border: "1px solid #1d4ed825", borderRadius: 12, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>🤖 Devolver bot</button>
                           ) : (
-                            <button onClick={() => assumirConversa(pedido.telefone)} style={{ flex: 1, padding: "11px 0", background: "#111", color: "#888", border: "1px solid #1e1e1e", borderRadius: 12, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
-                              📱 Assumir
-                            </button>
+                            <button onClick={() => assumirConversa(pedido.telefone)} style={{ flex: 1, padding: "11px 0", background: "#111", color: "#888", border: "1px solid #1e1e1e", borderRadius: 12, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>📱 Assumir</button>
                           )}
                         </div>
                       )}
