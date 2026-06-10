@@ -89,6 +89,8 @@ export default function PedidosPage() {
   const [manuais, setManuais] = useState<Record<string, boolean>>({})
   const [somAtivado, setSomAtivado] = useState(false)
   const [resumoPedido, setResumoPedido] = useState<Pedido | null>(null)
+  const [entregadores, setEntregadores] = useState<{id: string; nome: string; telefone: string; ativo: boolean}[]>([])
+  const [modalEntrega, setModalEntrega] = useState<{pedidoId: string; proxStatus: Status} | null>(null)
   const prevIdsRef = useRef<string[]>([])
   const piscarRef = useRef<NodeJS.Timeout | null>(null)
   const tituloOriginalRef = useRef(typeof document !== "undefined" ? document.title : "Cozinha")
@@ -134,6 +136,7 @@ export default function PedidosPage() {
     if ("Notification" in window && Notification.permission === "default") Notification.requestPermission()
     carregarPedidos()
     carregarStatusBot()
+    fetch('/api/entregadores').then(r => r.json()).then(d => setEntregadores(Array.isArray(d) ? d.filter((e: any) => e.ativo) : [])).catch(() => {})
     const intervalo = setInterval(carregarPedidos, 10000)
     return () => { clearInterval(intervalo); if (piscarRef.current) clearInterval(piscarRef.current); document.title = tituloOriginalRef.current }
   }, [router])
@@ -204,10 +207,11 @@ export default function PedidosPage() {
       })
       .catch(() => setTimeout(carregarPedidos, 3000))
   }
-  const avancarStatus = async (id: string, novoStatus: Status) => {
+  const avancarStatus = async (id: string, novoStatus: Status, entregador?: {id: string; nome: string; telefone: string}) => {
     setAtualizando(id)
-    const r = await fetch("/api/orders", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, status: novoStatus }) })
+    const r = await fetch("/api/orders", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, status: novoStatus, entregador }) })
     if (r.ok) { setPedidos(prev => prev.map(p => p.id === id ? { ...p, status: novoStatus } : p)); addToast(`${STATUS_CONFIG[novoStatus].label} ✅`, "success") }
+    setModalEntrega(null)
     setAtualizando(null)
   }
   const confirmarCancelamento = async (id: string) => {
@@ -240,6 +244,31 @@ export default function PedidosPage() {
         @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.5; } }
         @keyframes sheetUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
       `}</style>
+
+      {/* Modal Entregador */}
+      {modalEntrega && (
+        <div onClick={() => setModalEntrega(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 1000, display: "flex", alignItems: "flex-end" }}>
+          <div onClick={e => e.stopPropagation()} style={{ width: "100%", background: "#111", borderRadius: "20px 20px 0 0", padding: "20px 20px 40px" }}>
+            <div style={{ width: 40, height: 4, background: "#333", borderRadius: 2, margin: "0 auto 20px" }} />
+            <p style={{ color: "#fff", fontSize: 17, fontWeight: 800, margin: "0 0 6px" }}>Quem vai entregar?</p>
+            <p style={{ color: "#444", fontSize: 12, margin: "0 0 20px" }}>Selecione o entregador</p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 }}>
+              {entregadores.filter(e => e.ativo).map(e => (
+                <button key={e.id} onClick={() => avancarStatus(modalEntrega.pedidoId, modalEntrega.proxStatus, e)} style={{ background: "#0d0d0d", border: "1px solid #1e1e1e", borderRadius: 14, padding: "16px", color: "#fff", fontSize: 15, fontWeight: 700, cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: 12 }}>
+                  <span style={{ fontSize: 24 }}>🛵</span>
+                  <div>
+                    <p style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>{e.nome}</p>
+                    <p style={{ margin: 0, fontSize: 11, color: "#444" }}>{e.telefone}</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+            <button onClick={() => setModalEntrega(null)} style={{ width: "100%", background: "#1a1a1a", border: "1px solid #2a2a2a", borderRadius: 12, padding: "14px", color: "#666", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Bottom Sheet Resumo */}
       {resumoPedido && (
@@ -468,7 +497,13 @@ export default function PedidosPage() {
                         </button>
                       )}
                       {!isEsc && proxStatus && (
-                        <button onClick={() => avancarStatus(pedido.id, proxStatus)} disabled={atualizando === pedido.id} style={{ width: "100%", padding: "15px 0", background: atualizando === pedido.id ? "#222" : cfg.color, color: atualizando === pedido.id ? "#555" : cfg.btnColor, border: "none", borderRadius: 12, fontSize: 15, fontWeight: 900, cursor: atualizando === pedido.id ? "not-allowed" : "pointer", letterSpacing: -0.2, transition: "all 0.15s" }}>
+                        <button onClick={() => {
+                            if (proxStatus === 'saiu_entrega') {
+                              const ativos = entregadores.filter(e => e.ativo)
+                              if (ativos.length === 1) { avancarStatus(pedido.id, proxStatus, ativos[0]) }
+                              else { setModalEntrega({ pedidoId: pedido.id, proxStatus }) }
+                            } else { avancarStatus(pedido.id, proxStatus) }
+                          }} disabled={atualizando === pedido.id} style={{ width: "100%", padding: "15px 0", background: atualizando === pedido.id ? "#222" : cfg.color, color: atualizando === pedido.id ? "#555" : cfg.btnColor, border: "none", borderRadius: 12, fontSize: 15, fontWeight: 900, cursor: atualizando === pedido.id ? "not-allowed" : "pointer", letterSpacing: -0.2, transition: "all 0.15s" }}>
                           {atualizando === pedido.id ? "Atualizando..." : PROXIMO_LABEL[pedido.status]}
                         </button>
                       )}
