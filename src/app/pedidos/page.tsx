@@ -1,4 +1,4 @@
-﻿"use client"
+"use client"
 import { useEffect, useState, useRef } from "react"
 import { useRouter } from "next/navigation"
 
@@ -49,85 +49,12 @@ function tempoDesde(horario: string): string {
   } catch { return "" }
 }
 
-// Contexto de áudio global — desbloqueado no primeiro toque do usuário
-let audioCtx: AudioContext | null = null
-
-function getAudioContext(): AudioContext | null {
-  if (typeof window === "undefined") return null
-  if (!audioCtx) {
-    try {
-      audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)()
-    } catch { return null }
-  }
-  // Resume se estava suspenso (mobile)
-  if (audioCtx.state === "suspended") {
-    audioCtx.resume().catch(() => {})
-  }
-  return audioCtx
-}
-
-function desbloquearAudio() {
-  // Cria e toca um buffer silencioso para desbloquear o AudioContext no mobile
-  const ctx = getAudioContext()
-  if (!ctx) return
-  try {
-    const buf = ctx.createBuffer(1, 1, 22050)
-    const src = ctx.createBufferSource()
-    src.buffer = buf
-    src.connect(ctx.destination)
-    src.start(0)
-  } catch {}
-}
-
 function tocarSom(urgente = false) {
   try {
-    const ctx = getAudioContext()
-    if (!ctx) return
-
-    const master = ctx.createGain()
-    master.gain.setValueAtTime(0.75, ctx.currentTime)
-    master.connect(ctx.destination)
-
-    if (urgente) {
-      // Som urgente (escalonado): 4 bipes rápidos e agressivos
-      ;[0, 0.18, 0.36, 0.54].forEach(t => {
-        const o = ctx.createOscillator()
-        const g = ctx.createGain()
-        o.connect(g); g.connect(master)
-        o.type = "square"
-        o.frequency.setValueAtTime(880, ctx.currentTime + t)
-        o.frequency.exponentialRampToValueAtTime(1200, ctx.currentTime + t + 0.08)
-        g.gain.setValueAtTime(0, ctx.currentTime + t)
-        g.gain.linearRampToValueAtTime(0.9, ctx.currentTime + t + 0.01)
-        g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + t + 0.15)
-        o.start(ctx.currentTime + t)
-        o.stop(ctx.currentTime + t + 0.16)
-      })
-    } else {
-      // Som Pavlov — 3 notas ascendentes (Dó5 → Mi5 → Sol#5)
-      // Condicionamento positivo: "pedido chegou!"
-      const notas = [
-        { freq: 523.25, t: 0.0 },   // Dó5
-        { freq: 659.25, t: 0.18 },  // Mi5
-        { freq: 830.61, t: 0.36 },  // Sol#5
-      ]
-      notas.forEach(({ freq, t }) => {
-        // Oscilador principal (sine) + harmônico (triangle) para timbre de sino
-        const o1 = ctx.createOscillator()
-        const o2 = ctx.createOscillator()
-        const g = ctx.createGain()
-        o1.connect(g); o2.connect(g); g.connect(master)
-        o1.type = "sine"
-        o2.type = "triangle"
-        o1.frequency.setValueAtTime(freq, ctx.currentTime + t)
-        o2.frequency.setValueAtTime(freq * 2.01, ctx.currentTime + t) // leve batimento
-        g.gain.setValueAtTime(0, ctx.currentTime + t)
-        g.gain.linearRampToValueAtTime(0.85, ctx.currentTime + t + 0.015) // ataque rápido
-        g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + t + 0.55) // ressonância
-        o1.start(ctx.currentTime + t); o1.stop(ctx.currentTime + t + 0.6)
-        o2.start(ctx.currentTime + t); o2.stop(ctx.currentTime + t + 0.6)
-      })
-    }
+    const arquivo = urgente ? "/urgente.mp3" : "/pavlov.mp3"
+    const audio = new Audio(arquivo)
+    audio.volume = 1.0
+    audio.play().catch(() => {})
   } catch {}
 }
 
@@ -163,12 +90,12 @@ export default function PedidosPage() {
   const [botAtivo, setBotAtivo] = useState(true)
   const [salvandoBot, setSalvandoBot] = useState(false)
   const [manuais, setManuais] = useState<Record<string, boolean>>({})
+  const [somAtivado, setSomAtivado] = useState(false)
   const prevIdsRef = useRef<string[]>([])
   const piscarRef = useRef<NodeJS.Timeout | null>(null)
   const tituloOriginalRef = useRef(typeof document !== "undefined" ? document.title : "Cozinha")
   const toastIdRef = useRef(0)
   const filtrosRef = useRef<HTMLDivElement>(null)
-  const [somAtivado, setSomAtivado] = useState(false)
   const botoesRef = useRef<(HTMLButtonElement | null)[]>([])
 
   const addToast = (message: string, type: Toast["type"] = "success") => {
@@ -177,21 +104,24 @@ export default function PedidosPage() {
     setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3500)
   }
 
+  const ativarSom = () => {
+    setSomAtivado(true)
+    // Toca silenciosamente para desbloquear o Audio no mobile
+    try {
+      const audio = new Audio("/pavlov.mp3")
+      audio.volume = 0
+      audio.play().then(() => { audio.pause(); audio.currentTime = 0 }).catch(() => {})
+    } catch {}
+  }
+
   useEffect(() => {
     const user = getUserInfo()
     if (user) setIsAdmin(user.role === "admin" || user.role === "dev")
     if ("Notification" in window && Notification.permission === "default") Notification.requestPermission()
-
-    // Desbloqueia o AudioContext no primeiro toque/clique (obrigatório no mobile)
-    const unlock = () => { desbloquearAudio(); setSomAtivado(true); window.removeEventListener("touchstart", unlock); window.removeEventListener("click", unlock) }
-    window.addEventListener("touchstart", unlock, { once: true })
-    window.addEventListener("click", unlock, { once: true })
-
     carregarPedidos()
     carregarStatusBot()
     const intervalo = setInterval(carregarPedidos, 10000)
-    const relogio = setInterval(() => {}, 30000)
-    return () => { clearInterval(intervalo); clearInterval(relogio); if (piscarRef.current) clearInterval(piscarRef.current); document.title = tituloOriginalRef.current }
+    return () => { clearInterval(intervalo); if (piscarRef.current) clearInterval(piscarRef.current); document.title = tituloOriginalRef.current }
   }, [router])
 
   const iniciarPiscar = () => {
@@ -247,7 +177,7 @@ export default function PedidosPage() {
             if (chegaram.length > 0) {
               const temEsc = chegaram.some((p: Pedido) => p.escalonado)
               const temCanc = chegaram.some((p: Pedido) => p.cancelamentoSolicitado)
-              tocarSom(temEsc) // urgente = true se houver escalação
+              tocarSom(temEsc)
               if (temEsc) { addToast("🚨 URGENTE! Cliente precisa de você!", "error"); iniciarPiscar() }
               else if (temCanc) addToast("⚠️ Cancelamento solicitado!", "warning")
               else addToast(`🍕 ${chegaram.length} novo${chegaram.length > 1 ? "s" : ""} pedido${chegaram.length > 1 ? "s" : ""}!`, "success")
@@ -332,17 +262,16 @@ export default function PedidosPage() {
       <div style={{ padding: "10px 14px 0" }}>
 
         {/* Banner ativar som */}
-      {!somAtivado && (
-        <div onClick={() => { desbloquearAudio(); setSomAtivado(true) }} style={{ background: "#0d1a0d", border: "1px solid #16a34a40", borderRadius: 14, padding: "12px 14px", marginBottom: 10, display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
-          <span style={{ fontSize: 20 }}>🔔</span>
-          <div>
-            <p style={{ fontWeight: 800, color: "#4ade80", margin: 0, fontSize: 13 }}>Toque aqui para ativar o som</p>
-            <p style={{ fontSize: 11, color: "#4ade8060", margin: "2px 0 0" }}>Necessário para notificações no celular</p>
+        {!somAtivado && (
+          <div onClick={ativarSom} style={{ background: "#0d1a0d", border: "1px solid #16a34a40", borderRadius: 14, padding: "12px 14px", marginBottom: 10, display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+            <span style={{ fontSize: 20 }}>🔔</span>
+            <div>
+              <p style={{ fontWeight: 800, color: "#4ade80", margin: 0, fontSize: 13 }}>Toque aqui para ativar o som</p>
+              <p style={{ fontSize: 11, color: "#4ade8060", margin: "2px 0 0" }}>Necessário para notificações no celular</p>
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Alerta urgente */}
         {/* Alerta urgente */}
         {escalonados > 0 && (
           <div style={{ background: "#1a0505", border: "1px solid #f8717130", borderRadius: 14, padding: "12px 14px", marginBottom: 10, display: "flex", alignItems: "center", gap: 10 }}>
@@ -384,7 +313,6 @@ export default function PedidosPage() {
               </button>
             )
           })}
-          
         </div>
 
         {/* Cards */}
@@ -409,13 +337,9 @@ export default function PedidosPage() {
               return (
                 <div key={pedido.id} style={{ background: isEsc ? "#110505" : ativo ? "#0d0d0d" : "#090909", border: `1px solid ${isEsc ? "#f8717125" : isCanc ? "#fb923c25" : ativo ? cfg.border : "#111"}`, borderRadius: 16, overflow: "hidden", opacity: ativo ? 1 : 0.45, transition: "opacity 0.2s" }}>
 
-                  {/* Linha de cor do status */}
                   {ativo && <div style={{ height: 3, background: isEsc ? "#f87171" : cfg.color, width: "100%" }} />}
 
-                  {/* Corpo do card */}
                   <div style={{ padding: "14px 16px 12px" }}>
-
-                    {/* Linha 1: Nome + Badge status */}
                     <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 6 }}>
                       <div style={{ flex: 1 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
@@ -423,7 +347,6 @@ export default function PedidosPage() {
                           {isEsc && <span style={{ background: "#f87171", color: "#fff", fontSize: 9, fontWeight: 800, padding: "2px 7px", borderRadius: 20, letterSpacing: 0.5 }}>🚨 URGENTE</span>}
                           {isCanc && !isEsc && <span style={{ background: "#fb923c", color: "#fff", fontSize: 9, fontWeight: 800, padding: "2px 7px", borderRadius: 20 }}>⚠️ CANCEL.</span>}
                         </div>
-                        {/* Linha 2: horário + tempo + endereço */}
                         <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 3, flexWrap: "wrap" }}>
                           <span style={{ fontSize: 11, color: "#333", fontWeight: 500 }}>{pedido.horario}</span>
                           {tempo && (
@@ -436,13 +359,11 @@ export default function PedidosPage() {
                           )}
                         </div>
                       </div>
-                      {/* Badge status */}
                       <span style={{ background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.border}`, fontSize: 11, fontWeight: 800, padding: "4px 10px", borderRadius: 20, whiteSpace: "nowrap", marginLeft: 8, letterSpacing: 0.2 }}>
                         {isEsc ? "Urgente" : cfg.label}
                       </span>
                     </div>
 
-                    {/* Linha 3: Itens */}
                     <div style={{ marginBottom: 8 }}>
                       {pedido.itens.map((item, i) => (
                         <p key={i} style={{ fontSize: 14, color: ativo ? "#e0e0e0" : "#333", margin: "2px 0", fontWeight: ativo ? 600 : 400, lineHeight: 1.4 }}>
@@ -451,7 +372,6 @@ export default function PedidosPage() {
                       ))}
                     </div>
 
-                    {/* Observação */}
                     {pedido.observacao && (
                       <div style={{ background: "#1a1400", border: "1px solid #fbbf2420", borderRadius: 8, padding: "6px 10px", marginBottom: 8, display: "flex", alignItems: "flex-start", gap: 6 }}>
                         <span style={{ fontSize: 12 }}>✏️</span>
@@ -459,7 +379,6 @@ export default function PedidosPage() {
                       </div>
                     )}
 
-                    {/* Valor */}
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                       <p style={{ fontSize: 18, fontWeight: 900, color: ativo ? "#fff" : "#333", margin: 0, letterSpacing: -0.5 }}>
                         R$ {pedido.total.toFixed(2).replace(".", ",")}
@@ -472,11 +391,8 @@ export default function PedidosPage() {
                     </div>
                   </div>
 
-                  {/* Ações */}
                   {(ativo || isEsc) && (
                     <div style={{ padding: "0 12px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
-
-                      {/* Urgente */}
                       {isEsc && (
                         <div style={{ display: "flex", gap: 8 }}>
                           <button onClick={() => assumirConversa(pedido.telefone)} style={{ flex: 1, padding: "14px 0", background: "#f87171", color: "#fff", border: "none", borderRadius: 12, fontSize: 14, fontWeight: 800, cursor: "pointer" }}>
@@ -487,22 +403,16 @@ export default function PedidosPage() {
                           </button>
                         </div>
                       )}
-
-                      {/* Cancelamento */}
                       {isCanc && !isEsc && (
                         <button onClick={() => confirmarCancelamento(pedido.id)} disabled={atualizando === pedido.id} style={{ width: "100%", padding: "14px 0", background: "#fb923c", color: "#fff", border: "none", borderRadius: 12, fontSize: 14, fontWeight: 800, cursor: "pointer" }}>
                           {atualizando === pedido.id ? "Cancelando..." : "⚠️ Confirmar cancelamento"}
                         </button>
                       )}
-
-                      {/* Botão principal de avanço */}
                       {!isEsc && proxStatus && (
                         <button onClick={() => avancarStatus(pedido.id, proxStatus)} disabled={atualizando === pedido.id} style={{ width: "100%", padding: "15px 0", background: atualizando === pedido.id ? "#222" : cfg.color, color: atualizando === pedido.id ? "#555" : cfg.btnColor, border: "none", borderRadius: 12, fontSize: 15, fontWeight: 900, cursor: atualizando === pedido.id ? "not-allowed" : "pointer", letterSpacing: -0.2, transition: "all 0.15s" }}>
                           {atualizando === pedido.id ? "Atualizando..." : PROXIMO_LABEL[pedido.status]}
                         </button>
                       )}
-
-                      {/* Ações secundárias */}
                       {!isEsc && (
                         <div style={{ display: "flex", gap: 8 }}>
                           <button onClick={() => window.open("https://wa.me/" + pedido.telefone, "_blank")} style={{ flex: 1, padding: "11px 0", background: "#111", color: "#4ade80", border: "1px solid #16a34a25", borderRadius: 12, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
@@ -530,5 +440,3 @@ export default function PedidosPage() {
     </div>
   )
 }
-
-
