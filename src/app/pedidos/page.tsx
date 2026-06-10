@@ -96,6 +96,7 @@ export default function PedidosPage() {
   const [modalEntrega, setModalEntrega] = useState<{pedidoId: string; proxStatus: Status} | null>(null)
   const prevIdsRef = useRef<string[]>([])
   const piscarRef = useRef<NodeJS.Timeout | null>(null)
+  const somRepetidoRef = useRef<NodeJS.Timeout | null>(null)
   const tituloOriginalRef = useRef(typeof document !== "undefined" ? document.title : "Cozinha")
   const toastIdRef = useRef(0)
   const filtrosRef = useRef<HTMLDivElement>(null)
@@ -153,6 +154,13 @@ export default function PedidosPage() {
     if (piscarRef.current) { clearInterval(piscarRef.current); piscarRef.current = null }
     document.title = tituloOriginalRef.current
   }
+  const iniciarSomRepetido = () => {
+    if (somRepetidoRef.current) return
+    somRepetidoRef.current = setInterval(() => { tocarSomLocal(true) }, 8000)
+  }
+  const pararSomRepetido = () => {
+    if (somRepetidoRef.current) { clearInterval(somRepetidoRef.current); somRepetidoRef.current = null }
+  }
   const carregarStatusBot = async () => {
     try { const r = await fetch("/api/bot-status"); if (r.ok) { const d = await r.json(); setBotAtivo(d.ativo) } } catch {}
   }
@@ -168,7 +176,7 @@ export default function PedidosPage() {
   const assumirConversa = async (phone: string) => {
     try {
       await fetch("/api/bot-status", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phone, ativo: false }) })
-      setManuais(prev => ({ ...prev, [phone]: true })); pararPiscar(); window.open("https://wa.me/" + phone, "_blank")
+      setManuais(prev => ({ ...prev, [phone]: true })); pararPiscar(); pararSomRepetido(); window.open("https://wa.me/" + phone, "_blank")
     } catch {}
   }
   const devolverAoBot = async (phone: string) => {
@@ -198,7 +206,7 @@ export default function PedidosPage() {
               const temEsc = chegaram.some((p: Pedido) => p.escalonado)
               const temCanc = chegaram.some((p: Pedido) => p.cancelamentoSolicitado)
               tocarSomLocal(temEsc)
-              if (temEsc) { addToast("🚨 URGENTE! Cliente precisa de você!", "error"); iniciarPiscar() }
+              if (temEsc) { addToast("🚨 URGENTE! Cliente precisa de você!", "error"); iniciarPiscar(); iniciarSomRepetido() }
               else if (temCanc) addToast("⚠️ Cancelamento solicitado!", "warning")
               else addToast(`🍕 ${chegaram.length} novo${chegaram.length > 1 ? "s" : ""} pedido${chegaram.length > 1 ? "s" : ""}!`, "success")
             }
@@ -212,7 +220,7 @@ export default function PedidosPage() {
           if (novosEscalonados === 0) cardJaMostrouRef.current = false
           prevEscalonadosRef.current = novosEscalonados
           setUltimaAtualizacao(new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }))
-          if (!data.some((p: Pedido) => p.escalonado && p.status === "novo")) pararPiscar()
+          if (!data.some((p: Pedido) => p.escalonado && p.status === "novo")) { pararPiscar(); pararSomRepetido() }
         }
       })
       .catch(() => setTimeout(carregarPedidos, 3000))
