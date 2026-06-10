@@ -1,5 +1,6 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
-import { processMessage, createInitialSession, createReturningSession, BotSession, ClienteHistorico } from "@/lib/bot";
+import { processMessage, createInitialSession, createReturningSession, BotSession, ClienteHistorico, setMenuDinamico } from "@/lib/bot";
+import { getMENUDinamico } from "@/lib/menu";
 import { redis } from "@/lib/redis";
 import { interpretarMensagem } from "@/lib/claude";
 import { log } from "@/lib/logger";
@@ -276,6 +277,8 @@ export async function POST(req: NextRequest) {
     if (!phone) return NextResponse.json({ ok: true });
 
     const config = await getConfig();
+    const menuDinamico = await getMENUDinamico();
+    setMenuDinamico(menuDinamico);
 
     // Detecta imagem ou PDF (comprovante Pix)
     const isImagem = !!data?.message?.imageMessage;

@@ -1,4 +1,10 @@
-﻿import { MENU, getBorderPrice, getBorderByIndex, getSizePrice, getMacarronadaPrice } from "./menu";
+﻿import { MENU as MENU_PADRAO, getBorderPrice, getBorderByIndex, getSizePrice, getMacarronadaPrice } from "./menu";
+
+let MENU = MENU_PADRAO;
+
+export function setMenuDinamico(menu: typeof MENU_PADRAO) {
+  MENU = menu;
+}
 export type BotStep =
   | "welcome"
   | "returning"
