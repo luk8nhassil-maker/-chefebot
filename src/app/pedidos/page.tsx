@@ -334,7 +334,7 @@ export default function PedidosPage() {
             @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
             @keyframes borderRotate { 0% { background-position: 0% 50%; } 100% { background-position: 200% 50%; } }
           `}</style>
-          <div style={{ position: 'absolute', inset: 0, animation: 'bgPulse 1.5s infinite', backdropFilter: 'blur(8px)' }} />
+          <div style={{ position: 'absolute', inset: 0, animation: 'bgPulse 1.5s infinite', backdropFilter: 'blur(8px)', pointerEvents: 'none' }} />
           <div style={{ position: 'relative', width: '100%', maxWidth: 360, animation: 'cardIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)' }}>
             {/* Borda animada */}
             <div style={{ position: 'absolute', inset: -2, borderRadius: 24, background: 'linear-gradient(90deg, #ef4444, #ff6b00, #ef4444, #ff0000, #ef4444)', backgroundSize: '200% 100%', animation: 'borderRotate 2s linear infinite', zIndex: -1 }} />
