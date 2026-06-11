@@ -270,7 +270,7 @@ export default function TourGuiado({ passos, storageKey, onClose }: Props) {
               {/* Tag */}
               <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 9, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.5, padding: '2px 7px', borderRadius: 20, marginBottom: 5, background: s.tagBg, color: s.tagColor, transition: 'all 0.3s' }}>{s.tag}</div>
               <div style={{ fontSize: 13, fontWeight: 800, color: '#111', lineHeight: 1.2, marginBottom: 3 }}>{s.title}</div>
-              <div style={{ fontSize: 11, color: '#666', lineHeight: 1.45, minHeight: 24, animation: 'bubIn 0.3s ease' }}>
+              <div style={{ fontSize: 11, color: '#666', lineHeight: 1.45, minHeight: 48, wordBreak: 'break-word', overflowWrap: 'break-word' }}>
                 {typing}{isMouthing && <span style={{ display: 'inline-block', width: 2, height: 11, background: '#ccc', marginLeft: 1, verticalAlign: 'middle', animation: 'arrowFloat 0.7s step-end infinite' }} />}
               </div>
             </div>

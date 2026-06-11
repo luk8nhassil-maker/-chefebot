@@ -332,7 +332,7 @@ export default function AdminPage() {
       {/* Header */}
       <div style={{ background: '#0d0d0d', borderBottom: '1px solid #161616', padding: '14px 16px', position: 'sticky', top: 0, zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{ width: 36, height: 36, borderRadius: 10, background: '#ff6b00', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>🍕</div>
+          <div style={{ width: 36, height: 36, borderRadius: 10, background: '#ff6b00', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>ÃƒÂ°Ã…Â¸Ã‚ÂÃ¢â‚¬Â¢</div>
           <div>
             <p style={{ color: '#fff', fontSize: 15, fontWeight: 700, margin: 0, letterSpacing: -0.3 }}>ChefeBot</p>
             <p style={{ color: '#444', fontSize: 10, margin: 0 }}>Ola, {nomeUsuario}</p>
@@ -362,7 +362,7 @@ export default function AdminPage() {
                   {p === 'ontem' ? 'Ontem' : p === 'hoje' ? 'Hoje' : 'Semana'}
                 </button>
               ))}
-              <button onClick={() => setShowPeriodo(!showPeriodo)} style={{ ...btn(periodo === 'personalizado'), padding: '10px 14px' }}>📅</button>
+              <button onClick={() => setShowPeriodo(!showPeriodo)} style={{ ...btn(periodo === 'personalizado'), padding: '10px 14px' }}>ÃƒÂ°Ã…Â¸Ã¢â‚¬Å“Ã¢â‚¬Â¦</button>
             </div>
 
             {showPeriodo && (
@@ -400,7 +400,7 @@ export default function AdminPage() {
               </div>
               <div style={card}>
                 <p style={{ color: '#555', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 6px', letterSpacing: 0.5 }}>Avaliacao</p>
-                <p style={{ color: '#fbbf24', fontSize: 22, fontWeight: 800, margin: 0, letterSpacing: -0.5 }}>{avaliacoes.media > 0 ? avaliacoes.media.toFixed(1) : '—'} ★</p>
+                <p style={{ color: '#fbbf24', fontSize: 22, fontWeight: 800, margin: 0, letterSpacing: -0.5 }}>{avaliacoes.media > 0 ? avaliacoes.media.toFixed(1) : 'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â'} ÃƒÂ¢Ã‹Å“Ã¢â‚¬Â¦</p>
                 <p style={{ color: '#333', fontSize: 10, margin: '4px 0 0' }}>{avaliacoes.total} avaliacoes</p>
               </div>
             </div>
@@ -455,7 +455,7 @@ export default function AdminPage() {
                   <p style={{ color: '#fbbf24', fontSize: 36, fontWeight: 800, margin: 0, letterSpacing: -1 }}>{avaliacoes.media.toFixed(1)}</p>
                   <div>
                     <div style={{ display: 'flex', gap: 2 }}>
-                      {[1,2,3,4,5].map(s => <span key={s} style={{ color: s <= Math.round(avaliacoes.media) ? '#fbbf24' : '#333', fontSize: 14 }}>★</span>)}
+                      {[1,2,3,4,5].map(s => <span key={s} style={{ color: s <= Math.round(avaliacoes.media) ? '#fbbf24' : '#333', fontSize: 14 }}>ÃƒÂ¢Ã‹Å“Ã¢â‚¬Â¦</span>)}
                     </div>
                     <p style={{ color: '#444', fontSize: 11, margin: '2px 0 0' }}>{avaliacoes.total} avaliacoes</p>
                   </div>
@@ -465,7 +465,7 @@ export default function AdminPage() {
                     <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#0d0d0d', borderRadius: 8, padding: '8px 12px' }}>
                       <span style={{ color: '#555', fontSize: 11 }}>{a.phone.slice(-4).padStart(8, '*')}</span>
                       <div style={{ display: 'flex', gap: 1 }}>
-                        {[1,2,3,4,5].map(s => <span key={s} style={{ color: s <= a.nota ? '#fbbf24' : '#333', fontSize: 12 }}>★</span>)}
+                        {[1,2,3,4,5].map(s => <span key={s} style={{ color: s <= a.nota ? '#fbbf24' : '#333', fontSize: 12 }}>ÃƒÂ¢Ã‹Å“Ã¢â‚¬Â¦</span>)}
                       </div>
                     </div>
                   ))}
@@ -482,11 +482,11 @@ export default function AdminPage() {
                 storageKey="tour_cardapio_visto"
                 onClose={() => setShowTourCardapio(false)}
                 passos={[
-                  { face: '👨‍🍳', tag: '👋 Bem-vindo!', tagBg: '#ff6b0015', tagColor: '#ff6b00', title: 'Sou o Chef, seu guia!', text: 'Vou te ensinar como editar seu cardapio em 4 passos rapidos!', nextLabel: 'Bora! 🚀', nextBg: 'linear-gradient(135deg,#ff6b00,#ff9500)', accent: '#ff6b00' },
-                  { face: '🧐', tag: '✏️ Passo 1', tagBg: '#1d3a6e', tagColor: '#60a5fa', title: 'Toque no x para remover', text: 'Cada bolinha e um sabor. Quer tirar algum? So tocar no x ao lado!', highlightId: 'cardapio-sabores', arrowId: 'cardapio-sabores', nextLabel: 'Entendi! →', nextBg: 'linear-gradient(135deg,#3b82f6,#6366f1)', accent: '#3b82f6', particles: true },
-                  { face: '😄', tag: '➕ Passo 2', tagBg: '#2e1a5e', tagColor: '#a78bfa', title: 'Toque + para adicionar', text: 'Clique em "+ Add" para incluir novos sabores. Pode adicionar quantos quiser!', highlightId: 'cardapio-add-btn', arrowId: 'cardapio-add-btn', nextLabel: 'Facil demais! →', nextBg: 'linear-gradient(135deg,#8b5cf6,#ec4899)', accent: '#8b5cf6', particles: true },
-                  { face: '😮', tag: '⚠️ Passo 3', tagBg: '#3d0f0f', tagColor: '#f87171', title: 'Sempre salve no final!', text: 'Depois de editar aperte "Salvar Cardapio". Sem salvar o bot nao aprende!', highlightId: 'cardapio-salvar', arrowId: 'cardapio-salvar', nextLabel: 'Anotado! →', nextBg: 'linear-gradient(135deg,#ef4444,#ff6b00)', accent: '#ef4444', particles: true, showDismiss: true },
-                  { face: '🥳', tag: '🎉 Pronto!', tagBg: '#0d2e16', tagColor: '#4ade80', title: 'Voce e um craque!', text: 'Agora e so editar o cardapio do seu jeito. Qualquer duvida e so chamar!', nextLabel: 'Usar agora! 🍕', nextBg: 'linear-gradient(135deg,#16a34a,#4ade80)', accent: '#16a34a', showDismiss: true, last: true },
+                  { face: '\u{1F468}\u{200D}\u{1F373}', tag: 'Bem-vindo!', tagBg: '#ff6b0015', tagColor: '#ff6b00', title: 'Sou o Chef, seu guia!', text: 'Vou te ensinar como editar seu cardapio em 4 passos rapidos!', nextLabel: 'Bora!', nextBg: 'linear-gradient(135deg,#ff6b00,#ff9500)', accent: '#ff6b00' },
+                  { face: '\u{1F9D0}', tag: 'Passo 1 de 4', tagBg: '#1d3a6e', tagColor: '#60a5fa', title: 'Toque no x para remover', text: 'Cada bolinha e um sabor. Quer tirar algum? So tocar no x ao lado do nome!', highlightId: 'cardapio-sabores', arrowId: 'cardapio-sabores', nextLabel: 'Entendi!', nextBg: 'linear-gradient(135deg,#3b82f6,#6366f1)', accent: '#3b82f6', particles: true },
+                  { face: '\u{1F604}', tag: 'Passo 2 de 4', tagBg: '#2e1a5e', tagColor: '#a78bfa', title: 'Toque + para adicionar', text: 'Clique em + Add para incluir novos sabores. Pode adicionar quantos quiser!', highlightId: 'cardapio-add-btn', arrowId: 'cardapio-add-btn', nextLabel: 'Facil demais!', nextBg: 'linear-gradient(135deg,#8b5cf6,#ec4899)', accent: '#8b5cf6', particles: true },
+                  { face: '\u{1F62E}', tag: 'Passo 3 - IMPORTANTE', tagBg: '#3d0f0f', tagColor: '#f87171', title: 'Sempre salve no final!', text: 'Depois de editar aperte o botao verde Salvar Cardapio. Sem salvar o bot nao aprende!', highlightId: 'cardapio-salvar', arrowId: 'cardapio-salvar', nextLabel: 'Anotado!', nextBg: 'linear-gradient(135deg,#ef4444,#ff6b00)', accent: '#ef4444', particles: true, showDismiss: true },
+                  { face: '\u{1F973}', tag: 'Pronto!', tagBg: '#0d2e16', tagColor: '#4ade80', title: 'Voce e um craque!', text: 'Agora e so editar o cardapio do seu jeito. Qualquer duvida e so chamar!', nextLabel: 'Usar agora!', nextBg: 'linear-gradient(135deg,#16a34a,#4ade80)', accent: '#16a34a', showDismiss: true, last: true },
                 ]}
               />
             )}
@@ -636,7 +636,7 @@ export default function AdminPage() {
             <div style={card}>
               <p style={sectionTitle}>Horario</p>
               <button onClick={toggle24h} style={{ width: '100%', background: is24h ? '#14532d' : '#1a1a1a', border: `1px solid ${is24h ? '#16a34a40' : '#2a2a2a'}`, borderRadius: 10, padding: '12px', color: is24h ? '#4ade80' : '#666', fontSize: 14, fontWeight: 700, cursor: 'pointer', marginBottom: 12 }}>
-                {is24h ? 'Aberto 24 horas — clique para desativar' : 'Ativar 24 horas'}
+                {is24h ? 'Aberto 24 horas ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â clique para desativar' : 'Ativar 24 horas'}
               </button>
               <div style={{ display: 'flex', gap: 10 }}>
                 <div style={{ flex: 1 }}>
@@ -782,7 +782,7 @@ export default function AdminPage() {
 
             {mesFechado && (
               <div style={{ background: '#14532d20', border: '1px solid #16a34a30', borderRadius: 14, padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 10 }}>
-                <p style={{ color: '#4ade80', fontSize: 13, fontWeight: 700, margin: 0 }}>Mes fechado pelo contador — somente leitura</p>
+                <p style={{ color: '#4ade80', fontSize: 13, fontWeight: 700, margin: 0 }}>Mes fechado pelo contador ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â somente leitura</p>
               </div>
             )}
 
@@ -811,7 +811,7 @@ export default function AdminPage() {
 
                 <button onClick={() => cameraRef.current?.click()} disabled={analisandoNota} style={{ width: '100%', background: analisandoNota ? '#1a1a1a' : '#0d1a0d', border: `2px dashed ${analisandoNota ? '#2a2a2a' : '#16a34a50'}`, borderRadius: 16, padding: '24px 16px', cursor: analisandoNota ? 'not-allowed' : 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
                   <div style={{ width: 60, height: 60, borderRadius: '50%', background: analisandoNota ? '#1e1e1e' : '#16a34a20', border: `2px solid ${analisandoNota ? '#2a2a2a' : '#16a34a40'}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 26 }}>
-                    {analisandoNota ? '...' : '📷'}
+                    {analisandoNota ? '...' : 'ÃƒÂ°Ã…Â¸Ã¢â‚¬Å“Ã‚Â·'}
                   </div>
                   <div style={{ textAlign: 'center' }}>
                     <p style={{ color: analisandoNota ? '#444' : '#4ade80', fontSize: 15, fontWeight: 700, margin: 0 }}>{analisandoNota ? 'Analisando nota...' : 'Fotografar nota fiscal'}</p>
@@ -879,7 +879,7 @@ export default function AdminPage() {
                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                             <div style={{ flex: 1 }}>
                               <p style={{ color: '#e0e0e0', fontSize: 13, fontWeight: 600, margin: 0 }}>{c.descricao}</p>
-                              <p style={{ color: '#444', fontSize: 11, margin: '2px 0 0' }}>{cat?.label} · {c.data}</p>
+                              <p style={{ color: '#444', fontSize: 11, margin: '2px 0 0' }}>{cat?.label} Ãƒâ€šÃ‚Â· {c.data}</p>
                             </div>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                               <span style={{ color: '#f87171', fontSize: 13, fontWeight: 700 }}>R$ {c.valor.toFixed(2).replace('.', ',')}</span>
@@ -958,11 +958,11 @@ export default function AdminPage() {
       {/* Navegacao inferior */}
       <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: '#0d0d0d', borderTop: '1px solid #161616', display: 'flex', padding: '8px 0 4px', zIndex: 100 }}>
         {([
-          { key: 'dashboard', icon: '📊', label: 'Painel' },
-          { key: 'cardapio', icon: '🍕', label: 'Cardapio' },
-          { key: 'config', icon: '⚙️', label: 'Configuracao' },
-          { key: 'financeiro', icon: '💰', label: 'Financeiro' },
-          { key: 'dev', icon: '🛠️', label: 'Suporte' },
+          { key: 'dashboard', icon: 'ÃƒÂ°Ã…Â¸Ã¢â‚¬Å“Ã…Â ', label: 'Painel' },
+          { key: 'cardapio', icon: 'ÃƒÂ°Ã…Â¸Ã‚ÂÃ¢â‚¬Â¢', label: 'Cardapio' },
+          { key: 'config', icon: 'ÃƒÂ¢Ã…Â¡Ã¢â€žÂ¢ÃƒÂ¯Ã‚Â¸Ã‚Â', label: 'Configuracao' },
+          { key: 'financeiro', icon: 'ÃƒÂ°Ã…Â¸Ã¢â‚¬â„¢Ã‚Â°', label: 'Financeiro' },
+          { key: 'dev', icon: 'ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂºÃ‚Â ÃƒÂ¯Ã‚Â¸Ã‚Â', label: 'Suporte' },
         ] as { key: Aba; icon: string; label: string }[]).map(({ key, icon, label }) => (
           <button key={key} onClick={() => setAba(key)} style={{ flex: 1, background: 'none', border: 'none', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, padding: '6px 0' }}>
             <span style={{ fontSize: 20, opacity: aba === key ? 1 : 0.3 }}>{icon}</span>
