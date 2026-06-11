@@ -1,4 +1,4 @@
-'use client'
+'use client' // v2
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
@@ -100,7 +100,7 @@ export default function DevPage() {
   }
 
   const excluirPadrao = async (original: string) => {
-    if (!confirm(`Excluir padrÃ£o "${original}"?`)) return
+    if (!confirm(`Excluir padrÃƒÂ£o "${original}"?`)) return
     try {
       await fetch('/api/padroes', {
         method: 'DELETE',
@@ -108,9 +108,9 @@ export default function DevPage() {
         body: JSON.stringify({ original }),
       })
       setPadroes(prev => prev.filter(p => p.original !== original))
-      setMensagem('âœ… PadrÃ£o excluÃ­do!'); setTimeout(() => setMensagem(''), 3000)
+      setMensagem('Ã¢Å“â€¦ PadrÃƒÂ£o excluÃƒÂ­do!'); setTimeout(() => setMensagem(''), 3000)
     } catch {
-      setMensagem('âŒ Erro ao excluir.'); setTimeout(() => setMensagem(''), 3000)
+      setMensagem('Ã¢ÂÅ’ Erro ao excluir.'); setTimeout(() => setMensagem(''), 3000)
     }
   }
 
@@ -124,9 +124,9 @@ export default function DevPage() {
       setPadroes(prev => prev.map(p => p.original === original ? { ...p, interpretado: novoValor } : p))
       setEditando(null)
       setNovoValor('')
-      setMensagem('âœ… PadrÃ£o atualizado!'); setTimeout(() => setMensagem(''), 3000)
+      setMensagem('Ã¢Å“â€¦ PadrÃƒÂ£o atualizado!'); setTimeout(() => setMensagem(''), 3000)
     } catch {
-      setMensagem('âŒ Erro ao salvar.'); setTimeout(() => setMensagem(''), 3000)
+      setMensagem('Ã¢ÂÅ’ Erro ao salvar.'); setTimeout(() => setMensagem(''), 3000)
     }
   }
 
@@ -136,9 +136,9 @@ export default function DevPage() {
     try {
       await fetch('/api/logs', { method: 'DELETE' })
       setLogs([])
-      setMensagem('âœ… Logs limpos!'); setTimeout(() => setMensagem(''), 3000)
+      setMensagem('Ã¢Å“â€¦ Logs limpos!'); setTimeout(() => setMensagem(''), 3000)
     } catch {
-      setMensagem('âŒ Erro.'); setTimeout(() => setMensagem(''), 3000)
+      setMensagem('Ã¢ÂÅ’ Erro.'); setTimeout(() => setMensagem(''), 3000)
     }
     setLimpandoLogs(false)
   }
@@ -149,9 +149,9 @@ export default function DevPage() {
   )
 
   const corNivel = (nivel: string) => {
-    if (nivel === 'erro') return { bg: 'rgba(252,129,129,0.1)', border: 'rgba(252,129,129,0.3)', text: '#fc8181', icon: 'âŒ' }
-    if (nivel === 'aviso') return { bg: 'rgba(246,173,85,0.1)', border: 'rgba(246,173,85,0.3)', text: '#f6ad55', icon: 'âš ï¸' }
-    return { bg: 'rgba(99,179,237,0.1)', border: 'rgba(99,179,237,0.3)', text: '#63b3ed', icon: 'â„¹ï¸' }
+    if (nivel === 'erro') return { bg: 'rgba(252,129,129,0.1)', border: 'rgba(252,129,129,0.3)', text: '#fc8181', icon: 'Ã¢ÂÅ’' }
+    if (nivel === 'aviso') return { bg: 'rgba(246,173,85,0.1)', border: 'rgba(246,173,85,0.3)', text: '#f6ad55', icon: 'Ã¢Å¡Â Ã¯Â¸Â' }
+    return { bg: 'rgba(99,179,237,0.1)', border: 'rgba(99,179,237,0.3)', text: '#63b3ed', icon: 'Ã¢â€žÂ¹Ã¯Â¸Â' }
   }
 
   if (checking || loading) return (
@@ -167,12 +167,12 @@ export default function DevPage() {
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 32 }}>
           <div>
-            <h1 style={{ color: '#a78bfa', fontSize: 22, fontWeight: 800, margin: 0 }}>âš¡ Painel Dev â€” Ominix</h1>
+            <h1 style={{ color: '#a78bfa', fontSize: 22, fontWeight: 800, margin: 0 }}>Ã¢Å¡Â¡ Painel Dev Ã¢â‚¬â€ Ominix</h1>
             <p style={{ color: 'rgba(255,255,255,0.3)', fontSize: 13, margin: '4px 0 0' }}>Controle exclusivo do criador do sistema</p>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button onClick={() => router.push('/admin')} style={{ background: 'rgba(255,215,0,0.1)', border: '1px solid rgba(255,215,0,0.3)', color: '#ffd700', borderRadius: 8, padding: '8px 12px', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>
-              ðŸ‘‘ Admin
+              Ã°Å¸â€˜â€˜ Admin
             </button>
             <button onClick={() => fetch('/api/auth/logout', { method: 'POST' }).then(() => router.push('/login'))} style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', borderRadius: 8, padding: '8px 12px', cursor: 'pointer', fontSize: 13 }}>
               Sair
@@ -180,24 +180,24 @@ export default function DevPage() {
           </div>
         </div>
 
-        {/* Cards de mÃ©tricas */}
+        {/* Cards de mÃƒÂ©tricas */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 28 }}>
           <div style={{ background: 'rgba(167,139,250,0.08)', border: '1px solid rgba(167,139,250,0.25)', borderRadius: 14, padding: 18 }}>
-            <p style={{ color: 'rgba(167,139,250,0.6)', fontSize: 11, margin: '0 0 6px', fontWeight: 700, textTransform: 'uppercase' }}>ðŸ§  PadrÃµes</p>
+            <p style={{ color: 'rgba(167,139,250,0.6)', fontSize: 11, margin: '0 0 6px', fontWeight: 700, textTransform: 'uppercase' }}>Ã°Å¸Â§Â  PadrÃƒÂµes</p>
             <p style={{ color: '#a78bfa', fontSize: 28, fontWeight: 800, margin: 0 }}>{padroes.length}</p>
           </div>
           <div style={{ background: 'rgba(99,179,237,0.08)', border: '1px solid rgba(99,179,237,0.25)', borderRadius: 14, padding: 18 }}>
-            <p style={{ color: 'rgba(99,179,237,0.6)', fontSize: 11, margin: '0 0 6px', fontWeight: 700, textTransform: 'uppercase' }}>ðŸ”„ Usos</p>
+            <p style={{ color: 'rgba(99,179,237,0.6)', fontSize: 11, margin: '0 0 6px', fontWeight: 700, textTransform: 'uppercase' }}>Ã°Å¸â€â€ž Usos</p>
             <p style={{ color: '#63b3ed', fontSize: 28, fontWeight: 800, margin: 0 }}>{padroes.reduce((s, p) => s + p.vezes, 0)}</p>
           </div>
           <div style={{ background: logs.some(l => l.nivel === 'erro') ? 'rgba(252,129,129,0.08)' : 'rgba(104,211,145,0.08)', border: `1px solid ${logs.some(l => l.nivel === 'erro') ? 'rgba(252,129,129,0.25)' : 'rgba(104,211,145,0.25)'}`, borderRadius: 14, padding: 18 }}>
-            <p style={{ color: logs.some(l => l.nivel === 'erro') ? 'rgba(252,129,129,0.6)' : 'rgba(104,211,145,0.6)', fontSize: 11, margin: '0 0 6px', fontWeight: 700, textTransform: 'uppercase' }}>ðŸ”´ Erros</p>
+            <p style={{ color: logs.some(l => l.nivel === 'erro') ? 'rgba(252,129,129,0.6)' : 'rgba(104,211,145,0.6)', fontSize: 11, margin: '0 0 6px', fontWeight: 700, textTransform: 'uppercase' }}>Ã°Å¸â€Â´ Erros</p>
             <p style={{ color: logs.some(l => l.nivel === 'erro') ? '#fc8181' : '#68d391', fontSize: 28, fontWeight: 800, margin: 0 }}>{logs.filter(l => l.nivel === 'erro').length}</p>
           </div>
         </div>
 
         {mensagem && (
-          <div style={{ background: mensagem.includes('âœ…') ? 'rgba(104,211,145,0.1)' : 'rgba(252,129,129,0.1)', border: `1px solid ${mensagem.includes('âœ…') ? 'rgba(104,211,145,0.3)' : 'rgba(252,129,129,0.3)'}`, borderRadius: 10, padding: '10px 14px', marginBottom: 16, color: mensagem.includes('âœ…') ? '#68d391' : '#fc8181', fontWeight: 600, fontSize: 14 }}>
+          <div style={{ background: mensagem.includes('Ã¢Å“â€¦') ? 'rgba(104,211,145,0.1)' : 'rgba(252,129,129,0.1)', border: `1px solid ${mensagem.includes('Ã¢Å“â€¦') ? 'rgba(104,211,145,0.3)' : 'rgba(252,129,129,0.3)'}`, borderRadius: 10, padding: '10px 14px', marginBottom: 16, color: mensagem.includes('Ã¢Å“â€¦') ? '#68d391' : '#fc8181', fontWeight: 600, fontSize: 14 }}>
             {mensagem}
           </div>
         )}
@@ -205,10 +205,10 @@ export default function DevPage() {
         {/* Abas */}
         <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
           <button onClick={() => setAba('padroes')} style={{ flex: 1, padding: '10px 0', borderRadius: 10, border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: 13, background: aba === 'padroes' ? 'rgba(167,139,250,0.2)' : 'rgba(255,255,255,0.05)', color: aba === 'padroes' ? '#a78bfa' : 'rgba(255,255,255,0.4)' }}>
-            ðŸ§  PadrÃµes Aprendidos
+            Ã°Å¸Â§Â  PadrÃƒÂµes Aprendidos
           </button>
           <button onClick={() => setAba('logs')} style={{ flex: 1, padding: '10px 0', borderRadius: 10, border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: 13, background: aba === 'logs' ? 'rgba(252,129,129,0.2)' : 'rgba(255,255,255,0.05)', color: aba === 'logs' ? '#fc8181' : 'rgba(255,255,255,0.4)', position: 'relative' }}>
-            ðŸ”´ Logs do Sistema
+            Ã°Å¸â€Â´ Logs do Sistema
             {logs.filter(l => l.nivel === 'erro').length > 0 && (
               <span style={{ position: 'absolute', top: -4, right: -4, background: '#fc8181', color: '#fff', fontSize: 10, fontWeight: 800, padding: '1px 5px', borderRadius: 10 }}>
                 {logs.filter(l => l.nivel === 'erro').length}
@@ -217,20 +217,20 @@ export default function DevPage() {
           </button>
         </div>
 
-        {/* Aba PadrÃµes */}
+        {/* Aba PadrÃƒÂµes */}
         {aba === 'padroes' && (
           <div>
             <div style={{ marginBottom: 20 }}>
-              <input type="text" placeholder="Buscar padrÃ£o..." value={busca} onChange={e => setBusca(e.target.value)}
+              <input type="text" placeholder="Buscar padrÃƒÂ£o..." value={busca} onChange={e => setBusca(e.target.value)}
                 style={{ width: '100%', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 10, padding: '11px 14px', color: '#fff', fontSize: 14, outline: 'none', boxSizing: 'border-box' }} />
             </div>
             <h2 style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12, fontWeight: 700, marginBottom: 12, textTransform: 'uppercase', letterSpacing: 1 }}>
-              Biblioteca â€” {padroesFiltrados.length} resultado{padroesFiltrados.length !== 1 ? 's' : ''}
+              Biblioteca Ã¢â‚¬â€ {padroesFiltrados.length} resultado{padroesFiltrados.length !== 1 ? 's' : ''}
             </h2>
             {padroesFiltrados.length === 0 ? (
               <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 32, textAlign: 'center' }}>
                 <p style={{ color: 'rgba(255,255,255,0.2)', margin: 0, fontSize: 15 }}>
-                  {padroes.length === 0 ? 'Nenhum padrÃ£o aprendido ainda.' : 'Nenhum padrÃ£o encontrado.'}
+                  {padroes.length === 0 ? 'Nenhum padrÃƒÂ£o aprendido ainda.' : 'Nenhum padrÃƒÂ£o encontrado.'}
                 </p>
               </div>
             ) : (
@@ -243,27 +243,27 @@ export default function DevPage() {
                           <span style={{ background: 'rgba(252,129,129,0.1)', border: '1px solid rgba(252,129,129,0.3)', color: '#fc8181', fontSize: 12, padding: '3px 10px', borderRadius: 20 }}>
                             "{p.original}"
                           </span>
-                          <span style={{ color: 'rgba(255,255,255,0.3)', fontSize: 14 }}>â†’</span>
+                          <span style={{ color: 'rgba(255,255,255,0.3)', fontSize: 14 }}>Ã¢â€ â€™</span>
                           <span style={{ background: 'rgba(104,211,145,0.1)', border: '1px solid rgba(104,211,145,0.3)', color: '#68d391', fontSize: 12, padding: '3px 10px', borderRadius: 20 }}>
                             "{p.interpretado}"
                           </span>
                         </div>
                         <div style={{ display: 'flex', gap: 12 }}>
-                          <p style={{ color: 'rgba(255,255,255,0.25)', fontSize: 11, margin: 0 }}>ðŸ”„ {p.vezes}x</p>
-                          <p style={{ color: 'rgba(255,255,255,0.25)', fontSize: 11, margin: 0 }}>ðŸ“… {new Date(p.criadoEm).toLocaleDateString('pt-BR')}</p>
+                          <p style={{ color: 'rgba(255,255,255,0.25)', fontSize: 11, margin: 0 }}>Ã°Å¸â€â€ž {p.vezes}x</p>
+                          <p style={{ color: 'rgba(255,255,255,0.25)', fontSize: 11, margin: 0 }}>Ã°Å¸â€œâ€¦ {new Date(p.criadoEm).toLocaleDateString('pt-BR')}</p>
                         </div>
                       </div>
                       <div style={{ display: 'flex', gap: 6, marginLeft: 8 }}>
-                        <button onClick={() => { setEditando(p.original); setNovoValor(p.interpretado) }} style={{ background: 'rgba(167,139,250,0.1)', border: '1px solid rgba(167,139,250,0.3)', color: '#a78bfa', borderRadius: 8, padding: '5px 10px', cursor: 'pointer', fontSize: 12 }}>âœï¸</button>
-                        <button onClick={() => excluirPadrao(p.original)} style={{ background: 'rgba(252,129,129,0.1)', border: '1px solid rgba(252,129,129,0.3)', color: '#fc8181', borderRadius: 8, padding: '5px 10px', cursor: 'pointer', fontSize: 12 }}>ðŸ—‘ï¸</button>
+                        <button onClick={() => { setEditando(p.original); setNovoValor(p.interpretado) }} style={{ background: 'rgba(167,139,250,0.1)', border: '1px solid rgba(167,139,250,0.3)', color: '#a78bfa', borderRadius: 8, padding: '5px 10px', cursor: 'pointer', fontSize: 12 }}>Ã¢Å“ÂÃ¯Â¸Â</button>
+                        <button onClick={() => excluirPadrao(p.original)} style={{ background: 'rgba(252,129,129,0.1)', border: '1px solid rgba(252,129,129,0.3)', color: '#fc8181', borderRadius: 8, padding: '5px 10px', cursor: 'pointer', fontSize: 12 }}>Ã°Å¸â€”â€˜Ã¯Â¸Â</button>
                       </div>
                     </div>
                     {editando === p.original && (
                       <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
                         <input type="text" value={novoValor} onChange={e => setNovoValor(e.target.value)} placeholder="Novo valor..."
                           style={{ flex: 1, background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(167,139,250,0.3)', borderRadius: 8, padding: '8px 12px', color: '#fff', fontSize: 13, outline: 'none' }} />
-                        <button onClick={() => salvarEdicao(p.original)} style={{ background: 'rgba(104,211,145,0.15)', border: '1px solid rgba(104,211,145,0.4)', color: '#68d391', borderRadius: 8, padding: '8px 12px', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>âœ…</button>
-                        <button onClick={() => setEditando(null)} style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', borderRadius: 8, padding: '8px 12px', cursor: 'pointer', fontSize: 13 }}>âœ•</button>
+                        <button onClick={() => salvarEdicao(p.original)} style={{ background: 'rgba(104,211,145,0.15)', border: '1px solid rgba(104,211,145,0.4)', color: '#68d391', borderRadius: 8, padding: '8px 12px', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>Ã¢Å“â€¦</button>
+                        <button onClick={() => setEditando(null)} style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', borderRadius: 8, padding: '8px 12px', cursor: 'pointer', fontSize: 13 }}>Ã¢Å“â€¢</button>
                       </div>
                     )}
                   </div>
@@ -278,15 +278,15 @@ export default function DevPage() {
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <h2 style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12, fontWeight: 700, margin: 0, textTransform: 'uppercase', letterSpacing: 1 }}>
-                Ãšltimos 50 eventos
+                ÃƒÅ¡ltimos 50 eventos
               </h2>
               <button onClick={limparLogs} disabled={limpandoLogs} style={{ background: 'rgba(252,129,129,0.1)', border: '1px solid rgba(252,129,129,0.3)', color: '#fc8181', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>
-                ðŸ—‘ï¸ Limpar logs
+                Ã°Å¸â€”â€˜Ã¯Â¸Â Limpar logs
               </button>
             </div>
             {logs.length === 0 ? (
               <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: 12, padding: 32, textAlign: 'center' }}>
-                <p style={{ color: 'rgba(255,255,255,0.2)', margin: 0, fontSize: 15 }}>Nenhum log registrado. Sistema saudÃ¡vel! âœ…</p>
+                <p style={{ color: 'rgba(255,255,255,0.2)', margin: 0, fontSize: 15 }}>Nenhum log registrado. Sistema saudÃƒÂ¡vel! Ã¢Å“â€¦</p>
               </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -318,7 +318,7 @@ export default function DevPage() {
         )}
 
         <p style={{ textAlign: 'center', color: 'rgba(255,255,255,0.1)', fontSize: 11, marginTop: 32 }}>
-          Ominix Dev Console Â· Acesso restrito
+          Ominix Dev Console Ã‚Â· Acesso restrito
         </p>
       </div>
     </div>
