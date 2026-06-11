@@ -25,14 +25,18 @@ function LoginForm() {
   useEffect(() => {
     const match = document.cookie.match(/(?:^|;\s*)auth-user=([^;]+)/);
     if (match) {
-      try {
-        const user = JSON.parse(decodeURIComponent(match[1]));
-        // Verifica se o token ainda e valido antes de redirecionar
-        router.replace(getDestino(user.role, callbackUrl));
-      } catch {
-        document.cookie = 'auth-token=; max-age=0; path=/'
-        document.cookie = 'auth-user=; max-age=0; path=/'
-      }
+      fetch("/api/auth/verify")
+        .then(r => {
+          if (r.ok) return r.json().then((d: { role: string }) => {
+            router.replace(getDestino(d.role, callbackUrl));
+          });
+          document.cookie = 'auth-token=; max-age=0; path=/';
+          document.cookie = 'auth-user=; max-age=0; path=/';
+        })
+        .catch(() => {
+          document.cookie = 'auth-token=; max-age=0; path=/';
+          document.cookie = 'auth-user=; max-age=0; path=/';
+        });
     }
   }, [callbackUrl, router]);
 

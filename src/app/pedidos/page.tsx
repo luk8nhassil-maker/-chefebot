@@ -1,4 +1,4 @@
-﻿"use client"
+"use client"
 import { useEffect, useState, useRef } from "react"
 import { useRouter } from "next/navigation"
 
@@ -195,7 +195,7 @@ export default function PedidosPage() {
   }
   const carregarPedidos = () => {
     fetch("/api/orders")
-      .then(r => { if (r.status === 401) { router.push("/login?callbackUrl=/pedidos"); return null } return r.json() })
+      .then(r => { if (r.status === 401) { fetch("/api/auth/logout", { method: "POST" }).finally(() => router.push("/login?callbackUrl=/pedidos")); return null } return r.json() })
       .then(data => {
         if (data) {
           const novosIds = data.map((p: Pedido) => p.id)
