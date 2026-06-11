@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
+import TourGuiado from '@/components/TourGuiado'
 
 type Pedido = {
   id: string; cliente: string; telefone: string; itens: string[]
@@ -153,6 +154,7 @@ export default function AdminPage() {
   const [showPeriodo, setShowPeriodo] = useState(false)
   const [salvando, setSalvando] = useState(false)
   const [salvandoCardapio, setSalvandoCardapio] = useState(false)
+  const [showTourCardapio, setShowTourCardapio] = useState(false)
   const [mensagem, setMensagem] = useState('')
   const [senhas, setSenhas] = useState<Record<string, string>>({})
   const [nomes, setNomes] = useState<Record<string, string>>({})
@@ -228,6 +230,15 @@ export default function AdminPage() {
   }, [router])
 
   const msg = (m: string) => { setMensagem(m); setTimeout(() => setMensagem(''), 3000) }
+
+  useEffect(() => {
+    if (aba === 'cardapio') {
+      try {
+        const visto = localStorage.getItem('tour_cardapio_visto')
+        if (!visto) setShowTourCardapio(true)
+      } catch {}
+    }
+  }, [aba])
 
   const pedidosFiltrados = filtraPorPeriodo(pedidos, periodo, dataInicio, dataFim).filter(p => !p.escalonado && p.status !== 'cancelado')
   const pedidosEntregues = pedidosFiltrados.filter(p => p.status === 'entregue')
@@ -466,9 +477,22 @@ export default function AdminPage() {
         {/* ABA CARDAPIO */}
         {aba === 'cardapio' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {showTourCardapio && (
+              <TourGuiado
+                storageKey="tour_cardapio_visto"
+                onClose={() => setShowTourCardapio(false)}
+                passos={[
+                  { face: '👨‍🍳', tag: '👋 Bem-vindo!', tagBg: '#ff6b0015', tagColor: '#ff6b00', title: 'Sou o Chef, seu guia!', text: 'Vou te ensinar como editar seu cardapio em 4 passos rapidos!', nextLabel: 'Bora! 🚀', nextBg: 'linear-gradient(135deg,#ff6b00,#ff9500)', accent: '#ff6b00' },
+                  { face: '🧐', tag: '✏️ Passo 1', tagBg: '#1d3a6e', tagColor: '#60a5fa', title: 'Toque no x para remover', text: 'Cada bolinha e um sabor. Quer tirar algum? So tocar no x ao lado!', highlightId: 'cardapio-sabores', arrowId: 'cardapio-sabores', nextLabel: 'Entendi! →', nextBg: 'linear-gradient(135deg,#3b82f6,#6366f1)', accent: '#3b82f6', particles: true },
+                  { face: '😄', tag: '➕ Passo 2', tagBg: '#2e1a5e', tagColor: '#a78bfa', title: 'Toque + para adicionar', text: 'Clique em "+ Add" para incluir novos sabores. Pode adicionar quantos quiser!', highlightId: 'cardapio-add-btn', arrowId: 'cardapio-add-btn', nextLabel: 'Facil demais! →', nextBg: 'linear-gradient(135deg,#8b5cf6,#ec4899)', accent: '#8b5cf6', particles: true },
+                  { face: '😮', tag: '⚠️ Passo 3', tagBg: '#3d0f0f', tagColor: '#f87171', title: 'Sempre salve no final!', text: 'Depois de editar aperte "Salvar Cardapio". Sem salvar o bot nao aprende!', highlightId: 'cardapio-salvar', arrowId: 'cardapio-salvar', nextLabel: 'Anotado! →', nextBg: 'linear-gradient(135deg,#ef4444,#ff6b00)', accent: '#ef4444', particles: true, showDismiss: true },
+                  { face: '🥳', tag: '🎉 Pronto!', tagBg: '#0d2e16', tagColor: '#4ade80', title: 'Voce e um craque!', text: 'Agora e so editar o cardapio do seu jeito. Qualquer duvida e so chamar!', nextLabel: 'Usar agora! 🍕', nextBg: 'linear-gradient(135deg,#16a34a,#4ade80)', accent: '#16a34a', showDismiss: true, last: true },
+                ]}
+              />
+            )}
             <div style={card}>
               <p style={sectionTitle}>Sabores salgados</p>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+              <div id="cardapio-sabores" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
                 {cardapio.saltyFlavors.map((s, i) => (
                   <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 20, padding: '4px 10px' }}>
                     <span style={{ color: '#e0e0e0', fontSize: 12 }}>{s}</span>
@@ -478,7 +502,7 @@ export default function AdminPage() {
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
                 <input placeholder="Novo sabor" value={novoSabor} onChange={e => setNovoSabor(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && novoSabor.trim()) { setCardapio(prev => ({ ...prev, saltyFlavors: [...prev.saltyFlavors, novoSabor.trim()] })); setNovoSabor('') }}} style={{ ...inp, flex: 1 }} />
-                <button onClick={() => { if (novoSabor.trim()) { setCardapio(prev => ({ ...prev, saltyFlavors: [...prev.saltyFlavors, novoSabor.trim()] })); setNovoSabor('') }}} style={{ background: '#ff6b00', border: 'none', color: '#fff', borderRadius: 10, padding: '10px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>+ Add</button>
+                <button id="cardapio-add-btn" onClick={() => { if (novoSabor.trim()) { setCardapio(prev => ({ ...prev, saltyFlavors: [...prev.saltyFlavors, novoSabor.trim()] })); setNovoSabor('') }}} style={{ background: '#ff6b00', border: 'none', color: '#fff', borderRadius: 10, padding: '10px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>+ Add</button>
               </div>
             </div>
 
@@ -591,7 +615,7 @@ export default function AdminPage() {
               </div>
             </div>
 
-            <button onClick={salvarCardapio} disabled={salvandoCardapio} style={{ width: '100%', background: salvandoCardapio ? '#1a1a1a' : '#ff6b00', border: 'none', borderRadius: 12, padding: '15px', color: '#fff', fontSize: 15, fontWeight: 700, cursor: salvandoCardapio ? 'not-allowed' : 'pointer', marginBottom: 8 }}>
+            <button id="cardapio-salvar" onClick={salvarCardapio} disabled={salvandoCardapio} style={{ width: '100%', background: salvandoCardapio ? '#1a1a1a' : '#ff6b00', border: 'none', borderRadius: 12, padding: '15px', color: '#fff', fontSize: 15, fontWeight: 700, cursor: salvandoCardapio ? 'not-allowed' : 'pointer', marginBottom: 8 }}>
               {salvandoCardapio ? 'Salvando...' : 'Salvar Cardapio'}
             </button>
           </div>
