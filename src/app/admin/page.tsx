@@ -137,6 +137,10 @@ export default function AdminPage() {
   const [novoValor, setNovoValor] = useState('')
   const [novaCategoria, setNovaCategoria] = useState('ingredientes')
   const [salvandoCusto, setSalvandoCusto] = useState(false)
+  const [analisandoNota, setAnalisandoNota] = useState(false)
+  const cameraRef = useRef<HTMLInputElement>(null)
+  const [analisandoNota, setAnalisandoNota] = useState(false)
+  const cameraRef = useRef<HTMLInputElement>(null)
   const mesAtual = new Date().toISOString().slice(0, 7)
   const mesLabel = new Date().toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
   const CATEGORIAS_FIN = [
@@ -725,6 +729,30 @@ export default function AdminPage() {
 
             <div style={card}>
               <p style={sectionTitle}>+ Adicionar custo</p>
+              {/* Botão de câmera */}
+              <input ref={cameraRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={async e => {
+                const file = e.target.files?.[0]
+                if (!file) return
+                setAnalisandoNota(true)
+                try {
+                  const base64 = await new Promise<string>((resolve, reject) => {
+                    const reader = new FileReader()
+                    reader.onload = () => resolve((reader.result as string).split(',')[1])
+                    reader.onerror = reject
+                    reader.readAsDataURL(file)
+                  })
+                  const res = await fetch('/api/analisar-nota', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ base64, mimeType: file.type }) })
+                  const d = await res.json()
+                  if (d.descricao) setNovoDescricao(d.descricao)
+                  if (d.valor) setNovoValor(String(d.valor))
+                  if (d.categoria) setNovaCategoria(d.categoria)
+                  msg('✅ Nota reconhecida!')
+                } catch { msg('❌ Não consegui ler a nota.') }
+                setAnalisandoNota(false)
+              }} />
+              <button onClick={() => cameraRef.current?.click()} disabled={analisandoNota} style={{ width: '100%', background: analisandoNota ? '#1a1a1a' : '#1a2a3a', border: '1px solid #1e3a5a', borderRadius: 10, padding: '12px', color: analisandoNota ? '#444' : '#60a5fa', fontSize: 14, fontWeight: 700, cursor: analisandoNota ? 'not-allowed' : 'pointer', marginBottom: 8 }}>
+                {analisandoNota ? '🔍 Analisando nota...' : '📷 Fotografar nota fiscal'}
+              </button>
               <input placeholder="Descrição (ex: Farinha de trigo 10kg)" value={novoDescricao} onChange={e => setNovoDescricao(e.target.value)} style={{ ...inp, marginBottom: 8 }} />
               <input placeholder="Valor (R$)" value={novoValor} onChange={e => setNovoValor(e.target.value)} style={{ ...inp, marginBottom: 8 }} />
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
