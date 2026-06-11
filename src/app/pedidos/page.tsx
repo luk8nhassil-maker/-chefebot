@@ -195,7 +195,7 @@ export default function PedidosPage() {
   }
   const carregarPedidos = () => {
     fetch("/api/orders")
-      .then(r => { if (r.status === 401) { document.cookie = 'auth-token=; max-age=0; path=/'; document.cookie = 'auth-user=; max-age=0; path=/'; router.push("/login"); return null } return r.json() })
+      .then(r => { if (r.status === 401) { router.push("/login?callbackUrl=/pedidos"); return null } return r.json() })
       .then(data => {
         if (data) {
           const novosIds = data.map((p: Pedido) => p.id)
