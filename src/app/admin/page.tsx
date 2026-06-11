@@ -110,6 +110,34 @@ const CATEGORIAS_FIN = [
   { key: 'outros', label: 'Outros', cor: '#6b7280' },
 ]
 
+function NovoClienteForm({ onMsg }: { onMsg: (m: string) => void }) {
+  const [nome, setNome] = useState('')
+  const [usuario, setUsuario] = useState('')
+  const [senha, setSenha] = useState('')
+  const [criando, setCriando] = useState(false)
+  const inp2 = { width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 10, padding: '11px 14px', color: '#fff', fontSize: 14, outline: 'none', boxSizing: 'border-box' as const, marginBottom: 8 }
+  const criar = async () => {
+    if (!nome || !usuario || !senha) return
+    setCriando(true)
+    try {
+      const res = await fetch('/api/funcionarios', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: nome, username: usuario, password: senha, role: 'admin' }) })
+      if (res.ok) { onMsg('Acesso criado!'); setNome(''); setUsuario(''); setSenha('') }
+      else onMsg('Erro ao criar.')
+    } catch { onMsg('Erro.') }
+    setCriando(false)
+  }
+  return (
+    <div>
+      <input placeholder="Nome da pizzaria (ex: Magda Pizza)" value={nome} onChange={e => setNome(e.target.value)} style={inp2} />
+      <input placeholder="@usuario (ex: magda)" value={usuario} onChange={e => setUsuario(e.target.value)} style={inp2} />
+      <input placeholder="Senha" type="password" value={senha} onChange={e => setSenha(e.target.value)} style={inp2} />
+      <button onClick={criar} disabled={criando} style={{ width: '100%', background: criando ? '#1a1a1a' : '#ff6b00', border: 'none', borderRadius: 10, padding: '12px', color: '#fff', fontSize: 14, fontWeight: 700, cursor: criando ? 'not-allowed' : 'pointer' }}>
+        {criando ? 'Criando...' : '+ Criar acesso admin'}
+      </button>
+    </div>
+  )
+}
+
 export default function AdminPage() {
   const router = useRouter()
   const [aba, setAba] = useState<Aba>('dashboard')
@@ -871,6 +899,14 @@ export default function AdminPage() {
                   <button onClick={() => router.push('/dev')} style={{ background: '#1a1a1a', border: '1px solid #2a2a2a', color: '#e0e0e0', borderRadius: 10, padding: '12px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 600, textAlign: 'left' }}>Logs do sistema</button>
                   <button onClick={() => router.push('/relatorios')} style={{ background: '#1a1a1a', border: '1px solid #2a2a2a', color: '#e0e0e0', borderRadius: 10, padding: '12px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 600, textAlign: 'left' }}>Relatorios</button>
                 </div>
+              </div>
+            )}
+
+            {getUserInfo()?.role === 'dev' && (
+              <div style={card}>
+                <p style={sectionTitle}>Liberar acesso de teste</p>
+                <p style={{ color: '#555', fontSize: 12, margin: '0 0 12px' }}>Cria um admin para uma nova pizzaria testar o sistema.</p>
+                <NovoClienteForm onMsg={msg} />
               </div>
             )}
 
