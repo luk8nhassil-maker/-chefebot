@@ -1,4 +1,4 @@
-﻿import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { verifyToken } from '@/lib/auth'
 import { redis } from '@/lib/redis'
 
@@ -76,7 +76,7 @@ async function checkAuth(req: NextRequest) {
   const token = req.cookies.get('auth-token')?.value ?? null
   if (!token) return null
   const payload = await verifyToken(token)
-  if (!payload || !['atendente', 'admin'].includes(payload.role as string)) return null
+  if (!payload || !['atendente', 'admin', 'dev'].includes(payload.role as string)) return null
   return payload
 }
 
