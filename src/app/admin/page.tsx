@@ -646,11 +646,12 @@ export default function AdminPage() {
                   <input placeholder="@usuario" value={novoFunc.username} onChange={e => setNovoFunc(p => ({ ...p, username: e.target.value }))} style={inp} />
                   <input placeholder="Senha" type="password" value={novoFunc.password} onChange={e => setNovoFunc(p => ({ ...p, password: e.target.value }))} style={inp} />
                   <select value={(novoFunc as any).role || 'atendente'} onChange={e => setNovoFunc(p => ({ ...p, role: e.target.value }))} style={{ ...inp, appearance: 'none' as any }}>
-                    <option value="atendente">Ã°Å¸â€˜Â©Ã¢â‚¬ÂÃ°Å¸ÂÂ³ Atendente (Cozinha)</option>
-                    <option value="financeiro">Ã°Å¸â€™Â° Financeiro (Dono)</option>
-                    <option value="contador">Ã°Å¸â€œÅ  Contador</option>
-                    <option value="entregador">Ã°Å¸â€ºÂµ Entregador</option>
-                  </select>
+                      <option value="atendente">Atendente (Cozinha)</option>
+                      <option value="financeiro">Financeiro (Dono)</option>
+                      <option value="contador">Contador</option>
+                      <option value="entregador">Entregador</option>
+                      {getUserInfo()?.role === 'dev' && <option value="admin">Admin (Dono total)</option>}
+                    </select>
                   <button onClick={criarFunc} disabled={criando} style={{ background: '#ff6b00', border: 'none', color: '#fff', borderRadius: 10, padding: '11px', cursor: 'pointer', fontSize: 14, fontWeight: 700 }}>
                     {criando ? 'Criando...' : 'Criar funcionÃƒÂ¡rio'}
                   </button>
