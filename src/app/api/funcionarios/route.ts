@@ -7,7 +7,7 @@ export type Funcionario = {
   name: string;
   password: string;
   ativo: boolean;
-  role: "atendente" | "contador" | "financeiro" | "entregador";
+  role: "atendente" | "contador" | "financeiro" | "entregador" | "admin" | "dev";
 };
 
 const FUNCIONARIOS_PADRAO: Funcionario[] = [
@@ -39,7 +39,7 @@ export async function POST(req: NextRequest) {
   if (!body.username || !body.name || !body.password) return NextResponse.json({ error: "Dados incompletos" }, { status: 400 });
   const funcs = await getFuncionarios();
   if (funcs.find(f => f.username === body.username)) return NextResponse.json({ error: "Usuario ja existe" }, { status: 400 });
-  const novo: Funcionario = { username: body.username, name: body.name, password: body.password, ativo: true, role: "atendente" };
+  const novo: Funcionario = { username: body.username, name: body.name, password: body.password, ativo: true, role: body.role || "atendente" };
   await redis.set("funcionarios", [...funcs, novo]);
   return NextResponse.json({ ...novo, password: "••••••" });
 }
@@ -65,5 +65,14 @@ export async function DELETE(req: NextRequest) {
   const funcs = await getFuncionarios();
   const filtered = funcs.filter(f => f.username !== body.username);
   await redis.set("funcionarios", filtered);
+  return NextResponse.json({ ok: true });
+}export async function PUT(req: NextRequest) {
+  if (!await checkAuth(req)) return NextResponse.json({ error: "Nao autorizado" }, { status: 401 });
+  const body = await req.json();
+  if (!body.username || !body.name || !body.password) return NextResponse.json({ error: "Dados incompletos" }, { status: 400 });
+  const funcs = await getFuncionarios();
+  if (funcs.find(f => f.username === body.username)) return NextResponse.json({ error: "Usuario ja existe" }, { status: 400 });
+  const novo: Funcionario = { username: body.username, name: body.name, password: body.password, ativo: true, role: body.role || "atendente" };
+  await redis.set("funcionarios", [...funcs, novo]);
   return NextResponse.json({ ok: true });
 }
