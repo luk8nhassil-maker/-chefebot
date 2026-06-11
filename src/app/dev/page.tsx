@@ -34,7 +34,7 @@ function getUserRole(): string | null {
   return null
 }
 
-function ClientesAcesso() {
+function ClientesAcesso({ senhasCriadas }: { senhasCriadas: Record<string, string> }) {
   const [clientes, setClientes] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -68,7 +68,8 @@ function ClientesAcesso() {
                 {c.ativo ? 'Ativo' : 'Inativo'}
               </span>
               <button onClick={() => {
-                const msg = `*ChefeBot — Acesso de Teste* 🍕\n\n*Pizzaria:* ${c.name}\n*Link:* https://chefebot-pjif.vercel.app/login\n*Usuario:* ${c.username}\n*Senha:* (a senha que voce definiu)\n\nExplore o painel, teste o cardapio e veja como funciona. Qualquer duvida e so chamar! 😊`
+                const senha = senhasCriadas[c.username] || '(senha definida no cadastro)'
+                const msg = `*ChefeBot — Acesso de Teste* 🍕\n\n*Pizzaria:* ${c.name}\n*Link:* https://chefebot-pjif.vercel.app/login\n*Usuario:* ${c.username}\n*Senha:* ${senha}\n\nExplore o painel, teste o cardapio e veja como funciona. Qualquer duvida e so chamar! 😊`
                 window.open('https://wa.me/?text=' + encodeURIComponent(msg), '_blank')
               }} style={{ background: 'rgba(37,211,102,0.1)', border: '1px solid rgba(37,211,102,0.3)', color: '#25d366', borderRadius: 8, padding: '4px 10px', cursor: 'pointer', fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap' }}>
                 Enviar
@@ -81,7 +82,7 @@ function ClientesAcesso() {
   )
 }
 
-function NovoClienteDevForm() {
+function NovoClienteDevForm({ onCriado }: { onCriado: (username: string, senha: string) => void }) {
   const [nome, setNome] = useState('')
   const [usuario, setUsuario] = useState('')
   const [senha, setSenha] = useState('')
@@ -93,7 +94,7 @@ function NovoClienteDevForm() {
     setCriando(true)
     try {
       const res = await fetch('/api/funcionarios', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: nome, username: usuario, password: senha, role: 'admin' }) })
-      if (res.ok) { setResultado('Acesso criado! Login: ' + usuario + ' / Senha: ' + senha); setNome(''); setUsuario(''); setSenha('') }
+      if (res.ok) { onCriado(usuario, senha); setResultado('Acesso criado! Login: ' + usuario + ' / Senha: ' + senha); setNome(''); setUsuario(''); setSenha('') }
       else setResultado('Erro ao criar.')
     } catch { setResultado('Erro.') }
     setCriando(false)
@@ -133,6 +134,7 @@ export default function DevPage() {
   const [busca, setBusca] = useState('')
   const [aba, setAba] = useState<'padroes' | 'logs'>('padroes')
   const [limpandoLogs, setLimpandoLogs] = useState(false)
+  const [senhasCriadas, setSenhasCriadas] = useState<Record<string, string>>({})
 
   useEffect(() => {
     const role = getUserRole()
@@ -312,13 +314,13 @@ export default function DevPage() {
         )}
 
         {/* Clientes com acesso */}
-        <ClientesAcesso />
+        <ClientesAcesso senhasCriadas={senhasCriadas} />
 
         {/* Criar acesso admin */}
         <div style={{ background: 'rgba(255,107,0,0.08)', border: '1px solid rgba(255,107,0,0.2)', borderRadius: 14, padding: 20, marginTop: 24 }}>
           <p style={{ color: '#ff6b00', fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, margin: '0 0 4px' }}>Liberar acesso de teste</p>
           <p style={{ color: 'rgba(255,255,255,0.3)', fontSize: 12, margin: '0 0 14px' }}>Cria um admin para uma pizzaria testar o sistema.</p>
-          <NovoClienteDevForm />
+          <NovoClienteDevForm onCriado={(username, senha) => setSenhasCriadas(prev => ({ ...prev, [username]: senha }))} />
         </div>
 
         <p style={{ textAlign: 'center', color: 'rgba(255,255,255,0.1)', fontSize: 11, marginTop: 32 }}>
