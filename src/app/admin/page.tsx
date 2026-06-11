@@ -139,8 +139,6 @@ export default function AdminPage() {
   const [salvandoCusto, setSalvandoCusto] = useState(false)
   const [analisandoNota, setAnalisandoNota] = useState(false)
   const cameraRef = useRef<HTMLInputElement>(null)
-  const [analisandoNota, setAnalisandoNota] = useState(false)
-  const cameraRef = useRef<HTMLInputElement>(null)
   const mesAtual = new Date().toISOString().slice(0, 7)
   const mesLabel = new Date().toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
   const CATEGORIAS_FIN = [
