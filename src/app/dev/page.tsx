@@ -63,9 +63,17 @@ function ClientesAcesso() {
               <p style={{ color: '#fff', fontSize: 13, fontWeight: 700, margin: 0 }}>{c.name}</p>
               <p style={{ color: '#444', fontSize: 11, margin: '2px 0 0' }}>@{c.username} · Admin</p>
             </div>
-            <span style={{ background: c.ativo ? 'rgba(74,222,128,0.1)' : 'rgba(248,113,113,0.1)', color: c.ativo ? '#4ade80' : '#f87171', fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20, border: `1px solid ${c.ativo ? '#16a34a40' : '#dc262640'}` }}>
-              {c.ativo ? 'Ativo' : 'Inativo'}
-            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ background: c.ativo ? 'rgba(74,222,128,0.1)' : 'rgba(248,113,113,0.1)', color: c.ativo ? '#4ade80' : '#f87171', fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20, border: `1px solid ${c.ativo ? '#16a34a40' : '#dc262640'}` }}>
+                {c.ativo ? 'Ativo' : 'Inativo'}
+              </span>
+              <button onClick={() => {
+                const msg = `*ChefeBot — Acesso de Teste* 🍕\n\n*Pizzaria:* ${c.name}\n*Link:* https://chefebot-pjif.vercel.app/login\n*Usuario:* ${c.username}\n*Senha:* (a senha que voce definiu)\n\nExplore o painel, teste o cardapio e veja como funciona. Qualquer duvida e so chamar! 😊`
+                window.open('https://wa.me/?text=' + encodeURIComponent(msg), '_blank')
+              }} style={{ background: 'rgba(37,211,102,0.1)', border: '1px solid rgba(37,211,102,0.3)', color: '#25d366', borderRadius: 8, padding: '4px 10px', cursor: 'pointer', fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap' }}>
+                Enviar
+              </button>
+            </div>
           </div>
         ))}
       </div>
