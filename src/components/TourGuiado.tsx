@@ -41,7 +41,12 @@ export default function TourGuiado({ passos, storageKey, onClose }: Props) {
 
   function playClick(freq=700, dur=0.06) {
     try {
-      if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)()
+      if (!audioCtxRef.current) {
+        audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)()
+      }
+      if (audioCtxRef.current.state === 'suspended') {
+        audioCtxRef.current.resume()
+      }
       const ctx = audioCtxRef.current
       const o = ctx.createOscillator()
       const g = ctx.createGain()
