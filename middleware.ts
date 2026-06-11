@@ -23,7 +23,7 @@ export async function middleware(req: NextRequest) {
   try {
     const { payload } = await jwtVerify(token, getSecret());
     const role = payload.role as string;
-    if (!rule.roles.includes(role as "admin" | "atendente" | "dev")) {
+    if (!rule.roles.includes(role as any)) {
       const loginUrl = new URL("/login", req.url);
       loginUrl.searchParams.set("callbackUrl", pathname);
       return NextResponse.redirect(loginUrl);
