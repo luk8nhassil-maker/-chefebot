@@ -300,6 +300,7 @@ export default function AdminPage() {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
+          {getUserInfo()?.role === 'dev' && <button onClick={() => router.push('/dev')} style={{ background: '#1a1a1a', border: '1px solid #2a2a2a', color: '#60a5fa', borderRadius: 10, padding: '8px 14px', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>Dev</button>}
           <button onClick={() => router.push('/pedidos')} style={{ background: '#1a1a1a', border: '1px solid #2a2a2a', color: '#fff', borderRadius: 10, padding: '8px 14px', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>Cozinha</button>
           <button onClick={() => fetch('/api/auth/logout', { method: 'POST' }).then(() => router.push('/login'))} style={{ background: '#1a1a1a', border: '1px solid #2a2a2a', color: '#555', borderRadius: 10, padding: '8px 12px', cursor: 'pointer', fontSize: 12 }}>Sair</button>
         </div>
