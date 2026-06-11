@@ -59,7 +59,17 @@ function NovoClienteDevForm() {
       <button onClick={criar} disabled={criando} style={{ width: '100%', background: criando ? 'rgba(255,255,255,0.05)' : '#ff6b00', border: 'none', borderRadius: 10, padding: '12px', color: '#fff', fontSize: 14, fontWeight: 700, cursor: criando ? 'not-allowed' : 'pointer' }}>
         {criando ? 'Criando...' : '+ Criar acesso admin'}
       </button>
-      {resultado && <p style={{ color: '#4ade80', fontSize: 12, margin: '10px 0 0', background: 'rgba(74,222,128,0.1)', borderRadius: 8, padding: '8px 12px' }}>{resultado}</p>}
+      {resultado && (
+        <div style={{ marginTop: 12 }}>
+          <p style={{ color: '#4ade80', fontSize: 12, margin: '0 0 10px', background: 'rgba(74,222,128,0.1)', borderRadius: 8, padding: '8px 12px' }}>{resultado}</p>
+          <button onClick={() => {
+            const mensagem = `Ola! Aqui e a Ominix IA. 👋\n\nSeu acesso ao *ChefeBot* esta pronto para teste!\n\n🍕 *O que e o ChefeBot?*\nUm sistema completo de pedidos via WhatsApp para sua pizzaria. Seu cliente faz o pedido direto pelo WhatsApp — sem app, sem complicacao.\n\n🔗 *Link de acesso:*\nhttps://chefebot-pjif.vercel.app/login\n\n👤 *Usuario:* ${usuario || 'seu-usuario'}\n🔑 *Senha:* (a que voce definiu)\n\n📱 *O que explorar:*\n• Painel de pedidos em tempo real\n• Dashboard com faturamento\n• Cardapio dinamico\n• Configuracoes da pizzaria\n\nQualquer duvida e so chamar! 😊`
+            window.open('https://wa.me/?text=' + encodeURIComponent(mensagem), '_blank')
+          }} style={{ width: '100%', background: '#0d1a0d', border: '1px solid #16a34a40', borderRadius: 10, padding: '12px', color: '#4ade80', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>
+            Compartilhar acesso no WhatsApp
+          </button>
+        </div>
+      )}
     </div>
   )
 }
