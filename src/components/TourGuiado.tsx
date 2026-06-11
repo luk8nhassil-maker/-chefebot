@@ -72,17 +72,21 @@ export default function TourGuiado({ passos, storageKey, onClose }: Props) {
 
   function typeText(text: string) {
     if (typeRef.current) clearTimeout(typeRef.current)
-    setTyping(''); setIsMouthing(true)
+    setTyping('')
+    setIsMouthing(true)
     let i = 0
+    const fullText = text
     function next() {
-      if (i <= text.length) {
-        if (i > 0 && i % 3 === 0 && i < text.length) playClick(560 + Math.random()*200, 0.025)
-        setTyping(text.slice(0, i))
+      if (i <= fullText.length) {
+        const slice = fullText.slice(0, i)
+        setTyping(slice)
         i++
-        typeRef.current = setTimeout(next, i < 3 ? 0 : 17)
-      } else setIsMouthing(false)
+        typeRef.current = setTimeout(next, 20)
+      } else {
+        setIsMouthing(false)
+      }
     }
-    next()
+    setTimeout(next, 100)
   }
 
   function clearParticles() {
