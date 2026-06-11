@@ -129,17 +129,21 @@ export default function TourGuiado({ passos, storageKey, onClose }: Props) {
         const r = getPos(p.highlightId!)
         setSplRect(r)
         if (p.particles && r) spawnParticles(r.left + r.w/2 - 3, r.top + r.h/2 - 3, p.accent)
-      }, 100)
+      }, 150)
     } else {
       setSplRect(null)
       clearParticles()
     }
     if (p.arrowId) {
-      setTimeout(() => setArrowRect(getPos(p.arrowId!)), 100)
+      setTimeout(() => setArrowRect(getPos(p.arrowId!)), 150)
     } else setArrowRect(null)
-    typeText(p.text)
+    setTimeout(() => typeText(p.text), 200)
     playClick(360 + cur * 60, 0.07)
   }, [cur])
+
+  useEffect(() => {
+    setTimeout(() => typeText(passos[0].text), 300)
+  }, [])
 
   useEffect(() => {
     return () => {
