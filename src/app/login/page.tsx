@@ -28,18 +28,7 @@ function LoginForm() {
       try {
         const user = JSON.parse(decodeURIComponent(match[1]));
         // Verifica se o token ainda e valido antes de redirecionar
-        fetch('/api/auth/login', { method: 'GET' }).then(r => {
-          if (r.status === 405) {
-            // API existe, cookie valido — redireciona
-            router.replace(getDestino(user.role, callbackUrl));
-          } else {
-            // Limpa cookies e fica na tela de login
-            document.cookie = 'auth-token=; max-age=0; path=/'
-            document.cookie = 'auth-user=; max-age=0; path=/'
-          }
-        }).catch(() => {
-          router.replace(getDestino(user.role, callbackUrl));
-        })
+        router.replace(getDestino(user.role, callbackUrl));
       } catch {
         document.cookie = 'auth-token=; max-age=0; path=/'
         document.cookie = 'auth-user=; max-age=0; path=/'
