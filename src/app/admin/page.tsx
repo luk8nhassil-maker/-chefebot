@@ -23,7 +23,7 @@ type Cardapio = {
   sizes: { code: string; label: string; price: number }[]
   borders: { label: string; priceSmall: number; priceLarge: number }[]
 }
-type Aba = 'dashboard' | 'cardapio' | 'config' | 'dev'
+type Aba = 'dashboard' | 'cardapio' | 'config' | 'financeiro' | 'dev'
 type Periodo = 'ontem' | 'hoje' | 'semana' | 'personalizado'
 
 function getUserInfo(): { name: string; role: string } | null {
@@ -131,6 +131,24 @@ export default function AdminPage() {
   const [salvandoEntregador, setSalvandoEntregador] = useState(false)
   const [novaBebida, setNovaBebida] = useState({ name: '', price: '' })
   const [novoBairro, setNovoBairro] = useState({ name: '', fee: '' })
+  const [custos, setCustos] = useState<{id: string; descricao: string; valor: number; categoria: string; data: string; mes: string}[]>([])
+  const [faturamentoMes, setFaturamentoMes] = useState(0)
+  const [novoDescricao, setNovoDescricao] = useState('')
+  const [novoValor, setNovoValor] = useState('')
+  const [novaCategoria, setNovaCategoria] = useState('ingredientes')
+  const [salvandoCusto, setSalvandoCusto] = useState(false)
+  const mesAtual = new Date().toISOString().slice(0, 7)
+  const mesLabel = new Date().toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
+  const CATEGORIAS_FIN = [
+    { key: 'ingredientes', label: '🧄 Ingredientes', cor: '#f97316' },
+    { key: 'embalagens', label: '📦 Embalagens', cor: '#3b82f6' },
+    { key: 'energia', label: '💡 Energia/Gás', cor: '#eab308' },
+    { key: 'funcionarios', label: '👥 Funcionários', cor: '#8b5cf6' },
+    { key: 'aluguel', label: '🏠 Aluguel', cor: '#ec4899' },
+    { key: 'marketing', label: '📱 Marketing', cor: '#06b6d4' },
+    { key: 'manutencao', label: '🔧 Manutenção', cor: '#84cc16' },
+    { key: 'outros', label: '📋 Outros', cor: '#6b7280' },
+  ]
   const inputPizzaRef = useRef<HTMLInputElement>(null)
   const inputLancheRef = useRef<HTMLInputElement>(null)
   const inputBebidaRef = useRef<HTMLInputElement>(null)
@@ -150,8 +168,12 @@ export default function AdminPage() {
       fetch('/api/ranking').then(r => r.json()).catch(() => []),
       fetch('/api/cardapio').then(r => r.json()).catch(() => null),
       fetch('/api/entregadores').then(r => r.json()).catch(() => []),
-    ]).then(([ped, cfg, funcs, imgs, avals, rank, card, entreg]) => {
+      fetch(`/api/financeiro?mes=${new Date().toISOString().slice(0, 7)}`).then(r => r.json()).catch(() => []),
+    ]).then(([ped, cfg, funcs, imgs, avals, rank, card, entreg, cs]) => {
       setEntregadores(Array.isArray(entreg) ? entreg : [])
+      setCustos(Array.isArray(cs) ? cs : [])
+      const entreguesMes = Array.isArray(ped) ? ped.filter((p: any) => p.status === 'entregue').reduce((s: number, p: any) => s + (Number(p.total) || 0), 0) : 0
+      setFaturamentoMes(entreguesMes)
       setPedidos(Array.isArray(ped) ? ped : [])
       setConfig(cfg)
       setLimitePico(cfg.limitePico || 0)
@@ -683,6 +705,76 @@ export default function AdminPage() {
           </div>
         )}
 
+        {/* ABA FINANCEIRO */}
+        {aba === 'financeiro' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+              <div style={card}>
+                <p style={{ color: '#555', fontSize: 9, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 6px', letterSpacing: 0.5 }}>Faturamento</p>
+                <p style={{ color: '#4ade80', fontSize: 16, fontWeight: 800, margin: 0 }}>R$ {faturamentoMes.toFixed(2).replace('.', ',')}</p>
+              </div>
+              <div style={card}>
+                <p style={{ color: '#555', fontSize: 9, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 6px', letterSpacing: 0.5 }}>Custos</p>
+                <p style={{ color: '#f87171', fontSize: 16, fontWeight: 800, margin: 0 }}>R$ {custos.reduce((s, c) => s + c.valor, 0).toFixed(2).replace('.', ',')}</p>
+              </div>
+              <div style={card}>
+                <p style={{ color: '#555', fontSize: 9, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 6px', letterSpacing: 0.5 }}>Lucro</p>
+                <p style={{ color: faturamentoMes - custos.reduce((s, c) => s + c.valor, 0) >= 0 ? '#4ade80' : '#f87171', fontSize: 16, fontWeight: 800, margin: 0 }}>R$ {(faturamentoMes - custos.reduce((s, c) => s + c.valor, 0)).toFixed(2).replace('.', ',')}</p>
+              </div>
+            </div>
+
+            <div style={card}>
+              <p style={sectionTitle}>+ Adicionar custo</p>
+              <input placeholder="Descrição (ex: Farinha de trigo 10kg)" value={novoDescricao} onChange={e => setNovoDescricao(e.target.value)} style={{ ...inp, marginBottom: 8 }} />
+              <input placeholder="Valor (R$)" value={novoValor} onChange={e => setNovoValor(e.target.value)} style={{ ...inp, marginBottom: 8 }} />
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+                {CATEGORIAS_FIN.map(cat => (
+                  <button key={cat.key} onClick={() => setNovaCategoria(cat.key)} style={{ padding: '5px 10px', borderRadius: 20, border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 600, background: novaCategoria === cat.key ? cat.cor : '#1a1a1a', color: novaCategoria === cat.key ? '#fff' : '#555' }}>
+                    {cat.label}
+                  </button>
+                ))}
+              </div>
+              <button onClick={async () => {
+                if (!novoDescricao.trim() || !novoValor.trim()) return
+                setSalvandoCusto(true)
+                const res = await fetch('/api/financeiro', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ descricao: novoDescricao.trim(), valor: parseFloat(novoValor.replace(',', '.')), categoria: novaCategoria }) })
+                const d = await res.json()
+                if (d.ok) { setCustos(prev => [...prev, d.custo]); setNovoDescricao(''); setNovoValor(''); msg('✅ Custo adicionado!') }
+                setSalvandoCusto(false)
+              }} disabled={salvandoCusto} style={{ width: '100%', background: salvandoCusto ? '#1a1a1a' : '#16a34a', border: 'none', borderRadius: 10, padding: '12px', color: '#fff', fontSize: 14, fontWeight: 700, cursor: salvandoCusto ? 'not-allowed' : 'pointer' }}>
+                {salvandoCusto ? 'Salvando...' : '+ Adicionar'}
+              </button>
+            </div>
+
+            {custos.length > 0 && (
+              <div style={card}>
+                <p style={sectionTitle}>Custos de {mesLabel}</p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {custos.slice().reverse().map(c => {
+                    const cat = CATEGORIAS_FIN.find(cat => cat.key === c.categoria)
+                    return (
+                      <div key={c.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#0d0d0d', borderRadius: 10, padding: '10px 12px' }}>
+                        <div>
+                          <p style={{ color: '#e0e0e0', fontSize: 13, fontWeight: 600, margin: 0 }}>{c.descricao}</p>
+                          <p style={{ color: '#444', fontSize: 11, margin: '2px 0 0' }}>{cat?.label} · {c.data}</p>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ color: '#f87171', fontSize: 14, fontWeight: 700 }}>R$ {c.valor.toFixed(2).replace('.', ',')}</span>
+                          <button onClick={async () => {
+                            await fetch('/api/financeiro', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: c.id, mes: mesAtual }) })
+                            setCustos(prev => prev.filter(x => x.id !== c.id))
+                            msg('✅ Removido!')
+                          }} style={{ background: 'none', border: 'none', color: '#333', cursor: 'pointer', fontSize: 18, padding: 0 }}>×</button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* ABA DEV */}
         {aba === 'dev' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -730,6 +822,7 @@ export default function AdminPage() {
           { key: 'dashboard', icon: '📊', label: 'Dashboard' },
           { key: 'cardapio', icon: '🍕', label: 'Cardápio' },
           { key: 'config', icon: '⚙️', label: 'Config' },
+          { key: 'financeiro', icon: '💰', label: 'Financeiro' },
           { key: 'dev', icon: '🛠️', label: 'Suporte' },
         ] as { key: Aba; icon: string; label: string }[]).map(({ key, icon, label }) => (
           <button key={key} onClick={() => setAba(key)} style={{ flex: 1, background: 'none', border: 'none', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, padding: '6px 0' }}>
