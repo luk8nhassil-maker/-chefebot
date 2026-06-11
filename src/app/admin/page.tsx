@@ -138,6 +138,11 @@ export default function AdminPage() {
   const [novaCategoria, setNovaCategoria] = useState('ingredientes')
   const [salvandoCusto, setSalvandoCusto] = useState(false)
   const [analisandoNota, setAnalisandoNota] = useState(false)
+  const [mesFechado, setMesFechado] = useState(false)
+  const [editandoCusto, setEditandoCusto] = useState<string | null>(null)
+  const [editDescricao, setEditDescricao] = useState('')
+  const [editValor, setEditValor] = useState('')
+  const [editCategoria, setEditCategoria] = useState('ingredientes')
   const cameraRef = useRef<HTMLInputElement>(null)
   const mesAtual = new Date().toISOString().slice(0, 7)
   const mesLabel = new Date().toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
@@ -173,7 +178,8 @@ export default function AdminPage() {
       fetch(`/api/financeiro?mes=${new Date().toISOString().slice(0, 7)}`).then(r => r.json()).catch(() => []),
     ]).then(([ped, cfg, funcs, imgs, avals, rank, card, entreg, cs]) => {
       setEntregadores(Array.isArray(entreg) ? entreg : [])
-      setCustos(Array.isArray(cs) ? cs : [])
+      if (cs?.custos) { setCustos(cs.custos); setMesFechado(cs.status?.fechado || false) }
+      else if (Array.isArray(cs)) setCustos(cs)
       const entreguesMes = Array.isArray(ped) ? ped.filter((p: any) => p.status === 'entregue').reduce((s: number, p: any) => s + (Number(p.total) || 0), 0) : 0
       setFaturamentoMes(entreguesMes)
       setPedidos(Array.isArray(ped) ? ped : [])
@@ -776,22 +782,55 @@ export default function AdminPage() {
               <div style={card}>
                 <p style={sectionTitle}>Custos de {mesLabel}</p>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {mesFechado && (
+                    <div style={{ background: '#14532d20', border: '1px solid #16a34a30', borderRadius: 10, padding: '10px 12px', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontSize: 16 }}>🔒</span>
+                      <p style={{ color: '#4ade80', fontSize: 12, fontWeight: 600, margin: 0 }}>Mês fechado pelo contador — somente leitura</p>
+                    </div>
+                  )}
                   {custos.slice().reverse().map(c => {
                     const cat = CATEGORIAS_FIN.find(cat => cat.key === c.categoria)
+                    const estaEditando = editandoCusto === c.id
                     return (
-                      <div key={c.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#0d0d0d', borderRadius: 10, padding: '10px 12px' }}>
-                        <div>
-                          <p style={{ color: '#e0e0e0', fontSize: 13, fontWeight: 600, margin: 0 }}>{c.descricao}</p>
-                          <p style={{ color: '#444', fontSize: 11, margin: '2px 0 0' }}>{cat?.label} · {c.data}</p>
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <span style={{ color: '#f87171', fontSize: 14, fontWeight: 700 }}>R$ {c.valor.toFixed(2).replace('.', ',')}</span>
-                          <button onClick={async () => {
-                            await fetch('/api/financeiro', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: c.id, mes: mesAtual }) })
-                            setCustos(prev => prev.filter(x => x.id !== c.id))
-                            msg('✅ Removido!')
-                          }} style={{ background: 'none', border: 'none', color: '#333', cursor: 'pointer', fontSize: 18, padding: 0 }}>×</button>
-                        </div>
+                      <div key={c.id} style={{ background: '#0d0d0d', borderRadius: 10, padding: '10px 12px', marginBottom: 6 }}>
+                        {estaEditando ? (
+                          <div>
+                            <input value={editDescricao} onChange={e => setEditDescricao(e.target.value)} style={{ ...inp, marginBottom: 6 }} />
+                            <input value={editValor} onChange={e => setEditValor(e.target.value)} style={{ ...inp, marginBottom: 6 }} />
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 8 }}>
+                              {CATEGORIAS_FIN.map(cat => (
+                                <button key={cat.key} onClick={() => setEditCategoria(cat.key)} style={{ padding: '3px 8px', borderRadius: 20, border: 'none', cursor: 'pointer', fontSize: 10, fontWeight: 600, background: editCategoria === cat.key ? cat.cor : '#1a1a1a', color: editCategoria === cat.key ? '#fff' : '#555' }}>{cat.label}</button>
+                              ))}
+                            </div>
+                            <div style={{ display: 'flex', gap: 6 }}>
+                              <button onClick={async () => {
+                                const res = await fetch('/api/financeiro', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: c.id, descricao: editDescricao, valor: parseFloat(editValor.replace(',', '.')), categoria: editCategoria, mes: mesAtual }) })
+                                if (res.ok) { setCustos(prev => prev.map(x => x.id === c.id ? { ...x, descricao: editDescricao, valor: parseFloat(editValor.replace(',', '.')), categoria: editCategoria } : x)); setEditandoCusto(null); msg('✅ Atualizado!') }
+                              }} style={{ flex: 1, background: '#16a34a', border: 'none', borderRadius: 8, padding: '8px', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Salvar</button>
+                              <button onClick={() => setEditandoCusto(null)} style={{ background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8, padding: '8px 12px', color: '#666', fontSize: 12, cursor: 'pointer' }}>Cancelar</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <div>
+                              <p style={{ color: '#e0e0e0', fontSize: 13, fontWeight: 600, margin: 0 }}>{c.descricao}</p>
+                              <p style={{ color: '#444', fontSize: 11, margin: '2px 0 0' }}>{cat?.label} · {c.data}</p>
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <span style={{ color: '#f87171', fontSize: 13, fontWeight: 700 }}>R$ {c.valor.toFixed(2).replace('.', ',')}</span>
+                              {!mesFechado && (
+                                <>
+                                  <button onClick={() => { setEditandoCusto(c.id); setEditDescricao(c.descricao); setEditValor(String(c.valor)); setEditCategoria(c.categoria) }} style={{ background: 'none', border: 'none', color: '#555', cursor: 'pointer', fontSize: 14, padding: 0 }}>✏️</button>
+                                  <button onClick={async () => {
+                                    await fetch('/api/financeiro', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: c.id, mes: mesAtual }) })
+                                    setCustos(prev => prev.filter(x => x.id !== c.id))
+                                    msg('✅ Removido!')
+                                  }} style={{ background: 'none', border: 'none', color: '#333', cursor: 'pointer', fontSize: 16, padding: 0 }}>×</button>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )
                   })}
