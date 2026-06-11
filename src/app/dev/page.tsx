@@ -34,6 +34,45 @@ function getUserRole(): string | null {
   return null
 }
 
+function ClientesAcesso() {
+  const [clientes, setClientes] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    fetch('/api/funcionarios')
+      .then(r => r.json())
+      .then(data => {
+        if (Array.isArray(data)) {
+          setClientes(data.filter((f: any) => f.role === 'admin'))
+        }
+        setLoading(false)
+      }).catch(() => setLoading(false))
+  }, [])
+
+  if (loading) return null
+  if (clientes.length === 0) return null
+
+  return (
+    <div style={{ background: 'rgba(96,165,250,0.08)', border: '1px solid rgba(96,165,250,0.2)', borderRadius: 14, padding: 20, marginTop: 24 }}>
+      <p style={{ color: '#60a5fa', fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, margin: '0 0 4px' }}>Acessos criados</p>
+      <p style={{ color: 'rgba(255,255,255,0.3)', fontSize: 12, margin: '0 0 14px' }}>{clientes.length} pizzaria{clientes.length > 1 ? 's' : ''} com acesso ao sistema</p>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {clientes.map((c, i) => (
+          <div key={i} style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 10, padding: '10px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div>
+              <p style={{ color: '#fff', fontSize: 13, fontWeight: 700, margin: 0 }}>{c.name}</p>
+              <p style={{ color: '#444', fontSize: 11, margin: '2px 0 0' }}>@{c.username} · Admin</p>
+            </div>
+            <span style={{ background: c.ativo ? 'rgba(74,222,128,0.1)' : 'rgba(248,113,113,0.1)', color: c.ativo ? '#4ade80' : '#f87171', fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20, border: `1px solid ${c.ativo ? '#16a34a40' : '#dc262640'}` }}>
+              {c.ativo ? 'Ativo' : 'Inativo'}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function NovoClienteDevForm() {
   const [nome, setNome] = useState('')
   const [usuario, setUsuario] = useState('')
@@ -263,6 +302,9 @@ export default function DevPage() {
             )}
           </div>
         )}
+
+        {/* Clientes com acesso */}
+        <ClientesAcesso />
 
         {/* Criar acesso admin */}
         <div style={{ background: 'rgba(255,107,0,0.08)', border: '1px solid rgba(255,107,0,0.2)', borderRadius: 14, padding: 20, marginTop: 24 }}>
