@@ -1,6 +1,6 @@
 import { SignJWT, jwtVerify } from "jose";
 
-export type Role = "admin" | "atendente" | "dev";
+export type Role = "admin" | "atendente" | "dev" | "contador" | "financeiro" | "entregador";
 
 export interface AuthUser {
   username: string;

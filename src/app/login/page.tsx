@@ -6,6 +6,9 @@ function getDestino(role: string, callbackUrl: string | null): string {
   if (callbackUrl) return callbackUrl;
   if (role === 'dev') return '/dev';
   if (role === 'admin') return '/admin';
+  if (role === 'contador') return '/contador';
+  if (role === 'financeiro') return '/financeiro';
+  if (role === 'entregador') return '/entregador';
   return '/pedidos';
 }
 

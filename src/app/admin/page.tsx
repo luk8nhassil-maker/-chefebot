@@ -615,6 +615,12 @@ export default function AdminPage() {
                   <input placeholder="Nome" value={novoFunc.name} onChange={e => setNovoFunc(p => ({ ...p, name: e.target.value }))} style={inp} />
                   <input placeholder="@usuario" value={novoFunc.username} onChange={e => setNovoFunc(p => ({ ...p, username: e.target.value }))} style={inp} />
                   <input placeholder="Senha" type="password" value={novoFunc.password} onChange={e => setNovoFunc(p => ({ ...p, password: e.target.value }))} style={inp} />
+                  <select value={(novoFunc as any).role || 'atendente'} onChange={e => setNovoFunc(p => ({ ...p, role: e.target.value }))} style={{ ...inp, appearance: 'none' as any }}>
+                    <option value="atendente">👩‍🍳 Atendente (Cozinha)</option>
+                    <option value="financeiro">💰 Financeiro (Dono)</option>
+                    <option value="contador">📊 Contador</option>
+                    <option value="entregador">🛵 Entregador</option>
+                  </select>
                   <button onClick={criarFunc} disabled={criando} style={{ background: '#ff6b00', border: 'none', color: '#fff', borderRadius: 10, padding: '11px', cursor: 'pointer', fontSize: 14, fontWeight: 700 }}>
                     {criando ? 'Criando...' : 'Criar funcionário'}
                   </button>

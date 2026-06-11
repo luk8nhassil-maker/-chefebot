@@ -7,7 +7,7 @@ export type Funcionario = {
   name: string;
   password: string;
   ativo: boolean;
-  role: "atendente";
+  role: "atendente" | "contador" | "financeiro" | "entregador";
 };
 
 const FUNCIONARIOS_PADRAO: Funcionario[] = [
