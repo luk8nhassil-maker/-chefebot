@@ -8,31 +8,30 @@ function getSecret() {
   );
 }
 
+function clearAuthAndRedirect(req: NextRequest) {
+  const loginUrl = new URL("/login", req.url);
+  loginUrl.searchParams.set("callbackUrl", req.nextUrl.pathname);
+  const res = NextResponse.redirect(loginUrl);
+  res.cookies.set("auth-token", "", { maxAge: 0, path: "/" });
+  res.cookies.set("auth-user", "", { maxAge: 0, path: "/" });
+  return res;
+}
+
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
   const rule = ROUTE_ROLES.find((r) => pathname.startsWith(r.path));
   if (!rule) return NextResponse.next();
 
   const token = req.cookies.get("auth-token")?.value;
-  if (!token) {
-    const loginUrl = new URL("/login", req.url);
-    loginUrl.searchParams.set("callbackUrl", pathname);
-    return NextResponse.redirect(loginUrl);
-  }
+  if (!token) return clearAuthAndRedirect(req);
 
   try {
     const { payload } = await jwtVerify(token, getSecret());
     const role = payload.role as string;
-    if (!rule.roles.includes(role as any)) {
-      const loginUrl = new URL("/login", req.url);
-      loginUrl.searchParams.set("callbackUrl", pathname);
-      return NextResponse.redirect(loginUrl);
-    }
+    if (!rule.roles.includes(role as any)) return clearAuthAndRedirect(req);
     return NextResponse.next();
   } catch {
-    const loginUrl = new URL("/login", req.url);
-    loginUrl.searchParams.set("callbackUrl", pathname);
-    return NextResponse.redirect(loginUrl);
+    return clearAuthAndRedirect(req);
   }
 }
 
