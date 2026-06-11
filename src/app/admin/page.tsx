@@ -147,14 +147,14 @@ export default function AdminPage() {
   const mesAtual = new Date().toISOString().slice(0, 7)
   const mesLabel = new Date().toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
   const CATEGORIAS_FIN = [
-    { key: 'ingredientes', label: 'Ã°Å¸Â§â€ž Ingredientes', cor: '#f97316' },
-    { key: 'embalagens', label: 'Ã°Å¸â€œÂ¦ Embalagens', cor: '#3b82f6' },
-    { key: 'energia', label: 'Ã°Å¸â€™Â¡ Energia/GÃƒÂ¡s', cor: '#eab308' },
-    { key: 'funcionarios', label: 'Ã°Å¸â€˜Â¥ FuncionÃƒÂ¡rios', cor: '#8b5cf6' },
-    { key: 'aluguel', label: 'Ã°Å¸ÂÂ  Aluguel', cor: '#ec4899' },
-    { key: 'marketing', label: 'Ã°Å¸â€œÂ± Marketing', cor: '#06b6d4' },
-    { key: 'manutencao', label: 'Ã°Å¸â€Â§ ManutenÃƒÂ§ÃƒÂ£o', cor: '#84cc16' },
-    { key: 'outros', label: 'Ã°Å¸â€œâ€¹ Outros', cor: '#6b7280' },
+    { key: 'ingredientes', label: '\u{1F9C4} Ingredientes', cor: '#f97316' },
+    { key: 'embalagens', label: '\u{1F4E6} Embalagens', cor: '#3b82f6' },
+    { key: 'energia', label: '\u{1F4A1} Energia/Gas', cor: '#eab308' },
+    { key: 'funcionarios', label: '\u{1F465} Funcionarios', cor: '#8b5cf6' },
+    { key: 'aluguel', label: '\u{1F3E0} Aluguel', cor: '#ec4899' },
+    { key: 'marketing', label: '\u{1F4F1} Marketing', cor: '#06b6d4' },
+    { key: 'manutencao', label: '\u{1F527} Manutencao', cor: '#84cc16' },
+    { key: 'outros', label: '\u{1F4CB} Outros', cor: '#6b7280' },
   ]
   const inputPizzaRef = useRef<HTMLInputElement>(null)
   const inputLancheRef = useRef<HTMLInputElement>(null)
