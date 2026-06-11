@@ -29,8 +29,8 @@ export default function TourGuiado({ passos, storageKey, onClose }: Props) {
   const [dismissed, setDismissed] = useState(false)
   const [splRect, setSplRect] = useState<{top:number;left:number;w:number;h:number}|null>(null)
   const [arrowRect, setArrowRect] = useState<{top:number;left:number;w:number;h:number}|null>(null)
-  const [typing, setTyping] = useState('')
   const [isMouthing, setIsMouthing] = useState(false)
+  const typingRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const typeRef = useRef<NodeJS.Timeout|null>(null)
   const mouthRef = useRef<NodeJS.Timeout|null>(null)
@@ -72,21 +72,19 @@ export default function TourGuiado({ passos, storageKey, onClose }: Props) {
 
   function typeText(text: string) {
     if (typeRef.current) clearTimeout(typeRef.current)
-    setTyping('')
     setIsMouthing(true)
     let i = 0
-    const fullText = text
+    if (typingRef.current) typingRef.current.textContent = ''
     function next() {
-      if (i <= fullText.length) {
-        const slice = fullText.slice(0, i)
-        setTyping(slice)
+      if (i <= text.length) {
+        if (typingRef.current) typingRef.current.textContent = text.slice(0, i)
         i++
-        typeRef.current = setTimeout(next, 20)
+        typeRef.current = setTimeout(next, 22)
       } else {
         setIsMouthing(false)
       }
     }
-    setTimeout(next, 100)
+    setTimeout(next, 150)
   }
 
   function clearParticles() {
@@ -279,7 +277,7 @@ export default function TourGuiado({ passos, storageKey, onClose }: Props) {
               <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 9, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.5, padding: '2px 7px', borderRadius: 20, marginBottom: 5, background: s.tagBg, color: s.tagColor, transition: 'all 0.3s' }}>{s.tag}</div>
               <div style={{ fontSize: 13, fontWeight: 800, color: '#111', lineHeight: 1.2, marginBottom: 3 }}>{s.title}</div>
               <div style={{ fontSize: 11, color: '#666', lineHeight: 1.45, minHeight: 48, wordBreak: 'break-word', overflowWrap: 'break-word' }}>
-                {typing}{isMouthing && <span style={{ display: 'inline-block', width: 2, height: 11, background: '#ccc', marginLeft: 1, verticalAlign: 'middle', animation: 'arrowFloat 0.7s step-end infinite' }} />}
+                <span ref={typingRef}></span>{isMouthing && <span style={{ display: 'inline-block', width: 2, height: 11, background: '#ccc', marginLeft: 1, verticalAlign: 'middle', animation: 'arrowFloat 0.7s step-end infinite' }} />}
               </div>
             </div>
           </div>
