@@ -480,7 +480,7 @@ export function processMessage(input: string, session: BotSession): BotResponse 
         };
       }
       if (eNegativa(n) || n === "2") {
-        return { messages: [`Tudo bem! ${mensagemCategorias()}`], session: resetaTentativas({ ...session, step: "category", customerName: historico.nome, historico: undefined }) };
+        return { messages: [`Tudo bem! ${mensagemCategorias()}`], session: resetaTentativas({ ...session, step: "category", customerName: historico.nome }) };
       }
       return {
         messages: [`Ei *${firstName}*! 😊 Da última vez você pediu *${ultimoPedido}* — vai querer repetir ou montar um novo?\n\n  1. Repetir o mesmo\n  2. Quero outra coisa`],
