@@ -202,9 +202,10 @@ async function processarComprovante(phone: string, data: any, config: ConfigPizz
   try {
     const sessionKey = `session:${phone}`;
     const session = await redis.get<BotSession>(sessionKey);
-    const pedidosCheck = await redis.get<any[]>("pedidos") || [];
-    const pedidoPix = pedidosCheck.find(p => p.telefone === phone && p.status === "novo" && p.pagamento === "Pix");
-    const isPix = session?.paymentMethod === "Pix" || !!pedidoPix;
+    const pedidosVerif = await redis.get<any[]>("pedidos") || [];
+    const pedidoVerif = pedidosVerif.find(p => p.telefone === phone && p.status === "novo");
+    const isPix = session?.paymentMethod === "Pix" || session?.step === "aguardando_pix" || pedidoVerif?.pagamento === "Pix";
+    console.log("[ChefeBot] isPix:", isPix, "step:", session?.step, "pagamento:", pedidoVerif?.pagamento);
     if (!isPix) return;
 
     const isAguardandoPix = session?.step === "aguardando_pix";
@@ -310,7 +311,6 @@ export async function POST(req: NextRequest) {
     const isPDF = !!data?.message?.documentMessage &&
       (data?.message?.documentMessage?.mimetype === "application/pdf" ||
        data?.message?.documentMessage?.fileName?.endsWith(".pdf"));
-    console.log("[ChefeBot] Tipo mensagem:", JSON.stringify(Object.keys(data?.message || {})));
     if (isImagem || isPDF) {
       await processarComprovante(phone, data, config, isImagem);
       return NextResponse.json({ ok: true });
