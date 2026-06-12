@@ -306,19 +306,20 @@ async function processarComprovante(phone: string, data: any, config: ConfigPizz
     let mediaType: "image/jpeg" | "image/png" | "image/webp" | "application/pdf" = isImagem ? "image/jpeg" : "application/pdf";
     try {
       const downloadUrl = `https://${process.env.EVOLUTION_API_URL}/chat/getBase64FromMediaMessage/chefe`;
-      const msgPayload = { message: data?.data?.message || data?.message };
+      const msgPayload = { message: data?.data || data };
       const downloadRes = await fetch(downloadUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json", apikey: process.env.EVOLUTION_API_KEY! },
         body: JSON.stringify(msgPayload),
       });
-      const downloadRawText = await downloadRes.text();
-      return NextResponse.json({
-        debug: true,
-        status: downloadRes.status,
-        payload_enviado: msgPayload,
-        resposta_evolution: downloadRawText.slice(0, 500)
-      });
+      if (downloadRes.ok) {
+        const downloadData = await downloadRes.json();
+        imagemBase64 = downloadData.base64 || "";
+        if (downloadData.mimetype) mediaType = downloadData.mimetype;
+      } else {
+        const errText = await downloadRes.text();
+        await log("aviso", "Download comprovante falhou", errText.slice(0, 200));
+      }
     } catch (err) {
       await log("aviso", "Erro ao baixar comprovante", String(err));
     }
