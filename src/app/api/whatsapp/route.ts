@@ -295,7 +295,7 @@ export async function POST(req: NextRequest) {
 
     const config = await getConfig();
     const menuDinamico = await getMENUDinamico();
-    console.log("[ChefeBot] Preco P:", menuDinamico.sizes?.find(s => s.code === "P")?.price);
+    console.log("[ChefeBot] Preco P:", menuDinamico.sizes?.find((s: {code: string}) => s.code === "P")?.price);
     setMenuDinamico(menuDinamico);
     
 
