@@ -81,12 +81,13 @@ Se não conseguir ler: {"valor": null, "chave": null, "valido": false, "motivo":
     const resultado = JSON.parse(clean);
 
     const motivo = resultado.motivo || "";
-    let mensagemInvalido = "Comprovante inválido.";
-    if (motivo.includes("data")) mensagemInvalido = "Comprovante com data incorreta — use um comprovante de hoje.";
-    else if (motivo.includes("horario")) mensagemInvalido = "Comprovante com horário anterior ao pedido — envie o comprovante do pagamento realizado agora.";
-    else if (motivo.includes("agendado") || motivo.includes("nao concluido")) mensagemInvalido = "Pix agendado não é aceito — realize o pagamento agora.";
-    else if (motivo.includes("valor")) mensagemInvalido = "Valor do comprovante não confere com o pedido.";
-    else if (motivo.includes("nome")) mensagemInvalido = "Destinatário do comprovante não confere.";
+    let mensagemInvalido = "Hmm, não consegui confirmar esse comprovante. 😕 Pode tentar enviar de novo?";
+    if (motivo.includes("data")) mensagemInvalido = "Eita! 😅 Esse comprovante parece ser de outro dia. Para confirmar seu pedido precisa ser o comprovante de hoje mesmo, tá? Faz o Pix agora e manda o comprovante fresquinho! 🍕";
+    else if (motivo.includes("horario")) mensagemInvalido = "Opa! 🤔 Esse comprovante é de antes do seu pedido. Precisa ser o Pix feito agora, depois que você confirmou o pedido. Faz o pagamento e manda o comprovante, pode ser? 😊";
+    else if (motivo.includes("agendado") || motivo.includes("nao concluido")) mensagemInvalido = "Xiii, parece que esse Pix foi agendado ou ainda não foi concluído. 😬 A gente precisa do pagamento confirmado na hora! Faz o Pix normal (não agendado) e manda o comprovante. 👍";
+    else if (motivo.includes("valor")) mensagemInvalido = "Hmm, o valor do comprovante não bate com o do seu pedido. 🧐 Confere se pagou o valor certinho e manda o comprovante correto, por favor!";
+    else if (motivo.includes("nome")) mensagemInvalido = "Não consegui identificar o destinatário nesse comprovante. 😕 Certifica que o Pix foi para a chave correta e manda o comprovante de novo!";
+    else if (motivo.includes("ilegivel")) mensagemInvalido = "Não consegui ler esse comprovante direito. 😅 Tenta mandar uma foto mais nítida ou o PDF completo do comprovante!";
 
     return {
       valido: resultado.valido === true,
