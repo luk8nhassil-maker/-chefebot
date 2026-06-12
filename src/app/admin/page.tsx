@@ -196,7 +196,7 @@ export default function AdminPage() {
       setImagens(imgs || { ativo: true })
       setAvaliacoes(avals || { total: 0, media: 0, ultimas: [] })
       setRanking(Array.isArray(rank) ? rank : [])
-      if (card) setCardapio({ saltyFlavors: card.saltyFlavors || [], sweetFlavors: card.sweetFlavors || [], bebidas: card.bebidas || [], sucos: card.sucos || [], neighborhoods: card.neighborhoods || [], sizes: card.sizes || [], borders: card.borders || [] })
+      if (card) setCardapio({ saltyFlavors: card.saltyFlavors || [], sweetFlavors: card.sweetFlavors || [], bebidas: card.bebidas || [], sucos: card.sucos || [], neighborhoods: card.neighborhoods || [], sizes: card.sizes?.length ? card.sizes : [{ code: 'P', label: 'Pequena', price: 35 }, { code: 'M', label: 'Media', price: 40 }, { code: 'G', label: 'Grande', price: 50 }, { code: 'F', label: 'Familia', price: 55 }], borders: card.borders || [] })
       setEntregadores(Array.isArray(entreg) ? entreg : [])
       if (fin?.custos) { setCustos(fin.custos); setMesFechado(fin.status?.fechado || false) }
       const entreguesMes = Array.isArray(ped) ? ped.filter((p: any) => p.status === 'entregue').reduce((s: number, p: any) => s + (Number(p.total) || 0), 0) : 0
