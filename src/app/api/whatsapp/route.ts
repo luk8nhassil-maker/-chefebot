@@ -403,8 +403,8 @@ export async function POST(req: NextRequest) {
     );
     console.log("[PIX-DEBUG2] messageType:", messageType, "isImagem:", isImagem, "isPDF:", isPDF);
     if (isImagem || isPDF) {
-      const resultado = await processarComprovante(phone, data, config, isImagem);
-      return resultado || NextResponse.json({ ok: true });
+      await processarComprovante(phone, data, config, isImagem);
+      return NextResponse.json({ ok: true });
     }
 
     // Detecta comprovante Pix enviado como texto/cartao automatico
