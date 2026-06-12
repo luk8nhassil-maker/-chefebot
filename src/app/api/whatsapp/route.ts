@@ -306,7 +306,8 @@ async function processarComprovante(phone: string, data: any, config: ConfigPizz
     let mediaType: "image/jpeg" | "image/png" | "image/webp" | "application/pdf" = isImagem ? "image/jpeg" : "application/pdf";
     try {
       const downloadUrl = `https://${process.env.EVOLUTION_API_URL}/chat/getBase64FromMediaMessage/chefe`;
-      const msgPayload = data?.data || data;
+      const msgPayload = { message: data?.data?.message || data?.message };
+console.log("[DOWNLOAD-PAYLOAD-FIXED]", JSON.stringify(msgPayload).slice(0, 400));
       console.log("[DOWNLOAD-PAYLOAD]", JSON.stringify(msgPayload).slice(0,300));
       const downloadRes = await fetch(downloadUrl, {
         method: "POST",
