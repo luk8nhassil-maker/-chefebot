@@ -20,36 +20,28 @@ type Pedido = {
   pixConfirmado?: boolean
 }
 
-const STATUS_CONFIG: Record<Status, { label: string; color: string; bg: string; border: string; btnBg: string; btnColor: string }> = {
-  novo:         { label: "Novo",       color: "#fbbf24", bg: "#fbbf2412", border: "#fbbf2430", btnBg: "#fbbf24", btnColor: "#000" },
-  em_preparo:   { label: "Preparo",    color: "#fb923c", bg: "#fb923c12", border: "#fb923c30", btnBg: "#fb923c", btnColor: "#000" },
-  saiu_entrega: { label: "Na entrega", color: "#60a5fa", bg: "#60a5fa12", border: "#60a5fa30", btnBg: "#60a5fa", btnColor: "#000" },
-  entregue:     { label: "Entregue",   color: "#4ade80", bg: "#00000000", border: "#ffffff08", btnBg: "#4ade80", btnColor: "#000" },
-  cancelado:    { label: "Cancelado",  color: "#f87171", bg: "#00000000", border: "#ffffff08", btnBg: "#f87171", btnColor: "#fff" },
+const NEXT_STATUS: Record<Status, Status | null> = {
+  novo: "em_preparo",
+  em_preparo: "saiu_entrega",
+  saiu_entrega: "entregue",
+  entregue: null,
+  cancelado: null,
 }
 
-const PROXIMO_STATUS: Record<Status, Status | null> = {
-  novo: "em_preparo", em_preparo: "saiu_entrega", saiu_entrega: "entregue", entregue: null, cancelado: null,
+const ACTION_LABEL: Record<Status, string> = {
+  novo: "Começar a fazer",
+  em_preparo: "Saiu para entrega",
+  saiu_entrega: "Confirmar entrega",
+  entregue: "",
+  cancelado: "",
 }
 
-const PROXIMO_LABEL: Record<Status, string> = {
-  novo: "🔥 Iniciar preparo",
-  em_preparo: "🛵 Saiu para entrega",
-  saiu_entrega: "✅ Confirmar entrega",
-  entregue: "", cancelado: "",
-}
-
-function tempoDesde(horario: string): string {
-  try {
-    const [h, m] = horario.split(":").map(Number)
-    const agora = new Date()
-    const t = new Date(); t.setHours(h, m, 0, 0)
-    const diff = Math.floor((agora.getTime() - t.getTime()) / 60000)
-    if (diff < 1) return "agora"
-    if (diff < 60) return `${diff}min`
-    const hr = Math.floor(diff / 60), mn = diff % 60
-    return mn > 0 ? `${hr}h${mn}m` : `${hr}h`
-  } catch { return "" }
+const BADGE_CFG: Record<Status, { bg: string; fg: string; label: string }> = {
+  novo:         { bg: "#ff6b00",               fg: "#060606", label: "Novo" },
+  em_preparo:   { bg: "rgba(250,204,21,.14)",   fg: "#facc15", label: "Fazendo" },
+  saiu_entrega: { bg: "rgba(96,165,250,.14)",   fg: "#60a5fa", label: "Na rua" },
+  entregue:     { bg: "rgba(34,197,94,.14)",    fg: "#22c55e", label: "Entregue" },
+  cancelado:    { bg: "rgba(239,68,68,.14)",    fg: "#ef4444", label: "Cancelado" },
 }
 
 function getUserInfo(): { name: string; role: string } | null {
@@ -62,7 +54,6 @@ function getUserInfo(): { name: string; role: string } | null {
         const raw = trimmed.substring("auth-user=".length)
         let decoded = raw
         try { decoded = decodeURIComponent(raw) } catch {}
-        if (decoded.startsWith("%7B")) try { decoded = decodeURIComponent(decoded) } catch {}
         return JSON.parse(decoded)
       }
     }
@@ -70,10 +61,21 @@ function getUserInfo(): { name: string; role: string } | null {
   return null
 }
 
-type Toast = { id: number; message: string; type: "success" | "error" | "warning" | "info" }
+function tempoDesde(horario: string): number {
+  try {
+    const [h, m] = horario.split(":").map(Number)
+    const agora = new Date()
+    const t = new Date(); t.setHours(h, m, 0, 0)
+    return Math.max(0, Math.floor((agora.getTime() - t.getTime()) / 60000))
+  } catch { return 0 }
+}
 
-let audioPavlov: HTMLAudioElement | null = null
-let audioUrgente: HTMLAudioElement | null = null
+function timerDash(mins: number, meta: number = 40): { dash: number; color: string } {
+  const CIRC = 163.4
+  const progress = Math.min(mins / meta, 1)
+  const color = progress < 0.5 ? "#22c55e" : progress < 0.85 ? "#facc15" : "#ef4444"
+  return { dash: CIRC * (1 - progress), color }
+}
 
 export default function PedidosPage() {
   const router = useRouter()
@@ -81,69 +83,44 @@ export default function PedidosPage() {
   const [filtro, setFiltro] = useState<Status | "todos">("novo")
   const [loading, setLoading] = useState(true)
   const [isAdmin, setIsAdmin] = useState(false)
-  const [ultimaAtualizacao, setUltimaAtualizacao] = useState("")
-  const [atualizando, setAtualizando] = useState<string | null>(null)
-  const [toasts, setToasts] = useState<Toast[]>([])
+  const [userName, setUserName] = useState("Kellyne")
   const [botAtivo, setBotAtivo] = useState(true)
   const [salvandoBot, setSalvandoBot] = useState(false)
+  const [atualizando, setAtualizando] = useState<string | null>(null)
   const [manuais, setManuais] = useState<Record<string, boolean>>({})
+  const [detailId, setDetailId] = useState<string | null>(null)
   const [cardUrgenciaFechado, setCardUrgenciaFechado] = useState(false)
-  const prevEscalonadosRef = useRef(0)
-  const cardJaMostrouRef = useRef(false)
-  const [somAtivado, setSomAtivado] = useState(false)
-  const [resumoPedido, setResumoPedido] = useState<Pedido | null>(null)
+  const [toast, setToast] = useState<{ text: string; expires: number; pedidoId: string; prevStatus: Status } | null>(null)
+  const [now, setNow] = useState(Date.now())
+  const [leavingId, setLeavingId] = useState<string | null>(null)
+  const [flashId, setFlashId] = useState<string | null>(null)
   const [entregadores, setEntregadores] = useState<{id: string; nome: string; telefone: string; ativo: boolean}[]>([])
   const [modalEntrega, setModalEntrega] = useState<{pedidoId: string; proxStatus: Status} | null>(null)
+
   const prevIdsRef = useRef<string[]>([])
   const piscarRef = useRef<NodeJS.Timeout | null>(null)
   const somRepetidoRef = useRef<NodeJS.Timeout | null>(null)
-  const tituloOriginalRef = useRef(typeof document !== "undefined" ? document.title : "Cozinha")
-  const toastIdRef = useRef(0)
-  const filtrosRef = useRef<HTMLDivElement>(null)
-  const botoesRef = useRef<(HTMLButtonElement | null)[]>([])
+  const tituloOriginalRef = useRef(typeof document !== "undefined" ? document.title : "Pedidos")
+  const toastTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const flashTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const leaveTimerRef = useRef<NodeJS.Timeout | null>(null)
 
-  const addToast = (message: string, type: Toast["type"] = "success") => {
-    const id = ++toastIdRef.current
-    setToasts(prev => [...prev, { id, message, type }])
-    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3500)
-  }
-
-  const ativarSom = () => {
+  const tocarSom = () => {
     try {
-      audioPavlov = new Audio("/pavlov.mp3")
-      audioPavlov.play().catch(() => {})
-      audioPavlov.pause()
-      audioPavlov.currentTime = 0
-      audioPavlov.volume = 1.0
-      audioUrgente = new Audio("/urgente.mp3")
-      audioUrgente.play().catch(() => {})
-      audioUrgente.pause()
-      audioUrgente.currentTime = 0
-      audioUrgente.volume = 1.0
-      setSomAtivado(true)
+      const Ctx = (window as any).AudioContext || (window as any).webkitAudioContext
+      const ctx = new Ctx()
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.connect(gain); gain.connect(ctx.destination)
+      osc.type = "sine"
+      osc.frequency.setValueAtTime(880, ctx.currentTime)
+      osc.frequency.setValueAtTime(1175, ctx.currentTime + 0.13)
+      gain.gain.setValueAtTime(0.18, ctx.currentTime)
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.55)
+      osc.start(); osc.stop(ctx.currentTime + 0.55)
     } catch {}
+    if (navigator.vibrate) navigator.vibrate([120, 60, 120])
   }
-
-  const tocarSomLocal = (urgente = false) => {
-    try {
-      const audio = urgente ? audioUrgente : audioPavlov
-      if (!audio) return
-      audio.currentTime = 0
-      audio.volume = 1.0
-      audio.play().catch(() => {})
-    } catch {}
-  }
-
-  useEffect(() => {
-    const user = getUserInfo()
-    if (user) setIsAdmin(user.role === "admin" || user.role === "dev")
-    if ("Notification" in window && Notification.permission === "default") Notification.requestPermission()
-    carregarPedidos()
-    carregarStatusBot()
-    fetch('/api/entregadores').then(r => r.json()).then(d => setEntregadores(Array.isArray(d) ? d.filter((e: any) => e.ativo) : [])).catch(() => {})
-    const intervalo = setInterval(carregarPedidos, 10000)
-    return () => { clearInterval(intervalo); if (piscarRef.current) clearInterval(piscarRef.current); document.title = tituloOriginalRef.current }
-  }, [router])
 
   const iniciarPiscar = () => {
     if (piscarRef.current) return
@@ -156,43 +133,16 @@ export default function PedidosPage() {
   }
   const iniciarSomRepetido = () => {
     if (somRepetidoRef.current) return
-    somRepetidoRef.current = setInterval(() => { tocarSomLocal(true) }, 3000)
+    somRepetidoRef.current = setInterval(() => tocarSom(), 3000)
   }
   const pararSomRepetido = () => {
     if (somRepetidoRef.current) { clearInterval(somRepetidoRef.current); somRepetidoRef.current = null }
   }
+
   const carregarStatusBot = async () => {
     try { const r = await fetch("/api/bot-status"); if (r.ok) { const d = await r.json(); setBotAtivo(d.ativo) } } catch {}
   }
-  const alternarBot = async () => {
-    setSalvandoBot(true)
-    try {
-      const novo = !botAtivo
-      const r = await fetch("/api/bot-status", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ativo: novo }) })
-      if (r.ok) { setBotAtivo(novo); addToast(novo ? "🤖 Robô atendendo!" : "⏸️ Robô em pausa!", novo ? "success" : "warning") }
-    } catch {}
-    setSalvandoBot(false)
-  }
-  const assumirConversa = async (phone: string) => {
-    try {
-      await fetch("/api/bot-status", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phone, ativo: false }) })
-      setManuais(prev => ({ ...prev, [phone]: true })); pararPiscar(); pararSomRepetido(); window.open("https://wa.me/" + phone, "_blank")
-    } catch {}
-  }
-  const devolverAoBot = async (phone: string) => {
-    try {
-      await fetch("/api/bot-status", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phone, ativo: true }) })
-      setManuais(prev => ({ ...prev, [phone]: false })); addToast("🤖 Bot retomou a conversa", "info")
-    } catch {}
-  }
-  const marcarResolvido = async (phone: string, pedidoId: string) => {
-    try {
-      await fetch("/api/resolver", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phone }) })
-      setManuais(prev => ({ ...prev, [phone]: false }))
-      setPedidos(prev => prev.map(p => p.id === pedidoId ? { ...p, escalonado: false, status: "entregue" } : p))
-      pararPiscar(); addToast("✅ Resolvido! Cliente notificado.", "success")
-    } catch {}
-  }
+
   const carregarPedidos = () => {
     fetch("/api/orders")
       .then(r => { if (r.status === 401) { fetch("/api/auth/logout", { method: "POST" }).finally(() => router.push("/login?callbackUrl=/pedidos")); return null } return r.json() })
@@ -204,410 +154,584 @@ export default function PedidosPage() {
             const chegaram = data.filter((p: Pedido) => !anteriores.includes(p.id))
             if (chegaram.length > 0) {
               const temEsc = chegaram.some((p: Pedido) => p.escalonado)
-              const temCanc = chegaram.some((p: Pedido) => p.cancelamentoSolicitado)
-              tocarSomLocal(temEsc)
-              if (temEsc) { addToast("🚨 URGENTE! Cliente precisa de você!", "error"); iniciarPiscar(); iniciarSomRepetido() }
-              else if (temCanc) addToast("⚠️ Cancelamento solicitado!", "warning")
-              else addToast(`🍕 ${chegaram.length} novo${chegaram.length > 1 ? "s" : ""} pedido${chegaram.length > 1 ? "s" : ""}!`, "success")
+              tocarSom()
+              if (temEsc) { iniciarPiscar(); iniciarSomRepetido() }
             }
           }
-          prevIdsRef.current = novosIds; setPedidos(data); setLoading(false)
-          const novosEscalonados = data.filter((p: Pedido) => p.escalonado && p.status === 'novo').length
-          if (novosEscalonados > 0 && (!cardJaMostrouRef.current || novosEscalonados > prevEscalonadosRef.current)) {
-            setCardUrgenciaFechado(false)
-            cardJaMostrouRef.current = true
-          }
-          if (novosEscalonados === 0) cardJaMostrouRef.current = false
-          prevEscalonadosRef.current = novosEscalonados
-          setUltimaAtualizacao(new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }))
+          prevIdsRef.current = novosIds
+          setPedidos(data)
+          setLoading(false)
           if (!data.some((p: Pedido) => p.escalonado && p.status === "novo")) { pararPiscar(); pararSomRepetido() }
         }
       })
       .catch(() => setTimeout(carregarPedidos, 3000))
   }
+
+  useEffect(() => {
+    const user = getUserInfo()
+    if (user) {
+      setIsAdmin(user.role === "admin" || user.role === "dev")
+      setUserName(user.name || "Kellyne")
+    }
+    if ("Notification" in window && Notification.permission === "default") Notification.requestPermission()
+    carregarPedidos()
+    carregarStatusBot()
+    fetch("/api/entregadores").then(r => r.json()).then(d => setEntregadores(Array.isArray(d) ? d.filter((e: any) => e.ativo) : [])).catch(() => {})
+    const intervalo = setInterval(carregarPedidos, 10000)
+    const tick = setInterval(() => setNow(Date.now()), 1000)
+    return () => {
+      clearInterval(intervalo)
+      clearInterval(tick)
+      if (piscarRef.current) clearInterval(piscarRef.current)
+      if (somRepetidoRef.current) clearInterval(somRepetidoRef.current)
+      document.title = tituloOriginalRef.current
+    }
+  }, [router])
+
+  const alternarBot = async () => {
+    setSalvandoBot(true)
+    try {
+      const novo = !botAtivo
+      const r = await fetch("/api/bot-status", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ativo: novo }) })
+      if (r.ok) setBotAtivo(novo)
+    } catch {}
+    setSalvandoBot(false)
+  }
+
+  const assumirConversa = async (phone: string) => {
+    try {
+      await fetch("/api/assumir", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phone }) })
+      setManuais(prev => ({ ...prev, [phone]: true }))
+    } catch {}
+  }
+
+  const devolverAoBot = async (phone: string) => {
+    try {
+      await fetch("/api/devolver", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phone }) })
+      setManuais(prev => ({ ...prev, [phone]: false }))
+    } catch {}
+  }
+
+  const marcarResolvido = async (phone: string, pedidoId: string) => {
+    try {
+      await fetch("/api/resolver", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phone }) })
+      setManuais(prev => ({ ...prev, [phone]: false }))
+      setPedidos(prev => prev.map(p => p.id === pedidoId ? { ...p, escalonado: false, status: "entregue" } : p))
+      pararPiscar()
+    } catch {}
+  }
+
   const avancarStatus = async (id: string, novoStatus: Status, entregador?: {id: string; nome: string; telefone: string}) => {
+    const pedido = pedidos.find(p => p.id === id)
+    if (!pedido) return
+    const prevStatus = pedido.status
+
+    // Animação de saída se o filtro é do status atual
+    const F2S: Record<string, Status> = { novo: "novo", em_preparo: "em_preparo", saiu_entrega: "saiu_entrega", entregue: "entregue" }
+    const willLeave = filtro !== "todos" && F2S[filtro] === prevStatus
+
     setAtualizando(id)
     const r = await fetch("/api/orders", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, status: novoStatus, entregador }) })
-    if (r.ok) { setPedidos(prev => prev.map(p => p.id === id ? { ...p, status: novoStatus } : p)); addToast(`${STATUS_CONFIG[novoStatus].label} ✅`, "success") }
+    if (r.ok) {
+      setPedidos(prev => prev.map(p => p.id === id ? { ...p, status: novoStatus } : p))
+
+      if (willLeave) {
+        setLeavingId(id)
+        if (leaveTimerRef.current) clearTimeout(leaveTimerRef.current)
+        leaveTimerRef.current = setTimeout(() => setLeavingId(null), 350)
+      } else {
+        setFlashId(id)
+        if (flashTimerRef.current) clearTimeout(flashTimerRef.current)
+        flashTimerRef.current = setTimeout(() => setFlashId(null), 750)
+      }
+
+      const firstName = pedido.cliente.split(" ")[0]
+      const novoLabel = BADGE_CFG[novoStatus].label
+      setToast({ text: `${firstName} → ${novoLabel}`, expires: Date.now() + 5000, pedidoId: id, prevStatus })
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
+      toastTimerRef.current = setTimeout(() => setToast(null), 5000)
+    }
     setModalEntrega(null)
     setAtualizando(null)
   }
-  const confirmarCancelamento = async (id: string) => {
-    setAtualizando(id)
-    const r = await fetch("/api/orders", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, status: "cancelado" }) })
-    if (r.ok) { setPedidos(prev => prev.map(p => p.id === id ? { ...p, status: "cancelado", cancelamentoSolicitado: false } : p)); addToast("Pedido cancelado", "warning") }
-    setAtualizando(null)
+
+  const desfazerToast = () => {
+    if (!toast) return
+    setPedidos(prev => prev.map(p => p.id === toast.pedidoId ? { ...p, status: toast.prevStatus } : p))
+    fetch("/api/orders", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: toast.pedidoId, status: toast.prevStatus }) })
+    setToast(null)
+    setFlashId(null)
   }
 
-  const contagem = (s: Status | "todos") => s === "todos" ? pedidos.filter(p => !p.escalonado).length : pedidos.filter(p => p.status === s && !p.escalonado).length
-  const pedidosFiltrados = (filtro === "todos" ? pedidos : pedidos.filter(p => p.status === filtro)).sort((a, b) => {
-    if (a.escalonado && !b.escalonado) return -1; if (!a.escalonado && b.escalonado) return 1
-    if (a.cancelamentoSolicitado && !b.cancelamentoSolicitado) return -1; return 0
-  })
-  const ativos = pedidos.filter(p => !["entregue", "cancelado"].includes(p.status) && !p.escalonado).length
-  const escalonados = pedidos.filter(p => p.escalonado && p.status === "novo").length
-  const eAtivo = (s: Status) => !["entregue", "cancelado"].includes(s)
+  // Dados derivados
+  const escalonados = pedidos.filter(p => p.escalonado && p.status === "novo")
+  const emAberto = pedidos.filter(p => !["entregue", "cancelado"].includes(p.status)).length
+  const totalHoje = pedidos.length
+
+  const contagemPorStatus = (s: Status) => pedidos.filter(p => p.status === s).length
+
+  const pedidosFiltrados = (filtro === "todos" ? pedidos : pedidos.filter(p => p.status === filtro))
+    .sort((a, b) => {
+      if (a.escalonado && !b.escalonado) return -1
+      if (!a.escalonado && b.escalonado) return 1
+      if (a.cancelamentoSolicitado && !b.cancelamentoSolicitado) return -1
+      return 0
+    })
+
+  const detalhePedido = pedidos.find(p => p.id === detailId) || null
+
+  const toastSegs = toast ? Math.max(0, Math.ceil((toast.expires - now) / 1000)) : 0
+  const toastVisible = !!toast && toast.expires > now
+
+  // Avaliação média (mock por ora)
+  const avaliacaoMedia = "4,9"
+
+  const steps = [
+    { key: "novo" as Status,         label: "Novos",   count: contagemPorStatus("novo") },
+    { key: "em_preparo" as Status,   label: "Fazendo", count: contagemPorStatus("em_preparo") },
+    { key: "saiu_entrega" as Status, label: "Na rua",  count: contagemPorStatus("saiu_entrega") },
+    { key: "entregue" as Status,     label: "Prontos", count: contagemPorStatus("entregue") },
+  ]
 
   if (loading) return (
-    <div style={{ minHeight: "100vh", background: "#080808", display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ textAlign: "center" }}><div style={{ fontSize: 32, marginBottom: 12 }}>🍕</div><p style={{ color: "#333", fontSize: 14 }}>Carregando...</p></div>
+    <div style={{ minHeight: "100vh", background: "#060606", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ textAlign: "center" }}>
+        <div style={{ fontSize: 36, marginBottom: 12 }}>🍕</div>
+        <p style={{ color: "#a39b8b", fontSize: 14, fontFamily: "'Archivo', sans-serif" }}>Carregando...</p>
+      </div>
     </div>
   )
 
-  const toastColors: Record<Toast["type"], string> = { success: "#4ade80", error: "#f87171", warning: "#fb923c", info: "#60a5fa" }
   return (
-    <div style={{ minHeight: "100vh", background: "#080808", paddingBottom: 80, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>
+    <>
       <style>{`
-        @keyframes slideUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
-        @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.5; } }
-        @keyframes sheetUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+        @import url('https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800;900&display=swap');
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        html, body { margin: 0; padding: 0; background: #060606; }
+        button { cursor: pointer; font-family: 'Archivo', sans-serif; }
+        @keyframes cbPulse {
+          0% { box-shadow: 0 0 0 0 rgba(34,197,94,.55); }
+          70% { box-shadow: 0 0 0 7px rgba(34,197,94,0); }
+          100% { box-shadow: 0 0 0 0 rgba(34,197,94,0); }
+        }
+        @keyframes cbRedPulse {
+          0% { box-shadow: 0 0 0 0 rgba(239,68,68,.5); }
+          70% { box-shadow: 0 0 0 7px rgba(239,68,68,0); }
+          100% { box-shadow: 0 0 0 0 rgba(239,68,68,0); }
+        }
+        @keyframes cbUrgentGlow {
+          0%, 100% { border-color: rgba(239,68,68,.45); }
+          50% { border-color: rgba(239,68,68,.9); }
+        }
+        @keyframes cbNewGlow {
+          0% { box-shadow: 0 0 0 0 rgba(255,107,0,.4); }
+          70% { box-shadow: 0 0 0 10px rgba(255,107,0,0); }
+          100% { box-shadow: 0 0 0 0 rgba(255,107,0,0); }
+        }
+        @keyframes cbCardIn {
+          from { opacity: 0; transform: translateY(16px) scale(.97); }
+          to { opacity: 1; transform: none; }
+        }
+        @keyframes cbCardOut {
+          to { opacity: 0; transform: translateX(48px) scale(.96); }
+        }
+        @keyframes cbFlash {
+          0% { transform: scale(1); }
+          30% { transform: scale(1.012); box-shadow: 0 0 0 3px rgba(255,107,0,.55); }
+          100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(255,107,0,0); }
+        }
+        @keyframes cbToastIn {
+          from { opacity: 0; transform: translateY(14px); }
+          to { opacity: 1; transform: none; }
+        }
+        @keyframes cbSheetUp {
+          from { transform: translateY(100%); }
+          to { transform: none; }
+        }
+        @keyframes cbFadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        @keyframes cbCancelGlow {
+          0%, 100% { border-color: rgba(239,68,68,.3); }
+          50% { border-color: rgba(239,68,68,.7); }
+        }
       `}</style>
 
-      {/* Modal Entregador */}
-      {modalEntrega && (
-        <div onClick={() => setModalEntrega(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 1000, display: "flex", alignItems: "flex-end" }}>
-          <div onClick={e => e.stopPropagation()} style={{ width: "100%", background: "#111", borderRadius: "20px 20px 0 0", padding: "20px 20px 40px" }}>
-            <div style={{ width: 40, height: 4, background: "#333", borderRadius: 2, margin: "0 auto 20px" }} />
-            <p style={{ color: "#fff", fontSize: 17, fontWeight: 800, margin: "0 0 6px" }}>Quem vai entregar?</p>
-            <p style={{ color: "#444", fontSize: 12, margin: "0 0 20px" }}>Selecione o entregador</p>
-            <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 }}>
-              {entregadores.filter(e => e.ativo).map(e => (
-                <button key={e.id} onClick={() => avancarStatus(modalEntrega.pedidoId, modalEntrega.proxStatus, e)} style={{ background: "#0d0d0d", border: "1px solid #1e1e1e", borderRadius: 14, padding: "16px", color: "#fff", fontSize: 15, fontWeight: 700, cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: 12 }}>
-                  <span style={{ fontSize: 24 }}>🛵</span>
-                  <div>
-                    <p style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>{e.nome}</p>
-                    <p style={{ margin: 0, fontSize: 11, color: "#444" }}>{e.telefone}</p>
-                  </div>
-                </button>
-              ))}
+      <div style={{ minHeight: "100vh", maxWidth: 375, margin: "0 auto", background: "#060606", color: "#f5f2ee", fontFamily: "'Archivo', sans-serif", display: "flex", flexDirection: "column", paddingBottom: 90 }}>
+
+        {/* Header */}
+        <header style={{ display: "flex", alignItems: "center", gap: 12, padding: "18px 16px 12px" }}>
+          <div style={{ position: "relative", width: 48, height: 48, flexShrink: 0 }}>
+            <div style={{ width: 48, height: 48, borderRadius: "50%", background: "linear-gradient(135deg,#ff6b00,#ff9a3d)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 900, fontSize: 18, color: "#060606", letterSpacing: "-0.5px" }}>
+              {userName.slice(0, 2).toUpperCase()}
             </div>
-            <button onClick={() => setModalEntrega(null)} style={{ width: "100%", background: "#1a1a1a", border: "1px solid #2a2a2a", borderRadius: 12, padding: "14px", color: "#666", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
-              Cancelar
-            </button>
+            <span style={{ position: "absolute", right: 0, bottom: 0, width: 13, height: 13, borderRadius: "50%", background: "#22c55e", border: "3px solid #060606", animation: "cbPulse 2s infinite" }} />
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 20, fontWeight: 900, letterSpacing: "-0.4px", lineHeight: 1.1 }}>Oi, {userName.split(" ")[0]}</div>
+            <div style={{ fontSize: 12, color: "#a39b8b", fontWeight: 600, marginTop: 2 }}>Alto Alegre · ChefeBot</div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {isAdmin && (
+              <button onClick={() => router.push("/admin")} style={{ fontSize: 11, fontWeight: 800, color: "#a39b8b", background: "transparent", border: "1px solid #242220", padding: "6px 10px", borderRadius: 20 }}>Admin</button>
+            )}
+            <button onClick={() => fetch("/api/auth/logout", { method: "POST" }).then(() => router.push("/login"))} style={{ fontSize: 11, fontWeight: 800, color: "#5a564d", background: "transparent", border: "1px solid #1f1d1a", padding: "6px 10px", borderRadius: 20 }}>Sair</button>
+          </div>
+        </header>
+
+        {/* Bot toggle */}
+        <button onClick={alternarBot} disabled={salvandoBot} style={{ display: "flex", alignItems: "center", gap: 10, margin: "0 16px", padding: "13px 14px", background: botAtivo ? "rgba(34,197,94,.06)" : "rgba(250,204,21,.06)", border: `1px solid ${botAtivo ? "rgba(34,197,94,.28)" : "rgba(250,204,21,.3)"}`, borderRadius: 14, color: "#f5f2ee", textAlign: "left" }}>
+          <span style={{ width: 10, height: 10, borderRadius: "50%", background: botAtivo ? "#22c55e" : "#facc15", flexShrink: 0 }} />
+          <span style={{ flex: 1, fontSize: 14, fontWeight: 800, letterSpacing: "-0.2px" }}>{botAtivo ? "Bot atendendo no WhatsApp" : "Bot pausado · você no comando"}</span>
+          <span style={{ fontSize: 12, fontWeight: 800, color: botAtivo ? "#22c55e" : "#facc15", background: "#060606", padding: "6px 12px", borderRadius: 10, flexShrink: 0 }}>{botAtivo ? "Pausar" : "Ativar"}</span>
+        </button>
+
+        {/* Métricas */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, padding: "14px 16px 6px" }}>
+          <div style={{ background: "#101010", border: "1px solid #1f1d1a", borderRadius: 16, padding: "14px 12px", display: "flex", flexDirection: "column", gap: 3 }}>
+            <span style={{ fontSize: 26, fontWeight: 900, letterSpacing: "-1px", lineHeight: 1 }}>{totalHoje}</span>
+            <span style={{ fontSize: 10.5, fontWeight: 700, color: "#a39b8b", textTransform: "uppercase", letterSpacing: ".5px" }}>Pedidos hoje</span>
+          </div>
+          <div style={{ background: "#101010", border: "1px solid #1f1d1a", borderRadius: 16, padding: "14px 12px", display: "flex", flexDirection: "column", gap: 3 }}>
+            <span style={{ fontSize: 26, fontWeight: 900, letterSpacing: "-1px", lineHeight: 1, color: "#ff6b00" }}>{emAberto}</span>
+            <span style={{ fontSize: 10.5, fontWeight: 700, color: "#a39b8b", textTransform: "uppercase", letterSpacing: ".5px" }}>Em aberto</span>
+          </div>
+          <div style={{ background: "#101010", border: "1px solid #1f1d1a", borderRadius: 16, padding: "14px 12px", display: "flex", flexDirection: "column", gap: 3 }}>
+            <span style={{ fontSize: 26, fontWeight: 900, letterSpacing: "-1px", lineHeight: 1, color: "#facc15" }}>{avaliacaoMedia}</span>
+            <span style={{ fontSize: 10.5, fontWeight: 700, color: "#a39b8b", textTransform: "uppercase", letterSpacing: ".5px" }}>Avaliação</span>
           </div>
         </div>
-      )}
 
-      {/* Bottom Sheet Resumo */}
-      {resumoPedido && (
-        <div onClick={() => setResumoPedido(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 1000, display: "flex", alignItems: "flex-end" }}>
-          <div onClick={e => e.stopPropagation()} style={{ width: "100%", background: "#111", borderRadius: "20px 20px 0 0", padding: "20px 20px 40px", animation: "sheetUp 0.25s ease", maxHeight: "80vh", overflowY: "auto" }}>
-            <div style={{ width: 40, height: 4, background: "#333", borderRadius: 2, margin: "0 auto 20px" }} />
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-              <div>
-                <p style={{ fontWeight: 900, fontSize: 20, color: "#fff", margin: 0, letterSpacing: -0.5 }}>{resumoPedido.cliente}</p>
-                <p style={{ fontSize: 12, color: "#444", margin: "2px 0 0" }}>{resumoPedido.horario} · #{resumoPedido.id.slice(-4)}</p>
-              </div>
-              <button onClick={() => setResumoPedido(null)} style={{ background: "#1e1e1e", border: "none", color: "#666", borderRadius: 10, width: 36, height: 36, fontSize: 18, cursor: "pointer" }}>✕</button>
-            </div>
-            <div style={{ background: "#0d0d0d", borderRadius: 14, padding: "14px 16px", marginBottom: 12 }}>
-              <p style={{ fontSize: 11, color: "#444", fontWeight: 700, margin: "0 0 10px", letterSpacing: 0.5, textTransform: "uppercase" }}>Pedido</p>
-              {resumoPedido.itens.map((item, i) => (
-                <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                  <span style={{ color: "#fbbf24", fontSize: 12 }}>•</span>
-                  <p style={{ fontSize: 14, color: "#e0e0e0", margin: 0, fontWeight: 600 }}>{item}</p>
-                </div>
-              ))}
-              {resumoPedido.observacao && (
-                <div style={{ marginTop: 10, background: "#1a1400", borderRadius: 8, padding: "8px 10px", display: "flex", gap: 6 }}>
-                  <span style={{ fontSize: 12 }}>✏️</span>
-                  <p style={{ fontSize: 12, color: "#fbbf24", margin: 0 }}>{resumoPedido.observacao}</p>
-                </div>
-              )}
-            </div>
-            <div style={{ background: "#0d0d0d", borderRadius: 14, padding: "14px 16px", marginBottom: 12 }}>
-              <p style={{ fontSize: 11, color: "#444", fontWeight: 700, margin: "0 0 6px", letterSpacing: 0.5, textTransform: "uppercase" }}>Entrega</p>
-              <p style={{ fontSize: 14, color: "#e0e0e0", margin: 0, fontWeight: 600 }}>📍 {resumoPedido.endereco || "—"}</p>
-            </div>
-            <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
-              <div style={{ flex: 1, background: "#0d0d0d", borderRadius: 14, padding: "14px 16px" }}>
-                <p style={{ fontSize: 11, color: "#444", fontWeight: 700, margin: "0 0 6px", letterSpacing: 0.5, textTransform: "uppercase" }}>Pagamento</p>
-                <p style={{ fontSize: 14, color: "#e0e0e0", margin: 0, fontWeight: 700 }}>
-                  {resumoPedido.pagamento === "Pix" ? "💛 Pix" : resumoPedido.pagamento === "Dinheiro" ? "💵 Dinheiro" : resumoPedido.pagamento === "Cartão" ? "💳 Cartão" : "—"}
-                </p>
-                {resumoPedido.troco && <p style={{ fontSize: 12, color: "#fbbf24", margin: "4px 0 0", fontWeight: 600 }}>{resumoPedido.troco}</p>}
-                {resumoPedido.pixConfirmado && <p style={{ fontSize: 12, color: "#4ade80", margin: "4px 0 0", fontWeight: 700 }}>✅ Pix confirmado</p>}
-              </div>
-              <div style={{ flex: 1, background: "#0d0d0d", borderRadius: 14, padding: "14px 16px" }}>
-                <p style={{ fontSize: 11, color: "#444", fontWeight: 700, margin: "0 0 6px", letterSpacing: 0.5, textTransform: "uppercase" }}>Total</p>
-                <p style={{ fontSize: 18, color: "#4ade80", margin: 0, fontWeight: 900 }}>R$ {resumoPedido.total.toFixed(2).replace(".", ",")}</p>
-              </div>
-            </div>
-            <button onClick={() => window.open("https://wa.me/" + resumoPedido.telefone, "_blank")} style={{ width: "100%", padding: "14px", background: "#0d1a0d", border: "1px solid #16a34a25", borderRadius: 14, color: "#4ade80", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>
-              💬 Abrir WhatsApp
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Card Urgência Gamer */}
-      {escalonados > 0 && !cardUrgenciaFechado && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
-          <style>{`
-            @keyframes cardIn { from { transform: scale(0.8) translateY(20px); opacity: 0; } to { transform: scale(1) translateY(0); opacity: 1; } }
-            @keyframes bgPulse { 0%,100% { background: rgba(0,0,0,0.85); } 50% { background: rgba(80,0,0,0.9); } }
-            @keyframes shake { 0%,100% { transform: translateX(0); } 15% { transform: translateX(-6px) rotate(-1deg); } 30% { transform: translateX(6px) rotate(1deg); } 45% { transform: translateX(-4px); } 60% { transform: translateX(4px); } 75% { transform: translateX(-2px); } }
-            @keyframes glowPulse { 0%,100% { box-shadow: 0 0 30px rgba(239,68,68,0.5), 0 0 60px rgba(239,68,68,0.2), inset 0 1px 0 rgba(255,255,255,0.1); } 50% { box-shadow: 0 0 60px rgba(239,68,68,0.9), 0 0 100px rgba(239,68,68,0.4), inset 0 1px 0 rgba(255,255,255,0.1); } }
-            @keyframes scanline { 0% { transform: translateY(-100%); } 100% { transform: translateY(400%); } }
-            @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
-            @keyframes borderRotate { 0% { background-position: 0% 50%; } 100% { background-position: 200% 50%; } }
-          `}</style>
-          <div style={{ position: 'absolute', inset: 0, animation: 'bgPulse 1.5s infinite', backdropFilter: 'blur(8px)', pointerEvents: 'none' }} />
-          <div style={{ position: 'relative', width: '100%', maxWidth: 360, animation: 'cardIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)' }}>
-            {/* Borda animada */}
-            <div style={{ position: 'absolute', inset: -2, borderRadius: 24, background: 'linear-gradient(90deg, #ef4444, #ff6b00, #ef4444, #ff0000, #ef4444)', backgroundSize: '200% 100%', animation: 'borderRotate 2s linear infinite', zIndex: -1 }} />
-            <div style={{ background: 'linear-gradient(160deg, #1a0505 0%, #0d0d0d 40%, #1a0a00 100%)', borderRadius: 22, padding: '28px 24px', position: 'relative', overflow: 'hidden', animation: 'glowPulse 1.5s infinite' }}>
-              {/* Scanline effect */}
-              <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '20%', background: 'linear-gradient(transparent, rgba(239,68,68,0.05), transparent)', animation: 'scanline 3s linear infinite', pointerEvents: 'none' }} />
-              {/* Header */}
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 20 }}>
-                <span style={{ fontSize: 32, animation: 'shake 0.6s infinite' }}>🚨</span>
-                <div style={{ textAlign: 'center' }}>
-                  <p style={{ color: '#ef4444', fontSize: 11, fontWeight: 900, margin: 0, letterSpacing: 3, textTransform: 'uppercase', animation: 'blink 1s infinite' }}>● ATENÇÃO URGENTE</p>
-                  <p style={{ color: '#fff', fontSize: 20, fontWeight: 900, margin: '4px 0 0', letterSpacing: -0.5 }}>Cliente Esperando!</p>
-                </div>
-                <span style={{ fontSize: 32, animation: 'shake 0.6s infinite' }}>🚨</span>
-              </div>
-              {/* Info */}
-              <div style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 14, padding: '14px 16px', marginBottom: 20 }}>
-                <p style={{ color: '#fca5a5', fontSize: 13, fontWeight: 700, margin: '0 0 6px', textAlign: 'center' }}>
-                  {escalonados} cliente{escalonados > 1 ? 's' : ''} precisando de atendimento humano agora
-                </p>
-                {pedidos.filter(p => p.escalonado && p.status === 'novo').slice(0, 2).map((p, i) => (
-                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, background: 'rgba(0,0,0,0.3)', borderRadius: 8, padding: '8px 10px' }}>
-                    <span style={{ fontSize: 14 }}>👤</span>
-                    <div>
-                      <p style={{ color: '#fff', fontSize: 13, fontWeight: 700, margin: 0 }}>{p.cliente}</p>
-                      <p style={{ color: '#666', fontSize: 11, margin: 0 }}>{p.horario} · aguardando</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              {/* Botões */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {pedidos.filter(p => p.escalonado && p.status === 'novo').slice(0, 1).map(p => (
-                  <button key={p.id} onClick={() => { assumirConversa(p.telefone); setCardUrgenciaFechado(true); }} style={{ width: '100%', padding: '16px', background: 'linear-gradient(135deg, #ef4444, #dc2626)', border: 'none', borderRadius: 14, color: '#fff', fontSize: 15, fontWeight: 900, cursor: 'pointer', letterSpacing: 0.3, position: 'relative', overflow: 'hidden' }}>
-                    <span style={{ position: 'relative', zIndex: 1 }}>📱 Atender {p.cliente.split(' ')[0]} agora</span>
-                  </button>
-                ))}
-                <button onClick={() => {
-                  setCardUrgenciaFechado(true)
-                  setTimeout(() => {
-                    const el = document.querySelector('[data-urgente="true"]')
-                    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-                  }, 100)
-                }} style={{ width: '100%', padding: '14px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 14, color: '#aaa', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>
-                  👀 Ver no painel
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Toasts */}
-      <div style={{ position: "fixed", bottom: 20, left: 16, right: 16, zIndex: 9999, display: "flex", flexDirection: "column-reverse", gap: 8, pointerEvents: "none" }}>
-        {toasts.map(t => (
-          <div key={t.id} style={{ background: "#141414", border: `1px solid ${toastColors[t.type]}30`, borderLeft: `3px solid ${toastColors[t.type]}`, borderRadius: 12, padding: "12px 16px", color: "#fff", fontSize: 13, fontWeight: 600, backdropFilter: "blur(20px)", boxShadow: "0 8px 32px rgba(0,0,0,0.5)", animation: "slideUp 0.25s ease" }}>
-            {t.message}
-          </div>
-        ))}
-      </div>
-
-      {/* Header */}
-      <div style={{ background: "#0d0d0d", borderBottom: "1px solid #161616", padding: "14px 16px", position: "sticky", top: 0, zIndex: 100, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ fontSize: 20 }}>🍕</span>
-          <div>
+        {/* Banner urgência */}
+        {escalonados.length > 0 && !cardUrgenciaFechado && (
+          <div style={{ margin: "8px 16px 0", padding: 16, borderRadius: 18, background: "rgba(239,68,68,.08)", border: "1.5px solid rgba(239,68,68,.45)", animation: "cbUrgentGlow 1.6s infinite", display: "flex", flexDirection: "column", gap: 10 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ fontWeight: 800, fontSize: 15, color: "#fff", letterSpacing: -0.3 }}>Cozinha</span>
-              {escalonados > 0 && <span style={{ background: "#f87171", color: "#fff", fontSize: 10, fontWeight: 800, padding: "2px 8px", borderRadius: 20, animation: "pulse 1s infinite" }}>🚨 {escalonados}</span>}
-              {ativos > 0 && <span style={{ background: "#ffffff12", color: "#666", fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 20 }}>{ativos} ativo{ativos !== 1 ? "s" : ""}</span>}
+              <span style={{ width: 9, height: 9, borderRadius: "50%", background: "#ef4444", animation: "cbRedPulse 1.6s infinite" }} />
+              <span style={{ fontSize: 11, fontWeight: 900, color: "#ef4444", textTransform: "uppercase", letterSpacing: "1.2px" }}>Atendimento humano</span>
             </div>
-            <p style={{ fontSize: 10, color: "#333", margin: 0 }}>atualizado {ultimaAtualizacao}</p>
+            <div style={{ fontSize: 17, fontWeight: 900, letterSpacing: "-0.3px", lineHeight: 1.25 }}>
+              {escalonados[0].cliente.split(" ")[0]} quer falar com você
+            </div>
+            <div style={{ fontSize: 13, color: "#c9c2b4", fontWeight: 600, lineHeight: 1.4 }}>O bot pausou a conversa e está esperando.</div>
+            <button onClick={() => { assumirConversa(escalonados[0].telefone); setCardUrgenciaFechado(true) }} style={{ height: 52, border: "none", borderRadius: 14, background: "#ef4444", color: "#fff", fontSize: 16, fontWeight: 900, letterSpacing: "-0.2px" }}>
+              Abrir conversa
+            </button>
           </div>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <button onClick={alternarBot} disabled={salvandoBot} style={{ position: "relative", width: 44, height: 26, borderRadius: 13, border: "none", cursor: "pointer", background: botAtivo ? "#16a34a" : "#222", transition: "background 0.2s", flexShrink: 0 }}>
-            <span style={{ position: "absolute", top: 2, left: botAtivo ? 20 : 2, width: 22, height: 22, borderRadius: "50%", background: "#fff", transition: "left 0.2s" }} />
-          </button>
-          {isAdmin && <button onClick={() => window.location.href = "/admin"} style={{ background: "#1a1500", border: "1px solid #2a2000", color: "#fbbf24", borderRadius: 8, padding: "6px 9px", cursor: "pointer", fontSize: 13, fontWeight: 700 }}>👑</button>}
-          <button onClick={() => fetch("/api/auth/logout", { method: "POST" }).then(() => router.push("/login"))} style={{ background: "#141414", border: "1px solid #1e1e1e", color: "#444", borderRadius: 8, padding: "6px 9px", cursor: "pointer", fontSize: 11 }}>Sair</button>
-        </div>
-      </div>
+        )}
 
-      <div style={{ padding: "10px 14px 0" }}>
-        {!somAtivado && (
-          <div onClick={ativarSom} style={{ background: "#0d1a0d", border: "1px solid #16a34a40", borderRadius: 14, padding: "12px 14px", marginBottom: 10, display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
-            <span style={{ fontSize: 20 }}>🔔</span>
-            <div>
-              <p style={{ fontWeight: 800, color: "#4ade80", margin: 0, fontSize: 13 }}>Toque aqui para ativar o som</p>
-              <p style={{ fontSize: 11, color: "#4ade8060", margin: "2px 0 0" }}>Necessário para notificações no celular</p>
-            </div>
+        {/* Pipeline */}
+        <div style={{ padding: "16px 16px 10px", display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <span style={{ fontSize: 12, fontWeight: 900, letterSpacing: "1.2px", textTransform: "uppercase", color: "#a39b8b" }}>Fila de pedidos</span>
+            <button onClick={() => setFiltro("todos")} style={{ border: `1px solid ${filtro === "todos" ? "#ff6b00" : "#242220"}`, background: filtro === "todos" ? "#ff6b00" : "transparent", color: filtro === "todos" ? "#060606" : "#c9c2b4", fontSize: 12, fontWeight: 900, padding: "7px 14px", borderRadius: 18 }}>
+              Todos · {pedidos.length}
+            </button>
           </div>
-        )}
-        {escalonados > 0 && (
-          <div style={{ background: "#1a0505", border: "1px solid #f8717130", borderRadius: 14, padding: "12px 14px", marginBottom: 10, display: "flex", alignItems: "center", gap: 10 }}>
-            <span style={{ fontSize: 22 }}>🚨</span>
-            <div>
-              <p style={{ fontWeight: 800, color: "#f87171", margin: 0, fontSize: 13 }}>{escalonados} cliente{escalonados > 1 ? "s" : ""} precisando de você AGORA</p>
-              <p style={{ fontSize: 11, color: "#f8717160", margin: "2px 0 0" }}>Role até os cards vermelhos abaixo</p>
-            </div>
-          </div>
-        )}
-        <div ref={filtrosRef} style={{ display: "flex", gap: 6, marginBottom: 12, overflowX: "auto", paddingBottom: 2, scrollBehavior: "smooth", msOverflowStyle: "none", scrollbarWidth: "none" }}>
-          <style>{`div::-webkit-scrollbar { display: none; }`}</style>
-          {([
-            { key: "novo", label: "🔥 Novos", color: "#fbbf24" },
-            { key: "em_preparo", label: "👨‍🍳 Preparo", color: "#fb923c" },
-            { key: "saiu_entrega", label: "🛵 Entrega", color: "#60a5fa" },
-            { key: "entregue", label: "✅ Entregues", color: "#4ade80" },
-            { key: "cancelado", label: "❌ Cancel.", color: "#f87171" },
-            { key: "todos", label: "Todos", color: "#888" },
-          ] as { key: Status | "todos"; label: string; color: string }[]).map(({ key, label, color }, index) => {
-            const count = contagem(key)
-            const ativo = filtro === key
-            return (
-              <button key={key} ref={el => { botoesRef.current[index] = el }} onClick={() => {
-                setFiltro(key)
-                const btn = botoesRef.current[index]
-                const container = filtrosRef.current
-                if (btn && container) {
-                  const btnLeft = btn.offsetLeft
-                  const btnWidth = btn.offsetWidth
-                  const containerWidth = container.offsetWidth
-                  container.scrollTo({ left: btnLeft - (containerWidth / 2) + (btnWidth / 2), behavior: "smooth" })
-                }
-              }} style={{ flexShrink: 0, padding: "7px 14px", borderRadius: 20, border: ativo ? "none" : "1px solid #1a1a1a", cursor: "pointer", fontWeight: 700, fontSize: 12, background: ativo ? color : "#111", color: ativo ? "#000" : "#555", display: "flex", alignItems: "center", gap: 4, transition: "all 0.2s", transform: ativo ? "scale(1.05)" : "scale(1)" }}>
-                {label}
-                {count > 0 && <span style={{ background: ativo ? "rgba(0,0,0,0.2)" : "#222", color: ativo ? "#000" : "#666", fontSize: 10, fontWeight: 800, padding: "0 5px", borderRadius: 10 }}>{count}</span>}
-              </button>
-            )
-          })}
-        </div>
-        {pedidosFiltrados.length === 0 ? (
-          <div style={{ textAlign: "center", padding: "60px 0" }}>
-            <p style={{ fontSize: 36, margin: "0 0 10px" }}>🍕</p>
-            <p style={{ fontSize: 14, color: "#2a2a2a", fontWeight: 700 }}>{filtro === "novo" ? "Nenhum pedido novo" : "Nada aqui ainda"}</p>
-            <p style={{ fontSize: 12, color: "#1e1e1e", margin: "4px 0 0" }}>{filtro === "novo" ? "Tudo em dia por enquanto!" : ""}</p>
-          </div>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {pedidosFiltrados.map(pedido => {
-              const emManual = manuais[pedido.telefone] === true
-              const isEsc = pedido.escalonado === true
-              const isCanc = pedido.cancelamentoSolicitado === true
-              const proxStatus = PROXIMO_STATUS[pedido.status]
-              const cfg = isEsc ? STATUS_CONFIG.cancelado : STATUS_CONFIG[pedido.status]
-              const tempo = tempoDesde(pedido.horario)
-              const ativo = eAtivo(pedido.status)
-              const tempoUrgente = pedido.status === "novo"
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            {steps.map((s, i) => {
+              const active = filtro === s.key
               return (
-                <div key={pedido.id} data-urgente={isEsc ? "true" : undefined} style={{ background: isEsc ? "#110505" : ativo ? "#0d0d0d" : "#090909", border: `1px solid ${isEsc ? "#f8717125" : isCanc ? "#fb923c25" : ativo ? cfg.border : "#111"}`, borderRadius: 16, overflow: "hidden", opacity: ativo ? 1 : 0.45, transition: "opacity 0.2s" }}>
-                  {ativo && <div style={{ height: 3, background: isEsc ? "#f87171" : cfg.color, width: "100%" }} />}
-                  <div style={{ padding: "14px 16px 12px" }}>
-                    <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 6 }}>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
-                          <span style={{ fontWeight: 900, fontSize: 17, color: "#fff", letterSpacing: -0.5 }}>{pedido.cliente}</span>
-                          {isEsc && <span style={{ background: "#f87171", color: "#fff", fontSize: 9, fontWeight: 800, padding: "2px 7px", borderRadius: 20, letterSpacing: 0.5 }}>🚨 URGENTE</span>}
-                          {isCanc && !isEsc && <span style={{ background: "#fb923c", color: "#fff", fontSize: 9, fontWeight: 800, padding: "2px 7px", borderRadius: 20 }}>⚠️ CANCEL.</span>}
-                        </div>
-                        <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 3, flexWrap: "wrap" }}>
-                          <span style={{ fontSize: 11, color: "#333", fontWeight: 500 }}>{pedido.horario}</span>
-                          {tempo && (
-                            <span style={{ fontSize: 11, fontWeight: 700, color: tempoUrgente ? "#f87171" : "#2a2a2a", background: tempoUrgente ? "#f8717115" : "transparent", padding: tempoUrgente ? "1px 6px" : "0", borderRadius: 10 }}>
-                              {tempo}
-                            </span>
-                          )}
-                          {pedido.endereco && pedido.endereco !== "-" && (
-                            <span style={{ fontSize: 11, color: "#2a2a2a" }}>· {pedido.endereco.length > 25 ? pedido.endereco.substring(0, 25) + "..." : pedido.endereco}</span>
-                          )}
-                        </div>
-                      </div>
-                      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
-                        <span style={{ background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.border}`, fontSize: 11, fontWeight: 800, padding: "4px 10px", borderRadius: 20, whiteSpace: "nowrap", marginLeft: 8, letterSpacing: 0.2 }}>
-                          {isEsc ? "Urgente" : cfg.label}
-                        </span>
-                        {pedido.pixConfirmado && (
-                          <span style={{ background: "#14532d", color: "#4ade80", border: "1px solid #16a34a40", borderRadius: 8, padding: "3px 8px", fontSize: 10, fontWeight: 800, whiteSpace: "nowrap" }}>✅ Pago</span>
-                        )}
-                        {pedido.pagamento && !pedido.pixConfirmado && (
-                          <span style={{ background: "#1a1a1a", color: pedido.pagamento === "Dinheiro" ? "#fbbf24" : pedido.pagamento === "Cartão" ? "#60a5fa" : "#a78bfa", border: "1px solid #2a2a2a", borderRadius: 8, padding: "3px 8px", fontSize: 10, fontWeight: 700, whiteSpace: "nowrap" }}>
-                            {pedido.pagamento === "Pix" ? "💛 Pix" : pedido.pagamento === "Dinheiro" ? "💵 Dinheiro" : "💳 Cartão"}
-                          </span>
-                        )}
-                        <button onClick={() => setResumoPedido(pedido)} style={{ background: "#1a1a1a", border: "1px solid #2a2a2a", color: "#666", borderRadius: 8, padding: "3px 8px", fontSize: 10, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>
-                          📋 Resumo
-                        </button>
-                      </div>
-                    </div>
-                    <div style={{ marginBottom: 8 }}>
-                      {pedido.itens.map((item, i) => (
-                        <p key={i} style={{ fontSize: 14, color: ativo ? "#e0e0e0" : "#333", margin: "2px 0", fontWeight: ativo ? 600 : 400, lineHeight: 1.4 }}>{item}</p>
-                      ))}
-                    </div>
-                    {pedido.observacao && (
-                      <div style={{ background: "#1a1400", border: "1px solid #fbbf2420", borderRadius: 8, padding: "6px 10px", marginBottom: 8, display: "flex", alignItems: "flex-start", gap: 6 }}>
-                        <span style={{ fontSize: 12 }}>✏️</span>
-                        <p style={{ fontSize: 12, color: "#fbbf24", margin: 0, fontWeight: 500 }}>{pedido.observacao}</p>
-                      </div>
-                    )}
-                    {pedido.troco && pedido.troco !== "Sem troco" && (
-                      <div style={{ background: "#1a1400", border: "1px solid #fbbf2420", borderRadius: 8, padding: "6px 10px", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
-                        <span style={{ fontSize: 12 }}>💵</span>
-                        <p style={{ fontSize: 12, color: "#fbbf24", margin: 0, fontWeight: 600 }}>{pedido.troco}</p>
-                      </div>
-                    )}
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                      <p style={{ fontSize: 18, fontWeight: 900, color: ativo ? "#fff" : "#333", margin: 0, letterSpacing: -0.5 }}>
-                        R$ {pedido.total.toFixed(2).replace(".", ",")}
-                      </p>
-                      {ativo && <span style={{ fontSize: 11, color: "#333" }}>{pedido.itens.length} item{pedido.itens.length !== 1 ? "ns" : ""}</span>}
-                    </div>
-                  </div>
-                  {(ativo || isEsc) && (
-                    <div style={{ padding: "0 12px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
-                      {isEsc && (
-                        <div style={{ display: "flex", gap: 8 }}>
-                          <button onClick={() => assumirConversa(pedido.telefone)} style={{ flex: 1, padding: "14px 0", background: "#f87171", color: "#fff", border: "none", borderRadius: 12, fontSize: 14, fontWeight: 800, cursor: "pointer" }}>📱 Atender agora</button>
-                          <button onClick={() => marcarResolvido(pedido.telefone, pedido.id)} style={{ flex: 1, padding: "14px 0", background: "#16a34a", color: "#fff", border: "none", borderRadius: 12, fontSize: 14, fontWeight: 800, cursor: "pointer" }}>✅ Resolvido</button>
-                        </div>
-                      )}
-                      {isCanc && !isEsc && (
-                        <button onClick={() => confirmarCancelamento(pedido.id)} disabled={atualizando === pedido.id} style={{ width: "100%", padding: "14px 0", background: "#fb923c", color: "#fff", border: "none", borderRadius: 12, fontSize: 14, fontWeight: 800, cursor: "pointer" }}>
-                          {atualizando === pedido.id ? "Cancelando..." : "⚠️ Confirmar cancelamento"}
-                        </button>
-                      )}
-                      {!isEsc && proxStatus && (
-                        <button onClick={() => {
-                            if (proxStatus === 'saiu_entrega') {
-                              const ativos = entregadores.filter(e => e.ativo)
-                              if (ativos.length === 1) { avancarStatus(pedido.id, proxStatus, ativos[0]) }
-                              else { setModalEntrega({ pedidoId: pedido.id, proxStatus }) }
-                            } else { avancarStatus(pedido.id, proxStatus) }
-                          }} disabled={atualizando === pedido.id} style={{ width: "100%", padding: "15px 0", background: atualizando === pedido.id ? "#222" : cfg.color, color: atualizando === pedido.id ? "#555" : cfg.btnColor, border: "none", borderRadius: 12, fontSize: 15, fontWeight: 900, cursor: atualizando === pedido.id ? "not-allowed" : "pointer", letterSpacing: -0.2, transition: "all 0.15s" }}>
-                          {atualizando === pedido.id ? "Atualizando..." : PROXIMO_LABEL[pedido.status]}
-                        </button>
-                      )}
-                      {!isEsc && (
-                        <div style={{ display: "flex", gap: 8 }}>
-                          <button onClick={() => window.open("https://wa.me/" + pedido.telefone, "_blank")} style={{ flex: 1, padding: "11px 0", background: "#111", color: "#4ade80", border: "1px solid #16a34a25", borderRadius: 12, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>💬 WhatsApp</button>
-                          {emManual ? (
-                            <button onClick={() => devolverAoBot(pedido.telefone)} style={{ flex: 1, padding: "11px 0", background: "#111", color: "#60a5fa", border: "1px solid #1d4ed825", borderRadius: 12, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>🤖 Devolver bot</button>
-                          ) : (
-                            <button onClick={() => assumirConversa(pedido.telefone)} style={{ flex: 1, padding: "11px 0", background: "#111", color: "#888", border: "1px solid #1e1e1e", borderRadius: 12, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>📱 Assumir</button>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  )}
+                <div key={s.key} style={{ display: "flex", alignItems: "center", gap: 4, flex: 1 }}>
+                  <button onClick={() => setFiltro(active ? "todos" : s.key)} style={{ flex: 1, minWidth: 0, border: `1px solid ${active ? "#ff6b00" : "#242220"}`, background: active ? "#ff6b00" : "#101010", color: active ? "#060606" : "#c9c2b4", borderRadius: 14, padding: "10px 4px 9px", display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
+                    <span style={{ fontSize: 20, fontWeight: 900, lineHeight: 1, color: active ? "#060606" : "#ff6b00" }}>{s.count}</span>
+                    <span style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".4px" }}>{s.label}</span>
+                  </button>
+                  {i < steps.length - 1 && <span style={{ color: "#3a362f", fontSize: 15, fontWeight: 900, flexShrink: 0, lineHeight: 1 }}>›</span>}
                 </div>
               )
             })}
           </div>
+        </div>
+
+        {/* Lista de pedidos */}
+        <main style={{ display: "flex", flexDirection: "column", gap: 14, padding: "4px 16px 20px" }}>
+          {pedidosFiltrados.length === 0 && (
+            <div style={{ background: "#101010", border: "1px dashed #2a2723", borderRadius: 20, padding: "36px 20px", textAlign: "center", display: "flex", flexDirection: "column", gap: 6 }}>
+              <span style={{ fontSize: 17, fontWeight: 900, color: "#c9c2b4" }}>Nada por aqui</span>
+              <span style={{ fontSize: 13, fontWeight: 600, color: "#a39b8b" }}>Nenhum pedido nesse estado agora.</span>
+            </div>
+          )}
+
+          {pedidosFiltrados.map(pedido => {
+            const mins = tempoDesde(pedido.horario)
+            const meta = 40
+            const { dash, color: ringColor } = timerDash(mins, meta)
+            const badge = BADGE_CFG[pedido.status]
+            const nextStatus = NEXT_STATUS[pedido.status]
+            const isDone = pedido.status === "entregue"
+            const isCanceled = pedido.status === "cancelado"
+            const late = mins > meta && !isDone && !isCanceled
+            const firstName = pedido.cliente.split(" ")[0]
+
+            let cardAnim = "cbCardIn .35s ease both"
+            if (pedido.status === "novo" && !pedido.escalonado) cardAnim = "cbCardIn .35s ease both, cbNewGlow 2s ease infinite"
+            if (pedido.escalonado) cardAnim = "cbCardIn .35s ease both"
+            if (flashId === pedido.id) cardAnim = "cbFlash .7s ease"
+            if (leavingId === pedido.id) cardAnim = "cbCardOut .3s ease both"
+
+            let cardBorder = "1px solid #1f1d1a"
+            if (pedido.status === "novo") cardBorder = "1.5px solid rgba(255,107,0,.75)"
+            if (pedido.escalonado) cardBorder = "1.5px solid rgba(239,68,68,.45)"
+            if (pedido.cancelamentoSolicitado) cardBorder = "1.5px solid rgba(239,68,68,.3)"
+
+            const pagamento = pedido.pagamento || ""
+            const payDot = pagamento.toLowerCase().includes("pix") ? "#22c55e" : pagamento.toLowerCase().includes("cart") ? "#60a5fa" : "#facc15"
+
+            return (
+              <article key={pedido.id} onClick={() => setDetailId(pedido.id)} style={{ background: "#101010", border: cardBorder, borderRadius: 22, padding: 18, display: "flex", flexDirection: "column", gap: 14, animation: cardAnim, cursor: "pointer" }}>
+
+                {/* Topo: cliente + timer */}
+                <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+                  <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 7 }}>
+                    <span style={{ alignSelf: "flex-start", background: badge.bg, color: badge.fg, fontSize: 11, fontWeight: 900, letterSpacing: "1.2px", padding: "5px 10px", borderRadius: 8, textTransform: "uppercase" }}>{badge.label}</span>
+                    <h2 style={{ margin: 0, fontSize: 21, fontWeight: 900, letterSpacing: "-0.5px", lineHeight: 1.15 }}>{pedido.cliente}</h2>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "#a39b8b", fontWeight: 600 }}>
+                      <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#3a362f", flexShrink: 0 }} />
+                      {pedido.endereco}
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, flexShrink: 0 }}>
+                    <div style={{ position: "relative", width: 62, height: 62 }}>
+                      <svg width="62" height="62" viewBox="0 0 62 62" style={{ transform: "rotate(-90deg)", display: "block" }}>
+                        <circle cx="31" cy="31" r="26" fill="none" stroke="#1f1d1a" strokeWidth="5" />
+                        <circle cx="31" cy="31" r="26" fill="none" stroke={isDone ? "#22c55e" : ringColor} strokeWidth="5" strokeLinecap="round" strokeDasharray="163.4" strokeDashoffset={isDone ? 0 : dash} style={{ transition: "stroke-dashoffset 1s linear, stroke .4s" }} />
+                      </svg>
+                      <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+                        <span style={{ fontSize: 18, fontWeight: 900, lineHeight: 1, color: isDone ? "#22c55e" : ringColor }}>{mins}</span>
+                        <span style={{ fontSize: 8.5, fontWeight: 800, color: "#a39b8b", letterSpacing: "1px" }}>MIN</span>
+                      </div>
+                    </div>
+                    <span style={{ fontSize: 9.5, fontWeight: 800, color: late ? "#ef4444" : "#a39b8b", letterSpacing: ".2px", whiteSpace: "nowrap" }}>
+                      {isDone ? "concluído" : late ? `${mins - meta} min atrasado` : `meta ${meta} min`}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Itens */}
+                <div style={{ background: "#0b0b0b", borderRadius: 14, padding: "13px 14px", display: "flex", flexDirection: "column", gap: 9 }}>
+                  {pedido.itens.map((item, i) => (
+                    <div key={i} style={{ display: "flex", gap: 10, alignItems: "baseline", fontSize: 15.5, fontWeight: 700, letterSpacing: "-0.2px" }}>
+                      <span style={{ color: "#ff6b00", fontWeight: 900, flexShrink: 0 }}>1×</span>
+                      <span>{item}</span>
+                    </div>
+                  ))}
+                  {pedido.observacao && (
+                    <div style={{ fontSize: 12.5, fontWeight: 700, color: "#facc15", background: "rgba(250,204,21,.08)", borderRadius: 8, padding: "7px 10px" }}>
+                      Obs: {pedido.observacao}
+                    </div>
+                  )}
+                </div>
+
+                {/* Pagamento */}
+                <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 700, color: "#c9c2b4" }}>
+                  <span style={{ width: 8, height: 8, borderRadius: 2, background: payDot, flexShrink: 0 }} />
+                  {pagamento || "Pagamento não informado"}
+                  {pedido.pixConfirmado && <span style={{ fontSize: 11, color: "#22c55e", fontWeight: 800 }}>✓ confirmado</span>}
+                </div>
+
+                {/* Alerta cancelamento */}
+                {pedido.cancelamentoSolicitado && (
+                  <div style={{ fontSize: 13, fontWeight: 800, color: "#ef4444", background: "rgba(239,68,68,.08)", borderRadius: 10, padding: "10px 12px", animation: "cbCancelGlow 1.5s infinite", border: "1px solid rgba(239,68,68,.3)" }}>
+                    ⚠️ Cliente solicitou cancelamento
+                  </div>
+                )}
+
+                {/* Ações */}
+                {!isDone && !isCanceled && nextStatus && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }} onClick={e => e.stopPropagation()}>
+                    <button
+                      onClick={() => {
+                        if (nextStatus === "saiu_entrega" && entregadores.length > 0) {
+                          setModalEntrega({ pedidoId: pedido.id, proxStatus: nextStatus })
+                        } else {
+                          avancarStatus(pedido.id, nextStatus)
+                        }
+                      }}
+                      disabled={atualizando === pedido.id}
+                      style={{ height: 58, border: "none", borderRadius: 16, background: "#ff6b00", color: "#060606", fontSize: 17, fontWeight: 900, letterSpacing: "-0.2px", opacity: atualizando === pedido.id ? 0.6 : 1 }}
+                    >
+                      {atualizando === pedido.id ? "..." : ACTION_LABEL[pedido.status]}
+                    </button>
+                    <button style={{ height: 46, border: "1px solid #2a2723", borderRadius: 14, background: "transparent", color: "#c9c2b4", fontSize: 14, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                      <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#22c55e" }} />
+                      Falar com {firstName} no WhatsApp
+                    </button>
+                  </div>
+                )}
+
+                {isDone && (
+                  <div style={{ height: 54, borderRadius: 16, background: "rgba(34,197,94,.1)", border: "1px solid rgba(34,197,94,.3)", color: "#22c55e", fontSize: 15, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    Entregue · tudo certo ✓
+                  </div>
+                )}
+
+                {pedido.escalonado && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }} onClick={e => e.stopPropagation()}>
+                    <button onClick={() => assumirConversa(pedido.telefone)} style={{ height: 50, border: "none", borderRadius: 14, background: "#ef4444", color: "#fff", fontSize: 15, fontWeight: 900 }}>
+                      Assumir conversa
+                    </button>
+                    <button onClick={() => marcarResolvido(pedido.telefone, pedido.id)} style={{ height: 44, border: "1px solid #2a2723", borderRadius: 14, background: "transparent", color: "#4ade80", fontSize: 14, fontWeight: 800 }}>
+                      ✓ Resolvido
+                    </button>
+                  </div>
+                )}
+              </article>
+            )
+          })}
+        </main>
+
+        {/* Toast desfazer */}
+        {toastVisible && (
+          <div style={{ position: "fixed", bottom: 96, left: 0, right: 0, margin: "0 auto", width: "calc(100% - 32px)", maxWidth: 343, background: "#1c1a16", border: "1px solid #33302a", borderRadius: 16, padding: "12px 12px 12px 16px", display: "flex", alignItems: "center", gap: 12, animation: "cbToastIn .25s ease both", zIndex: 50, boxShadow: "0 12px 32px rgba(0,0,0,.55)" }}>
+            <span style={{ flex: 1, fontSize: 14, fontWeight: 800, letterSpacing: "-0.2px" }}>{toast?.text}</span>
+            <button onClick={desfazerToast} style={{ border: "none", background: "rgba(255,107,0,.16)", color: "#ff6b00", fontWeight: 900, fontSize: 14, padding: "11px 14px", borderRadius: 11, flexShrink: 0 }}>
+              Desfazer · {toastSegs}
+            </button>
+          </div>
         )}
+
+        {/* Bottom sheet detalhe */}
+        {detalhePedido && (
+          <>
+            <div onClick={() => setDetailId(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 60, animation: "cbFadeIn .2s ease both" }} />
+            <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, margin: "0 auto", maxWidth: 375, background: "#121110", border: "1px solid #242220", borderBottom: "none", borderRadius: "26px 26px 0 0", zIndex: 61, animation: "cbSheetUp .32s cubic-bezier(.2,.9,.3,1) both", padding: "10px 20px 26px", display: "flex", flexDirection: "column", gap: 14, maxHeight: "82vh", overflowY: "auto" }}>
+              <div style={{ width: 44, height: 5, borderRadius: 3, background: "#2e2b26", margin: "2px auto 0", flexShrink: 0 }} />
+
+              {(() => {
+                const p = detalhePedido
+                const mins = tempoDesde(p.horario)
+                const meta = 40
+                const { dash, color: ringColor } = timerDash(mins, meta)
+                const badge = BADGE_CFG[p.status]
+                const isDone = p.status === "entregue"
+                const nextStatus = NEXT_STATUS[p.status]
+                const firstName = p.cliente.split(" ")[0]
+                const pagamento = p.pagamento || ""
+                const payDot = pagamento.toLowerCase().includes("pix") ? "#22c55e" : pagamento.toLowerCase().includes("cart") ? "#60a5fa" : "#facc15"
+
+                return (
+                  <>
+                    <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 7 }}>
+                        <span style={{ alignSelf: "flex-start", background: badge.bg, color: badge.fg, fontSize: 11, fontWeight: 900, letterSpacing: "1.2px", padding: "5px 10px", borderRadius: 8, textTransform: "uppercase" }}>{badge.label}</span>
+                        <h2 style={{ margin: 0, fontSize: 24, fontWeight: 900, letterSpacing: "-0.6px", lineHeight: 1.1 }}>{p.cliente}</h2>
+                        <span style={{ fontSize: 13, color: "#a39b8b", fontWeight: 600 }}>Recebido às {p.horario} · há {mins} min</span>
+                      </div>
+                      <div style={{ position: "relative", width: 62, height: 62, flexShrink: 0 }}>
+                        <svg width="62" height="62" viewBox="0 0 62 62" style={{ transform: "rotate(-90deg)", display: "block" }}>
+                          <circle cx="31" cy="31" r="26" fill="none" stroke="#1f1d1a" strokeWidth="5" />
+                          <circle cx="31" cy="31" r="26" fill="none" stroke={isDone ? "#22c55e" : ringColor} strokeWidth="5" strokeLinecap="round" strokeDasharray="163.4" strokeDashoffset={isDone ? 0 : dash} style={{ transition: "stroke-dashoffset 1s linear, stroke .4s" }} />
+                        </svg>
+                        <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+                          <span style={{ fontSize: 18, fontWeight: 900, lineHeight: 1, color: isDone ? "#22c55e" : ringColor }}>{mins}</span>
+                          <span style={{ fontSize: 8.5, fontWeight: 800, color: "#a39b8b", letterSpacing: "1px" }}>MIN</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ background: "#0b0b0b", borderRadius: 14, padding: "13px 14px", display: "flex", flexDirection: "column", gap: 6 }}>
+                      <span style={{ fontSize: 10.5, fontWeight: 900, textTransform: "uppercase", letterSpacing: "1px", color: "#a39b8b" }}>Entregar em</span>
+                      <span style={{ fontSize: 15, fontWeight: 800, lineHeight: 1.35 }}>{p.endereco}</span>
+                    </div>
+
+                    <div style={{ background: "#0b0b0b", borderRadius: 14, padding: "13px 14px", display: "flex", flexDirection: "column", gap: 9 }}>
+                      <span style={{ fontSize: 10.5, fontWeight: 900, textTransform: "uppercase", letterSpacing: "1px", color: "#a39b8b" }}>Pedido</span>
+                      {p.itens.map((item, i) => (
+                        <div key={i} style={{ display: "flex", gap: 10, alignItems: "baseline", fontSize: 15.5, fontWeight: 700, letterSpacing: "-0.2px" }}>
+                          <span style={{ color: "#ff6b00", fontWeight: 900, flexShrink: 0 }}>1×</span>
+                          <span>{item}</span>
+                        </div>
+                      ))}
+                      {p.observacao && (
+                        <div style={{ fontSize: 12.5, fontWeight: 700, color: "#facc15", background: "rgba(250,204,21,.08)", borderRadius: 8, padding: "7px 10px" }}>
+                          Obs: {p.observacao}
+                        </div>
+                      )}
+                    </div>
+
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 700, color: "#c9c2b4" }}>
+                      <span style={{ width: 8, height: 8, borderRadius: 2, background: payDot, flexShrink: 0 }} />
+                      {pagamento || "Pagamento não informado"}
+                    </div>
+
+                    {!isDone && nextStatus && (
+                      <button onClick={() => { avancarStatus(p.id, nextStatus); setDetailId(null) }} disabled={atualizando === p.id} style={{ height: 58, border: "none", borderRadius: 16, background: "#ff6b00", color: "#060606", fontSize: 17, fontWeight: 900, letterSpacing: "-0.2px", flexShrink: 0, opacity: atualizando === p.id ? 0.6 : 1 }}>
+                        {ACTION_LABEL[p.status]}
+                      </button>
+                    )}
+                    {isDone && (
+                      <div style={{ height: 54, borderRadius: 16, background: "rgba(34,197,94,.1)", border: "1px solid rgba(34,197,94,.3)", color: "#22c55e", fontSize: 15, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                        Entregue · tudo certo ✓
+                      </div>
+                    )}
+                    <button style={{ height: 46, border: "1px solid #2a2723", borderRadius: 14, background: "transparent", color: "#c9c2b4", fontSize: 14, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, flexShrink: 0 }}>
+                      <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#22c55e" }} />
+                      Falar com {firstName} no WhatsApp
+                    </button>
+                    <button onClick={() => setDetailId(null)} style={{ height: 44, border: "none", background: "transparent", color: "#a39b8b", fontSize: 14, fontWeight: 800, flexShrink: 0 }}>
+                      Fechar
+                    </button>
+                  </>
+                )
+              })()}
+            </div>
+          </>
+        )}
+
+        {/* Modal seleção entregador */}
+        {modalEntrega && (
+          <>
+            <div onClick={() => setModalEntrega(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 60, animation: "cbFadeIn .2s ease both" }} />
+            <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, margin: "0 auto", maxWidth: 375, background: "#121110", border: "1px solid #242220", borderBottom: "none", borderRadius: "26px 26px 0 0", zIndex: 61, animation: "cbSheetUp .32s cubic-bezier(.2,.9,.3,1) both", padding: "20px 20px 36px", display: "flex", flexDirection: "column", gap: 14 }}>
+              <div style={{ width: 44, height: 5, borderRadius: 3, background: "#2e2b26", margin: "0 auto 6px" }} />
+              <p style={{ margin: 0, fontSize: 18, fontWeight: 900, letterSpacing: "-0.3px" }}>Selecionar entregador</p>
+              {entregadores.filter(e => e.ativo).map(e => (
+                <button key={e.id} onClick={() => avancarStatus(modalEntrega.pedidoId, modalEntrega.proxStatus, e)} style={{ height: 56, border: "1px solid #242220", borderRadius: 16, background: "#101010", color: "#f5f2ee", fontSize: 16, fontWeight: 800, textAlign: "left", padding: "0 16px" }}>
+                  {e.nome}
+                </button>
+              ))}
+              <button onClick={() => avancarStatus(modalEntrega.pedidoId, modalEntrega.proxStatus)} style={{ height: 48, border: "1px solid #2a2723", borderRadius: 14, background: "transparent", color: "#a39b8b", fontSize: 14, fontWeight: 800 }}>
+                Sem entregador
+              </button>
+            </div>
+          </>
+        )}
+
+        {/* Nav inferior */}
+        <nav style={{ position: "fixed", bottom: 0, left: 0, right: 0, margin: "0 auto", maxWidth: 375, background: "rgba(8,8,8,.94)", backdropFilter: "blur(14px)", borderTop: "1px solid #1f1d1a", display: "grid", gridTemplateColumns: "1fr 1fr 1fr", padding: "10px 8px 18px", zIndex: 40 }}>
+          <button style={{ border: "none", background: "transparent", display: "flex", flexDirection: "column", alignItems: "center", gap: 5, padding: "6px 0" }}>
+            <span style={{ position: "relative", display: "flex" }}>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                <rect x="4" y="3" width="16" height="18" rx="3" stroke="#ff6b00" strokeWidth="2.2" />
+                <line x1="8" y1="9" x2="16" y2="9" stroke="#ff6b00" strokeWidth="2.2" strokeLinecap="round" />
+                <line x1="8" y1="14" x2="13" y2="14" stroke="#ff6b00" strokeWidth="2.2" strokeLinecap="round" />
+              </svg>
+              {emAberto > 0 && <span style={{ position: "absolute", top: -5, right: -9, minWidth: 17, height: 17, borderRadius: 9, background: "#ff6b00", color: "#060606", fontSize: 10.5, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 4px" }}>{emAberto}</span>}
+            </span>
+            <span style={{ fontSize: 11, fontWeight: 900, color: "#ff6b00" }}>Pedidos</span>
+          </button>
+          <button style={{ border: "none", background: "transparent", display: "flex", flexDirection: "column", alignItems: "center", gap: 5, padding: "6px 0" }}>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+              <rect x="3" y="4" width="18" height="14" rx="5" stroke="#5a564d" strokeWidth="2.2" />
+              <circle cx="8.5" cy="11" r="1.4" fill="#5a564d" />
+              <circle cx="12" cy="11" r="1.4" fill="#5a564d" />
+              <circle cx="15.5" cy="11" r="1.4" fill="#5a564d" />
+            </svg>
+            <span style={{ fontSize: 11, fontWeight: 800, color: "#5a564d" }}>Conversas</span>
+          </button>
+          <button style={{ border: "none", background: "transparent", display: "flex", flexDirection: "column", alignItems: "center", gap: 5, padding: "6px 0" }}>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+              <rect x="4" y="4" width="7" height="7" rx="2" stroke="#5a564d" strokeWidth="2.2" />
+              <rect x="13" y="4" width="7" height="7" rx="2" stroke="#5a564d" strokeWidth="2.2" />
+              <rect x="4" y="13" width="7" height="7" rx="2" stroke="#5a564d" strokeWidth="2.2" />
+              <rect x="13" y="13" width="7" height="7" rx="2" stroke="#5a564d" strokeWidth="2.2" />
+            </svg>
+            <span style={{ fontSize: 11, fontWeight: 800, color: "#5a564d" }}>Cardápio</span>
+          </button>
+        </nav>
+
       </div>
-    </div>
+    </>
   )
 }
