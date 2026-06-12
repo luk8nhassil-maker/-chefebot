@@ -202,7 +202,9 @@ async function processarComprovante(phone: string, data: any, config: ConfigPizz
   try {
     const sessionKey = `session:${phone}`;
     const session = await redis.get<BotSession>(sessionKey);
-    const isPix = session?.paymentMethod === "Pix";
+    const pedidosCheck = await redis.get<any[]>("pedidos") || [];
+    const pedidoPix = pedidosCheck.find(p => p.telefone === phone && p.status === "novo" && p.pagamento === "Pix");
+    const isPix = session?.paymentMethod === "Pix" || !!pedidoPix;
     if (!isPix) return;
 
     const isAguardandoPix = session?.step === "aguardando_pix";
