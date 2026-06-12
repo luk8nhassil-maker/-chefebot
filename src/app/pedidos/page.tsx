@@ -36,12 +36,12 @@ const ACTION_LABEL: Record<Status, string> = {
   cancelado: "",
 }
 
-const BADGE_CFG: Record<Status, { bg: string; fg: string; label: string }> = {
-  novo:         { bg: "#ff6b00",               fg: "#060606", label: "Novo" },
-  em_preparo:   { bg: "rgba(250,204,21,.14)",   fg: "#facc15", label: "Fazendo" },
-  saiu_entrega: { bg: "rgba(96,165,250,.14)",   fg: "#60a5fa", label: "Na rua" },
-  entregue:     { bg: "rgba(34,197,94,.14)",    fg: "#22c55e", label: "Entregue" },
-  cancelado:    { bg: "rgba(239,68,68,.14)",    fg: "#ef4444", label: "Cancelado" },
+const BADGE_CFG: Record<Status, { bg: string; fg: string; label: string; cardBorder: string; stepBg: string; stepFg: string; stepBorder: string; stepCountFg: string }> = {
+  novo:         { bg: "#ff6b00",               fg: "#060606", label: "Novo",      cardBorder: "1.5px solid rgba(255,107,0,.75)",  stepBg: "#ff6b00",              stepFg: "#060606", stepBorder: "#ff6b00",              stepCountFg: "#060606" },
+  em_preparo:   { bg: "rgba(250,204,21,.18)",   fg: "#facc15", label: "Fazendo",   cardBorder: "1.5px solid rgba(250,204,21,.4)", stepBg: "rgba(250,204,21,.15)", stepFg: "#facc15", stepBorder: "rgba(250,204,21,.5)",   stepCountFg: "#facc15" },
+  saiu_entrega: { bg: "rgba(96,165,250,.18)",   fg: "#60a5fa", label: "Na rua",    cardBorder: "1.5px solid rgba(96,165,250,.4)", stepBg: "rgba(96,165,250,.15)", stepFg: "#60a5fa", stepBorder: "rgba(96,165,250,.5)",   stepCountFg: "#60a5fa" },
+  entregue:     { bg: "rgba(34,197,94,.18)",    fg: "#22c55e", label: "Entregue",  cardBorder: "1px solid #1f1d1a",               stepBg: "rgba(34,197,94,.15)",  stepFg: "#22c55e", stepBorder: "rgba(34,197,94,.5)",    stepCountFg: "#22c55e" },
+  cancelado:    { bg: "rgba(239,68,68,.18)",    fg: "#ef4444", label: "Cancelado", cardBorder: "1.5px solid rgba(239,68,68,.4)",  stepBg: "rgba(239,68,68,.15)",  stepFg: "#ef4444", stepBorder: "rgba(239,68,68,.5)",    stepCountFg: "#ef4444" },
 }
 
 function getUserInfo(): { name: string; role: string } | null {
@@ -287,10 +287,10 @@ export default function PedidosPage() {
   const avaliacaoMedia = "4,9"
 
   const steps = [
-    { key: "novo" as Status,         label: "Novos",   count: contagemPorStatus("novo") },
-    { key: "em_preparo" as Status,   label: "Fazendo", count: contagemPorStatus("em_preparo") },
-    { key: "saiu_entrega" as Status, label: "Na rua",  count: contagemPorStatus("saiu_entrega") },
-    { key: "entregue" as Status,     label: "Prontos", count: contagemPorStatus("entregue") },
+    { key: "novo" as Status,         stepLabel: "Novos",   count: contagemPorStatus("novo"),         ...BADGE_CFG["novo"] },
+    { key: "em_preparo" as Status,   stepLabel: "Fazendo", count: contagemPorStatus("em_preparo"),   ...BADGE_CFG["em_preparo"] },
+    { key: "saiu_entrega" as Status, stepLabel: "Na rua",  count: contagemPorStatus("saiu_entrega"), ...BADGE_CFG["saiu_entrega"] },
+    { key: "entregue" as Status,     stepLabel: "Prontos", count: contagemPorStatus("entregue"),     ...BADGE_CFG["entregue"] },
   ]
 
   if (loading) return (
@@ -369,8 +369,8 @@ export default function PedidosPage() {
             <span style={{ position: "absolute", right: 0, bottom: 0, width: 13, height: 13, borderRadius: "50%", background: "#22c55e", border: "3px solid #060606", animation: "cbPulse 2s infinite" }} />
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 20, fontWeight: 900, letterSpacing: "-0.4px", lineHeight: 1.1 }}>Oi, {userName.split(" ")[0]}</div>
-            <div style={{ fontSize: 12, color: "#a39b8b", fontWeight: 600, marginTop: 2 }}>Alto Alegre · ChefeBot</div>
+            <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: "-0.6px", lineHeight: 1.1 }}>Oi, {userName.split(" ")[0]}</div>
+            <div style={{ fontSize: 12, color: "#5a564d", fontWeight: 600, marginTop: 2 }}>Alto Alegre · ChefeBot</div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             {isAdmin && (
@@ -383,23 +383,26 @@ export default function PedidosPage() {
         {/* Bot toggle */}
         <button onClick={alternarBot} disabled={salvandoBot} style={{ display: "flex", alignItems: "center", gap: 10, margin: "0 16px", padding: "13px 14px", background: botAtivo ? "rgba(34,197,94,.06)" : "rgba(250,204,21,.06)", border: `1px solid ${botAtivo ? "rgba(34,197,94,.28)" : "rgba(250,204,21,.3)"}`, borderRadius: 14, color: "#f5f2ee", textAlign: "left" }}>
           <span style={{ width: 10, height: 10, borderRadius: "50%", background: botAtivo ? "#22c55e" : "#facc15", flexShrink: 0 }} />
-          <span style={{ flex: 1, fontSize: 14, fontWeight: 800, letterSpacing: "-0.2px" }}>{botAtivo ? "Bot atendendo no WhatsApp" : "Bot pausado · você no comando"}</span>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 14, fontWeight: 900, letterSpacing: "-0.2px", color: "#f5f2ee" }}>{botAtivo ? "Bot atendendo" : "Bot pausado"}</div>
+            <div style={{ fontSize: 11, fontWeight: 600, color: botAtivo ? "#22c55e" : "#facc15", marginTop: 2 }}>{botAtivo ? "WhatsApp conectado" : "Você no comando"}</div>
+          </div>
           <span style={{ fontSize: 12, fontWeight: 800, color: botAtivo ? "#22c55e" : "#facc15", background: "#060606", padding: "6px 12px", borderRadius: 10, flexShrink: 0 }}>{botAtivo ? "Pausar" : "Ativar"}</span>
         </button>
 
         {/* Métricas */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, padding: "14px 16px 6px" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1.2fr 1fr", gap: 8, padding: "14px 16px 6px" }}>
           <div style={{ background: "#101010", border: "1px solid #1f1d1a", borderRadius: 16, padding: "14px 12px", display: "flex", flexDirection: "column", gap: 3 }}>
-            <span style={{ fontSize: 26, fontWeight: 900, letterSpacing: "-1px", lineHeight: 1 }}>{totalHoje}</span>
-            <span style={{ fontSize: 10.5, fontWeight: 700, color: "#a39b8b", textTransform: "uppercase", letterSpacing: ".5px" }}>Pedidos hoje</span>
+            <span style={{ fontSize: 26, fontWeight: 900, letterSpacing: "-1px", lineHeight: 1, color: "#f5f2ee" }}>{totalHoje}</span>
+            <span style={{ fontSize: 10.5, fontWeight: 700, color: "#5a564d", textTransform: "uppercase", letterSpacing: ".5px" }}>Hoje</span>
           </div>
-          <div style={{ background: "#101010", border: "1px solid #1f1d1a", borderRadius: 16, padding: "14px 12px", display: "flex", flexDirection: "column", gap: 3 }}>
-            <span style={{ fontSize: 26, fontWeight: 900, letterSpacing: "-1px", lineHeight: 1, color: "#ff6b00" }}>{emAberto}</span>
-            <span style={{ fontSize: 10.5, fontWeight: 700, color: "#a39b8b", textTransform: "uppercase", letterSpacing: ".5px" }}>Em aberto</span>
+          <div style={{ background: "#1a0d00", border: "1.5px solid rgba(255,107,0,.5)", borderRadius: 16, padding: "14px 12px", display: "flex", flexDirection: "column", gap: 3 }}>
+            <span style={{ fontSize: 34, fontWeight: 900, letterSpacing: "-1.5px", lineHeight: 1, color: "#ff6b00" }}>{emAberto}</span>
+            <span style={{ fontSize: 10.5, fontWeight: 800, color: "#ff6b00", textTransform: "uppercase", letterSpacing: ".5px", opacity: 0.7 }}>Em aberto</span>
           </div>
           <div style={{ background: "#101010", border: "1px solid #1f1d1a", borderRadius: 16, padding: "14px 12px", display: "flex", flexDirection: "column", gap: 3 }}>
             <span style={{ fontSize: 26, fontWeight: 900, letterSpacing: "-1px", lineHeight: 1, color: "#facc15" }}>{avaliacaoMedia}</span>
-            <span style={{ fontSize: 10.5, fontWeight: 700, color: "#a39b8b", textTransform: "uppercase", letterSpacing: ".5px" }}>Avaliação</span>
+            <span style={{ fontSize: 10.5, fontWeight: 700, color: "#5a564d", textTransform: "uppercase", letterSpacing: ".5px" }}>★ Média</span>
           </div>
         </div>
 
@@ -433,11 +436,11 @@ export default function PedidosPage() {
               const active = filtro === s.key
               return (
                 <div key={s.key} style={{ display: "flex", alignItems: "center", gap: 4, flex: 1 }}>
-                  <button onClick={() => setFiltro(active ? "todos" : s.key)} style={{ flex: 1, minWidth: 0, border: `1px solid ${active ? "#ff6b00" : "#242220"}`, background: active ? "#ff6b00" : "#101010", color: active ? "#060606" : "#c9c2b4", borderRadius: 14, padding: "10px 4px 9px", display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
-                    <span style={{ fontSize: 20, fontWeight: 900, lineHeight: 1, color: active ? "#060606" : "#ff6b00" }}>{s.count}</span>
-                    <span style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".4px" }}>{s.label}</span>
+                  <button onClick={() => setFiltro(active ? "todos" : s.key)} style={{ flex: 1, minWidth: 0, border: `1px solid ${active ? s.stepBorder : "#242220"}`, background: active ? s.stepBg : "#101010", color: active ? s.stepFg : "#5a564d", borderRadius: 14, padding: "10px 4px 9px", display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
+                    <span style={{ fontSize: 20, fontWeight: 900, lineHeight: 1, color: active ? s.stepCountFg : "#444" }}>{s.count}</span>
+                    <span style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".4px" }}>{s.stepLabel}</span>
                   </button>
-                  {i < steps.length - 1 && <span style={{ color: "#3a362f", fontSize: 15, fontWeight: 900, flexShrink: 0, lineHeight: 1 }}>›</span>}
+                  {i < steps.length - 1 && <span style={{ color: "#2a2723", fontSize: 15, fontWeight: 900, flexShrink: 0, lineHeight: 1 }}>›</span>}
                 </div>
               )
             })}
@@ -470,10 +473,9 @@ export default function PedidosPage() {
             if (flashId === pedido.id) cardAnim = "cbFlash .7s ease"
             if (leavingId === pedido.id) cardAnim = "cbCardOut .3s ease both"
 
-            let cardBorder = "1px solid #1f1d1a"
-            if (pedido.status === "novo") cardBorder = "1.5px solid rgba(255,107,0,.75)"
-            if (pedido.escalonado) cardBorder = "1.5px solid rgba(239,68,68,.45)"
-            if (pedido.cancelamentoSolicitado) cardBorder = "1.5px solid rgba(239,68,68,.3)"
+            let cardBorder = badge.cardBorder
+            if (pedido.escalonado) cardBorder = "1.5px solid rgba(239,68,68,.6)"
+            if (pedido.cancelamentoSolicitado) cardBorder = "1.5px solid rgba(239,68,68,.4)"
 
             const pagamento = pedido.pagamento || ""
             const payDot = pagamento.toLowerCase().includes("pix") ? "#22c55e" : pagamento.toLowerCase().includes("cart") ? "#60a5fa" : "#facc15"
