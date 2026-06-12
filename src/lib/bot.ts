@@ -1,9 +1,13 @@
-﻿import { MENU as MENU_PADRAO, getBorderPrice, getBorderByIndex, getSizePrice, getMacarronadaPrice } from "./menu";
+﻿import { MENU as MENU_PADRAO, getBorderPrice, getBorderByIndex, getMacarronadaPrice } from "./menu";
 
 let MENU = MENU_PADRAO;
 
 export function setMenuDinamico(menu: typeof MENU_PADRAO) {
   MENU = menu;
+}
+
+function getSizePrice(size: string): number {
+  return MENU.sizes.find((s) => s.code === size)?.price ?? 0;
 }
 export type BotStep =
   | "welcome"
@@ -30,6 +34,7 @@ export type BotStep =
   | "payment"
   | "troco"
   | "confirm"
+  | "aguardando_pix"
   | "done"
   | "escalado";
 export interface CartItem {
@@ -899,9 +904,11 @@ export function processMessage(input: string, session: BotSession): BotResponse 
       const retira = n === "2" || n.includes("retirar") || n.includes("cancela") || n.includes("errado") ||
         (eNegativa(n) && !n.includes("nao obrigado"));
       if (confirma) {
+        if (session.paymentMethod === "Pix") {
+          return { messages: [`Ótimo! 😊 Para finalizar, envie o comprovante do Pix.\n\nChave Pix: (configurada pelo admin) 💸\n\nAssim que confirmarmos o pagamento, seu pedido vai direto pra cozinha! 🍕`], session: { ...session, step: "aguardando_pix" } };
+        }
         const timeMsg = session.deliveryType === "delivery" ? "40-60 minutos" : "20-30 minutos";
-        const pixMsg = session.paymentMethod === "Pix" ? `\n\nChave Pix: (configurada pelo admin) 💸` : "";
-        return { messages: [`Pedido confirmado! 🎉 Já foi pra cozinha!\n\nObrigado, *${session.customerName?.split(" ")[0]}*! Sua pizza chega em *${timeMsg}* 🛵${pixMsg}\n\nQualquer dúvida é só chamar. Bom apetite! 🍕`], session: { ...session, step: "done" } };
+        return { messages: [`Pedido confirmado! 🎉 Já foi pra cozinha!\n\nObrigado, *${session.customerName?.split(" ")[0]}*! Sua pizza chega em *${timeMsg}* 🛵\n\nQualquer dúvida é só chamar. Bom apetite! 🍕`], session: { ...session, step: "done" } };
       }
       if (retira) {
         return { messages: [`Tudo bem, pedido cancelado! Se mudar de ideia é só chamar. 😊`], session: { ...session, step: "done" } };
