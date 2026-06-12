@@ -307,10 +307,13 @@ export async function POST(req: NextRequest) {
     
 
     // Detecta imagem ou PDF (comprovante Pix)
-    const isImagem = !!data?.message?.imageMessage;
-    const isPDF = !!data?.message?.documentMessage &&
-      (data?.message?.documentMessage?.mimetype === "application/pdf" ||
-       data?.message?.documentMessage?.fileName?.endsWith(".pdf"));
+    const msgKeys = Object.keys(data?.message || {});
+    console.log("[PIX-DEBUG] msgKeys:", JSON.stringify(msgKeys));
+    const isImagem = !!(data?.message?.imageMessage || msgKeys.some(k => k.toLowerCase().includes("image")));
+    const isPDF = !!(data?.message?.documentMessage && (
+      data?.message?.documentMessage?.mimetype === "application/pdf" ||
+      data?.message?.documentMessage?.fileName?.endsWith(".pdf")
+    ));
     if (isImagem || isPDF) {
       await processarComprovante(phone, data, config, isImagem);
       return NextResponse.json({ ok: true });
