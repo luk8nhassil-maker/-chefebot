@@ -259,6 +259,7 @@ Responda APENAS em JSON:
     const clean = respText.replace(/```json|```/g, "").trim();
     const resultado = JSON.parse(clean);
 
+    await log("info", "Resultado validacao Pix", JSON.stringify(resultado));
     if (resultado.valido) {
       const pedidosAtualizados = pedidos.map(p => p.id === pedidoAtivo!.id ? { ...p, pixConfirmado: true } : p);
       await redis.set("pedidos", pedidosAtualizados);
@@ -352,6 +353,7 @@ async function processarComprovante(phone: string, data: any, config: ConfigPizz
       config.chavePix, config.nomeTitularPix || config.nomePizzaria,
       pedidoAtivo.horarioInicio || pedidoAtivo.horario
     );
+    await log("info", "Resultado validacao Pix", JSON.stringify(resultado));
     if (resultado.valido) {
       const pedidosAtualizados = pedidos.map(p => p.id === pedidoAtivo.id ? { ...p, pixConfirmado: true } : p);
       await redis.set("pedidos", pedidosAtualizados);
