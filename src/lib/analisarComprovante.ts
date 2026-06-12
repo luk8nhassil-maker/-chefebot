@@ -36,7 +36,6 @@ REGRAS DE VALIDAÇÃO — responda "valido: true" SOMENTE se TODAS forem atendid
 1. Valor bate com o esperado (tolerância de R$ 0,01)
 2. Nome do destinatário contém palavras do nome "${nomeTitular}" (comparação flexível, ignorar maiúsculas/minúsculas, aceitar nome parcial) OU CNPJ/chave contém "${chavePix}"
 3. A data do comprovante é HOJE (${dataHoje})
-4. O horário do comprovante está entre 10 minutos ANTES e qualquer momento DEPOIS de ${horarioReferencia} (margem de 10 min para o cliente que paga antes de confirmar)
 5. O comprovante indica que o Pix foi ENVIADO/CONCLUÍDO com sucesso (não agendado, não pendente, não cancelado, não em análise)
 
 Se qualquer uma dessas regras falhar, responda "valido: false".

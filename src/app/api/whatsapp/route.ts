@@ -124,7 +124,7 @@ async function salvarPedido(session: BotSession, phone: string, config: ConfigPi
     itens,
     total,
     status: "novo" as const,
-    horario: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
+    horario: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" }),
     endereco,
     data: new Date().toLocaleDateString("pt-BR"),
     ...(session.observacao ? { observacao: session.observacao } : {}),
@@ -158,7 +158,7 @@ async function salvarEscalonamento(phone: string, session: BotSession) {
     itens: ["Cliente precisa de atendimento humano"],
     total: 0,
     status: "novo",
-    horario: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
+    horario: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" }),
     endereco: "-",
     escalonado: true,
   };
@@ -259,7 +259,6 @@ Responda APENAS em JSON:
     const clean = respText.replace(/```json|```/g, "").trim();
     const resultado = JSON.parse(clean);
 
-    await log("info", "Resultado validacao Pix", JSON.stringify(resultado));
     if (resultado.valido) {
       const pedidosAtualizados = pedidos.map(p => p.id === pedidoAtivo!.id ? { ...p, pixConfirmado: true } : p);
       await redis.set("pedidos", pedidosAtualizados);
@@ -353,7 +352,6 @@ async function processarComprovante(phone: string, data: any, config: ConfigPizz
       config.chavePix, config.nomeTitularPix || config.nomePizzaria,
       pedidoAtivo.horarioInicio || pedidoAtivo.horario
     );
-    await log("info", "Resultado validacao Pix", JSON.stringify(resultado));
     if (resultado.valido) {
       const pedidosAtualizados = pedidos.map(p => p.id === pedidoAtivo.id ? { ...p, pixConfirmado: true } : p);
       await redis.set("pedidos", pedidosAtualizados);
