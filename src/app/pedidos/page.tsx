@@ -36,12 +36,12 @@ const ACTION_LABEL: Record<Status, string> = {
   cancelado: "",
 }
 
-const BADGE_CFG: Record<Status, { bg: string; fg: string; label: string; cardBorder: string; stepBg: string; stepFg: string; stepBorder: string; stepCountFg: string }> = {
-  novo:         { bg: "#ff6b00",               fg: "#060606", label: "Novo",      cardBorder: "1.5px solid rgba(255,107,0,.75)",  stepBg: "#ff6b00",              stepFg: "#060606", stepBorder: "#ff6b00",              stepCountFg: "#060606" },
-  em_preparo:   { bg: "rgba(250,204,21,.18)",   fg: "#facc15", label: "Fazendo",   cardBorder: "1.5px solid rgba(250,204,21,.4)", stepBg: "rgba(250,204,21,.15)", stepFg: "#facc15", stepBorder: "rgba(250,204,21,.5)",   stepCountFg: "#facc15" },
-  saiu_entrega: { bg: "rgba(96,165,250,.18)",   fg: "#60a5fa", label: "Na rua",    cardBorder: "1.5px solid rgba(96,165,250,.4)", stepBg: "rgba(96,165,250,.15)", stepFg: "#60a5fa", stepBorder: "rgba(96,165,250,.5)",   stepCountFg: "#60a5fa" },
-  entregue:     { bg: "rgba(34,197,94,.18)",    fg: "#22c55e", label: "Entregue",  cardBorder: "1px solid #1f1d1a",               stepBg: "rgba(34,197,94,.15)",  stepFg: "#22c55e", stepBorder: "rgba(34,197,94,.5)",    stepCountFg: "#22c55e" },
-  cancelado:    { bg: "rgba(239,68,68,.18)",    fg: "#ef4444", label: "Cancelado", cardBorder: "1.5px solid rgba(239,68,68,.4)",  stepBg: "rgba(239,68,68,.15)",  stepFg: "#ef4444", stepBorder: "rgba(239,68,68,.5)",    stepCountFg: "#ef4444" },
+const BADGE_CFG: Record<Status, { bg: string; fg: string; label: string; cardBorder: string; stepBg: string; stepFg: string; stepBorder: string; stepCountFg: string; ctaBg: string; ctaFg: string }> = {
+  novo:         { bg: "#ff6b00",               fg: "#060606", label: "Novo",      cardBorder: "1.5px solid rgba(255,107,0,.75)",  stepBg: "#ff6b00",              stepFg: "#060606", stepBorder: "#ff6b00",              stepCountFg: "#060606", ctaBg: "#ff6b00",    ctaFg: "#060606" },
+  em_preparo:   { bg: "rgba(250,204,21,.18)",   fg: "#facc15", label: "Fazendo",   cardBorder: "1.5px solid rgba(250,204,21,.4)", stepBg: "rgba(250,204,21,.15)", stepFg: "#facc15", stepBorder: "rgba(250,204,21,.5)",   stepCountFg: "#facc15", ctaBg: "#facc15",    ctaFg: "#060606" },
+  saiu_entrega: { bg: "rgba(96,165,250,.18)",   fg: "#60a5fa", label: "Na rua",    cardBorder: "1.5px solid rgba(96,165,250,.4)", stepBg: "rgba(96,165,250,.15)", stepFg: "#60a5fa", stepBorder: "rgba(96,165,250,.5)",   stepCountFg: "#60a5fa", ctaBg: "#60a5fa",    ctaFg: "#060606" },
+  entregue:     { bg: "rgba(34,197,94,.18)",    fg: "#22c55e", label: "Entregue",  cardBorder: "1px solid #1f1d1a",               stepBg: "rgba(34,197,94,.15)",  stepFg: "#22c55e", stepBorder: "rgba(34,197,94,.5)",    stepCountFg: "#22c55e", ctaBg: "#22c55e",    ctaFg: "#060606" },
+  cancelado:    { bg: "rgba(239,68,68,.18)",    fg: "#ef4444", label: "Cancelado", cardBorder: "1.5px solid rgba(239,68,68,.4)",  stepBg: "rgba(239,68,68,.15)",  stepFg: "#ef4444", stepBorder: "rgba(239,68,68,.5)",    stepCountFg: "#ef4444", ctaBg: "#ef4444",    ctaFg: "#fff" },
 }
 
 function getUserInfo(): { name: string; role: string } | null {
@@ -551,7 +551,7 @@ export default function PedidosPage() {
                         }
                       }}
                       disabled={atualizando === pedido.id}
-                      style={{ height: 58, border: "none", borderRadius: 16, background: "#ff6b00", color: "#060606", fontSize: 17, fontWeight: 900, letterSpacing: "-0.2px", opacity: atualizando === pedido.id ? 0.6 : 1 }}
+                      style={{ height: 58, border: "none", borderRadius: 16, background: badge.ctaBg, color: badge.ctaFg, fontSize: 17, fontWeight: 900, letterSpacing: "-0.2px", opacity: atualizando === pedido.id ? 0.6 : 1 }}
                     >
                       {atualizando === pedido.id ? "..." : ACTION_LABEL[pedido.status]}
                     </button>
