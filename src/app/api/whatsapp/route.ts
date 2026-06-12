@@ -306,10 +306,12 @@ async function processarComprovante(phone: string, data: any, config: ConfigPizz
     let mediaType: "image/jpeg" | "image/png" | "image/webp" | "application/pdf" = isImagem ? "image/jpeg" : "application/pdf";
     try {
       const downloadUrl = `https://${process.env.EVOLUTION_API_URL}/chat/getBase64FromMediaMessage/chefe`;
+      const msgPayload = data?.data || data;
+      console.log("[DOWNLOAD-PAYLOAD]", JSON.stringify(msgPayload).slice(0,300));
       const downloadRes = await fetch(downloadUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json", apikey: process.env.EVOLUTION_API_KEY! },
-        body: JSON.stringify({ message: data.message }),
+        body: JSON.stringify({ message: msgPayload.message }),
       });
       if (downloadRes.ok) {
         const downloadData = await downloadRes.json();
