@@ -239,6 +239,7 @@ async function processarComprovante(phone: string, data: any, config: ConfigPizz
       await log("aviso", "Erro ao baixar comprovante", String(err));
     }
     if (!imagemBase64) {
+      await log("aviso", "Comprovante sem base64 — download falhou", `Phone: ${phone} mediaType: ${mediaType}`);
       await enviarMensagem(phone, `Comprovante recebido! 📄 Nossa equipe vai verificar em instantes. ✅`);
       await salvarEscalonamento(phone, session || { step: "done", cart: [], deliveryFee: 0, customerName: pedidoAtivo.cliente });
       return;
