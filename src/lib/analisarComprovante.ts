@@ -30,13 +30,11 @@ DADOS ESPERADOS:
 - Chave Pix / CNPJ da pizzaria: ${chavePix}
 - Nome do titular que deve receber: ${nomeTitular}
 - Data do pedido: ${dataHoje}
-- Horário mínimo do comprovante: ${horarioReferencia} (o Pix deve ter sido feito APÓS esse horário)
-
 REGRAS DE VALIDAÇÃO — responda "valido: true" SOMENTE se TODAS forem atendidas:
 1. Valor bate com o esperado (tolerância de R$ 0,01)
 2. Nome do destinatário contém palavras do nome "${nomeTitular}" (comparação flexível, ignorar maiúsculas/minúsculas, aceitar nome parcial) OU CNPJ/chave contém "${chavePix}"
 3. A data do comprovante é HOJE (${dataHoje})
-5. O comprovante indica que o Pix foi ENVIADO/CONCLUÍDO com sucesso (não agendado, não pendente, não cancelado, não em análise)
+4. O comprovante indica que o Pix foi ENVIADO/CONCLUÍDO com sucesso (não agendado, não pendente, não cancelado, não em análise)
 
 Se qualquer uma dessas regras falhar, responda "valido: false".
 
