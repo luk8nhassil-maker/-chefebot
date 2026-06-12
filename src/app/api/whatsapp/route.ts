@@ -307,13 +307,18 @@ export async function POST(req: NextRequest) {
     
 
     // Detecta imagem ou PDF (comprovante Pix)
-    const msgKeys = Object.keys(data?.message || {});
-    console.log("[PIX-DEBUG] msgKeys:", JSON.stringify(msgKeys));
-    const isImagem = !!(data?.message?.imageMessage || msgKeys.some(k => k.toLowerCase().includes("image")));
-    const isPDF = !!(data?.message?.documentMessage && (
-      data?.message?.documentMessage?.mimetype === "application/pdf" ||
-      data?.message?.documentMessage?.fileName?.endsWith(".pdf")
-    ));
+    // Detecta imagem/PDF pelo messageType do webhook (Evolution API v2.3.7)
+    const messageType = data?.data?.messageType || data?.messageType || "";
+    const isImagem = !!(data?.message?.imageMessage || messageType === "imageMessage" || messageType === "image");
+    const isPDF = !!(
+      (data?.message?.documentMessage && (
+        data?.message?.documentMessage?.mimetype === "application/pdf" ||
+        data?.message?.documentMessage?.fileName?.endsWith(".pdf")
+      )) ||
+      messageType === "documentMessage" ||
+      messageType === "document"
+    );
+    console.log("[PIX-DEBUG2] messageType:", messageType, "isImagem:", isImagem, "isPDF:", isPDF);
     if (isImagem || isPDF) {
       await processarComprovante(phone, data, config, isImagem);
       return NextResponse.json({ ok: true });
