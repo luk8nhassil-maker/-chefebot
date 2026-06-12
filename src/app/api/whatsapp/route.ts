@@ -20,6 +20,7 @@ type Pedido = {
   cancelamentoSolicitado?: boolean;
   observacao?: string;
   pixConfirmado?: boolean;
+  tipoEntrega?: string;
 };
 
 type ConfigPizzaria = {
@@ -198,15 +199,26 @@ async function enviarImagem(phone: string, imageUrl: string) {
 
 async function processarComprovante(phone: string, data: any, config: ConfigPizzaria, isImagem: boolean) {
   try {
-    const pedidos = await redis.get<Pedido[]>("pedidos") || [];
-    const pedidoAtivo = pedidos
-      .filter(p => p.telefone === phone && p.status === "novo" && !p.escalonado)
-      .sort((a, b) => b.id.localeCompare(a.id))[0];
-    if (!pedidoAtivo) return;
     const sessionKey = `session:${phone}`;
     const session = await redis.get<BotSession>(sessionKey);
     const isPix = session?.paymentMethod === "Pix";
     if (!isPix) return;
+
+    const isAguardandoPix = session?.step === "aguardando_pix";
+    let pedidos = await redis.get<Pedido[]>("pedidos") || [];
+    let pedidoAtivo = pedidos
+      .filter(p => p.telefone === phone && p.status === "novo" && !p.escalonado)
+      .sort((a, b) => b.id.localeCompare(a.id))[0];
+
+    // Pedido ainda nao foi salvo — salva agora antes de validar
+    if (isAguardandoPix && !pedidoAtivo && session) {
+      await salvarPedido(session, phone, config);
+      pedidos = await redis.get<Pedido[]>("pedidos") || [];
+      pedidoAtivo = pedidos
+        .filter(p => p.telefone === phone && p.status === "novo" && !p.escalonado)
+        .sort((a, b) => b.id.localeCompare(a.id))[0];
+    }
+    if (!pedidoAtivo) return;
     await enviarMensagem(phone, `Comprovante recebido! 🔍 Verificando o pagamento...`);
     let imagemBase64 = "";
     let mediaType: "image/jpeg" | "image/png" | "image/webp" | "application/pdf" = isImagem ? "image/jpeg" : "application/pdf";
@@ -249,8 +261,9 @@ async function processarComprovante(phone: string, data: any, config: ConfigPizz
       const pedidosAtualizados = pedidos.map(p => p.id === pedidoAtivo.id ? { ...p, pixConfirmado: true } : p);
       await redis.set("pedidos", pedidosAtualizados);
       const firstName = pedidoAtivo.cliente.split(" ")[0];
-      await enviarMensagem(phone, `Pagamento confirmado! ✅🎉\n\nObrigado, *${firstName}*! Seu pedido ja foi enviado para a cozinha. Aguarda que vem ai! 🍕`);
-     await redis.set(chaveHash, true, { ex: 30 * 24 * 60 * 60 }) // 30 dias
+      const timeMsg = pedidoAtivo.tipoEntrega === "pickup" ? "20-30 minutos" : "40-60 minutos";
+      await enviarMensagem(phone, `Pagamento confirmado! ✅🎉\n\nObrigado, *${firstName}*! Seu pedido já foi pra cozinha. Sua pizza chega em *${timeMsg}* 🛵\n\nQualquer dúvida é só chamar. Bom apetite! 🍕`);
+      await redis.set(chaveHash, true, { ex: 30 * 24 * 60 * 60 }) // 30 dias
       await log("info", `Pix confirmado automaticamente para ${firstName}`, `Valor: R$ ${resultado.valorEncontrado}`);
     } else {
       await enviarMensagem(phone, `Comprovante recebido! 📄 Nossa equipe vai verificar o pagamento manualmente. Em instantes confirmamos! 😊`);
@@ -499,6 +512,21 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Cliente em aguardando_pix mandou texto (nao imagem) — lembra de enviar comprovante
+    if (currentSession.step === "aguardando_pix") {
+      const pixIniciadoEm = (currentSession as any).pixIniciadoEm || Date.now();
+      const minutos = Math.floor((Date.now() - pixIniciadoEm) / 60000);
+      const cobrancas = (currentSession as any).pixCobrancas || 0;
+      await enviarMensagem(phone, `Para confirmar seu pedido, preciso do comprovante do Pix! 📄\n\nSó enviar a imagem ou PDF aqui no chat. 😊`);
+      await redis.set(sessionKey, { ...currentSession, pixIniciadoEm, pixCobrancas: cobrancas + 1 }, { ex: 1800 });
+      if (cobrancas >= 1) {
+        // 2a cobrança — escalona para Kellyne
+        await salvarEscalonamento(phone, currentSession);
+        await enviarMensagem(phone, `Nossa equipe vai te ajudar a finalizar o pedido! Um instante. 😊`);
+      }
+      return NextResponse.json({ ok: true });
+    }
+
     // Sessao concluida — se mandar saudacao, inicia novo pedido como recorrente
     if (currentSession.step === "done" && eSaudacao(messageText)) {
       const historico = await redis.get<ClienteHistorico>(`cliente:${phone}`);
@@ -574,9 +602,15 @@ export async function POST(req: NextRequest) {
     const stepAnterior = currentSession.step;
     const result = processMessage(mensagemProcessada, currentSession);
 
-    // Salva pedido na confirmacao
+    // Se acabou de entrar em aguardando_pix, registra timestamp
+    if (result.session?.step === "aguardando_pix" && currentSession.step === "confirm") {
+      result.session = { ...result.session, pixIniciadoEm: Date.now(), pixCobrancas: 0 } as any;
+    }
+
+    // Salva pedido na confirmacao — Pix espera comprovante
     if (currentSession.step === "confirm" &&
-      (messageText.trim() === "1" || messageText.trim().toLowerCase() === "sim")) {
+      (messageText.trim() === "1" || messageText.trim().toLowerCase() === "sim") &&
+      currentSession.paymentMethod !== "Pix") {
       const pedidoId = await salvarPedido(currentSession, phone, config);
       result.session = { ...result.session, pedidoId } as any;
       if (config.limitePico > 0) {
