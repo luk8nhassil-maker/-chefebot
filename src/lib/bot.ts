@@ -49,6 +49,7 @@ export interface ClienteHistorico {
   ultimoEndereco?: string;
   ultimoNeighborhood?: string;
   ultimoDeliveryType?: string;
+  ultimoPayment?: string;
 }
 export interface BotSession {
   step: BotStep;
@@ -457,7 +458,7 @@ export function processMessage(input: string, session: BotSession): BotResponse 
           const total = subtotal + deliveryFee;
           const updatedSession: BotSession = {
             ...session,
-            step: "confirm",
+            step: "payment",
             cart,
             customerName: historico.nome,
             deliveryFee,
@@ -465,14 +466,15 @@ export function processMessage(input: string, session: BotSession): BotResponse 
             address: historico.ultimoEndereco,
             neighborhood: historico.ultimoNeighborhood,
           };
-          const receipt = buildReceipt(updatedSession);
+          const payList = MENU.payments.map((p, i) => `  ${i + 1}. ${p}`).join("\n");
           return {
             messages: [
               `Ótimo, *${firstName}*! 😊 Mesmo pedido de antes:`,
-              `🛒 *Confirmação do pedido:*\n\n${receipt}\n\nTá certinho?\n\n  1. Sim, confirmar ✅\n  2. Não, cancelar`
+              `🛒 *Itens:*\n${cart.map(item => `• ${item.name}`).join("\n")}\n\nEntrega: ${historico.ultimoEndereco ? `${historico.ultimoEndereco} - ${historico.ultimoNeighborhood}` : "Retirada na loja"}\n\nComo vai pagar?\n\n${payList}`
             ],
             session: resetaTentativas(updatedSession),
           };
+
         }
         return {
           messages: [`Que bom te ver de novo, *${firstName}*! 😊\n\n${mensagemCategorias()}`],
