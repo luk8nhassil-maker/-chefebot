@@ -299,6 +299,7 @@ async function processarComprovante(phone: string, data: any, config: ConfigPizz
         .sort((a, b) => b.id.localeCompare(a.id))[0];
     }
     if (!pedidoAtivo) return;
+    console.log("[COMP-INICIO] iniciando processamento phone:", phone);
     await enviarMensagem(phone, `Comprovante recebido! 🔍 Verificando o pagamento...`);
     let imagemBase64 = "";
     let mediaType: "image/jpeg" | "image/png" | "image/webp" | "application/pdf" = isImagem ? "image/jpeg" : "application/pdf";
