@@ -384,6 +384,7 @@ export async function POST(req: NextRequest) {
 
     // Detecta imagem ou PDF (comprovante Pix)
     // Detecta imagem/PDF pelo messageType do webhook (Evolution API v2.3.7)
+    console.log("[WEBHOOK-FULL]", JSON.stringify(data).slice(0,800));
     const messageType = data?.data?.messageType || data?.messageType || "";
     const isImagem = !!(data?.message?.imageMessage || messageType === "imageMessage" || messageType === "image");
     const isPDF = !!(
