@@ -26,6 +26,7 @@ export type BotStep =
   | "delivery_type"
   | "neighborhood"
   | "address"
+  | "confirm_address"
   | "payment"
   | "troco"
   | "confirm"
@@ -819,6 +820,15 @@ export function processMessage(input: string, session: BotSession): BotResponse 
     }
     case "delivery_type": {
       if (n === "1" || n.includes("entrega") || n.includes("delivery") || n.includes("entregar") || n.includes("minha casa")) {
+        const hist = session.historico;
+        if (hist?.ultimoEndereco && hist?.ultimoNeighborhood) {
+          const nbFound = MENU.neighborhoods.find(nb => nb.name === hist.ultimoNeighborhood);
+          const fee = nbFound?.fee || hist.ultimoDeliveryFee || 0;
+          return {
+            messages: [`Entregar no mesmo endereço de antes? 📍\n\n*${hist.ultimoEndereco} - ${hist.ultimoNeighborhood}*\n\n  1. Sim, mesmo endereço\n  2. Não, quero outro endereço`],
+            session: resetaTentativas({ ...session, step: "confirm_address", deliveryType: "delivery", neighborhood: hist.ultimoNeighborhood, deliveryFee: fee, address: hist.ultimoEndereco }),
+          };
+        }
         return { messages: [`Ótimo! Qual seu bairro? 🛵\n\n${neighborhoodList()}`], session: resetaTentativas({ ...session, step: "neighborhood", deliveryType: "delivery" }) };
       }
       if (n === "2" || n.includes("retirar") || n.includes("loja") || n.includes("buscar") || n.includes("pegar") || n.includes("retiro")) {
@@ -834,6 +844,16 @@ export function processMessage(input: string, session: BotSession): BotResponse 
       else found = MENU.neighborhoods.find((nb) => normalizar(nb.name).includes(n));
       if (!found) return respostaInvalida(neighborhoodList(), session);
       return { messages: [`*${found.name}*, taxa de entrega: ${formatCurrency(found.fee)} 🛵\n\nMe passa o endereço completo:\n_(Rua, número e complemento)_`], session: resetaTentativas({ ...session, step: "address", neighborhood: found.name, deliveryFee: found.fee }) };
+    }
+    case "confirm_address": {
+      const payList = MENU.payments.map((p, i) => `  ${i + 1}. ${p}`).join("\n");
+      if (ePositiva(n) || n === "1") {
+        return { messages: [`Ótimo! 📍 *${session.address} - ${session.neighborhood}*\n\nComo vai pagar?\n\n${payList}`], session: resetaTentativas({ ...session, step: "payment" }) };
+      }
+      if (eNegativa(n) || n === "2") {
+        return { messages: [`Tudo bem! Qual seu bairro? 🛵\n\n${neighborhoodList()}`], session: resetaTentativas({ ...session, step: "neighborhood", address: undefined }) };
+      }
+      return respostaInvalida(`  1. Sim, mesmo endereço\n  2. Não, quero outro endereço`, session);
     }
     case "address": {
       if (!text || text.length < 5) return respostaInvalida("Me passa o endereço completo.\nExemplo: *Rua das Flores, 123, Apto 2*", session);
