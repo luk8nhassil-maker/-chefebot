@@ -6,7 +6,7 @@ export function setMenuDinamico(menu: typeof MENU_PADRAO) {
   MENU = menu;
 }
 
-function getSizePrice(size: string): number {
+function getSizePrice(size: string): number { // dynamic
   return MENU.sizes.find((s) => s.code === size)?.price ?? 0;
 }
 export type BotStep =
