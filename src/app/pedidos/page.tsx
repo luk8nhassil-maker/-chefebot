@@ -460,14 +460,30 @@ export default function PedidosPage() {
           )}
 
           {pedidosFiltrados.map(pedido => {
-            const mins = tempoDesde(pedido.horario, pedido.horarioInicio, now)
+            const minsDesde = tempoDesde(pedido.horario, undefined, now)
+            const minsPrep = tempoDesde(pedido.horario, pedido.horarioInicio, now)
             const meta = 40
-            const { dash, color: ringColor } = timerDash(mins, meta)
             const badge = BADGE_CFG[pedido.status]
             const nextStatus = NEXT_STATUS[pedido.status]
             const isDone = pedido.status === "entregue"
             const isCanceled = pedido.status === "cancelado"
-            const late = mins > meta && !isDone && !isCanceled
+
+            // Timer logic por status
+            const isNovo = pedido.status === "novo"
+            const timerMins = isNovo ? minsDesde : minsPrep
+            const timerLabel = isNovo
+              ? (minsDesde === 0 ? "agora" : `aguardando ${minsDesde}m`)
+              : isDone ? "concluído"
+              : minsPrep > meta ? `${minsPrep - meta}m atrasado`
+              : `meta ${meta} min`
+            const timerColor = isNovo
+              ? (minsDesde < 3 ? "#22c55e" : minsDesde < 7 ? "#facc15" : "#ef4444")
+              : isDone ? "#22c55e"
+              : minsPrep < meta * 0.5 ? "#22c55e"
+              : minsPrep < meta * 0.85 ? "#facc15"
+              : "#ef4444"
+            const { dash, color: ringColor } = { dash: isNovo ? 163.4 * (1 - Math.min(minsDesde / 15, 1)) : 163.4 * (1 - Math.min(minsPrep / meta, 1)), color: timerColor }
+            const late = minsPrep > meta && !isDone && !isCanceled
             const firstName = pedido.cliente.split(" ")[0]
 
             let cardAnim = "cbCardIn .35s ease both"
@@ -503,12 +519,12 @@ export default function PedidosPage() {
                         <circle cx="31" cy="31" r="26" fill="none" stroke={isDone ? "#22c55e" : ringColor} strokeWidth="5" strokeLinecap="round" strokeDasharray="163.4" strokeDashoffset={isDone ? 0 : dash} style={{ transition: "stroke-dashoffset 1s linear, stroke .4s" }} />
                       </svg>
                       <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
-                        <span style={{ fontSize: 18, fontWeight: 900, lineHeight: 1, color: isDone ? "#22c55e" : ringColor }}>{mins}</span>
+                        <span style={{ fontSize: isNovo ? 14 : 18, fontWeight: 900, lineHeight: 1, color: timerColor }}>{isNovo ? (minsDesde === 0 ? "0" : minsDesde) : timerMins}</span>
                         <span style={{ fontSize: 8.5, fontWeight: 800, color: "#a39b8b", letterSpacing: "1px" }}>MIN</span>
                       </div>
                     </div>
-                    <span style={{ fontSize: 9.5, fontWeight: 800, color: late ? "#ef4444" : "#a39b8b", letterSpacing: ".2px", whiteSpace: "nowrap" }}>
-                      {isDone ? "concluído" : late ? `${mins - meta} min atrasado` : `meta ${meta} min`}
+                    <span style={{ fontSize: 9.5, fontWeight: 800, color: timerColor, letterSpacing: ".2px", whiteSpace: "nowrap", textAlign: "center", maxWidth: 62 }}>
+                      {timerLabel}
                     </span>
                   </div>
                 </div>
