@@ -388,21 +388,21 @@ export default function AdminPage() {
             {graficoPico.length > 0 && (
               <div style={{ ...card, marginBottom: 16 }}>
                 <p style={sectionTitle}>Horario de pico</p>
-                <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6, height: 70 }}>
+                <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 80 }}>
                   {graficoPico.map((item, i) => {
-                    const altura = maxPico > 0 ? Math.max((item.total / maxPico) * 100, 8) : 8
+                    const altura = maxPico > 0 ? Math.max((item.total / maxPico) * 100, 4) : 4
                     const isPico = item.total === maxPico && maxPico > 0
                     return (
-                      <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-                        <p style={{ color: isPico ? '#ff6b00' : '#333', fontSize: 9, margin: 0, fontWeight: isPico ? 800 : 400 }}>{item.total > 0 ? item.total : ''}</p>
-                        <div style={{ width: '100%', height: `${altura}%`, background: isPico ? '#ff6b00' : '#1e1e1e', borderRadius: '4px 4px 0 0', minHeight: 4 }} />
+                      <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                        {item.total > 0 && <p style={{ color: isPico ? '#ff6b00' : '#555', fontSize: 7, margin: 0, fontWeight: isPico ? 900 : 400 }}>{item.total}</p>}
+                        <div style={{ width: '100%', height: `${altura}%`, background: isPico ? '#ff6b00' : item.total > 0 ? '#2a2a2a' : '#161616', borderRadius: '3px 3px 0 0', minHeight: 3 }} />
                       </div>
                     )
                   })}
                 </div>
-                <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                <div style={{ display: 'flex', gap: 2, marginTop: 4, overflowX: 'hidden' }}>
                   {graficoPico.map((item, i) => (
-                    <p key={i} style={{ flex: 1, color: '#333', fontSize: 9, margin: 0, textAlign: 'center' }}>{item.hora}</p>
+                    <p key={i} style={{ flex: 1, color: item.total > 0 ? '#555' : '#222', fontSize: 7, margin: 0, textAlign: 'center' }}>{item.hora.replace('h','')}</p>
                   ))}
                 </div>
               </div>
