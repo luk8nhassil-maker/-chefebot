@@ -429,14 +429,14 @@ export function processMessage(input: string, session: BotSession): BotResponse 
         const sweetList = MENU.sweetFlavors.map((f, i) => `  ${MENU.saltyFlavors.length + i + 1}. ${f}`).join("\n");
         return {
           messages: [
-            `${qtd} pizzas *${size}* anotadas! 🍕`,
-            `Vamos montar uma de cada vez 😊\n\nQual o sabor da *pizza 1*?\n\nSalgadas\n${saltyList}\n\nDoces\n${sweetList}`
+            `2️⃣ *${qtd} pizzas ${size}* anotadas! Vamos montar uma de cada vez 🍕`,
+            `*Pizza 1 de ${qtd}* — Qual o sabor? 😋\n\nSalgadas\n${saltyList}\n\nDoces\n${sweetList}\n\n_(Digite *voltar* para corrigir)_`
           ],
           session: resetaTentativas({ ...session, step: "flavor", currentCategory: "pizza", currentSize: size, pendingPizzas: qtd, pizzaAtualIndex: 1 }),
         };
       }
       return {
-        messages: [`${qtd} pizzas anotadas! 🍕\n\nQual o tamanho?\n\n${sizeList()}`],
+        messages: [`2️⃣ *${qtd} pizzas* anotadas! Vamos montar uma de cada vez 🍕\n\n*Pizza 1 de ${qtd}* — Qual o tamanho?\n\n${sizeList()}\n\n_(Digite *voltar* para corrigir)_`],
         session: resetaTentativas({ ...session, step: "size", currentCategory: "pizza", pendingPizzas: qtd, pizzaAtualIndex: 1 }),
       };
     }
@@ -709,7 +709,7 @@ export function processMessage(input: string, session: BotSession): BotResponse 
         return {
           messages: [
             `Pizza *${size}* anotada! 👌`,
-            `Agora me conta — qual o sabor? 😋\n\nSalgadas\n${saltyList}\n\nDoces\n${sweetList}`
+            `Agora me conta — qual o sabor? 😋\n\nSalgadas\n${saltyList}\n\nDoces\n${sweetList}\n\n_(Digite *voltar* para corrigir)_`
           ],
           session: resetaTentativas({ ...session, step: "flavor", currentSize: size }),
         };
@@ -868,7 +868,7 @@ export function processMessage(input: string, session: BotSession): BotResponse 
         return {
           messages: [
             `Pizza ${session.pizzaAtualIndex} anotada! 🍕\n\n🛒 *Pedido até agora:*\n${resumoCarrinho(newCart)}\n  Subtotal: ${formatCurrency(subtotal)}`,
-            `Agora o sabor da *pizza ${proximo}*? 😋\n\nSalgadas\n${saltyList}\n\nDoces\n${sweetList}`
+            `*Pizza ${proximo} de ${session.pendingPizzas}* — Qual o sabor? 😋\n\nSalgadas\n${saltyList}\n\nDoces\n${sweetList}\n\n_(Digite *voltar* para corrigir)_`
           ],
           session: resetaTentativas({ ...session, step: "flavor", cart: newCart, currentSize: session.currentSize, currentFlavor: undefined, pizzaAtualIndex: proximo }),
         };
