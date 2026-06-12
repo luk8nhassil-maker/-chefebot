@@ -559,7 +559,7 @@ export default function PedidosPage() {
                 )}
 
                 {/* Ações */}
-                {!isDone && !isCanceled && nextStatus && (
+                {!isDone && !isCanceled && nextStatus && !(pedido.escalonado && pagamento === "Pix" && !pedido.pixConfirmado) && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }} onClick={e => e.stopPropagation()}>
                     <button
                       onClick={() => {
@@ -581,6 +581,11 @@ export default function PedidosPage() {
                   </div>
                 )}
 
+                {pedido.escalonado && pagamento === "Pix" && !pedido.pixConfirmado && (
+                  <div style={{ height: 58, borderRadius: 16, background: "rgba(234,179,8,.08)", border: "1px solid rgba(234,179,8,.3)", color: "#facc15", fontSize: 15, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                    ⏳ Aguardando confirmação do Pix
+                  </div>
+                )}
                 {isDone && (
                   <div style={{ height: 54, borderRadius: 16, background: "rgba(34,197,94,.1)", border: "1px solid rgba(34,197,94,.3)", color: "#22c55e", fontSize: 15, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center" }}>
                     Entregue · tudo certo ✓
@@ -681,7 +686,12 @@ export default function PedidosPage() {
                         {ACTION_LABEL[p.status]}
                       </button>
                     )}
-                    {isDone && (
+                    {pedido.escalonado && pagamento === "Pix" && !pedido.pixConfirmado && (
+                  <div style={{ height: 58, borderRadius: 16, background: "rgba(234,179,8,.08)", border: "1px solid rgba(234,179,8,.3)", color: "#facc15", fontSize: 15, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                    ⏳ Aguardando confirmação do Pix
+                  </div>
+                )}
+                {isDone && (
                       <div style={{ height: 54, borderRadius: 16, background: "rgba(34,197,94,.1)", border: "1px solid rgba(34,197,94,.3)", color: "#22c55e", fontSize: 15, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                         Entregue · tudo certo ✓
                       </div>
