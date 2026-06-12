@@ -63,12 +63,12 @@ function getUserInfo(): { name: string; role: string } | null {
   return null
 }
 
-function tempoDesde(horario: string, horarioInicio?: string): number {
+function tempoDesde(horario: string, horarioInicio?: string, now?: number): number {
   try {
     const base = horarioInicio || horario
     const [h, m] = base.split(":").map(Number)
-    const agora = new Date()
-    const t = new Date(); t.setHours(h, m, 0, 0)
+    const agora = now ? new Date(now) : new Date()
+    const t = new Date(agora); t.setHours(h, m, 0, 0)
     return Math.max(0, Math.floor((agora.getTime() - t.getTime()) / 60000))
   } catch { return 0 }
 }
@@ -460,7 +460,7 @@ export default function PedidosPage() {
           )}
 
           {pedidosFiltrados.map(pedido => {
-            const mins = tempoDesde(pedido.horario, pedido.horarioInicio)
+            const mins = tempoDesde(pedido.horario, pedido.horarioInicio, now)
             const meta = 40
             const { dash, color: ringColor } = timerDash(mins, meta)
             const badge = BADGE_CFG[pedido.status]
@@ -605,7 +605,7 @@ export default function PedidosPage() {
 
               {(() => {
                 const p = detalhePedido
-                const mins = tempoDesde(p.horario, p.horarioInicio)
+                const mins = tempoDesde(p.horario, p.horarioInicio, now)
                 const meta = 40
                 const { dash, color: ringColor } = timerDash(mins, meta)
                 const badge = BADGE_CFG[p.status]
