@@ -311,7 +311,7 @@ async function processarComprovante(phone: string, data: any, config: ConfigPizz
       const downloadRes = await fetch(downloadUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json", apikey: process.env.EVOLUTION_API_KEY! },
-        body: JSON.stringify({ message: msgPayload.message }),
+        body: JSON.stringify(msgPayload),
       });
       if (downloadRes.ok) {
         const downloadData = await downloadRes.json();
