@@ -133,7 +133,7 @@ async function salvarPedido(session: BotSession, phone: string, config: ConfigPi
     ...(session.deliveryType ? { tipoEntrega: session.deliveryType } : {}),
   };
   await redis.set("pedidos", [...pedidos, novoPedido]);
-  const historico: ClienteHistorico = { nome: session.customerName || phone, ultimoPedido: itens, ultimoTotal: total, ultimoCart: session.cart, ultimoDeliveryFee: session.deliveryFee, ultimoEndereco: session.address, ultimoNeighborhood: session.neighborhood, ultimoDeliveryType: session.deliveryType };
+  const historico: ClienteHistorico = { nome: session.customerName || phone, ultimoPedido: itens, ultimoTotal: total, ultimoCart: session.cart, ultimoDeliveryFee: session.deliveryFee, ultimoEndereco: session.address, ultimoNeighborhood: session.neighborhood, ultimoDeliveryType: session.deliveryType, ultimoPayment: session.paymentMethod };
   await redis.set(`cliente:${phone}`, historico, { ex: 30 * 24 * 60 * 60 });
   return pedidoId;
 }
@@ -560,6 +560,14 @@ export async function POST(req: NextRequest) {
       if (opcoes.length > 0) {
         const interpretado = await interpretarMensagem(messageText, currentSession.step, opcoes);
         if (interpretado) mensagemProcessada = interpretado;
+      }
+    }
+
+    // Se cliente esta escolhendo delivery, injeta historico para reusar endereco
+    if (currentSession.step === "delivery_type" && !currentSession.historico) {
+      const histSalvo = await redis.get<ClienteHistorico>(`cliente:${phone}`);
+      if (histSalvo?.ultimoEndereco && histSalvo?.ultimoNeighborhood) {
+        currentSession = { ...currentSession, historico: histSalvo };
       }
     }
 
