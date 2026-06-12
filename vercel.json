@@ -1,16 +1,7 @@
 {
   "crons": [
-    {
-      "path": "/api/cron",
-      "schedule": "0 3 * * *"
-    },
-    {
-      "path": "/api/cron/sessoes",
-      "schedule": "0 4 * * *"
-    },
-    {
-      "path": "/api/cron/pix-pendente",
-      "schedule": "* * * * *"
-    }
+    {"path": "/api/cron", "schedule": "0 3 * * *"},
+    {"path": "/api/cron/sessoes", "schedule": "0 4 * * *"},
+    {"path": "/api/cron/pix-pendente", "schedule": "0 * * * *"}
   ]
 }
