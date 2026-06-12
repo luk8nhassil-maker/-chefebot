@@ -310,6 +310,7 @@ export async function POST(req: NextRequest) {
     const isPDF = !!data?.message?.documentMessage &&
       (data?.message?.documentMessage?.mimetype === "application/pdf" ||
        data?.message?.documentMessage?.fileName?.endsWith(".pdf"));
+    console.log("[ChefeBot] Tipo mensagem:", JSON.stringify(Object.keys(data?.message || {})));
     if (isImagem || isPDF) {
       await processarComprovante(phone, data, config, isImagem);
       return NextResponse.json({ ok: true });
