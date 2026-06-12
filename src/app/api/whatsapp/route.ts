@@ -128,6 +128,9 @@ async function salvarPedido(session: BotSession, phone: string, config: ConfigPi
     ...(session.observacao ? { observacao: session.observacao } : {}),
     ...(session.paymentMethod ? { pagamento: session.paymentMethod } : {}),
     ...(session.troco ? { troco: session.troco } : {}),
+    ...(session.deliveryFee ? { taxaEntrega: session.deliveryFee } : {}),
+    ...(session.neighborhood ? { bairro: session.neighborhood } : {}),
+    ...(session.deliveryType ? { tipoEntrega: session.deliveryType } : {}),
   };
   await redis.set("pedidos", [...pedidos, novoPedido]);
   const historico: ClienteHistorico = { nome: session.customerName || phone, ultimoPedido: itens, ultimoTotal: total, ultimoCart: session.cart, ultimoDeliveryFee: session.deliveryFee, ultimoEndereco: session.address, ultimoNeighborhood: session.neighborhood, ultimoDeliveryType: session.deliveryType };

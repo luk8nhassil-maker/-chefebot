@@ -7,6 +7,8 @@ type Pedido = {
   id: string; cliente: string; telefone: string; itens: string[]
   total: number; status: string; horario: string; endereco: string
   escalonado?: boolean; observacao?: string; cancelamentoSolicitado?: boolean; data?: string
+  taxaEntrega?: number; bairro?: string; tipoEntrega?: string
+  entregador?: { id: string; nome: string; telefone: string }
 }
 type Config = {
   nomePizzaria: string; horaAbertura: number; horaFechamento: number
@@ -873,6 +875,56 @@ export default function AdminPage() {
         )}
 
         {/* ABA DEV */}
+        {aba === 'financeiro' && pedidos.filter(p => p.status === 'entregue' && p.entregador).length > 0 && (() => {
+          const entregasFeitas = pedidos.filter(p => p.status === 'entregue' && p.entregador)
+          const porEntregador: Record<string, { nome: string; entregas: Pedido[] }> = {}
+          entregasFeitas.forEach(p => {
+            if (!p.entregador) return
+            const id = p.entregador.id
+            if (!porEntregador[id]) porEntregador[id] = { nome: p.entregador.nome, entregas: [] }
+            porEntregador[id].entregas.push(p)
+          })
+          return (
+            <div style={{ background: '#111', border: '1px solid #1e1e1e', borderRadius: 16, padding: 16, marginTop: 8 }}>
+              <p style={{ color: '#ff6b00', fontSize: 12, fontWeight: 900, textTransform: 'uppercase', letterSpacing: 1, margin: '0 0 14px' }}>💸 Pagamento de Entregadores</p>
+              {Object.values(porEntregador).map(({ nome, entregas }) => {
+                const total = entregas.reduce((s, p) => s + (p.taxaEntrega || 0), 0)
+                const porBairro: Record<string, { count: number; taxa: number }> = {}
+                entregas.forEach(p => {
+                  const b = p.bairro || 'Sem bairro'
+                  if (!porBairro[b]) porBairro[b] = { count: 0, taxa: p.taxaEntrega || 0 }
+                  porBairro[b].count++
+                })
+                return (
+                  <div key={nome} style={{ background: '#0d0d0d', borderRadius: 12, padding: 14, marginBottom: 10, border: '1px solid #1a1a1a' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                      <div>
+                        <p style={{ color: '#f5f2ee', fontSize: 15, fontWeight: 900, margin: 0 }}>{nome}</p>
+                        <p style={{ color: '#5a564d', fontSize: 11, fontWeight: 600, margin: '2px 0 0' }}>{entregas.length} entrega{entregas.length > 1 ? 's' : ''}</p>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <p style={{ color: '#4ade80', fontSize: 20, fontWeight: 900, margin: 0 }}>R$ {total.toFixed(2).replace('.', ',')}</p>
+                        <p style={{ color: '#5a564d', fontSize: 10, fontWeight: 600, margin: '2px 0 0' }}>a receber</p>
+                      </div>
+                    </div>
+                    <div style={{ borderTop: '1px solid #1a1a1a', paddingTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {Object.entries(porBairro).map(([bairro, { count, taxa }]) => (
+                        <div key={bairro} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span style={{ color: '#ff6b00', fontSize: 12, fontWeight: 800 }}>{count}×</span>
+                            <span style={{ color: '#c9c2b4', fontSize: 13, fontWeight: 600 }}>{bairro}</span>
+                          </div>
+                          <span style={{ color: '#facc15', fontSize: 13, fontWeight: 700 }}>R$ {(count * taxa).toFixed(2).replace('.', ',')}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )
+        })()}
+
         {aba === 'dev' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div style={card}>
