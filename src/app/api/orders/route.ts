@@ -15,6 +15,10 @@ type Pedido = {
   pagamento?: string
   troco?: string
   entregador?: { id: string; nome: string; telefone: string }
+  tipoEntrega?: string
+  taxaEntrega?: number
+  bairro?: string
+  horarioInicio?: string
 }
 
 const PEDIDOS_INICIAIS: Pedido[] = [
@@ -76,7 +80,7 @@ async function checkAuth(req: NextRequest) {
   const token = req.cookies.get('auth-token')?.value ?? null
   if (!token) return null
   const payload = await verifyToken(token)
-  if (!payload || !['atendente', 'admin', 'dev'].includes(payload.role as string)) return null
+  if (!payload || !['atendente', 'admin'].includes(payload.role as string)) return null
   return payload
 }
 
@@ -96,10 +100,12 @@ export async function PATCH(req: NextRequest) {
   const index = pedidos.findIndex(p => p.id === id)
   if (index === -1) return NextResponse.json({ error: 'Pedido nao encontrado' }, { status: 404 })
 
+  const agora = new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })
   pedidos[index] = {
     ...pedidos[index],
     status,
     ...(status === 'cancelado' ? { cancelamentoSolicitado: false } : {}),
+    ...(status === 'em_preparo' && !pedidos[index].horarioInicio ? { horarioInicio: agora } : {}),
   }
 
   // Salva entregador no pedido se informado

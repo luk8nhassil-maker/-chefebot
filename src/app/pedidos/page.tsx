@@ -18,6 +18,8 @@ type Pedido = {
   pagamento?: string
   troco?: string
   pixConfirmado?: boolean
+  tipoEntrega?: string
+  horarioInicio?: string
 }
 
 const NEXT_STATUS: Record<Status, Status | null> = {
@@ -61,9 +63,10 @@ function getUserInfo(): { name: string; role: string } | null {
   return null
 }
 
-function tempoDesde(horario: string): number {
+function tempoDesde(horario: string, horarioInicio?: string): number {
   try {
-    const [h, m] = horario.split(":").map(Number)
+    const base = horarioInicio || horario
+    const [h, m] = base.split(":").map(Number)
     const agora = new Date()
     const t = new Date(); t.setHours(h, m, 0, 0)
     return Math.max(0, Math.floor((agora.getTime() - t.getTime()) / 60000))
@@ -457,7 +460,7 @@ export default function PedidosPage() {
           )}
 
           {pedidosFiltrados.map(pedido => {
-            const mins = tempoDesde(pedido.horario)
+            const mins = tempoDesde(pedido.horario, pedido.horarioInicio)
             const meta = 40
             const { dash, color: ringColor } = timerDash(mins, meta)
             const badge = BADGE_CFG[pedido.status]
@@ -544,7 +547,7 @@ export default function PedidosPage() {
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }} onClick={e => e.stopPropagation()}>
                     <button
                       onClick={() => {
-                        if (nextStatus === "saiu_entrega" && entregadores.length > 0) {
+                        if (nextStatus === "saiu_entrega" && entregadores.length > 0 && pedido.tipoEntrega !== "pickup") {
                           setModalEntrega({ pedidoId: pedido.id, proxStatus: nextStatus })
                         } else {
                           avancarStatus(pedido.id, nextStatus)
@@ -602,7 +605,7 @@ export default function PedidosPage() {
 
               {(() => {
                 const p = detalhePedido
-                const mins = tempoDesde(p.horario)
+                const mins = tempoDesde(p.horario, p.horarioInicio)
                 const meta = 40
                 const { dash, color: ringColor } = timerDash(mins, meta)
                 const badge = BADGE_CFG[p.status]
