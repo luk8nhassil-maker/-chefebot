@@ -12,28 +12,39 @@ export async function analisarComprovantePix(
   mediaType: "image/jpeg" | "image/png" | "image/webp" | "application/pdf",
   totalEsperado: number,
   chavePix: string,
-  nomeTitular: string
+  nomeTitular: string,
+  horarioPedido?: string
 ): Promise<ResultadoAnalise> {
   try {
     const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-    const prompt = `Analise este comprovante de transferência Pix e extraia as seguintes informações:
-1. Valor transferido (número apenas, ex: 52.00)
-2. Chave Pix ou conta de destino
+    const agora = new Date();
+    const dataHoje = agora.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" });
+    const horaAtual = agora.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" });
+    const horarioReferencia = horarioPedido || horaAtual;
 
-Dados esperados:
-- Valor esperado: R$ ${totalEsperado.toFixed(2)}
-- Chave Pix da pizzaria: ${chavePix}
-- Nome do titular: ${nomeTitular}
+    const prompt = `Analise este comprovante de transferência Pix e extraia as seguintes informações.
 
-Responda APENAS em JSON neste formato exato, sem explicações:
-{"valor": 52.00, "chave": "chave encontrada ou null", "valido": true/false}
+DADOS ESPERADOS:
+- Valor: R$ ${totalEsperado.toFixed(2)}
+- Chave Pix / CNPJ da pizzaria: ${chavePix}
+- Nome do titular que deve receber: ${nomeTitular}
+- Data do pedido: ${dataHoje}
+- Horário mínimo do comprovante: ${horarioReferencia} (o Pix deve ter sido feito APÓS esse horário)
 
-Considere "valido: true" se:
-- O valor bate com o esperado (tolerância de R$ 0,01)
-- A chave Pix ou nome do titular aparece no comprovante
+REGRAS DE VALIDAÇÃO — responda "valido: true" SOMENTE se TODAS forem atendidas:
+1. Valor bate com o esperado (tolerância de R$ 0,01)
+2. Nome do destinatário contém "${nomeTitular}" OU CNPJ/chave contém "${chavePix}"
+3. A data do comprovante é HOJE (${dataHoje})
+4. O horário do comprovante é IGUAL OU POSTERIOR a ${horarioReferencia}
+5. O comprovante indica que o Pix foi ENVIADO/CONCLUÍDO (não agendado, não pendente, não cancelado)
 
-Se não conseguir ler o comprovante, responda: {"valor": null, "chave": null, "valido": false}`;
+Se qualquer uma dessas regras falhar, responda "valido: false".
+
+Responda APENAS em JSON sem explicações:
+{"valor": 52.00, "chave": "chave encontrada ou null", "valido": true/false, "motivo": "aprovado / valor errado / data errada / horario anterior ao pedido / nome errado / pix nao concluido"}
+
+Se não conseguir ler: {"valor": null, "chave": null, "valido": false, "motivo": "ilegivel"}`;
 
     const content: any[] = [];
 
@@ -69,13 +80,21 @@ Se não conseguir ler o comprovante, responda: {"valor": null, "chave": null, "v
     const clean = texto.replace(/```json|```/g, "").trim();
     const resultado = JSON.parse(clean);
 
+    const motivo = resultado.motivo || "";
+    let mensagemInvalido = "Comprovante inválido.";
+    if (motivo.includes("data")) mensagemInvalido = "Comprovante com data incorreta — use um comprovante de hoje.";
+    else if (motivo.includes("horario")) mensagemInvalido = "Comprovante com horário anterior ao pedido — envie o comprovante do pagamento realizado agora.";
+    else if (motivo.includes("agendado") || motivo.includes("nao concluido")) mensagemInvalido = "Pix agendado não é aceito — realize o pagamento agora.";
+    else if (motivo.includes("valor")) mensagemInvalido = "Valor do comprovante não confere com o pedido.";
+    else if (motivo.includes("nome")) mensagemInvalido = "Destinatário do comprovante não confere.";
+
     return {
       valido: resultado.valido === true,
       valorEncontrado: resultado.valor ?? null,
       chavePix: resultado.chave ?? null,
       mensagem: resultado.valido
         ? `Pix de R$ ${resultado.valor} confirmado! ✅`
-        : `Comprovante inválido — valor ou chave não conferem.`,
+        : mensagemInvalido,
     };
   } catch (err) {
     return {

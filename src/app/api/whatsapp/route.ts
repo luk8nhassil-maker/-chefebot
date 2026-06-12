@@ -21,6 +21,7 @@ type Pedido = {
   observacao?: string;
   pixConfirmado?: boolean;
   tipoEntrega?: string;
+  horarioInicio?: string;
 };
 
 type ConfigPizzaria = {
@@ -255,7 +256,8 @@ async function processarComprovante(phone: string, data: any, config: ConfigPizz
 
     const resultado = await analisarComprovantePix(
       imagemBase64, mediaType as any, pedidoAtivo.total,
-      config.chavePix, config.nomeTitularPix || config.nomePizzaria
+      config.chavePix, config.nomeTitularPix || config.nomePizzaria,
+      pedidoAtivo.horarioInicio || pedidoAtivo.horario
     );
     if (resultado.valido) {
       const pedidosAtualizados = pedidos.map(p => p.id === pedidoAtivo.id ? { ...p, pixConfirmado: true } : p);
@@ -295,8 +297,9 @@ export async function POST(req: NextRequest) {
 
     const config = await getConfig();
     const menuDinamico = await getMENUDinamico();
-    console.log("[ChefeBot] Preco P:", menuDinamico.sizes?.find((s: {code: string}) => s.code === "P")?.price);
     setMenuDinamico(menuDinamico);
+    console.log("[ChefeBot] Tamanhos carregados:", JSON.stringify(menuDinamico.sizes));
+
     
 
     // Detecta imagem ou PDF (comprovante Pix)
@@ -522,7 +525,7 @@ export async function POST(req: NextRequest) {
       await redis.set(sessionKey, { ...currentSession, pixIniciadoEm, pixCobrancas: cobrancas + 1 }, { ex: 1800 });
       if (cobrancas >= 1) {
         // 2a cobrança — escalona para Kellyne
-        await salvarEscalonamento(phone, currentSession);
+        await salvarEscalonamento(phone, currentSession!);
         await enviarMensagem(phone, `Nossa equipe vai te ajudar a finalizar o pedido! Um instante. 😊`);
       }
       return NextResponse.json({ ok: true });
@@ -592,27 +595,29 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    if (!currentSession) return NextResponse.json({ ok: true });
+
     // Se cliente esta escolhendo delivery, injeta historico para reusar endereco
-    if (currentSession.step === "delivery_type" && !currentSession.historico) {
+    if (currentSession && currentSession.step === "delivery_type" && !(currentSession as any).historico) {
       const histSalvo = await redis.get<ClienteHistorico>(`cliente:${phone}`);
       if (histSalvo?.ultimoEndereco && histSalvo?.ultimoNeighborhood) {
-        currentSession = { ...currentSession, historico: histSalvo };
+        currentSession = { ...currentSession, historico: histSalvo } as any;
       }
     }
 
-    const stepAnterior = currentSession.step;
-    const result = processMessage(mensagemProcessada, currentSession);
+    const stepAnterior = currentSession!.step;
+    const result = processMessage(mensagemProcessada, currentSession!);
 
     // Se acabou de entrar em aguardando_pix, registra timestamp
-    if (result.session?.step === "aguardando_pix" && currentSession.step === "confirm") {
+    if (result.session?.step === "aguardando_pix" && currentSession!.step === "confirm") {
       result.session = { ...result.session, pixIniciadoEm: Date.now(), pixCobrancas: 0 } as any;
     }
 
     // Salva pedido na confirmacao — Pix espera comprovante
-    if (currentSession.step === "confirm" &&
+    if (currentSession!.step === "confirm" &&
       (messageText.trim() === "1" || messageText.trim().toLowerCase() === "sim") &&
-      currentSession.paymentMethod !== "Pix") {
-      const pedidoId = await salvarPedido(currentSession, phone, config);
+      currentSession!.paymentMethod !== "Pix") {
+      const pedidoId = await salvarPedido(currentSession!, phone, config);
       result.session = { ...result.session, pedidoId } as any;
       if (config.limitePico > 0) {
         const pedidosAtivos = (await redis.get<Pedido[]>("pedidos") || []).filter(p => p.status === "em_preparo" && !p.escalonado).length;
@@ -625,7 +630,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (result.escalar) {
-      await salvarEscalonamento(phone, currentSession);
+      await salvarEscalonamento(phone, currentSession!);
       await redis.set(`manual:${phone}`, true, { ex: 3600 });
     }
 
