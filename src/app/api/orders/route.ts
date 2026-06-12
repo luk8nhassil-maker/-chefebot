@@ -100,7 +100,7 @@ export async function PATCH(req: NextRequest) {
   const index = pedidos.findIndex(p => p.id === id)
   if (index === -1) return NextResponse.json({ error: 'Pedido nao encontrado' }, { status: 404 })
 
-  const agora = new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })
+  const agora = new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" })
   pedidos[index] = {
     ...pedidos[index],
     status,
