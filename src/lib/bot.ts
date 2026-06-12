@@ -402,7 +402,7 @@ export function processMessage(input: string, session: BotSession): BotResponse 
   // Detecta quantidade de pizzas: "2 pizzas", "duas pizzas familia"
   if ((session.step === "size" || session.step === "category" || session.step === "add_more" || session.step === "name") && !session.pendingPizzas) {
     const qtdMap: Record<string, number> = { "uma": 1, "um": 1, "duas": 2, "dois": 2, "tres": 3, "tr\u00eas": 3, "quatro": 4, "cinco": 5 };
-    const qtdMatch = n.match(/^(\d+|duas?|dois|tr[eê]s|quatro|cinco)\s+pizzas?/);
+    const qtdMatch = n.match(/(\d+|duas?|dois|tr[eê]s|quatro|cinco)\s+pizzas?/);
     let qtd = 0;
     if (qtdMatch) qtd = parseInt(qtdMatch[1]) || qtdMap[qtdMatch[1].toLowerCase()] || 0;
     if (qtd >= 2 && qtd <= 5) {
