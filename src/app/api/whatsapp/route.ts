@@ -299,7 +299,7 @@ async function processarComprovante(phone: string, data: any, config: ConfigPizz
         .sort((a, b) => b.id.localeCompare(a.id))[0];
     }
     console.log("[PEDIDO-CHECK]", pedidoAtivo ? pedidoAtivo.id : "NAO ENCONTRADO", "total:", pedidoAtivo?.total);
-    if (!pedidoAtivo) return NextResponse.json({debug:true, erro:"pedidoAtivo nao encontrado", isPix, step: session?.step, paymentMethod: session?.paymentMethod});
+    if (!pedidoAtivo) return;
     console.log("[COMP-INICIO] iniciando processamento phone:", phone);
     await enviarMensagem(phone, `Comprovante recebido! 🔍 Verificando o pagamento...`);
     let imagemBase64 = "";
@@ -405,9 +405,6 @@ export async function POST(req: NextRequest) {
     if (isImagem || isPDF) {
       const resultado = await processarComprovante(phone, data, config, isImagem);
       return resultado || NextResponse.json({ ok: true });
-    }
-    if (!isImagem && !isPDF) {
-      return NextResponse.json({ debug: true, messageType, isImagem, isPDF, keys: Object.keys(data || {}), dataData: Object.keys(data?.data || {}) });
     }
 
     // Detecta comprovante Pix enviado como texto/cartao automatico
