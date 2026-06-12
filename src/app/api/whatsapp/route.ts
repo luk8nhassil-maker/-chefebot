@@ -299,9 +299,8 @@ async function processarComprovante(phone: string, data: any, config: ConfigPizz
         .sort((a, b) => b.id.localeCompare(a.id))[0];
     }
     console.log("[PEDIDO-CHECK]", pedidoAtivo ? pedidoAtivo.id : "NAO ENCONTRADO", "total:", pedidoAtivo?.total);
-    if (!pedidoAtivo) return;
-    console.log("[COMP-INICIO] iniciando processamento phone:", phone);
-    await enviarMensagem(phone, `Comprovante recebido! 🔍 Verificando o pagamento...`);
+    if (!pedidoAtivo) return NextResponse.json({debug:true, erro:"pedidoAtivo nao encontrado", isPix, step: session?.step, paymentMethod: session?.paymentMethod});
+    return NextResponse.json({debug:true, chegou:"ate_aqui", pedidoId: pedidoAtivo.id, total: pedidoAtivo.total});
     let imagemBase64 = "";
     let mediaType: "image/jpeg" | "image/png" | "image/webp" | "application/pdf" = isImagem ? "image/jpeg" : "application/pdf";
     try {
