@@ -198,6 +198,82 @@ async function enviarImagem(phone: string, imageUrl: string) {
   }
 }
 
+async function processarComprovanteTexto(phone: string, texto: string, config: ConfigPizzaria) {
+  try {
+    const sessionKey = `session:${phone}`;
+    const session = await redis.get<BotSession>(sessionKey);
+    const pedidosCheck = await redis.get<any[]>("pedidos") || [];
+    const pedidoVerif = pedidosCheck.find(p => p.telefone === phone && p.status === "novo");
+    const isPix = session?.paymentMethod === "Pix" || session?.step === "aguardando_pix" || pedidoVerif?.pagamento === "Pix";
+    if (!isPix) return;
+
+    let pedidos = await redis.get<Pedido[]>("pedidos") || [];
+    let pedidoAtivo = pedidos.filter(p => p.telefone === phone && p.status === "novo" && !p.escalonado).sort((a, b) => b.id.localeCompare(a.id))[0];
+
+    const isAguardandoPix = session?.step === "aguardando_pix";
+    if (isAguardandoPix && !pedidoAtivo && session) {
+      await salvarPedido(session, phone, config);
+      pedidos = await redis.get<Pedido[]>("pedidos") || [];
+      pedidoAtivo = pedidos.filter(p => p.telefone === phone && p.status === "novo" && !p.escalonado).sort((a, b) => b.id.localeCompare(a.id))[0];
+    }
+    if (!pedidoAtivo) return;
+
+    await enviarMensagem(phone, `Comprovante recebido! 🔍 Verificando o pagamento...`);
+
+    // Usa Claude para validar o comprovante em texto
+    const client = new (await import("@anthropic-ai/sdk")).default({ apiKey: process.env.ANTHROPIC_API_KEY });
+    const agora = new Date();
+    const dataHoje = agora.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" });
+    const horaAtual = agora.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" });
+    const horarioRef = pedidoAtivo.horarioInicio || pedidoAtivo.horario || horaAtual;
+
+    const prompt = `Analise este comprovante de Pix (em formato de texto) e valide se é legítimo.
+
+COMPROVANTE RECEBIDO:
+${texto}
+
+DADOS ESPERADOS:
+- Valor: R$ ${pedidoAtivo.total.toFixed(2)}
+- Nome do destinatário deve conter: ${config.nomeTitularPix || config.nomePizzaria}
+- Chave Pix: ${config.chavePix}
+- Data: ${dataHoje}
+- Horário mínimo: ${horarioRef}
+
+Responda APENAS em JSON:
+{"valido": true/false, "valor": numero_ou_null, "motivo": "aprovado/valor_errado/data_errada/horario_anterior/nome_errado/nao_concluido/ilegivel"}`;
+
+    const response = await client.messages.create({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 200,
+      messages: [{ role: "user", content: prompt }],
+    });
+
+    const respText = response.content[0].type === "text" ? response.content[0].text : "";
+    const clean = respText.replace(/```json|```/g, "").trim();
+    const resultado = JSON.parse(clean);
+
+    if (resultado.valido) {
+      const pedidosAtualizados = pedidos.map(p => p.id === pedidoAtivo!.id ? { ...p, pixConfirmado: true } : p);
+      await redis.set("pedidos", pedidosAtualizados);
+      const firstName = pedidoAtivo.cliente.split(" ")[0];
+      const timeMsg = pedidoAtivo.tipoEntrega === "pickup" ? "20-30 minutos" : "40-60 minutos";
+      await enviarMensagem(phone, `Pagamento confirmado! ✅🎉
+
+Obrigado, *${firstName}*! Seu pedido já foi pra cozinha. Sua pizza chega em *${timeMsg}* 🛵
+
+Qualquer dúvida é só chamar. Bom apetite! 🍕`);
+      const sessionAtual = await redis.get<BotSession>(sessionKey);
+      if (sessionAtual) await redis.set(sessionKey, { ...sessionAtual, step: "done" }, { ex: 1800 });
+      await log("info", `Pix texto confirmado para ${firstName}`, `Valor: ${resultado.valor}`);
+    } else {
+      await enviarMensagem(phone, `❌ Não consegui confirmar esse pagamento. Nossa equipe vai verificar em instantes! 📄`);
+      await salvarEscalonamento(phone, session || { step: "done", cart: [], deliveryFee: 0, customerName: pedidoAtivo.cliente });
+    }
+  } catch (err) {
+    await log("erro", "Erro ao processar comprovante texto", String(err));
+  }
+}
+
 async function processarComprovante(phone: string, data: any, config: ConfigPizzaria, isImagem: boolean) {
   try {
     const sessionKey = `session:${phone}`;
@@ -321,6 +397,21 @@ export async function POST(req: NextRequest) {
     console.log("[PIX-DEBUG2] messageType:", messageType, "isImagem:", isImagem, "isPDF:", isPDF);
     if (isImagem || isPDF) {
       await processarComprovante(phone, data, config, isImagem);
+      return NextResponse.json({ ok: true });
+    }
+
+    // Detecta comprovante Pix enviado como texto/cartao automatico
+    const msgText = data?.message?.conversation || data?.message?.extendedTextMessage?.text || "";
+    const isPixReceipt = msgText.length > 20 && (
+      (msgText.toLowerCase().includes("pix") && (msgText.includes("R$") || msgText.includes("valor")) && msgText.includes("nome")) ||
+      msgText.toLowerCase().includes("comprovante") ||
+      msgText.toLowerCase().includes("transferência") ||
+      msgText.toLowerCase().includes("pagamento confirmado") ||
+      (msgText.toLowerCase().includes("destino") && msgText.toLowerCase().includes("origem"))
+    );
+    if (isPixReceipt) {
+      console.log("[PIX-TEXT] Comprovante em texto detectado:", msgText.slice(0, 200));
+      await processarComprovanteTexto(phone, msgText, config);
       return NextResponse.json({ ok: true });
     }
 
