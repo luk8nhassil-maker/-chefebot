@@ -402,7 +402,7 @@ export async function POST(req: NextRequest) {
 
     // Detecta comprovante Pix enviado como texto/cartao automatico
     const msgText = data?.message?.conversation || data?.message?.extendedTextMessage?.text || "";
-    console.log("[PIX-MSGTEXT]", JSON.stringify(msgText.slice(0,300)));
+    console.log("[PIX-FULL-MSG]", JSON.stringify(data?.message || {}).slice(0,500));
     const isPixReceipt = msgText.length > 20 && (
       (msgText.toLowerCase().includes("pix") && (msgText.includes("R$") || msgText.includes("valor")) && msgText.includes("nome")) ||
       msgText.toLowerCase().includes("comprovante") ||
