@@ -122,7 +122,7 @@ async function salvarPedido(session: BotSession, phone: string, config: ConfigPi
     itens,
     total,
     status: "novo" as const,
-    horario: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" }),
+    horario: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
     endereco,
     data: new Date().toLocaleDateString("pt-BR"),
     ...(session.observacao ? { observacao: session.observacao } : {}),
@@ -149,7 +149,7 @@ async function salvarEscalonamento(phone: string, session: BotSession) {
     itens: ["Cliente precisa de atendimento humano"],
     total: 0,
     status: "novo",
-    horario: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" }),
+    horario: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
     endereco: "-",
     escalonado: true,
   };
@@ -496,6 +496,19 @@ export async function POST(req: NextRequest) {
         // Nao e saudacao — cria sessao no step name e processa direto
         currentSession = { step: "name", cart: [], deliveryFee: 0, tentativasInvalidas: 0 };
         await redis.set(sessionKey, currentSession, { ex: 1800 });
+      }
+    }
+
+    // Sessao concluida — se mandar saudacao, inicia novo pedido como recorrente
+    if (currentSession.step === "done" && eSaudacao(messageText)) {
+      const historico = await redis.get<ClienteHistorico>(`cliente:${phone}`);
+      if (historico) {
+        const firstName = historico.nome.split(" ")[0];
+        const ultimoPedido = historico.ultimoPedido.join(", ");
+        const newSession = createReturningSession(historico);
+        await redis.set(sessionKey, newSession, { ex: 1800 });
+        await enviarMensagem(phone, `Ei *${firstName}*! 😊 Da ultima vez voce pediu *${ultimoPedido}* — vai querer repetir ou montar um novo?\n\n  1. Repetir o mesmo\n  2. Quero outra coisa`);
+        return NextResponse.json({ ok: true });
       }
     }
 
