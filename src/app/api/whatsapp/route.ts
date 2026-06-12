@@ -144,6 +144,13 @@ async function salvarEscalonamento(phone: string, session: BotSession) {
   const pedidos = (await redis.get<Pedido[]>("pedidos")) || [];
   const jaExisteAberto = pedidos.some((p) => p.telefone === phone && p.escalonado === true && p.status === "novo");
   if (jaExisteAberto) return;
+  // Se ja tem pedido ativo do cliente, marca ele como escalonado em vez de criar novo
+  const indexPedidoAtivo = pedidos.findIndex((p) => p.telefone === phone && p.status === "novo" && !p.escalonado);
+  if (indexPedidoAtivo !== -1) {
+    pedidos[indexPedidoAtivo] = { ...pedidos[indexPedidoAtivo], escalonado: true };
+    await redis.set("pedidos", pedidos);
+    return;
+  }
   const novoPedido: Pedido = {
     id: Date.now().toString(),
     cliente: session.customerName || phone,
