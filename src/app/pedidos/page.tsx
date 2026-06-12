@@ -569,10 +569,10 @@ export default function PedidosPage() {
                           avancarStatus(pedido.id, nextStatus)
                         }
                       }}
-                      disabled={atualizando === pedido.id}
-                      style={{ height: 58, border: "none", borderRadius: 16, background: badge.ctaBg, color: badge.ctaFg, fontSize: 17, fontWeight: 900, letterSpacing: "-0.2px", opacity: atualizando === pedido.id ? 0.6 : 1 }}
+                      disabled={atualizando === pedido.id || (pedido.status === "novo" && pagamento === "Pix" && !pedido.pixConfirmado)}
+                      style={{ height: 58, border: "none", borderRadius: 16, background: (pedido.status === "novo" && pagamento === "Pix" && !pedido.pixConfirmado) ? "#3a3530" : badge.ctaBg, color: (pedido.status === "novo" && pagamento === "Pix" && !pedido.pixConfirmado) ? "#6b6560" : badge.ctaFg, fontSize: 17, fontWeight: 900, letterSpacing: "-0.2px", opacity: atualizando === pedido.id ? 0.6 : 1, cursor: (pedido.status === "novo" && pagamento === "Pix" && !pedido.pixConfirmado) ? "not-allowed" : "pointer" }}
                     >
-                      {atualizando === pedido.id ? "..." : ACTION_LABEL[pedido.status]}
+                      {atualizando === pedido.id ? "..." : (pedido.status === "novo" && pagamento === "Pix" && !pedido.pixConfirmado) ? "Aguardando Pix ⏳" : ACTION_LABEL[pedido.status]}
                     </button>
                     <button style={{ height: 46, border: "1px solid #2a2723", borderRadius: 14, background: "transparent", color: "#c9c2b4", fontSize: 14, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
                       <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#22c55e" }} />
