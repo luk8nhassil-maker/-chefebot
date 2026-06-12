@@ -298,6 +298,7 @@ async function processarComprovante(phone: string, data: any, config: ConfigPizz
         .filter(p => p.telefone === phone && p.status === "novo" && !p.escalonado)
         .sort((a, b) => b.id.localeCompare(a.id))[0];
     }
+    console.log("[PEDIDO-CHECK]", pedidoAtivo ? pedidoAtivo.id : "NAO ENCONTRADO", "total:", pedidoAtivo?.total);
     if (!pedidoAtivo) return;
     console.log("[COMP-INICIO] iniciando processamento phone:", phone);
     await enviarMensagem(phone, `Comprovante recebido! 🔍 Verificando o pagamento...`);
