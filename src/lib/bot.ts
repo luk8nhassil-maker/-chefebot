@@ -461,7 +461,15 @@ export function processMessage(input: string, session: BotSession): BotResponse 
       const ultimoPedido = historico.ultimoPedido.join(", ");
       if (ePositiva(n) || n === "1") {
         if (historico.ultimoCart && historico.ultimoCart.length > 0) {
-          const cart = historico.ultimoCart;
+          // Recalcula preços com valores atuais do cardápio
+          const cart = historico.ultimoCart.map(item => {
+            if (item.category === "pizza" && item.size) {
+              const basePrice = getSizePrice(item.size);
+              const borderPrice = item.border && item.border !== "Sem borda" ? getBorderPrice(item.size) : 0;
+              return { ...item, price: basePrice + borderPrice };
+            }
+            return item;
+          });
           const subtotal = cartSubtotal(cart);
           const deliveryFee = historico.ultimoDeliveryFee || 0;
           const total = subtotal + deliveryFee;
