@@ -315,6 +315,9 @@ async function processarComprovante(phone: string, data: any, config: ConfigPizz
         const downloadData = await downloadRes.json();
         imagemBase64 = downloadData.base64 || "";
         if (downloadData.mimetype) mediaType = downloadData.mimetype;
+        console.log("[DOWNLOAD]", "base64len:", imagemBase64.length, "mimetype:", mediaType);
+      } else {
+        console.log("[DOWNLOAD-FAIL]", downloadRes.status);
       }
     } catch (err) {
       await log("aviso", "Erro ao baixar comprovante", String(err));
