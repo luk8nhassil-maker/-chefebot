@@ -6,8 +6,12 @@ export function setMenuDinamico(menu: typeof MENU_PADRAO) {
   MENU = menu;
 }
 
-function getSizePrice(size: string): number { // dynamic
+function getSizePrice(size: string): number {
   return MENU.sizes.find((s) => s.code === size)?.price ?? 0;
+}
+
+function sizeList(): string {
+  return MENU.sizes.map((s, i) => `  ${i + 1}. ${s.label} (${s.code}) - ${formatCurrency(s.price)}`).join("\n");
 }
 export type BotStep =
   | "welcome"
@@ -311,7 +315,7 @@ function eVoltar(n: string): boolean {
 function handleCategory(category: string, session: BotSession): BotResponse {
   if (category === "pizza") {
     return {
-      messages: [`Qual o tamanho da pizza? 🍕\n\n  1. Pequena (P) - R$ 35,00\n  2. Média (M) - R$ 40,00\n  3. Grande (G) - R$ 50,00\n  4. Família (F) - R$ 55,00`],
+      messages: [`Qual o tamanho da pizza? 🍕\n\n${sizeList()}`],
       session: { ...session, step: "size", currentCategory: "pizza", currentSize: undefined, currentFlavor: undefined, currentLanche: undefined },
     };
   }
@@ -390,7 +394,7 @@ export function processMessage(input: string, session: BotSession): BotResponse 
   if (session.step !== "escalado" && session.step !== "name" && session.step !== "address" && session.step !== "observacao" && eConfusao(n)) {
     const dicas: Partial<Record<BotStep, string>> = {
       category: `Sem estresse! É só escolher o que vai querer:\n\n${mensagemCategorias()}`,
-      size: `É só escolher o tamanho da pizza:\n\n  1. Pequena (P) - R$ 35,00\n  2. Média (M) - R$ 40,00\n  3. Grande (G) - R$ 50,00\n  4. Família (F) - R$ 55,00`,
+      size: `É só escolher o tamanho da pizza:\n\n${sizeList()}`,
       flavor: `É só digitar o número ou o nome do sabor que você quer! 😋`,
       border_escolha: `É só escolher o número da borda ou digitar o nome. Se não quiser borda é só digitar o número ${MENU.borders.length + 1}!`,
       add_more: `É só escolher uma opção:\n\n  1. Mais uma pizza\n  2. Quero mais alguma coisa\n  3. Não, pode fechar`,
@@ -408,7 +412,7 @@ export function processMessage(input: string, session: BotSession): BotResponse 
   if (eVoltar(n) && !["welcome", "name", "returning", "category", "escalado", "done", "add_more", "lanche_escolha", "bebida_escolha", "suco_escolha"].includes(session.step)) {
     switch (session.step) {
       case "flavor":
-        return { messages: [`Tudo bem! Qual o tamanho da pizza então? 😊\n\n  1. Pequena (P) - R$ 35,00\n  2. Média (M) - R$ 40,00\n  3. Grande (G) - R$ 50,00\n  4. Família (F) - R$ 55,00`], session: resetaTentativas({ ...session, step: "size", currentFlavor: undefined }) };
+        return { messages: [`Tudo bem! Qual o tamanho da pizza então? 😊\n\n${sizeList()}`], session: resetaTentativas({ ...session, step: "size", currentFlavor: undefined }) };
       case "border_escolha":
       case "segundo_sabor": {
         const saltyList = MENU.saltyFlavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n");
@@ -649,12 +653,12 @@ export function processMessage(input: string, session: BotSession): BotResponse 
         return {
           messages: [
             `*${saborSemTamanho}*, ótima escolha! 😋`,
-            `Qual o tamanho da pizza?\n\n  1. Pequena (P) - R$ 35,00\n  2. Média (M) - R$ 40,00\n  3. Grande (G) - R$ 50,00\n  4. Família (F) - R$ 55,00`
+            `Qual o tamanho da pizza?\n\n${sizeList()}`
           ],
           session: resetaTentativas({ ...session, step: "size", currentFlavor: saborSemTamanho }),
         };
       }
-      return respostaInvalida(`  1. Pequena (P) - R$ 35,00\n  2. Média (M) - R$ 40,00\n  3. Grande (G) - R$ 50,00\n  4. Família (F) - R$ 55,00`, session);
+      return respostaInvalida(`${sizeList()}`, session);
     }
     case "flavor": {
       const mudanca = tentaMudanca(text, session);
@@ -792,7 +796,7 @@ export function processMessage(input: string, session: BotSession): BotResponse 
     }
     case "add_more": {
       if (n === "1" || n.includes("mais pizza") || n.includes("outra pizza") || n.includes("mais uma")) {
-        return { messages: [`Qual o tamanho da próxima pizza? 🍕\n\n  1. Pequena (P) - R$ 35,00\n  2. Média (M) - R$ 40,00\n  3. Grande (G) - R$ 50,00\n  4. Família (F) - R$ 55,00`], session: resetaTentativas({ ...session, step: "size", currentCategory: "pizza" }) };
+        return { messages: [`Qual o tamanho da próxima pizza? 🍕\n\n${sizeList()}`], session: resetaTentativas({ ...session, step: "size", currentCategory: "pizza" }) };
       }
       if (n === "2" || n.includes("outro") || n.includes("mais alguma") || n.includes("adicionar")) {
         return { messages: [`Claro! 😊 ${mensagemCategorias()}`], session: resetaTentativas({ ...session, step: "category" }) };
