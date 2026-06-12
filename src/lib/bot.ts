@@ -69,6 +69,8 @@ export interface BotSession {
   currentFlavor?: string;
   currentLanche?: string;
   pendingCategory?: string;
+  pendingPizzas?: number;
+  pizzaAtualIndex?: number;
   deliveryType?: "delivery" | "pickup";
   neighborhood?: string;
   address?: string;
@@ -264,22 +266,35 @@ function listaLanches(): string {
     return `  ${i + 1}. ${l.name} - ${formatCurrency(l.price)}`;
   }).join("\n");
 }
+function getItemEmoji(item: CartItem): string {
+  const n = (item.name + " " + (item.flavor || "")).toLowerCase();
+  if (n.includes("pizza")) return "🍕";
+  if (n.includes("hambur") || n.includes("x-burg") || n.includes("lanche")) return "🍔";
+  if (n.includes("coca") || n.includes("pepsi") || n.includes("refri") || n.includes("guarana") || n.includes("bebida")) return "🥤";
+  if (n.includes("suco") || n.includes("vitamina") || n.includes("acai")) return "🧃";
+  if (n.includes("macarr") || n.includes("massa")) return "🍝";
+  if (n.includes("frango") || n.includes("porcao")) return "🍗";
+  if (n.includes("batata")) return "🍟";
+  return "🍽️";
+}
 function resumoCarrinho(cart: CartItem[]): string {
   return cart.map((item, i) => {
+    const emoji = getItemEmoji(item);
     const parts = [item.name];
     if (item.size) parts.push(item.size);
     if (item.flavor) parts.push(item.flavor);
     if (item.border && item.border !== "Sem borda") parts.push(`+ Borda ${item.border}`);
-    return `  ${i + 1}. ${parts.join(" ")} - ${formatCurrency(item.price)}`;
+    return `  ${emoji} ${parts.join(" ")} - ${formatCurrency(item.price)}`;
   }).join("\n");
 }
 function buildReceipt(session: BotSession): string {
   const lines = session.cart.map((item, i) => {
+    const emoji = getItemEmoji(item);
     const parts = [item.name];
     if (item.size) parts.push(item.size);
     if (item.flavor) parts.push(item.flavor);
     if (item.border && item.border !== "Sem borda") parts.push(`+ Borda ${item.border}`);
-    return `  ${i + 1}. ${parts.join(" ")} - ${formatCurrency(item.price)}`;
+    return `  ${emoji} ${parts.join(" ")} - ${formatCurrency(item.price)}`;
   });
   const subtotal = cartSubtotal(session.cart);
   const total = subtotal + session.deliveryFee;
@@ -384,6 +399,49 @@ function ePositiva(n: string): boolean {
 export function processMessage(input: string, session: BotSession): BotResponse {
   const text = input.trim();
   const n = normalizar(text);
+  // Detecta quantidade de pizzas: "2 pizzas", "duas pizzas familia"
+  if ((session.step === "size" || session.step === "category" || session.step === "add_more" || session.step === "name") && !session.pendingPizzas) {
+    const qtdMap: Record<string, number> = { "uma": 1, "um": 1, "duas": 2, "dois": 2, "tres": 3, "tr\u00eas": 3, "quatro": 4, "cinco": 5 };
+    const qtdMatch = n.match(/^(\d+|duas?|dois|tr[eê]s|quatro|cinco)\s+pizzas?/);
+    let qtd = 0;
+    if (qtdMatch) qtd = parseInt(qtdMatch[1]) || qtdMap[qtdMatch[1].toLowerCase()] || 0;
+    if (qtd >= 2 && qtd <= 5) {
+      const pedidoCompleto = detectaPedidoCompleto(text);
+      if (pedidoCompleto) {
+        const { size, flavor, border } = pedidoCompleto;
+        const basePrice = getSizePrice(size);
+        const borderPrice = border !== "Sem borda" ? getBorderPrice(size) : 0;
+        const itemPrice = basePrice + borderPrice;
+        const novasPizzas: CartItem[] = Array.from({ length: qtd }, () => ({ category: "pizza", name: "Pizza", size, flavor, border, price: itemPrice }));
+        const newCart = [...session.cart, ...novasPizzas];
+        const subtotal = cartSubtotal(newCart);
+        return {
+          messages: [
+            `${qtd} pizzas *${size}* de *${flavor}* com borda *${border}* anotadas! 🤤`,
+            `🛒 *Anotado no seu pedido!*\n\n${resumoCarrinho(newCart)}\n\n  Subtotal: ${formatCurrency(subtotal)}\n\nVai querer mais alguma coisa? 😄\n\n  1. Mais uma pizza\n  2. Outro produto\n  3. Não, pode fechar`
+          ],
+          session: resetaTentativas({ ...session, step: "add_more", cart: newCart, pendingPizzas: undefined, pizzaAtualIndex: undefined }),
+        };
+      }
+      const size = detectaTamanhoDaMensagem(n);
+      if (size) {
+        const saltyList = MENU.saltyFlavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n");
+        const sweetList = MENU.sweetFlavors.map((f, i) => `  ${MENU.saltyFlavors.length + i + 1}. ${f}`).join("\n");
+        return {
+          messages: [
+            `${qtd} pizzas *${size}* anotadas! 🍕`,
+            `Vamos montar uma de cada vez 😊\n\nQual o sabor da *pizza 1*?\n\nSalgadas\n${saltyList}\n\nDoces\n${sweetList}`
+          ],
+          session: resetaTentativas({ ...session, step: "flavor", currentCategory: "pizza", currentSize: size, pendingPizzas: qtd, pizzaAtualIndex: 1 }),
+        };
+      }
+      return {
+        messages: [`${qtd} pizzas anotadas! 🍕\n\nQual o tamanho?\n\n${sizeList()}`],
+        session: resetaTentativas({ ...session, step: "size", currentCategory: "pizza", pendingPizzas: qtd, pizzaAtualIndex: 1 }),
+      };
+    }
+  }
+
   if (session.step !== "escalado" && precisaEscalar(text)) {
     return {
       messages: [`Já chamo alguém pra te ajudar! Aguarda um instantinho 😊`],
@@ -762,12 +820,24 @@ export function processMessage(input: string, session: BotSession): BotResponse 
         const newItem: CartItem = { category: "pizza", name: "Pizza", size: session.currentSize!, flavor: session.currentFlavor!, border: "Sem borda", price: basePrice };
         const newCart = [...session.cart, newItem];
         const subtotal = cartSubtotal(newCart);
+        if (session.pendingPizzas && session.pizzaAtualIndex && session.pizzaAtualIndex < session.pendingPizzas) {
+          const proximo = session.pizzaAtualIndex + 1;
+          const saltyList = MENU.saltyFlavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n");
+          const sweetList = MENU.sweetFlavors.map((f, i) => `  ${MENU.saltyFlavors.length + i + 1}. ${f}`).join("\n");
+          return {
+            messages: [
+              `Pizza ${session.pizzaAtualIndex} anotada! 🍕\n\n🛒 *Pedido até agora:*\n${resumoCarrinho(newCart)}\n  Subtotal: ${formatCurrency(subtotal)}`,
+              `Agora o sabor da *pizza ${proximo}*? 😋\n\nSalgadas\n${saltyList}\n\nDoces\n${sweetList}`
+            ],
+            session: resetaTentativas({ ...session, step: "flavor", cart: newCart, currentSize: session.currentSize, currentFlavor: undefined, pizzaAtualIndex: proximo }),
+          };
+        }
         return {
           messages: [
             `Combinado, sem borda! 😄`,
             `🛒 *Anotado no seu pedido!*\n\n${resumoCarrinho(newCart)}\n\n  Subtotal: ${formatCurrency(subtotal)}\n\nVai querer mais alguma coisa? Aproveita! 😄\n\n  1. Mais uma pizza\n  2. Outro produto\n  3. Não, pode fechar`
           ],
-          session: resetaTentativas({ ...session, step: "add_more", cart: newCart, currentSize: undefined, currentFlavor: undefined }),
+          session: resetaTentativas({ ...session, step: "add_more", cart: newCart, currentSize: undefined, currentFlavor: undefined, pendingPizzas: undefined, pizzaAtualIndex: undefined }),
         };
       }
       const num = parseInt(text);
@@ -791,12 +861,24 @@ export function processMessage(input: string, session: BotSession): BotResponse 
       const newItem: CartItem = { category: "pizza", name: "Pizza", size: session.currentSize!, flavor: session.currentFlavor!, border: borderLabel, price: itemPrice };
       const newCart = [...session.cart, newItem];
       const subtotal = cartSubtotal(newCart);
+      if (session.pendingPizzas && session.pizzaAtualIndex && session.pizzaAtualIndex < session.pendingPizzas) {
+        const proximo = session.pizzaAtualIndex + 1;
+        const saltyList = MENU.saltyFlavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n");
+        const sweetList = MENU.sweetFlavors.map((f, i) => `  ${MENU.saltyFlavors.length + i + 1}. ${f}`).join("\n");
+        return {
+          messages: [
+            `Pizza ${session.pizzaAtualIndex} anotada! 🍕\n\n🛒 *Pedido até agora:*\n${resumoCarrinho(newCart)}\n  Subtotal: ${formatCurrency(subtotal)}`,
+            `Agora o sabor da *pizza ${proximo}*? 😋\n\nSalgadas\n${saltyList}\n\nDoces\n${sweetList}`
+          ],
+          session: resetaTentativas({ ...session, step: "flavor", cart: newCart, currentSize: session.currentSize, currentFlavor: undefined, pizzaAtualIndex: proximo }),
+        };
+      }
       return {
         messages: [
           `Borda de *${borderLabel}* anotada! 🤤`,
           `🛒 *Anotado no seu pedido!*\n\n${resumoCarrinho(newCart)}\n\n  Subtotal: ${formatCurrency(subtotal)}\n\nVai querer mais alguma coisa? Aproveita! 😄\n\n  1. Mais uma pizza\n  2. Outro produto\n  3. Não, pode fechar`
         ],
-        session: resetaTentativas({ ...session, step: "add_more", cart: newCart, currentSize: undefined, currentFlavor: undefined }),
+        session: resetaTentativas({ ...session, step: "add_more", cart: newCart, currentSize: undefined, currentFlavor: undefined, pendingPizzas: undefined, pizzaAtualIndex: undefined }),
       };
     }
     case "border": {
@@ -810,8 +892,10 @@ export function processMessage(input: string, session: BotSession): BotResponse 
         return { messages: [`Claro! 😊 ${mensagemCategorias()}`], session: resetaTentativas({ ...session, step: "category" }) };
       }
       if (eNegativa(n) || n === "3") {
+        const subtotalAtual = cartSubtotal(session.cart);
+        const resumo = session.cart.length > 0 ? `\n\n🛒 *Seu pedido:*\n${resumoCarrinho(session.cart)}\n  Subtotal: ${formatCurrency(subtotalAtual)}` : "";
         return {
-          messages: [`Tem algum detalhe especial pro seu pedido? ✏️\n\nEx: _sem cebola, bem passado, capricha no recheio..._\n\nSe não tiver é só digitar *0*`],
+          messages: [`Tem algum detalhe especial pro seu pedido? ✏️\n\nEx: _sem cebola, bem passado, capricha no recheio..._\n\nSe não tiver é só digitar *0*${resumo}`],
           session: resetaTentativas({ ...session, step: "observacao" }),
         };
       }
