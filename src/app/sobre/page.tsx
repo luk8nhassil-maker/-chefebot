@@ -28,6 +28,27 @@ const CARDS = [
   },
 ];
 
+const TESTIMONIALS = [
+  {
+    initial: "J",
+    name: "João Silva",
+    place: "Pizzaria do João • São Paulo, SP",
+    text: "Antes eu perdia pedido todo dia. Agora o bot atende sozinho e eu só faço as pizzas.",
+  },
+  {
+    initial: "M",
+    name: "Maria Oliveira",
+    place: "Pizzaria da Mari • Belo Horizonte, MG",
+    text: "O Pix automático foi um divisor de águas. Recebi 40 pedidos no sábado sem pegar no celular uma vez.",
+  },
+  {
+    initial: "C",
+    name: "Carlos Mendes",
+    place: "Sabor da Serra • Curitiba, PR",
+    text: "Minha equipe ficou mais tranquila. O painel mostra tudo em tempo real e os entregadores sabem exatamente onde ir.",
+  },
+];
+
 const STEPS = [
   {
     n: "01",
@@ -472,9 +493,87 @@ export default function SobrePage() {
         }
         .footer-text a:hover { color: #5a5450; }
 
+        /* ── Testimonials ───────────────────────────── */
+        .testimonials {
+          padding: 80px 0;
+        }
+        .testi-grid {
+          display: grid;
+          grid-template-columns: 1fr;
+          gap: 16px;
+        }
+        .testi-card {
+          background: #0e0e0e;
+          border: 1px solid rgba(255,107,0,0.12);
+          border-radius: 20px;
+          padding: 28px 24px;
+          display: flex;
+          flex-direction: column;
+          gap: 0;
+          transition: border-color 0.2s, transform 0.2s;
+        }
+        .testi-card:hover {
+          border-color: rgba(255,107,0,0.28);
+          transform: translateY(-2px);
+        }
+        .testi-stars {
+          color: #ff6b00;
+          font-size: 14px;
+          letter-spacing: 3px;
+          margin-bottom: 16px;
+        }
+        .testi-text {
+          font-size: 15px;
+          color: #c9c2b4;
+          line-height: 1.72;
+          font-weight: 400;
+          flex: 1;
+          margin-bottom: 24px;
+        }
+        .testi-text::before { content: '“'; }
+        .testi-text::after  { content: '”'; }
+        .testi-author {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          padding-top: 20px;
+          border-top: 1px solid #161616;
+        }
+        .testi-avatar {
+          width: 42px;
+          height: 42px;
+          border-radius: 12px;
+          background: linear-gradient(135deg, #ff7a1a, #ff5500);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-family: 'Archivo Black', 'Archivo', sans-serif;
+          font-size: 17px;
+          font-weight: 900;
+          color: #fff;
+          flex-shrink: 0;
+          user-select: none;
+        }
+        .testi-name {
+          font-size: 14px;
+          font-weight: 700;
+          color: #f4f1ec;
+          letter-spacing: -0.2px;
+          margin-bottom: 3px;
+        }
+        .testi-place {
+          font-size: 12px;
+          color: #5a5450;
+          font-weight: 400;
+        }
+
         /* ── Desktop ─────────────────────────────────── */
         @media (min-width: 680px) {
           .cards-grid {
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+          }
+          .testi-grid {
             grid-template-columns: repeat(3, 1fr);
             gap: 20px;
           }
@@ -558,6 +657,32 @@ export default function SobrePage() {
                   <div className="feat-icon" aria-hidden="true">{c.icon}</div>
                   <h3 className="feat-title">{c.title}</h3>
                   <p className="feat-desc">{c.desc}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <div className="section-divider" />
+
+        {/* ── Testimonials ── */}
+        <section className="testimonials">
+          <div className="container">
+            <p className="section-label">Depoimentos</p>
+            <h2 className="section-title">O que dizem nossos clientes</h2>
+
+            <div className="testi-grid">
+              {TESTIMONIALS.map(t => (
+                <div key={t.name} className="testi-card">
+                  <p className="testi-stars" aria-label="5 estrelas">★★★★★</p>
+                  <p className="testi-text">{t.text}</p>
+                  <div className="testi-author">
+                    <div className="testi-avatar" aria-hidden="true">{t.initial}</div>
+                    <div>
+                      <p className="testi-name">{t.name}</p>
+                      <p className="testi-place">{t.place}</p>
+                    </div>
+                  </div>
                 </div>
               ))}
             </div>
