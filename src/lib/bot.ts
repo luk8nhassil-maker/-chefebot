@@ -624,6 +624,17 @@ export function processMessage(input: string, session: BotSession): BotResponse 
       };
     }
     case "name": {
+      const _qtdMapC: Record<string, number> = { "uma": 1, "um": 1, "duas": 2, "dois": 2, "tres": 3, "três": 3, "quatro": 4, "cinco": 5 };
+      const _qtdMatchC = n.match(/(\d+|duas?|dois|tr[eê]s|quatro|cinco)\s+pizzas?/);
+      if (_qtdMatchC) {
+        const _qtdC = parseInt(_qtdMatchC[1]) || _qtdMapC[normalizar(_qtdMatchC[1])] || 0;
+        if (_qtdC >= 2 && _qtdC <= 5) {
+          return {
+            messages: [`${_qtdC === 2 ? "Duas" : _qtdC} pizzas! 😋 Mesmo tamanho ou tamanhos diferentes?\n\n${sizeList()}\n\nOu me diz _"tamanhos diferentes"_ que monto uma por uma!\n\n_(Digite *voltar* para corrigir a etapa anterior)_`],
+            session: resetaTentativas({ ...session, step: "pizza_tamanhos", currentCategory: "pizza", pendingPizzas: _qtdC, pizzaAtualIndex: 1 }),
+          };
+        }
+      }
       if (!text || text.length < 2) return respostaInvalida("Me fala seu nome pra eu te atender melhor!", session);
       const firstName = text.split(" ")[0];
       const pedidoCompleto = detectaPedidoCompleto(text);
@@ -654,6 +665,17 @@ export function processMessage(input: string, session: BotSession): BotResponse 
       };
     }
     case "category": {
+      const _qtdMapC: Record<string, number> = { "uma": 1, "um": 1, "duas": 2, "dois": 2, "tres": 3, "três": 3, "quatro": 4, "cinco": 5 };
+      const _qtdMatchC = n.match(/(\d+|duas?|dois|tr[eê]s|quatro|cinco)\s+pizzas?/);
+      if (_qtdMatchC) {
+        const _qtdC = parseInt(_qtdMatchC[1]) || _qtdMapC[normalizar(_qtdMatchC[1])] || 0;
+        if (_qtdC >= 2 && _qtdC <= 5) {
+          return {
+            messages: [`${_qtdC === 2 ? "Duas" : _qtdC} pizzas! 😋 Mesmo tamanho ou tamanhos diferentes?\n\n${sizeList()}\n\nOu me diz _"tamanhos diferentes"_ que monto uma por uma!\n\n_(Digite *voltar* para corrigir a etapa anterior)_`],
+            session: resetaTentativas({ ...session, step: "pizza_tamanhos", currentCategory: "pizza", pendingPizzas: _qtdC, pizzaAtualIndex: 1 }),
+          };
+        }
+      }
       // Detecta quantidade antecipada no step category
       const _qtdMapCat: Record<string, number> = { "uma": 1, "um": 1, "duas": 2, "dois": 2, "tres": 3, "três": 3, "quatro": 4, "cinco": 5 };
       const _qtdMatchCat = n.match(/(\d+|duas?|dois|tr[eê]s|quatro|cinco)\s+pizzas?/);
