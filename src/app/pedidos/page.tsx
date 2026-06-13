@@ -20,6 +20,7 @@ type Pedido = {
   pixConfirmado?: boolean
   tipoEntrega?: string
   horarioInicio?: string
+  horarioEntrega?: string
 }
 
 const NEXT_STATUS: Record<Status, Status | null> = {
@@ -119,6 +120,7 @@ export default function PedidosPage() {
   const leaveTimerRef = useRef<NodeJS.Timeout | null>(null)
   const muteadoRef = useRef(false)
   const prevPixRef = useRef<Record<string, boolean>>({})
+  const temposEntregaRef = useRef<Record<string, number>>({})
 
   const tocarSomNormal = () => {
     if (muteadoRef.current) return
@@ -347,7 +349,7 @@ export default function PedidosPage() {
       if (willLeave) { setLeavingId(id); if (leaveTimerRef.current) clearTimeout(leaveTimerRef.current); leaveTimerRef.current = setTimeout(() => setLeavingId(null), 350) }
       else { setFlashId(id); if (flashTimerRef.current) clearTimeout(flashTimerRef.current); flashTimerRef.current = setTimeout(() => setFlashId(null), 750) }
       const firstName = pedido.cliente.split(" ")[0]
-      if (novoStatus === "entregue") tocarSomEntrega()
+      if (novoStatus === "entregue") { tocarSomEntrega(); temposEntregaRef.current[id] = tempoDesde(pedido.horario, undefined, Date.now()) }
       setToast({ text: `${firstName} → ${STATUS_COLOR[novoStatus].label}`, expires: Date.now() + 5000, pedidoId: id, prevStatus })
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
       toastTimerRef.current = setTimeout(() => setToast(null), 5000)
@@ -392,6 +394,21 @@ export default function PedidosPage() {
   const toastSegs = toast ? Math.max(0, Math.ceil((toast.expires - now) / 1000)) : 0
   const toastVisible = !!toast && toast.expires > now
   const avaliacaoMedia = "4,9"
+  const tempoMedioPreparo = (() => {
+    const tempos: number[] = []
+    for (const p of pedidos.filter(q => q.status === "entregue")) {
+      if (p.horarioEntrega) {
+        const [h1, m1] = p.horario.split(":").map(Number)
+        const [h2, m2] = p.horarioEntrega.split(":").map(Number)
+        const diff = (h2 * 60 + m2) - (h1 * 60 + m1)
+        if (diff > 0 && diff < 300) tempos.push(diff)
+      } else if (temposEntregaRef.current[p.id] !== undefined) {
+        const t = temposEntregaRef.current[p.id]
+        if (t > 0 && t < 300) tempos.push(t)
+      }
+    }
+    return tempos.length > 0 ? Math.round(tempos.reduce((a, b) => a + b, 0) / tempos.length) : null
+  })()
   const initials = userName.slice(0, 2).toUpperCase()
 
   const steps = [
@@ -480,7 +497,7 @@ export default function PedidosPage() {
         </button>
 
         {/* Métricas */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1.2fr 1fr", gap: 8, padding: "14px 16px 6px" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, padding: "14px 16px 6px" }}>
           <div style={{ background: "#101010", border: "1px solid #1f1d1a", borderRadius: 16, padding: "14px 12px", display: "flex", flexDirection: "column", gap: 3 }}>
             <span style={{ fontSize: 26, fontWeight: 900, letterSpacing: "-1px", lineHeight: 1, color: "#f5f2ee" }}>{totalHoje}</span>
             <span style={{ fontSize: 10.5, fontWeight: 700, color: "#5a564d", textTransform: "uppercase", letterSpacing: ".5px" }}>Hoje</span>
@@ -492,6 +509,10 @@ export default function PedidosPage() {
           <div style={{ background: "#101010", border: "1px solid #1f1d1a", borderRadius: 16, padding: "14px 12px", display: "flex", flexDirection: "column", gap: 3 }}>
             <span style={{ fontSize: 26, fontWeight: 900, letterSpacing: "-1px", lineHeight: 1, color: "#facc15" }}>{avaliacaoMedia}</span>
             <span style={{ fontSize: 10.5, fontWeight: 700, color: "#5a564d", textTransform: "uppercase", letterSpacing: ".5px" }}>★ Média</span>
+          </div>
+          <div style={{ background: "#101010", border: "1px solid #1f1d1a", borderRadius: 16, padding: "14px 12px", display: "flex", flexDirection: "column", gap: 3 }}>
+            <span style={{ fontSize: 26, fontWeight: 900, letterSpacing: "-1px", lineHeight: 1, color: "#60a5fa" }}>{tempoMedioPreparo !== null ? `${tempoMedioPreparo}` : "--"}<span style={{ fontSize: 13, fontWeight: 700, marginLeft: 3 }}>{tempoMedioPreparo !== null ? "min" : ""}</span></span>
+            <span style={{ fontSize: 10.5, fontWeight: 700, color: "#5a564d", textTransform: "uppercase", letterSpacing: ".5px" }}>⏱ Média</span>
           </div>
         </div>
 
