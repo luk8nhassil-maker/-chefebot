@@ -22,6 +22,10 @@ function getSizePrice(size: string): number {
 function getSizeLabel(code: string): string {
   return MENU.sizes.find((s) => s.code === code)?.label ?? code;
 }
+function qtdPorExtenso(qtd: number): string {
+  const map: Record<number, string> = { 2: "duas", 3: "três", 4: "quatro", 5: "cinco" };
+  return map[qtd] ?? String(qtd);
+}
 
 function formatCurrency(value: number): string {
   return `R$ ${value.toFixed(2).replace(".", ",")}`;
@@ -512,7 +516,12 @@ export function processMessage(input: string, session: BotSession): BotResponse 
 
   if (eVoltar(n) && !["welcome", "name", "returning", "category", "escalado", "done", "add_more"].includes(session.step)) {
     switch (session.step) {
+      case "pizza_tamanhos":
+        return { messages: [`Qual o tamanho das ${qtdPorExtenso(session.pendingPizzas ?? 2)} pizzas?\n\n${sizeList()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "size", pendingPizzaSizes: undefined }) };
       case "flavor":
+        if (session.pendingPizzas && session.pendingPizzas >= 2) {
+          return { messages: [`Qual o tamanho das ${qtdPorExtenso(session.pendingPizzas)} pizzas?\n\n${sizeList()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "size", currentFlavor: undefined, pendingPizzaSizes: undefined }) };
+        }
         return { messages: [`Qual tamanho da pizza?\n\n${sizeList()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "size", currentFlavor: undefined }) };
       case "border_escolha":
       case "segundo_sabor":
@@ -735,7 +744,7 @@ export function processMessage(input: string, session: BotSession): BotResponse 
       }
       if (n.includes("mesmo") || n.includes("igual") || n.includes("iguais")) {
         return {
-          messages: [`Qual o tamanho das ${qtdLabel}?\n\n${sizeList()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`],
+          messages: [`Qual o tamanho das ${qtdLabel} pizzas?\n\n${sizeList()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`],
           session: resetaTentativas({ ...session, step: "size" }),
         };
       }
