@@ -120,18 +120,18 @@ export default function FinanceiroPage() {
       <div style={{ padding: '16px', maxWidth: 375, margin: '0 auto', width: '100%' }}>
 
         {/* Resumo do mês */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 16 }}>
-          <div style={{ background: '#101010', border: '1px solid #1f1d1a', borderRadius: 14, padding: 14, minWidth: 0 }}>
-            <p style={{ color: '#555', fontSize: 9, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 6px', letterSpacing: 0.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Faturamento</p>
-            <p style={{ color: '#4ade80', fontSize: 16, fontWeight: 800, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>R$ {faturamento.toFixed(2).replace('.', ',')}</p>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 16 }}>
+          <div style={{ background: '#101010', border: '1px solid #1f1d1a', borderRadius: 14, padding: '12px 10px', minWidth: 0 }}>
+            <p style={{ color: '#555', fontSize: 9, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 6px', letterSpacing: 0.5 }}>Fat.</p>
+            <p style={{ color: '#4ade80', fontSize: 13, fontWeight: 800, margin: 0, wordBreak: 'break-all' }}>R${faturamento.toFixed(2).replace('.', ',')}</p>
           </div>
-          <div style={{ background: '#101010', border: '1px solid #1f1d1a', borderRadius: 14, padding: 14, minWidth: 0 }}>
-            <p style={{ color: '#555', fontSize: 9, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 6px', letterSpacing: 0.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Custos</p>
-            <p style={{ color: '#f87171', fontSize: 16, fontWeight: 800, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>R$ {totalCustos.toFixed(2).replace('.', ',')}</p>
+          <div style={{ background: '#101010', border: '1px solid #1f1d1a', borderRadius: 14, padding: '12px 10px', minWidth: 0 }}>
+            <p style={{ color: '#555', fontSize: 9, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 6px', letterSpacing: 0.5 }}>Custos</p>
+            <p style={{ color: '#f87171', fontSize: 13, fontWeight: 800, margin: 0, wordBreak: 'break-all' }}>R${totalCustos.toFixed(2).replace('.', ',')}</p>
           </div>
-          <div style={{ background: '#111', border: `1px solid ${lucro >= 0 ? '#16a34a30' : '#dc262630'}`, borderRadius: 14, padding: 14, minWidth: 0 }}>
-            <p style={{ color: '#555', fontSize: 9, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 6px', letterSpacing: 0.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Lucro</p>
-            <p style={{ color: lucro >= 0 ? '#4ade80' : '#f87171', fontSize: 16, fontWeight: 800, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>R$ {lucro.toFixed(2).replace('.', ',')}</p>
+          <div style={{ background: '#111', border: `1px solid ${lucro >= 0 ? '#16a34a30' : '#dc262630'}`, borderRadius: 14, padding: '12px 10px', minWidth: 0 }}>
+            <p style={{ color: '#555', fontSize: 9, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 6px', letterSpacing: 0.5 }}>Lucro</p>
+            <p style={{ color: lucro >= 0 ? '#4ade80' : '#f87171', fontSize: 13, fontWeight: 800, margin: 0, wordBreak: 'break-all' }}>R${lucro.toFixed(2).replace('.', ',')}</p>
           </div>
         </div>
 
