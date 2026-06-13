@@ -107,6 +107,7 @@ export default function PedidosPage() {
   const [flashId, setFlashId] = useState<string | null>(null)
   const [entregadores, setEntregadores] = useState<{id: string; nome: string; telefone: string; ativo: boolean}[]>([])
   const [modalEntrega, setModalEntrega] = useState<{pedidoId: string; proxStatus: Status} | null>(null)
+  const [muteado, setMuteado] = useState(false)
 
   const prevIdsRef = useRef<string[]>([])
   const piscarRef = useRef<NodeJS.Timeout | null>(null)
@@ -115,17 +116,70 @@ export default function PedidosPage() {
   const toastTimerRef = useRef<NodeJS.Timeout | null>(null)
   const flashTimerRef = useRef<NodeJS.Timeout | null>(null)
   const leaveTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const muteadoRef = useRef(false)
+  const prevPixRef = useRef<Record<string, boolean>>({})
 
-  const tocarSom = () => {
+  const tocarSomNormal = () => {
+    if (muteadoRef.current) return
     try {
       const Ctx = (window as any).AudioContext || (window as any).webkitAudioContext
       const ctx = new Ctx(); const osc = ctx.createOscillator(); const gain = ctx.createGain()
       osc.connect(gain); gain.connect(ctx.destination); osc.type = "sine"
-      osc.frequency.setValueAtTime(880, ctx.currentTime); osc.frequency.setValueAtTime(1175, ctx.currentTime + 0.13)
-      gain.gain.setValueAtTime(0.18, ctx.currentTime); gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.55)
-      osc.start(); osc.stop(ctx.currentTime + 0.55)
+      osc.frequency.setValueAtTime(660, ctx.currentTime)
+      gain.gain.setValueAtTime(0.12, ctx.currentTime); gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4)
+      osc.start(); osc.stop(ctx.currentTime + 0.4)
     } catch {}
-    if (navigator.vibrate) navigator.vibrate([120, 60, 120])
+    if (navigator.vibrate) navigator.vibrate([80])
+  }
+
+  const tocarSomUrgente = () => {
+    if (muteadoRef.current) return
+    try {
+      const Ctx = (window as any).AudioContext || (window as any).webkitAudioContext
+      const ctx = new Ctx()
+      ;[0, 0.18, 0.36].forEach(t => {
+        const osc = ctx.createOscillator(); const gain = ctx.createGain()
+        osc.connect(gain); gain.connect(ctx.destination); osc.type = "square"
+        osc.frequency.setValueAtTime(880, ctx.currentTime + t)
+        gain.gain.setValueAtTime(0, ctx.currentTime + t); gain.gain.linearRampToValueAtTime(0.2, ctx.currentTime + t + 0.02); gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + t + 0.12)
+        osc.start(ctx.currentTime + t); osc.stop(ctx.currentTime + t + 0.12)
+      })
+    } catch {}
+    if (navigator.vibrate) navigator.vibrate([100, 50, 100, 50, 100])
+  }
+
+  const tocarSomPix = () => {
+    if (muteadoRef.current) return
+    try {
+      const Ctx = (window as any).AudioContext || (window as any).webkitAudioContext
+      const ctx = new Ctx()
+      ;[523.25, 659.25, 783.99].forEach((freq, i) => {
+        const osc = ctx.createOscillator(); const gain = ctx.createGain()
+        osc.connect(gain); gain.connect(ctx.destination); osc.type = "sine"
+        const t = ctx.currentTime + i * 0.14
+        osc.frequency.setValueAtTime(freq, t)
+        gain.gain.setValueAtTime(0.15, t); gain.gain.exponentialRampToValueAtTime(0.001, t + 0.28)
+        osc.start(t); osc.stop(t + 0.28)
+      })
+    } catch {}
+    if (navigator.vibrate) navigator.vibrate([50, 50, 50])
+  }
+
+  const tocarSomEntrega = () => {
+    if (muteadoRef.current) return
+    try {
+      const Ctx = (window as any).AudioContext || (window as any).webkitAudioContext
+      const ctx = new Ctx()
+      ;[783.99, 523.25].forEach((freq, i) => {
+        const osc = ctx.createOscillator(); const gain = ctx.createGain()
+        osc.connect(gain); gain.connect(ctx.destination); osc.type = "sine"
+        const t = ctx.currentTime + i * 0.22
+        osc.frequency.setValueAtTime(freq, t)
+        gain.gain.setValueAtTime(0.15, t); gain.gain.exponentialRampToValueAtTime(0.001, t + 0.38)
+        osc.start(t); osc.stop(t + 0.38)
+      })
+    } catch {}
+    if (navigator.vibrate) navigator.vibrate([120, 60, 200])
   }
 
   const iniciarPiscar = () => {
@@ -134,7 +188,7 @@ export default function PedidosPage() {
     piscarRef.current = setInterval(() => { e = !e; document.title = e ? "🚨 URGENTE!" : tituloOriginalRef.current }, 800)
   }
   const pararPiscar = () => { if (piscarRef.current) { clearInterval(piscarRef.current); piscarRef.current = null } document.title = tituloOriginalRef.current }
-  const iniciarSomRepetido = () => { if (somRepetidoRef.current) return; somRepetidoRef.current = setInterval(() => tocarSom(), 3000) }
+  const iniciarSomRepetido = () => { if (somRepetidoRef.current) return; somRepetidoRef.current = setInterval(() => tocarSomUrgente(), 3000) }
   const pararSomRepetido = () => { if (somRepetidoRef.current) { clearInterval(somRepetidoRef.current); somRepetidoRef.current = null } }
 
   const carregarStatusBot = async () => {
@@ -150,7 +204,10 @@ export default function PedidosPage() {
           const anteriores = prevIdsRef.current
           if (anteriores.length > 0) {
             const chegaram = data.filter((p: Pedido) => !anteriores.includes(p.id))
-            if (chegaram.length > 0) { const temEsc = chegaram.some((p: Pedido) => p.escalonado); tocarSom(); if (temEsc) { iniciarPiscar(); iniciarSomRepetido() } }
+            if (chegaram.length > 0) { const temEsc = chegaram.some((p: Pedido) => p.escalonado); if (temEsc) { tocarSomUrgente(); iniciarPiscar(); iniciarSomRepetido() } else { tocarSomNormal() } }
+            data.forEach((p: Pedido) => { if (p.pixConfirmado && prevPixRef.current[p.id] === false) tocarSomPix(); prevPixRef.current[p.id] = !!p.pixConfirmado })
+          } else {
+            data.forEach((p: Pedido) => { prevPixRef.current[p.id] = !!p.pixConfirmado })
           }
           prevIdsRef.current = novosIds
           setPedidos(data); setLoading(false)
@@ -163,6 +220,8 @@ export default function PedidosPage() {
   useEffect(() => {
     const user = getUserInfo()
     if (user) { setIsAdmin(user.role === "admin" || user.role === "dev"); setUserName(user.name || "Kellyne") }
+    const savedMute = localStorage.getItem("chefebot-mute") === "true"
+    if (savedMute) { setMuteado(true); muteadoRef.current = true }
     // Solicita notificação de forma forçada com explicação
     const solicitarNotificacao = async () => {
       if (!("Notification" in window)) return;
@@ -237,6 +296,13 @@ export default function PedidosPage() {
     return () => { if (wakeLock) wakeLock.release(); document.removeEventListener("visibilitychange", handleVisibility); window.removeEventListener("beforeinstallprompt", handleInstall); clearInterval(intervalo); clearInterval(tick); if (piscarRef.current) clearInterval(piscarRef.current); if (somRepetidoRef.current) clearInterval(somRepetidoRef.current); document.title = tituloOriginalRef.current }
   }, [router])
 
+  const toggleMute = () => {
+    const novo = !muteadoRef.current
+    muteadoRef.current = novo
+    setMuteado(novo)
+    localStorage.setItem("chefebot-mute", String(novo))
+  }
+
   const alternarBot = async () => {
     setSalvandoBot(true)
     try { const novo = !botAtivo; const r = await fetch("/api/bot-status", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ativo: novo }) }); if (r.ok) setBotAtivo(novo) } catch {}
@@ -269,6 +335,7 @@ export default function PedidosPage() {
       if (willLeave) { setLeavingId(id); if (leaveTimerRef.current) clearTimeout(leaveTimerRef.current); leaveTimerRef.current = setTimeout(() => setLeavingId(null), 350) }
       else { setFlashId(id); if (flashTimerRef.current) clearTimeout(flashTimerRef.current); flashTimerRef.current = setTimeout(() => setFlashId(null), 750) }
       const firstName = pedido.cliente.split(" ")[0]
+      if (novoStatus === "entregue") tocarSomEntrega()
       setToast({ text: `${firstName} → ${STATUS_COLOR[novoStatus].label}`, expires: Date.now() + 5000, pedidoId: id, prevStatus })
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
       toastTimerRef.current = setTimeout(() => setToast(null), 5000)
@@ -366,6 +433,7 @@ export default function PedidosPage() {
             <div style={{ fontSize: 11, color: "#5a564d", fontWeight: 700, marginTop: 2 }}>Alto Alegre · ChefeBot</div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <button onClick={toggleMute} title={muteado ? "Sons desativados" : "Sons ativados"} style={{ fontSize: 17, lineHeight: 1, background: muteado ? "rgba(239,68,68,.1)" : "transparent", border: `1px solid ${muteado ? "rgba(239,68,68,.35)" : "#242220"}`, padding: "5px 9px", borderRadius: 20 }}>{muteado ? "🔇" : "🔊"}</button>
             {isAdmin && <button onClick={() => router.push("/admin")} style={{ fontSize: 11, fontWeight: 800, color: "#a39b8b", background: "transparent", border: "1px solid #242220", padding: "6px 10px", borderRadius: 20 }}>Admin</button>}
             <button onClick={() => fetch("/api/auth/logout", { method: "POST" }).then(() => router.push("/login"))} style={{ fontSize: 11, fontWeight: 800, color: "#5a564d", background: "transparent", border: "1px solid #1f1d1a", padding: "6px 10px", borderRadius: 20 }}>Sair</button>
           </div>
