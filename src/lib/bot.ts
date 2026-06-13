@@ -19,6 +19,9 @@ export function setConfigDinamica(cfg: { tempoEntregaDelivery?: string; tempoEnt
 function getSizePrice(size: string): number {
   return MENU.sizes.find((s) => s.code === size)?.price ?? 0;
 }
+function getSizeLabel(code: string): string {
+  return MENU.sizes.find((s) => s.code === code)?.label ?? code;
+}
 
 function formatCurrency(value: number): string {
   return `R$ ${value.toFixed(2).replace(".", ",")}`;
@@ -708,17 +711,14 @@ export function processMessage(input: string, session: BotSession): BotResponse 
           session: resetaTentativas({ ...session, step: "size", pendingPizzaSizes: [] }),
         };
       }
-      // Detect two sizes in one message: "uma média e uma grande"
+      // Detect two different sizes in one message: "média e família", "M e G", "uma grande e uma família"
       const partesSize = n.split(/\s+e\s+(?:uma?|outra)?\s*/);
       if (partesSize.length >= 2 && qtd === 2) {
-        const s1 = detectaTamanhoDaMensagem(partesSize[0]);
-        const s2 = detectaTamanhoDaMensagem(partesSize[1]);
-        if (s1 && s2) {
+        const s1 = detectaTamanhoDaMensagem(partesSize[0]) || detectaTamanho(partesSize[0].trim());
+        const s2 = detectaTamanhoDaMensagem(partesSize[1]) || detectaTamanho(partesSize[1].trim());
+        if (s1 && s2 && s1 !== s2) {
           return {
-            messages: [
-              `Pizza 1: *${s1}*, Pizza 2: *${s2}*! 👌`,
-              `*Pizza 1 de 2* — qual o sabor?\n\n${listaFlavors()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
-            ],
+            messages: [`Pizza 1 será *${getSizeLabel(s1)}* e Pizza 2 será *${getSizeLabel(s2)}*! Qual o sabor da primeira?\n\n${listaFlavors()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`],
             session: resetaTentativas({ ...session, step: "flavor", currentSize: s1, pendingPizzaSizes: [s1, s2], pizzaAtualIndex: 1 }),
           };
         }
