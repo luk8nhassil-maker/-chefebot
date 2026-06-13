@@ -22,7 +22,25 @@
       "Bash(git add *)",
       "Bash(git commit *)",
       "Bash(git config *)",
-      "Bash(npm uninstall *)"
+      "Bash(npm uninstall *)",
+      "Bash(pkill -f \"next build\")",
+      "Bash(vercel *)",
+      "Bash(npx vercel *)",
+      "Bash(npx next *)",
+      "Bash(git push *)",
+      "Bash(kill -9 160635 160634)",
+      "Bash(awk '{print $2}')",
+      "Bash(xargs kill -9)",
+      "Bash(kill -9 204196 204191 210109 210103 212577 200862 206351)",
+      "Bash(wait 218357 218369)",
+      "Bash(wait 218369)",
+      "Bash(echo \"exit: $?\")",
+      "mcp__ide__getDiagnostics",
+      "Bash(kill -0 218369)",
+      "Bash(NODE_OPTIONS=\"--max-old-space-size=2048\" npm run build)",
+      "Bash(pkill -9 -f \"next\")",
+      "Bash(node *)",
+      "Bash(fuser /workspaces/-chefebot/.next/lock)"
     ]
   }
 }

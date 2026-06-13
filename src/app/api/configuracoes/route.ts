@@ -8,6 +8,9 @@ export type ConfigPizzaria = {
   chavePix: string;
   nomeTitularPix: string;
   limitePico: number;
+  whatsappPizzaria: string;
+  tempoEntregaDelivery: string;
+  tempoEntregaRetirada: string;
 };
 
 const CONFIG_PADRAO: ConfigPizzaria = {
@@ -17,6 +20,9 @@ const CONFIG_PADRAO: ConfigPizzaria = {
   chavePix: "",
   nomeTitularPix: "",
   limitePico: 0,
+  whatsappPizzaria: "",
+  tempoEntregaDelivery: "40-60 minutos",
+  tempoEntregaRetirada: "20-30 minutos",
 };
 
 export async function GET() {
@@ -33,6 +39,9 @@ export async function POST(req: NextRequest) {
     chavePix: body.chavePix || "",
     nomeTitularPix: body.nomeTitularPix || "",
     limitePico: Number(body.limitePico) || 0,
+    whatsappPizzaria: body.whatsappPizzaria || "",
+    tempoEntregaDelivery: body.tempoEntregaDelivery || CONFIG_PADRAO.tempoEntregaDelivery,
+    tempoEntregaRetirada: body.tempoEntregaRetirada || CONFIG_PADRAO.tempoEntregaRetirada,
   };
   await redis.set("config:pizzaria", config);
   return NextResponse.json({ ok: true, config });

@@ -366,24 +366,24 @@ export default function AdminPage() {
             {/* 4 métricas principais */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
               <div style={{ ...card, background: 'linear-gradient(135deg, #101010, #0d0d0d)' }}>
-                <p style={{ color: '#a39b8b', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 6px', letterSpacing: 0.5 }}>Pedidos</p>
+                <p style={{ color: '#a39b8b', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 6px', letterSpacing: 0.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Pedidos hoje</p>
                 <p style={{ color: '#f4f1ec', fontSize: 30, fontWeight: 900, margin: 0, letterSpacing: -1, lineHeight: 1 }}>{pedidosFiltrados.length}</p>
-                <p style={{ color: emAndamento > 0 ? '#ff6b00' : '#444', fontSize: 10, margin: '6px 0 0', fontWeight: emAndamento > 0 ? 700 : 400 }}>{emAndamento > 0 ? `${emAndamento} em andamento` : 'nenhum em andamento'}</p>
+                <p style={{ color: '#444', fontSize: 10, margin: '6px 0 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{totalEntregues} entregues</p>
               </div>
               <div style={{ ...card, background: 'linear-gradient(135deg, #101010, #0d0d0d)' }}>
-                <p style={{ color: '#a39b8b', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 6px', letterSpacing: 0.5 }}>Faturamento</p>
-                <p style={{ color: '#4ade80', fontSize: faturamento >= 1000 ? 18 : 22, fontWeight: 800, margin: 0, letterSpacing: -0.5, lineHeight: 1 }}>R${faturamento.toFixed(2).replace('.', ',')}</p>
-                <p style={{ color: '#444', fontSize: 10, margin: '6px 0 0' }}>{totalEntregues} entregues</p>
+                <p style={{ color: '#a39b8b', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 6px', letterSpacing: 0.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Faturamento dia</p>
+                <p style={{ color: '#4ade80', fontSize: faturamento >= 1000 ? 18 : 22, fontWeight: 800, margin: 0, letterSpacing: -0.5, lineHeight: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>R${faturamento.toFixed(2).replace('.', ',')}</p>
+                <p style={{ color: '#444', fontSize: 10, margin: '6px 0 0' }}>dos entregues</p>
               </div>
               <div style={{ ...card, background: 'linear-gradient(135deg, #101010, #0d0d0d)' }}>
                 <p style={{ color: '#a39b8b', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 6px', letterSpacing: 0.5 }}>Ticket medio</p>
-                <p style={{ color: '#fbbf24', fontSize: 22, fontWeight: 800, margin: 0, letterSpacing: -0.5, lineHeight: 1 }}>R${ticketMedio.toFixed(2).replace('.', ',')}</p>
+                <p style={{ color: '#fbbf24', fontSize: 22, fontWeight: 800, margin: 0, letterSpacing: -0.5, lineHeight: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>R${ticketMedio.toFixed(2).replace('.', ',')}</p>
                 <p style={{ color: '#444', fontSize: 10, margin: '6px 0 0' }}>por pedido</p>
               </div>
-              <div style={{ ...card, background: 'linear-gradient(135deg, #101010, #0d0d0d)' }}>
-                <p style={{ color: '#a39b8b', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 6px', letterSpacing: 0.5 }}>Avaliacao</p>
-                <p style={{ color: '#fbbf24', fontSize: 22, fontWeight: 800, margin: 0, letterSpacing: -0.5, lineHeight: 1 }}>{avaliacoes.media > 0 ? avaliacoes.media.toFixed(1) : '—'} ★</p>
-                <p style={{ color: '#444', fontSize: 10, margin: '6px 0 0' }}>{avaliacoes.total} avaliacoes</p>
+              <div style={{ ...card, background: 'linear-gradient(135deg, #101010, #0d0d0d)', border: emAndamento > 0 ? '1px solid #ff6b0030' : '1px solid #1f1d1a' }}>
+                <p style={{ color: '#a39b8b', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 6px', letterSpacing: 0.5 }}>Em andamento</p>
+                <p style={{ color: emAndamento > 0 ? '#ff6b00' : '#f4f1ec', fontSize: 30, fontWeight: 900, margin: 0, letterSpacing: -1, lineHeight: 1 }}>{emAndamento}</p>
+                <p style={{ color: emAndamento > 0 ? '#ff6b0080' : '#444', fontSize: 10, margin: '6px 0 0' }}>{emAndamento > 0 ? 'ativos agora' : 'nenhum ativo'}</p>
               </div>
             </div>
 
@@ -413,23 +413,23 @@ export default function AdminPage() {
               <div style={{ ...card, marginBottom: 16 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
                   <p style={{ ...sectionTitle, margin: 0 }}>Vendas por hora</p>
-                  <span style={{ color: '#ff6b00', fontSize: 11, fontWeight: 700 }}>pico {graficoPico.find(g => g.total === maxPico)?.hora}</span>
+                  <span style={{ color: '#ff6b00', fontSize: 11, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>pico {graficoPico.find(g => g.total === maxPico)?.hora}</span>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 100 }}>
+                <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 90 }}>
                   {graficoPico.map((item, i) => {
-                    const altura = maxPico > 0 ? Math.max((item.total / maxPico) * 100, 4) : 4
+                    const altura = maxPico > 0 ? Math.max((item.total / maxPico) * 90, 4) : 4
                     const isPico = item.total === maxPico && maxPico > 0
                     return (
-                      <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
-                        {item.total > 0 && <p style={{ color: isPico ? '#ff6b00' : '#a39b8b', fontSize: 8, margin: 0, fontWeight: 700 }}>{item.total}</p>}
-                        <div style={{ width: '100%', height: `${altura}%`, background: isPico ? 'linear-gradient(180deg, #ff9500, #ff6b00)' : item.total > 0 ? '#1f1d1a' : '#0d0d0d', borderRadius: '4px 4px 0 0', minHeight: 4, boxShadow: isPico ? '0 0 8px #ff6b0060' : 'none' }} />
+                      <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, minWidth: 0 }}>
+                        {item.total > 0 && <p style={{ color: isPico ? '#ff6b00' : '#555', fontSize: 8, margin: 0, fontWeight: 700 }}>{item.total}</p>}
+                        <div style={{ width: '100%', height: `${altura}%`, background: isPico ? 'linear-gradient(180deg, #ff9500, #ff6b00)' : item.total > 0 ? '#2a2520' : '#111', borderRadius: '3px 3px 0 0', minHeight: 4, boxShadow: isPico ? '0 0 10px #ff6b0050' : 'none', transition: 'background 0.3s' }} />
                       </div>
                     )
                   })}
                 </div>
-                <div style={{ display: 'flex', gap: 3, marginTop: 6 }}>
+                <div style={{ display: 'flex', gap: 2, marginTop: 5, borderTop: '1px solid #1a1a1a', paddingTop: 5 }}>
                   {graficoPico.map((item, i) => (
-                    <p key={i} style={{ flex: 1, color: item.total > 0 ? '#555' : '#1f1d1a', fontSize: 8, margin: 0, textAlign: 'center' }}>{item.hora.replace('h','')}</p>
+                    <p key={i} style={{ flex: 1, color: item.total > 0 ? '#444' : '#1a1a1a', fontSize: 7, margin: 0, textAlign: 'center', overflow: 'hidden' }}>{item.hora.replace('h','')}</p>
                   ))}
                 </div>
               </div>
@@ -441,11 +441,11 @@ export default function AdminPage() {
                 <p style={sectionTitle}>Top 5 sabores mais pedidos</p>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                   {ranking.slice(0, 5).map((item, i) => {
-                    const medals = ['🥇', '🥈', '🥉']
+                    const medals = ['🥇', '🥈', '🥉', '🏅', '🏅']
                     const barColor = i === 0 ? '#ff6b00' : i === 1 ? '#9ca3af' : i === 2 ? '#b45309' : '#333'
                     return (
                       <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <span style={{ fontSize: medals[i] ? 20 : 12, minWidth: 26, textAlign: 'center', color: '#444', fontWeight: 700 }}>{medals[i] || `${i + 1}.`}</span>
+                        <span style={{ fontSize: 20, minWidth: 26, textAlign: 'center' }}>{medals[i]}</span>
                         <p style={{ color: '#f4f1ec', fontSize: 13, margin: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.nome}</p>
                         <div style={{ width: 60, background: '#1f1d1a', borderRadius: 4, height: 5, flexShrink: 0 }}>
                           <div style={{ height: 5, borderRadius: 4, background: barColor, width: `${Math.max((item.total / (ranking[0]?.total || 1)) * 100, 8)}%` }} />
@@ -464,8 +464,8 @@ export default function AdminPage() {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                 {[
                   { icon: '🍳', label: 'Cozinha', sub: 'Pedidos ativos', action: () => router.push('/pedidos'), color: '#ff6b00' },
-                  { icon: '⚙️', label: 'Configuracoes', sub: 'Horario e cardapio', action: () => setAba('config'), color: '#3b82f6' },
-                  { icon: '💰', label: 'Financeiro', sub: 'Custos e lucro', action: () => setAba('financeiro'), color: '#4ade80' },
+                  { icon: '⚙️', label: 'Configuracoes', sub: 'Horario e cardapio', action: () => router.push('/configuracoes'), color: '#3b82f6' },
+                  { icon: '💰', label: 'Financeiro', sub: 'Custos e lucro', action: () => router.push('/financeiro'), color: '#4ade80' },
                   { icon: '📈', label: 'Relatorios', sub: 'Historico completo', action: () => router.push('/relatorios'), color: '#8b5cf6' },
                 ].map(({ icon, label, sub, action, color }) => (
                   <button key={label} onClick={action} style={{ background: '#101010', border: `1px solid #1f1d1a`, borderRadius: 14, padding: '14px 12px', cursor: 'pointer', textAlign: 'left', display: 'flex', flexDirection: 'column', gap: 2, transition: 'border-color 0.2s', minHeight: 90 }}>

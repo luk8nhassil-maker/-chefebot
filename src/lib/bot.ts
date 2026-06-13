@@ -6,6 +6,16 @@ export function setMenuDinamico(menu: typeof MENU_PADRAO) {
   MENU = menu;
 }
 
+let CONFIG_BOT = {
+  tempoEntregaDelivery: "40-60 minutos",
+  tempoEntregaRetirada: "20-30 minutos",
+};
+
+export function setConfigDinamica(cfg: { tempoEntregaDelivery?: string; tempoEntregaRetirada?: string }) {
+  if (cfg.tempoEntregaDelivery) CONFIG_BOT.tempoEntregaDelivery = cfg.tempoEntregaDelivery;
+  if (cfg.tempoEntregaRetirada) CONFIG_BOT.tempoEntregaRetirada = cfg.tempoEntregaRetirada;
+}
+
 function getSizePrice(size: string): number {
   return MENU.sizes.find((s) => s.code === size)?.price ?? 0;
 }
@@ -1006,7 +1016,7 @@ export function processMessage(input: string, session: BotSession): BotResponse 
         if (session.paymentMethod === "Pix") {
           return { messages: [`Ótimo! 😊 Para finalizar, envie o comprovante do Pix.\n\nChave Pix: (configurada pelo admin) 💸\n\nAssim que confirmarmos o pagamento, seu pedido vai direto pra cozinha! 🍕`], session: { ...session, step: "aguardando_pix" } };
         }
-        const timeMsg = session.deliveryType === "delivery" ? "40-60 minutos" : "20-30 minutos";
+        const timeMsg = session.deliveryType === "delivery" ? CONFIG_BOT.tempoEntregaDelivery : CONFIG_BOT.tempoEntregaRetirada;
         return { messages: [`Pedido confirmado! 🎉 Já foi pra cozinha!\n\nObrigado, *${session.customerName?.split(" ")[0]}*! Sua pizza chega em *${timeMsg}* 🛵\n\nQualquer dúvida é só chamar. Bom apetite! 🍕`], session: { ...session, step: "done" } };
       }
       if (retira) {

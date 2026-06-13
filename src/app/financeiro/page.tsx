@@ -87,28 +87,28 @@ export default function FinanceiroPage() {
     total: custos.filter(c => c.categoria === cat.key).reduce((s, c) => s + c.valor, 0)
   })).filter(c => c.total > 0)
 
-  const inp = { width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 10, padding: '11px 14px', color: '#fff', fontSize: 14, outline: 'none', boxSizing: 'border-box' as const }
+  const inp = { width: '100%', background: '#101010', border: '1px solid #1f1d1a', borderRadius: 10, padding: '14px', color: '#f4f1ec', fontSize: 16, outline: 'none', boxSizing: 'border-box' as const, minHeight: 52, fontFamily: "'Archivo', sans-serif" }
 
   if (loading) return (
-    <div style={{ minHeight: '100vh', background: '#080808', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <p style={{ color: '#333' }}>Carregando...</p>
+    <div style={{ minHeight: '100svh', background: '#060606', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: "'Archivo', sans-serif" }}>
+      <p style={{ color: '#a39b8b' }}>Carregando...</p>
     </div>
   )
 
   return (
-    <div style={{ minHeight: '100vh', background: '#080808', fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", paddingBottom: 40 }}>
+    <div style={{ minHeight: '100svh', background: '#060606', fontFamily: "'Archivo', sans-serif", paddingBottom: 'calc(env(safe-area-inset-bottom) + 40px)', overflowX: 'hidden' }}>
       <style>{`@keyframes slideUp { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }`}</style>
 
       {/* Header */}
-      <div style={{ background: '#0d0d0d', borderBottom: '1px solid #161616', padding: '14px 16px', position: 'sticky', top: 0, zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{ width: 36, height: 36, borderRadius: 10, background: '#1a2a1a', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>💰</div>
-          <div>
-            <p style={{ color: '#fff', fontSize: 15, fontWeight: 700, margin: 0 }}>Financeiro</p>
-            <p style={{ color: '#444', fontSize: 10, margin: 0 }}>{mesLabel}</p>
+      <div style={{ background: '#0a0a0a', borderBottom: '1px solid #1f1d1a', padding: '18px 16px', paddingTop: 'calc(env(safe-area-inset-top) + 18px)', position: 'sticky', top: 0, zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: 1 }}>
+          <div style={{ width: 36, height: 36, borderRadius: 10, background: '#0d1f0d', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0 }}>💰</div>
+          <div style={{ minWidth: 0 }}>
+            <p style={{ color: '#f4f1ec', fontSize: 15, fontWeight: 700, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Financeiro</p>
+            <p style={{ color: '#a39b8b', fontSize: 10, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{mesLabel}</p>
           </div>
         </div>
-        <button onClick={() => fetch('/api/auth/logout', { method: 'POST' }).then(() => router.push('/login'))} style={{ background: '#1a1a1a', border: '1px solid #2a2a2a', color: '#555', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontSize: 12 }}>Sair</button>
+        <button onClick={() => fetch('/api/auth/logout', { method: 'POST' }).then(() => router.push('/login'))} style={{ background: '#101010', border: '1px solid #1f1d1a', color: '#a39b8b', borderRadius: 8, padding: '8px 14px', cursor: 'pointer', fontSize: 12, minHeight: 40, flexShrink: 0, fontFamily: "'Archivo', sans-serif" }}>Sair</button>
       </div>
 
       {mensagem && (
@@ -117,15 +117,15 @@ export default function FinanceiroPage() {
         </div>
       )}
 
-      <div style={{ padding: '16px' }}>
+      <div style={{ padding: '16px', maxWidth: 375, margin: '0 auto', width: '100%' }}>
 
         {/* Resumo do mês */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 16 }}>
-          <div style={{ background: '#111', border: '1px solid #1e1e1e', borderRadius: 14, padding: 14 }}>
+          <div style={{ background: '#101010', border: '1px solid #1f1d1a', borderRadius: 14, padding: 14 }}>
             <p style={{ color: '#555', fontSize: 9, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 6px', letterSpacing: 0.5 }}>Faturamento</p>
             <p style={{ color: '#4ade80', fontSize: 16, fontWeight: 800, margin: 0 }}>R$ {faturamento.toFixed(2).replace('.', ',')}</p>
           </div>
-          <div style={{ background: '#111', border: '1px solid #1e1e1e', borderRadius: 14, padding: 14 }}>
+          <div style={{ background: '#101010', border: '1px solid #1f1d1a', borderRadius: 14, padding: 14 }}>
             <p style={{ color: '#555', fontSize: 9, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 6px', letterSpacing: 0.5 }}>Custos</p>
             <p style={{ color: '#f87171', fontSize: 16, fontWeight: 800, margin: 0 }}>R$ {totalCustos.toFixed(2).replace('.', ',')}</p>
           </div>
@@ -136,7 +136,7 @@ export default function FinanceiroPage() {
         </div>
 
         {/* Adicionar custo */}
-        <div style={{ background: '#111', border: '1px solid #1e1e1e', borderRadius: 14, padding: 16, marginBottom: 16 }}>
+        <div style={{ background: '#101010', border: '1px solid #1f1d1a', borderRadius: 14, padding: 16, marginBottom: 16 }}>
           <p style={{ color: '#555', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, margin: '0 0 12px' }}>+ Adicionar custo</p>
           <input placeholder="Descrição (ex: Farinha de trigo 10kg)" value={novoDescricao} onChange={e => setNovoDescricao(e.target.value)} style={{ ...inp, marginBottom: 8 }} />
           <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
@@ -149,14 +149,14 @@ export default function FinanceiroPage() {
               </button>
             ))}
           </div>
-          <button onClick={adicionarCusto} disabled={salvando} style={{ width: '100%', background: salvando ? '#1a1a1a' : '#16a34a', border: 'none', borderRadius: 10, padding: '12px', color: '#fff', fontSize: 14, fontWeight: 700, cursor: salvando ? 'not-allowed' : 'pointer' }}>
+          <button onClick={adicionarCusto} disabled={salvando} style={{ width: '100%', background: salvando ? '#101010' : '#16a34a', border: 'none', borderRadius: 10, padding: '12px', color: '#fff', fontSize: 15, fontWeight: 700, cursor: salvando ? 'not-allowed' : 'pointer', minHeight: 52, fontFamily: "'Archivo', sans-serif" }}>
             {salvando ? 'Salvando...' : '+ Adicionar'}
           </button>
         </div>
 
         {/* Por categoria */}
         {custosPorCategoria.length > 0 && (
-          <div style={{ background: '#111', border: '1px solid #1e1e1e', borderRadius: 14, padding: 16, marginBottom: 16 }}>
+          <div style={{ background: '#101010', border: '1px solid #1f1d1a', borderRadius: 14, padding: 16, marginBottom: 16 }}>
             <p style={{ color: '#555', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, margin: '0 0 12px' }}>Por categoria</p>
             {custosPorCategoria.map(cat => (
               <div key={cat.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
@@ -169,16 +169,16 @@ export default function FinanceiroPage() {
 
         {/* Lista de custos */}
         {custos.length > 0 && (
-          <div style={{ background: '#111', border: '1px solid #1e1e1e', borderRadius: 14, padding: 16 }}>
+          <div style={{ background: '#101010', border: '1px solid #1f1d1a', borderRadius: 14, padding: 16 }}>
             <p style={{ color: '#555', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, margin: '0 0 12px' }}>Todos os custos</p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {custos.slice().reverse().map(c => {
                 const cat = CATEGORIAS.find(cat => cat.key === c.categoria)
                 return (
-                  <div key={c.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#0d0d0d', borderRadius: 10, padding: '10px 12px' }}>
+                  <div key={c.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#0a0a0a', borderRadius: 10, padding: '10px 12px' }}>
                     <div>
-                      <p style={{ color: '#e0e0e0', fontSize: 13, fontWeight: 600, margin: 0 }}>{c.descricao}</p>
-                      <p style={{ color: '#444', fontSize: 11, margin: '2px 0 0' }}>{cat?.label} · {c.data}</p>
+                      <p style={{ color: '#f4f1ec', fontSize: 13, fontWeight: 600, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 180 }}>{c.descricao}</p>
+                      <p style={{ color: '#a39b8b', fontSize: 11, margin: '2px 0 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cat?.label} · {c.data}</p>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <span style={{ color: '#f87171', fontSize: 14, fontWeight: 700 }}>R$ {c.valor.toFixed(2).replace('.', ',')}</span>
