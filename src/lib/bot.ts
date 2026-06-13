@@ -36,7 +36,7 @@ function listaFlavors(): string {
 
 function mensagemAddMore(cart: CartItem[]): string {
   const subtotal = cartSubtotal(cart);
-  return `🛒 *Seu pedido até agora:*\n${resumoCarrinho(cart)}\n\n  Subtotal: *${formatCurrency(subtotal)}*\n\nVai querer mais alguma coisa? 😊\n\n  1️⃣ Mais uma pizza\n  2️⃣ Quero mais alguma coisa\n  3️⃣ Não, pode fechar`;
+  return `🛒 *Seu pedido até agora:*\n${resumoCarrinho(cart)}\n\n  Subtotal: *${formatCurrency(subtotal)}*\n\nVai querer mais alguma coisa? 😊\n\n  1️⃣ Mais uma pizza\n  2️⃣ Quero mais alguma coisa\n  3️⃣ Não, pode fechar\n\n_(Digite *voltar* para corrigir a etapa anterior)_`;
 }
 
 export type BotStep =
@@ -503,14 +503,14 @@ export function processMessage(input: string, session: BotSession): BotResponse 
       case "observacao":
         return { messages: [`Tudo bem! Vai querer mais alguma coisa? 😊\n\n  1️⃣ Mais uma pizza\n  2️⃣ Quero mais alguma coisa\n  3️⃣ Não, pode fechar`], session: resetaTentativas({ ...session, step: "add_more" }) };
       case "delivery_type":
-        return { messages: [`Tudo bem! Tem algum detalhe especial pro pedido? ✏️\n\nSe não tiver é só digitar *0*`], session: resetaTentativas({ ...session, step: "observacao" }) };
+        return { messages: [`Tudo bem! Tem algum detalhe especial pro pedido? ✏️\n\nSe não tiver é só digitar *0*\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "observacao" }) };
       case "neighborhood":
-        return { messages: [`Tudo bem! Como prefere receber? 😊\n\n  1. Entrega (delivery) 🛵\n  2. Buscar na loja 🏪`], session: resetaTentativas({ ...session, step: "delivery_type" }) };
+        return { messages: [`Tudo bem! Como prefere receber? 😊\n\n  1. Entrega (delivery) 🛵\n  2. Buscar na loja 🏪\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "delivery_type" }) };
       case "address":
         return { messages: [`Tudo bem! Qual seu bairro? 🛵\n\n${neighborhoodList()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "neighborhood" }) };
       case "payment":
         if (session.deliveryType === "pickup") {
-          return { messages: [`Tudo bem! Como prefere receber? 😊\n\n  1. Entrega (delivery) 🛵\n  2. Buscar na loja 🏪`], session: resetaTentativas({ ...session, step: "delivery_type" }) };
+          return { messages: [`Tudo bem! Como prefere receber? 😊\n\n  1. Entrega (delivery) 🛵\n  2. Buscar na loja 🏪\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "delivery_type" }) };
         }
         return { messages: [`Tudo bem! Me passa o endereço completo:\n_(Rua, número e complemento)_\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "address" }) };
       case "troco": {
@@ -747,7 +747,7 @@ export function processMessage(input: string, session: BotSession): BotResponse 
           session: resetaTentativas({ ...session, step: "size", currentFlavor: saborSemTamanho }),
         };
       }
-      return respostaInvalida(`${sizeList()}`, session);
+      return respostaInvalida(`${sizeList()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`, session);
     }
     case "flavor": {
       const mudanca = tentaMudanca(text, session);
@@ -774,7 +774,7 @@ export function processMessage(input: string, session: BotSession): BotResponse 
         flavor = allFlavors.find((f) => n.includes(normalizar(f)));
       }
       if (!flavor) {
-        return respostaInvalida(listaFlavors(), session);
+        return respostaInvalida(`${listaFlavors()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`, session);
       }
       if (session.currentFlavor && !flavor) {
         flavor = session.currentFlavor;
@@ -869,7 +869,7 @@ export function processMessage(input: string, session: BotSession): BotResponse 
         }
       }
       if (!borderLabel) {
-        return respostaInvalida(listaBordas(session.currentSize!), session);
+        return respostaInvalida(`${listaBordas(session.currentSize!)}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`, session);
       }
       const basePrice = getSizePrice(session.currentSize!);
       const itemPrice = basePrice + borderPrice;
@@ -908,7 +908,7 @@ export function processMessage(input: string, session: BotSession): BotResponse 
         const subtotalAtual = cartSubtotal(session.cart);
         const resumo = session.cart.length > 0 ? `\n\n🛒 *Seu pedido:*\n${resumoCarrinho(session.cart)}\n  Subtotal: *${formatCurrency(subtotalAtual)}*` : "";
         return {
-          messages: [`Tem algum detalhe especial pro seu pedido? ✏️\n\nEx: _sem cebola, bem passado, capricha no recheio..._\n\nSe não tiver é só digitar *0*${resumo}`],
+          messages: [`Tem algum detalhe especial pro seu pedido? ✏️\n\nEx: _sem cebola, bem passado, capricha no recheio..._\n\nSe não tiver é só digitar *0*${resumo}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`],
           session: resetaTentativas({ ...session, step: "observacao" }),
         };
       }
@@ -916,7 +916,7 @@ export function processMessage(input: string, session: BotSession): BotResponse 
       if (intencaoDireta) {
         return { messages: [`Claro! 😊 ${mensagemCategorias()}`], session: resetaTentativas({ ...session, step: "category" }) };
       }
-      return respostaInvalida(`  1️⃣ Mais uma pizza\n  2️⃣ Quero mais alguma coisa\n  3️⃣ Não, pode fechar`, session);
+      return respostaInvalida(`  1️⃣ Mais uma pizza\n  2️⃣ Quero mais alguma coisa\n  3️⃣ Não, pode fechar\n\n_(Digite *voltar* para corrigir a etapa anterior)_`, session);
     }
     case "observacao": {
       const semObservacao = n === "0" || n === "nao" || n === "n" || n === "nenhuma" ||
@@ -925,12 +925,12 @@ export function processMessage(input: string, session: BotSession): BotResponse 
         n.includes("nao tem") || n.includes("pode seguir") || n.includes("pode continuar");
       if (semObservacao) {
         return {
-          messages: [`Combinado! Como prefere receber? 😊\n\n  1. Entrega (delivery) 🛵\n  2. Buscar na loja 🏪`],
+          messages: [`Combinado! Como prefere receber? 😊\n\n  1. Entrega (delivery) 🛵\n  2. Buscar na loja 🏪\n\n_(Digite *voltar* para corrigir a etapa anterior)_`],
           session: resetaTentativas({ ...session, step: "delivery_type", observacao: undefined }),
         };
       }
       return {
-        messages: [`Anotei: _"${text}"_ ✏️\n\nComo prefere receber? 😊\n\n  1. Entrega (delivery) 🛵\n  2. Buscar na loja 🏪`],
+        messages: [`Anotei: _"${text}"_ ✏️\n\nComo prefere receber? 😊\n\n  1. Entrega (delivery) 🛵\n  2. Buscar na loja 🏪\n\n_(Digite *voltar* para corrigir a etapa anterior)_`],
         session: resetaTentativas({ ...session, step: "delivery_type", observacao: text }),
       };
     }
@@ -951,14 +951,14 @@ export function processMessage(input: string, session: BotSession): BotResponse 
         const payList = MENU.payments.map((p, i) => `  ${i + 1}. ${p}`).join("\n");
         return { messages: [`Combinado, você retira aqui na loja! 🏪\n\nComo vai pagar?\n\n${payList}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "payment", deliveryType: "pickup", deliveryFee: 0, neighborhood: undefined }) };
       }
-      return respostaInvalida(`  1. Entrega (delivery) 🛵\n  2. Buscar na loja 🏪`, session);
+      return respostaInvalida(`  1. Entrega (delivery) 🛵\n  2. Buscar na loja 🏪\n\n_(Digite *voltar* para corrigir a etapa anterior)_`, session);
     }
     case "neighborhood": {
       const num = parseInt(text);
       let found: { name: string; fee: number } | undefined;
       if (!isNaN(num) && num >= 1 && num <= MENU.neighborhoods.length) found = MENU.neighborhoods[num - 1];
       else found = MENU.neighborhoods.find((nb) => normalizar(nb.name).includes(n));
-      if (!found) return respostaInvalida(neighborhoodList(), session);
+      if (!found) return respostaInvalida(`${neighborhoodList()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`, session);
       return { messages: [`*${found.name}*, taxa de entrega: *${formatCurrency(found.fee)}* 🛵\n\nMe passa o endereço completo:\n_(Rua, número e complemento)_\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "address", neighborhood: found.name, deliveryFee: found.fee }) };
     }
     case "confirm_address": {
@@ -972,7 +972,7 @@ export function processMessage(input: string, session: BotSession): BotResponse 
       return respostaInvalida(`  1. Sim, mesmo endereço\n  2. Não, quero outro endereço`, session);
     }
     case "address": {
-      if (!text || text.length < 5) return respostaInvalida("Me passa o endereço completo.\nExemplo: *Rua das Flores, 123, Apto 2*", session);
+      if (!text || text.length < 5) return respostaInvalida("Me passa o endereço completo.\nExemplo: *Rua das Flores, 123, Apto 2*\n\n_(Digite *voltar* para corrigir a etapa anterior)_", session);
       const payList = MENU.payments.map((p, i) => `  ${i + 1}. ${p}`).join("\n");
       return { messages: [`Endereço anotado! 📍 Como vai pagar?\n\n${payList}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "payment", address: text }) };
     }
@@ -981,7 +981,7 @@ export function processMessage(input: string, session: BotSession): BotResponse 
       if (n === "1" || n.includes("pix") || n.includes("transfer")) payment = "Pix";
       else if (n === "2" || n.includes("dinheiro") || n.includes("especie") || n.includes("cash")) payment = "Dinheiro";
       else if (n === "3" || n.includes("cartao") || n.includes("credito") || n.includes("debito")) payment = "Cartão";
-      if (!payment) return respostaInvalida(MENU.payments.map((p, i) => `  ${i + 1}. ${p}`).join("\n"), session);
+      if (!payment) return respostaInvalida(`${MENU.payments.map((p, i) => `  ${i + 1}. ${p}`).join("\n")}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`, session);
       const updatedSession = { ...session, paymentMethod: payment };
       if (payment === "Dinheiro") {
         return { messages: [`Combinado! 💵 Vai precisar de troco?\n\nSe sim, me diz o valor que vai pagar. Ex: *100*\nSe não, é só digitar *não*`], session: resetaTentativas({ ...updatedSession, step: "troco", paymentMethod: "Dinheiro" }) };
