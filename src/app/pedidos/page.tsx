@@ -177,6 +177,28 @@ export default function PedidosPage() {
       }
     };
     solicitarNotificacao();
+
+    // Web Push VAPID — inscrever dispositivo
+    const inscreverPush = async () => {
+      try {
+        if (!("serviceWorker" in navigator) || !("PushManager" in window)) return;
+        const reg = await navigator.serviceWorker.ready;
+        const existing = await reg.pushManager.getSubscription();
+        if (existing) return;
+        const res = await fetch("/api/push");
+        const { publicKey } = await res.json();
+        const sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: publicKey,
+        });
+        await fetch("/api/push", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "subscribe", subscription: sub }),
+        });
+      } catch {}
+    };
+    inscreverPush();
     carregarPedidos(); carregarStatusBot()
     fetch("/api/entregadores").then(r => r.json()).then(d => setEntregadores(Array.isArray(d) ? d.filter((e: any) => e.ativo) : [])).catch(() => {})
     // Screen Orientation Lock

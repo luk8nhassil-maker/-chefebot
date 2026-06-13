@@ -1,4 +1,4 @@
-const CACHE = "chefebot-v1";
+const CACHE = "chefebot-v2";
 const OFFLINE = ["/pedidos", "/login"];
 
 self.addEventListener("install", e => {
@@ -17,13 +17,27 @@ self.addEventListener("fetch", e => {
 });
 
 self.addEventListener("push", e => {
-  const data = e.data?.json() || { title: "Novo pedido!", body: "Tem pedido novo na fila." };
-  e.waitUntil(self.registration.showNotification(data.title, {
-    body: data.body,
-    icon: "/icon-192.png",
-    badge: "/icon-192.png",
-    vibrate: [200, 100, 200],
-    tag: "novo-pedido",
-    renotify: true
-  }));
+  const data = e.data?.json() || { title: "Novo pedido! 🍕", body: "Tem pedido novo na fila." };
+  e.waitUntil(
+    self.registration.showNotification(data.title, {
+      body: data.body,
+      icon: "/icon-192.png",
+      badge: "/icon-192.png",
+      vibrate: [200, 100, 200, 100, 200],
+      tag: "novo-pedido",
+      renotify: true,
+      requireInteraction: true,
+      actions: [
+        { action: "abrir", title: "Ver pedido" },
+        { action: "fechar", title: "Fechar" }
+      ]
+    })
+  );
+});
+
+self.addEventListener("notificationclick", e => {
+  e.notification.close();
+  if (e.action === "abrir" || !e.action) {
+    e.waitUntil(clients.openWindow("/pedidos"));
+  }
 });

@@ -135,6 +135,23 @@ async function salvarPedido(session: BotSession, phone: string, config: ConfigPi
     ...(session.deliveryType ? { tipoEntrega: session.deliveryType } : {}),
   };
   await redis.set("pedidos", [...pedidos, novoPedido]);
+
+  // Dispara Web Push para todos os dispositivos inscritos
+  try {
+    const baseUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "https://chefebot-pjif.vercel.app";
+    const firstName = (session.customerName || phone).split(" ")[0];
+    const itensResumo = itens.slice(0, 2).join(", ") + (itens.length > 2 ? "..." : "");
+    await fetch(`${baseUrl}/api/push`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "notify",
+        title: `Novo pedido — ${firstName} 🍕`,
+        message: itensResumo,
+      }),
+    });
+  } catch {}
+
   const historico: ClienteHistorico = { nome: session.customerName || phone, ultimoPedido: itens, ultimoTotal: total, ultimoCart: session.cart, ultimoDeliveryFee: session.deliveryFee, ultimoEndereco: session.address, ultimoNeighborhood: session.neighborhood, ultimoDeliveryType: session.deliveryType, ultimoPayment: session.paymentMethod };
   await redis.set(`cliente:${phone}`, historico, { ex: 30 * 24 * 60 * 60 });
   return pedidoId;
