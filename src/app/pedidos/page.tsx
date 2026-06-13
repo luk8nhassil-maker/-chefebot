@@ -102,6 +102,8 @@ export default function PedidosPage() {
   const [toast, setToast] = useState<{ text: string; expires: number; pedidoId: string; prevStatus: Status } | null>(null)
   const [now, setNow] = useState(Date.now())
   const [leavingId, setLeavingId] = useState<string | null>(null)
+  const [installPrompt, setInstallPrompt] = useState<any>(null)
+  const [showInstallBanner, setShowInstallBanner] = useState(false)
   const [flashId, setFlashId] = useState<string | null>(null)
   const [entregadores, setEntregadores] = useState<{id: string; nome: string; telefone: string; ativo: boolean}[]>([])
   const [modalEntrega, setModalEntrega] = useState<{pedidoId: string; proxStatus: Status} | null>(null)
@@ -177,6 +179,22 @@ export default function PedidosPage() {
     solicitarNotificacao();
     carregarPedidos(); carregarStatusBot()
     fetch("/api/entregadores").then(r => r.json()).then(d => setEntregadores(Array.isArray(d) ? d.filter((e: any) => e.ativo) : [])).catch(() => {})
+    // Screen Orientation Lock
+    try {
+      if (screen.orientation && (screen.orientation as any).lock) {
+        (screen.orientation as any).lock("portrait").catch(() => {});
+      }
+    } catch {}
+
+    // Captura install prompt
+    const handleInstall = (e: any) => {
+      e.preventDefault();
+      setInstallPrompt(e);
+      const jaInstalou = window.matchMedia("(display-mode: standalone)").matches;
+      if (!jaInstalou) setShowInstallBanner(true);
+    };
+    window.addEventListener("beforeinstallprompt", handleInstall);
+
     // Wake Lock — mantém tela acesa
     let wakeLock: any = null;
     const ativarWakeLock = async () => {
@@ -193,7 +211,7 @@ export default function PedidosPage() {
 
     const intervalo = setInterval(carregarPedidos, 10000)
     const tick = setInterval(() => setNow(Date.now()), 1000)
-    return () => { if (wakeLock) wakeLock.release(); clearInterval(intervalo); clearInterval(tick); if (piscarRef.current) clearInterval(piscarRef.current); if (somRepetidoRef.current) clearInterval(somRepetidoRef.current); document.title = tituloOriginalRef.current }
+    return () => { if (wakeLock) wakeLock.release(); window.removeEventListener("beforeinstallprompt", handleInstall); clearInterval(intervalo); clearInterval(tick); if (piscarRef.current) clearInterval(piscarRef.current); if (somRepetidoRef.current) clearInterval(somRepetidoRef.current); document.title = tituloOriginalRef.current }
   }, [router])
 
   const alternarBot = async () => {
@@ -249,6 +267,25 @@ export default function PedidosPage() {
   const pedidosFiltrados = (filtro === "todos" ? pedidos : pedidos.filter(p => p.status === filtro))
     .sort((a, b) => { if (a.escalonado && !b.escalonado) return -1; if (!a.escalonado && b.escalonado) return 1; if (a.cancelamentoSolicitado && !b.cancelamentoSolicitado) return -1; return 0 })
   const detalhePedido = pedidos.find(p => p.id === detailId) || null
+  // App Badge API
+  useEffect(() => {
+    if ("setAppBadge" in navigator) {
+      if (emAberto > 0) (navigator as any).setAppBadge(emAberto);
+      else (navigator as any).clearAppBadge();
+    }
+  }, [emAberto])
+
+  // Shortcuts URL params
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const filtroParam = params.get("filtro");
+    const acaoParam = params.get("acao");
+    if (filtroParam) setFiltro(filtroParam as any);
+    if (acaoParam === "pausar") {
+      fetch("/api/bot-status", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ativo: false }) }).then(() => setBotAtivo(false));
+    }
+  }, [])
+
   const toastSegs = toast ? Math.max(0, Math.ceil((toast.expires - now) / 1000)) : 0
   const toastVisible = !!toast && toast.expires > now
   const avaliacaoMedia = "4,9"
@@ -310,6 +347,21 @@ export default function PedidosPage() {
             <button onClick={() => fetch("/api/auth/logout", { method: "POST" }).then(() => router.push("/login"))} style={{ fontSize: 11, fontWeight: 800, color: "#5a564d", background: "transparent", border: "1px solid #1f1d1a", padding: "6px 10px", borderRadius: 20 }}>Sair</button>
           </div>
         </header>
+
+        {/* Install Banner */}
+        {showInstallBanner && (
+          <div style={{ margin: "0 16px 12px", padding: "14px 16px", background: "linear-gradient(135deg,rgba(255,107,0,.15),rgba(255,107,0,.05))", border: "1.5px solid rgba(255,107,0,.4)", borderRadius: 18, display: "flex", alignItems: "center", gap: 12 }}>
+            <span style={{ fontSize: 32, flexShrink: 0 }}>🍕</span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <p style={{ margin: 0, fontSize: 14, fontWeight: 900, color: "#f4f1ec" }}>Instalar ChefeBot</p>
+              <p style={{ margin: "2px 0 0", fontSize: 11, fontWeight: 700, color: "#a39b8b" }}>Acesse mais rápido pela tela inicial</p>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, flexShrink: 0 }}>
+              <button onClick={async () => { if (installPrompt) { installPrompt.prompt(); const r = await installPrompt.userChoice; if (r.outcome === "accepted") setShowInstallBanner(false); } }} style={{ border: "none", background: "#ff6b00", color: "#fff", fontSize: 12, fontWeight: 900, padding: "8px 14px", borderRadius: 10 }}>Instalar</button>
+              <button onClick={() => setShowInstallBanner(false)} style={{ border: "none", background: "transparent", color: "#5a564d", fontSize: 11, fontWeight: 800, padding: "4px 0" }}>Agora não</button>
+            </div>
+          </div>
+        )}
 
         {/* Bot toggle */}
         <button onClick={alternarBot} disabled={salvandoBot} style={{ display: "flex", alignItems: "center", gap: 10, margin: "0 16px", padding: "13px 14px", background: botAtivo ? "rgba(34,197,94,.06)" : "rgba(250,204,21,.06)", border: `1px solid ${botAtivo ? "rgba(34,197,94,.28)" : "rgba(250,204,21,.3)"}`, borderRadius: 14, color: "#f5f2ee", textAlign: "left" }}>

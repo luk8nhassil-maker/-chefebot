@@ -7,6 +7,36 @@
   "background_color": "#060606",
   "theme_color": "#ff6b00",
   "orientation": "portrait",
+  "categories": [
+    "food",
+    "productivity"
+  ],
+  "shortcuts": [
+    {
+      "name": "Novos pedidos",
+      "short_name": "Novos",
+      "description": "Ver pedidos novos",
+      "url": "/pedidos?filtro=novo",
+      "icons": [
+        {
+          "src": "/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "Pausar bot",
+      "short_name": "Pausar",
+      "description": "Pausar o bot WhatsApp",
+      "url": "/pedidos?acao=pausar",
+      "icons": [
+        {
+          "src": "/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    }
+  ],
   "icons": [
     {
       "src": "/icon-192.png",
