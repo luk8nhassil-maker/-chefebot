@@ -108,6 +108,7 @@ export default function PedidosPage() {
   const [entregadores, setEntregadores] = useState<{id: string; nome: string; telefone: string; ativo: boolean}[]>([])
   const [modalEntrega, setModalEntrega] = useState<{pedidoId: string; proxStatus: Status} | null>(null)
   const [muteado, setMuteado] = useState(false)
+  const [busca, setBusca] = useState("")
 
   const prevIdsRef = useRef<string[]>([])
   const piscarRef = useRef<NodeJS.Timeout | null>(null)
@@ -366,6 +367,7 @@ export default function PedidosPage() {
   const totalHoje = pedidos.length
   const contagemPorStatus = (s: Status) => pedidos.filter(p => p.status === s).length
   const pedidosFiltrados = (filtro === "todos" ? pedidos : pedidos.filter(p => p.status === filtro))
+    .filter(p => !busca || p.cliente.toLowerCase().includes(busca.toLowerCase()))
     .sort((a, b) => { if (a.escalonado && !b.escalonado) return -1; if (!a.escalonado && b.escalonado) return 1; if (a.cancelamentoSolicitado && !b.cancelamentoSolicitado) return -1; return 0 })
   const detalhePedido = pedidos.find(p => p.id === detailId) || null
   // App Badge API
@@ -429,6 +431,8 @@ export default function PedidosPage() {
         @keyframes cbCancelGlow { 0%,100%{border-color:rgba(239,68,68,.3)} 50%{border-color:rgba(239,68,68,.7)} }
         @keyframes cbShimmer { 0%{background-position:-200% 0} 100%{background-position:200% 0} }
         @keyframes cbWait { 0%,100%{opacity:1} 50%{opacity:.35} }
+        .cbBusca::placeholder { color: #3a3730; }
+        .cbBusca:focus { border-color: #ff6b00 !important; box-shadow: 0 0 0 3px rgba(255,107,0,.1); }
       `}</style>
 
       <div style={{ minHeight: "100svh", maxWidth: 375, margin: "0 auto", background: "#060606", color: "#f5f2ee", fontFamily: "'Archivo', sans-serif", display: "flex", flexDirection: "column", paddingBottom: "calc(env(safe-area-inset-bottom) + 90px)" }}>
@@ -525,6 +529,22 @@ export default function PedidosPage() {
               )
             })}
           </div>
+        </div>
+
+        {/* Busca */}
+        <div style={{ padding: "0 16px 10px", position: "relative" }}>
+          <input
+            className="cbBusca"
+            type="text"
+            placeholder="Buscar cliente..."
+            value={busca}
+            onChange={e => setBusca(e.target.value)}
+            style={{ width: "100%", height: 48, background: "#101010", border: "1px solid #242220", borderRadius: 14, padding: "0 44px 0 16px", color: "#f5f2ee", fontSize: 15, fontWeight: 700, fontFamily: "'Archivo', sans-serif", outline: "none", boxSizing: "border-box", transition: "border-color .15s, box-shadow .15s" }}
+          />
+          {busca
+            ? <button onClick={() => setBusca("")} style={{ position: "absolute", right: 28, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: "#5a564d", fontSize: 18, lineHeight: 1, padding: "4px", cursor: "pointer" }}>×</button>
+            : <svg style={{ position: "absolute", right: 28, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="#3a3730" strokeWidth="2.2"/><path d="M16.5 16.5l3.5 3.5" stroke="#3a3730" strokeWidth="2.2" strokeLinecap="round"/></svg>
+          }
         </div>
 
         {/* Lista */}
