@@ -144,7 +144,7 @@ export default function FinanceiroPage() {
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
             {CATEGORIAS.map(cat => (
-              <button key={cat.key} onClick={() => setNovaCategoria(cat.key)} style={{ padding: '5px 10px', borderRadius: 20, border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 600, background: novaCategoria === cat.key ? cat.cor : '#1a1a1a', color: novaCategoria === cat.key ? '#fff' : '#555' }}>
+              <button key={cat.key} onClick={() => setNovaCategoria(cat.key)} style={{ padding: '10px 14px', minHeight: 48, borderRadius: 24, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, background: novaCategoria === cat.key ? cat.cor : '#1a1a1a', color: novaCategoria === cat.key ? '#fff' : '#555', fontFamily: "'Archivo', sans-serif", whiteSpace: 'nowrap' }}>
                 {cat.label}
               </button>
             ))}
@@ -182,7 +182,7 @@ export default function FinanceiroPage() {
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <span style={{ color: '#f87171', fontSize: 14, fontWeight: 700 }}>R$ {c.valor.toFixed(2).replace('.', ',')}</span>
-                      <button onClick={() => removerCusto(c.id)} style={{ background: 'none', border: 'none', color: '#333', cursor: 'pointer', fontSize: 16, padding: 0 }}>×</button>
+                      <button onClick={() => removerCusto(c.id)} style={{ background: 'none', border: 'none', color: '#555', cursor: 'pointer', fontSize: 18, padding: '0 4px', minHeight: 44, minWidth: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>×</button>
                     </div>
                   </div>
                 )

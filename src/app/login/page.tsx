@@ -24,6 +24,7 @@ function LoginForm() {
   const [visible, setVisible] = useState(false);
   const [userFocus, setUserFocus] = useState(false);
   const [passFocus, setPassFocus] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   useEffect(() => {
     const t = setTimeout(() => setVisible(true), 60);
@@ -73,12 +74,12 @@ function LoginForm() {
     }
   }
 
-  const inputStyle = (focused: boolean): React.CSSProperties => ({
+  const inputStyle = (focused: boolean, withIcon = false): React.CSSProperties => ({
     width: "100%",
     background: "#0a0a0a",
     border: `1.5px solid ${focused ? "#ff6b00" : "#222"}`,
     borderRadius: 14,
-    padding: "0 16px",
+    padding: withIcon ? "0 48px 0 16px" : "0 16px",
     color: "#f4f1ec",
     fontSize: 16,
     outline: "none",
@@ -250,36 +251,45 @@ function LoginForm() {
                 }}>
                   Senha
                 </label>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  autoComplete="current-password"
-                  required
-                  style={inputStyle(passFocus)}
-                  onFocus={() => setPassFocus(true)}
-                  onBlur={() => setPassFocus(false)}
-                />
-              </div>
-
-              {/* Erro */}
-              {error && (
-                <div style={{
-                  background: "rgba(220,38,38,0.08)",
-                  border: "1px solid rgba(248,113,113,0.18)",
-                  borderRadius: 12,
-                  padding: "12px 16px",
-                  color: "#f87171",
-                  fontSize: 13,
-                  fontWeight: 500,
-                  marginBottom: 18,
-                  lineHeight: 1.45,
-                  fontFamily: "'Archivo', sans-serif",
-                }}>
-                  {error}
+                <div style={{ position: "relative" }}>
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    placeholder="••••••••"
+                    autoComplete="current-password"
+                    required
+                    style={inputStyle(passFocus, true)}
+                    onFocus={() => setPassFocus(true)}
+                    onBlur={() => setPassFocus(false)}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(v => !v)}
+                    aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
+                    style={{
+                      position: "absolute",
+                      right: 14,
+                      top: "50%",
+                      transform: "translateY(-50%)",
+                      background: "none",
+                      border: "none",
+                      cursor: "pointer",
+                      padding: 4,
+                      lineHeight: 1,
+                      fontSize: 18,
+                      color: "#5a5450",
+                      WebkitTapHighlightColor: "transparent",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      userSelect: "none",
+                    }}
+                  >
+                    {showPassword ? "🙈" : "👁️"}
+                  </button>
                 </div>
-              )}
+              </div>
 
               {/* Botão */}
               <button
@@ -293,7 +303,7 @@ function LoginForm() {
                     : "linear-gradient(135deg, #ff7a1a 0%, #ff5500 100%)",
                   border: "none",
                   borderRadius: 16,
-                  color: loading ? "#ff6b0050" : "#fff",
+                  color: "#fff",
                   fontSize: 16,
                   fontWeight: 800,
                   cursor: loading ? "not-allowed" : "pointer",
@@ -302,29 +312,43 @@ function LoginForm() {
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  gap: 10,
                   transition: "opacity 0.2s, transform 0.15s, box-shadow 0.2s",
                   boxShadow: loading ? "none" : "0 6px 28px rgba(255,107,0,0.38), 0 2px 8px rgba(255,107,0,0.2)",
                   WebkitTapHighlightColor: "transparent",
-                  opacity: loading ? 0.7 : 1,
+                  opacity: loading ? 0.8 : 1,
                 }}
               >
                 {loading ? (
-                  <>
-                    <span style={{
-                      width: 18,
-                      height: 18,
-                      border: "2.5px solid rgba(255,107,0,0.25)",
-                      borderTopColor: "#ff6b00",
-                      borderRadius: "50%",
-                      display: "inline-block",
-                      animation: "spin 0.6s linear infinite",
-                      flexShrink: 0,
-                    }} />
-                    Entrando...
-                  </>
+                  <span style={{
+                    width: 22,
+                    height: 22,
+                    border: "2.5px solid rgba(255,255,255,0.25)",
+                    borderTopColor: "#fff",
+                    borderRadius: "50%",
+                    display: "inline-block",
+                    animation: "spin 0.6s linear infinite",
+                    flexShrink: 0,
+                  }} />
                 ) : "Entrar"}
               </button>
+
+              {/* Erro abaixo do botão */}
+              {error && (
+                <div style={{
+                  marginTop: 14,
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: 8,
+                  color: "#f87171",
+                  fontSize: 13,
+                  fontWeight: 500,
+                  lineHeight: 1.45,
+                  fontFamily: "'Archivo', sans-serif",
+                }}>
+                  <span style={{ flexShrink: 0, marginTop: 1 }}>⚠</span>
+                  <span>{error}</span>
+                </div>
+              )}
             </form>
           </div>
 
