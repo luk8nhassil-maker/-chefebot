@@ -742,6 +742,29 @@ export function processMessage(input: string, session: BotSession): BotResponse 
       return respostaInvalida(`Mesmo tamanho ou tamanhos diferentes?\n\n  • _"mesmo"_ ou o tamanho: aplico nas duas\n  • _"diferentes"_: escolho um por uma`, session);
     }
     case "size": {
+      {
+        const qtdMap: Record<string, number> = { "uma": 1, "um": 1, "duas": 2, "dois": 2, "tres": 3, "três": 3, "quatro": 4, "cinco": 5 };
+        const qtdMatch = n.match(/(\d+|duas?|dois|tr[eê]s|quatro|cinco)\s+pizzas?/) ||
+          n.match(/^(?:quero\s+)?(\d+|duas?|dois|tr[eê]s|quatro|cinco)(?:\s+pizzas?)?(?:\s+|$)/);
+        let qtd = 0;
+        if (qtdMatch) qtd = parseInt(qtdMatch[1]) || qtdMap[qtdMatch[1].toLowerCase()] || 0;
+        if (qtd >= 2 && qtd <= 5) {
+          const sizeInMsg = detectaTamanhoDaMensagem(n);
+          if (sizeInMsg) {
+            return {
+              messages: [
+                `${qtd} pizzas tamanho *${sizeInMsg}*! 🍕 Vamos montar uma de cada vez.`,
+                `*Pizza 1 de ${qtd}* — qual o sabor?\n\n${listaFlavors()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
+              ],
+              session: resetaTentativas({ ...session, step: "flavor", currentCategory: "pizza", currentSize: sizeInMsg, pendingPizzas: qtd, pizzaAtualIndex: 1, pendingPizzaSizes: undefined }),
+            };
+          }
+          return {
+            messages: [`${qtd === 2 ? "Duas" : qtd} pizzas! 😋 Mesmo tamanho ou tamanhos diferentes?`],
+            session: resetaTentativas({ ...session, step: "pizza_tamanhos", currentCategory: "pizza", pendingPizzas: qtd, pizzaAtualIndex: 1, pendingPizzaSizes: undefined }),
+          };
+        }
+      }
       const mudanca = tentaMudanca(text, session);
       if (mudanca) return mudanca;
       const size = detectaTamanho(n);
