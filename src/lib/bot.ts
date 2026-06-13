@@ -49,6 +49,7 @@ export type BotStep =
   | "segundo_sabor"
   | "border"
   | "border_escolha"
+  | "pizza_tamanhos"
   | "add_more"
   | "lanche_escolha"
   | "lanche_flavor"
@@ -97,6 +98,9 @@ export interface BotSession {
   pendingCategory?: string;
   pendingPizzas?: number;
   pizzaAtualIndex?: number;
+  pendingPizzaSizes?: string[];
+  bordaEmLote?: boolean;
+  bordaParaTodas?: string;
   deliveryType?: "delivery" | "pickup";
   neighborhood?: string;
   address?: string;
@@ -258,6 +262,16 @@ function detectaPedidoParcial(text: string): PedidoParcial | null {
   const border = detectaBordaDaMensagem(n);
   if (!size && !flavor && !border) return null;
   return { size: size ?? undefined, flavor: flavor ?? undefined, border: border ?? undefined };
+}
+function detectaDuasPizzas(text: string): Array<{size?: string; flavor?: string}> | null {
+  const n = normalizar(text);
+  const partes = n.split(/\s+e\s+(?:uma?|outra|mais\s+uma?)?\s*/);
+  if (partes.length >= 2) {
+    const r1 = { size: detectaTamanhoDaMensagem(partes[0]) ?? undefined, flavor: detectaSaborDaMensagem(partes[0]) ?? undefined };
+    const r2 = { size: detectaTamanhoDaMensagem(partes[1]) ?? undefined, flavor: detectaSaborDaMensagem(partes[1]) ?? undefined };
+    if ((r1.size || r1.flavor) && (r2.size || r2.flavor)) return [r1, r2];
+  }
+  return null;
 }
 function nomeCategoriaAtual(step: BotStep, currentCategory?: string): string {
   if (currentCategory === "pizza" || step === "size" || step === "flavor" || step === "segundo_sabor" || step === "border" || step === "border_escolha") return "pizza";
@@ -424,11 +438,11 @@ export function processMessage(input: string, session: BotSession): BotResponse 
   const text = input.trim();
   const n = normalizar(text);
   // Detecta quantidade de pizzas: "2 pizzas", "duas pizzas familia", "quero 2", "duas"
-  if ((session.step === "size" || session.step === "category" || session.step === "add_more" || session.step === "name") && !session.pendingPizzas) {
+  if ((session.step === "size" || session.step === "category" || session.step === "add_more" || session.step === "name" || session.step === "flavor" || session.step === "border_escolha") && !session.pendingPizzas) {
     const qtdMap: Record<string, number> = { "uma": 1, "um": 1, "duas": 2, "dois": 2, "tres": 3, "três": 3, "quatro": 4, "cinco": 5 };
     const qtdMatchComPizza = n.match(/(\d+|duas?|dois|tr[eê]s|quatro|cinco)\s+pizzas?/);
     // No step "size" (pizza já escolhida), aceita quantidade sem mencionar "pizza"
-    const qtdMatchSoPizza = (session.step === "size" || session.step === "add_more")
+    const qtdMatchSoPizza = (session.step === "size" || session.step === "add_more" || session.step === "flavor" || session.step === "border_escolha")
       ? n.match(/^(?:quero\s+)?(\d+|duas?|dois|tr[eê]s|quatro|cinco)(?:\s+|$)/)
       : null;
     const qtdMatch = qtdMatchComPizza || qtdMatchSoPizza;
@@ -462,8 +476,8 @@ export function processMessage(input: string, session: BotSession): BotResponse 
         };
       }
       return {
-        messages: [`${qtd} pizzas! 🍕 Vamos montar uma a uma.\n\n*Pizza 1 de ${qtd}* — qual o tamanho?\n\n${sizeList()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`],
-        session: resetaTentativas({ ...session, step: "size", currentCategory: "pizza", pendingPizzas: qtd, pizzaAtualIndex: 1 }),
+        messages: [`${qtd === 2 ? "Duas" : qtd} pizzas! 😋 Mesmo tamanho ou tamanhos diferentes?`],
+        session: resetaTentativas({ ...session, step: "pizza_tamanhos", currentCategory: "pizza", pendingPizzas: qtd, pizzaAtualIndex: 1 }),
       };
     }
   }
@@ -685,12 +699,71 @@ export function processMessage(input: string, session: BotSession): BotResponse 
       }
       return respostaInvalida(`  1. Manter\n  2. Ir pro outro`, session);
     }
+    case "pizza_tamanhos": {
+      const qtd = session.pendingPizzas!;
+      const qtdLabel = qtd === 2 ? "duas" : `${qtd}`;
+      if (n.includes("diferent") || n.includes("cada uma") || n.includes("separad") || n.includes("varia")) {
+        return {
+          messages: [`Qual o tamanho da pizza 1?\n\n${sizeList()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`],
+          session: resetaTentativas({ ...session, step: "size", pendingPizzaSizes: [] }),
+        };
+      }
+      // Detect two sizes in one message: "uma média e uma grande"
+      const partesSize = n.split(/\s+e\s+(?:uma?|outra)?\s*/);
+      if (partesSize.length >= 2 && qtd === 2) {
+        const s1 = detectaTamanhoDaMensagem(partesSize[0]);
+        const s2 = detectaTamanhoDaMensagem(partesSize[1]);
+        if (s1 && s2) {
+          return {
+            messages: [
+              `Pizza 1: *${s1}*, Pizza 2: *${s2}*! 👌`,
+              `*Pizza 1 de 2* — qual o sabor?\n\n${listaFlavors()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
+            ],
+            session: resetaTentativas({ ...session, step: "flavor", currentSize: s1, pendingPizzaSizes: [s1, s2], pizzaAtualIndex: 1 }),
+          };
+        }
+      }
+      const size = detectaTamanho(n) || detectaTamanhoDaMensagem(n);
+      if (size) {
+        return {
+          messages: [
+            `${qtd === 2 ? "Duas" : qtd} pizzas *${size}*! 🍕`,
+            `*Pizza 1 de ${qtd}* — qual o sabor?\n\n${listaFlavors()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
+          ],
+          session: resetaTentativas({ ...session, step: "flavor", currentSize: size, pizzaAtualIndex: 1 }),
+        };
+      }
+      if (n.includes("mesmo") || n.includes("igual") || n.includes("iguais")) {
+        return {
+          messages: [`Qual o tamanho das ${qtdLabel}?\n\n${sizeList()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`],
+          session: resetaTentativas({ ...session, step: "size" }),
+        };
+      }
+      return respostaInvalida(`Mesmo tamanho ou tamanhos diferentes?\n\n  • _"mesmo"_ ou o tamanho: aplico nas duas\n  • _"diferentes"_: escolho um por uma`, session);
+    }
     case "size": {
       const mudanca = tentaMudanca(text, session);
       if (mudanca) return mudanca;
       const size = detectaTamanho(n);
       const allFlavors = [...MENU.saltyFlavors, ...MENU.sweetFlavors];
       if (size) {
+        if (session.pendingPizzaSizes !== undefined) {
+          const newSizes = [...session.pendingPizzaSizes, size];
+          if (newSizes.length < session.pendingPizzas!) {
+            const proximo = newSizes.length + 1;
+            return {
+              messages: [`Pizza ${newSizes.length}: *${size}*! E a pizza ${proximo}?\n\n${sizeList()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`],
+              session: resetaTentativas({ ...session, step: "size", pendingPizzaSizes: newSizes }),
+            };
+          }
+          return {
+            messages: [
+              `Pizza ${newSizes.length}: *${size}*! 👌`,
+              `*Pizza 1 de ${session.pendingPizzas}* — qual o sabor?\n\n${listaFlavors()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
+            ],
+            session: resetaTentativas({ ...session, step: "flavor", currentSize: newSizes[0], pendingPizzaSizes: newSizes, pizzaAtualIndex: 1 }),
+          };
+        }
         const saborJunto = detectaSaborDaMensagem(n);
         if (saborJunto) {
           const bordaJunta = detectaBordaDaMensagem(n);
@@ -752,21 +825,34 @@ export function processMessage(input: string, session: BotSession): BotResponse 
     case "flavor": {
       const mudanca = tentaMudanca(text, session);
       if (mudanca) return mudanca;
+      const effectiveSize = (session.pendingPizzaSizes && session.pizzaAtualIndex)
+        ? session.pendingPizzaSizes[session.pizzaAtualIndex - 1]
+        : session.currentSize;
       const allFlavors = [...MENU.saltyFlavors, ...MENU.sweetFlavors];
-      if (permiteMeioAMeio(session.currentSize)) {
+      let flavor: string | undefined;
+      if (permiteMeioAMeio(effectiveSize)) {
         const dois = detectaDoisSabores(n, allFlavors);
         if (dois) {
           const flavorFinal = `${dois[0]}/${dois[1]}`;
+          if (session.pendingPizzas && session.pendingPizzas > 1 && session.pizzaAtualIndex === 1) {
+            const sizeForBorder = effectiveSize || "G";
+            return {
+              messages: [
+                `Meio a meio *${dois[0]}* e *${dois[1]}*! 😋`,
+                `As ${session.pendingPizzas === 2 ? "duas" : session.pendingPizzas} pizzas vão ter borda? Se sim, qual?\n\n${listaBordas(sizeForBorder)}\n\nSe quiser bordas diferentes é só falar 😊\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
+              ],
+              session: resetaTentativas({ ...session, step: "border_escolha", currentFlavor: flavorFinal, currentSize: sizeForBorder, bordaEmLote: true }),
+            };
+          }
           return {
             messages: [
               `Meio a meio *${dois[0]}* e *${dois[1]}*! Que combinação! 😋`,
-              `Vai querer borda recheada? Olha as opções 👇\n\n${listaBordas(session.currentSize!)}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
+              `Vai querer borda recheada? Olha as opções 👇\n\n${listaBordas(effectiveSize!)}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
             ],
-            session: resetaTentativas({ ...session, step: "border_escolha", currentFlavor: flavorFinal }),
+            session: resetaTentativas({ ...session, step: "border_escolha", currentFlavor: flavorFinal, currentSize: effectiveSize }),
           };
         }
       }
-      let flavor: string | undefined;
       const num = parseInt(text);
       if (!isNaN(num) && num >= 1 && num <= allFlavors.length) {
         flavor = allFlavors[num - 1];
@@ -776,15 +862,49 @@ export function processMessage(input: string, session: BotSession): BotResponse 
       if (!flavor) {
         return respostaInvalida(`${listaFlavors()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`, session);
       }
-      if (session.currentFlavor && !flavor) {
-        flavor = session.currentFlavor;
+      // Auto-apply border for subsequent pizzas in batch mode
+      if (session.bordaParaTodas && session.pizzaAtualIndex && session.pizzaAtualIndex > 1) {
+        const borda = session.bordaParaTodas;
+        const basePrice = getSizePrice(effectiveSize!);
+        const borderPriceVal = borda !== "Sem borda" ? getBorderPrice(effectiveSize!) : 0;
+        const newItem: CartItem = { category: "pizza", name: "Pizza", size: effectiveSize!, flavor, border: borda, price: basePrice + borderPriceVal };
+        const newCart = [...session.cart, newItem];
+        const subtotal = cartSubtotal(newCart);
+        if (session.pizzaAtualIndex < session.pendingPizzas!) {
+          const proximo = session.pizzaAtualIndex + 1;
+          const nextSize = session.pendingPizzaSizes ? session.pendingPizzaSizes[proximo - 1] : effectiveSize;
+          return {
+            messages: [
+              `✅ Pizza ${session.pizzaAtualIndex} de ${session.pendingPizzas} pronta!\n\n🛒 *Pedido até agora:*\n${resumoCarrinho(newCart)}\n  Subtotal: *${formatCurrency(subtotal)}*`,
+              `*Pizza ${proximo} de ${session.pendingPizzas}* — qual o sabor?\n\n${listaFlavors()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
+            ],
+            session: resetaTentativas({ ...session, step: "flavor", cart: newCart, currentSize: nextSize, currentFlavor: undefined, pizzaAtualIndex: proximo }),
+          };
+        }
+        return {
+          messages: [
+            `✅ Pizza ${session.pizzaAtualIndex} de ${session.pendingPizzas} pronta! 🎉`,
+            mensagemAddMore(newCart),
+          ],
+          session: resetaTentativas({ ...session, step: "add_more", cart: newCart, currentSize: undefined, currentFlavor: undefined, pendingPizzas: undefined, pizzaAtualIndex: undefined, pendingPizzaSizes: undefined, bordaParaTodas: undefined }),
+        };
+      }
+      if (session.pendingPizzas && session.pendingPizzas > 1 && session.pizzaAtualIndex === 1) {
+        const sizeForBorder = effectiveSize || "G";
+        return {
+          messages: [
+            `*${flavor}*! 😋`,
+            `As ${session.pendingPizzas === 2 ? "duas" : session.pendingPizzas} pizzas vão ter borda? Se sim, qual?\n\n${listaBordas(sizeForBorder)}\n\nSe quiser bordas diferentes é só falar 😊\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
+          ],
+          session: resetaTentativas({ ...session, step: "border_escolha", currentFlavor: flavor, currentSize: sizeForBorder, bordaEmLote: true }),
+        };
       }
       return {
         messages: [
           `*${flavor}*! 😋`,
-          `Vai querer borda recheada? Olha as opções 👇\n\n${listaBordas(session.currentSize!)}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
+          `Vai querer borda recheada? Olha as opções 👇\n\n${listaBordas(effectiveSize!)}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
         ],
-        session: resetaTentativas({ ...session, step: "border_escolha", currentFlavor: flavor }),
+        session: resetaTentativas({ ...session, step: "border_escolha", currentFlavor: flavor, currentSize: effectiveSize }),
       };
     }
     case "segundo_sabor": {
@@ -831,6 +951,50 @@ export function processMessage(input: string, session: BotSession): BotResponse 
       const mudanca = tentaMudanca(text, session);
       if (mudanca) return mudanca;
       const totalOpcoes = MENU.borders.length + 1;
+
+      // Batch border mode: first pizza of multiple — user answered "As duas vão ter borda?"
+      if (session.bordaEmLote && session.pendingPizzas && session.pendingPizzas > 1 && session.pizzaAtualIndex === 1) {
+        const diferentBorda = n.includes("diferent") || n.includes("so na") || n.includes("individual") || n.includes("cada uma") || n.includes("so em");
+        if (diferentBorda) {
+          return {
+            messages: [`Ok! Qual a borda da pizza 1?\n\n${listaBordas(session.currentSize || "G")}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`],
+            session: resetaTentativas({ ...session, bordaEmLote: false }),
+          };
+        }
+        const semBordaTodas = n.includes("sem borda") || n === String(totalOpcoes) || eNegativa(n);
+        let batchBorderLabel = "";
+        let batchBorderPrice = 0;
+        if (semBordaTodas) {
+          batchBorderLabel = "Sem borda";
+        } else {
+          const numB = parseInt(text);
+          if (!isNaN(numB) && numB >= 1 && numB <= MENU.borders.length) {
+            const b = getBorderByIndex(numB - 1, session.currentSize!);
+            if (b) { batchBorderLabel = b.label; batchBorderPrice = b.price; }
+          } else {
+            const found = MENU.borders.find(b => n.includes(normalizar(b.label)));
+            if (found) { batchBorderLabel = found.label; batchBorderPrice = getBorderPrice(session.currentSize!); }
+          }
+        }
+        if (!batchBorderLabel) {
+          return respostaInvalida(`${listaBordas(session.currentSize || "G")}\n\nSe quiser bordas diferentes é só falar 😊\n\n_(Digite *voltar* para corrigir a etapa anterior)_`, session);
+        }
+        const basePrice1 = getSizePrice(session.currentSize!);
+        const borda1Price = batchBorderLabel !== "Sem borda" ? batchBorderPrice : 0;
+        const newItem1: CartItem = { category: "pizza", name: "Pizza", size: session.currentSize!, flavor: session.currentFlavor!, border: batchBorderLabel, price: basePrice1 + borda1Price };
+        const newCart1 = [...session.cart, newItem1];
+        const subtotal1 = cartSubtotal(newCart1);
+        const nextSize = session.pendingPizzaSizes ? session.pendingPizzaSizes[1] : session.currentSize;
+        const bordaMsg = batchBorderLabel !== "Sem borda" ? `Borda *${batchBorderLabel}*` : "Sem borda";
+        return {
+          messages: [
+            `${bordaMsg} pra todas! 👌\n\n✅ Pizza 1 de ${session.pendingPizzas} pronta!\n\n🛒 *Pedido até agora:*\n${resumoCarrinho(newCart1)}\n  Subtotal: *${formatCurrency(subtotal1)}*`,
+            `*Pizza 2 de ${session.pendingPizzas}* — qual o sabor?\n\n${listaFlavors()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
+          ],
+          session: resetaTentativas({ ...session, step: "flavor", cart: newCart1, currentSize: nextSize, currentFlavor: undefined, pizzaAtualIndex: 2, bordaEmLote: false, bordaParaTodas: batchBorderLabel }),
+        };
+      }
+
       const semBorda = n.includes("sem borda") || eNegativa(n) || n === String(totalOpcoes);
       if (semBorda) {
         const basePrice = getSizePrice(session.currentSize!);
@@ -839,12 +1003,13 @@ export function processMessage(input: string, session: BotSession): BotResponse 
         const subtotal = cartSubtotal(newCart);
         if (session.pendingPizzas && session.pizzaAtualIndex && session.pizzaAtualIndex < session.pendingPizzas) {
           const proximo = session.pizzaAtualIndex + 1;
+          const nextSize = session.pendingPizzaSizes ? session.pendingPizzaSizes[proximo - 1] : session.currentSize;
           return {
             messages: [
               `✅ Pizza ${session.pizzaAtualIndex} de ${session.pendingPizzas} pronta!\n\n🛒 *Pedido até agora:*\n${resumoCarrinho(newCart)}\n  Subtotal: *${formatCurrency(subtotal)}*`,
-              `Agora a pizza ${proximo} — qual o sabor?\n\n${listaFlavors()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
+              `*Pizza ${proximo} de ${session.pendingPizzas}* — qual o sabor?\n\n${listaFlavors()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
             ],
-            session: resetaTentativas({ ...session, step: "flavor", cart: newCart, currentSize: session.currentSize, currentFlavor: undefined, pizzaAtualIndex: proximo }),
+            session: resetaTentativas({ ...session, step: "flavor", cart: newCart, currentSize: nextSize, currentFlavor: undefined, pizzaAtualIndex: proximo }),
           };
         }
         return {
@@ -852,7 +1017,7 @@ export function processMessage(input: string, session: BotSession): BotResponse 
             `Sem borda, anotado!`,
             mensagemAddMore(newCart),
           ],
-          session: resetaTentativas({ ...session, step: "add_more", cart: newCart, currentSize: undefined, currentFlavor: undefined, pendingPizzas: undefined, pizzaAtualIndex: undefined }),
+          session: resetaTentativas({ ...session, step: "add_more", cart: newCart, currentSize: undefined, currentFlavor: undefined, pendingPizzas: undefined, pizzaAtualIndex: undefined, pendingPizzaSizes: undefined, bordaParaTodas: undefined }),
         };
       }
       const num = parseInt(text);
@@ -878,12 +1043,13 @@ export function processMessage(input: string, session: BotSession): BotResponse 
       const subtotal = cartSubtotal(newCart);
       if (session.pendingPizzas && session.pizzaAtualIndex && session.pizzaAtualIndex < session.pendingPizzas) {
         const proximo = session.pizzaAtualIndex + 1;
+        const nextSize = session.pendingPizzaSizes ? session.pendingPizzaSizes[proximo - 1] : session.currentSize;
         return {
           messages: [
             `✅ Pizza ${session.pizzaAtualIndex} de ${session.pendingPizzas} pronta!\n\n🛒 *Pedido até agora:*\n${resumoCarrinho(newCart)}\n  Subtotal: *${formatCurrency(subtotal)}*`,
-            `Agora a pizza ${proximo} — qual o sabor?\n\n${listaFlavors()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
+            `*Pizza ${proximo} de ${session.pendingPizzas}* — qual o sabor?\n\n${listaFlavors()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
           ],
-          session: resetaTentativas({ ...session, step: "flavor", cart: newCart, currentSize: session.currentSize, currentFlavor: undefined, pizzaAtualIndex: proximo }),
+          session: resetaTentativas({ ...session, step: "flavor", cart: newCart, currentSize: nextSize, currentFlavor: undefined, pizzaAtualIndex: proximo }),
         };
       }
       return {
@@ -891,7 +1057,7 @@ export function processMessage(input: string, session: BotSession): BotResponse 
           `Borda *${borderLabel}* anotada! 👌`,
           mensagemAddMore(newCart),
         ],
-        session: resetaTentativas({ ...session, step: "add_more", cart: newCart, currentSize: undefined, currentFlavor: undefined, pendingPizzas: undefined, pizzaAtualIndex: undefined }),
+        session: resetaTentativas({ ...session, step: "add_more", cart: newCart, currentSize: undefined, currentFlavor: undefined, pendingPizzas: undefined, pizzaAtualIndex: undefined, pendingPizzaSizes: undefined, bordaParaTodas: undefined }),
       };
     }
     case "border": {
