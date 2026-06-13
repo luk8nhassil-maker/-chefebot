@@ -59,9 +59,9 @@ type Form = {
   nomeTitularPix: string
   aceitaDinheiro: boolean
   aceitaCartao: boolean
-  taxaEntrega: string
-  raioEntrega: string
   temMotoboy: boolean
+  fazDelivery: boolean
+  aceitaRetirada: boolean
 }
 
 const INITIAL: Form = {
@@ -74,9 +74,9 @@ const INITIAL: Form = {
   nomeTitularPix: '',
   aceitaDinheiro: true,
   aceitaCartao: true,
-  taxaEntrega: '',
-  raioEntrega: '',
   temMotoboy: false,
+  fazDelivery: true,
+  aceitaRetirada: true,
 }
 
 // ─── Toggle ───────────────────────────────────────────────────────────────────
@@ -223,15 +223,16 @@ function Step4({ form, set, onNext, onBack, saving }: { form: Form; set: (f: Par
       <h2 style={{ fontSize: 20, fontWeight: 700, color: TEXT, fontFamily: FONT, margin: '0 0 4px' }}>Entrega</h2>
       <p style={{ fontSize: 14, color: MUTED, fontFamily: FONT, margin: '0 0 24px' }}>Defina como funciona seu delivery</p>
 
-      <Field label="Taxa de entrega padrão (R$)">
-        <input style={inp} placeholder="0,00" type="number" inputMode="decimal" min={0} value={form.taxaEntrega} onChange={e => set({ taxaEntrega: e.target.value })} />
-      </Field>
-      <Field label="Raio de entrega (km)">
-        <input style={inp} placeholder="Ex: 5" type="number" inputMode="decimal" min={0} value={form.raioEntrega} onChange={e => set({ raioEntrega: e.target.value })} />
-      </Field>
+      <div style={{ background: '#0d1a0d', border: '1px solid #1a2e1a', borderRadius: 12, padding: '12px 14px', marginBottom: 20 }}>
+        <p style={{ fontSize: 13, color: '#7aad7a', fontFamily: FONT, margin: 0, lineHeight: 1.6 }}>
+          💡 As taxas de entrega são configuradas por bairro depois que você terminar o setup. Você pode adicionar quantos bairros quiser com taxas individuais em <strong style={{ color: '#9dcc9d' }}>Configurações</strong>.
+        </p>
+      </div>
 
-      <div style={{ marginBottom: 16 }}>
-        <Toggle value={form.temMotoboy} onChange={v => set({ temMotoboy: v })} label="🛵 Tem motoboy próprio?" />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
+        <Toggle value={form.fazDelivery}    onChange={v => set({ fazDelivery: v })}    label="🛵 Faz delivery?" />
+        <Toggle value={form.aceitaRetirada} onChange={v => set({ aceitaRetirada: v })} label="🏪 Aceita retirada na loja?" />
+        <Toggle value={form.temMotoboy}     onChange={v => set({ temMotoboy: v })}     label="🛵 Tem motoboy próprio?" />
       </div>
 
       <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: 10, paddingTop: 24 }}>
@@ -400,7 +401,7 @@ function Step6({ form, onGoPanel }: { form: Form; onGoPanel: () => void }) {
     { icon: '⏰', label: `${horaFmt(form.horaAbertura)} – ${horaFmt(form.horaFechamento)}` },
     { icon: '🔑', label: form.chavePix },
     { icon: '💰', label: [form.aceitaDinheiro && 'Dinheiro', form.aceitaCartao && 'Cartão', 'Pix'].filter(Boolean).join(' · ') },
-    ...(form.taxaEntrega ? [{ icon: '🛵', label: `Taxa R$ ${form.taxaEntrega} · Raio ${form.raioEntrega || '—'} km` }] : []),
+    { icon: '🛵', label: [form.fazDelivery && 'Delivery', form.aceitaRetirada && 'Retirada', form.temMotoboy && 'Motoboy próprio'].filter(Boolean).join(' · ') || '—' },
     { icon: '✅', label: 'WhatsApp conectado' },
   ]
 
@@ -463,9 +464,9 @@ export default function SetupPage() {
           nomeTitularPix:   form.nomeTitularPix,
           aceitaDinheiro:   form.aceitaDinheiro,
           aceitaCartao:     form.aceitaCartao,
-          taxaEntrega:      form.taxaEntrega ? Number(form.taxaEntrega) : 0,
-          raioEntrega:      form.raioEntrega  ? Number(form.raioEntrega)  : 0,
           temMotoboy:       form.temMotoboy,
+          fazDelivery:      form.fazDelivery,
+          aceitaRetirada:   form.aceitaRetirada,
         }),
       })
       setStep(5)
