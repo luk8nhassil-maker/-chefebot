@@ -128,7 +128,7 @@ const RESPOSTAS_INVALIDAS = [
 ];
 const LIMITE_TENTATIVAS = 3;
 function normalizar(texto: string): string {
-  return texto.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+  return texto.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[​-‍﻿]/g, "").trim();
 }
 function msgInvalida(): string {
   return RESPOSTAS_INVALIDAS[Math.floor(Math.random() * RESPOSTAS_INVALIDAS.length)];
