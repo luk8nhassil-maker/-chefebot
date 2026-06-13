@@ -1,15 +1,15 @@
 import { NextResponse } from "next/server";
 import { redis } from "@/lib/redis";
 
-const EVOLUTION_API_URL = 'https://evolution-api-production-8f99.up.railway.app'
-const EVOLUTION_API_KEY = '6208711c1b6fdffcc30cb492a44d74601415c33ff717ef6032162f9c0056319e'
+const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL || 'evolution-api-production-8f99.up.railway.app'
+const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY!
 const EVOLUTION_INSTANCE = 'chefe'
 const TIMEOUT_MS = 15 * 60 * 1000 // 15 minutos
 const STEPS_IGNORADOS = ['done', 'escalado', 'confirm', 'welcome']
 
 async function enviarMensagem(phone: string, text: string) {
   try {
-    await fetch(`${EVOLUTION_API_URL}/message/sendText/${EVOLUTION_INSTANCE}`, {
+    await fetch(`https://${EVOLUTION_API_URL}/message/sendText/${EVOLUTION_INSTANCE}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', apikey: EVOLUTION_API_KEY },
       body: JSON.stringify({ number: phone, text }),

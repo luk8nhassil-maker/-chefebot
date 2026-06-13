@@ -602,7 +602,6 @@ export async function POST(req: NextRequest) {
         await redis.set(`aguardando_resposta:${phone}`, true, { ex: 600 })
         return NextResponse.json({ ok: true })
       }
-      return NextResponse.json({ ok: true });
     }
 
     const aguardandoResposta = await redis.get<boolean>(`aguardando_resposta:${phone}`)

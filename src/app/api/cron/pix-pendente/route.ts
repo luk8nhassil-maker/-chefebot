@@ -49,19 +49,19 @@ export async function GET(req: Request) {
           await redis.set("pedidos", pedidosAtualizados);
         }
 
-        await enviarMensagem(phone, `⏰ Ei! Seu pedido está aguardando o comprovante do Pix.\\n\\nNossa equipe vai entrar em contato para te ajudar. 😊`);
+        await enviarMensagem(phone, `⏰ Ei! Seu pedido está aguardando o comprovante do Pix.\n\nNossa equipe vai entrar em contato para te ajudar. 😊`);
         await redis.set(key, { ...session, pixCobrancas: 3 }, { ex: 1800 });
         escalados++;
 
       } else if (minutos >= 4 && cobrancas < 2) {
         // 4 minutos — 2a cobrança
-        await enviarMensagem(phone, `⚠️ Seu pedido ainda está aguardando o comprovante do Pix.\\n\\nEnvie a imagem ou PDF do comprovante para confirmarmos! 📄`);
+        await enviarMensagem(phone, `⚠️ Seu pedido ainda está aguardando o comprovante do Pix.\n\nEnvie a imagem ou PDF do comprovante para confirmarmos! 📄`);
         await redis.set(key, { ...session, pixCobrancas: 2 }, { ex: 1800 });
         cobrados++;
 
       } else if (minutos >= 2 && cobrancas < 1) {
         // 2 minutos — 1a cobrança
-        await enviarMensagem(phone, `Lembrete: para confirmar seu pedido, envie o comprovante do Pix! 📄\\n\\nÉ rapidinho, só enviar a imagem aqui. 😊`);
+        await enviarMensagem(phone, `Lembrete: para confirmar seu pedido, envie o comprovante do Pix! 📄\n\nÉ rapidinho, só enviar a imagem aqui. 😊`);
         await redis.set(key, { ...session, pixCobrancas: 1 }, { ex: 1800 });
         cobrados++;
       }

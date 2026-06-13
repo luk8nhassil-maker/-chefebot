@@ -67,13 +67,14 @@ function LoginForm() {
 
   return (
     <div style={{
-      minHeight: "100vh",
+      minHeight: "100svh",
       background: "linear-gradient(135deg, #1a0a00 0%, #2d1200 40%, #1a0505 100%)",
       display: "flex",
       alignItems: "center",
       justifyContent: "center",
-      padding: "24px",
-      fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+      padding: "calc(env(safe-area-inset-top) + 24px) 24px calc(env(safe-area-inset-bottom) + 24px)",
+      fontFamily: "'Archivo', sans-serif",
+      overflowX: "hidden",
     }}>
       <div style={{
         position: "fixed",
@@ -82,7 +83,7 @@ function LoginForm() {
         pointerEvents: "none",
       }} />
 
-      <div style={{ width: "100%", maxWidth: "380px", position: "relative" }}>
+      <div style={{ width: "100%", maxWidth: "375px", position: "relative" }}>
         <div style={{ textAlign: "center", marginBottom: "40px" }}>
           <div style={{
             width: "72px",
@@ -131,11 +132,12 @@ function LoginForm() {
                   background: "rgba(255,255,255,0.08)",
                   border: "1px solid rgba(255,255,255,0.12)",
                   borderRadius: "12px",
-                  padding: "14px 16px",
+                  padding: "16px",
                   color: "white",
-                  fontSize: "15px",
+                  fontSize: "16px",
                   outline: "none",
                   boxSizing: "border-box",
+                  minHeight: "52px",
                   transition: "border-color 0.2s",
                 }}
                 onFocus={(e) => e.target.style.borderColor = "rgba(220,38,38,0.6)"}
@@ -158,11 +160,12 @@ function LoginForm() {
                   background: "rgba(255,255,255,0.08)",
                   border: "1px solid rgba(255,255,255,0.12)",
                   borderRadius: "12px",
-                  padding: "14px 16px",
+                  padding: "16px",
                   color: "white",
-                  fontSize: "15px",
+                  fontSize: "16px",
                   outline: "none",
                   boxSizing: "border-box",
+                  minHeight: "52px",
                   transition: "border-color 0.2s",
                 }}
                 onFocus={(e) => e.target.style.borderColor = "rgba(220,38,38,0.6)"}
@@ -194,12 +197,14 @@ function LoginForm() {
                 borderRadius: "12px",
                 padding: "15px",
                 color: "white",
-                fontSize: "15px",
+                fontSize: "16px",
                 fontWeight: 600,
                 cursor: loading ? "not-allowed" : "pointer",
                 boxShadow: loading ? "none" : "0 4px 16px rgba(220,38,38,0.4)",
                 transition: "all 0.2s",
                 letterSpacing: "0.3px",
+                minHeight: "48px",
+                fontFamily: "'Archivo', sans-serif",
               }}
             >
               {loading ? "Entrando..." : "Entrar"}

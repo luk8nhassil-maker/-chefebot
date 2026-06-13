@@ -227,13 +227,14 @@ export default function PedidosPage() {
       } catch {}
     };
     ativarWakeLock();
-    document.addEventListener("visibilitychange", () => {
+    const handleVisibility = () => {
       if (document.visibilityState === "visible") ativarWakeLock();
-    });
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
 
     const intervalo = setInterval(carregarPedidos, 10000)
     const tick = setInterval(() => setNow(Date.now()), 1000)
-    return () => { if (wakeLock) wakeLock.release(); window.removeEventListener("beforeinstallprompt", handleInstall); clearInterval(intervalo); clearInterval(tick); if (piscarRef.current) clearInterval(piscarRef.current); if (somRepetidoRef.current) clearInterval(somRepetidoRef.current); document.title = tituloOriginalRef.current }
+    return () => { if (wakeLock) wakeLock.release(); document.removeEventListener("visibilitychange", handleVisibility); window.removeEventListener("beforeinstallprompt", handleInstall); clearInterval(intervalo); clearInterval(tick); if (piscarRef.current) clearInterval(piscarRef.current); if (somRepetidoRef.current) clearInterval(somRepetidoRef.current); document.title = tituloOriginalRef.current }
   }, [router])
 
   const alternarBot = async () => {

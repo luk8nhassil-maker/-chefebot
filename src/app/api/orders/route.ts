@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyToken } from '@/lib/auth'
 import { redis } from '@/lib/redis'
+import type { PedidoEntregador } from '@/types/entregador'
+
+const APP_BASE_URL = 'https://chefebot-pjif.vercel.app'
 
 type Status = 'novo' | 'em_preparo' | 'saiu_entrega' | 'entregue' | 'cancelado'
 type Pedido = {
@@ -115,23 +118,53 @@ export async function PATCH(req: NextRequest) {
   await redis.set('pedidos', pedidos)
   await notificarCliente(pedidos[index].telefone, status, pedidos[index].cliente)
 
-  // Notifica entregador no WhatsApp quando pedido sai para entrega
+  // Notifica entregador no WhatsApp quando pedido sai para entrega + salva no Redis + envia link de rastreamento ao cliente
   if (status === 'saiu_entrega' && entregador?.telefone) {
     const pedido = pedidos[index]
     const phone = entregador.telefone.replace(/\D/g, '')
     const phoneFormatado = phone.startsWith('55') ? phone : '55' + phone
-    const troco = (pedido as any).troco && (pedido as any).troco !== 'Sem troco' ? `\n💵 ${(pedido as any).troco}` : ''
-    const pagamento = (pedido as any).pagamento ? `\n💳 ${(pedido as any).pagamento}${troco}` : ''
+    const agora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' })
+
+    // Salva pedido na fila do entregador no Redis
+    const pedidoEntregador: PedidoEntregador = {
+      pedidoId: pedido.id,
+      entregadorId: entregador.id,
+      entregadorNome: entregador.nome,
+      entregadorTelefone: entregador.telefone,
+      clienteNome: pedido.cliente,
+      clienteTelefone: pedido.telefone,
+      endereco: pedido.endereco,
+      total: pedido.total,
+      itens: pedido.itens,
+      status: 'pendente',
+      horarioSaida: agora,
+    }
+    const filaMotoboy = await redis.get<PedidoEntregador[]>(`entregador:pedidos:${entregador.id}`) || []
+    const filtrado = filaMotoboy.filter(p => p.pedidoId !== pedido.id)
+    await redis.set(`entregador:pedidos:${entregador.id}`, [...filtrado, pedidoEntregador], { ex: 86400 })
+
     try {
+      // Mensagem para o motoboy com link da área do entregador
       await fetch(`${EVOLUTION_API_URL}/message/sendText/${EVOLUTION_INSTANCE}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'apikey': EVOLUTION_API_KEY },
         body: JSON.stringify({
           number: phoneFormatado,
-          text: `🛵 *Novo pedido pra você, ${entregador.nome}!*\n\n👤 Cliente: *${pedido.cliente}*\n📍 Endereço: *${pedido.endereco}*\n💰 Total: *R$ ${pedido.total.toFixed(2).replace('.', ',')}*${pagamento}\n\nResponda *1* quando entregar.`,
+          text: `🛵 *Novo pedido para entregar!*\n👤 Cliente: ${pedido.cliente}\n📍 Endereço: ${pedido.endereco}\n💰 Total: R$ ${pedido.total.toFixed(2).replace('.', ',')}\nAcesse: ${APP_BASE_URL}/entregador?id=${entregador.id}`,
         }),
       })
-      // Salva no Redis que entregador está aguardando confirmação deste pedido
+
+      // Mensagem para o cliente com link de rastreamento
+      const clientePhone = sanitizePhone(pedido.telefone)
+      await fetch(`${EVOLUTION_API_URL}/message/sendText/${EVOLUTION_INSTANCE}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'apikey': EVOLUTION_API_KEY },
+        body: JSON.stringify({
+          number: clientePhone,
+          text: `Seu pedido saiu! 🛵\nEntregador: *${entregador.nome}*\nAcompanhe: ${APP_BASE_URL}/rastrear/${pedido.id}`,
+        }),
+      })
+
       await redis.set(`entregador_aguardando:${phoneFormatado}`, pedido.id, { ex: 3 * 60 * 60 })
     } catch {}
   }
