@@ -445,7 +445,8 @@ export function processMessage(input: string, session: BotSession): BotResponse 
   const text = input.trim();
   const n = normalizar(text);
   // Detecta quantidade de pizzas: "2 pizzas", "duas pizzas familia", "quero 2", "duas"
-  if ((session.step === "size" || session.step === "category" || session.step === "add_more" || session.step === "name" || session.step === "flavor" || session.step === "border_escolha") && !session.pendingPizzas) {
+  const _stepsQtd = ["size", "category", "add_more", "name", "flavor", "border_escolha", "returning"];
+  if (_stepsQtd.includes(session.step) && !session.pendingPizzas) {
     const qtdMap: Record<string, number> = { "uma": 1, "um": 1, "duas": 2, "dois": 2, "tres": 3, "três": 3, "quatro": 4, "cinco": 5 };
     const qtdMatchComPizza = n.match(/(\d+|duas?|dois|tr[eê]s|quatro|cinco)\s+pizzas?/);
     // No step "size" (pizza já escolhida), aceita quantidade sem mencionar "pizza"
@@ -483,7 +484,7 @@ export function processMessage(input: string, session: BotSession): BotResponse 
         };
       }
       return {
-        messages: [`${qtd === 2 ? "Duas" : qtd} pizzas! 😋 Mesmo tamanho ou tamanhos diferentes?`],
+        messages: [`Ótimo! ${qtd === 2 ? "Duas" : qtd} pizzas! 😋 Qual o tamanho? Pode ser o mesmo pra todas ou tamanhos diferentes 👇\n\n${sizeList()}\n\nOu me diz "tamanhos diferentes" que monto uma por uma!\n\n_(Digite *voltar* para corrigir a etapa anterior)_`],
         session: resetaTentativas({ ...session, step: "pizza_tamanhos", currentCategory: "pizza", pendingPizzas: qtd, pizzaAtualIndex: 1 }),
       };
     }
@@ -514,7 +515,7 @@ export function processMessage(input: string, session: BotSession): BotResponse 
     }
   }
 
-  if (eVoltar(n) && !["welcome", "name", "returning", "category", "escalado", "done", "add_more"].includes(session.step)) {
+  if (eVoltar(n) && !["welcome", "name", "returning", "category", "escalado", "done"].includes(session.step)) {
     switch (session.step) {
       case "pizza_tamanhos":
         return { messages: [`Qual o tamanho das ${qtdPorExtenso(session.pendingPizzas ?? 2)} pizzas?\n\n${sizeList()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "size", pendingPizzaSizes: undefined }) };
@@ -557,6 +558,8 @@ export function processMessage(input: string, session: BotSession): BotResponse 
         return { messages: [`Que lanche vai ser?\n\n${listaLanches()}\n\nDigite o número ou o nome:`], session: resetaTentativas({ ...session, step: "lanche_escolha", currentLanche: undefined }) };
       case "lanche_macarronada_size":
         return { messages: [`Que lanche vai ser?\n\n${listaLanches()}\n\nDigite o número ou o nome:`], session: resetaTentativas({ ...session, step: "lanche_escolha", currentLanche: undefined }) };
+      case "add_more":
+        return { messages: [`Ok! Vamos tirar o último item e você escolhe de novo.\n\n${mensagemCategorias()}`], session: resetaTentativas({ ...session, step: "category", cart: session.cart.slice(0, -1) }) };
       default:
         return { messages: [mensagemCategorias()], session: resetaTentativas({ ...session, step: "category" }) };
     }
