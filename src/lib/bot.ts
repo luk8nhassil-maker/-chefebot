@@ -445,7 +445,7 @@ export function processMessage(input: string, session: BotSession): BotResponse 
   const text = input.trim();
   const n = normalizar(text);
   // Detecta quantidade de pizzas: "2 pizzas", "duas pizzas familia", "quero 2", "duas"
-  const _stepsQtd = ["size", "category", "add_more", "name", "flavor", "border_escolha", "returning"];
+  const _stepsQtd = ["category", "add_more", "name", "flavor", "border_escolha", "returning"];
   if (_stepsQtd.includes(session.step) && !session.pendingPizzas) {
     const qtdMap: Record<string, number> = { "uma": 1, "um": 1, "duas": 2, "dois": 2, "tres": 3, "três": 3, "quatro": 4, "cinco": 5 };
     const qtdMatchComPizza = n.match(/(\d+|duas?|dois|tr[eê]s|quatro|cinco)\s+pizzas?/);
