@@ -1,5 +1,5 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
-import { processMessage, createInitialSession, createReturningSession, BotSession, ClienteHistorico, setMenuDinamico } from "@/lib/bot";
+import { processMessage, createInitialSession, createReturningSession, BotSession, ClienteHistorico, setMenuDinamico, setConfigDinamica } from "@/lib/bot";
 import { getMENUDinamico } from "@/lib/menu";
 import { redis } from "@/lib/redis";
 import { interpretarMensagem } from "@/lib/claude";
@@ -31,6 +31,8 @@ type ConfigPizzaria = {
   chavePix: string;
   nomeTitularPix: string;
   limitePico: number;
+  tempoEntregaDelivery?: string;
+  tempoEntregaRetirada?: string;
 };
 
 const CONFIG_PADRAO: ConfigPizzaria = {
@@ -40,6 +42,8 @@ const CONFIG_PADRAO: ConfigPizzaria = {
   chavePix: "",
   nomeTitularPix: "",
   limitePico: 0,
+  tempoEntregaDelivery: "40-60 minutos",
+  tempoEntregaRetirada: "20-30 minutos",
 };
 
 async function getConfig(): Promise<ConfigPizzaria> {
@@ -106,7 +110,7 @@ function getOpcoesPorStep(step: string): string[] {
   return opcoes[step] || [];
 }
 
-async function salvarPedido(session: BotSession, phone: string, config: ConfigPizzaria): Promise<string> {
+async function salvarPedido(session: BotSession, phone: string, _config: ConfigPizzaria): Promise<string> {
   const pedidos = (await redis.get<Pedido[]>("pedidos")) || [];
   const itens = session.cart.map((item) => {
     const border = item.border && item.border !== "Sem borda" ? ` + ${item.border}` : "";
@@ -182,7 +186,7 @@ async function salvarEscalonamento(phone: string, session: BotSession) {
   await redis.set("pedidos", [...pedidos, novoPedido]);
 }
 
-async function salvarCancelamentoSolicitado(phone: string, session: BotSession, pedidoId: string) {
+async function salvarCancelamentoSolicitado(_phone: string, _session: BotSession, pedidoId: string) {
   const pedidos = (await redis.get<Pedido[]>("pedidos")) || [];
   const index = pedidos.findIndex(p => p.id === pedidoId);
   if (index === -1) return;
@@ -280,7 +284,7 @@ Responda APENAS em JSON:
       const pedidosAtualizados = pedidos.map(p => p.id === pedidoAtivo!.id ? { ...p, pixConfirmado: true } : p);
       await redis.set("pedidos", pedidosAtualizados);
       const firstName = pedidoAtivo.cliente.split(" ")[0];
-      const timeMsg = pedidoAtivo.tipoEntrega === "pickup" ? "20-30 minutos" : "40-60 minutos";
+      const timeMsg = pedidoAtivo.tipoEntrega === "pickup" ? config.tempoEntregaRetirada : config.tempoEntregaDelivery;
       await enviarMensagem(phone, `Pagamento confirmado! ✅🎉
 
 Obrigado, *${firstName}*! Seu pedido já foi pra cozinha. Sua pizza chega em *${timeMsg}* 🛵
@@ -373,7 +377,7 @@ async function processarComprovante(phone: string, data: any, config: ConfigPizz
       const pedidosAtualizados = pedidos.map(p => p.id === pedidoAtivo.id ? { ...p, pixConfirmado: true } : p);
       await redis.set("pedidos", pedidosAtualizados);
       const firstName = pedidoAtivo.cliente.split(" ")[0];
-      const timeMsg = pedidoAtivo.tipoEntrega === "pickup" ? "20-30 minutos" : "40-60 minutos";
+      const timeMsg = pedidoAtivo.tipoEntrega === "pickup" ? config.tempoEntregaRetirada : config.tempoEntregaDelivery;
       await enviarMensagem(phone, `Pagamento confirmado! ✅🎉\n\nObrigado, *${firstName}*! Seu pedido já foi pra cozinha. Sua pizza chega em *${timeMsg}* 🛵\n\nQualquer dúvida é só chamar. Bom apetite! 🍕`);
       await redis.set(chaveHash, true, { ex: 30 * 24 * 60 * 60 }) // 30 dias
       await log("info", `Pix confirmado automaticamente para ${firstName}`, `Valor: R$ ${resultado.valorEncontrado}`);
@@ -408,6 +412,7 @@ export async function POST(req: NextRequest) {
     const config = await getConfig();
     const menuDinamico = await getMENUDinamico();
     setMenuDinamico(menuDinamico);
+    setConfigDinamica({ tempoEntregaDelivery: config.tempoEntregaDelivery, tempoEntregaRetirada: config.tempoEntregaRetirada });
     console.log("[ChefeBot] Tamanhos carregados:", JSON.stringify(menuDinamico.sizes));
 
     
@@ -468,7 +473,6 @@ export async function POST(req: NextRequest) {
             if (transcricao) {
               await enviarMensagem(phone, `🎤 _"${transcricao}"_`)
               // Processa o texto transcrito como se o cliente tivesse digitado
-              const fakeData = { ...data, message: { conversation: transcricao } }
               // Continua o fluxo normalmente com o texto transcrito
               const sessionKey = `session:${phone}`
               const currentSession = await redis.get<BotSession>(sessionKey)
@@ -655,7 +659,6 @@ export async function POST(req: NextRequest) {
     // Cliente em aguardando_pix mandou texto (nao imagem) — lembra de enviar comprovante
     if (currentSession.step === "aguardando_pix") {
       const pixIniciadoEm = (currentSession as any).pixIniciadoEm || Date.now();
-      const minutos = Math.floor((Date.now() - pixIniciadoEm) / 60000);
       const cobrancas = (currentSession as any).pixCobrancas || 0;
       await enviarMensagem(phone, `Para confirmar seu pedido, preciso do comprovante do Pix! 📄\n\nSó enviar a imagem ou PDF aqui no chat. 😊`);
       await redis.set(sessionKey, { ...currentSession, pixIniciadoEm, pixCobrancas: cobrancas + 1 }, { ex: 1800 });

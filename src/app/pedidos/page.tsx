@@ -96,7 +96,7 @@ export default function PedidosPage() {
   const [botAtivo, setBotAtivo] = useState(true)
   const [salvandoBot, setSalvandoBot] = useState(false)
   const [atualizando, setAtualizando] = useState<string | null>(null)
-  const [manuais, setManuais] = useState<Record<string, boolean>>({})
+  const [_manuais, setManuais] = useState<Record<string, boolean>>({})
   const [detailId, setDetailId] = useState<string | null>(null)
   const [cardUrgenciaFechado, setCardUrgenciaFechado] = useState(false)
   const [toast, setToast] = useState<{ text: string; expires: number; pedidoId: string; prevStatus: Status } | null>(null)
