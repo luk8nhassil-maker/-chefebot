@@ -21,6 +21,14 @@ function LoginForm() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [visible, setVisible] = useState(false);
+  const [userFocus, setUserFocus] = useState(false);
+  const [passFocus, setPassFocus] = useState(false);
+
+  useEffect(() => {
+    const t = setTimeout(() => setVisible(true), 60);
+    return () => clearTimeout(t);
+  }, []);
 
   useEffect(() => {
     const match = document.cookie.match(/(?:^|;\s*)auth-user=([^;]+)/);
@@ -65,161 +73,278 @@ function LoginForm() {
     }
   }
 
-  return (
-    <div style={{
-      minHeight: "100svh",
-      background: "linear-gradient(135deg, #1a0a00 0%, #2d1200 40%, #1a0505 100%)",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      padding: "calc(env(safe-area-inset-top) + 24px) 24px calc(env(safe-area-inset-bottom) + 24px)",
-      fontFamily: "'Archivo', sans-serif",
-      overflowX: "hidden",
-    }}>
-      <div style={{
-        position: "fixed",
-        inset: 0,
-        backgroundImage: "radial-gradient(circle at 20% 50%, rgba(220,38,38,0.08) 0%, transparent 50%), radial-gradient(circle at 80% 20%, rgba(251,146,60,0.06) 0%, transparent 50%)",
-        pointerEvents: "none",
-      }} />
+  const inputStyle = (focused: boolean): React.CSSProperties => ({
+    width: "100%",
+    background: "#0a0a0a",
+    border: `1.5px solid ${focused ? "#ff6b00" : "#222"}`,
+    borderRadius: 14,
+    padding: "0 16px",
+    color: "#f4f1ec",
+    fontSize: 16,
+    outline: "none",
+    boxSizing: "border-box",
+    minHeight: 52,
+    height: 52,
+    fontFamily: "'Archivo', sans-serif",
+    transition: "border-color 0.18s, box-shadow 0.18s",
+    WebkitAppearance: "none",
+    boxShadow: focused ? "0 0 0 3px rgba(255,107,0,0.15)" : "none",
+    display: "block",
+  });
 
-      <div style={{ width: "100%", maxWidth: "375px", position: "relative" }}>
-        <div style={{ textAlign: "center", marginBottom: "40px" }}>
-          <div style={{
-            width: "72px",
-            height: "72px",
-            background: "linear-gradient(135deg, #dc2626, #ea580c)",
-            borderRadius: "20px",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontSize: "36px",
-            margin: "0 auto 16px",
-            boxShadow: "0 8px 32px rgba(220,38,38,0.4)",
-          }}>
-            🍕
+  return (
+    <>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;700;900&display=swap');
+
+        *, *::before, *::after { box-sizing: border-box; }
+
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(24px) scale(0.98); }
+          to   { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        @keyframes logoIn {
+          from { opacity: 0; transform: scale(0.7) rotate(-8deg); }
+          to   { opacity: 1; transform: scale(1) rotate(0deg); }
+        }
+        @keyframes glowPulse {
+          0%, 100% { box-shadow: 0 0 48px rgba(255,107,0,0.35), 0 8px 32px rgba(255,107,0,0.25); }
+          50%       { box-shadow: 0 0 72px rgba(255,107,0,0.55), 0 12px 40px rgba(255,107,0,0.35); }
+        }
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+        @keyframes shimmer {
+          0%   { background-position: -200% center; }
+          100% { background-position: 200% center; }
+        }
+
+        input::placeholder { color: #333; }
+        input:-webkit-autofill,
+        input:-webkit-autofill:focus {
+          -webkit-box-shadow: 0 0 0 1000px #0a0a0a inset !important;
+          -webkit-text-fill-color: #f4f1ec !important;
+          caret-color: #f4f1ec;
+        }
+        button:active:not(:disabled) {
+          transform: scale(0.98);
+        }
+      `}</style>
+
+      <div style={{
+        minHeight: "100svh",
+        background: "#050505",
+        backgroundImage: "radial-gradient(ellipse 80% 50% at 50% -10%, rgba(255,107,0,0.08) 0%, transparent 70%)",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: `calc(env(safe-area-inset-top) + 40px) 24px calc(env(safe-area-inset-bottom) + 40px)`,
+        fontFamily: "'Archivo', sans-serif",
+        overflowX: "hidden",
+      }}>
+
+        {/* Container principal */}
+        <div style={{
+          width: "100%",
+          maxWidth: 380,
+          opacity: visible ? 1 : 0,
+          animation: visible ? "fadeIn 0.5s cubic-bezier(0.22,1,0.36,1) forwards" : "none",
+        }}>
+
+          {/* Marca */}
+          <div style={{ textAlign: "center", marginBottom: 44 }}>
+            <div style={{
+              width: 96,
+              height: 96,
+              background: "linear-gradient(145deg, #ff7a1a, #ff5500)",
+              borderRadius: 28,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: 48,
+              margin: "0 auto 24px",
+              animation: visible ? "logoIn 0.55s cubic-bezier(0.34,1.56,0.64,1) 0.1s both, glowPulse 3s ease-in-out 1s infinite" : "none",
+              flexShrink: 0,
+              lineHeight: 1,
+              userSelect: "none",
+            }}>
+              🍕
+            </div>
+
+            <h1 style={{
+              color: "#f4f1ec",
+              fontSize: 38,
+              fontWeight: 900,
+              margin: "0 0 10px",
+              letterSpacing: -1.5,
+              fontFamily: "'Archivo', sans-serif",
+              lineHeight: 1,
+            }}>
+              ChefeBot
+            </h1>
+
+            <p style={{
+              color: "#6b6259",
+              fontSize: 15,
+              margin: 0,
+              fontWeight: 500,
+              letterSpacing: 0.2,
+              fontFamily: "'Archivo', sans-serif",
+            }}>
+              Seu restaurante no WhatsApp
+            </p>
           </div>
-          <h1 style={{ color: "white", fontSize: "28px", fontWeight: 700, margin: "0 0 4px", letterSpacing: "-0.5px" }}>
-            ChefeBot
-          </h1>
-          <p style={{ color: "rgba(255,255,255,0.4)", fontSize: "13px", margin: 0 }}>
-            Sua pizzaria está esperando por você.
+
+          {/* Card */}
+          <div style={{
+            background: "#0e0e0e",
+            border: "1px solid #1c1c1c",
+            borderRadius: 22,
+            padding: "28px 24px",
+            boxShadow: "0 24px 64px rgba(0,0,0,0.6), 0 1px 0 rgba(255,255,255,0.03) inset",
+          }}>
+            <form onSubmit={handleSubmit} noValidate>
+
+              {/* Campo Usuário */}
+              <div style={{ marginBottom: 14 }}>
+                <label style={{
+                  display: "block",
+                  color: "#5a5450",
+                  fontSize: 11,
+                  fontWeight: 700,
+                  marginBottom: 8,
+                  letterSpacing: 1,
+                  textTransform: "uppercase",
+                  fontFamily: "'Archivo', sans-serif",
+                }}>
+                  Usuário
+                </label>
+                <input
+                  type="text"
+                  value={username}
+                  onChange={e => setUsername(e.target.value)}
+                  placeholder="seu usuário"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  autoComplete="username"
+                  spellCheck={false}
+                  required
+                  style={inputStyle(userFocus)}
+                  onFocus={() => setUserFocus(true)}
+                  onBlur={() => setUserFocus(false)}
+                />
+              </div>
+
+              {/* Campo Senha */}
+              <div style={{ marginBottom: 24 }}>
+                <label style={{
+                  display: "block",
+                  color: "#5a5450",
+                  fontSize: 11,
+                  fontWeight: 700,
+                  marginBottom: 8,
+                  letterSpacing: 1,
+                  textTransform: "uppercase",
+                  fontFamily: "'Archivo', sans-serif",
+                }}>
+                  Senha
+                </label>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  autoComplete="current-password"
+                  required
+                  style={inputStyle(passFocus)}
+                  onFocus={() => setPassFocus(true)}
+                  onBlur={() => setPassFocus(false)}
+                />
+              </div>
+
+              {/* Erro */}
+              {error && (
+                <div style={{
+                  background: "rgba(220,38,38,0.08)",
+                  border: "1px solid rgba(248,113,113,0.18)",
+                  borderRadius: 12,
+                  padding: "12px 16px",
+                  color: "#f87171",
+                  fontSize: 13,
+                  fontWeight: 500,
+                  marginBottom: 18,
+                  lineHeight: 1.45,
+                  fontFamily: "'Archivo', sans-serif",
+                }}>
+                  {error}
+                </div>
+              )}
+
+              {/* Botão */}
+              <button
+                type="submit"
+                disabled={loading}
+                style={{
+                  width: "100%",
+                  height: 56,
+                  background: loading
+                    ? "#1a1008"
+                    : "linear-gradient(135deg, #ff7a1a 0%, #ff5500 100%)",
+                  border: "none",
+                  borderRadius: 16,
+                  color: loading ? "#ff6b0050" : "#fff",
+                  fontSize: 16,
+                  fontWeight: 800,
+                  cursor: loading ? "not-allowed" : "pointer",
+                  fontFamily: "'Archivo', sans-serif",
+                  letterSpacing: -0.3,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 10,
+                  transition: "opacity 0.2s, transform 0.15s, box-shadow 0.2s",
+                  boxShadow: loading ? "none" : "0 6px 28px rgba(255,107,0,0.38), 0 2px 8px rgba(255,107,0,0.2)",
+                  WebkitTapHighlightColor: "transparent",
+                  opacity: loading ? 0.7 : 1,
+                }}
+              >
+                {loading ? (
+                  <>
+                    <span style={{
+                      width: 18,
+                      height: 18,
+                      border: "2.5px solid rgba(255,107,0,0.25)",
+                      borderTopColor: "#ff6b00",
+                      borderRadius: "50%",
+                      display: "inline-block",
+                      animation: "spin 0.6s linear infinite",
+                      flexShrink: 0,
+                    }} />
+                    Entrando...
+                  </>
+                ) : "Entrar"}
+              </button>
+            </form>
+          </div>
+
+          {/* Rodapé */}
+          <p style={{
+            textAlign: "center",
+            color: "#2a2826",
+            fontSize: 12,
+            marginTop: 28,
+            lineHeight: 1.6,
+            fontFamily: "'Archivo', sans-serif",
+          }}>
+            Simulador público —{" "}
+            <a href="/simulador" style={{ color: "#4a4640", textDecoration: "none" }}>
+              acessar sem login
+            </a>
           </p>
         </div>
-
-        <div style={{
-          background: "rgba(255,255,255,0.05)",
-          backdropFilter: "blur(20px)",
-          border: "1px solid rgba(255,255,255,0.1)",
-          borderRadius: "24px",
-          padding: "32px",
-        }}>
-          <form onSubmit={handleSubmit}>
-            <div style={{ marginBottom: "16px" }}>
-              <label style={{ display: "block", color: "rgba(255,255,255,0.6)", fontSize: "12px", fontWeight: 500, marginBottom: "8px", letterSpacing: "0.5px", textTransform: "uppercase" }}>
-                Usuário
-              </label>
-              <input
-                type="text"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="seu usuário"
-                autoCapitalize="none"
-                autoCorrect="off"
-                required
-                style={{
-                  width: "100%",
-                  background: "rgba(255,255,255,0.08)",
-                  border: "1px solid rgba(255,255,255,0.12)",
-                  borderRadius: "12px",
-                  padding: "16px",
-                  color: "white",
-                  fontSize: "16px",
-                  outline: "none",
-                  boxSizing: "border-box",
-                  minHeight: "52px",
-                  transition: "border-color 0.2s",
-                }}
-                onFocus={(e) => e.target.style.borderColor = "rgba(220,38,38,0.6)"}
-                onBlur={(e) => e.target.style.borderColor = "rgba(255,255,255,0.12)"}
-              />
-            </div>
-
-            <div style={{ marginBottom: "24px" }}>
-              <label style={{ display: "block", color: "rgba(255,255,255,0.6)", fontSize: "12px", fontWeight: 500, marginBottom: "8px", letterSpacing: "0.5px", textTransform: "uppercase" }}>
-                Senha
-              </label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                required
-                style={{
-                  width: "100%",
-                  background: "rgba(255,255,255,0.08)",
-                  border: "1px solid rgba(255,255,255,0.12)",
-                  borderRadius: "12px",
-                  padding: "16px",
-                  color: "white",
-                  fontSize: "16px",
-                  outline: "none",
-                  boxSizing: "border-box",
-                  minHeight: "52px",
-                  transition: "border-color 0.2s",
-                }}
-                onFocus={(e) => e.target.style.borderColor = "rgba(220,38,38,0.6)"}
-                onBlur={(e) => e.target.style.borderColor = "rgba(255,255,255,0.12)"}
-              />
-            </div>
-
-            {error && (
-              <div style={{
-                background: "rgba(220,38,38,0.15)",
-                border: "1px solid rgba(220,38,38,0.3)",
-                borderRadius: "12px",
-                padding: "12px 16px",
-                color: "#fca5a5",
-                fontSize: "13px",
-                marginBottom: "16px",
-              }}>
-                {error}
-              </div>
-            )}
-
-            <button
-              type="submit"
-              disabled={loading}
-              style={{
-                width: "100%",
-                background: loading ? "rgba(220,38,38,0.4)" : "linear-gradient(135deg, #dc2626, #b91c1c)",
-                border: "none",
-                borderRadius: "12px",
-                padding: "15px",
-                color: "white",
-                fontSize: "16px",
-                fontWeight: 600,
-                cursor: loading ? "not-allowed" : "pointer",
-                boxShadow: loading ? "none" : "0 4px 16px rgba(220,38,38,0.4)",
-                transition: "all 0.2s",
-                letterSpacing: "0.3px",
-                minHeight: "48px",
-                fontFamily: "'Archivo', sans-serif",
-              }}
-            >
-              {loading ? "Entrando..." : "Entrar"}
-            </button>
-          </form>
-        </div>
-
-        <p style={{ textAlign: "center", color: "rgba(255,255,255,0.3)", fontSize: "12px", marginTop: "24px" }}>
-          O simulador é público e não exige login.{" "}
-          <a href="/simulador" style={{ color: "rgba(251,146,60,0.8)", textDecoration: "none" }}>
-            Acessar simulador
-          </a>
-        </p>
       </div>
-    </div>
+    </>
   );
 }
 
