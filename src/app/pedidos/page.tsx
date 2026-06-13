@@ -161,12 +161,39 @@ export default function PedidosPage() {
   useEffect(() => {
     const user = getUserInfo()
     if (user) { setIsAdmin(user.role === "admin" || user.role === "dev"); setUserName(user.name || "Kellyne") }
-    if ("Notification" in window && Notification.permission === "default") Notification.requestPermission()
+    // Solicita notificação de forma forçada com explicação
+    const solicitarNotificacao = async () => {
+      if (!("Notification" in window)) return;
+      if (Notification.permission === "default") {
+        const perm = await Notification.requestPermission();
+        if (perm === "granted") {
+          new Notification("ChefeBot ativado! 🍕", {
+            body: "Você vai receber alertas de novos pedidos.",
+            icon: "/icon-192.png",
+          });
+        }
+      }
+    };
+    solicitarNotificacao();
     carregarPedidos(); carregarStatusBot()
     fetch("/api/entregadores").then(r => r.json()).then(d => setEntregadores(Array.isArray(d) ? d.filter((e: any) => e.ativo) : [])).catch(() => {})
+    // Wake Lock — mantém tela acesa
+    let wakeLock: any = null;
+    const ativarWakeLock = async () => {
+      try {
+        if ("wakeLock" in navigator) {
+          wakeLock = await (navigator as any).wakeLock.request("screen");
+        }
+      } catch {}
+    };
+    ativarWakeLock();
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") ativarWakeLock();
+    });
+
     const intervalo = setInterval(carregarPedidos, 10000)
     const tick = setInterval(() => setNow(Date.now()), 1000)
-    return () => { clearInterval(intervalo); clearInterval(tick); if (piscarRef.current) clearInterval(piscarRef.current); if (somRepetidoRef.current) clearInterval(somRepetidoRef.current); document.title = tituloOriginalRef.current }
+    return () => { if (wakeLock) wakeLock.release(); clearInterval(intervalo); clearInterval(tick); if (piscarRef.current) clearInterval(piscarRef.current); if (somRepetidoRef.current) clearInterval(somRepetidoRef.current); document.title = tituloOriginalRef.current }
   }, [router])
 
   const alternarBot = async () => {
