@@ -97,10 +97,10 @@ function calcularGraficoPico(pedidos: Pedido[]) {
   return resultado
 }
 
-const inp = { width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 10, padding: '11px 14px', color: '#fff', fontSize: 14, outline: 'none', boxSizing: 'border-box' as const }
-const btn = (active: boolean) => ({ padding: '10px 0', borderRadius: 10, border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: 13, background: active ? '#ff6b00' : '#1a1a1a', color: active ? '#fff' : '#555' })
-const card = { background: '#111', border: '1px solid #1e1e1e', borderRadius: 14, padding: 16 }
-const sectionTitle = { color: '#555', fontSize: 11, fontWeight: 700, textTransform: 'uppercase' as const, letterSpacing: 0.5, marginBottom: 12 }
+const inp = { width: '100%', background: '#101010', border: '1px solid #1f1d1a', borderRadius: 10, padding: '14px', color: '#f4f1ec', fontSize: 16, outline: 'none', boxSizing: 'border-box' as const, minHeight: 52, fontFamily: "'Archivo', sans-serif" }
+const btn = (active: boolean) => ({ padding: '10px 0', minHeight: 48, borderRadius: 10, border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: 13, background: active ? '#ff6b00' : '#101010', color: active ? '#fff' : '#a39b8b', fontFamily: "'Archivo', sans-serif" })
+const card = { background: '#101010', border: '1px solid #1f1d1a', borderRadius: 14, padding: 16 }
+const sectionTitle = { color: '#a39b8b', fontSize: 11, fontWeight: 700, textTransform: 'uppercase' as const, letterSpacing: 0.5, marginBottom: 12 }
 
 const CATEGORIAS_FIN = [
   { key: 'ingredientes', label: 'Ingredientes', cor: '#f97316' },
@@ -227,10 +227,10 @@ export default function AdminPage() {
   const faturamento = pedidosEntregues.reduce((s, p) => s + (Number(p.total) || 0), 0)
   const totalEntregues = pedidosEntregues.length
   const ticketMedio = totalEntregues > 0 ? faturamento / totalEntregues : 0
-  const telefonesTotal = pedidosEntregues.reduce((acc: Record<string, number>, p) => { acc[p.telefone] = (acc[p.telefone] || 0) + 1; return acc }, {})
-  const recorrentes = Object.values(telefonesTotal).filter(v => v > 1).length
   const graficoPico = calcularGraficoPico(pedidosFiltrados)
   const maxPico = graficoPico.length > 0 ? Math.max(...graficoPico.map(g => g.total)) : 1
+  const statusCounts = pedidosFiltrados.reduce((acc: Record<string, number>, p) => { acc[p.status] = (acc[p.status] || 0) + 1; return acc }, {})
+  const emAndamento = (statusCounts['pendente'] || 0) + (statusCounts['em preparo'] || 0) + (statusCounts['saiu para entrega'] || 0)
 
   const salvarConfig = async () => {
     setSalvando(true)
@@ -301,21 +301,21 @@ export default function AdminPage() {
   }
 
   if (loading) return (
-    <div style={{ minHeight: '100vh', background: '#080808', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <p style={{ color: '#333', fontSize: 14 }}>Carregando...</p>
+    <div style={{ minHeight: '100svh', background: '#060606', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: "'Archivo', sans-serif" }}>
+      <p style={{ color: '#a39b8b', fontSize: 14 }}>Carregando...</p>
     </div>
   )
   return (
-    <div style={{ minHeight: '100vh', background: '#080808', fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", paddingBottom: 80 }}>
+    <div style={{ minHeight: '100svh', background: '#060606', fontFamily: "'Archivo', sans-serif", paddingBottom: 'calc(env(safe-area-inset-bottom) + 80px)', overflowX: 'hidden' }}>
       <style>{`@keyframes slideUp { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } } input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(1); }`}</style>
 
       {/* Header */}
-      <div style={{ background: '#0d0d0d', borderBottom: '1px solid #161616', padding: '14px 16px', position: 'sticky', top: 0, zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{ width: 36, height: 36, borderRadius: 10, background: '#ff6b00', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>🍕</div>
-          <div>
-            <p style={{ color: '#fff', fontSize: 15, fontWeight: 700, margin: 0, letterSpacing: -0.3 }}>ChefeBot</p>
-            <p style={{ color: '#444', fontSize: 10, margin: 0 }}>Ola, {nomeUsuario}</p>
+      <div style={{ background: '#0a0a0a', borderBottom: '1px solid #1f1d1a', padding: '18px 16px', paddingTop: 'calc(env(safe-area-inset-top) + 18px)', position: 'sticky', top: 0, zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: 1 }}>
+          <div style={{ width: 36, height: 36, borderRadius: 10, background: '#ff6b00', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0 }}>🍕</div>
+          <div style={{ minWidth: 0 }}>
+            <p style={{ color: '#f4f1ec', fontSize: 15, fontWeight: 700, margin: 0, letterSpacing: -0.3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>ChefeBot</p>
+            <p style={{ color: '#a39b8b', fontSize: 10, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Olá, {nomeUsuario}</p>
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
@@ -331,11 +331,12 @@ export default function AdminPage() {
         </div>
       )}
 
-      <div style={{ padding: '16px 16px 0' }}>
+      <div style={{ padding: '16px 16px 0', maxWidth: 375, margin: '0 auto', width: '100%' }}>
 
         {/* ABA DASHBOARD */}
         {aba === 'dashboard' && (
           <div>
+            {/* Filtro de período */}
             <div style={{ display: 'flex', gap: 6, marginBottom: 16 }}>
               {(['ontem', 'hoje', 'semana'] as Periodo[]).map(p => (
                 <button key={p} onClick={() => { setPeriodo(p); setShowPeriodo(false) }} style={{ ...btn(periodo === p), flex: 1 }}>
@@ -350,100 +351,151 @@ export default function AdminPage() {
                 <p style={sectionTitle}>Periodo personalizado</p>
                 <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
                   <div style={{ flex: 1 }}>
-                    <label style={{ color: '#555', fontSize: 11, display: 'block', marginBottom: 4 }}>De</label>
+                    <label style={{ color: '#a39b8b', fontSize: 11, display: 'block', marginBottom: 4 }}>De</label>
                     <input type="date" value={dataInicio} onChange={e => setDataInicio(e.target.value)} style={inp} />
                   </div>
                   <div style={{ flex: 1 }}>
-                    <label style={{ color: '#555', fontSize: 11, display: 'block', marginBottom: 4 }}>Ate</label>
+                    <label style={{ color: '#a39b8b', fontSize: 11, display: 'block', marginBottom: 4 }}>Ate</label>
                     <input type="date" value={dataFim} onChange={e => setDataFim(e.target.value)} style={inp} />
                   </div>
                 </div>
-                <button onClick={() => { if (dataInicio && dataFim) { setPeriodo('personalizado'); setShowPeriodo(false) } }} style={{ width: '100%', background: '#ff6b00', border: 'none', borderRadius: 10, padding: '11px', color: '#fff', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>Aplicar</button>
+                <button onClick={() => { if (dataInicio && dataFim) { setPeriodo('personalizado'); setShowPeriodo(false) } }} style={{ width: '100%', background: '#ff6b00', border: 'none', borderRadius: 10, padding: '14px', color: '#fff', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>Aplicar</button>
               </div>
             )}
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16 }}>
-              <div style={card}>
-                <p style={{ color: '#555', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 6px', letterSpacing: 0.5 }}>Faturamento</p>
-                <p style={{ color: '#4ade80', fontSize: 22, fontWeight: 800, margin: 0, letterSpacing: -0.5 }}>R$ {faturamento.toFixed(2).replace('.', ',')}</p>
-                <p style={{ color: '#333', fontSize: 10, margin: '4px 0 0' }}>{totalEntregues} entregues</p>
+            {/* 4 métricas principais */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+              <div style={{ ...card, background: 'linear-gradient(135deg, #101010, #0d0d0d)' }}>
+                <p style={{ color: '#a39b8b', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 6px', letterSpacing: 0.5 }}>Pedidos</p>
+                <p style={{ color: '#f4f1ec', fontSize: 30, fontWeight: 900, margin: 0, letterSpacing: -1, lineHeight: 1 }}>{pedidosFiltrados.length}</p>
+                <p style={{ color: emAndamento > 0 ? '#ff6b00' : '#444', fontSize: 10, margin: '6px 0 0', fontWeight: emAndamento > 0 ? 700 : 400 }}>{emAndamento > 0 ? `${emAndamento} em andamento` : 'nenhum em andamento'}</p>
               </div>
-              <div style={card}>
-                <p style={{ color: '#555', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 6px', letterSpacing: 0.5 }}>Ticket medio</p>
-                <p style={{ color: '#fbbf24', fontSize: 22, fontWeight: 800, margin: 0, letterSpacing: -0.5 }}>R$ {ticketMedio.toFixed(2).replace('.', ',')}</p>
-                <p style={{ color: '#333', fontSize: 10, margin: '4px 0 0' }}>por pedido</p>
+              <div style={{ ...card, background: 'linear-gradient(135deg, #101010, #0d0d0d)' }}>
+                <p style={{ color: '#a39b8b', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 6px', letterSpacing: 0.5 }}>Faturamento</p>
+                <p style={{ color: '#4ade80', fontSize: faturamento >= 1000 ? 18 : 22, fontWeight: 800, margin: 0, letterSpacing: -0.5, lineHeight: 1 }}>R${faturamento.toFixed(2).replace('.', ',')}</p>
+                <p style={{ color: '#444', fontSize: 10, margin: '6px 0 0' }}>{totalEntregues} entregues</p>
               </div>
-              <div style={card}>
-                <p style={{ color: '#555', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 6px', letterSpacing: 0.5 }}>Clientes</p>
-                <p style={{ color: '#fff', fontSize: 22, fontWeight: 800, margin: 0, letterSpacing: -0.5 }}>{Object.keys(telefonesTotal).length}</p>
-                <p style={{ color: '#333', fontSize: 10, margin: '4px 0 0' }}>{recorrentes} retornaram</p>
+              <div style={{ ...card, background: 'linear-gradient(135deg, #101010, #0d0d0d)' }}>
+                <p style={{ color: '#a39b8b', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 6px', letterSpacing: 0.5 }}>Ticket medio</p>
+                <p style={{ color: '#fbbf24', fontSize: 22, fontWeight: 800, margin: 0, letterSpacing: -0.5, lineHeight: 1 }}>R${ticketMedio.toFixed(2).replace('.', ',')}</p>
+                <p style={{ color: '#444', fontSize: 10, margin: '6px 0 0' }}>por pedido</p>
               </div>
-              <div style={card}>
-                <p style={{ color: '#555', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 6px', letterSpacing: 0.5 }}>Avaliacao</p>
-                <p style={{ color: '#fbbf24', fontSize: 22, fontWeight: 800, margin: 0, letterSpacing: -0.5 }}>{avaliacoes.media > 0 ? avaliacoes.media.toFixed(1) : '—'} ★</p>
-                <p style={{ color: '#333', fontSize: 10, margin: '4px 0 0' }}>{avaliacoes.total} avaliacoes</p>
+              <div style={{ ...card, background: 'linear-gradient(135deg, #101010, #0d0d0d)' }}>
+                <p style={{ color: '#a39b8b', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 6px', letterSpacing: 0.5 }}>Avaliacao</p>
+                <p style={{ color: '#fbbf24', fontSize: 22, fontWeight: 800, margin: 0, letterSpacing: -0.5, lineHeight: 1 }}>{avaliacoes.media > 0 ? avaliacoes.media.toFixed(1) : '—'} ★</p>
+                <p style={{ color: '#444', fontSize: 10, margin: '6px 0 0' }}>{avaliacoes.total} avaliacoes</p>
               </div>
             </div>
 
+            {/* Breakdown por status */}
+            {pedidosFiltrados.length > 0 && (
+              <div style={{ ...card, marginBottom: 16 }}>
+                <p style={sectionTitle}>Pedidos por status</p>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  {[
+                    { key: 'pendente', label: 'Pendente', color: '#f97316' },
+                    { key: 'em preparo', label: 'Em preparo', color: '#3b82f6' },
+                    { key: 'saiu para entrega', label: 'A caminho', color: '#8b5cf6' },
+                    { key: 'entregue', label: 'Entregue', color: '#4ade80' },
+                  ].map(({ key, label, color }) => (
+                    <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#0a0a0a', borderRadius: 20, padding: '7px 12px', border: `1px solid ${statusCounts[key] ? color + '30' : '#1f1d1a'}` }}>
+                      <div style={{ width: 7, height: 7, borderRadius: '50%', background: statusCounts[key] ? color : '#2a2a2a', flexShrink: 0 }} />
+                      <span style={{ color: '#a39b8b', fontSize: 11 }}>{label}</span>
+                      <span style={{ color: statusCounts[key] ? '#f4f1ec' : '#444', fontSize: 13, fontWeight: 800 }}>{statusCounts[key] || 0}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Gráfico de vendas por hora */}
             {graficoPico.length > 0 && (
               <div style={{ ...card, marginBottom: 16 }}>
-                <p style={sectionTitle}>Horario de pico</p>
-                <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 80 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+                  <p style={{ ...sectionTitle, margin: 0 }}>Vendas por hora</p>
+                  <span style={{ color: '#ff6b00', fontSize: 11, fontWeight: 700 }}>pico {graficoPico.find(g => g.total === maxPico)?.hora}</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 100 }}>
                   {graficoPico.map((item, i) => {
                     const altura = maxPico > 0 ? Math.max((item.total / maxPico) * 100, 4) : 4
                     const isPico = item.total === maxPico && maxPico > 0
                     return (
-                      <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-                        {item.total > 0 && <p style={{ color: isPico ? '#ff6b00' : '#555', fontSize: 7, margin: 0, fontWeight: isPico ? 900 : 400 }}>{item.total}</p>}
-                        <div style={{ width: '100%', height: `${altura}%`, background: isPico ? '#ff6b00' : item.total > 0 ? '#2a2a2a' : '#161616', borderRadius: '3px 3px 0 0', minHeight: 3 }} />
+                      <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
+                        {item.total > 0 && <p style={{ color: isPico ? '#ff6b00' : '#a39b8b', fontSize: 8, margin: 0, fontWeight: 700 }}>{item.total}</p>}
+                        <div style={{ width: '100%', height: `${altura}%`, background: isPico ? 'linear-gradient(180deg, #ff9500, #ff6b00)' : item.total > 0 ? '#1f1d1a' : '#0d0d0d', borderRadius: '4px 4px 0 0', minHeight: 4, boxShadow: isPico ? '0 0 8px #ff6b0060' : 'none' }} />
                       </div>
                     )
                   })}
                 </div>
-                <div style={{ display: 'flex', gap: 2, marginTop: 4, overflowX: 'hidden' }}>
+                <div style={{ display: 'flex', gap: 3, marginTop: 6 }}>
                   {graficoPico.map((item, i) => (
-                    <p key={i} style={{ flex: 1, color: item.total > 0 ? '#555' : '#222', fontSize: 7, margin: 0, textAlign: 'center' }}>{item.hora.replace('h','')}</p>
+                    <p key={i} style={{ flex: 1, color: item.total > 0 ? '#555' : '#1f1d1a', fontSize: 8, margin: 0, textAlign: 'center' }}>{item.hora.replace('h','')}</p>
                   ))}
                 </div>
               </div>
             )}
 
+            {/* Top 5 sabores com medalhas */}
             {ranking.length > 0 && (
               <div style={{ ...card, marginBottom: 16 }}>
-                <p style={sectionTitle}>Pizzas mais pedidas</p>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {ranking.slice(0, 5).map((item, i) => (
-                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <span style={{ fontSize: 14, fontWeight: 800, color: i === 0 ? '#fbbf24' : i === 1 ? '#9ca3af' : i === 2 ? '#b45309' : '#333', minWidth: 20 }}>{i + 1}.</span>
-                      <p style={{ color: '#e0e0e0', fontSize: 13, margin: 0, flex: 1 }}>{item.nome}</p>
-                      <div style={{ width: 70, background: '#1e1e1e', borderRadius: 4, height: 6 }}>
-                        <div style={{ height: 6, borderRadius: 4, background: '#ff6b00', width: `${Math.max((item.total / (ranking[0]?.total || 1)) * 100, 8)}%` }} />
+                <p style={sectionTitle}>Top 5 sabores mais pedidos</p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {ranking.slice(0, 5).map((item, i) => {
+                    const medals = ['🥇', '🥈', '🥉']
+                    const barColor = i === 0 ? '#ff6b00' : i === 1 ? '#9ca3af' : i === 2 ? '#b45309' : '#333'
+                    return (
+                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <span style={{ fontSize: medals[i] ? 20 : 12, minWidth: 26, textAlign: 'center', color: '#444', fontWeight: 700 }}>{medals[i] || `${i + 1}.`}</span>
+                        <p style={{ color: '#f4f1ec', fontSize: 13, margin: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.nome}</p>
+                        <div style={{ width: 60, background: '#1f1d1a', borderRadius: 4, height: 5, flexShrink: 0 }}>
+                          <div style={{ height: 5, borderRadius: 4, background: barColor, width: `${Math.max((item.total / (ranking[0]?.total || 1)) * 100, 8)}%` }} />
+                        </div>
+                        <span style={{ color: '#a39b8b', fontSize: 11, minWidth: 28, textAlign: 'right', fontWeight: 600 }}>{item.total}x</span>
                       </div>
-                      <span style={{ color: '#444', fontSize: 11, minWidth: 24, textAlign: 'right' }}>{item.total}x</span>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
               </div>
             )}
 
+            {/* Cards de acesso rápido */}
+            <div style={{ marginBottom: 16 }}>
+              <p style={sectionTitle}>Acesso rapido</p>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                {[
+                  { icon: '🍳', label: 'Cozinha', sub: 'Pedidos ativos', action: () => router.push('/pedidos'), color: '#ff6b00' },
+                  { icon: '⚙️', label: 'Configuracoes', sub: 'Horario e cardapio', action: () => setAba('config'), color: '#3b82f6' },
+                  { icon: '💰', label: 'Financeiro', sub: 'Custos e lucro', action: () => setAba('financeiro'), color: '#4ade80' },
+                  { icon: '📈', label: 'Relatorios', sub: 'Historico completo', action: () => router.push('/relatorios'), color: '#8b5cf6' },
+                ].map(({ icon, label, sub, action, color }) => (
+                  <button key={label} onClick={action} style={{ background: '#101010', border: `1px solid #1f1d1a`, borderRadius: 14, padding: '14px 12px', cursor: 'pointer', textAlign: 'left', display: 'flex', flexDirection: 'column', gap: 2, transition: 'border-color 0.2s', minHeight: 90 }}>
+                    <div style={{ width: 34, height: 34, borderRadius: 10, background: color + '18', border: `1px solid ${color}30`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 17, marginBottom: 6 }}>{icon}</div>
+                    <p style={{ color: '#f4f1ec', fontSize: 13, fontWeight: 700, margin: 0, fontFamily: "'Archivo', sans-serif" }}>{label}</p>
+                    <p style={{ color: '#5a564d', fontSize: 10, margin: 0 }}>{sub}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Avaliações recentes */}
             {avaliacoes.total > 0 && (
               <div style={{ ...card, marginBottom: 16 }}>
                 <p style={sectionTitle}>Avaliacoes recentes</p>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-                  <p style={{ color: '#fbbf24', fontSize: 36, fontWeight: 800, margin: 0, letterSpacing: -1 }}>{avaliacoes.media.toFixed(1)}</p>
+                  <p style={{ color: '#fbbf24', fontSize: 36, fontWeight: 900, margin: 0, letterSpacing: -2 }}>{avaliacoes.media.toFixed(1)}</p>
                   <div>
                     <div style={{ display: 'flex', gap: 2 }}>
-                      {[1,2,3,4,5].map(s => <span key={s} style={{ color: s <= Math.round(avaliacoes.media) ? '#fbbf24' : '#333', fontSize: 14 }}>★</span>)}
+                      {[1,2,3,4,5].map(s => <span key={s} style={{ color: s <= Math.round(avaliacoes.media) ? '#fbbf24' : '#2a2a2a', fontSize: 14 }}>★</span>)}
                     </div>
-                    <p style={{ color: '#444', fontSize: 11, margin: '2px 0 0' }}>{avaliacoes.total} avaliacoes</p>
+                    <p style={{ color: '#5a564d', fontSize: 11, margin: '2px 0 0' }}>{avaliacoes.total} avaliacoes</p>
                   </div>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                   {avaliacoes.ultimas.slice(0, 3).map((a, i) => (
-                    <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#0d0d0d', borderRadius: 8, padding: '8px 12px' }}>
-                      <span style={{ color: '#555', fontSize: 11 }}>{a.phone.slice(-4).padStart(8, '*')}</span>
+                    <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#0a0a0a', borderRadius: 8, padding: '10px 12px' }}>
+                      <span style={{ color: '#5a564d', fontSize: 11 }}>{a.phone.slice(-4).padStart(8, '*')}</span>
                       <div style={{ display: 'flex', gap: 1 }}>
-                        {[1,2,3,4,5].map(s => <span key={s} style={{ color: s <= a.nota ? '#fbbf24' : '#333', fontSize: 12 }}>★</span>)}
+                        {[1,2,3,4,5].map(s => <span key={s} style={{ color: s <= a.nota ? '#fbbf24' : '#2a2a2a', fontSize: 13 }}>★</span>)}
                       </div>
                     </div>
                   ))}
@@ -967,7 +1019,7 @@ export default function AdminPage() {
       </div>
 
       {/* Navegacao inferior */}
-      <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: '#0d0d0d', borderTop: '1px solid #161616', display: 'flex', padding: '8px 0 4px', zIndex: 100 }}>
+      <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: '#0a0a0a', borderTop: '1px solid #1f1d1a', display: 'flex', padding: '10px 0', paddingBottom: 'calc(env(safe-area-inset-bottom) + 10px)', zIndex: 100 }}>
         {([
           { key: 'dashboard', icon: '📊', label: 'Painel' },
           { key: 'cardapio', icon: '🍕', label: 'Cardapio' },
@@ -975,7 +1027,7 @@ export default function AdminPage() {
           { key: 'financeiro', icon: '💰', label: 'Financeiro' },
           { key: 'dev', icon: '🛠️', label: 'Suporte' },
         ] as { key: Aba; icon: string; label: string }[]).map(({ key, icon, label }) => (
-          <button key={key} onClick={() => setAba(key)} style={{ flex: 1, background: 'none', border: 'none', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, padding: '6px 0' }}>
+          <button key={key} onClick={() => setAba(key)} style={{ flex: 1, background: 'none', border: 'none', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, padding: '6px 0', minHeight: 48, fontFamily: "'Archivo', sans-serif" }}>
             <span style={{ fontSize: 20, opacity: aba === key ? 1 : 0.3 }}>{icon}</span>
             <span style={{ fontSize: 10, color: aba === key ? '#ff6b00' : '#444', fontWeight: aba === key ? 700 : 400 }}>{label}</span>
             {aba === key && <div style={{ width: 4, height: 4, borderRadius: '50%', background: '#ff6b00' }} />}
