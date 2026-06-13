@@ -398,7 +398,7 @@ export default function PedidosPage() {
                     </div>
                     <div>
                       <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 4 }}>
-                        <span style={{ fontSize: 21, fontWeight: 900, letterSpacing: "-0.5px", lineHeight: 1, color: "#f4f1ec" }}>{firstName}</span>
+                        <span style={{ fontSize: 21, fontWeight: 900, letterSpacing: "-0.5px", lineHeight: 1, color: "#f4f1ec", maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>{firstName}</span>
                         <span style={{ background: sc.accentBg, color: sc.accent, fontSize: 10, fontWeight: 900, padding: "2px 8px", borderRadius: 8, letterSpacing: "0.5px", textTransform: "uppercase", border: `1px solid ${sc.accentBorder}` }}>{sc.label}</span>
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
@@ -408,7 +408,7 @@ export default function PedidosPage() {
                             : <svg width="11" height="11" viewBox="0 0 24 24" fill="none"><path d="M5 17H3a2 2 0 01-2-2V5a2 2 0 012-2h11a2 2 0 012 2v3" stroke="#38bdf8" strokeWidth="2.2" strokeLinecap="round"/><rect x="9" y="11" width="14" height="10" rx="2" stroke="#38bdf8" strokeWidth="2.2"/></svg>
                           }
                         </div>
-                        <span style={{ fontSize: 11, fontWeight: 700, color: isRetirada ? "#facc15" : "#38bdf8" }}>{isRetirada ? "Retirada na loja" : pedido.endereco}</span>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: isRetirada ? "#facc15" : "#38bdf8", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>{isRetirada ? "Retirada na loja" : pedido.endereco}</span>
                       </div>
                     </div>
                   </div>
@@ -437,7 +437,7 @@ export default function PedidosPage() {
                           {getItemIcon(item)}
                         </div>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <p style={{ fontSize: 13, fontWeight: 800, color: "#f4f1ec", margin: 0, lineHeight: 1.2 }}>{item}</p>
+                          <p style={{ fontSize: 13, fontWeight: 800, color: "#f4f1ec", margin: 0, lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item}</p>
                         </div>
                         <span style={{ fontSize: 12, fontWeight: 900, color: sc.accentSoft, background: `rgba(255,255,255,.06)`, padding: "3px 9px", borderRadius: 7, flexShrink: 0 }}>×1</span>
                       </div>
@@ -577,7 +577,7 @@ export default function PedidosPage() {
                     <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
                       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 7 }}>
                         <span style={{ alignSelf: "flex-start", background: sc.accentBg, color: sc.accent, fontSize: 11, fontWeight: 900, letterSpacing: "1.2px", padding: "5px 10px", borderRadius: 8, textTransform: "uppercase", border: `1px solid ${sc.accentBorder}` }}>{sc.label}</span>
-                        <h2 style={{ margin: 0, fontSize: 24, fontWeight: 900, letterSpacing: "-0.6px", lineHeight: 1.1 }}>{p.cliente}</h2>
+                        <h2 style={{ margin: 0, fontSize: 24, fontWeight: 900, letterSpacing: "-0.6px", lineHeight: 1.1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.cliente}</h2>
                         <span style={{ fontSize: 13, color: "#a39b8b", fontWeight: 600 }}>Recebido às {p.horario} · há {mins} min</span>
                       </div>
                       <div style={{ position: "relative", width: 50, height: 50, flexShrink: 0 }}>
