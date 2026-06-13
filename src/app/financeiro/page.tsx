@@ -27,6 +27,7 @@ type Transacao = {
   id: string
   tipo: 'pedido' | 'custo'
   emoji: string
+  inicial: string
   descricao: string
   subtitulo: string
   valor: number
@@ -48,17 +49,35 @@ const CATEGORIAS = [
 
 const FONT   = "'Archivo', sans-serif"
 const BG     = '#060606'
-const CARD   = '#101010'
-const BORDER = '1px solid #1f1d1a'
+const CARD   = '#0d0d0d'
+const BORDER = '1px solid #161412'
 const TEXT   = '#f4f1ec'
 const TEXT2  = '#a39b8b'
+const DIM    = '#5a564d'
 const ACCENT = '#ff6b00'
 const GREEN  = '#22c55e'
 const RED    = '#ef4444'
 
-const fmt = (v: number) => v.toFixed(2).replace('.', ',')
+const fmt = (v: number) =>
+  v.toFixed(2).replace('.', ',')
 
 const hoje = () => new Date().toLocaleDateString('pt-BR')
+
+// ── Avatar circular: inicial (pedido) ou emoji (custo) ──────────────────────
+function Avatar({ tx }: { tx: Transacao }) {
+  if (tx.tipo === 'pedido') {
+    return (
+      <div style={{ width: 44, height: 44, borderRadius: 22, background: 'rgba(255,107,0,0.14)', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <span style={{ color: ACCENT, fontSize: 17, fontWeight: 900, fontFamily: FONT, lineHeight: 1 }}>{tx.inicial}</span>
+      </div>
+    )
+  }
+  return (
+    <div style={{ width: 44, height: 44, borderRadius: 22, background: 'rgba(239,68,68,0.1)', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }}>
+      {tx.emoji}
+    </div>
+  )
+}
 
 export default function FinanceiroPage() {
   const router = useRouter()
@@ -117,8 +136,8 @@ export default function FinanceiroPage() {
   }
 
   // ── Filtros de período ──────────────────────────────────────────────────────
-  const now       = new Date()
-  const dataHoje  = hoje()
+  const now      = new Date()
+  const dataHoje = hoje()
 
   const isNoPeriodo = (dataStr: string | undefined): boolean => {
     if (!dataStr) return true
@@ -133,9 +152,9 @@ export default function FinanceiroPage() {
   const custosFiltrados  = custos.filter(c => isNoPeriodo(c.data))
   const pedidosFiltrados = pedidos.filter(p => isNoPeriodo(p.data ?? dataHoje))
 
-  const faturamento  = pedidosFiltrados.reduce((s, p) => s + (Number(p.total) || 0), 0)
-  const totalCustos  = custosFiltrados.reduce((s, c) => s + c.valor, 0)
-  const lucro        = faturamento - totalCustos
+  const faturamento = pedidosFiltrados.reduce((s, p) => s + (Number(p.total) || 0), 0)
+  const totalCustos = custosFiltrados.reduce((s, c) => s + c.valor, 0)
+  const lucro       = faturamento - totalCustos
 
   const fatHoje = pedidos
     .filter(p => (p.data ?? dataHoje) === dataHoje)
@@ -147,6 +166,7 @@ export default function FinanceiroPage() {
       id:        'p_' + p.id,
       tipo:      'pedido' as const,
       emoji:     '🍕',
+      inicial:   (p.cliente || 'P')[0].toUpperCase(),
       descricao: p.cliente || 'Pedido',
       subtitulo: p.horario ? `Pedido · ${p.horario}` : 'Pedido',
       valor:     Number(p.total) || 0,
@@ -159,8 +179,9 @@ export default function FinanceiroPage() {
         id:        'c_' + c.id,
         tipo:      'custo' as const,
         emoji:     cat?.emoji ?? '💸',
+        inicial:   '',
         descricao: c.descricao,
-        subtitulo: (cat ? cat.label : 'Custo') + (c.data ? ` · ${c.data}` : ''),
+        subtitulo: (cat?.label ?? 'Custo') + (c.data ? ` · ${c.data}` : ''),
         valor:     c.valor,
         data:      c.data ?? dataHoje,
         horario:   '',
@@ -168,13 +189,14 @@ export default function FinanceiroPage() {
       }
     }),
   ].sort((a, b) => {
-    const parseBR = (s: string) => { const [d, m, y] = s.split('/').map(Number); return new Date(y, m - 1, d).getTime() }
-    const dDiff = parseBR(b.data) - parseBR(a.data)
-    if (dDiff !== 0) return dDiff
-    return b.horario.localeCompare(a.horario)
+    const parseBR = (s: string) => {
+      const [d, m, y] = s.split('/').map(Number)
+      return new Date(y, m - 1, d).getTime()
+    }
+    const dd = parseBR(b.data) - parseBR(a.data)
+    return dd !== 0 ? dd : b.horario.localeCompare(a.horario)
   })
 
-  // Agrupar por data com labels humanizados
   const labelData = (dateStr: string) => {
     if (dateStr === dataHoje) return 'Hoje'
     const ontem = new Date(now); ontem.setDate(ontem.getDate() - 1)
@@ -193,8 +215,8 @@ export default function FinanceiroPage() {
   if (loading) return (
     <div style={{ minHeight: '100svh', background: BG, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: FONT }}>
       <div style={{ textAlign: 'center' }}>
-        <p style={{ color: ACCENT, fontSize: 28, margin: '0 0 12px' }}>💰</p>
-        <p style={{ color: TEXT2, fontSize: 14, margin: 0 }}>Carregando...</p>
+        <div style={{ width: 52, height: 52, borderRadius: 26, background: 'rgba(255,107,0,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, margin: '0 auto 14px' }}>💰</div>
+        <p style={{ color: DIM, fontSize: 13, margin: 0, fontWeight: 600 }}>Carregando...</p>
       </div>
     </div>
   )
@@ -203,166 +225,150 @@ export default function FinanceiroPage() {
     <div style={{ minHeight: '100svh', background: BG, fontFamily: FONT, overflowX: 'hidden', paddingBottom: 'calc(env(safe-area-inset-bottom) + 100px)' }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&display=swap');
-        @keyframes slideUp  { from { opacity:0; transform:translateY(14px) } to { opacity:1; transform:translateY(0) } }
-        @keyframes fadeIn   { from { opacity:0 } to { opacity:1 } }
-        .hscroll { display:flex; gap:10px; overflow-x:auto; padding-bottom:4px; scrollbar-width:none; -webkit-overflow-scrolling:touch }
-        .hscroll::-webkit-scrollbar { display:none }
+        @keyframes slideUp { from { opacity:0; transform:translateY(16px) } to { opacity:1; transform:translateY(0) } }
+        @keyframes fadeIn  { from { opacity:0 } to { opacity:1 } }
       `}</style>
 
-      {/* Toast flutuante */}
+      {/* ── Toast ────────────────────────────────────────────────────────────── */}
       {mensagem && (
-        <div style={{ position: 'fixed', top: 'calc(env(safe-area-inset-top) + 16px)', left: '50%', transform: 'translateX(-50%)', zIndex: 300, background: mensagem.includes('✅') ? '#14532d' : '#7f1d1d', borderRadius: 12, padding: '10px 20px', color: mensagem.includes('✅') ? '#4ade80' : '#f87171', fontWeight: 700, fontSize: 13, animation: 'slideUp 0.2s ease', whiteSpace: 'nowrap', boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }}>
+        <div style={{ position: 'fixed', top: 'calc(env(safe-area-inset-top) + 16px)', left: '50%', transform: 'translateX(-50%)', zIndex: 300, background: mensagem.includes('✅') ? '#14532d' : '#7f1d1d', borderRadius: 12, padding: '10px 20px', color: mensagem.includes('✅') ? '#4ade80' : '#f87171', fontWeight: 700, fontSize: 13, animation: 'slideUp 0.2s ease', whiteSpace: 'nowrap', boxShadow: '0 8px 40px rgba(0,0,0,0.6)' }}>
           {mensagem}
         </div>
       )}
 
       {/* ── Header sticky ────────────────────────────────────────────────────── */}
-      <div style={{ position: 'sticky', top: 0, zIndex: 100, background: 'rgba(6,6,6,0.96)', borderBottom: BORDER, paddingTop: 'calc(env(safe-area-inset-top) + 12px)', paddingBottom: 12, paddingLeft: 16, paddingRight: 16 }}>
+      <div style={{ position: 'sticky', top: 0, zIndex: 100, background: 'rgba(6,6,6,0.97)', borderBottom: '1px solid #111', paddingTop: 'calc(env(safe-area-inset-top) + 12px)', paddingBottom: 12, paddingLeft: 20, paddingRight: 20 }}>
         <div style={{ maxWidth: 375, margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <button
-            onClick={() => router.push('/admin')}
-            style={{ background: 'rgba(255,255,255,0.06)', border: BORDER, color: TEXT2, borderRadius: 10, padding: '8px 14px', cursor: 'pointer', fontSize: 14, minHeight: 44, fontFamily: FONT, fontWeight: 700, flexShrink: 0 }}
-          >←</button>
-          <div style={{ textAlign: 'center', minWidth: 0, flex: 1, margin: '0 12px' }}>
-            <p style={{ color: TEXT, fontSize: 14, fontWeight: 800, margin: 0, letterSpacing: '-0.2px' }}>Financeiro</p>
-            <p style={{ color: TEXT2, fontSize: 10, margin: 0, textTransform: 'uppercase', letterSpacing: '0.6px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{mesLabel}</p>
+          <button onClick={() => router.push('/admin')} style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)', color: DIM, borderRadius: 10, padding: '8px 14px', cursor: 'pointer', fontSize: 14, minHeight: 44, fontFamily: FONT, fontWeight: 700, flexShrink: 0 }}>←</button>
+          <div style={{ textAlign: 'center', flex: 1, margin: '0 12px', minWidth: 0 }}>
+            <p style={{ color: TEXT, fontSize: 14, fontWeight: 800, margin: 0 }}>Financeiro</p>
+            <p style={{ color: DIM, fontSize: 10, margin: 0, textTransform: 'uppercase', letterSpacing: '0.7px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{mesLabel}</p>
           </div>
-          <button
-            onClick={() => fetch('/api/auth/logout', { method: 'POST' }).then(() => router.push('/login'))}
-            style={{ background: 'rgba(255,255,255,0.06)', border: BORDER, color: TEXT2, borderRadius: 10, padding: '8px 14px', cursor: 'pointer', fontSize: 12, minHeight: 44, fontFamily: FONT, flexShrink: 0 }}
-          >Sair</button>
+          <button onClick={() => fetch('/api/auth/logout', { method: 'POST' }).then(() => router.push('/login'))} style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)', color: DIM, borderRadius: 10, padding: '8px 14px', cursor: 'pointer', fontSize: 12, minHeight: 44, fontFamily: FONT, flexShrink: 0 }}>Sair</button>
         </div>
       </div>
 
-      {/* ── Hero: saldo em destaque ────────────────────────────────────────────── */}
-      <div style={{ background: 'linear-gradient(180deg, #100800 0%, #060606 100%)', padding: '32px 16px 28px', textAlign: 'center' }}>
-        <p style={{ color: TEXT2, fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1.2px', margin: '0 0 10px' }}>
-          Faturamento {periodo === 'hoje' ? 'de Hoje' : periodo === 'semana' ? 'da Semana' : 'do Mês'}
+      {/* ── Hero — saldo com gradiente radial e glow ─────────────────────────── */}
+      <div style={{ position: 'relative', overflow: 'hidden', background: 'radial-gradient(ellipse 120% 140% at 50% -10%, #1c0900 0%, #0a0400 40%, #060606 75%)', padding: '40px 20px 32px', textAlign: 'center' }}>
+        {/* Glow blob laranja */}
+        <div style={{ position: 'absolute', top: '-10px', left: '50%', transform: 'translateX(-50%)', width: 220, height: 110, borderRadius: '50%', background: 'rgba(255,107,0,0.18)', filter: 'blur(55px)', pointerEvents: 'none' }} />
+
+        <p style={{ color: TEXT2, fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '2px', margin: '0 0 14px', position: 'relative' }}>
+          {periodo === 'hoje' ? 'Faturamento de Hoje' : periodo === 'semana' ? 'Faturamento da Semana' : 'Faturamento do Mês'}
         </p>
-        <p style={{ color: ACCENT, fontSize: 40, fontWeight: 900, margin: '0 0 10px', letterSpacing: '-1.5px', lineHeight: 1 }}>
+
+        <p style={{ color: ACCENT, fontSize: 52, fontWeight: 900, letterSpacing: '-2px', lineHeight: 1, margin: '0 0 16px', fontVariantNumeric: 'tabular-nums', position: 'relative' }}>
           R$ {fmt(faturamento)}
         </p>
-        {periodo !== 'hoje' && fatHoje > 0 && (
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.25)', borderRadius: 20, padding: '5px 14px' }}>
-            <span style={{ color: GREEN, fontSize: 12, fontWeight: 700 }}>↑ +R$ {fmt(fatHoje)} hoje</span>
+
+        {fatHoje > 0 && periodo !== 'hoje' && (
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(34,197,94,0.12)', border: '1px solid rgba(34,197,94,0.3)', borderRadius: 20, padding: '5px 16px', position: 'relative' }}>
+            <span style={{ color: GREEN, fontSize: 12, fontWeight: 800 }}>↑ +R$ {fmt(fatHoje)} hoje</span>
           </div>
         )}
-      </div>
 
-      <div style={{ maxWidth: 375, margin: '0 auto', padding: '0 16px' }}>
-
-        {/* ── Cards de métricas (scroll horizontal) ──────────────────────────── */}
-        <div className="hscroll" style={{ marginBottom: 20 }}>
+        {/* 3 mini cards */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginTop: 28, position: 'relative' }}>
           {[
-            { label: 'Faturamento', valor: faturamento, cor: ACCENT, bg: 'rgba(255,107,0,0.08)', bord: 'rgba(255,107,0,0.2)',  emoji: '📈' },
-            { label: 'Custos',      valor: totalCustos,  cor: RED,    bg: 'rgba(239,68,68,0.08)',  bord: 'rgba(239,68,68,0.2)',   emoji: '📉' },
-            { label: 'Lucro',       valor: lucro,        cor: lucro >= 0 ? GREEN : RED, bg: lucro >= 0 ? 'rgba(34,197,94,0.08)' : 'rgba(239,68,68,0.08)', bord: lucro >= 0 ? 'rgba(34,197,94,0.2)' : 'rgba(239,68,68,0.2)', emoji: '💰' },
+            { label: 'Fat.',   valor: faturamento, cor: ACCENT },
+            { label: 'Custos', valor: totalCustos,  cor: RED },
+            { label: 'Lucro',  valor: lucro,        cor: lucro >= 0 ? GREEN : RED },
           ].map(m => (
-            <div key={m.label} style={{ background: m.bg, border: `1px solid ${m.bord}`, borderRadius: 16, padding: '14px 16px', minWidth: 130, flexShrink: 0 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-                <span style={{ fontSize: 15 }}>{m.emoji}</span>
-                <span style={{ color: TEXT2, fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.6px' }}>{m.label}</span>
-              </div>
-              <p style={{ color: m.cor, fontSize: 17, fontWeight: 900, margin: 0, letterSpacing: '-0.5px' }}>R$ {fmt(m.valor)}</p>
+            <div key={m.label} style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 16, padding: '12px 10px', textAlign: 'center' }}>
+              <p style={{ color: DIM, fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.8px', margin: '0 0 6px' }}>{m.label}</p>
+              <p style={{ color: m.cor, fontSize: 13, fontWeight: 900, margin: 0, fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.3px' }}>R${fmt(m.valor)}</p>
             </div>
           ))}
         </div>
+      </div>
 
-        {/* ── Filtro de período ──────────────────────────────────────────────── */}
-        <div style={{ display: 'flex', gap: 6, marginBottom: 24 }}>
-          {(['hoje', 'semana', 'mes'] as Periodo[]).map(p => (
+      <div style={{ maxWidth: 375, margin: '0 auto', padding: '0 20px' }}>
+
+        {/* ── Filtro de período estilo trading ──────────────────────────────── */}
+        <div style={{ display: 'flex', gap: 4, marginTop: 24, marginBottom: 28, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 12, padding: 4 }}>
+          {([['hoje', '1D'], ['semana', '1S'], ['mes', '1M']] as [Periodo, string][]).map(([p, label]) => (
             <button
               key={p}
               onClick={() => setPeriodo(p)}
-              style={{ flex: 1, padding: '10px 0', minHeight: 44, borderRadius: 10, border: periodo === p ? 'none' : BORDER, cursor: 'pointer', fontWeight: 700, fontSize: 13, fontFamily: FONT, background: periodo === p ? ACCENT : CARD, color: periodo === p ? '#fff' : TEXT2, transition: 'all .15s' }}
-            >
-              {p === 'hoje' ? 'Hoje' : p === 'semana' ? 'Semana' : 'Mês'}
-            </button>
+              style={{ flex: 1, padding: '9px 0', minHeight: 42, borderRadius: 9, border: 'none', cursor: 'pointer', fontWeight: 800, fontSize: 13, fontFamily: FONT, transition: 'all .15s', background: periodo === p ? ACCENT : 'transparent', color: periodo === p ? '#fff' : DIM, letterSpacing: '0.5px' }}
+            >{label}</button>
           ))}
         </div>
 
-        {/* ── Extrato de transações ──────────────────────────────────────────── */}
+        {/* ── Transações ────────────────────────────────────────────────────── */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
+          <p style={{ color: TEXT, fontSize: 16, fontWeight: 800, margin: 0, letterSpacing: '-0.3px' }}>Transações</p>
+          <p style={{ color: DIM, fontSize: 12, fontWeight: 600, margin: 0 }}>
+            {transacoes.length} {transacoes.length === 1 ? 'item' : 'itens'}
+          </p>
+        </div>
+
         {grupos.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '48px 20px', color: TEXT2 }}>
-            <p style={{ fontSize: 36, margin: '0 0 14px' }}>📊</p>
-            <p style={{ margin: 0, fontWeight: 700, fontSize: 14 }}>Nenhuma transação neste período</p>
+          <div style={{ textAlign: 'center', padding: '56px 20px', color: DIM }}>
+            <p style={{ fontSize: 40, margin: '0 0 16px' }}>📊</p>
+            <p style={{ margin: 0, fontWeight: 700, fontSize: 14, color: TEXT2 }}>Sem transações neste período</p>
             <p style={{ margin: '6px 0 0', fontSize: 12 }}>Toque em + para registrar um custo</p>
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
             {grupos.map(grupo => (
               <div key={grupo.label}>
                 {/* Separador de data */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-                  <span style={{ color: TEXT2, fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.8px', whiteSpace: 'nowrap' }}>{grupo.label}</span>
-                  <div style={{ flex: 1, height: 1, background: '#1a1a1a' }} />
-                  <span style={{ color: '#333', fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap' }}>
-                    {grupo.items.length} item{grupo.items.length !== 1 ? 's' : ''}
-                  </span>
-                </div>
+                <p style={{ color: DIM, fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1px', margin: '0 0 14px' }}>{grupo.label}</p>
 
-                {/* Itens do grupo */}
-                <div style={{ background: CARD, border: BORDER, borderRadius: 16, overflow: 'hidden' }}>
-                  {grupo.items.map((tx, idx) => (
-                    <div
-                      key={tx.id}
-                      style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px', borderBottom: idx < grupo.items.length - 1 ? '1px solid #141414' : 'none' }}
-                    >
-                      {/* Ícone colorido */}
-                      <div style={{ width: 42, height: 42, borderRadius: 13, background: tx.tipo === 'pedido' ? 'rgba(255,107,0,0.12)' : 'rgba(239,68,68,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 19, flexShrink: 0 }}>
-                        {tx.emoji}
-                      </div>
+                {/* Itens — sem card, só espaçamento */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {grupo.items.map(tx => (
+                    <div key={tx.id} style={{ display: 'flex', alignItems: 'center', gap: 13, padding: '10px 0' }}>
+                      <Avatar tx={tx} />
 
-                      {/* Descrição */}
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <p style={{ color: TEXT, fontSize: 14, fontWeight: 600, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{tx.descricao}</p>
-                        <p style={{ color: TEXT2, fontSize: 11, margin: '3px 0 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{tx.subtitulo}</p>
+                        <p style={{ color: TEXT, fontSize: 14, fontWeight: 700, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{tx.descricao}</p>
+                        <p style={{ color: DIM, fontSize: 11, margin: '3px 0 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{tx.subtitulo}</p>
                       </div>
 
-                      {/* Valor + delete */}
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, flexShrink: 0 }}>
-                        <p style={{ color: tx.tipo === 'pedido' ? GREEN : RED, fontSize: 15, fontWeight: 800, margin: 0, letterSpacing: '-0.4px' }}>
+                        <p style={{ color: tx.tipo === 'pedido' ? GREEN : RED, fontSize: 15, fontWeight: 800, margin: 0, fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.4px' }}>
                           {tx.tipo === 'pedido' ? '+' : '−'}R$ {fmt(tx.valor)}
                         </p>
                         {tx.custoId && (
-                          <button
-                            onClick={() => removerCusto(tx.custoId!)}
-                            style={{ background: 'none', border: 'none', color: '#2a2a2a', cursor: 'pointer', fontSize: 17, padding: 0, minHeight: 28, minWidth: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1 }}
-                          >×</button>
+                          <button onClick={() => removerCusto(tx.custoId!)} style={{ background: 'none', border: 'none', color: '#252320', cursor: 'pointer', fontSize: 17, padding: 0, minHeight: 26, minWidth: 26, display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1 }}>×</button>
                         )}
                       </div>
                     </div>
                   ))}
                 </div>
+
+                {/* Divisor sutil entre grupos */}
+                <div style={{ height: 1, background: '#111', marginTop: 10 }} />
               </div>
             ))}
           </div>
         )}
       </div>
 
-      {/* ── FAB "+" ────────────────────────────────────────────────────────────── */}
+      {/* ── FAB "+" ──────────────────────────────────────────────────────────── */}
       <button
         onClick={() => setModalAberto(true)}
         aria-label="Adicionar custo"
-        style={{ position: 'fixed', bottom: 'calc(env(safe-area-inset-bottom) + 24px)', right: 20, width: 58, height: 58, borderRadius: 29, background: `linear-gradient(135deg, ${ACCENT} 0%, #c95200 100%)`, border: 'none', color: '#fff', fontSize: 28, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 6px 28px rgba(255,107,0,0.5)', zIndex: 90, lineHeight: 1 }}
+        style={{ position: 'fixed', bottom: 'calc(env(safe-area-inset-bottom) + 24px)', right: 20, width: 56, height: 56, borderRadius: 28, background: `linear-gradient(135deg, #ff7c1a 0%, #cc4d00 100%)`, border: 'none', color: '#fff', fontSize: 28, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 6px 30px rgba(255,107,0,0.55), 0 2px 8px rgba(0,0,0,0.4)', zIndex: 90, lineHeight: 1, fontFamily: FONT }}
       >+</button>
 
-      {/* ── Modal bottom sheet ──────────────────────────────────────────────── */}
+      {/* ── Bottom sheet — registrar custo ───────────────────────────────────── */}
       {modalAberto && (
         <div
           onClick={e => { if (e.target === e.currentTarget) setModalAberto(false) }}
-          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 200, display: 'flex', alignItems: 'flex-end', animation: 'fadeIn 0.2s ease' }}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', zIndex: 200, display: 'flex', alignItems: 'flex-end', animation: 'fadeIn 0.18s ease' }}
         >
-          <div style={{ background: '#0d0d0d', borderRadius: '20px 20px 0 0', padding: '0 20px 0', paddingBottom: 'calc(env(safe-area-inset-bottom) + 24px)', width: '100%', maxWidth: 375, margin: '0 auto', animation: 'slideUp 0.25s ease' }}>
-            {/* Drag handle */}
-            <div style={{ width: 36, height: 4, background: '#242424', borderRadius: 2, margin: '14px auto 22px' }} />
-            <p style={{ color: TEXT, fontSize: 18, fontWeight: 900, margin: '0 0 20px', letterSpacing: '-0.4px' }}>Registrar Custo</p>
+          <div style={{ background: '#0d0d0d', borderRadius: '22px 22px 0 0', padding: '0 20px', paddingBottom: 'calc(env(safe-area-inset-bottom) + 28px)', width: '100%', maxWidth: 375, margin: '0 auto', animation: 'slideUp 0.25s ease', borderTop: '1px solid #1a1a1a' }}>
+            <div style={{ width: 36, height: 4, background: '#222', borderRadius: 2, margin: '14px auto 24px' }} />
+            <p style={{ color: TEXT, fontSize: 18, fontWeight: 900, margin: '0 0 22px', letterSpacing: '-0.5px' }}>Registrar Custo</p>
 
             <input
-              placeholder="Descrição (ex: Farinha 10kg)"
+              placeholder="Descrição"
               value={novoDescricao}
               onChange={e => setNovoDescricao(e.target.value)}
-              style={{ width: '100%', background: '#181818', border: '1px solid #222', borderRadius: 12, padding: '14px', color: TEXT, fontSize: 16, outline: 'none', boxSizing: 'border-box', minHeight: 52, fontFamily: FONT, marginBottom: 10 }}
+              style={{ width: '100%', background: '#161616', border: '1px solid #1f1f1f', borderRadius: 12, padding: '14px 16px', color: TEXT, fontSize: 16, outline: 'none', boxSizing: 'border-box', minHeight: 52, fontFamily: FONT, marginBottom: 10 }}
             />
             <input
               placeholder="Valor (R$)"
@@ -370,33 +376,24 @@ export default function FinanceiroPage() {
               onChange={e => setNovoValor(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && adicionarCusto()}
               inputMode="decimal"
-              style={{ width: '100%', background: '#181818', border: '1px solid #222', borderRadius: 12, padding: '14px', color: TEXT, fontSize: 16, outline: 'none', boxSizing: 'border-box', minHeight: 52, fontFamily: FONT, marginBottom: 16 }}
+              style={{ width: '100%', background: '#161616', border: '1px solid #1f1f1f', borderRadius: 12, padding: '14px 16px', color: TEXT, fontSize: 16, outline: 'none', boxSizing: 'border-box', minHeight: 52, fontFamily: FONT, marginBottom: 18 }}
             />
 
-            {/* Categorias */}
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7, marginBottom: 22 }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7, marginBottom: 24 }}>
               {CATEGORIAS.map(cat => (
                 <button
                   key={cat.key}
                   onClick={() => setNovaCategoria(cat.key)}
-                  style={{ padding: '8px 14px', minHeight: 40, borderRadius: 20, border: novaCategoria === cat.key ? 'none' : '1px solid #222', cursor: 'pointer', fontSize: 12, fontWeight: 700, background: novaCategoria === cat.key ? cat.cor : '#181818', color: novaCategoria === cat.key ? '#fff' : '#666', fontFamily: FONT, whiteSpace: 'nowrap', transition: 'all .12s' }}
-                >
-                  {cat.emoji} {cat.label}
-                </button>
+                  style={{ padding: '8px 14px', minHeight: 40, borderRadius: 20, border: novaCategoria === cat.key ? 'none' : '1px solid #1f1f1f', cursor: 'pointer', fontSize: 12, fontWeight: 700, background: novaCategoria === cat.key ? cat.cor : '#161616', color: novaCategoria === cat.key ? '#fff' : DIM, fontFamily: FONT, whiteSpace: 'nowrap', transition: 'all .12s' }}
+                >{cat.emoji} {cat.label}</button>
               ))}
             </div>
 
-            {/* Ações */}
             <div style={{ display: 'flex', gap: 10 }}>
-              <button
-                onClick={() => setModalAberto(false)}
-                style={{ flex: 1, height: 54, background: '#181818', border: '1px solid #222', borderRadius: 14, color: TEXT2, fontSize: 15, fontWeight: 700, cursor: 'pointer', fontFamily: FONT }}
-              >Cancelar</button>
-              <button
-                onClick={adicionarCusto}
-                disabled={salvando}
-                style={{ flex: 2, height: 54, background: salvando ? '#1a1208' : `linear-gradient(135deg, ${ACCENT}, #c95200)`, border: 'none', borderRadius: 14, color: '#fff', fontSize: 15, fontWeight: 800, cursor: salvando ? 'not-allowed' : 'pointer', fontFamily: FONT, opacity: salvando ? 0.7 : 1 }}
-              >{salvando ? 'Salvando...' : '+ Registrar'}</button>
+              <button onClick={() => setModalAberto(false)} style={{ flex: 1, height: 54, background: '#161616', border: '1px solid #1f1f1f', borderRadius: 14, color: DIM, fontSize: 15, fontWeight: 700, cursor: 'pointer', fontFamily: FONT }}>Cancelar</button>
+              <button onClick={adicionarCusto} disabled={salvando} style={{ flex: 2, height: 54, background: salvando ? '#1a1208' : `linear-gradient(135deg, #ff7c1a, #cc4d00)`, border: 'none', borderRadius: 14, color: '#fff', fontSize: 15, fontWeight: 800, cursor: salvando ? 'not-allowed' : 'pointer', fontFamily: FONT, opacity: salvando ? 0.7 : 1 }}>
+                {salvando ? 'Salvando...' : '+ Registrar'}
+              </button>
             </div>
           </div>
         </div>
