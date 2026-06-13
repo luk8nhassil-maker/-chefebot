@@ -455,14 +455,14 @@ export function processMessage(input: string, session: BotSession): BotResponse 
       if (size) {
         return {
           messages: [
-            `2️⃣ *${qtd} pizzas ${size}* anotadas! Vamos montar uma de cada vez 🍕`,
-            `*Pizza 1 de ${qtd}* — Qual o sabor? 😋\n\n${listaFlavors()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
+            `${qtd} pizzas tamanho *${size}*! 🍕 Vamos montar uma de cada vez.`,
+            `*Pizza 1 de ${qtd}* — qual o sabor?\n\n${listaFlavors()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
           ],
           session: resetaTentativas({ ...session, step: "flavor", currentCategory: "pizza", currentSize: size, pendingPizzas: qtd, pizzaAtualIndex: 1 }),
         };
       }
       return {
-        messages: [`2️⃣ *${qtd} pizzas* anotadas! Vamos montar uma de cada vez 🍕\n\n*Pizza 1 de ${qtd}* — Qual o tamanho?\n\n${sizeList()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`],
+        messages: [`${qtd} pizzas! 🍕 Vamos montar uma a uma.\n\n*Pizza 1 de ${qtd}* — qual o tamanho?\n\n${sizeList()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`],
         session: resetaTentativas({ ...session, step: "size", currentCategory: "pizza", pendingPizzas: qtd, pizzaAtualIndex: 1 }),
       };
     }
@@ -496,43 +496,43 @@ export function processMessage(input: string, session: BotSession): BotResponse 
   if (eVoltar(n) && !["welcome", "name", "returning", "category", "escalado", "done", "add_more"].includes(session.step)) {
     switch (session.step) {
       case "flavor":
-        return { messages: [`Tudo bem! Qual o tamanho da pizza então? 😊\n\n${sizeList()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "size", currentFlavor: undefined }) };
+        return { messages: [`Qual tamanho da pizza?\n\n${sizeList()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "size", currentFlavor: undefined }) };
       case "border_escolha":
       case "segundo_sabor":
-        return { messages: [`Tudo bem! Qual o sabor então? 😊\n\n${listaFlavors()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "flavor", currentFlavor: undefined }) };
+        return { messages: [`Claro! Qual o sabor?\n\n${listaFlavors()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "flavor", currentFlavor: undefined }) };
       case "observacao":
-        return { messages: [`Tudo bem! Vai querer mais alguma coisa? 😊\n\n  1️⃣ Mais uma pizza\n  2️⃣ Quero mais alguma coisa\n  3️⃣ Não, pode fechar`], session: resetaTentativas({ ...session, step: "add_more" }) };
+        return { messages: [`Ok! Quer adicionar mais alguma coisa?\n\n  1️⃣ Mais uma pizza\n  2️⃣ Mais alguma coisa\n  3️⃣ Não, pode fechar`], session: resetaTentativas({ ...session, step: "add_more" }) };
       case "delivery_type":
-        return { messages: [`Tudo bem! Tem algum detalhe especial pro pedido? ✏️\n\nSe não tiver é só digitar *0*\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "observacao" }) };
+        return { messages: [`Alguma observação pro pedido?\n\nSe não tiver, digita *0*\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "observacao" }) };
       case "neighborhood":
-        return { messages: [`Tudo bem! Como prefere receber? 😊\n\n  1. Entrega (delivery) 🛵\n  2. Buscar na loja 🏪\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "delivery_type" }) };
+        return { messages: [`Ok! Entrega ou retirada?\n\n  1. Entrega (delivery) 🛵\n  2. Buscar na loja 🏪\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "delivery_type" }) };
       case "address":
-        return { messages: [`Tudo bem! Qual seu bairro? 🛵\n\n${neighborhoodList()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "neighborhood" }) };
+        return { messages: [`Qual é o bairro?\n\n${neighborhoodList()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "neighborhood" }) };
       case "payment":
         if (session.deliveryType === "pickup") {
-          return { messages: [`Tudo bem! Como prefere receber? 😊\n\n  1. Entrega (delivery) 🛵\n  2. Buscar na loja 🏪\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "delivery_type" }) };
+          return { messages: [`Ok! Entrega ou retirada?\n\n  1. Entrega (delivery) 🛵\n  2. Buscar na loja 🏪\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "delivery_type" }) };
         }
-        return { messages: [`Tudo bem! Me passa o endereço completo:\n_(Rua, número e complemento)_\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "address" }) };
+        return { messages: [`Ok! Me passa o endereço:\n_(Rua, número e complemento)_\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "address" }) };
       case "troco": {
         const payList = MENU.payments.map((p, i) => `  ${i + 1}. ${p}`).join("\n");
-        return { messages: [`Tudo bem! Como vai pagar? 💸\n\n${payList}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "payment", paymentMethod: undefined, troco: undefined }) };
+        return { messages: [`Certo! Como vai pagar?\n\n${payList}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "payment", paymentMethod: undefined, troco: undefined }) };
       }
       case "confirm": {
         const payList = MENU.payments.map((p, i) => `  ${i + 1}. ${p}`).join("\n");
-        return { messages: [`Tudo bem! Como vai pagar? 💸\n\n${payList}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "payment", paymentMethod: undefined }) };
+        return { messages: [`Certo! Como vai pagar?\n\n${payList}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "payment", paymentMethod: undefined }) };
       }
       case "lanche_escolha":
-        return { messages: [`Tudo bem! ${mensagemCategorias()}`], session: resetaTentativas({ ...session, step: "category", currentCategory: undefined }) };
+        return { messages: [mensagemCategorias()], session: resetaTentativas({ ...session, step: "category", currentCategory: undefined }) };
       case "bebida_escolha":
-        return { messages: [`Tudo bem! ${mensagemCategorias()}`], session: resetaTentativas({ ...session, step: "category", currentCategory: undefined }) };
+        return { messages: [mensagemCategorias()], session: resetaTentativas({ ...session, step: "category", currentCategory: undefined }) };
       case "suco_escolha":
-        return { messages: [`Tudo bem! ${mensagemCategorias()}`], session: resetaTentativas({ ...session, step: "category", currentCategory: undefined }) };
+        return { messages: [mensagemCategorias()], session: resetaTentativas({ ...session, step: "category", currentCategory: undefined }) };
       case "lanche_flavor":
-        return { messages: [`Tudo bem! Nossos lanches 😋\n\n${listaLanches()}\n\nDigite o número ou o nome:`], session: resetaTentativas({ ...session, step: "lanche_escolha", currentLanche: undefined }) };
+        return { messages: [`Que lanche vai ser?\n\n${listaLanches()}\n\nDigite o número ou o nome:`], session: resetaTentativas({ ...session, step: "lanche_escolha", currentLanche: undefined }) };
       case "lanche_macarronada_size":
-        return { messages: [`Tudo bem! Nossos lanches 😋\n\n${listaLanches()}\n\nDigite o número ou o nome:`], session: resetaTentativas({ ...session, step: "lanche_escolha", currentLanche: undefined }) };
+        return { messages: [`Que lanche vai ser?\n\n${listaLanches()}\n\nDigite o número ou o nome:`], session: resetaTentativas({ ...session, step: "lanche_escolha", currentLanche: undefined }) };
       default:
-        return { messages: [`Tudo bem! ${mensagemCategorias()}`], session: resetaTentativas({ ...session, step: "category" }) };
+        return { messages: [mensagemCategorias()], session: resetaTentativas({ ...session, step: "category" }) };
     }
   }
 
@@ -587,7 +587,7 @@ export function processMessage(input: string, session: BotSession): BotResponse 
         };
       }
       if (eNegativa(n) || n === "2") {
-        return { messages: [`Tudo bem! ${mensagemCategorias()}`], session: resetaTentativas({ ...session, step: "category", customerName: historico.nome }) };
+        return { messages: [mensagemCategorias()], session: resetaTentativas({ ...session, step: "category", customerName: historico.nome }) };
       }
       return {
         messages: [`Ei *${firstName}*! 😊 Da última vez você pediu *${ultimoPedido}* — vai querer repetir ou montar um novo?\n\n  1. Repetir o mesmo\n  2. Quero outra coisa`],
@@ -666,7 +666,7 @@ export function processMessage(input: string, session: BotSession): BotResponse 
           return {
             messages: [
               `Pizza *${size}* anotada! 👌`,
-              `Agora me conta — qual o sabor? 😋\n\n${listaFlavors()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
+              `Qual o sabor?\n\n${listaFlavors()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
             ],
             session: resetaTentativas({ ...session, step: "flavor", currentCategory: "pizza", currentSize: size }),
           };
@@ -722,7 +722,7 @@ export function processMessage(input: string, session: BotSession): BotResponse 
             const flavorFinal = `${dois[0]}/${dois[1]}`;
             return {
               messages: [
-                `Pizza *${size}* meio a meio *${dois[0]}* e *${dois[1]}*! Ótima pedida! 😋`,
+                `Pizza *${size}* meio a meio *${dois[0]}* e *${dois[1]}*! 😋`,
                 `Vai querer borda recheada? Olha as opções 👇\n\n${listaBordas(size)}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
               ],
               session: resetaTentativas({ ...session, step: "border_escolha", currentSize: size, currentFlavor: flavorFinal }),
@@ -732,7 +732,7 @@ export function processMessage(input: string, session: BotSession): BotResponse 
         return {
           messages: [
             `Pizza *${size}* anotada! 👌`,
-            `Agora me conta — qual o sabor? 😋\n\n${listaFlavors()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
+            `Qual o sabor?\n\n${listaFlavors()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
           ],
           session: resetaTentativas({ ...session, step: "flavor", currentSize: size }),
         };
@@ -781,7 +781,7 @@ export function processMessage(input: string, session: BotSession): BotResponse 
       }
       return {
         messages: [
-          `*${flavor}*! Excelente escolha! 🤤`,
+          `*${flavor}*! 😋`,
           `Vai querer borda recheada? Olha as opções 👇\n\n${listaBordas(session.currentSize!)}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
         ],
         session: resetaTentativas({ ...session, step: "border_escolha", currentFlavor: flavor }),
@@ -792,7 +792,7 @@ export function processMessage(input: string, session: BotSession): BotResponse 
       const naoQuerSegundo = n === "2" || eNegativa(n) || n.includes("so esse") || n.includes("apenas esse") || n.includes("so um");
       if (naoQuerSegundo) {
         return {
-          messages: [`Combinado! Vai querer borda recheada? 😋\n\n${listaBordas(session.currentSize!)}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`],
+          messages: [`Ok! Quer borda recheada?\n\n${listaBordas(session.currentSize!)}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`],
           session: resetaTentativas({ ...session, step: "border_escolha" }),
         };
       }
@@ -814,14 +814,14 @@ export function processMessage(input: string, session: BotSession): BotResponse 
       }
       if (flavor2 === session.currentFlavor) {
         return {
-          messages: [`Esse é o mesmo sabor! Vou considerar só *${flavor2}* então 😄\n\nVai querer borda recheada?\n\n${listaBordas(session.currentSize!)}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`],
+          messages: [`Esse é o mesmo sabor, vou colocar só *${flavor2}*. Quer borda recheada?\n\n${listaBordas(session.currentSize!)}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`],
           session: resetaTentativas({ ...session, step: "border_escolha" }),
         };
       }
       const flavorFinal = `${session.currentFlavor}/${flavor2}`;
       return {
         messages: [
-          `Meio a meio *${session.currentFlavor}* e *${flavor2}*! Que combinação! 😋`,
+          `Meio a meio *${session.currentFlavor}* e *${flavor2}*! 😋`,
           `Vai querer borda recheada?\n\n${listaBordas(session.currentSize!)}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
         ],
         session: resetaTentativas({ ...session, step: "border_escolha", currentFlavor: flavorFinal }),
@@ -841,15 +841,15 @@ export function processMessage(input: string, session: BotSession): BotResponse 
           const proximo = session.pizzaAtualIndex + 1;
           return {
             messages: [
-              `Pizza ${session.pizzaAtualIndex} anotada! 🍕\n\n🛒 *Pedido até agora:*\n${resumoCarrinho(newCart)}\n  Subtotal: *${formatCurrency(subtotal)}*`,
-              `Agora o sabor da *pizza ${proximo}*? 😋\n\n${listaFlavors()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
+              `✅ Pizza ${session.pizzaAtualIndex} de ${session.pendingPizzas} pronta!\n\n🛒 *Pedido até agora:*\n${resumoCarrinho(newCart)}\n  Subtotal: *${formatCurrency(subtotal)}*`,
+              `Agora a pizza ${proximo} — qual o sabor?\n\n${listaFlavors()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
             ],
             session: resetaTentativas({ ...session, step: "flavor", cart: newCart, currentSize: session.currentSize, currentFlavor: undefined, pizzaAtualIndex: proximo }),
           };
         }
         return {
           messages: [
-            `Combinado, sem borda! 😄`,
+            `Sem borda, anotado!`,
             mensagemAddMore(newCart),
           ],
           session: resetaTentativas({ ...session, step: "add_more", cart: newCart, currentSize: undefined, currentFlavor: undefined, pendingPizzas: undefined, pizzaAtualIndex: undefined }),
@@ -880,29 +880,29 @@ export function processMessage(input: string, session: BotSession): BotResponse 
         const proximo = session.pizzaAtualIndex + 1;
         return {
           messages: [
-            `Pizza ${session.pizzaAtualIndex} anotada! 🍕\n\n🛒 *Pedido até agora:*\n${resumoCarrinho(newCart)}\n  Subtotal: *${formatCurrency(subtotal)}*`,
-            `*Pizza ${proximo} de ${session.pendingPizzas}* — Qual o sabor? 😋\n\n${listaFlavors()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
+            `✅ Pizza ${session.pizzaAtualIndex} de ${session.pendingPizzas} pronta!\n\n🛒 *Pedido até agora:*\n${resumoCarrinho(newCart)}\n  Subtotal: *${formatCurrency(subtotal)}*`,
+            `Agora a pizza ${proximo} — qual o sabor?\n\n${listaFlavors()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
           ],
           session: resetaTentativas({ ...session, step: "flavor", cart: newCart, currentSize: session.currentSize, currentFlavor: undefined, pizzaAtualIndex: proximo }),
         };
       }
       return {
         messages: [
-          `Borda de *${borderLabel}* anotada! 🤤`,
+          `Borda *${borderLabel}* anotada! 👌`,
           mensagemAddMore(newCart),
         ],
         session: resetaTentativas({ ...session, step: "add_more", cart: newCart, currentSize: undefined, currentFlavor: undefined, pendingPizzas: undefined, pizzaAtualIndex: undefined }),
       };
     }
     case "border": {
-      return { messages: [`Qual borda você prefere? 😋\n\n${listaBordas(session.currentSize!)}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: { ...session, step: "border_escolha" } };
+      return { messages: [`Qual borda?\n\n${listaBordas(session.currentSize!)}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: { ...session, step: "border_escolha" } };
     }
     case "add_more": {
       if (n === "1" || n.includes("mais pizza") || n.includes("outra pizza") || n.includes("mais uma")) {
         return { messages: [`Qual o tamanho da próxima pizza? 🍕\n\n${sizeList()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "size", currentCategory: "pizza" }) };
       }
       if (n === "2" || n.includes("outro") || n.includes("mais alguma") || n.includes("adicionar")) {
-        return { messages: [`Claro! 😊 ${mensagemCategorias()}`], session: resetaTentativas({ ...session, step: "category" }) };
+        return { messages: [mensagemCategorias()], session: resetaTentativas({ ...session, step: "category" }) };
       }
       if (eNegativa(n) || n === "3") {
         const subtotalAtual = cartSubtotal(session.cart);
@@ -914,7 +914,7 @@ export function processMessage(input: string, session: BotSession): BotResponse 
       }
       const intencaoDireta = detectaIntencaoDireta(text);
       if (intencaoDireta) {
-        return { messages: [`Claro! 😊 ${mensagemCategorias()}`], session: resetaTentativas({ ...session, step: "category" }) };
+        return { messages: [mensagemCategorias()], session: resetaTentativas({ ...session, step: "category" }) };
       }
       return respostaInvalida(`  1️⃣ Mais uma pizza\n  2️⃣ Quero mais alguma coisa\n  3️⃣ Não, pode fechar\n\n_(Digite *voltar* para corrigir a etapa anterior)_`, session);
     }
@@ -925,12 +925,12 @@ export function processMessage(input: string, session: BotSession): BotResponse 
         n.includes("nao tem") || n.includes("pode seguir") || n.includes("pode continuar");
       if (semObservacao) {
         return {
-          messages: [`Combinado! Como prefere receber? 😊\n\n  1. Entrega (delivery) 🛵\n  2. Buscar na loja 🏪\n\n_(Digite *voltar* para corrigir a etapa anterior)_`],
+          messages: [`Entrega ou retirada?\n\n  1. Entrega (delivery) 🛵\n  2. Buscar na loja 🏪\n\n_(Digite *voltar* para corrigir a etapa anterior)_`],
           session: resetaTentativas({ ...session, step: "delivery_type", observacao: undefined }),
         };
       }
       return {
-        messages: [`Anotei: _"${text}"_ ✏️\n\nComo prefere receber? 😊\n\n  1. Entrega (delivery) 🛵\n  2. Buscar na loja 🏪\n\n_(Digite *voltar* para corrigir a etapa anterior)_`],
+        messages: [`Anotei: _"${text}"_ ✏️\n\nEntrega ou retirada?\n\n  1. Entrega (delivery) 🛵\n  2. Buscar na loja 🏪\n\n_(Digite *voltar* para corrigir a etapa anterior)_`],
         session: resetaTentativas({ ...session, step: "delivery_type", observacao: text }),
       };
     }
@@ -941,15 +941,15 @@ export function processMessage(input: string, session: BotSession): BotResponse 
           const nbFound = MENU.neighborhoods.find(nb => nb.name === hist.ultimoNeighborhood);
           const fee = nbFound?.fee || hist.ultimoDeliveryFee || 0;
           return {
-            messages: [`Entregar no mesmo endereço de antes? 📍\n\n*${hist.ultimoEndereco} - ${hist.ultimoNeighborhood}*\n\n  1. Sim, mesmo endereço\n  2. Não, quero outro endereço`],
+            messages: [`Mesmo endereço de antes? 📍\n\n*${hist.ultimoEndereco} - ${hist.ultimoNeighborhood}*\n\n  1. Sim\n  2. Não, quero outro`],
             session: resetaTentativas({ ...session, step: "confirm_address", deliveryType: "delivery", neighborhood: hist.ultimoNeighborhood, deliveryFee: fee, address: hist.ultimoEndereco }),
           };
         }
-        return { messages: [`Ótimo! Qual seu bairro? 🛵\n\n${neighborhoodList()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "neighborhood", deliveryType: "delivery" }) };
+        return { messages: [`Qual é o seu bairro? 🛵\n\n${neighborhoodList()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "neighborhood", deliveryType: "delivery" }) };
       }
       if (n === "2" || n.includes("retirar") || n.includes("loja") || n.includes("buscar") || n.includes("pegar") || n.includes("retiro")) {
         const payList = MENU.payments.map((p, i) => `  ${i + 1}. ${p}`).join("\n");
-        return { messages: [`Combinado, você retira aqui na loja! 🏪\n\nComo vai pagar?\n\n${payList}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "payment", deliveryType: "pickup", deliveryFee: 0, neighborhood: undefined }) };
+        return { messages: [`Retirada na loja! 🏪\n\nComo vai pagar?\n\n${payList}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "payment", deliveryType: "pickup", deliveryFee: 0, neighborhood: undefined }) };
       }
       return respostaInvalida(`  1. Entrega (delivery) 🛵\n  2. Buscar na loja 🏪\n\n_(Digite *voltar* para corrigir a etapa anterior)_`, session);
     }
@@ -959,22 +959,22 @@ export function processMessage(input: string, session: BotSession): BotResponse 
       if (!isNaN(num) && num >= 1 && num <= MENU.neighborhoods.length) found = MENU.neighborhoods[num - 1];
       else found = MENU.neighborhoods.find((nb) => normalizar(nb.name).includes(n));
       if (!found) return respostaInvalida(`${neighborhoodList()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`, session);
-      return { messages: [`*${found.name}*, taxa de entrega: *${formatCurrency(found.fee)}* 🛵\n\nMe passa o endereço completo:\n_(Rua, número e complemento)_\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "address", neighborhood: found.name, deliveryFee: found.fee }) };
+      return { messages: [`Taxa de entrega pro *${found.name}*: *${formatCurrency(found.fee)}* 🛵\n\nMe passa o endereço:\n_(Rua, número e complemento)_\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "address", neighborhood: found.name, deliveryFee: found.fee }) };
     }
     case "confirm_address": {
       const payList = MENU.payments.map((p, i) => `  ${i + 1}. ${p}`).join("\n");
       if (ePositiva(n) || n === "1") {
-        return { messages: [`Ótimo! 📍 *${session.address} - ${session.neighborhood}*\n\nComo vai pagar?\n\n${payList}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "payment" }) };
+        return { messages: [`Perfeito! 📍 *${session.address} - ${session.neighborhood}*\n\nComo vai pagar?\n\n${payList}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "payment" }) };
       }
       if (eNegativa(n) || n === "2") {
-        return { messages: [`Tudo bem! Qual seu bairro? 🛵\n\n${neighborhoodList()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "neighborhood", address: undefined }) };
+        return { messages: [`Ok! Qual é o bairro? 🛵\n\n${neighborhoodList()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "neighborhood", address: undefined }) };
       }
       return respostaInvalida(`  1. Sim, mesmo endereço\n  2. Não, quero outro endereço`, session);
     }
     case "address": {
       if (!text || text.length < 5) return respostaInvalida("Me passa o endereço completo.\nExemplo: *Rua das Flores, 123, Apto 2*\n\n_(Digite *voltar* para corrigir a etapa anterior)_", session);
       const payList = MENU.payments.map((p, i) => `  ${i + 1}. ${p}`).join("\n");
-      return { messages: [`Endereço anotado! 📍 Como vai pagar?\n\n${payList}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "payment", address: text }) };
+      return { messages: [`Anotado! 📍 Como vai pagar?\n\n${payList}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "payment", address: text }) };
     }
     case "payment": {
       let payment = "";
@@ -984,7 +984,7 @@ export function processMessage(input: string, session: BotSession): BotResponse 
       if (!payment) return respostaInvalida(`${MENU.payments.map((p, i) => `  ${i + 1}. ${p}`).join("\n")}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`, session);
       const updatedSession = { ...session, paymentMethod: payment };
       if (payment === "Dinheiro") {
-        return { messages: [`Combinado! 💵 Vai precisar de troco?\n\nSe sim, me diz o valor que vai pagar. Ex: *100*\nSe não, é só digitar *não*`], session: resetaTentativas({ ...updatedSession, step: "troco", paymentMethod: "Dinheiro" }) };
+        return { messages: [`Precisa de troco? 💵\n\nSe sim, me diz o valor. Ex: *100*\nSe não, é só digitar *não*`], session: resetaTentativas({ ...updatedSession, step: "troco", paymentMethod: "Dinheiro" }) };
       }
       const receipt = buildReceipt(updatedSession);
       return { messages: [`Confere seu pedido 👇\n\n${receipt}\n\nTá certinho?\n  ✅ *1.* Confirmar\n  ❌ *2.* Cancelar`], session: resetaTentativas({ ...updatedSession, step: "confirm" }) };
@@ -1014,13 +1014,13 @@ export function processMessage(input: string, session: BotSession): BotResponse 
         (eNegativa(n) && !n.includes("nao obrigado"));
       if (confirma) {
         if (session.paymentMethod === "Pix") {
-          return { messages: [`Ótimo! 😊 Para finalizar, envie o comprovante do Pix.\n\nChave Pix: (configurada pelo admin) 💸\n\nAssim que confirmarmos o pagamento, seu pedido vai direto pra cozinha! 🍕`], session: { ...session, step: "aguardando_pix" } };
+          return { messages: [`Para finalizar, manda o comprovante do Pix! 💸\n\nChave Pix: (configurada pelo admin)\n\nAssim que confirmar, já vai pra cozinha! 🍕`], session: { ...session, step: "aguardando_pix" } };
         }
         const timeMsg = session.deliveryType === "delivery" ? CONFIG_BOT.tempoEntregaDelivery : CONFIG_BOT.tempoEntregaRetirada;
         return { messages: [`Pedido confirmado! 🎉 Já foi pra cozinha!\n\nObrigado, *${session.customerName?.split(" ")[0]}*! Sua pizza chega em *${timeMsg}* 🛵\n\nQualquer dúvida é só chamar. Bom apetite! 🍕`], session: { ...session, step: "done" } };
       }
       if (retira) {
-        return { messages: [`Tudo bem, pedido cancelado! Se mudar de ideia é só chamar. 😊`], session: { ...session, step: "done" } };
+        return { messages: [`Pedido cancelado! Se mudar de ideia, é só chamar.`], session: { ...session, step: "done" } };
       }
       return respostaInvalida(`  ✅ *1.* Confirmar\n  ❌ *2.* Cancelar`, session);
     }
@@ -1033,12 +1033,12 @@ export function processMessage(input: string, session: BotSession): BotResponse 
       if (!lanche) lanche = MENU.lanches.find((l) => n.includes(normalizar(l.name)));
       if (!lanche) return respostaInvalida(listaLanches(), session);
       if (lanche.name === "Macarronada de Carne") {
-        return { messages: [`Ótima escolha! 😋 Qual tamanho da *Macarronada de Carne*?\n\n  1. Pequena (P) · *R$ 28,00*\n  2. Média (M) · *R$ 40,00*\n  3. Grande (G) · *R$ 50,00*\n\n_(Bacon ou ovos: acréscimo de R$ 10,00)_`], session: resetaTentativas({ ...session, step: "lanche_macarronada_size", currentLanche: lanche.name }) };
+        return { messages: [`Qual tamanho da *Macarronada de Carne*?\n\n  1. Pequena (P) · *R$ 28,00*\n  2. Média (M) · *R$ 40,00*\n  3. Grande (G) · *R$ 50,00*\n\n_(Bacon ou ovos: acréscimo de R$ 10,00)_`], session: resetaTentativas({ ...session, step: "lanche_macarronada_size", currentLanche: lanche.name }) };
       }
       if (lanche.hasFlavors) {
         const flavors = MENU[lanche.flavorsKey as keyof typeof MENU] as string[];
         const lista = flavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n");
-        return { messages: [`*${lanche.name}* selecionado! 😋 Qual sabor?\n\n${lista}`], session: resetaTentativas({ ...session, step: "lanche_flavor", currentLanche: lanche.name }) };
+        return { messages: [`Qual sabor do *${lanche.name}*?\n\n${lista}`], session: resetaTentativas({ ...session, step: "lanche_flavor", currentLanche: lanche.name }) };
       }
       const newItem: CartItem = { category: "lanche", name: lanche.name, price: lanche.price };
       const newCart = [...session.cart, newItem];
