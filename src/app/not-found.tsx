@@ -1,147 +1,155 @@
 import Link from "next/link";
 
 export const metadata = {
-  title: "Página não encontrada — ChefeBot",
+  title: "404 — Página não encontrada | ChefeBot",
 };
 
 export default function NotFound() {
   return (
     <>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;700;900&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Archivo+Black&family=Archivo:wght@400;500;700&display=swap');
 
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
         @keyframes fadeIn {
-          from { opacity: 0; transform: translateY(28px) scale(0.97); }
-          to   { opacity: 1; transform: translateY(0) scale(1); }
+          from { opacity: 0; transform: translateY(18px); }
+          to   { opacity: 1; transform: translateY(0); }
         }
-        @keyframes pizzaSpin {
-          from { opacity: 0; transform: scale(0.5) rotate(-20deg); }
-          to   { opacity: 1; transform: scale(1) rotate(0deg); }
+        @keyframes float {
+          0%, 100% { transform: translateY(0px)    rotate(0deg);  }
+          35%       { transform: translateY(-16px)  rotate(6deg);  }
+          65%       { transform: translateY(-9px)   rotate(-4deg); }
         }
-        @keyframes glowPulse {
-          0%, 100% { box-shadow: 0 0 48px rgba(255,107,0,0.40), 0 8px 32px rgba(255,107,0,0.28); }
-          50%       { box-shadow: 0 0 80px rgba(255,107,0,0.65), 0 16px 48px rgba(255,107,0,0.42); }
-        }
-        @keyframes btnHover {
-          from { box-shadow: 0 6px 28px rgba(255,107,0,0.38); }
-          to   { box-shadow: 0 8px 36px rgba(255,107,0,0.55); }
+        @keyframes bgPulse {
+          0%, 100% { opacity: 1; }
+          50%       { opacity: 0.6; }
         }
 
-        .not-found-wrap {
+        /* ── Page shell ──────────────────────────────── */
+        .nf-page {
+          position: relative;
           min-height: 100svh;
+          overflow: hidden;
           background: #060606;
-          background-image: radial-gradient(ellipse 70% 45% at 50% 0%, rgba(255,107,0,0.07) 0%, transparent 70%);
+          background-image:
+            radial-gradient(ellipse 85% 65% at 50% 48%,
+              rgba(255,107,0,0.08) 0%,
+              transparent 62%);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding:
+            calc(env(safe-area-inset-top)    + 48px) 24px
+            calc(env(safe-area-inset-bottom) + 48px);
+          font-family: 'Archivo', sans-serif;
+          text-align: center;
+        }
+
+        /* ── Decorative background "404" ─────────────── */
+        .nf-bg {
+          position: absolute;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          font-family: 'Archivo Black', 'Archivo', sans-serif;
+          font-weight: 900;
+          font-size: clamp(180px, 46vw, 760px);
+          line-height: 0.85;
+          letter-spacing: -6px;
+          color: rgba(255, 107, 0, 0.06);
+          white-space: nowrap;
+          user-select: none;
+          pointer-events: none;
+          z-index: 0;
+          animation: bgPulse 6s ease-in-out infinite;
+        }
+
+        /* ── Foreground content ──────────────────────── */
+        .nf-content {
+          position: relative;
+          z-index: 1;
           display: flex;
           flex-direction: column;
           align-items: center;
-          justify-content: center;
-          padding: calc(env(safe-area-inset-top) + 48px) 24px calc(env(safe-area-inset-bottom) + 48px);
-          font-family: 'Archivo', sans-serif;
-          text-align: center;
-          overflow: hidden;
-        }
-
-        .not-found-inner {
           width: 100%;
-          max-width: 400px;
-          animation: fadeIn 0.55s cubic-bezier(0.22,1,0.36,1) both;
+          max-width: 440px;
+          animation: fadeIn 0.5s cubic-bezier(0.22,1,0.36,1) 0.08s both;
         }
 
-        .not-found-pizza {
-          width: 104px;
-          height: 104px;
-          background: linear-gradient(145deg, #ff7a1a, #ff5500);
-          border-radius: 30px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: 52px;
-          margin: 0 auto 32px;
+        /* Emoji floats on its own wrapper — no transform conflict */
+        .nf-emoji-wrap {
+          font-size: clamp(60px, 15vw, 88px);
           line-height: 1;
+          margin-bottom: 32px;
           user-select: none;
-          flex-shrink: 0;
-          animation:
-            pizzaSpin 0.6s cubic-bezier(0.34,1.56,0.64,1) 0.1s both,
-            glowPulse 3s ease-in-out 0.8s infinite;
+          display: block;
+          animation: float 4.8s ease-in-out infinite;
         }
 
-        .not-found-code {
-          color: #ff6b00;
-          font-size: 13px;
-          font-weight: 700;
-          letter-spacing: 2.5px;
-          text-transform: uppercase;
-          margin-bottom: 16px;
-          opacity: 0.85;
-        }
-
-        .not-found-title {
-          color: #f4f1ec;
-          font-size: 28px;
+        .nf-title {
+          font-family: 'Archivo Black', 'Archivo', sans-serif;
+          font-size: clamp(54px, 14vw, 84px);
           font-weight: 900;
-          letter-spacing: -0.9px;
-          line-height: 1.15;
-          margin-bottom: 14px;
+          color: #ffffff;
+          letter-spacing: -2.5px;
+          line-height: 1;
+          margin-bottom: 16px;
         }
 
-        .not-found-sub {
-          color: #6b6259;
+        .nf-sub {
+          color: #a39b8b;
+          font-size: clamp(15px, 3.5vw, 17px);
+          font-weight: 400;
+          line-height: 1.65;
+          margin-bottom: 48px;
+          max-width: 280px;
+        }
+
+        .nf-link {
+          color: #ff6b00;
+          font-family: 'Archivo', sans-serif;
           font-size: 15px;
-          font-weight: 500;
-          line-height: 1.55;
-          margin-bottom: 40px;
+          font-weight: 700;
           letter-spacing: 0.1px;
-        }
-
-        .not-found-btn {
+          text-decoration: none;
           display: inline-flex;
           align-items: center;
-          justify-content: center;
-          gap: 8px;
-          background: linear-gradient(135deg, #ff7a1a 0%, #ff5500 100%);
-          color: #fff;
-          font-family: 'Archivo', sans-serif;
-          font-size: 16px;
-          font-weight: 800;
-          letter-spacing: -0.3px;
-          text-decoration: none;
-          border-radius: 16px;
-          height: 56px;
-          padding: 0 32px;
-          box-shadow: 0 6px 28px rgba(255,107,0,0.38), 0 2px 8px rgba(255,107,0,0.2);
-          transition: opacity 0.18s, transform 0.15s, box-shadow 0.18s;
+          gap: 7px;
+          padding: 3px 0 4px;
+          border-bottom: 1.5px solid rgba(255,107,0,0);
+          transition: border-color 0.18s, opacity 0.18s, gap 0.2s;
           -webkit-tap-highlight-color: transparent;
-          user-select: none;
         }
 
-        .not-found-btn:hover {
-          opacity: 0.92;
-          transform: translateY(-1px);
-          box-shadow: 0 10px 36px rgba(255,107,0,0.52), 0 4px 12px rgba(255,107,0,0.28);
+        .nf-link:hover {
+          border-bottom-color: rgba(255,107,0,0.4);
+          gap: 11px;
         }
 
-        .not-found-btn:active {
-          transform: scale(0.97);
-          opacity: 1;
+        .nf-link:active {
+          opacity: 0.6;
+        }
+
+        @media (min-width: 768px) {
+          .nf-content { max-width: 560px; }
+          .nf-sub { max-width: 360px; }
+          .nf-link { font-size: 16px; }
         }
       `}</style>
 
-      <div className="not-found-wrap">
-        <div className="not-found-inner">
-          <div className="not-found-pizza" aria-hidden="true">🍕</div>
+      <div className="nf-page">
+        <span className="nf-bg" aria-hidden="true">404</span>
 
-          <p className="not-found-code">Erro 404</p>
+        <div className="nf-content">
+          <span className="nf-emoji-wrap" aria-hidden="true">🍕</span>
 
-          <h1 className="not-found-title">Ops, essa página sumiu!</h1>
+          <h1 className="nf-title">Ooops!</h1>
 
-          <p className="not-found-sub">
-            Mas sua pizza não vai sumir não 😄
-          </p>
+          <p className="nf-sub">Essa página parece ter evaporado</p>
 
-          <Link href="/" className="not-found-btn">
-            ← Voltar ao início
+          <Link href="/" className="nf-link">
+            ← Voltar para o início
           </Link>
         </div>
       </div>
