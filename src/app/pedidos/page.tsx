@@ -123,13 +123,19 @@ export default function PedidosPage() {
     if (muteadoRef.current) return
     try {
       const Ctx = (window as any).AudioContext || (window as any).webkitAudioContext
-      const ctx = new Ctx(); const osc = ctx.createOscillator(); const gain = ctx.createGain()
-      osc.connect(gain); gain.connect(ctx.destination); osc.type = "sine"
-      osc.frequency.setValueAtTime(660, ctx.currentTime)
-      gain.gain.setValueAtTime(0.12, ctx.currentTime); gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4)
-      osc.start(); osc.stop(ctx.currentTime + 0.4)
+      const ctx = new Ctx()
+      const bipe = (freq: number, delay: number) => setTimeout(() => {
+        try {
+          const osc = ctx.createOscillator(); const gain = ctx.createGain()
+          osc.connect(gain); gain.connect(ctx.destination); osc.type = "square"
+          osc.frequency.value = freq
+          gain.gain.setValueAtTime(0.4, ctx.currentTime); gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.18)
+          osc.start(); osc.stop(ctx.currentTime + 0.18)
+        } catch {}
+      }, delay)
+      bipe(880, 0); bipe(880, 200); bipe(1175, 400)
     } catch {}
-    if (navigator.vibrate) navigator.vibrate([80])
+    if (navigator.vibrate) navigator.vibrate([120, 80, 120, 80, 150])
   }
 
   const tocarSomUrgente = () => {
@@ -137,15 +143,18 @@ export default function PedidosPage() {
     try {
       const Ctx = (window as any).AudioContext || (window as any).webkitAudioContext
       const ctx = new Ctx()
-      ;[0, 0.18, 0.36].forEach(t => {
-        const osc = ctx.createOscillator(); const gain = ctx.createGain()
-        osc.connect(gain); gain.connect(ctx.destination); osc.type = "square"
-        osc.frequency.setValueAtTime(880, ctx.currentTime + t)
-        gain.gain.setValueAtTime(0, ctx.currentTime + t); gain.gain.linearRampToValueAtTime(0.2, ctx.currentTime + t + 0.02); gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + t + 0.12)
-        osc.start(ctx.currentTime + t); osc.stop(ctx.currentTime + t + 0.12)
-      })
+      const bipe = (delay: number) => setTimeout(() => {
+        try {
+          const osc = ctx.createOscillator(); const gain = ctx.createGain()
+          osc.connect(gain); gain.connect(ctx.destination); osc.type = "sawtooth"
+          osc.frequency.value = 1200
+          gain.gain.setValueAtTime(0.6, ctx.currentTime); gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.14)
+          osc.start(); osc.stop(ctx.currentTime + 0.14)
+        } catch {}
+      }, delay)
+      bipe(0); bipe(180); bipe(360); bipe(540)
     } catch {}
-    if (navigator.vibrate) navigator.vibrate([100, 50, 100, 50, 100])
+    if (navigator.vibrate) navigator.vibrate([150, 50, 150, 50, 150, 50, 200])
   }
 
   const tocarSomPix = () => {
@@ -153,16 +162,17 @@ export default function PedidosPage() {
     try {
       const Ctx = (window as any).AudioContext || (window as any).webkitAudioContext
       const ctx = new Ctx()
-      ;[523.25, 659.25, 783.99].forEach((freq, i) => {
-        const osc = ctx.createOscillator(); const gain = ctx.createGain()
-        osc.connect(gain); gain.connect(ctx.destination); osc.type = "sine"
-        const t = ctx.currentTime + i * 0.14
-        osc.frequency.setValueAtTime(freq, t)
-        gain.gain.setValueAtTime(0.15, t); gain.gain.exponentialRampToValueAtTime(0.001, t + 0.28)
-        osc.start(t); osc.stop(t + 0.28)
-      })
+      ;[523, 659, 784, 1047].forEach((freq, i) => setTimeout(() => {
+        try {
+          const osc = ctx.createOscillator(); const gain = ctx.createGain()
+          osc.connect(gain); gain.connect(ctx.destination); osc.type = "sine"
+          osc.frequency.value = freq
+          gain.gain.setValueAtTime(0.3, ctx.currentTime); gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.2)
+          osc.start(); osc.stop(ctx.currentTime + 0.2)
+        } catch {}
+      }, i * 160))
     } catch {}
-    if (navigator.vibrate) navigator.vibrate([50, 50, 50])
+    if (navigator.vibrate) navigator.vibrate([60, 40, 60, 40, 80])
   }
 
   const tocarSomEntrega = () => {
@@ -170,16 +180,17 @@ export default function PedidosPage() {
     try {
       const Ctx = (window as any).AudioContext || (window as any).webkitAudioContext
       const ctx = new Ctx()
-      ;[783.99, 523.25].forEach((freq, i) => {
-        const osc = ctx.createOscillator(); const gain = ctx.createGain()
-        osc.connect(gain); gain.connect(ctx.destination); osc.type = "sine"
-        const t = ctx.currentTime + i * 0.22
-        osc.frequency.setValueAtTime(freq, t)
-        gain.gain.setValueAtTime(0.15, t); gain.gain.exponentialRampToValueAtTime(0.001, t + 0.38)
-        osc.start(t); osc.stop(t + 0.38)
-      })
+      ;[[523, 0], [392, 320]].forEach(([freq, delay]) => setTimeout(() => {
+        try {
+          const osc = ctx.createOscillator(); const gain = ctx.createGain()
+          osc.connect(gain); gain.connect(ctx.destination); osc.type = "sine"
+          osc.frequency.value = freq
+          gain.gain.setValueAtTime(0.3, ctx.currentTime); gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35)
+          osc.start(); osc.stop(ctx.currentTime + 0.35)
+        } catch {}
+      }, delay))
     } catch {}
-    if (navigator.vibrate) navigator.vibrate([120, 60, 200])
+    if (navigator.vibrate) navigator.vibrate([150, 80, 250])
   }
 
   const iniciarPiscar = () => {
