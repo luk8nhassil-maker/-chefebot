@@ -82,7 +82,7 @@ export default function RelatoriosPage() {
         </div>
         <button
           onClick={() => fetch('/api/auth/logout', { method: 'POST' }).then(() => router.push('/login'))}
-          style={{ background: CARD, border: BORDER, color: TEXT2, borderRadius: 8, padding: '8px 14px', cursor: 'pointer', fontSize: 12, minHeight: 40, flexShrink: 0, fontFamily: FONT }}
+          style={{ background: CARD, border: BORDER, color: TEXT2, borderRadius: 8, padding: '8px 14px', cursor: 'pointer', fontSize: 12, minHeight: 48, flexShrink: 0, fontFamily: FONT }}
         >
           Sair
         </button>

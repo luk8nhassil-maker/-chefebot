@@ -108,7 +108,7 @@ export default function FinanceiroPage() {
             <p style={{ color: '#a39b8b', fontSize: 10, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{mesLabel}</p>
           </div>
         </div>
-        <button onClick={() => fetch('/api/auth/logout', { method: 'POST' }).then(() => router.push('/login'))} style={{ background: '#101010', border: '1px solid #1f1d1a', color: '#a39b8b', borderRadius: 8, padding: '8px 14px', cursor: 'pointer', fontSize: 12, minHeight: 40, flexShrink: 0, fontFamily: "'Archivo', sans-serif" }}>Sair</button>
+        <button onClick={() => fetch('/api/auth/logout', { method: 'POST' }).then(() => router.push('/login'))} style={{ background: '#101010', border: '1px solid #1f1d1a', color: '#a39b8b', borderRadius: 8, padding: '8px 14px', cursor: 'pointer', fontSize: 12, minHeight: 48, flexShrink: 0, fontFamily: "'Archivo', sans-serif" }}>Sair</button>
       </div>
 
       {mensagem && (
@@ -121,17 +121,17 @@ export default function FinanceiroPage() {
 
         {/* Resumo do mês */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 16 }}>
-          <div style={{ background: '#101010', border: '1px solid #1f1d1a', borderRadius: 14, padding: 14 }}>
-            <p style={{ color: '#555', fontSize: 9, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 6px', letterSpacing: 0.5 }}>Faturamento</p>
-            <p style={{ color: '#4ade80', fontSize: 16, fontWeight: 800, margin: 0 }}>R$ {faturamento.toFixed(2).replace('.', ',')}</p>
+          <div style={{ background: '#101010', border: '1px solid #1f1d1a', borderRadius: 14, padding: 14, minWidth: 0 }}>
+            <p style={{ color: '#555', fontSize: 9, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 6px', letterSpacing: 0.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Faturamento</p>
+            <p style={{ color: '#4ade80', fontSize: 16, fontWeight: 800, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>R$ {faturamento.toFixed(2).replace('.', ',')}</p>
           </div>
-          <div style={{ background: '#101010', border: '1px solid #1f1d1a', borderRadius: 14, padding: 14 }}>
-            <p style={{ color: '#555', fontSize: 9, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 6px', letterSpacing: 0.5 }}>Custos</p>
-            <p style={{ color: '#f87171', fontSize: 16, fontWeight: 800, margin: 0 }}>R$ {totalCustos.toFixed(2).replace('.', ',')}</p>
+          <div style={{ background: '#101010', border: '1px solid #1f1d1a', borderRadius: 14, padding: 14, minWidth: 0 }}>
+            <p style={{ color: '#555', fontSize: 9, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 6px', letterSpacing: 0.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Custos</p>
+            <p style={{ color: '#f87171', fontSize: 16, fontWeight: 800, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>R$ {totalCustos.toFixed(2).replace('.', ',')}</p>
           </div>
-          <div style={{ background: '#111', border: `1px solid ${lucro >= 0 ? '#16a34a30' : '#dc262630'}`, borderRadius: 14, padding: 14 }}>
-            <p style={{ color: '#555', fontSize: 9, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 6px', letterSpacing: 0.5 }}>Lucro</p>
-            <p style={{ color: lucro >= 0 ? '#4ade80' : '#f87171', fontSize: 16, fontWeight: 800, margin: 0 }}>R$ {lucro.toFixed(2).replace('.', ',')}</p>
+          <div style={{ background: '#111', border: `1px solid ${lucro >= 0 ? '#16a34a30' : '#dc262630'}`, borderRadius: 14, padding: 14, minWidth: 0 }}>
+            <p style={{ color: '#555', fontSize: 9, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 6px', letterSpacing: 0.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Lucro</p>
+            <p style={{ color: lucro >= 0 ? '#4ade80' : '#f87171', fontSize: 16, fontWeight: 800, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>R$ {lucro.toFixed(2).replace('.', ',')}</p>
           </div>
         </div>
 
@@ -176,8 +176,8 @@ export default function FinanceiroPage() {
                 const cat = CATEGORIAS.find(cat => cat.key === c.categoria)
                 return (
                   <div key={c.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#0a0a0a', borderRadius: 10, padding: '10px 12px' }}>
-                    <div>
-                      <p style={{ color: '#f4f1ec', fontSize: 13, fontWeight: 600, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 180 }}>{c.descricao}</p>
+                    <div style={{ flex: 1, minWidth: 0, marginRight: 8 }}>
+                      <p style={{ color: '#f4f1ec', fontSize: 13, fontWeight: 600, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.descricao}</p>
                       <p style={{ color: '#a39b8b', fontSize: 11, margin: '2px 0 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cat?.label} · {c.data}</p>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

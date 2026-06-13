@@ -72,7 +72,7 @@ const inputStyle: React.CSSProperties = {
   borderRadius: 10,
   padding: '13px 14px',
   color: TEXT,
-  fontSize: 15,
+  fontSize: 16,
   outline: 'none',
   boxSizing: 'border-box',
   minHeight: 50,
@@ -101,6 +101,7 @@ const btnAdicionar: React.CSSProperties = {
   whiteSpace: 'nowrap',
   minHeight: 48,
   fontFamily: FONT,
+  flexShrink: 0,
 }
 
 const tagStyle: React.CSSProperties = {
@@ -115,6 +116,37 @@ const tagStyle: React.CSSProperties = {
   color: TEXT,
   maxWidth: '100%',
   overflow: 'hidden',
+}
+
+const btnRemoveTag: React.CSSProperties = {
+  background: 'none',
+  border: 'none',
+  color: '#f87171',
+  cursor: 'pointer',
+  fontSize: 16,
+  padding: '0 2px',
+  lineHeight: 1,
+  flexShrink: 0,
+  minHeight: 32,
+  minWidth: 32,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+}
+
+const btnRemoveRow: React.CSSProperties = {
+  background: 'none',
+  border: 'none',
+  color: '#f87171',
+  cursor: 'pointer',
+  fontSize: 18,
+  padding: '0 4px',
+  minHeight: 44,
+  minWidth: 44,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  flexShrink: 0,
 }
 
 function SectionCard({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
@@ -249,117 +281,123 @@ export default function ConfiguracoesPage() {
   return (
     <>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800;900&display=swap');`}</style>
-      <div style={{
-        minHeight: '100svh',
-        background: BG,
-        paddingTop: 'calc(env(safe-area-inset-top) + 18px)',
-        paddingBottom: 'calc(env(safe-area-inset-bottom) + 32px)',
-        paddingLeft: 16,
-        paddingRight: 16,
-        fontFamily: FONT,
-        overflowX: 'hidden',
-      }}>
-        <div style={{ maxWidth: 375, margin: '0 auto' }}>
+      <div style={{ minHeight: '100svh', background: BG, fontFamily: FONT, overflowX: 'hidden' }}>
 
-          {/* Header */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24 }}>
+        {/* Sticky Header com safe area */}
+        <div style={{
+          position: 'sticky',
+          top: 0,
+          zIndex: 100,
+          background: '#0a0a0a',
+          borderBottom: '1px solid #1a1a1a',
+          paddingTop: 'calc(env(safe-area-inset-top) + 14px)',
+          paddingBottom: 14,
+          paddingLeft: 16,
+          paddingRight: 16,
+        }}>
+          <div style={{ maxWidth: 375, margin: '0 auto', display: 'flex', alignItems: 'center', gap: 12 }}>
             <button
               onClick={() => router.push('/admin')}
-              style={{ background: 'rgba(255,255,255,0.06)', border: BORDER, color: TEXT2, borderRadius: 10, padding: '10px 14px', cursor: 'pointer', fontSize: 14, minHeight: 44, fontFamily: FONT, fontWeight: 700 }}
+              style={{ background: 'rgba(255,255,255,0.06)', border: BORDER, color: TEXT2, borderRadius: 10, padding: '10px 14px', cursor: 'pointer', fontSize: 14, minHeight: 48, fontFamily: FONT, fontWeight: 700, flexShrink: 0 }}
             >←</button>
-            <div>
-              <h1 style={{ color: TEXT, fontSize: 20, fontWeight: 900, margin: 0, letterSpacing: '-0.3px' }}>Configurações</h1>
-              <p style={{ color: TEXT2, fontSize: 11, fontWeight: 700, margin: '2px 0 0', textTransform: 'uppercase', letterSpacing: '0.5px' }}>ChefeBot · Alto Alegre</p>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <h1 style={{ color: TEXT, fontSize: 20, fontWeight: 900, margin: 0, letterSpacing: '-0.3px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Configurações</h1>
+              <p style={{ color: TEXT2, fontSize: 11, fontWeight: 700, margin: '2px 0 0', textTransform: 'uppercase', letterSpacing: '0.5px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>ChefeBot · Alto Alegre</p>
             </div>
           </div>
+        </div>
 
-          {/* Abas */}
-          <div style={{ display: 'flex', gap: 6, marginBottom: 20, background: '#0d0d0d', border: BORDER, borderRadius: 12, padding: 4 }}>
-            {(['geral', 'cardapio'] as const).map(a => (
-              <button
-                key={a}
-                onClick={() => setAba(a)}
-                style={{ flex: 1, padding: '10px 0', borderRadius: 9, border: 'none', cursor: 'pointer', fontWeight: 800, fontSize: 13, fontFamily: FONT, transition: 'all .15s', background: aba === a ? ACCENT : 'transparent', color: aba === a ? '#fff' : TEXT2 }}
-              >
-                {a === 'geral' ? '⚙️  Geral' : '🍕  Cardápio'}
-              </button>
-            ))}
-          </div>
+        {/* Conteúdo rolável */}
+        <div style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 32px)', paddingLeft: 16, paddingRight: 16, paddingTop: 16 }}>
+          <div style={{ maxWidth: 375, margin: '0 auto' }}>
 
-          {/* ── ABA GERAL ── */}
-          {aba === 'geral' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-
-              {/* Identidade */}
-              <SectionCard>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: -4 }}>
-                  <span style={{ fontSize: 16 }}>🍕</span>
-                  <span style={{ fontSize: 13, fontWeight: 900, color: TEXT, textTransform: 'uppercase', letterSpacing: '0.8px' }}>Identidade</span>
-                </div>
-                <FieldGroup label="Nome da Pizzaria">
-                  <input
-                    type="text"
-                    value={config.nomePizzaria}
-                    onChange={e => setConfig(prev => ({ ...prev, nomePizzaria: e.target.value }))}
-                    style={inputStyle}
-                    placeholder="Ex: Chefe da Pizza"
-                  />
-                </FieldGroup>
-
-                {/* WhatsApp da Pizzaria */}
-                <FieldGroup label="WhatsApp da Pizzaria">
-                  <div style={{ position: 'relative' }}>
-                    <span style={{ position: 'absolute', left: 13, top: '50%', transform: 'translateY(-50%)', fontSize: 15, pointerEvents: 'none' }}>📱</span>
-                    <input
-                      type="tel"
-                      value={config.whatsappPizzaria}
-                      onChange={e => setConfig(prev => ({ ...prev, whatsappPizzaria: e.target.value.replace(/\D/g, '') }))}
-                      style={{ ...inputStyle, paddingLeft: 40 }}
-                      placeholder="5598999999999 (com DDI)"
-                      maxLength={15}
-                    />
-                  </div>
-                  <p style={{ color: '#56524b', fontSize: 11, fontWeight: 700, margin: '6px 0 0' }}>
-                    Usado nos botões "Falar com a pizzaria" · inclua o código do país (55)
-                  </p>
-                </FieldGroup>
-              </SectionCard>
-
-              {/* Horário */}
-              <SectionCard>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: -4 }}>
-                  <span style={{ fontSize: 16 }}>⏰</span>
-                  <span style={{ fontSize: 13, fontWeight: 900, color: TEXT, textTransform: 'uppercase', letterSpacing: '0.8px' }}>Horário de Funcionamento</span>
-                </div>
+            {/* Abas */}
+            <div style={{ display: 'flex', gap: 6, marginBottom: 20, background: '#0d0d0d', border: BORDER, borderRadius: 12, padding: 4 }}>
+              {(['geral', 'cardapio'] as const).map(a => (
                 <button
-                  onClick={toggle24h}
-                  disabled={salvando}
-                  style={{ width: '100%', background: is24h ? 'rgba(34,197,94,.1)' : 'rgba(255,255,255,.04)', border: `1.5px solid ${is24h ? 'rgba(34,197,94,.4)' : '#1f1d1a'}`, borderRadius: 12, padding: '13px 16px', color: is24h ? '#4ade80' : TEXT2, fontSize: 13, fontWeight: 800, cursor: salvando ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 48, fontFamily: FONT, letterSpacing: '-0.1px' }}
+                  key={a}
+                  onClick={() => setAba(a)}
+                  style={{ flex: 1, padding: '10px 0', minHeight: 48, borderRadius: 9, border: 'none', cursor: 'pointer', fontWeight: 800, fontSize: 13, fontFamily: FONT, transition: 'all .15s', background: aba === a ? ACCENT : 'transparent', color: aba === a ? '#fff' : TEXT2 }}
                 >
-                  {is24h ? '✅ Aberto 24h — clique para voltar ao horário normal' : '🕐 Ativar funcionamento 24 horas'}
+                  {a === 'geral' ? '⚙️  Geral' : '🍕  Cardápio'}
                 </button>
-                <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
-                  <FieldGroup label="Abre às (h)">
-                    <input type="number" min={0} max={23} value={config.horaAbertura} onChange={e => setConfig(prev => ({ ...prev, horaAbertura: Number(e.target.value) }))} style={{ ...inputStyle, width: 90 }} />
-                  </FieldGroup>
-                  <span style={{ color: TEXT2, fontSize: 18, fontWeight: 900, paddingBottom: 13 }}>→</span>
-                  <FieldGroup label="Fecha às (h)">
-                    <input type="number" min={0} max={24} value={config.horaFechamento} onChange={e => setConfig(prev => ({ ...prev, horaFechamento: Number(e.target.value) }))} style={{ ...inputStyle, width: 90 }} />
-                  </FieldGroup>
-                </div>
-              </SectionCard>
+              ))}
+            </div>
 
-              {/* Tempo de entrega */}
-              <SectionCard>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: -4 }}>
-                  <span style={{ fontSize: 16 }}>🛵</span>
-                  <span style={{ fontSize: 13, fontWeight: 900, color: TEXT, textTransform: 'uppercase', letterSpacing: '0.8px' }}>Tempo Estimado de Entrega</span>
-                </div>
-                <p style={{ color: '#56524b', fontSize: 11, fontWeight: 700, margin: '-10px 0 -4px' }}>
-                  O bot usa esse texto na confirmação do pedido
-                </p>
-                <FieldGroup label="Delivery 🛵">
-                  <div style={{ position: 'relative' }}>
+            {/* ── ABA GERAL ── */}
+            {aba === 'geral' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+
+                {/* Identidade */}
+                <SectionCard>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: -4 }}>
+                    <span style={{ fontSize: 16, flexShrink: 0 }}>🍕</span>
+                    <span style={{ fontSize: 13, fontWeight: 900, color: TEXT, textTransform: 'uppercase', letterSpacing: '0.8px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Identidade</span>
+                  </div>
+                  <FieldGroup label="Nome da Pizzaria">
+                    <input
+                      type="text"
+                      value={config.nomePizzaria}
+                      onChange={e => setConfig(prev => ({ ...prev, nomePizzaria: e.target.value }))}
+                      style={inputStyle}
+                      placeholder="Ex: Chefe da Pizza"
+                    />
+                  </FieldGroup>
+
+                  <FieldGroup label="WhatsApp da Pizzaria">
+                    <div style={{ position: 'relative' }}>
+                      <span style={{ position: 'absolute', left: 13, top: '50%', transform: 'translateY(-50%)', fontSize: 15, pointerEvents: 'none' }}>📱</span>
+                      <input
+                        type="tel"
+                        value={config.whatsappPizzaria}
+                        onChange={e => setConfig(prev => ({ ...prev, whatsappPizzaria: e.target.value.replace(/\D/g, '') }))}
+                        style={{ ...inputStyle, paddingLeft: 40 }}
+                        placeholder="5598999999999 (com DDI)"
+                        maxLength={15}
+                      />
+                    </div>
+                    <p style={{ color: '#56524b', fontSize: 11, fontWeight: 700, margin: '6px 0 0' }}>
+                      Botão "Falar com a pizzaria" · inclua o código do país (55)
+                    </p>
+                  </FieldGroup>
+                </SectionCard>
+
+                {/* Horário */}
+                <SectionCard>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: -4 }}>
+                    <span style={{ fontSize: 16, flexShrink: 0 }}>⏰</span>
+                    <span style={{ fontSize: 13, fontWeight: 900, color: TEXT, textTransform: 'uppercase', letterSpacing: '0.8px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Horário de Funcionamento</span>
+                  </div>
+                  <button
+                    onClick={toggle24h}
+                    disabled={salvando}
+                    style={{ width: '100%', background: is24h ? 'rgba(34,197,94,.1)' : 'rgba(255,255,255,.04)', border: `1.5px solid ${is24h ? 'rgba(34,197,94,.4)' : '#1f1d1a'}`, borderRadius: 12, padding: '13px 16px', color: is24h ? '#4ade80' : TEXT2, fontSize: 13, fontWeight: 800, cursor: salvando ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 48, fontFamily: FONT, letterSpacing: '-0.1px' }}
+                  >
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {is24h ? '✅ Aberto 24h — toque para voltar ao normal' : '🕐 Ativar funcionamento 24 horas'}
+                    </span>
+                  </button>
+                  <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
+                    <FieldGroup label="Abre às (h)">
+                      <input type="number" min={0} max={23} value={config.horaAbertura} onChange={e => setConfig(prev => ({ ...prev, horaAbertura: Number(e.target.value) }))} style={{ ...inputStyle, width: 90 }} />
+                    </FieldGroup>
+                    <span style={{ color: TEXT2, fontSize: 18, fontWeight: 900, paddingBottom: 13 }}>→</span>
+                    <FieldGroup label="Fecha às (h)">
+                      <input type="number" min={0} max={24} value={config.horaFechamento} onChange={e => setConfig(prev => ({ ...prev, horaFechamento: Number(e.target.value) }))} style={{ ...inputStyle, width: 90 }} />
+                    </FieldGroup>
+                  </div>
+                </SectionCard>
+
+                {/* Tempo de entrega */}
+                <SectionCard>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: -4 }}>
+                    <span style={{ fontSize: 16, flexShrink: 0 }}>🛵</span>
+                    <span style={{ fontSize: 13, fontWeight: 900, color: TEXT, textTransform: 'uppercase', letterSpacing: '0.8px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Tempo Estimado de Entrega</span>
+                  </div>
+                  <p style={{ color: '#56524b', fontSize: 11, fontWeight: 700, margin: '-10px 0 -4px' }}>
+                    O bot usa esse texto na confirmação do pedido
+                  </p>
+                  <FieldGroup label="Delivery 🛵">
                     <input
                       type="text"
                       value={config.tempoEntregaDelivery}
@@ -368,267 +406,265 @@ export default function ConfiguracoesPage() {
                       placeholder="Ex: 40-60 minutos"
                       maxLength={30}
                     />
-                  </div>
-                </FieldGroup>
-                <FieldGroup label="Retirada na loja 🏪">
-                  <input
-                    type="text"
-                    value={config.tempoEntregaRetirada}
-                    onChange={e => setConfig(prev => ({ ...prev, tempoEntregaRetirada: e.target.value }))}
-                    style={inputStyle}
-                    placeholder="Ex: 20-30 minutos"
-                    maxLength={30}
-                  />
-                </FieldGroup>
-
-                {/* Preview */}
-                <div style={{ background: 'rgba(255,107,0,.06)', border: '1px solid rgba(255,107,0,.2)', borderRadius: 12, padding: '12px 14px' }}>
-                  <p style={{ color: TEXT2, fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.5px', margin: '0 0 6px' }}>Preview da mensagem</p>
-                  <p style={{ color: '#c9c2b4', fontSize: 13, fontWeight: 600, margin: 0, lineHeight: 1.5 }}>
-                    "Pedido confirmado! 🎉 Sua pizza chega em <span style={{ color: ACCENT, fontWeight: 900 }}>{config.tempoEntregaDelivery}</span> 🛵"
-                  </p>
-                </div>
-              </SectionCard>
-
-              {/* Pix + Admin — exibido somente para admin */}
-              {isAdmin && (
-                <SectionCard style={{ border: '1px solid rgba(255,200,0,0.15)', background: 'rgba(255,200,0,0.03)' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: -4 }}>
-                    <span style={{ fontSize: 16 }}>💸</span>
-                    <span style={{ fontSize: 13, fontWeight: 900, color: 'rgba(255,220,100,0.9)', textTransform: 'uppercase', letterSpacing: '0.8px' }}>Pagamento</span>
-                    <span style={{ fontSize: 10, background: 'rgba(255,200,0,0.12)', color: 'rgba(255,220,100,0.8)', padding: '2px 8px', borderRadius: 20, fontWeight: 800 }}>Somente Admin</span>
-                  </div>
-                  <FieldGroup label="Chave Pix">
+                  </FieldGroup>
+                  <FieldGroup label="Retirada na loja 🏪">
                     <input
                       type="text"
-                      placeholder="CPF, CNPJ, email ou telefone"
-                      value={config.chavePix}
-                      onChange={e => setConfig(prev => ({ ...prev, chavePix: e.target.value }))}
-                      style={{ ...inputStyle, border: '1px solid rgba(255,200,0,0.2)' }}
+                      value={config.tempoEntregaRetirada}
+                      onChange={e => setConfig(prev => ({ ...prev, tempoEntregaRetirada: e.target.value }))}
+                      style={inputStyle}
+                      placeholder="Ex: 20-30 minutos"
+                      maxLength={30}
                     />
                   </FieldGroup>
-                  <FieldGroup label="Nome do Titular Pix">
-                    <input
-                      type="text"
-                      placeholder="Nome como aparece no Pix"
-                      value={config.nomeTitularPix}
-                      onChange={e => setConfig(prev => ({ ...prev, nomeTitularPix: e.target.value }))}
-                      style={{ ...inputStyle, border: '1px solid rgba(255,200,0,0.2)' }}
-                    />
-                    <p style={{ color: '#56524b', fontSize: 11, fontWeight: 700, margin: '6px 0 0' }}>
-                      Usado na validação automática do comprovante
+
+                  <div style={{ background: 'rgba(255,107,0,.06)', border: '1px solid rgba(255,107,0,.2)', borderRadius: 12, padding: '12px 14px' }}>
+                    <p style={{ color: TEXT2, fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.5px', margin: '0 0 6px' }}>Preview da mensagem</p>
+                    <p style={{ color: '#c9c2b4', fontSize: 13, fontWeight: 600, margin: 0, lineHeight: 1.5 }}>
+                      {"\"Pedido confirmado! 🎉 Sua pizza chega em "}<span style={{ color: ACCENT, fontWeight: 900 }}>{config.tempoEntregaDelivery}</span>{" 🛵\""}
                     </p>
-                  </FieldGroup>
-                  <FieldGroup label="Limite de pedidos simultâneos (pico)">
-                    <input
-                      type="number"
-                      min={0}
-                      value={config.limitePico}
-                      onChange={e => setConfig(prev => ({ ...prev, limitePico: Number(e.target.value) }))}
-                      style={{ ...inputStyle, border: '1px solid rgba(255,200,0,0.2)' }}
-                      placeholder="0 = sem limite"
-                    />
-                    <p style={{ color: '#56524b', fontSize: 11, fontWeight: 700, margin: '6px 0 0' }}>
-                      Acima desse número, o bot avisa sobre demora extra · 0 = desativado
-                    </p>
-                  </FieldGroup>
+                  </div>
                 </SectionCard>
-              )}
 
-              {/* Botão salvar */}
-              <button
-                onClick={salvar}
-                disabled={salvando}
-                style={{ height: 56, background: salvando ? '#1a1208' : `linear-gradient(180deg, ${ACCENT}, #d95e00)`, border: 'none', borderRadius: 14, color: '#fff', fontSize: 16, fontWeight: 900, cursor: salvando ? 'not-allowed' : 'pointer', fontFamily: FONT, letterSpacing: '-0.2px', opacity: salvando ? 0.6 : 1 }}
-              >
-                {salvando ? 'Salvando...' : 'Salvar Configurações'}
-              </button>
-
-              {mensagem && (
-                <div style={{ textAlign: 'center', padding: '12px 16px', background: mensagem.includes('✅') ? 'rgba(34,197,94,.1)' : 'rgba(239,68,68,.1)', border: `1px solid ${mensagem.includes('✅') ? 'rgba(34,197,94,.3)' : 'rgba(239,68,68,.3)'}`, borderRadius: 12 }}>
-                  <p style={{ color: mensagem.includes('✅') ? '#4ade80' : '#f87171', fontWeight: 800, fontSize: 14, margin: 0 }}>{mensagem}</p>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* ── ABA CARDÁPIO ── */}
-          {aba === 'cardapio' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-
-              {/* Sabores Salgados */}
-              <SectionCard>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: -4 }}>
-                  <span style={{ fontSize: 16 }}>🧂</span>
-                  <span style={{ fontSize: 13, fontWeight: 900, color: TEXT, textTransform: 'uppercase', letterSpacing: '0.8px' }}>Sabores Salgados</span>
-                  <span style={{ marginLeft: 'auto', fontSize: 11, color: TEXT2, fontWeight: 700 }}>{cardapio.saltyFlavors.length}</span>
-                </div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
-                  {cardapio.saltyFlavors.map((s, i) => (
-                    <div key={i} style={tagStyle}>
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 120 }}>{s}</span>
-                      <button onClick={() => removerSabor('saltyFlavors', i)} style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: 16, padding: 0, lineHeight: 1, flexShrink: 0 }}>×</button>
+                {/* Pix + Admin */}
+                {isAdmin && (
+                  <SectionCard style={{ border: '1px solid rgba(255,200,0,0.15)', background: 'rgba(255,200,0,0.03)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: -4, flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: 16, flexShrink: 0 }}>💸</span>
+                      <span style={{ fontSize: 13, fontWeight: 900, color: 'rgba(255,220,100,0.9)', textTransform: 'uppercase', letterSpacing: '0.8px' }}>Pagamento</span>
+                      <span style={{ fontSize: 10, background: 'rgba(255,200,0,0.12)', color: 'rgba(255,220,100,0.8)', padding: '2px 8px', borderRadius: 20, fontWeight: 800, whiteSpace: 'nowrap' }}>Somente Admin</span>
                     </div>
-                  ))}
-                </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <input placeholder="Novo sabor" value={novoItem} onChange={e => setNovoItem(e.target.value)} onKeyDown={e => e.key === 'Enter' && adicionarSabor('saltyFlavors')} style={{ ...inputStyle, flex: 1 }} />
-                  <button onClick={() => adicionarSabor('saltyFlavors')} style={btnAdicionar}>+ Add</button>
-                </div>
-              </SectionCard>
-
-              {/* Sabores Doces */}
-              <SectionCard>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: -4 }}>
-                  <span style={{ fontSize: 16 }}>🍬</span>
-                  <span style={{ fontSize: 13, fontWeight: 900, color: TEXT, textTransform: 'uppercase', letterSpacing: '0.8px' }}>Sabores Doces</span>
-                  <span style={{ marginLeft: 'auto', fontSize: 11, color: TEXT2, fontWeight: 700 }}>{cardapio.sweetFlavors.length}</span>
-                </div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
-                  {cardapio.sweetFlavors.map((s, i) => (
-                    <div key={i} style={tagStyle}>
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 120 }}>{s}</span>
-                      <button onClick={() => removerSabor('sweetFlavors', i)} style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: 16, padding: 0, lineHeight: 1, flexShrink: 0 }}>×</button>
-                    </div>
-                  ))}
-                </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <input placeholder="Novo sabor" value={novoItem} onChange={e => setNovoItem(e.target.value)} onKeyDown={e => e.key === 'Enter' && adicionarSabor('sweetFlavors')} style={{ ...inputStyle, flex: 1 }} />
-                  <button onClick={() => adicionarSabor('sweetFlavors')} style={btnAdicionar}>+ Add</button>
-                </div>
-              </SectionCard>
-
-              {/* Bebidas */}
-              <SectionCard>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: -4 }}>
-                  <span style={{ fontSize: 16 }}>🥤</span>
-                  <span style={{ fontSize: 13, fontWeight: 900, color: TEXT, textTransform: 'uppercase', letterSpacing: '0.8px' }}>Bebidas</span>
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {cardapio.bebidas.map((b, i) => (
-                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,.04)', borderRadius: 10, padding: '10px 12px' }}>
-                      <span style={{ color: TEXT, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, marginRight: 8 }}>{b.name}</span>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                        <span style={{ color: '#4ade80', fontSize: 13, fontWeight: 800 }}>R$ {b.price.toFixed(2).replace('.', ',')}</span>
-                        <button onClick={() => removerBebida('bebidas', i)} style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: 18, padding: '0 4px' }}>×</button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <input placeholder="Nome" value={novoItem} onChange={e => setNovoItem(e.target.value)} style={{ ...inputStyle, flex: 2 }} />
-                  <input placeholder="R$" value={novoPreco} onChange={e => setNovoPreco(e.target.value)} style={{ ...inputStyle, flex: 1 }} />
-                  <button onClick={() => adicionarBebida('bebidas')} style={btnAdicionar}>+ Add</button>
-                </div>
-              </SectionCard>
-
-              {/* Sucos */}
-              <SectionCard>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: -4 }}>
-                  <span style={{ fontSize: 16 }}>🧃</span>
-                  <span style={{ fontSize: 13, fontWeight: 900, color: TEXT, textTransform: 'uppercase', letterSpacing: '0.8px' }}>Sucos</span>
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {cardapio.sucos.map((s, i) => (
-                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,.04)', borderRadius: 10, padding: '10px 12px' }}>
-                      <span style={{ color: TEXT, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, marginRight: 8 }}>{s.name}</span>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                        <span style={{ color: '#4ade80', fontSize: 13, fontWeight: 800 }}>R$ {s.price.toFixed(2).replace('.', ',')}</span>
-                        <button onClick={() => removerBebida('sucos', i)} style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: 18, padding: '0 4px' }}>×</button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <input placeholder="Nome" value={novoItem} onChange={e => setNovoItem(e.target.value)} style={{ ...inputStyle, flex: 2 }} />
-                  <input placeholder="R$" value={novoPreco} onChange={e => setNovoPreco(e.target.value)} style={{ ...inputStyle, flex: 1 }} />
-                  <button onClick={() => adicionarBebida('sucos')} style={btnAdicionar}>+ Add</button>
-                </div>
-              </SectionCard>
-
-              {/* Bairros */}
-              <SectionCard>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: -4 }}>
-                  <span style={{ fontSize: 16 }}>📍</span>
-                  <span style={{ fontSize: 13, fontWeight: 900, color: TEXT, textTransform: 'uppercase', letterSpacing: '0.8px' }}>Bairros e Taxas</span>
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {cardapio.neighborhoods.map((n, i) => (
-                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,.04)', borderRadius: 10, padding: '10px 12px' }}>
-                      <span style={{ color: TEXT, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, marginRight: 8 }}>{n.name}</span>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                        <span style={{ color: '#fbbf24', fontSize: 13, fontWeight: 800 }}>R$ {n.fee.toFixed(2).replace('.', ',')}</span>
-                        <button onClick={() => removerBairro(i)} style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: 18, padding: '0 4px' }}>×</button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <input placeholder="Bairro" value={novoItem} onChange={e => setNovoItem(e.target.value)} style={{ ...inputStyle, flex: 2 }} />
-                  <input placeholder="Taxa" value={novoTaxa} onChange={e => setNovoTaxa(e.target.value)} style={{ ...inputStyle, flex: 1 }} />
-                  <button onClick={adicionarBairro} style={btnAdicionar}>+ Add</button>
-                </div>
-              </SectionCard>
-
-              {/* Tamanhos */}
-              <SectionCard>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: -4 }}>
-                  <span style={{ fontSize: 16 }}>🍕</span>
-                  <span style={{ fontSize: 13, fontWeight: 900, color: TEXT, textTransform: 'uppercase', letterSpacing: '0.8px' }}>Preços das Pizzas</span>
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {cardapio.sizes.map((s, i) => (
-                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <span style={{ color: TEXT, fontSize: 13, fontWeight: 800, width: 100, flexShrink: 0 }}>{s.label} ({s.code})</span>
+                    <FieldGroup label="Chave Pix">
+                      <input
+                        type="text"
+                        placeholder="CPF, CNPJ, email ou telefone"
+                        value={config.chavePix}
+                        onChange={e => setConfig(prev => ({ ...prev, chavePix: e.target.value }))}
+                        style={{ ...inputStyle, border: '1px solid rgba(255,200,0,0.2)' }}
+                      />
+                    </FieldGroup>
+                    <FieldGroup label="Nome do Titular Pix">
+                      <input
+                        type="text"
+                        placeholder="Nome como aparece no Pix"
+                        value={config.nomeTitularPix}
+                        onChange={e => setConfig(prev => ({ ...prev, nomeTitularPix: e.target.value }))}
+                        style={{ ...inputStyle, border: '1px solid rgba(255,200,0,0.2)' }}
+                      />
+                      <p style={{ color: '#56524b', fontSize: 11, fontWeight: 700, margin: '6px 0 0' }}>
+                        Usado na validação automática do comprovante
+                      </p>
+                    </FieldGroup>
+                    <FieldGroup label="Limite de pedidos simultâneos (pico)">
                       <input
                         type="number"
-                        value={s.price}
-                        onChange={e => setCardapio(prev => ({ ...prev, sizes: prev.sizes.map((sz, idx) => idx === i ? { ...sz, price: parseFloat(e.target.value) || 0 } : sz) }))}
-                        style={{ ...inputStyle, flex: 1 }}
+                        min={0}
+                        value={config.limitePico}
+                        onChange={e => setConfig(prev => ({ ...prev, limitePico: Number(e.target.value) }))}
+                        style={{ ...inputStyle, border: '1px solid rgba(255,200,0,0.2)' }}
+                        placeholder="0 = sem limite"
                       />
-                    </div>
-                  ))}
-                </div>
-              </SectionCard>
+                      <p style={{ color: '#56524b', fontSize: 11, fontWeight: 700, margin: '6px 0 0' }}>
+                        Acima desse número, o bot avisa sobre demora extra · 0 = desativado
+                      </p>
+                    </FieldGroup>
+                  </SectionCard>
+                )}
 
-              {/* Bordas */}
-              <SectionCard>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: -4 }}>
-                  <span style={{ fontSize: 16 }}>🧀</span>
-                  <span style={{ fontSize: 13, fontWeight: 900, color: TEXT, textTransform: 'uppercase', letterSpacing: '0.8px' }}>Preços das Bordas</span>
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  {cardapio.borders.map((b, i) => (
-                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                      <span style={{ color: TEXT, fontSize: 13, fontWeight: 800, flex: 1, minWidth: 110 }}>{b.label}</span>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <label style={{ ...labelStyle, margin: 0, marginRight: 2 }}>P/M</label>
-                        <input type="number" value={b.priceSmall} onChange={e => setCardapio(prev => ({ ...prev, borders: prev.borders.map((bd, idx) => idx === i ? { ...bd, priceSmall: parseFloat(e.target.value) || 0 } : bd) }))} style={{ ...inputStyle, width: 70 }} />
+                <button
+                  onClick={salvar}
+                  disabled={salvando}
+                  style={{ width: '100%', height: 56, background: salvando ? '#1a1208' : `linear-gradient(180deg, ${ACCENT}, #d95e00)`, border: 'none', borderRadius: 14, color: '#fff', fontSize: 16, fontWeight: 900, cursor: salvando ? 'not-allowed' : 'pointer', fontFamily: FONT, letterSpacing: '-0.2px', opacity: salvando ? 0.6 : 1 }}
+                >
+                  {salvando ? 'Salvando...' : 'Salvar Configurações'}
+                </button>
+
+                {mensagem && (
+                  <div style={{ textAlign: 'center', padding: '12px 16px', background: mensagem.includes('✅') ? 'rgba(34,197,94,.1)' : 'rgba(239,68,68,.1)', border: `1px solid ${mensagem.includes('✅') ? 'rgba(34,197,94,.3)' : 'rgba(239,68,68,.3)'}`, borderRadius: 12 }}>
+                    <p style={{ color: mensagem.includes('✅') ? '#4ade80' : '#f87171', fontWeight: 800, fontSize: 14, margin: 0 }}>{mensagem}</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── ABA CARDÁPIO ── */}
+            {aba === 'cardapio' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+
+                {/* Sabores Salgados */}
+                <SectionCard>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: -4 }}>
+                    <span style={{ fontSize: 16, flexShrink: 0 }}>🧂</span>
+                    <span style={{ fontSize: 13, fontWeight: 900, color: TEXT, textTransform: 'uppercase', letterSpacing: '0.8px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>Sabores Salgados</span>
+                    <span style={{ fontSize: 11, color: TEXT2, fontWeight: 700, flexShrink: 0 }}>{cardapio.saltyFlavors.length}</span>
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
+                    {cardapio.saltyFlavors.map((s, i) => (
+                      <div key={i} style={tagStyle}>
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 120 }}>{s}</span>
+                        <button onClick={() => removerSabor('saltyFlavors', i)} style={btnRemoveTag}>×</button>
                       </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <label style={{ ...labelStyle, margin: 0, marginRight: 2 }}>G/F</label>
-                        <input type="number" value={b.priceLarge} onChange={e => setCardapio(prev => ({ ...prev, borders: prev.borders.map((bd, idx) => idx === i ? { ...bd, priceLarge: parseFloat(e.target.value) || 0 } : bd) }))} style={{ ...inputStyle, width: 70 }} />
+                    ))}
+                  </div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <input placeholder="Novo sabor" value={novoItem} onChange={e => setNovoItem(e.target.value)} onKeyDown={e => e.key === 'Enter' && adicionarSabor('saltyFlavors')} style={{ ...inputStyle, flex: 1 }} />
+                    <button onClick={() => adicionarSabor('saltyFlavors')} style={btnAdicionar}>+ Add</button>
+                  </div>
+                </SectionCard>
+
+                {/* Sabores Doces */}
+                <SectionCard>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: -4 }}>
+                    <span style={{ fontSize: 16, flexShrink: 0 }}>🍬</span>
+                    <span style={{ fontSize: 13, fontWeight: 900, color: TEXT, textTransform: 'uppercase', letterSpacing: '0.8px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>Sabores Doces</span>
+                    <span style={{ fontSize: 11, color: TEXT2, fontWeight: 700, flexShrink: 0 }}>{cardapio.sweetFlavors.length}</span>
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
+                    {cardapio.sweetFlavors.map((s, i) => (
+                      <div key={i} style={tagStyle}>
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 120 }}>{s}</span>
+                        <button onClick={() => removerSabor('sweetFlavors', i)} style={btnRemoveTag}>×</button>
                       </div>
-                    </div>
-                  ))}
-                </div>
-              </SectionCard>
+                    ))}
+                  </div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <input placeholder="Novo sabor" value={novoItem} onChange={e => setNovoItem(e.target.value)} onKeyDown={e => e.key === 'Enter' && adicionarSabor('sweetFlavors')} style={{ ...inputStyle, flex: 1 }} />
+                    <button onClick={() => adicionarSabor('sweetFlavors')} style={btnAdicionar}>+ Add</button>
+                  </div>
+                </SectionCard>
 
-              <button
-                onClick={salvarCardapio}
-                disabled={salvando}
-                style={{ height: 56, background: salvando ? '#1a1208' : `linear-gradient(180deg, ${ACCENT}, #d95e00)`, border: 'none', borderRadius: 14, color: '#fff', fontSize: 16, fontWeight: 900, cursor: salvando ? 'not-allowed' : 'pointer', fontFamily: FONT, letterSpacing: '-0.2px', opacity: salvando ? 0.6 : 1 }}
-              >
-                {salvando ? 'Salvando...' : '💾 Salvar Cardápio'}
-              </button>
+                {/* Bebidas */}
+                <SectionCard>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: -4 }}>
+                    <span style={{ fontSize: 16, flexShrink: 0 }}>🥤</span>
+                    <span style={{ fontSize: 13, fontWeight: 900, color: TEXT, textTransform: 'uppercase', letterSpacing: '0.8px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Bebidas</span>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {cardapio.bebidas.map((b, i) => (
+                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,.04)', borderRadius: 10, padding: '10px 12px' }}>
+                        <span style={{ color: TEXT, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, marginRight: 8 }}>{b.name}</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+                          <span style={{ color: '#4ade80', fontSize: 13, fontWeight: 800 }}>R$ {b.price.toFixed(2).replace('.', ',')}</span>
+                          <button onClick={() => removerBebida('bebidas', i)} style={btnRemoveRow}>×</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <input placeholder="Nome" value={novoItem} onChange={e => setNovoItem(e.target.value)} style={{ ...inputStyle, flex: 2 }} />
+                    <input placeholder="R$" value={novoPreco} onChange={e => setNovoPreco(e.target.value)} style={{ ...inputStyle, flex: 1 }} />
+                    <button onClick={() => adicionarBebida('bebidas')} style={btnAdicionar}>+ Add</button>
+                  </div>
+                </SectionCard>
 
-              {mensagem && (
-                <div style={{ textAlign: 'center', padding: '12px 16px', background: mensagem.includes('✅') ? 'rgba(34,197,94,.1)' : 'rgba(239,68,68,.1)', border: `1px solid ${mensagem.includes('✅') ? 'rgba(34,197,94,.3)' : 'rgba(239,68,68,.3)'}`, borderRadius: 12 }}>
-                  <p style={{ color: mensagem.includes('✅') ? '#4ade80' : '#f87171', fontWeight: 800, fontSize: 14, margin: 0 }}>{mensagem}</p>
-                </div>
-              )}
-            </div>
-          )}
+                {/* Sucos */}
+                <SectionCard>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: -4 }}>
+                    <span style={{ fontSize: 16, flexShrink: 0 }}>🧃</span>
+                    <span style={{ fontSize: 13, fontWeight: 900, color: TEXT, textTransform: 'uppercase', letterSpacing: '0.8px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Sucos</span>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {cardapio.sucos.map((s, i) => (
+                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,.04)', borderRadius: 10, padding: '10px 12px' }}>
+                        <span style={{ color: TEXT, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, marginRight: 8 }}>{s.name}</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+                          <span style={{ color: '#4ade80', fontSize: 13, fontWeight: 800 }}>R$ {s.price.toFixed(2).replace('.', ',')}</span>
+                          <button onClick={() => removerBebida('sucos', i)} style={btnRemoveRow}>×</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <input placeholder="Nome" value={novoItem} onChange={e => setNovoItem(e.target.value)} style={{ ...inputStyle, flex: 2 }} />
+                    <input placeholder="R$" value={novoPreco} onChange={e => setNovoPreco(e.target.value)} style={{ ...inputStyle, flex: 1 }} />
+                    <button onClick={() => adicionarBebida('sucos')} style={btnAdicionar}>+ Add</button>
+                  </div>
+                </SectionCard>
+
+                {/* Bairros */}
+                <SectionCard>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: -4 }}>
+                    <span style={{ fontSize: 16, flexShrink: 0 }}>📍</span>
+                    <span style={{ fontSize: 13, fontWeight: 900, color: TEXT, textTransform: 'uppercase', letterSpacing: '0.8px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Bairros e Taxas</span>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {cardapio.neighborhoods.map((n, i) => (
+                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,.04)', borderRadius: 10, padding: '10px 12px' }}>
+                        <span style={{ color: TEXT, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, marginRight: 8 }}>{n.name}</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+                          <span style={{ color: '#fbbf24', fontSize: 13, fontWeight: 800 }}>R$ {n.fee.toFixed(2).replace('.', ',')}</span>
+                          <button onClick={() => removerBairro(i)} style={btnRemoveRow}>×</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <input placeholder="Bairro" value={novoItem} onChange={e => setNovoItem(e.target.value)} style={{ ...inputStyle, flex: 2 }} />
+                    <input placeholder="Taxa" value={novoTaxa} onChange={e => setNovoTaxa(e.target.value)} style={{ ...inputStyle, flex: 1 }} />
+                    <button onClick={adicionarBairro} style={btnAdicionar}>+ Add</button>
+                  </div>
+                </SectionCard>
+
+                {/* Tamanhos */}
+                <SectionCard>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: -4 }}>
+                    <span style={{ fontSize: 16, flexShrink: 0 }}>🍕</span>
+                    <span style={{ fontSize: 13, fontWeight: 900, color: TEXT, textTransform: 'uppercase', letterSpacing: '0.8px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Preços das Pizzas</span>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {cardapio.sizes.map((s, i) => (
+                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <span style={{ color: TEXT, fontSize: 13, fontWeight: 800, width: 100, flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.label} ({s.code})</span>
+                        <input
+                          type="number"
+                          value={s.price}
+                          onChange={e => setCardapio(prev => ({ ...prev, sizes: prev.sizes.map((sz, idx) => idx === i ? { ...sz, price: parseFloat(e.target.value) || 0 } : sz) }))}
+                          style={{ ...inputStyle, flex: 1 }}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </SectionCard>
+
+                {/* Bordas */}
+                <SectionCard>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: -4 }}>
+                    <span style={{ fontSize: 16, flexShrink: 0 }}>🧀</span>
+                    <span style={{ fontSize: 13, fontWeight: 900, color: TEXT, textTransform: 'uppercase', letterSpacing: '0.8px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Preços das Bordas</span>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {cardapio.borders.map((b, i) => (
+                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        <span style={{ color: TEXT, fontSize: 13, fontWeight: 800, flex: 1, minWidth: 110, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.label}</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <label style={{ ...labelStyle, margin: 0, marginRight: 2 }}>P/M</label>
+                          <input type="number" value={b.priceSmall} onChange={e => setCardapio(prev => ({ ...prev, borders: prev.borders.map((bd, idx) => idx === i ? { ...bd, priceSmall: parseFloat(e.target.value) || 0 } : bd) }))} style={{ ...inputStyle, width: 70 }} />
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <label style={{ ...labelStyle, margin: 0, marginRight: 2 }}>G/F</label>
+                          <input type="number" value={b.priceLarge} onChange={e => setCardapio(prev => ({ ...prev, borders: prev.borders.map((bd, idx) => idx === i ? { ...bd, priceLarge: parseFloat(e.target.value) || 0 } : bd) }))} style={{ ...inputStyle, width: 70 }} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </SectionCard>
+
+                <button
+                  onClick={salvarCardapio}
+                  disabled={salvando}
+                  style={{ width: '100%', height: 56, background: salvando ? '#1a1208' : `linear-gradient(180deg, ${ACCENT}, #d95e00)`, border: 'none', borderRadius: 14, color: '#fff', fontSize: 16, fontWeight: 900, cursor: salvando ? 'not-allowed' : 'pointer', fontFamily: FONT, letterSpacing: '-0.2px', opacity: salvando ? 0.6 : 1 }}
+                >
+                  {salvando ? 'Salvando...' : '💾 Salvar Cardápio'}
+                </button>
+
+                {mensagem && (
+                  <div style={{ textAlign: 'center', padding: '12px 16px', background: mensagem.includes('✅') ? 'rgba(34,197,94,.1)' : 'rgba(239,68,68,.1)', border: `1px solid ${mensagem.includes('✅') ? 'rgba(34,197,94,.3)' : 'rgba(239,68,68,.3)'}`, borderRadius: 12 }}>
+                    <p style={{ color: mensagem.includes('✅') ? '#4ade80' : '#f87171', fontWeight: 800, fontSize: 14, margin: 0 }}>{mensagem}</p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </>
