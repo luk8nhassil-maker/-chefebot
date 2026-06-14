@@ -1,11 +1,13 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
-import { processMessage, createInitialSession, createReturningSession, BotSession, ClienteHistorico, setMenuDinamico, setConfigDinamica } from "@/lib/bot";
+import { processMessage, createInitialSession, createReturningSession, montarSaudacaoRetorno, BotSession, ClienteHistorico, setMenuDinamico, setConfigDinamica } from "@/lib/bot";
 import { getMENUDinamico } from "@/lib/menu";
 import { redis } from "@/lib/redis";
 import { interpretarMensagem } from "@/lib/claude";
 import { log } from "@/lib/logger";
 import { analisarComprovantePix } from "@/lib/analisarComprovante";
 import { transcreverAudio } from "@/lib/transcribeAudio";
+
+export const maxDuration = 30;
 
 type Pedido = {
   id: string;
@@ -156,7 +158,9 @@ async function salvarPedido(session: BotSession, phone: string, _config: ConfigP
     });
   } catch {}
 
-  const historico: ClienteHistorico = { nome: session.customerName || phone, ultimoPedido: itens, ultimoTotal: total, ultimoCart: session.cart, ultimoDeliveryFee: session.deliveryFee, ultimoEndereco: session.address, ultimoNeighborhood: session.neighborhood, ultimoDeliveryType: session.deliveryType, ultimoPayment: session.paymentMethod };
+  const histAnterior = await redis.get<ClienteHistorico>(`cliente:${phone}`);
+  const totalPedidos = (histAnterior?.totalPedidos || 0) + 1;
+  const historico: ClienteHistorico = { nome: session.customerName || phone, ultimoPedido: itens, ultimoTotal: total, ultimoCart: session.cart, ultimoDeliveryFee: session.deliveryFee, ultimoEndereco: session.address, ultimoNeighborhood: session.neighborhood, ultimoDeliveryType: session.deliveryType, ultimoPayment: session.paymentMethod, totalPedidos, ultimaVisita: Date.now() };
   await redis.set(`cliente:${phone}`, historico, { ex: 30 * 24 * 60 * 60 });
   return pedidoId;
 }
@@ -206,10 +210,14 @@ async function fecharEscalonamento(phone: string) {
 
 async function enviarMensagem(phone: string, message: string) {
   const url = `https://${process.env.EVOLUTION_API_URL}/message/sendText/chefe`;
+  // Delay "digitando" proporcional ao tamanho do texto (parece mais humano).
+  // ~22ms por caractere, com piso de 900ms e teto de 2500ms (seguro p/ serverless).
+  const delay = Math.min(2500, Math.max(900, message.length * 22));
   await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json", apikey: process.env.EVOLUTION_API_KEY! },
-    body: JSON.stringify({ number: phone, text: message }),
+    // delay no topo (Evolution v2) + options.delay/presence (Evolution v1) p/ compatibilidade
+    body: JSON.stringify({ number: phone, text: message, delay, options: { delay, presence: "composing" } }),
   });
 }
 
@@ -396,7 +404,7 @@ async function enviarRespostas(phone: string, messages: string[], config: Config
   for (const msg of messages) {
     const msgFinal = config.chavePix ? msg.replace("(configurada pelo admin)", config.chavePix) : msg;
     await enviarMensagem(phone, msgFinal);
-    await new Promise(resolve => setTimeout(resolve, 500));
+    await new Promise(resolve => setTimeout(resolve, 300));
   }
 }
 
@@ -633,11 +641,9 @@ export async function POST(req: NextRequest) {
 
       const historico = await redis.get<ClienteHistorico>(`cliente:${phone}`);
       if (historico) {
-        const firstName = historico.nome.split(" ")[0];
-        const ultimoPedido = historico.ultimoPedido.join(", ");
         currentSession = createReturningSession(historico);
         await redis.set(sessionKey, currentSession, { ex: 1800 });
-        await enviarMensagem(phone, `Ei *${firstName}*! 😊 Da ultima vez voce pediu *${ultimoPedido}* - vai querer repetir ou montar um novo?\n\n  1. Repetir o mesmo\n  2. Quero outra coisa`);
+        await enviarMensagem(phone, montarSaudacaoRetorno(historico));
         return NextResponse.json({ ok: true });
       } else {
         if (!estaAberto(config)) {
@@ -674,11 +680,9 @@ export async function POST(req: NextRequest) {
     if (currentSession.step === "done" && eSaudacao(messageText)) {
       const historico = await redis.get<ClienteHistorico>(`cliente:${phone}`);
       if (historico) {
-        const firstName = historico.nome.split(" ")[0];
-        const ultimoPedido = historico.ultimoPedido.join(", ");
         const newSession = createReturningSession(historico);
         await redis.set(sessionKey, newSession, { ex: 1800 });
-        await enviarMensagem(phone, `Ei *${firstName}*! 😊 Da ultima vez voce pediu *${ultimoPedido}* — vai querer repetir ou montar um novo?\n\n  1. Repetir o mesmo\n  2. Quero outra coisa`);
+        await enviarMensagem(phone, montarSaudacaoRetorno(historico));
         return NextResponse.json({ ok: true });
       }
     }

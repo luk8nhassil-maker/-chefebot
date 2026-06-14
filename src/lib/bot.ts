@@ -85,6 +85,8 @@ export interface ClienteHistorico {
   ultimoNeighborhood?: string;
   ultimoDeliveryType?: string;
   ultimoPayment?: string;
+  totalPedidos?: number;
+  ultimaVisita?: number;
 }
 export interface BotSession {
   step: BotStep;
@@ -640,7 +642,6 @@ export function processMessage(input: string, session: BotSession): BotResponse 
     case "returning": {
       const historico = session.historico!;
       const firstName = historico.nome.split(" ")[0];
-      const ultimoPedido = historico.ultimoPedido.join(", ");
       if (ePositiva(n) || n === "1") {
         if (historico.ultimoCart && historico.ultimoCart.length > 0) {
           const cart = historico.ultimoCart.map(item => {
@@ -681,7 +682,7 @@ export function processMessage(input: string, session: BotSession): BotResponse 
         return { messages: [`Tudo bem! ${mensagemCategorias()}`], session: resetaTentativas({ ...session, step: "category", customerName: historico.nome }) };
       }
       return {
-        messages: [`Ei *${firstName}*! 😊 Da última vez você pediu *${ultimoPedido}* — vai querer repetir ou montar um novo?\n\n  1. Repetir o mesmo\n  2. Quero outra coisa`],
+        messages: [montarSaudacaoRetorno(historico)],
         session,
       };
     }
@@ -1236,6 +1237,36 @@ export function processMessage(input: string, session: BotSession): BotResponse 
 }
 export function createInitialSession(): BotSession {
   return { step: "name", cart: [], deliveryFee: 0, tentativasInvalidas: 0 };
+}
+export function montarSaudacaoRetorno(h: ClienteHistorico): string {
+  const nome = h.nome.split(" ")[0];
+  const total = h.totalPedidos || 1;
+  const dias = h.ultimaVisita ? Math.floor((Date.now() - h.ultimaVisita) / (1000 * 60 * 60 * 24)) : 0;
+  const favorito = h.ultimoPedido[0] || "uma pizza";
+  const escolhe = (arr: string[]) => arr[Math.floor(Math.random() * arr.length)];
+  const rodape = "\n\n  1. Pedir o de sempre\n  2. Ver o cardápio";
+
+  let texto: string;
+  if (dias > 20) {
+    texto = escolhe([
+      `Oi *${nome}*! Quanto tempo, hein? 😄 Que saudade! Bora pedir aquela *${favorito}*?`,
+      `Eita, *${nome}* apareceu! 🍕 Tava com saudade do seu pedido. Vai querer a *${favorito}* de novo?`,
+    ]);
+  } else if (total >= 5) {
+    texto = escolhe([
+      `Opa, *${nome}*! Que bom te ver de novo 🍕 Vai de *${favorito}*, o seu clássico, ou hoje é dia de inventar?`,
+      `E aí *${nome}*! 😄 Já sei, já sei... aquela *${favorito}*? Ou hoje muda o jogo?`,
+      `Salve *${nome}*! Sempre um prazer 🍕 Manda a *${favorito}* de sempre ou vamos de novidade hoje?`,
+    ]);
+  } else if (total >= 2) {
+    texto = escolhe([
+      `Oi *${nome}*, que bom te ver de novo! 😊 Bora repetir a *${favorito}* ou quer ver o cardápio?`,
+      `Opa *${nome}*! 🍕 Da última vez você curtiu a *${favorito}*. Vai nela de novo ou quer variar?`,
+    ]);
+  } else {
+    texto = `Oi *${nome}*! Que bom te ver por aqui 😊 Vai querer a *${favorito}* de novo ou prefere ver o cardápio?`;
+  }
+  return texto + rodape;
 }
 export function createReturningSession(historico: ClienteHistorico): BotSession {
   return { step: "returning", cart: [], deliveryFee: 0, historico, tentativasInvalidas: 0 };
