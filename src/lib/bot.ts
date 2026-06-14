@@ -642,7 +642,17 @@ export function processMessage(input: string, session: BotSession): BotResponse 
     case "returning": {
       const historico = session.historico!;
       const firstName = historico.nome.split(" ")[0];
-      if (ePositiva(n) || n === "1") {
+      // Opção 2 / "ver cardápio" / "outra coisa" — detecta ANTES de ePositiva (evita que "quero ver o cardápio" vire repetir)
+      const querCardapio = n === "2" || n.includes("cardapio") || n.includes("menu") ||
+        n.includes("outra coisa") || n.includes("variar") || n.includes("novidade") ||
+        n.includes("outro") || n.includes("ver o") || eNegativa(n);
+      if (querCardapio) {
+        return { messages: [`Tudo bem! ${mensagemCategorias()}`], session: resetaTentativas({ ...session, step: "category", customerName: historico.nome }) };
+      }
+      // Opção 1 / "o de sempre" / repetir
+      const querRepetir = n === "1" || n.includes("de sempre") || n.includes("repetir") ||
+        n.includes("mesmo") || n.includes("igual") || ePositiva(n);
+      if (querRepetir) {
         if (historico.ultimoCart && historico.ultimoCart.length > 0) {
           const cart = historico.ultimoCart.map(item => {
             if (item.category === "pizza" && item.size) {
@@ -652,34 +662,25 @@ export function processMessage(input: string, session: BotSession): BotResponse 
             }
             return item;
           });
-          const deliveryFee = historico.ultimoDeliveryFee || 0;
           const updatedSession: BotSession = {
             ...session,
-            step: "payment",
+            step: "delivery_type",
             cart,
             customerName: historico.nome,
-            deliveryFee,
-            deliveryType: historico.ultimoDeliveryType as any || "delivery",
-            address: historico.ultimoEndereco,
-            neighborhood: historico.ultimoNeighborhood,
+            deliveryFee: 0,
           };
-          const payList = MENU.payments.map((p, i) => `  ${i + 1}. ${p}`).join("\n");
           return {
             messages: [
-              `Ótimo, *${firstName}*! 😊 Mesmo pedido de antes:`,
-              `🛒 *Itens:*\n${cart.map(item => `• ${item.name}`).join("\n")}\n\nEntrega: ${historico.ultimoEndereco ? `${historico.ultimoEndereco} - ${historico.ultimoNeighborhood}` : "Retirada na loja"}\n\nComo vai pagar?\n\n${payList}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
+              `Boa, *${firstName}*! 😋 Anotei o seu de sempre:`,
+              `🛒 *Itens:*\n${resumoCarrinho(cart)}\n\nE hoje, como prefere receber? 😊\n\n  1. Entrega (delivery) 🛵\n  2. Buscar na loja 🏪`
             ],
             session: resetaTentativas(updatedSession),
           };
-
         }
         return {
           messages: [`Que bom te ver de novo, *${firstName}*! 😊\n\n${mensagemCategorias()}`],
           session: resetaTentativas({ ...session, step: "category", customerName: historico.nome }),
         };
-      }
-      if (eNegativa(n) || n === "2") {
-        return { messages: [`Tudo bem! ${mensagemCategorias()}`], session: resetaTentativas({ ...session, step: "category", customerName: historico.nome }) };
       }
       return {
         messages: [montarSaudacaoRetorno(historico)],
@@ -1242,29 +1243,33 @@ export function montarSaudacaoRetorno(h: ClienteHistorico): string {
   const nome = h.nome.split(" ")[0];
   const total = h.totalPedidos || 1;
   const dias = h.ultimaVisita ? Math.floor((Date.now() - h.ultimaVisita) / (1000 * 60 * 60 * 24)) : 0;
-  const favorito = h.ultimoPedido[0] || "uma pizza";
+  const qtdItens = h.ultimoPedido.length;
+  // Resume o pedido anterior: 1 item cita ele; vários, cita o 1º + "e mais N"
+  const favorito = qtdItens === 0 ? "uma pizza"
+    : qtdItens === 1 ? h.ultimoPedido[0]
+    : `${h.ultimoPedido[0]} e mais ${qtdItens - 1} ${qtdItens - 1 === 1 ? "item" : "itens"}`;
   const escolhe = (arr: string[]) => arr[Math.floor(Math.random() * arr.length)];
   const rodape = "\n\n  1. Pedir o de sempre\n  2. Ver o cardápio";
 
   let texto: string;
   if (dias > 20) {
     texto = escolhe([
-      `Oi *${nome}*! Quanto tempo, hein? 😄 Que saudade! Bora pedir aquela *${favorito}*?`,
-      `Eita, *${nome}* apareceu! 🍕 Tava com saudade do seu pedido. Vai querer a *${favorito}* de novo?`,
+      `Oi *${nome}*! Quanto tempo, hein? 😄 Que saudade! Bora repetir aquele pedido (*${favorito}*)?`,
+      `Eita, *${nome}* apareceu! 🍕 Tava com saudade. Vai querer o de sempre (*${favorito}*)?`,
     ]);
   } else if (total >= 5) {
     texto = escolhe([
-      `Opa, *${nome}*! Que bom te ver de novo 🍕 Vai de *${favorito}*, o seu clássico, ou hoje é dia de inventar?`,
-      `E aí *${nome}*! 😄 Já sei, já sei... aquela *${favorito}*? Ou hoje muda o jogo?`,
-      `Salve *${nome}*! Sempre um prazer 🍕 Manda a *${favorito}* de sempre ou vamos de novidade hoje?`,
+      `Opa, *${nome}*! Que bom te ver de novo 🍕 Vai no seu clássico (*${favorito}*) ou hoje é dia de inventar?`,
+      `E aí *${nome}*! 😄 Já sei, já sei... o de sempre (*${favorito}*)? Ou hoje muda o jogo?`,
+      `Salve *${nome}*! Sempre um prazer 🍕 Manda o de sempre (*${favorito}*) ou vamos de novidade hoje?`,
     ]);
   } else if (total >= 2) {
     texto = escolhe([
-      `Oi *${nome}*, que bom te ver de novo! 😊 Bora repetir a *${favorito}* ou quer ver o cardápio?`,
-      `Opa *${nome}*! 🍕 Da última vez você curtiu a *${favorito}*. Vai nela de novo ou quer variar?`,
+      `Oi *${nome}*, que bom te ver de novo! 😊 Bora repetir (*${favorito}*) ou quer ver o cardápio?`,
+      `Opa *${nome}*! 🍕 Da última vez você pediu *${favorito}*. Vai nele de novo ou quer variar?`,
     ]);
   } else {
-    texto = `Oi *${nome}*! Que bom te ver por aqui 😊 Vai querer a *${favorito}* de novo ou prefere ver o cardápio?`;
+    texto = `Oi *${nome}*! Que bom te ver por aqui 😊 Vai querer o de sempre (*${favorito}*) de novo ou prefere ver o cardápio?`;
   }
   return texto + rodape;
 }
