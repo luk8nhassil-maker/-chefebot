@@ -159,23 +159,103 @@ function respostaEscaladaPorLoop(): BotResponse {
 function permiteMeioAMeio(size?: string): boolean {
   return size === "M" || size === "G" || size === "F";
 }
-function detectaDoisSabores(n: string, allFlavors: string[]): [string, string] | null {
-  const encontrados: string[] = [];
-  for (const f of allFlavors) {
-    if (n.includes(normalizar(f))) {
-      encontrados.push(f);
-      if (encontrados.length === 2) break;
+// ===== MOTOR DE RECONHECIMENTO DE SABOR (tolerante a erro humano) =====
+// Apelidos: variações que o fuzzy sozinho não pegaria (números por extenso vs dígito,
+// abreviações e grafias alternativas comuns no WhatsApp).
+const APELIDOS_SABOR: Record<string, string[]> = {
+  "Quatro Queijos": ["4 queijos", "4 queijo", "quatro queijo"],
+  "Tres Queijos": ["3 queijos", "3 queijo", "tres queijo"],
+  "Frango Catupiry": ["frango", "frango c catupiry", "frango com catupiry", "frango catupiri"],
+  "Mussarela": ["mucarela", "muzarela", "muzzarela", "mozarela", "mucarella", "mussarella", "mozzarela"],
+  "Romeu e Julieta": ["romeu", "romeu julieta"],
+  "Calabresa": ["calabreza", "calabre"],
+  "Portuguesa": ["portugesa", "portugues"],
+};
+function levenshtein(a: string, b: string): number {
+  const m = a.length, len = b.length;
+  const d: number[][] = Array.from({ length: m + 1 }, (_, i) => [i, ...Array(len).fill(0)]);
+  for (let j = 0; j <= len; j++) d[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= len; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost);
     }
   }
-  if (encontrados.length === 2) return [encontrados[0], encontrados[1]];
+  return d[m][len];
+}
+function variantesPlural(s: string): string[] {
+  return s.endsWith("s") ? [s, s.slice(0, -1)] : [s, s + "s"];
+}
+// Resolve UM sabor a partir de um trecho de texto (já normalizado ou não).
+function resolveUmSabor(termo: string, flavors: string[]): string | null {
+  const n = normalizar(termo);
+  if (!n) return null;
+  // Nível 1: substring exata normalizada (+ plural opcional)
+  for (const f of flavors) {
+    const nf = normalizar(f);
+    for (const v of variantesPlural(nf)) {
+      if (n.includes(v)) return f;
+    }
+  }
+  // Nível 2: apelidos / grafias alternativas
+  for (const f of flavors) {
+    for (const ap of (APELIDOS_SABOR[f] || [])) {
+      if (n.includes(normalizar(ap))) return f;
+    }
+  }
+  // Nível 3: fuzzy por palavra, só aceita se houver vencedor claro (evita confundir sabores parecidos)
+  const palavras = n.split(/\s+/).filter(p => p.length >= 4);
+  if (palavras.length === 0) return null;
+  let melhor: { f: string; d: number } | null = null;
+  let segundo = Infinity;
+  for (const f of flavors) {
+    const nf = normalizar(f);
+    const alvos = [nf, ...nf.split(/\s+/)];
+    let melhorLocal = Infinity;
+    for (const p of palavras) {
+      for (const a of alvos) {
+        if (a.length < 4) continue;
+        const tol = a.length <= 6 ? 1 : 2;
+        const dist = levenshtein(p, a);
+        if (dist <= tol && dist < melhorLocal) melhorLocal = dist;
+      }
+    }
+    if (melhorLocal < Infinity) {
+      if (melhor === null || melhorLocal < melhor.d) {
+        segundo = melhor ? melhor.d : Infinity;
+        melhor = { f, d: melhorLocal };
+      } else if (melhorLocal < segundo) {
+        segundo = melhorLocal;
+      }
+    }
+  }
+  if (melhor && (segundo === Infinity || segundo - melhor.d >= 1)) return melhor.f;
+  return null;
+}
+function detectaDoisSabores(n: string, allFlavors: string[]): [string, string] | null {
+  // Por número ("1 e 8"), evitando o caso em que o dígito faz parte de um apelido ("3 queijos")
   const nums = n.match(/\d+/g);
   if (nums && nums.length >= 2) {
-    const i1 = parseInt(nums[0]) - 1;
-    const i2 = parseInt(nums[1]) - 1;
-    if (i1 >= 0 && i1 < allFlavors.length && i2 >= 0 && i2 < allFlavors.length && i1 !== i2) {
-      return [allFlavors[i1], allFlavors[i2]];
+    const digitoEhApelido = allFlavors.some(f =>
+      (APELIDOS_SABOR[f] || []).some(ap => /\d/.test(ap) && n.includes(normalizar(ap)))
+    );
+    if (!digitoEhApelido) {
+      const i1 = parseInt(nums[0]) - 1;
+      const i2 = parseInt(nums[1]) - 1;
+      if (i1 >= 0 && i1 < allFlavors.length && i2 >= 0 && i2 < allFlavors.length && i1 !== i2) {
+        return [allFlavors[i1], allFlavors[i2]];
+      }
     }
   }
+  // Quebra a frase nos conectores e resolve cada lado com o motor tolerante
+  const partes = n.split(/\s+e\s+|\/|\s+meio\s+|,/).map(s => s.trim()).filter(Boolean);
+  const achados: string[] = [];
+  for (const parte of partes) {
+    const s = resolveUmSabor(parte, allFlavors);
+    if (s && !achados.includes(s)) achados.push(s);
+    if (achados.length === 2) break;
+  }
+  if (achados.length === 2) return [achados[0], achados[1]];
   return null;
 }
 function detectaIntencaoDireta(text: string): { category: string; label: string } | null {
@@ -231,7 +311,7 @@ function detectaBordaDaMensagem(n: string): string | null {
 }
 function detectaSaborDaMensagem(n: string): string | null {
   const allFlavors = [...MENU.saltyFlavors, ...MENU.sweetFlavors];
-  return allFlavors.find(f => n.includes(normalizar(f))) ?? null;
+  return resolveUmSabor(n, allFlavors);
 }
 type PedidoCompleto = {
   size: string;
@@ -782,7 +862,7 @@ export function processMessage(input: string, session: BotSession): BotResponse 
       if (!isNaN(num) && num >= 1 && num <= allFlavors.length) {
         flavor = allFlavors[num - 1];
       } else {
-        flavor = allFlavors.find((f) => n.includes(normalizar(f)));
+        flavor = resolveUmSabor(n, allFlavors) ?? undefined;
       }
       if (!flavor) {
         return respostaInvalida(listaFlavors(), session);
@@ -818,7 +898,7 @@ export function processMessage(input: string, session: BotSession): BotResponse 
       if (!isNaN(num) && num >= 1 && num <= allFlavors.length) {
         flavor2 = allFlavors[num - 1];
       } else {
-        flavor2 = allFlavors.find((f) => n.includes(normalizar(f)));
+        flavor2 = resolveUmSabor(n, allFlavors) ?? undefined;
       }
       if (!flavor2) {
         return respostaInvalida(listaFlavors(), session);
@@ -1063,7 +1143,7 @@ export function processMessage(input: string, session: BotSession): BotResponse 
       const num = parseInt(text);
       let flavor: string | undefined;
       if (!isNaN(num) && num >= 1 && num <= flavors.length) flavor = flavors[num - 1];
-      else flavor = flavors.find(f => normalizar(f) === n) || flavors.find(f => n.includes(normalizar(f)));
+      else flavor = flavors.find(f => normalizar(f) === n) || resolveUmSabor(n, flavors) || undefined;
       if (!flavor) return respostaInvalida(flavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n"), session);
       const newItem: CartItem = { category: "lanche", name: lanche.name, flavor, price: lanche.price };
       const newCart = [...session.cart, newItem];
