@@ -110,6 +110,7 @@ export interface BotSession {
   observacao?: string;
   pedidoId?: string;
   troco?: string;
+  ritmoRapido?: boolean;
 }
 export interface BotResponse {
   messages: string[];
@@ -514,6 +515,21 @@ function ePositiva(n: string): boolean {
     n.includes("ok") || n.includes("certo") || n.includes("isso");
 }
 export function processMessage(input: string, session: BotSession): BotResponse {
+  // Detecta o "ritmo" do cliente pela forma da resposta:
+  // resposta que é só número (ex: "1", "2") => cliente apressado => respostas mais rápidas.
+  // resposta com texto/palavras => cliente calmo => mantém o ritmo humano.
+  const limpo = input.trim();
+  let ritmoRapido = session.ritmoRapido;
+  if (/^\d{1,2}$/.test(limpo)) {
+    ritmoRapido = true;
+  } else if (limpo.length > 3) {
+    ritmoRapido = false;
+  }
+  const result = processMessageInner(input, session);
+  result.session = { ...result.session, ritmoRapido };
+  return result;
+}
+function processMessageInner(input: string, session: BotSession): BotResponse {
   const text = input.trim();
   const n = normalizar(text);
   // Detecta quantidade de pizzas: "2 pizzas", "duas pizzas familia", "quero 2", "duas"

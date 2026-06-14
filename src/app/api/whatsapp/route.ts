@@ -208,11 +208,14 @@ async function fecharEscalonamento(phone: string) {
   await redis.set("pedidos", atualizados);
 }
 
-async function enviarMensagem(phone: string, message: string) {
+async function enviarMensagem(phone: string, message: string, ritmoRapido = false) {
   const url = `https://${process.env.EVOLUTION_API_URL}/message/sendText/chefe`;
   // Delay "digitando" proporcional ao tamanho do texto (parece mais humano).
-  // ~22ms por caractere, com piso de 900ms e teto de 2500ms (seguro p/ serverless).
-  const delay = Math.min(2500, Math.max(900, message.length * 22));
+  // Cliente apressado (responde só com número) recebe respostas bem rápidas (~400ms).
+  // Cliente calmo (digita por extenso) mantém o ritmo humano (~22ms por caractere).
+  const delay = ritmoRapido
+    ? Math.min(600, Math.max(400, message.length * 6))
+    : Math.min(2500, Math.max(900, message.length * 22));
   await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json", apikey: process.env.EVOLUTION_API_KEY! },
@@ -400,11 +403,11 @@ async function processarComprovante(phone: string, data: any, config: ConfigPizz
   }
 }
 
-async function enviarRespostas(phone: string, messages: string[], config: ConfigPizzaria) {
+async function enviarRespostas(phone: string, messages: string[], config: ConfigPizzaria, ritmoRapido = false) {
   for (const msg of messages) {
     const msgFinal = config.chavePix ? msg.replace("(configurada pelo admin)", config.chavePix) : msg;
-    await enviarMensagem(phone, msgFinal);
-    await new Promise(resolve => setTimeout(resolve, 300));
+    await enviarMensagem(phone, msgFinal, ritmoRapido);
+    await new Promise(resolve => setTimeout(resolve, ritmoRapido ? 150 : 300));
   }
 }
 
@@ -797,7 +800,7 @@ export async function POST(req: NextRequest) {
       } catch {}
     }
 
-    await enviarRespostas(phone, result.messages, config);
+    await enviarRespostas(phone, result.messages, config, result.session.ritmoRapido);
     return NextResponse.json({ ok: true });
 
   } catch (error) {
