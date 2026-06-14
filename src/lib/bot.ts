@@ -782,6 +782,35 @@ export function processMessage(input: string, session: BotSession): BotResponse 
       const size = detectaTamanho(n);
       const allFlavors = [...MENU.saltyFlavors, ...MENU.sweetFlavors];
       if (size) {
+        // Se o tamanho permite meio a meio, tenta DOIS sabores primeiro (evita capturar só o primeiro)
+        if (permiteMeioAMeio(size)) {
+          const dois = detectaDoisSabores(n, allFlavors);
+          if (dois) {
+            const flavorFinal = `${dois[0]}/${dois[1]}`;
+            const bordaJunta = detectaBordaDaMensagem(n);
+            if (bordaJunta) {
+              const basePrice = getSizePrice(size);
+              const borderPrice = bordaJunta !== "Sem borda" ? getBorderPrice(size) : 0;
+              const itemPrice = basePrice + borderPrice;
+              const newItem: CartItem = { category: "pizza", name: "Pizza", size, flavor: flavorFinal, border: bordaJunta, price: itemPrice };
+              const newCart = [...session.cart, newItem];
+              return {
+                messages: [
+                  `Pizza *${size}* meio a meio *${dois[0]}* e *${dois[1]}* com borda de *${bordaJunta}*! 🤤`,
+                  mensagemAddMore(newCart),
+                ],
+                session: resetaTentativas({ ...session, step: "add_more", cart: newCart, currentSize: undefined, currentFlavor: undefined }),
+              };
+            }
+            return {
+              messages: [
+                `Pizza *${size}* meio a meio *${dois[0]}* e *${dois[1]}*! Ótima pedida! 😋`,
+                `Vai querer borda recheada? Olha as opções 👇\n\n${listaBordas(size)}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
+              ],
+              session: resetaTentativas({ ...session, step: "border_escolha", currentSize: size, currentFlavor: flavorFinal }),
+            };
+          }
+        }
         const saborJunto = detectaSaborDaMensagem(n);
         if (saborJunto) {
           const bordaJunta = detectaBordaDaMensagem(n);
@@ -806,19 +835,6 @@ export function processMessage(input: string, session: BotSession): BotResponse 
             ],
             session: resetaTentativas({ ...session, step: "border_escolha", currentSize: size, currentFlavor: saborJunto }),
           };
-        }
-        if (permiteMeioAMeio(size)) {
-          const dois = detectaDoisSabores(n, allFlavors);
-          if (dois) {
-            const flavorFinal = `${dois[0]}/${dois[1]}`;
-            return {
-              messages: [
-                `Pizza *${size}* meio a meio *${dois[0]}* e *${dois[1]}*! Ótima pedida! 😋`,
-                `Vai querer borda recheada? Olha as opções 👇\n\n${listaBordas(size)}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
-              ],
-              session: resetaTentativas({ ...session, step: "border_escolha", currentSize: size, currentFlavor: flavorFinal }),
-            };
-          }
         }
         return {
           messages: [
