@@ -36,7 +36,7 @@ function listaFlavors(): string {
 
 function mensagemAddMore(cart: CartItem[]): string {
   const subtotal = cartSubtotal(cart);
-  return `🛒 *Seu pedido até agora:*\n${resumoCarrinho(cart)}\n\n  Subtotal: *${formatCurrency(subtotal)}*\n\nVai querer mais alguma coisa? 😊\n\n  1️⃣ Mais uma pizza\n  2️⃣ Quero mais alguma coisa\n  3️⃣ Não, pode fechar`;
+  return `🛒 *Seu pedido até agora:*\n${resumoCarrinho(cart)}\n\n  Subtotal: *${formatCurrency(subtotal)}*\n\nVai querer uma *bebida* pra acompanhar ou mais alguma coisa? 😊\n\n  1️⃣ Mais uma pizza\n  2️⃣ Bebida 🥤\n  3️⃣ Outro item (lanche, suco...)\n  4️⃣ Não, pode fechar`;
 }
 
 export type BotStep =
@@ -348,10 +348,80 @@ type PedidoParcial = {
 function detectaPedidoParcial(text: string): PedidoParcial | null {
   const n = normalizar(text);
   const size = detectaTamanhoDaMensagem(n);
-  const flavor = detectaSaborDaMensagem(n);
   const border = detectaBordaDaMensagem(n);
+  // Para procurar o SABOR, removemos o trecho que fala da borda (ex: "com borda de chocolate"),
+  // senão "chocolate"/"catupiry"/"cheddar" da borda seriam confundidos com sabor.
+  let nSemBorda = n;
+  const idxBorda = n.search(/\bborda\b/);
+  if (idxBorda >= 0) nSemBorda = n.slice(0, idxBorda);
+  // tenta meio a meio primeiro (se o tamanho permite e há sinal)
+  let flavor: string | null = null;
+  const sinalizaMeioAMeio = nSemBorda.includes("meio a meio") || nSemBorda.includes("meio") || nSemBorda.includes("/") || nSemBorda.includes(" e ");
+  if (size && permiteMeioAMeio(size) && sinalizaMeioAMeio) {
+    const allFlavors = [...MENU.saltyFlavors, ...MENU.sweetFlavors];
+    const dois = detectaDoisSabores(nSemBorda, allFlavors);
+    if (dois && dois[0] !== dois[1]) flavor = `${dois[0]}/${dois[1]}`;
+  }
+  if (!flavor) flavor = detectaSaborDaMensagem(nSemBorda);
   if (!size && !flavor && !border) return null;
   return { size: size ?? undefined, flavor: flavor ?? undefined, border: border ?? undefined };
+}
+
+// Processa um pedido de pizza vindo numa mensagem (completo ou parcial) e decide o próximo passo,
+// pulando as etapas que o cliente já informou. Regra: se não veio borda, SEMPRE oferece borda.
+// Retorna null se a mensagem não tem nada de pizza (aí o chamador segue o fluxo normal).
+function montarPizzaDoPedido(text: string, session: BotSession, prefixo?: string): BotResponse | null {
+  const parcial = detectaPedidoParcial(text);
+  if (!parcial || (!parcial.size && !parcial.flavor)) return null;
+
+  const pre = prefixo ? prefixo + "\n\n" : "";
+
+  // 1) Falta tamanho -> pergunta tamanho (guarda o sabor se já veio)
+  if (!parcial.size) {
+    return {
+      messages: [
+        `${pre}Boa! Só me diz o tamanho dessa pizza 😋\n\n${sizeList()}\n\n_(Digite *voltar* para corrigir)_`,
+      ],
+      session: resetaTentativas({ ...session, step: "size", currentCategory: "pizza", currentFlavor: parcial.flavor }),
+    };
+  }
+
+  // 2) Falta sabor -> pergunta sabor (guarda o tamanho)
+  if (!parcial.flavor) {
+    return {
+      messages: [
+        `${pre}Pizza *${parcial.size}* anotada! 👌`,
+        `Agora me conta — qual o sabor? 😋\n\n${listaFlavors()}\n\n_(Digite *voltar* para corrigir)_`,
+      ],
+      session: resetaTentativas({ ...session, step: "flavor", currentCategory: "pizza", currentSize: parcial.size }),
+    };
+  }
+
+  // 3) Tem tamanho + sabor. Falta borda? -> SEMPRE oferece borda
+  if (!parcial.border) {
+    return {
+      messages: [
+        `${pre}Pizza *${parcial.size}* de *${parcial.flavor}*! 😋`,
+        `Vai querer borda recheada? Olha as opções 👇\n\n${listaBordas(parcial.size)}\n\n_(Digite *voltar* para corrigir)_`,
+      ],
+      session: resetaTentativas({ ...session, step: "border_escolha", currentCategory: "pizza", currentSize: parcial.size, currentFlavor: parcial.flavor }),
+    };
+  }
+
+  // 4) Pedido completo (tamanho + sabor + borda) -> adiciona pizza e segue pro "mais alguma coisa"
+  const { size, flavor, border } = parcial;
+  const basePrice = getSizePrice(size);
+  const borderPrice = border !== "Sem borda" ? getBorderPrice(size) : 0;
+  const newItem: CartItem = { category: "pizza", name: "Pizza", size, flavor, border, price: basePrice + borderPrice };
+  const newCart = [...session.cart, newItem];
+  const bordaTxt = border !== "Sem borda" ? ` com borda de *${border}*` : "";
+  return {
+    messages: [
+      `${pre}Pizza *${size}* de *${flavor}*${bordaTxt} anotada! 🤤`,
+      mensagemAddMore(newCart),
+    ],
+    session: resetaTentativas({ ...session, step: "add_more", cart: newCart, currentCategory: "pizza", currentSize: undefined, currentFlavor: undefined }),
+  };
 }
 function nomeCategoriaAtual(step: BotStep, currentCategory?: string): string {
   if (currentCategory === "pizza" || step === "size" || step === "flavor" || step === "segundo_sabor" || step === "border" || step === "border_escolha") return "pizza";
@@ -537,10 +607,15 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
     const qtdMap: Record<string, number> = { "uma": 1, "um": 1, "duas": 2, "dois": 2, "tres": 3, "três": 3, "quatro": 4, "cinco": 5 };
     const qtdMatchComPizza = n.match(/(\d+|duas?|dois|tr[eê]s|quatro|cinco)\s+pizzas?/);
     // No step "size" (pizza já escolhida), aceita quantidade sem mencionar "pizza"
+    // MAS números 1-4 sozinhos no step size são escolha de TAMANHO (4 opções), não quantidade.
     const qtdMatchSoPizza = (session.step === "size" || session.step === "add_more")
       ? n.match(/^(?:quero\s+)?(\d+|duas?|dois|tr[eê]s|quatro|cinco)(?:\s+|$)/)
       : null;
-    const qtdMatch = qtdMatchComPizza || qtdMatchSoPizza;
+    let qtdMatch = qtdMatchComPizza || qtdMatchSoPizza;
+    // Proteção: no step "size", se a mensagem é só o número da opção de tamanho (1 a 4), não trata como quantidade
+    if (session.step === "size" && !qtdMatchComPizza && /^\s*[1-4]\s*$/.test(n)) {
+      qtdMatch = null;
+    }
     let qtd = 0;
     if (qtdMatch) qtd = parseInt(qtdMatch[1]) || qtdMap[qtdMatch[1].toLowerCase()] || 0;
     if (qtd >= 2 && qtd <= 5) {
@@ -658,6 +733,14 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
     case "returning": {
       const historico = session.historico!;
       const firstName = historico.nome.split(" ")[0];
+      // Cliente apressado: já mandou o pedido (completo ou parcial) na saudação -> processa direto
+      const pedidoDireto = montarPizzaDoPedido(text, { ...session, customerName: historico.nome }, `Pode deixar, *${firstName}*! 🍕`);
+      if (pedidoDireto) return pedidoDireto;
+      const intencaoRet = detectaIntencaoDireta(text);
+      if (intencaoRet) {
+        const resp = handleCategory(intencaoRet.category, { ...session, step: "category", customerName: historico.nome });
+        return { ...resp, messages: [`Pode deixar, *${firstName}*! 😄\n\n${resp.messages[0]}`, ...resp.messages.slice(1)], session: resetaTentativas(resp.session) };
+      }
       // Opção 2 / "ver cardápio" / "outra coisa" — detecta ANTES de ePositiva (evita que "quero ver o cardápio" vire repetir)
       const querCardapio = n === "2" || n.includes("cardapio") || n.includes("menu") ||
         n.includes("outra coisa") || n.includes("variar") || n.includes("novidade") ||
@@ -706,23 +789,9 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
     case "name": {
       if (!text || text.length < 2) return respostaInvalida("Me fala seu nome pra eu te atender melhor!", session);
       const firstName = text.split(" ")[0];
-      const pedidoCompleto = detectaPedidoCompleto(text);
-      if (pedidoCompleto) {
-        const { size, flavor, border } = pedidoCompleto;
-        const basePrice = getSizePrice(size);
-        const borderPrice = border !== "Sem borda" ? getBorderPrice(size) : 0;
-        const itemPrice = basePrice + borderPrice;
-        const newItem: CartItem = { category: "pizza", name: "Pizza", size, flavor, border, price: itemPrice };
-        const newCart = [newItem];
-        return {
-          messages: [
-            `Prazer, *${firstName}*! 😊`,
-            `Pizza *${size}* de *${flavor}* com borda de *${border}* anotada! 🤤`,
-            mensagemAddMore(newCart),
-          ],
-          session: resetaTentativas({ ...session, step: "add_more", cart: newCart, customerName: text, currentCategory: "pizza" }),
-        };
-      }
+      // Cliente já mandou o pedido junto com (ou no lugar do) nome
+      const pedidoDireto = montarPizzaDoPedido(text, { ...session, customerName: text }, `Prazer, *${firstName}*! 😊`);
+      if (pedidoDireto) return pedidoDireto;
       const intencao = detectaIntencaoDireta(text);
       if (intencao) {
         const response = handleCategory(intencao.category, { ...session, step: "category", customerName: text });
@@ -743,43 +812,8 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       else if (intencao) category = intencao.category;
       if (!category) return respostaInvalida(mensagemCategorias(), session);
       if (category === "pizza") {
-        const pedidoCompleto = detectaPedidoCompleto(text);
-        if (pedidoCompleto) {
-          const { size, flavor, border } = pedidoCompleto;
-          const basePrice = getSizePrice(size);
-          const borderPrice = border !== "Sem borda" ? getBorderPrice(size) : 0;
-          const itemPrice = basePrice + borderPrice;
-          const newItem: CartItem = { category: "pizza", name: "Pizza", size, flavor, border, price: itemPrice };
-          const newCart = [...session.cart, newItem];
-          return {
-            messages: [
-              `Pizza *${size}* de *${flavor}* com borda de *${border}* anotada! 🤤`,
-              mensagemAddMore(newCart),
-            ],
-            session: resetaTentativas({ ...session, step: "add_more", cart: newCart, currentCategory: "pizza", currentSize: undefined, currentFlavor: undefined }),
-          };
-        }
-        const pedidoParcial = detectaPedidoParcial(text);
-        if (pedidoParcial?.size && pedidoParcial?.flavor) {
-          const { size, flavor } = pedidoParcial;
-          return {
-            messages: [
-              `Pizza *${size}* de *${flavor}*! 😋`,
-              `Vai querer borda recheada? Olha as opções 👇\n\n${listaBordas(size)}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
-            ],
-            session: resetaTentativas({ ...session, step: "border_escolha", currentCategory: "pizza", currentSize: size, currentFlavor: flavor }),
-          };
-        }
-        if (pedidoParcial?.size) {
-          const { size } = pedidoParcial;
-          return {
-            messages: [
-              `Pizza *${size}* anotada! 👌`,
-              `Agora me conta — qual o sabor? 😋\n\n${listaFlavors()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
-            ],
-            session: resetaTentativas({ ...session, step: "flavor", currentCategory: "pizza", currentSize: size }),
-          };
-        }
+        const pedidoPizza = montarPizzaDoPedido(text, session);
+        if (pedidoPizza) return pedidoPizza;
       }
       return { ...handleCategory(category, session), session: resetaTentativas(handleCategory(category, session).session) };
     }
@@ -1026,10 +1060,13 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       if (n === "1" || n.includes("mais pizza") || n.includes("outra pizza") || n.includes("mais uma")) {
         return { messages: [`Qual o tamanho da próxima pizza? 🍕\n\n${sizeList()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "size", currentCategory: "pizza" }) };
       }
-      if (n === "2" || n.includes("outro") || n.includes("mais alguma") || n.includes("adicionar")) {
+      if (n === "2" || n.includes("bebida") || n.includes("refri") || n.includes("guarana") || n.includes("suco") || n.includes("agua") || n.includes("cerveja")) {
+        return { ...handleCategory("bebida", { ...session, step: "category" }), session: resetaTentativas(handleCategory("bebida", { ...session, step: "category" }).session) };
+      }
+      if (n === "3" || n.includes("outro") || n.includes("mais alguma") || n.includes("adicionar") || n.includes("lanche")) {
         return { messages: [`Claro! 😊 ${mensagemCategorias()}`], session: resetaTentativas({ ...session, step: "category" }) };
       }
-      if (eNegativa(n) || n === "3") {
+      if (eNegativa(n) || n === "4") {
         const subtotalAtual = cartSubtotal(session.cart);
         const resumo = session.cart.length > 0 ? `\n\n🛒 *Seu pedido:*\n${resumoCarrinho(session.cart)}\n  Subtotal: *${formatCurrency(subtotalAtual)}*` : "";
         return {
@@ -1039,9 +1076,9 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       }
       const intencaoDireta = detectaIntencaoDireta(text);
       if (intencaoDireta) {
-        return { messages: [`Claro! 😊 ${mensagemCategorias()}`], session: resetaTentativas({ ...session, step: "category" }) };
+        return { ...handleCategory(intencaoDireta.category, { ...session, step: "category" }), session: resetaTentativas(handleCategory(intencaoDireta.category, { ...session, step: "category" }).session) };
       }
-      return respostaInvalida(`  1️⃣ Mais uma pizza\n  2️⃣ Quero mais alguma coisa\n  3️⃣ Não, pode fechar`, session);
+      return respostaInvalida(`  1️⃣ Mais uma pizza\n  2️⃣ Bebida 🥤\n  3️⃣ Outro item (lanche, suco...)\n  4️⃣ Não, pode fechar`, session);
     }
     case "observacao": {
       const semObservacao = n === "0" || n === "nao" || n === "n" || n === "nenhuma" ||
