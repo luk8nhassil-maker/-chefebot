@@ -298,10 +298,15 @@ function detectaTamanho(n: string): string | null {
   return null;
 }
 function detectaTamanhoDaMensagem(n: string): string | null {
-  if (n.includes("pequen") || n.includes(" p ") || n.includes(" p,") || n.includes(" p.")) return "P";
-  if (n.includes("medi") || n.includes(" m ") || n.includes(" m,") || n.includes(" m.")) return "M";
-  if (n.includes("grand") || n.includes(" g ") || n.includes(" g,") || n.includes(" g.")) return "G";
-  if (n.includes("famil") || n.includes(" f ") || n.includes(" f,") || n.includes(" f.")) return "F";
+  if (n.includes("pequen")) return "P";
+  if (n.includes("medi")) return "M";
+  if (n.includes("grand")) return "G";
+  if (n.includes("famil")) return "F";
+  // Letra isolada do tamanho (P/M/G/F) cercada por não-letras: " f ", "(f)", "f)", "tamanho: f", "f\n", fim de linha
+  if (/(^|[^a-z])p([^a-z]|$)/.test(n)) return "P";
+  if (/(^|[^a-z])m([^a-z]|$)/.test(n)) return "M";
+  if (/(^|[^a-z])g([^a-z]|$)/.test(n)) return "G";
+  if (/(^|[^a-z])f([^a-z]|$)/.test(n)) return "F";
   return null;
 }
 function detectaBordaDaMensagem(n: string): string | null {
@@ -602,20 +607,19 @@ export function processMessage(input: string, session: BotSession): BotResponse 
 function processMessageInner(input: string, session: BotSession): BotResponse {
   const text = input.trim();
   const n = normalizar(text);
-  // Detecta quantidade de pizzas: "2 pizzas", "duas pizzas familia", "quero 2", "duas"
+  // Detecta quantidade de pizzas. Regra de ouro: número PURO sozinho ("2") NUNCA é quantidade —
+  // nos steps category/add_more/size ele é opção de menu (1,2,3,4) ou opção de tamanho.
+  // Quantidade por número só vale com a palavra "pizza" junto ("2 pizzas"). Palavra por extenso
+  // ("duas", "três") pode indicar quantidade sozinha, pois não colide com opção de menu.
   if ((session.step === "size" || session.step === "category" || session.step === "add_more" || session.step === "name") && !session.pendingPizzas) {
     const qtdMap: Record<string, number> = { "uma": 1, "um": 1, "duas": 2, "dois": 2, "tres": 3, "três": 3, "quatro": 4, "cinco": 5 };
     const qtdMatchComPizza = n.match(/(\d+|duas?|dois|tr[eê]s|quatro|cinco)\s+pizzas?/);
-    // No step "size" (pizza já escolhida), aceita quantidade sem mencionar "pizza"
-    // MAS números 1-4 sozinhos no step size são escolha de TAMANHO (4 opções), não quantidade.
-    const qtdMatchSoPizza = (session.step === "size" || session.step === "add_more")
-      ? n.match(/^(?:quero\s+)?(\d+|duas?|dois|tr[eê]s|quatro|cinco)(?:\s+|$)/)
+    // Número PURO sozinho ("2") nunca conta como quantidade (é opção de menu/tamanho).
+    // Só palavra por extenso sozinha ("duas", "tres") conta — e nunca no add_more/category onde vira opção.
+    const qtdMatchExtenso = (session.step === "size" || session.step === "name")
+      ? n.match(/^(?:quero\s+)?(duas?|dois|tr[eê]s|quatro|cinco)(?:\s+pizzas?)?$/)
       : null;
-    let qtdMatch = qtdMatchComPizza || qtdMatchSoPizza;
-    // Proteção: no step "size", se a mensagem é só o número da opção de tamanho (1 a 4), não trata como quantidade
-    if (session.step === "size" && !qtdMatchComPizza && /^\s*[1-4]\s*$/.test(n)) {
-      qtdMatch = null;
-    }
+    const qtdMatch = qtdMatchComPizza || qtdMatchExtenso;
     let qtd = 0;
     if (qtdMatch) qtd = parseInt(qtdMatch[1]) || qtdMap[qtdMatch[1].toLowerCase()] || 0;
     if (qtd >= 2 && qtd <= 5) {
