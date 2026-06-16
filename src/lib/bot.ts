@@ -111,6 +111,8 @@ export interface BotSession {
   pedidoId?: string;
   troco?: string;
   ritmoRapido?: boolean;
+  pagamentoPendente?: string;
+  enderecoAConfirmar?: string;
 }
 export interface BotResponse {
   messages: string[];
@@ -512,6 +514,55 @@ function buildReceipt(session: BotSession): string {
 }
 function neighborhoodList(): string {
   return MENU.neighborhoods.map((n, i) => `  ${i + 1}. ${n.name} · *${formatCurrency(n.fee)}*`).join("\n");
+}
+
+// Detecta forma de pagamento numa mensagem (lista fechada e segura)
+function detectaPagamento(n: string): string | null {
+  if (/\bpix\b/.test(n) || n.includes("transfer")) return "Pix";
+  if (n.includes("dinheiro") || n.includes("especie") || n.includes("cash") || /\ba vista\b/.test(n)) return "Dinheiro";
+  if (n.includes("cartao") || n.includes("credito") || n.includes("debito") || /\bcard\b/.test(n)) return "Cartão";
+  return null;
+}
+
+// Detecta bairro de forma RIGOROSA: o nome do bairro deve aparecer como palavra(s) inteira(s)
+// na mensagem, não como substring solta. Prioriza o match mais longo (ex: "Santo Antonio" antes de "Santo").
+// Retorna null se não houver match seguro (aí o fluxo normal pergunta o bairro).
+function detectaBairro(n: string): { name: string; fee: number } | null {
+  // tokens da mensagem (palavras), para comparar por palavra inteira
+  const candidatos = MENU.neighborhoods
+    .map(nb => ({ nb, alvo: normalizar(nb.name) }))
+    // bairro presente como sequência de palavras inteiras: cercado por borda de palavra
+    .filter(({ alvo }) => new RegExp(`(^|[^a-z0-9])${alvo.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^a-z0-9]|$)`).test(n))
+    // ordena do nome mais longo pro mais curto (evita "Santo" ganhar de "Santo Antonio")
+    .sort((a, b) => b.alvo.length - a.alvo.length);
+  if (candidatos.length === 0) return null;
+  const escolhido = candidatos[0].nb;
+  return { name: escolhido.name, fee: escolhido.fee };
+}
+
+// Detector central de dados de entrega numa única mensagem.
+// Conservador: só retorna o que detectou com confiança; o resto fica null (fluxo normal pergunta).
+function detectaDadosEntrega(text: string): { tipo: "delivery" | "pickup" | null; bairro: { name: string; fee: number } | null; pagamento: string | null } {
+  const n = normalizar(text);
+  let tipo: "delivery" | "pickup" | null = null;
+  if (n.includes("entrega") || n.includes("delivery") || n.includes("entregar") || n.includes("minha casa") || n.includes("em casa")) tipo = "delivery";
+  else if (n.includes("retirar") || n.includes("retirada") || n.includes("buscar") || n.includes("pegar") || n.includes("retiro") || n.includes("na loja")) tipo = "pickup";
+  const bairro = detectaBairro(n);
+  const pagamento = detectaPagamento(n);
+  // Se detectou bairro mas não falou tipo, assume delivery (faz sentido: bairro implica entrega)
+  if (bairro && !tipo) tipo = "delivery";
+  return { tipo, bairro, pagamento };
+}
+
+// Aplica uma forma de pagamento e decide o próximo passo (troco se dinheiro, senão confirmação).
+// Usado tanto no step payment quanto na captura inteligente. Limpa pagamentoPendente.
+function aplicaPagamento(payment: string, session: BotSession): BotResponse {
+  const updatedSession = { ...session, paymentMethod: payment, pagamentoPendente: undefined };
+  if (payment === "Dinheiro") {
+    return { messages: [`Combinado! 💵 Vai precisar de troco?\n\nSe sim, me diz o valor que vai pagar. Ex: *100*\nSe não, é só digitar *não*`], session: resetaTentativas({ ...updatedSession, step: "troco", paymentMethod: "Dinheiro" }) };
+  }
+  const receipt = buildReceipt(updatedSession);
+  return { messages: [`Confere seu pedido 👇\n\n${receipt}\n\nTá certinho?\n  ✅ *1.* Confirmar\n  ❌ *2.* Cancelar`], session: resetaTentativas({ ...updatedSession, step: "confirm" }) };
 }
 function eVoltar(n: string): boolean {
   return n === "voltar" || n === "volta" || n === "errei" ||
@@ -1106,6 +1157,30 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       };
     }
     case "delivery_type": {
+      // ===== CAPTURA INTELIGENTE: tenta extrair tipo + bairro + pagamento de uma vez =====
+      const dados = detectaDadosEntrega(text);
+      const pagDetectado = dados.pagamento || undefined;
+
+      // Caminho RETIRADA detectada (com ou sem pagamento junto)
+      if (dados.tipo === "pickup") {
+        const baseSession = { ...session, deliveryType: "pickup" as const, deliveryFee: 0, neighborhood: undefined };
+        if (pagDetectado) {
+          // tipo + pagamento numa mensagem -> aplica pagamento e vai pro fechamento
+          return aplicaPagamento(pagDetectado, { ...baseSession });
+        }
+        const payList = MENU.payments.map((p, i) => `  ${i + 1}. ${p}`).join("\n");
+        return { messages: [`Combinado, você retira aqui na loja! 🏪\n\nComo vai pagar?\n\n${payList}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...baseSession, step: "payment" }) };
+      }
+
+      // Caminho DELIVERY com BAIRRO VÁLIDO detectado -> aplica taxa e pede só o endereço (pagamento guardado p/ depois)
+      if (dados.tipo === "delivery" && dados.bairro) {
+        return {
+          messages: [`*${dados.bairro.name}*, taxa de entrega: *${formatCurrency(dados.bairro.fee)}* 🛵\n\nMe passa o endereço completo:\n_(Rua, número e complemento)_\n\n_(Digite *voltar* para corrigir a etapa anterior)_`],
+          session: resetaTentativas({ ...session, step: "address", deliveryType: "delivery", neighborhood: dados.bairro.name, deliveryFee: dados.bairro.fee, pagamentoPendente: pagDetectado }),
+        };
+      }
+
+      // ===== FLUXO NORMAL (fallback): não detectou com confiança =====
       if (n === "1" || n.includes("entrega") || n.includes("delivery") || n.includes("entregar") || n.includes("minha casa")) {
         const hist = session.historico;
         if (hist?.ultimoEndereco && hist?.ultimoNeighborhood) {
@@ -1113,10 +1188,10 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
           const fee = nbFound?.fee || hist.ultimoDeliveryFee || 0;
           return {
             messages: [`Entregar no mesmo endereço de antes? 📍\n\n*${hist.ultimoEndereco} - ${hist.ultimoNeighborhood}*\n\n  1. Sim, mesmo endereço\n  2. Não, quero outro endereço`],
-            session: resetaTentativas({ ...session, step: "confirm_address", deliveryType: "delivery", neighborhood: hist.ultimoNeighborhood, deliveryFee: fee, address: hist.ultimoEndereco }),
+            session: resetaTentativas({ ...session, step: "confirm_address", deliveryType: "delivery", neighborhood: hist.ultimoNeighborhood, deliveryFee: fee, address: hist.ultimoEndereco, pagamentoPendente: pagDetectado }),
           };
         }
-        return { messages: [`Ótimo! Qual seu bairro? 🛵\n\n${neighborhoodList()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "neighborhood", deliveryType: "delivery" }) };
+        return { messages: [`Ótimo! Qual seu bairro? 🛵\n\n${neighborhoodList()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "neighborhood", deliveryType: "delivery", pagamentoPendente: pagDetectado }) };
       }
       if (n === "2" || n.includes("retirar") || n.includes("loja") || n.includes("buscar") || n.includes("pegar") || n.includes("retiro")) {
         const payList = MENU.payments.map((p, i) => `  ${i + 1}. ${p}`).join("\n");
@@ -1135,6 +1210,9 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
     case "confirm_address": {
       const payList = MENU.payments.map((p, i) => `  ${i + 1}. ${p}`).join("\n");
       if (ePositiva(n) || n === "1") {
+        if (session.pagamentoPendente) {
+          return aplicaPagamento(session.pagamentoPendente, session);
+        }
         return { messages: [`Ótimo! 📍 *${session.address} - ${session.neighborhood}*\n\nComo vai pagar?\n\n${payList}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "payment" }) };
       }
       if (eNegativa(n) || n === "2") {
@@ -1144,6 +1222,10 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
     }
     case "address": {
       if (!text || text.length < 5) return respostaInvalida("Me passa o endereço completo.\nExemplo: *Rua das Flores, 123, Apto 2*", session);
+      // Se o cliente já tinha informado o pagamento na captura inteligente, aplica agora e pula a pergunta
+      if (session.pagamentoPendente) {
+        return aplicaPagamento(session.pagamentoPendente, { ...session, address: text });
+      }
       const payList = MENU.payments.map((p, i) => `  ${i + 1}. ${p}`).join("\n");
       return { messages: [`Endereço anotado! 📍 Como vai pagar?\n\n${payList}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "payment", address: text }) };
     }
@@ -1153,12 +1235,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       else if (n === "2" || n.includes("dinheiro") || n.includes("especie") || n.includes("cash")) payment = "Dinheiro";
       else if (n === "3" || n.includes("cartao") || n.includes("credito") || n.includes("debito")) payment = "Cartão";
       if (!payment) return respostaInvalida(MENU.payments.map((p, i) => `  ${i + 1}. ${p}`).join("\n"), session);
-      const updatedSession = { ...session, paymentMethod: payment };
-      if (payment === "Dinheiro") {
-        return { messages: [`Combinado! 💵 Vai precisar de troco?\n\nSe sim, me diz o valor que vai pagar. Ex: *100*\nSe não, é só digitar *não*`], session: resetaTentativas({ ...updatedSession, step: "troco", paymentMethod: "Dinheiro" }) };
-      }
-      const receipt = buildReceipt(updatedSession);
-      return { messages: [`Confere seu pedido 👇\n\n${receipt}\n\nTá certinho?\n  ✅ *1.* Confirmar\n  ❌ *2.* Cancelar`], session: resetaTentativas({ ...updatedSession, step: "confirm" }) };
+      return aplicaPagamento(payment, session);
     }
     case "troco": {
       const total = cartSubtotal(session.cart) + session.deliveryFee;
