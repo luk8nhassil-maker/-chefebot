@@ -160,7 +160,8 @@ function respostaEscaladaPorLoop(): BotResponse {
   };
 }
 function permiteMeioAMeio(size?: string): boolean {
-  return size === "M" || size === "G" || size === "F";
+  // Todos os tamanhos permitem meio a meio (inclusive a Pequena).
+  return !!size;
 }
 // ===== MOTOR DE RECONHECIMENTO DE SABOR (tolerante a erro humano) =====
 // Apelidos: variações que o fuzzy sozinho não pegaria (números por extenso vs dígito,
