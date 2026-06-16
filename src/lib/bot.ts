@@ -36,7 +36,21 @@ function listaFlavors(): string {
 
 function mensagemAddMore(cart: CartItem[]): string {
   const subtotal = cartSubtotal(cart);
-  return `🛒 *Seu pedido:*\n${resumoCarrinho(cart)}\n  Subtotal: *${formatCurrency(subtotal)}*\n\nQuer adicionar algo? 😊\n\n  1️⃣ Bebida 🥤\n  2️⃣ Mais uma pizza 🍕\n  3️⃣ Finalizar pedido ✅`;
+
+  return `
+🛒 *Seu pedido:*
+${resumoCarrinho(cart)}
+
+💰 Subtotal: *${formatCurrency(subtotal)}*
+
+🔥 Quer deixar o pedido ainda melhor?
+
+🥤 1. Adicionar bebida gelada  
+🍕 2. Pedir mais uma pizza  
+✅ 3. Finalizar pedido  
+
+Dica: a galera normalmente pega uma bebida junto 😅
+`;
 }
 
 export type BotStep =

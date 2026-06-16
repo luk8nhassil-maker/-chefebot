@@ -40,7 +40,11 @@
       "Bash(NODE_OPTIONS=\"--max-old-space-size=2048\" npm run build)",
       "Bash(pkill -9 -f \"next\")",
       "Bash(node *)",
-      "Bash(fuser /workspaces/-chefebot/.next/lock)"
+      "Bash(fuser /workspaces/-chefebot/.next/lock)",
+      "Bash(npx tsx *)",
+      "Bash(npx dotenv *)",
+      "Bash(xxd /workspaces/-chefebot/src/lib/menu.ts)",
+      "mcp__claude_ai_Google_Drive__create_file"
     ]
   }
 }

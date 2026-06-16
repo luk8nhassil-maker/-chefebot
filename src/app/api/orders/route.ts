@@ -72,10 +72,11 @@ async function notificarCliente(telefone: string, status: Status, nomeCliente: s
 
 async function getPedidos(): Promise<Pedido[]> {
   const data = await redis.get<Pedido[]>('pedidos')
+
   if (!data) {
-    await redis.set('pedidos', PEDIDOS_INICIAIS)
-    return PEDIDOS_INICIAIS
+    return []
   }
+
   return data
 }
 
