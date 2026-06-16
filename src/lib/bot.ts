@@ -36,7 +36,7 @@ function listaFlavors(): string {
 
 function mensagemAddMore(cart: CartItem[]): string {
   const subtotal = cartSubtotal(cart);
-  return `🛒 *Seu pedido até agora:*\n${resumoCarrinho(cart)}\n\n  Subtotal: *${formatCurrency(subtotal)}*\n\nVai querer uma *bebida* pra acompanhar ou mais alguma coisa? 😊\n\n  1️⃣ Mais uma pizza\n  2️⃣ Bebida 🥤\n  3️⃣ Outro item (lanche, suco...)\n  4️⃣ Não, pode fechar`;
+  return `🛒 *Seu pedido:*\n${resumoCarrinho(cart)}\n  Subtotal: *${formatCurrency(subtotal)}*\n\nQuer adicionar algo? 😊\n\n  1️⃣ Bebida 🥤\n  2️⃣ Mais uma pizza 🍕\n  3️⃣ Finalizar pedido ✅`;
 }
 
 export type BotStep =
@@ -690,9 +690,9 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       case "segundo_sabor":
         return { messages: [`Tudo bem! Qual o sabor então? 😊\n\n${listaFlavors()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "flavor", currentFlavor: undefined }) };
       case "observacao":
-        return { messages: [`Tudo bem! Vai querer mais alguma coisa? 😊\n\n  1️⃣ Mais uma pizza\n  2️⃣ Quero mais alguma coisa\n  3️⃣ Não, pode fechar`], session: resetaTentativas({ ...session, step: "add_more" }) };
+        return { messages: [mensagemAddMore(session.cart)], session: resetaTentativas({ ...session, step: "add_more" }) };
       case "delivery_type":
-        return { messages: [`Tudo bem! Tem algum detalhe especial pro pedido? ✏️\n\nSe não tiver é só digitar *0*`], session: resetaTentativas({ ...session, step: "observacao" }) };
+        return { messages: [mensagemAddMore(session.cart)], session: resetaTentativas({ ...session, step: "add_more" }) };
       case "neighborhood":
         return { messages: [`Tudo bem! Como prefere receber? 😊\n\n  1. Entrega (delivery) 🛵\n  2. Buscar na loja 🏪`], session: resetaTentativas({ ...session, step: "delivery_type" }) };
       case "address":
@@ -1062,28 +1062,32 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       return { messages: [`Qual borda você prefere? 😋\n\n${listaBordas(session.currentSize!)}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: { ...session, step: "border_escolha" } };
     }
     case "add_more": {
-      if (n === "1" || n.includes("mais pizza") || n.includes("outra pizza") || n.includes("mais uma")) {
+      // 1 = Bebida (atalho prioritário)
+      if (n === "1" || n.includes("bebida") || n.includes("refri") || n.includes("guarana") || n.includes("suco") || n.includes("agua") || n.includes("cerveja")) {
+        const resp = handleCategory("bebida", { ...session, step: "category" });
+        return { ...resp, session: resetaTentativas(resp.session) };
+      }
+      // 2 = Mais uma pizza
+      if (n === "2" || n.includes("mais pizza") || n.includes("outra pizza") || n.includes("mais uma") || n.includes("mais 1")) {
         return { messages: [`Qual o tamanho da próxima pizza? 🍕\n\n${sizeList()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "size", currentCategory: "pizza" }) };
       }
-      if (n === "2" || n.includes("bebida") || n.includes("refri") || n.includes("guarana") || n.includes("suco") || n.includes("agua") || n.includes("cerveja")) {
-        return { ...handleCategory("bebida", { ...session, step: "category" }), session: resetaTentativas(handleCategory("bebida", { ...session, step: "category" }).session) };
-      }
-      if (n === "3" || n.includes("outro") || n.includes("mais alguma") || n.includes("adicionar") || n.includes("lanche")) {
+      // Outros itens (lanche, etc) — sem número fixo, mas reconhece por palavra
+      if (n.includes("outro") || n.includes("lanche") || n.includes("porcao") || n.includes("calzone")) {
         return { messages: [`Claro! 😊 ${mensagemCategorias()}`], session: resetaTentativas({ ...session, step: "category" }) };
       }
-      if (eNegativa(n) || n === "4") {
-        const subtotalAtual = cartSubtotal(session.cart);
-        const resumo = session.cart.length > 0 ? `\n\n🛒 *Seu pedido:*\n${resumoCarrinho(session.cart)}\n  Subtotal: *${formatCurrency(subtotalAtual)}*` : "";
+      // 3 = Finalizar -> vai DIRETO pra entrega (observação deixou de ser etapa obrigatória)
+      if (n === "3" || eNegativa(n) || n.includes("finalizar") || n.includes("fechar") || n.includes("pode fechar") || n.includes("so isso") || n.includes("e so")) {
         return {
-          messages: [`Tem algum detalhe especial pro seu pedido? ✏️\n\nEx: _sem cebola, bem passado, capricha no recheio..._\n\nSe não tiver é só digitar *0*${resumo}`],
-          session: resetaTentativas({ ...session, step: "observacao" }),
+          messages: [`Show! Vamos fechar então 🍕\n\nComo prefere receber? 😊\n\n  1. Entrega (delivery) 🛵\n  2. Buscar na loja 🏪`],
+          session: resetaTentativas({ ...session, step: "delivery_type" }),
         };
       }
       const intencaoDireta = detectaIntencaoDireta(text);
       if (intencaoDireta) {
-        return { ...handleCategory(intencaoDireta.category, { ...session, step: "category" }), session: resetaTentativas(handleCategory(intencaoDireta.category, { ...session, step: "category" }).session) };
+        const resp = handleCategory(intencaoDireta.category, { ...session, step: "category" });
+        return { ...resp, session: resetaTentativas(resp.session) };
       }
-      return respostaInvalida(`  1️⃣ Mais uma pizza\n  2️⃣ Bebida 🥤\n  3️⃣ Outro item (lanche, suco...)\n  4️⃣ Não, pode fechar`, session);
+      return respostaInvalida(`  1️⃣ Bebida 🥤\n  2️⃣ Mais uma pizza 🍕\n  3️⃣ Finalizar pedido ✅`, session);
     }
     case "observacao": {
       const semObservacao = n === "0" || n === "nao" || n === "n" || n === "nenhuma" ||
