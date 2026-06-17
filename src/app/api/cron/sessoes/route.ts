@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { redis } from "@/lib/redis";
 
-const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL || 'evolution-api-production-8f99.up.railway.app'
+const _rawUrl = process.env.EVOLUTION_API_URL || 'evolution-api-production-8f99.up.railway.app'
+const EVOLUTION_BASE = _rawUrl.startsWith('http') ? _rawUrl : `https://${_rawUrl}`
 const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY!
 const EVOLUTION_INSTANCE = 'chefebot'
 const TIMEOUT_MS = 15 * 60 * 1000 // 15 minutos
@@ -9,7 +10,7 @@ const STEPS_IGNORADOS = ['done', 'escalado', 'confirm', 'welcome']
 
 async function enviarMensagem(phone: string, text: string) {
   try {
-    await fetch(`https://${EVOLUTION_API_URL}/message/sendText/${EVOLUTION_INSTANCE}`, {
+    await fetch(`${EVOLUTION_BASE}/message/sendText/${EVOLUTION_INSTANCE}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', apikey: EVOLUTION_API_KEY },
       body: JSON.stringify({ number: phone, text }),

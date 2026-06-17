@@ -11,6 +11,9 @@ import { salvarStatusConexao, botPodeResponder, StatusConexao } from "@/lib/cone
 
 export const maxDuration = 30;
 
+const _evUrl = process.env.EVOLUTION_API_URL ?? 'evolution-api-production-8f99.up.railway.app'
+const EVOLUTION_BASE = _evUrl.startsWith('http') ? _evUrl : `https://${_evUrl}`
+
 type Pedido = {
   id: string;
   numero?: number;
@@ -221,7 +224,7 @@ async function fecharEscalonamento(phone: string) {
 }
 
 async function enviarMensagem(phone: string, message: string, ritmoRapido = false) {
-  const url = `https://${process.env.EVOLUTION_API_URL}/message/sendText/chefebot`;
+  const url = `${EVOLUTION_BASE}/message/sendText/chefebot`;
   // Delay "digitando" proporcional ao tamanho do texto (parece mais humano).
   // Cliente apressado (responde só com número) recebe respostas bem rápidas (~400ms).
   // Cliente calmo (digita por extenso) mantém o ritmo humano (~22ms por caractere).
@@ -238,7 +241,7 @@ async function enviarMensagem(phone: string, message: string, ritmoRapido = fals
 
 async function enviarImagem(phone: string, imageUrl: string) {
   try {
-    const url = `https://${process.env.EVOLUTION_API_URL}/message/sendMedia/chefebot`;
+    const url = `${EVOLUTION_BASE}/message/sendMedia/chefebot`;
     await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json", apikey: process.env.EVOLUTION_API_KEY! },
@@ -356,7 +359,7 @@ async function processarComprovante(phone: string, data: any, config: ConfigPizz
     let imagemBase64 = "";
     let mediaType: "image/jpeg" | "image/png" | "image/webp" | "application/pdf" = isImagem ? "image/jpeg" : "application/pdf";
     try {
-      const downloadUrl = `https://${process.env.EVOLUTION_API_URL}/chat/getBase64FromMediaMessage/chefebot`;
+      const downloadUrl = `${EVOLUTION_BASE}/chat/getBase64FromMediaMessage/chefebot`;
       const msgPayload = { message: data?.data || data };
       const downloadRes = await fetch(downloadUrl, {
         method: "POST",
@@ -506,7 +509,7 @@ export async function POST(req: NextRequest) {
     const isAudio = !!data?.message?.audioMessage || !!data?.message?.pttMessage
     if (isAudio) {
       try {
-        const downloadUrl = `https://${process.env.EVOLUTION_API_URL}/chat/getBase64FromMediaMessage/chefebot`
+        const downloadUrl = `${EVOLUTION_BASE}/chat/getBase64FromMediaMessage/chefebot`
         const downloadRes = await fetch(downloadUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', apikey: process.env.EVOLUTION_API_KEY! },
