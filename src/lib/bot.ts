@@ -36,7 +36,7 @@ function listaFlavors(): string {
 
 function mensagemAddMore(cart: CartItem[]): string {
   const subtotal = cartSubtotal(cart);
-  return `🛒 *Seu pedido:*\n${resumoCarrinho(cart)}\n  Subtotal: *${formatCurrency(subtotal)}*\n\nQuer adicionar algo? 😊\n\n  1️⃣ Bebida 🥤\n  2️⃣ Mais uma pizza 🍕\n  3️⃣ Finalizar pedido ✅`;
+  return `🛒 *Seu pedido:*\n${resumoCarrinho(cart)}\n  Subtotal: *${formatCurrency(subtotal)}*\n\nQuer adicionar algo a mais? Como bebida, outro lanche, ou podemos fechar esse pedido? 😊`;
 }
 
 export type BotStep =
@@ -449,7 +449,7 @@ function montarPizzaDoPedido(text: string, session: BotSession, prefixo?: string
     return {
       messages: [
         `${pre}Pizza *${parcial.size}* de *${parcial.flavor}*! 😋`,
-        `Vai querer borda recheada? 😋\n\n_(Digite *voltar* para corrigir a etapa anterior)_`,
+        `Vai querer borda recheada? 😋`,
       ],
       session: resetaTentativas({ ...session, step: "border_escolha", currentCategory: "pizza", currentSize: parcial.size, currentFlavor: parcial.flavor }),
     };
@@ -768,7 +768,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       flavor: `É só digitar o número ou o nome do sabor que você quer! 😋`,
       border_escolha: `É só escolher o número da borda ou digitar o nome. Se não quiser borda é só digitar o número ${MENU.borders.length + 1}!`,
       add_more: `É só escolher uma opção:\n\n  1️⃣ Mais uma pizza\n  2️⃣ Quero mais alguma coisa\n  3️⃣ Não, pode fechar`,
-      delivery_type: `É só me dizer como prefere receber:\n\n  1. Entrega (delivery) 🛵\n  2. Buscar na loja 🏪`,
+      delivery_type: `Vai querer entrega ou prefere buscar na loja? Se for entrega, me informa seu endereço completo com bairro, por favor 😊`,
       neighborhood: `É só digitar o número ou o nome do seu bairro!`,
       payment: `É só escolher como vai pagar:\n\n  1. Pix 💸\n  2. Dinheiro\n  3. Cartão`,
       confirm: `É só confirmar o pedido:\n\n  ✅ *1.* Confirmar\n  ❌ *2.* Cancelar`,
@@ -791,12 +791,12 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       case "delivery_type":
         return { messages: [mensagemAddMore(session.cart)], session: resetaTentativas({ ...session, step: "add_more" }) };
       case "neighborhood":
-        return { messages: [`Tudo bem! Como prefere receber? 😊\n\n  1. Entrega (delivery) 🛵\n  2. Buscar na loja 🏪`], session: resetaTentativas({ ...session, step: "delivery_type" }) };
+        return { messages: [`Tudo bem! Vai querer entrega ou prefere buscar na loja? Se for entrega, me informa seu endereço completo com bairro, por favor 😊`], session: resetaTentativas({ ...session, step: "delivery_type" }) };
       case "address":
-        return { messages: [`Tudo bem! Qual seu bairro? 🛵\n\n${neighborhoodList()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "neighborhood" }) };
+        return { messages: [`Tudo bem! Qual o seu bairro? 😊`], session: resetaTentativas({ ...session, step: "neighborhood" }) };
       case "payment":
         if (session.deliveryType === "pickup") {
-          return { messages: [`Tudo bem! Como prefere receber? 😊\n\n  1. Entrega (delivery) 🛵\n  2. Buscar na loja 🏪`], session: resetaTentativas({ ...session, step: "delivery_type" }) };
+          return { messages: [`Tudo bem! Vai querer entrega ou prefere buscar na loja? Se for entrega, me informa seu endereço completo com bairro, por favor 😊`], session: resetaTentativas({ ...session, step: "delivery_type" }) };
         }
         return { messages: [`Tudo bem! Me passa o endereço completo:\n_(Rua, número e complemento)_\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "address" }) };
       case "pedindo_nome": {
@@ -874,7 +874,10 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
           return {
             messages: [
               `Boa, *${firstName}*! 😋 Anotei o seu de sempre:`,
-              `🛒 *Itens:*\n${resumoCarrinho(cart)}\n\nE hoje, como prefere receber? 😊\n\n  1. Entrega (delivery) 🛵\n  2. Buscar na loja 🏪`
+              `🛒 *Itens:*
+${resumoCarrinho(cart)}
+
+Vai querer entrega ou prefere buscar na loja? Se for entrega, me informa seu endereço completo com bairro, por favor 😊`
             ],
             session: resetaTentativas(updatedSession),
           };
@@ -978,7 +981,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
             return {
               messages: [
                 `Pizza *${size}* meio a meio *${dois[0]}* e *${dois[1]}*! Ótima pedida! 😋`,
-                `Vai querer borda recheada? 😋\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
+                `Vai querer borda recheada? 😋`
               ],
               session: resetaTentativas({ ...session, step: "border_escolha", currentSize: size, currentFlavor: flavorFinal }),
             };
@@ -1004,7 +1007,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
           return {
             messages: [
               `Pizza *${size}* de *${saborJunto}*! 😋`,
-              `Vai querer borda recheada? 😋\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
+              `Vai querer borda recheada? 😋`
             ],
             session: resetaTentativas({ ...session, step: "border_escolha", currentSize: size, currentFlavor: saborJunto }),
           };
@@ -1040,7 +1043,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
           return {
             messages: [
               `Meio a meio *${dois[0]}* e *${dois[1]}*! Que combinação! 😋`,
-              `Vai querer borda recheada? 😋\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
+              `Vai querer borda recheada? 😋`
             ],
             session: resetaTentativas({ ...session, step: "border_escolha", currentFlavor: flavorFinal }),
           };
@@ -1062,7 +1065,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       return {
         messages: [
           `*${flavor}*! Excelente escolha! 🤤`,
-          `Vai querer borda recheada? 😋\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
+          `Vai querer borda recheada? 😋`
         ],
         session: resetaTentativas({ ...session, step: "border_escolha", currentFlavor: flavor }),
       };
@@ -1072,7 +1075,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       const naoQuerSegundo = n === "2" || eNegativa(n) || n.includes("so esse") || n.includes("apenas esse") || n.includes("so um");
       if (naoQuerSegundo) {
         return {
-          messages: [`Combinado! Vai querer borda recheada? 😋\n\n_(Digite *voltar* para corrigir a etapa anterior)_`],
+          messages: [`Combinado! Vai querer borda recheada? 😋`],
           session: resetaTentativas({ ...session, step: "border_escolha" }),
         };
       }
@@ -1094,7 +1097,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       }
       if (flavor2 === session.currentFlavor) {
         return {
-          messages: [`Esse é o mesmo sabor! Vou considerar só *${flavor2}* então 😄\n\nVai querer borda recheada? 😋\n\n_(Digite *voltar* para corrigir a etapa anterior)_`],
+          messages: [`Esse é o mesmo sabor! Vou considerar só *${flavor2}* então 😄\n\nVai querer borda recheada? 😋`],
           session: resetaTentativas({ ...session, step: "border_escolha" }),
         };
       }
@@ -1102,7 +1105,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       return {
         messages: [
           `Meio a meio *${session.currentFlavor}* e *${flavor2}*! Que combinação! 😋`,
-          `Vai querer borda recheada? 😋\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
+          `Vai querer borda recheada? 😋`
         ],
         session: resetaTentativas({ ...session, step: "border_escolha", currentFlavor: flavorFinal }),
       };
@@ -1182,23 +1185,25 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       return { messages: [`Qual borda você prefere? 😋\n\n${listaBordas(session.currentSize!)}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: { ...session, step: "border_escolha" } };
     }
     case "add_more": {
-      // 1 = Bebida (atalho prioritário)
-      if (n === "1" || n.includes("bebida") || n.includes("refri") || n.includes("guarana") || n.includes("suco") || n.includes("agua") || n.includes("cerveja")) {
+      // Pizza só se pedida explicitamente (regra: não voltar a pizza por engano)
+      if (n.includes("mais pizza") || n.includes("outra pizza") || (n.includes("pizza") && !n.includes("lanche"))) {
+        return { messages: [`Qual o tamanho da próxima pizza? 🍕\n\n${sizeList()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "size", currentCategory: "pizza" }) };
+      }
+      // Lanche (sem pizza) — vai direto pro cardápio de lanches
+      if (n.includes("lanche") || n.includes("calzone") || n.includes("porcao") || n.includes("batata") ||
+        n.includes("burguer") || n.includes("hamburguer") || n.includes("mini-pizza") || n.includes("mini pizza") || n.includes("macarronada")) {
+        const resp = handleCategory("lanche", { ...session, step: "category" });
+        return { ...resp, session: resetaTentativas(resp.session) };
+      }
+      // Bebida
+      if (n.includes("bebida") || n.includes("refri") || n.includes("guarana") || n.includes("suco") || n.includes("agua") || n.includes("cerveja") || n.includes("coca") || n.includes("pepsi")) {
         const resp = handleCategory("bebida", { ...session, step: "category" });
         return { ...resp, session: resetaTentativas(resp.session) };
       }
-      // 2 = Mais uma pizza
-      if (n === "2" || n.includes("mais pizza") || n.includes("outra pizza") || n.includes("mais uma") || n.includes("mais 1")) {
-        return { messages: [`Qual o tamanho da próxima pizza? 🍕\n\n${sizeList()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "size", currentCategory: "pizza" }) };
-      }
-      // Outros itens (lanche, etc) — sem número fixo, mas reconhece por palavra
-      if (n.includes("outro") || n.includes("lanche") || n.includes("porcao") || n.includes("calzone")) {
-        return { messages: [`Claro! 😊 ${mensagemCategorias()}`], session: resetaTentativas({ ...session, step: "category" }) };
-      }
-      // 3 = Finalizar -> vai DIRETO pra entrega (observação deixou de ser etapa obrigatória)
-      if (n === "3" || eNegativa(n) || n.includes("finalizar") || n.includes("fechar") || n.includes("pode fechar") || n.includes("so isso") || n.includes("e so")) {
+      // Finalizar -> vai DIRETO pra entrega
+      if (eNegativa(n) || n.includes("finalizar") || n.includes("fechar") || n.includes("pode fechar") || n.includes("so isso") || n.includes("e so") || n.includes("nao quero")) {
         return {
-          messages: [`Show! Vamos fechar então 🍕\n\nComo prefere receber? 😊\n\n  1. Entrega (delivery) 🛵\n  2. Buscar na loja 🏪`],
+          messages: [`Show! Vamos fechar então 🍕\n\nVai querer entrega ou prefere buscar aqui na loja? 😊`],
           session: resetaTentativas({ ...session, step: "delivery_type" }),
         };
       }
@@ -1207,7 +1212,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
         const resp = handleCategory(intencaoDireta.category, { ...session, step: "category" });
         return { ...resp, session: resetaTentativas(resp.session) };
       }
-      return respostaInvalida(`  1️⃣ Bebida 🥤\n  2️⃣ Mais uma pizza 🍕\n  3️⃣ Finalizar pedido ✅`, session);
+      return respostaInvalida(`Quer adicionar algo a mais? Como bebida, outro lanche, ou podemos fechar esse pedido? 😊`, session);
     }
     case "observacao": {
       const semObservacao = n === "0" || n === "nao" || n === "n" || n === "nenhuma" ||
@@ -1216,12 +1221,12 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
         n.includes("nao tem") || n.includes("pode seguir") || n.includes("pode continuar");
       if (semObservacao) {
         return {
-          messages: [`Combinado! Como prefere receber? 😊\n\n  1. Entrega (delivery) 🛵\n  2. Buscar na loja 🏪`],
+          messages: [`Combinado! Vai querer entrega ou prefere buscar na loja? Se for entrega, me informa seu endereço completo com bairro, por favor 😊`],
           session: resetaTentativas({ ...session, step: "delivery_type", observacao: undefined }),
         };
       }
       return {
-        messages: [`Anotei: _"${text}"_ ✏️\n\nComo prefere receber? 😊\n\n  1. Entrega (delivery) 🛵\n  2. Buscar na loja 🏪`],
+        messages: [`Anotei: _"${text}"_ ✏️\n\nVai querer entrega ou prefere buscar na loja? Se for entrega, me informa seu endereço completo com bairro, por favor 😊`],
         session: resetaTentativas({ ...session, step: "delivery_type", observacao: text }),
       };
     }
@@ -1259,19 +1264,19 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
             session: resetaTentativas({ ...session, step: "confirm_address", deliveryType: "delivery", neighborhood: hist.ultimoNeighborhood, deliveryFee: fee, address: hist.ultimoEndereco, pagamentoPendente: pagDetectado }),
           };
         }
-        return { messages: [`Ótimo! Qual seu bairro? 🛵\n\n${neighborhoodList()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "neighborhood", deliveryType: "delivery", pagamentoPendente: pagDetectado }) };
+        return { messages: [`Qual o seu bairro? 😊`], session: resetaTentativas({ ...session, step: "neighborhood", deliveryType: "delivery", pagamentoPendente: pagDetectado }) };
       }
       if (n === "2" || n.includes("retirar") || n.includes("loja") || n.includes("buscar") || n.includes("pegar") || n.includes("retiro")) {
         return { messages: [`Combinado, você retira aqui na loja! 🏪\n\nQual a forma de pagamento? 💸`], session: resetaTentativas({ ...session, step: "payment", deliveryType: "pickup", deliveryFee: 0, neighborhood: undefined }) };
       }
-      return respostaInvalida(`  1. Entrega (delivery) 🛵\n  2. Buscar na loja 🏪`, session);
+      return respostaInvalida(`Vai querer entrega ou prefere buscar na loja? 😊`, session);
     }
     case "neighborhood": {
       const num = parseInt(text);
       let found: { name: string; fee: number } | undefined;
       if (!isNaN(num) && num >= 1 && num <= MENU.neighborhoods.length) found = MENU.neighborhoods[num - 1];
-      else found = MENU.neighborhoods.find((nb) => normalizar(nb.name).includes(n));
-      if (!found) return respostaInvalida(neighborhoodList(), session);
+      else found = detectaBairro(n) ?? undefined;
+      if (!found) return respostaInvalida(`Qual o seu bairro? 😊`, session);
       return { messages: [`*${found.name}*, taxa de entrega: *${formatCurrency(found.fee)}* 🛵\n\nMe passa o endereço completo:\n_(Rua, número e complemento)_\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "address", neighborhood: found.name, deliveryFee: found.fee }) };
     }
     case "confirm_address": {
@@ -1282,7 +1287,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
         return { messages: [`Ótimo! 📍 *${session.address} - ${session.neighborhood}*\n\nQual a forma de pagamento? 💸`], session: resetaTentativas({ ...session, step: "payment" }) };
       }
       if (eNegativa(n) || n === "2") {
-        return { messages: [`Tudo bem! Qual seu bairro? 🛵\n\n${neighborhoodList()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "neighborhood", address: undefined }) };
+        return { messages: [`Tudo bem! Qual o seu bairro? 😊`], session: resetaTentativas({ ...session, step: "neighborhood", address: undefined }) };
       }
       return respostaInvalida(`  1. Sim, mesmo endereço\n  2. Não, quero outro endereço`, session);
     }
