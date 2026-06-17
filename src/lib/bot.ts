@@ -62,6 +62,7 @@ export type BotStep =
   | "address"
   | "confirm_address"
   | "payment"
+  | "payment_hibrido_valor"
   | "troco"
   | "pedindo_nome"
   | "confirm"
@@ -114,6 +115,7 @@ export interface BotSession {
   ritmoRapido?: boolean;
   pagamentoPendente?: string;
   enderecoAConfirmar?: string;
+  hibridoMetodos?: string[];
 }
 export interface BotResponse {
   messages: string[];
@@ -447,7 +449,7 @@ function montarPizzaDoPedido(text: string, session: BotSession, prefixo?: string
     return {
       messages: [
         `${pre}Pizza *${parcial.size}* de *${parcial.flavor}*! 😋`,
-        `Vai querer borda recheada? Olha as opções 👇\n\n${listaBordas(parcial.size)}\n\n_(Digite *voltar* para corrigir)_`,
+        `Vai querer borda recheada? 😋\n\n_(Digite *voltar* para corrigir a etapa anterior)_`,
       ],
       session: resetaTentativas({ ...session, step: "border_escolha", currentCategory: "pizza", currentSize: parcial.size, currentFlavor: parcial.flavor }),
     };
@@ -798,16 +800,13 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
         }
         return { messages: [`Tudo bem! Me passa o endereço completo:\n_(Rua, número e complemento)_\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "address" }) };
       case "pedindo_nome": {
-        const payList = MENU.payments.map((p, i) => `  ${i + 1}. ${p}`).join("\n");
-        return { messages: [`Tudo bem! Como vai pagar? 💸\n\n${payList}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "payment", paymentMethod: undefined }) };
+        return { messages: [`Tudo bem! Qual a forma de pagamento? 💸`], session: resetaTentativas({ ...session, step: "payment", paymentMethod: undefined }) };
       }
       case "troco": {
-        const payList = MENU.payments.map((p, i) => `  ${i + 1}. ${p}`).join("\n");
-        return { messages: [`Tudo bem! Como vai pagar? 💸\n\n${payList}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "payment", paymentMethod: undefined, troco: undefined }) };
+        return { messages: [`Tudo bem! Qual a forma de pagamento? 💸`], session: resetaTentativas({ ...session, step: "payment", paymentMethod: undefined, troco: undefined }) };
       }
       case "confirm": {
-        const payList = MENU.payments.map((p, i) => `  ${i + 1}. ${p}`).join("\n");
-        return { messages: [`Tudo bem! Como vai pagar? 💸\n\n${payList}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "payment", paymentMethod: undefined }) };
+        return { messages: [`Tudo bem! Qual a forma de pagamento? 💸`], session: resetaTentativas({ ...session, step: "payment", paymentMethod: undefined }) };
       }
       case "lanche_escolha":
         return { messages: [`Tudo bem! ${mensagemCategorias()}`], session: resetaTentativas({ ...session, step: "category", currentCategory: undefined }) };
@@ -979,7 +978,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
             return {
               messages: [
                 `Pizza *${size}* meio a meio *${dois[0]}* e *${dois[1]}*! Ótima pedida! 😋`,
-                `Vai querer borda recheada? Olha as opções 👇\n\n${listaBordas(size)}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
+                `Vai querer borda recheada? 😋\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
               ],
               session: resetaTentativas({ ...session, step: "border_escolha", currentSize: size, currentFlavor: flavorFinal }),
             };
@@ -1005,7 +1004,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
           return {
             messages: [
               `Pizza *${size}* de *${saborJunto}*! 😋`,
-              `Vai querer borda recheada? Olha as opções 👇\n\n${listaBordas(size)}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
+              `Vai querer borda recheada? 😋\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
             ],
             session: resetaTentativas({ ...session, step: "border_escolha", currentSize: size, currentFlavor: saborJunto }),
           };
@@ -1041,7 +1040,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
           return {
             messages: [
               `Meio a meio *${dois[0]}* e *${dois[1]}*! Que combinação! 😋`,
-              `Vai querer borda recheada? Olha as opções 👇\n\n${listaBordas(session.currentSize!)}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
+              `Vai querer borda recheada? 😋\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
             ],
             session: resetaTentativas({ ...session, step: "border_escolha", currentFlavor: flavorFinal }),
           };
@@ -1063,7 +1062,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       return {
         messages: [
           `*${flavor}*! Excelente escolha! 🤤`,
-          `Vai querer borda recheada? Olha as opções 👇\n\n${listaBordas(session.currentSize!)}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
+          `Vai querer borda recheada? 😋\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
         ],
         session: resetaTentativas({ ...session, step: "border_escolha", currentFlavor: flavor }),
       };
@@ -1073,7 +1072,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       const naoQuerSegundo = n === "2" || eNegativa(n) || n.includes("so esse") || n.includes("apenas esse") || n.includes("so um");
       if (naoQuerSegundo) {
         return {
-          messages: [`Combinado! Vai querer borda recheada? 😋\n\n${listaBordas(session.currentSize!)}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`],
+          messages: [`Combinado! Vai querer borda recheada? 😋\n\n_(Digite *voltar* para corrigir a etapa anterior)_`],
           session: resetaTentativas({ ...session, step: "border_escolha" }),
         };
       }
@@ -1095,7 +1094,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       }
       if (flavor2 === session.currentFlavor) {
         return {
-          messages: [`Esse é o mesmo sabor! Vou considerar só *${flavor2}* então 😄\n\nVai querer borda recheada?\n\n${listaBordas(session.currentSize!)}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`],
+          messages: [`Esse é o mesmo sabor! Vou considerar só *${flavor2}* então 😄\n\nVai querer borda recheada? 😋\n\n_(Digite *voltar* para corrigir a etapa anterior)_`],
           session: resetaTentativas({ ...session, step: "border_escolha" }),
         };
       }
@@ -1103,7 +1102,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       return {
         messages: [
           `Meio a meio *${session.currentFlavor}* e *${flavor2}*! Que combinação! 😋`,
-          `Vai querer borda recheada?\n\n${listaBordas(session.currentSize!)}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
+          `Vai querer borda recheada? 😋\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
         ],
         session: resetaTentativas({ ...session, step: "border_escolha", currentFlavor: flavorFinal }),
       };
@@ -1150,7 +1149,11 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
         }
       }
       if (!borderLabel) {
-        return respostaInvalida(listaBordas(session.currentSize!), session);
+        // Resposta positiva sem especificar qual borda (ex: "sim", "quero", "pode ser") -> mostra a lista agora
+        if (ePositiva(n) || n.includes("quero") || n.includes("com borda") || n.includes("pode ser") || n.includes("manda")) {
+          return { messages: [`Show! Qual borda você prefere? 😋\n\n${listaBordas(session.currentSize!)}`], session };
+        }
+        return respostaInvalida(`Vai querer borda recheada? 😋\n\nResponda *sim* pra ver as opções, ou *não* pra seguir sem borda.`, session);
       }
       const basePrice = getSizePrice(session.currentSize!);
       const itemPrice = basePrice + borderPrice;
@@ -1234,8 +1237,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
           // tipo + pagamento numa mensagem -> aplica pagamento e vai pro fechamento
           return aplicaPagamento(pagDetectado, { ...baseSession });
         }
-        const payList = MENU.payments.map((p, i) => `  ${i + 1}. ${p}`).join("\n");
-        return { messages: [`Combinado, você retira aqui na loja! 🏪\n\nComo vai pagar?\n\n${payList}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...baseSession, step: "payment" }) };
+        return { messages: [`Combinado, você retira aqui na loja! 🏪\n\nQual a forma de pagamento? 💸`], session: resetaTentativas({ ...baseSession, step: "payment" }) };
       }
 
       // Caminho DELIVERY com BAIRRO VÁLIDO detectado -> aplica taxa e pede só o endereço (pagamento guardado p/ depois)
@@ -1260,8 +1262,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
         return { messages: [`Ótimo! Qual seu bairro? 🛵\n\n${neighborhoodList()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "neighborhood", deliveryType: "delivery", pagamentoPendente: pagDetectado }) };
       }
       if (n === "2" || n.includes("retirar") || n.includes("loja") || n.includes("buscar") || n.includes("pegar") || n.includes("retiro")) {
-        const payList = MENU.payments.map((p, i) => `  ${i + 1}. ${p}`).join("\n");
-        return { messages: [`Combinado, você retira aqui na loja! 🏪\n\nComo vai pagar?\n\n${payList}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "payment", deliveryType: "pickup", deliveryFee: 0, neighborhood: undefined }) };
+        return { messages: [`Combinado, você retira aqui na loja! 🏪\n\nQual a forma de pagamento? 💸`], session: resetaTentativas({ ...session, step: "payment", deliveryType: "pickup", deliveryFee: 0, neighborhood: undefined }) };
       }
       return respostaInvalida(`  1. Entrega (delivery) 🛵\n  2. Buscar na loja 🏪`, session);
     }
@@ -1274,12 +1275,11 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       return { messages: [`*${found.name}*, taxa de entrega: *${formatCurrency(found.fee)}* 🛵\n\nMe passa o endereço completo:\n_(Rua, número e complemento)_\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "address", neighborhood: found.name, deliveryFee: found.fee }) };
     }
     case "confirm_address": {
-      const payList = MENU.payments.map((p, i) => `  ${i + 1}. ${p}`).join("\n");
       if (ePositiva(n) || n === "1") {
         if (session.pagamentoPendente) {
           return aplicaPagamento(session.pagamentoPendente, session);
         }
-        return { messages: [`Ótimo! 📍 *${session.address} - ${session.neighborhood}*\n\nComo vai pagar?\n\n${payList}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "payment" }) };
+        return { messages: [`Ótimo! 📍 *${session.address} - ${session.neighborhood}*\n\nQual a forma de pagamento? 💸`], session: resetaTentativas({ ...session, step: "payment" }) };
       }
       if (eNegativa(n) || n === "2") {
         return { messages: [`Tudo bem! Qual seu bairro? 🛵\n\n${neighborhoodList()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "neighborhood", address: undefined }) };
@@ -1292,15 +1292,79 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       if (session.pagamentoPendente) {
         return aplicaPagamento(session.pagamentoPendente, { ...session, address: text });
       }
-      const payList = MENU.payments.map((p, i) => `  ${i + 1}. ${p}`).join("\n");
-      return { messages: [`Endereço anotado! 📍 Como vai pagar?\n\n${payList}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "payment", address: text }) };
+      return { messages: [`Endereço anotado! 📍 Qual a forma de pagamento? 💸`], session: resetaTentativas({ ...session, step: "payment", address: text }) };
     }
+// Detecta pagamento híbrido (dois métodos na mesma mensagem), com ou sem valores.
+// Retorna null se for só um método (fluxo normal de aplicaPagamento cuida disso).
+function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Record<string, number> } | null {
+  const n = normalizar(text);
+  const metodosEncontrados: string[] = [];
+  if (/\bpix\b/.test(n)) metodosEncontrados.push("Pix");
+  if (n.includes("dinheiro") || n.includes("especie") || n.includes("cash")) metodosEncontrados.push("Dinheiro");
+  if (n.includes("cartao") || n.includes("credito") || n.includes("debito")) metodosEncontrados.push("Cartão");
+  if (metodosEncontrados.length < 2) return null;
+
+  // Tenta extrair valores associados: "50 no pix", "30 pix", "metade pix"
+  const valores: Record<string, number> = {};
+  const regexValor: Record<string, RegExp> = {
+    Pix: /(\d+(?:[.,]\d+)?)\s*(?:reais?\s*)?(?:no\s+|de\s+|em\s+)?pix|pix\s*(?:de\s+|no\s+valor de\s+)?(\d+(?:[.,]\d+)?)/,
+    Dinheiro: /(\d+(?:[.,]\d+)?)\s*(?:reais?\s*)?(?:no\s+|de\s+|em\s+)?dinheiro|dinheiro\s*(?:de\s+|no\s+valor de\s+)?(\d+(?:[.,]\d+)?)/,
+    Cartão: /(\d+(?:[.,]\d+)?)\s*(?:reais?\s*)?(?:no\s+|de\s+|em\s+)?cart[aã]o|cart[aã]o\s*(?:de\s+|no\s+valor de\s+)?(\d+(?:[.,]\d+)?)/,
+  };
+  for (const metodo of metodosEncontrados) {
+    const m = n.match(regexValor[metodo]);
+    if (m) {
+      const valorStr = (m[1] || m[2] || "").replace(",", ".");
+      const valor = parseFloat(valorStr);
+      if (!isNaN(valor)) valores[metodo] = valor;
+    }
+  }
+  return { metodos: metodosEncontrados, valores };
+}
+
     case "payment": {
       let payment = "";
       if (n === "1" || n.includes("pix") || n.includes("transfer")) payment = "Pix";
       else if (n === "2" || n.includes("dinheiro") || n.includes("especie") || n.includes("cash")) payment = "Dinheiro";
       else if (n === "3" || n.includes("cartao") || n.includes("credito") || n.includes("debito")) payment = "Cartão";
-      if (!payment) return respostaInvalida(MENU.payments.map((p, i) => `  ${i + 1}. ${p}`).join("\n"), session);
+
+      // ===== PAGAMENTO HÍBRIDO (dois métodos na mesma mensagem) =====
+      const hibrido = detectaPagamentoHibrido(text);
+      if (hibrido) {
+        const total = cartSubtotal(session.cart) + session.deliveryFee;
+        const [m1, m2] = hibrido.metodos;
+        const v1 = hibrido.valores[m1];
+        const v2 = hibrido.valores[m2];
+        // Os dois valores vieram explícitos -> confirma direto
+        if (v1 !== undefined && v2 !== undefined) {
+          const paymentLabel = `${m1} (${formatCurrency(v1)}) + ${m2} (${formatCurrency(v2)})`;
+          return aplicaPagamento(paymentLabel, session);
+        }
+        // "metade pix metade dinheiro" / "parte pix parte dinheiro" -> divide o total
+        if (n.includes("metade") || (n.includes("parte") && !v1 && !v2)) {
+          const meio = Math.round((total / 2) * 100) / 100;
+          const paymentLabel = `${m1} (${formatCurrency(meio)}) + ${m2} (${formatCurrency(total - meio)})`;
+          return aplicaPagamento(paymentLabel, session);
+        }
+        // Um valor veio, falta o outro -> calcula o complemento automaticamente
+        if (v1 !== undefined && v2 === undefined) {
+          const restante = Math.round((total - v1) * 100) / 100;
+          const paymentLabel = `${m1} (${formatCurrency(v1)}) + ${m2} (${formatCurrency(restante)})`;
+          return aplicaPagamento(paymentLabel, session);
+        }
+        if (v2 !== undefined && v1 === undefined) {
+          const restante = Math.round((total - v2) * 100) / 100;
+          const paymentLabel = `${m1} (${formatCurrency(restante)}) + ${m2} (${formatCurrency(v2)})`;
+          return aplicaPagamento(paymentLabel, session);
+        }
+        // Nenhum valor informado -> pede o complemento
+        return {
+          messages: [`Combinado, ${m1} e ${m2}! 💸\n\nQuanto deseja pagar no *${m1}*? (o restante fica no ${m2})`],
+          session: resetaTentativas({ ...session, step: "payment_hibrido_valor", hibridoMetodos: [m1, m2] }),
+        };
+      }
+
+      if (!payment) return respostaInvalida(`Qual a forma de pagamento? 💸\n\n_(Pix, Dinheiro ou Cartão)_`, session);
       // Tenta capturar o nome se vier junto (ex: "Lucas, pix" / "pix, Lucas")
       let nomeJunto: string | undefined;
       if (!session.customerName) {
@@ -1312,6 +1376,17 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
         if (restante && pareceNomeHumano(restante)) nomeJunto = restante;
       }
       return aplicaPagamento(payment, nomeJunto ? { ...session, customerName: nomeJunto } : session);
+    }
+    case "payment_hibrido_valor": {
+      const total = cartSubtotal(session.cart) + session.deliveryFee;
+      const valor = parseFloat(n.replace(",", ".").replace(/[^0-9.]/g, ""));
+      const [m1, m2] = session.hibridoMetodos || [];
+      if (isNaN(valor) || valor <= 0 || valor >= total || !m1 || !m2) {
+        return respostaInvalida(`Me diz um valor entre 0 e ${formatCurrency(total)} pro *${m1}*. O restante fica no ${m2}.`, session);
+      }
+      const restante = Math.round((total - valor) * 100) / 100;
+      const paymentLabel = `${m1} (${formatCurrency(valor)}) + ${m2} (${formatCurrency(restante)})`;
+      return aplicaPagamento(paymentLabel, { ...session, hibridoMetodos: undefined });
     }
     case "pedindo_nome": {
       if (!pareceNomeHumano(text)) {
