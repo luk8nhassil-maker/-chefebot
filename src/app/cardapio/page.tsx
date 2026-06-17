@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
+import PanelShell from "@/components/PanelShell";
 
 type EsgMetadata = Record<string, { desde: string; ultimaRevisao?: string }>
 
@@ -183,61 +184,22 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
         .cbScroll::-webkit-scrollbar { display: none; }
         .cbItem:active { opacity: 0.8; }
         .cbBtn:active { opacity: 0.75; }
-        .cb-shell { height:100svh; overflow:hidden; display:flex; flex-direction:column; max-width:390px; margin:0 auto; background:#060606; color:#f5f2ee; font-family:'Archivo',sans-serif; }
-        .cb-top-nav { display:none; }
-        .cb-right { flex:1; min-width:0; display:flex; flex-direction:column; overflow:hidden; }
-        .cb-header { flex-shrink:0; background:#060606; border-bottom:1px solid #1a1816; padding:calc(env(safe-area-inset-top) + 10px) 16px 10px; }
-        .cb-main { flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; }
-        .cb-nav { flex-shrink:0; background:rgba(6,6,6,.96); backdrop-filter:blur(14px); border-top:1px solid #181614; display:grid; grid-template-columns:1fr 1fr 1fr; padding:10px 8px calc(env(safe-area-inset-bottom)+16px); }
+        .cb-header { background:#060606; border-bottom:1px solid #1a1816; padding:calc(env(safe-area-inset-top) + 10px) 16px 10px; position:sticky; top:0; z-index:10; }
+        .cb-main { }
         .cbCardGrid { display:flex; flex-direction:column; }
         .cbGridFull {}
         @media (min-width: 768px) {
-          body { overflow: auto; }
-          .cb-shell { height:auto; overflow:visible; max-width:1200px; flex-direction:row; align-items:flex-start; }
-          .cb-top-nav { display:flex; flex-direction:column; gap:4px; width:200px; flex-shrink:0; position:sticky; top:24px; padding:24px 0; }
-          .cb-top-nav-brand { padding:0 20px 20px; border-bottom:1px solid #1a1816; margin-bottom:8px; }
-          .cb-top-nav-btn { display:flex; align-items:center; gap:10px; padding:10px 20px; font-family:'Archivo',sans-serif; font-size:13px; font-weight:800; color:#4a4640; background:transparent; border:none; border-radius:10px; cursor:pointer; transition:background .15s; text-align:left; width:100%; }
-          .cb-top-nav-btn:hover { background:rgba(255,255,255,.04); }
-          .cb-top-nav-btn.active { color:#ff6b00; background:rgba(255,107,0,.08); }
-          .cb-right { border-left:1px solid #1a1816; min-height:100vh; overflow:visible; }
           .cb-header { border-bottom:1px solid #1a1816; padding:24px 28px 20px; position:static; }
-          .cb-main { padding:20px 28px; overflow-y:visible; flex:none; }
-          .cb-nav { display:none; }
+          .cb-main { padding:20px 28px; }
           .cbCardGrid { display:grid !important; grid-template-columns:1fr 1fr !important; gap:8px !important; }
           .cbGridFull { grid-column:1/-1; }
         }
         @media (min-width: 1100px) {
-          .cb-shell { max-width:1280px; }
           .cbCardGrid { grid-template-columns:1fr 1fr 1fr !important; }
         }
       `}</style>
 
-      {/* cb-shell */}
-      <div className="cb-shell">
-
-        {/* ── DESKTOP: sidebar nav ── */}
-        <nav className="cb-top-nav">
-          <div className="cb-top-nav-brand">
-            <div style={{ fontSize: 20, fontWeight: 900, letterSpacing: "-0.5px", color: "#f5f2ee" }}>ChefeBot</div>
-            <div style={{ fontSize: 11, color: "#4a4640", fontWeight: 700, marginTop: 2 }}>Painel operacional</div>
-          </div>
-          <button className="cb-top-nav-btn" onClick={() => router.push("/pedidos")}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><rect x="4" y="3" width="16" height="18" rx="3" stroke="currentColor" strokeWidth="2.2"/><line x1="8" y1="9" x2="16" y2="9" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"/><line x1="8" y1="14" x2="13" y2="14" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"/></svg>
-            Pedidos
-          </button>
-          <button className="cb-top-nav-btn" onClick={() => router.push("/conversas")}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="14" rx="5" stroke="currentColor" strokeWidth="2.2"/><circle cx="8.5" cy="11" r="1.3" fill="currentColor"/><circle cx="12" cy="11" r="1.3" fill="currentColor"/><circle cx="15.5" cy="11" r="1.3" fill="currentColor"/></svg>
-            Conversas
-            {conversasBadge > 0 && <span style={{ marginLeft: "auto", minWidth: 18, height: 18, borderRadius: 9, background: "#ff6b00", color: "#fff", fontSize: 10, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 5px" }}>{conversasBadge}</span>}
-          </button>
-          <button className="cb-top-nav-btn active">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><rect x="4" y="4" width="7" height="7" rx="2" stroke="currentColor" strokeWidth="2.2"/><rect x="13" y="4" width="7" height="7" rx="2" stroke="currentColor" strokeWidth="2.2"/><rect x="4" y="13" width="7" height="7" rx="2" stroke="currentColor" strokeWidth="2.2"/><rect x="13" y="13" width="7" height="7" rx="2" stroke="currentColor" strokeWidth="2.2"/></svg>
-            Cardápio
-          </button>
-        </nav>
-
-        {/* ── PAINEL DIREITO ── */}
-        <div className="cb-right">
+      <PanelShell conversasCount={conversasBadge}>
 
         {/* ── HEADER ── */}
         <header className="cb-header">
@@ -513,26 +475,7 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
           <div style={{ height: 4, flexShrink: 0 }} />
         </main>
 
-        {/* Mobile nav */}
-        <nav className="cb-nav">
-          <button onClick={() => router.push("/pedidos")} style={{ background: "transparent", display: "flex", flexDirection: "column", alignItems: "center", gap: 5, padding: "6px 0" }}>
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><rect x="4" y="3" width="16" height="18" rx="3" stroke="#3a3730" strokeWidth="2.2"/><line x1="8" y1="9" x2="16" y2="9" stroke="#3a3730" strokeWidth="2.2" strokeLinecap="round"/><line x1="8" y1="14" x2="13" y2="14" stroke="#3a3730" strokeWidth="2.2" strokeLinecap="round"/></svg>
-            <span style={{ fontSize: 10, fontWeight: 800, color: "#3a3730" }}>Pedidos</span>
-          </button>
-          <button onClick={() => router.push("/conversas")} style={{ background: "transparent", display: "flex", flexDirection: "column", alignItems: "center", gap: 5, padding: "6px 0" }}>
-            <span style={{ position: "relative", display: "flex" }}>
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="14" rx="5" stroke="#3a3730" strokeWidth="2.2"/><circle cx="8.5" cy="11" r="1.4" fill="#3a3730"/><circle cx="12" cy="11" r="1.4" fill="#3a3730"/><circle cx="15.5" cy="11" r="1.4" fill="#3a3730"/></svg>
-              {conversasBadge > 0 && <span style={{ position: "absolute", top: -5, right: -9, minWidth: 16, height: 16, borderRadius: 8, background: "#ff6b00", color: "#fff", fontSize: 10, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 3px" }}>{conversasBadge}</span>}
-            </span>
-            <span style={{ fontSize: 10, fontWeight: 800, color: "#3a3730" }}>Conversas</span>
-          </button>
-          <button style={{ background: "transparent", display: "flex", flexDirection: "column", alignItems: "center", gap: 5, padding: "6px 0" }}>
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><rect x="4" y="4" width="7" height="7" rx="2" stroke="#ff6b00" strokeWidth="2.2"/><rect x="13" y="4" width="7" height="7" rx="2" stroke="#ff6b00" strokeWidth="2.2"/><rect x="4" y="13" width="7" height="7" rx="2" stroke="#ff6b00" strokeWidth="2.2"/><rect x="13" y="13" width="7" height="7" rx="2" stroke="#ff6b00" strokeWidth="2.2"/></svg>
-            <span style={{ fontSize: 10, fontWeight: 900, color: "#ff6b00" }}>Cardápio</span>
-          </button>
-        </nav>
-        </div>{/* /cb-right */}
-      </div>{/* /cb-shell */}
+      </PanelShell>
 
       {/* Toast com desfazer — fora do app-shell para ficar sobre tudo */}
       {toast && (
