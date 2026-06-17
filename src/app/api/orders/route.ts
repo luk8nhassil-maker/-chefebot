@@ -32,7 +32,7 @@ type Pedido = {
 
 const EVOLUTION_API_URL = 'https://evolution-api-production-8f99.up.railway.app'
 const EVOLUTION_API_KEY = '6208711c1b6fdffcc30cb492a44d74601415c33ff717ef6032162f9c0056319e'
-const EVOLUTION_INSTANCE = 'chefe'
+const EVOLUTION_INSTANCE = 'chefebot'
 
 function getMensagemStatus(status: Status, nomeCliente: string): string | null {
   const firstName = nomeCliente.split(' ')[0];

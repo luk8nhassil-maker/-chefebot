@@ -172,6 +172,7 @@ export default function AdminPage() {
   const [waTimer, setWaTimer] = useState(60)
   const [waExpired, setWaExpired] = useState(false)
   const [waLoadingQr, setWaLoadingQr] = useState(false)
+  const [waQrError, setWaQrError] = useState<string | null>(null)
   const cameraRef = useRef<HTMLInputElement>(null)
   const inputPizzaRef = useRef<HTMLInputElement>(null)
   const inputLancheRef = useRef<HTMLInputElement>(null)
@@ -216,11 +217,13 @@ export default function AdminPage() {
         setSenhas(s); setNomes(n)
       }
       setLoading(false)
-      // Verifica status do WhatsApp ao carregar
+      // Verifica status do WhatsApp ao carregar e tenta exibir QR se desconectado
       fetch('/api/whatsapp/state').then(r => r.json()).then(d => {
         const state = d?.instance?.state
-        setWaStatus(state === 'open' ? 'connected' : 'disconnected')
-      }).catch(() => setWaStatus('disconnected'))
+        const connected = state === 'open'
+        setWaStatus(connected ? 'connected' : 'disconnected')
+        if (!connected) tryAutoQr()
+      }).catch(() => { setWaStatus('disconnected'); tryAutoQr() })
     })
   }, [router])
 
@@ -256,31 +259,51 @@ export default function AdminPage() {
     } catch { setWaStatus('disconnected') }
   }
 
+  const startQrTimer = (base64: string) => {
+    setWaQrBase64(base64)
+    setWaShowQr(true)
+    setWaTimer(60)
+    setWaExpired(false)
+    if (waTimerRef.current) clearInterval(waTimerRef.current)
+    let t = 60
+    waTimerRef.current = setInterval(() => {
+      t -= 1
+      setWaTimer(t)
+      if (t <= 0) { clearInterval(waTimerRef.current!); waTimerRef.current = null; setWaExpired(true) }
+    }, 1000)
+    if (waPollRef.current) clearInterval(waPollRef.current)
+    waPollRef.current = setInterval(fetchWaStatus, 3000)
+  }
+
+  // Tenta exibir QR atual sem reset (usado na abertura automática da tela)
+  const tryAutoQr = async () => {
+    try {
+      const res = await fetch('/api/whatsapp/qrcode')
+      const d = await res.json()
+      const base64 = d?.base64 || d?.qrcode?.base64 || null
+      if (base64) startQrTimer(base64)
+    } catch {}
+  }
+
+  // Busca o QR já existente na instância (sem reset, sem Redis)
   const fetchQrCode = async () => {
     setWaLoadingQr(true)
     setWaExpired(false)
+    setWaQrError(null)
     try {
-      const d = await fetch('/api/whatsapp/qrcode').then(r => r.json())
-      const base64 = d?.qrcode?.base64 || d?.base64 || null
+      const res = await fetch('/api/whatsapp/qrcode')
+      const d = await res.json()
+      const base64 = d?.base64 || d?.qrcode?.base64 || null
       if (base64) {
-        setWaQrBase64(base64)
-        setWaShowQr(true)
-        setWaTimer(60)
-        setWaExpired(false)
-        // Timer de expiração do QR
-        if (waTimerRef.current) clearInterval(waTimerRef.current)
-        let t = 60
-        waTimerRef.current = setInterval(() => {
-          t -= 1
-          setWaTimer(t)
-          if (t <= 0) { clearInterval(waTimerRef.current!); waTimerRef.current = null; setWaExpired(true) }
-        }, 1000)
-        // Polling para detectar conexão bem-sucedida
-        if (waPollRef.current) clearInterval(waPollRef.current)
-        waPollRef.current = setInterval(fetchWaStatus, 3000)
+        startQrTimer(base64)
+      } else {
+        setWaQrError(d?.error || 'QR code não disponível. Tente novamente em instantes.')
       }
-    } catch {}
-    setWaLoadingQr(false)
+    } catch {
+      setWaQrError('Erro de rede ao buscar QR code.')
+    } finally {
+      setWaLoadingQr(false)
+    }
   }
 
   const msg = (m: string) => { setMensagem(m); setTimeout(() => setMensagem(''), 3000) }
@@ -427,6 +450,9 @@ export default function AdminPage() {
                     <button onClick={fetchQrCode} disabled={waLoadingQr} style={{ width: '100%', background: '#25d366', border: 'none', borderRadius: 10, padding: '14px', color: '#fff', fontSize: 14, fontWeight: 700, cursor: waLoadingQr ? 'not-allowed' : 'pointer', opacity: waLoadingQr ? 0.7 : 1 }}>
                       {waLoadingQr ? 'Gerando QR Code...' : '📷 Escanear QR Code'}
                     </button>
+                    {waQrError && (
+                      <p style={{ color: '#f87171', fontSize: 12, margin: '10px 0 0', textAlign: 'center' }}>{waQrError}</p>
+                    )}
                   </>
                 ) : (
                   <>

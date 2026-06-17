@@ -3,7 +3,7 @@ import { redis } from "@/lib/redis";
 
 const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL || 'evolution-api-production-8f99.up.railway.app'
 const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY!
-const EVOLUTION_INSTANCE = 'chefe'
+const EVOLUTION_INSTANCE = 'chefebot'
 const TIMEOUT_MS = 15 * 60 * 1000 // 15 minutos
 const STEPS_IGNORADOS = ['done', 'escalado', 'confirm', 'welcome']
 

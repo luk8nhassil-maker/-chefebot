@@ -6,7 +6,7 @@ const KEY  = '6208711c1b6fdffcc30cb492a44d74601415c33ff717ef6032162f9c0056319e'
 
 export async function GET() {
   try {
-    const res  = await fetch(`${BASE}/instance/connectionState/chefe`, {
+    const res  = await fetch(`${BASE}/instance/connectionState/chefebot`, {
       headers: { apikey: KEY },
       cache: 'no-store',
     })

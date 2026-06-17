@@ -3,7 +3,7 @@ import { redis } from "@/lib/redis";
 
 const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL || "evolution-api-production-8f99.up.railway.app";
 const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY!;
-const EVOLUTION_INSTANCE = "chefe";
+const EVOLUTION_INSTANCE = "chefebot";
 
 async function enviarMensagem(phone: string, text: string) {
   try {
