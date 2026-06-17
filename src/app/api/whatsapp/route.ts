@@ -6,11 +6,13 @@ import { interpretarMensagem } from "@/lib/claude";
 import { log } from "@/lib/logger";
 import { analisarComprovantePix } from "@/lib/analisarComprovante";
 import { transcreverAudio } from "@/lib/transcribeAudio";
+import { proximoNumeroPedido } from "@/lib/numeracao";
 
 export const maxDuration = 30;
 
 type Pedido = {
   id: string;
+  numero?: number;
   cliente: string;
   telefone: string;
   itens: string[];
@@ -123,8 +125,10 @@ async function salvarPedido(session: BotSession, phone: string, _config: ConfigP
   const total = session.cart.reduce((sum, item) => sum + item.price, 0) + session.deliveryFee;
   const endereco = session.deliveryType === "delivery" ? `${session.address} - ${session.neighborhood}` : "Retirada na loja";
   const pedidoId = Date.now().toString();
+  const numeroPedido = await proximoNumeroPedido();
   const novoPedido = {
     id: pedidoId,
+    numero: numeroPedido,
     cliente: session.customerName || phone,
     telefone: phone,
     itens,
@@ -152,7 +156,7 @@ async function salvarPedido(session: BotSession, phone: string, _config: ConfigP
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         action: "notify",
-        title: `Novo pedido — ${firstName} 🍕`,
+        title: `Pedido #${numeroPedido} — ${firstName} 🍕`,
         message: itensResumo,
       }),
     });

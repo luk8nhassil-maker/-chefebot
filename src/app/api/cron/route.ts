@@ -39,6 +39,14 @@ export async function GET() {
     // Limpa também chaves de sessão expiradas
     await redis.set("pedidos", limpo);
 
+    // Reset explícito do contador de numeração de pedidos do dia anterior.
+    // A chave já expira sozinha em 36h e muda de nome a cada dia, mas a limpeza
+    // explícita aqui garante que não fique nada residual, mesmo em caso raro de falha do TTL.
+    const ontem = new Date(agora);
+    ontem.setDate(ontem.getDate() - 1);
+    const ontemStr = ontem.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" });
+    await redis.del(`contador_pedidos:${ontemStr}`);
+
     return NextResponse.json({
       ok: true,
       total: pedidos.length,

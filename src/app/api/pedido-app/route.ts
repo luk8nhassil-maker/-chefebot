@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { redis } from "@/lib/redis";
+import { proximoNumeroPedido } from "@/lib/numeracao";
 
 export const maxDuration = 20;
 
@@ -51,8 +52,10 @@ export async function POST(req: NextRequest) {
         : "Retirada na loja";
 
     const pedidoId = Date.now().toString();
+    const numeroPedido = await proximoNumeroPedido();
     const novoPedido = {
       id: pedidoId,
+      numero: numeroPedido,
       cliente: body.cliente,
       telefone: body.telefone || "App",
       itens,
@@ -82,13 +85,13 @@ export async function POST(req: NextRequest) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "notify",
-          title: `Novo pedido (app) — ${firstName} 🍕`,
+          title: `Pedido #${numeroPedido} (app) — ${firstName} 🍕`,
           message: itensResumo,
         }),
       });
     } catch {}
 
-    return NextResponse.json({ ok: true, pedidoId, total });
+    return NextResponse.json({ ok: true, pedidoId, numero: numeroPedido, total });
   } catch (error) {
     console.error("Erro ao salvar pedido do app:", error);
     return NextResponse.json({ ok: false, error: "Erro interno" }, { status: 500 });

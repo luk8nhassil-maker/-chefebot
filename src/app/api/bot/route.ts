@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { processMessage, createInitialSession, BotSession } from "@/lib/bot";
 import { redis } from "@/lib/redis";
+import { proximoNumeroPedido } from "@/lib/numeracao";
 
 type Pedido = {
   id: string;
+  numero?: number;
   cliente: string;
   telefone: string;
   itens: string[];
@@ -25,8 +27,10 @@ async function salvarPedido(session: BotSession, phone: string) {
     ? `${session.address} — ${session.neighborhood}`
     : "Retirada na loja";
 
+  const numeroPedido = await proximoNumeroPedido();
   const novoPedido: Pedido = {
     id: Date.now().toString(),
+    numero: numeroPedido,
     cliente: session.customerName || phone,
     telefone: phone,
     itens,

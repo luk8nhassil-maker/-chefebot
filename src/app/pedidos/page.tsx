@@ -14,6 +14,7 @@ function whatsappLink(telefoneBruto: string, mensagem?: string): string {
 type Status = "novo" | "em_preparo" | "saiu_entrega" | "entregue" | "cancelado"
 type Pedido = {
   id: string
+  numero?: number
   cliente: string
   telefone: string
   itens: string[]
@@ -646,6 +647,9 @@ export default function PedidosPage() {
                     </div>
                     <div>
                       <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 4 }}>
+                        {pedido.numero != null && (
+                          <span style={{ background: "rgba(255,255,255,.08)", color: "#c9c2b4", fontSize: 11, fontWeight: 900, padding: "2px 7px", borderRadius: 7, letterSpacing: "0.3px", border: "1px solid rgba(255,255,255,.12)", flexShrink: 0 }}>#{pedido.numero}</span>
+                        )}
                         <span style={{ fontSize: 21, fontWeight: 900, letterSpacing: "-0.5px", lineHeight: 1, color: "#f4f1ec", maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>{firstName}</span>
                         <span style={{ background: sc.accentBg, color: sc.accent, fontSize: 10, fontWeight: 900, padding: "2px 8px", borderRadius: 8, letterSpacing: "0.5px", textTransform: "uppercase", border: `1px solid ${sc.accentBorder}` }}>{sc.label}</span>
                       </div>
@@ -825,7 +829,7 @@ export default function PedidosPage() {
                     <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
                       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 7 }}>
                         <span style={{ alignSelf: "flex-start", background: sc.accentBg, color: sc.accent, fontSize: 11, fontWeight: 900, letterSpacing: "1.2px", padding: "5px 10px", borderRadius: 8, textTransform: "uppercase", border: `1px solid ${sc.accentBorder}` }}>{sc.label}</span>
-                        <h2 style={{ margin: 0, fontSize: 24, fontWeight: 900, letterSpacing: "-0.6px", lineHeight: 1.1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.cliente}</h2>
+                        <h2 style={{ margin: 0, fontSize: 24, fontWeight: 900, letterSpacing: "-0.6px", lineHeight: 1.1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.numero != null ? `#${p.numero} · ` : ""}{p.cliente}</h2>
                         <span style={{ fontSize: 13, color: "#a39b8b", fontWeight: 600 }}>Recebido às {p.horario} · há {mins} min</span>
                       </div>
                       <div style={{ position: "relative", width: 50, height: 50, flexShrink: 0 }}>
