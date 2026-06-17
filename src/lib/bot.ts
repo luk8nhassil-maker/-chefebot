@@ -6,6 +6,27 @@ export function setMenuDinamico(menu: typeof MENU_PADRAO) {
   MENU = menu;
 }
 
+let ESGOTADOS: string[] = [];
+
+export function setEsgotados(lista: string[]) {
+  ESGOTADOS = lista;
+}
+
+function isEsgotado(nome: string): boolean {
+  return ESGOTADOS.some(e => e.toLowerCase() === nome.toLowerCase());
+}
+
+function respostaEsgotado(nome: string, alternativas: string[], session: BotSession): BotResponse {
+  const disponiveis = alternativas.filter(a => !isEsgotado(a));
+  const sugestao = disponiveis.length > 0
+    ? `\n\nQue tal *${disponiveis[Math.floor(Math.random() * Math.min(3, disponiveis.length))]}*? 😋`
+    : "";
+  return {
+    messages: [`Esse item acabou no momento 😅\nPosso te sugerir outra opção disponível?${sugestao}`],
+    session: resetaTentativas(session),
+  };
+}
+
 let CONFIG_BOT = {
   tempoEntregaDelivery: "40-60 minutos",
   tempoEntregaRetirada: "20-30 minutos",
@@ -1269,6 +1290,7 @@ Vai querer entrega ou prefere buscar na loja? Se for entrega, me informa seu end
       if (session.currentFlavor && !flavor) {
         flavor = session.currentFlavor;
       }
+      if (isEsgotado(flavor)) return respostaEsgotado(flavor, allFlavors, session);
       return {
         messages: [
           `*${flavor}*! Excelente escolha! 🤤`,
@@ -1287,6 +1309,10 @@ Vai querer entrega ou prefere buscar na loja? Se for entrega, me informa seu end
       if (!escolhido) {
         const listaOpcoes = candidatos.map(o => `• ${o}`).join("\n");
         return respostaInvalida(`Qual desses você quer?\n\n${listaOpcoes}`, session);
+      }
+      if (isEsgotado(escolhido)) {
+        const allF = [...MENU.saltyFlavors, ...MENU.sweetFlavors];
+        return respostaEsgotado(escolhido, allF, { ...session, candidatosSaborAmbiguo: undefined });
       }
       return {
         messages: [
@@ -1770,6 +1796,7 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
         }
       }
       if (!lanche) return respostaInvalida(listaLanches(), session);
+      if (isEsgotado(lanche.name)) return respostaEsgotado(lanche.name, MENU.lanches.map(l => l.name), session);
       if (lanche.name === "Macarronada de Carne") {
         return { messages: [`Ótima escolha! 😋 Qual tamanho da *Macarronada de Carne*?\n\n  1. Pequena (P) · *R$ 28,00*\n  2. Média (M) · *R$ 40,00*\n  3. Grande (G) · *R$ 50,00*\n\n_(Bacon ou ovos: acréscimo de R$ 10,00)_`], session: resetaTentativas({ ...session, step: "lanche_macarronada_size", currentLanche: lanche.name }) };
       }
@@ -1894,6 +1921,7 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
         }
       }
       if (!bebida) return respostaInvalida(listaBebidas(), session);
+      if (isEsgotado(bebida.name)) return respostaEsgotado(bebida.name, MENU.bebidas.map(b => b.name), session);
       const newItem: CartItem = { category: "bebida", name: bebida.name, price: bebida.price };
       const newCart = [...session.cart, newItem];
       return { messages: [mensagemAddMore(newCart)], session: resetaTentativas({ ...session, step: "add_more", cart: newCart }) };
@@ -1920,6 +1948,7 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
       let suco = MENU.sucos.find(s => normalizar(s.name).includes(n));
       if (!suco && !isNaN(num) && num >= 1 && num <= MENU.sucos.length) suco = MENU.sucos[num - 1];
       if (!suco) return respostaInvalida(`${listaSucos()}\n\n_(Com leite: acréscimo de R$ 1,00)_`, session);
+      if (isEsgotado(suco.name)) return respostaEsgotado(suco.name, MENU.sucos.map(s => s.name), session);
       const newItem: CartItem = { category: "suco", name: suco.name, price: suco.price };
       const newCart = [...session.cart, newItem];
       return { messages: [mensagemAddMore(newCart)], session: resetaTentativas({ ...session, step: "add_more", cart: newCart }) };

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyToken } from '@/lib/auth'
 import { redis } from '@/lib/redis'
+import { proximoNumeroPedido } from '@/lib/numeracao'
 import type { PedidoEntregador } from '@/types/entregador'
 
 const APP_BASE_URL = 'https://chefebot-pjif.vercel.app'
@@ -8,6 +9,7 @@ const APP_BASE_URL = 'https://chefebot-pjif.vercel.app'
 type Status = 'novo' | 'em_preparo' | 'saiu_entrega' | 'entregue' | 'cancelado'
 type Pedido = {
   id: string
+  numero?: number
   cliente: string
   telefone: string
   itens: string[]
@@ -21,15 +23,11 @@ type Pedido = {
   tipoEntrega?: string
   taxaEntrega?: number
   bairro?: string
+  referencia?: string
+  observacao?: string
   horarioInicio?: string
 }
 
-const PEDIDOS_INICIAIS: Pedido[] = [
-  { id: '1', cliente: 'Ana Lima', telefone: '(86) 99801-1234', itens: ['Pizza Calabresa G', 'Borda Catupiry G', 'Coca 2L'], total: 72.00, status: 'entregue', horario: '19:42', endereco: 'Rua Lizandro Nogueira, 210 - Centro' },
-  { id: '2', cliente: 'Carlos Sousa', telefone: '(86) 99700-5678', itens: ['Pizza Frango c/ Catupiry G', 'Pizza Portuguesa M'], total: 90.00, status: 'entregue', horario: '19:35', endereco: 'Av. Frei Serafim, 1200 - Centro' },
-  { id: '3', cliente: 'Juliana Costa', telefone: '(86) 98800-9012', itens: ['Pizza 4 Queijos G', 'Borda Chocolate G'], total: 62.00, status: 'entregue', horario: '19:10', endereco: 'Rua Coelho Rodrigues, 45 - Ilhotas' },
-  { id: '4', cliente: 'Marcos Oliveira', telefone: '(86) 99600-3456', itens: ['Pizza Pepperoni M', 'Suco de Laranja 1L'], total: 52.00, status: 'entregue', horario: '18:50', endereco: 'Rua Gabriel Ferreira, 88 - Vermelha' },
-]
 
 const EVOLUTION_API_URL = 'https://evolution-api-production-8f99.up.railway.app'
 const EVOLUTION_API_KEY = '6208711c1b6fdffcc30cb492a44d74601415c33ff717ef6032162f9c0056319e'
@@ -197,4 +195,61 @@ export async function PATCH(req: NextRequest) {
   }
 
   return NextResponse.json(pedidos[index])
+}
+
+export async function POST(req: NextRequest) {
+  const auth = await checkAuth(req)
+  if (!auth) return NextResponse.json({ error: 'Nao autorizado' }, { status: 401 })
+
+  const body = await req.json()
+  const { cliente, telefone, itens, total, endereco, bairro, referencia, tipoEntrega, taxaEntrega, pagamento, troco, observacao } = body
+
+  if (!cliente || !itens || itens.length === 0) {
+    return NextResponse.json({ error: 'Pedido inválido' }, { status: 400 })
+  }
+
+  const pedidos = await getPedidos()
+  const numeroPedido = await proximoNumeroPedido()
+  const agora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' })
+
+  const novoPedido: Pedido = {
+    id: Date.now().toString(),
+    numero: numeroPedido,
+    cliente: String(cliente),
+    telefone: String(telefone || ''),
+    itens: Array.isArray(itens) ? itens.filter(Boolean) : [String(itens)],
+    total: Number(total) || 0,
+    status: 'novo',
+    horario: agora,
+    endereco: String(endereco || (tipoEntrega === 'pickup' || tipoEntrega === 'retirada' ? 'Retirada na loja' : '')),
+    ...(bairro ? { bairro: String(bairro) } : {}),
+    ...(referencia ? { referencia: String(referencia) } : {}),
+    ...(tipoEntrega ? { tipoEntrega: String(tipoEntrega) } : {}),
+    ...(taxaEntrega ? { taxaEntrega: Number(taxaEntrega) } : {}),
+    ...(pagamento ? { pagamento: String(pagamento) } : {}),
+    ...(troco ? { troco: String(troco) } : {}),
+    ...(observacao ? { observacao: String(observacao) } : {}),
+  }
+
+  await redis.set('pedidos', [...pedidos, novoPedido])
+  return NextResponse.json(novoPedido, { status: 201 })
+}
+
+export async function DELETE(req: NextRequest) {
+  const auth = await checkAuth(req)
+  if (!auth) return NextResponse.json({ error: 'Nao autorizado' }, { status: 401 })
+
+  const { searchParams } = new URL(req.url)
+  const id = searchParams.get('id')
+  const pedidos = await getPedidos()
+
+  if (id) {
+    const filtered = pedidos.filter(p => p.id !== id)
+    await redis.set('pedidos', filtered)
+    return NextResponse.json({ ok: true })
+  }
+
+  const filtered = pedidos.filter(p => p.status !== 'entregue')
+  await redis.set('pedidos', filtered)
+  return NextResponse.json({ ok: true })
 }

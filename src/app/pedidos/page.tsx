@@ -2,10 +2,8 @@
 import { useEffect, useState, useRef } from "react"
 import { useRouter } from "next/navigation"
 
-// Gera um link wa.me seguro: limpa o número (só dígitos) e garante o código do país (55).
-// Se houver mensagem, ela vai codificada via encodeURIComponent.
 function whatsappLink(telefoneBruto: string, mensagem?: string): string {
-  let numero = (telefoneBruto || "").replace(/\D/g, "") // remove espaços, parênteses, traços, +, etc.
+  let numero = (telefoneBruto || "").replace(/\D/g, "")
   if (numero && !numero.startsWith("55")) numero = "55" + numero
   const texto = mensagem ? `?text=${encodeURIComponent(mensagem)}` : ""
   return `https://wa.me/${numero}${texto}`
@@ -31,6 +29,9 @@ type Pedido = {
   tipoEntrega?: string
   horarioInicio?: string
   horarioEntrega?: string
+  bairro?: string
+  taxaEntrega?: number
+  referencia?: string
 }
 
 const NEXT_STATUS: Record<Status, Status | null> = {
@@ -39,6 +40,13 @@ const NEXT_STATUS: Record<Status, Status | null> = {
 const ACTION_LABEL: Record<Status, string> = {
   novo: "Começar a fazer", em_preparo: "Saiu para entrega", saiu_entrega: "Confirmar entrega", entregue: "", cancelado: "",
 }
+const STATUS_OPTS: { value: Status; label: string }[] = [
+  { value: "novo", label: "Novo" },
+  { value: "em_preparo", label: "Fazendo" },
+  { value: "saiu_entrega", label: "Na rua" },
+  { value: "entregue", label: "Entregue" },
+  { value: "cancelado", label: "Cancelado" },
+]
 
 const STATUS_COLOR: Record<Status, { accent: string; accentSoft: string; accentBg: string; accentBorder: string; cardBg: string; cardBorder: string; glow: string; btnBg: string; btnFg: string; label: string }> = {
   novo:         { accent: "#ff6b00", accentSoft: "#ff9a3d", accentBg: "rgba(255,107,0,.15)", accentBorder: "rgba(255,107,0,.5)",  cardBg: "linear-gradient(180deg,rgba(255,107,0,.12),rgba(255,107,0,.02) 30%,#0d0906 65%)", cardBorder: "1.5px solid rgba(255,107,0,.55)",  glow: "cbGlowO", btnBg: "linear-gradient(180deg,#ff7d1a,#ff6b00)", btnFg: "#fff",    label: "Novo" },
@@ -50,14 +58,14 @@ const STATUS_COLOR: Record<Status, { accent: string; accentSoft: string; accentB
 
 function getItemIcon(item: string): string {
   const n = item.toLowerCase()
-  if (n.includes("pizza") || n.includes("calabresa") || n.includes("mussarela") || n.includes("frango") && n.includes("pizza")) return "🍕"
+  if (n.includes("pizza") || n.includes("calabresa") || n.includes("mussarela") || (n.includes("frango") && n.includes("pizza"))) return "🍕"
   if (n.includes("hambur") || n.includes("x-burg") || n.includes("xburg") || n.includes("lanche") || n.includes("hot dog") || n.includes("cachorro")) return "🍔"
   if (n.includes("coca") || n.includes("pepsi") || n.includes("refri") || n.includes("guaraná") || n.includes("guarana") || n.includes("fanta") || n.includes("sprite") || n.includes("bebida")) return "🥤"
   if (n.includes("suco") || n.includes("vitamina") || n.includes("açaí") || n.includes("acai") || n.includes("smoothie")) return "🧃"
   if (n.includes("massa") || n.includes("macarr") || n.includes("espaguete") || n.includes("lasanha") || n.includes("nhoque")) return "🍝"
   if (n.includes("frango") || n.includes("porção") || n.includes("porcao") || n.includes("asa") || n.includes("coxinha")) return "🍗"
   if (n.includes("batata") || n.includes("frita")) return "🍟"
-  if (n.includes("tacos") || n.includes("wrap") || n.includes("burrito")) return "🌮"
+  if (n.includes("calzone")) return "🥙"
   if (n.includes("sobremesa") || n.includes("torta") || n.includes("bolo") || n.includes("doce") || n.includes("pudim")) return "🍰"
   if (n.includes("agua") || n.includes("água") || n.includes("mineral")) return "💧"
   return "🍽️"
@@ -97,6 +105,33 @@ function timerDash(mins: number, meta: number = 40): { dash: number; color: stri
   return { dash: CIRC * (1 - progress), color }
 }
 
+function parseHybridPayment(pagamento: string): { metodo: string; valor: number }[] | null {
+  if (!pagamento || !pagamento.includes("+")) return null
+  const partes = pagamento.split("+").map(s => s.trim())
+  const resultado: { metodo: string; valor: number }[] = []
+  for (const parte of partes) {
+    const match = parte.match(/^(.+?)\s*\(R\$\s*([\d,.]+)\)$/)
+    if (!match) return null
+    const metodo = match[1].trim()
+    const valor = parseFloat(match[2].replace(".", "").replace(",", "."))
+    resultado.push({ metodo, valor })
+  }
+  return resultado.length >= 2 ? resultado : null
+}
+
+type NovoPedidoForm = {
+  cliente: string
+  telefone: string
+  tipoEntrega: "delivery" | "retirada"
+  endereco: string
+  bairro: string
+  referencia: string
+  itens: string[]
+  observacao: string
+  pagamento: string
+  total: string
+}
+
 export default function PedidosPage() {
   const router = useRouter()
   const [pedidos, setPedidos] = useState<Pedido[]>([])
@@ -122,6 +157,13 @@ export default function PedidosPage() {
   const [busca, setBusca] = useState("")
   const [modalLimpar, setModalLimpar] = useState(false)
   const [limpando, setLimpando] = useState(false)
+  const [modalNovoPedido, setModalNovoPedido] = useState(false)
+  const [novoPedidoForm, setNovoPedidoForm] = useState<NovoPedidoForm>({
+    cliente: "", telefone: "", tipoEntrega: "delivery", endereco: "", bairro: "", referencia: "", itens: [""], observacao: "", pagamento: "", total: ""
+  })
+  const [salvandoNovoPedido, setSalvandoNovoPedido] = useState(false)
+  const [modalAlterarStatus, setModalAlterarStatus] = useState<string | null>(null)
+  const [cancelandoId, setCancelandoId] = useState<string | null>(null)
 
   const prevIdsRef = useRef<string[]>([])
   const piscarRef = useRef<NodeJS.Timeout | null>(null)
@@ -248,22 +290,14 @@ export default function PedidosPage() {
     if (user) { setIsAdmin(user.role === "admin" || user.role === "dev"); setUserName(user.name || "Kellyne") }
     const savedMute = localStorage.getItem("chefebot-mute") === "true"
     if (savedMute) { setMuteado(true); muteadoRef.current = true }
-    // Solicita notificação de forma forçada com explicação
     const solicitarNotificacao = async () => {
       if (!("Notification" in window)) return;
       if (Notification.permission === "default") {
         const perm = await Notification.requestPermission();
-        if (perm === "granted") {
-          new Notification("ChefeBot ativado! 🍕", {
-            body: "Você vai receber alertas de novos pedidos.",
-            icon: "/icon-192.png",
-          });
-        }
+        if (perm === "granted") { new Notification("ChefeBot ativado! 🍕", { body: "Você vai receber alertas de novos pedidos.", icon: "/icon-192.png" }); }
       }
     };
     solicitarNotificacao();
-
-    // Web Push VAPID — inscrever dispositivo
     const inscreverPush = async () => {
       try {
         if (!("serviceWorker" in navigator) || !("PushManager" in window)) return;
@@ -272,51 +306,21 @@ export default function PedidosPage() {
         if (existing) return;
         const res = await fetch("/api/push");
         const { publicKey } = await res.json();
-        const sub = await reg.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: publicKey,
-        });
-        await fetch("/api/push", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "subscribe", subscription: sub }),
-        });
+        const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: publicKey });
+        await fetch("/api/push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "subscribe", subscription: sub }) });
       } catch {}
     };
     inscreverPush();
     carregarPedidos(); carregarStatusBot()
     fetch("/api/entregadores").then(r => r.json()).then(d => setEntregadores(Array.isArray(d) ? d.filter((e: any) => e.ativo) : [])).catch(() => {})
-    // Screen Orientation Lock
-    try {
-      if (screen.orientation && (screen.orientation as any).lock) {
-        (screen.orientation as any).lock("portrait").catch(() => {});
-      }
-    } catch {}
-
-    // Captura install prompt
-    const handleInstall = (e: any) => {
-      e.preventDefault();
-      setInstallPrompt(e);
-      const jaInstalou = window.matchMedia("(display-mode: standalone)").matches;
-      if (!jaInstalou) setShowInstallBanner(true);
-    };
+    try { if (screen.orientation && (screen.orientation as any).lock) { (screen.orientation as any).lock("portrait").catch(() => {}); } } catch {}
+    const handleInstall = (e: any) => { e.preventDefault(); setInstallPrompt(e); const jaInstalou = window.matchMedia("(display-mode: standalone)").matches; if (!jaInstalou) setShowInstallBanner(true); };
     window.addEventListener("beforeinstallprompt", handleInstall);
-
-    // Wake Lock — mantém tela acesa
     let wakeLock: any = null;
-    const ativarWakeLock = async () => {
-      try {
-        if ("wakeLock" in navigator) {
-          wakeLock = await (navigator as any).wakeLock.request("screen");
-        }
-      } catch {}
-    };
+    const ativarWakeLock = async () => { try { if ("wakeLock" in navigator) { wakeLock = await (navigator as any).wakeLock.request("screen"); } } catch {} };
     ativarWakeLock();
-    const handleVisibility = () => {
-      if (document.visibilityState === "visible") ativarWakeLock();
-    };
+    const handleVisibility = () => { if (document.visibilityState === "visible") ativarWakeLock(); };
     document.addEventListener("visibilitychange", handleVisibility);
-
     const intervalo = setInterval(carregarPedidos, 10000)
     const tick = setInterval(() => setNow(Date.now()), 1000)
     return () => { if (wakeLock) wakeLock.release(); document.removeEventListener("visibilitychange", handleVisibility); window.removeEventListener("beforeinstallprompt", handleInstall); clearInterval(intervalo); clearInterval(tick); if (piscarRef.current) clearInterval(piscarRef.current); if (somRepetidoRef.current) clearInterval(somRepetidoRef.current); document.title = tituloOriginalRef.current }
@@ -328,15 +332,11 @@ export default function PedidosPage() {
       const r = await fetch("/api/orders", { method: "DELETE" })
       if (r.ok) setPedidos(prev => prev.filter(p => p.status !== "entregue"))
     } catch {}
-    setLimpando(false)
-    setModalLimpar(false)
+    setLimpando(false); setModalLimpar(false)
   }
 
   const toggleMute = () => {
-    const novo = !muteadoRef.current
-    muteadoRef.current = novo
-    setMuteado(novo)
-    localStorage.setItem("chefebot-mute", String(novo))
+    const novo = !muteadoRef.current; muteadoRef.current = novo; setMuteado(novo); localStorage.setItem("chefebot-mute", String(novo))
   }
 
   const alternarBot = async () => {
@@ -376,7 +376,45 @@ export default function PedidosPage() {
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
       toastTimerRef.current = setTimeout(() => setToast(null), 5000)
     }
-    setModalEntrega(null); setAtualizando(null)
+    setModalEntrega(null); setAtualizando(null); setModalAlterarStatus(null)
+  }
+
+  const cancelarPedido = async (id: string) => {
+    setCancelandoId(id)
+    await avancarStatus(id, "cancelado")
+    setCancelandoId(null); setDetailId(null)
+  }
+
+  const salvarNovoPedido = async () => {
+    const f = novoPedidoForm
+    if (!f.cliente.trim() || !f.itens.filter(Boolean).length) return
+    setSalvandoNovoPedido(true)
+    try {
+      const r = await fetch("/api/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cliente: f.cliente.trim(),
+          telefone: f.telefone.trim(),
+          tipoEntrega: f.tipoEntrega,
+          endereco: f.tipoEntrega === "delivery" ? f.endereco.trim() : "Retirada na loja",
+          bairro: f.tipoEntrega === "delivery" ? f.bairro.trim() : undefined,
+          referencia: f.referencia.trim() || undefined,
+          itens: f.itens.filter(Boolean),
+          observacao: f.observacao.trim() || undefined,
+          pagamento: f.pagamento || undefined,
+          total: parseFloat(f.total.replace(",", ".")) || 0,
+        }),
+      })
+      if (r.ok) {
+        const novo = await r.json()
+        setPedidos(prev => [novo, ...prev])
+        setModalNovoPedido(false)
+        setNovoPedidoForm({ cliente: "", telefone: "", tipoEntrega: "delivery", endereco: "", bairro: "", referencia: "", itens: [""], observacao: "", pagamento: "", total: "" })
+        tocarSomNormal()
+      }
+    } catch {}
+    setSalvandoNovoPedido(false)
   }
 
   const desfazerToast = () => {
@@ -390,11 +428,23 @@ export default function PedidosPage() {
   const emAberto = pedidos.filter(p => !["entregue", "cancelado"].includes(p.status)).length
   const totalHoje = pedidos.length
   const contagemPorStatus = (s: Status) => pedidos.filter(p => p.status === s).length
+
+  const buscaNorm = busca.toLowerCase().trim()
   const pedidosFiltrados = (filtro === "todos" ? pedidos : pedidos.filter(p => p.status === filtro))
-    .filter(p => !busca || p.cliente.toLowerCase().includes(busca.toLowerCase()))
+    .filter(p => {
+      if (!buscaNorm) return true
+      const num = String(p.numero || "")
+      return (
+        p.cliente.toLowerCase().includes(buscaNorm) ||
+        p.telefone.replace(/\D/g, "").includes(buscaNorm.replace(/\D/g, "")) ||
+        (p.bairro || "").toLowerCase().includes(buscaNorm) ||
+        num.includes(buscaNorm)
+      )
+    })
     .sort((a, b) => { if (a.escalonado && !b.escalonado) return -1; if (!a.escalonado && b.escalonado) return 1; if (a.cancelamentoSolicitado && !b.cancelamentoSolicitado) return -1; return 0 })
+
   const detalhePedido = pedidos.find(p => p.id === detailId) || null
-  // App Badge API
+
   useEffect(() => {
     if ("setAppBadge" in navigator) {
       if (emAberto > 0) (navigator as any).setAppBadge(emAberto);
@@ -402,7 +452,6 @@ export default function PedidosPage() {
     }
   }, [emAberto])
 
-  // Shortcuts URL params
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const filtroParam = params.get("filtro");
@@ -446,6 +495,9 @@ export default function PedidosPage() {
     </div>
   )
 
+  const inputStyle: React.CSSProperties = { width: "100%", height: 46, background: "#0b0b0b", border: "1px solid #242220", borderRadius: 12, padding: "0 14px", color: "#f5f2ee", fontSize: 14, fontFamily: "'Archivo', sans-serif", outline: "none", boxSizing: "border-box" }
+  const labelStyle: React.CSSProperties = { display: "block", fontSize: 11, fontWeight: 900, color: "#56524b", textTransform: "uppercase", letterSpacing: ".8px", marginBottom: 6 }
+
   return (
     <>
       <style>{`
@@ -472,6 +524,7 @@ export default function PedidosPage() {
         @keyframes cbWait { 0%,100%{opacity:1} 50%{opacity:.35} }
         .cbBusca::placeholder { color: #3a3730; }
         .cbBusca:focus { border-color: #ff6b00 !important; box-shadow: 0 0 0 3px rgba(255,107,0,.1); }
+        .cbInput:focus { border-color: #ff6b00 !important; outline: none; }
       `}</style>
 
       <div style={{ minHeight: "100svh", maxWidth: 375, margin: "0 auto", background: "#060606", color: "#f5f2ee", fontFamily: "'Archivo', sans-serif", display: "flex", flexDirection: "column", paddingBottom: "calc(env(safe-area-inset-bottom) + 90px)" }}>
@@ -497,10 +550,7 @@ export default function PedidosPage() {
         {showInstallBanner && (
           <div style={{ margin: "0 16px 12px", padding: "14px 16px", background: "linear-gradient(135deg,rgba(255,107,0,.15),rgba(255,107,0,.05))", border: "1.5px solid rgba(255,107,0,.4)", borderRadius: 18, display: "flex", alignItems: "center", gap: 12 }}>
             <span style={{ fontSize: 32, flexShrink: 0 }}>🍕</span>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <p style={{ margin: 0, fontSize: 14, fontWeight: 900, color: "#f4f1ec" }}>Instalar ChefeBot</p>
-              <p style={{ margin: "2px 0 0", fontSize: 11, fontWeight: 700, color: "#a39b8b" }}>Acesse mais rápido pela tela inicial</p>
-            </div>
+            <div style={{ flex: 1, minWidth: 0 }}><p style={{ margin: 0, fontSize: 14, fontWeight: 900, color: "#f4f1ec" }}>Instalar ChefeBot</p><p style={{ margin: "2px 0 0", fontSize: 11, fontWeight: 700, color: "#a39b8b" }}>Acesse mais rápido pela tela inicial</p></div>
             <div style={{ display: "flex", flexDirection: "column", gap: 6, flexShrink: 0 }}>
               <button onClick={async () => { if (installPrompt) { installPrompt.prompt(); const r = await installPrompt.userChoice; if (r.outcome === "accepted") setShowInstallBanner(false); } }} style={{ border: "none", background: "#ff6b00", color: "#fff", fontSize: 12, fontWeight: 900, padding: "8px 14px", borderRadius: 10 }}>Instalar</button>
               <button onClick={() => setShowInstallBanner(false)} style={{ border: "none", background: "transparent", color: "#5a564d", fontSize: 11, fontWeight: 800, padding: "4px 0" }}>Agora não</button>
@@ -551,11 +601,12 @@ export default function PedidosPage() {
           </div>
         )}
 
-        {/* Pipeline */}
+        {/* Pipeline + Novo Pedido */}
         <div style={{ padding: "16px 16px 10px", display: "flex", flexDirection: "column", gap: 10 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <span style={{ fontSize: 10, fontWeight: 900, letterSpacing: "1.2px", textTransform: "uppercase", color: "#56524b" }}>Fila de pedidos</span>
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <button onClick={() => setModalNovoPedido(true)} style={{ height: 30, border: "1px solid rgba(255,107,0,.5)", background: "rgba(255,107,0,.1)", color: "#ff6b00", fontSize: 11, fontWeight: 900, padding: "0 12px", borderRadius: 10 }}>+ Novo</button>
               <button onClick={() => setFiltro("todos")} style={{ border: `1px solid ${filtro === "todos" ? "#ff6b00" : "#242220"}`, background: filtro === "todos" ? "#ff6b00" : "transparent", color: filtro === "todos" ? "#060606" : "#c9c2b4", fontSize: 11, fontWeight: 900, padding: "6px 13px", borderRadius: 18 }}>Todos · {pedidos.length}</button>
               <button onClick={() => setModalLimpar(true)} title="Limpar histórico" style={{ width: 30, height: 30, border: "1px solid #242220", borderRadius: 10, background: "transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><polyline points="3,6 5,6 21,6" stroke="#5a564d" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" stroke="#5a564d" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/><path d="M10 11v6M14 11v6" stroke="#5a564d" strokeWidth="2.2" strokeLinecap="round"/><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" stroke="#5a564d" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
@@ -584,10 +635,10 @@ export default function PedidosPage() {
           <input
             className="cbBusca"
             type="text"
-            placeholder="Buscar cliente..."
+            placeholder="Buscar por nome, telefone, bairro ou #número..."
             value={busca}
             onChange={e => setBusca(e.target.value)}
-            style={{ width: "100%", height: 48, background: "#101010", border: "1px solid #242220", borderRadius: 14, padding: "0 44px 0 16px", color: "#f5f2ee", fontSize: 15, fontWeight: 700, fontFamily: "'Archivo', sans-serif", outline: "none", boxSizing: "border-box", transition: "border-color .15s, box-shadow .15s" }}
+            style={{ width: "100%", height: 48, background: "#101010", border: "1px solid #242220", borderRadius: 14, padding: "0 44px 0 16px", color: "#f5f2ee", fontSize: 14, fontWeight: 700, fontFamily: "'Archivo', sans-serif", outline: "none", boxSizing: "border-box", transition: "border-color .15s, box-shadow .15s" }}
           />
           {busca
             ? <button onClick={() => setBusca("")} style={{ position: "absolute", right: 28, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: "#5a564d", fontSize: 18, lineHeight: 1, padding: "4px", cursor: "pointer" }}>×</button>
@@ -625,6 +676,7 @@ export default function PedidosPage() {
             const isPix = pagamento.toLowerCase().includes("pix")
             const pixPendente = isPix && !pedido.pixConfirmado && pedido.status === "novo"
             const pixConfirmado = isPix && !!pedido.pixConfirmado
+            const hibridoParts = parseHybridPayment(pagamento)
 
             let cardAnim = `cbCardIn .35s ease both, ${sc.glow} 3.4s infinite`
             if (flashId === pedido.id) cardAnim = "cbFlash .7s ease"
@@ -639,7 +691,7 @@ export default function PedidosPage() {
             return (
               <article key={pedido.id} onClick={() => setDetailId(pedido.id)} style={{ background: sc.cardBg, border: cardBorder, borderRadius: 26, padding: 18, display: "flex", flexDirection: "column", gap: 12, animation: cardAnim, cursor: "pointer" }}>
 
-                {/* Header: avatar + nome + timer */}
+                {/* Header */}
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                     <div style={{ width: 48, height: 48, borderRadius: 14, background: sc.accentBg, border: `2px solid ${sc.accentBorder}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
@@ -647,9 +699,7 @@ export default function PedidosPage() {
                     </div>
                     <div>
                       <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 4 }}>
-                        {pedido.numero != null && (
-                          <span style={{ background: "rgba(255,255,255,.08)", color: "#c9c2b4", fontSize: 11, fontWeight: 900, padding: "2px 7px", borderRadius: 7, letterSpacing: "0.3px", border: "1px solid rgba(255,255,255,.12)", flexShrink: 0 }}>#{pedido.numero}</span>
-                        )}
+                        {pedido.numero != null && <span style={{ background: "rgba(255,255,255,.08)", color: "#c9c2b4", fontSize: 11, fontWeight: 900, padding: "2px 7px", borderRadius: 7, border: "1px solid rgba(255,255,255,.12)", flexShrink: 0 }}>#{pedido.numero}</span>}
                         <span style={{ fontSize: 21, fontWeight: 900, letterSpacing: "-0.5px", lineHeight: 1, color: "#f4f1ec", maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>{firstName}</span>
                         <span style={{ background: sc.accentBg, color: sc.accent, fontSize: 10, fontWeight: 900, padding: "2px 8px", borderRadius: 8, letterSpacing: "0.5px", textTransform: "uppercase", border: `1px solid ${sc.accentBorder}` }}>{sc.label}</span>
                       </div>
@@ -660,7 +710,7 @@ export default function PedidosPage() {
                             : <svg width="11" height="11" viewBox="0 0 24 24" fill="none"><path d="M5 17H3a2 2 0 01-2-2V5a2 2 0 012-2h11a2 2 0 012 2v3" stroke="#38bdf8" strokeWidth="2.2" strokeLinecap="round"/><rect x="9" y="11" width="14" height="10" rx="2" stroke="#38bdf8" strokeWidth="2.2"/></svg>
                           }
                         </div>
-                        <span style={{ fontSize: 11, fontWeight: 700, color: isRetirada ? "#facc15" : "#38bdf8", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>{isRetirada ? "Retirada na loja" : pedido.endereco}</span>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: isRetirada ? "#facc15" : "#38bdf8", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>{isRetirada ? "Retirada na loja" : (pedido.bairro ? `${pedido.bairro} · ${pedido.endereco}` : pedido.endereco)}</span>
                       </div>
                     </div>
                   </div>
@@ -679,39 +729,44 @@ export default function PedidosPage() {
                   </div>
                 </div>
 
-                {/* Itens — sem borda, fundo harmonioso */}
-                <div style={{ background: sc.accentBg, borderRadius: 14, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 0 }}>
+                {/* Itens */}
+                <div style={{ background: sc.accentBg, borderRadius: 14, padding: "10px 12px" }}>
                   {pedido.itens.map((item, i) => (
                     <div key={i}>
-                      {i > 0 && <div style={{ height: 1, background: `rgba(255,255,255,.04)`, margin: "6px 0" }} />}
+                      {i > 0 && <div style={{ height: 1, background: "rgba(255,255,255,.04)", margin: "6px 0" }} />}
                       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                        <div style={{ width: 36, height: 36, borderRadius: 10, background: `rgba(255,255,255,.06)`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: 18 }}>
-                          {getItemIcon(item)}
-                        </div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <p style={{ fontSize: 13, fontWeight: 800, color: "#f4f1ec", margin: 0, lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item}</p>
-                        </div>
-                        <span style={{ fontSize: 12, fontWeight: 900, color: sc.accentSoft, background: `rgba(255,255,255,.06)`, padding: "3px 9px", borderRadius: 7, flexShrink: 0 }}>×1</span>
+                        <div style={{ width: 36, height: 36, borderRadius: 10, background: "rgba(255,255,255,.06)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: 18 }}>{getItemIcon(item)}</div>
+                        <p style={{ flex: 1, fontSize: 13, fontWeight: 800, color: "#f4f1ec", margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item}</p>
+                        <span style={{ fontSize: 12, fontWeight: 900, color: sc.accentSoft, background: "rgba(255,255,255,.06)", padding: "3px 9px", borderRadius: 7, flexShrink: 0 }}>×1</span>
                       </div>
                     </div>
                   ))}
-                  {pedido.observacao && (
-                    <div style={{ marginTop: 8, fontSize: 12, fontWeight: 700, color: "#facc15", background: "rgba(250,204,21,.08)", borderRadius: 8, padding: "6px 10px" }}>
-                      Obs: {pedido.observacao}
-                    </div>
-                  )}
+                  {pedido.observacao && <div style={{ marginTop: 8, fontSize: 12, fontWeight: 700, color: "#facc15", background: "rgba(250,204,21,.08)", borderRadius: 8, padding: "6px 10px" }}>Obs: {pedido.observacao}</div>}
                 </div>
 
-                {/* Status Pix */}
-                {isPix && (
+                {/* Pagamento híbrido */}
+                {hibridoParts && (
+                  <div style={{ background: "rgba(250,204,21,.07)", border: "1px solid rgba(250,204,21,.2)", borderRadius: 12, padding: "10px 12px" }}>
+                    <div style={{ fontSize: 10, fontWeight: 900, color: "#a39b8b", textTransform: "uppercase", letterSpacing: ".8px", marginBottom: 6 }}>Pagamento Misto</div>
+                    {hibridoParts.map((p, i) => (
+                      <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 800, color: "#fde68a", marginBottom: i < hibridoParts.length - 1 ? 3 : 0 }}>
+                        <span>{p.metodo}</span><span>R$ {p.valor.toFixed(2).replace(".", ",")}</span>
+                      </div>
+                    ))}
+                    <div style={{ borderTop: "1px solid rgba(250,204,21,.15)", marginTop: 6, paddingTop: 6, display: "flex", justifyContent: "space-between", fontSize: 14, fontWeight: 900, color: "#facc15" }}>
+                      <span>Total</span><span>R$ {pedido.total.toFixed(2).replace(".", ",")}</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Pix status */}
+                {!hibridoParts && isPix && (
                   <div style={{ position: pixPendente ? "relative" : "static", overflow: "hidden", background: pixConfirmado ? "rgba(52,211,153,.08)" : "rgba(251,191,36,.07)", border: `1.5px solid ${pixConfirmado ? "rgba(52,211,153,.3)" : "rgba(251,191,36,.25)"}`, borderRadius: 14, padding: "10px 13px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                     {pixPendente && <div style={{ position: "absolute", inset: 0, background: "linear-gradient(105deg,transparent 40%,rgba(251,191,36,.07) 50%,transparent 60%)", backgroundSize: "200% 100%", animation: "cbShimmer 2.2s infinite" }} />}
                     <div style={{ display: "flex", alignItems: "center", gap: 9, position: "relative" }}>
                       <div style={{ width: 32, height: 32, borderRadius: 9, background: pixConfirmado ? "rgba(52,211,153,.18)" : "rgba(251,191,36,.12)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                        {pixConfirmado
-                          ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M22 11.08V12a10 10 0 11-5.93-9.14" stroke="#34d399" strokeWidth="2.2" strokeLinecap="round"/><polyline points="22,4 12,14.01 9,11.01" stroke="#34d399" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                          : <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="#fbbf24" strokeWidth="2.2"/><polyline points="12,6 12,12 16,14" stroke="#fbbf24" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                        }
+                        {pixConfirmado ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M22 11.08V12a10 10 0 11-5.93-9.14" stroke="#34d399" strokeWidth="2.2" strokeLinecap="round"/><polyline points="22,4 12,14.01 9,11.01" stroke="#34d399" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                          : <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="#fbbf24" strokeWidth="2.2"/><polyline points="12,6 12,12 16,14" stroke="#fbbf24" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
                       </div>
                       <div>
                         <p style={{ fontSize: 13, fontWeight: 900, color: pixConfirmado ? "#34d399" : "#fbbf24", margin: 0 }}>{pixConfirmado ? "Pix confirmado" : "Aguardando Pix"}</p>
@@ -725,8 +780,8 @@ export default function PedidosPage() {
                   </div>
                 )}
 
-                {/* Pagamento não Pix */}
-                {!isPix && pagamento && (
+                {/* Pagamento não Pix, não híbrido */}
+                {!hibridoParts && !isPix && pagamento && (
                   <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 700, color: "#c9c2b4" }}>
                     <span style={{ width: 8, height: 8, borderRadius: 2, background: pagamento.toLowerCase().includes("cart") ? "#60a5fa" : "#facc15", flexShrink: 0 }} />
                     {pagamento}
@@ -735,22 +790,13 @@ export default function PedidosPage() {
 
                 {/* Alerta cancelamento */}
                 {pedido.cancelamentoSolicitado && (
-                  <div style={{ fontSize: 13, fontWeight: 800, color: "#ef4444", background: "rgba(239,68,68,.08)", borderRadius: 10, padding: "10px 12px", animation: "cbCancelGlow 1.5s infinite", border: "1px solid rgba(239,68,68,.3)" }}>
-                    ⚠️ Cliente solicitou cancelamento
-                  </div>
+                  <div style={{ fontSize: 13, fontWeight: 800, color: "#ef4444", background: "rgba(239,68,68,.08)", borderRadius: 10, padding: "10px 12px", animation: "cbCancelGlow 1.5s infinite", border: "1px solid rgba(239,68,68,.3)" }}>⚠️ Cliente solicitou cancelamento</div>
                 )}
 
                 {/* Ações — normal */}
                 {!isDone && !isCanceled && nextStatus && !pixPendente && !pedido.escalonado && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }} onClick={e => e.stopPropagation()}>
-                    <button
-                      onClick={() => {
-                        if (nextStatus === "saiu_entrega" && entregadores.length > 0 && pedido.tipoEntrega !== "pickup") { setModalEntrega({ pedidoId: pedido.id, proxStatus: nextStatus }) }
-                        else { avancarStatus(pedido.id, nextStatus) }
-                      }}
-                      disabled={atualizando === pedido.id}
-                      style={{ height: 56, border: "none", borderRadius: 16, background: sc.btnBg, color: sc.btnFg, fontSize: 17, fontWeight: 900, letterSpacing: "-0.2px", opacity: atualizando === pedido.id ? 0.6 : 1 }}
-                    >
+                    <button onClick={() => { if (nextStatus === "saiu_entrega" && entregadores.length > 0 && pedido.tipoEntrega !== "pickup") { setModalEntrega({ pedidoId: pedido.id, proxStatus: nextStatus }) } else { avancarStatus(pedido.id, nextStatus) } }} disabled={atualizando === pedido.id} style={{ height: 56, border: "none", borderRadius: 16, background: sc.btnBg, color: sc.btnFg, fontSize: 17, fontWeight: 900, letterSpacing: "-0.2px", opacity: atualizando === pedido.id ? 0.6 : 1 }}>
                       {atualizando === pedido.id ? "..." : ACTION_LABEL[pedido.status]}
                     </button>
                     <button onClick={e => { e.stopPropagation(); window.open(whatsappLink(pedido.telefone), "_blank"); }} style={{ height: 44, border: `1px solid ${sc.accentBorder}`, borderRadius: 13, background: "transparent", color: "#c9c2b4", fontSize: 13, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
@@ -777,22 +823,13 @@ export default function PedidosPage() {
                 {/* Ações — Escalonado */}
                 {pedido.escalonado && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }} onClick={e => e.stopPropagation()}>
-                    {pixPendente && (
-                      <div style={{ height: 54, border: "2px dashed #2a2723", borderRadius: 16, display: "flex", alignItems: "center", justifyContent: "center", gap: 9 }}>
-                        <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><rect x="3" y="11" width="18" height="11" rx="2" stroke="#56524b" strokeWidth="2.2"/><path d="M7 11V7a5 5 0 0110 0v4" stroke="#56524b" strokeWidth="2.2" strokeLinecap="round"/></svg>
-                        <span style={{ fontSize: 14, fontWeight: 800, color: "#56524b" }}>Libera ao confirmar Pix</span>
-                      </div>
-                    )}
+                    {pixPendente && <div style={{ height: 54, border: "2px dashed #2a2723", borderRadius: 16, display: "flex", alignItems: "center", justifyContent: "center", gap: 9 }}><svg width="17" height="17" viewBox="0 0 24 24" fill="none"><rect x="3" y="11" width="18" height="11" rx="2" stroke="#56524b" strokeWidth="2.2"/><path d="M7 11V7a5 5 0 0110 0v4" stroke="#56524b" strokeWidth="2.2" strokeLinecap="round"/></svg><span style={{ fontSize: 14, fontWeight: 800, color: "#56524b" }}>Libera ao confirmar Pix</span></div>}
                     <button onClick={() => assumirConversa(pedido.telefone)} style={{ height: 50, border: "none", borderRadius: 14, background: "#ef4444", color: "#fff", fontSize: 15, fontWeight: 900 }}>Assumir conversa</button>
                     <button onClick={() => marcarResolvido(pedido.telefone, pedido.id)} style={{ height: 44, border: "1px solid rgba(239,68,68,.4)", borderRadius: 14, background: "rgba(239,68,68,.07)", color: "#f87171", fontSize: 14, fontWeight: 900 }}>✓ Resolvido</button>
                   </div>
                 )}
 
-                {isDone && (
-                  <div style={{ height: 54, borderRadius: 16, background: "rgba(34,197,94,.1)", border: "1px solid rgba(34,197,94,.3)", color: "#22c55e", fontSize: 15, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                    Entregue · tudo certo ✓
-                  </div>
-                )}
+                {isDone && <div style={{ height: 54, borderRadius: 16, background: "rgba(34,197,94,.1)", border: "1px solid rgba(34,197,94,.3)", color: "#22c55e", fontSize: 15, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center" }}>Entregue · tudo certo ✓</div>}
               </article>
             )
           })}
@@ -810,7 +847,7 @@ export default function PedidosPage() {
         {detalhePedido && (
           <>
             <div onClick={() => setDetailId(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 60, animation: "cbFadeIn .2s ease both" }} />
-            <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, margin: "0 auto", maxWidth: 375, background: "#121110", border: "1px solid #242220", borderBottom: "none", borderRadius: "26px 26px 0 0", zIndex: 61, animation: "cbSheetUp .32s cubic-bezier(.2,.9,.3,1) both", padding: "10px 20px 26px", display: "flex", flexDirection: "column", gap: 14, maxHeight: "82vh", overflowY: "auto" }}>
+            <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, margin: "0 auto", maxWidth: 375, background: "#121110", border: "1px solid #242220", borderBottom: "none", borderRadius: "26px 26px 0 0", zIndex: 61, animation: "cbSheetUp .32s cubic-bezier(.2,.9,.3,1) both", padding: "10px 20px 26px", display: "flex", flexDirection: "column", gap: 12, maxHeight: "88vh", overflowY: "auto" }}>
               <div style={{ width: 44, height: 5, borderRadius: 3, background: "#2e2b26", margin: "2px auto 0", flexShrink: 0 }} />
               {(() => {
                 const p = detalhePedido
@@ -819,18 +856,22 @@ export default function PedidosPage() {
                 const { dash, color: ringColor } = timerDash(mins, meta)
                 const sc = STATUS_COLOR[p.status]
                 const isDone = p.status === "entregue"
+                const isCanceled = p.status === "cancelado"
                 const nextStatus = NEXT_STATUS[p.status]
                 const firstName = p.cliente.split(" ")[0]
                 const pagamento = p.pagamento || ""
                 const isPix = pagamento.toLowerCase().includes("pix")
+                const hibridoParts = parseHybridPayment(pagamento)
                 const payDot = isPix ? "#22c55e" : pagamento.toLowerCase().includes("cart") ? "#60a5fa" : "#facc15"
+                const isRetirada = !p.tipoEntrega || p.tipoEntrega === "pickup" || p.tipoEntrega === "retirada" || p.endereco === "Retirada na loja"
                 return (
                   <>
+                    {/* Cabeçalho */}
                     <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
                       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 7 }}>
                         <span style={{ alignSelf: "flex-start", background: sc.accentBg, color: sc.accent, fontSize: 11, fontWeight: 900, letterSpacing: "1.2px", padding: "5px 10px", borderRadius: 8, textTransform: "uppercase", border: `1px solid ${sc.accentBorder}` }}>{sc.label}</span>
-                        <h2 style={{ margin: 0, fontSize: 24, fontWeight: 900, letterSpacing: "-0.6px", lineHeight: 1.1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.numero != null ? `#${p.numero} · ` : ""}{p.cliente}</h2>
-                        <span style={{ fontSize: 13, color: "#a39b8b", fontWeight: 600 }}>Recebido às {p.horario} · há {mins} min</span>
+                        <h2 style={{ margin: 0, fontSize: 22, fontWeight: 900, letterSpacing: "-0.6px", lineHeight: 1.1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.numero != null ? `#${p.numero} · ` : ""}{p.cliente}</h2>
+                        <span style={{ fontSize: 12, color: "#a39b8b", fontWeight: 600 }}>Recebido às {p.horario} · há {mins} min</span>
                       </div>
                       <div style={{ position: "relative", width: 50, height: 50, flexShrink: 0 }}>
                         <svg width="50" height="50" viewBox="0 0 50 50" style={{ transform: "rotate(-90deg)", display: "block" }}>
@@ -843,11 +884,34 @@ export default function PedidosPage() {
                         </div>
                       </div>
                     </div>
-                    <div style={{ background: "#0b0b0b", borderRadius: 14, padding: "13px 14px", display: "flex", flexDirection: "column", gap: 6 }}>
-                      <span style={{ fontSize: 10.5, fontWeight: 900, textTransform: "uppercase", letterSpacing: "1px", color: "#a39b8b" }}>Entregar em</span>
-                      <span style={{ fontSize: 15, fontWeight: 800, lineHeight: 1.35 }}>{p.endereco}</span>
+
+                    {/* Informações completas */}
+                    <div style={{ background: "#0b0b0b", borderRadius: 14, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
+                      {p.telefone && p.telefone !== "App" && (
+                        <div style={{ display: "flex", justifyContent: "space-between" }}>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: "#5a564d" }}>Telefone</span>
+                          <span style={{ fontSize: 13, fontWeight: 800, color: "#c9c2b4" }}>{p.telefone}</span>
+                        </div>
+                      )}
+                      <div style={{ display: "flex", justifyContent: "space-between" }}>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: "#5a564d" }}>Tipo</span>
+                        <span style={{ fontSize: 13, fontWeight: 800, color: isRetirada ? "#facc15" : "#38bdf8" }}>{isRetirada ? "Retirada na loja" : "Delivery"}</span>
+                      </div>
+                      {!isRetirada && (
+                        <>
+                          {p.bairro && <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ fontSize: 11, fontWeight: 700, color: "#5a564d" }}>Bairro</span><span style={{ fontSize: 13, fontWeight: 800, color: "#f4f1ec" }}>{p.bairro}</span></div>}
+                          <div style={{ display: "flex", justifyContent: "space-between" }}>
+                            <span style={{ fontSize: 11, fontWeight: 700, color: "#5a564d" }}>Endereço</span>
+                            <span style={{ fontSize: 13, fontWeight: 800, color: "#f4f1ec", textAlign: "right", maxWidth: "60%" }}>{p.endereco}</span>
+                          </div>
+                          {p.referencia && <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ fontSize: 11, fontWeight: 700, color: "#5a564d" }}>Referência</span><span style={{ fontSize: 13, fontWeight: 800, color: "#f4f1ec", textAlign: "right", maxWidth: "60%" }}>{p.referencia}</span></div>}
+                          {p.taxaEntrega != null && p.taxaEntrega > 0 && <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ fontSize: 11, fontWeight: 700, color: "#5a564d" }}>Taxa entrega</span><span style={{ fontSize: 13, fontWeight: 800, color: "#f4f1ec" }}>R$ {p.taxaEntrega.toFixed(2).replace(".", ",")}</span></div>}
+                        </>
+                      )}
                     </div>
-                    <div style={{ background: sc.accentBg, borderRadius: 14, padding: "12px 13px", display: "flex", flexDirection: "column", gap: 0 }}>
+
+                    {/* Itens */}
+                    <div style={{ background: sc.accentBg, borderRadius: 14, padding: "12px 13px" }}>
                       <span style={{ fontSize: 10, fontWeight: 900, textTransform: "uppercase", letterSpacing: "1px", color: "#a39b8b", display: "block", marginBottom: 8 }}>Pedido</span>
                       {p.itens.map((item, i) => (
                         <div key={i}>
@@ -861,21 +925,73 @@ export default function PedidosPage() {
                       ))}
                       {p.observacao && <div style={{ marginTop: 8, fontSize: 12, fontWeight: 700, color: "#facc15", background: "rgba(250,204,21,.08)", borderRadius: 8, padding: "6px 10px" }}>Obs: {p.observacao}</div>}
                     </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 700, color: "#c9c2b4" }}>
-                      <span style={{ width: 8, height: 8, borderRadius: 2, background: payDot, flexShrink: 0 }} />
-                      {pagamento || "Pagamento não informado"}
-                      {p.pixConfirmado && <span style={{ fontSize: 11, color: "#34d399", fontWeight: 800 }}>✓ confirmado</span>}
-                    </div>
-                    {!isDone && nextStatus && (
+
+                    {/* Pagamento detalhado */}
+                    {hibridoParts ? (
+                      <div style={{ background: "rgba(250,204,21,.07)", border: "1px solid rgba(250,204,21,.2)", borderRadius: 12, padding: "12px 14px" }}>
+                        <div style={{ fontSize: 10, fontWeight: 900, color: "#a39b8b", textTransform: "uppercase", letterSpacing: ".8px", marginBottom: 8 }}>Pagamento Misto</div>
+                        {hibridoParts.map((pp, i) => (
+                          <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 14, fontWeight: 800, color: "#fde68a", marginBottom: 4 }}>
+                            <span>{pp.metodo}</span><span>R$ {pp.valor.toFixed(2).replace(".", ",")}</span>
+                          </div>
+                        ))}
+                        <div style={{ borderTop: "1px solid rgba(250,204,21,.15)", marginTop: 6, paddingTop: 6, display: "flex", justifyContent: "space-between", fontSize: 16, fontWeight: 900, color: "#facc15" }}>
+                          <span>Total</span><span>R$ {p.total.toFixed(2).replace(".", ",")}</span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 700, color: "#c9c2b4" }}>
+                          <span style={{ width: 8, height: 8, borderRadius: 2, background: payDot, flexShrink: 0 }} />
+                          {pagamento || "Pagamento não informado"}
+                          {p.pixConfirmado && <span style={{ fontSize: 11, color: "#34d399", fontWeight: 800 }}>✓ confirmado</span>}
+                        </div>
+                        <span style={{ fontSize: 15, fontWeight: 900, color: "#f4f1ec" }}>R$ {p.total.toFixed(2).replace(".", ",")}</span>
+                      </div>
+                    )}
+
+                    {/* Alterar status dropdown */}
+                    {!isDone && !isCanceled && (
+                      <div>
+                        {modalAlterarStatus === p.id ? (
+                          <div style={{ background: "#0b0b0b", border: "1px solid #242220", borderRadius: 14, overflow: "hidden" }}>
+                            <div style={{ padding: "10px 14px", fontSize: 11, fontWeight: 900, color: "#56524b", textTransform: "uppercase", letterSpacing: ".8px" }}>Alterar status</div>
+                            {STATUS_OPTS.map(opt => (
+                              <button key={opt.value} onClick={() => avancarStatus(p.id, opt.value)} disabled={p.status === opt.value} style={{ width: "100%", padding: "12px 14px", background: p.status === opt.value ? STATUS_COLOR[opt.value].accentBg : "transparent", border: "none", borderTop: "1px solid #1a1a1a", color: p.status === opt.value ? STATUS_COLOR[opt.value].accent : "#c9c2b4", fontSize: 14, fontWeight: 800, textAlign: "left", cursor: p.status === opt.value ? "default" : "pointer" }}>
+                                {opt.label} {p.status === opt.value && "· atual"}
+                              </button>
+                            ))}
+                            <button onClick={() => setModalAlterarStatus(null)} style={{ width: "100%", padding: "12px 14px", background: "transparent", border: "none", borderTop: "1px solid #1a1a1a", color: "#5a564d", fontSize: 13, fontWeight: 800, textAlign: "center" }}>Cancelar</button>
+                          </div>
+                        ) : (
+                          <button onClick={() => setModalAlterarStatus(p.id)} style={{ width: "100%", height: 44, border: "1px solid #242220", borderRadius: 12, background: "transparent", color: "#c9c2b4", fontSize: 13, fontWeight: 800 }}>Alterar status</button>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Ação principal */}
+                    {!isDone && !isCanceled && nextStatus && (
                       <button onClick={() => { avancarStatus(p.id, nextStatus); setDetailId(null) }} disabled={atualizando === p.id} style={{ height: 58, border: "none", borderRadius: 16, background: sc.btnBg, color: sc.btnFg, fontSize: 17, fontWeight: 900, letterSpacing: "-0.2px", flexShrink: 0, opacity: atualizando === p.id ? 0.6 : 1 }}>
                         {ACTION_LABEL[p.status]}
                       </button>
                     )}
                     {isDone && <div style={{ height: 54, borderRadius: 16, background: "rgba(34,197,94,.1)", border: "1px solid rgba(34,197,94,.3)", color: "#22c55e", fontSize: 15, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>Entregue · tudo certo ✓</div>}
-                    <button onClick={() => window.open(whatsappLink(p.telefone), "_blank")} style={{ height: 46, border: "1px solid #2a2723", borderRadius: 14, background: "transparent", color: "#c9c2b4", fontSize: 14, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, flexShrink: 0 }}>
-                      <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#22c55e" }} />
-                      Falar com {firstName} no WhatsApp
-                    </button>
+
+                    {/* WhatsApp */}
+                    {p.telefone && p.telefone !== "App" && (
+                      <button onClick={() => window.open(whatsappLink(p.telefone), "_blank")} style={{ height: 46, border: "1px solid #2a2723", borderRadius: 14, background: "transparent", color: "#c9c2b4", fontSize: 14, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, flexShrink: 0 }}>
+                        <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#22c55e" }} />
+                        Falar com {firstName} no WhatsApp
+                      </button>
+                    )}
+
+                    {/* Cancelar */}
+                    {!isDone && !isCanceled && (
+                      <button onClick={() => cancelarPedido(p.id)} disabled={cancelandoId === p.id} style={{ height: 46, border: "1px solid rgba(239,68,68,.35)", borderRadius: 14, background: "rgba(239,68,68,.06)", color: "#ef4444", fontSize: 14, fontWeight: 800, flexShrink: 0, opacity: cancelandoId === p.id ? 0.6 : 1 }}>
+                        {cancelandoId === p.id ? "Cancelando..." : "Cancelar pedido"}
+                      </button>
+                    )}
+
                     <button onClick={() => setDetailId(null)} style={{ height: 44, border: "none", background: "transparent", color: "#a39b8b", fontSize: 14, fontWeight: 800, flexShrink: 0 }}>Fechar</button>
                   </>
                 )
@@ -891,9 +1007,7 @@ export default function PedidosPage() {
             <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, margin: "0 auto", maxWidth: 375, background: "#121110", border: "1px solid #242220", borderBottom: "none", borderRadius: "26px 26px 0 0", zIndex: 61, animation: "cbSheetUp .32s cubic-bezier(.2,.9,.3,1) both", padding: "20px 20px 36px", display: "flex", flexDirection: "column", gap: 14 }}>
               <div style={{ width: 44, height: 5, borderRadius: 3, background: "#2e2b26", margin: "0 auto 6px" }} />
               <p style={{ margin: 0, fontSize: 18, fontWeight: 900, letterSpacing: "-0.3px" }}>Selecionar entregador</p>
-              {entregadores.filter(e => e.ativo).map(e => (
-                <button key={e.id} onClick={() => avancarStatus(modalEntrega.pedidoId, modalEntrega.proxStatus, e)} style={{ height: 56, border: "1px solid #242220", borderRadius: 16, background: "#101010", color: "#f5f2ee", fontSize: 16, fontWeight: 800, textAlign: "left", padding: "0 16px" }}>{e.nome}</button>
-              ))}
+              {entregadores.filter(e => e.ativo).map(e => (<button key={e.id} onClick={() => avancarStatus(modalEntrega.pedidoId, modalEntrega.proxStatus, e)} style={{ height: 56, border: "1px solid #242220", borderRadius: 16, background: "#101010", color: "#f5f2ee", fontSize: 16, fontWeight: 800, textAlign: "left", padding: "0 16px" }}>{e.nome}</button>))}
               <button onClick={() => avancarStatus(modalEntrega.pedidoId, modalEntrega.proxStatus)} style={{ height: 48, border: "1px solid #2a2723", borderRadius: 14, background: "transparent", color: "#a39b8b", fontSize: 14, fontWeight: 800 }}>Sem entregador</button>
             </div>
           </>
@@ -920,6 +1034,82 @@ export default function PedidosPage() {
           </>
         )}
 
+        {/* Modal Novo Pedido */}
+        {modalNovoPedido && (
+          <>
+            <div onClick={() => setModalNovoPedido(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.75)", zIndex: 70, animation: "cbFadeIn .2s ease both" }} />
+            <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, margin: "0 auto", maxWidth: 375, background: "#121110", border: "1px solid #242220", borderBottom: "none", borderRadius: "26px 26px 0 0", zIndex: 71, animation: "cbSheetUp .32s cubic-bezier(.2,.9,.3,1) both", padding: "12px 20px 32px", display: "flex", flexDirection: "column", gap: 12, maxHeight: "90vh", overflowY: "auto" }}>
+              <div style={{ width: 44, height: 5, borderRadius: 3, background: "#2e2b26", margin: "0 auto 4px", flexShrink: 0 }} />
+              <p style={{ margin: 0, fontSize: 19, fontWeight: 900, letterSpacing: "-0.4px", flexShrink: 0 }}>Novo pedido</p>
+
+              <div>
+                <label style={labelStyle}>Cliente *</label>
+                <input className="cbInput" value={novoPedidoForm.cliente} onChange={e => setNovoPedidoForm(f => ({ ...f, cliente: e.target.value }))} placeholder="Nome do cliente" style={inputStyle} />
+              </div>
+              <div>
+                <label style={labelStyle}>Telefone</label>
+                <input className="cbInput" value={novoPedidoForm.telefone} onChange={e => setNovoPedidoForm(f => ({ ...f, telefone: e.target.value }))} placeholder="(86) 99999-9999" style={inputStyle} type="tel" />
+              </div>
+              <div>
+                <label style={labelStyle}>Tipo</label>
+                <div style={{ display: "flex", gap: 8 }}>
+                  {(["delivery", "retirada"] as const).map(t => (
+                    <button key={t} onClick={() => setNovoPedidoForm(f => ({ ...f, tipoEntrega: t }))} style={{ flex: 1, height: 40, border: `1px solid ${novoPedidoForm.tipoEntrega === t ? "#ff6b00" : "#242220"}`, borderRadius: 10, background: novoPedidoForm.tipoEntrega === t ? "rgba(255,107,0,.15)" : "transparent", color: novoPedidoForm.tipoEntrega === t ? "#ff6b00" : "#5a564d", fontSize: 13, fontWeight: 900 }}>
+                      {t === "delivery" ? "🛵 Entrega" : "🏪 Retirada"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {novoPedidoForm.tipoEntrega === "delivery" && (
+                <>
+                  <div>
+                    <label style={labelStyle}>Endereço</label>
+                    <input className="cbInput" value={novoPedidoForm.endereco} onChange={e => setNovoPedidoForm(f => ({ ...f, endereco: e.target.value }))} placeholder="Rua, número" style={inputStyle} />
+                  </div>
+                  <div>
+                    <label style={labelStyle}>Bairro</label>
+                    <input className="cbInput" value={novoPedidoForm.bairro} onChange={e => setNovoPedidoForm(f => ({ ...f, bairro: e.target.value }))} placeholder="Centro, Tucum..." style={inputStyle} />
+                  </div>
+                  <div>
+                    <label style={labelStyle}>Referência</label>
+                    <input className="cbInput" value={novoPedidoForm.referencia} onChange={e => setNovoPedidoForm(f => ({ ...f, referencia: e.target.value }))} placeholder="Perto do mercado..." style={inputStyle} />
+                  </div>
+                </>
+              )}
+              <div>
+                <label style={labelStyle}>Itens *</label>
+                {novoPedidoForm.itens.map((item, i) => (
+                  <div key={i} style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+                    <input className="cbInput" value={item} onChange={e => { const arr = [...novoPedidoForm.itens]; arr[i] = e.target.value; setNovoPedidoForm(f => ({ ...f, itens: arr })) }} placeholder={`Item ${i + 1}`} style={{ ...inputStyle, flex: 1 }} />
+                    {novoPedidoForm.itens.length > 1 && <button onClick={() => setNovoPedidoForm(f => ({ ...f, itens: f.itens.filter((_, j) => j !== i) }))} style={{ width: 40, height: 46, border: "1px solid #242220", borderRadius: 10, background: "transparent", color: "#ef4444", fontSize: 18, flexShrink: 0 }}>×</button>}
+                  </div>
+                ))}
+                <button onClick={() => setNovoPedidoForm(f => ({ ...f, itens: [...f.itens, ""] }))} style={{ height: 36, width: "100%", border: "1px dashed #242220", borderRadius: 10, background: "transparent", color: "#5a564d", fontSize: 13, fontWeight: 800 }}>+ Adicionar item</button>
+              </div>
+              <div>
+                <label style={labelStyle}>Observação</label>
+                <input className="cbInput" value={novoPedidoForm.observacao} onChange={e => setNovoPedidoForm(f => ({ ...f, observacao: e.target.value }))} placeholder="Sem cebola, bem passado..." style={inputStyle} />
+              </div>
+              <div>
+                <label style={labelStyle}>Forma de pagamento</label>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {["Pix", "Dinheiro", "Cartão", "Misto"].map(p => (
+                    <button key={p} onClick={() => setNovoPedidoForm(f => ({ ...f, pagamento: p }))} style={{ height: 36, padding: "0 14px", border: `1px solid ${novoPedidoForm.pagamento === p ? "#ff6b00" : "#242220"}`, borderRadius: 10, background: novoPedidoForm.pagamento === p ? "rgba(255,107,0,.15)" : "transparent", color: novoPedidoForm.pagamento === p ? "#ff6b00" : "#5a564d", fontSize: 12, fontWeight: 900 }}>{p}</button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label style={labelStyle}>Total (R$)</label>
+                <input className="cbInput" value={novoPedidoForm.total} onChange={e => setNovoPedidoForm(f => ({ ...f, total: e.target.value }))} placeholder="0,00" style={inputStyle} inputMode="decimal" />
+              </div>
+              <button onClick={salvarNovoPedido} disabled={salvandoNovoPedido || !novoPedidoForm.cliente.trim() || !novoPedidoForm.itens.filter(Boolean).length} style={{ height: 56, border: "none", borderRadius: 16, background: "linear-gradient(180deg,#ff7d1a,#ff6b00)", color: "#fff", fontSize: 17, fontWeight: 900, opacity: (salvandoNovoPedido || !novoPedidoForm.cliente.trim() || !novoPedidoForm.itens.filter(Boolean).length) ? 0.5 : 1, flexShrink: 0 }}>
+                {salvandoNovoPedido ? "Salvando..." : "Criar pedido"}
+              </button>
+              <button onClick={() => setModalNovoPedido(false)} style={{ height: 44, border: "none", background: "transparent", color: "#a39b8b", fontSize: 14, fontWeight: 800, flexShrink: 0 }}>Cancelar</button>
+            </div>
+          </>
+        )}
+
         {/* Nav */}
         <nav style={{ position: "fixed", bottom: 0, left: 0, right: 0, margin: "0 auto", maxWidth: 375, background: "rgba(8,8,8,.94)", backdropFilter: "blur(14px)", borderTop: "1px solid #1f1d1a", display: "grid", gridTemplateColumns: "1fr 1fr 1fr", padding: "10px 8px calc(env(safe-area-inset-bottom) + 18px)", zIndex: 40 }}>
           <button style={{ border: "none", background: "transparent", display: "flex", flexDirection: "column", alignItems: "center", gap: 5, padding: "6px 0" }}>
@@ -929,11 +1119,11 @@ export default function PedidosPage() {
             </span>
             <span style={{ fontSize: 11, fontWeight: 900, color: "#ff6b00" }}>Pedidos</span>
           </button>
-          <button style={{ border: "none", background: "transparent", display: "flex", flexDirection: "column", alignItems: "center", gap: 5, padding: "6px 0" }}>
+          <button onClick={() => router.push("/conversas")} style={{ border: "none", background: "transparent", display: "flex", flexDirection: "column", alignItems: "center", gap: 5, padding: "6px 0" }}>
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="14" rx="5" stroke="#5a564d" strokeWidth="2.2"/><circle cx="8.5" cy="11" r="1.4" fill="#5a564d"/><circle cx="12" cy="11" r="1.4" fill="#5a564d"/><circle cx="15.5" cy="11" r="1.4" fill="#5a564d"/></svg>
             <span style={{ fontSize: 11, fontWeight: 800, color: "#5a564d" }}>Conversas</span>
           </button>
-          <button style={{ border: "none", background: "transparent", display: "flex", flexDirection: "column", alignItems: "center", gap: 5, padding: "6px 0" }}>
+          <button onClick={() => router.push("/cardapio")} style={{ border: "none", background: "transparent", display: "flex", flexDirection: "column", alignItems: "center", gap: 5, padding: "6px 0" }}>
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="4" y="4" width="7" height="7" rx="2" stroke="#5a564d" strokeWidth="2.2"/><rect x="13" y="4" width="7" height="7" rx="2" stroke="#5a564d" strokeWidth="2.2"/><rect x="4" y="13" width="7" height="7" rx="2" stroke="#5a564d" strokeWidth="2.2"/><rect x="13" y="13" width="7" height="7" rx="2" stroke="#5a564d" strokeWidth="2.2"/></svg>
             <span style={{ fontSize: 11, fontWeight: 800, color: "#5a564d" }}>Cardápio</span>
           </button>

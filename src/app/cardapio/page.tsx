@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
 
 type MenuType = {
   sizes: { code: string; label: string; price: number }[];
@@ -11,7 +12,148 @@ type MenuType = {
   borders: { label: string; priceSmall: number; priceLarge: number }[];
   neighborhoods: { name: string; fee: number }[];
   payments: string[];
+  esgotados?: string[];
 };
+
+// ==================== ADMIN CARDÁPIO ====================
+
+type Categoria = { label: string; itens: { nome: string; preco?: number }[] }
+
+function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void }) {
+  const router = useRouter()
+  const [esgotados, setEsgotados] = useState<string[]>(menu.esgotados || [])
+  const [salvando, setSalvando] = useState<string | null>(null)
+  const [toast, setToast] = useState("")
+  const toastRef = useRef<any>(null)
+
+  function showToast(msg: string) {
+    setToast(msg)
+    clearTimeout(toastRef.current)
+    toastRef.current = setTimeout(() => setToast(""), 2200)
+  }
+
+  async function toggleEsgotado(nome: string) {
+    const novoEstado = !esgotados.includes(nome)
+    setSalvando(nome)
+    try {
+      const r = await fetch("/api/cardapio", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nome, esgotado: novoEstado }),
+      })
+      const d = await r.json()
+      if (d.ok) {
+        setEsgotados(d.esgotados || (novoEstado ? [...esgotados, nome] : esgotados.filter(e => e !== nome)))
+        showToast(novoEstado ? `${nome} marcado como esgotado` : `${nome} disponível novamente`)
+      }
+    } catch {
+      showToast("Erro ao salvar")
+    }
+    setSalvando(null)
+  }
+
+  const categorias: Categoria[] = [
+    { label: "Sabores Salgados", itens: menu.saltyFlavors.map(f => ({ nome: f })) },
+    { label: "Sabores Doces", itens: menu.sweetFlavors.map(f => ({ nome: f })) },
+    { label: "Lanches & Porções", itens: menu.lanches.map(l => ({ nome: l.name, preco: l.price })) },
+    { label: "Bebidas", itens: menu.bebidas.map(b => ({ nome: b.name, preco: b.price })) },
+    { label: "Sucos", itens: menu.sucos.map(s => ({ nome: s.name, preco: s.price })) },
+  ]
+
+  const totalEsgotados = esgotados.length
+
+  return (
+    <>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800;900&display=swap');
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        html, body { margin: 0; padding: 0; background: #060606; }
+        button { cursor: pointer; font-family: 'Archivo', sans-serif; }
+        @keyframes cbToast { from{opacity:0;transform:translateY(14px)} to{opacity:1;transform:none} }
+      `}</style>
+
+      <div style={{ minHeight: "100svh", maxWidth: 375, margin: "0 auto", background: "#060606", color: "#f5f2ee", fontFamily: "'Archivo', sans-serif", paddingBottom: "calc(env(safe-area-inset-bottom) + 90px)" }}>
+
+        <header style={{ display: "flex", alignItems: "center", gap: 12, padding: "calc(env(safe-area-inset-top) + 18px) 16px 12px" }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: "-0.4px" }}>Cardápio</div>
+            <div style={{ fontSize: 11, color: "#5a564d", fontWeight: 700, marginTop: 2 }}>
+              {totalEsgotados > 0 ? `${totalEsgotados} item${totalEsgotados > 1 ? "s" : ""} esgotado${totalEsgotados > 1 ? "s" : ""}` : "Todos disponíveis"}
+            </div>
+          </div>
+          <button onClick={onSair} style={{ fontSize: 11, fontWeight: 800, color: "#5a564d", background: "transparent", border: "1px solid #1f1d1a", padding: "6px 10px", borderRadius: 20 }}>Sair</button>
+        </header>
+
+        {totalEsgotados > 0 && (
+          <div style={{ margin: "0 16px 12px", padding: "12px 14px", background: "rgba(239,68,68,.06)", border: "1px solid rgba(239,68,68,.25)", borderRadius: 14 }}>
+            <div style={{ fontSize: 12, fontWeight: 900, color: "#ef4444", marginBottom: 6 }}>Esgotados agora</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {esgotados.map(e => (
+                <span key={e} style={{ background: "rgba(239,68,68,.1)", color: "#f87171", fontSize: 11, fontWeight: 800, padding: "3px 9px", borderRadius: 8, border: "1px solid rgba(239,68,68,.25)" }}>{e}</span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div style={{ padding: "0 16px" }}>
+          {categorias.map(cat => (
+            <div key={cat.label} style={{ marginBottom: 24 }}>
+              <div style={{ fontSize: 10, fontWeight: 900, letterSpacing: "1.2px", textTransform: "uppercase", color: "#56524b", marginBottom: 8 }}>{cat.label}</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {cat.itens.map(item => {
+                  const esg = esgotados.includes(item.nome)
+                  const loading = salvando === item.nome
+                  return (
+                    <div key={item.nome} style={{ background: esg ? "rgba(239,68,68,.04)" : "#101010", border: `1px solid ${esg ? "rgba(239,68,68,.3)" : "#1f1d1a"}`, borderRadius: 14, padding: "12px 14px", display: "flex", alignItems: "center", gap: 10 }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 14, fontWeight: 800, color: esg ? "#f87171" : "#f4f1ec", textDecoration: esg ? "line-through" : "none", opacity: esg ? 0.7 : 1 }}>{item.nome}</div>
+                        {item.preco ? <div style={{ fontSize: 11, color: "#5a564d", marginTop: 2 }}>R$ {item.preco.toFixed(2).replace(".", ",")}</div> : null}
+                      </div>
+                      <button
+                        onClick={() => toggleEsgotado(item.nome)}
+                        disabled={loading}
+                        style={{
+                          height: 34, padding: "0 14px", border: "none", borderRadius: 10, fontSize: 12, fontWeight: 900, flexShrink: 0, opacity: loading ? 0.6 : 1,
+                          background: esg ? "rgba(34,197,94,.12)" : "rgba(239,68,68,.1)",
+                          color: esg ? "#22c55e" : "#ef4444",
+                        }}
+                      >
+                        {loading ? "..." : esg ? "Disponível" : "Esgotado"}
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <nav style={{ position: "fixed", bottom: 0, left: 0, right: 0, margin: "0 auto", maxWidth: 375, background: "rgba(8,8,8,.94)", backdropFilter: "blur(14px)", borderTop: "1px solid #1f1d1a", display: "grid", gridTemplateColumns: "1fr 1fr 1fr", padding: "10px 8px calc(env(safe-area-inset-bottom) + 18px)", zIndex: 40 }}>
+          <button onClick={() => router.push("/pedidos")} style={{ border: "none", background: "transparent", display: "flex", flexDirection: "column", alignItems: "center", gap: 5, padding: "6px 0" }}>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="4" y="3" width="16" height="18" rx="3" stroke="#5a564d" strokeWidth="2.2"/><line x1="8" y1="9" x2="16" y2="9" stroke="#5a564d" strokeWidth="2.2" strokeLinecap="round"/><line x1="8" y1="14" x2="13" y2="14" stroke="#5a564d" strokeWidth="2.2" strokeLinecap="round"/></svg>
+            <span style={{ fontSize: 11, fontWeight: 800, color: "#5a564d" }}>Pedidos</span>
+          </button>
+          <button onClick={() => router.push("/conversas")} style={{ border: "none", background: "transparent", display: "flex", flexDirection: "column", alignItems: "center", gap: 5, padding: "6px 0" }}>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="14" rx="5" stroke="#5a564d" strokeWidth="2.2"/><circle cx="8.5" cy="11" r="1.4" fill="#5a564d"/><circle cx="12" cy="11" r="1.4" fill="#5a564d"/><circle cx="15.5" cy="11" r="1.4" fill="#5a564d"/></svg>
+            <span style={{ fontSize: 11, fontWeight: 800, color: "#5a564d" }}>Conversas</span>
+          </button>
+          <button style={{ border: "none", background: "transparent", display: "flex", flexDirection: "column", alignItems: "center", gap: 5, padding: "6px 0" }}>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="4" y="4" width="7" height="7" rx="2" stroke="#ff6b00" strokeWidth="2.2"/><rect x="13" y="4" width="7" height="7" rx="2" stroke="#ff6b00" strokeWidth="2.2"/><rect x="4" y="13" width="7" height="7" rx="2" stroke="#ff6b00" strokeWidth="2.2"/><rect x="13" y="13" width="7" height="7" rx="2" stroke="#ff6b00" strokeWidth="2.2"/></svg>
+            <span style={{ fontSize: 11, fontWeight: 900, color: "#ff6b00" }}>Cardápio</span>
+          </button>
+        </nav>
+      </div>
+
+      {toast && (
+        <div style={{ position: "fixed", bottom: 96, left: 0, right: 0, margin: "0 auto", width: "calc(100% - 32px)", maxWidth: 343, background: "#1c1a16", border: "1px solid #33302a", borderRadius: 14, padding: "12px 16px", fontSize: 13, fontWeight: 800, color: "#f5f2ee", textAlign: "center", animation: "cbToast .25s ease both", zIndex: 80, fontFamily: "'Archivo', sans-serif" }}>
+          {toast}
+        </div>
+      )}
+    </>
+  )
+}
+
+// ==================== PUBLIC CARDÁPIO ====================
 
 type CartItem = {
   emoji: string;
@@ -25,14 +167,12 @@ type CartItem = {
 const money = (v: number) => "R$ " + v.toFixed(2).replace(".", ",");
 const bigBorder = (sz: string) => !(sz === "P" || sz === "M");
 
-export default function CardapioApp() {
-  const [menu, setMenu] = useState<MenuType | null>(null);
+function PublicCardapio({ menu }: { menu: MenuType }) {
   const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [screen, setScreen] = useState("sc-start");
   const [cart, setCart] = useState<CartItem[]>([]);
   const [sending, setSending] = useState(false);
 
-  // build da pizza atual
   const [size, setSize] = useState<string | null>(null);
   const [sizePrice, setSizePrice] = useState(0);
   const [mam, setMam] = useState(false);
@@ -40,14 +180,8 @@ export default function CardapioApp() {
   const [f2, setF2] = useState<string | null>(null);
   const [border, setBorder] = useState<string | null>(null);
   const [borderPrice, setBorderPrice] = useState(0);
-
-  // plano de múltiplas pizzas
   const [plan, setPlan] = useState<{ total: number; current: number; openEnded: boolean }>({ total: 0, current: 0, openEnded: false });
-
-  // lista simples atual
   const [listCat, setListCat] = useState<"lanche" | "bebida" | "suco">("lanche");
-
-  // entrega/pagamento
   const [delType, setDelType] = useState<"delivery" | "retirada" | null>(null);
   const [bairroIdx, setBairroIdx] = useState<string>("");
   const [rua, setRua] = useState("");
@@ -57,188 +191,77 @@ export default function CardapioApp() {
   const [toast, setToast] = useState("");
   const toastTimer = useRef<any>(null);
 
-  useEffect(() => {
-    fetch("/api/cardapio")
-      .then((r) => r.json())
-      .then(setMenu)
-      .catch(() => setMenu(null));
-  }, []);
+  useEffect(() => { document.documentElement.setAttribute("data-theme", theme); }, [theme]);
 
-  useEffect(() => {
-    document.documentElement.setAttribute("data-theme", theme);
-  }, [theme]);
+  function showToast(m: string) { setToast(m); clearTimeout(toastTimer.current); toastTimer.current = setTimeout(() => setToast(""), 1700); }
+  function go(s: string) { setScreen(s); window.scrollTo({ top: 0, behavior: "smooth" }); }
 
-  function showToast(m: string) {
-    setToast(m);
-    clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToast(""), 1700);
-  }
-
-  function go(s: string) {
-    setScreen(s);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }
-
-  // ===== PIZZA =====
-  function resetBuild() {
-    setSize(null); setSizePrice(0); setMam(false); setF1(null); setF2(null); setBorder(null); setBorderPrice(0);
-  }
+  function resetBuild() { setSize(null); setSizePrice(0); setMam(false); setF1(null); setF2(null); setBorder(null); setBorderPrice(0); }
   function goPizza() { go("sc-qty"); }
-  function setPizzaQty(q: number) {
-    setPlan(q === 0 ? { total: 0, current: 1, openEnded: true } : { total: q, current: 1, openEnded: false });
-    resetBuild();
-    go("sc-build");
-  }
+  function setPizzaQty(q: number) { setPlan(q === 0 ? { total: 0, current: 1, openEnded: true } : { total: q, current: 1, openEnded: false }); resetBuild(); go("sc-build"); }
   function pizzasNoCarrinho() { return cart.filter((c) => c.kind === "pizza").length; }
-
-  function pickSize(code: string) {
-    const s = menu!.sizes.find((x) => x.code === code)!;
-    setSize(code); setSizePrice(s.price);
-  }
-  function toggleMam() {
-    setMam(!mam); setF1(null); setF2(null);
-  }
+  function pickSize(code: string) { const s = menu.sizes.find((x) => x.code === code)!; setSize(code); setSizePrice(s.price); }
+  function toggleMam() { setMam(!mam); setF1(null); setF2(null); }
   function pickFlavor(f: string) {
     if (!mam) { setF1(f); return; }
-    if (f1 === f) { setF1(f2); setF2(null); }
-    else if (f2 === f) { setF2(null); }
-    else if (!f1) setF1(f);
-    else if (!f2) setF2(f);
-    else setF2(f);
+    if (f1 === f) { setF1(f2); setF2(null); } else if (f2 === f) { setF2(null); } else if (!f1) setF1(f); else if (!f2) setF2(f); else setF2(f);
   }
   const flavorOk = mam ? !!(f1 && f2) : !!f1;
   const buildOk = !!size && flavorOk;
-
   function pickBorder(idx: string) {
     if (idx === "") { setBorder(null); setBorderPrice(0); }
-    else { const b = menu!.borders[+idx]; setBorder(b.label); setBorderPrice(bigBorder(size!) ? b.priceLarge : b.priceSmall); }
+    else { const b = menu.borders[+idx]; setBorder(b.label); setBorderPrice(bigBorder(size!) ? b.priceLarge : b.priceSmall); }
   }
   function addPizza() {
     const flavor = mam ? `${f1} / ${f2}` : f1;
-    const newItem: CartItem = {
-      emoji: "🍕", kind: "pizza",
-      name: `Pizza ${size}${mam ? " (meio a meio)" : ""}`,
-      detail: `${flavor}${border ? ` · borda ${border}` : ""}`,
-      price: sizePrice + borderPrice, qty: 1,
-    };
+    const newItem: CartItem = { emoji: "🍕", kind: "pizza", name: `Pizza ${size}${mam ? " (meio a meio)" : ""}`, detail: `${flavor}${border ? ` · borda ${border}` : ""}`, price: sizePrice + borderPrice, qty: 1 };
     const newCart = [...cart, newItem];
     setCart(newCart);
     const feitas = newCart.filter((c) => c.kind === "pizza").length;
-    if (!plan.openEnded && plan.current < plan.total) {
-      setPlan({ ...plan, current: plan.current + 1 });
-      showToast(`Pizza pronta! Bora a ${plan.current + 1} 🍕`);
-      resetBuild();
-      go("sc-build");
-    } else if (plan.openEnded) {
-      showToast("Pizza adicionada! 🍕");
-      go("sc-another");
-    } else {
-      showToast("Tudo pronto! 🍕");
-      go("sc-cart");
-    }
+    if (!plan.openEnded && plan.current < plan.total) { setPlan({ ...plan, current: plan.current + 1 }); showToast(`Pizza pronta! 🍕`); resetBuild(); go("sc-build"); }
+    else if (plan.openEnded) { showToast("Pizza adicionada! 🍕"); go("sc-another"); }
+    else { showToast("Tudo pronto! 🍕"); go("sc-cart"); }
   }
-  function addAnother() {
-    setPlan({ total: 0, current: pizzasNoCarrinho() + 1, openEnded: true });
-    resetBuild();
-    go("sc-build");
-  }
-
-  // ===== SIMPLES =====
+  function addAnother() { setPlan({ total: 0, current: pizzasNoCarrinho() + 1, openEnded: true }); resetBuild(); go("sc-build"); }
   function goCat(cat: "lanche" | "bebida" | "suco") { setListCat(cat); go("sc-list"); }
   function addSimple(it: { name: string; price: number }, emoji: string) {
     const ex = cart.find((c) => c.kind === "simple" && c.name === it.name);
-    if (ex) {
-      setCart(cart.map((c) => (c === ex ? { ...c, qty: c.qty + 1 } : c)));
-    } else {
-      setCart([...cart, { emoji, kind: "simple", name: it.name, detail: "", price: it.price, qty: 1 }]);
-    }
+    if (ex) { setCart(cart.map((c) => (c === ex ? { ...c, qty: c.qty + 1 } : c))); }
+    else { setCart([...cart, { emoji, kind: "simple", name: it.name, detail: "", price: it.price, qty: 1 }]); }
     showToast(`${it.name} adicionado!`);
   }
-
-  // ===== CARRINHO =====
   const cartTotal = cart.reduce((s, i) => s + i.price * i.qty, 0);
   const cartCount = cart.reduce((s, i) => s + i.qty, 0);
-  function chQty(idx: number, d: number) {
-    setCart(cart.map((c, i) => (i === idx ? { ...c, qty: Math.max(1, c.qty + d) } : c)));
-  }
-  function rmItem(idx: number) {
-    const nc = cart.filter((_, i) => i !== idx);
-    setCart(nc);
-    if (nc.length === 0) go("sc-start");
-  }
-
-  // ===== ENTREGA =====
-  const fee = delType === "delivery" && bairroIdx !== "" ? menu!.neighborhoods[+bairroIdx].fee : 0;
+  function chQty(idx: number, d: number) { setCart(cart.map((c, i) => (i === idx ? { ...c, qty: Math.max(1, c.qty + d) } : c))); }
+  function rmItem(idx: number) { const nc = cart.filter((_, i) => i !== idx); setCart(nc); if (nc.length === 0) go("sc-start"); }
+  const fee = delType === "delivery" && bairroIdx !== "" ? menu.neighborhoods[+bairroIdx].fee : 0;
   const delOk = delType === "retirada" || (delType === "delivery" && bairroIdx !== "");
   const payOk = !!nome.trim() && !!payment;
 
-  // ===== ENVIAR =====
-  async function finish() {
-    if (sending) return;
-    setSending(true);
-    const payload = {
-      cliente: nome.trim(),
-      itens: cart.map((c) => ({ kind: c.kind, name: c.name, detail: c.detail, price: c.price, qty: c.qty })),
-      tipoEntrega: delType,
-      bairro: delType === "delivery" ? menu!.neighborhoods[+bairroIdx].name : undefined,
-      endereco: delType === "delivery" ? rua : undefined,
-      taxaEntrega: fee,
-      pagamento: payment,
-      troco: payment === "Dinheiro" && troco ? troco : undefined,
-    };
-    try {
-      const r = await fetch("/api/pedido-app", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const data = await r.json();
-      if (data.ok) { go("sc-done"); }
-      else { showToast("Erro ao enviar. Tente de novo."); }
-    } catch {
-      showToast("Sem conexão. Tente de novo.");
-    } finally {
-      setSending(false);
-    }
-  }
-  function resetAll() {
-    setCart([]); resetBuild(); setDelType(null); setBairroIdx(""); setRua(""); setNome(""); setPayment(null); setTroco("");
-    go("sc-start");
-  }
+  const esgotados = menu.esgotados || [];
 
-  // ===== STEPPER =====
+  async function finish() {
+    if (sending) return; setSending(true);
+    const payload = { cliente: nome.trim(), itens: cart.map((c) => ({ kind: c.kind, name: c.name, detail: c.detail, price: c.price, qty: c.qty })), tipoEntrega: delType, bairro: delType === "delivery" ? menu.neighborhoods[+bairroIdx].name : undefined, endereco: delType === "delivery" ? rua : undefined, taxaEntrega: fee, pagamento: payment, troco: payment === "Dinheiro" && troco ? troco : undefined };
+    try {
+      const r = await fetch("/api/pedido-app", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      const data = await r.json();
+      if (data.ok) { go("sc-done"); } else { showToast("Erro ao enviar. Tente de novo."); }
+    } catch { showToast("Sem conexão. Tente de novo."); } finally { setSending(false); }
+  }
+  function resetAll() { setCart([]); resetBuild(); setDelType(null); setBairroIdx(""); setRua(""); setNome(""); setPayment(null); setTroco(""); go("sc-start"); }
+
   const stepMap: Record<string, number> = { "sc-start": 0, "sc-qty": 0, "sc-build": 0, "sc-border": 0, "sc-another": 0, "sc-list": 0, "sc-cart": 0, "sc-delivery": 1, "sc-pay": 2, "sc-done": 2 };
   const stepIdx = stepMap[screen] ?? 0;
   const STEPS = ["Itens", "Entrega", "Pagar"];
-
-  // contexto pizza
   const feitas = pizzasNoCarrinho();
   let ctxBadge = "", ctxTxt = "", ctxDots: { cls: string }[] = [];
-  if (plan.openEnded) {
-    ctxBadge = `Pizza ${feitas + 1}`;
-    ctxTxt = feitas === 0 ? "Sua 1ª pizza" : `${feitas} já no carrinho`;
-  } else if (plan.total > 0) {
-    ctxBadge = `Pizza ${plan.current} de ${plan.total}`;
-    ctxTxt = `Montando a pizza ${plan.current}`;
-    for (let i = 1; i <= plan.total; i++) ctxDots.push({ cls: i < plan.current ? "done" : i === plan.current ? "cur" : "" });
-  }
+  if (plan.openEnded) { ctxBadge = `Pizza ${feitas + 1}`; ctxTxt = feitas === 0 ? "Sua 1ª pizza" : `${feitas} já no carrinho`; }
+  else if (plan.total > 0) { ctxBadge = `Pizza ${plan.current} de ${plan.total}`; ctxTxt = `Montando a pizza ${plan.current}`; for (let i = 1; i <= plan.total; i++) ctxDots.push({ cls: i < plan.current ? "done" : i === plan.current ? "cur" : "" }); }
 
-  if (!menu) {
-    return (
-      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#171210", color: "#f6efe7", fontFamily: "system-ui" }}>
-        Carregando cardápio… 🍕
-      </div>
-    );
-  }
-
-  const PizzaCtx = () =>
-    (ctxBadge ? (
-      <div className="pizza-ctx">
-        <span className="pc-badge">{ctxBadge}</span>
-        <span className="pc-txt" dangerouslySetInnerHTML={{ __html: ctxTxt }} />
-        {ctxDots.length > 0 && <span className="pizza-dots">{ctxDots.map((d, i) => <span key={i} className={`pd ${d.cls}`} />)}</span>}
-      </div>
-    ) : null);
+  const PizzaCtx = () => (ctxBadge ? (
+    <div className="pizza-ctx"><span className="pc-badge">{ctxBadge}</span><span className="pc-txt" dangerouslySetInnerHTML={{ __html: ctxTxt }} />{ctxDots.length > 0 && <span className="pizza-dots">{ctxDots.map((d, i) => <span key={i} className={`pd ${d.cls}`} />)}</span>}</div>
+  ) : null);
 
   return (
     <>
@@ -251,31 +274,24 @@ export default function CardapioApp() {
           </div>
           <div className="status"><span className="dot" /> Aberto · entrega 40–60 min</div>
         </header>
-
         <div className="steps">
           {STEPS.map((s, i) => (
             <span key={s} style={{ display: "contents" }}>
-              <div className={`step-chip ${i === stepIdx ? "active" : i < stepIdx ? "done" : ""}`}>
-                <span className="num">{i < stepIdx ? "✓" : i + 1}</span>{s}
-              </div>
+              <div className={`step-chip ${i === stepIdx ? "active" : i < stepIdx ? "done" : ""}`}><span className="num">{i < stepIdx ? "✓" : i + 1}</span>{s}</div>
               {i < STEPS.length - 1 && <div className={`step-line ${i < stepIdx ? "done" : ""}`} />}
             </span>
           ))}
         </div>
-
         <main>
-          {/* INÍCIO */}
           {screen === "sc-start" && (
             <section className="screen active">
               <div className="screen-head"><div className="eyebrow">Bora montar</div><h2>O que vai ser hoje?</h2><p>Escolha por onde começar.</p></div>
-              <div className="opt" onClick={goPizza}><div className="opt-emoji">🍕</div><div className="opt-body"><div className="opt-title">Pizza</div><div className="opt-desc">{menu.saltyFlavors.length} salgadas, {menu.sweetFlavors.length} doces · meio a meio</div></div><div className="opt-price">{money(menu.sizes[0].price)}+</div></div>
+              <div className="opt" onClick={goPizza}><div className="opt-emoji">🍕</div><div className="opt-body"><div className="opt-title">Pizza</div><div className="opt-desc">{menu.saltyFlavors.filter(f => !esgotados.includes(f)).length} salgadas, {menu.sweetFlavors.filter(f => !esgotados.includes(f)).length} doces · meio a meio</div></div><div className="opt-price">{money(menu.sizes[0].price)}+</div></div>
               <div className="opt" onClick={() => goCat("lanche")}><div className="opt-emoji">🥪</div><div className="opt-body"><div className="opt-title">Lanches & Porções</div><div className="opt-desc">Calzone, X-burguer, batata…</div></div></div>
               <div className="opt" onClick={() => goCat("bebida")}><div className="opt-emoji">🥤</div><div className="opt-body"><div className="opt-title">Bebidas</div><div className="opt-desc">Refri, guaraná, água, cerveja</div></div></div>
               <div className="opt" onClick={() => goCat("suco")}><div className="opt-emoji">🧃</div><div className="opt-body"><div className="opt-title">Sucos naturais</div><div className="opt-desc">Cajá, caju, maracujá…</div></div></div>
             </section>
           )}
-
-          {/* QUANTAS */}
           {screen === "sc-qty" && (
             <section className="screen active">
               <div className="screen-head"><div className="eyebrow">Pizza</div><h2>Quantas pizzas?</h2><p>Pode mudar depois, fica tranquilo.</p></div>
@@ -288,71 +304,45 @@ export default function CardapioApp() {
               <div className="btn-row"><button className="btn btn-ghost btn-sm" onClick={() => go("sc-start")}>Voltar</button></div>
             </section>
           )}
-
-          {/* MONTAR */}
           {screen === "sc-build" && (
             <section className="screen active">
               <PizzaCtx />
               <div className="screen-head"><div className="eyebrow">Monte sua pizza</div><h2>Tamanho e sabor</h2></div>
               <div className="section-label">📏 Tamanho</div>
-              <div className="grid2">
-                {menu.sizes.map((s) => (
-                  <div key={s.code} className={`opt ${size === s.code ? "sel" : ""}`} onClick={() => pickSize(s.code)}>
-                    <div className="opt-check" />
-                    <div className="opt-emoji">🍕</div>
-                    <div className="opt-body"><div className="opt-title">{s.label}</div><div className="opt-desc">{money(s.price)}</div></div>
-                  </div>
-                ))}
-              </div>
+              <div className="grid2">{menu.sizes.map((s) => (<div key={s.code} className={`opt ${size === s.code ? "sel" : ""}`} onClick={() => pickSize(s.code)}><div className="opt-check" /><div className="opt-emoji">🍕</div><div className="opt-body"><div className="opt-title">{s.label}</div><div className="opt-desc">{money(s.price)}</div></div></div>))}</div>
               <div className="section-label">🍕 Sabor</div>
-              <div className={`mam ${mam ? "on" : ""}`} onClick={toggleMam}>
-                <div className="mam-txt"><strong>Meio a meio</strong><p>Dois sabores numa pizza</p></div>
-                <div className="switch" />
-              </div>
+              <div className={`mam ${mam ? "on" : ""}`} onClick={toggleMam}><div className="mam-txt"><strong>Meio a meio</strong><p>Dois sabores numa pizza</p></div><div className="switch" /></div>
               {mam && <div className="half-hint show">{!f1 ? "Toque na 1ª metade" : !f2 ? `1ª: ${f1} — agora a 2ª` : `✓ ${f1} / ${f2}`}</div>}
               <div className="section-label">Salgadas</div>
-              {menu.saltyFlavors.map((f) => (
-                <div key={f} className={`opt ${f === f1 || f === f2 ? "sel" : ""}`} onClick={() => pickFlavor(f)}>
-                  <div className="opt-emoji">🍕</div><div className="opt-body"><div className="opt-title">{f}</div></div><div className="opt-check" />
-                </div>
-              ))}
+              {menu.saltyFlavors.map((f) => {
+                const esg = esgotados.includes(f)
+                return (
+                  <div key={f} className={`opt ${f === f1 || f === f2 ? "sel" : ""} ${esg ? "esg" : ""}`} onClick={() => !esg && pickFlavor(f)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }}>
+                    <div className="opt-emoji">🍕</div><div className="opt-body"><div className="opt-title">{f}</div>{esg && <div className="opt-desc" style={{ color: "#ef4444" }}>Esgotado</div>}</div><div className="opt-check" />
+                  </div>
+                )
+              })}
               <div className="section-label">Doces</div>
-              {menu.sweetFlavors.map((f) => (
-                <div key={f} className={`opt ${f === f1 || f === f2 ? "sel" : ""}`} onClick={() => pickFlavor(f)}>
-                  <div className="opt-emoji">🍕</div><div className="opt-body"><div className="opt-title">{f}</div></div><div className="opt-check" />
-                </div>
-              ))}
-              <div className="btn-row">
-                <button className="btn btn-ghost btn-back" onClick={() => go("sc-qty")}>←</button>
-                <button className="btn btn-sm" disabled={!buildOk} onClick={() => go("sc-border")}>Escolher borda</button>
-              </div>
+              {menu.sweetFlavors.map((f) => {
+                const esg = esgotados.includes(f)
+                return (
+                  <div key={f} className={`opt ${f === f1 || f === f2 ? "sel" : ""}`} onClick={() => !esg && pickFlavor(f)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }}>
+                    <div className="opt-emoji">🍕</div><div className="opt-body"><div className="opt-title">{f}</div>{esg && <div className="opt-desc" style={{ color: "#ef4444" }}>Esgotado</div>}</div><div className="opt-check" />
+                  </div>
+                )
+              })}
+              <div className="btn-row"><button className="btn btn-ghost btn-back" onClick={() => go("sc-qty")}>←</button><button className="btn btn-sm" disabled={!buildOk} onClick={() => go("sc-border")}>Escolher borda</button></div>
             </section>
           )}
-
-          {/* BORDA */}
           {screen === "sc-border" && (
             <section className="screen active">
               <PizzaCtx />
               <div className="screen-head"><div className="eyebrow">Quase pronta</div><h2>Borda recheada?</h2><p>Opcional.</p></div>
-              <div className={`opt ${border === null ? "sel" : ""}`} onClick={() => pickBorder("")}>
-                <div className="opt-emoji">⭕</div><div className="opt-body"><div className="opt-title">Sem borda</div><div className="opt-desc">Tradicional</div></div><div className="opt-price">Grátis</div><div className="opt-check" />
-              </div>
-              {menu.borders.map((b, i) => {
-                const p = bigBorder(size!) ? b.priceLarge : b.priceSmall;
-                return (
-                  <div key={i} className={`opt ${border === b.label ? "sel" : ""}`} onClick={() => pickBorder(String(i))}>
-                    <div className="opt-emoji">🧀</div><div className="opt-body"><div className="opt-title">{b.label}</div></div><div className="opt-price">+{money(p)}</div><div className="opt-check" />
-                  </div>
-                );
-              })}
-              <div className="btn-row">
-                <button className="btn btn-ghost btn-back" onClick={() => go("sc-build")}>←</button>
-                <button className="btn btn-sm" onClick={addPizza}>Adicionar ao pedido</button>
-              </div>
+              <div className={`opt ${border === null ? "sel" : ""}`} onClick={() => pickBorder("")}><div className="opt-emoji">⭕</div><div className="opt-body"><div className="opt-title">Sem borda</div><div className="opt-desc">Tradicional</div></div><div className="opt-price">Grátis</div><div className="opt-check" /></div>
+              {menu.borders.map((b, i) => { const p = bigBorder(size!) ? b.priceLarge : b.priceSmall; return (<div key={i} className={`opt ${border === b.label ? "sel" : ""}`} onClick={() => pickBorder(String(i))}><div className="opt-emoji">🧀</div><div className="opt-body"><div className="opt-title">{b.label}</div></div><div className="opt-price">+{money(p)}</div><div className="opt-check" /></div>); })}
+              <div className="btn-row"><button className="btn btn-ghost btn-back" onClick={() => go("sc-build")}>←</button><button className="btn btn-sm" onClick={addPizza}>Adicionar ao pedido</button></div>
             </section>
           )}
-
-          {/* OUTRA */}
           {screen === "sc-another" && (
             <section className="screen active">
               <div className="screen-head"><div className="eyebrow">Pizza adicionada ✓</div><h2>Mais uma pizza?</h2><p>{pizzasNoCarrinho()} pizza{pizzasNoCarrinho() > 1 ? "s" : ""} no pedido</p></div>
@@ -361,141 +351,94 @@ export default function CardapioApp() {
               <div className="opt" onClick={() => go("sc-cart")}><div className="opt-emoji">✅</div><div className="opt-body"><div className="opt-title">Pronto, ver meu pedido</div></div></div>
             </section>
           )}
-
-          {/* LISTA SIMPLES */}
           {screen === "sc-list" && (
             <section className="screen active">
               {(() => {
-                const cfg = {
-                  lanche: { eb: "Lanches & Porções", t: "Escolha seu lanche", data: menu.lanches, emoji: "🍽️" },
-                  bebida: { eb: "Bebidas", t: "Bebidas geladas", data: menu.bebidas, emoji: "🥤" },
-                  suco: { eb: "Sucos naturais", t: "Sucos da casa", data: menu.sucos, emoji: "🧃" },
-                }[listCat];
-                return (
-                  <>
-                    <div className="screen-head"><div className="eyebrow">{cfg.eb}</div><h2>{cfg.t}</h2><p>Toque para adicionar.</p></div>
-                    {cfg.data.map((it, i) => (
-                      <div key={i} className="opt" onClick={() => addSimple(it, cfg.emoji)}>
-                        <div className="opt-emoji">{cfg.emoji}</div><div className="opt-body"><div className="opt-title">{it.name}</div></div><div className="opt-price">{money(it.price)}</div>
-                      </div>
-                    ))}
-                    <div className="btn-row"><button className="btn btn-ghost btn-sm" onClick={() => go("sc-start")}>Voltar ao início</button></div>
-                  </>
-                );
+                const cfg = { lanche: { eb: "Lanches & Porções", t: "Escolha seu lanche", data: menu.lanches, emoji: "🍽️" }, bebida: { eb: "Bebidas", t: "Bebidas geladas", data: menu.bebidas, emoji: "🥤" }, suco: { eb: "Sucos naturais", t: "Sucos da casa", data: menu.sucos, emoji: "🧃" } }[listCat];
+                return (<><div className="screen-head"><div className="eyebrow">{cfg.eb}</div><h2>{cfg.t}</h2><p>Toque para adicionar.</p></div>{cfg.data.map((it, i) => { const esg = esgotados.includes(it.name); return (<div key={i} className="opt" onClick={() => !esg && addSimple(it, cfg.emoji)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }}><div className="opt-emoji">{cfg.emoji}</div><div className="opt-body"><div className="opt-title">{it.name}</div>{esg && <div className="opt-desc" style={{ color: "#ef4444" }}>Esgotado</div>}</div><div className="opt-price">{money(it.price)}</div></div>); })}<div className="btn-row"><button className="btn btn-ghost btn-sm" onClick={() => go("sc-start")}>Voltar ao início</button></div></>);
               })()}
             </section>
           )}
-
-          {/* CARRINHO */}
           {screen === "sc-cart" && (
             <section className="screen active">
               <div className="screen-head"><div className="eyebrow">Seu pedido</div><h2>Confira tudo</h2></div>
-              {cart.length === 0 ? (
-                <div className="empty"><div className="big">🛒</div><div>Seu pedido está vazio.</div></div>
-              ) : (
-                <>
-                  {(() => { let pn = 0; return cart.map((it, i) => {
-                    let tag = null;
-                    if (it.kind === "pizza") { pn++; tag = <span className="ci-tag">Pizza {pn}</span>; }
-                    const nm = it.kind === "pizza" ? it.name.replace(/^Pizza /, "") : it.name;
-                    return (
-                      <div key={i} className="cart-item">
-                        <div className="ci-emoji">{it.emoji}</div>
-                        <div className="ci-body">
-                          <div className="ci-name">{tag}{nm}{it.qty > 1 ? ` ×${it.qty}` : ""}</div>
-                          {it.detail && <div className="ci-detail">{it.detail}</div>}
-                          <div className="ci-price">{money(it.price * it.qty)}</div>
-                          {it.kind === "simple" && (
-                            <div className="qty-pill"><button onClick={() => chQty(i, -1)}>−</button><span>{it.qty}</span><button onClick={() => chQty(i, 1)}>+</button></div>
-                          )}
-                        </div>
-                        <button className="ci-remove" onClick={() => rmItem(i)}>✕</button>
-                      </div>
-                    );
-                  }); })()}
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 4px 4px", fontFamily: "Fraunces,serif", fontWeight: 900, fontSize: 20 }}>
-                    <span>Subtotal</span><span>{money(cartTotal)}</span>
-                  </div>
-                </>
+              {cart.length === 0 ? (<div className="empty"><div className="big">🛒</div><div>Seu pedido está vazio.</div></div>) : (
+                <>{(() => { let pn = 0; return cart.map((it, i) => { let tag = null; if (it.kind === "pizza") { pn++; tag = <span className="ci-tag">Pizza {pn}</span>; } const nm = it.kind === "pizza" ? it.name.replace(/^Pizza /, "") : it.name; return (<div key={i} className="cart-item"><div className="ci-emoji">{it.emoji}</div><div className="ci-body"><div className="ci-name">{tag}{nm}{it.qty > 1 ? ` ×${it.qty}` : ""}</div>{it.detail && <div className="ci-detail">{it.detail}</div>}<div className="ci-price">{money(it.price * it.qty)}</div>{it.kind === "simple" && (<div className="qty-pill"><button onClick={() => chQty(i, -1)}>−</button><span>{it.qty}</span><button onClick={() => chQty(i, 1)}>+</button></div>)}</div><button className="ci-remove" onClick={() => rmItem(i)}>✕</button></div>); }); })()}<div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 4px 4px", fontFamily: "Fraunces,serif", fontWeight: 900, fontSize: 20 }}><span>Subtotal</span><span>{money(cartTotal)}</span></div></>
               )}
               <button className="btn btn-ghost btn-sm" style={{ marginTop: 4 }} onClick={() => go("sc-start")}>+ Adicionar mais</button>
               {cart.length > 0 && <button className="btn" style={{ marginTop: 11 }} onClick={() => go("sc-delivery")}>Ir para entrega</button>}
             </section>
           )}
-
-          {/* ENTREGA */}
           {screen === "sc-delivery" && (
             <section className="screen active">
               <div className="screen-head"><div className="eyebrow">Entrega</div><h2>Como prefere receber?</h2></div>
               <div className={`opt ${delType === "delivery" ? "sel" : ""}`} onClick={() => setDelType("delivery")}><div className="opt-emoji">🛵</div><div className="opt-body"><div className="opt-title">Entrega (delivery)</div><div className="opt-desc">Levamos até você</div></div><div className="opt-check" /></div>
               <div className={`opt ${delType === "retirada" ? "sel" : ""}`} onClick={() => { setDelType("retirada"); setBairroIdx(""); }}><div className="opt-emoji">🏪</div><div className="opt-body"><div className="opt-title">Buscar na loja</div><div className="opt-desc">Sem taxa de entrega</div></div><div className="opt-check" /></div>
-              {delType === "delivery" && (
-                <div>
-                  <div className="section-label">Endereço</div>
-                  <div className="field"><label>Bairro</label>
-                    <select value={bairroIdx} onChange={(e) => setBairroIdx(e.target.value)}>
-                      <option value="">Selecione o bairro…</option>
-                      {menu.neighborhoods.map((b, i) => <option key={i} value={i}>{b.name} — {money(b.fee)}</option>)}
-                    </select>
-                  </div>
-                  <div className="field"><label>Rua, número e referência</label><input value={rua} onChange={(e) => setRua(e.target.value)} placeholder="Rua das Flores, 123 — perto do mercado" /></div>
-                </div>
-              )}
-              <div className="btn-row">
-                <button className="btn btn-ghost btn-back" onClick={() => go("sc-cart")}>←</button>
-                <button className="btn btn-sm" disabled={!delOk} onClick={() => go("sc-pay")}>Continuar</button>
-              </div>
+              {delType === "delivery" && (<div><div className="section-label">Endereço</div><div className="field"><label>Bairro</label><select value={bairroIdx} onChange={(e) => setBairroIdx(e.target.value)}><option value="">Selecione o bairro…</option>{menu.neighborhoods.map((b, i) => <option key={i} value={i}>{b.name} — {money(b.fee)}</option>)}</select></div><div className="field"><label>Rua, número e referência</label><input value={rua} onChange={(e) => setRua(e.target.value)} placeholder="Rua das Flores, 123 — perto do mercado" /></div></div>)}
+              <div className="btn-row"><button className="btn btn-ghost btn-back" onClick={() => go("sc-cart")}>←</button><button className="btn btn-sm" disabled={!delOk} onClick={() => go("sc-pay")}>Continuar</button></div>
             </section>
           )}
-
-          {/* PAGAMENTO */}
           {screen === "sc-pay" && (
             <section className="screen active">
               <div className="screen-head"><div className="eyebrow">Pagamento</div><h2>Quase lá!</h2></div>
               <div className="field"><label>Seu nome</label><input value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Como te chamamos?" /></div>
               <div className="section-label">Forma de pagamento</div>
-              {menu.payments.map((p) => {
-                const e: Record<string, string> = { Pix: "⚡", Dinheiro: "💵", Cartao: "💳" };
-                return (
-                  <div key={p} className={`opt ${payment === p ? "sel" : ""}`} onClick={() => setPayment(p)}>
-                    <div className="opt-emoji">{e[p] || "💰"}</div><div className="opt-body"><div className="opt-title">{p === "Cartao" ? "Cartão" : p}</div></div><div className="opt-check" />
-                  </div>
-                );
-              })}
+              {menu.payments.map((p) => { const e: Record<string, string> = { Pix: "⚡", Dinheiro: "💵", Cartao: "💳" }; return (<div key={p} className={`opt ${payment === p ? "sel" : ""}`} onClick={() => setPayment(p)}><div className="opt-emoji">{e[p] || "💰"}</div><div className="opt-body"><div className="opt-title">{p === "Cartao" ? "Cartão" : p}</div></div><div className="opt-check" /></div>); })}
               {payment === "Dinheiro" && <div className="field" style={{ marginTop: 8 }}><label>Troco para quanto?</label><input value={troco} onChange={(e) => setTroco(e.target.value)} inputMode="numeric" placeholder="Ex: 50" /></div>}
-              <div className="btn-row">
-                <button className="btn btn-ghost btn-back" onClick={() => go("sc-delivery")}>←</button>
-                <button className="btn btn-sm" disabled={!payOk || sending} onClick={finish}>{sending ? "Enviando…" : "Enviar pedido"}</button>
-              </div>
+              <div className="btn-row"><button className="btn btn-ghost btn-back" onClick={() => go("sc-delivery")}>←</button><button className="btn btn-sm" disabled={!payOk || sending} onClick={finish}>{sending ? "Enviando…" : "Enviar pedido"}</button></div>
             </section>
           )}
-
-          {/* SUCESSO */}
           {screen === "sc-done" && (
             <section className="screen active">
-              <div className="success">
-                <div className="check">✓</div>
-                <h2>Pedido enviado!</h2>
-                <p>Valeu, {nome.split(" ")[0]}! 🍕</p>
-                <p>A pizzaria já recebeu e vai preparar.</p>
-                <button className="btn" style={{ marginTop: 22 }} onClick={resetAll}>Fazer outro pedido</button>
-              </div>
+              <div className="success"><div className="check">✓</div><h2>Pedido enviado!</h2><p>Valeu, {nome.split(" ")[0]}! 🍕</p><p>A pizzaria já recebeu e vai preparar.</p><button className="btn" style={{ marginTop: 22 }} onClick={resetAll}>Fazer outro pedido</button></div>
             </section>
           )}
         </main>
       </div>
-
-      {cartCount > 0 && screen !== "sc-done" && (
-        <div className="cartbar show">
-          <div className="cartbar-inner">
-            <div className="cartbar-info"><div className="cartbar-count">{cartCount} {cartCount === 1 ? "item" : "itens"}</div><div className="cartbar-total">{money(cartTotal)}</div></div>
-            <button className="btn" onClick={() => go("sc-cart")}>Ver pedido</button>
-          </div>
-        </div>
-      )}
+      {cartCount > 0 && screen !== "sc-done" && (<div className="cartbar show"><div className="cartbar-inner"><div className="cartbar-info"><div className="cartbar-count">{cartCount} {cartCount === 1 ? "item" : "itens"}</div><div className="cartbar-total">{money(cartTotal)}</div></div><button className="btn" onClick={() => go("sc-cart")}>Ver pedido</button></div></div>)}
       {toast && <div className="toast show">{toast}</div>}
     </>
+  )
+}
+
+// ==================== ROOT ====================
+
+export default function CardapioPage() {
+  const [menu, setMenu] = useState<MenuType | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/cardapio")
+      .then((r) => r.json())
+      .then(setMenu)
+      .catch(() => setMenu(null));
+
+    // Detect admin via cookie
+    try {
+      const cookies = document.cookie.split(";")
+      for (const c of cookies) {
+        const t = c.trim()
+        if (t.startsWith("auth-user=")) {
+          const raw = t.substring("auth-user=".length)
+          let decoded = raw
+          try { decoded = decodeURIComponent(raw) } catch {}
+          const user = JSON.parse(decoded)
+          if (user && (user.role === "admin" || user.role === "atendente" || user.role === "dev")) {
+            setIsAdmin(true)
+          }
+        }
+      }
+    } catch {}
+  }, []);
+
+  if (!menu) return (
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#171210", color: "#f6efe7", fontFamily: "system-ui" }}>
+      Carregando cardápio… 🍕
+    </div>
   );
+
+  if (isAdmin) return <AdminCardapio menu={menu} onSair={() => setIsAdmin(false)} />;
+  return <PublicCardapio menu={menu} />;
 }
 
 const CSS = `

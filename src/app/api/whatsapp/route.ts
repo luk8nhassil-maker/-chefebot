@@ -1,5 +1,5 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
-import { processMessage, createInitialSession, createReturningSession, montarSaudacaoRetorno, BotSession, ClienteHistorico, setMenuDinamico, setConfigDinamica } from "@/lib/bot";
+import { processMessage, createInitialSession, createReturningSession, montarSaudacaoRetorno, BotSession, ClienteHistorico, setMenuDinamico, setConfigDinamica, setEsgotados } from "@/lib/bot";
 import { getMENUDinamico } from "@/lib/menu";
 import { redis } from "@/lib/redis";
 import { interpretarMensagem } from "@/lib/claude";
@@ -452,6 +452,8 @@ export async function POST(req: NextRequest) {
     const menuDinamico = await getMENUDinamico();
     setMenuDinamico(menuDinamico);
     setConfigDinamica({ tempoEntregaDelivery: config.tempoEntregaDelivery, tempoEntregaRetirada: config.tempoEntregaRetirada });
+    const esgotadosLista = (await redis.get<string[]>('esgotados')) || [];
+    setEsgotados(esgotadosLista);
     console.log("[ChefeBot] Tamanhos carregados:", JSON.stringify(menuDinamico.sizes));
 
     
