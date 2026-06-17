@@ -61,6 +61,8 @@ export type BotStep =
   | "neighborhood"
   | "confirma_bairro_fuzzy"
   | "confirma_produto_valor"
+  | "confirma_sabor_ambiguo"
+  | "confirma_item_ambiguo"
   | "address"
   | "confirm_address"
   | "payment"
@@ -122,6 +124,10 @@ export interface BotSession {
   bairroFuzzyCandidato?: string;
   hibridoValorParcial?: Record<string, number>;
   candidatosValorProduto?: { name: string; price: number; categoria: string }[];
+  candidatosSaborAmbiguo?: string[];
+  candidatosItemAmbiguo?: string[];
+  itemAmbiguoTipo?: "lanche" | "lanche_flavor" | "bebida";
+  stepAposSabor?: BotStep;
 }
 export interface BotResponse {
   messages: string[];
@@ -246,6 +252,45 @@ function resolveUmSabor(termo: string, flavors: string[]): string | null {
   }
   if (melhor && (segundo === Infinity || segundo - melhor.d >= 1)) return melhor.f;
   return null;
+}
+
+// Busca sabores (ou nomes de produto, é genérico) por PALAVRA-CHAVE, retornando TODOS os candidatos
+// cujo nome contém TODAS as palavras-chave que o cliente mencionou — sem decidir por conta própria
+// quando há ambiguidade. Ex: "queijo" bate em "Quatro Queijos" E "Tres Queijos" -> retorna os dois.
+// "refrigerante lata" exige as duas palavras presentes -> só bate em "Refrigerante Lata".
+// Diferente de resolveUmSabor (que escolhe 1 quando há vencedor claro), esta função é a camada
+// de segurança: se duas ou mais opções batem igualmente, NUNCA escolhe sozinha.
+function buscaPorPalavraChave(termo: string, nomes: string[]): string[] {
+  const STOPWORDS = new Set(["quero", "uma", "um", "de", "da", "do", "com", "sem", "vou", "queria", "quer", "por", "favor", "pizza", "lanche", "pode", "ser", "me", "ve", "vê", "tem", "essa", "esse", "aquela", "aquele"]);
+  const n = normalizar(termo).replace(/-/g, " "); // trata hífen como separador (ex: "x-burguer" -> "x burguer")
+  if (!n) return [];
+  const palavrasMsg = n.split(/\s+/).filter(p => p.length >= 3 && !STOPWORDS.has(p));
+  if (palavrasMsg.length === 0) return [];
+
+  const candidatos: string[] = [];
+  for (const nome of nomes) {
+    const palavrasNome = normalizar(nome).replace(/-/g, " ").split(/\s+/).filter(p => p.length >= 2);
+    // Exige que TODAS as palavras-chave da mensagem estejam presentes no nome (com plural/singular tolerado)
+    const todasBatem = palavrasMsg.every(pm =>
+      palavrasNome.some(pn => pn === pm || variantesPlural(pn).includes(pm) || variantesPlural(pm).includes(pn))
+    );
+    if (todasBatem) candidatos.push(nome);
+  }
+  return candidatos;
+}
+
+// Resolve um sabor (ou nome de item) com a regra de segurança: nunca assume se houver dúvida real.
+// 1) Tenta o resolveUmSabor tradicional (substring/apelido/fuzzy com vencedor claro) -> se achar 1, usa.
+// 2) Se não achou nada direto, tenta por palavra-chave: 1 candidato -> usa; 2+ candidatos -> retorna
+//    a lista para o caller perguntar "qual desses?"; 0 candidatos -> não reconheceu nada.
+function resolveSaborComAmbiguidade(termo: string, nomes: string[]): { tipo: "unico"; nome: string } | { tipo: "ambiguo"; opcoes: string[] } | { tipo: "nenhum" } {
+  const direto = resolveUmSabor(termo, nomes);
+  if (direto) return { tipo: "unico", nome: direto };
+
+  const porPalavra = buscaPorPalavraChave(termo, nomes);
+  if (porPalavra.length === 1) return { tipo: "unico", nome: porPalavra[0] };
+  if (porPalavra.length > 1) return { tipo: "ambiguo", opcoes: porPalavra };
+  return { tipo: "nenhum" };
 }
 function detectaDoisSabores(n: string, allFlavors: string[]): [string, string] | null {
   // Por número ("1 e 8"), evitando o caso em que o dígito faz parte de um apelido ("3 queijos")
@@ -890,6 +935,10 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
         return { messages: [`Tudo bem! Qual o seu bairro? 😊`], session: resetaTentativas({ ...session, step: "neighborhood", bairroFuzzyCandidato: undefined }) };
       case "confirma_produto_valor":
         return { messages: [`Tudo bem! ${mensagemCategorias()}`], session: resetaTentativas({ ...session, step: "category", candidatosValorProduto: undefined }) };
+      case "confirma_sabor_ambiguo":
+        return { messages: [`Tudo bem! Qual o sabor então? 😊\n\n${listaFlavors()}`], session: resetaTentativas({ ...session, step: "flavor", candidatosSaborAmbiguo: undefined }) };
+      case "confirma_item_ambiguo":
+        return { messages: [`Tudo bem! ${mensagemCategorias()}`], session: resetaTentativas({ ...session, step: "category", candidatosItemAmbiguo: undefined, itemAmbiguoTipo: undefined }) };
       case "address":
         return { messages: [`Tudo bem! Qual o seu bairro? 😊`], session: resetaTentativas({ ...session, step: "neighborhood" }) };
       case "payment":
@@ -1202,6 +1251,19 @@ Vai querer entrega ou prefere buscar na loja? Se for entrega, me informa seu end
         flavor = resolveUmSabor(n, allFlavors) ?? undefined;
       }
       if (!flavor) {
+        // Sem match direto -> tenta por palavra-chave. Se houver mais de uma opção, pergunta antes de assumir.
+        const resultado = resolveSaborComAmbiguidade(n, allFlavors);
+        if (resultado.tipo === "unico") {
+          flavor = resultado.nome;
+        } else if (resultado.tipo === "ambiguo") {
+          const listaOpcoes = resultado.opcoes.map(o => `*${o}*`).join(" ou ");
+          return {
+            messages: [`Você quis dizer qual desses? 🤔\n\n${resultado.opcoes.map(o => `• ${o}`).join("\n")}\n\n(${listaOpcoes})`],
+            session: resetaTentativas({ ...session, step: "confirma_sabor_ambiguo", candidatosSaborAmbiguo: resultado.opcoes }),
+          };
+        }
+      }
+      if (!flavor) {
         return respostaInvalida(listaFlavors(), session);
       }
       if (session.currentFlavor && !flavor) {
@@ -1213,6 +1275,25 @@ Vai querer entrega ou prefere buscar na loja? Se for entrega, me informa seu end
           `Vai querer borda recheada? 😋`
         ],
         session: resetaTentativas({ ...session, step: "border_escolha", currentFlavor: flavor }),
+      };
+    }
+    case "confirma_sabor_ambiguo": {
+      const candidatos = session.candidatosSaborAmbiguo || [];
+      if (candidatos.length === 0) return respostaInvalida(listaFlavors(), session);
+      const num = parseInt(text);
+      let escolhido: string | undefined;
+      if (!isNaN(num) && num >= 1 && num <= candidatos.length) escolhido = candidatos[num - 1];
+      else escolhido = candidatos.find(c => n.includes(normalizar(c)));
+      if (!escolhido) {
+        const listaOpcoes = candidatos.map(o => `• ${o}`).join("\n");
+        return respostaInvalida(`Qual desses você quer?\n\n${listaOpcoes}`, session);
+      }
+      return {
+        messages: [
+          `*${escolhido}*! Excelente escolha! 🤤`,
+          `Vai querer borda recheada? 😋`
+        ],
+        session: resetaTentativas({ ...session, step: "border_escolha", currentFlavor: escolhido, candidatosSaborAmbiguo: undefined }),
       };
     }
     case "segundo_sabor": {
@@ -1675,6 +1756,19 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
       let lanche = MENU.lanches.find((l) => normalizar(l.name) === n);
       if (!lanche && !isNaN(num) && num >= 1 && num <= MENU.lanches.length) lanche = MENU.lanches[num - 1];
       if (!lanche) lanche = MENU.lanches.find((l) => n.includes(normalizar(l.name)));
+      if (!lanche) {
+        // Sem match direto -> tenta por palavra-chave. Se houver mais de um nome de lanche batendo, pergunta antes.
+        const nomesLanches = MENU.lanches.map(l => l.name);
+        const candidatosLanche = buscaPorPalavraChave(n, nomesLanches);
+        if (candidatosLanche.length === 1) {
+          lanche = MENU.lanches.find(l => l.name === candidatosLanche[0]);
+        } else if (candidatosLanche.length > 1) {
+          return {
+            messages: [`Você quis dizer qual desses? 🤔\n\n${candidatosLanche.map(o => `• ${o}`).join("\n")}`],
+            session: resetaTentativas({ ...session, step: "confirma_item_ambiguo", candidatosItemAmbiguo: candidatosLanche, itemAmbiguoTipo: "lanche" }),
+          };
+        }
+      }
       if (!lanche) return respostaInvalida(listaLanches(), session);
       if (lanche.name === "Macarronada de Carne") {
         return { messages: [`Ótima escolha! 😋 Qual tamanho da *Macarronada de Carne*?\n\n  1. Pequena (P) · *R$ 28,00*\n  2. Média (M) · *R$ 40,00*\n  3. Grande (G) · *R$ 50,00*\n\n_(Bacon ou ovos: acréscimo de R$ 10,00)_`], session: resetaTentativas({ ...session, step: "lanche_macarronada_size", currentLanche: lanche.name }) };
@@ -1697,10 +1791,63 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
       let flavor: string | undefined;
       if (!isNaN(num) && num >= 1 && num <= flavors.length) flavor = flavors[num - 1];
       else flavor = flavors.find(f => normalizar(f) === n) || resolveUmSabor(n, flavors) || undefined;
+      if (!flavor) {
+        const resultado = resolveSaborComAmbiguidade(n, flavors);
+        if (resultado.tipo === "unico") {
+          flavor = resultado.nome;
+        } else if (resultado.tipo === "ambiguo") {
+          return {
+            messages: [`Você quis dizer qual desses? 🤔\n\n${resultado.opcoes.map(o => `• ${o}`).join("\n")}`],
+            session: resetaTentativas({ ...session, step: "confirma_item_ambiguo", candidatosItemAmbiguo: resultado.opcoes, itemAmbiguoTipo: "lanche_flavor" }),
+          };
+        }
+      }
       if (!flavor) return respostaInvalida(flavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n"), session);
       const newItem: CartItem = { category: "lanche", name: lanche.name, flavor, price: lanche.price };
       const newCart = [...session.cart, newItem];
       return { messages: [mensagemAddMore(newCart)], session: resetaTentativas({ ...session, step: "add_more", cart: newCart, currentLanche: undefined }) };
+    }
+    case "confirma_item_ambiguo": {
+      const candidatos = session.candidatosItemAmbiguo || [];
+      if (candidatos.length === 0) return respostaInvalida(mensagemCategorias(), session);
+      const num = parseInt(text);
+      let escolhido: string | undefined;
+      if (!isNaN(num) && num >= 1 && num <= candidatos.length) escolhido = candidatos[num - 1];
+      else escolhido = candidatos.find(c => n.includes(normalizar(c)));
+      if (!escolhido) {
+        const listaOpcoes = candidatos.map(o => `• ${o}`).join("\n");
+        return respostaInvalida(`Qual desses você quer?\n\n${listaOpcoes}`, session);
+      }
+      if (session.itemAmbiguoTipo === "lanche") {
+        const lanche = MENU.lanches.find(l => l.name === escolhido);
+        if (!lanche) return respostaInvalida(listaLanches(), session);
+        if (lanche.name === "Macarronada de Carne") {
+          return { messages: [`Ótima escolha! 😋 Qual tamanho da *Macarronada de Carne*?\n\n  1. Pequena (P) · *R$ 28,00*\n  2. Média (M) · *R$ 40,00*\n  3. Grande (G) · *R$ 50,00*\n\n_(Bacon ou ovos: acréscimo de R$ 10,00)_`], session: resetaTentativas({ ...session, step: "lanche_macarronada_size", currentLanche: lanche.name, candidatosItemAmbiguo: undefined }) };
+        }
+        if (lanche.hasFlavors) {
+          const flavors = MENU[lanche.flavorsKey as keyof typeof MENU] as string[];
+          const lista = flavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n");
+          return { messages: [`*${lanche.name}* selecionado! 😋 Qual sabor?\n\n${lista}`], session: resetaTentativas({ ...session, step: "lanche_flavor", currentLanche: lanche.name, candidatosItemAmbiguo: undefined }) };
+        }
+        const newItem: CartItem = { category: "lanche", name: lanche.name, price: lanche.price };
+        const newCart = [...session.cart, newItem];
+        return { messages: [mensagemAddMore(newCart)], session: resetaTentativas({ ...session, step: "add_more", cart: newCart, currentLanche: undefined, candidatosItemAmbiguo: undefined }) };
+      }
+      if (session.itemAmbiguoTipo === "lanche_flavor") {
+        const lanche = MENU.lanches.find(l => l.name === session.currentLanche);
+        if (!lanche) return respostaInvalida(listaLanches(), session);
+        const newItem: CartItem = { category: "lanche", name: lanche.name, flavor: escolhido, price: lanche.price };
+        const newCart = [...session.cart, newItem];
+        return { messages: [mensagemAddMore(newCart)], session: resetaTentativas({ ...session, step: "add_more", cart: newCart, currentLanche: undefined, candidatosItemAmbiguo: undefined }) };
+      }
+      if (session.itemAmbiguoTipo === "bebida") {
+        const bebida = MENU.bebidas.find(b => b.name === escolhido);
+        if (!bebida) return respostaInvalida(listaBebidas(), session);
+        const newItem: CartItem = { category: "bebida", name: bebida.name, price: bebida.price };
+        const newCart = [...session.cart, newItem];
+        return { messages: [mensagemAddMore(newCart)], session: resetaTentativas({ ...session, step: "add_more", cart: newCart, candidatosItemAmbiguo: undefined }) };
+      }
+      return respostaInvalida(mensagemCategorias(), session);
     }
     case "lanche_macarronada_size": {
       const mudanca = tentaMudanca(text, session);
@@ -1733,6 +1880,19 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
       const num = parseInt(text);
       let bebida = MENU.bebidas.find(b => normalizar(b.name).includes(n));
       if (!bebida && !isNaN(num) && num >= 1 && num <= MENU.bebidas.length) bebida = MENU.bebidas[num - 1];
+      if (!bebida) {
+        // Sem match direto -> tenta por palavra-chave (ex: "guarana" bate em várias). Pergunta se houver mais de uma.
+        const nomesBebidas = MENU.bebidas.map(b => b.name);
+        const candidatosBebida = buscaPorPalavraChave(n, nomesBebidas);
+        if (candidatosBebida.length === 1) {
+          bebida = MENU.bebidas.find(b => b.name === candidatosBebida[0]);
+        } else if (candidatosBebida.length > 1) {
+          return {
+            messages: [`Você quis dizer qual desses? 🤔\n\n${candidatosBebida.map(o => `• ${o}`).join("\n")}`],
+            session: resetaTentativas({ ...session, step: "confirma_item_ambiguo", candidatosItemAmbiguo: candidatosBebida, itemAmbiguoTipo: "bebida" }),
+          };
+        }
+      }
       if (!bebida) return respostaInvalida(listaBebidas(), session);
       const newItem: CartItem = { category: "bebida", name: bebida.name, price: bebida.price };
       const newCart = [...session.cart, newItem];
