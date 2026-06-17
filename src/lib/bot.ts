@@ -830,8 +830,8 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
     }
     case "welcome": {
       return {
-        messages: [`Olá! Seja bem-vindo à *Chefe da Pizza*! 🍕\n\nPra começar, me fala seu nome?`],
-        session: { ...session, step: "name" },
+        messages: [`Olá! Seja bem-vindo à *Chefe da Pizza*! 🍕\n\n${mensagemCategorias()}`],
+        session: { ...session, step: "category" },
       };
     }
     case "returning": {
@@ -1301,7 +1301,17 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       else if (n === "2" || n.includes("dinheiro") || n.includes("especie") || n.includes("cash")) payment = "Dinheiro";
       else if (n === "3" || n.includes("cartao") || n.includes("credito") || n.includes("debito")) payment = "Cartão";
       if (!payment) return respostaInvalida(MENU.payments.map((p, i) => `  ${i + 1}. ${p}`).join("\n"), session);
-      return aplicaPagamento(payment, session);
+      // Tenta capturar o nome se vier junto (ex: "Lucas, pix" / "pix, Lucas")
+      let nomeJunto: string | undefined;
+      if (!session.customerName) {
+        const restante = text
+          .replace(/\bpix\b/gi, "").replace(/\btransfer[êe]ncia\b/gi, "")
+          .replace(/\bdinheiro\b/gi, "").replace(/\bespecie\b/gi, "").replace(/\bcash\b/gi, "")
+          .replace(/\bcart[aã]o\b/gi, "").replace(/\bcr[eé]dito\b/gi, "").replace(/\bd[eé]bito\b/gi, "")
+          .replace(/[,.\-–]/g, " ").replace(/\s+/g, " ").trim();
+        if (restante && pareceNomeHumano(restante)) nomeJunto = restante;
+      }
+      return aplicaPagamento(payment, nomeJunto ? { ...session, customerName: nomeJunto } : session);
     }
     case "pedindo_nome": {
       if (!pareceNomeHumano(text)) {
@@ -1448,7 +1458,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
   }
 }
 export function createInitialSession(): BotSession {
-  return { step: "name", cart: [], deliveryFee: 0, tentativasInvalidas: 0 };
+  return { step: "welcome", cart: [], deliveryFee: 0, tentativasInvalidas: 0 };
 }
 export function montarSaudacaoRetorno(h: ClienteHistorico): string {
   const nome = h.nome.split(" ")[0];
