@@ -36,20 +36,23 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
   const [confirmLote, setConfirmLote] = useState<"esgotado" | "disponivel" | null>(null)
   const toastTimer = useRef<any>(null)
 
+  // Bebidas + Sucos unificados numa categoria só
   const todos: Produto[] = [
     ...(menu.saltyFlavors || []).map(f => ({ nome: f, categoria: "Salgados" })),
     ...(menu.sweetFlavors || []).map(f => ({ nome: f, categoria: "Doces" })),
-    ...(menu.lanches || []).map(l => ({ nome: l.name, categoria: "Lanches", preco: l.price || undefined })),
+    ...(menu.lanches || []).map(l => ({ nome: l.name, categoria: "Lanches", preco: l.price > 0 ? l.price : undefined })),
     ...(menu.bebidas || []).map(b => ({ nome: b.name, categoria: "Bebidas", preco: b.price })),
-    ...(menu.sucos || []).map(s => ({ nome: s.name, categoria: "Sucos", preco: s.price })),
+    ...(menu.sucos || []).map(s => ({ nome: s.name, categoria: "Bebidas", preco: s.price })),
     ...(menu.borders || []).map(b => ({ nome: b.label, categoria: "Bordas" })),
   ]
 
-  const CATS = ["todas", ...Array.from(new Set(todos.map(p => p.categoria)))]
-  const CAT_ICON: Record<string, string> = { todas: "☰", Salgados: "🍕", Doces: "🍬", Lanches: "🍔", Bebidas: "🥤", Sucos: "🧃", Bordas: "🧀" }
+  const CATS = ["todas", "Salgados", "Doces", "Lanches", "Bebidas", "Bordas"].filter(
+    c => c === "todas" || todos.some(p => p.categoria === c)
+  )
+  const CAT_ICON: Record<string, string> = { todas: "Tudo", Salgados: "🍕", Doces: "🍬", Lanches: "🍔", Bebidas: "🥤", Bordas: "🧀" }
 
   const totalProd = todos.length
-  const totalEsg = esgotados.length
+  const totalEsg = esgotados.filter(e => todos.some(p => p.nome === e)).length
   const totalDisp = totalProd - totalEsg
 
   const bNorm = normStr(busca)
@@ -108,11 +111,9 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
 
   async function aplicarLote(esgotado: boolean) {
     setConfirmLote(null)
-    const lista = Array.from(selecionados)
-    for (const nome of lista) {
-      await toggleEsgotado(nome, esgotado, false)
-    }
-    const count = lista.length
+    const nomes = Array.from(selecionados)
+    for (const nome of nomes) await toggleEsgotado(nome, esgotado, false)
+    const count = nomes.length
     setSelecionados(new Set())
     setModoSel(false)
     clearTimeout(toastTimer.current)
@@ -120,72 +121,99 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
       ? `${count} produto${count > 1 ? "s" : ""} marcado${count > 1 ? "s" : ""} como esgotado${count > 1 ? "s" : ""}. O bot não vai vender.`
       : `${count} produto${count > 1 ? "s" : ""} voltou${count > 1 ? "ram" : ""} a ficar disponíve${count > 1 ? "is" : "l"}. O bot já pode vender.`
     setToast({ msg, nome: "", era: !esgotado })
-    toastTimer.current = setTimeout(() => setToast(null), 4000)
+    toastTimer.current = setTimeout(() => setToast(null), 4500)
   }
-
-  const inputStyle: React.CSSProperties = { width: "100%", height: 48, background: "#0d0d0d", border: "1px solid #242220", borderRadius: 12, padding: "0 42px 0 14px", color: "#f5f2ee", fontSize: 15, fontWeight: 700, fontFamily: "'Archivo', sans-serif", boxSizing: "border-box", outline: "none", transition: "border-color .15s, box-shadow .15s" }
 
   return (
     <>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800;900&display=swap');
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-        html, body { margin: 0; padding: 0; background: #060606; }
-        button { cursor: pointer; font-family: 'Archivo', sans-serif; }
-        @keyframes cbToastIn { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:none} }
+        html, body { margin: 0; padding: 0; background: #060606; overflow: hidden; }
+        button { cursor: pointer; font-family: 'Archivo', sans-serif; border: none; }
+        @keyframes cbToastIn { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:none} }
         @keyframes cbFadeIn { from{opacity:0} to{opacity:1} }
         @keyframes cbSheetUp { from{transform:translateY(100%)} to{transform:none} }
-        @keyframes cbItemIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:none} }
-        .cbBusca::placeholder { color: #3a3730; }
-        .cbBusca:focus { border-color: #ff6b00 !important; box-shadow: 0 0 0 3px rgba(255,107,0,.1); }
-        .cbCatScroll { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
-        .cbCatScroll::-webkit-scrollbar { display: none; }
-        .cbItem { transition: border-color .12s, background .12s; }
-        .cbItem:active { opacity: 0.85; }
+        .cbBusca::placeholder { color: #383430; }
+        .cbBusca:focus { border-color: rgba(255,107,0,.6) !important; outline: none; }
+        .cbScroll { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+        .cbScroll::-webkit-scrollbar { display: none; }
+        .cbMain { -webkit-overflow-scrolling: touch; }
+        .cbItem:active { opacity: 0.8; }
+        .cbBtn:active { opacity: 0.75; }
       `}</style>
 
-      <div style={{ minHeight: "100svh", maxWidth: 375, margin: "0 auto", background: "#060606", color: "#f5f2ee", fontFamily: "'Archivo', sans-serif", display: "flex", flexDirection: "column", paddingBottom: "calc(env(safe-area-inset-bottom) + 90px)" }}>
+      {/* App-shell: header fixo + conteúdo rolável + nav fixo */}
+      <div style={{
+        height: "100svh",
+        maxWidth: 390,
+        margin: "0 auto",
+        background: "#060606",
+        color: "#f5f2ee",
+        fontFamily: "'Archivo', sans-serif",
+        display: "flex",
+        flexDirection: "column",
+        overflow: "hidden",
+      }}>
 
-        {/* Header sticky */}
-        <header style={{ position: "sticky", top: 0, zIndex: 30, background: "#060606", borderBottom: "1px solid #181614", padding: "calc(env(safe-area-inset-top) + 12px) 16px 12px" }}>
+        {/* ── HEADER FIXO ─────────────────────────────── */}
+        <header style={{
+          flexShrink: 0,
+          background: "#060606",
+          borderBottom: "1px solid #1a1816",
+          padding: "calc(env(safe-area-inset-top) + 10px) 16px 10px",
+        }}>
 
-          {/* Título + ações */}
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-            <div style={{ flex: 1 }}>
-              <span style={{ fontSize: 20, fontWeight: 900, letterSpacing: "-0.4px" }}>Cardápio</span>
-            </div>
+          {/* Linha 1: título + botões */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+            <span style={{ flex: 1, fontSize: 19, fontWeight: 900, letterSpacing: "-0.5px" }}>Cardápio</span>
             <button
               onClick={() => { setModoSel(!modoSel); setSelecionados(new Set()) }}
-              style={{ height: 34, padding: "0 12px", border: `1px solid ${modoSel ? "#ff6b00" : "#242220"}`, borderRadius: 10, background: modoSel ? "rgba(255,107,0,.15)" : "transparent", color: modoSel ? "#ff6b00" : "#5a564d", fontSize: 12, fontWeight: 900 }}
+              style={{
+                height: 32, padding: "0 11px",
+                border: `1px solid ${modoSel ? "rgba(255,107,0,.6)" : "#272320"}`,
+                borderRadius: 9,
+                background: modoSel ? "rgba(255,107,0,.12)" : "transparent",
+                color: modoSel ? "#ff6b00" : "#56524b",
+                fontSize: 12, fontWeight: 900,
+              }}
             >{modoSel ? "Cancelar" : "Selecionar"}</button>
-            <button onClick={onSair} style={{ height: 34, padding: "0 12px", border: "1px solid #1f1d1a", borderRadius: 10, background: "transparent", color: "#5a564d", fontSize: 12, fontWeight: 800 }}>Sair</button>
+            <button
+              onClick={onSair}
+              style={{ height: 32, padding: "0 11px", border: "1px solid #1f1d1a", borderRadius: 9, background: "transparent", color: "#4a4640", fontSize: 12, fontWeight: 700 }}
+            >Sair</button>
           </div>
 
-          {/* Métricas */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: 10 }}>
-            <div style={{ background: "#0e0e0e", border: "1px solid #1a1a1a", borderRadius: 12, padding: "10px 8px", textAlign: "center" }}>
-              <div style={{ fontSize: 24, fontWeight: 900, color: "#22c55e", lineHeight: 1 }}>{totalDisp}</div>
-              <div style={{ fontSize: 9, fontWeight: 900, color: "#22c55e", textTransform: "uppercase", letterSpacing: ".5px", marginTop: 3, opacity: .7 }}>Disponíveis</div>
+          {/* Linha 2: métricas compactas */}
+          <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+            <div style={{ flex: 1, background: "#0c0c0c", border: "1px solid #1e1c19", borderRadius: 10, padding: "8px 10px", display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#22c55e", flexShrink: 0 }} />
+              <span style={{ fontSize: 13, fontWeight: 900, color: "#f4f1ec" }}>{totalDisp}</span>
+              <span style={{ fontSize: 10, fontWeight: 700, color: "#4a4640", textTransform: "uppercase", letterSpacing: ".4px" }}>disponíveis</span>
             </div>
-            <div style={{ background: totalEsg > 0 ? "rgba(239,68,68,.06)" : "#0e0e0e", border: `1px solid ${totalEsg > 0 ? "rgba(239,68,68,.3)" : "#1a1a1a"}`, borderRadius: 12, padding: "10px 8px", textAlign: "center" }}>
-              <div style={{ fontSize: 24, fontWeight: 900, color: totalEsg > 0 ? "#ef4444" : "#3a3730", lineHeight: 1 }}>{totalEsg}</div>
-              <div style={{ fontSize: 9, fontWeight: 900, color: totalEsg > 0 ? "#ef4444" : "#3a3730", textTransform: "uppercase", letterSpacing: ".5px", marginTop: 3, opacity: .7 }}>Esgotados</div>
+            <div style={{
+              flex: 1,
+              background: totalEsg > 0 ? "rgba(239,68,68,.05)" : "#0c0c0c",
+              border: `1px solid ${totalEsg > 0 ? "rgba(239,68,68,.22)" : "#1e1c19"}`,
+              borderRadius: 10, padding: "8px 10px", display: "flex", alignItems: "center", gap: 8,
+            }}>
+              <span style={{ width: 8, height: 8, borderRadius: "50%", background: totalEsg > 0 ? "#ef4444" : "#2e2b26", flexShrink: 0 }} />
+              <span style={{ fontSize: 13, fontWeight: 900, color: totalEsg > 0 ? "#ef4444" : "#3a3730" }}>{totalEsg}</span>
+              <span style={{ fontSize: 10, fontWeight: 700, color: totalEsg > 0 ? "rgba(239,68,68,.6)" : "#3a3730", textTransform: "uppercase", letterSpacing: ".4px" }}>esgotados</span>
             </div>
-            <div style={{ background: "#0e0e0e", border: "1px solid #1a1a1a", borderRadius: 12, padding: "10px 8px", textAlign: "center" }}>
-              <div style={{ fontSize: 24, fontWeight: 900, color: "#a39b8b", lineHeight: 1 }}>{totalProd}</div>
-              <div style={{ fontSize: 9, fontWeight: 900, color: "#56524b", textTransform: "uppercase", letterSpacing: ".5px", marginTop: 3, opacity: .7 }}>Total</div>
+            <div style={{ flex: 0, background: "#0c0c0c", border: "1px solid #1e1c19", borderRadius: 10, padding: "8px 12px", display: "flex", alignItems: "center" }}>
+              <span style={{ fontSize: 13, fontWeight: 900, color: "#4a4640" }}>{totalProd}</span>
             </div>
           </div>
 
-          {/* Aviso bot */}
+          {/* Aviso bot — só quando há esgotados */}
           {totalEsg > 0 && (
-            <div style={{ background: "rgba(239,68,68,.05)", border: "1px solid rgba(239,68,68,.18)", borderRadius: 10, padding: "8px 12px", marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#ef4444", flexShrink: 0 }} />
-              <span style={{ fontSize: 12, fontWeight: 700, color: "#f87171" }}>Bot bloqueando {totalEsg} produto{totalEsg > 1 ? "s" : ""} esgotado{totalEsg > 1 ? "s" : ""}.</span>
+            <div style={{ background: "rgba(239,68,68,.05)", border: "1px solid rgba(239,68,68,.15)", borderRadius: 9, padding: "7px 11px", marginBottom: 10, fontSize: 12, fontWeight: 700, color: "#f87171" }}>
+              Bot bloqueando {totalEsg} produto{totalEsg > 1 ? "s" : ""} — cliente{totalEsg > 1 ? "s" : ""} não {totalEsg > 1 ? "receberão" : "receberá"} esse{totalEsg > 1 ? "s" : ""} item{totalEsg > 1 ? "ns" : ""}.
             </div>
           )}
 
-          {/* Busca */}
+          {/* Linha 3: busca */}
           <div style={{ position: "relative", marginBottom: 8 }}>
             <input
               className="cbBusca"
@@ -193,59 +221,95 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
               placeholder="Buscar produto..."
               value={busca}
               onChange={e => setBusca(e.target.value)}
-              style={inputStyle}
+              style={{
+                width: "100%", height: 44,
+                background: "#0d0d0d",
+                border: "1px solid #252220",
+                borderRadius: 11,
+                padding: "0 38px 0 13px",
+                color: "#f5f2ee",
+                fontSize: 14, fontWeight: 700,
+                fontFamily: "'Archivo', sans-serif",
+                transition: "border-color .15s",
+              }}
             />
             {busca
-              ? <button onClick={() => setBusca("")} style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: "#5a564d", fontSize: 20, lineHeight: 1, padding: "2px 4px" }}>×</button>
-              : <svg style={{ position: "absolute", right: 14, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="#3a3730" strokeWidth="2.2"/><path d="M16.5 16.5l3.5 3.5" stroke="#3a3730" strokeWidth="2.2" strokeLinecap="round"/></svg>
+              ? <button onClick={() => setBusca("")} style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", background: "none", color: "#56524b", fontSize: 19, lineHeight: 1, padding: "2px 5px" }}>×</button>
+              : <svg style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="#343028" strokeWidth="2.2"/><path d="M16.5 16.5l3.5 3.5" stroke="#343028" strokeWidth="2.2" strokeLinecap="round"/></svg>
             }
           </div>
 
-          {/* Filtros status */}
-          <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+          {/* Linha 4: filtros status */}
+          <div style={{ display: "flex", gap: 5, marginBottom: 7 }}>
             {(["todos", "disponivel", "esgotado"] as const).map(f => {
               const COUNT = { todos: totalProd, disponivel: totalDisp, esgotado: totalEsg }
               const LABEL = { todos: "Todos", disponivel: "Disponíveis", esgotado: "Esgotados" }
               const COLOR = { todos: "#ff6b00", disponivel: "#22c55e", esgotado: "#ef4444" }
               const active = filtroStatus === f
               return (
-                <button key={f} onClick={() => setFiltroStatus(f)} style={{ flex: 1, height: 36, border: `1px solid ${active ? COLOR[f] : "#1f1d1a"}`, borderRadius: 10, background: active ? `${COLOR[f]}1a` : "transparent", color: active ? COLOR[f] : "#5a564d", fontSize: 11, fontWeight: 900, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 1 }}>
-                  <span style={{ fontSize: 14, fontWeight: 900, lineHeight: 1 }}>{COUNT[f]}</span>
-                  <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: ".3px" }}>{LABEL[f]}</span>
+                <button
+                  key={f}
+                  onClick={() => setFiltroStatus(f)}
+                  style={{
+                    flex: 1, height: 38,
+                    border: `1px solid ${active ? COLOR[f] + "66" : "#1f1d1a"}`,
+                    borderRadius: 10,
+                    background: active ? COLOR[f] + "18" : "transparent",
+                    color: active ? COLOR[f] : "#4a4640",
+                    fontSize: 11, fontWeight: 900,
+                    display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 0,
+                  }}
+                >
+                  <span style={{ fontSize: 15, fontWeight: 900, lineHeight: 1.1 }}>{COUNT[f]}</span>
+                  <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: ".2px", opacity: .85 }}>{LABEL[f]}</span>
                 </button>
               )
             })}
           </div>
 
-          {/* Filtros categoria */}
-          <div className="cbCatScroll">
-            {CATS.map(cat => (
-              <button key={cat} onClick={() => setFiltroCat(cat)} style={{ height: 30, padding: "0 10px", border: `1px solid ${filtroCat === cat ? "#ff6b00" : "#1f1d1a"}`, borderRadius: 8, background: filtroCat === cat ? "rgba(255,107,0,.15)" : "#0e0e0e", color: filtroCat === cat ? "#ff6b00" : "#56524b", fontSize: 11, fontWeight: 900, whiteSpace: "nowrap", flexShrink: 0 }}>
-                {CAT_ICON[cat] || "•"} {cat === "todas" ? "Tudo" : cat}
-              </button>
-            ))}
+          {/* Linha 5: filtros categoria */}
+          <div className="cbScroll">
+            {CATS.map(cat => {
+              const active = filtroCat === cat
+              return (
+                <button
+                  key={cat}
+                  onClick={() => setFiltroCat(cat)}
+                  style={{
+                    height: 29, padding: "0 11px",
+                    border: `1px solid ${active ? "rgba(255,107,0,.55)" : "#1f1d1a"}`,
+                    borderRadius: 8,
+                    background: active ? "rgba(255,107,0,.14)" : "#0c0c0c",
+                    color: active ? "#ff6b00" : "#56524b",
+                    fontSize: 11, fontWeight: 900,
+                    whiteSpace: "nowrap", flexShrink: 0,
+                  }}
+                >{CAT_ICON[cat] || cat}</button>
+              )
+            })}
           </div>
         </header>
 
-        {/* Barra lote */}
+        {/* Barra de lote (quando há selecionados) */}
         {modoSel && selecionados.size > 0 && (
-          <div style={{ background: "#0f0e0c", borderBottom: "1px solid #1f1d1a", padding: "10px 16px", display: "flex", alignItems: "center", gap: 8, zIndex: 29 }}>
+          <div style={{ flexShrink: 0, background: "#0e0c0a", borderBottom: "1px solid #1f1d1a", padding: "9px 16px", display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ flex: 1, fontSize: 13, fontWeight: 800, color: "#c9c2b4" }}>{selecionados.size} selecionado{selecionados.size > 1 ? "s" : ""}</span>
-            <button onClick={() => setConfirmLote("esgotado")} style={{ height: 36, padding: "0 12px", border: "1px solid rgba(239,68,68,.35)", borderRadius: 10, background: "rgba(239,68,68,.1)", color: "#ef4444", fontSize: 12, fontWeight: 900 }}>Esgotar</button>
-            <button onClick={() => setConfirmLote("disponivel")} style={{ height: 36, padding: "0 12px", border: "1px solid rgba(34,197,94,.35)", borderRadius: 10, background: "rgba(34,197,94,.1)", color: "#22c55e", fontSize: 12, fontWeight: 900 }}>Disponibilizar</button>
+            <button onClick={() => setConfirmLote("esgotado")} style={{ height: 34, padding: "0 12px", border: "1px solid rgba(239,68,68,.3)", borderRadius: 9, background: "rgba(239,68,68,.08)", color: "#ef4444", fontSize: 12, fontWeight: 900 }}>Esgotar</button>
+            <button onClick={() => setConfirmLote("disponivel")} style={{ height: 34, padding: "0 12px", border: "1px solid rgba(34,197,94,.3)", borderRadius: 9, background: "rgba(34,197,94,.08)", color: "#22c55e", fontSize: 12, fontWeight: 900 }}>Disponibilizar</button>
           </div>
         )}
 
-        {/* Lista */}
-        <main style={{ padding: "10px 16px", display: "flex", flexDirection: "column", gap: 6, flex: 1 }}>
-
-          {/* Estado vazio */}
+        {/* ── LISTA ROLÁVEL ────────────────────────────── */}
+        <main
+          className="cbMain"
+          style={{ flex: 1, overflowY: "auto", padding: "8px 16px 12px", display: "flex", flexDirection: "column", gap: 5 }}
+        >
           {lista.length === 0 && (
-            <div style={{ background: "#0e0e0e", border: "1px dashed #242220", borderRadius: 16, padding: "40px 20px", textAlign: "center", marginTop: 4 }}>
-              <div style={{ fontSize: 36, marginBottom: 10 }}>{busca ? "🔍" : filtroStatus === "esgotado" ? "✅" : "📦"}</div>
-              <div style={{ fontSize: 15, fontWeight: 900, color: "#c9c2b4" }}>
+            <div style={{ background: "#0c0c0c", border: "1px dashed #252220", borderRadius: 14, padding: "40px 20px", textAlign: "center", marginTop: 6 }}>
+              <div style={{ fontSize: 32, marginBottom: 10 }}>{busca ? "🔍" : filtroStatus === "esgotado" ? "✅" : "📦"}</div>
+              <div style={{ fontSize: 14, fontWeight: 800, color: "#a39b8b" }}>
                 {busca
-                  ? "Nenhum produto encontrado com esse nome."
+                  ? "Nenhum produto encontrado."
                   : filtroStatus === "esgotado"
                   ? "Nenhum produto esgotado agora."
                   : "Nenhum produto disponível."}
@@ -253,7 +317,7 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
             </div>
           )}
 
-          {lista.map((produto, idx) => {
+          {lista.map(produto => {
             const esg = esgotados.includes(produto.nome)
             const loading = salvando.has(produto.nome)
             const sel = selecionados.has(produto.nome)
@@ -264,58 +328,76 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
                 className="cbItem"
                 onClick={() => modoSel && toggleSel(produto.nome)}
                 style={{
-                  background: sel ? "rgba(255,107,0,.05)" : esg ? "rgba(239,68,68,.04)" : "#0e0e0e",
-                  border: `1.5px solid ${sel ? "#ff6b00" : esg ? "rgba(239,68,68,.28)" : "#1a1a1a"}`,
-                  borderRadius: 14,
-                  padding: "14px 14px",
+                  background: sel ? "rgba(255,107,0,.05)" : esg ? "rgba(239,68,68,.03)" : "#0c0c0c",
+                  border: `1px solid ${sel ? "rgba(255,107,0,.5)" : esg ? "rgba(239,68,68,.2)" : "#1a1816"}`,
+                  borderRadius: 13,
+                  padding: "13px 14px",
                   display: "flex",
                   alignItems: "center",
                   gap: 12,
                   cursor: modoSel ? "pointer" : "default",
-                  animation: `cbItemIn .2s ease ${Math.min(idx * 0.02, 0.15)}s both`,
                 }}
               >
-                {/* Checkbox seleção */}
+                {/* Checkbox modo seleção */}
                 {modoSel && (
-                  <div style={{ width: 26, height: 26, borderRadius: 8, border: `2px solid ${sel ? "#ff6b00" : "#3a3730"}`, background: sel ? "#ff6b00" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: 15, color: "#fff", fontWeight: 900, transition: "all .12s" }}>
-                    {sel ? "✓" : ""}
+                  <div style={{
+                    width: 24, height: 24,
+                    borderRadius: 7,
+                    border: `2px solid ${sel ? "#ff6b00" : "#3a3730"}`,
+                    background: sel ? "#ff6b00" : "transparent",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    flexShrink: 0, fontSize: 14, color: "#fff", fontWeight: 900,
+                  }}>
+                    {sel && "✓"}
                   </div>
                 )}
 
-                {/* Informações */}
+                {/* Conteúdo do card */}
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 15, fontWeight: 800, color: esg ? "#ef4444" : "#f4f1ec", textDecoration: esg ? "line-through" : "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginBottom: 5 }}>
+                  {/* Nome */}
+                  <div style={{
+                    fontSize: 15, fontWeight: 800,
+                    color: esg ? "#c87070" : "#f0ede8",
+                    textDecoration: esg ? "line-through" : "none",
+                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                    marginBottom: 4,
+                  }}>
                     {produto.nome}
                   </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                    <span style={{ fontSize: 10, fontWeight: 900, color: "#56524b", background: "#181614", padding: "2px 8px", borderRadius: 6 }}>{produto.categoria}</span>
+                  {/* Metadados */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 10, fontWeight: 800, color: "#3e3b37", background: "#161412", padding: "2px 7px", borderRadius: 5 }}>
+                      {produto.categoria}
+                    </span>
                     {produto.preco != null && produto.preco > 0 && (
-                      <span style={{ fontSize: 11, fontWeight: 700, color: "#a39b8b" }}>R$ {produto.preco.toFixed(2).replace(".", ",")}</span>
+                      <span style={{ fontSize: 11, fontWeight: 600, color: "#6a6460" }}>
+                        R$ {produto.preco.toFixed(2).replace(".", ",")}
+                      </span>
                     )}
-                    <span style={{ fontSize: 11, fontWeight: 900, color: esg ? "#ef4444" : "#22c55e" }}>
-                      {esg ? "Bot bloqueado" : "Vendendo agora"}
+                    {/* Status operacional */}
+                    <span style={{ fontSize: 11, fontWeight: 800, color: esg ? "#b85555" : "#3d8a54" }}>
+                      {esg ? "Bot bloqueando venda" : "Vendendo agora"}
                     </span>
                   </div>
                 </div>
 
-                {/* Botão ação */}
+                {/* Botão de ação — só fora do modo seleção */}
                 {!modoSel && (
                   <button
+                    className="cbBtn"
                     onClick={e => { e.stopPropagation(); if (!loading) toggleEsgotado(produto.nome, !esg) }}
                     disabled={loading}
                     style={{
-                      height: 46,
-                      padding: "0 14px",
-                      border: `1.5px solid ${esg ? "rgba(34,197,94,.4)" : "rgba(239,68,68,.4)"}`,
-                      borderRadius: 12,
-                      background: esg ? "rgba(34,197,94,.1)" : "rgba(239,68,68,.1)",
-                      color: esg ? "#22c55e" : "#ef4444",
-                      fontSize: 12,
-                      fontWeight: 900,
+                      height: 40,
+                      padding: "0 13px",
+                      border: `1px solid ${esg ? "rgba(34,197,94,.35)" : "rgba(239,68,68,.35)"}`,
+                      borderRadius: 10,
+                      background: esg ? "rgba(34,197,94,.08)" : "rgba(239,68,68,.08)",
+                      color: esg ? "#22c55e" : "#e05555",
+                      fontSize: 12, fontWeight: 900,
                       flexShrink: 0,
-                      minWidth: 120,
-                      opacity: loading ? 0.6 : 1,
-                      transition: "opacity .15s",
+                      minWidth: 108,
+                      opacity: loading ? 0.5 : 1,
                     }}
                   >
                     {loading ? "..." : esg ? "Voltar a vender" : "Marcar esgotado"}
@@ -324,58 +406,99 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
               </div>
             )
           })}
+
+          {/* Espaço extra no final para o toast não cobrir */}
+          <div style={{ height: 4, flexShrink: 0 }} />
         </main>
 
-        {/* Toast com desfazer */}
-        {toast && (
-          <div style={{ position: "fixed", bottom: "calc(env(safe-area-inset-bottom) + 92px)", left: 0, right: 0, margin: "0 auto", width: "calc(100% - 32px)", maxWidth: 375, background: "#1c1a16", border: "1px solid #2e2b26", borderRadius: 16, padding: "13px 14px", display: "flex", alignItems: "center", gap: 10, animation: "cbToastIn .25s ease both", zIndex: 50, boxShadow: "0 8px 28px rgba(0,0,0,.6)", fontFamily: "'Archivo', sans-serif" }}>
-            <p style={{ flex: 1, fontSize: 13, fontWeight: 700, color: "#c9c2b4", margin: 0, lineHeight: 1.45 }}>{toast.msg}</p>
-            {toast.nome && (
-              <button onClick={desfazer} style={{ border: "none", background: "rgba(255,107,0,.15)", color: "#ff6b00", fontSize: 12, fontWeight: 900, padding: "9px 13px", borderRadius: 10, flexShrink: 0 }}>Desfazer</button>
-            )}
-          </div>
-        )}
-
-        {/* Modal confirmação lote */}
-        {confirmLote && (
-          <>
-            <div onClick={() => setConfirmLote(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.72)", zIndex: 60, animation: "cbFadeIn .2s ease" }} />
-            <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, margin: "0 auto", maxWidth: 375, background: "#121110", border: "1px solid #242220", borderBottom: "none", borderRadius: "24px 24px 0 0", zIndex: 61, animation: "cbSheetUp .3s cubic-bezier(.2,.9,.3,1) both", padding: "20px 20px calc(env(safe-area-inset-bottom) + 28px)", display: "flex", flexDirection: "column", gap: 12 }}>
-              <div style={{ width: 44, height: 5, borderRadius: 3, background: "#2e2b26", margin: "0 auto 4px" }} />
-              <p style={{ margin: 0, fontSize: 18, fontWeight: 900, letterSpacing: "-0.3px" }}>
-                {confirmLote === "esgotado"
-                  ? `Esgotar ${selecionados.size} produto${selecionados.size > 1 ? "s" : ""}?`
-                  : `Disponibilizar ${selecionados.size} produto${selecionados.size > 1 ? "s" : ""}?`}
-              </p>
-              <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: "#a39b8b", lineHeight: 1.5 }}>
-                {confirmLote === "esgotado"
-                  ? "O bot vai parar de vender esses produtos imediatamente."
-                  : "O bot vai voltar a oferecer esses produtos."}
-              </p>
-              <button onClick={() => aplicarLote(confirmLote === "esgotado")} style={{ height: 54, border: "none", borderRadius: 14, background: confirmLote === "esgotado" ? "#ef4444" : "#22c55e", color: "#fff", fontSize: 16, fontWeight: 900 }}>
-                {confirmLote === "esgotado" ? "Marcar esgotados" : "Disponibilizar todos"}
-              </button>
-              <button onClick={() => setConfirmLote(null)} style={{ height: 44, border: "none", background: "transparent", color: "#a39b8b", fontSize: 14, fontWeight: 800 }}>Cancelar</button>
-            </div>
-          </>
-        )}
-
-        {/* Nav */}
-        <nav style={{ position: "fixed", bottom: 0, left: 0, right: 0, margin: "0 auto", maxWidth: 375, background: "rgba(8,8,8,.94)", backdropFilter: "blur(14px)", borderTop: "1px solid #1f1d1a", display: "grid", gridTemplateColumns: "1fr 1fr 1fr", padding: "10px 8px calc(env(safe-area-inset-bottom) + 18px)", zIndex: 40 }}>
-          <button onClick={() => router.push("/pedidos")} style={{ border: "none", background: "transparent", display: "flex", flexDirection: "column", alignItems: "center", gap: 5, padding: "6px 0" }}>
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="4" y="3" width="16" height="18" rx="3" stroke="#5a564d" strokeWidth="2.2"/><line x1="8" y1="9" x2="16" y2="9" stroke="#5a564d" strokeWidth="2.2" strokeLinecap="round"/><line x1="8" y1="14" x2="13" y2="14" stroke="#5a564d" strokeWidth="2.2" strokeLinecap="round"/></svg>
-            <span style={{ fontSize: 11, fontWeight: 800, color: "#5a564d" }}>Pedidos</span>
+        {/* ── NAV INFERIOR ─────────────────────────────── */}
+        <nav style={{
+          flexShrink: 0,
+          background: "rgba(6,6,6,.96)",
+          backdropFilter: "blur(14px)",
+          borderTop: "1px solid #181614",
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr 1fr",
+          padding: "10px 8px calc(env(safe-area-inset-bottom) + 16px)",
+        }}>
+          <button onClick={() => router.push("/pedidos")} style={{ background: "transparent", display: "flex", flexDirection: "column", alignItems: "center", gap: 5, padding: "6px 0" }}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><rect x="4" y="3" width="16" height="18" rx="3" stroke="#3a3730" strokeWidth="2.2"/><line x1="8" y1="9" x2="16" y2="9" stroke="#3a3730" strokeWidth="2.2" strokeLinecap="round"/><line x1="8" y1="14" x2="13" y2="14" stroke="#3a3730" strokeWidth="2.2" strokeLinecap="round"/></svg>
+            <span style={{ fontSize: 10, fontWeight: 800, color: "#3a3730" }}>Pedidos</span>
           </button>
-          <button onClick={() => router.push("/conversas")} style={{ border: "none", background: "transparent", display: "flex", flexDirection: "column", alignItems: "center", gap: 5, padding: "6px 0" }}>
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="14" rx="5" stroke="#5a564d" strokeWidth="2.2"/><circle cx="8.5" cy="11" r="1.4" fill="#5a564d"/><circle cx="12" cy="11" r="1.4" fill="#5a564d"/><circle cx="15.5" cy="11" r="1.4" fill="#5a564d"/></svg>
-            <span style={{ fontSize: 11, fontWeight: 800, color: "#5a564d" }}>Conversas</span>
+          <button onClick={() => router.push("/conversas")} style={{ background: "transparent", display: "flex", flexDirection: "column", alignItems: "center", gap: 5, padding: "6px 0" }}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="14" rx="5" stroke="#3a3730" strokeWidth="2.2"/><circle cx="8.5" cy="11" r="1.4" fill="#3a3730"/><circle cx="12" cy="11" r="1.4" fill="#3a3730"/><circle cx="15.5" cy="11" r="1.4" fill="#3a3730"/></svg>
+            <span style={{ fontSize: 10, fontWeight: 800, color: "#3a3730" }}>Conversas</span>
           </button>
-          <button style={{ border: "none", background: "transparent", display: "flex", flexDirection: "column", alignItems: "center", gap: 5, padding: "6px 0" }}>
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="4" y="4" width="7" height="7" rx="2" stroke="#ff6b00" strokeWidth="2.2"/><rect x="13" y="4" width="7" height="7" rx="2" stroke="#ff6b00" strokeWidth="2.2"/><rect x="4" y="13" width="7" height="7" rx="2" stroke="#ff6b00" strokeWidth="2.2"/><rect x="13" y="13" width="7" height="7" rx="2" stroke="#ff6b00" strokeWidth="2.2"/></svg>
-            <span style={{ fontSize: 11, fontWeight: 900, color: "#ff6b00" }}>Cardápio</span>
+          <button style={{ background: "transparent", display: "flex", flexDirection: "column", alignItems: "center", gap: 5, padding: "6px 0" }}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><rect x="4" y="4" width="7" height="7" rx="2" stroke="#ff6b00" strokeWidth="2.2"/><rect x="13" y="4" width="7" height="7" rx="2" stroke="#ff6b00" strokeWidth="2.2"/><rect x="4" y="13" width="7" height="7" rx="2" stroke="#ff6b00" strokeWidth="2.2"/><rect x="13" y="13" width="7" height="7" rx="2" stroke="#ff6b00" strokeWidth="2.2"/></svg>
+            <span style={{ fontSize: 10, fontWeight: 900, color: "#ff6b00" }}>Cardápio</span>
           </button>
         </nav>
       </div>
+
+      {/* Toast com desfazer — fora do app-shell para ficar sobre tudo */}
+      {toast && (
+        <div style={{
+          position: "fixed",
+          bottom: "calc(env(safe-area-inset-bottom) + 80px)",
+          left: "50%", transform: "translateX(-50%)",
+          width: "calc(100% - 32px)", maxWidth: 358,
+          background: "#1a1816",
+          border: "1px solid #2a2723",
+          borderRadius: 14,
+          padding: "12px 14px",
+          display: "flex", alignItems: "center", gap: 10,
+          animation: "cbToastIn .22s ease both",
+          zIndex: 80,
+          boxShadow: "0 8px 30px rgba(0,0,0,.7)",
+          fontFamily: "'Archivo', sans-serif",
+        }}>
+          <p style={{ flex: 1, fontSize: 13, fontWeight: 700, color: "#b8b0a4", margin: 0, lineHeight: 1.4 }}>{toast.msg}</p>
+          {toast.nome && (
+            <button
+              onClick={desfazer}
+              style={{ background: "rgba(255,107,0,.14)", color: "#ff6b00", fontSize: 12, fontWeight: 900, padding: "8px 12px", borderRadius: 9, flexShrink: 0 }}
+            >Desfazer</button>
+          )}
+        </div>
+      )}
+
+      {/* Modal confirmação lote */}
+      {confirmLote && (
+        <>
+          <div onClick={() => setConfirmLote(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.75)", zIndex: 90, animation: "cbFadeIn .2s ease" }} />
+          <div style={{
+            position: "fixed", bottom: 0, left: 0, right: 0,
+            margin: "0 auto", maxWidth: 390,
+            background: "#111009",
+            border: "1px solid #242220", borderBottom: "none",
+            borderRadius: "22px 22px 0 0",
+            zIndex: 91,
+            animation: "cbSheetUp .3s cubic-bezier(.2,.9,.3,1) both",
+            padding: "18px 20px calc(env(safe-area-inset-bottom) + 28px)",
+            display: "flex", flexDirection: "column", gap: 12,
+          }}>
+            <div style={{ width: 40, height: 4, borderRadius: 2, background: "#2e2b26", margin: "0 auto 6px" }} />
+            <p style={{ margin: 0, fontSize: 17, fontWeight: 900, letterSpacing: "-0.3px" }}>
+              {confirmLote === "esgotado"
+                ? `Esgotar ${selecionados.size} produto${selecionados.size > 1 ? "s" : ""}?`
+                : `Disponibilizar ${selecionados.size} produto${selecionados.size > 1 ? "s" : ""}?`}
+            </p>
+            <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: "#8a8278", lineHeight: 1.5 }}>
+              {confirmLote === "esgotado"
+                ? "O bot vai parar de vender esses produtos imediatamente."
+                : "O bot vai voltar a oferecer esses produtos."}
+            </p>
+            <button
+              onClick={() => aplicarLote(confirmLote === "esgotado")}
+              style={{ height: 52, borderRadius: 13, background: confirmLote === "esgotado" ? "#c53333" : "#1e8a47", color: "#fff", fontSize: 15, fontWeight: 900 }}
+            >
+              {confirmLote === "esgotado" ? "Confirmar — marcar esgotados" : "Confirmar — disponibilizar"}
+            </button>
+            <button onClick={() => setConfirmLote(null)} style={{ height: 42, background: "transparent", color: "#6a6460", fontSize: 13, fontWeight: 800 }}>Cancelar</button>
+          </div>
+        </>
+      )}
     </>
   )
 }
@@ -444,7 +567,6 @@ function PublicCardapio({ menu }: { menu: MenuType }) {
     const newItem: CartItem = { emoji: "🍕", kind: "pizza", name: `Pizza ${size}${mam ? " (meio a meio)" : ""}`, detail: `${flavor}${border ? ` · borda ${border}` : ""}`, price: sizePrice + borderPrice, qty: 1 };
     const newCart = [...cart, newItem];
     setCart(newCart);
-    const feitas = newCart.filter((c) => c.kind === "pizza").length;
     if (!plan.openEnded && plan.current < plan.total) { setPlan({ ...plan, current: plan.current + 1 }); showToast(`Pizza pronta! 🍕`); resetBuild(); go("sc-build"); }
     else if (plan.openEnded) { showToast("Pizza adicionada! 🍕"); go("sc-another"); }
     else { showToast("Tudo pronto! 🍕"); go("sc-cart"); }
