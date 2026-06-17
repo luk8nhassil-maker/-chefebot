@@ -2,6 +2,15 @@
 import { useEffect, useState, useRef } from "react"
 import { useRouter } from "next/navigation"
 
+// Gera um link wa.me seguro: limpa o número (só dígitos) e garante o código do país (55).
+// Se houver mensagem, ela vai codificada via encodeURIComponent.
+function whatsappLink(telefoneBruto: string, mensagem?: string): string {
+  let numero = (telefoneBruto || "").replace(/\D/g, "") // remove espaços, parênteses, traços, +, etc.
+  if (numero && !numero.startsWith("55")) numero = "55" + numero
+  const texto = mensagem ? `?text=${encodeURIComponent(mensagem)}` : ""
+  return `https://wa.me/${numero}${texto}`
+}
+
 type Status = "novo" | "em_preparo" | "saiu_entrega" | "entregue" | "cancelado"
 type Pedido = {
   id: string
@@ -740,7 +749,7 @@ export default function PedidosPage() {
                     >
                       {atualizando === pedido.id ? "..." : ACTION_LABEL[pedido.status]}
                     </button>
-                    <button onClick={e => { e.stopPropagation(); window.open(`https://wa.me/${pedido.telefone}`, "_blank"); }} style={{ height: 44, border: `1px solid ${sc.accentBorder}`, borderRadius: 13, background: "transparent", color: "#c9c2b4", fontSize: 13, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                    <button onClick={e => { e.stopPropagation(); window.open(whatsappLink(pedido.telefone), "_blank"); }} style={{ height: 44, border: `1px solid ${sc.accentBorder}`, borderRadius: 13, background: "transparent", color: "#c9c2b4", fontSize: 13, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
                       <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#25d366" }} />
                       Falar com {firstName} no WhatsApp
                     </button>
@@ -754,7 +763,7 @@ export default function PedidosPage() {
                       <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><rect x="3" y="11" width="18" height="11" rx="2" stroke="#56524b" strokeWidth="2.2"/><path d="M7 11V7a5 5 0 0110 0v4" stroke="#56524b" strokeWidth="2.2" strokeLinecap="round"/></svg>
                       <span style={{ fontSize: 14, fontWeight: 800, color: "#56524b" }}>Libera ao confirmar Pix</span>
                     </div>
-                    <button onClick={e => { e.stopPropagation(); window.open(`https://wa.me/${pedido.telefone}`, "_blank"); }} style={{ height: 44, border: `1px solid ${sc.accentBorder}`, borderRadius: 13, background: "transparent", color: "#c9c2b4", fontSize: 13, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                    <button onClick={e => { e.stopPropagation(); window.open(whatsappLink(pedido.telefone), "_blank"); }} style={{ height: 44, border: `1px solid ${sc.accentBorder}`, borderRadius: 13, background: "transparent", color: "#c9c2b4", fontSize: 13, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
                       <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#25d366" }} />
                       Falar com {firstName} no WhatsApp
                     </button>
@@ -859,7 +868,7 @@ export default function PedidosPage() {
                       </button>
                     )}
                     {isDone && <div style={{ height: 54, borderRadius: 16, background: "rgba(34,197,94,.1)", border: "1px solid rgba(34,197,94,.3)", color: "#22c55e", fontSize: 15, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>Entregue · tudo certo ✓</div>}
-                    <button onClick={() => window.open(`https://wa.me/${p.telefone}`, "_blank")} style={{ height: 46, border: "1px solid #2a2723", borderRadius: 14, background: "transparent", color: "#c9c2b4", fontSize: 14, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, flexShrink: 0 }}>
+                    <button onClick={() => window.open(whatsappLink(p.telefone), "_blank")} style={{ height: 46, border: "1px solid #2a2723", borderRadius: 14, background: "transparent", color: "#c9c2b4", fontSize: 14, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, flexShrink: 0 }}>
                       <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#22c55e" }} />
                       Falar com {firstName} no WhatsApp
                     </button>
