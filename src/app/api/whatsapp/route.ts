@@ -738,7 +738,12 @@ export async function POST(req: NextRequest) {
       m.includes("Eita") || m.includes("Opa") || m.includes("nao peguei") ||
       m.includes("Hmm") || m.includes("nao tem isso")
     );
-    if (botConfuso) {
+    // Gatilho estrutural: cliente já errou 2x seguidas no MESMO step antes desta mensagem.
+    // Mais robusto que checar texto de erro — não depende das mensagens do bot, e pega
+    // o caso de "comportamento fora do fluxo" mesmo quando a resposta do bot não citar "não entendi".
+    const errouRepetido = (currentSession.step === resultTeste.session?.step) && (currentSession.tentativasInvalidas || 0) >= 1;
+    const precisaIA = botConfuso || errouRepetido;
+    if (precisaIA) {
       const opcoes = getOpcoesPorStep(currentSession.step);
       if (opcoes.length > 0) {
         const interpretado = await interpretarMensagem(messageText, currentSession.step, opcoes);
