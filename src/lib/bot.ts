@@ -60,6 +60,7 @@ export type BotStep =
   | "delivery_type"
   | "neighborhood"
   | "confirma_bairro_fuzzy"
+  | "confirma_produto_valor"
   | "address"
   | "confirm_address"
   | "payment"
@@ -120,6 +121,7 @@ export interface BotSession {
   hibridoMetodos?: string[];
   bairroFuzzyCandidato?: string;
   hibridoValorParcial?: Record<string, number>;
+  candidatosValorProduto?: { name: string; price: number; categoria: string }[];
 }
 export interface BotResponse {
   messages: string[];
@@ -271,6 +273,60 @@ function detectaDoisSabores(n: string, allFlavors: string[]): [string, string] |
   if (achados.length === 2) return [achados[0], achados[1]];
   return null;
 }
+// Detecta se a mensagem menciona uma categoria de produto + um valor numérico (ex: "hamburguer de 18", "lanche de 20").
+// Retorna a categoria normalizada (lanche/bebida/suco/pizza) e o valor, ou null se não houver os dois sinais juntos.
+function detectaCategoriaEValor(text: string): { categoria: "lanche" | "bebida" | "suco" | "pizza"; valor: number } | null {
+  const n = normalizar(text);
+  const valorMatch = n.match(/(\d+(?:[.,]\d{1,2})?)/);
+  if (!valorMatch) return null;
+  const valor = parseFloat(valorMatch[1].replace(",", "."));
+  if (isNaN(valor) || valor <= 0 || valor > 200) return null; // fora de faixa plausível, ignora
+
+  let categoria: "lanche" | "bebida" | "suco" | "pizza" | null = null;
+  if (n.includes("hamburgue") || n.includes("hamburguer") || n.includes("burguer") || n.includes("lanche") ||
+    n.includes("calzone") || n.includes("x-") || n.includes("x ") || n.includes("batata") || n.includes("porcao")) {
+    categoria = "lanche";
+  } else if (n.includes("bebida") || n.includes("refri") || n.includes("guarana") || n.includes("agua") || n.includes("cerveja")) {
+    categoria = "bebida";
+  } else if (n.includes("suco") || n.includes("vitamina")) {
+    categoria = "suco";
+  } else if (n.includes("pizza")) {
+    categoria = "pizza";
+  }
+  if (!categoria) return null;
+  return { categoria, valor };
+}
+
+// Busca produtos da categoria próximos ao valor informado. Retorna os candidatos ordenados por proximidade.
+// Regra de proximidade: se houver um candidato "claramente" mais próximo (distância <= 1 e folga de pelo
+// menos 2 reais para o segundo colocado), retorna só ele. Senão, retorna todos dentro da faixa ampla (R$3)
+// para o cliente escolher. Não inventa produto, só usa o que existe de fato no cardápio.
+function buscaProdutosPorValor(categoria: "lanche" | "bebida" | "suco", valor: number): { name: string; price: number }[] {
+  let lista: { name: string; price: number }[] = [];
+  if (categoria === "lanche") lista = MENU.lanches.filter(l => !l.sizes).map(l => ({ name: l.name, price: l.price }));
+  else if (categoria === "bebida") lista = MENU.bebidas;
+  else if (categoria === "suco") lista = MENU.sucos;
+
+  const FAIXA = 3; // até R$3,00 de diferença é considerado "próximo" o suficiente para listar
+  const comDistancia = lista
+    .map(p => ({ ...p, dist: Math.abs(p.price - valor) }))
+    .sort((a, b) => a.dist - b.dist);
+  const dentroDaFaixa = comDistancia.filter(p => p.dist <= FAIXA);
+  if (dentroDaFaixa.length === 0) return [];
+
+  // Vencedor claro: preço idêntico ao informado (distância 0) -> sugere só ele, mesmo com outros na faixa
+  const primeiro = dentroDaFaixa[0];
+  const segundo = dentroDaFaixa[1];
+  if (primeiro.dist === 0) {
+    return [{ name: primeiro.name, price: primeiro.price }];
+  }
+  // Ou vencedor claro por boa margem sobre o segundo colocado
+  if (primeiro.dist <= 1 && (!segundo || segundo.dist - primeiro.dist >= 2)) {
+    return [{ name: primeiro.name, price: primeiro.price }];
+  }
+  return dentroDaFaixa.slice(0, 3).map(p => ({ name: p.name, price: p.price }));
+}
+
 // Detecta se o cliente quer ver o cardápio/menu (qualquer etapa)
 function detectaIntencaoCardapio(text: string): boolean {
   const n = normalizar(text);
@@ -832,6 +888,8 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
         return { messages: [`Tudo bem! Vai querer entrega ou prefere buscar na loja? Se for entrega, me informa seu endereço completo com bairro, por favor 😊`], session: resetaTentativas({ ...session, step: "delivery_type" }) };
       case "confirma_bairro_fuzzy":
         return { messages: [`Tudo bem! Qual o seu bairro? 😊`], session: resetaTentativas({ ...session, step: "neighborhood", bairroFuzzyCandidato: undefined }) };
+      case "confirma_produto_valor":
+        return { messages: [`Tudo bem! ${mensagemCategorias()}`], session: resetaTentativas({ ...session, step: "category", candidatosValorProduto: undefined }) };
       case "address":
         return { messages: [`Tudo bem! Qual o seu bairro? 😊`], session: resetaTentativas({ ...session, step: "neighborhood" }) };
       case "payment":
@@ -967,6 +1025,27 @@ Vai querer entrega ou prefere buscar na loja? Se for entrega, me informa seu end
       return respostaInvalida("Não entendi muito bem 😅 Me diz seu nome, ou já pode pedir direto (ex: _\"pizza calabresa\"_ ou _\"cardápio\"_)", session);
     }
     case "category": {
+      // ===== BUSCA INTELIGENTE POR VALOR (ex: "quero um hamburguer de 18", "lanche de 20") =====
+      const catValor = detectaCategoriaEValor(text);
+      if (catValor && catValor.categoria !== "pizza") {
+        const candidatos = buscaProdutosPorValor(catValor.categoria, catValor.valor);
+        if (candidatos.length === 1) {
+          const p = candidatos[0];
+          return {
+            messages: [`Você quis dizer o *${p.name}* por *${formatCurrency(p.price)}*? 😊`],
+            session: resetaTentativas({ ...session, step: "confirma_produto_valor", candidatosValorProduto: [{ ...p, categoria: catValor.categoria }] }),
+          };
+        }
+        if (candidatos.length > 1) {
+          const top = candidatos.slice(0, 3);
+          const listaTxt = top.map(p => `*${p.name}* (${formatCurrency(p.price)})`).join("\n");
+          return {
+            messages: [`Tenho esses nessa faixa de preço:\n\n${listaTxt}\n\nQual prefere? 😊`],
+            session: resetaTentativas({ ...session, step: "confirma_produto_valor", candidatosValorProduto: top.map(p => ({ ...p, categoria: catValor.categoria })) }),
+          };
+        }
+        // Nenhum produto próximo -> cai no fallback normal (mostra cardápio da categoria)
+      }
       const intencao = detectaIntencaoDireta(text);
       let category = "";
       if (n === "1" || n.includes("pizza")) category = "pizza";
@@ -980,6 +1059,32 @@ Vai querer entrega ou prefere buscar na loja? Se for entrega, me informa seu end
         if (pedidoPizza) return pedidoPizza;
       }
       return { ...handleCategory(category, session), session: resetaTentativas(handleCategory(category, session).session) };
+    }
+    case "confirma_produto_valor": {
+      const candidatos = session.candidatosValorProduto || [];
+      if (candidatos.length === 0) return respostaInvalida(mensagemCategorias(), session);
+      let escolhido: { name: string; price: number; categoria: string } | undefined;
+      if (candidatos.length === 1 && (ePositiva(n) || n === "1")) {
+        escolhido = candidatos[0];
+      } else {
+        // tenta achar por nome ou número entre os candidatos listados
+        const num = parseInt(text);
+        if (!isNaN(num) && num >= 1 && num <= candidatos.length) escolhido = candidatos[num - 1];
+        else escolhido = candidatos.find(c => n.includes(normalizar(c.name)));
+      }
+      if (!escolhido) {
+        if (eNegativa(n)) {
+          return { messages: [`Sem problema! ${mensagemCategorias()}`], session: resetaTentativas({ ...session, step: "category", candidatosValorProduto: undefined }) };
+        }
+        const listaTxt = candidatos.map(p => `*${p.name}* (${formatCurrency(p.price)})`).join("\n");
+        return respostaInvalida(`Qual desses você quer?\n\n${listaTxt}`, session);
+      }
+      const newItem: CartItem = { category: escolhido.categoria, name: escolhido.name, price: escolhido.price };
+      const newCart = [...session.cart, newItem];
+      return {
+        messages: [`*${escolhido.name}* anotado! 😋`, mensagemAddMore(newCart)],
+        session: resetaTentativas({ ...session, step: "add_more", cart: newCart, candidatosValorProduto: undefined }),
+      };
     }
     case "confirmando_mudanca": {
       if (ePositiva(n) || n.includes("manter") || n.includes("continua")) {
@@ -1225,6 +1330,26 @@ Vai querer entrega ou prefere buscar na loja? Se for entrega, me informa seu end
       return { messages: [`Qual borda você prefere? 😋\n\n${listaBordas(session.currentSize!)}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: { ...session, step: "border_escolha" } };
     }
     case "add_more": {
+      // ===== BUSCA INTELIGENTE POR VALOR (ex: "tem lanche de 20?") =====
+      const catValorAM = detectaCategoriaEValor(text);
+      if (catValorAM && catValorAM.categoria !== "pizza") {
+        const candidatosAM = buscaProdutosPorValor(catValorAM.categoria, catValorAM.valor);
+        if (candidatosAM.length === 1) {
+          const p = candidatosAM[0];
+          return {
+            messages: [`Você quis dizer o *${p.name}* por *${formatCurrency(p.price)}*? 😊`],
+            session: resetaTentativas({ ...session, step: "confirma_produto_valor", candidatosValorProduto: [{ ...p, categoria: catValorAM.categoria }] }),
+          };
+        }
+        if (candidatosAM.length > 1) {
+          const top = candidatosAM.slice(0, 3);
+          const listaTxt = top.map(p => `*${p.name}* (${formatCurrency(p.price)})`).join("\n");
+          return {
+            messages: [`Tenho esses nessa faixa de preço:\n\n${listaTxt}\n\nQual prefere? 😊`],
+            session: resetaTentativas({ ...session, step: "confirma_produto_valor", candidatosValorProduto: top.map(p => ({ ...p, categoria: catValorAM.categoria })) }),
+          };
+        }
+      }
       const querFinalizar = eNegativa(n) || n.includes("finalizar") || n.includes("fechar") || n.includes("so isso") ||
         n.includes("e so") || n.includes("e isso") || n.includes("nao quero") || n.includes("ja esta bom") ||
         n.includes("ja ta bom") || n.includes("nao precisa mais") || n.includes("nada mais") || n.includes("por hoje") ||
