@@ -526,9 +526,17 @@ export default function PedidosPage() {
         .cbBusca::placeholder { color: #3a3730; }
         .cbBusca:focus { border-color: #ff6b00 !important; box-shadow: 0 0 0 3px rgba(255,107,0,.1); }
         .cbInput:focus { border-color: #ff6b00 !important; outline: none; }
+        @media (min-width: 768px) {
+          .cbPedidosWrap { max-width: 1100px !important; padding-bottom: 0 !important; }
+          .cbPedidosNav { max-width: 1100px !important; left: 50% !important; transform: translateX(-50%) !important; }
+        }
+        @media (min-width: 1024px) {
+          .cbPedidosWrap { max-width: 1280px !important; }
+          .cbPedidosNav { max-width: 1280px !important; }
+        }
       `}</style>
 
-      <div style={{ minHeight: "100svh", maxWidth: 375, margin: "0 auto", background: "#060606", color: "#f5f2ee", fontFamily: "'Archivo', sans-serif", display: "flex", flexDirection: "column", paddingBottom: "calc(env(safe-area-inset-bottom) + 90px)" }}>
+      <div className="cbPedidosWrap" style={{ minHeight: "100svh", maxWidth: 375, margin: "0 auto", background: "#060606", color: "#f5f2ee", fontFamily: "'Archivo', sans-serif", display: "flex", flexDirection: "column", paddingBottom: "calc(env(safe-area-inset-bottom) + 90px)" }}>
 
         {/* Header */}
         <header style={{ display: "flex", alignItems: "center", gap: 12, padding: "calc(env(safe-area-inset-top) + 18px) 16px 12px" }}>
@@ -1112,7 +1120,7 @@ export default function PedidosPage() {
         )}
 
         {/* Nav */}
-        <nav style={{ position: "fixed", bottom: 0, left: 0, right: 0, margin: "0 auto", maxWidth: 375, background: "rgba(8,8,8,.94)", backdropFilter: "blur(14px)", borderTop: "1px solid #1f1d1a", display: "grid", gridTemplateColumns: "1fr 1fr 1fr", padding: "10px 8px calc(env(safe-area-inset-bottom) + 18px)", zIndex: 40 }}>
+        <nav className="cbPedidosNav" style={{ position: "fixed", bottom: 0, left: 0, right: 0, margin: "0 auto", maxWidth: 375, background: "rgba(8,8,8,.94)", backdropFilter: "blur(14px)", borderTop: "1px solid #1f1d1a", display: "grid", gridTemplateColumns: "1fr 1fr 1fr", padding: "10px 8px calc(env(safe-area-inset-bottom) + 18px)", zIndex: 40 }}>
           <button style={{ border: "none", background: "transparent", display: "flex", flexDirection: "column", alignItems: "center", gap: 5, padding: "6px 0" }}>
             <span style={{ position: "relative", display: "flex" }}>
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="4" y="3" width="16" height="18" rx="3" stroke="#ff6b00" strokeWidth="2.2"/><line x1="8" y1="9" x2="16" y2="9" stroke="#ff6b00" strokeWidth="2.2" strokeLinecap="round"/><line x1="8" y1="14" x2="13" y2="14" stroke="#ff6b00" strokeWidth="2.2" strokeLinecap="round"/></svg>

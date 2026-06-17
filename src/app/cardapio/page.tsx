@@ -159,10 +159,20 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
         .cbMain { -webkit-overflow-scrolling: touch; }
         .cbItem:active { opacity: 0.8; }
         .cbBtn:active { opacity: 0.75; }
+        @media (min-width: 768px) {
+          html, body { overflow: auto; }
+          .cbAdminShell { height: auto !important; overflow: visible !important; max-width: 900px !important; }
+          .cbAdminShell .cbMain { overflow-y: visible !important; flex: none !important; }
+          .cbAdminShell header { position: sticky; top: 0; z-index: 30; }
+          .cbAdminShell nav { position: sticky !important; bottom: 0 !important; flex-shrink: 0; }
+        }
+        @media (min-width: 1024px) {
+          .cbAdminShell { max-width: 1100px !important; }
+        }
       `}</style>
 
       {/* App-shell: header fixo + conteúdo rolável + nav fixo */}
-      <div style={{
+      <div className="cbAdminShell" style={{
         height: "100svh",
         maxWidth: 390,
         margin: "0 auto",

@@ -9,6 +9,7 @@ type Pedido = {
   status: string
   escalonado?: boolean
   horarioEscalonado?: number
+  resolvidoConversas?: boolean
   [key: string]: unknown
 }
 
@@ -40,20 +41,26 @@ export async function POST(req: NextRequest) {
     pedido.itens.length === 1 && pedido.itens[0] === 'Cliente precisa de atendimento humano'
 
   let novosPedidos: Pedido[]
+
   if (isPedidoEscalonamentoPuro) {
-    // Remove da lista — era só um ticket de atendimento, não tem ordem real
+    // Ticket puro de escalamento — pode deletar
     novosPedidos = pedidos.filter(p => p.id !== id)
-  } else {
-    // Tem pedido real — mantém o pedido no fluxo, apenas remove o flag de escalonamento
+  } else if (pedido.escalonado) {
+    // Pedido real da fila (escalonado) — remove flag escalonado, mantém pedido no fluxo
     novosPedidos = pedidos.map(p =>
       p.id === id ? { ...p, escalonado: false, horarioEscalonado: undefined } : p
+    )
+  } else {
+    // Pedido da seção "Em atendimento hoje" (não escalonado) — apenas marca como resolvido
+    // na visão de conversas, sem alterar status do pedido e sem enviar mensagem
+    novosPedidos = pedidos.map(p =>
+      p.id === id ? { ...p, resolvidoConversas: true } : p
     )
   }
 
   await redis.set('pedidos', novosPedidos)
 
-  // Limpa estado de sessão do bot para que possa re-engajar se cliente escrever novamente
-  // NÃO envia nenhuma mensagem WhatsApp
+  // Limpa sessão do bot para re-engajamento futuro. NÃO envia mensagem WhatsApp.
   const phone = telefone.replace(/\D/g, '')
   const phoneFormatado = phone.startsWith('55') ? phone : '55' + phone
   await redis.del(`session:${phoneFormatado}`)
