@@ -380,7 +380,7 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
         {/* ── LISTA ── */}
         <main
           className="cb-main cbCardGrid"
-          style={{ padding: "8px 16px 12px", display: "flex", flexDirection: "column", gap: 6 }}
+          style={{ padding: "8px 16px 28px", display: "flex", flexDirection: "column", gap: 6 }}
         >
           {/* Verificar reposição */}
           {produtosParaRevisar.length > 0 && (

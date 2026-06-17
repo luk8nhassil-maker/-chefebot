@@ -150,7 +150,7 @@ export default function ConversasPage() {
         /* ── MOBILE: app-shell ── */
         .cb-shell { height:100svh; overflow:hidden; display:flex; flex-direction:column; max-width:390px; margin:0 auto; background:#060606; color:#f5f2ee; font-family:'Archivo',sans-serif; }
         .cb-header { flex-shrink:0; background:#060606; border-bottom:1px solid #1a1816; padding:calc(env(safe-area-inset-top) + 14px) 16px 12px; }
-        .cb-main { flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; padding:14px 16px 8px; }
+        .cb-main { flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; padding:14px 16px 28px; }
         .cb-nav { flex-shrink:0; background:rgba(6,6,6,.96); backdrop-filter:blur(14px); border-top:1px solid #181614; display:grid; grid-template-columns:1fr 1fr 1fr; padding:10px 8px calc(env(safe-area-inset-bottom) + 16px); }
         .cb-content { display:block; }
         .cb-col-primary { }

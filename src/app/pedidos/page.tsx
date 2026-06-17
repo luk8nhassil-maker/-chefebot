@@ -558,7 +558,7 @@ export default function PedidosPage() {
         .cb-top-nav { display:none; }
         .cb-right { flex:1; min-width:0; display:flex; flex-direction:column; overflow:hidden; }
         .cb-header { flex-shrink:0; background:#060606; border-bottom:1px solid #1a1816; padding:calc(env(safe-area-inset-top) + 12px) 16px 12px; }
-        .cb-main { flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; padding:12px 16px 8px; display:flex; flex-direction:column; gap:14px; }
+        .cb-main { flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; padding:12px 16px 28px; display:flex; flex-direction:column; gap:14px; }
         .cb-nav { flex-shrink:0; background:rgba(6,6,6,.96); backdrop-filter:blur(14px); border-top:1px solid #181614; display:grid; grid-template-columns:1fr 1fr 1fr; padding:10px 8px calc(env(safe-area-inset-bottom) + 16px); }
         .cbBusca::placeholder { color: #3a3730; }
         .cbBusca:focus { border-color: #ff6b00 !important; box-shadow: 0 0 0 3px rgba(255,107,0,.1); }

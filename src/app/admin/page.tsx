@@ -166,11 +166,19 @@ export default function AdminPage() {
   const [editValor, setEditValor] = useState('')
   const [editCategoria, setEditCategoria] = useState('ingredientes')
   const [showTourCardapio, setShowTourCardapio] = useState(false)
+  const [waStatus, setWaStatus] = useState<'unknown' | 'connected' | 'disconnected'>('unknown')
+  const [waQrBase64, setWaQrBase64] = useState<string | null>(null)
+  const [waShowQr, setWaShowQr] = useState(false)
+  const [waTimer, setWaTimer] = useState(60)
+  const [waExpired, setWaExpired] = useState(false)
+  const [waLoadingQr, setWaLoadingQr] = useState(false)
   const cameraRef = useRef<HTMLInputElement>(null)
   const inputPizzaRef = useRef<HTMLInputElement>(null)
   const inputLancheRef = useRef<HTMLInputElement>(null)
   const inputBebidaRef = useRef<HTMLInputElement>(null)
   const inputSucoRef = useRef<HTMLInputElement>(null)
+  const waTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const waPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const mesAtual = new Date().toISOString().slice(0, 7)
   const mesLabel = new Date().toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
   const is24h = config.horaAbertura === 0 && config.horaFechamento === 24
@@ -208,6 +216,11 @@ export default function AdminPage() {
         setSenhas(s); setNomes(n)
       }
       setLoading(false)
+      // Verifica status do WhatsApp ao carregar
+      fetch('/api/whatsapp/state').then(r => r.json()).then(d => {
+        const state = d?.instance?.state
+        setWaStatus(state === 'open' ? 'connected' : 'disconnected')
+      }).catch(() => setWaStatus('disconnected'))
     })
   }, [router])
 
@@ -219,6 +232,56 @@ export default function AdminPage() {
       } catch {}
     }
   }, [aba])
+
+  useEffect(() => {
+    return () => {
+      if (waTimerRef.current) clearInterval(waTimerRef.current)
+      if (waPollRef.current) clearInterval(waPollRef.current)
+    }
+  }, [])
+
+  const fetchWaStatus = async () => {
+    try {
+      const d = await fetch('/api/whatsapp/state').then(r => r.json())
+      const state = d?.instance?.state
+      if (state === 'open') {
+        setWaStatus('connected')
+        setWaShowQr(false)
+        setWaQrBase64(null)
+        if (waPollRef.current) { clearInterval(waPollRef.current); waPollRef.current = null }
+        if (waTimerRef.current) { clearInterval(waTimerRef.current); waTimerRef.current = null }
+      } else {
+        setWaStatus('disconnected')
+      }
+    } catch { setWaStatus('disconnected') }
+  }
+
+  const fetchQrCode = async () => {
+    setWaLoadingQr(true)
+    setWaExpired(false)
+    try {
+      const d = await fetch('/api/whatsapp/qrcode').then(r => r.json())
+      const base64 = d?.qrcode?.base64 || d?.base64 || null
+      if (base64) {
+        setWaQrBase64(base64)
+        setWaShowQr(true)
+        setWaTimer(60)
+        setWaExpired(false)
+        // Timer de expiração do QR
+        if (waTimerRef.current) clearInterval(waTimerRef.current)
+        let t = 60
+        waTimerRef.current = setInterval(() => {
+          t -= 1
+          setWaTimer(t)
+          if (t <= 0) { clearInterval(waTimerRef.current!); waTimerRef.current = null; setWaExpired(true) }
+        }, 1000)
+        // Polling para detectar conexão bem-sucedida
+        if (waPollRef.current) clearInterval(waPollRef.current)
+        waPollRef.current = setInterval(fetchWaStatus, 3000)
+      }
+    } catch {}
+    setWaLoadingQr(false)
+  }
 
   const msg = (m: string) => { setMensagem(m); setTimeout(() => setMensagem(''), 3000) }
 
@@ -336,6 +399,68 @@ export default function AdminPage() {
         {/* ABA DASHBOARD */}
         {aba === 'dashboard' && (
           <div>
+
+            {/* ── Card WhatsApp ── */}
+            {waStatus === 'connected' && (
+              <div style={{ ...card, marginBottom: 16, border: '1px solid rgba(37,211,102,.35)', background: 'rgba(37,211,102,.07)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#25d366', boxShadow: '0 0 8px #25d36660', flexShrink: 0 }} />
+                  <div>
+                    <p style={{ color: '#4ade80', fontSize: 14, fontWeight: 700, margin: 0 }}>WhatsApp conectado</p>
+                    <p style={{ color: '#a39b8b', fontSize: 11, margin: '2px 0 0' }}>Bot ativo — atendimento automático ligado</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {waStatus === 'disconnected' && (
+              <div style={{ ...card, marginBottom: 16, border: waShowQr ? '1px solid #2a2520' : '1px solid rgba(251,191,36,.35)', background: waShowQr ? '#0e0c0a' : 'rgba(251,191,36,.07)' }}>
+                {!waShowQr ? (
+                  <>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                      <span style={{ fontSize: 18 }}>⚠️</span>
+                      <p style={{ color: '#fbbf24', fontSize: 14, fontWeight: 700, margin: 0 }}>Conectar WhatsApp</p>
+                    </div>
+                    <p style={{ color: '#a39b8b', fontSize: 12, margin: '0 0 12px', lineHeight: 1.5 }}>
+                      Nenhum WhatsApp está conectado. Escaneie o QR Code para ativar o atendimento automático.
+                    </p>
+                    <button onClick={fetchQrCode} disabled={waLoadingQr} style={{ width: '100%', background: '#25d366', border: 'none', borderRadius: 10, padding: '14px', color: '#fff', fontSize: 14, fontWeight: 700, cursor: waLoadingQr ? 'not-allowed' : 'pointer', opacity: waLoadingQr ? 0.7 : 1 }}>
+                      {waLoadingQr ? 'Gerando QR Code...' : '📷 Escanear QR Code'}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <p style={{ ...sectionTitle, marginBottom: 12 }}>Conectar WhatsApp</p>
+                    {waQrBase64 && !waExpired && (
+                      <div style={{ textAlign: 'center', marginBottom: 12 }}>
+                        <img src={waQrBase64} alt="QR Code WhatsApp" style={{ width: '100%', maxWidth: 220, borderRadius: 12, background: '#fff', padding: 10, boxSizing: 'border-box' }} />
+                      </div>
+                    )}
+                    {waExpired ? (
+                      <div style={{ textAlign: 'center', marginBottom: 12 }}>
+                        <p style={{ color: '#f87171', fontSize: 13, fontWeight: 600, margin: '0 0 12px' }}>QR Code expirado.</p>
+                        <button onClick={fetchQrCode} disabled={waLoadingQr} style={{ background: '#25d366', border: 'none', borderRadius: 10, padding: '12px 24px', color: '#fff', fontSize: 13, fontWeight: 700, cursor: waLoadingQr ? 'not-allowed' : 'pointer', opacity: waLoadingQr ? 0.7 : 1 }}>
+                          {waLoadingQr ? 'Gerando...' : '🔄 Gerar novo QR Code'}
+                        </button>
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                        <span style={{ color: '#a39b8b', fontSize: 13 }}>
+                          Expira em: <strong style={{ color: waTimer < 15 ? '#f87171' : '#fbbf24' }}>{waTimer}s</strong>
+                        </span>
+                        <button onClick={fetchQrCode} disabled={waLoadingQr} style={{ background: 'transparent', border: '1px solid #2a2520', borderRadius: 8, padding: '6px 12px', color: '#a39b8b', fontSize: 11, fontWeight: 700, cursor: waLoadingQr ? 'not-allowed' : 'pointer' }}>
+                          {waLoadingQr ? '...' : 'Novo QR'}
+                        </button>
+                      </div>
+                    )}
+                    <p style={{ color: '#4a4640', fontSize: 11, margin: 0, lineHeight: 1.5 }}>
+                      Abra o WhatsApp, toque em <strong>Aparelhos conectados</strong> e escaneie o código.
+                    </p>
+                  </>
+                )}
+              </div>
+            )}
+
             {/* Filtro de período */}
             <div style={{ display: 'flex', gap: 6, marginBottom: 16 }}>
               {(['ontem', 'hoje', 'semana'] as Periodo[]).map(p => (
