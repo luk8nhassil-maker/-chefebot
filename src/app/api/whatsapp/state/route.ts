@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { salvarStatusConexao } from '@/lib/conexaoWhatsapp'
 
 const BASE = 'https://evolution-api-production-8f99.up.railway.app'
 const KEY  = '6208711c1b6fdffcc30cb492a44d74601415c33ff717ef6032162f9c0056319e'
@@ -10,6 +11,14 @@ export async function GET() {
       cache: 'no-store',
     })
     const data = await res.json()
+
+    // Sincroniza o Redis com o estado real da Evolution API (fonte de verdade em caso de dúvida)
+    const state = data?.instance?.state as string | undefined
+    if (state) {
+      const status = state === 'open' ? 'connected' : state === 'connecting' ? 'connecting' : 'disconnected'
+      await salvarStatusConexao(status)
+    }
+
     return NextResponse.json(data)
   } catch {
     return NextResponse.json({ error: 'Falha ao conectar à API' }, { status: 502 })

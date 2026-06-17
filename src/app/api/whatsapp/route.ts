@@ -7,6 +7,7 @@ import { log } from "@/lib/logger";
 import { analisarComprovantePix } from "@/lib/analisarComprovante";
 import { transcreverAudio } from "@/lib/transcribeAudio";
 import { proximoNumeroPedido } from "@/lib/numeracao";
+import { salvarStatusConexao, botPodeResponder, StatusConexao } from "@/lib/conexaoWhatsapp";
 
 export const maxDuration = 30;
 
@@ -418,7 +419,30 @@ async function enviarRespostas(phone: string, messages: string[], config: Config
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
+
+    // Evento de mudança de status da conexão do WhatsApp (Evolution API).
+    // A Evolution envia "connection.update" com data.state podendo ser "open" (conectado),
+    // "connecting" (conectando/QR pendente) ou "close" (desconectado).
+    if (body.event === "connection.update") {
+      const state = body.data?.state as string | undefined;
+      const status: StatusConexao = state === "open" ? "connected" : state === "connecting" ? "connecting" : "disconnected";
+      await salvarStatusConexao(status);
+      await log("info", `WhatsApp connection.update: ${state} -> ${status}`, "");
+      return NextResponse.json({ ok: true });
+    }
+
     if (body.event !== "messages.upsert") return NextResponse.json({ ok: true });
+
+    // Se a conexão não está ativa, ainda assim aceitamos a requisição (não perdemos a
+    // mensagem que a Evolution já recebeu), mas pausamos a RESPOSTA automática do bot.
+    // Quando a conexão voltar, o cliente pode reenviar e o bot responde normalmente —
+    // nenhuma intervenção manual é necessária, e o servidor não precisa reiniciar.
+    const conexaoAtiva = await botPodeResponder();
+    if (!conexaoAtiva) {
+      await log("info", "Mensagem recebida com WhatsApp desconectado/conectando — resposta pausada", "");
+      return NextResponse.json({ ok: true });
+    }
+
     const data = body.data;
     if (data?.key?.fromMe) return NextResponse.json({ ok: true });
     const phone = data?.key?.remoteJid?.replace("@s.whatsapp.net", "");
