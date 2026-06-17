@@ -17,24 +17,57 @@ type MenuType = {
 
 // ==================== ADMIN CARDÁPIO ====================
 
-type Categoria = { label: string; itens: { nome: string; preco?: number }[] }
+type Produto = { nome: string; categoria: string; preco?: number }
+
+function normStr(s: string) {
+  return s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase()
+}
 
 function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void }) {
   const router = useRouter()
   const [esgotados, setEsgotados] = useState<string[]>(menu.esgotados || [])
-  const [salvando, setSalvando] = useState<string | null>(null)
-  const [toast, setToast] = useState("")
-  const toastRef = useRef<any>(null)
+  const [salvando, setSalvando] = useState<Set<string>>(new Set())
+  const [toast, setToast] = useState<{ msg: string; nome: string; era: boolean } | null>(null)
+  const [busca, setBusca] = useState("")
+  const [filtroStatus, setFiltroStatus] = useState<"todos" | "disponivel" | "esgotado">("todos")
+  const [filtroCat, setFiltroCat] = useState("todas")
+  const [modoSel, setModoSel] = useState(false)
+  const [selecionados, setSelecionados] = useState<Set<string>>(new Set())
+  const [confirmLote, setConfirmLote] = useState<"esgotado" | "disponivel" | null>(null)
+  const toastTimer = useRef<any>(null)
 
-  function showToast(msg: string) {
-    setToast(msg)
-    clearTimeout(toastRef.current)
-    toastRef.current = setTimeout(() => setToast(""), 2200)
-  }
+  const todos: Produto[] = [
+    ...(menu.saltyFlavors || []).map(f => ({ nome: f, categoria: "Salgados" })),
+    ...(menu.sweetFlavors || []).map(f => ({ nome: f, categoria: "Doces" })),
+    ...(menu.lanches || []).map(l => ({ nome: l.name, categoria: "Lanches", preco: l.price || undefined })),
+    ...(menu.bebidas || []).map(b => ({ nome: b.name, categoria: "Bebidas", preco: b.price })),
+    ...(menu.sucos || []).map(s => ({ nome: s.name, categoria: "Sucos", preco: s.price })),
+    ...(menu.borders || []).map(b => ({ nome: b.label, categoria: "Bordas" })),
+  ]
 
-  async function toggleEsgotado(nome: string) {
-    const novoEstado = !esgotados.includes(nome)
-    setSalvando(nome)
+  const CATS = ["todas", ...Array.from(new Set(todos.map(p => p.categoria)))]
+  const CAT_ICON: Record<string, string> = { todas: "☰", Salgados: "🍕", Doces: "🍬", Lanches: "🍔", Bebidas: "🥤", Sucos: "🧃", Bordas: "🧀" }
+
+  const totalProd = todos.length
+  const totalEsg = esgotados.length
+  const totalDisp = totalProd - totalEsg
+
+  const bNorm = normStr(busca)
+  const lista = todos
+    .filter(p => {
+      if (bNorm && !normStr(p.nome).includes(bNorm)) return false
+      if (filtroCat !== "todas" && p.categoria !== filtroCat) return false
+      if (filtroStatus === "disponivel" && esgotados.includes(p.nome)) return false
+      if (filtroStatus === "esgotado" && !esgotados.includes(p.nome)) return false
+      return true
+    })
+    .sort((a, b) => {
+      const ae = esgotados.includes(a.nome), be = esgotados.includes(b.nome)
+      return ae === be ? 0 : ae ? -1 : 1
+    })
+
+  async function toggleEsgotado(nome: string, novoEstado: boolean, withToast = true) {
+    setSalvando(prev => new Set([...prev, nome]))
     try {
       const r = await fetch("/api/cardapio", {
         method: "PATCH",
@@ -43,24 +76,54 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
       })
       const d = await r.json()
       if (d.ok) {
-        setEsgotados(d.esgotados || (novoEstado ? [...esgotados, nome] : esgotados.filter(e => e !== nome)))
-        showToast(novoEstado ? `${nome} marcado como esgotado` : `${nome} disponível novamente`)
+        setEsgotados(d.esgotados || [])
+        if (withToast) {
+          clearTimeout(toastTimer.current)
+          const msg = novoEstado
+            ? `${nome} esgotado. O bot não vai vender esse produto.`
+            : `${nome} disponível. O bot já pode vender novamente.`
+          setToast({ msg, nome, era: !novoEstado })
+          toastTimer.current = setTimeout(() => setToast(null), 5500)
+        }
       }
-    } catch {
-      showToast("Erro ao salvar")
-    }
-    setSalvando(null)
+    } catch {}
+    setSalvando(prev => { const n = new Set(prev); n.delete(nome); return n })
   }
 
-  const categorias: Categoria[] = [
-    { label: "Sabores Salgados", itens: (menu.saltyFlavors || []).map(f => ({ nome: f })) },
-    { label: "Sabores Doces", itens: (menu.sweetFlavors || []).map(f => ({ nome: f })) },
-    { label: "Lanches & Porções", itens: (menu.lanches || []).map(l => ({ nome: l.name, preco: l.price })) },
-    { label: "Bebidas", itens: (menu.bebidas || []).map(b => ({ nome: b.name, preco: b.price })) },
-    { label: "Sucos", itens: (menu.sucos || []).map(s => ({ nome: s.name, preco: s.price })) },
-  ]
+  async function desfazer() {
+    if (!toast || !toast.nome) return
+    clearTimeout(toastTimer.current)
+    const voltarPara = toast.era
+    setToast(null)
+    await toggleEsgotado(toast.nome, voltarPara, false)
+  }
 
-  const totalEsgotados = esgotados.length
+  function toggleSel(nome: string) {
+    setSelecionados(prev => {
+      const n = new Set(prev)
+      if (n.has(nome)) n.delete(nome); else n.add(nome)
+      return n
+    })
+  }
+
+  async function aplicarLote(esgotado: boolean) {
+    setConfirmLote(null)
+    const lista = Array.from(selecionados)
+    for (const nome of lista) {
+      await toggleEsgotado(nome, esgotado, false)
+    }
+    const count = lista.length
+    setSelecionados(new Set())
+    setModoSel(false)
+    clearTimeout(toastTimer.current)
+    const msg = esgotado
+      ? `${count} produto${count > 1 ? "s" : ""} marcado${count > 1 ? "s" : ""} como esgotado${count > 1 ? "s" : ""}. O bot não vai vender.`
+      : `${count} produto${count > 1 ? "s" : ""} voltou${count > 1 ? "ram" : ""} a ficar disponíve${count > 1 ? "is" : "l"}. O bot já pode vender.`
+    setToast({ msg, nome: "", era: !esgotado })
+    toastTimer.current = setTimeout(() => setToast(null), 4000)
+  }
+
+  const inputStyle: React.CSSProperties = { width: "100%", height: 48, background: "#0d0d0d", border: "1px solid #242220", borderRadius: 12, padding: "0 42px 0 14px", color: "#f5f2ee", fontSize: 15, fontWeight: 700, fontFamily: "'Archivo', sans-serif", boxSizing: "border-box", outline: "none", transition: "border-color .15s, box-shadow .15s" }
 
   return (
     <>
@@ -69,65 +132,235 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
         html, body { margin: 0; padding: 0; background: #060606; }
         button { cursor: pointer; font-family: 'Archivo', sans-serif; }
-        @keyframes cbToast { from{opacity:0;transform:translateY(14px)} to{opacity:1;transform:none} }
+        @keyframes cbToastIn { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:none} }
+        @keyframes cbFadeIn { from{opacity:0} to{opacity:1} }
+        @keyframes cbSheetUp { from{transform:translateY(100%)} to{transform:none} }
+        @keyframes cbItemIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:none} }
+        .cbBusca::placeholder { color: #3a3730; }
+        .cbBusca:focus { border-color: #ff6b00 !important; box-shadow: 0 0 0 3px rgba(255,107,0,.1); }
+        .cbCatScroll { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
+        .cbCatScroll::-webkit-scrollbar { display: none; }
+        .cbItem { transition: border-color .12s, background .12s; }
+        .cbItem:active { opacity: 0.85; }
       `}</style>
 
-      <div style={{ minHeight: "100svh", maxWidth: 375, margin: "0 auto", background: "#060606", color: "#f5f2ee", fontFamily: "'Archivo', sans-serif", paddingBottom: "calc(env(safe-area-inset-bottom) + 90px)" }}>
+      <div style={{ minHeight: "100svh", maxWidth: 375, margin: "0 auto", background: "#060606", color: "#f5f2ee", fontFamily: "'Archivo', sans-serif", display: "flex", flexDirection: "column", paddingBottom: "calc(env(safe-area-inset-bottom) + 90px)" }}>
 
-        <header style={{ display: "flex", alignItems: "center", gap: 12, padding: "calc(env(safe-area-inset-top) + 18px) 16px 12px" }}>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: "-0.4px" }}>Cardápio</div>
-            <div style={{ fontSize: 11, color: "#5a564d", fontWeight: 700, marginTop: 2 }}>
-              {totalEsgotados > 0 ? `${totalEsgotados} item${totalEsgotados > 1 ? "s" : ""} esgotado${totalEsgotados > 1 ? "s" : ""}` : "Todos disponíveis"}
+        {/* Header sticky */}
+        <header style={{ position: "sticky", top: 0, zIndex: 30, background: "#060606", borderBottom: "1px solid #181614", padding: "calc(env(safe-area-inset-top) + 12px) 16px 12px" }}>
+
+          {/* Título + ações */}
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+            <div style={{ flex: 1 }}>
+              <span style={{ fontSize: 20, fontWeight: 900, letterSpacing: "-0.4px" }}>Cardápio</span>
+            </div>
+            <button
+              onClick={() => { setModoSel(!modoSel); setSelecionados(new Set()) }}
+              style={{ height: 34, padding: "0 12px", border: `1px solid ${modoSel ? "#ff6b00" : "#242220"}`, borderRadius: 10, background: modoSel ? "rgba(255,107,0,.15)" : "transparent", color: modoSel ? "#ff6b00" : "#5a564d", fontSize: 12, fontWeight: 900 }}
+            >{modoSel ? "Cancelar" : "Selecionar"}</button>
+            <button onClick={onSair} style={{ height: 34, padding: "0 12px", border: "1px solid #1f1d1a", borderRadius: 10, background: "transparent", color: "#5a564d", fontSize: 12, fontWeight: 800 }}>Sair</button>
+          </div>
+
+          {/* Métricas */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: 10 }}>
+            <div style={{ background: "#0e0e0e", border: "1px solid #1a1a1a", borderRadius: 12, padding: "10px 8px", textAlign: "center" }}>
+              <div style={{ fontSize: 24, fontWeight: 900, color: "#22c55e", lineHeight: 1 }}>{totalDisp}</div>
+              <div style={{ fontSize: 9, fontWeight: 900, color: "#22c55e", textTransform: "uppercase", letterSpacing: ".5px", marginTop: 3, opacity: .7 }}>Disponíveis</div>
+            </div>
+            <div style={{ background: totalEsg > 0 ? "rgba(239,68,68,.06)" : "#0e0e0e", border: `1px solid ${totalEsg > 0 ? "rgba(239,68,68,.3)" : "#1a1a1a"}`, borderRadius: 12, padding: "10px 8px", textAlign: "center" }}>
+              <div style={{ fontSize: 24, fontWeight: 900, color: totalEsg > 0 ? "#ef4444" : "#3a3730", lineHeight: 1 }}>{totalEsg}</div>
+              <div style={{ fontSize: 9, fontWeight: 900, color: totalEsg > 0 ? "#ef4444" : "#3a3730", textTransform: "uppercase", letterSpacing: ".5px", marginTop: 3, opacity: .7 }}>Esgotados</div>
+            </div>
+            <div style={{ background: "#0e0e0e", border: "1px solid #1a1a1a", borderRadius: 12, padding: "10px 8px", textAlign: "center" }}>
+              <div style={{ fontSize: 24, fontWeight: 900, color: "#a39b8b", lineHeight: 1 }}>{totalProd}</div>
+              <div style={{ fontSize: 9, fontWeight: 900, color: "#56524b", textTransform: "uppercase", letterSpacing: ".5px", marginTop: 3, opacity: .7 }}>Total</div>
             </div>
           </div>
-          <button onClick={onSair} style={{ fontSize: 11, fontWeight: 800, color: "#5a564d", background: "transparent", border: "1px solid #1f1d1a", padding: "6px 10px", borderRadius: 20 }}>Sair</button>
+
+          {/* Aviso bot */}
+          {totalEsg > 0 && (
+            <div style={{ background: "rgba(239,68,68,.05)", border: "1px solid rgba(239,68,68,.18)", borderRadius: 10, padding: "8px 12px", marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#ef4444", flexShrink: 0 }} />
+              <span style={{ fontSize: 12, fontWeight: 700, color: "#f87171" }}>Bot bloqueando {totalEsg} produto{totalEsg > 1 ? "s" : ""} esgotado{totalEsg > 1 ? "s" : ""}.</span>
+            </div>
+          )}
+
+          {/* Busca */}
+          <div style={{ position: "relative", marginBottom: 8 }}>
+            <input
+              className="cbBusca"
+              type="text"
+              placeholder="Buscar produto..."
+              value={busca}
+              onChange={e => setBusca(e.target.value)}
+              style={inputStyle}
+            />
+            {busca
+              ? <button onClick={() => setBusca("")} style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: "#5a564d", fontSize: 20, lineHeight: 1, padding: "2px 4px" }}>×</button>
+              : <svg style={{ position: "absolute", right: 14, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="#3a3730" strokeWidth="2.2"/><path d="M16.5 16.5l3.5 3.5" stroke="#3a3730" strokeWidth="2.2" strokeLinecap="round"/></svg>
+            }
+          </div>
+
+          {/* Filtros status */}
+          <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+            {(["todos", "disponivel", "esgotado"] as const).map(f => {
+              const COUNT = { todos: totalProd, disponivel: totalDisp, esgotado: totalEsg }
+              const LABEL = { todos: "Todos", disponivel: "Disponíveis", esgotado: "Esgotados" }
+              const COLOR = { todos: "#ff6b00", disponivel: "#22c55e", esgotado: "#ef4444" }
+              const active = filtroStatus === f
+              return (
+                <button key={f} onClick={() => setFiltroStatus(f)} style={{ flex: 1, height: 36, border: `1px solid ${active ? COLOR[f] : "#1f1d1a"}`, borderRadius: 10, background: active ? `${COLOR[f]}1a` : "transparent", color: active ? COLOR[f] : "#5a564d", fontSize: 11, fontWeight: 900, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 1 }}>
+                  <span style={{ fontSize: 14, fontWeight: 900, lineHeight: 1 }}>{COUNT[f]}</span>
+                  <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: ".3px" }}>{LABEL[f]}</span>
+                </button>
+              )
+            })}
+          </div>
+
+          {/* Filtros categoria */}
+          <div className="cbCatScroll">
+            {CATS.map(cat => (
+              <button key={cat} onClick={() => setFiltroCat(cat)} style={{ height: 30, padding: "0 10px", border: `1px solid ${filtroCat === cat ? "#ff6b00" : "#1f1d1a"}`, borderRadius: 8, background: filtroCat === cat ? "rgba(255,107,0,.15)" : "#0e0e0e", color: filtroCat === cat ? "#ff6b00" : "#56524b", fontSize: 11, fontWeight: 900, whiteSpace: "nowrap", flexShrink: 0 }}>
+                {CAT_ICON[cat] || "•"} {cat === "todas" ? "Tudo" : cat}
+              </button>
+            ))}
+          </div>
         </header>
 
-        {totalEsgotados > 0 && (
-          <div style={{ margin: "0 16px 12px", padding: "12px 14px", background: "rgba(239,68,68,.06)", border: "1px solid rgba(239,68,68,.25)", borderRadius: 14 }}>
-            <div style={{ fontSize: 12, fontWeight: 900, color: "#ef4444", marginBottom: 6 }}>Esgotados agora</div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-              {esgotados.map(e => (
-                <span key={e} style={{ background: "rgba(239,68,68,.1)", color: "#f87171", fontSize: 11, fontWeight: 800, padding: "3px 9px", borderRadius: 8, border: "1px solid rgba(239,68,68,.25)" }}>{e}</span>
-              ))}
-            </div>
+        {/* Barra lote */}
+        {modoSel && selecionados.size > 0 && (
+          <div style={{ background: "#0f0e0c", borderBottom: "1px solid #1f1d1a", padding: "10px 16px", display: "flex", alignItems: "center", gap: 8, zIndex: 29 }}>
+            <span style={{ flex: 1, fontSize: 13, fontWeight: 800, color: "#c9c2b4" }}>{selecionados.size} selecionado{selecionados.size > 1 ? "s" : ""}</span>
+            <button onClick={() => setConfirmLote("esgotado")} style={{ height: 36, padding: "0 12px", border: "1px solid rgba(239,68,68,.35)", borderRadius: 10, background: "rgba(239,68,68,.1)", color: "#ef4444", fontSize: 12, fontWeight: 900 }}>Esgotar</button>
+            <button onClick={() => setConfirmLote("disponivel")} style={{ height: 36, padding: "0 12px", border: "1px solid rgba(34,197,94,.35)", borderRadius: 10, background: "rgba(34,197,94,.1)", color: "#22c55e", fontSize: 12, fontWeight: 900 }}>Disponibilizar</button>
           </div>
         )}
 
-        <div style={{ padding: "0 16px" }}>
-          {categorias.map(cat => (
-            <div key={cat.label} style={{ marginBottom: 24 }}>
-              <div style={{ fontSize: 10, fontWeight: 900, letterSpacing: "1.2px", textTransform: "uppercase", color: "#56524b", marginBottom: 8 }}>{cat.label}</div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {cat.itens.map(item => {
-                  const esg = esgotados.includes(item.nome)
-                  const loading = salvando === item.nome
-                  return (
-                    <div key={item.nome} style={{ background: esg ? "rgba(239,68,68,.04)" : "#101010", border: `1px solid ${esg ? "rgba(239,68,68,.3)" : "#1f1d1a"}`, borderRadius: 14, padding: "12px 14px", display: "flex", alignItems: "center", gap: 10 }}>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 14, fontWeight: 800, color: esg ? "#f87171" : "#f4f1ec", textDecoration: esg ? "line-through" : "none", opacity: esg ? 0.7 : 1 }}>{item.nome}</div>
-                        {item.preco ? <div style={{ fontSize: 11, color: "#5a564d", marginTop: 2 }}>R$ {item.preco.toFixed(2).replace(".", ",")}</div> : null}
-                      </div>
-                      <button
-                        onClick={() => toggleEsgotado(item.nome)}
-                        disabled={loading}
-                        style={{
-                          height: 34, padding: "0 14px", border: "none", borderRadius: 10, fontSize: 12, fontWeight: 900, flexShrink: 0, opacity: loading ? 0.6 : 1,
-                          background: esg ? "rgba(34,197,94,.12)" : "rgba(239,68,68,.1)",
-                          color: esg ? "#22c55e" : "#ef4444",
-                        }}
-                      >
-                        {loading ? "..." : esg ? "Disponível" : "Esgotado"}
-                      </button>
-                    </div>
-                  )
-                })}
+        {/* Lista */}
+        <main style={{ padding: "10px 16px", display: "flex", flexDirection: "column", gap: 6, flex: 1 }}>
+
+          {/* Estado vazio */}
+          {lista.length === 0 && (
+            <div style={{ background: "#0e0e0e", border: "1px dashed #242220", borderRadius: 16, padding: "40px 20px", textAlign: "center", marginTop: 4 }}>
+              <div style={{ fontSize: 36, marginBottom: 10 }}>{busca ? "🔍" : filtroStatus === "esgotado" ? "✅" : "📦"}</div>
+              <div style={{ fontSize: 15, fontWeight: 900, color: "#c9c2b4" }}>
+                {busca
+                  ? "Nenhum produto encontrado com esse nome."
+                  : filtroStatus === "esgotado"
+                  ? "Nenhum produto esgotado agora."
+                  : "Nenhum produto disponível."}
               </div>
             </div>
-          ))}
-        </div>
+          )}
 
+          {lista.map((produto, idx) => {
+            const esg = esgotados.includes(produto.nome)
+            const loading = salvando.has(produto.nome)
+            const sel = selecionados.has(produto.nome)
+
+            return (
+              <div
+                key={produto.nome}
+                className="cbItem"
+                onClick={() => modoSel && toggleSel(produto.nome)}
+                style={{
+                  background: sel ? "rgba(255,107,0,.05)" : esg ? "rgba(239,68,68,.04)" : "#0e0e0e",
+                  border: `1.5px solid ${sel ? "#ff6b00" : esg ? "rgba(239,68,68,.28)" : "#1a1a1a"}`,
+                  borderRadius: 14,
+                  padding: "14px 14px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 12,
+                  cursor: modoSel ? "pointer" : "default",
+                  animation: `cbItemIn .2s ease ${Math.min(idx * 0.02, 0.15)}s both`,
+                }}
+              >
+                {/* Checkbox seleção */}
+                {modoSel && (
+                  <div style={{ width: 26, height: 26, borderRadius: 8, border: `2px solid ${sel ? "#ff6b00" : "#3a3730"}`, background: sel ? "#ff6b00" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: 15, color: "#fff", fontWeight: 900, transition: "all .12s" }}>
+                    {sel ? "✓" : ""}
+                  </div>
+                )}
+
+                {/* Informações */}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 15, fontWeight: 800, color: esg ? "#ef4444" : "#f4f1ec", textDecoration: esg ? "line-through" : "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginBottom: 5 }}>
+                    {produto.nome}
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                    <span style={{ fontSize: 10, fontWeight: 900, color: "#56524b", background: "#181614", padding: "2px 8px", borderRadius: 6 }}>{produto.categoria}</span>
+                    {produto.preco != null && produto.preco > 0 && (
+                      <span style={{ fontSize: 11, fontWeight: 700, color: "#a39b8b" }}>R$ {produto.preco.toFixed(2).replace(".", ",")}</span>
+                    )}
+                    <span style={{ fontSize: 11, fontWeight: 900, color: esg ? "#ef4444" : "#22c55e" }}>
+                      {esg ? "Bot bloqueado" : "Vendendo agora"}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Botão ação */}
+                {!modoSel && (
+                  <button
+                    onClick={e => { e.stopPropagation(); if (!loading) toggleEsgotado(produto.nome, !esg) }}
+                    disabled={loading}
+                    style={{
+                      height: 46,
+                      padding: "0 14px",
+                      border: `1.5px solid ${esg ? "rgba(34,197,94,.4)" : "rgba(239,68,68,.4)"}`,
+                      borderRadius: 12,
+                      background: esg ? "rgba(34,197,94,.1)" : "rgba(239,68,68,.1)",
+                      color: esg ? "#22c55e" : "#ef4444",
+                      fontSize: 12,
+                      fontWeight: 900,
+                      flexShrink: 0,
+                      minWidth: 120,
+                      opacity: loading ? 0.6 : 1,
+                      transition: "opacity .15s",
+                    }}
+                  >
+                    {loading ? "..." : esg ? "Voltar a vender" : "Marcar esgotado"}
+                  </button>
+                )}
+              </div>
+            )
+          })}
+        </main>
+
+        {/* Toast com desfazer */}
+        {toast && (
+          <div style={{ position: "fixed", bottom: "calc(env(safe-area-inset-bottom) + 92px)", left: 0, right: 0, margin: "0 auto", width: "calc(100% - 32px)", maxWidth: 375, background: "#1c1a16", border: "1px solid #2e2b26", borderRadius: 16, padding: "13px 14px", display: "flex", alignItems: "center", gap: 10, animation: "cbToastIn .25s ease both", zIndex: 50, boxShadow: "0 8px 28px rgba(0,0,0,.6)", fontFamily: "'Archivo', sans-serif" }}>
+            <p style={{ flex: 1, fontSize: 13, fontWeight: 700, color: "#c9c2b4", margin: 0, lineHeight: 1.45 }}>{toast.msg}</p>
+            {toast.nome && (
+              <button onClick={desfazer} style={{ border: "none", background: "rgba(255,107,0,.15)", color: "#ff6b00", fontSize: 12, fontWeight: 900, padding: "9px 13px", borderRadius: 10, flexShrink: 0 }}>Desfazer</button>
+            )}
+          </div>
+        )}
+
+        {/* Modal confirmação lote */}
+        {confirmLote && (
+          <>
+            <div onClick={() => setConfirmLote(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.72)", zIndex: 60, animation: "cbFadeIn .2s ease" }} />
+            <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, margin: "0 auto", maxWidth: 375, background: "#121110", border: "1px solid #242220", borderBottom: "none", borderRadius: "24px 24px 0 0", zIndex: 61, animation: "cbSheetUp .3s cubic-bezier(.2,.9,.3,1) both", padding: "20px 20px calc(env(safe-area-inset-bottom) + 28px)", display: "flex", flexDirection: "column", gap: 12 }}>
+              <div style={{ width: 44, height: 5, borderRadius: 3, background: "#2e2b26", margin: "0 auto 4px" }} />
+              <p style={{ margin: 0, fontSize: 18, fontWeight: 900, letterSpacing: "-0.3px" }}>
+                {confirmLote === "esgotado"
+                  ? `Esgotar ${selecionados.size} produto${selecionados.size > 1 ? "s" : ""}?`
+                  : `Disponibilizar ${selecionados.size} produto${selecionados.size > 1 ? "s" : ""}?`}
+              </p>
+              <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: "#a39b8b", lineHeight: 1.5 }}>
+                {confirmLote === "esgotado"
+                  ? "O bot vai parar de vender esses produtos imediatamente."
+                  : "O bot vai voltar a oferecer esses produtos."}
+              </p>
+              <button onClick={() => aplicarLote(confirmLote === "esgotado")} style={{ height: 54, border: "none", borderRadius: 14, background: confirmLote === "esgotado" ? "#ef4444" : "#22c55e", color: "#fff", fontSize: 16, fontWeight: 900 }}>
+                {confirmLote === "esgotado" ? "Marcar esgotados" : "Disponibilizar todos"}
+              </button>
+              <button onClick={() => setConfirmLote(null)} style={{ height: 44, border: "none", background: "transparent", color: "#a39b8b", fontSize: 14, fontWeight: 800 }}>Cancelar</button>
+            </div>
+          </>
+        )}
+
+        {/* Nav */}
         <nav style={{ position: "fixed", bottom: 0, left: 0, right: 0, margin: "0 auto", maxWidth: 375, background: "rgba(8,8,8,.94)", backdropFilter: "blur(14px)", borderTop: "1px solid #1f1d1a", display: "grid", gridTemplateColumns: "1fr 1fr 1fr", padding: "10px 8px calc(env(safe-area-inset-bottom) + 18px)", zIndex: 40 }}>
           <button onClick={() => router.push("/pedidos")} style={{ border: "none", background: "transparent", display: "flex", flexDirection: "column", alignItems: "center", gap: 5, padding: "6px 0" }}>
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="4" y="3" width="16" height="18" rx="3" stroke="#5a564d" strokeWidth="2.2"/><line x1="8" y1="9" x2="16" y2="9" stroke="#5a564d" strokeWidth="2.2" strokeLinecap="round"/><line x1="8" y1="14" x2="13" y2="14" stroke="#5a564d" strokeWidth="2.2" strokeLinecap="round"/></svg>
@@ -143,12 +376,6 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
           </button>
         </nav>
       </div>
-
-      {toast && (
-        <div style={{ position: "fixed", bottom: 96, left: 0, right: 0, margin: "0 auto", width: "calc(100% - 32px)", maxWidth: 343, background: "#1c1a16", border: "1px solid #33302a", borderRadius: 14, padding: "12px 16px", fontSize: 13, fontWeight: 800, color: "#f5f2ee", textAlign: "center", animation: "cbToast .25s ease both", zIndex: 80, fontFamily: "'Archivo', sans-serif" }}>
-          {toast}
-        </div>
-      )}
     </>
   )
 }
