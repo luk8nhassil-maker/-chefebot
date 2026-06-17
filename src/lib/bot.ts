@@ -1236,7 +1236,9 @@ Vai querer entrega ou prefere buscar na loja? Se for entrega, me informa seu end
         return { ...resp, session: resetaTentativas(resp.session) };
       }
       // Finalizar -> vai DIRETO pra entrega
-      if (eNegativa(n) || n.includes("finalizar") || n.includes("fechar") || n.includes("pode fechar") || n.includes("so isso") || n.includes("e so") || n.includes("nao quero")) {
+      if (eNegativa(n) || n.includes("finalizar") || n.includes("fechar") || n.includes("so isso") ||
+        n.includes("e so") || n.includes("e isso") || n.includes("nao quero") || n.includes("ja esta bom") ||
+        n.includes("ja ta bom") || n.includes("nao precisa mais") || n.includes("nada mais") || n.includes("por hoje")) {
         return {
           messages: [`Show! Vamos fechar então 🍕\n\nVai querer entrega ou prefere buscar aqui na loja? 😊`],
           session: resetaTentativas({ ...session, step: "delivery_type" }),
