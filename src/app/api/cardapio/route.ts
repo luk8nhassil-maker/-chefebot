@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { redis } from '@/lib/redis'
-import { MENU } from '@/lib/menu'
+import { MENU, getMENUDinamico } from '@/lib/menu'
 
 export async function GET() {
   try {
-    const cardapio = await redis.get('cardapio')
+    const menu = await getMENUDinamico()
     const esgotados = (await redis.get<string[]>('esgotados')) || []
-    const menu = cardapio || MENU
-    return NextResponse.json({ ...(menu as object), esgotados })
+    return NextResponse.json({ ...menu, esgotados })
   } catch {
     return NextResponse.json({ ...MENU, esgotados: [] })
   }

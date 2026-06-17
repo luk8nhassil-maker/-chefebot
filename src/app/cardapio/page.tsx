@@ -53,11 +53,11 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
   }
 
   const categorias: Categoria[] = [
-    { label: "Sabores Salgados", itens: menu.saltyFlavors.map(f => ({ nome: f })) },
-    { label: "Sabores Doces", itens: menu.sweetFlavors.map(f => ({ nome: f })) },
-    { label: "Lanches & Porções", itens: menu.lanches.map(l => ({ nome: l.name, preco: l.price })) },
-    { label: "Bebidas", itens: menu.bebidas.map(b => ({ nome: b.name, preco: b.price })) },
-    { label: "Sucos", itens: menu.sucos.map(s => ({ nome: s.name, preco: s.price })) },
+    { label: "Sabores Salgados", itens: (menu.saltyFlavors || []).map(f => ({ nome: f })) },
+    { label: "Sabores Doces", itens: (menu.sweetFlavors || []).map(f => ({ nome: f })) },
+    { label: "Lanches & Porções", itens: (menu.lanches || []).map(l => ({ nome: l.name, preco: l.price })) },
+    { label: "Bebidas", itens: (menu.bebidas || []).map(b => ({ nome: b.name, preco: b.price })) },
+    { label: "Sucos", itens: (menu.sucos || []).map(s => ({ nome: s.name, preco: s.price })) },
   ]
 
   const totalEsgotados = esgotados.length
@@ -200,7 +200,7 @@ function PublicCardapio({ menu }: { menu: MenuType }) {
   function goPizza() { go("sc-qty"); }
   function setPizzaQty(q: number) { setPlan(q === 0 ? { total: 0, current: 1, openEnded: true } : { total: q, current: 1, openEnded: false }); resetBuild(); go("sc-build"); }
   function pizzasNoCarrinho() { return cart.filter((c) => c.kind === "pizza").length; }
-  function pickSize(code: string) { const s = menu.sizes.find((x) => x.code === code)!; setSize(code); setSizePrice(s.price); }
+  function pickSize(code: string) { const s = (menu.sizes || []).find((x) => x.code === code); if (!s) return; setSize(code); setSizePrice(s.price); }
   function toggleMam() { setMam(!mam); setF1(null); setF2(null); }
   function pickFlavor(f: string) {
     if (!mam) { setF1(f); return; }
@@ -210,7 +210,7 @@ function PublicCardapio({ menu }: { menu: MenuType }) {
   const buildOk = !!size && flavorOk;
   function pickBorder(idx: string) {
     if (idx === "") { setBorder(null); setBorderPrice(0); }
-    else { const b = menu.borders[+idx]; setBorder(b.label); setBorderPrice(bigBorder(size!) ? b.priceLarge : b.priceSmall); }
+    else { const b = (menu.borders || [])[+idx]; if (!b) return; setBorder(b.label); setBorderPrice(bigBorder(size!) ? b.priceLarge : b.priceSmall); }
   }
   function addPizza() {
     const flavor = mam ? `${f1} / ${f2}` : f1;
@@ -234,7 +234,7 @@ function PublicCardapio({ menu }: { menu: MenuType }) {
   const cartCount = cart.reduce((s, i) => s + i.qty, 0);
   function chQty(idx: number, d: number) { setCart(cart.map((c, i) => (i === idx ? { ...c, qty: Math.max(1, c.qty + d) } : c))); }
   function rmItem(idx: number) { const nc = cart.filter((_, i) => i !== idx); setCart(nc); if (nc.length === 0) go("sc-start"); }
-  const fee = delType === "delivery" && bairroIdx !== "" ? menu.neighborhoods[+bairroIdx].fee : 0;
+  const fee = delType === "delivery" && bairroIdx !== "" ? ((menu.neighborhoods || [])[+bairroIdx]?.fee ?? 0) : 0;
   const delOk = delType === "retirada" || (delType === "delivery" && bairroIdx !== "");
   const payOk = !!nome.trim() && !!payment;
 
@@ -286,7 +286,7 @@ function PublicCardapio({ menu }: { menu: MenuType }) {
           {screen === "sc-start" && (
             <section className="screen active">
               <div className="screen-head"><div className="eyebrow">Bora montar</div><h2>O que vai ser hoje?</h2><p>Escolha por onde começar.</p></div>
-              <div className="opt" onClick={goPizza}><div className="opt-emoji">🍕</div><div className="opt-body"><div className="opt-title">Pizza</div><div className="opt-desc">{menu.saltyFlavors.filter(f => !esgotados.includes(f)).length} salgadas, {menu.sweetFlavors.filter(f => !esgotados.includes(f)).length} doces · meio a meio</div></div><div className="opt-price">{money(menu.sizes[0].price)}+</div></div>
+              <div className="opt" onClick={goPizza}><div className="opt-emoji">🍕</div><div className="opt-body"><div className="opt-title">Pizza</div><div className="opt-desc">{(menu.saltyFlavors || []).filter(f => !esgotados.includes(f)).length} salgadas, {(menu.sweetFlavors || []).filter(f => !esgotados.includes(f)).length} doces · meio a meio</div></div><div className="opt-price">{menu.sizes?.[0] ? money(menu.sizes[0].price) + "+" : ""}</div></div>
               <div className="opt" onClick={() => goCat("lanche")}><div className="opt-emoji">🥪</div><div className="opt-body"><div className="opt-title">Lanches & Porções</div><div className="opt-desc">Calzone, X-burguer, batata…</div></div></div>
               <div className="opt" onClick={() => goCat("bebida")}><div className="opt-emoji">🥤</div><div className="opt-body"><div className="opt-title">Bebidas</div><div className="opt-desc">Refri, guaraná, água, cerveja</div></div></div>
               <div className="opt" onClick={() => goCat("suco")}><div className="opt-emoji">🧃</div><div className="opt-body"><div className="opt-title">Sucos naturais</div><div className="opt-desc">Cajá, caju, maracujá…</div></div></div>
@@ -309,12 +309,12 @@ function PublicCardapio({ menu }: { menu: MenuType }) {
               <PizzaCtx />
               <div className="screen-head"><div className="eyebrow">Monte sua pizza</div><h2>Tamanho e sabor</h2></div>
               <div className="section-label">📏 Tamanho</div>
-              <div className="grid2">{menu.sizes.map((s) => (<div key={s.code} className={`opt ${size === s.code ? "sel" : ""}`} onClick={() => pickSize(s.code)}><div className="opt-check" /><div className="opt-emoji">🍕</div><div className="opt-body"><div className="opt-title">{s.label}</div><div className="opt-desc">{money(s.price)}</div></div></div>))}</div>
+              <div className="grid2">{(menu.sizes || []).map((s) => (<div key={s.code} className={`opt ${size === s.code ? "sel" : ""}`} onClick={() => pickSize(s.code)}><div className="opt-check" /><div className="opt-emoji">🍕</div><div className="opt-body"><div className="opt-title">{s.label}</div><div className="opt-desc">{money(s.price)}</div></div></div>))}</div>
               <div className="section-label">🍕 Sabor</div>
               <div className={`mam ${mam ? "on" : ""}`} onClick={toggleMam}><div className="mam-txt"><strong>Meio a meio</strong><p>Dois sabores numa pizza</p></div><div className="switch" /></div>
               {mam && <div className="half-hint show">{!f1 ? "Toque na 1ª metade" : !f2 ? `1ª: ${f1} — agora a 2ª` : `✓ ${f1} / ${f2}`}</div>}
               <div className="section-label">Salgadas</div>
-              {menu.saltyFlavors.map((f) => {
+              {(menu.saltyFlavors || []).map((f) => {
                 const esg = esgotados.includes(f)
                 return (
                   <div key={f} className={`opt ${f === f1 || f === f2 ? "sel" : ""} ${esg ? "esg" : ""}`} onClick={() => !esg && pickFlavor(f)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }}>
@@ -323,7 +323,7 @@ function PublicCardapio({ menu }: { menu: MenuType }) {
                 )
               })}
               <div className="section-label">Doces</div>
-              {menu.sweetFlavors.map((f) => {
+              {(menu.sweetFlavors || []).map((f) => {
                 const esg = esgotados.includes(f)
                 return (
                   <div key={f} className={`opt ${f === f1 || f === f2 ? "sel" : ""}`} onClick={() => !esg && pickFlavor(f)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }}>
@@ -339,7 +339,7 @@ function PublicCardapio({ menu }: { menu: MenuType }) {
               <PizzaCtx />
               <div className="screen-head"><div className="eyebrow">Quase pronta</div><h2>Borda recheada?</h2><p>Opcional.</p></div>
               <div className={`opt ${border === null ? "sel" : ""}`} onClick={() => pickBorder("")}><div className="opt-emoji">⭕</div><div className="opt-body"><div className="opt-title">Sem borda</div><div className="opt-desc">Tradicional</div></div><div className="opt-price">Grátis</div><div className="opt-check" /></div>
-              {menu.borders.map((b, i) => { const p = bigBorder(size!) ? b.priceLarge : b.priceSmall; return (<div key={i} className={`opt ${border === b.label ? "sel" : ""}`} onClick={() => pickBorder(String(i))}><div className="opt-emoji">🧀</div><div className="opt-body"><div className="opt-title">{b.label}</div></div><div className="opt-price">+{money(p)}</div><div className="opt-check" /></div>); })}
+              {(menu.borders || []).map((b, i) => { const p = bigBorder(size!) ? b.priceLarge : b.priceSmall; return (<div key={i} className={`opt ${border === b.label ? "sel" : ""}`} onClick={() => pickBorder(String(i))}><div className="opt-emoji">🧀</div><div className="opt-body"><div className="opt-title">{b.label}</div></div><div className="opt-price">+{money(p)}</div><div className="opt-check" /></div>); })}
               <div className="btn-row"><button className="btn btn-ghost btn-back" onClick={() => go("sc-build")}>←</button><button className="btn btn-sm" onClick={addPizza}>Adicionar ao pedido</button></div>
             </section>
           )}
@@ -354,7 +354,7 @@ function PublicCardapio({ menu }: { menu: MenuType }) {
           {screen === "sc-list" && (
             <section className="screen active">
               {(() => {
-                const cfg = { lanche: { eb: "Lanches & Porções", t: "Escolha seu lanche", data: menu.lanches, emoji: "🍽️" }, bebida: { eb: "Bebidas", t: "Bebidas geladas", data: menu.bebidas, emoji: "🥤" }, suco: { eb: "Sucos naturais", t: "Sucos da casa", data: menu.sucos, emoji: "🧃" } }[listCat];
+                const cfg = { lanche: { eb: "Lanches & Porções", t: "Escolha seu lanche", data: menu.lanches || [], emoji: "🍽️" }, bebida: { eb: "Bebidas", t: "Bebidas geladas", data: menu.bebidas || [], emoji: "🥤" }, suco: { eb: "Sucos naturais", t: "Sucos da casa", data: menu.sucos || [], emoji: "🧃" } }[listCat];
                 return (<><div className="screen-head"><div className="eyebrow">{cfg.eb}</div><h2>{cfg.t}</h2><p>Toque para adicionar.</p></div>{cfg.data.map((it, i) => { const esg = esgotados.includes(it.name); return (<div key={i} className="opt" onClick={() => !esg && addSimple(it, cfg.emoji)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }}><div className="opt-emoji">{cfg.emoji}</div><div className="opt-body"><div className="opt-title">{it.name}</div>{esg && <div className="opt-desc" style={{ color: "#ef4444" }}>Esgotado</div>}</div><div className="opt-price">{money(it.price)}</div></div>); })}<div className="btn-row"><button className="btn btn-ghost btn-sm" onClick={() => go("sc-start")}>Voltar ao início</button></div></>);
               })()}
             </section>
@@ -374,7 +374,7 @@ function PublicCardapio({ menu }: { menu: MenuType }) {
               <div className="screen-head"><div className="eyebrow">Entrega</div><h2>Como prefere receber?</h2></div>
               <div className={`opt ${delType === "delivery" ? "sel" : ""}`} onClick={() => setDelType("delivery")}><div className="opt-emoji">🛵</div><div className="opt-body"><div className="opt-title">Entrega (delivery)</div><div className="opt-desc">Levamos até você</div></div><div className="opt-check" /></div>
               <div className={`opt ${delType === "retirada" ? "sel" : ""}`} onClick={() => { setDelType("retirada"); setBairroIdx(""); }}><div className="opt-emoji">🏪</div><div className="opt-body"><div className="opt-title">Buscar na loja</div><div className="opt-desc">Sem taxa de entrega</div></div><div className="opt-check" /></div>
-              {delType === "delivery" && (<div><div className="section-label">Endereço</div><div className="field"><label>Bairro</label><select value={bairroIdx} onChange={(e) => setBairroIdx(e.target.value)}><option value="">Selecione o bairro…</option>{menu.neighborhoods.map((b, i) => <option key={i} value={i}>{b.name} — {money(b.fee)}</option>)}</select></div><div className="field"><label>Rua, número e referência</label><input value={rua} onChange={(e) => setRua(e.target.value)} placeholder="Rua das Flores, 123 — perto do mercado" /></div></div>)}
+              {delType === "delivery" && (<div><div className="section-label">Endereço</div><div className="field"><label>Bairro</label><select value={bairroIdx} onChange={(e) => setBairroIdx(e.target.value)}><option value="">Selecione o bairro…</option>{(menu.neighborhoods || []).map((b, i) => <option key={i} value={i}>{b.name} — {money(b.fee)}</option>)}</select></div><div className="field"><label>Rua, número e referência</label><input value={rua} onChange={(e) => setRua(e.target.value)} placeholder="Rua das Flores, 123 — perto do mercado" /></div></div>)}
               <div className="btn-row"><button className="btn btn-ghost btn-back" onClick={() => go("sc-cart")}>←</button><button className="btn btn-sm" disabled={!delOk} onClick={() => go("sc-pay")}>Continuar</button></div>
             </section>
           )}
@@ -383,7 +383,7 @@ function PublicCardapio({ menu }: { menu: MenuType }) {
               <div className="screen-head"><div className="eyebrow">Pagamento</div><h2>Quase lá!</h2></div>
               <div className="field"><label>Seu nome</label><input value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Como te chamamos?" /></div>
               <div className="section-label">Forma de pagamento</div>
-              {menu.payments.map((p) => { const e: Record<string, string> = { Pix: "⚡", Dinheiro: "💵", Cartao: "💳" }; return (<div key={p} className={`opt ${payment === p ? "sel" : ""}`} onClick={() => setPayment(p)}><div className="opt-emoji">{e[p] || "💰"}</div><div className="opt-body"><div className="opt-title">{p === "Cartao" ? "Cartão" : p}</div></div><div className="opt-check" /></div>); })}
+              {(menu.payments || []).map((p) => { const e: Record<string, string> = { Pix: "⚡", Dinheiro: "💵", Cartao: "💳" }; return (<div key={p} className={`opt ${payment === p ? "sel" : ""}`} onClick={() => setPayment(p)}><div className="opt-emoji">{e[p] || "💰"}</div><div className="opt-body"><div className="opt-title">{p === "Cartao" ? "Cartão" : p}</div></div><div className="opt-check" /></div>); })}
               {payment === "Dinheiro" && <div className="field" style={{ marginTop: 8 }}><label>Troco para quanto?</label><input value={troco} onChange={(e) => setTroco(e.target.value)} inputMode="numeric" placeholder="Ex: 50" /></div>}
               <div className="btn-row"><button className="btn btn-ghost btn-back" onClick={() => go("sc-delivery")}>←</button><button className="btn btn-sm" disabled={!payOk || sending} onClick={finish}>{sending ? "Enviando…" : "Enviar pedido"}</button></div>
             </section>
@@ -405,15 +405,18 @@ function PublicCardapio({ menu }: { menu: MenuType }) {
 
 export default function CardapioPage() {
   const [menu, setMenu] = useState<MenuType | null>(null);
+  const [erro, setErro] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
     fetch("/api/cardapio")
-      .then((r) => r.json())
-      .then(setMenu)
-      .catch(() => setMenu(null));
+      .then((r) => { if (!r.ok) throw new Error("api error"); return r.json(); })
+      .then((data) => {
+        if (data && typeof data === "object") setMenu(data);
+        else setErro(true);
+      })
+      .catch(() => setErro(true));
 
-    // Detect admin via cookie
     try {
       const cookies = document.cookie.split(";")
       for (const c of cookies) {
@@ -431,9 +434,17 @@ export default function CardapioPage() {
     } catch {}
   }, []);
 
+  if (erro) return (
+    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, background: "#060606", color: "#f5f2ee", fontFamily: "system-ui", padding: 24 }}>
+      <div style={{ fontSize: 40 }}>🍕</div>
+      <p style={{ fontWeight: 700, fontSize: 16, margin: 0 }}>Não foi possível carregar o cardápio.</p>
+      <button onClick={() => { setErro(false); fetch("/api/cardapio").then(r => r.json()).then(setMenu).catch(() => setErro(true)); }} style={{ border: "1px solid #333", background: "transparent", color: "#f5f2ee", padding: "10px 20px", borderRadius: 10, cursor: "pointer", fontSize: 14 }}>Tentar de novo</button>
+    </div>
+  );
+
   if (!menu) return (
-    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#171210", color: "#f6efe7", fontFamily: "system-ui" }}>
-      Carregando cardápio… 🍕
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#060606", color: "#f5f2ee", fontFamily: "system-ui" }}>
+      <div style={{ textAlign: "center" }}><div style={{ fontSize: 36, marginBottom: 12 }}>🍕</div><p>Carregando cardápio…</p></div>
     </div>
   );
 
