@@ -34,11 +34,11 @@ export async function POST(req: NextRequest) {
   const { phone } = await req.json();
   if (!phone) return NextResponse.json({ ok: false }, { status: 400 });
 
-  // Fecha o card urgente no painel
+  // Fecha o card urgente no painel e devolve o pedido para o fluxo normal (cozinha)
   const pedidos = (await redis.get<Pedido[]>("pedidos")) || [];
   const atualizados = pedidos.map(p =>
     p.telefone === phone && p.escalonado === true && p.status === "novo"
-      ? { ...p, escalonado: false, status: "entregue" as const }
+      ? { ...p, escalonado: false, status: "em_preparo" as const }
       : p
   );
   await redis.set("pedidos", atualizados);
@@ -48,10 +48,10 @@ export async function POST(req: NextRequest) {
   await redis.del(`manual:${phone}`);
   await redis.del(`resolvendo:${phone}`);
 
-  // Envia mensagem de encerramento humanizada
+  // Envia mensagem de encerramento humanizada (o pedido continua, só o atendimento foi resolvido)
   await enviarMensagem(
     phone,
-    `Fico feliz em ter ajudado! 😊\n\nSe precisar de mais alguma coisa é só chamar. Estamos sempre aqui pra te atender! 🍕`
+    `Fico feliz em ter ajudado! 😊\n\nSeu pedido já está sendo preparado com carinho. Qualquer coisa é só chamar! 🍕`
   );
 
   return NextResponse.json({ ok: true });

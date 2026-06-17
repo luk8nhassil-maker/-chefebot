@@ -352,7 +352,7 @@ export default function PedidosPage() {
     try {
       await fetch("/api/resolver", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phone }) })
       setManuais(prev => ({ ...prev, [phone]: false }))
-      setPedidos(prev => prev.map(p => p.id === pedidoId ? { ...p, escalonado: false, status: "entregue" } : p))
+      setPedidos(prev => prev.map(p => p.id === pedidoId ? { ...p, escalonado: false, status: "em_preparo" } : p))
       pararPiscar()
     } catch {}
   }
