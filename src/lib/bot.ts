@@ -59,10 +59,12 @@ export type BotStep =
   | "observacao"
   | "delivery_type"
   | "neighborhood"
+  | "confirma_bairro_fuzzy"
   | "address"
   | "confirm_address"
   | "payment"
   | "payment_hibrido_valor"
+  | "payment_hibrido_complemento"
   | "troco"
   | "pedindo_nome"
   | "confirm"
@@ -116,6 +118,8 @@ export interface BotSession {
   pagamentoPendente?: string;
   enderecoAConfirmar?: string;
   hibridoMetodos?: string[];
+  bairroFuzzyCandidato?: string;
+  hibridoValorParcial?: Record<string, number>;
 }
 export interface BotResponse {
   messages: string[];
@@ -579,6 +583,35 @@ function detectaBairro(n: string): { name: string; fee: number } | null {
   return { name: escolhido.name, fee: escolhido.fee };
 }
 
+// Fuzzy match de bairro (erro de digitação: "centor" -> "Centro", "tucun" -> "Tucum").
+// NUNCA aplica a taxa direto — sempre retorna um CANDIDATO pra confirmação manual.
+// Só aceita se houver vencedor claro (sem ambiguidade entre dois bairros parecidos).
+function detectaBairroFuzzy(n: string): { name: string; fee: number } | null {
+  const palavras = n.split(/\s+/).filter(p => p.length >= 4);
+  if (palavras.length === 0) return null;
+  let melhor: { nb: { name: string; fee: number }; d: number } | null = null;
+  let segundo = Infinity;
+  for (const nb of MENU.neighborhoods) {
+    const alvo = normalizar(nb.name);
+    const partesAlvo = [alvo, ...alvo.split(/\s+/)].filter(a => a.length >= 4);
+    let melhorLocal = Infinity;
+    for (const p of palavras) {
+      for (const a of partesAlvo) {
+        const tol = a.length <= 5 ? 1 : 2; // tolerância pequena: 1 erro em nomes bem curtos, 2 nos demais (cobre transposição de letras, ex: "centor"->"centro")
+        const dist = levenshtein(p, a);
+        if (dist <= tol && dist < melhorLocal) melhorLocal = dist;
+      }
+    }
+    if (melhorLocal < Infinity) {
+      if (!melhor || melhorLocal < melhor.d) { segundo = melhor ? melhor.d : segundo; melhor = { nb, d: melhorLocal }; }
+      else if (melhorLocal < segundo) segundo = melhorLocal;
+    }
+  }
+  if (!melhor) return null;
+  if (melhor.d >= segundo) return null; // ambíguo entre dois bairros -> não arrisca
+  return { name: melhor.nb.name, fee: melhor.nb.fee };
+}
+
 // Detector central de dados de entrega numa única mensagem.
 // Conservador: só retorna o que detectou com confiança; o resto fica null (fluxo normal pergunta).
 function detectaDadosEntrega(text: string): { tipo: "delivery" | "pickup" | null; bairro: { name: string; fee: number } | null; pagamento: string | null } {
@@ -792,6 +825,8 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
         return { messages: [mensagemAddMore(session.cart)], session: resetaTentativas({ ...session, step: "add_more" }) };
       case "neighborhood":
         return { messages: [`Tudo bem! Vai querer entrega ou prefere buscar na loja? Se for entrega, me informa seu endereço completo com bairro, por favor 😊`], session: resetaTentativas({ ...session, step: "delivery_type" }) };
+      case "confirma_bairro_fuzzy":
+        return { messages: [`Tudo bem! Qual o seu bairro? 😊`], session: resetaTentativas({ ...session, step: "neighborhood", bairroFuzzyCandidato: undefined }) };
       case "address":
         return { messages: [`Tudo bem! Qual o seu bairro? 😊`], session: resetaTentativas({ ...session, step: "neighborhood" }) };
       case "payment":
@@ -1255,6 +1290,11 @@ Vai querer entrega ou prefere buscar na loja? Se for entrega, me informa seu end
 
       // ===== FLUXO NORMAL (fallback): não detectou com confiança =====
       if (n === "1" || n.includes("entrega") || n.includes("delivery") || n.includes("entregar") || n.includes("minha casa")) {
+        // Bairro não bateu exato, mas pode ser erro de digitação -> tenta fuzzy (sempre confirma antes de aplicar taxa)
+        const candidatoFuzzy = detectaBairroFuzzy(n);
+        if (candidatoFuzzy) {
+          return { messages: [`Você quis dizer *${candidatoFuzzy.name}*? 😊`], session: resetaTentativas({ ...session, step: "confirma_bairro_fuzzy", deliveryType: "delivery", bairroFuzzyCandidato: candidatoFuzzy.name, pagamentoPendente: pagDetectado }) };
+        }
         const hist = session.historico;
         if (hist?.ultimoEndereco && hist?.ultimoNeighborhood) {
           const nbFound = MENU.neighborhoods.find(nb => nb.name === hist.ultimoNeighborhood);
@@ -1276,8 +1316,24 @@ Vai querer entrega ou prefere buscar na loja? Se for entrega, me informa seu end
       let found: { name: string; fee: number } | undefined;
       if (!isNaN(num) && num >= 1 && num <= MENU.neighborhoods.length) found = MENU.neighborhoods[num - 1];
       else found = detectaBairro(n) ?? undefined;
-      if (!found) return respostaInvalida(`Qual o seu bairro? 😊`, session);
-      return { messages: [`*${found.name}*, taxa de entrega: *${formatCurrency(found.fee)}* 🛵\n\nMe passa o endereço completo:\n_(Rua, número e complemento)_\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "address", neighborhood: found.name, deliveryFee: found.fee }) };
+      if (found) {
+        return { messages: [`*${found.name}*, taxa de entrega: *${formatCurrency(found.fee)}* 🛵\n\nMe passa o endereço completo:\n_(Rua, número e complemento)_\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "address", neighborhood: found.name, deliveryFee: found.fee }) };
+      }
+      // Sem match exato -> tenta fuzzy (erro de digitação). NUNCA aplica taxa direto: sempre confirma.
+      const candidato = detectaBairroFuzzy(n);
+      if (candidato) {
+        return { messages: [`Você quis dizer *${candidato.name}*? 😊`], session: resetaTentativas({ ...session, step: "confirma_bairro_fuzzy", bairroFuzzyCandidato: candidato.name }) };
+      }
+      return respostaInvalida(`Qual o seu bairro? 😊`, session);
+    }
+    case "confirma_bairro_fuzzy": {
+      const nomeCandidato = session.bairroFuzzyCandidato;
+      const nb = MENU.neighborhoods.find(b => b.name === nomeCandidato);
+      if (ePositiva(n) || n === "1") {
+        if (!nb) return respostaInvalida(`Qual o seu bairro? 😊`, session);
+        return { messages: [`*${nb.name}*, taxa de entrega: *${formatCurrency(nb.fee)}* 🛵\n\nMe passa o endereço completo:\n_(Rua, número e complemento)_`], session: resetaTentativas({ ...session, step: "address", neighborhood: nb.name, deliveryFee: nb.fee, bairroFuzzyCandidato: undefined }) };
+      }
+      return { messages: [`Sem problema! Qual o seu bairro então? 😊`], session: resetaTentativas({ ...session, step: "neighborhood", bairroFuzzyCandidato: undefined }) };
     }
     case "confirm_address": {
       if (ePositiva(n) || n === "1") {
@@ -1340,8 +1396,22 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
         const [m1, m2] = hibrido.metodos;
         const v1 = hibrido.valores[m1];
         const v2 = hibrido.valores[m2];
-        // Os dois valores vieram explícitos -> confirma direto
+        // Os dois valores vieram explícitos -> valida se a soma bate com o total
         if (v1 !== undefined && v2 !== undefined) {
+          const soma = Math.round((v1 + v2) * 100) / 100;
+          const diferenca = Math.round((total - soma) * 100) / 100;
+          if (diferenca > 0.01) {
+            // Faltou valor -> pede o complemento, sem perder o que já foi informado
+            return {
+              messages: [`Quase lá! ${m1} (${formatCurrency(v1)}) + ${m2} (${formatCurrency(v2)}) somam ${formatCurrency(soma)}, mas o pedido é ${formatCurrency(total)}.\n\nFaltam *${formatCurrency(diferenca)}* — como deseja pagar o restante? (${m1} ou ${m2})`],
+              session: resetaTentativas({ ...session, step: "payment_hibrido_complemento", hibridoMetodos: [m1, m2], hibridoValorParcial: { [m1]: v1, [m2]: v2 } as Record<string, number> }),
+            };
+          }
+          if (diferenca < -0.01) {
+            // Valor maior que o total -> avisa e confirma mesmo assim (provável troco/erro de digitação, não bloqueia)
+            const paymentLabel = `${m1} (${formatCurrency(v1)}) + ${m2} (${formatCurrency(v2)})`;
+            return aplicaPagamento(paymentLabel, session);
+          }
           const paymentLabel = `${m1} (${formatCurrency(v1)}) + ${m2} (${formatCurrency(v2)})`;
           return aplicaPagamento(paymentLabel, session);
         }
@@ -1381,6 +1451,25 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
         if (restante && pareceNomeHumano(restante)) nomeJunto = restante;
       }
       return aplicaPagamento(payment, nomeJunto ? { ...session, customerName: nomeJunto } : session);
+    }
+    case "payment_hibrido_complemento": {
+      const [m1, m2] = session.hibridoMetodos || [];
+      const parcial = session.hibridoValorParcial || {};
+      let metodoComplemento = "";
+      if (n.includes("pix")) metodoComplemento = "Pix";
+      else if (n.includes("dinheiro") || n.includes("especie") || n.includes("cash")) metodoComplemento = "Dinheiro";
+      else if (n.includes("cartao") || n.includes("credito") || n.includes("debito")) metodoComplemento = "Cartão";
+      if (!metodoComplemento) {
+        return respostaInvalida(`Como prefere pagar o restante? Pode ser ${m1}, ${m2} ou outra forma.`, session);
+      }
+      const total = cartSubtotal(session.cart) + session.deliveryFee;
+      const somaParcial = Object.values(parcial).reduce((s, v) => s + v, 0);
+      const restante = Math.round((total - somaParcial) * 100) / 100;
+      // Junta o valor do complemento ao mesmo método já existente, ou adiciona como terceira parte
+      const partes = { ...parcial };
+      partes[metodoComplemento] = Math.round(((partes[metodoComplemento] || 0) + restante) * 100) / 100;
+      const paymentLabel = Object.entries(partes).filter(([, v]) => v > 0).map(([m, v]) => `${m} (${formatCurrency(v)})`).join(" + ");
+      return aplicaPagamento(paymentLabel, { ...session, hibridoMetodos: undefined, hibridoValorParcial: undefined });
     }
     case "payment_hibrido_valor": {
       const total = cartSubtotal(session.cart) + session.deliveryFee;
