@@ -1,7 +1,7 @@
 "use client";
 import { useState, useRef, useEffect, useCallback } from "react";
 import ChatBubble from "./ChatBubble";
-import { BotSession, getWelcomeMessages } from "@/lib/bot";
+import { BotSession, createInitialSession } from "@/lib/bot";
 
 interface Message {
   id: string;
@@ -46,12 +46,25 @@ export function Simulator({ fullScreen = false }: { fullScreen?: boolean }) {
     }, 800);
   }, []);
 
-  const handleStart = useCallback(() => {
-    const welcome = getWelcomeMessages();
+  const handleStart = useCallback(async () => {
     setStarted(true);
-    addBotMessages(welcome);
-    setSession({ step: "name", cart: [], deliveryFee: 0 });
-  }, [addBotMessages]);
+    setLoading(true);
+    const initialSession = createInitialSession();
+    try {
+      const res = await fetch("/api/bot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: "oi", session: initialSession, phone }),
+      });
+      const data = await res.json();
+      setSession(data.session);
+      addBotMessages(data.messages);
+    } catch {
+      addBotMessages(["Erro ao conectar. Tente novamente."]);
+    } finally {
+      setLoading(false);
+    }
+  }, [addBotMessages, phone]);
 
   const handleSend = useCallback(async () => {
     if (!input.trim() || loading || !session) return;
