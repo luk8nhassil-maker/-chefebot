@@ -1531,11 +1531,14 @@ Como quer receber? 😊\n\n  1. Entrega 🛵\n  2. Retirada na loja 🏪\n  3. C
     case "delivery_type": {
       // ===== CONSUMO NO LOCAL (dine-in) =====
       const isDineIn = n === "3"
-        || n.includes("consumo no local")
-        || n.includes("vou comer ai")
+        || n.includes("consumo")
+        || n.includes("consumir")
+        || n.includes("vou comer")
         || n.includes("comer ai")
         || n.includes("comer aqui")
-        || n === "no local";
+        || n.includes("local")
+        || n.includes("ai mesmo")
+        || (n.includes("na loja") && !n.includes("retirar") && !n.includes("buscar") && !n.includes("pegar"));
       if (isDineIn) {
         return { messages: [`Combinado! 🍽️ Consumo no local!\n\nQual a forma de pagamento? 💸`], session: resetaTentativas({ ...session, step: "payment", deliveryType: "dine_in", deliveryFee: 0, neighborhood: undefined }) };
       }
