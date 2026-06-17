@@ -63,6 +63,7 @@ export type BotStep =
   | "confirm_address"
   | "payment"
   | "troco"
+  | "pedindo_nome"
   | "confirm"
   | "aguardando_pix"
   | "done"
@@ -264,6 +265,42 @@ function detectaDoisSabores(n: string, allFlavors: string[]): [string, string] |
   if (achados.length === 2) return [achados[0], achados[1]];
   return null;
 }
+// Detecta se o cliente quer ver o cardápio/menu (qualquer etapa)
+function detectaIntencaoCardapio(text: string): boolean {
+  const n = normalizar(text);
+  return n.includes("cardapio") || n.includes("menu") || n.includes("ver sabor") ||
+    n.includes("ver opcoes") || n.includes("o que tem") || n.includes("o que voces tem") ||
+    (n.includes("ver") && (n.includes("cardapio") || n.includes("opcoes")));
+}
+
+// Palavras do domínio do negócio: se aparecerem, o texto quase certamente NÃO é um nome próprio sozinho.
+const PALAVRAS_DOMINIO = [
+  "pizza", "cardapio", "menu", "sabor", "bebida", "lanche", "suco", "borda",
+  "calabresa", "frango", "portuguesa", "queijo", "napolitana", "baiana", "peruana",
+  "bacon", "mexicana", "mussarela", "chocolate", "cartola", "romeu", "calzone",
+  "burguer", "batata", "refrigerante", "guarana", "agua", "cerveja", "coca",
+  "entrega", "retirada", "pagamento", "pix", "dinheiro", "cartao", "finalizar",
+  "quero", "queria", "gostaria", "manda", "vou", "favor",
+];
+// Saudações e palavras curtas comuns que tecnicamente "parecem nome" mas nunca são.
+const NUNCA_E_NOME = ["oi", "ola", "olá", "eai", "ei", "opa", "bom", "boa", "sim", "nao", "ok", "obrigado", "obrigada", "blz", "alo"];
+// Heurística forte: só considera "nome humano" se NÃO houver sinais de pedido/domínio.
+// Critérios (todos precisam passar): sem números, sem palavras de domínio, no máximo 3 palavras,
+// e cada palavra parece um nome próprio (só letras, começa com maiúscula OU é curta/comum de nome).
+function pareceNomeHumano(text: string): boolean {
+  const t = text.trim();
+  if (!t || t.length < 2) return false;
+  if (/\d/.test(t)) return false; // números não fazem parte de nome
+  const n = normalizar(t);
+  if (NUNCA_E_NOME.includes(n)) return false;
+  if (PALAVRAS_DOMINIO.some(p => n.includes(p))) return false;
+  const palavras = t.split(/\s+/).filter(Boolean);
+  if (palavras.length > 3) return false; // nome humano raramente tem mais de 3 palavras
+  // cada "palavra" deve conter só letras (permite acento e hífen simples, ex: "Ana-Maria")
+  if (!palavras.every(p => /^[A-Za-zÀ-ÿ'-]+$/.test(p))) return false;
+  return true;
+}
+
 function detectaIntencaoDireta(text: string): { category: string; label: string } | null {
   const n = normalizar(text);
   const todosSaboresPizza = [...MENU.saltyFlavors, ...MENU.sweetFlavors];
@@ -558,11 +595,18 @@ function detectaDadosEntrega(text: string): { tipo: "delivery" | "pickup" | null
 // Usado tanto no step payment quanto na captura inteligente. Limpa pagamentoPendente.
 function aplicaPagamento(payment: string, session: BotSession): BotResponse {
   const updatedSession = { ...session, paymentMethod: payment, pagamentoPendente: undefined };
-  if (payment === "Dinheiro") {
-    return { messages: [`Combinado! 💵 Vai precisar de troco?\n\nSe sim, me diz o valor que vai pagar. Ex: *100*\nSe não, é só digitar *não*`], session: resetaTentativas({ ...updatedSession, step: "troco", paymentMethod: "Dinheiro" }) };
+  // Se o cliente pulou a etapa de nome (foi direto pro pedido), pede agora, antes de fechar.
+  if (!updatedSession.customerName) {
+    return { messages: [`Quase lá! Só me diz seu nome pra eu finalizar o pedido 😊`], session: resetaTentativas({ ...updatedSession, step: "pedindo_nome" }) };
   }
-  const receipt = buildReceipt(updatedSession);
-  return { messages: [`Confere seu pedido 👇\n\n${receipt}\n\nTá certinho?\n  ✅ *1.* Confirmar\n  ❌ *2.* Cancelar`], session: resetaTentativas({ ...updatedSession, step: "confirm" }) };
+  return continuaParaTrocoOuConfirm(updatedSession);
+}
+function continuaParaTrocoOuConfirm(session: BotSession): BotResponse {
+  if (session.paymentMethod === "Dinheiro") {
+    return { messages: [`Combinado! 💵 Vai precisar de troco?\n\nSe sim, me diz o valor que vai pagar. Ex: *100*\nSe não, é só digitar *não*`], session: resetaTentativas({ ...session, step: "troco" }) };
+  }
+  const receipt = buildReceipt(session);
+  return { messages: [`Confere seu pedido 👇\n\n${receipt}\n\nTá certinho?\n  ✅ *1.* Confirmar\n  ❌ *2.* Cancelar`], session: resetaTentativas({ ...session, step: "confirm" }) };
 }
 function eVoltar(n: string): boolean {
   return n === "voltar" || n === "volta" || n === "errei" ||
@@ -753,6 +797,10 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
           return { messages: [`Tudo bem! Como prefere receber? 😊\n\n  1. Entrega (delivery) 🛵\n  2. Buscar na loja 🏪`], session: resetaTentativas({ ...session, step: "delivery_type" }) };
         }
         return { messages: [`Tudo bem! Me passa o endereço completo:\n_(Rua, número e complemento)_\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "address" }) };
+      case "pedindo_nome": {
+        const payList = MENU.payments.map((p, i) => `  ${i + 1}. ${p}`).join("\n");
+        return { messages: [`Tudo bem! Como vai pagar? 💸\n\n${payList}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "payment", paymentMethod: undefined }) };
+      }
       case "troco": {
         const payList = MENU.payments.map((p, i) => `  ${i + 1}. ${p}`).join("\n");
         return { messages: [`Tudo bem! Como vai pagar? 💸\n\n${payList}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "payment", paymentMethod: undefined, troco: undefined }) };
@@ -843,20 +891,38 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       };
     }
     case "name": {
-      if (!text || text.length < 2) return respostaInvalida("Me fala seu nome pra eu te atender melhor!", session);
-      const firstName = text.split(" ")[0];
-      // Cliente já mandou o pedido junto com (ou no lugar do) nome
-      const pedidoDireto = montarPizzaDoPedido(text, { ...session, customerName: text }, `Prazer, *${firstName}*! 😊`);
+      if (!text || text.length < 1) return respostaInvalida("Me fala seu nome pra eu te atender melhor!", session);
+
+      // 1) Intenção de ver o cardápio -> responde o cardápio, NÃO assume como nome
+      if (detectaIntencaoCardapio(text)) {
+        return {
+          messages: [`Claro! 😊 ${mensagemCategorias()}`],
+          session: resetaTentativas({ ...session, step: "category" }), // customerName fica vazio por enquanto
+        };
+      }
+
+      // 2) Pedido direto/completo de pizza já na primeira mensagem
+      const pedidoDireto = montarPizzaDoPedido(text, { ...session }, `Prazer em te atender! 😊`);
       if (pedidoDireto) return pedidoDireto;
+
+      // 3) Intenção de categoria (pizza/lanche/bebida/suco) sem ser um pedido completo
       const intencao = detectaIntencaoDireta(text);
       if (intencao) {
-        const response = handleCategory(intencao.category, { ...session, step: "category", customerName: text });
-        return { ...response, messages: [`Perfeito, *${firstName}*! 😄\n\n${response.messages[0]}`], session: resetaTentativas(response.session) };
+        const response = handleCategory(intencao.category, { ...session, step: "category" });
+        return { ...response, messages: [`Perfeito! 😄\n\n${response.messages[0]}`], session: resetaTentativas(response.session) };
       }
-      return {
-        messages: [`Prazer, *${firstName}*! 😊 ${mensagemCategorias()}`],
-        session: resetaTentativas({ ...session, step: "category", customerName: text }),
-      };
+
+      // 4) Só agora valida se REALMENTE parece um nome humano (heurística forte)
+      if (pareceNomeHumano(text)) {
+        const firstName = text.split(" ")[0];
+        return {
+          messages: [`Prazer, *${firstName}*! 😊 ${mensagemCategorias()}`],
+          session: resetaTentativas({ ...session, step: "category", customerName: text }),
+        };
+      }
+
+      // 5) Não é nome, não é pedido reconhecido, não é cardápio -> pede de novo sem travar o cliente
+      return respostaInvalida("Não entendi muito bem 😅 Me diz seu nome, ou já pode pedir direto (ex: _\"pizza calabresa\"_ ou _\"cardápio\"_)", session);
     }
     case "category": {
       const intencao = detectaIntencaoDireta(text);
@@ -1236,6 +1302,12 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       else if (n === "3" || n.includes("cartao") || n.includes("credito") || n.includes("debito")) payment = "Cartão";
       if (!payment) return respostaInvalida(MENU.payments.map((p, i) => `  ${i + 1}. ${p}`).join("\n"), session);
       return aplicaPagamento(payment, session);
+    }
+    case "pedindo_nome": {
+      if (!pareceNomeHumano(text)) {
+        return respostaInvalida("Só preciso do seu nome pra finalizar 😊 (ex: _Lucas_, _Maria Silva_)", session);
+      }
+      return continuaParaTrocoOuConfirm({ ...session, customerName: text });
     }
     case "troco": {
       const total = cartSubtotal(session.cart) + session.deliveryFee;
