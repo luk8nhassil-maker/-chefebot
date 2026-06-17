@@ -21,6 +21,7 @@ type Pedido = {
   horario: string
   endereco: string
   escalonado?: boolean
+  horarioEscalonado?: number
   cancelamentoSolicitado?: boolean
   observacao?: string
   pagamento?: string
@@ -1120,7 +1121,10 @@ export default function PedidosPage() {
             <span style={{ fontSize: 11, fontWeight: 900, color: "#ff6b00" }}>Pedidos</span>
           </button>
           <button onClick={() => router.push("/conversas")} style={{ border: "none", background: "transparent", display: "flex", flexDirection: "column", alignItems: "center", gap: 5, padding: "6px 0" }}>
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="14" rx="5" stroke="#5a564d" strokeWidth="2.2"/><circle cx="8.5" cy="11" r="1.4" fill="#5a564d"/><circle cx="12" cy="11" r="1.4" fill="#5a564d"/><circle cx="15.5" cy="11" r="1.4" fill="#5a564d"/></svg>
+            <span style={{ position: "relative", display: "flex" }}>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="14" rx="5" stroke="#5a564d" strokeWidth="2.2"/><circle cx="8.5" cy="11" r="1.4" fill="#5a564d"/><circle cx="12" cy="11" r="1.4" fill="#5a564d"/><circle cx="15.5" cy="11" r="1.4" fill="#5a564d"/></svg>
+              {escalonados.length > 0 && <span style={{ position: "absolute", top: -5, right: -9, minWidth: 17, height: 17, borderRadius: 9, background: escalonados.some(p => { const min = Math.floor((Date.now() - (p.horarioEscalonado || parseInt(p.id))) / 60000); return min >= 8 }) ? "#e05050" : "#ff6b00", color: "#fff", fontSize: 10.5, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 4px" }}>{escalonados.length}</span>}
+            </span>
             <span style={{ fontSize: 11, fontWeight: 800, color: "#5a564d" }}>Conversas</span>
           </button>
           <button onClick={() => router.push("/cardapio")} style={{ border: "none", background: "transparent", display: "flex", flexDirection: "column", alignItems: "center", gap: 5, padding: "6px 0" }}>

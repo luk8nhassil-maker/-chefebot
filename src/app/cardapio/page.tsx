@@ -34,7 +34,25 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
   const [modoSel, setModoSel] = useState(false)
   const [selecionados, setSelecionados] = useState<Set<string>>(new Set())
   const [confirmLote, setConfirmLote] = useState<"esgotado" | "disponivel" | null>(null)
+  const [conversasBadge, setConversasBadge] = useState(0)
   const toastTimer = useRef<any>(null)
+
+  // Badge conversas pendentes
+  useEffect(() => {
+    const atualizar = () => {
+      fetch("/api/orders")
+        .then(r => r.ok ? r.json() : [])
+        .then((data: any[]) => {
+          if (Array.isArray(data)) {
+            setConversasBadge(data.filter((p: any) => p.escalonado && p.status === "novo").length)
+          }
+        })
+        .catch(() => {})
+    }
+    atualizar()
+    const iv = setInterval(atualizar, 20000)
+    return () => clearInterval(iv)
+  }, [])
 
   // Bebidas + Sucos unificados numa categoria só
   const todos: Produto[] = [
@@ -426,7 +444,10 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
             <span style={{ fontSize: 10, fontWeight: 800, color: "#3a3730" }}>Pedidos</span>
           </button>
           <button onClick={() => router.push("/conversas")} style={{ background: "transparent", display: "flex", flexDirection: "column", alignItems: "center", gap: 5, padding: "6px 0" }}>
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="14" rx="5" stroke="#3a3730" strokeWidth="2.2"/><circle cx="8.5" cy="11" r="1.4" fill="#3a3730"/><circle cx="12" cy="11" r="1.4" fill="#3a3730"/><circle cx="15.5" cy="11" r="1.4" fill="#3a3730"/></svg>
+            <span style={{ position: "relative", display: "flex" }}>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="14" rx="5" stroke="#3a3730" strokeWidth="2.2"/><circle cx="8.5" cy="11" r="1.4" fill="#3a3730"/><circle cx="12" cy="11" r="1.4" fill="#3a3730"/><circle cx="15.5" cy="11" r="1.4" fill="#3a3730"/></svg>
+              {conversasBadge > 0 && <span style={{ position: "absolute", top: -5, right: -9, minWidth: 16, height: 16, borderRadius: 8, background: "#ff6b00", color: "#fff", fontSize: 10, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 3px" }}>{conversasBadge}</span>}
+            </span>
             <span style={{ fontSize: 10, fontWeight: 800, color: "#3a3730" }}>Conversas</span>
           </button>
           <button style={{ background: "transparent", display: "flex", flexDirection: "column", alignItems: "center", gap: 5, padding: "6px 0" }}>

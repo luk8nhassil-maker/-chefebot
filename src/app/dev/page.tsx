@@ -122,6 +122,53 @@ function NovoClienteDevForm({ onCriado }: { onCriado: (username: string, senha: 
   )
 }
 
+function ResetOperacional() {
+  const [senha, setSenha] = useState('')
+  const [frase, setFrase] = useState('')
+  const [resetando, setResetando] = useState(false)
+  const [resultado, setResultado] = useState<{ ok: boolean; msg: string } | null>(null)
+  const FRASE = 'RESETAR CHEFEBOT'
+
+  const executarReset = async () => {
+    if (frase !== FRASE) { setResultado({ ok: false, msg: 'Frase incorreta. Digite exatamente: RESETAR CHEFEBOT' }); return }
+    setResetando(true)
+    try {
+      const r = await fetch('/api/dev/reset', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ senha, frase }) })
+      const d = await r.json()
+      if (d.ok) {
+        setResultado({ ok: true, msg: `Sistema resetado com sucesso. Pedidos e conversas foram limpos. (Sessões: ${d.detalhes?.sessoes ?? 0})` })
+        setSenha(''); setFrase('')
+      } else {
+        setResultado({ ok: false, msg: d.error || 'Não foi possível resetar o sistema. Verifique a senha.' })
+      }
+    } catch { setResultado({ ok: false, msg: 'Erro de conexão.' }) }
+    setResetando(false)
+  }
+
+  const inp = { width: '100%', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, padding: '10px 14px', color: '#fff', fontSize: 13, outline: 'none', boxSizing: 'border-box' as const, marginBottom: 10, fontFamily: 'inherit' }
+
+  return (
+    <div style={{ background: 'rgba(239,68,68,0.07)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 14, padding: 20, marginBottom: 24 }}>
+      <p style={{ color: '#f87171', fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, margin: '0 0 4px' }}>Reset Operacional</p>
+      <p style={{ color: 'rgba(255,255,255,0.3)', fontSize: 12, margin: '0 0 16px', lineHeight: 1.5 }}>
+        Limpa pedidos, conversas e sessões do bot. Não afeta cardápio, configurações nem credenciais.
+      </p>
+      <input type="password" placeholder="Senha de reset" value={senha} onChange={e => setSenha(e.target.value)} style={inp} />
+      <input type="text" placeholder={`Digite: ${FRASE}`} value={frase} onChange={e => setFrase(e.target.value)} style={{ ...inp, fontWeight: frase === FRASE ? 700 : 400, color: frase === FRASE ? '#f87171' : '#fff' }} />
+      <button
+        onClick={executarReset}
+        disabled={resetando || !senha || frase !== FRASE}
+        style={{ width: '100%', background: frase === FRASE && senha ? 'rgba(239,68,68,0.9)' : 'rgba(255,255,255,0.05)', border: 'none', borderRadius: 10, padding: '12px', color: frase === FRASE && senha ? '#fff' : 'rgba(255,255,255,0.2)', fontSize: 14, fontWeight: 700, cursor: frase === FRASE && senha ? 'pointer' : 'not-allowed' }}
+      >
+        {resetando ? 'Resetando...' : 'Resetar sistema'}
+      </button>
+      {resultado && (
+        <p style={{ marginTop: 12, padding: '10px 14px', borderRadius: 8, background: resultado.ok ? 'rgba(74,222,128,0.1)' : 'rgba(252,129,129,0.1)', color: resultado.ok ? '#4ade80' : '#fc8181', fontSize: 12, fontWeight: 600, margin: '12px 0 0' }}>{resultado.msg}</p>
+      )}
+    </div>
+  )
+}
+
 export default function DevPage() {
   const router = useRouter()
   const [padroes, setPadroes] = useState<Padrao[]>([])
@@ -312,6 +359,9 @@ export default function DevPage() {
             )}
           </div>
         )}
+
+        {/* Reset operacional */}
+        <ResetOperacional />
 
         {/* Clientes com acesso */}
         <ClientesAcesso senhasCriadas={senhasCriadas} />
