@@ -165,6 +165,9 @@ export default function PedidosPage() {
   const [salvandoNovoPedido, setSalvandoNovoPedido] = useState(false)
   const [modalAlterarStatus, setModalAlterarStatus] = useState<string | null>(null)
   const [cancelandoId, setCancelandoId] = useState<string | null>(null)
+  const [confirmPixModal, setConfirmPixModal] = useState<string | null>(null)
+  const [finalizarModal, setFinalizarModal] = useState<string | null>(null)
+  const [simpleToast, setSimpleToast] = useState("")
 
   const prevIdsRef = useRef<string[]>([])
   const piscarRef = useRef<NodeJS.Timeout | null>(null)
@@ -176,6 +179,7 @@ export default function PedidosPage() {
   const muteadoRef = useRef(false)
   const prevPixRef = useRef<Record<string, boolean>>({})
   const temposEntregaRef = useRef<Record<string, number>>({})
+  const simpleToastTimerRef = useRef<any>(null)
 
   const tocarSomNormal = () => {
     if (muteadoRef.current) return
@@ -499,6 +503,33 @@ export default function PedidosPage() {
   const inputStyle: React.CSSProperties = { width: "100%", height: 46, background: "#0b0b0b", border: "1px solid #242220", borderRadius: 12, padding: "0 14px", color: "#f5f2ee", fontSize: 14, fontFamily: "'Archivo', sans-serif", outline: "none", boxSizing: "border-box" }
   const labelStyle: React.CSSProperties = { display: "block", fontSize: 11, fontWeight: 900, color: "#56524b", textTransform: "uppercase", letterSpacing: ".8px", marginBottom: 6 }
 
+  const showSimpleToast = (msg: string) => {
+    setSimpleToast(msg); clearTimeout(simpleToastTimerRef.current)
+    simpleToastTimerRef.current = setTimeout(() => setSimpleToast(""), 3500)
+  }
+
+  const confirmarPixManual = async (id: string) => {
+    try {
+      const r = await fetch("/api/orders", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, pixConfirmado: true }) })
+      if (r.ok) {
+        setPedidos(prev => prev.map(p => p.id === id ? { ...p, pixConfirmado: true } : p))
+        setConfirmPixModal(null)
+        showSimpleToast("Pix confirmado manualmente. Nenhuma mensagem foi enviada.")
+      }
+    } catch {}
+  }
+
+  const finalizarPedidoSilencioso = async (id: string) => {
+    try {
+      const r = await fetch("/api/orders", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, status: "entregue", silent: true }) })
+      if (r.ok) {
+        setPedidos(prev => prev.map(p => p.id === id ? { ...p, status: "entregue" } : p))
+        setFinalizarModal(null); setDetailId(null)
+        showSimpleToast("Pedido finalizado internamente. Nenhuma mensagem foi enviada.")
+      }
+    } catch {}
+  }
+
   return (
     <>
       <style>{`
@@ -523,86 +554,150 @@ export default function PedidosPage() {
         @keyframes cbCancelGlow { 0%,100%{border-color:rgba(239,68,68,.3)} 50%{border-color:rgba(239,68,68,.7)} }
         @keyframes cbShimmer { 0%{background-position:-200% 0} 100%{background-position:200% 0} }
         @keyframes cbWait { 0%,100%{opacity:1} 50%{opacity:.35} }
+        .cb-shell { height:100svh; overflow:hidden; display:flex; flex-direction:column; max-width:390px; margin:0 auto; background:#060606; color:#f5f2ee; font-family:'Archivo',sans-serif; }
+        .cb-top-nav { display:none; }
+        .cb-right { flex:1; min-width:0; display:flex; flex-direction:column; overflow:hidden; }
+        .cb-header { flex-shrink:0; background:#060606; border-bottom:1px solid #1a1816; padding:calc(env(safe-area-inset-top) + 12px) 16px 12px; }
+        .cb-main { flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; padding:12px 16px 8px; display:flex; flex-direction:column; gap:14px; }
+        .cb-nav { flex-shrink:0; background:rgba(6,6,6,.96); backdrop-filter:blur(14px); border-top:1px solid #181614; display:grid; grid-template-columns:1fr 1fr 1fr; padding:10px 8px calc(env(safe-area-inset-bottom) + 16px); }
         .cbBusca::placeholder { color: #3a3730; }
         .cbBusca:focus { border-color: #ff6b00 !important; box-shadow: 0 0 0 3px rgba(255,107,0,.1); }
         .cbInput:focus { border-color: #ff6b00 !important; outline: none; }
+        .cbPipeScroll { display:flex; gap:4px; overflow-x:auto; scrollbar-width:none; flex:1; }
+        .cbPipeScroll::-webkit-scrollbar { display:none; }
         @media (min-width: 768px) {
-          .cbPedidosPage { display: flex !important; max-width: 1100px; margin: 0 auto; min-height: 100svh; }
-          .cbPedidosWrap { max-width: none !important; flex: 1 !important; min-width: 0 !important; padding-bottom: 0 !important; margin: 0 !important; border-right: 1px solid #1a1816; }
-          .cbPedidosSidebar { display: flex !important; flex-direction: column; gap: 12px; width: 240px; flex-shrink: 0; padding: 24px 16px; position: sticky; top: 0; height: 100svh; overflow-y: auto; border-left: 1px solid #1a1816; background: #060606; }
-          .cbPedidosNav { position: sticky !important; bottom: 0 !important; left: auto !important; right: auto !important; margin: 0 !important; max-width: none !important; transform: none !important; }
+          body { overflow: auto; }
+          .cb-shell { height:auto; overflow:visible; max-width:1200px; flex-direction:row; align-items:flex-start; }
+          .cb-top-nav { display:flex; flex-direction:column; gap:4px; width:200px; flex-shrink:0; position:sticky; top:24px; padding:24px 0; }
+          .cb-top-nav-brand { padding:0 20px 20px; border-bottom:1px solid #1a1816; margin-bottom:8px; }
+          .cb-top-nav-btn { display:flex; align-items:center; gap:10px; padding:10px 20px; font-family:'Archivo',sans-serif; font-size:13px; font-weight:800; color:#4a4640; background:transparent; border:none; border-radius:10px; cursor:pointer; transition:background .15s; text-align:left; width:100%; }
+          .cb-top-nav-btn:hover { background:rgba(255,255,255,.04); }
+          .cb-top-nav-btn.active { color:#ff6b00; background:rgba(255,107,0,.08); }
+          .cb-right { border-left:1px solid #1a1816; min-height:100vh; overflow:visible; }
+          .cb-header { border-bottom:1px solid #1a1816; padding:24px 28px 20px; }
+          .cb-main { padding:20px 28px; overflow-y:visible; flex:none; }
+          .cb-nav { display:none; }
         }
-        @media (min-width: 1100px) {
-          .cbPedidosPage { max-width: 1280px; }
-          .cbPedidosSidebar { width: 270px; }
-        }
+        @media (min-width: 1024px) { .cb-shell { max-width:1280px; } }
       `}</style>
 
-      <div className="cbPedidosPage" style={{ display: "block" }}>
-      <div className="cbPedidosWrap" style={{ minHeight: "100svh", maxWidth: 375, margin: "0 auto", background: "#060606", color: "#f5f2ee", fontFamily: "'Archivo', sans-serif", display: "flex", flexDirection: "column", paddingBottom: "calc(env(safe-area-inset-bottom) + 90px)" }}>
+      <div className="cb-shell">
 
-        {/* Header */}
-        <header style={{ display: "flex", alignItems: "center", gap: 12, padding: "calc(env(safe-area-inset-top) + 18px) 16px 12px" }}>
-          <div style={{ position: "relative", width: 48, height: 48, flexShrink: 0 }}>
-            <div style={{ width: 48, height: 48, borderRadius: "50%", background: "linear-gradient(135deg,#ff6b00,#ff9a3d)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 900, fontSize: 17, color: "#fff" }}>{initials}</div>
-            <span style={{ position: "absolute", right: 0, bottom: 0, width: 13, height: 13, borderRadius: "50%", background: "#22c55e", border: "3px solid #060606", animation: "cbPulse 2s infinite" }} />
+        {/* ── DESKTOP: sidebar nav ── */}
+        <nav className="cb-top-nav">
+          <div className="cb-top-nav-brand">
+            <div style={{ fontSize: 20, fontWeight: 900, letterSpacing: "-0.5px", color: "#f5f2ee" }}>ChefeBot</div>
+            <div style={{ fontSize: 11, color: "#4a4640", fontWeight: 700, marginTop: 2 }}>Painel operacional</div>
           </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 20, fontWeight: 900, letterSpacing: "-0.4px", lineHeight: 1.1 }}>Oi, {userName.split(" ")[0]}</div>
-            <div style={{ fontSize: 11, color: "#5a564d", fontWeight: 700, marginTop: 2 }}>Alto Alegre · ChefeBot</div>
+          <button className="cb-top-nav-btn active">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><rect x="4" y="3" width="16" height="18" rx="3" stroke="currentColor" strokeWidth="2.2"/><line x1="8" y1="9" x2="16" y2="9" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"/><line x1="8" y1="14" x2="13" y2="14" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"/></svg>
+            Pedidos
+            {emAberto > 0 && <span style={{ marginLeft: "auto", minWidth: 18, height: 18, borderRadius: 9, background: "#ff6b00", color: "#fff", fontSize: 10, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 5px" }}>{emAberto}</span>}
+          </button>
+          <button className="cb-top-nav-btn" onClick={() => router.push("/conversas")}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="14" rx="5" stroke="currentColor" strokeWidth="2.2"/><circle cx="8.5" cy="11" r="1.3" fill="currentColor"/><circle cx="12" cy="11" r="1.3" fill="currentColor"/><circle cx="15.5" cy="11" r="1.3" fill="currentColor"/></svg>
+            Conversas
+            {escalonados.length > 0 && <span style={{ marginLeft: "auto", minWidth: 18, height: 18, borderRadius: 9, background: escalonados.some(p => Math.floor((Date.now() - (p.horarioEscalonado || parseInt(p.id))) / 60000) >= 8) ? "#e05050" : "#ff6b00", color: "#fff", fontSize: 10, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 5px" }}>{escalonados.length}</span>}
+          </button>
+          <button className="cb-top-nav-btn" onClick={() => router.push("/cardapio")}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><rect x="4" y="4" width="7" height="7" rx="2" stroke="currentColor" strokeWidth="2.2"/><rect x="13" y="4" width="7" height="7" rx="2" stroke="currentColor" strokeWidth="2.2"/><rect x="4" y="13" width="7" height="7" rx="2" stroke="currentColor" strokeWidth="2.2"/><rect x="13" y="13" width="7" height="7" rx="2" stroke="currentColor" strokeWidth="2.2"/></svg>
+            Cardápio
+          </button>
+        </nav>
+
+        {/* ── PAINEL DIREITO ── */}
+        <div className="cb-right">
+
+        {/* ── HEADER ── */}
+        <header className="cb-header">
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 10 }}>
+            <div>
+              <div style={{ fontSize: 20, fontWeight: 900, letterSpacing: "-0.4px", lineHeight: 1.1 }}>Pedidos</div>
+              <div style={{ fontSize: 11, color: "#5a564d", fontWeight: 700, marginTop: 2 }}>Controle de pedidos da pizzaria</div>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <button onClick={toggleMute} title={muteado ? "Sons desativados" : "Sons ativados"} style={{ fontSize: 15, lineHeight: 1, background: muteado ? "rgba(239,68,68,.1)" : "transparent", border: `1px solid ${muteado ? "rgba(239,68,68,.35)" : "#242220"}`, padding: "5px 8px", borderRadius: 16 }}>{muteado ? "🔇" : "🔊"}</button>
+              {isAdmin && <button onClick={() => router.push("/admin")} style={{ fontSize: 11, fontWeight: 800, color: "#a39b8b", background: "transparent", border: "1px solid #242220", padding: "6px 10px", borderRadius: 16 }}>Admin</button>}
+              <button onClick={() => fetch("/api/auth/logout", { method: "POST" }).then(() => router.push("/login"))} style={{ fontSize: 11, fontWeight: 800, color: "#5a564d", background: "transparent", border: "1px solid #1f1d1a", padding: "6px 10px", borderRadius: 16 }}>Sair</button>
+            </div>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <button onClick={toggleMute} title={muteado ? "Sons desativados" : "Sons ativados"} style={{ fontSize: 17, lineHeight: 1, background: muteado ? "rgba(239,68,68,.1)" : "transparent", border: `1px solid ${muteado ? "rgba(239,68,68,.35)" : "#242220"}`, padding: "5px 9px", borderRadius: 20 }}>{muteado ? "🔇" : "🔊"}</button>
-            {isAdmin && <button onClick={() => router.push("/admin")} style={{ fontSize: 11, fontWeight: 800, color: "#a39b8b", background: "transparent", border: "1px solid #242220", padding: "6px 10px", borderRadius: 20 }}>Admin</button>}
-            <button onClick={() => fetch("/api/auth/logout", { method: "POST" }).then(() => router.push("/login"))} style={{ fontSize: 11, fontWeight: 800, color: "#5a564d", background: "transparent", border: "1px solid #1f1d1a", padding: "6px 10px", borderRadius: 20 }}>Sair</button>
+
+          {/* Bot toggle */}
+          <button onClick={alternarBot} disabled={salvandoBot} style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", padding: "10px 12px", background: botAtivo ? "rgba(34,197,94,.06)" : "rgba(250,204,21,.06)", border: `1px solid ${botAtivo ? "rgba(34,197,94,.28)" : "rgba(250,204,21,.3)"}`, borderRadius: 12, color: "#f5f2ee", textAlign: "left", marginBottom: 10 }}>
+            <span style={{ width: 9, height: 9, borderRadius: "50%", background: botAtivo ? "#22c55e" : "#facc15", flexShrink: 0, animation: botAtivo ? "cbPulse 2s infinite" : "none" }} />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 13, fontWeight: 900, letterSpacing: "-0.2px", color: "#f5f2ee" }}>{botAtivo ? "Bot atendendo" : "Bot pausado"}</div>
+              <div style={{ fontSize: 10, fontWeight: 700, color: botAtivo ? "#22c55e" : "#facc15", marginTop: 1 }}>{botAtivo ? "WhatsApp conectado" : "Você no comando"}</div>
+            </div>
+            <span style={{ fontSize: 11, fontWeight: 900, color: botAtivo ? "#22c55e" : "#facc15", background: "#060606", padding: "5px 10px", borderRadius: 8, flexShrink: 0 }}>{botAtivo ? "Pausar" : "Ativar"}</span>
+          </button>
+
+          {/* Métricas */}
+          <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+            <div style={{ flex: 1, background: "#101010", border: "1px solid #1f1d1a", borderRadius: 12, padding: "10px 10px" }}>
+              <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: "-1px", lineHeight: 1, color: "#f5f2ee" }}>{totalHoje}</div>
+              <div style={{ fontSize: 9.5, fontWeight: 700, color: "#5a564d", textTransform: "uppercase", letterSpacing: ".5px", marginTop: 2 }}>Hoje</div>
+            </div>
+            <div style={{ flex: 1, background: emAberto > 0 ? "#1a0d00" : "#101010", border: `1px solid ${emAberto > 0 ? "rgba(255,107,0,.5)" : "#1f1d1a"}`, borderRadius: 12, padding: "10px 10px" }}>
+              <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: "-1px", lineHeight: 1, color: emAberto > 0 ? "#ff6b00" : "#3a3730" }}>{emAberto}</div>
+              <div style={{ fontSize: 9.5, fontWeight: 700, color: emAberto > 0 ? "rgba(255,107,0,.7)" : "#3a3730", textTransform: "uppercase", letterSpacing: ".5px", marginTop: 2 }}>Em aberto</div>
+            </div>
+            <div style={{ flex: 1, background: "#101010", border: "1px solid #1f1d1a", borderRadius: 12, padding: "10px 10px" }}>
+              <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: "-1px", lineHeight: 1, color: "#22c55e" }}>{contagemPorStatus("entregue")}</div>
+              <div style={{ fontSize: 9.5, fontWeight: 700, color: "#5a564d", textTransform: "uppercase", letterSpacing: ".5px", marginTop: 2 }}>Prontos</div>
+            </div>
+            <div style={{ flex: 1, background: "#101010", border: "1px solid #1f1d1a", borderRadius: 12, padding: "10px 10px" }}>
+              <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: "-1px", lineHeight: 1, color: "#60a5fa" }}>{tempoMedioPreparo !== null ? `${tempoMedioPreparo}` : "—"}<span style={{ fontSize: 10, fontWeight: 700, marginLeft: 2 }}>{tempoMedioPreparo !== null ? "m" : ""}</span></div>
+              <div style={{ fontSize: 9.5, fontWeight: 700, color: "#5a564d", textTransform: "uppercase", letterSpacing: ".5px", marginTop: 2 }}>⏱ Média</div>
+            </div>
+          </div>
+
+          {/* Pipeline + Novo + Limpar */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+            <div className="cbPipeScroll">
+              <button onClick={() => setFiltro("todos")} style={{ border: `1px solid ${filtro === "todos" ? "#ff6b00" : "#242220"}`, background: filtro === "todos" ? "#ff6b00" : "transparent", color: filtro === "todos" ? "#060606" : "#c9c2b4", fontSize: 11, fontWeight: 900, padding: "6px 11px", borderRadius: 14, flexShrink: 0 }}>Todos · {pedidos.length}</button>
+              {steps.map((s) => {
+                const active = filtro === s.key; const sc = STATUS_COLOR[s.key]
+                return (
+                  <button key={s.key} onClick={() => setFiltro(active ? "todos" : s.key)} style={{ border: `1px solid ${active ? sc.accentBorder : "#242220"}`, background: active ? sc.accentBg : "#101010", color: active ? sc.accent : "#c9c2b4", fontSize: 11, fontWeight: 900, padding: "6px 11px", borderRadius: 14, flexShrink: 0 }}>
+                    {s.stepLabel} · {s.count}
+                  </button>
+                )
+              })}
+            </div>
+            <button onClick={() => setModalNovoPedido(true)} style={{ height: 32, border: "1px solid rgba(255,107,0,.5)", background: "rgba(255,107,0,.1)", color: "#ff6b00", fontSize: 11, fontWeight: 900, padding: "0 10px", borderRadius: 10, flexShrink: 0 }}>+ Novo</button>
+            <button onClick={() => setModalLimpar(true)} title="Limpar histórico" style={{ width: 32, height: 32, border: "1px solid #242220", borderRadius: 10, background: "transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><polyline points="3,6 5,6 21,6" stroke="#5a564d" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" stroke="#5a564d" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/><path d="M10 11v6M14 11v6" stroke="#5a564d" strokeWidth="2.2" strokeLinecap="round"/><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" stroke="#5a564d" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            </button>
+          </div>
+
+          {/* Busca */}
+          <div style={{ position: "relative" }}>
+            <input className="cbBusca" type="text" placeholder="Buscar por nome, telefone, bairro ou #número..." value={busca} onChange={e => setBusca(e.target.value)} style={{ width: "100%", height: 44, background: "#101010", border: "1px solid #242220", borderRadius: 12, padding: "0 40px 0 14px", color: "#f5f2ee", fontSize: 13, fontWeight: 700, fontFamily: "'Archivo', sans-serif", outline: "none", boxSizing: "border-box" }} />
+            {busca ? <button onClick={() => setBusca("")} style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: "#5a564d", fontSize: 18, lineHeight: 1, padding: "4px", cursor: "pointer" }}>×</button>
+              : <svg style={{ position: "absolute", right: 14, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="#3a3730" strokeWidth="2.2"/><path d="M16.5 16.5l3.5 3.5" stroke="#3a3730" strokeWidth="2.2" strokeLinecap="round"/></svg>}
           </div>
         </header>
 
+        {/* ── CONTEÚDO ── */}
+        <main className="cb-main">
+
         {/* Install Banner */}
         {showInstallBanner && (
-          <div style={{ margin: "0 16px 12px", padding: "14px 16px", background: "linear-gradient(135deg,rgba(255,107,0,.15),rgba(255,107,0,.05))", border: "1.5px solid rgba(255,107,0,.4)", borderRadius: 18, display: "flex", alignItems: "center", gap: 12 }}>
-            <span style={{ fontSize: 32, flexShrink: 0 }}>🍕</span>
-            <div style={{ flex: 1, minWidth: 0 }}><p style={{ margin: 0, fontSize: 14, fontWeight: 900, color: "#f4f1ec" }}>Instalar ChefeBot</p><p style={{ margin: "2px 0 0", fontSize: 11, fontWeight: 700, color: "#a39b8b" }}>Acesse mais rápido pela tela inicial</p></div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6, flexShrink: 0 }}>
-              <button onClick={async () => { if (installPrompt) { installPrompt.prompt(); const r = await installPrompt.userChoice; if (r.outcome === "accepted") setShowInstallBanner(false); } }} style={{ border: "none", background: "#ff6b00", color: "#fff", fontSize: 12, fontWeight: 900, padding: "8px 14px", borderRadius: 10 }}>Instalar</button>
-              <button onClick={() => setShowInstallBanner(false)} style={{ border: "none", background: "transparent", color: "#5a564d", fontSize: 11, fontWeight: 800, padding: "4px 0" }}>Agora não</button>
+          <div style={{ padding: "0 0 2px" }}>
+            <div style={{ padding: "14px 16px", background: "linear-gradient(135deg,rgba(255,107,0,.15),rgba(255,107,0,.05))", border: "1.5px solid rgba(255,107,0,.4)", borderRadius: 18, display: "flex", alignItems: "center", gap: 12 }}>
+              <span style={{ fontSize: 32, flexShrink: 0 }}>🍕</span>
+              <div style={{ flex: 1, minWidth: 0 }}><p style={{ margin: 0, fontSize: 14, fontWeight: 900, color: "#f4f1ec" }}>Instalar ChefeBot</p><p style={{ margin: "2px 0 0", fontSize: 11, fontWeight: 700, color: "#a39b8b" }}>Acesse mais rápido pela tela inicial</p></div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, flexShrink: 0 }}>
+                <button onClick={async () => { if (installPrompt) { installPrompt.prompt(); const r = await installPrompt.userChoice; if (r.outcome === "accepted") setShowInstallBanner(false); } }} style={{ border: "none", background: "#ff6b00", color: "#fff", fontSize: 12, fontWeight: 900, padding: "8px 14px", borderRadius: 10 }}>Instalar</button>
+                <button onClick={() => setShowInstallBanner(false)} style={{ border: "none", background: "transparent", color: "#5a564d", fontSize: 11, fontWeight: 800, padding: "4px 0" }}>Agora não</button>
+              </div>
             </div>
           </div>
         )}
-
-        {/* Bot toggle */}
-        <button onClick={alternarBot} disabled={salvandoBot} style={{ display: "flex", alignItems: "center", gap: 10, margin: "0 16px", padding: "13px 14px", background: botAtivo ? "rgba(34,197,94,.06)" : "rgba(250,204,21,.06)", border: `1px solid ${botAtivo ? "rgba(34,197,94,.28)" : "rgba(250,204,21,.3)"}`, borderRadius: 14, color: "#f5f2ee", textAlign: "left" }}>
-          <span style={{ width: 10, height: 10, borderRadius: "50%", background: botAtivo ? "#22c55e" : "#facc15", flexShrink: 0, animation: botAtivo ? "cbPulse 2s infinite" : "none" }} />
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 14, fontWeight: 900, letterSpacing: "-0.2px", color: "#f5f2ee" }}>{botAtivo ? "Bot atendendo" : "Bot pausado"}</div>
-            <div style={{ fontSize: 11, fontWeight: 700, color: botAtivo ? "#22c55e" : "#facc15", marginTop: 2 }}>{botAtivo ? "WhatsApp conectado" : "Você no comando"}</div>
-          </div>
-          <span style={{ fontSize: 12, fontWeight: 900, color: botAtivo ? "#22c55e" : "#facc15", background: "#060606", padding: "6px 12px", borderRadius: 10, flexShrink: 0 }}>{botAtivo ? "Pausar" : "Ativar"}</span>
-        </button>
-
-        {/* Métricas */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, padding: "14px 16px 6px" }}>
-          <div style={{ background: "#101010", border: "1px solid #1f1d1a", borderRadius: 16, padding: "14px 12px", display: "flex", flexDirection: "column", gap: 3 }}>
-            <span style={{ fontSize: 26, fontWeight: 900, letterSpacing: "-1px", lineHeight: 1, color: "#f5f2ee" }}>{totalHoje}</span>
-            <span style={{ fontSize: 10.5, fontWeight: 700, color: "#5a564d", textTransform: "uppercase", letterSpacing: ".5px" }}>Hoje</span>
-          </div>
-          <div style={{ background: "#1a0d00", border: "1.5px solid rgba(255,107,0,.5)", borderRadius: 16, padding: "14px 12px", display: "flex", flexDirection: "column", gap: 3 }}>
-            <span style={{ fontSize: 34, fontWeight: 900, letterSpacing: "-1.5px", lineHeight: 1, color: "#ff6b00" }}>{emAberto}</span>
-            <span style={{ fontSize: 10.5, fontWeight: 800, color: "#ff6b00", textTransform: "uppercase", letterSpacing: ".5px", opacity: 0.7 }}>Em aberto</span>
-          </div>
-          <div style={{ background: "#101010", border: "1px solid #1f1d1a", borderRadius: 16, padding: "14px 12px", display: "flex", flexDirection: "column", gap: 3 }}>
-            <span style={{ fontSize: 26, fontWeight: 900, letterSpacing: "-1px", lineHeight: 1, color: "#facc15" }}>{avaliacaoMedia}</span>
-            <span style={{ fontSize: 10.5, fontWeight: 700, color: "#5a564d", textTransform: "uppercase", letterSpacing: ".5px" }}>★ Média</span>
-          </div>
-          <div style={{ background: "#101010", border: "1px solid #1f1d1a", borderRadius: 16, padding: "14px 12px", display: "flex", flexDirection: "column", gap: 3 }}>
-            <span style={{ fontSize: 26, fontWeight: 900, letterSpacing: "-1px", lineHeight: 1, color: "#60a5fa" }}>{tempoMedioPreparo !== null ? `${tempoMedioPreparo}` : "--"}<span style={{ fontSize: 13, fontWeight: 700, marginLeft: 3 }}>{tempoMedioPreparo !== null ? "min" : ""}</span></span>
-            <span style={{ fontSize: 10.5, fontWeight: 700, color: "#5a564d", textTransform: "uppercase", letterSpacing: ".5px" }}>⏱ Média</span>
-          </div>
-        </div>
-
-        {/* Banner urgência */}
+        {/* Urgência */}
         {escalonados.length > 0 && !cardUrgenciaFechado && (
-          <div style={{ margin: "8px 16px 0", padding: 16, borderRadius: 18, background: "rgba(239,68,68,.08)", border: "1.5px solid rgba(239,68,68,.45)", animation: "cbUrgentGlow 1.6s infinite", display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ padding: 16, borderRadius: 18, background: "rgba(239,68,68,.08)", border: "1.5px solid rgba(239,68,68,.45)", animation: "cbUrgentGlow 1.6s infinite", display: "flex", flexDirection: "column", gap: 10 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <span style={{ width: 9, height: 9, borderRadius: "50%", background: "#ef4444", animation: "cbRedPulse 1.6s infinite" }} />
               <span style={{ fontSize: 11, fontWeight: 900, color: "#ef4444", textTransform: "uppercase", letterSpacing: "1.2px" }}>Atendimento humano</span>
@@ -613,53 +708,7 @@ export default function PedidosPage() {
           </div>
         )}
 
-        {/* Pipeline + Novo Pedido */}
-        <div style={{ padding: "16px 16px 10px", display: "flex", flexDirection: "column", gap: 10 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <span style={{ fontSize: 10, fontWeight: 900, letterSpacing: "1.2px", textTransform: "uppercase", color: "#56524b" }}>Fila de pedidos</span>
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <button onClick={() => setModalNovoPedido(true)} style={{ height: 30, border: "1px solid rgba(255,107,0,.5)", background: "rgba(255,107,0,.1)", color: "#ff6b00", fontSize: 11, fontWeight: 900, padding: "0 12px", borderRadius: 10 }}>+ Novo</button>
-              <button onClick={() => setFiltro("todos")} style={{ border: `1px solid ${filtro === "todos" ? "#ff6b00" : "#242220"}`, background: filtro === "todos" ? "#ff6b00" : "transparent", color: filtro === "todos" ? "#060606" : "#c9c2b4", fontSize: 11, fontWeight: 900, padding: "6px 13px", borderRadius: 18 }}>Todos · {pedidos.length}</button>
-              <button onClick={() => setModalLimpar(true)} title="Limpar histórico" style={{ width: 30, height: 30, border: "1px solid #242220", borderRadius: 10, background: "transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><polyline points="3,6 5,6 21,6" stroke="#5a564d" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" stroke="#5a564d" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/><path d="M10 11v6M14 11v6" stroke="#5a564d" strokeWidth="2.2" strokeLinecap="round"/><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" stroke="#5a564d" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
-              </button>
-            </div>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-            {steps.map((s, i) => {
-              const active = filtro === s.key
-              const sc = STATUS_COLOR[s.key]
-              return (
-                <div key={s.key} style={{ display: "flex", alignItems: "center", gap: 4, flex: 1 }}>
-                  <button onClick={() => setFiltro(active ? "todos" : s.key)} style={{ flex: 1, minWidth: 0, border: `1px solid ${active ? sc.accentBorder : "#242220"}`, background: active ? sc.accentBg : "#101010", borderRadius: 14, padding: "10px 4px 9px", display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
-                    <span style={{ fontSize: 20, fontWeight: 900, lineHeight: 1, color: active ? sc.accent : "#444" }}>{s.count}</span>
-                    <span style={{ fontSize: 9, fontWeight: 900, textTransform: "uppercase", letterSpacing: ".4px", color: active ? sc.accent : "#5a564d" }}>{s.stepLabel}</span>
-                  </button>
-                  {i < steps.length - 1 && <span style={{ color: "#2a2723", fontSize: 15, fontWeight: 900, flexShrink: 0, lineHeight: 1 }}>›</span>}
-                </div>
-              )
-            })}
-          </div>
-        </div>
-
-        {/* Busca */}
-        <div style={{ padding: "0 16px 10px", position: "relative" }}>
-          <input
-            className="cbBusca"
-            type="text"
-            placeholder="Buscar por nome, telefone, bairro ou #número..."
-            value={busca}
-            onChange={e => setBusca(e.target.value)}
-            style={{ width: "100%", height: 48, background: "#101010", border: "1px solid #242220", borderRadius: 14, padding: "0 44px 0 16px", color: "#f5f2ee", fontSize: 14, fontWeight: 700, fontFamily: "'Archivo', sans-serif", outline: "none", boxSizing: "border-box", transition: "border-color .15s, box-shadow .15s" }}
-          />
-          {busca
-            ? <button onClick={() => setBusca("")} style={{ position: "absolute", right: 28, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: "#5a564d", fontSize: 18, lineHeight: 1, padding: "4px", cursor: "pointer" }}>×</button>
-            : <svg style={{ position: "absolute", right: 28, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="#3a3730" strokeWidth="2.2"/><path d="M16.5 16.5l3.5 3.5" stroke="#3a3730" strokeWidth="2.2" strokeLinecap="round"/></svg>
-          }
-        </div>
-
         {/* Lista */}
-        <main style={{ display: "flex", flexDirection: "column", gap: 14, padding: "4px 16px 20px" }}>
           {pedidosFiltrados.length === 0 && (
             <div style={{ background: "#101010", border: "1px dashed #2a2723", borderRadius: 20, padding: "36px 20px", textAlign: "center" }}>
               <span style={{ fontSize: 17, fontWeight: 900, color: "#c9c2b4", display: "block" }}>Nada por aqui</span>
@@ -815,6 +864,9 @@ export default function PedidosPage() {
                       <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#25d366" }} />
                       Falar com {firstName} no WhatsApp
                     </button>
+                    <button onClick={e => { e.stopPropagation(); setFinalizarModal(pedido.id) }} style={{ height: 38, border: "1px solid rgba(255,255,255,.07)", borderRadius: 12, background: "transparent", color: "#56524b", fontSize: 11, fontWeight: 800 }}>
+                      Finalizar pedido
+                    </button>
                   </div>
                 )}
 
@@ -825,6 +877,9 @@ export default function PedidosPage() {
                       <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><rect x="3" y="11" width="18" height="11" rx="2" stroke="#56524b" strokeWidth="2.2"/><path d="M7 11V7a5 5 0 0110 0v4" stroke="#56524b" strokeWidth="2.2" strokeLinecap="round"/></svg>
                       <span style={{ fontSize: 14, fontWeight: 800, color: "#56524b" }}>Libera ao confirmar Pix</span>
                     </div>
+                    <button onClick={e => { e.stopPropagation(); setConfirmPixModal(pedido.id) }} style={{ height: 44, border: "1px solid rgba(251,191,36,.35)", borderRadius: 13, background: "rgba(251,191,36,.08)", color: "#fbbf24", fontSize: 13, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                      Confirmar Pix manualmente
+                    </button>
                     <button onClick={e => { e.stopPropagation(); window.open(whatsappLink(pedido.telefone), "_blank"); }} style={{ height: 44, border: `1px solid ${sc.accentBorder}`, borderRadius: 13, background: "transparent", color: "#c9c2b4", fontSize: 13, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
                       <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#25d366" }} />
                       Falar com {firstName} no WhatsApp
@@ -847,15 +902,45 @@ export default function PedidosPage() {
           })}
         </main>
 
-        {/* Toast */}
-        {toastVisible && (
-          <div style={{ position: "fixed", bottom: 96, left: 0, right: 0, margin: "0 auto", width: "calc(100% - 32px)", maxWidth: 343, background: "#1c1a16", border: "1px solid #33302a", borderRadius: 16, padding: "12px 12px 12px 16px", display: "flex", alignItems: "center", gap: 12, animation: "cbToastIn .25s ease both", zIndex: 50, boxShadow: "0 12px 32px rgba(0,0,0,.55)" }}>
-            <span style={{ flex: 1, fontSize: 14, fontWeight: 800, letterSpacing: "-0.2px" }}>{toast?.text}</span>
-            <button onClick={desfazerToast} style={{ border: "none", background: "rgba(255,107,0,.16)", color: "#ff6b00", fontWeight: 900, fontSize: 14, padding: "11px 14px", borderRadius: 11, flexShrink: 0 }}>Desfazer · {toastSegs}</button>
-          </div>
-        )}
+        <nav className="cb-nav">
+          <button style={{ border: "none", background: "transparent", display: "flex", flexDirection: "column", alignItems: "center", gap: 5, padding: "6px 0" }}>
+            <span style={{ position: "relative", display: "flex" }}>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="4" y="3" width="16" height="18" rx="3" stroke="#ff6b00" strokeWidth="2.2"/><line x1="8" y1="9" x2="16" y2="9" stroke="#ff6b00" strokeWidth="2.2" strokeLinecap="round"/><line x1="8" y1="14" x2="13" y2="14" stroke="#ff6b00" strokeWidth="2.2" strokeLinecap="round"/></svg>
+              {emAberto > 0 && <span style={{ position: "absolute", top: -5, right: -9, minWidth: 17, height: 17, borderRadius: 9, background: "#ff6b00", color: "#fff", fontSize: 10.5, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 4px" }}>{emAberto}</span>}
+            </span>
+            <span style={{ fontSize: 11, fontWeight: 900, color: "#ff6b00" }}>Pedidos</span>
+          </button>
+          <button onClick={() => router.push("/conversas")} style={{ border: "none", background: "transparent", display: "flex", flexDirection: "column", alignItems: "center", gap: 5, padding: "6px 0" }}>
+            <span style={{ position: "relative", display: "flex" }}>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="14" rx="5" stroke="#5a564d" strokeWidth="2.2"/><circle cx="8.5" cy="11" r="1.4" fill="#5a564d"/><circle cx="12" cy="11" r="1.4" fill="#5a564d"/><circle cx="15.5" cy="11" r="1.4" fill="#5a564d"/></svg>
+              {escalonados.length > 0 && <span style={{ position: "absolute", top: -5, right: -9, minWidth: 17, height: 17, borderRadius: 9, background: escalonados.some(p => { const min = Math.floor((Date.now() - (p.horarioEscalonado || parseInt(p.id))) / 60000); return min >= 8 }) ? "#e05050" : "#ff6b00", color: "#fff", fontSize: 10.5, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 4px" }}>{escalonados.length}</span>}
+            </span>
+            <span style={{ fontSize: 11, fontWeight: 800, color: "#5a564d" }}>Conversas</span>
+          </button>
+          <button onClick={() => router.push("/cardapio")} style={{ border: "none", background: "transparent", display: "flex", flexDirection: "column", alignItems: "center", gap: 5, padding: "6px 0" }}>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="4" y="4" width="7" height="7" rx="2" stroke="#5a564d" strokeWidth="2.2"/><rect x="13" y="4" width="7" height="7" rx="2" stroke="#5a564d" strokeWidth="2.2"/><rect x="4" y="13" width="7" height="7" rx="2" stroke="#5a564d" strokeWidth="2.2"/><rect x="13" y="13" width="7" height="7" rx="2" stroke="#5a564d" strokeWidth="2.2"/></svg>
+            <span style={{ fontSize: 11, fontWeight: 800, color: "#5a564d" }}>Cardápio</span>
+          </button>
+        </nav>
+        </div>{/* /cb-right */}
+      </div>{/* /cb-shell */}
 
-        {/* Bottom sheet detalhe */}
+      {/* Toast */}
+      {toastVisible && (
+        <div style={{ position: "fixed", bottom: 96, left: 0, right: 0, margin: "0 auto", width: "calc(100% - 32px)", maxWidth: 343, background: "#1c1a16", border: "1px solid #33302a", borderRadius: 16, padding: "12px 12px 12px 16px", display: "flex", alignItems: "center", gap: 12, animation: "cbToastIn .25s ease both", zIndex: 50, boxShadow: "0 12px 32px rgba(0,0,0,.55)" }}>
+          <span style={{ flex: 1, fontSize: 14, fontWeight: 800, letterSpacing: "-0.2px" }}>{toast?.text}</span>
+          <button onClick={desfazerToast} style={{ border: "none", background: "rgba(255,107,0,.16)", color: "#ff6b00", fontWeight: 900, fontSize: 14, padding: "11px 14px", borderRadius: 11, flexShrink: 0 }}>Desfazer · {toastSegs}</button>
+        </div>
+      )}
+
+      {/* Simple Toast */}
+      {simpleToast && (
+        <div style={{ position: "fixed", bottom: 96, left: 0, right: 0, margin: "0 auto", width: "calc(100% - 32px)", maxWidth: 343, background: "#1a1a0d", border: "1px solid rgba(251,191,36,.3)", borderRadius: 16, padding: "14px 16px", animation: "cbToastIn .25s ease both", zIndex: 50, boxShadow: "0 12px 32px rgba(0,0,0,.55)" }}>
+          <span style={{ fontSize: 13, fontWeight: 800, color: "#fbbf24" }}>{simpleToast}</span>
+        </div>
+      )}
+
+      {/* Bottom sheet detalhe */}
         {detalhePedido && (
           <>
             <div onClick={() => setDetailId(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 60, animation: "cbFadeIn .2s ease both" }} />
@@ -988,6 +1073,20 @@ export default function PedidosPage() {
                       </button>
                     )}
                     {isDone && <div style={{ height: 54, borderRadius: 16, background: "rgba(34,197,94,.1)", border: "1px solid rgba(34,197,94,.3)", color: "#22c55e", fontSize: 15, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>Entregue · tudo certo ✓</div>}
+
+                    {/* Confirmar Pix no detalhe */}
+                    {isPix && !p.pixConfirmado && !isDone && (
+                      <button onClick={() => { setDetailId(null); setConfirmPixModal(p.id) }} style={{ height: 46, border: "1px solid rgba(251,191,36,.35)", borderRadius: 14, background: "rgba(251,191,36,.08)", color: "#fbbf24", fontSize: 14, fontWeight: 900, flexShrink: 0 }}>
+                        Confirmar Pix manualmente
+                      </button>
+                    )}
+
+                    {/* Finalizar no detalhe */}
+                    {!isDone && !isCanceled && (
+                      <button onClick={() => { setDetailId(null); setFinalizarModal(p.id) }} style={{ height: 44, border: "1px solid rgba(255,255,255,.07)", borderRadius: 14, background: "transparent", color: "#56524b", fontSize: 13, fontWeight: 800, flexShrink: 0 }}>
+                        Finalizar pedido
+                      </button>
+                    )}
 
                     {/* WhatsApp */}
                     {p.telefone && p.telefone !== "App" && (
@@ -1122,31 +1221,46 @@ export default function PedidosPage() {
           </>
         )}
 
-        {/* Nav */}
-        <nav className="cbPedidosNav" style={{ position: "fixed", bottom: 0, left: 0, right: 0, margin: "0 auto", maxWidth: 375, background: "rgba(8,8,8,.94)", backdropFilter: "blur(14px)", borderTop: "1px solid #1f1d1a", display: "grid", gridTemplateColumns: "1fr 1fr 1fr", padding: "10px 8px calc(env(safe-area-inset-bottom) + 18px)", zIndex: 40 }}>
-          <button style={{ border: "none", background: "transparent", display: "flex", flexDirection: "column", alignItems: "center", gap: 5, padding: "6px 0" }}>
-            <span style={{ position: "relative", display: "flex" }}>
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="4" y="3" width="16" height="18" rx="3" stroke="#ff6b00" strokeWidth="2.2"/><line x1="8" y1="9" x2="16" y2="9" stroke="#ff6b00" strokeWidth="2.2" strokeLinecap="round"/><line x1="8" y1="14" x2="13" y2="14" stroke="#ff6b00" strokeWidth="2.2" strokeLinecap="round"/></svg>
-              {emAberto > 0 && <span style={{ position: "absolute", top: -5, right: -9, minWidth: 17, height: 17, borderRadius: 9, background: "#ff6b00", color: "#fff", fontSize: 10.5, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 4px" }}>{emAberto}</span>}
-            </span>
-            <span style={{ fontSize: 11, fontWeight: 900, color: "#ff6b00" }}>Pedidos</span>
-          </button>
-          <button onClick={() => router.push("/conversas")} style={{ border: "none", background: "transparent", display: "flex", flexDirection: "column", alignItems: "center", gap: 5, padding: "6px 0" }}>
-            <span style={{ position: "relative", display: "flex" }}>
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="14" rx="5" stroke="#5a564d" strokeWidth="2.2"/><circle cx="8.5" cy="11" r="1.4" fill="#5a564d"/><circle cx="12" cy="11" r="1.4" fill="#5a564d"/><circle cx="15.5" cy="11" r="1.4" fill="#5a564d"/></svg>
-              {escalonados.length > 0 && <span style={{ position: "absolute", top: -5, right: -9, minWidth: 17, height: 17, borderRadius: 9, background: escalonados.some(p => { const min = Math.floor((Date.now() - (p.horarioEscalonado || parseInt(p.id))) / 60000); return min >= 8 }) ? "#e05050" : "#ff6b00", color: "#fff", fontSize: 10.5, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 4px" }}>{escalonados.length}</span>}
-            </span>
-            <span style={{ fontSize: 11, fontWeight: 800, color: "#5a564d" }}>Conversas</span>
-          </button>
-          <button onClick={() => router.push("/cardapio")} style={{ border: "none", background: "transparent", display: "flex", flexDirection: "column", alignItems: "center", gap: 5, padding: "6px 0" }}>
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="4" y="4" width="7" height="7" rx="2" stroke="#5a564d" strokeWidth="2.2"/><rect x="13" y="4" width="7" height="7" rx="2" stroke="#5a564d" strokeWidth="2.2"/><rect x="4" y="13" width="7" height="7" rx="2" stroke="#5a564d" strokeWidth="2.2"/><rect x="13" y="13" width="7" height="7" rx="2" stroke="#5a564d" strokeWidth="2.2"/></svg>
-            <span style={{ fontSize: 11, fontWeight: 800, color: "#5a564d" }}>Cardápio</span>
-          </button>
-        </nav>
-      </div>
+      {/* Modal Confirmar Pix */}
+      {confirmPixModal && (
+        <>
+          <div onClick={() => setConfirmPixModal(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.7)", zIndex: 70, animation: "cbFadeIn .2s ease both" }} />
+          <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, margin: "0 auto", maxWidth: 480, background: "#121110", border: "1px solid #242220", borderBottom: "none", borderRadius: "26px 26px 0 0", zIndex: 71, animation: "cbSheetUp .32s cubic-bezier(.2,.9,.3,1) both", padding: "20px 20px 36px", display: "flex", flexDirection: "column", gap: 16 }}>
+            <div style={{ width: 44, height: 5, borderRadius: 3, background: "#2e2b26", margin: "0 auto 4px" }} />
+            <div style={{ width: 48, height: 48, borderRadius: 14, background: "rgba(251,191,36,.1)", border: "1px solid rgba(251,191,36,.25)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="#fbbf24" strokeWidth="2.2"/><polyline points="12,6 12,12 16,14" stroke="#fbbf24" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <p style={{ margin: 0, fontSize: 19, fontWeight: 900, letterSpacing: "-0.4px", lineHeight: 1.2 }}>Confirmar Pix manualmente?</p>
+              <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "#a39b8b", lineHeight: 1.5 }}>Use apenas se o pagamento já foi verificado. Nenhuma mensagem será enviada ao cliente.</p>
+            </div>
+            <button onClick={() => confirmarPixManual(confirmPixModal)} style={{ height: 56, border: "none", borderRadius: 16, background: "#fbbf24", color: "#060606", fontSize: 16, fontWeight: 900 }}>Confirmar Pix</button>
+            <button onClick={() => setConfirmPixModal(null)} style={{ height: 46, border: "none", background: "transparent", color: "#a39b8b", fontSize: 14, fontWeight: 800 }}>Cancelar</button>
+          </div>
+        </>
+      )}
 
-      {/* Desktop sidebar — hidden on mobile via CSS */}
-      <aside className="cbPedidosSidebar" style={{ display: "none", fontFamily: "'Archivo', sans-serif", color: "#f5f2ee" }}>
+      {/* Modal Finalizar Pedido */}
+      {finalizarModal && (
+        <>
+          <div onClick={() => setFinalizarModal(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.7)", zIndex: 70, animation: "cbFadeIn .2s ease both" }} />
+          <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, margin: "0 auto", maxWidth: 480, background: "#121110", border: "1px solid #242220", borderBottom: "none", borderRadius: "26px 26px 0 0", zIndex: 71, animation: "cbSheetUp .32s cubic-bezier(.2,.9,.3,1) both", padding: "20px 20px 36px", display: "flex", flexDirection: "column", gap: 16 }}>
+            <div style={{ width: 44, height: 5, borderRadius: 3, background: "#2e2b26", margin: "0 auto 4px" }} />
+            <div style={{ width: 48, height: 48, borderRadius: 14, background: "rgba(34,197,94,.1)", border: "1px solid rgba(34,197,94,.25)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M22 11.08V12a10 10 0 11-5.93-9.14" stroke="#22c55e" strokeWidth="2.2" strokeLinecap="round"/><polyline points="22,4 12,14.01 9,11.01" stroke="#22c55e" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <p style={{ margin: 0, fontSize: 19, fontWeight: 900, letterSpacing: "-0.4px", lineHeight: 1.2 }}>Finalizar pedido?</p>
+              <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "#a39b8b", lineHeight: 1.5 }}>O pedido será marcado como finalizado no painel. Nenhuma mensagem será enviada ao cliente.</p>
+            </div>
+            <button onClick={() => finalizarPedidoSilencioso(finalizarModal)} style={{ height: 56, border: "none", borderRadius: 16, background: "#22c55e", color: "#060606", fontSize: 16, fontWeight: 900 }}>Finalizar pedido</button>
+            <button onClick={() => setFinalizarModal(null)} style={{ height: 46, border: "none", background: "transparent", color: "#a39b8b", fontSize: 14, fontWeight: 800 }}>Cancelar</button>
+          </div>
+        </>
+      )}
+
+      {/* OLD_SIDEBAR - REMOVED */}
+      {false && <aside style={{ display: "none" }}>
         <div style={{ fontSize: 9, fontWeight: 900, textTransform: "uppercase", letterSpacing: "1.2px", color: "#3a3730", marginBottom: 4 }}>Dashboard</div>
 
         {/* Bot status */}
@@ -1203,9 +1317,7 @@ export default function PedidosPage() {
             <span style={{ fontSize: 13, fontWeight: 800, color: "#8a8278", textAlign: "left" }}>Cardápio</span>
           </button>
         </div>
-      </aside>
-
-      </div>
+      </aside>}
     </>
   )
 }

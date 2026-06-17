@@ -19,6 +19,7 @@ type Pedido = {
   endereco: string
   pagamento?: string
   troco?: string
+  pixConfirmado?: boolean
   entregador?: { id: string; nome: string; telefone: string }
   tipoEntrega?: string
   taxaEntrega?: number
@@ -97,10 +98,17 @@ export async function PATCH(req: NextRequest) {
   const auth = await checkAuth(req)
   if (!auth) return NextResponse.json({ error: 'Nao autorizado' }, { status: 401 })
 
-  const { id, status, entregador } = await req.json()
+  const { id, status, entregador, pixConfirmado, silent } = await req.json()
   const pedidos = await getPedidos()
   const index = pedidos.findIndex(p => p.id === id)
   if (index === -1) return NextResponse.json({ error: 'Pedido nao encontrado' }, { status: 404 })
+
+  // Confirmação de PIX manual — sem alterar status, sem enviar mensagem
+  if (pixConfirmado !== undefined) {
+    pedidos[index] = { ...pedidos[index], pixConfirmado }
+    await redis.set('pedidos', pedidos)
+    return NextResponse.json({ ok: true })
+  }
 
   const agora = new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" })
   pedidos[index] = {
@@ -115,6 +123,9 @@ export async function PATCH(req: NextRequest) {
     pedidos[index] = { ...pedidos[index], entregador }
   }
   await redis.set('pedidos', pedidos)
+
+  if (silent) return NextResponse.json(pedidos[index])
+
   await notificarCliente(pedidos[index].telefone, status, pedidos[index].cliente)
 
   // Notifica entregador no WhatsApp quando pedido sai para entrega + salva no Redis + envia link de rastreamento ao cliente

@@ -172,7 +172,7 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800;900&display=swap');
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-        html, body { margin: 0; padding: 0; background: #060606; overflow: hidden; }
+        html, body { margin: 0; padding: 0; background: #060606; }
         button { cursor: pointer; font-family: 'Archivo', sans-serif; border: none; }
         @keyframes cbToastIn { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:none} }
         @keyframes cbFadeIn { from{opacity:0} to{opacity:1} }
@@ -181,44 +181,66 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
         .cbBusca:focus { border-color: rgba(255,107,0,.6) !important; outline: none; }
         .cbScroll { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
         .cbScroll::-webkit-scrollbar { display: none; }
-        .cbMain { -webkit-overflow-scrolling: touch; }
         .cbItem:active { opacity: 0.8; }
         .cbBtn:active { opacity: 0.75; }
+        .cb-shell { height:100svh; overflow:hidden; display:flex; flex-direction:column; max-width:390px; margin:0 auto; background:#060606; color:#f5f2ee; font-family:'Archivo',sans-serif; }
+        .cb-top-nav { display:none; }
+        .cb-right { flex:1; min-width:0; display:flex; flex-direction:column; overflow:hidden; }
+        .cb-header { flex-shrink:0; background:#060606; border-bottom:1px solid #1a1816; padding:calc(env(safe-area-inset-top) + 10px) 16px 10px; }
+        .cb-main { flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; }
+        .cb-nav { flex-shrink:0; background:rgba(6,6,6,.96); backdrop-filter:blur(14px); border-top:1px solid #181614; display:grid; grid-template-columns:1fr 1fr 1fr; padding:10px 8px calc(env(safe-area-inset-bottom)+16px); }
+        .cbCardGrid { display:flex; flex-direction:column; }
+        .cbGridFull {}
         @media (min-width: 768px) {
-          html, body { overflow: auto; }
-          .cbAdminShell { height: auto !important; overflow: visible !important; max-width: 900px !important; }
-          .cbAdminShell .cbMain { overflow-y: visible !important; flex: none !important; }
-          .cbAdminShell header { position: sticky; top: 0; z-index: 30; }
-          .cbAdminShell nav { position: sticky !important; bottom: 0 !important; flex-shrink: 0; }
-          .cbCardGrid { display: grid !important; grid-template-columns: 1fr 1fr !important; gap: 8px !important; flex-direction: unset !important; }
-          .cbGridFull { grid-column: 1 / -1; }
+          body { overflow: auto; }
+          .cb-shell { height:auto; overflow:visible; max-width:1200px; flex-direction:row; align-items:flex-start; }
+          .cb-top-nav { display:flex; flex-direction:column; gap:4px; width:200px; flex-shrink:0; position:sticky; top:24px; padding:24px 0; }
+          .cb-top-nav-brand { padding:0 20px 20px; border-bottom:1px solid #1a1816; margin-bottom:8px; }
+          .cb-top-nav-btn { display:flex; align-items:center; gap:10px; padding:10px 20px; font-family:'Archivo',sans-serif; font-size:13px; font-weight:800; color:#4a4640; background:transparent; border:none; border-radius:10px; cursor:pointer; transition:background .15s; text-align:left; width:100%; }
+          .cb-top-nav-btn:hover { background:rgba(255,255,255,.04); }
+          .cb-top-nav-btn.active { color:#ff6b00; background:rgba(255,107,0,.08); }
+          .cb-right { border-left:1px solid #1a1816; min-height:100vh; overflow:visible; }
+          .cb-header { border-bottom:1px solid #1a1816; padding:24px 28px 20px; position:static; }
+          .cb-main { padding:20px 28px; overflow-y:visible; flex:none; }
+          .cb-nav { display:none; }
+          .cbCardGrid { display:grid !important; grid-template-columns:1fr 1fr !important; gap:8px !important; }
+          .cbGridFull { grid-column:1/-1; }
         }
         @media (min-width: 1100px) {
-          .cbAdminShell { max-width: 1100px !important; }
-          .cbCardGrid { grid-template-columns: 1fr 1fr 1fr !important; }
+          .cb-shell { max-width:1280px; }
+          .cbCardGrid { grid-template-columns:1fr 1fr 1fr !important; }
         }
       `}</style>
 
-      {/* App-shell: header fixo + conteúdo rolável + nav fixo */}
-      <div className="cbAdminShell" style={{
-        height: "100svh",
-        maxWidth: 390,
-        margin: "0 auto",
-        background: "#060606",
-        color: "#f5f2ee",
-        fontFamily: "'Archivo', sans-serif",
-        display: "flex",
-        flexDirection: "column",
-        overflow: "hidden",
-      }}>
+      {/* cb-shell */}
+      <div className="cb-shell">
 
-        {/* ── HEADER FIXO ─────────────────────────────── */}
-        <header style={{
-          flexShrink: 0,
-          background: "#060606",
-          borderBottom: "1px solid #1a1816",
-          padding: "calc(env(safe-area-inset-top) + 10px) 16px 10px",
-        }}>
+        {/* ── DESKTOP: sidebar nav ── */}
+        <nav className="cb-top-nav">
+          <div className="cb-top-nav-brand">
+            <div style={{ fontSize: 20, fontWeight: 900, letterSpacing: "-0.5px", color: "#f5f2ee" }}>ChefeBot</div>
+            <div style={{ fontSize: 11, color: "#4a4640", fontWeight: 700, marginTop: 2 }}>Painel operacional</div>
+          </div>
+          <button className="cb-top-nav-btn" onClick={() => router.push("/pedidos")}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><rect x="4" y="3" width="16" height="18" rx="3" stroke="currentColor" strokeWidth="2.2"/><line x1="8" y1="9" x2="16" y2="9" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"/><line x1="8" y1="14" x2="13" y2="14" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"/></svg>
+            Pedidos
+          </button>
+          <button className="cb-top-nav-btn" onClick={() => router.push("/conversas")}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="14" rx="5" stroke="currentColor" strokeWidth="2.2"/><circle cx="8.5" cy="11" r="1.3" fill="currentColor"/><circle cx="12" cy="11" r="1.3" fill="currentColor"/><circle cx="15.5" cy="11" r="1.3" fill="currentColor"/></svg>
+            Conversas
+            {conversasBadge > 0 && <span style={{ marginLeft: "auto", minWidth: 18, height: 18, borderRadius: 9, background: "#ff6b00", color: "#fff", fontSize: 10, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 5px" }}>{conversasBadge}</span>}
+          </button>
+          <button className="cb-top-nav-btn active">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><rect x="4" y="4" width="7" height="7" rx="2" stroke="currentColor" strokeWidth="2.2"/><rect x="13" y="4" width="7" height="7" rx="2" stroke="currentColor" strokeWidth="2.2"/><rect x="4" y="13" width="7" height="7" rx="2" stroke="currentColor" strokeWidth="2.2"/><rect x="13" y="13" width="7" height="7" rx="2" stroke="currentColor" strokeWidth="2.2"/></svg>
+            Cardápio
+          </button>
+        </nav>
+
+        {/* ── PAINEL DIREITO ── */}
+        <div className="cb-right">
+
+        {/* ── HEADER ── */}
+        <header className="cb-header">
 
           {/* Linha 1: título + botões */}
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
@@ -355,10 +377,10 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
           </div>
         )}
 
-        {/* ── LISTA ROLÁVEL ────────────────────────────── */}
+        {/* ── LISTA ── */}
         <main
-          className="cbMain cbCardGrid"
-          style={{ flex: 1, overflowY: "auto", padding: "8px 16px 12px", display: "flex", flexDirection: "column", gap: 6 }}
+          className="cb-main cbCardGrid"
+          style={{ padding: "8px 16px 12px", display: "flex", flexDirection: "column", gap: 6 }}
         >
           {/* Verificar reposição */}
           {produtosParaRevisar.length > 0 && (
@@ -491,16 +513,8 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
           <div style={{ height: 4, flexShrink: 0 }} />
         </main>
 
-        {/* ── NAV INFERIOR ─────────────────────────────── */}
-        <nav style={{
-          flexShrink: 0,
-          background: "rgba(6,6,6,.96)",
-          backdropFilter: "blur(14px)",
-          borderTop: "1px solid #181614",
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr 1fr",
-          padding: "10px 8px calc(env(safe-area-inset-bottom) + 16px)",
-        }}>
+        {/* Mobile nav */}
+        <nav className="cb-nav">
           <button onClick={() => router.push("/pedidos")} style={{ background: "transparent", display: "flex", flexDirection: "column", alignItems: "center", gap: 5, padding: "6px 0" }}>
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><rect x="4" y="3" width="16" height="18" rx="3" stroke="#3a3730" strokeWidth="2.2"/><line x1="8" y1="9" x2="16" y2="9" stroke="#3a3730" strokeWidth="2.2" strokeLinecap="round"/><line x1="8" y1="14" x2="13" y2="14" stroke="#3a3730" strokeWidth="2.2" strokeLinecap="round"/></svg>
             <span style={{ fontSize: 10, fontWeight: 800, color: "#3a3730" }}>Pedidos</span>
@@ -517,7 +531,8 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
             <span style={{ fontSize: 10, fontWeight: 900, color: "#ff6b00" }}>Cardápio</span>
           </button>
         </nav>
-      </div>
+        </div>{/* /cb-right */}
+      </div>{/* /cb-shell */}
 
       {/* Toast com desfazer — fora do app-shell para ficar sobre tudo */}
       {toast && (
