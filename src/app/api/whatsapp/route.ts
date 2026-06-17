@@ -22,6 +22,7 @@ type Pedido = {
   horario: string;
   endereco: string;
   escalonado?: boolean;
+  horarioEscalonado?: number;
   cancelamentoSolicitado?: boolean;
   observacao?: string;
   pixConfirmado?: boolean;
@@ -177,12 +178,13 @@ async function salvarEscalonamento(phone: string, session: BotSession) {
   // Se ja tem pedido ativo do cliente, marca ele como escalonado em vez de criar novo
   const indexPedidoAtivo = pedidos.findIndex((p) => p.telefone === phone && p.status === "novo" && !p.escalonado);
   if (indexPedidoAtivo !== -1) {
-    pedidos[indexPedidoAtivo] = { ...pedidos[indexPedidoAtivo], escalonado: true };
+    pedidos[indexPedidoAtivo] = { ...pedidos[indexPedidoAtivo], escalonado: true, horarioEscalonado: Date.now() };
     await redis.set("pedidos", pedidos);
     return;
   }
+  const agora = Date.now();
   const novoPedido: Pedido = {
-    id: Date.now().toString(),
+    id: agora.toString(),
     cliente: session.customerName || phone,
     telefone: phone,
     itens: ["Cliente precisa de atendimento humano"],
@@ -191,6 +193,7 @@ async function salvarEscalonamento(phone: string, session: BotSession) {
     horario: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" }),
     endereco: "-",
     escalonado: true,
+    horarioEscalonado: agora,
   };
   await redis.set("pedidos", [...pedidos, novoPedido]);
 }
