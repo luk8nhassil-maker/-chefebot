@@ -2,13 +2,20 @@ import { NextRequest, NextResponse } from 'next/server'
 import { redis } from '@/lib/redis'
 import { MENU, getMENUDinamico } from '@/lib/menu'
 
+type EsgMetadata = Record<string, { desde: string; ultimaRevisao?: string }>
+
+function hoje(): string {
+  return new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })
+}
+
 export async function GET() {
   try {
     const menu = await getMENUDinamico()
     const esgotados = (await redis.get<string[]>('esgotados')) || []
-    return NextResponse.json({ ...menu, esgotados })
+    const esgotadosMetadata = (await redis.get<EsgMetadata>('esgotadosMetadata')) || {}
+    return NextResponse.json({ ...menu, esgotados, esgotadosMetadata })
   } catch {
-    return NextResponse.json({ ...MENU, esgotados: [] })
+    return NextResponse.json({ ...MENU, esgotados: [], esgotadosMetadata: {} })
   }
 }
 
@@ -24,14 +31,33 @@ export async function POST(req: NextRequest) {
 
 export async function PATCH(req: NextRequest) {
   try {
-    const { nome, esgotado } = await req.json()
+    const { nome, esgotado, revisaoHoje } = await req.json()
     if (!nome) return NextResponse.json({ ok: false, error: 'nome obrigatorio' }, { status: 400 })
+
+    const metadata = (await redis.get<EsgMetadata>('esgotadosMetadata')) || {}
+
+    if (revisaoHoje) {
+      if (metadata[nome]) {
+        metadata[nome] = { ...metadata[nome], ultimaRevisao: hoje() }
+        await redis.set('esgotadosMetadata', metadata)
+      }
+      return NextResponse.json({ ok: true, esgotadosMetadata: metadata })
+    }
+
     const lista = (await redis.get<string[]>('esgotados')) || []
-    const nova = esgotado
-      ? (lista.includes(nome) ? lista : [...lista, nome])
-      : lista.filter((n: string) => n !== nome)
+    let nova: string[]
+    if (esgotado) {
+      nova = lista.includes(nome) ? lista : [...lista, nome]
+      if (!metadata[nome]) {
+        metadata[nome] = { desde: hoje(), ultimaRevisao: hoje() }
+      }
+    } else {
+      nova = lista.filter((n: string) => n !== nome)
+      delete metadata[nome]
+    }
     await redis.set('esgotados', nova)
-    return NextResponse.json({ ok: true, esgotados: nova })
+    await redis.set('esgotadosMetadata', metadata)
+    return NextResponse.json({ ok: true, esgotados: nova, esgotadosMetadata: metadata })
   } catch {
     return NextResponse.json({ ok: false }, { status: 500 })
   }

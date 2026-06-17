@@ -527,15 +527,18 @@ export default function PedidosPage() {
         .cbBusca:focus { border-color: #ff6b00 !important; box-shadow: 0 0 0 3px rgba(255,107,0,.1); }
         .cbInput:focus { border-color: #ff6b00 !important; outline: none; }
         @media (min-width: 768px) {
-          .cbPedidosWrap { max-width: 1100px !important; padding-bottom: 0 !important; }
-          .cbPedidosNav { max-width: 1100px !important; left: 50% !important; transform: translateX(-50%) !important; }
+          .cbPedidosPage { display: flex !important; max-width: 1100px; margin: 0 auto; min-height: 100svh; }
+          .cbPedidosWrap { max-width: none !important; flex: 1 !important; min-width: 0 !important; padding-bottom: 0 !important; margin: 0 !important; border-right: 1px solid #1a1816; }
+          .cbPedidosSidebar { display: flex !important; flex-direction: column; gap: 12px; width: 240px; flex-shrink: 0; padding: 24px 16px; position: sticky; top: 0; height: 100svh; overflow-y: auto; border-left: 1px solid #1a1816; background: #060606; }
+          .cbPedidosNav { position: sticky !important; bottom: 0 !important; left: auto !important; right: auto !important; margin: 0 !important; max-width: none !important; transform: none !important; }
         }
-        @media (min-width: 1024px) {
-          .cbPedidosWrap { max-width: 1280px !important; }
-          .cbPedidosNav { max-width: 1280px !important; }
+        @media (min-width: 1100px) {
+          .cbPedidosPage { max-width: 1280px; }
+          .cbPedidosSidebar { width: 270px; }
         }
       `}</style>
 
+      <div className="cbPedidosPage" style={{ display: "block" }}>
       <div className="cbPedidosWrap" style={{ minHeight: "100svh", maxWidth: 375, margin: "0 auto", background: "#060606", color: "#f5f2ee", fontFamily: "'Archivo', sans-serif", display: "flex", flexDirection: "column", paddingBottom: "calc(env(safe-area-inset-bottom) + 90px)" }}>
 
         {/* Header */}
@@ -1140,6 +1143,68 @@ export default function PedidosPage() {
             <span style={{ fontSize: 11, fontWeight: 800, color: "#5a564d" }}>Cardápio</span>
           </button>
         </nav>
+      </div>
+
+      {/* Desktop sidebar — hidden on mobile via CSS */}
+      <aside className="cbPedidosSidebar" style={{ display: "none", fontFamily: "'Archivo', sans-serif", color: "#f5f2ee" }}>
+        <div style={{ fontSize: 9, fontWeight: 900, textTransform: "uppercase", letterSpacing: "1.2px", color: "#3a3730", marginBottom: 4 }}>Dashboard</div>
+
+        {/* Bot status */}
+        <div style={{ padding: "12px 14px", borderRadius: 13, background: botAtivo ? "rgba(34,197,94,.06)" : "rgba(250,204,21,.06)", border: `1px solid ${botAtivo ? "rgba(34,197,94,.25)" : "rgba(250,204,21,.28)"}`, display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ width: 9, height: 9, borderRadius: "50%", background: botAtivo ? "#22c55e" : "#facc15", flexShrink: 0, animation: botAtivo ? "cbPulse 2s infinite" : "none" }} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 900, color: "#f5f2ee" }}>{botAtivo ? "Bot atendendo" : "Bot pausado"}</div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: botAtivo ? "#22c55e" : "#facc15", marginTop: 1 }}>{botAtivo ? "WhatsApp ativo" : "Você no comando"}</div>
+          </div>
+        </div>
+
+        {/* Métricas */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+            <div style={{ background: "#0e0e0e", border: "1px solid #1a1816", borderRadius: 11, padding: "11px 10px" }}>
+              <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: "-1px", lineHeight: 1, color: "#f5f2ee" }}>{totalHoje}</div>
+              <div style={{ fontSize: 9.5, fontWeight: 700, color: "#3a3730", textTransform: "uppercase", letterSpacing: ".5px", marginTop: 3 }}>Hoje</div>
+            </div>
+            <div style={{ background: emAberto > 0 ? "#1a0d00" : "#0e0e0e", border: `1px solid ${emAberto > 0 ? "rgba(255,107,0,.45)" : "#1a1816"}`, borderRadius: 11, padding: "11px 10px" }}>
+              <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: "-1px", lineHeight: 1, color: emAberto > 0 ? "#ff6b00" : "#3a3730" }}>{emAberto}</div>
+              <div style={{ fontSize: 9.5, fontWeight: 700, color: emAberto > 0 ? "rgba(255,107,0,.6)" : "#3a3730", textTransform: "uppercase", letterSpacing: ".5px", marginTop: 3 }}>Em aberto</div>
+            </div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+            <div style={{ background: "#0e0e0e", border: "1px solid #1a1816", borderRadius: 11, padding: "11px 10px" }}>
+              <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: "-1px", lineHeight: 1, color: "#22c55e" }}>{pedidos.filter(p => p.status === "entregue").length}</div>
+              <div style={{ fontSize: 9.5, fontWeight: 700, color: "#3a3730", textTransform: "uppercase", letterSpacing: ".5px", marginTop: 3 }}>Entregues</div>
+            </div>
+            <div style={{ background: "#0e0e0e", border: "1px solid #1a1816", borderRadius: 11, padding: "11px 10px" }}>
+              <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: "-1px", lineHeight: 1, color: "#60a5fa" }}>{tempoMedioPreparo !== null ? `${tempoMedioPreparo}` : "--"}<span style={{ fontSize: 11, fontWeight: 700, marginLeft: 2 }}>{tempoMedioPreparo !== null ? "m" : ""}</span></div>
+              <div style={{ fontSize: 9.5, fontWeight: 700, color: "#3a3730", textTransform: "uppercase", letterSpacing: ".5px", marginTop: 3 }}>⏱ Média</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Divisor */}
+        <div style={{ height: 1, background: "#1a1816", margin: "4px 0" }} />
+
+        {/* Navegação */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <button
+            onClick={() => router.push("/conversas")}
+            style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 14px", borderRadius: 12, border: escalonados.length > 0 ? "1px solid rgba(239,68,68,.35)" : "1px solid #1e1c19", background: escalonados.length > 0 ? "rgba(239,68,68,.05)" : "#0e0e0e", cursor: "pointer", fontFamily: "'Archivo', sans-serif" }}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="14" rx="5" stroke={escalonados.length > 0 ? "#ef4444" : "#5a564d"} strokeWidth="2.2"/><circle cx="8.5" cy="11" r="1.4" fill={escalonados.length > 0 ? "#ef4444" : "#5a564d"}/><circle cx="12" cy="11" r="1.4" fill={escalonados.length > 0 ? "#ef4444" : "#5a564d"}/><circle cx="15.5" cy="11" r="1.4" fill={escalonados.length > 0 ? "#ef4444" : "#5a564d"}/></svg>
+            <span style={{ flex: 1, fontSize: 13, fontWeight: 800, color: escalonados.length > 0 ? "#ef4444" : "#8a8278", textAlign: "left" }}>Conversas</span>
+            {escalonados.length > 0 && <span style={{ minWidth: 20, height: 20, borderRadius: 10, background: "#ef4444", color: "#fff", fontSize: 11, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 5px" }}>{escalonados.length}</span>}
+          </button>
+          <button
+            onClick={() => router.push("/cardapio")}
+            style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 14px", borderRadius: 12, border: "1px solid #1e1c19", background: "#0e0e0e", cursor: "pointer", fontFamily: "'Archivo', sans-serif" }}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><rect x="4" y="4" width="7" height="7" rx="2" stroke="#5a564d" strokeWidth="2.2"/><rect x="13" y="4" width="7" height="7" rx="2" stroke="#5a564d" strokeWidth="2.2"/><rect x="4" y="13" width="7" height="7" rx="2" stroke="#5a564d" strokeWidth="2.2"/><rect x="13" y="13" width="7" height="7" rx="2" stroke="#5a564d" strokeWidth="2.2"/></svg>
+            <span style={{ fontSize: 13, fontWeight: 800, color: "#8a8278", textAlign: "left" }}>Cardápio</span>
+          </button>
+        </div>
+      </aside>
+
       </div>
     </>
   )

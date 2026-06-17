@@ -50,9 +50,15 @@ function sizeList(): string {
 }
 
 function listaFlavors(): string {
-  const saltyList = MENU.saltyFlavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n");
-  const sweetList = MENU.sweetFlavors.map((f, i) => `  ${MENU.saltyFlavors.length + i + 1}. ${f}`).join("\n");
-  return `*SALGADAS*\n${saltyList}\n\n───────────\n\n*DOCES*\n${sweetList}`;
+  const salties = MENU.saltyFlavors.filter(f => !isEsgotado(f));
+  const sweets = MENU.sweetFlavors.filter(f => !isEsgotado(f));
+  let num = 1;
+  const saltyList = salties.map(f => `  ${num++}. ${f}`).join("\n");
+  const sweetList = sweets.map(f => `  ${num++}. ${f}`).join("\n");
+  const parts: string[] = [];
+  if (saltyList) parts.push(`*SALGADAS*\n${saltyList}`);
+  if (sweetList) parts.push(`*DOCES*\n${sweetList}`);
+  return parts.join("\n\n───────────\n\n");
 }
 
 function mensagemAddMore(cart: CartItem[]): string {
@@ -612,13 +618,16 @@ function listaBordas(size: string): string {
     `\n  ${MENU.borders.length + 1}. Sem borda`;
 }
 function listaBebidas(): string {
-  return MENU.bebidas.map((b, i) => `  ${i + 1}. ${b.name} · *${formatCurrency(b.price)}*`).join("\n");
+  const items = MENU.bebidas.filter(b => !isEsgotado(b.name));
+  return items.map((b, i) => `  ${i + 1}. ${b.name} · *${formatCurrency(b.price)}*`).join("\n");
 }
 function listaSucos(): string {
-  return MENU.sucos.map((s, i) => `  ${i + 1}. ${s.name} · *${formatCurrency(s.price)}*`).join("\n");
+  const items = MENU.sucos.filter(s => !isEsgotado(s.name));
+  return items.map((s, i) => `  ${i + 1}. ${s.name} · *${formatCurrency(s.price)}*`).join("\n");
 }
 function listaLanches(): string {
-  return MENU.lanches.map((l, i) => {
+  const items = MENU.lanches.filter(l => !isEsgotado(l.name));
+  return items.map((l, i) => {
     if (l.sizes && l.sizes.length > 0) {
       const precos = l.sizes.map((s: {code: string, price: number}) => `${s.code} *${formatCurrency(s.price)}*`).join(" | ");
       return `  ${i + 1}. ${l.name} · ${precos}`;

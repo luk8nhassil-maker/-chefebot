@@ -2,6 +2,8 @@
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 
+type EsgMetadata = Record<string, { desde: string; ultimaRevisao?: string }>
+
 type MenuType = {
   sizes: { code: string; label: string; price: number }[];
   saltyFlavors: string[];
@@ -13,6 +15,7 @@ type MenuType = {
   neighborhoods: { name: string; fee: number }[];
   payments: string[];
   esgotados?: string[];
+  esgotadosMetadata?: EsgMetadata;
 };
 
 // ==================== ADMIN CARDÁPIO ====================
@@ -26,6 +29,7 @@ function normStr(s: string) {
 function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void }) {
   const router = useRouter()
   const [esgotados, setEsgotados] = useState<string[]>(menu.esgotados || [])
+  const [esgotadosMetadata, setEsgotadosMetadata] = useState<EsgMetadata>(menu.esgotadosMetadata || {})
   const [salvando, setSalvando] = useState<Set<string>>(new Set())
   const [toast, setToast] = useState<{ msg: string; nome: string; era: boolean } | null>(null)
   const [busca, setBusca] = useState("")
@@ -36,6 +40,8 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
   const [confirmLote, setConfirmLote] = useState<"esgotado" | "disponivel" | null>(null)
   const [conversasBadge, setConversasBadge] = useState(0)
   const toastTimer = useRef<any>(null)
+
+  const hojeStr = new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })
 
   // Badge conversas pendentes
   useEffect(() => {
@@ -73,6 +79,12 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
   const totalEsg = esgotados.filter(e => todos.some(p => p.nome === e)).length
   const totalDisp = totalProd - totalEsg
 
+  const produtosParaRevisar = esgotados.filter(nome => {
+    const meta = esgotadosMetadata[nome]
+    if (!meta) return false
+    return meta.desde !== hojeStr && (!meta.ultimaRevisao || meta.ultimaRevisao !== hojeStr)
+  }).filter(nome => todos.some(p => p.nome === nome))
+
   const bNorm = normStr(busca)
   const lista = todos
     .filter(p => {
@@ -98,6 +110,7 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
       const d = await r.json()
       if (d.ok) {
         setEsgotados(d.esgotados || [])
+        if (d.esgotadosMetadata) setEsgotadosMetadata(d.esgotadosMetadata)
         if (withToast) {
           clearTimeout(toastTimer.current)
           const msg = novoEstado
@@ -125,6 +138,18 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
       if (n.has(nome)) n.delete(nome); else n.add(nome)
       return n
     })
+  }
+
+  async function revisarHoje(nome: string) {
+    try {
+      const r = await fetch("/api/cardapio", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nome, revisaoHoje: true }),
+      })
+      const d = await r.json()
+      if (d.ok && d.esgotadosMetadata) setEsgotadosMetadata(d.esgotadosMetadata)
+    } catch {}
   }
 
   async function aplicarLote(esgotado: boolean) {
@@ -165,9 +190,12 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
           .cbAdminShell .cbMain { overflow-y: visible !important; flex: none !important; }
           .cbAdminShell header { position: sticky; top: 0; z-index: 30; }
           .cbAdminShell nav { position: sticky !important; bottom: 0 !important; flex-shrink: 0; }
+          .cbCardGrid { display: grid !important; grid-template-columns: 1fr 1fr !important; gap: 8px !important; flex-direction: unset !important; }
+          .cbGridFull { grid-column: 1 / -1; }
         }
-        @media (min-width: 1024px) {
+        @media (min-width: 1100px) {
           .cbAdminShell { max-width: 1100px !important; }
+          .cbCardGrid { grid-template-columns: 1fr 1fr 1fr !important; }
         }
       `}</style>
 
@@ -329,11 +357,37 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
 
         {/* ── LISTA ROLÁVEL ────────────────────────────── */}
         <main
-          className="cbMain"
-          style={{ flex: 1, overflowY: "auto", padding: "8px 16px 12px", display: "flex", flexDirection: "column", gap: 5 }}
+          className="cbMain cbCardGrid"
+          style={{ flex: 1, overflowY: "auto", padding: "8px 16px 12px", display: "flex", flexDirection: "column", gap: 6 }}
         >
+          {/* Verificar reposição */}
+          {produtosParaRevisar.length > 0 && (
+            <div className="cbGridFull" style={{ background: "rgba(250,204,21,.04)", border: "1px solid rgba(250,204,21,.2)", borderRadius: 14, padding: "14px 16px", marginBottom: 4, display: "flex", flexDirection: "column", gap: 10 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#facc15", flexShrink: 0 }} />
+                <span style={{ fontSize: 10, fontWeight: 900, color: "#facc15", textTransform: "uppercase", letterSpacing: "1px" }}>Verificar reposição hoje</span>
+              </div>
+              {produtosParaRevisar.map(nome => (
+                <div key={nome} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: "#0e0c0a", borderRadius: 10, border: "1px solid #1e1c18" }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 800, color: "#c9c2b4", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{nome}</div>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: "#5a564d", marginTop: 2 }}>Esgotado desde {esgotadosMetadata[nome]?.desde}</div>
+                  </div>
+                  <button
+                    onClick={() => toggleEsgotado(nome, false)}
+                    style={{ height: 32, padding: "0 10px", border: "1px solid rgba(34,197,94,.35)", borderRadius: 8, background: "rgba(34,197,94,.08)", color: "#22c55e", fontSize: 11, fontWeight: 900, flexShrink: 0 }}
+                  >Voltou</button>
+                  <button
+                    onClick={() => revisarHoje(nome)}
+                    style={{ height: 32, padding: "0 10px", border: "1px solid #2a2723", borderRadius: 8, background: "transparent", color: "#8a8278", fontSize: 11, fontWeight: 900, flexShrink: 0 }}
+                  >Continua esgotado</button>
+                </div>
+              ))}
+            </div>
+          )}
+
           {lista.length === 0 && (
-            <div style={{ background: "#0c0c0c", border: "1px dashed #252220", borderRadius: 14, padding: "40px 20px", textAlign: "center", marginTop: 6 }}>
+            <div className="cbGridFull" style={{ background: "#0c0c0c", border: "1px dashed #252220", borderRadius: 14, padding: "40px 20px", textAlign: "center", marginTop: 6 }}>
               <div style={{ fontSize: 32, marginBottom: 10 }}>{busca ? "🔍" : filtroStatus === "esgotado" ? "✅" : "📦"}</div>
               <div style={{ fontSize: 14, fontWeight: 800, color: "#a39b8b" }}>
                 {busca
@@ -359,7 +413,7 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
                   background: sel ? "rgba(255,107,0,.05)" : esg ? "rgba(239,68,68,.03)" : "#0c0c0c",
                   border: `1px solid ${sel ? "rgba(255,107,0,.5)" : esg ? "rgba(239,68,68,.2)" : "#1a1816"}`,
                   borderRadius: 13,
-                  padding: "13px 14px",
+                  padding: "14px 16px",
                   display: "flex",
                   alignItems: "center",
                   gap: 12,
@@ -385,26 +439,24 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
                   {/* Nome */}
                   <div style={{
                     fontSize: 15, fontWeight: 800,
-                    color: esg ? "#c87070" : "#f0ede8",
-                    textDecoration: esg ? "line-through" : "none",
+                    color: esg ? "#a06060" : "#f0ede8",
                     overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                    marginBottom: 4,
+                    marginBottom: 6, lineHeight: 1.3,
                   }}>
                     {produto.nome}
                   </div>
                   {/* Metadados */}
                   <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                    <span style={{ fontSize: 10, fontWeight: 800, color: "#3e3b37", background: "#161412", padding: "2px 7px", borderRadius: 5 }}>
+                    <span style={{ fontSize: 10, fontWeight: 800, color: "#3e3b37", background: "#161412", padding: "3px 8px", borderRadius: 5, lineHeight: 1.5 }}>
                       {produto.categoria}
                     </span>
                     {produto.preco != null && produto.preco > 0 && (
-                      <span style={{ fontSize: 11, fontWeight: 600, color: "#6a6460" }}>
+                      <span style={{ fontSize: 11, fontWeight: 600, color: "#6a6460", lineHeight: 1.4 }}>
                         R$ {produto.preco.toFixed(2).replace(".", ",")}
                       </span>
                     )}
-                    {/* Status operacional */}
-                    <span style={{ fontSize: 11, fontWeight: 800, color: esg ? "#b85555" : "#3d8a54" }}>
-                      {esg ? "Bot bloqueando venda" : "Vendendo agora"}
+                    <span style={{ fontSize: 11, fontWeight: 800, color: esg ? "#b85555" : "#3d8a54", lineHeight: 1.4 }}>
+                      {esg ? "Esgotado" : "Vendendo"}
                     </span>
                   </div>
                 </div>
