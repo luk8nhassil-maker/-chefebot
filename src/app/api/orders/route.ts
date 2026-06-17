@@ -232,7 +232,7 @@ export async function POST(req: NextRequest) {
     total: Number(total) || 0,
     status: 'novo',
     horario: agora,
-    endereco: String(endereco || (tipoEntrega === 'pickup' || tipoEntrega === 'retirada' ? 'Retirada na loja' : '')),
+    endereco: String(endereco || (tipoEntrega === 'pickup' || tipoEntrega === 'retirada' ? 'Retirada na loja' : tipoEntrega === 'dine_in' ? 'Consumo no local' : '')),
     ...(bairro ? { bairro: String(bairro) } : {}),
     ...(referencia ? { referencia: String(referencia) } : {}),
     ...(tipoEntrega ? { tipoEntrega: String(tipoEntrega) } : {}),

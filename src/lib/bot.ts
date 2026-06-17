@@ -133,7 +133,7 @@ export interface BotSession {
   pendingCategory?: string;
   pendingPizzas?: number;
   pizzaAtualIndex?: number;
-  deliveryType?: "delivery" | "pickup";
+  deliveryType?: "delivery" | "pickup" | "dine_in";
   neighborhood?: string;
   address?: string;
   deliveryFee: number;
@@ -672,6 +672,8 @@ function buildReceipt(session: BotSession): string {
   const total = subtotal + session.deliveryFee;
   const deliveryLine = session.deliveryType === "delivery"
     ? `\n\n📍 *Entrega:* ${session.address}\n   Bairro ${session.neighborhood} · Taxa *${formatCurrency(session.deliveryFee)}*`
+    : session.deliveryType === "dine_in"
+    ? `\n\n🍽️ *Consumo no local*`
     : `\n\n🏪 *Retirada na loja* · _gratuita_`;
   const obsLine = session.observacao ? `\n\n✏️ _Obs: ${session.observacao}_` : "";
   const trocoLine = session.troco && session.troco !== "Sem troco"
@@ -937,7 +939,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       flavor: `É só digitar o número ou o nome do sabor que você quer! 😋`,
       border_escolha: `É só escolher o número da borda ou digitar o nome. Se não quiser borda é só digitar o número ${MENU.borders.length + 1}!`,
       add_more: `Se quiser, pode me dizer se deseja bebida, outro lanche ou se já podemos fechar 😊`,
-      delivery_type: `Vai querer entrega ou prefere buscar na loja? Se for entrega, me informa seu endereço completo com bairro, por favor 😊`,
+      delivery_type: `Como quer receber?\n\n  1. Entrega 🛵\n  2. Retirada na loja 🏪\n  3. Consumo no local 🍽️`,
       neighborhood: `É só digitar o número ou o nome do seu bairro!`,
       payment: `É só escolher como vai pagar:\n\n  1. Pix 💸\n  2. Dinheiro\n  3. Cartão`,
       confirm: `É só confirmar o pedido:\n\n  ✅ *1.* Confirmar\n  ❌ *2.* Cancelar`,
@@ -960,7 +962,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       case "delivery_type":
         return { messages: [mensagemAddMore(session.cart)], session: resetaTentativas({ ...session, step: "add_more" }) };
       case "neighborhood":
-        return { messages: [`Tudo bem! Vai querer entrega ou prefere buscar na loja? Se for entrega, me informa seu endereço completo com bairro, por favor 😊`], session: resetaTentativas({ ...session, step: "delivery_type" }) };
+        return { messages: [`Tudo bem! Como quer receber seu pedido? 😊\n\n  1. Entrega 🛵\n  2. Retirada na loja 🏪\n  3. Consumo no local 🍽️`], session: resetaTentativas({ ...session, step: "delivery_type" }) };
       case "confirma_bairro_fuzzy":
         return { messages: [`Tudo bem! Qual o seu bairro? 😊`], session: resetaTentativas({ ...session, step: "neighborhood", bairroFuzzyCandidato: undefined }) };
       case "confirma_produto_valor":
@@ -972,8 +974,8 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       case "address":
         return { messages: [`Tudo bem! Qual o seu bairro? 😊`], session: resetaTentativas({ ...session, step: "neighborhood" }) };
       case "payment":
-        if (session.deliveryType === "pickup") {
-          return { messages: [`Tudo bem! Vai querer entrega ou prefere buscar na loja? Se for entrega, me informa seu endereço completo com bairro, por favor 😊`], session: resetaTentativas({ ...session, step: "delivery_type" }) };
+        if (session.deliveryType === "pickup" || session.deliveryType === "dine_in") {
+          return { messages: [`Tudo bem! Como quer receber seu pedido? 😊\n\n  1. Entrega 🛵\n  2. Retirada na loja 🏪\n  3. Consumo no local 🍽️`], session: resetaTentativas({ ...session, step: "delivery_type" }) };
         }
         return { messages: [`Tudo bem! Me passa o endereço completo:\n_(Rua, número e complemento)_\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "address" }) };
       case "pedindo_nome": {
@@ -1054,7 +1056,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
               `🛒 *Itens:*
 ${resumoCarrinho(cart)}
 
-Vai querer entrega ou prefere buscar na loja? Se for entrega, me informa seu endereço completo com bairro, por favor 😊`
+Como quer receber? 😊\n\n  1. Entrega 🛵\n  2. Retirada na loja 🏪\n  3. Consumo no local 🍽️`
             ],
             session: resetaTentativas(updatedSession),
           };
@@ -1478,7 +1480,7 @@ Vai querer entrega ou prefere buscar na loja? Se for entrega, me informa seu end
       // PRIORIDADE MÁXIMA: se quer finalizar e não mencionou pizza/lanche/bebida explicitamente, vai direto pro fechamento
       if (querFinalizar && !querPizza && !querLanche && !querBebida) {
         return {
-          messages: [`Show! Vamos fechar então 🍕\n\nVai querer entrega ou prefere buscar aqui na loja? 😊`],
+          messages: [`Show! Vamos fechar então 🍕\n\nComo quer receber seu pedido? 😊\n\n  1. Entrega 🛵\n  2. Retirada na loja 🏪\n  3. Consumo no local 🍽️`],
           session: resetaTentativas({ ...session, step: "delivery_type" }),
         };
       }
@@ -1499,7 +1501,7 @@ Vai querer entrega ou prefere buscar na loja? Se for entrega, me informa seu end
       // Finalizar (caso tenha mencionado algo de produto mas ainda assim a intenção predominante é fechar)
       if (querFinalizar) {
         return {
-          messages: [`Show! Vamos fechar então 🍕\n\nVai querer entrega ou prefere buscar aqui na loja? 😊`],
+          messages: [`Show! Vamos fechar então 🍕\n\nComo quer receber seu pedido? 😊\n\n  1. Entrega 🛵\n  2. Retirada na loja 🏪\n  3. Consumo no local 🍽️`],
           session: resetaTentativas({ ...session, step: "delivery_type" }),
         };
       }
@@ -1517,16 +1519,27 @@ Vai querer entrega ou prefere buscar na loja? Se for entrega, me informa seu end
         n.includes("nao tem") || n.includes("pode seguir") || n.includes("pode continuar");
       if (semObservacao) {
         return {
-          messages: [`Combinado! Vai querer entrega ou prefere buscar na loja? Se for entrega, me informa seu endereço completo com bairro, por favor 😊`],
+          messages: [`Combinado! Como quer receber seu pedido? 😊\n\n  1. Entrega 🛵\n  2. Retirada na loja 🏪\n  3. Consumo no local 🍽️`],
           session: resetaTentativas({ ...session, step: "delivery_type", observacao: undefined }),
         };
       }
       return {
-        messages: [`Anotei: _"${text}"_ ✏️\n\nVai querer entrega ou prefere buscar na loja? Se for entrega, me informa seu endereço completo com bairro, por favor 😊`],
+        messages: [`Anotei: _"${text}"_ ✏️\n\nComo quer receber seu pedido? 😊\n\n  1. Entrega 🛵\n  2. Retirada na loja 🏪\n  3. Consumo no local 🍽️`],
         session: resetaTentativas({ ...session, step: "delivery_type", observacao: text }),
       };
     }
     case "delivery_type": {
+      // ===== CONSUMO NO LOCAL (dine-in) =====
+      const isDineIn = n === "3"
+        || n.includes("consumo no local")
+        || n.includes("vou comer ai")
+        || n.includes("comer ai")
+        || n.includes("comer aqui")
+        || n === "no local";
+      if (isDineIn) {
+        return { messages: [`Combinado! 🍽️ Consumo no local!\n\nQual a forma de pagamento? 💸`], session: resetaTentativas({ ...session, step: "payment", deliveryType: "dine_in", deliveryFee: 0, neighborhood: undefined }) };
+      }
+
       // ===== CAPTURA INTELIGENTE: tenta extrair tipo + bairro + pagamento de uma vez =====
       const dados = detectaDadosEntrega(text);
       const pagDetectado = dados.pagamento || undefined;
@@ -1570,7 +1583,7 @@ Vai querer entrega ou prefere buscar na loja? Se for entrega, me informa seu end
       if (n === "2" || n.includes("retirar") || n.includes("loja") || n.includes("buscar") || n.includes("pegar") || n.includes("retiro")) {
         return { messages: [`Combinado, você retira aqui na loja! 🏪\n\nQual a forma de pagamento? 💸`], session: resetaTentativas({ ...session, step: "payment", deliveryType: "pickup", deliveryFee: 0, neighborhood: undefined }) };
       }
-      return respostaInvalida(`Vai querer entrega ou prefere buscar na loja? 😊`, session);
+      return respostaInvalida(`Como quer receber?\n\n  1. Entrega 🛵\n  2. Retirada na loja 🏪\n  3. Consumo no local 🍽️`, session);
     }
     case "neighborhood": {
       const num = parseInt(text);
@@ -1777,7 +1790,10 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
           return { messages: [`Ótimo! 😊 Para finalizar, envie o comprovante do Pix.\n\nChave Pix: (configurada pelo admin) 💸\n\nAssim que confirmarmos o pagamento, seu pedido vai direto pra cozinha! 🍕`], session: { ...session, step: "aguardando_pix" } };
         }
         const timeMsg = session.deliveryType === "delivery" ? CONFIG_BOT.tempoEntregaDelivery : CONFIG_BOT.tempoEntregaRetirada;
-        return { messages: [`Pedido confirmado! 🎉 Já foi pra cozinha!\n\nObrigado, *${session.customerName?.split(" ")[0]}*! Sua pizza chega em *${timeMsg}* 🛵\n\nQualquer dúvida é só chamar. Bom apetite! 🍕`], session: { ...session, step: "done" } };
+        const confirmMsg = session.deliveryType === "dine_in"
+          ? `Pedido confirmado! 🎉 Já foi pra cozinha!\n\nObrigado, *${session.customerName?.split(" ")[0]}*! Seu pedido fica prontinho em *${timeMsg}* 🍽️\n\nQualquer dúvida é só chamar. Bom apetite! 🍕`
+          : `Pedido confirmado! 🎉 Já foi pra cozinha!\n\nObrigado, *${session.customerName?.split(" ")[0]}*! Sua pizza chega em *${timeMsg}* 🛵\n\nQualquer dúvida é só chamar. Bom apetite! 🍕`;
+        return { messages: [confirmMsg], session: { ...session, step: "done" } };
       }
       if (retira) {
         return { messages: [`Tudo bem, pedido cancelado! Se mudar de ideia é só chamar. 😊`], session: { ...session, step: "done" } };

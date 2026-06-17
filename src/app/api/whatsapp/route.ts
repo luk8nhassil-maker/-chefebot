@@ -125,7 +125,11 @@ async function salvarPedido(session: BotSession, phone: string, _config: ConfigP
     return `${item.name}${size}${flavor}${border}`;
   });
   const total = session.cart.reduce((sum, item) => sum + item.price, 0) + session.deliveryFee;
-  const endereco = session.deliveryType === "delivery" ? `${session.address} - ${session.neighborhood}` : "Retirada na loja";
+  const endereco = session.deliveryType === "delivery"
+    ? `${session.address} - ${session.neighborhood}`
+    : session.deliveryType === "dine_in"
+    ? "Consumo no local"
+    : "Retirada na loja";
   const pedidoId = Date.now().toString();
   const numeroPedido = await proximoNumeroPedido();
   const novoPedido = {

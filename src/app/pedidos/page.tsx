@@ -721,7 +721,8 @@ export default function PedidosPage() {
             const minsDesde = tempoDesde(pedido.horario, undefined, now)
             const minsPrep = tempoDesde(pedido.horario, pedido.horarioInicio, now)
             const meta = 40
-            const nextStatus = NEXT_STATUS[pedido.status]
+            const isDineIn = pedido.tipoEntrega === "dine_in" || pedido.endereco === "Consumo no local"
+            const nextStatus = (isDineIn && pedido.status === "em_preparo") ? "entregue" as Status : NEXT_STATUS[pedido.status]
             const isDone = pedido.status === "entregue"
             const isCanceled = pedido.status === "cancelado"
             const isNovo = pedido.status === "novo"
@@ -747,7 +748,7 @@ export default function PedidosPage() {
             if (pedido.escalonado) cardBorder = "1.5px solid rgba(239,68,68,.6)"
             if (pedido.cancelamentoSolicitado) cardBorder = "1.5px solid rgba(239,68,68,.4)"
 
-            const isRetirada = !pedido.tipoEntrega || pedido.tipoEntrega === "pickup" || pedido.tipoEntrega === "retirada" || pedido.endereco === "Retirada na loja"
+            const isRetirada = !isDineIn && (!pedido.tipoEntrega || pedido.tipoEntrega === "pickup" || pedido.tipoEntrega === "retirada" || pedido.endereco === "Retirada na loja")
 
             return (
               <article key={pedido.id} onClick={() => setDetailId(pedido.id)} style={{ background: sc.cardBg, border: cardBorder, borderRadius: 26, padding: 18, display: "flex", flexDirection: "column", gap: 12, animation: cardAnim, cursor: "pointer" }}>
@@ -765,13 +766,15 @@ export default function PedidosPage() {
                         <span style={{ background: sc.accentBg, color: sc.accent, fontSize: 10, fontWeight: 900, padding: "2px 8px", borderRadius: 8, letterSpacing: "0.5px", textTransform: "uppercase", border: `1px solid ${sc.accentBorder}` }}>{sc.label}</span>
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                        <div style={{ width: 20, height: 20, borderRadius: 5, background: isRetirada ? "rgba(250,204,21,.12)" : "rgba(56,189,248,.12)", border: `1px solid ${isRetirada ? "rgba(250,204,21,.3)" : "rgba(56,189,248,.3)"}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                          {isRetirada
+                        <div style={{ width: 20, height: 20, borderRadius: 5, background: isDineIn ? "rgba(167,139,250,.12)" : isRetirada ? "rgba(250,204,21,.12)" : "rgba(56,189,248,.12)", border: `1px solid ${isDineIn ? "rgba(167,139,250,.3)" : isRetirada ? "rgba(250,204,21,.3)" : "rgba(56,189,248,.3)"}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                          {isDineIn
+                            ? <svg width="11" height="11" viewBox="0 0 24 24" fill="none"><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 002-2V2" stroke="#a78bfa" strokeWidth="2.2" strokeLinecap="round"/><path d="M7 2v20M21 15V2a5 5 0 00-5 5v6h3.5" stroke="#a78bfa" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                            : isRetirada
                             ? <svg width="11" height="11" viewBox="0 0 24 24" fill="none"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" stroke="#facc15" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
                             : <svg width="11" height="11" viewBox="0 0 24 24" fill="none"><path d="M5 17H3a2 2 0 01-2-2V5a2 2 0 012-2h11a2 2 0 012 2v3" stroke="#38bdf8" strokeWidth="2.2" strokeLinecap="round"/><rect x="9" y="11" width="14" height="10" rx="2" stroke="#38bdf8" strokeWidth="2.2"/></svg>
                           }
                         </div>
-                        <span style={{ fontSize: 11, fontWeight: 700, color: isRetirada ? "#facc15" : "#38bdf8", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>{isRetirada ? "Retirada na loja" : (pedido.bairro ? `${pedido.bairro} · ${pedido.endereco}` : pedido.endereco)}</span>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: isDineIn ? "#a78bfa" : isRetirada ? "#facc15" : "#38bdf8", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>{isDineIn ? "Consumo no local" : isRetirada ? "Retirada na loja" : (pedido.bairro ? `${pedido.bairro} · ${pedido.endereco}` : pedido.endereco)}</span>
                       </div>
                     </div>
                   </div>
@@ -858,7 +861,7 @@ export default function PedidosPage() {
                 {!isDone && !isCanceled && nextStatus && !pixPendente && !pedido.escalonado && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }} onClick={e => e.stopPropagation()}>
                     <button onClick={() => { if (nextStatus === "saiu_entrega" && entregadores.length > 0 && pedido.tipoEntrega !== "pickup") { setModalEntrega({ pedidoId: pedido.id, proxStatus: nextStatus }) } else { avancarStatus(pedido.id, nextStatus) } }} disabled={atualizando === pedido.id} style={{ height: 56, border: "none", borderRadius: 16, background: sc.btnBg, color: sc.btnFg, fontSize: 17, fontWeight: 900, letterSpacing: "-0.2px", opacity: atualizando === pedido.id ? 0.6 : 1 }}>
-                      {atualizando === pedido.id ? "..." : ACTION_LABEL[pedido.status]}
+                      {atualizando === pedido.id ? "..." : (isDineIn && pedido.status === "em_preparo" ? "Pedido pronto! 🍽️" : ACTION_LABEL[pedido.status])}
                     </button>
                     <button onClick={e => { e.stopPropagation(); window.open(whatsappLink(pedido.telefone), "_blank"); }} style={{ height: 44, border: `1px solid ${sc.accentBorder}`, borderRadius: 13, background: "transparent", color: "#c9c2b4", fontSize: 13, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
                       <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#25d366" }} />
@@ -954,13 +957,14 @@ export default function PedidosPage() {
                 const sc = STATUS_COLOR[p.status]
                 const isDone = p.status === "entregue"
                 const isCanceled = p.status === "cancelado"
-                const nextStatus = NEXT_STATUS[p.status]
+                const isDineInDetail = p.tipoEntrega === "dine_in" || p.endereco === "Consumo no local"
+                const nextStatus = (isDineInDetail && p.status === "em_preparo") ? "entregue" as Status : NEXT_STATUS[p.status]
                 const firstName = p.cliente.split(" ")[0]
                 const pagamento = p.pagamento || ""
                 const isPix = pagamento.toLowerCase().includes("pix")
                 const hibridoParts = parseHybridPayment(pagamento)
                 const payDot = isPix ? "#22c55e" : pagamento.toLowerCase().includes("cart") ? "#60a5fa" : "#facc15"
-                const isRetirada = !p.tipoEntrega || p.tipoEntrega === "pickup" || p.tipoEntrega === "retirada" || p.endereco === "Retirada na loja"
+                const isRetirada = !isDineInDetail && (!p.tipoEntrega || p.tipoEntrega === "pickup" || p.tipoEntrega === "retirada" || p.endereco === "Retirada na loja")
                 return (
                   <>
                     {/* Cabeçalho */}
@@ -992,9 +996,9 @@ export default function PedidosPage() {
                       )}
                       <div style={{ display: "flex", justifyContent: "space-between" }}>
                         <span style={{ fontSize: 11, fontWeight: 700, color: "#5a564d" }}>Tipo</span>
-                        <span style={{ fontSize: 13, fontWeight: 800, color: isRetirada ? "#facc15" : "#38bdf8" }}>{isRetirada ? "Retirada na loja" : "Delivery"}</span>
+                        <span style={{ fontSize: 13, fontWeight: 800, color: isDineInDetail ? "#a78bfa" : isRetirada ? "#facc15" : "#38bdf8" }}>{isDineInDetail ? "Consumo no local 🍽️" : isRetirada ? "Retirada na loja" : "Delivery"}</span>
                       </div>
-                      {!isRetirada && (
+                      {!isRetirada && !isDineInDetail && (
                         <>
                           {p.bairro && <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ fontSize: 11, fontWeight: 700, color: "#5a564d" }}>Bairro</span><span style={{ fontSize: 13, fontWeight: 800, color: "#f4f1ec" }}>{p.bairro}</span></div>}
                           <div style={{ display: "flex", justifyContent: "space-between" }}>
