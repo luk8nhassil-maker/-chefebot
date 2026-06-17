@@ -711,8 +711,13 @@ function eNegativa(n: string): boolean {
     n.includes("assim ta bom");
 }
 function eConfusao(n: string): boolean {
-  const palavras = ["nao entendi", "nao entendeu", "nao percebi", "nao compreendi", "como assim", "que isso", "que e isso", "nao to entendendo", "nao estou entendendo", "confuso", "confused", "o que", "oque", "hein", "ha", "nao sei", "pode explicar", "explica"];
-  return palavras.some(p => n.includes(p));
+  // Frases/termos longos: substring simples é seguro (não colidem com palavras comuns)
+  const frases = ["nao entendi", "nao entendeu", "nao percebi", "nao compreendi", "como assim", "que isso", "que e isso", "nao to entendendo", "nao estou entendendo", "confuso", "confused", "nao sei", "pode explicar", "explica"];
+  if (frases.some(p => n.includes(p))) return true;
+  // Termos curtos/ambíguos: exigem borda de palavra para não colidir com substrings
+  // (ex: "ha" aparece dentro de "fechar"; "oque" pode aparecer colado em outras palavras digitadas errado)
+  const termosCurtos = ["o que", "oque", "hein", "ha"];
+  return termosCurtos.some(p => new RegExp(`(^|[^a-z])${p}([^a-z]|$)`).test(n));
 }
 function ePositiva(n: string): boolean {
   return n === "sim" || n === "s" || n === "1" || n.includes("sim") ||
@@ -800,7 +805,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       size: `É só escolher o tamanho da pizza:\n\n${sizeList()}`,
       flavor: `É só digitar o número ou o nome do sabor que você quer! 😋`,
       border_escolha: `É só escolher o número da borda ou digitar o nome. Se não quiser borda é só digitar o número ${MENU.borders.length + 1}!`,
-      add_more: `É só escolher uma opção:\n\n  1️⃣ Mais uma pizza\n  2️⃣ Quero mais alguma coisa\n  3️⃣ Não, pode fechar`,
+      add_more: `Se quiser, pode me dizer se deseja bebida, outro lanche ou se já podemos fechar 😊`,
       delivery_type: `Vai querer entrega ou prefere buscar na loja? Se for entrega, me informa seu endereço completo com bairro, por favor 😊`,
       neighborhood: `É só digitar o número ou o nome do seu bairro!`,
       payment: `É só escolher como vai pagar:\n\n  1. Pix 💸\n  2. Dinheiro\n  3. Cartão`,
@@ -1220,25 +1225,38 @@ Vai querer entrega ou prefere buscar na loja? Se for entrega, me informa seu end
       return { messages: [`Qual borda você prefere? 😋\n\n${listaBordas(session.currentSize!)}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: { ...session, step: "border_escolha" } };
     }
     case "add_more": {
+      const querFinalizar = eNegativa(n) || n.includes("finalizar") || n.includes("fechar") || n.includes("so isso") ||
+        n.includes("e so") || n.includes("e isso") || n.includes("nao quero") || n.includes("ja esta bom") ||
+        n.includes("ja ta bom") || n.includes("nao precisa mais") || n.includes("nada mais") || n.includes("por hoje") ||
+        n.includes("isso mesmo");
+      const querPizza = n.includes("mais pizza") || n.includes("outra pizza") || (n.includes("pizza") && !n.includes("lanche"));
+      const querLanche = n.includes("lanche") || n.includes("calzone") || n.includes("porcao") || n.includes("batata") ||
+        n.includes("burguer") || n.includes("hamburguer") || n.includes("mini-pizza") || n.includes("mini pizza") || n.includes("macarronada");
+      const querBebida = n.includes("bebida") || n.includes("refri") || n.includes("guarana") || n.includes("suco") || n.includes("agua") || n.includes("cerveja") || n.includes("coca") || n.includes("pepsi");
+
+      // PRIORIDADE MÁXIMA: se quer finalizar e não mencionou pizza/lanche/bebida explicitamente, vai direto pro fechamento
+      if (querFinalizar && !querPizza && !querLanche && !querBebida) {
+        return {
+          messages: [`Show! Vamos fechar então 🍕\n\nVai querer entrega ou prefere buscar aqui na loja? 😊`],
+          session: resetaTentativas({ ...session, step: "delivery_type" }),
+        };
+      }
       // Pizza só se pedida explicitamente (regra: não voltar a pizza por engano)
-      if (n.includes("mais pizza") || n.includes("outra pizza") || (n.includes("pizza") && !n.includes("lanche"))) {
+      if (querPizza) {
         return { messages: [`Qual o tamanho da próxima pizza? 🍕\n\n${sizeList()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "size", currentCategory: "pizza" }) };
       }
       // Lanche (sem pizza) — vai direto pro cardápio de lanches
-      if (n.includes("lanche") || n.includes("calzone") || n.includes("porcao") || n.includes("batata") ||
-        n.includes("burguer") || n.includes("hamburguer") || n.includes("mini-pizza") || n.includes("mini pizza") || n.includes("macarronada")) {
+      if (querLanche) {
         const resp = handleCategory("lanche", { ...session, step: "category" });
         return { ...resp, session: resetaTentativas(resp.session) };
       }
       // Bebida
-      if (n.includes("bebida") || n.includes("refri") || n.includes("guarana") || n.includes("suco") || n.includes("agua") || n.includes("cerveja") || n.includes("coca") || n.includes("pepsi")) {
+      if (querBebida) {
         const resp = handleCategory("bebida", { ...session, step: "category" });
         return { ...resp, session: resetaTentativas(resp.session) };
       }
-      // Finalizar -> vai DIRETO pra entrega
-      if (eNegativa(n) || n.includes("finalizar") || n.includes("fechar") || n.includes("so isso") ||
-        n.includes("e so") || n.includes("e isso") || n.includes("nao quero") || n.includes("ja esta bom") ||
-        n.includes("ja ta bom") || n.includes("nao precisa mais") || n.includes("nada mais") || n.includes("por hoje")) {
+      // Finalizar (caso tenha mencionado algo de produto mas ainda assim a intenção predominante é fechar)
+      if (querFinalizar) {
         return {
           messages: [`Show! Vamos fechar então 🍕\n\nVai querer entrega ou prefere buscar aqui na loja? 😊`],
           session: resetaTentativas({ ...session, step: "delivery_type" }),
