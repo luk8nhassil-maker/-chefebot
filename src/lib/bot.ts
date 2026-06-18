@@ -1124,7 +1124,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
     }
     case "welcome": {
       return {
-        messages: [`Olá! Seja bem-vindo à *Chefe da Pizza*! 🍕\n\n${mensagemCategorias()}`],
+        messages: [`Olá! Seja bem-vindo à *Chefe da Pizza*! 🍕\n\nO que vai ser hoje? Temos coisa boa te esperando!`],
         session: { ...session, step: "category" },
       };
     }
@@ -2219,5 +2219,5 @@ export function createReturningSession(historico: ClienteHistorico): BotSession 
   return { step: "returning", cart: [], deliveryFee: 0, historico, tentativasInvalidas: 0 };
 }
 export function getWelcomeMessages(): string[] {
-  return [`Olá! Seja bem-vindo à *Chefe da Pizza*! 🍕\n\nPra começar, me fala seu nome?`];
+  return [`Olá! Seja bem-vindo à *Chefe da Pizza*! 🍕\n\nO que vai ser hoje? Temos coisa boa te esperando!`];
 }
