@@ -3,7 +3,7 @@ import { salvarStatusConexao } from "@/lib/conexaoWhatsapp";
 
 const _baseUrl    = process.env.EVOLUTION_API_URL ?? "evolution-api-production-8f99.up.railway.app";
 const BASE        = _baseUrl.startsWith("http") ? _baseUrl : `https://${_baseUrl}`;
-const KEY         = process.env.EVOLUTION_API_KEY  ?? "6208711c1b6fdffcc30cb492a44d74601415c33ff717ef6032162f9c0056319e";
+const KEY         = process.env.EVOLUTION_API_KEY!;
 const INSTANCE    = "chefebot";
 const WEBHOOK_URL = "https://chefebot-pjif.vercel.app/api/whatsapp";
 

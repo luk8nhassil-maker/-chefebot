@@ -458,6 +458,15 @@ export async function POST(req: NextRequest) {
     const phone = data?.key?.remoteJid?.replace("@s.whatsapp.net", "");
     if (!phone) return NextResponse.json({ ok: true });
 
+    // Idempotência global: ignora mensagens já processadas (Evolution pode reenviar webhooks)
+    const msgId = data?.key?.id as string | undefined;
+    if (msgId) {
+      const idempotencyKey = `msg_processed:${msgId}`;
+      const jaProcessado = await redis.get(idempotencyKey);
+      if (jaProcessado) return NextResponse.json({ ok: true });
+      await redis.set(idempotencyKey, 1, { ex: 86400 }); // 24h TTL
+    }
+
     const config = await getConfig();
     const menuDinamico = await getMENUDinamico();
     setMenuDinamico(menuDinamico);
