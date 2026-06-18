@@ -63,7 +63,14 @@ function listaFlavors(): string {
 
 function mensagemAddMore(cart: CartItem[]): string {
   const subtotal = cartSubtotal(cart);
-  return `🛒 *Seu pedido:*\n${resumoCarrinho(cart)}\n  Subtotal: *${formatCurrency(subtotal)}*\n\nQuer adicionar algo a mais? Como bebida, outro lanche, ou podemos fechar esse pedido? 😊`;
+  const temBebida = cart.some(i => i.category === "bebida" || i.category === "suco");
+  let upsellBebida = "";
+  if (!temBebida) {
+    const destaques = MENU.bebidas.slice(0, 3);
+    const lista = destaques.map((b, i) => `  ${i + 1}. ${b.name} · *${formatCurrency(b.price)}*`).join("\n");
+    upsellBebida = `\n\n🥤 *Quer adicionar uma bebida?*\n${lista}`;
+  }
+  return `🛒 *Seu pedido:*\n${resumoCarrinho(cart)}\n  Subtotal: *${formatCurrency(subtotal)}*${upsellBebida}\n\nOu *fechar pedido*, *mais pizza*, *lanche*, *ver cardápio*... 😊`;
 }
 
 export type BotStep =
@@ -155,6 +162,7 @@ export interface BotSession {
   candidatosItemAmbiguo?: string[];
   itemAmbiguoTipo?: "lanche" | "lanche_flavor" | "bebida";
   stepAposSabor?: BotStep;
+  retornoRapido?: boolean;
 }
 export interface BotResponse {
   messages: string[];
@@ -1043,6 +1051,31 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
             }
             return item;
           });
+
+          // Se temos histórico completo de entrega, pré-preenche e vai direto para confirmação
+          if (historico.ultimoDeliveryType && historico.ultimoPayment) {
+            const deliveryFee = historico.ultimoDeliveryFee ?? 0;
+            const sessionRapida: BotSession = {
+              ...session,
+              step: "confirm",
+              cart,
+              customerName: historico.nome,
+              deliveryType: historico.ultimoDeliveryType as BotSession["deliveryType"],
+              neighborhood: historico.ultimoNeighborhood,
+              address: historico.ultimoEndereco,
+              deliveryFee,
+              paymentMethod: historico.ultimoPayment,
+              retornoRapido: true,
+            };
+            return {
+              messages: [
+                `Boa, *${firstName}*! 😋 Preparei tudo igual da última vez:\n\n${buildReceipt(sessionRapida)}\n\nConfirmo assim?\n  ✅ *1.* Confirmar\n  ✏️ *2.* Mudar algo`,
+              ],
+              session: resetaTentativas(sessionRapida),
+            };
+          }
+
+          // Sem histórico de entrega: restaura carrinho e pede tipo de entrega
           const updatedSession: BotSession = {
             ...session,
             step: "delivery_type",
@@ -1053,10 +1086,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
           return {
             messages: [
               `Boa, *${firstName}*! 😋 Anotei o seu de sempre:`,
-              `🛒 *Itens:*
-${resumoCarrinho(cart)}
-
-Como quer receber? 😊\n\n  1. Entrega 🛵\n  2. Retirada na loja 🏪\n  3. Consumo no local 🍽️`
+              `🛒 *Itens:*\n${resumoCarrinho(cart)}\n\nComo quer receber? 😊\n\n  1. Entrega 🛵\n  2. Retirada na loja 🏪\n  3. Consumo no local 🍽️`
             ],
             session: resetaTentativas(updatedSession),
           };
@@ -1799,6 +1829,9 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
         return { messages: [confirmMsg], session: { ...session, step: "done" } };
       }
       if (retira) {
+        if (session.retornoRapido) {
+          return { messages: [`Tudo bem! Como quer receber? 😊\n\n  1. Entrega 🛵\n  2. Retirada na loja 🏪\n  3. Consumo no local 🍽️`], session: resetaTentativas({ ...session, step: "delivery_type", retornoRapido: false }) };
+        }
         return { messages: [`Tudo bem, pedido cancelado! Se mudar de ideia é só chamar. 😊`], session: { ...session, step: "done" } };
       }
       return respostaInvalida(`  ✅ *1.* Confirmar\n  ❌ *2.* Cancelar`, session);

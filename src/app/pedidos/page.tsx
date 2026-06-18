@@ -124,7 +124,7 @@ function parseHybridPayment(pagamento: string): { metodo: string; valor: number 
 type NovoPedidoForm = {
   cliente: string
   telefone: string
-  tipoEntrega: "delivery" | "retirada"
+  tipoEntrega: "delivery" | "retirada" | "dine_in"
   endereco: string
   bairro: string
   referencia: string
@@ -403,7 +403,7 @@ export default function PedidosPage() {
           cliente: f.cliente.trim(),
           telefone: f.telefone.trim(),
           tipoEntrega: f.tipoEntrega,
-          endereco: f.tipoEntrega === "delivery" ? f.endereco.trim() : "Retirada na loja",
+          endereco: f.tipoEntrega === "delivery" ? f.endereco.trim() : f.tipoEntrega === "dine_in" ? "Consumo no local" : "Retirada na loja",
           bairro: f.tipoEntrega === "delivery" ? f.bairro.trim() : undefined,
           referencia: f.referencia.trim() || undefined,
           itens: f.itens.filter(Boolean),
@@ -1113,9 +1113,9 @@ export default function PedidosPage() {
               <div>
                 <label style={labelStyle}>Tipo</label>
                 <div style={{ display: "flex", gap: 8 }}>
-                  {(["delivery", "retirada"] as const).map(t => (
+                  {(["delivery", "retirada", "dine_in"] as const).map(t => (
                     <button key={t} onClick={() => setNovoPedidoForm(f => ({ ...f, tipoEntrega: t }))} style={{ flex: 1, height: 40, border: `1px solid ${novoPedidoForm.tipoEntrega === t ? "#ff6b00" : "#242220"}`, borderRadius: 10, background: novoPedidoForm.tipoEntrega === t ? "rgba(255,107,0,.15)" : "transparent", color: novoPedidoForm.tipoEntrega === t ? "#ff6b00" : "#5a564d", fontSize: 13, fontWeight: 900 }}>
-                      {t === "delivery" ? "🛵 Entrega" : "🏪 Retirada"}
+                      {t === "delivery" ? "🛵 Entrega" : t === "dine_in" ? "🍽️ Local" : "🏪 Retirada"}
                     </button>
                   ))}
                 </div>
