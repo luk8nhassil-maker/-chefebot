@@ -163,6 +163,7 @@ export interface BotSession {
   itemAmbiguoTipo?: "lanche" | "lanche_flavor" | "bebida";
   stepAposSabor?: BotStep;
   retornoRapido?: boolean;
+  pendingQtdSuco?: number;
 }
 export interface BotResponse {
   messages: string[];
@@ -917,6 +918,35 @@ function parsearQtdEItem(text: string): { qty: number; produto: string } | null 
   return null;
 }
 
+// Interpreta mensagem com múltiplos sucos e quantidades individuais.
+// Ex: "um de maracuja e 1 de bacuri" → [Maracujá, Bacuri]
+// Ex: "maracuja e bacuri" → [Maracujá, Bacuri]
+function parsearMultiSuco(text: string): CartItem[] | null {
+  const n = normalizar(text).replace(/-/g, " ");
+  const numMap: Record<string, number> = { um: 1, uma: 1, dois: 2, duas: 2, tres: 3 };
+  const nomesS = MENU.sucos.map(s => s.name);
+  const partes = n.split(/\s+e\s+|,\s*|\s+mais\s+/).map(s => s.trim()).filter(Boolean);
+  if (partes.length < 2) return null;
+  const itens: CartItem[] = [];
+  for (const parte of partes) {
+    let qty = 1;
+    let produto = parte;
+    const mQtd = parte.match(/^(\d+|um[a]?|dois|duas|tres)\s+(?:de\s+)?(.+)$/);
+    if (mQtd) {
+      qty = parseInt(mQtd[1]) || numMap[mQtd[1]] || 1;
+      produto = mQtd[2].trim();
+    } else {
+      produto = parte.replace(/^de\s+/, "");
+    }
+    const suco = resolveUmSabor(produto, nomesS);
+    if (!suco) return null;
+    const sucoData = MENU.sucos.find(s => s.name === suco)!;
+    for (let i = 0; i < qty; i++) {
+      itens.push({ category: "suco" as const, name: suco, price: sucoData.price });
+    }
+  }
+  return itens.length >= 2 ? itens : null;
+}
 // Tenta adicionar qty unidades de uma bebida/suco/lanche (sem sabor, sem tamanho) ao carrinho.
 // Retorna BotResponse se resolvido com sucesso, null se o produto não foi identificado.
 function tentaAdicionarComQtd(
@@ -1285,6 +1315,10 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       if (category === "pizza") {
         const pedidoPizza = montarPizzaDoPedido(text, session);
         if (pedidoPizza) return pedidoPizza;
+      }
+      if (category === "suco" && qtdItemCat && qtdItemCat.qty > 1) {
+        const resp = handleCategory("suco", session);
+        return { ...resp, session: resetaTentativas({ ...resp.session, pendingQtdSuco: qtdItemCat.qty }) };
       }
       return { ...handleCategory(category, session), session: resetaTentativas(handleCategory(category, session).session) };
     }
@@ -2162,11 +2196,30 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
     case "suco_escolha": {
       const mudanca = tentaMudanca(text, session);
       if (mudanca) return mudanca;
+      // Multi-suco: "um de maracuja e 1 de bacuri", "maracuja e bacuri"
+      const multiSuco = parsearMultiSuco(text);
+      if (multiSuco) {
+        const totalMulti = multiSuco.length;
+        const pendingQtd = session.pendingQtdSuco;
+        const nomesSucoMap = new Map<string, number>();
+        for (const i of multiSuco) nomesSucoMap.set(i.name, (nomesSucoMap.get(i.name) || 0) + 1);
+        const labels = [...nomesSucoMap.entries()].map(([nome, q]) => q > 1 ? `*${q}x ${nome}*` : `*${nome}*`).join(" e ");
+        if (pendingQtd && totalMulti < pendingQtd) {
+          const faltam = pendingQtd - totalMulti;
+          const newCart = [...session.cart, ...multiSuco];
+          return {
+            messages: [`${labels} anotados! 😋 Falta${faltam === 1 ? "" : "m"} *${faltam} ${faltam === 1 ? "suco" : "sucos"}*. Qual ${faltam === 1 ? "seria" : "seriam"}?\n\n${listaSucos()}`],
+            session: resetaTentativas({ ...session, cart: newCart, pendingQtdSuco: faltam }),
+          };
+        }
+        const newCart = [...session.cart, ...multiSuco];
+        return { messages: [`${labels} anotados! 😋`, mensagemAddMore(newCart)], session: resetaTentativas({ ...session, step: "add_more", cart: newCart, pendingQtdSuco: undefined }) };
+      }
       // Qty + produto (ex: "2 laranja", "3x acai")
       const qtdSuco = parsearQtdEItem(text);
       if (qtdSuco && qtdSuco.qty >= 2) {
         const resQtdSuc = tentaAdicionarComQtd(qtdSuco, session);
-        if (resQtdSuc) return resQtdSuc;
+        if (resQtdSuc) return { ...resQtdSuc, session: { ...resQtdSuc.session, pendingQtdSuco: undefined } };
       }
       const nums = n.match(/\d+/g);
       if (nums && nums.length >= 2) {
