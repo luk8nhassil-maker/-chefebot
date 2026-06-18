@@ -1504,6 +1504,11 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       // Nova consulta de preço tem prioridade sobre contexto anterior
       const novaConsultaPreco = verificaConsultaPreco(text, session);
       if (novaConsultaPreco) return novaConsultaPreco;
+      // Consulta implícita sem palavra de preço ("e a pizza m?", "e a familia?")
+      // Remove "e ", "e a ", "e o " do início e tenta detectar o produto
+      const textSemConector = text.replace(/^(e\s+(a|o|as|os)\s+|e\s+)/i, "").trim();
+      const consultaImplicita = textSemConector !== text ? verificaConsultaPreco("quanto " + textSemConector, session) : null;
+      if (consultaImplicita) return consultaImplicita;
       const c = session.pendingConsultaPreco;
       if (!c) return { messages: [mensagemCategorias()], session: resetaTentativas({ ...session, step: "category", pendingConsultaPreco: undefined }) };
       const quer = ePositiva(n) || n === "1" || n.includes("sim") || n.includes("pode anotar") || n.includes("quero") || n.includes("manda") || n.includes("anota");
