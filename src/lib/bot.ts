@@ -480,7 +480,7 @@ function detectaIntencaoDireta(text: string): { category: string; label: string 
   if (todosSaboresPizza.some(f => n.includes(normalizar(f)))) return { category: "pizza", label: "pizza" };
   if (n.includes("pizza") && !n.includes("mini")) return { category: "pizza", label: "pizza" };
   if (n.includes("calzone")) return { category: "lanche", label: "calzone" };
-  if (n.includes("mini-pizza") || n.includes("mini pizza")) return { category: "lanche", label: "mini-pizza" };
+  if (n.includes("mini-pizza") || n.includes("mini pizza")) return { category: "pizza", label: "mini pizza" };
   if (n.includes("macarronada")) return { category: "lanche", label: "macarronada" };
   if (n.includes("x-burguer") || n.includes("x burguer") || n.includes("hamburguer")) return { category: "lanche", label: "hamburguer" };
   if (n.includes("x-bacon")) return { category: "lanche", label: "x-bacon" };
@@ -665,7 +665,7 @@ function listaSucos(): string {
   return items.map((s, i) => `  ${i + 1}. ${s.name} · *${formatCurrency(s.price)}*`).join("\n");
 }
 function listaLanches(): string {
-  const items = MENU.lanches.filter(l => !isEsgotado(l.name));
+  const items = MENU.lanches.filter(l => !isEsgotado(l.name) && l.name !== "Mini-Pizza");
   return items.map((l, i) => {
     if (l.sizes && l.sizes.length > 0) {
       const precos = l.sizes.map((s: {code: string, price: number}) => `${s.code} *${formatCurrency(s.price)}*`).join(" | ");
@@ -825,8 +825,9 @@ function eVoltar(n: string): boolean {
 }
 function handleCategory(category: string, session: BotSession): BotResponse {
   if (category === "pizza") {
+    const miniPizzaEntry = `\n\n  🍕 *Mini-Pizza* · *R$ 17,00* — (só digitar "mini pizza")`;
     return {
-      messages: [`Qual o tamanho da pizza? 🍕\n\n${sizeList()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`],
+      messages: [`Qual o tamanho da pizza? 🍕\n\n${sizeList()}${miniPizzaEntry}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`],
       session: { ...session, step: "size", currentCategory: "pizza", currentSize: undefined, currentFlavor: undefined, currentLanche: undefined },
     };
   }
@@ -1323,6 +1324,12 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       else if (intencao) category = intencao.category;
       if (!category) return respostaInvalida(mensagemCategorias(), session);
       if (category === "pizza") {
+        if (n.includes("mini-pizza") || n.includes("mini pizza")) {
+          return {
+            messages: [`Mini-Pizza anotada! 🍕 Qual sabor?\n\n${MENU.miniPizzaFlavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n")}`],
+            session: resetaTentativas({ ...session, step: "lanche_flavor", currentCategory: "pizza", currentLanche: "Mini-Pizza" }),
+          };
+        }
         const pedidoPizza = montarPizzaDoPedido(text, session);
         if (pedidoPizza) return pedidoPizza;
       }
@@ -1380,6 +1387,12 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
     case "size": {
       const mudanca = tentaMudanca(text, session);
       if (mudanca) return mudanca;
+      if (n.includes("mini-pizza") || n.includes("mini pizza")) {
+        return {
+          messages: [`Mini-Pizza anotada! 🍕 Qual sabor?\n\n${MENU.miniPizzaFlavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n")}`],
+          session: resetaTentativas({ ...session, step: "lanche_flavor", currentCategory: "pizza", currentLanche: "Mini-Pizza" }),
+        };
+      }
       const size = detectaTamanho(n);
       const allFlavors = [...MENU.saltyFlavors, ...MENU.sweetFlavors];
       if (size) {
@@ -1724,8 +1737,9 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
         n.includes("ja ta bom") || n.includes("nao precisa mais") || n.includes("nada mais") || n.includes("por hoje") ||
         n.includes("isso mesmo");
       const querPizza = n.includes("mais pizza") || n.includes("outra pizza") || (n.includes("pizza") && !n.includes("lanche"));
+      const querMiniPizza = n.includes("mini-pizza") || n.includes("mini pizza");
       const querLanche = n.includes("lanche") || n.includes("calzone") || n.includes("porcao") || n.includes("batata") ||
-        n.includes("burguer") || n.includes("hamburguer") || n.includes("mini-pizza") || n.includes("mini pizza") || n.includes("macarronada");
+        n.includes("burguer") || n.includes("hamburguer") || n.includes("macarronada");
       const querBebida = n.includes("bebida") || n.includes("refri") || n.includes("guarana") || n.includes("suco") || n.includes("agua") || n.includes("cerveja") || n.includes("coca") || n.includes("pepsi");
 
       // PRIORIDADE MÁXIMA: se quer finalizar e não mencionou pizza/lanche/bebida explicitamente, vai direto pro fechamento
@@ -1733,6 +1747,13 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
         return {
           messages: [`Show! Vamos fechar então 🍕\n\nComo quer receber seu pedido? 😊\n\n  1. Entrega 🛵\n  2. Retirada na loja 🏪\n  3. Consumo no local 🍽️`],
           session: resetaTentativas({ ...session, step: "delivery_type" }),
+        };
+      }
+      // Mini-Pizza vai para lanche_flavor (reusa fluxo existente)
+      if (querMiniPizza) {
+        return {
+          messages: [`Mini-Pizza anotada! 🍕 Qual sabor?\n\n${MENU.miniPizzaFlavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n")}`],
+          session: resetaTentativas({ ...session, step: "lanche_flavor", currentCategory: "pizza", currentLanche: "Mini-Pizza" }),
         };
       }
       // Pizza só se pedida explicitamente (regra: não voltar a pizza por engano)
