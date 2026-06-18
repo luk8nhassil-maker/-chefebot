@@ -896,7 +896,7 @@ function parsearQtdEItem(text: string): { qty: number; produto: string } | null 
   };
   // Remove prefixos de intenção comuns
   const semPrefixo = n
-    .replace(/^(?:quero|me ve|me ve|manda|vou querer|queria|gostaria de|da um|da)\s+/, "");
+    .replace(/^(?:quero|me ve|me ve|me da|me da|pode ser|pode|manda|vou querer|queria|gostaria de|da um|da)\s+/, "");
   // Padrão: número (+ 'x' opcional) + produto (exige pelo menos 2 chars de produto)
   const m1 = semPrefixo.match(/^(\d{1,2})x?\s+(.{2,})$/);
   if (m1) {
@@ -1244,6 +1244,12 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       return respostaInvalida("Não entendi muito bem 😅 Me diz seu nome, ou já pode pedir direto (ex: _\"pizza calabresa\"_ ou _\"cardápio\"_)", session);
     }
     case "category": {
+      // ===== QTD + PRODUTO DIRETO (ex: "quero 2 x burguer", "manda uma coca", "pode ser 1 x tudo") =====
+      const qtdItemCat = parsearQtdEItem(text);
+      if (qtdItemCat) {
+        const resQtdCat = tentaAdicionarComQtd(qtdItemCat, session);
+        if (resQtdCat) return resQtdCat;
+      }
       // ===== BUSCA INTELIGENTE POR VALOR (ex: "quero um hamburguer de 18", "lanche de 20") =====
       const catValor = detectaCategoriaEValor(text);
       if (catValor && catValor.categoria !== "pizza") {
