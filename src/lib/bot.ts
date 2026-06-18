@@ -372,6 +372,16 @@ function detectaDoisSabores(n: string, allFlavors: string[]): [string, string] |
     if (achados.length === 2) break;
   }
   if (achados.length === 2) return [achados[0], achados[1]];
+  // Fallback: sem separador explícito, tenta splits por palavra
+  // Ex: "calabresa peruana" → [Calabresa, Peruana]
+  const palavrasN = n.split(/\s+/);
+  for (let i = 1; i < palavrasN.length; i++) {
+    const p1 = palavrasN.slice(0, i).join(" ");
+    const p2 = palavrasN.slice(i).join(" ");
+    const s1 = resolveUmSabor(p1, allFlavors);
+    const s2 = resolveUmSabor(p2, allFlavors);
+    if (s1 && s2 && s1 !== s2) return [s1, s2];
+  }
   return null;
 }
 // Detecta se a mensagem menciona uma categoria de produto + um valor numérico (ex: "hamburguer de 18", "lanche de 20").
@@ -599,7 +609,7 @@ function montarPizzaDoPedido(text: string, session: BotSession, prefixo?: string
     return {
       messages: [
         `${pre}Pizza *${parcial.size}* anotada! 👌`,
-        `Agora me conta — qual o sabor? 😋\n\n${listaFlavors()}\n\n_(Digite *voltar* para corrigir)_`,
+        `Agora me conta — qual o sabor? 😋 Você pode escolher até *2 sabores*!\n\n${listaFlavors()}\n\n_(Digite *voltar* para corrigir)_`,
       ],
       session: resetaTentativas({ ...session, step: "flavor", currentCategory: "pizza", currentSize: parcial.size }),
     };
@@ -1430,7 +1440,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
         return {
           messages: [
             `Pizza *${size}* anotada! 👌`,
-            `Agora me conta — qual o sabor? 😋\n\n${listaFlavors()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
+            `Agora me conta — qual o sabor? 😋 Você pode escolher até *2 sabores*!\n\n${listaFlavors()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
           ],
           session: resetaTentativas({ ...session, step: "flavor", currentSize: size }),
         };
@@ -1451,6 +1461,12 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       const mudanca = tentaMudanca(text, session);
       if (mudanca) return mudanca;
       const allFlavors = [...MENU.saltyFlavors, ...MENU.sweetFlavors];
+      // Aviso se o cliente tentar mais de 2 sabores
+      const trechosSabores = n.split(/\s+e\s+|\/|,|\s+mais\s+/).map(s => s.trim()).filter(Boolean);
+      const saboresEncontrados = trechosSabores.map(t => resolveUmSabor(t, allFlavors)).filter(Boolean);
+      if (saboresEncontrados.length > 2) {
+        return respostaInvalida(`A pizza aceita até *2 sabores*! 😊\n\nEscolha 1 ou 2 sabores:\n\n${listaFlavors()}`, session);
+      }
       if (permiteMeioAMeio(session.currentSize)) {
         const dois = detectaDoisSabores(n, allFlavors);
         if (dois) {
