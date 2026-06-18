@@ -1501,6 +1501,9 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       };
     }
     case "consulta_preco": {
+      // Nova consulta de preço tem prioridade sobre contexto anterior
+      const novaConsultaPreco = verificaConsultaPreco(text, session);
+      if (novaConsultaPreco) return novaConsultaPreco;
       const c = session.pendingConsultaPreco;
       if (!c) return { messages: [mensagemCategorias()], session: resetaTentativas({ ...session, step: "category", pendingConsultaPreco: undefined }) };
       const quer = ePositiva(n) || n === "1" || n.includes("sim") || n.includes("pode anotar") || n.includes("quero") || n.includes("manda") || n.includes("anota");
