@@ -841,12 +841,15 @@ function handleCategory(category: string, session: BotSession): BotResponse {
 }
 function tentaMudanca(text: string, session: BotSession): BotResponse | null {
   const intencao = detectaIntencaoDireta(text);
-  if (!intencao) return null;
+  const querCardapio = !intencao && detectaIntencaoCardapio(text);
+  if (!intencao && !querCardapio) return null;
   const categoriaAtual = nomeCategoriaAtual(session.step, session.currentCategory);
-  if (intencao.category === session.currentCategory) return null;
+  if (intencao && intencao.category === session.currentCategory) return null;
+  const novaLabel = intencao ? intencao.label : "cardápio";
+  const pendingCategory = intencao ? intencao.category : "category";
   return {
-    messages: [`Ei, você ainda quer o *${categoriaAtual}*? Ou prefere ir direto pro *${intencao.label}*?\n\n  1. Manter o ${categoriaAtual}\n  2. Ir pro ${intencao.label}`],
-    session: { ...session, step: "confirmando_mudanca", pendingCategory: intencao.category },
+    messages: [`Ei, você ainda quer o *${categoriaAtual}*? Ou prefere ir pro *${novaLabel}*?\n\n  1. Manter o ${categoriaAtual}\n  2. Ir pro ${novaLabel}`],
+    session: { ...session, step: "confirmando_mudanca", pendingCategory },
   };
 }
 function respostaInvalida(lista: string, session: BotSession): BotResponse {
@@ -1318,6 +1321,12 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       }
       if (eNegativa(n) || n.includes("troca") || n.includes("muda") || n === "2") {
         const pendingCategory = session.pendingCategory ?? "pizza";
+        if (pendingCategory === "category") {
+          return {
+            messages: [`Tudo bem! O que mais vai querer? 😊\n\n${mensagemCategorias()}`],
+            session: resetaTentativas({ ...session, step: "category", pendingCategory: undefined, currentCategory: undefined }),
+          };
+        }
         return { ...handleCategory(pendingCategory, { ...session, pendingCategory: undefined }), session: resetaTentativas(handleCategory(pendingCategory, { ...session, pendingCategory: undefined }).session) };
       }
       return respostaInvalida(`  1. Manter\n  2. Ir pro outro`, session);
