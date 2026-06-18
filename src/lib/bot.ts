@@ -1285,6 +1285,9 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
     case "returning": {
       const historico = session.historico!;
       const firstName = historico.nome.split(" ")[0];
+      // Consulta de preço tem prioridade sobre pedido direto
+      const resConsultaRet = verificaConsultaPreco(text, session);
+      if (resConsultaRet) return resConsultaRet;
       // Cliente apressado: já mandou o pedido (completo ou parcial) na saudação -> processa direto
       const pedidoDireto = montarPizzaDoPedido(text, { ...session, customerName: historico.nome }, `Pode deixar, *${firstName}*! 🍕`);
       if (pedidoDireto) return pedidoDireto;
