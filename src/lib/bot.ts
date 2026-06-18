@@ -1592,6 +1592,13 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       return { messages: [`Qual borda você prefere? 😋\n\n${listaBordas(session.currentSize!)}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: { ...session, step: "border_escolha" } };
     }
     case "add_more": {
+      // ===== CARDÁPIO / MENU / VER OPÇÕES =====
+      if (detectaIntencaoCardapio(text)) {
+        return {
+          messages: [`Claro! O que mais vai querer? 😊\n\n${mensagemCategorias()}`],
+          session: resetaTentativas(session),
+        };
+      }
       // ===== QTD + PRODUTO DIRETO (ex: "3 coca", "2x burguer", "2 calabresa", "2 portuguesa") =====
       const qtdItemAM = parsearQtdEItem(text);
       if (qtdItemAM) {
