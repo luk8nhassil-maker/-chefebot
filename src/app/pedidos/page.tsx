@@ -185,18 +185,23 @@ export default function PedidosPage() {
   const tocarSomNormal = () => {
     if (muteadoRef.current) return
     try {
-      const Ctx = (window as any).AudioContext || (window as any).webkitAudioContext
-      const ctx = new Ctx()
-      const bipe = (freq: number, delay: number) => setTimeout(() => {
+      const audio = new Audio("/pavlov.mp3")
+      audio.play().catch(() => {
         try {
-          const osc = ctx.createOscillator(); const gain = ctx.createGain()
-          osc.connect(gain); gain.connect(ctx.destination); osc.type = "square"
-          osc.frequency.value = freq
-          gain.gain.setValueAtTime(0.4, ctx.currentTime); gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.18)
-          osc.start(); osc.stop(ctx.currentTime + 0.18)
+          const Ctx = (window as any).AudioContext || (window as any).webkitAudioContext
+          const ctx = new Ctx()
+          const bipe = (freq: number, delay: number) => setTimeout(() => {
+            try {
+              const osc = ctx.createOscillator(); const gain = ctx.createGain()
+              osc.connect(gain); gain.connect(ctx.destination); osc.type = "square"
+              osc.frequency.value = freq
+              gain.gain.setValueAtTime(0.4, ctx.currentTime); gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.18)
+              osc.start(); osc.stop(ctx.currentTime + 0.18)
+            } catch {}
+          }, delay)
+          bipe(880, 0); bipe(880, 200); bipe(1175, 400)
         } catch {}
-      }, delay)
-      bipe(880, 0); bipe(880, 200); bipe(1175, 400)
+      })
     } catch {}
     if (navigator.vibrate) navigator.vibrate([120, 80, 120, 80, 150])
   }
@@ -327,7 +332,7 @@ export default function PedidosPage() {
     ativarWakeLock();
     const handleVisibility = () => { if (document.visibilityState === "visible") ativarWakeLock(); };
     document.addEventListener("visibilitychange", handleVisibility);
-    const intervalo = setInterval(carregarPedidos, 10000)
+    const intervalo = setInterval(carregarPedidos, 3000)
     const tick = setInterval(() => setNow(Date.now()), 1000)
     return () => { if (wakeLock) wakeLock.release(); document.removeEventListener("visibilitychange", handleVisibility); window.removeEventListener("beforeinstallprompt", handleInstall); clearInterval(intervalo); clearInterval(tick); if (piscarRef.current) clearInterval(piscarRef.current); if (somRepetidoRef.current) clearInterval(somRepetidoRef.current); document.title = tituloOriginalRef.current }
   }, [router])
