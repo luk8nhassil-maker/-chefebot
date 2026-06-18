@@ -866,6 +866,81 @@ function ePositiva(n: string): boolean {
     n.includes("claro") || n.includes("vai") || n.includes("beleza") ||
     n.includes("ok") || n.includes("certo") || n.includes("isso");
 }
+// Extrai quantidade + nome de produto de mensagens como "3 coca", "2x burguer", "quero 4 hambúrgueres".
+// NUNCA chamada em steps de seleção (size/flavor/border/payment/delivery_type/category/confirm).
+// Retorna null se a mensagem for só um número (ex: "2") — esses nunca são quantidade sem produto.
+function parsearQtdEItem(text: string): { qty: number; produto: string } | null {
+  const n = normalizar(text);
+  const numPorExtenso: Record<string, number> = {
+    "um": 1, "uma": 1, "dois": 2, "duas": 2, "tres": 3, "quatro": 4, "cinco": 5,
+  };
+  // Remove prefixos de intenção comuns
+  const semPrefixo = n
+    .replace(/^(?:quero|me ve|me ve|manda|vou querer|queria|gostaria de|da um|da)\s+/, "");
+  // Padrão: número (+ 'x' opcional) + produto (exige pelo menos 2 chars de produto)
+  const m1 = semPrefixo.match(/^(\d{1,2})x?\s+(.{2,})$/);
+  if (m1) {
+    const qty = parseInt(m1[1]);
+    const produto = m1[2].trim();
+    if (qty >= 1 && qty <= 20) return { qty, produto };
+  }
+  // Padrão: número por extenso + produto
+  const m2 = semPrefixo.match(/^(um[a]?|dois|duas|tres|quatro|cinco)\s+(.{2,})$/);
+  if (m2) {
+    const qty = numPorExtenso[m2[1]] ?? 0;
+    const produto = m2[2].trim();
+    if (qty >= 1) return { qty, produto };
+  }
+  return null;
+}
+
+// Tenta adicionar qty unidades de uma bebida/suco/lanche (sem sabor, sem tamanho) ao carrinho.
+// Retorna BotResponse se resolvido com sucesso, null se o produto não foi identificado.
+function tentaAdicionarComQtd(
+  qtdItem: { qty: number; produto: string },
+  session: BotSession,
+): BotResponse | null {
+  const { qty, produto } = qtdItem;
+  // Bebidas
+  const nomesBebidas = MENU.bebidas.map(b => b.name);
+  const resBebida = resolveSaborComAmbiguidade(produto, nomesBebidas);
+  if (resBebida.tipo === "unico") {
+    const bebida = MENU.bebidas.find(b => b.name === resBebida.nome);
+    if (bebida && !isEsgotado(bebida.name)) {
+      const novos: CartItem[] = Array.from({ length: qty }, () => ({ category: "bebida" as const, name: bebida.name, price: bebida.price }));
+      const newCart = [...session.cart, ...novos];
+      const label = qty > 1 ? `*${qty}x ${bebida.name}*` : `*${bebida.name}*`;
+      return { messages: [`${label} anotado${qty > 1 ? "s" : ""}! 😋`, mensagemAddMore(newCart)], session: resetaTentativas({ ...session, step: "add_more", cart: newCart }) };
+    }
+  }
+  // Sucos
+  const nomesSucos = MENU.sucos.map(s => s.name);
+  const resSuco = resolveSaborComAmbiguidade(produto, nomesSucos);
+  if (resSuco.tipo === "unico") {
+    const suco = MENU.sucos.find(s => s.name === resSuco.nome);
+    if (suco && !isEsgotado(suco.name)) {
+      const novos: CartItem[] = Array.from({ length: qty }, () => ({ category: "suco" as const, name: suco.name, price: suco.price }));
+      const newCart = [...session.cart, ...novos];
+      const label = qty > 1 ? `*${qty}x ${suco.name}*` : `*${suco.name}*`;
+      return { messages: [`${label} anotado${qty > 1 ? "s" : ""}! 😋`, mensagemAddMore(newCart)], session: resetaTentativas({ ...session, step: "add_more", cart: newCart }) };
+    }
+  }
+  // Lanches simples (sem sabor e sem tamanhos variáveis)
+  const lancheSimples = MENU.lanches.filter(l => !l.hasFlavors && !l.sizes);
+  const nomesLanches = lancheSimples.map(l => l.name);
+  const resLanche = resolveSaborComAmbiguidade(produto, nomesLanches);
+  if (resLanche.tipo === "unico") {
+    const lanche = lancheSimples.find(l => l.name === resLanche.nome);
+    if (lanche && !isEsgotado(lanche.name)) {
+      const novos: CartItem[] = Array.from({ length: qty }, () => ({ category: "lanche" as const, name: lanche.name, price: lanche.price }));
+      const newCart = [...session.cart, ...novos];
+      const label = qty > 1 ? `*${qty}x ${lanche.name}*` : `*${lanche.name}*`;
+      return { messages: [`${label} anotado${qty > 1 ? "s" : ""}! 😋`, mensagemAddMore(newCart)], session: resetaTentativas({ ...session, step: "add_more", cart: newCart, currentLanche: undefined }) };
+    }
+  }
+  return null;
+}
+
 export function processMessage(input: string, session: BotSession): BotResponse {
   // Detecta o "ritmo" do cliente pela forma da resposta:
   // resposta que é só número (ex: "1", "2") => cliente apressado => respostas mais rápidas.
@@ -1478,6 +1553,13 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       return { messages: [`Qual borda você prefere? 😋\n\n${listaBordas(session.currentSize!)}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: { ...session, step: "border_escolha" } };
     }
     case "add_more": {
+      // ===== QTD + PRODUTO DIRETO (ex: "3 coca", "2x burguer", "quero 4 hambúrgueres") =====
+      const qtdItemAM = parsearQtdEItem(text);
+      if (qtdItemAM) {
+        const resQtd = tentaAdicionarComQtd(qtdItemAM, session);
+        if (resQtd) return resQtd;
+        // Não resolveu — cai no fluxo normal abaixo
+      }
       // ===== BUSCA INTELIGENTE POR VALOR (ex: "tem lanche de 20?") =====
       const catValorAM = detectaCategoriaEValor(text);
       if (catValorAM && catValorAM.categoria !== "pizza") {
@@ -1839,6 +1921,12 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
     case "lanche_escolha": {
       const mudanca = tentaMudanca(text, session);
       if (mudanca) return mudanca;
+      // Qty + produto (ex: "2x burguer", "3 hamburguer artesanal")
+      const qtdLanche = parsearQtdEItem(text);
+      if (qtdLanche && qtdLanche.qty >= 2) {
+        const resQtdLan = tentaAdicionarComQtd(qtdLanche, session);
+        if (resQtdLan) return resQtdLan;
+      }
       const num = parseInt(text);
       let lanche = MENU.lanches.find((l) => normalizar(l.name) === n);
       if (!lanche && !isNaN(num) && num >= 1 && num <= MENU.lanches.length) lanche = MENU.lanches[num - 1];
@@ -1950,6 +2038,12 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
     case "bebida_escolha": {
       const mudanca = tentaMudanca(text, session);
       if (mudanca) return mudanca;
+      // Qty + produto (ex: "3 coca", "2x guarana")
+      const qtdBebida = parsearQtdEItem(text);
+      if (qtdBebida && qtdBebida.qty >= 2) {
+        const resQtdBeb = tentaAdicionarComQtd(qtdBebida, session);
+        if (resQtdBeb) return resQtdBeb;
+      }
       const nums = n.match(/\d+/g);
       if (nums && nums.length >= 2) {
         const i1 = parseInt(nums[0]) - 1;
@@ -1990,6 +2084,12 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
     case "suco_escolha": {
       const mudanca = tentaMudanca(text, session);
       if (mudanca) return mudanca;
+      // Qty + produto (ex: "2 laranja", "3x acai")
+      const qtdSuco = parsearQtdEItem(text);
+      if (qtdSuco && qtdSuco.qty >= 2) {
+        const resQtdSuc = tentaAdicionarComQtd(qtdSuco, session);
+        if (resQtdSuc) return resQtdSuc;
+      }
       const nums = n.match(/\d+/g);
       if (nums && nums.length >= 2) {
         const i1 = parseInt(nums[0]) - 1;
