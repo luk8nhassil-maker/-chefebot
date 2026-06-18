@@ -1180,6 +1180,12 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       if (pedidoDireto) return pedidoDireto;
       const intencaoRet = detectaIntencaoDireta(text);
       if (intencaoRet) {
+        if (intencaoRet.category === "pizza" && (n.includes("mini-pizza") || n.includes("mini pizza"))) {
+          return {
+            messages: [`Pode deixar, *${firstName}*! 😄\n\nMini-Pizza anotada! 🍕 Qual sabor?\n\n${MENU.miniPizzaFlavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n")}`],
+            session: resetaTentativas({ ...session, step: "lanche_flavor", currentCategory: "pizza", currentLanche: "Mini-Pizza", customerName: historico.nome }),
+          };
+        }
         const resp = handleCategory(intencaoRet.category, { ...session, step: "category", customerName: historico.nome });
         return { ...resp, messages: [`Pode deixar, *${firstName}*! 😄\n\n${resp.messages[0]}`, ...resp.messages.slice(1)], session: resetaTentativas(resp.session) };
       }
@@ -1271,6 +1277,13 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       // 3) Intenção de categoria (pizza/lanche/bebida/suco) sem ser um pedido completo
       const intencao = detectaIntencaoDireta(text);
       if (intencao) {
+        const nName = normalizar(text);
+        if (intencao.category === "pizza" && (nName.includes("mini-pizza") || nName.includes("mini pizza"))) {
+          return {
+            messages: [`Perfeito! 😄\n\nMini-Pizza anotada! 🍕 Qual sabor?\n\n${MENU.miniPizzaFlavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n")}`],
+            session: resetaTentativas({ ...session, step: "lanche_flavor", currentCategory: "pizza", currentLanche: "Mini-Pizza" }),
+          };
+        }
         const response = handleCategory(intencao.category, { ...session, step: "category" });
         return { ...response, messages: [`Perfeito! 😄\n\n${response.messages[0]}`], session: resetaTentativas(response.session) };
       }
