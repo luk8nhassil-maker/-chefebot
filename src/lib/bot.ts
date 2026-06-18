@@ -971,7 +971,20 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
     const qtdMatchExtenso = (session.step === "size" || session.step === "name")
       ? n.match(/^(?:quero\s+)?(duas?|dois|tr[eê]s|quatro|cinco)(?:\s+pizzas?)?$/)
       : null;
-    const qtdMatch = qtdMatchComPizza || qtdMatchExtenso;
+    // "quero 2 calabresa família", "3 portuguesa grande", "2x pizza calabresa média"
+    // Apenas em category/add_more onde não colidem com seleção de tamanho.
+    const qtdMatchNumSabor = (session.step === "category" || session.step === "add_more")
+      ? (() => {
+          const mf = n.match(/^(?:quero\s+)?(\d{1,2})x?\s+(?:pizza\s+)?(.+)$/);
+          if (!mf) return null;
+          const qty = parseInt(mf[1]);
+          if (qty < 2 || qty > 5) return null;
+          const todosFlavors = [...MENU.saltyFlavors, ...MENU.sweetFlavors];
+          if (!todosFlavors.some(f => mf[2].includes(normalizar(f).split(" ")[0]) || normalizar(f).split(" ").some(w => w.length > 3 && mf[2].includes(w)))) return null;
+          return mf;
+        })()
+      : null;
+    const qtdMatch = qtdMatchComPizza || qtdMatchExtenso || qtdMatchNumSabor;
     let qtd = 0;
     if (qtdMatch) qtd = parseInt(qtdMatch[1]) || qtdMap[qtdMatch[1].toLowerCase()] || 0;
     if (qtd >= 2 && qtd <= 5) {
@@ -1561,8 +1574,17 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
         // Não é bebida/suco/lanche — verifica se é sabor de pizza com quantidade
         if (qtdItemAM.qty >= 2 && qtdItemAM.qty <= 5) {
           const allFlavorsAM = [...MENU.saltyFlavors, ...MENU.sweetFlavors];
-          const saborPizzaAM = resolveUmSabor(qtdItemAM.produto, allFlavorsAM);
+          // Tenta detectar pedido completo (sabor + tamanho) no texto original
+          const pedidoParc = detectaPedidoParcial(text);
+          const saborPizzaAM = (pedidoParc?.flavor) || resolveUmSabor(qtdItemAM.produto, allFlavorsAM);
           if (saborPizzaAM) {
+            const sizeAM = pedidoParc?.size || detectaTamanhoDaMensagem(normalizar(text));
+            if (sizeAM) {
+              return {
+                messages: [`${qtdItemAM.qty} pizzas *${sizeAM}* de *${saborPizzaAM}*! 🍕 Com qual borda?\n\n${listaBordas(sizeAM)}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`],
+                session: resetaTentativas({ ...session, step: "border_escolha", currentCategory: "pizza", currentFlavor: saborPizzaAM, currentSize: sizeAM, pendingPizzas: qtdItemAM.qty, pizzaAtualIndex: 1 }),
+              };
+            }
             return {
               messages: [`${qtdItemAM.qty} pizzas de *${saborPizzaAM}*! 🍕 Qual o tamanho?\n\n${sizeList()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`],
               session: resetaTentativas({ ...session, step: "size", currentCategory: "pizza", currentFlavor: saborPizzaAM, pendingPizzas: qtdItemAM.qty, pizzaAtualIndex: 1 }),
