@@ -94,6 +94,7 @@ export type BotStep =
   | "bebida_escolha"
   | "suco_escolha"
   | "confirmando_mudanca"
+  | "consulta_preco"
   | "observacao"
   | "delivery_type"
   | "neighborhood"
@@ -168,6 +169,14 @@ export interface BotSession {
   stepAposSabor?: BotStep;
   retornoRapido?: boolean;
   pendingQtdSuco?: number;
+  pendingConsultaPreco?: {
+    label: string;
+    categoria: "pizza_size" | "pizza_mini" | "pizza_ambiguo" | "lanche" | "bebida" | "suco";
+    produto?: string;
+    preco?: number;
+    size?: string;
+    qty?: number;
+  };
 }
 export interface BotResponse {
   messages: string[];
@@ -476,6 +485,104 @@ function pareceNomeHumano(text: string): boolean {
   // cada "palavra" deve conter só letras (permite acento e hífen simples, ex: "Ana-Maria")
   if (!palavras.every(p => /^[A-Za-zÀ-ÿ'-]+$/.test(p))) return false;
   return true;
+}
+
+type ConsultaPreco = {
+  label: string;
+  categoria: "pizza_size" | "pizza_mini" | "pizza_ambiguo" | "lanche" | "bebida" | "suco";
+  produto?: string;
+  preco?: number;
+  size?: string;
+  qty?: number;
+};
+
+function detectaConsultaPreco(text: string): ConsultaPreco | null {
+  const n = normalizar(text).replace(/-/g, " ");
+  const temConsulta =
+    n.includes("quanto") || n.includes("valor") || n.includes("preco") ||
+    n.includes("custa") || n.includes("caro") || n.includes("barato");
+  if (!temConsulta) return null;
+
+  // Extrai qty se houver ("quanto tá 2 x-burguer")
+  const qtyMatch = n.match(/\b(\d{1,2})\s*x?\s+/);
+  const qty = qtyMatch ? parseInt(qtyMatch[1]) : 1;
+
+  // Pizza com tamanho específico
+  const sizeMaps: Array<[RegExp, string, string]> = [
+    [/\bpizza\s*(pequena|p\b)|\bpizza\s+p\b|\bp\s+pizza\b/, "P", "Pizza Pequena (P)"],
+    [/\bpizza\s*(media|m\b)|\bpizza\s+m\b|\bm\s+pizza\b/, "M", "Pizza Média (M)"],
+    [/\bpizza\s*(grande|g\b)|\bpizza\s+g\b|\bg\s+pizza\b/, "G", "Pizza Grande (G)"],
+    [/\bpizza\s*(familia|f\b)|\bpizza\s+f\b|\bf\s+pizza\b/, "F", "Pizza Família (F)"],
+  ];
+  for (const [re, size, label] of sizeMaps) {
+    if (re.test(n)) {
+      const preco = MENU.sizes.find(s => s.code === size)?.price ?? 0;
+      return { label, categoria: "pizza_size", size, preco, qty };
+    }
+  }
+
+  // Mini-pizza
+  if (n.includes("mini pizza") || n.includes("mine pizza") || /\bmini\b/.test(n)) {
+    return { label: "Mini-Pizza", categoria: "pizza_mini", preco: 17, qty };
+  }
+
+  // Pizza genérica (ambíguo)
+  if (n.includes("pizza")) {
+    return { label: "pizza", categoria: "pizza_ambiguo" };
+  }
+
+  // Lanches — resolve por alias
+  for (const lanche of MENU.lanches.filter(l => l.name !== "Mini-Pizza")) {
+    const nomesParaBusca = [lanche.name, ...(APELIDOS_SABOR[lanche.name] ?? [])];
+    for (const alias of nomesParaBusca) {
+      if (n.includes(normalizar(alias).replace(/-/g, " "))) {
+        return { label: lanche.name, categoria: "lanche", produto: lanche.name, preco: lanche.price, qty };
+      }
+    }
+  }
+
+  // Bebidas — resolve por alias
+  for (const bebida of MENU.bebidas) {
+    const nomesParaBusca = [bebida.name, ...(APELIDOS_SABOR[bebida.name] ?? [])];
+    for (const alias of nomesParaBusca) {
+      if (n.includes(normalizar(alias).replace(/-/g, " "))) {
+        return { label: bebida.name, categoria: "bebida", produto: bebida.name, preco: bebida.price, qty };
+      }
+    }
+  }
+
+  // Sucos — resolve por nome
+  const nomesS = MENU.sucos.map(s => s.name);
+  const suco = resolveUmSabor(n, nomesS);
+  if (suco) {
+    const item = MENU.sucos.find(s => s.name === suco)!;
+    return { label: suco, categoria: "suco", produto: suco, preco: item.price, qty };
+  }
+
+  return null;
+}
+
+function mensagemConsultaPreco(c: ConsultaPreco): string {
+  if (c.categoria === "pizza_ambiguo") {
+    const lista = [
+      `  • Mini-Pizza — *R$ 17,00*`,
+      ...MENU.sizes.map(s => `  • ${s.label} (${s.code}) — *${formatCurrency(s.price)}*`),
+    ].join("\n");
+    return `Temos vários tamanhos de pizza 😊\n\n${lista}\n\nQual você quer que eu anote?`;
+  }
+  const qtyLabel = c.qty && c.qty > 1 ? `${c.qty}x ` : "";
+  const precoTotal = c.preco && c.qty && c.qty > 1 ? c.preco * c.qty : c.preco;
+  const precoStr = precoTotal ? ` — *${formatCurrency(precoTotal)}*` : "";
+  return `${qtyLabel}${c.label}${precoStr} 🍕\n\nPosso anotar pra você?\n\n  1. Sim, quero pedir\n  2. Ver outro produto`;
+}
+
+function verificaConsultaPreco(text: string, session: BotSession): BotResponse | null {
+  const c = detectaConsultaPreco(text);
+  if (!c) return null;
+  return {
+    messages: [mensagemConsultaPreco(c)],
+    session: resetaTentativas({ ...session, step: "consulta_preco", pendingConsultaPreco: c }),
+  };
 }
 
 function detectaIntencaoDireta(text: string): { category: string; label: string } | null {
@@ -1273,7 +1380,11 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
         };
       }
 
-      // 2) Pedido direto/completo de pizza já na primeira mensagem
+      // 2) Consulta de preço ("quanto tá a pizza pequena?")
+      const resConsultaName = verificaConsultaPreco(text, session);
+      if (resConsultaName) return resConsultaName;
+
+      // 3) Pedido direto/completo de pizza já na primeira mensagem
       const pedidoDireto = montarPizzaDoPedido(text, { ...session }, `Prazer em te atender! 😊`);
       if (pedidoDireto) return pedidoDireto;
 
@@ -1304,6 +1415,9 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       return respostaInvalida("Não entendi muito bem 😅 Me diz seu nome, ou já pode pedir direto (ex: _\"pizza calabresa\"_ ou _\"cardápio\"_)", session);
     }
     case "category": {
+      // ===== CONSULTA DE PREÇO (ex: "quanto tá a pizza pequena?", "valor do x-burguer") =====
+      const resConsultaCat = verificaConsultaPreco(text, session);
+      if (resConsultaCat) return resConsultaCat;
       // ===== QTD + PRODUTO DIRETO (ex: "quero 2 x burguer", "manda uma coca", "pode ser 1 x tudo") =====
       const qtdItemCat = parsearQtdEItem(text);
       if (qtdItemCat) {
@@ -1382,6 +1496,79 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
         messages: [`*${escolhido.name}* anotado! 😋`, mensagemAddMore(newCart)],
         session: resetaTentativas({ ...session, step: "add_more", cart: newCart, candidatosValorProduto: undefined }),
       };
+    }
+    case "consulta_preco": {
+      const c = session.pendingConsultaPreco;
+      if (!c) return { messages: [mensagemCategorias()], session: resetaTentativas({ ...session, step: "category", pendingConsultaPreco: undefined }) };
+      const quer = ePositiva(n) || n === "1" || n.includes("sim") || n.includes("pode anotar") || n.includes("quero") || n.includes("manda") || n.includes("anota");
+      const verOutro = n === "2" || n.includes("ver outro") || n.includes("outro produto") || n.includes("cardapio") || n.includes("menu") || eNegativa(n);
+      if (verOutro) {
+        return { messages: [`Tudo bem! ${mensagemCategorias()}`], session: resetaTentativas({ ...session, step: "category", pendingConsultaPreco: undefined }) };
+      }
+      if (c.categoria === "pizza_ambiguo") {
+        // Verificar se cliente escolheu um tamanho na resposta
+        const novaConsulta = detectaConsultaPreco(text);
+        if (novaConsulta && novaConsulta.categoria !== "pizza_ambiguo") {
+          return { messages: [mensagemConsultaPreco(novaConsulta)], session: resetaTentativas({ ...session, step: "consulta_preco", pendingConsultaPreco: novaConsulta }) };
+        }
+        // Detecta tamanho direto
+        const numShiftCP: Record<string, string> = { "2": "1", "3": "2", "4": "3", "5": "4" };
+        const sizeCP = detectaTamanho(numShiftCP[n] ?? n);
+        if (n === "1" && !quer) {
+          return { messages: [mensagemConsultaPreco({ label: "Mini-Pizza", categoria: "pizza_mini", preco: 17, qty: 1 })], session: resetaTentativas({ ...session, step: "consulta_preco", pendingConsultaPreco: { label: "Mini-Pizza", categoria: "pizza_mini", preco: 17, qty: 1 } }) };
+        }
+        if (sizeCP) {
+          const preco = MENU.sizes.find(s => s.code === sizeCP)?.price ?? 0;
+          const sizeLabel = MENU.sizes.find(s => s.code === sizeCP)?.label ?? sizeCP;
+          const novaC = { label: `Pizza ${sizeLabel} (${sizeCP})`, categoria: "pizza_size" as const, size: sizeCP, preco, qty: 1 };
+          return { messages: [mensagemConsultaPreco(novaC)], session: resetaTentativas({ ...session, step: "consulta_preco", pendingConsultaPreco: novaC }) };
+        }
+        return respostaInvalida(mensagemConsultaPreco(c), session);
+      }
+      if (!quer) return respostaInvalida(`  1. Sim, quero pedir\n  2. Ver outro produto`, session);
+      // Iniciar pedido conforme categoria
+      if (c.categoria === "pizza_mini") {
+        return { messages: [`Mini-Pizza anotada! 🍕 Qual sabor?\n\n${MENU.miniPizzaFlavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n")}`], session: resetaTentativas({ ...session, step: "lanche_flavor", currentCategory: "pizza", currentLanche: "Mini-Pizza", pendingConsultaPreco: undefined }) };
+      }
+      if (c.categoria === "pizza_size") {
+        return { messages: [`Pizza *${c.size}* anotada! 👌\n\nQual o sabor? 😋 Você pode escolher até *2 sabores*!\n\n${listaFlavors()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "flavor", currentCategory: "pizza", currentSize: c.size, pendingConsultaPreco: undefined }) };
+      }
+      if (c.categoria === "lanche") {
+        const lanche = MENU.lanches.find(l => l.name === c.produto);
+        if (lanche) {
+          if (lanche.hasFlavors) {
+            const flavors = lanche.flavorsKey ? (MENU as Record<string, unknown>)[lanche.flavorsKey] as string[] : [];
+            return { messages: [`*${lanche.name}* anotado! 🍕 Qual sabor?\n\n${flavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n")}`], session: resetaTentativas({ ...session, step: "lanche_flavor", currentCategory: "lanche", currentLanche: lanche.name, pendingConsultaPreco: undefined }) };
+          }
+          const qty = c.qty ?? 1;
+          const novos: CartItem[] = Array.from({ length: qty }, () => ({ category: "lanche" as const, name: lanche.name, price: lanche.price }));
+          const newCart = [...session.cart, ...novos];
+          const label = qty > 1 ? `*${qty}x ${lanche.name}*` : `*${lanche.name}*`;
+          return { messages: [`${label} anotado${qty > 1 ? "s" : ""}! 😋`, mensagemAddMore(newCart)], session: resetaTentativas({ ...session, step: "add_more", cart: newCart, pendingConsultaPreco: undefined }) };
+        }
+      }
+      if (c.categoria === "bebida") {
+        const bebida = MENU.bebidas.find(b => b.name === c.produto);
+        if (bebida) {
+          const qty = c.qty ?? 1;
+          const novos: CartItem[] = Array.from({ length: qty }, () => ({ category: "bebida" as const, name: bebida.name, price: bebida.price }));
+          const newCart = [...session.cart, ...novos];
+          const label = qty > 1 ? `*${qty}x ${bebida.name}*` : `*${bebida.name}*`;
+          return { messages: [`${label} anotado${qty > 1 ? "s" : ""}! 😋`, mensagemAddMore(newCart)], session: resetaTentativas({ ...session, step: "add_more", cart: newCart, pendingConsultaPreco: undefined }) };
+        }
+      }
+      if (c.categoria === "suco") {
+        const suco = MENU.sucos.find(s => s.name === c.produto);
+        if (suco) {
+          const qty = c.qty ?? 1;
+          if (qty > 1) {
+            return { messages: [`Perfeito, ${qty} *${suco.name}*! 😋`, mensagemAddMore([...session.cart, ...Array.from({ length: qty }, () => ({ category: "suco" as const, name: suco.name, price: suco.price }))])], session: resetaTentativas({ ...session, step: "add_more", cart: [...session.cart, ...Array.from({ length: qty }, () => ({ category: "suco" as const, name: suco.name, price: suco.price }))], pendingConsultaPreco: undefined }) };
+          }
+          const newCart = [...session.cart, { category: "suco" as const, name: suco.name, price: suco.price }];
+          return { messages: [`*${suco.name}* anotado! 😋`, mensagemAddMore(newCart)], session: resetaTentativas({ ...session, step: "add_more", cart: newCart, pendingConsultaPreco: undefined }) };
+        }
+      }
+      return { messages: [mensagemCategorias()], session: resetaTentativas({ ...session, step: "category", pendingConsultaPreco: undefined }) };
     }
     case "confirmando_mudanca": {
       if (ePositiva(n) || n.includes("manter") || n.includes("continua")) {
@@ -1684,6 +1871,9 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       return { messages: [`Qual borda você prefere? 😋\n\n${listaBordas(session.currentSize!)}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: { ...session, step: "border_escolha" } };
     }
     case "add_more": {
+      // ===== CONSULTA DE PREÇO =====
+      const resConsultaAM = verificaConsultaPreco(text, session);
+      if (resConsultaAM) return resConsultaAM;
       // ===== CARDÁPIO / MENU / VER OPÇÕES =====
       if (detectaIntencaoCardapio(text)) {
         return {
