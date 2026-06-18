@@ -1660,6 +1660,18 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
           session: resetaTentativas(session),
         };
       }
+      // Número puro 1-4 após mostrar menu de categorias
+      if (/^\d$/.test(n)) {
+        const numCat = parseInt(n);
+        const catMap: Record<number, string> = { 1: "pizza", 2: "lanche", 3: "bebida", 4: "suco" };
+        if (catMap[numCat]) {
+          const cat = catMap[numCat];
+          const resp = cat === "pizza"
+            ? { messages: [`Qual o tamanho da próxima pizza? 🍕\n\n${sizeList()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "size", currentCategory: "pizza" }) }
+            : handleCategory(cat, { ...session, step: "category" });
+          return { ...resp, session: resetaTentativas(resp.session) };
+        }
+      }
       // ===== QTD + PRODUTO DIRETO (ex: "3 coca", "2x burguer", "2 calabresa", "2 portuguesa") =====
       const qtdItemAM = parsearQtdEItem(text);
       if (qtdItemAM) {
