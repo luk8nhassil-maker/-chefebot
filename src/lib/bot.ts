@@ -1553,11 +1553,22 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       return { messages: [`Qual borda você prefere? 😋\n\n${listaBordas(session.currentSize!)}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: { ...session, step: "border_escolha" } };
     }
     case "add_more": {
-      // ===== QTD + PRODUTO DIRETO (ex: "3 coca", "2x burguer", "quero 4 hambúrgueres") =====
+      // ===== QTD + PRODUTO DIRETO (ex: "3 coca", "2x burguer", "2 calabresa", "2 portuguesa") =====
       const qtdItemAM = parsearQtdEItem(text);
       if (qtdItemAM) {
         const resQtd = tentaAdicionarComQtd(qtdItemAM, session);
         if (resQtd) return resQtd;
+        // Não é bebida/suco/lanche — verifica se é sabor de pizza com quantidade
+        if (qtdItemAM.qty >= 2 && qtdItemAM.qty <= 5) {
+          const allFlavorsAM = [...MENU.saltyFlavors, ...MENU.sweetFlavors];
+          const saborPizzaAM = resolveUmSabor(qtdItemAM.produto, allFlavorsAM);
+          if (saborPizzaAM) {
+            return {
+              messages: [`${qtdItemAM.qty} pizzas de *${saborPizzaAM}*! 🍕 Qual o tamanho?\n\n${sizeList()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`],
+              session: resetaTentativas({ ...session, step: "size", currentCategory: "pizza", currentFlavor: saborPizzaAM, pendingPizzas: qtdItemAM.qty, pizzaAtualIndex: 1 }),
+            };
+          }
+        }
         // Não resolveu — cai no fluxo normal abaixo
       }
       // ===== BUSCA INTELIGENTE POR VALOR (ex: "tem lanche de 20?") =====
@@ -1927,7 +1938,9 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
         const resQtdLan = tentaAdicionarComQtd(qtdLanche, session);
         if (resQtdLan) return resQtdLan;
       }
-      const num = parseInt(text);
+      // parseInt só quando texto for puramente numérico — evita "2 calabresa" selecionar o 2º lanche
+      const numPuro = /^\d+$/.test(text.trim());
+      const num = numPuro ? parseInt(text) : NaN;
       let lanche = MENU.lanches.find((l) => normalizar(l.name) === n);
       if (!lanche && !isNaN(num) && num >= 1 && num <= MENU.lanches.length) lanche = MENU.lanches[num - 1];
       if (!lanche) lanche = MENU.lanches.find((l) => n.includes(normalizar(l.name)));
@@ -2059,7 +2072,8 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
           return { messages: [`*${b1.name}* e *${b2.name}* anotadas! 😋`, mensagemAddMore(newCart)], session: resetaTentativas({ ...session, step: "add_more", cart: newCart }) };
         }
       }
-      const num = parseInt(text);
+      const numPuroBeb = /^\d+$/.test(text.trim());
+      const num = numPuroBeb ? parseInt(text) : NaN;
       let bebida = MENU.bebidas.find(b => normalizar(b.name).includes(n));
       if (!bebida && !isNaN(num) && num >= 1 && num <= MENU.bebidas.length) bebida = MENU.bebidas[num - 1];
       if (!bebida) {
@@ -2105,7 +2119,8 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
           return { messages: [`*${s1.name}* e *${s2.name}* anotados! 😋`, mensagemAddMore(newCart)], session: resetaTentativas({ ...session, step: "add_more", cart: newCart }) };
         }
       }
-      const num = parseInt(text);
+      const numPuroSuc = /^\d+$/.test(text.trim());
+      const num = numPuroSuc ? parseInt(text) : NaN;
       let suco = MENU.sucos.find(s => normalizar(s.name).includes(n));
       if (!suco && !isNaN(num) && num >= 1 && num <= MENU.sucos.length) suco = MENU.sucos[num - 1];
       if (!suco) return respostaInvalida(`${listaSucos()}\n\n_(Com leite: acréscimo de R$ 1,00)_`, session);
