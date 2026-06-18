@@ -896,7 +896,7 @@ function ePositiva(n: string): boolean {
 function parsearQtdEItem(text: string): { qty: number; produto: string } | null {
   const n = normalizar(text);
   const numPorExtenso: Record<string, number> = {
-    "um": 1, "uma": 1, "dois": 2, "duas": 2, "tres": 3, "quatro": 4, "cinco": 5,
+    "um": 1, "uma": 1, "dois": 2, "duas": 2, "tres": 3, "quatro": 4, "cinco": 5, "seis": 6, "sete": 7,
   };
   // Remove prefixos de intenção comuns
   const semPrefixo = n
@@ -909,7 +909,7 @@ function parsearQtdEItem(text: string): { qty: number; produto: string } | null 
     if (qty >= 1 && qty <= 20) return { qty, produto };
   }
   // Padrão: número por extenso + produto
-  const m2 = semPrefixo.match(/^(um[a]?|dois|duas|tres|quatro|cinco)\s+(.{2,})$/);
+  const m2 = semPrefixo.match(/^(um[a]?|dois|duas|tres|quatro|cinco|seis|sete)\s+(.{2,})$/);
   if (m2) {
     const qty = numPorExtenso[m2[1]] ?? 0;
     const produto = m2[2].trim();
@@ -1317,8 +1317,10 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
         if (pedidoPizza) return pedidoPizza;
       }
       if (category === "suco" && qtdItemCat && qtdItemCat.qty > 1) {
-        const resp = handleCategory("suco", session);
-        return { ...resp, session: resetaTentativas({ ...resp.session, pendingQtdSuco: qtdItemCat.qty }) };
+        return {
+          messages: [`Perfeito, ${qtdItemCat.qty === 2 ? "são" : "serão"} *${qtdItemCat.qty} sucos*! 😋 Quais sabores?\n\n${listaSucos()}\n\n_(Com leite: acréscimo de R$ 1,00)_\n\nDigite os números ou nomes:`],
+          session: resetaTentativas({ ...session, step: "suco_escolha", currentCategory: "suco", pendingQtdSuco: qtdItemCat.qty }),
+        };
       }
       return { ...handleCategory(category, session), session: resetaTentativas(handleCategory(category, session).session) };
     }
@@ -2233,7 +2235,12 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
             { category: "suco", name: s2.name, price: s2.price },
           ];
           const newCart = [...session.cart, ...novosItens];
-          return { messages: [`*${s1.name}* e *${s2.name}* anotados! 😋`, mensagemAddMore(newCart)], session: resetaTentativas({ ...session, step: "add_more", cart: newCart }) };
+          const pendQtd2 = session.pendingQtdSuco;
+          if (pendQtd2 && pendQtd2 > 2) {
+            const faltam2 = pendQtd2 - 2;
+            return { messages: [`*${s1.name}* e *${s2.name}* anotados! 😋 Faltam *${faltam2} sucos*. Quais seriam?\n\n${listaSucos()}`], session: resetaTentativas({ ...session, cart: newCart, pendingQtdSuco: faltam2 }) };
+          }
+          return { messages: [`*${s1.name}* e *${s2.name}* anotados! 😋`, mensagemAddMore(newCart)], session: resetaTentativas({ ...session, step: "add_more", cart: newCart, pendingQtdSuco: undefined }) };
         }
       }
       const numPuroSuc = /^\d+$/.test(text.trim());
@@ -2244,7 +2251,15 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
       if (isEsgotado(suco.name)) return respostaEsgotado(suco.name, MENU.sucos.map(s => s.name), session);
       const newItem: CartItem = { category: "suco", name: suco.name, price: suco.price };
       const newCart = [...session.cart, newItem];
-      return { messages: [mensagemAddMore(newCart)], session: resetaTentativas({ ...session, step: "add_more", cart: newCart }) };
+      const pendQtd1 = session.pendingQtdSuco;
+      if (pendQtd1 && pendQtd1 > 1) {
+        const faltam1 = pendQtd1 - 1;
+        return {
+          messages: [`*${suco.name}* anotado! 😋 Falt${faltam1 === 1 ? "a" : "am"} *${faltam1} ${faltam1 === 1 ? "suco" : "sucos"}*. Qual ${faltam1 === 1 ? "seria" : "seriam"}?\n\n${listaSucos()}\n\n_(Com leite: acréscimo de R$ 1,00)_`],
+          session: resetaTentativas({ ...session, cart: newCart, pendingQtdSuco: faltam1 }),
+        };
+      }
+      return { messages: [mensagemAddMore(newCart)], session: resetaTentativas({ ...session, step: "add_more", cart: newCart, pendingQtdSuco: undefined }) };
     }
     case "done": {
       return { messages: [`_Oi! Sua sessão expirou por inatividade. Vamos começar de novo? 😊_\n\n${mensagemCategorias()}`], session: resetaTentativas({ step: "category", cart: [], deliveryFee: 0, customerName: session.customerName }) };
