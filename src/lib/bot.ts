@@ -217,8 +217,10 @@ function permiteMeioAMeio(size?: string): boolean {
 }
 // ===== MOTOR DE RECONHECIMENTO DE SABOR (tolerante a erro humano) =====
 // Apelidos: variações que o fuzzy sozinho não pegaria (números por extenso vs dígito,
-// abreviações e grafias alternativas comuns no WhatsApp).
+// abreviações, grafias alternativas e apelidos culturais comuns no WhatsApp).
+// Cobre pizza, lanches, bebidas e sucos.
 const APELIDOS_SABOR: Record<string, string[]> = {
+  // Pizza — sabores
   "Quatro Queijos": ["4 queijos", "4 queijo", "quatro queijo"],
   "Tres Queijos": ["3 queijos", "3 queijo", "tres queijo"],
   "Frango Catupiry": ["frango", "frango c catupiry", "frango com catupiry", "frango catupiri"],
@@ -226,6 +228,24 @@ const APELIDOS_SABOR: Record<string, string[]> = {
   "Romeu e Julieta": ["romeu", "romeu julieta"],
   "Calabresa": ["calabreza", "calabre"],
   "Portuguesa": ["portugesa", "portugues"],
+  // Lanches — apelidos culturais e grafias variantes
+  "X-Burguer": ["hamburguer", "hamburgues", "hamburguer", "hamburgues", "burguer simples", "x burguer simples"],
+  "X-Bacon": ["xbacon", "x bacon", "burguer bacon"],
+  "X-Tudo": ["xtudo", "x tudo", "burguer tudo", "burguer completo"],
+  "Porcao de Batatas": ["batata frita", "batatas fritas", "porcao batata", "porcao batatas", "batata"],
+  "Macarronada de Carne": ["macarronada", "macarrao", "macarrao de carne"],
+  // Bebidas — marca/apelido popular → produto mais comum no cardápio
+  "Refrigerante Lata": ["coca", "coca cola", "cocacola", "coca-cola", "pepsi cola", "soda"],
+  "Refrigerante 2L": ["refri 2 litros", "refrigerante 2 litros", "coca 2 litros", "coca 2l"],
+  "Refrigerante 1,5L": ["refri 1.5", "refri 1,5", "coca 1.5", "coca 1,5", "refrigerante 1.5"],
+  "Refrigerante 1L": ["refri 1 litro", "refrigerante 1 litro", "coca 1 litro", "coca 1l"],
+  "Pepsi Lata": ["pepsi"],
+  "Guarana Lata": ["guarana lata", "guarana latinha"],
+  "Guarana 2L": ["guarana 2 litros", "guarana 2l"],
+  "Guarana 1L": ["guarana 1 litro", "guarana 1l"],
+  "Cerveja Long Neck": ["cerveja", "long neck", "longneck", "birra"],
+  "Agua sem Gas": ["agua", "aguinha", "agua mineral"],
+  "Agua com Gas": ["agua gasosa", "agua c gas", "agua com gas"],
 };
 function levenshtein(a: string, b: string): number {
   const m = a.length, len = b.length;
