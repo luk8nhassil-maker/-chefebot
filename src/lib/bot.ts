@@ -48,6 +48,10 @@ function formatCurrency(value: number): string {
 function sizeList(): string {
   return MENU.sizes.map((s, i) => `  ${i + 1}. ${s.label} (${s.code}) · *${formatCurrency(s.price)}*`).join("\n");
 }
+function sizeListComMiniPizza(): string {
+  const sizes = MENU.sizes.map((s, i) => `  ${i + 2}. ${s.label} (${s.code}) · *${formatCurrency(s.price)}*`).join("\n");
+  return `  1. Mini-Pizza · *R$ 17,00*\n${sizes}`;
+}
 
 function listaFlavors(): string {
   const salties = MENU.saltyFlavors.filter(f => !isEsgotado(f));
@@ -598,7 +602,7 @@ function montarPizzaDoPedido(text: string, session: BotSession, prefixo?: string
   if (!parcial.size) {
     return {
       messages: [
-        `${pre}Boa! Só me diz o tamanho dessa pizza 😋\n\n${sizeList()}\n\n_(Digite *voltar* para corrigir)_`,
+        `${pre}Boa! Só me diz o tamanho dessa pizza 😋\n\n${sizeListComMiniPizza()}\n\n_(Digite *voltar* para corrigir)_`,
       ],
       session: resetaTentativas({ ...session, step: "size", currentCategory: "pizza", currentFlavor: parcial.flavor }),
     };
@@ -825,9 +829,8 @@ function eVoltar(n: string): boolean {
 }
 function handleCategory(category: string, session: BotSession): BotResponse {
   if (category === "pizza") {
-    const miniPizzaEntry = `\n\n  🍕 *Mini-Pizza* · *R$ 17,00* — (só digitar "mini pizza")`;
     return {
-      messages: [`Qual o tamanho da pizza? 🍕\n\n${sizeList()}${miniPizzaEntry}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`],
+      messages: [`Qual o tamanho da pizza? 🍕\n\n${sizeListComMiniPizza()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`],
       session: { ...session, step: "size", currentCategory: "pizza", currentSize: undefined, currentFlavor: undefined, currentLanche: undefined },
     };
   }
@@ -1079,7 +1082,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
         };
       }
       return {
-        messages: [`2️⃣ *${qtd} pizzas* anotadas! Vamos montar uma de cada vez 🍕\n\n*Pizza 1 de ${qtd}* — Qual o tamanho?\n\n${sizeList()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`],
+        messages: [`2️⃣ *${qtd} pizzas* anotadas! Vamos montar uma de cada vez 🍕\n\n*Pizza 1 de ${qtd}* — Qual o tamanho?\n\n${sizeListComMiniPizza()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`],
         session: resetaTentativas({ ...session, step: "size", currentCategory: "pizza", pendingPizzas: qtd, pizzaAtualIndex: 1 }),
       };
     }
@@ -1095,7 +1098,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
   if (session.step !== "escalado" && session.step !== "name" && session.step !== "address" && session.step !== "observacao" && eConfusao(n)) {
     const dicas: Partial<Record<BotStep, string>> = {
       category: `Sem estresse! É só escolher o que vai querer:\n\n${mensagemCategorias()}`,
-      size: `É só escolher o tamanho da pizza:\n\n${sizeList()}`,
+      size: `É só escolher o tamanho da pizza:\n\n${sizeListComMiniPizza()}`,
       flavor: `É só digitar o número ou o nome do sabor que você quer! 😋`,
       border_escolha: `É só escolher o número da borda ou digitar o nome. Se não quiser borda é só digitar o número ${MENU.borders.length + 1}!`,
       add_more: `Se quiser, pode me dizer se deseja bebida, outro lanche ou se já podemos fechar 😊`,
@@ -1113,7 +1116,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
   if (eVoltar(n) && !["welcome", "name", "returning", "category", "escalado", "done", "add_more"].includes(session.step)) {
     switch (session.step) {
       case "flavor":
-        return { messages: [`Tudo bem! Qual o tamanho da pizza então? 😊\n\n${sizeList()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "size", currentFlavor: undefined }) };
+        return { messages: [`Tudo bem! Qual o tamanho da pizza então? 😊\n\n${sizeListComMiniPizza()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "size", currentFlavor: undefined }) };
       case "border_escolha":
       case "segundo_sabor":
         return { messages: [`Tudo bem! Qual o sabor então? 😊\n\n${listaFlavors()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "flavor", currentFlavor: undefined }) };
@@ -1400,13 +1403,15 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
     case "size": {
       const mudanca = tentaMudanca(text, session);
       if (mudanca) return mudanca;
-      if (n.includes("mini-pizza") || n.includes("mini pizza")) {
+      if (n === "1" || n === "mini" || n.includes("mini-pizza") || n.includes("mini pizza")) {
         return {
           messages: [`Mini-Pizza anotada! 🍕 Qual sabor?\n\n${MENU.miniPizzaFlavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n")}`],
           session: resetaTentativas({ ...session, step: "lanche_flavor", currentCategory: "pizza", currentLanche: "Mini-Pizza" }),
         };
       }
-      const size = detectaTamanho(n);
+      // Números 2-5 mapeiam para tamanhos (opção 1 é Mini-Pizza, interceptada acima)
+      const numShiftSize: Record<string, string> = { "2": "1", "3": "2", "4": "3", "5": "4" };
+      const size = detectaTamanho(numShiftSize[n] ?? n);
       const allFlavors = [...MENU.saltyFlavors, ...MENU.sweetFlavors];
       if (size) {
         // Se o tamanho permite meio a meio, tenta DOIS sabores primeiro (evita capturar só o primeiro)
@@ -1476,12 +1481,12 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
         return {
           messages: [
             `*${saborSemTamanho}*, ótima escolha! 😋`,
-            `Qual o tamanho da pizza?\n\n${sizeList()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
+            `Qual o tamanho da pizza?\n\n${sizeListComMiniPizza()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
           ],
           session: resetaTentativas({ ...session, step: "size", currentFlavor: saborSemTamanho }),
         };
       }
-      return respostaInvalida(`${sizeList()}`, session);
+      return respostaInvalida(`${sizeListComMiniPizza()}`, session);
     }
     case "flavor": {
       const mudanca = tentaMudanca(text, session);
@@ -1693,7 +1698,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
         if (catMap[numCat]) {
           const cat = catMap[numCat];
           const resp = cat === "pizza"
-            ? { messages: [`Qual o tamanho da próxima pizza? 🍕\n\n${sizeList()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "size", currentCategory: "pizza" }) }
+            ? { messages: [`Qual o tamanho da próxima pizza? 🍕\n\n${sizeListComMiniPizza()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "size", currentCategory: "pizza" }) }
             : handleCategory(cat, { ...session, step: "category" });
           return { ...resp, session: resetaTentativas(resp.session) };
         }
@@ -1718,7 +1723,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
               };
             }
             return {
-              messages: [`${qtdItemAM.qty} pizzas de *${saborPizzaAM}*! 🍕 Qual o tamanho?\n\n${sizeList()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`],
+              messages: [`${qtdItemAM.qty} pizzas de *${saborPizzaAM}*! 🍕 Qual o tamanho?\n\n${sizeListComMiniPizza()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`],
               session: resetaTentativas({ ...session, step: "size", currentCategory: "pizza", currentFlavor: saborPizzaAM, pendingPizzas: qtdItemAM.qty, pizzaAtualIndex: 1 }),
             };
           }
@@ -1771,7 +1776,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       }
       // Pizza só se pedida explicitamente (regra: não voltar a pizza por engano)
       if (querPizza) {
-        return { messages: [`Qual o tamanho da próxima pizza? 🍕\n\n${sizeList()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "size", currentCategory: "pizza" }) };
+        return { messages: [`Qual o tamanho da próxima pizza? 🍕\n\n${sizeListComMiniPizza()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "size", currentCategory: "pizza" }) };
       }
       // Lanche (sem pizza) — vai direto pro cardápio de lanches
       if (querLanche) {
