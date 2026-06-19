@@ -1,4 +1,5 @@
 import { MENU as MENU_PADRAO, getBorderPrice, getBorderByIndex, getMacarronadaPrice } from "./menu";
+import { detectarFormaRecebimento } from "./botSkills";
 
 let MENU = MENU_PADRAO;
 
@@ -972,25 +973,19 @@ function detectaBairroPrefix(n: string): { name: string; fee: number }[] {
 // Conservador: só retorna o que detectou com confiança; o resto fica null (fluxo normal pergunta).
 function detectaDadosEntrega(text: string): { tipo: "delivery" | "pickup" | null; bairro: { name: string; fee: number } | null; pagamento: string | null } {
   const n = normalizar(text);
-  let tipo: "delivery" | "pickup" | null = null;
-  if (n.includes("entrega") || n.includes("delivery") || n.includes("entregar") || n.includes("minha casa") || n.includes("em casa")) tipo = "delivery";
-  else if (n.includes("retirar") || n.includes("retirada") || n.includes("buscar") || n.includes("pegar") || n.includes("retiro") || n.includes("na loja")) tipo = "pickup";
+  const forma = detectarFormaRecebimento(text);
+  // detectaDadosEntrega só lida com delivery/pickup (dine_in é tratado no step delivery_type)
+  let tipo: "delivery" | "pickup" | null = (forma === "delivery" || forma === "pickup") ? forma : null;
   const bairro = detectaBairro(n);
   const pagamento = detectaPagamento(n);
-  // Se detectou bairro mas não falou tipo, assume delivery (faz sentido: bairro implica entrega)
+  // Se detectou bairro mas não falou tipo, assume delivery (bairro implica entrega)
   if (bairro && !tipo) tipo = "delivery";
   return { tipo, bairro, pagamento };
 }
 
-// Detecta tipo de entrega incluindo consumo no local
-function detectaTipoEntregaCompleto(n: string): "delivery" | "pickup" | "dine_in" | null {
-  if (/\blocal\b/.test(n) || n.includes("consumo no local") || n.includes("comer ai") ||
-      n.includes("aqui mesmo") || n.includes("na mesa") || n.includes("comer aqui")) return "dine_in";
-  if (n.includes("entrega") || n.includes("delivery") || n.includes("entregar") ||
-      n.includes("minha casa") || n.includes("em casa") || n.includes("manda ai")) return "delivery";
-  if (n.includes("retirar") || n.includes("retirada") || n.includes("buscar") ||
-      n.includes("pegar") || n.includes("retiro") || n.includes("na loja") || n.includes("busco ai")) return "pickup";
-  return null;
+// Detecta tipo de entrega incluindo consumo no local — usa a Skill Central de Recebimento
+function detectaTipoEntregaCompleto(text: string): "delivery" | "pickup" | "dine_in" | null {
+  return detectarFormaRecebimento(text);
 }
 
 // Extrai rua/endereço de forma simples e heurística
@@ -2388,16 +2383,9 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       };
     }
     case "delivery_type": {
-      // ===== CONSUMO NO LOCAL (dine-in) =====
-      const isDineIn = n === "3"
-        || n.includes("consumo")
-        || n.includes("consumir")
-        || n.includes("vou comer")
-        || n.includes("comer ai")
-        || n.includes("comer aqui")
-        || n.includes("local")
-        || n.includes("ai mesmo")
-        || (n.includes("na loja") && !n.includes("retirar") && !n.includes("buscar") && !n.includes("pegar"));
+      // ===== CONSUMO NO LOCAL (dine-in) — via Skill Central de Recebimento =====
+      const formaDetectada = n === "3" ? "dine_in" : detectarFormaRecebimento(text);
+      const isDineIn = formaDetectada === "dine_in";
       if (isDineIn) {
         return { messages: [`Combinado! 🍽️ Consumo no local!\n\nQual a forma de pagamento? 💸`], session: resetaTentativas({ ...session, step: "payment", deliveryType: "dine_in", deliveryFee: 0, neighborhood: undefined }) };
       }
@@ -2425,7 +2413,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       }
 
       // ===== FLUXO NORMAL (fallback): não detectou com confiança =====
-      if (n === "1" || n.includes("entrega") || n.includes("delivery") || n.includes("entregar") || n.includes("minha casa")) {
+      if (n === "1" || formaDetectada === "delivery") {
         // Bairro não bateu exato, mas pode ser erro de digitação -> tenta fuzzy (sempre confirma antes de aplicar taxa)
         const candidatoFuzzy = detectaBairroFuzzy(n);
         if (candidatoFuzzy) {
@@ -2442,7 +2430,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
         }
         return { messages: [`Qual o seu bairro? 😊`], session: resetaTentativas({ ...session, step: "neighborhood", deliveryType: "delivery", pagamentoPendente: pagDetectado }) };
       }
-      if (n === "2" || n.includes("retirar") || n.includes("loja") || n.includes("buscar") || n.includes("pegar") || n.includes("retiro")) {
+      if (n === "2" || formaDetectada === "pickup") {
         return { messages: [`Combinado, você retira aqui na loja! 🏪\n\nQual a forma de pagamento? 💸`], session: resetaTentativas({ ...session, step: "payment", deliveryType: "pickup", deliveryFee: 0, neighborhood: undefined }) };
       }
       return respostaInvalida(`Como quer receber?\n\n  1. Entrega 🛵\n  2. Retirada na loja 🏪\n  3. Consumo no local 🍽️`, session);
