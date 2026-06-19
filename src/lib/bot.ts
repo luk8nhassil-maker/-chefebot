@@ -90,6 +90,7 @@ export type BotStep =
   | "lanche_escolha"
   | "lanche_flavor"
   | "lanche_macarronada_size"
+  | "product_family_choice"
   | "bebida_escolha"
   | "suco_escolha"
   | "confirmando_mudanca"
@@ -164,6 +165,8 @@ export interface BotSession {
   bairroFuzzyCandidato?: string;
   hibridoValorParcial?: Record<string, number>;
   candidatosValorProduto?: { name: string; price: number; categoria: string }[];
+  candidatosFamilia?: { name: string; price: number; hasFlavors: boolean; flavorsKey: string; sizes?: { code: string; price: number }[] }[];
+  familiaLabel?: string;
   candidatosSaborAmbiguo?: string[];
   candidatosItemAmbiguo?: string[];
   itemAmbiguoTipo?: "lanche" | "lanche_flavor" | "bebida";
@@ -252,7 +255,7 @@ const APELIDOS_SABOR: Record<string, string[]> = {
   "X-Bacon": ["xbacon", "x bacon", "burguer bacon"],
   "X-Tudo": ["xtudo", "x tudo", "burguer tudo", "burguer completo"],
   "Porcao de Batatas": ["batata frita", "batatas fritas", "porcao batata", "porcao batatas", "batata"],
-  "Macarronada de Carne": ["macarronada", "macarrao", "macarrao de carne"],
+  "Macarronada de Carne": ["macarronada", "macarrao", "macarrao de carne", "macarrona", "massa"],
   // Bebidas — marca/apelido popular → produto mais comum no cardápio
   "Refrigerante Lata": ["coca", "coca cola", "cocacola", "coca-cola", "pepsi cola", "soda"],
   "Refrigerante 2L": ["refri 2 litros", "refrigerante 2 litros", "coca 2 litros", "coca 2l"],
@@ -505,7 +508,7 @@ function detectaConsultaPreco(text: string): ConsultaPreco | null {
   const n = normalizar(text).replace(/-/g, " ");
   const temConsulta =
     n.includes("quanto") || n.includes("valor") || n.includes("preco") ||
-    n.includes("custa") || n.includes("caro") || n.includes("barato");
+    n.includes("custa") || /\bcaro\b/.test(n) || n.includes("barato");
   if (!temConsulta) return null;
 
   // Extrai qty se houver ("quanto tá 2 x-burguer")
@@ -808,9 +811,96 @@ function montarPizzaDoPedido(text: string, session: BotSession, prefixo?: string
     session: resetaTentativas({ ...session, step: "add_more", cart: newCart, currentCategory: "pizza", currentSize: undefined, currentFlavor: undefined }),
   };
 }
+// Mapeamento de famílias de produto: palavras-chave → filtro sobre nomes do cardápio.
+// Adicionar novas famílias aqui quando o cardápio crescer.
+const FAMILIAS_PRODUTO: Array<{
+  palavras: string[];
+  label: string;
+  filtro: (nomeNormalizado: string) => boolean;
+}> = [
+  {
+    palavras: ["macarronada", "macarrao", "macarrona", "macaronada", "massa"],
+    label: "macarronada",
+    filtro: (nome) => nome.includes("macarronada"),
+  },
+];
+
+export function detectarFamiliaProduto(text: string): { label: string; itens: typeof MENU.lanches } | null {
+  const n = normalizar(text);
+  if (n === "lanche" || n === "2" || n === "lanches") return null;
+
+  for (const familia of FAMILIAS_PRODUTO) {
+    if (familia.palavras.some(p => n.includes(normalizar(p)))) {
+      const itens = MENU.lanches.filter(l => familia.filtro(normalizar(l.name)) && !isEsgotado(l.name));
+      if (itens.length > 0) return { label: familia.label, itens };
+    }
+  }
+  return null;
+}
+
+function mensagemFamilia(label: string, itens: typeof MENU.lanches): string {
+  const listaTxt = itens.map((item, i) => {
+    if (item.sizes && item.sizes.length > 0) {
+      const precos = item.sizes.map((s: { code: string; price: number }) => `${s.code} · *${formatCurrency(s.price)}*`).join(" | ");
+      return `  ${i + 1}. *${item.name}*\n     ${precos}`;
+    }
+    return `  ${i + 1}. *${item.name}* · *${formatCurrency(item.price)}*`;
+  }).join("\n\n");
+  return `Temos essas opções de ${label}: 😋\n\n${listaTxt}\n\nDigite o número ou o tamanho que deseja:`;
+}
+
+// Helper ÚNICO para responder com a lista filtrada de uma família de produto.
+// Usado por TODOS os pontos de entrada (name, category, add_more) para garantir
+// que a família nunca caia em handleCategory("lanche").
+function responderFamiliaProduto(session: BotSession, familia: { label: string; itens: typeof MENU.lanches }): BotResponse {
+  return {
+    messages: [mensagemFamilia(familia.label, familia.itens)],
+    session: resetaTentativas({
+      ...session,
+      step: "product_family_choice",
+      currentCategory: "lanche",
+      candidatosFamilia: familia.itens,
+      familiaLabel: familia.label,
+    }),
+  };
+}
+
+export function detectarLancheEspecifico(text: string, session: BotSession): BotResponse | null {
+  // Família de produto (ex: todas as macarronadas) → mostra lista filtrada
+  const familia = detectarFamiliaProduto(text);
+  if (familia) return responderFamiliaProduto(session, familia);
+
+  // Produto específico não-família (ex: X-Burguer, Calzone)
+  const n = normalizar(text);
+  if (n === "lanche" || n === "2" || n === "lanches") return null;
+
+  const nomesLanches = MENU.lanches.map(l => l.name);
+  const lancheNome = resolveUmSabor(n, nomesLanches);
+  if (!lancheNome) return null;
+
+  const lanche = MENU.lanches.find(l => l.name === lancheNome);
+  if (!lanche) return null;
+  if (isEsgotado(lanche.name)) return respostaEsgotado(lanche.name, nomesLanches, session);
+
+  if (lanche.hasFlavors) {
+    const flavors = MENU[lanche.flavorsKey as keyof typeof MENU] as string[];
+    const lista = flavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n");
+    return {
+      messages: [`*${lanche.name}* selecionado! 😋 Qual sabor?\n\n${lista}`],
+      session: resetaTentativas({ ...session, step: "lanche_flavor", currentCategory: "lanche", currentLanche: lanche.name }),
+    };
+  }
+  const newItem: CartItem = { category: "lanche", name: lanche.name, price: lanche.price };
+  const newCart = [...session.cart, newItem];
+  return {
+    messages: [mensagemAddMore(newCart)],
+    session: resetaTentativas({ ...session, step: "add_more", cart: newCart, currentLanche: undefined }),
+  };
+}
+
 function nomeCategoriaAtual(step: BotStep, currentCategory?: string): string {
   if (currentCategory === "pizza" || step === "size" || step === "flavor" || step === "segundo_sabor" || step === "border" || step === "border_escolha") return "pizza";
-  if (currentCategory === "lanche" || step === "lanche_escolha" || step === "lanche_flavor" || step === "lanche_macarronada_size") return "lanche";
+  if (currentCategory === "lanche" || step === "lanche_escolha" || step === "lanche_flavor" || step === "lanche_macarronada_size" || step === "product_family_choice") return "lanche";
   if (currentCategory === "bebida" || step === "bebida_escolha") return "bebida";
   if (currentCategory === "suco" || step === "suco_escolha") return "suco";
   return "item atual";
@@ -1415,6 +1505,11 @@ export function retomarFluxoDoBot(session: BotSession): string[] {
         : [`Prontinho,${nome} voltei por aqui! 😊\n\n${mensagemCategorias()}`];
     case "lanche_escolha":
       return [`Prontinho,${nome} voltei por aqui! 😊\n\nNossos lanches 😋\n\n${listaLanches()}\n\nDigite o número ou o nome:`];
+    case "product_family_choice": {
+      const label = session.familiaLabel ?? "produto";
+      const itens = session.candidatosFamilia ?? [];
+      return [`Prontinho,${nome} voltei por aqui! 😊\n\n${mensagemFamilia(label, itens as typeof MENU.lanches)}`];
+    }
     case "lanche_flavor":
       return [`Prontinho,${nome} voltei por aqui! 😊\n\nQual o sabor do lanche?`];
     case "bebida_escolha":
@@ -1594,6 +1689,11 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
         return { messages: [`Tudo bem! Nossos lanches 😋\n\n${listaLanches()}\n\nDigite o número ou o nome:`], session: resetaTentativas({ ...session, step: "lanche_escolha", currentLanche: undefined }) };
       case "lanche_macarronada_size":
         return { messages: [`Tudo bem! Nossos lanches 😋\n\n${listaLanches()}\n\nDigite o número ou o nome:`], session: resetaTentativas({ ...session, step: "lanche_escolha", currentLanche: undefined }) };
+      case "product_family_choice": {
+        const labelFam = session.familiaLabel ?? "produto";
+        const itensFam = (session.candidatosFamilia ?? []) as typeof MENU.lanches;
+        return { messages: [mensagemFamilia(labelFam, itensFam)], session: resetaTentativas({ ...session, step: "product_family_choice" }) };
+      }
       default:
         return { messages: [`Tudo bem! ${mensagemCategorias()}`], session: resetaTentativas({ ...session, step: "category" }) };
     }
@@ -1621,6 +1721,9 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       // Cliente apressado: já mandou o pedido (completo ou parcial) na saudação -> processa direto
       const pedidoDireto = montarPizzaDoPedido(text, { ...session, customerName: historico.nome }, `Pode deixar, *${firstName}*! 🍕`);
       if (pedidoDireto) return pedidoDireto;
+      // FAMÍLIA DE PRODUTO (ex: "quero uma macarronada") — ANTES de detectaIntencaoDireta
+      const familiaRet = detectarFamiliaProduto(text);
+      if (familiaRet) return responderFamiliaProduto({ ...session, customerName: historico.nome }, familiaRet);
       const intencaoRet = detectaIntencaoDireta(text);
       if (intencaoRet) {
         if (intencaoRet.category === "pizza" && (n.includes("mini-pizza") || n.includes("mini pizza"))) {
@@ -1725,7 +1828,13 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       const pedidoDireto = montarPizzaDoPedido(text, { ...session }, `Prazer em te atender! 😊`);
       if (pedidoDireto) return pedidoDireto;
 
-      // 3) Intenção de categoria (pizza/lanche/bebida/suco) sem ser um pedido completo
+      // 5) FAMÍLIA DE PRODUTO (ex: "quero uma macarronada") — PRECISA rodar ANTES de
+      // detectaIntencaoDireta/handleCategory, senão a macarronada vira categoria "lanche"
+      // genérica e abre a lista completa de lanches. Não salva como nome nem pede nome.
+      const familiaName = detectarFamiliaProduto(text);
+      if (familiaName) return responderFamiliaProduto(session, familiaName);
+
+      // 6) Intenção de categoria (pizza/lanche/bebida/suco) sem ser um pedido completo
       const intencao = detectaIntencaoDireta(text);
       if (intencao) {
         const nName = normalizar(text);
@@ -1785,6 +1894,9 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
         }
         // Nenhum produto próximo -> cai no fallback normal (mostra cardápio da categoria)
       }
+      // ===== FAMÍLIA DE PRODUTO (ex: "macarronada") — ANTES da detecção genérica de categoria =====
+      const familiaCat = detectarFamiliaProduto(text);
+      if (familiaCat) return responderFamiliaProduto(session, familiaCat);
       const intencao = detectaIntencaoDireta(text);
       let category = "";
       if (n === "1" || n.includes("pizza")) category = "pizza";
@@ -1792,7 +1904,11 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       else if (n === "3" || n.includes("bebida")) category = "bebida";
       else if (n === "4" || n.includes("suco") || n.includes("vitamina")) category = "suco";
       else if (intencao) category = intencao.category;
-      if (!category) return respostaInvalida(mensagemCategorias(), session);
+      if (!category) {
+        const lancheEspFallback = detectarLancheEspecifico(text, session);
+        if (lancheEspFallback) return lancheEspFallback;
+        return respostaInvalida(mensagemCategorias(), session);
+      }
       if (category === "pizza") {
         if (n.includes("mini-pizza") || n.includes("mini pizza")) {
           return {
@@ -1808,6 +1924,10 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
           messages: [`Perfeito, ${qtdItemCat.qty === 2 ? "são" : "serão"} *${qtdItemCat.qty} sucos*! 😋 Quais sabores?\n\n${listaSucos()}\n\n_(Com leite: acréscimo de R$ 1,00)_\n\nDigite os números ou nomes:`],
           session: resetaTentativas({ ...session, step: "suco_escolha", currentCategory: "suco", pendingQtdSuco: qtdItemCat.qty }),
         };
+      }
+      if (category === "lanche") {
+        const lancheEsp = detectarLancheEspecifico(text, session);
+        if (lancheEsp) return lancheEsp;
       }
       return { ...handleCategory(category, session), session: resetaTentativas(handleCategory(category, session).session) };
     }
@@ -2248,6 +2368,9 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       // ===== PEDIDO COMPLETO INTELIGENTE =====
       const pedidoCompletoAM = processarPedidoCompleto(text, session);
       if (pedidoCompletoAM) return pedidoCompletoAM;
+      // ===== FAMÍLIA DE PRODUTO (ex: "macarronada", "massa") — ANTES dos gates de categoria =====
+      const familiaAM = detectarFamiliaProduto(text);
+      if (familiaAM) return responderFamiliaProduto(session, familiaAM);
       // ===== CARDÁPIO / MENU / VER OPÇÕES =====
       if (detectaIntencaoCardapio(text)) {
         return {
@@ -2377,8 +2500,10 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       if (querPizza) {
         return { messages: [`Qual o tamanho da próxima pizza? 🍕\n\n${sizeListComMiniPizza()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "size", currentCategory: "pizza" }) };
       }
-      // Lanche (sem pizza) — vai direto pro cardápio de lanches
+      // Lanche (sem pizza) — tenta produto específico antes de abrir cardápio completo
       if (querLanche) {
+        const lancheEsp = detectarLancheEspecifico(text, session);
+        if (lancheEsp) return lancheEsp;
         const resp = handleCategory("lanche", { ...session, step: "category" });
         return { ...resp, session: resetaTentativas(resp.session) };
       }
@@ -2833,6 +2958,80 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
         return { messages: [mensagemAddMore(newCart)], session: resetaTentativas({ ...session, step: "add_more", cart: newCart, candidatosItemAmbiguo: undefined }) };
       }
       return respostaInvalida(mensagemCategorias(), session);
+    }
+    case "product_family_choice": {
+      const mudancaFam = tentaMudanca(text, session);
+      if (mudancaFam) return mudancaFam;
+      const candidatosFam = (session.candidatosFamilia ?? []) as typeof MENU.lanches;
+      const labelFam = session.familiaLabel ?? "produto";
+      if (candidatosFam.length === 0) return respostaInvalida(mensagemCategorias(), { ...session, step: "category" });
+
+      // Tenta detectar tamanho por nome/letra (não por número, pois número = índice de produto)
+      const tamFam = (() => {
+        if (n.includes("pequen") || n === "p") return "P";
+        if (n.includes("medi") || n === "m") return "M";
+        if (n.includes("grand") || n === "g") return "G";
+        if (n.includes("famil") || n === "f") return "F";
+        return null;
+      })();
+      // Tenta detectar número (escolha do item)
+      const numPuroFam = /^\d+$/.test(text.trim());
+      const numFam = numPuroFam ? parseInt(text) : NaN;
+
+      let escolhidoFam: typeof MENU.lanches[0] | undefined;
+      if (!isNaN(numFam) && numFam >= 1 && numFam <= candidatosFam.length) {
+        escolhidoFam = candidatosFam[numFam - 1];
+      } else {
+        escolhidoFam = candidatosFam.find(c => n.includes(normalizar(c.name)));
+      }
+
+      // Tamanho digitado sem número: se só um produto na família, seleciona ele
+      if (!escolhidoFam && tamFam && candidatosFam.length === 1) {
+        escolhidoFam = candidatosFam[0];
+      }
+
+      if (!escolhidoFam) {
+        return respostaInvalida(mensagemFamilia(labelFam, candidatosFam), session);
+      }
+
+      if (isEsgotado(escolhidoFam.name)) {
+        return respostaEsgotado(escolhidoFam.name, candidatosFam.map(c => c.name), session);
+      }
+
+      // Produto com tamanhos variáveis (ex: Macarronada)
+      if (escolhidoFam.sizes && escolhidoFam.sizes.length > 0) {
+        if (tamFam) {
+          const sizeItem = escolhidoFam.sizes.find((s: { code: string; price: number }) => s.code === tamFam);
+          if (sizeItem) {
+            const newItem: CartItem = { category: "lanche", name: escolhidoFam.name, size: tamFam, price: sizeItem.price };
+            const newCart = [...session.cart, newItem];
+            return {
+              messages: [mensagemAddMore(newCart)],
+              session: resetaTentativas({ ...session, step: "add_more", cart: newCart, candidatosFamilia: undefined, familiaLabel: undefined }),
+            };
+          }
+        }
+        return {
+          messages: [`Ótima escolha! 😋 Qual tamanho da *${escolhidoFam.name}*?\n\n  1. Pequena (P) · *R$ 28,00*\n  2. Média (M) · *R$ 40,00*\n  3. Grande (G) · *R$ 50,00*\n\n_(Bacon ou ovos: acréscimo de R$ 10,00)_`],
+          session: resetaTentativas({ ...session, step: "lanche_macarronada_size", currentCategory: "lanche", currentLanche: escolhidoFam.name, candidatosFamilia: undefined, familiaLabel: undefined }),
+        };
+      }
+      // Produto com sabores
+      if (escolhidoFam.hasFlavors) {
+        const flavors = MENU[escolhidoFam.flavorsKey as keyof typeof MENU] as string[];
+        const lista = flavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n");
+        return {
+          messages: [`*${escolhidoFam.name}* selecionado! 😋 Qual sabor?\n\n${lista}`],
+          session: resetaTentativas({ ...session, step: "lanche_flavor", currentCategory: "lanche", currentLanche: escolhidoFam.name, candidatosFamilia: undefined, familiaLabel: undefined }),
+        };
+      }
+      // Lanche simples
+      const newItem: CartItem = { category: "lanche", name: escolhidoFam.name, price: escolhidoFam.price };
+      const newCart = [...session.cart, newItem];
+      return {
+        messages: [mensagemAddMore(newCart)],
+        session: resetaTentativas({ ...session, step: "add_more", cart: newCart, candidatosFamilia: undefined, familiaLabel: undefined }),
+      };
     }
     case "lanche_macarronada_size": {
       const mudanca = tentaMudanca(text, session);
