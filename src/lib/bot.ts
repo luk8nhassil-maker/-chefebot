@@ -171,6 +171,7 @@ export interface BotSession {
   retornoRapido?: boolean;
   pendingQtdSuco?: number;
   pendingConsultaFatias?: { size?: string };
+  candidatosBairro?: { name: string; fee: number }[];
   pendingConsultaPreco?: {
     label: string;
     categoria: "pizza_size" | "pizza_mini" | "pizza_ambiguo" | "lanche" | "bebida" | "suco";
@@ -946,6 +947,22 @@ function detectaBairroFuzzy(n: string): { name: string; fee: number } | null {
   if (!melhor) return null;
   if (melhor.d >= segundo) return null; // ambíguo entre dois bairros -> não arrisca
   return { name: melhor.nb.name, fee: melhor.nb.fee };
+}
+
+// Match por prefixo (primeiras 3 letras) — cobre "Ville" → "Vila", "Can" → "Canaa", etc.
+// Retorna lista de candidatos (pode ser vários).
+function detectaBairroPrefix(n: string): { name: string; fee: number }[] {
+  const palavras = n.split(/\s+/).filter(p => p.length >= 3);
+  if (palavras.length === 0) return [];
+  const resultado: { name: string; fee: number }[] = [];
+  for (const nb of MENU.neighborhoods) {
+    const partesNome = normalizar(nb.name).split(/\s+/);
+    const match = palavras.some(p =>
+      partesNome.some(parte => parte.startsWith(p.slice(0, 3)) || p.startsWith(parte.slice(0, 3)))
+    );
+    if (match && !resultado.find(r => r.name === nb.name)) resultado.push(nb);
+  }
+  return resultado;
 }
 
 // Detector central de dados de entrega numa única mensagem.
@@ -2163,14 +2180,44 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       if (found) {
         return { messages: [`*${found.name}*, taxa de entrega: *${formatCurrency(found.fee)}* 🛵\n\nMe passa o endereço completo:\n_(Rua, número e complemento)_\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "address", neighborhood: found.name, deliveryFee: found.fee }) };
       }
-      // Sem match exato -> tenta fuzzy (erro de digitação). NUNCA aplica taxa direto: sempre confirma.
+      // Sem match exato → tenta prefixo (3 primeiras letras)
+      const prefixCandidatos = detectaBairroPrefix(n);
+      if (prefixCandidatos.length === 1) {
+        const c = prefixCandidatos[0];
+        return { messages: [`Você quis dizer *${c.name}*? 😊`], session: resetaTentativas({ ...session, step: "confirma_bairro_fuzzy", bairroFuzzyCandidato: c.name, candidatosBairro: undefined }) };
+      }
+      if (prefixCandidatos.length > 1) {
+        const lista = prefixCandidatos.map((c, i) => `  ${i + 1}. ${c.name}`).join("\n");
+        return { messages: [`Encontrei esses bairros parecidos:\n\n${lista}\n\nQual é o seu? 😊`], session: resetaTentativas({ ...session, step: "confirma_bairro_fuzzy", bairroFuzzyCandidato: undefined, candidatosBairro: prefixCandidatos }) };
+      }
+      // Fallback: fuzzy levenshtein (erro de digitação)
       const candidato = detectaBairroFuzzy(n);
       if (candidato) {
-        return { messages: [`Você quis dizer *${candidato.name}*? 😊`], session: resetaTentativas({ ...session, step: "confirma_bairro_fuzzy", bairroFuzzyCandidato: candidato.name }) };
+        return { messages: [`Você quis dizer *${candidato.name}*? 😊`], session: resetaTentativas({ ...session, step: "confirma_bairro_fuzzy", bairroFuzzyCandidato: candidato.name, candidatosBairro: undefined }) };
       }
-      return respostaInvalida(`Qual o seu bairro? 😊`, session);
+      return respostaInvalida(`Hmm, não encontrei esse bairro. Pode digitar novamente? 😊`, session);
     }
     case "confirma_bairro_fuzzy": {
+      // Lista de múltiplos candidatos (prefix match)
+      const candidatos = session.candidatosBairro;
+      if (candidatos && candidatos.length > 1) {
+        const numEscolha = parseInt(text);
+        if (!isNaN(numEscolha) && numEscolha >= 1 && numEscolha <= candidatos.length) {
+          const nb = candidatos[numEscolha - 1];
+          return { messages: [`*${nb.name}*, taxa de entrega: *${formatCurrency(nb.fee)}* 🛵\n\nMe passa o endereço completo:\n_(Rua, número e complemento)_`], session: resetaTentativas({ ...session, step: "address", neighborhood: nb.name, deliveryFee: nb.fee, candidatosBairro: undefined }) };
+        }
+        // Tenta match por nome dentro dos candidatos
+        const porNome = candidatos.find(c => n.includes(normalizar(c.name).split(/\s+/)[0]));
+        if (porNome) {
+          return { messages: [`*${porNome.name}*, taxa de entrega: *${formatCurrency(porNome.fee)}* 🛵\n\nMe passa o endereço completo:\n_(Rua, número e complemento)_`], session: resetaTentativas({ ...session, step: "address", neighborhood: porNome.name, deliveryFee: porNome.fee, candidatosBairro: undefined }) };
+        }
+        if (eNegativa(n)) {
+          return { messages: [`Sem problema! Qual o seu bairro? 😊`], session: resetaTentativas({ ...session, step: "neighborhood", candidatosBairro: undefined }) };
+        }
+        const lista = candidatos.map((c, i) => `  ${i + 1}. ${c.name}`).join("\n");
+        return respostaInvalida(`Qual desses é o seu bairro?\n\n${lista}`, session);
+      }
+      // Candidato único (confirmação sim/não)
       const nomeCandidato = session.bairroFuzzyCandidato;
       const nb = MENU.neighborhoods.find(b => b.name === nomeCandidato);
       if (ePositiva(n) || n === "1") {
