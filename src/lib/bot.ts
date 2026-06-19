@@ -982,6 +982,189 @@ function detectaDadosEntrega(text: string): { tipo: "delivery" | "pickup" | null
   return { tipo, bairro, pagamento };
 }
 
+// Detecta tipo de entrega incluindo consumo no local
+function detectaTipoEntregaCompleto(n: string): "delivery" | "pickup" | "dine_in" | null {
+  if (/\blocal\b/.test(n) || n.includes("consumo no local") || n.includes("comer ai") ||
+      n.includes("aqui mesmo") || n.includes("na mesa") || n.includes("comer aqui")) return "dine_in";
+  if (n.includes("entrega") || n.includes("delivery") || n.includes("entregar") ||
+      n.includes("minha casa") || n.includes("em casa") || n.includes("manda ai")) return "delivery";
+  if (n.includes("retirar") || n.includes("retirada") || n.includes("buscar") ||
+      n.includes("pegar") || n.includes("retiro") || n.includes("na loja") || n.includes("busco ai")) return "pickup";
+  return null;
+}
+
+// Extrai rua/endereço de forma simples e heurística
+function extrairEndereco(text: string): string | null {
+  const m = text.match(/\b(?:rua|avenida|av\.|travessa|alameda|estrada|quadra)\s+[\wÀ-ú\s,\d]+/i);
+  return m ? m[0].trim().slice(0, 100) : null;
+}
+
+// Navega para próximo step necessário após produto(s) já estar no cart, aproveitando tudo que veio na sessão
+function continuarAposItemCompleto(newCart: CartItem[], session: BotSession, msg: string): BotResponse {
+  const s: BotSession = { ...session, cart: newCart };
+  if (!s.deliveryType) {
+    return {
+      messages: [`${msg}\n\nComo você vai querer receber? 😊\n\n  1. Entrega 🛵\n  2. Retirada na loja 🏪\n  3. Consumo no local 🍽️`],
+      session: resetaTentativas({ ...s, step: "delivery_type" }),
+    };
+  }
+  if (s.deliveryType === "delivery" && !s.neighborhood) {
+    return {
+      messages: [`${msg}\n\nQual seu bairro para eu calcular a entrega? 😊`],
+      session: resetaTentativas({ ...s, step: "neighborhood" }),
+    };
+  }
+  if (s.deliveryType === "delivery" && !s.address) {
+    return {
+      messages: [`${msg}\n\nMe passa o endereço completo para entrega:\n_(Rua, número e complemento)_`],
+      session: resetaTentativas({ ...s, step: "address" }),
+    };
+  }
+  if (!s.paymentMethod) {
+    return {
+      messages: [`${msg}\n\nQual vai ser a forma de pagamento? 💸\n\n  1. Pix 💸\n  2. Dinheiro 💵\n  3. Cartão 💳`],
+      session: resetaTentativas({ ...s, step: "payment" }),
+    };
+  }
+  return aplicaPagamento(s.paymentMethod, s);
+}
+
+// Pedido completo inteligente: identifica produto + entrega + pagamento de uma única mensagem.
+// Só ativa quando há pelo menos um campo de entrega/pagamento junto ao produto.
+// Retorna null se a mensagem não contiver info suficiente (deixa os steps normais tratarem).
+function processarPedidoCompleto(text: string, session: BotSession): BotResponse | null {
+  const n = normalizar(text).replace(/-/g, " ");
+
+  // Detecta entrega/bairro/pagamento
+  const deliveryType = detectaTipoEntregaCompleto(n);
+  let bairroDetectado = detectaBairro(n);
+  if (!bairroDetectado) {
+    const candidatos = detectaBairroPrefix(n);
+    if (candidatos.length === 1) bairroDetectado = candidatos[0];
+  }
+  const pagamento = detectaPagamento(n);
+
+  // Só ativa quando a mensagem carrega info de entrega/pagamento além do produto
+  const temInfoExtra = !!(deliveryType || bairroDetectado || pagamento);
+  if (!temInfoExtra) return null;
+
+  // Palavras-gatilho que não são produtos (intenção de compra)
+  const nSemGatilho = n
+    .replace(/\b(quero|manda|me ve|vou querer|pode ser|me manda|manda ai|pode|traz|traga|gostaria de|me passa)\b/g, "")
+    .trim();
+
+  // Detecta produto
+  const isMiniPizza = nSemGatilho.includes("mini pizza");
+  const isPizza = !isMiniPizza && (nSemGatilho.includes("pizza") || !!detectaPedidoParcial(text));
+
+  // Lanche por nome (exceto Mini-Pizza)
+  const lanche = !isMiniPizza && !isPizza
+    ? MENU.lanches.find(l => l.name !== "Mini-Pizza" && !isEsgotado(l.name) && nSemGatilho.includes(normalizar(l.name)))
+    : null;
+
+  // Sucos por nome (usar parsearMultiSuco ou match individual)
+  const multiSuco = !lanche && !isPizza && !isMiniPizza ? parsearMultiSuco(text) : null;
+  const sucoSingle = !multiSuco && !lanche && !isPizza && !isMiniPizza
+    ? MENU.sucos.find(s => !isEsgotado(s.name) && nSemGatilho.includes(normalizar(s.name).split(" ")[0]))
+    : null;
+  const sucosItems: CartItem[] = multiSuco ?? (sucoSingle ? [{ category: "suco" as const, name: sucoSingle.name, price: sucoSingle.price }] : []);
+
+  // Bebida por nome
+  const bebida = !lanche && !isPizza && !isMiniPizza && sucosItems.length === 0
+    ? MENU.bebidas.find(b => !isEsgotado(b.name) && nSemGatilho.includes(normalizar(b.name).split(" ")[0]))
+    : null;
+
+  const temProduto = isPizza || isMiniPizza || !!lanche || sucosItems.length > 0 || !!bebida;
+  if (!temProduto) return null;
+
+  // Monta base da sessão com todos os campos já conhecidos
+  const tipoEntrega = deliveryType ?? (bairroDetectado ? "delivery" : null);
+  let sessionBase: BotSession = { ...session };
+  if (tipoEntrega) {
+    sessionBase = {
+      ...sessionBase,
+      deliveryType: tipoEntrega,
+      deliveryFee: tipoEntrega === "delivery" ? (bairroDetectado?.fee ?? session.deliveryFee) : 0,
+      neighborhood: tipoEntrega === "delivery" ? (bairroDetectado?.name ?? session.neighborhood) : session.neighborhood,
+    };
+  }
+  if (pagamento) sessionBase = { ...sessionBase, paymentMethod: pagamento };
+  const enderecoDetectado = extrairEndereco(text);
+  if (enderecoDetectado) sessionBase = { ...sessionBase, address: enderecoDetectado };
+
+  // ---- Mini-pizza ----
+  if (isMiniPizza) {
+    return {
+      messages: [`Perfeito! 😄 Mini-Pizza anotada! 🍕 Qual sabor?\n\n${MENU.miniPizzaFlavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n")}`],
+      session: resetaTentativas({ ...sessionBase, step: "lanche_flavor", currentCategory: "pizza", currentLanche: "Mini-Pizza" }),
+    };
+  }
+
+  // ---- Pizza ----
+  if (isPizza) {
+    const parcial = detectaPedidoParcial(text);
+    if (!parcial || (!parcial.size && !parcial.flavor)) {
+      return {
+        messages: [`Perfeito! 🍕 Qual o tamanho da pizza?\n\n${sizeListComMiniPizza()}`],
+        session: resetaTentativas({ ...sessionBase, step: "size", currentCategory: "pizza" }),
+      };
+    }
+    if (parcial.size && parcial.flavor) {
+      if (!parcial.border) {
+        return {
+          messages: [`Pizza *${parcial.size}* de *${parcial.flavor}*! 😋\n\nVai querer borda recheada? 😋`],
+          session: resetaTentativas({ ...sessionBase, step: "border_escolha", currentCategory: "pizza", currentSize: parcial.size, currentFlavor: parcial.flavor }),
+        };
+      }
+      const basePrice = getSizePrice(parcial.size);
+      const borderPrice = parcial.border !== "Sem borda" ? getBorderPrice(parcial.size) : 0;
+      const item: CartItem = { category: "pizza", name: "Pizza", size: parcial.size, flavor: parcial.flavor, border: parcial.border, price: basePrice + borderPrice };
+      const bordaTxt = parcial.border !== "Sem borda" ? ` com borda de *${parcial.border}*` : "";
+      return continuarAposItemCompleto([...sessionBase.cart, item], sessionBase, `Pizza *${parcial.size}* de *${parcial.flavor}*${bordaTxt} anotada! 🤤`);
+    }
+    if (parcial.size) {
+      return {
+        messages: [`Pizza *${parcial.size}* anotada! 👌\n\nQual o sabor? 😋 Pode escolher até 2 sabores!\n\n${listaFlavors()}`],
+        session: resetaTentativas({ ...sessionBase, step: "flavor", currentCategory: "pizza", currentSize: parcial.size }),
+      };
+    }
+    return {
+      messages: [`*${parcial.flavor}* boa pedida! 😋 Qual o tamanho?\n\n${sizeListComMiniPizza()}`],
+      session: resetaTentativas({ ...sessionBase, step: "size", currentCategory: "pizza", currentFlavor: parcial.flavor }),
+    };
+  }
+
+  // ---- Lanche ----
+  if (lanche) {
+    const item: CartItem = { category: "lanche", name: lanche.name, price: lanche.price };
+    return continuarAposItemCompleto([...sessionBase.cart, item], sessionBase, `*${lanche.name}* anotado! 😋`);
+  }
+
+  // ---- Sucos ----
+  if (sucosItems.length > 0) {
+    const leiteDetectado = detectaLeiteTexto(text);
+    const todosBanana = sucosItems.every(i => normalizar(i.name).includes("banana"));
+    const leite = leiteDetectado ?? (todosBanana ? "com" : null);
+    const labels = [...new Map(sucosItems.map(i => [i.name, i])).keys()].map(nome => `*${nome}*`).join(" e ");
+    if (leite) {
+      const itensComLeite = aplicarLeite(sucosItems, leite);
+      return continuarAposItemCompleto([...sessionBase.cart, ...itensComLeite], sessionBase, `${labels} anotado${sucosItems.length > 1 ? "s" : ""}! 😋`);
+    }
+    return {
+      messages: [`${labels} anotado${sucosItems.length > 1 ? "s" : ""}! 😋\n\nQuer com leite ou sem leite? 🥤\n\n  1. Com leite\n  2. Sem leite`],
+      session: resetaTentativas({ ...sessionBase, step: "suco_leite", pendingSucosLeite: sucosItems }),
+    };
+  }
+
+  // ---- Bebida ----
+  if (bebida) {
+    const item: CartItem = { category: "bebida", name: bebida.name, price: bebida.price };
+    return continuarAposItemCompleto([...sessionBase.cart, item], sessionBase, `*${bebida.name}* anotada! 😋`);
+  }
+
+  return null;
+}
+
 // Aplica uma forma de pagamento e decide o próximo passo (troco se dinheiro, senão confirmação).
 // Usado tanto no step payment quanto na captura inteligente. Limpa pagamentoPendente.
 function aplicaPagamento(payment: string, session: BotSession): BotResponse {
@@ -1433,6 +1616,9 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       // Consulta de preço tem prioridade sobre pedido direto
       const resConsultaRet = verificaConsultaFatias(text, session) ?? verificaConsultaPreco(text, session);
       if (resConsultaRet) return resConsultaRet;
+      // Cliente apressado: pedido completo com entrega/pagamento
+      const pedidoCompletoRet = processarPedidoCompleto(text, { ...session, customerName: historico.nome });
+      if (pedidoCompletoRet) return pedidoCompletoRet;
       // Cliente apressado: já mandou o pedido (completo ou parcial) na saudação -> processa direto
       const pedidoDireto = montarPizzaDoPedido(text, { ...session, customerName: historico.nome }, `Pode deixar, *${firstName}*! 🍕`);
       if (pedidoDireto) return pedidoDireto;
@@ -1532,7 +1718,11 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       const resConsultaName = verificaConsultaFatias(text, session) ?? verificaConsultaPreco(text, session);
       if (resConsultaName) return resConsultaName;
 
-      // 3) Pedido direto/completo de pizza já na primeira mensagem
+      // 3) Pedido completo inteligente (produto + entrega/pagamento numa mensagem)
+      const pedidoCompletoName = processarPedidoCompleto(text, session);
+      if (pedidoCompletoName) return pedidoCompletoName;
+
+      // 4) Pedido direto/completo de pizza já na primeira mensagem
       const pedidoDireto = montarPizzaDoPedido(text, { ...session }, `Prazer em te atender! 😊`);
       if (pedidoDireto) return pedidoDireto;
 
@@ -1566,6 +1756,9 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       // ===== CONSULTA DE PREÇO (ex: "quanto tá a pizza pequena?", "valor do x-burguer") =====
       const resConsultaCat = verificaConsultaFatias(text, session) ?? verificaConsultaPreco(text, session);
       if (resConsultaCat) return resConsultaCat;
+      // ===== PEDIDO COMPLETO INTELIGENTE (produto + entrega + pagamento numa única mensagem) =====
+      const pedidoCompletoCat = processarPedidoCompleto(text, session);
+      if (pedidoCompletoCat) return pedidoCompletoCat;
       // ===== QTD + PRODUTO DIRETO (ex: "quero 2 x burguer", "manda uma coca", "pode ser 1 x tudo") =====
       const qtdItemCat = parsearQtdEItem(text);
       if (qtdItemCat) {
@@ -2053,6 +2246,9 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       // ===== CONSULTA DE PREÇO =====
       const resConsultaAM = verificaConsultaFatias(text, session) ?? verificaConsultaPreco(text, session);
       if (resConsultaAM) return resConsultaAM;
+      // ===== PEDIDO COMPLETO INTELIGENTE =====
+      const pedidoCompletoAM = processarPedidoCompleto(text, session);
+      if (pedidoCompletoAM) return pedidoCompletoAM;
       // ===== CARDÁPIO / MENU / VER OPÇÕES =====
       if (detectaIntencaoCardapio(text)) {
         return {
@@ -2131,6 +2327,10 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
 
       // PRIORIDADE MÁXIMA: se quer finalizar e não mencionou pizza/lanche/bebida explicitamente, vai direto pro fechamento
       if (querFinalizar && !querPizza && !querLanche && !querBebida) {
+        // Se já tem info de entrega/pagamento (preenchida por pedido completo), pula para o próximo step necessário
+        if (session.deliveryType) {
+          return continuarAposItemCompleto(session.cart, session, "Show! Vamos fechar então 🍕");
+        }
         return {
           messages: [`Show! Vamos fechar então 🍕\n\nComo quer receber seu pedido? 😊\n\n  1. Entrega 🛵\n  2. Retirada na loja 🏪\n  3. Consumo no local 🍽️`],
           session: resetaTentativas({ ...session, step: "delivery_type" }),
