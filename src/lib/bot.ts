@@ -1,4 +1,4 @@
-import { MENU as MENU_PADRAO, getBorderPrice, getBorderByIndex, getMacarronadaPrice } from "./menu";
+import { MENU as MENU_PADRAO, getBorderPrice, getBorderByIndex } from "./menu";
 
 let MENU = MENU_PADRAO;
 
@@ -816,11 +816,13 @@ function montarPizzaDoPedido(text: string, session: BotSession, prefixo?: string
 const FAMILIAS_PRODUTO: Array<{
   palavras: string[];
   label: string;
+  titulo: string;
   filtro: (nomeNormalizado: string) => boolean;
 }> = [
   {
-    palavras: ["macarronada", "macarrao", "macarrona", "macaronada", "massa"],
+    palavras: ["macarronada", "macarrao", "macarrona", "macaronada", "macarrão", "massa"],
     label: "macarronada",
+    titulo: "Nossas macarronadas",
     filtro: (nome) => nome.includes("macarronada"),
   },
 ];
@@ -839,14 +841,22 @@ export function detectarFamiliaProduto(text: string): { label: string; itens: ty
 }
 
 function mensagemFamilia(label: string, itens: typeof MENU.lanches): string {
-  const listaTxt = itens.map((item, i) => {
-    if (item.sizes && item.sizes.length > 0) {
-      const precos = item.sizes.map((s: { code: string; price: number }) => `${s.code} · *${formatCurrency(s.price)}*`).join(" | ");
-      return `  ${i + 1}. *${item.name}*\n     ${precos}`;
-    }
-    return `  ${i + 1}. *${item.name}* · *${formatCurrency(item.price)}*`;
-  }).join("\n\n");
-  return `Temos essas opções de ${label}: 😋\n\n${listaTxt}\n\nDigite o número ou o tamanho que deseja:`;
+  const fam = FAMILIAS_PRODUTO.find(f => f.label === label);
+  const titulo = fam?.titulo ?? `Temos essas opções de ${label}`;
+  // Lista no estilo "sabor" (igual à pizza): só o nome, sem preço — o preço aparece
+  // depois, na escolha de tamanho.
+  const listaTxt = itens.map((item, i) => `  ${i + 1}. *${item.name}*`).join("\n");
+  return `${titulo}: 😋\n\n${listaTxt}\n\nDigite o número ou o sabor que deseja:`;
+}
+
+// Monta a mensagem de escolha de tamanho para um produto que tem tamanhos
+// próprios (ex: cada macarronada). Usa os preços do próprio item do cardápio.
+function mensagemTamanhoProduto(item: typeof MENU.lanches[0]): string {
+  const labelTam: Record<string, string> = { P: "Pequena", M: "Média", G: "Grande", F: "Família" };
+  const linhas = (item.sizes ?? [])
+    .map((s, i) => `  ${i + 1}. ${labelTam[s.code] ?? s.code} (${s.code}) · *${formatCurrency(s.price)}*`)
+    .join("\n");
+  return `Ótima escolha! 😋 Qual tamanho da *${item.name}*?\n\n${linhas}\n\n_(Bacon ou ovos: acréscimo de R$ 10,00)_`;
 }
 
 // Helper ÚNICO para responder com a lista filtrada de uma família de produto.
@@ -2880,8 +2890,8 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
       }
       if (!lanche) return respostaInvalida(listaLanches(), session);
       if (isEsgotado(lanche.name)) return respostaEsgotado(lanche.name, MENU.lanches.map(l => l.name), session);
-      if (lanche.name === "Macarronada de Carne") {
-        return { messages: [`Ótima escolha! 😋 Qual tamanho da *Macarronada de Carne*?\n\n  1. Pequena (P) · *R$ 28,00*\n  2. Média (M) · *R$ 40,00*\n  3. Grande (G) · *R$ 50,00*\n\n_(Bacon ou ovos: acréscimo de R$ 10,00)_`], session: resetaTentativas({ ...session, step: "lanche_macarronada_size", currentLanche: lanche.name }) };
+      if (lanche.sizes && lanche.sizes.length > 0) {
+        return { messages: [mensagemTamanhoProduto(lanche)], session: resetaTentativas({ ...session, step: "lanche_macarronada_size", currentLanche: lanche.name }) };
       }
       if (lanche.hasFlavors) {
         const flavors = MENU[lanche.flavorsKey as keyof typeof MENU] as string[];
@@ -2931,8 +2941,8 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
       if (session.itemAmbiguoTipo === "lanche") {
         const lanche = MENU.lanches.find(l => l.name === escolhido);
         if (!lanche) return respostaInvalida(listaLanches(), session);
-        if (lanche.name === "Macarronada de Carne") {
-          return { messages: [`Ótima escolha! 😋 Qual tamanho da *Macarronada de Carne*?\n\n  1. Pequena (P) · *R$ 28,00*\n  2. Média (M) · *R$ 40,00*\n  3. Grande (G) · *R$ 50,00*\n\n_(Bacon ou ovos: acréscimo de R$ 10,00)_`], session: resetaTentativas({ ...session, step: "lanche_macarronada_size", currentLanche: lanche.name, candidatosItemAmbiguo: undefined }) };
+        if (lanche.sizes && lanche.sizes.length > 0) {
+          return { messages: [mensagemTamanhoProduto(lanche)], session: resetaTentativas({ ...session, step: "lanche_macarronada_size", currentLanche: lanche.name, candidatosItemAmbiguo: undefined }) };
         }
         if (lanche.hasFlavors) {
           const flavors = MENU[lanche.flavorsKey as keyof typeof MENU] as string[];
@@ -2981,8 +2991,15 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
       let escolhidoFam: typeof MENU.lanches[0] | undefined;
       if (!isNaN(numFam) && numFam >= 1 && numFam <= candidatosFam.length) {
         escolhidoFam = candidatosFam[numFam - 1];
-      } else {
-        escolhidoFam = candidatosFam.find(c => n.includes(normalizar(c.name)));
+      } else if (!tamFam) {
+        // Casa por sabor/nome em qualquer direção: "carne" → "Macarronada de Carne",
+        // "macarronada de frango" → "Macarronada de Frango". Se ficar ambíguo
+        // (ex: só "macarronada"), reexibe a lista para o cliente escolher.
+        const matches = candidatosFam.filter(c => {
+          const cn = normalizar(c.name);
+          return cn === n || cn.includes(n) || n.includes(cn);
+        });
+        if (matches.length === 1) escolhidoFam = matches[0];
       }
 
       // Tamanho digitado sem número: se só um produto na família, seleciona ele
@@ -3012,7 +3029,7 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
           }
         }
         return {
-          messages: [`Ótima escolha! 😋 Qual tamanho da *${escolhidoFam.name}*?\n\n  1. Pequena (P) · *R$ 28,00*\n  2. Média (M) · *R$ 40,00*\n  3. Grande (G) · *R$ 50,00*\n\n_(Bacon ou ovos: acréscimo de R$ 10,00)_`],
+          messages: [mensagemTamanhoProduto(escolhidoFam)],
           session: resetaTentativas({ ...session, step: "lanche_macarronada_size", currentCategory: "lanche", currentLanche: escolhidoFam.name, candidatosFamilia: undefined, familiaLabel: undefined }),
         };
       }
@@ -3036,10 +3053,16 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
     case "lanche_macarronada_size": {
       const mudanca = tentaMudanca(text, session);
       if (mudanca) return mudanca;
+      // Usa o produto selecionado (Macarronada de Carne, de Frango, ...) e os preços
+      // dos tamanhos do próprio item do cardápio — nada hardcoded.
+      const lancheTam = MENU.lanches.find(l => l.name === session.currentLanche);
+      const sizes = lancheTam?.sizes ?? [];
       const size = detectaTamanho(n);
-      if (!size || size === "F") return respostaInvalida(`  1. Pequena (P) · *R$ 28,00*\n  2. Média (M) · *R$ 40,00*\n  3. Grande (G) · *R$ 50,00*`, session);
-      const price = getMacarronadaPrice(size);
-      const newItem: CartItem = { category: "lanche", name: "Macarronada de Carne", size, price };
+      const sizeItem = size ? sizes.find(s => s.code === size) : undefined;
+      if (!size || !sizeItem) {
+        return respostaInvalida(mensagemTamanhoProduto(lancheTam ?? MENU.lanches.find(l => l.name === "Macarronada de Carne")!), session);
+      }
+      const newItem: CartItem = { category: "lanche", name: lancheTam!.name, size, price: sizeItem.price };
       const newCart = [...session.cart, newItem];
       return { messages: [mensagemAddMore(newCart)], session: resetaTentativas({ ...session, step: "add_more", cart: newCart, currentLanche: undefined }) };
     }
