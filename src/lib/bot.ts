@@ -253,7 +253,7 @@ const APELIDOS_SABOR: Record<string, string[]> = {
   "X-Bacon": ["xbacon", "x bacon", "burguer bacon"],
   "X-Tudo": ["xtudo", "x tudo", "burguer tudo", "burguer completo"],
   "Porcao de Batatas": ["batata frita", "batatas fritas", "porcao batata", "porcao batatas", "batata"],
-  "Macarronada de Carne": ["macarronada", "macarrao", "macarrao de carne"],
+  "Macarronada de Carne": ["macarronada", "macarrao", "macarrao de carne", "macarrona", "massa"],
   // Bebidas — marca/apelido popular → produto mais comum no cardápio
   "Refrigerante Lata": ["coca", "coca cola", "cocacola", "coca-cola", "pepsi cola", "soda"],
   "Refrigerante 2L": ["refri 2 litros", "refrigerante 2 litros", "coca 2 litros", "coca 2l"],
@@ -506,7 +506,7 @@ function detectaConsultaPreco(text: string): ConsultaPreco | null {
   const n = normalizar(text).replace(/-/g, " ");
   const temConsulta =
     n.includes("quanto") || n.includes("valor") || n.includes("preco") ||
-    n.includes("custa") || n.includes("caro") || n.includes("barato");
+    n.includes("custa") || /\bcaro\b/.test(n) || n.includes("barato");
   if (!temConsulta) return null;
 
   // Extrai qty se houver ("quanto tá 2 x-burguer")
@@ -809,6 +809,41 @@ function montarPizzaDoPedido(text: string, session: BotSession, prefixo?: string
     session: resetaTentativas({ ...session, step: "add_more", cart: newCart, currentCategory: "pizza", currentSize: undefined, currentFlavor: undefined }),
   };
 }
+export function detectarLancheEspecifico(text: string, session: BotSession): BotResponse | null {
+  const n = normalizar(text);
+  // Textos genéricos que indicam apenas a categoria, sem produto específico
+  if (n === "lanche" || n === "2" || n === "lanches") return null;
+
+  const nomesLanches = MENU.lanches.map(l => l.name);
+  const lancheNome = resolveUmSabor(n, nomesLanches);
+  if (!lancheNome) return null;
+
+  const lanche = MENU.lanches.find(l => l.name === lancheNome);
+  if (!lanche) return null;
+  if (isEsgotado(lanche.name)) return respostaEsgotado(lanche.name, nomesLanches, session);
+
+  if (lanche.name === "Macarronada de Carne") {
+    return {
+      messages: [`Ótima escolha! 😋 Qual tamanho da *Macarronada de Carne*?\n\n  1. Pequena (P) · *R$ 28,00*\n  2. Média (M) · *R$ 40,00*\n  3. Grande (G) · *R$ 50,00*\n\n_(Bacon ou ovos: acréscimo de R$ 10,00)_`],
+      session: resetaTentativas({ ...session, step: "lanche_macarronada_size", currentCategory: "lanche", currentLanche: lanche.name }),
+    };
+  }
+  if (lanche.hasFlavors) {
+    const flavors = MENU[lanche.flavorsKey as keyof typeof MENU] as string[];
+    const lista = flavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n");
+    return {
+      messages: [`*${lanche.name}* selecionado! 😋 Qual sabor?\n\n${lista}`],
+      session: resetaTentativas({ ...session, step: "lanche_flavor", currentCategory: "lanche", currentLanche: lanche.name }),
+    };
+  }
+  const newItem: CartItem = { category: "lanche", name: lanche.name, price: lanche.price };
+  const newCart = [...session.cart, newItem];
+  return {
+    messages: [mensagemAddMore(newCart)],
+    session: resetaTentativas({ ...session, step: "add_more", cart: newCart, currentLanche: undefined }),
+  };
+}
+
 function nomeCategoriaAtual(step: BotStep, currentCategory?: string): string {
   if (currentCategory === "pizza" || step === "size" || step === "flavor" || step === "segundo_sabor" || step === "border" || step === "border_escolha") return "pizza";
   if (currentCategory === "lanche" || step === "lanche_escolha" || step === "lanche_flavor" || step === "lanche_macarronada_size") return "lanche";
@@ -1793,7 +1828,11 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       else if (n === "3" || n.includes("bebida")) category = "bebida";
       else if (n === "4" || n.includes("suco") || n.includes("vitamina")) category = "suco";
       else if (intencao) category = intencao.category;
-      if (!category) return respostaInvalida(mensagemCategorias(), session);
+      if (!category) {
+        const lancheEspFallback = detectarLancheEspecifico(text, session);
+        if (lancheEspFallback) return lancheEspFallback;
+        return respostaInvalida(mensagemCategorias(), session);
+      }
       if (category === "pizza") {
         if (n.includes("mini-pizza") || n.includes("mini pizza")) {
           return {
@@ -1809,6 +1848,10 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
           messages: [`Perfeito, ${qtdItemCat.qty === 2 ? "são" : "serão"} *${qtdItemCat.qty} sucos*! 😋 Quais sabores?\n\n${listaSucos()}\n\n_(Com leite: acréscimo de R$ 1,00)_\n\nDigite os números ou nomes:`],
           session: resetaTentativas({ ...session, step: "suco_escolha", currentCategory: "suco", pendingQtdSuco: qtdItemCat.qty }),
         };
+      }
+      if (category === "lanche") {
+        const lancheEsp = detectarLancheEspecifico(text, session);
+        if (lancheEsp) return lancheEsp;
       }
       return { ...handleCategory(category, session), session: resetaTentativas(handleCategory(category, session).session) };
     }
@@ -2347,8 +2390,10 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       if (querPizza) {
         return { messages: [`Qual o tamanho da próxima pizza? 🍕\n\n${sizeListComMiniPizza()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "size", currentCategory: "pizza" }) };
       }
-      // Lanche (sem pizza) — vai direto pro cardápio de lanches
+      // Lanche (sem pizza) — tenta produto específico antes de abrir cardápio completo
       if (querLanche) {
+        const lancheEsp = detectarLancheEspecifico(text, session);
+        if (lancheEsp) return lancheEsp;
         const resp = handleCategory("lanche", { ...session, step: "category" });
         return { ...resp, session: resetaTentativas(resp.session) };
       }
