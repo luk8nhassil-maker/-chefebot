@@ -1,5 +1,5 @@
 import { MENU as MENU_PADRAO, getBorderPrice, getBorderByIndex, getMacarronadaPrice } from "./menu";
-import { detectarTipoRecebimento } from "./botSkills";
+import { detectarTipoRecebimento, detectarFormaPagamento, tipoPagamentoParaLabel } from "./botSkills";
 
 let MENU = MENU_PADRAO;
 
@@ -901,11 +901,11 @@ function neighborhoodList(): string {
 }
 
 // Detecta forma de pagamento numa mensagem (lista fechada e segura)
+// Delega à skill central (botSkills.ts). Aceita texto normalizado (idempotente).
 function detectaPagamento(n: string): string | null {
-  if (/\bpix\b/.test(n) || n.includes("transfer")) return "Pix";
-  if (n.includes("dinheiro") || n.includes("especie") || n.includes("cash") || /\ba vista\b/.test(n)) return "Dinheiro";
-  if (n.includes("cartao") || n.includes("credito") || n.includes("debito") || /\bcard\b/.test(n)) return "Cartão";
-  return null;
+  const r = detectarFormaPagamento(n);
+  if (!r.type || r.type === "mixed") return null; // misto é tratado por detectaPagamentoHibrido
+  return tipoPagamentoParaLabel(r.type);
 }
 
 // Detecta bairro de forma RIGOROSA: o nome do bairro deve aparecer como palavra(s) inteira(s)
@@ -1594,6 +1594,33 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       default:
         return { messages: [`Tudo bem! ${mensagemCategorias()}`], session: resetaTentativas({ ...session, step: "category" }) };
     }
+  }
+
+  // Detecta pagamento híbrido (dois métodos na mesma mensagem), com ou sem valores.
+  // Retorna null se for só um método (fluxo normal de aplicaPagamento cuida disso).
+  // Movida para fora do switch (estava no meio do bloco), evitando block-scope em strict mode.
+  function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Record<string, number> } | null {
+    const norm = normalizar(text);
+    const metodosEncontrados: string[] = [];
+    if (/\bpix\b/.test(norm)) metodosEncontrados.push("Pix");
+    if (norm.includes("dinheiro") || norm.includes("especie") || norm.includes("cash")) metodosEncontrados.push("Dinheiro");
+    if (norm.includes("cartao") || norm.includes("credito") || norm.includes("debito")) metodosEncontrados.push("Cartão");
+    if (metodosEncontrados.length < 2) return null;
+    const valores: Record<string, number> = {};
+    const regexValor: Record<string, RegExp> = {
+      Pix: /(\d+(?:[.,]\d+)?)\s*(?:reais?\s*)?(?:no\s+|de\s+|em\s+)?pix|pix\s*(?:de\s+|no\s+valor de\s+)?(\d+(?:[.,]\d+)?)/,
+      Dinheiro: /(\d+(?:[.,]\d+)?)\s*(?:reais?\s*)?(?:no\s+|de\s+|em\s+)?dinheiro|dinheiro\s*(?:de\s+|no\s+valor de\s+)?(\d+(?:[.,]\d+)?)/,
+      Cartão: /(\d+(?:[.,]\d+)?)\s*(?:reais?\s*)?(?:no\s+|de\s+|em\s+)?cart[aã]o|cart[aã]o\s*(?:de\s+|no\s+valor de\s+)?(\d+(?:[.,]\d+)?)/,
+    };
+    for (const metodo of metodosEncontrados) {
+      const m = norm.match(regexValor[metodo]);
+      if (m) {
+        const valorStr = (m[1] || m[2] || "").replace(",", ".");
+        const valor = parseFloat(valorStr);
+        if (!isNaN(valor)) valores[metodo] = valor;
+      }
+    }
+    return { metodos: metodosEncontrados, valores };
   }
 
   switch (session.step) {
@@ -2510,39 +2537,19 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       }
       return { messages: [`Endereço anotado! 📍 Qual a forma de pagamento? 💸`], session: resetaTentativas({ ...session, step: "payment", address: text }) };
     }
-// Detecta pagamento híbrido (dois métodos na mesma mensagem), com ou sem valores.
-// Retorna null se for só um método (fluxo normal de aplicaPagamento cuida disso).
-function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Record<string, number> } | null {
-  const n = normalizar(text);
-  const metodosEncontrados: string[] = [];
-  if (/\bpix\b/.test(n)) metodosEncontrados.push("Pix");
-  if (n.includes("dinheiro") || n.includes("especie") || n.includes("cash")) metodosEncontrados.push("Dinheiro");
-  if (n.includes("cartao") || n.includes("credito") || n.includes("debito")) metodosEncontrados.push("Cartão");
-  if (metodosEncontrados.length < 2) return null;
-
-  // Tenta extrair valores associados: "50 no pix", "30 pix", "metade pix"
-  const valores: Record<string, number> = {};
-  const regexValor: Record<string, RegExp> = {
-    Pix: /(\d+(?:[.,]\d+)?)\s*(?:reais?\s*)?(?:no\s+|de\s+|em\s+)?pix|pix\s*(?:de\s+|no\s+valor de\s+)?(\d+(?:[.,]\d+)?)/,
-    Dinheiro: /(\d+(?:[.,]\d+)?)\s*(?:reais?\s*)?(?:no\s+|de\s+|em\s+)?dinheiro|dinheiro\s*(?:de\s+|no\s+valor de\s+)?(\d+(?:[.,]\d+)?)/,
-    Cartão: /(\d+(?:[.,]\d+)?)\s*(?:reais?\s*)?(?:no\s+|de\s+|em\s+)?cart[aã]o|cart[aã]o\s*(?:de\s+|no\s+valor de\s+)?(\d+(?:[.,]\d+)?)/,
-  };
-  for (const metodo of metodosEncontrados) {
-    const m = n.match(regexValor[metodo]);
-    if (m) {
-      const valorStr = (m[1] || m[2] || "").replace(",", ".");
-      const valor = parseFloat(valorStr);
-      if (!isNaN(valor)) valores[metodo] = valor;
-    }
-  }
-  return { metodos: metodosEncontrados, valores };
-}
-
     case "payment": {
+      // Opções numéricas de menu ("1"/"2"/"3") permanecem aqui — são UI, não conhecimento.
+      // Detecção semântica delega à skill central.
       let payment = "";
-      if (n === "1" || n.includes("pix") || n.includes("transfer")) payment = "Pix";
-      else if (n === "2" || n.includes("dinheiro") || n.includes("especie") || n.includes("cash")) payment = "Dinheiro";
-      else if (n === "3" || n.includes("cartao") || n.includes("credito") || n.includes("debito")) payment = "Cartão";
+      if (n === "1") payment = "Pix";
+      else if (n === "2") payment = "Dinheiro";
+      else if (n === "3") payment = "Cartão";
+      else {
+        const pgResult = detectarFormaPagamento(text);
+        if (pgResult.type && pgResult.type !== "mixed") {
+          payment = tipoPagamentoParaLabel(pgResult.type);
+        }
+      }
 
       // ===== PAGAMENTO HÍBRIDO (dois métodos na mesma mensagem) =====
       const hibrido = detectaPagamentoHibrido(text);
@@ -2611,9 +2618,10 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
       const [m1, m2] = session.hibridoMetodos || [];
       const parcial = session.hibridoValorParcial || {};
       let metodoComplemento = "";
-      if (n.includes("pix")) metodoComplemento = "Pix";
-      else if (n.includes("dinheiro") || n.includes("especie") || n.includes("cash")) metodoComplemento = "Dinheiro";
-      else if (n.includes("cartao") || n.includes("credito") || n.includes("debito")) metodoComplemento = "Cartão";
+      {
+        const pgComp = detectarFormaPagamento(text);
+        if (pgComp.type && pgComp.type !== "mixed") metodoComplemento = tipoPagamentoParaLabel(pgComp.type);
+      }
       if (!metodoComplemento) {
         return respostaInvalida(`Como prefere pagar o restante? Pode ser ${m1}, ${m2} ou outra forma.`, session);
       }

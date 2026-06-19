@@ -350,3 +350,150 @@ export function detectarIntencaoDoCliente(
 
   return { intent: "desconhecida", confidence: "baixa" };
 }
+
+// ---------------------------------------------------------------------------
+// SKILL: Forma de pagamento — fonte única de verdade
+// Adicionar novos sinônimos aqui, nunca nos arquivos de fluxo.
+// ---------------------------------------------------------------------------
+
+// Substrings simples por método (ordem importa apenas dentro de cada grupo)
+const KEYWORDS_PIX: string[] = [
+  "pix", "transfer", "transferencia", "chave pix", "manda o pix",
+  "qual a chave", "vou pagar no pix", "pago no pix",
+];
+
+const KEYWORDS_DINHEIRO: string[] = [
+  "dinheiro", "especie", "cash", "a vista", "pago em dinheiro",
+  "vou pagar em dinheiro", "pago na entrega em dinheiro",
+];
+
+const KEYWORDS_CARTAO: string[] = [
+  "cartao", "credito", "debito", "maquininha", "maquina",
+  "pago no cartao", "cartao na entrega",
+];
+
+// Palavras-chave para word-boundary (evitam falsos positivos em substrings)
+const KEYWORDS_PIX_WORD: string[] = ["pix"];
+
+export type TipoPagamento = "pix" | "cash" | "card" | "mixed" | null;
+export type MetodoPagamento = "pix" | "cash" | "card";
+
+export interface ResultadoPagamento {
+  type: TipoPagamento;
+  confidence: "high" | "medium" | "low";
+  matchedBy?: string;
+  needsChange?: boolean;
+  changeFor?: number;
+  mixedMethods?: MetodoPagamento[];
+}
+
+function detectaMetodo(norm: string): { method: MetodoPagamento; matchedBy: string } | null {
+  // PIX com word-boundary (evita "fênix" → "fenix" que contém "nix", não "pix")
+  for (const kw of KEYWORDS_PIX_WORD) {
+    if (new RegExp(`\\b${kw}\\b`).test(norm)) return { method: "pix", matchedBy: kw };
+  }
+  // PIX por substring (frases compostas como "vou pagar no pix" — "pix" já cobre, mas mantém frases explícitas)
+  for (const kw of KEYWORDS_PIX) {
+    if (kw !== "pix" && norm.includes(kw)) return { method: "pix", matchedBy: kw };
+  }
+  for (const kw of KEYWORDS_DINHEIRO) {
+    if (norm.includes(kw)) return { method: "cash", matchedBy: kw };
+  }
+  for (const kw of KEYWORDS_CARTAO) {
+    if (norm.includes(kw)) return { method: "card", matchedBy: kw };
+  }
+  return null;
+}
+
+function detectaTroco(norm: string): { needsChange: boolean; changeFor?: number } {
+  if (norm.includes("sem troco") || norm.includes("nao precisa de troco")) {
+    return { needsChange: false };
+  }
+  const trocoMatch = norm.match(/troco\s+(?:de\s+|para\s+|pra\s+|p\/?\s*)?(\d+(?:[.,]\d+)?)/);
+  if (trocoMatch) {
+    return { needsChange: true, changeFor: parseFloat(trocoMatch[1].replace(",", ".")) };
+  }
+  if (norm.includes("troco")) return { needsChange: true };
+  return { needsChange: false };
+}
+
+/**
+ * Detecta forma de pagamento numa mensagem.
+ * Aceita texto cru ou já normalizado (normalização é idempotente).
+ *
+ * Pagamento misto é DETECTADO mas o processamento de split de valores
+ * permanece em bot.ts (detectaPagamentoHibrido), por envolver cálculos
+ * de total que dependem do carrinho — fora do escopo desta skill.
+ */
+export function detectarFormaPagamento(mensagem: string): ResultadoPagamento {
+  const norm = n(mensagem);
+
+  // Verifica todos os métodos presentes na mensagem
+  const metodosPresentes: { method: MetodoPagamento; matchedBy: string }[] = [];
+
+  // PIX word-boundary
+  for (const kw of KEYWORDS_PIX_WORD) {
+    if (new RegExp(`\\b${kw}\\b`).test(norm)) {
+      metodosPresentes.push({ method: "pix", matchedBy: kw });
+      break;
+    }
+  }
+  // PIX frases compostas
+  if (!metodosPresentes.some(m => m.method === "pix")) {
+    for (const kw of KEYWORDS_PIX) {
+      if (kw !== "pix" && norm.includes(kw)) {
+        metodosPresentes.push({ method: "pix", matchedBy: kw });
+        break;
+      }
+    }
+  }
+  for (const kw of KEYWORDS_DINHEIRO) {
+    if (norm.includes(kw)) { metodosPresentes.push({ method: "cash", matchedBy: kw }); break; }
+  }
+  for (const kw of KEYWORDS_CARTAO) {
+    if (norm.includes(kw)) { metodosPresentes.push({ method: "card", matchedBy: kw }); break; }
+  }
+
+  const troco = detectaTroco(norm);
+
+  // Pagamento misto: 2+ métodos detectados
+  if (metodosPresentes.length >= 2) {
+    return {
+      type: "mixed",
+      confidence: "high",
+      matchedBy: metodosPresentes.map(m => m.matchedBy).join(" + "),
+      mixedMethods: metodosPresentes.map(m => m.method),
+      ...troco,
+    };
+  }
+
+  if (metodosPresentes.length === 1) {
+    const { method, matchedBy } = metodosPresentes[0];
+    return {
+      type: method,
+      confidence: "high",
+      matchedBy,
+      // troco só faz sentido em dinheiro, mas detectamos sempre (fluxo decide o que usar)
+      ...(troco.needsChange ? troco : {}),
+    };
+  }
+
+  // "troco" sem método explícito → implica dinheiro
+  if (troco.needsChange) {
+    return {
+      type: "cash",
+      confidence: "medium",
+      matchedBy: "troco",
+      ...troco,
+    };
+  }
+
+  return { type: null, confidence: "low" };
+}
+
+/** Converte o tipo da skill (pix/cash/card) para o label usado no bot ("Pix"/"Dinheiro"/"Cartão") */
+export function tipoPagamentoParaLabel(type: MetodoPagamento): "Pix" | "Dinheiro" | "Cartão" {
+  if (type === "pix")  return "Pix";
+  if (type === "cash") return "Dinheiro";
+  return "Cartão";
+}
