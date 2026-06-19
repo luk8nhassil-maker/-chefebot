@@ -475,20 +475,51 @@ function detectaIntencaoCardapio(text: string): boolean {
 
 export function detectaPerguntaEntregaFuncionamento(text: string): boolean {
   const n = normalizar(text);
-  const palavrasChave = [
-    "entrega", "entregando", "delivery", "funcionando", "funcionamento",
-    "aberto", "da pra pedir", "da pra", "ainda da", "ainda ta",
-    "ate que horas", "que horas", "horario", "horario de",
+
+  // Padrões explícitos de perguntas sobre entrega/funcionamento
+  const padroes = [
+    /fazendo entrega/,
+    /faz(em)? entrega/,
+    /ta(o)? entregando/,
+    /estao entregando/,
+    /voces entregando/,
+    /entregando ainda/,
+    /ainda entregando/,
+    /fazem delivery/,
+    /faz delivery/,
+    /tem delivery/,
+    /ainda da pra pedir/,
+    /da pra pedir/,
+    /ainda da tempo/,
+    /da tempo de pedir/,
+    /ainda estao funcionando/,
+    /estao funcionando/,
+    /voces funcionando/,
+    /ainda aberto/,
+    /estao aberto/,
+    /ta aberto/,
+    /ate que horas/,
+    /horario de (entrega|funcionamento|atendimento)/,
+    /qual (o )?horario/,
+    /que horas (fecha|termina|encerra|entrega)/,
   ];
-  if (!palavrasChave.some(p => n.includes(p))) return false;
-  // Se há um pedido completo junto (produto + pagamento/bairro), prioriza o pedido
+  const temPadrao = padroes.some(r => r.test(n));
+
+  // Palavras-chave simples como fallback
+  const palavrasChave = ["entregando", "delivery", "funcionando", "funcionamento", "horario"];
+  const temPalavraChave = palavrasChave.some(p => n.includes(p));
+
+  if (!temPadrao && !temPalavraChave) return false;
+
+  // Se a mensagem carrega pedido completo (produto + pagamento/bairro), prioriza o pedido
   const temProduto = n.includes("pizza") || n.includes("lanche") || n.includes("burguer") ||
     n.includes("bacon") || n.includes("calabresa") || n.includes("frango") ||
     n.includes("bebida") || n.includes("suco") || n.includes("refrigerante") ||
-    n.includes("calzone") || n.includes("x-") || n.includes("x ");
+    n.includes("calzone") || /\bx-/.test(n);
   const temPagamentoOuBairro = n.includes("pix") || n.includes("dinheiro") || n.includes("cartao") ||
-    n.includes("entrega bairro") || n.includes("bairro");
+    n.includes("bairro");
   if (temProduto && temPagamentoOuBairro) return false;
+
   return true;
 }
 
@@ -1606,6 +1637,24 @@ export function processMessage(input: string, session: BotSession): BotResponse 
 function processMessageInner(input: string, session: BotSession): BotResponse {
   const text = input.trim();
   const n = normalizar(text);
+
+  // ── REGRA PRIORITY #1: Pergunta sobre entrega/funcionamento ─────────────────
+  // Roda antes de QUALQUER outra lógica para não cair em fallbacks de produto/cardápio.
+  // Exceção: steps finais (confirm, aguardando_pix) e sessão escalada.
+  if (
+    session.step !== "escalado" &&
+    session.step !== "confirm" &&
+    session.step !== "aguardando_pix" &&
+    detectaPerguntaEntregaFuncionamento(text)
+  ) {
+    return {
+      messages: [
+        `Sim, estamos fazendo entrega sim ✅\n\nHoje nosso atendimento vai até *${HORARIO_FUNCIONAMENTO}*.\n\nPode mandar seu pedido por aqui mesmo.\nO que vai ser hoje? 🍕`,
+      ],
+      session: resetaTentativas({ ...session, step: session.customerName ? "category" : "name" }),
+    };
+  }
+
   // Detecta quantidade de pizzas. Regra de ouro: número PURO sozinho ("2") NUNCA é quantidade —
   // nos steps category/add_more/size ele é opção de menu (1,2,3,4) ou opção de tamanho.
   // Quantidade por número só vale com a palavra "pizza" junto ("2 pizzas"). Palavra por extenso
@@ -1748,22 +1797,6 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       default:
         return { messages: [`Tudo bem! ${mensagemCategorias()}`], session: resetaTentativas({ ...session, step: "category" }) };
     }
-  }
-
-  // Detecta perguntas sobre entrega/funcionamento antes de qualquer step
-  // Exceção: se a mensagem contém produto + pagamento/bairro, deixa processarPedidoCompleto tratar
-  if (
-    session.step !== "escalado" &&
-    session.step !== "confirm" &&
-    session.step !== "aguardando_pix" &&
-    detectaPerguntaEntregaFuncionamento(text)
-  ) {
-    return {
-      messages: [
-        `Sim, estamos fazendo entrega sim ✅\n\nHoje nosso atendimento vai até *${HORARIO_FUNCIONAMENTO}*.\n\nPode mandar seu pedido por aqui mesmo.\nO que vai ser hoje? 🍕`,
-      ],
-      session: resetaTentativas({ ...session, step: session.customerName ? "category" : "name" }),
-    };
   }
 
   switch (session.step) {
