@@ -64,6 +64,7 @@ export default function ConversasPage() {
   const [now, setNow] = useState(Date.now())
   const [confirmando, setConfirmando] = useState<Pedido | null>(null)
   const [finalizando, setFinalizando] = useState<string | null>(null)
+  const [devolvendoBot, setDevolvendoBot] = useState<string | null>(null)
   const [toast, setToast] = useState("")
   const toastTimer = useRef<any>(null)
 
@@ -84,6 +85,22 @@ export default function ConversasPage() {
   function showToast(msg: string) {
     setToast(msg); clearTimeout(toastTimer.current)
     toastTimer.current = setTimeout(() => setToast(""), 3500)
+  }
+
+  async function devolverParaBot(p: Pedido) {
+    setDevolvendoBot(p.id)
+    try {
+      const r = await fetch('/api/devolver-para-bot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ telefone: p.telefone }),
+      })
+      if (r.ok) {
+        setPedidos(prev => prev.map(x => x.id === p.id ? { ...x, escalonado: false } : x))
+        showToast('Conversa devolvida para o robô! 🤖')
+      } else { showToast('Não foi possível devolver para o robô.') }
+    } catch { showToast('Não foi possível devolver para o robô.') }
+    setDevolvendoBot(null)
   }
 
   async function finalizarAtendimento(p: Pedido) {
@@ -145,6 +162,8 @@ export default function ConversasPage() {
         .cbWaLinkSm:active { opacity:.8; }
         .cbFin { height:44px; padding:0 13px; background:transparent; border:1px solid #272320; border-radius:11px; color:#56524b; font-size:12px; font-weight:900; flex-shrink:0; }
         .cbFin:active { opacity:.75; }
+        .cbBot { height:44px; padding:0 13px; background:rgba(100,140,255,.08); border:1px solid rgba(100,140,255,.25); border-radius:11px; color:#7a9fff; font-size:12px; font-weight:900; flex-shrink:0; }
+        .cbBot:active { opacity:.75; }
         .cbFinSm { height:34px; padding:0 11px; background:transparent; border:1px solid #272320; border-radius:9px; color:#56524b; font-size:11px; font-weight:900; flex-shrink:0; }
         .cbFinSm:active { opacity:.75; }
 
@@ -223,6 +242,7 @@ export default function ConversasPage() {
                   const urgency = getUrgency(minWait)
                   const isPrimeiro = idx === 0
                   const emFin = finalizando === p.id
+                  const emDevolvendo = devolvendoBot === p.id
 
                   return (
                     <div key={p.id} className="cbCard" style={{ background: isPrimeiro ? UBG[urgency] : "rgba(255,255,255,.02)", border: `1.5px solid ${isPrimeiro ? UBD[urgency] : "#1e1c19"}`, borderRadius: 16, padding: 14, marginBottom: 10, animationDelay: `${idx * 0.05}s` }}>
@@ -236,11 +256,14 @@ export default function ConversasPage() {
                       <div style={{ fontSize: 12, fontWeight: 600, color: "#5a564d", marginBottom: 6 }}>{p.telefone}</div>
                       <div style={{ fontSize: 13, fontWeight: 900, color: UC[urgency], marginBottom: 4 }}>{labelEspera(minWait, urgency)}</div>
                       <div style={{ fontSize: 11, fontWeight: 600, color: "#4a4640", marginBottom: 13 }}>Última mensagem às {p.horario}</div>
-                      <div style={{ display: "flex", gap: 8 }}>
-                        <a href={whatsappLink(p.telefone)} target="_blank" rel="noreferrer" className="cbWaLink">
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        <a href={whatsappLink(p.telefone)} target="_blank" rel="noreferrer" className="cbWaLink" style={{ minWidth: 140 }}>
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 2C6.48 2 2 6.48 2 12c0 1.77.46 3.43 1.26 4.89L2 22l5.26-1.24A9.94 9.94 0 0 0 12 22c5.52 0 10-4.48 10-10S17.52 2 12 2z" fill="#fff" opacity=".2"/><path d="M9.5 8.5c-.28 0-.5.04-.7.12C8.3 8.2 7 9.5 7 11c0 2.5 2.5 5 5 6.5 1.5.8 3.5.5 4.5-.5.2-.2.4-.5.5-.8.1-.3 0-.6-.2-.8l-1.8-1.3c-.2-.15-.5-.1-.7.05l-.8.8c-.15.15-.4.2-.6.1C12 14.8 11.2 14 10.6 13c-.1-.2-.05-.45.1-.6l.8-.8c.15-.2.2-.5.05-.7L10.3 9.1c-.2-.22-.5-.6-.8-.6z" fill="white"/></svg>
                           Abrir WhatsApp
                         </a>
+                        <button className="cbBot" disabled={emDevolvendo} onClick={() => devolverParaBot(p)} style={{ opacity: emDevolvendo ? 0.4 : 1 }}>
+                          {emDevolvendo ? "…" : "🤖 Devolver para o robô"}
+                        </button>
                         <button className="cbFin" disabled={emFin} onClick={() => setConfirmando(p)} style={{ opacity: emFin ? 0.4 : 1 }}>
                           {emFin ? "…" : "Finalizar"}
                         </button>

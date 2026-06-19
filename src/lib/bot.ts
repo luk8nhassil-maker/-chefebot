@@ -1,4 +1,4 @@
-import { MENU as MENU_PADRAO, getBorderPrice, getBorderByIndex, getMacarronadaPrice } from "./menu";
+import { MENU as MENU_PADRAO, getBorderPrice, getBorderByIndex } from "./menu";
 
 let MENU = MENU_PADRAO;
 
@@ -37,6 +37,12 @@ export function setConfigDinamica(cfg: { tempoEntregaDelivery?: string; tempoEnt
   if (cfg.tempoEntregaRetirada) CONFIG_BOT.tempoEntregaRetirada = cfg.tempoEntregaRetirada;
 }
 
+let HORARIO_FUNCIONAMENTO = "22h";
+
+export function setHorarioFuncionamento(horario: string) {
+  HORARIO_FUNCIONAMENTO = horario;
+}
+
 function getSizePrice(size: string): number {
   return MENU.sizes.find((s) => s.code === size)?.price ?? 0;
 }
@@ -47,6 +53,10 @@ function formatCurrency(value: number): string {
 
 function sizeList(): string {
   return MENU.sizes.map((s, i) => `  ${i + 1}. ${s.label} (${s.code}) · *${formatCurrency(s.price)}*`).join("\n");
+}
+function sizeListComMiniPizza(): string {
+  const sizes = MENU.sizes.map((s, i) => `  ${i + 2}. ${s.label} (${s.code}) · *${formatCurrency(s.price)}*`).join("\n");
+  return `  1. Mini-Pizza · *R$ 17,00*\n${sizes}`;
 }
 
 function listaFlavors(): string {
@@ -63,7 +73,13 @@ function listaFlavors(): string {
 
 function mensagemAddMore(cart: CartItem[]): string {
   const subtotal = cartSubtotal(cart);
-  return `🛒 *Seu pedido:*\n${resumoCarrinho(cart)}\n  Subtotal: *${formatCurrency(subtotal)}*\n\nQuer adicionar algo a mais? Como bebida, outro lanche, ou podemos fechar esse pedido? 😊`;
+  const temBebida = cart.some(i => i.category === "bebida" || i.category === "suco");
+  if (!temBebida) {
+    const destaques = MENU.bebidas.slice(0, 3);
+    const lista = destaques.map((b, i) => `  ${i + 1}. ${b.name} — ${formatCurrency(b.price)}`).join("\n");
+    return `🛒 *Seu pedido:*\n${resumoCarrinho(cart)}\n  Subtotal: *${formatCurrency(subtotal)}*\n\n🥤 *Quer adicionar uma bebida?*\n${lista}\n  4. Ver mais bebidas\n  5. Fechar pedido\n\nDigite o número da opção 😊`;
+  }
+  return `🛒 *Seu pedido:*\n${resumoCarrinho(cart)}\n  Subtotal: *${formatCurrency(subtotal)}*\n\nOu *fechar pedido*, *mais pizza*, *lanche*, *ver cardápio*... 😊`;
 }
 
 export type BotStep =
@@ -80,9 +96,12 @@ export type BotStep =
   | "lanche_escolha"
   | "lanche_flavor"
   | "lanche_macarronada_size"
+  | "product_family_choice"
   | "bebida_escolha"
   | "suco_escolha"
   | "confirmando_mudanca"
+  | "consulta_preco"
+  | "consulta_fatias"
   | "observacao"
   | "delivery_type"
   | "neighborhood"
@@ -99,6 +118,7 @@ export type BotStep =
   | "pedindo_nome"
   | "confirm"
   | "aguardando_pix"
+  | "suco_leite"
   | "done"
   | "escalado";
 export interface CartItem {
@@ -137,6 +157,7 @@ export interface BotSession {
   neighborhood?: string;
   address?: string;
   deliveryFee: number;
+  bairroConfirmado?: boolean;
   paymentMethod?: string;
   escalado?: boolean;
   historico?: ClienteHistorico;
@@ -151,10 +172,26 @@ export interface BotSession {
   bairroFuzzyCandidato?: string;
   hibridoValorParcial?: Record<string, number>;
   candidatosValorProduto?: { name: string; price: number; categoria: string }[];
+  candidatosFamilia?: { name: string; price: number; hasFlavors: boolean; flavorsKey: string; sizes?: { code: string; price: number }[] }[];
+  familiaLabel?: string;
   candidatosSaborAmbiguo?: string[];
   candidatosItemAmbiguo?: string[];
   itemAmbiguoTipo?: "lanche" | "lanche_flavor" | "bebida";
   stepAposSabor?: BotStep;
+  retornoRapido?: boolean;
+  pendingQtdSuco?: number;
+  stepAnteriorEscalado?: BotStep;
+  pendingConsultaFatias?: { size?: string };
+  candidatosBairro?: { name: string; fee: number }[];
+  pendingSucosLeite?: CartItem[];
+  pendingConsultaPreco?: {
+    label: string;
+    categoria: "pizza_size" | "pizza_mini" | "pizza_ambiguo" | "lanche" | "bebida" | "suco";
+    produto?: string;
+    preco?: number;
+    size?: string;
+    qty?: number;
+  };
 }
 export interface BotResponse {
   messages: string[];
@@ -209,8 +246,10 @@ function permiteMeioAMeio(size?: string): boolean {
 }
 // ===== MOTOR DE RECONHECIMENTO DE SABOR (tolerante a erro humano) =====
 // Apelidos: variações que o fuzzy sozinho não pegaria (números por extenso vs dígito,
-// abreviações e grafias alternativas comuns no WhatsApp).
+// abreviações, grafias alternativas e apelidos culturais comuns no WhatsApp).
+// Cobre pizza, lanches, bebidas e sucos.
 const APELIDOS_SABOR: Record<string, string[]> = {
+  // Pizza — sabores
   "Quatro Queijos": ["4 queijos", "4 queijo", "quatro queijo"],
   "Tres Queijos": ["3 queijos", "3 queijo", "tres queijo"],
   "Frango Catupiry": ["frango", "frango c catupiry", "frango com catupiry", "frango catupiri"],
@@ -218,6 +257,24 @@ const APELIDOS_SABOR: Record<string, string[]> = {
   "Romeu e Julieta": ["romeu", "romeu julieta"],
   "Calabresa": ["calabreza", "calabre"],
   "Portuguesa": ["portugesa", "portugues"],
+  // Lanches — apelidos culturais e grafias variantes
+  "X-Burguer": ["hamburguer", "hamburgues", "hamburguer", "hamburgues", "burguer simples", "x burguer simples"],
+  "X-Bacon": ["xbacon", "x bacon", "burguer bacon"],
+  "X-Tudo": ["xtudo", "x tudo", "burguer tudo", "burguer completo"],
+  "Porcao de Batatas": ["batata frita", "batatas fritas", "porcao batata", "porcao batatas", "batata"],
+  "Macarronada de Carne": ["macarronada", "macarrao", "macarrao de carne", "macarrona", "massa"],
+  // Bebidas — marca/apelido popular → produto mais comum no cardápio
+  "Refrigerante Lata": ["coca", "coca cola", "cocacola", "coca-cola", "pepsi cola", "soda"],
+  "Refrigerante 2L": ["refri 2 litros", "refrigerante 2 litros", "coca 2 litros", "coca 2l"],
+  "Refrigerante 1,5L": ["refri 1.5", "refri 1,5", "coca 1.5", "coca 1,5", "refrigerante 1.5"],
+  "Refrigerante 1L": ["refri 1 litro", "refrigerante 1 litro", "coca 1 litro", "coca 1l"],
+  "Pepsi Lata": ["pepsi"],
+  "Guarana Lata": ["guarana lata", "guarana latinha"],
+  "Guarana 2L": ["guarana 2 litros", "guarana 2l"],
+  "Guarana 1L": ["guarana 1 litro", "guarana 1l"],
+  "Cerveja Long Neck": ["cerveja", "long neck", "longneck", "birra"],
+  "Agua sem Gas": ["agua", "aguinha", "agua mineral"],
+  "Agua com Gas": ["agua gasosa", "agua c gas", "agua com gas"],
 };
 function levenshtein(a: string, b: string): number {
   const m = a.length, len = b.length;
@@ -343,6 +400,16 @@ function detectaDoisSabores(n: string, allFlavors: string[]): [string, string] |
     if (achados.length === 2) break;
   }
   if (achados.length === 2) return [achados[0], achados[1]];
+  // Fallback: sem separador explícito, tenta splits por palavra
+  // Ex: "calabresa peruana" → [Calabresa, Peruana]
+  const palavrasN = n.split(/\s+/);
+  for (let i = 1; i < palavrasN.length; i++) {
+    const p1 = palavrasN.slice(0, i).join(" ");
+    const p2 = palavrasN.slice(i).join(" ");
+    const s1 = resolveUmSabor(p1, allFlavors);
+    const s2 = resolveUmSabor(p2, allFlavors);
+    if (s1 && s2 && s1 !== s2) return [s1, s2];
+  }
   return null;
 }
 // Detecta se a mensagem menciona uma categoria de produto + um valor numérico (ex: "hamburguer de 18", "lanche de 20").
@@ -407,6 +474,56 @@ function detectaIntencaoCardapio(text: string): boolean {
     (n.includes("ver") && (n.includes("cardapio") || n.includes("opcoes")));
 }
 
+export function detectaPerguntaEntregaFuncionamento(text: string): boolean {
+  const n = normalizar(text);
+
+  // Padrões explícitos de perguntas sobre entrega/funcionamento
+  const padroes = [
+    /fazendo entrega/,
+    /faz(em)? entrega/,
+    /ta(o)? entregando/,
+    /estao entregando/,
+    /voces entregando/,
+    /entregando ainda/,
+    /ainda entregando/,
+    /fazem delivery/,
+    /faz delivery/,
+    /tem delivery/,
+    /ainda da pra pedir/,
+    /da pra pedir/,
+    /ainda da tempo/,
+    /da tempo de pedir/,
+    /ainda estao funcionando/,
+    /estao funcionando/,
+    /voces funcionando/,
+    /ainda aberto/,
+    /estao aberto/,
+    /ta aberto/,
+    /ate que horas/,
+    /horario de (entrega|funcionamento|atendimento)/,
+    /qual (o )?horario/,
+    /que horas (fecha|termina|encerra|entrega)/,
+  ];
+  const temPadrao = padroes.some(r => r.test(n));
+
+  // Palavras-chave simples como fallback
+  const palavrasChave = ["entregando", "delivery", "funcionando", "funcionamento", "horario"];
+  const temPalavraChave = palavrasChave.some(p => n.includes(p));
+
+  if (!temPadrao && !temPalavraChave) return false;
+
+  // Se a mensagem carrega pedido completo (produto + pagamento/bairro), prioriza o pedido
+  const temProduto = n.includes("pizza") || n.includes("lanche") || n.includes("burguer") ||
+    n.includes("bacon") || n.includes("calabresa") || n.includes("frango") ||
+    n.includes("bebida") || n.includes("suco") || n.includes("refrigerante") ||
+    n.includes("calzone") || /\bx-/.test(n);
+  const temPagamentoOuBairro = n.includes("pix") || n.includes("dinheiro") || n.includes("cartao") ||
+    n.includes("bairro");
+  if (temProduto && temPagamentoOuBairro) return false;
+
+  return true;
+}
+
 // Palavras do domínio do negócio: se aparecerem, o texto quase certamente NÃO é um nome próprio sozinho.
 const PALAVRAS_DOMINIO = [
   "pizza", "cardapio", "menu", "sabor", "bebida", "lanche", "suco", "borda",
@@ -435,13 +552,178 @@ function pareceNomeHumano(text: string): boolean {
   return true;
 }
 
+type ConsultaPreco = {
+  label: string;
+  categoria: "pizza_size" | "pizza_mini" | "pizza_ambiguo" | "lanche" | "bebida" | "suco";
+  produto?: string;
+  preco?: number;
+  size?: string;
+  qty?: number;
+};
+
+function detectaConsultaPreco(text: string): ConsultaPreco | null {
+  const n = normalizar(text).replace(/-/g, " ");
+  const temConsulta =
+    n.includes("quanto") || n.includes("valor") || n.includes("preco") ||
+    n.includes("custa") || /\bcaro\b/.test(n) || n.includes("barato");
+  if (!temConsulta) return null;
+
+  // Extrai qty se houver ("quanto tá 2 x-burguer")
+  const qtyMatch = n.match(/\b(\d{1,2})\s*x?\s+/);
+  const qty = qtyMatch ? parseInt(qtyMatch[1]) : 1;
+
+  // Pizza com tamanho específico
+  const sizeMaps: Array<[RegExp, string, string]> = [
+    [/\bpizza\s*(pequena|p\b)|\bpizza\s+p\b|\bp\s+pizza\b/, "P", "Pizza Pequena (P)"],
+    [/\bpizza\s*(media|m\b)|\bpizza\s+m\b|\bm\s+pizza\b/, "M", "Pizza Média (M)"],
+    [/\bpizza\s*(grande|g\b)|\bpizza\s+g\b|\bg\s+pizza\b/, "G", "Pizza Grande (G)"],
+    [/\bpizza\s*(familia|f\b)|\bpizza\s+f\b|\bf\s+pizza\b/, "F", "Pizza Família (F)"],
+  ];
+  for (const [re, size, label] of sizeMaps) {
+    if (re.test(n)) {
+      const preco = MENU.sizes.find(s => s.code === size)?.price ?? 0;
+      return { label, categoria: "pizza_size", size, preco, qty };
+    }
+  }
+
+  // Mini-pizza
+  if (n.includes("mini pizza") || n.includes("mine pizza") || /\bmini\b/.test(n)) {
+    return { label: "Mini-Pizza", categoria: "pizza_mini", preco: 17, qty };
+  }
+
+  // Pizza genérica (ambíguo)
+  if (n.includes("pizza")) {
+    return { label: "pizza", categoria: "pizza_ambiguo" };
+  }
+
+  // Lanches — resolve por alias
+  for (const lanche of MENU.lanches.filter(l => l.name !== "Mini-Pizza")) {
+    const nomesParaBusca = [lanche.name, ...(APELIDOS_SABOR[lanche.name] ?? [])];
+    for (const alias of nomesParaBusca) {
+      if (n.includes(normalizar(alias).replace(/-/g, " "))) {
+        return { label: lanche.name, categoria: "lanche", produto: lanche.name, preco: lanche.price, qty };
+      }
+    }
+  }
+
+  // Bebidas — resolve por alias
+  for (const bebida of MENU.bebidas) {
+    const nomesParaBusca = [bebida.name, ...(APELIDOS_SABOR[bebida.name] ?? [])];
+    for (const alias of nomesParaBusca) {
+      if (n.includes(normalizar(alias).replace(/-/g, " "))) {
+        return { label: bebida.name, categoria: "bebida", produto: bebida.name, preco: bebida.price, qty };
+      }
+    }
+  }
+
+  // Sucos — resolve por nome
+  const nomesS = MENU.sucos.map(s => s.name);
+  const suco = resolveUmSabor(n, nomesS);
+  if (suco) {
+    const item = MENU.sucos.find(s => s.name === suco)!;
+    return { label: suco, categoria: "suco", produto: suco, preco: item.price, qty };
+  }
+
+  return null;
+}
+
+function mensagemConsultaPreco(c: ConsultaPreco): string {
+  if (c.categoria === "pizza_ambiguo") {
+    const lista = [
+      `  • Mini-Pizza — *R$ 17,00*`,
+      ...MENU.sizes.map(s => `  • ${s.label} (${s.code}) — *${formatCurrency(s.price)}*`),
+    ].join("\n");
+    return `Temos vários tamanhos de pizza 😊\n\n${lista}\n\nQual você quer que eu anote?`;
+  }
+  const qtyLabel = c.qty && c.qty > 1 ? `${c.qty}x ` : "";
+  const precoTotal = c.preco && c.qty && c.qty > 1 ? c.preco * c.qty : c.preco;
+  const precoStr = precoTotal ? ` — *${formatCurrency(precoTotal)}*` : "";
+  return `${qtyLabel}${c.label}${precoStr} 🍕\n\nPosso anotar pra você?\n\n  1. Sim, quero pedir\n  2. Ver outro produto`;
+}
+
+function verificaConsultaPreco(text: string, session: BotSession): BotResponse | null {
+  const c = detectaConsultaPreco(text);
+  if (!c) return null;
+  return {
+    messages: [mensagemConsultaPreco(c)],
+    session: resetaTentativas({ ...session, step: "consulta_preco", pendingConsultaPreco: c }),
+  };
+}
+
+const FATIAS_POR_TAMANHO: Record<string, { label: string; fatias: number }> = {
+  P: { label: "Pequena", fatias: 6 },
+  M: { label: "Média", fatias: 8 },
+  G: { label: "Grande", fatias: 10 },
+  F: { label: "Família", fatias: 12 },
+};
+
+function verificaConsultaFatias(text: string, session: BotSession): BotResponse | null {
+  const n = normalizar(text);
+  const temFatia = n.includes("fatia") || n.includes("quantas fatias") || n.includes("vem quantas") || n.includes("serve quantas") || n.includes("quantas porcoes") || n.includes("quantas porcao");
+  const temGeral = n.includes("cada tamanho") || n.includes("cada pizza") || n.includes("todos") || n.includes("todos os tamanhos") || (temFatia && !n.includes("pizza p") && !n.includes("pizza m") && !n.includes("pizza g") && !n.includes("pizza f") && !n.includes("pequena") && !n.includes("media") && !n.includes("grande") && !n.includes("famil") && !/\b[pmgf]\b/.test(n));
+  if (!temFatia) return null;
+
+  // Tenta detectar tamanho específico
+  let size: string | null = null;
+  if (n.includes("pequena") || n.includes("pizza p") || /\bp\b/.test(n)) size = "P";
+  else if (n.includes("media") || n.includes("pizza m") || /\bm\b/.test(n)) size = "M";
+  else if (n.includes("grande") || n.includes("pizza g") || /\bg\b/.test(n)) size = "G";
+  else if (n.includes("famil") || n.includes("pizza f") || /\bf\b/.test(n)) size = "F";
+
+  let resposta: string;
+  if (size && !temGeral) {
+    const { label, fatias } = FATIAS_POR_TAMANHO[size];
+    resposta = `Pizza ${label} (${size}) vem com *${fatias} fatias* 🍕\n\nQuer que eu anote uma pra você?`;
+  } else {
+    const lista = Object.entries(FATIAS_POR_TAMANHO).map(([code, { label, fatias }]) => `  ${code} ${label} — *${fatias} fatias*`).join("\n");
+    resposta = `🍕 Nossas pizzas vêm assim:\n\n${lista}\n\nQuer que eu anote uma pra você?`;
+  }
+
+  // No step size, reforça que pode escolher tamanho; nos demais, vai para consulta_fatias
+  if (session.step === "size") {
+    const reforco = `\n\n${sizeListComMiniPizza()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`;
+    return { messages: [resposta + reforco], session: resetaTentativas(session) };
+  }
+  return { messages: [resposta], session: resetaTentativas({ ...session, step: "consulta_fatias", pendingConsultaFatias: { size: size ?? undefined } }) };
+}
+
+function resolveFatiasFollowUp(text: string, session: BotSession): BotResponse | null {
+  const n = normalizar(text).replace(/-/g, " ");
+  // Detecta tamanho na mensagem de follow-up (sem precisar de "fatias")
+  let size: string | null = null;
+  if (n.includes("pequena") || n.includes("pizza p") || /\bp\b/.test(n)) size = "P";
+  else if (n.includes("media") || n.includes("pizza m") || /\bm\b/.test(n)) size = "M";
+  else if (n.includes("grande") || n.includes("pizza g") || /\bg\b/.test(n)) size = "G";
+  else if (n.includes("famil") || n.includes("pizza f") || /\bf\b/.test(n)) size = "F";
+  if (!size) return null;
+  const { label, fatias } = FATIAS_POR_TAMANHO[size];
+  const resposta = `Pizza ${label} (${size}) vem com *${fatias} fatias* 🍕\n\nQuer que eu anote uma pra você?`;
+  return { messages: [resposta], session: resetaTentativas({ ...session, step: "consulta_fatias", pendingConsultaFatias: { size } }) };
+}
+
+export function detectaIntencaoSuco(text: string): boolean {
+  const n = normalizar(text);
+  return (
+    n.includes("suco") ||
+    n.includes("sucos") ||
+    n.includes("vitamina") ||
+    n.includes("caja") ||
+    n.includes("caju") ||
+    n.includes("acerola") ||
+    n.includes("goiaba") ||
+    n.includes("bacuri") ||
+    n.includes("cupuacu") ||
+    n.includes("maracuja") ||
+    (n.includes("laranja") && !n.includes("refri") && !n.includes("guarana"))
+  );
+}
 function detectaIntencaoDireta(text: string): { category: string; label: string } | null {
   const n = normalizar(text);
   const todosSaboresPizza = [...MENU.saltyFlavors, ...MENU.sweetFlavors];
   if (todosSaboresPizza.some(f => n.includes(normalizar(f)))) return { category: "pizza", label: "pizza" };
   if (n.includes("pizza") && !n.includes("mini")) return { category: "pizza", label: "pizza" };
   if (n.includes("calzone")) return { category: "lanche", label: "calzone" };
-  if (n.includes("mini-pizza") || n.includes("mini pizza")) return { category: "lanche", label: "mini-pizza" };
+  if (n.includes("mini-pizza") || n.includes("mini pizza")) return { category: "pizza", label: "mini pizza" };
   if (n.includes("macarronada")) return { category: "lanche", label: "macarronada" };
   if (n.includes("x-burguer") || n.includes("x burguer") || n.includes("hamburguer")) return { category: "lanche", label: "hamburguer" };
   if (n.includes("x-bacon")) return { category: "lanche", label: "x-bacon" };
@@ -559,7 +841,7 @@ function montarPizzaDoPedido(text: string, session: BotSession, prefixo?: string
   if (!parcial.size) {
     return {
       messages: [
-        `${pre}Boa! Só me diz o tamanho dessa pizza 😋\n\n${sizeList()}\n\n_(Digite *voltar* para corrigir)_`,
+        `${pre}Boa! Só me diz o tamanho dessa pizza 😋\n\n${sizeListComMiniPizza()}\n\n_(Digite *voltar* para corrigir)_`,
       ],
       session: resetaTentativas({ ...session, step: "size", currentCategory: "pizza", currentFlavor: parcial.flavor }),
     };
@@ -570,7 +852,7 @@ function montarPizzaDoPedido(text: string, session: BotSession, prefixo?: string
     return {
       messages: [
         `${pre}Pizza *${parcial.size}* anotada! 👌`,
-        `Agora me conta — qual o sabor? 😋\n\n${listaFlavors()}\n\n_(Digite *voltar* para corrigir)_`,
+        `Agora me conta — qual o sabor? 😋 Você pode escolher até *2 sabores*!\n\n${listaFlavors()}\n\n_(Digite *voltar* para corrigir)_`,
       ],
       session: resetaTentativas({ ...session, step: "flavor", currentCategory: "pizza", currentSize: parcial.size }),
     };
@@ -602,9 +884,106 @@ function montarPizzaDoPedido(text: string, session: BotSession, prefixo?: string
     session: resetaTentativas({ ...session, step: "add_more", cart: newCart, currentCategory: "pizza", currentSize: undefined, currentFlavor: undefined }),
   };
 }
+// Mapeamento de famílias de produto: palavras-chave → filtro sobre nomes do cardápio.
+// Adicionar novas famílias aqui quando o cardápio crescer.
+const FAMILIAS_PRODUTO: Array<{
+  palavras: string[];
+  label: string;
+  titulo: string;
+  filtro: (nomeNormalizado: string) => boolean;
+}> = [
+  {
+    palavras: ["macarronada", "macarrao", "macarrona", "macaronada", "macarrão", "massa"],
+    label: "macarronada",
+    titulo: "Nossas macarronadas",
+    filtro: (nome) => nome.includes("macarronada"),
+  },
+];
+
+export function detectarFamiliaProduto(text: string): { label: string; itens: typeof MENU.lanches } | null {
+  const n = normalizar(text);
+  if (n === "lanche" || n === "2" || n === "lanches") return null;
+
+  for (const familia of FAMILIAS_PRODUTO) {
+    if (familia.palavras.some(p => n.includes(normalizar(p)))) {
+      const itens = MENU.lanches.filter(l => familia.filtro(normalizar(l.name)) && !isEsgotado(l.name));
+      if (itens.length > 0) return { label: familia.label, itens };
+    }
+  }
+  return null;
+}
+
+function mensagemFamilia(label: string, itens: typeof MENU.lanches): string {
+  const fam = FAMILIAS_PRODUTO.find(f => f.label === label);
+  const titulo = fam?.titulo ?? `Temos essas opções de ${label}`;
+  // Lista no estilo "sabor" (igual à pizza): só o nome, sem preço — o preço aparece
+  // depois, na escolha de tamanho.
+  const listaTxt = itens.map((item, i) => `  ${i + 1}. *${item.name}*`).join("\n");
+  return `${titulo}: 😋\n\n${listaTxt}\n\nDigite o número ou o sabor que deseja:`;
+}
+
+// Monta a mensagem de escolha de tamanho para um produto que tem tamanhos
+// próprios (ex: cada macarronada). Usa os preços do próprio item do cardápio.
+function mensagemTamanhoProduto(item: typeof MENU.lanches[0]): string {
+  const labelTam: Record<string, string> = { P: "Pequena", M: "Média", G: "Grande", F: "Família" };
+  const linhas = (item.sizes ?? [])
+    .map((s, i) => `  ${i + 1}. ${labelTam[s.code] ?? s.code} (${s.code}) · *${formatCurrency(s.price)}*`)
+    .join("\n");
+  return `Ótima escolha! 😋 Qual tamanho da *${item.name}*?\n\n${linhas}\n\n_(Bacon ou ovos: acréscimo de R$ 10,00)_`;
+}
+
+// Helper ÚNICO para responder com a lista filtrada de uma família de produto.
+// Usado por TODOS os pontos de entrada (name, category, add_more) para garantir
+// que a família nunca caia em handleCategory("lanche").
+function responderFamiliaProduto(session: BotSession, familia: { label: string; itens: typeof MENU.lanches }): BotResponse {
+  return {
+    messages: [mensagemFamilia(familia.label, familia.itens)],
+    session: resetaTentativas({
+      ...session,
+      step: "product_family_choice",
+      currentCategory: "lanche",
+      candidatosFamilia: familia.itens,
+      familiaLabel: familia.label,
+    }),
+  };
+}
+
+export function detectarLancheEspecifico(text: string, session: BotSession): BotResponse | null {
+  // Família de produto (ex: todas as macarronadas) → mostra lista filtrada
+  const familia = detectarFamiliaProduto(text);
+  if (familia) return responderFamiliaProduto(session, familia);
+
+  // Produto específico não-família (ex: X-Burguer, Calzone)
+  const n = normalizar(text);
+  if (n === "lanche" || n === "2" || n === "lanches") return null;
+
+  const nomesLanches = MENU.lanches.map(l => l.name);
+  const lancheNome = resolveUmSabor(n, nomesLanches);
+  if (!lancheNome) return null;
+
+  const lanche = MENU.lanches.find(l => l.name === lancheNome);
+  if (!lanche) return null;
+  if (isEsgotado(lanche.name)) return respostaEsgotado(lanche.name, nomesLanches, session);
+
+  if (lanche.hasFlavors) {
+    const flavors = MENU[lanche.flavorsKey as keyof typeof MENU] as string[];
+    const lista = flavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n");
+    return {
+      messages: [`*${lanche.name}* selecionado! 😋 Qual sabor?\n\n${lista}`],
+      session: resetaTentativas({ ...session, step: "lanche_flavor", currentCategory: "lanche", currentLanche: lanche.name }),
+    };
+  }
+  const newItem: CartItem = { category: "lanche", name: lanche.name, price: lanche.price };
+  const newCart = [...session.cart, newItem];
+  return {
+    messages: [mensagemAddMore(newCart)],
+    session: resetaTentativas({ ...session, step: "add_more", cart: newCart, currentLanche: undefined }),
+  };
+}
+
 function nomeCategoriaAtual(step: BotStep, currentCategory?: string): string {
   if (currentCategory === "pizza" || step === "size" || step === "flavor" || step === "segundo_sabor" || step === "border" || step === "border_escolha") return "pizza";
-  if (currentCategory === "lanche" || step === "lanche_escolha" || step === "lanche_flavor" || step === "lanche_macarronada_size") return "lanche";
+  if (currentCategory === "lanche" || step === "lanche_escolha" || step === "lanche_flavor" || step === "lanche_macarronada_size" || step === "product_family_choice") return "lanche";
   if (currentCategory === "bebida" || step === "bebida_escolha") return "bebida";
   if (currentCategory === "suco" || step === "suco_escolha") return "suco";
   return "item atual";
@@ -626,7 +1005,7 @@ function listaSucos(): string {
   return items.map((s, i) => `  ${i + 1}. ${s.name} · *${formatCurrency(s.price)}*`).join("\n");
 }
 function listaLanches(): string {
-  const items = MENU.lanches.filter(l => !isEsgotado(l.name));
+  const items = MENU.lanches.filter(l => !isEsgotado(l.name) && l.name !== "Mini-Pizza");
   return items.map((l, i) => {
     if (l.sizes && l.sizes.length > 0) {
       const precos = l.sizes.map((s: {code: string, price: number}) => `${s.code} *${formatCurrency(s.price)}*`).join(" | ");
@@ -745,6 +1124,58 @@ function detectaBairroFuzzy(n: string): { name: string; fee: number } | null {
   return { name: melhor.nb.name, fee: melhor.nb.fee };
 }
 
+// Match por prefixo (primeiras 3 letras) — cobre "Ville" → "Vila", "Can" → "Canaa", etc.
+// Retorna lista de candidatos (pode ser vários).
+function detectaBairroPrefix(n: string): { name: string; fee: number }[] {
+  const palavras = n.split(/\s+/).filter(p => p.length >= 3);
+  if (palavras.length === 0) return [];
+  const resultado: { name: string; fee: number }[] = [];
+  for (const nb of MENU.neighborhoods) {
+    const partesNome = normalizar(nb.name).split(/\s+/);
+    const match = palavras.some(p =>
+      partesNome.some(parte => parte.startsWith(p.slice(0, 3)) || p.startsWith(parte.slice(0, 3)))
+    );
+    if (match && !resultado.find(r => r.name === nb.name)) resultado.push(nb);
+  }
+  return resultado;
+}
+
+// Bairro da ENTREGA ATUAL está confirmado de forma segura?
+// Exige: flag de confirmação desta entrega + bairro cadastrado no menu + taxa batendo com a do bairro.
+// Nunca aceita bairro "stale" da sessão nem taxa inventada (correção do bug de bairro fantasma).
+function bairroConfirmadoValido(session: BotSession): boolean {
+  if (!session.bairroConfirmado || !session.neighborhood) return false;
+  const nb = MENU.neighborhoods.find(b => normalizar(b.name) === normalizar(session.neighborhood!));
+  return !!nb && session.deliveryFee === nb.fee;
+}
+
+// Após o bairro estar confirmado: se o endereço já veio antes, segue pro pagamento;
+// senão pede o endereço. Centraliza a transição para nunca pular a confirmação de bairro.
+function proximoAposBairro(session: BotSession, nb: { name: string; fee: number }): BotResponse {
+  const base: BotSession = {
+    ...session,
+    deliveryType: "delivery",
+    neighborhood: nb.name,
+    deliveryFee: nb.fee,
+    bairroConfirmado: true,
+    candidatosBairro: undefined,
+    bairroFuzzyCandidato: undefined,
+  };
+  if (base.address) {
+    // Endereço já veio antes do bairro — se já sabemos o pagamento, retoma o fechamento.
+    const pay = base.pagamentoPendente ?? base.paymentMethod;
+    if (pay) return aplicaPagamento(pay, base);
+    return {
+      messages: [`*${nb.name}*, taxa de entrega: *${formatCurrency(nb.fee)}* 🛵\n\n📍 ${base.address}\n\nQual a forma de pagamento? 💸`],
+      session: resetaTentativas({ ...base, step: "payment" }),
+    };
+  }
+  return {
+    messages: [`*${nb.name}*, taxa de entrega: *${formatCurrency(nb.fee)}* 🛵\n\nMe passa o endereço completo:\n_(Rua, número e complemento)_\n\n_(Digite *voltar* para corrigir a etapa anterior)_`],
+    session: resetaTentativas({ ...base, step: "address" }),
+  };
+}
+
 // Detector central de dados de entrega numa única mensagem.
 // Conservador: só retorna o que detectou com confiança; o resto fica null (fluxo normal pergunta).
 function detectaDadosEntrega(text: string): { tipo: "delivery" | "pickup" | null; bairro: { name: string; fee: number } | null; pagamento: string | null } {
@@ -759,6 +1190,199 @@ function detectaDadosEntrega(text: string): { tipo: "delivery" | "pickup" | null
   return { tipo, bairro, pagamento };
 }
 
+// Detecta tipo de entrega incluindo consumo no local
+function detectaTipoEntregaCompleto(n: string): "delivery" | "pickup" | "dine_in" | null {
+  if (/\blocal\b/.test(n) || n.includes("consumo no local") || n.includes("comer ai") ||
+      n.includes("aqui mesmo") || n.includes("na mesa") || n.includes("comer aqui")) return "dine_in";
+  if (n.includes("entrega") || n.includes("delivery") || n.includes("entregar") ||
+      n.includes("minha casa") || n.includes("em casa") || n.includes("manda ai")) return "delivery";
+  if (n.includes("retirar") || n.includes("retirada") || n.includes("buscar") ||
+      n.includes("pegar") || n.includes("retiro") || n.includes("na loja") || n.includes("busco ai")) return "pickup";
+  return null;
+}
+
+// Extrai rua/endereço de forma simples e heurística
+function extrairEndereco(text: string): string | null {
+  const m = text.match(/\b(?:rua|avenida|av\.|travessa|alameda|estrada|quadra)\s+[\wÀ-ú\s,\d]+/i);
+  return m ? m[0].trim().slice(0, 100) : null;
+}
+
+// Navega para próximo step necessário após produto(s) já estar no cart, aproveitando tudo que veio na sessão
+function continuarAposItemCompleto(newCart: CartItem[], session: BotSession, msg: string): BotResponse {
+  const s: BotSession = { ...session, cart: newCart };
+  if (!s.deliveryType) {
+    return {
+      messages: [`${msg}\n\nComo você vai querer receber? 😊\n\n  1. Entrega 🛵\n  2. Retirada na loja 🏪\n  3. Consumo no local 🍽️`],
+      session: resetaTentativas({ ...s, step: "delivery_type" }),
+    };
+  }
+  if (s.deliveryType === "delivery" && !bairroConfirmadoValido(s)) {
+    return {
+      messages: [`${msg}\n\nQual seu bairro para eu calcular a entrega? 😊`],
+      session: resetaTentativas({ ...s, step: "neighborhood", neighborhood: undefined, deliveryFee: 0, bairroConfirmado: false }),
+    };
+  }
+  if (s.deliveryType === "delivery" && !s.address) {
+    return {
+      messages: [`${msg}\n\nMe passa o endereço completo para entrega:\n_(Rua, número e complemento)_`],
+      session: resetaTentativas({ ...s, step: "address" }),
+    };
+  }
+  if (!s.paymentMethod) {
+    return {
+      messages: [`${msg}\n\nQual vai ser a forma de pagamento? 💸\n\n  1. Pix 💸\n  2. Dinheiro 💵\n  3. Cartão 💳`],
+      session: resetaTentativas({ ...s, step: "payment" }),
+    };
+  }
+  return aplicaPagamento(s.paymentMethod, s);
+}
+
+// Pedido completo inteligente: identifica produto + entrega + pagamento de uma única mensagem.
+// Só ativa quando há pelo menos um campo de entrega/pagamento junto ao produto.
+// Retorna null se a mensagem não contiver info suficiente (deixa os steps normais tratarem).
+function processarPedidoCompleto(text: string, session: BotSession): BotResponse | null {
+  const n = normalizar(text).replace(/-/g, " ");
+
+  // Detecta entrega/bairro/pagamento
+  const deliveryType = detectaTipoEntregaCompleto(n);
+  // Só aceita bairro por MATCH EXATO aqui (seguro). Prefixo/fuzzy é parcial e
+  // precisa de confirmação — fica para o step de bairro perguntar/confirmar.
+  const bairroDetectado = detectaBairro(n);
+  const pagamento = detectaPagamento(n);
+
+  // Só ativa quando a mensagem carrega info de entrega/pagamento além do produto
+  const temInfoExtra = !!(deliveryType || bairroDetectado || pagamento);
+  if (!temInfoExtra) return null;
+
+  // Palavras-gatilho que não são produtos (intenção de compra)
+  const nSemGatilho = n
+    .replace(/\b(quero|manda|me ve|vou querer|pode ser|me manda|manda ai|pode|traz|traga|gostaria de|me passa)\b/g, "")
+    .trim();
+
+  // Detecta produto
+  const isMiniPizza = nSemGatilho.includes("mini pizza");
+  const isPizza = !isMiniPizza && (nSemGatilho.includes("pizza") || !!detectaPedidoParcial(text));
+
+  // Lanche por nome (exceto Mini-Pizza).
+  // Compara sem hífen/espaço para aceitar "x-burguer", "x burguer" e "xburguer" como equivalentes.
+  const lanche = !isMiniPizza && !isPizza
+    ? MENU.lanches.find(l => {
+        if (l.name === "Mini-Pizza" || isEsgotado(l.name)) return false;
+        const nNome = normalizar(l.name).replace(/-/g, " ");
+        const nNomeSemEsp = nNome.replace(/\s+/g, "");
+        const nSemEsp = nSemGatilho.replace(/\s+/g, "");
+        return nSemGatilho.includes(nNome) || nSemEsp.includes(nNomeSemEsp);
+      })
+    : null;
+
+  // Sucos por nome (usar parsearMultiSuco ou match individual)
+  const multiSuco = !lanche && !isPizza && !isMiniPizza ? parsearMultiSuco(text) : null;
+  const sucoSingle = !multiSuco && !lanche && !isPizza && !isMiniPizza
+    ? MENU.sucos.find(s => !isEsgotado(s.name) && nSemGatilho.includes(normalizar(s.name).split(" ")[0]))
+    : null;
+  const sucosItems: CartItem[] = multiSuco ?? (sucoSingle ? [{ category: "suco" as const, name: sucoSingle.name, price: sucoSingle.price }] : []);
+
+  // Bebida por nome
+  const bebida = !lanche && !isPizza && !isMiniPizza && sucosItems.length === 0
+    ? MENU.bebidas.find(b => !isEsgotado(b.name) && nSemGatilho.includes(normalizar(b.name).split(" ")[0]))
+    : null;
+
+  const temProduto = isPizza || isMiniPizza || !!lanche || sucosItems.length > 0 || !!bebida;
+  if (!temProduto) return null;
+
+  // Monta base da sessão com todos os campos já conhecidos
+  const tipoEntrega = deliveryType ?? (bairroDetectado ? "delivery" : null);
+  let sessionBase: BotSession = { ...session };
+  if (tipoEntrega === "delivery") {
+    // NUNCA reaproveita bairro/taxa antigos da sessão. Só aplica se veio bairro EXATO
+    // nesta mensagem; caso contrário zera para o fluxo perguntar/confirmar o bairro.
+    sessionBase = {
+      ...sessionBase,
+      deliveryType: "delivery",
+      deliveryFee: bairroDetectado ? bairroDetectado.fee : 0,
+      neighborhood: bairroDetectado ? bairroDetectado.name : undefined,
+      bairroConfirmado: bairroDetectado ? true : false,
+    };
+  } else if (tipoEntrega === "pickup" || tipoEntrega === "dine_in") {
+    sessionBase = { ...sessionBase, deliveryType: tipoEntrega, deliveryFee: 0, neighborhood: undefined, bairroConfirmado: false };
+  }
+  if (pagamento) sessionBase = { ...sessionBase, paymentMethod: pagamento };
+  const enderecoDetectado = extrairEndereco(text);
+  if (enderecoDetectado) sessionBase = { ...sessionBase, address: enderecoDetectado };
+
+  // ---- Mini-pizza ----
+  if (isMiniPizza) {
+    return {
+      messages: [`Perfeito! 😄 Mini-Pizza anotada! 🍕 Qual sabor?\n\n${MENU.miniPizzaFlavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n")}`],
+      session: resetaTentativas({ ...sessionBase, step: "lanche_flavor", currentCategory: "pizza", currentLanche: "Mini-Pizza" }),
+    };
+  }
+
+  // ---- Pizza ----
+  if (isPizza) {
+    const parcial = detectaPedidoParcial(text);
+    if (!parcial || (!parcial.size && !parcial.flavor)) {
+      return {
+        messages: [`Perfeito! 🍕 Qual o tamanho da pizza?\n\n${sizeListComMiniPizza()}`],
+        session: resetaTentativas({ ...sessionBase, step: "size", currentCategory: "pizza" }),
+      };
+    }
+    if (parcial.size && parcial.flavor) {
+      if (!parcial.border) {
+        return {
+          messages: [`Pizza *${parcial.size}* de *${parcial.flavor}*! 😋\n\nVai querer borda recheada? 😋`],
+          session: resetaTentativas({ ...sessionBase, step: "border_escolha", currentCategory: "pizza", currentSize: parcial.size, currentFlavor: parcial.flavor }),
+        };
+      }
+      const basePrice = getSizePrice(parcial.size);
+      const borderPrice = parcial.border !== "Sem borda" ? getBorderPrice(parcial.size) : 0;
+      const item: CartItem = { category: "pizza", name: "Pizza", size: parcial.size, flavor: parcial.flavor, border: parcial.border, price: basePrice + borderPrice };
+      const bordaTxt = parcial.border !== "Sem borda" ? ` com borda de *${parcial.border}*` : "";
+      return continuarAposItemCompleto([...sessionBase.cart, item], sessionBase, `Pizza *${parcial.size}* de *${parcial.flavor}*${bordaTxt} anotada! 🤤`);
+    }
+    if (parcial.size) {
+      return {
+        messages: [`Pizza *${parcial.size}* anotada! 👌\n\nQual o sabor? 😋 Pode escolher até 2 sabores!\n\n${listaFlavors()}`],
+        session: resetaTentativas({ ...sessionBase, step: "flavor", currentCategory: "pizza", currentSize: parcial.size }),
+      };
+    }
+    return {
+      messages: [`*${parcial.flavor}* boa pedida! 😋 Qual o tamanho?\n\n${sizeListComMiniPizza()}`],
+      session: resetaTentativas({ ...sessionBase, step: "size", currentCategory: "pizza", currentFlavor: parcial.flavor }),
+    };
+  }
+
+  // ---- Lanche ----
+  if (lanche) {
+    const item: CartItem = { category: "lanche", name: lanche.name, price: lanche.price };
+    return continuarAposItemCompleto([...sessionBase.cart, item], sessionBase, `*${lanche.name}* anotado! 😋`);
+  }
+
+  // ---- Sucos ----
+  if (sucosItems.length > 0) {
+    const leiteDetectado = detectaLeiteTexto(text);
+    const todosBanana = sucosItems.every(i => normalizar(i.name).includes("banana"));
+    const leite = leiteDetectado ?? (todosBanana ? "com" : null);
+    const labels = [...new Map(sucosItems.map(i => [i.name, i])).keys()].map(nome => `*${nome}*`).join(" e ");
+    if (leite) {
+      const itensComLeite = aplicarLeite(sucosItems, leite);
+      return continuarAposItemCompleto([...sessionBase.cart, ...itensComLeite], sessionBase, `${labels} anotado${sucosItems.length > 1 ? "s" : ""}! 😋`);
+    }
+    return {
+      messages: [`${labels} anotado${sucosItems.length > 1 ? "s" : ""}! 😋\n\nQuer com leite ou sem leite? 🥤\n\n  1. Com leite\n  2. Sem leite`],
+      session: resetaTentativas({ ...sessionBase, step: "suco_leite", pendingSucosLeite: sucosItems }),
+    };
+  }
+
+  // ---- Bebida ----
+  if (bebida) {
+    const item: CartItem = { category: "bebida", name: bebida.name, price: bebida.price };
+    return continuarAposItemCompleto([...sessionBase.cart, item], sessionBase, `*${bebida.name}* anotada! 😋`);
+  }
+
+  return null;
+}
+
 // Aplica uma forma de pagamento e decide o próximo passo (troco se dinheiro, senão confirmação).
 // Usado tanto no step payment quanto na captura inteligente. Limpa pagamentoPendente.
 function aplicaPagamento(payment: string, session: BotSession): BotResponse {
@@ -770,6 +1394,21 @@ function aplicaPagamento(payment: string, session: BotSession): BotResponse {
   return continuaParaTrocoOuConfirm(updatedSession);
 }
 function continuaParaTrocoOuConfirm(session: BotSession): BotResponse {
+  // BLOQUEIO DE SEGURANÇA: entrega nunca fecha sem bairro confirmado e taxa válida.
+  // Rede de proteção final — preserva o pagamento já escolhido p/ retomar após o bairro.
+  if (session.deliveryType === "delivery" && !bairroConfirmadoValido(session)) {
+    return {
+      messages: [`Antes de fechar, preciso confirmar o endereço de entrega 😊\n\nQual o bairro da entrega?`],
+      session: resetaTentativas({
+        ...session,
+        step: "neighborhood",
+        neighborhood: undefined,
+        deliveryFee: 0,
+        bairroConfirmado: false,
+        pagamentoPendente: session.paymentMethod ?? session.pagamentoPendente,
+      }),
+    };
+  }
   if (session.paymentMethod === "Dinheiro") {
     return { messages: [`Combinado! 💵 Vai precisar de troco?\n\nSe sim, me diz o valor que vai pagar. Ex: *100*\nSe não, é só digitar *não*`], session: resetaTentativas({ ...session, step: "troco" }) };
   }
@@ -787,7 +1426,7 @@ function eVoltar(n: string): boolean {
 function handleCategory(category: string, session: BotSession): BotResponse {
   if (category === "pizza") {
     return {
-      messages: [`Qual o tamanho da pizza? 🍕\n\n${sizeList()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`],
+      messages: [`Qual o tamanho da pizza? 🍕\n\n${sizeListComMiniPizza()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`],
       session: { ...session, step: "size", currentCategory: "pizza", currentSize: undefined, currentFlavor: undefined, currentLanche: undefined },
     };
   }
@@ -813,12 +1452,15 @@ function handleCategory(category: string, session: BotSession): BotResponse {
 }
 function tentaMudanca(text: string, session: BotSession): BotResponse | null {
   const intencao = detectaIntencaoDireta(text);
-  if (!intencao) return null;
+  const querCardapio = !intencao && detectaIntencaoCardapio(text);
+  if (!intencao && !querCardapio) return null;
   const categoriaAtual = nomeCategoriaAtual(session.step, session.currentCategory);
-  if (intencao.category === session.currentCategory) return null;
+  if (intencao && intencao.category === session.currentCategory) return null;
+  const novaLabel = intencao ? intencao.label : "cardápio";
+  const pendingCategory = intencao ? intencao.category : "category";
   return {
-    messages: [`Ei, você ainda quer o *${categoriaAtual}*? Ou prefere ir direto pro *${intencao.label}*?\n\n  1. Manter o ${categoriaAtual}\n  2. Ir pro ${intencao.label}`],
-    session: { ...session, step: "confirmando_mudanca", pendingCategory: intencao.category },
+    messages: [`Ei, você ainda quer o *${categoriaAtual}*? Ou prefere ir pro *${novaLabel}*?\n\n  1. Manter o ${categoriaAtual}\n  2. Ir pro ${novaLabel}`],
+    session: { ...session, step: "confirmando_mudanca", pendingCategory },
   };
 }
 function respostaInvalida(lista: string, session: BotSession): BotResponse {
@@ -858,6 +1500,187 @@ function ePositiva(n: string): boolean {
     n.includes("claro") || n.includes("vai") || n.includes("beleza") ||
     n.includes("ok") || n.includes("certo") || n.includes("isso");
 }
+// Extrai quantidade + nome de produto de mensagens como "3 coca", "2x burguer", "quero 4 hambúrgueres".
+// NUNCA chamada em steps de seleção (size/flavor/border/payment/delivery_type/category/confirm).
+// Retorna null se a mensagem for só um número (ex: "2") — esses nunca são quantidade sem produto.
+function parsearQtdEItem(text: string): { qty: number; produto: string } | null {
+  const n = normalizar(text);
+  const numPorExtenso: Record<string, number> = {
+    "um": 1, "uma": 1, "dois": 2, "duas": 2, "tres": 3, "quatro": 4, "cinco": 5, "seis": 6, "sete": 7,
+  };
+  // Remove prefixos de intenção comuns
+  const semPrefixo = n
+    .replace(/^(?:quero|me ve|me ve|me da|me da|pode ser|pode|manda|vou querer|queria|gostaria de|da um|da)\s+/, "");
+  // Padrão: número (+ 'x' opcional) + produto (exige pelo menos 2 chars de produto)
+  const m1 = semPrefixo.match(/^(\d{1,2})x?\s+(.{2,})$/);
+  if (m1) {
+    const qty = parseInt(m1[1]);
+    const produto = m1[2].trim();
+    if (qty >= 1 && qty <= 20) return { qty, produto };
+  }
+  // Padrão: número por extenso + produto
+  const m2 = semPrefixo.match(/^(um[a]?|dois|duas|tres|quatro|cinco|seis|sete)\s+(.{2,})$/);
+  if (m2) {
+    const qty = numPorExtenso[m2[1]] ?? 0;
+    const produto = m2[2].trim();
+    if (qty >= 1) return { qty, produto };
+  }
+  return null;
+}
+
+// Interpreta mensagem com múltiplos sucos e quantidades individuais.
+// Ex: "um de maracuja e 1 de bacuri" → [Maracujá, Bacuri]
+// Ex: "maracuja e bacuri" → [Maracujá, Bacuri]
+function parsearMultiSuco(text: string): CartItem[] | null {
+  const n = normalizar(text).replace(/-/g, " ");
+  const numMap: Record<string, number> = { um: 1, uma: 1, dois: 2, duas: 2, tres: 3 };
+  const nomesS = MENU.sucos.map(s => s.name);
+  const partes = n.split(/\s+e\s+|,\s*|\s+mais\s+/).map(s => s.trim()).filter(Boolean);
+  if (partes.length < 2) return null;
+  const itens: CartItem[] = [];
+  for (const parte of partes) {
+    let qty = 1;
+    let produto = parte;
+    const mQtd = parte.match(/^(\d+|um[a]?|dois|duas|tres)\s+(?:de\s+)?(.+)$/);
+    if (mQtd) {
+      qty = parseInt(mQtd[1]) || numMap[mQtd[1]] || 1;
+      produto = mQtd[2].trim();
+    } else {
+      produto = parte.replace(/^de\s+/, "");
+    }
+    const suco = resolveUmSabor(produto, nomesS);
+    if (!suco) return null;
+    const sucoData = MENU.sucos.find(s => s.name === suco)!;
+    for (let i = 0; i < qty; i++) {
+      itens.push({ category: "suco" as const, name: suco, price: sucoData.price });
+    }
+  }
+  return itens.length >= 2 ? itens : null;
+}
+function detectaLeiteTexto(text: string): "com" | "sem" | null {
+  const n = normalizar(text);
+  if (n.includes("com leite") || n.includes("c/ leite")) return "com";
+  if (n.includes("sem leite") || n.includes("s/ leite") || n.includes("puro") || n.includes("pura") || n === "sem") return "sem";
+  return null;
+}
+function aplicarLeite(items: CartItem[], leite: "com" | "sem"): CartItem[] {
+  return items.map(item => {
+    if (item.category !== "suco") return item;
+    const isBanana = normalizar(item.name).includes("banana");
+    if (isBanana) return { ...item, name: `${item.name} com leite`, price: item.price + 1 };
+    return { ...item, name: `${item.name}${leite === "com" ? " com leite" : " sem leite"}`, price: leite === "com" ? item.price + 1 : item.price };
+  });
+}
+function finalizarSucos(novosItens: CartItem[], text: string, session: BotSession, label: string): BotResponse {
+  const leiteTexto = detectaLeiteTexto(text);
+  const todosBanana = novosItens.every(i => normalizar(i.name).includes("banana"));
+  if (leiteTexto || todosBanana) {
+    const itensComLeite = aplicarLeite(novosItens, leiteTexto ?? "com");
+    const newCart = [...session.cart, ...itensComLeite];
+    return { messages: [`${label} anotado${novosItens.length > 1 ? "s" : ""}! 😋`, mensagemAddMore(newCart)], session: resetaTentativas({ ...session, step: "add_more", cart: newCart, pendingQtdSuco: undefined, pendingSucosLeite: undefined }) };
+  }
+  return {
+    messages: [`${label} anotado${novosItens.length > 1 ? "s" : ""}! 😋\n\nQuer com leite ou sem leite? 🥤\n\n  1. Com leite\n  2. Sem leite`],
+    session: resetaTentativas({ ...session, step: "suco_leite", pendingSucosLeite: novosItens, pendingQtdSuco: undefined }),
+  };
+}
+// Tenta adicionar qty unidades de uma bebida/suco/lanche (sem sabor, sem tamanho) ao carrinho.
+// Retorna BotResponse se resolvido com sucesso, null se o produto não foi identificado.
+function tentaAdicionarComQtd(
+  qtdItem: { qty: number; produto: string },
+  session: BotSession,
+): BotResponse | null {
+  const { qty, produto } = qtdItem;
+  // Bebidas
+  const nomesBebidas = MENU.bebidas.map(b => b.name);
+  const resBebida = resolveSaborComAmbiguidade(produto, nomesBebidas);
+  if (resBebida.tipo === "unico") {
+    const bebida = MENU.bebidas.find(b => b.name === resBebida.nome);
+    if (bebida && !isEsgotado(bebida.name)) {
+      const novos: CartItem[] = Array.from({ length: qty }, () => ({ category: "bebida" as const, name: bebida.name, price: bebida.price }));
+      const newCart = [...session.cart, ...novos];
+      const label = qty > 1 ? `*${qty}x ${bebida.name}*` : `*${bebida.name}*`;
+      return { messages: [`${label} anotado${qty > 1 ? "s" : ""}! 😋`, mensagemAddMore(newCart)], session: resetaTentativas({ ...session, step: "add_more", cart: newCart }) };
+    }
+  }
+  // Sucos
+  const nomesSucos = MENU.sucos.map(s => s.name);
+  const resSuco = resolveSaborComAmbiguidade(produto, nomesSucos);
+  if (resSuco.tipo === "unico") {
+    const suco = MENU.sucos.find(s => s.name === resSuco.nome);
+    if (suco && !isEsgotado(suco.name)) {
+      const novos: CartItem[] = Array.from({ length: qty }, () => ({ category: "suco" as const, name: suco.name, price: suco.price }));
+      const newCart = [...session.cart, ...novos];
+      const label = qty > 1 ? `*${qty}x ${suco.name}*` : `*${suco.name}*`;
+      return { messages: [`${label} anotado${qty > 1 ? "s" : ""}! 😋`, mensagemAddMore(newCart)], session: resetaTentativas({ ...session, step: "add_more", cart: newCart }) };
+    }
+  }
+  // Lanches simples (sem sabor e sem tamanhos variáveis)
+  const lancheSimples = MENU.lanches.filter(l => !l.hasFlavors && !l.sizes);
+  const nomesLanches = lancheSimples.map(l => l.name);
+  const resLanche = resolveSaborComAmbiguidade(produto, nomesLanches);
+  if (resLanche.tipo === "unico") {
+    const lanche = lancheSimples.find(l => l.name === resLanche.nome);
+    if (lanche && !isEsgotado(lanche.name)) {
+      const novos: CartItem[] = Array.from({ length: qty }, () => ({ category: "lanche" as const, name: lanche.name, price: lanche.price }));
+      const newCart = [...session.cart, ...novos];
+      const label = qty > 1 ? `*${qty}x ${lanche.name}*` : `*${lanche.name}*`;
+      return { messages: [`${label} anotado${qty > 1 ? "s" : ""}! 😋`, mensagemAddMore(newCart)], session: resetaTentativas({ ...session, step: "add_more", cart: newCart, currentLanche: undefined }) };
+    }
+  }
+  return null;
+}
+
+export function retomarFluxoDoBot(session: BotSession): string[] {
+  const step = session.stepAnteriorEscalado ?? session.step;
+  const nome = session.customerName ? ` *${session.customerName.split(" ")[0]}*,` : "";
+  switch (step) {
+    case "category":
+      return [`Prontinho,${nome} voltei por aqui! 😊\n\n${mensagemCategorias()}`];
+    case "size":
+      return [`Prontinho,${nome} voltei por aqui! 😊\n\nQual o tamanho da pizza?\n\n${sizeListComMiniPizza()}`];
+    case "flavor":
+      return [`Prontinho,${nome} voltei por aqui! 😊\n\nQual o sabor da pizza? Você pode escolher até *2 sabores*!\n\n${listaFlavors()}`];
+    case "border_escolha":
+      return [`Prontinho,${nome} voltei por aqui! 😊\n\nVai querer borda recheada? 😋`];
+    case "add_more":
+      return session.cart.length > 0
+        ? [`Prontinho,${nome} voltei por aqui! 😊\n\n${mensagemAddMore(session.cart)}`]
+        : [`Prontinho,${nome} voltei por aqui! 😊\n\n${mensagemCategorias()}`];
+    case "lanche_escolha":
+      return [`Prontinho,${nome} voltei por aqui! 😊\n\nNossos lanches 😋\n\n${listaLanches()}\n\nDigite o número ou o nome:`];
+    case "product_family_choice": {
+      const label = session.familiaLabel ?? "produto";
+      const itens = session.candidatosFamilia ?? [];
+      return [`Prontinho,${nome} voltei por aqui! 😊\n\n${mensagemFamilia(label, itens as typeof MENU.lanches)}`];
+    }
+    case "lanche_flavor":
+      return [`Prontinho,${nome} voltei por aqui! 😊\n\nQual o sabor do lanche?`];
+    case "bebida_escolha":
+      return [`Prontinho,${nome} voltei por aqui! 😊\n\nEscolha a bebida:`];
+    case "suco_escolha":
+      return [`Prontinho,${nome} voltei por aqui! 😊\n\nQual o sabor do suco?`];
+    case "observacao":
+      return [`Prontinho,${nome} voltei por aqui! 😊\n\nTem alguma observação pro pedido?`];
+    case "delivery_type":
+      return [`Prontinho,${nome} voltei por aqui! 😊\n\nComo quer receber seu pedido?\n\n  1. Entrega 🛵\n  2. Retirada na loja 🏪\n  3. Consumo no local 🍽️`];
+    case "neighborhood":
+      return [`Prontinho,${nome} voltei por aqui! 😊\n\nQual o seu bairro?`];
+    case "address":
+      return [`Prontinho,${nome} voltei por aqui! 😊\n\nMe passa o endereço completo:\n_(Rua, número e complemento)_`];
+    case "payment":
+      return [`Prontinho,${nome} voltei por aqui! 😊\n\nQual a forma de pagamento? 💸`];
+    case "aguardando_pix":
+      return [`Prontinho,${nome} voltei por aqui! 😊\n\nSó me manda o comprovante do Pix pra confirmar o pedido! 📄`];
+    case "confirm":
+      return session.cart.length > 0
+        ? [`Prontinho,${nome} voltei por aqui! 😊\n\n${resumoCarrinho(session.cart)}\n\nConfirma o pedido?`]
+        : [`Prontinho,${nome} voltei por aqui! 😊\n\nMe confirma rapidinho: você quer continuar o pedido ou começar de novo?`];
+    default:
+      return [`Prontinho,${nome} voltei por aqui 😊\n\nMe confirma rapidinho: você quer continuar o pedido ou começar de novo?\n\n  1. Continuar pedido\n  2. Começar de novo`];
+  }
+}
+
 export function processMessage(input: string, session: BotSession): BotResponse {
   // Detecta o "ritmo" do cliente pela forma da resposta:
   // resposta que é só número (ex: "1", "2") => cliente apressado => respostas mais rápidas.
@@ -876,6 +1699,24 @@ export function processMessage(input: string, session: BotSession): BotResponse 
 function processMessageInner(input: string, session: BotSession): BotResponse {
   const text = input.trim();
   const n = normalizar(text);
+
+  // ── REGRA PRIORITY #1: Pergunta sobre entrega/funcionamento ─────────────────
+  // Roda antes de QUALQUER outra lógica para não cair em fallbacks de produto/cardápio.
+  // Exceção: steps finais (confirm, aguardando_pix) e sessão escalada.
+  if (
+    session.step !== "escalado" &&
+    session.step !== "confirm" &&
+    session.step !== "aguardando_pix" &&
+    detectaPerguntaEntregaFuncionamento(text)
+  ) {
+    return {
+      messages: [
+        `Sim, estamos fazendo entrega sim ✅\n\nHoje nosso atendimento vai até *${HORARIO_FUNCIONAMENTO}*.\n\nPode mandar seu pedido por aqui mesmo.\nO que vai ser hoje? 🍕`,
+      ],
+      session: resetaTentativas({ ...session, step: session.customerName ? "category" : "name" }),
+    };
+  }
+
   // Detecta quantidade de pizzas. Regra de ouro: número PURO sozinho ("2") NUNCA é quantidade —
   // nos steps category/add_more/size ele é opção de menu (1,2,3,4) ou opção de tamanho.
   // Quantidade por número só vale com a palavra "pizza" junto ("2 pizzas"). Palavra por extenso
@@ -888,7 +1729,20 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
     const qtdMatchExtenso = (session.step === "size" || session.step === "name")
       ? n.match(/^(?:quero\s+)?(duas?|dois|tr[eê]s|quatro|cinco)(?:\s+pizzas?)?$/)
       : null;
-    const qtdMatch = qtdMatchComPizza || qtdMatchExtenso;
+    // "quero 2 calabresa família", "3 portuguesa grande", "2x pizza calabresa média"
+    // Apenas em category/add_more onde não colidem com seleção de tamanho.
+    const qtdMatchNumSabor = (session.step === "category" || session.step === "add_more")
+      ? (() => {
+          const mf = n.match(/^(?:quero\s+)?(\d{1,2})x?\s+(?:pizza\s+)?(.+)$/);
+          if (!mf) return null;
+          const qty = parseInt(mf[1]);
+          if (qty < 2 || qty > 5) return null;
+          const todosFlavors = [...MENU.saltyFlavors, ...MENU.sweetFlavors];
+          if (!todosFlavors.some(f => mf[2].includes(normalizar(f).split(" ")[0]) || normalizar(f).split(" ").some(w => w.length > 3 && mf[2].includes(w)))) return null;
+          return mf;
+        })()
+      : null;
+    const qtdMatch = qtdMatchComPizza || qtdMatchExtenso || qtdMatchNumSabor;
     let qtd = 0;
     if (qtdMatch) qtd = parseInt(qtdMatch[1]) || qtdMap[qtdMatch[1].toLowerCase()] || 0;
     if (qtd >= 2 && qtd <= 5) {
@@ -919,7 +1773,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
         };
       }
       return {
-        messages: [`2️⃣ *${qtd} pizzas* anotadas! Vamos montar uma de cada vez 🍕\n\n*Pizza 1 de ${qtd}* — Qual o tamanho?\n\n${sizeList()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`],
+        messages: [`2️⃣ *${qtd} pizzas* anotadas! Vamos montar uma de cada vez 🍕\n\n*Pizza 1 de ${qtd}* — Qual o tamanho?\n\n${sizeListComMiniPizza()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`],
         session: resetaTentativas({ ...session, step: "size", currentCategory: "pizza", pendingPizzas: qtd, pizzaAtualIndex: 1 }),
       };
     }
@@ -928,14 +1782,14 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
   if (session.step !== "escalado" && precisaEscalar(text)) {
     return {
       messages: [`Já chamo alguém pra te ajudar! Aguarda um instantinho 😊`],
-      session: { ...session, step: "escalado", escalado: true },
+      session: { ...session, step: "escalado", escalado: true, stepAnteriorEscalado: session.step },
       escalar: true,
     };
   }
   if (session.step !== "escalado" && session.step !== "name" && session.step !== "address" && session.step !== "observacao" && eConfusao(n)) {
     const dicas: Partial<Record<BotStep, string>> = {
       category: `Sem estresse! É só escolher o que vai querer:\n\n${mensagemCategorias()}`,
-      size: `É só escolher o tamanho da pizza:\n\n${sizeList()}`,
+      size: `É só escolher o tamanho da pizza:\n\n${sizeListComMiniPizza()}`,
       flavor: `É só digitar o número ou o nome do sabor que você quer! 😋`,
       border_escolha: `É só escolher o número da borda ou digitar o nome. Se não quiser borda é só digitar o número ${MENU.borders.length + 1}!`,
       add_more: `Se quiser, pode me dizer se deseja bebida, outro lanche ou se já podemos fechar 😊`,
@@ -953,7 +1807,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
   if (eVoltar(n) && !["welcome", "name", "returning", "category", "escalado", "done", "add_more"].includes(session.step)) {
     switch (session.step) {
       case "flavor":
-        return { messages: [`Tudo bem! Qual o tamanho da pizza então? 😊\n\n${sizeList()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "size", currentFlavor: undefined }) };
+        return { messages: [`Tudo bem! Qual o tamanho da pizza então? 😊\n\n${sizeListComMiniPizza()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "size", currentFlavor: undefined }) };
       case "border_escolha":
       case "segundo_sabor":
         return { messages: [`Tudo bem! Qual o sabor então? 😊\n\n${listaFlavors()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "flavor", currentFlavor: undefined }) };
@@ -964,7 +1818,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       case "neighborhood":
         return { messages: [`Tudo bem! Como quer receber seu pedido? 😊\n\n  1. Entrega 🛵\n  2. Retirada na loja 🏪\n  3. Consumo no local 🍽️`], session: resetaTentativas({ ...session, step: "delivery_type" }) };
       case "confirma_bairro_fuzzy":
-        return { messages: [`Tudo bem! Qual o seu bairro? 😊`], session: resetaTentativas({ ...session, step: "neighborhood", bairroFuzzyCandidato: undefined }) };
+        return { messages: [`Tudo bem! Qual o seu bairro? 😊`], session: resetaTentativas({ ...session, step: "neighborhood", bairroFuzzyCandidato: undefined, neighborhood: undefined, deliveryFee: 0, bairroConfirmado: false }) };
       case "confirma_produto_valor":
         return { messages: [`Tudo bem! ${mensagemCategorias()}`], session: resetaTentativas({ ...session, step: "category", candidatosValorProduto: undefined }) };
       case "confirma_sabor_ambiguo":
@@ -972,7 +1826,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       case "confirma_item_ambiguo":
         return { messages: [`Tudo bem! ${mensagemCategorias()}`], session: resetaTentativas({ ...session, step: "category", candidatosItemAmbiguo: undefined, itemAmbiguoTipo: undefined }) };
       case "address":
-        return { messages: [`Tudo bem! Qual o seu bairro? 😊`], session: resetaTentativas({ ...session, step: "neighborhood" }) };
+        return { messages: [`Tudo bem! Qual o seu bairro? 😊`], session: resetaTentativas({ ...session, step: "neighborhood", neighborhood: undefined, deliveryFee: 0, bairroConfirmado: false }) };
       case "payment":
         if (session.deliveryType === "pickup" || session.deliveryType === "dine_in") {
           return { messages: [`Tudo bem! Como quer receber seu pedido? 😊\n\n  1. Entrega 🛵\n  2. Retirada na loja 🏪\n  3. Consumo no local 🍽️`], session: resetaTentativas({ ...session, step: "delivery_type" }) };
@@ -997,6 +1851,11 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
         return { messages: [`Tudo bem! Nossos lanches 😋\n\n${listaLanches()}\n\nDigite o número ou o nome:`], session: resetaTentativas({ ...session, step: "lanche_escolha", currentLanche: undefined }) };
       case "lanche_macarronada_size":
         return { messages: [`Tudo bem! Nossos lanches 😋\n\n${listaLanches()}\n\nDigite o número ou o nome:`], session: resetaTentativas({ ...session, step: "lanche_escolha", currentLanche: undefined }) };
+      case "product_family_choice": {
+        const labelFam = session.familiaLabel ?? "produto";
+        const itensFam = (session.candidatosFamilia ?? []) as typeof MENU.lanches;
+        return { messages: [mensagemFamilia(labelFam, itensFam)], session: resetaTentativas({ ...session, step: "product_family_choice" }) };
+      }
       default:
         return { messages: [`Tudo bem! ${mensagemCategorias()}`], session: resetaTentativas({ ...session, step: "category" }) };
     }
@@ -1008,18 +1867,33 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
     }
     case "welcome": {
       return {
-        messages: [`Olá! Seja bem-vindo à *Chefe da Pizza*! 🍕\n\n${mensagemCategorias()}`],
+        messages: [`Olá! Seja bem-vindo à *Chefe da Pizza*! 🍕\n\nO que vai ser hoje? Temos coisa boa te esperando!`],
         session: { ...session, step: "category" },
       };
     }
     case "returning": {
       const historico = session.historico!;
       const firstName = historico.nome.split(" ")[0];
+      // Consulta de preço tem prioridade sobre pedido direto
+      const resConsultaRet = verificaConsultaFatias(text, session) ?? verificaConsultaPreco(text, session);
+      if (resConsultaRet) return resConsultaRet;
+      // Cliente apressado: pedido completo com entrega/pagamento
+      const pedidoCompletoRet = processarPedidoCompleto(text, { ...session, customerName: historico.nome });
+      if (pedidoCompletoRet) return pedidoCompletoRet;
       // Cliente apressado: já mandou o pedido (completo ou parcial) na saudação -> processa direto
       const pedidoDireto = montarPizzaDoPedido(text, { ...session, customerName: historico.nome }, `Pode deixar, *${firstName}*! 🍕`);
       if (pedidoDireto) return pedidoDireto;
+      // FAMÍLIA DE PRODUTO (ex: "quero uma macarronada") — ANTES de detectaIntencaoDireta
+      const familiaRet = detectarFamiliaProduto(text);
+      if (familiaRet) return responderFamiliaProduto({ ...session, customerName: historico.nome }, familiaRet);
       const intencaoRet = detectaIntencaoDireta(text);
       if (intencaoRet) {
+        if (intencaoRet.category === "pizza" && (n.includes("mini-pizza") || n.includes("mini pizza"))) {
+          return {
+            messages: [`Pode deixar, *${firstName}*! 😄\n\nMini-Pizza anotada! 🍕 Qual sabor?\n\n${MENU.miniPizzaFlavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n")}`],
+            session: resetaTentativas({ ...session, step: "lanche_flavor", currentCategory: "pizza", currentLanche: "Mini-Pizza", customerName: historico.nome }),
+          };
+        }
         const resp = handleCategory(intencaoRet.category, { ...session, step: "category", customerName: historico.nome });
         return { ...resp, messages: [`Pode deixar, *${firstName}*! 😄\n\n${resp.messages[0]}`, ...resp.messages.slice(1)], session: resetaTentativas(resp.session) };
       }
@@ -1043,6 +1917,37 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
             }
             return item;
           });
+
+          // Se temos histórico completo de entrega, pré-preenche e vai direto para confirmação
+          if (historico.ultimoDeliveryType && historico.ultimoPayment) {
+            const isDeliveryHist = historico.ultimoDeliveryType === "delivery";
+            // Para entrega, usa a taxa ATUAL do bairro no menu (mais correta que a do histórico).
+            const nbHist = isDeliveryHist ? MENU.neighborhoods.find(b => b.name === historico.ultimoNeighborhood) : undefined;
+            const deliveryFee = isDeliveryHist ? (nbHist?.fee ?? historico.ultimoDeliveryFee ?? 0) : 0;
+            const sessionRapida: BotSession = {
+              ...session,
+              step: "confirm",
+              cart,
+              customerName: historico.nome,
+              deliveryType: historico.ultimoDeliveryType as BotSession["deliveryType"],
+              neighborhood: historico.ultimoNeighborhood,
+              address: historico.ultimoEndereco,
+              deliveryFee,
+              // Bairro vem mostrado no resumo p/ o cliente confirmar; só conta como confirmado
+              // se for um bairro cadastrado (senão o guard final pede o bairro de novo).
+              bairroConfirmado: isDeliveryHist && !!nbHist,
+              paymentMethod: historico.ultimoPayment,
+              retornoRapido: true,
+            };
+            return {
+              messages: [
+                `Boa, *${firstName}*! 😋 Preparei tudo igual da última vez:\n\n${buildReceipt(sessionRapida)}\n\nConfirmo assim?\n  ✅ *1.* Confirmar\n  ✏️ *2.* Mudar algo`,
+              ],
+              session: resetaTentativas(sessionRapida),
+            };
+          }
+
+          // Sem histórico de entrega: restaura carrinho e pede tipo de entrega
           const updatedSession: BotSession = {
             ...session,
             step: "delivery_type",
@@ -1053,10 +1958,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
           return {
             messages: [
               `Boa, *${firstName}*! 😋 Anotei o seu de sempre:`,
-              `🛒 *Itens:*
-${resumoCarrinho(cart)}
-
-Como quer receber? 😊\n\n  1. Entrega 🛵\n  2. Retirada na loja 🏪\n  3. Consumo no local 🍽️`
+              `🛒 *Itens:*\n${resumoCarrinho(cart)}\n\nComo quer receber? 😊\n\n  1. Entrega 🛵\n  2. Retirada na loja 🏪\n  3. Consumo no local 🍽️`
             ],
             session: resetaTentativas(updatedSession),
           };
@@ -1082,13 +1984,34 @@ Como quer receber? 😊\n\n  1. Entrega 🛵\n  2. Retirada na loja 🏪\n  3. C
         };
       }
 
-      // 2) Pedido direto/completo de pizza já na primeira mensagem
+      // 2) Consulta de preço ("quanto tá a pizza pequena?")
+      const resConsultaName = verificaConsultaFatias(text, session) ?? verificaConsultaPreco(text, session);
+      if (resConsultaName) return resConsultaName;
+
+      // 3) Pedido completo inteligente (produto + entrega/pagamento numa mensagem)
+      const pedidoCompletoName = processarPedidoCompleto(text, session);
+      if (pedidoCompletoName) return pedidoCompletoName;
+
+      // 4) Pedido direto/completo de pizza já na primeira mensagem
       const pedidoDireto = montarPizzaDoPedido(text, { ...session }, `Prazer em te atender! 😊`);
       if (pedidoDireto) return pedidoDireto;
 
-      // 3) Intenção de categoria (pizza/lanche/bebida/suco) sem ser um pedido completo
+      // 5) FAMÍLIA DE PRODUTO (ex: "quero uma macarronada") — PRECISA rodar ANTES de
+      // detectaIntencaoDireta/handleCategory, senão a macarronada vira categoria "lanche"
+      // genérica e abre a lista completa de lanches. Não salva como nome nem pede nome.
+      const familiaName = detectarFamiliaProduto(text);
+      if (familiaName) return responderFamiliaProduto(session, familiaName);
+
+      // 6) Intenção de categoria (pizza/lanche/bebida/suco) sem ser um pedido completo
       const intencao = detectaIntencaoDireta(text);
       if (intencao) {
+        const nName = normalizar(text);
+        if (intencao.category === "pizza" && (nName.includes("mini-pizza") || nName.includes("mini pizza"))) {
+          return {
+            messages: [`Perfeito! 😄\n\nMini-Pizza anotada! 🍕 Qual sabor?\n\n${MENU.miniPizzaFlavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n")}`],
+            session: resetaTentativas({ ...session, step: "lanche_flavor", currentCategory: "pizza", currentLanche: "Mini-Pizza" }),
+          };
+        }
         const response = handleCategory(intencao.category, { ...session, step: "category" });
         return { ...response, messages: [`Perfeito! 😄\n\n${response.messages[0]}`], session: resetaTentativas(response.session) };
       }
@@ -1106,6 +2029,18 @@ Como quer receber? 😊\n\n  1. Entrega 🛵\n  2. Retirada na loja 🏪\n  3. C
       return respostaInvalida("Não entendi muito bem 😅 Me diz seu nome, ou já pode pedir direto (ex: _\"pizza calabresa\"_ ou _\"cardápio\"_)", session);
     }
     case "category": {
+      // ===== CONSULTA DE PREÇO (ex: "quanto tá a pizza pequena?", "valor do x-burguer") =====
+      const resConsultaCat = verificaConsultaFatias(text, session) ?? verificaConsultaPreco(text, session);
+      if (resConsultaCat) return resConsultaCat;
+      // ===== PEDIDO COMPLETO INTELIGENTE (produto + entrega + pagamento numa única mensagem) =====
+      const pedidoCompletoCat = processarPedidoCompleto(text, session);
+      if (pedidoCompletoCat) return pedidoCompletoCat;
+      // ===== QTD + PRODUTO DIRETO (ex: "quero 2 x burguer", "manda uma coca", "pode ser 1 x tudo") =====
+      const qtdItemCat = parsearQtdEItem(text);
+      if (qtdItemCat) {
+        const resQtdCat = tentaAdicionarComQtd(qtdItemCat, session);
+        if (resQtdCat) return resQtdCat;
+      }
       // ===== BUSCA INTELIGENTE POR VALOR (ex: "quero um hamburguer de 18", "lanche de 20") =====
       const catValor = detectaCategoriaEValor(text);
       if (catValor && catValor.categoria !== "pizza") {
@@ -1127,6 +2062,9 @@ Como quer receber? 😊\n\n  1. Entrega 🛵\n  2. Retirada na loja 🏪\n  3. C
         }
         // Nenhum produto próximo -> cai no fallback normal (mostra cardápio da categoria)
       }
+      // ===== FAMÍLIA DE PRODUTO (ex: "macarronada") — ANTES da detecção genérica de categoria =====
+      const familiaCat = detectarFamiliaProduto(text);
+      if (familiaCat) return responderFamiliaProduto(session, familiaCat);
       const intencao = detectaIntencaoDireta(text);
       let category = "";
       if (n === "1" || n.includes("pizza")) category = "pizza";
@@ -1134,10 +2072,30 @@ Como quer receber? 😊\n\n  1. Entrega 🛵\n  2. Retirada na loja 🏪\n  3. C
       else if (n === "3" || n.includes("bebida")) category = "bebida";
       else if (n === "4" || n.includes("suco") || n.includes("vitamina")) category = "suco";
       else if (intencao) category = intencao.category;
-      if (!category) return respostaInvalida(mensagemCategorias(), session);
+      if (!category) {
+        const lancheEspFallback = detectarLancheEspecifico(text, session);
+        if (lancheEspFallback) return lancheEspFallback;
+        return respostaInvalida(mensagemCategorias(), session);
+      }
       if (category === "pizza") {
+        if (n.includes("mini-pizza") || n.includes("mini pizza")) {
+          return {
+            messages: [`Mini-Pizza anotada! 🍕 Qual sabor?\n\n${MENU.miniPizzaFlavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n")}`],
+            session: resetaTentativas({ ...session, step: "lanche_flavor", currentCategory: "pizza", currentLanche: "Mini-Pizza" }),
+          };
+        }
         const pedidoPizza = montarPizzaDoPedido(text, session);
         if (pedidoPizza) return pedidoPizza;
+      }
+      if (category === "suco" && qtdItemCat && qtdItemCat.qty > 1) {
+        return {
+          messages: [`Perfeito, ${qtdItemCat.qty === 2 ? "são" : "serão"} *${qtdItemCat.qty} sucos*! 😋 Quais sabores?\n\n${listaSucos()}\n\n_(Com leite: acréscimo de R$ 1,00)_\n\nDigite os números ou nomes:`],
+          session: resetaTentativas({ ...session, step: "suco_escolha", currentCategory: "suco", pendingQtdSuco: qtdItemCat.qty }),
+        };
+      }
+      if (category === "lanche") {
+        const lancheEsp = detectarLancheEspecifico(text, session);
+        if (lancheEsp) return lancheEsp;
       }
       return { ...handleCategory(category, session), session: resetaTentativas(handleCategory(category, session).session) };
     }
@@ -1167,6 +2125,108 @@ Como quer receber? 😊\n\n  1. Entrega 🛵\n  2. Retirada na loja 🏪\n  3. C
         session: resetaTentativas({ ...session, step: "add_more", cart: newCart, candidatosValorProduto: undefined }),
       };
     }
+    case "consulta_fatias": {
+      // Nova consulta de fatias ou follow-up de tamanho
+      const resFatiasF = verificaConsultaFatias(text, session);
+      if (resFatiasF) return resFatiasF;
+      const followUp = resolveFatiasFollowUp(text, session);
+      if (followUp) return followUp;
+      // Cliente quer pedir o último tamanho consultado
+      const lastSize = session.pendingConsultaFatias?.size;
+      const querPedirF = ePositiva(n) || n === "1" || n.includes("sim") || n.includes("quero") || n.includes("pode anotar") || n.includes("anota") || n.includes("manda") || n.includes("quero essa");
+      if (querPedirF && lastSize) {
+        return { messages: [`Pizza *${lastSize}* anotada! 👌\n\nQual o sabor? 😋 Você pode escolher até *2 sabores*!\n\n${listaFlavors()}`], session: resetaTentativas({ ...session, step: "flavor", currentCategory: "pizza", currentSize: lastSize, pendingConsultaFatias: undefined }) };
+      }
+      // Ver outro / cardápio
+      if (n === "2" || n.includes("ver outro") || n.includes("cardapio") || n.includes("menu") || eNegativa(n)) {
+        return { messages: [`Tudo bem! ${mensagemCategorias()}`], session: resetaTentativas({ ...session, step: "category", pendingConsultaFatias: undefined }) };
+      }
+      // Consulta de preço dentro do contexto de fatias
+      const resPrecoF = verificaConsultaPreco(text, session);
+      if (resPrecoF) return resPrecoF;
+      return respostaInvalida(`Quer saber de outro tamanho? Ou posso anotar uma pizza pra você? 😊`, session);
+    }
+    case "consulta_preco": {
+      // Nova consulta de preço tem prioridade sobre contexto anterior
+      const novaConsultaPreco = verificaConsultaPreco(text, session);
+      if (novaConsultaPreco) return novaConsultaPreco;
+      // Consulta implícita sem palavra de preço ("e a pizza m?", "e a familia?")
+      // Remove "e ", "e a ", "e o " do início e tenta detectar o produto
+      const textSemConector = text.replace(/^(e\s+(a|o|as|os)\s+|e\s+)/i, "").trim();
+      const consultaImplicita = textSemConector !== text ? verificaConsultaPreco("quanto " + textSemConector, session) : null;
+      if (consultaImplicita) return consultaImplicita;
+      const c = session.pendingConsultaPreco;
+      if (!c) return { messages: [mensagemCategorias()], session: resetaTentativas({ ...session, step: "category", pendingConsultaPreco: undefined }) };
+      const quer = ePositiva(n) || n === "1" || n.includes("sim") || n.includes("pode anotar") || n.includes("quero") || n.includes("manda") || n.includes("anota");
+      const verOutro = n === "2" || n.includes("ver outro") || n.includes("outro produto") || n.includes("cardapio") || n.includes("menu") || eNegativa(n);
+      if (verOutro) {
+        return { messages: [`Tudo bem! ${mensagemCategorias()}`], session: resetaTentativas({ ...session, step: "category", pendingConsultaPreco: undefined }) };
+      }
+      if (c.categoria === "pizza_ambiguo") {
+        // Verificar se cliente escolheu um tamanho na resposta
+        const novaConsulta = detectaConsultaPreco(text);
+        if (novaConsulta && novaConsulta.categoria !== "pizza_ambiguo") {
+          return { messages: [mensagemConsultaPreco(novaConsulta)], session: resetaTentativas({ ...session, step: "consulta_preco", pendingConsultaPreco: novaConsulta }) };
+        }
+        // Detecta tamanho direto
+        const numShiftCP: Record<string, string> = { "2": "1", "3": "2", "4": "3", "5": "4" };
+        const sizeCP = detectaTamanho(numShiftCP[n] ?? n);
+        if (n === "1" && !quer) {
+          return { messages: [mensagemConsultaPreco({ label: "Mini-Pizza", categoria: "pizza_mini", preco: 17, qty: 1 })], session: resetaTentativas({ ...session, step: "consulta_preco", pendingConsultaPreco: { label: "Mini-Pizza", categoria: "pizza_mini", preco: 17, qty: 1 } }) };
+        }
+        if (sizeCP) {
+          const preco = MENU.sizes.find(s => s.code === sizeCP)?.price ?? 0;
+          const sizeLabel = MENU.sizes.find(s => s.code === sizeCP)?.label ?? sizeCP;
+          const novaC = { label: `Pizza ${sizeLabel} (${sizeCP})`, categoria: "pizza_size" as const, size: sizeCP, preco, qty: 1 };
+          return { messages: [mensagemConsultaPreco(novaC)], session: resetaTentativas({ ...session, step: "consulta_preco", pendingConsultaPreco: novaC }) };
+        }
+        return respostaInvalida(mensagemConsultaPreco(c), session);
+      }
+      if (!quer) return respostaInvalida(`  1. Sim, quero pedir\n  2. Ver outro produto`, session);
+      // Iniciar pedido conforme categoria
+      if (c.categoria === "pizza_mini") {
+        return { messages: [`Mini-Pizza anotada! 🍕 Qual sabor?\n\n${MENU.miniPizzaFlavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n")}`], session: resetaTentativas({ ...session, step: "lanche_flavor", currentCategory: "pizza", currentLanche: "Mini-Pizza", pendingConsultaPreco: undefined }) };
+      }
+      if (c.categoria === "pizza_size") {
+        return { messages: [`Pizza *${c.size}* anotada! 👌\n\nQual o sabor? 😋 Você pode escolher até *2 sabores*!\n\n${listaFlavors()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "flavor", currentCategory: "pizza", currentSize: c.size, pendingConsultaPreco: undefined }) };
+      }
+      if (c.categoria === "lanche") {
+        const lanche = MENU.lanches.find(l => l.name === c.produto);
+        if (lanche) {
+          if (lanche.hasFlavors) {
+            const flavors = lanche.flavorsKey ? (MENU as Record<string, unknown>)[lanche.flavorsKey] as string[] : [];
+            return { messages: [`*${lanche.name}* anotado! 🍕 Qual sabor?\n\n${flavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n")}`], session: resetaTentativas({ ...session, step: "lanche_flavor", currentCategory: "lanche", currentLanche: lanche.name, pendingConsultaPreco: undefined }) };
+          }
+          const qty = c.qty ?? 1;
+          const novos: CartItem[] = Array.from({ length: qty }, () => ({ category: "lanche" as const, name: lanche.name, price: lanche.price }));
+          const newCart = [...session.cart, ...novos];
+          const label = qty > 1 ? `*${qty}x ${lanche.name}*` : `*${lanche.name}*`;
+          return { messages: [`${label} anotado${qty > 1 ? "s" : ""}! 😋`, mensagemAddMore(newCart)], session: resetaTentativas({ ...session, step: "add_more", cart: newCart, pendingConsultaPreco: undefined }) };
+        }
+      }
+      if (c.categoria === "bebida") {
+        const bebida = MENU.bebidas.find(b => b.name === c.produto);
+        if (bebida) {
+          const qty = c.qty ?? 1;
+          const novos: CartItem[] = Array.from({ length: qty }, () => ({ category: "bebida" as const, name: bebida.name, price: bebida.price }));
+          const newCart = [...session.cart, ...novos];
+          const label = qty > 1 ? `*${qty}x ${bebida.name}*` : `*${bebida.name}*`;
+          return { messages: [`${label} anotado${qty > 1 ? "s" : ""}! 😋`, mensagemAddMore(newCart)], session: resetaTentativas({ ...session, step: "add_more", cart: newCart, pendingConsultaPreco: undefined }) };
+        }
+      }
+      if (c.categoria === "suco") {
+        const suco = MENU.sucos.find(s => s.name === c.produto);
+        if (suco) {
+          const qty = c.qty ?? 1;
+          if (qty > 1) {
+            return { messages: [`Perfeito, ${qty} *${suco.name}*! 😋`, mensagemAddMore([...session.cart, ...Array.from({ length: qty }, () => ({ category: "suco" as const, name: suco.name, price: suco.price }))])], session: resetaTentativas({ ...session, step: "add_more", cart: [...session.cart, ...Array.from({ length: qty }, () => ({ category: "suco" as const, name: suco.name, price: suco.price }))], pendingConsultaPreco: undefined }) };
+          }
+          const newCart = [...session.cart, { category: "suco" as const, name: suco.name, price: suco.price }];
+          return { messages: [`*${suco.name}* anotado! 😋`, mensagemAddMore(newCart)], session: resetaTentativas({ ...session, step: "add_more", cart: newCart, pendingConsultaPreco: undefined }) };
+        }
+      }
+      return { messages: [mensagemCategorias()], session: resetaTentativas({ ...session, step: "category", pendingConsultaPreco: undefined }) };
+    }
     case "confirmando_mudanca": {
       if (ePositiva(n) || n.includes("manter") || n.includes("continua")) {
         const categoriaAtual = session.currentCategory ?? "pizza";
@@ -1174,6 +2234,12 @@ Como quer receber? 😊\n\n  1. Entrega 🛵\n  2. Retirada na loja 🏪\n  3. C
       }
       if (eNegativa(n) || n.includes("troca") || n.includes("muda") || n === "2") {
         const pendingCategory = session.pendingCategory ?? "pizza";
+        if (pendingCategory === "category") {
+          return {
+            messages: [`Tudo bem! O que mais vai querer? 😊\n\n${mensagemCategorias()}`],
+            session: resetaTentativas({ ...session, step: "category", pendingCategory: undefined, currentCategory: undefined }),
+          };
+        }
         return { ...handleCategory(pendingCategory, { ...session, pendingCategory: undefined }), session: resetaTentativas(handleCategory(pendingCategory, { ...session, pendingCategory: undefined }).session) };
       }
       return respostaInvalida(`  1. Manter\n  2. Ir pro outro`, session);
@@ -1181,7 +2247,17 @@ Como quer receber? 😊\n\n  1. Entrega 🛵\n  2. Retirada na loja 🏪\n  3. C
     case "size": {
       const mudanca = tentaMudanca(text, session);
       if (mudanca) return mudanca;
-      const size = detectaTamanho(n);
+      const resFatiasSize = verificaConsultaFatias(text, session);
+      if (resFatiasSize) return resFatiasSize;
+      if (n === "1" || n === "mini" || n.includes("mini-pizza") || n.includes("mini pizza")) {
+        return {
+          messages: [`Mini-Pizza anotada! 🍕 Qual sabor?\n\n${MENU.miniPizzaFlavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n")}`],
+          session: resetaTentativas({ ...session, step: "lanche_flavor", currentCategory: "pizza", currentLanche: "Mini-Pizza" }),
+        };
+      }
+      // Números 2-5 mapeiam para tamanhos (opção 1 é Mini-Pizza, interceptada acima)
+      const numShiftSize: Record<string, string> = { "2": "1", "3": "2", "4": "3", "5": "4" };
+      const size = detectaTamanho(numShiftSize[n] ?? n);
       const allFlavors = [...MENU.saltyFlavors, ...MENU.sweetFlavors];
       if (size) {
         // Se o tamanho permite meio a meio, tenta DOIS sabores primeiro (evita capturar só o primeiro)
@@ -1241,7 +2317,7 @@ Como quer receber? 😊\n\n  1. Entrega 🛵\n  2. Retirada na loja 🏪\n  3. C
         return {
           messages: [
             `Pizza *${size}* anotada! 👌`,
-            `Agora me conta — qual o sabor? 😋\n\n${listaFlavors()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
+            `Agora me conta — qual o sabor? 😋 Você pode escolher até *2 sabores*!\n\n${listaFlavors()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
           ],
           session: resetaTentativas({ ...session, step: "flavor", currentSize: size }),
         };
@@ -1251,17 +2327,23 @@ Como quer receber? 😊\n\n  1. Entrega 🛵\n  2. Retirada na loja 🏪\n  3. C
         return {
           messages: [
             `*${saborSemTamanho}*, ótima escolha! 😋`,
-            `Qual o tamanho da pizza?\n\n${sizeList()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
+            `Qual o tamanho da pizza?\n\n${sizeListComMiniPizza()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`
           ],
           session: resetaTentativas({ ...session, step: "size", currentFlavor: saborSemTamanho }),
         };
       }
-      return respostaInvalida(`${sizeList()}`, session);
+      return respostaInvalida(`${sizeListComMiniPizza()}`, session);
     }
     case "flavor": {
       const mudanca = tentaMudanca(text, session);
       if (mudanca) return mudanca;
       const allFlavors = [...MENU.saltyFlavors, ...MENU.sweetFlavors];
+      // Aviso se o cliente tentar mais de 2 sabores
+      const trechosSabores = n.split(/\s+e\s+|\/|,|\s+mais\s+/).map(s => s.trim()).filter(Boolean);
+      const saboresEncontrados = trechosSabores.map(t => resolveUmSabor(t, allFlavors)).filter(Boolean);
+      if (saboresEncontrados.length > 2) {
+        return respostaInvalida(`A pizza aceita até *2 sabores*! 😊\n\nEscolha 1 ou 2 sabores:\n\n${listaFlavors()}`, session);
+      }
       if (permiteMeioAMeio(session.currentSize)) {
         const dois = detectaDoisSabores(n, allFlavors);
         if (dois) {
@@ -1448,6 +2530,92 @@ Como quer receber? 😊\n\n  1. Entrega 🛵\n  2. Retirada na loja 🏪\n  3. C
       return { messages: [`Qual borda você prefere? 😋\n\n${listaBordas(session.currentSize!)}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: { ...session, step: "border_escolha" } };
     }
     case "add_more": {
+      // ===== CONSULTA DE PREÇO =====
+      const resConsultaAM = verificaConsultaFatias(text, session) ?? verificaConsultaPreco(text, session);
+      if (resConsultaAM) return resConsultaAM;
+      // ===== PEDIDO COMPLETO INTELIGENTE =====
+      const pedidoCompletoAM = processarPedidoCompleto(text, session);
+      if (pedidoCompletoAM) return pedidoCompletoAM;
+      // ===== FAMÍLIA DE PRODUTO (ex: "macarronada", "massa") — ANTES dos gates de categoria =====
+      const familiaAM = detectarFamiliaProduto(text);
+      if (familiaAM) return responderFamiliaProduto(session, familiaAM);
+      // ===== CARDÁPIO / MENU / VER OPÇÕES =====
+      if (detectaIntencaoCardapio(text)) {
+        return {
+          messages: [`Claro! O que mais vai querer? 😊\n\n${mensagemCategorias()}`],
+          session: resetaTentativas(session),
+        };
+      }
+      // Nome exato de bebida (ex: "refrigerante 2l") → adiciona antes de outros checks
+      const bebidaPorNome = MENU.bebidas.find(b => normalizar(b.name) === n);
+      if (bebidaPorNome) {
+        if (isEsgotado(bebidaPorNome.name)) return respostaEsgotado(bebidaPorNome.name, MENU.bebidas.map(b => b.name), session);
+        const newCartBeb = [...session.cart, { category: "bebida" as const, name: bebidaPorNome.name, price: bebidaPorNome.price }];
+        return { messages: [`*${bebidaPorNome.name}* anotada! 😋`, mensagemAddMore(newCartBeb)], session: resetaTentativas({ ...session, step: "add_more", cart: newCartBeb }) };
+      }
+      // === UPSELL BEBIDA: quando não há bebida no carrinho, números 1-5 mapeiam para a oferta curta ===
+      const temBebidaNoCarrinho = session.cart.some(i => i.category === "bebida" || i.category === "suco");
+      if (!temBebidaNoCarrinho && /^\d$/.test(n)) {
+        const numUpsell = parseInt(n);
+        if (numUpsell >= 1 && numUpsell <= 3) {
+          const bebidaUpsell = MENU.bebidas[numUpsell - 1];
+          if (isEsgotado(bebidaUpsell.name)) return respostaEsgotado(bebidaUpsell.name, MENU.bebidas.map(b => b.name), session);
+          const newCart = [...session.cart, { category: "bebida" as const, name: bebidaUpsell.name, price: bebidaUpsell.price }];
+          return { messages: [`*${bebidaUpsell.name}* anotada! 😋`, mensagemAddMore(newCart)], session: resetaTentativas({ ...session, step: "add_more", cart: newCart }) };
+        }
+        if (numUpsell === 4) {
+          const resp = handleCategory("bebida", { ...session, step: "category" });
+          return { ...resp, session: resetaTentativas(resp.session) };
+        }
+        if (numUpsell === 5) {
+          if (session.deliveryType) {
+            return continuarAposItemCompleto(session.cart, session, "Show! Vamos fechar então 🍕");
+          }
+          return {
+            messages: [`Show! Vamos fechar então 🍕\n\nComo quer receber seu pedido? 😊\n\n  1. Entrega 🛵\n  2. Retirada na loja 🏪\n  3. Consumo no local 🍽️`],
+            session: resetaTentativas({ ...session, step: "delivery_type" }),
+          };
+        }
+      }
+      // Número puro 1-4 após mostrar menu de categorias (quando já há bebida no carrinho)
+      if (/^\d$/.test(n)) {
+        const numCat = parseInt(n);
+        const catMap: Record<number, string> = { 1: "pizza", 2: "lanche", 3: "bebida", 4: "suco" };
+        if (catMap[numCat]) {
+          const cat = catMap[numCat];
+          const resp = cat === "pizza"
+            ? { messages: [`Qual o tamanho da próxima pizza? 🍕\n\n${sizeListComMiniPizza()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "size", currentCategory: "pizza" }) }
+            : handleCategory(cat, { ...session, step: "category" });
+          return { ...resp, session: resetaTentativas(resp.session) };
+        }
+      }
+      // ===== QTD + PRODUTO DIRETO (ex: "3 coca", "2x burguer", "2 calabresa", "2 portuguesa") =====
+      const qtdItemAM = parsearQtdEItem(text);
+      if (qtdItemAM) {
+        const resQtd = tentaAdicionarComQtd(qtdItemAM, session);
+        if (resQtd) return resQtd;
+        // Não é bebida/suco/lanche — verifica se é sabor de pizza com quantidade
+        if (qtdItemAM.qty >= 2 && qtdItemAM.qty <= 5) {
+          const allFlavorsAM = [...MENU.saltyFlavors, ...MENU.sweetFlavors];
+          // Tenta detectar pedido completo (sabor + tamanho) no texto original
+          const pedidoParc = detectaPedidoParcial(text);
+          const saborPizzaAM = (pedidoParc?.flavor) || resolveUmSabor(qtdItemAM.produto, allFlavorsAM);
+          if (saborPizzaAM) {
+            const sizeAM = pedidoParc?.size || detectaTamanhoDaMensagem(normalizar(text));
+            if (sizeAM) {
+              return {
+                messages: [`${qtdItemAM.qty} pizzas *${sizeAM}* de *${saborPizzaAM}*! 🍕 Com qual borda?\n\n${listaBordas(sizeAM)}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`],
+                session: resetaTentativas({ ...session, step: "border_escolha", currentCategory: "pizza", currentFlavor: saborPizzaAM, currentSize: sizeAM, pendingPizzas: qtdItemAM.qty, pizzaAtualIndex: 1 }),
+              };
+            }
+            return {
+              messages: [`${qtdItemAM.qty} pizzas de *${saborPizzaAM}*! 🍕 Qual o tamanho?\n\n${sizeListComMiniPizza()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`],
+              session: resetaTentativas({ ...session, step: "size", currentCategory: "pizza", currentFlavor: saborPizzaAM, pendingPizzas: qtdItemAM.qty, pizzaAtualIndex: 1 }),
+            };
+          }
+        }
+        // Não resolveu — cai no fluxo normal abaixo
+      }
       // ===== BUSCA INTELIGENTE POR VALOR (ex: "tem lanche de 20?") =====
       const catValorAM = detectaCategoriaEValor(text);
       if (catValorAM && catValorAM.categoria !== "pizza") {
@@ -1473,24 +2641,44 @@ Como quer receber? 😊\n\n  1. Entrega 🛵\n  2. Retirada na loja 🏪\n  3. C
         n.includes("ja ta bom") || n.includes("nao precisa mais") || n.includes("nada mais") || n.includes("por hoje") ||
         n.includes("isso mesmo");
       const querPizza = n.includes("mais pizza") || n.includes("outra pizza") || (n.includes("pizza") && !n.includes("lanche"));
+      const querMiniPizza = n.includes("mini-pizza") || n.includes("mini pizza");
       const querLanche = n.includes("lanche") || n.includes("calzone") || n.includes("porcao") || n.includes("batata") ||
-        n.includes("burguer") || n.includes("hamburguer") || n.includes("mini-pizza") || n.includes("mini pizza") || n.includes("macarronada");
-      const querBebida = n.includes("bebida") || n.includes("refri") || n.includes("guarana") || n.includes("suco") || n.includes("agua") || n.includes("cerveja") || n.includes("coca") || n.includes("pepsi");
+        n.includes("burguer") || n.includes("hamburguer") || n.includes("macarronada");
+      const querSuco = detectaIntencaoSuco(text);
+      const querBebida = !querSuco && (n.includes("bebida") || n.includes("refri") || n.includes("guarana") || n.includes("agua") || n.includes("cerveja") || n.includes("coca") || n.includes("pepsi"));
 
       // PRIORIDADE MÁXIMA: se quer finalizar e não mencionou pizza/lanche/bebida explicitamente, vai direto pro fechamento
       if (querFinalizar && !querPizza && !querLanche && !querBebida) {
+        // Se já tem info de entrega/pagamento (preenchida por pedido completo), pula para o próximo step necessário
+        if (session.deliveryType) {
+          return continuarAposItemCompleto(session.cart, session, "Show! Vamos fechar então 🍕");
+        }
         return {
           messages: [`Show! Vamos fechar então 🍕\n\nComo quer receber seu pedido? 😊\n\n  1. Entrega 🛵\n  2. Retirada na loja 🏪\n  3. Consumo no local 🍽️`],
           session: resetaTentativas({ ...session, step: "delivery_type" }),
         };
       }
+      // Mini-Pizza vai para lanche_flavor (reusa fluxo existente)
+      if (querMiniPizza) {
+        return {
+          messages: [`Mini-Pizza anotada! 🍕 Qual sabor?\n\n${MENU.miniPizzaFlavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n")}`],
+          session: resetaTentativas({ ...session, step: "lanche_flavor", currentCategory: "pizza", currentLanche: "Mini-Pizza" }),
+        };
+      }
       // Pizza só se pedida explicitamente (regra: não voltar a pizza por engano)
       if (querPizza) {
-        return { messages: [`Qual o tamanho da próxima pizza? 🍕\n\n${sizeList()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "size", currentCategory: "pizza" }) };
+        return { messages: [`Qual o tamanho da próxima pizza? 🍕\n\n${sizeListComMiniPizza()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "size", currentCategory: "pizza" }) };
       }
-      // Lanche (sem pizza) — vai direto pro cardápio de lanches
+      // Lanche (sem pizza) — tenta produto específico antes de abrir cardápio completo
       if (querLanche) {
+        const lancheEsp = detectarLancheEspecifico(text, session);
+        if (lancheEsp) return lancheEsp;
         const resp = handleCategory("lanche", { ...session, step: "category" });
+        return { ...resp, session: resetaTentativas(resp.session) };
+      }
+      // Suco — prioridade sobre bebida genérica
+      if (querSuco) {
+        const resp = handleCategory("suco", { ...session, step: "category" });
         return { ...resp, session: resetaTentativas(resp.session) };
       }
       // Bebida
@@ -1557,12 +2745,9 @@ Como quer receber? 😊\n\n  1. Entrega 🛵\n  2. Retirada na loja 🏪\n  3. C
         return { messages: [`Combinado, você retira aqui na loja! 🏪\n\nQual a forma de pagamento? 💸`], session: resetaTentativas({ ...baseSession, step: "payment" }) };
       }
 
-      // Caminho DELIVERY com BAIRRO VÁLIDO detectado -> aplica taxa e pede só o endereço (pagamento guardado p/ depois)
+      // Caminho DELIVERY com BAIRRO VÁLIDO (match exato) detectado -> confirma e pede o endereço
       if (dados.tipo === "delivery" && dados.bairro) {
-        return {
-          messages: [`*${dados.bairro.name}*, taxa de entrega: *${formatCurrency(dados.bairro.fee)}* 🛵\n\nMe passa o endereço completo:\n_(Rua, número e complemento)_\n\n_(Digite *voltar* para corrigir a etapa anterior)_`],
-          session: resetaTentativas({ ...session, step: "address", deliveryType: "delivery", neighborhood: dados.bairro.name, deliveryFee: dados.bairro.fee, pagamentoPendente: pagDetectado }),
-        };
+        return proximoAposBairro({ ...session, pagamentoPendente: pagDetectado }, dados.bairro);
       }
 
       // ===== FLUXO NORMAL (fallback): não detectou com confiança =====
@@ -1581,7 +2766,7 @@ Como quer receber? 😊\n\n  1. Entrega 🛵\n  2. Retirada na loja 🏪\n  3. C
             session: resetaTentativas({ ...session, step: "confirm_address", deliveryType: "delivery", neighborhood: hist.ultimoNeighborhood, deliveryFee: fee, address: hist.ultimoEndereco, pagamentoPendente: pagDetectado }),
           };
         }
-        return { messages: [`Qual o seu bairro? 😊`], session: resetaTentativas({ ...session, step: "neighborhood", deliveryType: "delivery", pagamentoPendente: pagDetectado }) };
+        return { messages: [`Qual o seu bairro? 😊`], session: resetaTentativas({ ...session, step: "neighborhood", deliveryType: "delivery", neighborhood: undefined, deliveryFee: 0, bairroConfirmado: false, pagamentoPendente: pagDetectado }) };
       }
       if (n === "2" || n.includes("retirar") || n.includes("loja") || n.includes("buscar") || n.includes("pegar") || n.includes("retiro")) {
         return { messages: [`Combinado, você retira aqui na loja! 🏪\n\nQual a forma de pagamento? 💸`], session: resetaTentativas({ ...session, step: "payment", deliveryType: "pickup", deliveryFee: 0, neighborhood: undefined }) };
@@ -1594,38 +2779,77 @@ Como quer receber? 😊\n\n  1. Entrega 🛵\n  2. Retirada na loja 🏪\n  3. C
       if (!isNaN(num) && num >= 1 && num <= MENU.neighborhoods.length) found = MENU.neighborhoods[num - 1];
       else found = detectaBairro(n) ?? undefined;
       if (found) {
-        return { messages: [`*${found.name}*, taxa de entrega: *${formatCurrency(found.fee)}* 🛵\n\nMe passa o endereço completo:\n_(Rua, número e complemento)_\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "address", neighborhood: found.name, deliveryFee: found.fee }) };
+        return proximoAposBairro(session, found);
       }
-      // Sem match exato -> tenta fuzzy (erro de digitação). NUNCA aplica taxa direto: sempre confirma.
+      // Sem match exato → tenta prefixo (3 primeiras letras)
+      const prefixCandidatos = detectaBairroPrefix(n);
+      if (prefixCandidatos.length === 1) {
+        const c = prefixCandidatos[0];
+        return { messages: [`Você quis dizer *${c.name}*? 😊`], session: resetaTentativas({ ...session, step: "confirma_bairro_fuzzy", bairroFuzzyCandidato: c.name, candidatosBairro: undefined }) };
+      }
+      if (prefixCandidatos.length > 1) {
+        const lista = prefixCandidatos.map((c, i) => `  ${i + 1}. ${c.name}`).join("\n");
+        return { messages: [`Encontrei esses bairros parecidos:\n\n${lista}\n\nQual é o seu? 😊`], session: resetaTentativas({ ...session, step: "confirma_bairro_fuzzy", bairroFuzzyCandidato: undefined, candidatosBairro: prefixCandidatos }) };
+      }
+      // Fallback: fuzzy levenshtein (erro de digitação)
       const candidato = detectaBairroFuzzy(n);
       if (candidato) {
-        return { messages: [`Você quis dizer *${candidato.name}*? 😊`], session: resetaTentativas({ ...session, step: "confirma_bairro_fuzzy", bairroFuzzyCandidato: candidato.name }) };
+        return { messages: [`Você quis dizer *${candidato.name}*? 😊`], session: resetaTentativas({ ...session, step: "confirma_bairro_fuzzy", bairroFuzzyCandidato: candidato.name, candidatosBairro: undefined }) };
       }
-      return respostaInvalida(`Qual o seu bairro? 😊`, session);
+      return respostaInvalida(`Hmm, não encontrei esse bairro. Pode digitar novamente? 😊`, session);
     }
     case "confirma_bairro_fuzzy": {
+      // Lista de múltiplos candidatos (prefix match)
+      const candidatos = session.candidatosBairro;
+      if (candidatos && candidatos.length > 1) {
+        const numEscolha = parseInt(text);
+        if (!isNaN(numEscolha) && numEscolha >= 1 && numEscolha <= candidatos.length) {
+          return proximoAposBairro(session, candidatos[numEscolha - 1]);
+        }
+        // Tenta match por nome dentro dos candidatos
+        const porNome = candidatos.find(c => n.includes(normalizar(c.name).split(/\s+/)[0]));
+        if (porNome) {
+          return proximoAposBairro(session, porNome);
+        }
+        if (eNegativa(n)) {
+          return { messages: [`Sem problema! Qual o seu bairro? 😊`], session: resetaTentativas({ ...session, step: "neighborhood", candidatosBairro: undefined, neighborhood: undefined, deliveryFee: 0, bairroConfirmado: false }) };
+        }
+        const lista = candidatos.map((c, i) => `  ${i + 1}. ${c.name}`).join("\n");
+        return respostaInvalida(`Qual desses é o seu bairro?\n\n${lista}`, session);
+      }
+      // Candidato único (confirmação sim/não)
       const nomeCandidato = session.bairroFuzzyCandidato;
       const nb = MENU.neighborhoods.find(b => b.name === nomeCandidato);
       if (ePositiva(n) || n === "1") {
         if (!nb) return respostaInvalida(`Qual o seu bairro? 😊`, session);
-        return { messages: [`*${nb.name}*, taxa de entrega: *${formatCurrency(nb.fee)}* 🛵\n\nMe passa o endereço completo:\n_(Rua, número e complemento)_`], session: resetaTentativas({ ...session, step: "address", neighborhood: nb.name, deliveryFee: nb.fee, bairroFuzzyCandidato: undefined }) };
+        return proximoAposBairro(session, nb);
       }
-      return { messages: [`Sem problema! Qual o seu bairro então? 😊`], session: resetaTentativas({ ...session, step: "neighborhood", bairroFuzzyCandidato: undefined }) };
+      return { messages: [`Sem problema! Qual o seu bairro então? 😊`], session: resetaTentativas({ ...session, step: "neighborhood", bairroFuzzyCandidato: undefined, neighborhood: undefined, deliveryFee: 0, bairroConfirmado: false }) };
     }
     case "confirm_address": {
       if (ePositiva(n) || n === "1") {
-        if (session.pagamentoPendente) {
-          return aplicaPagamento(session.pagamentoPendente, session);
+        // Cliente confirmou explicitamente o endereço+bairro mostrado → bairro confirmado
+        const sessaoConfirmada = { ...session, bairroConfirmado: true };
+        if (sessaoConfirmada.pagamentoPendente) {
+          return aplicaPagamento(sessaoConfirmada.pagamentoPendente, sessaoConfirmada);
         }
-        return { messages: [`Ótimo! 📍 *${session.address} - ${session.neighborhood}*\n\nQual a forma de pagamento? 💸`], session: resetaTentativas({ ...session, step: "payment" }) };
+        return { messages: [`Ótimo! 📍 *${sessaoConfirmada.address} - ${sessaoConfirmada.neighborhood}*\n\nQual a forma de pagamento? 💸`], session: resetaTentativas({ ...sessaoConfirmada, step: "payment" }) };
       }
       if (eNegativa(n) || n === "2") {
-        return { messages: [`Tudo bem! Qual o seu bairro? 😊`], session: resetaTentativas({ ...session, step: "neighborhood", address: undefined }) };
+        return { messages: [`Tudo bem! Qual o seu bairro? 😊`], session: resetaTentativas({ ...session, step: "neighborhood", address: undefined, neighborhood: undefined, deliveryFee: 0, bairroConfirmado: false }) };
       }
       return respostaInvalida(`  1. Sim, mesmo endereço\n  2. Não, quero outro endereço`, session);
     }
     case "address": {
       if (!text || text.length < 5) return respostaInvalida("Me passa o endereço completo.\nExemplo: *Rua das Flores, 123, Apto 2*", session);
+      // GUARD: entrega NUNCA avança sem bairro confirmado e taxa válida.
+      // Salva o endereço parcial e pergunta o bairro (sem inventar bairro/taxa).
+      if (session.deliveryType === "delivery" && !bairroConfirmadoValido(session)) {
+        return {
+          messages: [`Endereço anotado! 📍\n\nQual o bairro da entrega? 😊`],
+          session: resetaTentativas({ ...session, step: "neighborhood", address: text, neighborhood: undefined, deliveryFee: 0, bairroConfirmado: false }),
+        };
+      }
       // Se o cliente já tinha informado o pagamento na captura inteligente, aplica agora e pula a pergunta
       if (session.pagamentoPendente) {
         return aplicaPagamento(session.pagamentoPendente, { ...session, address: text });
@@ -1789,6 +3013,13 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
       const retira = n === "2" || n.includes("retirar") || n.includes("cancela") || n.includes("errado") ||
         (eNegativa(n) && !n.includes("nao obrigado"));
       if (confirma) {
+        // BLOQUEIO FINAL: entrega não pode ser confirmada sem bairro confirmado + taxa válida.
+        if (session.deliveryType === "delivery" && !bairroConfirmadoValido(session)) {
+          return {
+            messages: [`Opa! Antes de confirmar, preciso do bairro pra calcular a entrega certinho 😊\n\nQual o bairro da entrega?`],
+            session: resetaTentativas({ ...session, step: "neighborhood", neighborhood: undefined, deliveryFee: 0, bairroConfirmado: false, pagamentoPendente: session.paymentMethod ?? session.pagamentoPendente }),
+          };
+        }
         if (session.paymentMethod === "Pix") {
           return { messages: [`Ótimo! 😊 Para finalizar, envie o comprovante do Pix.\n\nChave Pix: (configurada pelo admin) 💸\n\nAssim que confirmarmos o pagamento, seu pedido vai direto pra cozinha! 🍕`], session: { ...session, step: "aguardando_pix" } };
         }
@@ -1799,6 +3030,9 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
         return { messages: [confirmMsg], session: { ...session, step: "done" } };
       }
       if (retira) {
+        if (session.retornoRapido) {
+          return { messages: [`Tudo bem! Como quer receber? 😊\n\n  1. Entrega 🛵\n  2. Retirada na loja 🏪\n  3. Consumo no local 🍽️`], session: resetaTentativas({ ...session, step: "delivery_type", retornoRapido: false }) };
+        }
         return { messages: [`Tudo bem, pedido cancelado! Se mudar de ideia é só chamar. 😊`], session: { ...session, step: "done" } };
       }
       return respostaInvalida(`  ✅ *1.* Confirmar\n  ❌ *2.* Cancelar`, session);
@@ -1806,7 +3040,15 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
     case "lanche_escolha": {
       const mudanca = tentaMudanca(text, session);
       if (mudanca) return mudanca;
-      const num = parseInt(text);
+      // Qty + produto (ex: "2x burguer", "3 hamburguer artesanal")
+      const qtdLanche = parsearQtdEItem(text);
+      if (qtdLanche && qtdLanche.qty >= 2) {
+        const resQtdLan = tentaAdicionarComQtd(qtdLanche, session);
+        if (resQtdLan) return resQtdLan;
+      }
+      // parseInt só quando texto for puramente numérico — evita "2 calabresa" selecionar o 2º lanche
+      const numPuro = /^\d+$/.test(text.trim());
+      const num = numPuro ? parseInt(text) : NaN;
       let lanche = MENU.lanches.find((l) => normalizar(l.name) === n);
       if (!lanche && !isNaN(num) && num >= 1 && num <= MENU.lanches.length) lanche = MENU.lanches[num - 1];
       if (!lanche) lanche = MENU.lanches.find((l) => n.includes(normalizar(l.name)));
@@ -1825,8 +3067,8 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
       }
       if (!lanche) return respostaInvalida(listaLanches(), session);
       if (isEsgotado(lanche.name)) return respostaEsgotado(lanche.name, MENU.lanches.map(l => l.name), session);
-      if (lanche.name === "Macarronada de Carne") {
-        return { messages: [`Ótima escolha! 😋 Qual tamanho da *Macarronada de Carne*?\n\n  1. Pequena (P) · *R$ 28,00*\n  2. Média (M) · *R$ 40,00*\n  3. Grande (G) · *R$ 50,00*\n\n_(Bacon ou ovos: acréscimo de R$ 10,00)_`], session: resetaTentativas({ ...session, step: "lanche_macarronada_size", currentLanche: lanche.name }) };
+      if (lanche.sizes && lanche.sizes.length > 0) {
+        return { messages: [mensagemTamanhoProduto(lanche)], session: resetaTentativas({ ...session, step: "lanche_macarronada_size", currentLanche: lanche.name }) };
       }
       if (lanche.hasFlavors) {
         const flavors = MENU[lanche.flavorsKey as keyof typeof MENU] as string[];
@@ -1876,8 +3118,8 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
       if (session.itemAmbiguoTipo === "lanche") {
         const lanche = MENU.lanches.find(l => l.name === escolhido);
         if (!lanche) return respostaInvalida(listaLanches(), session);
-        if (lanche.name === "Macarronada de Carne") {
-          return { messages: [`Ótima escolha! 😋 Qual tamanho da *Macarronada de Carne*?\n\n  1. Pequena (P) · *R$ 28,00*\n  2. Média (M) · *R$ 40,00*\n  3. Grande (G) · *R$ 50,00*\n\n_(Bacon ou ovos: acréscimo de R$ 10,00)_`], session: resetaTentativas({ ...session, step: "lanche_macarronada_size", currentLanche: lanche.name, candidatosItemAmbiguo: undefined }) };
+        if (lanche.sizes && lanche.sizes.length > 0) {
+          return { messages: [mensagemTamanhoProduto(lanche)], session: resetaTentativas({ ...session, step: "lanche_macarronada_size", currentLanche: lanche.name, candidatosItemAmbiguo: undefined }) };
         }
         if (lanche.hasFlavors) {
           const flavors = MENU[lanche.flavorsKey as keyof typeof MENU] as string[];
@@ -1904,19 +3146,117 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
       }
       return respostaInvalida(mensagemCategorias(), session);
     }
+    case "product_family_choice": {
+      const mudancaFam = tentaMudanca(text, session);
+      if (mudancaFam) return mudancaFam;
+      const candidatosFam = (session.candidatosFamilia ?? []) as typeof MENU.lanches;
+      const labelFam = session.familiaLabel ?? "produto";
+      if (candidatosFam.length === 0) return respostaInvalida(mensagemCategorias(), { ...session, step: "category" });
+
+      // Tenta detectar tamanho por nome/letra (não por número, pois número = índice de produto)
+      const tamFam = (() => {
+        if (n.includes("pequen") || n === "p") return "P";
+        if (n.includes("medi") || n === "m") return "M";
+        if (n.includes("grand") || n === "g") return "G";
+        if (n.includes("famil") || n === "f") return "F";
+        return null;
+      })();
+      // Tenta detectar número (escolha do item)
+      const numPuroFam = /^\d+$/.test(text.trim());
+      const numFam = numPuroFam ? parseInt(text) : NaN;
+
+      let escolhidoFam: typeof MENU.lanches[0] | undefined;
+      if (!isNaN(numFam) && numFam >= 1 && numFam <= candidatosFam.length) {
+        escolhidoFam = candidatosFam[numFam - 1];
+      } else if (!tamFam) {
+        // Casa por sabor/nome em qualquer direção: "carne" → "Macarronada de Carne",
+        // "macarronada de frango" → "Macarronada de Frango". Se ficar ambíguo
+        // (ex: só "macarronada"), reexibe a lista para o cliente escolher.
+        const matches = candidatosFam.filter(c => {
+          const cn = normalizar(c.name);
+          return cn === n || cn.includes(n) || n.includes(cn);
+        });
+        if (matches.length === 1) escolhidoFam = matches[0];
+      }
+
+      // Tamanho digitado sem número: se só um produto na família, seleciona ele
+      if (!escolhidoFam && tamFam && candidatosFam.length === 1) {
+        escolhidoFam = candidatosFam[0];
+      }
+
+      if (!escolhidoFam) {
+        return respostaInvalida(mensagemFamilia(labelFam, candidatosFam), session);
+      }
+
+      if (isEsgotado(escolhidoFam.name)) {
+        return respostaEsgotado(escolhidoFam.name, candidatosFam.map(c => c.name), session);
+      }
+
+      // Produto com tamanhos variáveis (ex: Macarronada)
+      if (escolhidoFam.sizes && escolhidoFam.sizes.length > 0) {
+        if (tamFam) {
+          const sizeItem = escolhidoFam.sizes.find((s: { code: string; price: number }) => s.code === tamFam);
+          if (sizeItem) {
+            const newItem: CartItem = { category: "lanche", name: escolhidoFam.name, size: tamFam, price: sizeItem.price };
+            const newCart = [...session.cart, newItem];
+            return {
+              messages: [mensagemAddMore(newCart)],
+              session: resetaTentativas({ ...session, step: "add_more", cart: newCart, candidatosFamilia: undefined, familiaLabel: undefined }),
+            };
+          }
+        }
+        return {
+          messages: [mensagemTamanhoProduto(escolhidoFam)],
+          session: resetaTentativas({ ...session, step: "lanche_macarronada_size", currentCategory: "lanche", currentLanche: escolhidoFam.name, candidatosFamilia: undefined, familiaLabel: undefined }),
+        };
+      }
+      // Produto com sabores
+      if (escolhidoFam.hasFlavors) {
+        const flavors = MENU[escolhidoFam.flavorsKey as keyof typeof MENU] as string[];
+        const lista = flavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n");
+        return {
+          messages: [`*${escolhidoFam.name}* selecionado! 😋 Qual sabor?\n\n${lista}`],
+          session: resetaTentativas({ ...session, step: "lanche_flavor", currentCategory: "lanche", currentLanche: escolhidoFam.name, candidatosFamilia: undefined, familiaLabel: undefined }),
+        };
+      }
+      // Lanche simples
+      const newItem: CartItem = { category: "lanche", name: escolhidoFam.name, price: escolhidoFam.price };
+      const newCart = [...session.cart, newItem];
+      return {
+        messages: [mensagemAddMore(newCart)],
+        session: resetaTentativas({ ...session, step: "add_more", cart: newCart, candidatosFamilia: undefined, familiaLabel: undefined }),
+      };
+    }
     case "lanche_macarronada_size": {
       const mudanca = tentaMudanca(text, session);
       if (mudanca) return mudanca;
+      // Usa o produto selecionado (Macarronada de Carne, de Frango, ...) e os preços
+      // dos tamanhos do próprio item do cardápio — nada hardcoded.
+      const lancheTam = MENU.lanches.find(l => l.name === session.currentLanche);
+      const sizes = lancheTam?.sizes ?? [];
       const size = detectaTamanho(n);
-      if (!size || size === "F") return respostaInvalida(`  1. Pequena (P) · *R$ 28,00*\n  2. Média (M) · *R$ 40,00*\n  3. Grande (G) · *R$ 50,00*`, session);
-      const price = getMacarronadaPrice(size);
-      const newItem: CartItem = { category: "lanche", name: "Macarronada de Carne", size, price };
+      const sizeItem = size ? sizes.find(s => s.code === size) : undefined;
+      if (!size || !sizeItem) {
+        return respostaInvalida(mensagemTamanhoProduto(lancheTam ?? MENU.lanches.find(l => l.name === "Macarronada de Carne")!), session);
+      }
+      const newItem: CartItem = { category: "lanche", name: lancheTam!.name, size, price: sizeItem.price };
       const newCart = [...session.cart, newItem];
       return { messages: [mensagemAddMore(newCart)], session: resetaTentativas({ ...session, step: "add_more", cart: newCart, currentLanche: undefined }) };
     }
     case "bebida_escolha": {
+      // Se o cliente pedir suco enquanto está na lista de bebidas, redireciona
+      if (detectaIntencaoSuco(text)) {
+        const resp = handleCategory("suco", { ...session, step: "category" });
+        return { ...resp, session: resetaTentativas(resp.session) };
+      }
       const mudanca = tentaMudanca(text, session);
       if (mudanca) return mudanca;
+      // Qty + produto (ex: "3 coca", "2x guarana")
+      const qtdBebida = parsearQtdEItem(text);
+      if (qtdBebida && qtdBebida.qty >= 2) {
+        const resQtdBeb = tentaAdicionarComQtd(qtdBebida, session);
+        if (resQtdBeb) return resQtdBeb;
+      }
       const nums = n.match(/\d+/g);
       if (nums && nums.length >= 2) {
         const i1 = parseInt(nums[0]) - 1;
@@ -1932,7 +3272,8 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
           return { messages: [`*${b1.name}* e *${b2.name}* anotadas! 😋`, mensagemAddMore(newCart)], session: resetaTentativas({ ...session, step: "add_more", cart: newCart }) };
         }
       }
-      const num = parseInt(text);
+      const numPuroBeb = /^\d+$/.test(text.trim());
+      const num = numPuroBeb ? parseInt(text) : NaN;
       let bebida = MENU.bebidas.find(b => normalizar(b.name).includes(n));
       if (!bebida && !isNaN(num) && num >= 1 && num <= MENU.bebidas.length) bebida = MENU.bebidas[num - 1];
       if (!bebida) {
@@ -1957,6 +3298,40 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
     case "suco_escolha": {
       const mudanca = tentaMudanca(text, session);
       if (mudanca) return mudanca;
+      // Multi-suco: "um de maracuja e 1 de bacuri", "maracuja e bacuri"
+      const multiSuco = parsearMultiSuco(text);
+      if (multiSuco) {
+        const totalMulti = multiSuco.length;
+        const pendingQtd = session.pendingQtdSuco;
+        const nomesSucoMap = new Map<string, number>();
+        for (const i of multiSuco) nomesSucoMap.set(i.name, (nomesSucoMap.get(i.name) || 0) + 1);
+        const labels = [...nomesSucoMap.entries()].map(([nome, q]) => q > 1 ? `*${q}x ${nome}*` : `*${nome}*`).join(" e ");
+        if (pendingQtd && totalMulti < pendingQtd) {
+          const faltam = pendingQtd - totalMulti;
+          const accumulated = [...(session.pendingSucosLeite ?? []), ...multiSuco];
+          return {
+            messages: [`${labels} anotados! 😋 Falta${faltam === 1 ? "" : "m"} *${faltam} ${faltam === 1 ? "suco" : "sucos"}*. Qual ${faltam === 1 ? "seria" : "seriam"}?\n\n${listaSucos()}`],
+            session: resetaTentativas({ ...session, pendingSucosLeite: accumulated, pendingQtdSuco: faltam }),
+          };
+        }
+        const accumulated = [...(session.pendingSucosLeite ?? []), ...multiSuco];
+        return finalizarSucos(accumulated, text, session, labels);
+      }
+      // Qty + produto (ex: "2 laranja", "3x acai")
+      const qtdSuco = parsearQtdEItem(text);
+      if (qtdSuco && qtdSuco.qty >= 2) {
+        const resSucoNome = resolveSaborComAmbiguidade(qtdSuco.produto, MENU.sucos.map(s => s.name));
+        if (resSucoNome.tipo === "unico") {
+          const sucoData = MENU.sucos.find(s => s.name === resSucoNome.nome);
+          if (sucoData && !isEsgotado(sucoData.name)) {
+            const novos: CartItem[] = Array.from({ length: qtdSuco.qty }, () => ({ category: "suco" as const, name: sucoData.name, price: sucoData.price }));
+            const accumulated = [...(session.pendingSucosLeite ?? []), ...novos];
+            return finalizarSucos(accumulated, text, session, `*${qtdSuco.qty}x ${sucoData.name}*`);
+          }
+        }
+        const resQtdSuc = tentaAdicionarComQtd(qtdSuco, session);
+        if (resQtdSuc) return { ...resQtdSuc, session: { ...resQtdSuc.session, pendingQtdSuco: undefined } };
+      }
       const nums = n.match(/\d+/g);
       if (nums && nums.length >= 2) {
         const i1 = parseInt(nums[0]) - 1;
@@ -1968,18 +3343,44 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
             { category: "suco", name: s1.name, price: s1.price },
             { category: "suco", name: s2.name, price: s2.price },
           ];
-          const newCart = [...session.cart, ...novosItens];
-          return { messages: [`*${s1.name}* e *${s2.name}* anotados! 😋`, mensagemAddMore(newCart)], session: resetaTentativas({ ...session, step: "add_more", cart: newCart }) };
+          const pendQtd2 = session.pendingQtdSuco;
+          if (pendQtd2 && pendQtd2 > 2) {
+            const faltam2 = pendQtd2 - 2;
+            const accumulated2 = [...(session.pendingSucosLeite ?? []), ...novosItens];
+            return { messages: [`*${s1.name}* e *${s2.name}* anotados! 😋 Faltam *${faltam2} sucos*. Quais seriam?\n\n${listaSucos()}`], session: resetaTentativas({ ...session, pendingSucosLeite: accumulated2, pendingQtdSuco: faltam2 }) };
+          }
+          const accumulated2 = [...(session.pendingSucosLeite ?? []), ...novosItens];
+          return finalizarSucos(accumulated2, text, session, `*${s1.name}* e *${s2.name}*`);
         }
       }
-      const num = parseInt(text);
+      const numPuroSuc = /^\d+$/.test(text.trim());
+      const num = numPuroSuc ? parseInt(text) : NaN;
       let suco = MENU.sucos.find(s => normalizar(s.name).includes(n));
       if (!suco && !isNaN(num) && num >= 1 && num <= MENU.sucos.length) suco = MENU.sucos[num - 1];
-      if (!suco) return respostaInvalida(`${listaSucos()}\n\n_(Com leite: acréscimo de R$ 1,00)_`, session);
+      if (!suco) return respostaInvalida(`${listaSucos()}`, session);
       if (isEsgotado(suco.name)) return respostaEsgotado(suco.name, MENU.sucos.map(s => s.name), session);
       const newItem: CartItem = { category: "suco", name: suco.name, price: suco.price };
-      const newCart = [...session.cart, newItem];
-      return { messages: [mensagemAddMore(newCart)], session: resetaTentativas({ ...session, step: "add_more", cart: newCart }) };
+      const pendQtd1 = session.pendingQtdSuco;
+      if (pendQtd1 && pendQtd1 > 1) {
+        const faltam1 = pendQtd1 - 1;
+        const accumulated1 = [...(session.pendingSucosLeite ?? []), newItem];
+        return {
+          messages: [`*${suco.name}* anotado! 😋 Falt${faltam1 === 1 ? "a" : "am"} *${faltam1} ${faltam1 === 1 ? "suco" : "sucos"}*. Qual ${faltam1 === 1 ? "seria" : "seriam"}?\n\n${listaSucos()}`],
+          session: resetaTentativas({ ...session, pendingSucosLeite: accumulated1, pendingQtdSuco: faltam1 }),
+        };
+      }
+      const accumulated1 = [...(session.pendingSucosLeite ?? []), newItem];
+      return finalizarSucos(accumulated1, text, session, `*${suco.name}*`);
+    }
+    case "suco_leite": {
+      const pending = session.pendingSucosLeite ?? [];
+      let leite: "com" | "sem" | null = null;
+      if (n === "1" || n === "com leite" || n === "leite" || n.includes("com leite")) leite = "com";
+      else if (n === "2" || n === "sem leite" || n === "sem" || n.includes("sem leite")) leite = "sem";
+      if (!leite) return respostaInvalida(`Quer os sucos com leite ou sem leite? 🥤\n\n  1. Com leite\n  2. Sem leite`, session);
+      const itensComLeite = aplicarLeite(pending, leite);
+      const newCart = [...session.cart, ...itensComLeite];
+      return { messages: [mensagemAddMore(newCart)], session: resetaTentativas({ ...session, step: "add_more", cart: newCart, pendingSucosLeite: undefined }) };
     }
     case "done": {
       return { messages: [`_Oi! Sua sessão expirou por inatividade. Vamos começar de novo? 😊_\n\n${mensagemCategorias()}`], session: resetaTentativas({ step: "category", cart: [], deliveryFee: 0, customerName: session.customerName }) };
@@ -2029,5 +3430,5 @@ export function createReturningSession(historico: ClienteHistorico): BotSession 
   return { step: "returning", cart: [], deliveryFee: 0, historico, tentativasInvalidas: 0 };
 }
 export function getWelcomeMessages(): string[] {
-  return [`Olá! Seja bem-vindo à *Chefe da Pizza*! 🍕\n\nPra começar, me fala seu nome?`];
+  return [`Olá! Seja bem-vindo à *Chefe da Pizza*! 🍕\n\nO que vai ser hoje? Temos coisa boa te esperando!`];
 }

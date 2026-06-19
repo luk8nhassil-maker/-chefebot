@@ -124,7 +124,7 @@ function parseHybridPayment(pagamento: string): { metodo: string; valor: number 
 type NovoPedidoForm = {
   cliente: string
   telefone: string
-  tipoEntrega: "delivery" | "retirada"
+  tipoEntrega: "delivery" | "retirada" | "dine_in"
   endereco: string
   bairro: string
   referencia: string
@@ -137,7 +137,10 @@ type NovoPedidoForm = {
 export default function PedidosPage() {
   const router = useRouter()
   const [pedidos, setPedidos] = useState<Pedido[]>([])
-  const [filtro, setFiltro] = useState<Status | "todos">("novo")
+  const [filtro, setFiltro] = useState<Status | "todos" | "tempo_real">("novo")
+  const [sessoes, setSessoes] = useState<any[]>([])
+  const [assumindoSessao, setAssumindoSessao] = useState<string | null>(null)
+  const [devolvendoSessaoBot, setDevolvendoSessaoBot] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [isAdmin, setIsAdmin] = useState(false)
   const [userName, setUserName] = useState("Kellyne")
@@ -185,18 +188,23 @@ export default function PedidosPage() {
   const tocarSomNormal = () => {
     if (muteadoRef.current) return
     try {
-      const Ctx = (window as any).AudioContext || (window as any).webkitAudioContext
-      const ctx = new Ctx()
-      const bipe = (freq: number, delay: number) => setTimeout(() => {
+      const audio = new Audio("/pavlov.mp3")
+      audio.play().catch(() => {
         try {
-          const osc = ctx.createOscillator(); const gain = ctx.createGain()
-          osc.connect(gain); gain.connect(ctx.destination); osc.type = "square"
-          osc.frequency.value = freq
-          gain.gain.setValueAtTime(0.4, ctx.currentTime); gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.18)
-          osc.start(); osc.stop(ctx.currentTime + 0.18)
+          const Ctx = (window as any).AudioContext || (window as any).webkitAudioContext
+          const ctx = new Ctx()
+          const bipe = (freq: number, delay: number) => setTimeout(() => {
+            try {
+              const osc = ctx.createOscillator(); const gain = ctx.createGain()
+              osc.connect(gain); gain.connect(ctx.destination); osc.type = "square"
+              osc.frequency.value = freq
+              gain.gain.setValueAtTime(0.4, ctx.currentTime); gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.18)
+              osc.start(); osc.stop(ctx.currentTime + 0.18)
+            } catch {}
+          }, delay)
+          bipe(880, 0); bipe(880, 200); bipe(1175, 400)
         } catch {}
-      }, delay)
-      bipe(880, 0); bipe(880, 200); bipe(1175, 400)
+      })
     } catch {}
     if (navigator.vibrate) navigator.vibrate([120, 80, 120, 80, 150])
   }
@@ -327,10 +335,23 @@ export default function PedidosPage() {
     ativarWakeLock();
     const handleVisibility = () => { if (document.visibilityState === "visible") ativarWakeLock(); };
     document.addEventListener("visibilitychange", handleVisibility);
-    const intervalo = setInterval(carregarPedidos, 10000)
+    const intervalo = setInterval(carregarPedidos, 3000)
     const tick = setInterval(() => setNow(Date.now()), 1000)
     return () => { if (wakeLock) wakeLock.release(); document.removeEventListener("visibilitychange", handleVisibility); window.removeEventListener("beforeinstallprompt", handleInstall); clearInterval(intervalo); clearInterval(tick); if (piscarRef.current) clearInterval(piscarRef.current); if (somRepetidoRef.current) clearInterval(somRepetidoRef.current); document.title = tituloOriginalRef.current }
   }, [router])
+
+  useEffect(() => {
+    if (filtro !== "tempo_real") return
+    const carregarSessoes = () => {
+      fetch("/api/sessoes-ativas")
+        .then(r => r.ok ? r.json() : [])
+        .then(d => Array.isArray(d) ? setSessoes(d) : setSessoes([]))
+        .catch(() => {})
+    }
+    carregarSessoes()
+    const iv = setInterval(carregarSessoes, 3000)
+    return () => clearInterval(iv)
+  }, [filtro])
 
   const limparHistorico = async () => {
     setLimpando(true)
@@ -352,7 +373,25 @@ export default function PedidosPage() {
   }
 
   const assumirConversa = async (phone: string) => {
-    try { await fetch("/api/assumir", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phone }) }); setManuais(prev => ({ ...prev, [phone]: true })) } catch {}
+    try { await fetch("/api/assumir", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ telefone: phone }) }); setManuais(prev => ({ ...prev, [phone]: true })) } catch {}
+  }
+
+  const assumirSessao = async (phone: string) => {
+    setAssumindoSessao(phone)
+    try {
+      await fetch("/api/assumir", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ telefone: phone }) })
+      setSessoes(prev => prev.map(s => s.phone === phone ? { ...s, manual: true } : s))
+    } catch {}
+    setAssumindoSessao(null)
+  }
+
+  const devolverSessaoParaBot = async (phone: string) => {
+    setDevolvendoSessaoBot(phone)
+    try {
+      await fetch("/api/devolver-para-bot", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ telefone: phone }) })
+      setSessoes(prev => prev.map(s => s.phone === phone ? { ...s, manual: false } : s))
+    } catch {}
+    setDevolvendoSessaoBot(null)
   }
 
   const marcarResolvido = async (phone: string, pedidoId: string) => {
@@ -403,7 +442,7 @@ export default function PedidosPage() {
           cliente: f.cliente.trim(),
           telefone: f.telefone.trim(),
           tipoEntrega: f.tipoEntrega,
-          endereco: f.tipoEntrega === "delivery" ? f.endereco.trim() : "Retirada na loja",
+          endereco: f.tipoEntrega === "delivery" ? f.endereco.trim() : f.tipoEntrega === "dine_in" ? "Consumo no local" : "Retirada na loja",
           bairro: f.tipoEntrega === "delivery" ? f.bairro.trim() : undefined,
           referencia: f.referencia.trim() || undefined,
           itens: f.itens.filter(Boolean),
@@ -436,7 +475,7 @@ export default function PedidosPage() {
   const contagemPorStatus = (s: Status) => pedidos.filter(p => p.status === s).length
 
   const buscaNorm = busca.toLowerCase().trim()
-  const pedidosFiltrados = (filtro === "todos" ? pedidos : pedidos.filter(p => p.status === filtro))
+  const pedidosFiltrados = (filtro === "todos" || filtro === "tempo_real" ? pedidos : pedidos.filter(p => p.status === filtro))
     .filter(p => {
       if (!buscaNorm) return true
       const num = String(p.numero || "")
@@ -621,7 +660,7 @@ export default function PedidosPage() {
           {/* Pipeline + Novo + Limpar */}
           <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
             <div className="cbPipeScroll">
-              <button onClick={() => setFiltro("todos")} style={{ border: `1px solid ${filtro === "todos" ? "#ff6b00" : "#242220"}`, background: filtro === "todos" ? "#ff6b00" : "transparent", color: filtro === "todos" ? "#060606" : "#c9c2b4", fontSize: 11, fontWeight: 900, padding: "6px 11px", borderRadius: 14, flexShrink: 0 }}>Todos · {pedidos.length}</button>
+              <button onClick={() => setFiltro("tempo_real")} style={{ border: `1px solid ${filtro === "tempo_real" ? "#60a5fa" : "#242220"}`, background: filtro === "tempo_real" ? "#60a5fa" : "transparent", color: filtro === "tempo_real" ? "#060606" : "#c9c2b4", fontSize: 11, fontWeight: 900, padding: "6px 11px", borderRadius: 14, flexShrink: 0 }}>⚡ Tempo real · {sessoes.length}</button>
               {steps.map((s) => {
                 const active = filtro === s.key; const sc = STATUS_COLOR[s.key]
                 return (
@@ -674,15 +713,63 @@ export default function PedidosPage() {
           </div>
         )}
 
+        {/* Tempo real */}
+        {filtro === "tempo_real" && (
+          <>
+            {sessoes.length === 0 ? (
+              <div style={{ background: "#101010", border: "1px dashed #2a2723", borderRadius: 20, padding: "36px 20px", textAlign: "center" }}>
+                <span style={{ fontSize: 32, display: "block", marginBottom: 8 }}>⚡</span>
+                <span style={{ fontSize: 15, fontWeight: 900, color: "#c9c2b4", display: "block" }}>Nenhuma conversa em tempo real agora.</span>
+              </div>
+            ) : sessoes.map(s => (
+              <div key={s.phone} style={{ background: "#101010", border: `1px solid ${s.manual ? "rgba(239,68,68,.45)" : "#1f1d1a"}`, borderRadius: 16, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                  <div>
+                    <span style={{ fontSize: 14, fontWeight: 900, color: "#f5f2ee" }}>Cliente final {s.lastDigits}</span>
+                    {s.customerName && <span style={{ fontSize: 12, color: "#a39b8b", fontWeight: 600, marginLeft: 6 }}>({s.customerName})</span>}
+                  </div>
+                  <span style={{ fontSize: 10, fontWeight: 800, padding: "3px 8px", borderRadius: 8, background: s.manual ? "rgba(239,68,68,.15)" : "rgba(52,211,153,.12)", color: s.manual ? "#ef4444" : "#34d399", border: `1px solid ${s.manual ? "rgba(239,68,68,.35)" : "rgba(52,211,153,.3)"}` }}>
+                    {s.manual ? "Atendimento humano" : "Robô atendendo"}
+                  </span>
+                </div>
+                <div style={{ fontSize: 12, color: "#a39b8b", fontWeight: 600 }}>
+                  Etapa: <span style={{ color: "#c9c2b4" }}>{s.stepLabel}</span>
+                </div>
+                {s.ultimaMensagem && (
+                  <div style={{ fontSize: 12, color: "#c9c2b4", background: "#0d0c0b", borderRadius: 8, padding: "8px 10px", fontStyle: "italic" }}>"{s.ultimaMensagem}"</div>
+                )}
+                {s.cart && s.cart.length > 0 && (
+                  <div style={{ fontSize: 11, color: "#a39b8b" }}>🛒 {s.cart.join(", ")}</div>
+                )}
+                <div style={{ display: "flex", gap: 8 }}>
+                  {!s.manual ? (
+                    <button
+                      onClick={() => assumirSessao(s.phone)}
+                      disabled={assumindoSessao === s.phone}
+                      style={{ flex: 1, height: 38, border: "none", borderRadius: 10, background: "#ef4444", color: "#fff", fontSize: 12, fontWeight: 900 }}
+                    >{assumindoSessao === s.phone ? "..." : "Assumir conversa"}</button>
+                  ) : (
+                    <button
+                      onClick={() => devolverSessaoParaBot(s.phone)}
+                      disabled={devolvendoSessaoBot === s.phone}
+                      style={{ flex: 1, height: 38, border: "none", borderRadius: 10, background: "#2563eb", color: "#fff", fontSize: 12, fontWeight: 900 }}
+                    >{devolvendoSessaoBot === s.phone ? "..." : "🤖 Devolver para o robô"}</button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </>
+        )}
+
         {/* Lista */}
-          {pedidosFiltrados.length === 0 && (
+          {filtro !== "tempo_real" && pedidosFiltrados.length === 0 && (
             <div style={{ background: "#101010", border: "1px dashed #2a2723", borderRadius: 20, padding: "36px 20px", textAlign: "center" }}>
               <span style={{ fontSize: 17, fontWeight: 900, color: "#c9c2b4", display: "block" }}>Nada por aqui</span>
               <span style={{ fontSize: 13, fontWeight: 600, color: "#a39b8b", display: "block", marginTop: 4 }}>Nenhum pedido nesse estado agora.</span>
             </div>
           )}
 
-          {pedidosFiltrados.map(pedido => {
+          {filtro !== "tempo_real" && pedidosFiltrados.map(pedido => {
             const sc = STATUS_COLOR[pedido.status]
             const minsDesde = tempoDesde(pedido.horario, undefined, now)
             const minsPrep = tempoDesde(pedido.horario, pedido.horarioInicio, now)
@@ -1113,9 +1200,9 @@ export default function PedidosPage() {
               <div>
                 <label style={labelStyle}>Tipo</label>
                 <div style={{ display: "flex", gap: 8 }}>
-                  {(["delivery", "retirada"] as const).map(t => (
+                  {(["delivery", "retirada", "dine_in"] as const).map(t => (
                     <button key={t} onClick={() => setNovoPedidoForm(f => ({ ...f, tipoEntrega: t }))} style={{ flex: 1, height: 40, border: `1px solid ${novoPedidoForm.tipoEntrega === t ? "#ff6b00" : "#242220"}`, borderRadius: 10, background: novoPedidoForm.tipoEntrega === t ? "rgba(255,107,0,.15)" : "transparent", color: novoPedidoForm.tipoEntrega === t ? "#ff6b00" : "#5a564d", fontSize: 13, fontWeight: 900 }}>
-                      {t === "delivery" ? "🛵 Entrega" : "🏪 Retirada"}
+                      {t === "delivery" ? "🛵 Entrega" : t === "dine_in" ? "🍽️ Local" : "🏪 Retirada"}
                     </button>
                   ))}
                 </div>
