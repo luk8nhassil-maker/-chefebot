@@ -110,7 +110,7 @@ function getOpcoesPorStep(step: string): string[] {
     category: ["pizza", "lanche", "bebida", "suco"],
     size: ["Pequena", "Media", "Grande", "Familia"],
     add_more: ["mais uma pizza", "outro produto", "nao pode fechar"],
-    delivery_type: ["entrega", "retirada"],
+    delivery_type: ["entrega", "retirada", "consumo no local"],
     payment: ["Pix", "Dinheiro", "Cartao"],
     confirm: ["sim confirmar", "nao retirar"],
     border_escolha: ["Catupiry", "Chocolate", "Cheddar", "Catupiry com Cheddar", "sem borda"],
@@ -310,7 +310,7 @@ Responda APENAS em JSON:
       const pedidosAtualizados = pedidos.map(p => p.id === pedidoAtivo!.id ? { ...p, pixConfirmado: true } : p);
       await redis.set("pedidos", pedidosAtualizados);
       const firstName = pedidoAtivo.cliente.split(" ")[0];
-      const timeMsg = pedidoAtivo.tipoEntrega === "pickup" ? config.tempoEntregaRetirada : config.tempoEntregaDelivery;
+      const timeMsg = (pedidoAtivo.tipoEntrega === "pickup" || pedidoAtivo.tipoEntrega === "dine_in") ? config.tempoEntregaRetirada : config.tempoEntregaDelivery;
       await enviarMensagem(phone, `Pagamento confirmado! ✅🎉
 
 Obrigado, *${firstName}*! Seu pedido já foi pra cozinha. Sua pizza chega em *${timeMsg}* 🛵
@@ -403,7 +403,7 @@ async function processarComprovante(phone: string, data: any, config: ConfigPizz
       const pedidosAtualizados = pedidos.map(p => p.id === pedidoAtivo.id ? { ...p, pixConfirmado: true } : p);
       await redis.set("pedidos", pedidosAtualizados);
       const firstName = pedidoAtivo.cliente.split(" ")[0];
-      const timeMsg = pedidoAtivo.tipoEntrega === "pickup" ? config.tempoEntregaRetirada : config.tempoEntregaDelivery;
+      const timeMsg = (pedidoAtivo.tipoEntrega === "pickup" || pedidoAtivo.tipoEntrega === "dine_in") ? config.tempoEntregaRetirada : config.tempoEntregaDelivery;
       await enviarMensagem(phone, `Pagamento confirmado! ✅🎉\n\nObrigado, *${firstName}*! Seu pedido já foi pra cozinha. Sua pizza chega em *${timeMsg}* 🛵\n\nQualquer dúvida é só chamar. Bom apetite! 🍕`);
       await redis.set(chaveHash, true, { ex: 30 * 24 * 60 * 60 }) // 30 dias
       await log("info", `Pix confirmado automaticamente para ${firstName}`, `Valor: R$ ${resultado.valorEncontrado}`);

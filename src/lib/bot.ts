@@ -984,8 +984,10 @@ function detectaDadosEntrega(text: string): { tipo: "delivery" | "pickup" | null
 
 // Detecta tipo de entrega incluindo consumo no local
 function detectaTipoEntregaCompleto(n: string): "delivery" | "pickup" | "dine_in" | null {
-  if (/\blocal\b/.test(n) || n.includes("consumo no local") || n.includes("comer ai") ||
-      n.includes("aqui mesmo") || n.includes("na mesa") || n.includes("comer aqui")) return "dine_in";
+  if (/\blocal\b/.test(n) || n.includes("consumo") || n.includes("consumir") ||
+      n.includes("comer ai") || n.includes("comer aqui") || n.includes("comer na pizzaria") ||
+      n.includes("aqui mesmo") || n.includes("na mesa") || /\bmesa\b/.test(n) ||
+      n.includes("vou comer")) return "dine_in";
   if (n.includes("entrega") || n.includes("delivery") || n.includes("entregar") ||
       n.includes("minha casa") || n.includes("em casa") || n.includes("manda ai")) return "delivery";
   if (n.includes("retirar") || n.includes("retirada") || n.includes("buscar") ||
@@ -2395,8 +2397,10 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
         || n.includes("vou comer")
         || n.includes("comer ai")
         || n.includes("comer aqui")
+        || n.includes("comer na pizzaria")
         || n.includes("local")
         || n.includes("ai mesmo")
+        || /\bmesa\b/.test(n)
         || (n.includes("na loja") && !n.includes("retirar") && !n.includes("buscar") && !n.includes("pegar"));
       if (isDineIn) {
         return { messages: [`Combinado! 🍽️ Consumo no local!\n\nQual a forma de pagamento? 💸`], session: resetaTentativas({ ...session, step: "payment", deliveryType: "dine_in", deliveryFee: 0, neighborhood: undefined }) };
