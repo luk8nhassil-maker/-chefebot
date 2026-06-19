@@ -112,6 +112,7 @@ export type BotStep =
   | "pedindo_nome"
   | "confirm"
   | "aguardando_pix"
+  | "suco_leite"
   | "done"
   | "escalado";
 export interface CartItem {
@@ -173,6 +174,7 @@ export interface BotSession {
   stepAnteriorEscalado?: BotStep;
   pendingConsultaFatias?: { size?: string };
   candidatosBairro?: { name: string; fee: number }[];
+  pendingSucosLeite?: CartItem[];
   pendingConsultaPreco?: {
     label: string;
     categoria: "pizza_size" | "pizza_mini" | "pizza_ambiguo" | "lanche" | "bebida" | "suco";
@@ -1138,6 +1140,33 @@ function parsearMultiSuco(text: string): CartItem[] | null {
     }
   }
   return itens.length >= 2 ? itens : null;
+}
+function detectaLeiteTexto(text: string): "com" | "sem" | null {
+  const n = normalizar(text);
+  if (n.includes("com leite") || n.includes("c/ leite")) return "com";
+  if (n.includes("sem leite") || n.includes("s/ leite") || n.includes("puro") || n.includes("pura") || n === "sem") return "sem";
+  return null;
+}
+function aplicarLeite(items: CartItem[], leite: "com" | "sem"): CartItem[] {
+  return items.map(item => {
+    if (item.category !== "suco") return item;
+    const isBanana = normalizar(item.name).includes("banana");
+    if (isBanana) return { ...item, name: `${item.name} com leite` };
+    return { ...item, name: `${item.name}${leite === "com" ? " com leite" : " sem leite"}` };
+  });
+}
+function finalizarSucos(novosItens: CartItem[], text: string, session: BotSession, label: string): BotResponse {
+  const leiteTexto = detectaLeiteTexto(text);
+  const todosBanana = novosItens.every(i => normalizar(i.name).includes("banana"));
+  if (leiteTexto || todosBanana) {
+    const itensComLeite = aplicarLeite(novosItens, leiteTexto ?? "com");
+    const newCart = [...session.cart, ...itensComLeite];
+    return { messages: [`${label} anotado${novosItens.length > 1 ? "s" : ""}! 😋`, mensagemAddMore(newCart)], session: resetaTentativas({ ...session, step: "add_more", cart: newCart, pendingQtdSuco: undefined, pendingSucosLeite: undefined }) };
+  }
+  return {
+    messages: [`${label} anotado${novosItens.length > 1 ? "s" : ""}! 😋\n\nQuer com leite ou sem leite? 🥤\n\n  1. Com leite\n  2. Sem leite`],
+    session: resetaTentativas({ ...session, step: "suco_leite", pendingSucosLeite: novosItens, pendingQtdSuco: undefined }),
+  };
 }
 // Tenta adicionar qty unidades de uma bebida/suco/lanche (sem sabor, sem tamanho) ao carrinho.
 // Retorna BotResponse se resolvido com sucesso, null se o produto não foi identificado.
@@ -2645,18 +2674,27 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
         const labels = [...nomesSucoMap.entries()].map(([nome, q]) => q > 1 ? `*${q}x ${nome}*` : `*${nome}*`).join(" e ");
         if (pendingQtd && totalMulti < pendingQtd) {
           const faltam = pendingQtd - totalMulti;
-          const newCart = [...session.cart, ...multiSuco];
+          const accumulated = [...(session.pendingSucosLeite ?? []), ...multiSuco];
           return {
             messages: [`${labels} anotados! 😋 Falta${faltam === 1 ? "" : "m"} *${faltam} ${faltam === 1 ? "suco" : "sucos"}*. Qual ${faltam === 1 ? "seria" : "seriam"}?\n\n${listaSucos()}`],
-            session: resetaTentativas({ ...session, cart: newCart, pendingQtdSuco: faltam }),
+            session: resetaTentativas({ ...session, pendingSucosLeite: accumulated, pendingQtdSuco: faltam }),
           };
         }
-        const newCart = [...session.cart, ...multiSuco];
-        return { messages: [`${labels} anotados! 😋`, mensagemAddMore(newCart)], session: resetaTentativas({ ...session, step: "add_more", cart: newCart, pendingQtdSuco: undefined }) };
+        const accumulated = [...(session.pendingSucosLeite ?? []), ...multiSuco];
+        return finalizarSucos(accumulated, text, session, labels);
       }
       // Qty + produto (ex: "2 laranja", "3x acai")
       const qtdSuco = parsearQtdEItem(text);
       if (qtdSuco && qtdSuco.qty >= 2) {
+        const resSucoNome = resolveSaborComAmbiguidade(qtdSuco.produto, MENU.sucos.map(s => s.name));
+        if (resSucoNome.tipo === "unico") {
+          const sucoData = MENU.sucos.find(s => s.name === resSucoNome.nome);
+          if (sucoData && !isEsgotado(sucoData.name)) {
+            const novos: CartItem[] = Array.from({ length: qtdSuco.qty }, () => ({ category: "suco" as const, name: sucoData.name, price: sucoData.price }));
+            const accumulated = [...(session.pendingSucosLeite ?? []), ...novos];
+            return finalizarSucos(accumulated, text, session, `*${qtdSuco.qty}x ${sucoData.name}*`);
+          }
+        }
         const resQtdSuc = tentaAdicionarComQtd(qtdSuco, session);
         if (resQtdSuc) return { ...resQtdSuc, session: { ...resQtdSuc.session, pendingQtdSuco: undefined } };
       }
@@ -2671,32 +2709,44 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
             { category: "suco", name: s1.name, price: s1.price },
             { category: "suco", name: s2.name, price: s2.price },
           ];
-          const newCart = [...session.cart, ...novosItens];
           const pendQtd2 = session.pendingQtdSuco;
           if (pendQtd2 && pendQtd2 > 2) {
             const faltam2 = pendQtd2 - 2;
-            return { messages: [`*${s1.name}* e *${s2.name}* anotados! 😋 Faltam *${faltam2} sucos*. Quais seriam?\n\n${listaSucos()}`], session: resetaTentativas({ ...session, cart: newCart, pendingQtdSuco: faltam2 }) };
+            const accumulated2 = [...(session.pendingSucosLeite ?? []), ...novosItens];
+            return { messages: [`*${s1.name}* e *${s2.name}* anotados! 😋 Faltam *${faltam2} sucos*. Quais seriam?\n\n${listaSucos()}`], session: resetaTentativas({ ...session, pendingSucosLeite: accumulated2, pendingQtdSuco: faltam2 }) };
           }
-          return { messages: [`*${s1.name}* e *${s2.name}* anotados! 😋`, mensagemAddMore(newCart)], session: resetaTentativas({ ...session, step: "add_more", cart: newCart, pendingQtdSuco: undefined }) };
+          const accumulated2 = [...(session.pendingSucosLeite ?? []), ...novosItens];
+          return finalizarSucos(accumulated2, text, session, `*${s1.name}* e *${s2.name}*`);
         }
       }
       const numPuroSuc = /^\d+$/.test(text.trim());
       const num = numPuroSuc ? parseInt(text) : NaN;
       let suco = MENU.sucos.find(s => normalizar(s.name).includes(n));
       if (!suco && !isNaN(num) && num >= 1 && num <= MENU.sucos.length) suco = MENU.sucos[num - 1];
-      if (!suco) return respostaInvalida(`${listaSucos()}\n\n_(Com leite: acréscimo de R$ 1,00)_`, session);
+      if (!suco) return respostaInvalida(`${listaSucos()}`, session);
       if (isEsgotado(suco.name)) return respostaEsgotado(suco.name, MENU.sucos.map(s => s.name), session);
       const newItem: CartItem = { category: "suco", name: suco.name, price: suco.price };
-      const newCart = [...session.cart, newItem];
       const pendQtd1 = session.pendingQtdSuco;
       if (pendQtd1 && pendQtd1 > 1) {
         const faltam1 = pendQtd1 - 1;
+        const accumulated1 = [...(session.pendingSucosLeite ?? []), newItem];
         return {
-          messages: [`*${suco.name}* anotado! 😋 Falt${faltam1 === 1 ? "a" : "am"} *${faltam1} ${faltam1 === 1 ? "suco" : "sucos"}*. Qual ${faltam1 === 1 ? "seria" : "seriam"}?\n\n${listaSucos()}\n\n_(Com leite: acréscimo de R$ 1,00)_`],
-          session: resetaTentativas({ ...session, cart: newCart, pendingQtdSuco: faltam1 }),
+          messages: [`*${suco.name}* anotado! 😋 Falt${faltam1 === 1 ? "a" : "am"} *${faltam1} ${faltam1 === 1 ? "suco" : "sucos"}*. Qual ${faltam1 === 1 ? "seria" : "seriam"}?\n\n${listaSucos()}`],
+          session: resetaTentativas({ ...session, pendingSucosLeite: accumulated1, pendingQtdSuco: faltam1 }),
         };
       }
-      return { messages: [mensagemAddMore(newCart)], session: resetaTentativas({ ...session, step: "add_more", cart: newCart, pendingQtdSuco: undefined }) };
+      const accumulated1 = [...(session.pendingSucosLeite ?? []), newItem];
+      return finalizarSucos(accumulated1, text, session, `*${suco.name}*`);
+    }
+    case "suco_leite": {
+      const pending = session.pendingSucosLeite ?? [];
+      let leite: "com" | "sem" | null = null;
+      if (n === "1" || n === "com leite" || n === "leite" || n.includes("com leite")) leite = "com";
+      else if (n === "2" || n === "sem leite" || n === "sem" || n.includes("sem leite")) leite = "sem";
+      if (!leite) return respostaInvalida(`Quer os sucos com leite ou sem leite? 🥤\n\n  1. Com leite\n  2. Sem leite`, session);
+      const itensComLeite = aplicarLeite(pending, leite);
+      const newCart = [...session.cart, ...itensComLeite];
+      return { messages: [mensagemAddMore(newCart)], session: resetaTentativas({ ...session, step: "add_more", cart: newCart, pendingSucosLeite: undefined }) };
     }
     case "done": {
       return { messages: [`_Oi! Sua sessão expirou por inatividade. Vamos começar de novo? 😊_\n\n${mensagemCategorias()}`], session: resetaTentativas({ step: "category", cart: [], deliveryFee: 0, customerName: session.customerName }) };
