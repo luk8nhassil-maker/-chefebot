@@ -157,6 +157,7 @@ export interface BotSession {
   neighborhood?: string;
   address?: string;
   deliveryFee: number;
+  bairroConfirmado?: boolean;
   paymentMethod?: string;
   escalado?: boolean;
   historico?: ClienteHistorico;
@@ -1139,6 +1140,42 @@ function detectaBairroPrefix(n: string): { name: string; fee: number }[] {
   return resultado;
 }
 
+// Bairro da ENTREGA ATUAL está confirmado de forma segura?
+// Exige: flag de confirmação desta entrega + bairro cadastrado no menu + taxa batendo com a do bairro.
+// Nunca aceita bairro "stale" da sessão nem taxa inventada (correção do bug de bairro fantasma).
+function bairroConfirmadoValido(session: BotSession): boolean {
+  if (!session.bairroConfirmado || !session.neighborhood) return false;
+  const nb = MENU.neighborhoods.find(b => normalizar(b.name) === normalizar(session.neighborhood!));
+  return !!nb && session.deliveryFee === nb.fee;
+}
+
+// Após o bairro estar confirmado: se o endereço já veio antes, segue pro pagamento;
+// senão pede o endereço. Centraliza a transição para nunca pular a confirmação de bairro.
+function proximoAposBairro(session: BotSession, nb: { name: string; fee: number }): BotResponse {
+  const base: BotSession = {
+    ...session,
+    deliveryType: "delivery",
+    neighborhood: nb.name,
+    deliveryFee: nb.fee,
+    bairroConfirmado: true,
+    candidatosBairro: undefined,
+    bairroFuzzyCandidato: undefined,
+  };
+  if (base.address) {
+    // Endereço já veio antes do bairro — se já sabemos o pagamento, retoma o fechamento.
+    const pay = base.pagamentoPendente ?? base.paymentMethod;
+    if (pay) return aplicaPagamento(pay, base);
+    return {
+      messages: [`*${nb.name}*, taxa de entrega: *${formatCurrency(nb.fee)}* 🛵\n\n📍 ${base.address}\n\nQual a forma de pagamento? 💸`],
+      session: resetaTentativas({ ...base, step: "payment" }),
+    };
+  }
+  return {
+    messages: [`*${nb.name}*, taxa de entrega: *${formatCurrency(nb.fee)}* 🛵\n\nMe passa o endereço completo:\n_(Rua, número e complemento)_\n\n_(Digite *voltar* para corrigir a etapa anterior)_`],
+    session: resetaTentativas({ ...base, step: "address" }),
+  };
+}
+
 // Detector central de dados de entrega numa única mensagem.
 // Conservador: só retorna o que detectou com confiança; o resto fica null (fluxo normal pergunta).
 function detectaDadosEntrega(text: string): { tipo: "delivery" | "pickup" | null; bairro: { name: string; fee: number } | null; pagamento: string | null } {
@@ -1179,10 +1216,10 @@ function continuarAposItemCompleto(newCart: CartItem[], session: BotSession, msg
       session: resetaTentativas({ ...s, step: "delivery_type" }),
     };
   }
-  if (s.deliveryType === "delivery" && !s.neighborhood) {
+  if (s.deliveryType === "delivery" && !bairroConfirmadoValido(s)) {
     return {
       messages: [`${msg}\n\nQual seu bairro para eu calcular a entrega? 😊`],
-      session: resetaTentativas({ ...s, step: "neighborhood" }),
+      session: resetaTentativas({ ...s, step: "neighborhood", neighborhood: undefined, deliveryFee: 0, bairroConfirmado: false }),
     };
   }
   if (s.deliveryType === "delivery" && !s.address) {
@@ -1208,11 +1245,9 @@ function processarPedidoCompleto(text: string, session: BotSession): BotResponse
 
   // Detecta entrega/bairro/pagamento
   const deliveryType = detectaTipoEntregaCompleto(n);
-  let bairroDetectado = detectaBairro(n);
-  if (!bairroDetectado) {
-    const candidatos = detectaBairroPrefix(n);
-    if (candidatos.length === 1) bairroDetectado = candidatos[0];
-  }
+  // Só aceita bairro por MATCH EXATO aqui (seguro). Prefixo/fuzzy é parcial e
+  // precisa de confirmação — fica para o step de bairro perguntar/confirmar.
+  const bairroDetectado = detectaBairro(n);
   const pagamento = detectaPagamento(n);
 
   // Só ativa quando a mensagem carrega info de entrega/pagamento além do produto
@@ -1251,13 +1286,18 @@ function processarPedidoCompleto(text: string, session: BotSession): BotResponse
   // Monta base da sessão com todos os campos já conhecidos
   const tipoEntrega = deliveryType ?? (bairroDetectado ? "delivery" : null);
   let sessionBase: BotSession = { ...session };
-  if (tipoEntrega) {
+  if (tipoEntrega === "delivery") {
+    // NUNCA reaproveita bairro/taxa antigos da sessão. Só aplica se veio bairro EXATO
+    // nesta mensagem; caso contrário zera para o fluxo perguntar/confirmar o bairro.
     sessionBase = {
       ...sessionBase,
-      deliveryType: tipoEntrega,
-      deliveryFee: tipoEntrega === "delivery" ? (bairroDetectado?.fee ?? session.deliveryFee) : 0,
-      neighborhood: tipoEntrega === "delivery" ? (bairroDetectado?.name ?? session.neighborhood) : session.neighborhood,
+      deliveryType: "delivery",
+      deliveryFee: bairroDetectado ? bairroDetectado.fee : 0,
+      neighborhood: bairroDetectado ? bairroDetectado.name : undefined,
+      bairroConfirmado: bairroDetectado ? true : false,
     };
+  } else if (tipoEntrega === "pickup" || tipoEntrega === "dine_in") {
+    sessionBase = { ...sessionBase, deliveryType: tipoEntrega, deliveryFee: 0, neighborhood: undefined, bairroConfirmado: false };
   }
   if (pagamento) sessionBase = { ...sessionBase, paymentMethod: pagamento };
   const enderecoDetectado = extrairEndereco(text);
@@ -1347,6 +1387,21 @@ function aplicaPagamento(payment: string, session: BotSession): BotResponse {
   return continuaParaTrocoOuConfirm(updatedSession);
 }
 function continuaParaTrocoOuConfirm(session: BotSession): BotResponse {
+  // BLOQUEIO DE SEGURANÇA: entrega nunca fecha sem bairro confirmado e taxa válida.
+  // Rede de proteção final — preserva o pagamento já escolhido p/ retomar após o bairro.
+  if (session.deliveryType === "delivery" && !bairroConfirmadoValido(session)) {
+    return {
+      messages: [`Antes de fechar, preciso confirmar o endereço de entrega 😊\n\nQual o bairro da entrega?`],
+      session: resetaTentativas({
+        ...session,
+        step: "neighborhood",
+        neighborhood: undefined,
+        deliveryFee: 0,
+        bairroConfirmado: false,
+        pagamentoPendente: session.paymentMethod ?? session.pagamentoPendente,
+      }),
+    };
+  }
   if (session.paymentMethod === "Dinheiro") {
     return { messages: [`Combinado! 💵 Vai precisar de troco?\n\nSe sim, me diz o valor que vai pagar. Ex: *100*\nSe não, é só digitar *não*`], session: resetaTentativas({ ...session, step: "troco" }) };
   }
@@ -1756,7 +1811,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       case "neighborhood":
         return { messages: [`Tudo bem! Como quer receber seu pedido? 😊\n\n  1. Entrega 🛵\n  2. Retirada na loja 🏪\n  3. Consumo no local 🍽️`], session: resetaTentativas({ ...session, step: "delivery_type" }) };
       case "confirma_bairro_fuzzy":
-        return { messages: [`Tudo bem! Qual o seu bairro? 😊`], session: resetaTentativas({ ...session, step: "neighborhood", bairroFuzzyCandidato: undefined }) };
+        return { messages: [`Tudo bem! Qual o seu bairro? 😊`], session: resetaTentativas({ ...session, step: "neighborhood", bairroFuzzyCandidato: undefined, neighborhood: undefined, deliveryFee: 0, bairroConfirmado: false }) };
       case "confirma_produto_valor":
         return { messages: [`Tudo bem! ${mensagemCategorias()}`], session: resetaTentativas({ ...session, step: "category", candidatosValorProduto: undefined }) };
       case "confirma_sabor_ambiguo":
@@ -1764,7 +1819,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       case "confirma_item_ambiguo":
         return { messages: [`Tudo bem! ${mensagemCategorias()}`], session: resetaTentativas({ ...session, step: "category", candidatosItemAmbiguo: undefined, itemAmbiguoTipo: undefined }) };
       case "address":
-        return { messages: [`Tudo bem! Qual o seu bairro? 😊`], session: resetaTentativas({ ...session, step: "neighborhood" }) };
+        return { messages: [`Tudo bem! Qual o seu bairro? 😊`], session: resetaTentativas({ ...session, step: "neighborhood", neighborhood: undefined, deliveryFee: 0, bairroConfirmado: false }) };
       case "payment":
         if (session.deliveryType === "pickup" || session.deliveryType === "dine_in") {
           return { messages: [`Tudo bem! Como quer receber seu pedido? 😊\n\n  1. Entrega 🛵\n  2. Retirada na loja 🏪\n  3. Consumo no local 🍽️`], session: resetaTentativas({ ...session, step: "delivery_type" }) };
@@ -1858,7 +1913,10 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
 
           // Se temos histórico completo de entrega, pré-preenche e vai direto para confirmação
           if (historico.ultimoDeliveryType && historico.ultimoPayment) {
-            const deliveryFee = historico.ultimoDeliveryFee ?? 0;
+            const isDeliveryHist = historico.ultimoDeliveryType === "delivery";
+            // Para entrega, usa a taxa ATUAL do bairro no menu (mais correta que a do histórico).
+            const nbHist = isDeliveryHist ? MENU.neighborhoods.find(b => b.name === historico.ultimoNeighborhood) : undefined;
+            const deliveryFee = isDeliveryHist ? (nbHist?.fee ?? historico.ultimoDeliveryFee ?? 0) : 0;
             const sessionRapida: BotSession = {
               ...session,
               step: "confirm",
@@ -1868,6 +1926,9 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
               neighborhood: historico.ultimoNeighborhood,
               address: historico.ultimoEndereco,
               deliveryFee,
+              // Bairro vem mostrado no resumo p/ o cliente confirmar; só conta como confirmado
+              // se for um bairro cadastrado (senão o guard final pede o bairro de novo).
+              bairroConfirmado: isDeliveryHist && !!nbHist,
               paymentMethod: historico.ultimoPayment,
               retornoRapido: true,
             };
@@ -2677,12 +2738,9 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
         return { messages: [`Combinado, você retira aqui na loja! 🏪\n\nQual a forma de pagamento? 💸`], session: resetaTentativas({ ...baseSession, step: "payment" }) };
       }
 
-      // Caminho DELIVERY com BAIRRO VÁLIDO detectado -> aplica taxa e pede só o endereço (pagamento guardado p/ depois)
+      // Caminho DELIVERY com BAIRRO VÁLIDO (match exato) detectado -> confirma e pede o endereço
       if (dados.tipo === "delivery" && dados.bairro) {
-        return {
-          messages: [`*${dados.bairro.name}*, taxa de entrega: *${formatCurrency(dados.bairro.fee)}* 🛵\n\nMe passa o endereço completo:\n_(Rua, número e complemento)_\n\n_(Digite *voltar* para corrigir a etapa anterior)_`],
-          session: resetaTentativas({ ...session, step: "address", deliveryType: "delivery", neighborhood: dados.bairro.name, deliveryFee: dados.bairro.fee, pagamentoPendente: pagDetectado }),
-        };
+        return proximoAposBairro({ ...session, pagamentoPendente: pagDetectado }, dados.bairro);
       }
 
       // ===== FLUXO NORMAL (fallback): não detectou com confiança =====
@@ -2701,7 +2759,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
             session: resetaTentativas({ ...session, step: "confirm_address", deliveryType: "delivery", neighborhood: hist.ultimoNeighborhood, deliveryFee: fee, address: hist.ultimoEndereco, pagamentoPendente: pagDetectado }),
           };
         }
-        return { messages: [`Qual o seu bairro? 😊`], session: resetaTentativas({ ...session, step: "neighborhood", deliveryType: "delivery", pagamentoPendente: pagDetectado }) };
+        return { messages: [`Qual o seu bairro? 😊`], session: resetaTentativas({ ...session, step: "neighborhood", deliveryType: "delivery", neighborhood: undefined, deliveryFee: 0, bairroConfirmado: false, pagamentoPendente: pagDetectado }) };
       }
       if (n === "2" || n.includes("retirar") || n.includes("loja") || n.includes("buscar") || n.includes("pegar") || n.includes("retiro")) {
         return { messages: [`Combinado, você retira aqui na loja! 🏪\n\nQual a forma de pagamento? 💸`], session: resetaTentativas({ ...session, step: "payment", deliveryType: "pickup", deliveryFee: 0, neighborhood: undefined }) };
@@ -2714,7 +2772,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       if (!isNaN(num) && num >= 1 && num <= MENU.neighborhoods.length) found = MENU.neighborhoods[num - 1];
       else found = detectaBairro(n) ?? undefined;
       if (found) {
-        return { messages: [`*${found.name}*, taxa de entrega: *${formatCurrency(found.fee)}* 🛵\n\nMe passa o endereço completo:\n_(Rua, número e complemento)_\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "address", neighborhood: found.name, deliveryFee: found.fee }) };
+        return proximoAposBairro(session, found);
       }
       // Sem match exato → tenta prefixo (3 primeiras letras)
       const prefixCandidatos = detectaBairroPrefix(n);
@@ -2739,16 +2797,15 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       if (candidatos && candidatos.length > 1) {
         const numEscolha = parseInt(text);
         if (!isNaN(numEscolha) && numEscolha >= 1 && numEscolha <= candidatos.length) {
-          const nb = candidatos[numEscolha - 1];
-          return { messages: [`*${nb.name}*, taxa de entrega: *${formatCurrency(nb.fee)}* 🛵\n\nMe passa o endereço completo:\n_(Rua, número e complemento)_`], session: resetaTentativas({ ...session, step: "address", neighborhood: nb.name, deliveryFee: nb.fee, candidatosBairro: undefined }) };
+          return proximoAposBairro(session, candidatos[numEscolha - 1]);
         }
         // Tenta match por nome dentro dos candidatos
         const porNome = candidatos.find(c => n.includes(normalizar(c.name).split(/\s+/)[0]));
         if (porNome) {
-          return { messages: [`*${porNome.name}*, taxa de entrega: *${formatCurrency(porNome.fee)}* 🛵\n\nMe passa o endereço completo:\n_(Rua, número e complemento)_`], session: resetaTentativas({ ...session, step: "address", neighborhood: porNome.name, deliveryFee: porNome.fee, candidatosBairro: undefined }) };
+          return proximoAposBairro(session, porNome);
         }
         if (eNegativa(n)) {
-          return { messages: [`Sem problema! Qual o seu bairro? 😊`], session: resetaTentativas({ ...session, step: "neighborhood", candidatosBairro: undefined }) };
+          return { messages: [`Sem problema! Qual o seu bairro? 😊`], session: resetaTentativas({ ...session, step: "neighborhood", candidatosBairro: undefined, neighborhood: undefined, deliveryFee: 0, bairroConfirmado: false }) };
         }
         const lista = candidatos.map((c, i) => `  ${i + 1}. ${c.name}`).join("\n");
         return respostaInvalida(`Qual desses é o seu bairro?\n\n${lista}`, session);
@@ -2758,24 +2815,34 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       const nb = MENU.neighborhoods.find(b => b.name === nomeCandidato);
       if (ePositiva(n) || n === "1") {
         if (!nb) return respostaInvalida(`Qual o seu bairro? 😊`, session);
-        return { messages: [`*${nb.name}*, taxa de entrega: *${formatCurrency(nb.fee)}* 🛵\n\nMe passa o endereço completo:\n_(Rua, número e complemento)_`], session: resetaTentativas({ ...session, step: "address", neighborhood: nb.name, deliveryFee: nb.fee, bairroFuzzyCandidato: undefined }) };
+        return proximoAposBairro(session, nb);
       }
-      return { messages: [`Sem problema! Qual o seu bairro então? 😊`], session: resetaTentativas({ ...session, step: "neighborhood", bairroFuzzyCandidato: undefined }) };
+      return { messages: [`Sem problema! Qual o seu bairro então? 😊`], session: resetaTentativas({ ...session, step: "neighborhood", bairroFuzzyCandidato: undefined, neighborhood: undefined, deliveryFee: 0, bairroConfirmado: false }) };
     }
     case "confirm_address": {
       if (ePositiva(n) || n === "1") {
-        if (session.pagamentoPendente) {
-          return aplicaPagamento(session.pagamentoPendente, session);
+        // Cliente confirmou explicitamente o endereço+bairro mostrado → bairro confirmado
+        const sessaoConfirmada = { ...session, bairroConfirmado: true };
+        if (sessaoConfirmada.pagamentoPendente) {
+          return aplicaPagamento(sessaoConfirmada.pagamentoPendente, sessaoConfirmada);
         }
-        return { messages: [`Ótimo! 📍 *${session.address} - ${session.neighborhood}*\n\nQual a forma de pagamento? 💸`], session: resetaTentativas({ ...session, step: "payment" }) };
+        return { messages: [`Ótimo! 📍 *${sessaoConfirmada.address} - ${sessaoConfirmada.neighborhood}*\n\nQual a forma de pagamento? 💸`], session: resetaTentativas({ ...sessaoConfirmada, step: "payment" }) };
       }
       if (eNegativa(n) || n === "2") {
-        return { messages: [`Tudo bem! Qual o seu bairro? 😊`], session: resetaTentativas({ ...session, step: "neighborhood", address: undefined }) };
+        return { messages: [`Tudo bem! Qual o seu bairro? 😊`], session: resetaTentativas({ ...session, step: "neighborhood", address: undefined, neighborhood: undefined, deliveryFee: 0, bairroConfirmado: false }) };
       }
       return respostaInvalida(`  1. Sim, mesmo endereço\n  2. Não, quero outro endereço`, session);
     }
     case "address": {
       if (!text || text.length < 5) return respostaInvalida("Me passa o endereço completo.\nExemplo: *Rua das Flores, 123, Apto 2*", session);
+      // GUARD: entrega NUNCA avança sem bairro confirmado e taxa válida.
+      // Salva o endereço parcial e pergunta o bairro (sem inventar bairro/taxa).
+      if (session.deliveryType === "delivery" && !bairroConfirmadoValido(session)) {
+        return {
+          messages: [`Endereço anotado! 📍\n\nQual o bairro da entrega? 😊`],
+          session: resetaTentativas({ ...session, step: "neighborhood", address: text, neighborhood: undefined, deliveryFee: 0, bairroConfirmado: false }),
+        };
+      }
       // Se o cliente já tinha informado o pagamento na captura inteligente, aplica agora e pula a pergunta
       if (session.pagamentoPendente) {
         return aplicaPagamento(session.pagamentoPendente, { ...session, address: text });
@@ -2939,6 +3006,13 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
       const retira = n === "2" || n.includes("retirar") || n.includes("cancela") || n.includes("errado") ||
         (eNegativa(n) && !n.includes("nao obrigado"));
       if (confirma) {
+        // BLOQUEIO FINAL: entrega não pode ser confirmada sem bairro confirmado + taxa válida.
+        if (session.deliveryType === "delivery" && !bairroConfirmadoValido(session)) {
+          return {
+            messages: [`Opa! Antes de confirmar, preciso do bairro pra calcular a entrega certinho 😊\n\nQual o bairro da entrega?`],
+            session: resetaTentativas({ ...session, step: "neighborhood", neighborhood: undefined, deliveryFee: 0, bairroConfirmado: false, pagamentoPendente: session.paymentMethod ?? session.pagamentoPendente }),
+          };
+        }
         if (session.paymentMethod === "Pix") {
           return { messages: [`Ótimo! 😊 Para finalizar, envie o comprovante do Pix.\n\nChave Pix: (configurada pelo admin) 💸\n\nAssim que confirmarmos o pagamento, seu pedido vai direto pra cozinha! 🍕`], session: { ...session, step: "aguardando_pix" } };
         }
