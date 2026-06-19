@@ -1,5 +1,5 @@
 import { MENU as MENU_PADRAO, getBorderPrice, getBorderByIndex, getMacarronadaPrice } from "./menu";
-import { detectarTipoRecebimento, detectarFormaPagamento, tipoPagamentoParaLabel } from "./botSkills";
+import { detectarTipoRecebimento, detectarFormaPagamento, tipoPagamentoParaLabel, detectarIntencaoInicial, PALAVRAS_DOMINIO_SKILL } from "./botSkills";
 
 let MENU = MENU_PADRAO;
 
@@ -458,22 +458,19 @@ function buscaProdutosPorValor(categoria: "lanche" | "bebida" | "suco", valor: n
   return dentroDaFaixa.slice(0, 3).map(p => ({ name: p.name, price: p.price }));
 }
 
-// Detecta se o cliente quer ver o cardápio/menu (qualquer etapa)
+// Delega à skill central (botSkills.ts).
 function detectaIntencaoCardapio(text: string): boolean {
-  const n = normalizar(text);
-  return n.includes("cardapio") || n.includes("menu") || n.includes("ver sabor") ||
-    n.includes("ver opcoes") || n.includes("o que tem") || n.includes("o que voces tem") ||
-    (n.includes("ver") && (n.includes("cardapio") || n.includes("opcoes")));
+  return detectarIntencaoInicial(text).intent === "cardapio";
 }
 
 // Palavras do domínio do negócio: se aparecerem, o texto quase certamente NÃO é um nome próprio sozinho.
+// Mesclado com PALAVRAS_DOMINIO_SKILL para incluir horário, promoção, atendente, cancelamento.
 const PALAVRAS_DOMINIO = [
-  "pizza", "cardapio", "menu", "sabor", "bebida", "lanche", "suco", "borda",
+  ...PALAVRAS_DOMINIO_SKILL,
   "calabresa", "frango", "portuguesa", "queijo", "napolitana", "baiana", "peruana",
   "bacon", "mexicana", "mussarela", "chocolate", "cartola", "romeu", "calzone",
   "burguer", "batata", "refrigerante", "guarana", "agua", "cerveja", "coca",
-  "entrega", "retirada", "pagamento", "pix", "dinheiro", "cartao", "finalizar",
-  "quero", "queria", "gostaria", "manda", "vou", "favor",
+  "pagamento", "finalizar", "quero", "queria", "gostaria", "manda", "vou", "favor",
 ];
 // Saudações e palavras curtas comuns que tecnicamente "parecem nome" mas nunca são.
 const NUNCA_E_NOME = ["oi", "ola", "olá", "eai", "ei", "opa", "bom", "boa", "sim", "nao", "ok", "obrigado", "obrigada", "blz", "alo"];
@@ -1729,13 +1726,40 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
     case "name": {
       if (!text || text.length < 1) return respostaInvalida("Me fala seu nome pra eu te atender melhor!", session);
 
-      // 1) Intenção de ver o cardápio -> responde o cardápio, NÃO assume como nome
-      if (detectaIntencaoCardapio(text)) {
+      // 1) Intenção inicial detectada pela skill — NÃO trata como nome
+      const intencaoInicial = detectarIntencaoInicial(text);
+      if (intencaoInicial.intent === "cardapio") {
         return {
           messages: [`Claro! 😊 ${mensagemCategorias()}`],
-          session: resetaTentativas({ ...session, step: "category" }), // customerName fica vazio por enquanto
+          session: resetaTentativas({ ...session, step: "category" }),
         };
       }
+      if (intencaoInicial.intent === "horario") {
+        return {
+          messages: [`Para saber nosso horário de funcionamento, entre em contato com a loja! 😊\n\nEnquanto isso, posso te ajudar com seu pedido. O que vai ser hoje?`],
+          session: resetaTentativas({ ...session, step: "category" }),
+        };
+      }
+      if (intencaoInicial.intent === "promocao") {
+        return {
+          messages: [`Nossas promoções são atualizadas constantemente! 😊 Chama o atendente pra saber as de hoje.\n\nOu, se preferir, pode pedir pelo cardápio:`],
+          session: resetaTentativas({ ...session, step: "category" }),
+        };
+      }
+      if (intencaoInicial.intent === "cancelamento") {
+        return {
+          messages: [`Entendido! Para cancelar um pedido, vou chamar alguém pra te ajudar. Aguarda um instantinho! 😊`],
+          session: { ...session, step: "escalado", escalado: true, stepAnteriorEscalado: session.step },
+          escalar: true,
+        };
+      }
+      if (intencaoInicial.intent === "iniciar_pedido") {
+        return {
+          messages: [`Ótimo! 😊 ${mensagemCategorias()}`],
+          session: resetaTentativas({ ...session, step: "category" }),
+        };
+      }
+      // falar_atendente é coberto por precisaEscalar (global, antes do switch)
 
       // 2) Consulta de preço ("quanto tá a pizza pequena?")
       const resConsultaName = verificaConsultaFatias(text, session) ?? verificaConsultaPreco(text, session);

@@ -500,3 +500,142 @@ export function tipoPagamentoParaLabel(type: MetodoPagamento): "Pix" | "Dinheiro
   if (type === "cash") return "Dinheiro";
   return "Cartão";
 }
+
+// ---------------------------------------------------------------------------
+// SKILL: Intenção inicial do cliente — fonte única de verdade
+// Usada para evitar que "cardápio", "promoção", "horário" etc. virem nome.
+// Adicionar novos sinônimos aqui, nunca nos arquivos de fluxo.
+// ---------------------------------------------------------------------------
+
+export type IntencaoInicial =
+  | "cardapio"
+  | "iniciar_pedido"
+  | "falar_atendente"
+  | "horario"
+  | "promocao"
+  | "cancelamento"
+  | null;
+
+export interface ResultadoIntencaoInicial {
+  intent: IntencaoInicial;
+  confidence: "high" | "medium" | "low";
+  matchedBy?: string;
+}
+
+// Substrings por intenção (ordem dentro de cada grupo não importa)
+const KEYWORDS_INICIAL: { intent: Exclude<IntencaoInicial, null>; kw: string }[] = [
+  // --- cardápio ---
+  { intent: "cardapio", kw: "cardapio"           },
+  { intent: "cardapio", kw: "manda o cardapio"   },
+  { intent: "cardapio", kw: "quero ver o cardapio" },
+  { intent: "cardapio", kw: "tem cardapio"        },
+  { intent: "cardapio", kw: "me manda o menu"     },
+  { intent: "cardapio", kw: "ver sabor"           },
+  { intent: "cardapio", kw: "ver opcoes"          },
+  { intent: "cardapio", kw: "o que tem"           },
+  { intent: "cardapio", kw: "o que voces tem"     },
+  { intent: "cardapio", kw: "que pizza tem"       },
+  { intent: "cardapio", kw: "que sabores"         },
+  { intent: "cardapio", kw: "quais sao os sabores" },
+  // --- iniciar pedido ---
+  { intent: "iniciar_pedido", kw: "quero pedir"           },
+  { intent: "iniciar_pedido", kw: "fazer pedido"          },
+  { intent: "iniciar_pedido", kw: "quero fazer um pedido" },
+  { intent: "iniciar_pedido", kw: "vou querer uma pizza"  },
+  { intent: "iniciar_pedido", kw: "quero uma pizza"       },
+  { intent: "iniciar_pedido", kw: "queria pedir"          },
+  { intent: "iniciar_pedido", kw: "pode anotar"           },
+  { intent: "iniciar_pedido", kw: "anota ai"              },
+  { intent: "iniciar_pedido", kw: "manda uma pizza"       },
+  // --- falar com atendente ---
+  { intent: "falar_atendente", kw: "falar com atendente"   },
+  { intent: "falar_atendente", kw: "quero falar com alguem" },
+  { intent: "falar_atendente", kw: "me chama alguem"       },
+  { intent: "falar_atendente", kw: "quero atendimento"     },
+  { intent: "falar_atendente", kw: "atendimento humano"    },
+  { intent: "falar_atendente", kw: "falar com humano"      },
+  // --- horário ---
+  { intent: "horario", kw: "horario"        },
+  { intent: "horario", kw: "que horas abre" },
+  { intent: "horario", kw: "que horas fecha" },
+  { intent: "horario", kw: "esta aberto"    },
+  { intent: "horario", kw: "ta aberto"      },
+  { intent: "horario", kw: "funciona hoje"  },
+  { intent: "horario", kw: "funcionamento"  },
+  // --- promoção ---
+  { intent: "promocao", kw: "promocao"          },
+  { intent: "promocao", kw: "tem promocao"      },
+  { intent: "promocao", kw: "qual a promocao"   },
+  { intent: "promocao", kw: "tem oferta"        },
+  { intent: "promocao", kw: "combo"             },
+  { intent: "promocao", kw: "desconto"          },
+  { intent: "promocao", kw: "proximo combo"     },
+  // --- cancelamento ---
+  { intent: "cancelamento", kw: "cancelar"         },
+  { intent: "cancelamento", kw: "quero cancelar"   },
+  { intent: "cancelamento", kw: "cancela meu pedido" },
+  { intent: "cancelamento", kw: "desistir"         },
+  { intent: "cancelamento", kw: "nao quero mais"   },
+  { intent: "cancelamento", kw: "desisti"          },
+];
+
+// Palavras-chave que exigem word-boundary (evitam falsos positivos)
+// Ordem importa: cancelamento antes de iniciar_pedido para "cancela meu pedido" não virar pedido
+const KEYWORDS_INICIAL_WORD: { intent: Exclude<IntencaoInicial, null>; word: string }[] = [
+  { intent: "cancelamento",    word: "cancela"    },
+  { intent: "cancelamento",    word: "cancelar"   },
+  { intent: "cardapio",        word: "menu"       },
+  { intent: "falar_atendente", word: "atendente"  },
+  { intent: "falar_atendente", word: "humano"     },
+  { intent: "horario",         word: "horario"    },
+  { intent: "promocao",        word: "promocao"   },
+  { intent: "iniciar_pedido",  word: "pedido"     },
+];
+
+/**
+ * Detecta a intenção inicial do cliente antes de tratar como nome ou dado de pedido.
+ * Retorna null quando nenhuma intenção específica é reconhecida (texto pode ser um nome).
+ *
+ * Regra de ouro: se retorna não-null, o texto NÃO deve ser tratado como nome humano.
+ */
+export function detectarIntencaoInicial(mensagem: string): ResultadoIntencaoInicial {
+  const norm = n(mensagem);
+
+  // Word-boundary primeiro (mais precisos)
+  for (const { intent, word } of KEYWORDS_INICIAL_WORD) {
+    if (new RegExp(`\\b${word}\\b`).test(norm)) {
+      return { intent, confidence: "high", matchedBy: word };
+    }
+  }
+
+  // Substrings compostas
+  for (const { intent, kw } of KEYWORDS_INICIAL) {
+    if (norm.includes(kw)) {
+      return { intent, confidence: "high", matchedBy: kw };
+    }
+  }
+
+  return { intent: null, confidence: "low" };
+}
+
+/**
+ * Lista de palavras que indicam intenção de domínio e NUNCA devem ser tratadas como nome.
+ * Exportada para que bot.ts possa manter PALAVRAS_DOMINIO sincronizada.
+ */
+export const PALAVRAS_DOMINIO_SKILL: string[] = [
+  // recebimento
+  "entrega", "delivery", "entregar", "retirar", "retirada", "buscar", "retiro",
+  "consumo", "consumir", "local", "mesa",
+  // pagamento
+  "pix", "dinheiro", "cartao", "credito", "debito", "maquininha", "troco",
+  // cardápio / pedido
+  "cardapio", "menu", "sabor", "pedido", "pedir",
+  "pizza", "lanche", "bebida", "suco", "borda",
+  // horário / promoção
+  "horario", "abre", "fecha", "aberto", "funcionamento",
+  "promocao", "oferta", "combo", "desconto",
+  // atendente
+  "atendente", "atendimento", "humano",
+  // cancelamento
+  "cancelar", "cancelamento", "desistir",
+];
