@@ -644,6 +644,22 @@ function resolveFatiasFollowUp(text: string, session: BotSession): BotResponse |
   return { messages: [resposta], session: resetaTentativas({ ...session, step: "consulta_fatias", pendingConsultaFatias: { size } }) };
 }
 
+export function detectaIntencaoSuco(text: string): boolean {
+  const n = normalizar(text);
+  return (
+    n.includes("suco") ||
+    n.includes("sucos") ||
+    n.includes("vitamina") ||
+    n.includes("caja") ||
+    n.includes("caju") ||
+    n.includes("acerola") ||
+    n.includes("goiaba") ||
+    n.includes("bacuri") ||
+    n.includes("cupuacu") ||
+    n.includes("maracuja") ||
+    (n.includes("laranja") && !n.includes("refri") && !n.includes("guarana"))
+  );
+}
 function detectaIntencaoDireta(text: string): { category: string; label: string } | null {
   const n = normalizar(text);
   const todosSaboresPizza = [...MENU.saltyFlavors, ...MENU.sweetFlavors];
@@ -2486,7 +2502,8 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       const querMiniPizza = n.includes("mini-pizza") || n.includes("mini pizza");
       const querLanche = n.includes("lanche") || n.includes("calzone") || n.includes("porcao") || n.includes("batata") ||
         n.includes("burguer") || n.includes("hamburguer") || n.includes("macarronada");
-      const querBebida = n.includes("bebida") || n.includes("refri") || n.includes("guarana") || n.includes("suco") || n.includes("agua") || n.includes("cerveja") || n.includes("coca") || n.includes("pepsi");
+      const querSuco = detectaIntencaoSuco(text);
+      const querBebida = !querSuco && (n.includes("bebida") || n.includes("refri") || n.includes("guarana") || n.includes("agua") || n.includes("cerveja") || n.includes("coca") || n.includes("pepsi"));
 
       // PRIORIDADE MÁXIMA: se quer finalizar e não mencionou pizza/lanche/bebida explicitamente, vai direto pro fechamento
       if (querFinalizar && !querPizza && !querLanche && !querBebida) {
@@ -2515,6 +2532,11 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
         const lancheEsp = detectarLancheEspecifico(text, session);
         if (lancheEsp) return lancheEsp;
         const resp = handleCategory("lanche", { ...session, step: "category" });
+        return { ...resp, session: resetaTentativas(resp.session) };
+      }
+      // Suco — prioridade sobre bebida genérica
+      if (querSuco) {
+        const resp = handleCategory("suco", { ...session, step: "category" });
         return { ...resp, session: resetaTentativas(resp.session) };
       }
       // Bebida
@@ -3067,6 +3089,11 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
       return { messages: [mensagemAddMore(newCart)], session: resetaTentativas({ ...session, step: "add_more", cart: newCart, currentLanche: undefined }) };
     }
     case "bebida_escolha": {
+      // Se o cliente pedir suco enquanto está na lista de bebidas, redireciona
+      if (detectaIntencaoSuco(text)) {
+        const resp = handleCategory("suco", { ...session, step: "category" });
+        return { ...resp, session: resetaTentativas(resp.session) };
+      }
       const mudanca = tentaMudanca(text, session);
       if (mudanca) return mudanca;
       // Qty + produto (ex: "3 coca", "2x guarana")
