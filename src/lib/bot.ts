@@ -1079,6 +1079,39 @@ function detectaPagamento(n: string): string | null {
   return null;
 }
 
+// ===== HELPERS DE PAGAMENTO (centralizados) =====
+// O paymentMethod pode ser simples ("Pix", "Dinheiro", "Cartão") ou composto, no
+// formato híbrido "Pix (R$ 30,00) + Dinheiro (R$ 20,00)". Estes helpers evitam
+// comparações soltas (=== "Pix") que quebram no pagamento híbrido com Pix parcial.
+export function temPixNoPagamento(paymentMethod?: string): boolean {
+  return !!paymentMethod && /\bpix\b/i.test(paymentMethod);
+}
+export function temDinheiroNoPagamento(paymentMethod?: string): boolean {
+  return !!paymentMethod && /dinheiro/i.test(paymentMethod);
+}
+// Extrai o valor associado a um método dentro do label (ex: "Pix (R$ 30,00)" -> 30).
+// Retorna null quando o método não tem valor explícito (pagamento simples, sem parênteses).
+function extrairValorMetodo(paymentMethod: string | undefined, metodo: string): number | null {
+  if (!paymentMethod) return null;
+  const re = new RegExp(`${metodo}\\s*\\(R\\$\\s*([0-9.,]+)\\)`, "i");
+  const m = paymentMethod.match(re);
+  if (!m) return null;
+  const valor = parseFloat(m[1].replace(/\./g, "").replace(",", "."));
+  return isNaN(valor) ? null : valor;
+}
+// Valor esperado do Pix: parte do Pix no híbrido; total no Pix puro; 0 se não houver Pix.
+export function valorPixEsperado(paymentMethod: string | undefined, total: number): number {
+  if (!temPixNoPagamento(paymentMethod)) return 0;
+  const parcial = extrairValorMetodo(paymentMethod, "Pix");
+  return parcial ?? total;
+}
+// Valor esperado em dinheiro: parte em dinheiro no híbrido; total no dinheiro puro; 0 se não houver.
+export function valorDinheiroEsperado(paymentMethod: string | undefined, total: number): number {
+  if (!temDinheiroNoPagamento(paymentMethod)) return 0;
+  const parcial = extrairValorMetodo(paymentMethod, "Dinheiro");
+  return parcial ?? total;
+}
+
 // Detecta bairro de forma RIGOROSA: o nome do bairro deve aparecer como palavra(s) inteira(s)
 // na mensagem, não como substring solta. Prioriza o match mais longo (ex: "Santo Antonio" antes de "Santo").
 // Retorna null se não houver match seguro (aí o fluxo normal pergunta o bairro).
@@ -1409,7 +1442,7 @@ function continuaParaTrocoOuConfirm(session: BotSession): BotResponse {
       }),
     };
   }
-  if (session.paymentMethod === "Dinheiro") {
+  if (temDinheiroNoPagamento(session.paymentMethod)) {
     return { messages: [`Combinado! 💵 Vai precisar de troco?\n\nSe sim, me diz o valor que vai pagar. Ex: *100*\nSe não, é só digitar *não*`], session: resetaTentativas({ ...session, step: "troco" }) };
   }
   const receipt = buildReceipt(session);
@@ -2991,16 +3024,18 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
     }
     case "troco": {
       const total = cartSubtotal(session.cart) + session.deliveryFee;
+      // No híbrido, o troco é calculado só sobre a parte em dinheiro; no dinheiro puro, sobre o total.
+      const baseTroco = valorDinheiroEsperado(session.paymentMethod, total) || total;
       let troco = "";
       const naoQuerTroco = n.includes("nao") || n.includes("sem troco") || n === "0" || n.includes("exato") || n.includes("nao precisa");
       if (naoQuerTroco) {
         troco = "Sem troco";
       } else {
         const valor = parseFloat(n.replace(",", ".").replace(/[^0-9.]/g, ""));
-        if (isNaN(valor) || valor < total) {
-          return respostaInvalida(`O total é *${formatCurrency(total)}*. Me diz um valor maior ou igual ao total, ou digita *não* se não precisar de troco.`, session);
+        if (isNaN(valor) || valor < baseTroco) {
+          return respostaInvalida(`O total é *${formatCurrency(baseTroco)}*. Me diz um valor maior ou igual ao total, ou digita *não* se não precisar de troco.`, session);
         }
-        const valorTroco = valor - total;
+        const valorTroco = valor - baseTroco;
         troco = `Troco de ${formatCurrency(valorTroco)} para ${formatCurrency(valor)}`;
       }
       const updatedSession = { ...session, troco };
@@ -3020,7 +3055,7 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
             session: resetaTentativas({ ...session, step: "neighborhood", neighborhood: undefined, deliveryFee: 0, bairroConfirmado: false, pagamentoPendente: session.paymentMethod ?? session.pagamentoPendente }),
           };
         }
-        if (session.paymentMethod === "Pix") {
+        if (temPixNoPagamento(session.paymentMethod)) {
           return { messages: [`Ótimo! 😊 Para finalizar, envie o comprovante do Pix.\n\nChave Pix: (configurada pelo admin) 💸\n\nAssim que confirmarmos o pagamento, seu pedido vai direto pra cozinha! 🍕`], session: { ...session, step: "aguardando_pix" } };
         }
         const timeMsg = session.deliveryType === "delivery" ? CONFIG_BOT.tempoEntregaDelivery : CONFIG_BOT.tempoEntregaRetirada;

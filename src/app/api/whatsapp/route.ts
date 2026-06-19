@@ -1,5 +1,5 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
-import { processMessage, createInitialSession, createReturningSession, montarSaudacaoRetorno, BotSession, ClienteHistorico, setMenuDinamico, setConfigDinamica, setEsgotados } from "@/lib/bot";
+import { processMessage, createInitialSession, createReturningSession, montarSaudacaoRetorno, BotSession, ClienteHistorico, setMenuDinamico, setConfigDinamica, setEsgotados, temPixNoPagamento, valorPixEsperado } from "@/lib/bot";
 import { getMENUDinamico } from "@/lib/menu";
 import { redis } from "@/lib/redis";
 import { interpretarMensagem } from "@/lib/claude";
@@ -31,6 +31,8 @@ type Pedido = {
   pixConfirmado?: boolean;
   tipoEntrega?: string;
   horarioInicio?: string;
+  pagamento?: string;
+  troco?: string;
 };
 
 type ConfigPizzaria = {
@@ -258,7 +260,7 @@ async function processarComprovanteTexto(phone: string, texto: string, config: C
     const session = await redis.get<BotSession>(sessionKey);
     const pedidosCheck = await redis.get<any[]>("pedidos") || [];
     const pedidoVerif = pedidosCheck.find(p => p.telefone === phone && p.status === "novo");
-    const isPix = session?.paymentMethod === "Pix" || session?.step === "aguardando_pix" || pedidoVerif?.pagamento === "Pix";
+    const isPix = temPixNoPagamento(session?.paymentMethod) || session?.step === "aguardando_pix" || temPixNoPagamento(pedidoVerif?.pagamento);
     if (!isPix) return;
 
     let pedidos = await redis.get<Pedido[]>("pedidos") || [];
@@ -287,7 +289,7 @@ COMPROVANTE RECEBIDO:
 ${texto}
 
 DADOS ESPERADOS:
-- Valor: R$ ${pedidoAtivo.total.toFixed(2)}
+- Valor: R$ ${valorPixEsperado(pedidoAtivo.pagamento, pedidoAtivo.total).toFixed(2)}
 - Nome do destinatário deve conter: ${config.nomeTitularPix || config.nomePizzaria}
 - Chave Pix: ${config.chavePix}
 - Data: ${dataHoje}
@@ -334,7 +336,7 @@ async function processarComprovante(phone: string, data: any, config: ConfigPizz
     const session = await redis.get<BotSession>(sessionKey);
     const pedidosVerif = await redis.get<any[]>("pedidos") || [];
     const pedidoVerif = pedidosVerif.find(p => p.telefone === phone && p.status === "novo");
-    const isPix = session?.paymentMethod === "Pix" || session?.step === "aguardando_pix" || pedidoVerif?.pagamento === "Pix";
+    const isPix = temPixNoPagamento(session?.paymentMethod) || session?.step === "aguardando_pix" || temPixNoPagamento(pedidoVerif?.pagamento);
     console.log("[ChefeBot] isPix:", isPix, "step:", session?.step, "pagamento:", pedidoVerif?.pagamento);
     if (!isPix) return;
 
@@ -395,7 +397,7 @@ async function processarComprovante(phone: string, data: any, config: ConfigPizz
     }
 
     const resultado = await analisarComprovantePix(
-      imagemBase64, mediaType as any, pedidoAtivo.total,
+      imagemBase64, mediaType as any, valorPixEsperado(pedidoAtivo.pagamento, pedidoAtivo.total),
       config.chavePix, config.nomeTitularPix || config.nomePizzaria,
       pedidoAtivo.horarioInicio || pedidoAtivo.horario
     );
@@ -818,7 +820,7 @@ export async function POST(req: NextRequest) {
     // Salva pedido na confirmacao — Pix espera comprovante
     if (currentSession!.step === "confirm" &&
       (messageText.trim() === "1" || messageText.trim().toLowerCase() === "sim") &&
-      currentSession!.paymentMethod !== "Pix") {
+      !temPixNoPagamento(currentSession!.paymentMethod)) {
       const pedidoId = await salvarPedido(currentSession!, phone, config);
       result.session = { ...result.session, pedidoId } as any;
       if (config.limitePico > 0) {
