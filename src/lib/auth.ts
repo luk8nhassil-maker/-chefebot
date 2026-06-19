@@ -10,22 +10,22 @@ export interface AuthUser {
 
 const USERS: Record<string, { password: string; name: string; role: Role }> = {
   kellyne: {
-    password: process.env.KELLYNE_PASSWORD ?? "kellyne123",
+    password: process.env.KELLYNE_PASSWORD!,
     name: "Kellyne",
     role: "atendente",
   },
   salao: {
-    password: process.env.SALAO_PASSWORD ?? "salao123",
+    password: process.env.SALAO_PASSWORD!,
     name: "Atendente Salão",
     role: "atendente",
   },
   brito: {
-    password: process.env.ADMIN_PASSWORD ?? "admin123",
+    password: process.env.ADMIN_PASSWORD!,
     name: "Brito",
     role: "admin",
   },
   ominix: {
-    password: "@Controle250",
+    password: process.env.OMINIX_PASSWORD!,
     name: "Ominix Dev",
     role: "dev",
   },

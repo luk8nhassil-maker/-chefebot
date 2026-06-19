@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { redis } from "@/lib/redis";
 import { proximoNumeroPedido } from "@/lib/numeracao";
+import { getMENUDinamico } from "@/lib/menu";
 
 export const maxDuration = 20;
 
@@ -19,7 +20,6 @@ type PedidoApp = {
   tipoEntrega: "delivery" | "retirada";
   bairro?: string;
   endereco?: string;
-  taxaEntrega?: number;
   pagamento: string;
   troco?: string;
   observacao?: string;
@@ -43,7 +43,13 @@ export async function POST(req: NextRequest) {
     });
 
     const subtotal = body.itens.reduce((s, i) => s + i.price * i.qty, 0);
-    const taxa = body.tipoEntrega === "delivery" ? (body.taxaEntrega || 0) : 0;
+    let taxa = 0;
+    if (body.tipoEntrega === "delivery" && body.bairro) {
+      const menu = await getMENUDinamico();
+      const bairroNorm = body.bairro.toLowerCase().trim();
+      const bairroConfig = (menu.neighborhoods as Array<{ name: string; fee: number }>).find((n) => n.name.toLowerCase().trim() === bairroNorm);
+      taxa = bairroConfig?.fee ?? 0;
+    }
     const total = subtotal + taxa;
 
     const endereco =

@@ -11,8 +11,8 @@ export type Funcionario = {
 };
 
 const FUNCIONARIOS_PADRAO: Funcionario[] = [
-  { username: "kellyne", name: "Kellyne", password: process.env.KELLYNE_PASSWORD ?? "kellyne123", ativo: true, role: "atendente" },
-  { username: "salao", name: "Atendente Salao", password: process.env.SALAO_PASSWORD ?? "salao123", ativo: true, role: "atendente" },
+  { username: "kellyne", name: "Kellyne", password: process.env.KELLYNE_PASSWORD!, ativo: true, role: "atendente" },
+  { username: "salao", name: "Atendente Salao", password: process.env.SALAO_PASSWORD!, ativo: true, role: "atendente" },
 ];
 
 export async function getFuncionarios(): Promise<Funcionario[]> {
