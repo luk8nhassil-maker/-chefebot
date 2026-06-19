@@ -3,6 +3,11 @@ jest.mock("./redis", () => ({ redis: { get: jest.fn().mockResolvedValue(null) } 
 
 import { processMessage, detectarLancheEspecifico, detectarFamiliaProduto, createInitialSession, BotSession } from "./bot";
 
+function sessaoName(): BotSession {
+  // Conversa inicial, SEM nome salvo, no step "name"
+  return { ...createInitialSession(), step: "name" };
+}
+
 function sessaoCategoria(): BotSession {
   return { ...createInitialSession(), step: "category", customerName: "Teste" };
 }
@@ -16,6 +21,14 @@ function sessaoAddMore(): BotSession {
   };
 }
 
+const OUTROS_LANCHES = ["Calzone", "X-Burguer", "X-Bacon", "X-Tudo", "Porção de Batatas", "Porcao de Batatas"];
+
+function naoContemOutrosLanches(msg: string) {
+  for (const lanche of OUTROS_LANCHES) {
+    expect(msg).not.toContain(lanche);
+  }
+}
+
 // ===== detectarFamiliaProduto() =====
 
 describe("detectarFamiliaProduto", () => {
@@ -27,123 +40,157 @@ describe("detectarFamiliaProduto", () => {
   });
 
   test("detecta 'macaronada' (erro ortográfico)", () => {
-    const res = detectarFamiliaProduto("macaronada");
-    expect(res).not.toBeNull();
-    expect(res!.label).toBe("macarronada");
+    expect(detectarFamiliaProduto("macaronada")!.label).toBe("macarronada");
   });
 
   test("detecta 'tem macarrão?'", () => {
-    const res = detectarFamiliaProduto("tem macarrão?");
-    expect(res).not.toBeNull();
-    expect(res!.label).toBe("macarronada");
+    expect(detectarFamiliaProduto("tem macarrão?")!.label).toBe("macarronada");
   });
 
-  test("detecta 'massa' via alias", () => {
-    const res = detectarFamiliaProduto("quero massa");
-    expect(res).not.toBeNull();
-    expect(res!.label).toBe("macarronada");
+  test("detecta 'quero uma massa' via alias", () => {
+    expect(detectarFamiliaProduto("quero uma massa")!.label).toBe("macarronada");
   });
 
-  test("NÃO detecta família para 'lanche' genérico", () => {
+  test("NÃO detecta família para 'lanche'/'quero lanche'/'2'", () => {
     expect(detectarFamiliaProduto("lanche")).toBeNull();
     expect(detectarFamiliaProduto("quero lanche")).toBeNull();
+    expect(detectarFamiliaProduto("2")).toBeNull();
   });
 
   test("NÃO detecta família para 'pizza'", () => {
     expect(detectarFamiliaProduto("quero pizza")).toBeNull();
   });
 
-  test("NÃO detecta família para '2' (opção de menu)", () => {
-    expect(detectarFamiliaProduto("2")).toBeNull();
-  });
-
-  test("família só contém itens de macarronada", () => {
-    const res = detectarFamiliaProduto("macarronada");
-    expect(res).not.toBeNull();
-    const nomes = res!.itens.map(i => i.name);
+  test("família só contém itens de macarronada (sem outros lanches)", () => {
+    const nomes = detectarFamiliaProduto("macarronada")!.itens.map(i => i.name);
+    expect(nomes).toContain("Macarronada de Carne");
     expect(nomes).not.toContain("Calzone");
     expect(nomes).not.toContain("X-Burguer");
     expect(nomes).not.toContain("X-Bacon");
     expect(nomes).not.toContain("X-Tudo");
     expect(nomes).not.toContain("Porcao de Batatas");
-    expect(nomes).toContain("Macarronada de Carne");
   });
 });
 
-// ===== processMessage() — step category =====
+// ===== INTEGRAÇÃO: conversa nova/inicial (o bug de produção) =====
 
-describe("category step — produto específico", () => {
-  test("'quero uma macarronada' vai para product_family_choice", () => {
-    const res = processMessage("quero uma macarronada", sessaoCategoria());
-    expect(res.session.step).toBe("product_family_choice");
-  });
-
-  test("resposta NÃO contém outros lanches", () => {
-    const res = processMessage("quero uma macarronada", sessaoCategoria());
+describe("INTEGRAÇÃO — conversa nova: 'quero uma macarronada'", () => {
+  test("welcome → saudação → 'quero uma macarronada' lista só macarronadas", () => {
+    // 1) Estado inicial, primeira mensagem qualquer dispara saudação e vai pra category
+    let sess = createInitialSession();
+    const saudacao = processMessage("oi", sess);
+    sess = saudacao.session;
+    // 2) Primeira mensagem útil de pedido
+    const res = processMessage("quero uma macarronada", sess);
     const msg = res.messages.join("\n");
-    expect(msg).not.toContain("Calzone");
-    expect(msg).not.toContain("X-Burguer");
-    expect(msg).not.toContain("X-Bacon");
-    expect(msg).not.toContain("X-Tudo");
-    expect(msg).not.toContain("Porção de Batatas");
-    expect(msg).not.toContain("Porcao de Batatas");
-  });
-
-  test("resposta contém título correto (sem 'Nossos lanches')", () => {
-    const res = processMessage("quero uma macarronada", sessaoCategoria());
-    const msg = res.messages.join("\n");
+    expect(msg).toContain("Temos essas opções de macarronada");
+    expect(msg).toContain("Macarronada de Carne");
     expect(msg.toLowerCase()).not.toContain("nossos lanches");
-    expect(msg.toLowerCase()).toContain("macarronada");
+    naoContemOutrosLanches(msg);
+    expect(res.session.step).toBe("product_family_choice");
   });
+});
 
-  test("'macaronada' (erro ortográfico) vai para product_family_choice", () => {
-    const res = processMessage("macaronada", sessaoCategoria());
+// ===== step "name" (sem nome salvo) — o caminho diagnosticado =====
+
+describe("step name — produto família ANTES da detecção de categoria", () => {
+  test("'quero uma macarronada' lista só macarronadas (não 'Nossos lanches')", () => {
+    const res = processMessage("quero uma macarronada", sessaoName());
+    const msg = res.messages.join("\n");
+    expect(msg).toContain("Temos essas opções de macarronada");
+    expect(msg).toContain("Macarronada de Carne");
+    expect(msg.toLowerCase()).not.toContain("nossos lanches");
+    naoContemOutrosLanches(msg);
     expect(res.session.step).toBe("product_family_choice");
   });
 
-  test("'tem macarrão?' vai para product_family_choice", () => {
-    const res = processMessage("tem macarrão?", sessaoCategoria());
+  test("NÃO salva 'quero uma macarronada' como nome do cliente", () => {
+    const res = processMessage("quero uma macarronada", sessaoName());
+    expect(res.session.customerName).toBeUndefined();
+  });
+
+  test("'macaronada' (typo) também detecta macarronada", () => {
+    const res = processMessage("macaronada", sessaoName());
     expect(res.session.step).toBe("product_family_choice");
+    naoContemOutrosLanches(res.messages.join("\n"));
+  });
+
+  test("'tem macarrão?' detecta macarronada", () => {
+    const res = processMessage("tem macarrão?", sessaoName());
+    expect(res.session.step).toBe("product_family_choice");
+  });
+
+  test("'quero uma massa' detecta macarronada", () => {
+    const res = processMessage("quero uma massa", sessaoName());
+    expect(res.session.step).toBe("product_family_choice");
+  });
+
+  test("'quero lanche' continua abrindo a lista completa de lanches", () => {
+    const res = processMessage("quero lanche", sessaoName());
+    expect(res.session.step).toBe("lanche_escolha");
+    expect(res.messages.join("\n")).toContain("Calzone");
+  });
+
+  test("'quero pizza' continua no fluxo de pizza", () => {
+    const res = processMessage("quero pizza", sessaoName());
+    expect(res.session.step).toBe("size");
+  });
+});
+
+// ===== step "category" =====
+
+describe("step category — produto família", () => {
+  test("'quero uma macarronada' lista só macarronadas", () => {
+    const res = processMessage("quero uma macarronada", sessaoCategoria());
+    const msg = res.messages.join("\n");
+    expect(msg).toContain("Temos essas opções de macarronada");
+    expect(msg.toLowerCase()).not.toContain("nossos lanches");
+    naoContemOutrosLanches(msg);
+    expect(res.session.step).toBe("product_family_choice");
+  });
+
+  test("'macaronada'/'tem macarrão?'/'massa' detectam macarronada", () => {
+    for (const t of ["macaronada", "tem macarrão?", "quero uma massa"]) {
+      const res = processMessage(t, sessaoCategoria());
+      expect(res.session.step).toBe("product_family_choice");
+    }
   });
 
   test("'quero lanche' continua abrindo categoria de lanches completa", () => {
     const res = processMessage("quero lanche", sessaoCategoria());
     expect(res.session.step).toBe("lanche_escolha");
-    const msg = res.messages.join("\n");
-    expect(msg).toContain("Calzone");
+    expect(res.messages.join("\n")).toContain("Calzone");
   });
 
   test("'quero pizza' continua no fluxo de pizza", () => {
-    const res = processMessage("quero pizza", sessaoCategoria());
-    expect(res.session.step).toBe("size");
+    expect(processMessage("quero pizza", sessaoCategoria()).session.step).toBe("size");
   });
 });
 
-// ===== add_more step — produto específico =====
+// ===== step "add_more" =====
 
-describe("add_more step — produto específico", () => {
-  test("'quero uma macarronada' no add_more vai para product_family_choice", () => {
+describe("step add_more — produto família", () => {
+  test("'quero uma macarronada' lista só macarronadas", () => {
     const res = processMessage("quero uma macarronada", sessaoAddMore());
+    const msg = res.messages.join("\n");
+    expect(msg).toContain("Macarronada de Carne");
+    naoContemOutrosLanches(msg);
     expect(res.session.step).toBe("product_family_choice");
   });
 
-  test("resposta no add_more não contém outros lanches", () => {
-    const res = processMessage("quero uma macarronada", sessaoAddMore());
-    const msg = res.messages.join("\n");
-    expect(msg).not.toContain("Calzone");
-    expect(msg).not.toContain("X-Burguer");
-    expect(msg).toContain("Macarronada de Carne");
+  test("typo 'macaronada' no add_more também detecta (não invalida)", () => {
+    const res = processMessage("macaronada", sessaoAddMore());
+    expect(res.session.step).toBe("product_family_choice");
   });
 
   test("'lanche' no add_more continua abrindo cardápio completo", () => {
     const res = processMessage("lanche", sessaoAddMore());
     expect(res.session.step).toBe("lanche_escolha");
-    const msg = res.messages.join("\n");
-    expect(msg).toContain("Calzone");
+    expect(res.messages.join("\n")).toContain("Calzone");
   });
 });
 
-// ===== Fluxo completo após escolher macarronada =====
+// ===== Fluxo completo após escolher na família =====
 
 describe("fluxo completo após product_family_choice", () => {
   function sessaoFamilyChoice(): BotSession {
@@ -157,13 +204,13 @@ describe("fluxo completo após product_family_choice", () => {
     };
   }
 
-  test("digitar '1' vai para lanche_macarronada_size", () => {
+  test("digitar '1' (número da opção) vai para escolha de tamanho", () => {
     const res = processMessage("1", sessaoFamilyChoice());
     expect(res.session.step).toBe("lanche_macarronada_size");
     expect(res.session.currentLanche).toBe("Macarronada de Carne");
   });
 
-  test("digitar tamanho 'P' adiciona ao carrinho", () => {
+  test("digitar tamanho 'P' adiciona ao carrinho e segue para add_more", () => {
     const res = processMessage("P", sessaoFamilyChoice());
     expect(res.session.step).toBe("add_more");
     expect(res.session.cart).toHaveLength(1);
@@ -172,13 +219,11 @@ describe("fluxo completo após product_family_choice", () => {
     expect(res.session.cart[0].price).toBe(28);
   });
 
-  test("digitar tamanho 'G' adiciona ao carrinho com preço correto", () => {
-    const res = processMessage("G", sessaoFamilyChoice());
-    expect(res.session.step).toBe("add_more");
-    expect(res.session.cart[0].price).toBe(50);
+  test("digitar 'G' adiciona com preço correto", () => {
+    expect(processMessage("G", sessaoFamilyChoice()).session.cart[0].price).toBe(50);
   });
 
-  test("após lanche_macarronada_size escolher tamanho vai para add_more", () => {
+  test("escolha de tamanho em lanche_macarronada_size segue o fluxo normal", () => {
     const sessSize: BotSession = {
       ...createInitialSession(),
       step: "lanche_macarronada_size",
@@ -191,14 +236,13 @@ describe("fluxo completo após product_family_choice", () => {
     expect(res.session.cart[0].price).toBe(40);
   });
 
-  test("após add_more fechar pedido vai para delivery_type", () => {
+  test("após escolher macarronada, fechar pedido vai para delivery_type", () => {
     const sessAddMore: BotSession = {
       ...createInitialSession(),
       step: "add_more",
       customerName: "Teste",
       cart: [{ category: "lanche", name: "Macarronada de Carne", size: "P", price: 28 }],
     };
-    const res = processMessage("fechar pedido", sessAddMore);
-    expect(res.session.step).toBe("delivery_type");
+    expect(processMessage("fechar pedido", sessAddMore).session.step).toBe("delivery_type");
   });
 });

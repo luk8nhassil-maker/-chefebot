@@ -850,21 +850,26 @@ function mensagemFamilia(label: string, itens: typeof MENU.lanches): string {
   return `Temos essas opções de ${label}: 😋\n\n${listaTxt}\n\nDigite o número ou o tamanho que deseja:`;
 }
 
+// Helper ÚNICO para responder com a lista filtrada de uma família de produto.
+// Usado por TODOS os pontos de entrada (name, category, add_more) para garantir
+// que a família nunca caia em handleCategory("lanche").
+function responderFamiliaProduto(session: BotSession, familia: { label: string; itens: typeof MENU.lanches }): BotResponse {
+  return {
+    messages: [mensagemFamilia(familia.label, familia.itens)],
+    session: resetaTentativas({
+      ...session,
+      step: "product_family_choice",
+      currentCategory: "lanche",
+      candidatosFamilia: familia.itens,
+      familiaLabel: familia.label,
+    }),
+  };
+}
+
 export function detectarLancheEspecifico(text: string, session: BotSession): BotResponse | null {
   // Família de produto (ex: todas as macarronadas) → mostra lista filtrada
   const familia = detectarFamiliaProduto(text);
-  if (familia) {
-    return {
-      messages: [mensagemFamilia(familia.label, familia.itens)],
-      session: resetaTentativas({
-        ...session,
-        step: "product_family_choice",
-        currentCategory: "lanche",
-        candidatosFamilia: familia.itens,
-        familiaLabel: familia.label,
-      }),
-    };
-  }
+  if (familia) return responderFamiliaProduto(session, familia);
 
   // Produto específico não-família (ex: X-Burguer, Calzone)
   const n = normalizar(text);
@@ -1717,6 +1722,9 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       // Cliente apressado: já mandou o pedido (completo ou parcial) na saudação -> processa direto
       const pedidoDireto = montarPizzaDoPedido(text, { ...session, customerName: historico.nome }, `Pode deixar, *${firstName}*! 🍕`);
       if (pedidoDireto) return pedidoDireto;
+      // FAMÍLIA DE PRODUTO (ex: "quero uma macarronada") — ANTES de detectaIntencaoDireta
+      const familiaRet = detectarFamiliaProduto(text);
+      if (familiaRet) return responderFamiliaProduto({ ...session, customerName: historico.nome }, familiaRet);
       const intencaoRet = detectaIntencaoDireta(text);
       if (intencaoRet) {
         if (intencaoRet.category === "pizza" && (n.includes("mini-pizza") || n.includes("mini pizza"))) {
@@ -1821,7 +1829,13 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       const pedidoDireto = montarPizzaDoPedido(text, { ...session }, `Prazer em te atender! 😊`);
       if (pedidoDireto) return pedidoDireto;
 
-      // 3) Intenção de categoria (pizza/lanche/bebida/suco) sem ser um pedido completo
+      // 5) FAMÍLIA DE PRODUTO (ex: "quero uma macarronada") — PRECISA rodar ANTES de
+      // detectaIntencaoDireta/handleCategory, senão a macarronada vira categoria "lanche"
+      // genérica e abre a lista completa de lanches. Não salva como nome nem pede nome.
+      const familiaName = detectarFamiliaProduto(text);
+      if (familiaName) return responderFamiliaProduto(session, familiaName);
+
+      // 6) Intenção de categoria (pizza/lanche/bebida/suco) sem ser um pedido completo
       const intencao = detectaIntencaoDireta(text);
       if (intencao) {
         const nName = normalizar(text);
@@ -1881,6 +1895,9 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
         }
         // Nenhum produto próximo -> cai no fallback normal (mostra cardápio da categoria)
       }
+      // ===== FAMÍLIA DE PRODUTO (ex: "macarronada") — ANTES da detecção genérica de categoria =====
+      const familiaCat = detectarFamiliaProduto(text);
+      if (familiaCat) return responderFamiliaProduto(session, familiaCat);
       const intencao = detectaIntencaoDireta(text);
       let category = "";
       if (n === "1" || n.includes("pizza")) category = "pizza";
@@ -2352,6 +2369,9 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       // ===== PEDIDO COMPLETO INTELIGENTE =====
       const pedidoCompletoAM = processarPedidoCompleto(text, session);
       if (pedidoCompletoAM) return pedidoCompletoAM;
+      // ===== FAMÍLIA DE PRODUTO (ex: "macarronada", "massa") — ANTES dos gates de categoria =====
+      const familiaAM = detectarFamiliaProduto(text);
+      if (familiaAM) return responderFamiliaProduto(session, familiaAM);
       // ===== CARDÁPIO / MENU / VER OPÇÕES =====
       if (detectaIntencaoCardapio(text)) {
         return {
