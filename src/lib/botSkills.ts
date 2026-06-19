@@ -6,6 +6,11 @@
  *
  * Esta camada é SOMENTE LEITURA em relação ao fluxo principal:
  * não altera sessão, não dispara respostas — só classifica intenções.
+ *
+ * SKILL ATIVA: detectarTipoRecebimento() — fonte única de verdade para
+ * delivery / retirada / consumo no local. Usada pelo bot.ts em dois pontos:
+ *   • detectaTipoEntregaCompleto() (pedido completo numa mensagem)
+ *   • case "delivery_type" (step de escolha de recebimento)
  */
 
 // ---------------------------------------------------------------------------
@@ -84,24 +89,85 @@ const FRASES_INICIAR_PEDIDO = [
   "manda uma pizza", "traz uma pizza",
 ];
 
-const FRASES_DELIVERY = [
-  "entregar", "entrega", "delivery", "manda entregar", "manda em casa",
-  "minha casa", "em casa", "no meu endereco", "vou querer delivery",
-  "manda ai", "manda pra mim",
+// ---------------------------------------------------------------------------
+// SKILL: Tipo de recebimento — fonte única de verdade
+// Adicionar novos sinônimos aqui, nunca nos arquivos de fluxo.
+// ---------------------------------------------------------------------------
+
+// Palavras que exigem match de palavra inteira (evitam falsos positivos)
+const KEYWORDS_RECEBIMENTO_WORD: { type: "dine_in" | "delivery" | "pickup"; word: string }[] = [
+  { type: "dine_in",  word: "local" },
+  { type: "dine_in",  word: "mesa"  },
 ];
 
-const FRASES_RETIRADA = [
-  "retirar", "retirada", "buscar", "pegar", "retiro",
-  "vou buscar", "passo pra pegar", "vou la pegar", "busco ai",
-  "na loja", "passa la", "vou la",
+// Substrings simples, por ordem de prioridade (dine_in antes de delivery/pickup)
+const KEYWORDS_RECEBIMENTO: { type: "dine_in" | "delivery" | "pickup"; kw: string }[] = [
+  // --- consumo no local ---
+  { type: "dine_in", kw: "consumo no local"  },
+  { type: "dine_in", kw: "consumir no local" },
+  { type: "dine_in", kw: "comer ai"          },
+  { type: "dine_in", kw: "comer aqui"        },
+  { type: "dine_in", kw: "comer na pizzaria" },
+  { type: "dine_in", kw: "vou comer"         },
+  { type: "dine_in", kw: "comer no local"    },
+  { type: "dine_in", kw: "consumo local"     },
+  { type: "dine_in", kw: "consumir"          },
+  { type: "dine_in", kw: "aqui mesmo"        },
+  { type: "dine_in", kw: "na mesa"           },
+  // --- delivery ---
+  { type: "delivery", kw: "entrega"           },
+  { type: "delivery", kw: "delivery"          },
+  { type: "delivery", kw: "entregar"          },
+  { type: "delivery", kw: "minha casa"        },
+  { type: "delivery", kw: "em casa"           },
+  { type: "delivery", kw: "manda ai"          },
+  { type: "delivery", kw: "manda entregar"    },
+  { type: "delivery", kw: "manda em casa"     },
+  { type: "delivery", kw: "no meu endereco"   },
+  // --- retirada ---
+  { type: "pickup",  kw: "retirar"            },
+  { type: "pickup",  kw: "retirada"           },
+  { type: "pickup",  kw: "buscar"             },
+  { type: "pickup",  kw: "busco ai"           },
+  { type: "pickup",  kw: "pegar"              },
+  { type: "pickup",  kw: "retiro"             },
+  { type: "pickup",  kw: "na loja"            },
+  { type: "pickup",  kw: "vou buscar"         },
+  { type: "pickup",  kw: "passo pra pegar"    },
 ];
 
-const FRASES_CONSUMO_LOCAL = [
-  "consumo no local", "consumir no local", "comer ai", "comer aqui",
-  "comer na pizzaria", "vou comer ai", "vou comer la", "vou comer aqui",
-  "comer no local", "consumo local", "consumir", "aqui mesmo",
-  "na mesa", "mesa", "local",
-];
+export interface ResultadoRecebimento {
+  type: "delivery" | "pickup" | "dine_in";
+  confidence: "alta" | "media";
+  matchedBy: string;
+}
+
+/**
+ * Detecta o tipo de recebimento numa mensagem.
+ * Aceita texto cru ou já normalizado (normalização é idempotente).
+ * Retorna null se nenhum padrão conhecido for reconhecido.
+ */
+export function detectarTipoRecebimento(mensagem: string): ResultadoRecebimento | null {
+  const norm = n(mensagem);
+  // word-boundary primeiro (evitam "local" dentro de outras palavras)
+  for (const { type, word } of KEYWORDS_RECEBIMENTO_WORD) {
+    if (new RegExp(`\\b${word}\\b`).test(norm)) {
+      return { type, confidence: "alta", matchedBy: word };
+    }
+  }
+  for (const { type, kw } of KEYWORDS_RECEBIMENTO) {
+    if (norm.includes(kw)) return { type, confidence: "alta", matchedBy: kw };
+  }
+  return null;
+}
+
+// Aliases internos para compatibilidade com detectaRecebimentoInterno
+const FRASES_CONSUMO_LOCAL = KEYWORDS_RECEBIMENTO
+  .filter(k => k.type === "dine_in").map(k => k.kw);
+const FRASES_DELIVERY = KEYWORDS_RECEBIMENTO
+  .filter(k => k.type === "delivery").map(k => k.kw);
+const FRASES_RETIRADA = KEYWORDS_RECEBIMENTO
+  .filter(k => k.type === "pickup").map(k => k.kw);
 
 const FRASES_ESCALAR = [
   "falar com atendente", "falar com humano", "atendente", "atendimento humano",

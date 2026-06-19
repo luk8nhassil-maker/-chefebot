@@ -1,4 +1,5 @@
 import { MENU as MENU_PADRAO, getBorderPrice, getBorderByIndex, getMacarronadaPrice } from "./menu";
+import { detectarTipoRecebimento } from "./botSkills";
 
 let MENU = MENU_PADRAO;
 
@@ -982,17 +983,10 @@ function detectaDadosEntrega(text: string): { tipo: "delivery" | "pickup" | null
   return { tipo, bairro, pagamento };
 }
 
-// Detecta tipo de entrega incluindo consumo no local
+// Detecta tipo de entrega — delega à skill central (botSkills.ts).
+// Aceita texto já normalizado (normalização é idempotente).
 function detectaTipoEntregaCompleto(n: string): "delivery" | "pickup" | "dine_in" | null {
-  if (/\blocal\b/.test(n) || n.includes("consumo") || n.includes("consumir") ||
-      n.includes("comer ai") || n.includes("comer aqui") || n.includes("comer na pizzaria") ||
-      n.includes("aqui mesmo") || n.includes("na mesa") || /\bmesa\b/.test(n) ||
-      n.includes("vou comer")) return "dine_in";
-  if (n.includes("entrega") || n.includes("delivery") || n.includes("entregar") ||
-      n.includes("minha casa") || n.includes("em casa") || n.includes("manda ai")) return "delivery";
-  if (n.includes("retirar") || n.includes("retirada") || n.includes("buscar") ||
-      n.includes("pegar") || n.includes("retiro") || n.includes("na loja") || n.includes("busco ai")) return "pickup";
-  return null;
+  return detectarTipoRecebimento(n)?.type ?? null;
 }
 
 // Extrai rua/endereço de forma simples e heurística
@@ -2390,19 +2384,10 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       };
     }
     case "delivery_type": {
-      // ===== CONSUMO NO LOCAL (dine-in) =====
-      const isDineIn = n === "3"
-        || n.includes("consumo")
-        || n.includes("consumir")
-        || n.includes("vou comer")
-        || n.includes("comer ai")
-        || n.includes("comer aqui")
-        || n.includes("comer na pizzaria")
-        || n.includes("local")
-        || n.includes("ai mesmo")
-        || /\bmesa\b/.test(n)
-        || (n.includes("na loja") && !n.includes("retirar") && !n.includes("buscar") && !n.includes("pegar"));
-      if (isDineIn) {
+      // ===== TIPO DE RECEBIMENTO — usa skill central (botSkills.ts) =====
+      // "3" é opção de menu (UI) — permanece aqui, não é conhecimento semântico.
+      const recebimentoDetectado = n === "3" ? "dine_in" : detectarTipoRecebimento(text)?.type ?? null;
+      if (recebimentoDetectado === "dine_in") {
         return { messages: [`Combinado! 🍽️ Consumo no local!\n\nQual a forma de pagamento? 💸`], session: resetaTentativas({ ...session, step: "payment", deliveryType: "dine_in", deliveryFee: 0, neighborhood: undefined }) };
       }
 
