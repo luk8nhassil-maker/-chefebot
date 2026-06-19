@@ -68,13 +68,12 @@ function listaFlavors(): string {
 function mensagemAddMore(cart: CartItem[]): string {
   const subtotal = cartSubtotal(cart);
   const temBebida = cart.some(i => i.category === "bebida" || i.category === "suco");
-  let upsellBebida = "";
   if (!temBebida) {
     const destaques = MENU.bebidas.slice(0, 3);
-    const lista = destaques.map((b, i) => `  ${i + 1}. ${b.name} · *${formatCurrency(b.price)}*`).join("\n");
-    upsellBebida = `\n\n🥤 *Quer adicionar uma bebida?*\n${lista}`;
+    const lista = destaques.map((b, i) => `  ${i + 1}. ${b.name} — ${formatCurrency(b.price)}`).join("\n");
+    return `🛒 *Seu pedido:*\n${resumoCarrinho(cart)}\n  Subtotal: *${formatCurrency(subtotal)}*\n\n🥤 *Quer adicionar uma bebida?*\n${lista}\n  4. Ver mais bebidas\n  5. Fechar pedido\n\nDigite o número da opção 😊`;
   }
-  return `🛒 *Seu pedido:*\n${resumoCarrinho(cart)}\n  Subtotal: *${formatCurrency(subtotal)}*${upsellBebida}\n\nOu *fechar pedido*, *mais pizza*, *lanche*, *ver cardápio*... 😊`;
+  return `🛒 *Seu pedido:*\n${resumoCarrinho(cart)}\n  Subtotal: *${formatCurrency(subtotal)}*\n\nOu *fechar pedido*, *mais pizza*, *lanche*, *ver cardápio*... 😊`;
 }
 
 export type BotStep =
@@ -2256,7 +2255,38 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
           session: resetaTentativas(session),
         };
       }
-      // Número puro 1-4 após mostrar menu de categorias
+      // Nome exato de bebida (ex: "refrigerante 2l") → adiciona sem passar por outros checks
+      const bebidaPorNome = MENU.bebidas.find(b => normalizar(b.name) === n);
+      if (bebidaPorNome) {
+        if (isEsgotado(bebidaPorNome.name)) return respostaEsgotado(bebidaPorNome.name, MENU.bebidas.map(b => b.name), session);
+        const newCartBeb = [...session.cart, { category: "bebida" as const, name: bebidaPorNome.name, price: bebidaPorNome.price }];
+        return { messages: [`*${bebidaPorNome.name}* anotada! 😋`, mensagemAddMore(newCartBeb)], session: resetaTentativas({ ...session, step: "add_more", cart: newCartBeb }) };
+      }
+      // === UPSELL BEBIDA: quando não há bebida no carrinho, números 1-5 mapeiam para a oferta curta ===
+      const temBebidaNoCarrinho = session.cart.some(i => i.category === "bebida" || i.category === "suco");
+      if (!temBebidaNoCarrinho && /^\d$/.test(n)) {
+        const numUpsell = parseInt(n);
+        if (numUpsell >= 1 && numUpsell <= 3) {
+          const bebidaUpsell = MENU.bebidas[numUpsell - 1];
+          if (isEsgotado(bebidaUpsell.name)) return respostaEsgotado(bebidaUpsell.name, MENU.bebidas.map(b => b.name), session);
+          const newCart = [...session.cart, { category: "bebida" as const, name: bebidaUpsell.name, price: bebidaUpsell.price }];
+          return { messages: [`*${bebidaUpsell.name}* anotada! 😋`, mensagemAddMore(newCart)], session: resetaTentativas({ ...session, step: "add_more", cart: newCart }) };
+        }
+        if (numUpsell === 4) {
+          const resp = handleCategory("bebida", { ...session, step: "category" });
+          return { ...resp, session: resetaTentativas(resp.session) };
+        }
+        if (numUpsell === 5) {
+          if (session.deliveryType) {
+            return continuarAposItemCompleto(session.cart, session, "Show! Vamos fechar então 🍕");
+          }
+          return {
+            messages: [`Show! Vamos fechar então 🍕\n\nComo quer receber seu pedido? 😊\n\n  1. Entrega 🛵\n  2. Retirada na loja 🏪\n  3. Consumo no local 🍽️`],
+            session: resetaTentativas({ ...session, step: "delivery_type" }),
+          };
+        }
+      }
+      // Número puro 1-4 após mostrar menu de categorias (quando já há bebida no carrinho)
       if (/^\d$/.test(n)) {
         const numCat = parseInt(n);
         const catMap: Record<number, string> = { 1: "pizza", 2: "lanche", 3: "bebida", 4: "suco" };
@@ -2352,7 +2382,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
         const resp = handleCategory("lanche", { ...session, step: "category" });
         return { ...resp, session: resetaTentativas(resp.session) };
       }
-      // Bebida
+      // Bebida: intenção genérica → mostra lista completa
       if (querBebida) {
         const resp = handleCategory("bebida", { ...session, step: "category" });
         return { ...resp, session: resetaTentativas(resp.session) };
