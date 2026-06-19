@@ -469,12 +469,13 @@ export function detectarFormaPagamento(mensagem: string): ResultadoPagamento {
 
   if (metodosPresentes.length === 1) {
     const { method, matchedBy } = metodosPresentes[0];
+    // Inclui troco sempre que "troco" apareceu (needsChange=false é informação válida)
+    const temSinalTroco = norm.includes("troco");
     return {
       type: method,
       confidence: "high",
       matchedBy,
-      // troco só faz sentido em dinheiro, mas detectamos sempre (fluxo decide o que usar)
-      ...(troco.needsChange ? troco : {}),
+      ...(temSinalTroco ? troco : {}),
     };
   }
 
@@ -488,6 +489,8 @@ export function detectarFormaPagamento(mensagem: string): ResultadoPagamento {
     };
   }
 
+  // "sem troco" sozinho (sem método) — informa needsChange mesmo sem tipo detectado
+  if (norm.includes("troco")) return { type: null, confidence: "low", ...troco };
   return { type: null, confidence: "low" };
 }
 
