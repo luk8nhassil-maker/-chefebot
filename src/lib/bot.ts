@@ -95,6 +95,7 @@ export type BotStep =
   | "suco_escolha"
   | "confirmando_mudanca"
   | "consulta_preco"
+  | "consulta_fatias"
   | "observacao"
   | "delivery_type"
   | "neighborhood"
@@ -169,6 +170,7 @@ export interface BotSession {
   stepAposSabor?: BotStep;
   retornoRapido?: boolean;
   pendingQtdSuco?: number;
+  pendingConsultaFatias?: { size?: string };
   pendingConsultaPreco?: {
     label: string;
     categoria: "pizza_size" | "pizza_mini" | "pizza_ambiguo" | "lanche" | "bebida" | "suco";
@@ -614,9 +616,26 @@ function verificaConsultaFatias(text: string, session: BotSession): BotResponse 
     resposta = `🍕 Nossas pizzas vêm assim:\n\n${lista}\n\nQuer que eu anote uma pra você?`;
   }
 
-  // No step size, reforça que pode escolher tamanho
-  const reforco = session.step === "size" ? `\n\n${sizeListComMiniPizza()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_` : "";
-  return { messages: [resposta + reforco], session: resetaTentativas(session) };
+  // No step size, reforça que pode escolher tamanho; nos demais, vai para consulta_fatias
+  if (session.step === "size") {
+    const reforco = `\n\n${sizeListComMiniPizza()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`;
+    return { messages: [resposta + reforco], session: resetaTentativas(session) };
+  }
+  return { messages: [resposta], session: resetaTentativas({ ...session, step: "consulta_fatias", pendingConsultaFatias: { size: size ?? undefined } }) };
+}
+
+function resolveFatiasFollowUp(text: string, session: BotSession): BotResponse | null {
+  const n = normalizar(text).replace(/-/g, " ");
+  // Detecta tamanho na mensagem de follow-up (sem precisar de "fatias")
+  let size: string | null = null;
+  if (n.includes("pequena") || n.includes("pizza p") || /\bp\b/.test(n)) size = "P";
+  else if (n.includes("media") || n.includes("pizza m") || /\bm\b/.test(n)) size = "M";
+  else if (n.includes("grande") || n.includes("pizza g") || /\bg\b/.test(n)) size = "G";
+  else if (n.includes("famil") || n.includes("pizza f") || /\bf\b/.test(n)) size = "F";
+  if (!size) return null;
+  const { label, fatias } = FATIAS_POR_TAMANHO[size];
+  const resposta = `Pizza ${label} (${size}) vem com *${fatias} fatias* 🍕\n\nQuer que eu anote uma pra você?`;
+  return { messages: [resposta], session: resetaTentativas({ ...session, step: "consulta_fatias", pendingConsultaFatias: { size } }) };
 }
 
 function detectaIntencaoDireta(text: string): { category: string; label: string } | null {
@@ -1533,6 +1552,27 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
         messages: [`*${escolhido.name}* anotado! 😋`, mensagemAddMore(newCart)],
         session: resetaTentativas({ ...session, step: "add_more", cart: newCart, candidatosValorProduto: undefined }),
       };
+    }
+    case "consulta_fatias": {
+      // Nova consulta de fatias ou follow-up de tamanho
+      const resFatiasF = verificaConsultaFatias(text, session);
+      if (resFatiasF) return resFatiasF;
+      const followUp = resolveFatiasFollowUp(text, session);
+      if (followUp) return followUp;
+      // Cliente quer pedir o último tamanho consultado
+      const lastSize = session.pendingConsultaFatias?.size;
+      const querPedirF = ePositiva(n) || n === "1" || n.includes("sim") || n.includes("quero") || n.includes("pode anotar") || n.includes("anota") || n.includes("manda") || n.includes("quero essa");
+      if (querPedirF && lastSize) {
+        return { messages: [`Pizza *${lastSize}* anotada! 👌\n\nQual o sabor? 😋 Você pode escolher até *2 sabores*!\n\n${listaFlavors()}`], session: resetaTentativas({ ...session, step: "flavor", currentCategory: "pizza", currentSize: lastSize, pendingConsultaFatias: undefined }) };
+      }
+      // Ver outro / cardápio
+      if (n === "2" || n.includes("ver outro") || n.includes("cardapio") || n.includes("menu") || eNegativa(n)) {
+        return { messages: [`Tudo bem! ${mensagemCategorias()}`], session: resetaTentativas({ ...session, step: "category", pendingConsultaFatias: undefined }) };
+      }
+      // Consulta de preço dentro do contexto de fatias
+      const resPrecoF = verificaConsultaPreco(text, session);
+      if (resPrecoF) return resPrecoF;
+      return respostaInvalida(`Quer saber de outro tamanho? Ou posso anotar uma pizza pra você? 😊`, session);
     }
     case "consulta_preco": {
       // Nova consulta de preço tem prioridade sobre contexto anterior
