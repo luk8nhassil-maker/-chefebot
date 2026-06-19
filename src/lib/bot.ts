@@ -1263,9 +1263,16 @@ function processarPedidoCompleto(text: string, session: BotSession): BotResponse
   const isMiniPizza = nSemGatilho.includes("mini pizza");
   const isPizza = !isMiniPizza && (nSemGatilho.includes("pizza") || !!detectaPedidoParcial(text));
 
-  // Lanche por nome (exceto Mini-Pizza)
+  // Lanche por nome (exceto Mini-Pizza).
+  // Compara sem hífen/espaço para aceitar "x-burguer", "x burguer" e "xburguer" como equivalentes.
   const lanche = !isMiniPizza && !isPizza
-    ? MENU.lanches.find(l => l.name !== "Mini-Pizza" && !isEsgotado(l.name) && nSemGatilho.includes(normalizar(l.name)))
+    ? MENU.lanches.find(l => {
+        if (l.name === "Mini-Pizza" || isEsgotado(l.name)) return false;
+        const nNome = normalizar(l.name).replace(/-/g, " ");
+        const nNomeSemEsp = nNome.replace(/\s+/g, "");
+        const nSemEsp = nSemGatilho.replace(/\s+/g, "");
+        return nSemGatilho.includes(nNome) || nSemEsp.includes(nNomeSemEsp);
+      })
     : null;
 
   // Sucos por nome (usar parsearMultiSuco ou match individual)
