@@ -560,6 +560,7 @@ export async function POST(req: NextRequest) {
 
     const messageText = data?.message?.conversation || data?.message?.extendedTextMessage?.text || "";
     if (!messageText) return NextResponse.json({ ok: true });
+    await redis.set(`ultima_msg:${phone}`, messageText.slice(0, 200), { ex: 1800 });
 
     // Verifica se é entregador confirmando entrega
     const pedidoEntregadorId = await redis.get<string>(`entregador_aguardando:${phone}`)
