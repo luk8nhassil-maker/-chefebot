@@ -37,6 +37,12 @@ export function setConfigDinamica(cfg: { tempoEntregaDelivery?: string; tempoEnt
   if (cfg.tempoEntregaRetirada) CONFIG_BOT.tempoEntregaRetirada = cfg.tempoEntregaRetirada;
 }
 
+let HORARIO_FUNCIONAMENTO = "22h";
+
+export function setHorarioFuncionamento(horario: string) {
+  HORARIO_FUNCIONAMENTO = horario;
+}
+
 function getSizePrice(size: string): number {
   return MENU.sizes.find((s) => s.code === size)?.price ?? 0;
 }
@@ -465,6 +471,25 @@ function detectaIntencaoCardapio(text: string): boolean {
   return n.includes("cardapio") || n.includes("menu") || n.includes("ver sabor") ||
     n.includes("ver opcoes") || n.includes("o que tem") || n.includes("o que voces tem") ||
     (n.includes("ver") && (n.includes("cardapio") || n.includes("opcoes")));
+}
+
+export function detectaPerguntaEntregaFuncionamento(text: string): boolean {
+  const n = normalizar(text);
+  const palavrasChave = [
+    "entrega", "entregando", "delivery", "funcionando", "funcionamento",
+    "aberto", "da pra pedir", "da pra", "ainda da", "ainda ta",
+    "ate que horas", "que horas", "horario", "horario de",
+  ];
+  if (!palavrasChave.some(p => n.includes(p))) return false;
+  // Se há um pedido completo junto (produto + pagamento/bairro), prioriza o pedido
+  const temProduto = n.includes("pizza") || n.includes("lanche") || n.includes("burguer") ||
+    n.includes("bacon") || n.includes("calabresa") || n.includes("frango") ||
+    n.includes("bebida") || n.includes("suco") || n.includes("refrigerante") ||
+    n.includes("calzone") || n.includes("x-") || n.includes("x ");
+  const temPagamentoOuBairro = n.includes("pix") || n.includes("dinheiro") || n.includes("cartao") ||
+    n.includes("entrega bairro") || n.includes("bairro");
+  if (temProduto && temPagamentoOuBairro) return false;
+  return true;
 }
 
 // Palavras do domínio do negócio: se aparecerem, o texto quase certamente NÃO é um nome próprio sozinho.
@@ -1723,6 +1748,22 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       default:
         return { messages: [`Tudo bem! ${mensagemCategorias()}`], session: resetaTentativas({ ...session, step: "category" }) };
     }
+  }
+
+  // Detecta perguntas sobre entrega/funcionamento antes de qualquer step
+  // Exceção: se a mensagem contém produto + pagamento/bairro, deixa processarPedidoCompleto tratar
+  if (
+    session.step !== "escalado" &&
+    session.step !== "confirm" &&
+    session.step !== "aguardando_pix" &&
+    detectaPerguntaEntregaFuncionamento(text)
+  ) {
+    return {
+      messages: [
+        `Sim, estamos fazendo entrega sim ✅\n\nHoje nosso atendimento vai até *${HORARIO_FUNCIONAMENTO}*.\n\nPode mandar seu pedido por aqui mesmo.\nO que vai ser hoje? 🍕`,
+      ],
+      session: resetaTentativas({ ...session, step: session.customerName ? "category" : "name" }),
+    };
   }
 
   switch (session.step) {
