@@ -170,6 +170,7 @@ export interface BotSession {
   stepAposSabor?: BotStep;
   retornoRapido?: boolean;
   pendingQtdSuco?: number;
+  stepAnteriorEscalado?: BotStep;
   pendingConsultaFatias?: { size?: string };
   candidatosBairro?: { name: string; fee: number }[];
   pendingConsultaPreco?: {
@@ -1185,6 +1186,51 @@ function tentaAdicionarComQtd(
   return null;
 }
 
+export function retomarFluxoDoBot(session: BotSession): string[] {
+  const step = session.stepAnteriorEscalado ?? session.step;
+  const nome = session.customerName ? ` *${session.customerName.split(" ")[0]}*,` : "";
+  switch (step) {
+    case "category":
+      return [`Prontinho,${nome} voltei por aqui! 😊\n\n${mensagemCategorias()}`];
+    case "size":
+      return [`Prontinho,${nome} voltei por aqui! 😊\n\nQual o tamanho da pizza?\n\n${sizeListComMiniPizza()}`];
+    case "flavor":
+      return [`Prontinho,${nome} voltei por aqui! 😊\n\nQual o sabor da pizza? Você pode escolher até *2 sabores*!\n\n${listaFlavors()}`];
+    case "border_escolha":
+      return [`Prontinho,${nome} voltei por aqui! 😊\n\nVai querer borda recheada? 😋`];
+    case "add_more":
+      return session.cart.length > 0
+        ? [`Prontinho,${nome} voltei por aqui! 😊\n\n${mensagemAddMore(session.cart)}`]
+        : [`Prontinho,${nome} voltei por aqui! 😊\n\n${mensagemCategorias()}`];
+    case "lanche_escolha":
+      return [`Prontinho,${nome} voltei por aqui! 😊\n\nNossos lanches 😋\n\n${listaLanches()}\n\nDigite o número ou o nome:`];
+    case "lanche_flavor":
+      return [`Prontinho,${nome} voltei por aqui! 😊\n\nQual o sabor do lanche?`];
+    case "bebida_escolha":
+      return [`Prontinho,${nome} voltei por aqui! 😊\n\nEscolha a bebida:`];
+    case "suco_escolha":
+      return [`Prontinho,${nome} voltei por aqui! 😊\n\nQual o sabor do suco?`];
+    case "observacao":
+      return [`Prontinho,${nome} voltei por aqui! 😊\n\nTem alguma observação pro pedido?`];
+    case "delivery_type":
+      return [`Prontinho,${nome} voltei por aqui! 😊\n\nComo quer receber seu pedido?\n\n  1. Entrega 🛵\n  2. Retirada na loja 🏪\n  3. Consumo no local 🍽️`];
+    case "neighborhood":
+      return [`Prontinho,${nome} voltei por aqui! 😊\n\nQual o seu bairro?`];
+    case "address":
+      return [`Prontinho,${nome} voltei por aqui! 😊\n\nMe passa o endereço completo:\n_(Rua, número e complemento)_`];
+    case "payment":
+      return [`Prontinho,${nome} voltei por aqui! 😊\n\nQual a forma de pagamento? 💸`];
+    case "aguardando_pix":
+      return [`Prontinho,${nome} voltei por aqui! 😊\n\nSó me manda o comprovante do Pix pra confirmar o pedido! 📄`];
+    case "confirm":
+      return session.cart.length > 0
+        ? [`Prontinho,${nome} voltei por aqui! 😊\n\n${resumoCarrinho(session.cart)}\n\nConfirma o pedido?`]
+        : [`Prontinho,${nome} voltei por aqui! 😊\n\nMe confirma rapidinho: você quer continuar o pedido ou começar de novo?`];
+    default:
+      return [`Prontinho,${nome} voltei por aqui 😊\n\nMe confirma rapidinho: você quer continuar o pedido ou começar de novo?\n\n  1. Continuar pedido\n  2. Começar de novo`];
+  }
+}
+
 export function processMessage(input: string, session: BotSession): BotResponse {
   // Detecta o "ritmo" do cliente pela forma da resposta:
   // resposta que é só número (ex: "1", "2") => cliente apressado => respostas mais rápidas.
@@ -1268,7 +1314,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
   if (session.step !== "escalado" && precisaEscalar(text)) {
     return {
       messages: [`Já chamo alguém pra te ajudar! Aguarda um instantinho 😊`],
-      session: { ...session, step: "escalado", escalado: true },
+      session: { ...session, step: "escalado", escalado: true, stepAnteriorEscalado: session.step },
       escalar: true,
     };
   }
