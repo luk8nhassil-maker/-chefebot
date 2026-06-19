@@ -585,6 +585,40 @@ function verificaConsultaPreco(text: string, session: BotSession): BotResponse |
   };
 }
 
+const FATIAS_POR_TAMANHO: Record<string, { label: string; fatias: number }> = {
+  P: { label: "Pequena", fatias: 6 },
+  M: { label: "Média", fatias: 8 },
+  G: { label: "Grande", fatias: 10 },
+  F: { label: "Família", fatias: 12 },
+};
+
+function verificaConsultaFatias(text: string, session: BotSession): BotResponse | null {
+  const n = normalizar(text);
+  const temFatia = n.includes("fatia") || n.includes("quantas fatias") || n.includes("vem quantas") || n.includes("serve quantas") || n.includes("quantas porcoes") || n.includes("quantas porcao");
+  const temGeral = n.includes("cada tamanho") || n.includes("cada pizza") || n.includes("todos") || n.includes("todos os tamanhos") || (temFatia && !n.includes("pizza p") && !n.includes("pizza m") && !n.includes("pizza g") && !n.includes("pizza f") && !n.includes("pequena") && !n.includes("media") && !n.includes("grande") && !n.includes("famil") && !/\b[pmgf]\b/.test(n));
+  if (!temFatia) return null;
+
+  // Tenta detectar tamanho específico
+  let size: string | null = null;
+  if (n.includes("pequena") || n.includes("pizza p") || /\bp\b/.test(n)) size = "P";
+  else if (n.includes("media") || n.includes("pizza m") || /\bm\b/.test(n)) size = "M";
+  else if (n.includes("grande") || n.includes("pizza g") || /\bg\b/.test(n)) size = "G";
+  else if (n.includes("famil") || n.includes("pizza f") || /\bf\b/.test(n)) size = "F";
+
+  let resposta: string;
+  if (size && !temGeral) {
+    const { label, fatias } = FATIAS_POR_TAMANHO[size];
+    resposta = `Pizza ${label} (${size}) vem com *${fatias} fatias* 🍕\n\nQuer que eu anote uma pra você?`;
+  } else {
+    const lista = Object.entries(FATIAS_POR_TAMANHO).map(([code, { label, fatias }]) => `  ${code} ${label} — *${fatias} fatias*`).join("\n");
+    resposta = `🍕 Nossas pizzas vêm assim:\n\n${lista}\n\nQuer que eu anote uma pra você?`;
+  }
+
+  // No step size, reforça que pode escolher tamanho
+  const reforco = session.step === "size" ? `\n\n${sizeListComMiniPizza()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_` : "";
+  return { messages: [resposta + reforco], session: resetaTentativas(session) };
+}
+
 function detectaIntencaoDireta(text: string): { category: string; label: string } | null {
   const n = normalizar(text);
   const todosSaboresPizza = [...MENU.saltyFlavors, ...MENU.sweetFlavors];
@@ -1286,7 +1320,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       const historico = session.historico!;
       const firstName = historico.nome.split(" ")[0];
       // Consulta de preço tem prioridade sobre pedido direto
-      const resConsultaRet = verificaConsultaPreco(text, session);
+      const resConsultaRet = verificaConsultaFatias(text, session) ?? verificaConsultaPreco(text, session);
       if (resConsultaRet) return resConsultaRet;
       // Cliente apressado: já mandou o pedido (completo ou parcial) na saudação -> processa direto
       const pedidoDireto = montarPizzaDoPedido(text, { ...session, customerName: historico.nome }, `Pode deixar, *${firstName}*! 🍕`);
@@ -1384,7 +1418,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       }
 
       // 2) Consulta de preço ("quanto tá a pizza pequena?")
-      const resConsultaName = verificaConsultaPreco(text, session);
+      const resConsultaName = verificaConsultaFatias(text, session) ?? verificaConsultaPreco(text, session);
       if (resConsultaName) return resConsultaName;
 
       // 3) Pedido direto/completo de pizza já na primeira mensagem
@@ -1419,7 +1453,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
     }
     case "category": {
       // ===== CONSULTA DE PREÇO (ex: "quanto tá a pizza pequena?", "valor do x-burguer") =====
-      const resConsultaCat = verificaConsultaPreco(text, session);
+      const resConsultaCat = verificaConsultaFatias(text, session) ?? verificaConsultaPreco(text, session);
       if (resConsultaCat) return resConsultaCat;
       // ===== QTD + PRODUTO DIRETO (ex: "quero 2 x burguer", "manda uma coca", "pode ser 1 x tudo") =====
       const qtdItemCat = parsearQtdEItem(text);
@@ -1601,6 +1635,8 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
     case "size": {
       const mudanca = tentaMudanca(text, session);
       if (mudanca) return mudanca;
+      const resFatiasSize = verificaConsultaFatias(text, session);
+      if (resFatiasSize) return resFatiasSize;
       if (n === "1" || n === "mini" || n.includes("mini-pizza") || n.includes("mini pizza")) {
         return {
           messages: [`Mini-Pizza anotada! 🍕 Qual sabor?\n\n${MENU.miniPizzaFlavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n")}`],
@@ -1883,7 +1919,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
     }
     case "add_more": {
       // ===== CONSULTA DE PREÇO =====
-      const resConsultaAM = verificaConsultaPreco(text, session);
+      const resConsultaAM = verificaConsultaFatias(text, session) ?? verificaConsultaPreco(text, session);
       if (resConsultaAM) return resConsultaAM;
       // ===== CARDÁPIO / MENU / VER OPÇÕES =====
       if (detectaIntencaoCardapio(text)) {
