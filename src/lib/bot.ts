@@ -182,6 +182,7 @@ export interface BotSession {
     size?: string;
     qty?: number;
   };
+  menuAtual?: { tipo: string; opcoes: { name: string; price: number; hasFlavors: boolean; flavorsKey: string; sizes?: { code: string; price: number }[] }[] };
 }
 export interface BotResponse {
   messages: string[];
@@ -831,8 +832,42 @@ function listaSucos(): string {
   const items = MENU.sucos.filter(s => !isEsgotado(s.name));
   return items.map((s, i) => `  ${i + 1}. ${s.name} · *${formatCurrency(s.price)}*`).join("\n");
 }
+type LancheItem = { name: string; price: number; hasFlavors: boolean; flavorsKey: string; sizes?: { code: string; price: number }[] };
+function getLanchesAtivos(): LancheItem[] {
+  return MENU.lanches.filter(l => !isEsgotado(l.name) && l.name !== "Mini-Pizza");
+}
+function resolverProdutoDoMenuAtual(texto: string, opcoes: LancheItem[]): LancheItem | null {
+  const n = normalizar(texto).replace(/-/g, " ");
+  // 1. Detecta número puro ou em frases: "6", "opção 6", "numero 6", "quero o 6", "manda o 6"
+  const numPuro = /^\d+$/.test(texto.trim());
+  const numFrase = n.match(/(?:opcao|numero|quero\s+o|manda\s+o)\s+(\d+)/);
+  const num = numPuro ? parseInt(texto.trim()) : numFrase ? parseInt(numFrase[1]) : NaN;
+  if (!isNaN(num) && num >= 1 && num <= opcoes.length) return opcoes[num - 1];
+  // 2. Nome exato normalizado
+  for (const l of opcoes) {
+    if (normalizar(l.name).replace(/-/g, " ") === n) return l;
+  }
+  // 3. Apelidos e grafias alternativas (APELIDOS_SABOR)
+  for (const l of opcoes) {
+    const apelidos = APELIDOS_SABOR[l.name] || [];
+    if (apelidos.some(ap => n.includes(normalizar(ap).replace(/-/g, " ")))) return l;
+  }
+  // 4. Substring do nome normalizado
+  for (const l of opcoes) {
+    const nomeNorm = normalizar(l.name).replace(/-/g, " ");
+    if (n.includes(nomeNorm)) return l;
+  }
+  // 5. Palavras-chave do nome (todas presentes, mínimo 3 chars, sem stopwords)
+  const stopwords = new Set(["de", "da", "do", "um", "uma"]);
+  for (const l of opcoes) {
+    const nomeNorm = normalizar(l.name).replace(/-/g, " ");
+    const palavras = nomeNorm.split(/\s+/).filter(w => w.length >= 3 && !stopwords.has(w));
+    if (palavras.length > 0 && palavras.every(w => n.includes(w))) return l;
+  }
+  return null;
+}
 function listaLanches(): string {
-  const items = MENU.lanches.filter(l => !isEsgotado(l.name) && l.name !== "Mini-Pizza");
+  const items = getLanchesAtivos();
   return items.map((l, i) => {
     if (l.sizes && l.sizes.length > 0) {
       const precos = l.sizes.map((s: {code: string, price: number}) => `${s.code} *${formatCurrency(s.price)}*`).join(" | ");
@@ -1199,7 +1234,7 @@ function handleCategory(category: string, session: BotSession): BotResponse {
   if (category === "lanche") {
     return {
       messages: [`Nossos lanches 😋\n\n${listaLanches()}\n\nDigite o número ou o nome:`],
-      session: { ...session, step: "lanche_escolha", currentCategory: "lanche", currentSize: undefined, currentFlavor: undefined, currentLanche: undefined },
+      session: { ...session, step: "lanche_escolha", currentCategory: "lanche", currentSize: undefined, currentFlavor: undefined, currentLanche: undefined, menuAtual: { tipo: "lanches", opcoes: getLanchesAtivos() } },
     };
   }
   if (category === "bebida") {
@@ -1591,9 +1626,9 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       case "suco_escolha":
         return { messages: [`Tudo bem! ${mensagemCategorias()}`], session: resetaTentativas({ ...session, step: "category", currentCategory: undefined }) };
       case "lanche_flavor":
-        return { messages: [`Tudo bem! Nossos lanches 😋\n\n${listaLanches()}\n\nDigite o número ou o nome:`], session: resetaTentativas({ ...session, step: "lanche_escolha", currentLanche: undefined }) };
+        return { messages: [`Tudo bem! Nossos lanches 😋\n\n${listaLanches()}\n\nDigite o número ou o nome:`], session: resetaTentativas({ ...session, step: "lanche_escolha", currentLanche: undefined, menuAtual: { tipo: "lanches", opcoes: getLanchesAtivos() } }) };
       case "lanche_macarronada_size":
-        return { messages: [`Tudo bem! Nossos lanches 😋\n\n${listaLanches()}\n\nDigite o número ou o nome:`], session: resetaTentativas({ ...session, step: "lanche_escolha", currentLanche: undefined }) };
+        return { messages: [`Tudo bem! Nossos lanches 😋\n\n${listaLanches()}\n\nDigite o número ou o nome:`], session: resetaTentativas({ ...session, step: "lanche_escolha", currentLanche: undefined, menuAtual: { tipo: "lanches", opcoes: getLanchesAtivos() } }) };
       default:
         return { messages: [`Tudo bem! ${mensagemCategorias()}`], session: resetaTentativas({ ...session, step: "category" }) };
     }
@@ -2734,18 +2769,15 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
         const resQtdLan = tentaAdicionarComQtd(qtdLanche, session);
         if (resQtdLan) return resQtdLan;
       }
-      // parseInt só quando texto for puramente numérico — evita "2 calabresa" selecionar o 2º lanche
-      const numPuro = /^\d+$/.test(text.trim());
-      const num = numPuro ? parseInt(text) : NaN;
-      let lanche = MENU.lanches.find((l) => normalizar(l.name) === n);
-      if (!lanche && !isNaN(num) && num >= 1 && num <= MENU.lanches.length) lanche = MENU.lanches[num - 1];
-      if (!lanche) lanche = MENU.lanches.find((l) => n.includes(normalizar(l.name)));
+      // Resolve produto pelo menu exibido ao cliente (session.menuAtual), não pelo array global
+      const opcoesMenu = (session.menuAtual?.opcoes ?? getLanchesAtivos()) as LancheItem[];
+      let lanche: LancheItem | undefined = resolverProdutoDoMenuAtual(text, opcoesMenu) ?? undefined;
       if (!lanche) {
-        // Sem match direto -> tenta por palavra-chave. Se houver mais de um nome de lanche batendo, pergunta antes.
-        const nomesLanches = MENU.lanches.map(l => l.name);
-        const candidatosLanche = buscaPorPalavraChave(n, nomesLanches);
+        // Sem match direto -> tenta por palavra-chave. Se houver mais de um nome batendo, pergunta antes.
+        const nomesOpcoes = opcoesMenu.map(l => l.name);
+        const candidatosLanche = buscaPorPalavraChave(n, nomesOpcoes);
         if (candidatosLanche.length === 1) {
-          lanche = MENU.lanches.find(l => l.name === candidatosLanche[0]);
+          lanche = opcoesMenu.find(l => l.name === candidatosLanche[0]);
         } else if (candidatosLanche.length > 1) {
           return {
             messages: [`Você quis dizer qual desses? 🤔\n\n${candidatosLanche.map(o => `• ${o}`).join("\n")}`],
