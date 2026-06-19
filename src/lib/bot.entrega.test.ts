@@ -131,6 +131,46 @@ describe("frase exata 'ainda estão fazendo entrega?' — integração", () => {
   });
 });
 
+// ─── Teste próximo ao fluxo real do simulador ────────────────────────────────
+// O simulador envia: "oi" com step "welcome" → recebe step "category" →
+// então envia "ainda estão fazendo entrega" (sem ?) com step "category".
+
+describe("fluxo real do simulador — 'ainda estão fazendo entrega' sem ?", () => {
+  function sessaoWelcome(): BotSession {
+    return { step: "welcome", cart: [], deliveryFee: 0, tentativasInvalidas: 0 };
+  }
+
+  it("step welcome → 'oi' → step vira category", () => {
+    const res = processMessage("oi", sessaoWelcome());
+    expect(res.session.step).toBe("category");
+  });
+
+  it("step category → 'ainda estão fazendo entrega' (sem ?) → NÃO retorna fallback", () => {
+    const sessaoAposOi = processMessage("oi", sessaoWelcome()).session;
+    const res = processMessage("ainda estão fazendo entrega", sessaoAposOi);
+    expect(res.messages[0]).not.toContain("Opa, acho que não tem isso");
+    expect(res.messages[0]).not.toContain("Eita, não entendi");
+  });
+
+  it("step category → 'ainda estão fazendo entrega' (sem ?) → contém confirmação de entrega", () => {
+    const sessaoAposOi = processMessage("oi", sessaoWelcome()).session;
+    const res = processMessage("ainda estão fazendo entrega", sessaoAposOi);
+    expect(res.messages[0]).toContain("Sim, estamos fazendo entrega sim");
+  });
+
+  it("step category → 'ainda estão fazendo entrega' (sem ?) → contém horário", () => {
+    const sessaoAposOi = processMessage("oi", sessaoWelcome()).session;
+    const res = processMessage("ainda estão fazendo entrega", sessaoAposOi);
+    expect(res.messages[0]).toContain("22h");
+  });
+
+  it("step category → 'ainda estão fazendo entrega' (sem ?) → convida para pedir", () => {
+    const sessaoAposOi = processMessage("oi", sessaoWelcome()).session;
+    const res = processMessage("ainda estão fazendo entrega", sessaoAposOi);
+    expect(res.messages[0]).toContain("O que vai ser hoje");
+  });
+});
+
 // ─── Outras variações ─────────────────────────────────────────────────────────
 
 describe("variações de pergunta de entrega — step name", () => {
