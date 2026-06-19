@@ -86,3 +86,64 @@ describe("bebida_escolha + intenção de suco → redireciona para sucos", () =>
     expect(texto).not.toMatch(/refrigerante/i);
   });
 });
+
+// ──────────────────────────────────────────────
+// Adicional de leite: R$ 1,00 somado ao preço
+// ──────────────────────────────────────────────
+describe("suco_leite — adicional de R$ 1,00 com leite", () => {
+  function sessionSucoLeite(suco: { name: string; price: number }): BotSession {
+    return {
+      step: "suco_leite",
+      cart: [{ category: "pizza", name: "Calabresa", price: 50 }],
+      deliveryFee: 0,
+      pendingSucosLeite: [{ category: "suco", name: suco.name, price: suco.price }],
+    };
+  }
+
+  it('Caja + "1" → "Caja com leite" e preço R$ 8,00', () => {
+    const res = processMessage("1", sessionSucoLeite({ name: "Caja", price: 7 }));
+    const item = res.session.cart.find(i => i.category === "suco");
+    expect(item?.name).toBe("Caja com leite");
+    expect(item?.price).toBe(8);
+  });
+
+  it('Caja + "com leite" → "Caja com leite" e preço R$ 8,00', () => {
+    const res = processMessage("com leite", sessionSucoLeite({ name: "Caja", price: 7 }));
+    const item = res.session.cart.find(i => i.category === "suco");
+    expect(item?.name).toBe("Caja com leite");
+    expect(item?.price).toBe(8);
+  });
+
+  it('Caja + "2" → "Caja sem leite" e preço R$ 7,00 (sem adicional)', () => {
+    const res = processMessage("2", sessionSucoLeite({ name: "Caja", price: 7 }));
+    const item = res.session.cart.find(i => i.category === "suco");
+    expect(item?.name).toBe("Caja sem leite");
+    expect(item?.price).toBe(7);
+  });
+
+  it('Caja + "sem leite" → preço original R$ 7,00', () => {
+    const res = processMessage("sem leite", sessionSucoLeite({ name: "Caja", price: 7 }));
+    const item = res.session.cart.find(i => i.category === "suco");
+    expect(item?.price).toBe(7);
+  });
+
+  it('Bacuri + com leite → preço R$ 10,00 (base 9 + 1)', () => {
+    const res = processMessage("1", sessionSucoLeite({ name: "Bacuri", price: 9 }));
+    const item = res.session.cart.find(i => i.category === "suco");
+    expect(item?.name).toBe("Bacuri com leite");
+    expect(item?.price).toBe(10);
+  });
+
+  it('Cupuacu + com leite → preço R$ 9,00 (base 8 + 1)', () => {
+    const res = processMessage("1", sessionSucoLeite({ name: "Cupuacu", price: 8 }));
+    const item = res.session.cart.find(i => i.category === "suco");
+    expect(item?.name).toBe("Cupuacu com leite");
+    expect(item?.price).toBe(9);
+  });
+
+  it('subtotal soma o adicional de R$ 1,00', () => {
+    const res = processMessage("1", sessionSucoLeite({ name: "Caja", price: 7 }));
+    const total = res.session.cart.reduce((sum, i) => sum + i.price, 0);
+    expect(total).toBe(58); // pizza R$ 50 + Caja com leite R$ 8
+  });
+});

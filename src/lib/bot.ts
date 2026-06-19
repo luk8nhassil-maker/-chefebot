@@ -1449,8 +1449,8 @@ function aplicarLeite(items: CartItem[], leite: "com" | "sem"): CartItem[] {
   return items.map(item => {
     if (item.category !== "suco") return item;
     const isBanana = normalizar(item.name).includes("banana");
-    if (isBanana) return { ...item, name: `${item.name} com leite` };
-    return { ...item, name: `${item.name}${leite === "com" ? " com leite" : " sem leite"}` };
+    if (isBanana) return { ...item, name: `${item.name} com leite`, price: item.price + 1 };
+    return { ...item, name: `${item.name}${leite === "com" ? " com leite" : " sem leite"}`, price: leite === "com" ? item.price + 1 : item.price };
   });
 }
 function finalizarSucos(novosItens: CartItem[], text: string, session: BotSession, label: string): BotResponse {
