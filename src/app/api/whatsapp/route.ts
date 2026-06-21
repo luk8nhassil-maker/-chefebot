@@ -2,7 +2,9 @@
 import { processMessage, createInitialSession, createReturningSession, montarSaudacaoRetorno, BotSession, ClienteHistorico, setMenuDinamico, setConfigDinamica, setEsgotados, temPixNoPagamento, valorPixEsperado } from "@/lib/bot";
 import { getMENUDinamico } from "@/lib/menu";
 import { redis } from "@/lib/redis";
-import { interpretarMensagem } from "@/lib/claude";
+import { interpretarMensagem, gerarRespostaGuardiao } from "@/lib/claude";
+import { registrarMensagem, ultimasMensagensRelevantes } from "@/lib/conversa";
+import { analisarConversaParaRetomada, validarRespostaIA, botParecePerdido } from "@/lib/conversationBrain";
 import { log } from "@/lib/logger";
 import { analisarComprovantePix } from "@/lib/analisarComprovante";
 import { transcreverAudio } from "@/lib/transcribeAudio";
@@ -424,6 +426,7 @@ async function enviarRespostas(phone: string, messages: string[], config: Config
   for (const msg of messages) {
     const msgFinal = config.chavePix ? msg.replace("(configurada pelo admin)", config.chavePix) : msg;
     await enviarMensagem(phone, msgFinal, ritmoRapido);
+    await registrarMensagem(phone, "bot", msgFinal);
     await new Promise(resolve => setTimeout(resolve, ritmoRapido ? 150 : 300));
   }
 }
@@ -456,7 +459,22 @@ export async function POST(req: NextRequest) {
     }
 
     const data = body.data;
-    if (data?.key?.fromMe) return NextResponse.json({ ok: true });
+    if (data?.key?.fromMe) {
+      // Mensagem enviada pelo próprio número. Durante atendimento manual o bot está
+      // pausado, então um fromMe aqui é do ATENDENTE HUMANO — registramos para dar
+      // contexto à retomada pós-handoff. (Mensagens do bot são logadas no envio.)
+      try {
+        const fromPhone = data?.key?.remoteJid?.replace("@s.whatsapp.net", "");
+        if (fromPhone) {
+          const emManualFrom = await redis.get<boolean>(`manual:${fromPhone}`);
+          if (emManualFrom === true) {
+            const txtFrom = data?.message?.conversation || data?.message?.extendedTextMessage?.text || "";
+            if (txtFrom) await registrarMensagem(fromPhone, "atendente", txtFrom);
+          }
+        }
+      } catch {}
+      return NextResponse.json({ ok: true });
+    }
     const phone = data?.key?.remoteJid?.replace("@s.whatsapp.net", "");
     if (!phone) return NextResponse.json({ ok: true });
 
@@ -690,6 +708,44 @@ export async function POST(req: NextRequest) {
     const sessionKey = `session:${phone}`;
     let currentSession = await redis.get<BotSession>(sessionKey);
 
+    // ── RETOMADA INTELIGENTE PÓS-HANDOFF (Guardião de Venda) ──────────────────
+    // Só dispara após uma NOVA mensagem real da cliente (devolver para o bot é
+    // silencioso). O Guardião lê as duas últimas mensagens relevantes e decide se
+    // o fluxo rígido responde sozinho ou se a IA precisa reorganizar o contexto.
+    const armadaRetomada = await redis.get<boolean>(`retomada:${phone}`);
+    if (armadaRetomada === true) {
+      await redis.del(`retomada:${phone}`);
+      if (currentSession) {
+        // Lê o contexto ANTES de registrar a mensagem nova, para pegar as duas
+        // últimas mensagens ANTERIORES (cliente / atendente / bot).
+        const ultimas = await ultimasMensagensRelevantes(phone, 2);
+        await registrarMensagem(phone, "cliente", messageText);
+        const decisao = analisarConversaParaRetomada({
+          session: currentSession,
+          mensagemAtual: messageText,
+          ultimasMensagens: ultimas,
+          voltouDoHandoff: true,
+        });
+        const sessaoRetomada = decisao.session ?? currentSession;
+        let mensagensRetomada = decisao.safeReply ? [decisao.safeReply] : [];
+        if (decisao.shouldUseAI && decisao.promptContexto) {
+          const respostaIA = await gerarRespostaGuardiao(decisao.promptContexto);
+          if (respostaIA && validarRespostaIA(respostaIA, sessaoRetomada)) {
+            mensagensRetomada = [respostaIA];
+          }
+        }
+        await redis.set(sessionKey, sessaoRetomada, { ex: 1800 });
+        if (mensagensRetomada.length > 0) {
+          await enviarRespostas(phone, mensagensRetomada, config, sessaoRetomada.ritmoRapido);
+        }
+        return NextResponse.json({ ok: true });
+      }
+      // Sem sessão ativa (expirou) — segue o fluxo normal, que recria a sessão.
+    }
+
+    // Registra a mensagem da cliente no log da conversa (contexto p/ futuro handoff).
+    await registrarMensagem(phone, "cliente", messageText);
+
     // Sem sessao ativa — inicia nova
     if (!currentSession) {
       if (eDespedida(messageText)) return NextResponse.json({ ok: true });
@@ -853,6 +909,29 @@ export async function POST(req: NextRequest) {
           if (imagemUrl && typeof imagemUrl === "string") {
             await enviarImagem(phone, imagemUrl);
             await new Promise(resolve => setTimeout(resolve, 800));
+          }
+        }
+      } catch {}
+    }
+
+    // ── GUARDIÃO DE VENDA (fallback) ──────────────────────────────────────────
+    // Atua SOMENTE quando o fluxo rígido se perdeu (resposta de confusão) e não
+    // houve escalonamento. Substitui APENAS o texto de saída por uma pergunta/
+    // recuperação segura da IA — nunca altera sessão, carrinho, taxa ou pagamento.
+    // Se a IA estiver indisponível ou a resposta for reprovada na validação,
+    // mantém a resposta determinística atual (comportamento de hoje).
+    if (!result.escalar && botParecePerdido(result.messages)) {
+      try {
+        const ultimasCtx = await ultimasMensagensRelevantes(phone, 2);
+        const decisaoBrain = analisarConversaParaRetomada({
+          session: result.session,
+          mensagemAtual: messageText,
+          ultimasMensagens: ultimasCtx,
+        });
+        if (decisaoBrain.shouldUseAI && decisaoBrain.promptContexto) {
+          const respostaIA = await gerarRespostaGuardiao(decisaoBrain.promptContexto);
+          if (respostaIA && validarRespostaIA(respostaIA, result.session)) {
+            result.messages = [respostaIA];
           }
         }
       } catch {}
