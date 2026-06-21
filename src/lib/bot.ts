@@ -181,6 +181,7 @@ export interface BotSession {
   retornoRapido?: boolean;
   pendingQtdSuco?: number;
   stepAnteriorEscalado?: BotStep;
+  aguardandoRetomada?: boolean;
   pendingConsultaFatias?: { size?: string };
   candidatosBairro?: { name: string; fee: number }[];
   pendingSucosLeite?: CartItem[];
@@ -1712,6 +1713,229 @@ export function retomarFluxoDoBot(session: BotSession): string[] {
     default:
       return [`Prontinho,${nome} voltei por aqui 😊\n\nMe confirma rapidinho: você quer continuar o pedido ou começar de novo?\n\n  1. Continuar pedido\n  2. Começar de novo`];
   }
+}
+
+// ============================================================================
+// RETOMADA INTELIGENTE PÓS-HANDOFF
+// ----------------------------------------------------------------------------
+// Quando o atendimento é devolvido do humano para o bot, NADA é enviado
+// (prepararRetomadaSilenciosa). Só na PRÓXIMA mensagem real da cliente é que
+// reorganizamos o contexto (retomarFluxoAposHandoff). O fluxo rígido continua
+// sendo a fonte da verdade para preço, taxa, carrinho, pagamento e confirmação;
+// a IA só entra como camada de interpretação quando a conversa está ambígua ou
+// interrompida — e mesmo assim NUNCA inventa dados do pedido.
+// ============================================================================
+
+export type AutorMensagem = "cliente" | "atendente" | "bot";
+
+export interface MensagemRelevante {
+  autor: AutorMensagem;
+  texto: string;
+  ts?: number;
+}
+
+export interface RetomadaHandoff {
+  // "deterministico": o fluxo rígido entendeu a nova mensagem e respondeu sozinho.
+  // "ia": conversa ambígua/interrompida — recomenda reorganizar o contexto com a
+  //       IA usando `promptContexto`; `messages` traz o fallback determinístico
+  //       (a próxima pergunta correta) caso a IA não esteja disponível.
+  tipo: "deterministico" | "ia";
+  session: BotSession;
+  messages: string[];
+  promptContexto?: string;
+  motivo?: string;
+}
+
+// Mensagens "de confusão" do bot — sinal de que o fluxo rígido não entendeu.
+function ehRespostaConfusa(msg: string): boolean {
+  const n = normalizar(msg);
+  return [
+    "nao entendi", "nao achei", "nao peguei", "nao tem isso",
+    "essa nao ta na lista", "acho que nao tem isso",
+  ].some(p => n.includes(p));
+}
+
+// Aberturas vagas / retomadas de conversa que, logo após um handoff humano, NÃO
+// devem reiniciar o bot do zero — sinalizam que a IA deve recolocar a conversa no
+// trilho do pedido em vez de tratar como saudação inicial.
+function ehAberturaVaga(texto: string): boolean {
+  const n = normalizar(texto);
+  if (n.length === 0) return true;
+  const exatos = [
+    "oi", "ola", "ei", "opa", "e ai", "eai", "iae", "alo", "alou", "oi?",
+    "voltei", "cheguei", "to aqui", "estou aqui", "e entao", "entao",
+    "tudo bem", "tudo bom", "como assim", "?", "??", "???", "e ai?",
+    "continua", "continuar", "vamos", "bora", "e a pizza", "e o pedido",
+    "cade", "ue", "hein", "oi de novo", "e dai", "to esperando",
+  ];
+  return exatos.includes(n);
+}
+
+// Estado base de retomada: garante que a sessão saiu de "escalado" e limpa as
+// flags de handoff, SEM tocar em carrinho / taxa / pagamento / bairro.
+function estadoBaseRetomada(session: BotSession): BotSession {
+  let step = session.stepAnteriorEscalado ?? session.step;
+  if (step === "escalado") step = session.cart.length > 0 ? "add_more" : "category";
+  return {
+    ...session,
+    step,
+    escalado: false,
+    stepAnteriorEscalado: undefined,
+    aguardandoRetomada: false,
+    tentativasInvalidas: 0,
+  };
+}
+
+// Próxima pergunta correta segundo o ESTADO do pedido (fonte da verdade).
+// Nunca inventa bairro / pagamento / taxa: apenas pergunta o que falta, na ordem
+// do fluxo. Usada como fallback determinístico da IA e para garantir que, faltando
+// bairro pede bairro, faltando pagamento pede pagamento, e se completo confirma.
+export function proximaPerguntaPorEstado(session: BotSession): { session: BotSession; messages: string[] } {
+  const nome = session.customerName ? ` *${session.customerName.split(" ")[0]}*,` : "";
+  const pre = `Voltei por aqui,${nome} vamos continuar! 😊\n\n`;
+
+  // 1. Carrinho vazio → escolher item
+  if (!session.cart || session.cart.length === 0) {
+    return {
+      session: resetaTentativas({ ...session, step: "category" }),
+      messages: [pre + mensagemCategorias()],
+    };
+  }
+  // 2. Falta forma de recebimento
+  if (!session.deliveryType) {
+    return {
+      session: resetaTentativas({ ...session, step: "delivery_type" }),
+      messages: [pre + `Como quer receber seu pedido?\n\n  1. Entrega 🛵\n  2. Retirada na loja 🏪\n  3. Consumo no local 🍽️`],
+    };
+  }
+  // 3. Entrega sem bairro confirmado → pergunta o bairro
+  if (session.deliveryType === "delivery" && !bairroConfirmadoValido(session)) {
+    return {
+      session: resetaTentativas({ ...session, step: "neighborhood" }),
+      messages: [pre + `Qual o seu bairro? 😊`],
+    };
+  }
+  // 4. Entrega sem endereço → pergunta o endereço
+  if (session.deliveryType === "delivery" && !session.address) {
+    return {
+      session: resetaTentativas({ ...session, step: "address" }),
+      messages: [pre + `Me passa o endereço completo:\n_(Rua, número e complemento)_`],
+    };
+  }
+  // 5. Falta pagamento → pergunta o pagamento
+  if (!session.paymentMethod) {
+    return {
+      session: resetaTentativas({ ...session, step: "payment" }),
+      messages: [pre + `Qual a forma de pagamento? 💸\n\n  1. Pix\n  2. Dinheiro\n  3. Cartão`],
+    };
+  }
+  // 6. Pix aguardando comprovante → segue aguardando
+  if (temPixNoPagamento(session.paymentMethod) && session.step === "aguardando_pix") {
+    return {
+      session: resetaTentativas({ ...session, step: "aguardando_pix" }),
+      messages: [pre + `Só me enviar o comprovante do Pix pra confirmar o pedido! 📄`],
+    };
+  }
+  // 7. Pedido completo → confirmar
+  return {
+    session: resetaTentativas({ ...session, step: "confirm" }),
+    messages: [pre + `${resumoCarrinho(session.cart)}\n\nPosso confirmar o pedido?`],
+  };
+}
+
+function montarContextoRetomada(
+  base: BotSession,
+  novaMensagem: string,
+  ultimas: MensagemRelevante[],
+  prox: { session: BotSession; messages: string[] },
+  intervencaoHumana: boolean,
+): string {
+  const itens = base.cart.length > 0
+    ? base.cart.map(i => `${i.name}${i.size ? " " + i.size : ""}${i.flavor ? " " + i.flavor : ""}`).join("; ")
+    : "(carrinho vazio)";
+  const histLinhas = (ultimas || []).map(m => {
+    const autor = m.autor === "cliente" ? "Cliente" : m.autor === "atendente" ? "Atendente humano" : "Bot";
+    return `- ${autor}: ${m.texto}`;
+  }).join("\n") || "- (sem histórico recente)";
+  const faltas: string[] = [];
+  if (!base.cart || base.cart.length === 0) faltas.push("itens do pedido");
+  if (!base.deliveryType) faltas.push("forma de recebimento (entrega/retirada/consumo no local)");
+  if (base.deliveryType === "delivery" && !bairroConfirmadoValido(base)) faltas.push("bairro");
+  if (base.deliveryType === "delivery" && !base.address) faltas.push("endereço");
+  if (!base.paymentMethod) faltas.push("forma de pagamento");
+
+  return [
+    `Carrinho atual: ${itens}`,
+    `Etapa atual do pedido: ${prox.session.step}`,
+    `Taxa de entrega atual: ${base.deliveryFee ? formatCurrency(base.deliveryFee) : "ainda não definida"}`,
+    `Bairro: ${base.neighborhood ?? "não informado"}`,
+    `Pagamento: ${base.paymentMethod ?? "não informado"}`,
+    `Intervenção humana recente: ${intervencaoHumana ? "sim" : "não"}`,
+    `O que ainda falta: ${faltas.length ? faltas.join(", ") : "nada — o pedido pode ser confirmado"}`,
+    ``,
+    `Duas últimas mensagens relevantes:`,
+    histLinhas,
+    ``,
+    `Nova mensagem da cliente: "${novaMensagem}"`,
+    ``,
+    `Próxima pergunta sugerida pelo fluxo (fonte da verdade): "${prox.messages[0]}"`,
+  ].join("\n");
+}
+
+// Decide, após uma NOVA mensagem real da cliente, como retomar o fluxo.
+// Processa SOMENTE a mensagem nova (nunca reprocessa mensagem antiga). Usa as duas
+// últimas mensagens relevantes apenas como CONTEXTO para a IA — nunca as injeta no
+// fluxo determinístico.
+export function retomarFluxoAposHandoff(params: {
+  session: BotSession;
+  novaMensagem: string;
+  ultimasMensagens?: MensagemRelevante[];
+  intervencaoHumanaRecente?: boolean;
+}): RetomadaHandoff {
+  const { novaMensagem } = params;
+  const ultimas = params.ultimasMensagens ?? [];
+  const base = estadoBaseRetomada(params.session);
+  const intervencaoHumana = params.intervencaoHumanaRecente === true
+    || ultimas.some(m => m.autor === "atendente");
+
+  // Processa SOMENTE a nova mensagem da cliente.
+  const det = processMessage(novaMensagem, base);
+  const confuso = det.messages.some(ehRespostaConfusa);
+  const aberturaVaga = ehAberturaVaga(novaMensagem);
+
+  // O fluxo rígido resolve sozinho quando entendeu a mensagem e ela não é uma
+  // abertura vaga logo após intervenção humana.
+  if (!confuso && !(aberturaVaga && intervencaoHumana)) {
+    return { tipo: "deterministico", session: det.session, messages: det.messages, motivo: "fluxo_rigido" };
+  }
+
+  // Conversa ambígua / interrompida → recomenda IA, com fallback determinístico.
+  // A sessão devolvida NÃO altera carrinho / taxa / pagamento: só ajusta o step
+  // para a próxima pergunta correta. A IA apenas formula o texto da pergunta.
+  const prox = proximaPerguntaPorEstado(base);
+  const promptContexto = montarContextoRetomada(base, novaMensagem, ultimas, prox, intervencaoHumana);
+  return {
+    tipo: "ia",
+    session: prox.session,
+    messages: prox.messages,
+    promptContexto,
+    motivo: confuso ? "ambiguo" : "abertura_pos_handoff",
+  };
+}
+
+// Prepara a devolução do atendimento para o bot de forma SILENCIOSA: sai de
+// "escalado", restaura o step anterior e marca que a próxima mensagem da cliente
+// deve acionar a retomada. NÃO retorna mensagens — o bot não fala ao ser devolvido.
+export function prepararRetomadaSilenciosa(session: BotSession): BotSession {
+  let step = session.stepAnteriorEscalado ?? session.step;
+  if (step === "escalado") step = session.cart.length > 0 ? "add_more" : "category";
+  return {
+    ...session,
+    step,
+    escalado: false,
+    stepAnteriorEscalado: undefined,
+    aguardandoRetomada: true,
+  };
 }
 
 export function processMessage(input: string, session: BotSession): BotResponse {
