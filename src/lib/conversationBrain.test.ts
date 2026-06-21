@@ -78,6 +78,25 @@ describe("classificador de caminho", () => {
     expect(d.recommendedAction).toBe("RECOVER_SALE");
   });
 
+  it("bot perdido sem palavra de confusão (fluxoPerdido) → BECO + IA", () => {
+    // Mensagem neutra que o fluxo rígido não entendeu — "algo fora do esperado".
+    const d = analisarConversaParaRetomada({ session: sessaoEntregaPagamento(), mensagemAtual: "abacaxi roxo", fluxoPerdido: true });
+    expect(d.path).toBe("BECO");
+    expect(d.shouldUseAI).toBe(true);
+    expect(d.reason).toBe("fluxo_perdido");
+  });
+
+  it("fluxoPerdido NÃO sobrepõe um sinal de SAIDA", () => {
+    const d = analisarConversaParaRetomada({ session: sessaoEntregaPagamento(), mensagemAtual: "deixa pra lá", fluxoPerdido: true });
+    expect(d.path).toBe("SAIDA");
+  });
+
+  it("sem fluxoPerdido, mensagem neutra segue CAMINHO_CERTO (sem IA)", () => {
+    const d = analisarConversaParaRetomada({ session: sessaoEntregaPagamento(), mensagemAtual: "abacaxi roxo" });
+    expect(d.path).toBe("CAMINHO_CERTO");
+    expect(d.shouldUseAI).toBe(false);
+  });
+
   it("demora longa após etapa crítica → SAIDA", () => {
     const c = classificarCaminho("ok", sessaoEntregaPagamento(), { ultimaInteracaoTs: 0, agoraTs: 16 * 60 * 1000 });
     expect(c.path).toBe("SAIDA");

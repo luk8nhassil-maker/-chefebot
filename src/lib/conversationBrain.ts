@@ -56,6 +56,9 @@ export interface BrainInput {
   voltouDoHandoff?: boolean;
   ultimaInteracaoTs?: number;
   agoraTs?: number;
+  // O fluxo rígido se perdeu nesta mensagem (resposta de confusão do bot). Mesmo
+  // sem palavra de confusão, "responder algo fora do esperado" é um BECO.
+  fluxoPerdido?: boolean;
 }
 
 function normalizar(texto: string): string {
@@ -212,13 +215,22 @@ export function analisarConversaParaRetomada(input: BrainInput): BrainDecision {
     ultimasMensagens: ultimas,
   });
 
+  // Se o fluxo rígido se perdeu nesta mensagem ("algo fora do esperado"), tratamos
+  // como BECO mesmo sem palavra de confusão — exceto se já houver sinal de SAIDA.
+  let path = classif.path;
+  let reason = classif.reason;
+  if (path === "CAMINHO_CERTO" && input.fluxoPerdido === true) {
+    path = "BECO";
+    reason = "fluxo_perdido";
+  }
+
   // SAIDA → tentar recuperar a venda (IA), com fallback determinístico.
-  if (classif.path === "SAIDA") {
+  if (path === "SAIDA") {
     const prox = proximaPerguntaPorEstado(session);
     return {
       path: "SAIDA",
       shouldUseAI: true,
-      reason: classif.reason,
+      reason,
       recommendedAction: "RECOVER_SALE",
       safeReply: prox.messages[0],
       session: prox.session,
@@ -248,12 +260,12 @@ export function analisarConversaParaRetomada(input: BrainInput): BrainDecision {
   }
 
   // BECO → pergunta de reorganização (IA), com fallback determinístico.
-  if (classif.path === "BECO") {
+  if (path === "BECO") {
     const prox = proximaPerguntaPorEstado(session);
     return {
       path: "BECO",
       shouldUseAI: true,
-      reason: classif.reason,
+      reason,
       recommendedAction: "ASK_CLARIFYING_QUESTION",
       safeReply: prox.messages[0],
       session: prox.session,
@@ -265,7 +277,7 @@ export function analisarConversaParaRetomada(input: BrainInput): BrainDecision {
   return {
     path: "CAMINHO_CERTO",
     shouldUseAI: false,
-    reason: classif.reason,
+    reason,
     recommendedAction: "FOLLOW_NORMAL_FLOW",
   };
 }

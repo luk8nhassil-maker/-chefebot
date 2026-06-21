@@ -980,6 +980,7 @@ export async function POST(req: NextRequest) {
           session: result.session,
           mensagemAtual: messageText,
           ultimasMensagens: ultimasCtx,
+          fluxoPerdido: true,
         });
         if (decisaoBrain.shouldUseAI && decisaoBrain.promptContexto) {
           const respostaIA = await gerarRespostaGuardiao(decisaoBrain.promptContexto);
