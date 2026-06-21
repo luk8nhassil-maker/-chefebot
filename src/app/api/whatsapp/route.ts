@@ -5,6 +5,7 @@ import { redis } from "@/lib/redis";
 import { interpretarMensagem, gerarRespostaGuardiao } from "@/lib/claude";
 import { registrarMensagem, ultimasMensagensRelevantes } from "@/lib/conversa";
 import { analisarConversaParaRetomada, validarRespostaIA, botParecePerdido } from "@/lib/conversationBrain";
+import { resumirCasoParaAprendizado, registrarCasoPendente, consumirCasoPendente, avaliarResultadoDaRetomada, salvarCasoResolvido } from "@/lib/learningMemory";
 import { log } from "@/lib/logger";
 import { analisarComprovantePix } from "@/lib/analisarComprovante";
 import { transcreverAudio } from "@/lib/transcribeAudio";
@@ -431,6 +432,34 @@ async function enviarRespostas(phone: string, messages: string[], config: Config
   }
 }
 
+// Memória de Conversão: registra como PENDENTE um caso em que o Guardião usou IA
+// (BECO/SAIDA). Será avaliado na próxima interação do cliente. Best-effort — nunca
+// chama IA extra e nunca altera a sessão.
+async function registrarCasoGuardiao(opts: {
+  phone: string;
+  path: "BECO" | "SAIDA";
+  session: BotSession;
+  mensagemCliente: string;
+  ultimas: { autor?: string; texto: string }[];
+  respostaIA: string;
+}) {
+  try {
+    const caso = resumirCasoParaAprendizado({
+      conversaId: opts.phone,
+      path: opts.path,
+      step: opts.session.step,
+      mensagemCliente: opts.mensagemCliente,
+      ultimasMensagens: opts.ultimas,
+      carrinho: opts.session.cart,
+      deliveryType: opts.session.deliveryType,
+      respostaIA: opts.respostaIA,
+      respostaFinal: opts.respostaIA,
+      resultado: "PENDENTE",
+    });
+    await registrarCasoPendente(opts.phone, caso);
+  } catch {}
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -732,6 +761,12 @@ export async function POST(req: NextRequest) {
           const respostaIA = await gerarRespostaGuardiao(decisao.promptContexto);
           if (respostaIA && validarRespostaIA(respostaIA, sessaoRetomada)) {
             mensagensRetomada = [respostaIA];
+            if (decisao.path === "BECO" || decisao.path === "SAIDA") {
+              await registrarCasoGuardiao({
+                phone, path: decisao.path, session: sessaoRetomada,
+                mensagemCliente: messageText, ultimas, respostaIA,
+              });
+            }
           }
         }
         await redis.set(sessionKey, sessaoRetomada, { ex: 1800 });
@@ -896,6 +931,24 @@ export async function POST(req: NextRequest) {
 
     await redis.set(sessionKey, result.session, { ex: 1800 });
 
+    // Memória de Conversão: se havia um caso PENDENTE (retomada da mensagem
+    // anterior), avalia o resultado com base nesta interação e arquiva o caso.
+    // Best-effort — não chama IA e não altera a sessão.
+    try {
+      const pendente = await consumirCasoPendente(phone);
+      if (pendente) {
+        const resultado = avaliarResultadoDaRetomada({
+          pedidoFechado: result.session.step === "done" || result.session.step === "aguardando_pix",
+          precisouHumano: !!result.escalar,
+          abandonou: eDespedida(messageText) || querCancelar(messageText),
+          continuou: stepAnterior !== result.session.step,
+          stepAntes: pendente.step,
+          stepDepois: result.session.step,
+        });
+        await salvarCasoResolvido({ ...pendente, resultado });
+      }
+    } catch {}
+
     // Envia imagem do cardapio
     const stepAtual = result.session.step;
     const stepsComImagem = ["size", "flavor", "lanche_escolha", "bebida_escolha", "suco_escolha"];
@@ -932,6 +985,12 @@ export async function POST(req: NextRequest) {
           const respostaIA = await gerarRespostaGuardiao(decisaoBrain.promptContexto);
           if (respostaIA && validarRespostaIA(respostaIA, result.session)) {
             result.messages = [respostaIA];
+            if (decisaoBrain.path === "BECO" || decisaoBrain.path === "SAIDA") {
+              await registrarCasoGuardiao({
+                phone, path: decisaoBrain.path, session: result.session,
+                mensagemCliente: messageText, ultimas: ultimasCtx, respostaIA,
+              });
+            }
           }
         }
       } catch {}
