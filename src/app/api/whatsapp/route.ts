@@ -670,7 +670,10 @@ export async function POST(req: NextRequest) {
     if (botAtivo === false) return NextResponse.json({ ok: true });
 
     const emManual = await redis.get<boolean>(`manual:${phone}`);
-    if (emManual === true) return NextResponse.json({ ok: true });
+    if (emManual === true) {
+      await registrarMensagem(phone, "cliente", messageText);
+      return NextResponse.json({ ok: true });
+    }
 
     const spamKey = `spam:${phone}`;
     const spamCount = await redis.get<number>(spamKey) || 0;

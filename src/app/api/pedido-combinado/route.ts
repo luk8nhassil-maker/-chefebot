@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { verifyToken } from '@/lib/auth'
 import { redis } from '@/lib/redis'
 import type { BotSession, CartItem, MensagemRelevante } from '@/lib/bot'
+import { extrairDaConversa } from '@/lib/pedidoCombinado'
 
 async function checkAuth(req: NextRequest) {
   const token = req.cookies.get('auth-token')?.value ?? null
@@ -42,9 +43,10 @@ export async function GET(req: NextRequest) {
   const session = await redis.get<BotSession>(`session:${phone}`)
   const conversa = await redis.get<MensagemRelevante[]>(`conversa:${phone}`) ?? []
 
+  // Dados estruturados do bot (fonte primária)
   const cart: CartItem[] = session?.cart ?? []
-  const itens = cart.map(formatarItem).filter(Boolean)
-  const total = cart.reduce((acc, i) => acc + i.price, 0) + (session?.deliveryFee ?? 0)
+  const sessionItens = cart.map(formatarItem).filter(Boolean)
+  const sessionTotal = cart.reduce((acc, i) => acc + i.price, 0) + (session?.deliveryFee ?? 0)
 
   const tipoMap: Record<string, 'delivery' | 'retirada' | 'dine_in'> = {
     delivery: 'delivery',
@@ -52,19 +54,29 @@ export async function GET(req: NextRequest) {
     retirada: 'retirada',
     dine_in: 'dine_in',
   }
-  const tipoEntrega: 'delivery' | 'retirada' | 'dine_in' | '' = tipoMap[session?.deliveryType ?? ''] ?? ''
+  const sessionTipo: 'delivery' | 'retirada' | 'dine_in' | '' = tipoMap[session?.deliveryType ?? ''] ?? ''
+
+  // Extração da conversa como fallback para campos ausentes na sessão
+  const extraido = extrairDaConversa(conversa)
+
+  const itens = sessionItens.length > 0 ? sessionItens : extraido.itens
+  const tipoEntrega = sessionTipo || extraido.tipoEntrega
+  const endereco = session?.address?.trim() || extraido.endereco
+  const bairro = session?.neighborhood?.trim() || extraido.bairro
+  const pagamento = session?.paymentMethod?.trim() || extraido.pagamento
+  const troco = session?.troco?.trim() || extraido.troco
 
   const rascunho: PedidoCombinadoRascunho = {
     cliente: session?.customerName ?? '',
     telefone: phone,
     tipoEntrega,
-    endereco: session?.address ?? '',
-    bairro: session?.neighborhood ?? '',
+    endereco,
+    bairro,
     referencia: '',
     itens,
-    total,
-    pagamento: session?.paymentMethod ?? '',
-    troco: session?.troco ?? '',
+    total: sessionTotal,
+    pagamento,
+    troco,
     observacao: session?.observacao ?? '',
   }
 
