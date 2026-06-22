@@ -19,14 +19,87 @@ type Pedido = {
   observacao?: string
   referencia?: string
   troco?: string
+  pixConfirmado?: boolean
 }
 
 interface PageProps {
   params: Promise<{ id: string }>
 }
 
+// --- helpers ---
+
+function dataBrasiliaDe(id: string): string {
+  const ts = parseInt(id, 10)
+  if (isNaN(ts) || ts < 1e12) return ''
+  return new Date(ts).toLocaleDateString('pt-BR', {
+    timeZone: 'America/Sao_Paulo',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  })
+}
+
+function numeroDiarioCupom(
+  pedido: Pedido,
+  lista: Pedido[]
+): { diario: number | null; idCurto: string } {
+  const idCurto = pedido.id.slice(-6).toUpperCase()
+  const ts = parseInt(pedido.id, 10)
+  if (isNaN(ts) || ts < 1e12) return { diario: null, idCurto }
+
+  const diaBrasilia = new Date(ts).toLocaleDateString('pt-BR', {
+    timeZone: 'America/Sao_Paulo',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  })
+
+  const doMesmoDia = lista.filter(p => {
+    const tsp = parseInt(p.id, 10)
+    if (isNaN(tsp) || tsp < 1e12) return false
+    return (
+      new Date(tsp).toLocaleDateString('pt-BR', {
+        timeZone: 'America/Sao_Paulo',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+      }) === diaBrasilia
+    )
+  })
+
+  doMesmoDia.sort((a, b) => parseInt(a.id, 10) - parseInt(b.id, 10))
+  const idx = doMesmoDia.findIndex(p => p.id === pedido.id)
+  return { diario: idx >= 0 ? idx + 1 : null, idCurto }
+}
+
+function parseHybrid(pagamento: string): { metodo: string; valor: number }[] | null {
+  if (!pagamento || !pagamento.includes('+')) return null
+  const partes = pagamento.split('+').map(s => s.trim())
+  const resultado: { metodo: string; valor: number }[] = []
+  for (const parte of partes) {
+    const match = parte.match(/^(.+?)\s*\(R\$\s*([\d,.]+)\)$/)
+    if (!match) return null
+    const metodo = match[1].trim()
+    const valor = parseFloat(match[2].replace('.', '').replace(',', '.'))
+    resultado.push({ metodo, valor })
+  }
+  return resultado.length >= 2 ? resultado : null
+}
+
+function brl(n: number): string {
+  return `R$ ${n.toFixed(2).replace('.', ',')}`
+}
+
+// strip "Troco para " / "Troco " prefix so we display just the value
+function trocoValor(troco: string): string {
+  return troco.replace(/^[Tt]roco\s+(para\s+)?/i, '')
+}
+
+// --- component ---
+
 export default function ImprimirPedidoPage({ params }: PageProps) {
   const [pedido, setPedido] = useState<Pedido | null>(null)
+  const [lista, setLista] = useState<Pedido[]>([])
   const [erro, setErro] = useState('')
   const [autoPrint, setAutoPrint] = useState(false)
   const [embedded, setEmbedded] = useState(false)
@@ -36,9 +109,10 @@ export default function ImprimirPedidoPage({ params }: PageProps) {
       try {
         const res = await fetch('/api/orders')
         if (!res.ok) { setErro('Erro ao buscar pedidos'); return }
-        const lista: Pedido[] = await res.json()
-        const encontrado = lista.find(p => p.id === id)
+        const todos: Pedido[] = await res.json()
+        const encontrado = todos.find(p => p.id === id)
         if (!encontrado) { setErro('Pedido não encontrado'); return }
+        setLista(todos)
         setPedido(encontrado)
         const sp = new URLSearchParams(window.location.search)
         if (sp.get('auto') === '1') setAutoPrint(true)
@@ -51,21 +125,15 @@ export default function ImprimirPedidoPage({ params }: PageProps) {
 
   useEffect(() => {
     if (!pedido || !autoPrint) return
-    const t = setTimeout(() => window.print(), 400)
-    return () => clearTimeout(t)
+    let t: ReturnType<typeof setTimeout>
+    const raf = requestAnimationFrame(() => {
+      t = setTimeout(() => window.print(), 150)
+    })
+    return () => { cancelAnimationFrame(raf); clearTimeout(t) }
   }, [pedido, autoPrint])
 
-  if (erro) {
-    return (
-      <div style={{ fontFamily: "'Courier New', monospace", padding: 16 }}>{erro}</div>
-    )
-  }
-
-  if (!pedido) {
-    return (
-      <div style={{ fontFamily: "'Courier New', monospace", padding: 16 }}>Carregando...</div>
-    )
-  }
+  if (erro) return <div style={{ fontFamily: "'Courier New', monospace", padding: 16 }}>{erro}</div>
+  if (!pedido) return <div style={{ fontFamily: "'Courier New', monospace", padding: 16 }}>Carregando...</div>
 
   const isDineIn = pedido.tipoEntrega === 'dine_in' || pedido.endereco === 'Consumo no local'
   const isRetirada =
@@ -76,8 +144,22 @@ export default function ImprimirPedidoPage({ params }: PageProps) {
   const isDelivery = !isDineIn && !isRetirada
 
   const tipoLabel = isDineIn ? 'CONSUMO NO LOCAL' : isRetirada ? 'RETIRADA' : 'DELIVERY'
-  const numeroLabel =
-    pedido.numero != null ? `#${pedido.numero}` : `#${pedido.id.slice(-6).toUpperCase()}`
+
+  const { diario, idCurto } = numeroDiarioCupom(pedido, lista)
+  const numeroCupom =
+    diario != null ? `#${diario}` : pedido.numero != null ? `#${pedido.numero}` : `#${idCurto}`
+
+  const dataBrasilia = dataBrasiliaDe(pedido.id)
+
+  const pagamento = pedido.pagamento || ''
+  const hibrido = parseHybrid(pagamento)
+  const temPix = /\bpix\b/i.test(pagamento)
+  const temDinheiro = /dinheiro/i.test(pagamento)
+  const temCartao = /cart[aã]o/i.test(pagamento)
+  const pixConfirmado = pedido.pixConfirmado === true
+
+  const trocoStr = pedido.troco && pedido.troco !== 'Sem troco' ? pedido.troco : null
+  const semTroco = pedido.troco === 'Sem troco'
 
   return (
     <>
@@ -97,9 +179,11 @@ export default function ImprimirPedidoPage({ params }: PageProps) {
         .centro { text-align: center; }
         .negrito { font-weight: bold; }
         .grande { font-size: 14px; font-weight: bold; text-align: center; margin: 3px 0; }
-        .total-linha { font-size: 14px; font-weight: bold; text-align: right; margin-top: 4px; }
+        .total-linha { font-size: 14px; font-weight: bold; text-align: center; margin-top: 4px; }
+        .alerta { font-weight: bold; text-align: center; }
         .linha { border: none; border-top: 1px dashed #000; margin: 6px 0; }
         .secao { margin: 2px 0; }
+        .secao-titulo { font-weight: bold; text-align: center; margin: 4px 0 2px; }
         .btn-imprimir {
           display: block;
           margin: 16px auto;
@@ -121,63 +205,149 @@ export default function ImprimirPedidoPage({ params }: PageProps) {
       `}</style>
 
       <div className="cupom">
+
+        {/* Cabeçalho */}
         <div className="centro negrito">====== CHEFE DA PIZZA ======</div>
-        <div className="grande">PEDIDO {numeroLabel}</div>
-        <hr className="linha" />
-
-        <div className="secao">
-          <span className="negrito">Cliente: </span>{pedido.cliente}
-        </div>
-        {pedido.telefone && pedido.telefone !== 'App' && (
-          <div className="secao">
-            <span className="negrito">Telefone: </span>{pedido.telefone}
-          </div>
+        <div className="grande">PEDIDO {numeroCupom}</div>
+        {diario != null && (
+          <div className="centro" style={{ fontSize: 10 }}>ID interno: {idCurto}</div>
         )}
-        <div className="secao">
-          <span className="negrito">Horário: </span>{pedido.horario}
-        </div>
 
         <hr className="linha" />
-        <div className="secao negrito">Tipo: {tipoLabel}</div>
+
+        {dataBrasilia && (
+          <div className="secao"><span className="negrito">Data: </span>{dataBrasilia}</div>
+        )}
+        <div className="secao"><span className="negrito">Horário: </span>{pedido.horario}</div>
+        <div className="secao"><span className="negrito">Cliente: </span>{pedido.cliente}</div>
+        {pedido.telefone && pedido.telefone !== 'App' && (
+          <div className="secao"><span className="negrito">Telefone: </span>{pedido.telefone}</div>
+        )}
 
         <hr className="linha" />
-        <div className="secao negrito">Itens:</div>
+        <div className="negrito centro">Tipo: {tipoLabel}</div>
+
+        {/* Itens */}
+        <hr className="linha" />
+        <div className="secao-titulo">---------- ITENS ----------</div>
         {pedido.itens.map((item, i) => (
           <div key={i} className="secao">1x {item}</div>
         ))}
-
         {pedido.observacao && (
-          <>
-            <hr className="linha" />
-            <div className="secao"><span className="negrito">Obs: </span>{pedido.observacao}</div>
-          </>
+          <div className="secao" style={{ marginTop: 4 }}>
+            <span className="negrito">Obs: </span>{pedido.observacao}
+          </div>
         )}
+
+        {/* Entrega */}
+        <hr className="linha" />
+        <div className="secao-titulo">-------- ENTREGA --------</div>
 
         {isDelivery && (
           <>
-            <hr className="linha" />
-            <div className="secao negrito">Entrega:</div>
-            <div className="secao">Rua: {pedido.endereco}</div>
-            {pedido.bairro && <div className="secao">Bairro: {pedido.bairro}</div>}
-            {pedido.referencia && <div className="secao">Ref: {pedido.referencia}</div>}
-            {pedido.taxaEntrega != null && pedido.taxaEntrega > 0 && (
-              <div className="secao">
-                Taxa: R$ {pedido.taxaEntrega.toFixed(2).replace('.', ',')}
-              </div>
+            {pedido.endereco && pedido.endereco.trim()
+              ? <div className="secao"><span className="negrito">Rua: </span>{pedido.endereco}</div>
+              : <div className="secao negrito">ENDEREÇO NÃO INFORMADO</div>
+            }
+            {pedido.bairro && (
+              <div className="secao"><span className="negrito">Bairro: </span>{pedido.bairro}</div>
             )}
+            {pedido.referencia && (
+              <div className="secao"><span className="negrito">Referência: </span>{pedido.referencia}</div>
+            )}
+            <div className="secao">
+              <span className="negrito">Taxa: </span>
+              {pedido.taxaEntrega && pedido.taxaEntrega > 0 ? brl(pedido.taxaEntrega) : 'R$ 0,00'}
+            </div>
           </>
         )}
 
+        {isRetirada && (
+          <>
+            <div className="secao negrito">RETIRADA NO BALCÃO</div>
+            <div className="secao"><span className="negrito">Taxa: </span>R$ 0,00</div>
+          </>
+        )}
+
+        {isDineIn && (
+          <>
+            <div className="secao negrito">CONSUMO NO LOCAL</div>
+            <div className="secao"><span className="negrito">Taxa: </span>R$ 0,00</div>
+          </>
+        )}
+
+        {/* Pagamento */}
         <hr className="linha" />
-        <div className="secao negrito">Pagamento:</div>
-        <div className="secao">{pedido.pagamento || 'Não informado'}</div>
-        {pedido.troco && pedido.troco !== 'Sem troco' && (
-          <div className="secao">Troco: {pedido.troco}</div>
+        <div className="secao-titulo">------- PAGAMENTO -------</div>
+
+        {hibrido ? (
+          <>
+            <div className="secao negrito">PAGAMENTO: HÍBRIDO</div>
+            {hibrido.map((h, i) => (
+              <div key={i} className="secao">
+                <span className="negrito">{h.metodo.toUpperCase()}: </span>{brl(h.valor)}
+              </div>
+            ))}
+            {trocoStr && (
+              <div className="secao">
+                <span className="negrito">TROCO PARA: </span>{trocoValor(trocoStr)}
+              </div>
+            )}
+            {semTroco && <div className="secao negrito">TROCO: NÃO PRECISA</div>}
+          </>
+        ) : temPix ? (
+          <>
+            <div className="secao negrito">PAGAMENTO: PIX</div>
+            <div className="secao">
+              <span className="negrito">STATUS: </span>
+              {pixConfirmado ? 'PIX PAGO' : 'AGUARDANDO'}
+            </div>
+            <div className="secao">
+              <span className="negrito">TOTAL NO PIX: </span>{brl(pedido.total)}
+            </div>
+          </>
+        ) : temDinheiro ? (
+          <>
+            <div className="secao negrito">PAGAMENTO: DINHEIRO</div>
+            <div className="secao"><span className="negrito">TOTAL: </span>{brl(pedido.total)}</div>
+            {trocoStr && (
+              <div className="secao">
+                <span className="negrito">TROCO PARA: </span>{trocoValor(trocoStr)}
+              </div>
+            )}
+            {semTroco && <div className="secao negrito">TROCO: NÃO PRECISA</div>}
+          </>
+        ) : temCartao ? (
+          <>
+            <div className="secao negrito">PAGAMENTO: CARTÃO</div>
+            <div className="secao">
+              <span className="negrito">TOTAL NO CARTÃO: </span>{brl(pedido.total)}
+            </div>
+          </>
+        ) : pagamento ? (
+          <div className="secao negrito">PAGAMENTO: {pagamento.toUpperCase()}</div>
+        ) : (
+          <div className="secao">Pagamento não informado</div>
+        )}
+
+        {/* Alerta Pix */}
+        {temPix && (
+          <div style={{ marginTop: 6 }}>
+            {pixConfirmado ? (
+              <div className="alerta">*** PIX CONFIRMADO ***</div>
+            ) : (
+              <>
+                <div className="alerta">*** ATENÇÃO: TEM PIX ***</div>
+                <div className="alerta">CONFIRMAR PAGAMENTO PIX</div>
+              </>
+            )}
+          </div>
         )}
 
         <hr className="linha" />
-        <div className="total-linha">TOTAL: R$ {pedido.total.toFixed(2).replace('.', ',')}</div>
+        <div className="total-linha">TOTAL: {brl(pedido.total)}</div>
         <div className="centro">============================</div>
+
       </div>
 
       {!embedded && (
