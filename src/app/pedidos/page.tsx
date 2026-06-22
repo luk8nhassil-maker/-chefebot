@@ -212,6 +212,21 @@ export default function PedidosPage() {
   const [finalizarModal, setFinalizarModal] = useState<string | null>(null)
   const [simpleToast, setSimpleToast] = useState("")
 
+  type PedidoCombinadoRascunho = {
+    cliente: string; telefone: string; tipoEntrega: "delivery" | "retirada" | "dine_in" | ""
+    endereco: string; bairro: string; referencia: string; itens: string[]
+    total: number; pagamento: string; troco: string; observacao: string
+  }
+  type MensagemRelevante = { autor: "cliente" | "atendente" | "bot"; texto: string; ts?: number }
+
+  const [modalPedidoCombinado, setModalPedidoCombinado] = useState(false)
+  const [pedidoCombinadoPhone, setPedidoCombinadoPhone] = useState<string | null>(null)
+  const [pedidoCombinadoRascunho, setPedidoCombinadoRascunho] = useState<PedidoCombinadoRascunho | null>(null)
+  const [pedidoCombinadoPendencias, setPedidoCombinadoPendencias] = useState<string[]>([])
+  const [pedidoCombinadoConversa, setPedidoCombinadoConversa] = useState<MensagemRelevante[]>([])
+  const [carregandoPedidoCombinado, setCarregandoPedidoCombinado] = useState(false)
+  const [criandoPedidoCombinado, setCriandoPedidoCombinado] = useState(false)
+
   const prevIdsRef = useRef<string[]>([])
   const piscarRef = useRef<NodeJS.Timeout | null>(null)
   const somRepetidoRef = useRef<NodeJS.Timeout | null>(null)
@@ -456,6 +471,62 @@ export default function PedidosPage() {
     setDevolvendoSessaoBot(null)
   }
 
+  const abrirPedidoCombinado = async (phone: string) => {
+    setCarregandoPedidoCombinado(true)
+    setPedidoCombinadoPhone(phone)
+    try {
+      const r = await fetch(`/api/pedido-combinado?phone=${encodeURIComponent(phone)}`)
+      if (r.ok) {
+        const data = await r.json()
+        setPedidoCombinadoRascunho(data.rascunho)
+        setPedidoCombinadoPendencias(data.pendencias)
+        setPedidoCombinadoConversa(data.conversa ?? [])
+        setModalPedidoCombinado(true)
+      }
+    } catch {}
+    setCarregandoPedidoCombinado(false)
+  }
+
+  const criarPedidoCombinado = async () => {
+    if (!pedidoCombinadoRascunho || !pedidoCombinadoPhone) return
+    const r = pedidoCombinadoRascunho
+    setCriandoPedidoCombinado(true)
+    try {
+      const res = await fetch('/api/orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          cliente: r.cliente,
+          telefone: r.telefone,
+          tipoEntrega: r.tipoEntrega || 'delivery',
+          endereco: r.endereco,
+          bairro: r.bairro || undefined,
+          referencia: r.referencia || undefined,
+          itens: r.itens,
+          total: r.total,
+          pagamento: r.pagamento || undefined,
+          troco: r.troco || undefined,
+          observacao: r.observacao || undefined,
+        }),
+      })
+      if (res.ok) {
+        // Limpa sessão manual sem enviar mensagem
+        await fetch(`/api/pedido-combinado?phone=${encodeURIComponent(pedidoCombinadoPhone)}`, { method: 'DELETE' })
+        setSessoes(prev => prev.filter(s => s.phone !== pedidoCombinadoPhone))
+        const novoPedido = await res.json()
+        setPedidos(prev => [novoPedido, ...prev])
+        setModalPedidoCombinado(false)
+        setPedidoCombinadoRascunho(null)
+        setPedidoCombinadoPhone(null)
+        setFiltro("novo")
+        setSimpleToast("Pedido criado e enviado para a cozinha!")
+        if (simpleToastTimerRef.current) clearTimeout(simpleToastTimerRef.current)
+        simpleToastTimerRef.current = setTimeout(() => setSimpleToast(""), 3000)
+      }
+    } catch {}
+    setCriandoPedidoCombinado(false)
+  }
+
   const marcarResolvido = async (phone: string, pedidoId: string) => {
     try {
       await fetch("/api/resolver", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phone }) })
@@ -650,6 +721,13 @@ export default function PedidosPage() {
       }
     } catch {}
   }
+
+  const Row = ({ label, value, missing }: { label: string; value: string; missing?: boolean }) => (
+    <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
+      <span style={{ fontSize: 11, fontWeight: 800, color: "#56524b", minWidth: 72, flexShrink: 0 }}>{label}</span>
+      <span style={{ fontSize: 13, fontWeight: 700, color: missing ? "#ef4444" : "#c9c2b4" }}>{value || (missing ? "—" : "—")}</span>
+    </div>
+  )
 
   const renderDetalhe = (p: Pedido) => {
     const mins = tempoDesde(p.horario, p.horarioInicio, now)
@@ -1048,11 +1126,18 @@ export default function PedidosPage() {
                       style={{ flex: 1, height: 38, border: "none", borderRadius: 10, background: "#ef4444", color: "#fff", fontSize: 12, fontWeight: 900 }}
                     >{assumindoSessao === s.phone ? "..." : "Assumir conversa"}</button>
                   ) : (
-                    <button
-                      onClick={() => devolverSessaoParaBot(s.phone)}
-                      disabled={devolvendoSessaoBot === s.phone}
-                      style={{ flex: 1, height: 38, border: "none", borderRadius: 10, background: "#2563eb", color: "#fff", fontSize: 12, fontWeight: 900 }}
-                    >{devolvendoSessaoBot === s.phone ? "..." : "🤖 Devolver para o robô"}</button>
+                    <>
+                      <button
+                        onClick={() => abrirPedidoCombinado(s.phone)}
+                        disabled={carregandoPedidoCombinado === true && pedidoCombinadoPhone === s.phone}
+                        style={{ flex: 1, height: 38, border: "none", borderRadius: 10, background: "#22c55e", color: "#060606", fontSize: 12, fontWeight: 900 }}
+                      >{carregandoPedidoCombinado && pedidoCombinadoPhone === s.phone ? "..." : "🧾 Pedido combinado"}</button>
+                      <button
+                        onClick={() => devolverSessaoParaBot(s.phone)}
+                        disabled={devolvendoSessaoBot === s.phone}
+                        style={{ flex: 1, height: 38, border: "none", borderRadius: 10, background: "#2563eb", color: "#fff", fontSize: 12, fontWeight: 900 }}
+                      >{devolvendoSessaoBot === s.phone ? "..." : "🤖 Devolver para o robô"}</button>
+                    </>
                   )}
                 </div>
               </div>
@@ -1376,6 +1461,82 @@ export default function PedidosPage() {
             </div>
             <button onClick={() => finalizarPedidoSilencioso(finalizarModal)} style={{ height: 56, border: "none", borderRadius: 16, background: "#22c55e", color: "#060606", fontSize: 16, fontWeight: 900 }}>Finalizar pedido</button>
             <button onClick={() => setFinalizarModal(null)} style={{ height: 46, border: "none", background: "transparent", color: "#a39b8b", fontSize: 14, fontWeight: 800 }}>Cancelar</button>
+          </div>
+        </>
+      )}
+
+      {/* Modal Pedido Combinado */}
+      {modalPedidoCombinado && pedidoCombinadoRascunho && (
+        <>
+          <div onClick={() => { setModalPedidoCombinado(false) }} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.75)", zIndex: 70, animation: "cbFadeIn .2s ease both" }} />
+          <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, margin: "0 auto", maxWidth: 480, background: "#121110", border: "1px solid #242220", borderBottom: "none", borderRadius: "26px 26px 0 0", zIndex: 71, animation: "cbSheetUp .32s cubic-bezier(.2,.9,.3,1) both", padding: "12px 20px 36px", display: "flex", flexDirection: "column", gap: 14, maxHeight: "90vh", overflowY: "auto" }}>
+            <div style={{ width: 44, height: 5, borderRadius: 3, background: "#2e2b26", margin: "0 auto 4px", flexShrink: 0 }} />
+            <p style={{ margin: 0, fontSize: 18, fontWeight: 900, letterSpacing: "-0.3px", flexShrink: 0 }}>Revise o pedido antes de enviar para a cozinha</p>
+
+            {/* Itens */}
+            <div style={{ background: "#0d0c0b", borderRadius: 12, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 6 }}>
+              <span style={{ fontSize: 10, fontWeight: 800, color: "#5a564d", textTransform: "uppercase", letterSpacing: ".8px" }}>Itens</span>
+              {pedidoCombinadoRascunho.itens.length === 0 ? (
+                <span style={{ fontSize: 13, color: "#ef4444", fontWeight: 700 }}>Nenhum item</span>
+              ) : pedidoCombinadoRascunho.itens.map((item, i) => (
+                <div key={i} style={{ fontSize: 13, fontWeight: 700, color: "#c9c2b4" }}>{getItemIcon(item)} {item}</div>
+              ))}
+              {pedidoCombinadoRascunho.total > 0 && (
+                <div style={{ marginTop: 4, paddingTop: 8, borderTop: "1px solid #1a1816", fontSize: 14, fontWeight: 900, color: "#f5f2ee" }}>Total: R$ {pedidoCombinadoRascunho.total.toFixed(2).replace(".", ",")}</div>
+              )}
+            </div>
+
+            {/* Dados do pedido */}
+            <div style={{ background: "#0d0c0b", borderRadius: 12, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 7 }}>
+              <span style={{ fontSize: 10, fontWeight: 800, color: "#5a564d", textTransform: "uppercase", letterSpacing: ".8px" }}>Dados</span>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <Row label="Cliente" value={pedidoCombinadoRascunho.cliente} missing={!pedidoCombinadoRascunho.cliente} />
+                <Row label="Tipo" value={pedidoCombinadoRascunho.tipoEntrega === "delivery" ? "🛵 Entrega" : pedidoCombinadoRascunho.tipoEntrega === "retirada" ? "🏪 Retirada" : pedidoCombinadoRascunho.tipoEntrega === "dine_in" ? "🍽️ Consumo no local" : ""} missing={!pedidoCombinadoRascunho.tipoEntrega} />
+                {pedidoCombinadoRascunho.tipoEntrega === "delivery" && <Row label="Endereço" value={[pedidoCombinadoRascunho.endereco, pedidoCombinadoRascunho.bairro].filter(Boolean).join(", ")} missing={!pedidoCombinadoRascunho.endereco} />}
+                <Row label="Pagamento" value={pedidoCombinadoRascunho.pagamento} missing={!pedidoCombinadoRascunho.pagamento} />
+                {pedidoCombinadoRascunho.troco && <Row label="Troco para" value={pedidoCombinadoRascunho.troco} />}
+                {pedidoCombinadoRascunho.observacao && <Row label="Obs." value={pedidoCombinadoRascunho.observacao} />}
+              </div>
+            </div>
+
+            {/* Pendencias */}
+            {pedidoCombinadoPendencias.length > 0 && (
+              <div style={{ background: "rgba(239,68,68,.06)", border: "1px solid rgba(239,68,68,.3)", borderRadius: 12, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 6 }}>
+                <span style={{ fontSize: 10, fontWeight: 800, color: "#ef4444", textTransform: "uppercase", letterSpacing: ".8px" }}>Informações que faltam</span>
+                {pedidoCombinadoPendencias.map((p, i) => (
+                  <div key={i} style={{ fontSize: 13, fontWeight: 700, color: "#f87171", display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ fontSize: 10 }}>●</span> {p}
+                  </div>
+                ))}
+                <p style={{ margin: "4px 0 0", fontSize: 12, fontWeight: 600, color: "#7f1d1d" }}>Volte para a conversa para pegar as informações que faltam.</p>
+              </div>
+            )}
+
+            {/* Histórico da conversa */}
+            {pedidoCombinadoConversa.length > 0 && (
+              <div style={{ background: "#0d0c0b", borderRadius: 12, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 6 }}>
+                <span style={{ fontSize: 10, fontWeight: 800, color: "#5a564d", textTransform: "uppercase", letterSpacing: ".8px" }}>Histórico da conversa</span>
+                {pedidoCombinadoConversa.map((m, i) => (
+                  <div key={i} style={{ fontSize: 12, color: m.autor === "atendente" ? "#60a5fa" : "#c9c2b4", fontWeight: 600 }}>
+                    <span style={{ fontWeight: 800, color: m.autor === "atendente" ? "#60a5fa" : "#a39b8b" }}>{m.autor === "atendente" ? "Atendente" : "Cliente"}: </span>{m.texto}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Botões */}
+            {pedidoCombinadoPendencias.length === 0 && (
+              <button
+                onClick={criarPedidoCombinado}
+                disabled={criandoPedidoCombinado}
+                style={{ height: 56, border: "none", borderRadius: 16, background: criandoPedidoCombinado ? "#14532d" : "#22c55e", color: "#060606", fontSize: 16, fontWeight: 900, opacity: criandoPedidoCombinado ? 0.7 : 1 }}
+              >{criandoPedidoCombinado ? "Criando..." : "✅ Criar pedido"}</button>
+            )}
+            <button
+              onClick={() => { setModalPedidoCombinado(false) }}
+              disabled={criandoPedidoCombinado}
+              style={{ height: 46, border: "none", background: "transparent", color: "#a39b8b", fontSize: 14, fontWeight: 800 }}
+            >← Voltar para conversa</button>
           </div>
         </>
       )}
