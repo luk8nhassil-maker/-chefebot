@@ -420,6 +420,9 @@ export default function PedidosPage() {
       setToast({ text: `${firstName} → ${STATUS_COLOR[novoStatus].label}`, expires: Date.now() + 5000, pedidoId: id, prevStatus })
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
       toastTimerRef.current = setTimeout(() => setToast(null), 5000)
+      if (prevStatus === "novo" && novoStatus === "em_preparo") {
+        window.open(`/pedidos/${id}/imprimir?auto=1`, "_blank")
+      }
     }
     setModalEntrega(null); setAtualizando(null); setModalAlterarStatus(null)
   }

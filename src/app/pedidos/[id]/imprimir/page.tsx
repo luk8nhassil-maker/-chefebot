@@ -28,6 +28,7 @@ interface PageProps {
 export default function ImprimirPedidoPage({ params }: PageProps) {
   const [pedido, setPedido] = useState<Pedido | null>(null)
   const [erro, setErro] = useState('')
+  const [autoPrint, setAutoPrint] = useState(false)
 
   useEffect(() => {
     params.then(async ({ id }) => {
@@ -38,11 +39,20 @@ export default function ImprimirPedidoPage({ params }: PageProps) {
         const encontrado = lista.find(p => p.id === id)
         if (!encontrado) { setErro('Pedido não encontrado'); return }
         setPedido(encontrado)
+        if (new URLSearchParams(window.location.search).get('auto') === '1') {
+          setAutoPrint(true)
+        }
       } catch {
         setErro('Erro ao carregar pedido')
       }
     })
   }, [params])
+
+  useEffect(() => {
+    if (!pedido || !autoPrint) return
+    const t = setTimeout(() => window.print(), 400)
+    return () => clearTimeout(t)
+  }, [pedido, autoPrint])
 
   if (erro) {
     return (
