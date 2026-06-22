@@ -34,6 +34,10 @@ type Pedido = {
   bairro?: string
   taxaEntrega?: number
   referencia?: string
+  isArchived?: boolean
+  archivedAt?: string
+  archivedBy?: string
+  archivedReason?: string
 }
 
 const NEXT_STATUS: Record<Status, Status | null> = {
@@ -168,7 +172,7 @@ function imprimirPedidoSilencioso(id: string) {
 export default function PedidosPage() {
   const router = useRouter()
   const [pedidos, setPedidos] = useState<Pedido[]>([])
-  const [filtro, setFiltro] = useState<Status | "todos" | "tempo_real">("novo")
+  const [filtro, setFiltro] = useState<Status | "todos" | "tempo_real" | "arquivados">("novo")
   const [sessoes, setSessoes] = useState<any[]>([])
   const [assumindoSessao, setAssumindoSessao] = useState<string | null>(null)
   const [devolvendoSessaoBot, setDevolvendoSessaoBot] = useState<string | null>(null)
@@ -193,6 +197,10 @@ export default function PedidosPage() {
   const [busca, setBusca] = useState("")
   const [modalLimpar, setModalLimpar] = useState(false)
   const [limpando, setLimpando] = useState(false)
+  const [pedidosArquivados, setPedidosArquivados] = useState<Pedido[]>([])
+  const [carregandoArquivados, setCarregandoArquivados] = useState(false)
+  const [modalArquivarExpediente, setModalArquivarExpediente] = useState(false)
+  const [arquivandoExpediente, setArquivandoExpediente] = useState(false)
   const [modalNovoPedido, setModalNovoPedido] = useState(false)
   const [novoPedidoForm, setNovoPedidoForm] = useState<NovoPedidoForm>({
     cliente: "", telefone: "", tipoEntrega: "delivery", endereco: "", bairro: "", referencia: "", itens: [""], observacao: "", pagamento: "", total: ""
@@ -372,6 +380,15 @@ export default function PedidosPage() {
   }, [router])
 
   useEffect(() => {
+    if (filtro !== "arquivados") return
+    setCarregandoArquivados(true)
+    fetch("/api/orders?arquivados=true")
+      .then(r => r.ok ? r.json() : [])
+      .then(d => { setPedidosArquivados(Array.isArray(d) ? d : []); setCarregandoArquivados(false) })
+      .catch(() => setCarregandoArquivados(false))
+  }, [filtro])
+
+  useEffect(() => {
     if (filtro !== "tempo_real") return
     const carregarSessoes = () => {
       fetch("/api/sessoes-ativas")
@@ -391,6 +408,20 @@ export default function PedidosPage() {
       if (r.ok) setPedidos(prev => prev.filter(p => p.status !== "entregue"))
     } catch {}
     setLimpando(false); setModalLimpar(false)
+  }
+
+  const arquivarExpediente = async () => {
+    setArquivandoExpediente(true)
+    try {
+      const r = await fetch("/api/arquivar", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ todos: true }) })
+      if (r.ok) {
+        // Remove pedidos não-finalizados da lista ativa sem recarregar a página
+        setPedidos(prev => prev.filter(p => p.status === "entregue" || p.status === "cancelado"))
+        setModalArquivarExpediente(false)
+        showSimpleToast("Pedidos não resolvidos arquivados com sucesso.")
+      }
+    } catch {}
+    setArquivandoExpediente(false)
   }
 
   const toggleMute = () => {
@@ -509,7 +540,7 @@ export default function PedidosPage() {
   const contagemPorStatus = (s: Status) => pedidos.filter(p => p.status === s).length
 
   const buscaNorm = busca.toLowerCase().trim()
-  const pedidosFiltrados = (filtro === "todos" || filtro === "tempo_real" ? pedidos : pedidos.filter(p => p.status === filtro))
+  const pedidosFiltrados = (filtro === "todos" || filtro === "tempo_real" || filtro === "arquivados" ? pedidos : pedidos.filter(p => p.status === filtro))
     .filter(p => {
       if (!buscaNorm) return true
       const num = String(p.numero || "")
@@ -703,7 +734,9 @@ export default function PedidosPage() {
                   </button>
                 )
               })}
+              <button onClick={() => setFiltro("arquivados")} style={{ border: `1px solid ${filtro === "arquivados" ? "rgba(139,92,246,.6)" : "#242220"}`, background: filtro === "arquivados" ? "rgba(139,92,246,.15)" : "transparent", color: filtro === "arquivados" ? "#a78bfa" : "#5a564d", fontSize: 11, fontWeight: 900, padding: "6px 11px", borderRadius: 14, flexShrink: 0 }}>📦 Arquivados</button>
             </div>
+            <button onClick={() => setModalArquivarExpediente(true)} title="Arquivar não resolvidos do expediente" style={{ height: 32, border: "1px solid rgba(139,92,246,.4)", background: "rgba(139,92,246,.08)", color: "#a78bfa", fontSize: 11, fontWeight: 900, padding: "0 10px", borderRadius: 10, flexShrink: 0, whiteSpace: "nowrap" }}>📦</button>
             <button onClick={() => setModalNovoPedido(true)} style={{ height: 32, border: "1px solid rgba(255,107,0,.5)", background: "rgba(255,107,0,.1)", color: "#ff6b00", fontSize: 11, fontWeight: 900, padding: "0 10px", borderRadius: 10, flexShrink: 0 }}>+ Novo</button>
             <button onClick={() => setModalLimpar(true)} title="Limpar histórico" style={{ width: 32, height: 32, border: "1px solid #242220", borderRadius: 10, background: "transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><polyline points="3,6 5,6 21,6" stroke="#5a564d" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" stroke="#5a564d" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/><path d="M10 11v6M14 11v6" stroke="#5a564d" strokeWidth="2.2" strokeLinecap="round"/><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" stroke="#5a564d" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
@@ -745,6 +778,47 @@ export default function PedidosPage() {
             <div style={{ fontSize: 13, color: "#c9c2b4", fontWeight: 600, lineHeight: 1.4 }}>O bot pausou a conversa e está esperando.</div>
             <button onClick={() => { assumirConversa(escalonados[0].telefone); setCardUrgenciaFechado(true) }} style={{ height: 52, border: "none", borderRadius: 14, background: "#ef4444", color: "#fff", fontSize: 16, fontWeight: 900, letterSpacing: "-0.2px" }}>Abrir conversa</button>
           </div>
+        )}
+
+        {/* Arquivados */}
+        {filtro === "arquivados" && (
+          <>
+            {carregandoArquivados ? (
+              <div style={{ background: "#101010", border: "1px dashed #2a2723", borderRadius: 20, padding: "36px 20px", textAlign: "center" }}>
+                <span style={{ fontSize: 13, fontWeight: 700, color: "#5a564d" }}>Carregando...</span>
+              </div>
+            ) : pedidosArquivados.length === 0 ? (
+              <div style={{ background: "#101010", border: "1px dashed #2a2723", borderRadius: 20, padding: "36px 20px", textAlign: "center" }}>
+                <span style={{ fontSize: 32, display: "block", marginBottom: 8 }}>📦</span>
+                <span style={{ fontSize: 15, fontWeight: 900, color: "#c9c2b4", display: "block" }}>Nenhum pedido arquivado.</span>
+                <span style={{ fontSize: 12, fontWeight: 600, color: "#5a564d", display: "block", marginTop: 4 }}>Pedidos arquivados ficam aqui para consulta.</span>
+              </div>
+            ) : pedidosArquivados.map(p => {
+              const sc = STATUS_COLOR[p.status] || STATUS_COLOR["cancelado"]
+              const firstName = p.cliente.split(" ")[0]
+              const archivedDate = p.archivedAt ? new Date(p.archivedAt).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" }) : ""
+              const motivo = p.archivedReason === "fim_expediente" ? "Fim de expediente" : p.archivedReason === "manual" ? "Arquivado manualmente" : "Arquivado"
+              return (
+                <article key={p.id} style={{ background: "rgba(139,92,246,.05)", border: "1px solid rgba(139,92,246,.2)", borderRadius: 20, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 8, opacity: 0.85 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                    <div>
+                      {p.numero != null && <span style={{ fontSize: 10, fontWeight: 900, color: "#5a564d", marginRight: 6 }}>#{p.numero}</span>}
+                      <span style={{ fontSize: 16, fontWeight: 900, color: "#c9c2b4" }}>{firstName}</span>
+                      <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 800, color: sc.accent, background: sc.accentBg, padding: "2px 6px", borderRadius: 6, border: `1px solid ${sc.accentBorder}` }}>{sc.label}</span>
+                    </div>
+                    <span style={{ fontSize: 9, fontWeight: 800, color: "#a78bfa", background: "rgba(139,92,246,.12)", padding: "3px 8px", borderRadius: 8 }}>📦 {motivo}</span>
+                  </div>
+                  <div style={{ fontSize: 12, color: "#5a564d", fontWeight: 700 }}>
+                    {p.itens.slice(0, 2).join(", ")}{p.itens.length > 2 ? "..." : ""}
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#3a3730", fontWeight: 700 }}>
+                    <span>Arquivado: {archivedDate}</span>
+                    <span>R$ {p.total.toFixed(2).replace(".", ",")}</span>
+                  </div>
+                </article>
+              )
+            })}
+          </>
         )}
 
         {/* Tempo real */}
@@ -796,14 +870,14 @@ export default function PedidosPage() {
         )}
 
         {/* Lista */}
-          {filtro !== "tempo_real" && pedidosFiltrados.length === 0 && (
+          {filtro !== "tempo_real" && filtro !== "arquivados" && pedidosFiltrados.length === 0 && (
             <div style={{ background: "#101010", border: "1px dashed #2a2723", borderRadius: 20, padding: "36px 20px", textAlign: "center" }}>
               <span style={{ fontSize: 17, fontWeight: 900, color: "#c9c2b4", display: "block" }}>Nada por aqui</span>
               <span style={{ fontSize: 13, fontWeight: 600, color: "#a39b8b", display: "block", marginTop: 4 }}>Nenhum pedido nesse estado agora.</span>
             </div>
           )}
 
-          {filtro !== "tempo_real" && pedidosFiltrados.map(pedido => {
+          {filtro !== "tempo_real" && filtro !== "arquivados" && pedidosFiltrados.map(pedido => {
             const sc = STATUS_COLOR[pedido.status]
             const minsDesde = tempoDesde(pedido.horario, undefined, now)
             const minsPrep = tempoDesde(pedido.horario, pedido.horarioInicio, now)
@@ -1221,6 +1295,28 @@ export default function PedidosPage() {
                 {limpando ? "Arquivando..." : "Sim, arquivar entregues"}
               </button>
               <button onClick={() => setModalLimpar(false)} disabled={limpando} style={{ height: 46, border: "none", background: "transparent", color: "#a39b8b", fontSize: 14, fontWeight: 800 }}>Cancelar</button>
+            </div>
+          </>
+        )}
+
+        {/* Modal Arquivar Expediente */}
+        {modalArquivarExpediente && (
+          <>
+            <div onClick={() => setModalArquivarExpediente(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.7)", zIndex: 60, animation: "cbFadeIn .2s ease both" }} />
+            <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, margin: "0 auto", maxWidth: 375, background: "#121110", border: "1px solid #242220", borderBottom: "none", borderRadius: "26px 26px 0 0", zIndex: 61, animation: "cbSheetUp .32s cubic-bezier(.2,.9,.3,1) both", padding: "20px 20px 36px", display: "flex", flexDirection: "column", gap: 16 }}>
+              <div style={{ width: 44, height: 5, borderRadius: 3, background: "#2e2b26", margin: "0 auto 4px" }} />
+              <div style={{ width: 48, height: 48, borderRadius: 14, background: "rgba(139,92,246,.1)", border: "1px solid rgba(139,92,246,.25)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <span style={{ fontSize: 22 }}>📦</span>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <p style={{ margin: 0, fontSize: 19, fontWeight: 900, letterSpacing: "-0.4px", lineHeight: 1.2 }}>Arquivar não resolvidos?</p>
+                <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "#a39b8b", lineHeight: 1.5 }}>Pedidos pendentes, em preparo, na rua, aguardando Pix e conversas abertas serão movidos para a aba Arquivados. Nenhum dado será apagado.</p>
+                <p style={{ margin: 0, fontSize: 12, fontWeight: 700, color: "#5a564d", lineHeight: 1.5 }}>Pedidos entregues e cancelados não são afetados.</p>
+              </div>
+              <button onClick={arquivarExpediente} disabled={arquivandoExpediente} style={{ height: 56, border: "none", borderRadius: 16, background: arquivandoExpediente ? "#3b1e6e" : "#7c3aed", color: "#fff", fontSize: 16, fontWeight: 900, letterSpacing: "-0.2px", opacity: arquivandoExpediente ? 0.7 : 1 }}>
+                {arquivandoExpediente ? "Arquivando..." : "📦 Sim, arquivar não resolvidos"}
+              </button>
+              <button onClick={() => setModalArquivarExpediente(false)} disabled={arquivandoExpediente} style={{ height: 46, border: "none", background: "transparent", color: "#a39b8b", fontSize: 14, fontWeight: 800 }}>Cancelar</button>
             </div>
           </>
         )}
