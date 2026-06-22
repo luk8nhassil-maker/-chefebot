@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { processMessage, createInitialSession, BotSession } from "@/lib/bot";
+import { resolverFallbackInteligente } from "@/lib/fallbackInteligente";
 import { redis } from "@/lib/redis";
 import { proximoNumeroPedido } from "@/lib/numeracao";
 
@@ -52,6 +53,16 @@ export async function POST(req: NextRequest) {
 
   const currentSession = session ?? createInitialSession();
   const result = processMessage(message, currentSession);
+
+  // Fallback Inteligente Universal: nunca devolve resposta "seca" ao simulador.
+  // Só troca o TEXTO de saída — não altera a sessão/carrinho retornados.
+  const fb = await resolverFallbackInteligente({
+    mensagemAtual: message,
+    session: result.session,
+    mensagensFallback: result.messages,
+    jaEscalou: result.escalar,
+  });
+  result.messages = fb.messages;
 
   if (
     currentSession.step === "confirm" &&

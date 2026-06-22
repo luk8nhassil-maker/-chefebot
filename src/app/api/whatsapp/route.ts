@@ -4,7 +4,8 @@ import { getMENUDinamico } from "@/lib/menu";
 import { redis } from "@/lib/redis";
 import { interpretarMensagem, gerarRespostaGuardiao } from "@/lib/claude";
 import { registrarMensagem, ultimasMensagensRelevantes } from "@/lib/conversa";
-import { analisarConversaParaRetomada, validarRespostaIA, botParecePerdido } from "@/lib/conversationBrain";
+import { analisarConversaParaRetomada, validarRespostaIA } from "@/lib/conversationBrain";
+import { resolverFallbackInteligente, pareceFallbackSeco } from "@/lib/fallbackInteligente";
 import { resumirCasoParaAprendizado, registrarCasoPendente, consumirCasoPendente, avaliarResultadoDaRetomada, salvarCasoResolvido } from "@/lib/learningMemory";
 import { log } from "@/lib/logger";
 import { analisarComprovantePix } from "@/lib/analisarComprovante";
@@ -967,31 +968,29 @@ export async function POST(req: NextRequest) {
       } catch {}
     }
 
-    // ── GUARDIÃO DE VENDA (fallback) ──────────────────────────────────────────
-    // Atua SOMENTE quando o fluxo rígido se perdeu (resposta de confusão) e não
-    // houve escalonamento. Substitui APENAS o texto de saída por uma pergunta/
-    // recuperação segura da IA — nunca altera sessão, carrinho, taxa ou pagamento.
-    // Se a IA estiver indisponível ou a resposta for reprovada na validação,
-    // mantém a resposta determinística atual (comportamento de hoje).
-    if (!result.escalar && botParecePerdido(result.messages)) {
+    // ── FALLBACK INTELIGENTE UNIVERSAL ────────────────────────────────────────
+    // Nunca envia resposta "seca" (Ops/não entendi/opção inválida). Quando o fluxo
+    // rígido se perde e não houve escalonamento, troca o texto por uma resposta
+    // natural (IA validada) ou pelo fallback determinístico humanizado. Substitui
+    // APENAS o texto de saída — nunca altera sessão, carrinho, taxa ou pagamento.
+    if (!result.escalar && pareceFallbackSeco(result.messages)) {
       try {
         const ultimasCtx = await ultimasMensagensRelevantes(phone, 2);
-        const decisaoBrain = analisarConversaParaRetomada({
-          session: result.session,
+        const fb = await resolverFallbackInteligente({
           mensagemAtual: messageText,
+          session: result.session,
+          mensagensFallback: result.messages,
           ultimasMensagens: ultimasCtx,
-          fluxoPerdido: true,
+          jaEscalou: result.escalar,
         });
-        if (decisaoBrain.shouldUseAI && decisaoBrain.promptContexto) {
-          const respostaIA = await gerarRespostaGuardiao(decisaoBrain.promptContexto);
-          if (respostaIA && validarRespostaIA(respostaIA, result.session)) {
-            result.messages = [respostaIA];
-            if (decisaoBrain.path === "BECO" || decisaoBrain.path === "SAIDA") {
-              await registrarCasoGuardiao({
-                phone, path: decisaoBrain.path, session: result.session,
-                mensagemCliente: messageText, ultimas: ultimasCtx, respostaIA,
-              });
-            }
+        if (fb.intervencao !== "nenhuma") {
+          result.messages = fb.messages;
+          // Memória: registra caso pendente quando a IA reorganizou (BECO/SAIDA).
+          if (fb.usouIA && (fb.path === "BECO" || fb.path === "SAIDA")) {
+            await registrarCasoGuardiao({
+              phone, path: fb.path, session: result.session,
+              mensagemCliente: messageText, ultimas: ultimasCtx, respostaIA: fb.messages[0],
+            });
           }
         }
       } catch {}
