@@ -544,14 +544,30 @@ export default function PedidosPage() {
     .filter(p => {
       if (!buscaNorm) return true
       const num = String(p.numero || "")
+      const statusLabel = STATUS_COLOR[p.status]?.label?.toLowerCase() || ""
       return (
         p.cliente.toLowerCase().includes(buscaNorm) ||
         p.telefone.replace(/\D/g, "").includes(buscaNorm.replace(/\D/g, "")) ||
         (p.bairro || "").toLowerCase().includes(buscaNorm) ||
-        num.includes(buscaNorm)
+        num.includes(buscaNorm) ||
+        statusLabel.includes(buscaNorm) ||
+        (p.pagamento || "").toLowerCase().includes(buscaNorm)
       )
     })
-    .sort((a, b) => { if (a.escalonado && !b.escalonado) return -1; if (!a.escalonado && b.escalonado) return 1; if (a.cancelamentoSolicitado && !b.cancelamentoSolicitado) return -1; return 0 })
+    .sort((a, b) => {
+      const prio = (p: Pedido) => {
+        if (p.escalonado) return 0
+        if (p.cancelamentoSolicitado) return 1
+        if (p.status === "novo" && (p.pagamento || "").toLowerCase().includes("pix") && !p.pixConfirmado) return 2
+        if (p.status === "novo") return 3
+        if (p.status === "em_preparo") return 4
+        if (p.status === "saiu_entrega") return 5
+        return 6
+      }
+      const pa = prio(a), pb = prio(b)
+      if (pa !== pb) return pa - pb
+      return parseInt(a.id) - parseInt(b.id)
+    })
 
   const detalhePedido = pedidos.find(p => p.id === detailId) || null
 
@@ -635,6 +651,173 @@ export default function PedidosPage() {
     } catch {}
   }
 
+  const renderDetalhe = (p: Pedido) => {
+    const mins = tempoDesde(p.horario, p.horarioInicio, now)
+    const meta = 40
+    const { dash, color: ringColor } = timerDash(mins, meta)
+    const sc = STATUS_COLOR[p.status]
+    const isDone = p.status === "entregue"
+    const isCanceled = p.status === "cancelado"
+    const isDineInDetail = p.tipoEntrega === "dine_in" || p.endereco === "Consumo no local"
+    const nextStatus = (isDineInDetail && p.status === "em_preparo") ? "entregue" as Status : NEXT_STATUS[p.status]
+    const firstName = p.cliente.split(" ")[0]
+    const pagamento = p.pagamento || ""
+    const isPix = pagamento.toLowerCase().includes("pix")
+    const hibridoParts = parseHybridPayment(pagamento)
+    const payDot = isPix ? "#22c55e" : pagamento.toLowerCase().includes("cart") ? "#60a5fa" : "#facc15"
+    const isRetirada = !isDineInDetail && (!p.tipoEntrega || p.tipoEntrega === "pickup" || p.tipoEntrega === "retirada" || p.endereco === "Retirada na loja")
+    return (
+      <>
+        {/* Cabeçalho */}
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+          <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 7 }}>
+            <span style={{ alignSelf: "flex-start", background: sc.accentBg, color: sc.accent, fontSize: 11, fontWeight: 900, letterSpacing: "1.2px", padding: "5px 10px", borderRadius: 8, textTransform: "uppercase", border: `1px solid ${sc.accentBorder}` }}>{sc.label}</span>
+            <h2 style={{ margin: 0, fontSize: 22, fontWeight: 900, letterSpacing: "-0.6px", lineHeight: 1.1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.numero != null ? `#${p.numero} · ` : ""}{p.cliente}</h2>
+            <span style={{ fontSize: 12, color: "#a39b8b", fontWeight: 600 }}>Recebido às {p.horario} · há {mins} min</span>
+          </div>
+          <div style={{ position: "relative", width: 50, height: 50, flexShrink: 0 }}>
+            <svg width="50" height="50" viewBox="0 0 50 50" style={{ transform: "rotate(-90deg)", display: "block" }}>
+              <circle cx="25" cy="25" r="21" fill="none" stroke="#1a1a1a" strokeWidth="4" />
+              <circle cx="25" cy="25" r="21" fill="none" stroke={isDone ? "#34d399" : ringColor} strokeWidth="4" strokeLinecap="round" strokeDasharray="131.9" strokeDashoffset={isDone ? 0 : dash} style={{ transition: "stroke-dashoffset 1s linear, stroke .4s" }} />
+            </svg>
+            <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+              <span style={{ fontSize: 16, fontWeight: 900, lineHeight: 1, color: isDone ? "#34d399" : ringColor }}>{mins}</span>
+              <span style={{ fontSize: 7.5, fontWeight: 800, color: "#a39b8b", letterSpacing: "1px" }}>MIN</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Informações completas */}
+        <div style={{ background: "#0b0b0b", borderRadius: 14, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
+          {p.telefone && p.telefone !== "App" && (
+            <div style={{ display: "flex", justifyContent: "space-between" }}>
+              <span style={{ fontSize: 11, fontWeight: 700, color: "#5a564d" }}>Telefone</span>
+              <span style={{ fontSize: 13, fontWeight: 800, color: "#c9c2b4" }}>{p.telefone}</span>
+            </div>
+          )}
+          <div style={{ display: "flex", justifyContent: "space-between" }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: "#5a564d" }}>Tipo</span>
+            <span style={{ fontSize: 13, fontWeight: 800, color: isDineInDetail ? "#a78bfa" : isRetirada ? "#facc15" : "#38bdf8" }}>{isDineInDetail ? "Consumo no local 🍽️" : isRetirada ? "Retirada na loja" : "Delivery"}</span>
+          </div>
+          {!isRetirada && !isDineInDetail && (
+            <>
+              {p.bairro && <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ fontSize: 11, fontWeight: 700, color: "#5a564d" }}>Bairro</span><span style={{ fontSize: 13, fontWeight: 800, color: "#f4f1ec" }}>{p.bairro}</span></div>}
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: "#5a564d" }}>Endereço</span>
+                <span style={{ fontSize: 13, fontWeight: 800, color: "#f4f1ec", textAlign: "right", maxWidth: "60%" }}>{p.endereco}</span>
+              </div>
+              {p.referencia && <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ fontSize: 11, fontWeight: 700, color: "#5a564d" }}>Referência</span><span style={{ fontSize: 13, fontWeight: 800, color: "#f4f1ec", textAlign: "right", maxWidth: "60%" }}>{p.referencia}</span></div>}
+              {p.taxaEntrega != null && p.taxaEntrega > 0 && <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ fontSize: 11, fontWeight: 700, color: "#5a564d" }}>Taxa entrega</span><span style={{ fontSize: 13, fontWeight: 800, color: "#f4f1ec" }}>R$ {p.taxaEntrega.toFixed(2).replace(".", ",")}</span></div>}
+            </>
+          )}
+        </div>
+
+        {/* Itens */}
+        <div style={{ background: sc.accentBg, borderRadius: 14, padding: "12px 13px" }}>
+          <span style={{ fontSize: 10, fontWeight: 900, textTransform: "uppercase", letterSpacing: "1px", color: "#a39b8b", display: "block", marginBottom: 8 }}>Pedido</span>
+          {p.itens.map((item, i) => (
+            <div key={i}>
+              {i > 0 && <div style={{ height: 1, background: "rgba(255,255,255,.04)", margin: "6px 0" }} />}
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ width: 34, height: 34, borderRadius: 9, background: "rgba(255,255,255,.06)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: 17 }}>{getItemIcon(item)}</div>
+                <span style={{ flex: 1, fontSize: 14, fontWeight: 700, color: "#f4f1ec" }}>{item}</span>
+                <span style={{ fontSize: 12, fontWeight: 900, color: sc.accentSoft, background: "rgba(255,255,255,.06)", padding: "3px 9px", borderRadius: 7, flexShrink: 0 }}>×1</span>
+              </div>
+            </div>
+          ))}
+          {p.observacao && <div style={{ marginTop: 8, fontSize: 12, fontWeight: 700, color: "#facc15", background: "rgba(250,204,21,.08)", borderRadius: 8, padding: "6px 10px" }}>Obs: {p.observacao}</div>}
+        </div>
+
+        {/* Pagamento detalhado */}
+        {hibridoParts ? (
+          <div style={{ background: "rgba(250,204,21,.07)", border: "1px solid rgba(250,204,21,.2)", borderRadius: 12, padding: "12px 14px" }}>
+            <div style={{ fontSize: 10, fontWeight: 900, color: "#a39b8b", textTransform: "uppercase", letterSpacing: ".8px", marginBottom: 8 }}>Pagamento Misto</div>
+            {hibridoParts.map((pp, i) => (
+              <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 14, fontWeight: 800, color: "#fde68a", marginBottom: 4 }}>
+                <span>{pp.metodo}</span><span>R$ {pp.valor.toFixed(2).replace(".", ",")}</span>
+              </div>
+            ))}
+            <div style={{ borderTop: "1px solid rgba(250,204,21,.15)", marginTop: 6, paddingTop: 6, display: "flex", justifyContent: "space-between", fontSize: 16, fontWeight: 900, color: "#facc15" }}>
+              <span>Total</span><span>R$ {p.total.toFixed(2).replace(".", ",")}</span>
+            </div>
+          </div>
+        ) : (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 700, color: "#c9c2b4" }}>
+              <span style={{ width: 8, height: 8, borderRadius: 2, background: payDot, flexShrink: 0 }} />
+              {pagamento || "Pagamento não informado"}
+              {p.pixConfirmado && <span style={{ fontSize: 11, color: "#34d399", fontWeight: 800 }}>✓ confirmado</span>}
+            </div>
+            <span style={{ fontSize: 15, fontWeight: 900, color: "#f4f1ec" }}>R$ {p.total.toFixed(2).replace(".", ",")}</span>
+          </div>
+        )}
+
+        {/* Alterar status dropdown */}
+        {!isDone && !isCanceled && (
+          <div>
+            {modalAlterarStatus === p.id ? (
+              <div style={{ background: "#0b0b0b", border: "1px solid #242220", borderRadius: 14, overflow: "hidden" }}>
+                <div style={{ padding: "10px 14px", fontSize: 11, fontWeight: 900, color: "#56524b", textTransform: "uppercase", letterSpacing: ".8px" }}>Alterar status</div>
+                {STATUS_OPTS.map(opt => (
+                  <button key={opt.value} onClick={() => avancarStatus(p.id, opt.value)} disabled={p.status === opt.value} style={{ width: "100%", padding: "12px 14px", background: p.status === opt.value ? STATUS_COLOR[opt.value].accentBg : "transparent", border: "none", borderTop: "1px solid #1a1a1a", color: p.status === opt.value ? STATUS_COLOR[opt.value].accent : "#c9c2b4", fontSize: 14, fontWeight: 800, textAlign: "left", cursor: p.status === opt.value ? "default" : "pointer" }}>
+                    {opt.label} {p.status === opt.value && "· atual"}
+                  </button>
+                ))}
+                <button onClick={() => setModalAlterarStatus(null)} style={{ width: "100%", padding: "12px 14px", background: "transparent", border: "none", borderTop: "1px solid #1a1a1a", color: "#5a564d", fontSize: 13, fontWeight: 800, textAlign: "center" }}>Cancelar</button>
+              </div>
+            ) : (
+              <button onClick={() => setModalAlterarStatus(p.id)} style={{ width: "100%", height: 44, border: "1px solid #242220", borderRadius: 12, background: "transparent", color: "#c9c2b4", fontSize: 13, fontWeight: 800 }}>Alterar status</button>
+            )}
+          </div>
+        )}
+
+        {/* Ação principal */}
+        {!isDone && !isCanceled && nextStatus && (
+          <button onClick={() => { avancarStatus(p.id, nextStatus); setDetailId(null) }} disabled={atualizando === p.id} style={{ height: 58, border: "none", borderRadius: 16, background: sc.btnBg, color: sc.btnFg, fontSize: 17, fontWeight: 900, letterSpacing: "-0.2px", flexShrink: 0, opacity: atualizando === p.id ? 0.6 : 1 }}>
+            {ACTION_LABEL[p.status]}
+          </button>
+        )}
+        {isDone && <div style={{ height: 54, borderRadius: 16, background: "rgba(34,197,94,.1)", border: "1px solid rgba(34,197,94,.3)", color: "#22c55e", fontSize: 15, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>Entregue · tudo certo ✓</div>}
+
+        {/* Confirmar Pix no detalhe */}
+        {isPix && !p.pixConfirmado && !isDone && (
+          <button onClick={() => { setDetailId(null); setConfirmPixModal(p.id) }} style={{ height: 46, border: "1px solid rgba(251,191,36,.35)", borderRadius: 14, background: "rgba(251,191,36,.08)", color: "#fbbf24", fontSize: 14, fontWeight: 900, flexShrink: 0 }}>
+            Confirmar Pix manualmente
+          </button>
+        )}
+
+        {/* Finalizar no detalhe */}
+        {!isDone && !isCanceled && (
+          <button onClick={() => { setDetailId(null); setFinalizarModal(p.id) }} style={{ height: 44, border: "1px solid rgba(255,255,255,.07)", borderRadius: 14, background: "transparent", color: "#56524b", fontSize: 13, fontWeight: 800, flexShrink: 0 }}>
+            Finalizar pedido
+          </button>
+        )}
+
+        {/* WhatsApp */}
+        {p.telefone && p.telefone !== "App" && (
+          <button onClick={() => window.open(whatsappLink(p.telefone), "_blank")} style={{ height: 46, border: "1px solid #2a2723", borderRadius: 14, background: "transparent", color: "#c9c2b4", fontSize: 14, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, flexShrink: 0 }}>
+            <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#22c55e" }} />
+            Falar com {firstName} no WhatsApp
+          </button>
+        )}
+
+        {/* Cancelar */}
+        {!isDone && !isCanceled && (
+          <button onClick={() => cancelarPedido(p.id)} disabled={cancelandoId === p.id} style={{ height: 46, border: "1px solid rgba(239,68,68,.35)", borderRadius: 14, background: "rgba(239,68,68,.06)", color: "#ef4444", fontSize: 14, fontWeight: 800, flexShrink: 0, opacity: cancelandoId === p.id ? 0.6 : 1 }}>
+            {cancelandoId === p.id ? "Cancelando..." : "Cancelar pedido"}
+          </button>
+        )}
+
+        {/* Imprimir pedido */}
+        <button onClick={() => window.open(`/pedidos/${p.id}/imprimir`, "_blank")} style={{ height: 44, border: "1px solid rgba(255,255,255,.1)", borderRadius: 14, background: "transparent", color: "#a39b8b", fontSize: 14, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, flexShrink: 0 }}>
+          🖨️ Imprimir pedido
+        </button>
+
+        <button onClick={() => setDetailId(null)} style={{ height: 44, border: "none", background: "transparent", color: "#a39b8b", fontSize: 14, fontWeight: 800, flexShrink: 0 }}>Fechar</button>
+      </>
+    )
+  }
+
   return (
     <>
       <style>{`
@@ -666,9 +849,16 @@ export default function PedidosPage() {
         .cbInput:focus { border-color: #ff6b00 !important; outline: none; }
         .cbPipeScroll { display:flex; gap:4px; overflow-x:auto; scrollbar-width:none; flex:1; }
         .cbPipeScroll::-webkit-scrollbar { display:none; }
+        .cb-workspace { display:flex; flex:1; min-height:0; overflow:hidden; }
+        .cb-list-col { flex:1; overflow-y:auto; padding:12px 16px; display:flex; flex-direction:column; gap:10px; }
+        .cb-detail-col { display:none; }
+        .cb-mob-sheet-wrap { display:block; }
+        .cb-row:active { opacity:.85; }
         @media (min-width: 768px) {
           .cb-header { border-bottom:1px solid #1a1816; padding:24px 28px 20px; position:static; }
-          .cb-main { padding:20px 28px; }
+          .cb-list-col { padding:16px 24px; }
+          .cb-detail-col { display:flex; flex-direction:column; width:420px; min-width:380px; flex-shrink:0; border-left:1px solid #1a1816; background:#080708; overflow-y:auto; padding:16px 20px 32px; gap:12px; }
+          .cb-mob-sheet-wrap { display:none !important; }
         }
       `}</style>
 
@@ -752,7 +942,8 @@ export default function PedidosPage() {
         </header>
 
         {/* ── CONTEÚDO ── */}
-        <main className="cb-main">
+        <div className="cb-workspace">
+        <main className="cb-list-col">
 
         {/* Install Banner */}
         {showInstallBanner && (
@@ -769,14 +960,14 @@ export default function PedidosPage() {
         )}
         {/* Urgência */}
         {escalonados.length > 0 && !cardUrgenciaFechado && (
-          <div style={{ padding: 16, borderRadius: 18, background: "rgba(239,68,68,.08)", border: "1.5px solid rgba(239,68,68,.45)", animation: "cbUrgentGlow 1.6s infinite", display: "flex", flexDirection: "column", gap: 10 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ width: 9, height: 9, borderRadius: "50%", background: "#ef4444", animation: "cbRedPulse 1.6s infinite" }} />
-              <span style={{ fontSize: 11, fontWeight: 900, color: "#ef4444", textTransform: "uppercase", letterSpacing: "1.2px" }}>Atendimento humano</span>
-            </div>
-            <div style={{ fontSize: 17, fontWeight: 900, letterSpacing: "-0.3px", lineHeight: 1.25 }}>{escalonados[0].cliente.split(" ")[0]} quer falar com você</div>
-            <div style={{ fontSize: 13, color: "#c9c2b4", fontWeight: 600, lineHeight: 1.4 }}>O bot pausou a conversa e está esperando.</div>
-            <button onClick={() => { assumirConversa(escalonados[0].telefone); setCardUrgenciaFechado(true) }} style={{ height: 52, border: "none", borderRadius: 14, background: "#ef4444", color: "#fff", fontSize: 16, fontWeight: 900, letterSpacing: "-0.2px" }}>Abrir conversa</button>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "rgba(239,68,68,.06)", border: "1px solid rgba(239,68,68,.35)", borderLeft: "3px solid #ef4444", borderRadius: 10, animation: "cbUrgentGlow 1.6s infinite" }}>
+            <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#ef4444", flexShrink: 0, animation: "cbRedPulse 1.6s infinite" }} />
+            <span style={{ fontSize: 11, fontWeight: 900, color: "#ef4444", textTransform: "uppercase", letterSpacing: "1px", flexShrink: 0 }}>🚨 URGENTE</span>
+            <span style={{ fontSize: 12, fontWeight: 700, color: "#f4f1ec", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {escalonados.length === 1 ? `${escalonados[0].cliente.split(" ")[0]} quer falar` : `${escalonados.length} conversas aguardando`}
+            </span>
+            <button onClick={() => { assumirConversa(escalonados[0].telefone); setCardUrgenciaFechado(true) }} style={{ height: 26, padding: "0 10px", border: "none", borderRadius: 7, background: "#ef4444", color: "#fff", fontSize: 11, fontWeight: 900, flexShrink: 0 }}>Assumir</button>
+            <button onClick={() => setCardUrgenciaFechado(true)} style={{ height: 26, width: 26, border: "1px solid rgba(239,68,68,.25)", borderRadius: 7, background: "transparent", color: "#ef4444", fontSize: 16, fontWeight: 900, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
           </div>
         )}
 
@@ -881,195 +1072,115 @@ export default function PedidosPage() {
             const sc = STATUS_COLOR[pedido.status]
             const minsDesde = tempoDesde(pedido.horario, undefined, now)
             const minsPrep = tempoDesde(pedido.horario, pedido.horarioInicio, now)
-            const meta = 40
             const isDineIn = pedido.tipoEntrega === "dine_in" || pedido.endereco === "Consumo no local"
             const nextStatus = (isDineIn && pedido.status === "em_preparo") ? "entregue" as Status : NEXT_STATUS[pedido.status]
             const isDone = pedido.status === "entregue"
             const isCanceled = pedido.status === "cancelado"
             const isNovo = pedido.status === "novo"
             const timerMins = isNovo ? minsDesde : minsPrep
-            const timerLabel = isNovo ? (minsDesde === 0 ? "agora" : `aguardando ${minsDesde}m`) : isDone ? "concluído" : minsPrep > meta ? `${minsPrep - meta}m atrasado` : `meta ${meta} min`
-            const timerColor = isNovo ? (minsDesde < 3 ? "#34d399" : minsDesde < 7 ? "#fbbf24" : "#f87171") : isDone ? "#34d399" : minsPrep < meta * 0.5 ? "#34d399" : minsPrep < meta * 0.85 ? "#fbbf24" : "#f87171"
-            const CIRC = 131.9
-            const progress = isNovo ? Math.min(minsDesde / 15, 1) : Math.min(minsPrep / meta, 1)
-            const dash = CIRC * (1 - progress)
+            const timerColor = isNovo ? (minsDesde < 3 ? "#34d399" : minsDesde < 7 ? "#fbbf24" : "#f87171") : isDone ? "#34d399" : minsPrep < 20 ? "#34d399" : minsPrep < 34 ? "#fbbf24" : "#f87171"
             const firstName = pedido.cliente.split(" ")[0]
-            const clientInitial = pedido.cliente.charAt(0).toUpperCase()
             const pagamento = pedido.pagamento || ""
             const isPix = pagamento.toLowerCase().includes("pix")
             const pixPendente = isPix && !pedido.pixConfirmado && pedido.status === "novo"
-            const pixConfirmado = isPix && !!pedido.pixConfirmado
-            const hibridoParts = parseHybridPayment(pagamento)
-
-            let cardAnim = `cbCardIn .35s ease both, ${sc.glow} 3.4s infinite`
-            if (flashId === pedido.id) cardAnim = "cbFlash .7s ease"
-            if (leavingId === pedido.id) cardAnim = "cbCardOut .3s ease both"
-
-            let cardBorder = sc.cardBorder
-            if (pedido.escalonado) cardBorder = "1.5px solid rgba(239,68,68,.6)"
-            if (pedido.cancelamentoSolicitado) cardBorder = "1.5px solid rgba(239,68,68,.4)"
-
             const isRetirada = !isDineIn && (!pedido.tipoEntrega || pedido.tipoEntrega === "pickup" || pedido.tipoEntrega === "retirada" || pedido.endereco === "Retirada na loja")
 
+            let rowBorder = sc.accentBorder
+            if (pedido.escalonado) rowBorder = "rgba(239,68,68,.7)"
+            if (pedido.cancelamentoSolicitado) rowBorder = "rgba(239,68,68,.5)"
+            if (isDone) rowBorder = "rgba(34,197,94,.3)"
+            if (isCanceled) rowBorder = "rgba(239,68,68,.2)"
+
+            let rowAnim = `cbCardIn .35s ease both`
+            if (flashId === pedido.id) rowAnim = "cbFlash .7s ease"
+            if (leavingId === pedido.id) rowAnim = "cbCardOut .3s ease both"
+
+            const isSelected = detailId === pedido.id
+
             return (
-              <article key={pedido.id} onClick={() => setDetailId(pedido.id)} style={{ background: sc.cardBg, border: cardBorder, borderRadius: 26, padding: 18, display: "flex", flexDirection: "column", gap: 12, animation: cardAnim, cursor: "pointer" }}>
-
-                {/* Header */}
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                    <div style={{ width: 48, height: 48, borderRadius: 14, background: sc.accentBg, border: `2px solid ${sc.accentBorder}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                      <span style={{ fontSize: 18, fontWeight: 900, color: sc.accentSoft }}>{clientInitial}</span>
-                    </div>
-                    <div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 4 }}>
-                        {pedido.numero != null && <span style={{ background: "rgba(255,255,255,.08)", color: "#c9c2b4", fontSize: 11, fontWeight: 900, padding: "2px 7px", borderRadius: 7, border: "1px solid rgba(255,255,255,.12)", flexShrink: 0 }}>#{pedido.numero}</span>}
-                        <span style={{ fontSize: 21, fontWeight: 900, letterSpacing: "-0.5px", lineHeight: 1, color: "#f4f1ec", maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>{firstName}</span>
-                        <span style={{ background: sc.accentBg, color: sc.accent, fontSize: 10, fontWeight: 900, padding: "2px 8px", borderRadius: 8, letterSpacing: "0.5px", textTransform: "uppercase", border: `1px solid ${sc.accentBorder}` }}>{sc.label}</span>
-                      </div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                        <div style={{ width: 20, height: 20, borderRadius: 5, background: isDineIn ? "rgba(167,139,250,.12)" : isRetirada ? "rgba(250,204,21,.12)" : "rgba(56,189,248,.12)", border: `1px solid ${isDineIn ? "rgba(167,139,250,.3)" : isRetirada ? "rgba(250,204,21,.3)" : "rgba(56,189,248,.3)"}`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                          {isDineIn
-                            ? <svg width="11" height="11" viewBox="0 0 24 24" fill="none"><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 002-2V2" stroke="#a78bfa" strokeWidth="2.2" strokeLinecap="round"/><path d="M7 2v20M21 15V2a5 5 0 00-5 5v6h3.5" stroke="#a78bfa" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                            : isRetirada
-                            ? <svg width="11" height="11" viewBox="0 0 24 24" fill="none"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" stroke="#facc15" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                            : <svg width="11" height="11" viewBox="0 0 24 24" fill="none"><path d="M5 17H3a2 2 0 01-2-2V5a2 2 0 012-2h11a2 2 0 012 2v3" stroke="#38bdf8" strokeWidth="2.2" strokeLinecap="round"/><rect x="9" y="11" width="14" height="10" rx="2" stroke="#38bdf8" strokeWidth="2.2"/></svg>
-                          }
-                        </div>
-                        <span style={{ fontSize: 11, fontWeight: 700, color: isDineIn ? "#a78bfa" : isRetirada ? "#facc15" : "#38bdf8", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>{isDineIn ? "Consumo no local" : isRetirada ? "Retirada na loja" : (pedido.bairro ? `${pedido.bairro} · ${pedido.endereco}` : pedido.endereco)}</span>
-                      </div>
-                    </div>
-                  </div>
-                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, flexShrink: 0 }}>
-                    <div style={{ position: "relative", width: 50, height: 50 }}>
-                      <svg width="50" height="50" viewBox="0 0 50 50" style={{ transform: "rotate(-90deg)", display: "block" }}>
-                        <circle cx="25" cy="25" r="21" fill="none" stroke={`${sc.accentBg}`} strokeWidth="4" />
-                        <circle cx="25" cy="25" r="21" fill="none" stroke={isDone ? sc.accent : timerColor} strokeWidth="4" strokeLinecap="round" strokeDasharray="131.9" strokeDashoffset={isDone ? 0 : dash} style={{ transition: "stroke-dashoffset 1s linear, stroke .4s", animation: pixPendente ? "cbWait 2.2s infinite" : "none" }} />
-                      </svg>
-                      <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
-                        <span style={{ fontSize: 13, fontWeight: 900, lineHeight: 1, color: isDone ? sc.accent : timerColor }}>{isNovo ? (minsDesde === 0 ? "0" : minsDesde) : timerMins}</span>
-                        <span style={{ fontSize: 7.5, fontWeight: 800, color: "#a39b8b", letterSpacing: "1px" }}>MIN</span>
-                      </div>
-                    </div>
-                    <span style={{ fontSize: 9, fontWeight: 800, color: isDone ? sc.accent : timerColor, letterSpacing: ".2px", whiteSpace: "nowrap" }}>{timerLabel}</span>
-                  </div>
+              <article
+                key={pedido.id}
+                className="cb-row"
+                onClick={() => setDetailId(pedido.id === detailId ? null : pedido.id)}
+                style={{
+                  background: isSelected ? "#161412" : "#0f0e0d",
+                  border: `1.5px solid ${isSelected ? sc.accentBorder : rowBorder}`,
+                  borderRadius: 16,
+                  padding: "10px 14px",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 5,
+                  animation: rowAnim,
+                  cursor: "pointer",
+                  transition: "border-color .15s, background .15s",
+                }}
+              >
+                {/* Row line 1: num · name · status · flags · timer */}
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  {pedido.numero != null && <span style={{ fontSize: 10, fontWeight: 900, color: "#3a3730", flexShrink: 0 }}>#{pedido.numero}</span>}
+                  <span style={{ fontSize: 15, fontWeight: 900, color: "#f4f1ec", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{firstName}</span>
+                  <span style={{ fontSize: 9, fontWeight: 900, color: sc.accent, background: sc.accentBg, padding: "2px 6px", borderRadius: 6, border: `1px solid ${sc.accentBorder}`, textTransform: "uppercase", letterSpacing: ".5px", flexShrink: 0 }}>{sc.label}</span>
+                  {pedido.escalonado && <span style={{ fontSize: 12, flexShrink: 0 }}>🚨</span>}
+                  {pixPendente && <span style={{ fontSize: 9, fontWeight: 900, color: "#fbbf24", background: "rgba(251,191,36,.12)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>PIX⏳</span>}
+                  {pedido.cancelamentoSolicitado && <span style={{ fontSize: 12, flexShrink: 0 }}>⚠️</span>}
+                  <span style={{ fontSize: 11, fontWeight: 900, color: timerColor, flexShrink: 0, minWidth: 26, textAlign: "right" }}>{timerMins}m</span>
                 </div>
 
-                {/* Itens */}
-                <div style={{ background: sc.accentBg, borderRadius: 14, padding: "10px 12px" }}>
-                  {pedido.itens.map((item, i) => (
-                    <div key={i}>
-                      {i > 0 && <div style={{ height: 1, background: "rgba(255,255,255,.04)", margin: "6px 0" }} />}
-                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                        <div style={{ width: 36, height: 36, borderRadius: 10, background: "rgba(255,255,255,.06)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: 18 }}>{getItemIcon(item)}</div>
-                        <p style={{ flex: 1, fontSize: 13, fontWeight: 800, color: "#f4f1ec", margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item}</p>
-                        <span style={{ fontSize: 12, fontWeight: 900, color: sc.accentSoft, background: "rgba(255,255,255,.06)", padding: "3px 9px", borderRadius: 7, flexShrink: 0 }}>×1</span>
-                      </div>
-                    </div>
-                  ))}
-                  {pedido.observacao && <div style={{ marginTop: 8, fontSize: 12, fontWeight: 700, color: "#facc15", background: "rgba(250,204,21,.08)", borderRadius: 8, padding: "6px 10px" }}>Obs: {pedido.observacao}</div>}
+                {/* Row line 2: type · location · items · payment · total */}
+                <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 700, color: "#4a4640" }}>
+                  <span style={{ flexShrink: 0 }}>{isDineIn ? "🍽️" : isRetirada ? "🏪" : "🛵"}</span>
+                  <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#5a564d" }}>{isDineIn ? "No local" : isRetirada ? "Retirada" : (pedido.bairro || pedido.endereco || "—")}</span>
+                  <span style={{ flexShrink: 0 }}>·</span>
+                  <span style={{ flexShrink: 0 }}>{pedido.itens.length} {pedido.itens.length === 1 ? "item" : "itens"}</span>
+                  <span style={{ flexShrink: 0 }}>·</span>
+                  <span style={{ flexShrink: 0, color: isPix ? "#22c55e" : "#5a564d" }}>{isPix ? "Pix" : (pagamento.split(" ")[0] || "—")}</span>
+                  <span style={{ flexShrink: 0 }}>·</span>
+                  <span style={{ flexShrink: 0, fontWeight: 900, color: "#c9c2b4" }}>R${pedido.total.toFixed(2).replace(".", ",")}</span>
                 </div>
 
-                {/* Pagamento híbrido */}
-                {hibridoParts && (
-                  <div style={{ background: "rgba(250,204,21,.07)", border: "1px solid rgba(250,204,21,.2)", borderRadius: 12, padding: "10px 12px" }}>
-                    <div style={{ fontSize: 10, fontWeight: 900, color: "#a39b8b", textTransform: "uppercase", letterSpacing: ".8px", marginBottom: 6 }}>Pagamento Misto</div>
-                    {hibridoParts.map((p, i) => (
-                      <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 800, color: "#fde68a", marginBottom: i < hibridoParts.length - 1 ? 3 : 0 }}>
-                        <span>{p.metodo}</span><span>R$ {p.valor.toFixed(2).replace(".", ",")}</span>
-                      </div>
-                    ))}
-                    <div style={{ borderTop: "1px solid rgba(250,204,21,.15)", marginTop: 6, paddingTop: 6, display: "flex", justifyContent: "space-between", fontSize: 14, fontWeight: 900, color: "#facc15" }}>
-                      <span>Total</span><span>R$ {pedido.total.toFixed(2).replace(".", ",")}</span>
-                    </div>
-                  </div>
-                )}
-
-                {/* Pix status */}
-                {!hibridoParts && isPix && (
-                  <div style={{ position: pixPendente ? "relative" : "static", overflow: "hidden", background: pixConfirmado ? "rgba(52,211,153,.08)" : "rgba(251,191,36,.07)", border: `1.5px solid ${pixConfirmado ? "rgba(52,211,153,.3)" : "rgba(251,191,36,.25)"}`, borderRadius: 14, padding: "10px 13px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    {pixPendente && <div style={{ position: "absolute", inset: 0, background: "linear-gradient(105deg,transparent 40%,rgba(251,191,36,.07) 50%,transparent 60%)", backgroundSize: "200% 100%", animation: "cbShimmer 2.2s infinite" }} />}
-                    <div style={{ display: "flex", alignItems: "center", gap: 9, position: "relative" }}>
-                      <div style={{ width: 32, height: 32, borderRadius: 9, background: pixConfirmado ? "rgba(52,211,153,.18)" : "rgba(251,191,36,.12)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                        {pixConfirmado ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M22 11.08V12a10 10 0 11-5.93-9.14" stroke="#34d399" strokeWidth="2.2" strokeLinecap="round"/><polyline points="22,4 12,14.01 9,11.01" stroke="#34d399" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                          : <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="#fbbf24" strokeWidth="2.2"/><polyline points="12,6 12,12 16,14" stroke="#fbbf24" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
-                      </div>
-                      <div>
-                        <p style={{ fontSize: 13, fontWeight: 900, color: pixConfirmado ? "#34d399" : "#fbbf24", margin: 0 }}>{pixConfirmado ? "Pix confirmado" : "Aguardando Pix"}</p>
-                        <p style={{ fontSize: 10, fontWeight: 700, color: pixConfirmado ? "#6ee7b7" : "#fcd34d", margin: "2px 0 0" }}>{pixConfirmado ? "Verificado automaticamente" : "Toque para ver o comprovante"}</p>
-                      </div>
-                    </div>
-                    <div style={{ textAlign: "right", flexShrink: 0, position: "relative" }}>
-                      <p style={{ fontSize: 9, fontWeight: 800, color: "#56524b", margin: 0, textTransform: "uppercase", letterSpacing: "0.5px" }}>VALOR</p>
-                      <p style={{ fontSize: 15, fontWeight: 900, color: pixConfirmado ? "#6ee7b7" : "#fcd34d", margin: 0 }}>R$ {pedido.total.toFixed(2).replace(".", ",")}</p>
-                    </div>
-                  </div>
-                )}
-
-                {/* Pagamento não Pix, não híbrido */}
-                {!hibridoParts && !isPix && pagamento && (
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 700, color: "#c9c2b4" }}>
-                    <span style={{ width: 8, height: 8, borderRadius: 2, background: pagamento.toLowerCase().includes("cart") ? "#60a5fa" : "#facc15", flexShrink: 0 }} />
-                    {pagamento}
-                  </div>
-                )}
-
-                {/* Alerta cancelamento */}
-                {pedido.cancelamentoSolicitado && (
-                  <div style={{ fontSize: 13, fontWeight: 800, color: "#ef4444", background: "rgba(239,68,68,.08)", borderRadius: 10, padding: "10px 12px", animation: "cbCancelGlow 1.5s infinite", border: "1px solid rgba(239,68,68,.3)" }}>⚠️ Cliente solicitou cancelamento</div>
-                )}
-
-                {/* Ações — normal */}
-                {!isDone && !isCanceled && nextStatus && !pixPendente && !pedido.escalonado && (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }} onClick={e => e.stopPropagation()}>
-                    <button onClick={() => { if (nextStatus === "saiu_entrega" && entregadores.length > 0 && pedido.tipoEntrega !== "pickup") { setModalEntrega({ pedidoId: pedido.id, proxStatus: nextStatus }) } else { avancarStatus(pedido.id, nextStatus) } }} disabled={atualizando === pedido.id} style={{ height: 56, border: "none", borderRadius: 16, background: sc.btnBg, color: sc.btnFg, fontSize: 17, fontWeight: 900, letterSpacing: "-0.2px", opacity: atualizando === pedido.id ? 0.6 : 1 }}>
-                      {atualizando === pedido.id ? "..." : (isDineIn && pedido.status === "em_preparo" ? "Pedido pronto! 🍽️" : ACTION_LABEL[pedido.status])}
+                {/* Row line 3: action button */}
+                <div style={{ marginTop: 3 }} onClick={e => e.stopPropagation()}>
+                  {pedido.escalonado && (
+                    <button
+                      onClick={() => { assumirConversa(pedido.telefone); setCardUrgenciaFechado(true) }}
+                      style={{ height: 28, padding: "0 14px", border: "none", borderRadius: 8, background: "#ef4444", color: "#fff", fontSize: 12, fontWeight: 900 }}
+                    >Assumir conversa</button>
+                  )}
+                  {!pedido.escalonado && pixPendente && (
+                    <button
+                      onClick={() => setConfirmPixModal(pedido.id)}
+                      style={{ height: 28, padding: "0 14px", border: "1px solid rgba(251,191,36,.35)", borderRadius: 8, background: "rgba(251,191,36,.08)", color: "#fbbf24", fontSize: 12, fontWeight: 900 }}
+                    >Confirmar Pix</button>
+                  )}
+                  {!pedido.escalonado && !pixPendente && !isDone && !isCanceled && nextStatus && (
+                    <button
+                      onClick={() => {
+                        if (nextStatus === "saiu_entrega" && entregadores.length > 0 && pedido.tipoEntrega !== "pickup") {
+                          setModalEntrega({ pedidoId: pedido.id, proxStatus: nextStatus })
+                        } else {
+                          avancarStatus(pedido.id, nextStatus)
+                        }
+                      }}
+                      disabled={atualizando === pedido.id}
+                      style={{ height: 28, padding: "0 14px", border: "none", borderRadius: 8, background: sc.btnBg, color: sc.btnFg, fontSize: 12, fontWeight: 900, opacity: atualizando === pedido.id ? 0.6 : 1 }}
+                    >
+                      {atualizando === pedido.id ? "..." : (isDineIn && pedido.status === "em_preparo" ? "Pronto 🍽️" : ACTION_LABEL[pedido.status])}
                     </button>
-                    <button onClick={e => { e.stopPropagation(); window.open(whatsappLink(pedido.telefone), "_blank"); }} style={{ height: 44, border: `1px solid ${sc.accentBorder}`, borderRadius: 13, background: "transparent", color: "#c9c2b4", fontSize: 13, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-                      <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#25d366" }} />
-                      Falar com {firstName} no WhatsApp
-                    </button>
-                    <button onClick={e => { e.stopPropagation(); setFinalizarModal(pedido.id) }} style={{ height: 38, border: "1px solid rgba(255,255,255,.07)", borderRadius: 12, background: "transparent", color: "#56524b", fontSize: 11, fontWeight: 800 }}>
-                      Finalizar pedido
-                    </button>
-                  </div>
-                )}
-
-                {/* Ações — Pix pendente */}
-                {pixPendente && !pedido.escalonado && (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }} onClick={e => e.stopPropagation()}>
-                    <div style={{ height: 56, border: "2px dashed #2a2723", borderRadius: 16, display: "flex", alignItems: "center", justifyContent: "center", gap: 9 }}>
-                      <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><rect x="3" y="11" width="18" height="11" rx="2" stroke="#56524b" strokeWidth="2.2"/><path d="M7 11V7a5 5 0 0110 0v4" stroke="#56524b" strokeWidth="2.2" strokeLinecap="round"/></svg>
-                      <span style={{ fontSize: 14, fontWeight: 800, color: "#56524b" }}>Libera ao confirmar Pix</span>
-                    </div>
-                    <button onClick={e => { e.stopPropagation(); setConfirmPixModal(pedido.id) }} style={{ height: 44, border: "1px solid rgba(251,191,36,.35)", borderRadius: 13, background: "rgba(251,191,36,.08)", color: "#fbbf24", fontSize: 13, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-                      Confirmar Pix manualmente
-                    </button>
-                    <button onClick={e => { e.stopPropagation(); window.open(whatsappLink(pedido.telefone), "_blank"); }} style={{ height: 44, border: `1px solid ${sc.accentBorder}`, borderRadius: 13, background: "transparent", color: "#c9c2b4", fontSize: 13, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-                      <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#25d366" }} />
-                      Falar com {firstName} no WhatsApp
-                    </button>
-                  </div>
-                )}
-
-                {/* Ações — Escalonado */}
-                {pedido.escalonado && (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }} onClick={e => e.stopPropagation()}>
-                    {pixPendente && <div style={{ height: 54, border: "2px dashed #2a2723", borderRadius: 16, display: "flex", alignItems: "center", justifyContent: "center", gap: 9 }}><svg width="17" height="17" viewBox="0 0 24 24" fill="none"><rect x="3" y="11" width="18" height="11" rx="2" stroke="#56524b" strokeWidth="2.2"/><path d="M7 11V7a5 5 0 0110 0v4" stroke="#56524b" strokeWidth="2.2" strokeLinecap="round"/></svg><span style={{ fontSize: 14, fontWeight: 800, color: "#56524b" }}>Libera ao confirmar Pix</span></div>}
-                    <button onClick={() => assumirConversa(pedido.telefone)} style={{ height: 50, border: "none", borderRadius: 14, background: "#ef4444", color: "#fff", fontSize: 15, fontWeight: 900 }}>Assumir conversa</button>
-                    <button onClick={() => marcarResolvido(pedido.telefone, pedido.id)} style={{ height: 44, border: "1px solid rgba(239,68,68,.4)", borderRadius: 14, background: "rgba(239,68,68,.07)", color: "#f87171", fontSize: 14, fontWeight: 900 }}>✓ Resolvido</button>
-                  </div>
-                )}
-
-                {isDone && <div style={{ height: 54, borderRadius: 16, background: "rgba(34,197,94,.1)", border: "1px solid rgba(34,197,94,.3)", color: "#22c55e", fontSize: 15, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center" }}>Entregue · tudo certo ✓</div>}
-
-                {/* Imprimir pedido */}
-                <button onClick={e => { e.stopPropagation(); window.open(`/pedidos/${pedido.id}/imprimir`, "_blank") }} style={{ height: 38, border: "1px solid rgba(255,255,255,.1)", borderRadius: 12, background: "transparent", color: "#56524b", fontSize: 12, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, cursor: "pointer" }}>
-                  🖨️ Imprimir pedido
-                </button>
+                  )}
+                  {isDone && <span style={{ fontSize: 11, fontWeight: 800, color: "#22c55e" }}>✓ Entregue</span>}
+                  {isCanceled && <span style={{ fontSize: 11, fontWeight: 800, color: "#5a564d" }}>✗ Cancelado</span>}
+                </div>
               </article>
             )
           })}
         </main>
+
+        {detalhePedido && (
+          <aside className="cb-detail-col">
+            {renderDetalhe(detalhePedido)}
+          </aside>
+        )}
+        </div>
 
       </PanelShell>
 
@@ -1088,181 +1199,15 @@ export default function PedidosPage() {
         </div>
       )}
 
-      {/* Bottom sheet detalhe */}
+      {/* Bottom sheet detalhe — mobile only */}
         {detalhePedido && (
-          <>
+          <div className="cb-mob-sheet-wrap">
             <div onClick={() => setDetailId(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 60, animation: "cbFadeIn .2s ease both" }} />
             <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, margin: "0 auto", maxWidth: 375, background: "#121110", border: "1px solid #242220", borderBottom: "none", borderRadius: "26px 26px 0 0", zIndex: 61, animation: "cbSheetUp .32s cubic-bezier(.2,.9,.3,1) both", padding: "10px 20px 26px", display: "flex", flexDirection: "column", gap: 12, maxHeight: "88vh", overflowY: "auto" }}>
               <div style={{ width: 44, height: 5, borderRadius: 3, background: "#2e2b26", margin: "2px auto 0", flexShrink: 0 }} />
-              {(() => {
-                const p = detalhePedido
-                const mins = tempoDesde(p.horario, p.horarioInicio, now)
-                const meta = 40
-                const { dash, color: ringColor } = timerDash(mins, meta)
-                const sc = STATUS_COLOR[p.status]
-                const isDone = p.status === "entregue"
-                const isCanceled = p.status === "cancelado"
-                const isDineInDetail = p.tipoEntrega === "dine_in" || p.endereco === "Consumo no local"
-                const nextStatus = (isDineInDetail && p.status === "em_preparo") ? "entregue" as Status : NEXT_STATUS[p.status]
-                const firstName = p.cliente.split(" ")[0]
-                const pagamento = p.pagamento || ""
-                const isPix = pagamento.toLowerCase().includes("pix")
-                const hibridoParts = parseHybridPayment(pagamento)
-                const payDot = isPix ? "#22c55e" : pagamento.toLowerCase().includes("cart") ? "#60a5fa" : "#facc15"
-                const isRetirada = !isDineInDetail && (!p.tipoEntrega || p.tipoEntrega === "pickup" || p.tipoEntrega === "retirada" || p.endereco === "Retirada na loja")
-                return (
-                  <>
-                    {/* Cabeçalho */}
-                    <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
-                      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 7 }}>
-                        <span style={{ alignSelf: "flex-start", background: sc.accentBg, color: sc.accent, fontSize: 11, fontWeight: 900, letterSpacing: "1.2px", padding: "5px 10px", borderRadius: 8, textTransform: "uppercase", border: `1px solid ${sc.accentBorder}` }}>{sc.label}</span>
-                        <h2 style={{ margin: 0, fontSize: 22, fontWeight: 900, letterSpacing: "-0.6px", lineHeight: 1.1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.numero != null ? `#${p.numero} · ` : ""}{p.cliente}</h2>
-                        <span style={{ fontSize: 12, color: "#a39b8b", fontWeight: 600 }}>Recebido às {p.horario} · há {mins} min</span>
-                      </div>
-                      <div style={{ position: "relative", width: 50, height: 50, flexShrink: 0 }}>
-                        <svg width="50" height="50" viewBox="0 0 50 50" style={{ transform: "rotate(-90deg)", display: "block" }}>
-                          <circle cx="25" cy="25" r="21" fill="none" stroke="#1a1a1a" strokeWidth="4" />
-                          <circle cx="25" cy="25" r="21" fill="none" stroke={isDone ? "#34d399" : ringColor} strokeWidth="4" strokeLinecap="round" strokeDasharray="131.9" strokeDashoffset={isDone ? 0 : dash} style={{ transition: "stroke-dashoffset 1s linear, stroke .4s" }} />
-                        </svg>
-                        <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
-                          <span style={{ fontSize: 16, fontWeight: 900, lineHeight: 1, color: isDone ? "#34d399" : ringColor }}>{mins}</span>
-                          <span style={{ fontSize: 7.5, fontWeight: 800, color: "#a39b8b", letterSpacing: "1px" }}>MIN</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Informações completas */}
-                    <div style={{ background: "#0b0b0b", borderRadius: 14, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
-                      {p.telefone && p.telefone !== "App" && (
-                        <div style={{ display: "flex", justifyContent: "space-between" }}>
-                          <span style={{ fontSize: 11, fontWeight: 700, color: "#5a564d" }}>Telefone</span>
-                          <span style={{ fontSize: 13, fontWeight: 800, color: "#c9c2b4" }}>{p.telefone}</span>
-                        </div>
-                      )}
-                      <div style={{ display: "flex", justifyContent: "space-between" }}>
-                        <span style={{ fontSize: 11, fontWeight: 700, color: "#5a564d" }}>Tipo</span>
-                        <span style={{ fontSize: 13, fontWeight: 800, color: isDineInDetail ? "#a78bfa" : isRetirada ? "#facc15" : "#38bdf8" }}>{isDineInDetail ? "Consumo no local 🍽️" : isRetirada ? "Retirada na loja" : "Delivery"}</span>
-                      </div>
-                      {!isRetirada && !isDineInDetail && (
-                        <>
-                          {p.bairro && <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ fontSize: 11, fontWeight: 700, color: "#5a564d" }}>Bairro</span><span style={{ fontSize: 13, fontWeight: 800, color: "#f4f1ec" }}>{p.bairro}</span></div>}
-                          <div style={{ display: "flex", justifyContent: "space-between" }}>
-                            <span style={{ fontSize: 11, fontWeight: 700, color: "#5a564d" }}>Endereço</span>
-                            <span style={{ fontSize: 13, fontWeight: 800, color: "#f4f1ec", textAlign: "right", maxWidth: "60%" }}>{p.endereco}</span>
-                          </div>
-                          {p.referencia && <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ fontSize: 11, fontWeight: 700, color: "#5a564d" }}>Referência</span><span style={{ fontSize: 13, fontWeight: 800, color: "#f4f1ec", textAlign: "right", maxWidth: "60%" }}>{p.referencia}</span></div>}
-                          {p.taxaEntrega != null && p.taxaEntrega > 0 && <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ fontSize: 11, fontWeight: 700, color: "#5a564d" }}>Taxa entrega</span><span style={{ fontSize: 13, fontWeight: 800, color: "#f4f1ec" }}>R$ {p.taxaEntrega.toFixed(2).replace(".", ",")}</span></div>}
-                        </>
-                      )}
-                    </div>
-
-                    {/* Itens */}
-                    <div style={{ background: sc.accentBg, borderRadius: 14, padding: "12px 13px" }}>
-                      <span style={{ fontSize: 10, fontWeight: 900, textTransform: "uppercase", letterSpacing: "1px", color: "#a39b8b", display: "block", marginBottom: 8 }}>Pedido</span>
-                      {p.itens.map((item, i) => (
-                        <div key={i}>
-                          {i > 0 && <div style={{ height: 1, background: "rgba(255,255,255,.04)", margin: "6px 0" }} />}
-                          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                            <div style={{ width: 34, height: 34, borderRadius: 9, background: "rgba(255,255,255,.06)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: 17 }}>{getItemIcon(item)}</div>
-                            <span style={{ flex: 1, fontSize: 14, fontWeight: 700, color: "#f4f1ec" }}>{item}</span>
-                            <span style={{ fontSize: 12, fontWeight: 900, color: sc.accentSoft, background: "rgba(255,255,255,.06)", padding: "3px 9px", borderRadius: 7, flexShrink: 0 }}>×1</span>
-                          </div>
-                        </div>
-                      ))}
-                      {p.observacao && <div style={{ marginTop: 8, fontSize: 12, fontWeight: 700, color: "#facc15", background: "rgba(250,204,21,.08)", borderRadius: 8, padding: "6px 10px" }}>Obs: {p.observacao}</div>}
-                    </div>
-
-                    {/* Pagamento detalhado */}
-                    {hibridoParts ? (
-                      <div style={{ background: "rgba(250,204,21,.07)", border: "1px solid rgba(250,204,21,.2)", borderRadius: 12, padding: "12px 14px" }}>
-                        <div style={{ fontSize: 10, fontWeight: 900, color: "#a39b8b", textTransform: "uppercase", letterSpacing: ".8px", marginBottom: 8 }}>Pagamento Misto</div>
-                        {hibridoParts.map((pp, i) => (
-                          <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 14, fontWeight: 800, color: "#fde68a", marginBottom: 4 }}>
-                            <span>{pp.metodo}</span><span>R$ {pp.valor.toFixed(2).replace(".", ",")}</span>
-                          </div>
-                        ))}
-                        <div style={{ borderTop: "1px solid rgba(250,204,21,.15)", marginTop: 6, paddingTop: 6, display: "flex", justifyContent: "space-between", fontSize: 16, fontWeight: 900, color: "#facc15" }}>
-                          <span>Total</span><span>R$ {p.total.toFixed(2).replace(".", ",")}</span>
-                        </div>
-                      </div>
-                    ) : (
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 700, color: "#c9c2b4" }}>
-                          <span style={{ width: 8, height: 8, borderRadius: 2, background: payDot, flexShrink: 0 }} />
-                          {pagamento || "Pagamento não informado"}
-                          {p.pixConfirmado && <span style={{ fontSize: 11, color: "#34d399", fontWeight: 800 }}>✓ confirmado</span>}
-                        </div>
-                        <span style={{ fontSize: 15, fontWeight: 900, color: "#f4f1ec" }}>R$ {p.total.toFixed(2).replace(".", ",")}</span>
-                      </div>
-                    )}
-
-                    {/* Alterar status dropdown */}
-                    {!isDone && !isCanceled && (
-                      <div>
-                        {modalAlterarStatus === p.id ? (
-                          <div style={{ background: "#0b0b0b", border: "1px solid #242220", borderRadius: 14, overflow: "hidden" }}>
-                            <div style={{ padding: "10px 14px", fontSize: 11, fontWeight: 900, color: "#56524b", textTransform: "uppercase", letterSpacing: ".8px" }}>Alterar status</div>
-                            {STATUS_OPTS.map(opt => (
-                              <button key={opt.value} onClick={() => avancarStatus(p.id, opt.value)} disabled={p.status === opt.value} style={{ width: "100%", padding: "12px 14px", background: p.status === opt.value ? STATUS_COLOR[opt.value].accentBg : "transparent", border: "none", borderTop: "1px solid #1a1a1a", color: p.status === opt.value ? STATUS_COLOR[opt.value].accent : "#c9c2b4", fontSize: 14, fontWeight: 800, textAlign: "left", cursor: p.status === opt.value ? "default" : "pointer" }}>
-                                {opt.label} {p.status === opt.value && "· atual"}
-                              </button>
-                            ))}
-                            <button onClick={() => setModalAlterarStatus(null)} style={{ width: "100%", padding: "12px 14px", background: "transparent", border: "none", borderTop: "1px solid #1a1a1a", color: "#5a564d", fontSize: 13, fontWeight: 800, textAlign: "center" }}>Cancelar</button>
-                          </div>
-                        ) : (
-                          <button onClick={() => setModalAlterarStatus(p.id)} style={{ width: "100%", height: 44, border: "1px solid #242220", borderRadius: 12, background: "transparent", color: "#c9c2b4", fontSize: 13, fontWeight: 800 }}>Alterar status</button>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Ação principal */}
-                    {!isDone && !isCanceled && nextStatus && (
-                      <button onClick={() => { avancarStatus(p.id, nextStatus); setDetailId(null) }} disabled={atualizando === p.id} style={{ height: 58, border: "none", borderRadius: 16, background: sc.btnBg, color: sc.btnFg, fontSize: 17, fontWeight: 900, letterSpacing: "-0.2px", flexShrink: 0, opacity: atualizando === p.id ? 0.6 : 1 }}>
-                        {ACTION_LABEL[p.status]}
-                      </button>
-                    )}
-                    {isDone && <div style={{ height: 54, borderRadius: 16, background: "rgba(34,197,94,.1)", border: "1px solid rgba(34,197,94,.3)", color: "#22c55e", fontSize: 15, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>Entregue · tudo certo ✓</div>}
-
-                    {/* Confirmar Pix no detalhe */}
-                    {isPix && !p.pixConfirmado && !isDone && (
-                      <button onClick={() => { setDetailId(null); setConfirmPixModal(p.id) }} style={{ height: 46, border: "1px solid rgba(251,191,36,.35)", borderRadius: 14, background: "rgba(251,191,36,.08)", color: "#fbbf24", fontSize: 14, fontWeight: 900, flexShrink: 0 }}>
-                        Confirmar Pix manualmente
-                      </button>
-                    )}
-
-                    {/* Finalizar no detalhe */}
-                    {!isDone && !isCanceled && (
-                      <button onClick={() => { setDetailId(null); setFinalizarModal(p.id) }} style={{ height: 44, border: "1px solid rgba(255,255,255,.07)", borderRadius: 14, background: "transparent", color: "#56524b", fontSize: 13, fontWeight: 800, flexShrink: 0 }}>
-                        Finalizar pedido
-                      </button>
-                    )}
-
-                    {/* WhatsApp */}
-                    {p.telefone && p.telefone !== "App" && (
-                      <button onClick={() => window.open(whatsappLink(p.telefone), "_blank")} style={{ height: 46, border: "1px solid #2a2723", borderRadius: 14, background: "transparent", color: "#c9c2b4", fontSize: 14, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, flexShrink: 0 }}>
-                        <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#22c55e" }} />
-                        Falar com {firstName} no WhatsApp
-                      </button>
-                    )}
-
-                    {/* Cancelar */}
-                    {!isDone && !isCanceled && (
-                      <button onClick={() => cancelarPedido(p.id)} disabled={cancelandoId === p.id} style={{ height: 46, border: "1px solid rgba(239,68,68,.35)", borderRadius: 14, background: "rgba(239,68,68,.06)", color: "#ef4444", fontSize: 14, fontWeight: 800, flexShrink: 0, opacity: cancelandoId === p.id ? 0.6 : 1 }}>
-                        {cancelandoId === p.id ? "Cancelando..." : "Cancelar pedido"}
-                      </button>
-                    )}
-
-                    {/* Imprimir pedido */}
-                    <button onClick={() => window.open(`/pedidos/${p.id}/imprimir`, "_blank")} style={{ height: 44, border: "1px solid rgba(255,255,255,.1)", borderRadius: 14, background: "transparent", color: "#a39b8b", fontSize: 14, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, flexShrink: 0 }}>
-                      🖨️ Imprimir pedido
-                    </button>
-
-                    <button onClick={() => setDetailId(null)} style={{ height: 44, border: "none", background: "transparent", color: "#a39b8b", fontSize: 14, fontWeight: 800, flexShrink: 0 }}>Fechar</button>
-                  </>
-                )
-              })()}
+              {renderDetalhe(detalhePedido)}
             </div>
-          </>
+          </div>
         )}
 
         {/* Modal entregador */}
