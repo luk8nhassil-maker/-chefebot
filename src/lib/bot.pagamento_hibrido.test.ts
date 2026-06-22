@@ -67,27 +67,25 @@ describe("helpers de pagamento", () => {
 // ===== Pix puro =====
 
 describe("Pix puro (comportamento preservado)", () => {
-  test("após confirmação vai para aguardando_pix", () => {
-    let r = processMessage("pix", sessaoPayment());
-    expect(r.session.step).toBe("confirm");
-    expect(r.session.paymentMethod).toBe("Pix");
-    r = processMessage("1", r.session);
+  test("retirada com pix vai direto para aguardando_pix (sem confirm intermediário)", () => {
+    const r = processMessage("pix", sessaoPayment());
+    // Pickup pula o confirm e vai direto a aguardando_pix
     expect(r.session.step).toBe("aguardando_pix");
+    expect(r.session.paymentMethod).toBe("Pix");
   });
 });
 
 // ===== Dinheiro puro =====
 
 describe("Dinheiro puro (comportamento preservado)", () => {
-  test("pergunta troco sobre o total e fecha em done", () => {
+  test("pergunta troco sobre o total e fecha em done diretamente (pickup sem confirm)", () => {
     let r = processMessage("dinheiro", sessaoPayment());
     expect(r.session.step).toBe("troco");
     // valor menor que o total é rejeitado (baseline = total no dinheiro puro)
     const rejeitado = processMessage("40", r.session);
     expect(rejeitado.session.step).toBe("troco");
+    // Pickup: após troco vai direto a done, sem confirm
     r = processMessage("não", r.session);
-    expect(r.session.step).toBe("confirm");
-    r = processMessage("1", r.session);
     expect(r.session.step).toBe("done");
   });
 });
@@ -103,16 +101,16 @@ describe("Híbrido Pix + Dinheiro", () => {
 
     // R$ 30 é >= parte em dinheiro (R$ 20) -> válido, troco de R$ 10.
     // Se o baseline ainda fosse o total (R$ 50), isto seria rejeitado.
+    // Pickup: após troco vai direto a aguardando_pix (tem Pix no pagamento, sem confirm).
     const comTroco = processMessage("30", r.session);
-    expect(comTroco.session.step).toBe("confirm");
+    expect(comTroco.session.step).toBe("aguardando_pix");
     expect(comTroco.session.troco).toContain("Troco de R$ 10,00");
   });
 
-  test("após confirmação vai para aguardando_pix (não fecha direto)", () => {
+  test("após troco vai para aguardando_pix diretamente (pickup sem confirm)", () => {
     let r = processMessage("vou pagar 30 no pix e 20 em dinheiro", sessaoPayment());
+    // sem troco -> pickup finaliza direto: tem Pix -> aguardando_pix
     r = processMessage("não", r.session);
-    expect(r.session.step).toBe("confirm");
-    r = processMessage("1", r.session);
     expect(r.session.step).toBe("aguardando_pix");
     expect(r.session.step).not.toBe("done");
   });
@@ -131,14 +129,12 @@ describe("Híbrido Pix + Dinheiro", () => {
 // ===== Híbrido Pix + Cartão =====
 
 describe("Híbrido Pix + Cartão", () => {
-  test("sem dinheiro não pergunta troco e aguarda comprovante após confirmação", () => {
-    let r = processMessage("vou pagar 30 no pix e 20 no cartao", sessaoPayment());
-    // não há parte em dinheiro -> pula troco e vai direto ao resumo/confirmação
-    expect(r.session.step).toBe("confirm");
+  test("sem dinheiro não pergunta troco e vai direto a aguardando_pix (pickup sem confirm)", () => {
+    const r = processMessage("vou pagar 30 no pix e 20 no cartao", sessaoPayment());
+    // pickup: sem dinheiro -> sem troco -> finalizarPedidoPickup -> tem Pix -> aguardando_pix diretamente
+    expect(r.session.step).toBe("aguardando_pix");
     expect(r.session.paymentMethod).toContain("Pix");
     expect(r.session.paymentMethod).toContain("Cartão");
-    r = processMessage("1", r.session);
-    expect(r.session.step).toBe("aguardando_pix");
   });
 
   test("comprovante validado pela parte parcial do Pix", () => {
