@@ -134,6 +134,37 @@ type NovoPedidoForm = {
   total: string
 }
 
+function imprimirPedidoSilencioso(id: string) {
+  if (typeof window === "undefined") return
+
+  const iframe = document.createElement("iframe")
+  iframe.src = `/pedidos/${id}/imprimir?auto=1&embedded=1`
+  iframe.style.position = "fixed"
+  iframe.style.right = "0"
+  iframe.style.bottom = "0"
+  iframe.style.width = "0"
+  iframe.style.height = "0"
+  iframe.style.border = "0"
+  iframe.style.opacity = "0"
+  iframe.setAttribute("aria-hidden", "true")
+
+  document.body.appendChild(iframe)
+
+  const remover = () => {
+    setTimeout(() => {
+      try { iframe.remove() } catch {}
+    }, 1000)
+  }
+
+  iframe.onload = () => {
+    try {
+      iframe.contentWindow?.addEventListener("afterprint", remover)
+    } catch {}
+  }
+
+  setTimeout(remover, 30000)
+}
+
 export default function PedidosPage() {
   const router = useRouter()
   const [pedidos, setPedidos] = useState<Pedido[]>([])
@@ -421,7 +452,7 @@ export default function PedidosPage() {
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
       toastTimerRef.current = setTimeout(() => setToast(null), 5000)
       if (prevStatus === "novo" && novoStatus === "em_preparo") {
-        window.open(`/pedidos/${id}/imprimir?auto=1`, "_blank")
+        imprimirPedidoSilencioso(id)
       }
     }
     setModalEntrega(null); setAtualizando(null); setModalAlterarStatus(null)

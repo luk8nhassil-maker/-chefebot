@@ -29,6 +29,7 @@ export default function ImprimirPedidoPage({ params }: PageProps) {
   const [pedido, setPedido] = useState<Pedido | null>(null)
   const [erro, setErro] = useState('')
   const [autoPrint, setAutoPrint] = useState(false)
+  const [embedded, setEmbedded] = useState(false)
 
   useEffect(() => {
     params.then(async ({ id }) => {
@@ -39,9 +40,9 @@ export default function ImprimirPedidoPage({ params }: PageProps) {
         const encontrado = lista.find(p => p.id === id)
         if (!encontrado) { setErro('Pedido não encontrado'); return }
         setPedido(encontrado)
-        if (new URLSearchParams(window.location.search).get('auto') === '1') {
-          setAutoPrint(true)
-        }
+        const sp = new URLSearchParams(window.location.search)
+        if (sp.get('auto') === '1') setAutoPrint(true)
+        if (sp.get('embedded') === '1') setEmbedded(true)
       } catch {
         setErro('Erro ao carregar pedido')
       }
@@ -179,9 +180,11 @@ export default function ImprimirPedidoPage({ params }: PageProps) {
         <div className="centro">============================</div>
       </div>
 
-      <button className="btn-imprimir" onClick={() => window.print()}>
-        Imprimir agora
-      </button>
+      {!embedded && (
+        <button className="btn-imprimir" onClick={() => window.print()}>
+          Imprimir agora
+        </button>
+      )}
     </>
   )
 }
