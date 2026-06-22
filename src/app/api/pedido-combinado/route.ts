@@ -73,6 +73,7 @@ export async function GET(req: NextRequest) {
   if (rascunho.itens.length === 0) pendencias.push('Nenhum item no pedido')
   if (!rascunho.tipoEntrega) pendencias.push('Tipo de entrega não definido')
   if (rascunho.tipoEntrega === 'delivery' && !rascunho.endereco.trim()) pendencias.push('Endereço de entrega não informado')
+  if (rascunho.tipoEntrega === 'delivery' && !rascunho.bairro.trim()) pendencias.push('Bairro não informado')
   if (!rascunho.pagamento.trim()) pendencias.push('Forma de pagamento não informada')
 
   return NextResponse.json({ rascunho, pendencias, conversa })
@@ -86,10 +87,9 @@ export async function DELETE(req: NextRequest) {
   if (!phone) return NextResponse.json({ error: 'phone obrigatório' }, { status: 400 })
 
   // Remove manual flag and session — order was created, conversation is done
-  // NEVER sends messages to the client
+  // NEVER sends messages to the client; conversa:{phone} is preserved
   await redis.del(`manual:${phone}`)
   await redis.del(`session:${phone}`)
-  await redis.del(`conversa:${phone}`)
 
   return NextResponse.json({ ok: true })
 }
