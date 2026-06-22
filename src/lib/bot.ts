@@ -222,6 +222,14 @@ function precisaEscalar(texto: string): boolean {
   const n = normalizar(texto);
   return PALAVRAS_ESCALONAMENTO.some(p => n.includes(normalizar(p)));
 }
+const SAUDACOES_SIMPLES = [
+  "boa noite", "boa tarde", "bom dia", "oi", "oie", "ola", "opa",
+  "eai", "e ai", "hey", "hello", "alo",
+];
+function ehSaudacaoSimples(n: string): boolean {
+  const s = n.replace(/[?!.…]+$/g, "").trim();
+  return SAUDACOES_SIMPLES.some(p => s === p || s.startsWith(p + " ") || s.endsWith(" " + p));
+}
 function cartSubtotal(cart: CartItem[]): number {
   return cart.reduce((sum, item) => sum + item.price, 0);
 }
@@ -2283,6 +2291,9 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       }
 
       // 5) Não é nome, não é pedido reconhecido, não é cardápio -> pede de novo sem travar o cliente
+      if (ehSaudacaoSimples(n)) {
+        return { messages: [msgInvalida()], session: resetaTentativas(session) };
+      }
       return respostaInvalida("Não entendi muito bem 😅 Me diz seu nome, ou já pode pedir direto (ex: _\"pizza calabresa\"_ ou _\"cardápio\"_)", session);
     }
     case "category": {
@@ -2332,6 +2343,9 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       if (!category) {
         const lancheEspFallback = detectarLancheEspecifico(text, session);
         if (lancheEspFallback) return lancheEspFallback;
+        if (ehSaudacaoSimples(n)) {
+          return { messages: [msgInvalida()], session: resetaTentativas({ ...session, step: "category" }) };
+        }
         return respostaInvalida(mensagemCategorias(), session);
       }
       if (category === "pizza") {
@@ -2954,6 +2968,9 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       if (intencaoDireta) {
         const resp = handleCategory(intencaoDireta.category, { ...session, step: "category" });
         return { ...resp, session: resetaTentativas(resp.session) };
+      }
+      if (ehSaudacaoSimples(n)) {
+        return { messages: [msgInvalida()], session: resetaTentativas({ ...session, step: "add_more" }) };
       }
       return respostaInvalida(`Quer adicionar algo a mais? Como bebida, outro lanche, ou podemos fechar esse pedido? 😊`, session);
     }
