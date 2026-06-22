@@ -1,4 +1,5 @@
 import { MENU as MENU_PADRAO, getBorderPrice, getBorderByIndex } from "./menu";
+import { detectarContextoHumano } from "./contextoHumanoSkill";
 
 let MENU = MENU_PADRAO;
 
@@ -2294,6 +2295,9 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       if (ehSaudacaoSimples(n)) {
         return { messages: [msgInvalida()], session: resetaTentativas(session) };
       }
+      if (detectarContextoHumano(text) !== null) {
+        return { messages: [msgInvalida()], session: resetaTentativas(session) };
+      }
       return respostaInvalida("Não entendi muito bem 😅 Me diz seu nome, ou já pode pedir direto (ex: _\"pizza calabresa\"_ ou _\"cardápio\"_)", session);
     }
     case "category": {
@@ -2344,6 +2348,9 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
         const lancheEspFallback = detectarLancheEspecifico(text, session);
         if (lancheEspFallback) return lancheEspFallback;
         if (ehSaudacaoSimples(n)) {
+          return { messages: [msgInvalida()], session: resetaTentativas({ ...session, step: "category" }) };
+        }
+        if (detectarContextoHumano(text) !== null) {
           return { messages: [msgInvalida()], session: resetaTentativas({ ...session, step: "category" }) };
         }
         return respostaInvalida(mensagemCategorias(), session);
@@ -2970,6 +2977,9 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
         return { ...resp, session: resetaTentativas(resp.session) };
       }
       if (ehSaudacaoSimples(n)) {
+        return { messages: [msgInvalida()], session: resetaTentativas({ ...session, step: "add_more" }) };
+      }
+      if (detectarContextoHumano(text) !== null) {
         return { messages: [msgInvalida()], session: resetaTentativas({ ...session, step: "add_more" }) };
       }
       return respostaInvalida(`Quer adicionar algo a mais? Como bebida, outro lanche, ou podemos fechar esse pedido? 😊`, session);
