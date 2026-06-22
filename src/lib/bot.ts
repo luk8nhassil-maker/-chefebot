@@ -1450,6 +1450,29 @@ function aplicaPagamento(payment: string, session: BotSession): BotResponse {
   }
   return continuaParaTrocoOuConfirm(updatedSession);
 }
+
+// Finaliza pedido de retirada direto, sem tela de confirmação.
+// Para Pix: mantém aguardando_pix (regra existente). Para demais: vai a done com resumo.
+function finalizarPedidoPickup(session: BotSession): BotResponse {
+  const subtotal = cartSubtotal(session.cart);
+  const total = subtotal + session.deliveryFee;
+  const resumo = resumoCarrinho(session.cart);
+  const obsLine = session.observacao ? `\n\n✏️ _Obs: ${session.observacao}_` : "";
+  const trocoLine = session.troco && session.troco !== "Sem troco"
+    ? `\n💵 _${session.troco}_`
+    : session.troco === "Sem troco" ? `\n💵 _Sem troco_` : "";
+  if (temPixNoPagamento(session.paymentMethod)) {
+    return {
+      messages: [`Fechado ✅\n\nSeu pedido ficou confirmado para retirada no balcão.\n\n${resumo}${obsLine}\n\nPagamento: ${session.paymentMethod}\nTotal: ${formatCurrency(total)}\n\nPara finalizar, envie o comprovante do Pix.\n\nChave Pix: (configurada pelo admin) 💸\n\nAssim que confirmarmos o pagamento, seu pedido vai direto pra cozinha! 🍕`],
+      session: { ...session, step: "aguardando_pix" },
+    };
+  }
+  return {
+    messages: [`Fechado ✅\n\nSeu pedido ficou confirmado para retirada no balcão.\n\n${resumo}${obsLine}${trocoLine}\n\nPagamento: ${session.paymentMethod}\nTotal: ${formatCurrency(total)}\n\nQuando chegar, é só falar o nome do pedido.`],
+    session: { ...session, step: "done" },
+  };
+}
+
 function continuaParaTrocoOuConfirm(session: BotSession): BotResponse {
   // BLOQUEIO DE SEGURANÇA: entrega nunca fecha sem bairro confirmado e taxa válida.
   // Rede de proteção final — preserva o pagamento já escolhido p/ retomar após o bairro.
@@ -1465,6 +1488,15 @@ function continuaParaTrocoOuConfirm(session: BotSession): BotResponse {
         pagamentoPendente: session.paymentMethod ?? session.pagamentoPendente,
       }),
     };
+  }
+  // RETIRADA: pula a tela de confirmação e finaliza direto com resumo.
+  // Dinheiro na retirada: ainda pergunta troco (útil no balcão); o handler de troco
+  // também detecta pickup e finaliza sem confirm após recolher o troco.
+  if (session.deliveryType === "pickup") {
+    if (temDinheiroNoPagamento(session.paymentMethod)) {
+      return { messages: [`Combinado! 💵 Vai precisar de troco?\n\nSe sim, me diz o valor que vai pagar. Ex: *100*\nSe não, é só digitar *não*`], session: resetaTentativas({ ...session, step: "troco" }) };
+    }
+    return finalizarPedidoPickup(session);
   }
   if (temDinheiroNoPagamento(session.paymentMethod)) {
     return { messages: [`Combinado! 💵 Vai precisar de troco?\n\nSe sim, me diz o valor que vai pagar. Ex: *100*\nSe não, é só digitar *não*`], session: resetaTentativas({ ...session, step: "troco" }) };
@@ -3051,7 +3083,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
           // tipo + pagamento numa mensagem -> aplica pagamento e vai pro fechamento
           return aplicaPagamento(pagDetectado, { ...baseSession });
         }
-        return { messages: [`Combinado, você retira aqui na loja! 🏪\n\nQual a forma de pagamento? 💸`], session: resetaTentativas({ ...baseSession, step: "payment" }) };
+        return { messages: [`Perfeito, retirada no balcão ✅\n\nSem taxa de entrega.\n\nQual vai ser a forma de pagamento?\nPix, dinheiro ou cartão?`], session: resetaTentativas({ ...baseSession, step: "payment" }) };
       }
 
       // Caminho DELIVERY com BAIRRO VÁLIDO (match exato) detectado -> confirma e pede o endereço
@@ -3078,7 +3110,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
         return { messages: [`Qual o seu bairro? 😊`], session: resetaTentativas({ ...session, step: "neighborhood", deliveryType: "delivery", neighborhood: undefined, deliveryFee: 0, bairroConfirmado: false, pagamentoPendente: pagDetectado }) };
       }
       if (n === "2" || n.includes("retirar") || n.includes("loja") || n.includes("buscar") || n.includes("pegar") || n.includes("retiro")) {
-        return { messages: [`Combinado, você retira aqui na loja! 🏪\n\nQual a forma de pagamento? 💸`], session: resetaTentativas({ ...session, step: "payment", deliveryType: "pickup", deliveryFee: 0, neighborhood: undefined }) };
+        return { messages: [`Perfeito, retirada no balcão ✅\n\nSem taxa de entrega.\n\nQual vai ser a forma de pagamento?\nPix, dinheiro ou cartão?`], session: resetaTentativas({ ...session, step: "payment", deliveryType: "pickup", deliveryFee: 0, neighborhood: undefined }) };
       }
       return respostaInvalida(`Como quer receber?\n\n  1. Entrega 🛵\n  2. Retirada na loja 🏪\n  3. Consumo no local 🍽️`, session);
     }
@@ -3315,6 +3347,12 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
         troco = `Troco de ${formatCurrency(valorTroco)} para ${formatCurrency(valor)}`;
       }
       const updatedSession = { ...session, troco };
+      // RETIRADA: após troco, finaliza direto sem tela de confirmação.
+      if (updatedSession.deliveryType === "pickup") {
+        const result = finalizarPedidoPickup(updatedSession);
+        const trocoAck = troco === "Sem troco" ? "_Sem troco então!_ ✅" : `_${troco}_ ✅`;
+        return { messages: [`Anotado! 💵 ${trocoAck}\n\n${result.messages[0]}`], session: result.session };
+      }
       const receipt = buildReceipt(updatedSession);
       return { messages: [`Anotado! 💵 ${troco === "Sem troco" ? "_Sem troco então!_" : `_${troco}_ ✅`}\n\nConfere seu pedido 👇\n\n${receipt}\n\nTá certinho?\n  ✅ *1.* Confirmar\n  ❌ *2.* Cancelar`], session: resetaTentativas({ ...updatedSession, step: "confirm" }) };
     }
