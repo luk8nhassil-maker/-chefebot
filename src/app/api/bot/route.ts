@@ -14,21 +14,33 @@ type Pedido = {
   status: "novo" | "em_preparo" | "saiu_entrega" | "entregue" | "cancelado";
   horario: string;
   endereco: string;
+  data?: string;
+  pagamento?: string;
+  troco?: string;
+  tipoEntrega?: string;
+  taxaEntrega?: number;
+  bairro?: string;
+  observacao?: string;
 };
 
 async function salvarPedido(session: BotSession, phone: string) {
   const pedidos = (await redis.get<Pedido[]>("pedidos")) || [];
   const itens = session.cart.map((item) => {
-    const border = item.border !== "Sem borda" ? ` + ${item.border}` : "";
-    return `Pizza ${item.flavor} ${item.size}${border}`;
+    const border = item.border && item.border !== "Sem borda" ? ` + ${item.border}` : "";
+    const size = item.size ? ` ${item.size}` : "";
+    const flavor = item.flavor ? ` ${item.flavor}` : "";
+    return `${item.name}${size}${flavor}${border}`;
   });
   const total = session.cart.reduce((sum, item) => sum + item.price, 0) + session.deliveryFee;
 
   const endereco = session.deliveryType === "delivery"
-    ? `${session.address} — ${session.neighborhood}`
+    ? `${session.address} - ${session.neighborhood}`
+    : session.deliveryType === "dine_in"
+    ? "Consumo no local"
     : "Retirada na loja";
 
   const numeroPedido = await proximoNumeroPedido();
+  const agora = new Date();
   const novoPedido: Pedido = {
     id: Date.now().toString(),
     numero: numeroPedido,
@@ -37,8 +49,15 @@ async function salvarPedido(session: BotSession, phone: string) {
     itens,
     total,
     status: "novo",
-    horario: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
+    horario: agora.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" }),
+    data: agora.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" }),
     endereco,
+    ...(session.paymentMethod ? { pagamento: session.paymentMethod } : {}),
+    ...(session.troco ? { troco: session.troco } : {}),
+    ...(session.deliveryType ? { tipoEntrega: session.deliveryType } : {}),
+    ...(session.deliveryFee ? { taxaEntrega: session.deliveryFee } : {}),
+    ...(session.neighborhood ? { bairro: session.neighborhood } : {}),
+    ...(session.observacao ? { observacao: session.observacao } : {}),
   };
   await redis.set("pedidos", [...pedidos, novoPedido]);
 }

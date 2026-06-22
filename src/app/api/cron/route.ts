@@ -1,11 +1,21 @@
 import { NextResponse } from "next/server";
 import { redis } from "@/lib/redis";
 
+type ConfigPizzaria = {
+  horaFechamento?: number;
+  [key: string]: unknown;
+};
+
 type Pedido = {
   id: string;
   status: string;
   horario: string;
   data?: string;
+  isArchived?: boolean;
+  archivedAt?: string;
+  archivedBy?: string;
+  archivedReason?: string;
+  [key: string]: unknown;
 };
 
 export async function GET(req: Request) {
@@ -17,6 +27,27 @@ export async function GET(req: Request) {
     const pedidos = (await redis.get<Pedido[]>("pedidos")) || [];
     const agora = new Date();
     const hojeStr = agora.toLocaleDateString("pt-BR");
+
+    // Arquivamento automático de pedidos não-resolvidos no fechamento do expediente
+    const config = await redis.get<ConfigPizzaria>("config:pizzaria");
+    const horaFechamento = config?.horaFechamento ?? 23;
+    const brasilia = new Date(agora.toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }));
+    const horaAtual = brasilia.getHours();
+    const minutosAtual = brasilia.getMinutes();
+    // Arquiva dentro da janela de 5 min após o fechamento
+    const deveArquivar = horaAtual === horaFechamento && minutosAtual < 5;
+    const agoraISO = agora.toISOString();
+
+    if (deveArquivar) {
+      const pedidosAtualizados = pedidos.map((p: Pedido) => {
+        if (p.isArchived) return p;
+        if (['entregue', 'cancelado'].includes(p.status)) return p;
+        return { ...p, isArchived: true, archivedAt: agoraISO, archivedBy: 'system', archivedReason: 'fim_expediente' };
+      });
+      await redis.set("pedidos", pedidosAtualizados);
+      return NextResponse.json({ ok: true, acao: 'arquivamento_expediente', arquivados: pedidosAtualizados.filter((p: Pedido) => p.isArchived && p.archivedAt === agoraISO).length });
+    }
+
 
     const limpo = pedidos.filter((p: Pedido) => {
       // Pedidos ativos nunca são removidos

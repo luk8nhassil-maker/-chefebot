@@ -909,10 +909,11 @@ export async function POST(req: NextRequest) {
       result.session = { ...result.session, pixIniciadoEm: Date.now(), pixCobrancas: 0 } as any;
     }
 
-    // Salva pedido na confirmacao — Pix espera comprovante
+    // Salva pedido na confirmacao — Pix e nao-Pix salvos aqui.
+    // Para Pix, o pedido fica visivel no painel com pixConfirmado:false ate o comprovante chegar.
+    // processarComprovante verifica se o pedido ja existe antes de salvar novamente.
     if (currentSession!.step === "confirm" &&
-      (messageText.trim() === "1" || messageText.trim().toLowerCase() === "sim") &&
-      !temPixNoPagamento(currentSession!.paymentMethod)) {
+      (messageText.trim() === "1" || messageText.trim().toLowerCase() === "sim")) {
       const pedidoId = await salvarPedido(currentSession!, phone, config);
       result.session = { ...result.session, pedidoId } as any;
       if (config.limitePico > 0) {

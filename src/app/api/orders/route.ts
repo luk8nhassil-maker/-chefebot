@@ -27,6 +27,11 @@ type Pedido = {
   referencia?: string
   observacao?: string
   horarioInicio?: string
+  // Campos de arquivamento
+  isArchived?: boolean
+  archivedAt?: string
+  archivedBy?: string
+  archivedReason?: string
 }
 
 
@@ -92,7 +97,18 @@ export async function GET(req: NextRequest) {
   const auth = await checkAuth(req)
   if (!auth) return NextResponse.json({ error: 'Nao autorizado' }, { status: 401 })
   const pedidos = await getPedidos()
-  return NextResponse.json([...pedidos].reverse())
+
+  const url = new URL(req.url)
+  const soArquivados = url.searchParams.get('arquivados') === 'true'
+
+  if (soArquivados) {
+    const arquivados = pedidos.filter(p => p.isArchived)
+    return NextResponse.json([...arquivados].reverse())
+  }
+
+  // Padrão: exclui arquivados da área de trabalho principal
+  const ativos = pedidos.filter(p => !p.isArchived)
+  return NextResponse.json([...ativos].reverse())
 }
 
 export async function PATCH(req: NextRequest) {
