@@ -3,6 +3,7 @@ import { redis } from '@/lib/redis'
 import { verifyToken } from '@/lib/auth'
 import { prepararRetomadaSilenciosa } from '@/lib/bot'
 import type { BotSession } from '@/lib/bot'
+import { fecharCiclo } from '@/lib/ciclos'
 
 async function checkAuth(req: NextRequest) {
   const token = req.cookies.get('auth-token')?.value ?? null
@@ -39,6 +40,7 @@ export async function POST(req: NextRequest) {
   await redis.del(`manual:${phoneFormatado}`)
   await redis.del(`resolvendo:${phoneFormatado}`)
   await redis.set(`retomada:${phoneFormatado}`, true, { ex: 1800 })
+  fecharCiclo(phoneFormatado, 'fechado', 'devolvido para o bot').catch(() => {})
 
   return NextResponse.json({ ok: true })
 }

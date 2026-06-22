@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { verifyToken } from '@/lib/auth'
 import { redis } from '@/lib/redis'
 import type { BotSession, CartItem, MensagemRelevante } from '@/lib/bot'
-import { extrairDaConversa } from '@/lib/pedidoCombinado'
+import { extrairDaConversa, filtrarMensagensDoCiclo } from '@/lib/pedidoCombinado'
+import { obterCicloAtivo, fecharCiclo } from '@/lib/ciclos'
 
 async function checkAuth(req: NextRequest) {
   const token = req.cookies.get('auth-token')?.value ?? null
@@ -40,8 +41,14 @@ export async function GET(req: NextRequest) {
   const phone = new URL(req.url).searchParams.get('phone')
   if (!phone) return NextResponse.json({ error: 'phone obrigatório' }, { status: 400 })
 
-  const session = await redis.get<BotSession>(`session:${phone}`)
-  const conversa = await redis.get<MensagemRelevante[]>(`conversa:${phone}`) ?? []
+  const [session, conversaCompleta, cicloAtivo] = await Promise.all([
+    redis.get<BotSession>(`session:${phone}`),
+    redis.get<MensagemRelevante[]>(`conversa:${phone}`).then(v => v ?? []),
+    obterCicloAtivo(phone),
+  ])
+
+  // Filtrar apenas mensagens do ciclo atual (evita contaminação de pedidos antigos)
+  const conversa = filtrarMensagensDoCiclo(conversaCompleta, cicloAtivo?.id ?? null)
 
   // Dados estruturados do bot (fonte primária)
   const cart: CartItem[] = session?.cart ?? []
@@ -88,7 +95,7 @@ export async function GET(req: NextRequest) {
   if (rascunho.tipoEntrega === 'delivery' && !rascunho.bairro.trim()) pendencias.push('Bairro não informado')
   if (!rascunho.pagamento.trim()) pendencias.push('Forma de pagamento não informada')
 
-  return NextResponse.json({ rascunho, pendencias, conversa })
+  return NextResponse.json({ rascunho, pendencias, conversa, cicloId: cicloAtivo?.id ?? null })
 }
 
 export async function DELETE(req: NextRequest) {
@@ -102,6 +109,7 @@ export async function DELETE(req: NextRequest) {
   // NEVER sends messages to the client; conversa:{phone} is preserved
   await redis.del(`manual:${phone}`)
   await redis.del(`session:${phone}`)
+  fecharCiclo(phone, 'finalizado', 'pedido combinado criado pela atendente').catch(() => {})
 
   return NextResponse.json({ ok: true })
 }

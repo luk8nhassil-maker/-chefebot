@@ -17,11 +17,14 @@ export async function registrarMensagem(
   phone: string,
   autor: AutorMensagem,
   texto: string,
+  cicloId?: string,
 ): Promise<void> {
   if (!phone || !texto) return;
   try {
     const log = (await redis.get<MensagemRelevante[]>(chave(phone))) || [];
-    log.push({ autor, texto: texto.slice(0, 400), ts: Date.now() });
+    const entrada: MensagemRelevante = { autor, texto: texto.slice(0, 400), ts: Date.now() }
+    if (cicloId) (entrada as any).cicloId = cicloId
+    log.push(entrada);
     await redis.set(chave(phone), log.slice(-MAX_MENSAGENS), { ex: TTL_SEGUNDOS });
   } catch {
     // log de conversa é best-effort; nunca propaga erro

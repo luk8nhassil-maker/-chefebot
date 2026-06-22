@@ -12,7 +12,8 @@ import { analisarComprovantePix } from "@/lib/analisarComprovante";
 import { transcreverAudio } from "@/lib/transcribeAudio";
 import { proximoNumeroPedido } from "@/lib/numeracao";
 import { salvarStatusConexao, botPodeResponder, StatusConexao } from "@/lib/conexaoWhatsapp";
-import { ehConfirmacaoPedido } from "@/lib/confirmacaoPedido";
+import { ehConfirmacaoPedido } from "@/lib/confirmacaoPedido"
+import { abrirCiclo, fecharCiclo, obterCicloAtivo, isDesistencia as isMensagemDesistencia } from "@/lib/ciclos";
 
 export const maxDuration = 30;
 
@@ -500,7 +501,10 @@ export async function POST(req: NextRequest) {
           const emManualFrom = await redis.get<boolean>(`manual:${fromPhone}`);
           if (emManualFrom === true) {
             const txtFrom = data?.message?.conversation || data?.message?.extendedTextMessage?.text || "";
-            if (txtFrom) await registrarMensagem(fromPhone, "atendente", txtFrom);
+            if (txtFrom) {
+              const cicloAtendente = await obterCicloAtivo(fromPhone).catch(() => null)
+              await registrarMensagem(fromPhone, "atendente", txtFrom, cicloAtendente?.id)
+            }
           }
         }
       } catch {}
@@ -671,7 +675,11 @@ export async function POST(req: NextRequest) {
 
     const emManual = await redis.get<boolean>(`manual:${phone}`);
     if (emManual === true) {
-      await registrarMensagem(phone, "cliente", messageText);
+      const cicloManual = await obterCicloAtivo(phone).catch(() => null)
+      if (isMensagemDesistencia(messageText)) {
+        fecharCiclo(phone, 'cancelado', 'cliente desistiu em modo manual').catch(() => {})
+      }
+      await registrarMensagem(phone, "cliente", messageText, cicloManual?.id)
       return NextResponse.json({ ok: true });
     }
 
@@ -784,7 +792,8 @@ export async function POST(req: NextRequest) {
     }
 
     // Registra a mensagem da cliente no log da conversa (contexto p/ futuro handoff).
-    await registrarMensagem(phone, "cliente", messageText);
+    const cicloBot = await obterCicloAtivo(phone).catch(() => null)
+    await registrarMensagem(phone, "cliente", messageText, cicloBot?.id);
 
     // Sem sessao ativa — inicia nova
     if (!currentSession) {
@@ -794,6 +803,7 @@ export async function POST(req: NextRequest) {
       if (historico) {
         currentSession = createReturningSession(historico);
         await redis.set(sessionKey, currentSession, { ex: 1800 });
+        abrirCiclo(phone, 'cliente recorrente').catch(() => {})
         await enviarMensagem(phone, montarSaudacaoRetorno(historico));
         return NextResponse.json({ ok: true });
       } else {
@@ -804,6 +814,7 @@ export async function POST(req: NextRequest) {
         if (eSaudacao(messageText)) {
           currentSession = createInitialSession();
           await redis.set(sessionKey, currentSession, { ex: 1800 });
+          abrirCiclo(phone, 'nova saudação').catch(() => {})
           await enviarMensagem(phone, `Ola! Seja bem-vindo a *${config.nomePizzaria}*! 🍕\n\nO que vai ser hoje? Temos coisa boa te esperando! 😋\n\n  1. Pizza\n  2. Lanches\n  3. Bebidas\n  4. Sucos e Vitaminas`);
           await redis.set(sessionKey, { ...currentSession, step: "category" }, { ex: 1800 });
           return NextResponse.json({ ok: true });
@@ -811,6 +822,7 @@ export async function POST(req: NextRequest) {
         // Nao e saudacao — cliente ja mandou o pedido direto. Cria sessao no step category e processa.
         currentSession = { step: "category", cart: [], deliveryFee: 0, tentativasInvalidas: 0 };
         await redis.set(sessionKey, currentSession, { ex: 1800 });
+        abrirCiclo(phone, 'pedido direto sem saudação').catch(() => {})
       }
     }
 
@@ -842,6 +854,7 @@ export async function POST(req: NextRequest) {
     // Sessao ativa
     if (eDespedida(messageText) && currentSession.step !== "confirm") {
       await redis.del(sessionKey);
+      fecharCiclo(phone, 'abandonado', 'despedida do cliente').catch(() => {})
       await enviarMensagem(phone, `Ate mais! Volte sempre! 😊🍕`);
       return NextResponse.json({ ok: true });
     }
@@ -918,6 +931,7 @@ export async function POST(req: NextRequest) {
     // processarComprovante verifica se o pedido ja existe antes de salvar novamente.
     if (currentSession!.step === "confirm" && ehConfirmacaoPedido(messageText)) {
       const pedidoId = await salvarPedido(currentSession!, phone, config);
+      fecharCiclo(phone, 'finalizado', 'pedido confirmado pelo cliente').catch(() => {})
       result.session = { ...result.session, pedidoId } as any;
       if (config.limitePico > 0) {
         const pedidosAtivos = (await redis.get<Pedido[]>("pedidos") || []).filter(p => p.status === "em_preparo" && !p.escalonado).length;

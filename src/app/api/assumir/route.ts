@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { redis } from '@/lib/redis'
 import { verifyToken } from '@/lib/auth'
+import { abrirCiclo } from '@/lib/ciclos'
 
 async function checkAuth(req: NextRequest) {
   const token = req.cookies.get('auth-token')?.value ?? null
@@ -21,6 +22,7 @@ export async function POST(req: NextRequest) {
   const phoneFormatado = phone.startsWith('55') ? phone : '55' + phone
 
   await redis.set(`manual:${phoneFormatado}`, true, { ex: 3600 })
+  abrirCiclo(phoneFormatado, 'atendente assumiu conversa').catch(() => {})
 
   return NextResponse.json({ ok: true })
 }

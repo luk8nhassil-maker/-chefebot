@@ -1787,6 +1787,7 @@ export interface MensagemRelevante {
   autor: AutorMensagem;
   texto: string;
   ts?: number;
+  cicloId?: string;
 }
 
 export interface RetomadaHandoff {

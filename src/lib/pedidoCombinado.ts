@@ -1,4 +1,5 @@
 import type { MensagemRelevante } from './bot'
+export { filtrarMensagensDoCiclo, recortarMensagensRecentes } from './ciclos'
 
 export type RascunhoCombinado = {
   itens: string[]
