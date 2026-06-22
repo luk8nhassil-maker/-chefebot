@@ -12,6 +12,7 @@ import { analisarComprovantePix } from "@/lib/analisarComprovante";
 import { transcreverAudio } from "@/lib/transcribeAudio";
 import { proximoNumeroPedido } from "@/lib/numeracao";
 import { salvarStatusConexao, botPodeResponder, StatusConexao } from "@/lib/conexaoWhatsapp";
+import { ehConfirmacaoPedido } from "@/lib/confirmacaoPedido";
 
 export const maxDuration = 30;
 
@@ -912,8 +913,7 @@ export async function POST(req: NextRequest) {
     // Salva pedido na confirmacao — Pix e nao-Pix salvos aqui.
     // Para Pix, o pedido fica visivel no painel com pixConfirmado:false ate o comprovante chegar.
     // processarComprovante verifica se o pedido ja existe antes de salvar novamente.
-    if (currentSession!.step === "confirm" &&
-      (messageText.trim() === "1" || messageText.trim().toLowerCase() === "sim")) {
+    if (currentSession!.step === "confirm" && ehConfirmacaoPedido(messageText)) {
       const pedidoId = await salvarPedido(currentSession!, phone, config);
       result.session = { ...result.session, pedidoId } as any;
       if (config.limitePico > 0) {
