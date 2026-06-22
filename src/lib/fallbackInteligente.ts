@@ -16,6 +16,7 @@
 import type { BotSession, MensagemRelevante } from "./bot";
 import { analisarConversaParaRetomada, validarRespostaIA, type ConversationPath } from "./conversationBrain";
 import { gerarRespostaGuardiao } from "./claude";
+import { gerarRecomendacaoLocal } from "./recomendacaoSkill";
 
 function normalizar(texto: string): string {
   return (texto || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
@@ -108,6 +109,12 @@ export async function resolverFallbackInteligente(input: FallbackInput): Promise
   // Não intervém em escalonamento nem quando a resposta já é boa (não-seca).
   if (input.jaEscalou || !pareceFallbackSeco(mensagensFallback)) {
     return { messages: mensagensFallback, usouIA: false, intervencao: "nenhuma" };
+  }
+
+  // Curto-circuito local: intenções de recomendação não precisam de API.
+  const recomendacao = gerarRecomendacaoLocal(session, mensagemAtual);
+  if (recomendacao) {
+    return { messages: [recomendacao], usouIA: false, intervencao: "fallback_melhorado" };
   }
 
   // Decide o caminho (BECO/SAIDA) e monta o contexto seguro para a IA.

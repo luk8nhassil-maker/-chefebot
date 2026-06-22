@@ -185,6 +185,62 @@ describe("funciona em /api/bot e /api/whatsapp (mesma função central)", () => 
   });
 });
 
+// ─── Skill de Recomendação: curto-circuito sem chamar IA ─────────────────────
+describe("skill de recomendação não chama a IA", () => {
+  it('"o que você me sugere?" em category → chamarIA NÃO é chamada', async () => {
+    const spy = vi.fn(async () => "qualquer resposta da IA");
+    const fb = await resolverFallbackInteligente({
+      mensagemAtual: "o que você me sugere?",
+      session: sessaoCategoria(),
+      mensagensFallback: ["Ops, não achei essa opção aqui! As disponíveis são:"],
+      chamarIA: spy,
+    });
+    expect(spy).not.toHaveBeenCalled();
+    expect(fb.usouIA).toBe(false);
+    expect(fb.intervencao).toBe("fallback_melhorado");
+    expect(fb.messages[0].toLowerCase()).toMatch(/pizza|lanche|bebida|suco/);
+  });
+
+  it('"quero algo barato" em category → chamarIA NÃO é chamada', async () => {
+    const spy = vi.fn(async () => "qualquer resposta da IA");
+    const fb = await resolverFallbackInteligente({
+      mensagemAtual: "quero algo barato",
+      session: sessaoCategoria(),
+      mensagensFallback: ["Eita, não entendi não! Pode escolher uma dessas opções:"],
+      chamarIA: spy,
+    });
+    expect(spy).not.toHaveBeenCalled();
+    expect(fb.usouIA).toBe(false);
+    expect(fb.intervencao).toBe("fallback_melhorado");
+  });
+
+  it('"não sei o que pedir" em category → chamarIA NÃO é chamada', async () => {
+    const spy = vi.fn(async () => "qualquer resposta da IA");
+    const fb = await resolverFallbackInteligente({
+      mensagemAtual: "não sei o que pedir",
+      session: sessaoCategoria(),
+      mensagensFallback: ["Ops, não achei essa opção aqui! As disponíveis são:"],
+      chamarIA: spy,
+    });
+    expect(spy).not.toHaveBeenCalled();
+    expect(fb.usouIA).toBe(false);
+    expect(fb.intervencao).toBe("fallback_melhorado");
+    expect(fb.messages[0]).not.toMatch(/r\$|reais/i);
+  });
+
+  it("recomendação em step 'payment' não curto-circuita → chamarIA é chamada normalmente", async () => {
+    const spy = vi.fn(async () => "Tudo certo! Como você prefere pagar?");
+    const fb = await resolverFallbackInteligente({
+      mensagemAtual: "o que você me sugere?",
+      session: sessaoPagamento(),
+      mensagensFallback: ["Ops, não achei essa opção aqui!"],
+      chamarIA: spy,
+    });
+    // Fora do escopo da skill → vai para o brain/IA normalmente
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+});
+
 // ─── fallbackDeterministicoMelhorado é step-aware (não reseta o pedido) ────────
 describe("fallback humanizado é consciente do estado", () => {
   it("no pagamento, pede pagamento (não volta pro cardápio)", () => {
