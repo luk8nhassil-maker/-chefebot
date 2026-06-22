@@ -12,6 +12,7 @@ import { analisarComprovantePix } from "@/lib/analisarComprovante";
 import { transcreverAudio } from "@/lib/transcribeAudio";
 import { proximoNumeroPedido } from "@/lib/numeracao";
 import { salvarStatusConexao, botPodeResponder, StatusConexao } from "@/lib/conexaoWhatsapp";
+import { normalizarMensagemCliente } from "@/lib/normalizarMensagem";
 
 export const maxDuration = 30;
 
@@ -608,7 +609,24 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true })
     }
 
-    const messageText = data?.message?.conversation || data?.message?.extendedTextMessage?.text || "";
+    // REGRA DE HIGIENIZAÇÃO: figurinha, GIF e mídia sem texto não alteram sessão,
+    // carrinho ou step — ignorar silenciosamente.
+    const isSticker = !!(data?.message?.stickerMessage || messageType === "stickerMessage");
+    if (isSticker) return NextResponse.json({ ok: true });
+
+    const isGif = !!(
+      data?.message?.videoMessage?.gifPlayback ||
+      data?.message?.gifMessage ||
+      messageType === "gifMessage"
+    );
+    const captionGif = data?.message?.videoMessage?.caption || "";
+    if (isGif && !captionGif) return NextResponse.json({ ok: true });
+
+    const messageTextRaw = data?.message?.conversation || data?.message?.extendedTextMessage?.text || "";
+    if (!messageTextRaw) return NextResponse.json({ ok: true });
+    // Remove emojis e caracteres não textuais antes de qualquer interpretação.
+    const messageText = normalizarMensagemCliente(messageTextRaw);
+    // Mensagem era apenas emoji — ignorar sem alterar sessão.
     if (!messageText) return NextResponse.json({ ok: true });
     await redis.set(`ultima_msg:${phone}`, messageText.slice(0, 200), { ex: 1800 });
 

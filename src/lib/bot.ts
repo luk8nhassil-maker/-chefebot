@@ -1,4 +1,5 @@
 import { MENU as MENU_PADRAO, getBorderPrice, getBorderByIndex } from "./menu";
+import { normalizarMensagemCliente } from "./normalizarMensagem";
 
 let MENU = MENU_PADRAO;
 
@@ -1947,17 +1948,26 @@ export function prepararRetomadaSilenciosa(session: BotSession): BotSession {
 }
 
 export function processMessage(input: string, session: BotSession): BotResponse {
+  // REGRA DE HIGIENIZAÇÃO: remove emojis antes de qualquer interpretação.
+  const inputLimpo = normalizarMensagemCliente(input);
+
+  // Mensagem era apenas emoji (ou caracteres não textuais) — preservar sessão intacta,
+  // sem responder fallback, sem avançar step, sem alterar carrinho.
+  if (input.trim() && !inputLimpo) {
+    return { messages: [], session };
+  }
+
   // Detecta o "ritmo" do cliente pela forma da resposta:
   // resposta que é só número (ex: "1", "2") => cliente apressado => respostas mais rápidas.
   // resposta com texto/palavras => cliente calmo => mantém o ritmo humano.
-  const limpo = input.trim();
+  const limpo = inputLimpo.trim();
   let ritmoRapido = session.ritmoRapido;
   if (/^\d{1,2}$/.test(limpo)) {
     ritmoRapido = true;
   } else if (limpo.length > 3) {
     ritmoRapido = false;
   }
-  const result = processMessageInner(input, session);
+  const result = processMessageInner(inputLimpo, session);
   result.session = { ...result.session, ritmoRapido };
   return result;
 }
@@ -2630,7 +2640,9 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       }
       let flavor: string | undefined;
       const num = parseInt(text);
-      if (!isNaN(num) && num >= 1 && num <= allFlavors.length) {
+      // Só usa índice numérico se a mensagem for APENAS um número (ex: "3").
+      // Caso contrário "3 queijo" seria interpretado como índice 3 em vez do alias "Três Queijos".
+      if (!isNaN(num) && /^\d+$/.test(text.trim()) && num >= 1 && num <= allFlavors.length) {
         flavor = allFlavors[num - 1];
       } else {
         flavor = resolveUmSabor(n, allFlavors) ?? undefined;
