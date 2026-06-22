@@ -80,7 +80,7 @@ function mensagemAddMore(cart: CartItem[]): string {
     const lista = destaques.map((b, i) => `  ${i + 1}. ${b.name} — ${formatCurrency(b.price)}`).join("\n");
     return `🛒 *Seu pedido:*\n${resumoCarrinho(cart)}\n  Subtotal: *${formatCurrency(subtotal)}*\n\n🥤 *Quer adicionar uma bebida?*\n${lista}\n  4. Ver mais bebidas\n  5. Fechar pedido\n\nDigite o número da opção 😊`;
   }
-  return `🛒 *Seu pedido:*\n${resumoCarrinho(cart)}\n  Subtotal: *${formatCurrency(subtotal)}*\n\nOu *fechar pedido*, *mais pizza*, *lanche*, *ver cardápio*... 😊`;
+  return `Olha como ficou seu pedido até agora:\n\n${resumoCarrinho(cart)}\n\nTotal até aqui: *${formatCurrency(subtotal)}*\n\nQuer colocar mais alguma coisa ou já posso fechar pra você?\n\nPode mandar do seu jeito: mais uma pizza, uma bebida, ver cardápio ou fechar pedido.`;
 }
 
 export type BotStep =
@@ -1081,7 +1081,7 @@ function buildReceipt(session: BotSession): string {
   const obsLine = session.observacao ? `\n\n✏️ _Obs: ${session.observacao}_` : "";
   const trocoLine = session.troco && session.troco !== "Sem troco"
     ? `\n💵 _${session.troco}_`
-    : session.troco === "Sem troco" ? `\n💵 _Sem troco_` : "";
+    : session.troco === "Sem troco" ? `\n💵 _Troco: não precisa_` : "";
   return (
     itemLines.join("\n\n") +
     deliveryLine +
@@ -1460,7 +1460,7 @@ function finalizarPedidoPickup(session: BotSession): BotResponse {
   const obsLine = session.observacao ? `\n\n✏️ _Obs: ${session.observacao}_` : "";
   const trocoLine = session.troco && session.troco !== "Sem troco"
     ? `\n💵 _${session.troco}_`
-    : session.troco === "Sem troco" ? `\n💵 _Sem troco_` : "";
+    : session.troco === "Sem troco" ? `\n💵 _Troco: não precisa_` : "";
   if (temPixNoPagamento(session.paymentMethod)) {
     return {
       messages: [`Fechado ✅\n\nSeu pedido ficou confirmado para retirada no balcão.\n\n${resumo}${obsLine}\n\nPagamento: ${session.paymentMethod}\nTotal: ${formatCurrency(total)}\n\nPara finalizar, envie o comprovante do Pix.\n\nChave Pix: (configurada pelo admin) 💸\n\nAssim que confirmarmos o pagamento, seu pedido vai direto pra cozinha! 🍕`],
@@ -1494,12 +1494,12 @@ function continuaParaTrocoOuConfirm(session: BotSession): BotResponse {
   // também detecta pickup e finaliza sem confirm após recolher o troco.
   if (session.deliveryType === "pickup") {
     if (temDinheiroNoPagamento(session.paymentMethod)) {
-      return { messages: [`Combinado! 💵 Vai precisar de troco?\n\nSe sim, me diz o valor que vai pagar. Ex: *100*\nSe não, é só digitar *não*`], session: resetaTentativas({ ...session, step: "troco" }) };
+      return { messages: [`Combinado, pagamento em dinheiro ✅\n\nVai precisar de troco?\n\nSe precisar, me fala pra quanto.\nSe não precisar, pode responder só: não`], session: resetaTentativas({ ...session, step: "troco" }) };
     }
     return finalizarPedidoPickup(session);
   }
   if (temDinheiroNoPagamento(session.paymentMethod)) {
-    return { messages: [`Combinado! 💵 Vai precisar de troco?\n\nSe sim, me diz o valor que vai pagar. Ex: *100*\nSe não, é só digitar *não*`], session: resetaTentativas({ ...session, step: "troco" }) };
+    return { messages: [`Combinado, pagamento em dinheiro ✅\n\nVai precisar de troco?\n\nSe precisar, me fala pra quanto.\nSe não precisar, pode responder só: não`], session: resetaTentativas({ ...session, step: "troco" }) };
   }
   const receipt = buildReceipt(session);
   return { messages: [`Confere seu pedido 👇\n\n${receipt}\n\nTá certinho?\n  ✅ *1.* Confirmar\n  ❌ *2.* Cancelar`], session: resetaTentativas({ ...session, step: "confirm" }) };
@@ -3350,11 +3350,11 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
       // RETIRADA: após troco, finaliza direto sem tela de confirmação.
       if (updatedSession.deliveryType === "pickup") {
         const result = finalizarPedidoPickup(updatedSession);
-        const trocoAck = troco === "Sem troco" ? "_Sem troco então!_ ✅" : `_${troco}_ ✅`;
-        return { messages: [`Anotado! 💵 ${trocoAck}\n\n${result.messages[0]}`], session: result.session };
+        const trocoAck = troco === "Sem troco" ? "Fechou, sem troco então ✅" : `Anotado! 💵 _${troco}_ ✅`;
+        return { messages: [`${trocoAck}\n\n${result.messages[0]}`], session: result.session };
       }
       const receipt = buildReceipt(updatedSession);
-      return { messages: [`Anotado! 💵 ${troco === "Sem troco" ? "_Sem troco então!_" : `_${troco}_ ✅`}\n\nConfere seu pedido 👇\n\n${receipt}\n\nTá certinho?\n  ✅ *1.* Confirmar\n  ❌ *2.* Cancelar`], session: resetaTentativas({ ...updatedSession, step: "confirm" }) };
+      return { messages: [`${troco === "Sem troco" ? "Fechou, sem troco então ✅" : `Anotado! 💵 _${troco}_ ✅`}\n\nConfere seu pedido 👇\n\n${receipt}\n\nTá certinho?\n  ✅ *1.* Confirmar\n  ❌ *2.* Cancelar`], session: resetaTentativas({ ...updatedSession, step: "confirm" }) };
     }
     case "confirm": {
       const confirma = ePositiva(n) || n.includes("confirmar") || n.includes("correto") ||
