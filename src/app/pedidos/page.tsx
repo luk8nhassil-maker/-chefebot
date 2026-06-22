@@ -953,6 +953,11 @@ export default function PedidosPage() {
                 )}
 
                 {isDone && <div style={{ height: 54, borderRadius: 16, background: "rgba(34,197,94,.1)", border: "1px solid rgba(34,197,94,.3)", color: "#22c55e", fontSize: 15, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center" }}>Entregue · tudo certo ✓</div>}
+
+                {/* Imprimir pedido */}
+                <button onClick={e => { e.stopPropagation(); window.open(`/pedidos/${pedido.id}/imprimir`, "_blank") }} style={{ height: 38, border: "1px solid rgba(255,255,255,.1)", borderRadius: 12, background: "transparent", color: "#56524b", fontSize: 12, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, cursor: "pointer" }}>
+                  🖨️ Imprimir pedido
+                </button>
               </article>
             )
           })}
@@ -1138,6 +1143,11 @@ export default function PedidosPage() {
                         {cancelandoId === p.id ? "Cancelando..." : "Cancelar pedido"}
                       </button>
                     )}
+
+                    {/* Imprimir pedido */}
+                    <button onClick={() => window.open(`/pedidos/${p.id}/imprimir`, "_blank")} style={{ height: 44, border: "1px solid rgba(255,255,255,.1)", borderRadius: 14, background: "transparent", color: "#a39b8b", fontSize: 14, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, flexShrink: 0 }}>
+                      🖨️ Imprimir pedido
+                    </button>
 
                     <button onClick={() => setDetailId(null)} style={{ height: 44, border: "none", background: "transparent", color: "#a39b8b", fontSize: 14, fontWeight: 800, flexShrink: 0 }}>Fechar</button>
                   </>
