@@ -104,10 +104,12 @@ describe("name: saudação não escalona nem acumula tentativas", () => {
 // ─── category: contexto humano com tentativas acumuladas não escalona ─────────
 
 describe("category: contexto humano leve não escalona nem acumula tentativas", () => {
-  // Nota: "você é humano?" contém "humano" que está em PALAVRAS_ESCALONAMENTO,
-  // então escalona pelo guard global — não pelo nosso patch. Testamos só mensagens
-  // que chegam ao step-specific handler.
-  it.each(["me conta uma piada", "kkk", "hoje foi um dia cansativo", "tô sem ideia", "me surpreende", "bora", "me salva"])(
+  // "você é humano?" e "você é robô?" agora têm guard antes de precisaEscalar.
+  it.each([
+    "me conta uma piada", "kkk",
+    "você é humano?", "você é robô?", "vc é humano?",
+    "hoje foi um dia cansativo", "tô sem ideia", "me surpreende", "bora", "me salva",
+  ])(
     '"%s" com tentativasInvalidas:2 → não escalar', (msg) => {
       const r = processMessage(msg, sessaoCategory(2));
       expect(r.escalar).toBeFalsy();
@@ -138,6 +140,34 @@ describe("category: contexto humano leve não escalona nem acumula tentativas", 
   it("mensagem sensível 'tenho alergia' com tentativas:2 → escalona (não tratada como venda)", () => {
     const r = processMessage("tenho alergia", sessaoCategory(2));
     expect(r.escalar).toBe(true);
+  });
+
+  // ─── Escalonamento real de atendente humano permanece intacto ─────────────
+  it('"quero falar com um humano" → continua escalando', () => {
+    const r = processMessage("quero falar com um humano", sessaoCategory(0));
+    expect(r.escalar).toBe(true);
+  });
+
+  it('"me passa para um atendente" → continua escalando', () => {
+    const r = processMessage("me passa para um atendente", sessaoCategory(0));
+    expect(r.escalar).toBe(true);
+  });
+
+  it('"quero atendimento humano" → continua escalando', () => {
+    const r = processMessage("quero atendimento humano", sessaoCategory(0));
+    expect(r.escalar).toBe(true);
+  });
+
+  it('"você é humano?" → não escala, zera tentativas', () => {
+    const r = processMessage("você é humano?", sessaoCategory(2));
+    expect(r.escalar).toBeFalsy();
+    expect(r.session.tentativasInvalidas).toBe(0);
+  });
+
+  it('"você é robô?" → não escala, mantém step category', () => {
+    const r = processMessage("você é robô?", sessaoCategory(2));
+    expect(r.escalar).toBeFalsy();
+    expect(r.session.step).toBe("category");
   });
 });
 
