@@ -213,13 +213,13 @@ describe("não quebra retirada / consumo no local", () => {
     expect(res.session.deliveryFee).toBe(0);
   });
 
-  it("retirada → pagamento → confirma → fecha (não bloqueia por bairro)", () => {
+  it("retirada → pagamento pix → vai para aguardando_pix diretamente (sem confirm, sem bairro)", () => {
     const r1 = processMessage("2", sessaoDeliveryType());
     const r2 = processMessage("pix", r1.session);
-    expect(r2.session.step).toBe("confirm");
-    const r3 = processMessage("1", r2.session);
-    // pix vai para aguardando_pix; o importante: não voltou pra neighborhood
-    expect(r3.session.step).not.toBe("neighborhood");
+    // pickup pula o confirm e vai direto a aguardando_pix
+    expect(r2.session.step).toBe("aguardando_pix");
+    // o importante: não voltou pra neighborhood
+    expect(r2.session.step).not.toBe("neighborhood");
   });
 });
 
