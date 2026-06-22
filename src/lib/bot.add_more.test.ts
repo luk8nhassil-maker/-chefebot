@@ -73,3 +73,24 @@ describe("add_more — quando já há bebida no carrinho", () => {
     expect(res.session.cart.some(i => i.name === "Refrigerante 2L")).toBe(false);
   });
 });
+
+describe("add_more — regressão: copy do carrinho após bebida adicionada", () => {
+  it('pizza + bebida (opção 2) → carrinho não contém "Ou fechar pedido"', () => {
+    const res = processMessage("2", makeSession());
+    const cartMsg = res.messages.find(m => m.includes("Total até aqui") || m.includes("Subtotal") || m.includes("fechar pedido"));
+    expect(cartMsg).toBeDefined();
+    expect(cartMsg).not.toContain("Ou fechar pedido");
+    expect(cartMsg).not.toContain("Subtotal");
+    expect(cartMsg).toContain("Total até aqui");
+    expect(cartMsg).toContain("Quer colocar mais alguma coisa");
+  });
+
+  it('pizza + bebida por nome → carrinho não contém "Ou fechar pedido"', () => {
+    const res = processMessage("refrigerante 2l", makeSession());
+    const cartMsg = res.messages.find(m => m.includes("Total até aqui") || m.includes("Subtotal") || m.includes("fechar pedido"));
+    expect(cartMsg).toBeDefined();
+    expect(cartMsg).not.toContain("Ou fechar pedido");
+    expect(cartMsg).not.toContain("Subtotal");
+    expect(cartMsg).toContain("Total até aqui");
+  });
+});
