@@ -52,7 +52,7 @@ export async function POST(req: NextRequest) {
   // Envia a mensagem pelo WhatsApp real via Evolution API
   try {
     const delay = Math.min(2500, Math.max(900, text.length * 22));
-    await fetch(`${EVOLUTION_BASE}/message/sendText/chefebot`, {
+    const evResponse = await fetch(`${EVOLUTION_BASE}/message/sendText/chefebot`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -65,6 +65,13 @@ export async function POST(req: NextRequest) {
         options: { delay, presence: "composing" },
       }),
     });
+
+    if (!evResponse.ok) {
+      return NextResponse.json(
+        { ok: false, error: "Falha ao enviar mensagem para o WhatsApp" },
+        { status: 502 },
+      );
+    }
   } catch {
     return NextResponse.json(
       { ok: false, error: "Falha ao enviar mensagem para o WhatsApp" },
@@ -72,7 +79,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Salva no histórico como mensagem outbound humana
+  // Só registra após confirmação de envio bem-sucedido pela Evolution API
   await registrarMensagem(phone, "atendente", `[${senderName}] ${text}`);
 
   return NextResponse.json({ ok: true, senderName, phone });
