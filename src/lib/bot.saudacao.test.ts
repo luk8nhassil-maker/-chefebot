@@ -100,3 +100,125 @@ describe("name: saudação não escalona nem acumula tentativas", () => {
     expect(r.escalar).toBe(true);
   });
 });
+
+// ─── category: contexto humano com tentativas acumuladas não escalona ─────────
+
+describe("category: contexto humano leve não escalona nem acumula tentativas", () => {
+  // "você é humano?" e "você é robô?" agora têm guard antes de precisaEscalar.
+  it.each([
+    "me conta uma piada", "kkk",
+    "você é humano?", "você é robô?", "vc é humano?",
+    "hoje foi um dia cansativo", "tô sem ideia", "me surpreende", "bora", "me salva",
+  ])(
+    '"%s" com tentativasInvalidas:2 → não escalar', (msg) => {
+      const r = processMessage(msg, sessaoCategory(2));
+      expect(r.escalar).toBeFalsy();
+    },
+  );
+
+  it('"me conta uma piada" com tentativas:2 → zera contador', () => {
+    const r = processMessage("me conta uma piada", sessaoCategory(2));
+    expect(r.session.tentativasInvalidas).toBe(0);
+  });
+
+  it('"kkk" com tentativas:2 → mantém step category', () => {
+    const r = processMessage("kkk", sessaoCategory(2));
+    expect(r.session.step).toBe("category");
+  });
+
+  it('"bora" com tentativas:2 → não altera carrinho', () => {
+    const session = sessaoCategory(2);
+    const r = processMessage("bora", session);
+    expect(r.session.cart).toEqual([]);
+  });
+
+  it("mensagem de reclamação 'demorou' com tentativas:2 → escalona (fluxo atual mantido)", () => {
+    const r = processMessage("demorou demais", sessaoCategory(2));
+    expect(r.escalar).toBe(true);
+  });
+
+  it("mensagem sensível 'tenho alergia' com tentativas:2 → escalona (não tratada como venda)", () => {
+    const r = processMessage("tenho alergia", sessaoCategory(2));
+    expect(r.escalar).toBe(true);
+  });
+
+  // ─── Escalonamento real de atendente humano permanece intacto ─────────────
+  it('"quero falar com um humano" → continua escalando', () => {
+    const r = processMessage("quero falar com um humano", sessaoCategory(0));
+    expect(r.escalar).toBe(true);
+  });
+
+  it('"me passa para um atendente" → continua escalando', () => {
+    const r = processMessage("me passa para um atendente", sessaoCategory(0));
+    expect(r.escalar).toBe(true);
+  });
+
+  it('"quero atendimento humano" → continua escalando', () => {
+    const r = processMessage("quero atendimento humano", sessaoCategory(0));
+    expect(r.escalar).toBe(true);
+  });
+
+  it('"você é humano?" → não escala, zera tentativas', () => {
+    const r = processMessage("você é humano?", sessaoCategory(2));
+    expect(r.escalar).toBeFalsy();
+    expect(r.session.tentativasInvalidas).toBe(0);
+  });
+
+  it('"você é robô?" → não escala, mantém step category', () => {
+    const r = processMessage("você é robô?", sessaoCategory(2));
+    expect(r.escalar).toBeFalsy();
+    expect(r.session.step).toBe("category");
+  });
+});
+
+// ─── add_more: contexto humano com tentativas acumuladas não escalona ─────────
+
+describe("add_more: contexto humano leve não escalona nem acumula tentativas", () => {
+  it.each(["me conta uma piada", "kkk", "bora", "tô sem ideia"])(
+    '"%s" com tentativasInvalidas:2 → não escalar', (msg) => {
+      const r = processMessage(msg, sessaoAddMore(2));
+      expect(r.escalar).toBeFalsy();
+    },
+  );
+
+  it('"me conta uma piada" no add_more → zera contador', () => {
+    const r = processMessage("me conta uma piada", sessaoAddMore(2));
+    expect(r.session.tentativasInvalidas).toBe(0);
+  });
+
+  it('"bora" no add_more → mantém step add_more e carrinho intacto', () => {
+    const session = sessaoAddMore(2);
+    const r = processMessage("bora", session);
+    expect(r.session.step).toBe("add_more");
+    expect(r.session.cart).toEqual(session.cart);
+  });
+
+  it("'demorou' com tentativas:2 no add_more → escalona", () => {
+    const r = processMessage("demorou demais", sessaoAddMore(2));
+    expect(r.escalar).toBe(true);
+  });
+});
+
+// ─── name: contexto humano com tentativas acumuladas não escalona ─────────────
+
+describe("name: contexto humano leve não escalona nem acumula tentativas", () => {
+  it.each(["me conta uma piada", "kkk", "bora", "tô sem ideia"])(
+    '"%s" com tentativasInvalidas:2 no name → não escalar', (msg) => {
+      const r = processMessage(msg, sessaoName(2));
+      expect(r.escalar).toBeFalsy();
+    },
+  );
+
+  it('"me conta uma piada" no name → zera contador', () => {
+    const r = processMessage("me conta uma piada", sessaoName(2));
+    expect(r.session.tentativasInvalidas).toBe(0);
+  });
+
+  // No step name, "demorou demais" é aceito como nome (pareceNomeHumano=true)
+  // e não escalona — é o comportamento esperado do step name.
+  // Reclamações explícitas com palavras em PALAVRAS_ESCALONAMENTO escalona globalmente.
+  it("'reclamação' com tentativas:2 no name → escalona (via PALAVRAS_ESCALONAMENTO global)", () => {
+    const r = processMessage("quero fazer uma reclamação", sessaoName(2));
+    expect(r.escalar).toBe(true);
+  });
+});

@@ -241,6 +241,106 @@ describe("skill de recomendação não chama a IA", () => {
   });
 });
 
+// ─── Skill de Contexto Humano: curto-circuito sem chamar IA ──────────────────
+describe("skill de contexto humano não chama a IA", () => {
+  const FALLBACK_SECO = "Ops, não achei essa opção aqui! As disponíveis são:";
+
+  it('"me conta uma piada" em category → chamarIA NÃO é chamada', async () => {
+    const spy = vi.fn(async () => "qualquer resposta da IA");
+    const fb = await resolverFallbackInteligente({
+      mensagemAtual: "me conta uma piada",
+      session: sessaoCategoria(),
+      mensagensFallback: [FALLBACK_SECO],
+      chamarIA: spy,
+    });
+    expect(spy).not.toHaveBeenCalled();
+    expect(fb.usouIA).toBe(false);
+    expect(fb.intervencao).toBe("fallback_melhorado");
+    expect(fb.messages[0].toLowerCase()).toMatch(/pizza|lanche|bebida|suco/);
+  });
+
+  it('"você é humano?" em category → chamarIA NÃO é chamada', async () => {
+    const spy = vi.fn(async () => "qualquer resposta da IA");
+    const fb = await resolverFallbackInteligente({
+      mensagemAtual: "você é humano?",
+      session: sessaoCategoria(),
+      mensagensFallback: [FALLBACK_SECO],
+      chamarIA: spy,
+    });
+    expect(spy).not.toHaveBeenCalled();
+    expect(fb.usouIA).toBe(false);
+    expect(fb.intervencao).toBe("fallback_melhorado");
+  });
+
+  it('"hoje foi um dia cansativo" em category → chamarIA NÃO é chamada', async () => {
+    const spy = vi.fn(async () => "qualquer resposta da IA");
+    const fb = await resolverFallbackInteligente({
+      mensagemAtual: "hoje foi um dia cansativo",
+      session: sessaoCategoria(),
+      mensagensFallback: [FALLBACK_SECO],
+      chamarIA: spy,
+    });
+    expect(spy).not.toHaveBeenCalled();
+    expect(fb.usouIA).toBe(false);
+    expect(fb.intervencao).toBe("fallback_melhorado");
+    expect(fb.messages[0].toLowerCase()).toMatch(/pizza|lanche|bebida|suco/);
+  });
+
+  it('"kkk" em category → chamarIA NÃO é chamada, usouIA: false', async () => {
+    const spy = vi.fn(async () => "qualquer resposta da IA");
+    const fb = await resolverFallbackInteligente({
+      mensagemAtual: "kkk",
+      session: sessaoCategoria(),
+      mensagensFallback: [FALLBACK_SECO],
+      chamarIA: spy,
+    });
+    expect(spy).not.toHaveBeenCalled();
+    expect(fb.usouIA).toBe(false);
+    expect(fb.intervencao).toBe("fallback_melhorado");
+  });
+
+  it('"tô sem ideia" em category → intervencao: "fallback_melhorado"', async () => {
+    const spy = vi.fn(async () => "qualquer resposta da IA");
+    const fb = await resolverFallbackInteligente({
+      mensagemAtual: "tô sem ideia",
+      session: sessaoCategoria(),
+      mensagensFallback: [FALLBACK_SECO],
+      chamarIA: spy,
+    });
+    // recomendacaoSkill tem "sem ideia" no grupo INDECISAO — a resposta vem de lá,
+    // mas o invariante é o mesmo: sem chamar a IA.
+    expect(spy).not.toHaveBeenCalled();
+    expect(fb.usouIA).toBe(false);
+    expect(fb.intervencao).toBe("fallback_melhorado");
+  });
+
+  it('"bora" em category → chamarIA NÃO é chamada', async () => {
+    const spy = vi.fn(async () => "qualquer resposta da IA");
+    const fb = await resolverFallbackInteligente({
+      mensagemAtual: "bora",
+      session: sessaoCategoria(),
+      mensagensFallback: [FALLBACK_SECO],
+      chamarIA: spy,
+    });
+    expect(spy).not.toHaveBeenCalled();
+    expect(fb.usouIA).toBe(false);
+    expect(fb.intervencao).toBe("fallback_melhorado");
+    expect(fb.messages[0].toLowerCase()).toMatch(/pizza|lanche|bebida|suco/);
+  });
+
+  it("contexto humano em step payment NÃO curto-circuita → chamarIA é chamada", async () => {
+    const spy = vi.fn(async () => "Tudo certo! Como você prefere pagar?");
+    const fb = await resolverFallbackInteligente({
+      mensagemAtual: "me conta uma piada",
+      session: sessaoPagamento(),
+      mensagensFallback: [FALLBACK_SECO],
+      chamarIA: spy,
+    });
+    // Fora do escopo da skill (step payment) → vai para brain/IA normalmente
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+});
+
 // ─── fallbackDeterministicoMelhorado é step-aware (não reseta o pedido) ────────
 describe("fallback humanizado é consciente do estado", () => {
   it("no pagamento, pede pagamento (não volta pro cardápio)", () => {

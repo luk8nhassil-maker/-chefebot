@@ -17,6 +17,7 @@ import type { BotSession, MensagemRelevante } from "./bot";
 import { analisarConversaParaRetomada, validarRespostaIA, type ConversationPath } from "./conversationBrain";
 import { gerarRespostaGuardiao } from "./claude";
 import { gerarRecomendacaoLocal } from "./recomendacaoSkill";
+import { gerarRespostaContextoHumano } from "./contextoHumanoSkill";
 
 function normalizar(texto: string): string {
   return (texto || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
@@ -115,6 +116,13 @@ export async function resolverFallbackInteligente(input: FallbackInput): Promise
   const recomendacao = gerarRecomendacaoLocal(session, mensagemAtual);
   if (recomendacao) {
     return { messages: [recomendacao], usouIA: false, intervencao: "fallback_melhorado" };
+  }
+
+  // Curto-circuito local: mensagens de contexto humano (humor, cansaço, indecisão
+  // ampla, retomada leve) respondidas localmente — zero chamada de API.
+  const contextoHumano = gerarRespostaContextoHumano(session, mensagemAtual);
+  if (contextoHumano) {
+    return { messages: [contextoHumano], usouIA: false, intervencao: "fallback_melhorado" };
   }
 
   // Decide o caminho (BECO/SAIDA) e monta o contexto seguro para a IA.

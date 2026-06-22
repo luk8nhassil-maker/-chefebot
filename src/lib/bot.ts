@@ -1,4 +1,5 @@
 import { MENU as MENU_PADRAO, getBorderPrice, getBorderByIndex } from "./menu";
+import { detectarContextoHumano } from "./contextoHumanoSkill";
 
 let MENU = MENU_PADRAO;
 
@@ -221,6 +222,20 @@ function msgInvalida(): string {
 function precisaEscalar(texto: string): boolean {
   const n = normalizar(texto);
   return PALAVRAS_ESCALONAMENTO.some(p => n.includes(normalizar(p)));
+}
+// Detecta perguntas sobre a identidade/natureza do bot ("você é humano?", "você é robô?").
+// DIFERENTE de pedido real de atendente ("quero falar com um humano", "me passa para atendente").
+// Usado como guard antes de precisaEscalar nos steps seguros para evitar escalonamento indevido.
+function ehPerguntaIdentidadeBot(n: string): boolean {
+  return (
+    /voce e (um )?(humano|robo|bot|ia)\b/.test(n) ||
+    /vc e (um )?(humano|robo|bot|ia)\b/.test(n) ||
+    /voce e uma (ia|inteligencia)/.test(n) ||
+    /\be (um )?(robo|bot|ia)\b/.test(n) ||
+    /\be humano\b/.test(n) ||
+    /ta(o)? falando com (um )?(robo|bot|ia|humano)\b/.test(n) ||
+    /to falando com (um )?(robo|bot|ia|humano)\b/.test(n)
+  );
 }
 const SAUDACOES_SIMPLES = [
   "boa noite", "boa tarde", "bom dia", "oi", "oie", "ola", "opa",
@@ -2044,6 +2059,17 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
     }
   }
 
+  // Perguntas de identidade do bot ("você é humano?", "você é robô?") são conversa
+  // leve, não pedido de atendente. Nos steps seguros, rota para contextoHumanoSkill
+  // sem escalar nem incrementar tentativa inválida.
+  if (
+    session.step !== "escalado" &&
+    (session.step === "category" || session.step === "add_more" || session.step === "name") &&
+    ehPerguntaIdentidadeBot(n)
+  ) {
+    return { messages: [msgInvalida()], session: resetaTentativas(session) };
+  }
+
   if (session.step !== "escalado" && precisaEscalar(text)) {
     return {
       messages: [`Já chamo alguém pra te ajudar! Aguarda um instantinho 😊`],
@@ -2294,6 +2320,9 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       if (ehSaudacaoSimples(n)) {
         return { messages: [msgInvalida()], session: resetaTentativas(session) };
       }
+      if (detectarContextoHumano(text) !== null) {
+        return { messages: [msgInvalida()], session: resetaTentativas(session) };
+      }
       return respostaInvalida("Não entendi muito bem 😅 Me diz seu nome, ou já pode pedir direto (ex: _\"pizza calabresa\"_ ou _\"cardápio\"_)", session);
     }
     case "category": {
@@ -2344,6 +2373,9 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
         const lancheEspFallback = detectarLancheEspecifico(text, session);
         if (lancheEspFallback) return lancheEspFallback;
         if (ehSaudacaoSimples(n)) {
+          return { messages: [msgInvalida()], session: resetaTentativas({ ...session, step: "category" }) };
+        }
+        if (detectarContextoHumano(text) !== null) {
           return { messages: [msgInvalida()], session: resetaTentativas({ ...session, step: "category" }) };
         }
         return respostaInvalida(mensagemCategorias(), session);
@@ -2970,6 +3002,9 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
         return { ...resp, session: resetaTentativas(resp.session) };
       }
       if (ehSaudacaoSimples(n)) {
+        return { messages: [msgInvalida()], session: resetaTentativas({ ...session, step: "add_more" }) };
+      }
+      if (detectarContextoHumano(text) !== null) {
         return { messages: [msgInvalida()], session: resetaTentativas({ ...session, step: "add_more" }) };
       }
       return respostaInvalida(`Quer adicionar algo a mais? Como bebida, outro lanche, ou podemos fechar esse pedido? 😊`, session);
