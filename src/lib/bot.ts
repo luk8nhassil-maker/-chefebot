@@ -2367,6 +2367,12 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       // ===== QTD + PRODUTO DIRETO (ex: "quero 2 x burguer", "manda uma coca", "pode ser 1 x tudo") =====
       const qtdItemCat = parsearQtdEItem(text);
       if (qtdItemCat) {
+        // Se há intenção clara de pizza (qty=1 + "pizza"/"famil"), tenta pizza antes de sucos/bebidas
+        // (evita fuzzy-match: "baiana" → "banana" → Vitamina de Banana)
+        if (qtdItemCat.qty === 1 && (n.includes("pizza") || n.includes("famil"))) {
+          const pizzaCat = montarPizzaDoPedido(text, session);
+          if (pizzaCat) return pizzaCat;
+        }
         const resQtdCat = tentaAdicionarComQtd(qtdItemCat, session);
         if (resQtdCat) return resQtdCat;
       }
@@ -2927,6 +2933,12 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       // ===== QTD + PRODUTO DIRETO (ex: "3 coca", "2x burguer", "2 calabresa", "2 portuguesa") =====
       const qtdItemAM = parsearQtdEItem(text);
       if (qtdItemAM) {
+        // Se há intenção clara de pizza (qty=1 + "pizza"/"famil"), tenta pizza antes de sucos/bebidas
+        // (evita fuzzy-match: "baiana" → "banana" → Vitamina de Banana)
+        if (qtdItemAM.qty === 1 && (n.includes("pizza") || n.includes("famil"))) {
+          const pizzaAM = montarPizzaDoPedido(text, session);
+          if (pizzaAM) return pizzaAM;
+        }
         const resQtd = tentaAdicionarComQtd(qtdItemAM, session);
         if (resQtd) return resQtd;
         // Não é bebida/suco/lanche — verifica se é sabor de pizza com quantidade
