@@ -176,6 +176,9 @@ export default function PedidosPage() {
   const [sessoes, setSessoes] = useState<any[]>([])
   const [assumindoSessao, setAssumindoSessao] = useState<string | null>(null)
   const [devolvendoSessaoBot, setDevolvendoSessaoBot] = useState<string | null>(null)
+  const [mensagemHumana, setMensagemHumana] = useState<Record<string, string>>({})
+  const [enviandoMensagem, setEnviandoMensagem] = useState<string | null>(null)
+  const [erroEnvioMensagem, setErroEnvioMensagem] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
   const [isAdmin, setIsAdmin] = useState(false)
   const [userName, setUserName] = useState("Kellyne")
@@ -469,6 +472,29 @@ export default function PedidosPage() {
       setSessoes(prev => prev.map(s => s.phone === phone ? { ...s, manual: false } : s))
     } catch {}
     setDevolvendoSessaoBot(null)
+  }
+
+  const enviarMensagemHumana = async (phone: string) => {
+    const texto = (mensagemHumana[phone] || "").trim()
+    if (!texto) return
+    setEnviandoMensagem(phone)
+    setErroEnvioMensagem(prev => ({ ...prev, [phone]: "" }))
+    try {
+      const r = await fetch("/api/conversas/enviar-mensagem-humana", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone, text: texto, senderName: userName || "Kellyne" }),
+      })
+      const data = await r.json()
+      if (data.ok) {
+        setMensagemHumana(prev => ({ ...prev, [phone]: "" }))
+      } else {
+        setErroEnvioMensagem(prev => ({ ...prev, [phone]: data.error || "Erro ao enviar." }))
+      }
+    } catch {
+      setErroEnvioMensagem(prev => ({ ...prev, [phone]: "Erro de rede ao enviar." }))
+    }
+    setEnviandoMensagem(null)
   }
 
   const abrirPedidoCombinado = async (phone: string) => {
@@ -1117,6 +1143,26 @@ export default function PedidosPage() {
                 )}
                 {s.cart && s.cart.length > 0 && (
                   <div style={{ fontSize: 11, color: "#a39b8b" }}>🛒 {s.cart.join(", ")}</div>
+                )}
+                {s.manual && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    <textarea
+                      value={mensagemHumana[s.phone] || ""}
+                      onChange={e => setMensagemHumana(prev => ({ ...prev, [s.phone]: e.target.value }))}
+                      onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); enviarMensagemHumana(s.phone) } }}
+                      placeholder={`Responder como ${userName || "Kellyne"}...`}
+                      rows={2}
+                      style={{ width: "100%", background: "#0d0c0b", border: "1px solid #2a2723", borderRadius: 8, padding: "8px 10px", color: "#f4f1ec", fontSize: 13, resize: "none", fontFamily: "inherit", outline: "none", boxSizing: "border-box" }}
+                    />
+                    {erroEnvioMensagem[s.phone] && (
+                      <span style={{ color: "#f87171", fontSize: 11, fontWeight: 600 }}>{erroEnvioMensagem[s.phone]}</span>
+                    )}
+                    <button
+                      onClick={() => enviarMensagemHumana(s.phone)}
+                      disabled={enviandoMensagem === s.phone || !(mensagemHumana[s.phone] || "").trim()}
+                      style={{ height: 36, border: "none", borderRadius: 8, background: enviandoMensagem === s.phone ? "#1a1a1a" : "#25d366", color: enviandoMensagem === s.phone ? "#666" : "#fff", fontSize: 12, fontWeight: 900, cursor: enviandoMensagem === s.phone ? "not-allowed" : "pointer" }}
+                    >{enviandoMensagem === s.phone ? "Enviando..." : "Enviar no WhatsApp"}</button>
+                  </div>
                 )}
                 <div style={{ display: "flex", gap: 8 }}>
                   {!s.manual ? (
