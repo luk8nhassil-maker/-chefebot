@@ -369,17 +369,20 @@ function resolveUmSabor(termo: string, flavors: string[]): string | null {
 // Diferente de resolveUmSabor (que escolhe 1 quando há vencedor claro), esta função é a camada
 // de segurança: se duas ou mais opções batem igualmente, NUNCA escolhe sozinha.
 function buscaPorPalavraChave(termo: string, nomes: string[]): string[] {
-  const STOPWORDS = new Set(["quero", "uma", "um", "de", "da", "do", "com", "sem", "vou", "queria", "quer", "por", "favor", "pizza", "lanche", "pode", "ser", "me", "ve", "vê", "tem", "essa", "esse", "aquela", "aquele"]);
+  const STOPWORDS = new Set(["quero", "uma", "um", "de", "da", "do", "com", "sem", "vou", "queria", "quer", "por", "favor", "pizza", "lanche", "pode", "ser", "me", "ve", "vê", "tem", "essa", "esse", "aquela", "aquele", "tambem", "la", "aqui", "agora", "ai", "mesmo", "ja", "so", "mais", "outro", "outra"]);
   const n = normalizar(termo).replace(/-/g, " "); // trata hífen como separador (ex: "x-burguer" -> "x burguer")
   if (!n) return [];
   const palavrasMsg = n.split(/\s+/).filter(p => p.length >= 3 && !STOPWORDS.has(p));
-  if (palavrasMsg.length === 0) return [];
+  // Tokens de tamanho/unidade (ex: "2l", "1kg", "500ml") são precisos mesmo sendo curtos — incluir explicitamente
+  const sizeTokens = n.split(/\s+/).filter(p => /^\d+[a-z]+$/.test(p) && !palavrasMsg.includes(p));
+  const todasChaves = [...palavrasMsg, ...sizeTokens];
+  if (todasChaves.length === 0) return [];
 
   const candidatos: string[] = [];
   for (const nome of nomes) {
     const palavrasNome = normalizar(nome).replace(/-/g, " ").split(/\s+/).filter(p => p.length >= 2);
     // Exige que TODAS as palavras-chave da mensagem estejam presentes no nome (com plural/singular tolerado)
-    const todasBatem = palavrasMsg.every(pm =>
+    const todasBatem = todasChaves.every(pm =>
       palavrasNome.some(pn => pn === pm || variantesPlural(pn).includes(pm) || variantesPlural(pm).includes(pn))
     );
     if (todasBatem) candidatos.push(nome);
@@ -440,8 +443,12 @@ function detectaDoisSabores(n: string, allFlavors: string[]): [string, string] |
 // Retorna a categoria normalizada (lanche/bebida/suco/pizza) e o valor, ou null se não houver os dois sinais juntos.
 function detectaCategoriaEValor(text: string): { categoria: "lanche" | "bebida" | "suco" | "pizza"; valor: number } | null {
   const n = normalizar(text);
-  const valorMatch = n.match(/(\d+(?:[.,]\d{1,2})?)/);
+  // \b garante que o número não esteja colado a letras (ex: "2l", "500ml", "1kg" → tamanho, não preço)
+  const valorMatch = n.match(/\b(\d+(?:[.,]\d{1,2})?)\b/);
   if (!valorMatch) return null;
+  // Se o texto logo após o número for uma palavra de unidade de medida, é tamanho — não preço
+  const textoApos = n.slice(valorMatch.index! + valorMatch[0].length).trimStart();
+  if (/^(?:litro|litros|ml|kg)\b/.test(textoApos)) return null;
   const valor = parseFloat(valorMatch[1].replace(",", "."));
   if (isNaN(valor) || valor <= 0 || valor > 200) return null; // fora de faixa plausível, ignora
 
@@ -3016,8 +3023,16 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
         const resp = handleCategory("suco", { ...session, step: "category" });
         return { ...resp, session: resetaTentativas(resp.session) };
       }
-      // Bebida
+      // Bebida — tenta match direto antes de abrir menu (ex: "refrigerante de 2l" → Refrigerante 2L)
       if (querBebida) {
+        const resBebidaDireta = resolveSaborComAmbiguidade(text, MENU.bebidas.map(b => b.name));
+        if (resBebidaDireta.tipo === "unico") {
+          const bebida = MENU.bebidas.find(b => b.name === resBebidaDireta.nome);
+          if (bebida && !isEsgotado(bebida.name)) {
+            const newCart = [...session.cart, { category: "bebida" as const, name: bebida.name, price: bebida.price }];
+            return { messages: [`*${bebida.name}* anotada! 😋`, mensagemAddMore(newCart)], session: resetaTentativas({ ...session, step: "add_more", cart: newCart }) };
+          }
+        }
         const resp = handleCategory("bebida", { ...session, step: "category" });
         return { ...resp, session: resetaTentativas(resp.session) };
       }
