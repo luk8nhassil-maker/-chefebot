@@ -65,7 +65,7 @@ export async function GET(req: NextRequest) {
       let mensagensCount: number
 
       if (meta) {
-        nome = session?.customerName || meta.nome
+        nome = session?.customerName || meta.nome || phone
         ultimaMensagem = meta.ultimaMensagem
         ultimaTs = meta.ultimaTs
         mensagensCount = meta.mensagensCount

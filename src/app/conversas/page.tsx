@@ -88,9 +88,10 @@ function temPixPendente(p: Pedido): boolean {
   return !!(p.pagamento && p.pagamento.toLowerCase().includes("pix") && !p.pixConfirmado && (p.total || 0) > 0)
 }
 
-function getInitials(name: string): string {
+function getInitials(name?: string | null): string {
+  if (!name) return "?"
   const parts = name.trim().split(" ")
-  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase()
+  if (parts.length >= 2) return ((parts[0][0] ?? "") + (parts[1][0] ?? "")).toUpperCase() || "?"
   return (parts[0][0] || "?").toUpperCase()
 }
 
@@ -99,14 +100,15 @@ function formatTs(ts?: number): string {
   return new Date(ts).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })
 }
 
-function msgTexto(msg: { autor: string; texto: string }): string {
-  if (msg.autor === "atendente") return msg.texto.replace(/^\[.*?\]\s*/, "")
-  return msg.texto
+function msgTexto(msg: { autor: string; texto?: string | null }): string {
+  const t = msg.texto ?? ""
+  if (msg.autor === "atendente") return t.replace(/^\[.*?\]\s*/, "")
+  return t
 }
 
-function msgSenderLabel(msg: { autor: string; texto: string }): string {
+function msgSenderLabel(msg: { autor: string; texto?: string | null }): string {
   if (msg.autor === "atendente") {
-    const m = msg.texto.match(/^\[(.*?)\]/)
+    const m = (msg.texto ?? "").match(/^\[(.*?)\]/)
     return m ? m[1] : "Atendente"
   }
   if (msg.autor === "bot") return "Bot"
