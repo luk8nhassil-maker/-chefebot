@@ -174,7 +174,6 @@ export default function PedidosPage() {
   const [pedidos, setPedidos] = useState<Pedido[]>([])
   const [filtro, setFiltro] = useState<Status | "todos" | "tempo_real" | "arquivados">("novo")
   const [sessoes, setSessoes] = useState<any[]>([])
-  const [assumindoSessao, setAssumindoSessao] = useState<string | null>(null)
   const [devolvendoSessaoBot, setDevolvendoSessaoBot] = useState<string | null>(null)
   const [revivendoConversa, setRevivendoConversa] = useState<string | null>(null)
   const [mensagemHumana, setMensagemHumana] = useState<Record<string, string>>({})
@@ -477,15 +476,6 @@ export default function PedidosPage() {
 
   const assumirConversa = async (phone: string) => {
     try { await fetch("/api/assumir", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ telefone: phone }) }); setManuais(prev => ({ ...prev, [phone]: true })) } catch {}
-  }
-
-  const assumirSessao = async (phone: string) => {
-    setAssumindoSessao(phone)
-    try {
-      await fetch("/api/assumir", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ telefone: phone }) })
-      setSessoes(prev => prev.map(s => s.phone === phone ? { ...s, manual: true } : s))
-    } catch {}
-    setAssumindoSessao(null)
   }
 
   const devolverSessaoParaBot = async (phone: string) => {
@@ -1209,7 +1199,7 @@ export default function PedidosPage() {
                     <div style={{ fontSize: 13, fontWeight: 800, color: "#3a3730" }}>Nenhuma conversa ativa</div>
                     <div style={{ fontSize: 11, color: "#2e2c29", fontWeight: 600, marginTop: 4 }}>Clientes em andamento aparecerão aqui.</div>
                   </div>
-                ) : sessoes.map(s => {
+                ) : [...sessoes].sort((a, b) => Number(!!b.manual) - Number(!!a.manual)).map(s => {
                   const displayName = s.customerName || `…${s.lastDigits}`
                   const initial = ((s.customerName || s.lastDigits || "?")[0]).toUpperCase()
                   const isActive = sessaoAtiva === s.phone
@@ -1224,9 +1214,9 @@ export default function PedidosPage() {
                       </div>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, marginBottom: 3 }}>
-                          <span style={{ fontSize: 13, fontWeight: 900, color: "#f0ede8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displayName}</span>
-                          <span style={{ fontSize: 9, fontWeight: 900, color: s.manual ? "#ef4444" : "#34d399", background: s.manual ? "rgba(239,68,68,.1)" : "rgba(52,211,153,.08)", border: `1px solid ${s.manual ? "rgba(239,68,68,.25)" : "rgba(52,211,153,.2)"}`, padding: "2px 6px", borderRadius: 5, flexShrink: 0 }}>
-                            {s.manual ? "Humano" : "Robô"}
+                          <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 900, color: "#f0ede8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displayName}</span>
+                          <span style={{ fontSize: 9, fontWeight: 900, color: s.manual ? "#fff" : "#34d399", background: s.manual ? "#ef4444" : "rgba(52,211,153,.08)", border: `1px solid ${s.manual ? "#ef4444" : "rgba(52,211,153,.2)"}`, padding: "2px 7px", borderRadius: 5, flexShrink: 0, whiteSpace: "nowrap" }}>
+                            {s.manual ? "Atender" : "Bot atendendo"}
                           </span>
                         </div>
                         <div style={{ fontSize: 11, color: "#4a4640", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -1271,26 +1261,20 @@ export default function PedidosPage() {
                           {s.manual ? "Atendimento humano" : "Robô atendendo"} · {s.stepLabel}
                         </div>
                       </div>
-                      {/* Botões de ação no header */}
-                      <div style={{ display: "flex", gap: 5, flexShrink: 0 }}>
-                        {!s.manual ? (
-                          <button onClick={() => assumirSessao(s.phone)} disabled={assumindoSessao === s.phone} style={{ height: 30, padding: "0 10px", border: "none", borderRadius: 8, background: "#ef4444", color: "#fff", fontSize: 11, fontWeight: 900 }}>
-                            {assumindoSessao === s.phone ? "..." : "Assumir"}
+                      {/* Botões de ação no header (só em atendimento humano/assumido) */}
+                      {s.manual && (
+                        <div style={{ display: "flex", gap: 5, flexShrink: 0 }}>
+                          <button onClick={() => abrirPedidoCombinado(s.phone)} disabled={carregandoPedidoCombinado && pedidoCombinadoPhone === s.phone} style={{ height: 30, padding: "0 9px", border: "none", borderRadius: 8, background: "#22c55e", color: "#060606", fontSize: 11, fontWeight: 900 }}>
+                            {carregandoPedidoCombinado && pedidoCombinadoPhone === s.phone ? "..." : "🧾 Pedido"}
                           </button>
-                        ) : (
-                          <>
-                            <button onClick={() => abrirPedidoCombinado(s.phone)} disabled={carregandoPedidoCombinado && pedidoCombinadoPhone === s.phone} style={{ height: 30, padding: "0 9px", border: "none", borderRadius: 8, background: "#22c55e", color: "#060606", fontSize: 11, fontWeight: 900 }}>
-                              {carregandoPedidoCombinado && pedidoCombinadoPhone === s.phone ? "..." : "🧾 Pedido"}
-                            </button>
-                            <button onClick={() => devolverSessaoParaBot(s.phone)} disabled={devolvendoSessaoBot === s.phone} style={{ height: 30, padding: "0 9px", border: "none", borderRadius: 8, background: "#2563eb", color: "#fff", fontSize: 11, fontWeight: 900 }}>
-                              {devolvendoSessaoBot === s.phone ? "..." : "🤖 Robô"}
-                            </button>
-                            <button onClick={() => reviverConversa(s.phone)} disabled={revivendoConversa === s.phone} title="Reativa o bot. Não envia mensagem ao cliente." style={{ height: 30, padding: "0 8px", border: "1px solid rgba(251,191,36,.35)", borderRadius: 8, background: "rgba(251,191,36,.08)", color: "#fbbf24", fontSize: 11, fontWeight: 800 }}>
-                              {revivendoConversa === s.phone ? "..." : "🔄"}
-                            </button>
-                          </>
-                        )}
-                      </div>
+                          <button onClick={() => devolverSessaoParaBot(s.phone)} disabled={devolvendoSessaoBot === s.phone} style={{ height: 30, padding: "0 9px", border: "none", borderRadius: 8, background: "#2563eb", color: "#fff", fontSize: 11, fontWeight: 900 }}>
+                            {devolvendoSessaoBot === s.phone ? "..." : "🤖 Robô"}
+                          </button>
+                          <button onClick={() => reviverConversa(s.phone)} disabled={revivendoConversa === s.phone} title="Reativa o bot. Não envia mensagem ao cliente." style={{ height: 30, padding: "0 8px", border: "1px solid rgba(251,191,36,.35)", borderRadius: 8, background: "rgba(251,191,36,.08)", color: "#fbbf24", fontSize: 11, fontWeight: 800 }}>
+                            {revivendoConversa === s.phone ? "..." : "🔄"}
+                          </button>
+                        </div>
+                      )}
                     </div>
 
                     {/* Resumo rápido compacto (só quando há dados relevantes) */}
@@ -1378,7 +1362,7 @@ export default function PedidosPage() {
                       </div>
                     ) : (
                       <div style={{ padding: "10px 14px", borderTop: "1px solid #141210", background: "#0a0908", flexShrink: 0, textAlign: "center" }}>
-                        <span style={{ fontSize: 12, color: "#3a3730", fontWeight: 700 }}>Robô está atendendo · clique em <span style={{ color: "#ef4444" }}>Assumir</span> para responder</span>
+                        <span style={{ fontSize: 12, color: "#3a3730", fontWeight: 700 }}>Bot atendendo automaticamente</span>
                       </div>
                     )}
                   </>
