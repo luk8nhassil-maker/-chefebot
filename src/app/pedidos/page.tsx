@@ -174,6 +174,7 @@ export default function PedidosPage() {
   const [pedidos, setPedidos] = useState<Pedido[]>([])
   const [filtro, setFiltro] = useState<Status | "todos" | "tempo_real" | "arquivados">("novo")
   const [sessoes, setSessoes] = useState<any[]>([])
+  const [assumindoSessao, setAssumindoSessao] = useState<string | null>(null)
   const [devolvendoSessaoBot, setDevolvendoSessaoBot] = useState<string | null>(null)
   const [revivendoConversa, setRevivendoConversa] = useState<string | null>(null)
   const [mensagemHumana, setMensagemHumana] = useState<Record<string, string>>({})
@@ -476,6 +477,15 @@ export default function PedidosPage() {
 
   const assumirConversa = async (phone: string) => {
     try { await fetch("/api/assumir", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ telefone: phone }) }); setManuais(prev => ({ ...prev, [phone]: true })) } catch {}
+  }
+
+  const assumirSessao = async (phone: string) => {
+    setAssumindoSessao(phone)
+    try {
+      await fetch("/api/assumir", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ telefone: phone }) })
+      setSessoes(prev => prev.map(s => s.phone === phone ? { ...s, manual: true, postOrderPriority: false } : s))
+    } catch {}
+    setAssumindoSessao(null)
   }
 
   const devolverSessaoParaBot = async (phone: string) => {
@@ -1199,7 +1209,10 @@ export default function PedidosPage() {
                     <div style={{ fontSize: 13, fontWeight: 800, color: "#3a3730" }}>Nenhuma conversa ativa</div>
                     <div style={{ fontSize: 11, color: "#2e2c29", fontWeight: 600, marginTop: 4 }}>Clientes em andamento aparecerão aqui.</div>
                   </div>
-                ) : [...sessoes].sort((a, b) => Number(!!b.manual) - Number(!!a.manual)).map(s => {
+                ) : [...sessoes].sort((a, b) => {
+                    if (Number(!!b.manual) !== Number(!!a.manual)) return Number(!!b.manual) - Number(!!a.manual);
+                    return Number(!!b.postOrderPriority) - Number(!!a.postOrderPriority);
+                  }).map(s => {
                   const displayName = s.customerName || `…${s.lastDigits}`
                   const initial = ((s.customerName || s.lastDigits || "?")[0]).toUpperCase()
                   const isActive = sessaoAtiva === s.phone
@@ -1209,14 +1222,14 @@ export default function PedidosPage() {
                       className={`cb-chat-item${isActive ? " cb-chat-item-active" : ""}`}
                       onClick={() => setSessaoAtiva(s.phone)}
                     >
-                      <div style={{ width: 38, height: 38, borderRadius: "50%", flexShrink: 0, background: s.manual ? "rgba(239,68,68,.13)" : "rgba(255,107,0,.1)", border: `1.5px solid ${s.manual ? "rgba(239,68,68,.3)" : "rgba(255,107,0,.25)"}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 900, color: s.manual ? "#ef4444" : "#ff6b00" }}>
+                      <div style={{ width: 38, height: 38, borderRadius: "50%", flexShrink: 0, background: s.manual ? "rgba(239,68,68,.13)" : s.postOrderPriority ? "rgba(251,191,36,.13)" : "rgba(255,107,0,.1)", border: `1.5px solid ${s.manual ? "rgba(239,68,68,.3)" : s.postOrderPriority ? "rgba(251,191,36,.3)" : "rgba(255,107,0,.25)"}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 900, color: s.manual ? "#ef4444" : s.postOrderPriority ? "#fbbf24" : "#ff6b00" }}>
                         {initial}
                       </div>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, marginBottom: 3 }}>
                           <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 900, color: "#f0ede8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displayName}</span>
-                          <span style={{ fontSize: 9, fontWeight: 900, color: s.manual ? "#fff" : "#34d399", background: s.manual ? "#ef4444" : "rgba(52,211,153,.08)", border: `1px solid ${s.manual ? "#ef4444" : "rgba(52,211,153,.2)"}`, padding: "2px 7px", borderRadius: 5, flexShrink: 0, whiteSpace: "nowrap" }}>
-                            {s.manual ? "Atender" : "Bot atendendo"}
+                          <span style={{ fontSize: 9, fontWeight: 900, color: s.manual ? "#fff" : s.postOrderPriority ? "#060606" : "#34d399", background: s.manual ? "#ef4444" : s.postOrderPriority ? "#fbbf24" : "rgba(52,211,153,.08)", border: `1px solid ${s.manual ? "#ef4444" : s.postOrderPriority ? "#fbbf24" : "rgba(52,211,153,.2)"}`, padding: "2px 7px", borderRadius: 5, flexShrink: 0, whiteSpace: "nowrap" }}>
+                            {s.manual ? "Atender" : s.postOrderPriority ? "Atender" : "Bot atendendo"}
                           </span>
                         </div>
                         <div style={{ fontSize: 11, color: "#4a4640", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -1252,17 +1265,17 @@ export default function PedidosPage() {
                     {/* Header da conversa */}
                     <div style={{ padding: "10px 12px", borderBottom: "1px solid #141210", display: "flex", alignItems: "center", gap: 8, flexShrink: 0, background: "#0a0908" }}>
                       <button className="cb-mob-back" onClick={() => setSessaoAtiva(null)} style={{ background: "none", border: "none", color: "#ff6b00", fontSize: 20, lineHeight: 1, padding: "0 4px", cursor: "pointer", flexShrink: 0 }}>←</button>
-                      <div style={{ width: 34, height: 34, borderRadius: "50%", flexShrink: 0, background: s.manual ? "rgba(239,68,68,.13)" : "rgba(255,107,0,.1)", border: `1.5px solid ${s.manual ? "rgba(239,68,68,.3)" : "rgba(255,107,0,.25)"}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 900, color: s.manual ? "#ef4444" : "#ff6b00" }}>
+                      <div style={{ width: 34, height: 34, borderRadius: "50%", flexShrink: 0, background: s.manual ? "rgba(239,68,68,.13)" : s.postOrderPriority ? "rgba(251,191,36,.13)" : "rgba(255,107,0,.1)", border: `1.5px solid ${s.manual ? "rgba(239,68,68,.3)" : s.postOrderPriority ? "rgba(251,191,36,.3)" : "rgba(255,107,0,.25)"}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 900, color: s.manual ? "#ef4444" : s.postOrderPriority ? "#fbbf24" : "#ff6b00" }}>
                         {initial}
                       </div>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 13, fontWeight: 900, color: "#f0ede8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displayName}</div>
-                        <div style={{ fontSize: 10, fontWeight: 700, color: s.manual ? "#ef4444" : "#34d399" }}>
-                          {s.manual ? "Atendimento humano" : "Robô atendendo"} · {s.stepLabel}
+                        <div style={{ fontSize: 10, fontWeight: 700, color: s.manual ? "#ef4444" : s.postOrderPriority ? "#fbbf24" : "#34d399" }}>
+                          {s.manual ? "Atendimento humano" : s.postOrderPriority ? "Bot respondendo · pós-pedido" : "Robô atendendo"} · {s.stepLabel}
                         </div>
                       </div>
-                      {/* Botões de ação no header (só em atendimento humano/assumido) */}
-                      {s.manual && (
+                      {/* Botões de ação: humano → Pedido/Robô/reviver; pós-pedido → Atender */}
+                      {s.manual ? (
                         <div style={{ display: "flex", gap: 5, flexShrink: 0 }}>
                           <button onClick={() => abrirPedidoCombinado(s.phone)} disabled={carregandoPedidoCombinado && pedidoCombinadoPhone === s.phone} style={{ height: 30, padding: "0 9px", border: "none", borderRadius: 8, background: "#22c55e", color: "#060606", fontSize: 11, fontWeight: 900 }}>
                             {carregandoPedidoCombinado && pedidoCombinadoPhone === s.phone ? "..." : "🧾 Pedido"}
@@ -1274,7 +1287,11 @@ export default function PedidosPage() {
                             {revivendoConversa === s.phone ? "..." : "🔄"}
                           </button>
                         </div>
-                      )}
+                      ) : s.postOrderPriority ? (
+                        <button onClick={() => assumirSessao(s.phone)} disabled={assumindoSessao === s.phone} style={{ height: 30, padding: "0 10px", border: "none", borderRadius: 8, background: "#fbbf24", color: "#060606", fontSize: 11, fontWeight: 900, flexShrink: 0 }}>
+                          {assumindoSessao === s.phone ? "..." : "Atender"}
+                        </button>
+                      ) : null}
                     </div>
 
                     {/* Resumo rápido compacto (só quando há dados relevantes) */}
@@ -1362,7 +1379,9 @@ export default function PedidosPage() {
                       </div>
                     ) : (
                       <div style={{ padding: "10px 14px", borderTop: "1px solid #141210", background: "#0a0908", flexShrink: 0, textAlign: "center" }}>
-                        <span style={{ fontSize: 12, color: "#3a3730", fontWeight: 700 }}>Bot atendendo automaticamente</span>
+                        <span style={{ fontSize: 12, color: s.postOrderPriority ? "#fbbf24" : "#3a3730", fontWeight: 700 }}>
+                          {s.postOrderPriority ? "Bot respondendo · clique em Atender se precisar intervir" : "Bot atendendo automaticamente"}
+                        </span>
                       </div>
                     )}
                   </>

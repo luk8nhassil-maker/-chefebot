@@ -6,7 +6,7 @@ import { interpretarMensagem, gerarRespostaGuardiao } from "@/lib/claude";
 import { registrarMensagem, ultimasMensagensRelevantes } from "@/lib/conversa";
 import { atualizarRascunhoAtendimentoTempoReal } from "@/lib/rascunhoAtendimentoTempoReal";
 import { analisarConversaParaRetomada, validarRespostaIA } from "@/lib/conversationBrain";
-import { resolverFallbackInteligente, pareceFallbackSeco, avaliarHandoffPorConfusao } from "@/lib/fallbackInteligente";
+import { resolverFallbackInteligente, pareceFallbackSeco, avaliarHandoffPorConfusao, deveMarcarPrioridadePosPedido } from "@/lib/fallbackInteligente";
 import { resumirCasoParaAprendizado, registrarCasoPendente, consumirCasoPendente, avaliarResultadoDaRetomada, salvarCasoResolvido } from "@/lib/learningMemory";
 import { log } from "@/lib/logger";
 import { analisarComprovantePix } from "@/lib/analisarComprovante";
@@ -768,6 +768,14 @@ export async function POST(req: NextRequest) {
 
     const sessionKey = `session:${phone}`;
     let currentSession = await redis.get<BotSession>(sessionKey);
+
+    // Prioridade pós-pedido: se o cliente voltou a falar após finalizar um
+    // pedido (step 'done'), marca a flag no Redis para o painel exibir "Atender".
+    // Saudações NÃO marcam — elas já disparam nova sessão de retorno logo abaixo.
+    // manual=true permanece exclusivo para atendimento humano ativo.
+    if (deveMarcarPrioridadePosPedido(currentSession?.step)) {
+      await redis.set(`postOrderPriority:${phone}`, true, { ex: 3600 });
+    }
 
     // ── RETOMADA INTELIGENTE PÓS-HANDOFF (Guardião de Venda) ──────────────────
     // Só dispara após uma NOVA mensagem real da cliente (devolver para o bot é

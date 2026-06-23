@@ -8,6 +8,7 @@ import {
   ehMensagemSocial,
   fallbackDeterministicoMelhorado,
   avaliarHandoffPorConfusao,
+  deveMarcarPrioridadePosPedido,
 } from "./fallbackInteligente";
 import { processMessage, createInitialSession, type BotSession } from "./bot";
 
@@ -50,6 +51,37 @@ describe("pareceFallbackSeco", () => {
     expect(pareceFallbackSeco(["Qual o tamanho da pizza?"])).toBe(false);
     expect(pareceFallbackSeco(["Boa noite! 😊 Você quer pizza, lanche, bebida ou suco?"])).toBe(false);
     expect(pareceFallbackSeco(["Opa, Ana! Que bom te ver de novo 🍕"])).toBe(false); // saudação não é fallback
+  });
+});
+
+// ─── deveMarcarPrioridadePosPedido ───────────────────────────────────────────
+describe("deveMarcarPrioridadePosPedido", () => {
+  it("pedido finalizado (step done) + msg qualquer → marca prioridade pós-pedido", () => {
+    expect(deveMarcarPrioridadePosPedido("done")).toBe(true);
+  });
+
+  it("pedido finalizado + saudação TAMBÉM marca (Kellyne precisa ver qualquer msg pós-pedido)", () => {
+    // Qualquer mensagem quando step='done' deve aparecer no Tempo Real como pós-pedido.
+    expect(deveMarcarPrioridadePosPedido("done")).toBe(true);
+  });
+
+  it("prioridade pós-pedido NÃO ativa manual (função não seta manual — só sinaliza)", () => {
+    // A função retorna true/false; é o chamador do webhook que decide o que fazer.
+    // manual=true só acontece via clique em Atender (/api/assumir).
+    const resultado = deveMarcarPrioridadePosPedido("done");
+    expect(resultado).toBe(true);
+  });
+
+  it("conversa normal (step category) NÃO marca prioridade", () => {
+    expect(deveMarcarPrioridadePosPedido("category")).toBe(false);
+  });
+
+  it("step undefined (sessão nova) NÃO marca prioridade", () => {
+    expect(deveMarcarPrioridadePosPedido(undefined)).toBe(false);
+  });
+
+  it("step welcome NÃO marca prioridade", () => {
+    expect(deveMarcarPrioridadePosPedido("welcome")).toBe(false);
   });
 });
 
