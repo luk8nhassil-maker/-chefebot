@@ -729,7 +729,8 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
             </section>
           )}
           {screen === "sc-build" && (
-            <section className="screen active">
+            <section className="screen active sc-build-screen">
+              <div className="build-back"><button className="build-back-btn" onClick={() => go("sc-qty")}>← Voltar</button></div>
               <PizzaCtx />
               <div className="screen-head"><div className="eyebrow">Monte sua pizza</div><h2>Tamanho e sabor</h2></div>
               <div className="section-label">📏 Tamanho</div>
@@ -755,7 +756,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                   </div>
                 )
               })}
-              <div className="btn-row"><button className="btn btn-ghost btn-back" onClick={() => go("sc-qty")}>←</button><button className="btn btn-sm" disabled={!buildOk} onClick={() => go("sc-border")}>Escolher borda</button></div>
+              <div className="build-foot"><button className="btn" disabled={!buildOk} onClick={() => go("sc-border")}>Confirmar pizza</button></div>
             </section>
           )}
           {screen === "sc-border" && (
@@ -992,4 +993,10 @@ main{padding:6px 20px 20px}
 .qty-card-title{font-weight:600;font-size:15.5px;letter-spacing:-.1px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .qty-card-sub{font-size:13px;color:var(--text-sub);margin-top:3px;font-weight:400}
 .qty-badge{font-size:10px;font-weight:700;color:var(--brand);background:var(--brand-soft);padding:2px 8px;border-radius:20px;white-space:nowrap;letter-spacing:.2px}
+.sc-build-screen{padding-top:34px;padding-bottom:96px}
+.build-back{position:fixed;top:54px;left:50%;transform:translateX(-50%);width:100%;max-width:540px;padding:0 20px;z-index:45;pointer-events:none}
+.build-back-btn{pointer-events:auto;background:var(--surface2);border:1px solid var(--line-strong);color:var(--text-sub);font-family:var(--font-ui);font-size:13px;font-weight:600;padding:7px 14px;border-radius:30px;cursor:pointer;box-shadow:var(--shadow-sm);transition:transform .14s}
+.build-back-btn:active{transform:scale(.96)}
+.build-foot{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:540px;z-index:55;background:var(--surface);border-top:1px solid var(--line);box-shadow:0 -4px 18px rgba(0,0,0,.18);padding:12px 20px calc(env(safe-area-inset-bottom) + 14px)}
+.build-foot .btn{margin:0}
 `;
