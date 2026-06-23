@@ -245,6 +245,7 @@ export default function PedidosPage() {
   const temposEntregaRef = useRef<Record<string, number>>({})
   const simpleToastTimerRef = useRef<any>(null)
   const historicoBottomRef = useRef<HTMLDivElement>(null)
+  const sendInFlightRef = useRef(false)
 
   const tocarSomNormal = () => {
     if (muteadoRef.current) return
@@ -507,8 +508,12 @@ export default function PedidosPage() {
   }
 
   const enviarMensagemHumana = async (phone: string) => {
+    // Trava síncrona: bloqueia envios duplicados (ex.: Enter apertado 2x rápido)
+    // antes de qualquer await ou atualização de estado assíncrona.
+    if (sendInFlightRef.current) return
     const texto = (mensagemHumana[phone] || "").trim()
     if (!texto) return
+    sendInFlightRef.current = true
     setEnviandoMensagem(phone)
     setErroEnvioMensagem(prev => ({ ...prev, [phone]: "" }))
     try {
@@ -526,8 +531,10 @@ export default function PedidosPage() {
       }
     } catch {
       setErroEnvioMensagem(prev => ({ ...prev, [phone]: "Erro de rede ao enviar." }))
+    } finally {
+      sendInFlightRef.current = false
+      setEnviandoMensagem(null)
     }
-    setEnviandoMensagem(null)
   }
 
   const abrirPedidoCombinado = async (phone: string) => {
@@ -1003,6 +1010,10 @@ export default function PedidosPage() {
         .cb-mob-sheet-wrap { display:block; }
         .cb-row:active { opacity:.85; }
         /* ── Chat layout ── */
+        /* Só no modo conversa: fixa a altura da viewport para o container, fazendo
+           a lista de mensagens rolar (flex-1/min-h-0/overflow) e o composer ficar
+           sempre fixo no rodapé. Não afeta a listagem normal de pedidos. */
+        .ps-content:has(.cb-chat-mode) { display:flex; flex-direction:column; min-height:100svh; }
         .cb-chat-root { display:flex; flex:1; min-height:0; overflow:hidden; }
         .cb-chat-left { display:flex; flex-direction:column; overflow:hidden; width:100%; }
         .cb-chat-left-inner { flex:1; overflow-y:auto; }
@@ -1346,7 +1357,7 @@ export default function PedidosPage() {
                             className="cb-chat-textarea"
                             value={mensagemHumana[s.phone] || ""}
                             onChange={e => setMensagemHumana(prev => ({ ...prev, [s.phone]: e.target.value }))}
-                            onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); enviarMensagemHumana(s.phone) } }}
+                            onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (sendInFlightRef.current || enviandoMensagem === s.phone) return; enviarMensagemHumana(s.phone) } }}
                             placeholder={`Responder como ${userName || "Kellyne"}… (Enter para enviar)`}
                             rows={2}
                           />
