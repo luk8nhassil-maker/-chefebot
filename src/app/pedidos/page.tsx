@@ -1378,11 +1378,20 @@ export default function PedidosPage() {
                           }
                         </button>
                       </div>
+                    ) : !s.postOrderPriority ? (
+                      <div style={{ padding: "10px 14px", borderTop: "1px solid #141210", background: "#0a0908", flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+                        <button
+                          onClick={() => assumirSessao(s.phone)}
+                          disabled={assumindoSessao === s.phone}
+                          style={{ height: 36, padding: "0 18px", border: "none", borderRadius: 22, background: "#ff6b00", color: "#fff", fontSize: 12, fontWeight: 900, cursor: assumindoSessao === s.phone ? "not-allowed" : "pointer", opacity: assumindoSessao === s.phone ? 0.5 : 1, transition: "opacity .15s" }}
+                        >
+                          {assumindoSessao === s.phone ? "…" : "Atender cliente"}
+                        </button>
+                        <span style={{ fontSize: 10, color: "#3a3730", fontWeight: 600 }}>Clique para assumir essa conversa manualmente.</span>
+                      </div>
                     ) : (
                       <div style={{ padding: "10px 14px", borderTop: "1px solid #141210", background: "#0a0908", flexShrink: 0, textAlign: "center" }}>
-                        <span style={{ fontSize: 12, color: s.postOrderPriority ? "#fbbf24" : "#3a3730", fontWeight: 700 }}>
-                          {s.postOrderPriority ? "Bot respondendo · clique em Atender se precisar intervir" : "Bot atendendo automaticamente"}
-                        </span>
+                        <span style={{ fontSize: 12, color: "#fbbf24", fontWeight: 700 }}>Bot respondendo · pós-pedido · clique em Atender acima se precisar intervir</span>
                       </div>
                     )}
                   </>
