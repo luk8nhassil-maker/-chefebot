@@ -1206,6 +1206,22 @@ export default function PedidosPage() {
                       </div>
                     )}
 
+                    {/* Status de fechamento */}
+                    {s.resumoRapido.statusFechamento && (() => {
+                      const sf = s.resumoRapido.statusFechamento
+                      const cfg = sf.nivel === "pronto"
+                        ? { icon: "✅", color: "#4ade80", bg: "rgba(34,197,94,.12)", border: "rgba(34,197,94,.35)" }
+                        : sf.nivel === "quase_pronto"
+                        ? { icon: "🟡", color: "#fbbf24", bg: "rgba(250,204,21,.1)", border: "rgba(250,204,21,.35)" }
+                        : { icon: "⚠️", color: "#f87171", bg: "rgba(239,68,68,.1)", border: "rgba(239,68,68,.3)" }
+                      return (
+                        <div style={{ background: cfg.bg, border: `1px solid ${cfg.border}`, borderRadius: 8, padding: "6px 10px" }}>
+                          <div style={{ fontSize: 12, fontWeight: 800, color: cfg.color }}>{cfg.icon} {sf.titulo}</div>
+                          <div style={{ fontSize: 11, color: "#a39b8b", marginTop: 2 }}>{sf.descricao}</div>
+                        </div>
+                      )
+                    })()}
+
                     {/* Pendências */}
                     {s.resumoRapido.pendencias.length === 0 ? (
                       <span style={{ fontSize: 11, color: "#4ade80", fontWeight: 700 }}>Tudo certo até aqui.</span>
