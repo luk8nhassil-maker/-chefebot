@@ -21,6 +21,7 @@ export async function POST(req: NextRequest) {
   const phoneFormatado = phone.startsWith('55') ? phone : '55' + phone
 
   await redis.set(`manual:${phoneFormatado}`, true, { ex: 3600 })
+  await redis.del(`postOrderPriority:${phoneFormatado}`)
 
   return NextResponse.json({ ok: true })
 }

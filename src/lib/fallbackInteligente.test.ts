@@ -8,6 +8,7 @@ import {
   ehMensagemSocial,
   fallbackDeterministicoMelhorado,
   avaliarHandoffPorConfusao,
+  deveMarcarPrioridadePosPedido,
 } from "./fallbackInteligente";
 import { processMessage, createInitialSession, type BotSession } from "./bot";
 
@@ -50,6 +51,39 @@ describe("pareceFallbackSeco", () => {
     expect(pareceFallbackSeco(["Qual o tamanho da pizza?"])).toBe(false);
     expect(pareceFallbackSeco(["Boa noite! 😊 Você quer pizza, lanche, bebida ou suco?"])).toBe(false);
     expect(pareceFallbackSeco(["Opa, Ana! Que bom te ver de novo 🍕"])).toBe(false); // saudação não é fallback
+  });
+});
+
+// ─── deveMarcarPrioridadePosPedido ───────────────────────────────────────────
+describe("deveMarcarPrioridadePosPedido", () => {
+  it("pedido finalizado (step done) + msg não-saudação → marca prioridade pós-pedido", () => {
+    expect(deveMarcarPrioridadePosPedido("done", false)).toBe(true);
+  });
+
+  it("pedido finalizado + saudação NÃO marca (cliente iniciando novo pedido)", () => {
+    expect(deveMarcarPrioridadePosPedido("done", true)).toBe(false);
+  });
+
+  it("prioridade pós-pedido NÃO ativa manual (função não seta manual — só sinaliza)", () => {
+    // A função retorna true/false; é o chamador do webhook que decide o que fazer.
+    // manual=true só acontece via clique em Atender (/api/assumir). Aqui garantimos
+    // que a função pura não tem efeito colateral — só testamos o retorno.
+    const resultado = deveMarcarPrioridadePosPedido("done", false);
+    expect(resultado).toBe(true);
+    // O chamador seta postOrderPriority, não manual.
+  });
+
+  it("conversa normal (step category) NÃO marca prioridade", () => {
+    expect(deveMarcarPrioridadePosPedido("category", false)).toBe(false);
+    expect(deveMarcarPrioridadePosPedido("category", true)).toBe(false);
+  });
+
+  it("step undefined (sessão nova) NÃO marca prioridade", () => {
+    expect(deveMarcarPrioridadePosPedido(undefined, false)).toBe(false);
+  });
+
+  it("step welcome NÃO marca prioridade", () => {
+    expect(deveMarcarPrioridadePosPedido("welcome", false)).toBe(false);
   });
 });
 

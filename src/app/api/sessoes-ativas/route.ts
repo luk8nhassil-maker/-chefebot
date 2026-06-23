@@ -11,7 +11,7 @@ async function checkAuth(req: NextRequest) {
   return payload
 }
 
-const STEPS_IGNORADOS = ['done', 'welcome']
+const STEPS_SEMPRE_IGNORADOS = ['welcome']
 
 const STEP_LABELS: Record<string, string> = {
   name: 'nome',
@@ -65,7 +65,11 @@ export async function GET(req: NextRequest) {
 
       const session = await redis.get<any>(chave)
       if (!session) continue
-      if (STEPS_IGNORADOS.includes(session.step)) continue
+      if (STEPS_SEMPRE_IGNORADOS.includes(session.step)) continue
+
+      const postOrderPriority = !!(await redis.get(`postOrderPriority:${phone}`))
+      // Sessões 'done' só aparecem se houver prioridade pós-pedido.
+      if (session.step === 'done' && !postOrderPriority) continue
 
       const manual = !!(await redis.get(`manual:${phone}`))
       const ultimaMensagem = await redis.get<string>(`ultima_msg:${phone}`)
@@ -88,6 +92,7 @@ export async function GET(req: NextRequest) {
         stepLabel: STEP_LABELS[session.step] ?? session.step,
         cart: cartResumo,
         manual,
+        postOrderPriority,
         ultimaMensagem: ultimaMensagem ?? null,
         customerName: session.customerName ?? null,
         resumoRapido,
