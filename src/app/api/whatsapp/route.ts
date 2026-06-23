@@ -470,7 +470,11 @@ async function atualizarRascunhoVivo(phone: string, messageText: string) {
   try {
     const sessao = await redis.get<BotSession>(`session:${phone}`);
     if (sessao) {
-      const atualizada = atualizarRascunhoAtendimentoTempoReal(sessao, messageText);
+      // Busca última mensagem da atendente para detectar perguntas de nome.
+      const historico = await ultimasMensagensRelevantes(phone, 5);
+      const ultimaAtendente = [...historico].reverse().find(m => m.autor === "atendente");
+      const contexto = ultimaAtendente ? { ultimaMensagemAtendente: ultimaAtendente.texto } : undefined;
+      const atualizada = atualizarRascunhoAtendimentoTempoReal(sessao, messageText, contexto);
       await redis.set(`session:${phone}`, atualizada, { ex: 1800 });
     }
   } catch {}
@@ -957,7 +961,12 @@ export async function POST(req: NextRequest) {
 
     // Atualiza o rascunho vivo (leitura da atendente). Aditivo: preserva todos os
     // campos oficiais da sessão, só preenche result.session.rascunhoAtendimento.
-    try { result.session = atualizarRascunhoAtendimentoTempoReal(result.session, messageText); } catch {}
+    try {
+      const historicoNormal = await ultimasMensagensRelevantes(phone, 5);
+      const ultimaAtendenteNormal = [...historicoNormal].reverse().find(m => m.autor === "atendente");
+      const contextoNormal = ultimaAtendenteNormal ? { ultimaMensagemAtendente: ultimaAtendenteNormal.texto } : undefined;
+      result.session = atualizarRascunhoAtendimentoTempoReal(result.session, messageText, contextoNormal);
+    } catch {}
 
     await redis.set(sessionKey, result.session, { ex: 1800 });
 

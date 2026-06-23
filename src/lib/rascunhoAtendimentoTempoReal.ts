@@ -159,6 +159,11 @@ function detectarTroco(texto: string): string | undefined {
   return undefined;
 }
 
+// Contexto externo passado pelo webhook — não polui o contrato puro do helper.
+export interface RascunhoContexto {
+  ultimaMensagemAtendente?: string;
+}
+
 // ── Nome (só quando declarado claramente; nunca a partir do telefone) ────────
 function detectarNome(texto: string): string | undefined {
   const m = texto.match(
@@ -179,14 +184,60 @@ const BLOCKLIST_NOME = new Set([
   "noite","tarde","dia","tudo","obrigado","obrigada","por","favor","preciso","quero",
 ]);
 
-// Detecta nome simples (1-2 palavras, apenas letras) quando o bot está
-// aguardando o nome do cliente. Nunca inventado fora desse contexto.
+// Conjunto de termos do cardápio (sabores, bebidas, lanches) em forma normalizada.
+// Construído uma única vez a partir do MENU para evitar falsos positivos de nome.
+const TERMOS_CARDAPIO: Set<string> = (() => {
+  const set = new Set<string>();
+  const add = (t: string) => { const n = norm(t); if (n.length >= 2) set.add(n); };
+
+  // Sabores: indexa o nome completo e cada palavra individual.
+  for (const f of [...MENU.saltyFlavors, ...MENU.sweetFlavors]) {
+    add(f);
+    for (const w of f.split(" ")) add(w);
+  }
+  // Bebidas, sucos e lanches: apenas o nome completo (palavras individuais já cobertas).
+  for (const b of MENU.bebidas ?? []) add(b.name);
+  for (const s of MENU.sucos ?? []) add(s.name);
+  for (const l of MENU.lanches ?? []) add(l.name);
+
+  return set;
+})();
+
+// Rejeita uma resposta que provavelmente seja um item/sabor do cardápio.
+// Usado apenas na captura de nome contextual.
+function pareceItemDeCardapio(texto: string): boolean {
+  const partes = norm(texto).split(/\s+/);
+  return partes.some(p => TERMOS_CARDAPIO.has(p));
+}
+
+// Verifica se a mensagem da atendente indica que ela estava pedindo o nome.
+function atendentePerguNome(msg: string): boolean {
+  if (!msg) return false;
+  const n = norm(msg).trim();
+  return (
+    /qual\s+(?:o\s+)?seu\s+nome/.test(n) ||
+    /me\s+diga\s+(?:o\s+)?(?:seu\s+)?nome/.test(n) ||
+    /me\s+passa\s+(?:o\s+)?(?:seu\s+)?nome/.test(n) ||
+    /como\s+(?:voce|você)\s+se\s+chama/.test(n) ||
+    /seu\s+nome\s+por\s+favor/.test(n) ||
+    /^nome\??$/.test(n)
+  );
+}
+
+// Detecta nome simples (1-2 palavras, apenas letras) quando:
+// • o bot está aguardando nome (step "name"/"pedindo_nome"), OU
+// • a última mensagem da atendente perguntou o nome.
 function detectarNomeContextual(
   session: BotSession,
   texto: string,
+  contexto?: RascunhoContexto,
 ): string | undefined {
-  const step = session.step;
-  if (step !== "name" && step !== "pedindo_nome") return undefined;
+  const stepNome = session.step === "name" || session.step === "pedindo_nome";
+  const atendentePerguntou =
+    !!contexto?.ultimaMensagemAtendente &&
+    atendentePerguNome(contexto.ultimaMensagemAtendente);
+
+  if (!stepNome && !atendentePerguntou) return undefined;
 
   const partes = texto.trim().split(/\s+/);
   if (partes.length === 0 || partes.length > 2) return undefined;
@@ -194,8 +245,11 @@ function detectarNomeContextual(
   // Aceita apenas letras (incluindo acentuadas); rejeita números e símbolos.
   if (!partes.every(p => /^[a-zA-ZÀ-ÿ]{2,}$/.test(p))) return undefined;
 
-  // Rejeita se qualquer parte estiver na blocklist.
+  // Rejeita se qualquer parte estiver na blocklist de palavras comuns.
   if (partes.some(p => BLOCKLIST_NOME.has(norm(p)))) return undefined;
+
+  // Rejeita se a resposta parecer um sabor, bebida ou lanche do cardápio.
+  if (pareceItemDeCardapio(texto)) return undefined;
 
   return partes.map(capitalizar).join(" ");
 }
@@ -208,6 +262,7 @@ function detectarNomeContextual(
 export function atualizarRascunhoAtendimentoTempoReal(
   session: BotSession,
   textoCliente: string,
+  contexto?: RascunhoContexto,
 ): BotSession {
   const texto = (textoCliente || "").trim();
   if (!texto) return session;
@@ -220,11 +275,12 @@ export function atualizarRascunhoAtendimentoTempoReal(
   const entrega = detectarEntrega(texto);
   const pagamento = detectarPagamento(texto);
   const troco = detectarTroco(texto);
-  // Explicit declarations always win; contextual only when no nome yet set.
+  // Declarações explícitas ("me chamo X") sempre vencem.
+  // Contextual só dispara quando não há nome ainda e há contexto seguro.
   const nomeExplicito = detectarNome(texto);
   const nomeContextual =
     !nomeExplicito && !session.customerName && !atual.nome
-      ? detectarNomeContextual(session, texto)
+      ? detectarNomeContextual(session, texto, contexto)
       : undefined;
   const nome = nomeExplicito ?? nomeContextual;
 

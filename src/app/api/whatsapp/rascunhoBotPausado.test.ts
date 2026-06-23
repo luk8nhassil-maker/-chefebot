@@ -50,10 +50,26 @@ function webhook(texto: string) {
   } as never;
 }
 
-function sessaoSalva() {
-  return store.get(`session:${PHONE}`) as
-    | { rascunhoAtendimento?: { itens: string[]; endereco?: string; bairro?: string; tipoEntrega?: string; pagamento?: string } }
-    | undefined;
+type SessaoSalva = {
+  rascunhoAtendimento?: {
+    itens: string[];
+    nome?: string;
+    endereco?: string;
+    bairro?: string;
+    tipoEntrega?: string;
+    pagamento?: string;
+  };
+};
+
+function sessaoSalva(): SessaoSalva | undefined {
+  return store.get(`session:${PHONE}`) as SessaoSalva | undefined;
+}
+
+// Pré-carrega o log de conversa com a última mensagem da atendente.
+function setUltimaMsgAtendente(texto: string) {
+  store.set(`conversa:${PHONE}`, [
+    { autor: "atendente", texto, ts: Date.now() },
+  ]);
 }
 
 beforeEach(() => {
@@ -105,5 +121,27 @@ describe("bot global pausado (bot_ativo === false) — rascunho vivo", () => {
     expect(r?.pagamento).toBe("Dinheiro");
     expect(processMessage).not.toHaveBeenCalled();
     expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("bot pausado — captura de nome via contexto da atendente", () => {
+  it("atendente pergunta nome → cliente responde 'lucas' → rascunho.nome 'Lucas'", async () => {
+    setUltimaMsgAtendente("qual o seu nome?");
+    await POST(webhook("lucas"));
+    expect(sessaoSalva()?.rascunhoAtendimento?.nome).toBe("Lucas");
+    expect(processMessage).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("sem última mensagem da atendente → 'lucas' não vira nome", async () => {
+    // store sem conversa: nenhum histórico de atendente
+    await POST(webhook("lucas"));
+    expect(sessaoSalva()?.rascunhoAtendimento?.nome).toBeUndefined();
+  });
+
+  it("atendente perguntou nome + cliente responde 'dinheiro' → nome não capturado", async () => {
+    setUltimaMsgAtendente("qual o seu nome?");
+    await POST(webhook("dinheiro"));
+    expect(sessaoSalva()?.rascunhoAtendimento?.nome).toBeUndefined();
   });
 });
