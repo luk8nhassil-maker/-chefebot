@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { redis } from '@/lib/redis'
 import { verifyToken } from '@/lib/auth'
+import { calcularResumoAtendimentoHumano } from '@/lib/resumoAtendimentoHumano'
 
 async function checkAuth(req: NextRequest) {
   const token = req.cookies.get('auth-token')?.value ?? null
@@ -76,6 +77,10 @@ export async function GET(req: NextRequest) {
         return parts.join(' ')
       })
 
+      const resumoRapido = manual
+        ? calcularResumoAtendimentoHumano(session)
+        : null
+
       sessoes.push({
         phone,
         lastDigits: phone.slice(-4),
@@ -85,6 +90,7 @@ export async function GET(req: NextRequest) {
         manual,
         ultimaMensagem: ultimaMensagem ?? null,
         customerName: session.customerName ?? null,
+        resumoRapido,
       })
     }
 
