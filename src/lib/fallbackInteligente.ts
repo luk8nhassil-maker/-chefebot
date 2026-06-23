@@ -40,6 +40,21 @@ export function pareceFallbackSeco(messages: string[]): boolean {
   });
 }
 
+// Handoff automático por confusão consecutiva.
+// Conta quantas vezes SEGUIDAS o bot ficou perdido (fallback seco, via
+// pareceFallbackSeco). Na 2ª confusão consecutiva sinaliza o handoff para humano
+// (o webhook marca manual=true → painel mostra "Atender"). Resposta válida
+// (sem fallback) zera o contador, evitando falso positivo. Função pura.
+export function avaliarHandoffPorConfusao(
+  contadorAnterior: number,
+  perdidoEsteTurno: boolean,
+): { novoContador: number; ativarManual: boolean } {
+  if (!perdidoEsteTurno) return { novoContador: 0, ativarManual: false };
+  const novo = (contadorAnterior || 0) + 1;
+  if (novo >= 2) return { novoContador: 0, ativarManual: true };
+  return { novoContador: novo, ativarManual: false };
+}
+
 // Saudações e mensagens sociais que jamais podem virar "opção inválida".
 const SAUDACOES = ["bom dia", "boa tarde", "boa noite", "oi", "oie", "ola", "opa", "eai", "e ai", "iae", "hey", "hello", "alo", "boa"];
 const SOCIAIS = ["tudo bem", "tudo bom", "como vai", "como voce esta", "como esta", "beleza", "blz", "de boa", "suave", "tranquilo"];

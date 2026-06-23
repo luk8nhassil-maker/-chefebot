@@ -163,6 +163,8 @@ export interface BotSession {
   escalado?: boolean;
   historico?: ClienteHistorico;
   tentativasInvalidas?: number;
+  // Confusões consecutivas (fallback seco) — usado para handoff automático ao humano.
+  clientePerdidoCount?: number;
   observacao?: string;
   pedidoId?: string;
   troco?: string;
