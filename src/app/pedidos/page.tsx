@@ -38,6 +38,7 @@ type Pedido = {
   archivedAt?: string
   archivedBy?: string
   archivedReason?: string
+  origem?: string
 }
 
 const NEXT_STATUS: Record<Status, Status | null> = {
@@ -1461,6 +1462,7 @@ export default function PedidosPage() {
                       {pedido.numero != null && <span style={{ fontSize: 10, fontWeight: 900, color: "#3a3730", flexShrink: 0 }}>#{pedido.numero}</span>}
                       <span style={{ fontSize: 14, fontWeight: 900, color: "#f0ede8", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{firstName}</span>
                       {pedido.escalonado && <span style={{ fontSize: 11, flexShrink: 0 }}>🚨</span>}
+                      {(pedido.origem === "site" || pedido.origem === "app") && <span style={{ fontSize: 9, fontWeight: 900, color: "#60a5fa", background: "rgba(96,165,250,.12)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>🌐 Site</span>}
                       {pixPendente && <span style={{ fontSize: 9, fontWeight: 900, color: "#fbbf24", background: "rgba(251,191,36,.12)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>PIX⏳</span>}
                       {pedido.cancelamentoSolicitado && <span style={{ fontSize: 11, flexShrink: 0 }}>⚠️</span>}
                       <span style={{ fontSize: 10, fontWeight: 900, color: sc.accent, background: sc.accentBg, padding: "2px 7px", borderRadius: 6, border: `1px solid ${sc.accentBorder}`, textTransform: "uppercase", letterSpacing: ".4px", flexShrink: 0 }}>{sc.label}</span>

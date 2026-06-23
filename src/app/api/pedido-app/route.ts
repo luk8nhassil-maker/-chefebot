@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { redis } from "@/lib/redis";
 import { proximoNumeroPedido } from "@/lib/numeracao";
 import { getMENUDinamico } from "@/lib/menu";
+import { computeTaxaApp, buildEnderecoApp } from "@/lib/pedidoAppLogic";
 
 export const maxDuration = 20;
 
@@ -15,11 +16,13 @@ type ItemApp = {
 
 type PedidoApp = {
   cliente: string;
-  telefone?: string;
+  telefone: string;
   itens: ItemApp[];
-  tipoEntrega: "delivery" | "retirada";
+  tipoEntrega: "delivery" | "retirada" | "dine_in";
   bairro?: string;
-  endereco?: string;
+  rua?: string;
+  numero?: string;
+  referencia?: string;
   pagamento: string;
   troco?: string;
   observacao?: string;
@@ -32,6 +35,9 @@ export async function POST(req: NextRequest) {
     if (!body.cliente || !body.itens || body.itens.length === 0) {
       return NextResponse.json({ ok: false, error: "Pedido inválido" }, { status: 400 });
     }
+    if (!body.telefone || !body.telefone.trim()) {
+      return NextResponse.json({ ok: false, error: "Telefone obrigatório" }, { status: 400 });
+    }
 
     const pedidos = (await redis.get<any[]>("pedidos")) || [];
 
@@ -43,19 +49,11 @@ export async function POST(req: NextRequest) {
     });
 
     const subtotal = body.itens.reduce((s, i) => s + i.price * i.qty, 0);
-    let taxa = 0;
-    if (body.tipoEntrega === "delivery" && body.bairro) {
-      const menu = await getMENUDinamico();
-      const bairroNorm = body.bairro.toLowerCase().trim();
-      const bairroConfig = (menu.neighborhoods as Array<{ name: string; fee: number }>).find((n) => n.name.toLowerCase().trim() === bairroNorm);
-      taxa = bairroConfig?.fee ?? 0;
-    }
+    const menu = await getMENUDinamico();
+    const taxa = computeTaxaApp(body.tipoEntrega, body.bairro, menu.neighborhoods as Array<{ name: string; fee: number }>);
     const total = subtotal + taxa;
 
-    const endereco =
-      body.tipoEntrega === "delivery"
-        ? `${body.endereco || ""}${body.bairro ? ` - ${body.bairro}` : ""}`.trim()
-        : "Retirada na loja";
+    const endereco = buildEnderecoApp({ tipoEntrega: body.tipoEntrega, rua: body.rua, numero: body.numero, bairro: body.bairro });
 
     const pedidoId = Date.now().toString();
     const numeroPedido = await proximoNumeroPedido();
@@ -63,19 +61,20 @@ export async function POST(req: NextRequest) {
       id: pedidoId,
       numero: numeroPedido,
       cliente: body.cliente,
-      telefone: body.telefone || "App",
+      telefone: body.telefone.trim(),
       itens,
       total,
       status: "novo" as const,
       horario: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" }),
       endereco,
       data: new Date().toLocaleDateString("pt-BR"),
-      origem: "app",
+      origem: "site",
       ...(body.observacao ? { observacao: body.observacao } : {}),
       ...(body.pagamento ? { pagamento: body.pagamento } : {}),
       ...(body.troco ? { troco: body.troco } : {}),
       ...(taxa ? { taxaEntrega: taxa } : {}),
       ...(body.bairro ? { bairro: body.bairro } : {}),
+      ...(body.referencia ? { referencia: body.referencia } : {}),
       ...(body.tipoEntrega ? { tipoEntrega: body.tipoEntrega } : {}),
     };
 
@@ -91,7 +90,7 @@ export async function POST(req: NextRequest) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "notify",
-          title: `Pedido #${numeroPedido} (app) — ${firstName} 🍕`,
+          title: `Pedido #${numeroPedido} (site) — ${firstName} 🍕`,
           message: itensResumo,
         }),
       });
@@ -99,7 +98,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true, pedidoId, numero: numeroPedido, total });
   } catch (error) {
-    console.error("Erro ao salvar pedido do app:", error);
+    console.error("Erro ao salvar pedido do site:", error);
     return NextResponse.json({ ok: false, error: "Erro interno" }, { status: 500 });
   }
 }
