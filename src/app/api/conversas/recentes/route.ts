@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { redis } from '@/lib/redis'
 import { verifyToken } from '@/lib/auth'
+import { CONVERSAS_ZSET, type ConversaMeta } from '@/lib/conversasHistorico'
 import type { MensagemRelevante } from '@/lib/bot'
 
 async function checkAuth(req: NextRequest) {
@@ -36,23 +37,51 @@ export async function GET(req: NextRequest) {
   if (!auth) return NextResponse.json({ ok: false, error: 'Não autorizado' }, { status: 401 })
 
   try {
-    const chaves = await redis.keys('conversa:*')
+    // Prefer permanent ZSET index; fall back to TTL scan if not yet populated
+    const phonesFromZset = await redis.zrange<string[]>(CONVERSAS_ZSET, 0, -1, { rev: true })
+    let phones: string[]
+
+    if (phonesFromZset.length > 0) {
+      phones = phonesFromZset
+    } else {
+      const chaves = await redis.keys('conversa:*')
+      phones = chaves.map(k => k.replace('conversa:', '')).filter(p => p.length >= 8)
+    }
+
     const conversas: ConversaRecente[] = []
 
-    for (const chave of chaves) {
-      const phone = chave.replace('conversa:', '')
-      if (!phone || phone.length < 8) continue
+    for (const phone of phones) {
+      const [meta, session, manualVal] = await Promise.all([
+        redis.get<ConversaMeta>(`conversa_meta:${phone}`),
+        redis.get<any>(`session:${phone}`),
+        redis.get(`manual:${phone}`),
+      ])
 
-      const msgs = await redis.get<MensagemRelevante[]>(chave)
-      if (!msgs || msgs.length === 0) continue
+      const manual = !!manualVal
 
-      const ultima = msgs[msgs.length - 1]
-      const session = await redis.get<any>(`session:${phone}`)
-      const manual = !!(await redis.get(`manual:${phone}`))
+      let nome: string
+      let ultimaMensagem: string
+      let ultimaTs: number
+      let mensagensCount: number
+
+      if (meta) {
+        nome = session?.customerName || meta.nome
+        ultimaMensagem = meta.ultimaMensagem
+        ultimaTs = meta.ultimaTs
+        mensagensCount = meta.mensagensCount
+      } else {
+        // Fallback: TTL key may still be alive (before first backfill or fresh conversation)
+        const msgs = await redis.get<MensagemRelevante[]>(`conversa:${phone}`)
+        if (!msgs || msgs.length === 0) continue
+        const ultima = msgs[msgs.length - 1]
+        nome = session?.customerName || phone
+        ultimaMensagem = ultima.texto
+        ultimaTs = ultima.ts ?? 0
+        mensagensCount = msgs.length
+      }
 
       let status: StatusConversa
       if (manual) {
-        // manual flag + escalado step = waiting in queue; otherwise human is handling
         status = session?.step === 'escalado' ? 'aguardando' : 'humano'
       } else if (session && !STEPS_BOT_ATIVOS.includes(session.step)) {
         status = 'robo'
@@ -60,14 +89,7 @@ export async function GET(req: NextRequest) {
         status = 'finalizado'
       }
 
-      conversas.push({
-        phone,
-        nome: session?.customerName || phone,
-        ultimaMensagem: ultima.texto,
-        ultimaTs: ultima.ts ?? 0,
-        status,
-        mensagensCount: msgs.length,
-      })
+      conversas.push({ phone, nome, ultimaMensagem, ultimaTs, status, mensagensCount })
     }
 
     conversas.sort((a, b) => {
