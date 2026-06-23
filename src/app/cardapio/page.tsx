@@ -694,14 +694,38 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
           )}
           {screen === "sc-qty" && (
             <section className="screen active">
-              <div className="screen-head"><div className="eyebrow">Pizza</div><h2>Quantas pizzas?</h2><p>Pode mudar depois, fica tranquilo.</p></div>
-              <div className="grid2">
-                <div className="opt" onClick={() => setPizzaQty(1)}><div className="opt-emoji">🍕</div><div className="opt-body"><div className="opt-title">1 pizza</div></div></div>
-                <div className="opt" onClick={() => setPizzaQty(2)}><div className="opt-emoji">🍕🍕</div><div className="opt-body"><div className="opt-title">2 pizzas</div></div></div>
-                <div className="opt" onClick={() => setPizzaQty(3)}><div className="opt-emoji">🍕🍕🍕</div><div className="opt-body"><div className="opt-title">3 pizzas</div></div></div>
-                <div className="opt" onClick={() => setPizzaQty(0)}><div className="opt-emoji">➕</div><div className="opt-body"><div className="opt-title">Vou adicionando</div></div></div>
+              <div className="screen-head"><div className="eyebrow">Pizza</div><h2>Quantas pizzas você quer?</h2><p>Você pode montar uma agora e adicionar mais depois.</p></div>
+              <div className="qty-grid">
+                <div className="qty-card" onClick={() => setPizzaQty(1)}>
+                  <div className="qty-card-icon">🍕</div>
+                  <div className="qty-card-body">
+                    <div className="qty-card-title">1 pizza <span className="qty-badge">Mais escolhido</span></div>
+                    <div className="qty-card-sub">Para um pedido simples</div>
+                  </div>
+                </div>
+                <div className="qty-card" onClick={() => setPizzaQty(2)}>
+                  <div className="qty-card-icon">🍕</div>
+                  <div className="qty-card-body">
+                    <div className="qty-card-title">2 pizzas</div>
+                    <div className="qty-card-sub">Boa para dividir</div>
+                  </div>
+                </div>
+                <div className="qty-card" onClick={() => setPizzaQty(3)}>
+                  <div className="qty-card-icon">🍕</div>
+                  <div className="qty-card-body">
+                    <div className="qty-card-title">3 pizzas</div>
+                    <div className="qty-card-sub">Para família ou amigos</div>
+                  </div>
+                </div>
+                <div className="qty-card" onClick={() => setPizzaQty(0)}>
+                  <div className="qty-card-icon">➕</div>
+                  <div className="qty-card-body">
+                    <div className="qty-card-title">Vou adicionando</div>
+                    <div className="qty-card-sub">Monte uma por vez</div>
+                  </div>
+                </div>
               </div>
-              <div className="btn-row"><button className="btn btn-ghost btn-sm" onClick={() => go("sc-start")}>Voltar</button></div>
+              <div className="btn-row"><button className="btn btn-ghost btn-sm" style={{ color: "var(--text-faint)" }} onClick={() => go("sc-start")}>← Voltar</button></div>
             </section>
           )}
           {screen === "sc-build" && (
@@ -959,4 +983,13 @@ main{padding:6px 20px 20px}
 .success h2{font-family:var(--font-ui);font-weight:600;font-size:24px;margin-bottom:9px;letter-spacing:-.4px}
 .success p{color:var(--text-sub);font-size:15px;margin-bottom:5px}
 .toast{position:fixed;bottom:116px;left:50%;transform:translateX(-50%);background:var(--green);color:#fff;padding:12px 22px;border-radius:30px;font-size:13.5px;font-weight:500;z-index:60;white-space:nowrap}
+.qty-grid{display:flex;flex-direction:column;gap:10px}
+@media(min-width:480px){.qty-grid{display:grid;grid-template-columns:1fr 1fr;gap:11px}}
+.qty-card{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:16px 18px;cursor:pointer;display:flex;align-items:center;gap:14px;transition:transform .14s,border-color .14s,background .14s;box-shadow:var(--shadow-sm)}
+.qty-card:active{transform:scale(.98);border-color:var(--brand);background:var(--brand-soft)}
+.qty-card-icon{font-size:24px;flex:0 0 auto;width:36px;text-align:center}
+.qty-card-body{flex:1;min-width:0}
+.qty-card-title{font-weight:600;font-size:15.5px;letter-spacing:-.1px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.qty-card-sub{font-size:13px;color:var(--text-sub);margin-top:3px;font-weight:400}
+.qty-badge{font-size:10px;font-weight:700;color:var(--brand);background:var(--brand-soft);padding:2px 8px;border-radius:20px;white-space:nowrap;letter-spacing:.2px}
 `;
