@@ -3,6 +3,39 @@ import { useEffect, useState, useRef } from "react"
 import { useRouter } from "next/navigation"
 import PanelShell from "@/components/PanelShell"
 
+type StatusConversa = 'aguardando' | 'humano' | 'robo' | 'finalizado'
+
+type ConversaRecente = {
+  phone: string
+  nome: string
+  ultimaMensagem: string
+  ultimaTs: number
+  status: StatusConversa
+  mensagensCount: number
+}
+
+const STATUS_COLOR: Record<StatusConversa, string> = {
+  aguardando: "#e05050",
+  humano: "#ff6b00",
+  robo: "#5577ee",
+  finalizado: "#8a8278",
+}
+
+const STATUS_LABEL: Record<StatusConversa, string> = {
+  aguardando: "Na fila",
+  humano: "Em atendimento",
+  robo: "Com robô",
+  finalizado: "Finalizado",
+}
+
+function formatRelTs(ts?: number): string {
+  if (!ts) return ""
+  const diff = Date.now() - ts
+  if (diff < 60000) return "agora"
+  if (diff < 3600000) return `${Math.floor(diff / 60000)}min`
+  return new Date(ts).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })
+}
+
 type Pedido = {
   id: string
   numero?: number
@@ -100,6 +133,16 @@ export default function ConversasPage() {
   const historicoBottomRef = useRef<HTMLDivElement>(null)
   const mensagemInputRef = useRef<HTMLTextAreaElement>(null)
 
+  // Recentes: all conversations from last 30 min (conversa:* TTL)
+  const [conversasRecentes, setConversasRecentes] = useState<ConversaRecente[]>([])
+
+  async function carregarRecentes() {
+    try {
+      const r = await fetch("/api/conversas/recentes")
+      if (r.ok) setConversasRecentes(await r.json())
+    } catch {}
+  }
+
   function carregar() {
     fetch("/api/orders")
       .then(r => { if (r.status === 401) { router.push("/login?callbackUrl=/conversas"); return null } return r.json() })
@@ -114,12 +157,18 @@ export default function ConversasPage() {
     return () => { clearInterval(ivData); clearInterval(ivTime) }
   }, [router])
 
-  // Deselect conversation if it disappears from the list
   useEffect(() => {
-    if (conversaSelecionada && !pedidos.some(p => p.telefone === conversaSelecionada)) {
-      setConversaSelecionada(null)
+    carregarRecentes()
+    const iv = setInterval(carregarRecentes, 8000)
+    return () => clearInterval(iv)
+  }, [])
+
+  // Deselect only if conversation disappears from recentes (not from pedidos)
+  useEffect(() => {
+    if (conversaSelecionada && !conversasRecentes.some(c => c.phone === conversaSelecionada)) {
+      if (conversasRecentes.length > 0) setConversaSelecionada(null)
     }
-  }, [pedidos, conversaSelecionada])
+  }, [conversasRecentes, conversaSelecionada])
 
   // Poll history for selected conversation
   useEffect(() => {
@@ -234,6 +283,19 @@ export default function ConversasPage() {
     ? pedidos.find(p => p.telefone === conversaSelecionada) ?? null
     : null
   const isFilaItem = pedidoSelecionado ? fila.some(p => p.id === pedidoSelecionado.id) : false
+
+  const conversaRecenteSelecionada = conversaSelecionada
+    ? conversasRecentes.find(c => c.phone === conversaSelecionada) ?? null
+    : null
+
+  const recentesBusca = busca.trim()
+    ? conversasRecentes.filter(c =>
+        c.nome.toLowerCase().includes(busca.toLowerCase()) || c.phone.includes(busca)
+      )
+    : conversasRecentes
+
+  const aguardandoCount = conversasRecentes.filter(c => c.status === 'aguardando').length
+  const humanoCount = conversasRecentes.filter(c => c.status === 'humano').length
 
   if (loading) return (
     <div style={{ height: "100svh", background: "#060606", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Archivo', sans-serif" }}>
@@ -609,11 +671,8 @@ export default function ConversasPage() {
       `}</style>
 
       <PanelShell
-        conversasCount={fila.length}
-        conversasUrgent={fila.some(p => {
-          const u = getUrgency(minEsperando(getTimestampEspera(p), now))
-          return u === "urgente" || u === "critico"
-        })}
+        conversasCount={aguardandoCount + humanoCount}
+        conversasUrgent={aguardandoCount > 0}
       >
         <div className="cv-root">
 
@@ -625,18 +684,18 @@ export default function ConversasPage() {
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
                 <div>
                   <div style={{ fontSize: 17, fontWeight: 900, color: "#1a1715", letterSpacing: "-0.3px" }}>Conversas</div>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: "#a09790", marginTop: 1 }}>Atendimento humano</div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "#a09790", marginTop: 1 }}>Últimas 30 minutos</div>
                 </div>
                 <div style={{ display: "flex", gap: 6 }}>
-                  {fila.length > 0 && (
+                  {aguardandoCount > 0 && (
                     <div style={{ display: "flex", alignItems: "center", gap: 5, background: "rgba(224,80,80,.08)", border: "1px solid rgba(224,80,80,.22)", borderRadius: 20, padding: "4px 10px" }}>
                       <span className="cv-dot" style={{ background: "#e05050" }} />
-                      <span style={{ fontSize: 11, fontWeight: 900, color: "#e05050" }}>{fila.length}</span>
+                      <span style={{ fontSize: 11, fontWeight: 900, color: "#e05050" }}>{aguardandoCount}</span>
                     </div>
                   )}
-                  {emAtendimento.length > 0 && (
-                    <div style={{ background: "rgba(86,184,126,.08)", border: "1px solid rgba(86,184,126,.22)", borderRadius: 20, padding: "4px 10px" }}>
-                      <span style={{ fontSize: 11, fontWeight: 900, color: "#56b87e" }}>{emAtendimento.length}</span>
+                  {humanoCount > 0 && (
+                    <div style={{ background: "rgba(255,107,0,.08)", border: "1px solid rgba(255,107,0,.22)", borderRadius: 20, padding: "4px 10px" }}>
+                      <span style={{ fontSize: 11, fontWeight: 900, color: "#ff6b00" }}>{humanoCount}</span>
                     </div>
                   )}
                 </div>
@@ -661,7 +720,7 @@ export default function ConversasPage() {
               </div>
 
               {/* Compact metrics */}
-              {fila.length > 0 && maxEsperaMin > 0 && (
+              {aguardandoCount > 0 && maxEsperaMin > 0 && (
                 <div style={{ marginTop: 10, fontSize: 11, fontWeight: 700, color: maxEsperaMin >= 8 ? "#e05050" : "#a09790" }}>
                   Aguardando há {maxEsperaMin}min (mais antigo)
                 </div>
@@ -670,76 +729,38 @@ export default function ConversasPage() {
 
             {/* List scroll */}
             <div className="cv-list-scroll">
-
-              {/* Fila section */}
-              {filaBusca.length > 0 && (
-                <>
-                  <div className="cv-section-label">Aguardando atendimento</div>
-                  {filaBusca.map((p, idx) => {
-                    const ts = getTimestampEspera(p)
-                    const minWait = minEsperando(ts, now)
-                    const urgency = getUrgency(minWait)
-                    const isActive = conversaSelecionada === p.telefone
-                    return (
-                      <div
-                        key={p.id}
-                        className={`cv-item${isActive ? " cv-item-active" : ""}`}
-                        onClick={() => setConversaSelecionada(p.telefone)}
-                        style={{ animationDelay: `${idx * 0.04}s` }}
-                      >
-                        <div className="cv-item-avatar" style={{ background: `${UC[urgency]}18`, border: `2px solid ${UC[urgency]}44`, color: UC[urgency] }}>
-                          {getInitials(p.cliente)}
-                        </div>
-                        <div className="cv-item-body">
-                          <div className="cv-item-name">{p.cliente}</div>
-                          <div className="cv-item-preview">{labelEspera(minWait, urgency)}</div>
-                        </div>
-                        <div className="cv-item-meta">
-                          <span className="cv-item-time">{p.horario}</span>
-                          <span className="cv-badge-fila">{idx + 1}º</span>
-                        </div>
-                      </div>
-                    )
-                  })}
-                </>
-              )}
-
-              {/* Em atendimento section */}
-              {atendBusca.length > 0 && (
-                <>
-                  <div className="cv-section-label">Em atendimento</div>
-                  {atendBusca.map((p, idx) => {
-                    const isActive = conversaSelecionada === p.telefone
-                    const pixPendente = temPixPendente(p)
-                    return (
-                      <div
-                        key={p.id}
-                        className={`cv-item${isActive ? " cv-item-active" : ""}`}
-                        onClick={() => setConversaSelecionada(p.telefone)}
-                        style={{ animationDelay: `${idx * 0.03}s` }}
-                      >
-                        <div className="cv-item-avatar" style={{ background: "rgba(90,86,77,.1)", border: "1.5px solid #d5cfc8", color: "#8a8278" }}>
-                          {getInitials(p.cliente)}
-                        </div>
-                        <div className="cv-item-body">
-                          <div className="cv-item-name">{p.cliente}</div>
-                          <div className="cv-item-preview">{p.itens?.[0] || p.telefone}</div>
-                        </div>
-                        <div className="cv-item-meta">
-                          <span className="cv-item-time">{p.horario}</span>
-                          {pixPendente
-                            ? <span className="cv-badge-pix">PIX⏳</span>
-                            : <span className="cv-badge-atend">●</span>
-                          }
-                        </div>
-                      </div>
-                    )
-                  })}
-                </>
-              )}
+              {recentesBusca.map((c, idx) => {
+                const isActive = conversaSelecionada === c.phone
+                const cor = STATUS_COLOR[c.status]
+                const pedidoC = pedidos.find(p => p.telefone === c.phone)
+                const pixPendente = pedidoC ? temPixPendente(pedidoC) : false
+                return (
+                  <div
+                    key={c.phone}
+                    className={`cv-item${isActive ? " cv-item-active" : ""}`}
+                    onClick={() => setConversaSelecionada(c.phone)}
+                    style={{ animationDelay: `${idx * 0.03}s` }}
+                  >
+                    <div className="cv-item-avatar" style={{ background: `${cor}18`, border: `1.5px solid ${cor}44`, color: cor }}>
+                      {getInitials(c.nome)}
+                    </div>
+                    <div className="cv-item-body">
+                      <div className="cv-item-name">{c.nome}</div>
+                      <div className="cv-item-preview">{c.ultimaMensagem}</div>
+                    </div>
+                    <div className="cv-item-meta">
+                      <span className="cv-item-time">{formatRelTs(c.ultimaTs)}</span>
+                      {pixPendente
+                        ? <span className="cv-badge-pix">PIX⏳</span>
+                        : <span style={{ fontSize: 10, fontWeight: 900, padding: "3px 8px", borderRadius: 20, background: `${cor}12`, color: cor, border: `1px solid ${cor}30`, whiteSpace: "nowrap" }}>{STATUS_LABEL[c.status]}</span>
+                      }
+                    </div>
+                  </div>
+                )
+              })}
 
               {/* Empty states */}
-              {filaBusca.length === 0 && atendBusca.length === 0 && (
+              {recentesBusca.length === 0 && (
                 <div className="cv-list-empty">
                   {busca ? (
                     <>
@@ -749,9 +770,9 @@ export default function ConversasPage() {
                   ) : (
                     <>
                       <div style={{ fontSize: 30, marginBottom: 10 }}>✅</div>
-                      <div style={{ fontSize: 14, fontWeight: 900, color: "#56b87e", marginBottom: 6 }}>Nenhuma conversa aguardando</div>
+                      <div style={{ fontSize: 14, fontWeight: 900, color: "#56b87e", marginBottom: 6 }}>Nenhuma conversa recente</div>
                       <div style={{ fontSize: 12, fontWeight: 600, color: "#b0a89e", lineHeight: 1.6 }}>
-                        Quando um cliente precisar de atendimento, ele aparecerá aqui.
+                        As conversas das últimas 30 minutos aparecem aqui automaticamente.
                       </div>
                     </>
                   )}
@@ -762,71 +783,80 @@ export default function ConversasPage() {
 
           {/* ── RIGHT COLUMN: open conversation ── */}
           <div className={`cv-right${conversaSelecionada ? " cv-mob-visible" : ""}`}>
-            {!pedidoSelecionado ? (
+            {!conversaRecenteSelecionada ? (
               <div className="cv-no-select">
                 <div style={{ fontSize: 36 }}>💬</div>
                 <div style={{ fontSize: 15, fontWeight: 800, color: "#8a8278" }}>
                   {conversaSelecionada ? "Carregando…" : "Selecione uma conversa"}
                 </div>
                 <div style={{ fontSize: 13, fontWeight: 600, color: "#b0a89e", textAlign: "center", maxWidth: 240 }}>
-                  {!conversaSelecionada && "Escolha um cliente na lista ao lado para começar o atendimento."}
+                  {!conversaSelecionada && "Escolha um cliente na lista ao lado para ver o histórico."}
                 </div>
               </div>
             ) : (
               <>
                 {/* Chat header */}
-                <div className="cv-chat-header">
-                  <button className="cv-btn-back" onClick={() => setConversaSelecionada(null)} aria-label="Voltar">
-                    ←
-                  </button>
-                  <div
-                    className="cv-chat-header-avatar"
-                    style={isFilaItem
-                      ? { background: `${UC[getUrgency(minEsperando(getTimestampEspera(pedidoSelecionado), now))]}18`, color: UC[getUrgency(minEsperando(getTimestampEspera(pedidoSelecionado), now))], border: `2px solid ${UC[getUrgency(minEsperando(getTimestampEspera(pedidoSelecionado), now))]}44` }
-                      : { background: "rgba(90,86,77,.1)", color: "#8a8278", border: "1.5px solid #d5cfc8" }
-                    }
-                  >
-                    {getInitials(pedidoSelecionado.cliente)}
-                  </div>
-                  <div className="cv-chat-header-info">
-                    <div className="cv-chat-header-name">{pedidoSelecionado.cliente}</div>
-                    <div className="cv-chat-header-sub">{pedidoSelecionado.telefone}</div>
-                  </div>
-                  <div className="cv-chat-header-actions">
-                    {isFilaItem && (
-                      <span className="cv-badge-fila" style={{ fontSize: 11 }}>
-                        {labelEspera(minEsperando(getTimestampEspera(pedidoSelecionado), now), getUrgency(minEsperando(getTimestampEspera(pedidoSelecionado), now)))}
-                      </span>
-                    )}
-                    <a href={whatsappLink(pedidoSelecionado.telefone)} target="_blank" rel="noreferrer" className="cv-btn-wa">
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
-                        <path d="M9.5 8.5c-.28 0-.5.04-.7.12C8.3 8.2 7 9.5 7 11c0 2.5 2.5 5 5 6.5 1.5.8 3.5.5 4.5-.5.2-.2.4-.5.5-.8.1-.3 0-.6-.2-.8l-1.8-1.3c-.2-.15-.5-.1-.7.05l-.8.8c-.15.15-.4.2-.6.1C12 14.8 11.2 14 10.6 13c-.1-.2-.05-.45.1-.6l.8-.8c.15-.2.2-.5.05-.7L10.3 9.1c-.2-.22-.5-.6-.8-.6z" fill="white" />
-                      </svg>
-                      WA
-                    </a>
-                    {isFilaItem && (
-                      <button
-                        className="cv-btn-bot"
-                        disabled={devolvendoBot === pedidoSelecionado.id}
-                        onClick={() => devolverParaBot(pedidoSelecionado)}
-                      >
-                        {devolvendoBot === pedidoSelecionado.id ? "…" : "🤖"}
+                {(() => {
+                  const nomeHeader = pedidoSelecionado?.cliente ?? conversaRecenteSelecionada.nome
+                  const cor = STATUS_COLOR[conversaRecenteSelecionada.status]
+                  return (
+                    <div className="cv-chat-header">
+                      <button className="cv-btn-back" onClick={() => setConversaSelecionada(null)} aria-label="Voltar">
+                        ←
                       </button>
-                    )}
-                    <button
-                      className="cv-btn-fin"
-                      disabled={finalizando === pedidoSelecionado.id}
-                      onClick={() => setConfirmando(pedidoSelecionado)}
-                    >
-                      {finalizando === pedidoSelecionado.id ? "…" : "Finalizar"}
-                    </button>
-                  </div>
-                </div>
+                      <div className="cv-chat-header-avatar" style={{ background: `${cor}18`, color: cor, border: `1.5px solid ${cor}44` }}>
+                        {getInitials(nomeHeader)}
+                      </div>
+                      <div className="cv-chat-header-info">
+                        <div className="cv-chat-header-name">{nomeHeader}</div>
+                        <div className="cv-chat-header-sub">{conversaRecenteSelecionada.phone}</div>
+                      </div>
+                      <div className="cv-chat-header-actions">
+                        <span style={{ fontSize: 10, fontWeight: 900, padding: "3px 8px", borderRadius: 20, background: `${cor}12`, color: cor, border: `1px solid ${cor}30` }}>
+                          {STATUS_LABEL[conversaRecenteSelecionada.status]}
+                        </span>
+                        <a href={whatsappLink(conversaRecenteSelecionada.phone)} target="_blank" rel="noreferrer" className="cv-btn-wa">
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+                            <path d="M9.5 8.5c-.28 0-.5.04-.7.12C8.3 8.2 7 9.5 7 11c0 2.5 2.5 5 5 6.5 1.5.8 3.5.5 4.5-.5.2-.2.4-.5.5-.8.1-.3 0-.6-.2-.8l-1.8-1.3c-.2-.15-.5-.1-.7.05l-.8.8c-.15.15-.4.2-.6.1C12 14.8 11.2 14 10.6 13c-.1-.2-.05-.45.1-.6l.8-.8c.15-.2.2-.5.05-.7L10.3 9.1c-.2-.22-.5-.6-.8-.6z" fill="white" />
+                          </svg>
+                          WA
+                        </a>
+                        {pedidoSelecionado && isFilaItem && (
+                          <button
+                            className="cv-btn-bot"
+                            disabled={devolvendoBot === pedidoSelecionado.id}
+                            onClick={() => devolverParaBot(pedidoSelecionado)}
+                          >
+                            {devolvendoBot === pedidoSelecionado.id ? "…" : "🤖"}
+                          </button>
+                        )}
+                        {pedidoSelecionado && (
+                          <button
+                            className="cv-btn-fin"
+                            disabled={finalizando === pedidoSelecionado.id}
+                            onClick={() => setConfirmando(pedidoSelecionado)}
+                          >
+                            {finalizando === pedidoSelecionado.id ? "…" : "Finalizar"}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })()}
 
                 {/* PIX warning strip */}
-                {temPixPendente(pedidoSelecionado) && (
+                {pedidoSelecionado && temPixPendente(pedidoSelecionado) && (
                   <div style={{ background: "rgba(255,170,0,.08)", borderBottom: "1px solid rgba(255,170,0,.2)", padding: "8px 18px", fontSize: 12, fontWeight: 800, color: "#c08000", flexShrink: 0 }}>
                     ⚠ Pix pendente de confirmação neste pedido
+                  </div>
+                )}
+
+                {/* Status info strip for non-humano conversations */}
+                {conversaRecenteSelecionada.status !== 'humano' && (
+                  <div style={{ background: "rgba(0,0,0,.03)", borderBottom: "1px solid rgba(0,0,0,.06)", padding: "7px 18px", fontSize: 12, fontWeight: 700, color: STATUS_COLOR[conversaRecenteSelecionada.status], flexShrink: 0 }}>
+                    {conversaRecenteSelecionada.status === 'aguardando' && "⏳ Na fila — aguardando atendimento humano"}
+                    {conversaRecenteSelecionada.status === 'robo' && "🤖 Robô está respondendo esta conversa"}
+                    {conversaRecenteSelecionada.status === 'finalizado' && "✓ Atendimento finalizado — histórico somente leitura"}
                   </div>
                 )}
 
@@ -853,34 +883,36 @@ export default function ConversasPage() {
                   <div ref={historicoBottomRef} />
                 </div>
 
-                {/* Message input */}
-                <div className="cv-input-wrap">
-                  <textarea
-                    ref={mensagemInputRef}
-                    className="cv-textarea"
-                    placeholder="Digite sua mensagem…"
-                    value={mensagem}
-                    rows={1}
-                    onChange={e => setMensagem(e.target.value)}
-                    onKeyDown={e => {
-                      if (e.key === "Enter" && !e.shiftKey) {
-                        e.preventDefault()
-                        enviarMensagem()
-                      }
-                    }}
-                  />
-                  <button
-                    className="cv-send-btn"
-                    onClick={enviarMensagem}
-                    disabled={enviando || !mensagem.trim()}
-                    aria-label="Enviar mensagem"
-                  >
-                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
-                      <path d="M22 2L11 13" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
-                      <path d="M22 2L15 22L11 13L2 9L22 2Z" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                  </button>
-                </div>
+                {/* Message input — only when human is handling */}
+                {conversaRecenteSelecionada.status === 'humano' && (
+                  <div className="cv-input-wrap">
+                    <textarea
+                      ref={mensagemInputRef}
+                      className="cv-textarea"
+                      placeholder="Digite sua mensagem…"
+                      value={mensagem}
+                      rows={1}
+                      onChange={e => setMensagem(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault()
+                          enviarMensagem()
+                        }
+                      }}
+                    />
+                    <button
+                      className="cv-send-btn"
+                      onClick={enviarMensagem}
+                      disabled={enviando || !mensagem.trim()}
+                      aria-label="Enviar mensagem"
+                    >
+                      <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
+                        <path d="M22 2L11 13" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+                        <path d="M22 2L15 22L11 13L2 9L22 2Z" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    </button>
+                  </div>
+                )}
               </>
             )}
           </div>
