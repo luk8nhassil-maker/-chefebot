@@ -285,3 +285,99 @@ describe("14. nome detectado quando o bot está aguardando o nome do cliente", (
     expect(resumo.pendencias).not.toContain("Confirmar nome do cliente");
   });
 });
+
+// ─── 15. Detecção de nome por contexto da atendente ──────────────────────────
+
+describe("15. nome capturado quando atendente perguntou (step diferente de name)", () => {
+  it("1. 'qual o seu nome?' + 'lucas' → 'Lucas' (step category)", () => {
+    const s = { ...nova(), step: "category" as const };
+    const r = atualizarRascunhoAtendimentoTempoReal(s, "lucas", {
+      ultimaMensagemAtendente: "qual o seu nome?",
+    });
+    expect(r.rascunhoAtendimento?.nome).toBe("Lucas");
+  });
+
+  it("2. 'nome?' + 'lucas brito' → 'Lucas Brito' (step escalado)", () => {
+    const s = { ...nova(), step: "escalado" as const };
+    const r = atualizarRascunhoAtendimentoTempoReal(s, "lucas brito", {
+      ultimaMensagemAtendente: "nome?",
+    });
+    expect(r.rascunhoAtendimento?.nome).toBe("Lucas Brito");
+  });
+
+  it("3. última mensagem da atendente NÃO perguntou nome → não captura", () => {
+    const s = { ...nova(), step: "category" as const };
+    const r = atualizarRascunhoAtendimentoTempoReal(s, "lucas", {
+      ultimaMensagemAtendente: "tudo bem?",
+    });
+    expect(r.rascunhoAtendimento?.nome).toBeUndefined();
+  });
+
+  it("4. atendente perguntou nome + cliente 'dinheiro' → NÃO captura", () => {
+    const s = { ...nova(), step: "category" as const };
+    const r = atualizarRascunhoAtendimentoTempoReal(s, "dinheiro", {
+      ultimaMensagemAtendente: "qual o seu nome?",
+    });
+    expect(r.rascunhoAtendimento?.nome).toBeUndefined();
+  });
+
+  it("5. atendente perguntou nome + cliente 'pizza calabresa' → NÃO captura", () => {
+    const s = { ...nova(), step: "category" as const };
+    const r = atualizarRascunhoAtendimentoTempoReal(s, "pizza calabresa", {
+      ultimaMensagemAtendente: "me diga seu nome",
+    });
+    expect(r.rascunhoAtendimento?.nome).toBeUndefined();
+  });
+
+  it("6. customerName oficial existe → não sobrescreve mesmo com contexto", () => {
+    const s = { ...nova(), step: "category" as const, customerName: "Maria" };
+    const r = atualizarRascunhoAtendimentoTempoReal(s, "lucas", {
+      ultimaMensagemAtendente: "qual o seu nome?",
+    });
+    expect(r.rascunhoAtendimento?.nome).toBeUndefined();
+  });
+
+  it("7. rascunho.nome já existe → não sobrescreve com contextual", () => {
+    const s = {
+      ...nova(),
+      step: "category" as const,
+      rascunhoAtendimento: { itens: [], nome: "Ana" },
+    };
+    const r = atualizarRascunhoAtendimentoTempoReal(s, "lucas", {
+      ultimaMensagemAtendente: "qual o seu nome?",
+    });
+    expect(r.rascunhoAtendimento?.nome).toBe("Ana");
+  });
+
+  it("8. caso real: atendente pergunta → cliente responde → resumo correto", () => {
+    const s = { ...nova(), step: "escalado" as const };
+    const r = atualizarRascunhoAtendimentoTempoReal(s, "lucas", {
+      ultimaMensagemAtendente: "qual o seu nome?",
+    });
+    const resumo = calcularResumoAtendimentoHumano(r);
+    expect(resumo.cliente).toBe("Lucas");
+    expect(resumo.pendencias).not.toContain("Confirmar nome do cliente");
+  });
+
+  it("variantes de pergunta: 'como você se chama?' → captura nome", () => {
+    const s = { ...nova(), step: "category" as const };
+    const r = atualizarRascunhoAtendimentoTempoReal(s, "joao silva", {
+      ultimaMensagemAtendente: "como você se chama?",
+    });
+    expect(r.rascunhoAtendimento?.nome).toBe("Joao Silva");
+  });
+
+  it("variante: 'seu nome por favor' → captura nome", () => {
+    const s = { ...nova(), step: "category" as const };
+    const r = atualizarRascunhoAtendimentoTempoReal(s, "fernanda", {
+      ultimaMensagemAtendente: "seu nome por favor",
+    });
+    expect(r.rascunhoAtendimento?.nome).toBe("Fernanda");
+  });
+
+  it("sem contexto (undefined) → comportamento igual ao anterior", () => {
+    const s = { ...nova(), step: "category" as const };
+    const r = atualizarRascunhoAtendimentoTempoReal(s, "lucas");
+    expect(r.rascunhoAtendimento?.nome).toBeUndefined();
+  });
+});
