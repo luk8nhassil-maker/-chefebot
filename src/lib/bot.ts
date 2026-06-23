@@ -194,6 +194,9 @@ export interface BotSession {
     size?: string;
     qty?: number;
   };
+  // Rascunho de leitura para a atendente (MVP 3). Campo aditivo: NÃO participa do
+  // fluxo do bot — só é preenchido por atualizarRascunhoAtendimentoTempoReal.
+  rascunhoAtendimento?: import("./rascunhoAtendimentoTempoReal").RascunhoAtendimento;
 }
 export interface BotResponse {
   messages: string[];
