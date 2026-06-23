@@ -152,6 +152,7 @@ export default function ConversasPage() {
   const [confirmando, setConfirmando] = useState<Pedido | null>(null)
   const [finalizando, setFinalizando] = useState<string | null>(null)
   const [devolvendoBot, setDevolvendoBot] = useState<string | null>(null)
+  const [assumindo, setAssumindo] = useState(false)
   const [toast, setToast] = useState("")
   const [busca, setBusca] = useState("")
   const toastTimer = useRef<any>(null)
@@ -273,6 +274,22 @@ export default function ConversasPage() {
       } else { showToast("Não foi possível devolver para o robô.") }
     } catch { showToast("Não foi possível devolver para o robô.") }
     setDevolvendoBot(null)
+  }
+
+  async function assumirAtendimento(telefone: string) {
+    setAssumindo(true)
+    try {
+      const r = await fetch("/api/assumir", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ telefone }),
+      })
+      if (r.ok) {
+        setConversasRecentes(prev => prev.map(c => c.phone === telefone ? { ...c, status: 'humano' } : c))
+        showToast("Você assumiu o atendimento! 👤")
+      } else { showToast("Não foi possível assumir o atendimento.") }
+    } catch { showToast("Não foi possível assumir o atendimento.") }
+    setAssumindo(false)
   }
 
   async function finalizarAtendimento(p: Pedido) {
@@ -584,6 +601,17 @@ export default function ConversasPage() {
           transition: opacity .15s;
         }
         .cv-btn-bot:disabled { opacity: .4; }
+        .cv-btn-assumir {
+          height: 36px; padding: 0 14px;
+          background: #ff6b00;
+          border: none;
+          border-radius: 22px; color: #fff;
+          font-size: 12px; font-weight: 900;
+          transition: opacity .15s;
+          white-space: nowrap;
+        }
+        .cv-btn-assumir:hover:not(:disabled) { opacity: .88; }
+        .cv-btn-assumir:disabled { opacity: .5; }
         .cv-btn-fin {
           height: 36px; padding: 0 12px;
           background: transparent;
@@ -876,6 +904,16 @@ export default function ConversasPage() {
                           </svg>
                           WA
                         </a>
+                        {conversaRecenteSelecionada.status === 'robo' && (
+                          <button
+                            className="cv-btn-assumir"
+                            disabled={assumindo}
+                            onClick={() => assumirAtendimento(conversaRecenteSelecionada.phone)}
+                            title="Clique para assumir essa conversa manualmente."
+                          >
+                            {assumindo ? "…" : "Atender cliente"}
+                          </button>
+                        )}
                         {pedidoSelecionado && isFilaItem && (
                           <button
                             className="cv-btn-bot"
@@ -883,6 +921,29 @@ export default function ConversasPage() {
                             onClick={() => devolverParaBot(pedidoSelecionado)}
                           >
                             {devolvendoBot === pedidoSelecionado.id ? "…" : "🤖"}
+                          </button>
+                        )}
+                        {conversaRecenteSelecionada.status === 'humano' && !(pedidoSelecionado && isFilaItem) && (
+                          <button
+                            className="cv-btn-bot"
+                            disabled={devolvendoBot === conversaRecenteSelecionada.phone}
+                            onClick={async () => {
+                              setDevolvendoBot(conversaRecenteSelecionada.phone)
+                              try {
+                                const r = await fetch("/api/devolver-para-bot", {
+                                  method: "POST",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({ telefone: conversaRecenteSelecionada.phone }),
+                                })
+                                if (r.ok) {
+                                  setConversasRecentes(prev => prev.map(c => c.phone === conversaRecenteSelecionada.phone ? { ...c, status: 'robo' } : c))
+                                  showToast("Conversa devolvida para o robô! 🤖")
+                                } else { showToast("Não foi possível devolver para o robô.") }
+                              } catch { showToast("Não foi possível devolver para o robô.") }
+                              setDevolvendoBot(null)
+                            }}
+                          >
+                            {devolvendoBot === conversaRecenteSelecionada.phone ? "…" : "🤖"}
                           </button>
                         )}
                         {pedidoSelecionado && (
