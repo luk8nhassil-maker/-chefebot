@@ -168,6 +168,38 @@ function detectarNome(texto: string): string | undefined {
   return undefined;
 }
 
+// Palavras que NUNCA são nomes — evita confundir respostas comuns com o nome
+// do cliente quando o bot está esperando a resposta para "qual o seu nome?".
+const BLOCKLIST_NOME = new Set([
+  "dinheiro","pix","cartao","cartão","credito","crédito","debito","débito",
+  "entrega","delivery","retirada","dine","pizza","lanche","hamburguer","hamburger",
+  "bebida","suco","refrigerante","guarana","guaraná","cerveja","pepsi","coca",
+  "rua","avenida","av","bairro","travessa","estrada","rodovia","alameda","praca","praça",
+  "troco","real","reais","sim","nao","não","ok","oi","ola","olá","bom","boa",
+  "noite","tarde","dia","tudo","obrigado","obrigada","por","favor","preciso","quero",
+]);
+
+// Detecta nome simples (1-2 palavras, apenas letras) quando o bot está
+// aguardando o nome do cliente. Nunca inventado fora desse contexto.
+function detectarNomeContextual(
+  session: BotSession,
+  texto: string,
+): string | undefined {
+  const step = session.step;
+  if (step !== "name" && step !== "pedindo_nome") return undefined;
+
+  const partes = texto.trim().split(/\s+/);
+  if (partes.length === 0 || partes.length > 2) return undefined;
+
+  // Aceita apenas letras (incluindo acentuadas); rejeita números e símbolos.
+  if (!partes.every(p => /^[a-zA-ZÀ-ÿ]{2,}$/.test(p))) return undefined;
+
+  // Rejeita se qualquer parte estiver na blocklist.
+  if (partes.some(p => BLOCKLIST_NOME.has(norm(p)))) return undefined;
+
+  return partes.map(capitalizar).join(" ");
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Função principal: recebe a sessão e o texto novo do cliente; devolve uma NOVA
 // sessão com session.rascunhoAtendimento atualizado (merge incremental). Nunca
@@ -188,7 +220,13 @@ export function atualizarRascunhoAtendimentoTempoReal(
   const entrega = detectarEntrega(texto);
   const pagamento = detectarPagamento(texto);
   const troco = detectarTroco(texto);
-  const nome = detectarNome(texto);
+  // Explicit declarations always win; contextual only when no nome yet set.
+  const nomeExplicito = detectarNome(texto);
+  const nomeContextual =
+    !nomeExplicito && !session.customerName && !atual.nome
+      ? detectarNomeContextual(session, texto)
+      : undefined;
+  const nome = nomeExplicito ?? nomeContextual;
 
   const rascunhoAtendimento: RascunhoAtendimento = {
     nome: nome ?? atual.nome,

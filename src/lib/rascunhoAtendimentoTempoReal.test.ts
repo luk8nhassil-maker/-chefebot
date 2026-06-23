@@ -230,3 +230,58 @@ describe("13. helper não muta a sessão original", () => {
     expect(s.rascunhoAtendimento?.itens).toEqual(["Pizza G Calabresa", "Refrigerante"]);
   });
 });
+
+// ─── 14. Detecção de nome contextual (step "name" / "pedindo_nome") ───────────
+
+describe("14. nome detectado quando o bot está aguardando o nome do cliente", () => {
+  it("step 'name' + 'lucas' → nome 'Lucas'", () => {
+    const s = { ...nova(), step: "name" as const };
+    const r = atualizarRascunhoAtendimentoTempoReal(s, "lucas");
+    expect(r.rascunhoAtendimento?.nome).toBe("Lucas");
+  });
+
+  it("step 'pedindo_nome' + 'lucas brito' → nome 'Lucas Brito'", () => {
+    const s = { ...nova(), step: "pedindo_nome" as const };
+    const r = atualizarRascunhoAtendimentoTempoReal(s, "lucas brito");
+    expect(r.rascunhoAtendimento?.nome).toBe("Lucas Brito");
+  });
+
+  it("step diferente de 'name'/'pedindo_nome' NÃO captura nome simples", () => {
+    const s = { ...nova(), step: "category" as const };
+    const r = atualizarRascunhoAtendimentoTempoReal(s, "lucas");
+    expect(r.rascunhoAtendimento?.nome).toBeUndefined();
+  });
+
+  it("'dinheiro' no step 'name' NÃO é capturado como nome", () => {
+    const s = { ...nova(), step: "name" as const };
+    const r = atualizarRascunhoAtendimentoTempoReal(s, "dinheiro");
+    expect(r.rascunhoAtendimento?.nome).toBeUndefined();
+  });
+
+  it("'pix' no step 'name' NÃO é capturado como nome", () => {
+    const s = { ...nova(), step: "name" as const };
+    const r = atualizarRascunhoAtendimentoTempoReal(s, "pix");
+    expect(r.rascunhoAtendimento?.nome).toBeUndefined();
+  });
+
+  it("'pizza' no step 'pedindo_nome' NÃO é capturado como nome", () => {
+    const s = { ...nova(), step: "pedindo_nome" as const };
+    const r = atualizarRascunhoAtendimentoTempoReal(s, "pizza");
+    expect(r.rascunhoAtendimento?.nome).toBeUndefined();
+  });
+
+  it("oficial session.customerName impede sobrescrita pelo contextual", () => {
+    const s = { ...nova(), step: "name" as const, customerName: "Maria" };
+    const r = atualizarRascunhoAtendimentoTempoReal(s, "lucas");
+    // rascunho.nome não é preenchido porque oficial já existe
+    expect(r.rascunhoAtendimento?.nome).toBeUndefined();
+  });
+
+  it("nome detectado remove 'Confirmar nome do cliente' das pendências", () => {
+    const s = { ...nova(), step: "name" as const };
+    const r = atualizarRascunhoAtendimentoTempoReal(s, "lucas");
+    const resumo = calcularResumoAtendimentoHumano(r);
+    expect(resumo.cliente).toBe("Lucas");
+    expect(resumo.pendencias).not.toContain("Confirmar nome do cliente");
+  });
+});
