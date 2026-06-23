@@ -14,7 +14,7 @@ import { transcreverAudio } from "@/lib/transcribeAudio";
 import { proximoNumeroPedido } from "@/lib/numeracao";
 import { salvarStatusConexao, botPodeResponder, StatusConexao } from "@/lib/conexaoWhatsapp";
 import { ehConfirmacaoPedido } from "@/lib/confirmacaoPedido";
-import { escolherStepDeRetomada } from "@/lib/reviverConversa";
+import { escolherStepDeRetomada, detectarConversaMorta } from "@/lib/reviverConversa";
 import type { BotStep } from "@/lib/bot";
 
 export const maxDuration = 30;
@@ -901,15 +901,20 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
-    // Revive conversa travada no step "escalado" quando o manual lock expirou.
-    // Sem este patch o bot ficaria repetindo "Já avisamos e vêm aí" indefinidamente.
+    // Revive conversa travada (step "escalado" ou "done" com manual lock expirado).
+    // Usa detectarConversaMorta para manter a lógica centralizada no helper.
     // Cooldown de 10 min evita loop de revival em caso de bug.
-    if (currentSession && currentSession.step === "escalado") {
+    if (currentSession) {
       const cooldownKey = `revive_cooldown:${phone}`;
       const cooldownAtivo = await redis.get(cooldownKey);
-      if (!cooldownAtivo) {
-        const novoStep = escolherStepDeRetomada(currentSession) as BotStep;
-        currentSession = { ...currentSession, step: novoStep, escalado: false, stepAnteriorEscalado: undefined };
+      const resultadoReviver = detectarConversaMorta(currentSession, {
+        emManual: false,
+        botAtivo: true,
+        aguardandoPix: false, // early return em "aguardando_pix" já garantiu que não chegamos aqui
+        cooldownAtivo: !!cooldownAtivo,
+      });
+      if (resultadoReviver.deveReviver && resultadoReviver.novoStep) {
+        currentSession = { ...currentSession, step: resultadoReviver.novoStep as BotStep, escalado: false, stepAnteriorEscalado: undefined };
         await redis.set(sessionKey, currentSession, { ex: 1800 });
         await redis.set(cooldownKey, 1, { ex: 600 });
       }

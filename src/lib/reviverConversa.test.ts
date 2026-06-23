@@ -137,26 +137,21 @@ describe("detectarConversaMorta", () => {
   });
 });
 
-// ─── Cenários de webhook (comportamento derivado do helper) ──────────────────
+// ─── Cenários de webhook — usa detectarConversaMorta (não hardcode) ──────────
 
 describe("cenários de webhook via helper", () => {
-  it("mensagem nova em conversa escalado com bot ativo → deveReviver true (webhook processa)", () => {
+  it("step escalado + bot ativo → deveReviver true (webhook revive)", () => {
     const s = sessaoBase({ step: "escalado" });
     const r = detectarConversaMorta(s, ctxPadrao);
     expect(r.deveReviver).toBe(true);
     expect(r.novoStep).toBeDefined();
   });
 
-  it("mensagem com manual ativo → deveReviver false (webhook ignora processMessage)", () => {
-    const s = sessaoBase({ step: "escalado" });
-    const r = detectarConversaMorta(s, { ...ctxPadrao, emManual: true });
-    expect(r.deveReviver).toBe(false);
-  });
-
-  it("mensagem com bot global desligado → deveReviver false (webhook não processa)", () => {
-    const s = sessaoBase({ step: "escalado" });
-    const r = detectarConversaMorta(s, { ...ctxPadrao, botAtivo: false });
-    expect(r.deveReviver).toBe(false);
+  it("step done + bot ativo → deveReviver true (webhook revive — não só escalado)", () => {
+    const s = sessaoBase({ step: "done" });
+    const r = detectarConversaMorta(s, ctxPadrao);
+    expect(r.deveReviver).toBe(true);
+    expect(r.novoStep).toBeDefined();
   });
 
   it("cooldown ativo → deveReviver false (sem loop de revival)", () => {
@@ -164,6 +159,33 @@ describe("cenários de webhook via helper", () => {
     const r = detectarConversaMorta(s, { ...ctxPadrao, cooldownAtivo: true });
     expect(r.deveReviver).toBe(false);
     expect(r.motivo).toBe("cooldown_ativo");
+  });
+
+  it("manual ativo → deveReviver false (webhook não chama processMessage)", () => {
+    const s = sessaoBase({ step: "escalado" });
+    const r = detectarConversaMorta(s, { ...ctxPadrao, emManual: true });
+    expect(r.deveReviver).toBe(false);
+    expect(r.motivo).toBe("atendimento_manual");
+  });
+
+  it("bot global desligado → deveReviver false (webhook não chama processMessage)", () => {
+    const s = sessaoBase({ step: "escalado" });
+    const r = detectarConversaMorta(s, { ...ctxPadrao, botAtivo: false });
+    expect(r.deveReviver).toBe(false);
+    expect(r.motivo).toBe("bot_desligado");
+  });
+
+  it("aguardando Pix → deveReviver false (não revive durante pagamento)", () => {
+    const s = sessaoBase({ step: "escalado" });
+    const r = detectarConversaMorta(s, { ...ctxPadrao, aguardandoPix: true });
+    expect(r.deveReviver).toBe(false);
+    expect(r.motivo).toBe("aguardando_pix");
+  });
+
+  it("histórico conversa:phone — helper não acessa Redis (nunca apaga conversa)", () => {
+    const s = sessaoBase({ step: "escalado" });
+    // Se o helper chamasse Redis aqui sem mock, lançaria erro. Não lança → ok.
+    expect(() => detectarConversaMorta(s, ctxPadrao)).not.toThrow();
   });
 });
 
