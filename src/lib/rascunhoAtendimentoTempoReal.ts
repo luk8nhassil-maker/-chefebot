@@ -184,6 +184,32 @@ const BLOCKLIST_NOME = new Set([
   "noite","tarde","dia","tudo","obrigado","obrigada","por","favor","preciso","quero",
 ]);
 
+// Conjunto de termos do cardápio (sabores, bebidas, lanches) em forma normalizada.
+// Construído uma única vez a partir do MENU para evitar falsos positivos de nome.
+const TERMOS_CARDAPIO: Set<string> = (() => {
+  const set = new Set<string>();
+  const add = (t: string) => { const n = norm(t); if (n.length >= 2) set.add(n); };
+
+  // Sabores: indexa o nome completo e cada palavra individual.
+  for (const f of [...MENU.saltyFlavors, ...MENU.sweetFlavors]) {
+    add(f);
+    for (const w of f.split(" ")) add(w);
+  }
+  // Bebidas, sucos e lanches: apenas o nome completo (palavras individuais já cobertas).
+  for (const b of MENU.bebidas ?? []) add(b.name);
+  for (const s of MENU.sucos ?? []) add(s.name);
+  for (const l of MENU.lanches ?? []) add(l.name);
+
+  return set;
+})();
+
+// Rejeita uma resposta que provavelmente seja um item/sabor do cardápio.
+// Usado apenas na captura de nome contextual.
+function pareceItemDeCardapio(texto: string): boolean {
+  const partes = norm(texto).split(/\s+/);
+  return partes.some(p => TERMOS_CARDAPIO.has(p));
+}
+
 // Verifica se a mensagem da atendente indica que ela estava pedindo o nome.
 function atendentePerguNome(msg: string): boolean {
   if (!msg) return false;
@@ -219,8 +245,11 @@ function detectarNomeContextual(
   // Aceita apenas letras (incluindo acentuadas); rejeita números e símbolos.
   if (!partes.every(p => /^[a-zA-ZÀ-ÿ]{2,}$/.test(p))) return undefined;
 
-  // Rejeita se qualquer parte estiver na blocklist.
+  // Rejeita se qualquer parte estiver na blocklist de palavras comuns.
   if (partes.some(p => BLOCKLIST_NOME.has(norm(p)))) return undefined;
+
+  // Rejeita se a resposta parecer um sabor, bebida ou lanche do cardápio.
+  if (pareceItemDeCardapio(texto)) return undefined;
 
   return partes.map(capitalizar).join(" ");
 }

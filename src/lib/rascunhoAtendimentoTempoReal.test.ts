@@ -381,3 +381,44 @@ describe("15. nome capturado quando atendente perguntou (step diferente de name)
     expect(r.rascunhoAtendimento?.nome).toBeUndefined();
   });
 });
+
+// ─── 16. Termos de cardápio não viram nome mesmo com contexto de atendente ────
+
+describe("16. sabores e itens de cardápio não são capturados como nome", () => {
+  const ctx = { ultimaMensagemAtendente: "qual o seu nome?" };
+
+  it("'calabresa' → NÃO captura nome", () => {
+    const s = { ...nova(), step: "category" as const };
+    expect(atualizarRascunhoAtendimentoTempoReal(s, "calabresa", ctx).rascunhoAtendimento?.nome).toBeUndefined();
+  });
+
+  it("'frango' → NÃO captura nome", () => {
+    const s = { ...nova(), step: "category" as const };
+    expect(atualizarRascunhoAtendimentoTempoReal(s, "frango", ctx).rascunhoAtendimento?.nome).toBeUndefined();
+  });
+
+  it("'portuguesa' → NÃO captura nome", () => {
+    const s = { ...nova(), step: "category" as const };
+    expect(atualizarRascunhoAtendimentoTempoReal(s, "portuguesa", ctx).rascunhoAtendimento?.nome).toBeUndefined();
+  });
+
+  it("'bacon' → NÃO captura nome", () => {
+    const s = { ...nova(), step: "category" as const };
+    expect(atualizarRascunhoAtendimentoTempoReal(s, "bacon", ctx).rascunhoAtendimento?.nome).toBeUndefined();
+  });
+
+  it("'chocolate' → NÃO captura nome", () => {
+    const s = { ...nova(), step: "category" as const };
+    expect(atualizarRascunhoAtendimentoTempoReal(s, "chocolate", ctx).rascunhoAtendimento?.nome).toBeUndefined();
+  });
+
+  it("'lucas' continua sendo capturado como nome", () => {
+    const s = { ...nova(), step: "category" as const };
+    expect(atualizarRascunhoAtendimentoTempoReal(s, "lucas", ctx).rascunhoAtendimento?.nome).toBe("Lucas");
+  });
+
+  it("'lucas brito' continua sendo capturado como nome", () => {
+    const s = { ...nova(), step: "category" as const };
+    expect(atualizarRascunhoAtendimentoTempoReal(s, "lucas brito", ctx).rascunhoAtendimento?.nome).toBe("Lucas Brito");
+  });
+});
