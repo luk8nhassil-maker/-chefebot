@@ -100,6 +100,35 @@ function formatTs(ts?: number): string {
   return new Date(ts).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })
 }
 
+function ss(val: unknown, fallback = ""): string {
+  return typeof val === "string" ? val : fallback
+}
+
+function normalizarConversa(raw: unknown): ConversaRecente {
+  const c = (raw ?? {}) as Record<string, unknown>
+  const validStatuses: StatusConversa[] = ["aguardando", "humano", "robo", "finalizado"]
+  const phone = ss(c.phone)
+  return {
+    phone,
+    nome: ss(c.nome) || phone || "?",
+    ultimaMensagem: ss(c.ultimaMensagem),
+    ultimaTs: typeof c.ultimaTs === "number" ? c.ultimaTs : 0,
+    status: validStatuses.includes(c.status as StatusConversa)
+      ? (c.status as StatusConversa)
+      : "finalizado",
+    mensagensCount: typeof c.mensagensCount === "number" ? c.mensagensCount : 0,
+  }
+}
+
+function normalizarMensagem(raw: unknown): { autor: string; texto: string; ts?: number } {
+  const m = (raw ?? {}) as Record<string, unknown>
+  return {
+    autor: ss(m.autor) || "bot",
+    texto: ss(m.texto),
+    ts: typeof m.ts === "number" ? m.ts : undefined,
+  }
+}
+
 function msgTexto(msg: { autor: string; texto?: string | null }): string {
   const t = msg.texto ?? ""
   if (msg.autor === "atendente") return t.replace(/^\[.*?\]\s*/, "")
@@ -141,14 +170,17 @@ export default function ConversasPage() {
   async function carregarRecentes() {
     try {
       const r = await fetch("/api/conversas/recentes")
-      if (r.ok) setConversasRecentes(await r.json())
+      if (r.ok) {
+        const json = await r.json()
+        setConversasRecentes(Array.isArray(json) ? json.map(normalizarConversa) : [])
+      }
     } catch {}
   }
 
   function carregar() {
     fetch("/api/orders")
       .then(r => { if (r.status === 401) { router.push("/login?callbackUrl=/conversas"); return null } return r.json() })
-      .then(data => { if (data) { setPedidos(data); setLoading(false) } })
+      .then(data => { if (data) { setPedidos(Array.isArray(data) ? data : []); setLoading(false) } })
       .catch(() => setLoading(false))
   }
 
@@ -195,7 +227,8 @@ export default function ConversasPage() {
       const r = await fetch(`/api/pedido-combinado?phone=${encodeURIComponent(phone)}`)
       if (r.ok) {
         const data = await r.json()
-        setHistoricoMsgs(data.conversa ?? [])
+        const msgs = Array.isArray(data?.conversa) ? data.conversa : []
+        setHistoricoMsgs(msgs.map(normalizarMensagem))
       }
     } catch {}
   }
@@ -272,11 +305,11 @@ export default function ConversasPage() {
   )
 
   const filaBusca = busca.trim()
-    ? fila.filter(p => p.cliente.toLowerCase().includes(busca.toLowerCase()) || p.telefone.includes(busca))
+    ? fila.filter(p => ss(p.cliente).toLowerCase().includes(busca.toLowerCase()) || ss(p.telefone).includes(busca))
     : fila
 
   const atendBusca = busca.trim()
-    ? emAtendimento.filter(p => p.cliente.toLowerCase().includes(busca.toLowerCase()) || p.telefone.includes(busca))
+    ? emAtendimento.filter(p => ss(p.cliente).toLowerCase().includes(busca.toLowerCase()) || ss(p.telefone).includes(busca))
     : emAtendimento
 
   const maxEsperaMin = fila.length > 0 ? minEsperando(getTimestampEspera(fila[0]), now) : 0
@@ -292,7 +325,7 @@ export default function ConversasPage() {
 
   const recentesBusca = busca.trim()
     ? conversasRecentes.filter(c =>
-        c.nome.toLowerCase().includes(busca.toLowerCase()) || c.phone.includes(busca)
+        ss(c.nome).toLowerCase().includes(busca.toLowerCase()) || ss(c.phone).includes(busca)
       )
     : conversasRecentes
 
@@ -958,7 +991,7 @@ export default function ConversasPage() {
               </div>
               <div>
                 <div style={{ fontSize: 17, fontWeight: 900, letterSpacing: "-0.3px", color: "#1a1715" }}>Finalizar atendimento?</div>
-                <div style={{ fontSize: 12, fontWeight: 600, color: "#8a8278" }}>{confirmando.cliente.split(" ")[0]}</div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "#8a8278" }}>{ss(confirmando.cliente).split(" ")[0] || "Cliente"}</div>
               </div>
             </div>
 
