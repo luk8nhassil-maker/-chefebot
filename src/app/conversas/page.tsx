@@ -317,7 +317,7 @@ export default function ConversasPage() {
         @keyframes cbFadeIn { from{opacity:0;transform:translateY(5px)} to{opacity:1;transform:none} }
         @keyframes cbSheetUp { from{transform:translateY(100%)} to{transform:none} }
 
-        /* Override ps-content: full-height + subtle warm gradient on the dark shell */
+        /* Override ps-content */
         .ps-content {
           overflow: hidden !important;
           padding-bottom: 0 !important;
@@ -333,7 +333,7 @@ export default function ConversasPage() {
         .cv-root {
           display: flex;
           flex-direction: row;
-          background: #fbf7f2;
+          background: #17140f;
           border-radius: 0;
           overflow: hidden;
           height: calc(100svh - 72px - env(safe-area-inset-bottom));
@@ -341,11 +341,11 @@ export default function ConversasPage() {
         @media (min-width: 768px) {
           .cv-root {
             margin: 16px;
-            border-radius: 24px;
+            border-radius: 32px;
             box-shadow:
-              0 20px 80px rgba(0,0,0,.65),
-              0 4px 24px rgba(0,0,0,.35),
-              0 0 0 1px rgba(255,255,255,.04);
+              0 24px 80px rgba(0,0,0,.72),
+              0 4px 24px rgba(0,0,0,.42),
+              0 0 0 1px rgba(255,255,255,.05);
             height: calc(100vh - 32px);
           }
         }
@@ -353,37 +353,37 @@ export default function ConversasPage() {
           .cv-root { margin: 20px; height: calc(100vh - 40px); }
         }
 
-        /* ── Left column: conversation list ── */
+        /* ── Left column ── */
         .cv-left {
           display: flex;
           flex-direction: column;
           width: 100%;
-          background: #fbf7f2;
+          background: #17140f;
           overflow: hidden;
           flex-shrink: 0;
           position: relative;
           z-index: 1;
         }
         @media (min-width: 768px) {
-          .cv-left { width: 300px; border-radius: 24px 0 0 24px; }
+          .cv-left { width: 300px; border-radius: 32px 0 0 32px; }
         }
         @media (min-width: 1024px) {
           .cv-left { width: 320px; }
         }
 
-        /* ── Right column: open conversation ── */
+        /* ── Right column ── */
         .cv-right {
           display: none;
           flex-direction: column;
           flex: 1;
-          background: #fbf7f2;
+          background: #17140f;
           overflow: hidden;
         }
         @media (min-width: 768px) {
-          .cv-right { display: flex !important; border-radius: 0 24px 24px 0; }
+          .cv-right { display: flex !important; border-radius: 0 32px 32px 0; }
         }
 
-        /* Mobile: toggle between list and detail */
+        /* Mobile toggle */
         .cv-left.cv-mob-hidden { display: none !important; }
         .cv-right.cv-mob-visible { display: flex !important; }
         @media (min-width: 768px) {
@@ -391,49 +391,58 @@ export default function ConversasPage() {
           .cv-right { display: flex !important; }
         }
 
-        /* ── List header — no hard border, depth by shadow ── */
+        /* ── List header — sem sombra (remove a linha abaixo da busca) ── */
         .cv-list-header {
           padding: 20px 16px 14px;
           background: transparent;
           flex-shrink: 0;
           position: relative;
           z-index: 1;
-          box-shadow: 0 4px 14px rgba(0,0,0,.05);
         }
 
-        /* ── Search: pill shape, inset shadow instead of border ── */
+        /* ── Título "Conversas" — força cor clara (inline style usa dark) ── */
+        .cv-list-header > div > div:first-child > div:first-child {
+          color: #ede9e3 !important;
+          font-size: clamp(18px, 1.6vw, 24px) !important;
+          letter-spacing: -0.5px !important;
+        }
+        .cv-list-header > div > div:first-child > div:last-child {
+          color: #504840 !important;
+        }
+
+        /* ── Search ── */
         .cv-search {
           width: 100%; height: 40px;
-          background: rgba(255,255,255,.72);
+          background: rgba(255,255,255,.07);
           border: none;
           border-radius: 22px;
           padding: 0 14px 0 38px;
-          color: #1a1715; font-size: 13px; font-weight: 600;
+          color: #ede9e3; font-size: 13px; font-weight: 600;
           font-family: 'Archivo', sans-serif;
-          box-shadow: 0 1px 5px rgba(0,0,0,.1) inset;
+          box-shadow: 0 1px 4px rgba(0,0,0,.35) inset;
           transition: box-shadow .15s;
         }
-        .cv-search::placeholder { color: #b8b0a6; }
-        .cv-search:focus { outline: none; box-shadow: 0 0 0 2.5px rgba(255,107,0,.22), 0 1px 3px rgba(0,0,0,.08) inset; }
+        .cv-search::placeholder { color: #4a4840; }
+        .cv-search:focus { outline: none; box-shadow: 0 0 0 2.5px rgba(255,107,0,.3), 0 1px 4px rgba(0,0,0,.35) inset; }
 
         /* ── List scroll area ── */
         .cv-list-scroll {
           flex: 1;
           overflow-y: auto;
-          padding: 6px 0 12px;
+          padding: 4px 0 8px;
         }
         .cv-list-scroll::-webkit-scrollbar { width: 3px; }
         .cv-list-scroll::-webkit-scrollbar-track { background: transparent; }
-        .cv-list-scroll::-webkit-scrollbar-thumb { background: #d0c9c0; border-radius: 2px; }
+        .cv-list-scroll::-webkit-scrollbar-thumb { background: #302820; border-radius: 2px; }
 
         /* ── Section label ── */
         .cv-section-label {
           font-size: 10px; font-weight: 900; letter-spacing: .7px;
-          text-transform: uppercase; color: #a8a098;
+          text-transform: uppercase; color: #4a4840;
           padding: 14px 20px 5px;
         }
 
-        /* ── Conversation items as floating cards ── */
+        /* ── Conversation items ── */
         .cv-item {
           display: flex; align-items: center; gap: 12px;
           padding: 12px 14px;
@@ -444,15 +453,15 @@ export default function ConversasPage() {
           animation: cbFadeIn .22s ease both;
         }
         .cv-item:hover {
-          background: rgba(255,255,255,.75);
-          box-shadow: 0 3px 14px rgba(0,0,0,.07);
+          background: rgba(255,255,255,.06);
+          box-shadow: 0 3px 14px rgba(0,0,0,.3);
           transform: translateY(-1px);
         }
         .cv-item.cv-item-active {
-          background: #ffffff;
+          background: rgba(255,255,255,.09);
           box-shadow:
-            0 6px 20px rgba(255,107,0,.13),
-            0 2px 6px rgba(0,0,0,.06);
+            0 6px 20px rgba(255,107,0,.16),
+            0 2px 6px rgba(0,0,0,.3);
         }
         .cv-item-avatar {
           width: 44px; height: 44px; border-radius: 50%;
@@ -462,36 +471,36 @@ export default function ConversasPage() {
         }
         .cv-item-body { flex: 1; min-width: 0; }
         .cv-item-name {
-          font-size: 13.5px; font-weight: 800; color: #1a1715;
+          font-size: 13.5px; font-weight: 800; color: #ede9e3;
           white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
         }
         .cv-item-preview {
-          font-size: 12px; font-weight: 600; color: #8a8278;
+          font-size: 12px; font-weight: 600; color: #6a6258;
           white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
           margin-top: 2px;
         }
         .cv-item-meta {
           display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex-shrink: 0;
         }
-        .cv-item-time { font-size: 11px; font-weight: 700; color: #a8a098; }
+        .cv-item-time { font-size: 11px; font-weight: 700; color: #504840; }
 
         /* ── Empty states ── */
         .cv-list-empty { padding: 44px 24px; text-align: center; }
         .cv-no-select {
           flex: 1; display: flex; flex-direction: column;
           align-items: center; justify-content: center;
-          color: #b8b0a8; gap: 12px;
+          color: #6a6258; gap: 12px;
         }
 
-        /* ── Chat header — depth by shadow, no hard border ── */
+        /* ── Chat header ── */
         .cv-chat-header {
           display: flex; align-items: center; gap: 12px;
           padding: 16px 20px;
-          background: #ffffff;
+          background: #201c17;
           flex-shrink: 0;
           min-height: 72px;
           position: relative; z-index: 1;
-          box-shadow: 0 3px 16px rgba(0,0,0,.06);
+          box-shadow: 0 3px 16px rgba(0,0,0,.35);
         }
         .cv-chat-header-avatar {
           width: 42px; height: 42px; border-radius: 50%;
@@ -500,13 +509,13 @@ export default function ConversasPage() {
         }
         .cv-chat-header-info { flex: 1; min-width: 0; }
         .cv-chat-header-name {
-          font-size: 14px; font-weight: 900; color: #1a1715;
+          font-size: 14px; font-weight: 900; color: #ede9e3;
           white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
         }
-        .cv-chat-header-sub { font-size: 11px; font-weight: 700; color: #a8a098; margin-top: 2px; }
+        .cv-chat-header-sub { font-size: 11px; font-weight: 700; color: #6a6258; margin-top: 2px; }
         .cv-chat-header-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 
-        /* Header action buttons */
+        /* Header buttons */
         .cv-btn-wa {
           display: flex; align-items: center; gap: 5px;
           height: 36px; padding: 0 13px;
@@ -520,9 +529,9 @@ export default function ConversasPage() {
         .cv-btn-wa:active { opacity: .8; transform: none; }
         .cv-btn-bot {
           height: 36px; padding: 0 12px;
-          background: rgba(100,140,255,.08);
-          border: 1.5px solid rgba(100,140,255,.2);
-          border-radius: 22px; color: #5577ee;
+          background: rgba(100,140,255,.1);
+          border: 1.5px solid rgba(100,140,255,.25);
+          border-radius: 22px; color: #7799ee;
           font-size: 12px; font-weight: 900;
           transition: opacity .15s;
         }
@@ -530,36 +539,36 @@ export default function ConversasPage() {
         .cv-btn-fin {
           height: 36px; padding: 0 12px;
           background: transparent;
-          border: 1.5px solid #ddd9d2;
-          border-radius: 22px; color: #8a8278;
+          border: 1.5px solid rgba(255,255,255,.12);
+          border-radius: 22px; color: #7a7268;
           font-size: 12px; font-weight: 800;
           transition: background .15s;
         }
-        .cv-btn-fin:hover:not(:disabled) { background: rgba(0,0,0,.03); }
+        .cv-btn-fin:hover:not(:disabled) { background: rgba(255,255,255,.06); }
         .cv-btn-fin:disabled { opacity: .4; }
         .cv-btn-back {
           height: 36px; width: 36px;
           background: transparent; border: none;
-          color: #766d63; font-size: 18px;
+          color: #7a7268; font-size: 18px;
           display: flex; align-items: center; justify-content: center;
           border-radius: 50%; flex-shrink: 0;
           transition: background .12s;
         }
-        .cv-btn-back:hover { background: rgba(0,0,0,.05); }
+        .cv-btn-back:hover { background: rgba(255,255,255,.06); }
         @media (min-width: 768px) {
           .cv-btn-back { display: none !important; }
         }
 
-        /* ── Messages area: only scrollable region ── */
+        /* ── Messages area (única região rolável) ── */
         .cv-msgs {
           flex: 1; overflow-y: auto;
           padding: 20px 20px 12px;
           display: flex; flex-direction: column; gap: 10px;
-          background: linear-gradient(160deg, #fdfcfa 0%, #f9f5f0 100%);
+          background: #131008;
         }
         .cv-msgs::-webkit-scrollbar { width: 3px; }
         .cv-msgs::-webkit-scrollbar-track { background: transparent; }
-        .cv-msgs::-webkit-scrollbar-thumb { background: #ddd8d0; border-radius: 2px; }
+        .cv-msgs::-webkit-scrollbar-thumb { background: #302820; border-radius: 2px; }
 
         /* Message rows */
         .cv-msg-row { display: flex; flex-direction: column; max-width: 74%; gap: 3px; }
@@ -567,14 +576,14 @@ export default function ConversasPage() {
         .cv-msg-row.cv-row-atendente { align-self: flex-end; align-items: flex-end; }
         .cv-msg-row.cv-row-bot { align-self: flex-end; align-items: flex-end; }
 
-        /* Bubbles — more rounded, no sharp corners except tail */
+        /* Bubbles */
         .cv-bubble {
           padding: 10px 16px; border-radius: 22px;
           font-size: 13px; font-weight: 600; line-height: 1.55;
           word-break: break-word;
         }
         .cv-bubble-client {
-          background: #edeae4; color: #1a1715;
+          background: #2a2420; color: #cfc9c1;
           border-bottom-left-radius: 6px;
         }
         .cv-bubble-atendente {
@@ -584,50 +593,50 @@ export default function ConversasPage() {
           box-shadow: 0 3px 10px rgba(255,107,0,.28);
         }
         .cv-bubble-bot {
-          background: #eaedff; color: #3344bb;
+          background: #1a1d30; color: #8899cc;
           border-bottom-right-radius: 6px;
         }
 
         /* Sender label + time */
-        .cv-msg-sender { font-size: 10.5px; font-weight: 700; color: #a8a098; padding: 0 4px; }
-        .cv-msg-time { font-size: 10.5px; font-weight: 700; color: #bdb5ac; padding: 0 4px; }
+        .cv-msg-sender { font-size: 10.5px; font-weight: 700; color: #5a5248; padding: 0 4px; }
+        .cv-msg-time { font-size: 10.5px; font-weight: 700; color: #3e3830; padding: 0 4px; }
         .cv-msgs-empty {
           flex: 1; display: flex; align-items: center; justify-content: center;
-          color: #c8c0b8; font-size: 13px; font-weight: 700;
+          color: #4a4440; font-size: 13px; font-weight: 700;
         }
 
-        /* ── Input area: fixed footer, no hard border ── */
+        /* ── Input area ── */
         .cv-input-wrap {
           display: flex; align-items: flex-end; gap: 10px;
           padding: 14px 18px calc(14px + env(safe-area-inset-bottom));
-          background: #ffffff;
+          background: #201c17;
           flex-shrink: 0;
-          box-shadow: 0 -3px 16px rgba(0,0,0,.05);
+          box-shadow: 0 -3px 16px rgba(0,0,0,.3);
         }
         @media (min-width: 768px) {
           .cv-input-wrap { padding: 14px 18px; }
         }
 
-        /* Textarea: pill shape, no hard border */
+        /* Textarea */
         .cv-textarea {
           flex: 1; min-height: 44px; max-height: 110px;
-          background: #f4f1ec;
+          background: #2a2520;
           border: none;
           border-radius: 24px;
           padding: 11px 18px;
-          color: #1a1715; font-size: 13.5px; font-weight: 600;
+          color: #ede9e3; font-size: 13.5px; font-weight: 600;
           font-family: 'Archivo', sans-serif; resize: none;
           line-height: 1.45;
-          box-shadow: 0 1px 5px rgba(0,0,0,.09) inset;
+          box-shadow: 0 1px 4px rgba(0,0,0,.35) inset;
           transition: box-shadow .15s;
         }
-        .cv-textarea::placeholder { color: #b8b0a6; }
+        .cv-textarea::placeholder { color: #4a4840; }
         .cv-textarea:focus {
           outline: none;
-          box-shadow: 0 0 0 2.5px rgba(255,107,0,.2), 0 1px 4px rgba(0,0,0,.08) inset;
+          box-shadow: 0 0 0 2.5px rgba(255,107,0,.25), 0 1px 4px rgba(0,0,0,.35) inset;
         }
 
-        /* Send button: circular gradient + glow */
+        /* Send button */
         .cv-send-btn {
           width: 46px; height: 46px; border-radius: 50%; flex-shrink: 0;
           background: linear-gradient(135deg, #ff8a2b 0%, #ff5000 100%);
@@ -642,24 +651,24 @@ export default function ConversasPage() {
           box-shadow: 0 6px 18px rgba(255,107,0,.5);
         }
         .cv-send-btn:active:not(:disabled) { transform: scale(.92); box-shadow: 0 2px 8px rgba(255,107,0,.3); }
-        .cv-send-btn:disabled { background: #e0dbd4; color: #b8b0a6; box-shadow: none; }
+        .cv-send-btn:disabled { background: #2a2520; color: #4a4840; box-shadow: none; }
 
         /* ── Status badges ── */
         .cv-badge-fila {
           font-size: 10px; font-weight: 900; padding: 3px 8px; border-radius: 20px;
-          background: rgba(224,80,80,.09); color: #e05050;
-          border: 1px solid rgba(224,80,80,.22);
+          background: rgba(224,80,80,.12); color: #e05050;
+          border: 1px solid rgba(224,80,80,.25);
           white-space: nowrap;
         }
         .cv-badge-atend {
           font-size: 10px; font-weight: 900; padding: 3px 8px; border-radius: 20px;
-          background: rgba(86,184,126,.09); color: #56b87e;
-          border: 1px solid rgba(86,184,126,.22);
+          background: rgba(86,184,126,.1); color: #56b87e;
+          border: 1px solid rgba(86,184,126,.25);
           white-space: nowrap;
         }
         .cv-badge-pix {
           font-size: 10px; font-weight: 900; padding: 3px 7px; border-radius: 20px;
-          background: rgba(255,170,0,.1); color: #c88800;
+          background: rgba(255,170,0,.12); color: #d09000;
           white-space: nowrap;
         }
         .cv-dot {
