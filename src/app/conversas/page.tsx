@@ -43,14 +43,12 @@ function getUrgency(min: number): Urgency {
 }
 
 const UC: Record<Urgency, string> = { normal: "#56b87e", atencao: "#e0893a", urgente: "#e05050", critico: "#c0373a" }
-const UBG: Record<Urgency, string> = { normal: "rgba(86,184,126,.07)", atencao: "rgba(224,137,58,.07)", urgente: "rgba(224,80,80,.07)", critico: "rgba(192,55,58,.1)" }
-const UBD: Record<Urgency, string> = { normal: "rgba(86,184,126,.22)", atencao: "rgba(224,137,58,.3)", urgente: "rgba(224,80,80,.38)", critico: "rgba(192,55,58,.5)" }
 
 function labelEspera(min: number, u: Urgency): string {
-  if (u === "critico") return `Crítico · ${min} min`
-  if (u === "urgente") return `Urgente · ${min} min`
+  if (u === "critico") return `Crítico · ${min}min`
+  if (u === "urgente") return `Urgente · ${min}min`
   if (min === 0) return "Agora mesmo"
-  return `${min} min esperando`
+  return `${min}min esperando`
 }
 
 function temPixPendente(p: Pedido): boolean {
@@ -61,6 +59,25 @@ function getInitials(name: string): string {
   const parts = name.trim().split(" ")
   if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase()
   return (parts[0][0] || "?").toUpperCase()
+}
+
+function formatTs(ts?: number): string {
+  if (!ts) return ""
+  return new Date(ts).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })
+}
+
+function msgTexto(msg: { autor: string; texto: string }): string {
+  if (msg.autor === "atendente") return msg.texto.replace(/^\[.*?\]\s*/, "")
+  return msg.texto
+}
+
+function msgSenderLabel(msg: { autor: string; texto: string }): string {
+  if (msg.autor === "atendente") {
+    const m = msg.texto.match(/^\[(.*?)\]/)
+    return m ? m[1] : "Atendente"
+  }
+  if (msg.autor === "bot") return "Bot"
+  return ""
 }
 
 export default function ConversasPage() {
@@ -74,6 +91,14 @@ export default function ConversasPage() {
   const [toast, setToast] = useState("")
   const [busca, setBusca] = useState("")
   const toastTimer = useRef<any>(null)
+
+  // Chat state
+  const [conversaSelecionada, setConversaSelecionada] = useState<string | null>(null)
+  const [historicoMsgs, setHistoricoMsgs] = useState<{ autor: string; texto: string; ts?: number }[]>([])
+  const [mensagem, setMensagem] = useState("")
+  const [enviando, setEnviando] = useState(false)
+  const historicoBottomRef = useRef<HTMLDivElement>(null)
+  const mensagemInputRef = useRef<HTMLTextAreaElement>(null)
 
   function carregar() {
     fetch("/api/orders")
@@ -89,24 +114,78 @@ export default function ConversasPage() {
     return () => { clearInterval(ivData); clearInterval(ivTime) }
   }, [router])
 
+  // Deselect conversation if it disappears from the list
+  useEffect(() => {
+    if (conversaSelecionada && !pedidos.some(p => p.telefone === conversaSelecionada)) {
+      setConversaSelecionada(null)
+    }
+  }, [pedidos, conversaSelecionada])
+
+  // Poll history for selected conversation
+  useEffect(() => {
+    if (!conversaSelecionada) { setHistoricoMsgs([]); return }
+    carregarHistorico(conversaSelecionada)
+    const iv = setInterval(() => carregarHistorico(conversaSelecionada), 3000)
+    return () => clearInterval(iv)
+  }, [conversaSelecionada])
+
+  // Auto-scroll to newest message
+  useEffect(() => {
+    historicoBottomRef.current?.scrollIntoView({ behavior: "smooth" })
+  }, [historicoMsgs])
+
   function showToast(msg: string) {
     setToast(msg); clearTimeout(toastTimer.current)
     toastTimer.current = setTimeout(() => setToast(""), 3500)
   }
 
+  async function carregarHistorico(phone: string) {
+    try {
+      const r = await fetch(`/api/pedido-combinado?phone=${encodeURIComponent(phone)}`)
+      if (r.ok) {
+        const data = await r.json()
+        setHistoricoMsgs(data.conversa ?? [])
+      }
+    } catch {}
+  }
+
+  async function enviarMensagem() {
+    if (!conversaSelecionada || !mensagem.trim() || enviando) return
+    const texto = mensagem.trim()
+    setEnviando(true)
+    try {
+      const r = await fetch("/api/conversas/enviar-mensagem-humana", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone: conversaSelecionada, text: texto, senderName: "Kellyne" }),
+      })
+      const data = await r.json()
+      if (data.ok) {
+        setMensagem("")
+        setHistoricoMsgs(prev => [...prev, { autor: "atendente", texto: `[Kellyne] ${texto}`, ts: Date.now() }])
+        mensagemInputRef.current?.focus()
+      } else {
+        showToast(data.error || "Erro ao enviar mensagem.")
+      }
+    } catch {
+      showToast("Erro ao enviar mensagem.")
+    }
+    setEnviando(false)
+  }
+
   async function devolverParaBot(p: Pedido) {
     setDevolvendoBot(p.id)
     try {
-      const r = await fetch('/api/devolver-para-bot', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const r = await fetch("/api/devolver-para-bot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ telefone: p.telefone }),
       })
       if (r.ok) {
         setPedidos(prev => prev.map(x => x.id === p.id ? { ...x, escalonado: false } : x))
-        showToast('Conversa devolvida para o robô! 🤖')
-      } else { showToast('Não foi possível devolver para o robô.') }
-    } catch { showToast('Não foi possível devolver para o robô.') }
+        showToast("Conversa devolvida para o robô! 🤖")
+      } else { showToast("Não foi possível devolver para o robô.") }
+    } catch { showToast("Não foi possível devolver para o robô.") }
     setDevolvendoBot(null)
   }
 
@@ -151,6 +230,11 @@ export default function ConversasPage() {
 
   const maxEsperaMin = fila.length > 0 ? minEsperando(getTimestampEspera(fila[0]), now) : 0
 
+  const pedidoSelecionado = conversaSelecionada
+    ? pedidos.find(p => p.telefone === conversaSelecionada) ?? null
+    : null
+  const isFilaItem = pedidoSelecionado ? fila.some(p => p.id === pedidoSelecionado.id) : false
+
   if (loading) return (
     <div style={{ height: "100svh", background: "#060606", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Archivo', sans-serif" }}>
       <div style={{ textAlign: "center" }}>
@@ -168,65 +252,306 @@ export default function ConversasPage() {
         html, body { margin: 0; padding: 0; background: #060606; }
         button { cursor: pointer; font-family: 'Archivo', sans-serif; border: none; }
         @keyframes cbPulse { 0%{opacity:1} 50%{opacity:.4} 100%{opacity:1} }
-        @keyframes cbFadeIn { from{opacity:0;transform:translateY(5px)} to{opacity:1;transform:none} }
+        @keyframes cbFadeIn { from{opacity:0;transform:translateY(4px)} to{opacity:1;transform:none} }
         @keyframes cbSheetUp { from{transform:translateY(100%)} to{transform:none} }
-        .cbCard { animation: cbFadeIn .22s ease both; }
 
-        .cb-wa-btn {
-          display:flex; align-items:center; justify-content:center; gap:6px;
-          height:38px; padding:0 14px;
-          background:#25d366; border-radius:10px;
-          color:#fff; font-family:'Archivo',sans-serif;
-          font-size:12px; font-weight:900; text-decoration:none; flex:1;
+        /* Override ps-content for full-height chat layout */
+        .ps-content {
+          overflow: hidden !important;
+          padding-bottom: 0 !important;
+          display: flex !important;
+          flex-direction: column !important;
         }
-        .cb-wa-btn:active { opacity:.85; }
-        .cb-bot-btn {
-          height:38px; padding:0 12px;
-          background:rgba(100,140,255,.1); border:1px solid rgba(100,140,255,.28); border-radius:10px;
-          color:#7a9fff; font-size:12px; font-weight:900;
-        }
-        .cb-bot-btn:active { opacity:.75; }
-        .cb-fin-btn {
-          height:38px; padding:0 12px;
-          background:transparent; border:1px solid #242220; border-radius:10px;
-          color:#56524b; font-size:12px; font-weight:800;
-        }
-        .cb-fin-btn:active { opacity:.75; }
 
-        .cb-wa-sm {
-          display:flex; align-items:center; justify-content:center; gap:5px;
-          height:32px; padding:0 12px;
-          border:1px solid rgba(37,211,102,.3); border-radius:9px;
-          background:rgba(37,211,102,.07); color:#25d366;
-          font-family:'Archivo',sans-serif; font-size:11px; font-weight:900; text-decoration:none;
+        /* ── Chat root ── */
+        .cv-root {
+          display: flex;
+          flex-direction: row;
+          background: #f8f5f1;
+          border-radius: 0;
+          overflow: hidden;
+          /* mobile: leave room for bottom nav */
+          height: calc(100svh - 72px - env(safe-area-inset-bottom));
         }
-        .cb-wa-sm:active { opacity:.8; }
-        .cb-fin-sm {
-          height:32px; padding:0 10px;
-          background:transparent; border:1px solid #222; border-radius:9px;
-          color:#4a4640; font-size:11px; font-weight:800;
-        }
-        .cb-fin-sm:active { opacity:.75; }
-
-        .cb-search::placeholder { color:#3a3730; }
-        .cb-search:focus { border-color:#ff6b00 !important; outline:none; box-shadow:0 0 0 3px rgba(255,107,0,.1); }
-
-        /* Mobile layout */
-        .cb-header { background:#060606; border-bottom:1px solid #1a1816; padding:calc(env(safe-area-inset-top) + 14px) 16px 12px; position:sticky; top:0; z-index:10; }
-        .cb-main { padding:12px 16px; }
-        .cb-content { display:block; }
-
-        /* Desktop layout */
         @media (min-width: 768px) {
-          .cb-header { padding:24px 28px 20px; position:static; border-bottom:1px solid #1a1816; }
-          .cb-main { padding:20px 28px; }
-          .cb-content { display:grid; grid-template-columns:1fr 1fr; gap:24px; align-items:flex-start; }
-          .cb-metrics { gap:10px !important; }
-          .cb-metric-box { padding:12px 16px !important; }
-          .cb-metric-num { font-size:26px !important; }
+          .cv-root {
+            margin: 16px;
+            border-radius: 18px;
+            box-shadow: 0 8px 48px rgba(0,0,0,.55);
+            height: calc(100vh - 32px);
+          }
         }
         @media (min-width: 1024px) {
-          .cb-content { grid-template-columns:5fr 4fr; }
+          .cv-root { margin: 20px; height: calc(100vh - 40px); }
+        }
+
+        /* ── Left column: conversation list ── */
+        .cv-left {
+          display: flex;
+          flex-direction: column;
+          width: 100%;
+          background: #f0ece6;
+          overflow: hidden;
+          flex-shrink: 0;
+          border-right: 1px solid #e2ddd6;
+        }
+        @media (min-width: 768px) {
+          .cv-left { width: 300px; border-radius: 18px 0 0 18px; }
+        }
+        @media (min-width: 1024px) {
+          .cv-left { width: 320px; }
+        }
+
+        /* ── Right column: open conversation ── */
+        .cv-right {
+          display: none;
+          flex-direction: column;
+          flex: 1;
+          background: #ffffff;
+          overflow: hidden;
+        }
+        @media (min-width: 768px) {
+          .cv-right { display: flex !important; border-radius: 0 18px 18px 0; }
+        }
+
+        /* Mobile: toggle between list and detail */
+        .cv-left.cv-mob-hidden { display: none !important; }
+        .cv-right.cv-mob-visible { display: flex !important; }
+        @media (min-width: 768px) {
+          .cv-left.cv-mob-hidden { display: flex !important; }
+          .cv-right { display: flex !important; }
+        }
+
+        /* ── List header ── */
+        .cv-list-header {
+          padding: 16px 16px 12px;
+          border-bottom: 1px solid #e2ddd6;
+          background: #f0ece6;
+          flex-shrink: 0;
+        }
+
+        /* ── Search ── */
+        .cv-search {
+          width: 100%; height: 38px;
+          background: #faf8f5; border: 1.5px solid #e2ddd6;
+          border-radius: 10px; padding: 0 12px 0 36px;
+          color: #1a1715; font-size: 13px; font-weight: 600;
+          font-family: 'Archivo', sans-serif;
+          transition: border-color .15s;
+        }
+        .cv-search::placeholder { color: #b0a89e; }
+        .cv-search:focus { border-color: #ff6b00; outline: none; box-shadow: 0 0 0 3px rgba(255,107,0,.1); }
+
+        /* ── List scroll area ── */
+        .cv-list-scroll {
+          flex: 1;
+          overflow-y: auto;
+          padding: 8px 0;
+        }
+        .cv-list-scroll::-webkit-scrollbar { width: 4px; }
+        .cv-list-scroll::-webkit-scrollbar-track { background: transparent; }
+        .cv-list-scroll::-webkit-scrollbar-thumb { background: #d5cfc8; border-radius: 2px; }
+
+        /* ── Section label ── */
+        .cv-section-label {
+          font-size: 10px; font-weight: 900; letter-spacing: .6px;
+          text-transform: uppercase; color: #a09790;
+          padding: 10px 16px 4px;
+        }
+
+        /* ── Conversation item ── */
+        .cv-item {
+          display: flex; align-items: center; gap: 11px;
+          padding: 11px 16px; cursor: pointer;
+          border-left: 3px solid transparent;
+          transition: background .12s;
+          animation: cbFadeIn .2s ease both;
+        }
+        .cv-item:hover { background: rgba(0,0,0,.04); }
+        .cv-item.cv-item-active {
+          background: #fff4ec;
+          border-left-color: #ff6b00;
+        }
+        .cv-item-avatar {
+          width: 42px; height: 42px; border-radius: 50%;
+          display: flex; align-items: center; justify-content: center;
+          font-size: 14px; font-weight: 900; flex-shrink: 0;
+          letter-spacing: -0.5px;
+        }
+        .cv-item-body { flex: 1; min-width: 0; }
+        .cv-item-name {
+          font-size: 13.5px; font-weight: 800; color: #1a1715;
+          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .cv-item-preview {
+          font-size: 12px; font-weight: 600; color: #8a8278;
+          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+          margin-top: 1px;
+        }
+        .cv-item-meta {
+          display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex-shrink: 0;
+        }
+        .cv-item-time { font-size: 11px; font-weight: 700; color: #a09790; }
+
+        /* ── Empty states ── */
+        .cv-list-empty {
+          padding: 40px 24px; text-align: center;
+        }
+        .cv-no-select {
+          flex: 1; display: flex; flex-direction: column;
+          align-items: center; justify-content: center;
+          color: #b0a89e; gap: 10px;
+        }
+
+        /* ── Chat right: header ── */
+        .cv-chat-header {
+          display: flex; align-items: center; gap: 12px;
+          padding: 14px 18px;
+          border-bottom: 1px solid #f0ece6;
+          background: #fff; flex-shrink: 0;
+          min-height: 68px;
+        }
+        .cv-chat-header-avatar {
+          width: 40px; height: 40px; border-radius: 50%;
+          display: flex; align-items: center; justify-content: center;
+          font-size: 13px; font-weight: 900; flex-shrink: 0;
+        }
+        .cv-chat-header-info { flex: 1; min-width: 0; }
+        .cv-chat-header-name {
+          font-size: 14px; font-weight: 900; color: #1a1715;
+          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .cv-chat-header-sub { font-size: 11px; font-weight: 700; color: #a09790; margin-top: 1px; }
+        .cv-chat-header-actions { display: flex; align-items: center; gap: 7px; flex-shrink: 0; }
+
+        /* Header action buttons */
+        .cv-btn-wa {
+          display: flex; align-items: center; gap: 5px;
+          height: 34px; padding: 0 12px;
+          background: #25d366; border-radius: 9px;
+          color: #fff; font-family: 'Archivo', sans-serif;
+          font-size: 12px; font-weight: 900; text-decoration: none;
+        }
+        .cv-btn-wa:active { opacity: .85; }
+        .cv-btn-bot {
+          height: 34px; padding: 0 11px;
+          background: rgba(100,140,255,.1); border: 1px solid rgba(100,140,255,.28);
+          border-radius: 9px; color: #5577ee;
+          font-size: 12px; font-weight: 900;
+        }
+        .cv-btn-bot:disabled { opacity: .4; }
+        .cv-btn-fin {
+          height: 34px; padding: 0 11px;
+          background: transparent; border: 1.5px solid #e2ddd6;
+          border-radius: 9px; color: #8a8278;
+          font-size: 12px; font-weight: 800;
+        }
+        .cv-btn-fin:disabled { opacity: .4; }
+        .cv-btn-back {
+          height: 34px; width: 34px;
+          background: transparent; border: none;
+          color: #766d63; font-size: 18px;
+          display: flex; align-items: center; justify-content: center;
+          border-radius: 8px; flex-shrink: 0;
+        }
+        .cv-btn-back:hover { background: #f5f2ee; }
+        @media (min-width: 768px) {
+          .cv-btn-back { display: none !important; }
+        }
+
+        /* ── Messages area ── */
+        .cv-msgs {
+          flex: 1; overflow-y: auto;
+          padding: 16px 18px;
+          display: flex; flex-direction: column; gap: 8px;
+          background: #fdfcfa;
+        }
+        .cv-msgs::-webkit-scrollbar { width: 4px; }
+        .cv-msgs::-webkit-scrollbar-track { background: transparent; }
+        .cv-msgs::-webkit-scrollbar-thumb { background: #e2ddd6; border-radius: 2px; }
+
+        /* Message rows */
+        .cv-msg-row { display: flex; flex-direction: column; max-width: 72%; gap: 2px; }
+        .cv-msg-row.cv-row-client { align-self: flex-start; }
+        .cv-msg-row.cv-row-atendente { align-self: flex-end; align-items: flex-end; }
+        .cv-msg-row.cv-row-bot { align-self: flex-end; align-items: flex-end; }
+
+        /* Bubbles */
+        .cv-bubble {
+          padding: 9px 13px; border-radius: 16px;
+          font-size: 13px; font-weight: 600; line-height: 1.5;
+          word-break: break-word;
+        }
+        .cv-bubble-client {
+          background: #ede9e3; color: #1a1715;
+          border-bottom-left-radius: 4px;
+        }
+        .cv-bubble-atendente {
+          background: #ff6b00; color: #fff;
+          border-bottom-right-radius: 4px;
+        }
+        .cv-bubble-bot {
+          background: #eaedff; color: #3344bb;
+          border-bottom-right-radius: 4px;
+        }
+
+        /* Sender label + time */
+        .cv-msg-sender { font-size: 10.5px; font-weight: 700; color: #a09790; padding: 0 2px; }
+        .cv-msg-time { font-size: 10.5px; font-weight: 700; color: #b8b0a8; padding: 0 2px; }
+        .cv-msgs-empty {
+          flex: 1; display: flex; align-items: center; justify-content: center;
+          color: #c0b8b0; font-size: 13px; font-weight: 700;
+        }
+
+        /* ── Input area ── */
+        .cv-input-wrap {
+          display: flex; align-items: flex-end; gap: 10px;
+          padding: 14px 18px calc(14px + env(safe-area-inset-bottom));
+          border-top: 1px solid #f0ece6;
+          background: #fff; flex-shrink: 0;
+        }
+        @media (min-width: 768px) {
+          .cv-input-wrap { padding: 14px 18px; }
+        }
+        .cv-textarea {
+          flex: 1; min-height: 40px; max-height: 110px;
+          background: #f5f2ee; border: 1.5px solid #e2ddd6;
+          border-radius: 12px; padding: 10px 14px;
+          color: #1a1715; font-size: 13.5px; font-weight: 600;
+          font-family: 'Archivo', sans-serif; resize: none;
+          line-height: 1.45; transition: border-color .15s;
+        }
+        .cv-textarea::placeholder { color: #b0a89e; }
+        .cv-textarea:focus { border-color: #ff6b00; outline: none; box-shadow: 0 0 0 3px rgba(255,107,0,.09); }
+        .cv-send-btn {
+          width: 42px; height: 42px; border-radius: 50%; flex-shrink: 0;
+          background: #ff6b00; color: #fff;
+          display: flex; align-items: center; justify-content: center;
+          font-size: 16px; transition: opacity .15s, transform .1s;
+        }
+        .cv-send-btn:hover:not(:disabled) { opacity: .9; }
+        .cv-send-btn:active:not(:disabled) { transform: scale(.93); }
+        .cv-send-btn:disabled { background: #e2ddd6; color: #b0a89e; }
+
+        /* ── Status badges ── */
+        .cv-badge-fila {
+          font-size: 10px; font-weight: 900; padding: 2px 7px; border-radius: 20px;
+          background: rgba(224,80,80,.1); color: #e05050; border: 1px solid rgba(224,80,80,.25);
+          white-space: nowrap;
+        }
+        .cv-badge-atend {
+          font-size: 10px; font-weight: 900; padding: 2px 7px; border-radius: 20px;
+          background: rgba(86,184,126,.1); color: #56b87e; border: 1px solid rgba(86,184,126,.25);
+          white-space: nowrap;
+        }
+        .cv-badge-pix {
+          font-size: 10px; font-weight: 900; padding: 2px 6px; border-radius: 20px;
+          background: rgba(255,170,0,.12); color: #d48a00;
+          white-space: nowrap;
+        }
+        .cv-dot {
+          width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
+          animation: cbPulse 1.8s ease-in-out infinite;
         }
       `}</style>
 
@@ -237,279 +562,296 @@ export default function ConversasPage() {
           return u === "urgente" || u === "critico"
         })}
       >
+        <div className="cv-root">
 
-        {/* ── HEADER ── */}
-        <header className="cb-header">
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-            <div>
-              <div style={{ fontSize: 20, fontWeight: 900, letterSpacing: "-0.4px", color: "#f5f2ee" }}>Conversas</div>
-              <div style={{ fontSize: 11, color: "#5a564d", fontWeight: 700, marginTop: 1 }}>Atendimento humano</div>
-            </div>
-            {fila.length > 0 && (
-              <div style={{ display: "flex", alignItems: "center", gap: 6, background: "rgba(224,80,80,.1)", border: "1px solid rgba(224,80,80,.3)", borderRadius: 20, padding: "5px 12px" }}>
-                <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#e06060", animation: "cbPulse 1.6s infinite", flexShrink: 0 }} />
-                <span style={{ fontSize: 12, fontWeight: 900, color: "#e06060" }}>{fila.length} aguardando</span>
+          {/* ── LEFT COLUMN: conversation list ── */}
+          <div className={`cv-left${conversaSelecionada ? " cv-mob-hidden" : ""}`}>
+
+            {/* List header */}
+            <div className="cv-list-header">
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                <div>
+                  <div style={{ fontSize: 17, fontWeight: 900, color: "#1a1715", letterSpacing: "-0.3px" }}>Conversas</div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "#a09790", marginTop: 1 }}>Atendimento humano</div>
+                </div>
+                <div style={{ display: "flex", gap: 6 }}>
+                  {fila.length > 0 && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 5, background: "rgba(224,80,80,.08)", border: "1px solid rgba(224,80,80,.22)", borderRadius: 20, padding: "4px 10px" }}>
+                      <span className="cv-dot" style={{ background: "#e05050" }} />
+                      <span style={{ fontSize: 11, fontWeight: 900, color: "#e05050" }}>{fila.length}</span>
+                    </div>
+                  )}
+                  {emAtendimento.length > 0 && (
+                    <div style={{ background: "rgba(86,184,126,.08)", border: "1px solid rgba(86,184,126,.22)", borderRadius: 20, padding: "4px 10px" }}>
+                      <span style={{ fontSize: 11, fontWeight: 900, color: "#56b87e" }}>{emAtendimento.length}</span>
+                    </div>
+                  )}
+                </div>
               </div>
-            )}
-          </div>
 
-          {/* Métricas */}
-          <div className="cb-metrics" style={{ display: "flex", gap: 6, marginBottom: 14 }}>
-            <div className="cb-metric-box" style={{ flex: 1, background: fila.length > 0 ? "rgba(224,80,80,.07)" : "#0d0d0d", border: `1px solid ${fila.length > 0 ? "rgba(224,80,80,.25)" : "#1e1c19"}`, borderRadius: 12, padding: "10px 12px" }}>
-              <div className="cb-metric-num" style={{ fontSize: 24, fontWeight: 900, lineHeight: 1, color: fila.length > 0 ? "#e06060" : "#3a3730" }}>{fila.length}</div>
-              <div style={{ fontSize: 10, fontWeight: 800, color: fila.length > 0 ? "rgba(224,80,80,.7)" : "#3a3730", textTransform: "uppercase", letterSpacing: ".4px", marginTop: 3 }}>Aguardando</div>
-            </div>
-            <div className="cb-metric-box" style={{ flex: 1, background: maxEsperaMin >= 8 ? "rgba(224,80,80,.07)" : "#0d0d0d", border: `1px solid ${maxEsperaMin >= 8 ? "rgba(224,80,80,.25)" : "#1e1c19"}`, borderRadius: 12, padding: "10px 12px" }}>
-              <div className="cb-metric-num" style={{ fontSize: 24, fontWeight: 900, lineHeight: 1, color: maxEsperaMin >= 8 ? "#e06060" : fila.length > 0 ? "#d4c9ba" : "#3a3730" }}>{fila.length > 0 ? `${maxEsperaMin}m` : "—"}</div>
-              <div style={{ fontSize: 10, fontWeight: 800, color: "#3a3730", textTransform: "uppercase", letterSpacing: ".4px", marginTop: 3 }}>Mais antigo</div>
-            </div>
-            <div className="cb-metric-box" style={{ flex: 1, background: "#0d0d0d", border: "1px solid #1e1c19", borderRadius: 12, padding: "10px 12px" }}>
-              <div className="cb-metric-num" style={{ fontSize: 24, fontWeight: 900, lineHeight: 1, color: emAtendimento.length > 0 ? "#d4c9ba" : "#3a3730" }}>{emAtendimento.length}</div>
-              <div style={{ fontSize: 10, fontWeight: 800, color: "#3a3730", textTransform: "uppercase", letterSpacing: ".4px", marginTop: 3 }}>Em andamento</div>
-            </div>
-          </div>
-
-          {/* Busca */}
-          <div style={{ position: "relative" }}>
-            <svg style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} width="15" height="15" viewBox="0 0 24 24" fill="none">
-              <circle cx="11" cy="11" r="7" stroke="#3a3730" strokeWidth="2.2"/>
-              <path d="M16.5 16.5l3.5 3.5" stroke="#3a3730" strokeWidth="2.2" strokeLinecap="round"/>
-            </svg>
-            <input
-              className="cb-search"
-              type="text"
-              placeholder="Buscar por nome ou telefone…"
-              value={busca}
-              onChange={e => setBusca(e.target.value)}
-              style={{ width: "100%", height: 40, background: "#0d0d0d", border: "1px solid #1e1c19", borderRadius: 10, padding: "0 36px 0 36px", color: "#f5f2ee", fontSize: 13, fontWeight: 600, fontFamily: "'Archivo',sans-serif", transition: "border-color .15s" }}
-            />
-            {busca && (
-              <button onClick={() => setBusca("")} style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: "#5a564d", fontSize: 18, lineHeight: 1, padding: 4 }}>×</button>
-            )}
-          </div>
-        </header>
-
-        {/* ── CONTEÚDO ── */}
-        <main className="cb-main">
-          <div className="cb-content">
-
-            {/* ── COL 1: Fila de atendimento ── */}
-            <div>
-              <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 10 }}>
-                {fila.length > 0 && <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#e06060", animation: "cbPulse 1.8s ease-in-out infinite", flexShrink: 0 }} />}
-                <span style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.5px", textTransform: "uppercase", color: fila.length > 0 ? "#c9c2b4" : "#3a3730" }}>
-                  Fila de atendimento
-                </span>
-                {fila.length > 0 && (
-                  <span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 900, color: "#e06060", background: "rgba(224,80,80,.12)", border: "1px solid rgba(224,80,80,.25)", padding: "2px 8px", borderRadius: 20 }}>
-                    {fila.length}
-                  </span>
+              {/* Search */}
+              <div style={{ position: "relative" }}>
+                <svg style={{ position: "absolute", left: 11, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} width="14" height="14" viewBox="0 0 24 24" fill="none">
+                  <circle cx="11" cy="11" r="7" stroke="#b0a89e" strokeWidth="2.2" />
+                  <path d="M16.5 16.5l3.5 3.5" stroke="#b0a89e" strokeWidth="2.2" strokeLinecap="round" />
+                </svg>
+                <input
+                  className="cv-search"
+                  type="text"
+                  placeholder="Buscar por nome ou telefone…"
+                  value={busca}
+                  onChange={e => setBusca(e.target.value)}
+                />
+                {busca && (
+                  <button onClick={() => setBusca("")} style={{ position: "absolute", right: 9, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: "#a09790", fontSize: 17, lineHeight: 1, padding: 4 }}>×</button>
                 )}
               </div>
 
-              {filaBusca.length === 0 && (
-                <div style={{ background: "#0d0d0d", border: "1px dashed #252220", borderRadius: 14, padding: "28px 20px", textAlign: "center" }}>
+              {/* Compact metrics */}
+              {fila.length > 0 && maxEsperaMin > 0 && (
+                <div style={{ marginTop: 10, fontSize: 11, fontWeight: 700, color: maxEsperaMin >= 8 ? "#e05050" : "#a09790" }}>
+                  Aguardando há {maxEsperaMin}min (mais antigo)
+                </div>
+              )}
+            </div>
+
+            {/* List scroll */}
+            <div className="cv-list-scroll">
+
+              {/* Fila section */}
+              {filaBusca.length > 0 && (
+                <>
+                  <div className="cv-section-label">Aguardando atendimento</div>
+                  {filaBusca.map((p, idx) => {
+                    const ts = getTimestampEspera(p)
+                    const minWait = minEsperando(ts, now)
+                    const urgency = getUrgency(minWait)
+                    const isActive = conversaSelecionada === p.telefone
+                    return (
+                      <div
+                        key={p.id}
+                        className={`cv-item${isActive ? " cv-item-active" : ""}`}
+                        onClick={() => setConversaSelecionada(p.telefone)}
+                        style={{ animationDelay: `${idx * 0.04}s` }}
+                      >
+                        <div className="cv-item-avatar" style={{ background: `${UC[urgency]}18`, border: `2px solid ${UC[urgency]}44`, color: UC[urgency] }}>
+                          {getInitials(p.cliente)}
+                        </div>
+                        <div className="cv-item-body">
+                          <div className="cv-item-name">{p.cliente}</div>
+                          <div className="cv-item-preview">{labelEspera(minWait, urgency)}</div>
+                        </div>
+                        <div className="cv-item-meta">
+                          <span className="cv-item-time">{p.horario}</span>
+                          <span className="cv-badge-fila">{idx + 1}º</span>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </>
+              )}
+
+              {/* Em atendimento section */}
+              {atendBusca.length > 0 && (
+                <>
+                  <div className="cv-section-label">Em atendimento</div>
+                  {atendBusca.map((p, idx) => {
+                    const isActive = conversaSelecionada === p.telefone
+                    const pixPendente = temPixPendente(p)
+                    return (
+                      <div
+                        key={p.id}
+                        className={`cv-item${isActive ? " cv-item-active" : ""}`}
+                        onClick={() => setConversaSelecionada(p.telefone)}
+                        style={{ animationDelay: `${idx * 0.03}s` }}
+                      >
+                        <div className="cv-item-avatar" style={{ background: "rgba(90,86,77,.1)", border: "1.5px solid #d5cfc8", color: "#8a8278" }}>
+                          {getInitials(p.cliente)}
+                        </div>
+                        <div className="cv-item-body">
+                          <div className="cv-item-name">{p.cliente}</div>
+                          <div className="cv-item-preview">{p.itens?.[0] || p.telefone}</div>
+                        </div>
+                        <div className="cv-item-meta">
+                          <span className="cv-item-time">{p.horario}</span>
+                          {pixPendente
+                            ? <span className="cv-badge-pix">PIX⏳</span>
+                            : <span className="cv-badge-atend">●</span>
+                          }
+                        </div>
+                      </div>
+                    )
+                  })}
+                </>
+              )}
+
+              {/* Empty states */}
+              {filaBusca.length === 0 && atendBusca.length === 0 && (
+                <div className="cv-list-empty">
                   {busca ? (
                     <>
-                      <div style={{ fontSize: 22, marginBottom: 6 }}>🔍</div>
-                      <div style={{ fontSize: 13, fontWeight: 800, color: "#3a3730" }}>Nenhum resultado</div>
+                      <div style={{ fontSize: 26, marginBottom: 8 }}>🔍</div>
+                      <div style={{ fontSize: 13, fontWeight: 800, color: "#a09790" }}>Nenhum resultado para "{busca}"</div>
                     </>
                   ) : (
                     <>
-                      <div style={{ fontSize: 26, marginBottom: 6 }}>✅</div>
-                      <div style={{ fontSize: 13, fontWeight: 900, color: "#3d8a54", marginBottom: 3 }}>Ninguém aguardando</div>
-                      <div style={{ fontSize: 11, fontWeight: 600, color: "#4a4640", lineHeight: 1.5 }}>Quando um cliente precisar de atendimento, aparecerá aqui.</div>
+                      <div style={{ fontSize: 30, marginBottom: 10 }}>✅</div>
+                      <div style={{ fontSize: 14, fontWeight: 900, color: "#56b87e", marginBottom: 6 }}>Nenhuma conversa aguardando</div>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: "#b0a89e", lineHeight: 1.6 }}>
+                        Quando um cliente precisar de atendimento, ele aparecerá aqui.
+                      </div>
                     </>
                   )}
                 </div>
               )}
-
-              {filaBusca.map((p, idx) => {
-                const ts = getTimestampEspera(p)
-                const minWait = minEsperando(ts, now)
-                const urgency = getUrgency(minWait)
-                const isPrimeiro = idx === 0 && !busca
-                const emFin = finalizando === p.id
-                const emDevolvendo = devolvendoBot === p.id
-                const initials = getInitials(p.cliente)
-
-                return (
-                  <div key={p.id} className="cbCard" style={{
-                    background: isPrimeiro ? UBG[urgency] : "rgba(255,255,255,.015)",
-                    border: `1.5px solid ${isPrimeiro ? UBD[urgency] : "#1e1c19"}`,
-                    borderRadius: 14,
-                    padding: "12px 14px",
-                    marginBottom: 8,
-                    animationDelay: `${idx * 0.04}s`,
-                  }}>
-                    {/* Topo: avatar + info + badge posição */}
-                    <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 11 }}>
-                      {/* Avatar */}
-                      <div style={{
-                        width: 44, height: 44, borderRadius: "50%", flexShrink: 0,
-                        background: `${UC[urgency]}22`,
-                        border: `2px solid ${UC[urgency]}55`,
-                        display: "flex", alignItems: "center", justifyContent: "center",
-                        fontSize: 15, fontWeight: 900, color: UC[urgency], letterSpacing: "-0.5px",
-                      }}>
-                        {initials}
-                      </div>
-
-                      {/* Info */}
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
-                          <span style={{ fontSize: 15, fontWeight: 900, color: "#f4f1ec", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                            {p.cliente.split(" ")[0]}
-                          </span>
-                          {p.numero != null && (
-                            <span style={{ fontSize: 10, fontWeight: 800, color: "#4a4640", flexShrink: 0 }}>#{p.numero}</span>
-                          )}
-                        </div>
-                        <div style={{ fontSize: 11, fontWeight: 600, color: "#4a4640", marginBottom: 3 }}>{p.telefone}</div>
-                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          <span style={{ fontSize: 12, fontWeight: 900, color: UC[urgency] }}>{labelEspera(minWait, urgency)}</span>
-                        </div>
-                      </div>
-
-                      {/* Badge posição */}
-                      <div style={{ flexShrink: 0 }}>
-                        {isPrimeiro ? (
-                          <span style={{ fontSize: 10, fontWeight: 900, color: UC[urgency], background: `${UC[urgency]}18`, border: `1px solid ${UC[urgency]}40`, padding: "3px 9px", borderRadius: 20, whiteSpace: "nowrap" }}>
-                            1º · Agora
-                          </span>
-                        ) : (
-                          <span style={{ fontSize: 10, fontWeight: 800, color: "#4a4640", background: "#141210", border: "1px solid #222", padding: "3px 9px", borderRadius: 20, whiteSpace: "nowrap" }}>
-                            {idx + 1}º na fila
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Última mensagem */}
-                    <div style={{ fontSize: 11, fontWeight: 600, color: "#3a3730", marginBottom: 11, paddingLeft: 56 }}>
-                      Última mensagem às {p.horario}
-                    </div>
-
-                    {/* Ações */}
-                    <div style={{ display: "flex", gap: 7 }}>
-                      <a href={whatsappLink(p.telefone)} target="_blank" rel="noreferrer" className="cb-wa-btn">
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
-                          <path d="M12 2C6.48 2 2 6.48 2 12c0 1.77.46 3.43 1.26 4.89L2 22l5.26-1.24A9.94 9.94 0 0 0 12 22c5.52 0 10-4.48 10-10S17.52 2 12 2z" fill="#fff" opacity=".2"/>
-                          <path d="M9.5 8.5c-.28 0-.5.04-.7.12C8.3 8.2 7 9.5 7 11c0 2.5 2.5 5 5 6.5 1.5.8 3.5.5 4.5-.5.2-.2.4-.5.5-.8.1-.3 0-.6-.2-.8l-1.8-1.3c-.2-.15-.5-.1-.7.05l-.8.8c-.15.15-.4.2-.6.1C12 14.8 11.2 14 10.6 13c-.1-.2-.05-.45.1-.6l.8-.8c.15-.2.2-.5.05-.7L10.3 9.1c-.2-.22-.5-.6-.8-.6z" fill="white"/>
-                        </svg>
-                        WhatsApp
-                      </a>
-                      <button className="cb-bot-btn" disabled={emDevolvendo} onClick={() => devolverParaBot(p)} style={{ opacity: emDevolvendo ? 0.4 : 1 }}>
-                        {emDevolvendo ? "…" : "🤖 Robô"}
-                      </button>
-                      <button className="cb-fin-btn" disabled={emFin} onClick={() => setConfirmando(p)} style={{ opacity: emFin ? 0.4 : 1 }}>
-                        {emFin ? "…" : "Finalizar"}
-                      </button>
-                    </div>
-                  </div>
-                )
-              })}
             </div>
+          </div>
 
-            {/* ── COL 2: Em atendimento hoje ── */}
-            <div style={{ marginTop: 4 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 10 }}>
-                <span style={{ fontSize: 11, fontWeight: 900, letterSpacing: "0.5px", textTransform: "uppercase", color: "#3a3730" }}>
-                  Em atendimento hoje
-                </span>
-                {emAtendimento.length > 0 && (
-                  <span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 900, color: "#4a4640", background: "#141210", border: "1px solid #222", padding: "2px 8px", borderRadius: 20 }}>
-                    {emAtendimento.length}
-                  </span>
-                )}
+          {/* ── RIGHT COLUMN: open conversation ── */}
+          <div className={`cv-right${conversaSelecionada ? " cv-mob-visible" : ""}`}>
+            {!pedidoSelecionado ? (
+              <div className="cv-no-select">
+                <div style={{ fontSize: 36 }}>💬</div>
+                <div style={{ fontSize: 15, fontWeight: 800, color: "#8a8278" }}>
+                  {conversaSelecionada ? "Carregando…" : "Selecione uma conversa"}
+                </div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "#b0a89e", textAlign: "center", maxWidth: 240 }}>
+                  {!conversaSelecionada && "Escolha um cliente na lista ao lado para começar o atendimento."}
+                </div>
               </div>
-
-              {atendBusca.length === 0 && (
-                <div style={{ background: "#0d0d0d", border: "1px dashed #1e1c19", borderRadius: 12, padding: "18px", textAlign: "center" }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: "#3a3730" }}>
-                    {busca ? "Nenhum resultado" : "Nenhum atendimento aberto hoje"}
+            ) : (
+              <>
+                {/* Chat header */}
+                <div className="cv-chat-header">
+                  <button className="cv-btn-back" onClick={() => setConversaSelecionada(null)} aria-label="Voltar">
+                    ←
+                  </button>
+                  <div
+                    className="cv-chat-header-avatar"
+                    style={isFilaItem
+                      ? { background: `${UC[getUrgency(minEsperando(getTimestampEspera(pedidoSelecionado), now))]}18`, color: UC[getUrgency(minEsperando(getTimestampEspera(pedidoSelecionado), now))], border: `2px solid ${UC[getUrgency(minEsperando(getTimestampEspera(pedidoSelecionado), now))]}44` }
+                      : { background: "rgba(90,86,77,.1)", color: "#8a8278", border: "1.5px solid #d5cfc8" }
+                    }
+                  >
+                    {getInitials(pedidoSelecionado.cliente)}
+                  </div>
+                  <div className="cv-chat-header-info">
+                    <div className="cv-chat-header-name">{pedidoSelecionado.cliente}</div>
+                    <div className="cv-chat-header-sub">{pedidoSelecionado.telefone}</div>
+                  </div>
+                  <div className="cv-chat-header-actions">
+                    {isFilaItem && (
+                      <span className="cv-badge-fila" style={{ fontSize: 11 }}>
+                        {labelEspera(minEsperando(getTimestampEspera(pedidoSelecionado), now), getUrgency(minEsperando(getTimestampEspera(pedidoSelecionado), now)))}
+                      </span>
+                    )}
+                    <a href={whatsappLink(pedidoSelecionado.telefone)} target="_blank" rel="noreferrer" className="cv-btn-wa">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+                        <path d="M9.5 8.5c-.28 0-.5.04-.7.12C8.3 8.2 7 9.5 7 11c0 2.5 2.5 5 5 6.5 1.5.8 3.5.5 4.5-.5.2-.2.4-.5.5-.8.1-.3 0-.6-.2-.8l-1.8-1.3c-.2-.15-.5-.1-.7.05l-.8.8c-.15.15-.4.2-.6.1C12 14.8 11.2 14 10.6 13c-.1-.2-.05-.45.1-.6l.8-.8c.15-.2.2-.5.05-.7L10.3 9.1c-.2-.22-.5-.6-.8-.6z" fill="white" />
+                      </svg>
+                      WA
+                    </a>
+                    {isFilaItem && (
+                      <button
+                        className="cv-btn-bot"
+                        disabled={devolvendoBot === pedidoSelecionado.id}
+                        onClick={() => devolverParaBot(pedidoSelecionado)}
+                      >
+                        {devolvendoBot === pedidoSelecionado.id ? "…" : "🤖"}
+                      </button>
+                    )}
+                    <button
+                      className="cv-btn-fin"
+                      disabled={finalizando === pedidoSelecionado.id}
+                      onClick={() => setConfirmando(pedidoSelecionado)}
+                    >
+                      {finalizando === pedidoSelecionado.id ? "…" : "Finalizar"}
+                    </button>
                   </div>
                 </div>
-              )}
 
-              {atendBusca.map((p, idx) => {
-                const emFin = finalizando === p.id
-                const pixPendente = temPixPendente(p)
-                const initials = getInitials(p.cliente)
-                return (
-                  <div key={p.id} className="cbCard" style={{
-                    background: "#0c0c0c",
-                    border: `1px solid ${pixPendente ? "rgba(255,170,0,.22)" : "#181614"}`,
-                    borderRadius: 12,
-                    padding: "10px 12px",
-                    marginBottom: 7,
-                    animationDelay: `${idx * 0.03}s`,
-                  }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 9 }}>
-                      {/* Avatar pequeno */}
-                      <div style={{
-                        width: 36, height: 36, borderRadius: "50%", flexShrink: 0,
-                        background: "rgba(90,86,77,.15)", border: "1px solid #272320",
-                        display: "flex", alignItems: "center", justifyContent: "center",
-                        fontSize: 12, fontWeight: 900, color: "#6a6460",
-                      }}>
-                        {initials}
-                      </div>
-
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
-                          <span style={{ fontSize: 14, fontWeight: 900, color: "#d4c9ba", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                            {p.cliente.split(" ")[0]}
-                          </span>
-                          {p.numero != null && (
-                            <span style={{ background: "#161412", color: "#4a4640", fontSize: 9, fontWeight: 800, padding: "2px 5px", borderRadius: 5 }}>#{p.numero}</span>
-                          )}
-                          {pixPendente && (
-                            <span style={{ background: "rgba(255,170,0,.12)", color: "#ffaa00", fontSize: 9, fontWeight: 900, padding: "2px 6px", borderRadius: 5, letterSpacing: ".3px", flexShrink: 0 }}>PIX⏳</span>
-                          )}
-                        </div>
-                        <div style={{ fontSize: 11, color: "#3a3730", fontWeight: 600 }}>{p.telefone} · {p.horario}</div>
-                      </div>
-                    </div>
-
-                    <div style={{ display: "flex", gap: 7 }}>
-                      <a href={whatsappLink(p.telefone)} target="_blank" rel="noreferrer" className="cb-wa-sm" style={{ flex: 1 }}>
-                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none">
-                          <path d="M9.5 8.5c-.28 0-.5.04-.7.12C8.3 8.2 7 9.5 7 11c0 2.5 2.5 5 5 6.5 1.5.8 3.5.5 4.5-.5.2-.2.4-.5.5-.8.1-.3 0-.6-.2-.8l-1.8-1.3c-.2-.15-.5-.1-.7.05l-.8.8c-.15.15-.4.2-.6.1C12 14.8 11.2 14 10.6 13c-.1-.2-.05-.45.1-.6l.8-.8c.15-.2.2-.5.05-.7L10.3 9.1c-.2-.22-.5-.6-.8-.6z" fill="currentColor"/>
-                        </svg>
-                        WhatsApp
-                      </a>
-                      <button className="cb-fin-sm" disabled={emFin} onClick={() => setConfirmando(p)} style={{ opacity: emFin ? 0.4 : 1 }}>
-                        {emFin ? "…" : "Finalizar"}
-                      </button>
-                    </div>
+                {/* PIX warning strip */}
+                {temPixPendente(pedidoSelecionado) && (
+                  <div style={{ background: "rgba(255,170,0,.08)", borderBottom: "1px solid rgba(255,170,0,.2)", padding: "8px 18px", fontSize: 12, fontWeight: 800, color: "#c08000", flexShrink: 0 }}>
+                    ⚠ Pix pendente de confirmação neste pedido
                   </div>
-                )
-              })}
-            </div>
+                )}
 
+                {/* Messages area */}
+                <div className="cv-msgs">
+                  {historicoMsgs.length === 0 ? (
+                    <div className="cv-msgs-empty">Sem histórico de mensagens disponível</div>
+                  ) : (
+                    historicoMsgs.map((msg, i) => {
+                      const isClient = msg.autor === "cliente"
+                      const isBot = msg.autor === "bot"
+                      const rowClass = isClient ? "cv-row-client" : isBot ? "cv-row-bot" : "cv-row-atendente"
+                      const bubbleClass = isClient ? "cv-bubble-client" : isBot ? "cv-bubble-bot" : "cv-bubble-atendente"
+                      const sender = msgSenderLabel(msg)
+                      return (
+                        <div key={i} className={`cv-msg-row ${rowClass}`}>
+                          {sender && <span className="cv-msg-sender">{sender}</span>}
+                          <div className={`cv-bubble ${bubbleClass}`}>{msgTexto(msg)}</div>
+                          {msg.ts && <span className="cv-msg-time">{formatTs(msg.ts)}</span>}
+                        </div>
+                      )
+                    })
+                  )}
+                  <div ref={historicoBottomRef} />
+                </div>
+
+                {/* Message input */}
+                <div className="cv-input-wrap">
+                  <textarea
+                    ref={mensagemInputRef}
+                    className="cv-textarea"
+                    placeholder="Digite sua mensagem…"
+                    value={mensagem}
+                    rows={1}
+                    onChange={e => setMensagem(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault()
+                        enviarMensagem()
+                      }
+                    }}
+                  />
+                  <button
+                    className="cv-send-btn"
+                    onClick={enviarMensagem}
+                    disabled={enviando || !mensagem.trim()}
+                    aria-label="Enviar mensagem"
+                  >
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
+                      <path d="M22 2L11 13" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+                      <path d="M22 2L15 22L11 13L2 9L22 2Z" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </button>
+                </div>
+              </>
+            )}
           </div>
-        </main>
 
+        </div>
       </PanelShell>
 
       {/* ── MODAL CONFIRMAÇÃO ── */}
       {confirmando && (
         <>
-          <div onClick={() => setConfirmando(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.75)", zIndex: 90 }} />
+          <div onClick={() => setConfirmando(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", zIndex: 90 }} />
           <div style={{
             position: "fixed", bottom: 0, left: 0, right: 0, margin: "0 auto", maxWidth: 480,
-            background: "#111009", border: "1px solid #242220", borderBottom: "none",
+            background: "#ffffff", border: "1px solid #e2ddd6", borderBottom: "none",
             borderRadius: "22px 22px 0 0", zIndex: 91,
             animation: "cbSheetUp .3s cubic-bezier(.2,.9,.3,1) both",
             padding: "18px 20px calc(env(safe-area-inset-bottom) + 28px)",
             display: "flex", flexDirection: "column", gap: 10,
           }}>
-            <div style={{ width: 40, height: 4, borderRadius: 2, background: "#2e2b26", margin: "0 auto 6px" }} />
+            <div style={{ width: 40, height: 4, borderRadius: 2, background: "#e2ddd6", margin: "0 auto 6px" }} />
 
             {temPixPendente(confirmando) && (
-              <div style={{ background: "rgba(255,170,0,.08)", border: "1px solid rgba(255,170,0,.25)", borderRadius: 10, padding: "10px 14px" }}>
-                <div style={{ fontSize: 12, fontWeight: 900, color: "#ffaa00", marginBottom: 3 }}>⚠ Pix pendente</div>
+              <div style={{ background: "rgba(255,170,0,.07)", border: "1px solid rgba(255,170,0,.22)", borderRadius: 10, padding: "10px 14px" }}>
+                <div style={{ fontSize: 12, fontWeight: 900, color: "#c08000", marginBottom: 3 }}>⚠ Pix pendente</div>
                 <div style={{ fontSize: 12, fontWeight: 600, color: "#8a8278", lineHeight: 1.5 }}>
                   Esse pedido aguarda confirmação de Pix. Finalizar removerá o atendimento da fila.
                 </div>
@@ -517,22 +859,22 @@ export default function ConversasPage() {
             )}
 
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <div style={{ width: 44, height: 44, borderRadius: "50%", background: "rgba(90,86,77,.15)", border: "1px solid #2a2723", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, fontWeight: 900, color: "#6a6460", flexShrink: 0 }}>
+              <div style={{ width: 44, height: 44, borderRadius: "50%", background: "rgba(90,86,77,.1)", border: "1px solid #e2ddd6", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, fontWeight: 900, color: "#8a8278", flexShrink: 0 }}>
                 {getInitials(confirmando.cliente)}
               </div>
               <div>
-                <div style={{ fontSize: 17, fontWeight: 900, letterSpacing: "-0.3px" }}>Finalizar atendimento?</div>
-                <div style={{ fontSize: 12, fontWeight: 600, color: "#6a6460" }}>{confirmando.cliente.split(" ")[0]}</div>
+                <div style={{ fontSize: 17, fontWeight: 900, letterSpacing: "-0.3px", color: "#1a1715" }}>Finalizar atendimento?</div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "#8a8278" }}>{confirmando.cliente.split(" ")[0]}</div>
               </div>
             </div>
 
             <div style={{ fontSize: 13, fontWeight: 600, color: "#8a8278", lineHeight: 1.55 }}>
               Esse atendimento será removido da tela de conversas. Nenhuma mensagem será enviada ao cliente.
             </div>
-            <button onClick={() => finalizarAtendimento(confirmando)} style={{ height: 52, borderRadius: 13, background: "#1e3d2a", border: "1px solid rgba(86,184,126,.3)", color: "#56b87e", fontSize: 15, fontWeight: 900, marginTop: 4 }}>
+            <button onClick={() => finalizarAtendimento(confirmando)} style={{ height: 52, borderRadius: 13, background: "#e8f5ed", border: "1px solid rgba(86,184,126,.3)", color: "#3a7a52", fontSize: 15, fontWeight: 900 }}>
               Sim, finalizar
             </button>
-            <button onClick={() => setConfirmando(null)} style={{ height: 42, background: "transparent", color: "#6a6460", fontSize: 13, fontWeight: 800 }}>
+            <button onClick={() => setConfirmando(null)} style={{ height: 42, background: "transparent", color: "#8a8278", fontSize: 13, fontWeight: 800, border: "none" }}>
               Cancelar
             </button>
           </div>
@@ -541,7 +883,7 @@ export default function ConversasPage() {
 
       {/* Toast */}
       {toast && (
-        <div style={{ position: "fixed", bottom: "calc(env(safe-area-inset-bottom) + 80px)", left: "50%", transform: "translateX(-50%)", background: "#1a1816", border: "1px solid #2a2723", borderRadius: 14, padding: "12px 18px", fontSize: 13, fontWeight: 700, color: "#b8b0a4", zIndex: 80, whiteSpace: "nowrap", maxWidth: "calc(100% - 32px)", fontFamily: "'Archivo', sans-serif" }}>
+        <div style={{ position: "fixed", bottom: "calc(env(safe-area-inset-bottom) + 80px)", left: "50%", transform: "translateX(-50%)", background: "#1a1715", border: "1px solid #2a2723", borderRadius: 14, padding: "12px 18px", fontSize: 13, fontWeight: 700, color: "#f8f5f1", zIndex: 80, whiteSpace: "nowrap", maxWidth: "calc(100% - 32px)", fontFamily: "'Archivo', sans-serif", boxShadow: "0 4px 20px rgba(0,0,0,.4)" }}>
           {toast}
         </div>
       )}
