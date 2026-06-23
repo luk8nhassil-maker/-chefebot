@@ -333,7 +333,7 @@ export default function ConversasPage() {
         .cv-root {
           display: flex;
           flex-direction: row;
-          background: #f8f5f0;
+          background: #fbf7f2;
           border-radius: 0;
           overflow: hidden;
           height: calc(100svh - 72px - env(safe-area-inset-bottom));
@@ -358,11 +358,9 @@ export default function ConversasPage() {
           display: flex;
           flex-direction: column;
           width: 100%;
-          background: linear-gradient(175deg, #f2ede7 0%, #ebe5de 100%);
+          background: #fbf7f2;
           overflow: hidden;
           flex-shrink: 0;
-          /* shadow instead of hard border */
-          box-shadow: 3px 0 16px rgba(0,0,0,.07);
           position: relative;
           z-index: 1;
         }
@@ -378,7 +376,7 @@ export default function ConversasPage() {
           display: none;
           flex-direction: column;
           flex: 1;
-          background: #fdfcfa;
+          background: #fbf7f2;
           overflow: hidden;
         }
         @media (min-width: 768px) {
