@@ -56,34 +56,32 @@ describe("pareceFallbackSeco", () => {
 
 // ─── deveMarcarPrioridadePosPedido ───────────────────────────────────────────
 describe("deveMarcarPrioridadePosPedido", () => {
-  it("pedido finalizado (step done) + msg não-saudação → marca prioridade pós-pedido", () => {
-    expect(deveMarcarPrioridadePosPedido("done", false)).toBe(true);
+  it("pedido finalizado (step done) + msg qualquer → marca prioridade pós-pedido", () => {
+    expect(deveMarcarPrioridadePosPedido("done")).toBe(true);
   });
 
-  it("pedido finalizado + saudação NÃO marca (cliente iniciando novo pedido)", () => {
-    expect(deveMarcarPrioridadePosPedido("done", true)).toBe(false);
+  it("pedido finalizado + saudação TAMBÉM marca (Kellyne precisa ver qualquer msg pós-pedido)", () => {
+    // Qualquer mensagem quando step='done' deve aparecer no Tempo Real como pós-pedido.
+    expect(deveMarcarPrioridadePosPedido("done")).toBe(true);
   });
 
   it("prioridade pós-pedido NÃO ativa manual (função não seta manual — só sinaliza)", () => {
     // A função retorna true/false; é o chamador do webhook que decide o que fazer.
-    // manual=true só acontece via clique em Atender (/api/assumir). Aqui garantimos
-    // que a função pura não tem efeito colateral — só testamos o retorno.
-    const resultado = deveMarcarPrioridadePosPedido("done", false);
+    // manual=true só acontece via clique em Atender (/api/assumir).
+    const resultado = deveMarcarPrioridadePosPedido("done");
     expect(resultado).toBe(true);
-    // O chamador seta postOrderPriority, não manual.
   });
 
   it("conversa normal (step category) NÃO marca prioridade", () => {
-    expect(deveMarcarPrioridadePosPedido("category", false)).toBe(false);
-    expect(deveMarcarPrioridadePosPedido("category", true)).toBe(false);
+    expect(deveMarcarPrioridadePosPedido("category")).toBe(false);
   });
 
   it("step undefined (sessão nova) NÃO marca prioridade", () => {
-    expect(deveMarcarPrioridadePosPedido(undefined, false)).toBe(false);
+    expect(deveMarcarPrioridadePosPedido(undefined)).toBe(false);
   });
 
   it("step welcome NÃO marca prioridade", () => {
-    expect(deveMarcarPrioridadePosPedido("welcome", false)).toBe(false);
+    expect(deveMarcarPrioridadePosPedido("welcome")).toBe(false);
   });
 });
 

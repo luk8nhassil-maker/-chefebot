@@ -773,7 +773,7 @@ export async function POST(req: NextRequest) {
     // pedido (step 'done'), marca a flag no Redis para o painel exibir "Atender".
     // Saudações NÃO marcam — elas já disparam nova sessão de retorno logo abaixo.
     // manual=true permanece exclusivo para atendimento humano ativo.
-    if (deveMarcarPrioridadePosPedido(currentSession?.step, eSaudacao(messageText))) {
+    if (deveMarcarPrioridadePosPedido(currentSession?.step)) {
       await redis.set(`postOrderPriority:${phone}`, true, { ex: 3600 });
     }
 

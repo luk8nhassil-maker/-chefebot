@@ -43,8 +43,8 @@ export function pareceFallbackSeco(messages: string[]): boolean {
 // Prioridade pós-pedido: sinaliza ao painel Tempo Real que o cliente voltou a
 // falar após finalizar um pedido. Nunca ativa manual=true — isso fica para o
 // clique explícito em "Atender". Função pura (sem efeitos colaterais).
-export function deveMarcarPrioridadePosPedido(step: string | undefined, mensagemEhSaudacao: boolean): boolean {
-  return step === 'done' && !mensagemEhSaudacao;
+export function deveMarcarPrioridadePosPedido(step: string | undefined): boolean {
+  return step === 'done';
 }
 
 // Handoff automático por confusão consecutiva.
