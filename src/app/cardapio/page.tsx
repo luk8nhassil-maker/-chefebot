@@ -5,7 +5,7 @@ import PanelShell from "@/components/PanelShell";
 
 type EsgMetadata = Record<string, { desde: string; ultimaRevisao?: string }>
 
-type MenuType = {
+export type MenuType = {
   sizes: { code: string; label: string; price: number }[];
   saltyFlavors: string[];
   sweetFlavors: string[];
@@ -218,6 +218,12 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
                 fontSize: 12, fontWeight: 900,
               }}
             >{modoSel ? "Cancelar" : "Selecionar"}</button>
+            <a
+              href="/pedido"
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ height: 32, padding: "0 11px", border: "1px solid #1f1d1a", borderRadius: 9, background: "transparent", color: "#4a4640", fontSize: 12, fontWeight: 700, display: "inline-flex", alignItems: "center", textDecoration: "none" }}
+            >🌐 Link cliente</a>
             <button
               onClick={onSair}
               style={{ height: 32, padding: "0 11px", border: "1px solid #1f1d1a", borderRadius: 9, background: "transparent", color: "#4a4640", fontSize: 12, fontWeight: 700 }}
@@ -558,7 +564,7 @@ type CartItem = {
 const money = (v: number) => "R$ " + v.toFixed(2).replace(".", ",");
 const bigBorder = (sz: string) => !(sz === "P" || sz === "M");
 
-function PublicCardapio({ menu }: { menu: MenuType }) {
+export function PublicCardapio({ menu }: { menu: MenuType }) {
   const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [screen, setScreen] = useState("sc-start");
   const [cart, setCart] = useState<CartItem[]>([]);
