@@ -573,12 +573,16 @@ function PublicCardapio({ menu }: { menu: MenuType }) {
   const [borderPrice, setBorderPrice] = useState(0);
   const [plan, setPlan] = useState<{ total: number; current: number; openEnded: boolean }>({ total: 0, current: 0, openEnded: false });
   const [listCat, setListCat] = useState<"lanche" | "bebida" | "suco">("lanche");
-  const [delType, setDelType] = useState<"delivery" | "retirada" | null>(null);
+  const [delType, setDelType] = useState<"delivery" | "retirada" | "dine_in" | null>(null);
   const [bairroIdx, setBairroIdx] = useState<string>("");
   const [rua, setRua] = useState("");
   const [nome, setNome] = useState("");
   const [payment, setPayment] = useState<string | null>(null);
   const [troco, setTroco] = useState("");
+  const [telefone, setTelefone] = useState("");
+  const [numero, setNumero] = useState("");
+  const [referencia, setReferencia] = useState("");
+  const [observacao, setObservacao] = useState("");
   const [toast, setToast] = useState("");
   const toastTimer = useRef<any>(null);
 
@@ -625,21 +629,21 @@ function PublicCardapio({ menu }: { menu: MenuType }) {
   function chQty(idx: number, d: number) { setCart(cart.map((c, i) => (i === idx ? { ...c, qty: Math.max(1, c.qty + d) } : c))); }
   function rmItem(idx: number) { const nc = cart.filter((_, i) => i !== idx); setCart(nc); if (nc.length === 0) go("sc-start"); }
   const fee = delType === "delivery" && bairroIdx !== "" ? ((menu.neighborhoods || [])[+bairroIdx]?.fee ?? 0) : 0;
-  const delOk = delType === "retirada" || (delType === "delivery" && bairroIdx !== "");
-  const payOk = !!nome.trim() && !!payment;
+  const delOk = delType === "retirada" || delType === "dine_in" || (delType === "delivery" && bairroIdx !== "");
+  const payOk = !!nome.trim() && !!telefone.trim() && !!payment;
 
   const esgotados = menu.esgotados || [];
 
   async function finish() {
     if (sending) return; setSending(true);
-    const payload = { cliente: nome.trim(), itens: cart.map((c) => ({ kind: c.kind, name: c.name, detail: c.detail, price: c.price, qty: c.qty })), tipoEntrega: delType, bairro: delType === "delivery" ? menu.neighborhoods[+bairroIdx].name : undefined, endereco: delType === "delivery" ? rua : undefined, taxaEntrega: fee, pagamento: payment, troco: payment === "Dinheiro" && troco ? troco : undefined };
+    const payload = { cliente: nome.trim(), telefone: telefone.trim(), itens: cart.map((c) => ({ kind: c.kind, name: c.name, detail: c.detail, price: c.price, qty: c.qty })), tipoEntrega: delType, bairro: delType === "delivery" ? menu.neighborhoods[+bairroIdx].name : undefined, rua: delType === "delivery" ? rua : undefined, numero: delType === "delivery" && numero.trim() ? numero.trim() : undefined, referencia: delType === "delivery" && referencia.trim() ? referencia.trim() : undefined, observacao: observacao.trim() || undefined, taxaEntrega: fee, pagamento: payment, troco: payment === "Dinheiro" && troco ? troco : undefined };
     try {
       const r = await fetch("/api/pedido-app", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const data = await r.json();
       if (data.ok) { go("sc-done"); } else { showToast("Erro ao enviar. Tente de novo."); }
     } catch { showToast("Sem conexão. Tente de novo."); } finally { setSending(false); }
   }
-  function resetAll() { setCart([]); resetBuild(); setDelType(null); setBairroIdx(""); setRua(""); setNome(""); setPayment(null); setTroco(""); go("sc-start"); }
+  function resetAll() { setCart([]); resetBuild(); setDelType(null); setBairroIdx(""); setRua(""); setNumero(""); setReferencia(""); setNome(""); setTelefone(""); setPayment(null); setTroco(""); setObservacao(""); go("sc-start"); }
 
   const stepMap: Record<string, number> = { "sc-start": 0, "sc-qty": 0, "sc-build": 0, "sc-border": 0, "sc-another": 0, "sc-list": 0, "sc-cart": 0, "sc-delivery": 1, "sc-pay": 2, "sc-done": 2 };
   const stepIdx = stepMap[screen] ?? 0;
@@ -764,7 +768,8 @@ function PublicCardapio({ menu }: { menu: MenuType }) {
               <div className="screen-head"><div className="eyebrow">Entrega</div><h2>Como prefere receber?</h2></div>
               <div className={`opt ${delType === "delivery" ? "sel" : ""}`} onClick={() => setDelType("delivery")}><div className="opt-emoji">🛵</div><div className="opt-body"><div className="opt-title">Entrega (delivery)</div><div className="opt-desc">Levamos até você</div></div><div className="opt-check" /></div>
               <div className={`opt ${delType === "retirada" ? "sel" : ""}`} onClick={() => { setDelType("retirada"); setBairroIdx(""); }}><div className="opt-emoji">🏪</div><div className="opt-body"><div className="opt-title">Buscar na loja</div><div className="opt-desc">Sem taxa de entrega</div></div><div className="opt-check" /></div>
-              {delType === "delivery" && (<div><div className="section-label">Endereço</div><div className="field"><label>Bairro</label><select value={bairroIdx} onChange={(e) => setBairroIdx(e.target.value)}><option value="">Selecione o bairro…</option>{(menu.neighborhoods || []).map((b, i) => <option key={i} value={i}>{b.name} — {money(b.fee)}</option>)}</select></div><div className="field"><label>Rua, número e referência</label><input value={rua} onChange={(e) => setRua(e.target.value)} placeholder="Rua das Flores, 123 — perto do mercado" /></div></div>)}
+              <div className={`opt ${delType === "dine_in" ? "sel" : ""}`} onClick={() => { setDelType("dine_in"); setBairroIdx(""); }}><div className="opt-emoji">🍽️</div><div className="opt-body"><div className="opt-title">Consumo no local</div><div className="opt-desc">Comer aqui na pizzaria</div></div><div className="opt-check" /></div>
+              {delType === "delivery" && (<div><div className="section-label">Endereço</div><div className="field"><label>Bairro</label><select value={bairroIdx} onChange={(e) => setBairroIdx(e.target.value)}><option value="">Selecione o bairro…</option>{(menu.neighborhoods || []).map((b, i) => <option key={i} value={i}>{b.name} — {money(b.fee)}</option>)}</select></div><div className="field"><label>Rua</label><input value={rua} onChange={(e) => setRua(e.target.value)} placeholder="Rua das Flores" /></div><div className="field"><label>Número</label><input value={numero} onChange={(e) => setNumero(e.target.value)} inputMode="numeric" placeholder="123" /></div><div className="field"><label>Referência (opcional)</label><input value={referencia} onChange={(e) => setReferencia(e.target.value)} placeholder="Perto do mercado" /></div></div>)}
               <div className="btn-row"><button className="btn btn-ghost btn-back" onClick={() => go("sc-cart")}>←</button><button className="btn btn-sm" disabled={!delOk} onClick={() => go("sc-pay")}>Continuar</button></div>
             </section>
           )}
@@ -772,9 +777,11 @@ function PublicCardapio({ menu }: { menu: MenuType }) {
             <section className="screen active">
               <div className="screen-head"><div className="eyebrow">Pagamento</div><h2>Quase lá!</h2></div>
               <div className="field"><label>Seu nome</label><input value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Como te chamamos?" /></div>
+              <div className="field"><label>WhatsApp / telefone</label><input value={telefone} onChange={(e) => setTelefone(e.target.value)} inputMode="tel" placeholder="(99) 9 9999-9999" /></div>
               <div className="section-label">Forma de pagamento</div>
               {(menu.payments || []).map((p) => { const e: Record<string, string> = { Pix: "⚡", Dinheiro: "💵", Cartao: "💳" }; return (<div key={p} className={`opt ${payment === p ? "sel" : ""}`} onClick={() => setPayment(p)}><div className="opt-emoji">{e[p] || "💰"}</div><div className="opt-body"><div className="opt-title">{p === "Cartao" ? "Cartão" : p}</div></div><div className="opt-check" /></div>); })}
               {payment === "Dinheiro" && <div className="field" style={{ marginTop: 8 }}><label>Troco para quanto?</label><input value={troco} onChange={(e) => setTroco(e.target.value)} inputMode="numeric" placeholder="Ex: 50" /></div>}
+              <div className="field" style={{ marginTop: 8 }}><label>Observação (opcional)</label><input value={observacao} onChange={(e) => setObservacao(e.target.value)} placeholder="Sem cebola, caprichar no recheio…" /></div>
               <div className="btn-row"><button className="btn btn-ghost btn-back" onClick={() => go("sc-delivery")}>←</button><button className="btn btn-sm" disabled={!payOk || sending} onClick={finish}>{sending ? "Enviando…" : "Enviar pedido"}</button></div>
             </section>
           )}
