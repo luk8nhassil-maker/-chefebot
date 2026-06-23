@@ -161,6 +161,7 @@ export default function ConversasPage() {
   const [historicoMsgs, setHistoricoMsgs] = useState<{ autor: string; texto: string; ts?: number }[]>([])
   const [mensagem, setMensagem] = useState("")
   const [enviando, setEnviando] = useState(false)
+  const [historicoErro, setHistoricoErro] = useState(false)
   const historicoBottomRef = useRef<HTMLDivElement>(null)
   const mensagemInputRef = useRef<HTMLTextAreaElement>(null)
 
@@ -197,16 +198,12 @@ export default function ConversasPage() {
     return () => clearInterval(iv)
   }, [])
 
-  // Deselect only if conversation disappears from recentes (not from pedidos)
+  // Poll history for selected conversation. A conversa permanece aberta enquanto
+  // selecionada — mesmo que saia da lista de recentes (ex.: finalizada ou após 30 min),
+  // garantindo leitura do histórico sem fechar sozinha.
   useEffect(() => {
-    if (conversaSelecionada && !conversasRecentes.some(c => c.phone === conversaSelecionada)) {
-      if (conversasRecentes.length > 0) setConversaSelecionada(null)
-    }
-  }, [conversasRecentes, conversaSelecionada])
-
-  // Poll history for selected conversation
-  useEffect(() => {
-    if (!conversaSelecionada) { setHistoricoMsgs([]); return }
+    if (!conversaSelecionada) { setHistoricoMsgs([]); setHistoricoErro(false); return }
+    setHistoricoErro(false)
     carregarHistorico(conversaSelecionada)
     const iv = setInterval(() => carregarHistorico(conversaSelecionada), 3000)
     return () => clearInterval(iv)
@@ -229,8 +226,13 @@ export default function ConversasPage() {
         const data = await r.json()
         const msgs = Array.isArray(data?.conversa) ? data.conversa : []
         setHistoricoMsgs(msgs.map(normalizarMensagem))
+        setHistoricoErro(false)
+      } else {
+        setHistoricoErro(true)
       }
-    } catch {}
+    } catch {
+      setHistoricoErro(true)
+    }
   }
 
   async function enviarMensagem() {
@@ -319,8 +321,19 @@ export default function ConversasPage() {
     : null
   const isFilaItem = pedidoSelecionado ? fila.some(p => p.id === pedidoSelecionado.id) : false
 
-  const conversaRecenteSelecionada = conversaSelecionada
-    ? conversasRecentes.find(c => c.phone === conversaSelecionada) ?? null
+  // O painel abre com base no que foi clicado (conversaSelecionada), não na
+  // permanência na lista de recentes. Se a conversa já saiu de recentes (ex.:
+  // finalizada ou após 30 min), monta-se um registro de fallback somente-leitura
+  // para que o histórico ainda abra.
+  const conversaRecenteSelecionada: ConversaRecente | null = conversaSelecionada
+    ? conversasRecentes.find(c => c.phone === conversaSelecionada) ?? {
+        phone: conversaSelecionada,
+        nome: pedidos.find(p => p.telefone === conversaSelecionada)?.cliente || conversaSelecionada,
+        ultimaMensagem: "",
+        ultimaTs: 0,
+        status: "finalizado" as StatusConversa,
+        mensagensCount: 0,
+      }
     : null
 
   const recentesBusca = busca.trim()
@@ -904,7 +917,9 @@ export default function ConversasPage() {
 
                 {/* Messages area */}
                 <div className="cv-msgs">
-                  {historicoMsgs.length === 0 ? (
+                  {historicoErro && historicoMsgs.length === 0 ? (
+                    <div className="cv-msgs-empty">Não foi possível carregar o histórico. Tentando novamente…</div>
+                  ) : historicoMsgs.length === 0 ? (
                     <div className="cv-msgs-empty">Sem histórico de mensagens disponível</div>
                   ) : (
                     historicoMsgs.map((msg, i) => {
