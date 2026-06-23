@@ -1144,6 +1144,84 @@ export default function PedidosPage() {
                 {s.cart && s.cart.length > 0 && (
                   <div style={{ fontSize: 11, color: "#a39b8b" }}>🛒 {s.cart.join(", ")}</div>
                 )}
+                {s.manual && s.resumoRapido && (
+                  <div style={{ background: "#0d0c0b", border: "1px solid #1f1d1a", borderRadius: 10, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 8 }}>
+                    <span style={{ fontSize: 10, fontWeight: 800, color: "#a39b8b", textTransform: "uppercase", letterSpacing: ".8px" }}>Resumo rápido</span>
+
+                    {/* Cliente */}
+                    <div style={{ fontSize: 12, color: "#c9c2b4" }}>
+                      <span style={{ color: "#a39b8b", fontWeight: 700 }}>Cliente: </span>
+                      {s.resumoRapido.cliente || <span style={{ color: "#5a564d", fontStyle: "italic" }}>ainda não informado</span>}
+                    </div>
+
+                    {/* Itens */}
+                    <div style={{ fontSize: 12, color: "#c9c2b4" }}>
+                      <span style={{ color: "#a39b8b", fontWeight: 700 }}>Pedido:</span>
+                      {s.resumoRapido.itens.length === 0 ? (
+                        <span style={{ color: "#5a564d", fontStyle: "italic" }}> ainda não informado</span>
+                      ) : (
+                        <ul style={{ margin: "4px 0 0", paddingLeft: 14, display: "flex", flexDirection: "column", gap: 2 }}>
+                          {s.resumoRapido.itens.slice(0, 4).map((item: string, i: number) => (
+                            <li key={i} style={{ fontSize: 12 }}>{item}</li>
+                          ))}
+                          {s.resumoRapido.itens.length > 4 && (
+                            <li style={{ fontSize: 11, color: "#5a564d" }}>+ {s.resumoRapido.itens.length - 4} itens</li>
+                          )}
+                        </ul>
+                      )}
+                    </div>
+
+                    {/* Entrega */}
+                    <div style={{ fontSize: 12, color: "#c9c2b4" }}>
+                      <span style={{ color: "#a39b8b", fontWeight: 700 }}>Entrega: </span>
+                      {s.resumoRapido.tipoEntregaLabel || <span style={{ color: "#5a564d", fontStyle: "italic" }}>ainda não informado</span>}
+                      {s.resumoRapido.tipoEntrega === "delivery" && (
+                        <div style={{ marginTop: 3, display: "flex", flexDirection: "column", gap: 2, paddingLeft: 8 }}>
+                          <span>
+                            <span style={{ color: "#a39b8b" }}>Bairro: </span>
+                            {s.resumoRapido.bairro || <span style={{ color: "#5a564d", fontStyle: "italic" }}>ainda não informado</span>}
+                          </span>
+                          <span>
+                            <span style={{ color: "#a39b8b" }}>Endereço: </span>
+                            {s.resumoRapido.endereco || <span style={{ color: "#5a564d", fontStyle: "italic" }}>ainda não informado</span>}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Pagamento */}
+                    <div style={{ fontSize: 12, color: "#c9c2b4" }}>
+                      <span style={{ color: "#a39b8b", fontWeight: 700 }}>Pagamento: </span>
+                      {s.resumoRapido.pagamento || <span style={{ color: "#5a564d", fontStyle: "italic" }}>ainda não informado</span>}
+                      {s.resumoRapido.troco && (
+                        <span style={{ color: "#a39b8b" }}> · Troco: {s.resumoRapido.troco}</span>
+                      )}
+                    </div>
+
+                    {/* Total */}
+                    {s.resumoRapido.total > 0 && (
+                      <div style={{ fontSize: 12 }}>
+                        <span style={{ color: "#a39b8b", fontWeight: 700 }}>Total parcial: </span>
+                        <span style={{ color: "#4ade80", fontWeight: 800 }}>R$ {s.resumoRapido.total.toFixed(2).replace(".", ",")}</span>
+                      </div>
+                    )}
+
+                    {/* Pendências */}
+                    {s.resumoRapido.pendencias.length === 0 ? (
+                      <span style={{ fontSize: 11, color: "#4ade80", fontWeight: 700 }}>Tudo certo até aqui.</span>
+                    ) : (
+                      <div style={{ fontSize: 11 }}>
+                        <span style={{ color: "#fbbf24", fontWeight: 800 }}>Pendências:</span>
+                        <ul style={{ margin: "4px 0 0", paddingLeft: 14, display: "flex", flexDirection: "column", gap: 2 }}>
+                          {s.resumoRapido.pendencias.map((p: string, i: number) => (
+                            <li key={i} style={{ color: "#fbbf24" }}>{p}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {s.manual && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                     <textarea
