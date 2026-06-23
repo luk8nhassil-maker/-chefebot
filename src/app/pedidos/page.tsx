@@ -215,6 +215,8 @@ export default function PedidosPage() {
   const [confirmPixModal, setConfirmPixModal] = useState<string | null>(null)
   const [finalizarModal, setFinalizarModal] = useState<string | null>(null)
   const [simpleToast, setSimpleToast] = useState("")
+  const [sessaoAtiva, setSessaoAtiva] = useState<string | null>(null)
+  const [historicoMsgs, setHistoricoMsgs] = useState<{autor:string;texto:string;ts?:number}[]>([])
 
   type PedidoCombinadoRascunho = {
     cliente: string; telefone: string; tipoEntrega: "delivery" | "retirada" | "dine_in" | ""
@@ -242,6 +244,7 @@ export default function PedidosPage() {
   const prevPixRef = useRef<Record<string, boolean>>({})
   const temposEntregaRef = useRef<Record<string, number>>({})
   const simpleToastTimerRef = useRef<any>(null)
+  const historicoBottomRef = useRef<HTMLDivElement>(null)
 
   const tocarSomNormal = () => {
     if (muteadoRef.current) return
@@ -420,6 +423,24 @@ export default function PedidosPage() {
     return () => clearInterval(iv)
   }, [filtro])
 
+  useEffect(() => {
+    if (filtro !== "tempo_real") {
+      setSessaoAtiva(null)
+      setHistoricoMsgs([])
+    }
+  }, [filtro])
+
+  useEffect(() => {
+    if (!sessaoAtiva || filtro !== "tempo_real") return
+    carregarHistoricoConversa(sessaoAtiva)
+    const iv = setInterval(() => carregarHistoricoConversa(sessaoAtiva), 3000)
+    return () => clearInterval(iv)
+  }, [sessaoAtiva, filtro])
+
+  useEffect(() => {
+    historicoBottomRef.current?.scrollIntoView({ behavior: "smooth" })
+  }, [historicoMsgs])
+
   const limparHistorico = async () => {
     setLimpando(true)
     try {
@@ -499,6 +520,7 @@ export default function PedidosPage() {
       const data = await r.json()
       if (data.ok) {
         setMensagemHumana(prev => ({ ...prev, [phone]: "" }))
+        setHistoricoMsgs(prev => [...prev, { autor: "atendente", texto: `[${userName || "Kellyne"}] ${texto}`, ts: Date.now() }])
       } else {
         setErroEnvioMensagem(prev => ({ ...prev, [phone]: data.error || "Erro ao enviar." }))
       }
@@ -562,6 +584,16 @@ export default function PedidosPage() {
       }
     } catch {}
     setCriandoPedidoCombinado(false)
+  }
+
+  const carregarHistoricoConversa = async (phone: string) => {
+    try {
+      const r = await fetch(`/api/pedido-combinado?phone=${encodeURIComponent(phone)}`)
+      if (r.ok) {
+        const data = await r.json()
+        setHistoricoMsgs(data.conversa ?? [])
+      }
+    } catch {}
   }
 
   const marcarResolvido = async (phone: string, pedidoId: string) => {
@@ -966,14 +998,35 @@ export default function PedidosPage() {
         .cbPipeScroll::-webkit-scrollbar { display:none; }
         .cb-workspace { display:flex; flex:1; min-height:0; overflow:hidden; }
         .cb-list-col { flex:1; overflow-y:auto; padding:12px 16px; display:flex; flex-direction:column; gap:10px; }
+        .cb-list-col.cb-chat-mode { padding:0 !important; gap:0 !important; overflow:hidden !important; }
         .cb-detail-col { display:none; }
         .cb-mob-sheet-wrap { display:block; }
         .cb-row:active { opacity:.85; }
+        /* ── Chat layout ── */
+        .cb-chat-root { display:flex; flex:1; min-height:0; overflow:hidden; }
+        .cb-chat-left { display:flex; flex-direction:column; overflow:hidden; width:100%; }
+        .cb-chat-left-inner { flex:1; overflow-y:auto; }
+        .cb-chat-right { display:none; flex-direction:column; flex:1; overflow:hidden; min-height:0; }
+        .cb-chat-right.cb-mob-visible { display:flex; }
+        .cb-mob-back { display:inline-flex; }
+        .cb-chat-msg-area { flex:1; overflow-y:auto; padding:12px 14px; display:flex; flex-direction:column; gap:6px; }
+        .cb-chat-msg-area::-webkit-scrollbar { width:4px; }
+        .cb-chat-msg-area::-webkit-scrollbar-thumb { background:#2a2723; border-radius:2px; }
+        .cb-chat-left-inner::-webkit-scrollbar { width:3px; }
+        .cb-chat-left-inner::-webkit-scrollbar-thumb { background:#1e1c19; border-radius:2px; }
+        .cb-chat-item { width:100%; text-align:left; background:transparent; border:none; border-bottom:1px solid #111; padding:10px 14px; cursor:pointer; display:flex; align-items:center; gap:10px; transition:background .1s; }
+        .cb-chat-item:hover { background:rgba(255,255,255,.03); }
+        .cb-chat-item.cb-chat-item-active { background:#131110; border-left:3px solid #ff6b00; padding-left:11px; }
+        .cb-chat-textarea { width:100%; background:#0d0c0b; border:1px solid #252220; border-radius:10px; padding:9px 12px; color:#f4f1ec; font-size:13px; resize:none; font-family:inherit; outline:none; box-sizing:border-box; line-height:1.4; }
+        .cb-chat-textarea:focus { border-color:#ff6b00; }
         @media (min-width: 768px) {
           .cb-header { border-bottom:1px solid #1a1816; padding:24px 28px 20px; position:static; }
           .cb-list-col { padding:16px 24px; }
           .cb-detail-col { display:flex; flex-direction:column; width:420px; min-width:380px; flex-shrink:0; border-left:1px solid #1a1816; background:#080708; overflow-y:auto; padding:16px 20px 32px; gap:12px; }
           .cb-mob-sheet-wrap { display:none !important; }
+          .cb-chat-left { width:280px; min-width:240px; flex-shrink:0; border-right:1px solid #1a1816; display:flex !important; }
+          .cb-chat-right { display:flex !important; }
+          .cb-mob-back { display:none !important; }
         }
       `}</style>
 
@@ -1058,7 +1111,7 @@ export default function PedidosPage() {
 
         {/* ── CONTEÚDO ── */}
         <div className="cb-workspace">
-        <main className="cb-list-col">
+        <main className={`cb-list-col${filtro === "tempo_real" ? " cb-chat-mode" : ""}`}>
 
         {/* Install Banner */}
         {showInstallBanner && (
@@ -1127,179 +1180,202 @@ export default function PedidosPage() {
           </>
         )}
 
-        {/* Tempo real */}
+        {/* ── Tempo real: layout de chat em duas colunas ── */}
         {filtro === "tempo_real" && (
-          <>
-            {sessoes.length === 0 ? (
-              <div style={{ background: "#101010", border: "1px dashed #2a2723", borderRadius: 20, padding: "36px 20px", textAlign: "center" }}>
-                <span style={{ fontSize: 32, display: "block", marginBottom: 8 }}>⚡</span>
-                <span style={{ fontSize: 15, fontWeight: 900, color: "#c9c2b4", display: "block" }}>Nenhuma conversa em tempo real agora.</span>
-              </div>
-            ) : sessoes.map(s => (
-              <div key={s.phone} style={{ background: "#101010", border: `1px solid ${s.manual ? "rgba(239,68,68,.45)" : "#1f1d1a"}`, borderRadius: 16, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                  <div>
-                    <span style={{ fontSize: 14, fontWeight: 900, color: "#f5f2ee" }}>Cliente final {s.lastDigits}</span>
-                    {s.customerName && <span style={{ fontSize: 12, color: "#a39b8b", fontWeight: 600, marginLeft: 6 }}>({s.customerName})</span>}
-                  </div>
-                  <span style={{ fontSize: 10, fontWeight: 800, padding: "3px 8px", borderRadius: 8, background: s.manual ? "rgba(239,68,68,.15)" : "rgba(52,211,153,.12)", color: s.manual ? "#ef4444" : "#34d399", border: `1px solid ${s.manual ? "rgba(239,68,68,.35)" : "rgba(52,211,153,.3)"}` }}>
-                    {s.manual ? "Atendimento humano" : "Robô atendendo"}
-                  </span>
-                </div>
-                <div style={{ fontSize: 12, color: "#a39b8b", fontWeight: 600 }}>
-                  Etapa: <span style={{ color: "#c9c2b4" }}>{s.stepLabel}</span>
-                </div>
-                {s.ultimaMensagem && (
-                  <div style={{ fontSize: 12, color: "#c9c2b4", background: "#0d0c0b", borderRadius: 8, padding: "8px 10px", fontStyle: "italic" }}>"{s.ultimaMensagem}"</div>
-                )}
-                {s.cart && s.cart.length > 0 && (
-                  <div style={{ fontSize: 11, color: "#a39b8b" }}>🛒 {s.cart.join(", ")}</div>
-                )}
-                {s.manual && s.resumoRapido && (
-                  <div style={{ background: "#0d0c0b", border: "1px solid #1f1d1a", borderRadius: 10, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 8 }}>
-                    <span style={{ fontSize: 10, fontWeight: 800, color: "#a39b8b", textTransform: "uppercase", letterSpacing: ".8px" }}>Resumo rápido</span>
+          <div className="cb-chat-root">
 
-                    {/* Cliente */}
-                    <div style={{ fontSize: 12, color: "#c9c2b4" }}>
-                      <span style={{ color: "#a39b8b", fontWeight: 700 }}>Cliente: </span>
-                      {s.resumoRapido.cliente || <span style={{ color: "#5a564d", fontStyle: "italic" }}>ainda não informado</span>}
+            {/* ── Coluna esquerda: lista de sessões ── */}
+            <div className={`cb-chat-left${sessaoAtiva ? " cb-mob-hidden" : ""}`}>
+              <div style={{ padding: "10px 14px 8px", borderBottom: "1px solid #141210", flexShrink: 0 }}>
+                <div style={{ fontSize: 11, fontWeight: 900, color: "#4a4640", textTransform: "uppercase", letterSpacing: ".5px" }}>
+                  ⚡ Conversas · {sessoes.length}
+                </div>
+              </div>
+              <div className="cb-chat-left-inner">
+                {sessoes.length === 0 ? (
+                  <div style={{ padding: "40px 16px", textAlign: "center" }}>
+                    <div style={{ fontSize: 26, marginBottom: 8 }}>⚡</div>
+                    <div style={{ fontSize: 13, fontWeight: 800, color: "#3a3730" }}>Nenhuma conversa ativa</div>
+                    <div style={{ fontSize: 11, color: "#2e2c29", fontWeight: 600, marginTop: 4 }}>Clientes em andamento aparecerão aqui.</div>
+                  </div>
+                ) : sessoes.map(s => {
+                  const displayName = s.customerName || `…${s.lastDigits}`
+                  const initial = ((s.customerName || s.lastDigits || "?")[0]).toUpperCase()
+                  const isActive = sessaoAtiva === s.phone
+                  return (
+                    <button
+                      key={s.phone}
+                      className={`cb-chat-item${isActive ? " cb-chat-item-active" : ""}`}
+                      onClick={() => setSessaoAtiva(s.phone)}
+                    >
+                      <div style={{ width: 38, height: 38, borderRadius: "50%", flexShrink: 0, background: s.manual ? "rgba(239,68,68,.13)" : "rgba(255,107,0,.1)", border: `1.5px solid ${s.manual ? "rgba(239,68,68,.3)" : "rgba(255,107,0,.25)"}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 900, color: s.manual ? "#ef4444" : "#ff6b00" }}>
+                        {initial}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, marginBottom: 3 }}>
+                          <span style={{ fontSize: 13, fontWeight: 900, color: "#f0ede8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displayName}</span>
+                          <span style={{ fontSize: 9, fontWeight: 900, color: s.manual ? "#ef4444" : "#34d399", background: s.manual ? "rgba(239,68,68,.1)" : "rgba(52,211,153,.08)", border: `1px solid ${s.manual ? "rgba(239,68,68,.25)" : "rgba(52,211,153,.2)"}`, padding: "2px 6px", borderRadius: 5, flexShrink: 0 }}>
+                            {s.manual ? "Humano" : "Robô"}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: 11, color: "#4a4640", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {s.ultimaMensagem || s.stepLabel || "—"}
+                        </div>
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
+            {/* ── Coluna direita: conversa aberta ── */}
+            <div className={`cb-chat-right${sessaoAtiva ? " cb-mob-visible" : ""}`}>
+              {!sessaoAtiva ? (
+                <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 10 }}>
+                  <div style={{ fontSize: 32 }}>💬</div>
+                  <div style={{ fontSize: 13, fontWeight: 800, color: "#3a3730" }}>Selecione uma conversa</div>
+                </div>
+              ) : (() => {
+                const s = sessoes.find(x => x.phone === sessaoAtiva)
+                if (!s) return (
+                  <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <span style={{ color: "#3a3730", fontSize: 13, fontWeight: 700 }}>Conversa encerrada</span>
+                  </div>
+                )
+                const displayName = s.customerName || `…${s.lastDigits}`
+                const initial = ((s.customerName || s.lastDigits || "?")[0]).toUpperCase()
+                const canSend = s.manual && !!(mensagemHumana[s.phone] || "").trim()
+
+                return (
+                  <>
+                    {/* Header da conversa */}
+                    <div style={{ padding: "10px 12px", borderBottom: "1px solid #141210", display: "flex", alignItems: "center", gap: 8, flexShrink: 0, background: "#0a0908" }}>
+                      <button className="cb-mob-back" onClick={() => setSessaoAtiva(null)} style={{ background: "none", border: "none", color: "#ff6b00", fontSize: 20, lineHeight: 1, padding: "0 4px", cursor: "pointer", flexShrink: 0 }}>←</button>
+                      <div style={{ width: 34, height: 34, borderRadius: "50%", flexShrink: 0, background: s.manual ? "rgba(239,68,68,.13)" : "rgba(255,107,0,.1)", border: `1.5px solid ${s.manual ? "rgba(239,68,68,.3)" : "rgba(255,107,0,.25)"}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 900, color: s.manual ? "#ef4444" : "#ff6b00" }}>
+                        {initial}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 900, color: "#f0ede8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displayName}</div>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: s.manual ? "#ef4444" : "#34d399" }}>
+                          {s.manual ? "Atendimento humano" : "Robô atendendo"} · {s.stepLabel}
+                        </div>
+                      </div>
+                      {/* Botões de ação no header */}
+                      <div style={{ display: "flex", gap: 5, flexShrink: 0 }}>
+                        {!s.manual ? (
+                          <button onClick={() => assumirSessao(s.phone)} disabled={assumindoSessao === s.phone} style={{ height: 30, padding: "0 10px", border: "none", borderRadius: 8, background: "#ef4444", color: "#fff", fontSize: 11, fontWeight: 900 }}>
+                            {assumindoSessao === s.phone ? "..." : "Assumir"}
+                          </button>
+                        ) : (
+                          <>
+                            <button onClick={() => abrirPedidoCombinado(s.phone)} disabled={carregandoPedidoCombinado && pedidoCombinadoPhone === s.phone} style={{ height: 30, padding: "0 9px", border: "none", borderRadius: 8, background: "#22c55e", color: "#060606", fontSize: 11, fontWeight: 900 }}>
+                              {carregandoPedidoCombinado && pedidoCombinadoPhone === s.phone ? "..." : "🧾 Pedido"}
+                            </button>
+                            <button onClick={() => devolverSessaoParaBot(s.phone)} disabled={devolvendoSessaoBot === s.phone} style={{ height: 30, padding: "0 9px", border: "none", borderRadius: 8, background: "#2563eb", color: "#fff", fontSize: 11, fontWeight: 900 }}>
+                              {devolvendoSessaoBot === s.phone ? "..." : "🤖 Robô"}
+                            </button>
+                            <button onClick={() => reviverConversa(s.phone)} disabled={revivendoConversa === s.phone} title="Reativa o bot. Não envia mensagem ao cliente." style={{ height: 30, padding: "0 8px", border: "1px solid rgba(251,191,36,.35)", borderRadius: 8, background: "rgba(251,191,36,.08)", color: "#fbbf24", fontSize: 11, fontWeight: 800 }}>
+                              {revivendoConversa === s.phone ? "..." : "🔄"}
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </div>
 
-                    {/* Itens */}
-                    <div style={{ fontSize: 12, color: "#c9c2b4" }}>
-                      <span style={{ color: "#a39b8b", fontWeight: 700 }}>Pedido:</span>
-                      {s.resumoRapido.itens.length === 0 ? (
-                        <span style={{ color: "#5a564d", fontStyle: "italic" }}> ainda não informado</span>
-                      ) : (
-                        <ul style={{ margin: "4px 0 0", paddingLeft: 14, display: "flex", flexDirection: "column", gap: 2 }}>
-                          {s.resumoRapido.itens.slice(0, 4).map((item: string, i: number) => (
-                            <li key={i} style={{ fontSize: 12 }}>{item}</li>
-                          ))}
-                          {s.resumoRapido.itens.length > 4 && (
-                            <li style={{ fontSize: 11, color: "#5a564d" }}>+ {s.resumoRapido.itens.length - 4} itens</li>
+                    {/* Resumo rápido compacto (só quando há dados relevantes) */}
+                    {s.manual && s.resumoRapido && (s.resumoRapido.cliente || s.resumoRapido.itens.length > 0 || s.resumoRapido.total > 0) && (
+                      <div style={{ padding: "6px 14px", background: "rgba(255,107,0,.04)", borderBottom: "1px solid #141210", display: "flex", alignItems: "center", gap: 8, flexShrink: 0, flexWrap: "wrap" }}>
+                        {s.resumoRapido.cliente && <span style={{ fontSize: 11, fontWeight: 800, color: "#c9c2b4" }}>{s.resumoRapido.cliente}</span>}
+                        {s.resumoRapido.itens.length > 0 && <span style={{ fontSize: 11, color: "#6a6460" }}>· {s.resumoRapido.itens.slice(0, 2).join(", ")}{s.resumoRapido.itens.length > 2 ? `... +${s.resumoRapido.itens.length - 2}` : ""}</span>}
+                        {s.resumoRapido.total > 0 && <span style={{ fontSize: 11, fontWeight: 900, color: "#4ade80", marginLeft: "auto" }}>R$ {s.resumoRapido.total.toFixed(2).replace(".", ",")}</span>}
+                        {s.resumoRapido.pendencias.length > 0 && <span style={{ fontSize: 10, fontWeight: 900, color: "#fbbf24" }}>⚠ {s.resumoRapido.pendencias.length} pendência{s.resumoRapido.pendencias.length > 1 ? "s" : ""}</span>}
+                      </div>
+                    )}
+
+                    {/* Área de mensagens */}
+                    <div className="cb-chat-msg-area">
+                      {historicoMsgs.length === 0 ? (
+                        <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "flex-end", paddingBottom: 8 }}>
+                          {s.ultimaMensagem ? (
+                            <>
+                              <div style={{ fontSize: 10, fontWeight: 700, color: "#3a3730", textAlign: "center", marginBottom: 8 }}>Histórico não disponível · última mensagem recebida</div>
+                              <div style={{ background: "#141210", border: "1px solid #222", borderRadius: 14, borderBottomLeftRadius: 4, padding: "9px 13px", maxWidth: "78%", alignSelf: "flex-start" }}>
+                                <div style={{ fontSize: 13, color: "#c9c2b4", lineHeight: 1.5 }}>{s.ultimaMensagem}</div>
+                              </div>
+                            </>
+                          ) : (
+                            <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                              <span style={{ fontSize: 12, color: "#3a3730", fontWeight: 700 }}>Sem mensagens registradas</span>
+                            </div>
                           )}
-                        </ul>
-                      )}
-                    </div>
-
-                    {/* Entrega */}
-                    <div style={{ fontSize: 12, color: "#c9c2b4" }}>
-                      <span style={{ color: "#a39b8b", fontWeight: 700 }}>Entrega: </span>
-                      {s.resumoRapido.tipoEntregaLabel || <span style={{ color: "#5a564d", fontStyle: "italic" }}>ainda não informado</span>}
-                      {s.resumoRapido.tipoEntrega === "delivery" && (
-                        <div style={{ marginTop: 3, display: "flex", flexDirection: "column", gap: 2, paddingLeft: 8 }}>
-                          <span>
-                            <span style={{ color: "#a39b8b" }}>Bairro: </span>
-                            {s.resumoRapido.bairro || <span style={{ color: "#5a564d", fontStyle: "italic" }}>ainda não informado</span>}
-                          </span>
-                          <span>
-                            <span style={{ color: "#a39b8b" }}>Endereço: </span>
-                            {s.resumoRapido.endereco || <span style={{ color: "#5a564d", fontStyle: "italic" }}>ainda não informado</span>}
-                          </span>
                         </div>
-                      )}
+                      ) : historicoMsgs.map((msg, i) => {
+                        const isCliente = msg.autor === "cliente"
+                        const isAtendente = msg.autor === "atendente"
+                        const textoLimpo = isAtendente ? (msg.texto || "").replace(/^\[.*?\]\s*/, "") : (msg.texto || "")
+                        const ts = msg.ts ? new Date(msg.ts).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) : ""
+                        return (
+                          <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: isCliente ? "flex-start" : "flex-end" }}>
+                            {!isCliente && (
+                              <span style={{ fontSize: 9, fontWeight: 700, color: isAtendente ? "#ff8533" : "#5a564d", marginBottom: 2, paddingRight: 4 }}>
+                                {isAtendente ? (userName || "Atendente") : "🤖 Bot"}
+                              </span>
+                            )}
+                            <div style={{ maxWidth: "76%", background: isCliente ? "#141210" : isAtendente ? "rgba(255,107,0,.15)" : "#0d1117", border: `1px solid ${isCliente ? "#222" : isAtendente ? "rgba(255,107,0,.3)" : "#1a2030"}`, borderRadius: 14, borderBottomLeftRadius: isCliente ? 4 : 14, borderBottomRightRadius: isCliente ? 14 : 4, padding: "8px 12px" }}>
+                              <div style={{ fontSize: 13, color: isCliente ? "#c9c2b4" : isAtendente ? "#f4f1ec" : "#7a8fa6", lineHeight: 1.5, wordBreak: "break-word" }}>{textoLimpo}</div>
+                            </div>
+                            {ts && <span style={{ fontSize: 9, color: "#3a3730", fontWeight: 600, marginTop: 2, paddingLeft: isCliente ? 4 : 0, paddingRight: isCliente ? 0 : 4 }}>{ts}</span>}
+                          </div>
+                        )
+                      })}
+                      <div ref={historicoBottomRef} />
                     </div>
 
-                    {/* Pagamento */}
-                    <div style={{ fontSize: 12, color: "#c9c2b4" }}>
-                      <span style={{ color: "#a39b8b", fontWeight: 700 }}>Pagamento: </span>
-                      {s.resumoRapido.pagamento || <span style={{ color: "#5a564d", fontStyle: "italic" }}>ainda não informado</span>}
-                      {s.resumoRapido.troco && (
-                        <span style={{ color: "#a39b8b" }}> · Troco: {s.resumoRapido.troco}</span>
-                      )}
-                    </div>
-
-                    {/* Total */}
-                    {s.resumoRapido.total > 0 && (
-                      <div style={{ fontSize: 12 }}>
-                        <span style={{ color: "#a39b8b", fontWeight: 700 }}>Total parcial: </span>
-                        <span style={{ color: "#4ade80", fontWeight: 800 }}>R$ {s.resumoRapido.total.toFixed(2).replace(".", ",")}</span>
+                    {/* Carrinho (barra compacta) */}
+                    {s.cart && s.cart.length > 0 && (
+                      <div style={{ padding: "5px 14px", borderTop: "1px solid #141210", background: "#0a0908", fontSize: 11, color: "#5a564d", fontWeight: 600, flexShrink: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        🛒 {s.cart.join(" · ")}
                       </div>
                     )}
 
-                    {/* Status de fechamento */}
-                    {s.resumoRapido.statusFechamento && (() => {
-                      const sf = s.resumoRapido.statusFechamento
-                      const cfg = sf.nivel === "pronto"
-                        ? { icon: "✅", color: "#4ade80", bg: "rgba(34,197,94,.12)", border: "rgba(34,197,94,.35)" }
-                        : sf.nivel === "quase_pronto"
-                        ? { icon: "🟡", color: "#fbbf24", bg: "rgba(250,204,21,.1)", border: "rgba(250,204,21,.35)" }
-                        : { icon: "⚠️", color: "#f87171", bg: "rgba(239,68,68,.1)", border: "rgba(239,68,68,.3)" }
-                      return (
-                        <div style={{ background: cfg.bg, border: `1px solid ${cfg.border}`, borderRadius: 8, padding: "6px 10px" }}>
-                          <div style={{ fontSize: 12, fontWeight: 800, color: cfg.color }}>{cfg.icon} {sf.titulo}</div>
-                          <div style={{ fontSize: 11, color: "#a39b8b", marginTop: 2 }}>{sf.descricao}</div>
+                    {/* Input de resposta */}
+                    {s.manual ? (
+                      <div style={{ padding: "10px 12px", borderTop: "1px solid #141210", display: "flex", gap: 8, alignItems: "flex-end", flexShrink: 0, background: "#080706" }}>
+                        <div style={{ flex: 1 }}>
+                          <textarea
+                            className="cb-chat-textarea"
+                            value={mensagemHumana[s.phone] || ""}
+                            onChange={e => setMensagemHumana(prev => ({ ...prev, [s.phone]: e.target.value }))}
+                            onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); enviarMensagemHumana(s.phone) } }}
+                            placeholder={`Responder como ${userName || "Kellyne"}… (Enter para enviar)`}
+                            rows={2}
+                          />
+                          {erroEnvioMensagem[s.phone] && (
+                            <span style={{ color: "#f87171", fontSize: 11, fontWeight: 600, display: "block", marginTop: 3 }}>{erroEnvioMensagem[s.phone]}</span>
+                          )}
                         </div>
-                      )
-                    })()}
-
-                    {/* Pendências */}
-                    {s.resumoRapido.pendencias.length === 0 ? (
-                      <span style={{ fontSize: 11, color: "#4ade80", fontWeight: 700 }}>Tudo certo até aqui.</span>
+                        <button
+                          onClick={() => enviarMensagemHumana(s.phone)}
+                          disabled={enviandoMensagem === s.phone || !canSend}
+                          style={{ width: 42, height: 42, border: "none", borderRadius: 10, flexShrink: 0, background: enviandoMensagem === s.phone || !canSend ? "#1a1a1a" : "#25d366", color: enviandoMensagem === s.phone || !canSend ? "#444" : "#fff", display: "flex", alignItems: "center", justifyContent: "center", transition: "background .15s", cursor: enviandoMensagem === s.phone || !canSend ? "not-allowed" : "pointer" }}
+                        >
+                          {enviandoMensagem === s.phone
+                            ? <span style={{ fontSize: 10, fontWeight: 900 }}>...</span>
+                            : <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><path d="M22 2L11 13" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/><path d="M22 2L15 22l-4-9-9-4 20-7z" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                          }
+                        </button>
+                      </div>
                     ) : (
-                      <div style={{ fontSize: 11 }}>
-                        <span style={{ color: "#fbbf24", fontWeight: 800 }}>Pendências:</span>
-                        <ul style={{ margin: "4px 0 0", paddingLeft: 14, display: "flex", flexDirection: "column", gap: 2 }}>
-                          {s.resumoRapido.pendencias.map((p: string, i: number) => (
-                            <li key={i} style={{ color: "#fbbf24" }}>{p}</li>
-                          ))}
-                        </ul>
+                      <div style={{ padding: "10px 14px", borderTop: "1px solid #141210", background: "#0a0908", flexShrink: 0, textAlign: "center" }}>
+                        <span style={{ fontSize: 12, color: "#3a3730", fontWeight: 700 }}>Robô está atendendo · clique em <span style={{ color: "#ef4444" }}>Assumir</span> para responder</span>
                       </div>
                     )}
-                  </div>
-                )}
+                  </>
+                )
+              })()}
+            </div>
 
-                {s.manual && (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    <textarea
-                      value={mensagemHumana[s.phone] || ""}
-                      onChange={e => setMensagemHumana(prev => ({ ...prev, [s.phone]: e.target.value }))}
-                      onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); enviarMensagemHumana(s.phone) } }}
-                      placeholder={`Responder como ${userName || "Kellyne"}...`}
-                      rows={2}
-                      style={{ width: "100%", background: "#0d0c0b", border: "1px solid #2a2723", borderRadius: 8, padding: "8px 10px", color: "#f4f1ec", fontSize: 13, resize: "none", fontFamily: "inherit", outline: "none", boxSizing: "border-box" }}
-                    />
-                    {erroEnvioMensagem[s.phone] && (
-                      <span style={{ color: "#f87171", fontSize: 11, fontWeight: 600 }}>{erroEnvioMensagem[s.phone]}</span>
-                    )}
-                    <button
-                      onClick={() => enviarMensagemHumana(s.phone)}
-                      disabled={enviandoMensagem === s.phone || !(mensagemHumana[s.phone] || "").trim()}
-                      style={{ height: 36, border: "none", borderRadius: 8, background: enviandoMensagem === s.phone ? "#1a1a1a" : "#25d366", color: enviandoMensagem === s.phone ? "#666" : "#fff", fontSize: 12, fontWeight: 900, cursor: enviandoMensagem === s.phone ? "not-allowed" : "pointer" }}
-                    >{enviandoMensagem === s.phone ? "Enviando..." : "Enviar no WhatsApp"}</button>
-                  </div>
-                )}
-                <div style={{ display: "flex", gap: 8 }}>
-                  {!s.manual ? (
-                    <button
-                      onClick={() => assumirSessao(s.phone)}
-                      disabled={assumindoSessao === s.phone}
-                      style={{ flex: 1, height: 38, border: "none", borderRadius: 10, background: "#ef4444", color: "#fff", fontSize: 12, fontWeight: 900 }}
-                    >{assumindoSessao === s.phone ? "..." : "Assumir conversa"}</button>
-                  ) : (
-                    <>
-                      <button
-                        onClick={() => abrirPedidoCombinado(s.phone)}
-                        disabled={carregandoPedidoCombinado === true && pedidoCombinadoPhone === s.phone}
-                        style={{ flex: 1, height: 38, border: "none", borderRadius: 10, background: "#22c55e", color: "#060606", fontSize: 12, fontWeight: 900 }}
-                      >{carregandoPedidoCombinado && pedidoCombinadoPhone === s.phone ? "..." : "🧾 Pedido combinado"}</button>
-                      <button
-                        onClick={() => devolverSessaoParaBot(s.phone)}
-                        disabled={devolvendoSessaoBot === s.phone}
-                        style={{ flex: 1, height: 38, border: "none", borderRadius: 10, background: "#2563eb", color: "#fff", fontSize: 12, fontWeight: 900 }}
-                      >{devolvendoSessaoBot === s.phone ? "..." : "🤖 Devolver para o robô"}</button>
-                      <button
-                        onClick={() => reviverConversa(s.phone)}
-                        disabled={revivendoConversa === s.phone}
-                        title="Reativa o bot para essa conversa. Não envia mensagem ao cliente."
-                        style={{ height: 38, border: "1px solid rgba(251,191,36,.35)", borderRadius: 10, background: "rgba(251,191,36,.08)", color: "#fbbf24", fontSize: 12, fontWeight: 800, padding: "0 10px", cursor: revivendoConversa === s.phone ? "not-allowed" : "pointer" }}
-                      >{revivendoConversa === s.phone ? "..." : "🔄 Reviver"}</button>
-                    </>
-                  )}
-                </div>
-              </div>
-            ))}
-          </>
+          </div>
         )}
 
         {/* Lista */}
