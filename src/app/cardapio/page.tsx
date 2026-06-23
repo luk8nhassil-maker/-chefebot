@@ -667,21 +667,23 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     <>
       <style>{CSS}</style>
       <div className="wrap">
-        <div className="steps">
-          {STEPS.map((s, i) => (
-            <span key={s} style={{ display: "contents" }}>
-              <div className={`step-chip ${i === stepIdx ? "active" : i < stepIdx ? "done" : ""}`}><span className="num">{i < stepIdx ? "✓" : i + 1}</span>{s}</div>
-              {i < STEPS.length - 1 && <div className={`step-line ${i < stepIdx ? "done" : ""}`} />}
-            </span>
-          ))}
-        </div>
-        <header>
-          <div className="head-row">
-            <div className="logo"><div className="logo-mark">🍕</div><div><h1>Chefe da Pizza</h1><p>Alto Alegre do MA</p></div></div>
-            <button className="theme-btn" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} aria-label="Trocar tema">{theme === "dark" ? "🌙" : "☀️"}</button>
+        <div className="app-top-fixed">
+          <header>
+            <div className="head-row">
+              <div className="logo"><div className="logo-mark">🍕</div><div><h1>Chefe da Pizza</h1><p>Alto Alegre do MA</p></div></div>
+              <button className="theme-btn" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} aria-label="Trocar tema">{theme === "dark" ? "🌙" : "☀️"}</button>
+            </div>
+            <div className="status"><span className="dot" /> Aberto · entrega 40–60 min</div>
+          </header>
+          <div className="steps">
+            {STEPS.map((s, i) => (
+              <span key={s} style={{ display: "contents" }}>
+                <div className={`step-chip ${i === stepIdx ? "active" : i < stepIdx ? "done" : ""}`}><span className="num">{i < stepIdx ? "✓" : i + 1}</span>{s}</div>
+                {i < STEPS.length - 1 && <div className={`step-line ${i < stepIdx ? "done" : ""}`} />}
+              </span>
+            ))}
           </div>
-          <div className="status"><span className="dot" /> Aberto · entrega 40–60 min</div>
-        </header>
+        </div>
         <main>
           {screen === "sc-start" && (
             <section className="screen active">
@@ -886,8 +888,9 @@ const CSS = `
 :root[data-theme="light"]{--bg:#f7f2ea;--surface:#fff;--surface2:#fbf6ee;--text:#2a1d16;--text-sub:#8a7a6c;--text-faint:#b3a596;--brand:#e8472b;--brand-press:#c2371f;--brand-soft:rgba(232,71,43,.09);--gold:#c98a17;--green:#4f8a43;--green-soft:rgba(79,138,67,.12);--line:rgba(42,29,22,.08);--line-strong:rgba(42,29,22,.14);--shadow-sm:0 1px 8px rgba(120,80,40,.07);}
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 body{font-family:var(--font-ui);background:var(--bg);color:var(--text);line-height:1.5;overflow-x:hidden;padding-bottom:104px;transition:background .35s,color .35s;font-size:16px;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
-.wrap{max-width:540px;margin:0 auto;min-height:100vh;position:relative;font-family:var(--font-ui);padding-top:46px}
+.wrap{max-width:540px;margin:0 auto;min-height:100vh;position:relative;font-family:var(--font-ui);padding-top:166px}
 .wrap h1,.wrap h2,.wrap h3,.wrap button,.wrap input,.wrap select,.wrap textarea{font-family:var(--font-ui)}
+.app-top-fixed{position:fixed;top:0;left:50%;transform:translateX(-50%);width:100%;max-width:540px;z-index:40;background:var(--bg);box-shadow:0 2px 8px rgba(0,0,0,.16);transition:background .35s}
 header{background:var(--surface);padding:18px 20px;border-bottom:1px solid var(--line);transition:background .35s}
 .head-row{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .logo{display:flex;align-items:center;gap:12px}
@@ -899,7 +902,7 @@ header{background:var(--surface);padding:18px 20px;border-bottom:1px solid var(-
 .status{display:inline-flex;align-items:center;gap:7px;margin-top:14px;background:var(--green-soft);color:var(--green);padding:6px 13px;border-radius:20px;font-size:12.5px;font-weight:500}
 .status .dot{width:7px;height:7px;border-radius:50%;background:var(--green);animation:pulse 2s infinite}
 @keyframes pulse{0%{box-shadow:0 0 0 0 var(--green-soft)}70%{box-shadow:0 0 0 7px transparent}100%{box-shadow:0 0 0 0 transparent}}
-.steps{position:fixed;top:0;left:50%;transform:translateX(-50%);width:100%;max-width:540px;z-index:50;display:flex;gap:8px;padding:12px 20px;align-items:center;background:var(--bg);border-bottom:1px solid var(--line);box-shadow:0 1px 8px rgba(0,0,0,.16);transition:background .35s}
+.steps{display:flex;gap:8px;padding:12px 20px;align-items:center;border-top:1px solid var(--line)}
 .step-chip{display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:500;color:var(--text-faint);letter-spacing:0}
 .step-chip .num{width:22px;height:22px;border-radius:50%;border:1.5px solid var(--line-strong);display:flex;align-items:center;justify-content:center;font-size:11px;transition:.25s}
 .step-chip.active{color:var(--text);font-weight:600}
@@ -994,7 +997,7 @@ main{padding:6px 20px 20px}
 .qty-card-sub{font-size:13px;color:var(--text-sub);margin-top:3px;font-weight:400}
 .qty-badge{font-size:10px;font-weight:700;color:var(--brand);background:var(--brand-soft);padding:2px 8px;border-radius:20px;white-space:nowrap;letter-spacing:.2px}
 .sc-build-screen{padding-top:34px;padding-bottom:96px}
-.build-back{position:fixed;top:54px;left:50%;transform:translateX(-50%);width:100%;max-width:540px;padding:0 20px;z-index:45;pointer-events:none}
+.build-back{position:fixed;top:170px;left:50%;transform:translateX(-50%);width:100%;max-width:540px;padding:0 20px;z-index:45;pointer-events:none}
 .build-back-btn{pointer-events:auto;background:var(--surface2);border:1px solid var(--line-strong);color:var(--text-sub);font-family:var(--font-ui);font-size:13px;font-weight:600;padding:7px 14px;border-radius:30px;cursor:pointer;box-shadow:var(--shadow-sm);transition:transform .14s}
 .build-back-btn:active{transform:scale(.96)}
 .build-foot{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:540px;z-index:55;background:var(--surface);border-top:1px solid var(--line);box-shadow:0 -4px 18px rgba(0,0,0,.18);padding:12px 20px calc(env(safe-area-inset-bottom) + 14px)}
