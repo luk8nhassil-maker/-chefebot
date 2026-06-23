@@ -1345,72 +1345,83 @@ export default function PedidosPage() {
                 className="cb-row"
                 onClick={() => setDetailId(pedido.id === detailId ? null : pedido.id)}
                 style={{
-                  background: isSelected ? "#161412" : "#0f0e0d",
+                  background: isSelected ? "#131110" : "#0d0c0b",
                   border: `1.5px solid ${isSelected ? sc.accentBorder : rowBorder}`,
-                  borderRadius: 16,
-                  padding: "10px 14px",
+                  borderRadius: 14,
+                  padding: "11px 13px",
                   display: "flex",
                   flexDirection: "column",
-                  gap: 5,
+                  gap: 0,
                   animation: rowAnim,
                   cursor: "pointer",
                   transition: "border-color .15s, background .15s",
                 }}
               >
-                {/* Row line 1: num · name · status · flags · timer */}
-                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  {pedido.numero != null && <span style={{ fontSize: 10, fontWeight: 900, color: "#3a3730", flexShrink: 0 }}>#{pedido.numero}</span>}
-                  <span style={{ fontSize: 15, fontWeight: 900, color: "#f4f1ec", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{firstName}</span>
-                  <span style={{ fontSize: 9, fontWeight: 900, color: sc.accent, background: sc.accentBg, padding: "2px 6px", borderRadius: 6, border: `1px solid ${sc.accentBorder}`, textTransform: "uppercase", letterSpacing: ".5px", flexShrink: 0 }}>{sc.label}</span>
-                  {pedido.escalonado && <span style={{ fontSize: 12, flexShrink: 0 }}>🚨</span>}
-                  {pixPendente && <span style={{ fontSize: 9, fontWeight: 900, color: "#fbbf24", background: "rgba(251,191,36,.12)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>PIX⏳</span>}
-                  {pedido.cancelamentoSolicitado && <span style={{ fontSize: 12, flexShrink: 0 }}>⚠️</span>}
-                  <span style={{ fontSize: 11, fontWeight: 900, color: timerColor, flexShrink: 0, minWidth: 26, textAlign: "right" }}>{timerMins}m</span>
-                </div>
+                {/* Layout: avatar dot + conteúdo */}
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 11 }}>
+                  {/* Dot de status */}
+                  <div style={{ marginTop: 3, flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+                    <div style={{ width: 10, height: 10, borderRadius: "50%", background: isDone ? "#22c55e" : isCanceled ? "#ef4444" : sc.accent, boxShadow: isDone || isCanceled ? "none" : `0 0 6px ${sc.accent}55` }} />
+                  </div>
 
-                {/* Row line 2: type · location · items · payment · total */}
-                <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 700, color: "#4a4640" }}>
-                  <span style={{ flexShrink: 0 }}>{isDineIn ? "🍽️" : isRetirada ? "🏪" : "🛵"}</span>
-                  <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#5a564d" }}>{isDineIn ? "No local" : isRetirada ? "Retirada" : (pedido.bairro || pedido.endereco || "—")}</span>
-                  <span style={{ flexShrink: 0 }}>·</span>
-                  <span style={{ flexShrink: 0 }}>{pedido.itens.length} {pedido.itens.length === 1 ? "item" : "itens"}</span>
-                  <span style={{ flexShrink: 0 }}>·</span>
-                  <span style={{ flexShrink: 0, color: isPix ? "#22c55e" : "#5a564d" }}>{isPix ? "Pix" : (pagamento.split(" ")[0] || "—")}</span>
-                  <span style={{ flexShrink: 0 }}>·</span>
-                  <span style={{ flexShrink: 0, fontWeight: 900, color: "#c9c2b4" }}>R${pedido.total.toFixed(2).replace(".", ",")}</span>
-                </div>
+                  {/* Conteúdo principal */}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    {/* Linha 1: nome + badges + timer */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
+                      {pedido.numero != null && <span style={{ fontSize: 10, fontWeight: 900, color: "#3a3730", flexShrink: 0 }}>#{pedido.numero}</span>}
+                      <span style={{ fontSize: 14, fontWeight: 900, color: "#f0ede8", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{firstName}</span>
+                      {pedido.escalonado && <span style={{ fontSize: 11, flexShrink: 0 }}>🚨</span>}
+                      {pixPendente && <span style={{ fontSize: 9, fontWeight: 900, color: "#fbbf24", background: "rgba(251,191,36,.12)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>PIX⏳</span>}
+                      {pedido.cancelamentoSolicitado && <span style={{ fontSize: 11, flexShrink: 0 }}>⚠️</span>}
+                      <span style={{ fontSize: 10, fontWeight: 900, color: sc.accent, background: sc.accentBg, padding: "2px 7px", borderRadius: 6, border: `1px solid ${sc.accentBorder}`, textTransform: "uppercase", letterSpacing: ".4px", flexShrink: 0 }}>{sc.label}</span>
+                    </div>
 
-                {/* Row line 3: action button */}
-                <div style={{ marginTop: 3 }} onClick={e => e.stopPropagation()}>
-                  {pedido.escalonado && (
-                    <button
-                      onClick={() => { assumirConversa(pedido.telefone); setCardUrgenciaFechado(true) }}
-                      style={{ height: 28, padding: "0 14px", border: "none", borderRadius: 8, background: "#ef4444", color: "#fff", fontSize: 12, fontWeight: 900 }}
-                    >Assumir conversa</button>
-                  )}
-                  {!pedido.escalonado && pixPendente && (
-                    <button
-                      onClick={() => setConfirmPixModal(pedido.id)}
-                      style={{ height: 28, padding: "0 14px", border: "1px solid rgba(251,191,36,.35)", borderRadius: 8, background: "rgba(251,191,36,.08)", color: "#fbbf24", fontSize: 12, fontWeight: 900 }}
-                    >Confirmar Pix</button>
-                  )}
-                  {!pedido.escalonado && !pixPendente && !isDone && !isCanceled && nextStatus && (
-                    <button
-                      onClick={() => {
-                        if (nextStatus === "saiu_entrega" && entregadores.length > 0 && pedido.tipoEntrega !== "pickup") {
-                          setModalEntrega({ pedidoId: pedido.id, proxStatus: nextStatus })
-                        } else {
-                          avancarStatus(pedido.id, nextStatus)
-                        }
-                      }}
-                      disabled={atualizando === pedido.id}
-                      style={{ height: 28, padding: "0 14px", border: "none", borderRadius: 8, background: sc.btnBg, color: sc.btnFg, fontSize: 12, fontWeight: 900, opacity: atualizando === pedido.id ? 0.6 : 1 }}
-                    >
-                      {atualizando === pedido.id ? "..." : (isDineIn && pedido.status === "em_preparo" ? "Pronto 🍽️" : ACTION_LABEL[pedido.status])}
-                    </button>
-                  )}
-                  {isDone && <span style={{ fontSize: 11, fontWeight: 800, color: "#22c55e" }}>✓ Entregue</span>}
-                  {isCanceled && <span style={{ fontSize: 11, fontWeight: 800, color: "#5a564d" }}>✗ Cancelado</span>}
+                    {/* Linha 2: infos compactas */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 700, color: "#4a4640", marginBottom: 9 }}>
+                      <span style={{ flexShrink: 0 }}>{isDineIn ? "🍽️" : isRetirada ? "🏪" : "🛵"}</span>
+                      <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#5a564d" }}>{isDineIn ? "No local" : isRetirada ? "Retirada" : (pedido.bairro || pedido.endereco || "—")}</span>
+                      <span style={{ flexShrink: 0, color: "#3a3730" }}>·</span>
+                      <span style={{ flexShrink: 0 }}>{pedido.itens.length}it</span>
+                      <span style={{ flexShrink: 0, color: "#3a3730" }}>·</span>
+                      <span style={{ flexShrink: 0, color: isPix ? "#22c55e" : "#5a564d" }}>{isPix ? "Pix" : (pagamento.split(" ")[0] || "—")}</span>
+                      <span style={{ flexShrink: 0, color: "#3a3730" }}>·</span>
+                      <span style={{ flexShrink: 0, fontWeight: 900, color: "#c9c2b4" }}>R${pedido.total.toFixed(2).replace(".", ",")}</span>
+                      <span style={{ flexShrink: 0, fontWeight: 900, color: timerColor, marginLeft: 2, fontSize: 11 }}>{timerMins}m</span>
+                    </div>
+
+                    {/* Linha 3: botão de ação */}
+                    <div onClick={e => e.stopPropagation()}>
+                      {pedido.escalonado && (
+                        <button
+                          onClick={() => { assumirConversa(pedido.telefone); setCardUrgenciaFechado(true) }}
+                          style={{ height: 30, padding: "0 14px", border: "none", borderRadius: 8, background: "#ef4444", color: "#fff", fontSize: 12, fontWeight: 900 }}
+                        >🚨 Assumir conversa</button>
+                      )}
+                      {!pedido.escalonado && pixPendente && (
+                        <button
+                          onClick={() => setConfirmPixModal(pedido.id)}
+                          style={{ height: 30, padding: "0 14px", border: "1px solid rgba(251,191,36,.35)", borderRadius: 8, background: "rgba(251,191,36,.08)", color: "#fbbf24", fontSize: 12, fontWeight: 900 }}
+                        >Confirmar Pix</button>
+                      )}
+                      {!pedido.escalonado && !pixPendente && !isDone && !isCanceled && nextStatus && (
+                        <button
+                          onClick={() => {
+                            if (nextStatus === "saiu_entrega" && entregadores.length > 0 && pedido.tipoEntrega !== "pickup") {
+                              setModalEntrega({ pedidoId: pedido.id, proxStatus: nextStatus })
+                            } else {
+                              avancarStatus(pedido.id, nextStatus)
+                            }
+                          }}
+                          disabled={atualizando === pedido.id}
+                          style={{ height: 30, padding: "0 14px", border: "none", borderRadius: 8, background: sc.btnBg, color: sc.btnFg, fontSize: 12, fontWeight: 900, opacity: atualizando === pedido.id ? 0.6 : 1 }}
+                        >
+                          {atualizando === pedido.id ? "..." : (isDineIn && pedido.status === "em_preparo" ? "Pronto 🍽️" : ACTION_LABEL[pedido.status])}
+                        </button>
+                      )}
+                      {isDone && <span style={{ fontSize: 11, fontWeight: 800, color: "#22c55e" }}>✓ Entregue</span>}
+                      {isCanceled && <span style={{ fontSize: 11, fontWeight: 800, color: "#5a564d" }}>✗ Cancelado</span>}
+                    </div>
+                  </div>
                 </div>
               </article>
             )
