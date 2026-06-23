@@ -6,7 +6,7 @@ import { interpretarMensagem, gerarRespostaGuardiao } from "@/lib/claude";
 import { registrarMensagem, ultimasMensagensRelevantes } from "@/lib/conversa";
 import { atualizarRascunhoAtendimentoTempoReal } from "@/lib/rascunhoAtendimentoTempoReal";
 import { analisarConversaParaRetomada, validarRespostaIA } from "@/lib/conversationBrain";
-import { resolverFallbackInteligente, pareceFallbackSeco } from "@/lib/fallbackInteligente";
+import { resolverFallbackInteligente, pareceFallbackSeco, avaliarHandoffPorConfusao } from "@/lib/fallbackInteligente";
 import { resumirCasoParaAprendizado, registrarCasoPendente, consumirCasoPendente, avaliarResultadoDaRetomada, salvarCasoResolvido } from "@/lib/learningMemory";
 import { log } from "@/lib/logger";
 import { analisarComprovantePix } from "@/lib/analisarComprovante";
@@ -978,6 +978,17 @@ export async function POST(req: NextRequest) {
     if (result.escalar) {
       await salvarEscalonamento(phone, currentSession!);
       await redis.set(`manual:${phone}`, true, { ex: 3600 });
+      result.session = { ...result.session, clientePerdidoCount: 0 };
+    } else {
+      // Handoff automático: 2 confusões consecutivas (fallback seco) marcam a
+      // conversa como manual=true, e o painel Tempo Real exibe "Atender".
+      // Reusa o sinal de fallback já existente; resposta válida zera o contador.
+      const { novoContador, ativarManual } = avaliarHandoffPorConfusao(
+        currentSession!.clientePerdidoCount || 0,
+        pareceFallbackSeco(result.messages),
+      );
+      if (ativarManual) await redis.set(`manual:${phone}`, true, { ex: 3600 });
+      result.session = { ...result.session, clientePerdidoCount: novoContador };
     }
 
     // Atualiza o rascunho vivo (leitura da atendente). Aditivo: preserva todos os

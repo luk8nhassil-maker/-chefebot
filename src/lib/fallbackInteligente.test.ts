@@ -7,6 +7,7 @@ import {
   pareceFallbackSeco,
   ehMensagemSocial,
   fallbackDeterministicoMelhorado,
+  avaliarHandoffPorConfusao,
 } from "./fallbackInteligente";
 import { processMessage, createInitialSession, type BotSession } from "./bot";
 
@@ -49,6 +50,49 @@ describe("pareceFallbackSeco", () => {
     expect(pareceFallbackSeco(["Qual o tamanho da pizza?"])).toBe(false);
     expect(pareceFallbackSeco(["Boa noite! 😊 Você quer pizza, lanche, bebida ou suco?"])).toBe(false);
     expect(pareceFallbackSeco(["Opa, Ana! Que bom te ver de novo 🍕"])).toBe(false); // saudação não é fallback
+  });
+});
+
+// ─── avaliarHandoffPorConfusao (handoff por confusão consecutiva) ─────────────
+describe("avaliarHandoffPorConfusao", () => {
+  const confuso = (m: string) => pareceFallbackSeco([m]);
+  const VALIDA = "Qual o tamanho da pizza?";
+
+  it("1ª mensagem confusa NÃO ativa manual (bot ainda conduz)", () => {
+    const r = avaliarHandoffPorConfusao(0, confuso(FALLBACKS_SECOS[0]));
+    expect(r.ativarManual).toBe(false);
+    expect(r.novoContador).toBe(1);
+  });
+
+  it("2ª mensagem confusa consecutiva ativa manual=true", () => {
+    const r = avaliarHandoffPorConfusao(1, confuso(FALLBACKS_SECOS[2]));
+    expect(r.ativarManual).toBe(true);
+    expect(r.novoContador).toBe(0); // zera após handoff
+  });
+
+  it("resposta válida entre duas confusas zera o contador (sem falso positivo)", () => {
+    // confusa → 1
+    let c = avaliarHandoffPorConfusao(0, confuso(FALLBACKS_SECOS[0])).novoContador;
+    expect(c).toBe(1);
+    // válida → zera
+    const meio = avaliarHandoffPorConfusao(c, confuso(VALIDA));
+    expect(meio.ativarManual).toBe(false);
+    expect(meio.novoContador).toBe(0);
+    c = meio.novoContador;
+    // próxima confusa volta a ser a 1ª, NÃO ativa manual
+    const depois = avaliarHandoffPorConfusao(c, confuso(FALLBACKS_SECOS[1]));
+    expect(depois.ativarManual).toBe(false);
+    expect(depois.novoContador).toBe(1);
+  });
+
+  it("fluxo normal de pedido (sem confusão) nunca ativa manual", () => {
+    let c = 0;
+    for (const m of ["Você quer pizza, lanche, bebida ou suco?", "Qual o tamanho?", "Pedido confirmado! 🍕"]) {
+      const r = avaliarHandoffPorConfusao(c, confuso(m));
+      expect(r.ativarManual).toBe(false);
+      c = r.novoContador;
+    }
+    expect(c).toBe(0);
   });
 });
 
