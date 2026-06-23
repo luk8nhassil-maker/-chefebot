@@ -1,5 +1,6 @@
 import { redis } from "./redis";
 import type { AutorMensagem, MensagemRelevante } from "./bot";
+import { atualizarHistorico } from "./conversasHistorico";
 
 // Log curto e rotativo das mensagens da conversa por telefone. Serve apenas para
 // dar CONTEXTO à retomada inteligente pós-handoff (ver retomarFluxoAposHandoff).
@@ -19,13 +20,15 @@ export async function registrarMensagem(
   texto: string,
 ): Promise<void> {
   if (!phone || !texto) return;
+  const ts = Date.now();
   try {
     const log = (await redis.get<MensagemRelevante[]>(chave(phone))) || [];
-    log.push({ autor, texto: texto.slice(0, 400), ts: Date.now() });
+    log.push({ autor, texto: texto.slice(0, 400), ts });
     await redis.set(chave(phone), log.slice(-MAX_MENSAGENS), { ex: TTL_SEGUNDOS });
   } catch {
     // log de conversa é best-effort; nunca propaga erro
   }
+  atualizarHistorico(phone, autor, texto, ts).catch(() => {});
 }
 
 // Retorna as N mensagens mais recentes da conversa (mais antiga → mais nova).
