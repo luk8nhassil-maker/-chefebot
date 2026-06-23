@@ -1378,7 +1378,7 @@ export default function PedidosPage() {
                           }
                         </button>
                       </div>
-                    ) : (
+                    ) : !s.postOrderPriority ? (
                       <div style={{ padding: "10px 14px", borderTop: "1px solid #141210", background: "#0a0908", flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
                         <button
                           onClick={() => assumirSessao(s.phone)}
@@ -1387,9 +1387,11 @@ export default function PedidosPage() {
                         >
                           {assumindoSessao === s.phone ? "…" : "Atender cliente"}
                         </button>
-                        <span style={{ fontSize: 10, color: "#3a3730", fontWeight: 600 }}>
-                          {s.postOrderPriority ? "Bot respondendo · pós-pedido" : "Clique para assumir essa conversa manualmente."}
-                        </span>
+                        <span style={{ fontSize: 10, color: "#3a3730", fontWeight: 600 }}>Clique para assumir essa conversa manualmente.</span>
+                      </div>
+                    ) : (
+                      <div style={{ padding: "10px 14px", borderTop: "1px solid #141210", background: "#0a0908", flexShrink: 0, textAlign: "center" }}>
+                        <span style={{ fontSize: 12, color: "#fbbf24", fontWeight: 700 }}>Bot respondendo · pós-pedido · clique em Atender acima se precisar intervir</span>
                       </div>
                     )}
                   </>
