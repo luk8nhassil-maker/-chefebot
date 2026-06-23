@@ -463,6 +463,19 @@ async function registrarCasoGuardiao(opts: {
   } catch {}
 }
 
+// Atualiza o rascunho vivo (leitura da atendente) sem processar fluxo do bot e
+// sem responder ao cliente. Usado quando o bot está pausado (global ou manual).
+// Best-effort: qualquer falha aqui nunca quebra o webhook.
+async function atualizarRascunhoVivo(phone: string, messageText: string) {
+  try {
+    const sessao = await redis.get<BotSession>(`session:${phone}`);
+    if (sessao) {
+      const atualizada = atualizarRascunhoAtendimentoTempoReal(sessao, messageText);
+      await redis.set(`session:${phone}`, atualizada, { ex: 1800 });
+    }
+  } catch {}
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -668,20 +681,18 @@ export async function POST(req: NextRequest) {
     }
 
     const botAtivo = await redis.get<boolean>("bot_ativo");
-    if (botAtivo === false) return NextResponse.json({ ok: true });
+    if (botAtivo === false) {
+      // Bot global pausado ("Você no comando"): NÃO processa fluxo, NÃO responde.
+      // Mantém o rascunho vivo atualizado para o Resumo rápido da atendente.
+      await atualizarRascunhoVivo(phone, messageText);
+      return NextResponse.json({ ok: true });
+    }
 
     const emManual = await redis.get<boolean>(`manual:${phone}`);
     if (emManual === true) {
-      // Bot permanece PAUSADO: não processa fluxo, não responde ao cliente.
-      // Apenas atualiza o rascunho vivo (leitura da atendente no painel).
-      // Best-effort: qualquer falha aqui nunca quebra o webhook.
-      try {
-        const sessaoManual = await redis.get<BotSession>(`session:${phone}`);
-        if (sessaoManual) {
-          const sessaoAtualizada = atualizarRascunhoAtendimentoTempoReal(sessaoManual, messageText);
-          await redis.set(`session:${phone}`, sessaoAtualizada, { ex: 1800 });
-        }
-      } catch {}
+      // Conversa assumida: bot permanece PAUSADO, NÃO responde ao cliente.
+      // Só atualiza o rascunho vivo (leitura da atendente no painel).
+      await atualizarRascunhoVivo(phone, messageText);
       return NextResponse.json({ ok: true });
     }
 
