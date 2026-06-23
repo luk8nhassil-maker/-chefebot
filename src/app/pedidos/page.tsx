@@ -176,6 +176,7 @@ export default function PedidosPage() {
   const [sessoes, setSessoes] = useState<any[]>([])
   const [assumindoSessao, setAssumindoSessao] = useState<string | null>(null)
   const [devolvendoSessaoBot, setDevolvendoSessaoBot] = useState<string | null>(null)
+  const [revivendoConversa, setRevivendoConversa] = useState<string | null>(null)
   const [mensagemHumana, setMensagemHumana] = useState<Record<string, string>>({})
   const [enviandoMensagem, setEnviandoMensagem] = useState<string | null>(null)
   const [erroEnvioMensagem, setErroEnvioMensagem] = useState<Record<string, string>>({})
@@ -472,6 +473,16 @@ export default function PedidosPage() {
       setSessoes(prev => prev.map(s => s.phone === phone ? { ...s, manual: false } : s))
     } catch {}
     setDevolvendoSessaoBot(null)
+  }
+
+  const reviverConversa = async (phone: string) => {
+    if (!confirm("Reviver conversa e devolver para o robô?")) return
+    setRevivendoConversa(phone)
+    try {
+      await fetch("/api/conversas/reviver", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phone }) })
+      setSessoes(prev => prev.map(s => s.phone === phone ? { ...s, manual: false } : s))
+    } catch {}
+    setRevivendoConversa(null)
   }
 
   const enviarMensagemHumana = async (phone: string) => {
@@ -1277,6 +1288,12 @@ export default function PedidosPage() {
                         disabled={devolvendoSessaoBot === s.phone}
                         style={{ flex: 1, height: 38, border: "none", borderRadius: 10, background: "#2563eb", color: "#fff", fontSize: 12, fontWeight: 900 }}
                       >{devolvendoSessaoBot === s.phone ? "..." : "🤖 Devolver para o robô"}</button>
+                      <button
+                        onClick={() => reviverConversa(s.phone)}
+                        disabled={revivendoConversa === s.phone}
+                        title="Reativa o bot para essa conversa. Não envia mensagem ao cliente."
+                        style={{ height: 38, border: "1px solid rgba(251,191,36,.35)", borderRadius: 10, background: "rgba(251,191,36,.08)", color: "#fbbf24", fontSize: 12, fontWeight: 800, padding: "0 10px", cursor: revivendoConversa === s.phone ? "not-allowed" : "pointer" }}
+                      >{revivendoConversa === s.phone ? "..." : "🔄 Reviver"}</button>
                     </>
                   )}
                 </div>
