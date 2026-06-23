@@ -252,6 +252,89 @@ describe("10. total = itens + taxa de entrega", () => {
   });
 });
 
+// ─── 11a. statusFechamento ────────────────────────────────────────────────────
+
+describe("11a. statusFechamento", () => {
+  it("sem pedido → incompleto", () => {
+    const s = sessaoBase();
+    const r = calcularResumoAtendimentoHumano(s);
+    expect(r.statusFechamento.nivel).toBe("incompleto");
+  });
+
+  it("pedido com várias pendências → incompleto", () => {
+    const s = sessaoBase({
+      cart: [{ category: "pizza", name: "Pizza", size: "G", flavor: "Calabresa", border: "Sem borda", price: 50 }],
+      deliveryType: "delivery",
+    });
+    const r = calcularResumoAtendimentoHumano(s);
+    expect(r.pendencias.length).toBeGreaterThan(1);
+    expect(r.statusFechamento.nivel).toBe("incompleto");
+  });
+
+  it("pedido com apenas uma pendência e já tem item → quase_pronto", () => {
+    const s = sessaoBase({
+      cart: [{ category: "pizza", name: "Pizza", size: "G", flavor: "Calabresa", border: "Sem borda", price: 50 }],
+      deliveryType: "pickup",
+      paymentMethod: "Pix",
+      // falta apenas nome
+    });
+    const r = calcularResumoAtendimentoHumano(s);
+    expect(r.pendencias).toEqual(["Confirmar nome do cliente"]);
+    expect(r.statusFechamento.nivel).toBe("quase_pronto");
+    expect(r.statusFechamento.titulo).toBe("Quase pronto");
+  });
+
+  it("pedido completo sem pendências → pronto", () => {
+    const r = calcularResumoAtendimentoHumano(sessaoCompleta());
+    expect(r.pendencias).toHaveLength(0);
+    expect(r.statusFechamento.nivel).toBe("pronto");
+    expect(r.statusFechamento.titulo).toBe("Pronto para finalizar");
+  });
+
+  it("delivery sem bairro/endereço → não pode ser pronto", () => {
+    const s = sessaoCompleta();
+    s.neighborhood = "";
+    s.address = "";
+    const r = calcularResumoAtendimentoHumano(s);
+    expect(r.statusFechamento.nivel).not.toBe("pronto");
+  });
+
+  it("retirada com cliente, pedido e pagamento → pronto", () => {
+    const s = sessaoBase({
+      customerName: "Maria",
+      cart: [{ category: "pizza", name: "Pizza", size: "M", flavor: "Mussarela", border: "Sem borda", price: 40 }],
+      deliveryType: "pickup",
+      deliveryFee: 0,
+      paymentMethod: "Cartão",
+    });
+    const r = calcularResumoAtendimentoHumano(s);
+    expect(r.statusFechamento.nivel).toBe("pronto");
+  });
+
+  it("dinheiro sem troco quando precisa → quase_pronto se só falta troco", () => {
+    const s = sessaoBase({
+      customerName: "Ana",
+      cart: [{ category: "pizza", name: "Pizza", size: "G", flavor: "Calabresa", border: "Sem borda", price: 50 }],
+      deliveryType: "pickup",
+      paymentMethod: "Dinheiro",
+      troco: "",
+    });
+    const r = calcularResumoAtendimentoHumano(s);
+    expect(r.pendencias).toContain("Confirmar troco");
+    expect(r.pendencias).toHaveLength(1);
+    expect(r.statusFechamento.nivel).toBe("quase_pronto");
+  });
+
+  it("statusFechamento não altera as pendências existentes", () => {
+    const s = sessaoCompleta();
+    s.paymentMethod = "";
+    const r = calcularResumoAtendimentoHumano(s);
+    expect(r.pendencias).toContain("Confirmar forma de pagamento");
+    expect(r.statusFechamento).toBeDefined();
+    expect(r.pendencias).toContain("Confirmar forma de pagamento");
+  });
+});
+
 // ─── 11. Troco — pendência apenas com pagamento em dinheiro ──────────────────
 
 describe("11. troco — pendência somente quando pagamento em dinheiro", () => {

@@ -1,5 +1,11 @@
 import type { BotSession, CartItem } from "./bot";
 
+export interface StatusFechamento {
+  nivel: "incompleto" | "quase_pronto" | "pronto";
+  titulo: string;
+  descricao: string;
+}
+
 export interface ResumoAtendimentoHumano {
   cliente: string;
   itens: string[];
@@ -12,6 +18,7 @@ export interface ResumoAtendimentoHumano {
   troco: string;
   observacao: string;
   pendencias: string[];
+  statusFechamento: StatusFechamento;
 }
 
 function formatarItem(item: CartItem): string {
@@ -86,6 +93,15 @@ export function calcularResumoAtendimentoHumano(
     pagamento.toLowerCase().includes("especie");
   if (precisaTroco && !troco.trim()) pendencias.push("Confirmar troco");
 
+  let statusFechamento: StatusFechamento;
+  if (pendencias.length === 0) {
+    statusFechamento = { nivel: "pronto", titulo: "Pronto para finalizar", descricao: "Revise e crie o pedido." };
+  } else if (pendencias.length === 1 && itens.length > 0) {
+    statusFechamento = { nivel: "quase_pronto", titulo: "Quase pronto", descricao: "Falta só confirmar um detalhe." };
+  } else {
+    statusFechamento = { nivel: "incompleto", titulo: "Pedido incompleto", descricao: "Ainda faltam informações para finalizar." };
+  }
+
   return {
     cliente,
     itens,
@@ -98,5 +114,6 @@ export function calcularResumoAtendimentoHumano(
     troco,
     observacao: session.observacao ?? "",
     pendencias,
+    statusFechamento,
   };
 }
