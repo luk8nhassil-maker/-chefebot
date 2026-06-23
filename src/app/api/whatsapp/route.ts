@@ -14,6 +14,8 @@ import { transcreverAudio } from "@/lib/transcribeAudio";
 import { proximoNumeroPedido } from "@/lib/numeracao";
 import { salvarStatusConexao, botPodeResponder, StatusConexao } from "@/lib/conexaoWhatsapp";
 import { ehConfirmacaoPedido } from "@/lib/confirmacaoPedido";
+import { escolherStepDeRetomada } from "@/lib/reviverConversa";
+import type { BotStep } from "@/lib/bot";
 
 export const maxDuration = 30;
 
@@ -897,6 +899,20 @@ export async function POST(req: NextRequest) {
       }
       await enviarMensagem(phone, `Seu pedido ja esta em andamento e nao da pra cancelar.`);
       return NextResponse.json({ ok: true });
+    }
+
+    // Revive conversa travada no step "escalado" quando o manual lock expirou.
+    // Sem este patch o bot ficaria repetindo "Já avisamos e vêm aí" indefinidamente.
+    // Cooldown de 10 min evita loop de revival em caso de bug.
+    if (currentSession && currentSession.step === "escalado") {
+      const cooldownKey = `revive_cooldown:${phone}`;
+      const cooldownAtivo = await redis.get(cooldownKey);
+      if (!cooldownAtivo) {
+        const novoStep = escolherStepDeRetomada(currentSession) as BotStep;
+        currentSession = { ...currentSession, step: novoStep, escalado: false, stepAnteriorEscalado: undefined };
+        await redis.set(sessionKey, currentSession, { ex: 1800 });
+        await redis.set(cooldownKey, 1, { ex: 600 });
+      }
     }
 
     // Processa mensagem
