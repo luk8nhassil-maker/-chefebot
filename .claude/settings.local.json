@@ -47,7 +47,8 @@
       "mcp__claude_ai_Google_Drive__create_file",
       "Bash(python3 *)",
       "Bash(curl -s -w '\\\\nHTTP:%{http_code}' -X DELETE https://evolution-api-production-8f99.up.railway.app/instance/logout/chefe -H 'apikey: 6208711c1b6fdffcc30cb492a44d74601415c33ff717ef6032162f9c0056319e' -H 'Content-Type: application/json')",
-      "Bash(curl -s -w '\\\\nHTTP:%{http_code}' -X DELETE https://evolution-api-production-8f99.up.railway.app/instance/delete/chefe -H 'apikey: 6208711c1b6fdffcc30cb492a44d74601415c33ff717ef6032162f9c0056319e' -H 'Content-Type: application/json')"
+      "Bash(curl -s -w '\\\\nHTTP:%{http_code}' -X DELETE https://evolution-api-production-8f99.up.railway.app/instance/delete/chefe -H 'apikey: 6208711c1b6fdffcc30cb492a44d74601415c33ff717ef6032162f9c0056319e' -H 'Content-Type: application/json')",
+      "mcp__Google_Drive__read_file_content"
     ]
   }
 }
