@@ -27,6 +27,12 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
+    const token = req.cookies.get('auth-token')?.value
+    const payload = token ? await verifyToken(token) : null
+    if (!payload || !ROLES_PERMITIDAS.includes(payload.role)) {
+      return NextResponse.json({ ok: false, error: 'Nao autorizado' }, { status: 401 })
+    }
+
     const body = await req.json()
     await redis.set('cardapio', body)
     return NextResponse.json({ ok: true })
