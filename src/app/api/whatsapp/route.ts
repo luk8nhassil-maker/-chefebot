@@ -686,6 +686,10 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Salva a mensagem do cliente antes de qualquer early-return de modo pausado/manual.
+    // Garante que o painel Tempo Real veja a mensagem independentemente do estado do bot.
+    await registrarMensagem(phone, "cliente", messageText);
+
     const botAtivo = await redis.get<boolean>("bot_ativo");
     if (botAtivo === false) {
       // Bot global pausado ("Você no comando"): NÃO processa fluxo, NÃO responde.
@@ -785,10 +789,9 @@ export async function POST(req: NextRequest) {
     if (armadaRetomada === true) {
       await redis.del(`retomada:${phone}`);
       if (currentSession) {
-        // Lê o contexto ANTES de registrar a mensagem nova, para pegar as duas
-        // últimas mensagens ANTERIORES (cliente / atendente / bot).
-        const ultimas = await ultimasMensagensRelevantes(phone, 2);
-        await registrarMensagem(phone, "cliente", messageText);
+        // Mensagem já registrada no início do fluxo; pega as 3 mais recentes e
+        // descarta a primeira (atual) para obter as 2 ANTERIORES como contexto.
+        const ultimas = (await ultimasMensagensRelevantes(phone, 3)).slice(1);
         const decisao = analisarConversaParaRetomada({
           session: currentSession,
           mensagemAtual: messageText,
@@ -817,9 +820,6 @@ export async function POST(req: NextRequest) {
       }
       // Sem sessão ativa (expirou) — segue o fluxo normal, que recria a sessão.
     }
-
-    // Registra a mensagem da cliente no log da conversa (contexto p/ futuro handoff).
-    await registrarMensagem(phone, "cliente", messageText);
 
     // Sem sessao ativa — inicia nova
     if (!currentSession) {
