@@ -1,5 +1,14 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
+import { verifyToken } from "@/lib/auth";
 import { redis } from "@/lib/redis";
+
+async function checkAuth(req: NextRequest) {
+  const token = req.cookies.get("auth-token")?.value ?? null;
+  if (!token) return null;
+  const payload = await verifyToken(token);
+  if (!payload || !["atendente", "admin"].includes(payload.role as string)) return null;
+  return payload;
+}
 
 const _evResolverUrl = process.env.EVOLUTION_API_URL ?? 'evolution-api-production-8f99.up.railway.app'
 const EVOLUTION_API_URL = _evResolverUrl.startsWith('http') ? _evResolverUrl : `https://${_evResolverUrl}`
@@ -32,6 +41,9 @@ async function enviarMensagem(phone: string, message: string) {
 }
 
 export async function POST(req: NextRequest) {
+  const auth = await checkAuth(req);
+  if (!auth) return NextResponse.json({ error: "Nao autorizado" }, { status: 401 });
+
   const { phone } = await req.json();
   if (!phone) return NextResponse.json({ ok: false }, { status: 400 });
 
