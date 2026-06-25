@@ -1293,9 +1293,7 @@ export default function PedidosPage() {
                           {assumindoSessao === s.phone ? "..." : "Atender"}
                         </button>
                       ) : (
-                        <button onClick={() => assumirSessao(s.phone)} disabled={assumindoSessao === s.phone} style={{ height: 30, padding: "0 10px", border: "1px solid rgba(201,194,180,.15)", borderRadius: 8, background: "rgba(201,194,180,.06)", color: "#9a9590", fontSize: 11, fontWeight: 700, flexShrink: 0 }}>
-                          {assumindoSessao === s.phone ? "..." : "Assumir atendimento"}
-                        </button>
+                        <span style={{ fontSize: 11, color: "#3a3730", fontWeight: 700, flexShrink: 0 }}>Bot atendendo automaticamente</span>
                       )}
                     </div>
 
@@ -1383,10 +1381,14 @@ export default function PedidosPage() {
                         </button>
                       </div>
                     ) : (
-                      <div style={{ padding: "10px 14px", borderTop: "1px solid #141210", background: "#0a0908", flexShrink: 0, textAlign: "center" }}>
-                        <span style={{ fontSize: 12, color: s.postOrderPriority ? "#fbbf24" : "#3a3730", fontWeight: 700 }}>
-                          {s.postOrderPriority ? "Bot respondendo · clique em Atender se precisar intervir" : "Bot atendendo automaticamente"}
-                        </span>
+                      <div style={{ padding: "10px 12px", borderTop: "1px solid #141210", background: "#0a0908", flexShrink: 0, textAlign: "center" }}>
+                        {s.postOrderPriority ? (
+                          <span style={{ fontSize: 12, color: "#fbbf24", fontWeight: 700 }}>Bot respondendo · clique em Atender se precisar intervir</span>
+                        ) : (
+                          <button onClick={() => assumirSessao(s.phone)} disabled={assumindoSessao === s.phone} style={{ height: 30, padding: "0 16px", border: "1px solid rgba(201,194,180,.15)", borderRadius: 8, background: "rgba(201,194,180,.06)", color: "#9a9590", fontSize: 12, fontWeight: 700 }}>
+                            {assumindoSessao === s.phone ? "..." : "Assumir atendimento"}
+                          </button>
+                        )}
                       </div>
                     )}
                   </>
