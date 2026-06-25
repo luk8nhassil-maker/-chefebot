@@ -1014,7 +1014,7 @@ export default function PedidosPage() {
         /* Só no modo conversa: fixa a altura da viewport para o container, fazendo
            a lista de mensagens rolar (flex-1/min-h-0/overflow) e o composer ficar
            sempre fixo no rodapé. Não afeta a listagem normal de pedidos. */
-        .ps-content:has(.cb-chat-mode) { display:flex; flex-direction:column; min-height:100svh; }
+        .ps-content:has(.cb-chat-mode) { display:flex; flex-direction:column; height:100svh; overflow:hidden; }
         .cb-chat-root { display:flex; flex:1; min-height:0; overflow:hidden; }
         .cb-chat-left { display:flex; flex-direction:column; overflow:hidden; width:100%; }
         .cb-chat-left-inner { flex:1; overflow-y:auto; }
