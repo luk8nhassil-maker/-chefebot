@@ -511,15 +511,21 @@ export async function POST(req: NextRequest) {
 
     const data = body.data;
     if (data?.key?.fromMe) {
-      // Mensagem enviada pelo próprio número. Durante atendimento manual o bot está
-      // pausado, então um fromMe aqui é do ATENDENTE HUMANO — registramos para dar
-      // contexto à retomada pós-handoff. (Mensagens do bot são logadas no envio.)
+      // Mensagem enviada pelo próprio número (celular ou API).
+      // Salva como "atendente" quando o bot está pausado globalmente (bot_ativo=false)
+      // ou quando a conversa está em atendimento manual (manual:{phone}=true).
+      // Isso garante que respostas dadas pela Kellyne pelo WhatsApp Business apareçam
+      // no painel Tempo Real. Bot nunca responde — always early-return.
       try {
         const fromPhone = data?.key?.remoteJid?.replace("@s.whatsapp.net", "");
         if (fromPhone) {
           const emManualFrom = await redis.get<boolean>(`manual:${fromPhone}`);
-          if (emManualFrom === true) {
-            const txtFrom = data?.message?.conversation || data?.message?.extendedTextMessage?.text || "";
+          const botGlobalAtivo = await redis.get<boolean>("bot_ativo");
+          if (emManualFrom === true || botGlobalAtivo === false) {
+            const txtFrom =
+              data?.message?.conversation ||
+              data?.message?.extendedTextMessage?.text ||
+              "";
             if (txtFrom) await registrarMensagem(fromPhone, "atendente", txtFrom);
           }
         }
