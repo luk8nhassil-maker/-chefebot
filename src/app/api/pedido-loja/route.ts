@@ -1,88 +1,10 @@
-import { supabase } from '@/lib/supabase'
-import { NextRequest, NextResponse } from 'next/server'
+import { NextResponse } from 'next/server'
 
-function generateToken(): string {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
-  let token = ''
-  for (let i = 0; i < 4; i++) {
-    token += chars[Math.floor(Math.random() * chars.length)]
-  }
-  return token
-}
-
-export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json()
-    const { clienteNome, clienteTelefone, endereco, tipoEntrega, pagamento, items, total, bairro } = body
-
-    if (!clienteNome || !clienteTelefone || !tipoEntrega || !pagamento || !items?.length) {
-      return NextResponse.json({ error: 'Dados incompletos' }, { status: 400 })
-    }
-
-    const token = generateToken()
-
-    const { data: tenantRow } = await supabase.from('tenants').select('id').limit(1).single()
-    const tenantId = tenantRow?.id
-
-    const enderecoFinal = tipoEntrega === 'delivery'
-      ? `${(endereco || '').trim()}${bairro ? ` — ${bairro}` : ''}`
-      : 'Retirada na loja'
-
-    const { data: pedido, error: pedidoError } = await supabase
-      .from('pedidos')
-      .insert({
-        tenant_id: tenantId,
-        cliente_nome: clienteNome,
-        cliente_telefone: clienteTelefone,
-        endereco: enderecoFinal,
-        tipo_entrega: tipoEntrega,
-        pagamento,
-        total,
-        status: 'novo',
-        token,
-      })
-      .select()
-      .single()
-
-    if (pedidoError) {
-      return NextResponse.json({ error: pedidoError.message }, { status: 500 })
-    }
-
-    const itens = items.map((item: {
-      produtoId: string
-      nome?: string
-      quantidade: number
-      tamanho: string
-      borda?: string
-      observacao: string
-      precoUnitario: number
-    }) => {
-      const tamanhoValido = (item.tamanho && ['P', 'M', 'G', 'F'].includes(item.tamanho))
-        ? item.tamanho
-        : null
-      const obs = item.borda
-        ? `Borda: ${item.borda}${item.observacao ? ` | ${item.observacao}` : ''}`
-        : (item.observacao || '')
-      return {
-        pedido_id: pedido.id,
-        produto_id: null,
-        produto_nome: item.nome || null,
-        quantidade: item.quantidade,
-        tamanho: tamanhoValido,
-        observacao: obs,
-        preco_unitario: item.precoUnitario,
-      }
-    })
-
-    const { error: itensError } = await supabase.from('itens_pedido').insert(itens)
-
-    if (itensError) {
-      return NextResponse.json({ error: itensError.message }, { status: 500 })
-    }
-
-    return NextResponse.json({ pedido, token })
-  } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : 'Erro interno'
-    return NextResponse.json({ error: msg }, { status: 500 })
-  }
+// Loja desativada. O pedido agora é feito pelo cardápio (/cardapio).
+// Mantemos a rota apenas para responder de forma clara a clientes antigos.
+export async function POST() {
+  return NextResponse.json(
+    { error: 'Loja desativada. Use /cardapio' },
+    { status: 410 },
+  )
 }
