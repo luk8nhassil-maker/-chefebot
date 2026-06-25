@@ -1292,7 +1292,11 @@ export default function PedidosPage() {
                         <button onClick={() => assumirSessao(s.phone)} disabled={assumindoSessao === s.phone} style={{ height: 30, padding: "0 10px", border: "none", borderRadius: 8, background: "#fbbf24", color: "#060606", fontSize: 11, fontWeight: 900, flexShrink: 0 }}>
                           {assumindoSessao === s.phone ? "..." : "Atender"}
                         </button>
-                      ) : null}
+                      ) : (
+                        <button onClick={() => assumirSessao(s.phone)} disabled={assumindoSessao === s.phone} style={{ height: 30, padding: "0 10px", border: "1px solid rgba(201,194,180,.15)", borderRadius: 8, background: "rgba(201,194,180,.06)", color: "#9a9590", fontSize: 11, fontWeight: 700, flexShrink: 0 }}>
+                          {assumindoSessao === s.phone ? "..." : "Assumir atendimento"}
+                        </button>
+                      )}
                     </div>
 
                     {/* Resumo rápido compacto (só quando há dados relevantes) */}
