@@ -693,6 +693,15 @@ export async function POST(req: NextRequest) {
     const botAtivo = await redis.get<boolean>("bot_ativo");
     if (botAtivo === false) {
       // Bot global pausado ("Você no comando"): NÃO processa fluxo, NÃO responde.
+      // Garante que a conversa apareça no Tempo Real mesmo sem sessão prévia.
+      const sessaoExistente = await redis.get<BotSession>(`session:${phone}`);
+      if (!sessaoExistente) {
+        await redis.set(
+          `session:${phone}`,
+          { step: "escalado", cart: [], deliveryFee: 0, escalado: true },
+          { ex: 1800 }
+        );
+      }
       // Mantém o rascunho vivo atualizado para o Resumo rápido da atendente.
       await atualizarRascunhoVivo(phone, messageText);
       return NextResponse.json({ ok: true });
