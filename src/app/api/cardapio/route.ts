@@ -3,6 +3,9 @@ import { redis } from '@/lib/redis'
 import { MENU, getMENUDinamico } from '@/lib/menu'
 import { verifyToken } from '@/lib/auth'
 
+// Esgotados precisam refletir em tempo real no cardapio publico: nunca cachear.
+export const dynamic = 'force-dynamic'
+
 const ROLES_PERMITIDAS = ['admin', 'atendente', 'dev']
 
 type EsgMetadata = Record<string, { desde: string; ultimaRevisao?: string }>

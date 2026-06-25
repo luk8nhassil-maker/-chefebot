@@ -76,3 +76,32 @@ describe("GET /api/cardapio — público", () => {
     expect(Array.isArray(data.esgotados)).toBe(true);
   });
 });
+
+describe("Esgotado reflete no cardápio público (GET) após PATCH", () => {
+  async function marcar(nome: string, esgotado: boolean) {
+    const token = await createToken({ username: "brito", name: "Brito", role: "admin" });
+    const res = await PATCH(patchReq({ nome, esgotado }, token));
+    expect(res.status).toBe(200);
+  }
+
+  it("ao marcar um sabor como esgotado, o GET público passa a listá-lo em esgotados", async () => {
+    await marcar("Calabresa", true);
+    const data = await (await GET()).json();
+    expect(data.esgotados).toContain("Calabresa");
+    // o sabor continua no cardápio base; o cliente o trata como bloqueado via lista de esgotados
+    expect(data.saltyFlavors).toContain("Calabresa");
+  });
+
+  it("ao desmarcar (disponível), o GET público remove o item de esgotados", async () => {
+    await marcar("Calabresa", true);
+    expect((await (await GET()).json()).esgotados).toContain("Calabresa");
+    await marcar("Calabresa", false);
+    expect((await (await GET()).json()).esgotados).not.toContain("Calabresa");
+  });
+
+  it("uma borda marcada como esgotada também aparece em esgotados", async () => {
+    await marcar("Catupiry", true);
+    const data = await (await GET()).json();
+    expect(data.esgotados).toContain("Catupiry");
+  });
+});
