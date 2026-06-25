@@ -58,13 +58,21 @@ ALTER TABLE produtos ENABLE ROW LEVEL SECURITY;
 ALTER TABLE pedidos ENABLE ROW LEVEL SECURITY;
 ALTER TABLE itens_pedido ENABLE ROW LEVEL SECURITY;
 
--- Políticas de leitura pública
-CREATE POLICY "Leitura pública de tenants" ON tenants FOR SELECT USING (true);
-CREATE POLICY "Leitura pública de produtos ativos" ON produtos FOR SELECT USING (ativo = true);
-
--- Políticas de escrita anônima
-CREATE POLICY "Inserção anônima de pedidos" ON pedidos FOR INSERT WITH CHECK (true);
-CREATE POLICY "Inserção anônima de itens" ON itens_pedido FOR INSERT WITH CHECK (true);
+-- Políticas de leitura pública (idempotentes)
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename='tenants' AND policyname='Leitura pública de tenants') THEN
+    CREATE POLICY "Leitura pública de tenants" ON tenants FOR SELECT USING (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename='produtos' AND policyname='Leitura pública de produtos ativos') THEN
+    CREATE POLICY "Leitura pública de produtos ativos" ON produtos FOR SELECT USING (ativo = true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename='pedidos' AND policyname='Inserção anônima de pedidos') THEN
+    CREATE POLICY "Inserção anônima de pedidos" ON pedidos FOR INSERT WITH CHECK (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename='itens_pedido' AND policyname='Inserção anônima de itens') THEN
+    CREATE POLICY "Inserção anônima de itens" ON itens_pedido FOR INSERT WITH CHECK (true);
+  END IF;
+END $$;
 
 -- Dados de exemplo
 INSERT INTO tenants (nome, cor_primaria, horario, endereco, telefone)

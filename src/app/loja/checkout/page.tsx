@@ -3,10 +3,18 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useCart } from '@/lib/cart-context'
-import { supabase } from '@/lib/supabase'
 
 type TipoEntrega = 'delivery' | 'retirada'
 type Pagamento = 'pix' | 'cartao' | 'dinheiro'
+
+function mensagemAmigavel(msg: string): string {
+  if (!msg) return 'Erro ao processar pedido. Tente novamente.'
+  if (msg.includes('row-level security') || msg.includes('RLS')) return 'Não foi possível salvar o pedido. Tente novamente.'
+  if (msg.includes('foreign key') || msg.includes('violates')) return 'Produto inválido. Volte ao cardápio e tente novamente.'
+  if (msg.includes('fetch') || msg.includes('network') || msg.includes('Failed')) return 'Sem conexão. Verifique sua internet e tente novamente.'
+  if (msg.includes('Dados incompletos')) return 'Preencha todos os campos obrigatórios.'
+  return 'Erro ao processar pedido. Tente novamente.'
+}
 
 function formatCurrency(v: number) {
   return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -73,11 +81,12 @@ export default function CheckoutPage() {
         pagamento,
         tipoEntrega,
       }))
+      localStorage.removeItem('chefe-cart-summary')
 
       clearCart()
       router.push(`/loja/confirmacao?token=${data.pedido.token}`)
     } catch (e: any) {
-      setErro(e.message || 'Erro ao processar pedido. Tente novamente.')
+      setErro(mensagemAmigavel(e.message))
       setEnviando(false)
     }
   }
