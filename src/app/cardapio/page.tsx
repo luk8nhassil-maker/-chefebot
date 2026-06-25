@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import PanelShell from "@/components/PanelShell";
+import { useLiveMenu, cartItemEsgotado } from "./liveMenu";
 
 type EsgMetadata = Record<string, { desde: string; ultimaRevisao?: string }>
 
@@ -559,6 +560,9 @@ type CartItem = {
   detail: string;
   price: number;
   qty: number;
+  // Nomes de produtos (sabores/borda da pizza ou nome do item simples) usados
+  // para detectar se o item ficou esgotado depois de adicionado ao carrinho.
+  keys?: string[];
 };
 
 const money = (v: number) => "R$ " + v.toFixed(2).replace(".", ",");
@@ -615,7 +619,8 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   }
   function addPizza() {
     const flavor = mam ? `${f1} / ${f2}` : f1;
-    const newItem: CartItem = { emoji: "🍕", kind: "pizza", name: `Pizza ${size}${mam ? " (meio a meio)" : ""}`, detail: `${flavor}${border ? ` · borda ${border}` : ""}`, price: sizePrice + borderPrice, qty: 1 };
+    const keys = [f1, mam ? f2 : null, border].filter(Boolean) as string[];
+    const newItem: CartItem = { emoji: "🍕", kind: "pizza", name: `Pizza ${size}${mam ? " (meio a meio)" : ""}`, detail: `${flavor}${border ? ` · borda ${border}` : ""}`, price: sizePrice + borderPrice, qty: 1, keys };
     const newCart = [...cart, newItem];
     setCart(newCart);
     if (!plan.openEnded && plan.current < plan.total) { setPlan({ ...plan, current: plan.current + 1 }); showToast(`Pizza pronta! 🍕`); resetBuild(); go("sc-build"); }
@@ -627,7 +632,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   function addSimple(it: { name: string; price: number }, emoji: string) {
     const ex = cart.find((c) => c.kind === "simple" && c.name === it.name);
     if (ex) { setCart(cart.map((c) => (c === ex ? { ...c, qty: c.qty + 1 } : c))); }
-    else { setCart([...cart, { emoji, kind: "simple", name: it.name, detail: "", price: it.price, qty: 1 }]); }
+    else { setCart([...cart, { emoji, kind: "simple", name: it.name, detail: "", price: it.price, qty: 1, keys: [it.name] }]); }
     showToast(`${it.name} adicionado!`);
   }
   const cartTotal = cart.reduce((s, i) => s + i.price * i.qty, 0);
@@ -639,9 +644,33 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const payOk = !!nome.trim() && !!telefone.trim() && !!payment;
 
   const esgotados = menu.esgotados || [];
+  const esgotadosKey = esgotados.join("|");
+  const cartEsgotado = cart.some((c) => cartItemEsgotado(c.keys, esgotados));
+
+  // Reage ao cardápio atualizado pelo polling: se o sabor/borda que o cliente
+  // está montando ficou esgotado, limpa só essa seleção (buildOk volta a ser
+  // falso e ele não consegue continuar). Não mexe no carrinho.
+  useEffect(() => {
+    if (f1 && esgotados.includes(f1)) {
+      setF1(f2 && !esgotados.includes(f2) ? f2 : null);
+      setF2(null);
+      showToast("Um sabor que você escolheu ficou esgotado.");
+    } else if (f2 && esgotados.includes(f2)) {
+      setF2(null);
+      showToast("Um sabor que você escolheu ficou esgotado.");
+    }
+    if (border && esgotados.includes(border)) {
+      setBorder(null);
+      setBorderPrice(0);
+      showToast("A borda que você escolheu ficou esgotada.");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [esgotadosKey]);
 
   async function finish() {
-    if (sending) return; setSending(true);
+    if (sending) return;
+    if (cartEsgotado) { showToast("Um item do seu pedido ficou esgotado. Remova para continuar."); return; }
+    setSending(true);
     const payload = { cliente: nome.trim(), telefone: telefone.trim(), itens: cart.map((c) => ({ kind: c.kind, name: c.name, detail: c.detail, price: c.price, qty: c.qty })), tipoEntrega: delType, bairro: delType === "delivery" ? menu.neighborhoods[+bairroIdx].name : undefined, rua: delType === "delivery" ? rua : undefined, numero: delType === "delivery" && numero.trim() ? numero.trim() : undefined, referencia: delType === "delivery" && referencia.trim() ? referencia.trim() : undefined, observacao: observacao.trim() || undefined, taxaEntrega: fee, pagamento: payment, troco: payment === "Dinheiro" && troco ? troco : undefined };
     try {
       const r = await fetch("/api/pedido-app", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
@@ -788,10 +817,11 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
             <section className="screen active">
               <div className="screen-head"><div className="eyebrow">Seu pedido</div><h2>Confira tudo</h2></div>
               {cart.length === 0 ? (<div className="empty"><div className="big">🛒</div><div>Seu pedido está vazio.</div></div>) : (
-                <>{(() => { let pn = 0; return cart.map((it, i) => { let tag = null; if (it.kind === "pizza") { pn++; tag = <span className="ci-tag">Pizza {pn}</span>; } const nm = it.kind === "pizza" ? it.name.replace(/^Pizza /, "") : it.name; return (<div key={i} className="cart-item"><div className="ci-emoji">{it.emoji}</div><div className="ci-body"><div className="ci-name">{tag}{nm}{it.qty > 1 ? ` ×${it.qty}` : ""}</div>{it.detail && <div className="ci-detail">{it.detail}</div>}<div className="ci-price">{money(it.price * it.qty)}</div>{it.kind === "simple" && (<div className="qty-pill"><button onClick={() => chQty(i, -1)}>−</button><span>{it.qty}</span><button onClick={() => chQty(i, 1)}>+</button></div>)}</div><button className="ci-remove" onClick={() => rmItem(i)}>✕</button></div>); }); })()}<div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 4px 4px", fontWeight: 700, fontSize: 19 }}><span>Subtotal</span><span>{money(cartTotal)}</span></div></>
+                <>{(() => { let pn = 0; return cart.map((it, i) => { let tag = null; if (it.kind === "pizza") { pn++; tag = <span className="ci-tag">Pizza {pn}</span>; } const nm = it.kind === "pizza" ? it.name.replace(/^Pizza /, "") : it.name; const itemEsg = cartItemEsgotado(it.keys, esgotados); return (<div key={i} className="cart-item"><div className="ci-emoji">{it.emoji}</div><div className="ci-body"><div className="ci-name">{tag}{nm}{it.qty > 1 ? ` ×${it.qty}` : ""}{itemEsg && <span style={{ color: "#ef4444", fontWeight: 800, marginLeft: 6 }}>· Esgotado</span>}</div>{it.detail && <div className="ci-detail">{it.detail}</div>}<div className="ci-price">{money(it.price * it.qty)}</div>{it.kind === "simple" && (<div className="qty-pill"><button onClick={() => chQty(i, -1)}>−</button><span>{it.qty}</span><button onClick={() => chQty(i, 1)}>+</button></div>)}</div><button className="ci-remove" onClick={() => rmItem(i)}>✕</button></div>); }); })()}<div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 4px 4px", fontWeight: 700, fontSize: 19 }}><span>Subtotal</span><span>{money(cartTotal)}</span></div></>
               )}
               <button className="btn btn-ghost btn-sm" style={{ marginTop: 4 }} onClick={() => go("sc-start")}>+ Adicionar mais</button>
-              {cart.length > 0 && <button className="btn" style={{ marginTop: 11 }} onClick={() => go("sc-delivery")}>Ir para entrega</button>}
+              {cartEsgotado && <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 10, background: "rgba(239,68,68,.1)", color: "#ef4444", fontSize: 13, fontWeight: 700 }}>Um item do seu pedido ficou esgotado. Remova para continuar.</div>}
+              {cart.length > 0 && <button className="btn" style={{ marginTop: 11 }} disabled={cartEsgotado} onClick={() => !cartEsgotado && go("sc-delivery")}>Ir para entrega</button>}
             </section>
           )}
           {screen === "sc-delivery" && (
@@ -813,7 +843,8 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
               {(menu.payments || []).map((p) => { const e: Record<string, string> = { Pix: "⚡", Dinheiro: "💵", Cartao: "💳" }; return (<div key={p} className={`opt ${payment === p ? "sel" : ""}`} onClick={() => setPayment(p)}><div className="opt-emoji">{e[p] || "💰"}</div><div className="opt-body"><div className="opt-title">{p === "Cartao" ? "Cartão" : p}</div></div><div className="opt-check" /></div>); })}
               {payment === "Dinheiro" && <div className="field" style={{ marginTop: 8 }}><label>Troco para quanto?</label><input value={troco} onChange={(e) => setTroco(e.target.value)} inputMode="numeric" placeholder="Ex: 50" /></div>}
               <div className="field" style={{ marginTop: 8 }}><label>Observação (opcional)</label><input value={observacao} onChange={(e) => setObservacao(e.target.value)} placeholder="Sem cebola, caprichar no recheio…" /></div>
-              <div className="btn-row"><button className="btn btn-ghost btn-back" onClick={() => go("sc-delivery")}>←</button><button className="btn btn-sm" disabled={!payOk || sending} onClick={finish}>{sending ? "Enviando…" : "Enviar pedido"}</button></div>
+              {cartEsgotado && <div style={{ marginTop: 8, padding: "10px 12px", borderRadius: 10, background: "rgba(239,68,68,.1)", color: "#ef4444", fontSize: 13, fontWeight: 700 }}>Um item do seu pedido ficou esgotado. Remova para continuar.</div>}
+              <div className="btn-row"><button className="btn btn-ghost btn-back" onClick={() => go("sc-delivery")}>←</button><button className="btn btn-sm" disabled={!payOk || sending || cartEsgotado} onClick={finish}>{sending ? "Enviando…" : "Enviar pedido"}</button></div>
             </section>
           )}
           {screen === "sc-done" && (
@@ -832,19 +863,10 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
 // ==================== ROOT ====================
 
 export default function CardapioPage() {
-  const [menu, setMenu] = useState<MenuType | null>(null);
-  const [erro, setErro] = useState(false);
+  const { menu, erro, retry } = useLiveMenu();
   const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
-    fetch("/api/cardapio", { cache: "no-store" })
-      .then((r) => { if (!r.ok) throw new Error("api error"); return r.json(); })
-      .then((data) => {
-        if (data && typeof data === "object") setMenu(data);
-        else setErro(true);
-      })
-      .catch(() => setErro(true));
-
     try {
       const cookies = document.cookie.split(";")
       for (const c of cookies) {
@@ -866,7 +888,7 @@ export default function CardapioPage() {
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, background: "#060606", color: "#f5f2ee", fontFamily: "system-ui", padding: 24 }}>
       <div style={{ fontSize: 40 }}>🍕</div>
       <p style={{ fontWeight: 700, fontSize: 16, margin: 0 }}>Não foi possível carregar o cardápio.</p>
-      <button onClick={() => { setErro(false); fetch("/api/cardapio", { cache: "no-store" }).then(r => r.json()).then(setMenu).catch(() => setErro(true)); }} style={{ border: "1px solid #333", background: "transparent", color: "#f5f2ee", padding: "10px 20px", borderRadius: 10, cursor: "pointer", fontSize: 14 }}>Tentar de novo</button>
+      <button onClick={retry} style={{ border: "1px solid #333", background: "transparent", color: "#f5f2ee", padding: "10px 20px", borderRadius: 10, cursor: "pointer", fontSize: 14 }}>Tentar de novo</button>
     </div>
   );
 
