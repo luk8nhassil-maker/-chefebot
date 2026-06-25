@@ -71,7 +71,7 @@ function ConfirmacaoContent() {
                 <div key={i} className="flex justify-between text-sm">
                   <span className="text-gray-600 flex-1 mr-2">
                     <span className="font-semibold text-gray-800">{item.quantidade}x</span>{' '}
-                    {item.nome} ({item.tamanho})
+                    {item.nome}{item.tamanho ? ` (${item.tamanho})` : ''}
                     {item.observacao && (
                       <span className="text-gray-400 italic"> — {item.observacao}</span>
                     )}

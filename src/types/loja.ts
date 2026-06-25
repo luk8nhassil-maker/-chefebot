@@ -23,7 +23,8 @@ export interface CartItem {
   cartId: string
   produtoId: string
   nome: string
-  tamanho: 'P' | 'M' | 'G'
+  tamanho: string
+  borda?: string
   quantidade: number
   observacao: string
   precoUnitario: number
@@ -39,4 +40,33 @@ export interface PedidoConfirmado {
   pagamento: 'pix' | 'cartao' | 'dinheiro'
   items: CartItem[]
   created_at: string
+}
+
+export interface TamanhoInfo {
+  code: string
+  label: string
+  price: number
+}
+
+export interface BordaInfo {
+  label: string
+  priceSmall: number
+  priceLarge: number
+}
+
+export type TipoProduto = 'pizza' | 'lanche_tamanhos' | 'item_simples'
+
+export interface ProdutoLoja {
+  id: string
+  nome: string
+  categoria: 'Pizzas' | 'Lanches' | 'Bebidas' | 'Sucos'
+  tipo: TipoProduto
+  preco: number
+  tamanhos?: TamanhoInfo[]
+}
+
+export interface CardapioData {
+  tamanhosPizza: TamanhoInfo[]
+  bordas: BordaInfo[]
+  produtos: ProdutoLoja[]
 }

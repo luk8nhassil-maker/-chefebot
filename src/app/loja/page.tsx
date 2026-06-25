@@ -1,38 +1,35 @@
-import { supabase } from '@/lib/supabase'
+import { redis } from '@/lib/redis'
 import Link from 'next/link'
-import type { Tenant } from '@/types/loja'
 
-async function getTenant(): Promise<Tenant | null> {
-  const { data } = await supabase.from('tenants').select('*').limit(1).single()
-  return data
+type ConfigRedis = {
+  nomePizzaria?: string
+  horaAbertura?: number
+  horaFechamento?: number
+  tempoEntregaDelivery?: string
+  endereco?: string
+  whatsappPizzaria?: string
 }
 
-function isOpen(horario: string): boolean {
-  const now = new Date()
-  const hour = now.getHours()
-  return hour >= 18 || hour < 1
+function isOpen(horaAbertura: number, horaFechamento: number): boolean {
+  const hour = new Date().getHours()
+  if (horaFechamento > horaAbertura) return hour >= horaAbertura && hour < horaFechamento
+  return hour >= horaAbertura || hour < horaFechamento
 }
 
 export default async function LojaPage() {
-  const tenant = await getTenant()
+  let config: ConfigRedis | null = null
+  try {
+    config = await redis.get<ConfigRedis>('config:pizzaria')
+  } catch {}
 
-  if (!tenant) {
-    return (
-      <div className="min-h-screen bg-white flex flex-col items-center justify-center p-8 text-center">
-        <div className="text-6xl mb-4">🍕</div>
-        <h1 className="text-2xl font-bold text-gray-900 mb-2">Chefe da Pizza</h1>
-        <p className="text-gray-500 mb-6">Configuração necessária. Execute o SQL de setup no Supabase.</p>
-        <Link
-          href="/loja/setup"
-          className="bg-red-600 text-white px-6 py-3 rounded-xl font-semibold"
-        >
-          Ver instruções de setup
-        </Link>
-      </div>
-    )
-  }
-
-  const aberto = isOpen(tenant.horario)
+  const nome = config?.nomePizzaria || 'Chefe da Pizza'
+  const horaAbertura = config?.horaAbertura ?? 18
+  const horaFechamento = config?.horaFechamento ?? 23
+  const tempoDelivery = config?.tempoEntregaDelivery || '40-60 minutos'
+  const endereco = config?.endereco || ''
+  const telefone = config?.whatsappPizzaria || ''
+  const aberto = isOpen(horaAbertura, horaFechamento)
+  const horarioLabel = `${horaAbertura}h – ${horaFechamento}h`
 
   return (
     <div className="min-h-screen bg-white flex flex-col">
@@ -41,15 +38,13 @@ export default async function LojaPage() {
         <div className="w-24 h-24 rounded-full bg-white/20 flex items-center justify-center text-5xl mb-4 shadow-lg">
           🍕
         </div>
-        <h1 className="text-3xl font-extrabold tracking-tight">{tenant.nome}</h1>
+        <h1 className="text-3xl font-extrabold tracking-tight">{nome}</h1>
         <span
           className={`mt-3 inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-semibold ${
             aberto ? 'bg-green-500/30 text-green-100' : 'bg-gray-600/40 text-gray-200'
           }`}
         >
-          <span
-            className={`w-2 h-2 rounded-full ${aberto ? 'bg-green-400 animate-pulse' : 'bg-gray-400'}`}
-          />
+          <span className={`w-2 h-2 rounded-full ${aberto ? 'bg-green-400 animate-pulse' : 'bg-gray-400'}`} />
           {aberto ? 'Aberto agora' : 'Fechado'}
         </span>
       </div>
@@ -60,31 +55,35 @@ export default async function LojaPage() {
           <span className="text-2xl">🕐</span>
           <div>
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Horário</p>
-            <p className="text-gray-800 font-medium mt-0.5">{tenant.horario}</p>
+            <p className="text-gray-800 font-medium mt-0.5">{horarioLabel}</p>
           </div>
         </div>
 
-        <div className="bg-gray-50 rounded-2xl p-4 flex items-start gap-4">
-          <span className="text-2xl">📍</span>
-          <div>
-            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Endereço</p>
-            <p className="text-gray-800 font-medium mt-0.5">{tenant.endereco}</p>
+        {endereco && (
+          <div className="bg-gray-50 rounded-2xl p-4 flex items-start gap-4">
+            <span className="text-2xl">📍</span>
+            <div>
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Endereço</p>
+              <p className="text-gray-800 font-medium mt-0.5">{endereco}</p>
+            </div>
           </div>
-        </div>
+        )}
 
-        <div className="bg-gray-50 rounded-2xl p-4 flex items-start gap-4">
-          <span className="text-2xl">📞</span>
-          <div>
-            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Telefone</p>
-            <p className="text-gray-800 font-medium mt-0.5">{tenant.telefone}</p>
+        {telefone && (
+          <div className="bg-gray-50 rounded-2xl p-4 flex items-start gap-4">
+            <span className="text-2xl">📞</span>
+            <div>
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Contato</p>
+              <p className="text-gray-800 font-medium mt-0.5">{telefone}</p>
+            </div>
           </div>
-        </div>
+        )}
 
         <div className="bg-red-50 border border-red-100 rounded-2xl p-4 flex items-start gap-4">
           <span className="text-2xl">🛵</span>
           <div>
             <p className="text-xs font-semibold text-red-400 uppercase tracking-wide">Delivery</p>
-            <p className="text-gray-800 font-medium mt-0.5">Taxa de entrega a combinar · ~40 min</p>
+            <p className="text-gray-800 font-medium mt-0.5">Taxa por bairro · ~{tempoDelivery}</p>
           </div>
         </div>
       </div>

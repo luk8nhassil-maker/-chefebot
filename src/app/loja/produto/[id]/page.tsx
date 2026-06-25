@@ -2,17 +2,15 @@
 import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { supabase } from '@/lib/supabase'
 import { useCart } from '@/lib/cart-context'
-import type { Produto } from '@/types/loja'
+import type { CardapioData, ProdutoLoja, TamanhoInfo } from '@/types/loja'
 
-type Tamanho = 'P' | 'M' | 'G'
-
-const TAMANHOS: { key: Tamanho; label: string; multiplier: number }[] = [
-  { key: 'P', label: 'Pequena', multiplier: 0.8 },
-  { key: 'M', label: 'Média', multiplier: 1.0 },
-  { key: 'G', label: 'Grande', multiplier: 1.3 },
-]
+const EMOJI: Record<string, string> = {
+  Pizzas: '🍕',
+  Lanches: '🍔',
+  Bebidas: '🥤',
+  Sucos: '🍊',
+}
 
 function formatCurrency(v: number) {
   return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -23,21 +21,70 @@ export default function ProdutoPage() {
   const router = useRouter()
   const { addItem } = useCart()
 
-  const [produto, setProduto] = useState<Produto | null>(null)
+  const [data, setData] = useState<CardapioData | null>(null)
+  const [produto, setProduto] = useState<ProdutoLoja | null>(null)
   const [loading, setLoading] = useState(true)
-  const [tamanho, setTamanho] = useState<Tamanho>('M')
+  const [tamanho, setTamanho] = useState('M')
+  const [borda, setBorda] = useState('')
   const [quantidade, setQuantidade] = useState(1)
   const [observacao, setObservacao] = useState('')
   const [added, setAdded] = useState(false)
 
   useEffect(() => {
-    async function load() {
-      const { data } = await supabase.from('produtos').select('*').eq('id', id).single()
-      setProduto(data)
-      setLoading(false)
-    }
-    load()
+    fetch('/api/loja/cardapio')
+      .then(r => r.json())
+      .then((cardapio: CardapioData) => {
+        const found = cardapio.produtos.find(p => p.id === id) ?? null
+        setData(cardapio)
+        setProduto(found)
+        if (found) {
+          if (found.tipo === 'lanche_tamanhos' && found.tamanhos?.length) {
+            setTamanho(found.tamanhos[0].code)
+          } else if (found.tipo === 'item_simples') {
+            setTamanho('')
+          }
+        }
+        setLoading(false)
+      })
+      .catch(() => setLoading(false))
   }, [id])
+
+  function computePreco(): number {
+    if (!produto || !data) return 0
+    if (produto.tipo === 'pizza') {
+      const t = data.tamanhosPizza.find(t => t.code === tamanho)
+      const pizzaPrice = t?.price ?? 0
+      const b = borda ? data.bordas.find(b => b.label === borda) : null
+      const bordaPrice = b
+        ? (tamanho === 'P' || tamanho === 'M' ? b.priceSmall : b.priceLarge)
+        : 0
+      return pizzaPrice + bordaPrice
+    }
+    if (produto.tipo === 'lanche_tamanhos') {
+      return produto.tamanhos?.find(t => t.code === tamanho)?.price ?? 0
+    }
+    return produto.preco
+  }
+
+  const precoUnitario = computePreco()
+  const total = precoUnitario * quantidade
+
+  function handleAdd() {
+    if (!produto) return
+    addItem({
+      cartId: `${produto.id}-${tamanho}-${borda || 'sem'}`,
+      produtoId: produto.id,
+      nome: produto.nome,
+      tamanho,
+      borda: borda || undefined,
+      quantidade,
+      observacao,
+      precoUnitario,
+      total,
+    })
+    setAdded(true)
+    setTimeout(() => router.push('/loja/cardapio'), 800)
+  }
 
   if (loading) {
     return (
@@ -58,28 +105,15 @@ export default function ProdutoPage() {
     )
   }
 
-  const tamanhoInfo = TAMANHOS.find(t => t.key === tamanho)!
-  const precoUnitario = Math.round(produto.preco * tamanhoInfo.multiplier * 100) / 100
-  const total = precoUnitario * quantidade
-
-  function handleAdd() {
-    addItem({
-      cartId: `${produto!.id}-${tamanho}-${Date.now()}`,
-      produtoId: produto!.id,
-      nome: produto!.nome,
-      tamanho,
-      quantidade,
-      observacao,
-      precoUnitario,
-      total,
-    })
-    setAdded(true)
-    setTimeout(() => router.push('/loja/cardapio'), 800)
-  }
+  const emoji = EMOJI[produto.categoria] || '🍽️'
+  const tamanhos: TamanhoInfo[] =
+    produto.tipo === 'pizza'
+      ? (data?.tamanhosPizza ?? [])
+      : (produto.tamanhos ?? [])
 
   return (
     <div className="min-h-screen bg-white flex flex-col">
-      {/* Photo / header */}
+      {/* Header */}
       <div className="bg-red-600 px-4 pt-10 pb-6">
         <Link href="/loja/cardapio" className="text-white/80 mb-4 inline-block">
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -87,59 +121,77 @@ export default function ProdutoPage() {
           </svg>
         </Link>
         <div className="flex justify-center mt-2">
-          {produto.foto_url ? (
-            <img
-              src={produto.foto_url}
-              alt={produto.nome}
-              className="w-40 h-40 rounded-2xl object-cover shadow-xl"
-            />
-          ) : (
-            <div className="w-40 h-40 rounded-2xl bg-white/20 flex items-center justify-center text-7xl shadow-xl">
-              🍕
-            </div>
-          )}
+          <div className="w-40 h-40 rounded-2xl bg-white/20 flex items-center justify-center text-7xl shadow-xl">
+            {emoji}
+          </div>
         </div>
       </div>
 
       {/* Details */}
       <div className="flex-1 px-4 pt-5 pb-6 space-y-5">
-        <div>
-          <h1 className="text-2xl font-extrabold text-gray-900">{produto.nome}</h1>
-          {produto.descricao && (
-            <p className="text-gray-500 mt-1.5 leading-relaxed">{produto.descricao}</p>
-          )}
-        </div>
+        <h1 className="text-2xl font-extrabold text-gray-900">{produto.nome}</h1>
 
-        {/* Size selector */}
-        <div>
-          <p className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Tamanho</p>
-          <div className="grid grid-cols-3 gap-2">
-            {TAMANHOS.map(t => {
-              const price = Math.round(produto.preco * t.multiplier * 100) / 100
-              return (
+        {/* Size selector — pizza (P/M/G/F) and lanche_tamanhos */}
+        {tamanhos.length > 0 && (
+          <div>
+            <p className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Tamanho</p>
+            <div className={`grid gap-2 ${tamanhos.length === 4 ? 'grid-cols-4' : 'grid-cols-3'}`}>
+              {tamanhos.map(t => (
                 <button
-                  key={t.key}
-                  onClick={() => setTamanho(t.key)}
+                  key={t.code}
+                  onClick={() => setTamanho(t.code)}
                   className={`flex flex-col items-center py-3 px-2 rounded-xl border-2 transition-all ${
-                    tamanho === t.key
-                      ? 'border-red-600 bg-red-50'
-                      : 'border-gray-200 bg-white'
+                    tamanho === t.code ? 'border-red-600 bg-red-50' : 'border-gray-200 bg-white'
                   }`}
                 >
-                  <span className={`text-lg font-extrabold ${tamanho === t.key ? 'text-red-600' : 'text-gray-700'}`}>
-                    {t.key}
+                  <span className={`text-lg font-extrabold ${tamanho === t.code ? 'text-red-600' : 'text-gray-700'}`}>
+                    {t.code}
                   </span>
-                  <span className={`text-xs font-medium mt-0.5 ${tamanho === t.key ? 'text-red-500' : 'text-gray-400'}`}>
+                  <span className={`text-xs font-medium mt-0.5 ${tamanho === t.code ? 'text-red-500' : 'text-gray-400'}`}>
                     {t.label}
                   </span>
-                  <span className={`text-sm font-bold mt-1 ${tamanho === t.key ? 'text-red-600' : 'text-gray-600'}`}>
-                    {formatCurrency(price)}
+                  <span className={`text-sm font-bold mt-1 ${tamanho === t.code ? 'text-red-600' : 'text-gray-600'}`}>
+                    {formatCurrency(t.price)}
                   </span>
                 </button>
-              )
-            })}
+              ))}
+            </div>
           </div>
-        </div>
+        )}
+
+        {/* Borda — pizza only */}
+        {produto.tipo === 'pizza' && data && data.bordas.length > 0 && (
+          <div>
+            <p className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
+              Borda recheada <span className="normal-case font-normal text-gray-400">(opcional)</span>
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => setBorda('')}
+                className={`py-2.5 px-3 rounded-xl border-2 text-sm font-semibold transition-all ${
+                  borda === '' ? 'border-red-600 bg-red-50 text-red-600' : 'border-gray-200 text-gray-600'
+                }`}
+              >
+                Sem borda
+              </button>
+              {data.bordas.map(b => {
+                const price = tamanho === 'P' || tamanho === 'M' ? b.priceSmall : b.priceLarge
+                return (
+                  <button
+                    key={b.label}
+                    onClick={() => setBorda(b.label)}
+                    className={`py-2.5 px-3 rounded-xl border-2 text-sm font-semibold transition-all text-left ${
+                      borda === b.label ? 'border-red-600 bg-red-50 text-red-600' : 'border-gray-200 text-gray-600'
+                    }`}
+                  >
+                    {b.label}
+                    <span className="block text-xs font-normal mt-0.5">+{formatCurrency(price)}</span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Observations */}
         <div>
@@ -149,7 +201,7 @@ export default function ProdutoPage() {
           <textarea
             value={observacao}
             onChange={e => setObservacao(e.target.value)}
-            placeholder="Ex: sem cebola, borda recheada..."
+            placeholder="Ex: sem cebola, bem passado..."
             rows={3}
             className="w-full border border-gray-200 rounded-xl px-4 py-3 text-gray-800 placeholder-gray-400 resize-none focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent text-sm"
           />
@@ -176,7 +228,7 @@ export default function ProdutoPage() {
         </div>
       </div>
 
-      {/* Add to cart button */}
+      {/* Add to cart */}
       <div className="px-4 pb-8 pt-2">
         <button
           onClick={handleAdd}

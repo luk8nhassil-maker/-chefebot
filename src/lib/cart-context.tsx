@@ -28,7 +28,10 @@ function cartReducer(state: CartState, action: CartAction): CartState {
   switch (action.type) {
     case 'ADD_ITEM': {
       const existingIdx = state.items.findIndex(
-        i => i.produtoId === action.item.produtoId && i.tamanho === action.item.tamanho
+        i =>
+          i.produtoId === action.item.produtoId &&
+          i.tamanho === action.item.tamanho &&
+          (i.borda ?? '') === (action.item.borda ?? '')
       )
       if (existingIdx >= 0) {
         const items = [...state.items]

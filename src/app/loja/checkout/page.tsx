@@ -210,7 +210,7 @@ export default function CheckoutPage() {
               <div key={item.cartId} className="flex justify-between text-sm">
                 <span className="text-gray-600 truncate flex-1 mr-2">
                   <span className="font-semibold text-gray-800">{item.quantidade}x</span>{' '}
-                  {item.nome} ({item.tamanho})
+                  {item.nome}{item.tamanho ? ` (${item.tamanho})` : ''}
                 </span>
                 <span className="text-gray-800 font-medium shrink-0">{formatCurrency(item.total)}</span>
               </div>

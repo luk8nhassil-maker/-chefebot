@@ -77,11 +77,16 @@ export default function CarrinhoPage() {
             <div className="flex items-start justify-between gap-3">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-bold bg-red-100 text-red-600 px-2 py-0.5 rounded-full">
-                    {item.tamanho}
-                  </span>
+                  {item.tamanho && (
+                    <span className="text-sm font-bold bg-red-100 text-red-600 px-2 py-0.5 rounded-full">
+                      {item.tamanho}
+                    </span>
+                  )}
                   <span className="font-bold text-gray-900 truncate">{item.nome}</span>
                 </div>
+                {item.borda && (
+                  <p className="text-xs text-gray-500 mt-0.5">+ Borda {item.borda}</p>
+                )}
                 {item.observacao && (
                   <p className="text-xs text-gray-400 mt-1 italic">{item.observacao}</p>
                 )}

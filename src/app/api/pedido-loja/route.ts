@@ -48,16 +48,23 @@ export async function POST(req: NextRequest) {
       produtoId: string
       quantidade: number
       tamanho: string
+      borda?: string
       observacao: string
       precoUnitario: number
-    }) => ({
-      pedido_id: pedido.id,
-      produto_id: item.produtoId,
-      quantidade: item.quantidade,
-      tamanho: item.tamanho,
-      observacao: item.observacao || '',
-      preco_unitario: item.precoUnitario,
-    }))
+    }) => {
+      const tamanhoValido = ['P', 'M', 'G'].includes(item.tamanho) ? item.tamanho : null
+      const obs = item.borda
+        ? `Borda: ${item.borda}${item.observacao ? ` | ${item.observacao}` : ''}`
+        : (item.observacao || '')
+      return {
+        pedido_id: pedido.id,
+        produto_id: null,
+        quantidade: item.quantidade,
+        tamanho: tamanhoValido,
+        observacao: obs,
+        preco_unitario: item.precoUnitario,
+      }
+    })
 
     const { error: itensError } = await supabase.from('itens_pedido').insert(itens)
 

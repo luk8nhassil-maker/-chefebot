@@ -1,13 +1,13 @@
 "use client";
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { supabase } from '@/lib/supabase'
 import { useCart } from '@/lib/cart-context'
-import type { Produto } from '@/types/loja'
+import type { ProdutoLoja, CardapioData } from '@/types/loja'
 
-const CATEGORIAS = ['Pizzas', 'Lanches', 'Bebidas', 'Sucos']
+const CATEGORIAS = ['Pizzas', 'Lanches', 'Bebidas', 'Sucos'] as const
+type Categoria = typeof CATEGORIAS[number]
 
-const EMOJI: Record<string, string> = {
+const EMOJI: Record<Categoria, string> = {
   Pizzas: '🍕',
   Lanches: '🍔',
   Bebidas: '🥤',
@@ -18,25 +18,22 @@ function formatCurrency(v: number) {
   return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 }
 
-function ProductCard({ produto }: { produto: Produto }) {
+function ProductCard({ produto }: { produto: ProdutoLoja }) {
+  const emoji = EMOJI[produto.categoria as Categoria] || '🍽️'
+  const priceLabel =
+    produto.tipo === 'item_simples'
+      ? formatCurrency(produto.preco)
+      : `A partir de ${formatCurrency(produto.preco)}`
+
   return (
     <Link href={`/loja/produto/${produto.id}`} className="block">
       <div className="flex items-center gap-4 bg-white border border-gray-100 rounded-2xl p-4 shadow-sm active:bg-gray-50 transition-colors">
         <div className="w-16 h-16 rounded-xl bg-red-50 flex items-center justify-center text-3xl shrink-0">
-          {produto.foto_url ? (
-            <img src={produto.foto_url} alt={produto.nome} className="w-full h-full object-cover rounded-xl" />
-          ) : (
-            EMOJI[produto.categoria] || '🍽️'
-          )}
+          {emoji}
         </div>
         <div className="flex-1 min-w-0">
           <h3 className="font-bold text-gray-900">{produto.nome}</h3>
-          {produto.descricao && (
-            <p className="text-sm text-gray-500 mt-0.5 line-clamp-2">{produto.descricao}</p>
-          )}
-          <p className="text-red-600 font-bold mt-1">
-            A partir de {formatCurrency(produto.preco * 0.8)}
-          </p>
+          <p className="text-red-600 font-bold mt-1">{priceLabel}</p>
         </div>
         <div className="w-9 h-9 rounded-full bg-red-600 text-white flex items-center justify-center text-xl font-bold shrink-0 shadow-md shadow-red-200">
           +
@@ -47,26 +44,22 @@ function ProductCard({ produto }: { produto: Produto }) {
 }
 
 export default function CardapioPage() {
-  const [categoria, setCategoria] = useState('Pizzas')
-  const [produtos, setProdutos] = useState<Produto[]>([])
+  const [categoria, setCategoria] = useState<Categoria>('Pizzas')
+  const [data, setData] = useState<CardapioData | null>(null)
   const [loading, setLoading] = useState(true)
   const { totalItems, totalPrice } = useCart()
 
   useEffect(() => {
-    async function load() {
-      setLoading(true)
-      const { data } = await supabase
-        .from('produtos')
-        .select('*')
-        .eq('ativo', true)
-        .order('nome')
-      setProdutos(data || [])
-      setLoading(false)
-    }
-    load()
+    fetch('/api/loja/cardapio')
+      .then(r => r.json())
+      .then((d: CardapioData) => {
+        setData(d)
+        setLoading(false)
+      })
+      .catch(() => setLoading(false))
   }, [])
 
-  const filtrados = produtos.filter(p => p.categoria === categoria)
+  const filtrados = data?.produtos.filter(p => p.categoria === categoria) ?? []
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col pb-24">
