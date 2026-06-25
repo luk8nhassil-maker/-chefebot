@@ -81,9 +81,16 @@ export async function GET() {
     preco: s.price,
   }))
 
+  type NeighborhoodEntry = { name: string; fee: number }
+  const neighborhoods = (menu.neighborhoods as NeighborhoodEntry[]).map(n => ({
+    nome: n.name,
+    fee: n.fee,
+  }))
+
   return NextResponse.json({
     tamanhosPizza,
     bordas,
+    neighborhoods,
     produtos: [...pizzas, ...lanches, ...bebidas, ...sucos],
   })
 }

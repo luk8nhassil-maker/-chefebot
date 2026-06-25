@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useCart } from '@/lib/cart-context'
+import type { BairroInfo } from '@/types/loja'
 
 type TipoEntrega = 'delivery' | 'retirada'
 type Pagamento = 'pix' | 'cartao' | 'dinheiro'
@@ -27,12 +28,14 @@ export default function CheckoutPage() {
   const [nome, setNome] = useState('')
   const [whatsapp, setWhatsapp] = useState('')
   const [endereco, setEndereco] = useState('')
+  const [bairro, setBairro] = useState('')
+  const [bairros, setBairros] = useState<BairroInfo[]>([])
   const [tipoEntrega, setTipoEntrega] = useState<TipoEntrega>('delivery')
   const [pagamento, setPagamento] = useState<Pagamento>('pix')
   const [enviando, setEnviando] = useState(false)
   const [erro, setErro] = useState('')
 
-  const [summary, setSummary] = useState({ desconto: 0, cupom: '', taxaEntrega: 5, total: 0 })
+  const [summary, setSummary] = useState<{ desconto: number; cupom: string; subtotal?: number; total?: number }>({ desconto: 0, cupom: '', subtotal: 0 })
 
   useEffect(() => {
     try {
@@ -40,6 +43,17 @@ export default function CheckoutPage() {
       if (saved) setSummary(JSON.parse(saved))
     } catch {}
   }, [])
+
+  useEffect(() => {
+    fetch('/api/loja/cardapio')
+      .then(r => r.json())
+      .then(d => { if (d.neighborhoods?.length) setBairros(d.neighborhoods) })
+      .catch(() => {})
+  }, [])
+
+  const subtotal = summary.subtotal ?? summary.total ?? 0
+  const taxaEntrega = tipoEntrega === 'retirada' ? 0 : (bairros.find(b => b.nome === bairro)?.fee ?? 0)
+  const total = subtotal + taxaEntrega
 
   useEffect(() => {
     if (items.length === 0 && !enviando) {
@@ -50,6 +64,7 @@ export default function CheckoutPage() {
   async function handleConfirmar() {
     if (!nome.trim()) { setErro('Informe seu nome'); return }
     if (!whatsapp.trim()) { setErro('Informe seu WhatsApp'); return }
+    if (tipoEntrega === 'delivery' && !bairro) { setErro('Selecione o bairro de entrega'); return }
     if (tipoEntrega === 'delivery' && !endereco.trim()) { setErro('Informe o endereço de entrega'); return }
 
     setEnviando(true)
@@ -63,10 +78,11 @@ export default function CheckoutPage() {
           clienteNome: nome.trim(),
           clienteTelefone: whatsapp.trim(),
           endereco: tipoEntrega === 'delivery' ? endereco.trim() : 'Retirada na loja',
+          bairro: tipoEntrega === 'delivery' ? bairro : '',
           tipoEntrega,
           pagamento,
           items,
-          total: summary.total,
+          total,
           cupom: summary.cupom,
         }),
       })
@@ -80,6 +96,9 @@ export default function CheckoutPage() {
         items,
         pagamento,
         tipoEntrega,
+        subtotal,
+        taxaEntrega,
+        bairro: tipoEntrega === 'delivery' ? bairro : '',
       }))
       localStorage.removeItem('chefe-cart-summary')
 
@@ -162,16 +181,35 @@ export default function CheckoutPage() {
           </div>
 
           {tipoEntrega === 'delivery' && (
-            <div className="mt-4">
-              <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide block mb-1.5">
-                Endereço de entrega *
-              </label>
-              <input
-                value={endereco}
-                onChange={e => setEndereco(e.target.value)}
-                placeholder="Rua, número, bairro..."
-                className="w-full border border-gray-200 rounded-xl px-4 py-3 text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500"
-              />
+            <div className="mt-4 space-y-4">
+              <div>
+                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide block mb-1.5">
+                  Bairro *
+                </label>
+                <select
+                  value={bairro}
+                  onChange={e => setBairro(e.target.value)}
+                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-gray-800 focus:outline-none focus:ring-2 focus:ring-red-500 bg-white"
+                >
+                  <option value="">Selecione o bairro</option>
+                  {bairros.map(b => (
+                    <option key={b.nome} value={b.nome}>
+                      {b.nome} — {b.fee === 0 ? 'Grátis' : `R$ ${b.fee.toFixed(2).replace('.', ',')}`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide block mb-1.5">
+                  Rua e número *
+                </label>
+                <input
+                  value={endereco}
+                  onChange={e => setEndereco(e.target.value)}
+                  placeholder="Ex: Rua das Flores, 123"
+                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500"
+                />
+              </div>
             </div>
           )}
         </div>
@@ -215,9 +253,25 @@ export default function CheckoutPage() {
                 <span className="text-gray-800 font-medium shrink-0">{formatCurrency(item.total)}</span>
               </div>
             ))}
-            <div className="pt-2 border-t border-gray-100 flex justify-between font-bold text-base">
-              <span>Total</span>
-              <span className="text-red-600">{formatCurrency(summary.total)}</span>
+            <div className="pt-2 border-t border-gray-100 space-y-1.5 text-sm">
+              {summary.desconto > 0 && (
+                <div className="flex justify-between text-green-600">
+                  <span>Desconto ({(summary.desconto * 100).toFixed(0)}%)</span>
+                  <span>−{formatCurrency((summary.subtotal ?? 0) - subtotal)}</span>
+                </div>
+              )}
+              <div className="flex justify-between text-gray-600">
+                <span>Subtotal</span>
+                <span>{formatCurrency(subtotal)}</span>
+              </div>
+              <div className="flex justify-between text-gray-600">
+                <span>Taxa de entrega{bairro ? ` (${bairro})` : ''}</span>
+                <span>{tipoEntrega === 'retirada' ? 'Grátis' : taxaEntrega === 0 && !bairro ? 'a definir' : formatCurrency(taxaEntrega)}</span>
+              </div>
+              <div className="pt-1 border-t border-gray-100 flex justify-between font-bold text-base">
+                <span>Total</span>
+                <span className="text-red-600">{formatCurrency(total)}</span>
+              </div>
             </div>
           </div>
         </div>

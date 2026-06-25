@@ -22,9 +22,8 @@ export default function CarrinhoPage() {
   const [cupomErro, setCupomErro] = useState('')
   const [cupomOk, setCupomOk] = useState(false)
 
-  const taxaEntrega = 5.0
   const descontoValor = totalPrice * desconto
-  const total = totalPrice - descontoValor + taxaEntrega
+  const subtotal = totalPrice - descontoValor
 
   function aplicarCupom() {
     const key = cupom.trim().toUpperCase()
@@ -163,13 +162,13 @@ export default function CarrinhoPage() {
                 <span>−{formatCurrency(descontoValor)}</span>
               </div>
             )}
-            <div className="flex justify-between text-gray-600">
+            <div className="flex justify-between text-gray-500 text-xs italic">
               <span>Taxa de entrega</span>
-              <span>{formatCurrency(taxaEntrega)}</span>
+              <span>a definir no checkout</span>
             </div>
             <div className="flex justify-between font-bold text-gray-900 text-base pt-2 border-t border-gray-100">
-              <span>Total</span>
-              <span className="text-red-600">{formatCurrency(total)}</span>
+              <span>Subtotal</span>
+              <span className="text-red-600">{formatCurrency(subtotal)}</span>
             </div>
           </div>
         </div>
@@ -182,15 +181,14 @@ export default function CarrinhoPage() {
             localStorage.setItem('chefe-cart-summary', JSON.stringify({
               desconto,
               cupom: cupomOk ? cupom.toUpperCase() : '',
-              taxaEntrega,
-              total,
+              subtotal,
             }))
             router.push('/loja/checkout')
           }}
           className="w-full bg-red-600 text-white py-4 rounded-2xl font-bold text-lg shadow-lg shadow-red-200 active:bg-red-700 flex items-center justify-between px-6"
         >
           <span>Ir para Checkout</span>
-          <span>{formatCurrency(total)}</span>
+          <span>{formatCurrency(subtotal)}</span>
         </button>
       </div>
     </div>

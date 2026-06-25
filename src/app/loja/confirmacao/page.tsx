@@ -72,6 +72,9 @@ function ConfirmacaoContent() {
                   <span className="text-gray-600 flex-1 mr-2">
                     <span className="font-semibold text-gray-800">{item.quantidade}x</span>{' '}
                     {item.nome}{item.tamanho ? ` (${item.tamanho})` : ''}
+                    {item.borda && (
+                      <span className="text-gray-500"> + Borda {item.borda}</span>
+                    )}
                     {item.observacao && (
                       <span className="text-gray-400 italic"> — {item.observacao}</span>
                     )}
@@ -79,9 +82,27 @@ function ConfirmacaoContent() {
                   <span className="text-gray-800 font-medium shrink-0">{formatCurrency(item.total)}</span>
                 </div>
               ))}
-              <div className="pt-2 border-t border-gray-100 flex justify-between font-bold">
-                <span>Total</span>
-                <span className="text-red-600">{formatCurrency(pedido.total)}</span>
+              <div className="pt-2 border-t border-gray-100 space-y-1.5 text-sm">
+                {pedido.subtotal != null && pedido.taxaEntrega != null ? (
+                  <>
+                    <div className="flex justify-between text-gray-600">
+                      <span>Subtotal</span>
+                      <span>{formatCurrency(pedido.subtotal)}</span>
+                    </div>
+                    <div className="flex justify-between text-gray-600">
+                      <span>
+                        {pedido.tipoEntrega === 'delivery'
+                          ? `Entrega${pedido.bairro ? ` (${pedido.bairro})` : ''}`
+                          : 'Retirada na loja'}
+                      </span>
+                      <span>{pedido.taxaEntrega === 0 ? 'Grátis' : formatCurrency(pedido.taxaEntrega)}</span>
+                    </div>
+                  </>
+                ) : null}
+                <div className="pt-1 border-t border-gray-100 flex justify-between font-bold text-base">
+                  <span>Total</span>
+                  <span className="text-red-600">{formatCurrency(pedido.total)}</span>
+                </div>
               </div>
             </div>
 
@@ -92,7 +113,10 @@ function ConfirmacaoContent() {
               </div>
               <div>
                 <p className="text-gray-400 text-xs font-semibold uppercase tracking-wide">Entrega</p>
-                <p className="font-semibold text-gray-800 mt-0.5 capitalize">{pedido.tipoEntrega}</p>
+                <p className="font-semibold text-gray-800 mt-0.5 capitalize">
+                  {pedido.tipoEntrega === 'delivery' ? 'Delivery' : 'Retirada'}
+                  {pedido.tipoEntrega === 'delivery' && pedido.bairro ? ` · ${pedido.bairro}` : ''}
+                </p>
               </div>
             </div>
 

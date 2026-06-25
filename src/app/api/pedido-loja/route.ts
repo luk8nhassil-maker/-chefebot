@@ -13,7 +13,7 @@ function generateToken(): string {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-    const { clienteNome, clienteTelefone, endereco, tipoEntrega, pagamento, items, total } = body
+    const { clienteNome, clienteTelefone, endereco, tipoEntrega, pagamento, items, total, bairro } = body
 
     if (!clienteNome || !clienteTelefone || !tipoEntrega || !pagamento || !items?.length) {
       return NextResponse.json({ error: 'Dados incompletos' }, { status: 400 })
@@ -24,13 +24,17 @@ export async function POST(req: NextRequest) {
     const { data: tenantRow } = await supabase.from('tenants').select('id').limit(1).single()
     const tenantId = tenantRow?.id
 
+    const enderecoFinal = tipoEntrega === 'delivery'
+      ? `${(endereco || '').trim()}${bairro ? ` — ${bairro}` : ''}`
+      : 'Retirada na loja'
+
     const { data: pedido, error: pedidoError } = await supabase
       .from('pedidos')
       .insert({
         tenant_id: tenantId,
         cliente_nome: clienteNome,
         cliente_telefone: clienteTelefone,
-        endereco: endereco || '',
+        endereco: enderecoFinal,
         tipo_entrega: tipoEntrega,
         pagamento,
         total,
@@ -46,19 +50,23 @@ export async function POST(req: NextRequest) {
 
     const itens = items.map((item: {
       produtoId: string
+      nome?: string
       quantidade: number
       tamanho: string
       borda?: string
       observacao: string
       precoUnitario: number
     }) => {
-      const tamanhoValido = ['P', 'M', 'G'].includes(item.tamanho) ? item.tamanho : null
+      const tamanhoValido = (item.tamanho && ['P', 'M', 'G', 'F'].includes(item.tamanho))
+        ? item.tamanho
+        : null
       const obs = item.borda
         ? `Borda: ${item.borda}${item.observacao ? ` | ${item.observacao}` : ''}`
         : (item.observacao || '')
       return {
         pedido_id: pedido.id,
         produto_id: null,
+        produto_nome: item.nome || null,
         quantidade: item.quantidade,
         tamanho: tamanhoValido,
         observacao: obs,

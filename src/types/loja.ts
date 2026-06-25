@@ -35,6 +35,9 @@ export interface PedidoConfirmado {
   id: string
   token: string
   total: number
+  subtotal?: number
+  taxaEntrega?: number
+  bairro?: string
   clienteNome: string
   tipoEntrega: 'delivery' | 'retirada'
   pagamento: 'pix' | 'cartao' | 'dinheiro'
@@ -65,8 +68,14 @@ export interface ProdutoLoja {
   tamanhos?: TamanhoInfo[]
 }
 
+export interface BairroInfo {
+  nome: string
+  fee: number
+}
+
 export interface CardapioData {
   tamanhosPizza: TamanhoInfo[]
   bordas: BordaInfo[]
   produtos: ProdutoLoja[]
+  neighborhoods: BairroInfo[]
 }

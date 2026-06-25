@@ -40,8 +40,9 @@ CREATE TABLE IF NOT EXISTS itens_pedido (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   pedido_id UUID REFERENCES pedidos(id) ON DELETE CASCADE,
   produto_id UUID REFERENCES produtos(id) ON DELETE SET NULL,
+  produto_nome TEXT,
   quantidade INTEGER NOT NULL CHECK (quantidade > 0),
-  tamanho TEXT CHECK (tamanho IN ('P', 'M', 'G')),
+  tamanho TEXT CHECK (tamanho IS NULL OR tamanho IN ('P', 'M', 'G', 'F')),
   observacao TEXT,
   preco_unitario DECIMAL(10,2) NOT NULL
 );
