@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { redis } from '@/lib/redis'
 import { MENU, getMENUDinamico } from '@/lib/menu'
+import { verifyToken } from '@/lib/auth'
+
+const ROLES_PERMITIDAS = ['admin', 'atendente', 'dev']
 
 type EsgMetadata = Record<string, { desde: string; ultimaRevisao?: string }>
 
@@ -31,6 +34,12 @@ export async function POST(req: NextRequest) {
 
 export async function PATCH(req: NextRequest) {
   try {
+    const token = req.cookies.get('auth-token')?.value
+    const payload = token ? await verifyToken(token) : null
+    if (!payload || !ROLES_PERMITIDAS.includes(payload.role)) {
+      return NextResponse.json({ ok: false, error: 'Nao autorizado' }, { status: 401 })
+    }
+
     const { nome, esgotado, revisaoHoje } = await req.json()
     if (!nome) return NextResponse.json({ ok: false, error: 'nome obrigatorio' }, { status: 400 })
 
