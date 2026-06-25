@@ -937,7 +937,7 @@ export default function PedidosPage() {
         {/* Confirmar Pix no detalhe */}
         {isPix && !p.pixConfirmado && !isDone && (
           <button onClick={() => { setDetailId(null); setConfirmPixModal(p.id) }} style={{ height: 46, border: "1px solid rgba(251,191,36,.35)", borderRadius: 14, background: "rgba(251,191,36,.08)", color: "#fbbf24", fontSize: 14, fontWeight: 900, flexShrink: 0 }}>
-            Confirmar Pix manualmente
+            Confirmar Pix recebido
           </button>
         )}
 
@@ -1465,7 +1465,7 @@ export default function PedidosPage() {
                       {(pedido.origem === "site" || pedido.origem === "app") && <span style={{ fontSize: 9, fontWeight: 900, color: "#60a5fa", background: "rgba(96,165,250,.12)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>🌐 Site</span>}
                       {pixPendente && <span style={{ fontSize: 9, fontWeight: 900, color: "#fbbf24", background: "rgba(251,191,36,.12)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>PIX⏳</span>}
                       {pedido.cancelamentoSolicitado && <span style={{ fontSize: 11, flexShrink: 0 }}>⚠️</span>}
-                      <span style={{ fontSize: 10, fontWeight: 900, color: sc.accent, background: sc.accentBg, padding: "2px 7px", borderRadius: 6, border: `1px solid ${sc.accentBorder}`, textTransform: "uppercase", letterSpacing: ".4px", flexShrink: 0 }}>{sc.label}</span>
+                      <span style={{ fontSize: 10, fontWeight: 900, color: pixPendente ? "#fbbf24" : (isPix && pedido.pixConfirmado && pedido.status === "novo" ? "#34d399" : sc.accent), background: pixPendente ? "rgba(251,191,36,.12)" : (isPix && pedido.pixConfirmado && pedido.status === "novo" ? "rgba(52,211,153,.12)" : sc.accentBg), padding: "2px 7px", borderRadius: 6, border: `1px solid ${pixPendente ? "rgba(251,191,36,.35)" : (isPix && pedido.pixConfirmado && pedido.status === "novo" ? "rgba(52,211,153,.35)" : sc.accentBorder)}`, textTransform: "uppercase", letterSpacing: ".4px", flexShrink: 0 }}>{pixPendente ? "Aguardando Pix" : (isPix && pedido.pixConfirmado && pedido.status === "novo" ? "Pago" : sc.label)}</span>
                     </div>
 
                     {/* Linha 2: infos compactas */}
@@ -1493,7 +1493,7 @@ export default function PedidosPage() {
                         <button
                           onClick={() => setConfirmPixModal(pedido.id)}
                           style={{ height: 30, padding: "0 14px", border: "1px solid rgba(251,191,36,.35)", borderRadius: 8, background: "rgba(251,191,36,.08)", color: "#fbbf24", fontSize: 12, fontWeight: 900 }}
-                        >Confirmar Pix</button>
+                        >Confirmar Pix recebido</button>
                       )}
                       {!pedido.escalonado && !pixPendente && !isDone && !isCanceled && nextStatus && (
                         <button
