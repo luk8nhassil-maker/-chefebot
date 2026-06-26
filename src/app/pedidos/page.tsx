@@ -1031,6 +1031,12 @@ export default function PedidosPage() {
         .cb-chat-item { width:100%; text-align:left; background:transparent; border:none; border-bottom:1px solid #111; padding:10px 14px; cursor:pointer; display:flex; align-items:center; gap:10px; transition:background .1s; }
         .cb-chat-item:hover { background:rgba(255,255,255,.03); }
         .cb-chat-item.cb-chat-item-active { background:#131110; border-left:3px solid #ff6b00; padding-left:11px; }
+        @keyframes cb-pulse-urgent { 0%,100%{background:rgba(251,191,36,.04)} 50%{background:rgba(251,191,36,.11)} }
+        .cb-chat-item.cb-chat-item-urgente { animation:cb-pulse-urgent 2s ease-in-out infinite; border-left:3px solid #fbbf24; padding-left:11px; }
+        .cb-chat-item.cb-chat-item-urgente:hover { background:rgba(251,191,36,.09) !important; }
+        .cb-assumir-btn { background:#fbbf24; color:#060606; border:none; border-radius:5px; padding:3px 8px; font-size:9px; font-weight:900; cursor:pointer; white-space:nowrap; flex-shrink:0; line-height:1.4; }
+        .cb-assumir-btn:hover { background:#f59e0b; }
+        .cb-assumir-btn:disabled { opacity:.65; cursor:default; }
         .cb-chat-textarea { width:100%; background:#0d0c0b; border:1px solid #252220; border-radius:10px; padding:9px 12px; color:#f4f1ec; font-size:13px; resize:none; font-family:inherit; outline:none; box-sizing:border-box; line-height:1.4; }
         .cb-chat-textarea:focus { border-color:#ff6b00; }
         @media (min-width: 768px) {
@@ -1213,8 +1219,13 @@ export default function PedidosPage() {
                     <div style={{ fontSize: 11, color: "#2e2c29", fontWeight: 600, marginTop: 4 }}>Clientes em andamento aparecerão aqui.</div>
                   </div>
                 ) : [...sessoes].sort((a, b) => {
+                    // Precisa de humano (ainda não assumido) → topo
+                    const aNH = a.postOrderPriority && !a.manual;
+                    const bNH = b.postOrderPriority && !b.manual;
+                    if (Number(!!bNH) !== Number(!!aNH)) return Number(!!bNH) - Number(!!aNH);
+                    // Já assumido → segundo
                     if (Number(!!b.manual) !== Number(!!a.manual)) return Number(!!b.manual) - Number(!!a.manual);
-                    return Number(!!b.postOrderPriority) - Number(!!a.postOrderPriority);
+                    return 0;
                   }).map(s => {
                   const displayName = s.customerName || `…${s.lastDigits}`
                   const initial = ((s.customerName || s.lastDigits || "?")[0]).toUpperCase()
@@ -1222,7 +1233,7 @@ export default function PedidosPage() {
                   return (
                     <button
                       key={s.phone}
-                      className={`cb-chat-item${isActive ? " cb-chat-item-active" : ""}`}
+                      className={`cb-chat-item${isActive ? " cb-chat-item-active" : ""}${s.postOrderPriority && !s.manual ? " cb-chat-item-urgente" : ""}`}
                       onClick={() => setSessaoAtiva(s.phone)}
                     >
                       <div style={{ width: 38, height: 38, borderRadius: "50%", flexShrink: 0, background: s.manual ? "rgba(239,68,68,.13)" : s.postOrderPriority ? "rgba(251,191,36,.13)" : "rgba(255,107,0,.1)", border: `1.5px solid ${s.manual ? "rgba(239,68,68,.3)" : s.postOrderPriority ? "rgba(251,191,36,.3)" : "rgba(255,107,0,.25)"}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 900, color: s.manual ? "#ef4444" : s.postOrderPriority ? "#fbbf24" : "#ff6b00" }}>
@@ -1231,9 +1242,19 @@ export default function PedidosPage() {
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, marginBottom: 3 }}>
                           <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 900, color: "#f0ede8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displayName}</span>
-                          <span style={{ fontSize: 9, fontWeight: 900, color: s.manual ? "#fff" : s.postOrderPriority ? "#060606" : "#34d399", background: s.manual ? "#ef4444" : s.postOrderPriority ? "#fbbf24" : "rgba(52,211,153,.08)", border: `1px solid ${s.manual ? "#ef4444" : s.postOrderPriority ? "#fbbf24" : "rgba(52,211,153,.2)"}`, padding: "2px 7px", borderRadius: 5, flexShrink: 0, whiteSpace: "nowrap" }}>
-                            {s.manual ? "Atender" : s.postOrderPriority ? "Atender" : "Bot atendendo"}
-                          </span>
+                          {s.postOrderPriority && !s.manual ? (
+                            <button
+                              className="cb-assumir-btn"
+                              disabled={assumindoSessao === s.phone}
+                              onClick={e => { e.stopPropagation(); setSessaoAtiva(s.phone); assumirSessao(s.phone) }}
+                            >
+                              {assumindoSessao === s.phone ? "..." : "Assumir agora"}
+                            </button>
+                          ) : (
+                            <span style={{ fontSize: 9, fontWeight: 900, color: s.manual ? "#ef4444" : "#34d399", background: s.manual ? "rgba(239,68,68,.08)" : "rgba(52,211,153,.08)", border: `1px solid ${s.manual ? "rgba(239,68,68,.25)" : "rgba(52,211,153,.2)"}`, padding: "2px 7px", borderRadius: 5, flexShrink: 0, whiteSpace: "nowrap" }}>
+                              {s.manual ? "Você atendendo" : "Bot atendendo"}
+                            </span>
+                          )}
                         </div>
                         <div style={{ fontSize: 11, color: "#4a4640", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                           {s.ultimaMensagem || s.stepLabel || "—"}
@@ -1291,8 +1312,8 @@ export default function PedidosPage() {
                           </button>
                         </div>
                       ) : s.postOrderPriority ? (
-                        <button onClick={() => assumirSessao(s.phone)} disabled={assumindoSessao === s.phone} style={{ height: 30, padding: "0 10px", border: "none", borderRadius: 8, background: "#fbbf24", color: "#060606", fontSize: 11, fontWeight: 900, flexShrink: 0 }}>
-                          {assumindoSessao === s.phone ? "..." : "Atender"}
+                        <button onClick={() => assumirSessao(s.phone)} disabled={assumindoSessao === s.phone} style={{ height: 30, padding: "0 12px", border: "2px solid #fbbf24", borderRadius: 8, background: "#fbbf24", color: "#060606", fontSize: 11, fontWeight: 900, flexShrink: 0, boxShadow: "0 0 10px rgba(251,191,36,.4)" }}>
+                          {assumindoSessao === s.phone ? "..." : "Assumir agora"}
                         </button>
                       ) : (
                         <span style={{ fontSize: 11, color: "#3a3730", fontWeight: 700, flexShrink: 0 }}>Bot atendendo automaticamente</span>
