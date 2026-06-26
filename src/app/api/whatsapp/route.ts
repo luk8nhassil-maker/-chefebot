@@ -717,9 +717,26 @@ export async function POST(req: NextRequest) {
     const emManual = await redis.get<boolean>(`manual:${phone}`);
     if (emManual === true) {
       // Conversa assumida: bot permanece PAUSADO, NÃO responde ao cliente.
-      // Só atualiza o rascunho vivo (leitura da atendente no painel) e sinaliza nova mensagem.
+      // Atualiza rascunho vivo e sinaliza nova mensagem para o painel.
       await atualizarRascunhoVivo(phone, messageText);
       await redis.set(`nova_msg_manual:${phone}`, true, { ex: 3600 });
+
+      // Garante que session:{phone} exista para que /api/sessoes-ativas
+      // inclua esta conversa no Tempo Real de /pedidos.
+      // A sessão pode ter expirado (TTL 1800s) enquanto o atendimento ainda
+      // estava ativo (flag manual tem TTL 3600s). Sem sessão, o Tempo Real
+      // não mostra a conversa mesmo com nova mensagem do cliente.
+      const sessaoExistente = await redis.get(`session:${phone}`);
+      if (!sessaoExistente) {
+        await redis.set(
+          `session:${phone}`,
+          { step: 'escalado', cart: [], deliveryFee: 0, escalado: true },
+          { ex: 3600 },
+        );
+      }
+      // Renova TTL do flag manual para sincronizar com a sessão recriada.
+      await redis.set(`manual:${phone}`, true, { ex: 3600 });
+
       return NextResponse.json({ ok: true });
     }
 
