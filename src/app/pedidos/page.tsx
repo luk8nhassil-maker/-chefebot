@@ -1472,7 +1472,7 @@ export default function PedidosPage() {
                             {revivendoConversa === s.phone ? "..." : "🔄"}
                           </button>
                           <button onClick={() => arquivarConversa(s.phone, s.step)} disabled={arquivandoConversa === s.phone} title="Arquivar conversa. Histórico preservado." style={{ height: 30, padding: "0 8px", border: "1px solid rgba(239,68,68,.3)", borderRadius: 8, background: "rgba(239,68,68,.07)", color: "#ef4444", fontSize: 11, fontWeight: 800 }}>
-                            {arquivandoConversa === s.phone ? "..." : "✕"}
+                            {arquivandoConversa === s.phone ? "..." : "📦 Arquivar"}
                           </button>
                         </div>
                       ) : s.postOrderPriority ? (
@@ -1481,14 +1481,14 @@ export default function PedidosPage() {
                             {assumindoSessao === s.phone ? "..." : "Assumir e responder"}
                           </button>
                           <button onClick={() => arquivarConversa(s.phone, s.step)} disabled={arquivandoConversa === s.phone} title="Arquivar conversa. Histórico preservado." style={{ height: 30, padding: "0 8px", border: "1px solid rgba(239,68,68,.3)", borderRadius: 8, background: "rgba(239,68,68,.07)", color: "#ef4444", fontSize: 11, fontWeight: 800 }}>
-                            {arquivandoConversa === s.phone ? "..." : "✕"}
+                            {arquivandoConversa === s.phone ? "..." : "📦 Arquivar"}
                           </button>
                         </div>
                       ) : (
                         <div style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0 }}>
                           <span style={{ fontSize: 11, color: "#3a3730", fontWeight: 700 }}>Bot atendendo automaticamente</span>
                           <button onClick={() => arquivarConversa(s.phone, s.step)} disabled={arquivandoConversa === s.phone} title="Arquivar conversa. Histórico preservado." style={{ height: 26, padding: "0 7px", border: "1px solid rgba(239,68,68,.3)", borderRadius: 7, background: "rgba(239,68,68,.07)", color: "#ef4444", fontSize: 10, fontWeight: 800 }}>
-                            {arquivandoConversa === s.phone ? "..." : "✕"}
+                            {arquivandoConversa === s.phone ? "..." : "📦 Arquivar"}
                           </button>
                         </div>
                       )}
