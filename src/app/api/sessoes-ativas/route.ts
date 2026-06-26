@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { redis } from '@/lib/redis'
 import { verifyToken } from '@/lib/auth'
 import { calcularResumoAtendimentoHumano } from '@/lib/resumoAtendimentoHumano'
+import { montarSessaoManualMinima } from '@/lib/sessaoTempoReal'
+import type { ConversaMeta } from '@/lib/conversasHistorico'
 
 async function checkAuth(req: NextRequest) {
   const token = req.cookies.get('auth-token')?.value ?? null
@@ -58,21 +60,15 @@ export async function GET(req: NextRequest) {
   try {
     const chaves = await redis.keys('session:*')
     const sessoes = []
-
-    // ───────────── [DIAG-TEMP] instrumentação SOMENTE-LEITURA — REMOVER após diagnóstico ─────────────
-    // Não altera filtros, retornos nem escreve no Redis. Só observa. Telefone sempre mascarado (4 últimos).
-    const diagMask = (p: string) => '…' + p.slice(-4)
-    const diagReturned: Array<Record<string, unknown>> = []
-    const diagDiscarded: Array<Record<string, unknown>> = []
-    // ───────────── [DIAG-TEMP] fim ─────────────
+    const phonesIncluidos = new Set<string>() // dedup: nunca duplicar uma conversa
 
     for (const chave of chaves) {
       const phone = chave.replace('session:', '')
-      if (!phone || phone.length < 8) { if (phone) diagDiscarded.push({ phone: diagMask(phone), reason: 'phone_invalido_len_lt_8' }) /* [DIAG-TEMP] */; continue }
+      if (!phone || phone.length < 8) continue
 
       const session = await redis.get<any>(chave)
-      if (!session) { diagDiscarded.push({ phone: diagMask(phone), reason: 'session_nula_ou_expirada' }) /* [DIAG-TEMP] */; continue }
-      if (STEPS_SEMPRE_IGNORADOS.includes(session.step)) { diagDiscarded.push({ phone: diagMask(phone), reason: 'step_sempre_ignorado', step: session.step }) /* [DIAG-TEMP] */; continue }
+      if (!session) continue
+      if (STEPS_SEMPRE_IGNORADOS.includes(session.step)) continue
 
       const postOrderPriority = !!(await redis.get(`postOrderPriority:${phone}`))
       const manual = !!(await redis.get(`manual:${phone}`))
@@ -80,7 +76,7 @@ export async function GET(req: NextRequest) {
       // em atendimento humano (manual=true). Sem a exceção manual, conversas
       // assumidas com step='done' (ex.: pós-pedido que a Kellyne assumiu — assumir
       // apaga postOrderPriority) sumiam do Tempo Real apesar de manual=true.
-      if (session.step === 'done' && !postOrderPriority && !manual) { diagDiscarded.push({ phone: diagMask(phone), reason: 'done_sem_manual_nem_postorder', step: session.step, manual, postOrderPriority }) /* [DIAG-TEMP] */; continue }
+      if (session.step === 'done' && !postOrderPriority && !manual) continue
 
       const conversationAlert = !!(await redis.get(`conversationAlert:${phone}`))
       const ultimaMensagem = await redis.get<string>(`ultima_msg:${phone}`)
@@ -97,13 +93,7 @@ export async function GET(req: NextRequest) {
         ? calcularResumoAtendimentoHumano(session)
         : null
 
-      // ───────────── [DIAG-TEMP] TTLs (leitura) + resumo da sessão RETORNADA — remover depois ─────────────
-      const diagTtlSession = await redis.ttl(`session:${phone}`)
-      const diagTtlManual = await redis.ttl(`manual:${phone}`)
-      const diagTtlUltima = await redis.ttl(`ultima_msg:${phone}`)
-      diagReturned.push({ phone: diagMask(phone), step: session.step, manual, postOrderPriority, hasUltimaMsg: !!ultimaMensagem, hasSession: true, ttlSession: diagTtlSession, ttlManual: diagTtlManual, ttlUltimaMsg: diagTtlUltima })
-      // ───────────── [DIAG-TEMP] fim ─────────────
-
+      phonesIncluidos.add(phone)
       sessoes.push({
         phone,
         lastDigits: phone.slice(-4),
@@ -120,21 +110,38 @@ export async function GET(req: NextRequest) {
       })
     }
 
-    // ───────────── [DIAG-TEMP] resumo final no runtime log (console) — remover depois ─────────────
-    console.log('[DIAG-SA]', JSON.stringify({
-      ts: new Date().toISOString(),
-      totalKeysSession: chaves.length,
-      returned: diagReturned.length,
-      discarded: diagDiscarded.length,
-      returnedSessions: diagReturned,
-      discardedSessions: diagDiscarded,
-    }))
-    // ───────────── [DIAG-TEMP] fim ─────────────
+    // ── Atendimento humano SEM session: garantir visibilidade no Tempo Real ──
+    // Regra estrutural: enquanto manual:{phone} === true, a conversa NÃO pode
+    // sumir, mesmo que session:{phone} tenha expirado/sido removida. Reconstrói
+    // uma sessão mínima só para o painel (sem inventar carrinho/Pix/pedido).
+    const chavesManual = await redis.keys('manual:*')
+    for (const chaveM of chavesManual) {
+      const phone = chaveM.replace('manual:', '')
+      if (!phone || phone.length < 8) continue
+      if (phonesIncluidos.has(phone)) continue // dedup com a passada de session:*
+
+      const manual = !!(await redis.get(`manual:${phone}`))
+      if (!manual) continue
+
+      const meta = await redis.get<ConversaMeta>(`conversa_meta:${phone}`)
+      const ultimaMensagem =
+        (await redis.get<string>(`ultima_msg:${phone}`)) ?? meta?.ultimaMensagem ?? null
+      const conversationAlert = !!(await redis.get(`conversationAlert:${phone}`))
+      const novaMsgManual = !!(await redis.get(`nova_msg_manual:${phone}`))
+
+      phonesIncluidos.add(phone)
+      sessoes.push(
+        montarSessaoManualMinima(phone, {
+          ultimaMensagem,
+          customerName: meta?.nome ?? null,
+          conversationAlert,
+          novaMsgManual,
+        }),
+      )
+    }
 
     return NextResponse.json(sessoes)
-  } catch (e) {
-    // [DIAG-TEMP] loga a exceção que hoje é engolida silenciosamente (NÃO muda o retorno: continua [] 200)
-    console.error('[DIAG-SA] EXCEPTION', e instanceof Error ? `${e.name}: ${e.message}` : String(e))
+  } catch {
     return NextResponse.json([], { status: 200 })
   }
 }

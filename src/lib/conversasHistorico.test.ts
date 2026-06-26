@@ -139,6 +139,39 @@ describe('atualizarHistorico: conversa_full', () => {
   })
 })
 
+describe('atualizarHistorico: histórico permanente (sem TTL)', () => {
+  test('conversa_full é gravado SEM TTL (não expira com a session)', async () => {
+    await atualizarHistorico('5586999990020', 'cliente', 'oi', 8000, 'Ana')
+    const setCall = redisMock.set.mock.calls.find(c => c[0] === 'conversa_full:5586999990020')
+    expect(setCall).toBeDefined()
+    // (key, value) apenas — sem 3º argumento { ex: TTL }
+    expect(setCall.length).toBe(2)
+  })
+
+  test('conversa_meta é gravado SEM TTL', async () => {
+    await atualizarHistorico('5586999990021', 'cliente', 'oi', 9000, 'Ana')
+    const setCall = redisMock.set.mock.calls.find(c => c[0] === 'conversa_meta:5586999990021')
+    expect(setCall).toBeDefined()
+    expect(setCall.length).toBe(2)
+  })
+
+  test('append-only preserva cliente, bot e atendente em ordem', async () => {
+    let stored: Array<{ autor: string; texto: string; ts: number }> = []
+    redisMock.get.mockImplementation(async (key: string) =>
+      key === 'conversa_full:5586999990022' ? stored : null,
+    )
+    redisMock.set.mockImplementation(async (key: string, value: unknown) => {
+      if (key === 'conversa_full:5586999990022') stored = value as typeof stored
+      return 'OK'
+    })
+    await atualizarHistorico('5586999990022', 'cliente', 'm1', 1, 'Ana')
+    await atualizarHistorico('5586999990022', 'bot', 'm2', 2, 'Ana')
+    await atualizarHistorico('5586999990022', 'atendente', 'm3', 3, 'Ana')
+    expect(stored.map(m => m.texto)).toEqual(['m1', 'm2', 'm3'])
+    expect(stored.map(m => m.autor)).toEqual(['cliente', 'bot', 'atendente'])
+  })
+})
+
 describe('atualizarHistorico: guards', () => {
   test('não faz nada quando phone é vazio', async () => {
     await atualizarHistorico('', 'cliente', 'texto', Date.now())

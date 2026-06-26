@@ -40,7 +40,14 @@ export async function GET(req: NextRequest) {
   if (!phone) return NextResponse.json({ error: 'phone obrigatório' }, { status: 400 })
 
   const session = await redis.get<BotSession>(`session:${phone}`)
-  const conversa = await redis.get<MensagemRelevante[]>(`conversa:${phone}`) ?? []
+  // Histórico mostrado no painel vem da fonte PERMANENTE (conversa_full), não do
+  // log curto rotativo (conversa:{phone}, 8 msgs / TTL 30min) que truncava e
+  // expirava a conversa durante o atendimento. Fallback ao log curto para
+  // conversas antigas que ainda não foram indexadas no histórico completo.
+  const conversa =
+    (await redis.get<MensagemRelevante[]>(`conversa_full:${phone}`)) ??
+    (await redis.get<MensagemRelevante[]>(`conversa:${phone}`)) ??
+    []
 
   const cart: CartItem[] = session?.cart ?? []
   const itens = cart.map(formatarItem).filter(Boolean)

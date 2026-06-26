@@ -4,9 +4,6 @@ import { verifyToken } from '@/lib/auth'
 import { CONVERSAS_ZSET, MAX_FULL_MSGS, type ConversaMeta } from '@/lib/conversasHistorico'
 import type { MensagemRelevante } from '@/lib/bot'
 
-const META_TTL = 60 * 60 * 24 * 90
-const FULL_TTL = 60 * 60 * 24 * 90
-
 async function checkAuth(req: NextRequest) {
   const token = req.cookies.get('auth-token')?.value ?? null
   if (!token) return null
@@ -56,7 +53,7 @@ export async function POST(req: NextRequest) {
       }
       merged.sort((a, b) => (a.ts ?? 0) - (b.ts ?? 0))
       const trimmed = merged.slice(-MAX_FULL_MSGS)
-      await redis.set(fullKey, trimmed, { ex: FULL_TTL })
+      await redis.set(fullKey, trimmed) // permanente: sem TTL
 
       const meta: ConversaMeta = {
         phone,
@@ -65,7 +62,7 @@ export async function POST(req: NextRequest) {
         ultimaTs: ts,
         mensagensCount: trimmed.length,
       }
-      await redis.set(`conversa_meta:${phone}`, meta, { ex: META_TTL })
+      await redis.set(`conversa_meta:${phone}`, meta) // permanente: sem TTL
 
       indexed++
     }
@@ -75,7 +72,7 @@ export async function POST(req: NextRequest) {
       const metaKey = `conversa_meta:${phone}`
       const existing = await redis.get<ConversaMeta>(metaKey)
       if (existing && existing.nome === phone) {
-        await redis.set(metaKey, { ...existing, nome }, { ex: META_TTL })
+        await redis.set(metaKey, { ...existing, nome }) // permanente: sem TTL
       }
     }
 

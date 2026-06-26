@@ -2,9 +2,13 @@ import { redis } from './redis'
 import type { AutorMensagem, MensagemRelevante } from './bot'
 
 export const CONVERSAS_ZSET = 'conversas:index'
-const META_TTL = 60 * 60 * 24 * 90
-const FULL_TTL = 60 * 60 * 24 * 90
-export const MAX_FULL_MSGS = 200
+// Histórico permanente: a conversa NUNCA deve expirar nem ser truncada de forma
+// destrutiva durante o atendimento. conversa_full/conversa_meta são gravados SEM
+// TTL (permanentes). Mantemos um teto de segurança alto só para evitar um único
+// valor Redis patológico; 1000 mensagens cobre conversas reais com folga.
+// (Para histórico verdadeiramente ilimitado, migrar conversa_full para uma LIST
+//  Redis com RPUSH/LRANGE é o próximo passo recomendado — fora do escopo deste fix.)
+export const MAX_FULL_MSGS = 1000
 
 export type ConversaMeta = {
   phone: string
@@ -38,7 +42,8 @@ export async function atualizarHistorico(
     const full = (await redis.get<MensagemRelevante[]>(fullKey)) || []
     full.push({ autor, texto: texto.slice(0, 400), ts })
     const trimmed = full.slice(-MAX_FULL_MSGS)
-    await redis.set(fullKey, trimmed, { ex: FULL_TTL })
+    // Permanente: sem TTL — o histórico não pode expirar durante/depois do atendimento.
+    await redis.set(fullKey, trimmed)
 
     const meta: ConversaMeta = {
       phone,
@@ -47,7 +52,8 @@ export async function atualizarHistorico(
       ultimaTs: ts,
       mensagensCount: trimmed.length,
     }
-    await redis.set(metaKey, meta, { ex: META_TTL })
+    // Permanente: sem TTL.
+    await redis.set(metaKey, meta)
   } catch {
     // best-effort; never propagate error
   }
