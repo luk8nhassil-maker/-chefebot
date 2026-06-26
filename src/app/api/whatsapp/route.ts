@@ -721,20 +721,17 @@ export async function POST(req: NextRequest) {
       await atualizarRascunhoVivo(phone, messageText);
       await redis.set(`nova_msg_manual:${phone}`, true, { ex: 3600 });
 
-      // Garante que session:{phone} exista para que /api/sessoes-ativas
-      // inclua esta conversa no Tempo Real de /pedidos.
-      // A sessão pode ter expirado (TTL 1800s) enquanto o atendimento ainda
-      // estava ativo (flag manual tem TTL 3600s). Sem sessão, o Tempo Real
-      // não mostra a conversa mesmo com nova mensagem do cliente.
-      const sessaoExistente = await redis.get(`session:${phone}`);
-      if (!sessaoExistente) {
-        await redis.set(
-          `session:${phone}`,
-          { step: 'escalado', cart: [], deliveryFee: 0, escalado: true },
-          { ex: 3600 },
-        );
-      }
-      // Renova TTL do flag manual para sincronizar com a sessão recriada.
+      // Garante TTL de 3600s em manual:{phone} e session:{phone}.
+      // Regra: enquanto manual=true, qualquer mensagem do cliente renova ambos.
+      // atualizarRascunhoVivo salva a sessão com 1800s — re-lemos aqui para
+      // garantir que pegamos a versão atualizada (com rascunho) e salvamos com
+      // 3600s. Se a sessão expirou (nula), criamos sessão mínima.
+      const sessaoAtual = await redis.get(`session:${phone}`);
+      await redis.set(
+        `session:${phone}`,
+        sessaoAtual ?? { step: 'escalado', cart: [], deliveryFee: 0, escalado: true },
+        { ex: 3600 },
+      );
       await redis.set(`manual:${phone}`, true, { ex: 3600 });
 
       return NextResponse.json({ ok: true });

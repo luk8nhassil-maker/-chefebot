@@ -83,6 +83,14 @@ export async function POST(req: NextRequest) {
   await registrarMensagem(phone, "atendente", `[${senderName}] ${text}`);
   await redis.del(`nova_msg_manual:${phone}`);
 
+  // Renova TTL de manual e session enquanto o atendimento está ativo.
+  // Previne que o flag manual expire durante conversas longas e o bot reassuma.
+  await redis.set(`manual:${phone}`, true, { ex: 3600 });
+  const sessaoEnvio = await redis.get(`session:${phone}`);
+  if (sessaoEnvio) {
+    await redis.set(`session:${phone}`, sessaoEnvio, { ex: 3600 });
+  }
+
   return NextResponse.json({ ok: true, senderName, phone });
 }
 
