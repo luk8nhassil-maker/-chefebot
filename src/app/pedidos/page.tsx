@@ -1074,7 +1074,7 @@ export default function PedidosPage() {
         .cb-chat-right { display:none; flex-direction:column; flex:1; overflow:hidden; min-height:0; }
         .cb-chat-right.cb-mob-visible { display:flex; }
         .cb-mob-back { display:inline-flex; }
-        .cb-chat-msg-area { flex:1; overflow-y:auto; padding:12px 14px; display:flex; flex-direction:column; gap:6px; }
+        .cb-chat-msg-area { flex:1; min-height:0; overflow-y:auto; padding:12px 14px 16px; display:flex; flex-direction:column; gap:6px; }
         .cb-chat-msg-area::-webkit-scrollbar { width:4px; }
         .cb-chat-msg-area::-webkit-scrollbar-thumb { background:#2a2723; border-radius:2px; }
         .cb-chat-left-inner::-webkit-scrollbar { width:3px; }
