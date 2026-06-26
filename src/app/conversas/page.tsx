@@ -158,9 +158,6 @@ export default function ConversasPage() {
 
   // Chat state
   const [conversaSelecionada, setConversaSelecionada] = useState<string | null>(null)
-  // Guarda o phone recebido via ?phone= ao navegar de "Assumir e responder",
-  // para mostrar o painel como "Em atendimento" enquanto a API ainda não respondeu.
-  const [phoneFromNav, setPhoneFromNav] = useState<string | null>(null)
   const [historicoMsgs, setHistoricoMsgs] = useState<{ autor: string; texto: string; ts?: number }[]>([])
   const [mensagem, setMensagem] = useState("")
   const [enviando, setEnviando] = useState(false)
@@ -194,15 +191,6 @@ export default function ConversasPage() {
     const ivTime = setInterval(() => setNow(Date.now()), 30000)
     return () => { clearInterval(ivData); clearInterval(ivTime) }
   }, [router])
-
-  // Abre automaticamente a conversa quando vindo de "Assumir e responder"
-  useEffect(() => {
-    const phone = new URLSearchParams(window.location.search).get("phone")
-    if (phone) {
-      setPhoneFromNav(phone)
-      setConversaSelecionada(phone)
-    }
-  }, [])
 
   useEffect(() => {
     carregarRecentes()
@@ -343,8 +331,7 @@ export default function ConversasPage() {
         nome: pedidos.find(p => p.telefone === conversaSelecionada)?.cliente || conversaSelecionada,
         ultimaMensagem: "",
         ultimaTs: 0,
-        // Quando vindo de "Assumir e responder", assume status humano enquanto a API ainda não retornou
-        status: (conversaSelecionada === phoneFromNav ? "humano" : "finalizado") as StatusConversa,
+        status: "finalizado" as StatusConversa,
         mensagensCount: 0,
       }
     : null

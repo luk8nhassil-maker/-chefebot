@@ -532,8 +532,7 @@ export default function PedidosPage() {
     try {
       const r = await fetch("/api/assumir", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ telefone: phone }) })
       if (r.ok) {
-        router.push(`/conversas?phone=${encodeURIComponent(phone)}`)
-        return
+        setSessoes(prev => prev.map(s => s.phone === phone ? { ...s, manual: true, postOrderPriority: false } : s))
       }
     } catch {}
     setAssumindoSessao(null)
@@ -1269,11 +1268,7 @@ export default function PedidosPage() {
                 {sessoes.length === 0 ? (
                   <div style={{ padding: "40px 16px", textAlign: "center" }}>
                     <div style={{ fontSize: 26, marginBottom: 8 }}>⚡</div>
-                    <div style={{ fontSize: 13, fontWeight: 800, color: "#3a3730" }}>Nenhuma conversa aguardando agora</div>
-                    <div style={{ fontSize: 11, color: "#2e2c29", fontWeight: 600, marginTop: 4 }}>Conversas assumidas ficam em Conversas.</div>
-                    <button onClick={() => router.push("/conversas")} style={{ marginTop: 12, height: 30, padding: "0 14px", border: "1px solid #242220", borderRadius: 8, background: "transparent", color: "#5a564d", fontSize: 11, fontWeight: 800, fontFamily: "inherit" }}>
-                      Abrir Conversas
-                    </button>
+                    <div style={{ fontSize: 13, fontWeight: 800, color: "#3a3730" }}>Nenhuma conversa ativa</div>
                   </div>
                 ) : [...sessoes].sort((a, b) => {
                     // Urgente: precisa de humano imediato (botão Assumir agora)
@@ -1317,7 +1312,7 @@ export default function PedidosPage() {
                             </span>
                           ) : (
                             <span style={{ fontSize: 9, fontWeight: 900, color: s.manual ? "#ef4444" : "#34d399", background: s.manual ? "rgba(239,68,68,.08)" : "rgba(52,211,153,.08)", border: `1px solid ${s.manual ? "rgba(239,68,68,.25)" : "rgba(52,211,153,.2)"}`, padding: "2px 7px", borderRadius: 5, flexShrink: 0, whiteSpace: "nowrap" }}>
-                              {s.manual ? "Você atendendo" : "Bot atendendo"}
+                              {s.manual ? "Em atendimento" : "Bot atendendo"}
                             </span>
                           )}
                         </div>
