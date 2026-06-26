@@ -18,6 +18,7 @@ export interface SessaoTempoRealMinima {
   ultimaMensagem: string | null
   customerName: string | null
   resumoRapido: null
+  ultimaTs: number
 }
 
 export function montarSessaoManualMinima(
@@ -27,6 +28,7 @@ export function montarSessaoManualMinima(
     customerName?: string | null
     conversationAlert?: boolean
     novaMsgManual?: boolean
+    ultimaTs?: number
   } = {},
 ): SessaoTempoRealMinima {
   return {
@@ -42,5 +44,6 @@ export function montarSessaoManualMinima(
     ultimaMensagem: extras.ultimaMensagem ?? null,
     customerName: extras.customerName ?? null,
     resumoRapido: null,             // nunca inventa pedido/Pix/pagamento
+    ultimaTs: extras.ultimaTs ?? 0,
   }
 }

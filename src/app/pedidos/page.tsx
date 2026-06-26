@@ -175,6 +175,7 @@ export default function PedidosPage() {
   const [pedidos, setPedidos] = useState<Pedido[]>([])
   const [filtro, setFiltro] = useState<Status | "todos" | "tempo_real" | "arquivados">("novo")
   const [sessoes, setSessoes] = useState<any[]>([])
+  const [seenConversas, setSeenConversas] = useState<Set<string>>(new Set())
   const [assumindoSessao, setAssumindoSessao] = useState<string | null>(null)
   const [devolvendoSessaoBot, setDevolvendoSessaoBot] = useState<string | null>(null)
   const [revivendoConversa, setRevivendoConversa] = useState<string | null>(null)
@@ -422,7 +423,22 @@ export default function PedidosPage() {
     const carregarSessoes = () => {
       fetch("/api/sessoes-ativas")
         .then(r => r.ok ? r.json() : [])
-        .then(d => Array.isArray(d) ? setSessoes(d) : setSessoes([]))
+        .then(d => {
+          if (Array.isArray(d)) {
+            setSessoes(d)
+            // Limpa seenConversas para phones onde novaMsgManual voltou a false
+            // (Kellyne respondeu ou TTL expirou), permitindo destacar nova mensagem futura
+            setSeenConversas(prev => {
+              const next = new Set(prev)
+              for (const s of d) {
+                if (!s.novaMsgManual && next.has(s.phone)) next.delete(s.phone)
+              }
+              return next.size === prev.size ? prev : next
+            })
+          } else {
+            setSessoes([])
+          }
+        })
         .catch(() => {})
     }
     carregarSessoes()
@@ -1087,6 +1103,9 @@ export default function PedidosPage() {
         .cb-chat-item.cb-chat-item-urgente:hover { background:rgba(251,191,36,.09) !important; }
         .cb-chat-item.cb-chat-item-alerta { border-left:3px solid #f97316; padding-left:11px; }
         .cb-chat-item.cb-chat-item-alerta:hover { background:rgba(249,115,22,.07) !important; }
+        @keyframes cb-pulse-nova-msg { 0%,100%{background:rgba(34,197,94,.04)} 50%{background:rgba(34,197,94,.11)} }
+        .cb-chat-item.cb-chat-item-nova-msg { animation:cb-pulse-nova-msg 1.8s ease-in-out infinite; border-left:3px solid #22c55e; padding-left:11px; }
+        .cb-chat-item.cb-chat-item-nova-msg:hover { background:rgba(34,197,94,.09) !important; }
         .cb-assumir-btn { background:#fbbf24; color:#060606; border:none; border-radius:5px; padding:3px 8px; font-size:9px; font-weight:900; cursor:pointer; white-space:nowrap; flex-shrink:0; line-height:1.4; }
         .cb-assumir-btn:hover { background:#f59e0b; }
         .cb-assumir-btn:disabled { opacity:.65; cursor:default; }
@@ -1285,16 +1304,18 @@ export default function PedidosPage() {
                     if (bNovaMsg !== aNovaMsg) return bNovaMsg - aNovaMsg;
                     // Já assumido, aguardando
                     if (Number(!!b.manual) !== Number(!!a.manual)) return Number(!!b.manual) - Number(!!a.manual);
-                    return 0;
+                    // Tiebreaker: conversa mais recente primeiro
+                    return (b.ultimaTs ?? 0) - (a.ultimaTs ?? 0);
                   }).map(s => {
                   const displayName = s.customerName || `…${s.lastDigits}`
                   const initial = ((s.customerName || s.lastDigits || "?")[0]).toUpperCase()
                   const isActive = sessaoAtiva === s.phone
+                  const hasNovaMsg = s.novaMsgManual && !seenConversas.has(s.phone) && !isActive
                   return (
                     <button
                       key={s.phone}
-                      className={`cb-chat-item${isActive ? " cb-chat-item-active" : ""}${s.postOrderPriority && !s.manual ? " cb-chat-item-urgente" : s.conversationAlert && !s.manual ? " cb-chat-item-alerta" : ""}`}
-                      onClick={() => { setSessaoAtiva(s.phone); isNearBottomRef.current = true; prevMsgCountRef.current = 0; setNovasMsgCount(0) }}
+                      className={`cb-chat-item${isActive ? " cb-chat-item-active" : ""}${s.postOrderPriority && !s.manual ? " cb-chat-item-urgente" : s.conversationAlert && !s.manual ? " cb-chat-item-alerta" : hasNovaMsg ? " cb-chat-item-nova-msg" : ""}`}
+                      onClick={() => { setSessaoAtiva(s.phone); setSeenConversas(prev => { const n = new Set(prev); n.add(s.phone); return n }); isNearBottomRef.current = true; prevMsgCountRef.current = 0; setNovasMsgCount(0) }}
                     >
                       <div style={{ width: 38, height: 38, borderRadius: "50%", flexShrink: 0, background: s.manual ? "rgba(239,68,68,.13)" : s.postOrderPriority ? "rgba(251,191,36,.13)" : "rgba(255,107,0,.1)", border: `1.5px solid ${s.manual ? "rgba(239,68,68,.3)" : s.postOrderPriority ? "rgba(251,191,36,.3)" : "rgba(255,107,0,.25)"}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 900, color: s.manual ? "#ef4444" : s.postOrderPriority ? "#fbbf24" : "#ff6b00" }}>
                         {initial}
@@ -1314,13 +1335,17 @@ export default function PedidosPage() {
                             <span style={{ fontSize: 9, fontWeight: 900, color: "#f97316", background: "rgba(249,115,22,.08)", border: "1px solid rgba(249,115,22,.3)", padding: "2px 7px", borderRadius: 5, flexShrink: 0, whiteSpace: "nowrap" }}>
                               ⚠ Atenção
                             </span>
+                          ) : hasNovaMsg ? (
+                            <span style={{ fontSize: 10, fontWeight: 900, color: "#22c55e", background: "rgba(34,197,94,.12)", border: "1px solid rgba(34,197,94,.4)", padding: "2px 8px", borderRadius: 5, flexShrink: 0, whiteSpace: "nowrap" }}>
+                              ● Nova mensagem
+                            </span>
                           ) : (
-                            <span style={{ fontSize: 9, fontWeight: 900, color: s.manual && s.novaMsgManual ? "#f97316" : s.manual ? "#ef4444" : "#34d399", background: s.manual && s.novaMsgManual ? "rgba(249,115,22,.12)" : s.manual ? "rgba(239,68,68,.08)" : "rgba(52,211,153,.08)", border: `1px solid ${s.manual && s.novaMsgManual ? "rgba(249,115,22,.45)" : s.manual ? "rgba(239,68,68,.25)" : "rgba(52,211,153,.2)"}`, padding: "2px 7px", borderRadius: 5, flexShrink: 0, whiteSpace: "nowrap" }}>
-                              {s.manual && s.novaMsgManual ? "● Cliente respondeu" : s.manual ? "Em atendimento" : "Bot atendendo"}
+                            <span style={{ fontSize: 9, fontWeight: 900, color: s.manual ? "#ef4444" : "#34d399", background: s.manual ? "rgba(239,68,68,.08)" : "rgba(52,211,153,.08)", border: `1px solid ${s.manual ? "rgba(239,68,68,.25)" : "rgba(52,211,153,.2)"}`, padding: "2px 7px", borderRadius: 5, flexShrink: 0, whiteSpace: "nowrap" }}>
+                              {s.manual ? "Em atendimento" : "Bot atendendo"}
                             </span>
                           )}
                         </div>
-                        <div style={{ fontSize: 11, color: "#4a4640", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        <div style={{ fontSize: 11, color: hasNovaMsg ? "#b8f5c8" : "#4a4640", fontWeight: hasNovaMsg ? 800 : 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                           {s.ultimaMensagem || s.stepLabel || "—"}
                         </div>
                       </div>

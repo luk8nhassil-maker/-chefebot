@@ -111,6 +111,7 @@ export async function GET(req: NextRequest) {
         ultimaMensagem: ultimaMensagem ?? null,
         customerName: session.customerName ?? null,
         resumoRapido,
+        ultimaTs: meta?.ultimaTs ?? 0,
       })
     }
 
@@ -146,6 +147,7 @@ export async function GET(req: NextRequest) {
           customerName: meta?.nome ?? null,
           conversationAlert,
           novaMsgManual,
+          ultimaTs: meta?.ultimaTs ?? 0,
         }),
       )
     }
