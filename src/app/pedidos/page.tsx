@@ -247,6 +247,10 @@ export default function PedidosPage() {
   const simpleToastTimerRef = useRef<any>(null)
   const historicoBottomRef = useRef<HTMLDivElement>(null)
   const sendInFlightRef = useRef(false)
+  const chatMsgAreaRef = useRef<HTMLDivElement>(null)
+  const isNearBottomRef = useRef(true)
+  const prevMsgCountRef = useRef(0)
+  const [novasMsgCount, setNovasMsgCount] = useState(0)
 
   const tocarSomNormal = () => {
     if (muteadoRef.current) return
@@ -440,7 +444,30 @@ export default function PedidosPage() {
   }, [sessaoAtiva, filtro])
 
   useEffect(() => {
-    historicoBottomRef.current?.scrollIntoView({ behavior: "smooth" })
+    const prevCount = prevMsgCountRef.current
+    const currentCount = historicoMsgs.length
+    const delta = currentCount - prevCount
+
+    prevMsgCountRef.current = currentCount
+
+    if (currentCount === 0) return
+
+    // Primeira carga da conversa: vai direto para o final sem mostrar balão
+    if (prevCount === 0) {
+      historicoBottomRef.current?.scrollIntoView({ behavior: "auto" })
+      setNovasMsgCount(0)
+      return
+    }
+
+    // Polling sem mensagem nova (ou histórico menor/resetado): não mexe no scroll
+    if (delta <= 0) return
+
+    if (isNearBottomRef.current) {
+      historicoBottomRef.current?.scrollIntoView({ behavior: "smooth" })
+      setNovasMsgCount(0)
+    } else {
+      setNovasMsgCount(c => c + delta)
+    }
   }, [historicoMsgs])
 
   const limparHistorico = async () => {
@@ -526,6 +553,8 @@ export default function PedidosPage() {
       const data = await r.json()
       if (data.ok) {
         setMensagemHumana(prev => ({ ...prev, [phone]: "" }))
+        isNearBottomRef.current = true
+        setNovasMsgCount(0)
         setHistoricoMsgs(prev => [...prev, { autor: "atendente", texto: `[${userName || "Kellyne"}] ${texto}`, ts: Date.now() }])
       } else {
         setErroEnvioMensagem(prev => ({ ...prev, [phone]: data.error || "Erro ao enviar." }))
@@ -1240,7 +1269,7 @@ export default function PedidosPage() {
                     <button
                       key={s.phone}
                       className={`cb-chat-item${isActive ? " cb-chat-item-active" : ""}${s.postOrderPriority && !s.manual ? " cb-chat-item-urgente" : s.conversationAlert && !s.manual ? " cb-chat-item-alerta" : ""}`}
-                      onClick={() => setSessaoAtiva(s.phone)}
+                      onClick={() => { setSessaoAtiva(s.phone); isNearBottomRef.current = true; prevMsgCountRef.current = 0; setNovasMsgCount(0) }}
                     >
                       <div style={{ width: 38, height: 38, borderRadius: "50%", flexShrink: 0, background: s.manual ? "rgba(239,68,68,.13)" : s.postOrderPriority ? "rgba(251,191,36,.13)" : "rgba(255,107,0,.1)", border: `1.5px solid ${s.manual ? "rgba(239,68,68,.3)" : s.postOrderPriority ? "rgba(251,191,36,.3)" : "rgba(255,107,0,.25)"}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 900, color: s.manual ? "#ef4444" : s.postOrderPriority ? "#fbbf24" : "#ff6b00" }}>
                         {initial}
@@ -1341,7 +1370,17 @@ export default function PedidosPage() {
                     )}
 
                     {/* Área de mensagens */}
-                    <div className="cb-chat-msg-area">
+                    <div
+                      ref={chatMsgAreaRef}
+                      className="cb-chat-msg-area"
+                      onScroll={() => {
+                        const el = chatMsgAreaRef.current
+                        if (!el) return
+                        const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120
+                        isNearBottomRef.current = nearBottom
+                        if (nearBottom && novasMsgCount > 0) setNovasMsgCount(0)
+                      }}
+                    >
                       {historicoMsgs.length === 0 ? (
                         <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "flex-end", paddingBottom: 8 }}>
                           {s.ultimaMensagem ? (
@@ -1376,6 +1415,35 @@ export default function PedidosPage() {
                           </div>
                         )
                       })}
+                      {novasMsgCount > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            historicoBottomRef.current?.scrollIntoView({ behavior: "smooth" })
+                            isNearBottomRef.current = true
+                            setNovasMsgCount(0)
+                          }}
+                          style={{
+                            position: "sticky",
+                            bottom: 10,
+                            alignSelf: "center",
+                            background: "#25d366",
+                            color: "#fff",
+                            border: 0,
+                            borderRadius: 20,
+                            padding: "5px 14px",
+                            fontSize: 12,
+                            fontWeight: 900,
+                            cursor: "pointer",
+                            boxShadow: "0 2px 10px rgba(0,0,0,.4)",
+                            userSelect: "none",
+                            zIndex: 5,
+                            fontFamily: "inherit",
+                          }}
+                        >
+                          {novasMsgCount === 1 ? "1 nova mensagem" : `${novasMsgCount} novas mensagens`} ↓
+                        </button>
+                      )}
                       <div ref={historicoBottomRef} />
                     </div>
 
