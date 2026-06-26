@@ -717,8 +717,9 @@ export async function POST(req: NextRequest) {
     const emManual = await redis.get<boolean>(`manual:${phone}`);
     if (emManual === true) {
       // Conversa assumida: bot permanece PAUSADO, NÃO responde ao cliente.
-      // Só atualiza o rascunho vivo (leitura da atendente no painel).
+      // Só atualiza o rascunho vivo (leitura da atendente no painel) e sinaliza nova mensagem.
       await atualizarRascunhoVivo(phone, messageText);
+      await redis.set(`nova_msg_manual:${phone}`, true, { ex: 3600 });
       return NextResponse.json({ ok: true });
     }
 

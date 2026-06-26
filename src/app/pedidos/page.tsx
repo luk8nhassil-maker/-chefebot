@@ -1272,14 +1272,18 @@ export default function PedidosPage() {
                   </div>
                 ) : [...sessoes].sort((a, b) => {
                     // Urgente: precisa de humano imediato (botão Assumir agora)
-                    const aUrgente = (a.postOrderPriority && !a.manual) ? 3 : 0;
-                    const bUrgente = (b.postOrderPriority && !b.manual) ? 3 : 0;
+                    const aUrgente = (a.postOrderPriority && !a.manual) ? 4 : 0;
+                    const bUrgente = (b.postOrderPriority && !b.manual) ? 4 : 0;
                     if (bUrgente !== aUrgente) return bUrgente - aUrgente;
                     // Alerta: 2ª confusão consecutiva, bot ainda conduz
-                    const aAlerta = (a.conversationAlert && !a.manual && !a.postOrderPriority) ? 2 : 0;
-                    const bAlerta = (b.conversationAlert && !b.manual && !b.postOrderPriority) ? 2 : 0;
+                    const aAlerta = (a.conversationAlert && !a.manual && !a.postOrderPriority) ? 3 : 0;
+                    const bAlerta = (b.conversationAlert && !b.manual && !b.postOrderPriority) ? 3 : 0;
                     if (bAlerta !== aAlerta) return bAlerta - aAlerta;
-                    // Já assumido → terceiro
+                    // Manual com nova mensagem do cliente (não lida)
+                    const aNovaMsg = (a.manual && a.novaMsgManual) ? 2 : 0;
+                    const bNovaMsg = (b.manual && b.novaMsgManual) ? 2 : 0;
+                    if (bNovaMsg !== aNovaMsg) return bNovaMsg - aNovaMsg;
+                    // Já assumido, aguardando
                     if (Number(!!b.manual) !== Number(!!a.manual)) return Number(!!b.manual) - Number(!!a.manual);
                     return 0;
                   }).map(s => {
@@ -1311,8 +1315,8 @@ export default function PedidosPage() {
                               ⚠ Atenção
                             </span>
                           ) : (
-                            <span style={{ fontSize: 9, fontWeight: 900, color: s.manual ? "#ef4444" : "#34d399", background: s.manual ? "rgba(239,68,68,.08)" : "rgba(52,211,153,.08)", border: `1px solid ${s.manual ? "rgba(239,68,68,.25)" : "rgba(52,211,153,.2)"}`, padding: "2px 7px", borderRadius: 5, flexShrink: 0, whiteSpace: "nowrap" }}>
-                              {s.manual ? "Em atendimento" : "Bot atendendo"}
+                            <span style={{ fontSize: 9, fontWeight: 900, color: s.manual && s.novaMsgManual ? "#f97316" : s.manual ? "#ef4444" : "#34d399", background: s.manual && s.novaMsgManual ? "rgba(249,115,22,.12)" : s.manual ? "rgba(239,68,68,.08)" : "rgba(52,211,153,.08)", border: `1px solid ${s.manual && s.novaMsgManual ? "rgba(249,115,22,.45)" : s.manual ? "rgba(239,68,68,.25)" : "rgba(52,211,153,.2)"}`, padding: "2px 7px", borderRadius: 5, flexShrink: 0, whiteSpace: "nowrap" }}>
+                              {s.manual && s.novaMsgManual ? "● Cliente respondeu" : s.manual ? "Em atendimento" : "Bot atendendo"}
                             </span>
                           )}
                         </div>

@@ -81,6 +81,7 @@ export async function POST(req: NextRequest) {
 
   // Só registra após confirmação de envio bem-sucedido pela Evolution API
   await registrarMensagem(phone, "atendente", `[${senderName}] ${text}`);
+  await redis.del(`nova_msg_manual:${phone}`);
 
   return NextResponse.json({ ok: true, senderName, phone });
 }

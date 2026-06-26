@@ -74,6 +74,7 @@ export async function GET(req: NextRequest) {
       const manual = !!(await redis.get(`manual:${phone}`))
       const conversationAlert = !!(await redis.get(`conversationAlert:${phone}`))
       const ultimaMensagem = await redis.get<string>(`ultima_msg:${phone}`)
+      const novaMsgManual = manual && !!(await redis.get(`nova_msg_manual:${phone}`))
 
       const cartResumo = (session.cart || []).map((i: any) => {
         const parts = [i.name]
@@ -95,6 +96,7 @@ export async function GET(req: NextRequest) {
         manual,
         postOrderPriority,
         conversationAlert,
+        novaMsgManual,
         ultimaMensagem: ultimaMensagem ?? null,
         customerName: session.customerName ?? null,
         resumoRapido,
