@@ -14,7 +14,12 @@ export const maxDuration = 30;
 const CHAVE_FILA = 'mcp:fila:eventos';
 const BATCH_SIZE = 50;
 
-export async function GET(): Promise<NextResponse> {
+export async function GET(req: Request): Promise<NextResponse> {
+  const auth = req.headers.get('authorization');
+  if (auth !== `Bearer ${process.env.CRON_SECRET}`) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
   if (process.env.MCP_MODE !== 'observador') {
     return NextResponse.json({ ok: true, motivo: 'mcp inativo' });
   }
