@@ -1034,6 +1034,8 @@ export default function PedidosPage() {
         @keyframes cb-pulse-urgent { 0%,100%{background:rgba(251,191,36,.04)} 50%{background:rgba(251,191,36,.11)} }
         .cb-chat-item.cb-chat-item-urgente { animation:cb-pulse-urgent 2s ease-in-out infinite; border-left:3px solid #fbbf24; padding-left:11px; }
         .cb-chat-item.cb-chat-item-urgente:hover { background:rgba(251,191,36,.09) !important; }
+        .cb-chat-item.cb-chat-item-alerta { border-left:3px solid #f97316; padding-left:11px; }
+        .cb-chat-item.cb-chat-item-alerta:hover { background:rgba(249,115,22,.07) !important; }
         .cb-assumir-btn { background:#fbbf24; color:#060606; border:none; border-radius:5px; padding:3px 8px; font-size:9px; font-weight:900; cursor:pointer; white-space:nowrap; flex-shrink:0; line-height:1.4; }
         .cb-assumir-btn:hover { background:#f59e0b; }
         .cb-assumir-btn:disabled { opacity:.65; cursor:default; }
@@ -1219,11 +1221,15 @@ export default function PedidosPage() {
                     <div style={{ fontSize: 11, color: "#2e2c29", fontWeight: 600, marginTop: 4 }}>Clientes em andamento aparecerão aqui.</div>
                   </div>
                 ) : [...sessoes].sort((a, b) => {
-                    // Precisa de humano (ainda não assumido) → topo
-                    const aNH = a.postOrderPriority && !a.manual;
-                    const bNH = b.postOrderPriority && !b.manual;
-                    if (Number(!!bNH) !== Number(!!aNH)) return Number(!!bNH) - Number(!!aNH);
-                    // Já assumido → segundo
+                    // Urgente: precisa de humano imediato (botão Assumir agora)
+                    const aUrgente = (a.postOrderPriority && !a.manual) ? 3 : 0;
+                    const bUrgente = (b.postOrderPriority && !b.manual) ? 3 : 0;
+                    if (bUrgente !== aUrgente) return bUrgente - aUrgente;
+                    // Alerta: 2ª confusão consecutiva, bot ainda conduz
+                    const aAlerta = (a.conversationAlert && !a.manual && !a.postOrderPriority) ? 2 : 0;
+                    const bAlerta = (b.conversationAlert && !b.manual && !b.postOrderPriority) ? 2 : 0;
+                    if (bAlerta !== aAlerta) return bAlerta - aAlerta;
+                    // Já assumido → terceiro
                     if (Number(!!b.manual) !== Number(!!a.manual)) return Number(!!b.manual) - Number(!!a.manual);
                     return 0;
                   }).map(s => {
@@ -1233,7 +1239,7 @@ export default function PedidosPage() {
                   return (
                     <button
                       key={s.phone}
-                      className={`cb-chat-item${isActive ? " cb-chat-item-active" : ""}${s.postOrderPriority && !s.manual ? " cb-chat-item-urgente" : ""}`}
+                      className={`cb-chat-item${isActive ? " cb-chat-item-active" : ""}${s.postOrderPriority && !s.manual ? " cb-chat-item-urgente" : s.conversationAlert && !s.manual ? " cb-chat-item-alerta" : ""}`}
                       onClick={() => setSessaoAtiva(s.phone)}
                     >
                       <div style={{ width: 38, height: 38, borderRadius: "50%", flexShrink: 0, background: s.manual ? "rgba(239,68,68,.13)" : s.postOrderPriority ? "rgba(251,191,36,.13)" : "rgba(255,107,0,.1)", border: `1.5px solid ${s.manual ? "rgba(239,68,68,.3)" : s.postOrderPriority ? "rgba(251,191,36,.3)" : "rgba(255,107,0,.25)"}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 900, color: s.manual ? "#ef4444" : s.postOrderPriority ? "#fbbf24" : "#ff6b00" }}>
@@ -1250,6 +1256,10 @@ export default function PedidosPage() {
                             >
                               {assumindoSessao === s.phone ? "..." : "Assumir agora"}
                             </button>
+                          ) : s.conversationAlert && !s.manual ? (
+                            <span style={{ fontSize: 9, fontWeight: 900, color: "#f97316", background: "rgba(249,115,22,.08)", border: "1px solid rgba(249,115,22,.3)", padding: "2px 7px", borderRadius: 5, flexShrink: 0, whiteSpace: "nowrap" }}>
+                              ⚠ Atenção
+                            </span>
                           ) : (
                             <span style={{ fontSize: 9, fontWeight: 900, color: s.manual ? "#ef4444" : "#34d399", background: s.manual ? "rgba(239,68,68,.08)" : "rgba(52,211,153,.08)", border: `1px solid ${s.manual ? "rgba(239,68,68,.25)" : "rgba(52,211,153,.2)"}`, padding: "2px 7px", borderRadius: 5, flexShrink: 0, whiteSpace: "nowrap" }}>
                               {s.manual ? "Você atendendo" : "Bot atendendo"}
