@@ -1345,8 +1345,15 @@ export default function PedidosPage() {
                             </span>
                           )}
                         </div>
-                        <div style={{ fontSize: 11, color: hasNovaMsg ? "#b8f5c8" : "#4a4640", fontWeight: hasNovaMsg ? 800 : 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {s.ultimaMensagem || s.stepLabel || "—"}
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <div style={{ flex: 1, minWidth: 0, fontSize: 11, color: hasNovaMsg ? "#b8f5c8" : "#4a4640", fontWeight: hasNovaMsg ? 800 : 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {s.ultimaMensagem || s.stepLabel || "—"}
+                          </div>
+                          {hasNovaMsg && (
+                            <span style={{ flexShrink: 0, minWidth: 20, height: 20, borderRadius: 10, background: "#22c55e", color: "#fff", fontSize: 11, fontWeight: 900, display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "0 5px", lineHeight: 1 }}>
+                              1
+                            </span>
+                          )}
                         </div>
                       </div>
                     </button>
