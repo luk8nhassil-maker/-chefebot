@@ -72,6 +72,7 @@ export async function GET(req: NextRequest) {
       if (session.step === 'done' && !postOrderPriority) continue
 
       const manual = !!(await redis.get(`manual:${phone}`))
+      const conversationAlert = !!(await redis.get(`conversationAlert:${phone}`))
       const ultimaMensagem = await redis.get<string>(`ultima_msg:${phone}`)
 
       const cartResumo = (session.cart || []).map((i: any) => {
@@ -93,6 +94,7 @@ export async function GET(req: NextRequest) {
         cart: cartResumo,
         manual,
         postOrderPriority,
+        conversationAlert,
         ultimaMensagem: ultimaMensagem ?? null,
         customerName: session.customerName ?? null,
         resumoRapido,

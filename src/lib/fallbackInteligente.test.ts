@@ -85,46 +85,59 @@ describe("deveMarcarPrioridadePosPedido", () => {
   });
 });
 
-// ─── avaliarHandoffPorConfusao (handoff por confusão consecutiva) ─────────────
+// ─── avaliarHandoffPorConfusao (sistema de 3 níveis) ─────────────────────────
 describe("avaliarHandoffPorConfusao", () => {
   const confuso = (m: string) => pareceFallbackSeco([m]);
   const VALIDA = "Qual o tamanho da pizza?";
 
-  it("1ª mensagem confusa NÃO ativa manual (bot ainda conduz)", () => {
+  it("1ª mensagem confusa → nivel 'none', bot ainda conduz (contador=1)", () => {
     const r = avaliarHandoffPorConfusao(0, confuso(FALLBACKS_SECOS[0]));
-    expect(r.ativarManual).toBe(false);
+    expect(r.nivel).toBe('none');
     expect(r.novoContador).toBe(1);
   });
 
-  it("2ª mensagem confusa consecutiva ativa manual=true", () => {
+  it("2ª mensagem confusa → nivel 'alert', painel destaca mas bot conduz (contador=2)", () => {
     const r = avaliarHandoffPorConfusao(1, confuso(FALLBACKS_SECOS[2]));
-    expect(r.ativarManual).toBe(true);
-    expect(r.novoContador).toBe(0); // zera após handoff
+    expect(r.nivel).toBe('alert');
+    expect(r.novoContador).toBe(2);
   });
 
-  it("resposta válida entre duas confusas zera o contador (sem falso positivo)", () => {
+  it("3ª mensagem confusa → nivel 'urgent', bot para e Assumir agora aparece (contador=0)", () => {
+    const r = avaliarHandoffPorConfusao(2, confuso(FALLBACKS_SECOS[4]));
+    expect(r.nivel).toBe('urgent');
+    expect(r.novoContador).toBe(0);
+  });
+
+  it("resposta válida entre confusas zera contador e retorna nivel 'none'", () => {
     // confusa → 1
     let c = avaliarHandoffPorConfusao(0, confuso(FALLBACKS_SECOS[0])).novoContador;
     expect(c).toBe(1);
     // válida → zera
     const meio = avaliarHandoffPorConfusao(c, confuso(VALIDA));
-    expect(meio.ativarManual).toBe(false);
+    expect(meio.nivel).toBe('none');
     expect(meio.novoContador).toBe(0);
     c = meio.novoContador;
-    // próxima confusa volta a ser a 1ª, NÃO ativa manual
+    // próxima confusa volta a ser a 1ª (nivel 'none', não 'alert')
     const depois = avaliarHandoffPorConfusao(c, confuso(FALLBACKS_SECOS[1]));
-    expect(depois.ativarManual).toBe(false);
+    expect(depois.nivel).toBe('none');
     expect(depois.novoContador).toBe(1);
   });
 
-  it("fluxo normal de pedido (sem confusão) nunca ativa manual", () => {
+  it("fluxo normal de pedido (sem confusão) nunca passa de 'none'", () => {
     let c = 0;
     for (const m of ["Você quer pizza, lanche, bebida ou suco?", "Qual o tamanho?", "Pedido confirmado! 🍕"]) {
       const r = avaliarHandoffPorConfusao(c, confuso(m));
-      expect(r.ativarManual).toBe(false);
+      expect(r.nivel).toBe('none');
       c = r.novoContador;
     }
     expect(c).toBe(0);
+  });
+
+  it("resposta válida em nivel 'alert' reseta sem apagar dados (função pura, só retorna)", () => {
+    // Simula: estava em alert (contador=2), cliente manda mensagem válida
+    const r = avaliarHandoffPorConfusao(2, false);
+    expect(r.nivel).toBe('none');
+    expect(r.novoContador).toBe(0);
   });
 });
 

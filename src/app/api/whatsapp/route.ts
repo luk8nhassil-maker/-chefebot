@@ -1004,15 +1004,30 @@ export async function POST(req: NextRequest) {
       await redis.set(`manual:${phone}`, true, { ex: 3600 });
       result.session = { ...result.session, clientePerdidoCount: 0 };
     } else {
-      // Handoff automático: 2 confusões consecutivas (fallback seco) marcam a
-      // conversa como manual=true, e o painel Tempo Real exibe "Atender".
-      // Reusa o sinal de fallback já existente; resposta válida zera o contador.
-      const { novoContador, ativarManual } = avaliarHandoffPorConfusao(
+      // Handoff automático por confusão consecutiva — 3 níveis:
+      //   none  : resposta válida (zera) ou 1ª confusão. Bot conduz, sem alerta.
+      //   alert : 2ª confusão. Painel destaca mas bot ainda conduz.
+      //   urgent: 3ª confusão. Bot para; envia mensagem à cliente; painel exibe "Assumir agora".
+      const ehFallbackSeco = pareceFallbackSeco(result.messages);
+      const { novoContador, nivel } = avaliarHandoffPorConfusao(
         currentSession!.clientePerdidoCount || 0,
-        pareceFallbackSeco(result.messages),
+        ehFallbackSeco,
       );
-      if (ativarManual) await redis.set(`manual:${phone}`, true, { ex: 3600 });
-      result.session = { ...result.session, clientePerdidoCount: novoContador };
+      if (nivel === 'urgent') {
+        result.messages = ['Vou chamar alguém da equipe para te ajudar melhor, tá bom? Um instante que já vamos continuar seu atendimento.'];
+        result.session = { ...result.session, step: 'escalado', clientePerdidoCount: 0 };
+        await redis.set(`postOrderPriority:${phone}`, true, { ex: 3600 });
+        await redis.del(`conversationAlert:${phone}`);
+      } else if (nivel === 'alert') {
+        result.session = { ...result.session, clientePerdidoCount: novoContador };
+        await redis.set(`conversationAlert:${phone}`, true, { ex: 3600 });
+      } else {
+        result.session = { ...result.session, clientePerdidoCount: novoContador };
+        if (!ehFallbackSeco) {
+          // Resposta válida: limpa o alerta de dificuldade anterior se existia.
+          await redis.del(`conversationAlert:${phone}`);
+        }
+      }
     }
 
     // Atualiza o rascunho vivo (leitura da atendente). Aditivo: preserva todos os

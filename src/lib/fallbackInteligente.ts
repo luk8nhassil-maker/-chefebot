@@ -47,19 +47,20 @@ export function deveMarcarPrioridadePosPedido(step: string | undefined): boolean
   return step === 'done';
 }
 
-// Handoff automático por confusão consecutiva.
-// Conta quantas vezes SEGUIDAS o bot ficou perdido (fallback seco, via
-// pareceFallbackSeco). Na 2ª confusão consecutiva sinaliza o handoff para humano
-// (o webhook marca manual=true → painel mostra "Atender"). Resposta válida
-// (sem fallback) zera o contador, evitando falso positivo. Função pura.
+// Handoff automático por confusão consecutiva — sistema de 3 níveis:
+//   nivel 'none'  : 1ª confusão ou resposta válida (zera contador). Bot conduz.
+//   nivel 'alert' : 2ª confusão consecutiva. Painel destaca mas bot ainda conduz.
+//   nivel 'urgent': 3ª confusão consecutiva. Bot para; painel exibe "Assumir agora".
+// Resposta válida (sem fallback) zera o contador, evitando falso positivo. Função pura.
 export function avaliarHandoffPorConfusao(
   contadorAnterior: number,
   perdidoEsteTurno: boolean,
-): { novoContador: number; ativarManual: boolean } {
-  if (!perdidoEsteTurno) return { novoContador: 0, ativarManual: false };
+): { novoContador: number; nivel: 'none' | 'alert' | 'urgent' } {
+  if (!perdidoEsteTurno) return { novoContador: 0, nivel: 'none' };
   const novo = (contadorAnterior || 0) + 1;
-  if (novo >= 2) return { novoContador: 0, ativarManual: true };
-  return { novoContador: novo, ativarManual: false };
+  if (novo >= 3) return { novoContador: 0, nivel: 'urgent' };
+  if (novo >= 2) return { novoContador: novo, nivel: 'alert' };
+  return { novoContador: novo, nivel: 'none' };
 }
 
 // Saudações e mensagens sociais que jamais podem virar "opção inválida".
