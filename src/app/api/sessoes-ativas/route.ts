@@ -59,13 +59,20 @@ export async function GET(req: NextRequest) {
     const chaves = await redis.keys('session:*')
     const sessoes = []
 
+    // ───────────── [DIAG-TEMP] instrumentação SOMENTE-LEITURA — REMOVER após diagnóstico ─────────────
+    // Não altera filtros, retornos nem escreve no Redis. Só observa. Telefone sempre mascarado (4 últimos).
+    const diagMask = (p: string) => '…' + p.slice(-4)
+    const diagReturned: Array<Record<string, unknown>> = []
+    const diagDiscarded: Array<Record<string, unknown>> = []
+    // ───────────── [DIAG-TEMP] fim ─────────────
+
     for (const chave of chaves) {
       const phone = chave.replace('session:', '')
-      if (!phone || phone.length < 8) continue
+      if (!phone || phone.length < 8) { if (phone) diagDiscarded.push({ phone: diagMask(phone), reason: 'phone_invalido_len_lt_8' }) /* [DIAG-TEMP] */; continue }
 
       const session = await redis.get<any>(chave)
-      if (!session) continue
-      if (STEPS_SEMPRE_IGNORADOS.includes(session.step)) continue
+      if (!session) { diagDiscarded.push({ phone: diagMask(phone), reason: 'session_nula_ou_expirada' }) /* [DIAG-TEMP] */; continue }
+      if (STEPS_SEMPRE_IGNORADOS.includes(session.step)) { diagDiscarded.push({ phone: diagMask(phone), reason: 'step_sempre_ignorado', step: session.step }) /* [DIAG-TEMP] */; continue }
 
       const postOrderPriority = !!(await redis.get(`postOrderPriority:${phone}`))
       const manual = !!(await redis.get(`manual:${phone}`))
@@ -73,7 +80,7 @@ export async function GET(req: NextRequest) {
       // em atendimento humano (manual=true). Sem a exceção manual, conversas
       // assumidas com step='done' (ex.: pós-pedido que a Kellyne assumiu — assumir
       // apaga postOrderPriority) sumiam do Tempo Real apesar de manual=true.
-      if (session.step === 'done' && !postOrderPriority && !manual) continue
+      if (session.step === 'done' && !postOrderPriority && !manual) { diagDiscarded.push({ phone: diagMask(phone), reason: 'done_sem_manual_nem_postorder', step: session.step, manual, postOrderPriority }) /* [DIAG-TEMP] */; continue }
 
       const conversationAlert = !!(await redis.get(`conversationAlert:${phone}`))
       const ultimaMensagem = await redis.get<string>(`ultima_msg:${phone}`)
@@ -89,6 +96,13 @@ export async function GET(req: NextRequest) {
       const resumoRapido = manual
         ? calcularResumoAtendimentoHumano(session)
         : null
+
+      // ───────────── [DIAG-TEMP] TTLs (leitura) + resumo da sessão RETORNADA — remover depois ─────────────
+      const diagTtlSession = await redis.ttl(`session:${phone}`)
+      const diagTtlManual = await redis.ttl(`manual:${phone}`)
+      const diagTtlUltima = await redis.ttl(`ultima_msg:${phone}`)
+      diagReturned.push({ phone: diagMask(phone), step: session.step, manual, postOrderPriority, hasUltimaMsg: !!ultimaMensagem, hasSession: true, ttlSession: diagTtlSession, ttlManual: diagTtlManual, ttlUltimaMsg: diagTtlUltima })
+      // ───────────── [DIAG-TEMP] fim ─────────────
 
       sessoes.push({
         phone,
@@ -106,8 +120,21 @@ export async function GET(req: NextRequest) {
       })
     }
 
+    // ───────────── [DIAG-TEMP] resumo final no runtime log (console) — remover depois ─────────────
+    console.log('[DIAG-SA]', JSON.stringify({
+      ts: new Date().toISOString(),
+      totalKeysSession: chaves.length,
+      returned: diagReturned.length,
+      discarded: diagDiscarded.length,
+      returnedSessions: diagReturned,
+      discardedSessions: diagDiscarded,
+    }))
+    // ───────────── [DIAG-TEMP] fim ─────────────
+
     return NextResponse.json(sessoes)
-  } catch {
+  } catch (e) {
+    // [DIAG-TEMP] loga a exceção que hoje é engolida silenciosamente (NÃO muda o retorno: continua [] 200)
+    console.error('[DIAG-SA] EXCEPTION', e instanceof Error ? `${e.name}: ${e.message}` : String(e))
     return NextResponse.json([], { status: 200 })
   }
 }
