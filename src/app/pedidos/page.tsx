@@ -1290,19 +1290,19 @@ export default function PedidosPage() {
                     <div style={{ fontSize: 13, fontWeight: 800, color: "#3a3730" }}>Nenhuma conversa ativa</div>
                   </div>
                 ) : [...sessoes].sort((a, b) => {
-                    // Urgente: precisa de humano imediato (botão Assumir agora)
-                    const aUrgente = (a.postOrderPriority && !a.manual) ? 4 : 0;
-                    const bUrgente = (b.postOrderPriority && !b.manual) ? 4 : 0;
+                    // 1. Nova mensagem não vista: sobe ao topo imediatamente
+                    const aNova = (a.manual && a.novaMsgManual && !seenConversas.has(a.phone)) ? 1 : 0;
+                    const bNova = (b.manual && b.novaMsgManual && !seenConversas.has(b.phone)) ? 1 : 0;
+                    if (bNova !== aNova) return bNova - aNova;
+                    // 2. Urgente: precisa de humano imediato (botão Assumir agora)
+                    const aUrgente = (a.postOrderPriority && !a.manual) ? 1 : 0;
+                    const bUrgente = (b.postOrderPriority && !b.manual) ? 1 : 0;
                     if (bUrgente !== aUrgente) return bUrgente - aUrgente;
-                    // Alerta: 2ª confusão consecutiva, bot ainda conduz
-                    const aAlerta = (a.conversationAlert && !a.manual && !a.postOrderPriority) ? 3 : 0;
-                    const bAlerta = (b.conversationAlert && !b.manual && !b.postOrderPriority) ? 3 : 0;
+                    // 3. Alerta: 2ª confusão consecutiva, bot ainda conduz
+                    const aAlerta = (a.conversationAlert && !a.manual && !a.postOrderPriority) ? 1 : 0;
+                    const bAlerta = (b.conversationAlert && !b.manual && !b.postOrderPriority) ? 1 : 0;
                     if (bAlerta !== aAlerta) return bAlerta - aAlerta;
-                    // Manual com nova mensagem do cliente (não lida)
-                    const aNovaMsg = (a.manual && a.novaMsgManual) ? 2 : 0;
-                    const bNovaMsg = (b.manual && b.novaMsgManual) ? 2 : 0;
-                    if (bNovaMsg !== aNovaMsg) return bNovaMsg - aNovaMsg;
-                    // Já assumido, aguardando
+                    // 4. Já assumido, aguardando
                     if (Number(!!b.manual) !== Number(!!a.manual)) return Number(!!b.manual) - Number(!!a.manual);
                     // Tiebreaker: conversa mais recente primeiro
                     return (b.ultimaTs ?? 0) - (a.ultimaTs ?? 0);
