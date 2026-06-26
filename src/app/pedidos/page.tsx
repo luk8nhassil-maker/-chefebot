@@ -530,8 +530,11 @@ export default function PedidosPage() {
   const assumirSessao = async (phone: string) => {
     setAssumindoSessao(phone)
     try {
-      await fetch("/api/assumir", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ telefone: phone }) })
-      setSessoes(prev => prev.map(s => s.phone === phone ? { ...s, manual: true, postOrderPriority: false } : s))
+      const r = await fetch("/api/assumir", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ telefone: phone }) })
+      if (r.ok) {
+        router.push(`/conversas?phone=${encodeURIComponent(phone)}`)
+        return
+      }
     } catch {}
     setAssumindoSessao(null)
   }
@@ -1266,8 +1269,11 @@ export default function PedidosPage() {
                 {sessoes.length === 0 ? (
                   <div style={{ padding: "40px 16px", textAlign: "center" }}>
                     <div style={{ fontSize: 26, marginBottom: 8 }}>⚡</div>
-                    <div style={{ fontSize: 13, fontWeight: 800, color: "#3a3730" }}>Nenhuma conversa ativa</div>
-                    <div style={{ fontSize: 11, color: "#2e2c29", fontWeight: 600, marginTop: 4 }}>Clientes em andamento aparecerão aqui.</div>
+                    <div style={{ fontSize: 13, fontWeight: 800, color: "#3a3730" }}>Nenhuma conversa aguardando agora</div>
+                    <div style={{ fontSize: 11, color: "#2e2c29", fontWeight: 600, marginTop: 4 }}>Conversas assumidas ficam em Conversas.</div>
+                    <button onClick={() => router.push("/conversas")} style={{ marginTop: 12, height: 30, padding: "0 14px", border: "1px solid #242220", borderRadius: 8, background: "transparent", color: "#5a564d", fontSize: 11, fontWeight: 800, fontFamily: "inherit" }}>
+                      Abrir Conversas
+                    </button>
                   </div>
                 ) : [...sessoes].sort((a, b) => {
                     // Urgente: precisa de humano imediato (botão Assumir agora)
@@ -1303,7 +1309,7 @@ export default function PedidosPage() {
                               disabled={assumindoSessao === s.phone}
                               onClick={e => { e.stopPropagation(); setSessaoAtiva(s.phone); assumirSessao(s.phone) }}
                             >
-                              {assumindoSessao === s.phone ? "..." : "Assumir agora"}
+                              {assumindoSessao === s.phone ? "..." : "Assumir e responder"}
                             </button>
                           ) : s.conversationAlert && !s.manual ? (
                             <span style={{ fontSize: 9, fontWeight: 900, color: "#f97316", background: "rgba(249,115,22,.08)", border: "1px solid rgba(249,115,22,.3)", padding: "2px 7px", borderRadius: 5, flexShrink: 0, whiteSpace: "nowrap" }}>
@@ -1372,7 +1378,7 @@ export default function PedidosPage() {
                         </div>
                       ) : s.postOrderPriority ? (
                         <button onClick={() => assumirSessao(s.phone)} disabled={assumindoSessao === s.phone} style={{ height: 30, padding: "0 12px", border: "2px solid #fbbf24", borderRadius: 8, background: "#fbbf24", color: "#060606", fontSize: 11, fontWeight: 900, flexShrink: 0, boxShadow: "0 0 10px rgba(251,191,36,.4)" }}>
-                          {assumindoSessao === s.phone ? "..." : "Assumir agora"}
+                          {assumindoSessao === s.phone ? "..." : "Assumir e responder"}
                         </button>
                       ) : (
                         <span style={{ fontSize: 11, color: "#3a3730", fontWeight: 700, flexShrink: 0 }}>Bot atendendo automaticamente</span>
@@ -1507,7 +1513,7 @@ export default function PedidosPage() {
                           <span style={{ fontSize: 12, color: "#fbbf24", fontWeight: 700 }}>Bot respondendo · clique em Atender se precisar intervir</span>
                         ) : (
                           <button onClick={() => assumirSessao(s.phone)} disabled={assumindoSessao === s.phone} style={{ height: 30, padding: "0 16px", border: "1px solid rgba(201,194,180,.15)", borderRadius: 8, background: "rgba(201,194,180,.06)", color: "#9a9590", fontSize: 12, fontWeight: 700 }}>
-                            {assumindoSessao === s.phone ? "..." : "Assumir atendimento"}
+                            {assumindoSessao === s.phone ? "..." : "Assumir e responder"}
                           </button>
                         )}
                       </div>
