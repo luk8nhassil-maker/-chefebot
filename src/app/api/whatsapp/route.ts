@@ -721,18 +721,19 @@ export async function POST(req: NextRequest) {
       await atualizarRascunhoVivo(phone, messageText);
       await redis.set(`nova_msg_manual:${phone}`, true, { ex: 3600 });
 
-      // Garante TTL de 3600s em manual:{phone} e session:{phone}.
+      // Garante TTL em manual:{phone} e session:{phone}.
       // Regra: enquanto manual=true, qualquer mensagem do cliente renova ambos.
       // atualizarRascunhoVivo salva a sessão com 1800s — re-lemos aqui para
       // garantir que pegamos a versão atualizada (com rascunho) e salvamos com
-      // 3600s. Se a sessão expirou (nula), criamos sessão mínima.
+      // 7200s (2h). manual:{phone} também recebe 7200s para suportar a janela
+      // de abandono de 2h definida em permanenciaTempoReal.
       const sessaoAtual = await redis.get(`session:${phone}`);
       await redis.set(
         `session:${phone}`,
         sessaoAtual ?? { step: 'escalado', cart: [], deliveryFee: 0, escalado: true },
-        { ex: 3600 },
+        { ex: 7200 },
       );
-      await redis.set(`manual:${phone}`, true, { ex: 3600 });
+      await redis.set(`manual:${phone}`, true, { ex: 7200 });
 
       return NextResponse.json({ ok: true });
     }
@@ -1016,7 +1017,8 @@ export async function POST(req: NextRequest) {
 
     if (result.escalar) {
       await salvarEscalonamento(phone, currentSession!);
-      await redis.set(`manual:${phone}`, true, { ex: 3600 });
+      // TTL de 7200s (2h) alinhado com a janela de abandono de atendimento humano.
+      await redis.set(`manual:${phone}`, true, { ex: 7200 });
       result.session = { ...result.session, clientePerdidoCount: 0 };
     } else {
       // Handoff automático por confusão consecutiva — 3 níveis:

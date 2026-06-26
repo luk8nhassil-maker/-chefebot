@@ -4,6 +4,7 @@ import { verifyToken } from '@/lib/auth'
 import { calcularResumoAtendimentoHumano } from '@/lib/resumoAtendimentoHumano'
 import { montarSessaoManualMinima } from '@/lib/sessaoTempoReal'
 import type { ConversaMeta } from '@/lib/conversasHistorico'
+import { deveExibirNoTempoReal } from '@/lib/permanenciaTempoReal'
 
 async function checkAuth(req: NextRequest) {
   const token = req.cookies.get('auth-token')?.value ?? null
@@ -72,11 +73,14 @@ export async function GET(req: NextRequest) {
 
       const postOrderPriority = !!(await redis.get(`postOrderPriority:${phone}`))
       const manual = !!(await redis.get(`manual:${phone}`))
-      // Sessões 'done' só aparecem se houver prioridade pós-pedido OU se estiverem
-      // em atendimento humano (manual=true). Sem a exceção manual, conversas
-      // assumidas com step='done' (ex.: pós-pedido que a Kellyne assumiu — assumir
-      // apaga postOrderPriority) sumiam do Tempo Real apesar de manual=true.
-      if (session.step === 'done' && !postOrderPriority && !manual) continue
+
+      // Regra de permanência: usa ultimaTs permanente de conversa_meta para
+      // decidir se a conversa ainda deve aparecer no Tempo Real. Isso substitui
+      // o filtro imediato de 'done' (que agora fica visível por 30 min) e
+      // acrescenta limites para pix (60 min), bot (40 min) e manual (2h).
+      // Histórico (conversa_full / conversa_meta) nunca é apagado por esta regra.
+      const meta = await redis.get<ConversaMeta>(`conversa_meta:${phone}`)
+      if (!deveExibirNoTempoReal({ step: session.step, manual, postOrderPriority, ultimaTs: meta?.ultimaTs ?? 0 })) continue
 
       const conversationAlert = !!(await redis.get(`conversationAlert:${phone}`))
       const ultimaMensagem = await redis.get<string>(`ultima_msg:${phone}`)
@@ -124,6 +128,12 @@ export async function GET(req: NextRequest) {
       if (!manual) continue
 
       const meta = await redis.get<ConversaMeta>(`conversa_meta:${phone}`)
+
+      // Aplica regra de permanência: conversas manuais sem sessão some após 2h
+      // de inatividade. Não deleta manual:{phone} — preserva o fluxo de retorno
+      // do atendimento humano caso o cliente mande nova mensagem.
+      if (!deveExibirNoTempoReal({ step: 'manual', manual: true, postOrderPriority: false, ultimaTs: meta?.ultimaTs ?? 0 })) continue
+
       const ultimaMensagem =
         (await redis.get<string>(`ultima_msg:${phone}`)) ?? meta?.ultimaMensagem ?? null
       const conversationAlert = !!(await redis.get(`conversationAlert:${phone}`))
