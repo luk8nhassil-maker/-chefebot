@@ -426,7 +426,7 @@ export default function PedidosPage() {
   useEffect(() => {
     if (filtro !== "tempo_real") return
     const carregarSessoes = () => {
-      fetch("/api/sessoes-ativas")
+      fetch(`/api/sessoes-ativas?t=${Date.now()}`, { cache: "no-store" })
         .then(r => r.ok ? r.json() : [])
         .then(d => {
           if (Array.isArray(d)) {
