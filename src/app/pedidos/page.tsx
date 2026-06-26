@@ -250,6 +250,7 @@ export default function PedidosPage() {
   const chatMsgAreaRef = useRef<HTMLDivElement>(null)
   const isNearBottomRef = useRef(true)
   const prevMsgCountRef = useRef(0)
+  const shouldScrollOnOpenRef = useRef(false)
   const [novasMsgCount, setNovasMsgCount] = useState(0)
 
   const tocarSomNormal = () => {
@@ -436,6 +437,16 @@ export default function PedidosPage() {
     }
   }, [filtro])
 
+  // Reseta o estado de scroll toda vez que a conversa aberta muda,
+  // independente do caminho que ativou a mudança (onClick, "Assumir agora", etc.)
+  useEffect(() => {
+    if (!sessaoAtiva) return
+    shouldScrollOnOpenRef.current = true
+    isNearBottomRef.current = true
+    prevMsgCountRef.current = 0
+    setNovasMsgCount(0)
+  }, [sessaoAtiva])
+
   useEffect(() => {
     if (!sessaoAtiva || filtro !== "tempo_real") return
     carregarHistoricoConversa(sessaoAtiva)
@@ -444,23 +455,32 @@ export default function PedidosPage() {
   }, [sessaoAtiva, filtro])
 
   useEffect(() => {
-    const prevCount = prevMsgCountRef.current
     const currentCount = historicoMsgs.length
-    const delta = currentCount - prevCount
 
-    prevMsgCountRef.current = currentCount
-
-    if (currentCount === 0) return
-
-    // Primeira carga da conversa: vai direto para o final sem mostrar balão
-    if (prevCount === 0) {
-      historicoBottomRef.current?.scrollIntoView({ behavior: "auto" })
-      setNovasMsgCount(0)
+    if (currentCount === 0) {
       return
     }
 
-    // Polling sem mensagem nova (ou histórico menor/resetado): não mexe no scroll
-    if (delta <= 0) return
+    // Scroll de abertura: só dispara quando sessaoAtiva mudou explicitamente.
+    // Nunca acionado por polling com array vazio ou qualquer outra fonte.
+    if (shouldScrollOnOpenRef.current) {
+      shouldScrollOnOpenRef.current = false
+      prevMsgCountRef.current = currentCount
+      setNovasMsgCount(0)
+      requestAnimationFrame(() => {
+        historicoBottomRef.current?.scrollIntoView({ behavior: "auto" })
+      })
+      return
+    }
+
+    const prevCount = prevMsgCountRef.current
+    const delta = currentCount - prevCount
+    prevMsgCountRef.current = currentCount
+
+    // Polling sem mensagem nova ou histórico encolheu: não mexe no scroll
+    if (delta <= 0) {
+      return
+    }
 
     if (isNearBottomRef.current) {
       historicoBottomRef.current?.scrollIntoView({ behavior: "smooth" })
