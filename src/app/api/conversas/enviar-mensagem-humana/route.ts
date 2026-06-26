@@ -85,10 +85,10 @@ export async function POST(req: NextRequest) {
 
   // Renova TTL de manual e session enquanto o atendimento está ativo.
   // Previne que o flag manual expire durante conversas longas e o bot reassuma.
-  await redis.set(`manual:${phone}`, true, { ex: 3600 });
+  await redis.set(`manual:${phone}`, true, { ex: 7200 });
   const sessaoEnvio = await redis.get(`session:${phone}`);
   if (sessaoEnvio) {
-    await redis.set(`session:${phone}`, sessaoEnvio, { ex: 3600 });
+    await redis.set(`session:${phone}`, sessaoEnvio, { ex: 7200 });
   }
 
   return NextResponse.json({ ok: true, senderName, phone });
