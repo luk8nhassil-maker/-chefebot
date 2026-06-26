@@ -632,6 +632,7 @@ export async function POST(req: NextRequest) {
       await enviarMensagem(phone, `Recebi seu áudio! 😊 Já chamo alguém para te atender melhor. Um instante!`)
       const sessionAudio = await redis.get<BotSession>(`session:${phone}`) || { step: "escalado" as any, cart: [], deliveryFee: 0 }
       await salvarEscalonamento(phone, sessionAudio)
+      await redis.set(`postOrderPriority:${phone}`, true, { ex: 3600 })
       return NextResponse.json({ ok: true })
     }
 
