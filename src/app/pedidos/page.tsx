@@ -175,12 +175,39 @@ export default function PedidosPage() {
   const [pedidos, setPedidos] = useState<Pedido[]>([])
   const [filtro, setFiltro] = useState<Status | "todos" | "tempo_real" | "arquivados">("novo")
   const [sessoes, setSessoes] = useState<any[]>([])
-  const [seenConversas, setSeenConversas] = useState<Set<string>>(new Set())
+  // Visto-até por telefone: guarda o timestamp da última mensagem que a Kellyne
+  // já viu. "Visto" é por timestamp, não só por telefone — assim uma NOVA mensagem
+  // no mesmo telefone (ts maior) volta a destacar mesmo após a conversa ter sido aberta.
+  const [seenConversas, setSeenConversas] = useState<Record<string, number>>({})
   // Fonte única de verdade: usada tanto no sort (subir ao topo) quanto no
   // render do badge verde. Garante que "sobe" e "mostra bolinha" nunca divirjam.
   const getPhoneKey = (s: any) => s.phone || s.telefone || ""
-  const temNovaMsgNaoVista = (s: any) =>
-    Boolean(s.novaMsgManual && !seenConversas.has(getPhoneKey(s)))
+  const getSessaoTs = (s: any) => {
+    const raw =
+      s.ultimaTs ?? s.lastMessageAt ?? s.updatedAt ?? s.timestamp ?? s.createdAt ?? 0
+    if (typeof raw === "number") return raw
+    const parsed = Date.parse(raw)
+    return Number.isNaN(parsed) ? 0 : parsed
+  }
+  const temNovaMsgNaoVista = (s: any) => {
+    const ultimaTs = getSessaoTs(s)
+    const vistoAte = seenConversas[getPhoneKey(s)] ?? 0
+    return Boolean(s.novaMsgManual && ultimaTs > vistoAte)
+  }
+  // Marca a conversa como vista até o ts atual da sessão (e persiste em localStorage).
+  // Idempotente: se nada novo a marcar, devolve o estado anterior (sem re-render/loop).
+  const marcarConversaComoVista = (s: any) => {
+    const phone = getPhoneKey(s)
+    if (!phone) return
+    const ts = getSessaoTs(s)
+    setSeenConversas(prev => {
+      const atual = prev[phone] ?? 0
+      if (ts <= atual) return prev
+      const next = { ...prev, [phone]: ts }
+      try { localStorage.setItem("tempoRealSeenConversas", JSON.stringify(next)) } catch {}
+      return next
+    })
+  }
   const [assumindoSessao, setAssumindoSessao] = useState<string | null>(null)
   const [devolvendoSessaoBot, setDevolvendoSessaoBot] = useState<string | null>(null)
   const [revivendoConversa, setRevivendoConversa] = useState<string | null>(null)
@@ -431,15 +458,6 @@ export default function PedidosPage() {
         .then(d => {
           if (Array.isArray(d)) {
             setSessoes(d)
-            // Limpa seenConversas para phones onde novaMsgManual voltou a false
-            // (Kellyne respondeu ou TTL expirou), permitindo destacar nova mensagem futura
-            setSeenConversas(prev => {
-              const next = new Set(prev)
-              for (const s of d) {
-                if (!s.novaMsgManual && next.has(s.phone)) next.delete(s.phone)
-              }
-              return next.size === prev.size ? prev : next
-            })
           } else {
             setSessoes([])
           }
@@ -450,6 +468,27 @@ export default function PedidosPage() {
     const iv = setInterval(carregarSessoes, 3000)
     return () => clearInterval(iv)
   }, [filtro])
+
+  // Hidrata o "visto-até" do localStorage no mount, para que após F5 uma
+  // mensagem já aberta não reapareça como nova.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("tempoRealSeenConversas")
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        if (parsed && typeof parsed === "object") setSeenConversas(parsed)
+      }
+    } catch {}
+  }, [])
+
+  // Se a conversa aberta recebe nova mensagem, marca como vista automaticamente
+  // (Kellyne está olhando aquela conversa). Roda com valores frescos de sessoes/
+  // sessaoAtiva; marcarConversaComoVista é idempotente, então não gera loop.
+  useEffect(() => {
+    if (!sessaoAtiva) return
+    const ativa = sessoes.find(s => getPhoneKey(s) === sessaoAtiva)
+    if (ativa) marcarConversaComoVista(ativa)
+  }, [sessoes, sessaoAtiva])
 
   useEffect(() => {
     if (filtro !== "tempo_real") {
@@ -1321,7 +1360,7 @@ export default function PedidosPage() {
                       key={s.phone}
                       style={{ position: "relative" }}
                       className={`cb-chat-item${isActive ? " cb-chat-item-active" : ""}${s.postOrderPriority && !s.manual ? " cb-chat-item-urgente" : s.conversationAlert && !s.manual ? " cb-chat-item-alerta" : hasNovaMsg ? " cb-chat-item-nova-msg" : ""}`}
-                      onClick={() => { setSessaoAtiva(s.phone); setSeenConversas(prev => { const n = new Set(prev); n.add(s.phone); return n }); isNearBottomRef.current = true; prevMsgCountRef.current = 0; setNovasMsgCount(0) }}
+                      onClick={() => { setSessaoAtiva(s.phone); marcarConversaComoVista(s); isNearBottomRef.current = true; prevMsgCountRef.current = 0; setNovasMsgCount(0) }}
                     >
                       {hasNovaMsg && (
                         <span
