@@ -9,6 +9,7 @@ import {
   fallbackDeterministicoMelhorado,
   avaliarHandoffPorConfusao,
   deveMarcarPrioridadePosPedido,
+  houveAvancoReal,
 } from "./fallbackInteligente";
 import { processMessage, createInitialSession, type BotSession } from "./bot";
 
@@ -138,6 +139,116 @@ describe("avaliarHandoffPorConfusao", () => {
     const r = avaliarHandoffPorConfusao(2, false);
     expect(r.nivel).toBe('none');
     expect(r.novoContador).toBe(0);
+  });
+});
+
+// ─── houveAvancoReal ──────────────────────────────────────────────────────────
+describe("houveAvancoReal", () => {
+  const cartVazio: BotSession['cart'] = [];
+  const cartComItem: BotSession['cart'] = [
+    { category: 'pizza', name: 'Pizza', size: 'G', flavor: 'Calabresa', border: 'Sem borda', price: 50 },
+  ];
+
+  it("step 'escalado' → sempre true (sessão travada não acumula alerta)", () => {
+    const s = { ...createInitialSession(), step: 'escalado' as any, cart: cartVazio };
+    expect(houveAvancoReal(s, s)).toBe(true);
+  });
+
+  it("step mudou → true", () => {
+    const antes = { ...createInitialSession(), step: 'returning' as any, cart: cartVazio };
+    const depois = { ...createInitialSession(), step: 'category' as any, cart: cartVazio };
+    expect(houveAvancoReal(antes, depois)).toBe(true);
+  });
+
+  it("item adicionado ao carrinho → true", () => {
+    const antes = { ...createInitialSession(), step: 'size' as any, cart: cartVazio };
+    const depois = { ...createInitialSession(), step: 'size' as any, cart: cartComItem };
+    expect(houveAvancoReal(antes, depois)).toBe(true);
+  });
+
+  it("deliveryType preenchido → true", () => {
+    const antes = { ...createInitialSession(), step: 'delivery_type' as any, cart: cartVazio };
+    const depois = { ...antes, deliveryType: 'delivery' as any };
+    expect(houveAvancoReal(antes, depois)).toBe(true);
+  });
+
+  it("neighborhood preenchido → true", () => {
+    const antes = { ...createInitialSession(), step: 'neighborhood' as any, cart: cartVazio };
+    const depois = { ...antes, neighborhood: 'Centro' };
+    expect(houveAvancoReal(antes, depois)).toBe(true);
+  });
+
+  it("deliveryFee preenchido → true", () => {
+    const antes = { ...createInitialSession(), step: 'neighborhood' as any, cart: cartVazio, deliveryFee: 0 };
+    const depois = { ...antes, deliveryFee: 5 };
+    expect(houveAvancoReal(antes, depois)).toBe(true);
+  });
+
+  it("paymentMethod preenchido → true", () => {
+    const antes = { ...createInitialSession(), step: 'payment' as any, cart: cartComItem };
+    const depois = { ...antes, paymentMethod: 'Pix' as any };
+    expect(houveAvancoReal(antes, depois)).toBe(true);
+  });
+
+  it("customerName preenchido → true", () => {
+    const antes = { ...createInitialSession(), step: 'name' as any, cart: cartVazio };
+    const depois = { ...antes, customerName: 'Lucas' };
+    expect(houveAvancoReal(antes, depois)).toBe(true);
+  });
+
+  it("step igual, sem mudança de campo → false (sem avanço real)", () => {
+    const s = { ...createInitialSession(), step: 'returning' as any, cart: cartVazio };
+    expect(houveAvancoReal(s, s)).toBe(false);
+  });
+
+  // ── Cenários do bug: "Jjj" repetido em 'returning' ──────────────────────────
+
+  it("1ª repetição sem avanço em 'returning' → semAvancoProblematico=true → nivel 'none', contador=1", () => {
+    const antes = { ...createInitialSession(), step: 'returning' as any, cart: cartVazio };
+    const depois = { ...createInitialSession(), step: 'returning' as any, cart: cartVazio };
+    const semAvancoProblematico = antes.step !== 'escalado' && !houveAvancoReal(antes, depois);
+    expect(semAvancoProblematico).toBe(true);
+    const r = avaliarHandoffPorConfusao(0, semAvancoProblematico);
+    expect(r.nivel).toBe('none');
+    expect(r.novoContador).toBe(1);
+  });
+
+  it("2ª repetição sem avanço em 'returning' → nivel 'alert'", () => {
+    const antes = { ...createInitialSession(), step: 'returning' as any, cart: cartVazio };
+    const depois = { ...createInitialSession(), step: 'returning' as any, cart: cartVazio };
+    const semAvancoProblematico = antes.step !== 'escalado' && !houveAvancoReal(antes, depois);
+    const r = avaliarHandoffPorConfusao(1, semAvancoProblematico);
+    expect(r.nivel).toBe('alert');
+    expect(r.novoContador).toBe(2);
+  });
+
+  it("3ª repetição sem avanço em 'returning' → nivel 'urgent'", () => {
+    const antes = { ...createInitialSession(), step: 'returning' as any, cart: cartVazio };
+    const depois = { ...createInitialSession(), step: 'returning' as any, cart: cartVazio };
+    const semAvancoProblematico = antes.step !== 'escalado' && !houveAvancoReal(antes, depois);
+    const r = avaliarHandoffPorConfusao(2, semAvancoProblematico);
+    expect(r.nivel).toBe('urgent');
+    expect(r.novoContador).toBe(0);
+  });
+
+  it("entrada válida em 'returning' que avança step → houveAvancoReal=true → não conta dificuldade", () => {
+    const antes = { ...createInitialSession(), step: 'returning' as any, cart: cartVazio };
+    const depois = { ...createInitialSession(), step: 'category' as any, cart: cartVazio };
+    expect(houveAvancoReal(antes, depois)).toBe(true);
+    // Mesmo com contador alto, avanço real reseta tudo
+    const r = avaliarHandoffPorConfusao(2, false);
+    expect(r.nivel).toBe('none');
+    expect(r.novoContador).toBe(0);
+  });
+
+  it("avanço real preserva carrinho e dados da sessão (função pura)", () => {
+    const antes = { ...createInitialSession(), step: 'returning' as any, cart: cartComItem, customerName: 'Lucas' };
+    const depois = { ...antes, step: 'category' as any };
+    expect(houveAvancoReal(antes, depois)).toBe(true);
+    // Dados não foram apagados — função só lê, não altera
+    expect(antes.cart).toEqual(cartComItem);
+    expect(antes.customerName).toBe('Lucas');
+    expect(depois.cart).toEqual(cartComItem);
   });
 });
 
