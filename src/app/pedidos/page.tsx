@@ -247,6 +247,11 @@ export default function PedidosPage() {
   const simpleToastTimerRef = useRef<any>(null)
   const historicoBottomRef = useRef<HTMLDivElement>(null)
   const sendInFlightRef = useRef(false)
+  const chatMsgAreaRef = useRef<HTMLDivElement>(null)
+  const isNearBottomRef = useRef(true)
+  const prevMsgCountRef = useRef(0)
+  const shouldScrollOnOpenRef = useRef(false)
+  const [novasMsgCount, setNovasMsgCount] = useState(0)
 
   const tocarSomNormal = () => {
     if (muteadoRef.current) return
@@ -432,6 +437,16 @@ export default function PedidosPage() {
     }
   }, [filtro])
 
+  // Reseta o estado de scroll toda vez que a conversa aberta muda,
+  // independente do caminho que ativou a mudança (onClick, "Assumir agora", etc.)
+  useEffect(() => {
+    if (!sessaoAtiva) return
+    shouldScrollOnOpenRef.current = true
+    isNearBottomRef.current = true
+    prevMsgCountRef.current = 0
+    setNovasMsgCount(0)
+  }, [sessaoAtiva])
+
   useEffect(() => {
     if (!sessaoAtiva || filtro !== "tempo_real") return
     carregarHistoricoConversa(sessaoAtiva)
@@ -440,7 +455,39 @@ export default function PedidosPage() {
   }, [sessaoAtiva, filtro])
 
   useEffect(() => {
-    historicoBottomRef.current?.scrollIntoView({ behavior: "smooth" })
+    const currentCount = historicoMsgs.length
+
+    if (currentCount === 0) {
+      return
+    }
+
+    // Scroll de abertura: só dispara quando sessaoAtiva mudou explicitamente.
+    // Nunca acionado por polling com array vazio ou qualquer outra fonte.
+    if (shouldScrollOnOpenRef.current) {
+      shouldScrollOnOpenRef.current = false
+      prevMsgCountRef.current = currentCount
+      setNovasMsgCount(0)
+      requestAnimationFrame(() => {
+        historicoBottomRef.current?.scrollIntoView({ behavior: "auto" })
+      })
+      return
+    }
+
+    const prevCount = prevMsgCountRef.current
+    const delta = currentCount - prevCount
+    prevMsgCountRef.current = currentCount
+
+    // Polling sem mensagem nova ou histórico encolheu: não mexe no scroll
+    if (delta <= 0) {
+      return
+    }
+
+    if (isNearBottomRef.current) {
+      historicoBottomRef.current?.scrollIntoView({ behavior: "smooth" })
+      setNovasMsgCount(0)
+    } else {
+      setNovasMsgCount(c => c + delta)
+    }
   }, [historicoMsgs])
 
   const limparHistorico = async () => {
@@ -483,8 +530,10 @@ export default function PedidosPage() {
   const assumirSessao = async (phone: string) => {
     setAssumindoSessao(phone)
     try {
-      await fetch("/api/assumir", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ telefone: phone }) })
-      setSessoes(prev => prev.map(s => s.phone === phone ? { ...s, manual: true, postOrderPriority: false } : s))
+      const r = await fetch("/api/assumir", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ telefone: phone }) })
+      if (r.ok) {
+        setSessoes(prev => prev.map(s => s.phone === phone ? { ...s, manual: true, postOrderPriority: false } : s))
+      }
     } catch {}
     setAssumindoSessao(null)
   }
@@ -526,6 +575,8 @@ export default function PedidosPage() {
       const data = await r.json()
       if (data.ok) {
         setMensagemHumana(prev => ({ ...prev, [phone]: "" }))
+        isNearBottomRef.current = true
+        setNovasMsgCount(0)
         setHistoricoMsgs(prev => [...prev, { autor: "atendente", texto: `[${userName || "Kellyne"}] ${texto}`, ts: Date.now() }])
       } else {
         setErroEnvioMensagem(prev => ({ ...prev, [phone]: data.error || "Erro ao enviar." }))
@@ -1218,18 +1269,21 @@ export default function PedidosPage() {
                   <div style={{ padding: "40px 16px", textAlign: "center" }}>
                     <div style={{ fontSize: 26, marginBottom: 8 }}>⚡</div>
                     <div style={{ fontSize: 13, fontWeight: 800, color: "#3a3730" }}>Nenhuma conversa ativa</div>
-                    <div style={{ fontSize: 11, color: "#2e2c29", fontWeight: 600, marginTop: 4 }}>Clientes em andamento aparecerão aqui.</div>
                   </div>
                 ) : [...sessoes].sort((a, b) => {
                     // Urgente: precisa de humano imediato (botão Assumir agora)
-                    const aUrgente = (a.postOrderPriority && !a.manual) ? 3 : 0;
-                    const bUrgente = (b.postOrderPriority && !b.manual) ? 3 : 0;
+                    const aUrgente = (a.postOrderPriority && !a.manual) ? 4 : 0;
+                    const bUrgente = (b.postOrderPriority && !b.manual) ? 4 : 0;
                     if (bUrgente !== aUrgente) return bUrgente - aUrgente;
                     // Alerta: 2ª confusão consecutiva, bot ainda conduz
-                    const aAlerta = (a.conversationAlert && !a.manual && !a.postOrderPriority) ? 2 : 0;
-                    const bAlerta = (b.conversationAlert && !b.manual && !b.postOrderPriority) ? 2 : 0;
+                    const aAlerta = (a.conversationAlert && !a.manual && !a.postOrderPriority) ? 3 : 0;
+                    const bAlerta = (b.conversationAlert && !b.manual && !b.postOrderPriority) ? 3 : 0;
                     if (bAlerta !== aAlerta) return bAlerta - aAlerta;
-                    // Já assumido → terceiro
+                    // Manual com nova mensagem do cliente (não lida)
+                    const aNovaMsg = (a.manual && a.novaMsgManual) ? 2 : 0;
+                    const bNovaMsg = (b.manual && b.novaMsgManual) ? 2 : 0;
+                    if (bNovaMsg !== aNovaMsg) return bNovaMsg - aNovaMsg;
+                    // Já assumido, aguardando
                     if (Number(!!b.manual) !== Number(!!a.manual)) return Number(!!b.manual) - Number(!!a.manual);
                     return 0;
                   }).map(s => {
@@ -1240,7 +1294,7 @@ export default function PedidosPage() {
                     <button
                       key={s.phone}
                       className={`cb-chat-item${isActive ? " cb-chat-item-active" : ""}${s.postOrderPriority && !s.manual ? " cb-chat-item-urgente" : s.conversationAlert && !s.manual ? " cb-chat-item-alerta" : ""}`}
-                      onClick={() => setSessaoAtiva(s.phone)}
+                      onClick={() => { setSessaoAtiva(s.phone); isNearBottomRef.current = true; prevMsgCountRef.current = 0; setNovasMsgCount(0) }}
                     >
                       <div style={{ width: 38, height: 38, borderRadius: "50%", flexShrink: 0, background: s.manual ? "rgba(239,68,68,.13)" : s.postOrderPriority ? "rgba(251,191,36,.13)" : "rgba(255,107,0,.1)", border: `1.5px solid ${s.manual ? "rgba(239,68,68,.3)" : s.postOrderPriority ? "rgba(251,191,36,.3)" : "rgba(255,107,0,.25)"}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 900, color: s.manual ? "#ef4444" : s.postOrderPriority ? "#fbbf24" : "#ff6b00" }}>
                         {initial}
@@ -1254,15 +1308,15 @@ export default function PedidosPage() {
                               disabled={assumindoSessao === s.phone}
                               onClick={e => { e.stopPropagation(); setSessaoAtiva(s.phone); assumirSessao(s.phone) }}
                             >
-                              {assumindoSessao === s.phone ? "..." : "Assumir agora"}
+                              {assumindoSessao === s.phone ? "..." : "Assumir e responder"}
                             </button>
                           ) : s.conversationAlert && !s.manual ? (
                             <span style={{ fontSize: 9, fontWeight: 900, color: "#f97316", background: "rgba(249,115,22,.08)", border: "1px solid rgba(249,115,22,.3)", padding: "2px 7px", borderRadius: 5, flexShrink: 0, whiteSpace: "nowrap" }}>
                               ⚠ Atenção
                             </span>
                           ) : (
-                            <span style={{ fontSize: 9, fontWeight: 900, color: s.manual ? "#ef4444" : "#34d399", background: s.manual ? "rgba(239,68,68,.08)" : "rgba(52,211,153,.08)", border: `1px solid ${s.manual ? "rgba(239,68,68,.25)" : "rgba(52,211,153,.2)"}`, padding: "2px 7px", borderRadius: 5, flexShrink: 0, whiteSpace: "nowrap" }}>
-                              {s.manual ? "Você atendendo" : "Bot atendendo"}
+                            <span style={{ fontSize: 9, fontWeight: 900, color: s.manual && s.novaMsgManual ? "#f97316" : s.manual ? "#ef4444" : "#34d399", background: s.manual && s.novaMsgManual ? "rgba(249,115,22,.12)" : s.manual ? "rgba(239,68,68,.08)" : "rgba(52,211,153,.08)", border: `1px solid ${s.manual && s.novaMsgManual ? "rgba(249,115,22,.45)" : s.manual ? "rgba(239,68,68,.25)" : "rgba(52,211,153,.2)"}`, padding: "2px 7px", borderRadius: 5, flexShrink: 0, whiteSpace: "nowrap" }}>
+                              {s.manual && s.novaMsgManual ? "● Cliente respondeu" : s.manual ? "Em atendimento" : "Bot atendendo"}
                             </span>
                           )}
                         </div>
@@ -1323,7 +1377,7 @@ export default function PedidosPage() {
                         </div>
                       ) : s.postOrderPriority ? (
                         <button onClick={() => assumirSessao(s.phone)} disabled={assumindoSessao === s.phone} style={{ height: 30, padding: "0 12px", border: "2px solid #fbbf24", borderRadius: 8, background: "#fbbf24", color: "#060606", fontSize: 11, fontWeight: 900, flexShrink: 0, boxShadow: "0 0 10px rgba(251,191,36,.4)" }}>
-                          {assumindoSessao === s.phone ? "..." : "Assumir agora"}
+                          {assumindoSessao === s.phone ? "..." : "Assumir e responder"}
                         </button>
                       ) : (
                         <span style={{ fontSize: 11, color: "#3a3730", fontWeight: 700, flexShrink: 0 }}>Bot atendendo automaticamente</span>
@@ -1341,7 +1395,17 @@ export default function PedidosPage() {
                     )}
 
                     {/* Área de mensagens */}
-                    <div className="cb-chat-msg-area">
+                    <div
+                      ref={chatMsgAreaRef}
+                      className="cb-chat-msg-area"
+                      onScroll={() => {
+                        const el = chatMsgAreaRef.current
+                        if (!el) return
+                        const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120
+                        isNearBottomRef.current = nearBottom
+                        if (nearBottom && novasMsgCount > 0) setNovasMsgCount(0)
+                      }}
+                    >
                       {historicoMsgs.length === 0 ? (
                         <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "flex-end", paddingBottom: 8 }}>
                           {s.ultimaMensagem ? (
@@ -1376,6 +1440,35 @@ export default function PedidosPage() {
                           </div>
                         )
                       })}
+                      {novasMsgCount > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            historicoBottomRef.current?.scrollIntoView({ behavior: "smooth" })
+                            isNearBottomRef.current = true
+                            setNovasMsgCount(0)
+                          }}
+                          style={{
+                            position: "sticky",
+                            bottom: 10,
+                            alignSelf: "center",
+                            background: "#25d366",
+                            color: "#fff",
+                            border: 0,
+                            borderRadius: 20,
+                            padding: "5px 14px",
+                            fontSize: 12,
+                            fontWeight: 900,
+                            cursor: "pointer",
+                            boxShadow: "0 2px 10px rgba(0,0,0,.4)",
+                            userSelect: "none",
+                            zIndex: 5,
+                            fontFamily: "inherit",
+                          }}
+                        >
+                          {novasMsgCount === 1 ? "1 nova mensagem" : `${novasMsgCount} novas mensagens`} ↓
+                        </button>
+                      )}
                       <div ref={historicoBottomRef} />
                     </div>
 
@@ -1419,7 +1512,7 @@ export default function PedidosPage() {
                           <span style={{ fontSize: 12, color: "#fbbf24", fontWeight: 700 }}>Bot respondendo · clique em Atender se precisar intervir</span>
                         ) : (
                           <button onClick={() => assumirSessao(s.phone)} disabled={assumindoSessao === s.phone} style={{ height: 30, padding: "0 16px", border: "1px solid rgba(201,194,180,.15)", borderRadius: 8, background: "rgba(201,194,180,.06)", color: "#9a9590", fontSize: 12, fontWeight: 700 }}>
-                            {assumindoSessao === s.phone ? "..." : "Assumir atendimento"}
+                            {assumindoSessao === s.phone ? "..." : "Assumir e responder"}
                           </button>
                         )}
                       </div>

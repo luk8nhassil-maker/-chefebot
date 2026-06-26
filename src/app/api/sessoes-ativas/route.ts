@@ -68,12 +68,16 @@ export async function GET(req: NextRequest) {
       if (STEPS_SEMPRE_IGNORADOS.includes(session.step)) continue
 
       const postOrderPriority = !!(await redis.get(`postOrderPriority:${phone}`))
-      // Sessões 'done' só aparecem se houver prioridade pós-pedido.
-      if (session.step === 'done' && !postOrderPriority) continue
-
       const manual = !!(await redis.get(`manual:${phone}`))
+      // Sessões 'done' só aparecem se houver prioridade pós-pedido OU se estiverem
+      // em atendimento humano (manual=true). Sem a exceção manual, conversas
+      // assumidas com step='done' (ex.: pós-pedido que a Kellyne assumiu — assumir
+      // apaga postOrderPriority) sumiam do Tempo Real apesar de manual=true.
+      if (session.step === 'done' && !postOrderPriority && !manual) continue
+
       const conversationAlert = !!(await redis.get(`conversationAlert:${phone}`))
       const ultimaMensagem = await redis.get<string>(`ultima_msg:${phone}`)
+      const novaMsgManual = manual && !!(await redis.get(`nova_msg_manual:${phone}`))
 
       const cartResumo = (session.cart || []).map((i: any) => {
         const parts = [i.name]
@@ -95,6 +99,7 @@ export async function GET(req: NextRequest) {
         manual,
         postOrderPriority,
         conversationAlert,
+        novaMsgManual,
         ultimaMensagem: ultimaMensagem ?? null,
         customerName: session.customerName ?? null,
         resumoRapido,

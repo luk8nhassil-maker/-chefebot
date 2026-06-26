@@ -23,5 +23,13 @@ export async function POST(req: NextRequest) {
   await redis.set(`manual:${phoneFormatado}`, true, { ex: 3600 })
   await redis.del(`postOrderPriority:${phoneFormatado}`)
 
+  // Renova o TTL da sessão para 3600s (igual ao flag manual).
+  // Sem isso, session:{phone} pode expirar antes do atendimento terminar
+  // (TTL padrão do bot é 1800s) e a conversa some do Tempo Real.
+  const sessaoAtual = await redis.get(`session:${phoneFormatado}`)
+  if (sessaoAtual) {
+    await redis.set(`session:${phoneFormatado}`, sessaoAtual, { ex: 3600 })
+  }
+
   return NextResponse.json({ ok: true })
 }
