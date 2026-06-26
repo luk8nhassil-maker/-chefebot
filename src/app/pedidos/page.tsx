@@ -176,6 +176,11 @@ export default function PedidosPage() {
   const [filtro, setFiltro] = useState<Status | "todos" | "tempo_real" | "arquivados">("novo")
   const [sessoes, setSessoes] = useState<any[]>([])
   const [seenConversas, setSeenConversas] = useState<Set<string>>(new Set())
+  // Fonte única de verdade: usada tanto no sort (subir ao topo) quanto no
+  // render do badge verde. Garante que "sobe" e "mostra bolinha" nunca divirjam.
+  const getPhoneKey = (s: any) => s.phone || s.telefone || ""
+  const temNovaMsgNaoVista = (s: any) =>
+    Boolean(s.novaMsgManual && !seenConversas.has(getPhoneKey(s)))
   const [assumindoSessao, setAssumindoSessao] = useState<string | null>(null)
   const [devolvendoSessaoBot, setDevolvendoSessaoBot] = useState<string | null>(null)
   const [revivendoConversa, setRevivendoConversa] = useState<string | null>(null)
@@ -1291,8 +1296,8 @@ export default function PedidosPage() {
                   </div>
                 ) : [...sessoes].sort((a, b) => {
                     // 1. Nova mensagem não vista: sobe ao topo imediatamente
-                    const aNova = (a.manual && a.novaMsgManual && !seenConversas.has(a.phone)) ? 1 : 0;
-                    const bNova = (b.manual && b.novaMsgManual && !seenConversas.has(b.phone)) ? 1 : 0;
+                    const aNova = temNovaMsgNaoVista(a) ? 1 : 0;
+                    const bNova = temNovaMsgNaoVista(b) ? 1 : 0;
                     if (bNova !== aNova) return bNova - aNova;
                     // 2. Urgente: precisa de humano imediato (botão Assumir agora)
                     const aUrgente = (a.postOrderPriority && !a.manual) ? 1 : 0;
@@ -1310,14 +1315,22 @@ export default function PedidosPage() {
                   const displayName = s.customerName || `…${s.lastDigits}`
                   const initial = ((s.customerName || s.lastDigits || "?")[0]).toUpperCase()
                   const isActive = sessaoAtiva === s.phone
-                  const phone = s.phone || s.telefone || ""
-                  const hasNovaMsg = Boolean(s.novaMsgManual && !seenConversas.has(phone))
+                  const hasNovaMsg = temNovaMsgNaoVista(s)
                   return (
                     <button
                       key={s.phone}
+                      style={{ position: "relative" }}
                       className={`cb-chat-item${isActive ? " cb-chat-item-active" : ""}${s.postOrderPriority && !s.manual ? " cb-chat-item-urgente" : s.conversationAlert && !s.manual ? " cb-chat-item-alerta" : hasNovaMsg ? " cb-chat-item-nova-msg" : ""}`}
                       onClick={() => { setSessaoAtiva(s.phone); setSeenConversas(prev => { const n = new Set(prev); n.add(s.phone); return n }); isNearBottomRef.current = true; prevMsgCountRef.current = 0; setNovasMsgCount(0) }}
                     >
+                      {hasNovaMsg && (
+                        <span
+                          title="Nova mensagem"
+                          style={{ position: "absolute", right: 12, bottom: 10, zIndex: 20, minWidth: 20, height: 20, borderRadius: 10, background: "#22c55e", color: "#fff", fontSize: 11, fontWeight: 900, display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "0 5px", lineHeight: 1, boxShadow: "0 1px 4px rgba(0,0,0,.4)" }}
+                        >
+                          1
+                        </span>
+                      )}
                       <div style={{ width: 38, height: 38, borderRadius: "50%", flexShrink: 0, background: s.manual ? "rgba(239,68,68,.13)" : s.postOrderPriority ? "rgba(251,191,36,.13)" : "rgba(255,107,0,.1)", border: `1.5px solid ${s.manual ? "rgba(239,68,68,.3)" : s.postOrderPriority ? "rgba(251,191,36,.3)" : "rgba(255,107,0,.25)"}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 900, color: s.manual ? "#ef4444" : s.postOrderPriority ? "#fbbf24" : "#ff6b00" }}>
                         {initial}
                       </div>
@@ -1346,15 +1359,8 @@ export default function PedidosPage() {
                             </span>
                           )}
                         </div>
-                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          <div style={{ flex: 1, minWidth: 0, fontSize: 11, color: hasNovaMsg ? "#b8f5c8" : "#4a4640", fontWeight: hasNovaMsg ? 800 : 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                            {s.ultimaMensagem || s.stepLabel || "—"}
-                          </div>
-                          {hasNovaMsg && (
-                            <span style={{ flexShrink: 0, minWidth: 20, height: 20, borderRadius: 10, background: "#22c55e", color: "#fff", fontSize: 11, fontWeight: 900, display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "0 5px", lineHeight: 1 }}>
-                              1
-                            </span>
-                          )}
+                        <div style={{ fontSize: 11, color: hasNovaMsg ? "#b8f5c8" : "#4a4640", fontWeight: hasNovaMsg ? 800 : 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", paddingRight: hasNovaMsg ? 28 : 0 }}>
+                          {s.ultimaMensagem || s.stepLabel || "—"}
                         </div>
                       </div>
                     </button>
