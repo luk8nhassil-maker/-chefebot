@@ -47,6 +47,31 @@ export function deveMarcarPrioridadePosPedido(step: string | undefined): boolean
   return step === 'done';
 }
 
+// Retorna true quando a sessão avançou de forma real entre os dois snapshots:
+// step mudou, carrinho cresceu, ou campo operacional importante foi preenchido.
+// Retorna false quando o bot apenas repetiu uma orientação sem dado novo.
+// Função pura — sem efeitos colaterais.
+export function houveAvancoReal(
+  sessaoAntes: BotSession,
+  sessaoDepois: BotSession,
+): boolean {
+  // Sessão já travada pós-Level 3: não acumula novos alertas.
+  if (sessaoAntes.step === 'escalado') return true;
+  // Step avançou para qualquer outro estado.
+  if (sessaoAntes.step !== sessaoDepois.step) return true;
+  // Item adicionado ao carrinho.
+  if ((sessaoDepois.cart?.length || 0) > (sessaoAntes.cart?.length || 0)) return true;
+  // Campos operacionais preenchidos neste turno.
+  if (!sessaoAntes.deliveryType && sessaoDepois.deliveryType) return true;
+  if (!sessaoAntes.neighborhood && sessaoDepois.neighborhood) return true;
+  if (!sessaoAntes.bairroConfirmado && sessaoDepois.bairroConfirmado) return true;
+  if ((sessaoDepois.deliveryFee || 0) > (sessaoAntes.deliveryFee || 0)) return true;
+  if (!sessaoAntes.address && sessaoDepois.address) return true;
+  if (!sessaoAntes.paymentMethod && sessaoDepois.paymentMethod) return true;
+  if (!sessaoAntes.customerName && sessaoDepois.customerName) return true;
+  return false;
+}
+
 // Handoff automático por confusão consecutiva — sistema de 3 níveis:
 //   nivel 'none'  : 1ª confusão ou resposta válida (zera contador). Bot conduz.
 //   nivel 'alert' : 2ª confusão consecutiva. Painel destaca mas bot ainda conduz.

@@ -6,7 +6,7 @@ import { interpretarMensagem, gerarRespostaGuardiao } from "@/lib/claude";
 import { registrarMensagem, ultimasMensagensRelevantes } from "@/lib/conversa";
 import { atualizarRascunhoAtendimentoTempoReal } from "@/lib/rascunhoAtendimentoTempoReal";
 import { analisarConversaParaRetomada, validarRespostaIA } from "@/lib/conversationBrain";
-import { resolverFallbackInteligente, pareceFallbackSeco, avaliarHandoffPorConfusao, deveMarcarPrioridadePosPedido } from "@/lib/fallbackInteligente";
+import { resolverFallbackInteligente, pareceFallbackSeco, avaliarHandoffPorConfusao, deveMarcarPrioridadePosPedido, houveAvancoReal } from "@/lib/fallbackInteligente";
 import { resumirCasoParaAprendizado, registrarCasoPendente, consumirCasoPendente, avaliarResultadoDaRetomada, salvarCasoResolvido } from "@/lib/learningMemory";
 import { log } from "@/lib/logger";
 import { analisarComprovantePix } from "@/lib/analisarComprovante";
@@ -1008,10 +1008,17 @@ export async function POST(req: NextRequest) {
       //   none  : resposta válida (zera) ou 1ª confusão. Bot conduz, sem alerta.
       //   alert : 2ª confusão. Painel destaca mas bot ainda conduz.
       //   urgent: 3ª confusão. Bot para; envia mensagem à cliente; painel exibe "Assumir agora".
+      // Conta como dificuldade: fallback seco OU ausência de avanço real (step, cart,
+      // campos operacionais) — captura repetições de orientação sem dado novo (ex: "Jjj"
+      // em 'returning'). Sessão já em 'escalado' nunca acumula novo contador.
       const ehFallbackSeco = pareceFallbackSeco(result.messages);
+      const semAvancoProblematico =
+        currentSession!.step !== 'escalado' &&
+        !houveAvancoReal(currentSession!, result.session);
+      const perdidoEsteTurno = ehFallbackSeco || semAvancoProblematico;
       const { novoContador, nivel } = avaliarHandoffPorConfusao(
         currentSession!.clientePerdidoCount || 0,
-        ehFallbackSeco,
+        perdidoEsteTurno,
       );
       if (nivel === 'urgent') {
         result.messages = ['Vou chamar alguém da equipe para te ajudar melhor, tá bom? Um instante que já vamos continuar seu atendimento.'];
@@ -1023,8 +1030,8 @@ export async function POST(req: NextRequest) {
         await redis.set(`conversationAlert:${phone}`, true, { ex: 3600 });
       } else {
         result.session = { ...result.session, clientePerdidoCount: novoContador };
-        if (!ehFallbackSeco) {
-          // Resposta válida: limpa o alerta de dificuldade anterior se existia.
+        if (!perdidoEsteTurno) {
+          // Resposta válida com avanço real: limpa o alerta de dificuldade anterior.
           await redis.del(`conversationAlert:${phone}`);
         }
       }
