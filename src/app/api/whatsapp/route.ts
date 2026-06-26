@@ -1,4 +1,4 @@
-﻿import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse, after } from "next/server";
 import { processMessage, createInitialSession, createReturningSession, montarSaudacaoRetorno, BotSession, ClienteHistorico, setMenuDinamico, setConfigDinamica, setEsgotados, temPixNoPagamento, valorPixEsperado } from "@/lib/bot";
 import { getMENUDinamico } from "@/lib/menu";
 import { redis } from "@/lib/redis";
@@ -7,7 +7,7 @@ import { registrarMensagem, ultimasMensagensRelevantes } from "@/lib/conversa";
 import { atualizarRascunhoAtendimentoTempoReal } from "@/lib/rascunhoAtendimentoTempoReal";
 import { analisarConversaParaRetomada, validarRespostaIA } from "@/lib/conversationBrain";
 import { resolverFallbackInteligente, pareceFallbackSeco, avaliarHandoffPorConfusao, deveMarcarPrioridadePosPedido, houveAvancoReal } from "@/lib/fallbackInteligente";
-import { resumirCasoParaAprendizado, registrarCasoPendente, consumirCasoPendente, avaliarResultadoDaRetomada, salvarCasoResolvido } from "@/lib/learningMemory";
+import { resumirCasoParaAprendizado, registrarCasoPendente, consumirCasoPendente, avaliarResultadoDaRetomada, salvarCasoResolvido, anonimizarConversaId } from "@/lib/learningMemory";
 import { log } from "@/lib/logger";
 import { analisarComprovantePix } from "@/lib/analisarComprovante";
 import { transcreverAudio } from "@/lib/transcribeAudio";
@@ -1106,6 +1106,8 @@ export async function POST(req: NextRequest) {
     // rígido se perde e não houve escalonamento, troca o texto por uma resposta
     // natural (IA validada) ou pelo fallback determinístico humanizado. Substitui
     // APENAS o texto de saída — nunca altera sessão, carrinho, taxa ou pagamento.
+    // Captura o estado ANTES da resolução — usado pelo MCP observer abaixo.
+    const mcpFoiFallbackSeco = !result.escalar && pareceFallbackSeco(result.messages);
     if (!result.escalar && pareceFallbackSeco(result.messages)) {
       try {
         const ultimasCtx = await ultimasMensagensRelevantes(phone, 2);
@@ -1130,6 +1132,43 @@ export async function POST(req: NextRequest) {
     }
 
     await enviarRespostas(phone, result.messages, config, result.session.ritmoRapido);
+
+    // ── MCP FASE 1: TELEMETRIA OBSERVADORA ────────────────────────────────────
+    // Executa APÓS a resposta ao cliente usando after() — zero impacto de latência.
+    // MCP_MODE=off (padrão) não executa nenhum código abaixo.
+    // Qualquer falha é capturada e logada sem propagar para o fluxo principal.
+    if (process.env.MCP_MODE === 'observador' && msgId) {
+      const mcpEvento = {
+        phoneHash: anonimizarConversaId(phone),
+        msgId,
+        stepAntes:        currentSession?.step ?? 'desconhecido',
+        stepDepois:       result.session.step,
+        houveMudancaStep: currentSession?.step !== result.session.step,
+        cartLength:       result.session.cart.length,
+        deliveryType:     result.session.deliveryType,
+        precisouIA:       precisaIA,
+        escalou:          !!result.escalar,
+        foiFallbackSeco:  mcpFoiFallbackSeco,
+        timestamp:        Date.now(),
+      };
+      const mcpTask = async () => {
+        try {
+          const { enfileirarEventoMcp } = await import('@/mcp/eventTap');
+          await enfileirarEventoMcp(mcpEvento);
+        } catch (err) {
+          const { logErroMcp } = await import('@/mcp/logger/mcpLogger');
+          logErroMcp('enfileirarEventoMcp', err).catch(() => {});
+        }
+      };
+      try {
+        after(mcpTask);
+      } catch {
+        // after() indisponível neste contexto (risco controlado: ~5ms de latência)
+        mcpTask().catch(() => {});
+      }
+    }
+    // ──────────────────────────────────────────────────────────────────────────
+
     return NextResponse.json({ ok: true });
 
   } catch (error) {
