@@ -34,12 +34,16 @@ describe('deveExibirNoTempoReal', () => {
       expect(deveExibirNoTempoReal({ step: 'done', manual: false, postOrderPriority: false, ultimaTs: passado(30 * MIN + 1), now: agora })).toBe(false)
     })
 
-    test('done+postOrderPriority usa regra de bot (40 min)', () => {
+    test('done+postOrderPriority usa regra de pós-pedido (60 min)', () => {
       expect(deveExibirNoTempoReal({ step: 'done', manual: false, postOrderPriority: true, ultimaTs: passado(35 * MIN), now: agora })).toBe(true)
     })
 
-    test('done+postOrderPriority some após 40 min', () => {
-      expect(deveExibirNoTempoReal({ step: 'done', manual: false, postOrderPriority: true, ultimaTs: passado(41 * MIN), now: agora })).toBe(false)
+    test('done+postOrderPriority ainda visível aos 41 min (limite é 60 min)', () => {
+      expect(deveExibirNoTempoReal({ step: 'done', manual: false, postOrderPriority: true, ultimaTs: passado(41 * MIN), now: agora })).toBe(true)
+    })
+
+    test('done+postOrderPriority some após 60 min', () => {
+      expect(deveExibirNoTempoReal({ step: 'done', manual: false, postOrderPriority: true, ultimaTs: passado(61 * MIN), now: agora })).toBe(false)
     })
   })
 
@@ -78,22 +82,22 @@ describe('deveExibirNoTempoReal', () => {
     })
   })
 
-  // ── atendimento humano (2 h) ───────────────────────────────────────────────
-  describe('manual=true (2 h)', () => {
-    test('exibe quando manual há 1h50min', () => {
-      expect(deveExibirNoTempoReal({ step: 'escalado', manual: true, postOrderPriority: false, ultimaTs: passado(110 * MIN), now: agora })).toBe(true)
+  // ── atendimento humano (60 min) ───────────────────────────────────────────
+  describe('manual=true (60 min)', () => {
+    test('exibe quando manual há 55 min', () => {
+      expect(deveExibirNoTempoReal({ step: 'escalado', manual: true, postOrderPriority: false, ultimaTs: passado(55 * MIN), now: agora })).toBe(true)
     })
 
-    test('oculta quando manual há 2h1min', () => {
-      expect(deveExibirNoTempoReal({ step: 'escalado', manual: true, postOrderPriority: false, ultimaTs: passado(121 * MIN), now: agora })).toBe(false)
+    test('oculta quando manual há 61 min', () => {
+      expect(deveExibirNoTempoReal({ step: 'escalado', manual: true, postOrderPriority: false, ultimaTs: passado(61 * MIN), now: agora })).toBe(false)
     })
 
-    test('exatamente em 2h permanece visível', () => {
-      expect(deveExibirNoTempoReal({ step: 'escalado', manual: true, postOrderPriority: false, ultimaTs: passado(2 * H), now: agora })).toBe(true)
+    test('exatamente em 60 min permanece visível', () => {
+      expect(deveExibirNoTempoReal({ step: 'escalado', manual: true, postOrderPriority: false, ultimaTs: passado(60 * MIN), now: agora })).toBe(true)
     })
 
     test('manual sobrepõe regra de done (não aplica 30 min)', () => {
-      // step=done mas manual=true → regra de 2h prevalece
+      // step=done mas manual=true → regra de 60 min prevalece
       expect(deveExibirNoTempoReal({ step: 'done', manual: true, postOrderPriority: false, ultimaTs: passado(35 * MIN), now: agora })).toBe(true)
     })
 

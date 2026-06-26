@@ -5,10 +5,11 @@
 // Nova mensagem do cliente atualiza ultimaTs via atualizarHistorico() e a conversa
 // reaparece automaticamente na próxima chamada.
 
-const LIMITE_BOT_MS    = 40 * 60 * 1000        // 40 min  – bot em andamento
-const LIMITE_PIX_MS    = 60 * 60 * 1000        // 60 min  – aguardando Pix
-const LIMITE_DONE_MS   = 30 * 60 * 1000        // 30 min  – pedido finalizado
-const LIMITE_MANUAL_MS = 2  * 60 * 60 * 1000   // 2 h     – atendimento humano
+const LIMITE_BOT_MS         = 40 * 60 * 1000   // 40 min – bot em andamento
+const LIMITE_PIX_MS         = 60 * 60 * 1000   // 60 min – aguardando Pix
+const LIMITE_DONE_MS        = 30 * 60 * 1000   // 30 min – pedido finalizado
+const LIMITE_MANUAL_MS      = 60 * 60 * 1000   // 60 min – atendimento humano
+const LIMITE_POST_ORDER_MS  = 60 * 60 * 1000   // 60 min – pós-pedido/prioridade
 
 export type ContextoPermanencia = {
   step: string
@@ -31,7 +32,7 @@ export function deveExibirNoTempoReal(ctx: ContextoPermanencia): boolean {
   const now = ctx.now ?? Date.now()
   const idadeMs = now - ctx.ultimaTs
 
-  // Atendimento humano: janela mais larga (2h)
+  // Atendimento humano: 60 min
   if (ctx.manual) {
     return idadeMs <= LIMITE_MANUAL_MS
   }
@@ -46,6 +47,11 @@ export function deveExibirNoTempoReal(ctx: ContextoPermanencia): boolean {
     return idadeMs <= LIMITE_PIX_MS
   }
 
-  // Demais casos (bot em andamento, postOrderPriority, escalado sem manual): 40 min
+  // Pós-pedido / prioridade: 60 min
+  if (ctx.postOrderPriority) {
+    return idadeMs <= LIMITE_POST_ORDER_MS
+  }
+
+  // Demais casos (bot em andamento, escalado sem manual): 40 min
   return idadeMs <= LIMITE_BOT_MS
 }

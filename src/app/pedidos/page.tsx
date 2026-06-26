@@ -249,6 +249,7 @@ export default function PedidosPage() {
   const [confirmPixModal, setConfirmPixModal] = useState<string | null>(null)
   const [finalizarModal, setFinalizarModal] = useState<string | null>(null)
   const [simpleToast, setSimpleToast] = useState("")
+  const [arquivandoConversa, setArquivandoConversa] = useState<string | null>(null)
   const [sessaoAtiva, setSessaoAtiva] = useState<string | null>(null)
   const [historicoMsgs, setHistoricoMsgs] = useState<{autor:string;texto:string;ts?:number}[]>([])
 
@@ -615,6 +616,24 @@ export default function PedidosPage() {
       setSessoes(prev => prev.map(s => s.phone === phone ? { ...s, manual: false } : s))
     } catch {}
     setRevivendoConversa(null)
+  }
+
+  const arquivarConversa = async (phone: string, step: string) => {
+    const ehPix = step === 'aguardando_pix'
+    if (ehPix && !confirm('Esta conversa está aguardando comprovante de Pix.\nDeseja mesmo arquivá-la?')) return
+    setArquivandoConversa(phone)
+    try {
+      const r = await fetch('/api/arquivar-conversa', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ telefone: phone, force: ehPix }),
+      })
+      if (r.ok) {
+        setSessoes(prev => prev.filter(s => s.phone !== phone))
+        if (sessaoAtiva === phone) setSessaoAtiva(null)
+      }
+    } catch {}
+    setArquivandoConversa(null)
   }
 
   const enviarMensagemHumana = async (phone: string) => {
@@ -1440,9 +1459,12 @@ export default function PedidosPage() {
                           {s.manual ? "Atendimento humano" : s.postOrderPriority ? "Bot respondendo · pós-pedido" : "Robô atendendo"} · {s.stepLabel}
                         </div>
                       </div>
-                      {/* Botões de ação: humano → Pedido/Robô/reviver; pós-pedido → Atender */}
+                      {/* Botões de ação — Arquivar sempre na 1ª posição para garantir visibilidade */}
                       {s.manual ? (
                         <div style={{ display: "flex", gap: 5, flexShrink: 0 }}>
+                          <button onClick={() => arquivarConversa(s.phone, s.step)} disabled={arquivandoConversa === s.phone} title="Arquivar conversa. Histórico preservado." style={{ height: 30, padding: "0 9px", border: "1px solid rgba(239,68,68,.35)", borderRadius: 8, background: "rgba(239,68,68,.09)", color: "#ef4444", fontSize: 11, fontWeight: 800 }}>
+                            {arquivandoConversa === s.phone ? "..." : "📦 Arquivar"}
+                          </button>
                           <button onClick={() => abrirPedidoCombinado(s.phone)} disabled={carregandoPedidoCombinado && pedidoCombinadoPhone === s.phone} style={{ height: 30, padding: "0 9px", border: "none", borderRadius: 8, background: "#22c55e", color: "#060606", fontSize: 11, fontWeight: 900 }}>
                             {carregandoPedidoCombinado && pedidoCombinadoPhone === s.phone ? "..." : "🧾 Pedido"}
                           </button>
@@ -1454,11 +1476,18 @@ export default function PedidosPage() {
                           </button>
                         </div>
                       ) : s.postOrderPriority ? (
-                        <button onClick={() => assumirSessao(s.phone)} disabled={assumindoSessao === s.phone} style={{ height: 30, padding: "0 12px", border: "2px solid #fbbf24", borderRadius: 8, background: "#fbbf24", color: "#060606", fontSize: 11, fontWeight: 900, flexShrink: 0, boxShadow: "0 0 10px rgba(251,191,36,.4)" }}>
-                          {assumindoSessao === s.phone ? "..." : "Assumir e responder"}
-                        </button>
+                        <div style={{ display: "flex", gap: 5, flexShrink: 0 }}>
+                          <button onClick={() => arquivarConversa(s.phone, s.step)} disabled={arquivandoConversa === s.phone} title="Arquivar conversa. Histórico preservado." style={{ height: 30, padding: "0 9px", border: "1px solid rgba(239,68,68,.35)", borderRadius: 8, background: "rgba(239,68,68,.09)", color: "#ef4444", fontSize: 11, fontWeight: 800 }}>
+                            {arquivandoConversa === s.phone ? "..." : "📦 Arquivar"}
+                          </button>
+                          <button onClick={() => assumirSessao(s.phone)} disabled={assumindoSessao === s.phone} style={{ height: 30, padding: "0 12px", border: "2px solid #fbbf24", borderRadius: 8, background: "#fbbf24", color: "#060606", fontSize: 11, fontWeight: 900, boxShadow: "0 0 10px rgba(251,191,36,.4)" }}>
+                            {assumindoSessao === s.phone ? "..." : "Assumir e responder"}
+                          </button>
+                        </div>
                       ) : (
-                        <span style={{ fontSize: 11, color: "#3a3730", fontWeight: 700, flexShrink: 0 }}>Bot atendendo automaticamente</span>
+                        <button onClick={() => arquivarConversa(s.phone, s.step)} disabled={arquivandoConversa === s.phone} title="Arquivar conversa. Histórico preservado." style={{ height: 30, padding: "0 9px", border: "1px solid rgba(239,68,68,.35)", borderRadius: 8, background: "rgba(239,68,68,.09)", color: "#ef4444", fontSize: 11, fontWeight: 800, flexShrink: 0 }}>
+                          {arquivandoConversa === s.phone ? "..." : "📦 Arquivar"}
+                        </button>
                       )}
                     </div>
 
