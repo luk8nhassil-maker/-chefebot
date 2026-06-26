@@ -1310,7 +1310,8 @@ export default function PedidosPage() {
                   const displayName = s.customerName || `…${s.lastDigits}`
                   const initial = ((s.customerName || s.lastDigits || "?")[0]).toUpperCase()
                   const isActive = sessaoAtiva === s.phone
-                  const hasNovaMsg = s.novaMsgManual && !seenConversas.has(s.phone) && !isActive
+                  const phone = s.phone || s.telefone || ""
+                  const hasNovaMsg = Boolean(s.novaMsgManual && !seenConversas.has(phone))
                   return (
                     <button
                       key={s.phone}
