@@ -594,6 +594,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const [referencia, setReferencia] = useState("");
   const [observacao, setObservacao] = useState("");
   const [toast, setToast] = useState("");
+  const [pedidoConfirmado, setPedidoConfirmado] = useState<{ id: string; numero: number; total: number } | null>(null);
   const toastTimer = useRef<any>(null);
 
   useEffect(() => { document.documentElement.setAttribute("data-theme", theme); }, [theme]);
@@ -675,10 +676,10 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     try {
       const r = await fetch("/api/pedido-app", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const data = await r.json();
-      if (data.ok) { go("sc-done"); } else { showToast("Erro ao enviar. Tente de novo."); }
+      if (data.ok) { setPedidoConfirmado({ id: data.pedidoId, numero: data.numero, total: data.total }); go("sc-done"); } else { showToast("Erro ao enviar. Tente de novo."); }
     } catch { showToast("Sem conexão. Tente de novo."); } finally { setSending(false); }
   }
-  function resetAll() { setCart([]); resetBuild(); setDelType(null); setBairroIdx(""); setRua(""); setNumero(""); setReferencia(""); setNome(""); setTelefone(""); setPayment(null); setTroco(""); setObservacao(""); go("sc-start"); }
+  function resetAll() { setCart([]); resetBuild(); setDelType(null); setBairroIdx(""); setRua(""); setNumero(""); setReferencia(""); setNome(""); setTelefone(""); setPayment(null); setTroco(""); setObservacao(""); setPedidoConfirmado(null); go("sc-start"); }
 
   const stepMap: Record<string, number> = { "sc-start": 0, "sc-qty": 0, "sc-build": 0, "sc-border": 0, "sc-another": 0, "sc-list": 0, "sc-cart": 0, "sc-delivery": 1, "sc-pay": 2, "sc-done": 2 };
   const stepIdx = stepMap[screen] ?? 0;
@@ -849,7 +850,19 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
           )}
           {screen === "sc-done" && (
             <section className="screen active">
-              <div className="success"><div className="check">✓</div><h2>Pedido enviado!</h2><p>Valeu, {nome.split(" ")[0]}! 🍕</p><p>A pizzaria já recebeu e vai preparar.</p><button className="btn" style={{ marginTop: 22 }} onClick={resetAll}>Fazer outro pedido</button></div>
+              <div className="success">
+                <div className="check">✓</div>
+                <h2>Pedido recebido!</h2>
+                <p>Valeu, {nome.split(" ")[0]}! A pizzaria já recebeu seu pedido e vai começar a preparar em breve.</p>
+                {pedidoConfirmado && (
+                  <>
+                    <p style={{ fontWeight: 700, fontSize: 18, margin: "12px 0 4px" }}>Pedido #{pedidoConfirmado.numero}</p>
+                    <p style={{ color: "var(--muted)", fontSize: 14, marginBottom: 16 }}>Total: {money(pedidoConfirmado.total)}</p>
+                    <a href={`/rastrear/${pedidoConfirmado.id}`} className="btn" style={{ display: "block", marginBottom: 10, textAlign: "center", textDecoration: "none" }}>Acompanhar pedido</a>
+                  </>
+                )}
+                <button className="btn btn-ghost" style={{ marginTop: pedidoConfirmado ? 0 : 22 }} onClick={resetAll}>Fazer novo pedido</button>
+              </div>
             </section>
           )}
         </main>
