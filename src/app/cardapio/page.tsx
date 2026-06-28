@@ -601,6 +601,8 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const [erroTroco, setErroTroco] = useState("");
   const [trocoOpcao, setTrocoOpcao] = useState<"nao" | "sim" | null>(null);
   const [editandoIdentidade, setEditandoIdentidade] = useState(false);
+  const [hydrated, setHydrated] = useState(false);
+  const [restoredDraft, setRestoredDraft] = useState(false);
   const pagamentoRef = useRef<HTMLDivElement>(null);
   const toastTimer = useRef<any>(null);
   const nomeRef = useRef<HTMLInputElement>(null);
@@ -612,11 +614,49 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     try {
       const n = localStorage.getItem("cf_nome"); const t = localStorage.getItem("cf_tel");
       if (n) setNome(n); if (t) setTelefone(t);
-      // Se dados válidos existem, não força edição
       if (n && t && n.trim() && t.replace(/\D/g, "").length >= 10) setEditandoIdentidade(false);
       else setEditandoIdentidade(true);
     } catch { setEditandoIdentidade(true); }
+    try {
+      const raw = sessionStorage.getItem("cf_draft");
+      if (raw) {
+        const d = JSON.parse(raw);
+        if (Array.isArray(d.cart) && d.cart.length > 0) {
+          setCart(d.cart);
+          if (d.delType) setDelType(d.delType);
+          if (d.bairroIdx) setBairroIdx(d.bairroIdx);
+          if (d.rua) setRua(d.rua);
+          if (d.numero) setNumero(d.numero);
+          if (d.referencia) setReferencia(d.referencia);
+          if (d.payment) setPayment(d.payment);
+          if (d.trocoOpcao) setTrocoOpcao(d.trocoOpcao);
+          if (d.troco) setTroco(d.troco);
+          if (d.observacao) setObservacao(d.observacao);
+          if (d.plan) setPlan(d.plan);
+          const safeScreens = ["sc-cart", "sc-delivery", "sc-pay", "sc-another"];
+          setScreen(safeScreens.includes(d.screen) ? d.screen : "sc-cart");
+          setRestoredDraft(true);
+        }
+      }
+    } catch {}
+    setHydrated(true);
   }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    if (screen === "sc-done") return;
+    if (cart.length === 0) { try { sessionStorage.removeItem("cf_draft"); } catch {}; return; }
+    try {
+      sessionStorage.setItem("cf_draft", JSON.stringify({ cart, screen, delType, bairroIdx, rua, numero, referencia, payment, trocoOpcao, troco, observacao, plan }));
+    } catch {}
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hydrated, cart, screen, delType, bairroIdx, rua, numero, referencia, payment, trocoOpcao, troco, observacao, plan]);
+
+  useEffect(() => {
+    if (!restoredDraft) return;
+    const t = setTimeout(() => setRestoredDraft(false), 5000);
+    return () => clearTimeout(t);
+  }, [restoredDraft]);
 
   function showToast(m: string) { setToast(m); clearTimeout(toastTimer.current); toastTimer.current = setTimeout(() => setToast(""), 1700); }
   function go(s: string) { setScreen(s); window.scrollTo({ top: 0, behavior: "smooth" }); }
@@ -716,14 +756,14 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     try {
       const r = await fetch("/api/pedido-app", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const data = await r.json();
-      if (data.ok) { try { localStorage.setItem("cf_nome", nome.trim()); localStorage.setItem("cf_tel", telefone.trim()); } catch {} setPedidoConfirmado({ id: data.pedidoId, numero: data.numero, total: data.total }); go("sc-done"); } else { showToast("Erro ao enviar. Tente de novo."); }
+      if (data.ok) { try { localStorage.setItem("cf_nome", nome.trim()); localStorage.setItem("cf_tel", telefone.trim()); } catch {} try { sessionStorage.removeItem("cf_draft"); } catch {} setPedidoConfirmado({ id: data.pedidoId, numero: data.numero, total: data.total }); go("sc-done"); } else { showToast("Erro ao enviar. Tente de novo."); }
     } catch { showToast("Sem conexão. Tente de novo."); } finally { setSending(false); }
   }
-  function resetAll() { setCart([]); resetBuild(); setDelType(null); setBairroIdx(""); setRua(""); setNumero(""); setReferencia(""); setPayment(null); setTroco(""); setTrocoOpcao(null); setObservacao(""); setErroNome(""); setErroTelefone(""); setErroPagamento(""); setErroTroco(""); setPedidoConfirmado(null); setEditandoIdentidade(false); go("sc-start"); }
+  function resetAll() { setCart([]); resetBuild(); setDelType(null); setBairroIdx(""); setRua(""); setNumero(""); setReferencia(""); setPayment(null); setTroco(""); setTrocoOpcao(null); setObservacao(""); setErroNome(""); setErroTelefone(""); setErroPagamento(""); setErroTroco(""); setPedidoConfirmado(null); setRestoredDraft(false); setEditandoIdentidade(false); try { sessionStorage.removeItem("cf_draft"); } catch {} go("sc-start"); }
 
-  const stepMap: Record<string, number> = { "sc-start": 0, "sc-qty": 0, "sc-build": 0, "sc-border": 0, "sc-another": 0, "sc-list": 0, "sc-cart": 0, "sc-delivery": 1, "sc-pay": 2, "sc-done": 2 };
+  const stepMap: Record<string, number> = { "sc-start": 0, "sc-qty": 0, "sc-build": 0, "sc-border": 0, "sc-list": 0, "sc-another": 1, "sc-cart": 1, "sc-delivery": 2, "sc-pay": 3, "sc-done": 3 };
   const stepIdx = stepMap[screen] ?? 0;
-  const STEPS = ["Itens", "Entrega", "Pagar"];
+  const STEPS = ["Itens", "Sacola", "Entrega", "Pagar"];
   const feitas = pizzasNoCarrinho();
   let ctxBadge = "", ctxTxt = "", ctxDots: { cls: string }[] = [];
   if (plan.openEnded) { ctxBadge = `Pizza ${feitas + 1}`; ctxTxt = feitas === 0 ? "Sua 1ª pizza" : `${feitas} já no carrinho`; }
@@ -856,7 +896,17 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
           )}
           {screen === "sc-cart" && (
             <section className="screen active">
-              <div className="screen-head"><div className="eyebrow">Seu pedido</div><h2>Confira tudo</h2></div>
+              {restoredDraft && (
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 10, background: "var(--brand-soft)", border: "1px solid var(--brand)", borderRadius: 14, padding: "12px 14px", marginBottom: 14 }}>
+                  <span style={{ fontSize: 20, flexShrink: 0 }}>🍕</span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text)" }}>Seu pedido continua aqui</div>
+                    <div style={{ fontSize: 13, color: "var(--text-sub)", marginTop: 2 }}>Restauramos o que você já tinha escolhido.</div>
+                  </div>
+                  <button onClick={() => setRestoredDraft(false)} style={{ background: "none", border: "none", color: "var(--text-faint)", fontSize: 18, cursor: "pointer", padding: "0 2px", lineHeight: 1 }}>×</button>
+                </div>
+              )}
+              <div className="screen-head"><div className="eyebrow">Sua sacola</div><h2>Confira os itens</h2><p>Tudo certo? Então bora finalizar.</p></div>
               {cart.length === 0 ? (<div className="empty"><div className="big">🛒</div><div>Seu pedido está vazio.</div></div>) : (
                 <>{(() => { let pn = 0; return cart.map((it, i) => { let tag = null; if (it.kind === "pizza") { pn++; tag = <span className="ci-tag">Pizza {pn}</span>; } const nm = it.kind === "pizza" ? it.name.replace(/^Pizza /, "") : it.name; const itemEsg = cartItemEsgotado(it.keys, esgotados); return (<div key={i} className="cart-item"><div className="ci-emoji">{it.emoji}</div><div className="ci-body"><div className="ci-name">{tag}{nm}{it.qty > 1 ? ` ×${it.qty}` : ""}{itemEsg && <span style={{ color: "#ef4444", fontWeight: 800, marginLeft: 6 }}>· Esgotado</span>}</div>{it.detail && <div className="ci-detail">{it.detail}</div>}<div className="ci-price">{money(it.price * it.qty)}</div>{it.kind === "simple" && (<div className="qty-pill"><button onClick={() => chQty(i, -1)}>−</button><span>{it.qty}</span><button onClick={() => chQty(i, 1)}>+</button></div>)}</div><button className="ci-remove" onClick={() => rmItem(i)}>✕</button></div>); }); })()}<div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 4px 4px", fontWeight: 700, fontSize: 19 }}><span>Subtotal</span><span>{money(cartTotal)}</span></div></>
               )}
