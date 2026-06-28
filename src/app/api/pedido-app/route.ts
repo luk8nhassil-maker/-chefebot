@@ -58,6 +58,13 @@ function officialUnitPrice(item: ItemApp, menu: MenuPedidoApp): number | null {
     const found = produtos.find((produto) => norm(produto.name) === norm(item.name));
     if (!found) return null;
 
+    const suco = menu.sucos.find((entry) => norm(entry.name) === norm(item.name));
+    if (suco) {
+      const detail = norm(item.detail || "");
+      if (!detail || detail === "sem leite") return Number.isFinite(suco.price) ? suco.price : null;
+      if (detail === "com leite") return Number.isFinite(suco.price) ? suco.price + 1 : null;
+      return null;
+    }
     if (norm(found.name).includes("macarronada")) {
       const sizeCode = item.detail?.match(/^Tamanho\s+([A-Za-z])$/i)?.[1]?.toUpperCase();
       const size = sizeCode ? found.sizes?.find((entry) => entry.code.toUpperCase() === sizeCode) : null;

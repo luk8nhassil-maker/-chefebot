@@ -123,6 +123,52 @@ describe("POST /api/pedido-app", () => {
   });
 
 
+  it("aceita lanche simples com preco oficial mesmo se o browser manda preco manipulado", async () => {
+    const res = await POST(postReq({
+      ...basePayload,
+      itens: [{ kind: "simple", name: "X-Burguer", detail: "", price: 1, qty: 1 }],
+    }));
+
+    expect(res.status).toBe(200);
+    const pedidos = store.get("pedidos") as PedidoSalvo[];
+    expect(pedidos[0].itens).toEqual(["X-Burguer"]);
+    expect(pedidos[0].total).toBe(18);
+  });
+
+  it("aceita suco com leite usando preco oficial mais adicional mesmo se o browser manda preco manipulado", async () => {
+    const res = await POST(postReq({
+      ...basePayload,
+      itens: [{ kind: "simple", name: "Caja", detail: "Com leite", price: 1, qty: 1 }],
+    }));
+
+    expect(res.status).toBe(200);
+    const pedidos = store.get("pedidos") as PedidoSalvo[];
+    expect(pedidos[0].itens).toEqual(["Caja Com leite"]);
+    expect(pedidos[0].taxaEntrega).toBe(3);
+    expect(pedidos[0].total).toBe(11);
+  });
+
+  it("aceita suco sem leite usando preco base oficial", async () => {
+    const res = await POST(postReq({
+      ...basePayload,
+      itens: [{ kind: "simple", name: "Caja", detail: "Sem leite", price: 1, qty: 1 }],
+    }));
+
+    expect(res.status).toBe(200);
+    const pedidos = store.get("pedidos") as PedidoSalvo[];
+    expect(pedidos[0].itens).toEqual(["Caja Sem leite"]);
+    expect(pedidos[0].total).toBe(10);
+  });
+
+  it("rejeita suco com detail invalido", async () => {
+    const res = await POST(postReq({
+      ...basePayload,
+      itens: [{ kind: "simple", name: "Caja", detail: "Pouco leite", price: 8, qty: 1 }],
+    }));
+
+    expect(res.status).toBe(400);
+    expect(store.get("pedidos")).toBeUndefined();
+  });
   it("aceita macarronada P com preco oficial mesmo se o browser manda preco manipulado", async () => {
     const res = await POST(postReq({
       ...basePayload,

@@ -584,6 +584,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const [plan, setPlan] = useState<{ total: number; current: number; openEnded: boolean }>({ total: 0, current: 0, openEnded: false });
   const [listCat, setListCat] = useState<"lanche" | "bebida" | "suco">("lanche");
   const [macarronadaPendente, setMacarronadaPendente] = useState<{ name: string; price: number; sizes?: { code: string; price: number }[] } | null>(null);
+  const [sucoPendente, setSucoPendente] = useState<{ name: string; price: number } | null>(null);
   const [delType, setDelType] = useState<"delivery" | "retirada" | "dine_in" | null>(null);
   const [bairroIdx, setBairroIdx] = useState<string>("");
   const [rua, setRua] = useState("");
@@ -707,10 +708,22 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   }
   function addSimple(it: { name: string; price: number; sizes?: { code: string; price: number }[] }, emoji: string) {
     if (isMacarronada(it)) { setMacarronadaPendente(it); go("sc-macarronada-size"); return; }
+    if (listCat === "suco") { setSucoPendente(it); go("sc-suco-leite"); return; }
     const ex = cart.find((c) => c.kind === "simple" && c.name === it.name);
     if (ex) { setCart(cart.map((c) => (c === ex ? { ...c, qty: c.qty + 1 } : c))); }
     else { setCart([...cart, { emoji, kind: "simple", name: it.name, detail: "", price: it.price, qty: 1, keys: [it.name] }]); }
     showToast(`${it.name} adicionado!`);
+  }
+  function addSucoLeite(comLeite: boolean) {
+    if (!sucoPendente) return;
+    const detail = comLeite ? "Com leite" : "Sem leite";
+    const price = sucoPendente.price + (comLeite ? 1 : 0);
+    const ex = cart.find((c) => c.kind === "simple" && c.name === sucoPendente.name && c.detail === detail);
+    if (ex) setCart(cart.map((c) => (c === ex ? { ...c, qty: c.qty + 1 } : c)));
+    else setCart([...cart, { emoji: "S", kind: "simple", name: sucoPendente.name, detail, price, qty: 1, keys: [sucoPendente.name] }]);
+    showToast(`${sucoPendente.name} ${detail.toLowerCase()} adicionado!`);
+    setSucoPendente(null);
+    go("sc-cart");
   }
   function addMacarronadaSize(code: string) {
     if (!macarronadaPendente) return;
@@ -782,7 +795,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   }
   function resetAll() { setCart([]); resetBuild(); setDelType(null); setBairroIdx(""); setRua(""); setNumero(""); setReferencia(""); setPayment(null); setTroco(""); setTrocoOpcao(null); setObservacao(""); setErroNome(""); setErroTelefone(""); setErroPagamento(""); setErroTroco(""); setPedidoConfirmado(null); setRestoredDraft(false); setEditandoIdentidade(false); try { sessionStorage.removeItem("cf_draft"); } catch {} go("sc-start"); }
 
-  const stepMap: Record<string, number> = { "sc-start": 0, "sc-qty": 0, "sc-build": 0, "sc-border": 0, "sc-list": 0, "sc-macarronada-size": 0, "sc-another": 1, "sc-cart": 1, "sc-delivery": 2, "sc-pay": 3, "sc-done": 3 };
+  const stepMap: Record<string, number> = { "sc-start": 0, "sc-qty": 0, "sc-build": 0, "sc-border": 0, "sc-list": 0, "sc-suco-leite": 0, "sc-macarronada-size": 0, "sc-another": 1, "sc-cart": 1, "sc-delivery": 2, "sc-pay": 3, "sc-done": 3 };
   const stepIdx = stepMap[screen] ?? 0;
   const STEPS = ["Itens", "Sacola", "Entrega", "Pagar"];
   const feitas = pizzasNoCarrinho();
@@ -915,7 +928,14 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
               })()}
             </section>
           )}
-          {screen === "sc-macarronada-size" && macarronadaPendente && (
+          {screen === "sc-suco-leite" && sucoPendente && (
+            <section className="screen active">
+              <div className="screen-head"><div className="eyebrow">Suco natural</div><h2>Com leite?</h2><p>{sucoPendente.name}</p></div>
+              <div className="opt" onClick={() => addSucoLeite(false)}><div className="opt-emoji">S</div><div className="opt-body"><div className="opt-title">Sem leite</div></div><div className="opt-price">{money(sucoPendente.price)}</div></div>
+              <div className="opt" onClick={() => addSucoLeite(true)}><div className="opt-emoji">+1</div><div className="opt-body"><div className="opt-title">Com leite</div><div className="opt-desc">Adicional de R$ 1,00</div></div><div className="opt-price">{money(sucoPendente.price + 1)}</div></div>
+              <div className="btn-row"><button className="btn btn-ghost btn-sm" onClick={() => { setSucoPendente(null); go("sc-list"); }}>Voltar</button></div>
+            </section>
+          )}          {screen === "sc-macarronada-size" && macarronadaPendente && (
             <section className="screen active">
               <div className="screen-head"><div className="eyebrow">Macarronada</div><h2>Escolha o tamanho</h2><p>{macarronadaPendente.name}</p></div>
               {(macarronadaPendente.sizes || []).map((s) => (
