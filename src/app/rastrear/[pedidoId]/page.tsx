@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import dynamic from 'next/dynamic'
-import type { PedidoEntregador, LocalizacaoEntregador } from '@/types/entregador'
+import type { LocalizacaoEntregador } from '@/types/entregador'
 
 const MapaEntregador = dynamic(() => import('@/components/MapaEntregador'), { ssr: false })
 
@@ -12,11 +12,49 @@ interface PageProps {
   params: Promise<{ pedidoId: string }>
 }
 
+type PedidoStatus = {
+  numero?: number
+  status: string
+  tipoEntrega: string
+  itens: string[]
+  total: number
+}
+
+type InfoStatus = {
+  label: string
+  desc: string
+  color: string
+  emoji: string
+}
+
+function getInfoStatus(status: string, tipoEntrega: string): InfoStatus {
+  if (tipoEntrega === 'retirada' || tipoEntrega === 'dine_in') {
+    const map: Record<string, InfoStatus> = {
+      novo:          { emoji: '⏳', label: 'Pedido recebido',       desc: 'Aguardando a pizzaria confirmar.',          color: '#888' },
+      em_preparo:    { emoji: '👨‍🍳', label: 'Em preparo',            desc: 'Estamos fazendo seu pedido com carinho!',   color: '#ff6b00' },
+      saiu_entrega:  { emoji: '✅', label: 'Pronto para retirada',  desc: 'Pode vir buscar — está te esperando!',      color: '#4caf50' },
+      entregue:      { emoji: '✓',  label: 'Retirado',              desc: 'Bom apetite!',                              color: '#4caf50' },
+      cancelado:     { emoji: '✗',  label: 'Cancelado',             desc: 'Entre em contato com a pizzaria.',           color: '#ef4444' },
+    }
+    return map[status] ?? { emoji: '⏳', label: 'Pedido recebido', desc: 'Aguardando confirmação.', color: '#888' }
+  }
+
+  // delivery
+  const map: Record<string, InfoStatus> = {
+    novo:         { emoji: '⏳', label: 'Pedido recebido',  desc: 'Aguardando a pizzaria começar o preparo.',  color: '#888' },
+    em_preparo:   { emoji: '👨‍🍳', label: 'Em preparo',      desc: 'Estamos fazendo seu pedido com carinho!',  color: '#ff6b00' },
+    saiu_entrega: { emoji: '🛵', label: 'A caminho',        desc: 'Seu pedido está na rua!',                   color: '#ff6b00' },
+    entregue:     { emoji: '✓',  label: 'Entregue',         desc: 'Bom apetite!',                              color: '#4caf50' },
+    cancelado:    { emoji: '✗',  label: 'Cancelado',        desc: 'Entre em contato com a pizzaria.',           color: '#ef4444' },
+  }
+  return map[status] ?? { emoji: '⏳', label: 'Pedido recebido', desc: 'Aguardando confirmação.', color: '#888' }
+}
+
 export default function RastrearPage({ params }: PageProps) {
   const [pedidoId, setPedidoId] = useState<string | null>(null)
+  const [pedidoStatus, setPedidoStatus] = useState<PedidoStatus | null>(null)
   const [localizacao, setLocalizacao] = useState<LocalizacaoEntregador | null>(null)
-  const [pedido, setPedido] = useState<PedidoEntregador | null>(null)
-  const [erro, setErro] = useState('')
+  const [carregando, setCarregando] = useState(true)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   useEffect(() => {
@@ -26,43 +64,48 @@ export default function RastrearPage({ params }: PageProps) {
   useEffect(() => {
     if (!pedidoId) return
 
+    async function fetchStatus() {
+      try {
+        const res = await fetch(`/api/pedido-status?pedidoId=${pedidoId}`, { cache: 'no-store' })
+        if (res.ok) {
+          const data = await res.json()
+          setPedidoStatus(data)
+        }
+      } catch {}
+      setCarregando(false)
+    }
+
     async function fetchLocalizacao() {
       try {
         const res = await fetch(`/api/localizacao?pedidoId=${pedidoId}`)
         if (res.ok) {
           const data = await res.json()
           setLocalizacao(data)
-          setErro('')
         }
       } catch {}
     }
 
-    async function fetchPedido() {
-      try {
-        // Busca o pedido em todos os entregadores pela localização
-        const locRes = await fetch(`/api/localizacao?pedidoId=${pedidoId}`)
-        if (!locRes.ok) return
-        const loc: LocalizacaoEntregador = await locRes.json()
-
-        const res = await fetch(`/api/entregador-pedidos?entregadorId=${loc.entregadorId}`)
-        if (!res.ok) return
-        const pedidos: PedidoEntregador[] = await res.json()
-        const p = pedidos.find(x => x.pedidoId === pedidoId)
-        if (p) setPedido(p)
-      } catch {}
-    }
-
+    fetchStatus()
     fetchLocalizacao()
-    fetchPedido()
 
-    intervalRef.current = setInterval(fetchLocalizacao, 10000)
+    // Atualiza status a cada 15s e localização a cada 10s
+    intervalRef.current = setInterval(() => {
+      fetchStatus()
+      fetchLocalizacao()
+    }, 10000)
+
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current)
     }
   }, [pedidoId])
 
-  const statusLabel = pedido?.status === 'entregue' ? '✓ Entregue' : pedido?.status === 'em_rota' ? '🛵 A caminho' : '⏳ Saiu para entrega'
-  const statusColor = pedido?.status === 'entregue' ? '#4caf50' : '#ff6b00'
+  const info = pedidoStatus
+    ? getInfoStatus(pedidoStatus.status, pedidoStatus.tipoEntrega)
+    : { emoji: '⏳', label: 'Carregando...', desc: '', color: '#888' }
+
+  const isDelivery = pedidoStatus?.tipoEntrega === 'delivery'
+  const emRota = pedidoStatus?.status === 'saiu_entrega'
+  const mostrarMapa = isDelivery && emRota && !!localizacao
 
   return (
     <div style={{ background: '#060606', minHeight: '100dvh', fontFamily: 'Archivo, sans-serif', color: '#fff', display: 'flex', flexDirection: 'column' }}>
@@ -70,54 +113,41 @@ export default function RastrearPage({ params }: PageProps) {
       <div style={{ background: '#111', borderBottom: '1px solid #222', padding: '16px 20px', display: 'flex', alignItems: 'center', gap: '10px' }}>
         <span style={{ fontSize: '22px' }}>🍕</span>
         <div>
-          <div style={{ fontSize: '15px', fontWeight: 700, color: '#ff6b00' }}>Rastreamento do Pedido</div>
+          <div style={{ fontSize: '15px', fontWeight: 700, color: '#ff6b00' }}>
+            {pedidoStatus?.numero ? `Pedido #${pedidoStatus.numero}` : 'Acompanhar Pedido'}
+          </div>
           <div style={{ fontSize: '11px', color: '#888' }}>#{pedidoId}</div>
         </div>
       </div>
 
-      {/* Mapa */}
-      <div style={{ flex: 1, minHeight: '50vh', position: 'relative' }}>
-        {localizacao ? (
+      {/* Área do mapa — só para delivery em rota */}
+      {mostrarMapa && (
+        <div style={{ flex: 1, minHeight: '50vh', position: 'relative' }}>
           <MapaEntregador localizacao={localizacao} />
-        ) : (
-          <div style={{ height: '50vh', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '12px', color: '#888' }}>
-            <div style={{ fontSize: '40px' }}>🛵</div>
-            <div style={{ fontSize: '14px' }}>{erro || 'Aguardando localização do entregador...'}</div>
-          </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Card de informações */}
-      <div style={{ background: '#111', borderTop: '1px solid #222', padding: '20px', borderRadius: '20px 20px 0 0', marginTop: '-20px', position: 'relative', zIndex: 10 }}>
-        {/* Status */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-          <span style={{ fontSize: '14px', fontWeight: 700, color: statusColor }}>{statusLabel}</span>
-          {localizacao && (
-            <span style={{ fontSize: '11px', color: '#666' }}>
-              Atualizado: {new Date(localizacao.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-            </span>
-          )}
+      <div style={{ background: '#111', borderTop: mostrarMapa ? '1px solid #222' : 'none', padding: '28px 20px 20px', borderRadius: mostrarMapa ? '20px 20px 0 0' : 0, marginTop: mostrarMapa ? '-20px' : 0, position: 'relative', zIndex: 10, flex: mostrarMapa ? 'none' : 1 }}>
+
+        {/* Status principal */}
+        <div style={{ textAlign: 'center', marginBottom: '24px' }}>
+          <div style={{ fontSize: '48px', marginBottom: '8px' }}>{info.emoji}</div>
+          <div style={{ fontSize: '18px', fontWeight: 800, color: info.color, marginBottom: '6px' }}>{info.label}</div>
+          {info.desc && <div style={{ fontSize: '13px', color: '#888' }}>{info.desc}</div>}
         </div>
 
-        {pedido ? (
-          <>
-            {/* Entregador */}
-            <div style={{ background: '#0a0a0a', borderRadius: '10px', padding: '12px 14px', marginBottom: '12px' }}>
-              <div style={{ fontSize: '11px', color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>Entregador</div>
-              <div style={{ fontSize: '15px', fontWeight: 600 }}>🛵 {pedido.entregadorNome}</div>
+        {/* Itens do pedido */}
+        {!carregando && pedidoStatus && (
+          <div style={{ background: '#0a0a0a', borderRadius: '10px', padding: '12px 14px', marginBottom: '16px' }}>
+            <div style={{ fontSize: '11px', color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' }}>Seu pedido</div>
+            {pedidoStatus.itens.map((item, i) => (
+              <div key={i} style={{ fontSize: '13px', color: '#ccc', paddingLeft: '8px', borderLeft: '2px solid #333', marginBottom: '3px' }}>{item}</div>
+            ))}
+            <div style={{ marginTop: '8px', fontSize: '15px', fontWeight: 700, color: '#ff6b00' }}>
+              Total: R$ {pedidoStatus.total.toFixed(2).replace('.', ',')}
             </div>
-
-            {/* Itens */}
-            <div style={{ background: '#0a0a0a', borderRadius: '10px', padding: '12px 14px', marginBottom: '16px' }}>
-              <div style={{ fontSize: '11px', color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' }}>Seu pedido</div>
-              {pedido.itens.map((item, i) => (
-                <div key={i} style={{ fontSize: '13px', color: '#ccc', paddingLeft: '8px', borderLeft: '2px solid #333', marginBottom: '3px' }}>{item}</div>
-              ))}
-              <div style={{ marginTop: '8px', fontSize: '15px', fontWeight: 700, color: '#ff6b00' }}>Total: R$ {pedido.total.toFixed(2).replace('.', ',')}</div>
-            </div>
-          </>
-        ) : (
-          <div style={{ color: '#888', fontSize: '14px', textAlign: 'center', padding: '20px 0' }}>Carregando detalhes do pedido...</div>
+          </div>
         )}
 
         {/* Botão WhatsApp */}
