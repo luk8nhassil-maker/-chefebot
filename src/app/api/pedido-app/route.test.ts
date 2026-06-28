@@ -54,6 +54,36 @@ beforeEach(() => {
 });
 
 describe("POST /api/pedido-app", () => {
+  it("rejeita delivery sem bairro", async () => {
+    const res = await POST(postReq({
+      ...basePayload,
+      bairro: "",
+    }));
+
+    expect(res.status).toBe(400);
+    expect(store.get("pedidos")).toBeUndefined();
+  });
+
+  it("rejeita delivery sem rua", async () => {
+    const res = await POST(postReq({
+      ...basePayload,
+      rua: "",
+    }));
+
+    expect(res.status).toBe(400);
+    expect(store.get("pedidos")).toBeUndefined();
+  });
+
+  it("rejeita delivery sem numero", async () => {
+    const res = await POST(postReq({
+      ...basePayload,
+      numero: "",
+    }));
+
+    expect(res.status).toBe(400);
+    expect(store.get("pedidos")).toBeUndefined();
+  });
+
   it("recalcula item simples com preco oficial do servidor quando o browser manda preco manipulado", async () => {
     const res = await POST(postReq(basePayload));
 
