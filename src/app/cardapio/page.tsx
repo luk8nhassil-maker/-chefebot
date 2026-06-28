@@ -806,14 +806,24 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     else { setErroTelefone(""); }
     if (!payment) { setErroPagamento("pagamento"); if (!hasError) pagamentoRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }); hasError = true; }
     else { setErroPagamento(""); }
-    if (payment === "Dinheiro" && trocoOpcao === "sim" && troco.trim()) {
-      const trocoNum = parseFloat(troco.replace(",", ".").replace(/[^\d.]/g, ""));
-      if (isNaN(trocoNum) || trocoNum <= cartTotal + fee) { setErroTroco("O valor do troco precisa ser maior que o total do pedido."); if (!hasError) pagamentoRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }); hasError = true; }
-      else { setErroTroco(""); }
+    if (payment === "Dinheiro") {
+      if (!trocoOpcao) {
+        setErroTroco("Escolha se você precisa de troco.");
+        if (!hasError) pagamentoRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+        hasError = true;
+      } else if (trocoOpcao === "sim" && !troco.trim()) {
+        setErroTroco("Informe para quanto precisa de troco.");
+        if (!hasError) pagamentoRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+        hasError = true;
+      } else if (trocoOpcao === "sim") {
+        const trocoNum = parseFloat(troco.replace(",", ".").replace(/[^\d.]/g, ""));
+        if (isNaN(trocoNum) || trocoNum <= cartTotal + fee) { setErroTroco("O valor do troco precisa ser maior que o total do pedido."); if (!hasError) pagamentoRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }); hasError = true; }
+        else { setErroTroco(""); }
+      } else { setErroTroco(""); }
     } else { setErroTroco(""); }
     if (hasError) return;
     setSending(true);
-    const payload = { cliente: nome.trim(), telefone: telefone.trim(), itens: cart.map((c) => ({ kind: c.kind, name: c.name, detail: c.detail, price: c.price, qty: c.qty })), tipoEntrega: delType, bairro: delType === "delivery" ? menu.neighborhoods[+bairroIdx].name : undefined, rua: delType === "delivery" ? rua : undefined, numero: delType === "delivery" && numero.trim() ? numero.trim() : undefined, referencia: delType === "delivery" && referencia.trim() ? referencia.trim() : undefined, observacao: observacao.trim() || undefined, taxaEntrega: fee, pagamento: payment, troco: payment === "Dinheiro" && troco ? troco : undefined };
+    const payload = { cliente: nome.trim(), telefone: telefone.trim(), itens: cart.map((c) => ({ kind: c.kind, name: c.name, detail: c.detail, price: c.price, qty: c.qty })), tipoEntrega: delType, bairro: delType === "delivery" ? menu.neighborhoods[+bairroIdx].name : undefined, rua: delType === "delivery" ? rua : undefined, numero: delType === "delivery" && numero.trim() ? numero.trim() : undefined, referencia: delType === "delivery" && referencia.trim() ? referencia.trim() : undefined, observacao: observacao.trim() || undefined, taxaEntrega: fee, pagamento: payment, troco: payment === "Dinheiro" ? (trocoOpcao === "nao" ? "Sem troco" : troco.trim()) : undefined };
     try {
       const r = await fetch("/api/pedido-app", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const data = await r.json();
@@ -1101,9 +1111,10 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                 <div style={{ marginTop: 8, padding: "12px 14px", background: "var(--card)", borderRadius: 10 }}>
                   <div style={{ fontSize: 13, fontWeight: 600, color: "var(--fg)", marginBottom: 8 }}>Precisa de troco?</div>
                   <div style={{ display: "flex", gap: 8, marginBottom: trocoOpcao === "sim" ? 12 : 0 }}>
-                    <button className={`btn ${trocoOpcao === "nao" ? "" : "btn-ghost"}`} style={{ flex: 1, fontSize: 13, padding: "10px 0" }} onClick={() => { setTrocoOpcao("nao"); setTroco(""); }}>Não preciso</button>
-                    <button className={`btn ${trocoOpcao === "sim" ? "" : "btn-ghost"}`} style={{ flex: 1, fontSize: 13, padding: "10px 0" }} onClick={() => setTrocoOpcao("sim")}>Sim, preciso</button>
+                    <button className={`btn ${trocoOpcao === "nao" ? "" : "btn-ghost"}`} style={{ flex: 1, fontSize: 13, padding: "10px 0" }} onClick={() => { setTrocoOpcao("nao"); setTroco(""); setErroTroco(""); }}>Não preciso de troco</button>
+                    <button className={`btn ${trocoOpcao === "sim" ? "" : "btn-ghost"}`} style={{ flex: 1, fontSize: 13, padding: "10px 0" }} onClick={() => { setTrocoOpcao("sim"); setErroTroco(""); }}>Preciso de troco</button>
                   </div>
+                  {erroTroco && trocoOpcao !== "sim" && <div style={{ color: "#ef4444", fontSize: 12, marginTop: 4 }}>{erroTroco}</div>}
                   {trocoOpcao === "sim" && (
                     <div className="field" style={{ marginBottom: 0 }}>
                       <label>Troco para quanto?</label>

@@ -84,6 +84,64 @@ describe("POST /api/pedido-app", () => {
     expect(store.get("pedidos")).toBeUndefined();
   });
 
+  it("rejeita dinheiro sem escolher troco", async () => {
+    const res = await POST(postReq({
+      ...basePayload,
+      pagamento: "Dinheiro",
+    }));
+
+    expect(res.status).toBe(400);
+    expect(store.get("pedidos")).toBeUndefined();
+  });
+
+  it("aceita dinheiro com Sem troco", async () => {
+    const res = await POST(postReq({
+      ...basePayload,
+      pagamento: "Dinheiro",
+      troco: "Sem troco",
+    }));
+
+    expect(res.status).toBe(200);
+    const pedidos = store.get("pedidos") as PedidoSalvo[];
+    expect(pedidos[0].troco).toBe("Sem troco");
+  });
+
+  it("aceita dinheiro com valor de troco", async () => {
+    const res = await POST(postReq({
+      ...basePayload,
+      pagamento: "Dinheiro",
+      troco: "50",
+    }));
+
+    expect(res.status).toBe(200);
+    const pedidos = store.get("pedidos") as PedidoSalvo[];
+    expect(pedidos[0].troco).toBe("50");
+  });
+
+  it("aceita Pix sem troco", async () => {
+    const res = await POST(postReq({
+      ...basePayload,
+      pagamento: "Pix",
+      troco: undefined,
+    }));
+
+    expect(res.status).toBe(200);
+    const pedidos = store.get("pedidos") as PedidoSalvo[];
+    expect(pedidos[0].troco).toBeUndefined();
+  });
+
+  it("aceita cartao sem troco", async () => {
+    const res = await POST(postReq({
+      ...basePayload,
+      pagamento: "Cartao",
+      troco: undefined,
+    }));
+
+    expect(res.status).toBe(200);
+    const pedidos = store.get("pedidos") as PedidoSalvo[];
+    expect(pedidos[0].troco).toBeUndefined();
+  });
+
   it("recalcula item simples com preco oficial do servidor quando o browser manda preco manipulado", async () => {
     const res = await POST(postReq(basePayload));
 

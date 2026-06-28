@@ -44,6 +44,10 @@ function norm(value: string): string {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
 }
 
+function isPagamentoDinheiro(pagamento: string): boolean {
+  return norm(pagamento) === "dinheiro";
+}
+
 function formatItem(item: ItemApp): string {
   const qtyPrefix = item.qty > 1 ? `${item.qty}x ` : "";
   const detalhe = item.detail ? ` ${item.detail}` : "";
@@ -112,6 +116,10 @@ export async function POST(req: NextRequest) {
     }
     if (!body.pagamento || !body.pagamento.trim()) {
       return NextResponse.json({ ok: false, error: "Forma de pagamento obrigatória" }, { status: 400 });
+    }
+
+    if (isPagamentoDinheiro(body.pagamento) && !body.troco?.trim()) {
+      return NextResponse.json({ ok: false, error: "Troco obrigatorio para dinheiro" }, { status: 400 });
     }
 
     if (body.tipoEntrega === "delivery" && (!body.bairro?.trim() || !body.rua?.trim() || !body.numero?.trim())) {
