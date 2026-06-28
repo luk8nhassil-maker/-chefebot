@@ -746,6 +746,11 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const ruaOk = rua.trim().length > 0;
   const numeroOk = numero.trim().length > 0;
   const delOk = delType === "retirada" || delType === "dine_in" || (delType === "delivery" && bairroIdx !== "" && ruaOk && numeroOk);
+  const enderecoErroAtivo = delType === "delivery" && !!erroEntrega;
+  const bairroErro = enderecoErroAtivo && bairroIdx === "";
+  const ruaErro = enderecoErroAtivo && !ruaOk;
+  const numeroErro = enderecoErroAtivo && !numeroOk;
+  const enderecoErroStyle = { borderColor: "#ef4444", background: "rgba(239,68,68,.08)", boxShadow: "0 0 0 1px rgba(239,68,68,.18)" };
   const payOk = !!nome.trim() && telefoneValido(telefone) && !!payment;
 
   const esgotados = menu.esgotados || [];
@@ -772,10 +777,22 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [esgotadosKey]);
 
+  function getEnderecoErro() {
+    const faltando = [bairroIdx === "" ? "bairro" : "", !ruaOk ? "rua" : "", !numeroOk ? "numero" : ""].filter(Boolean);
+    if (faltando.length === 0) return "";
+    if (faltando.length === 1) {
+      if (faltando[0] === "bairro") return "Selecione o bairro";
+      if (faltando[0] === "rua") return "Preencha a rua";
+      return "Preencha o numero";
+    }
+    const lista = faltando.length === 2 ? faltando.join(" e ") : faltando.slice(0, -1).join(", ") + " e " + faltando[faltando.length - 1];
+    return "Falta preencher: " + lista;
+  }
+
   async function finish() {
     if (sending) return;
     if (cartEsgotado) { showToast("Um item do seu pedido ficou esgotado. Remova para continuar."); return; }
-    if (delType === "delivery" && !delOk) { setErroEntrega("Preencha bairro, rua e numero para entrega."); go("sc-delivery"); return; }
+    if (delType === "delivery" && !delOk) { setErroEntrega(getEnderecoErro()); go("sc-delivery"); return; }
     let hasError = false;
     if (!nome.trim()) { setErroNome("Me diz seu nome pra gente identificar o pedido."); setEditandoIdentidade(true); nomeRef.current?.focus(); hasError = true; }
     else { setErroNome(""); }
@@ -975,10 +992,33 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
               <div className={`opt ${delType === "delivery" ? "sel" : ""}`} onClick={() => { setDelType("delivery"); if (erroEntrega) setErroEntrega(""); }}><div className="opt-emoji">🛵</div><div className="opt-body"><div className="opt-title">Entrega (delivery)</div><div className="opt-desc">Levamos até você</div></div><div className="opt-check" /></div>
               <div className={`opt ${delType === "retirada" ? "sel" : ""}`} onClick={() => { setDelType("retirada"); setBairroIdx(""); setErroEntrega(""); }}><div className="opt-emoji">🏪</div><div className="opt-body"><div className="opt-title">Buscar na loja</div><div className="opt-desc">Sem taxa de entrega</div></div><div className="opt-check" /></div>
               <div className={`opt ${delType === "dine_in" ? "sel" : ""}`} onClick={() => { setDelType("dine_in"); setBairroIdx(""); setErroEntrega(""); }}><div className="opt-emoji">🍽️</div><div className="opt-body"><div className="opt-title">Consumo no local</div><div className="opt-desc">Comer aqui na pizzaria</div></div><div className="opt-check" /></div>
-              {delType === "delivery" && (<div><div className="section-label">Endereço</div><div className="field"><label>Bairro</label><select value={bairroIdx} onChange={(e) => { setBairroIdx(e.target.value); if (erroEntrega) setErroEntrega(""); }}><option value="">Selecione o bairro…</option>{(menu.neighborhoods || []).map((b, i) => <option key={i} value={i}>{b.name} — {money(b.fee)}</option>)}</select></div><div className="field"><label>Rua</label><input value={rua} onChange={(e) => { setRua(e.target.value); if (erroEntrega) setErroEntrega(""); }} placeholder="Rua das Flores" /></div><div className="field"><label>Número</label><input value={numero} onChange={(e) => { setNumero(e.target.value); if (erroEntrega) setErroEntrega(""); }} inputMode="numeric" placeholder="123" /></div><div className="field"><label>Referência (opcional)</label><input value={referencia} onChange={(e) => setReferencia(e.target.value)} placeholder="Perto do mercado" /></div></div>)}
-              {erroEntrega && <div style={{ color: "#ef4444", fontSize: 12, marginTop: 6, marginBottom: 4 }}>{erroEntrega}</div>}
+              {delType === "delivery" && (
+                <div>
+                  <div className="section-label">Endereco</div>
+                  {erroEntrega && <div style={{ color: "#ef4444", fontSize: 12, fontWeight: 700, margin: "-4px 0 10px" }}>{erroEntrega}</div>}
+                  <div className="field">
+                    <label>Bairro</label>
+                    <select value={bairroIdx} onChange={(e) => { setBairroIdx(e.target.value); if (erroEntrega) setErroEntrega(""); }} style={bairroErro ? enderecoErroStyle : undefined}>
+                      <option value="">Selecione o bairro...</option>
+                      {(menu.neighborhoods || []).map((b, i) => <option key={i} value={i}>{b.name} - {money(b.fee)}</option>)}
+                    </select>
+                    {bairroErro && <div style={{ color: "#ef4444", fontSize: 12, marginTop: 4 }}>Selecione o bairro</div>}
+                  </div>
+                  <div className="field">
+                    <label>Rua</label>
+                    <input value={rua} onChange={(e) => { setRua(e.target.value); if (erroEntrega) setErroEntrega(""); }} placeholder="Rua das Flores" style={ruaErro ? enderecoErroStyle : undefined} />
+                    {ruaErro && <div style={{ color: "#ef4444", fontSize: 12, marginTop: 4 }}>Preencha a rua</div>}
+                  </div>
+                  <div className="field">
+                    <label>Numero</label>
+                    <input value={numero} onChange={(e) => { setNumero(e.target.value); if (erroEntrega) setErroEntrega(""); }} inputMode="numeric" placeholder="123" style={numeroErro ? enderecoErroStyle : undefined} />
+                    {numeroErro && <div style={{ color: "#ef4444", fontSize: 12, marginTop: 4 }}>Preencha o numero</div>}
+                  </div>
+                  <div className="field"><label>Referencia (opcional)</label><input value={referencia} onChange={(e) => setReferencia(e.target.value)} placeholder="Perto do mercado" /></div>
+                </div>
+              )}
 
-              <div className="btn-row"><button className="btn btn-ghost btn-back" onClick={() => go("sc-cart")}>←</button><button className="btn btn-sm" disabled={!delType} onClick={() => { if (!delOk) { setErroEntrega("Preencha bairro, rua e numero para entrega."); return; } setErroEntrega(""); go("sc-pay"); }}>Continuar</button></div>
+              <div className="btn-row"><button className="btn btn-ghost btn-back" onClick={() => go("sc-cart")}>{"<-"}</button><button className="btn btn-sm" disabled={!delType} onClick={() => { if (!delOk) { setErroEntrega(getEnderecoErro()); return; } setErroEntrega(""); go("sc-pay"); }}>Continuar</button></div>
             </section>
           )}
           {screen === "sc-pay" && (
