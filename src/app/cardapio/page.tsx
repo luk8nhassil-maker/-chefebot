@@ -751,6 +751,12 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const ruaErro = enderecoErroAtivo && !ruaOk;
   const numeroErro = enderecoErroAtivo && !numeroOk;
   const enderecoErroStyle = { borderColor: "#ef4444", background: "rgba(239,68,68,.08)", boxShadow: "0 0 0 1px rgba(239,68,68,.18)" };
+  const bairroSelectStyle = {
+    ...(bairroErro ? enderecoErroStyle : {}),
+    background: bairroErro ? "rgba(239,68,68,.08)" : "var(--surface)",
+    color: "var(--text)",
+  };
+  const bairroOptionStyle = { background: "#fff", color: "#2a1d16" };
   const payOk = !!nome.trim() && telefoneValido(telefone) && !!payment;
 
   const esgotados = menu.esgotados || [];
@@ -783,7 +789,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     if (faltando.length === 1) {
       if (faltando[0] === "bairro") return "Selecione o bairro";
       if (faltando[0] === "rua") return "Preencha a rua";
-      return "Preencha o numero";
+      return "Preencha o n?mero";
     }
     const lista = faltando.length === 2 ? faltando.join(" e ") : faltando.slice(0, -1).join(", ") + " e " + faltando[faltando.length - 1];
     return "Falta preencher: " + lista;
@@ -998,9 +1004,9 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                   {erroEntrega && <div style={{ color: "#ef4444", fontSize: 12, fontWeight: 700, margin: "-4px 0 10px" }}>{erroEntrega}</div>}
                   <div className="field">
                     <label>Bairro</label>
-                    <select value={bairroIdx} onChange={(e) => { setBairroIdx(e.target.value); if (erroEntrega) setErroEntrega(""); }} style={bairroErro ? enderecoErroStyle : undefined}>
-                      <option value="">Selecione o bairro...</option>
-                      {(menu.neighborhoods || []).map((b, i) => <option key={i} value={i}>{b.name} - {money(b.fee)}</option>)}
+                    <select value={bairroIdx} onChange={(e) => { setBairroIdx(e.target.value); if (erroEntrega) setErroEntrega(""); }} style={bairroSelectStyle}>
+                      <option value="" style={bairroOptionStyle}>Selecione o bairro...</option>
+                      {(menu.neighborhoods || []).map((b, i) => <option key={i} value={i} style={bairroOptionStyle}>{b.name} - {money(b.fee)}</option>)}
                     </select>
                     {bairroErro && <div style={{ color: "#ef4444", fontSize: 12, marginTop: 4 }}>Selecione o bairro</div>}
                   </div>
@@ -1010,9 +1016,12 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                     {ruaErro && <div style={{ color: "#ef4444", fontSize: 12, marginTop: 4 }}>Preencha a rua</div>}
                   </div>
                   <div className="field">
-                    <label>Numero</label>
-                    <input value={numero} onChange={(e) => { setNumero(e.target.value); if (erroEntrega) setErroEntrega(""); }} inputMode="numeric" placeholder="123" style={numeroErro ? enderecoErroStyle : undefined} />
-                    {numeroErro && <div style={{ color: "#ef4444", fontSize: 12, marginTop: 4 }}>Preencha o numero</div>}
+                    <label>N?mero</label>
+                    <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
+                      <input value={numero} onChange={(e) => { setNumero(e.target.value); if (erroEntrega) setErroEntrega(""); }} inputMode="text" placeholder="123" style={numeroErro ? enderecoErroStyle : undefined} />
+                      <button type="button" onClick={() => { setNumero("S/N"); if (erroEntrega) setErroEntrega(""); }} style={{ flex: "0 0 auto", border: "1px solid var(--line-strong)", borderRadius: 13, background: numero.trim().toUpperCase() === "S/N" ? "var(--brand-soft)" : "var(--surface2)", color: numero.trim().toUpperCase() === "S/N" ? "var(--brand)" : "var(--text)", fontSize: 12, fontWeight: 700, padding: "0 12px" }}>Sem n?mero</button>
+                    </div>
+                    {numeroErro && <div style={{ color: "#ef4444", fontSize: 12, marginTop: 4 }}>Preencha o n?mero</div>}
                   </div>
                   <div className="field"><label>Referencia (opcional)</label><input value={referencia} onChange={(e) => setReferencia(e.target.value)} placeholder="Perto do mercado" /></div>
                 </div>
