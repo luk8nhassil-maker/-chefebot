@@ -599,6 +599,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const [erroTelefone, setErroTelefone] = useState("");
   const [erroPagamento, setErroPagamento] = useState("");
   const [trocoOpcao, setTrocoOpcao] = useState<"nao" | "sim" | null>(null);
+  const [editandoIdentidade, setEditandoIdentidade] = useState(false);
   const pagamentoRef = useRef<HTMLDivElement>(null);
   const toastTimer = useRef<any>(null);
   const nomeRef = useRef<HTMLInputElement>(null);
@@ -610,7 +611,10 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     try {
       const n = localStorage.getItem("cf_nome"); const t = localStorage.getItem("cf_tel");
       if (n) setNome(n); if (t) setTelefone(t);
-    } catch {}
+      // Se dados válidos existem, não força edição
+      if (n && t && n.trim() && t.replace(/\D/g, "").length >= 10) setEditandoIdentidade(false);
+      else setEditandoIdentidade(true);
+    } catch { setEditandoIdentidade(true); }
   }, []);
 
   function showToast(m: string) { setToast(m); clearTimeout(toastTimer.current); toastTimer.current = setTimeout(() => setToast(""), 1700); }
@@ -694,11 +698,11 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     if (sending) return;
     if (cartEsgotado) { showToast("Um item do seu pedido ficou esgotado. Remova para continuar."); return; }
     let hasError = false;
-    if (!nome.trim()) { setErroNome("Por favor, informe seu nome."); nomeRef.current?.focus(); hasError = true; }
+    if (!nome.trim()) { setErroNome("Me diz seu nome pra gente identificar o pedido."); setEditandoIdentidade(true); nomeRef.current?.focus(); hasError = true; }
     else { setErroNome(""); }
-    if (!telefoneValido(telefone)) { setErroTelefone("Informe um WhatsApp válido (mínimo 10 dígitos)."); if (!hasError) telefoneRef.current?.focus(); hasError = true; }
+    if (!telefoneValido(telefone)) { setErroTelefone("Coloca um WhatsApp válido pra pizzaria falar com você se precisar."); setEditandoIdentidade(true); if (!hasError) telefoneRef.current?.focus(); hasError = true; }
     else { setErroTelefone(""); }
-    if (!payment) { setErroPagamento("Escolha uma forma de pagamento para enviar o pedido."); if (!hasError) pagamentoRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }); hasError = true; }
+    if (!payment) { setErroPagamento("pagamento"); if (!hasError) pagamentoRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }); hasError = true; }
     else { setErroPagamento(""); }
     if (hasError) return;
     setSending(true);
@@ -709,7 +713,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
       if (data.ok) { try { localStorage.setItem("cf_nome", nome.trim()); localStorage.setItem("cf_tel", telefone.trim()); } catch {} setPedidoConfirmado({ id: data.pedidoId, numero: data.numero, total: data.total }); go("sc-done"); } else { showToast("Erro ao enviar. Tente de novo."); }
     } catch { showToast("Sem conexão. Tente de novo."); } finally { setSending(false); }
   }
-  function resetAll() { setCart([]); resetBuild(); setDelType(null); setBairroIdx(""); setRua(""); setNumero(""); setReferencia(""); setPayment(null); setTroco(""); setTrocoOpcao(null); setObservacao(""); setErroNome(""); setErroTelefone(""); setErroPagamento(""); setPedidoConfirmado(null); go("sc-start"); }
+  function resetAll() { setCart([]); resetBuild(); setDelType(null); setBairroIdx(""); setRua(""); setNumero(""); setReferencia(""); setPayment(null); setTroco(""); setTrocoOpcao(null); setObservacao(""); setErroNome(""); setErroTelefone(""); setErroPagamento(""); setPedidoConfirmado(null); setEditandoIdentidade(false); go("sc-start"); }
 
   const stepMap: Record<string, number> = { "sc-start": 0, "sc-qty": 0, "sc-build": 0, "sc-border": 0, "sc-another": 0, "sc-list": 0, "sc-cart": 0, "sc-delivery": 1, "sc-pay": 2, "sc-done": 2 };
   const stepIdx = stepMap[screen] ?? 0;
@@ -886,21 +890,36 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
               <button className="btn btn-ghost" style={{ fontSize: 13, padding: "8px 14px", marginBottom: 20, marginTop: -8 }} onClick={() => go("sc-cart")}>← Editar carrinho</button>
 
               {/* Bloco: Identificação */}
-              <div className="section-label">Para quem é o pedido?</div>
-              <p style={{ fontSize: 13, color: "var(--muted)", marginBottom: 12, marginTop: -4 }}>Usamos esses dados para identificar seu pedido e falar com você se precisar.</p>
-              <div className="field">
-                <label>Seu nome</label>
-                <input ref={nomeRef} value={nome} onChange={(e) => { setNome(e.target.value); if (erroNome) setErroNome(""); }} placeholder="Como te chamamos?" />
-                {erroNome && <div style={{ color: "#ef4444", fontSize: 12, marginTop: 4 }}>{erroNome}</div>}
-              </div>
-              <div className="field">
-                <label>WhatsApp / telefone</label>
-                <input ref={telefoneRef} value={telefone} onChange={(e) => { const f = formatTel(e.target.value); setTelefone(f); if (erroTelefone) setErroTelefone(""); }} inputMode="tel" placeholder="(99) 9 9999-9999" />
-                {erroTelefone && <div style={{ color: "#ef4444", fontSize: 12, marginTop: 4 }}>{erroTelefone}</div>}
-              </div>
+              {!editandoIdentidade && nome.trim() && telefoneValido(telefone) ? (
+                <div style={{ background: "var(--card)", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
+                  <div style={{ fontSize: 12, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 6 }}>Pedido identificado</div>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: "var(--fg)" }}>{nome.trim()}</div>
+                  <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 2 }}>{telefone}</div>
+                  <button
+                    style={{ marginTop: 10, background: "none", border: "none", color: "#ff6b00", fontSize: 13, cursor: "pointer", padding: 0, textDecoration: "underline" }}
+                    onClick={() => setEditandoIdentidade(true)}
+                  >Alterar dados</button>
+                </div>
+              ) : (
+                <div style={{ marginBottom: 16 }}>
+                  <div className="section-label">Pra quem é o pedido?</div>
+                  <p style={{ fontSize: 13, color: "var(--muted)", marginBottom: 12, marginTop: -4 }}>Rapidinho: é só pra gente identificar seu pedido e falar com você se precisar.</p>
+                  <div className="field">
+                    <label>Seu nome</label>
+                    <input ref={nomeRef} value={nome} onChange={(e) => { setNome(e.target.value); if (erroNome) setErroNome(""); }} placeholder="Como te chamamos?" />
+                    {erroNome && <div style={{ color: "#ef4444", fontSize: 12, marginTop: 4 }}>{erroNome}</div>}
+                  </div>
+                  <div className="field">
+                    <label>WhatsApp</label>
+                    <input ref={telefoneRef} value={telefone} onChange={(e) => { const f = formatTel(e.target.value); setTelefone(f); if (erroTelefone) setErroTelefone(""); }} inputMode="tel" placeholder="(99) 9 9999-9999" />
+                    {erroTelefone && <div style={{ color: "#ef4444", fontSize: 12, marginTop: 4 }}>{erroTelefone}</div>}
+                  </div>
+                </div>
+              )}
 
               {/* Bloco: Pagamento */}
-              <div ref={pagamentoRef} className="section-label" style={{ marginTop: 8 }}>Como você vai pagar?</div>
+              <div ref={pagamentoRef} className="section-label" style={{ marginTop: 0 }}>Como você vai pagar?</div>
+              <p style={{ fontSize: 13, color: "var(--muted)", marginBottom: 10, marginTop: -4 }}>Escolhe a melhor forma pra você.</p>
               {(menu.payments || []).map((p) => {
                 const emojis: Record<string, string> = { Pix: "⚡", Dinheiro: "💵", Cartao: "💳" };
                 const hints: Record<string, string> = { Pix: "A pizzaria confirma antes de preparar.", Dinheiro: "Pagamento na entrega/retirada.", Cartao: "Pagamento na entrega/retirada." };
@@ -915,7 +934,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                   </div>
                 );
               })}
-              {erroPagamento && <div style={{ color: "#ef4444", fontSize: 12, marginTop: 6, marginBottom: 4 }}>{erroPagamento}</div>}
+              {erroPagamento && <div style={{ color: "#ef4444", fontSize: 12, marginTop: 6, marginBottom: 4 }}>Falta só escolher como você vai pagar.</div>}
               {payment === "Dinheiro" && (
                 <div style={{ marginTop: 8, padding: "12px 14px", background: "var(--card)", borderRadius: 10 }}>
                   <div style={{ fontSize: 13, fontWeight: 600, color: "var(--fg)", marginBottom: 8 }}>Precisa de troco?</div>
@@ -933,16 +952,18 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
               )}
 
               {/* Bloco: Observação */}
-              <div className="field" style={{ marginTop: 16 }}><label>Observação (opcional)</label><input value={observacao} onChange={(e) => setObservacao(e.target.value)} placeholder="Ex: sem cebola, cortar a pizza, ponto da massa…" /></div>
+              <div style={{ marginTop: 16, marginBottom: 4 }}>
+                <div className="section-label">Algum detalhe no pedido?</div>
+                <p style={{ fontSize: 13, color: "var(--muted)", marginBottom: 10, marginTop: -4 }}>Se não tiver nada, pode enviar direto.</p>
+                <div className="field" style={{ marginBottom: 0 }}><input value={observacao} onChange={(e) => setObservacao(e.target.value)} placeholder="Ex: sem cebola, cortar a pizza, caprichar no molho…" /></div>
+              </div>
 
               {/* Bloco: Revisão */}
               {nome.trim() && telefoneValido(telefone) && payment && (
-                <div style={{ marginTop: 8, padding: "12px 14px", borderRadius: 10, background: "rgba(255,107,0,.08)", fontSize: 13 }}>
-                  <div style={{ fontWeight: 700, color: "var(--fg)", marginBottom: 6 }}>Resumo do pedido</div>
-                  <div style={{ color: "var(--muted)", lineHeight: 1.7 }}>
+                <div style={{ marginTop: 16, padding: "12px 14px", borderRadius: 10, background: "rgba(255,107,0,.08)", fontSize: 13 }}>
+                  <div style={{ fontWeight: 700, color: "var(--fg)", marginBottom: 8 }}>Tudo certo por aqui</div>
+                  <div style={{ color: "var(--muted)", lineHeight: 1.8 }}>
                     <div>Pedido para: <strong style={{ color: "var(--fg)" }}>{nome.trim()}</strong></div>
-                    <div>WhatsApp: <strong style={{ color: "var(--fg)" }}>{telefone}</strong></div>
-                    <div>Recebimento: <strong style={{ color: "var(--fg)" }}>{delType === "delivery" ? `Entrega — ${(menu.neighborhoods || [])[+bairroIdx]?.name ?? ""}` : delType === "retirada" ? "Retirada na loja" : "Consumo no local"}</strong></div>
                     <div>Pagamento: <strong style={{ color: "var(--fg)" }}>{payment === "Cartao" ? "Cartão" : payment}</strong></div>
                     <div>Total: <strong style={{ color: "#ff6b00" }}>{money(cartTotal + fee)}</strong></div>
                   </div>
