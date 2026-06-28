@@ -10,7 +10,7 @@ export type MenuType = {
   sizes: { code: string; label: string; price: number }[];
   saltyFlavors: string[];
   sweetFlavors: string[];
-  lanches: { name: string; price: number }[];
+  lanches: { name: string; price: number; sizes?: { code: string; price: number }[] }[];
   bebidas: { name: string; price: number }[];
   sucos: { name: string; price: number }[];
   borders: { label: string; priceSmall: number; priceLarge: number }[];
@@ -583,6 +583,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const [borderPrice, setBorderPrice] = useState(0);
   const [plan, setPlan] = useState<{ total: number; current: number; openEnded: boolean }>({ total: 0, current: 0, openEnded: false });
   const [listCat, setListCat] = useState<"lanche" | "bebida" | "suco">("lanche");
+  const [macarronadaPendente, setMacarronadaPendente] = useState<{ name: string; price: number; sizes?: { code: string; price: number }[] } | null>(null);
   const [delType, setDelType] = useState<"delivery" | "retirada" | "dine_in" | null>(null);
   const [bairroIdx, setBairroIdx] = useState<string>("");
   const [rua, setRua] = useState("");
@@ -697,11 +698,31 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   }
   function addAnother() { setPlan({ total: 0, current: pizzasNoCarrinho() + 1, openEnded: true }); resetBuild(); go("sc-build"); }
   function goCat(cat: "lanche" | "bebida" | "suco") { setListCat(cat); go("sc-list"); }
-  function addSimple(it: { name: string; price: number }, emoji: string) {
+  function isMacarronada(it: { name: string; sizes?: { code: string; price: number }[] }) {
+    return it.name.toLowerCase().includes("macarronada") && Array.isArray(it.sizes) && it.sizes.length > 0;
+  }
+  function simplePriceLabel(it: { price: number; sizes?: { code: string; price: number }[] }) {
+    if (Array.isArray(it.sizes) && it.sizes.length > 0) return `A partir de ${money(Math.min(...it.sizes.map((s) => s.price)))}`;
+    return money(it.price);
+  }
+  function addSimple(it: { name: string; price: number; sizes?: { code: string; price: number }[] }, emoji: string) {
+    if (isMacarronada(it)) { setMacarronadaPendente(it); go("sc-macarronada-size"); return; }
     const ex = cart.find((c) => c.kind === "simple" && c.name === it.name);
     if (ex) { setCart(cart.map((c) => (c === ex ? { ...c, qty: c.qty + 1 } : c))); }
     else { setCart([...cart, { emoji, kind: "simple", name: it.name, detail: "", price: it.price, qty: 1, keys: [it.name] }]); }
     showToast(`${it.name} adicionado!`);
+  }
+  function addMacarronadaSize(code: string) {
+    if (!macarronadaPendente) return;
+    const sizeOption = macarronadaPendente.sizes?.find((s) => s.code === code);
+    if (!sizeOption) return;
+    const detail = `Tamanho ${sizeOption.code}`;
+    const ex = cart.find((c) => c.kind === "simple" && c.name === macarronadaPendente.name && c.detail === detail);
+    if (ex) setCart(cart.map((c) => (c === ex ? { ...c, qty: c.qty + 1 } : c)));
+    else setCart([...cart, { emoji: "🍽️", kind: "simple", name: macarronadaPendente.name, detail, price: sizeOption.price, qty: 1, keys: [macarronadaPendente.name] }]);
+    showToast(`${macarronadaPendente.name} ${sizeOption.code} adicionada!`);
+    setMacarronadaPendente(null);
+    go("sc-cart");
   }
   const cartTotal = cart.reduce((s, i) => s + i.price * i.qty, 0);
   const cartCount = cart.reduce((s, i) => s + i.qty, 0);
@@ -761,7 +782,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   }
   function resetAll() { setCart([]); resetBuild(); setDelType(null); setBairroIdx(""); setRua(""); setNumero(""); setReferencia(""); setPayment(null); setTroco(""); setTrocoOpcao(null); setObservacao(""); setErroNome(""); setErroTelefone(""); setErroPagamento(""); setErroTroco(""); setPedidoConfirmado(null); setRestoredDraft(false); setEditandoIdentidade(false); try { sessionStorage.removeItem("cf_draft"); } catch {} go("sc-start"); }
 
-  const stepMap: Record<string, number> = { "sc-start": 0, "sc-qty": 0, "sc-build": 0, "sc-border": 0, "sc-list": 0, "sc-another": 1, "sc-cart": 1, "sc-delivery": 2, "sc-pay": 3, "sc-done": 3 };
+  const stepMap: Record<string, number> = { "sc-start": 0, "sc-qty": 0, "sc-build": 0, "sc-border": 0, "sc-list": 0, "sc-macarronada-size": 0, "sc-another": 1, "sc-cart": 1, "sc-delivery": 2, "sc-pay": 3, "sc-done": 3 };
   const stepIdx = stepMap[screen] ?? 0;
   const STEPS = ["Itens", "Sacola", "Entrega", "Pagar"];
   const feitas = pizzasNoCarrinho();
@@ -890,8 +911,17 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
             <section className="screen active">
               {(() => {
                 const cfg = { lanche: { eb: "Lanches & Porções", t: "Escolha seu lanche", data: menu.lanches || [], emoji: "🍽️" }, bebida: { eb: "Bebidas", t: "Bebidas geladas", data: menu.bebidas || [], emoji: "🥤" }, suco: { eb: "Sucos naturais", t: "Sucos da casa", data: menu.sucos || [], emoji: "🧃" } }[listCat];
-                return (<><div className="screen-head"><div className="eyebrow">{cfg.eb}</div><h2>{cfg.t}</h2><p>Toque para adicionar.</p></div>{cfg.data.map((it, i) => { const esg = esgotados.includes(it.name); return (<div key={i} className="opt" onClick={() => !esg && addSimple(it, cfg.emoji)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }}><div className="opt-emoji">{cfg.emoji}</div><div className="opt-body"><div className="opt-title">{it.name}</div>{esg && <div className="opt-desc" style={{ color: "#ef4444" }}>Esgotado</div>}</div><div className="opt-price">{money(it.price)}</div></div>); })}<div className="btn-row"><button className="btn btn-ghost btn-sm" onClick={() => go("sc-start")}>Voltar ao início</button></div></>);
+                return (<><div className="screen-head"><div className="eyebrow">{cfg.eb}</div><h2>{cfg.t}</h2><p>Toque para adicionar.</p></div>{cfg.data.map((it, i) => { const esg = esgotados.includes(it.name); return (<div key={i} className="opt" onClick={() => !esg && addSimple(it, cfg.emoji)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }}><div className="opt-emoji">{cfg.emoji}</div><div className="opt-body"><div className="opt-title">{it.name}</div>{esg && <div className="opt-desc" style={{ color: "#ef4444" }}>Esgotado</div>}</div><div className="opt-price">{simplePriceLabel(it)}</div></div>); })}<div className="btn-row"><button className="btn btn-ghost btn-sm" onClick={() => go("sc-start")}>Voltar ao início</button></div></>);
               })()}
+            </section>
+          )}
+          {screen === "sc-macarronada-size" && macarronadaPendente && (
+            <section className="screen active">
+              <div className="screen-head"><div className="eyebrow">Macarronada</div><h2>Escolha o tamanho</h2><p>{macarronadaPendente.name}</p></div>
+              {(macarronadaPendente.sizes || []).map((s) => (
+                <div key={s.code} className="opt" onClick={() => addMacarronadaSize(s.code)}><div className="opt-emoji">🍽️</div><div className="opt-body"><div className="opt-title">Tamanho {s.code}</div></div><div className="opt-price">{money(s.price)}</div></div>
+              ))}
+              <div className="btn-row"><button className="btn btn-ghost btn-sm" onClick={() => { setMacarronadaPendente(null); go("sc-list"); }}>Voltar</button></div>
             </section>
           )}
           {screen === "sc-cart" && (

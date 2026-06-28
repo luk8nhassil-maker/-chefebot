@@ -122,6 +122,56 @@ describe("POST /api/pedido-app", () => {
     expect(pedidos[0].total).toBe(30);
   });
 
+
+  it("aceita macarronada P com preco oficial mesmo se o browser manda preco manipulado", async () => {
+    const res = await POST(postReq({
+      ...basePayload,
+      itens: [{ kind: "simple", name: "Macarronada de Carne", detail: "Tamanho P", price: 1, qty: 1 }],
+    }));
+
+    expect(res.status).toBe(200);
+    const pedidos = store.get("pedidos") as PedidoSalvo[];
+    expect(pedidos[0].itens).toEqual(["Macarronada de Carne Tamanho P"]);
+    expect(pedidos[0].taxaEntrega).toBe(3);
+    expect(pedidos[0].total).toBe(31);
+  });
+
+  it("aceita macarronada M e G com precos oficiais", async () => {
+    const resM = await POST(postReq({
+      ...basePayload,
+      itens: [{ kind: "simple", name: "Macarronada de Frango", detail: "Tamanho M", price: 1, qty: 1 }],
+    }));
+    expect(resM.status).toBe(200);
+    expect((store.get("pedidos") as PedidoSalvo[])[0].total).toBe(43);
+
+    store.clear();
+    const resG = await POST(postReq({
+      ...basePayload,
+      itens: [{ kind: "simple", name: "Macarronada de Frango", detail: "Tamanho G", price: 1, qty: 1 }],
+    }));
+    expect(resG.status).toBe(200);
+    expect((store.get("pedidos") as PedidoSalvo[])[0].total).toBe(53);
+  });
+
+  it("rejeita macarronada sem tamanho", async () => {
+    const res = await POST(postReq({
+      ...basePayload,
+      itens: [{ kind: "simple", name: "Macarronada de Carne", detail: "", price: 1, qty: 1 }],
+    }));
+
+    expect(res.status).toBe(400);
+    expect(store.get("pedidos")).toBeUndefined();
+  });
+
+  it("rejeita macarronada com tamanho invalido", async () => {
+    const res = await POST(postReq({
+      ...basePayload,
+      itens: [{ kind: "simple", name: "Macarronada de Carne", detail: "Tamanho X", price: 1, qty: 1 }],
+    }));
+
+    expect(res.status).toBe(400);
+    expect(store.get("pedidos")).toBeUndefined();
+  });
   it("rejeita item que nao existe no cardapio oficial", async () => {
     const res = await POST(postReq({
       ...basePayload,
