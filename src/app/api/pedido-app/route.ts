@@ -114,6 +114,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "Forma de pagamento obrigatória" }, { status: 400 });
     }
 
+    if (body.tipoEntrega === "delivery" && (!body.bairro?.trim() || !body.rua?.trim() || !body.numero?.trim())) {
+      return NextResponse.json({ ok: false, error: "Endereco obrigatorio para entrega" }, { status: 400 });
+    }
+
     const menu = await getMENUDinamico();
     const pedidos = (await redis.get<unknown[]>("pedidos")) || [];
 
