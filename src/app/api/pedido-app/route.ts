@@ -28,11 +28,13 @@ type PedidoApp = {
   observacao?: string;
 };
 
+type MenuSimpleItem = { name: string; price: number; sizes?: { code: string; price: number }[] };
+
 type MenuPedidoApp = {
   sizes: { code: string; price: number }[];
   saltyFlavors: string[];
   sweetFlavors: string[];
-  lanches: { name: string; price: number }[];
+  lanches: { name: string; price: number; sizes?: { code: string; price: number }[] }[];
   bebidas: { name: string; price: number }[];
   sucos: { name: string; price: number }[];
   borders: { label: string; priceSmall: number; priceLarge: number }[];
@@ -52,9 +54,17 @@ function officialUnitPrice(item: ItemApp, menu: MenuPedidoApp): number | null {
   if (!Number.isInteger(item.qty) || item.qty < 1) return null;
 
   if (item.kind === "simple") {
-    const produtos = [...menu.lanches, ...menu.bebidas, ...menu.sucos];
+    const produtos: MenuSimpleItem[] = [...menu.lanches, ...menu.bebidas, ...menu.sucos];
     const found = produtos.find((produto) => norm(produto.name) === norm(item.name));
-    return found && Number.isFinite(found.price) ? found.price : null;
+    if (!found) return null;
+
+    if (norm(found.name).includes("macarronada")) {
+      const sizeCode = item.detail?.match(/^Tamanho\s+([A-Za-z])$/i)?.[1]?.toUpperCase();
+      const size = sizeCode ? found.sizes?.find((entry) => entry.code.toUpperCase() === sizeCode) : null;
+      return size && Number.isFinite(size.price) ? size.price : null;
+    }
+
+    return Number.isFinite(found.price) ? found.price : null;
   }
 
   if (item.kind !== "pizza") return null;
