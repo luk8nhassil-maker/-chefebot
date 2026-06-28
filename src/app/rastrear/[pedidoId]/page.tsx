@@ -110,14 +110,19 @@ export default function RastrearPage({ params }: PageProps) {
   return (
     <div style={{ background: '#060606', minHeight: '100dvh', fontFamily: 'Archivo, sans-serif', color: '#fff', display: 'flex', flexDirection: 'column' }}>
       {/* Header */}
-      <div style={{ background: '#111', borderBottom: '1px solid #222', padding: '16px 20px', display: 'flex', alignItems: 'center', gap: '10px' }}>
-        <span style={{ fontSize: '22px' }}>🍕</span>
-        <div>
-          <div style={{ fontSize: '15px', fontWeight: 700, color: '#ff6b00' }}>
-            {pedidoStatus?.numero ? `Pedido #${pedidoStatus.numero}` : 'Acompanhar Pedido'}
+      <div style={{ background: '#111', borderBottom: '1px solid #222', padding: '12px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <span style={{ fontSize: '22px' }}>🍕</span>
+          <div>
+            <div style={{ fontSize: '15px', fontWeight: 700, color: '#ff6b00' }}>
+              {pedidoStatus?.numero ? `Pedido #${pedidoStatus.numero}` : 'Acompanhar Pedido'}
+            </div>
+            <div style={{ fontSize: '11px', color: '#888' }}>#{pedidoId}</div>
           </div>
-          <div style={{ fontSize: '11px', color: '#888' }}>#{pedidoId}</div>
         </div>
+        <a href="/cardapio" style={{ fontSize: '13px', color: '#888', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '4px' }}>
+          ← Cardápio
+        </a>
       </div>
 
       {/* Área do mapa — só para delivery em rota */}
@@ -149,6 +154,14 @@ export default function RastrearPage({ params }: PageProps) {
             </div>
           </div>
         )}
+
+        {/* Botão novo pedido */}
+        <a
+          href="/cardapio"
+          style={{ display: 'block', width: '100%', padding: '14px', borderRadius: '12px', background: '#ff6b00', color: '#fff', fontSize: '15px', fontWeight: 700, textDecoration: 'none', textAlign: 'center', boxSizing: 'border-box', marginBottom: '10px' }}
+        >
+          Fazer novo pedido
+        </a>
 
         {/* Botão WhatsApp */}
         <a
