@@ -38,6 +38,9 @@ export async function POST(req: NextRequest) {
     if (!body.telefone || !body.telefone.trim()) {
       return NextResponse.json({ ok: false, error: "Telefone obrigatório" }, { status: 400 });
     }
+    if (!body.pagamento || !body.pagamento.trim()) {
+      return NextResponse.json({ ok: false, error: "Forma de pagamento obrigatória" }, { status: 400 });
+    }
 
     const pedidos = (await redis.get<any[]>("pedidos")) || [];
 
@@ -70,7 +73,7 @@ export async function POST(req: NextRequest) {
       data: new Date().toLocaleDateString("pt-BR"),
       origem: "site",
       ...(body.observacao ? { observacao: body.observacao } : {}),
-      ...(body.pagamento ? { pagamento: body.pagamento } : {}),
+      pagamento: body.pagamento,
       ...(body.troco ? { troco: body.troco } : {}),
       ...(taxa ? { taxaEntrega: taxa } : {}),
       ...(body.bairro ? { bairro: body.bairro } : {}),

@@ -597,6 +597,9 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const [pedidoConfirmado, setPedidoConfirmado] = useState<{ id: string; numero: number; total: number } | null>(null);
   const [erroNome, setErroNome] = useState("");
   const [erroTelefone, setErroTelefone] = useState("");
+  const [erroPagamento, setErroPagamento] = useState("");
+  const [trocoOpcao, setTrocoOpcao] = useState<"nao" | "sim" | null>(null);
+  const pagamentoRef = useRef<HTMLDivElement>(null);
   const toastTimer = useRef<any>(null);
   const nomeRef = useRef<HTMLInputElement>(null);
   const telefoneRef = useRef<HTMLInputElement>(null);
@@ -695,6 +698,8 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     else { setErroNome(""); }
     if (!telefoneValido(telefone)) { setErroTelefone("Informe um WhatsApp válido (mínimo 10 dígitos)."); if (!hasError) telefoneRef.current?.focus(); hasError = true; }
     else { setErroTelefone(""); }
+    if (!payment) { setErroPagamento("Escolha uma forma de pagamento para enviar o pedido."); if (!hasError) pagamentoRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }); hasError = true; }
+    else { setErroPagamento(""); }
     if (hasError) return;
     setSending(true);
     const payload = { cliente: nome.trim(), telefone: telefone.trim(), itens: cart.map((c) => ({ kind: c.kind, name: c.name, detail: c.detail, price: c.price, qty: c.qty })), tipoEntrega: delType, bairro: delType === "delivery" ? menu.neighborhoods[+bairroIdx].name : undefined, rua: delType === "delivery" ? rua : undefined, numero: delType === "delivery" && numero.trim() ? numero.trim() : undefined, referencia: delType === "delivery" && referencia.trim() ? referencia.trim() : undefined, observacao: observacao.trim() || undefined, taxaEntrega: fee, pagamento: payment, troco: payment === "Dinheiro" && troco ? troco : undefined };
@@ -704,7 +709,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
       if (data.ok) { try { localStorage.setItem("cf_nome", nome.trim()); localStorage.setItem("cf_tel", telefone.trim()); } catch {} setPedidoConfirmado({ id: data.pedidoId, numero: data.numero, total: data.total }); go("sc-done"); } else { showToast("Erro ao enviar. Tente de novo."); }
     } catch { showToast("Sem conexão. Tente de novo."); } finally { setSending(false); }
   }
-  function resetAll() { setCart([]); resetBuild(); setDelType(null); setBairroIdx(""); setRua(""); setNumero(""); setReferencia(""); setPayment(null); setTroco(""); setObservacao(""); setErroNome(""); setErroTelefone(""); setPedidoConfirmado(null); go("sc-start"); }
+  function resetAll() { setCart([]); resetBuild(); setDelType(null); setBairroIdx(""); setRua(""); setNumero(""); setReferencia(""); setPayment(null); setTroco(""); setTrocoOpcao(null); setObservacao(""); setErroNome(""); setErroTelefone(""); setErroPagamento(""); setPedidoConfirmado(null); go("sc-start"); }
 
   const stepMap: Record<string, number> = { "sc-start": 0, "sc-qty": 0, "sc-build": 0, "sc-border": 0, "sc-another": 0, "sc-list": 0, "sc-cart": 0, "sc-delivery": 1, "sc-pay": 2, "sc-done": 2 };
   const stepIdx = stepMap[screen] ?? 0;
@@ -862,7 +867,25 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
           )}
           {screen === "sc-pay" && (
             <section className="screen active">
-              <div className="screen-head"><div className="eyebrow">Pagamento</div><h2>Quase lá!</h2></div>
+              <div className="screen-head"><div className="eyebrow">Finalizar pedido</div><h2>Quase lá!</h2><p style={{ fontSize: 13, color: "var(--muted)", margin: "4px 0 0" }}>Confira seus dados e escolha como vai pagar.</p></div>
+
+              {/* Bloco: Resumo do pedido */}
+              <div className="section-label">Meu pedido</div>
+              <div style={{ background: "var(--card)", borderRadius: 10, padding: "10px 14px", marginBottom: 16 }}>
+                {cart.map((c, i) => (
+                  <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "var(--muted)", paddingBottom: 4 }}>
+                    <span>{c.qty > 1 ? `${c.qty}× ` : ""}{c.name}{c.detail ? ` · ${c.detail}` : ""}</span>
+                    <span style={{ whiteSpace: "nowrap", paddingLeft: 8 }}>{money(c.price * c.qty)}</span>
+                  </div>
+                ))}
+                {fee > 0 && <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "var(--muted)", paddingTop: 4, borderTop: "1px solid var(--border)" }}><span>Taxa de entrega</span><span>{money(fee)}</span></div>}
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 15, fontWeight: 700, color: "var(--fg)", paddingTop: 8, marginTop: 4, borderTop: "1px solid var(--border)" }}>
+                  <span>Total</span><span style={{ color: "#ff6b00" }}>{money(cartTotal + fee)}</span>
+                </div>
+              </div>
+              <button className="btn btn-ghost" style={{ fontSize: 13, padding: "8px 14px", marginBottom: 20, marginTop: -8 }} onClick={() => go("sc-cart")}>← Editar carrinho</button>
+
+              {/* Bloco: Identificação */}
               <div className="section-label">Para quem é o pedido?</div>
               <p style={{ fontSize: 13, color: "var(--muted)", marginBottom: 12, marginTop: -4 }}>Usamos esses dados para identificar seu pedido e falar com você se precisar.</p>
               <div className="field">
@@ -875,15 +898,57 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                 <input ref={telefoneRef} value={telefone} onChange={(e) => { const f = formatTel(e.target.value); setTelefone(f); if (erroTelefone) setErroTelefone(""); }} inputMode="tel" placeholder="(99) 9 9999-9999" />
                 {erroTelefone && <div style={{ color: "#ef4444", fontSize: 12, marginTop: 4 }}>{erroTelefone}</div>}
               </div>
-              <div className="section-label">Forma de pagamento</div>
-              {(menu.payments || []).map((p) => { const e: Record<string, string> = { Pix: "⚡", Dinheiro: "💵", Cartao: "💳" }; return (<div key={p} className={`opt ${payment === p ? "sel" : ""}`} onClick={() => setPayment(p)}><div className="opt-emoji">{e[p] || "💰"}</div><div className="opt-body"><div className="opt-title">{p === "Cartao" ? "Cartão" : p}</div></div><div className="opt-check" /></div>); })}
-              {payment === "Dinheiro" && <div className="field" style={{ marginTop: 8 }}><label>Troco para quanto?</label><input value={troco} onChange={(e) => setTroco(e.target.value)} inputMode="numeric" placeholder="Ex: 50" /></div>}
-              <div className="field" style={{ marginTop: 8 }}><label>Observação (opcional)</label><input value={observacao} onChange={(e) => setObservacao(e.target.value)} placeholder="Sem cebola, caprichar no recheio…" /></div>
-              {nome.trim() && telefoneValido(telefone) && (
-                <div style={{ marginTop: 8, padding: "10px 12px", borderRadius: 10, background: "rgba(255,107,0,.08)", fontSize: 13, color: "var(--muted)" }}>
-                  Pedido para: <strong style={{ color: "var(--fg)" }}>{nome.trim()}</strong> · WhatsApp: <strong style={{ color: "var(--fg)" }}>{telefone}</strong>
+
+              {/* Bloco: Pagamento */}
+              <div ref={pagamentoRef} className="section-label" style={{ marginTop: 8 }}>Como você vai pagar?</div>
+              {(menu.payments || []).map((p) => {
+                const emojis: Record<string, string> = { Pix: "⚡", Dinheiro: "💵", Cartao: "💳" };
+                const hints: Record<string, string> = { Pix: "A pizzaria confirma antes de preparar.", Dinheiro: "Pagamento na entrega/retirada.", Cartao: "Pagamento na entrega/retirada." };
+                return (
+                  <div key={p} className={`opt ${payment === p ? "sel" : ""}`} onClick={() => { setPayment(p); setErroPagamento(""); if (p !== "Dinheiro") { setTroco(""); setTrocoOpcao(null); } }}>
+                    <div className="opt-emoji">{emojis[p] || "💰"}</div>
+                    <div className="opt-body">
+                      <div className="opt-title">{p === "Cartao" ? "Cartão" : p}</div>
+                      {payment === p && <div className="opt-desc">{hints[p]}</div>}
+                    </div>
+                    <div className="opt-check" />
+                  </div>
+                );
+              })}
+              {erroPagamento && <div style={{ color: "#ef4444", fontSize: 12, marginTop: 6, marginBottom: 4 }}>{erroPagamento}</div>}
+              {payment === "Dinheiro" && (
+                <div style={{ marginTop: 8, padding: "12px 14px", background: "var(--card)", borderRadius: 10 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: "var(--fg)", marginBottom: 8 }}>Precisa de troco?</div>
+                  <div style={{ display: "flex", gap: 8, marginBottom: trocoOpcao === "sim" ? 12 : 0 }}>
+                    <button className={`btn ${trocoOpcao === "nao" ? "" : "btn-ghost"}`} style={{ flex: 1, fontSize: 13, padding: "10px 0" }} onClick={() => { setTrocoOpcao("nao"); setTroco(""); }}>Não preciso</button>
+                    <button className={`btn ${trocoOpcao === "sim" ? "" : "btn-ghost"}`} style={{ flex: 1, fontSize: 13, padding: "10px 0" }} onClick={() => setTrocoOpcao("sim")}>Sim, preciso</button>
+                  </div>
+                  {trocoOpcao === "sim" && (
+                    <div className="field" style={{ marginBottom: 0 }}>
+                      <label>Troco para quanto?</label>
+                      <input value={troco} onChange={(e) => setTroco(e.target.value)} inputMode="numeric" placeholder={`Ex: ${Math.ceil((cartTotal + fee) / 10) * 10}`} />
+                    </div>
+                  )}
                 </div>
               )}
+
+              {/* Bloco: Observação */}
+              <div className="field" style={{ marginTop: 16 }}><label>Observação (opcional)</label><input value={observacao} onChange={(e) => setObservacao(e.target.value)} placeholder="Ex: sem cebola, cortar a pizza, ponto da massa…" /></div>
+
+              {/* Bloco: Revisão */}
+              {nome.trim() && telefoneValido(telefone) && payment && (
+                <div style={{ marginTop: 8, padding: "12px 14px", borderRadius: 10, background: "rgba(255,107,0,.08)", fontSize: 13 }}>
+                  <div style={{ fontWeight: 700, color: "var(--fg)", marginBottom: 6 }}>Resumo do pedido</div>
+                  <div style={{ color: "var(--muted)", lineHeight: 1.7 }}>
+                    <div>Pedido para: <strong style={{ color: "var(--fg)" }}>{nome.trim()}</strong></div>
+                    <div>WhatsApp: <strong style={{ color: "var(--fg)" }}>{telefone}</strong></div>
+                    <div>Recebimento: <strong style={{ color: "var(--fg)" }}>{delType === "delivery" ? `Entrega — ${(menu.neighborhoods || [])[+bairroIdx]?.name ?? ""}` : delType === "retirada" ? "Retirada na loja" : "Consumo no local"}</strong></div>
+                    <div>Pagamento: <strong style={{ color: "var(--fg)" }}>{payment === "Cartao" ? "Cartão" : payment}</strong></div>
+                    <div>Total: <strong style={{ color: "#ff6b00" }}>{money(cartTotal + fee)}</strong></div>
+                  </div>
+                </div>
+              )}
+
               {cartEsgotado && <div style={{ marginTop: 8, padding: "10px 12px", borderRadius: 10, background: "rgba(239,68,68,.1)", color: "#ef4444", fontSize: 13, fontWeight: 700 }}>Um item do seu pedido ficou esgotado. Remova para continuar.</div>}
               <div className="btn-row"><button className="btn btn-ghost btn-back" onClick={() => go("sc-delivery")}>←</button><button className="btn btn-sm" disabled={sending || cartEsgotado} onClick={finish}>{sending ? "Enviando…" : "Enviar pedido"}</button></div>
             </section>
