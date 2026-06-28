@@ -28,6 +28,61 @@ type PedidoApp = {
   observacao?: string;
 };
 
+type MenuPedidoApp = {
+  sizes: { code: string; price: number }[];
+  saltyFlavors: string[];
+  sweetFlavors: string[];
+  lanches: { name: string; price: number }[];
+  bebidas: { name: string; price: number }[];
+  sucos: { name: string; price: number }[];
+  borders: { label: string; priceSmall: number; priceLarge: number }[];
+};
+
+function norm(value: string): string {
+  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+}
+
+function formatItem(item: ItemApp): string {
+  const qtyPrefix = item.qty > 1 ? `${item.qty}x ` : "";
+  const detalhe = item.detail ? ` ${item.detail}` : "";
+  return `${qtyPrefix}${item.name}${detalhe}`.trim();
+}
+
+function officialUnitPrice(item: ItemApp, menu: MenuPedidoApp): number | null {
+  if (!Number.isInteger(item.qty) || item.qty < 1) return null;
+
+  if (item.kind === "simple") {
+    const produtos = [...menu.lanches, ...menu.bebidas, ...menu.sucos];
+    const found = produtos.find((produto) => norm(produto.name) === norm(item.name));
+    return found && Number.isFinite(found.price) ? found.price : null;
+  }
+
+  if (item.kind !== "pizza") return null;
+
+  const sizeCode = item.name.match(/^Pizza\s+([A-Za-z])/i)?.[1]?.toUpperCase();
+  const size = sizeCode ? menu.sizes.find((entry) => entry.code.toUpperCase() === sizeCode) : null;
+  if (!size || !Number.isFinite(size.price)) return null;
+
+  const detail = item.detail || "";
+  const detailParts = detail.split("·").map((part) => part.trim()).filter(Boolean);
+  const flavorsText = detailParts[0] || "";
+  const flavors = flavorsText.split("/").map((part) => part.trim()).filter(Boolean);
+  const allowedFlavors = [...menu.saltyFlavors, ...menu.sweetFlavors].map(norm);
+  if (flavors.length === 0 || flavors.some((flavor) => !allowedFlavors.includes(norm(flavor)))) {
+    return null;
+  }
+
+  const borderText = detailParts.find((part) => norm(part).startsWith("borda "));
+  if (!borderText) return size.price;
+
+  const borderName = borderText.replace(/^borda\s+/i, "").trim();
+  const border = menu.borders.find((entry) => norm(entry.label) === norm(borderName));
+  if (!border) return null;
+
+  const isSmallOrMedium = size.code === "P" || size.code === "M";
+  return size.price + (isSmallOrMedium ? border.priceSmall : border.priceLarge);
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = (await req.json()) as PedidoApp;
@@ -42,17 +97,23 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "Forma de pagamento obrigatória" }, { status: 400 });
     }
 
-    const pedidos = (await redis.get<any[]>("pedidos")) || [];
+    const menu = await getMENUDinamico();
+    const pedidos = (await redis.get<unknown[]>("pedidos")) || [];
+
+    const itensValidados = body.itens.map((item) => ({
+      linha: formatItem(item),
+      unitPrice: officialUnitPrice(item, menu as MenuPedidoApp),
+      qty: item.qty,
+    }));
+
+    if (itensValidados.some((item) => item.unitPrice === null)) {
+      return NextResponse.json({ ok: false, error: "Item inválido" }, { status: 400 });
+    }
 
     // Formata os itens como strings, no MESMO padrão do fluxo do WhatsApp
-    const itens = body.itens.map((item) => {
-      const qtyPrefix = item.qty > 1 ? `${item.qty}x ` : "";
-      const detalhe = item.detail ? ` ${item.detail}` : "";
-      return `${qtyPrefix}${item.name}${detalhe}`.trim();
-    });
+    const itens = itensValidados.map((item) => item.linha);
 
-    const subtotal = body.itens.reduce((s, i) => s + i.price * i.qty, 0);
-    const menu = await getMENUDinamico();
+    const subtotal = itensValidados.reduce((s, item) => s + item.unitPrice! * item.qty, 0);
     const taxa = computeTaxaApp(body.tipoEntrega, body.bairro, menu.neighborhoods as Array<{ name: string; fee: number }>);
     const total = subtotal + taxa;
 
