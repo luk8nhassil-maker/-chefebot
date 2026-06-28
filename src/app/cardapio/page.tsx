@@ -595,12 +595,31 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const [observacao, setObservacao] = useState("");
   const [toast, setToast] = useState("");
   const [pedidoConfirmado, setPedidoConfirmado] = useState<{ id: string; numero: number; total: number } | null>(null);
+  const [erroNome, setErroNome] = useState("");
+  const [erroTelefone, setErroTelefone] = useState("");
   const toastTimer = useRef<any>(null);
+  const nomeRef = useRef<HTMLInputElement>(null);
+  const telefoneRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { document.documentElement.setAttribute("data-theme", theme); }, [theme]);
 
+  useEffect(() => {
+    try {
+      const n = localStorage.getItem("cf_nome"); const t = localStorage.getItem("cf_tel");
+      if (n) setNome(n); if (t) setTelefone(t);
+    } catch {}
+  }, []);
+
   function showToast(m: string) { setToast(m); clearTimeout(toastTimer.current); toastTimer.current = setTimeout(() => setToast(""), 1700); }
   function go(s: string) { setScreen(s); window.scrollTo({ top: 0, behavior: "smooth" }); }
+  function formatTel(v: string) {
+    const d = v.replace(/\D/g, "").slice(0, 11);
+    if (d.length <= 2) return d;
+    if (d.length <= 6) return `(${d.slice(0,2)}) ${d.slice(2)}`;
+    if (d.length <= 10) return `(${d.slice(0,2)}) ${d.slice(2,6)}-${d.slice(6)}`;
+    return `(${d.slice(0,2)}) ${d.slice(2,7)}-${d.slice(7)}`;
+  }
+  function telefoneValido(t: string) { return t.replace(/\D/g, "").length >= 10; }
 
   function resetBuild() { setSize(null); setSizePrice(0); setMam(false); setF1(null); setF2(null); setBorder(null); setBorderPrice(0); }
   function goPizza() { go("sc-qty"); }
@@ -642,7 +661,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   function rmItem(idx: number) { const nc = cart.filter((_, i) => i !== idx); setCart(nc); if (nc.length === 0) go("sc-start"); }
   const fee = delType === "delivery" && bairroIdx !== "" ? ((menu.neighborhoods || [])[+bairroIdx]?.fee ?? 0) : 0;
   const delOk = delType === "retirada" || delType === "dine_in" || (delType === "delivery" && bairroIdx !== "");
-  const payOk = !!nome.trim() && !!telefone.trim() && !!payment;
+  const payOk = !!nome.trim() && telefoneValido(telefone) && !!payment;
 
   const esgotados = menu.esgotados || [];
   const esgotadosKey = esgotados.join("|");
@@ -671,15 +690,21 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   async function finish() {
     if (sending) return;
     if (cartEsgotado) { showToast("Um item do seu pedido ficou esgotado. Remova para continuar."); return; }
+    let hasError = false;
+    if (!nome.trim()) { setErroNome("Por favor, informe seu nome."); nomeRef.current?.focus(); hasError = true; }
+    else { setErroNome(""); }
+    if (!telefoneValido(telefone)) { setErroTelefone("Informe um WhatsApp válido (mínimo 10 dígitos)."); if (!hasError) telefoneRef.current?.focus(); hasError = true; }
+    else { setErroTelefone(""); }
+    if (hasError) return;
     setSending(true);
     const payload = { cliente: nome.trim(), telefone: telefone.trim(), itens: cart.map((c) => ({ kind: c.kind, name: c.name, detail: c.detail, price: c.price, qty: c.qty })), tipoEntrega: delType, bairro: delType === "delivery" ? menu.neighborhoods[+bairroIdx].name : undefined, rua: delType === "delivery" ? rua : undefined, numero: delType === "delivery" && numero.trim() ? numero.trim() : undefined, referencia: delType === "delivery" && referencia.trim() ? referencia.trim() : undefined, observacao: observacao.trim() || undefined, taxaEntrega: fee, pagamento: payment, troco: payment === "Dinheiro" && troco ? troco : undefined };
     try {
       const r = await fetch("/api/pedido-app", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const data = await r.json();
-      if (data.ok) { setPedidoConfirmado({ id: data.pedidoId, numero: data.numero, total: data.total }); go("sc-done"); } else { showToast("Erro ao enviar. Tente de novo."); }
+      if (data.ok) { try { localStorage.setItem("cf_nome", nome.trim()); localStorage.setItem("cf_tel", telefone.trim()); } catch {} setPedidoConfirmado({ id: data.pedidoId, numero: data.numero, total: data.total }); go("sc-done"); } else { showToast("Erro ao enviar. Tente de novo."); }
     } catch { showToast("Sem conexão. Tente de novo."); } finally { setSending(false); }
   }
-  function resetAll() { setCart([]); resetBuild(); setDelType(null); setBairroIdx(""); setRua(""); setNumero(""); setReferencia(""); setNome(""); setTelefone(""); setPayment(null); setTroco(""); setObservacao(""); setPedidoConfirmado(null); go("sc-start"); }
+  function resetAll() { setCart([]); resetBuild(); setDelType(null); setBairroIdx(""); setRua(""); setNumero(""); setReferencia(""); setPayment(null); setTroco(""); setObservacao(""); setErroNome(""); setErroTelefone(""); setPedidoConfirmado(null); go("sc-start"); }
 
   const stepMap: Record<string, number> = { "sc-start": 0, "sc-qty": 0, "sc-build": 0, "sc-border": 0, "sc-another": 0, "sc-list": 0, "sc-cart": 0, "sc-delivery": 1, "sc-pay": 2, "sc-done": 2 };
   const stepIdx = stepMap[screen] ?? 0;
@@ -838,14 +863,29 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
           {screen === "sc-pay" && (
             <section className="screen active">
               <div className="screen-head"><div className="eyebrow">Pagamento</div><h2>Quase lá!</h2></div>
-              <div className="field"><label>Seu nome</label><input value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Como te chamamos?" /></div>
-              <div className="field"><label>WhatsApp / telefone</label><input value={telefone} onChange={(e) => setTelefone(e.target.value)} inputMode="tel" placeholder="(99) 9 9999-9999" /></div>
+              <div className="section-label">Para quem é o pedido?</div>
+              <p style={{ fontSize: 13, color: "var(--muted)", marginBottom: 12, marginTop: -4 }}>Usamos esses dados para identificar seu pedido e falar com você se precisar.</p>
+              <div className="field">
+                <label>Seu nome</label>
+                <input ref={nomeRef} value={nome} onChange={(e) => { setNome(e.target.value); if (erroNome) setErroNome(""); }} placeholder="Como te chamamos?" />
+                {erroNome && <div style={{ color: "#ef4444", fontSize: 12, marginTop: 4 }}>{erroNome}</div>}
+              </div>
+              <div className="field">
+                <label>WhatsApp / telefone</label>
+                <input ref={telefoneRef} value={telefone} onChange={(e) => { const f = formatTel(e.target.value); setTelefone(f); if (erroTelefone) setErroTelefone(""); }} inputMode="tel" placeholder="(99) 9 9999-9999" />
+                {erroTelefone && <div style={{ color: "#ef4444", fontSize: 12, marginTop: 4 }}>{erroTelefone}</div>}
+              </div>
               <div className="section-label">Forma de pagamento</div>
               {(menu.payments || []).map((p) => { const e: Record<string, string> = { Pix: "⚡", Dinheiro: "💵", Cartao: "💳" }; return (<div key={p} className={`opt ${payment === p ? "sel" : ""}`} onClick={() => setPayment(p)}><div className="opt-emoji">{e[p] || "💰"}</div><div className="opt-body"><div className="opt-title">{p === "Cartao" ? "Cartão" : p}</div></div><div className="opt-check" /></div>); })}
               {payment === "Dinheiro" && <div className="field" style={{ marginTop: 8 }}><label>Troco para quanto?</label><input value={troco} onChange={(e) => setTroco(e.target.value)} inputMode="numeric" placeholder="Ex: 50" /></div>}
               <div className="field" style={{ marginTop: 8 }}><label>Observação (opcional)</label><input value={observacao} onChange={(e) => setObservacao(e.target.value)} placeholder="Sem cebola, caprichar no recheio…" /></div>
+              {nome.trim() && telefoneValido(telefone) && (
+                <div style={{ marginTop: 8, padding: "10px 12px", borderRadius: 10, background: "rgba(255,107,0,.08)", fontSize: 13, color: "var(--muted)" }}>
+                  Pedido para: <strong style={{ color: "var(--fg)" }}>{nome.trim()}</strong> · WhatsApp: <strong style={{ color: "var(--fg)" }}>{telefone}</strong>
+                </div>
+              )}
               {cartEsgotado && <div style={{ marginTop: 8, padding: "10px 12px", borderRadius: 10, background: "rgba(239,68,68,.1)", color: "#ef4444", fontSize: 13, fontWeight: 700 }}>Um item do seu pedido ficou esgotado. Remova para continuar.</div>}
-              <div className="btn-row"><button className="btn btn-ghost btn-back" onClick={() => go("sc-delivery")}>←</button><button className="btn btn-sm" disabled={!payOk || sending || cartEsgotado} onClick={finish}>{sending ? "Enviando…" : "Enviar pedido"}</button></div>
+              <div className="btn-row"><button className="btn btn-ghost btn-back" onClick={() => go("sc-delivery")}>←</button><button className="btn btn-sm" disabled={sending || cartEsgotado} onClick={finish}>{sending ? "Enviando…" : "Enviar pedido"}</button></div>
             </section>
           )}
           {screen === "sc-done" && (
