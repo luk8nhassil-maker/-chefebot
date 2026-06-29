@@ -743,6 +743,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   function chQty(idx: number, d: number) { setCart(cart.map((c, i) => (i === idx ? { ...c, qty: Math.max(1, c.qty + d) } : c))); }
   function rmItem(idx: number) { const nc = cart.filter((_, i) => i !== idx); setCart(nc); if (nc.length === 0) go("sc-start"); }
   const fee = delType === "delivery" && bairroIdx !== "" ? ((menu.neighborhoods || [])[+bairroIdx]?.fee ?? 0) : 0;
+  const finalTotal = cartTotal + fee;
   const ruaOk = rua.trim().length > 0;
   const numeroOk = numero.trim().length > 0;
   const delOk = delType === "retirada" || delType === "dine_in" || (delType === "delivery" && bairroIdx !== "" && ruaOk && numeroOk);
@@ -1055,7 +1056,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                 ))}
                 {fee > 0 && <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "var(--muted)", paddingTop: 4, borderTop: "1px solid var(--border)" }}><span>Taxa de entrega</span><span>{money(fee)}</span></div>}
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 15, fontWeight: 700, color: "var(--fg)", paddingTop: 8, marginTop: 4, borderTop: "1px solid var(--border)" }}>
-                  <span>Total</span><span style={{ color: "#ff6b00" }}>{money(cartTotal + fee)}</span>
+                  <span>Total</span><span style={{ color: "#ff6b00" }}>{money(finalTotal)}</span>
                 </div>
               </div>
               <button className="btn btn-ghost" style={{ fontSize: 13, padding: "8px 14px", marginBottom: 20, marginTop: -8 }} onClick={() => go("sc-cart")}>← Editar carrinho</button>
@@ -1168,7 +1169,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
           )}
         </main>
       </div>
-      {cartCount > 0 && screen !== "sc-done" && (<div className="cartbar show"><div className="cartbar-inner"><div className="cartbar-info"><div className="cartbar-count">{cartCount} {cartCount === 1 ? "item" : "itens"}</div><div className="cartbar-total">{money(cartTotal)}</div></div><button className="btn" onClick={() => go("sc-cart")}>Ver pedido</button></div></div>)}
+      {cartCount > 0 && screen !== "sc-done" && (<div className="cartbar show"><div className="cartbar-inner"><div className="cartbar-info"><div className="cartbar-count">{cartCount} {cartCount === 1 ? "item" : "itens"}</div><div className="cartbar-total">{money(finalTotal)}</div></div><button className="btn" onClick={() => go("sc-cart")}>Ver pedido</button></div></div>)}
       {toast && <div className="toast show">{toast}</div>}
     </>
   )
