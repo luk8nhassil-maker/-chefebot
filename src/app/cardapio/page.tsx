@@ -592,7 +592,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const [border, setBorder] = useState<string | null>(null);
   const [borderPrice, setBorderPrice] = useState(0);
   const [plan, setPlan] = useState<{ total: number; current: number; openEnded: boolean }>({ total: 0, current: 0, openEnded: false });
-  const [listCat, setListCat] = useState<"lanche" | "bebida" | "suco">("lanche");
+  const [listCat, setListCat] = useState<"lanche" | "macarronada" | "bebida" | "suco">("lanche");
   const [macarronadaPendente, setMacarronadaPendente] = useState<{ name: string; price: number; sizes?: { code: string; price: number }[] } | null>(null);
   const [sucoPendente, setSucoPendente] = useState<{ name: string; price: number } | null>(null);
   const [delType, setDelType] = useState<"delivery" | "retirada" | "dine_in" | null>(null);
@@ -734,7 +734,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     else { showToast("Tudo pronto! 🍕"); go("sc-cart"); }
   }
   function addAnother() { setPlan({ total: 0, current: pizzasNoCarrinho() + 1, openEnded: true }); resetBuild(); go("sc-build"); }
-  function goCat(cat: "lanche" | "bebida" | "suco") { setListCat(cat); go("sc-list"); }
+  function goCat(cat: "lanche" | "macarronada" | "bebida" | "suco") { setListCat(cat); go("sc-list"); }
   function isMacarronada(it: { name: string; sizes?: { code: string; price: number }[] }) {
     return it.name.toLowerCase().includes("macarronada") && Array.isArray(it.sizes) && it.sizes.length > 0;
   }
@@ -879,38 +879,55 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const PizzaCtx = () => (ctxBadge ? (
     <div className="pizza-ctx"><span className="pc-badge">{ctxBadge}</span><span className="pc-txt" dangerouslySetInnerHTML={{ __html: ctxTxt }} />{ctxDots.length > 0 && <span className="pizza-dots">{ctxDots.map((d, i) => <span key={i} className={`pd ${d.cls}`} />)}</span>}</div>
   ) : null);
+  const TopBack = ({ onClick, label = "← Voltar" }: { onClick: () => void; label?: string }) => (
+    <div className="top-back"><button type="button" onClick={onClick}>{label}</button></div>
+  );
 
   return (
     <>
       <style>{CSS}</style>
-      <div className="wrap">
-        <div className="steps">
-          {STEPS.map((s, i) => (
-            <span key={s} style={{ display: "contents" }}>
-              <div className={`step-chip ${i === stepIdx ? "active" : i < stepIdx ? "done" : ""}`}><span className="num">{i < stepIdx ? "✓" : i + 1}</span>{s}</div>
-              {i < STEPS.length - 1 && <div className={`step-line ${i < stepIdx ? "done" : ""}`} />}
-            </span>
-          ))}
-        </div>
+      <div className={`wrap ${screen === "sc-start" ? "wrap-start" : ""}`}>
+        {screen !== "sc-start" && (
+          <div className="steps">
+            {STEPS.map((s, i) => (
+              <span key={s} style={{ display: "contents" }}>
+                <div className={`step-chip ${i === stepIdx ? "active" : i < stepIdx ? "done" : ""}`}><span className="num">{i < stepIdx ? "✓" : i + 1}</span>{s}</div>
+                {i < STEPS.length - 1 && <div className={`step-line ${i < stepIdx ? "done" : ""}`} />}
+              </span>
+            ))}
+          </div>
+        )}
         <header>
           <div className="head-row">
-            <div className="logo"><div className="logo-mark">🍕</div><div><h1>Chefe da Pizza</h1><p>Alto Alegre do MA</p></div></div>
+            <div className="logo"><div className="logo-mark">🍕</div><div><h1>CHEFE DA PIZZA</h1><p>Alto Alegre do MA</p></div></div>
             <button className="theme-btn" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} aria-label="Trocar tema">{theme === "dark" ? "🌙" : "☀️"}</button>
           </div>
-          <div className="status"><span className="dot" /> Aberto · entrega 40–60 min</div>
+          <div className="status-row"><span className="status"><span className="dot" /> Aberto agora</span><span className="eta">40 a 60 min</span></div>
         </header>
         <main>
           {screen === "sc-start" && (
-            <section className="screen active">
-              <div className="screen-head"><div className="eyebrow">Bora montar</div><h2>O que vai ser hoje?</h2><p>Escolha por onde começar.</p></div>
-              <div className="opt" onClick={goPizza}><div className="opt-emoji">🍕</div><div className="opt-body"><div className="opt-title">Pizza</div><div className="opt-desc">{(menu.saltyFlavors || []).filter(f => !esgotados.includes(f)).length} salgadas, {(menu.sweetFlavors || []).filter(f => !esgotados.includes(f)).length} doces · meio a meio</div></div></div>
-              <div className="opt" onClick={() => goCat("lanche")}><div className="opt-emoji">🥪</div><div className="opt-body"><div className="opt-title">Lanches & Porções</div><div className="opt-desc">Calzone, X-burguer, batata…</div></div></div>
-              <div className="opt" onClick={() => goCat("bebida")}><div className="opt-emoji">🥤</div><div className="opt-body"><div className="opt-title">Bebidas</div><div className="opt-desc">Refri, guaraná, água, cerveja</div></div></div>
-              <div className="opt" onClick={() => goCat("suco")}><div className="opt-emoji">🧃</div><div className="opt-body"><div className="opt-title">Sucos naturais</div><div className="opt-desc">Cajá, caju, maracujá…</div></div></div>
+            <section className="screen active home-screen">
+              <div className="promo-card">
+                <div className="promo-label">PROMO DE HOJE</div>
+                <h2>Pizza G + Guaraná 1L grátis</h2>
+                <p>Uma escolha fácil pra pedir sem pensar muito.</p>
+                <button className="promo-btn" onClick={goPizza}>Pedir essa promoção →</button>
+              </div>
+              <div className="home-copy">
+                <h2>Ou monte seu pedido</h2>
+                <p>Escolha uma categoria pra começar do seu jeito.</p>
+              </div>
+              <div className="home-grid">
+                <button className="home-cat" onClick={goPizza}><span>🍕</span><strong>Pizzas</strong></button>
+                <button className="home-cat" onClick={() => goCat("lanche")}><span>🍔</span><strong>Lanches</strong></button>
+                <button className="home-cat" onClick={() => goCat("macarronada")}><span>🍝</span><strong>Macarronada</strong></button>
+                <button className="home-cat" onClick={() => goCat("bebida")}><span>🥤</span><strong>Bebidas</strong></button>
+              </div>
             </section>
           )}
           {screen === "sc-qty" && (
             <section className="screen active">
+              <TopBack onClick={() => go("sc-start")} />
               <div className="screen-head"><div className="eyebrow">Pizza</div><h2>Quantas pizzas você quer?</h2><p>Você pode montar uma agora e adicionar mais depois.</p></div>
               <div className="qty-grid">
                 <div className="qty-card" onClick={() => setPizzaQty(1)}>
@@ -942,47 +959,51 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                   </div>
                 </div>
               </div>
-              <div className="btn-row"><button className="btn btn-ghost btn-sm" style={{ color: "var(--text-faint)" }} onClick={() => go("sc-start")}>← Voltar</button></div>
             </section>
           )}
           {screen === "sc-build" && (
             <section className="screen active sc-build-screen">
               <div className="build-back"><button className="build-back-btn" onClick={() => go("sc-qty")}>← Voltar</button></div>
               <PizzaCtx />
-              <div className="screen-head"><div className="eyebrow">Monte sua pizza</div><h2>Tamanho e sabor</h2></div>
-              <div className="section-label">📏 Tamanho</div>
-              <div className="grid2">{(menu.sizes || []).map((s) => (<div key={s.code} className={`opt ${size === s.code ? "sel" : ""}`} onClick={() => pickSize(s.code)}><div className="opt-check" /><div className="opt-emoji">🍕</div><div className="opt-body"><div className="opt-title">{s.label}</div><div className="opt-desc">{money(s.price)}</div></div></div>))}</div>
-              <div className="section-label">🍕 Sabor</div>
+              <div className="screen-head"><div className="eyebrow">Monte sua pizza</div><h2>Escolha o tamanho</h2><p>Depois escolha um sabor. Se quiser, ative meio a meio.</p></div>
+              <div className="choice-block">
+                <div className="section-label">📏 Tamanho</div>
+                <div className="grid2">{(menu.sizes || []).map((s) => (<div key={s.code} className={`opt ${size === s.code ? "sel" : ""}`} onClick={() => pickSize(s.code)}><div className="opt-check" /><div className="opt-emoji">🍕</div><div className="opt-body"><div className="opt-title">{s.label}</div><div className="opt-desc">{money(s.price)}</div></div></div>))}</div>
+              </div>
+              <div className="screen-head flavor-head"><div className="eyebrow">Agora escolha o sabor</div><h2>{mam ? "Escolha os dois sabores" : "Escolha um sabor"}</h2><p>Toque no sabor para marcar. Os selecionados ficam com check.</p></div>
               <div className={`mam ${mam ? "on" : ""}`} onClick={toggleMam}><div className="mam-txt"><strong>Meio a meio</strong><p>Dois sabores numa pizza</p></div><div className="switch" /></div>
               {mam && <div className="half-hint show">{!f1 ? "Toque na 1ª metade" : !f2 ? `1ª: ${f1} — agora a 2ª` : `✓ ${f1} / ${f2}`}</div>}
-              <div className="section-label">Salgadas</div>
-              {(menu.saltyFlavors || []).map((f) => {
-                const esg = esgotados.includes(f)
-                return (
-                  <div key={f} className={`opt ${f === f1 || f === f2 ? "sel" : ""} ${esg ? "esg" : ""}`} onClick={() => !esg && pickFlavor(f)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }}>
-                    <div className="opt-emoji">🍕</div><div className="opt-body"><div className="opt-title">{f}</div>{esg && <div className="opt-desc" style={{ color: "#ef4444" }}>Esgotado</div>}</div><div className="opt-check" />
-                  </div>
-                )
-              })}
-              <div className="section-label">Doces</div>
-              {(menu.sweetFlavors || []).map((f) => {
-                const esg = esgotados.includes(f)
-                return (
-                  <div key={f} className={`opt ${f === f1 || f === f2 ? "sel" : ""}`} onClick={() => !esg && pickFlavor(f)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }}>
-                    <div className="opt-emoji">🍕</div><div className="opt-body"><div className="opt-title">{f}</div>{esg && <div className="opt-desc" style={{ color: "#ef4444" }}>Esgotado</div>}</div><div className="opt-check" />
-                  </div>
-                )
-              })}
+              <div className="flavor-list">
+                <div className="section-label">Salgadas</div>
+                {(menu.saltyFlavors || []).map((f) => {
+                  const esg = esgotados.includes(f)
+                  return (
+                    <div key={f} className={`opt flavor-opt ${f === f1 || f === f2 ? "sel" : ""} ${esg ? "esg" : ""}`} onClick={() => !esg && pickFlavor(f)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }}>
+                      <div className="opt-emoji">🍕</div><div className="opt-body"><div className="opt-title">{f}</div>{esg && <div className="opt-desc" style={{ color: "#ef4444" }}>Esgotado</div>}</div><div className="opt-check" />
+                    </div>
+                  )
+                })}
+                <div className="section-label">Doces</div>
+                {(menu.sweetFlavors || []).map((f) => {
+                  const esg = esgotados.includes(f)
+                  return (
+                    <div key={f} className={`opt flavor-opt ${f === f1 || f === f2 ? "sel" : ""}`} onClick={() => !esg && pickFlavor(f)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }}>
+                      <div className="opt-emoji">🍕</div><div className="opt-body"><div className="opt-title">{f}</div>{esg && <div className="opt-desc" style={{ color: "#ef4444" }}>Esgotado</div>}</div><div className="opt-check" />
+                    </div>
+                  )
+                })}
+              </div>
               <div className="build-foot"><button className="btn" disabled={!buildOk} onClick={() => go("sc-border")}>Confirmar pizza</button></div>
             </section>
           )}
           {screen === "sc-border" && (
             <section className="screen active">
+              <TopBack onClick={() => go("sc-build")} />
               <PizzaCtx />
               <div className="screen-head"><div className="eyebrow">Quase pronta</div><h2>Borda recheada?</h2><p>Opcional.</p></div>
               <div className={`opt ${border === null ? "sel" : ""}`} onClick={() => pickBorder("")}><div className="opt-emoji">⭕</div><div className="opt-body"><div className="opt-title">Sem borda</div><div className="opt-desc">Tradicional</div></div><div className="opt-price">Grátis</div><div className="opt-check" /></div>
               {(menu.borders || []).map((b, i) => { const p = bigBorder(size!) ? b.priceLarge : b.priceSmall; const esg = esgotados.includes(b.label); return (<div key={i} className={`opt ${border === b.label ? "sel" : ""}`} onClick={() => !esg && pickBorder(String(i))} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }}><div className="opt-emoji">🧀</div><div className="opt-body"><div className="opt-title">{b.label}</div>{esg && <div className="opt-desc" style={{ color: "#ef4444" }}>Esgotado</div>}</div><div className="opt-price">{esg ? "" : `+${money(p)}`}</div><div className="opt-check" /></div>); })}
-              <div className="btn-row"><button className="btn btn-ghost btn-back" onClick={() => go("sc-build")}>←</button><button className="btn btn-sm" onClick={addPizza}>Adicionar ao pedido</button></div>
+              <button className="btn btn-sm" style={{ marginTop: 16 }} onClick={addPizza}>Adicionar ao pedido</button>
             </section>
           )}
           {screen === "sc-another" && (
@@ -995,26 +1016,28 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
           )}
           {screen === "sc-list" && (
             <section className="screen active">
+              <TopBack onClick={() => go("sc-start")} label="← Voltar ao início" />
               {(() => {
-                const cfg = { lanche: { eb: "Lanches & Porções", t: "Escolha seu lanche", data: menu.lanches || [], emoji: "🍽️" }, bebida: { eb: "Bebidas", t: "Bebidas geladas", data: menu.bebidas || [], emoji: "🥤" }, suco: { eb: "Sucos naturais", t: "Sucos da casa", data: menu.sucos || [], emoji: "🧃" } }[listCat];
-                return (<><div className="screen-head"><div className="eyebrow">{cfg.eb}</div><h2>{cfg.t}</h2><p>Toque para adicionar.</p></div>{cfg.data.map((it, i) => { const esg = esgotados.includes(it.name); return (<div key={i} className="opt" onClick={() => !esg && addSimple(it, cfg.emoji)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }}><div className="opt-emoji">{cfg.emoji}</div><div className="opt-body"><div className="opt-title">{it.name}</div>{esg && <div className="opt-desc" style={{ color: "#ef4444" }}>Esgotado</div>}</div><div className="opt-price">{simplePriceLabel(it)}</div></div>); })}<div className="btn-row"><button className="btn btn-ghost btn-sm" onClick={() => go("sc-start")}>Voltar ao início</button></div></>);
+                const lanches = menu.lanches || [];
+                const cfg = { lanche: { eb: "Lanches & Porções", t: "Escolha seu lanche", data: lanches.filter((it) => !isMacarronada(it)), emoji: "🍽️" }, macarronada: { eb: "Macarronada", t: "Escolha sua macarronada", data: lanches.filter(isMacarronada), emoji: "🍝" }, bebida: { eb: "Bebidas", t: "Bebidas geladas", data: menu.bebidas || [], emoji: "🥤" }, suco: { eb: "Sucos naturais", t: "Sucos da casa", data: menu.sucos || [], emoji: "🧃" } }[listCat];
+                return (<><div className="screen-head"><div className="eyebrow">{cfg.eb}</div><h2>{cfg.t}</h2><p>Toque para adicionar.</p></div>{cfg.data.map((it, i) => { const esg = esgotados.includes(it.name); return (<div key={i} className="opt" onClick={() => !esg && addSimple(it, cfg.emoji)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }}><div className="opt-emoji">{cfg.emoji}</div><div className="opt-body"><div className="opt-title">{it.name}</div>{esg && <div className="opt-desc" style={{ color: "#ef4444" }}>Esgotado</div>}</div><div className="opt-price">{simplePriceLabel(it)}</div></div>); })}</>);
               })()}
             </section>
           )}
           {screen === "sc-suco-leite" && sucoPendente && (
             <section className="screen active">
+              <TopBack onClick={() => { setSucoPendente(null); go("sc-list"); }} />
               <div className="screen-head"><div className="eyebrow">Suco natural</div><h2>Com leite?</h2><p>{sucoPendente.name}</p></div>
               <div className="opt" onClick={() => addSucoLeite(false)}><div className="opt-emoji">S</div><div className="opt-body"><div className="opt-title">Sem leite</div></div><div className="opt-price">{money(sucoPendente.price)}</div></div>
               <div className="opt" onClick={() => addSucoLeite(true)}><div className="opt-emoji">+1</div><div className="opt-body"><div className="opt-title">Com leite</div><div className="opt-desc">Adicional de R$ 1,00</div></div><div className="opt-price">{money(sucoPendente.price + 1)}</div></div>
-              <div className="btn-row"><button className="btn btn-ghost btn-sm" onClick={() => { setSucoPendente(null); go("sc-list"); }}>Voltar</button></div>
             </section>
           )}          {screen === "sc-macarronada-size" && macarronadaPendente && (
             <section className="screen active">
+              <TopBack onClick={() => { setMacarronadaPendente(null); go("sc-list"); }} />
               <div className="screen-head"><div className="eyebrow">Macarronada</div><h2>Escolha o tamanho</h2><p>{macarronadaPendente.name}</p></div>
               {(macarronadaPendente.sizes || []).map((s) => (
                 <div key={s.code} className="opt" onClick={() => addMacarronadaSize(s.code)}><div className="opt-emoji">🍽️</div><div className="opt-body"><div className="opt-title">Tamanho {s.code}</div></div><div className="opt-price">{money(s.price)}</div></div>
               ))}
-              <div className="btn-row"><button className="btn btn-ghost btn-sm" onClick={() => { setMacarronadaPendente(null); go("sc-list"); }}>Voltar</button></div>
             </section>
           )}
           {screen === "sc-cart" && (
@@ -1040,6 +1063,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
           )}
           {screen === "sc-delivery" && (
             <section className="screen active">
+              <TopBack onClick={() => go("sc-cart")} />
               <div className="screen-head"><div className="eyebrow">Entrega</div><h2>Como prefere receber?</h2></div>
               <div className={`opt ${delType === "delivery" ? "sel" : ""}`} onClick={() => { setDelType("delivery"); if (erroEntrega) setErroEntrega(""); }}><div className="opt-emoji">🛵</div><div className="opt-body"><div className="opt-title">Entrega (delivery)</div><div className="opt-desc">Levamos até você</div></div><div className="opt-check" /></div>
               <div className={`opt ${delType === "retirada" ? "sel" : ""}`} onClick={() => { setDelType("retirada"); setBairroIdx(""); setErroEntrega(""); }}><div className="opt-emoji">🏪</div><div className="opt-body"><div className="opt-title">Buscar na loja</div><div className="opt-desc">Sem taxa de entrega</div></div><div className="opt-check" /></div>
@@ -1072,12 +1096,13 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                   <div className="field"><label>Referencia (opcional)</label><input value={referencia} onChange={(e) => setReferencia(e.target.value)} placeholder="Perto do mercado" /></div>
                 </div>
               )}
-
-              <div className="btn-row"><button className="btn btn-ghost btn-back" onClick={() => go("sc-cart")}>{"<-"}</button><button className="btn btn-sm" disabled={!delType} onClick={() => { if (!delOk) { setErroEntrega(getEnderecoErro()); return; } setErroEntrega(""); go("sc-pay"); }}>Continuar</button></div>
+              <div className="checkout-summary">{cartCount} {cartCount === 1 ? "item" : "itens"} · {money(finalTotal)}</div>
+              <button className="btn btn-sm" disabled={!delType} onClick={() => { if (!delOk) { setErroEntrega(getEnderecoErro()); return; } setErroEntrega(""); go("sc-pay"); }}>Continuar para pagamento</button>
             </section>
           )}
           {screen === "sc-pay" && (
             <section className="screen active">
+              <TopBack onClick={() => go("sc-delivery")} />
               <div className="screen-head"><div className="eyebrow">Último passo</div><h2>Seu pedido está quase pronto 🍕</h2><p style={{ fontSize: 13, color: "var(--muted)", margin: "4px 0 0" }}>Confere rapidinho os dados e escolhe como vai pagar.</p></div>
 
               {/* Bloco: Resumo do pedido */}
@@ -1182,7 +1207,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
               )}
 
               {cartEsgotado && <div style={{ marginTop: 8, padding: "10px 12px", borderRadius: 10, background: "rgba(239,68,68,.1)", color: "#ef4444", fontSize: 13, fontWeight: 700 }}>Um item do seu pedido ficou esgotado. Remova para continuar.</div>}
-              <div className="btn-row"><button className="btn btn-ghost btn-back" onClick={() => go("sc-delivery")}>←</button><button className="btn btn-sm" disabled={sending || cartEsgotado} onClick={finish}>{sending ? "Enviando…" : "Confirmar meu pedido"}</button></div>
+              <button className="btn btn-sm" style={{ marginTop: 16 }} disabled={sending || cartEsgotado} onClick={finish}>{sending ? "Enviando…" : "Finalizar pedido"}</button>
             </section>
           )}
           {screen === "sc-done" && (
@@ -1205,7 +1230,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
           )}
         </main>
       </div>
-      {cartCount > 0 && screen !== "sc-done" && (<div className="cartbar show"><div className="cartbar-inner"><div className="cartbar-info"><div className="cartbar-count">{cartCount} {cartCount === 1 ? "item" : "itens"}</div><div className="cartbar-total">{money(finalTotal)}</div></div><button className="btn" onClick={() => go("sc-cart")}>Ver pedido</button></div></div>)}
+      {cartCount > 0 && screen !== "sc-done" && screen !== "sc-cart" && (<div className="cartbar show"><div className="cartbar-inner"><div className="cartbar-info"><div className="cartbar-count">Sacola</div><div className="cartbar-total">{cartCount} {cartCount === 1 ? "item" : "itens"} · {money(finalTotal)}</div></div><button className="cartbar-link" onClick={() => go("sc-cart")}>Editar</button></div></div>)}
       {toast && <div className="toast show">{toast}</div>}
     </>
   )
@@ -1258,18 +1283,28 @@ const CSS = `
 :root[data-theme="dark"]{--bg:#171210;--surface:#221b18;--surface2:#2c2320;--text:#f0e9e1;--text-sub:#a89a8b;--text-faint:#6f655c;--brand:#f0512f;--brand-press:#d2421f;--brand-soft:rgba(240,81,47,.13);--gold:#edb24a;--green:#62a256;--green-soft:rgba(98,162,86,.16);--line:rgba(246,239,231,.08);--line-strong:rgba(246,239,231,.16);--shadow-sm:0 1px 8px rgba(0,0,0,.22);}
 :root[data-theme="light"]{--bg:#f7f2ea;--surface:#fff;--surface2:#fbf6ee;--text:#2a1d16;--text-sub:#8a7a6c;--text-faint:#b3a596;--brand:#e8472b;--brand-press:#c2371f;--brand-soft:rgba(232,71,43,.09);--gold:#c98a17;--green:#4f8a43;--green-soft:rgba(79,138,67,.12);--line:rgba(42,29,22,.08);--line-strong:rgba(42,29,22,.14);--shadow-sm:0 1px 8px rgba(120,80,40,.07);}
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-body{font-family:var(--font-ui);background:var(--bg);color:var(--text);line-height:1.5;overflow-x:hidden;padding-bottom:104px;transition:background .35s,color .35s;font-size:16px;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
+body{font-family:var(--font-ui);background:var(--bg);color:var(--text);line-height:1.5;overflow-x:hidden;padding-bottom:112px;transition:background .35s,color .35s;font-size:16px;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
 .wrap{max-width:540px;margin:0 auto;min-height:100vh;position:relative;font-family:var(--font-ui);padding-top:46px}
+.wrap-start{padding-top:0;background:#0b0807}
 .wrap h1,.wrap h2,.wrap h3,.wrap button,.wrap input,.wrap select,.wrap textarea{font-family:var(--font-ui)}
 header{background:var(--surface);padding:18px 20px;border-bottom:1px solid var(--line);transition:background .35s}
+.wrap-start header{background:#0b0807;border-bottom:1px solid rgba(255,255,255,.08);padding:18px 20px 16px}
 .head-row{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .logo{display:flex;align-items:center;gap:12px}
 .logo-mark{width:42px;height:42px;border-radius:13px;background:var(--brand);display:flex;align-items:center;justify-content:center;font-size:22px;box-shadow:0 2px 10px var(--brand-soft)}
-.logo h1{font-family:var(--font-ui);font-weight:600;font-size:19px;letter-spacing:-.3px;line-height:1.1}
+.wrap-start .logo-mark{width:34px;height:34px;border-radius:10px;font-size:18px;background:linear-gradient(145deg,#f46a2d,#a93518)}
+.logo h1{font-family:var(--font-ui);font-weight:600;font-size:19px;letter-spacing:0;line-height:1.1}
+.wrap-start .logo h1{font-size:14px;font-weight:800;letter-spacing:.8px;color:#f7efe7}
 .logo p{font-size:12.5px;color:var(--text-sub);margin-top:3px;font-weight:400}
+.wrap-start .logo p{font-size:12px;color:#8e8178}
 .theme-btn{width:40px;height:40px;border-radius:12px;border:1px solid var(--line-strong);background:var(--surface2);color:var(--text);font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:.2s}
+.wrap-start .theme-btn{background:#15100e;border-color:rgba(255,255,255,.08);color:#d9cfc5}
 .theme-btn:active{transform:scale(.92)}
-.status{display:inline-flex;align-items:center;gap:7px;margin-top:14px;background:var(--green-soft);color:var(--green);padding:6px 13px;border-radius:20px;font-size:12.5px;font-weight:500}
+.status-row{display:flex;align-items:center;gap:10px;margin-top:14px}
+.status{display:inline-flex;align-items:center;gap:7px;background:var(--green-soft);color:var(--green);padding:6px 13px;border-radius:20px;font-size:12.5px;font-weight:500}
+.eta{color:var(--text-sub);font-size:12.5px;font-weight:600}
+.wrap-start .status{background:rgba(52,211,153,.12);color:#49d17c}
+.wrap-start .eta{color:#9c8f86}
 .status .dot{width:7px;height:7px;border-radius:50%;background:var(--green);animation:pulse 2s infinite}
 @keyframes pulse{0%{box-shadow:0 0 0 0 var(--green-soft)}70%{box-shadow:0 0 0 7px transparent}100%{box-shadow:0 0 0 0 transparent}}
 .steps{position:fixed;top:0;left:50%;transform:translateX(-50%);width:100%;max-width:540px;z-index:50;display:flex;gap:8px;padding:12px 20px;align-items:center;background:var(--bg);border-bottom:1px solid var(--line);box-shadow:0 1px 8px rgba(0,0,0,.16);transition:background .35s}
@@ -1282,9 +1317,13 @@ header{background:var(--surface);padding:18px 20px;border-bottom:1px solid var(-
 .step-line{flex:1;height:1.5px;background:var(--line);border-radius:2px}
 .step-line.done{background:var(--green)}
 main{padding:6px 20px 20px}
+.wrap-start main{padding:18px 20px 112px}
 .screen.active{display:block;animation:slide .4s cubic-bezier(.2,.8,.2,1)}
 @keyframes slide{from{opacity:0;transform:translateX(14px)}to{opacity:1;transform:none}}
+.top-back{margin:4px 0 12px}
+.top-back button{border:1px solid var(--line-strong);background:var(--surface2);color:var(--text-sub);font-family:var(--font-ui);font-size:13px;font-weight:700;padding:8px 13px;border-radius:999px;box-shadow:var(--shadow-sm)}
 .screen-head{margin:18px 0 20px}
+.top-back + .screen-head{margin-top:8px}
 .eyebrow{font-size:11px;font-weight:600;color:var(--brand);text-transform:uppercase;letter-spacing:1.4px}
 .screen-head h2{font-family:var(--font-ui);font-weight:600;font-size:23px;letter-spacing:-.4px;margin-top:7px;line-height:1.2}
 .screen-head p{font-size:14.5px;color:var(--text-sub);margin-top:7px;font-weight:400;line-height:1.5}
@@ -1306,6 +1345,20 @@ main{padding:6px 20px 20px}
 .opt-check{width:23px;height:23px;border-radius:50%;border:2px solid var(--line-strong);flex:0 0 auto;display:flex;align-items:center;justify-content:center;font-size:13px;color:#fff;transition:.16s}
 .opt.sel .opt-check{background:var(--brand);border-color:var(--brand)}
 .opt.sel .opt-check::after{content:"✓"}
+.home-screen{padding-bottom:8px}
+.promo-card{background:linear-gradient(145deg,rgba(72,36,20,.78),rgba(24,15,12,.98) 58%,rgba(14,11,10,1));border:1px solid rgba(240,81,47,.28);border-radius:22px;padding:20px;box-shadow:0 18px 50px rgba(0,0,0,.34),inset 0 1px 0 rgba(255,255,255,.04)}
+.promo-label{color:#f59b67;font-size:10.5px;font-weight:800;letter-spacing:1.4px;margin-bottom:10px}
+.promo-card h2{color:#fff4ec;font-size:25px;font-weight:850;line-height:1.08;letter-spacing:0;margin-bottom:8px}
+.promo-card p{color:#b9aaa0;font-size:14px;line-height:1.45;margin-bottom:18px}
+.promo-btn{width:100%;border:0;border-radius:15px;background:#f05a28;color:#fff;padding:15px 16px;font-size:15px;font-weight:800;box-shadow:0 12px 26px rgba(240,90,40,.2)}
+.home-copy{margin:24px 0 14px}
+.home-copy h2{color:#f7efe7;font-size:22px;font-weight:850;letter-spacing:0;line-height:1.15}
+.home-copy p{color:#9d8f85;font-size:14px;margin-top:6px}
+.home-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.home-cat{min-height:118px;text-align:left;background:#15110f;border:1px solid rgba(255,255,255,.08);border-radius:20px;padding:16px;display:flex;flex-direction:column;justify-content:space-between;color:#f4ece5;box-shadow:0 10px 28px rgba(0,0,0,.22)}
+.home-cat:active{transform:scale(.98);border-color:rgba(240,81,47,.5)}
+.home-cat span{font-size:27px}
+.home-cat strong{font-size:15.5px;font-weight:800;letter-spacing:0}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:11px}
 .grid2 .opt{flex-direction:column;align-items:flex-start;gap:7px;padding:17px;position:relative}
 .grid2 .opt-check{position:absolute;top:13px;right:13px;width:20px;height:20px}
@@ -1315,6 +1368,10 @@ main{padding:6px 20px 20px}
 .mam.on{border-color:var(--brand);background:var(--brand-soft)}
 .mam-txt strong{font-weight:600;font-size:15.5px;letter-spacing:-.1px}
 .mam-txt p{font-size:13px;color:var(--text-sub);margin-top:2px;font-weight:400}
+.choice-block{background:rgba(255,255,255,.025);border:1px solid var(--line);border-radius:18px;padding:2px 10px 12px;margin-bottom:22px}
+.flavor-head{margin-top:6px;margin-bottom:14px}
+.flavor-list{max-height:470px;overflow-y:auto;padding-right:2px;padding-bottom:86px;scrollbar-width:thin}
+.flavor-opt{padding:14px 16px;margin-bottom:8px}
 .switch{width:48px;height:28px;border-radius:20px;background:var(--line-strong);position:relative;flex:0 0 auto;transition:.22s}
 .switch::after{content:"";position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;background:#fff;transition:.22s;box-shadow:0 1px 3px rgba(0,0,0,.3)}
 .mam.on .switch{background:var(--brand)}
@@ -1343,12 +1400,13 @@ main{padding:6px 20px 20px}
 .field label{display:block;font-size:13px;font-weight:600;margin-bottom:7px;letter-spacing:0}
 .field input,.field select{width:100%;background:var(--surface);border:1px solid var(--line-strong);border-radius:13px;padding:14px;color:var(--text);font-family:var(--font-ui);font-size:15.5px;transition:.16s;font-weight:400}
 .field input:focus,.field select:focus{outline:none;border-color:var(--brand)}
-.cartbar{position:fixed;bottom:0;left:0;right:0;z-index:50;background:var(--surface);border-top:1px solid var(--line);padding:14px 20px;box-shadow:0 -4px 18px rgba(0,0,0,.1)}
-.cartbar-inner{max-width:540px;margin:0 auto;display:flex;align-items:center;gap:14px}
+.cartbar{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:540px;z-index:50;background:transparent;padding:0 20px calc(env(safe-area-inset-bottom) + 14px);pointer-events:none}
+.cartbar-inner{margin:0 auto;display:flex;align-items:center;gap:14px;background:#15110f;border:1px solid rgba(255,255,255,.1);border-radius:20px;padding:12px 12px 12px 16px;box-shadow:0 -10px 34px rgba(0,0,0,.35);pointer-events:auto}
 .cartbar-info{flex:1}
 .cartbar-count{font-size:12.5px;color:var(--text-sub);font-weight:500}
-.cartbar-total{font-family:var(--font-ui);font-weight:700;font-size:21px;line-height:1.1;letter-spacing:-.3px}
-.cartbar .btn{margin:0;width:auto;padding:14px 24px}
+.cartbar-total{font-family:var(--font-ui);font-weight:700;font-size:15px;line-height:1.2;letter-spacing:0}
+.cartbar-link{border:1px solid var(--line-strong);background:transparent;color:var(--text-sub);border-radius:999px;padding:9px 13px;font-size:12.5px;font-weight:700}
+.checkout-summary{margin:14px 0 10px;color:var(--text-sub);font-size:13px;font-weight:700;text-align:center}
 .empty{text-align:center;padding:54px 20px;color:var(--text-sub)}
 .empty .big{font-size:56px;margin-bottom:14px;opacity:.4}
 .success{text-align:center;padding:34px 8px}
@@ -1366,9 +1424,9 @@ main{padding:6px 20px 20px}
 .qty-card-title{font-weight:600;font-size:15.5px;letter-spacing:-.1px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .qty-card-sub{font-size:13px;color:var(--text-sub);margin-top:3px;font-weight:400}
 .qty-badge{font-size:10px;font-weight:700;color:var(--brand);background:var(--brand-soft);padding:2px 8px;border-radius:20px;white-space:nowrap;letter-spacing:.2px}
-.sc-build-screen{padding-top:34px;padding-bottom:96px}
-.build-back{position:fixed;top:54px;left:50%;transform:translateX(-50%);width:100%;max-width:540px;padding:0 20px;z-index:45;pointer-events:none}
-.build-back-btn{pointer-events:auto;background:var(--surface2);border:1px solid var(--line-strong);color:var(--text-sub);font-family:var(--font-ui);font-size:13px;font-weight:600;padding:7px 14px;border-radius:30px;cursor:pointer;box-shadow:var(--shadow-sm);transition:transform .14s}
+.sc-build-screen{padding-top:10px;padding-bottom:96px}
+.build-back{position:relative;z-index:1;margin:-2px 0 14px;padding:0}
+.build-back-btn{background:var(--surface2);border:1px solid var(--line-strong);color:var(--text-sub);font-family:var(--font-ui);font-size:13px;font-weight:600;padding:7px 14px;border-radius:30px;cursor:pointer;box-shadow:var(--shadow-sm);transition:transform .14s}
 .build-back-btn:active{transform:scale(.96)}
 .build-foot{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:540px;z-index:55;background:var(--surface);border-top:1px solid var(--line);box-shadow:0 -4px 18px rgba(0,0,0,.18);padding:12px 20px calc(env(safe-area-inset-bottom) + 14px)}
 .build-foot .btn{margin:0}
