@@ -1288,23 +1288,16 @@ body{font-family:var(--font-ui);background:var(--bg);color:var(--text);line-heig
 .wrap-start{padding-top:0;background:#0b0807}
 .wrap h1,.wrap h2,.wrap h3,.wrap button,.wrap input,.wrap select,.wrap textarea{font-family:var(--font-ui)}
 header{background:var(--surface);padding:18px 20px;border-bottom:1px solid var(--line);transition:background .35s}
-.wrap-start header{background:#0b0807;border-bottom:1px solid rgba(255,255,255,.08);padding:18px 20px 16px}
 .head-row{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .logo{display:flex;align-items:center;gap:12px}
 .logo-mark{width:42px;height:42px;border-radius:13px;background:var(--brand);display:flex;align-items:center;justify-content:center;font-size:22px;box-shadow:0 2px 10px var(--brand-soft)}
-.wrap-start .logo-mark{width:34px;height:34px;border-radius:10px;font-size:18px;background:linear-gradient(145deg,#f46a2d,#a93518)}
 .logo h1{font-family:var(--font-ui);font-weight:600;font-size:19px;letter-spacing:0;line-height:1.1}
-.wrap-start .logo h1{font-size:14px;font-weight:800;letter-spacing:.8px;color:#f7efe7}
 .logo p{font-size:12.5px;color:var(--text-sub);margin-top:3px;font-weight:400}
-.wrap-start .logo p{font-size:12px;color:#8e8178}
 .theme-btn{width:40px;height:40px;border-radius:12px;border:1px solid var(--line-strong);background:var(--surface2);color:var(--text);font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:.2s}
-.wrap-start .theme-btn{background:#15100e;border-color:rgba(255,255,255,.08);color:#d9cfc5}
 .theme-btn:active{transform:scale(.92)}
 .status-row{display:flex;align-items:center;gap:10px;margin-top:14px}
 .status{display:inline-flex;align-items:center;gap:7px;background:var(--green-soft);color:var(--green);padding:6px 13px;border-radius:20px;font-size:12.5px;font-weight:500}
 .eta{color:var(--text-sub);font-size:12.5px;font-weight:600}
-.wrap-start .status{background:rgba(52,211,153,.12);color:#49d17c}
-.wrap-start .eta{color:#9c8f86}
 .status .dot{width:7px;height:7px;border-radius:50%;background:var(--green);animation:pulse 2s infinite}
 @keyframes pulse{0%{box-shadow:0 0 0 0 var(--green-soft)}70%{box-shadow:0 0 0 7px transparent}100%{box-shadow:0 0 0 0 transparent}}
 .steps{position:fixed;top:0;left:50%;transform:translateX(-50%);width:100%;max-width:540px;z-index:50;display:flex;gap:8px;padding:12px 20px;align-items:center;background:var(--bg);border-bottom:1px solid var(--line);box-shadow:0 1px 8px rgba(0,0,0,.16);transition:background .35s}
