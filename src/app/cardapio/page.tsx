@@ -565,6 +565,16 @@ type CartItem = {
   keys?: string[];
 };
 
+type PedidoConfirmadoStatus = "novo" | "em_preparo" | "saiu_entrega" | "entregue" | "cancelado";
+
+const STATUS_PEDIDO_LABEL: Record<PedidoConfirmadoStatus, string> = {
+  novo: "Pedido recebido",
+  em_preparo: "Preparando seu pedido",
+  saiu_entrega: "Saiu para entrega",
+  entregue: "Pedido entregue",
+  cancelado: "Pedido cancelado",
+};
+
 const money = (v: number) => "R$ " + v.toFixed(2).replace(".", ",");
 const bigBorder = (sz: string) => !(sz === "P" || sz === "M");
 
@@ -597,6 +607,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const [observacao, setObservacao] = useState("");
   const [toast, setToast] = useState("");
   const [pedidoConfirmado, setPedidoConfirmado] = useState<{ id: string; numero: number; total: number } | null>(null);
+  const [statusPedidoConfirmado, setStatusPedidoConfirmado] = useState<PedidoConfirmadoStatus>("novo");
   const [erroNome, setErroNome] = useState("");
   const [erroTelefone, setErroTelefone] = useState("");
   const [erroPagamento, setErroPagamento] = useState("");
@@ -660,6 +671,30 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     const t = setTimeout(() => setRestoredDraft(false), 5000);
     return () => clearTimeout(t);
   }, [restoredDraft]);
+
+  useEffect(() => {
+    const pedidoId = pedidoConfirmado?.id;
+    if (!pedidoId) return;
+    let active = true;
+
+    async function fetchStatusPedido() {
+      try {
+        const res = await fetch(`/api/pedido-status?pedidoId=${pedidoId}`, { cache: "no-store" });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (active && data.status && data.status in STATUS_PEDIDO_LABEL) {
+          setStatusPedidoConfirmado(data.status);
+        }
+      } catch {}
+    }
+
+    fetchStatusPedido();
+    const interval = setInterval(fetchStatusPedido, 5000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [pedidoConfirmado?.id]);
 
   function showToast(m: string) { setToast(m); clearTimeout(toastTimer.current); toastTimer.current = setTimeout(() => setToast(""), 1700); }
   function go(s: string) { setScreen(s); window.scrollTo({ top: 0, behavior: "smooth" }); }
@@ -828,10 +863,10 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     try {
       const r = await fetch("/api/pedido-app", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const data = await r.json();
-      if (data.ok) { try { localStorage.setItem("cf_nome", nome.trim()); localStorage.setItem("cf_tel", telefone.trim()); } catch {} try { sessionStorage.removeItem("cf_draft"); } catch {} setPedidoConfirmado({ id: data.pedidoId, numero: data.numero, total: data.total }); go("sc-done"); } else { showToast("Erro ao enviar. Tente de novo."); }
+      if (data.ok) { try { localStorage.setItem("cf_nome", nome.trim()); localStorage.setItem("cf_tel", telefone.trim()); } catch {} try { sessionStorage.removeItem("cf_draft"); } catch {} setStatusPedidoConfirmado("novo"); setPedidoConfirmado({ id: data.pedidoId, numero: data.numero, total: data.total }); go("sc-done"); } else { showToast("Erro ao enviar. Tente de novo."); }
     } catch { showToast("Sem conexão. Tente de novo."); } finally { setSending(false); }
   }
-  function resetAll() { setCart([]); resetBuild(); setDelType(null); setBairroIdx(""); setRua(""); setNumero(""); setReferencia(""); setPayment(null); setTroco(""); setTrocoOpcao(null); setObservacao(""); setErroNome(""); setErroTelefone(""); setErroPagamento(""); setErroEntrega(""); setErroTroco(""); setPedidoConfirmado(null); setRestoredDraft(false); setEditandoIdentidade(false); try { sessionStorage.removeItem("cf_draft"); } catch {} go("sc-start"); }
+  function resetAll() { setCart([]); resetBuild(); setDelType(null); setBairroIdx(""); setRua(""); setNumero(""); setReferencia(""); setPayment(null); setTroco(""); setTrocoOpcao(null); setObservacao(""); setErroNome(""); setErroTelefone(""); setErroPagamento(""); setErroEntrega(""); setErroTroco(""); setPedidoConfirmado(null); setStatusPedidoConfirmado("novo"); setRestoredDraft(false); setEditandoIdentidade(false); try { sessionStorage.removeItem("cf_draft"); } catch {} go("sc-start"); }
 
   const stepMap: Record<string, number> = { "sc-start": 0, "sc-qty": 0, "sc-build": 0, "sc-border": 0, "sc-list": 0, "sc-suco-leite": 0, "sc-macarronada-size": 0, "sc-another": 1, "sc-cart": 1, "sc-delivery": 2, "sc-pay": 3, "sc-done": 3 };
   const stepIdx = stepMap[screen] ?? 0;
@@ -1159,6 +1194,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                 {pedidoConfirmado && (
                   <>
                     <p style={{ fontWeight: 700, fontSize: 18, margin: "12px 0 4px" }}>Pedido #{pedidoConfirmado.numero}</p>
+                    <p style={{ color: "#ff6b00", fontSize: 15, fontWeight: 800, margin: "0 0 8px" }}>{STATUS_PEDIDO_LABEL[statusPedidoConfirmado]}</p>
                     <p style={{ color: "var(--muted)", fontSize: 14, marginBottom: 16 }}>Total: {money(pedidoConfirmado.total)}</p>
                     <a href={`/rastrear/${pedidoConfirmado.id}`} className="btn" style={{ display: "block", marginBottom: 10, textAlign: "center", textDecoration: "none" }}>Acompanhar pedido</a>
                   </>
