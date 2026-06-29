@@ -1011,7 +1011,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
               <div className={`opt ${delType === "dine_in" ? "sel" : ""}`} onClick={() => { setDelType("dine_in"); setBairroIdx(""); setErroEntrega(""); }}><div className="opt-emoji">🍽️</div><div className="opt-body"><div className="opt-title">Consumo no local</div><div className="opt-desc">Comer aqui na pizzaria</div></div><div className="opt-check" /></div>
               {delType === "delivery" && (
                 <div>
-                  <div className="section-label">Endereco</div>
+                  <div className="section-label">Endereço</div>
                   {erroEntrega && <div style={{ color: "#ef4444", fontSize: 12, fontWeight: 700, margin: "-4px 0 10px" }}>{erroEntrega}</div>}
                   <div className="field">
                     <label>Bairro</label>
@@ -1027,10 +1027,10 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                     {ruaErro && <div style={{ color: "#ef4444", fontSize: 12, marginTop: 4 }}>Preencha a rua</div>}
                   </div>
                   <div className="field">
-                    <label>N?mero</label>
+                    <label>Número</label>
                     <div style={{ display: "flex", gap: 8, alignItems: "stretch" }}>
                       <input value={numero} onChange={(e) => { setNumero(e.target.value); if (erroEntrega) setErroEntrega(""); }} inputMode="text" placeholder="123" style={numeroErro ? enderecoErroStyle : undefined} />
-                      <button type="button" onClick={() => { setNumero("S/N"); if (erroEntrega) setErroEntrega(""); }} style={{ flex: "0 0 auto", border: "1px solid var(--line-strong)", borderRadius: 13, background: numero.trim().toUpperCase() === "S/N" ? "var(--brand-soft)" : "var(--surface2)", color: numero.trim().toUpperCase() === "S/N" ? "var(--brand)" : "var(--text)", fontSize: 12, fontWeight: 700, padding: "0 12px" }}>Sem n?mero</button>
+                      <button type="button" onClick={() => { setNumero("S/N"); if (erroEntrega) setErroEntrega(""); }} style={{ flex: "0 0 auto", border: "1px solid var(--line-strong)", borderRadius: 13, background: numero.trim().toUpperCase() === "S/N" ? "var(--brand-soft)" : "var(--surface2)", color: numero.trim().toUpperCase() === "S/N" ? "var(--brand)" : "var(--text)", fontSize: 12, fontWeight: 700, padding: "0 12px" }}>Sem número</button>
                     </div>
                     {numeroErro && <div style={{ color: "#ef4444", fontSize: 12, marginTop: 4 }}>Preencha o n?mero</div>}
                   </div>
