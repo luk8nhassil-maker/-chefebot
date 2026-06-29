@@ -743,6 +743,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   function chQty(idx: number, d: number) { setCart(cart.map((c, i) => (i === idx ? { ...c, qty: Math.max(1, c.qty + d) } : c))); }
   function rmItem(idx: number) { const nc = cart.filter((_, i) => i !== idx); setCart(nc); if (nc.length === 0) go("sc-start"); }
   const fee = delType === "delivery" && bairroIdx !== "" ? ((menu.neighborhoods || [])[+bairroIdx]?.fee ?? 0) : 0;
+  const cartbarTotal = cartTotal + fee;
   const ruaOk = rua.trim().length > 0;
   const numeroOk = numero.trim().length > 0;
   const delOk = delType === "retirada" || delType === "dine_in" || (delType === "delivery" && bairroIdx !== "" && ruaOk && numeroOk);
@@ -1168,7 +1169,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
           )}
         </main>
       </div>
-      {cartCount > 0 && screen !== "sc-done" && (<div className="cartbar show"><div className="cartbar-inner"><div className="cartbar-info"><div className="cartbar-count">{cartCount} {cartCount === 1 ? "item" : "itens"}</div><div className="cartbar-total">{money(cartTotal)}</div></div><button className="btn" onClick={() => go("sc-cart")}>Ver pedido</button></div></div>)}
+      {cartCount > 0 && screen !== "sc-done" && (<div className="cartbar show"><div className="cartbar-inner"><div className="cartbar-info"><div className="cartbar-count">{cartCount} {cartCount === 1 ? "item" : "itens"}</div><div className="cartbar-total">{money(cartbarTotal)}</div></div><button className="btn" onClick={() => go("sc-cart")}>Ver pedido</button></div></div>)}
       {toast && <div className="toast show">{toast}</div>}
     </>
   )
