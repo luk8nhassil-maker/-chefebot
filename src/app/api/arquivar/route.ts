@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyToken } from '@/lib/auth'
 import { redis } from '@/lib/redis'
+import { sanitizarPedidoPixResposta } from '@/lib/pix'
 
 type PedidoArquivavel = {
   id: string
@@ -78,5 +79,5 @@ export async function GET(req: NextRequest) {
 
   const pedidos = (await redis.get<PedidoArquivavel[]>('pedidos')) || []
   const arquivados = pedidos.filter(p => p.isArchived)
-  return NextResponse.json([...arquivados].reverse())
+  return NextResponse.json([...arquivados].reverse().map(sanitizarPedidoPixResposta))
 }
