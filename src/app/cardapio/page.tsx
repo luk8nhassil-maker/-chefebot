@@ -1284,10 +1284,10 @@ const CSS = `
 :root[data-theme="light"]{--bg:#f7f2ea;--surface:#fff;--surface2:#fbf6ee;--text:#2a1d16;--text-sub:#8a7a6c;--text-faint:#b3a596;--brand:#e8472b;--brand-press:#c2371f;--brand-soft:rgba(232,71,43,.09);--gold:#c98a17;--green:#4f8a43;--green-soft:rgba(79,138,67,.12);--line:rgba(42,29,22,.08);--line-strong:rgba(42,29,22,.14);--shadow-sm:0 1px 8px rgba(120,80,40,.07);}
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 body{font-family:var(--font-ui);background:var(--bg);color:var(--text);line-height:1.5;overflow-x:hidden;padding-bottom:112px;transition:background .35s,color .35s;font-size:16px;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
-.wrap{max-width:540px;margin:0 auto;min-height:100vh;position:relative;font-family:var(--font-ui);padding-top:46px}
+.wrap{width:min(100%,540px);max-width:540px;margin:0 auto;min-height:100vh;position:relative;font-family:var(--font-ui);padding-top:46px}
 .wrap-start{padding-top:0;background:#0b0807}
 .wrap h1,.wrap h2,.wrap h3,.wrap button,.wrap input,.wrap select,.wrap textarea{font-family:var(--font-ui)}
-header{background:var(--surface);padding:18px 20px;border-bottom:1px solid var(--line);transition:background .35s}
+header{width:100%;background:var(--surface);padding:18px 20px;border-bottom:1px solid var(--line);transition:background .35s}
 .head-row{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .logo{display:flex;align-items:center;gap:12px}
 .logo-mark{width:42px;height:42px;border-radius:13px;background:var(--brand);display:flex;align-items:center;justify-content:center;font-size:22px;box-shadow:0 2px 10px var(--brand-soft)}
@@ -1309,8 +1309,9 @@ header{background:var(--surface);padding:18px 20px;border-bottom:1px solid var(-
 .step-chip.done .num{background:var(--green);border-color:var(--green);color:#fff}
 .step-line{flex:1;height:1.5px;background:var(--line);border-radius:2px}
 .step-line.done{background:var(--green)}
-main{padding:6px 20px 20px}
+main{width:100%;padding:6px 20px 20px}
 .wrap-start main{padding:18px 20px 112px}
+.screen{width:100%}
 .screen.active{display:block;animation:slide .4s cubic-bezier(.2,.8,.2,1)}
 @keyframes slide{from{opacity:0;transform:translateX(14px)}to{opacity:1;transform:none}}
 .top-back{margin:4px 0 12px}
