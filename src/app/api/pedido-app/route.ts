@@ -3,6 +3,7 @@ import { redis } from "@/lib/redis";
 import { proximoNumeroPedido } from "@/lib/numeracao";
 import { getMENUDinamico } from "@/lib/menu";
 import { computeTaxaApp, buildEnderecoApp } from "@/lib/pedidoAppLogic";
+import { criarPixMetadata } from "@/lib/pix";
 
 export const maxDuration = 20;
 
@@ -150,6 +151,7 @@ export async function POST(req: NextRequest) {
 
     const pedidoId = Date.now().toString();
     const numeroPedido = await proximoNumeroPedido();
+    const pix = criarPixMetadata(pedidoId, body.pagamento, total);
     const novoPedido = {
       id: pedidoId,
       numero: numeroPedido,
@@ -164,6 +166,7 @@ export async function POST(req: NextRequest) {
       origem: "site",
       ...(body.observacao ? { observacao: body.observacao } : {}),
       pagamento: body.pagamento,
+      ...(pix ? { pix } : {}),
       ...(body.troco ? { troco: body.troco } : {}),
       ...(taxa ? { taxaEntrega: taxa } : {}),
       ...(body.bairro ? { bairro: body.bairro } : {}),

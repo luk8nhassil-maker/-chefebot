@@ -15,6 +15,7 @@ import { proximoNumeroPedido } from "@/lib/numeracao";
 import { salvarStatusConexao, botPodeResponder, StatusConexao } from "@/lib/conexaoWhatsapp";
 import { ehConfirmacaoPedido } from "@/lib/confirmacaoPedido";
 import { escolherStepDeRetomada, detectarConversaMorta } from "@/lib/reviverConversa";
+import { criarPixMetadata, type PixMetadata } from "@/lib/pix";
 import type { BotStep } from "@/lib/bot";
 
 export const maxDuration = 30;
@@ -37,6 +38,7 @@ type Pedido = {
   cancelamentoSolicitado?: boolean;
   observacao?: string;
   pixConfirmado?: boolean;
+  pix?: PixMetadata;
   tipoEntrega?: string;
   horarioInicio?: string;
   pagamento?: string;
@@ -145,6 +147,7 @@ async function salvarPedido(session: BotSession, phone: string, _config: ConfigP
     : "Retirada na loja";
   const pedidoId = Date.now().toString();
   const numeroPedido = await proximoNumeroPedido();
+  const pix = criarPixMetadata(pedidoId, session.paymentMethod, total);
   const novoPedido = {
     id: pedidoId,
     numero: numeroPedido,
@@ -158,6 +161,7 @@ async function salvarPedido(session: BotSession, phone: string, _config: ConfigP
     data: new Date().toLocaleDateString("pt-BR"),
     ...(session.observacao ? { observacao: session.observacao } : {}),
     ...(session.paymentMethod ? { pagamento: session.paymentMethod } : {}),
+    ...(pix ? { pix } : {}),
     ...(session.troco ? { troco: session.troco } : {}),
     ...(session.deliveryFee ? { taxaEntrega: session.deliveryFee } : {}),
     ...(session.neighborhood ? { bairro: session.neighborhood } : {}),
