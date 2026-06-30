@@ -15,7 +15,7 @@ import { proximoNumeroPedido } from "@/lib/numeracao";
 import { salvarStatusConexao, botPodeResponder, StatusConexao } from "@/lib/conexaoWhatsapp";
 import { ehConfirmacaoPedido } from "@/lib/confirmacaoPedido";
 import { escolherStepDeRetomada, detectarConversaMorta } from "@/lib/reviverConversa";
-import { criarPixMetadata, prepararPixProviderMercadoPago, type PixMetadata } from "@/lib/pix";
+import { anexarPixMercadoPagoEmMensagens, criarPixMetadata, prepararPixProviderMercadoPago, serializarPixCliente, type PixCliente, type PixMetadata } from "@/lib/pix";
 import type { BotStep } from "@/lib/bot";
 
 export const maxDuration = 30;
@@ -131,7 +131,12 @@ function getOpcoesPorStep(step: string): string[] {
   return opcoes[step] || [];
 }
 
-async function salvarPedido(session: BotSession, phone: string, _config: ConfigPizzaria): Promise<string> {
+type PedidoSalvoResultado = {
+  pedidoId: string;
+  pixCliente?: PixCliente;
+};
+
+async function salvarPedido(session: BotSession, phone: string, _config: ConfigPizzaria): Promise<PedidoSalvoResultado> {
   const pedidos = (await redis.get<Pedido[]>("pedidos")) || [];
   const itens = session.cart.map((item) => {
     const border = item.border && item.border !== "Sem borda" ? ` + ${item.border}` : "";
@@ -194,7 +199,7 @@ async function salvarPedido(session: BotSession, phone: string, _config: ConfigP
   const totalPedidos = (histAnterior?.totalPedidos || 0) + 1;
   const historico: ClienteHistorico = { nome: session.customerName || phone, ultimoPedido: itens, ultimoTotal: total, ultimoCart: session.cart, ultimoDeliveryFee: session.deliveryFee, ultimoEndereco: session.address, ultimoNeighborhood: session.neighborhood, ultimoDeliveryType: session.deliveryType, ultimoPayment: session.paymentMethod, totalPedidos, ultimaVisita: Date.now() };
   await redis.set(`cliente:${phone}`, historico, { ex: 30 * 24 * 60 * 60 });
-  return pedidoId;
+  return { pedidoId, pixCliente: serializarPixCliente(pix) };
 }
 
 async function salvarEscalonamento(phone: string, session: BotSession) {
@@ -1012,8 +1017,9 @@ export async function POST(req: NextRequest) {
     // Para Pix, o pedido fica visivel no painel com pixConfirmado:false ate o comprovante chegar.
     // processarComprovante verifica se o pedido ja existe antes de salvar novamente.
     if (currentSession!.step === "confirm" && ehConfirmacaoPedido(messageText)) {
-      const pedidoId = await salvarPedido(currentSession!, phone, config);
+      const { pedidoId, pixCliente } = await salvarPedido(currentSession!, phone, config);
       result.session = { ...result.session, pedidoId } as any;
+      result.messages = anexarPixMercadoPagoEmMensagens(result.messages, pixCliente);
       if (config.limitePico > 0) {
         const pedidosAtivos = (await redis.get<Pedido[]>("pedidos") || []).filter(p => p.status === "em_preparo" && !p.escalonado).length;
         if (pedidosAtivos >= config.limitePico) {

@@ -575,6 +575,13 @@ const STATUS_PEDIDO_LABEL: Record<PedidoConfirmadoStatus, string> = {
   cancelado: "Pedido cancelado",
 };
 
+type PixClientePedido = {
+  provider: "mercadopago";
+  qrCode: string;
+  ticketUrl?: string;
+  valorEsperado?: number;
+};
+
 const money = (v: number) => "R$ " + v.toFixed(2).replace(".", ",");
 const bigBorder = (sz: string) => !(sz === "P" || sz === "M");
 
@@ -606,7 +613,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const [referencia, setReferencia] = useState("");
   const [observacao, setObservacao] = useState("");
   const [toast, setToast] = useState("");
-  const [pedidoConfirmado, setPedidoConfirmado] = useState<{ id: string; numero: number; total: number } | null>(null);
+  const [pedidoConfirmado, setPedidoConfirmado] = useState<{ id: string; numero: number; total: number; pix?: PixClientePedido } | null>(null);
   const [statusPedidoConfirmado, setStatusPedidoConfirmado] = useState<PedidoConfirmadoStatus>("novo");
   const [erroNome, setErroNome] = useState("");
   const [erroTelefone, setErroTelefone] = useState("");
@@ -863,7 +870,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     try {
       const r = await fetch("/api/pedido-app", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const data = await r.json();
-      if (data.ok) { try { localStorage.setItem("cf_nome", nome.trim()); localStorage.setItem("cf_tel", telefone.trim()); } catch {} try { sessionStorage.removeItem("cf_draft"); } catch {} setStatusPedidoConfirmado("novo"); setPedidoConfirmado({ id: data.pedidoId, numero: data.numero, total: data.total }); go("sc-done"); } else { showToast("Erro ao enviar. Tente de novo."); }
+      if (data.ok) { try { localStorage.setItem("cf_nome", nome.trim()); localStorage.setItem("cf_tel", telefone.trim()); } catch {} try { sessionStorage.removeItem("cf_draft"); } catch {} setStatusPedidoConfirmado("novo"); setPedidoConfirmado({ id: data.pedidoId, numero: data.numero, total: data.total, ...(data.pix?.qrCode ? { pix: data.pix } : {}) }); go("sc-done"); } else { showToast("Erro ao enviar. Tente de novo."); }
     } catch { showToast("Sem conexão. Tente de novo."); } finally { setSending(false); }
   }
   function resetAll() { setCart([]); resetBuild(); setDelType(null); setBairroIdx(""); setRua(""); setNumero(""); setReferencia(""); setPayment(null); setTroco(""); setTrocoOpcao(null); setObservacao(""); setErroNome(""); setErroTelefone(""); setErroPagamento(""); setErroEntrega(""); setErroTroco(""); setPedidoConfirmado(null); setStatusPedidoConfirmado("novo"); setRestoredDraft(false); setEditandoIdentidade(false); try { sessionStorage.removeItem("cf_draft"); } catch {} go("sc-start"); }
@@ -1221,6 +1228,14 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                     <p style={{ fontWeight: 700, fontSize: 18, margin: "12px 0 4px" }}>Pedido #{pedidoConfirmado.numero}</p>
                     <p style={{ color: "#ff6b00", fontSize: 15, fontWeight: 800, margin: "0 0 8px" }}>{STATUS_PEDIDO_LABEL[statusPedidoConfirmado]}</p>
                     <p style={{ color: "var(--muted)", fontSize: 14, marginBottom: 16 }}>Total: {money(pedidoConfirmado.total)}</p>
+                    {pedidoConfirmado.pix?.qrCode && (
+                      <div style={{ textAlign: "left", background: "var(--card)", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
+                        <div style={{ fontSize: 12, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 6 }}>Pix copia e cola</div>
+                        {typeof pedidoConfirmado.pix.valorEsperado === "number" && <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 8 }}>Valor do Pix: {money(pedidoConfirmado.pix.valorEsperado)}</div>}
+                        <textarea readOnly value={pedidoConfirmado.pix.qrCode} style={{ width: "100%", minHeight: 92, border: "1px solid var(--line)", borderRadius: 10, background: "var(--surface2)", color: "var(--fg)", padding: 10, resize: "vertical", fontSize: 12, lineHeight: 1.4 }} />
+                        {pedidoConfirmado.pix.ticketUrl && <a href={pedidoConfirmado.pix.ticketUrl} target="_blank" rel="noreferrer" style={{ display: "block", marginTop: 8, color: "#ff6b00", fontSize: 13, fontWeight: 800 }}>Abrir pagamento</a>}
+                      </div>
+                    )}
                     <a href={`/rastrear/${pedidoConfirmado.id}`} className="btn" style={{ display: "block", marginBottom: 10, textAlign: "center", textDecoration: "none" }}>Acompanhar pedido</a>
                   </>
                 )}

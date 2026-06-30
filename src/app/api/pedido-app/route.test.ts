@@ -149,9 +149,11 @@ describe("POST /api/pedido-app", () => {
 
   it("PIX_PROVIDER ausente nao chama Mercado Pago", async () => {
     const res = await POST(postReq(basePayload));
+    const data = await res.json();
 
     expect(res.status).toBe(200);
     expect(criarCobrancaPixMercadoPagoMock).not.toHaveBeenCalled();
+    expect(data.pix).toBeUndefined();
   });
 
   it("PIX_PROVIDER diferente de mercadopago nao chama Mercado Pago", async () => {
@@ -167,6 +169,7 @@ describe("POST /api/pedido-app", () => {
     vi.stubEnv("PIX_PROVIDER", "mercadopago");
 
     const res = await POST(postReq({ ...basePayload, email: "cliente@example.com" }));
+    const data = await res.json();
 
     expect(res.status).toBe(200);
     expect(criarCobrancaPixMercadoPagoMock).toHaveBeenCalledWith(expect.objectContaining({
@@ -189,6 +192,13 @@ describe("POST /api/pedido-app", () => {
     });
     expect(pedidos[0].pixConfirmado).toBeUndefined();
     expect(pedidos[0].status).toBe("novo");
+    expect(data.pix).toEqual({
+      provider: "mercadopago",
+      qrCode: "pix-copia-e-cola",
+      ticketUrl: "https://mp.test/ticket",
+      valorEsperado: 33,
+    });
+    expect(data.pix).not.toHaveProperty("qrCodeBase64");
   });
 
   it("PIX_PROVIDER mercadopago com Pix hibrido usa somente pix.valorEsperado", async () => {
@@ -198,6 +208,7 @@ describe("POST /api/pedido-app", () => {
       ...basePayload,
       pagamento: "Pix (R$ 20,00) + Dinheiro (R$ 13,00)",
     }));
+    const data = await res.json();
 
     expect(res.status).toBe(200);
     expect(criarCobrancaPixMercadoPagoMock).toHaveBeenCalledWith(expect.objectContaining({
@@ -206,6 +217,7 @@ describe("POST /api/pedido-app", () => {
     const pedidos = store.get("pedidos") as PedidoSalvo[];
     expect(pedidos[0].total).toBe(33);
     expect(pedidos[0].pix.valorEsperado).toBe(20);
+    expect(data.pix.valorEsperado).toBe(20);
   });
 
   it("erro do Mercado Pago salva pedido com fallback Pix atual", async () => {
@@ -214,6 +226,7 @@ describe("POST /api/pedido-app", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     const res = await POST(postReq(basePayload));
+    const data = await res.json();
 
     expect(res.status).toBe(200);
     const pedidos = store.get("pedidos") as PedidoSalvo[];
@@ -225,6 +238,7 @@ describe("POST /api/pedido-app", () => {
     expect(pedidos[0].pix.provider).toBeUndefined();
     expect(pedidos[0].pixConfirmado).toBeUndefined();
     expect(pedidos[0].status).toBe("novo");
+    expect(data.pix).toBeUndefined();
     warnSpy.mockRestore();
   });
 
