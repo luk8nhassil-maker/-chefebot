@@ -10,7 +10,7 @@ vi.mock("./mercadoPagoPix", () => ({
   criarCobrancaPixMercadoPago: criarCobrancaPixMercadoPagoMock,
 }));
 
-import { anexarPixMercadoPagoEmMensagens, criarPixMetadata, gerarTxidPixInterno, prepararPixProviderMercadoPago, serializarPixCliente } from "./pix";
+import { anexarPixMercadoPagoEmMensagens, criarPixMetadata, gerarTxidPixInterno, prepararPixProviderMercadoPago, sanitizarPedidoPixResposta, serializarPixCliente } from "./pix";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -174,6 +174,32 @@ describe("metadados internos de Pix", () => {
 
     expect(pixCliente).toEqual({ provider: "mercadopago", qrCode: "copia-e-cola" });
     expect(pixCliente).not.toHaveProperty("qrCodeBase64");
+  });
+
+  test("helper de resposta de pedido remove somente qrCodeBase64", () => {
+    const pedido = {
+      id: "pedido-1",
+      pix: {
+        provider: "mercadopago" as const,
+        providerPaymentId: "mp-1",
+        qrCode: "copia-e-cola",
+        qrCodeBase64: "base64-nao-deve-sair",
+        ticketUrl: "https://mp.test/ticket",
+        status: "pendente" as const,
+      },
+    };
+
+    const sanitizado = sanitizarPedidoPixResposta(pedido);
+
+    expect(sanitizado.pix).toEqual({
+      provider: "mercadopago",
+      providerPaymentId: "mp-1",
+      qrCode: "copia-e-cola",
+      ticketUrl: "https://mp.test/ticket",
+      status: "pendente",
+    });
+    expect(sanitizado.pix).not.toHaveProperty("qrCodeBase64");
+    expect(pedido.pix.qrCodeBase64).toBe("base64-nao-deve-sair");
   });
 
   test("WhatsApp mantem mensagem atual quando nao ha Mercado Pago", () => {

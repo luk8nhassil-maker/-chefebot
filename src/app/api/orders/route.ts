@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { verifyToken } from '@/lib/auth'
 import { redis } from '@/lib/redis'
 import { proximoNumeroPedido } from '@/lib/numeracao'
-import { criarPixMetadata, type PixMetadata } from '@/lib/pix'
+import { criarPixMetadata, sanitizarPedidoPixResposta, type PixMetadata } from '@/lib/pix'
 import type { PedidoEntregador } from '@/types/entregador'
 
 const APP_BASE_URL = 'https://chefebot-pjif.vercel.app'
@@ -105,12 +105,12 @@ export async function GET(req: NextRequest) {
 
   if (soArquivados) {
     const arquivados = pedidos.filter(p => p.isArchived)
-    return NextResponse.json([...arquivados].reverse())
+    return NextResponse.json([...arquivados].reverse().map(sanitizarPedidoPixResposta))
   }
 
   // Padrão: exclui arquivados da área de trabalho principal
   const ativos = pedidos.filter(p => !p.isArchived)
-  return NextResponse.json([...ativos].reverse())
+  return NextResponse.json([...ativos].reverse().map(sanitizarPedidoPixResposta))
 }
 
 export async function PATCH(req: NextRequest) {
@@ -143,7 +143,7 @@ export async function PATCH(req: NextRequest) {
   }
   await redis.set('pedidos', pedidos)
 
-  if (silent) return NextResponse.json(pedidos[index])
+  if (silent) return NextResponse.json(sanitizarPedidoPixResposta(pedidos[index]))
 
   await notificarCliente(pedidos[index].telefone, status, pedidos[index].cliente)
 
@@ -224,7 +224,7 @@ export async function PATCH(req: NextRequest) {
     }
   }
 
-  return NextResponse.json(pedidos[index])
+  return NextResponse.json(sanitizarPedidoPixResposta(pedidos[index]))
 }
 
 export async function POST(req: NextRequest) {

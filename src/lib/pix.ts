@@ -122,6 +122,14 @@ export function serializarPixCliente(pix: PixMetadata | undefined): PixCliente |
   };
 }
 
+export function sanitizarPedidoPixResposta<T extends object>(pedido: T): T {
+  const pixOriginal = (pedido as { pix?: PixMetadata }).pix;
+  if (!pixOriginal || !("qrCodeBase64" in pixOriginal)) return pedido;
+
+  const { qrCodeBase64: _qrCodeBase64, ...pix } = pixOriginal;
+  return { ...pedido, pix } as T;
+}
+
 export function montarTextoPixMercadoPagoCliente(pix: PixCliente | undefined): string {
   if (!pix?.qrCode) return "";
 
