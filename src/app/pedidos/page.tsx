@@ -47,6 +47,19 @@ const NEXT_STATUS: Record<Status, Status | null> = {
 const ACTION_LABEL: Record<Status, string> = {
   novo: "Começar a fazer", em_preparo: "Saiu para entrega", saiu_entrega: "Confirmar entrega", entregue: "", cancelado: "",
 }
+function isPedidoDineIn(p: Pick<Pedido, "tipoEntrega" | "endereco">): boolean {
+  return p.tipoEntrega === "dine_in" || p.endereco === "Consumo no local"
+}
+function isPedidoRetirada(p: Pick<Pedido, "tipoEntrega" | "endereco">): boolean {
+  return !isPedidoDineIn(p) && (!p.tipoEntrega || p.tipoEntrega === "pickup" || p.tipoEntrega === "retirada" || p.endereco === "Retirada na loja")
+}
+function getActionLabel(p: Pedido): string {
+  if (p.status === "em_preparo") {
+    if (isPedidoDineIn(p)) return "Pronto"
+    if (isPedidoRetirada(p)) return "Pronto para retirada"
+  }
+  return ACTION_LABEL[p.status]
+}
 const STATUS_OPTS: { value: Status; label: string }[] = [
   { value: "novo", label: "Novo" },
   { value: "em_preparo", label: "Fazendo" },
@@ -1059,7 +1072,7 @@ export default function PedidosPage() {
         {/* Ação principal */}
         {!isDone && !isCanceled && nextStatus && (
           <button onClick={() => { avancarStatus(p.id, nextStatus); setDetailId(null) }} disabled={atualizando === p.id} style={{ height: 58, border: "none", borderRadius: 16, background: sc.btnBg, color: sc.btnFg, fontSize: 17, fontWeight: 900, letterSpacing: "-0.2px", flexShrink: 0, opacity: atualizando === p.id ? 0.6 : 1 }}>
-            {ACTION_LABEL[p.status]}
+            {getActionLabel(p)}
           </button>
         )}
         {isDone && <div style={{ height: 54, borderRadius: 16, background: "rgba(34,197,94,.1)", border: "1px solid rgba(34,197,94,.3)", color: "#22c55e", fontSize: 15, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>Entregue · tudo certo ✓</div>}
@@ -1746,7 +1759,7 @@ export default function PedidosPage() {
                           disabled={atualizando === pedido.id}
                           style={{ height: 30, padding: "0 14px", border: "none", borderRadius: 8, background: sc.btnBg, color: sc.btnFg, fontSize: 12, fontWeight: 900, opacity: atualizando === pedido.id ? 0.6 : 1 }}
                         >
-                          {atualizando === pedido.id ? "..." : (isDineIn && pedido.status === "em_preparo" ? "Pronto 🍽️" : ACTION_LABEL[pedido.status])}
+                          {atualizando === pedido.id ? "..." : getActionLabel(pedido)}
                         </button>
                       )}
                       {isDone && <span style={{ fontSize: 11, fontWeight: 800, color: "#22c55e" }}>✓ Entregue</span>}
