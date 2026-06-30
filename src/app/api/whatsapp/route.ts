@@ -15,7 +15,7 @@ import { proximoNumeroPedido } from "@/lib/numeracao";
 import { salvarStatusConexao, botPodeResponder, StatusConexao } from "@/lib/conexaoWhatsapp";
 import { ehConfirmacaoPedido } from "@/lib/confirmacaoPedido";
 import { escolherStepDeRetomada, detectarConversaMorta } from "@/lib/reviverConversa";
-import { criarPixMetadata, type PixMetadata } from "@/lib/pix";
+import { criarPixMetadata, prepararPixProviderMercadoPago, type PixMetadata } from "@/lib/pix";
 import type { BotStep } from "@/lib/bot";
 
 export const maxDuration = 30;
@@ -147,7 +147,12 @@ async function salvarPedido(session: BotSession, phone: string, _config: ConfigP
     : "Retirada na loja";
   const pedidoId = Date.now().toString();
   const numeroPedido = await proximoNumeroPedido();
-  const pix = criarPixMetadata(pedidoId, session.paymentMethod, total);
+  const pixBase = criarPixMetadata(pedidoId, session.paymentMethod, total);
+  const pix = await prepararPixProviderMercadoPago({
+    pedidoId,
+    pix: pixBase,
+    clienteNome: session.customerName || phone,
+  });
   const novoPedido = {
     id: pedidoId,
     numero: numeroPedido,

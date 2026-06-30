@@ -3,7 +3,7 @@ import { redis } from "@/lib/redis";
 import { proximoNumeroPedido } from "@/lib/numeracao";
 import { getMENUDinamico } from "@/lib/menu";
 import { computeTaxaApp, buildEnderecoApp } from "@/lib/pedidoAppLogic";
-import { criarPixMetadata } from "@/lib/pix";
+import { criarPixMetadata, prepararPixProviderMercadoPago } from "@/lib/pix";
 
 export const maxDuration = 20;
 
@@ -27,6 +27,7 @@ type PedidoApp = {
   pagamento: string;
   troco?: string;
   observacao?: string;
+  email?: string;
 };
 
 type MenuSimpleItem = { name: string; price: number; sizes?: { code: string; price: number }[] };
@@ -151,7 +152,13 @@ export async function POST(req: NextRequest) {
 
     const pedidoId = Date.now().toString();
     const numeroPedido = await proximoNumeroPedido();
-    const pix = criarPixMetadata(pedidoId, body.pagamento, total);
+    const pixBase = criarPixMetadata(pedidoId, body.pagamento, total);
+    const pix = await prepararPixProviderMercadoPago({
+      pedidoId,
+      pix: pixBase,
+      clienteNome: body.cliente,
+      payerEmail: body.email,
+    });
     const novoPedido = {
       id: pedidoId,
       numero: numeroPedido,

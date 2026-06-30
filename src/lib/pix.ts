@@ -1,4 +1,5 @@
 import { temPixNoPagamento, valorPixEsperado } from "./bot";
+import { criarCobrancaPixMercadoPago } from "./mercadoPagoPix";
 
 export type PixMetadata = {
   txid?: string;
@@ -6,7 +7,12 @@ export type PixMetadata = {
   status?: "pendente" | "confirmado";
   confirmadoPor?: "manual" | "webhook" | "comprovante";
   confirmadoEm?: string;
+  provider?: "mercadopago";
   providerPaymentId?: string;
+  qrCode?: string;
+  qrCodeBase64?: string;
+  ticketUrl?: string;
+  idempotencyKey?: string;
 };
 
 export type PixWebhookPayload = {
@@ -32,6 +38,14 @@ export type PixWebhookResultado = {
   providerPaymentId?: string;
 };
 
+export type PrepararPixProviderInput = {
+  pedidoId: string;
+  pix: PixMetadata | undefined;
+  descricao?: string;
+  clienteNome?: string;
+  payerEmail?: string;
+};
+
 const STATUS_PIX_PAGO = new Set(["pago", "paid", "liquidado", "settled", "confirmed", "confirmado"]);
 
 function emCentavos(valor: number): number {
@@ -50,6 +64,38 @@ export function criarPixMetadata(pedidoId: string, pagamento: string | undefined
     valorEsperado: valorPixEsperado(pagamento, total),
     status: "pendente",
   };
+}
+
+export async function prepararPixProviderMercadoPago(input: PrepararPixProviderInput): Promise<PixMetadata | undefined> {
+  const pix = input.pix;
+  if (!pix) return undefined;
+  if (process.env.PIX_PROVIDER !== "mercadopago") return pix;
+  if (!pix.txid || typeof pix.valorEsperado !== "number" || !Number.isFinite(pix.valorEsperado)) return pix;
+
+  try {
+    const cobranca = await criarCobrancaPixMercadoPago({
+      pedidoId: input.pedidoId,
+      txid: pix.txid,
+      valorEsperado: pix.valorEsperado,
+      descricao: input.descricao,
+      clienteNome: input.clienteNome,
+      payerEmail: input.payerEmail,
+    });
+
+    return {
+      ...pix,
+      provider: cobranca.provider,
+      providerPaymentId: cobranca.providerPaymentId,
+      qrCode: cobranca.qrCode,
+      qrCodeBase64: cobranca.qrCodeBase64,
+      ticketUrl: cobranca.ticketUrl,
+      idempotencyKey: cobranca.idempotencyKey,
+      status: "pendente",
+    };
+  } catch (error) {
+    console.warn("[Pix] Mercado Pago indisponivel; mantendo Pix manual", error);
+    return pix;
+  }
 }
 
 export function avaliarWebhookPixPassivo(payload: PixWebhookPayload, pedidos: PedidoComPix[]): PixWebhookResultado {
