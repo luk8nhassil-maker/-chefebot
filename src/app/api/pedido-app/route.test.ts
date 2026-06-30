@@ -18,7 +18,14 @@ const { store, redisMock } = vi.hoisted(() => {
   return { store, redisMock };
 });
 
+const { criarCobrancaPixMercadoPagoMock } = vi.hoisted(() => ({
+  criarCobrancaPixMercadoPagoMock: vi.fn(),
+}));
+
 vi.mock("@/lib/redis", () => ({ redis: redisMock }));
+vi.mock("@/lib/mercadoPagoPix", () => ({
+  criarCobrancaPixMercadoPago: criarCobrancaPixMercadoPagoMock,
+}));
 
 import { POST } from "./route";
 
@@ -50,7 +57,17 @@ const basePayload = {
 beforeEach(() => {
   store.clear();
   vi.clearAllMocks();
+  vi.unstubAllEnvs();
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) }));
+  criarCobrancaPixMercadoPagoMock.mockResolvedValue({
+    provider: "mercadopago",
+    providerPaymentId: "mp-123",
+    qrCode: "pix-copia-e-cola",
+    qrCodeBase64: "base64-pix",
+    ticketUrl: "https://mp.test/ticket",
+    idempotencyKey: "chefebot_pix_chefebot_123",
+    statusOriginal: "pending",
+  });
 });
 
 describe("POST /api/pedido-app", () => {
@@ -128,6 +145,102 @@ describe("POST /api/pedido-app", () => {
     expect(res.status).toBe(200);
     const pedidos = store.get("pedidos") as PedidoSalvo[];
     expect(pedidos[0].troco).toBeUndefined();
+  });
+
+  it("PIX_PROVIDER ausente nao chama Mercado Pago", async () => {
+    const res = await POST(postReq(basePayload));
+
+    expect(res.status).toBe(200);
+    expect(criarCobrancaPixMercadoPagoMock).not.toHaveBeenCalled();
+  });
+
+  it("PIX_PROVIDER diferente de mercadopago nao chama Mercado Pago", async () => {
+    vi.stubEnv("PIX_PROVIDER", "manual");
+
+    const res = await POST(postReq(basePayload));
+
+    expect(res.status).toBe(200);
+    expect(criarCobrancaPixMercadoPagoMock).not.toHaveBeenCalled();
+  });
+
+  it("PIX_PROVIDER mercadopago com Pix puro chama adaptador e salva dados do provider", async () => {
+    vi.stubEnv("PIX_PROVIDER", "mercadopago");
+
+    const res = await POST(postReq({ ...basePayload, email: "cliente@example.com" }));
+
+    expect(res.status).toBe(200);
+    expect(criarCobrancaPixMercadoPagoMock).toHaveBeenCalledWith(expect.objectContaining({
+      pedidoId: expect.any(String),
+      txid: expect.stringMatching(/^chefebot_/),
+      valorEsperado: 33,
+      clienteNome: "Lucas Brito",
+      payerEmail: "cliente@example.com",
+    }));
+    const pedidos = store.get("pedidos") as PedidoSalvo[];
+    expect(pedidos[0].pix).toMatchObject({
+      provider: "mercadopago",
+      providerPaymentId: "mp-123",
+      qrCode: "pix-copia-e-cola",
+      qrCodeBase64: "base64-pix",
+      ticketUrl: "https://mp.test/ticket",
+      idempotencyKey: "chefebot_pix_chefebot_123",
+      status: "pendente",
+      valorEsperado: 33,
+    });
+    expect(pedidos[0].pixConfirmado).toBeUndefined();
+    expect(pedidos[0].status).toBe("novo");
+  });
+
+  it("PIX_PROVIDER mercadopago com Pix hibrido usa somente pix.valorEsperado", async () => {
+    vi.stubEnv("PIX_PROVIDER", "mercadopago");
+
+    const res = await POST(postReq({
+      ...basePayload,
+      pagamento: "Pix (R$ 20,00) + Dinheiro (R$ 13,00)",
+    }));
+
+    expect(res.status).toBe(200);
+    expect(criarCobrancaPixMercadoPagoMock).toHaveBeenCalledWith(expect.objectContaining({
+      valorEsperado: 20,
+    }));
+    const pedidos = store.get("pedidos") as PedidoSalvo[];
+    expect(pedidos[0].total).toBe(33);
+    expect(pedidos[0].pix.valorEsperado).toBe(20);
+  });
+
+  it("erro do Mercado Pago salva pedido com fallback Pix atual", async () => {
+    vi.stubEnv("PIX_PROVIDER", "mercadopago");
+    criarCobrancaPixMercadoPagoMock.mockRejectedValue(new Error("mp fora"));
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const res = await POST(postReq(basePayload));
+
+    expect(res.status).toBe(200);
+    const pedidos = store.get("pedidos") as PedidoSalvo[];
+    expect(pedidos[0].pix).toMatchObject({
+      txid: expect.stringMatching(/^chefebot_/),
+      valorEsperado: 33,
+      status: "pendente",
+    });
+    expect(pedidos[0].pix.provider).toBeUndefined();
+    expect(pedidos[0].pixConfirmado).toBeUndefined();
+    expect(pedidos[0].status).toBe("novo");
+    warnSpy.mockRestore();
+  });
+
+  it("pedido sem Pix nao chama Mercado Pago", async () => {
+    vi.stubEnv("PIX_PROVIDER", "mercadopago");
+
+    const res = await POST(postReq({
+      ...basePayload,
+      pagamento: "Cartao",
+    }));
+
+    expect(res.status).toBe(200);
+    expect(criarCobrancaPixMercadoPagoMock).not.toHaveBeenCalled();
+    const pedidos = store.get("pedidos") as PedidoSalvo[];
+    expect(pedidos[0].pix).toBeUndefined();
+    expect(pedidos[0].status).toBe("novo");
   });
 
   it("aceita cartao sem troco", async () => {
