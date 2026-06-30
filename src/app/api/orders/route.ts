@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { verifyToken } from '@/lib/auth'
 import { redis } from '@/lib/redis'
 import { proximoNumeroPedido } from '@/lib/numeracao'
+import { criarPixMetadata, type PixMetadata } from '@/lib/pix'
 import type { PedidoEntregador } from '@/types/entregador'
 
 const APP_BASE_URL = 'https://chefebot-pjif.vercel.app'
@@ -20,6 +21,7 @@ type Pedido = {
   pagamento?: string
   troco?: string
   pixConfirmado?: boolean
+  pix?: PixMetadata
   entregador?: { id: string; nome: string; telefone: string }
   tipoEntrega?: string
   taxaEntrega?: number
@@ -239,9 +241,11 @@ export async function POST(req: NextRequest) {
   const pedidos = await getPedidos()
   const numeroPedido = await proximoNumeroPedido()
   const agora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' })
+  const pedidoId = Date.now().toString()
+  const pix = criarPixMetadata(pedidoId, pagamento ? String(pagamento) : undefined, Number(total) || 0)
 
   const novoPedido: Pedido = {
-    id: Date.now().toString(),
+    id: pedidoId,
     numero: numeroPedido,
     cliente: String(cliente),
     telefone: String(telefone || ''),
@@ -255,6 +259,7 @@ export async function POST(req: NextRequest) {
     ...(tipoEntrega ? { tipoEntrega: String(tipoEntrega) } : {}),
     ...(taxaEntrega ? { taxaEntrega: Number(taxaEntrega) } : {}),
     ...(pagamento ? { pagamento: String(pagamento) } : {}),
+    ...(pix ? { pix } : {}),
     ...(troco ? { troco: String(troco) } : {}),
     ...(observacao ? { observacao: String(observacao) } : {}),
   }

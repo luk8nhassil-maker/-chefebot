@@ -3,6 +3,7 @@ import { processMessage, createInitialSession, BotSession } from "@/lib/bot";
 import { resolverFallbackInteligente } from "@/lib/fallbackInteligente";
 import { redis } from "@/lib/redis";
 import { proximoNumeroPedido } from "@/lib/numeracao";
+import { criarPixMetadata, type PixMetadata } from "@/lib/pix";
 
 type Pedido = {
   id: string;
@@ -17,6 +18,7 @@ type Pedido = {
   data?: string;
   pagamento?: string;
   troco?: string;
+  pix?: PixMetadata;
   tipoEntrega?: string;
   taxaEntrega?: number;
   bairro?: string;
@@ -41,8 +43,10 @@ async function salvarPedido(session: BotSession, phone: string) {
 
   const numeroPedido = await proximoNumeroPedido();
   const agora = new Date();
+  const pedidoId = Date.now().toString();
+  const pix = criarPixMetadata(pedidoId, session.paymentMethod, total);
   const novoPedido: Pedido = {
-    id: Date.now().toString(),
+    id: pedidoId,
     numero: numeroPedido,
     cliente: session.customerName || phone,
     telefone: phone,
@@ -53,6 +57,7 @@ async function salvarPedido(session: BotSession, phone: string) {
     data: agora.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" }),
     endereco,
     ...(session.paymentMethod ? { pagamento: session.paymentMethod } : {}),
+    ...(pix ? { pix } : {}),
     ...(session.troco ? { troco: session.troco } : {}),
     ...(session.deliveryType ? { tipoEntrega: session.deliveryType } : {}),
     ...(session.deliveryFee ? { taxaEntrega: session.deliveryFee } : {}),
