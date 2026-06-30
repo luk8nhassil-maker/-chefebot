@@ -3,7 +3,7 @@ import { redis } from "@/lib/redis";
 import { proximoNumeroPedido } from "@/lib/numeracao";
 import { getMENUDinamico } from "@/lib/menu";
 import { computeTaxaApp, buildEnderecoApp } from "@/lib/pedidoAppLogic";
-import { criarPixMetadata, prepararPixProviderMercadoPago } from "@/lib/pix";
+import { criarPixMetadata, prepararPixProviderMercadoPago, serializarPixCliente } from "@/lib/pix";
 
 export const maxDuration = 20;
 
@@ -199,7 +199,8 @@ export async function POST(req: NextRequest) {
       });
     } catch {}
 
-    return NextResponse.json({ ok: true, pedidoId, numero: numeroPedido, total });
+    const pixCliente = serializarPixCliente(pix);
+    return NextResponse.json({ ok: true, pedidoId, numero: numeroPedido, total, ...(pixCliente ? { pix: pixCliente } : {}) });
   } catch (error) {
     console.error("Erro ao salvar pedido do site:", error);
     return NextResponse.json({ ok: false, error: "Erro interno" }, { status: 500 });

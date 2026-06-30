@@ -46,6 +46,13 @@ export type PrepararPixProviderInput = {
   payerEmail?: string;
 };
 
+export type PixCliente = {
+  provider: "mercadopago";
+  qrCode: string;
+  ticketUrl?: string;
+  valorEsperado?: number;
+};
+
 const STATUS_PIX_PAGO = new Set(["pago", "paid", "liquidado", "settled", "confirmed", "confirmado"]);
 
 function emCentavos(valor: number): number {
@@ -96,6 +103,43 @@ export async function prepararPixProviderMercadoPago(input: PrepararPixProviderI
     console.warn("[Pix] Mercado Pago indisponivel; mantendo Pix manual", error);
     return pix;
   }
+}
+
+export function serializarPixCliente(pix: PixMetadata | undefined): PixCliente | undefined {
+  const qrCode = typeof pix?.qrCode === "string" ? pix.qrCode.trim() : "";
+  if (pix?.provider !== "mercadopago" || !qrCode) return undefined;
+
+  const ticketUrl = typeof pix.ticketUrl === "string" && pix.ticketUrl.trim() ? pix.ticketUrl.trim() : undefined;
+  const valorEsperado = typeof pix.valorEsperado === "number" && Number.isFinite(pix.valorEsperado)
+    ? pix.valorEsperado
+    : undefined;
+
+  return {
+    provider: "mercadopago",
+    qrCode,
+    ...(ticketUrl ? { ticketUrl } : {}),
+    ...(valorEsperado !== undefined ? { valorEsperado } : {}),
+  };
+}
+
+export function montarTextoPixMercadoPagoCliente(pix: PixCliente | undefined): string {
+  if (!pix?.qrCode) return "";
+
+  const valor = typeof pix.valorEsperado === "number" && Number.isFinite(pix.valorEsperado)
+    ? `\nValor do Pix: R$ ${pix.valorEsperado.toFixed(2).replace(".", ",")}`
+    : "";
+  const ticket = pix.ticketUrl ? `\nLink de pagamento: ${pix.ticketUrl}` : "";
+
+  return `\n\nPix Mercado Pago copia e cola:${valor}\n${pix.qrCode}${ticket}`;
+}
+
+export function anexarPixMercadoPagoEmMensagens(messages: string[], pix: PixCliente | undefined): string[] {
+  const textoPix = montarTextoPixMercadoPagoCliente(pix);
+  if (!textoPix || messages.length === 0) return messages;
+
+  return messages.map((message, index) => (
+    index === messages.length - 1 ? `${message}${textoPix}` : message
+  ));
 }
 
 export function avaliarWebhookPixPassivo(payload: PixWebhookPayload, pedidos: PedidoComPix[]): PixWebhookResultado {

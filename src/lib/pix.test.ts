@@ -10,7 +10,7 @@ vi.mock("./mercadoPagoPix", () => ({
   criarCobrancaPixMercadoPago: criarCobrancaPixMercadoPagoMock,
 }));
 
-import { criarPixMetadata, gerarTxidPixInterno, prepararPixProviderMercadoPago } from "./pix";
+import { anexarPixMercadoPagoEmMensagens, criarPixMetadata, gerarTxidPixInterno, prepararPixProviderMercadoPago, serializarPixCliente } from "./pix";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -142,5 +142,60 @@ describe("metadados internos de Pix", () => {
 
     expect(resultado).toBeUndefined();
     expect(criarCobrancaPixMercadoPagoMock).not.toHaveBeenCalled();
+  });
+
+  test("helper publico retorna Pix somente quando provider e mercadopago e existe qrCode", () => {
+    expect(serializarPixCliente(undefined)).toBeUndefined();
+    expect(serializarPixCliente({ txid: "tx", valorEsperado: 50, status: "pendente" })).toBeUndefined();
+    expect(serializarPixCliente({ provider: "mercadopago", valorEsperado: 50, status: "pendente" })).toBeUndefined();
+
+    expect(serializarPixCliente({
+      provider: "mercadopago",
+      qrCode: " copia-e-cola ",
+      qrCodeBase64: "base64-nao-deve-sair",
+      ticketUrl: " https://mp.test/ticket ",
+      valorEsperado: 30,
+      status: "pendente",
+    })).toEqual({
+      provider: "mercadopago",
+      qrCode: "copia-e-cola",
+      ticketUrl: "https://mp.test/ticket",
+      valorEsperado: 30,
+    });
+  });
+
+  test("helper publico nao retorna qrCodeBase64", () => {
+    const pixCliente = serializarPixCliente({
+      provider: "mercadopago",
+      qrCode: "copia-e-cola",
+      qrCodeBase64: "base64-nao-deve-sair",
+      status: "pendente",
+    });
+
+    expect(pixCliente).toEqual({ provider: "mercadopago", qrCode: "copia-e-cola" });
+    expect(pixCliente).not.toHaveProperty("qrCodeBase64");
+  });
+
+  test("WhatsApp mantem mensagem atual quando nao ha Mercado Pago", () => {
+    const messages = ["Ótimo! Para finalizar, envie o comprovante do Pix.\n\nChave Pix: (configurada pelo admin)"];
+
+    expect(anexarPixMercadoPagoEmMensagens(messages, undefined)).toBe(messages);
+  });
+
+  test("WhatsApp anexa copia e cola quando ha Pix Mercado Pago valido", () => {
+    const messages = ["Ótimo! Para finalizar, envie o comprovante do Pix.\n\nChave Pix: (configurada pelo admin)"];
+
+    const resultado = anexarPixMercadoPagoEmMensagens(messages, {
+      provider: "mercadopago",
+      qrCode: "000201-copia-e-cola",
+      ticketUrl: "https://mp.test/ticket",
+      valorEsperado: 30,
+    });
+
+    expect(resultado[0]).toContain("Chave Pix: (configurada pelo admin)");
+    expect(resultado[0]).toContain("Pix Mercado Pago copia e cola");
+    expect(resultado[0]).toContain("Valor do Pix: R$ 30,00");
+    expect(resultado[0]).toContain("000201-copia-e-cola");
+    expect(resultado[0]).toContain("https://mp.test/ticket");
   });
 });
