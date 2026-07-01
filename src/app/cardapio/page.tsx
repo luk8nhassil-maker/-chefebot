@@ -1124,7 +1124,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
             </section>
           )}
           {screen === "sc-pay" && (
-            <section className="screen active">
+            <section className="screen active pay-screen">
               <TopBack onClick={() => go("sc-delivery")} />
               <div className="screen-head"><div className="eyebrow">Último passo</div><h2>Seu pedido está quase pronto 🍕</h2><p style={{ fontSize: 13, color: "var(--muted)", margin: "4px 0 0" }}>Confere rapidinho os dados e escolhe como vai pagar.</p></div>
 
@@ -1230,7 +1230,6 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
               )}
 
               {cartEsgotado && <div style={{ marginTop: 8, padding: "10px 12px", borderRadius: 10, background: "rgba(239,68,68,.1)", color: "#ef4444", fontSize: 13, fontWeight: 700 }}>Um item do seu pedido ficou esgotado. Remova para continuar.</div>}
-              <button className="btn btn-sm" style={{ marginTop: 16 }} disabled={sending || cartEsgotado} onClick={finish}>{sending ? "Enviando…" : "Finalizar pedido"}</button>
             </section>
           )}
           {screen === "sc-done" && (
@@ -1273,7 +1272,18 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
           </div>
         </div>
       )}
-      {cartCount > 0 && screen !== "sc-done" && screen !== "sc-cart" && screen !== "sc-delivery" && (<div className="cartbar show"><div className="cartbar-inner"><div className="cartbar-info"><div className="cartbar-count">Sacola</div><div className="cartbar-total">{cartCount} {cartCount === 1 ? "item" : "itens"} · {money(finalTotal)}</div></div><button className="cartbar-link" onClick={() => go("sc-cart")}>Editar</button></div></div>)}
+      {cartCount > 0 && screen === "sc-pay" && (
+        <div className="delivery-cta-bar">
+          <div className="delivery-cta-inner pay-cta-inner">
+            <div className="delivery-cta-info">
+              <div className="delivery-cta-label">Total</div>
+              <div className="delivery-cta-total">{money(finalTotal)}</div>
+            </div>
+            <button className="btn delivery-cta-btn" disabled={sending || cartEsgotado} onClick={finish}>{sending ? "Enviando…" : "Finalizar pedido"}</button>
+          </div>
+        </div>
+      )}
+      {cartCount > 0 && screen !== "sc-done" && screen !== "sc-cart" && screen !== "sc-delivery" && screen !== "sc-pay" && (<div className="cartbar show"><div className="cartbar-inner"><div className="cartbar-info"><div className="cartbar-count">Sacola</div><div className="cartbar-total">{cartCount} {cartCount === 1 ? "item" : "itens"} · {money(finalTotal)}</div></div><button className="cartbar-link" onClick={() => go("sc-cart")}>Editar</button></div></div>)}
       {toast && <div className="toast show">{toast}</div>}
     </>
   )
@@ -1445,6 +1455,8 @@ main{width:100%;padding:6px 20px 20px}
 .delivery-cta-total{font-size:16px;font-weight:800;color:var(--text);line-height:1.15;white-space:nowrap}
 .delivery-cta-cart{border:1px solid var(--line-strong);background:transparent;color:var(--text-sub);border-radius:999px;padding:10px 12px;font-size:12.5px;font-weight:700}
 .delivery-cta-btn{margin:0;padding:14px 12px;border-radius:13px;min-width:0;white-space:normal;line-height:1.15}
+.pay-screen{padding-bottom:132px}
+.pay-cta-inner{grid-template-columns:auto minmax(0,1fr)}
 .cartbar{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:540px;z-index:50;background:transparent;padding:0 20px calc(env(safe-area-inset-bottom) + 14px);pointer-events:none}
 .cartbar-inner{margin:0 auto;display:flex;align-items:center;gap:14px;background:#15110f;border:1px solid rgba(255,255,255,.1);border-radius:20px;padding:12px 12px 12px 16px;box-shadow:0 -10px 34px rgba(0,0,0,.35);pointer-events:auto}
 .cartbar-info{flex:1}
