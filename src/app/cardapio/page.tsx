@@ -849,6 +849,15 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     return "Falta preencher: " + lista;
   }
 
+  function continueToPayment() {
+    if (!delOk) {
+      setErroEntrega(getEnderecoErro());
+      return;
+    }
+    setErroEntrega("");
+    go("sc-pay");
+  }
+
   async function finish() {
     if (sending) return;
     if (cartEsgotado) { showToast("Um item do seu pedido ficou esgotado. Remova para continuar."); return; }
@@ -1081,7 +1090,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
             </section>
           )}
           {screen === "sc-delivery" && (
-            <section className="screen active">
+            <section className="screen active delivery-screen">
               <TopBack onClick={() => go("sc-cart")} />
               <div className="screen-head"><div className="eyebrow">Entrega</div><h2>Como prefere receber?</h2></div>
               <div className={`opt ${delType === "delivery" ? "sel" : ""}`} onClick={() => { setDelType("delivery"); if (erroEntrega) setErroEntrega(""); }}><div className="opt-emoji">🛵</div><div className="opt-body"><div className="opt-title">Entrega (delivery)</div><div className="opt-desc">Levamos até você</div></div><div className="opt-check" /></div>
@@ -1116,7 +1125,6 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                 </div>
               )}
               <div className="checkout-summary">{cartCount} {cartCount === 1 ? "item" : "itens"} · {money(finalTotal)}</div>
-              <button className="btn btn-sm" disabled={!delType} onClick={() => { if (!delOk) { setErroEntrega(getEnderecoErro()); return; } setErroEntrega(""); go("sc-pay"); }}>Continuar para pagamento</button>
             </section>
           )}
           {screen === "sc-pay" && (
@@ -1257,7 +1265,19 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
           )}
         </main>
       </div>
-      {cartCount > 0 && screen !== "sc-done" && screen !== "sc-cart" && (<div className="cartbar show"><div className="cartbar-inner"><div className="cartbar-info"><div className="cartbar-count">Sacola</div><div className="cartbar-total">{cartCount} {cartCount === 1 ? "item" : "itens"} · {money(finalTotal)}</div></div><button className="cartbar-link" onClick={() => go("sc-cart")}>Editar</button></div></div>)}
+      {cartCount > 0 && screen === "sc-delivery" && (
+        <div className="delivery-cta-bar">
+          <div className="delivery-cta-inner">
+            <div className="delivery-cta-info">
+              <div className="delivery-cta-label">Total</div>
+              <div className="delivery-cta-total">{money(finalTotal)}</div>
+            </div>
+            <button className="delivery-cta-cart" onClick={() => go("sc-cart")}>Sacola</button>
+            <button className="btn delivery-cta-btn" disabled={!delType} onClick={continueToPayment}>Continuar para pagamento</button>
+          </div>
+        </div>
+      )}
+      {cartCount > 0 && screen !== "sc-done" && screen !== "sc-cart" && screen !== "sc-delivery" && (<div className="cartbar show"><div className="cartbar-inner"><div className="cartbar-info"><div className="cartbar-count">Sacola</div><div className="cartbar-total">{cartCount} {cartCount === 1 ? "item" : "itens"} · {money(finalTotal)}</div></div><button className="cartbar-link" onClick={() => go("sc-cart")}>Editar</button></div></div>)}
       {toast && <div className="toast show">{toast}</div>}
     </>
   )
@@ -1421,6 +1441,14 @@ main{width:100%;padding:6px 20px 20px}
 .field label{display:block;font-size:13px;font-weight:600;margin-bottom:7px;letter-spacing:0}
 .field input,.field select{width:100%;background:var(--surface);border:1px solid var(--line-strong);border-radius:13px;padding:14px;color:var(--text);font-family:var(--font-ui);font-size:15.5px;transition:.16s;font-weight:400}
 .field input:focus,.field select:focus{outline:none;border-color:var(--brand)}
+.delivery-screen{padding-bottom:132px}
+.delivery-cta-bar{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:540px;z-index:55;background:linear-gradient(to top,var(--bg) 78%,transparent);padding:18px 20px calc(env(safe-area-inset-bottom) + 14px);pointer-events:none}
+.delivery-cta-inner{display:grid;grid-template-columns:auto auto minmax(0,1fr);align-items:center;gap:10px;background:var(--surface);border:1px solid var(--line-strong);border-radius:18px;padding:10px;box-shadow:0 -10px 34px rgba(0,0,0,.28);pointer-events:auto}
+.delivery-cta-info{min-width:74px;padding-left:4px}
+.delivery-cta-label{font-size:11px;color:var(--text-sub);font-weight:600;text-transform:uppercase;letter-spacing:.7px}
+.delivery-cta-total{font-size:16px;font-weight:800;color:var(--text);line-height:1.15;white-space:nowrap}
+.delivery-cta-cart{border:1px solid var(--line-strong);background:transparent;color:var(--text-sub);border-radius:999px;padding:10px 12px;font-size:12.5px;font-weight:700}
+.delivery-cta-btn{margin:0;padding:14px 12px;border-radius:13px;min-width:0;white-space:normal;line-height:1.15}
 .cartbar{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:540px;z-index:50;background:transparent;padding:0 20px calc(env(safe-area-inset-bottom) + 14px);pointer-events:none}
 .cartbar-inner{margin:0 auto;display:flex;align-items:center;gap:14px;background:#15110f;border:1px solid rgba(255,255,255,.1);border-radius:20px;padding:12px 12px 12px 16px;box-shadow:0 -10px 34px rgba(0,0,0,.35);pointer-events:auto}
 .cartbar-info{flex:1}
