@@ -28,6 +28,18 @@ type Cardapio = {
 type Entregador = { id: string; nome: string; telefone: string; ativo: boolean }
 type Aba = 'dashboard' | 'cardapio' | 'config' | 'financeiro' | 'dev'
 type Periodo = 'ontem' | 'hoje' | 'semana' | 'personalizado'
+type MercadoPagoConfig = {
+  provider: 'mercadopago'
+  enabled: boolean
+  configured: boolean
+  tokenMasked: string | null
+  payerEmailFallback?: string
+  lastTestAt?: string
+  lastTestOk?: boolean
+  lastTestMessage?: string
+  updatedAt?: string
+  updatedBy?: string
+}
 
 function getUserInfo(): { name: string; role: string } | null {
   if (typeof document === 'undefined') return null
@@ -173,6 +185,13 @@ export default function AdminPage() {
   const [waExpired, setWaExpired] = useState(false)
   const [waLoadingQr, setWaLoadingQr] = useState(false)
   const [waQrError, setWaQrError] = useState<string | null>(null)
+  const [mpConfig, setMpConfig] = useState<MercadoPagoConfig | null>(null)
+  const [mpToken, setMpToken] = useState('')
+  const [mpPayerEmail, setMpPayerEmail] = useState('')
+  const [mpLoading, setMpLoading] = useState(false)
+  const [mpSaving, setMpSaving] = useState(false)
+  const [mpTesting, setMpTesting] = useState(false)
+  const [mpRemoving, setMpRemoving] = useState(false)
   const cameraRef = useRef<HTMLInputElement>(null)
   const inputPizzaRef = useRef<HTMLInputElement>(null)
   const inputLancheRef = useRef<HTMLInputElement>(null)
@@ -224,6 +243,7 @@ export default function AdminPage() {
         setWaStatus(connected ? 'connected' : 'disconnected')
         if (!connected) tryAutoQr()
       }).catch(() => { setWaStatus('disconnected'); tryAutoQr() })
+      carregarMercadoPago()
     })
   }, [router])
 
@@ -307,6 +327,80 @@ export default function AdminPage() {
   }
 
   const msg = (m: string) => { setMensagem(m); setTimeout(() => setMensagem(''), 3000) }
+
+  const carregarMercadoPago = async () => {
+    setMpLoading(true)
+    try {
+      const res = await fetch('/api/admin/integracoes/mercadopago')
+      if (!res.ok) throw new Error('erro')
+      const data = await res.json()
+      setMpConfig(data)
+      setMpPayerEmail(data.payerEmailFallback || '')
+    } catch {
+      msg('Erro ao carregar Mercado Pago.')
+    } finally {
+      setMpLoading(false)
+    }
+  }
+
+  const salvarMercadoPago = async () => {
+    setMpSaving(true)
+    try {
+      const res = await fetch('/api/admin/integracoes/mercadopago', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          accessToken: mpToken,
+          payerEmailFallback: mpPayerEmail,
+        }),
+      })
+      const data = await res.json().catch(() => null)
+      if (!res.ok) throw new Error(data?.error || 'erro')
+      setMpConfig(data.config)
+      setMpToken('')
+      setMpPayerEmail(data.config?.payerEmailFallback || '')
+      msg('Mercado Pago salvo. Pix automatico ainda nao foi ativado.')
+    } catch {
+      msg('Erro ao salvar Mercado Pago.')
+    } finally {
+      setMpSaving(false)
+    }
+  }
+
+  const testarMercadoPago = async () => {
+    setMpTesting(true)
+    try {
+      const res = await fetch('/api/admin/integracoes/mercadopago/test', { method: 'POST' })
+      const data = await res.json().catch(() => null)
+      if (data?.config) setMpConfig(data.config)
+      if (!res.ok || !data?.ok) throw new Error(data?.config?.lastTestMessage || 'erro')
+      msg('Conexao Mercado Pago validada.')
+    } catch {
+      msg('Nao foi possivel validar Mercado Pago.')
+    } finally {
+      setMpTesting(false)
+    }
+  }
+
+  const removerMercadoPago = async () => {
+    setMpRemoving(true)
+    try {
+      const res = await fetch('/api/admin/integracoes/mercadopago', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clearToken: true, enabled: false, payerEmailFallback: mpPayerEmail }),
+      })
+      const data = await res.json().catch(() => null)
+      if (!res.ok) throw new Error(data?.error || 'erro')
+      setMpConfig(data.config)
+      setMpToken('')
+      msg('Mercado Pago desconectado.')
+    } catch {
+      msg('Erro ao remover token Mercado Pago.')
+    } finally {
+      setMpRemoving(false)
+    }
+  }
 
   const pedidosFiltrados = filtraPorPeriodo(pedidos, periodo, dataInicio, dataFim).filter(p => !p.escalonado && p.status !== 'cancelado')
   const pedidosEntregues = pedidosFiltrados.filter(p => p.status === 'entregue')
@@ -829,6 +923,87 @@ export default function AdminPage() {
               <p style={sectionTitle}>Alerta de pico</p>
               <label style={{ color: '#555', fontSize: 11, display: 'block', marginBottom: 6 }}>Avisar quando atingir X pedidos simultaneos (0 = desativado)</label>
               <input type="number" value={limitePico} onChange={e => setLimitePico(Number(e.target.value))} style={inp} min={0} />
+            </div>
+
+            <div style={card}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 12 }}>
+                <div>
+                  <p style={{ ...sectionTitle, marginBottom: 4 }}>Integracoes / Mercado Pago</p>
+                  <p style={{ color: '#555', fontSize: 11, margin: 0, lineHeight: 1.45 }}>
+                    Preparacao da integracao. Esta etapa nao ativa Pix automatico nem altera o Pix manual.
+                  </p>
+                </div>
+                <span style={{
+                  background: mpConfig?.configured && mpConfig.lastTestOk ? '#14532d' : '#1a1a1a',
+                  border: `1px solid ${mpConfig?.configured && mpConfig.lastTestOk ? '#16a34a40' : '#2a2a2a'}`,
+                  color: mpConfig?.configured && mpConfig.lastTestOk ? '#4ade80' : '#888',
+                  borderRadius: 999,
+                  padding: '5px 10px',
+                  fontSize: 11,
+                  fontWeight: 800,
+                  whiteSpace: 'nowrap',
+                }}>
+                  {mpLoading ? 'Carregando' : mpConfig?.configured && mpConfig.lastTestOk ? 'Conectado' : 'Desconectado'}
+                </span>
+              </div>
+
+              <div style={{ background: '#0d0d0d', border: '1px solid #1e1e1e', borderRadius: 12, padding: 12, marginBottom: 12 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  <div>
+                    <p style={{ color: '#555', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 4px' }}>Token</p>
+                    <p style={{ color: mpConfig?.configured ? '#fbbf24' : '#666', fontSize: 13, fontWeight: 800, margin: 0 }}>
+                      {mpConfig?.configured ? 'Configurado' : 'Nao configurado'}
+                    </p>
+                  </div>
+                  <div>
+                    <p style={{ color: '#555', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 4px' }}>Mascarado</p>
+                    <p style={{ color: '#c9c2b4', fontSize: 13, fontWeight: 700, margin: 0, wordBreak: 'break-all' }}>
+                      {mpConfig?.tokenMasked || '-'}
+                    </p>
+                  </div>
+                </div>
+                {mpConfig?.lastTestMessage && (
+                  <p style={{ color: mpConfig.lastTestOk ? '#4ade80' : '#f87171', fontSize: 12, fontWeight: 700, margin: '10px 0 0', lineHeight: 1.4 }}>
+                    {mpConfig.lastTestMessage}
+                  </p>
+                )}
+              </div>
+
+              <label style={{ color: '#555', fontSize: 11, display: 'block', marginBottom: 6 }}>Access Token</label>
+              <input
+                type="password"
+                value={mpToken}
+                onChange={e => setMpToken(e.target.value)}
+                style={{ ...inp, marginBottom: 6 }}
+                placeholder={mpConfig?.configured ? 'Deixe vazio para manter o token atual' : 'Cole o access token do Mercado Pago'}
+                autoComplete="off"
+              />
+              <p style={{ color: '#444', fontSize: 11, margin: '0 0 12px', lineHeight: 1.4 }}>
+                Depois de salvo, o token completo nunca sera exibido novamente.
+              </p>
+
+              <label style={{ color: '#555', fontSize: 11, display: 'block', marginBottom: 6 }}>E-mail fallback do pagador</label>
+              <input
+                type="email"
+                value={mpPayerEmail}
+                onChange={e => setMpPayerEmail(e.target.value)}
+                style={{ ...inp, marginBottom: 12 }}
+                placeholder="cliente@example.com"
+              />
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <button onClick={salvarMercadoPago} disabled={mpSaving || mpLoading} style={{ width: '100%', background: mpSaving ? '#1a1a1a' : '#ff6b00', border: 'none', borderRadius: 10, padding: '12px', color: '#fff', fontSize: 14, fontWeight: 800, cursor: mpSaving || mpLoading ? 'not-allowed' : 'pointer' }}>
+                  {mpSaving ? 'Salvando...' : 'Salvar configuracao'}
+                </button>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={testarMercadoPago} disabled={mpTesting || !mpConfig?.configured} style={{ flex: 1, background: mpTesting || !mpConfig?.configured ? '#121212' : '#1a1a1a', border: '1px solid #2a2a2a', color: mpConfig?.configured ? '#4ade80' : '#555', borderRadius: 10, padding: '11px', fontSize: 13, fontWeight: 800, cursor: mpTesting || !mpConfig?.configured ? 'not-allowed' : 'pointer' }}>
+                    {mpTesting ? 'Testando...' : 'Testar conexao'}
+                  </button>
+                  <button onClick={removerMercadoPago} disabled={mpRemoving || !mpConfig?.configured} style={{ flex: 1, background: mpRemoving || !mpConfig?.configured ? '#121212' : '#1a1a1a', border: '1px solid #2a2a2a', color: mpConfig?.configured ? '#f87171' : '#555', borderRadius: 10, padding: '11px', fontSize: 13, fontWeight: 800, cursor: mpRemoving || !mpConfig?.configured ? 'not-allowed' : 'pointer' }}>
+                    {mpRemoving ? 'Removendo...' : 'Desconectar Mercado Pago'}
+                  </button>
+                </div>
+              </div>
             </div>
 
             <div style={card}>
