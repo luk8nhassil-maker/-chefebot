@@ -588,6 +588,7 @@ const bigBorder = (sz: string) => !(sz === "P" || sz === "M");
 export function PublicCardapio({ menu }: { menu: MenuType }) {
   const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [screen, setScreen] = useState("sc-start");
+  const [previousStepBeforeCart, setPreviousStepBeforeCart] = useState<string | null>(null);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [sending, setSending] = useState(false);
 
@@ -704,7 +705,17 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   }, [pedidoConfirmado?.id]);
 
   function showToast(m: string) { setToast(m); clearTimeout(toastTimer.current); toastTimer.current = setTimeout(() => setToast(""), 1700); }
-  function go(s: string) { setScreen(s); window.scrollTo({ top: 0, behavior: "smooth" }); }
+  const safeCartReturnScreens = ["sc-start", "sc-qty", "sc-build", "sc-border", "sc-list", "sc-suco-leite", "sc-macarronada-size", "sc-another", "sc-delivery", "sc-pay"];
+  function go(s: string) {
+    if (s === "sc-cart" && screen !== "sc-cart" && safeCartReturnScreens.includes(screen)) {
+      setPreviousStepBeforeCart(screen);
+    }
+    setScreen(s);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+  function backFromCart() {
+    go(previousStepBeforeCart && safeCartReturnScreens.includes(previousStepBeforeCart) ? previousStepBeforeCart : "sc-start");
+  }
   function formatTel(v: string) {
     const d = v.replace(/\D/g, "").slice(0, 11);
     if (d.length <= 2) return d;
@@ -1063,6 +1074,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
               {cart.length === 0 ? (<div className="empty"><div className="big">🛒</div><div>Seu pedido está vazio.</div></div>) : (
                 <>{(() => { let pn = 0; return cart.map((it, i) => { let tag = null; if (it.kind === "pizza") { pn++; tag = <span className="ci-tag">Pizza {pn}</span>; } const nm = it.kind === "pizza" ? it.name.replace(/^Pizza /, "") : it.name; const itemEsg = cartItemEsgotado(it.keys, esgotados); return (<div key={i} className="cart-item"><div className="ci-emoji">{it.emoji}</div><div className="ci-body"><div className="ci-name">{tag}{nm}{it.qty > 1 ? ` ×${it.qty}` : ""}{itemEsg && <span style={{ color: "#ef4444", fontWeight: 800, marginLeft: 6 }}>· Esgotado</span>}</div>{it.detail && <div className="ci-detail">{it.detail}</div>}<div className="ci-price">{money(it.price * it.qty)}</div>{it.kind === "simple" && (<div className="qty-pill"><button onClick={() => chQty(i, -1)}>−</button><span>{it.qty}</span><button onClick={() => chQty(i, 1)}>+</button></div>)}</div><button className="ci-remove" onClick={() => rmItem(i)}>✕</button></div>); }); })()}<div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 4px 4px", fontWeight: 700, fontSize: 19 }}><span>Subtotal</span><span>{money(cartTotal)}</span></div></>
               )}
+              <button className="btn btn-ghost btn-sm" style={{ marginTop: 4 }} onClick={backFromCart}>Voltar</button>
               <button className="btn btn-ghost btn-sm" style={{ marginTop: 4 }} onClick={() => go("sc-start")}>+ Adicionar mais</button>
               {cartEsgotado && <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 10, background: "rgba(239,68,68,.1)", color: "#ef4444", fontSize: 13, fontWeight: 700 }}>Um item do seu pedido ficou esgotado. Remova para continuar.</div>}
               {cart.length > 0 && <button className="btn" style={{ marginTop: 11 }} disabled={cartEsgotado} onClick={() => !cartEsgotado && go("sc-delivery")}>Ir para entrega</button>}
