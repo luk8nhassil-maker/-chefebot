@@ -737,14 +737,11 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   }
   const flavorOk = mam ? !!(f1 && f2) : !!f1;
   const buildOk = !!size && flavorOk;
-  function pickBorder(idx: string) {
-    if (idx === "") { setBorder(null); setBorderPrice(0); }
-    else { const b = (menu.borders || [])[+idx]; if (!b) return; setBorder(b.label); setBorderPrice(bigBorder(size!) ? b.priceLarge : b.priceSmall); }
-  }
-  function addPizza() {
+  function addPizzaWithBorder(chosenBorder: string | null, chosenBorderPrice: number) {
+    setBorder(chosenBorder); setBorderPrice(chosenBorderPrice);
     const flavor = mam ? `${f1} / ${f2}` : f1;
-    const keys = [f1, mam ? f2 : null, border].filter(Boolean) as string[];
-    const newItem: CartItem = { emoji: "🍕", kind: "pizza", name: `Pizza ${size}${mam ? " (meio a meio)" : ""}`, detail: `${flavor}${border ? ` · borda ${border}` : ""}`, price: sizePrice + borderPrice, qty: 1, keys };
+    const keys = [f1, mam ? f2 : null, chosenBorder].filter(Boolean) as string[];
+    const newItem: CartItem = { emoji: "🍕", kind: "pizza", name: `Pizza ${size}${mam ? " (meio a meio)" : ""}`, detail: `${flavor}${chosenBorder ? ` · borda ${chosenBorder}` : ""}`, price: sizePrice + chosenBorderPrice, qty: 1, keys };
     const newCart = [...cart, newItem];
     setCart(newCart);
     if (!plan.openEnded && plan.current < plan.total) { setPlan({ ...plan, current: plan.current + 1 }); showToast(`Pizza pronta! 🍕`); resetBuild(); go("sc-build"); }
@@ -1028,9 +1025,8 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
               <TopBack onClick={() => go("sc-build")} />
               <PizzaCtx />
               <div className="screen-head"><div className="eyebrow">Quase pronta</div><h2>Borda recheada?</h2><p>Opcional.</p></div>
-              <div className={`opt ${border === null ? "sel" : ""}`} onClick={() => pickBorder("")}><div className="opt-emoji">⭕</div><div className="opt-body"><div className="opt-title">Sem borda</div><div className="opt-desc">Tradicional</div></div><div className="opt-price">Grátis</div><div className="opt-check" /></div>
-              {(menu.borders || []).map((b, i) => { const p = bigBorder(size!) ? b.priceLarge : b.priceSmall; const esg = esgotados.includes(b.label); return (<div key={i} className={`opt ${border === b.label ? "sel" : ""}`} onClick={() => !esg && pickBorder(String(i))} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }}><div className="opt-emoji">🧀</div><div className="opt-body"><div className="opt-title">{b.label}</div>{esg && <div className="opt-desc" style={{ color: "#ef4444" }}>Esgotado</div>}</div><div className="opt-price">{esg ? "" : `+${money(p)}`}</div><div className="opt-check" /></div>); })}
-              <button className="btn btn-sm" style={{ marginTop: 16 }} onClick={addPizza}>Adicionar ao pedido</button>
+              <div className={`opt ${border === null ? "sel" : ""}`} onClick={() => addPizzaWithBorder(null, 0)}><div className="opt-emoji">⭕</div><div className="opt-body"><div className="opt-title">Sem borda</div><div className="opt-desc">Tradicional</div></div><div className="opt-price">Grátis</div><div className="opt-check" /></div>
+              {(menu.borders || []).map((b, i) => { const p = bigBorder(size!) ? b.priceLarge : b.priceSmall; const esg = esgotados.includes(b.label); return (<div key={i} className={`opt ${border === b.label ? "sel" : ""}`} onClick={() => !esg && addPizzaWithBorder(b.label, p)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }}><div className="opt-emoji">🧀</div><div className="opt-body"><div className="opt-title">{b.label}</div>{esg && <div className="opt-desc" style={{ color: "#ef4444" }}>Esgotado</div>}</div><div className="opt-price">{esg ? "" : `+${money(p)}`}</div><div className="opt-check" /></div>); })}
             </section>
           )}
           {screen === "sc-another" && (
