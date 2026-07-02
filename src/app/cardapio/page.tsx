@@ -169,6 +169,27 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
     toastTimer.current = setTimeout(() => setToast(null), 4500)
   }
 
+  async function copiarLinkCliente() {
+    const url = `${window.location.origin}/pedido`
+    let ok = false
+    try { await navigator.clipboard.writeText(url); ok = true } catch {}
+    if (!ok) {
+      try {
+        const ta = document.createElement("textarea")
+        ta.value = url
+        ta.style.position = "fixed"
+        ta.style.opacity = "0"
+        document.body.appendChild(ta)
+        ta.select()
+        ok = document.execCommand("copy")
+        document.body.removeChild(ta)
+      } catch {}
+    }
+    clearTimeout(toastTimer.current)
+    setToast({ msg: ok ? "Link copiado" : `Não consegui copiar. Link: ${url}`, nome: "", era: false })
+    toastTimer.current = setTimeout(() => setToast(null), 4500)
+  }
+
   return (
     <>
       <style>{`
@@ -225,6 +246,12 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
               rel="noopener noreferrer"
               style={{ height: 32, padding: "0 11px", border: "1px solid #1f1d1a", borderRadius: 9, background: "transparent", color: "#4a4640", fontSize: 12, fontWeight: 700, display: "inline-flex", alignItems: "center", textDecoration: "none" }}
             >🌐 Link cliente</a>
+            <button
+              onClick={copiarLinkCliente}
+              title="Copiar link do cliente"
+              aria-label="Copiar link do cliente"
+              style={{ height: 32, width: 32, padding: 0, border: "1px solid #1f1d1a", borderRadius: 9, background: "transparent", color: "#4a4640", fontSize: 13, fontWeight: 700 }}
+            >📋</button>
             <button
               onClick={onSair}
               style={{ height: 32, padding: "0 11px", border: "1px solid #1f1d1a", borderRadius: 9, background: "transparent", color: "#4a4640", fontSize: 12, fontWeight: 700 }}
