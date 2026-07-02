@@ -27,6 +27,35 @@ type InfoStatus = {
   emoji: string
 }
 
+// Ordem operacional dos status já usados pelo sistema. Status desconhecido é
+// tratado como "novo" (primeira etapa), sem quebrar a página.
+const ORDEM_STATUS = ['novo', 'em_preparo', 'saiu_entrega', 'entregue']
+
+function getEtapasTimeline(tipoEntrega: string): { emoji: string; label: string }[] {
+  if (tipoEntrega === 'retirada') {
+    return [
+      { emoji: '📥', label: 'Pedido recebido' },
+      { emoji: '👨‍🍳', label: 'Em preparo' },
+      { emoji: '✅', label: 'Pronto para retirada' },
+      { emoji: '🏁', label: 'Finalizado' },
+    ]
+  }
+  if (tipoEntrega === 'dine_in') {
+    return [
+      { emoji: '📥', label: 'Pedido recebido' },
+      { emoji: '👨‍🍳', label: 'Em preparo' },
+      { emoji: '🍽️', label: 'Pronto para servir' },
+      { emoji: '🏁', label: 'Finalizado' },
+    ]
+  }
+  return [
+    { emoji: '📥', label: 'Pedido recebido' },
+    { emoji: '👨‍🍳', label: 'Em preparo' },
+    { emoji: '🛵', label: 'Saiu para entrega' },
+    { emoji: '✓', label: 'Entregue' },
+  ]
+}
+
 function getInfoStatus(status: string, tipoEntrega: string): InfoStatus {
   if (tipoEntrega === 'retirada' || tipoEntrega === 'dine_in') {
     const map: Record<string, InfoStatus> = {
@@ -107,6 +136,10 @@ export default function RastrearPage({ params }: PageProps) {
   const emRota = pedidoStatus?.status === 'saiu_entrega'
   const mostrarMapa = isDelivery && emRota && !!localizacao
 
+  const etapas = pedidoStatus ? getEtapasTimeline(pedidoStatus.tipoEntrega) : []
+  const idxAtual = pedidoStatus ? Math.max(0, ORDEM_STATUS.indexOf(pedidoStatus.status)) : 0
+  const mostrarTimeline = !carregando && !!pedidoStatus && pedidoStatus.status !== 'cancelado'
+
   return (
     <div style={{ background: '#060606', minHeight: '100dvh', fontFamily: 'Archivo, sans-serif', color: '#fff', display: 'flex', flexDirection: 'column' }}>
       {/* Header */}
@@ -141,6 +174,31 @@ export default function RastrearPage({ params }: PageProps) {
           <div style={{ fontSize: '18px', fontWeight: 800, color: info.color, marginBottom: '6px' }}>{info.label}</div>
           {info.desc && <div style={{ fontSize: '13px', color: '#888' }}>{info.desc}</div>}
         </div>
+
+        {/* Timeline de etapas do pedido */}
+        {mostrarTimeline && (
+          <div style={{ background: '#0a0a0a', borderRadius: '10px', padding: '14px 16px', marginBottom: '16px' }}>
+            <div style={{ fontSize: '11px', color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '12px' }}>Acompanhamento</div>
+            {etapas.map((etapa, i) => {
+              const concluida = i < idxAtual
+              const atual = i === idxAtual
+              const corBorda = atual ? '#ff6b00' : concluida ? '#4caf50' : '#333'
+              return (
+                <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                    <div style={{ width: '22px', height: '22px', borderRadius: '50%', background: concluida ? '#4caf50' : atual ? '#ff6b00' : '#1c1c1c', border: `2px solid ${corBorda}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: 800, color: '#fff', boxSizing: 'border-box', flexShrink: 0 }}>
+                      {concluida ? '✓' : atual ? '●' : ''}
+                    </div>
+                    {i < etapas.length - 1 && <div style={{ width: '2px', height: '22px', background: i < idxAtual ? '#4caf50' : '#222' }} />}
+                  </div>
+                  <div style={{ paddingBottom: i < etapas.length - 1 ? '8px' : 0, marginTop: '2px' }}>
+                    <div style={{ fontSize: '14px', fontWeight: atual ? 800 : 600, color: atual ? '#ff6b00' : concluida ? '#ccc' : '#666' }}>{etapa.emoji} {etapa.label}</div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
 
         {/* Itens do pedido */}
         {!carregando && pedidoStatus && (
