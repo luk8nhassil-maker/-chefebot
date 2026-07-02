@@ -612,6 +612,21 @@ type PixClientePedido = {
 const money = (v: number) => "R$ " + v.toFixed(2).replace(".", ",");
 const bigBorder = (sz: string) => !(sz === "P" || sz === "M");
 
+async function copiarTexto(texto: string): Promise<boolean> {
+  try { await navigator.clipboard.writeText(texto); return true } catch {}
+  try {
+    const ta = document.createElement("textarea")
+    ta.value = texto
+    ta.style.position = "fixed"
+    ta.style.opacity = "0"
+    document.body.appendChild(ta)
+    ta.select()
+    const ok = document.execCommand("copy")
+    document.body.removeChild(ta)
+    return ok
+  } catch { return false }
+}
+
 export function PublicCardapio({ menu }: { menu: MenuType }) {
   const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [screen, setScreen] = useState("sc-start");
@@ -1275,6 +1290,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                         <div style={{ fontSize: 12, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 6 }}>Pix copia e cola</div>
                         {typeof pedidoConfirmado.pix.valorEsperado === "number" && <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 8 }}>Valor do Pix: {money(pedidoConfirmado.pix.valorEsperado)}</div>}
                         <textarea readOnly value={pedidoConfirmado.pix.qrCode} style={{ width: "100%", minHeight: 92, border: "1px solid var(--line)", borderRadius: 10, background: "var(--surface2)", color: "var(--fg)", padding: 10, resize: "vertical", fontSize: 12, lineHeight: 1.4 }} />
+                        <button className="btn btn-sm" style={{ width: "100%", marginTop: 10 }} onClick={async () => showToast((await copiarTexto(pedidoConfirmado.pix?.qrCode || "")) ? "Código Pix copiado!" : "Não consegui copiar. Toque no texto acima e copie manualmente.")}>📋 Copiar código Pix</button>
                         {pedidoConfirmado.pix.ticketUrl && <a href={pedidoConfirmado.pix.ticketUrl} target="_blank" rel="noreferrer" style={{ display: "block", marginTop: 8, color: "#ff6b00", fontSize: 13, fontWeight: 800 }}>Abrir pagamento</a>}
                       </div>
                     )}
