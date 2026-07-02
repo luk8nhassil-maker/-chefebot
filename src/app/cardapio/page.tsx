@@ -1030,8 +1030,11 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const PizzaCtx = () => (ctxBadge ? (
     <div className="pizza-ctx"><span className="pc-badge">{ctxBadge}</span><span className="pc-txt" dangerouslySetInnerHTML={{ __html: ctxTxt }} />{ctxDots.length > 0 && <span className="pizza-dots">{ctxDots.map((d, i) => <span key={i} className={`pd ${d.cls}`} />)}</span>}</div>
   ) : null);
-  const TopBack = ({ onClick, label = "← Voltar" }: { onClick: () => void; label?: string }) => (
-    <div className="top-back"><button type="button" onClick={onClick}>{label}</button></div>
+  const TopBack = ({ onClick, title }: { onClick: () => void; title?: string }) => (
+    <div className="top-back">
+      <button type="button" onClick={onClick} aria-label="Voltar">←</button>
+      {title && <span className="top-back-title">{title}</span>}
+    </div>
   );
 
   return (
@@ -1048,13 +1051,16 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
             ))}
           </div>
         )}
-        <header>
-          <div className="head-row">
-            <div className="logo"><div className="logo-mark">🍕</div><div><h1>CHEFE DA PIZZA</h1><p>Alto Alegre do MA</p></div></div>
-            <button className="theme-btn" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} aria-label="Trocar tema">{theme === "dark" ? "🌙" : "☀️"}</button>
-          </div>
-          <div className="status-row"><span className="status"><span className="dot" /> Aberto agora</span><span className="eta">40 a 60 min</span></div>
-        </header>
+        {/* Informações da pizzaria: só na tela inicial e de forma discreta.
+            Nas etapas internas o topo é apenas voltar + nome da etapa. */}
+        {screen === "sc-start" && (
+          <header className="header-min">
+            <div className="head-row">
+              <div className="logo"><div className="logo-mark">🍕</div><div><h1>CHEFE DA PIZZA</h1><p>Alto Alegre do MA · <span style={{ color: "var(--green)", fontWeight: 600 }}>● Aberto agora</span> · 40 a 60 min</p></div></div>
+              <button className="theme-btn" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} aria-label="Trocar tema">{theme === "dark" ? "🌙" : "☀️"}</button>
+            </div>
+          </header>
+        )}
         <main>
           {screen === "sc-start" && (
             <section className="screen active home-screen">
@@ -1100,7 +1106,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
           )}
           {screen === "sc-qty" && (
             <section className="screen active">
-              <TopBack onClick={() => go("sc-start")} />
+              <TopBack onClick={() => go("sc-start")} title="Quantidade" />
               <div className="screen-head"><div className="eyebrow">Pizza</div><h2>Quantas pizzas você quer?</h2><p>Você pode montar uma agora e adicionar mais depois.</p></div>
               <div className="qty-grid">
                 <div className="qty-card" onClick={() => setPizzaQty(1)}>
@@ -1136,7 +1142,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
           )}
           {screen === "sc-build" && (
             <section className="screen active sc-build-screen">
-              <div className="build-back"><button className="build-back-btn" onClick={() => go("sc-qty")}>← Voltar</button></div>
+              <TopBack onClick={() => go("sc-qty")} title="Monte sua pizza" />
               <PizzaCtx />
               <div className="screen-head"><div className="eyebrow">Monte sua pizza</div><h2>Escolha o tamanho</h2><p>Depois escolha um sabor. Se quiser, ative meio a meio.</p></div>
               <div className="choice-block">
@@ -1171,7 +1177,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
           )}
           {screen === "sc-border" && (
             <section className="screen active">
-              <TopBack onClick={() => go("sc-build")} />
+              <TopBack onClick={() => go("sc-build")} title="Escolha a borda" />
               <PizzaCtx />
               <div className="screen-head"><div className="eyebrow">Quase pronta</div><h2>Borda recheada?</h2><p>Opcional.</p></div>
               <div className={`opt ${border === null ? "sel" : ""}`} onClick={() => addPizzaWithBorder(null, 0)}><div className="opt-emoji">⭕</div><div className="opt-body"><div className="opt-title">Sem borda</div><div className="opt-desc">Tradicional</div></div><div className="opt-price">Grátis</div><div className="opt-check" /></div>
@@ -1180,7 +1186,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
           )}
           {screen === "sc-promo" && promoSel && (
             <section className="screen active">
-              <TopBack onClick={() => { setPromoSel(null); go("sc-start"); }} />
+              <TopBack onClick={() => { setPromoSel(null); go("sc-start"); }} title="Promoção" />
               <div className="screen-head"><div className="eyebrow">{promoSel.badge || "PROMOÇÃO"}</div><h2>{promoSel.title}</h2><p>{promoSel.description}</p></div>
               <div style={{ background: "var(--card)", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
                 <div style={{ fontSize: 12, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 8 }}>O que vem na promoção</div>
@@ -1213,6 +1219,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
           )}
           {screen === "sc-another" && (
             <section className="screen active">
+              <TopBack onClick={() => go("sc-cart")} title="Adicionar mais?" />
               <div className="screen-head"><div className="eyebrow">Pizza adicionada ✓</div><h2>Mais uma pizza?</h2><p>{pizzasNoCarrinho()} pizza{pizzasNoCarrinho() > 1 ? "s" : ""} no pedido</p></div>
               <div className="opt" onClick={addAnother}><div className="opt-emoji">🍕</div><div className="opt-body"><div className="opt-title">Montar outra pizza</div></div></div>
               <div className="opt" onClick={() => go("sc-start")}><div className="opt-emoji">🥤</div><div className="opt-body"><div className="opt-title">Adicionar bebida ou lanche</div></div></div>
@@ -1221,7 +1228,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
           )}
           {screen === "sc-list" && (
             <section className="screen active">
-              <TopBack onClick={() => go("sc-start")} label="← Voltar ao início" />
+              <TopBack onClick={() => go("sc-start")} title={({ lanche: "Lanches", macarronada: "Macarronada", bebida: "Bebidas", suco: "Sucos" } as Record<string, string>)[listCat] || "Escolha o produto"} />
               {(() => {
                 const lanches = menu.lanches || [];
                 const cfg = { lanche: { eb: "Lanches & Porções", t: "Escolha seu lanche", data: lanches.filter((it) => !isMacarronada(it)), emoji: "🍽️" }, macarronada: { eb: "Macarronada", t: "Escolha sua macarronada", data: lanches.filter(isMacarronada), emoji: "🍝" }, bebida: { eb: "Bebidas", t: "Bebidas geladas", data: menu.bebidas || [], emoji: "🥤" }, suco: { eb: "Sucos naturais", t: "Sucos da casa", data: menu.sucos || [], emoji: "🧃" } }[listCat];
@@ -1231,14 +1238,14 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
           )}
           {screen === "sc-suco-leite" && sucoPendente && (
             <section className="screen active">
-              <TopBack onClick={() => { setSucoPendente(null); go("sc-list"); }} />
+              <TopBack onClick={() => { setSucoPendente(null); go("sc-list"); }} title="Como prefere o suco?" />
               <div className="screen-head"><div className="eyebrow">Suco natural</div><h2>Com leite?</h2><p>{sucoPendente.name}</p></div>
               <div className="opt" onClick={() => addSucoLeite(false)}><div className="opt-emoji">S</div><div className="opt-body"><div className="opt-title">Sem leite</div></div><div className="opt-price">{money(sucoPendente.price)}</div></div>
               <div className="opt" onClick={() => addSucoLeite(true)}><div className="opt-emoji">+1</div><div className="opt-body"><div className="opt-title">Com leite</div><div className="opt-desc">Adicional de R$ 1,00</div></div><div className="opt-price">{money(sucoPendente.price + 1)}</div></div>
             </section>
           )}          {screen === "sc-macarronada-size" && macarronadaPendente && (
             <section className="screen active">
-              <TopBack onClick={() => { setMacarronadaPendente(null); go("sc-list"); }} />
+              <TopBack onClick={() => { setMacarronadaPendente(null); go("sc-list"); }} title="Escolha o tamanho" />
               <div className="screen-head"><div className="eyebrow">Macarronada</div><h2>Escolha o tamanho</h2><p>{macarronadaPendente.name}</p></div>
               {(macarronadaPendente.sizes || []).map((s) => (
                 <div key={s.code} className="opt" onClick={() => addMacarronadaSize(s.code)}><div className="opt-emoji">🍽️</div><div className="opt-body"><div className="opt-title">Tamanho {s.code}</div></div><div className="opt-price">{money(s.price)}</div></div>
@@ -1247,6 +1254,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
           )}
           {screen === "sc-cart" && (
             <section className="screen active">
+              <TopBack onClick={backFromCart} title="Sacola" />
               {restoredDraft && (
                 <div style={{ display: "flex", alignItems: "flex-start", gap: 10, background: "var(--brand-soft)", border: "1px solid var(--brand)", borderRadius: 14, padding: "12px 14px", marginBottom: 14 }}>
                   <span style={{ fontSize: 20, flexShrink: 0 }}>🍕</span>
@@ -1269,7 +1277,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
           )}
           {screen === "sc-delivery" && (
             <section className="screen active delivery-screen">
-              <TopBack onClick={() => go("sc-cart")} />
+              <TopBack onClick={() => go("sc-cart")} title="Entrega" />
               <div className="screen-head"><div className="eyebrow">Entrega</div><h2>Como prefere receber?</h2></div>
               <div className={`opt ${delType === "delivery" ? "sel" : ""}`} onClick={() => { setDelType("delivery"); if (erroEntrega) setErroEntrega(""); }}><div className="opt-emoji">🛵</div><div className="opt-body"><div className="opt-title">Entrega (delivery)</div><div className="opt-desc">Levamos até você</div></div><div className="opt-check" /></div>
               <div className={`opt ${delType === "retirada" ? "sel" : ""}`} onClick={() => { setDelType("retirada"); setBairroIdx(""); setErroEntrega(""); }}><div className="opt-emoji">🏪</div><div className="opt-body"><div className="opt-title">Buscar na loja</div><div className="opt-desc">Sem taxa de entrega</div></div><div className="opt-check" /></div>
@@ -1307,7 +1315,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
           )}
           {screen === "sc-pay" && (
             <section className="screen active pay-screen">
-              <TopBack onClick={() => go("sc-delivery")} />
+              <TopBack onClick={() => go("sc-delivery")} title="Pagamento" />
               <div className="screen-head"><div className="eyebrow">Último passo</div><h2>Seu pedido está quase pronto 🍕</h2><p style={{ fontSize: 13, color: "var(--muted)", margin: "4px 0 0" }}>Confere rapidinho os dados e escolhe como vai pagar.</p></div>
 
               {/* Bloco: Resumo do pedido */}
@@ -1557,8 +1565,13 @@ main{width:100%;padding:6px 20px 20px}
 .screen{width:100%}
 .screen.active{display:block;animation:slide .4s cubic-bezier(.2,.8,.2,1)}
 @keyframes slide{from{opacity:0;transform:translateX(14px)}to{opacity:1;transform:none}}
-.top-back{margin:4px 0 12px}
-.top-back button{border:1px solid var(--line-strong);background:var(--surface2);color:var(--text-sub);font-family:var(--font-ui);font-size:13px;font-weight:700;padding:8px 13px;border-radius:999px;box-shadow:var(--shadow-sm)}
+.top-back{display:flex;align-items:center;gap:12px;margin:4px 0 12px}
+.top-back button{width:38px;height:38px;display:flex;align-items:center;justify-content:center;padding:0;border:1px solid var(--line-strong);background:var(--surface2);color:var(--text-sub);font-family:var(--font-ui);font-size:17px;font-weight:700;border-radius:999px;box-shadow:var(--shadow-sm);flex-shrink:0}
+.top-back-title{font-size:16.5px;font-weight:800;color:var(--text);letter-spacing:-.2px}
+.header-min{padding:12px 20px}
+.header-min .logo-mark{width:34px;height:34px;border-radius:10px;font-size:18px}
+.header-min .logo h1{font-size:15.5px}
+.header-min .logo p{font-size:12px;margin-top:2px}
 .screen-head{margin:18px 0 20px}
 .top-back + .screen-head{margin-top:8px}
 .eyebrow{font-size:11px;font-weight:600;color:var(--brand);text-transform:uppercase;letter-spacing:1.4px}
