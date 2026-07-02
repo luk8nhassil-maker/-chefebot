@@ -233,6 +233,7 @@ export default function PedidosPage() {
   const [botAtivo, setBotAtivo] = useState(true)
   const [salvandoBot, setSalvandoBot] = useState(false)
   const [atualizando, setAtualizando] = useState<string | null>(null)
+  const atualizandoRef = useRef<string | null>(null)
   const [_manuais, setManuais] = useState<Record<string, boolean>>({})
   const [detailId, setDetailId] = useState<string | null>(null)
   const [cardUrgenciaFechado, setCardUrgenciaFechado] = useState(false)
@@ -757,17 +758,22 @@ export default function PedidosPage() {
   }
 
   const avancarStatus = async (id: string, novoStatus: Status, entregador?: {id: string; nome: string; telefone: string}) => {
+    if (atualizandoRef.current === id) return
     const pedido = pedidos.find(p => p.id === id)
     if (!pedido) return
     const prevStatus = pedido.status
     const F2S: Record<string, Status> = { novo: "novo", em_preparo: "em_preparo", saiu_entrega: "saiu_entrega", entregue: "entregue" }
     const willLeave = filtro !== "todos" && F2S[filtro] === prevStatus
+    atualizandoRef.current = id
     setAtualizando(id)
-    const r = await fetch("/api/orders", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, status: novoStatus, entregador }) })
-    if (r.ok) {
-      setPedidos(prev => prev.map(p => p.id === id ? { ...p, status: novoStatus } : p))
-      if (willLeave) { setLeavingId(id); if (leaveTimerRef.current) clearTimeout(leaveTimerRef.current); leaveTimerRef.current = setTimeout(() => setLeavingId(null), 350) }
-      else { setFlashId(id); if (flashTimerRef.current) clearTimeout(flashTimerRef.current); flashTimerRef.current = setTimeout(() => setFlashId(null), 750) }
+    // Atualização otimista: o painel reflete o novo status na hora do clique;
+    // se a API falhar, o status é revertido e a equipe vê o aviso de erro.
+    setPedidos(prev => prev.map(p => p.id === id ? { ...p, status: novoStatus } : p))
+    if (willLeave) { setLeavingId(id); if (leaveTimerRef.current) clearTimeout(leaveTimerRef.current); leaveTimerRef.current = setTimeout(() => setLeavingId(null), 350) }
+    else { setFlashId(id); if (flashTimerRef.current) clearTimeout(flashTimerRef.current); flashTimerRef.current = setTimeout(() => setFlashId(null), 750) }
+    try {
+      const r = await fetch("/api/orders", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, status: novoStatus, entregador }) })
+      if (!r.ok) throw new Error("Falha ao atualizar status")
       const firstName = pedido.cliente.split(" ")[0]
       if (novoStatus === "entregue") { tocarSomEntrega(); temposEntregaRef.current[id] = tempoDesde(pedido.horario, undefined, Date.now()) }
       setToast({ text: `${firstName} → ${STATUS_COLOR[novoStatus].label}`, expires: Date.now() + 5000, pedidoId: id, prevStatus })
@@ -776,8 +782,16 @@ export default function PedidosPage() {
       if (prevStatus === "novo" && novoStatus === "em_preparo") {
         imprimirPedidoSilencioso(id)
       }
+    } catch {
+      setPedidos(prev => prev.map(p => p.id === id ? { ...p, status: prevStatus } : p))
+      const firstName = pedido.cliente.split(" ")[0]
+      setToast({ text: `⚠️ Não consegui atualizar ${firstName}. Tente de novo.`, expires: Date.now() + 5000, pedidoId: id, prevStatus })
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
+      toastTimerRef.current = setTimeout(() => setToast(null), 5000)
+    } finally {
+      atualizandoRef.current = null
+      setModalEntrega(null); setAtualizando(null); setModalAlterarStatus(null)
     }
-    setModalEntrega(null); setAtualizando(null); setModalAlterarStatus(null)
   }
 
   const cancelarPedido = async (id: string) => {
