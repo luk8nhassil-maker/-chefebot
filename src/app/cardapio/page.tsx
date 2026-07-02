@@ -258,6 +258,8 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
             >Sair</button>
           </div>
 
+          <a href="/cardapio/promocoes" style={{ display: "block", textAlign: "center", padding: "9px 0", marginBottom: 10, border: "1px solid #272320", borderRadius: 10, background: "#0c0c0c", color: "#c9c2b4", fontSize: 12.5, fontWeight: 800, textDecoration: "none" }}>🏷️ Gerenciar promoções</a>
+
           {/* Linha 2: métricas compactas */}
           <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
             <div style={{ flex: 1, background: "#0c0c0c", border: "1px solid #1e1c19", borderRadius: 10, padding: "8px 10px", display: "flex", alignItems: "center", gap: 8 }}>
@@ -582,7 +584,7 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
 
 type CartItem = {
   emoji: string;
-  kind: "pizza" | "simple";
+  kind: "pizza" | "simple" | "promo";
   name: string;
   detail: string;
   price: number;
@@ -590,6 +592,21 @@ type CartItem = {
   // Nomes de produtos (sabores/borda da pizza ou nome do item simples) usados
   // para detectar se o item ficou esgotado depois de adicionado ao carrinho.
   keys?: string[];
+  // Presente quando o item veio de uma promoção do cardápio.
+  promoId?: string;
+};
+
+type PromocaoPublica = {
+  id: string;
+  badge: string;
+  title: string;
+  description: string;
+  buttonText: string;
+  promotionalPrice?: number;
+  includedText: string;
+  maxUsesPerOrder?: number;
+  mainItems: { productId: string; productName: string; category: string; sizeRequired?: string; quantity: number; customerMustChooseFlavor?: boolean }[];
+  freeItems: { productId: string; productName: string; category: string; quantity: number }[];
 };
 
 type PedidoConfirmadoStatus = "novo" | "em_preparo" | "saiu_entrega" | "entregue" | "cancelado";
@@ -670,6 +687,10 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   // Último pedido confirmado neste navegador (sem telefone/endereço), para o
   // cliente reencontrar o rastreio se fechar a página. Expira em 3 horas.
   const [pedidoRecente, setPedidoRecente] = useState<{ id: string; numero?: number; ts: number } | null>(null);
+  // Promoções ativas vindas do servidor (substituem o antigo card fixo).
+  const [promos, setPromos] = useState<PromocaoPublica[]>([]);
+  const [promoSel, setPromoSel] = useState<PromocaoPublica | null>(null);
+  const [promoSabor, setPromoSabor] = useState<string | null>(null);
   const pagamentoRef = useRef<HTMLDivElement>(null);
   const toastTimer = useRef<any>(null);
   const nomeRef = useRef<HTMLInputElement>(null);
@@ -762,7 +783,37 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
 
   function showToast(m: string) { setToast(m); clearTimeout(toastTimer.current); toastTimer.current = setTimeout(() => setToast(""), 1700); }
   function dispensarPedidoRecente() { setPedidoRecente(null); try { localStorage.removeItem("cf_ultimo_pedido"); } catch {} }
-  const safeCartReturnScreens = ["sc-start", "sc-qty", "sc-build", "sc-border", "sc-list", "sc-suco-leite", "sc-macarronada-size", "sc-another", "sc-delivery", "sc-pay"];
+
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/promocoes-cardapio", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((d) => { if (alive && Array.isArray(d)) setPromos(d); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
+
+  const promoDestaque = promos[0] || null;
+  function abrirPromocao(p: PromocaoPublica) { setPromoSel(p); setPromoSabor(null); go("sc-promo"); }
+  function promoPrecisaSabor(p: PromocaoPublica) { return p.mainItems.some((m) => m.category === "pizza" && m.customerMustChooseFlavor !== false); }
+  function promoInclusos(p: PromocaoPublica) {
+    return p.freeItems.map((f) => `${f.quantity > 1 ? `${f.quantity}x ` : ""}${f.productName} grátis`).join(" + ");
+  }
+  function adicionarPromocao() {
+    if (!promoSel || typeof promoSel.promotionalPrice !== "number") return;
+    if (promoPrecisaSabor(promoSel) && !promoSabor) { showToast("Escolha o sabor da pizza primeiro."); return; }
+    const limite = promoSel.maxUsesPerOrder;
+    const jaNoCarrinho = cart.filter((c) => c.kind === "promo" && c.promoId === promoSel.id).length;
+    if (limite && jaNoCarrinho >= limite) { showToast(`Essa promoção é limitada a ${limite} por pedido.`); return; }
+    const inclusos = promoInclusos(promoSel);
+    const detail = `${promoSabor ? `Sabor: ${promoSabor} · ` : ""}${inclusos ? `Inclui: ${inclusos} · ` : ""}Preço promocional: ${money(promoSel.promotionalPrice)}`;
+    const keys = [promoSabor, ...promoSel.mainItems.filter((m) => m.category !== "pizza").map((m) => m.productName), ...promoSel.freeItems.map((f) => f.productName)].filter(Boolean) as string[];
+    setCart([...cart, { emoji: "🏷️", kind: "promo", name: `Promoção: ${promoSel.title}`, detail, price: promoSel.promotionalPrice, qty: 1, keys, promoId: promoSel.id }]);
+    showToast("Promoção adicionada! 🏷️");
+    setPromoSel(null); setPromoSabor(null);
+    go("sc-cart");
+  }
+  const safeCartReturnScreens = ["sc-start", "sc-qty", "sc-build", "sc-border", "sc-list", "sc-suco-leite", "sc-macarronada-size", "sc-another", "sc-delivery", "sc-pay", "sc-promo"];
   function go(s: string) {
     if (s === "sc-cart" && screen !== "sc-cart" && safeCartReturnScreens.includes(screen)) {
       setPreviousStepBeforeCart(screen);
@@ -940,7 +991,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     } else { setErroTroco(""); }
     if (hasError) return;
     setSending(true);
-    const payload = { cliente: nome.trim(), telefone: telefone.trim(), itens: cart.map((c) => ({ kind: c.kind, name: c.name, detail: c.detail, price: c.price, qty: c.qty })), tipoEntrega: delType, bairro: delType === "delivery" ? menu.neighborhoods[+bairroIdx].name : undefined, rua: delType === "delivery" ? rua : undefined, numero: delType === "delivery" && numero.trim() ? numero.trim() : undefined, referencia: delType === "delivery" && referencia.trim() ? referencia.trim() : undefined, observacao: observacao.trim() || undefined, taxaEntrega: fee, pagamento: payment, troco: payment === "Dinheiro" ? (trocoOpcao === "nao" ? "Sem troco" : troco.trim()) : undefined };
+    const payload = { cliente: nome.trim(), telefone: telefone.trim(), itens: cart.map((c) => ({ kind: c.kind, name: c.name, detail: c.detail, price: c.price, qty: c.qty, ...(c.promoId ? { promoId: c.promoId } : {}) })), tipoEntrega: delType, bairro: delType === "delivery" ? menu.neighborhoods[+bairroIdx].name : undefined, rua: delType === "delivery" ? rua : undefined, numero: delType === "delivery" && numero.trim() ? numero.trim() : undefined, referencia: delType === "delivery" && referencia.trim() ? referencia.trim() : undefined, observacao: observacao.trim() || undefined, taxaEntrega: fee, pagamento: payment, troco: payment === "Dinheiro" ? (trocoOpcao === "nao" ? "Sem troco" : troco.trim()) : undefined };
     try {
       const r = await fetch("/api/pedido-app", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const data = await r.json();
@@ -949,7 +1000,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   }
   function resetAll() { setCart([]); resetBuild(); setDelType(null); setBairroIdx(""); setRua(""); setNumero(""); setReferencia(""); setPayment(null); setTroco(""); setTrocoOpcao(null); setObservacao(""); setErroNome(""); setErroTelefone(""); setErroPagamento(""); setErroEntrega(""); setErroTroco(""); setPedidoConfirmado(null); setStatusPedidoConfirmado("novo"); setRestoredDraft(false); setEditandoIdentidade(false); try { sessionStorage.removeItem("cf_draft"); } catch {} go("sc-start"); }
 
-  const stepMap: Record<string, number> = { "sc-start": 0, "sc-qty": 0, "sc-build": 0, "sc-border": 0, "sc-list": 0, "sc-suco-leite": 0, "sc-macarronada-size": 0, "sc-another": 1, "sc-cart": 1, "sc-delivery": 2, "sc-pay": 3, "sc-done": 3 };
+  const stepMap: Record<string, number> = { "sc-start": 0, "sc-qty": 0, "sc-build": 0, "sc-border": 0, "sc-list": 0, "sc-suco-leite": 0, "sc-macarronada-size": 0, "sc-promo": 0, "sc-another": 1, "sc-cart": 1, "sc-delivery": 2, "sc-pay": 3, "sc-done": 3 };
   const stepIdx = stepMap[screen] ?? 0;
   const STEPS = ["Itens", "Sacola", "Entrega", "Pagar"];
   const feitas = pizzasNoCarrinho();
@@ -1000,12 +1051,14 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                   <button onClick={dispensarPedidoRecente} aria-label="Fechar acompanhamento" style={{ background: "none", border: "none", color: "var(--text-faint)", fontSize: 18, cursor: "pointer", padding: "0 2px", lineHeight: 1 }}>×</button>
                 </div>
               )}
-              <div className="promo-card">
-                <div className="promo-label">PROMO DE HOJE</div>
-                <h2>Pizza G + Guaraná 1L grátis</h2>
-                <p>Uma escolha fácil pra pedir sem pensar muito.</p>
-                <button className="promo-btn" onClick={goPizza}>Pedir essa promoção →</button>
-              </div>
+              {promoDestaque && (
+                <div className="promo-card">
+                  <div className="promo-label">{promoDestaque.badge || "PROMO DE HOJE"}</div>
+                  <h2>{promoDestaque.title}</h2>
+                  <p>{promoDestaque.description}</p>
+                  <button className="promo-btn" onClick={() => abrirPromocao(promoDestaque)}>{promoDestaque.buttonText || "Pedir essa promoção →"}</button>
+                </div>
+              )}
               <div className="home-copy">
                 <h2>Ou monte seu pedido</h2>
                 <p>Escolha uma categoria pra começar do seu jeito.</p>
@@ -1096,6 +1149,39 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
               <div className="screen-head"><div className="eyebrow">Quase pronta</div><h2>Borda recheada?</h2><p>Opcional.</p></div>
               <div className={`opt ${border === null ? "sel" : ""}`} onClick={() => addPizzaWithBorder(null, 0)}><div className="opt-emoji">⭕</div><div className="opt-body"><div className="opt-title">Sem borda</div><div className="opt-desc">Tradicional</div></div><div className="opt-price">Grátis</div><div className="opt-check" /></div>
               {(menu.borders || []).map((b, i) => { const p = bigBorder(size!) ? b.priceLarge : b.priceSmall; const esg = esgotados.includes(b.label); return (<div key={i} className={`opt ${border === b.label ? "sel" : ""}`} onClick={() => !esg && addPizzaWithBorder(b.label, p)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }}><div className="opt-emoji">🧀</div><div className="opt-body"><div className="opt-title">{b.label}</div>{esg && <div className="opt-desc" style={{ color: "#ef4444" }}>Esgotado</div>}</div><div className="opt-price">{esg ? "" : `+${money(p)}`}</div><div className="opt-check" /></div>); })}
+            </section>
+          )}
+          {screen === "sc-promo" && promoSel && (
+            <section className="screen active">
+              <TopBack onClick={() => { setPromoSel(null); go("sc-start"); }} />
+              <div className="screen-head"><div className="eyebrow">{promoSel.badge || "PROMOÇÃO"}</div><h2>{promoSel.title}</h2><p>{promoSel.description}</p></div>
+              <div style={{ background: "var(--card)", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
+                <div style={{ fontSize: 12, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 8 }}>O que vem na promoção</div>
+                {promoSel.mainItems.map((m, i) => (
+                  <div key={`m${i}`} style={{ fontSize: 14, color: "var(--fg)", fontWeight: 600, marginBottom: 4 }}>{m.quantity > 1 ? `${m.quantity}x ` : ""}{m.productName}</div>
+                ))}
+                {promoSel.freeItems.map((f, i) => (
+                  <div key={`f${i}`} style={{ fontSize: 14, color: "#62a256", fontWeight: 700, marginBottom: 4 }}>+ {f.quantity > 1 ? `${f.quantity}x ` : ""}{f.productName} grátis (R$ 0,00)</div>
+                ))}
+                {promoSel.includedText && <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 6 }}>{promoSel.includedText}</div>}
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 16, fontWeight: 800, paddingTop: 10, marginTop: 8, borderTop: "1px solid var(--border)" }}>
+                  <span>Preço promocional</span><span style={{ color: "#ff6b00" }}>{typeof promoSel.promotionalPrice === "number" ? money(promoSel.promotionalPrice) : "—"}</span>
+                </div>
+              </div>
+              {promoPrecisaSabor(promoSel) && (
+                <>
+                  <div className="section-label">Escolha o sabor da pizza</div>
+                  {[...(menu.saltyFlavors || []), ...(menu.sweetFlavors || [])].map((f) => {
+                    const esg = esgotados.includes(f);
+                    return (
+                      <div key={f} className={`opt ${promoSabor === f ? "sel" : ""}`} onClick={() => !esg && setPromoSabor(f)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }}>
+                        <div className="opt-emoji">🍕</div><div className="opt-body"><div className="opt-title">{f}</div>{esg && <div className="opt-desc" style={{ color: "#ef4444" }}>Esgotado</div>}</div><div className="opt-check" />
+                      </div>
+                    );
+                  })}
+                </>
+              )}
+              <button className="btn" style={{ marginTop: 16 }} disabled={promoPrecisaSabor(promoSel) && !promoSabor} onClick={adicionarPromocao}>Adicionar promoção ao carrinho</button>
             </section>
           )}
           {screen === "sc-another" && (
