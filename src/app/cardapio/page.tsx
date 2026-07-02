@@ -1294,6 +1294,13 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                         {pedidoConfirmado.pix.ticketUrl && <a href={pedidoConfirmado.pix.ticketUrl} target="_blank" rel="noreferrer" style={{ display: "block", marginTop: 8, color: "#ff6b00", fontSize: 13, fontWeight: 800 }}>Abrir pagamento</a>}
                       </div>
                     )}
+                    {payment === "Pix" && !pedidoConfirmado.pix?.qrCode && statusPedidoConfirmado === "novo" && (
+                      <div style={{ textAlign: "left", background: "var(--card)", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
+                        <div style={{ fontSize: 12, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 6 }}>⏳ Aguardando confirmação do Pix</div>
+                        <p style={{ fontSize: 13, color: "var(--fg)", margin: 0, lineHeight: 1.5 }}>Seu pedido foi recebido. A pizzaria confirma o pagamento antes de começar o preparo.</p>
+                        <p style={{ fontSize: 13, color: "var(--muted)", margin: "8px 0 0", lineHeight: 1.5 }}>Se você já fez o Pix, envie o comprovante pelo WhatsApp da pizzaria.</p>
+                      </div>
+                    )}
                     <a href={`/rastrear/${pedidoConfirmado.id}`} className="btn" style={{ display: "block", marginBottom: 10, textAlign: "center", textDecoration: "none" }}>Acompanhar pedido</a>
                   </>
                 )}
