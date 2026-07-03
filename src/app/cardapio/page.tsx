@@ -793,7 +793,6 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     return () => { alive = false; };
   }, []);
 
-  const promoDestaque = promos[0] || null;
   function abrirPromocao(p: PromocaoPublica) { setPromoSel(p); setPromoSabor(null); go("sc-promo"); }
   function promoPrecisaSabor(p: PromocaoPublica) { return p.mainItems.some((m) => m.category === "pizza" && m.customerMustChooseFlavor !== false); }
   function promoInclusos(p: PromocaoPublica) {
@@ -1051,14 +1050,14 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                   <button onClick={dispensarPedidoRecente} aria-label="Fechar acompanhamento" style={{ background: "none", border: "none", color: "var(--text-faint)", fontSize: 18, cursor: "pointer", padding: "0 2px", lineHeight: 1 }}>×</button>
                 </div>
               )}
-              {promoDestaque && (
-                <div className="promo-card">
-                  <div className="promo-label">{promoDestaque.badge || "PROMO DE HOJE"}</div>
-                  <h2>{promoDestaque.title}</h2>
-                  <p>{promoDestaque.description}</p>
-                  <button className="promo-btn" onClick={() => abrirPromocao(promoDestaque)}>{promoDestaque.buttonText || "Pedir essa promoção →"}</button>
+              {promos.map((p) => (
+                <div className="promo-card" key={p.id}>
+                  <div className="promo-label">{p.badge || "PROMO DE HOJE"}</div>
+                  <h2>{p.title}</h2>
+                  <p>{p.description}</p>
+                  <button className="promo-btn" onClick={() => abrirPromocao(p)}>{p.buttonText || "Pedir essa promoção →"}</button>
                 </div>
-              )}
+              ))}
               <div className="home-copy">
                 <h2>Ou monte seu pedido</h2>
                 <p>Escolha uma categoria pra começar do seu jeito.</p>
@@ -1561,6 +1560,7 @@ main{width:100%;padding:6px 20px 20px}
 .promo-card h2{color:#fff4ec;font-size:25px;font-weight:850;line-height:1.08;letter-spacing:0;margin-bottom:8px}
 .promo-card p{color:#b9aaa0;font-size:14px;line-height:1.45;margin-bottom:18px}
 .promo-btn{width:100%;border:0;border-radius:15px;background:#f05a28;color:#fff;padding:15px 16px;font-size:15px;font-weight:800;box-shadow:0 12px 26px rgba(240,90,40,.2)}
+.promo-card + .promo-card{margin-top:12px}
 .home-copy{margin:24px 0 14px}
 .home-copy h2{color:#f7efe7;font-size:22px;font-weight:850;letter-spacing:0;line-height:1.15}
 .home-copy p{color:#9d8f85;font-size:14px;margin-top:6px}
