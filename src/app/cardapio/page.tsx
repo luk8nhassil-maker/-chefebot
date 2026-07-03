@@ -10,6 +10,7 @@ export type MenuType = {
   sizes: { code: string; label: string; price: number }[];
   saltyFlavors: string[];
   sweetFlavors: string[];
+  miniPizzaFlavors?: string[];
   lanches: { name: string; price: number; sizes?: { code: string; price: number }[] }[];
   bebidas: { name: string; price: number }[];
   sucos: { name: string; price: number }[];
@@ -628,6 +629,8 @@ type PixClientePedido = {
 
 const money = (v: number) => "R$ " + v.toFixed(2).replace(".", ",");
 const bigBorder = (sz: string) => !(sz === "P" || sz === "M");
+const itemSlug = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
+const isMiniPizzaName = (value: string) => itemSlug(value) === "minipizza";
 
 async function copiarTexto(texto: string): Promise<boolean> {
   try { await navigator.clipboard.writeText(texto); return true } catch {}
@@ -681,6 +684,8 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const [erroEntrega, setErroEntrega] = useState("");
   const [erroTroco, setErroTroco] = useState("");
   const [trocoOpcao, setTrocoOpcao] = useState<"nao" | "sim" | null>(null);
+  const [miniPizzaMode, setMiniPizzaMode] = useState(false);
+  const [paymentModal, setPaymentModal] = useState<string | null>(null);
   const [editandoIdentidade, setEditandoIdentidade] = useState(false);
   const [hydrated, setHydrated] = useState(false);
   const [restoredDraft, setRestoredDraft] = useState(false);
@@ -852,18 +857,30 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   }
   function telefoneValido(t: string) { return t.replace(/\D/g, "").length >= 10; }
 
-  function resetBuild() { setSize(null); setSizePrice(0); setMam(false); setF1(null); setF2(null); setBorder(null); setBorderPrice(0); }
+  const esgotados = menu.esgotados || [];
+  const miniPizzaItem = (menu.lanches || []).find((it) => isMiniPizzaName(it.name) && Number.isFinite(it.price));
+  const miniPizzaEsgotada = !!miniPizzaItem && esgotados.includes(miniPizzaItem.name);
+  const miniPizzaFlavors = (menu.miniPizzaFlavors?.length ? menu.miniPizzaFlavors : [...(menu.saltyFlavors || []), ...(menu.sweetFlavors || [])]).filter(Boolean);
+
+  function resetBuild() { setSize(null); setSizePrice(0); setMam(false); setF1(null); setF2(null); setBorder(null); setBorderPrice(0); setMiniPizzaMode(false); }
   function goPizza() { go("sc-qty"); }
   function setPizzaQty(q: number) { setPlan(q === 0 ? { total: 0, current: 1, openEnded: true } : { total: q, current: 1, openEnded: false }); resetBuild(); go("sc-build"); }
-  function pizzasNoCarrinho() { return cart.filter((c) => c.kind === "pizza").length; }
-  function pickSize(code: string) { const s = (menu.sizes || []).find((x) => x.code === code); if (!s) return; setSize(code); setSizePrice(s.price); }
-  function toggleMam() { setMam(!mam); setF1(null); setF2(null); }
+  function pizzasNoCarrinho() { return cart.filter((c) => c.kind === "pizza" || (c.kind === "simple" && isMiniPizzaName(c.name))).length; }
+  function pickSize(code: string) { const s = (menu.sizes || []).find((x) => x.code === code); if (!s) return; setMiniPizzaMode(false); setSize(code); setSizePrice(s.price); }
+  function pickMiniPizza() { if (!miniPizzaItem || miniPizzaEsgotada) return; setMiniPizzaMode(true); setSize("MINI"); setSizePrice(miniPizzaItem.price); setMam(false); setF2(null); }
+  function setFlavorMode(nextMam: boolean) { if (miniPizzaMode && nextMam) return; setMam(nextMam); setF1(null); setF2(null); }
   function pickFlavor(f: string) {
     if (!mam) { setF1(f); return; }
     if (f1 === f) { setF1(f2); setF2(null); } else if (f2 === f) { setF2(null); } else if (!f1) setF1(f); else if (!f2) setF2(f); else setF2(f);
   }
   const flavorOk = mam ? !!(f1 && f2) : !!f1;
-  const buildOk = !!size && flavorOk;
+  const buildOk = !!size && flavorOk && !(miniPizzaMode && miniPizzaEsgotada);
+  const flavorSections = miniPizzaMode
+    ? [{ title: "Sabores da mini-pizza", flavors: miniPizzaFlavors }]
+    : [{ title: "Salgadas", flavors: menu.saltyFlavors || [] }, { title: "Doces", flavors: menu.sweetFlavors || [] }];
+  const selectedSizeLabel = miniPizzaMode && miniPizzaItem ? miniPizzaItem.name : size ? ((menu.sizes || []).find((s) => s.code === size)?.label || size) : "";
+  const buildFootHint = !size ? "Escolha um tamanho para continuar" : !flavorOk ? (mam ? "Escolha 2 sabores" : "Escolha 1 sabor") : miniPizzaMode ? "Mini-pizza pronta para a sacola" : "Agora escolha a borda";
+  const buildActionLabel = miniPizzaMode ? "Adicionar mini-pizza" : "Confirmar pizza";
   function addPizzaWithBorder(chosenBorder: string | null, chosenBorderPrice: number) {
     setBorder(chosenBorder); setBorderPrice(chosenBorderPrice);
     const flavor = mam ? `${f1} / ${f2}` : f1;
@@ -875,6 +892,17 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     else if (plan.openEnded) { showToast("Pizza adicionada! 🍕"); go("sc-another"); }
     else { showToast("Tudo pronto! 🍕"); go("sc-cart"); }
   }
+  function addMiniPizza() {
+    if (!miniPizzaItem || !f1) return;
+    const detail = `Sabor: ${f1}`;
+    const ex = cart.find((c) => c.kind === "simple" && isMiniPizzaName(c.name) && c.detail === detail);
+    if (ex) setCart(cart.map((c) => (c === ex ? { ...c, qty: c.qty + 1 } : c)));
+    else setCart([...cart, { emoji: "🍕", kind: "simple", name: miniPizzaItem.name, detail, price: miniPizzaItem.price, qty: 1, keys: [miniPizzaItem.name, f1] }]);
+    if (!plan.openEnded && plan.current < plan.total) { setPlan({ ...plan, current: plan.current + 1 }); showToast("Mini-pizza adicionada!"); resetBuild(); go("sc-build"); }
+    else if (plan.openEnded) { showToast("Mini-pizza adicionada!"); go("sc-another"); }
+    else { showToast("Tudo pronto!"); go("sc-cart"); }
+  }
+  function continueBuild() { if (!buildOk) return; if (miniPizzaMode) addMiniPizza(); else go("sc-border"); }
   function addAnother() { setPlan({ total: 0, current: pizzasNoCarrinho() + 1, openEnded: true }); resetBuild(); go("sc-build"); }
   function goCat(cat: "lanche" | "macarronada" | "bebida" | "suco") { setListCat(cat); go("sc-list"); }
   function isMacarronada(it: { name: string; sizes?: { code: string; price: number }[] }) {
@@ -937,7 +965,6 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const bairroOptionStyle = { background: "#fff", color: "#2a1d16" };
   const payOk = !!nome.trim() && telefoneValido(telefone) && !!payment;
 
-  const esgotados = menu.esgotados || [];
   const esgotadosKey = esgotados.join("|");
   const cartEsgotado = cart.some((c) => cartItemEsgotado(c.keys, esgotados));
 
@@ -982,6 +1009,41 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     go("sc-pay");
   }
 
+  function paymentLabel(value: string) { return value === "Cartao" ? "Cartão" : value; }
+  function paymentIcon(value: string) { return ({ Pix: "⚡", Dinheiro: "$", Cartao: "▣" } as Record<string, string>)[value] || "$"; }
+  function paymentHint(value: string) {
+    return ({ Pix: "Confirmacao manual pela pizzaria.", Dinheiro: "Configure o troco.", Cartao: "Pagamento na maquina." } as Record<string, string>)[value] || "Forma de pagamento";
+  }
+  function paymentSummary(value: string) {
+    if (value !== payment) return paymentHint(value);
+    if (value === "Dinheiro") {
+      if (trocoOpcao === "nao") return "Sem troco";
+      if (trocoOpcao === "sim" && troco.trim()) return `Troco para ${troco}`;
+      return "Troco pendente";
+    }
+    return "Selecionado";
+  }
+  function openPaymentConfig(value: string) {
+    setErroPagamento("");
+    if (value !== "Dinheiro") setErroTroco("");
+    setPaymentModal(value);
+  }
+  function confirmPaymentConfig() {
+    if (!paymentModal) return;
+    if (paymentModal === "Dinheiro") {
+      if (!trocoOpcao) { setErroTroco("Escolha se você precisa de troco."); return; }
+      if (trocoOpcao === "sim" && !troco.trim()) { setErroTroco("Informe para quanto precisa de troco."); return; }
+      if (trocoOpcao === "sim") {
+        const trocoNum = parseFloat(troco.replace(",", ".").replace(/[^\d.]/g, ""));
+        if (isNaN(trocoNum) || trocoNum <= cartTotal + fee) { setErroTroco("O valor do troco precisa ser maior que o total do pedido."); return; }
+      }
+    }
+    setPayment(paymentModal);
+    setErroPagamento("");
+    if (paymentModal !== "Dinheiro") { setTroco(""); setTrocoOpcao(null); setErroTroco(""); }
+    setPaymentModal(null);
+  }
+
   async function finish() {
     if (sending) return;
     if (cartEsgotado) { showToast("Um item do seu pedido ficou esgotado. Remova para continuar."); return; }
@@ -1017,7 +1079,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
       if (data.ok) { try { localStorage.setItem("cf_nome", nome.trim()); localStorage.setItem("cf_tel", telefone.trim()); } catch {} try { sessionStorage.removeItem("cf_draft"); } catch {} try { const resumo = { id: String(data.pedidoId), numero: typeof data.numero === "number" ? data.numero : undefined, ts: Date.now() }; localStorage.setItem("cf_ultimo_pedido", JSON.stringify(resumo)); setPedidoRecente(resumo); } catch {} setStatusPedidoConfirmado("novo"); setPedidoConfirmado({ id: data.pedidoId, numero: data.numero, total: data.total, ...(data.pix?.qrCode ? { pix: data.pix } : {}) }); go("sc-done"); } else { showToast("Erro ao enviar. Tente de novo."); }
     } catch { showToast("Sem conexão. Tente de novo."); } finally { setSending(false); }
   }
-  function resetAll() { setCart([]); resetBuild(); setDelType(null); setBairroIdx(""); setRua(""); setNumero(""); setReferencia(""); setPayment(null); setTroco(""); setTrocoOpcao(null); setObservacao(""); setErroNome(""); setErroTelefone(""); setErroPagamento(""); setErroEntrega(""); setErroTroco(""); setPedidoConfirmado(null); setStatusPedidoConfirmado("novo"); setRestoredDraft(false); setEditandoIdentidade(false); try { sessionStorage.removeItem("cf_draft"); } catch {} go("sc-start"); }
+  function resetAll() { setCart([]); resetBuild(); setDelType(null); setBairroIdx(""); setRua(""); setNumero(""); setReferencia(""); setPayment(null); setTroco(""); setTrocoOpcao(null); setPaymentModal(null); setObservacao(""); setErroNome(""); setErroTelefone(""); setErroPagamento(""); setErroEntrega(""); setErroTroco(""); setPedidoConfirmado(null); setStatusPedidoConfirmado("novo"); setRestoredDraft(false); setEditandoIdentidade(false); try { sessionStorage.removeItem("cf_draft"); } catch {} go("sc-start"); }
 
   const stepMap: Record<string, number> = { "sc-start": 0, "sc-qty": 0, "sc-build": 0, "sc-border": 0, "sc-list": 0, "sc-suco-leite": 0, "sc-macarronada-size": 0, "sc-promo": 0, "sc-another": 1, "sc-cart": 1, "sc-delivery": 2, "sc-pay": 3, "sc-done": 3 };
   const stepIdx = stepMap[screen] ?? 0;
@@ -1144,43 +1206,71 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
             <section className="screen active sc-build-screen">
               <TopBack onClick={() => go("sc-qty")} title="Monte sua pizza" />
               <PizzaCtx />
-              <div className="screen-head"><div className="eyebrow">Monte sua pizza</div><h2>Escolha o tamanho</h2><p>Depois escolha um sabor. Se quiser, ative meio a meio.</p></div>
-              <div className="choice-block">
-                <div className="section-label">📏 Tamanho</div>
-                <div className="grid2">{(menu.sizes || []).map((s) => (<div key={s.code} className={`opt ${size === s.code ? "sel" : ""}`} onClick={() => pickSize(s.code)}><div className="opt-check" /><div className="opt-emoji">🍕</div><div className="opt-body"><div className="opt-title">{s.label}</div><div className="opt-desc">{money(s.price)}</div></div></div>))}</div>
-              </div>
-              <div className="screen-head flavor-head"><div className="eyebrow">Agora escolha o sabor</div><h2>{mam ? "Escolha os dois sabores" : "Escolha um sabor"}</h2><p>Toque no sabor para marcar. Os selecionados ficam com check.</p></div>
-              <div className={`mam ${mam ? "on" : ""}`} onClick={toggleMam}><div className="mam-txt"><strong>Meio a meio</strong><p>Dois sabores numa pizza</p></div><div className="switch" /></div>
-              {mam && <div className="half-hint show">{!f1 ? "Toque na 1ª metade" : !f2 ? `1ª: ${f1} — agora a 2ª` : `✓ ${f1} / ${f2}`}</div>}
-              <div className="flavor-list">
-                <div className="section-label">Salgadas</div>
-                {(menu.saltyFlavors || []).map((f) => {
-                  const esg = esgotados.includes(f)
-                  return (
-                    <div key={f} className={`opt flavor-opt ${f === f1 || f === f2 ? "sel" : ""} ${esg ? "esg" : ""}`} onClick={() => !esg && pickFlavor(f)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }}>
-                      <div className="opt-emoji">🍕</div><div className="opt-body"><div className="opt-title">{f}</div>{esg && <div className="opt-desc" style={{ color: "#ef4444" }}>Esgotado</div>}</div><div className="opt-check" />
+              <div className="screen-head"><div className="eyebrow">Monte sua pizza</div><h2>Escolha o tamanho</h2><p>Toque em uma opcao para liberar os sabores.</p></div>
+              <div className="choice-block size-choice">
+                <div className="section-label">Tamanho</div>
+                <div className={`choice-nudge ${size ? "ok" : ""}`}>{size ? `Selecionado: ${selectedSizeLabel}` : "Escolha uma opcao antes de avancar."}</div>
+                <div className="grid2 size-grid">
+                  {(menu.sizes || []).map((s) => (
+                    <div key={s.code} className={`opt ${!miniPizzaMode && size === s.code ? "sel" : ""}`} onClick={() => pickSize(s.code)}>
+                      <div className="opt-check" />
+                      <div className="opt-emoji">🍕</div>
+                      <div className="opt-body"><div className="opt-title">{s.label}</div><div className="opt-desc">{money(s.price)}</div></div>
                     </div>
-                  )
-                })}
-                <div className="section-label">Doces</div>
-                {(menu.sweetFlavors || []).map((f) => {
-                  const esg = esgotados.includes(f)
-                  return (
-                    <div key={f} className={`opt flavor-opt ${f === f1 || f === f2 ? "sel" : ""}`} onClick={() => !esg && pickFlavor(f)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }}>
-                      <div className="opt-emoji">🍕</div><div className="opt-body"><div className="opt-title">{f}</div>{esg && <div className="opt-desc" style={{ color: "#ef4444" }}>Esgotado</div>}</div><div className="opt-check" />
+                  ))}
+                  {miniPizzaItem && (
+                    <div className={`opt mini-size-opt ${miniPizzaMode ? "sel" : ""}`} onClick={pickMiniPizza} style={{ opacity: miniPizzaEsgotada ? 0.5 : 1, cursor: miniPizzaEsgotada ? "not-allowed" : "pointer" }}>
+                      <div className="opt-check" />
+                      <div className="opt-emoji">🍕</div>
+                      <div className="opt-body"><div className="opt-title">Mini-pizza</div><div className="opt-desc" style={miniPizzaEsgotada ? { color: "#ef4444" } : undefined}>{miniPizzaEsgotada ? "Esgotado" : "Produto do cardapio"}</div></div>
+                      <div className="opt-price">{miniPizzaEsgotada ? "" : money(miniPizzaItem.price)}</div>
                     </div>
-                  )
-                })}
+                  )}
+                </div>
               </div>
-              <div className="build-foot"><button className="btn" disabled={!buildOk} onClick={() => go("sc-border")}>Confirmar pizza</button></div>
+              <div className={`screen-head flavor-head ${!size ? "muted-head" : ""}`}><div className="eyebrow">Agora escolha o sabor</div><h2>{mam ? "Escolha 2 sabores" : "Escolha 1 sabor"}</h2><p>{miniPizzaMode ? "Mini-pizza vai com um sabor." : "Escolha 1 sabor ou ative meio a meio."}</p></div>
+              {size ? (
+                <>
+                  {!miniPizzaMode && (
+                    <div className="flavor-mode">
+                      <button type="button" className={`flavor-mode-card ${!mam ? "sel" : ""}`} onClick={() => setFlavorMode(false)}>
+                        <strong>1 sabor</strong><span>Toque em um sabor.</span>
+                      </button>
+                      <button type="button" className={`flavor-mode-card ${mam ? "sel" : ""}`} onClick={() => setFlavorMode(true)}>
+                        <strong>Meio a meio</strong><span>Selecione 2 sabores.</span>
+                      </button>
+                    </div>
+                  )}
+                  {miniPizzaMode && <div className="mini-flow-note">Mini-pizza usa preco e produto existentes do cardapio.</div>}
+                  {mam && <div className="half-hint show">{!f1 ? "Toque na 1a metade" : !f2 ? `1a: ${f1} - agora a 2a` : `${f1} / ${f2}`}</div>}
+                  <div className="flavor-list">
+                    {flavorSections.map((section) => (
+                      <div key={section.title}>
+                        <div className="section-label">{section.title}</div>
+                        {section.flavors.map((f) => {
+                          const esg = esgotados.includes(f)
+                          return (
+                            <div key={`${section.title}-${f}`} className={`opt flavor-opt ${f === f1 || f === f2 ? "sel" : ""} ${esg ? "esg" : ""}`} onClick={() => !esg && pickFlavor(f)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }}>
+                              <div className="opt-emoji">🍕</div><div className="opt-body"><div className="opt-title">{f}</div>{esg && <div className="opt-desc" style={{ color: "#ef4444" }}>Esgotado</div>}</div><div className="opt-check" />
+                            </div>
+                          )
+                        })}
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <div className="locked-note">Escolha o tamanho acima para continuar.</div>
+              )}
+              <div className="build-foot"><div className="build-foot-hint">{buildFootHint}</div><button className="btn" disabled={!buildOk} onClick={continueBuild}>{buildActionLabel}</button></div>
             </section>
           )}
           {screen === "sc-border" && (
             <section className="screen active">
               <TopBack onClick={() => go("sc-build")} title="Escolha a borda" />
               <PizzaCtx />
-              <div className="screen-head"><div className="eyebrow">Quase pronta</div><h2>Borda recheada?</h2><p>Opcional.</p></div>
-              <div className={`opt ${border === null ? "sel" : ""}`} onClick={() => addPizzaWithBorder(null, 0)}><div className="opt-emoji">⭕</div><div className="opt-body"><div className="opt-title">Sem borda</div><div className="opt-desc">Tradicional</div></div><div className="opt-price">Grátis</div><div className="opt-check" /></div>
+              <div className="screen-head"><div className="eyebrow">Quase pronta</div><h2>Escolha a borda</h2><p>Toque em uma opcao para adicionar direto ao pedido.</p></div>
+              <div className="opt" onClick={() => addPizzaWithBorder(null, 0)}><div className="opt-emoji">⭕</div><div className="opt-body"><div className="opt-title">Sem borda</div></div><div className="opt-check" /></div>
               {(menu.borders || []).map((b, i) => { const p = bigBorder(size!) ? b.priceLarge : b.priceSmall; const esg = esgotados.includes(b.label); return (<div key={i} className={`opt ${border === b.label ? "sel" : ""}`} onClick={() => !esg && addPizzaWithBorder(b.label, p)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }}><div className="opt-emoji">🧀</div><div className="opt-body"><div className="opt-title">{b.label}</div>{esg && <div className="opt-desc" style={{ color: "#ef4444" }}>Esgotado</div>}</div><div className="opt-price">{esg ? "" : `+${money(p)}`}</div><div className="opt-check" /></div>); })}
             </section>
           )}
@@ -1253,7 +1343,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
             </section>
           )}
           {screen === "sc-cart" && (
-            <section className="screen active">
+            <section className="screen active cart-screen">
               <TopBack onClick={backFromCart} title="Sacola" />
               {restoredDraft && (
                 <div style={{ display: "flex", alignItems: "flex-start", gap: 10, background: "var(--brand-soft)", border: "1px solid var(--brand)", borderRadius: 14, padding: "12px 14px", marginBottom: 14 }}>
@@ -1269,10 +1359,8 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
               {cart.length === 0 ? (<div className="empty"><div className="big">🛒</div><div>Seu pedido está vazio.</div></div>) : (
                 <>{(() => { let pn = 0; return cart.map((it, i) => { let tag = null; if (it.kind === "pizza") { pn++; tag = <span className="ci-tag">Pizza {pn}</span>; } const nm = it.kind === "pizza" ? it.name.replace(/^Pizza /, "") : it.name; const itemEsg = cartItemEsgotado(it.keys, esgotados); return (<div key={i} className="cart-item"><div className="ci-emoji">{it.emoji}</div><div className="ci-body"><div className="ci-name">{tag}{nm}{it.qty > 1 ? ` ×${it.qty}` : ""}{itemEsg && <span style={{ color: "#ef4444", fontWeight: 800, marginLeft: 6 }}>· Esgotado</span>}</div>{it.detail && <div className="ci-detail">{it.detail}</div>}<div className="ci-price">{money(it.price * it.qty)}</div>{it.kind === "simple" && (<div className="qty-pill"><button onClick={() => chQty(i, -1)}>−</button><span>{it.qty}</span><button onClick={() => chQty(i, 1)}>+</button></div>)}</div><button className="ci-remove" onClick={() => rmItem(i)}>✕</button></div>); }); })()}<div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 4px 4px", fontWeight: 700, fontSize: 19 }}><span>Subtotal</span><span>{money(cartTotal)}</span></div></>
               )}
-              <button className="btn btn-ghost btn-sm" style={{ marginTop: 4 }} onClick={backFromCart}>Voltar</button>
               <button className="btn btn-ghost btn-sm" style={{ marginTop: 4 }} onClick={() => go("sc-start")}>+ Adicionar mais</button>
               {cartEsgotado && <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 10, background: "rgba(239,68,68,.1)", color: "#ef4444", fontSize: 13, fontWeight: 700 }}>Um item do seu pedido ficou esgotado. Remova para continuar.</div>}
-              {cart.length > 0 && <button className="btn" style={{ marginTop: 11 }} disabled={cartEsgotado} onClick={() => !cartEsgotado && go("sc-delivery")}>Ir para entrega</button>}
             </section>
           )}
           {screen === "sc-delivery" && (
@@ -1316,23 +1404,35 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
           {screen === "sc-pay" && (
             <section className="screen active pay-screen">
               <TopBack onClick={() => go("sc-delivery")} title="Pagamento" />
-              <div className="screen-head"><div className="eyebrow">Último passo</div><h2>Seu pedido está quase pronto 🍕</h2><p style={{ fontSize: 13, color: "var(--muted)", margin: "4px 0 0" }}>Confere rapidinho os dados e escolhe como vai pagar.</p></div>
+              <div className="screen-head pay-head"><div className="eyebrow">Último passo</div><h2>Escolha o pagamento</h2><p>Depois confira seus dados e finalize.</p></div>
 
-              {/* Bloco: Resumo do pedido */}
-              <div className="section-label">Meu pedido</div>
-              <div style={{ background: "var(--card)", borderRadius: 10, padding: "10px 14px", marginBottom: 16 }}>
-                {cart.map((c, i) => (
-                  <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "var(--muted)", paddingBottom: 4 }}>
-                    <span>{c.qty > 1 ? `${c.qty}× ` : ""}{c.name}{c.detail ? ` · ${c.detail}` : ""}</span>
-                    <span style={{ whiteSpace: "nowrap", paddingLeft: 8 }}>{money(c.price * c.qty)}</span>
-                  </div>
-                ))}
-                {fee > 0 && <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "var(--muted)", paddingTop: 4, borderTop: "1px solid var(--border)" }}><span>Taxa de entrega</span><span>{money(fee)}</span></div>}
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 15, fontWeight: 700, color: "var(--fg)", paddingTop: 8, marginTop: 4, borderTop: "1px solid var(--border)" }}>
-                  <span>Total</span><span style={{ color: "#ff6b00" }}>{money(finalTotal)}</span>
+              <details className="order-summary-compact">
+                <summary><span>{cartCount} {cartCount === 1 ? "item" : "itens"}</span><strong>{money(finalTotal)}</strong></summary>
+                <div className="summary-lines">
+                  {cart.map((c, i) => (
+                    <div key={i} className="summary-line">
+                      <span>{c.qty > 1 ? `${c.qty}x ` : ""}{c.name}{c.detail ? ` - ${c.detail}` : ""}</span>
+                      <strong>{money(c.price * c.qty)}</strong>
+                    </div>
+                  ))}
+                  {fee > 0 && <div className="summary-line"><span>Taxa de entrega</span><strong>{money(fee)}</strong></div>}
+                  <button type="button" className="summary-edit" onClick={() => go("sc-cart")}>Editar carrinho</button>
                 </div>
+              </details>
+
+              <div ref={pagamentoRef} className="payment-choice">
+                <div className="section-label" style={{ marginTop: 0 }}>Forma de pagamento</div>
+                <div className="payment-grid">
+                  {(menu.payments || []).map((p) => (
+                    <button key={p} type="button" className={`payment-card ${payment === p ? "sel" : ""}`} onClick={() => openPaymentConfig(p)}>
+                      <span className="payment-icon">{paymentIcon(p)}</span>
+                      <span className="payment-card-text"><strong>{paymentLabel(p)}</strong><small>{paymentSummary(p)}</small></span>
+                      <span className="payment-edit" aria-hidden="true">✎</span>
+                    </button>
+                  ))}
+                </div>
+                {erroPagamento && <div className="pay-error">Falta escolher como voce vai pagar.</div>}
               </div>
-              <button className="btn btn-ghost" style={{ fontSize: 13, padding: "8px 14px", marginBottom: 20, marginTop: -8 }} onClick={() => go("sc-cart")}>← Editar carrinho</button>
 
               {/* Bloco: Identificação */}
               {!editandoIdentidade && nome.trim() && telefoneValido(telefone) ? (
@@ -1362,63 +1462,12 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                   </div>
                 </div>
               )}
-
-              {/* Bloco: Pagamento */}
-              <div ref={pagamentoRef} className="section-label" style={{ marginTop: 0 }}>Como você prefere pagar?</div>
-              <p style={{ fontSize: 13, color: "var(--muted)", marginBottom: 10, marginTop: -4 }}>Escolhe a melhor forma pra você.</p>
-              {(menu.payments || []).map((p) => {
-                const emojis: Record<string, string> = { Pix: "⚡", Dinheiro: "💵", Cartao: "💳" };
-                const hints: Record<string, string> = { Pix: "A pizzaria confirma o Pix antes de preparar.", Dinheiro: "Pague na entrega ou retirada.", Cartao: "Pague na máquina na entrega ou retirada." };
-                return (
-                  <div key={p} className={`opt ${payment === p ? "sel" : ""}`} onClick={() => { setPayment(p); setErroPagamento(""); setErroTroco(""); if (p !== "Dinheiro") { setTroco(""); setTrocoOpcao(null); } }}>
-                    <div className="opt-emoji">{emojis[p] || "💰"}</div>
-                    <div className="opt-body">
-                      <div className="opt-title">{p === "Cartao" ? "Cartão" : p}</div>
-                      {hints[p] && <div className="opt-desc">{hints[p]}</div>}
-                    </div>
-                    <div className="opt-check" />
-                  </div>
-                );
-              })}
-              {erroPagamento && <div style={{ color: "#ef4444", fontSize: 12, marginTop: 6, marginBottom: 4 }}>Falta só escolher como você vai pagar.</div>}
-              {payment === "Dinheiro" && (
-                <div style={{ marginTop: 8, padding: "12px 14px", background: "var(--card)", borderRadius: 10 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: "var(--fg)", marginBottom: 8 }}>Precisa de troco?</div>
-                  <div style={{ display: "flex", gap: 8, marginBottom: trocoOpcao === "sim" ? 12 : 0 }}>
-                    <button className={`btn ${trocoOpcao === "nao" ? "" : "btn-ghost"}`} style={{ flex: 1, fontSize: 13, padding: "10px 0" }} onClick={() => { setTrocoOpcao("nao"); setTroco(""); setErroTroco(""); }}>Não preciso de troco</button>
-                    <button className={`btn ${trocoOpcao === "sim" ? "" : "btn-ghost"}`} style={{ flex: 1, fontSize: 13, padding: "10px 0" }} onClick={() => { setTrocoOpcao("sim"); setErroTroco(""); }}>Preciso de troco</button>
-                  </div>
-                  {erroTroco && trocoOpcao !== "sim" && <div style={{ color: "#ef4444", fontSize: 12, marginTop: 4 }}>{erroTroco}</div>}
-                  {trocoOpcao === "sim" && (
-                    <div className="field" style={{ marginBottom: 0 }}>
-                      <label>Troco para quanto?</label>
-                      <input value={troco} onChange={(e) => { setTroco(e.target.value); if (erroTroco) setErroTroco(""); }} inputMode="numeric" placeholder={`Ex: ${Math.ceil((cartTotal + fee) / 10) * 10}`} />
-                      {erroTroco && <div style={{ color: "#ef4444", fontSize: 12, marginTop: 4 }}>{erroTroco}</div>}
-                    </div>
-                  )}
-                </div>
-              )}
-
               {/* Bloco: Observação */}
               <div style={{ marginTop: 16, marginBottom: 4 }}>
                 <div className="section-label">Algum detalhe no pedido?</div>
                 <p style={{ fontSize: 13, color: "var(--muted)", marginBottom: 10, marginTop: -4 }}>Se quiser, deixa um recado pra cozinha. Se não tiver nada, pode seguir direto.</p>
                 <div className="field" style={{ marginBottom: 0 }}><input value={observacao} onChange={(e) => setObservacao(e.target.value)} placeholder="Ex: sem cebola, sem azeitona, tirar milho, pouco orégano…" /></div>
               </div>
-
-              {/* Bloco: Revisão */}
-              {nome.trim() && telefoneValido(telefone) && payment && (
-                <div style={{ marginTop: 16, padding: "12px 14px", borderRadius: 10, background: "rgba(255,107,0,.08)", fontSize: 13 }}>
-                  <div style={{ fontWeight: 700, color: "var(--fg)", marginBottom: 8 }}>Tudo certo por aqui</div>
-                  <div style={{ color: "var(--muted)", lineHeight: 1.8 }}>
-                    <div>Pedido para: <strong style={{ color: "var(--fg)" }}>{nome.trim()}</strong></div>
-                    <div>Pagamento: <strong style={{ color: "var(--fg)" }}>{payment === "Cartao" ? "Cartão" : payment}</strong></div>
-                    <div>Total: <strong style={{ color: "#ff6b00" }}>{money(cartTotal + fee)}</strong></div>
-                  </div>
-                  <div style={{ marginTop: 10, fontSize: 12, color: "var(--muted)" }}>Agora é só confirmar que a pizzaria recebe na hora.</div>
-                </div>
-              )}
-
               {cartEsgotado && <div style={{ marginTop: 8, padding: "10px 12px", borderRadius: 10, background: "rgba(239,68,68,.1)", color: "#ef4444", fontSize: 13, fontWeight: 700 }}>Um item do seu pedido ficou esgotado. Remova para continuar.</div>}
             </section>
           )}
@@ -1458,6 +1507,18 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
           )}
         </main>
       </div>
+      {cartCount > 0 && screen === "sc-cart" && (
+        <div className="delivery-cta-bar">
+          <div className="delivery-cta-inner cart-cta-inner">
+            <div className="delivery-cta-info">
+              <div className="delivery-cta-label">Subtotal</div>
+              <div className="delivery-cta-total">{money(cartTotal)}</div>
+            </div>
+            <button className="delivery-cta-cart" onClick={() => go("sc-start")}>Adicionar</button>
+            <button className="btn delivery-cta-btn" disabled={cartEsgotado} onClick={() => !cartEsgotado && go("sc-delivery")}>Ir para entrega</button>
+          </div>
+        </div>
+      )}
       {cartCount > 0 && screen === "sc-delivery" && (
         <div className="delivery-cta-bar">
           <div className="delivery-cta-inner">
@@ -1482,6 +1543,54 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
         </div>
       )}
       {cartCount > 0 && screen !== "sc-done" && screen !== "sc-cart" && screen !== "sc-delivery" && screen !== "sc-pay" && (<div className="cartbar show"><div className="cartbar-inner"><div className="cartbar-info"><div className="cartbar-count">Sacola</div><div className="cartbar-total">{cartCount} {cartCount === 1 ? "item" : "itens"} · {money(finalTotal)}</div></div><button className="cartbar-link" onClick={() => go("sc-cart")}>Editar</button></div></div>)}
+      {paymentModal && (
+        <div className="payment-modal-backdrop" role="presentation" onClick={() => setPaymentModal(null)}>
+          <div className="payment-modal" role="dialog" aria-modal="true" aria-labelledby="payment-modal-title" onClick={(e) => e.stopPropagation()}>
+            <div className="payment-modal-head">
+              <div>
+                <div className="payment-modal-kicker">Pagamento</div>
+                <h3 id="payment-modal-title">{paymentLabel(paymentModal)}</h3>
+              </div>
+              <button type="button" className="payment-modal-close" aria-label="Fechar" onClick={() => setPaymentModal(null)}>×</button>
+            </div>
+            {paymentModal === "Pix" && (
+              <div className="payment-modal-body">
+                <p>A pizzaria confirma o Pix antes de preparar.</p>
+                <p>Depois de finalizar, as instrucoes aparecem no pedido.</p>
+              </div>
+            )}
+            {paymentModal === "Cartao" && (
+              <div className="payment-modal-body">
+                <p>Pagamento na maquina da pizzaria.</p>
+                <p>Vale para entrega, retirada ou consumo no local.</p>
+              </div>
+            )}
+            {paymentModal !== "Pix" && paymentModal !== "Cartao" && paymentModal !== "Dinheiro" && (
+              <div className="payment-modal-body"><p>{paymentHint(paymentModal)}</p></div>
+            )}
+            {paymentModal === "Dinheiro" && (
+              <div className="payment-modal-body">
+                <div className="money-choice-title">Precisa de troco?</div>
+                <div className="money-choice-row">
+                  <button type="button" className={`btn ${trocoOpcao === "nao" ? "" : "btn-ghost"}`} onClick={() => { setTrocoOpcao("nao"); setTroco(""); setErroTroco(""); }}>Nao preciso</button>
+                  <button type="button" className={`btn ${trocoOpcao === "sim" ? "" : "btn-ghost"}`} onClick={() => { setTrocoOpcao("sim"); setErroTroco(""); }}>Preciso</button>
+                </div>
+                {trocoOpcao === "sim" && (
+                  <div className="field money-field">
+                    <label>Troco para quanto?</label>
+                    <input value={troco} onChange={(e) => { setTroco(e.target.value); if (erroTroco) setErroTroco(""); }} inputMode="numeric" placeholder={`Ex: ${Math.ceil((cartTotal + fee) / 10) * 10}`} />
+                  </div>
+                )}
+                {erroTroco && <div className="pay-error">{erroTroco}</div>}
+              </div>
+            )}
+            <div className="payment-modal-actions">
+              <button type="button" className="btn btn-ghost" onClick={() => setPaymentModal(null)}>Cancelar</button>
+              <button type="button" className="btn" onClick={confirmPaymentConfig}>Confirmar</button>
+            </div>
+          </div>
+        </div>
+      )}
       {toast && <div className="toast show">{toast}</div>}
     </>
   )
@@ -1617,12 +1726,24 @@ main{width:100%;padding:6px 20px 20px}
 .grid2 .opt-check{position:absolute;top:13px;right:13px;width:20px;height:20px}
 .grid2 .opt-emoji{width:auto}
 .section-label{font-size:11px;font-weight:600;color:var(--text-sub);text-transform:uppercase;letter-spacing:1px;margin:22px 0 10px;display:flex;align-items:center;gap:7px}
+.size-choice{padding-top:8px}
+.choice-nudge{margin:0 0 12px;padding:10px 12px;border-radius:12px;background:var(--surface2);border:1px solid var(--line);color:var(--text-sub);font-size:13px;font-weight:700}
+.choice-nudge.ok{color:var(--green);background:var(--green-soft);border-color:rgba(98,162,86,.26)}
+.mini-size-opt{min-height:136px}
+.muted-head{opacity:.68}
+.locked-note{border:1px dashed var(--line-strong);border-radius:15px;padding:18px 14px;color:var(--text-sub);font-size:13.5px;text-align:center;background:rgba(255,255,255,.02)}
 .mam{display:flex;align-items:center;justify-content:space-between;background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:16px 18px;margin-bottom:14px;cursor:pointer;box-shadow:var(--shadow-sm)}
 .mam.on{border-color:var(--brand);background:var(--brand-soft)}
 .mam-txt strong{font-weight:600;font-size:15.5px;letter-spacing:-.1px}
 .mam-txt p{font-size:13px;color:var(--text-sub);margin-top:2px;font-weight:400}
 .choice-block{background:rgba(255,255,255,.025);border:1px solid var(--line);border-radius:18px;padding:2px 10px 12px;margin-bottom:22px}
 .flavor-head{margin-top:6px;margin-bottom:14px}
+.flavor-mode{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
+.flavor-mode-card{text-align:left;background:var(--surface);border:1px solid var(--line);border-radius:15px;padding:14px;color:var(--text);box-shadow:var(--shadow-sm)}
+.flavor-mode-card.sel{border-color:var(--brand);background:var(--brand-soft)}
+.flavor-mode-card strong{display:block;font-size:14.5px;font-weight:800}
+.flavor-mode-card span{display:block;font-size:12.5px;color:var(--text-sub);margin-top:3px;line-height:1.35}
+.mini-flow-note{margin:-2px 0 12px;padding:11px 12px;border-radius:13px;background:var(--brand-soft);color:var(--text-sub);font-size:13px;font-weight:700}
 .flavor-list{max-height:470px;overflow-y:auto;padding-right:2px;padding-bottom:86px;scrollbar-width:thin}
 .flavor-opt{padding:14px 16px;margin-bottom:8px}
 .switch{width:48px;height:28px;border-radius:20px;background:var(--line-strong);position:relative;flex:0 0 auto;transition:.22s}
@@ -1663,6 +1784,43 @@ main{width:100%;padding:6px 20px 20px}
 .delivery-cta-btn{margin:0;padding:14px 12px;border-radius:13px;min-width:0;white-space:normal;line-height:1.15}
 .pay-screen{padding-bottom:132px}
 .pay-cta-inner{grid-template-columns:auto minmax(0,1fr)}
+.cart-screen{padding-bottom:132px}
+.cart-cta-inner{grid-template-columns:auto auto minmax(0,1fr)}
+.pay-head{margin-bottom:12px}
+.order-summary-compact{background:var(--surface);border:1px solid var(--line);border-radius:15px;margin:0 0 16px;box-shadow:var(--shadow-sm);overflow:hidden}
+.order-summary-compact summary{list-style:none;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;cursor:pointer;color:var(--text-sub);font-size:13px;font-weight:700}
+.order-summary-compact summary::-webkit-details-marker{display:none}
+.order-summary-compact summary strong{font-size:16px;color:var(--brand)}
+.summary-lines{border-top:1px solid var(--line);padding:10px 14px 12px}
+.summary-line{display:flex;justify-content:space-between;gap:12px;color:var(--text-sub);font-size:12.5px;line-height:1.35;padding:4px 0}
+.summary-line span{min-width:0}
+.summary-line strong{white-space:nowrap;color:var(--text);font-weight:700}
+.summary-edit{margin-top:8px;background:transparent;border:1px solid var(--line-strong);border-radius:999px;color:var(--text-sub);font-size:12.5px;font-weight:800;padding:8px 12px}
+.payment-choice{margin:0 0 16px}
+.payment-grid{display:grid;gap:10px}
+.payment-card{width:100%;display:flex;align-items:center;gap:12px;text-align:left;background:var(--surface);border:1px solid var(--line);border-radius:16px;color:var(--text);padding:15px;box-shadow:var(--shadow-sm)}
+.payment-card.sel{border-color:var(--brand);background:var(--brand-soft)}
+.payment-icon{width:34px;height:34px;border-radius:12px;background:var(--surface2);display:flex;align-items:center;justify-content:center;color:var(--brand);font-size:18px;font-weight:900;flex:0 0 auto}
+.payment-card-text{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}
+.payment-card-text strong{font-size:15px;font-weight:850;color:var(--text)}
+.payment-card-text small{font-size:12.5px;color:var(--text-sub);line-height:1.35}
+.payment-edit{width:30px;height:30px;border-radius:999px;border:1px solid var(--line-strong);display:flex;align-items:center;justify-content:center;color:var(--text-sub);font-size:14px;flex:0 0 auto}
+.pay-error{color:#ef4444;font-size:12px;font-weight:700;margin-top:8px}
+.payment-modal-backdrop{position:fixed;inset:0;z-index:80;background:rgba(0,0,0,.55);display:flex;align-items:flex-end;justify-content:center;padding:20px}
+.payment-modal{width:100%;max-width:500px;background:var(--surface);border:1px solid var(--line-strong);border-radius:20px;padding:16px;box-shadow:0 -14px 45px rgba(0,0,0,.35);animation:sheet .22s ease-out}
+.payment-modal-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:12px}
+.payment-modal-kicker{font-size:11px;color:var(--brand);text-transform:uppercase;letter-spacing:1px;font-weight:800}
+.payment-modal h3{font-size:21px;line-height:1.15;margin-top:3px}
+.payment-modal-close{width:36px;height:36px;border-radius:999px;background:var(--surface2);border:1px solid var(--line-strong);color:var(--text-sub);font-size:22px;line-height:1}
+.payment-modal-body{color:var(--text-sub);font-size:14px;line-height:1.45}
+.payment-modal-body p + p{margin-top:7px}
+.money-choice-title{font-size:13px;font-weight:800;color:var(--text);margin-bottom:10px}
+.money-choice-row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
+.money-choice-row .btn{padding:12px 8px;font-size:13px}
+.money-field{margin:0}
+.payment-modal-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:16px}
+.payment-modal-actions .btn{padding:13px 10px}
+@keyframes sheet{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
 .cartbar{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:540px;z-index:50;background:transparent;padding:0 20px calc(env(safe-area-inset-bottom) + 14px);pointer-events:none}
 .cartbar-inner{margin:0 auto;display:flex;align-items:center;gap:14px;background:#15110f;border:1px solid rgba(255,255,255,.1);border-radius:20px;padding:12px 12px 12px 16px;box-shadow:0 -10px 34px rgba(0,0,0,.35);pointer-events:auto}
 .cartbar-info{flex:1}
@@ -1692,5 +1850,6 @@ main{width:100%;padding:6px 20px 20px}
 .build-back-btn{background:var(--surface2);border:1px solid var(--line-strong);color:var(--text-sub);font-family:var(--font-ui);font-size:13px;font-weight:600;padding:7px 14px;border-radius:30px;cursor:pointer;box-shadow:var(--shadow-sm);transition:transform .14s}
 .build-back-btn:active{transform:scale(.96)}
 .build-foot{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:540px;z-index:55;background:var(--surface);border-top:1px solid var(--line);box-shadow:0 -4px 18px rgba(0,0,0,.18);padding:12px 20px calc(env(safe-area-inset-bottom) + 14px)}
+.build-foot-hint{font-size:12.5px;color:var(--text-sub);font-weight:700;text-align:center;margin-bottom:8px}
 .build-foot .btn{margin:0}
 `;
