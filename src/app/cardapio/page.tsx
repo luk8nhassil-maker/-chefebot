@@ -1628,6 +1628,9 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
               <div>
                 <div className="payment-modal-kicker">Pagamento</div>
                 <h3 id="payment-modal-title">{paymentLabel(paymentModal)}</h3>
+                {paymentModal === "Dinheiro" && trocoOpcao && (
+                  <span className="money-status-badge">{trocoOpcao === "nao" ? "Sem troco" : "Precisa de troco"}</span>
+                )}
               </div>
               <button type="button" className="payment-modal-close" aria-label="Fechar" onClick={() => setPaymentModal(null)}>×</button>
             </div>
@@ -1650,20 +1653,20 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
               <div className="payment-modal-body">
                 <div className="money-choice-title">Precisa de troco?</div>
                 <div className="money-choice-row">
-                  <button type="button" className={`btn ${trocoOpcao === "nao" ? "" : "btn-ghost"}`} onClick={() => { setTrocoOpcao("nao"); setTroco(""); setErroTroco(""); }}>Nao preciso</button>
+                  <button type="button" className={`btn ${trocoOpcao === "nao" ? "" : "btn-ghost"}`} onClick={() => { setTrocoOpcao("nao"); setTroco(""); setErroTroco(""); }}>Não preciso</button>
                   <button type="button" className={`btn ${trocoOpcao === "sim" ? "" : "btn-ghost"}`} onClick={() => { setTrocoOpcao("sim"); setErroTroco(""); }}>Preciso</button>
                 </div>
                 {trocoOpcao === "sim" && (
                   <div className="field money-field">
-                    <label>Troco para quanto?</label>
+                    <label>Vai pagar com quanto?</label>
                     <input value={troco} onChange={(e) => { setTroco(e.target.value); if (erroTroco) setErroTroco(""); }} inputMode="numeric" placeholder={`Ex: ${Math.ceil((cartTotal + fee) / 10) * 10}`} />
                   </div>
                 )}
                 {erroTroco && <div className="pay-error">{erroTroco}</div>}
               </div>
             )}
-            <div className="payment-modal-actions">
-              <button type="button" className="btn btn-ghost" onClick={() => setPaymentModal(null)}>Cancelar</button>
+            <div className={`payment-modal-actions ${paymentModal === "Dinheiro" ? "single" : ""}`}>
+              {paymentModal !== "Dinheiro" && <button type="button" className="btn btn-ghost" onClick={() => setPaymentModal(null)}>Cancelar</button>}
               <button type="button" className="btn" onClick={confirmPaymentConfig}>Confirmar</button>
             </div>
           </div>
@@ -1894,11 +1897,13 @@ main{width:100%;padding:6px 20px 20px}
 .payment-modal-close{width:36px;height:36px;border-radius:999px;background:var(--surface2);border:1px solid var(--line-strong);color:var(--text-sub);font-size:22px;line-height:1}
 .payment-modal-body{color:var(--text-sub);font-size:14px;line-height:1.45}
 .payment-modal-body p + p{margin-top:7px}
+.money-status-badge{display:inline-block;margin-top:6px;padding:3px 10px;border-radius:999px;background:var(--brand-soft);color:var(--brand);font-size:11px;font-weight:700}
 .money-choice-title{font-size:13px;font-weight:800;color:var(--text);margin-bottom:10px}
 .money-choice-row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
 .money-choice-row .btn{padding:12px 8px;font-size:13px}
 .money-field{margin:0}
 .payment-modal-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:16px}
+.payment-modal-actions.single{grid-template-columns:1fr}
 .payment-modal-actions .btn{padding:13px 10px}
 @keyframes sheet{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
 .cartbar{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:540px;z-index:50;background:transparent;padding:0 20px calc(env(safe-area-inset-bottom) + 14px);pointer-events:none}
