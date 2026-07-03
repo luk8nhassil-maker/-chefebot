@@ -690,6 +690,10 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const [borderPrice, setBorderPrice] = useState(0);
   const [plan, setPlan] = useState<{ total: number; current: number; openEnded: boolean }>({ total: 0, current: 0, openEnded: false });
   const [listCat, setListCat] = useState<"lanche" | "macarronada" | "bebida" | "suco">("lanche");
+  // Upsell contextual de bebida: rastreia o tipo do último item adicionado e
+  // se o cliente já ignorou a sugestão nesta compra (reseta só em resetAll()).
+  const [lastAddedKind, setLastAddedKind] = useState<"pizza" | "lanche" | "macarronada" | "bebida" | "suco" | null>(null);
+  const [upsellBebidaIgnorado, setUpsellBebidaIgnorado] = useState(false);
   const [macarronadaPendente, setMacarronadaPendente] = useState<{ name: string; price: number; sizes?: { code: string; price: number }[] } | null>(null);
   const [sucoPendente, setSucoPendente] = useState<{ name: string; price: number } | null>(null);
   const [delType, setDelType] = useState<"delivery" | "retirada" | "dine_in" | null>(null);
@@ -927,6 +931,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     const newItem: CartItem = { emoji: "🍕", kind: "pizza", name: `Pizza ${size}${mam ? " (meio a meio)" : ""}`, detail: `${flavor}${chosenBorder ? ` · borda ${chosenBorder}` : ""}`, price: sizePrice + chosenBorderPrice, qty: 1, keys };
     const newCart = [...cart, newItem];
     setCart(newCart);
+    setLastAddedKind("pizza");
     if (!plan.openEnded && plan.current < plan.total) { setPlan({ ...plan, current: plan.current + 1 }); showToast(`Pizza pronta! 🍕`); resetBuild(); go("sc-build"); }
     else if (plan.openEnded) { showToast("Pizza adicionada! 🍕"); go("sc-another"); }
     else { showToast("Tudo pronto! 🍕"); go("sc-cart"); }
@@ -937,6 +942,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     const ex = cart.find((c) => c.kind === "simple" && isMiniPizzaName(c.name) && c.detail === detail);
     if (ex) setCart(cart.map((c) => (c === ex ? { ...c, qty: c.qty + 1 } : c)));
     else setCart([...cart, { emoji: "🍕", kind: "simple", name: miniPizzaItem.name, detail, price: miniPizzaItem.price, qty: 1, keys: [miniPizzaItem.name, f1] }]);
+    setLastAddedKind("pizza");
     if (!plan.openEnded && plan.current < plan.total) { setPlan({ ...plan, current: plan.current + 1 }); showToast("Mini-pizza adicionada!"); resetBuild(); go("sc-build"); }
     else if (plan.openEnded) { showToast("Mini-pizza adicionada!"); go("sc-another"); }
     else { showToast("Tudo pronto!"); go("sc-cart"); }
@@ -957,6 +963,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     const ex = cart.find((c) => c.kind === "simple" && c.name === it.name);
     if (ex) { setCart(cart.map((c) => (c === ex ? { ...c, qty: c.qty + 1 } : c))); }
     else { setCart([...cart, { emoji, kind: "simple", name: it.name, detail: "", price: it.price, qty: 1, keys: [it.name] }]); }
+    setLastAddedKind(listCat === "bebida" ? "bebida" : "lanche");
     showToast(`${it.name} adicionado!`);
   }
   function addSucoLeite(comLeite: boolean) {
@@ -966,6 +973,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     const ex = cart.find((c) => c.kind === "simple" && c.name === sucoPendente.name && c.detail === detail);
     if (ex) setCart(cart.map((c) => (c === ex ? { ...c, qty: c.qty + 1 } : c)));
     else setCart([...cart, { emoji: "S", kind: "simple", name: sucoPendente.name, detail, price, qty: 1, keys: [sucoPendente.name] }]);
+    setLastAddedKind("suco");
     showToast(`${sucoPendente.name} ${detail.toLowerCase()} adicionado!`);
     setSucoPendente(null);
     go("sc-cart");
@@ -978,12 +986,16 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     const ex = cart.find((c) => c.kind === "simple" && c.name === macarronadaPendente.name && c.detail === detail);
     if (ex) setCart(cart.map((c) => (c === ex ? { ...c, qty: c.qty + 1 } : c)));
     else setCart([...cart, { emoji: "🍽️", kind: "simple", name: macarronadaPendente.name, detail, price: sizeOption.price, qty: 1, keys: [macarronadaPendente.name] }]);
+    setLastAddedKind("macarronada");
     showToast(`${macarronadaPendente.name} ${sizeOption.code} adicionada!`);
     setMacarronadaPendente(null);
-    go("sc-cart");
+    go("sc-another");
   }
   const cartTotal = cart.reduce((s, i) => s + i.price * i.qty, 0);
   const cartCount = cart.reduce((s, i) => s + i.qty, 0);
+  const cartTemBebidaOuSuco = cart.some((c) => [...(menu.bebidas || []), ...(menu.sucos || [])].some((m) => m.name === c.name));
+  const showUpsellBebida = !upsellBebidaIgnorado && !cartTemBebidaOuSuco && ["pizza", "lanche", "macarronada"].includes(lastAddedKind || "");
+  function sairDoPosItemSemBebida(destino: "sc-start" | "sc-cart") { if (showUpsellBebida) setUpsellBebidaIgnorado(true); go(destino); }
   function chQty(idx: number, d: number) { setCart(cart.map((c, i) => (i === idx ? { ...c, qty: Math.max(1, c.qty + d) } : c))); }
   function rmItem(idx: number) { const nc = cart.filter((_, i) => i !== idx); setCart(nc); if (nc.length === 0) go("sc-start"); }
   const fee = delType === "delivery" && bairroIdx !== "" ? ((menu.neighborhoods || [])[+bairroIdx]?.fee ?? 0) : 0;
@@ -1126,7 +1138,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
       if (data.ok) { try { localStorage.setItem("cf_nome", nome.trim()); localStorage.setItem("cf_tel", telefone.trim()); } catch {} try { sessionStorage.removeItem("cf_draft"); } catch {} try { const resumo = { id: String(data.pedidoId), numero: typeof data.numero === "number" ? data.numero : undefined, ts: Date.now() }; localStorage.setItem("cf_ultimo_pedido", JSON.stringify(resumo)); setPedidoRecente(resumo); } catch {} setStatusPedidoConfirmado("novo"); setPedidoConfirmado({ id: data.pedidoId, numero: data.numero, total: data.total, ...(data.pix?.qrCode ? { pix: data.pix } : {}) }); go("sc-done"); } else { showToast("Erro ao enviar. Tente de novo."); }
     } catch { showToast("Sem conexão. Tente de novo."); } finally { setSending(false); }
   }
-  function resetAll() { setCart([]); resetBuild(); setDelType(null); setBairroIdx(""); setRua(""); setNumero(""); setReferencia(""); setPayment(null); setTroco(""); setTrocoOpcao(null); setPaymentModal(null); setObservacao(""); setErroNome(""); setErroTelefone(""); setErroPagamento(""); setErroEntrega(""); setErroTroco(""); setPedidoConfirmado(null); setStatusPedidoConfirmado("novo"); setRestoredDraft(false); setEditandoIdentidade(false); try { sessionStorage.removeItem("cf_draft"); } catch {} go("sc-start"); }
+  function resetAll() { setCart([]); resetBuild(); setDelType(null); setBairroIdx(""); setRua(""); setNumero(""); setReferencia(""); setPayment(null); setTroco(""); setTrocoOpcao(null); setPaymentModal(null); setObservacao(""); setErroNome(""); setErroTelefone(""); setErroPagamento(""); setErroEntrega(""); setErroTroco(""); setPedidoConfirmado(null); setStatusPedidoConfirmado("novo"); setRestoredDraft(false); setEditandoIdentidade(false); setLastAddedKind(null); setUpsellBebidaIgnorado(false); try { sessionStorage.removeItem("cf_draft"); } catch {} go("sc-start"); }
 
   const stepMap: Record<string, number> = { "sc-start": 0, "sc-build": 0, "sc-border": 0, "sc-list": 0, "sc-suco-leite": 0, "sc-macarronada-size": 0, "sc-promo": 0, "sc-another": 1, "sc-cart": 1, "sc-delivery": 2, "sc-pay": 3, "sc-done": 3 };
   const stepIdx = stepMap[screen] ?? 0;
@@ -1330,12 +1342,21 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
             </section>
           )}
           {screen === "sc-another" && (
-            <section className="screen active">
-              <TopBack onClick={() => go("sc-cart")} title="Adicionar mais?" />
-              <div className="screen-head"><div className="eyebrow">Pizza adicionada ✓</div><h2>Mais uma pizza?</h2><p>{pizzasNoCarrinho()} pizza{pizzasNoCarrinho() > 1 ? "s" : ""} no pedido</p></div>
-              <div className="opt" onClick={addAnother}><div className="opt-emoji">🍕</div><div className="opt-body"><div className="opt-title">Montar outra pizza</div></div></div>
-              <div className="opt" onClick={() => go("sc-start")}><div className="opt-emoji">🥤</div><div className="opt-body"><div className="opt-title">Adicionar bebida ou lanche</div></div></div>
-              <div className="opt" onClick={() => go("sc-cart")}><div className="opt-emoji">✅</div><div className="opt-body"><div className="opt-title">Pronto, ver meu pedido</div></div></div>
+            <section className="screen active another-screen">
+              <TopBack onClick={() => sairDoPosItemSemBebida("sc-cart")} title="Pedido adicionado" />
+              <div className="screen-head">
+                <div className="eyebrow">Pedido adicionado ✓</div>
+                <h2>{showUpsellBebida ? "Que tal uma bebida pra acompanhar?" : "O que você quer fazer agora?"}</h2>
+              </div>
+              {showUpsellBebida && (
+                <div className="grid2">
+                  <div className="opt" onClick={() => goCat("bebida")}><div className="opt-emoji">🥤</div><div className="opt-body"><div className="opt-title">Refrigerantes</div></div></div>
+                  {(menu.sucos || []).length > 0 && (
+                    <div className="opt" onClick={() => goCat("suco")}><div className="opt-emoji">🧃</div><div className="opt-body"><div className="opt-title">Sucos</div></div></div>
+                  )}
+                </div>
+              )}
+              <button className="btn btn-ghost btn-sm" onClick={() => sairDoPosItemSemBebida("sc-start")}>+ Adicionar outro produto</button>
             </section>
           )}
           {screen === "sc-list" && (
@@ -1572,6 +1593,17 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
               <div className="delivery-cta-total">{cartCount} {cartCount === 1 ? "item" : "itens"} · {money(finalTotal)}</div>
             </div>
             <button className="btn delivery-cta-btn" onClick={() => go("sc-cart")}>Revisar pedido</button>
+          </div>
+        </div>
+      )}
+      {screen === "sc-another" && cartCount > 0 && (
+        <div className="delivery-cta-bar">
+          <div className="delivery-cta-inner pay-cta-inner">
+            <div className="delivery-cta-info">
+              <div className="delivery-cta-label">Sacola</div>
+              <div className="delivery-cta-total">{cartCount} {cartCount === 1 ? "item" : "itens"} · {money(finalTotal)}</div>
+            </div>
+            <button className="btn delivery-cta-btn" onClick={() => sairDoPosItemSemBebida("sc-cart")}>Ir para sacola</button>
           </div>
         </div>
       )}
@@ -1864,6 +1896,7 @@ main{width:100%;padding:6px 20px 20px}
 .cart-cta-inner{grid-template-columns:auto auto minmax(0,1fr)}
 .list-screen{padding-bottom:194px}
 .done-screen{padding-bottom:96px}
+.another-screen{padding-bottom:132px}
 .pay-head{margin-bottom:12px}
 .order-summary-compact{background:var(--surface);border:1px solid var(--line);border-radius:15px;margin:0 0 16px;box-shadow:var(--shadow-sm);overflow:hidden}
 .order-summary-compact summary{list-style:none;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;cursor:pointer;color:var(--text-sub);font-size:13px;font-weight:700}
