@@ -691,6 +691,8 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const [promos, setPromos] = useState<PromocaoPublica[]>([]);
   const [promoSel, setPromoSel] = useState<PromocaoPublica | null>(null);
   const [promoSabor, setPromoSabor] = useState<string | null>(null);
+  const promoScrollRef = useRef<HTMLDivElement>(null);
+  const promoUserInteractRef = useRef(false);
   const pagamentoRef = useRef<HTMLDivElement>(null);
   const toastTimer = useRef<any>(null);
   const nomeRef = useRef<HTMLInputElement>(null);
@@ -792,6 +794,24 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
       .catch(() => {});
     return () => { alive = false; };
   }, []);
+
+  // Carrossel de promoções: avança sozinho a cada ~4,5s só quando há mais de
+  // 1 promoção e o cliente está na tela inicial. Um toque/arraste do cliente
+  // pausa apenas o próximo avanço automático, sem travar a rolagem manual.
+  useEffect(() => {
+    if (screen !== "sc-start" || promos.length < 2) return;
+    const el = promoScrollRef.current;
+    if (!el) return;
+    const id = setInterval(() => {
+      if (promoUserInteractRef.current) { promoUserInteractRef.current = false; return; }
+      const card = el.children[0] as HTMLElement | undefined;
+      const step = card ? card.offsetWidth + 12 : el.clientWidth;
+      const max = el.scrollWidth - el.clientWidth;
+      const next = el.scrollLeft + step >= max - 4 ? 0 : el.scrollLeft + step;
+      el.scrollTo({ left: next, behavior: "smooth" });
+    }, 4500);
+    return () => clearInterval(id);
+  }, [screen, promos.length]);
 
   function abrirPromocao(p: PromocaoPublica) { setPromoSel(p); setPromoSabor(null); go("sc-promo"); }
   function promoPrecisaSabor(p: PromocaoPublica) { return p.mainItems.some((m) => m.category === "pizza" && m.customerMustChooseFlavor !== false); }
@@ -1050,14 +1070,22 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                   <button onClick={dispensarPedidoRecente} aria-label="Fechar acompanhamento" style={{ background: "none", border: "none", color: "var(--text-faint)", fontSize: 18, cursor: "pointer", padding: "0 2px", lineHeight: 1 }}>×</button>
                 </div>
               )}
-              {promos.map((p) => (
-                <div className="promo-card" key={p.id}>
-                  <div className="promo-label">{p.badge || "PROMO DE HOJE"}</div>
-                  <h2>{p.title}</h2>
-                  <p>{p.description}</p>
-                  <button className="promo-btn" onClick={() => abrirPromocao(p)}>{p.buttonText || "Pedir essa promoção →"}</button>
+              {promos.length > 0 && (
+                <div
+                  className="promo-scroll"
+                  ref={promoScrollRef}
+                  onPointerDown={() => { promoUserInteractRef.current = true; }}
+                >
+                  {promos.map((p) => (
+                    <div className="promo-card" key={p.id} style={promos.length === 1 ? { flex: "0 0 100%" } : undefined}>
+                      <div className="promo-label">{p.badge || "PROMO DE HOJE"}</div>
+                      <h2>{p.title}</h2>
+                      <p>{p.description}</p>
+                      <button className="promo-btn" onClick={() => abrirPromocao(p)}>{p.buttonText || "Pedir essa promoção →"}</button>
+                    </div>
+                  ))}
                 </div>
-              ))}
+              )}
               <div className="home-copy">
                 <h2>Ou monte seu pedido</h2>
                 <p>Escolha uma categoria pra começar do seu jeito.</p>
@@ -1555,12 +1583,14 @@ main{width:100%;padding:6px 20px 20px}
 .opt.sel .opt-check{background:var(--brand);border-color:var(--brand)}
 .opt.sel .opt-check::after{content:"✓"}
 .home-screen{padding-bottom:8px}
-.promo-card{background:linear-gradient(145deg,rgba(72,36,20,.78),rgba(24,15,12,.98) 58%,rgba(14,11,10,1));border:1px solid rgba(240,81,47,.28);border-radius:22px;padding:20px;box-shadow:0 18px 50px rgba(0,0,0,.34),inset 0 1px 0 rgba(255,255,255,.04)}
+.promo-scroll{display:flex;gap:12px;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none;margin:0 -20px;padding:0 20px 4px}
+.promo-scroll::-webkit-scrollbar{display:none}
+.promo-card{flex:0 0 86%;scroll-snap-align:start;background:linear-gradient(145deg,rgba(72,36,20,.78),rgba(24,15,12,.98) 58%,rgba(14,11,10,1));border:1px solid rgba(240,81,47,.28);border-radius:22px;padding:20px;box-shadow:0 18px 50px rgba(0,0,0,.34),inset 0 1px 0 rgba(255,255,255,.04)}
 .promo-label{color:#f59b67;font-size:10.5px;font-weight:800;letter-spacing:1.4px;margin-bottom:10px}
 .promo-card h2{color:#fff4ec;font-size:25px;font-weight:850;line-height:1.08;letter-spacing:0;margin-bottom:8px}
 .promo-card p{color:#b9aaa0;font-size:14px;line-height:1.45;margin-bottom:18px}
 .promo-btn{width:100%;border:0;border-radius:15px;background:#f05a28;color:#fff;padding:15px 16px;font-size:15px;font-weight:800;box-shadow:0 12px 26px rgba(240,90,40,.2)}
-.promo-card + .promo-card{margin-top:12px}
+@media (min-width:640px){.promo-card{flex-basis:340px}}
 .home-copy{margin:24px 0 14px}
 .home-copy h2{color:#f7efe7;font-size:22px;font-weight:850;letter-spacing:0;line-height:1.15}
 .home-copy p{color:#9d8f85;font-size:14px;margin-top:6px}
