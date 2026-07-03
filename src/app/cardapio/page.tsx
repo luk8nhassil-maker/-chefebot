@@ -684,7 +684,6 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
 
   const [size, setSize] = useState<string | null>(null);
   const [sizePrice, setSizePrice] = useState(0);
-  const [mam, setMam] = useState(false);
   const [f1, setF1] = useState<string | null>(null);
   const [f2, setF2] = useState<string | null>(null);
   const [border, setBorder] = useState<string | null>(null);
@@ -865,7 +864,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     setPromoSel(null); setPromoSabor(null);
     go("sc-cart");
   }
-  const safeCartReturnScreens = ["sc-start", "sc-qty", "sc-build", "sc-border", "sc-list", "sc-suco-leite", "sc-macarronada-size", "sc-another", "sc-delivery", "sc-pay", "sc-promo"];
+  const safeCartReturnScreens = ["sc-start", "sc-build", "sc-border", "sc-list", "sc-suco-leite", "sc-macarronada-size", "sc-another", "sc-delivery", "sc-pay", "sc-promo"];
   function go(s: string) {
     if (s === "sc-cart" && screen !== "sc-cart" && safeCartReturnScreens.includes(screen)) {
       setPreviousStepBeforeCart(screen);
@@ -890,24 +889,36 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const miniPizzaEsgotada = !!miniPizzaItem && esgotados.includes(miniPizzaItem.name);
   const miniPizzaFlavors = (menu.miniPizzaFlavors?.length ? menu.miniPizzaFlavors : [...(menu.saltyFlavors || []), ...(menu.sweetFlavors || [])]).filter(Boolean);
 
-  function resetBuild() { setSize(null); setSizePrice(0); setMam(false); setF1(null); setF2(null); setBorder(null); setBorderPrice(0); setMiniPizzaMode(false); }
-  function goPizza() { go("sc-qty"); }
-  function setPizzaQty(q: number) { setPlan(q === 0 ? { total: 0, current: 1, openEnded: true } : { total: q, current: 1, openEnded: false }); resetBuild(); go("sc-build"); }
+  function resetBuild() { setSize(null); setSizePrice(0); setF1(null); setF2(null); setBorder(null); setBorderPrice(0); setMiniPizzaMode(false); }
+  function goPizza() { setPlan({ total: 0, current: 1, openEnded: true }); resetBuild(); go("sc-build"); }
   function pizzasNoCarrinho() { return cart.filter((c) => c.kind === "pizza" || (c.kind === "simple" && isMiniPizzaName(c.name))).length; }
   function pickSize(code: string) { const s = (menu.sizes || []).find((x) => x.code === code); if (!s) return; setMiniPizzaMode(false); setSize(code); setSizePrice(s.price); }
-  function pickMiniPizza() { if (!miniPizzaItem || miniPizzaEsgotada) return; setMiniPizzaMode(true); setSize("MINI"); setSizePrice(miniPizzaItem.price); setMam(false); setF2(null); }
-  function setFlavorMode(nextMam: boolean) { if (miniPizzaMode && nextMam) return; setMam(nextMam); setF1(null); setF2(null); }
+  function pickMiniPizza() { if (!miniPizzaItem || miniPizzaEsgotada) return; setMiniPizzaMode(true); setSize("MINI"); setSizePrice(miniPizzaItem.price); setF2(null); }
+  // Toque direto em até 2 sabores: o 1º sabor já forma uma pizza normal, o 2º
+  // vira meio a meio automaticamente (sem etapa de escolher o "modo" antes).
   function pickFlavor(f: string) {
-    if (!mam) { setF1(f); return; }
-    if (f1 === f) { setF1(f2); setF2(null); } else if (f2 === f) { setF2(null); } else if (!f1) setF1(f); else if (!f2) setF2(f); else setF2(f);
+    if (f1 === f) { setF1(f2); setF2(null); return; }
+    if (f2 === f) { setF2(null); return; }
+    if (!f1) { setF1(f); return; }
+    if (!f2) { setF2(f); return; }
+    setF2(f);
   }
-  const flavorOk = mam ? !!(f1 && f2) : !!f1;
+  const mam = !!(f1 && f2);
+  const flavorOk = !!f1;
   const buildOk = !!size && flavorOk && !(miniPizzaMode && miniPizzaEsgotada);
   const flavorSections = miniPizzaMode
     ? [{ title: "Sabores da mini-pizza", flavors: miniPizzaFlavors }]
     : [{ title: "Salgadas", flavors: menu.saltyFlavors || [] }, { title: "Doces", flavors: menu.sweetFlavors || [] }];
   const selectedSizeLabel = miniPizzaMode && miniPizzaItem ? miniPizzaItem.name : size ? ((menu.sizes || []).find((s) => s.code === size)?.label || size) : "";
-  const buildFootHint = !size ? "Escolha um tamanho para continuar" : !flavorOk ? (mam ? "Escolha 2 sabores" : "Escolha 1 sabor") : miniPizzaMode ? "Mini-pizza pronta para a sacola" : "Agora escolha a borda";
+  const buildFootHint = !size
+    ? "Escolha um tamanho para continuar"
+    : miniPizzaMode
+      ? (flavorOk ? "Mini-pizza pronta para a sacola" : "Escolha 1 sabor para a mini-pizza")
+      : !f1
+        ? "Escolha até 2 sabores"
+        : !f2
+          ? "Você pode escolher até 2 sabores"
+          : "Sabores prontos — agora escolha a borda";
   const buildActionLabel = miniPizzaMode ? "Adicionar mini-pizza" : "Confirmar pizza";
   function addPizzaWithBorder(chosenBorder: string | null, chosenBorderPrice: number) {
     setBorder(chosenBorder); setBorderPrice(chosenBorderPrice);
@@ -1117,7 +1128,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   }
   function resetAll() { setCart([]); resetBuild(); setDelType(null); setBairroIdx(""); setRua(""); setNumero(""); setReferencia(""); setPayment(null); setTroco(""); setTrocoOpcao(null); setPaymentModal(null); setObservacao(""); setErroNome(""); setErroTelefone(""); setErroPagamento(""); setErroEntrega(""); setErroTroco(""); setPedidoConfirmado(null); setStatusPedidoConfirmado("novo"); setRestoredDraft(false); setEditandoIdentidade(false); try { sessionStorage.removeItem("cf_draft"); } catch {} go("sc-start"); }
 
-  const stepMap: Record<string, number> = { "sc-start": 0, "sc-qty": 0, "sc-build": 0, "sc-border": 0, "sc-list": 0, "sc-suco-leite": 0, "sc-macarronada-size": 0, "sc-promo": 0, "sc-another": 1, "sc-cart": 1, "sc-delivery": 2, "sc-pay": 3, "sc-done": 3 };
+  const stepMap: Record<string, number> = { "sc-start": 0, "sc-build": 0, "sc-border": 0, "sc-list": 0, "sc-suco-leite": 0, "sc-macarronada-size": 0, "sc-promo": 0, "sc-another": 1, "sc-cart": 1, "sc-delivery": 2, "sc-pay": 3, "sc-done": 3 };
   const stepIdx = stepMap[screen] ?? 0;
   const STEPS = ["Itens", "Sacola", "Entrega", "Pagar"];
   const showStrongCartCta = cartCount > 0 && ["sc-list", "sc-suco-leite", "sc-macarronada-size", "sc-promo"].includes(screen);
@@ -1213,45 +1224,9 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
               </div>
             </section>
           )}
-          {screen === "sc-qty" && (
-            <section className="screen active">
-              <TopBack onClick={() => go("sc-start")} title="Quantidade" />
-              <div className="screen-head"><div className="eyebrow">Pizza</div><h2>Quantas pizzas você quer?</h2><p>Você pode montar uma agora e adicionar mais depois.</p></div>
-              <div className="qty-grid">
-                <div className="qty-card" onClick={() => setPizzaQty(1)}>
-                  <div className="qty-card-icon">🍕</div>
-                  <div className="qty-card-body">
-                    <div className="qty-card-title">1 pizza <span className="qty-badge">Mais escolhido</span></div>
-                    <div className="qty-card-sub">Para um pedido simples</div>
-                  </div>
-                </div>
-                <div className="qty-card" onClick={() => setPizzaQty(2)}>
-                  <div className="qty-card-icon">🍕</div>
-                  <div className="qty-card-body">
-                    <div className="qty-card-title">2 pizzas</div>
-                    <div className="qty-card-sub">Boa para dividir</div>
-                  </div>
-                </div>
-                <div className="qty-card" onClick={() => setPizzaQty(3)}>
-                  <div className="qty-card-icon">🍕</div>
-                  <div className="qty-card-body">
-                    <div className="qty-card-title">3 pizzas</div>
-                    <div className="qty-card-sub">Para família ou amigos</div>
-                  </div>
-                </div>
-                <div className="qty-card" onClick={() => setPizzaQty(0)}>
-                  <div className="qty-card-icon">➕</div>
-                  <div className="qty-card-body">
-                    <div className="qty-card-title">Vou adicionando</div>
-                    <div className="qty-card-sub">Monte uma por vez</div>
-                  </div>
-                </div>
-              </div>
-            </section>
-          )}
           {screen === "sc-build" && (
             <section className="screen active sc-build-screen">
-              <TopBack onClick={() => go("sc-qty")} title="Monte sua pizza" />
+              <TopBack onClick={() => go("sc-start")} title="Monte sua pizza" />
               <PizzaCtx />
               <div className="screen-head"><div className="eyebrow">Monte sua pizza</div><h2>Escolha o tamanho</h2><p>Toque em uma opcao para liberar os sabores.</p></div>
               <div className="choice-block size-choice">
@@ -1275,21 +1250,21 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                   )}
                 </div>
               </div>
-              <div className={`screen-head flavor-head ${!size ? "muted-head" : ""}`}><div className="eyebrow">Agora escolha o sabor</div><h2>{mam ? "Escolha 2 sabores" : "Escolha 1 sabor"}</h2><p>{miniPizzaMode ? "Mini-pizza vai com um sabor." : "Escolha 1 sabor ou ative meio a meio."}</p></div>
+              <div className={`screen-head flavor-head ${!size ? "muted-head" : ""}`}><div className="eyebrow">Agora escolha o sabor</div><h2>Escolha até 2 sabores</h2><p>{miniPizzaMode ? "Mini-pizza vai com um sabor." : "Toque em 1 sabor, ou em 2 para meio a meio."}</p></div>
               {size ? (
                 <>
+                  {miniPizzaMode && <div className="mini-flow-note">Mini-pizza usa preco e produto existentes do cardapio.</div>}
                   {!miniPizzaMode && (
-                    <div className="flavor-mode">
-                      <button type="button" className={`flavor-mode-card ${!mam ? "sel" : ""}`} onClick={() => setFlavorMode(false)}>
-                        <strong>1 sabor</strong><span>Toque em um sabor.</span>
-                      </button>
-                      <button type="button" className={`flavor-mode-card ${mam ? "sel" : ""}`} onClick={() => setFlavorMode(true)}>
-                        <strong>Meio a meio</strong><span>Selecione 2 sabores.</span>
-                      </button>
+                    <div className="flavor-progress">
+                      <div className="flavor-progress-dots">
+                        <span className={`pd ${f1 ? "done" : "cur"}`} />
+                        <span className={`pd ${f2 ? "done" : f1 ? "cur" : ""}`} />
+                      </div>
+                      <span className="flavor-progress-label">
+                        {f2 ? `${f1} / ${f2}` : f1 ? `${f1} — toque em outro para meio a meio` : "Nenhum sabor escolhido ainda"}
+                      </span>
                     </div>
                   )}
-                  {miniPizzaMode && <div className="mini-flow-note">Mini-pizza usa preco e produto existentes do cardapio.</div>}
-                  {mam && <div className="half-hint show">{!f1 ? "Toque na 1a metade" : !f2 ? `1a: ${f1} - agora a 2a` : `${f1} / ${f2}`}</div>}
                   <div className="flavor-list">
                     {flavorSections.map((section) => (
                       <div key={section.title}>
@@ -1849,6 +1824,9 @@ main{width:100%;padding:6px 20px 20px}
 .mam.on .switch{background:var(--brand)}
 .mam.on .switch::after{left:23px}
 .half-hint{font-size:13.5px;color:var(--gold);margin:-4px 0 12px;font-weight:500;padding-left:2px}
+.flavor-progress{display:flex;align-items:center;gap:10px;margin:2px 0 14px;padding-left:2px}
+.flavor-progress-dots{display:flex;gap:6px;flex:0 0 auto}
+.flavor-progress-label{font-size:13px;color:var(--text-sub);font-weight:500}
 .btn{width:100%;background:var(--brand);color:#fff;border:none;border-radius:14px;padding:16px;font-family:var(--font-ui);font-size:15.5px;font-weight:600;cursor:pointer;transition:transform .14s,background .14s;box-shadow:0 3px 12px var(--brand-soft);letter-spacing:.1px}
 .btn:active{transform:scale(.98);background:var(--brand-press)}
 .btn:disabled{opacity:.35;box-shadow:none;cursor:not-allowed}
