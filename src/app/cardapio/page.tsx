@@ -1056,6 +1056,14 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     if (value !== "Dinheiro") setErroTroco("");
     setPaymentModal(value);
   }
+  function confirmDinheiroSemTroco() {
+    setPayment("Dinheiro");
+    setTrocoOpcao("nao");
+    setTroco("");
+    setErroTroco("");
+    setErroPagamento("");
+    setPaymentModal(null);
+  }
   function confirmPaymentConfig() {
     if (!paymentModal) return;
     if (paymentModal === "Dinheiro") {
@@ -1626,10 +1634,18 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
           <div className="payment-modal" role="dialog" aria-modal="true" aria-labelledby="payment-modal-title" onClick={(e) => e.stopPropagation()}>
             <div className="payment-modal-head">
               <div>
-                <div className="payment-modal-kicker">Pagamento</div>
-                <h3 id="payment-modal-title">{paymentLabel(paymentModal)}</h3>
-                {paymentModal === "Dinheiro" && trocoOpcao && (
-                  <span className="money-status-badge">{trocoOpcao === "nao" ? "Sem troco" : "Precisa de troco"}</span>
+                {paymentModal === "Dinheiro" ? (
+                  <>
+                    <h3 id="payment-modal-title">Precisa de troco?</h3>
+                    {trocoOpcao && (
+                      <span className="money-status-badge">{trocoOpcao === "nao" ? "Sem troco" : "Precisa de troco"}</span>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <div className="payment-modal-kicker">Pagamento</div>
+                    <h3 id="payment-modal-title">{paymentLabel(paymentModal)}</h3>
+                  </>
                 )}
               </div>
               <button type="button" className="payment-modal-close" aria-label="Fechar" onClick={() => setPaymentModal(null)}>×</button>
@@ -1651,9 +1667,8 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
             )}
             {paymentModal === "Dinheiro" && (
               <div className="payment-modal-body">
-                <div className="money-choice-title">Precisa de troco?</div>
                 <div className="money-choice-row">
-                  <button type="button" className={`btn ${trocoOpcao === "nao" ? "" : "btn-ghost"}`} onClick={() => { setTrocoOpcao("nao"); setTroco(""); setErroTroco(""); }}>Não preciso</button>
+                  <button type="button" className={`btn ${trocoOpcao === "nao" ? "" : "btn-ghost"}`} onClick={confirmDinheiroSemTroco}>Não preciso</button>
                   <button type="button" className={`btn ${trocoOpcao === "sim" ? "" : "btn-ghost"}`} onClick={() => { setTrocoOpcao("sim"); setErroTroco(""); }}>Preciso</button>
                 </div>
                 {trocoOpcao === "sim" && (
@@ -1665,10 +1680,12 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                 {erroTroco && <div className="pay-error">{erroTroco}</div>}
               </div>
             )}
-            <div className={`payment-modal-actions ${paymentModal === "Dinheiro" ? "single" : ""}`}>
-              {paymentModal !== "Dinheiro" && <button type="button" className="btn btn-ghost" onClick={() => setPaymentModal(null)}>Cancelar</button>}
-              <button type="button" className="btn" onClick={confirmPaymentConfig}>Confirmar</button>
-            </div>
+            {(paymentModal !== "Dinheiro" || trocoOpcao === "sim") && (
+              <div className={`payment-modal-actions ${paymentModal === "Dinheiro" ? "single" : ""}`}>
+                {paymentModal !== "Dinheiro" && <button type="button" className="btn btn-ghost" onClick={() => setPaymentModal(null)}>Cancelar</button>}
+                <button type="button" className="btn" onClick={confirmPaymentConfig}>Confirmar</button>
+              </div>
+            )}
           </div>
         </div>
       )}
