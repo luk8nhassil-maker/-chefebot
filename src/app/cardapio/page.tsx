@@ -1084,6 +1084,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const stepMap: Record<string, number> = { "sc-start": 0, "sc-qty": 0, "sc-build": 0, "sc-border": 0, "sc-list": 0, "sc-suco-leite": 0, "sc-macarronada-size": 0, "sc-promo": 0, "sc-another": 1, "sc-cart": 1, "sc-delivery": 2, "sc-pay": 3, "sc-done": 3 };
   const stepIdx = stepMap[screen] ?? 0;
   const STEPS = ["Itens", "Sacola", "Entrega", "Pagar"];
+  const showStrongCartCta = cartCount > 0 && ["sc-list", "sc-suco-leite", "sc-macarronada-size", "sc-promo"].includes(screen);
   const feitas = pizzasNoCarrinho();
   let ctxBadge = "", ctxTxt = "", ctxDots: { cls: string }[] = [];
   if (plan.openEnded) { ctxBadge = `Pizza ${feitas + 1}`; ctxTxt = feitas === 0 ? "Sua 1ª pizza" : `${feitas} já no carrinho`; }
@@ -1542,7 +1543,18 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
           </div>
         </div>
       )}
-      {cartCount > 0 && screen !== "sc-done" && screen !== "sc-cart" && screen !== "sc-delivery" && screen !== "sc-pay" && (<div className="cartbar show"><div className="cartbar-inner"><div className="cartbar-info"><div className="cartbar-count">Sacola</div><div className="cartbar-total">{cartCount} {cartCount === 1 ? "item" : "itens"} · {money(finalTotal)}</div></div><button className="cartbar-link" onClick={() => go("sc-cart")}>Editar</button></div></div>)}
+      {showStrongCartCta && (
+        <div className="delivery-cta-bar">
+          <div className="delivery-cta-inner pay-cta-inner">
+            <div className="delivery-cta-info">
+              <div className="delivery-cta-label">Sacola</div>
+              <div className="delivery-cta-total">{cartCount} {cartCount === 1 ? "item" : "itens"} · {money(finalTotal)}</div>
+            </div>
+            <button className="btn delivery-cta-btn" onClick={() => go("sc-cart")}>Revisar pedido</button>
+          </div>
+        </div>
+      )}
+      {cartCount > 0 && !showStrongCartCta && screen !== "sc-done" && screen !== "sc-cart" && screen !== "sc-delivery" && screen !== "sc-pay" && (<div className="cartbar show"><div className="cartbar-inner"><div className="cartbar-info"><div className="cartbar-count">Sacola</div><div className="cartbar-total">{cartCount} {cartCount === 1 ? "item" : "itens"} · {money(finalTotal)}</div></div><button className="cartbar-link" onClick={() => go("sc-cart")}>Editar</button></div></div>)}
       {paymentModal && (
         <div className="payment-modal-backdrop" role="presentation" onClick={() => setPaymentModal(null)}>
           <div className="payment-modal" role="dialog" aria-modal="true" aria-labelledby="payment-modal-title" onClick={(e) => e.stopPropagation()}>
