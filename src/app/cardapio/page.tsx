@@ -1334,8 +1334,8 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
             <section className="screen active">
               <TopBack onClick={() => { setSucoPendente(null); go("sc-list"); }} title="Como prefere o suco?" />
               <div className="screen-head"><div className="eyebrow">Suco natural</div><h2>Com leite?</h2><p>{sucoPendente.name}</p></div>
-              <div className="opt" onClick={() => addSucoLeite(false)}><div className="opt-emoji">S</div><div className="opt-body"><div className="opt-title">Sem leite</div></div><div className="opt-price">{money(sucoPendente.price)}</div></div>
-              <div className="opt" onClick={() => addSucoLeite(true)}><div className="opt-emoji">+1</div><div className="opt-body"><div className="opt-title">Com leite</div><div className="opt-desc">Adicional de R$ 1,00</div></div><div className="opt-price">{money(sucoPendente.price + 1)}</div></div>
+              <div className="opt" onClick={() => addSucoLeite(false)}><div className="opt-emoji">S</div><div className="opt-body"><div className="opt-title">Sem leite</div></div></div>
+              <div className="opt" onClick={() => addSucoLeite(true)}><div className="opt-emoji">+1</div><div className="opt-body"><div className="opt-title">Com leite</div></div><div className="opt-price">+{money(1)}</div></div>
             </section>
           )}          {screen === "sc-macarronada-size" && macarronadaPendente && (
             <section className="screen active">
