@@ -4,15 +4,17 @@ import { proximoNumeroPedido } from "@/lib/numeracao";
 import { getMENUDinamico } from "@/lib/menu";
 import { computeTaxaApp, buildEnderecoApp } from "@/lib/pedidoAppLogic";
 import { criarPixMetadata, prepararPixProviderMercadoPago, serializarPixCliente } from "@/lib/pix";
+import { PROMOS_KEY, catalogoDoMenu, dentroDaJanela, precoFinalPromocao, promocaoIndisponivel, type Promocao } from "@/lib/promocoes";
 
 export const maxDuration = 20;
 
 type ItemApp = {
-  kind: "pizza" | "simple";
+  kind: "pizza" | "simple" | "promo";
   name: string;     // ex: "Pizza G (meio a meio)" ou "Refrigerante 2L"
   detail?: string;  // ex: "Calabresa / Baiana · borda Catupiry"
   price: number;
   qty: number;
+  promoId?: string; // presente quando kind === "promo"
 };
 
 type PedidoApp = {
@@ -131,9 +133,29 @@ export async function POST(req: NextRequest) {
     const menu = await getMENUDinamico();
     const pedidos = (await redis.get<unknown[]>("pedidos")) || [];
 
+    // Itens promocionais: o preço NUNCA vem do cliente — é recalculado a
+    // partir da promoção ativa salva no Redis. Promoção inexistente,
+    // inativa, fora da janela ou com produto esgotado invalida o pedido.
+    const temPromo = body.itens.some((item) => item.kind === "promo");
+    const promos = temPromo ? ((await redis.get<Promocao[]>(PROMOS_KEY)) || []) : [];
+    const esgotadosPromo = temPromo ? ((await redis.get<string[]>("esgotados")) || []) : [];
+    const catalogoPromo = temPromo ? catalogoDoMenu(menu as never) : [];
+
+    function promoUnitPrice(item: ItemApp): number | null {
+      if (!Number.isInteger(item.qty) || item.qty < 1) return null;
+      const promo = promos.find((p) => p.id === item.promoId);
+      if (!promo || !promo.active || !dentroDaJanela(promo)) return null;
+      if (promo.maxUsesPerOrder && item.qty > promo.maxUsesPerOrder) return null;
+      if (promocaoIndisponivel(promo, esgotadosPromo)) return null;
+      const sabor = item.detail?.match(/Sabor:\s*([^·]+)/i)?.[1]?.trim();
+      if (sabor && esgotadosPromo.some((e) => norm(e) === norm(sabor))) return null;
+      const preco = precoFinalPromocao(promo, catalogoPromo);
+      return preco !== null && Number.isFinite(preco) && preco >= 0 ? preco : null;
+    }
+
     const itensValidados = body.itens.map((item) => ({
       linha: formatItem(item),
-      unitPrice: officialUnitPrice(item, menu as MenuPedidoApp),
+      unitPrice: item.kind === "promo" ? promoUnitPrice(item) : officialUnitPrice(item, menu as MenuPedidoApp),
       qty: item.qty,
     }));
 
