@@ -1164,6 +1164,9 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                 <button className="home-cat" onClick={() => goCat("lanche")}><span>🍔</span><strong>Lanches</strong></button>
                 <button className="home-cat" onClick={() => goCat("macarronada")}><span>🍝</span><strong>Macarronada</strong></button>
                 <button className="home-cat" onClick={() => goCat("bebida")}><span>🥤</span><strong>Bebidas</strong></button>
+                {(menu.sucos || []).length > 0 && (
+                  <button className="home-cat" onClick={() => goCat("suco")}><span>🧃</span><strong>Sucos</strong></button>
+                )}
               </div>
             </section>
           )}
