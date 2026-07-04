@@ -10,6 +10,7 @@ type ResultadoAnalise = {
   dataPagamento: string | null;
   horaPagamento: string | null;
   dataHoraPagamento: string | null;
+  motivo: string | null;
   mensagem: string;
 };
 
@@ -106,6 +107,7 @@ Se não conseguir ler: {"valor": null, "chave": null, "e2eId": null, "codigoAute
       dataPagamento: resultado.dataPagamento ?? null,
       horaPagamento: resultado.horaPagamento ?? resultado.horarioPagamento ?? null,
       dataHoraPagamento: resultado.dataHoraPagamento ?? null,
+      motivo: motivo || null,
       mensagem: resultado.valido
         ? `Pix de R$ ${resultado.valor} confirmado! ✅`
         : mensagemInvalido,
@@ -120,6 +122,7 @@ Se não conseguir ler: {"valor": null, "chave": null, "e2eId": null, "codigoAute
       dataPagamento: null,
       horaPagamento: null,
       dataHoraPagamento: null,
+      motivo: "erro_leitura",
       mensagem: "Não consegui ler o comprovante.",
     };
   }

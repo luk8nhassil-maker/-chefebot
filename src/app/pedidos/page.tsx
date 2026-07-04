@@ -28,7 +28,7 @@ type Pedido = {
   pagamento?: string
   troco?: string
   pixConfirmado?: boolean
-  pix?: { status?: string; confirmadoPor?: string; confirmadoEm?: string }
+  pix?: { status?: string; confirmadoPor?: string; confirmadoEm?: string; evidencia?: { motivos?: string[] } }
   tipoEntrega?: string
   horarioInicio?: string
   horarioEntrega?: string
@@ -62,6 +62,17 @@ function labelPixConfirmado(p: Pick<Pedido, "pix">): string {
   if (por === "webhook") return "✓ confirmado pelo banco"
   if (por === "manual") return "✓ confirmado manualmente"
   return "✓ confirmado"
+}
+// Etapa 2E: comprovante avaliado por avaliarEvidenciaPix sem evidencia forte o
+// suficiente para aprovacao automatica. Nao aparece pixConfirmado — fica pendente
+// de conferencia manual pela Kellyne.
+function labelPixRevisaoOuSuspeito(p: Pick<Pedido, "pix">): string | null {
+  if (p.pix?.status === "em_revisao") return "🔍 Pix em revisão"
+  if (p.pix?.status === "suspeito") return "⚠️ Pix suspeito"
+  return null
+}
+function motivoResumidoPix(p: Pick<Pedido, "pix">): string | undefined {
+  return p.pix?.evidencia?.motivos?.[0]
 }
 function getActionLabel(p: Pedido): string {
   if (p.status === "em_preparo") {
@@ -1064,13 +1075,21 @@ export default function PedidosPage() {
             </div>
           </div>
         ) : (
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 700, color: "#c9c2b4" }}>
-              <span style={{ width: 8, height: 8, borderRadius: 2, background: payDot, flexShrink: 0 }} />
-              {pagamento || "Pagamento não informado"}
-              {p.pixConfirmado && <span style={{ fontSize: 11, color: "#34d399", fontWeight: 800 }}>{labelPixConfirmado(p)}</span>}
+          <div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 700, color: "#c9c2b4" }}>
+                <span style={{ width: 8, height: 8, borderRadius: 2, background: payDot, flexShrink: 0 }} />
+                {pagamento || "Pagamento não informado"}
+                {p.pixConfirmado && <span style={{ fontSize: 11, color: "#34d399", fontWeight: 800 }}>{labelPixConfirmado(p)}</span>}
+                {!p.pixConfirmado && labelPixRevisaoOuSuspeito(p) && (
+                  <span style={{ fontSize: 11, color: p.pix?.status === "suspeito" ? "#f87171" : "#fbbf24", fontWeight: 800 }}>{labelPixRevisaoOuSuspeito(p)}</span>
+                )}
+              </div>
+              <span style={{ fontSize: 15, fontWeight: 900, color: "#f4f1ec" }}>R$ {p.total.toFixed(2).replace(".", ",")}</span>
             </div>
-            <span style={{ fontSize: 15, fontWeight: 900, color: "#f4f1ec" }}>R$ {p.total.toFixed(2).replace(".", ",")}</span>
+            {!p.pixConfirmado && motivoResumidoPix(p) && (
+              <div style={{ marginTop: 6, fontSize: 11, fontWeight: 700, color: "#a39b8b" }}>{motivoResumidoPix(p)}</div>
+            )}
           </div>
         )}
 
@@ -1692,6 +1711,7 @@ export default function PedidosPage() {
             const pagamento = pedido.pagamento || ""
             const isPix = pagamento.toLowerCase().includes("pix")
             const pixPendente = isPix && !pedido.pixConfirmado && pedido.status === "novo"
+            const pixEmRevisaoOuSuspeito = isPix && !pedido.pixConfirmado && labelPixRevisaoOuSuspeito(pedido)
             const isRetirada = !isDineIn && (!pedido.tipoEntrega || pedido.tipoEntrega === "pickup" || pedido.tipoEntrega === "retirada" || pedido.endereco === "Retirada na loja")
 
             let rowBorder = sc.accentBorder
@@ -1740,6 +1760,7 @@ export default function PedidosPage() {
                       {pedido.escalonado && <span style={{ fontSize: 11, flexShrink: 0 }}>🚨</span>}
                       {(pedido.origem === "site" || pedido.origem === "app") && <span style={{ fontSize: 9, fontWeight: 900, color: "#60a5fa", background: "rgba(96,165,250,.12)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>🌐 Site</span>}
                       {pixPendente && <span style={{ fontSize: 9, fontWeight: 900, color: "#fbbf24", background: "rgba(251,191,36,.12)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>PIX⏳</span>}
+                      {pixEmRevisaoOuSuspeito && <span style={{ fontSize: 9, fontWeight: 900, color: pedido.pix?.status === "suspeito" ? "#f87171" : "#fbbf24", background: pedido.pix?.status === "suspeito" ? "rgba(248,113,113,.12)" : "rgba(251,191,36,.12)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>{pixEmRevisaoOuSuspeito}</span>}
                       {pedido.cancelamentoSolicitado && <span style={{ fontSize: 11, flexShrink: 0 }}>⚠️</span>}
                       <span style={{ fontSize: 10, fontWeight: 900, color: pixPendente ? "#fbbf24" : (isPix && pedido.pixConfirmado && pedido.status === "novo" ? "#34d399" : sc.accent), background: pixPendente ? "rgba(251,191,36,.12)" : (isPix && pedido.pixConfirmado && pedido.status === "novo" ? "rgba(52,211,153,.12)" : sc.accentBg), padding: "2px 7px", borderRadius: 6, border: `1px solid ${pixPendente ? "rgba(251,191,36,.35)" : (isPix && pedido.pixConfirmado && pedido.status === "novo" ? "rgba(52,211,153,.35)" : sc.accentBorder)}`, textTransform: "uppercase", letterSpacing: ".4px", flexShrink: 0 }}>{pixPendente ? "Aguardando Pix" : (isPix && pedido.pixConfirmado && pedido.status === "novo" ? "Pago" : sc.label)}</span>
                     </div>

@@ -1,10 +1,11 @@
 import { temPixNoPagamento, valorPixEsperado } from "./bot";
 import { criarCobrancaPixMercadoPago } from "./mercadoPagoPix";
+import type { CriteriosEvidenciaPix, DecisaoEvidenciaPix } from "./pixComprovanteAvaliacao";
 
-// Status intermediários (comprovante_recebido/em_revisao/suspeito) são preparação
-// para a fila de revisão de comprovantes; nesta etapa nada os escreve ainda —
-// apenas "pendente" e "confirmado" circulam. Pedidos antigos podem não ter
-// status algum (ou nem ter pix): todo leitor deve tratar ausência como pendente.
+// Status "em_revisao"/"suspeito" são escritos pela camada de avaliacao por evidencia
+// (avaliarEvidenciaPix, Etapa 2E) quando a decisao nao e "aprovar". "comprovante_recebido"
+// segue reservado para uso futuro. Pedidos antigos podem nao ter status algum (ou nem
+// ter pix): todo leitor deve tratar ausencia como pendente.
 export type PixStatus = "pendente" | "comprovante_recebido" | "em_revisao" | "suspeito" | "confirmado";
 export type PixConfirmadoPor = "manual" | "webhook" | "comprovante";
 export type PixEvidenciaOrigem = "texto" | "midia";
@@ -15,6 +16,13 @@ export type PixEvidencia = {
   motivo?: string;
   origem?: PixEvidenciaOrigem;
   registradoEm?: string;
+  // Snapshot auditavel da decisao de avaliarEvidenciaPix (Etapa 2E).
+  hash?: string;
+  decisao?: DecisaoEvidenciaPix;
+  score?: number;
+  criterios?: CriteriosEvidenciaPix;
+  motivos?: string[];
+  avaliadoEm?: string;
 };
 
 export type PixMetadata = {
@@ -104,7 +112,19 @@ export function registrarPixEvidencia(
   evidencia: Omit<PixEvidencia, "registradoEm">,
   registradoEm: string = new Date().toISOString()
 ): PixMetadata {
-  if (!evidencia.e2eId && !evidencia.codigoAutenticacao && !evidencia.dataHoraPagamento && !evidencia.motivo) return pix;
+  const temConteudo = !!(
+    evidencia.e2eId ||
+    evidencia.codigoAutenticacao ||
+    evidencia.dataHoraPagamento ||
+    evidencia.motivo ||
+    evidencia.hash ||
+    evidencia.decisao ||
+    typeof evidencia.score === "number" ||
+    evidencia.criterios ||
+    evidencia.motivos?.length
+  );
+  if (!temConteudo) return pix;
+
   return {
     ...pix,
     evidencia: {
@@ -114,9 +134,28 @@ export function registrarPixEvidencia(
       ...(evidencia.dataHoraPagamento ? { dataHoraPagamento: evidencia.dataHoraPagamento } : {}),
       ...(evidencia.motivo ? { motivo: evidencia.motivo } : {}),
       ...(evidencia.origem ? { origem: evidencia.origem } : {}),
+      ...(evidencia.hash ? { hash: evidencia.hash } : {}),
+      ...(evidencia.decisao ? { decisao: evidencia.decisao } : {}),
+      ...(typeof evidencia.score === "number" ? { score: evidencia.score } : {}),
+      ...(evidencia.criterios ? { criterios: evidencia.criterios } : {}),
+      ...(evidencia.motivos?.length ? { motivos: evidencia.motivos } : {}),
       registradoEm,
     },
   };
+}
+
+// Marca o Pix para fila de revisao humana quando a evidencia do comprovante
+// nao e forte o suficiente para aprovacao automatica (Etapa 2E). "Seguro" aqui
+// significa: nunca rebaixa um Pix que ja foi confirmado por outro caminho
+// (webhook, manual ou comprovante anterior) — mesma logica defensiva de
+// confirmarPixMetadata, que tambem nunca sobrescreve uma confirmacao existente.
+export function marcarPixRevisaoOuSuspeito(
+  pix: PixMetadata | undefined,
+  status: "em_revisao" | "suspeito"
+): PixMetadata {
+  const base = pix || {};
+  if (base.status === "confirmado") return base;
+  return { ...base, status };
 }
 
 export function criarPixMetadata(pedidoId: string, pagamento: string | undefined, total: number): PixMetadata | undefined {
