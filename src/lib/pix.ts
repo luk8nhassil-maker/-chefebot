@@ -7,6 +7,13 @@ import { criarCobrancaPixMercadoPago } from "./mercadoPagoPix";
 // status algum (ou nem ter pix): todo leitor deve tratar ausência como pendente.
 export type PixStatus = "pendente" | "comprovante_recebido" | "em_revisao" | "suspeito" | "confirmado";
 export type PixConfirmadoPor = "manual" | "webhook" | "comprovante";
+export type PixEvidenciaOrigem = "texto" | "midia";
+export type PixEvidencia = {
+  e2eId?: string;
+  codigoAutenticacao?: string;
+  origem?: PixEvidenciaOrigem;
+  registradoEm?: string;
+};
 
 export type PixMetadata = {
   txid?: string;
@@ -14,6 +21,7 @@ export type PixMetadata = {
   status?: PixStatus;
   confirmadoPor?: PixConfirmadoPor;
   confirmadoEm?: string;
+  evidencia?: PixEvidencia;
   provider?: "mercadopago";
   providerPaymentId?: string;
   qrCode?: string;
@@ -86,6 +94,24 @@ export function confirmarPixMetadata(
     status: "confirmado",
     confirmadoPor: pix?.confirmadoPor || confirmadoPor,
     confirmadoEm: pix?.confirmadoEm || confirmadoEm,
+  };
+}
+
+export function registrarPixEvidencia(
+  pix: PixMetadata,
+  evidencia: Omit<PixEvidencia, "registradoEm">,
+  registradoEm: string = new Date().toISOString()
+): PixMetadata {
+  if (!evidencia.e2eId && !evidencia.codigoAutenticacao) return pix;
+  return {
+    ...pix,
+    evidencia: {
+      ...(pix.evidencia || {}),
+      ...(evidencia.e2eId ? { e2eId: evidencia.e2eId } : {}),
+      ...(evidencia.codigoAutenticacao ? { codigoAutenticacao: evidencia.codigoAutenticacao } : {}),
+      ...(evidencia.origem ? { origem: evidencia.origem } : {}),
+      registradoEm,
+    },
   };
 }
 
