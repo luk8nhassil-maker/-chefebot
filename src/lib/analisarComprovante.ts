@@ -5,6 +5,7 @@ type ResultadoAnalise = {
   valido: boolean;
   valorEncontrado: number | null;
   chavePix: string | null;
+  beneficiario: string | null;
   e2eId: string | null;
   codigoAutenticacao: string | null;
   dataPagamento: string | null;
@@ -42,7 +43,7 @@ DADOS ESPERADOS:
 - E2E ID Pix ou código de autenticação/transação, se estiver visível (não obrigatório)
 REGRAS DE VALIDAÇÃO — responda "valido: true" SOMENTE se TODAS forem atendidas:
 1. Valor bate com o esperado (tolerância de R$ 0,01)
-2. Nome do destinatário contém palavras do nome "${nomeTitular}" (comparação flexível, ignorar maiúsculas/minúsculas, aceitar nome parcial) OU CNPJ/chave contém "${chavePix}"
+2. Nome do destinatário contém palavras do nome "${nomeTitular}" (comparação flexível, ignorar maiúsculas/minúsculas, aceitar nome parcial) OU a chave/CNPJ do comprovante equivale a "${chavePix}" — compare apenas os dígitos, ignorando formatação como +55, parênteses, espaços, hífens e pontos
 3. A data do comprovante é HOJE (${dataHoje})
 4. O comprovante indica que o Pix foi ENVIADO/CONCLUÍDO com sucesso (não agendado, não pendente, não cancelado, não em análise)
 
@@ -51,9 +52,9 @@ REGRAS DE VALIDAÇÃO — responda "valido: true" SOMENTE se TODAS forem atendid
 Se qualquer uma dessas regras falhar, responda "valido: false".
 
 Responda APENAS em JSON sem explicações:
-{"valor": 52.00, "chave": "chave encontrada ou null", "e2eId": "E2E encontrado ou null", "codigoAutenticacao": "codigo encontrado ou null", "dataPagamento": "DD/MM/AAAA ou null", "horaPagamento": "HH:mm ou null", "dataHoraPagamento": "data e hora completa ou null", "valido": true/false, "motivo": "aprovado / valor errado / data errada / horario anterior ao pedido / nome errado / pix nao concluido"}
+{"valor": 52.00, "chave": "chave Pix do destinatario encontrada (telefone/CPF/CNPJ/email/aleatoria) ou null", "beneficiario": "nome do destinatario/recebedor encontrado ou null", "e2eId": "E2E encontrado ou null", "codigoAutenticacao": "codigo encontrado ou null", "dataPagamento": "DD/MM/AAAA ou null", "horaPagamento": "HH:mm ou null", "dataHoraPagamento": "data e hora completa ou null", "valido": true/false, "motivo": "aprovado / valor errado / data errada / horario anterior ao pedido / nome errado / pix nao concluido"}
 
-Se não conseguir ler: {"valor": null, "chave": null, "e2eId": null, "codigoAutenticacao": null, "dataPagamento": null, "horaPagamento": null, "dataHoraPagamento": null, "valido": false, "motivo": "ilegivel"}`;
+Se não conseguir ler: {"valor": null, "chave": null, "beneficiario": null, "e2eId": null, "codigoAutenticacao": null, "dataPagamento": null, "horaPagamento": null, "dataHoraPagamento": null, "valido": false, "motivo": "ilegivel"}`;
 
     const content: any[] = [];
 
@@ -102,6 +103,7 @@ Se não conseguir ler: {"valor": null, "chave": null, "e2eId": null, "codigoAute
       valido: resultado.valido === true,
       valorEncontrado: resultado.valor ?? null,
       chavePix: resultado.chave ?? null,
+      beneficiario: resultado.beneficiario ?? resultado.destinatario ?? null,
       e2eId: normalizarE2EIdPix(resultado.e2eId ?? resultado.e2e ?? resultado.endToEndId) ?? null,
       codigoAutenticacao: normalizarCodigoAutenticacaoPix(resultado.codigoAutenticacao ?? resultado.codigo ?? resultado.codigoTransacao) ?? null,
       dataPagamento: resultado.dataPagamento ?? null,
@@ -117,6 +119,7 @@ Se não conseguir ler: {"valor": null, "chave": null, "e2eId": null, "codigoAute
       valido: false,
       valorEncontrado: null,
       chavePix: null,
+      beneficiario: null,
       e2eId: null,
       codigoAutenticacao: null,
       dataPagamento: null,

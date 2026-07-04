@@ -1,3 +1,4 @@
+import { avaliarBeneficiarioPix } from "./pixBeneficiario";
 import type { ResultadoHorarioComprovantePix } from "./pixComprovanteHorario";
 
 export type CriterioValorPix = "ok" | "divergente" | "ausente";
@@ -31,6 +32,8 @@ export type AvaliarEvidenciaPixInput = {
   valorEsperado?: number | null;
   valorLido?: number | null;
   toleranciaValor?: number;
+  chaveEsperada?: string | null;
+  chaveLida?: string | null;
   beneficiarioEsperado?: string | null;
   beneficiarioLido?: string | null;
   statusTransacao?: string | null;
@@ -71,17 +74,6 @@ function valorCorresponde(esperado: number, lido: number, tolerancia: number): b
   return Math.abs(esperado - lido) <= tolerancia;
 }
 
-function beneficiarioCorresponde(esperado: string, lido: string): boolean {
-  const esperadoNorm = normalizarTextoComparacaoPix(esperado);
-  const lidoNorm = normalizarTextoComparacaoPix(lido);
-  if (!esperadoNorm || !lidoNorm) return false;
-  if (lidoNorm.includes(esperadoNorm) || esperadoNorm.includes(lidoNorm)) return true;
-
-  const palavrasEsperado = esperadoNorm.split(" ").filter((palavra) => palavra.length >= 3);
-  if (palavrasEsperado.length === 0) return false;
-  return palavrasEsperado.some((palavra) => lidoNorm.includes(palavra));
-}
-
 function avaliarCriterioValor(input: AvaliarEvidenciaPixInput): CriterioValorPix {
   const { valorEsperado, valorLido } = input;
   if (typeof valorEsperado !== "number" || !Number.isFinite(valorEsperado)) return "ausente";
@@ -91,12 +83,16 @@ function avaliarCriterioValor(input: AvaliarEvidenciaPixInput): CriterioValorPix
   return valorCorresponde(valorEsperado, valorLido, tolerancia) ? "ok" : "divergente";
 }
 
+// Delegado ao helper pixBeneficiario: reconhece chave equivalente em qualquer
+// formatacao (telefone com/sem +55/mascara, CPF/CNPJ pontuado, e-mail em caixa
+// diferente) e so acusa "divergente" com evidencia clara de outro recebedor.
 function avaliarCriterioBeneficiario(input: AvaliarEvidenciaPixInput): CriterioBeneficiarioPix {
-  const esperado = (input.beneficiarioEsperado || "").trim();
-  const lido = (input.beneficiarioLido || "").trim();
-  if (!esperado || !lido) return "ausente";
-
-  return beneficiarioCorresponde(esperado, lido) ? "ok" : "divergente";
+  return avaliarBeneficiarioPix({
+    chaveEsperada: input.chaveEsperada,
+    beneficiarioEsperado: input.beneficiarioEsperado,
+    chaveLida: input.chaveLida,
+    beneficiarioLido: input.beneficiarioLido,
+  });
 }
 
 function avaliarCriterioStatus(input: AvaliarEvidenciaPixInput): CriterioStatusPix {

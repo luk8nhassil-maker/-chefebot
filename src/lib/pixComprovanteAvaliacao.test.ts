@@ -174,3 +174,125 @@ describe("avaliarEvidenciaPix", () => {
     expect(resultado.decisao).not.toBe("aprovar");
   });
 });
+
+// Regressao do falso negativo real (pedido de R$ 1,00, PDF): a chave lida veio
+// como telefone formatado pelo banco e era comparada contra o NOME do titular,
+// caindo em "divergente" -> revisar mesmo com comprovante correto.
+describe("avaliarEvidenciaPix — chave Pix em formato diferente (regressao falso negativo)", () => {
+  test.each([
+    "+55 99 97400-0691",
+    "(99) 97400-0691",
+    "55 99 97400-0691",
+    "99974000691",
+  ])("valor ok + chave equivalente %s aprova com os demais sinais fortes", (chaveLida) => {
+    const resultado = avaliarEvidenciaPix({
+      valorEsperado: 1,
+      valorLido: 1,
+      chaveEsperada: "99974000691",
+      chaveLida,
+      beneficiarioEsperado: "Kellyne F dos Santos",
+      beneficiarioLido: null,
+      statusTransacao: "concluido",
+      horario: horarioOk,
+      hashReutilizado: false,
+      e2eReutilizado: false,
+      origem: "pdf",
+      legibilidade: "alta",
+    });
+
+    expect(resultado.criterios.beneficiario).toBe("ok");
+    expect(resultado.decisao).toBe("aprovar");
+    expect(resultado.motivos).not.toContain("Beneficiario/chave do comprovante nao corresponde ao esperado.");
+  });
+
+  test("valor ok mas chave/beneficiario ilegiveis cai em revisar, nao suspeito", () => {
+    const resultado = avaliarEvidenciaPix({
+      valorEsperado: 1,
+      valorLido: 1,
+      chaveEsperada: "99974000691",
+      chaveLida: null,
+      beneficiarioEsperado: "Kellyne F dos Santos",
+      beneficiarioLido: null,
+      statusTransacao: "concluido",
+      horario: horarioOk,
+      hashReutilizado: false,
+      e2eReutilizado: false,
+      origem: "pdf",
+      legibilidade: "alta",
+    });
+
+    expect(resultado.criterios.beneficiario).toBe("ausente");
+    expect(resultado.decisao).toBe("revisar");
+  });
+
+  test("valor ok mas chave claramente de outro recebedor cai em revisar", () => {
+    const resultado = avaliarEvidenciaPix({
+      valorEsperado: 1,
+      valorLido: 1,
+      chaveEsperada: "99974000691",
+      chaveLida: "(11) 98888-7777",
+      beneficiarioEsperado: "Kellyne F dos Santos",
+      beneficiarioLido: null,
+      statusTransacao: "concluido",
+      horario: horarioOk,
+      hashReutilizado: false,
+      e2eReutilizado: false,
+      origem: "pdf",
+      legibilidade: "alta",
+    });
+
+    expect(resultado.criterios.beneficiario).toBe("divergente");
+    expect(resultado.decisao).toBe("revisar");
+  });
+
+  test("chave equivalente nao salva comprovante com hash reutilizado: continua suspeito", () => {
+    const resultado = avaliarEvidenciaPix({
+      valorEsperado: 1,
+      valorLido: 1,
+      chaveEsperada: "99974000691",
+      chaveLida: "+55 99 97400-0691",
+      statusTransacao: "concluido",
+      horario: horarioOk,
+      hashReutilizado: true,
+      e2eReutilizado: false,
+      origem: "pdf",
+      legibilidade: "alta",
+    });
+
+    expect(resultado.decisao).toBe("suspeito");
+  });
+
+  test("chave equivalente nao salva comprovante com horario anterior: continua suspeito", () => {
+    const resultado = avaliarEvidenciaPix({
+      valorEsperado: 1,
+      valorLido: 1,
+      chaveEsperada: "99974000691",
+      chaveLida: "+55 99 97400-0691",
+      statusTransacao: "concluido",
+      horario: horarioAnterior,
+      hashReutilizado: false,
+      e2eReutilizado: false,
+      origem: "pdf",
+      legibilidade: "alta",
+    });
+
+    expect(resultado.decisao).toBe("suspeito");
+  });
+
+  test("chave equivalente com valor errado nunca aprova", () => {
+    const resultado = avaliarEvidenciaPix({
+      valorEsperado: 52,
+      valorLido: 1,
+      chaveEsperada: "99974000691",
+      chaveLida: "+55 99 97400-0691",
+      statusTransacao: "concluido",
+      horario: horarioOk,
+      hashReutilizado: false,
+      e2eReutilizado: false,
+      origem: "pdf",
+      legibilidade: "alta",
+    });
+
+    expect(resultado.decisao).not.toBe("aprovar");
+  });
+});
