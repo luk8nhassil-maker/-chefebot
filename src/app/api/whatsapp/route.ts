@@ -16,6 +16,8 @@ import { salvarStatusConexao, botPodeResponder, StatusConexao } from "@/lib/cone
 import { ehConfirmacaoPedido } from "@/lib/confirmacaoPedido";
 import { escolherStepDeRetomada, detectarConversaMorta } from "@/lib/reviverConversa";
 import { anexarPixMercadoPagoEmMensagens, confirmarPixMetadata, criarPixMetadata, prepararPixProviderMercadoPago, serializarPixCliente, type PixCliente, type PixMetadata } from "@/lib/pix";
+import { encontrarPedidoPixPendentePorTelefone } from "@/lib/pixPedidoMatching";
+import { telefonesCorrespondem } from "@/lib/telefone";
 import type { BotStep } from "@/lib/bot";
 
 export const maxDuration = 30;
@@ -276,25 +278,41 @@ async function enviarImagem(phone: string, imageUrl: string) {
   }
 }
 
+function existePedidoAbertoNaoPixDoTelefone(pedidos: Pedido[], phone: string): boolean {
+  return pedidos.some(p =>
+    p.status === "novo"
+    && !p.escalonado
+    && telefonesCorrespondem(p.telefone, phone)
+    && !temPixNoPagamento(p.pagamento)
+    && !p.pix
+  );
+}
+
+async function encaminharComprovanteSemPedidoPix(phone: string, session: BotSession | null, origem: "texto" | "midia") {
+  await enviarMensagem(phone, `Recebi seu comprovante, mas não consegui vincular automaticamente a um pedido Pix pendente. Vou encaminhar para conferência.`);
+  await salvarEscalonamento(phone, session || { step: "done", cart: [], deliveryFee: 0, customerName: phone });
+  await log("aviso", "Comprovante Pix sem pedido pendente correspondente", `Phone: ${phone} origem: ${origem}`);
+}
+
 async function processarComprovanteTexto(phone: string, texto: string, config: ConfigPizzaria) {
   try {
     const sessionKey = `session:${phone}`;
     const session = await redis.get<BotSession>(sessionKey);
-    const pedidosCheck = await redis.get<any[]>("pedidos") || [];
-    const pedidoVerif = pedidosCheck.find(p => p.telefone === phone && p.status === "novo");
-    const isPix = temPixNoPagamento(session?.paymentMethod) || session?.step === "aguardando_pix" || temPixNoPagamento(pedidoVerif?.pagamento);
-    if (!isPix) return;
-
     let pedidos = await redis.get<Pedido[]>("pedidos") || [];
-    let pedidoAtivo = pedidos.filter(p => p.telefone === phone && p.status === "novo" && !p.escalonado).sort((a, b) => b.id.localeCompare(a.id))[0];
+    let pedidoAtivo = encontrarPedidoPixPendentePorTelefone(pedidos, phone);
 
     const isAguardandoPix = session?.step === "aguardando_pix";
     if (isAguardandoPix && !pedidoAtivo && session) {
       await salvarPedido(session, phone, config);
       pedidos = await redis.get<Pedido[]>("pedidos") || [];
-      pedidoAtivo = pedidos.filter(p => p.telefone === phone && p.status === "novo" && !p.escalonado).sort((a, b) => b.id.localeCompare(a.id))[0];
+      pedidoAtivo = encontrarPedidoPixPendentePorTelefone(pedidos, phone);
     }
-    if (!pedidoAtivo) return;
+    if (!pedidoAtivo) {
+      if (session && !isAguardandoPix && !temPixNoPagamento(session.paymentMethod)) return;
+      if (existePedidoAbertoNaoPixDoTelefone(pedidos, phone)) return;
+      await encaminharComprovanteSemPedidoPix(phone, session, "texto");
+      return;
+    }
 
     await enviarMensagem(phone, `Comprovante recebido! 🔍 Verificando o pagamento...`);
 
@@ -356,28 +374,24 @@ async function processarComprovante(phone: string, data: any, config: ConfigPizz
   try {
     const sessionKey = `session:${phone}`;
     const session = await redis.get<BotSession>(sessionKey);
-    const pedidosVerif = await redis.get<any[]>("pedidos") || [];
-    const pedidoVerif = pedidosVerif.find(p => p.telefone === phone && p.status === "novo");
-    const isPix = temPixNoPagamento(session?.paymentMethod) || session?.step === "aguardando_pix" || temPixNoPagamento(pedidoVerif?.pagamento);
-    console.log("[ChefeBot] isPix:", isPix, "step:", session?.step, "pagamento:", pedidoVerif?.pagamento);
-    if (!isPix) return;
-
     const isAguardandoPix = session?.step === "aguardando_pix";
     let pedidos = await redis.get<Pedido[]>("pedidos") || [];
-    let pedidoAtivo = pedidos
-      .filter(p => p.telefone === phone && p.status === "novo" && !p.escalonado)
-      .sort((a, b) => b.id.localeCompare(a.id))[0];
+    let pedidoAtivo = encontrarPedidoPixPendentePorTelefone(pedidos, phone);
+    console.log("[ChefeBot] pedidoPixPendente:", !!pedidoAtivo, "step:", session?.step, "pagamento:", pedidoAtivo?.pagamento);
 
     // Pedido ainda nao foi salvo — salva agora antes de validar
     if (isAguardandoPix && !pedidoAtivo && session) {
       await salvarPedido(session, phone, config);
       pedidos = await redis.get<Pedido[]>("pedidos") || [];
-      pedidoAtivo = pedidos
-        .filter(p => p.telefone === phone && p.status === "novo" && !p.escalonado)
-        .sort((a, b) => b.id.localeCompare(a.id))[0];
+      pedidoAtivo = encontrarPedidoPixPendentePorTelefone(pedidos, phone);
     }
     console.log("[PEDIDO-CHECK]", pedidoAtivo ? pedidoAtivo.id : "NAO ENCONTRADO", "total:", pedidoAtivo?.total);
-    if (!pedidoAtivo) return;
+    if (!pedidoAtivo) {
+      if (session && !isAguardandoPix && !temPixNoPagamento(session.paymentMethod)) return;
+      if (existePedidoAbertoNaoPixDoTelefone(pedidos, phone)) return;
+      await encaminharComprovanteSemPedidoPix(phone, session, "midia");
+      return;
+    }
     console.log("[COMP-INICIO] iniciando processamento phone:", phone);
     await enviarMensagem(phone, `Comprovante recebido! 🔍 Verificando o pagamento...`);
     let imagemBase64 = "";
