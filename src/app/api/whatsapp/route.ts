@@ -15,7 +15,7 @@ import { proximoNumeroPedido } from "@/lib/numeracao";
 import { salvarStatusConexao, botPodeResponder, StatusConexao } from "@/lib/conexaoWhatsapp";
 import { ehConfirmacaoPedido } from "@/lib/confirmacaoPedido";
 import { escolherStepDeRetomada, detectarConversaMorta } from "@/lib/reviverConversa";
-import { anexarPixMercadoPagoEmMensagens, criarPixMetadata, prepararPixProviderMercadoPago, serializarPixCliente, type PixCliente, type PixMetadata } from "@/lib/pix";
+import { anexarPixMercadoPagoEmMensagens, confirmarPixMetadata, criarPixMetadata, prepararPixProviderMercadoPago, serializarPixCliente, type PixCliente, type PixMetadata } from "@/lib/pix";
 import type { BotStep } from "@/lib/bot";
 
 export const maxDuration = 30;
@@ -331,7 +331,7 @@ Responda APENAS em JSON:
     const resultado = JSON.parse(clean);
 
     if (resultado.valido) {
-      const pedidosAtualizados = pedidos.map(p => p.id === pedidoAtivo!.id ? { ...p, pixConfirmado: true } : p);
+      const pedidosAtualizados = pedidos.map(p => p.id === pedidoAtivo!.id ? { ...p, pixConfirmado: true, pix: confirmarPixMetadata(p.pix, "comprovante") } : p);
       await redis.set("pedidos", pedidosAtualizados);
       const firstName = pedidoAtivo.cliente.split(" ")[0];
       const timeMsg = pedidoAtivo.tipoEntrega === "pickup" ? config.tempoEntregaRetirada : config.tempoEntregaDelivery;
@@ -424,7 +424,7 @@ async function processarComprovante(phone: string, data: any, config: ConfigPizz
       pedidoAtivo.horarioInicio || pedidoAtivo.horario
     );
     if (resultado.valido) {
-      const pedidosAtualizados = pedidos.map(p => p.id === pedidoAtivo.id ? { ...p, pixConfirmado: true } : p);
+      const pedidosAtualizados = pedidos.map(p => p.id === pedidoAtivo.id ? { ...p, pixConfirmado: true, pix: confirmarPixMetadata(p.pix, "comprovante") } : p);
       await redis.set("pedidos", pedidosAtualizados);
       const firstName = pedidoAtivo.cliente.split(" ")[0];
       const timeMsg = pedidoAtivo.tipoEntrega === "pickup" ? config.tempoEntregaRetirada : config.tempoEntregaDelivery;

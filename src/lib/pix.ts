@@ -1,11 +1,18 @@
 import { temPixNoPagamento, valorPixEsperado } from "./bot";
 import { criarCobrancaPixMercadoPago } from "./mercadoPagoPix";
 
+// Status intermediários (comprovante_recebido/em_revisao/suspeito) são preparação
+// para a fila de revisão de comprovantes; nesta etapa nada os escreve ainda —
+// apenas "pendente" e "confirmado" circulam. Pedidos antigos podem não ter
+// status algum (ou nem ter pix): todo leitor deve tratar ausência como pendente.
+export type PixStatus = "pendente" | "comprovante_recebido" | "em_revisao" | "suspeito" | "confirmado";
+export type PixConfirmadoPor = "manual" | "webhook" | "comprovante";
+
 export type PixMetadata = {
   txid?: string;
   valorEsperado?: number;
-  status?: "pendente" | "confirmado";
-  confirmadoPor?: "manual" | "webhook" | "comprovante";
+  status?: PixStatus;
+  confirmadoPor?: PixConfirmadoPor;
   confirmadoEm?: string;
   provider?: "mercadopago";
   providerPaymentId?: string;
@@ -61,6 +68,25 @@ function emCentavos(valor: number): number {
 
 export function gerarTxidPixInterno(pedidoId: string): string {
   return `chefebot_${pedidoId}`;
+}
+
+// Registra a confirmação do Pix com origem e horário. Regras:
+// - nunca sobrescreve uma confirmação já registrada (ex: um clique manual não
+//   apaga confirmadoPor "webhook" nem o horário original);
+// - aceita pix undefined (pedidos antigos sem metadata) criando o mínimo auditável;
+// - preenche origem/horário em pedidos legados confirmados sem esses campos.
+export function confirmarPixMetadata(
+  pix: PixMetadata | undefined,
+  confirmadoPor: PixConfirmadoPor,
+  confirmadoEm: string = new Date().toISOString()
+): PixMetadata {
+  if (pix?.status === "confirmado" && pix.confirmadoPor) return pix;
+  return {
+    ...(pix || {}),
+    status: "confirmado",
+    confirmadoPor: pix?.confirmadoPor || confirmadoPor,
+    confirmadoEm: pix?.confirmadoEm || confirmadoEm,
+  };
 }
 
 export function criarPixMetadata(pedidoId: string, pagamento: string | undefined, total: number): PixMetadata | undefined {

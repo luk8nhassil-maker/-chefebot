@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { verifyToken } from '@/lib/auth'
 import { redis } from '@/lib/redis'
 import { proximoNumeroPedido } from '@/lib/numeracao'
-import { criarPixMetadata, sanitizarPedidoPixResposta, type PixMetadata } from '@/lib/pix'
+import { confirmarPixMetadata, criarPixMetadata, sanitizarPedidoPixResposta, type PixMetadata } from '@/lib/pix'
 import type { PedidoEntregador } from '@/types/entregador'
 
 const APP_BASE_URL = 'https://chefebot-pjif.vercel.app'
@@ -122,9 +122,13 @@ export async function PATCH(req: NextRequest) {
   const index = pedidos.findIndex(p => p.id === id)
   if (index === -1) return NextResponse.json({ error: 'Pedido nao encontrado' }, { status: 404 })
 
-  // Confirmação de PIX manual — sem alterar status, sem enviar mensagem
+  // Confirmação de PIX manual — sem alterar status, sem enviar mensagem.
+  // Registra origem/horário no metadata (auditoria); confirmação anterior
+  // por webhook/comprovante nunca é sobrescrita pelo clique manual.
   if (pixConfirmado !== undefined) {
-    pedidos[index] = { ...pedidos[index], pixConfirmado }
+    pedidos[index] = pixConfirmado === true
+      ? { ...pedidos[index], pixConfirmado: true, pix: confirmarPixMetadata(pedidos[index].pix, 'manual') }
+      : { ...pedidos[index], pixConfirmado }
     await redis.set('pedidos', pedidos)
     return NextResponse.json({ ok: true })
   }

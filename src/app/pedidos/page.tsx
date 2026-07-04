@@ -28,6 +28,7 @@ type Pedido = {
   pagamento?: string
   troco?: string
   pixConfirmado?: boolean
+  pix?: { status?: string; confirmadoPor?: string; confirmadoEm?: string }
   tipoEntrega?: string
   horarioInicio?: string
   horarioEntrega?: string
@@ -52,6 +53,15 @@ function isPedidoDineIn(p: Pick<Pedido, "tipoEntrega" | "endereco">): boolean {
 }
 function isPedidoRetirada(p: Pick<Pedido, "tipoEntrega" | "endereco">): boolean {
   return !isPedidoDineIn(p) && (!p.tipoEntrega || p.tipoEntrega === "pickup" || p.tipoEntrega === "retirada" || p.endereco === "Retirada na loja")
+}
+// Origem da confirmação do Pix (auditoria). Pedidos antigos sem pix.confirmadoPor
+// caem no rótulo genérico de sempre.
+function labelPixConfirmado(p: Pick<Pedido, "pix">): string {
+  const por = p.pix?.confirmadoPor
+  if (por === "comprovante") return "✓ validado por comprovante"
+  if (por === "webhook") return "✓ confirmado pelo banco"
+  if (por === "manual") return "✓ confirmado manualmente"
+  return "✓ confirmado"
 }
 function getActionLabel(p: Pedido): string {
   if (p.status === "em_preparo") {
@@ -1058,7 +1068,7 @@ export default function PedidosPage() {
             <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 700, color: "#c9c2b4" }}>
               <span style={{ width: 8, height: 8, borderRadius: 2, background: payDot, flexShrink: 0 }} />
               {pagamento || "Pagamento não informado"}
-              {p.pixConfirmado && <span style={{ fontSize: 11, color: "#34d399", fontWeight: 800 }}>✓ confirmado</span>}
+              {p.pixConfirmado && <span style={{ fontSize: 11, color: "#34d399", fontWeight: 800 }}>{labelPixConfirmado(p)}</span>}
             </div>
             <span style={{ fontSize: 15, fontWeight: 900, color: "#f4f1ec" }}>R$ {p.total.toFixed(2).replace(".", ",")}</span>
           </div>
