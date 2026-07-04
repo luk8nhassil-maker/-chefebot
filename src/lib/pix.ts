@@ -1,5 +1,7 @@
 import { temPixNoPagamento, valorPixEsperado } from "./bot";
 import { criarCobrancaPixMercadoPago } from "./mercadoPagoPix";
+import { normalizarWhatsAppPizzaria } from "./pixCliente";
+import { gerarPixCopiaEColaEstatico } from "./pixCopiaECola";
 import type { CriteriosEvidenciaPix, DecisaoEvidenciaPix } from "./pixComprovanteAvaliacao";
 
 // Status "em_revisao"/"suspeito" são escritos pela camada de avaliacao por evidencia
@@ -72,10 +74,21 @@ export type PrepararPixProviderInput = {
 };
 
 export type PixCliente = {
-  provider: "mercadopago";
-  qrCode: string;
+  provider: "mercadopago" | "manual";
+  qrCode?: string;
+  copiaECola?: string;
+  chavePix?: string;
+  beneficiario?: string;
+  whatsappPizzaria?: string;
   ticketUrl?: string;
   valorEsperado?: number;
+};
+
+export type PixClienteManualConfig = {
+  chavePix?: string | null;
+  nomeTitularPix?: string | null;
+  nomePizzaria?: string | null;
+  whatsappPizzaria?: string | null;
 };
 
 const STATUS_PIX_PAGO = new Set(["pago", "paid", "liquidado", "settled", "confirmed", "confirmado"]);
@@ -200,20 +213,46 @@ export async function prepararPixProviderMercadoPago(input: PrepararPixProviderI
   }
 }
 
-export function serializarPixCliente(pix: PixMetadata | undefined): PixCliente | undefined {
+export function serializarPixCliente(pix: PixMetadata | undefined, config?: PixClienteManualConfig): PixCliente | undefined {
   const qrCode = typeof pix?.qrCode === "string" ? pix.qrCode.trim() : "";
-  if (pix?.provider !== "mercadopago" || !qrCode) return undefined;
-
-  const ticketUrl = typeof pix.ticketUrl === "string" && pix.ticketUrl.trim() ? pix.ticketUrl.trim() : undefined;
-  const valorEsperado = typeof pix.valorEsperado === "number" && Number.isFinite(pix.valorEsperado)
+  const valorEsperado = typeof pix?.valorEsperado === "number" && Number.isFinite(pix.valorEsperado)
     ? pix.valorEsperado
+    : undefined;
+  const chavePix = String(config?.chavePix || "").trim();
+  const beneficiario = String(config?.nomeTitularPix || "").trim();
+  const whatsappPizzaria = normalizarWhatsAppPizzaria(config?.whatsappPizzaria);
+
+  if (pix?.provider === "mercadopago" && qrCode) {
+    const ticketUrl = typeof pix.ticketUrl === "string" && pix.ticketUrl.trim() ? pix.ticketUrl.trim() : undefined;
+    return {
+      provider: "mercadopago",
+      qrCode,
+      ...(ticketUrl ? { ticketUrl } : {}),
+      ...(valorEsperado !== undefined ? { valorEsperado } : {}),
+      ...(chavePix ? { chavePix } : {}),
+      ...(beneficiario ? { beneficiario } : {}),
+      ...(whatsappPizzaria ? { whatsappPizzaria } : {}),
+    };
+  }
+
+  if (!pix || !chavePix) return undefined;
+
+  const copiaECola = beneficiario && valorEsperado !== undefined
+    ? gerarPixCopiaEColaEstatico({
+      chavePix,
+      valor: valorEsperado,
+      nomeRecebedor: beneficiario,
+      txid: pix.txid,
+    })
     : undefined;
 
   return {
-    provider: "mercadopago",
-    qrCode,
-    ...(ticketUrl ? { ticketUrl } : {}),
+    provider: "manual",
+    chavePix,
+    ...(beneficiario ? { beneficiario } : {}),
+    ...(whatsappPizzaria ? { whatsappPizzaria } : {}),
     ...(valorEsperado !== undefined ? { valorEsperado } : {}),
+    ...(copiaECola ? { copiaECola } : {}),
   };
 }
 

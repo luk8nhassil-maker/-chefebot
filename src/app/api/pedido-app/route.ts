@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { randomUUID } from "crypto";
 import { redis } from "@/lib/redis";
 import { proximoNumeroPedido } from "@/lib/numeracao";
 import { getMENUDinamico } from "@/lib/menu";
@@ -43,6 +44,21 @@ type MenuPedidoApp = {
   sucos: { name: string; price: number }[];
   borders: { label: string; priceSmall: number; priceLarge: number }[];
 };
+
+type ConfigPizzariaPix = {
+  nomePizzaria?: string;
+  chavePix?: string;
+  nomeTitularPix?: string;
+  whatsappPizzaria?: string;
+};
+
+function criarTokenPublicoAcompanhamento(): string {
+  return randomUUID().replace(/-/g, "");
+}
+
+async function getConfigPix(): Promise<ConfigPizzariaPix> {
+  return (await redis.get<ConfigPizzariaPix>("config:pizzaria")) || {};
+}
 
 function norm(value: string): string {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
@@ -174,6 +190,7 @@ export async function POST(req: NextRequest) {
 
     const pedidoId = Date.now().toString();
     const numeroPedido = await proximoNumeroPedido();
+    const statusToken = criarTokenPublicoAcompanhamento();
     const pixBase = criarPixMetadata(pedidoId, body.pagamento, total);
     const pix = await prepararPixProviderMercadoPago({
       pedidoId,
@@ -193,6 +210,7 @@ export async function POST(req: NextRequest) {
       endereco,
       data: new Date().toLocaleDateString("pt-BR"),
       origem: "site",
+      statusToken,
       ...(body.observacao ? { observacao: body.observacao } : {}),
       pagamento: body.pagamento,
       ...(pix ? { pix } : {}),
@@ -221,8 +239,9 @@ export async function POST(req: NextRequest) {
       });
     } catch {}
 
-    const pixCliente = serializarPixCliente(pix);
-    return NextResponse.json({ ok: true, pedidoId, numero: numeroPedido, total, ...(pixCliente ? { pix: pixCliente } : {}) });
+    const configPix = await getConfigPix();
+    const pixCliente = serializarPixCliente(pix, configPix);
+    return NextResponse.json({ ok: true, pedidoId, numero: numeroPedido, total, statusToken, ...(pixCliente ? { pix: pixCliente } : {}) });
   } catch (error) {
     console.error("Erro ao salvar pedido do site:", error);
     return NextResponse.json({ ok: false, error: "Erro interno" }, { status: 500 });

@@ -156,6 +156,33 @@ describe("POST /api/pedido-app", () => {
     expect(data.pix).toBeUndefined();
   });
 
+  it("Pix manual retorna chave, beneficiario, WhatsApp e token publico de status", async () => {
+    store.set("config:pizzaria", {
+      nomePizzaria: "Chefe da Pizza",
+      chavePix: "99974000691",
+      nomeTitularPix: "Kellyne Pizzaria",
+      whatsappPizzaria: "(99) 97400-0691",
+    });
+
+    const res = await POST(postReq(basePayload));
+    const data = await res.json();
+    const pedidos = store.get("pedidos") as PedidoSalvo[];
+
+    expect(res.status).toBe(200);
+    expect(criarCobrancaPixMercadoPagoMock).not.toHaveBeenCalled();
+    expect(typeof data.statusToken).toBe("string");
+    expect(pedidos[0].statusToken).toBe(data.statusToken);
+    expect(data.pix).toMatchObject({
+      provider: "manual",
+      chavePix: "99974000691",
+      beneficiario: "Kellyne Pizzaria",
+      whatsappPizzaria: "5599974000691",
+      valorEsperado: 33,
+    });
+    expect(data.pix.copiaECola).toContain("99974000691");
+    expect(data.pix.copiaECola).toMatch(/6304[0-9A-F]{4}$/);
+  });
+
   it("PIX_PROVIDER diferente de mercadopago nao chama Mercado Pago", async () => {
     vi.stubEnv("PIX_PROVIDER", "manual");
 
