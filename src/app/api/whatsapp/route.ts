@@ -16,6 +16,7 @@ import { salvarStatusConexao, botPodeResponder, StatusConexao } from "@/lib/cone
 import { ehConfirmacaoPedido } from "@/lib/confirmacaoPedido";
 import { escolherStepDeRetomada, detectarConversaMorta } from "@/lib/reviverConversa";
 import { anexarPixMercadoPagoEmMensagens, confirmarPixMetadata, criarPixMetadata, prepararPixProviderMercadoPago, serializarPixCliente, type PixCliente, type PixMetadata } from "@/lib/pix";
+import { chaveDedupComprovantePix, gerarHashComprovantePixMidia, gerarHashComprovantePixTexto, PIX_COMPROVANTE_DEDUP_TTL_SEGUNDOS } from "@/lib/pixComprovanteHash";
 import { encontrarPedidoPixPendentePorTelefone } from "@/lib/pixPedidoMatching";
 import { telefonesCorrespondem } from "@/lib/telefone";
 import type { BotStep } from "@/lib/bot";
@@ -294,6 +295,12 @@ async function encaminharComprovanteSemPedidoPix(phone: string, session: BotSess
   await log("aviso", "Comprovante Pix sem pedido pendente correspondente", `Phone: ${phone} origem: ${origem}`);
 }
 
+async function bloquearComprovantePixReutilizado(phone: string, session: BotSession | null, pedidoAtivo: Pedido, origem: "texto" | "midia") {
+  await enviarMensagem(phone, `⚠️ Este comprovante já foi utilizado anteriormente. Por favor, envie o comprovante correto ou entre em contato conosco.`);
+  await salvarEscalonamento(phone, session || { step: "done", cart: [], deliveryFee: 0, customerName: pedidoAtivo.cliente });
+  await log("aviso", "Comprovante Pix reutilizado detectado", `Phone: ${phone} origem: ${origem}`);
+}
+
 async function processarComprovanteTexto(phone: string, texto: string, config: ConfigPizzaria) {
   try {
     const sessionKey = `session:${phone}`;
@@ -315,6 +322,13 @@ async function processarComprovanteTexto(phone: string, texto: string, config: C
     }
 
     await enviarMensagem(phone, `Comprovante recebido! 🔍 Verificando o pagamento...`);
+    const hashComprovante = gerarHashComprovantePixTexto(texto);
+    const chaveHash = chaveDedupComprovantePix(hashComprovante);
+    const jaUsado = await redis.get(chaveHash);
+    if (jaUsado) {
+      await bloquearComprovantePixReutilizado(phone, session, pedidoAtivo, "texto");
+      return;
+    }
 
     // Usa Claude para validar o comprovante em texto
     const client = new (await import("@anthropic-ai/sdk")).default({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -358,6 +372,7 @@ Responda APENAS em JSON:
 Obrigado, *${firstName}*! Seu pedido já foi pra cozinha. Sua pizza chega em *${timeMsg}* 🛵
 
 Qualquer dúvida é só chamar. Bom apetite! 🍕`);
+      await redis.set(chaveHash, true, { ex: PIX_COMPROVANTE_DEDUP_TTL_SEGUNDOS });
       const sessionAtual = await redis.get<BotSession>(sessionKey);
       if (sessionAtual) await redis.set(sessionKey, { ...sessionAtual, step: "done" }, { ex: 1800 });
       await log("info", `Pix texto confirmado para ${firstName}`, `Valor: ${resultado.valor}`);
@@ -422,13 +437,11 @@ async function processarComprovante(phone: string, data: any, config: ConfigPizz
       return;
     }
     // Verifica se comprovante ja foi usado antes (anti-reutilizacao)
-    const hashComprovante = imagemBase64.slice(0, 64)
-    const chaveHash = `pix_usado:${hashComprovante}`
+    const hashComprovante = gerarHashComprovantePixMidia(imagemBase64)
+    const chaveHash = chaveDedupComprovantePix(hashComprovante)
     const jaUsado = await redis.get(chaveHash)
     if (jaUsado) {
-      await enviarMensagem(phone, `⚠️ Este comprovante já foi utilizado anteriormente. Por favor, envie o comprovante correto ou entre em contato conosco.`)
-      await salvarEscalonamento(phone, session || { step: "done", cart: [], deliveryFee: 0, customerName: pedidoAtivo.cliente })
-      await log("aviso", `Comprovante Pix reutilizado detectado`, `Phone: ${phone}`)
+      await bloquearComprovantePixReutilizado(phone, session, pedidoAtivo, "midia")
       return
     }
 
@@ -443,7 +456,7 @@ async function processarComprovante(phone: string, data: any, config: ConfigPizz
       const firstName = pedidoAtivo.cliente.split(" ")[0];
       const timeMsg = pedidoAtivo.tipoEntrega === "pickup" ? config.tempoEntregaRetirada : config.tempoEntregaDelivery;
       await enviarMensagem(phone, `Pagamento confirmado! ✅🎉\n\nObrigado, *${firstName}*! Seu pedido já foi pra cozinha. Sua pizza chega em *${timeMsg}* 🛵\n\nQualquer dúvida é só chamar. Bom apetite! 🍕`);
-      await redis.set(chaveHash, true, { ex: 30 * 24 * 60 * 60 }) // 30 dias
+      await redis.set(chaveHash, true, { ex: PIX_COMPROVANTE_DEDUP_TTL_SEGUNDOS })
       await log("info", `Pix confirmado automaticamente para ${firstName}`, `Valor: R$ ${resultado.valorEncontrado}`);
     } else {
       await enviarMensagem(phone, `Comprovante recebido! 📄 Nossa equipe vai verificar o pagamento manualmente. Em instantes confirmamos! 😊`);
