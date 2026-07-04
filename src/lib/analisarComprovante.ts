@@ -47,7 +47,7 @@ REGRAS DE VALIDAÇÃO — responda "valido: true" SOMENTE se TODAS forem atendid
 3. A data do comprovante é HOJE (${dataHoje})
 4. O comprovante indica que o Pix foi ENVIADO/CONCLUÍDO com sucesso (não agendado, não pendente, não cancelado, não em análise)
 
-5. Se data e horario do pagamento estiverem claros, o pagamento nao pode ser anterior ao horario de referencia do pedido por mais de 10 minutos. Se apenas a data estiver visivel ou o horario estiver ilegivel, nao reprove somente por falta de horario.
+5. Se data e horario do pagamento estiverem claros, o pagamento nao pode ser anterior ao horario de referencia do pedido por mais de 8 minutos. Se apenas a data estiver visivel ou o horario estiver ilegivel, nao reprove somente por falta de horario.
 
 Se qualquer uma dessas regras falhar, responda "valido: false".
 
