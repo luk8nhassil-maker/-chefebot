@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import PanelShell from "@/components/PanelShell";
 import { useLiveMenu, cartItemEsgotado } from "./liveMenu";
+import { CARDAPIO_ILLUSTRATIONS, CardapioIllustration } from "@/lib/cardapioVisuals";
 
 type EsgMetadata = Record<string, { desde: string; ultimaRevisao?: string }>
 
@@ -640,25 +641,36 @@ const ICONS = {
   pedido: "🧾",
   pizza: "🍕",
   lanche: "🍔",
+  macarronada: "🍝",
   bebidas: "🥤",
   sucos: "🧃",
   entrega: "🛵",
+  retirada: "🏪",
+  consumoLocal: "🍽️",
   pagamento: "💰",
   pix: "⚡",
   cartao: "💳",
   dinheiro: "💵",
   remover: "✕",
+  adicionar: "➕",
   voltar: "←",
   check: "✓",
+  alerta: "⚠️",
+  vazio: "🛒",
+  busca: "🔍",
+  editar: "✎",
   relogio: "🕐",
   localizacao: "📍",
 } as const;
 
-// Pontos já identificados para receber ilustração própria no futuro (não
-// implementado agora, apenas mapeado para não aumentar risco deste patch):
-// sacola vazia (.empty), pedido enviado (sc-done/.success), aguardando Pix
-// (bloco "Aguardando confirmação do Pix"), pedido em preparo / saiu para
-// entrega (STATUS_PEDIDO_LABEL), cardápio vazio ou erro de carregamento.
+// Banco de ilustrações leves (src/lib/cardapioVisuals.tsx) já aplicado em:
+// sacola vazia (sc-cart), categoria sem itens (sc-list) e aguardando Pix
+// (sc-done). "Pedido enviado" já usa o mesmo padrão nativamente (check grande
+// + título + texto) e não foi tocado para preservar a copy já validada.
+// Seguem só mapeados para uso futuro (evitar aumentar risco deste patch):
+// pedido em preparo / saiu para entrega (STATUS_PEDIDO_LABEL), cardápio
+// vazio e erro de carregamento — este último some no fallback isolado de
+// `CardapioPage` (fora do <style>{CSS}</style> de PublicCardapio).
 
 async function copiarTexto(texto: string): Promise<boolean> {
   try { await navigator.clipboard.writeText(texto); return true } catch {}
@@ -1061,7 +1073,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   }
 
   function paymentLabel(value: string) { return value === "Cartao" ? "Cartão" : value; }
-  function paymentIcon(value: string) { return ({ Pix: "⚡", Dinheiro: "$", Cartao: "▣" } as Record<string, string>)[value] || "$"; }
+  function paymentIcon(value: string) { return ({ Pix: ICONS.pix, Dinheiro: ICONS.dinheiro, Cartao: ICONS.cartao } as Record<string, string>)[value] || ICONS.pagamento; }
   function paymentHint(value: string) {
     return ({ Pix: "Confirmacao manual pela pizzaria.", Dinheiro: "Configure o troco.", Cartao: "Pagamento na maquina." } as Record<string, string>)[value] || "Forma de pagamento";
   }
@@ -1228,7 +1240,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
               <div className="home-grid">
                 <button className="home-cat" onClick={goPizza}><span>{ICONS.pizza}</span><strong>Pizzas</strong></button>
                 <button className="home-cat" onClick={() => goCat("lanche")}><span>{ICONS.lanche}</span><strong>Lanches</strong></button>
-                <button className="home-cat" onClick={() => goCat("macarronada")}><span>🍝</span><strong>Macarronada</strong></button>
+                <button className="home-cat" onClick={() => goCat("macarronada")}><span>{ICONS.macarronada}</span><strong>Macarronada</strong></button>
                 <button className="home-cat" onClick={() => goCat("bebida")}><span>{ICONS.bebidas}</span><strong>Bebidas</strong></button>
                 {(menu.sucos || []).length > 0 && (
                   <button className="home-cat" onClick={() => goCat("suco")}><span>{ICONS.sucos}</span><strong>Sucos</strong></button>
@@ -1364,8 +1376,8 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
               <TopBack onClick={() => go("sc-start")} title={({ lanche: "Lanches", macarronada: "Macarronada", bebida: "Bebidas", suco: "Sucos" } as Record<string, string>)[listCat] || "Escolha o produto"} />
               {(() => {
                 const lanches = menu.lanches || [];
-                const cfg = { lanche: { eb: "Lanches & Porções", t: "Escolha seu lanche", data: lanches.filter((it) => !isMacarronada(it)), emoji: "🍽️" }, macarronada: { eb: "", t: "Escolha sua macarronada", data: lanches.filter(isMacarronada), emoji: "🍝" }, bebida: { eb: "", t: "Bebidas geladas", data: menu.bebidas || [], emoji: "🥤" }, suco: { eb: "Sucos naturais", t: "Sucos da casa", data: menu.sucos || [], emoji: "🧃" } }[listCat];
-                return (<><div className="screen-head">{cfg.eb && <div className="eyebrow">{cfg.eb}</div>}<h2>{cfg.t}</h2><p>Toque para adicionar.</p></div>{cfg.data.map((it, i) => { const esg = esgotados.includes(it.name); return (<div key={i} className="opt" onClick={() => !esg && addSimple(it, cfg.emoji)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }}><div className="opt-emoji">{cfg.emoji}</div><div className="opt-body"><div className="opt-title">{it.name}</div>{esg && <div className="opt-desc" style={{ color: "#ef4444" }}>Esgotado</div>}</div><div className="opt-price">{simplePriceLabel(it)}</div></div>); })}</>);
+                const cfg = { lanche: { eb: "Lanches & Porções", t: "Escolha seu lanche", data: lanches.filter((it) => !isMacarronada(it)), emoji: "🍽️" }, macarronada: { eb: "", t: "Escolha sua macarronada", data: lanches.filter(isMacarronada), emoji: ICONS.macarronada }, bebida: { eb: "", t: "Bebidas geladas", data: menu.bebidas || [], emoji: ICONS.bebidas }, suco: { eb: "Sucos naturais", t: "Sucos da casa", data: menu.sucos || [], emoji: ICONS.sucos } }[listCat];
+                return (<><div className="screen-head">{cfg.eb && <div className="eyebrow">{cfg.eb}</div>}<h2>{cfg.t}</h2><p>Toque para adicionar.</p></div>{cfg.data.length === 0 ? <CardapioIllustration {...CARDAPIO_ILLUSTRATIONS.semResultado} /> : cfg.data.map((it, i) => { const esg = esgotados.includes(it.name); return (<div key={i} className="opt" onClick={() => !esg && addSimple(it, cfg.emoji)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }}><div className="opt-emoji">{cfg.emoji}</div><div className="opt-body"><div className="opt-title">{it.name}</div>{esg && <div className="opt-desc" style={{ color: "#ef4444" }}>Esgotado</div>}</div><div className="opt-price">{simplePriceLabel(it)}</div></div>); })}</>);
               })()}
             </section>
           )}
@@ -1399,11 +1411,11 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                 </div>
               )}
               <div className="screen-head"><h2>Confira os itens</h2><p>Tudo certo? Então bora finalizar.</p></div>
-              {cart.length === 0 ? (<div className="empty"><div className="big">🛒</div><div>Seu pedido está vazio.</div></div>) : (
+              {cart.length === 0 ? (<CardapioIllustration {...CARDAPIO_ILLUSTRATIONS.sacolaVazia} />) : (
                 <>{(() => { let pn = 0; return cart.map((it, i) => { let tag = null; if (it.kind === "pizza") { pn++; tag = <span className="ci-tag">Pizza {pn}</span>; } const nm = it.kind === "pizza" ? it.name.replace(/^Pizza /, "") : it.name; const itemEsg = cartItemEsgotado(it.keys, esgotados); return (<div key={i} className="cart-item"><div className="ci-emoji">{it.emoji}</div><div className="ci-body"><div className="ci-name">{tag}{nm}{it.qty > 1 ? ` ×${it.qty}` : ""}{itemEsg && <span style={{ color: "#ef4444", fontWeight: 800, marginLeft: 6 }}>· Esgotado</span>}</div>{it.detail && <div className="ci-detail">{it.detail}</div>}<div className="ci-price">{money(it.price * it.qty)}</div>{it.kind === "simple" && (<div className="qty-pill"><button onClick={() => chQty(i, -1)}>−</button><span>{it.qty}</span><button onClick={() => chQty(i, 1)}>+</button></div>)}</div><button className="ci-remove" onClick={() => rmItem(i)}>{ICONS.remover}</button></div>); }); })()}<div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 4px 4px", fontWeight: 700, fontSize: 19 }}><span>Subtotal</span><span>{money(cartTotal)}</span></div></>
               )}
               <button className="btn btn-ghost btn-sm" style={{ marginTop: 4 }} onClick={() => go("sc-start")}>+ Adicionar mais</button>
-              {cartEsgotado && <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 10, background: "rgba(239,68,68,.1)", color: "#ef4444", fontSize: 13, fontWeight: 700 }}>Um item do seu pedido ficou esgotado. Remova para continuar.</div>}
+              {cartEsgotado && <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 10, background: "rgba(239,68,68,.1)", color: "#ef4444", fontSize: 13, fontWeight: 700 }}>{ICONS.alerta} Um item do seu pedido ficou esgotado. Remova para continuar.</div>}
             </section>
           )}
           {screen === "sc-delivery" && (
@@ -1411,8 +1423,8 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
               <TopBack onClick={() => go("sc-cart")} title="Entrega" />
               <div className="screen-head"><h2>Como prefere receber?</h2></div>
               <div className={`opt ${delType === "delivery" ? "sel" : ""}`} onClick={() => { setDelType("delivery"); if (erroEntrega) setErroEntrega(""); }}><div className="opt-emoji">{ICONS.entrega}</div><div className="opt-body"><div className="opt-title">Entrega (delivery)</div><div className="opt-desc">Levamos até você</div></div><div className="opt-check" /></div>
-              <div className={`opt ${delType === "retirada" ? "sel" : ""}`} onClick={() => { setDelType("retirada"); setBairroIdx(""); setErroEntrega(""); }}><div className="opt-emoji">🏪</div><div className="opt-body"><div className="opt-title">Buscar na loja</div><div className="opt-desc">Sem taxa de entrega</div></div><div className="opt-check" /></div>
-              <div className={`opt ${delType === "dine_in" ? "sel" : ""}`} onClick={() => { setDelType("dine_in"); setBairroIdx(""); setErroEntrega(""); }}><div className="opt-emoji">🍽️</div><div className="opt-body"><div className="opt-title">Consumo no local</div><div className="opt-desc">Comer aqui na pizzaria</div></div><div className="opt-check" /></div>
+              <div className={`opt ${delType === "retirada" ? "sel" : ""}`} onClick={() => { setDelType("retirada"); setBairroIdx(""); setErroEntrega(""); }}><div className="opt-emoji">{ICONS.retirada}</div><div className="opt-body"><div className="opt-title">Buscar na loja</div><div className="opt-desc">Sem taxa de entrega</div></div><div className="opt-check" /></div>
+              <div className={`opt ${delType === "dine_in" ? "sel" : ""}`} onClick={() => { setDelType("dine_in"); setBairroIdx(""); setErroEntrega(""); }}><div className="opt-emoji">{ICONS.consumoLocal}</div><div className="opt-body"><div className="opt-title">Consumo no local</div><div className="opt-desc">Comer aqui na pizzaria</div></div><div className="opt-check" /></div>
               {delType === "delivery" && (
                 <div>
                   <div className="section-label">Endereço</div>
@@ -1470,7 +1482,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                     <button key={p} type="button" className={`payment-card ${payment === p ? "sel" : ""}`} onClick={() => openPaymentConfig(p)}>
                       <span className="payment-icon">{paymentIcon(p)}</span>
                       <span className="payment-card-text"><strong>{paymentLabel(p)}</strong><small>{paymentSummary(p)}</small></span>
-                      <span className="payment-edit" aria-hidden="true">✎</span>
+                      <span className="payment-edit" aria-hidden="true">{ICONS.editar}</span>
                     </button>
                   ))}
                 </div>
@@ -1511,7 +1523,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                 <p style={{ fontSize: 13, color: "var(--muted)", marginBottom: 10, marginTop: -4 }}>Se quiser, deixa um recado pra cozinha. Se não tiver nada, pode seguir direto.</p>
                 <div className="field" style={{ marginBottom: 0 }}><input value={observacao} onChange={(e) => setObservacao(e.target.value)} placeholder="Ex: sem cebola, sem azeitona, tirar milho, pouco orégano…" /></div>
               </div>
-              {cartEsgotado && <div style={{ marginTop: 8, padding: "10px 12px", borderRadius: 10, background: "rgba(239,68,68,.1)", color: "#ef4444", fontSize: 13, fontWeight: 700 }}>Um item do seu pedido ficou esgotado. Remova para continuar.</div>}
+              {cartEsgotado && <div style={{ marginTop: 8, padding: "10px 12px", borderRadius: 10, background: "rgba(239,68,68,.1)", color: "#ef4444", fontSize: 13, fontWeight: 700 }}>{ICONS.alerta} Um item do seu pedido ficou esgotado. Remova para continuar.</div>}
             </section>
           )}
           {screen === "sc-done" && (
@@ -1535,10 +1547,10 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                       </div>
                     )}
                     {payment === "Pix" && !pedidoConfirmado.pix?.qrCode && statusPedidoConfirmado === "novo" && (
-                      <div style={{ textAlign: "left", background: "var(--card)", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
-                        <div style={{ fontSize: 12, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 6 }}>⏳ Aguardando confirmação do Pix</div>
-                        <p style={{ fontSize: 13, color: "var(--fg)", margin: 0, lineHeight: 1.5 }}>Seu pedido foi recebido. A pizzaria confirma o pagamento antes de começar o preparo.</p>
-                        <p style={{ fontSize: 13, color: "var(--muted)", margin: "8px 0 0", lineHeight: 1.5 }}>Se você já fez o Pix, envie o comprovante pelo WhatsApp da pizzaria.</p>
+                      <div style={{ textAlign: "left", background: "var(--surface)", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
+                        <CardapioIllustration compact icon={CARDAPIO_ILLUSTRATIONS.aguardandoPix.icon} title={CARDAPIO_ILLUSTRATIONS.aguardandoPix.title} />
+                        <p style={{ fontSize: 13, color: "var(--text)", margin: "10px 0 0", lineHeight: 1.5 }}>Seu pedido foi recebido. A pizzaria confirma o pagamento antes de começar o preparo.</p>
+                        <p style={{ fontSize: 13, color: "var(--text-sub)", margin: "8px 0 0", lineHeight: 1.5 }}>Se você já fez o Pix, envie o comprovante pelo WhatsApp da pizzaria.</p>
                       </div>
                     )}
                     <a href={`/rastrear/${pedidoConfirmado.id}`} className="btn" style={{ display: "block", marginBottom: 10, textAlign: "center", textDecoration: "none" }}>Acompanhar pedido</a>
@@ -1954,6 +1966,13 @@ main{width:100%;padding:6px 20px 20px}
 .checkout-summary{margin:14px 0 10px;color:var(--text-sub);font-size:13px;font-weight:700;text-align:center}
 .empty{text-align:center;padding:54px 20px;color:var(--text-sub)}
 .empty .big{font-size:56px;margin-bottom:14px;opacity:.4}
+.cardapio-illustration{text-align:center;padding:36px 20px}
+.cardapio-illustration-icon{font-size:40px;margin-bottom:10px;line-height:1}
+.cardapio-illustration-title{font-weight:700;font-size:15.5px;color:var(--text)}
+.cardapio-illustration-text{font-size:13px;color:var(--text-sub);margin-top:4px;line-height:1.4}
+.cardapio-illustration.compact{text-align:left;padding:0;display:flex;align-items:center;gap:10px}
+.cardapio-illustration.compact .cardapio-illustration-icon{font-size:22px;margin-bottom:0}
+.cardapio-illustration.compact .cardapio-illustration-title{font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-sub);font-weight:600}
 .success{text-align:center;padding:34px 8px}
 .success .check{width:80px;height:80px;border-radius:50%;background:var(--green);margin:0 auto 20px;display:flex;align-items:center;justify-content:center;font-size:42px;color:#fff;animation:pop .55s cubic-bezier(.2,1.4,.4,1)}
 @keyframes pop{from{transform:scale(0)}to{transform:scale(1)}}
