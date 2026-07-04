@@ -164,6 +164,40 @@ describe("metadados internos de Pix", () => {
     });
   });
 
+  test("helper publico retorna Pix manual com chave, beneficiario e copia e cola local", () => {
+    const pixCliente = serializarPixCliente(
+      { txid: "chefebot_123", valorEsperado: 30, status: "pendente" },
+      {
+        chavePix: "99974000691",
+        nomeTitularPix: "Kellyne Pizzaria",
+        whatsappPizzaria: "(99) 97400-0691",
+      }
+    );
+
+    expect(pixCliente).toMatchObject({
+      provider: "manual",
+      chavePix: "99974000691",
+      beneficiario: "Kellyne Pizzaria",
+      whatsappPizzaria: "5599974000691",
+      valorEsperado: 30,
+    });
+    expect(pixCliente?.copiaECola).toContain("99974000691");
+    expect(pixCliente?.copiaECola).toMatch(/6304[0-9A-F]{4}$/);
+  });
+
+  test("helper publico com Pix manual sem titular retorna so chave e nao gera copia e cola", () => {
+    const pixCliente = serializarPixCliente(
+      { txid: "chefebot_123", valorEsperado: 30, status: "pendente" },
+      { chavePix: "99974000691" }
+    );
+
+    expect(pixCliente).toEqual({
+      provider: "manual",
+      chavePix: "99974000691",
+      valorEsperado: 30,
+    });
+  });
+
   test("helper publico nao retorna qrCodeBase64", () => {
     const pixCliente = serializarPixCliente({
       provider: "mercadopago",
