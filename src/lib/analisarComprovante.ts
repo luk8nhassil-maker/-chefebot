@@ -1,9 +1,12 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { normalizarCodigoAutenticacaoPix, normalizarE2EIdPix } from "./pixComprovanteEvidencia";
 
 type ResultadoAnalise = {
   valido: boolean;
   valorEncontrado: number | null;
   chavePix: string | null;
+  e2eId: string | null;
+  codigoAutenticacao: string | null;
   mensagem: string;
 };
 
@@ -30,6 +33,7 @@ DADOS ESPERADOS:
 - Chave Pix / CNPJ da pizzaria: ${chavePix}
 - Nome do titular que deve receber: ${nomeTitular}
 - Data do pedido: ${dataHoje}
+- E2E ID Pix ou código de autenticação/transação, se estiver visível (não obrigatório)
 REGRAS DE VALIDAÇÃO — responda "valido: true" SOMENTE se TODAS forem atendidas:
 1. Valor bate com o esperado (tolerância de R$ 0,01)
 2. Nome do destinatário contém palavras do nome "${nomeTitular}" (comparação flexível, ignorar maiúsculas/minúsculas, aceitar nome parcial) OU CNPJ/chave contém "${chavePix}"
@@ -39,9 +43,9 @@ REGRAS DE VALIDAÇÃO — responda "valido: true" SOMENTE se TODAS forem atendid
 Se qualquer uma dessas regras falhar, responda "valido: false".
 
 Responda APENAS em JSON sem explicações:
-{"valor": 52.00, "chave": "chave encontrada ou null", "valido": true/false, "motivo": "aprovado / valor errado / data errada / horario anterior ao pedido / nome errado / pix nao concluido"}
+{"valor": 52.00, "chave": "chave encontrada ou null", "e2eId": "E2E encontrado ou null", "codigoAutenticacao": "codigo encontrado ou null", "valido": true/false, "motivo": "aprovado / valor errado / data errada / horario anterior ao pedido / nome errado / pix nao concluido"}
 
-Se não conseguir ler: {"valor": null, "chave": null, "valido": false, "motivo": "ilegivel"}`;
+Se não conseguir ler: {"valor": null, "chave": null, "e2eId": null, "codigoAutenticacao": null, "valido": false, "motivo": "ilegivel"}`;
 
     const content: any[] = [];
 
@@ -90,6 +94,8 @@ Se não conseguir ler: {"valor": null, "chave": null, "valido": false, "motivo":
       valido: resultado.valido === true,
       valorEncontrado: resultado.valor ?? null,
       chavePix: resultado.chave ?? null,
+      e2eId: normalizarE2EIdPix(resultado.e2eId ?? resultado.e2e ?? resultado.endToEndId) ?? null,
+      codigoAutenticacao: normalizarCodigoAutenticacaoPix(resultado.codigoAutenticacao ?? resultado.codigo ?? resultado.codigoTransacao) ?? null,
       mensagem: resultado.valido
         ? `Pix de R$ ${resultado.valor} confirmado! ✅`
         : mensagemInvalido,
@@ -99,6 +105,8 @@ Se não conseguir ler: {"valor": null, "chave": null, "valido": false, "motivo":
       valido: false,
       valorEncontrado: null,
       chavePix: null,
+      e2eId: null,
+      codigoAutenticacao: null,
       mensagem: "Não consegui ler o comprovante.",
     };
   }

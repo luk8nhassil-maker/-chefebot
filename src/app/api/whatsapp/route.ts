@@ -15,7 +15,8 @@ import { proximoNumeroPedido } from "@/lib/numeracao";
 import { salvarStatusConexao, botPodeResponder, StatusConexao } from "@/lib/conexaoWhatsapp";
 import { ehConfirmacaoPedido } from "@/lib/confirmacaoPedido";
 import { escolherStepDeRetomada, detectarConversaMorta } from "@/lib/reviverConversa";
-import { anexarPixMercadoPagoEmMensagens, confirmarPixMetadata, criarPixMetadata, prepararPixProviderMercadoPago, serializarPixCliente, type PixCliente, type PixMetadata } from "@/lib/pix";
+import { anexarPixMercadoPagoEmMensagens, confirmarPixMetadata, criarPixMetadata, prepararPixProviderMercadoPago, registrarPixEvidencia, serializarPixCliente, type PixCliente, type PixEvidenciaOrigem, type PixMetadata } from "@/lib/pix";
+import { chaveDedupIdentificadorComprovantePix, extrairIdentificadorComprovantePix, normalizarIdentificadorComprovantePix, PIX_COMPROVANTE_E2E_TTL_SEGUNDOS, type PixComprovanteIdentificador } from "@/lib/pixComprovanteEvidencia";
 import { chaveDedupComprovantePix, gerarHashComprovantePixMidia, gerarHashComprovantePixTexto, PIX_COMPROVANTE_DEDUP_TTL_SEGUNDOS } from "@/lib/pixComprovanteHash";
 import { encontrarPedidoPixPendentePorTelefone } from "@/lib/pixPedidoMatching";
 import { telefonesCorrespondem } from "@/lib/telefone";
@@ -301,6 +302,44 @@ async function bloquearComprovantePixReutilizado(phone: string, session: BotSess
   await log("aviso", "Comprovante Pix reutilizado detectado", `Phone: ${phone} origem: ${origem}`);
 }
 
+function temIdentificadorComprovantePix(identificador: PixComprovanteIdentificador): boolean {
+  return !!(identificador.e2eId || identificador.codigoAutenticacao);
+}
+
+function escolherIdentificadorComprovantePix(
+  preferencial: PixComprovanteIdentificador,
+  alternativo: PixComprovanteIdentificador
+): PixComprovanteIdentificador {
+  const normalizadoPreferencial = normalizarIdentificadorComprovantePix(preferencial);
+  if (temIdentificadorComprovantePix(normalizadoPreferencial)) return normalizadoPreferencial;
+
+  return normalizarIdentificadorComprovantePix(alternativo);
+}
+
+async function chaveE2EJaUsada(identificador: PixComprovanteIdentificador): Promise<string | undefined> {
+  const chave = chaveDedupIdentificadorComprovantePix(identificador);
+  if (!chave) return undefined;
+
+  const jaUsado = await redis.get(chave);
+  return jaUsado ? chave : undefined;
+}
+
+async function registrarDedupE2E(identificador: PixComprovanteIdentificador) {
+  const chave = chaveDedupIdentificadorComprovantePix(identificador);
+  if (!chave) return;
+
+  await redis.set(chave, true, { ex: PIX_COMPROVANTE_E2E_TTL_SEGUNDOS });
+}
+
+function confirmarPixComEvidencia(
+  pix: PixMetadata | undefined,
+  identificador: PixComprovanteIdentificador,
+  origem: PixEvidenciaOrigem
+): PixMetadata {
+  const confirmado = confirmarPixMetadata(pix, "comprovante");
+  return registrarPixEvidencia(confirmado, { ...identificador, origem });
+}
+
 async function processarComprovanteTexto(phone: string, texto: string, config: ConfigPizzaria) {
   try {
     const sessionKey = `session:${phone}`;
@@ -329,6 +368,11 @@ async function processarComprovanteTexto(phone: string, texto: string, config: C
       await bloquearComprovantePixReutilizado(phone, session, pedidoAtivo, "texto");
       return;
     }
+    const identificadorTexto = extrairIdentificadorComprovantePix(texto);
+    if (await chaveE2EJaUsada(identificadorTexto)) {
+      await bloquearComprovantePixReutilizado(phone, session, pedidoAtivo, "texto");
+      return;
+    }
 
     // Usa Claude para validar o comprovante em texto
     const client = new (await import("@anthropic-ai/sdk")).default({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -348,9 +392,10 @@ DADOS ESPERADOS:
 - Chave Pix: ${config.chavePix}
 - Data: ${dataHoje}
 - Horário mínimo: ${horarioRef}
+- E2E ID Pix ou código de autenticação/transação, se estiver visível (não obrigatório)
 
 Responda APENAS em JSON:
-{"valido": true/false, "valor": numero_ou_null, "motivo": "aprovado/valor_errado/data_errada/horario_anterior/nome_errado/nao_concluido/ilegivel"}`;
+{"valido": true/false, "valor": numero_ou_null, "e2eId": "E2E ou null", "codigoAutenticacao": "codigo ou null", "motivo": "aprovado/valor_errado/data_errada/horario_anterior/nome_errado/nao_concluido/ilegivel"}`;
 
     const response = await client.messages.create({
       model: "claude-haiku-4-5-20251001",
@@ -361,9 +406,18 @@ Responda APENAS em JSON:
     const respText = response.content[0].type === "text" ? response.content[0].text : "";
     const clean = respText.replace(/```json|```/g, "").trim();
     const resultado = JSON.parse(clean);
+    const identificadorAnalise = normalizarIdentificadorComprovantePix({
+      e2eId: resultado.e2eId ?? resultado.e2e ?? resultado.endToEndId,
+      codigoAutenticacao: resultado.codigoAutenticacao ?? resultado.codigo ?? resultado.codigoTransacao,
+    });
+    const identificador = escolherIdentificadorComprovantePix(identificadorTexto, identificadorAnalise);
+    if (await chaveE2EJaUsada(identificador)) {
+      await bloquearComprovantePixReutilizado(phone, session, pedidoAtivo, "texto");
+      return;
+    }
 
     if (resultado.valido) {
-      const pedidosAtualizados = pedidos.map(p => p.id === pedidoAtivo!.id ? { ...p, pixConfirmado: true, pix: confirmarPixMetadata(p.pix, "comprovante") } : p);
+      const pedidosAtualizados = pedidos.map(p => p.id === pedidoAtivo!.id ? { ...p, pixConfirmado: true, pix: confirmarPixComEvidencia(p.pix, identificador, "texto") } : p);
       await redis.set("pedidos", pedidosAtualizados);
       const firstName = pedidoAtivo.cliente.split(" ")[0];
       const timeMsg = pedidoAtivo.tipoEntrega === "pickup" ? config.tempoEntregaRetirada : config.tempoEntregaDelivery;
@@ -373,6 +427,7 @@ Obrigado, *${firstName}*! Seu pedido já foi pra cozinha. Sua pizza chega em *${
 
 Qualquer dúvida é só chamar. Bom apetite! 🍕`);
       await redis.set(chaveHash, true, { ex: PIX_COMPROVANTE_DEDUP_TTL_SEGUNDOS });
+      await registrarDedupE2E(identificador);
       const sessionAtual = await redis.get<BotSession>(sessionKey);
       if (sessionAtual) await redis.set(sessionKey, { ...sessionAtual, step: "done" }, { ex: 1800 });
       await log("info", `Pix texto confirmado para ${firstName}`, `Valor: ${resultado.valor}`);
@@ -450,13 +505,23 @@ async function processarComprovante(phone: string, data: any, config: ConfigPizz
       config.chavePix, config.nomeTitularPix || config.nomePizzaria,
       pedidoAtivo.horarioInicio || pedidoAtivo.horario
     );
+    const identificador = normalizarIdentificadorComprovantePix({
+      e2eId: resultado.e2eId ?? undefined,
+      codigoAutenticacao: resultado.codigoAutenticacao ?? undefined,
+    });
+    if (await chaveE2EJaUsada(identificador)) {
+      await bloquearComprovantePixReutilizado(phone, session, pedidoAtivo, "midia")
+      return
+    }
+
     if (resultado.valido) {
-      const pedidosAtualizados = pedidos.map(p => p.id === pedidoAtivo.id ? { ...p, pixConfirmado: true, pix: confirmarPixMetadata(p.pix, "comprovante") } : p);
+      const pedidosAtualizados = pedidos.map(p => p.id === pedidoAtivo.id ? { ...p, pixConfirmado: true, pix: confirmarPixComEvidencia(p.pix, identificador, "midia") } : p);
       await redis.set("pedidos", pedidosAtualizados);
       const firstName = pedidoAtivo.cliente.split(" ")[0];
       const timeMsg = pedidoAtivo.tipoEntrega === "pickup" ? config.tempoEntregaRetirada : config.tempoEntregaDelivery;
       await enviarMensagem(phone, `Pagamento confirmado! ✅🎉\n\nObrigado, *${firstName}*! Seu pedido já foi pra cozinha. Sua pizza chega em *${timeMsg}* 🛵\n\nQualquer dúvida é só chamar. Bom apetite! 🍕`);
       await redis.set(chaveHash, true, { ex: PIX_COMPROVANTE_DEDUP_TTL_SEGUNDOS })
+      await registrarDedupE2E(identificador)
       await log("info", `Pix confirmado automaticamente para ${firstName}`, `Valor: R$ ${resultado.valorEncontrado}`);
     } else {
       await enviarMensagem(phone, `Comprovante recebido! 📄 Nossa equipe vai verificar o pagamento manualmente. Em instantes confirmamos! 😊`);

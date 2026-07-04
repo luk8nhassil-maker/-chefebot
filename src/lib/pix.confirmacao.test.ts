@@ -3,7 +3,7 @@ import { vi, describe, test, expect } from "vitest";
 vi.mock("./redis", () => ({ redis: { get: vi.fn().mockResolvedValue(null) } }));
 vi.mock("./mercadoPagoPix", () => ({ criarCobrancaPixMercadoPago: vi.fn() }));
 
-import { confirmarPixMetadata, type PixMetadata } from "./pix";
+import { confirmarPixMetadata, registrarPixEvidencia, type PixMetadata } from "./pix";
 
 describe("confirmarPixMetadata — auditoria da confirmação de Pix", () => {
   test("confirma Pix pendente preenchendo status, origem e horário", () => {
@@ -69,5 +69,36 @@ describe("confirmarPixMetadata — auditoria da confirmação de Pix", () => {
     const confirmado = confirmarPixMetadata({ status: "pendente" }, "comprovante");
     expect(confirmado.confirmadoEm).toBeTruthy();
     expect(Number.isNaN(Date.parse(confirmado.confirmadoEm!))).toBe(false);
+  });
+
+  test("registra evidencia E2E/codigo sem alterar confirmacao do Pix", () => {
+    const pix: PixMetadata = {
+      status: "confirmado",
+      confirmadoPor: "comprovante",
+      confirmadoEm: "2026-07-04T20:00:00.000Z",
+    };
+
+    expect(
+      registrarPixEvidencia(
+        pix,
+        { e2eId: "E1234567890ABCDEF1234567890ABCD", origem: "midia" },
+        "2026-07-04T20:05:00.000Z",
+      ),
+    ).toEqual({
+      status: "confirmado",
+      confirmadoPor: "comprovante",
+      confirmadoEm: "2026-07-04T20:00:00.000Z",
+      evidencia: {
+        e2eId: "E1234567890ABCDEF1234567890ABCD",
+        origem: "midia",
+        registradoEm: "2026-07-04T20:05:00.000Z",
+      },
+    });
+  });
+
+  test("sem E2E/codigo visivel preserva o metadata atual", () => {
+    const pix: PixMetadata = { status: "confirmado", confirmadoPor: "comprovante" };
+
+    expect(registrarPixEvidencia(pix, { origem: "texto" })).toBe(pix);
   });
 });
