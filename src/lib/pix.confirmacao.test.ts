@@ -101,4 +101,25 @@ describe("confirmarPixMetadata — auditoria da confirmação de Pix", () => {
 
     expect(registrarPixEvidencia(pix, { origem: "texto" })).toBe(pix);
   });
+
+  test("registra evidencia de horario suspeito sem alterar status", () => {
+    const pix: PixMetadata = { status: "pendente", txid: "chefebot_5" };
+
+    expect(
+      registrarPixEvidencia(
+        pix,
+        { dataHoraPagamento: "2026-07-04T19:00:00", motivo: "pagamento_anterior", origem: "texto" },
+        "2026-07-04T22:05:00.000Z",
+      ),
+    ).toEqual({
+      status: "pendente",
+      txid: "chefebot_5",
+      evidencia: {
+        dataHoraPagamento: "2026-07-04T19:00:00",
+        motivo: "pagamento_anterior",
+        origem: "texto",
+        registradoEm: "2026-07-04T22:05:00.000Z",
+      },
+    });
+  });
 });

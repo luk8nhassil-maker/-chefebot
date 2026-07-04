@@ -18,6 +18,7 @@ import { escolherStepDeRetomada, detectarConversaMorta } from "@/lib/reviverConv
 import { anexarPixMercadoPagoEmMensagens, confirmarPixMetadata, criarPixMetadata, prepararPixProviderMercadoPago, registrarPixEvidencia, serializarPixCliente, type PixCliente, type PixEvidenciaOrigem, type PixMetadata } from "@/lib/pix";
 import { chaveDedupIdentificadorComprovantePix, extrairIdentificadorComprovantePix, normalizarIdentificadorComprovantePix, PIX_COMPROVANTE_E2E_TTL_SEGUNDOS, type PixComprovanteIdentificador } from "@/lib/pixComprovanteEvidencia";
 import { chaveDedupComprovantePix, gerarHashComprovantePixMidia, gerarHashComprovantePixTexto, PIX_COMPROVANTE_DEDUP_TTL_SEGUNDOS } from "@/lib/pixComprovanteHash";
+import { avaliarHorarioComprovantePix, extrairDataHoraComprovantePix, FUSO_OPERACIONAL_PIX, type PixComprovanteHorarioExtraido, type ResultadoHorarioComprovantePix } from "@/lib/pixComprovanteHorario";
 import { encontrarPedidoPixPendentePorTelefone } from "@/lib/pixPedidoMatching";
 import { telefonesCorrespondem } from "@/lib/telefone";
 import type { BotStep } from "@/lib/bot";
@@ -36,6 +37,7 @@ type Pedido = {
   total: number;
   status: "novo" | "em_preparo" | "saiu_entrega" | "entregue" | "cancelado";
   horario: string;
+  data?: string;
   endereco: string;
   escalonado?: boolean;
   horarioEscalonado?: number;
@@ -334,10 +336,61 @@ async function registrarDedupE2E(identificador: PixComprovanteIdentificador) {
 function confirmarPixComEvidencia(
   pix: PixMetadata | undefined,
   identificador: PixComprovanteIdentificador,
-  origem: PixEvidenciaOrigem
+  origem: PixEvidenciaOrigem,
+  horario?: PixComprovanteHorarioExtraido
 ): PixMetadata {
   const confirmado = confirmarPixMetadata(pix, "comprovante");
-  return registrarPixEvidencia(confirmado, { ...identificador, origem });
+  return registrarPixEvidencia(confirmado, {
+    ...identificador,
+    ...(horario?.dataHora ? { dataHoraPagamento: horario.dataHora } : {}),
+    origem,
+  });
+}
+
+function escolherHorarioComprovantePix(
+  preferencial: PixComprovanteHorarioExtraido,
+  alternativo: PixComprovanteHorarioExtraido
+): PixComprovanteHorarioExtraido {
+  if (preferencial.data || preferencial.hora) return preferencial;
+  return alternativo;
+}
+
+function avaliarHorarioPedidoComprovante(
+  pedido: Pedido,
+  horario: PixComprovanteHorarioExtraido,
+  textoComprovante?: string
+): ResultadoHorarioComprovantePix {
+  return avaliarHorarioComprovantePix({
+    horarioPedido: pedido.horarioInicio || pedido.horario,
+    dataPedido: pedido.data,
+    dataHoraComprovante: horario.dataHora,
+    dataComprovante: horario.data,
+    horaComprovante: horario.hora,
+    textoComprovante,
+    fuso: FUSO_OPERACIONAL_PIX,
+  });
+}
+
+async function bloquearComprovantePixAnterior(
+  phone: string,
+  session: BotSession | null,
+  pedidos: Pedido[],
+  pedidoAtivo: Pedido,
+  origem: PixEvidenciaOrigem,
+  avaliacao: ResultadoHorarioComprovantePix
+) {
+  const pedidosAtualizados = pedidos.map(p => p.id === pedidoAtivo.id ? {
+    ...p,
+    pix: registrarPixEvidencia(p.pix || {}, {
+      origem,
+      ...(avaliacao.pagamentoEm ? { dataHoraPagamento: avaliacao.pagamentoEm } : {}),
+      motivo: avaliacao.motivo,
+    }),
+  } : p);
+  await redis.set("pedidos", pedidosAtualizados);
+  await enviarMensagem(phone, `Recebi seu comprovante, mas não consegui validar automaticamente a data/horário do pagamento para este pedido. Vou encaminhar para conferência.`);
+  await salvarEscalonamento(phone, session || { step: "done", cart: [], deliveryFee: 0, customerName: pedidoAtivo.cliente });
+  await log("aviso", "Comprovante Pix anterior ao pedido", `Phone: ${phone} origem: ${origem} motivo: ${avaliacao.motivo}`);
 }
 
 async function processarComprovanteTexto(phone: string, texto: string, config: ConfigPizzaria) {
@@ -373,6 +426,12 @@ async function processarComprovanteTexto(phone: string, texto: string, config: C
       await bloquearComprovantePixReutilizado(phone, session, pedidoAtivo, "texto");
       return;
     }
+    const horarioTexto = extrairDataHoraComprovantePix(texto, pedidoAtivo.data);
+    const avaliacaoHorarioTexto = avaliarHorarioPedidoComprovante(pedidoAtivo, horarioTexto, texto);
+    if (avaliacaoHorarioTexto.bloquear) {
+      await bloquearComprovantePixAnterior(phone, session, pedidos, pedidoAtivo, "texto", avaliacaoHorarioTexto);
+      return;
+    }
 
     // Usa Claude para validar o comprovante em texto
     const client = new (await import("@anthropic-ai/sdk")).default({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -393,13 +452,16 @@ DADOS ESPERADOS:
 - Data: ${dataHoje}
 - Horário mínimo: ${horarioRef}
 - E2E ID Pix ou código de autenticação/transação, se estiver visível (não obrigatório)
+- Data e hora do pagamento Pix, se estiverem visíveis (hora não obrigatória)
+
+Se data e hora do pagamento estiverem claras, o pagamento não pode ser anterior ao horário do pedido por mais de 10 minutos. Se apenas a data estiver visível ou o horário estiver ilegível, não reprove somente por falta de horário.
 
 Responda APENAS em JSON:
-{"valido": true/false, "valor": numero_ou_null, "e2eId": "E2E ou null", "codigoAutenticacao": "codigo ou null", "motivo": "aprovado/valor_errado/data_errada/horario_anterior/nome_errado/nao_concluido/ilegivel"}`;
+{"valido": true/false, "valor": numero_ou_null, "e2eId": "E2E ou null", "codigoAutenticacao": "codigo ou null", "dataPagamento": "DD/MM/AAAA ou null", "horaPagamento": "HH:mm ou null", "dataHoraPagamento": "data e hora completa ou null", "motivo": "aprovado/valor_errado/data_errada/horario_anterior/nome_errado/nao_concluido/ilegivel"}`;
 
     const response = await client.messages.create({
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 200,
+      max_tokens: 260,
       messages: [{ role: "user", content: prompt }],
     });
 
@@ -415,9 +477,19 @@ Responda APENAS em JSON:
       await bloquearComprovantePixReutilizado(phone, session, pedidoAtivo, "texto");
       return;
     }
+    const horarioAnalise = extrairDataHoraComprovantePix([
+      resultado.dataHoraPagamento,
+      [resultado.dataPagamento, resultado.horaPagamento ?? resultado.horarioPagamento].filter(Boolean).join(" "),
+    ].filter(Boolean).join("\n"), pedidoAtivo.data);
+    const horarioComprovante = escolherHorarioComprovantePix(horarioTexto, horarioAnalise);
+    const avaliacaoHorario = avaliarHorarioPedidoComprovante(pedidoAtivo, horarioComprovante, texto);
+    if (avaliacaoHorario.bloquear) {
+      await bloquearComprovantePixAnterior(phone, session, pedidos, pedidoAtivo, "texto", avaliacaoHorario);
+      return;
+    }
 
     if (resultado.valido) {
-      const pedidosAtualizados = pedidos.map(p => p.id === pedidoAtivo!.id ? { ...p, pixConfirmado: true, pix: confirmarPixComEvidencia(p.pix, identificador, "texto") } : p);
+      const pedidosAtualizados = pedidos.map(p => p.id === pedidoAtivo!.id ? { ...p, pixConfirmado: true, pix: confirmarPixComEvidencia(p.pix, identificador, "texto", horarioComprovante) } : p);
       await redis.set("pedidos", pedidosAtualizados);
       const firstName = pedidoAtivo.cliente.split(" ")[0];
       const timeMsg = pedidoAtivo.tipoEntrega === "pickup" ? config.tempoEntregaRetirada : config.tempoEntregaDelivery;
@@ -513,9 +585,18 @@ async function processarComprovante(phone: string, data: any, config: ConfigPizz
       await bloquearComprovantePixReutilizado(phone, session, pedidoAtivo, "midia")
       return
     }
+    const horarioComprovante = extrairDataHoraComprovantePix([
+      resultado.dataHoraPagamento,
+      [resultado.dataPagamento, resultado.horaPagamento].filter(Boolean).join(" "),
+    ].filter(Boolean).join("\n"), pedidoAtivo.data);
+    const avaliacaoHorario = avaliarHorarioPedidoComprovante(pedidoAtivo, horarioComprovante);
+    if (avaliacaoHorario.bloquear) {
+      await bloquearComprovantePixAnterior(phone, session, pedidos, pedidoAtivo, "midia", avaliacaoHorario)
+      return
+    }
 
     if (resultado.valido) {
-      const pedidosAtualizados = pedidos.map(p => p.id === pedidoAtivo.id ? { ...p, pixConfirmado: true, pix: confirmarPixComEvidencia(p.pix, identificador, "midia") } : p);
+      const pedidosAtualizados = pedidos.map(p => p.id === pedidoAtivo.id ? { ...p, pixConfirmado: true, pix: confirmarPixComEvidencia(p.pix, identificador, "midia", horarioComprovante) } : p);
       await redis.set("pedidos", pedidosAtualizados);
       const firstName = pedidoAtivo.cliente.split(" ")[0];
       const timeMsg = pedidoAtivo.tipoEntrega === "pickup" ? config.tempoEntregaRetirada : config.tempoEntregaDelivery;

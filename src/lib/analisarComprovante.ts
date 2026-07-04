@@ -7,6 +7,9 @@ type ResultadoAnalise = {
   chavePix: string | null;
   e2eId: string | null;
   codigoAutenticacao: string | null;
+  dataPagamento: string | null;
+  horaPagamento: string | null;
+  dataHoraPagamento: string | null;
   mensagem: string;
 };
 
@@ -33,6 +36,8 @@ DADOS ESPERADOS:
 - Chave Pix / CNPJ da pizzaria: ${chavePix}
 - Nome do titular que deve receber: ${nomeTitular}
 - Data do pedido: ${dataHoje}
+- Horario de referencia do pedido: ${horarioReferencia}
+- Data e horario do pagamento Pix, se estiverem visiveis (horario nao obrigatorio)
 - E2E ID Pix ou código de autenticação/transação, se estiver visível (não obrigatório)
 REGRAS DE VALIDAÇÃO — responda "valido: true" SOMENTE se TODAS forem atendidas:
 1. Valor bate com o esperado (tolerância de R$ 0,01)
@@ -40,12 +45,14 @@ REGRAS DE VALIDAÇÃO — responda "valido: true" SOMENTE se TODAS forem atendid
 3. A data do comprovante é HOJE (${dataHoje})
 4. O comprovante indica que o Pix foi ENVIADO/CONCLUÍDO com sucesso (não agendado, não pendente, não cancelado, não em análise)
 
+5. Se data e horario do pagamento estiverem claros, o pagamento nao pode ser anterior ao horario de referencia do pedido por mais de 10 minutos. Se apenas a data estiver visivel ou o horario estiver ilegivel, nao reprove somente por falta de horario.
+
 Se qualquer uma dessas regras falhar, responda "valido: false".
 
 Responda APENAS em JSON sem explicações:
-{"valor": 52.00, "chave": "chave encontrada ou null", "e2eId": "E2E encontrado ou null", "codigoAutenticacao": "codigo encontrado ou null", "valido": true/false, "motivo": "aprovado / valor errado / data errada / horario anterior ao pedido / nome errado / pix nao concluido"}
+{"valor": 52.00, "chave": "chave encontrada ou null", "e2eId": "E2E encontrado ou null", "codigoAutenticacao": "codigo encontrado ou null", "dataPagamento": "DD/MM/AAAA ou null", "horaPagamento": "HH:mm ou null", "dataHoraPagamento": "data e hora completa ou null", "valido": true/false, "motivo": "aprovado / valor errado / data errada / horario anterior ao pedido / nome errado / pix nao concluido"}
 
-Se não conseguir ler: {"valor": null, "chave": null, "e2eId": null, "codigoAutenticacao": null, "valido": false, "motivo": "ilegivel"}`;
+Se não conseguir ler: {"valor": null, "chave": null, "e2eId": null, "codigoAutenticacao": null, "dataPagamento": null, "horaPagamento": null, "dataHoraPagamento": null, "valido": false, "motivo": "ilegivel"}`;
 
     const content: any[] = [];
 
@@ -73,7 +80,7 @@ Se não conseguir ler: {"valor": null, "chave": null, "e2eId": null, "codigoAute
 
     const response = await client.messages.create({
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 200,
+      max_tokens: 260,
       messages: [{ role: "user", content }],
     });
 
@@ -96,6 +103,9 @@ Se não conseguir ler: {"valor": null, "chave": null, "e2eId": null, "codigoAute
       chavePix: resultado.chave ?? null,
       e2eId: normalizarE2EIdPix(resultado.e2eId ?? resultado.e2e ?? resultado.endToEndId) ?? null,
       codigoAutenticacao: normalizarCodigoAutenticacaoPix(resultado.codigoAutenticacao ?? resultado.codigo ?? resultado.codigoTransacao) ?? null,
+      dataPagamento: resultado.dataPagamento ?? null,
+      horaPagamento: resultado.horaPagamento ?? resultado.horarioPagamento ?? null,
+      dataHoraPagamento: resultado.dataHoraPagamento ?? null,
       mensagem: resultado.valido
         ? `Pix de R$ ${resultado.valor} confirmado! ✅`
         : mensagemInvalido,
@@ -107,6 +117,9 @@ Se não conseguir ler: {"valor": null, "chave": null, "e2eId": null, "codigoAute
       chavePix: null,
       e2eId: null,
       codigoAutenticacao: null,
+      dataPagamento: null,
+      horaPagamento: null,
+      dataHoraPagamento: null,
       mensagem: "Não consegui ler o comprovante.",
     };
   }

@@ -11,6 +11,8 @@ export type PixEvidenciaOrigem = "texto" | "midia";
 export type PixEvidencia = {
   e2eId?: string;
   codigoAutenticacao?: string;
+  dataHoraPagamento?: string;
+  motivo?: string;
   origem?: PixEvidenciaOrigem;
   registradoEm?: string;
 };
@@ -102,13 +104,15 @@ export function registrarPixEvidencia(
   evidencia: Omit<PixEvidencia, "registradoEm">,
   registradoEm: string = new Date().toISOString()
 ): PixMetadata {
-  if (!evidencia.e2eId && !evidencia.codigoAutenticacao) return pix;
+  if (!evidencia.e2eId && !evidencia.codigoAutenticacao && !evidencia.dataHoraPagamento && !evidencia.motivo) return pix;
   return {
     ...pix,
     evidencia: {
       ...(pix.evidencia || {}),
       ...(evidencia.e2eId ? { e2eId: evidencia.e2eId } : {}),
       ...(evidencia.codigoAutenticacao ? { codigoAutenticacao: evidencia.codigoAutenticacao } : {}),
+      ...(evidencia.dataHoraPagamento ? { dataHoraPagamento: evidencia.dataHoraPagamento } : {}),
+      ...(evidencia.motivo ? { motivo: evidencia.motivo } : {}),
       ...(evidencia.origem ? { origem: evidencia.origem } : {}),
       registradoEm,
     },
