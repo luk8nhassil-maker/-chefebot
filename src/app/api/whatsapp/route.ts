@@ -534,10 +534,11 @@ DADOS ESPERADOS:
 - Data e hora do pagamento Pix, se estiverem visíveis (hora não obrigatória)
 - Nome do destinatário ou chave Pix encontrado no comprovante, se estiver visível
 
+A chave Pix pode aparecer formatada de outra forma (+55, parênteses, espaços, hífens, pontos); considere equivalente se os dígitos corresponderem.
 Se data e hora do pagamento estiverem claras, o pagamento não pode ser anterior ao horário do pedido por mais de 10 minutos. Se apenas a data estiver visível ou o horário estiver ilegível, não reprove somente por falta de horário.
 
 Responda APENAS em JSON:
-{"valido": true/false, "valor": numero_ou_null, "beneficiario": "nome ou chave do destinatario encontrado ou null", "e2eId": "E2E ou null", "codigoAutenticacao": "codigo ou null", "dataPagamento": "DD/MM/AAAA ou null", "horaPagamento": "HH:mm ou null", "dataHoraPagamento": "data e hora completa ou null", "motivo": "aprovado/valor_errado/data_errada/horario_anterior/nome_errado/nao_concluido/ilegivel"}`;
+{"valido": true/false, "valor": numero_ou_null, "beneficiario": "nome do destinatario encontrado ou null", "chave": "chave Pix do destinatario encontrada ou null", "e2eId": "E2E ou null", "codigoAutenticacao": "codigo ou null", "dataPagamento": "DD/MM/AAAA ou null", "horaPagamento": "HH:mm ou null", "dataHoraPagamento": "data e hora completa ou null", "motivo": "aprovado/valor_errado/data_errada/horario_anterior/nome_errado/nao_concluido/ilegivel"}`;
 
     const response = await client.messages.create({
       model: "claude-haiku-4-5-20251001",
@@ -568,12 +569,13 @@ Responda APENAS em JSON:
       return;
     }
 
-    const beneficiarioLido = resultado.beneficiario ?? resultado.destinatario ?? resultado.chave ?? null;
     const avaliacao = avaliarEvidenciaPix({
       valorEsperado: valorPixEsperado(pedidoAtivo.pagamento, pedidoAtivo.total),
       valorLido: typeof resultado.valor === "number" ? resultado.valor : null,
+      chaveEsperada: config.chavePix,
+      chaveLida: resultado.chave ?? resultado.chavePix ?? null,
       beneficiarioEsperado: config.nomeTitularPix || config.nomePizzaria,
-      beneficiarioLido,
+      beneficiarioLido: resultado.beneficiario ?? resultado.destinatario ?? null,
       statusTransacao: derivarStatusTransacaoPix(resultado.motivo),
       horario: avaliacaoHorario,
       hashReutilizado: false,
@@ -712,8 +714,10 @@ async function processarComprovante(phone: string, data: any, config: ConfigPizz
     const avaliacao = avaliarEvidenciaPix({
       valorEsperado: valorPixEsperado(pedidoAtivo.pagamento, pedidoAtivo.total),
       valorLido: resultado.valorEncontrado,
+      chaveEsperada: config.chavePix,
+      chaveLida: resultado.chavePix,
       beneficiarioEsperado: config.nomeTitularPix || config.nomePizzaria,
-      beneficiarioLido: resultado.chavePix,
+      beneficiarioLido: resultado.beneficiario,
       statusTransacao: derivarStatusTransacaoPix(resultado.motivo),
       horario: avaliacaoHorario,
       hashReutilizado: false,
