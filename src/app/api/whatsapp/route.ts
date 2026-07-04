@@ -15,10 +15,11 @@ import { proximoNumeroPedido } from "@/lib/numeracao";
 import { salvarStatusConexao, botPodeResponder, StatusConexao } from "@/lib/conexaoWhatsapp";
 import { ehConfirmacaoPedido } from "@/lib/confirmacaoPedido";
 import { escolherStepDeRetomada, detectarConversaMorta } from "@/lib/reviverConversa";
-import { anexarPixMercadoPagoEmMensagens, confirmarPixMetadata, criarPixMetadata, prepararPixProviderMercadoPago, registrarPixEvidencia, serializarPixCliente, type PixCliente, type PixEvidenciaOrigem, type PixMetadata } from "@/lib/pix";
+import { anexarPixMercadoPagoEmMensagens, confirmarPixMetadata, criarPixMetadata, marcarPixRevisaoOuSuspeito, prepararPixProviderMercadoPago, registrarPixEvidencia, serializarPixCliente, type PixCliente, type PixEvidenciaOrigem, type PixMetadata } from "@/lib/pix";
 import { chaveDedupIdentificadorComprovantePix, extrairIdentificadorComprovantePix, normalizarIdentificadorComprovantePix, PIX_COMPROVANTE_E2E_TTL_SEGUNDOS, type PixComprovanteIdentificador } from "@/lib/pixComprovanteEvidencia";
 import { chaveDedupComprovantePix, gerarHashComprovantePixMidia, gerarHashComprovantePixTexto, PIX_COMPROVANTE_DEDUP_TTL_SEGUNDOS } from "@/lib/pixComprovanteHash";
 import { avaliarHorarioComprovantePix, extrairDataHoraComprovantePix, FUSO_OPERACIONAL_PIX, type PixComprovanteHorarioExtraido, type ResultadoHorarioComprovantePix } from "@/lib/pixComprovanteHorario";
+import { avaliarEvidenciaPix, type ResultadoEvidenciaPix } from "@/lib/pixComprovanteAvaliacao";
 import { encontrarPedidoPixPendentePorTelefone } from "@/lib/pixPedidoMatching";
 import { telefonesCorrespondem } from "@/lib/telefone";
 import type { BotStep } from "@/lib/bot";
@@ -347,6 +348,84 @@ function confirmarPixComEvidencia(
   });
 }
 
+// Persiste o snapshot auditavel da decisao de avaliarEvidenciaPix em pix.evidencia,
+// preservando o restante do metadata (Etapa 2E).
+function registrarAvaliacaoPixNoMetadata(
+  pix: PixMetadata | undefined,
+  avaliacao: ResultadoEvidenciaPix,
+  identificador: PixComprovanteIdentificador,
+  origem: PixEvidenciaOrigem,
+  hash: string,
+  horario?: PixComprovanteHorarioExtraido
+): PixMetadata {
+  return registrarPixEvidencia(pix || {}, {
+    ...identificador,
+    ...(horario?.dataHora ? { dataHoraPagamento: horario.dataHora } : {}),
+    origem,
+    hash,
+    decisao: avaliacao.decisao,
+    score: avaliacao.score,
+    criterios: avaliacao.criterios,
+    motivos: avaliacao.motivos,
+    avaliadoEm: new Date().toISOString(),
+  });
+}
+
+const PALAVRAS_STATUS_PENDENTE_MOTIVO = /agend|pendent|process|analise|conclu[ií]do fals|nao.?conclu|n[aã]o.?conclu|cancel/;
+
+// Deriva um status de transacao aproximado a partir do "motivo" que a IA ja
+// devolve hoje (nossos prompts nao extraem um campo de status separado).
+// "ilegivel"/ausente vira sinal "ausente" (neutro); qualquer motivo indicando
+// agendamento/pendencia vira "pendente_ou_agendado"; o resto e tratado como concluido.
+function derivarStatusTransacaoPix(motivo: string | null | undefined): string | undefined {
+  const normalizado = (motivo || "").trim().toLowerCase();
+  if (!normalizado || normalizado === "ilegivel" || normalizado === "erro_leitura") return undefined;
+  return PALAVRAS_STATUS_PENDENTE_MOTIVO.test(normalizado) ? "agendado" : "concluido";
+}
+
+// Legibilidade "baixa" apenas quando a propria IA relatou motivo "ilegivel"
+// ou erro de leitura; caso contrario tratamos como alta (ela conseguiu extrair campos).
+function derivarLegibilidadePix(motivo: string | null | undefined): "alta" | "baixa" | undefined {
+  const normalizado = (motivo || "").trim().toLowerCase();
+  if (!normalizado) return undefined;
+  return normalizado === "ilegivel" || normalizado === "erro_leitura" ? "baixa" : "alta";
+}
+
+// Mensagens neutras, sem acusar o cliente de fraude — a distincao real
+// (revisar vs suspeito) fica no log e no pix.evidencia para a Kellyne conferir.
+const MSG_PIX_REVISAR = "Recebi seu comprovante! 🔍 Vou confirmar alguns detalhes com nossa equipe antes de liberar seu pedido. Só um instante!";
+const MSG_PIX_SUSPEITO = "Recebi seu comprovante! 📄 Preciso que nossa equipe confirme esse pagamento antes de liberar seu pedido. Em instantes alguém te retorna.";
+
+// A analise textual/visual (resultado.valido) e a avaliacao por evidencia (avaliarEvidenciaPix)
+// sao independentes; a decisao final so aprova quando as duas concordam. Se a IA nao validou
+// o comprovante mas o score achou evidencia forte, rebaixa para "revisar" em vez de aprovar —
+// nunca o contrario, para nao tornar a aprovacao automatica mais agressiva que hoje.
+function decisaoFinalPix(resultadoIAValido: boolean, avaliacao: ResultadoEvidenciaPix): ResultadoEvidenciaPix {
+  if (avaliacao.decisao !== "aprovar" || resultadoIAValido) return avaliacao;
+  return {
+    ...avaliacao,
+    decisao: "revisar",
+    motivos: [...avaliacao.motivos, "Validacao direta da IA nao confirmou o comprovante."],
+  };
+}
+
+async function tratarComprovantePixNaoAprovado(
+  phone: string,
+  session: BotSession | null,
+  pedidoAtivo: Pedido,
+  origem: PixEvidenciaOrigem,
+  avaliacao: ResultadoEvidenciaPix
+) {
+  const mensagem = avaliacao.decisao === "suspeito" ? MSG_PIX_SUSPEITO : MSG_PIX_REVISAR;
+  await enviarMensagem(phone, mensagem);
+  await salvarEscalonamento(phone, session || { step: "done", cart: [], deliveryFee: 0, customerName: pedidoAtivo.cliente });
+  await log(
+    "aviso",
+    `Comprovante Pix marcado como ${avaliacao.decisao}`,
+    `Phone: ${phone} origem: ${origem} score: ${avaliacao.score} motivos: ${avaliacao.motivos.join("; ") || "-"}`
+  );
+}
+
 function escolherHorarioComprovantePix(
   preferencial: PixComprovanteHorarioExtraido,
   alternativo: PixComprovanteHorarioExtraido
@@ -453,11 +532,12 @@ DADOS ESPERADOS:
 - Horário mínimo: ${horarioRef}
 - E2E ID Pix ou código de autenticação/transação, se estiver visível (não obrigatório)
 - Data e hora do pagamento Pix, se estiverem visíveis (hora não obrigatória)
+- Nome do destinatário ou chave Pix encontrado no comprovante, se estiver visível
 
 Se data e hora do pagamento estiverem claras, o pagamento não pode ser anterior ao horário do pedido por mais de 10 minutos. Se apenas a data estiver visível ou o horário estiver ilegível, não reprove somente por falta de horário.
 
 Responda APENAS em JSON:
-{"valido": true/false, "valor": numero_ou_null, "e2eId": "E2E ou null", "codigoAutenticacao": "codigo ou null", "dataPagamento": "DD/MM/AAAA ou null", "horaPagamento": "HH:mm ou null", "dataHoraPagamento": "data e hora completa ou null", "motivo": "aprovado/valor_errado/data_errada/horario_anterior/nome_errado/nao_concluido/ilegivel"}`;
+{"valido": true/false, "valor": numero_ou_null, "beneficiario": "nome ou chave do destinatario encontrado ou null", "e2eId": "E2E ou null", "codigoAutenticacao": "codigo ou null", "dataPagamento": "DD/MM/AAAA ou null", "horaPagamento": "HH:mm ou null", "dataHoraPagamento": "data e hora completa ou null", "motivo": "aprovado/valor_errado/data_errada/horario_anterior/nome_errado/nao_concluido/ilegivel"}`;
 
     const response = await client.messages.create({
       model: "claude-haiku-4-5-20251001",
@@ -488,8 +568,35 @@ Responda APENAS em JSON:
       return;
     }
 
-    if (resultado.valido) {
-      const pedidosAtualizados = pedidos.map(p => p.id === pedidoAtivo!.id ? { ...p, pixConfirmado: true, pix: confirmarPixComEvidencia(p.pix, identificador, "texto", horarioComprovante) } : p);
+    const beneficiarioLido = resultado.beneficiario ?? resultado.destinatario ?? resultado.chave ?? null;
+    const avaliacao = avaliarEvidenciaPix({
+      valorEsperado: valorPixEsperado(pedidoAtivo.pagamento, pedidoAtivo.total),
+      valorLido: typeof resultado.valor === "number" ? resultado.valor : null,
+      beneficiarioEsperado: config.nomeTitularPix || config.nomePizzaria,
+      beneficiarioLido,
+      statusTransacao: derivarStatusTransacaoPix(resultado.motivo),
+      horario: avaliacaoHorario,
+      hashReutilizado: false,
+      e2eId: identificador.e2eId,
+      codigoAutenticacao: identificador.codigoAutenticacao,
+      e2eReutilizado: false,
+      origem: "texto",
+      legibilidade: derivarLegibilidadePix(resultado.motivo),
+    });
+
+    const decisaoFinal = decisaoFinalPix(resultado.valido === true, avaliacao);
+
+    if (decisaoFinal.decisao === "aprovar") {
+      const pedidosAtualizados = pedidos.map(p => p.id === pedidoAtivo!.id ? {
+        ...p,
+        pixConfirmado: true,
+        pix: confirmarPixComEvidencia(
+          registrarAvaliacaoPixNoMetadata(p.pix, decisaoFinal, identificador, "texto", hashComprovante, horarioComprovante),
+          identificador,
+          "texto",
+          horarioComprovante
+        ),
+      } : p);
       await redis.set("pedidos", pedidosAtualizados);
       const firstName = pedidoAtivo.cliente.split(" ")[0];
       const timeMsg = pedidoAtivo.tipoEntrega === "pickup" ? config.tempoEntregaRetirada : config.tempoEntregaDelivery;
@@ -504,8 +611,15 @@ Qualquer dúvida é só chamar. Bom apetite! 🍕`);
       if (sessionAtual) await redis.set(sessionKey, { ...sessionAtual, step: "done" }, { ex: 1800 });
       await log("info", `Pix texto confirmado para ${firstName}`, `Valor: ${resultado.valor}`);
     } else {
-      await enviarMensagem(phone, `❌ Não consegui confirmar esse pagamento. Nossa equipe vai verificar em instantes! 📄`);
-      await salvarEscalonamento(phone, session || { step: "done", cart: [], deliveryFee: 0, customerName: pedidoAtivo.cliente });
+      const pedidosAtualizados = pedidos.map(p => p.id === pedidoAtivo!.id ? {
+        ...p,
+        pix: marcarPixRevisaoOuSuspeito(
+          registrarAvaliacaoPixNoMetadata(p.pix, decisaoFinal, identificador, "texto", hashComprovante, horarioComprovante),
+          decisaoFinal.decisao === "suspeito" ? "suspeito" : "em_revisao"
+        ),
+      } : p);
+      await redis.set("pedidos", pedidosAtualizados);
+      await tratarComprovantePixNaoAprovado(phone, session, pedidoAtivo, "texto", decisaoFinal);
     }
   } catch (err) {
     await log("erro", "Erro ao processar comprovante texto", String(err));
@@ -595,8 +709,33 @@ async function processarComprovante(phone: string, data: any, config: ConfigPizz
       return
     }
 
-    if (resultado.valido) {
-      const pedidosAtualizados = pedidos.map(p => p.id === pedidoAtivo.id ? { ...p, pixConfirmado: true, pix: confirmarPixComEvidencia(p.pix, identificador, "midia", horarioComprovante) } : p);
+    const avaliacao = avaliarEvidenciaPix({
+      valorEsperado: valorPixEsperado(pedidoAtivo.pagamento, pedidoAtivo.total),
+      valorLido: resultado.valorEncontrado,
+      beneficiarioEsperado: config.nomeTitularPix || config.nomePizzaria,
+      beneficiarioLido: resultado.chavePix,
+      statusTransacao: derivarStatusTransacaoPix(resultado.motivo),
+      horario: avaliacaoHorario,
+      hashReutilizado: false,
+      e2eId: identificador.e2eId,
+      codigoAutenticacao: identificador.codigoAutenticacao,
+      e2eReutilizado: false,
+      origem: mediaType === "application/pdf" ? "pdf" : "imagem",
+      legibilidade: derivarLegibilidadePix(resultado.motivo),
+    });
+    const decisaoFinal = decisaoFinalPix(resultado.valido === true, avaliacao);
+
+    if (decisaoFinal.decisao === "aprovar") {
+      const pedidosAtualizados = pedidos.map(p => p.id === pedidoAtivo.id ? {
+        ...p,
+        pixConfirmado: true,
+        pix: confirmarPixComEvidencia(
+          registrarAvaliacaoPixNoMetadata(p.pix, decisaoFinal, identificador, "midia", hashComprovante, horarioComprovante),
+          identificador,
+          "midia",
+          horarioComprovante
+        ),
+      } : p);
       await redis.set("pedidos", pedidosAtualizados);
       const firstName = pedidoAtivo.cliente.split(" ")[0];
       const timeMsg = pedidoAtivo.tipoEntrega === "pickup" ? config.tempoEntregaRetirada : config.tempoEntregaDelivery;
@@ -605,9 +744,15 @@ async function processarComprovante(phone: string, data: any, config: ConfigPizz
       await registrarDedupE2E(identificador)
       await log("info", `Pix confirmado automaticamente para ${firstName}`, `Valor: R$ ${resultado.valorEncontrado}`);
     } else {
-      await enviarMensagem(phone, `Comprovante recebido! 📄 Nossa equipe vai verificar o pagamento manualmente. Em instantes confirmamos! 😊`);
-      await salvarEscalonamento(phone, session || { step: "done", cart: [], deliveryFee: 0, customerName: pedidoAtivo.cliente });
-      await log("aviso", `Comprovante Pix nao validado automaticamente`, `Phone: ${phone}`);
+      const pedidosAtualizados = pedidos.map(p => p.id === pedidoAtivo.id ? {
+        ...p,
+        pix: marcarPixRevisaoOuSuspeito(
+          registrarAvaliacaoPixNoMetadata(p.pix, decisaoFinal, identificador, "midia", hashComprovante, horarioComprovante),
+          decisaoFinal.decisao === "suspeito" ? "suspeito" : "em_revisao"
+        ),
+      } : p);
+      await redis.set("pedidos", pedidosAtualizados);
+      await tratarComprovantePixNaoAprovado(phone, session, pedidoAtivo, "midia", decisaoFinal);
     }
   } catch (err) {
     await log("erro", "Erro ao processar comprovante", String(err));
