@@ -535,7 +535,7 @@ DADOS ESPERADOS:
 - Nome do destinatário ou chave Pix encontrado no comprovante, se estiver visível
 
 A chave Pix pode aparecer formatada de outra forma (+55, parênteses, espaços, hífens, pontos); considere equivalente se os dígitos corresponderem.
-Se data e hora do pagamento estiverem claras, o pagamento não pode ser anterior ao horário do pedido por mais de 10 minutos. Se apenas a data estiver visível ou o horário estiver ilegível, não reprove somente por falta de horário.
+Se data e hora do pagamento estiverem claras, o pagamento não pode ser anterior ao horário do pedido por mais de 8 minutos. Se apenas a data estiver visível ou o horário estiver ilegível, não reprove somente por falta de horário.
 
 Responda APENAS em JSON:
 {"valido": true/false, "valor": numero_ou_null, "beneficiario": "nome do destinatario encontrado ou null", "chave": "chave Pix do destinatario encontrada ou null", "e2eId": "E2E ou null", "codigoAutenticacao": "codigo ou null", "dataPagamento": "DD/MM/AAAA ou null", "horaPagamento": "HH:mm ou null", "dataHoraPagamento": "data e hora completa ou null", "motivo": "aprovado/valor_errado/data_errada/horario_anterior/nome_errado/nao_concluido/ilegivel"}`;

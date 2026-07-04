@@ -22,15 +22,26 @@ describe("horario do comprovante Pix", () => {
     expect(resultado.diferencaMinutos).toBe(12);
   });
 
-  test("comprovante ate 10 minutos antes do pedido passa por tolerancia", () => {
+  test("comprovante ate 8 minutos antes do pedido passa por tolerancia", () => {
     const resultado = avaliarHorarioComprovantePix({
       ...pedido,
-      textoComprovante: "Pagamento em 04/07/2026 as 19:20",
+      textoComprovante: "Pagamento em 04/07/2026 as 19:22",
     });
 
     expect(resultado.bloquear).toBe(false);
     expect(resultado.motivo).toBe("ok");
-    expect(resultado.diferencaMinutos).toBe(-10);
+    expect(resultado.diferencaMinutos).toBe(-8);
+  });
+
+  test("comprovante 9 minutos antes do pedido deve bloquear (acima da nova tolerancia de 8min)", () => {
+    const resultado = avaliarHorarioComprovantePix({
+      ...pedido,
+      textoComprovante: "Pagamento em 04/07/2026 as 19:21",
+    });
+
+    expect(resultado.bloquear).toBe(true);
+    expect(resultado.motivo).toBe("pagamento_anterior");
+    expect(resultado.diferencaMinutos).toBe(-9);
   });
 
   test("comprovante 30 minutos antes do pedido deve bloquear", () => {
