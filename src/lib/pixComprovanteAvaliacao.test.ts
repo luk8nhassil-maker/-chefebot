@@ -119,12 +119,22 @@ describe("avaliarEvidenciaPix", () => {
     expect(resultado.decisao).toBe("suspeito");
   });
 
-  test("sem e2e nem codigo de autenticacao nao impede aprovacao sozinho", () => {
+  test("sem e2e nem codigo de autenticacao nunca autoaprova: cai em revisao com motivo claro", () => {
     const resultado = avaliarEvidenciaPix(
       baseInput({ e2eId: undefined, codigoAutenticacao: undefined })
     );
 
     expect(resultado.criterios.e2e).toBe("ausente");
+    expect(resultado.decisao).toBe("revisar");
+    expect(resultado.motivos).toContain("ID da transacao/E2E nao identificado no comprovante.");
+  });
+
+  test("codigo de autenticacao (sem e2eId) conta como identificador e permite aprovar", () => {
+    const resultado = avaliarEvidenciaPix(
+      baseInput({ e2eId: undefined, codigoAutenticacao: "A1B2C3D4E5F6G7H8" })
+    );
+
+    expect(resultado.criterios.e2e).toBe("novo");
     expect(resultado.decisao).toBe("aprovar");
   });
 
@@ -142,13 +152,11 @@ describe("avaliarEvidenciaPix", () => {
     expect(resultado.decisao).toBe("aprovar");
   });
 
-  test("score nunca aprova sem valor e beneficiario ok, mesmo com score alto", () => {
-    const resultado = avaliarEvidenciaPix(
-      baseInput({ statusTransacao: undefined, e2eId: undefined, codigoAutenticacao: undefined })
-    );
+  test("status ausente sozinho nao bloqueia aprovacao quando ha e2e e demais sinais fortes", () => {
+    const resultado = avaliarEvidenciaPix(baseInput({ statusTransacao: undefined }));
 
     expect(resultado.criterios.status).toBe("ausente");
-    expect(resultado.criterios.e2e).toBe("ausente");
+    expect(resultado.criterios.e2e).toBe("novo");
     expect(resultado.decisao).toBe("aprovar");
   });
 
@@ -195,6 +203,7 @@ describe("avaliarEvidenciaPix — chave Pix em formato diferente (regressao fals
       statusTransacao: "concluido",
       horario: horarioOk,
       hashReutilizado: false,
+      e2eId: "E12345678202607041200ABCDEFG12",
       e2eReutilizado: false,
       origem: "pdf",
       legibilidade: "alta",
@@ -294,5 +303,55 @@ describe("avaliarEvidenciaPix — chave Pix em formato diferente (regressao fals
     });
 
     expect(resultado.decisao).not.toBe("aprovar");
+  });
+});
+
+// Regressao do teste real pos-PR #139: comprovante com valor, chave, beneficiario,
+// status e horario visiveis e corretos, mas com o E2E/ID da transacao escondido ou
+// cortado do print, era autoaprovado. Sem identificador de transacao nao ha como
+// amarrar o print a uma transacao real — deve ir para revisao humana.
+describe("avaliarEvidenciaPix — E2E/ID da transacao obrigatorio para autoaprovar", () => {
+  const comprovantePerfeitoSemE2E = {
+    valorEsperado: 1,
+    valorLido: 1,
+    chaveEsperada: "99974000691",
+    chaveLida: "+55 99 97400-0691",
+    beneficiarioEsperado: "Kellyne F dos Santos",
+    beneficiarioLido: "Kellyne F dos Santos",
+    statusTransacao: "concluido",
+    horario: horarioOk,
+    hashReutilizado: false,
+    e2eReutilizado: false,
+    origem: "pdf" as const,
+    legibilidade: "alta" as const,
+  };
+
+  test("tudo correto mas sem E2E/ID visivel cai em revisar, nunca aprova", () => {
+    const resultado = avaliarEvidenciaPix(comprovantePerfeitoSemE2E);
+
+    expect(resultado.criterios.e2e).toBe("ausente");
+    expect(resultado.decisao).toBe("revisar");
+    expect(resultado.motivos).toContain("ID da transacao/E2E nao identificado no comprovante.");
+  });
+
+  test("mesmo comprovante com E2E visivel e inedito aprova", () => {
+    const resultado = avaliarEvidenciaPix({
+      ...comprovantePerfeitoSemE2E,
+      e2eId: "E12345678202607041200ABCDEFG12",
+    });
+
+    expect(resultado.criterios.e2e).toBe("novo");
+    expect(resultado.decisao).toBe("aprovar");
+    expect(resultado.motivos).not.toContain("ID da transacao/E2E nao identificado no comprovante.");
+  });
+
+  test("mesmo comprovante com E2E reutilizado continua suspeito", () => {
+    const resultado = avaliarEvidenciaPix({
+      ...comprovantePerfeitoSemE2E,
+      e2eId: "E12345678202607041200ABCDEFG12",
+      e2eReutilizado: true,
+    });
+
+    expect(resultado.decisao).toBe("suspeito");
   });
 });

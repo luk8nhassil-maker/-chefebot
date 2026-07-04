@@ -159,7 +159,7 @@ function montarMotivos(criterios: CriteriosEvidenciaPix): string[] {
   if (criterios.hash === "reutilizado") motivos.push("Hash do comprovante ja foi utilizado antes (possivel reuso).");
 
   if (criterios.e2e === "reutilizado") motivos.push("Identificador E2E/codigo de autenticacao ja foi utilizado antes.");
-  if (criterios.e2e === "ausente") motivos.push("Comprovante sem E2E ou codigo de autenticacao identificavel.");
+  if (criterios.e2e === "ausente") motivos.push("ID da transacao/E2E nao identificado no comprovante.");
 
   if (criterios.legibilidade === "baixa") motivos.push("Legibilidade baixa: comprovante dificil de conferir.");
 
@@ -167,7 +167,9 @@ function montarMotivos(criterios: CriteriosEvidenciaPix): string[] {
 }
 
 // Camada de decisao conservadora: so aprova automaticamente com evidencia forte
-// em todos os sinais. Qualquer sinal fraco ou ausente cai em revisao humana.
+// em todos os sinais, incluindo E2E/ID da transacao VISIVEL e inedito — comprovante
+// sem identificador de transacao nunca autoaprova (vai para revisao humana), pois
+// e o unico dado que amarra o print a uma transacao real e conferivel no banco.
 // Reuso de hash/E2E ou pagamento comprovadamente anterior ao pedido (ja bloqueado
 // em pixComprovanteHorario) e sempre "suspeito", nunca aprovado nem revisado.
 export function avaliarEvidenciaPix(input: AvaliarEvidenciaPixInput): ResultadoEvidenciaPix {
@@ -199,6 +201,7 @@ export function avaliarEvidenciaPix(input: AvaliarEvidenciaPixInput): ResultadoE
     score >= 80 &&
     criterios.valor === "ok" &&
     criterios.beneficiario === "ok" &&
+    criterios.e2e === "novo" &&
     criterios.status !== "pendente_ou_agendado" &&
     criterios.legibilidade !== "baixa"
   ) {

@@ -36,6 +36,7 @@ describe("integracao avaliarEvidenciaPix + pix.ts (Etapa 2E)", () => {
       statusTransacao: "concluido",
       horario: horarioOk,
       hashReutilizado: false,
+      e2eId: "E12345678202607041200ABCDEFG12",
       e2eReutilizado: false,
       origem: "imagem",
       legibilidade: "alta",
@@ -49,6 +50,28 @@ describe("integracao avaliarEvidenciaPix + pix.ts (Etapa 2E)", () => {
     expect(pix.evidencia?.decisao).toBe("aprovar");
     expect(pix.evidencia?.score).toBe(avaliacao.score);
     expect(pix.evidencia?.criterios).toEqual(avaliacao.criterios);
+  });
+
+  test("tudo correto mas sem E2E/ID visivel nao confirma: pix.status = em_revisao", () => {
+    const avaliacao = avaliarEvidenciaPix({
+      valorEsperado: 52,
+      valorLido: 52,
+      beneficiarioEsperado: "Chefe da Pizza",
+      beneficiarioLido: "Chefe da Pizza LTDA",
+      statusTransacao: "concluido",
+      horario: horarioOk,
+      hashReutilizado: false,
+      e2eReutilizado: false,
+      origem: "imagem",
+      legibilidade: "alta",
+    });
+
+    const pix = aplicarDecisaoPix({ txid: "chefebot_9", valorEsperado: 52, status: "pendente" }, avaliacao);
+
+    expect(avaliacao.decisao).toBe("revisar");
+    expect(pix.status).toBe("em_revisao");
+    expect(pix.confirmadoPor).toBeUndefined();
+    expect(pix.evidencia?.motivos).toContain("ID da transacao/E2E nao identificado no comprovante.");
   });
 
   test("decisao revisar nao confirma e marca pix.status = em_revisao", () => {
