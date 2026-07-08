@@ -759,6 +759,14 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const [payment, setPayment] = useState<string | null>(null);
   const [troco, setTroco] = useState("");
   const [telefone, setTelefone] = useState("");
+  // Vínculo com o WhatsApp via token do link (?t=): o navegador só conhece o
+  // token opaco e os 4 últimos dígitos — o phone completo fica no servidor.
+  const [waToken, setWaToken] = useState<string | null>(null);
+  const [waFinal, setWaFinal] = useState("");
+  // Vínculo automático do token é a fonte principal enquanto ativo — só deixa
+  // de valer se o cliente pedir explicitamente para usar outro WhatsApp.
+  const [usarOutroWhatsapp, setUsarOutroWhatsapp] = useState(false);
+  const vinculoWhatsappAtivo = !!waFinal && !usarOutroWhatsapp;
   const [numero, setNumero] = useState("");
   const [referencia, setReferencia] = useState("");
   const [observacao, setObservacao] = useState("");
@@ -792,6 +800,39 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const telefoneRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { document.documentElement.setAttribute("data-theme", theme); }, [theme]);
+
+  // Vínculo WhatsApp: valida o token do link (?t=) no servidor e guarda só na
+  // sessão do navegador. Token inválido/expirado nunca quebra o fluxo — o
+  // checkout volta a pedir o WhatsApp manualmente.
+  useEffect(() => {
+    async function ativarVinculo(token: string) {
+      try {
+        const r = await fetch(`/api/cardapio-whatsapp-session?t=${encodeURIComponent(token)}`, { cache: "no-store" });
+        const data = await r.json();
+        if (data?.ok && data.phoneFinal) {
+          setWaToken(token); setWaFinal(String(data.phoneFinal));
+          try { sessionStorage.setItem("cf_wa_token", token); sessionStorage.setItem("cf_wa_final", String(data.phoneFinal)); } catch {}
+        } else {
+          try { sessionStorage.removeItem("cf_wa_token"); sessionStorage.removeItem("cf_wa_final"); } catch {}
+        }
+      } catch {}
+    }
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const t = params.get("t");
+      if (t) {
+        // Remove o token da URL (evita vazar em prints/compartilhamentos).
+        params.delete("t");
+        const qs = params.toString();
+        window.history.replaceState({}, "", window.location.pathname + (qs ? `?${qs}` : ""));
+        ativarVinculo(t);
+        return;
+      }
+      const salvo = sessionStorage.getItem("cf_wa_token");
+      const salvoFinal = sessionStorage.getItem("cf_wa_final");
+      if (salvo && salvoFinal) { setWaToken(salvo); setWaFinal(salvoFinal); }
+    } catch {}
+  }, []);
 
   useEffect(() => {
     try {
@@ -1090,7 +1131,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     color: "var(--text)",
   };
   const bairroOptionStyle = { background: "#fff", color: "#2a1d16" };
-  const payOk = !!nome.trim() && telefoneValido(telefone) && !!payment;
+  const payOk = !!nome.trim() && (telefoneValido(telefone) || vinculoWhatsappAtivo) && !!payment;
 
   const esgotadosKey = esgotados.join("|");
   const cartEsgotado = cart.some((c) => cartItemEsgotado(c.keys, esgotados));
@@ -1186,7 +1227,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     let hasError = false;
     if (!nome.trim()) { setErroNome("Me diz seu nome pra gente identificar o pedido."); setEditandoIdentidade(true); nomeRef.current?.focus(); hasError = true; }
     else { setErroNome(""); }
-    if (!telefoneValido(telefone)) { setErroTelefone("Coloca um WhatsApp válido pra pizzaria falar com você se precisar."); setEditandoIdentidade(true); if (!hasError) telefoneRef.current?.focus(); hasError = true; }
+    if (!telefoneValido(telefone) && !vinculoWhatsappAtivo) { setErroTelefone("Coloca um WhatsApp válido pra pizzaria falar com você se precisar."); setEditandoIdentidade(true); if (!hasError) telefoneRef.current?.focus(); hasError = true; }
     else { setErroTelefone(""); }
     if (!payment) { setErroPagamento("pagamento"); if (!hasError) pagamentoRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }); hasError = true; }
     else { setErroPagamento(""); }
@@ -1207,11 +1248,11 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     } else { setErroTroco(""); }
     if (hasError) return;
     setSending(true);
-    const payload = { cliente: nome.trim(), telefone: telefone.trim(), itens: cart.map((c) => ({ kind: c.kind, name: c.name, detail: c.detail, price: c.price, qty: c.qty, ...(c.promoId ? { promoId: c.promoId } : {}) })), tipoEntrega: delType, bairro: delType === "delivery" ? menu.neighborhoods[+bairroIdx].name : undefined, rua: delType === "delivery" ? rua : undefined, numero: delType === "delivery" && numero.trim() ? numero.trim() : undefined, referencia: delType === "delivery" && referencia.trim() ? referencia.trim() : undefined, observacao: observacao.trim() || undefined, taxaEntrega: fee, pagamento: payment, troco: payment === "Dinheiro" ? (trocoOpcao === "nao" ? "Sem troco" : troco.trim()) : undefined };
+    const payload = { cliente: nome.trim(), telefone: telefone.trim() || undefined, whatsappToken: waToken || undefined, usarOutroWhatsapp: usarOutroWhatsapp || undefined, itens: cart.map((c) => ({ kind: c.kind, name: c.name, detail: c.detail, price: c.price, qty: c.qty, ...(c.promoId ? { promoId: c.promoId } : {}) })), tipoEntrega: delType, bairro: delType === "delivery" ? menu.neighborhoods[+bairroIdx].name : undefined, rua: delType === "delivery" ? rua : undefined, numero: delType === "delivery" && numero.trim() ? numero.trim() : undefined, referencia: delType === "delivery" && referencia.trim() ? referencia.trim() : undefined, observacao: observacao.trim() || undefined, taxaEntrega: fee, pagamento: payment, troco: payment === "Dinheiro" ? (trocoOpcao === "nao" ? "Sem troco" : troco.trim()) : undefined };
     try {
       const r = await fetch("/api/pedido-app", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const data = await r.json();
-      if (data.ok) { try { localStorage.setItem("cf_nome", nome.trim()); localStorage.setItem("cf_tel", telefone.trim()); } catch {} try { sessionStorage.removeItem("cf_draft"); } catch {} try { const resumo = { id: String(data.pedidoId), numero: typeof data.numero === "number" ? data.numero : undefined, ts: Date.now() }; localStorage.setItem("cf_ultimo_pedido", JSON.stringify(resumo)); setPedidoRecente(resumo); } catch {} setStatusPedidoConfirmado("novo"); setStatusPixCliente(payment?.toLowerCase().includes("pix") ? "aguardando_pix" : "nao_pix"); setPedidoConfirmado({ id: data.pedidoId, numero: data.numero, total: data.total, ...(typeof data.statusToken === "string" ? { statusToken: data.statusToken } : {}), ...(data.pix ? { pix: data.pix } : {}) }); go("sc-done"); } else { showToast("Erro ao enviar. Tente de novo."); }
+      if (data.ok) { try { localStorage.setItem("cf_nome", nome.trim()); if (telefone.trim()) localStorage.setItem("cf_tel", telefone.trim()); } catch {} try { sessionStorage.removeItem("cf_draft"); } catch {} try { const resumo = { id: String(data.pedidoId), numero: typeof data.numero === "number" ? data.numero : undefined, ts: Date.now() }; localStorage.setItem("cf_ultimo_pedido", JSON.stringify(resumo)); setPedidoRecente(resumo); } catch {} setStatusPedidoConfirmado("novo"); setStatusPixCliente(payment?.toLowerCase().includes("pix") ? "aguardando_pix" : "nao_pix"); setPedidoConfirmado({ id: data.pedidoId, numero: data.numero, total: data.total, ...(typeof data.statusToken === "string" ? { statusToken: data.statusToken } : {}), ...(data.pix ? { pix: data.pix } : {}) }); go("sc-done"); } else { showToast("Erro ao enviar. Tente de novo."); }
     } catch { showToast("Sem conexão. Tente de novo."); } finally { setSending(false); }
   }
   function resetAll() { setCart([]); resetBuild(); setDelType(null); setBairroIdx(""); setRua(""); setNumero(""); setReferencia(""); setPayment(null); setTroco(""); setTrocoOpcao(null); setPaymentModal(null); setObservacao(""); setErroNome(""); setErroTelefone(""); setErroPagamento(""); setErroEntrega(""); setErroTroco(""); setPedidoConfirmado(null); setStatusPedidoConfirmado("novo"); setStatusPixCliente("aguardando_pix"); setRestoredDraft(false); setEditandoIdentidade(false); setLastAddedKind(null); setUpsellBebidaIgnorado(false); try { sessionStorage.removeItem("cf_draft"); } catch {} go("sc-start"); }
@@ -1565,16 +1606,24 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
               </div>
 
               {/* Bloco: Identificação */}
-              {!editandoIdentidade && nome.trim() && telefoneValido(telefone) ? (
+              {!editandoIdentidade && nome.trim() && (telefoneValido(telefone) || vinculoWhatsappAtivo) ? (
                 <div style={{ background: "var(--card)", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
                   <div style={{ fontSize: 12, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 6 }}>Pedido identificado</div>
                   <div style={{ fontSize: 15, fontWeight: 700, color: "var(--fg)" }}>{nome.trim()}</div>
-                  <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 2 }}>{telefone}</div>
+                  <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 2 }}>
+                    {vinculoWhatsappAtivo ? `✅ Vinculado ao WhatsApp · final ${waFinal}` : telefone}
+                  </div>
                   <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 8, lineHeight: 1.5 }}>Vamos usar esses dados nesse pedido. Se estiver tudo certo, é só escolher o pagamento.</div>
                   <button
                     style={{ marginTop: 8, background: "none", border: "none", color: "#ff6b00", fontSize: 13, cursor: "pointer", padding: 0, textDecoration: "underline" }}
                     onClick={() => setEditandoIdentidade(true)}
-                  >Alterar dados</button>
+                  >{vinculoWhatsappAtivo ? "Alterar nome" : "Alterar dados"}</button>
+                  {vinculoWhatsappAtivo && (
+                    <button
+                      style={{ marginTop: 8, marginLeft: 16, background: "none", border: "none", color: "var(--muted)", fontSize: 13, cursor: "pointer", padding: 0, textDecoration: "underline" }}
+                      onClick={() => { setUsarOutroWhatsapp(true); setEditandoIdentidade(true); }}
+                    >Usar outro WhatsApp</button>
+                  )}
                 </div>
               ) : (
                 <div style={{ marginBottom: 16 }}>
@@ -1585,11 +1634,33 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                     <input ref={nomeRef} value={nome} onChange={(e) => { setNome(e.target.value); if (erroNome) setErroNome(""); }} placeholder="Como te chamamos?" />
                     {erroNome && <div style={{ color: "#ef4444", fontSize: 12, marginTop: 4 }}>{erroNome}</div>}
                   </div>
-                  <div className="field">
-                    <label>WhatsApp</label>
-                    <input ref={telefoneRef} value={telefone} onChange={(e) => { const f = formatTel(e.target.value); setTelefone(f); if (erroTelefone) setErroTelefone(""); }} inputMode="tel" placeholder="(99) 9 9999-9999" />
-                    {erroTelefone && <div style={{ color: "#ef4444", fontSize: 12, marginTop: 4 }}>{erroTelefone}</div>}
-                  </div>
+                  {vinculoWhatsappAtivo ? (
+                    <div className="field">
+                      <div style={{ color: "var(--muted)", fontSize: 13 }}>
+                        ✅ Pedido vinculado automaticamente ao seu WhatsApp (final {waFinal}).{" "}
+                        <button
+                          type="button"
+                          style={{ background: "none", border: "none", color: "#ff6b00", fontSize: 13, cursor: "pointer", padding: 0, textDecoration: "underline" }}
+                          onClick={() => setUsarOutroWhatsapp(true)}
+                        >Usar outro WhatsApp</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="field">
+                      <label>WhatsApp</label>
+                      <input ref={telefoneRef} value={telefone} onChange={(e) => { const f = formatTel(e.target.value); setTelefone(f); if (erroTelefone) setErroTelefone(""); }} inputMode="tel" placeholder="(99) 9 9999-9999" />
+                      {waFinal && usarOutroWhatsapp && (
+                        <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 4 }}>
+                          <button
+                            type="button"
+                            style={{ background: "none", border: "none", color: "#ff6b00", fontSize: 12, cursor: "pointer", padding: 0, textDecoration: "underline" }}
+                            onClick={() => { setUsarOutroWhatsapp(false); setTelefone(""); setErroTelefone(""); }}
+                          >Voltar a usar o WhatsApp vinculado (final {waFinal})</button>
+                        </div>
+                      )}
+                      {erroTelefone && <div style={{ color: "#ef4444", fontSize: 12, marginTop: 4 }}>{erroTelefone}</div>}
+                    </div>
+                  )}
                 </div>
               )}
               {/* Bloco: Observação */}

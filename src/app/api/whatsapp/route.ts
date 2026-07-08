@@ -1,5 +1,6 @@
 ﻿import { NextRequest, NextResponse, after } from "next/server";
-import { processMessage, createInitialSession, createReturningSession, montarSaudacaoRetorno, garantirLinkCardapioEmMensagens, BotSession, ClienteHistorico, setMenuDinamico, setConfigDinamica, setEsgotados, temPixNoPagamento, valorPixEsperado } from "@/lib/bot";
+import { processMessage, createInitialSession, createReturningSession, montarSaudacaoRetorno, garantirLinkCardapioEmMensagens, LINK_CARDAPIO_DIGITAL, BotSession, ClienteHistorico, setMenuDinamico, setConfigDinamica, setEsgotados, temPixNoPagamento, valorPixEsperado } from "@/lib/bot";
+import { criarOuReutilizarTokenCardapio, anexarTokenAoLinkCardapio } from "@/lib/cardapioToken";
 import { getMENUDinamico } from "@/lib/menu";
 import { redis } from "@/lib/redis";
 import { interpretarMensagem, gerarRespostaGuardiao } from "@/lib/claude";
@@ -255,6 +256,15 @@ async function fecharEscalonamento(phone: string) {
 }
 
 async function enviarMensagem(phone: string, message: string, ritmoRapido = false) {
+  // Link do cardápio personalizado: injeta token opaco (?t=) que o site
+  // resolve de volta para este phone. Best-effort — falha no Redis nunca
+  // impede o envio (o link segue funcionando sem vínculo).
+  if (message.includes(LINK_CARDAPIO_DIGITAL)) {
+    try {
+      const token = await criarOuReutilizarTokenCardapio(phone);
+      message = anexarTokenAoLinkCardapio(message, token);
+    } catch {}
+  }
   const url = `${EVOLUTION_BASE}/message/sendText/chefebot`;
   // Delay "digitando" proporcional ao tamanho do texto (parece mais humano).
   // Cliente apressado (responde só com número) recebe respostas bem rápidas (~400ms).
