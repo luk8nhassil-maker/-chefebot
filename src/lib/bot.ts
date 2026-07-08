@@ -60,9 +60,17 @@ function sizeListComMiniPizza(): string {
   return `  1. Mini-Pizza · *R$ 17,00*\n${sizes}`;
 }
 
+// Fonte única de verdade para a lista numerada de sabores: tanto o texto exibido
+// (listaFlavors) quanto a resolução do número digitado (case "flavor"/"segundo_sabor"/
+// detectaDoisSabores) usam esta mesma função — nunca mais podem desalinhar índice.
+function flavorsDisponiveis(): string[] {
+  return [...MENU.saltyFlavors, ...MENU.sweetFlavors].filter(f => !isEsgotado(f));
+}
 function listaFlavors(): string {
-  const salties = MENU.saltyFlavors.filter(f => !isEsgotado(f));
-  const sweets = MENU.sweetFlavors.filter(f => !isEsgotado(f));
+  const saltyCount = MENU.saltyFlavors.filter(f => !isEsgotado(f)).length;
+  const disponiveis = flavorsDisponiveis();
+  const salties = disponiveis.slice(0, saltyCount);
+  const sweets = disponiveis.slice(saltyCount);
   let num = 1;
   const saltyList = salties.map(f => `  ${num++}. ${f}`).join("\n");
   const sweetList = sweets.map(f => `  ${num++}. ${f}`).join("\n");
@@ -405,7 +413,11 @@ function resolveSaborComAmbiguidade(termo: string, nomes: string[]): { tipo: "un
   if (porPalavra.length > 1) return { tipo: "ambiguo", opcoes: porPalavra };
   return { tipo: "nenhum" };
 }
-function detectaDoisSabores(n: string, allFlavors: string[]): [string, string] | null {
+// allFlavors: lista completa, usada para resolução por nome/apelido (esgotados incluídos,
+// para que o cliente que digitar o nome de um item esgotado ainda receba o aviso correto).
+// flavorsParaNumero: lista filtrada (mesma exibida ao cliente) — usada SÓ para resolver
+// escolha por número ("1 e 8"), evitando o desalinhamento de índice quando há esgotados.
+function detectaDoisSabores(n: string, allFlavors: string[], flavorsParaNumero: string[] = allFlavors): [string, string] | null {
   // Por número ("1 e 8"), evitando o caso em que o dígito faz parte de um apelido ("3 queijos")
   const nums = n.match(/\d+/g);
   if (nums && nums.length >= 2) {
@@ -415,8 +427,8 @@ function detectaDoisSabores(n: string, allFlavors: string[]): [string, string] |
     if (!digitoEhApelido) {
       const i1 = parseInt(nums[0]) - 1;
       const i2 = parseInt(nums[1]) - 1;
-      if (i1 >= 0 && i1 < allFlavors.length && i2 >= 0 && i2 < allFlavors.length && i1 !== i2) {
-        return [allFlavors[i1], allFlavors[i2]];
+      if (i1 >= 0 && i1 < flavorsParaNumero.length && i2 >= 0 && i2 < flavorsParaNumero.length && i1 !== i2) {
+        return [flavorsParaNumero[i1], flavorsParaNumero[i2]];
       }
     }
   }
@@ -1025,16 +1037,26 @@ function listaBordas(size: string): string {
   return MENU.borders.map((b, i) => `  ${i + 1}. *${b.label}* · *${formatCurrency(preco)}*`).join("\n") +
     `\n  ${MENU.borders.length + 1}. Sem borda`;
 }
+// Mesma lógica de fonte única aplicada a bebidas/sucos/lanches (ver flavorsDisponiveis).
+function bebidasDisponiveis(): typeof MENU.bebidas {
+  return MENU.bebidas.filter(b => !isEsgotado(b.name));
+}
+function sucosDisponiveis(): typeof MENU.sucos {
+  return MENU.sucos.filter(s => !isEsgotado(s.name));
+}
+function lanchesDisponiveis(): typeof MENU.lanches {
+  return MENU.lanches.filter(l => !isEsgotado(l.name) && l.name !== "Mini-Pizza");
+}
 function listaBebidas(): string {
-  const items = MENU.bebidas.filter(b => !isEsgotado(b.name));
+  const items = bebidasDisponiveis();
   return items.map((b, i) => `  ${i + 1}. ${b.name} · *${formatCurrency(b.price)}*`).join("\n");
 }
 function listaSucos(): string {
-  const items = MENU.sucos.filter(s => !isEsgotado(s.name));
+  const items = sucosDisponiveis();
   return items.map((s, i) => `  ${i + 1}. ${s.name} · *${formatCurrency(s.price)}*`).join("\n");
 }
 function listaLanches(): string {
-  const items = MENU.lanches.filter(l => !isEsgotado(l.name) && l.name !== "Mini-Pizza");
+  const items = lanchesDisponiveis();
   return items.map((l, i) => {
     if (l.sizes && l.sizes.length > 0) {
       const precos = l.sizes.map((s: {code: string, price: number}) => `${s.code} *${formatCurrency(s.price)}*`).join(" | ");
@@ -2608,7 +2630,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       if (size) {
         // Se o tamanho permite meio a meio, tenta DOIS sabores primeiro (evita capturar só o primeiro)
         if (permiteMeioAMeio(size)) {
-          const dois = detectaDoisSabores(n, allFlavors);
+          const dois = detectaDoisSabores(n, allFlavors, flavorsDisponiveis());
           if (dois) {
             const flavorFinal = `${dois[0]}/${dois[1]}`;
             const bordaJunta = detectaBordaDaMensagem(n);
@@ -2691,7 +2713,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
         return respostaInvalida(`A pizza aceita até *2 sabores*! 😊\n\nEscolha 1 ou 2 sabores:\n\n${listaFlavors()}`, session);
       }
       if (permiteMeioAMeio(session.currentSize)) {
-        const dois = detectaDoisSabores(n, allFlavors);
+        const dois = detectaDoisSabores(n, allFlavors, flavorsDisponiveis());
         if (dois) {
           const flavorFinal = `${dois[0]}/${dois[1]}`;
           return {
@@ -2705,8 +2727,9 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       }
       let flavor: string | undefined;
       const num = parseInt(text);
-      if (!isNaN(num) && num >= 1 && num <= allFlavors.length) {
-        flavor = allFlavors[num - 1];
+      const flavorsParaNumero = flavorsDisponiveis();
+      if (!isNaN(num) && num >= 1 && num <= flavorsParaNumero.length) {
+        flavor = flavorsParaNumero[num - 1];
       } else {
         flavor = resolveUmSabor(n, allFlavors) ?? undefined;
       }
@@ -2778,8 +2801,9 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       }
       let flavor2: string | undefined;
       const num = parseInt(text);
-      if (!isNaN(num) && num >= 1 && num <= allFlavors.length) {
-        flavor2 = allFlavors[num - 1];
+      const flavorsParaNumero = flavorsDisponiveis();
+      if (!isNaN(num) && num >= 1 && num <= flavorsParaNumero.length) {
+        flavor2 = flavorsParaNumero[num - 1];
       } else {
         flavor2 = resolveUmSabor(n, allFlavors) ?? undefined;
       }
@@ -3415,8 +3439,11 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
       // parseInt só quando texto for puramente numérico — evita "2 calabresa" selecionar o 2º lanche
       const numPuro = /^\d+$/.test(text.trim());
       const num = numPuro ? parseInt(text) : NaN;
+      // O número escolhido resolve contra a MESMA lista filtrada exibida por listaLanches()
+      // (sem Mini-Pizza, sem esgotados) — nunca contra o array cru do cardápio.
+      const lanchesParaNumero = lanchesDisponiveis();
       let lanche = MENU.lanches.find((l) => normalizar(l.name) === n);
-      if (!lanche && !isNaN(num) && num >= 1 && num <= MENU.lanches.length) lanche = MENU.lanches[num - 1];
+      if (!lanche && !isNaN(num) && num >= 1 && num <= lanchesParaNumero.length) lanche = lanchesParaNumero[num - 1];
       if (!lanche) lanche = MENU.lanches.find((l) => n.includes(normalizar(l.name)));
       if (!lanche) {
         // Sem match direto -> tenta por palavra-chave. Se houver mais de um nome de lanche batendo, pergunta antes.
@@ -3623,13 +3650,16 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
         const resQtdBeb = tentaAdicionarComQtd(qtdBebida, session);
         if (resQtdBeb) return resQtdBeb;
       }
+      // O número (simples ou par "1 e 3") resolve contra a MESMA lista filtrada exibida
+      // por listaBebidas() (sem esgotados) — nunca contra o array cru do cardápio.
+      const bebidasParaNumero = bebidasDisponiveis();
       const nums = n.match(/\d+/g);
       if (nums && nums.length >= 2) {
         const i1 = parseInt(nums[0]) - 1;
         const i2 = parseInt(nums[1]) - 1;
-        if (i1 >= 0 && i1 < MENU.bebidas.length && i2 >= 0 && i2 < MENU.bebidas.length) {
-          const b1 = MENU.bebidas[i1];
-          const b2 = MENU.bebidas[i2];
+        if (i1 >= 0 && i1 < bebidasParaNumero.length && i2 >= 0 && i2 < bebidasParaNumero.length) {
+          const b1 = bebidasParaNumero[i1];
+          const b2 = bebidasParaNumero[i2];
           const novosItens: CartItem[] = [
             { category: "bebida", name: b1.name, price: b1.price },
             { category: "bebida", name: b2.name, price: b2.price },
@@ -3641,7 +3671,7 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
       const numPuroBeb = /^\d+$/.test(text.trim());
       const num = numPuroBeb ? parseInt(text) : NaN;
       let bebida = MENU.bebidas.find(b => normalizar(b.name).includes(n));
-      if (!bebida && !isNaN(num) && num >= 1 && num <= MENU.bebidas.length) bebida = MENU.bebidas[num - 1];
+      if (!bebida && !isNaN(num) && num >= 1 && num <= bebidasParaNumero.length) bebida = bebidasParaNumero[num - 1];
       if (!bebida) {
         // Sem match direto -> tenta por palavra-chave (ex: "guarana" bate em várias). Pergunta se houver mais de uma.
         const nomesBebidas = MENU.bebidas.map(b => b.name);
@@ -3698,13 +3728,16 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
         const resQtdSuc = tentaAdicionarComQtd(qtdSuco, session);
         if (resQtdSuc) return { ...resQtdSuc, session: { ...resQtdSuc.session, pendingQtdSuco: undefined } };
       }
+      // O número (simples ou par "1 e 3") resolve contra a MESMA lista filtrada exibida
+      // por listaSucos() (sem esgotados) — nunca contra o array cru do cardápio.
+      const sucosParaNumero = sucosDisponiveis();
       const nums = n.match(/\d+/g);
       if (nums && nums.length >= 2) {
         const i1 = parseInt(nums[0]) - 1;
         const i2 = parseInt(nums[1]) - 1;
-        if (i1 >= 0 && i1 < MENU.sucos.length && i2 >= 0 && i2 < MENU.sucos.length) {
-          const s1 = MENU.sucos[i1];
-          const s2 = MENU.sucos[i2];
+        if (i1 >= 0 && i1 < sucosParaNumero.length && i2 >= 0 && i2 < sucosParaNumero.length) {
+          const s1 = sucosParaNumero[i1];
+          const s2 = sucosParaNumero[i2];
           const novosItens: CartItem[] = [
             { category: "suco", name: s1.name, price: s1.price },
             { category: "suco", name: s2.name, price: s2.price },
@@ -3722,7 +3755,7 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
       const numPuroSuc = /^\d+$/.test(text.trim());
       const num = numPuroSuc ? parseInt(text) : NaN;
       let suco = MENU.sucos.find(s => normalizar(s.name).includes(n));
-      if (!suco && !isNaN(num) && num >= 1 && num <= MENU.sucos.length) suco = MENU.sucos[num - 1];
+      if (!suco && !isNaN(num) && num >= 1 && num <= sucosParaNumero.length) suco = sucosParaNumero[num - 1];
       if (!suco) return respostaInvalida(`${listaSucos()}`, session);
       if (isEsgotado(suco.name)) return respostaEsgotado(suco.name, MENU.sucos.map(s => s.name), session);
       const newItem: CartItem = { category: "suco", name: suco.name, price: suco.price };
