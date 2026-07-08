@@ -1034,10 +1034,6 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     if (!f2) { setF2(f); return; }
     setF2(f);
   }
-  function pickFlavorFromModal(f: string) {
-    pickFlavor(f);
-    setFlavorModalOpen(false);
-  }
   const mam = !!(f1 && f2);
   const flavorOk = !!f1;
   const buildOk = !!size && flavorOk && !(miniPizzaMode && miniPizzaEsgotada);
@@ -1055,6 +1051,9 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
           ? "Você pode escolher até 2 sabores"
           : "Sabores prontos — agora escolha a borda";
   const buildActionLabel = miniPizzaMode ? "Adicionar mini-pizza" : "Confirmar pizza";
+  const flavorModalTitle = miniPizzaMode ? (miniPizzaItem?.name || "Mini-pizza") : `Pizza ${selectedSizeLabel}`;
+  const flavorModalMessage = miniPizzaMode ? "Escolha o sabor da sua mini-pizza." : "Você pode escolher até 2 sabores.";
+  const flavorModalHint = miniPizzaMode ? null : "Escolha 1 sabor para pizza inteira ou 2 sabores para meio a meio.";
   function addPizzaWithBorder(chosenBorder: string | null, chosenBorderPrice: number) {
     setBorder(chosenBorder); setBorderPrice(chosenBorderPrice);
     const flavor = mam ? `${f1} / ${f2}` : f1;
@@ -1079,6 +1078,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     else { showToast("Tudo pronto!"); go("sc-cart"); }
   }
   function continueBuild() { if (!buildOk) return; if (miniPizzaMode) addMiniPizza(); else go("sc-border"); }
+  function confirmFromModal() { if (!buildOk) return; setFlavorModalOpen(false); continueBuild(); }
   function addAnother() { setPlan({ total: 0, current: pizzasNoCarrinho() + 1, openEnded: true }); resetBuild(); go("sc-build"); }
   function goCat(cat: "lanche" | "macarronada" | "bebida" | "suco") { setListCat(cat); go("sc-list"); }
   function isMacarronada(it: { name: string; sizes?: { code: string; price: number }[] }) {
@@ -1904,8 +1904,9 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
           <div className="flavor-modal payment-modal" role="dialog" aria-modal="true" aria-labelledby="flavor-modal-title" onClick={(e) => e.stopPropagation()}>
             <div className="payment-modal-head">
               <div>
-                <div className="payment-modal-kicker">{selectedSizeLabel}</div>
-                <h3 id="flavor-modal-title">Escolha o sabor da sua pizza</h3>
+                <h3 id="flavor-modal-title">{flavorModalTitle}</h3>
+                <p className="flavor-modal-msg">{flavorModalMessage}</p>
+                {flavorModalHint && <p className="flavor-modal-hint">{flavorModalHint}</p>}
               </div>
               <button type="button" className="payment-modal-close" aria-label="Fechar" onClick={() => setFlavorModalOpen(false)}>×</button>
             </div>
@@ -1916,7 +1917,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                   {section.flavors.map((f) => {
                     const esg = esgotados.includes(f);
                     return (
-                      <div key={`modal-${section.title}-${f}`} className={`opt flavor-opt ${f === f1 || f === f2 ? "sel" : ""} ${esg ? "esg" : ""}`} onClick={() => !esg && pickFlavorFromModal(f)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }}>
+                      <div key={`modal-${section.title}-${f}`} className={`opt flavor-opt ${f === f1 || f === f2 ? "sel" : ""} ${esg ? "esg" : ""}`} onClick={() => !esg && pickFlavor(f)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }}>
                         <div className="opt-emoji">🍕</div><div className="opt-body"><div className="opt-title">{f}</div>{esg && <div className="opt-desc" style={{ color: "#ef4444" }}>Esgotado</div>}</div><div className="opt-check" />
                       </div>
                     );
@@ -1925,7 +1926,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
               ))}
             </div>
             <div className="payment-modal-actions single">
-              <button type="button" className="btn btn-ghost" onClick={() => setFlavorModalOpen(false)}>Fechar</button>
+              <button type="button" className="btn" disabled={!buildOk} onClick={confirmFromModal}>{buildActionLabel}</button>
             </div>
           </div>
         </div>
@@ -2194,6 +2195,8 @@ main{width:100%;padding:6px 20px 20px}
 .flavor-modal{max-height:82vh;display:flex;flex-direction:column;padding-bottom:14px}
 .flavor-modal-body{overflow-y:auto;flex:1 1 auto;padding-right:2px;margin:2px 0 4px;scrollbar-width:thin}
 .flavor-modal-body .opt{margin-bottom:8px}
+.flavor-modal-msg{font-size:13.5px;font-weight:700;color:var(--text);margin-top:4px}
+.flavor-modal-hint{font-size:12.5px;color:var(--text-sub);margin-top:3px;line-height:1.35}
 .cartbar{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:540px;z-index:50;background:transparent;padding:0 20px calc(env(safe-area-inset-bottom) + 14px);pointer-events:none}
 .cartbar-inner{margin:0 auto;display:flex;align-items:center;gap:14px;background:#15110f;border:1px solid rgba(255,255,255,.1);border-radius:20px;padding:12px 12px 12px 16px;box-shadow:0 -10px 34px rgba(0,0,0,.35);pointer-events:auto}
 .cartbar-info{flex:1}
