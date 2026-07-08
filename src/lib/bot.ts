@@ -3782,7 +3782,7 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
       return { messages: [mensagemAddMore(newCart)], session: resetaTentativas({ ...session, step: "add_more", cart: newCart, pendingSucosLeite: undefined }) };
     }
     case "done": {
-      return { messages: [`_Oi! Sua sessão expirou por inatividade. Vamos começar de novo? 😊_\n\n${mensagemCategorias()}`], session: resetaTentativas({ step: "category", cart: [], deliveryFee: 0, customerName: session.customerName }) };
+      return { messages: [`_Oi! Sua sessão expirou por inatividade. Vamos começar de novo? 😊_\n\n${mensagemCategorias()}\n\nSe preferir ver o cardápio digital, é só acessar:\nhttps://chefebot-pjif.vercel.app/cardapio`], session: resetaTentativas({ step: "category", cart: [], deliveryFee: 0, customerName: session.customerName }) };
     }
     default:
       return { messages: ["Eita, me perdi aqui! Vamos começar de novo?"], session: { step: "welcome", cart: [], deliveryFee: 0 } };
@@ -3802,6 +3802,7 @@ export function montarSaudacaoRetorno(h: ClienteHistorico): string {
     : `${h.ultimoPedido[0]} e mais ${qtdItens - 1} ${qtdItens - 1 === 1 ? "item" : "itens"}`;
   const escolhe = (arr: string[]) => arr[Math.floor(Math.random() * arr.length)];
   const rodape = "\n\n  1. Pedir o de sempre\n  2. Ver o cardápio";
+  const linkCardapio = "\n\nSe preferir ver o cardápio digital, é só acessar:\nhttps://chefebot-pjif.vercel.app/cardapio";
 
   let texto: string;
   if (dias > 20) {
@@ -3823,7 +3824,7 @@ export function montarSaudacaoRetorno(h: ClienteHistorico): string {
   } else {
     texto = `Oi *${nome}*! Que bom te ver por aqui 😊 Vai querer o de sempre (*${favorito}*) de novo ou prefere ver o cardápio?`;
   }
-  return texto + rodape;
+  return texto + rodape + linkCardapio;
 }
 export function createReturningSession(historico: ClienteHistorico): BotSession {
   return { step: "returning", cart: [], deliveryFee: 0, historico, tentativasInvalidas: 0 };
