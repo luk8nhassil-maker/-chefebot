@@ -14,10 +14,21 @@
 // ============================================================================
 
 import type { BotSession, MensagemRelevante } from "./bot";
+import { comLinkCardapio } from "./bot";
 import { analisarConversaParaRetomada, validarRespostaIA, type ConversationPath } from "./conversationBrain";
 import { gerarRespostaGuardiao } from "./claude";
 import { gerarRecomendacaoLocal } from "./recomendacaoSkill";
 import { gerarRespostaContextoHumano } from "./contextoHumanoSkill";
+
+// Steps de pós-pedido/operacional onde o link do cardápio NÃO deve aparecer
+// (pedido já entregue/cancelado, aguardando comprovante Pix, ou já escalado
+// para atendimento humano). Fora desses steps, qualquer substituição de texto
+// "seco" pelo fallback inteligente representa iniciar/continuar um pedido.
+const STEPS_SEM_LINK_CARDAPIO = new Set<string>(["done", "aguardando_pix", "escalado"]);
+
+function deveIncluirLinkCardapio(session: BotSession): boolean {
+  return !STEPS_SEM_LINK_CARDAPIO.has(session.step);
+}
 
 function normalizar(texto: string): string {
   return (texto || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
@@ -186,15 +197,17 @@ export async function resolverFallbackInteligente(input: FallbackInput): Promise
     try {
       const ia = await chamar(decisao.promptContexto);
       if (ia && validarRespostaIA(ia, session)) {
-        return { messages: [ia], usouIA: true, intervencao: "ia", path: decisao.path, promptContexto: decisao.promptContexto };
+        const mensagemFinal = deveIncluirLinkCardapio(session) ? comLinkCardapio(ia) : ia;
+        return { messages: [mensagemFinal], usouIA: true, intervencao: "ia", path: decisao.path, promptContexto: decisao.promptContexto };
       }
     } catch {
       // cai no fallback determinístico humanizado
     }
   }
 
+  const fallbackHumanizado = fallbackDeterministicoMelhorado(session, mensagemAtual);
   return {
-    messages: [fallbackDeterministicoMelhorado(session, mensagemAtual)],
+    messages: [deveIncluirLinkCardapio(session) ? comLinkCardapio(fallbackHumanizado) : fallbackHumanizado],
     usouIA: false,
     intervencao: "fallback_melhorado",
     path: decisao.path,

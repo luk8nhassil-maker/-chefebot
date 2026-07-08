@@ -1032,6 +1032,19 @@ function nomeCategoriaAtual(step: BotStep, currentCategory?: string): string {
 function mensagemCategorias(): string {
   return `O que vai ser hoje? Temos coisa boa te esperando! 😋\n\n  1. Pizza\n  2. Lanches\n  3. Bebidas\n  4. Sucos e Vitaminas`;
 }
+
+// Link do cardápio digital — deve acompanhar toda mensagem que chama o cliente
+// para iniciar ou continuar a montagem do pedido (nunca em mensagens de
+// pós-pedido: done, aguardando_pix, escalado, status/rastreamento).
+export const LINK_CARDAPIO_DIGITAL = "https://chefebot-pjif.vercel.app/cardapio";
+export function textoLinkCardapioDigital(): string {
+  return `Se preferir ver o cardápio digital, é só acessar:\n${LINK_CARDAPIO_DIGITAL}`;
+}
+// Anexa o link do cardápio a uma mensagem, evitando duplicar se ele já estiver presente.
+export function comLinkCardapio(mensagem: string): string {
+  if (mensagem.includes(LINK_CARDAPIO_DIGITAL)) return mensagem;
+  return `${mensagem}\n\n${textoLinkCardapioDigital()}`;
+}
 function listaBordas(size: string): string {
   const preco = getBorderPrice(size);
   return MENU.borders.map((b, i) => `  ${i + 1}. *${b.label}* · *${formatCurrency(preco)}*`).join("\n") +
@@ -2217,7 +2230,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
     }
     case "welcome": {
       return {
-        messages: [`Olá! Seja bem-vindo à *Chefe da Pizza*! 🍕\n\nVocê pode fazer seu pedido por aqui mesmo no WhatsApp.\n\nSe preferir ver o cardápio digital, é só acessar:\nhttps://chefebot-pjif.vercel.app/cardapio\n\nO que vai ser hoje? Temos coisa boa te esperando!`],
+        messages: [comLinkCardapio(`Olá! Seja bem-vindo à *Chefe da Pizza*! 🍕\n\nVocê pode fazer seu pedido por aqui mesmo no WhatsApp.\n\nO que vai ser hoje? Temos coisa boa te esperando!`)],
         session: { ...session, step: "category" },
       };
     }
@@ -3782,7 +3795,7 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
       return { messages: [mensagemAddMore(newCart)], session: resetaTentativas({ ...session, step: "add_more", cart: newCart, pendingSucosLeite: undefined }) };
     }
     case "done": {
-      return { messages: [`_Oi! Sua sessão expirou por inatividade. Vamos começar de novo? 😊_\n\n${mensagemCategorias()}\n\nSe preferir ver o cardápio digital, é só acessar:\nhttps://chefebot-pjif.vercel.app/cardapio`], session: resetaTentativas({ step: "category", cart: [], deliveryFee: 0, customerName: session.customerName }) };
+      return { messages: [comLinkCardapio(`_Oi! Sua sessão expirou por inatividade. Vamos começar de novo? 😊_\n\n${mensagemCategorias()}`)], session: resetaTentativas({ step: "category", cart: [], deliveryFee: 0, customerName: session.customerName }) };
     }
     default:
       return { messages: ["Eita, me perdi aqui! Vamos começar de novo?"], session: { step: "welcome", cart: [], deliveryFee: 0 } };
@@ -3802,7 +3815,6 @@ export function montarSaudacaoRetorno(h: ClienteHistorico): string {
     : `${h.ultimoPedido[0]} e mais ${qtdItens - 1} ${qtdItens - 1 === 1 ? "item" : "itens"}`;
   const escolhe = (arr: string[]) => arr[Math.floor(Math.random() * arr.length)];
   const rodape = "\n\n  1. Pedir o de sempre\n  2. Ver o cardápio";
-  const linkCardapio = "\n\nSe preferir ver o cardápio digital, é só acessar:\nhttps://chefebot-pjif.vercel.app/cardapio";
 
   let texto: string;
   if (dias > 20) {
@@ -3824,7 +3836,7 @@ export function montarSaudacaoRetorno(h: ClienteHistorico): string {
   } else {
     texto = `Oi *${nome}*! Que bom te ver por aqui 😊 Vai querer o de sempre (*${favorito}*) de novo ou prefere ver o cardápio?`;
   }
-  return texto + rodape + linkCardapio;
+  return comLinkCardapio(texto + rodape);
 }
 export function createReturningSession(historico: ClienteHistorico): BotSession {
   return { step: "returning", cart: [], deliveryFee: 0, historico, tentativasInvalidas: 0 };
