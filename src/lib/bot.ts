@@ -1045,6 +1045,67 @@ export function comLinkCardapio(mensagem: string): string {
   if (mensagem.includes(LINK_CARDAPIO_DIGITAL)) return mensagem;
   return `${mensagem}\n\n${textoLinkCardapioDigital()}`;
 }
+
+// ── GATE CENTRAL DO LINK DO CARDÁPIO ─────────────────────────────────────────
+// Regra de negócio definitiva: TODA mensagem que convida o cliente a iniciar,
+// retomar ou continuar um pedido deve conter o link do cardápio digital.
+// Este gate roda no wrapper processMessage (cobre o bot determinístico inteiro,
+// tanto /api/whatsapp quanto /api/bot) e nos pontos de texto gerado fora dele
+// (fallback inteligente/IA e retomada pós-handoff no webhook).
+//
+// Steps em que o link NUNCA entra: pagamento/confirmação/pós-pedido/humano.
+// O caso "done" é bloqueado pelo step RESULTANTE: quando o bot reinicia o
+// atendimento a sessão sai de done (vira category), então o convite de novo
+// pedido recebe o link; já a confirmação "pedido foi pra cozinha" permanece em
+// done e fica sem link — preservando o espaço do futuro link de rastreamento.
+const STEPS_BLOQUEADOS_LINK_CARDAPIO = new Set<string>([
+  "done", "aguardando_pix", "escalado",
+  "payment", "payment_hibrido_valor", "payment_hibrido_complemento", "troco", "confirm",
+]);
+
+// Conteúdo que identifica mensagem operacional/pós-pedido (nunca recebe link),
+// avaliado sobre o texto normalizado (sem acentos, minúsculas).
+const TERMOS_BLOQUEIO_LINK: RegExp[] = [
+  /entregue/, /cancelad/, /avalia/, /\bnota\b/, /feedback/,
+  /em preparo/, /sendo preparado/, /saiu para entrega/, /foi pra cozinha/, /chega em/,
+  /pagamento/, /\bpix\b/, /comprovante/, /troco/,
+  /atendente/, /equipe/, /humano/, /ja chamo alguem/, /vem ai em breve/,
+  /rastrear/, /rastreamento/, /acompanhamento/, /\bstatus\b/, /resolvido/,
+];
+
+// Conteúdo que identifica convite para iniciar/retomar/continuar pedido.
+const TERMOS_CONVITE_LINK: RegExp[] = [
+  /\bpizzas?\b/, /\blanches?\b/, /\bbebidas?\b/, /\bsucos?\b/, /\bvitaminas?\b/,
+  /cardapio/, /montar seu pedido/, /fazer (seu |um )?pedido/, /o que vai ser/,
+  /vamos montar/, /voltei por aqui/, /escolher uma opcao/, /escolha uma categoria/,
+];
+
+// Decide e anexa o link do cardápio numa mensagem final. `step` é o step
+// RESULTANTE da sessão quando disponível (opcional para textos gerados por IA
+// fora do fluxo determinístico).
+export function garantirLinkCardapioEmMensagemDePedido(mensagem: string, step?: BotStep | string): string {
+  if (!mensagem || mensagem.includes(LINK_CARDAPIO_DIGITAL)) return mensagem;
+  if (step && STEPS_BLOQUEADOS_LINK_CARDAPIO.has(step)) return mensagem;
+  const n = normalizar(mensagem);
+  if (TERMOS_BLOQUEIO_LINK.some(re => re.test(n))) return mensagem;
+  if (!TERMOS_CONVITE_LINK.some(re => re.test(n))) return mensagem;
+  return comLinkCardapio(mensagem);
+}
+
+// Versão para a resposta completa (várias bolhas): anexa o link no MÁXIMO uma
+// vez por resposta, na última mensagem que caracteriza convite de pedido.
+export function garantirLinkCardapioEmMensagens(messages: string[], step?: BotStep | string): string[] {
+  if (messages.some(m => m.includes(LINK_CARDAPIO_DIGITAL))) return messages;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const comLink = garantirLinkCardapioEmMensagemDePedido(messages[i], step);
+    if (comLink !== messages[i]) {
+      const copia = [...messages];
+      copia[i] = comLink;
+      return copia;
+    }
+  }
+  return messages;
+}
 function listaBordas(size: string): string {
   const preco = getBorderPrice(size);
   return MENU.borders.map((b, i) => `  ${i + 1}. *${b.label}* · *${formatCurrency(preco)}*`).join("\n") +
@@ -2046,6 +2107,9 @@ export function processMessage(input: string, session: BotSession): BotResponse 
   }
   const result = processMessageInner(input, session);
   result.session = { ...result.session, ritmoRapido };
+  // Gate central: convites de início/retorno/continuação de pedido saem SEMPRE
+  // com o link do cardápio digital (exceções por step/conteúdo no próprio gate).
+  result.messages = garantirLinkCardapioEmMensagens(result.messages, result.session.step);
   return result;
 }
 function processMessageInner(input: string, session: BotSession): BotResponse {
