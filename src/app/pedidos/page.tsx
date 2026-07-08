@@ -1065,11 +1065,36 @@ export default function PedidosPage() {
         {hibridoParts ? (
           <div style={{ background: "rgba(250,204,21,.07)", border: "1px solid rgba(250,204,21,.2)", borderRadius: 12, padding: "12px 14px" }}>
             <div style={{ fontSize: 10, fontWeight: 900, color: "#a39b8b", textTransform: "uppercase", letterSpacing: ".8px", marginBottom: 8 }}>Pagamento Misto</div>
-            {hibridoParts.map((pp, i) => (
-              <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 14, fontWeight: 800, color: "#fde68a", marginBottom: 4 }}>
-                <span>{pp.metodo}</span><span>R$ {pp.valor.toFixed(2).replace(".", ",")}</span>
+            {hibridoParts.map((pp, i) => {
+              const ehPix = /pix/i.test(pp.metodo)
+              const revisaoOuSuspeito = ehPix ? labelPixRevisaoOuSuspeito(p) : null
+              return (
+                <div key={i} style={{ marginBottom: 4 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, fontWeight: 800, color: "#fde68a" }}>
+                    <span>{pp.metodo}</span><span>R$ {pp.valor.toFixed(2).replace(".", ",")}</span>
+                  </div>
+                  {ehPix && (
+                    <div style={{ marginTop: 2 }}>
+                      {p.pixConfirmado ? (
+                        <span style={{ fontSize: 11, color: "#34d399", fontWeight: 800 }}>{labelPixConfirmado(p)}</span>
+                      ) : revisaoOuSuspeito ? (
+                        <span style={{ fontSize: 11, color: p.pix?.status === "suspeito" ? "#f87171" : "#fbbf24", fontWeight: 800 }}>{revisaoOuSuspeito}</span>
+                      ) : (
+                        <span style={{ fontSize: 11, color: "#fbbf24", fontWeight: 800 }}>⏳ Aguardando confirmação</span>
+                      )}
+                      {!p.pixConfirmado && !revisaoOuSuspeito && motivoResumidoPix(p) && (
+                        <div style={{ marginTop: 2, fontSize: 11, fontWeight: 700, color: "#a39b8b" }}>{motivoResumidoPix(p)}</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+            {p.troco && (
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, fontWeight: 700, color: "#a39b8b", marginTop: 6 }}>
+                <span>Troco</span><span>{p.troco === "Sem troco" ? "Sem troco" : p.troco}</span>
               </div>
-            ))}
+            )}
             <div style={{ borderTop: "1px solid rgba(250,204,21,.15)", marginTop: 6, paddingTop: 6, display: "flex", justifyContent: "space-between", fontSize: 16, fontWeight: 900, color: "#facc15" }}>
               <span>Total</span><span>R$ {p.total.toFixed(2).replace(".", ",")}</span>
             </div>
@@ -1710,6 +1735,7 @@ export default function PedidosPage() {
             const firstName = pedido.cliente.split(" ")[0]
             const pagamento = pedido.pagamento || ""
             const isPix = pagamento.toLowerCase().includes("pix")
+            const hibridoParts = parseHybridPayment(pagamento)
             const pixPendente = isPix && !pedido.pixConfirmado && pedido.status === "novo"
             const pixEmRevisaoOuSuspeito = isPix && !pedido.pixConfirmado && labelPixRevisaoOuSuspeito(pedido)
             const isRetirada = !isDineIn && (!pedido.tipoEntrega || pedido.tipoEntrega === "pickup" || pedido.tipoEntrega === "retirada" || pedido.endereco === "Retirada na loja")
@@ -1759,10 +1785,10 @@ export default function PedidosPage() {
                       <span style={{ fontSize: 14, fontWeight: 900, color: "#f0ede8", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{firstName}</span>
                       {pedido.escalonado && <span style={{ fontSize: 11, flexShrink: 0 }}>🚨</span>}
                       {(pedido.origem === "site" || pedido.origem === "app") && <span style={{ fontSize: 9, fontWeight: 900, color: "#60a5fa", background: "rgba(96,165,250,.12)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>🌐 Site</span>}
-                      {pixPendente && <span style={{ fontSize: 9, fontWeight: 900, color: "#fbbf24", background: "rgba(251,191,36,.12)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>PIX⏳</span>}
+                      {pixPendente && <span style={{ fontSize: 9, fontWeight: 900, color: "#fbbf24", background: "rgba(251,191,36,.12)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>{hibridoParts ? "PIX parcial ⏳" : "PIX⏳"}</span>}
                       {pixEmRevisaoOuSuspeito && <span style={{ fontSize: 9, fontWeight: 900, color: pedido.pix?.status === "suspeito" ? "#f87171" : "#fbbf24", background: pedido.pix?.status === "suspeito" ? "rgba(248,113,113,.12)" : "rgba(251,191,36,.12)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>{pixEmRevisaoOuSuspeito}</span>}
                       {pedido.cancelamentoSolicitado && <span style={{ fontSize: 11, flexShrink: 0 }}>⚠️</span>}
-                      <span style={{ fontSize: 10, fontWeight: 900, color: pixPendente ? "#fbbf24" : (isPix && pedido.pixConfirmado && pedido.status === "novo" ? "#34d399" : sc.accent), background: pixPendente ? "rgba(251,191,36,.12)" : (isPix && pedido.pixConfirmado && pedido.status === "novo" ? "rgba(52,211,153,.12)" : sc.accentBg), padding: "2px 7px", borderRadius: 6, border: `1px solid ${pixPendente ? "rgba(251,191,36,.35)" : (isPix && pedido.pixConfirmado && pedido.status === "novo" ? "rgba(52,211,153,.35)" : sc.accentBorder)}`, textTransform: "uppercase", letterSpacing: ".4px", flexShrink: 0 }}>{pixPendente ? "Aguardando Pix" : (isPix && pedido.pixConfirmado && pedido.status === "novo" ? "Pago" : sc.label)}</span>
+                      <span style={{ fontSize: 10, fontWeight: 900, color: pixPendente ? "#fbbf24" : (isPix && pedido.pixConfirmado && pedido.status === "novo" ? "#34d399" : sc.accent), background: pixPendente ? "rgba(251,191,36,.12)" : (isPix && pedido.pixConfirmado && pedido.status === "novo" ? "rgba(52,211,153,.12)" : sc.accentBg), padding: "2px 7px", borderRadius: 6, border: `1px solid ${pixPendente ? "rgba(251,191,36,.35)" : (isPix && pedido.pixConfirmado && pedido.status === "novo" ? "rgba(52,211,153,.35)" : sc.accentBorder)}`, textTransform: "uppercase", letterSpacing: ".4px", flexShrink: 0 }}>{pixPendente ? (hibridoParts ? "Aguardando Pix parcial" : "Aguardando Pix") : (isPix && pedido.pixConfirmado && pedido.status === "novo" ? (hibridoParts ? "Pix parcial pago" : "Pago") : sc.label)}</span>
                     </div>
 
                     {/* Linha 2: infos compactas */}
