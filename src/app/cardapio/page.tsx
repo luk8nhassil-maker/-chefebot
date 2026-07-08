@@ -746,6 +746,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const [f2, setF2] = useState<string | null>(null);
   const [border, setBorder] = useState<string | null>(null);
   const [borderPrice, setBorderPrice] = useState(0);
+  const [flavorModalOpen, setFlavorModalOpen] = useState(false);
   const [plan, setPlan] = useState<{ total: number; current: number; openEnded: boolean }>({ total: 0, current: 0, openEnded: false });
   const [listCat, setListCat] = useState<"lanche" | "macarronada" | "bebida" | "suco">("lanche");
   // Upsell contextual de bebida: rastreia o tipo do último item adicionado e
@@ -1019,11 +1020,11 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const miniPizzaEsgotada = !!miniPizzaItem && esgotados.includes(miniPizzaItem.name);
   const miniPizzaFlavors = (menu.miniPizzaFlavors?.length ? menu.miniPizzaFlavors : [...(menu.saltyFlavors || []), ...(menu.sweetFlavors || [])]).filter(Boolean);
 
-  function resetBuild() { setSize(null); setSizePrice(0); setF1(null); setF2(null); setBorder(null); setBorderPrice(0); setMiniPizzaMode(false); }
+  function resetBuild() { setSize(null); setSizePrice(0); setF1(null); setF2(null); setBorder(null); setBorderPrice(0); setMiniPizzaMode(false); setFlavorModalOpen(false); }
   function goPizza() { setPlan({ total: 0, current: 1, openEnded: true }); resetBuild(); go("sc-build"); }
   function pizzasNoCarrinho() { return cart.filter((c) => c.kind === "pizza" || (c.kind === "simple" && isMiniPizzaName(c.name))).length; }
-  function pickSize(code: string) { const s = (menu.sizes || []).find((x) => x.code === code); if (!s) return; setMiniPizzaMode(false); setSize(code); setSizePrice(s.price); }
-  function pickMiniPizza() { if (!miniPizzaItem || miniPizzaEsgotada) return; setMiniPizzaMode(true); setSize("MINI"); setSizePrice(miniPizzaItem.price); setF2(null); }
+  function pickSize(code: string) { const s = (menu.sizes || []).find((x) => x.code === code); if (!s) return; setMiniPizzaMode(false); setSize(code); setSizePrice(s.price); setFlavorModalOpen(true); }
+  function pickMiniPizza() { if (!miniPizzaItem || miniPizzaEsgotada) return; setMiniPizzaMode(true); setSize("MINI"); setSizePrice(miniPizzaItem.price); setF2(null); setFlavorModalOpen(true); }
   // Toque direto em até 2 sabores: o 1º sabor já forma uma pizza normal, o 2º
   // vira meio a meio automaticamente (sem etapa de escolher o "modo" antes).
   function pickFlavor(f: string) {
@@ -1032,6 +1033,10 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     if (!f1) { setF1(f); return; }
     if (!f2) { setF2(f); return; }
     setF2(f);
+  }
+  function pickFlavorFromModal(f: string) {
+    pickFlavor(f);
+    setFlavorModalOpen(false);
   }
   const mam = !!(f1 && f2);
   const flavorOk = !!f1;
@@ -1894,6 +1899,37 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
           </div>
         </div>
       )}
+      {screen === "sc-build" && flavorModalOpen && size && (
+        <div className="flavor-modal-backdrop" role="presentation" onClick={() => setFlavorModalOpen(false)}>
+          <div className="flavor-modal payment-modal" role="dialog" aria-modal="true" aria-labelledby="flavor-modal-title" onClick={(e) => e.stopPropagation()}>
+            <div className="payment-modal-head">
+              <div>
+                <div className="payment-modal-kicker">{selectedSizeLabel}</div>
+                <h3 id="flavor-modal-title">Escolha o sabor da sua pizza</h3>
+              </div>
+              <button type="button" className="payment-modal-close" aria-label="Fechar" onClick={() => setFlavorModalOpen(false)}>×</button>
+            </div>
+            <div className="flavor-modal-body">
+              {flavorSections.map((section) => (
+                <div key={section.title}>
+                  <div className="section-label">{section.title}</div>
+                  {section.flavors.map((f) => {
+                    const esg = esgotados.includes(f);
+                    return (
+                      <div key={`modal-${section.title}-${f}`} className={`opt flavor-opt ${f === f1 || f === f2 ? "sel" : ""} ${esg ? "esg" : ""}`} onClick={() => !esg && pickFlavorFromModal(f)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }}>
+                        <div className="opt-emoji">🍕</div><div className="opt-body"><div className="opt-title">{f}</div>{esg && <div className="opt-desc" style={{ color: "#ef4444" }}>Esgotado</div>}</div><div className="opt-check" />
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+            <div className="payment-modal-actions single">
+              <button type="button" className="btn btn-ghost" onClick={() => setFlavorModalOpen(false)}>Fechar</button>
+            </div>
+          </div>
+        </div>
+      )}
       {toast && <div className="toast show">{toast}</div>}
     </>
   )
@@ -2154,6 +2190,10 @@ main{width:100%;padding:6px 20px 20px}
 .payment-modal-actions.single{grid-template-columns:1fr}
 .payment-modal-actions .btn{padding:13px 10px}
 @keyframes sheet{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
+.flavor-modal-backdrop{position:fixed;inset:0;z-index:85;background:rgba(0,0,0,.6);display:flex;align-items:flex-end;justify-content:center;padding:16px}
+.flavor-modal{max-height:82vh;display:flex;flex-direction:column;padding-bottom:14px}
+.flavor-modal-body{overflow-y:auto;flex:1 1 auto;padding-right:2px;margin:2px 0 4px;scrollbar-width:thin}
+.flavor-modal-body .opt{margin-bottom:8px}
 .cartbar{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:540px;z-index:50;background:transparent;padding:0 20px calc(env(safe-area-inset-bottom) + 14px);pointer-events:none}
 .cartbar-inner{margin:0 auto;display:flex;align-items:center;gap:14px;background:#15110f;border:1px solid rgba(255,255,255,.1);border-radius:20px;padding:12px 12px 12px 16px;box-shadow:0 -10px 34px rgba(0,0,0,.35);pointer-events:auto}
 .cartbar-info{flex:1}
