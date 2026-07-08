@@ -1,5 +1,5 @@
 ﻿import { NextRequest, NextResponse, after } from "next/server";
-import { processMessage, createInitialSession, createReturningSession, montarSaudacaoRetorno, BotSession, ClienteHistorico, setMenuDinamico, setConfigDinamica, setEsgotados, temPixNoPagamento, valorPixEsperado } from "@/lib/bot";
+import { processMessage, createInitialSession, createReturningSession, montarSaudacaoRetorno, garantirLinkCardapioEmMensagens, BotSession, ClienteHistorico, setMenuDinamico, setConfigDinamica, setEsgotados, temPixNoPagamento, valorPixEsperado } from "@/lib/bot";
 import { getMENUDinamico } from "@/lib/menu";
 import { redis } from "@/lib/redis";
 import { interpretarMensagem, gerarRespostaGuardiao } from "@/lib/claude";
@@ -1129,7 +1129,8 @@ export async function POST(req: NextRequest) {
       const querMais = ["sim", "quero", "pode", "vai", "bora", "oi", "ola", "bom dia", "boa tarde", "boa noite", "olá"].some(p => nResp.includes(p))
       if (querMais) {
         const cats = `O que vai ser hoje? 😊\n\n  1. Pizza\n  2. Lanches\n  3. Bebidas\n  4. Sucos e Vitaminas`
-        await enviarMensagem(phone, `Ótimo! 😄\n\n${cats}`)
+        // Reinício de pedido pós-avaliação — convite de pedido, passa pelo gate do link.
+        await enviarMensagem(phone, garantirLinkCardapioEmMensagens([`Ótimo! 😄\n\n${cats}`], "category")[0])
         const newSession = createInitialSession()
         await redis.set(`session:${phone}`, { ...newSession, customerName: undefined }, { ex: 1800 })
       } else {
@@ -1182,6 +1183,9 @@ export async function POST(req: NextRequest) {
         }
         await redis.set(sessionKey, sessaoRetomada, { ex: 1800 });
         if (mensagensRetomada.length > 0) {
+          // Retomada pós-handoff gera texto fora do processMessage (IA/safeReply) —
+          // passa pelo gate central do link do cardápio antes do envio.
+          mensagensRetomada = garantirLinkCardapioEmMensagens(mensagensRetomada, sessaoRetomada.step);
           await enviarRespostas(phone, mensagensRetomada, config, sessaoRetomada.ritmoRapido);
         }
         return NextResponse.json({ ok: true });

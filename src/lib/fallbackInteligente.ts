@@ -14,21 +14,11 @@
 // ============================================================================
 
 import type { BotSession, MensagemRelevante } from "./bot";
-import { comLinkCardapio } from "./bot";
+import { garantirLinkCardapioEmMensagemDePedido } from "./bot";
 import { analisarConversaParaRetomada, validarRespostaIA, type ConversationPath } from "./conversationBrain";
 import { gerarRespostaGuardiao } from "./claude";
 import { gerarRecomendacaoLocal } from "./recomendacaoSkill";
 import { gerarRespostaContextoHumano } from "./contextoHumanoSkill";
-
-// Steps de pós-pedido/operacional onde o link do cardápio NÃO deve aparecer
-// (pedido já entregue/cancelado, aguardando comprovante Pix, ou já escalado
-// para atendimento humano). Fora desses steps, qualquer substituição de texto
-// "seco" pelo fallback inteligente representa iniciar/continuar um pedido.
-const STEPS_SEM_LINK_CARDAPIO = new Set<string>(["done", "aguardando_pix", "escalado"]);
-
-function deveIncluirLinkCardapio(session: BotSession): boolean {
-  return !STEPS_SEM_LINK_CARDAPIO.has(session.step);
-}
 
 function normalizar(texto: string): string {
   return (texto || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
@@ -174,14 +164,14 @@ export async function resolverFallbackInteligente(input: FallbackInput): Promise
   // Curto-circuito local: intenções de recomendação não precisam de API.
   const recomendacao = gerarRecomendacaoLocal(session, mensagemAtual);
   if (recomendacao) {
-    return { messages: [recomendacao], usouIA: false, intervencao: "fallback_melhorado" };
+    return { messages: [garantirLinkCardapioEmMensagemDePedido(recomendacao, session.step)], usouIA: false, intervencao: "fallback_melhorado" };
   }
 
   // Curto-circuito local: mensagens de contexto humano (humor, cansaço, indecisão
   // ampla, retomada leve) respondidas localmente — zero chamada de API.
   const contextoHumano = gerarRespostaContextoHumano(session, mensagemAtual);
   if (contextoHumano) {
-    return { messages: [contextoHumano], usouIA: false, intervencao: "fallback_melhorado" };
+    return { messages: [garantirLinkCardapioEmMensagemDePedido(contextoHumano, session.step)], usouIA: false, intervencao: "fallback_melhorado" };
   }
 
   // Decide o caminho (BECO/SAIDA) e monta o contexto seguro para a IA.
@@ -197,7 +187,7 @@ export async function resolverFallbackInteligente(input: FallbackInput): Promise
     try {
       const ia = await chamar(decisao.promptContexto);
       if (ia && validarRespostaIA(ia, session)) {
-        const mensagemFinal = deveIncluirLinkCardapio(session) ? comLinkCardapio(ia) : ia;
+        const mensagemFinal = garantirLinkCardapioEmMensagemDePedido(ia, session.step);
         return { messages: [mensagemFinal], usouIA: true, intervencao: "ia", path: decisao.path, promptContexto: decisao.promptContexto };
       }
     } catch {
@@ -207,7 +197,7 @@ export async function resolverFallbackInteligente(input: FallbackInput): Promise
 
   const fallbackHumanizado = fallbackDeterministicoMelhorado(session, mensagemAtual);
   return {
-    messages: [deveIncluirLinkCardapio(session) ? comLinkCardapio(fallbackHumanizado) : fallbackHumanizado],
+    messages: [garantirLinkCardapioEmMensagemDePedido(fallbackHumanizado, session.step)],
     usouIA: false,
     intervencao: "fallback_melhorado",
     path: decisao.path,
