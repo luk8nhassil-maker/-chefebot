@@ -168,8 +168,9 @@ export default function ImprimirPedidoPage({ params }: PageProps) {
         html, body { background: #fff; }
         .cupom {
           font-family: 'Courier New', Courier, monospace;
-          font-size: 12px;
-          line-height: 1.6;
+          font-size: 14px;
+          font-weight: 600;
+          line-height: 1.7;
           width: 72mm;
           max-width: 72mm;
           padding: 4mm 3mm;
@@ -177,13 +178,13 @@ export default function ImprimirPedidoPage({ params }: PageProps) {
           color: #000;
         }
         .centro { text-align: center; }
-        .negrito { font-weight: bold; }
-        .grande { font-size: 14px; font-weight: bold; text-align: center; margin: 3px 0; }
-        .total-linha { font-size: 14px; font-weight: bold; text-align: center; margin-top: 4px; }
-        .alerta { font-weight: bold; text-align: center; }
-        .linha { border: none; border-top: 1px dashed #000; margin: 6px 0; }
-        .secao { margin: 2px 0; }
-        .secao-titulo { font-weight: bold; text-align: center; margin: 4px 0 2px; }
+        .negrito { font-weight: 800; }
+        .grande { font-size: 16px; font-weight: 800; text-align: center; margin: 4px 0; }
+        .total-linha { font-size: 17px; font-weight: 800; text-align: center; margin-top: 6px; }
+        .alerta { font-weight: 800; text-align: center; }
+        .linha { border: none; border-top: 1px dashed #000; margin: 7px 0; }
+        .secao { margin: 3px 0; }
+        .secao-titulo { font-weight: 800; text-align: center; margin: 5px 0 3px; }
         .btn-imprimir {
           display: block;
           margin: 16px auto;
@@ -200,7 +201,12 @@ export default function ImprimirPedidoPage({ params }: PageProps) {
           @page { size: 80mm auto; margin: 0; }
           html, body { margin: 0; }
           .btn-imprimir { display: none !important; }
-          .cupom { padding: 2mm; }
+          .cupom {
+            padding: 2mm;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+            color: #000 !important;
+          }
         }
       `}</style>
 
