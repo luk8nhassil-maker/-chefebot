@@ -705,6 +705,8 @@ const ICONS = {
   editar: "✎",
   relogio: "🕐",
   localizacao: "📍",
+  pessoa: "👤",
+  nota: "📝",
 } as const;
 
 // Banco de ilustrações leves (src/lib/cardapioVisuals.tsx) já aplicado em:
@@ -838,7 +840,14 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     try {
       const n = localStorage.getItem("cf_nome"); const t = localStorage.getItem("cf_tel");
       if (n) setNome(n); if (t) setTelefone(t);
-      if (n && t && n.trim() && t.replace(/\D/g, "").length >= 10) setEditandoIdentidade(false);
+      // Cliente vinculado ao WhatsApp (token do link) não precisa ter telefone
+      // salvo no navegador para já ver o pedido identificado — lê a mesma
+      // sessionStorage que a validação do token grava (evita depender da ordem
+      // dos efeitos de montagem, já que o state de vínculo pode não estar
+      // atualizado neste mesmo ciclo de render).
+      const temVinculoWa = !!sessionStorage.getItem("cf_wa_final");
+      const telValido = !!t && t.replace(/\D/g, "").length >= 10;
+      if (n && n.trim() && (telValido || temVinculoWa)) setEditandoIdentidade(false);
       else setEditandoIdentidade(true);
     } catch { setEditandoIdentidade(true); }
     try {
@@ -1591,8 +1600,8 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                 </div>
               </details>
 
-              <div ref={pagamentoRef} className="payment-choice">
-                <div className="section-label" style={{ marginTop: 0 }}>Forma de pagamento</div>
+              <div ref={pagamentoRef} className="pay-section-card payment-choice">
+                <div className="pay-section-title">Escolha o pagamento</div>
                 <div className="payment-grid">
                   {(menu.payments || []).map((p) => (
                     <button key={p} type="button" className={`payment-card ${payment === p ? "sel" : ""}`} onClick={() => openPaymentConfig(p)}>
@@ -1607,28 +1616,34 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
 
               {/* Bloco: Identificação */}
               {!editandoIdentidade && nome.trim() && (telefoneValido(telefone) || vinculoWhatsappAtivo) ? (
-                <div style={{ background: "var(--card)", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
-                  <div style={{ fontSize: 12, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 6 }}>Pedido identificado</div>
-                  <div style={{ fontSize: 15, fontWeight: 700, color: "var(--fg)" }}>{nome.trim()}</div>
-                  <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 2 }}>
-                    {vinculoWhatsappAtivo ? `✅ Vinculado ao WhatsApp · final ${waFinal}` : telefone}
+                <div className="pay-section-card">
+                  <div className="pay-section-title">Pedido identificado</div>
+                  <div className="identidade-row">
+                    <div className="identidade-avatar" aria-hidden="true">{ICONS.pessoa}</div>
+                    <div className="identidade-info">
+                      <div className="identidade-nome">{nome.trim()}</div>
+                      {vinculoWhatsappAtivo
+                        ? <span className="wa-badge">✅ Vinculado ao WhatsApp · final {waFinal}</span>
+                        : <span className="identidade-tel">{telefone}</span>}
+                    </div>
                   </div>
-                  <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 8, lineHeight: 1.5 }}>Vamos usar esses dados nesse pedido. Se estiver tudo certo, é só escolher o pagamento.</div>
-                  <button
-                    style={{ marginTop: 8, background: "none", border: "none", color: "#ff6b00", fontSize: 13, cursor: "pointer", padding: 0, textDecoration: "underline" }}
-                    onClick={() => setEditandoIdentidade(true)}
-                  >{vinculoWhatsappAtivo ? "Alterar nome" : "Alterar dados"}</button>
-                  {vinculoWhatsappAtivo && (
-                    <button
-                      style={{ marginTop: 8, marginLeft: 16, background: "none", border: "none", color: "var(--muted)", fontSize: 13, cursor: "pointer", padding: 0, textDecoration: "underline" }}
-                      onClick={() => { setUsarOutroWhatsapp(true); setEditandoIdentidade(true); }}
-                    >Usar outro WhatsApp</button>
-                  )}
+                  <p className="identidade-explicacao">Vamos usar esses dados neste pedido.<br />Se estiver tudo certo, é só escolher o pagamento.</p>
+                  <div className="pay-divider" />
+                  <div className="pay-actions-row">
+                    <button type="button" className="pay-action-link" onClick={() => setEditandoIdentidade(true)}>{vinculoWhatsappAtivo ? "Alterar nome" : "Alterar dados"}</button>
+                    {vinculoWhatsappAtivo && (
+                      <button
+                        type="button"
+                        className="pay-action-link muted"
+                        onClick={() => { setUsarOutroWhatsapp(true); setEditandoIdentidade(true); }}
+                      >Usar outro WhatsApp</button>
+                    )}
+                  </div>
                 </div>
               ) : (
-                <div style={{ marginBottom: 16 }}>
-                  <div className="section-label">Pra quem é o pedido?</div>
-                  <p style={{ fontSize: 13, color: "var(--muted)", marginBottom: 12, marginTop: -4 }}>Rapidinho: é só pra gente identificar seu pedido e falar com você se precisar.</p>
+                <div className="pay-section-card">
+                  <div className="pay-section-title">Pra quem é o pedido?</div>
+                  <p className="pay-section-help">Rapidinho: é só pra gente identificar seu pedido e falar com você se precisar.</p>
                   <div className="field">
                     <label>Seu nome</label>
                     <input ref={nomeRef} value={nome} onChange={(e) => { setNome(e.target.value); if (erroNome) setErroNome(""); }} placeholder="Como te chamamos?" />
@@ -1636,11 +1651,11 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                   </div>
                   {vinculoWhatsappAtivo ? (
                     <div className="field">
-                      <div style={{ color: "var(--muted)", fontSize: 13 }}>
-                        ✅ Pedido vinculado automaticamente ao seu WhatsApp (final {waFinal}).{" "}
+                      <div className="wa-inline-note">
+                        <span className="wa-badge">✅ Vinculado ao seu WhatsApp · final {waFinal}</span>
                         <button
                           type="button"
-                          style={{ background: "none", border: "none", color: "#ff6b00", fontSize: 13, cursor: "pointer", padding: 0, textDecoration: "underline" }}
+                          className="pay-action-link"
                           onClick={() => setUsarOutroWhatsapp(true)}
                         >Usar outro WhatsApp</button>
                       </div>
@@ -1650,13 +1665,12 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                       <label>WhatsApp</label>
                       <input ref={telefoneRef} value={telefone} onChange={(e) => { const f = formatTel(e.target.value); setTelefone(f); if (erroTelefone) setErroTelefone(""); }} inputMode="tel" placeholder="(99) 9 9999-9999" />
                       {waFinal && usarOutroWhatsapp && (
-                        <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 4 }}>
-                          <button
-                            type="button"
-                            style={{ background: "none", border: "none", color: "#ff6b00", fontSize: 12, cursor: "pointer", padding: 0, textDecoration: "underline" }}
-                            onClick={() => { setUsarOutroWhatsapp(false); setTelefone(""); setErroTelefone(""); }}
-                          >Voltar a usar o WhatsApp vinculado (final {waFinal})</button>
-                        </div>
+                        <button
+                          type="button"
+                          className="pay-action-link"
+                          style={{ fontSize: 12, marginTop: 6 }}
+                          onClick={() => { setUsarOutroWhatsapp(false); setTelefone(""); setErroTelefone(""); }}
+                        >Voltar a usar o WhatsApp vinculado (final {waFinal})</button>
                       )}
                       {erroTelefone && <div style={{ color: "#ef4444", fontSize: 12, marginTop: 4 }}>{erroTelefone}</div>}
                     </div>
@@ -1664,9 +1678,12 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                 </div>
               )}
               {/* Bloco: Observação */}
-              <div style={{ marginTop: 16, marginBottom: 4 }}>
-                <div className="section-label">Algum detalhe no pedido?</div>
-                <p style={{ fontSize: 13, color: "var(--muted)", marginBottom: 10, marginTop: -4 }}>Se quiser, deixa um recado pra cozinha. Se não tiver nada, pode seguir direto.</p>
+              <div className="pay-section-card">
+                <div className="pay-section-title">Observações do pedido</div>
+                <div className="obs-help-row">
+                  <span className="obs-icon" aria-hidden="true">{ICONS.nota}</span>
+                  <p className="pay-section-help" style={{ margin: 0 }}>Se quiser, deixa um recado pra cozinha.<br />Se não tiver nada, pode seguir direto.</p>
+                </div>
                 <div className="field" style={{ marginBottom: 0 }}><input value={observacao} onChange={(e) => setObservacao(e.target.value)} placeholder="Ex: sem cebola, sem azeitona, tirar milho, pouco orégano…" /></div>
               </div>
               {cartEsgotado && <div style={{ marginTop: 8, padding: "10px 12px", borderRadius: 10, background: "rgba(239,68,68,.1)", color: "#ef4444", fontSize: 13, fontWeight: 700 }}>{ICONS.alerta} Um item do seu pedido ficou esgotado. Remova para continuar.</div>}
@@ -2065,10 +2082,10 @@ main{width:100%;padding:6px 20px 20px}
 .field input:focus,.field select:focus{outline:none;border-color:var(--brand)}
 .delivery-screen{padding-bottom:132px}
 .delivery-cta-bar{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:540px;z-index:55;background:linear-gradient(to top,var(--bg) 78%,transparent);padding:18px 20px calc(env(safe-area-inset-bottom) + 14px);pointer-events:none}
-.delivery-cta-inner{display:grid;grid-template-columns:auto auto minmax(0,1fr);align-items:center;gap:10px;background:var(--surface);border:1px solid var(--line-strong);border-radius:18px;padding:10px;box-shadow:0 -10px 34px rgba(0,0,0,.28);pointer-events:auto}
-.delivery-cta-info{min-width:74px;padding-left:4px}
-.delivery-cta-label{font-size:11px;color:var(--text-sub);font-weight:600;text-transform:uppercase;letter-spacing:.7px}
-.delivery-cta-total{font-size:16px;font-weight:800;color:var(--text);line-height:1.15;white-space:nowrap}
+.delivery-cta-inner{display:grid;grid-template-columns:auto auto minmax(0,1fr);align-items:center;gap:14px;background:var(--surface);border:1px solid var(--line-strong);border-radius:20px;padding:14px;box-shadow:0 -10px 34px rgba(0,0,0,.28);pointer-events:auto}
+.delivery-cta-info{min-width:74px;padding-left:6px}
+.delivery-cta-label{font-size:11px;color:var(--text-sub);font-weight:700;text-transform:uppercase;letter-spacing:.14em}
+.delivery-cta-total{font-size:18px;font-weight:800;color:var(--text);line-height:1.2;white-space:nowrap;margin-top:2px;display:block}
 .delivery-cta-cart{border:1px solid var(--line-strong);background:transparent;color:var(--text-sub);border-radius:999px;padding:10px 12px;font-size:12.5px;font-weight:700}
 .delivery-cta-btn{margin:0;padding:14px 12px;border-radius:13px;min-width:0;white-space:normal;line-height:1.15}
 .pay-screen{padding-bottom:132px}
@@ -2098,6 +2115,28 @@ main{width:100%;padding:6px 20px 20px}
 .payment-card-text small{font-size:12.5px;color:var(--text-sub);line-height:1.35}
 .payment-edit{width:30px;height:30px;border-radius:999px;border:1px solid var(--line-strong);display:flex;align-items:center;justify-content:center;color:var(--text-sub);font-size:14px;flex:0 0 auto}
 .pay-error{color:#ef4444;font-size:12px;font-weight:700;margin-top:8px}
+/* Cards de seção da etapa de pagamento (pagamento / identificação / observações) —
+   mesmo bloco visual, mais respiro entre eles do que o antigo layout colado. */
+.pay-section-card{background:var(--surface);border:1px solid var(--line);border-radius:20px;padding:18px 16px;margin-bottom:18px;box-shadow:var(--shadow-sm)}
+.pay-section-card:last-of-type{margin-bottom:0}
+.pay-section-title{font-size:11px;font-weight:700;color:var(--text-sub);text-transform:uppercase;letter-spacing:.16em;margin-bottom:14px;display:flex;align-items:center;gap:8px}
+.pay-section-help{font-size:13px;color:var(--text-sub);line-height:1.5;margin:0 0 12px}
+.pay-section-card .field:last-child{margin-bottom:0}
+.pay-section-card .field input{background:var(--surface2)}
+.identidade-row{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+.identidade-avatar{width:40px;height:40px;border-radius:50%;background:var(--surface2);border:1px solid var(--line-strong);display:flex;align-items:center;justify-content:center;font-size:18px;flex:0 0 auto}
+.identidade-info{min-width:0}
+.identidade-nome{font-size:16px;font-weight:800;color:var(--text)}
+.identidade-tel{display:block;font-size:13px;color:var(--text-sub);margin-top:2px}
+.wa-badge{display:inline-flex;align-items:center;gap:6px;margin-top:4px;padding:4px 10px;border-radius:999px;background:var(--green-soft);color:var(--green);font-size:12px;font-weight:700;line-height:1.4}
+.identidade-explicacao{font-size:13px;color:var(--text-sub);line-height:1.5;margin:0 0 14px}
+.pay-divider{height:1px;background:var(--line);margin:0 0 14px}
+.pay-actions-row{display:flex;align-items:center;gap:20px;flex-wrap:wrap}
+.pay-action-link{background:none;border:none;color:var(--brand);font-size:13px;font-weight:700;cursor:pointer;padding:11px 2px;margin:-11px -2px;text-decoration:underline;text-underline-offset:2px;min-height:44px;display:inline-flex;align-items:center}
+.pay-action-link.muted{color:var(--text-sub)}
+.obs-help-row{display:flex;align-items:flex-start;gap:10px;margin-bottom:14px}
+.obs-icon{font-size:16px;line-height:1.5;flex:0 0 auto}
+.wa-inline-note{display:flex;flex-direction:column;align-items:flex-start;gap:8px}
 .payment-modal-backdrop{position:fixed;inset:0;z-index:80;background:rgba(0,0,0,.55);display:flex;align-items:flex-end;justify-content:center;padding:20px}
 .payment-modal{width:100%;max-width:500px;background:var(--surface);border:1px solid var(--line-strong);border-radius:20px;padding:16px;box-shadow:0 -14px 45px rgba(0,0,0,.35);animation:sheet .22s ease-out}
 .payment-modal-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:12px}
