@@ -60,9 +60,17 @@ function sizeListComMiniPizza(): string {
   return `  1. Mini-Pizza · *R$ 17,00*\n${sizes}`;
 }
 
+// Fonte única de verdade para a lista numerada de sabores: tanto o texto exibido
+// (listaFlavors) quanto a resolução do número digitado (case "flavor"/"segundo_sabor"/
+// detectaDoisSabores) usam esta mesma função — nunca mais podem desalinhar índice.
+function flavorsDisponiveis(): string[] {
+  return [...MENU.saltyFlavors, ...MENU.sweetFlavors].filter(f => !isEsgotado(f));
+}
 function listaFlavors(): string {
-  const salties = MENU.saltyFlavors.filter(f => !isEsgotado(f));
-  const sweets = MENU.sweetFlavors.filter(f => !isEsgotado(f));
+  const saltyCount = MENU.saltyFlavors.filter(f => !isEsgotado(f)).length;
+  const disponiveis = flavorsDisponiveis();
+  const salties = disponiveis.slice(0, saltyCount);
+  const sweets = disponiveis.slice(saltyCount);
   let num = 1;
   const saltyList = salties.map(f => `  ${num++}. ${f}`).join("\n");
   const sweetList = sweets.map(f => `  ${num++}. ${f}`).join("\n");
@@ -405,7 +413,11 @@ function resolveSaborComAmbiguidade(termo: string, nomes: string[]): { tipo: "un
   if (porPalavra.length > 1) return { tipo: "ambiguo", opcoes: porPalavra };
   return { tipo: "nenhum" };
 }
-function detectaDoisSabores(n: string, allFlavors: string[]): [string, string] | null {
+// allFlavors: lista completa, usada para resolução por nome/apelido (esgotados incluídos,
+// para que o cliente que digitar o nome de um item esgotado ainda receba o aviso correto).
+// flavorsParaNumero: lista filtrada (mesma exibida ao cliente) — usada SÓ para resolver
+// escolha por número ("1 e 8"), evitando o desalinhamento de índice quando há esgotados.
+function detectaDoisSabores(n: string, allFlavors: string[], flavorsParaNumero: string[] = allFlavors): [string, string] | null {
   // Por número ("1 e 8"), evitando o caso em que o dígito faz parte de um apelido ("3 queijos")
   const nums = n.match(/\d+/g);
   if (nums && nums.length >= 2) {
@@ -415,8 +427,8 @@ function detectaDoisSabores(n: string, allFlavors: string[]): [string, string] |
     if (!digitoEhApelido) {
       const i1 = parseInt(nums[0]) - 1;
       const i2 = parseInt(nums[1]) - 1;
-      if (i1 >= 0 && i1 < allFlavors.length && i2 >= 0 && i2 < allFlavors.length && i1 !== i2) {
-        return [allFlavors[i1], allFlavors[i2]];
+      if (i1 >= 0 && i1 < flavorsParaNumero.length && i2 >= 0 && i2 < flavorsParaNumero.length && i1 !== i2) {
+        return [flavorsParaNumero[i1], flavorsParaNumero[i2]];
       }
     }
   }
@@ -1020,21 +1032,105 @@ function nomeCategoriaAtual(step: BotStep, currentCategory?: string): string {
 function mensagemCategorias(): string {
   return `O que vai ser hoje? Temos coisa boa te esperando! 😋\n\n  1. Pizza\n  2. Lanches\n  3. Bebidas\n  4. Sucos e Vitaminas`;
 }
+
+// Link do cardápio digital — deve acompanhar toda mensagem que chama o cliente
+// para iniciar ou continuar a montagem do pedido (nunca em mensagens de
+// pós-pedido: done, aguardando_pix, escalado, status/rastreamento).
+export const LINK_CARDAPIO_DIGITAL = "https://chefebot-pjif.vercel.app/cardapio";
+export function textoLinkCardapioDigital(): string {
+  return `Se preferir ver o cardápio digital, é só acessar:\n${LINK_CARDAPIO_DIGITAL}`;
+}
+// Anexa o link do cardápio a uma mensagem, evitando duplicar se ele já estiver presente.
+export function comLinkCardapio(mensagem: string): string {
+  if (mensagem.includes(LINK_CARDAPIO_DIGITAL)) return mensagem;
+  return `${mensagem}\n\n${textoLinkCardapioDigital()}`;
+}
+
+// ── GATE CENTRAL DO LINK DO CARDÁPIO ─────────────────────────────────────────
+// Regra de negócio definitiva: TODA mensagem que convida o cliente a iniciar,
+// retomar ou continuar um pedido deve conter o link do cardápio digital.
+// Este gate roda no wrapper processMessage (cobre o bot determinístico inteiro,
+// tanto /api/whatsapp quanto /api/bot) e nos pontos de texto gerado fora dele
+// (fallback inteligente/IA e retomada pós-handoff no webhook).
+//
+// Steps em que o link NUNCA entra: pagamento/confirmação/pós-pedido/humano.
+// O caso "done" é bloqueado pelo step RESULTANTE: quando o bot reinicia o
+// atendimento a sessão sai de done (vira category), então o convite de novo
+// pedido recebe o link; já a confirmação "pedido foi pra cozinha" permanece em
+// done e fica sem link — preservando o espaço do futuro link de rastreamento.
+const STEPS_BLOQUEADOS_LINK_CARDAPIO = new Set<string>([
+  "done", "aguardando_pix", "escalado",
+  "payment", "payment_hibrido_valor", "payment_hibrido_complemento", "troco", "confirm",
+]);
+
+// Conteúdo que identifica mensagem operacional/pós-pedido (nunca recebe link),
+// avaliado sobre o texto normalizado (sem acentos, minúsculas).
+const TERMOS_BLOQUEIO_LINK: RegExp[] = [
+  /entregue/, /cancelad/, /avalia/, /\bnota\b/, /feedback/,
+  /em preparo/, /sendo preparado/, /saiu para entrega/, /foi pra cozinha/, /chega em/,
+  /pagamento/, /\bpix\b/, /comprovante/, /troco/,
+  /atendente/, /equipe/, /humano/, /ja chamo alguem/, /vem ai em breve/,
+  /rastrear/, /rastreamento/, /acompanhamento/, /\bstatus\b/, /resolvido/,
+];
+
+// Conteúdo que identifica convite para iniciar/retomar/continuar pedido.
+const TERMOS_CONVITE_LINK: RegExp[] = [
+  /\bpizzas?\b/, /\blanches?\b/, /\bbebidas?\b/, /\bsucos?\b/, /\bvitaminas?\b/,
+  /cardapio/, /montar seu pedido/, /fazer (seu |um )?pedido/, /o que vai ser/,
+  /vamos montar/, /voltei por aqui/, /escolher uma opcao/, /escolha uma categoria/,
+];
+
+// Decide e anexa o link do cardápio numa mensagem final. `step` é o step
+// RESULTANTE da sessão quando disponível (opcional para textos gerados por IA
+// fora do fluxo determinístico).
+export function garantirLinkCardapioEmMensagemDePedido(mensagem: string, step?: BotStep | string): string {
+  if (!mensagem || mensagem.includes(LINK_CARDAPIO_DIGITAL)) return mensagem;
+  if (step && STEPS_BLOQUEADOS_LINK_CARDAPIO.has(step)) return mensagem;
+  const n = normalizar(mensagem);
+  if (TERMOS_BLOQUEIO_LINK.some(re => re.test(n))) return mensagem;
+  if (!TERMOS_CONVITE_LINK.some(re => re.test(n))) return mensagem;
+  return comLinkCardapio(mensagem);
+}
+
+// Versão para a resposta completa (várias bolhas): anexa o link no MÁXIMO uma
+// vez por resposta, na última mensagem que caracteriza convite de pedido.
+export function garantirLinkCardapioEmMensagens(messages: string[], step?: BotStep | string): string[] {
+  if (messages.some(m => m.includes(LINK_CARDAPIO_DIGITAL))) return messages;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const comLink = garantirLinkCardapioEmMensagemDePedido(messages[i], step);
+    if (comLink !== messages[i]) {
+      const copia = [...messages];
+      copia[i] = comLink;
+      return copia;
+    }
+  }
+  return messages;
+}
 function listaBordas(size: string): string {
   const preco = getBorderPrice(size);
   return MENU.borders.map((b, i) => `  ${i + 1}. *${b.label}* · *${formatCurrency(preco)}*`).join("\n") +
     `\n  ${MENU.borders.length + 1}. Sem borda`;
 }
+// Mesma lógica de fonte única aplicada a bebidas/sucos/lanches (ver flavorsDisponiveis).
+function bebidasDisponiveis(): typeof MENU.bebidas {
+  return MENU.bebidas.filter(b => !isEsgotado(b.name));
+}
+function sucosDisponiveis(): typeof MENU.sucos {
+  return MENU.sucos.filter(s => !isEsgotado(s.name));
+}
+function lanchesDisponiveis(): typeof MENU.lanches {
+  return MENU.lanches.filter(l => !isEsgotado(l.name) && l.name !== "Mini-Pizza");
+}
 function listaBebidas(): string {
-  const items = MENU.bebidas.filter(b => !isEsgotado(b.name));
+  const items = bebidasDisponiveis();
   return items.map((b, i) => `  ${i + 1}. ${b.name} · *${formatCurrency(b.price)}*`).join("\n");
 }
 function listaSucos(): string {
-  const items = MENU.sucos.filter(s => !isEsgotado(s.name));
+  const items = sucosDisponiveis();
   return items.map((s, i) => `  ${i + 1}. ${s.name} · *${formatCurrency(s.price)}*`).join("\n");
 }
 function listaLanches(): string {
-  const items = MENU.lanches.filter(l => !isEsgotado(l.name) && l.name !== "Mini-Pizza");
+  const items = lanchesDisponiveis();
   return items.map((l, i) => {
     if (l.sizes && l.sizes.length > 0) {
       const precos = l.sizes.map((s: {code: string, price: number}) => `${s.code} *${formatCurrency(s.price)}*`).join(" | ");
@@ -2011,6 +2107,9 @@ export function processMessage(input: string, session: BotSession): BotResponse 
   }
   const result = processMessageInner(input, session);
   result.session = { ...result.session, ritmoRapido };
+  // Gate central: convites de início/retorno/continuação de pedido saem SEMPRE
+  // com o link do cardápio digital (exceções por step/conteúdo no próprio gate).
+  result.messages = garantirLinkCardapioEmMensagens(result.messages, result.session.step);
   return result;
 }
 function processMessageInner(input: string, session: BotSession): BotResponse {
@@ -2195,7 +2294,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
     }
     case "welcome": {
       return {
-        messages: [`Olá! Seja bem-vindo à *Chefe da Pizza*! 🍕\n\nO que vai ser hoje? Temos coisa boa te esperando!`],
+        messages: [comLinkCardapio(`Olá! Seja bem-vindo à *Chefe da Pizza*! 🍕\n\nVocê pode fazer seu pedido por aqui mesmo no WhatsApp.\n\nO que vai ser hoje? Temos coisa boa te esperando!`)],
         session: { ...session, step: "category" },
       };
     }
@@ -2608,7 +2707,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       if (size) {
         // Se o tamanho permite meio a meio, tenta DOIS sabores primeiro (evita capturar só o primeiro)
         if (permiteMeioAMeio(size)) {
-          const dois = detectaDoisSabores(n, allFlavors);
+          const dois = detectaDoisSabores(n, allFlavors, flavorsDisponiveis());
           if (dois) {
             const flavorFinal = `${dois[0]}/${dois[1]}`;
             const bordaJunta = detectaBordaDaMensagem(n);
@@ -2691,7 +2790,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
         return respostaInvalida(`A pizza aceita até *2 sabores*! 😊\n\nEscolha 1 ou 2 sabores:\n\n${listaFlavors()}`, session);
       }
       if (permiteMeioAMeio(session.currentSize)) {
-        const dois = detectaDoisSabores(n, allFlavors);
+        const dois = detectaDoisSabores(n, allFlavors, flavorsDisponiveis());
         if (dois) {
           const flavorFinal = `${dois[0]}/${dois[1]}`;
           return {
@@ -2705,8 +2804,9 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       }
       let flavor: string | undefined;
       const num = parseInt(text);
-      if (!isNaN(num) && num >= 1 && num <= allFlavors.length) {
-        flavor = allFlavors[num - 1];
+      const flavorsParaNumero = flavorsDisponiveis();
+      if (!isNaN(num) && num >= 1 && num <= flavorsParaNumero.length) {
+        flavor = flavorsParaNumero[num - 1];
       } else {
         flavor = resolveUmSabor(n, allFlavors) ?? undefined;
       }
@@ -2778,8 +2878,9 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       }
       let flavor2: string | undefined;
       const num = parseInt(text);
-      if (!isNaN(num) && num >= 1 && num <= allFlavors.length) {
-        flavor2 = allFlavors[num - 1];
+      const flavorsParaNumero = flavorsDisponiveis();
+      if (!isNaN(num) && num >= 1 && num <= flavorsParaNumero.length) {
+        flavor2 = flavorsParaNumero[num - 1];
       } else {
         flavor2 = resolveUmSabor(n, allFlavors) ?? undefined;
       }
@@ -3415,8 +3516,11 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
       // parseInt só quando texto for puramente numérico — evita "2 calabresa" selecionar o 2º lanche
       const numPuro = /^\d+$/.test(text.trim());
       const num = numPuro ? parseInt(text) : NaN;
+      // O número escolhido resolve contra a MESMA lista filtrada exibida por listaLanches()
+      // (sem Mini-Pizza, sem esgotados) — nunca contra o array cru do cardápio.
+      const lanchesParaNumero = lanchesDisponiveis();
       let lanche = MENU.lanches.find((l) => normalizar(l.name) === n);
-      if (!lanche && !isNaN(num) && num >= 1 && num <= MENU.lanches.length) lanche = MENU.lanches[num - 1];
+      if (!lanche && !isNaN(num) && num >= 1 && num <= lanchesParaNumero.length) lanche = lanchesParaNumero[num - 1];
       if (!lanche) lanche = MENU.lanches.find((l) => n.includes(normalizar(l.name)));
       if (!lanche) {
         // Sem match direto -> tenta por palavra-chave. Se houver mais de um nome de lanche batendo, pergunta antes.
@@ -3623,13 +3727,16 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
         const resQtdBeb = tentaAdicionarComQtd(qtdBebida, session);
         if (resQtdBeb) return resQtdBeb;
       }
+      // O número (simples ou par "1 e 3") resolve contra a MESMA lista filtrada exibida
+      // por listaBebidas() (sem esgotados) — nunca contra o array cru do cardápio.
+      const bebidasParaNumero = bebidasDisponiveis();
       const nums = n.match(/\d+/g);
       if (nums && nums.length >= 2) {
         const i1 = parseInt(nums[0]) - 1;
         const i2 = parseInt(nums[1]) - 1;
-        if (i1 >= 0 && i1 < MENU.bebidas.length && i2 >= 0 && i2 < MENU.bebidas.length) {
-          const b1 = MENU.bebidas[i1];
-          const b2 = MENU.bebidas[i2];
+        if (i1 >= 0 && i1 < bebidasParaNumero.length && i2 >= 0 && i2 < bebidasParaNumero.length) {
+          const b1 = bebidasParaNumero[i1];
+          const b2 = bebidasParaNumero[i2];
           const novosItens: CartItem[] = [
             { category: "bebida", name: b1.name, price: b1.price },
             { category: "bebida", name: b2.name, price: b2.price },
@@ -3641,7 +3748,7 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
       const numPuroBeb = /^\d+$/.test(text.trim());
       const num = numPuroBeb ? parseInt(text) : NaN;
       let bebida = MENU.bebidas.find(b => normalizar(b.name).includes(n));
-      if (!bebida && !isNaN(num) && num >= 1 && num <= MENU.bebidas.length) bebida = MENU.bebidas[num - 1];
+      if (!bebida && !isNaN(num) && num >= 1 && num <= bebidasParaNumero.length) bebida = bebidasParaNumero[num - 1];
       if (!bebida) {
         // Sem match direto -> tenta por palavra-chave (ex: "guarana" bate em várias). Pergunta se houver mais de uma.
         const nomesBebidas = MENU.bebidas.map(b => b.name);
@@ -3698,13 +3805,16 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
         const resQtdSuc = tentaAdicionarComQtd(qtdSuco, session);
         if (resQtdSuc) return { ...resQtdSuc, session: { ...resQtdSuc.session, pendingQtdSuco: undefined } };
       }
+      // O número (simples ou par "1 e 3") resolve contra a MESMA lista filtrada exibida
+      // por listaSucos() (sem esgotados) — nunca contra o array cru do cardápio.
+      const sucosParaNumero = sucosDisponiveis();
       const nums = n.match(/\d+/g);
       if (nums && nums.length >= 2) {
         const i1 = parseInt(nums[0]) - 1;
         const i2 = parseInt(nums[1]) - 1;
-        if (i1 >= 0 && i1 < MENU.sucos.length && i2 >= 0 && i2 < MENU.sucos.length) {
-          const s1 = MENU.sucos[i1];
-          const s2 = MENU.sucos[i2];
+        if (i1 >= 0 && i1 < sucosParaNumero.length && i2 >= 0 && i2 < sucosParaNumero.length) {
+          const s1 = sucosParaNumero[i1];
+          const s2 = sucosParaNumero[i2];
           const novosItens: CartItem[] = [
             { category: "suco", name: s1.name, price: s1.price },
             { category: "suco", name: s2.name, price: s2.price },
@@ -3722,7 +3832,7 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
       const numPuroSuc = /^\d+$/.test(text.trim());
       const num = numPuroSuc ? parseInt(text) : NaN;
       let suco = MENU.sucos.find(s => normalizar(s.name).includes(n));
-      if (!suco && !isNaN(num) && num >= 1 && num <= MENU.sucos.length) suco = MENU.sucos[num - 1];
+      if (!suco && !isNaN(num) && num >= 1 && num <= sucosParaNumero.length) suco = sucosParaNumero[num - 1];
       if (!suco) return respostaInvalida(`${listaSucos()}`, session);
       if (isEsgotado(suco.name)) return respostaEsgotado(suco.name, MENU.sucos.map(s => s.name), session);
       const newItem: CartItem = { category: "suco", name: suco.name, price: suco.price };
@@ -3749,7 +3859,7 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
       return { messages: [mensagemAddMore(newCart)], session: resetaTentativas({ ...session, step: "add_more", cart: newCart, pendingSucosLeite: undefined }) };
     }
     case "done": {
-      return { messages: [`_Oi! Sua sessão expirou por inatividade. Vamos começar de novo? 😊_\n\n${mensagemCategorias()}`], session: resetaTentativas({ step: "category", cart: [], deliveryFee: 0, customerName: session.customerName }) };
+      return { messages: [comLinkCardapio(`_Oi! Sua sessão expirou por inatividade. Vamos começar de novo? 😊_\n\n${mensagemCategorias()}`)], session: resetaTentativas({ step: "category", cart: [], deliveryFee: 0, customerName: session.customerName }) };
     }
     default:
       return { messages: ["Eita, me perdi aqui! Vamos começar de novo?"], session: { step: "welcome", cart: [], deliveryFee: 0 } };
@@ -3790,7 +3900,7 @@ export function montarSaudacaoRetorno(h: ClienteHistorico): string {
   } else {
     texto = `Oi *${nome}*! Que bom te ver por aqui 😊 Vai querer o de sempre (*${favorito}*) de novo ou prefere ver o cardápio?`;
   }
-  return texto + rodape;
+  return comLinkCardapio(texto + rodape);
 }
 export function createReturningSession(historico: ClienteHistorico): BotSession {
   return { step: "returning", cart: [], deliveryFee: 0, historico, tentativasInvalidas: 0 };

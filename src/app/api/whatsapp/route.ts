@@ -1,5 +1,6 @@
 ﻿import { NextRequest, NextResponse, after } from "next/server";
-import { processMessage, createInitialSession, createReturningSession, montarSaudacaoRetorno, BotSession, ClienteHistorico, setMenuDinamico, setConfigDinamica, setEsgotados, temPixNoPagamento, valorPixEsperado } from "@/lib/bot";
+import { processMessage, createInitialSession, createReturningSession, montarSaudacaoRetorno, garantirLinkCardapioEmMensagens, LINK_CARDAPIO_DIGITAL, BotSession, ClienteHistorico, setMenuDinamico, setConfigDinamica, setEsgotados, temPixNoPagamento, valorPixEsperado } from "@/lib/bot";
+import { criarOuReutilizarTokenCardapio, anexarTokenAoLinkCardapio } from "@/lib/cardapioToken";
 import { getMENUDinamico } from "@/lib/menu";
 import { redis } from "@/lib/redis";
 import { interpretarMensagem, gerarRespostaGuardiao } from "@/lib/claude";
@@ -255,6 +256,15 @@ async function fecharEscalonamento(phone: string) {
 }
 
 async function enviarMensagem(phone: string, message: string, ritmoRapido = false) {
+  // Link do cardápio personalizado: injeta token opaco (?t=) que o site
+  // resolve de volta para este phone. Best-effort — falha no Redis nunca
+  // impede o envio (o link segue funcionando sem vínculo).
+  if (message.includes(LINK_CARDAPIO_DIGITAL)) {
+    try {
+      const token = await criarOuReutilizarTokenCardapio(phone);
+      message = anexarTokenAoLinkCardapio(message, token);
+    } catch {}
+  }
   const url = `${EVOLUTION_BASE}/message/sendText/chefebot`;
   // Delay "digitando" proporcional ao tamanho do texto (parece mais humano).
   // Cliente apressado (responde só com número) recebe respostas bem rápidas (~400ms).
@@ -1129,7 +1139,8 @@ export async function POST(req: NextRequest) {
       const querMais = ["sim", "quero", "pode", "vai", "bora", "oi", "ola", "bom dia", "boa tarde", "boa noite", "olá"].some(p => nResp.includes(p))
       if (querMais) {
         const cats = `O que vai ser hoje? 😊\n\n  1. Pizza\n  2. Lanches\n  3. Bebidas\n  4. Sucos e Vitaminas`
-        await enviarMensagem(phone, `Ótimo! 😄\n\n${cats}`)
+        // Reinício de pedido pós-avaliação — convite de pedido, passa pelo gate do link.
+        await enviarMensagem(phone, garantirLinkCardapioEmMensagens([`Ótimo! 😄\n\n${cats}`], "category")[0])
         const newSession = createInitialSession()
         await redis.set(`session:${phone}`, { ...newSession, customerName: undefined }, { ex: 1800 })
       } else {
@@ -1182,6 +1193,9 @@ export async function POST(req: NextRequest) {
         }
         await redis.set(sessionKey, sessaoRetomada, { ex: 1800 });
         if (mensagensRetomada.length > 0) {
+          // Retomada pós-handoff gera texto fora do processMessage (IA/safeReply) —
+          // passa pelo gate central do link do cardápio antes do envio.
+          mensagensRetomada = garantirLinkCardapioEmMensagens(mensagensRetomada, sessaoRetomada.step);
           await enviarRespostas(phone, mensagensRetomada, config, sessaoRetomada.ritmoRapido);
         }
         return NextResponse.json({ ok: true });
@@ -1207,7 +1221,7 @@ export async function POST(req: NextRequest) {
         if (eSaudacao(messageText)) {
           currentSession = createInitialSession();
           await redis.set(sessionKey, currentSession, { ex: 1800 });
-          await enviarMensagem(phone, `Ola! Seja bem-vindo a *${config.nomePizzaria}*! 🍕\n\nO que vai ser hoje? Temos coisa boa te esperando! 😋\n\n  1. Pizza\n  2. Lanches\n  3. Bebidas\n  4. Sucos e Vitaminas`);
+          await enviarMensagem(phone, `Ola! Seja bem-vindo a *${config.nomePizzaria}*! 🍕\n\nVocê pode fazer seu pedido por aqui mesmo no WhatsApp.\n\nSe preferir ver o cardápio digital, é só acessar:\nhttps://chefebot-pjif.vercel.app/cardapio\n\nO que vai ser hoje? Temos coisa boa te esperando! 😋\n\n  1. Pizza\n  2. Lanches\n  3. Bebidas\n  4. Sucos e Vitaminas`);
           await redis.set(sessionKey, { ...currentSession, step: "category" }, { ex: 1800 });
           return NextResponse.json({ ok: true });
         }

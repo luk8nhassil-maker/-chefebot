@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import PanelShell from "@/components/PanelShell";
 import { useLiveMenu, cartItemEsgotado } from "./liveMenu";
 import { CARDAPIO_ILLUSTRATIONS, CardapioIllustration } from "@/lib/cardapioVisuals";
+import { montarLinkWhatsAppComprovante } from "@/lib/pixCliente";
 
 type EsgMetadata = Record<string, { desde: string; ultimaRevisao?: string }>
 
@@ -622,29 +623,53 @@ const STATUS_PEDIDO_LABEL: Record<PedidoConfirmadoStatus, string> = {
 };
 
 type PixClientePedido = {
-  provider: "mercadopago";
-  qrCode: string;
+  provider: "mercadopago" | "manual";
+  qrCode?: string;
+  copiaECola?: string;
+  chavePix?: string;
+  beneficiario?: string;
+  whatsappPizzaria?: string;
   ticketUrl?: string;
   valorEsperado?: number;
 };
 
-// Pix manual (sem Mercado Pago): dados que a API devolve na criação do pedido
-// para o cliente pagar pela chave e enviar o comprovante no WhatsApp.
-type PixManualPedido = {
-  chave: string;
-  valor: number;
-  titular?: string;
-  copiaECola?: string;
-  whatsappUrl?: string;
+type PagamentoPixClienteStatus = "aguardando_pix" | "pago" | "em_revisao" | "conferencia_manual" | "nao_pix";
+
+type PedidoStatusCliente = {
+  status?: PedidoConfirmadoStatus;
+  pixConfirmado?: boolean;
+  pagamentoStatus?: PagamentoPixClienteStatus;
+  titulo?: string;
+  mensagem?: string;
+  pix?: {
+    status?: string;
+    confirmadoPor?: string;
+    evidencia?: { decisao?: string };
+  };
 };
 
-// Estado de pagamento do Pix vindo do polling de status (com token).
-type EstadoPixCliente = "aguardando" | "em_analise" | "pago";
+type PedidoConfirmadoCliente = {
+  id: string;
+  numero: number;
+  total: number;
+  statusToken?: string;
+  pix?: PixClientePedido;
+};
 
-const ESTADO_PIX_LABEL: Record<EstadoPixCliente, string> = {
-  aguardando: "Aguardando Pix",
-  em_analise: "Comprovante em análise",
+const PIX_STATUS_LABEL: Record<PagamentoPixClienteStatus, string> = {
+  aguardando_pix: "Aguardando Pix",
   pago: "Pagamento confirmado",
+  em_revisao: "Comprovante em análise",
+  conferencia_manual: "Conferência manual necessária",
+  nao_pix: "Pedido recebido",
+};
+
+const PIX_STATUS_TEXT: Record<PagamentoPixClienteStatus, string> = {
+  aguardando_pix: "Depois de pagar, envie o comprovante pelo WhatsApp. Assim que o sistema validar, seu pedido será confirmado automaticamente.",
+  pago: "Seu pagamento foi confirmado e o pedido foi liberado para preparo.",
+  em_revisao: "Recebemos o comprovante. A equipe vai conferir os detalhes antes de liberar o pedido.",
+  conferencia_manual: "Recebemos o comprovante, mas a equipe precisa conferir esse pagamento manualmente.",
+  nao_pix: "Acompanhe o andamento do pedido por aqui.",
 };
 
 const money = (v: number) => "R$ " + v.toFixed(2).replace(".", ",");
@@ -680,6 +705,8 @@ const ICONS = {
   editar: "✎",
   relogio: "🕐",
   localizacao: "📍",
+  pessoa: "👤",
+  nota: "📝",
 } as const;
 
 // Banco de ilustrações leves (src/lib/cardapioVisuals.tsx) já aplicado em:
@@ -735,13 +762,21 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const [payment, setPayment] = useState<string | null>(null);
   const [troco, setTroco] = useState("");
   const [telefone, setTelefone] = useState("");
+  // Vínculo com o WhatsApp via token do link (?t=): o navegador só conhece o
+  // token opaco e os 4 últimos dígitos — o phone completo fica no servidor.
+  const [waToken, setWaToken] = useState<string | null>(null);
+  const [waFinal, setWaFinal] = useState("");
+  // Vínculo automático do token é a fonte principal enquanto ativo — só deixa
+  // de valer se o cliente pedir explicitamente para usar outro WhatsApp.
+  const [usarOutroWhatsapp, setUsarOutroWhatsapp] = useState(false);
+  const vinculoWhatsappAtivo = !!waFinal && !usarOutroWhatsapp;
   const [numero, setNumero] = useState("");
   const [referencia, setReferencia] = useState("");
   const [observacao, setObservacao] = useState("");
   const [toast, setToast] = useState("");
-  const [pedidoConfirmado, setPedidoConfirmado] = useState<{ id: string; numero: number; total: number; statusToken?: string; pix?: PixClientePedido; pixManual?: PixManualPedido } | null>(null);
+  const [pedidoConfirmado, setPedidoConfirmado] = useState<PedidoConfirmadoCliente | null>(null);
   const [statusPedidoConfirmado, setStatusPedidoConfirmado] = useState<PedidoConfirmadoStatus>("novo");
-  const [estadoPix, setEstadoPix] = useState<EstadoPixCliente | null>(null);
+  const [statusPixCliente, setStatusPixCliente] = useState<PagamentoPixClienteStatus>("aguardando_pix");
   const [erroNome, setErroNome] = useState("");
   const [erroTelefone, setErroTelefone] = useState("");
   const [erroPagamento, setErroPagamento] = useState("");
@@ -769,11 +804,51 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
 
   useEffect(() => { document.documentElement.setAttribute("data-theme", theme); }, [theme]);
 
+  // Vínculo WhatsApp: valida o token do link (?t=) no servidor e guarda só na
+  // sessão do navegador. Token inválido/expirado nunca quebra o fluxo — o
+  // checkout volta a pedir o WhatsApp manualmente.
+  useEffect(() => {
+    async function ativarVinculo(token: string) {
+      try {
+        const r = await fetch(`/api/cardapio-whatsapp-session?t=${encodeURIComponent(token)}`, { cache: "no-store" });
+        const data = await r.json();
+        if (data?.ok && data.phoneFinal) {
+          setWaToken(token); setWaFinal(String(data.phoneFinal));
+          try { sessionStorage.setItem("cf_wa_token", token); sessionStorage.setItem("cf_wa_final", String(data.phoneFinal)); } catch {}
+        } else {
+          try { sessionStorage.removeItem("cf_wa_token"); sessionStorage.removeItem("cf_wa_final"); } catch {}
+        }
+      } catch {}
+    }
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const t = params.get("t");
+      if (t) {
+        // Remove o token da URL (evita vazar em prints/compartilhamentos).
+        params.delete("t");
+        const qs = params.toString();
+        window.history.replaceState({}, "", window.location.pathname + (qs ? `?${qs}` : ""));
+        ativarVinculo(t);
+        return;
+      }
+      const salvo = sessionStorage.getItem("cf_wa_token");
+      const salvoFinal = sessionStorage.getItem("cf_wa_final");
+      if (salvo && salvoFinal) { setWaToken(salvo); setWaFinal(salvoFinal); }
+    } catch {}
+  }, []);
+
   useEffect(() => {
     try {
       const n = localStorage.getItem("cf_nome"); const t = localStorage.getItem("cf_tel");
       if (n) setNome(n); if (t) setTelefone(t);
-      if (n && t && n.trim() && t.replace(/\D/g, "").length >= 10) setEditandoIdentidade(false);
+      // Cliente vinculado ao WhatsApp (token do link) não precisa ter telefone
+      // salvo no navegador para já ver o pedido identificado — lê a mesma
+      // sessionStorage que a validação do token grava (evita depender da ordem
+      // dos efeitos de montagem, já que o state de vínculo pode não estar
+      // atualizado neste mesmo ciclo de render).
+      const temVinculoWa = !!sessionStorage.getItem("cf_wa_final");
+      const telValido = !!t && t.replace(/\D/g, "").length >= 10;
+      if (n && n.trim() && (telValido || temVinculoWa)) setEditandoIdentidade(false);
       else setEditandoIdentidade(true);
     } catch { setEditandoIdentidade(true); }
     try {
@@ -830,27 +905,35 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
 
   useEffect(() => {
     const pedidoId = pedidoConfirmado?.id;
-    if (!pedidoId) return;
-    const statusToken = pedidoConfirmado?.statusToken;
+    const token = pedidoConfirmado?.statusToken;
+    if (!pedidoId || !token) return;
+    const pedidoIdSeguro = pedidoId;
+    const tokenSeguro = token;
     let active = true;
+    let tentativas = 0;
     let interval: ReturnType<typeof setInterval> | undefined;
 
     async function fetchStatusPedido() {
+      tentativas += 1;
       try {
-        const tokenParam = statusToken ? `&token=${encodeURIComponent(statusToken)}` : "";
-        const res = await fetch(`/api/pedido-status?pedidoId=${pedidoId}${tokenParam}`, { cache: "no-store" });
+        const params = new URLSearchParams({ id: pedidoIdSeguro, token: tokenSeguro });
+        const res = await fetch(`/api/pedido-app/status?${params.toString()}`, { cache: "no-store" });
         if (!res.ok) return;
-        const data = await res.json();
-        if (!active) return;
-        if (data.status && data.status in STATUS_PEDIDO_LABEL) {
+        const data = (await res.json()) as PedidoStatusCliente;
+        if (active && data.status && data.status in STATUS_PEDIDO_LABEL) {
           setStatusPedidoConfirmado(data.status);
         }
-        if (data.pix?.estado && data.pix.estado in ESTADO_PIX_LABEL) {
-          setEstadoPix(data.pix.estado);
+        if (active && data.pagamentoStatus) {
+          setStatusPixCliente(data.pagamentoStatus);
         }
-        // Pedido em estado terminal: não há mais nada a atualizar.
-        if (data.status === "entregue" || data.status === "cancelado") {
-          clearInterval(interval);
+        if (
+          data.pagamentoStatus === "pago" ||
+          data.status === "cancelado" ||
+          data.status === "entregue" ||
+          tentativas >= 240
+        ) {
+          active = false;
+          if (interval) clearInterval(interval);
         }
       } catch {}
     }
@@ -859,7 +942,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     interval = setInterval(fetchStatusPedido, 5000);
     return () => {
       active = false;
-      clearInterval(interval);
+      if (interval) clearInterval(interval);
     };
   }, [pedidoConfirmado?.id, pedidoConfirmado?.statusToken]);
 
@@ -1062,7 +1145,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     color: "var(--text)",
   };
   const bairroOptionStyle = { background: "#fff", color: "#2a1d16" };
-  const payOk = !!nome.trim() && telefoneValido(telefone) && !!payment;
+  const payOk = !!nome.trim() && (telefoneValido(telefone) || vinculoWhatsappAtivo) && !!payment;
 
   const esgotadosKey = esgotados.join("|");
   const cartEsgotado = cart.some((c) => cartItemEsgotado(c.keys, esgotados));
@@ -1158,7 +1241,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     let hasError = false;
     if (!nome.trim()) { setErroNome("Me diz seu nome pra gente identificar o pedido."); setEditandoIdentidade(true); nomeRef.current?.focus(); hasError = true; }
     else { setErroNome(""); }
-    if (!telefoneValido(telefone)) { setErroTelefone("Coloca um WhatsApp válido pra pizzaria falar com você se precisar."); setEditandoIdentidade(true); if (!hasError) telefoneRef.current?.focus(); hasError = true; }
+    if (!telefoneValido(telefone) && !vinculoWhatsappAtivo) { setErroTelefone("Coloca um WhatsApp válido pra pizzaria falar com você se precisar."); setEditandoIdentidade(true); if (!hasError) telefoneRef.current?.focus(); hasError = true; }
     else { setErroTelefone(""); }
     if (!payment) { setErroPagamento("pagamento"); if (!hasError) pagamentoRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }); hasError = true; }
     else { setErroPagamento(""); }
@@ -1179,14 +1262,14 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     } else { setErroTroco(""); }
     if (hasError) return;
     setSending(true);
-    const payload = { cliente: nome.trim(), telefone: telefone.trim(), itens: cart.map((c) => ({ kind: c.kind, name: c.name, detail: c.detail, price: c.price, qty: c.qty, ...(c.promoId ? { promoId: c.promoId } : {}) })), tipoEntrega: delType, bairro: delType === "delivery" ? menu.neighborhoods[+bairroIdx].name : undefined, rua: delType === "delivery" ? rua : undefined, numero: delType === "delivery" && numero.trim() ? numero.trim() : undefined, referencia: delType === "delivery" && referencia.trim() ? referencia.trim() : undefined, observacao: observacao.trim() || undefined, taxaEntrega: fee, pagamento: payment, troco: payment === "Dinheiro" ? (trocoOpcao === "nao" ? "Sem troco" : troco.trim()) : undefined };
+    const payload = { cliente: nome.trim(), telefone: telefone.trim() || undefined, whatsappToken: waToken || undefined, usarOutroWhatsapp: usarOutroWhatsapp || undefined, itens: cart.map((c) => ({ kind: c.kind, name: c.name, detail: c.detail, price: c.price, qty: c.qty, ...(c.promoId ? { promoId: c.promoId } : {}) })), tipoEntrega: delType, bairro: delType === "delivery" ? menu.neighborhoods[+bairroIdx].name : undefined, rua: delType === "delivery" ? rua : undefined, numero: delType === "delivery" && numero.trim() ? numero.trim() : undefined, referencia: delType === "delivery" && referencia.trim() ? referencia.trim() : undefined, observacao: observacao.trim() || undefined, taxaEntrega: fee, pagamento: payment, troco: payment === "Dinheiro" ? (trocoOpcao === "nao" ? "Sem troco" : troco.trim()) : undefined };
     try {
       const r = await fetch("/api/pedido-app", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const data = await r.json();
-      if (data.ok) { try { localStorage.setItem("cf_nome", nome.trim()); localStorage.setItem("cf_tel", telefone.trim()); } catch {} try { sessionStorage.removeItem("cf_draft"); } catch {} try { const resumo = { id: String(data.pedidoId), numero: typeof data.numero === "number" ? data.numero : undefined, ts: Date.now() }; localStorage.setItem("cf_ultimo_pedido", JSON.stringify(resumo)); setPedidoRecente(resumo); } catch {} setStatusPedidoConfirmado("novo"); setEstadoPix(data.pixManual ? "aguardando" : null); setPedidoConfirmado({ id: data.pedidoId, numero: data.numero, total: data.total, ...(typeof data.statusToken === "string" ? { statusToken: data.statusToken } : {}), ...(data.pix?.qrCode ? { pix: data.pix } : {}), ...(data.pixManual?.chave ? { pixManual: data.pixManual } : {}) }); go("sc-done"); } else { showToast("Erro ao enviar. Tente de novo."); }
+      if (data.ok) { try { localStorage.setItem("cf_nome", nome.trim()); if (telefone.trim()) localStorage.setItem("cf_tel", telefone.trim()); } catch {} try { sessionStorage.removeItem("cf_draft"); } catch {} try { const resumo = { id: String(data.pedidoId), numero: typeof data.numero === "number" ? data.numero : undefined, ts: Date.now() }; localStorage.setItem("cf_ultimo_pedido", JSON.stringify(resumo)); setPedidoRecente(resumo); } catch {} setStatusPedidoConfirmado("novo"); setStatusPixCliente(payment?.toLowerCase().includes("pix") ? "aguardando_pix" : "nao_pix"); setPedidoConfirmado({ id: data.pedidoId, numero: data.numero, total: data.total, ...(typeof data.statusToken === "string" ? { statusToken: data.statusToken } : {}), ...(data.pix ? { pix: data.pix } : {}) }); go("sc-done"); } else { showToast("Erro ao enviar. Tente de novo."); }
     } catch { showToast("Sem conexão. Tente de novo."); } finally { setSending(false); }
   }
-  function resetAll() { setCart([]); resetBuild(); setDelType(null); setBairroIdx(""); setRua(""); setNumero(""); setReferencia(""); setPayment(null); setTroco(""); setTrocoOpcao(null); setPaymentModal(null); setObservacao(""); setErroNome(""); setErroTelefone(""); setErroPagamento(""); setErroEntrega(""); setErroTroco(""); setPedidoConfirmado(null); setStatusPedidoConfirmado("novo"); setEstadoPix(null); setRestoredDraft(false); setEditandoIdentidade(false); setLastAddedKind(null); setUpsellBebidaIgnorado(false); try { sessionStorage.removeItem("cf_draft"); } catch {} go("sc-start"); }
+  function resetAll() { setCart([]); resetBuild(); setDelType(null); setBairroIdx(""); setRua(""); setNumero(""); setReferencia(""); setPayment(null); setTroco(""); setTrocoOpcao(null); setPaymentModal(null); setObservacao(""); setErroNome(""); setErroTelefone(""); setErroPagamento(""); setErroEntrega(""); setErroTroco(""); setPedidoConfirmado(null); setStatusPedidoConfirmado("novo"); setStatusPixCliente("aguardando_pix"); setRestoredDraft(false); setEditandoIdentidade(false); setLastAddedKind(null); setUpsellBebidaIgnorado(false); try { sessionStorage.removeItem("cf_draft"); } catch {} go("sc-start"); }
 
   const stepMap: Record<string, number> = { "sc-start": 0, "sc-build": 0, "sc-border": 0, "sc-list": 0, "sc-suco-leite": 0, "sc-macarronada-size": 0, "sc-promo": 0, "sc-another": 1, "sc-cart": 1, "sc-delivery": 2, "sc-pay": 3, "sc-done": 3 };
   const stepIdx = stepMap[screen] ?? 0;
@@ -1213,6 +1296,17 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
       {title && <span className="top-back-title">{title}</span>}
     </div>
   );
+  const pixPedido = pedidoConfirmado?.pix;
+  const isPagamentoPix = (!!payment && payment.toLowerCase().includes("pix")) || !!pixPedido;
+  const pixValor = typeof pixPedido?.valorEsperado === "number" ? pixPedido.valorEsperado : pedidoConfirmado?.total;
+  const pixCodigoCopiaECola = pixPedido?.copiaECola || pixPedido?.qrCode || "";
+  const whatsappComprovanteUrl = pedidoConfirmado && pixPedido?.whatsappPizzaria
+    ? montarLinkWhatsAppComprovante(pixPedido.whatsappPizzaria, {
+      pedidoId: pedidoConfirmado.id,
+      numero: pedidoConfirmado.numero,
+      total: pedidoConfirmado.total,
+    })
+    : undefined;
 
   return (
     <>
@@ -1511,8 +1605,8 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                 </div>
               </details>
 
-              <div ref={pagamentoRef} className="payment-choice">
-                <div className="section-label" style={{ marginTop: 0 }}>Forma de pagamento</div>
+              <div ref={pagamentoRef} className="pay-section-card payment-choice">
+                <div className="pay-section-title">Escolha o pagamento</div>
                 <div className="payment-grid">
                   {(menu.payments || []).map((p) => (
                     <button key={p} type="button" className={`payment-card ${payment === p ? "sel" : ""}`} onClick={() => openPaymentConfig(p)}>
@@ -1526,37 +1620,75 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
               </div>
 
               {/* Bloco: Identificação */}
-              {!editandoIdentidade && nome.trim() && telefoneValido(telefone) ? (
-                <div style={{ background: "var(--card)", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
-                  <div style={{ fontSize: 12, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 6 }}>Pedido identificado</div>
-                  <div style={{ fontSize: 15, fontWeight: 700, color: "var(--fg)" }}>{nome.trim()}</div>
-                  <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 2 }}>{telefone}</div>
-                  <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 8, lineHeight: 1.5 }}>Vamos usar esses dados nesse pedido. Se estiver tudo certo, é só escolher o pagamento.</div>
-                  <button
-                    style={{ marginTop: 8, background: "none", border: "none", color: "#ff6b00", fontSize: 13, cursor: "pointer", padding: 0, textDecoration: "underline" }}
-                    onClick={() => setEditandoIdentidade(true)}
-                  >Alterar dados</button>
+              {!editandoIdentidade && nome.trim() && (telefoneValido(telefone) || vinculoWhatsappAtivo) ? (
+                <div className="pay-section-card">
+                  <div className="pay-section-title">Pedido identificado</div>
+                  <div className="identidade-row">
+                    <div className="identidade-avatar" aria-hidden="true">{ICONS.pessoa}</div>
+                    <div className="identidade-info">
+                      <div className="identidade-nome">{nome.trim()}</div>
+                      {vinculoWhatsappAtivo
+                        ? <span className="wa-badge">✅ Vinculado ao WhatsApp · final {waFinal}</span>
+                        : <span className="identidade-tel">{telefone}</span>}
+                    </div>
+                  </div>
+                  <p className="identidade-explicacao">Vamos usar esses dados neste pedido.<br />Se estiver tudo certo, é só escolher o pagamento.</p>
+                  <div className="pay-divider" />
+                  <div className="pay-actions-row">
+                    <button type="button" className="pay-action-link" onClick={() => setEditandoIdentidade(true)}>{vinculoWhatsappAtivo ? "Alterar nome" : "Alterar dados"}</button>
+                    {vinculoWhatsappAtivo && (
+                      <button
+                        type="button"
+                        className="pay-action-link muted"
+                        onClick={() => { setUsarOutroWhatsapp(true); setEditandoIdentidade(true); }}
+                      >Usar outro WhatsApp</button>
+                    )}
+                  </div>
                 </div>
               ) : (
-                <div style={{ marginBottom: 16 }}>
-                  <div className="section-label">Pra quem é o pedido?</div>
-                  <p style={{ fontSize: 13, color: "var(--muted)", marginBottom: 12, marginTop: -4 }}>Rapidinho: é só pra gente identificar seu pedido e falar com você se precisar.</p>
+                <div className="pay-section-card">
+                  <div className="pay-section-title">Pra quem é o pedido?</div>
+                  <p className="pay-section-help">Rapidinho: é só pra gente identificar seu pedido e falar com você se precisar.</p>
                   <div className="field">
                     <label>Seu nome</label>
                     <input ref={nomeRef} value={nome} onChange={(e) => { setNome(e.target.value); if (erroNome) setErroNome(""); }} placeholder="Como te chamamos?" />
                     {erroNome && <div style={{ color: "#ef4444", fontSize: 12, marginTop: 4 }}>{erroNome}</div>}
                   </div>
-                  <div className="field">
-                    <label>WhatsApp</label>
-                    <input ref={telefoneRef} value={telefone} onChange={(e) => { const f = formatTel(e.target.value); setTelefone(f); if (erroTelefone) setErroTelefone(""); }} inputMode="tel" placeholder="(99) 9 9999-9999" />
-                    {erroTelefone && <div style={{ color: "#ef4444", fontSize: 12, marginTop: 4 }}>{erroTelefone}</div>}
-                  </div>
+                  {vinculoWhatsappAtivo ? (
+                    <div className="field">
+                      <div className="wa-inline-note">
+                        <span className="wa-badge">✅ Vinculado ao seu WhatsApp · final {waFinal}</span>
+                        <button
+                          type="button"
+                          className="pay-action-link"
+                          onClick={() => setUsarOutroWhatsapp(true)}
+                        >Usar outro WhatsApp</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="field">
+                      <label>WhatsApp</label>
+                      <input ref={telefoneRef} value={telefone} onChange={(e) => { const f = formatTel(e.target.value); setTelefone(f); if (erroTelefone) setErroTelefone(""); }} inputMode="tel" placeholder="(99) 9 9999-9999" />
+                      {waFinal && usarOutroWhatsapp && (
+                        <button
+                          type="button"
+                          className="pay-action-link"
+                          style={{ fontSize: 12, marginTop: 6 }}
+                          onClick={() => { setUsarOutroWhatsapp(false); setTelefone(""); setErroTelefone(""); }}
+                        >Voltar a usar o WhatsApp vinculado (final {waFinal})</button>
+                      )}
+                      {erroTelefone && <div style={{ color: "#ef4444", fontSize: 12, marginTop: 4 }}>{erroTelefone}</div>}
+                    </div>
+                  )}
                 </div>
               )}
               {/* Bloco: Observação */}
-              <div style={{ marginTop: 16, marginBottom: 4 }}>
-                <div className="section-label">Algum detalhe no pedido?</div>
-                <p style={{ fontSize: 13, color: "var(--muted)", marginBottom: 10, marginTop: -4 }}>Se quiser, deixa um recado pra cozinha. Se não tiver nada, pode seguir direto.</p>
+              <div className="pay-section-card">
+                <div className="pay-section-title">Observações do pedido</div>
+                <div className="obs-help-row">
+                  <span className="obs-icon" aria-hidden="true">{ICONS.nota}</span>
+                  <p className="pay-section-help" style={{ margin: 0 }}>Se quiser, deixa um recado pra cozinha.<br />Se não tiver nada, pode seguir direto.</p>
+                </div>
                 <div className="field" style={{ marginBottom: 0 }}><input value={observacao} onChange={(e) => setObservacao(e.target.value)} placeholder="Ex: sem cebola, sem azeitona, tirar milho, pouco orégano…" /></div>
               </div>
               {cartEsgotado && <div style={{ marginTop: 8, padding: "10px 12px", borderRadius: 10, background: "rgba(239,68,68,.1)", color: "#ef4444", fontSize: 13, fontWeight: 700 }}>{ICONS.alerta} Um item do seu pedido ficou esgotado. Remova para continuar.</div>}
@@ -1573,65 +1705,43 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                     <p style={{ fontWeight: 700, fontSize: 18, margin: "12px 0 4px" }}>Pedido #{pedidoConfirmado.numero}</p>
                     <p style={{ color: "#ff6b00", fontSize: 15, fontWeight: 800, margin: "0 0 8px" }}>{STATUS_PEDIDO_LABEL[statusPedidoConfirmado]}</p>
                     <p style={{ color: "var(--muted)", fontSize: 14, marginBottom: 16 }}>Total: {money(pedidoConfirmado.total)}</p>
-                    {pedidoConfirmado.pix?.qrCode && (
-                      <div style={{ textAlign: "left", background: "var(--card)", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
-                        <div style={{ fontSize: 12, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 6 }}>Pix copia e cola</div>
-                        {typeof pedidoConfirmado.pix.valorEsperado === "number" && <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 8 }}>Valor do Pix: {money(pedidoConfirmado.pix.valorEsperado)}</div>}
-                        <textarea readOnly value={pedidoConfirmado.pix.qrCode} style={{ width: "100%", minHeight: 92, border: "1px solid var(--line)", borderRadius: 10, background: "var(--surface2)", color: "var(--fg)", padding: 10, resize: "vertical", fontSize: 12, lineHeight: 1.4 }} />
-                        <button className="btn btn-sm" style={{ width: "100%", marginTop: 10 }} onClick={async () => showToast((await copiarTexto(pedidoConfirmado.pix?.qrCode || "")) ? "Código Pix copiado!" : "Não consegui copiar. Toque no texto acima e copie manualmente.")}>📋 Copiar código Pix</button>
-                        {pedidoConfirmado.pix.ticketUrl && <a href={pedidoConfirmado.pix.ticketUrl} target="_blank" rel="noreferrer" style={{ display: "block", marginTop: 8, color: "#ff6b00", fontSize: 13, fontWeight: 800 }}>Abrir pagamento</a>}
-                      </div>
-                    )}
-                    {/* Pix manual: chave + copia e cola + WhatsApp, com estado vivo
-                        (aguardando → em análise → pago) vindo do polling com token. */}
-                    {payment === "Pix" && !pedidoConfirmado.pix?.qrCode && pedidoConfirmado.pixManual && estadoPix === "pago" && (
-                      <div style={{ textAlign: "left", background: "rgba(34,197,94,.1)", border: "1px solid rgba(34,197,94,.35)", borderRadius: 12, padding: "14px 16px", marginBottom: 16 }}>
-                        <div style={{ fontSize: 16, fontWeight: 800, color: "var(--green)", marginBottom: 6 }}>✅ Pagamento confirmado!</div>
-                        <p style={{ fontSize: 13, color: "var(--text)", margin: 0, lineHeight: 1.5 }}>Seu Pix foi validado e o pedido já foi liberado para preparo. {delType === "retirada" ? "Avisaremos quando estiver pronto para retirada." : delType === "dine_in" ? "É só aguardar na mesa. 🍕" : "Agora é só aguardar a entrega. 🛵"}</p>
-                      </div>
-                    )}
-                    {payment === "Pix" && !pedidoConfirmado.pix?.qrCode && pedidoConfirmado.pixManual && estadoPix !== "pago" && (
-                      <div style={{ textAlign: "left", background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 12, padding: "14px 16px", marginBottom: 16 }}>
-                        {estadoPix === "em_analise" ? (
-                          <>
-                            <div style={{ fontSize: 16, fontWeight: 800, color: "#fbbf24", marginBottom: 6 }}>🔍 Comprovante em análise</div>
-                            <p style={{ fontSize: 13, color: "var(--text)", margin: "0 0 12px", lineHeight: 1.5 }}>Recebemos seu comprovante e nossa equipe está conferindo. Assim que confirmar, esta tela atualiza sozinha.</p>
-                          </>
-                        ) : (
-                          <>
-                            <div style={{ fontSize: 16, fontWeight: 800, color: "var(--fg)", marginBottom: 4 }}>⚡ Quase lá, falta o Pix</div>
-                            <p style={{ fontSize: 13, color: "var(--text-sub)", margin: "0 0 12px", lineHeight: 1.5 }}>Seu pedido está reservado. Ele vai para a cozinha assim que o pagamento for confirmado.</p>
-                          </>
-                        )}
-                        <div style={{ background: "var(--surface2)", borderRadius: 10, padding: "10px 12px", marginBottom: 10 }}>
-                          <div style={{ fontSize: 11, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.5px" }}>Valor do Pix</div>
-                          <div style={{ fontSize: 17, fontWeight: 800, color: "var(--fg)" }}>{money(pedidoConfirmado.pixManual.valor)}</div>
-                          <div style={{ fontSize: 11, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.5px", marginTop: 8 }}>Chave Pix</div>
-                          <div style={{ fontSize: 15, fontWeight: 700, color: "var(--fg)", wordBreak: "break-all" }}>{pedidoConfirmado.pixManual.chave}</div>
-                          {pedidoConfirmado.pixManual.titular && (
-                            <>
-                              <div style={{ fontSize: 11, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.5px", marginTop: 8 }}>Beneficiário</div>
-                              <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)" }}>{pedidoConfirmado.pixManual.titular}</div>
-                            </>
-                          )}
+                    {isPagamentoPix && (
+                      <div style={{ textAlign: "left", background: "var(--surface)", border: "1px solid var(--line-strong)", borderRadius: 10, padding: "14px", marginBottom: 16 }}>
+                        <CardapioIllustration compact icon={statusPixCliente === "pago" ? ICONS.check : CARDAPIO_ILLUSTRATIONS.aguardandoPix.icon} title={statusPixCliente === "aguardando_pix" ? "Quase lá, falta o Pix" : PIX_STATUS_LABEL[statusPixCliente]} />
+                        <div style={{ display: "inline-flex", marginTop: 12, marginBottom: 12, padding: "5px 10px", borderRadius: 999, background: statusPixCliente === "pago" ? "var(--green-soft)" : "var(--brand-soft)", color: statusPixCliente === "pago" ? "var(--green)" : "var(--brand)", fontSize: 12, fontWeight: 800 }}>
+                          {PIX_STATUS_LABEL[statusPixCliente]}
                         </div>
-                        <button className="btn btn-sm" style={{ width: "100%", marginBottom: 8 }} onClick={async () => showToast((await copiarTexto(pedidoConfirmado.pixManual?.chave || "")) ? "Chave Pix copiada!" : "Não consegui copiar. Anote a chave acima.")}>📋 Copiar chave Pix</button>
-                        {pedidoConfirmado.pixManual.copiaECola && (
-                          <button className="btn btn-sm" style={{ width: "100%", marginBottom: 8 }} onClick={async () => showToast((await copiarTexto(pedidoConfirmado.pixManual?.copiaECola || "")) ? "Código Pix copiado! Cole no app do seu banco." : "Não consegui copiar. Use a chave Pix acima.")}>⚡ Copiar Pix copia e cola</button>
+                        <div style={{ display: "grid", gap: 8, fontSize: 14, color: "var(--text)", lineHeight: 1.45 }}>
+                          <div><strong>Pedido:</strong> #{pedidoConfirmado.numero}</div>
+                          <div><strong>Total:</strong> {money(pedidoConfirmado.total)}</div>
+                          {pixPedido?.chavePix && <div style={{ wordBreak: "break-word" }}><strong>Chave Pix:</strong> {pixPedido.chavePix}</div>}
+                          {pixPedido?.beneficiario && <div><strong>Beneficiário:</strong> {pixPedido.beneficiario}</div>}
+                          {pixValor !== undefined && pixValor !== pedidoConfirmado.total && <div><strong>Valor do Pix:</strong> {money(pixValor)}</div>}
+                        </div>
+                        <p style={{ color: "var(--text-sub)", fontSize: 13, lineHeight: 1.5, margin: "12px 0 0" }}>
+                          {PIX_STATUS_TEXT[statusPixCliente]}
+                        </p>
+                        {statusPixCliente !== "pago" && (
+                          <p style={{ color: "var(--text)", fontSize: 13, fontWeight: 700, lineHeight: 1.5, margin: "8px 0 0" }}>
+                            Use o botão abaixo para enviar o comprovante pelo WhatsApp da pizzaria.
+                          </p>
                         )}
-                        <p style={{ fontSize: 13, color: "var(--text)", margin: "10px 0", lineHeight: 1.5, fontWeight: 600 }}>Depois de pagar, envie o comprovante pelo WhatsApp. Assim que o sistema validar, seu pedido é confirmado automaticamente.</p>
-                        {pedidoConfirmado.pixManual.whatsappUrl ? (
-                          <a href={pedidoConfirmado.pixManual.whatsappUrl} target="_blank" rel="noreferrer" className="btn" style={{ display: "block", width: "100%", textAlign: "center", textDecoration: "none", background: "#25d366", color: "#fff" }}>💬 Enviar comprovante no WhatsApp</a>
-                        ) : (
-                          <p style={{ fontSize: 13, color: "var(--text-sub)", margin: 0, lineHeight: 1.5 }}>Envie o comprovante pelo WhatsApp da pizzaria — o mesmo número pelo qual você costuma pedir.</p>
-                        )}
-                      </div>
-                    )}
-                    {payment === "Pix" && !pedidoConfirmado.pix?.qrCode && !pedidoConfirmado.pixManual && statusPedidoConfirmado === "novo" && (
-                      <div style={{ textAlign: "left", background: "var(--surface)", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
-                        <CardapioIllustration compact icon={CARDAPIO_ILLUSTRATIONS.aguardandoPix.icon} title={CARDAPIO_ILLUSTRATIONS.aguardandoPix.title} />
-                        <p style={{ fontSize: 13, color: "var(--text)", margin: "10px 0 0", lineHeight: 1.5 }}>Seu pedido foi recebido. A pizzaria confirma o pagamento antes de começar o preparo.</p>
-                        <p style={{ fontSize: 13, color: "var(--text-sub)", margin: "8px 0 0", lineHeight: 1.5 }}>Se você já fez o Pix, envie o comprovante pelo WhatsApp da pizzaria.</p>
+                        <div style={{ display: "grid", gap: 10, marginTop: 14 }}>
+                          {pixPedido?.chavePix && (
+                            <button className="btn btn-sm" onClick={async () => showToast((await copiarTexto(pixPedido.chavePix || "")) ? "Chave Pix copiada!" : "Não consegui copiar. Toque na chave e copie manualmente.")}>Copiar chave Pix</button>
+                          )}
+                          {pixCodigoCopiaECola && (
+                            <button className="btn btn-sm btn-ghost" onClick={async () => showToast((await copiarTexto(pixCodigoCopiaECola)) ? "Pix copia e cola copiado!" : "Não consegui copiar. Toque no código e copie manualmente.")}>Copiar Pix copia e cola</button>
+                          )}
+                          {whatsappComprovanteUrl ? (
+                            <a href={whatsappComprovanteUrl} target="_blank" rel="noreferrer" className="btn btn-sm" style={{ display: "block", textAlign: "center", textDecoration: "none", background: "#1f8f4d" }}>Enviar comprovante no WhatsApp</a>
+                          ) : (
+                            <div style={{ border: "1px dashed var(--line-strong)", borderRadius: 10, padding: "10px 12px", color: "var(--text-sub)", fontSize: 13, lineHeight: 1.45 }}>
+                              Envie o comprovante pelo WhatsApp da pizzaria. Se o botão não aparecer, copie a chave Pix acima e chame a equipe pelo contato do cardápio.
+                            </div>
+                          )}
+                          {pedidoConfirmado.pix?.ticketUrl && <a href={pedidoConfirmado.pix.ticketUrl} target="_blank" rel="noreferrer" style={{ display: "block", color: "#ff6b00", fontSize: 13, fontWeight: 800, textAlign: "center" }}>Abrir pagamento</a>}
+                        </div>
                       </div>
                     )}
                     <a href={`/rastrear/${pedidoConfirmado.id}`} className="btn" style={{ display: "block", marginBottom: 10, textAlign: "center", textDecoration: "none" }}>Acompanhar pedido</a>
@@ -2008,10 +2118,10 @@ main{width:100%;padding:6px 20px 20px}
 .field input:focus,.field select:focus{outline:none;border-color:var(--brand)}
 .delivery-screen{padding-bottom:132px}
 .delivery-cta-bar{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:540px;z-index:55;background:linear-gradient(to top,var(--bg) 78%,transparent);padding:18px 20px calc(env(safe-area-inset-bottom) + 14px);pointer-events:none}
-.delivery-cta-inner{display:grid;grid-template-columns:auto auto minmax(0,1fr);align-items:center;gap:10px;background:var(--surface);border:1px solid var(--line-strong);border-radius:18px;padding:10px;box-shadow:0 -10px 34px rgba(0,0,0,.28);pointer-events:auto}
-.delivery-cta-info{min-width:74px;padding-left:4px}
-.delivery-cta-label{font-size:11px;color:var(--text-sub);font-weight:600;text-transform:uppercase;letter-spacing:.7px}
-.delivery-cta-total{font-size:16px;font-weight:800;color:var(--text);line-height:1.15;white-space:nowrap}
+.delivery-cta-inner{display:grid;grid-template-columns:auto auto minmax(0,1fr);align-items:center;gap:14px;background:var(--surface);border:1px solid var(--line-strong);border-radius:20px;padding:14px;box-shadow:0 -10px 34px rgba(0,0,0,.28);pointer-events:auto}
+.delivery-cta-info{min-width:74px;padding-left:6px}
+.delivery-cta-label{font-size:11px;color:var(--text-sub);font-weight:700;text-transform:uppercase;letter-spacing:.14em}
+.delivery-cta-total{font-size:18px;font-weight:800;color:var(--text);line-height:1.2;white-space:nowrap;margin-top:2px;display:block}
 .delivery-cta-cart{border:1px solid var(--line-strong);background:transparent;color:var(--text-sub);border-radius:999px;padding:10px 12px;font-size:12.5px;font-weight:700}
 .delivery-cta-btn{margin:0;padding:14px 12px;border-radius:13px;min-width:0;white-space:normal;line-height:1.15}
 .pay-screen{padding-bottom:132px}
@@ -2041,6 +2151,28 @@ main{width:100%;padding:6px 20px 20px}
 .payment-card-text small{font-size:12.5px;color:var(--text-sub);line-height:1.35}
 .payment-edit{width:30px;height:30px;border-radius:999px;border:1px solid var(--line-strong);display:flex;align-items:center;justify-content:center;color:var(--text-sub);font-size:14px;flex:0 0 auto}
 .pay-error{color:#ef4444;font-size:12px;font-weight:700;margin-top:8px}
+/* Cards de seção da etapa de pagamento (pagamento / identificação / observações) —
+   mesmo bloco visual, mais respiro entre eles do que o antigo layout colado. */
+.pay-section-card{background:var(--surface);border:1px solid var(--line);border-radius:20px;padding:18px 16px;margin-bottom:18px;box-shadow:var(--shadow-sm)}
+.pay-section-card:last-of-type{margin-bottom:0}
+.pay-section-title{font-size:11px;font-weight:700;color:var(--text-sub);text-transform:uppercase;letter-spacing:.16em;margin-bottom:14px;display:flex;align-items:center;gap:8px}
+.pay-section-help{font-size:13px;color:var(--text-sub);line-height:1.5;margin:0 0 12px}
+.pay-section-card .field:last-child{margin-bottom:0}
+.pay-section-card .field input{background:var(--surface2)}
+.identidade-row{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+.identidade-avatar{width:40px;height:40px;border-radius:50%;background:var(--surface2);border:1px solid var(--line-strong);display:flex;align-items:center;justify-content:center;font-size:18px;flex:0 0 auto}
+.identidade-info{min-width:0}
+.identidade-nome{font-size:16px;font-weight:800;color:var(--text)}
+.identidade-tel{display:block;font-size:13px;color:var(--text-sub);margin-top:2px}
+.wa-badge{display:inline-flex;align-items:center;gap:6px;margin-top:4px;padding:4px 10px;border-radius:999px;background:var(--green-soft);color:var(--green);font-size:12px;font-weight:700;line-height:1.4}
+.identidade-explicacao{font-size:13px;color:var(--text-sub);line-height:1.5;margin:0 0 14px}
+.pay-divider{height:1px;background:var(--line);margin:0 0 14px}
+.pay-actions-row{display:flex;align-items:center;gap:20px;flex-wrap:wrap}
+.pay-action-link{background:none;border:none;color:var(--brand);font-size:13px;font-weight:700;cursor:pointer;padding:11px 2px;margin:-11px -2px;text-decoration:underline;text-underline-offset:2px;min-height:44px;display:inline-flex;align-items:center}
+.pay-action-link.muted{color:var(--text-sub)}
+.obs-help-row{display:flex;align-items:flex-start;gap:10px;margin-bottom:14px}
+.obs-icon{font-size:16px;line-height:1.5;flex:0 0 auto}
+.wa-inline-note{display:flex;flex-direction:column;align-items:flex-start;gap:8px}
 .payment-modal-backdrop{position:fixed;inset:0;z-index:80;background:rgba(0,0,0,.55);display:flex;align-items:flex-end;justify-content:center;padding:20px}
 .payment-modal{width:100%;max-width:500px;background:var(--surface);border:1px solid var(--line-strong);border-radius:20px;padding:16px;box-shadow:0 -14px 45px rgba(0,0,0,.35);animation:sheet .22s ease-out}
 .payment-modal-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:12px}

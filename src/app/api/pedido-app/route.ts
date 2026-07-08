@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
+import { randomUUID } from "crypto";
 import { redis } from "@/lib/redis";
 import { proximoNumeroPedido } from "@/lib/numeracao";
 import { getMENUDinamico } from "@/lib/menu";
 import { computeTaxaApp, buildEnderecoApp } from "@/lib/pedidoAppLogic";
 import { criarPixMetadata, prepararPixProviderMercadoPago, serializarPixCliente } from "@/lib/pix";
 import { PROMOS_KEY, catalogoDoMenu, dentroDaJanela, precoFinalPromocao, promocaoIndisponivel, type Promocao } from "@/lib/promocoes";
+import { validarTokenCardapio } from "@/lib/cardapioToken";
 
 export const maxDuration = 20;
 
@@ -19,7 +21,9 @@ type ItemApp = {
 
 type PedidoApp = {
   cliente: string;
-  telefone: string;
+  telefone?: string;
+  whatsappToken?: string;
+  usarOutroWhatsapp?: boolean;
   itens: ItemApp[];
   tipoEntrega: "delivery" | "retirada" | "dine_in";
   bairro?: string;
@@ -43,6 +47,21 @@ type MenuPedidoApp = {
   sucos: { name: string; price: number }[];
   borders: { label: string; priceSmall: number; priceLarge: number }[];
 };
+
+type ConfigPizzariaPix = {
+  nomePizzaria?: string;
+  chavePix?: string;
+  nomeTitularPix?: string;
+  whatsappPizzaria?: string;
+};
+
+function criarTokenPublicoAcompanhamento(): string {
+  return randomUUID().replace(/-/g, "");
+}
+
+async function getConfigPix(): Promise<ConfigPizzariaPix> {
+  return (await redis.get<ConfigPizzariaPix>("config:pizzaria")) || {};
+}
 
 function norm(value: string): string {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
@@ -115,7 +134,23 @@ export async function POST(req: NextRequest) {
     if (!body.cliente || !body.itens || body.itens.length === 0) {
       return NextResponse.json({ ok: false, error: "Pedido inválido" }, { status: 400 });
     }
-    if (!body.telefone || !body.telefone.trim()) {
+    // Vínculo com o WhatsApp: se veio token do link do cardápio, o telefone
+    // resolvido SERVER-SIDE é a fonte principal do pedido — todo cliente já
+    // começou a conversa pelo WhatsApp real, então o vínculo é automático.
+    // O telefone do body (localStorage antigo, campo preenchido sozinho etc.)
+    // é IGNORADO enquanto o token for válido, a menos que o cliente peça
+    // explicitamente para usar outro WhatsApp (`usarOutroWhatsapp: true`) —
+    // aí sim o telefone digitado vence e o pedido NÃO é tratado como vínculo
+    // automático do token. Token inválido/expirado cai na regra normal de
+    // telefone obrigatório digitado no checkout.
+    const vinculoWhatsapp = body.whatsappToken ? await validarTokenCardapio(body.whatsappToken) : null;
+    const telefoneDigitado = (body.telefone || "").trim();
+    const usarOutroWhatsapp = !!body.usarOutroWhatsapp;
+    const telefonePedido = vinculoWhatsapp && !usarOutroWhatsapp
+      ? vinculoWhatsapp.phone
+      : telefoneDigitado;
+    const whatsappVinculado = !!vinculoWhatsapp && !usarOutroWhatsapp;
+    if (!telefonePedido) {
       return NextResponse.json({ ok: false, error: "Telefone obrigatório" }, { status: 400 });
     }
     if (!body.pagamento || !body.pagamento.trim()) {
@@ -174,6 +209,7 @@ export async function POST(req: NextRequest) {
 
     const pedidoId = Date.now().toString();
     const numeroPedido = await proximoNumeroPedido();
+    const statusToken = criarTokenPublicoAcompanhamento();
     const pixBase = criarPixMetadata(pedidoId, body.pagamento, total);
     const pix = await prepararPixProviderMercadoPago({
       pedidoId,
@@ -185,7 +221,8 @@ export async function POST(req: NextRequest) {
       id: pedidoId,
       numero: numeroPedido,
       cliente: body.cliente,
-      telefone: body.telefone.trim(),
+      telefone: telefonePedido,
+      ...(whatsappVinculado ? { whatsappVinculado: true } : {}),
       itens,
       total,
       status: "novo" as const,
@@ -193,6 +230,7 @@ export async function POST(req: NextRequest) {
       endereco,
       data: new Date().toLocaleDateString("pt-BR"),
       origem: "site",
+      statusToken,
       ...(body.observacao ? { observacao: body.observacao } : {}),
       pagamento: body.pagamento,
       ...(pix ? { pix } : {}),
@@ -221,8 +259,9 @@ export async function POST(req: NextRequest) {
       });
     } catch {}
 
-    const pixCliente = serializarPixCliente(pix);
-    return NextResponse.json({ ok: true, pedidoId, numero: numeroPedido, total, ...(pixCliente ? { pix: pixCliente } : {}) });
+    const configPix = await getConfigPix();
+    const pixCliente = serializarPixCliente(pix, configPix);
+    return NextResponse.json({ ok: true, pedidoId, numero: numeroPedido, total, statusToken, ...(pixCliente ? { pix: pixCliente } : {}) });
   } catch (error) {
     console.error("Erro ao salvar pedido do site:", error);
     return NextResponse.json({ ok: false, error: "Erro interno" }, { status: 500 });
