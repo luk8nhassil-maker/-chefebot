@@ -677,6 +677,20 @@ const bigBorder = (sz: string) => !(sz === "P" || sz === "M");
 const itemSlug = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
 const isMiniPizzaName = (value: string) => itemSlug(value) === "minipizza";
 
+// Pagamento misto (Pix + Dinheiro): mesma string canônica já validada no
+// backend/WhatsApp ("Pix (R$ X,XX) + Dinheiro (R$ Y,YY)"), ver src/lib/bot.ts
+// (temPixNoPagamento/temDinheiroNoPagamento/valorPixEsperado/valorDinheiroEsperado).
+const parseValorInput = (v: string): number => parseFloat(v.replace(",", ".").replace(/[^\d.]/g, ""));
+function extrairHibrido(pagamento: string | null): { pix: number; dinheiro: number } | null {
+  if (!pagamento) return null;
+  const m = pagamento.match(/^Pix\s*\(R\$\s*([0-9.,]+)\)\s*\+\s*Dinheiro\s*\(R\$\s*([0-9.,]+)\)$/i);
+  if (!m) return null;
+  const pix = parseValorInput(m[1]);
+  const dinheiro = parseValorInput(m[2]);
+  if (isNaN(pix) || isNaN(dinheiro)) return null;
+  return { pix, dinheiro };
+}
+
 // Sistema inicial de ícones do fluxo público, reaproveitável em qualquer tela
 // (bottom nav, categorias, símbolos de ação). Sem biblioteca externa — só emoji.
 const ICONS = {
@@ -695,6 +709,7 @@ const ICONS = {
   pix: "⚡",
   cartao: "💳",
   dinheiro: "💵",
+  misto: "🔀",
   remover: "✕",
   adicionar: "➕",
   voltar: "←",
@@ -783,6 +798,11 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const [erroEntrega, setErroEntrega] = useState("");
   const [erroTroco, setErroTroco] = useState("");
   const [trocoOpcao, setTrocoOpcao] = useState<"nao" | "sim" | null>(null);
+  // Pagamento misto Pix + Dinheiro: rascunho dos dois campos do modal antes de
+  // confirmar. Reaproveita troco/trocoOpcao acima para a parte em dinheiro.
+  const [mistoPixInput, setMistoPixInput] = useState("");
+  const [mistoDinheiroInput, setMistoDinheiroInput] = useState("");
+  const [erroMisto, setErroMisto] = useState("");
   const [miniPizzaMode, setMiniPizzaMode] = useState(false);
   const [paymentModal, setPaymentModal] = useState<string | null>(null);
   const [editandoIdentidade, setEditandoIdentidade] = useState(false);
@@ -1131,6 +1151,15 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   function rmItem(idx: number) { const nc = cart.filter((_, i) => i !== idx); setCart(nc); if (nc.length === 0) go("sc-start"); }
   const fee = delType === "delivery" && bairroIdx !== "" ? ((menu.neighborhoods || [])[+bairroIdx]?.fee ?? 0) : 0;
   const finalTotal = cartTotal + fee;
+  // Pagamento misto confirmado: re-parseado do próprio `payment` (fonte única
+  // de verdade), então some sozinho se o cliente trocar para outro método.
+  const hibridoAtual = extrairHibrido(payment);
+  const isHibrido = !!hibridoAtual;
+  const hibridoSomaValida = !hibridoAtual || Math.abs(hibridoAtual.pix + hibridoAtual.dinheiro - finalTotal) <= 0.01;
+  const hibridoTrocoValido = !hibridoAtual || hibridoAtual.dinheiro <= 0 || (
+    trocoOpcao === "nao" || (trocoOpcao === "sim" && !isNaN(parseValorInput(troco)) && parseValorInput(troco) > hibridoAtual.dinheiro)
+  );
+  const hibridoBloqueado = isHibrido && (!hibridoSomaValida || !hibridoTrocoValido);
   const ruaOk = rua.trim().length > 0;
   const numeroOk = numero.trim().length > 0;
   const delOk = delType === "retirada" || delType === "dine_in" || (delType === "delivery" && bairroIdx !== "" && ruaOk && numeroOk);
@@ -1191,12 +1220,22 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     go("sc-pay");
   }
 
-  function paymentLabel(value: string) { return value === "Cartao" ? "Cartão" : value; }
-  function paymentIcon(value: string) { return ({ Pix: ICONS.pix, Dinheiro: ICONS.dinheiro, Cartao: ICONS.cartao } as Record<string, string>)[value] || ICONS.pagamento; }
+  function paymentLabel(value: string) { return value === "Cartao" ? "Cartão" : value === "Misto" ? "Pagamento misto" : value; }
+  function paymentIcon(value: string) { return ({ Pix: ICONS.pix, Dinheiro: ICONS.dinheiro, Cartao: ICONS.cartao, Misto: ICONS.misto } as Record<string, string>)[value] || ICONS.pagamento; }
   function paymentHint(value: string) {
-    return ({ Pix: "Confirmacao manual pela pizzaria.", Dinheiro: "Configure o troco.", Cartao: "Pagamento na maquina." } as Record<string, string>)[value] || "Forma de pagamento";
+    return ({ Pix: "Confirmacao manual pela pizzaria.", Dinheiro: "Configure o troco.", Cartao: "Pagamento na maquina.", Misto: "Divida entre Pix e Dinheiro." } as Record<string, string>)[value] || "Forma de pagamento";
   }
   function paymentSummary(value: string) {
+    if (value === "Misto") {
+      if (!hibridoAtual) return paymentHint(value);
+      const linhaTroco = trocoOpcao === "nao" ? "Sem troco" : trocoOpcao === "sim" && troco.trim() ? `Troco para ${troco}` : null;
+      return (
+        <>
+          {`Pix ${money(hibridoAtual.pix)} + Dinheiro ${money(hibridoAtual.dinheiro)}`}
+          {linhaTroco && <><br />{linhaTroco}</>}
+        </>
+      );
+    }
     if (value !== payment) return paymentHint(value);
     if (value === "Dinheiro") {
       if (trocoOpcao === "nao") return "Sem troco";
@@ -1207,7 +1246,21 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   }
   function openPaymentConfig(value: string) {
     setErroPagamento("");
-    if (value !== "Dinheiro") setErroTroco("");
+    if (value !== "Dinheiro" && value !== "Misto") setErroTroco("");
+    if (value === "Misto") {
+      setErroMisto("");
+      // Reabrir com os valores já confirmados (se houver) para o cliente ajustar.
+      if (hibridoAtual) {
+        setMistoPixInput(hibridoAtual.pix.toFixed(2).replace(".", ","));
+        setMistoDinheiroInput(hibridoAtual.dinheiro.toFixed(2).replace(".", ","));
+      } else {
+        setMistoPixInput("");
+        setMistoDinheiroInput("");
+        setTrocoOpcao(null);
+        setTroco("");
+        setErroTroco("");
+      }
+    }
     setPaymentModal(value);
   }
   function confirmDinheiroSemTroco() {
@@ -1218,8 +1271,44 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     setErroPagamento("");
     setPaymentModal(null);
   }
+  function onChangeMistoPix(v: string) {
+    setMistoPixInput(v);
+    if (erroMisto) setErroMisto("");
+    const num = parseValorInput(v);
+    if (!isNaN(num) && num >= 0 && num <= finalTotal + 0.001) {
+      setMistoDinheiroInput(Math.max(0, finalTotal - num).toFixed(2).replace(".", ","));
+    }
+  }
+  function onChangeMistoDinheiro(v: string) {
+    setMistoDinheiroInput(v);
+    if (erroMisto) setErroMisto("");
+    const num = parseValorInput(v);
+    if (!isNaN(num) && num >= 0 && num <= finalTotal + 0.001) {
+      setMistoPixInput(Math.max(0, finalTotal - num).toFixed(2).replace(".", ","));
+    }
+  }
+  function confirmMistoPagamento() {
+    const pixNum = parseValorInput(mistoPixInput);
+    const dinheiroNum = parseValorInput(mistoDinheiroInput);
+    if (isNaN(pixNum) || isNaN(dinheiroNum)) { setErroMisto("Informe os dois valores."); return; }
+    if (pixNum < 0 || dinheiroNum < 0) { setErroMisto("Os valores não podem ser negativos."); return; }
+    if (pixNum === 0 || dinheiroNum === 0) { setErroMisto("Informe um valor maior que zero no Pix e no Dinheiro. Se for só um método, escolha ele direto."); return; }
+    const soma = pixNum + dinheiroNum;
+    if (Math.abs(soma - finalTotal) > 0.01) { setErroMisto(`A soma (${money(soma)}) precisa ser igual ao total do pedido (${money(finalTotal)}).`); return; }
+    if (!trocoOpcao) { setErroTroco("Escolha se você precisa de troco."); return; }
+    if (trocoOpcao === "sim" && !troco.trim()) { setErroTroco("Informe para quanto precisa de troco."); return; }
+    if (trocoOpcao === "sim") {
+      const trocoNum = parseValorInput(troco);
+      if (isNaN(trocoNum) || trocoNum <= dinheiroNum) { setErroTroco(`O troco é sobre a parte em dinheiro — informe um valor maior que ${money(dinheiroNum)}.`); return; }
+    }
+    setPayment(`Pix (${money(pixNum)}) + Dinheiro (${money(dinheiroNum)})`);
+    setErroPagamento("");
+    setErroMisto("");
+    setPaymentModal(null);
+  }
   function confirmPaymentConfig() {
     if (!paymentModal) return;
+    if (paymentModal === "Misto") { confirmMistoPagamento(); return; }
     if (paymentModal === "Dinheiro") {
       if (!trocoOpcao) { setErroTroco("Escolha se você precisa de troco."); return; }
       if (trocoOpcao === "sim" && !troco.trim()) { setErroTroco("Informe para quanto precisa de troco."); return; }
@@ -1231,6 +1320,11 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     setPayment(paymentModal);
     setErroPagamento("");
     if (paymentModal !== "Dinheiro") { setTroco(""); setTrocoOpcao(null); setErroTroco(""); }
+    // Trocar para um método puro descarta qualquer rascunho de pagamento misto,
+    // pra nunca deixar um payload híbrido antigo escapar no envio do pedido.
+    setMistoPixInput("");
+    setMistoDinheiroInput("");
+    setErroMisto("");
     setPaymentModal(null);
   }
 
@@ -1259,17 +1353,38 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
         if (isNaN(trocoNum) || trocoNum <= cartTotal + fee) { setErroTroco("O valor do troco precisa ser maior que o total do pedido."); if (!hasError) pagamentoRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }); hasError = true; }
         else { setErroTroco(""); }
       } else { setErroTroco(""); }
+    } else if (isHibrido && hibridoAtual) {
+      // Rechecagem defensiva: o carrinho pode ter mudado depois do modal confirmar o misto.
+      if (!hibridoSomaValida) {
+        setErroPagamento("A divisão do pagamento misto não bate mais com o total. Ajuste os valores.");
+        if (!hasError) pagamentoRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+        hasError = true;
+      } else if (hibridoAtual.dinheiro > 0) {
+        if (!trocoOpcao) {
+          setErroTroco("Escolha se você precisa de troco.");
+          if (!hasError) pagamentoRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+          hasError = true;
+        } else if (trocoOpcao === "sim" && !troco.trim()) {
+          setErroTroco("Informe para quanto precisa de troco.");
+          if (!hasError) pagamentoRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+          hasError = true;
+        } else if (trocoOpcao === "sim") {
+          const trocoNum = parseValorInput(troco);
+          if (isNaN(trocoNum) || trocoNum <= hibridoAtual.dinheiro) { setErroTroco(`O troco é sobre a parte em dinheiro — informe um valor maior que ${money(hibridoAtual.dinheiro)}.`); if (!hasError) pagamentoRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }); hasError = true; }
+          else { setErroTroco(""); }
+        } else { setErroTroco(""); }
+      } else { setErroTroco(""); }
     } else { setErroTroco(""); }
     if (hasError) return;
     setSending(true);
-    const payload = { cliente: nome.trim(), telefone: telefone.trim() || undefined, whatsappToken: waToken || undefined, usarOutroWhatsapp: usarOutroWhatsapp || undefined, itens: cart.map((c) => ({ kind: c.kind, name: c.name, detail: c.detail, price: c.price, qty: c.qty, ...(c.promoId ? { promoId: c.promoId } : {}) })), tipoEntrega: delType, bairro: delType === "delivery" ? menu.neighborhoods[+bairroIdx].name : undefined, rua: delType === "delivery" ? rua : undefined, numero: delType === "delivery" && numero.trim() ? numero.trim() : undefined, referencia: delType === "delivery" && referencia.trim() ? referencia.trim() : undefined, observacao: observacao.trim() || undefined, taxaEntrega: fee, pagamento: payment, troco: payment === "Dinheiro" ? (trocoOpcao === "nao" ? "Sem troco" : troco.trim()) : undefined };
+    const payload = { cliente: nome.trim(), telefone: telefone.trim() || undefined, whatsappToken: waToken || undefined, usarOutroWhatsapp: usarOutroWhatsapp || undefined, itens: cart.map((c) => ({ kind: c.kind, name: c.name, detail: c.detail, price: c.price, qty: c.qty, ...(c.promoId ? { promoId: c.promoId } : {}) })), tipoEntrega: delType, bairro: delType === "delivery" ? menu.neighborhoods[+bairroIdx].name : undefined, rua: delType === "delivery" ? rua : undefined, numero: delType === "delivery" && numero.trim() ? numero.trim() : undefined, referencia: delType === "delivery" && referencia.trim() ? referencia.trim() : undefined, observacao: observacao.trim() || undefined, taxaEntrega: fee, pagamento: payment, troco: (payment === "Dinheiro" || isHibrido) ? (trocoOpcao === "nao" ? "Sem troco" : troco.trim()) : undefined };
     try {
       const r = await fetch("/api/pedido-app", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const data = await r.json();
       if (data.ok) { try { localStorage.setItem("cf_nome", nome.trim()); if (telefone.trim()) localStorage.setItem("cf_tel", telefone.trim()); } catch {} try { sessionStorage.removeItem("cf_draft"); } catch {} try { const resumo = { id: String(data.pedidoId), numero: typeof data.numero === "number" ? data.numero : undefined, ts: Date.now() }; localStorage.setItem("cf_ultimo_pedido", JSON.stringify(resumo)); setPedidoRecente(resumo); } catch {} setStatusPedidoConfirmado("novo"); setStatusPixCliente(payment?.toLowerCase().includes("pix") ? "aguardando_pix" : "nao_pix"); setPedidoConfirmado({ id: data.pedidoId, numero: data.numero, total: data.total, ...(typeof data.statusToken === "string" ? { statusToken: data.statusToken } : {}), ...(data.pix ? { pix: data.pix } : {}) }); go("sc-done"); } else { showToast("Erro ao enviar. Tente de novo."); }
     } catch { showToast("Sem conexão. Tente de novo."); } finally { setSending(false); }
   }
-  function resetAll() { setCart([]); resetBuild(); setDelType(null); setBairroIdx(""); setRua(""); setNumero(""); setReferencia(""); setPayment(null); setTroco(""); setTrocoOpcao(null); setPaymentModal(null); setObservacao(""); setErroNome(""); setErroTelefone(""); setErroPagamento(""); setErroEntrega(""); setErroTroco(""); setPedidoConfirmado(null); setStatusPedidoConfirmado("novo"); setStatusPixCliente("aguardando_pix"); setRestoredDraft(false); setEditandoIdentidade(false); setLastAddedKind(null); setUpsellBebidaIgnorado(false); try { sessionStorage.removeItem("cf_draft"); } catch {} go("sc-start"); }
+  function resetAll() { setCart([]); resetBuild(); setDelType(null); setBairroIdx(""); setRua(""); setNumero(""); setReferencia(""); setPayment(null); setTroco(""); setTrocoOpcao(null); setPaymentModal(null); setMistoPixInput(""); setMistoDinheiroInput(""); setErroMisto(""); setObservacao(""); setErroNome(""); setErroTelefone(""); setErroPagamento(""); setErroEntrega(""); setErroTroco(""); setPedidoConfirmado(null); setStatusPedidoConfirmado("novo"); setStatusPixCliente("aguardando_pix"); setRestoredDraft(false); setEditandoIdentidade(false); setLastAddedKind(null); setUpsellBebidaIgnorado(false); try { sessionStorage.removeItem("cf_draft"); } catch {} go("sc-start"); }
 
   const stepMap: Record<string, number> = { "sc-start": 0, "sc-build": 0, "sc-border": 0, "sc-list": 0, "sc-suco-leite": 0, "sc-macarronada-size": 0, "sc-promo": 0, "sc-another": 1, "sc-cart": 1, "sc-delivery": 2, "sc-pay": 3, "sc-done": 3 };
   const stepIdx = stepMap[screen] ?? 0;
@@ -1608,15 +1723,22 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
               <div ref={pagamentoRef} className="pay-section-card payment-choice">
                 <div className="pay-section-title">Escolha o pagamento</div>
                 <div className="payment-grid">
-                  {(menu.payments || []).map((p) => (
-                    <button key={p} type="button" className={`payment-card ${payment === p ? "sel" : ""}`} onClick={() => openPaymentConfig(p)}>
+                  {[...(menu.payments || []), "Misto"].map((p) => (
+                    <button key={p} type="button" className={`payment-card ${(p === "Misto" ? isHibrido : payment === p) ? "sel" : ""}`} onClick={() => openPaymentConfig(p)}>
                       <span className="payment-icon">{paymentIcon(p)}</span>
                       <span className="payment-card-text"><strong>{paymentLabel(p)}</strong><small>{paymentSummary(p)}</small></span>
                       <span className="payment-edit" aria-hidden="true">{ICONS.editar}</span>
                     </button>
                   ))}
                 </div>
-                {erroPagamento && <div className="pay-error">Falta escolher como voce vai pagar.</div>}
+                {erroPagamento && <div className="pay-error">{erroPagamento === "pagamento" ? "Falta escolher como voce vai pagar." : erroPagamento}</div>}
+                {!erroPagamento && hibridoBloqueado && (
+                  <div className="pay-error">
+                    {!hibridoSomaValida
+                      ? `A divisão do pagamento misto não bate mais com o total (${money(finalTotal)}). Toque em "Pagamento misto" para ajustar.`
+                      : "Falta confirmar o troco do pagamento misto. Toque em \"Pagamento misto\" para ajustar."}
+                  </div>
+                )}
               </div>
 
               {/* Bloco: Identificação */}
@@ -1784,7 +1906,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
               <div className="delivery-cta-label">Total</div>
               <div className="delivery-cta-total">{money(finalTotal)}</div>
             </div>
-            <button className="btn delivery-cta-btn" disabled={sending || cartEsgotado} onClick={finish}>{sending ? "Enviando…" : "Finalizar pedido"}</button>
+            <button className="btn delivery-cta-btn" disabled={sending || cartEsgotado || hibridoBloqueado} onClick={finish}>{sending ? "Enviando…" : "Finalizar pedido"}</button>
           </div>
         </div>
       )}
@@ -1851,6 +1973,11 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                       <span className="money-status-badge">{trocoOpcao === "nao" ? "Sem troco" : "Precisa de troco"}</span>
                     )}
                   </>
+                ) : paymentModal === "Misto" ? (
+                  <>
+                    <div className="payment-modal-kicker">Pagamento misto</div>
+                    <h3 id="payment-modal-title">Pix + Dinheiro</h3>
+                  </>
                 ) : (
                   <>
                     <div className="payment-modal-kicker">Pagamento</div>
@@ -1872,7 +1999,49 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                 <p>Vale para entrega, retirada ou consumo no local.</p>
               </div>
             )}
-            {paymentModal !== "Pix" && paymentModal !== "Cartao" && paymentModal !== "Dinheiro" && (
+            {paymentModal === "Misto" && (() => {
+              const pixNumAtual = parseValorInput(mistoPixInput);
+              const dinheiroNumAtual = parseValorInput(mistoDinheiroInput);
+              const somaAtual = (isNaN(pixNumAtual) ? 0 : pixNumAtual) + (isNaN(dinheiroNumAtual) ? 0 : dinheiroNumAtual);
+              const somaBate = !isNaN(pixNumAtual) && !isNaN(dinheiroNumAtual) && Math.abs(somaAtual - finalTotal) <= 0.01;
+              const dinheiroAtivo = !isNaN(dinheiroNumAtual) && dinheiroNumAtual > 0;
+              return (
+                <div className="payment-modal-body">
+                  <p>Total do pedido: <strong>{money(finalTotal)}</strong></p>
+                  <div className="misto-fields">
+                    <div className="field money-field">
+                      <label>Valor no Pix</label>
+                      <input value={mistoPixInput} onChange={(e) => onChangeMistoPix(e.target.value)} inputMode="numeric" placeholder="Ex: 50" />
+                    </div>
+                    <div className="field money-field">
+                      <label>Valor no Dinheiro</label>
+                      <input value={mistoDinheiroInput} onChange={(e) => onChangeMistoDinheiro(e.target.value)} inputMode="numeric" placeholder="Ex: 30" />
+                    </div>
+                  </div>
+                  <p className={`misto-resumo ${somaBate ? "ok" : ""}`}>
+                    {`Pix R$ ${isNaN(pixNumAtual) ? "0,00" : pixNumAtual.toFixed(2).replace(".", ",")} + Dinheiro R$ ${isNaN(dinheiroNumAtual) ? "0,00" : dinheiroNumAtual.toFixed(2).replace(".", ",")}`}
+                    {!somaBate && ` (total: ${money(somaAtual)})`}
+                  </p>
+                  {erroMisto && <div className="pay-error">{erroMisto}</div>}
+                  {dinheiroAtivo && (
+                    <>
+                      <div className="money-choice-row">
+                        <button type="button" className={`btn ${trocoOpcao === "nao" ? "" : "btn-ghost"}`} onClick={() => { setTrocoOpcao("nao"); setTroco(""); setErroTroco(""); }}>Sem troco</button>
+                        <button type="button" className={`btn ${trocoOpcao === "sim" ? "" : "btn-ghost"}`} onClick={() => { setTrocoOpcao("sim"); setErroTroco(""); }}>Troco para quanto?</button>
+                      </div>
+                      {trocoOpcao === "sim" && (
+                        <div className="field money-field">
+                          <label>Vai pagar a parte em dinheiro com quanto?</label>
+                          <input value={troco} onChange={(e) => { setTroco(e.target.value); if (erroTroco) setErroTroco(""); }} inputMode="numeric" placeholder={`Ex: ${Math.ceil(dinheiroNumAtual / 10) * 10 || 50}`} />
+                        </div>
+                      )}
+                      {erroTroco && <div className="pay-error">{erroTroco}</div>}
+                    </>
+                  )}
+                </div>
+              );
+            })()}
+            {paymentModal !== "Pix" && paymentModal !== "Cartao" && paymentModal !== "Dinheiro" && paymentModal !== "Misto" && (
               <div className="payment-modal-body"><p>{paymentHint(paymentModal)}</p></div>
             )}
             {paymentModal === "Dinheiro" && (
@@ -2187,6 +2356,9 @@ main{width:100%;padding:6px 20px 20px}
 .money-choice-row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
 .money-choice-row .btn{padding:12px 8px;font-size:13px}
 .money-field{margin:0}
+.misto-fields{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0}
+.misto-resumo{font-size:13px;font-weight:700;color:var(--text);background:var(--surface2);border:1px solid var(--line-strong);border-radius:12px;padding:10px 12px;margin:0 0 10px}
+.misto-resumo.ok{color:var(--green);background:var(--green-soft);border-color:rgba(98,162,86,.26)}
 .payment-modal-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:16px}
 .payment-modal-actions.single{grid-template-columns:1fr}
 .payment-modal-actions .btn{padding:13px 10px}
