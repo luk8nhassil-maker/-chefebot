@@ -1727,7 +1727,6 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                     <button key={p} type="button" className={`payment-card ${(p === "Misto" ? isHibrido : payment === p) ? "sel" : ""}`} onClick={() => openPaymentConfig(p)}>
                       <span className="payment-icon">{paymentIcon(p)}</span>
                       <span className="payment-card-text"><strong>{paymentLabel(p)}</strong><small>{paymentSummary(p)}</small></span>
-                      <span className="payment-edit" aria-hidden="true">{ICONS.editar}</span>
                     </button>
                   ))}
                 </div>
@@ -2319,7 +2318,6 @@ main{width:100%;padding:6px 20px 20px}
 .payment-card-text{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}
 .payment-card-text strong{font-size:15px;font-weight:850;color:var(--text)}
 .payment-card-text small{font-size:12.5px;color:var(--text-sub);line-height:1.35}
-.payment-edit{width:30px;height:30px;border-radius:999px;border:1px solid var(--line-strong);display:flex;align-items:center;justify-content:center;color:var(--text-sub);font-size:14px;flex:0 0 auto}
 .pay-error{color:#ef4444;font-size:12px;font-weight:700;margin-top:8px}
 /* Cards de seção da etapa de pagamento (pagamento / identificação / observações) —
    mesmo bloco visual, mais respiro entre eles do que o antigo layout colado. */
