@@ -2217,7 +2217,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
     }
     case "welcome": {
       return {
-        messages: [`Olá! Seja bem-vindo à *Chefe da Pizza*! 🍕\n\nO que vai ser hoje? Temos coisa boa te esperando!`],
+        messages: [`Olá! Seja bem-vindo à *Chefe da Pizza*! 🍕\n\nVocê pode fazer seu pedido por aqui mesmo no WhatsApp.\n\nSe preferir ver o cardápio digital, é só acessar:\nhttps://chefebot-pjif.vercel.app/cardapio\n\nO que vai ser hoje? Temos coisa boa te esperando!`],
         session: { ...session, step: "category" },
       };
     }

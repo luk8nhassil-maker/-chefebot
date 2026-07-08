@@ -1207,7 +1207,7 @@ export async function POST(req: NextRequest) {
         if (eSaudacao(messageText)) {
           currentSession = createInitialSession();
           await redis.set(sessionKey, currentSession, { ex: 1800 });
-          await enviarMensagem(phone, `Ola! Seja bem-vindo a *${config.nomePizzaria}*! 🍕\n\nO que vai ser hoje? Temos coisa boa te esperando! 😋\n\n  1. Pizza\n  2. Lanches\n  3. Bebidas\n  4. Sucos e Vitaminas`);
+          await enviarMensagem(phone, `Ola! Seja bem-vindo a *${config.nomePizzaria}*! 🍕\n\nVocê pode fazer seu pedido por aqui mesmo no WhatsApp.\n\nSe preferir ver o cardápio digital, é só acessar:\nhttps://chefebot-pjif.vercel.app/cardapio\n\nO que vai ser hoje? Temos coisa boa te esperando! 😋\n\n  1. Pizza\n  2. Lanches\n  3. Bebidas\n  4. Sucos e Vitaminas`);
           await redis.set(sessionKey, { ...currentSession, step: "category" }, { ex: 1800 });
           return NextResponse.json({ ok: true });
         }
