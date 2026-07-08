@@ -7,6 +7,7 @@ import { computeTaxaApp, buildEnderecoApp } from "@/lib/pedidoAppLogic";
 import { criarPixMetadata, prepararPixProviderMercadoPago, serializarPixCliente } from "@/lib/pix";
 import { PROMOS_KEY, catalogoDoMenu, dentroDaJanela, precoFinalPromocao, promocaoIndisponivel, type Promocao } from "@/lib/promocoes";
 import { validarTokenCardapio } from "@/lib/cardapioToken";
+import { temDinheiroNoPagamento, valorDinheiroEsperado } from "@/lib/bot";
 
 export const maxDuration = 20;
 
@@ -65,10 +66,6 @@ async function getConfigPix(): Promise<ConfigPizzariaPix> {
 
 function norm(value: string): string {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
-}
-
-function isPagamentoDinheiro(pagamento: string): boolean {
-  return norm(pagamento) === "dinheiro";
 }
 
 function formatItem(item: ItemApp): string {
@@ -157,7 +154,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "Forma de pagamento obrigatória" }, { status: 400 });
     }
 
-    if (isPagamentoDinheiro(body.pagamento) && !body.troco?.trim()) {
+    if (temDinheiroNoPagamento(body.pagamento) && !body.troco?.trim()) {
       return NextResponse.json({ ok: false, error: "Troco obrigatorio para dinheiro" }, { status: 400 });
     }
 
@@ -204,6 +201,16 @@ export async function POST(req: NextRequest) {
     const subtotal = itensValidados.reduce((s, item) => s + item.unitPrice! * item.qty, 0);
     const taxa = computeTaxaApp(body.tipoEntrega, body.bairro, menu.neighborhoods as Array<{ name: string; fee: number }>);
     const total = subtotal + taxa;
+
+    // Troco (quando há dinheiro no pagamento, puro ou híbrido) é validado só
+    // contra a parte em dinheiro — mesma regra do fluxo do WhatsApp (bot.ts).
+    if (temDinheiroNoPagamento(body.pagamento) && body.troco?.trim() && !/sem\s*troco/i.test(body.troco)) {
+      const valorTroco = parseFloat(body.troco.replace(",", ".").replace(/[^0-9.]/g, ""));
+      const baseTroco = valorDinheiroEsperado(body.pagamento, total);
+      if (isNaN(valorTroco) || valorTroco < baseTroco) {
+        return NextResponse.json({ ok: false, error: "Valor de troco insuficiente para a parte em dinheiro" }, { status: 400 });
+      }
+    }
 
     const endereco = buildEnderecoApp({ tipoEntrega: body.tipoEntrega, rua: body.rua, numero: body.numero, bairro: body.bairro });
 

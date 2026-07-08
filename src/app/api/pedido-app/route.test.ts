@@ -234,6 +234,7 @@ describe("POST /api/pedido-app", () => {
     const res = await POST(postReq({
       ...basePayload,
       pagamento: "Pix (R$ 20,00) + Dinheiro (R$ 13,00)",
+      troco: "20",
     }));
     const data = await res.json();
 
@@ -245,6 +246,53 @@ describe("POST /api/pedido-app", () => {
     expect(pedidos[0].total).toBe(33);
     expect(pedidos[0].pix.valorEsperado).toBe(20);
     expect(data.pix.valorEsperado).toBe(20);
+  });
+
+  it("rejeita hibrido Pix + Dinheiro sem informar troco", async () => {
+    const res = await POST(postReq({
+      ...basePayload,
+      pagamento: "Pix (R$ 20,00) + Dinheiro (R$ 13,00)",
+    }));
+
+    expect(res.status).toBe(400);
+    expect(store.get("pedidos")).toBeUndefined();
+  });
+
+  it("aceita hibrido Pix + Dinheiro com troco valido sobre a parte em dinheiro", async () => {
+    // total 33 (2x Refrigerante 2L + taxa Centro), parte em dinheiro = 13
+    const res = await POST(postReq({
+      ...basePayload,
+      pagamento: "Pix (R$ 20,00) + Dinheiro (R$ 13,00)",
+      troco: "20",
+    }));
+
+    expect(res.status).toBe(200);
+    const pedidos = store.get("pedidos") as PedidoSalvo[];
+    expect(pedidos[0].troco).toBe("20");
+  });
+
+  it("rejeita hibrido Pix + Dinheiro com troco menor que a parte em dinheiro", async () => {
+    // parte em dinheiro = 13, troco para 10 é insuficiente
+    const res = await POST(postReq({
+      ...basePayload,
+      pagamento: "Pix (R$ 20,00) + Dinheiro (R$ 13,00)",
+      troco: "10",
+    }));
+
+    expect(res.status).toBe(400);
+    expect(store.get("pedidos")).toBeUndefined();
+  });
+
+  it("aceita hibrido Pix + Dinheiro com Sem troco", async () => {
+    const res = await POST(postReq({
+      ...basePayload,
+      pagamento: "Pix (R$ 20,00) + Dinheiro (R$ 13,00)",
+      troco: "Sem troco",
+    }));
+
+    expect(res.status).toBe(200);
+    const pedidos = store.get("pedidos") as PedidoSalvo[];
+    expect(pedidos[0].troco).toBe("Sem troco");
   });
 
   it("erro do Mercado Pago salva pedido com fallback Pix atual", async () => {
