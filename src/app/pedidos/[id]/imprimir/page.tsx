@@ -20,6 +20,7 @@ type Pedido = {
   referencia?: string
   troco?: string
   pixConfirmado?: boolean
+  pix?: { status?: string }
 }
 
 interface PageProps {
@@ -93,6 +94,16 @@ function brl(n: number): string {
 // strip "Troco para " / "Troco " prefix so we display just the value
 function trocoValor(troco: string): string {
   return troco.replace(/^[Tt]roco\s+(para\s+)?/i, '')
+}
+
+// Status da perna Pix dentro do pagamento misto — mesma classificação já usada
+// no painel (pixConfirmado / pix.status em_revisao|suspeito), só o texto muda
+// para o formato do cupom (STATUS: ...).
+function statusPixHibrido(pixConfirmado: boolean, pixStatus?: string): string {
+  if (pixConfirmado) return 'PIX CONFIRMADO'
+  if (pixStatus === 'em_revisao') return 'PIX EM REVISÃO'
+  if (pixStatus === 'suspeito') return 'PIX SUSPEITO'
+  return 'AGUARDANDO CONFIRMAÇÃO'
 }
 
 // --- component ---
@@ -290,8 +301,15 @@ export default function ImprimirPedidoPage({ params }: PageProps) {
           <>
             <div className="secao negrito">PAGAMENTO: HÍBRIDO</div>
             {hibrido.map((h, i) => (
-              <div key={i} className="secao">
-                <span className="negrito">{h.metodo.toUpperCase()}: </span>{brl(h.valor)}
+              <div key={i}>
+                <div className="secao">
+                  <span className="negrito">{h.metodo.toUpperCase()}: </span>{brl(h.valor)}
+                </div>
+                {/pix/i.test(h.metodo) && (
+                  <div className="secao">
+                    <span className="negrito">STATUS: </span>{statusPixHibrido(pixConfirmado, pedido.pix?.status)}
+                  </div>
+                )}
               </div>
             ))}
             {trocoStr && (
