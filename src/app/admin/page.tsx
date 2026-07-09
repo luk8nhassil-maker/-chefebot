@@ -135,6 +135,14 @@ const PASSOS_TOUR_CARDAPIO = [
   { face: String.fromCodePoint(0x1F973), tag: 'Pronto!', tagBg: '#0d2e16', tagColor: '#4ade80', title: 'Voce e um craque!', text: 'Agora e so editar o cardapio do seu jeito. Qualquer duvida e so chamar!', nextLabel: 'Usar agora!', nextBg: 'linear-gradient(135deg,#16a34a,#4ade80)', accent: '#16a34a', showDismiss: true, last: true },
 ]
 
+const ABA_TABS: { key: Aba; Icon: typeof LayoutDashboard; label: string }[] = [
+  { key: 'dashboard', Icon: LayoutDashboard, label: 'Painel' },
+  { key: 'cardapio', Icon: Pizza, label: 'Cardapio' },
+  { key: 'config', Icon: Settings, label: 'Configuracao' },
+  { key: 'financeiro', Icon: Wallet, label: 'Financeiro' },
+  { key: 'dev', Icon: Wrench, label: 'Suporte' },
+]
+
 export default function AdminPage() {
   const router = useRouter()
   const [aba, setAba] = useState<Aba>('dashboard')
@@ -493,7 +501,7 @@ export default function AdminPage() {
   return (
     <PanelShell showGestaoNav>
     <div style={{ minHeight: '100svh', background: '#060606', fontFamily: "'Archivo', sans-serif", paddingBottom: 'calc(env(safe-area-inset-bottom) + 80px)', overflowX: 'hidden' }}>
-      <style>{`@keyframes slideUp { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } } input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(1); } .ps-bottom-nav { display: none !important; } .ps-content { padding-bottom: 0 !important; } .cb-admin-metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; } .cb-admin-acesso { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; } .cb-admin-bottomnav { left: 0; } @media (min-width: 768px) { .cb-admin-bottomnav { left: 220px; } } @media (min-width: 1024px) { .cb-admin-metrics { grid-template-columns: repeat(4, minmax(0,1fr)); } .cb-admin-acesso { grid-template-columns: repeat(4, minmax(0,1fr)); } .cb-admin-bottomnav { left: 240px; } }`}</style>
+      <style>{`@keyframes slideUp { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } } input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(1); } .ps-bottom-nav { display: none !important; } .ps-content { padding-bottom: 0 !important; } .cb-admin-metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; } .cb-admin-acesso { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; } .cb-admin-bottomnav { left: 0; display: flex; } .cb-admin-desktop-tabs { display: none; } .cb-admin-tab { display: flex; align-items: center; gap: 7px; padding: 9px 16px; border-radius: 10px; background: transparent; color: #5a564d; font-size: 13px; font-weight: 700; font-family: 'Archivo', sans-serif; border: none; cursor: pointer; } .cb-admin-tab-active { background: rgba(255,107,0,.08); color: #ff6b00; } @media (min-width: 768px) { .cb-admin-bottomnav { left: 220px; display: none; } .cb-admin-desktop-tabs { display: flex; gap: 6px; padding: 12px 16px 0; } } @media (min-width: 1024px) { .cb-admin-metrics { grid-template-columns: repeat(4, minmax(0,1fr)); } .cb-admin-acesso { grid-template-columns: repeat(4, minmax(0,1fr)); } .cb-admin-bottomnav { left: 240px; } }`}</style>
 
       {/* Header */}
       <div style={{ background: '#0a0a0a', borderBottom: '1px solid #1f1d1a', padding: '18px 16px', paddingTop: 'calc(env(safe-area-inset-top) + 18px)', position: 'sticky', top: 0, zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -516,6 +524,16 @@ export default function AdminPage() {
           {mensagem}
         </div>
       )}
+
+      {/* Navegação por abas — visível só em desktop/tablet (>=768px); no mobile a navegação é a bottom nav */}
+      <div className="cb-admin-desktop-tabs">
+        {ABA_TABS.map(({ key, Icon, label }) => (
+          <button key={key} className={`cb-admin-tab${aba === key ? ' cb-admin-tab-active' : ''}`} onClick={() => setAba(key)}>
+            <Icon size={16} aria-hidden="true" />
+            <span>{label}</span>
+          </button>
+        ))}
+      </div>
 
       <div style={{ padding: '16px 16px 0', maxWidth: 1400, margin: '0 auto', width: '100%' }}>
 
@@ -1351,14 +1369,8 @@ export default function AdminPage() {
       </div>
 
       {/* Navegacao inferior */}
-      <div className="cb-admin-bottomnav" style={{ position: 'fixed', bottom: 0, right: 0, background: '#0a0a0a', borderTop: '1px solid #1f1d1a', display: 'flex', padding: '10px 0', paddingBottom: 'calc(env(safe-area-inset-bottom) + 10px)', zIndex: 100 }}>
-        {([
-          { key: 'dashboard', Icon: LayoutDashboard, label: 'Painel' },
-          { key: 'cardapio', Icon: Pizza, label: 'Cardapio' },
-          { key: 'config', Icon: Settings, label: 'Configuracao' },
-          { key: 'financeiro', Icon: Wallet, label: 'Financeiro' },
-          { key: 'dev', Icon: Wrench, label: 'Suporte' },
-        ] as { key: Aba; Icon: typeof LayoutDashboard; label: string }[]).map(({ key, Icon, label }) => (
+      <div className="cb-admin-bottomnav" style={{ position: 'fixed', bottom: 0, right: 0, background: '#0a0a0a', borderTop: '1px solid #1f1d1a', padding: '10px 0', paddingBottom: 'calc(env(safe-area-inset-bottom) + 10px)', zIndex: 100 }}>
+        {ABA_TABS.map(({ key, Icon, label }) => (
           <button key={key} onClick={() => setAba(key)} style={{ flex: 1, background: 'none', border: 'none', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, padding: '6px 0', minHeight: 48, fontFamily: "'Archivo', sans-serif" }}>
             <Icon size={20} color={aba === key ? '#ff6b00' : '#444'} opacity={aba === key ? 1 : 0.3} aria-hidden="true" />
             <span style={{ fontSize: 10, color: aba === key ? '#ff6b00' : '#444', fontWeight: aba === key ? 700 : 400 }}>{label}</span>
