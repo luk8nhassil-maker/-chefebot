@@ -451,7 +451,7 @@ export default function SetupPage() {
   async function save() {
     setSaving(true)
     try {
-      await fetch('/api/configuracoes', {
+      const res = await fetch('/api/configuracoes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -469,6 +469,14 @@ export default function SetupPage() {
           aceitaRetirada:   form.aceitaRetirada,
         }),
       })
+      if (res.status === 401 || res.status === 403) {
+        alert('Sua sessão expirou ou você não tem permissão para salvar. Faça login novamente.')
+        return
+      }
+      if (!res.ok) {
+        alert('Erro ao salvar. Tente novamente.')
+        return
+      }
       setStep(5)
     } catch {
       alert('Erro ao salvar. Tente novamente.')
