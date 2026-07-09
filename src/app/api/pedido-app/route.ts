@@ -1,9 +1,12 @@
+import { randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { redis } from "@/lib/redis";
 import { proximoNumeroPedido } from "@/lib/numeracao";
 import { getMENUDinamico } from "@/lib/menu";
 import { computeTaxaApp, buildEnderecoApp } from "@/lib/pedidoAppLogic";
 import { criarPixMetadata, prepararPixProviderMercadoPago, serializarPixCliente } from "@/lib/pix";
+import { gerarPixCopiaEColaEstatico } from "@/lib/pixBRCode";
+import { montarLinkWhatsappComprovantePix } from "@/lib/pixCardapio";
 import { PROMOS_KEY, catalogoDoMenu, dentroDaJanela, precoFinalPromocao, promocaoIndisponivel, type Promocao } from "@/lib/promocoes";
 
 export const maxDuration = 20;
@@ -181,9 +184,14 @@ export async function POST(req: NextRequest) {
       clienteNome: body.cliente,
       payerEmail: body.email,
     });
+    // Token aleatorio que autoriza SOMENTE a consulta de status de pagamento
+    // deste pedido (GET /api/pedido-status com token). Vai apenas na resposta
+    // de criacao — quem nao criou o pedido nao tem como obte-lo.
+    const statusToken = randomUUID();
     const novoPedido = {
       id: pedidoId,
       numero: numeroPedido,
+      statusToken,
       cliente: body.cliente,
       telefone: body.telefone.trim(),
       itens,
@@ -222,7 +230,48 @@ export async function POST(req: NextRequest) {
     } catch {}
 
     const pixCliente = serializarPixCliente(pix);
-    return NextResponse.json({ ok: true, pedidoId, numero: numeroPedido, total, ...(pixCliente ? { pix: pixCliente } : {}) });
+
+    // Pix manual (sem Mercado Pago): entrega ao cliente a chave configurada,
+    // o beneficiario, o link do WhatsApp para envio do comprovante e um
+    // copia-e-cola estatico gerado localmente (BR Code, sem API bancaria).
+    let pixManual: Record<string, unknown> | undefined;
+    if (pix && !pixCliente) {
+      const config = await redis.get<{ chavePix?: string; nomeTitularPix?: string; nomePizzaria?: string; whatsappPizzaria?: string }>("config:pizzaria");
+      const chave = (config?.chavePix || "").trim();
+      if (chave) {
+        const titular = (config?.nomeTitularPix || "").trim();
+        const valorPix = typeof pix.valorEsperado === "number" && Number.isFinite(pix.valorEsperado) ? pix.valorEsperado : total;
+        const copiaECola = gerarPixCopiaEColaEstatico({
+          chave,
+          valor: valorPix,
+          nome: titular || config?.nomePizzaria,
+          cidade: "ALTO ALEGRE",
+          txid: `CHEFE${numeroPedido}`,
+        });
+        const whatsappUrl = montarLinkWhatsappComprovantePix({
+          whatsapp: config?.whatsappPizzaria,
+          numeroPedido,
+          total: valorPix,
+        });
+        pixManual = {
+          chave,
+          valor: valorPix,
+          ...(titular ? { titular } : {}),
+          ...(copiaECola ? { copiaECola } : {}),
+          ...(whatsappUrl ? { whatsappUrl } : {}),
+        };
+      }
+    }
+
+    return NextResponse.json({
+      ok: true,
+      pedidoId,
+      numero: numeroPedido,
+      total,
+      statusToken,
+      ...(pixCliente ? { pix: pixCliente } : {}),
+      ...(pixManual ? { pixManual } : {}),
+    });
   } catch (error) {
     console.error("Erro ao salvar pedido do site:", error);
     return NextResponse.json({ ok: false, error: "Erro interno" }, { status: 500 });
