@@ -15,6 +15,21 @@ type Config = {
   tempoEntregaRetirada: string
 }
 
+type ConfigFidelidade = {
+  ativo: boolean
+  pizzasParaPremio: number
+  tipoRecompensa: 'pizza_gratis' | 'desconto_fixo' | 'desconto_percentual'
+  descricaoRecompensa: string
+  validadeDias?: number
+}
+
+const FIDELIDADE_PADRAO: ConfigFidelidade = {
+  ativo: false,
+  pizzasParaPremio: 10,
+  tipoRecompensa: 'pizza_gratis',
+  descricaoRecompensa: 'Pizza grátis',
+}
+
 type ItemCardapio = { name: string; price: number }
 
 type Cardapio = {
@@ -180,12 +195,22 @@ export default function ConfiguracoesPage() {
   const [novoItem, setNovoItem] = useState('')
   const [novoPreco, setNovoPreco] = useState('')
   const [novoTaxa, setNovoTaxa] = useState('')
+  const [fidelidade, setFidelidade] = useState<ConfigFidelidade>(FIDELIDADE_PADRAO)
+  const [salvandoFidelidade, setSalvandoFidelidade] = useState(false)
+  const [mensagemFidelidade, setMensagemFidelidade] = useState('')
   const is24h = config.horaAbertura === 0 && config.horaFechamento === 24
 
   useEffect(() => {
     const role = getUserRole()
-    setIsAdmin(role === 'admin' || role === 'dev')
+    const admin = role === 'admin' || role === 'dev'
+    setIsAdmin(admin)
     setChecking(false)
+    if (admin) {
+      fetch('/api/fidelidade/config')
+        .then(r => (r.ok ? r.json() : null))
+        .then(data => { if (data) setFidelidade({ ...FIDELIDADE_PADRAO, ...data }) })
+        .catch(err => console.error('Falha ao carregar fidelidade:', err))
+    }
     fetch('/api/configuracoes')
       .then(r => { if (r.status === 401) { router.push('/login?callbackUrl=/configuracoes'); return null } return r.json() })
       .then(data => {
@@ -243,6 +268,17 @@ export default function ConfiguracoesPage() {
       else showMsg('❌ Erro ao salvar.')
     } catch { showMsg('❌ Erro ao salvar.') }
     setSalvando(false)
+  }
+
+  const salvarFidelidade = async () => {
+    setSalvandoFidelidade(true)
+    setMensagemFidelidade('')
+    try {
+      const res = await fetch('/api/fidelidade/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(fidelidade) })
+      setMensagemFidelidade(res.ok ? '✅ Fidelidade salva!' : '❌ Erro ao salvar.')
+    } catch { setMensagemFidelidade('❌ Erro ao salvar.') }
+    setSalvandoFidelidade(false)
+    setTimeout(() => setMensagemFidelidade(''), 3000)
   }
 
   const salvarCardapio = async () => {
@@ -478,6 +514,73 @@ export default function ConfiguracoesPage() {
                         Acima desse número, o bot avisa sobre demora extra · 0 = desativado
                       </p>
                     </FieldGroup>
+                  </SectionCard>
+                )}
+
+                {/* Fidelidade */}
+                {isAdmin && (
+                  <SectionCard>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: -4, flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: 16, flexShrink: 0 }}>🎁</span>
+                      <span style={{ fontSize: 13, fontWeight: 900, color: TEXT, textTransform: 'uppercase', letterSpacing: '0.8px' }}>Fidelidade</span>
+                      <span style={{ fontSize: 10, background: 'rgba(255,200,0,0.12)', color: 'rgba(255,220,100,0.8)', padding: '2px 8px', borderRadius: 20, fontWeight: 800, whiteSpace: 'nowrap' }}>Somente Admin</span>
+                    </div>
+                    <button
+                      onClick={() => setFidelidade(prev => ({ ...prev, ativo: !prev.ativo }))}
+                      style={{ width: '100%', background: fidelidade.ativo ? 'rgba(34,197,94,.1)' : 'rgba(255,255,255,.04)', border: `1.5px solid ${fidelidade.ativo ? 'rgba(34,197,94,.4)' : '#1f1d1a'}`, borderRadius: 12, padding: '13px 16px', color: fidelidade.ativo ? '#4ade80' : TEXT2, fontSize: 13, fontWeight: 800, cursor: 'pointer', minHeight: 48, fontFamily: FONT }}
+                    >
+                      {fidelidade.ativo ? '✅ Fidelidade ativa — toque para desativar' : '⭕ Fidelidade desativada — toque para ativar'}
+                    </button>
+                    <FieldGroup label="A cada quantas pizzas ganha recompensa">
+                      <input
+                        type="number"
+                        min={1}
+                        value={fidelidade.pizzasParaPremio}
+                        onChange={e => setFidelidade(prev => ({ ...prev, pizzasParaPremio: Number(e.target.value) }))}
+                        style={inputStyle}
+                      />
+                    </FieldGroup>
+                    <FieldGroup label="Tipo de recompensa">
+                      <select
+                        value={fidelidade.tipoRecompensa}
+                        onChange={e => setFidelidade(prev => ({ ...prev, tipoRecompensa: e.target.value as ConfigFidelidade['tipoRecompensa'] }))}
+                        style={inputStyle}
+                      >
+                        <option value="pizza_gratis">Pizza grátis</option>
+                        <option value="desconto_fixo">Desconto fixo (R$)</option>
+                        <option value="desconto_percentual">Desconto percentual (%)</option>
+                      </select>
+                    </FieldGroup>
+                    <FieldGroup label="Descrição da recompensa">
+                      <input
+                        type="text"
+                        placeholder="Ex: Pizza média grátis"
+                        value={fidelidade.descricaoRecompensa}
+                        onChange={e => setFidelidade(prev => ({ ...prev, descricaoRecompensa: e.target.value }))}
+                        style={inputStyle}
+                        maxLength={120}
+                      />
+                    </FieldGroup>
+                    <FieldGroup label="Validade da recompensa (dias, opcional)">
+                      <input
+                        type="number"
+                        min={0}
+                        value={fidelidade.validadeDias ?? 0}
+                        onChange={e => setFidelidade(prev => ({ ...prev, validadeDias: Number(e.target.value) || undefined }))}
+                        style={inputStyle}
+                        placeholder="0 = sem validade"
+                      />
+                    </FieldGroup>
+                    <button
+                      onClick={salvarFidelidade}
+                      disabled={salvandoFidelidade}
+                      style={{ width: '100%', height: 48, background: salvandoFidelidade ? '#1a1208' : `linear-gradient(180deg, ${ACCENT}, #d95e00)`, border: 'none', borderRadius: 12, color: '#fff', fontSize: 14, fontWeight: 900, cursor: salvandoFidelidade ? 'not-allowed' : 'pointer', fontFamily: FONT, opacity: salvandoFidelidade ? 0.6 : 1 }}
+                    >
+                      {salvandoFidelidade ? 'Salvando...' : 'Salvar Fidelidade'}
+                    </button>
+                    {mensagemFidelidade && (
+                      <p style={{ textAlign: 'center', color: mensagemFidelidade.includes('✅') ? '#4ade80' : '#f87171', fontWeight: 800, fontSize: 13, margin: 0 }}>{mensagemFidelidade}</p>
+                    )}
                   </SectionCard>
                 )}
 

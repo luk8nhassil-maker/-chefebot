@@ -4,6 +4,7 @@ import { redis } from '@/lib/redis'
 import { proximoNumeroPedido } from '@/lib/numeracao'
 import { confirmarPixMetadata, criarPixMetadata, sanitizarPedidoPixResposta, type PixMetadata } from '@/lib/pix'
 import type { PedidoEntregador } from '@/types/entregador'
+import { creditarFidelidadePedido } from '@/lib/fidelidade'
 
 const APP_BASE_URL = 'https://chefebot-pjif.vercel.app'
 
@@ -29,6 +30,8 @@ type Pedido = {
   referencia?: string
   observacao?: string
   horarioInicio?: string
+  clienteId?: string
+  pizzasCount?: number
   // Campos de arquivamento
   isArchived?: boolean
   archivedAt?: string
@@ -225,6 +228,20 @@ export async function PATCH(req: NextRequest) {
       } catch (err) {
         console.error('[ChefeBot] Erro ao enviar pesquisa:', err)
       }
+    }
+
+    // Credito de fidelidade: so conta quando o pedido chega a 'entregue'
+    // (finalizado com sucesso). Idempotente por pedidoId — nunca duplica.
+    // Isolado em try/catch proprio: falha aqui jamais pode afetar a resposta
+    // do PATCH nem impedir a mudanca de status do pedido, que ja foi salva.
+    try {
+      await creditarFidelidadePedido({
+        pedidoId: id,
+        clienteId: pedidos[index].clienteId,
+        pizzas: pedidos[index].pizzasCount ?? 0,
+      })
+    } catch (err) {
+      console.error('[ChefeBot] Erro ao creditar fidelidade (ignorado):', err)
     }
   }
 
