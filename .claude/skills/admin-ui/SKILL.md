@@ -61,6 +61,14 @@ Toda tela do painel usa `src/components/PanelShell.tsx` como casca:
 - Título de página: 18–20px / 700. Rótulo de métrica: 10px uppercase / 700 / letter-spacing. Valor de métrica: 22–30px / 800.
 - Não introduzir nova paleta por tela — todo card novo reaproveita esta tabela.
 
+## Formulários (telas tipo /configuracoes)
+
+Páginas dominadas por formulário (não grid de métricas/cards) não devem esticar até 1400px.
+Usar `max-width: 680px` no container do formulário, alinhado à esquerda da área de conteúdo
+(não `margin: 0 auto` centralizado) — o espaço extra à direita em telas grandes é intencional,
+evita inputs/labels ilegíveis. Regra de "nunca maxWidth:375" continua valendo — a diferença é
+o valor do teto (680px pra formulário, não 375px de celular nem 1400px de dashboard).
+
 ## Estados a sempre considerar
 
 Ao desenhar uma tela nova do painel, cobrir pelo menos:

@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import PanelShell from '@/components/PanelShell'
 
 type Config = {
   nomePizzaria: string
@@ -193,6 +194,11 @@ export default function ConfiguracoesPage() {
           setLoading(false)
         }
       })
+      .catch(err => {
+        console.error('Falha ao carregar configuracoes:', err)
+        setConfig(CONFIG_PADRAO)
+        setLoading(false)
+      })
     fetch('/api/cardapio')
       .then(r => r.json())
       .then(data => {
@@ -205,6 +211,10 @@ export default function ConfiguracoesPage() {
           sizes: data.sizes || [],
           borders: data.borders || [],
         })
+      })
+      .catch(err => {
+        console.error('Falha ao carregar cardapio:', err)
+        setCardapio({ saltyFlavors: [], sweetFlavors: [], bebidas: [], sucos: [], neighborhoods: [], sizes: [], borders: [] })
       })
   }, [router])
 
@@ -279,7 +289,7 @@ export default function ConfiguracoesPage() {
   )
 
   return (
-    <>
+    <PanelShell showGestaoNav>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800;900&display=swap');`}</style>
       <div style={{ minHeight: '100svh', background: BG, fontFamily: FONT, overflowX: 'hidden' }}>
 
@@ -295,7 +305,7 @@ export default function ConfiguracoesPage() {
           paddingLeft: 16,
           paddingRight: 16,
         }}>
-          <div style={{ maxWidth: 375, margin: '0 auto', display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ maxWidth: 680, display: 'flex', alignItems: 'center', gap: 12 }}>
             <button
               onClick={() => router.push('/admin')}
               style={{ background: 'rgba(255,255,255,0.06)', border: BORDER, color: TEXT2, borderRadius: 10, padding: '10px 14px', cursor: 'pointer', fontSize: 14, minHeight: 48, fontFamily: FONT, fontWeight: 700, flexShrink: 0 }}
@@ -309,7 +319,7 @@ export default function ConfiguracoesPage() {
 
         {/* Conteúdo rolável */}
         <div style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 32px)', paddingLeft: 16, paddingRight: 16, paddingTop: 16 }}>
-          <div style={{ maxWidth: 375, margin: '0 auto' }}>
+          <div style={{ maxWidth: 680 }}>
 
             {/* Abas */}
             <div style={{ display: 'flex', gap: 6, marginBottom: 20, background: '#0d0d0d', border: BORDER, borderRadius: 12, padding: 4 }}>
@@ -667,6 +677,6 @@ export default function ConfiguracoesPage() {
           </div>
         </div>
       </div>
-    </>
+    </PanelShell>
   )
 }
