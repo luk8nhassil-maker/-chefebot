@@ -2,6 +2,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import TourGuiado from '@/components/TourGuiado'
+import PanelShell from '@/components/PanelShell'
 
 type Pedido = {
   id: string; cliente: string; telefone: string; itens: string[]
@@ -208,8 +209,8 @@ export default function AdminPage() {
     if (!user || (user.role !== 'admin' && user.role !== 'dev')) { router.push('/login?callbackUrl=/admin'); return }
     setNomeUsuario(user.name)
     Promise.all([
-      fetch('/api/orders').then(r => r.json()),
-      fetch('/api/configuracoes').then(r => r.json()),
+      fetch('/api/orders').then(r => r.json()).catch(err => { console.error('Falha ao carregar pedidos:', err); return [] }),
+      fetch('/api/configuracoes').then(r => r.json()).catch(err => { console.error('Falha ao carregar configuracoes:', err); return { nomePizzaria: '', horaAbertura: 18, horaFechamento: 23, chavePix: '' } }),
       fetch('/api/funcionarios').then(r => r.json()),
       fetch('/api/cardapio-imagens').then(r => r.json()).catch(() => ({ ativo: true })),
       fetch('/api/avaliacoes').then(r => r.json()).catch(() => ({ total: 0, media: 0, ultimas: [] })),
@@ -244,6 +245,9 @@ export default function AdminPage() {
         if (!connected) tryAutoQr()
       }).catch(() => { setWaStatus('disconnected'); tryAutoQr() })
       carregarMercadoPago()
+    }).catch(err => {
+      console.error('Falha ao carregar dados do dashboard:', err)
+      setLoading(false)
     })
   }, [router])
 
@@ -486,8 +490,9 @@ export default function AdminPage() {
     </div>
   )
   return (
+    <PanelShell showGestaoNav>
     <div style={{ minHeight: '100svh', background: '#060606', fontFamily: "'Archivo', sans-serif", paddingBottom: 'calc(env(safe-area-inset-bottom) + 80px)', overflowX: 'hidden' }}>
-      <style>{`@keyframes slideUp { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } } input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(1); }`}</style>
+      <style>{`@keyframes slideUp { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } } input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(1); } .ps-bottom-nav { display: none !important; } .ps-content { padding-bottom: 0 !important; } .cb-admin-metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; } .cb-admin-acesso { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; } .cb-admin-bottomnav { left: 0; } @media (min-width: 768px) { .cb-admin-bottomnav { left: 220px; } } @media (min-width: 1024px) { .cb-admin-metrics { grid-template-columns: repeat(4, minmax(0,1fr)); } .cb-admin-acesso { grid-template-columns: repeat(4, minmax(0,1fr)); } .cb-admin-bottomnav { left: 240px; } }`}</style>
 
       {/* Header */}
       <div style={{ background: '#0a0a0a', borderBottom: '1px solid #1f1d1a', padding: '18px 16px', paddingTop: 'calc(env(safe-area-inset-top) + 18px)', position: 'sticky', top: 0, zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -511,7 +516,7 @@ export default function AdminPage() {
         </div>
       )}
 
-      <div style={{ padding: '16px 16px 0', maxWidth: 375, margin: '0 auto', width: '100%' }}>
+      <div style={{ padding: '16px 16px 0', maxWidth: 1400, margin: '0 auto', width: '100%' }}>
 
         {/* ABA DASHBOARD */}
         {aba === 'dashboard' && (
@@ -609,7 +614,7 @@ export default function AdminPage() {
             )}
 
             {/* 4 métricas principais */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+            <div className="cb-admin-metrics">
               <div style={{ ...card, background: 'linear-gradient(135deg, #101010, #0d0d0d)' }}>
                 <p style={{ color: '#a39b8b', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 6px', letterSpacing: 0.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Pedidos hoje</p>
                 <p style={{ color: '#f4f1ec', fontSize: 30, fontWeight: 900, margin: 0, letterSpacing: -1, lineHeight: 1 }}>{pedidosFiltrados.length}</p>
@@ -706,7 +711,7 @@ export default function AdminPage() {
             {/* Cards de acesso rápido */}
             <div style={{ marginBottom: 16 }}>
               <p style={sectionTitle}>Acesso rapido</p>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <div className="cb-admin-acesso">
                 {[
                   { icon: '🍳', label: 'Cozinha', sub: 'Pedidos ativos', action: () => router.push('/pedidos'), color: '#ff6b00' },
                   { icon: '⚙️', label: 'Configuracoes', sub: 'Horario e cardapio', action: () => router.push('/configuracoes'), color: '#3b82f6' },
@@ -1345,7 +1350,7 @@ export default function AdminPage() {
       </div>
 
       {/* Navegacao inferior */}
-      <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: '#0a0a0a', borderTop: '1px solid #1f1d1a', display: 'flex', padding: '10px 0', paddingBottom: 'calc(env(safe-area-inset-bottom) + 10px)', zIndex: 100 }}>
+      <div className="cb-admin-bottomnav" style={{ position: 'fixed', bottom: 0, right: 0, background: '#0a0a0a', borderTop: '1px solid #1f1d1a', display: 'flex', padding: '10px 0', paddingBottom: 'calc(env(safe-area-inset-bottom) + 10px)', zIndex: 100 }}>
         {([
           { key: 'dashboard', icon: '📊', label: 'Painel' },
           { key: 'cardapio', icon: '🍕', label: 'Cardapio' },
@@ -1361,5 +1366,6 @@ export default function AdminPage() {
         ))}
       </div>
     </div>
+    </PanelShell>
   )
 }
