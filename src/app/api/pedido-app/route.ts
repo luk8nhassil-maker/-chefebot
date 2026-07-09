@@ -8,6 +8,8 @@ import { criarPixMetadata, prepararPixProviderMercadoPago, serializarPixCliente 
 import { PROMOS_KEY, catalogoDoMenu, dentroDaJanela, precoFinalPromocao, promocaoIndisponivel, type Promocao } from "@/lib/promocoes";
 import { validarTokenCardapio } from "@/lib/cardapioToken";
 import { temDinheiroNoPagamento, valorDinheiroEsperado } from "@/lib/bot";
+import { verificarTokenCliente, CLIENTE_COOKIE } from "@/lib/clienteAuth";
+import { contarPizzas } from "@/lib/fidelidade";
 
 export const maxDuration = 20;
 
@@ -214,6 +216,29 @@ export async function POST(req: NextRequest) {
 
     const endereco = buildEnderecoApp({ tipoEntrega: body.tipoEntrega, rua: body.rua, numero: body.numero, bairro: body.bairro });
 
+    // Vinculo com area do cliente (opcional): se o cliente estiver logado
+    // (cookie cliente-token valido), o pedido recebe clienteId + contagem de
+    // pizzas para credito de fidelidade futuro. Pedido anonimo/convidado
+    // segue funcionando normalmente — qualquer falha aqui e ignorada e o
+    // pedido NUNCA deixa de ser criado por causa da fidelidade/login.
+    let clienteId: string | undefined;
+    try {
+      const clienteToken = req.cookies.get(CLIENTE_COOKIE)?.value;
+      if (clienteToken) {
+        const payloadCliente = await verificarTokenCliente(clienteToken);
+        if (payloadCliente) clienteId = payloadCliente.clienteId;
+      }
+    } catch (err) {
+      console.error("[ChefeBot] Erro ao resolver cliente do pedido (ignorado):", err);
+    }
+
+    let pizzasCount = 0;
+    try {
+      pizzasCount = contarPizzas(body.itens);
+    } catch (err) {
+      console.error("[ChefeBot] Erro ao contar pizzas para fidelidade (ignorado):", err);
+    }
+
     const pedidoId = Date.now().toString();
     const numeroPedido = await proximoNumeroPedido();
     const statusToken = criarTokenPublicoAcompanhamento();
@@ -230,6 +255,8 @@ export async function POST(req: NextRequest) {
       cliente: body.cliente,
       telefone: telefonePedido,
       ...(whatsappVinculado ? { whatsappVinculado: true } : {}),
+      ...(clienteId ? { clienteId } : {}),
+      ...(pizzasCount > 0 ? { pizzasCount } : {}),
       itens,
       total,
       status: "novo" as const,
