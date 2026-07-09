@@ -1415,6 +1415,13 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const isPagamentoPix = (!!payment && payment.toLowerCase().includes("pix")) || !!pixPedido;
   const pixValor = typeof pixPedido?.valorEsperado === "number" ? pixPedido.valorEsperado : pedidoConfirmado?.total;
   const pixCodigoCopiaECola = pixPedido?.copiaECola || pixPedido?.qrCode || "";
+  // Resumo da tela final (sc-done): reaproveita os mesmos estados/helpers já
+  // usados na etapa de pagamento (payment, hibridoAtual, trocoOpcao/troco) —
+  // nenhum recalculo novo, só apresentação. Só mostra troco quando a escolha
+  // já foi confirmada (trocoOpcao setado); nunca inventa valor.
+  const isDinheiroPuro = payment === "Dinheiro";
+  const isCartaoPuro = payment === "Cartao";
+  const trocoConfirmadoTexto = trocoOpcao === "nao" ? "Sem troco" : trocoOpcao === "sim" && troco.trim() ? `Troco para ${troco}` : null;
   const whatsappComprovanteUrl = pedidoConfirmado && pixPedido?.whatsappPizzaria
     ? montarLinkWhatsAppComprovante(pixPedido.whatsappPizzaria, {
       pedidoId: pedidoConfirmado.id,
@@ -1832,12 +1839,24 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                         <div style={{ display: "inline-flex", marginTop: 12, marginBottom: 12, padding: "5px 10px", borderRadius: 999, background: statusPixCliente === "pago" ? "var(--green-soft)" : "var(--brand-soft)", color: statusPixCliente === "pago" ? "var(--green)" : "var(--brand)", fontSize: 12, fontWeight: 800 }}>
                           {PIX_STATUS_LABEL[statusPixCliente]}
                         </div>
+                        {isHibrido && hibridoAtual ? (
+                          <div style={{ display: "grid", gap: 4, fontSize: 14, color: "var(--text)", lineHeight: 1.5, marginBottom: 12 }}>
+                            <p style={{ margin: 0 }}><strong>Pix:</strong> {money(hibridoAtual.pix)} — {PIX_STATUS_LABEL[statusPixCliente]}</p>
+                            <p style={{ margin: 0 }}><strong>Dinheiro:</strong> {money(hibridoAtual.dinheiro)} na hora de receber o pedido</p>
+                            {trocoConfirmadoTexto && <p style={{ margin: 0 }}><strong>Troco:</strong> {trocoConfirmadoTexto}</p>}
+                          </div>
+                        ) : (
+                          statusPixCliente !== "pago" && (
+                            <p style={{ margin: "0 0 12px", fontWeight: 700, fontSize: 14, color: "var(--text)" }}>
+                              Agora falta fazer o Pix de {money(pixValor ?? pedidoConfirmado.total)}.
+                            </p>
+                          )
+                        )}
                         <div style={{ display: "grid", gap: 8, fontSize: 14, color: "var(--text)", lineHeight: 1.45 }}>
                           <div><strong>Pedido:</strong> #{pedidoConfirmado.numero}</div>
                           <div><strong>Total:</strong> {money(pedidoConfirmado.total)}</div>
                           {pixPedido?.chavePix && <div style={{ wordBreak: "break-word" }}><strong>Chave Pix:</strong> {pixPedido.chavePix}</div>}
                           {pixPedido?.beneficiario && <div><strong>Beneficiário:</strong> {pixPedido.beneficiario}</div>}
-                          {pixValor !== undefined && pixValor !== pedidoConfirmado.total && <div><strong>Valor do Pix:</strong> {money(pixValor)}</div>}
                         </div>
                         <p style={{ color: "var(--text-sub)", fontSize: 13, lineHeight: 1.5, margin: "12px 0 0" }}>
                           {PIX_STATUS_TEXT[statusPixCliente]}
@@ -1863,6 +1882,17 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                           )}
                           {pedidoConfirmado.pix?.ticketUrl && <a href={pedidoConfirmado.pix.ticketUrl} target="_blank" rel="noreferrer" style={{ display: "block", color: "#ff6b00", fontSize: 13, fontWeight: 800, textAlign: "center" }}>Abrir pagamento</a>}
                         </div>
+                      </div>
+                    )}
+                    {!isPagamentoPix && isDinheiroPuro && (
+                      <div style={{ textAlign: "left", background: "var(--surface)", border: "1px solid var(--line-strong)", borderRadius: 10, padding: "14px", marginBottom: 16, fontSize: 14, color: "var(--text)", lineHeight: 1.5 }}>
+                        <p style={{ margin: trocoConfirmadoTexto ? "0 0 4px" : 0, fontWeight: 700 }}>Pagamento em dinheiro na hora de receber o pedido.</p>
+                        {trocoConfirmadoTexto && <p style={{ margin: 0, color: "var(--text-sub)" }}>Troco: {trocoConfirmadoTexto}</p>}
+                      </div>
+                    )}
+                    {!isPagamentoPix && isCartaoPuro && (
+                      <div style={{ textAlign: "left", background: "var(--surface)", border: "1px solid var(--line-strong)", borderRadius: 10, padding: "14px", marginBottom: 16, fontSize: 14, color: "var(--text)", lineHeight: 1.5 }}>
+                        <p style={{ margin: 0, fontWeight: 700 }}>Pagamento no cartão na hora de receber o pedido.</p>
                       </div>
                     )}
                     <a href={`/rastrear/${pedidoConfirmado.id}`} className="btn" style={{ display: "block", marginBottom: 10, textAlign: "center", textDecoration: "none" }}>Acompanhar pedido</a>
