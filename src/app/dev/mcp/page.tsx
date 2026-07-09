@@ -98,7 +98,7 @@ function StatusMcp({ dados }: { dados: DadosMcp }) {
         <span style={{ width: 10, height: 10, borderRadius: '50%', background: statusColor, flexShrink: 0, boxShadow: `0 0 6px ${statusColor}` }} />
         <span style={{ color: statusColor, fontSize: 14, fontWeight: 800 }}>MCP_MODE = {modo}</span>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+      <div className="mcp-status-3col">
         <div style={{ background: BG_R, border: BORDER, borderRadius: 8, padding: '10px 12px' }}>
           <p style={{ color: TEXT3, fontSize: 9, fontWeight: 800, textTransform: 'uppercase', margin: '0 0 4px' }}>Fila</p>
           <p style={{ color: dados.filaCount > 0 ? ORANGE : GREEN, fontSize: 20, fontWeight: 900, margin: 0 }}>{dados.filaCount}</p>
@@ -177,7 +177,7 @@ function CronPanel({ dados }: { dados: DadosMcp }) {
               <p style={{ color: TEXT2, fontSize: 11, margin: 0, fontFamily: 'monospace' }}>{m.durationMs}ms</p>
             </div>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+          <div className="mcp-status-3col">
             <div style={{ background: BG_R, border: BORDER, borderRadius: 7, padding: '8px 10px' }}>
               <p style={{ color: TEXT3, fontSize: 9, fontWeight: 800, textTransform: 'uppercase', margin: '0 0 2px' }}>Processados</p>
               <p style={{ color: GREEN, fontSize: 16, fontWeight: 800, margin: 0 }}>{m.processed}</p>
@@ -391,6 +391,14 @@ export default function DevMcpPage() {
 
   return (
     <div style={{ minHeight: '100vh', background: BG, padding: '24px 16px', fontFamily: FONT }}>
+      <style>{`
+        .mcp-grid-2col { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 14px; }
+        .mcp-status-3col { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+        @media (max-width: 600px) {
+          .mcp-grid-2col { grid-template-columns: 1fr; }
+          .mcp-status-3col { grid-template-columns: 1fr 1fr; }
+        }
+      `}</style>
       <div style={{ maxWidth: 900, margin: '0 auto' }}>
 
         {/* Header */}
@@ -426,7 +434,7 @@ export default function DevMcpPage() {
         {aba === 'status' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <StatusMcp dados={dados} />
-            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 14 }}>
+            <div className="mcp-grid-2col">
               <ScorePanel dados={dados} />
               <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
                 <CronPanel dados={dados} />
@@ -438,7 +446,7 @@ export default function DevMcpPage() {
 
         {aba === 'dados' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 14 }}>
+            <div className="mcp-grid-2col">
               <QualidadePanel dados={dados} />
               <GargalosPanel dados={dados} />
             </div>
