@@ -26,10 +26,28 @@ export async function GET(req: Request): Promise<NextResponse> {
 
   const startedAt = Date.now();
 
+  const persistirMeta = async (processados: number, erros: number, reason?: string) => {
+    const finishedAt = Date.now();
+    await redis.set(
+      'mcp:meta:cron:ultima',
+      JSON.stringify({
+        startedAt,
+        finishedAt,
+        processed: processados,
+        errors: erros,
+        mode: 'observador',
+        durationMs: finishedAt - startedAt,
+        ...(reason ? { reason } : {}),
+      }),
+      { ex: 172800 },
+    );
+  };
+
   try {
     const itens = await redis.lrange<string>(CHAVE_FILA, 0, BATCH_SIZE - 1);
 
     if (itens.length === 0) {
+      await persistirMeta(0, 0, 'fila_vazia');
       return NextResponse.json({ ok: true, processados: 0 });
     }
 
@@ -48,20 +66,7 @@ export async function GET(req: Request): Promise<NextResponse> {
 
     // Remove apenas os itens processados neste batch
     await redis.ltrim(CHAVE_FILA, itens.length, -1);
-
-    const finishedAt = Date.now();
-    await redis.set(
-      'mcp:meta:cron:ultima',
-      JSON.stringify({
-        startedAt,
-        finishedAt,
-        processed: processados,
-        errors: errosLote,
-        mode: 'observador',
-        durationMs: finishedAt - startedAt,
-      }),
-      { ex: 172800 },
-    );
+    await persistirMeta(processados, errosLote);
 
     return NextResponse.json({ ok: true, processados });
   } catch (err) {

@@ -8,7 +8,7 @@ const BG = '#0a0a1a'
 const BG_S = '#0f0f1c'
 const BG_R = '#161626'
 const BORDER = '1px solid #1e1e32'
-const BORDER2 = '1px solid #2a2a42'
+
 const TEXT = '#e8e8f4'
 const TEXT2 = '#8888aa'
 const TEXT3 = '#44446a'
@@ -73,16 +73,6 @@ function formatTs(ts: number): string {
   return new Date(ts).toLocaleString('pt-BR', {
     day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit'
   })
-}
-
-function Kpi({ label, value, color, sub }: { label: string; value: string | number; color: string; sub?: string }) {
-  return (
-    <div style={{ background: BG_R, border: BORDER, borderRadius: 10, padding: '14px 16px' }}>
-      <p style={{ color: TEXT3, fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.8, margin: '0 0 6px' }}>{label}</p>
-      <p style={{ color, fontSize: 26, fontWeight: 900, margin: 0, lineHeight: 1 }}>{value}</p>
-      {sub && <p style={{ color: TEXT3, fontSize: 10, margin: '4px 0 0' }}>{sub}</p>}
-    </div>
-  )
 }
 
 function ScoreRing({ score }: { score: number }) {
@@ -365,13 +355,11 @@ export default function DevMcpPage() {
   const [dados, setDados] = useState<DadosMcp | null>(null)
   const [loading, setLoading] = useState(true)
   const [erro, setErro] = useState('')
-  const [checking, setChecking] = useState(true)
   const [aba, setAba] = useState<'status' | 'dados'>('status')
 
   useEffect(() => {
     const role = getUserRole()
     if (role !== 'dev') { router.push('/login'); return }
-    setChecking(false)
     fetch('/api/dev/mcp')
       .then(r => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`)
@@ -381,7 +369,7 @@ export default function DevMcpPage() {
       .catch(e => { setErro(String(e)); setLoading(false) })
   }, [router])
 
-  if (checking || loading) {
+  if (loading) {
     return (
       <div style={{ minHeight: '100vh', background: BG, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: FONT }}>
         <p style={{ color: TEXT3 }}>Carregando...</p>
