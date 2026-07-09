@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { redis } from "@/lib/redis";
+import { verifyToken } from "@/lib/auth";
 
 export type ConfigPizzaria = {
   nomePizzaria: string;
@@ -32,9 +33,23 @@ const CONFIG_PADRAO: ConfigPizzaria = {
   tempoEntregaRetirada: "20-30 minutos",
 };
 
-export async function GET() {
-  const config = await redis.get<ConfigPizzaria>("config:pizzaria");
-  return NextResponse.json(config ?? CONFIG_PADRAO);
+async function checkAuth(req: NextRequest) {
+  const token = req.cookies.get("auth-token")?.value ?? null;
+  if (!token) return null;
+  const payload = await verifyToken(token);
+  if (!payload || !["admin", "atendente", "dev"].includes(payload.role as string)) return null;
+  return payload;
+}
+
+export async function GET(req: NextRequest) {
+  const auth = await checkAuth(req);
+  if (!auth) return NextResponse.json({ error: "Nao autorizado" }, { status: 401 });
+  const config = await redis.get<ConfigPizzaria>("config:pizzaria") ?? CONFIG_PADRAO;
+  if (auth.role !== "admin" && auth.role !== "dev") {
+    const { chavePix, nomeTitularPix, ...resto } = config;
+    return NextResponse.json(resto);
+  }
+  return NextResponse.json(config);
 }
 
 export async function POST(req: NextRequest) {
