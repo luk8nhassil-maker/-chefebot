@@ -6,6 +6,9 @@ interface PanelShellProps {
   pedidosCount?: number
   conversasCount?: number
   conversasUrgent?: boolean
+  /** Mostra o grupo "Gestão" (Dashboard, Configurações, Financeiro, Relatórios) na sidebar desktop.
+   *  Desligado por padrão para não alterar o comportamento atual de /pedidos, /cardapio e /conversas. */
+  showGestaoNav?: boolean
 }
 
 export default function PanelShell({
@@ -13,6 +16,7 @@ export default function PanelShell({
   pedidosCount = 0,
   conversasCount = 0,
   conversasUrgent = false,
+  showGestaoNav = false,
 }: PanelShellProps) {
   const router = useRouter()
   const pathname = usePathname()
@@ -20,6 +24,10 @@ export default function PanelShell({
   const onPedidos = pathname.startsWith("/pedidos")
   const onConversas = pathname.startsWith("/conversas")
   const onCardapio = pathname.startsWith("/cardapio")
+  const onAdmin = pathname.startsWith("/admin")
+  const onConfiguracoes = pathname.startsWith("/configuracoes")
+  const onFinanceiro = pathname.startsWith("/financeiro")
+  const onRelatorios = pathname.startsWith("/relatorios")
 
   const convBadgeColor = conversasUrgent ? "#e05050" : "#ff6b00"
 
@@ -103,6 +111,31 @@ export default function PanelShell({
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><rect x="4" y="4" width="7" height="7" rx="2" stroke="currentColor" strokeWidth="2.2"/><rect x="13" y="4" width="7" height="7" rx="2" stroke="currentColor" strokeWidth="2.2"/><rect x="4" y="13" width="7" height="7" rx="2" stroke="currentColor" strokeWidth="2.2"/><rect x="13" y="13" width="7" height="7" rx="2" stroke="currentColor" strokeWidth="2.2"/></svg>
           Cardápio
         </button>
+
+        {showGestaoNav && (
+          <>
+            <div style={{ padding: "12px 12px 4px" }}>
+              <div style={{ height: 1, background: "#1a1816", marginBottom: 10 }} />
+              <div style={{ padding: "0 8px", fontSize: 10, fontWeight: 800, letterSpacing: "0.4px", color: "#3a3733", textTransform: "uppercase" }}>Gestão</div>
+            </div>
+            <button className={`ps-sidebar-btn${onAdmin ? " ps-active" : ""}`} onClick={() => router.push("/admin")}>
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><path d="M4 11L12 4l8 7" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/><path d="M6 10v9a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-9" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              Dashboard
+            </button>
+            <button className={`ps-sidebar-btn${onConfiguracoes ? " ps-active" : ""}`} onClick={() => router.push("/configuracoes")}>
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="2.2"/><path d="M19.4 13.5a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V19.5a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1.08-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H4.5a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1.08 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H10a1.65 1.65 0 0 0 1-1.51V4.5a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V10c.36.4.86.66 1.51 1h.09a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              Configurações
+            </button>
+            <button className={`ps-sidebar-btn${onFinanceiro ? " ps-active" : ""}`} onClick={() => router.push("/financeiro")}>
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><line x1="12" y1="2" x2="12" y2="22" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"/><path d="M17 6.5c0-1.4-2.2-2.5-5-2.5s-5 1.1-5 2.5S9.2 9 12 9s5 1.1 5 2.5-2.2 2.5-5 2.5-5-1.1-5-2.5" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              Financeiro
+            </button>
+            <button className={`ps-sidebar-btn${onRelatorios ? " ps-active" : ""}`} onClick={() => router.push("/relatorios")}>
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><line x1="5" y1="20" x2="5" y2="12" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"/><line x1="12" y1="20" x2="12" y2="6" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"/><line x1="19" y1="20" x2="19" y2="15" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"/></svg>
+              Relatórios
+            </button>
+          </>
+        )}
       </nav>
 
       {/* Mobile: fixed bottom nav */}
