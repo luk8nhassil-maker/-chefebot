@@ -24,26 +24,49 @@ export async function GET(req: Request): Promise<NextResponse> {
     return NextResponse.json({ ok: true, motivo: 'mcp inativo' });
   }
 
+  const startedAt = Date.now();
+
+  const persistirMeta = async (processados: number, erros: number, reason?: string) => {
+    const finishedAt = Date.now();
+    await redis.set(
+      'mcp:meta:cron:ultima',
+      JSON.stringify({
+        startedAt,
+        finishedAt,
+        processed: processados,
+        errors: erros,
+        mode: 'observador',
+        durationMs: finishedAt - startedAt,
+        ...(reason ? { reason } : {}),
+      }),
+      { ex: 172800 },
+    );
+  };
+
   try {
     const itens = await redis.lrange<string>(CHAVE_FILA, 0, BATCH_SIZE - 1);
 
     if (itens.length === 0) {
+      await persistirMeta(0, 0, 'fila_vazia');
       return NextResponse.json({ ok: true, processados: 0 });
     }
 
     let processados = 0;
+    let errosLote = 0;
     for (const item of itens) {
       try {
         const evento = (typeof item === 'string' ? JSON.parse(item) : item) as McpEventoFila;
         await processarEventoObservador(evento);
         processados++;
       } catch (err) {
+        errosLote++;
         await logErroMcp('cron:processar-item', err);
       }
     }
 
     // Remove apenas os itens processados neste batch
     await redis.ltrim(CHAVE_FILA, itens.length, -1);
+    await persistirMeta(processados, errosLote);
 
     return NextResponse.json({ ok: true, processados });
   } catch (err) {
