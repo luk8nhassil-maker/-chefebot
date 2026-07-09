@@ -1998,6 +1998,10 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                 <span className="bnav-label">Pedido</span>
               </span>
             )}
+            <a className="bnav-item" href="/cliente">
+              <span className="bnav-icon">{ICONS.pessoa}</span>
+              <span className="bnav-label">Perfil</span>
+            </a>
           </div>
         </nav>
       )}
