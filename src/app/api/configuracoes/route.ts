@@ -53,6 +53,10 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const auth = await checkAuth(req);
+  if (!auth) return NextResponse.json({ error: "Nao autorizado" }, { status: 401 });
+
+  const podeEditarPix = auth.role === "admin" || auth.role === "dev";
   const body = await req.json();
   const existing = await redis.get<ConfigPizzaria>("config:pizzaria");
   const config: ConfigPizzaria = {
@@ -60,8 +64,9 @@ export async function POST(req: NextRequest) {
     nomePizzaria: body.nomePizzaria || CONFIG_PADRAO.nomePizzaria,
     horaAbertura: Number(body.horaAbertura) ?? CONFIG_PADRAO.horaAbertura,
     horaFechamento: Number(body.horaFechamento) ?? CONFIG_PADRAO.horaFechamento,
-    chavePix: body.chavePix || "",
-    nomeTitularPix: body.nomeTitularPix || "",
+    // atendente nao pode alterar dados de Pix: preserva o valor ja salvo, ignorando o body
+    chavePix: podeEditarPix ? (body.chavePix || "") : (existing?.chavePix ?? ""),
+    nomeTitularPix: podeEditarPix ? (body.nomeTitularPix || "") : (existing?.nomeTitularPix ?? ""),
     limitePico: Number(body.limitePico) || 0,
     whatsappPizzaria: body.whatsappPizzaria || "",
     tempoEntregaDelivery: body.tempoEntregaDelivery || CONFIG_PADRAO.tempoEntregaDelivery,
@@ -74,5 +79,9 @@ export async function POST(req: NextRequest) {
     ...(body.aceitaRetirada !== undefined && { aceitaRetirada: Boolean(body.aceitaRetirada) }),
   };
   await redis.set("config:pizzaria", config);
+  if (!podeEditarPix) {
+    const { chavePix, nomeTitularPix, ...resto } = config;
+    return NextResponse.json({ ok: true, config: resto });
+  }
   return NextResponse.json({ ok: true, config });
 }
