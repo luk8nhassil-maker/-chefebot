@@ -52,3 +52,36 @@ export interface McpLogEntryErro {
   origem: string;
   mensagem: string;
 }
+
+// ── Fase 2A: Copiloto Determinístico ────────────────────────────────────────
+
+export type McpPeriodo = '24h' | '7d' | '30d';
+
+export type TipoSugestao =
+  | 'confusao_recorrente'
+  | 'escalacao_frequente'
+  | 'necessidade_ia_frequente';
+
+export type SeveridadeSugestao = 'alta' | 'media' | 'baixa';
+
+export interface McpSugestaoEvidencia {
+  totalEventos: number;
+  problemas: number;
+  taxaProblema: number;
+  confiancaMedia: number;
+  padroesDominantes: PadraoObservado[];
+}
+
+// Sugestão candidata persistida em mcp:sugestoes:candidatas.
+// Sem PII — apenas metadados estruturais e resumo textual sem dados do cliente.
+export interface McpSugestaoCandidata {
+  id: string;
+  ts: number;
+  periodo: McpPeriodo;
+  step: string;
+  tipo: TipoSugestao;
+  severidade: SeveridadeSugestao;
+  confianca: number;
+  evidencia: McpSugestaoEvidencia;
+  resumo: string;
+}
