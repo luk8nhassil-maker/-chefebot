@@ -3,6 +3,7 @@ import { useEffect, useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import TourGuiado from '@/components/TourGuiado'
 import PanelShell from '@/components/PanelShell'
+import { LayoutDashboard, Pizza, Settings, Wallet, Wrench, ChefHat, DollarSign, TrendingUp, AlertTriangle, Camera, RefreshCw, Calendar, Star, Banknote } from 'lucide-react'
 
 type Pedido = {
   id: string; cliente: string; telefone: string; itens: string[]
@@ -540,14 +541,14 @@ export default function AdminPage() {
                 {!waShowQr ? (
                   <>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                      <span style={{ fontSize: 18 }}>⚠️</span>
+                      <AlertTriangle size={18} color="#fbbf24" aria-hidden="true" />
                       <p style={{ color: '#fbbf24', fontSize: 14, fontWeight: 700, margin: 0 }}>Conectar WhatsApp</p>
                     </div>
                     <p style={{ color: '#a39b8b', fontSize: 12, margin: '0 0 12px', lineHeight: 1.5 }}>
                       Nenhum WhatsApp está conectado. Escaneie o QR Code para ativar o atendimento automático.
                     </p>
-                    <button onClick={fetchQrCode} disabled={waLoadingQr} style={{ width: '100%', background: '#25d366', border: 'none', borderRadius: 10, padding: '14px', color: '#fff', fontSize: 14, fontWeight: 700, cursor: waLoadingQr ? 'not-allowed' : 'pointer', opacity: waLoadingQr ? 0.7 : 1 }}>
-                      {waLoadingQr ? 'Gerando QR Code...' : '📷 Escanear QR Code'}
+                    <button onClick={fetchQrCode} disabled={waLoadingQr} style={{ width: '100%', background: '#25d366', border: 'none', borderRadius: 10, padding: '14px', color: '#fff', fontSize: 14, fontWeight: 700, cursor: waLoadingQr ? 'not-allowed' : 'pointer', opacity: waLoadingQr ? 0.7 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                      {waLoadingQr ? 'Gerando QR Code...' : <><Camera size={16} aria-hidden="true" /> Escanear QR Code</>}
                     </button>
                     {waQrError && (
                       <p style={{ color: '#f87171', fontSize: 12, margin: '10px 0 0', textAlign: 'center' }}>{waQrError}</p>
@@ -564,8 +565,8 @@ export default function AdminPage() {
                     {waExpired ? (
                       <div style={{ textAlign: 'center', marginBottom: 12 }}>
                         <p style={{ color: '#f87171', fontSize: 13, fontWeight: 600, margin: '0 0 12px' }}>QR Code expirado.</p>
-                        <button onClick={fetchQrCode} disabled={waLoadingQr} style={{ background: '#25d366', border: 'none', borderRadius: 10, padding: '12px 24px', color: '#fff', fontSize: 13, fontWeight: 700, cursor: waLoadingQr ? 'not-allowed' : 'pointer', opacity: waLoadingQr ? 0.7 : 1 }}>
-                          {waLoadingQr ? 'Gerando...' : '🔄 Gerar novo QR Code'}
+                        <button onClick={fetchQrCode} disabled={waLoadingQr} style={{ background: '#25d366', border: 'none', borderRadius: 10, padding: '12px 24px', color: '#fff', fontSize: 13, fontWeight: 700, cursor: waLoadingQr ? 'not-allowed' : 'pointer', opacity: waLoadingQr ? 0.7 : 1, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                          {waLoadingQr ? 'Gerando...' : <><RefreshCw size={15} aria-hidden="true" /> Gerar novo QR Code</>}
                         </button>
                       </div>
                     ) : (
@@ -593,7 +594,7 @@ export default function AdminPage() {
                   {p === 'ontem' ? 'Ontem' : p === 'hoje' ? 'Hoje' : 'Semana'}
                 </button>
               ))}
-              <button onClick={() => setShowPeriodo(!showPeriodo)} style={{ ...btn(periodo === 'personalizado'), padding: '10px 14px' }}>📅</button>
+              <button onClick={() => setShowPeriodo(!showPeriodo)} style={{ ...btn(periodo === 'personalizado'), padding: '10px 14px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Calendar size={16} aria-hidden="true" /></button>
             </div>
 
             {showPeriodo && (
@@ -713,13 +714,13 @@ export default function AdminPage() {
               <p style={sectionTitle}>Acesso rapido</p>
               <div className="cb-admin-acesso">
                 {[
-                  { icon: '🍳', label: 'Cozinha', sub: 'Pedidos ativos', action: () => router.push('/pedidos'), color: '#ff6b00' },
-                  { icon: '⚙️', label: 'Configuracoes', sub: 'Horario e cardapio', action: () => router.push('/configuracoes'), color: '#3b82f6' },
-                  { icon: '💰', label: 'Financeiro', sub: 'Custos e lucro', action: () => router.push('/financeiro'), color: '#4ade80' },
-                  { icon: '📈', label: 'Relatorios', sub: 'Historico completo', action: () => router.push('/relatorios'), color: '#8b5cf6' },
-                ].map(({ icon, label, sub, action, color }) => (
+                  { Icon: ChefHat, label: 'Cozinha', sub: 'Pedidos ativos', action: () => router.push('/pedidos'), color: '#ff6b00' },
+                  { Icon: Settings, label: 'Configuracoes', sub: 'Horario e cardapio', action: () => router.push('/configuracoes'), color: '#3b82f6' },
+                  { Icon: DollarSign, label: 'Financeiro', sub: 'Custos e lucro', action: () => router.push('/financeiro'), color: '#4ade80' },
+                  { Icon: TrendingUp, label: 'Relatorios', sub: 'Historico completo', action: () => router.push('/relatorios'), color: '#8b5cf6' },
+                ].map(({ Icon, label, sub, action, color }) => (
                   <button key={label} onClick={action} style={{ background: '#101010', border: `1px solid #1f1d1a`, borderRadius: 14, padding: '14px 12px', cursor: 'pointer', textAlign: 'left', display: 'flex', flexDirection: 'column', gap: 2, transition: 'border-color 0.2s', minHeight: 90 }}>
-                    <div style={{ width: 34, height: 34, borderRadius: 10, background: color + '18', border: `1px solid ${color}30`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 17, marginBottom: 6 }}>{icon}</div>
+                    <div style={{ width: 34, height: 34, borderRadius: 10, background: color + '18', border: `1px solid ${color}30`, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 6 }}><Icon size={18} color={color} aria-hidden="true" /></div>
                     <p style={{ color: '#f4f1ec', fontSize: 13, fontWeight: 700, margin: 0, fontFamily: "'Archivo', sans-serif" }}>{label}</p>
                     <p style={{ color: '#5a564d', fontSize: 10, margin: 0 }}>{sub}</p>
                   </button>
@@ -735,7 +736,7 @@ export default function AdminPage() {
                   <p style={{ color: '#fbbf24', fontSize: 36, fontWeight: 900, margin: 0, letterSpacing: -2 }}>{avaliacoes.media.toFixed(1)}</p>
                   <div>
                     <div style={{ display: 'flex', gap: 2 }}>
-                      {[1,2,3,4,5].map(s => <span key={s} style={{ color: s <= Math.round(avaliacoes.media) ? '#fbbf24' : '#2a2a2a', fontSize: 14 }}>★</span>)}
+                      {[1,2,3,4,5].map(s => <Star key={s} size={14} color={s <= Math.round(avaliacoes.media) ? '#fbbf24' : '#2a2a2a'} fill={s <= Math.round(avaliacoes.media) ? '#fbbf24' : '#2a2a2a'} aria-hidden="true" />)}
                     </div>
                     <p style={{ color: '#5a564d', fontSize: 11, margin: '2px 0 0' }}>{avaliacoes.total} avaliacoes</p>
                   </div>
@@ -745,7 +746,7 @@ export default function AdminPage() {
                     <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#0a0a0a', borderRadius: 8, padding: '10px 12px' }}>
                       <span style={{ color: '#5a564d', fontSize: 11 }}>{a.phone.slice(-4).padStart(8, '*')}</span>
                       <div style={{ display: 'flex', gap: 1 }}>
-                        {[1,2,3,4,5].map(s => <span key={s} style={{ color: s <= a.nota ? '#fbbf24' : '#2a2a2a', fontSize: 13 }}>★</span>)}
+                        {[1,2,3,4,5].map(s => <Star key={s} size={13} color={s <= a.nota ? '#fbbf24' : '#2a2a2a'} fill={s <= a.nota ? '#fbbf24' : '#2a2a2a'} aria-hidden="true" />)}
                       </div>
                     </div>
                   ))}
@@ -1163,7 +1164,7 @@ export default function AdminPage() {
 
                 <button onClick={() => cameraRef.current?.click()} disabled={analisandoNota} style={{ width: '100%', background: analisandoNota ? '#1a1a1a' : '#0d1a0d', border: `2px dashed ${analisandoNota ? '#2a2a2a' : '#16a34a50'}`, borderRadius: 16, padding: '24px 16px', cursor: analisandoNota ? 'not-allowed' : 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
                   <div style={{ width: 60, height: 60, borderRadius: '50%', background: analisandoNota ? '#1e1e1e' : '#16a34a20', border: `2px solid ${analisandoNota ? '#2a2a2a' : '#16a34a40'}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 26 }}>
-                    {analisandoNota ? '...' : '📷'}
+                    {analisandoNota ? '...' : <Camera size={26} color="#4ade80" aria-hidden="true" />}
                   </div>
                   <div style={{ textAlign: 'center' }}>
                     <p style={{ color: analisandoNota ? '#444' : '#4ade80', fontSize: 15, fontWeight: 700, margin: 0 }}>{analisandoNota ? 'Analisando nota...' : 'Fotografar nota fiscal'}</p>
@@ -1269,7 +1270,7 @@ export default function AdminPage() {
           })
           return (
             <div style={{ background: '#111', border: '1px solid #1e1e1e', borderRadius: 16, padding: 16, marginTop: 8 }}>
-              <p style={{ color: '#ff6b00', fontSize: 12, fontWeight: 900, textTransform: 'uppercase', letterSpacing: 1, margin: '0 0 14px' }}>💸 Pagamento de Entregadores</p>
+              <p style={{ color: '#ff6b00', fontSize: 12, fontWeight: 900, textTransform: 'uppercase', letterSpacing: 1, margin: '0 0 14px', display: 'flex', alignItems: 'center', gap: 6 }}><Banknote size={14} aria-hidden="true" /> Pagamento de Entregadores</p>
               {Object.values(porEntregador).map(({ nome, entregas }) => {
                 const total = entregas.reduce((s, p) => s + (p.taxaEntrega || 0), 0)
                 const porBairro: Record<string, { count: number; taxa: number }> = {}
@@ -1352,14 +1353,14 @@ export default function AdminPage() {
       {/* Navegacao inferior */}
       <div className="cb-admin-bottomnav" style={{ position: 'fixed', bottom: 0, right: 0, background: '#0a0a0a', borderTop: '1px solid #1f1d1a', display: 'flex', padding: '10px 0', paddingBottom: 'calc(env(safe-area-inset-bottom) + 10px)', zIndex: 100 }}>
         {([
-          { key: 'dashboard', icon: '📊', label: 'Painel' },
-          { key: 'cardapio', icon: '🍕', label: 'Cardapio' },
-          { key: 'config', icon: '⚙️', label: 'Configuracao' },
-          { key: 'financeiro', icon: '💰', label: 'Financeiro' },
-          { key: 'dev', icon: '🛠️', label: 'Suporte' },
-        ] as { key: Aba; icon: string; label: string }[]).map(({ key, icon, label }) => (
+          { key: 'dashboard', Icon: LayoutDashboard, label: 'Painel' },
+          { key: 'cardapio', Icon: Pizza, label: 'Cardapio' },
+          { key: 'config', Icon: Settings, label: 'Configuracao' },
+          { key: 'financeiro', Icon: Wallet, label: 'Financeiro' },
+          { key: 'dev', Icon: Wrench, label: 'Suporte' },
+        ] as { key: Aba; Icon: typeof LayoutDashboard; label: string }[]).map(({ key, Icon, label }) => (
           <button key={key} onClick={() => setAba(key)} style={{ flex: 1, background: 'none', border: 'none', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, padding: '6px 0', minHeight: 48, fontFamily: "'Archivo', sans-serif" }}>
-            <span style={{ fontSize: 20, opacity: aba === key ? 1 : 0.3 }}>{icon}</span>
+            <Icon size={20} color={aba === key ? '#ff6b00' : '#444'} opacity={aba === key ? 1 : 0.3} aria-hidden="true" />
             <span style={{ fontSize: 10, color: aba === key ? '#ff6b00' : '#444', fontWeight: aba === key ? 700 : 400 }}>{label}</span>
             {aba === key && <div style={{ width: 4, height: 4, borderRadius: '50%', background: '#ff6b00' }} />}
           </button>
