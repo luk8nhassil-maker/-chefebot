@@ -22,6 +22,9 @@ import {
   calcularPontosPorValor,
   calcularPontosElegiveisPedido,
   calcularSaldoDoExtrato,
+  calcularPontosPrevistos,
+  calcularProgressoPontos,
+  ordenarExtratoPontosDesc,
   obterConfigFidelidadePontos,
   salvarConfigFidelidadePontos,
   obterExtratoPontos,
@@ -344,5 +347,107 @@ describe("compatibilidade com o modelo antigo (pizzas)", () => {
     const novo = await obterSaldoPontos("cli_dual");
     expect(antigo.progresso).toBe(3);
     expect(novo.disponivel).toBe(99);
+  });
+});
+
+describe("calcularPontosPrevistos — soma só o 'previsto' de pedidos ainda não resolvidos", () => {
+  function mov(overrides: Partial<MovimentoPontos>): MovimentoPontos {
+    return { movimentoId: "m", clienteId: "cli_x", tipo: "previsto", pontos: 0, motivo: "teste", createdAt: new Date().toISOString(), ...overrides };
+  }
+
+  test("previsto sem confirmado/cancelado correspondente conta como estimativa", () => {
+    const extrato = [mov({ tipo: "previsto", pontos: 40, pedidoId: "p1" })];
+    expect(calcularPontosPrevistos(extrato)).toBe(40);
+  });
+
+  test("previsto cujo pedido já foi confirmado não conta mais (evita contar 2x)", () => {
+    const extrato = [
+      mov({ tipo: "previsto", pontos: 40, pedidoId: "p1" }),
+      mov({ tipo: "confirmado", pontos: 40, pedidoId: "p1" }),
+    ];
+    expect(calcularPontosPrevistos(extrato)).toBe(0);
+  });
+
+  test("previsto cujo pedido foi cancelado também não conta mais", () => {
+    const extrato = [
+      mov({ tipo: "previsto", pontos: 25, pedidoId: "p2" }),
+      mov({ tipo: "cancelado", pontos: 25, pedidoId: "p2" }),
+    ];
+    expect(calcularPontosPrevistos(extrato)).toBe(0);
+  });
+
+  test("soma vários previstos ainda pendentes de pedidos diferentes", () => {
+    const extrato = [
+      mov({ tipo: "previsto", pontos: 10, pedidoId: "p1" }),
+      mov({ tipo: "previsto", pontos: 15, pedidoId: "p2" }),
+    ];
+    expect(calcularPontosPrevistos(extrato)).toBe(25);
+  });
+
+  test("array vazio ou inválido retorna 0", () => {
+    expect(calcularPontosPrevistos([])).toBe(0);
+    expect(calcularPontosPrevistos(undefined as unknown as MovimentoPontos[])).toBe(0);
+  });
+});
+
+describe("calcularProgressoPontos — progresso, faltantes e meta atingida", () => {
+  test("progresso parcial calcula percentual, faltantes e meta não atingida", () => {
+    const r = calcularProgressoPontos(360, 720);
+    expect(r.progressoPercentual).toBe(50);
+    expect(r.pontosFaltantes).toBe(360);
+    expect(r.metaAtingida).toBe(false);
+  });
+
+  test("saldo igual à meta: meta atingida, sem faltantes", () => {
+    const r = calcularProgressoPontos(720, 720);
+    expect(r.progressoPercentual).toBe(100);
+    expect(r.pontosFaltantes).toBe(0);
+    expect(r.metaAtingida).toBe(true);
+  });
+
+  test("saldo acima da meta: percentual nunca ultrapassa 100 e faltantes nunca fica negativo", () => {
+    const r = calcularProgressoPontos(5000, 720);
+    expect(r.progressoPercentual).toBe(100);
+    expect(r.pontosFaltantes).toBe(0);
+    expect(r.metaAtingida).toBe(true);
+  });
+
+  test("meta inválida (<= 0) retorna progresso neutro, nunca divide por zero", () => {
+    expect(calcularProgressoPontos(100, 0)).toEqual({ pontosFaltantes: 0, progressoPercentual: 0, metaAtingida: false });
+    expect(calcularProgressoPontos(100, -10)).toEqual({ pontosFaltantes: 0, progressoPercentual: 0, metaAtingida: false });
+  });
+
+  test("saldo negativo ou não finito é tratado como 0", () => {
+    const r = calcularProgressoPontos(-50, 100);
+    expect(r.progressoPercentual).toBe(0);
+    expect(r.pontosFaltantes).toBe(100);
+  });
+});
+
+describe("ordenarExtratoPontosDesc — mais recente primeiro, sem mutar a lista original", () => {
+  function mov(id: string, createdAt: string): MovimentoPontos {
+    return { movimentoId: id, clienteId: "cli_x", tipo: "confirmado", pontos: 1, motivo: "x", createdAt };
+  }
+
+  test("ordena do mais recente para o mais antigo", () => {
+    const extrato = [
+      mov("a", "2026-01-01T00:00:00.000Z"),
+      mov("b", "2026-03-01T00:00:00.000Z"),
+      mov("c", "2026-02-01T00:00:00.000Z"),
+    ];
+    const ordenado = ordenarExtratoPontosDesc(extrato);
+    expect(ordenado.map((m) => m.movimentoId)).toEqual(["b", "c", "a"]);
+  });
+
+  test("não muta o array original", () => {
+    const extrato = [mov("a", "2026-01-01T00:00:00.000Z"), mov("b", "2026-03-01T00:00:00.000Z")];
+    const original = [...extrato];
+    ordenarExtratoPontosDesc(extrato);
+    expect(extrato).toEqual(original);
+  });
+
+  test("array vazio ou inválido retorna array vazio", () => {
+    expect(ordenarExtratoPontosDesc([])).toEqual([]);
+    expect(ordenarExtratoPontosDesc(undefined as unknown as MovimentoPontos[])).toEqual([]);
   });
 });

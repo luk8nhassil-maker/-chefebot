@@ -4,7 +4,13 @@ import { redis } from '@/lib/redis'
 import { proximoNumeroPedido } from '@/lib/numeracao'
 import { confirmarPixMetadata, criarPixMetadata, sanitizarPedidoPixResposta, type PixMetadata } from '@/lib/pix'
 import type { PedidoEntregador } from '@/types/entregador'
-import { creditarFidelidadePedido } from '@/lib/fidelidade'
+import {
+  creditarFidelidadePedido,
+  calcularPontosElegiveisPedido,
+  registrarMovimentoPontosIdempotente,
+  construirEventoIdPontos,
+  obterExtratoPontos,
+} from '@/lib/fidelidade'
 
 const APP_BASE_URL = 'https://chefebot-pjif.vercel.app'
 
@@ -124,6 +130,7 @@ export async function PATCH(req: NextRequest) {
   const pedidos = await getPedidos()
   const index = pedidos.findIndex(p => p.id === id)
   if (index === -1) return NextResponse.json({ error: 'Pedido nao encontrado' }, { status: 404 })
+  const statusAnterior = pedidos[index].status
 
   // Confirmação de PIX manual — sem alterar status, sem enviar mensagem.
   // Registra origem/horário no metadata (auditoria); confirmação anterior
@@ -242,6 +249,81 @@ export async function PATCH(req: NextRequest) {
       })
     } catch (err) {
       console.error('[ChefeBot] Erro ao creditar fidelidade (ignorado):', err)
+    }
+
+    // Pontos confirmados (modelo novo) — so quando o pedido tem clienteId.
+    // Mesmo valor elegivel do "previsto" (recalculado do total/taxa salvos no
+    // pedido). Idempotente por eventoId — repetir 'entregue' nunca duplica.
+    // Isolado em try/catch proprio, mesma garantia do credito antigo acima.
+    try {
+      const clienteIdPontos = pedidos[index].clienteId
+      if (clienteIdPontos) {
+        const pontosElegiveis = calcularPontosElegiveisPedido({
+          total: pedidos[index].total,
+          taxaEntrega: pedidos[index].taxaEntrega,
+        })
+        if (pontosElegiveis > 0) {
+          await registrarMovimentoPontosIdempotente(clienteIdPontos, {
+            eventoId: construirEventoIdPontos(id, 'confirmado'),
+            pedidoId: id,
+            tipo: 'confirmado',
+            pontos: pontosElegiveis,
+            motivo: `Pedido ${id} entregue`,
+          })
+        }
+      }
+    } catch (err) {
+      console.error('[ChefeBot] Erro ao registrar pontos confirmados (ignorado):', err)
+    }
+  }
+
+  // Cancelamento (modelo novo de pontos) — so quando o pedido tem clienteId.
+  // Duas situacoes distintas:
+  //  - pedido ainda nao tinha chegado a "entregue": o "previsto" nunca virou
+  //    saldo real, entao so registramos "cancelado" para transparencia (nunca
+  //    mexe no saldo confirmado).
+  //  - pedido JA estava "entregue" (ja gerou "confirmado") e foi corrigido
+  //    para cancelado depois do fato: precisa de um "estornado" que subtrai
+  //    exatamente o que tinha sido confirmado, sem apagar o credito original.
+  // Isolado em try/catch proprio — nunca pode afetar a resposta do PATCH.
+  // So processa em transicao REAL para cancelado: repetir 'cancelado' quando
+  // ja estava cancelado nao deve reavaliar statusAnterior (ja teria virado
+  // 'cancelado' na primeira chamada), o que geraria um eventoId diferente e
+  // burlaria a idempotencia por eventoId.
+  if (status === 'cancelado' && statusAnterior !== 'cancelado') {
+    try {
+      const clienteIdPontos = pedidos[index].clienteId
+      if (clienteIdPontos) {
+        const pontosElegiveis = calcularPontosElegiveisPedido({
+          total: pedidos[index].total,
+          taxaEntrega: pedidos[index].taxaEntrega,
+        })
+        if (statusAnterior === 'entregue') {
+          if (pontosElegiveis > 0) {
+            const extratoAtual = await obterExtratoPontos(clienteIdPontos)
+            const teveConfirmado = extratoAtual.some(m => m.pedidoId === id && m.tipo === 'confirmado')
+            if (teveConfirmado) {
+              await registrarMovimentoPontosIdempotente(clienteIdPontos, {
+                eventoId: construirEventoIdPontos(id, 'estornado'),
+                pedidoId: id,
+                tipo: 'estornado',
+                pontos: pontosElegiveis,
+                motivo: `Pedido ${id} corrigido para cancelado apos entrega`,
+              })
+            }
+          }
+        } else if (pontosElegiveis > 0) {
+          await registrarMovimentoPontosIdempotente(clienteIdPontos, {
+            eventoId: construirEventoIdPontos(id, 'cancelado'),
+            pedidoId: id,
+            tipo: 'cancelado',
+            pontos: pontosElegiveis,
+            motivo: `Pedido ${id} cancelado antes da entrega`,
+          })
+        }
+      }
+    } catch (err) {
+      console.error('[ChefeBot] Erro ao registrar cancelamento de pontos (ignorado):', err)
     }
   }
 
