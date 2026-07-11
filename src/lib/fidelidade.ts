@@ -1,4 +1,5 @@
 import { redis } from "./redis";
+import { sanitizeTelefoneCliente, clienteIdDoTelefone } from "./clientes";
 
 export type TipoRecompensa = "pizza_gratis" | "desconto_fixo" | "desconto_percentual";
 
@@ -240,6 +241,10 @@ export type MovimentoPontos = {
   createdAt: string;
   /** Chave de idempotência usada para gravar este movimento (ver registrarMovimentoPontosIdempotente). */
   eventoId?: string;
+  /** Valor em R$ que originou os pontos (antes da conversão R$1=1 ponto), quando aplicável. */
+  valorElegivel?: number;
+  /** Saldo confirmado logo após este movimento — snapshot para auditoria, recalculável a qualquer momento a partir do extrato completo. */
+  saldoApos?: number;
 };
 
 export type SaldoPontos = {
@@ -400,14 +405,14 @@ export async function obterSaldoPontos(clienteId: string): Promise<SaldoPontos> 
  */
 export async function registrarMovimentoPontosIdempotente(
   clienteId: string,
-  evento: { eventoId?: string; pedidoId: string; tipo: TipoMovimentoPontos; pontos: number; motivo: string }
+  evento: { eventoId?: string; pedidoId: string; tipo: TipoMovimentoPontos; pontos: number; motivo: string; valorElegivel?: number }
 ): Promise<MovimentoPontos | null> {
   const eventoId = evento.eventoId ?? construirEventoIdPontos(evento.pedidoId, evento.tipo);
   const marcou = await redis.set(chaveEventoPontos(eventoId), true, { nx: true });
   if (!marcou) return null;
 
   const extrato = await obterExtratoPontos(clienteId);
-  const registro: MovimentoPontos = {
+  const registroSemSaldo: MovimentoPontos = {
     movimentoId: novoId("pt"),
     clienteId,
     pedidoId: evento.pedidoId,
@@ -416,9 +421,82 @@ export async function registrarMovimentoPontosIdempotente(
     motivo: evento.motivo,
     createdAt: new Date().toISOString(),
     eventoId,
+    ...(evento.valorElegivel !== undefined ? { valorElegivel: evento.valorElegivel } : {}),
   };
+  // saldoApos é um snapshot de auditoria — sempre recalculável a partir do
+  // extrato completo (calcularSaldoDoExtrato), nunca a fonte de verdade.
+  const saldoApos = calcularSaldoDoExtrato([...extrato, registroSemSaldo]);
+  const registro: MovimentoPontos = { ...registroSemSaldo, saldoApos };
+
   await redis.set(chaveExtratoPontos(clienteId), [...extrato, registro]);
   return registro;
+}
+
+/**
+ * Deriva um clienteId a partir de um telefone, no mesmo formato usado pelo
+ * login do cliente (`cli_{telefone sanitizado}`). Retorna undefined para
+ * telefone ausente/curto demais para ser válido — nunca cria um clienteId a
+ * partir de lixo, o que evitaria criar saldo órfão.
+ */
+function derivarClienteIdPorTelefone(telefone?: string): string | undefined {
+  if (!telefone) return undefined;
+  const sanitizado = sanitizeTelefoneCliente(telefone);
+  if (sanitizado.length < 10) return undefined;
+  return clienteIdDoTelefone(sanitizado);
+}
+
+export type PedidoParaCreditoPontos = {
+  id: string;
+  status: string;
+  telefone?: string;
+  clienteId?: string;
+  total?: number;
+  taxaEntrega?: number;
+};
+
+/**
+ * Ponto único de integração entre pedidos reais e a fidelidade por pontos.
+ * Chamar sempre que um pedido for persistido com `status === "entregue"` —
+ * em QUALQUER um dos caminhos que escrevem na chave "pedidos" do Redis
+ * (`/api/orders`, confirmação de entrega pelo WhatsApp, painel do
+ * entregador, fechamento de escalonamento). A idempotência é por pedidoId
+ * (`eventoId` padrão `confirmado:{pedidoId}`): reprocessar ou resalvar o
+ * mesmo pedido entregue nunca credita duas vezes, então não é necessário
+ * comparar o status anterior com o novo antes de chamar esta função —
+ * chamar sempre que o status observado for "entregue" é seguro.
+ *
+ * Regras aplicadas: só usa o valor dos produtos (total menos taxa de
+ * entrega — taxa nunca gera pontos); só credita com `clienteId` explícito
+ * no pedido OU derivável de um telefone válido (>= 10 dígitos) — pedido sem
+ * nenhum dos dois nunca cria saldo órfão; fidelidade precisa estar ativa na
+ * configuração; pontos <= 0 (valor zerado/negativo) não gera movimento.
+ *
+ * Nunca lança exceção que impeça o chamador de responder — mesma convenção
+ * do crédito antigo (`creditarFidelidadePedido`): quem chama deve envolver
+ * em try/catch, para que uma falha aqui nunca impeça o pedido de ser salvo
+ * como entregue nem a resposta HTTP de ser enviada.
+ */
+export async function creditarPontosPedidoEntregue(pedido: PedidoParaCreditoPontos): Promise<void> {
+  if (pedido.status !== "entregue" || !pedido.id) return;
+
+  const clienteId = pedido.clienteId || derivarClienteIdPorTelefone(pedido.telefone);
+  if (!clienteId) return; // sem cliente/telefone valido: nunca cria saldo orfao
+
+  const config = await obterConfigFidelidadePontos();
+  if (!config.ativo) return;
+
+  const valorElegivel = Math.max((Number(pedido.total) || 0) - (Number(pedido.taxaEntrega) || 0), 0);
+  const pontos = calcularPontosElegiveisPedido({ total: pedido.total ?? 0, taxaEntrega: pedido.taxaEntrega });
+  if (pontos <= 0) return;
+
+  await registrarMovimentoPontosIdempotente(clienteId, {
+    eventoId: construirEventoIdPontos(pedido.id, "confirmado"),
+    pedidoId: pedido.id,
+    tipo: "confirmado",
+    pontos,
+    valorElegivel,
+    motivo: `Credito por pedido ${pedido.id} entregue`,
+  });
 }
 
 /**

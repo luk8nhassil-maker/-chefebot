@@ -23,6 +23,7 @@ import { avaliarHorarioComprovantePix, extrairDataHoraComprovantePix, FUSO_OPERA
 import { avaliarEvidenciaPix, type ResultadoEvidenciaPix } from "@/lib/pixComprovanteAvaliacao";
 import { encontrarPedidoPixPendentePorTelefone } from "@/lib/pixPedidoMatching";
 import { telefonesCorrespondem } from "@/lib/telefone";
+import { creditarPontosPedidoEntregue } from "@/lib/fidelidade";
 import type { BotStep } from "@/lib/bot";
 
 export const maxDuration = 30;
@@ -51,6 +52,8 @@ type Pedido = {
   horarioInicio?: string;
   pagamento?: string;
   troco?: string;
+  clienteId?: string;
+  taxaEntrega?: number;
 };
 
 type ConfigPizzaria = {
@@ -247,12 +250,32 @@ async function salvarCancelamentoSolicitado(_phone: string, _session: BotSession
 
 async function fecharEscalonamento(phone: string) {
   const pedidos = (await redis.get<Pedido[]>("pedidos")) || [];
+  const idsFechados = new Set(
+    pedidos.filter(p => p.telefone === phone && p.escalonado === true && p.status === "novo").map(p => p.id)
+  );
   const atualizados = pedidos.map(p =>
-    p.telefone === phone && p.escalonado === true && p.status === "novo"
-      ? { ...p, status: "entregue" as const, escalonado: false }
-      : p
+    idsFechados.has(p.id) ? { ...p, status: "entregue" as const, escalonado: false } : p
   );
   await redis.set("pedidos", atualizados);
+
+  // Fidelidade por pontos: idempotente por pedidoId e isolada em try/catch
+  // proprio — falha aqui nunca pode impedir o fechamento do escalonamento,
+  // que ja foi salvo acima.
+  for (const pedido of atualizados) {
+    if (!idsFechados.has(pedido.id)) continue;
+    try {
+      await creditarPontosPedidoEntregue({
+        id: pedido.id,
+        status: "entregue",
+        telefone: pedido.telefone,
+        clienteId: pedido.clienteId,
+        total: pedido.total,
+        taxaEntrega: pedido.taxaEntrega,
+      });
+    } catch (err) {
+      console.error("[ChefeBot] Erro ao creditar pontos de fidelidade (ignorado):", err);
+    }
+  }
 }
 
 async function enviarMensagem(phone: string, message: string, ritmoRapido = false) {
@@ -996,6 +1019,23 @@ export async function POST(req: NextRequest) {
         if (index !== -1 && pedidos[index].status === 'saiu_entrega') {
           pedidos[index] = { ...pedidos[index], status: 'entregue' }
           await redis.set('pedidos', pedidos)
+
+          // Fidelidade por pontos: idempotente por pedidoId, isolada em
+          // try/catch proprio — falha aqui nunca pode impedir a confirmacao
+          // de entrega, que ja foi salva acima.
+          try {
+            await creditarPontosPedidoEntregue({
+              id: pedidos[index].id,
+              status: 'entregue',
+              telefone: pedidos[index].telefone,
+              clienteId: pedidos[index].clienteId,
+              total: pedidos[index].total,
+              taxaEntrega: pedidos[index].taxaEntrega,
+            })
+          } catch (err) {
+            console.error('[ChefeBot] Erro ao creditar pontos de fidelidade (ignorado):', err)
+          }
+
           await redis.del(`entregador_aguardando:${phone}`)
           const pedido = pedidos[index]
           const firstName = pedido.cliente.split(' ')[0]

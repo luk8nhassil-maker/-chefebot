@@ -4,7 +4,7 @@ import { redis } from '@/lib/redis'
 import { proximoNumeroPedido } from '@/lib/numeracao'
 import { confirmarPixMetadata, criarPixMetadata, sanitizarPedidoPixResposta, type PixMetadata } from '@/lib/pix'
 import type { PedidoEntregador } from '@/types/entregador'
-import { creditarFidelidadePedido } from '@/lib/fidelidade'
+import { creditarFidelidadePedido, creditarPontosPedidoEntregue } from '@/lib/fidelidade'
 
 const APP_BASE_URL = 'https://chefebot-pjif.vercel.app'
 
@@ -242,6 +242,23 @@ export async function PATCH(req: NextRequest) {
       })
     } catch (err) {
       console.error('[ChefeBot] Erro ao creditar fidelidade (ignorado):', err)
+    }
+
+    // Fidelidade por pontos (novo modelo, R$1 = 1 ponto): roda em paralelo ao
+    // credito antigo acima, sem substitui-lo. Mesma protecao — isolado em
+    // try/catch proprio, idempotente por pedidoId, nunca impede o pedido de
+    // ser marcado como entregue nem a resposta do PATCH.
+    try {
+      await creditarPontosPedidoEntregue({
+        id,
+        status: 'entregue',
+        telefone: pedidos[index].telefone,
+        clienteId: pedidos[index].clienteId,
+        total: pedidos[index].total,
+        taxaEntrega: pedidos[index].taxaEntrega,
+      })
+    } catch (err) {
+      console.error('[ChefeBot] Erro ao creditar pontos de fidelidade (ignorado):', err)
     }
   }
 
