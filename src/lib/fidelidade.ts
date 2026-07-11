@@ -193,3 +193,190 @@ export async function obterProgressoFidelidade(clienteId: string): Promise<Progr
     recompensasDisponiveis,
   };
 }
+
+// ============================================================================
+// MODELO NOVO — FIDELIDADE POR PONTOS (fundação, Etapa 1 do plano aprovado)
+//
+// Tudo abaixo é aditivo e isolado do modelo antigo (pizzas) acima: chaves de
+// Redis próprias, com o prefixo "fidelidade:pontos:", nunca sobrescrevem ou
+// leem as chaves antigas (`fidelidade:saldo:`, `fidelidade:extrato:`,
+// `fidelidade:creditado:`). Nada aqui é chamado por nenhuma rota de pedido
+// real ainda — é só a fundação de tipos/dados/helpers puros para a próxima
+// etapa conectar ao fluxo de `/api/orders` (crédito) e ao checkout (resgate).
+//
+// Unidades não são conversíveis automaticamente: o saldo antigo é em
+// "pizzas" (unidade), o novo é em "pontos" (1 ponto = R$1 gasto). Por isso
+// não existe aqui nenhuma função de migração — decisão de negócio em aberto,
+// documentada na auditoria técnica aprovada.
+// ============================================================================
+
+/**
+ * Estado de um movimento de pontos. Distinção explícita exigida pelo modelo:
+ * - previsto: calculado na criação do pedido, ainda não é saldo real (é a
+ *   estimativa "este pedido renderá X pontos").
+ * - confirmado: pedido chegou a "entregue" — pontos passam a valer no saldo.
+ * - cancelado: pedido previsto que não virou confirmado (pedido cancelado);
+ *   fica registrado no extrato para transparência, nunca some silenciosamente.
+ * - resgatado: débito de pontos por resgate de recompensa.
+ * - ajuste: correção manual (positiva ou negativa), fora do fluxo automático.
+ */
+export type TipoMovimentoPontos = "previsto" | "confirmado" | "cancelado" | "resgatado" | "ajuste";
+
+export type MovimentoPontos = {
+  movimentoId: string;
+  clienteId: string;
+  pedidoId?: string;
+  tipo: TipoMovimentoPontos;
+  pontos: number;
+  motivo: string;
+  createdAt: string;
+};
+
+export type SaldoPontos = {
+  /** Pontos confirmados e ainda não resgatados. Nunca inclui "previstos". */
+  disponivel: number;
+};
+
+export type ConfigFidelidadePontos = {
+  ativo: boolean;
+  /** Valor de referência da Pizza Família usado para calcular a meta (ex.: 60). */
+  valorPizzaFamiliaReferencia: number;
+  /** Quantas Pizzas Família a meta equivale (ex.: 12). */
+  metaPizzasFamilia: number;
+  descricaoRecompensa: string;
+  validadeDias?: number;
+};
+
+export const CONFIG_FIDELIDADE_PONTOS_PADRAO: ConfigFidelidadePontos = {
+  ativo: false,
+  valorPizzaFamiliaReferencia: 60,
+  metaPizzasFamilia: 12,
+  descricaoRecompensa: "1 Pizza Família",
+};
+
+const CHAVE_CONFIG_PONTOS = "config:fidelidade:pontos";
+
+function chaveExtratoPontos(clienteId: string): string {
+  return `fidelidade:pontos:extrato:${clienteId}`;
+}
+
+function chaveEventoPontos(pedidoId: string, tipo: TipoMovimentoPontos): string {
+  return `fidelidade:pontos:evento:${tipo}:${pedidoId}`;
+}
+
+/** Meta em pontos = valor de referência × quantidade de Pizzas Família. Entrada inválida (<=0) retorna 0. */
+export function calcularMetaPontos(
+  config: Pick<ConfigFidelidadePontos, "valorPizzaFamiliaReferencia" | "metaPizzasFamilia">
+): number {
+  const valor = Number(config.valorPizzaFamiliaReferencia);
+  const qtd = Number(config.metaPizzasFamilia);
+  if (!Number.isFinite(valor) || valor <= 0 || !Number.isFinite(qtd) || qtd <= 0) return 0;
+  return Math.round(valor * qtd);
+}
+
+/**
+ * Regra central do novo modelo: R$1 gasto = 1 ponto. Arredonda sempre para
+ * baixo (nunca credita ponto fracionado por centavos) e nunca retorna valor
+ * negativo.
+ */
+export function calcularPontosPorValor(valorReais: number): number {
+  if (!Number.isFinite(valorReais) || valorReais <= 0) return 0;
+  return Math.floor(valorReais);
+}
+
+/**
+ * Pontos elegíveis de um pedido: total menos taxa de entrega (a taxa nunca
+ * gera pontos). Não decide se o pedido está entregue/cancelado — quem chama
+ * decide em que momento aplicar (previsto vs. confirmado); esta função só
+ * calcula o valor.
+ */
+export function calcularPontosElegiveisPedido(params: { total: number; taxaEntrega?: number }): number {
+  const total = Number(params.total) || 0;
+  const taxa = Number(params.taxaEntrega) || 0;
+  return calcularPontosPorValor(total - taxa);
+}
+
+/**
+ * Saldo confirmado a partir do extrato completo. "previsto" e "cancelado"
+ * nunca afetam o saldo (são só registro/transparência); "confirmado" soma;
+ * "resgatado" subtrai; "ajuste" soma o valor informado (pode ser negativo).
+ * Função pura — não lê nem escreve Redis — para permitir testar saldo
+ * residual e comportamento de cada tipo sem infraestrutura.
+ */
+export function calcularSaldoDoExtrato(movimentos: MovimentoPontos[]): number {
+  if (!Array.isArray(movimentos)) return 0;
+  return movimentos.reduce((saldo, mov) => {
+    switch (mov.tipo) {
+      case "confirmado":
+        return saldo + mov.pontos;
+      case "resgatado":
+        return saldo - mov.pontos;
+      case "ajuste":
+        return saldo + mov.pontos;
+      case "previsto":
+      case "cancelado":
+      default:
+        return saldo;
+    }
+  }, 0);
+}
+
+export async function obterConfigFidelidadePontos(): Promise<ConfigFidelidadePontos> {
+  const salva = await redis.get<ConfigFidelidadePontos>(CHAVE_CONFIG_PONTOS);
+  return salva ?? CONFIG_FIDELIDADE_PONTOS_PADRAO;
+}
+
+export async function salvarConfigFidelidadePontos(config: ConfigFidelidadePontos): Promise<void> {
+  await redis.set(CHAVE_CONFIG_PONTOS, config);
+}
+
+export async function obterExtratoPontos(clienteId: string): Promise<MovimentoPontos[]> {
+  return (await redis.get<MovimentoPontos[]>(chaveExtratoPontos(clienteId))) ?? [];
+}
+
+export async function obterSaldoPontos(clienteId: string): Promise<SaldoPontos> {
+  const extrato = await obterExtratoPontos(clienteId);
+  return { disponivel: calcularSaldoDoExtrato(extrato) };
+}
+
+/**
+ * Registra um movimento de pontos de forma idempotente por (pedidoId, tipo):
+ * a mesma combinação nunca é processada duas vezes (SET NX, mesmo padrão já
+ * usado no crédito antigo por pedidoId). Não decide regra de negócio (quando
+ * um "previsto" vira "confirmado", por exemplo) — isso é responsabilidade de
+ * quem chama, na etapa que conectar ao fluxo real de pedidos. Retorna `null`
+ * quando o evento já tinha sido registrado antes; o movimento criado caso
+ * contrário.
+ */
+export async function registrarMovimentoPontosIdempotente(
+  clienteId: string,
+  evento: { pedidoId: string; tipo: TipoMovimentoPontos; pontos: number; motivo: string }
+): Promise<MovimentoPontos | null> {
+  const marcou = await redis.set(chaveEventoPontos(evento.pedidoId, evento.tipo), true, { nx: true });
+  if (!marcou) return null;
+
+  const extrato = await obterExtratoPontos(clienteId);
+  const registro: MovimentoPontos = {
+    movimentoId: novoId("pt"),
+    clienteId,
+    pedidoId: evento.pedidoId,
+    tipo: evento.tipo,
+    pontos: evento.pontos,
+    motivo: evento.motivo,
+    createdAt: new Date().toISOString(),
+  };
+  await redis.set(chaveExtratoPontos(clienteId), [...extrato, registro]);
+  return registro;
+}
+
+/**
+ * Leitura de compatibilidade com o modelo antigo (pizzas), exposta para a
+ * fase de decisão de migração (ver auditoria técnica aprovada). Não converte
+ * pizzas em pontos automaticamente — as unidades não são equivalentes (uma
+ * pizza não tem o mesmo valor em R$ sempre). Só expõe o dado antigo,
+ * sem apagar nem reescrever nada.
+ */
+export async function obterSaldoAntigoPizzas(clienteId: string): Promise<number> {
+  const progresso = await obterProgressoFidelidade(clienteId);
+  return progresso.progresso;
+}
