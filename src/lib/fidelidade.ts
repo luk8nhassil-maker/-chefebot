@@ -213,14 +213,22 @@ export async function obterProgressoFidelidade(clienteId: string): Promise<Progr
 /**
  * Estado de um movimento de pontos. Distinção explícita exigida pelo modelo:
  * - previsto: calculado na criação do pedido, ainda não é saldo real (é a
- *   estimativa "este pedido renderá X pontos").
+ *   estimativa "este pedido renderá X pontos"). Nunca afeta o saldo.
  * - confirmado: pedido chegou a "entregue" — pontos passam a valer no saldo.
- * - cancelado: pedido previsto que não virou confirmado (pedido cancelado);
- *   fica registrado no extrato para transparência, nunca some silenciosamente.
+ * - cancelado: pedido previsto que não virou confirmado (pedido cancelado
+ *   antes da entrega); fica registrado no extrato para transparência, nunca
+ *   some silenciosamente. Nunca afeta o saldo (nunca havia sido somado).
+ * - estornado: reverte um crédito que **já tinha sido confirmado** (ex.:
+ *   pedido marcado "entregue" por engano e depois corrigido para
+ *   "cancelado"). Diferente de "cancelado": aqui os pontos já estavam no
+ *   saldo e precisam ser retirados. O extrato nunca é reescrito ou apagado —
+ *   o estorno é sempre um novo movimento (subtrai no cálculo do saldo, como
+ *   "resgatado"), referenciando o mesmo `pedidoId` do crédito original, mas
+ *   com um `eventoId` próprio (ver `registrarMovimentoPontosIdempotente`).
  * - resgatado: débito de pontos por resgate de recompensa.
  * - ajuste: correção manual (positiva ou negativa), fora do fluxo automático.
  */
-export type TipoMovimentoPontos = "previsto" | "confirmado" | "cancelado" | "resgatado" | "ajuste";
+export type TipoMovimentoPontos = "previsto" | "confirmado" | "cancelado" | "estornado" | "resgatado" | "ajuste";
 
 export type MovimentoPontos = {
   movimentoId: string;
@@ -230,25 +238,39 @@ export type MovimentoPontos = {
   pontos: number;
   motivo: string;
   createdAt: string;
+  /** Chave de idempotência usada para gravar este movimento (ver registrarMovimentoPontosIdempotente). */
+  eventoId?: string;
 };
 
 export type SaldoPontos = {
-  /** Pontos confirmados e ainda não resgatados. Nunca inclui "previstos". */
+  /** Pontos confirmados e ainda não resgatados/estornados. Nunca inclui "previstos". */
   disponivel: number;
 };
 
 export type ConfigFidelidadePontos = {
   ativo: boolean;
-  /** Valor de referência da Pizza Família usado para calcular a meta (ex.: 60). */
-  valorPizzaFamiliaReferencia: number;
-  /** Quantas Pizzas Família a meta equivale (ex.: 12). */
-  metaPizzasFamilia: number;
+  /**
+   * Meta em pontos — fonte principal e explícita da configuração. Quando
+   * definida (> 0), sempre vence sobre o cálculo derivado das referências de
+   * Pizza Família abaixo.
+   */
+  metaPontos?: number;
+  /**
+   * Referência opcional, só para documentar/derivar a meta quando
+   * `metaPontos` não é informado (compatibilidade com a forma como a meta
+   * foi originalmente descrita: "equivalente a N Pizzas Família"). Nunca é
+   * obrigatória para o modelo por pontos funcionar.
+   */
+  valorPizzaFamiliaReferencia?: number;
+  /** Referência opcional, ver `valorPizzaFamiliaReferencia`. */
+  metaPizzasFamilia?: number;
   descricaoRecompensa: string;
   validadeDias?: number;
 };
 
 export const CONFIG_FIDELIDADE_PONTOS_PADRAO: ConfigFidelidadePontos = {
   ativo: false,
+  metaPontos: 720,
   valorPizzaFamiliaReferencia: 60,
   metaPizzasFamilia: 12,
   descricaoRecompensa: "1 Pizza Família",
@@ -260,14 +282,33 @@ function chaveExtratoPontos(clienteId: string): string {
   return `fidelidade:pontos:extrato:${clienteId}`;
 }
 
-function chaveEventoPontos(pedidoId: string, tipo: TipoMovimentoPontos): string {
-  return `fidelidade:pontos:evento:${tipo}:${pedidoId}`;
+function chaveEventoPontos(eventoId: string): string {
+  return `fidelidade:pontos:evento:${eventoId}`;
 }
 
-/** Meta em pontos = valor de referência × quantidade de Pizzas Família. Entrada inválida (<=0) retorna 0. */
+/**
+ * Constrói um `eventoId` padrão a partir de (pedidoId, tipo), com um sufixo
+ * opcional para diferenciar múltiplos eventos do mesmo tipo no mesmo pedido
+ * (ex.: um estorno parcial e outro complementar). Uso conveniente, não
+ * obrigatório — quem chama `registrarMovimentoPontosIdempotente` pode sempre
+ * passar seu próprio `eventoId`.
+ */
+export function construirEventoIdPontos(pedidoId: string, tipo: TipoMovimentoPontos, sufixo?: string): string {
+  return sufixo ? `${tipo}:${pedidoId}:${sufixo}` : `${tipo}:${pedidoId}`;
+}
+
+/**
+ * Meta em pontos. Prioridade: `metaPontos` explícito (se > 0) sempre vence;
+ * na ausência dele, deriva de `valorPizzaFamiliaReferencia × metaPizzasFamilia`
+ * (as duas referências de pizza, se informadas). Sem nenhuma das duas fontes
+ * válidas, retorna 0 — as referências de pizza nunca são obrigatórias.
+ */
 export function calcularMetaPontos(
-  config: Pick<ConfigFidelidadePontos, "valorPizzaFamiliaReferencia" | "metaPizzasFamilia">
+  config: Pick<ConfigFidelidadePontos, "metaPontos" | "valorPizzaFamiliaReferencia" | "metaPizzasFamilia">
 ): number {
+  const metaExplicita = Number(config.metaPontos);
+  if (Number.isFinite(metaExplicita) && metaExplicita > 0) return Math.round(metaExplicita);
+
   const valor = Number(config.valorPizzaFamiliaReferencia);
   const qtd = Number(config.metaPizzasFamilia);
   if (!Number.isFinite(valor) || valor <= 0 || !Number.isFinite(qtd) || qtd <= 0) return 0;
@@ -298,10 +339,13 @@ export function calcularPontosElegiveisPedido(params: { total: number; taxaEntre
 
 /**
  * Saldo confirmado a partir do extrato completo. "previsto" e "cancelado"
- * nunca afetam o saldo (são só registro/transparência); "confirmado" soma;
- * "resgatado" subtrai; "ajuste" soma o valor informado (pode ser negativo).
- * Função pura — não lê nem escreve Redis — para permitir testar saldo
- * residual e comportamento de cada tipo sem infraestrutura.
+ * nunca afetam o saldo (são só registro/transparência — o crédito nunca
+ * chegou a entrar); "confirmado" soma; "resgatado" e "estornado" subtraem
+ * (um estorno reverte um crédito já confirmado, sem apagar o movimento
+ * original — ele continua no extrato, só um novo lançamento negativo é
+ * somado); "ajuste" soma o valor informado (pode ser negativo). Função pura
+ * — não lê nem escreve Redis, não muta a lista recebida — para permitir
+ * testar saldo residual e comportamento de cada tipo sem infraestrutura.
  */
 export function calcularSaldoDoExtrato(movimentos: MovimentoPontos[]): number {
   if (!Array.isArray(movimentos)) return 0;
@@ -310,6 +354,7 @@ export function calcularSaldoDoExtrato(movimentos: MovimentoPontos[]): number {
       case "confirmado":
         return saldo + mov.pontos;
       case "resgatado":
+      case "estornado":
         return saldo - mov.pontos;
       case "ajuste":
         return saldo + mov.pontos;
@@ -340,19 +385,25 @@ export async function obterSaldoPontos(clienteId: string): Promise<SaldoPontos> 
 }
 
 /**
- * Registra um movimento de pontos de forma idempotente por (pedidoId, tipo):
- * a mesma combinação nunca é processada duas vezes (SET NX, mesmo padrão já
- * usado no crédito antigo por pedidoId). Não decide regra de negócio (quando
- * um "previsto" vira "confirmado", por exemplo) — isso é responsabilidade de
- * quem chama, na etapa que conectar ao fluxo real de pedidos. Retorna `null`
- * quando o evento já tinha sido registrado antes; o movimento criado caso
- * contrário.
+ * Registra um movimento de pontos de forma idempotente. A prevenção de
+ * duplicidade NÃO depende exclusivamente de (pedidoId, tipo): quem chama pode
+ * informar um `eventoId` explícito (ex.: para diferenciar um estorno parcial
+ * de outro, ou dois ajustes manuais no mesmo pedido) — só quando `eventoId`
+ * não é informado é que cai no padrão derivado `${tipo}:${pedidoId}` (mesmo
+ * comportamento simples de antes, preservado para o caso comum de 1 evento
+ * por tipo por pedido). A mesma chave nunca é processada duas vezes (SET NX,
+ * mesmo padrão já usado no crédito antigo). Não decide regra de negócio
+ * (quando um "previsto" vira "confirmado", ou quando um "confirmado" precisa
+ * de um "estornado", por exemplo) — isso é responsabilidade de quem chama,
+ * na etapa que conectar ao fluxo real de pedidos. Retorna `null` quando o
+ * evento já tinha sido registrado antes; o movimento criado caso contrário.
  */
 export async function registrarMovimentoPontosIdempotente(
   clienteId: string,
-  evento: { pedidoId: string; tipo: TipoMovimentoPontos; pontos: number; motivo: string }
+  evento: { eventoId?: string; pedidoId: string; tipo: TipoMovimentoPontos; pontos: number; motivo: string }
 ): Promise<MovimentoPontos | null> {
-  const marcou = await redis.set(chaveEventoPontos(evento.pedidoId, evento.tipo), true, { nx: true });
+  const eventoId = evento.eventoId ?? construirEventoIdPontos(evento.pedidoId, evento.tipo);
+  const marcou = await redis.set(chaveEventoPontos(eventoId), true, { nx: true });
   if (!marcou) return null;
 
   const extrato = await obterExtratoPontos(clienteId);
@@ -364,6 +415,7 @@ export async function registrarMovimentoPontosIdempotente(
     pontos: evento.pontos,
     motivo: evento.motivo,
     createdAt: new Date().toISOString(),
+    eventoId,
   };
   await redis.set(chaveExtratoPontos(clienteId), [...extrato, registro]);
   return registro;
