@@ -287,8 +287,53 @@ function chaveExtratoPontos(clienteId: string): string {
   return `fidelidade:pontos:extrato:${clienteId}`;
 }
 
-function chaveEventoPontos(eventoId: string): string {
-  return `fidelidade:pontos:evento:${eventoId}`;
+function chaveLockPontos(clienteId: string): string {
+  return `fidelidade:pontos:lock:${clienteId}`;
+}
+
+function chaveRecompensasPontos(clienteId: string): string {
+  return `fidelidade:pontos:recompensas:${clienteId}`;
+}
+
+const LOCK_TTL_SEGUNDOS = 5;
+const LOCK_MAX_TENTATIVAS = 50;
+const LOCK_ESPERA_MS = 20;
+
+function esperar(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Serializa qualquer leitura-modificação-escrita do extrato/recompensas de
+ * UM cliente por vez, via lock exclusivo em Redis (`SET NX` + TTL curto,
+ * liberado no fim). Isso é o que impede duas requisições concorrentes (dois
+ * pedidos entregues quase ao mesmo tempo, ou o mesmo pedido reprocessado em
+ * paralelo) de lerem o mesmo extrato "antes" e se sobrescreverem uma à
+ * outra na escrita — o cenário que um `SET NX` de idempotência sozinho,
+ * seguido de leitura/escrita de array sem proteção, não resolve.
+ *
+ * TTL curto (5s) é uma rede de segurança contra deadlock se o processo
+ * morrer com o lock preso — não é o mecanismo principal de liberação (isso
+ * é o `finally`). Backoff simples com várias tentativas curtas: em caso de
+ * falha real (não conseguiu o lock em nenhuma tentativa), lança erro — quem
+ * chama (sempre em try/catch, ver `creditarPontosPedidoEntregue`) trata como
+ * falha best-effort e o pedido pode ser reprocessado depois com segurança,
+ * já que nada é marcado como "processado" antes da escrita real do extrato.
+ */
+async function comBloqueioCliente<T>(clienteId: string, fn: () => Promise<T>): Promise<T> {
+  const chave = chaveLockPontos(clienteId);
+  for (let tentativa = 0; tentativa < LOCK_MAX_TENTATIVAS; tentativa++) {
+    const obtido = await redis.set(chave, "1", { nx: true, ex: LOCK_TTL_SEGUNDOS });
+    if (obtido) {
+      try {
+        return await fn();
+      } finally {
+        await redis.del(chave);
+      }
+    }
+    await esperar(LOCK_ESPERA_MS);
+  }
+  throw new Error(`Nao foi possivel obter o bloqueio de fidelidade por pontos para ${clienteId}`);
 }
 
 /**
@@ -390,55 +435,164 @@ export async function obterSaldoPontos(clienteId: string): Promise<SaldoPontos> 
 }
 
 /**
- * Registra um movimento de pontos de forma idempotente. A prevenção de
- * duplicidade NÃO depende exclusivamente de (pedidoId, tipo): quem chama pode
- * informar um `eventoId` explícito (ex.: para diferenciar um estorno parcial
- * de outro, ou dois ajustes manuais no mesmo pedido) — só quando `eventoId`
- * não é informado é que cai no padrão derivado `${tipo}:${pedidoId}` (mesmo
- * comportamento simples de antes, preservado para o caso comum de 1 evento
- * por tipo por pedido). A mesma chave nunca é processada duas vezes (SET NX,
- * mesmo padrão já usado no crédito antigo). Não decide regra de negócio
- * (quando um "previsto" vira "confirmado", ou quando um "confirmado" precisa
- * de um "estornado", por exemplo) — isso é responsabilidade de quem chama,
- * na etapa que conectar ao fluxo real de pedidos. Retorna `null` quando o
- * evento já tinha sido registrado antes; o movimento criado caso contrário.
+ * Estado de uma recompensa desbloqueada pelo modelo de pontos:
+ * - disponivel: meta atingida, cliente ainda não foi notificado.
+ * - notificada: evento de notificação já registrado (ver `notificacaoStatus`
+ *   no próprio registro) — continua "disponível" para resgate, só marca que
+ *   o aviso já foi (ou vai ser, quando a etapa de envio existir) disparado.
+ * - resgatada: resgate concluído dentro do app (fora do escopo desta etapa
+ *   — implementação futura). A partir daqui um novo ciclo pode gerar outra
+ *   notificação se o saldo voltar a cruzar a meta.
+ * - expirada: fora do escopo desta etapa, reservado para regra de validade.
+ */
+export type StatusRecompensaPontos = "disponivel" | "notificada" | "resgatada" | "expirada";
+
+export type RecompensaPontosDesbloqueada = {
+  recompensaId: string;
+  clienteId: string;
+  /** Pedido cujo crédito fez o saldo cruzar a meta. */
+  pedidoId?: string;
+  pontosNaDesbloqueio: number;
+  metaNaDesbloqueio: number;
+  status: StatusRecompensaPontos;
+  /** Estado da notificação — "pendente" até uma etapa futura efetivamente enviar a mensagem (ver `notificacaoRecompensaHabilitada`). */
+  notificacaoStatus: "pendente" | "enviada";
+  createdAt: string;
+};
+
+export async function obterRecompensasPontos(clienteId: string): Promise<RecompensaPontosDesbloqueada[]> {
+  return (await redis.get<RecompensaPontosDesbloqueada[]>(chaveRecompensasPontos(clienteId))) ?? [];
+}
+
+/**
+ * Lê a flag de ambiente que habilita o ENVIO real da notificação de
+ * recompensa desbloqueada. Nenhuma função deste arquivo envia mensagem —
+ * esta etapa só registra o evento auditável e o estado "pendente"; o envio
+ * de verdade (integração com o WhatsApp) é implementação futura, a ser
+ * ligada somente depois que o fluxo de resgate dentro do app existir e
+ * estiver validado. Até lá, esta flag existe só para a etapa futura checar
+ * antes de disparar — o valor default (ausente/qualquer coisa != "true") é
+ * sempre "desligado".
+ */
+export function notificacaoRecompensaHabilitada(): boolean {
+  return process.env.FIDELIDADE_NOTIFICACAO_RECOMPENSA_ATIVA === "true";
+}
+
+/**
+ * Detecta a passagem de saldoAnterior < meta para saldoAtual >= meta e
+ * registra um evento auditável de recompensa desbloqueada, com a
+ * notificação marcada como "pendente". Nunca cria duas recompensas abertas
+ * para o mesmo cliente ao mesmo tempo — enquanto existir uma com status
+ * "disponivel" ou "notificada", nenhuma nova é criada, mesmo que novos
+ * pedidos continuem empurrando o saldo pra cima. Só depois de um resgate
+ * (fora do escopo desta etapa) é que um novo cruzamento pode gerar outra.
+ * Chamada sempre dentro do lock de `registrarMovimentoPontosIdempotente` —
+ * não faz sentido chamar isoladamente fora dessa seção crítica.
+ */
+async function detectarRecompensaDesbloqueada(
+  clienteId: string,
+  params: { saldoAnterior: number; saldoAtual: number; pedidoId?: string }
+): Promise<void> {
+  const config = await obterConfigFidelidadePontos();
+  const meta = calcularMetaPontos(config);
+  if (meta <= 0) return;
+  if (params.saldoAnterior >= meta) return; // ja tinha cruzado antes (ciclo ja aberto ou nao resolvido)
+  if (params.saldoAtual < meta) return; // ainda nao cruzou
+
+  const recompensas = await obterRecompensasPontos(clienteId);
+  const jaTemCicloAberto = recompensas.some((r) => r.status === "disponivel" || r.status === "notificada");
+  if (jaTemCicloAberto) return; // nunca duplica enquanto a recompensa anterior nao for resgatada
+
+  const recompensa: RecompensaPontosDesbloqueada = {
+    recompensaId: novoId("rcp"),
+    clienteId,
+    pedidoId: params.pedidoId,
+    pontosNaDesbloqueio: params.saldoAtual,
+    metaNaDesbloqueio: meta,
+    status: "disponivel",
+    notificacaoStatus: "pendente",
+    createdAt: new Date().toISOString(),
+  };
+  await redis.set(chaveRecompensasPontos(clienteId), [...recompensas, recompensa]);
+}
+
+/**
+ * Registra um movimento de pontos de forma idempotente e seguindo contra
+ * concorrência. Toda a operação — checar se o evento já foi processado,
+ * calcular o saldo antes/depois, gravar o movimento no extrato e detectar
+ * recompensa desbloqueada — roda dentro de um lock exclusivo por cliente
+ * (`comBloqueioCliente`), então duas chamadas concorrentes para o mesmo
+ * cliente nunca se sobrescrevem.
+ *
+ * A idempotência NÃO é uma chave separada marcada antes da escrita (o que
+ * deixaria o pedido "preso" sem pontos se o processo falhasse entre marcar
+ * e escrever) — é uma checagem direta contra o próprio extrato: se já existe
+ * um movimento com este `eventoId`, nada é escrito de novo. Isso também
+ * permite reprocessar com segurança após uma falha parcial: como nada é
+ * marcado antes da escrita real, uma tentativa anterior que falhou no meio
+ * do caminho não deixa rastro que bloqueie a próxima tentativa.
+ *
+ * `eventoId` explícito (opcional) permite diferenciar múltiplos eventos do
+ * mesmo tipo no mesmo pedido; sem ele, cai no padrão `${tipo}:${pedidoId}`.
+ * Retorna `null` quando o evento já tinha sido registrado antes; o
+ * movimento criado caso contrário.
  */
 export async function registrarMovimentoPontosIdempotente(
   clienteId: string,
   evento: { eventoId?: string; pedidoId: string; tipo: TipoMovimentoPontos; pontos: number; motivo: string; valorElegivel?: number }
 ): Promise<MovimentoPontos | null> {
   const eventoId = evento.eventoId ?? construirEventoIdPontos(evento.pedidoId, evento.tipo);
-  const marcou = await redis.set(chaveEventoPontos(eventoId), true, { nx: true });
-  if (!marcou) return null;
 
-  const extrato = await obterExtratoPontos(clienteId);
-  const registroSemSaldo: MovimentoPontos = {
-    movimentoId: novoId("pt"),
-    clienteId,
-    pedidoId: evento.pedidoId,
-    tipo: evento.tipo,
-    pontos: evento.pontos,
-    motivo: evento.motivo,
-    createdAt: new Date().toISOString(),
-    eventoId,
-    ...(evento.valorElegivel !== undefined ? { valorElegivel: evento.valorElegivel } : {}),
-  };
-  // saldoApos é um snapshot de auditoria — sempre recalculável a partir do
-  // extrato completo (calcularSaldoDoExtrato), nunca a fonte de verdade.
-  const saldoApos = calcularSaldoDoExtrato([...extrato, registroSemSaldo]);
-  const registro: MovimentoPontos = { ...registroSemSaldo, saldoApos };
+  return comBloqueioCliente(clienteId, async () => {
+    const extrato = await obterExtratoPontos(clienteId);
+    if (extrato.some((m) => m.eventoId === eventoId)) return null; // ja processado
 
-  await redis.set(chaveExtratoPontos(clienteId), [...extrato, registro]);
-  return registro;
+    const saldoAnterior = calcularSaldoDoExtrato(extrato);
+    const registroSemSaldo: MovimentoPontos = {
+      movimentoId: novoId("pt"),
+      clienteId,
+      pedidoId: evento.pedidoId,
+      tipo: evento.tipo,
+      pontos: evento.pontos,
+      motivo: evento.motivo,
+      createdAt: new Date().toISOString(),
+      eventoId,
+      ...(evento.valorElegivel !== undefined ? { valorElegivel: evento.valorElegivel } : {}),
+    };
+    const novoExtrato = [...extrato, registroSemSaldo];
+    // saldoApos é um snapshot de auditoria — sempre recalculável a partir do
+    // extrato completo (calcularSaldoDoExtrato), nunca a fonte de verdade.
+    const saldoApos = calcularSaldoDoExtrato(novoExtrato);
+    const registro: MovimentoPontos = { ...registroSemSaldo, saldoApos };
+    novoExtrato[novoExtrato.length - 1] = registro;
+
+    await redis.set(chaveExtratoPontos(clienteId), novoExtrato);
+
+    // Detecta cruzamento de meta genericamente (qualquer tipo que tenha
+    // aumentado o saldo — hoje só "confirmado"/"ajuste" positivo fazem
+    // isso), dentro do mesmo lock, para nunca competir com outra escrita
+    // concorrente na leitura de recompensas.
+    if (saldoApos > saldoAnterior) {
+      await detectarRecompensaDesbloqueada(clienteId, { saldoAnterior, saldoAtual: saldoApos, pedidoId: evento.pedidoId });
+    }
+
+    return registro;
+  });
 }
 
 /**
- * Deriva um clienteId a partir de um telefone, no mesmo formato usado pelo
- * login do cliente (`cli_{telefone sanitizado}`). Retorna undefined para
- * telefone ausente/curto demais para ser válido — nunca cria um clienteId a
- * partir de lixo, o que evitaria criar saldo órfão.
+ * Deriva o clienteId canônico a partir de um telefone, no mesmo formato
+ * usado pelo login do cliente (`cli_{telefone sanitizado}`). Retorna
+ * undefined para telefone ausente/curto demais para ser válido — nunca cria
+ * um clienteId a partir de lixo, o que evitaria criar saldo órfão.
+ *
+ * O telefone do WhatsApp é a identidade canônica da fidelidade por pontos:
+ * o mesmo telefone SEMPRE deriva o mesmo clienteId, então uma compra pelo
+ * WhatsApp e uma compra pelo app com o mesmo número alimentam o mesmo
+ * saldo — nunca dois saldos para o mesmo telefone, com ou sem o cliente
+ * ainda ter ativado o perfil no app.
  */
-function derivarClienteIdPorTelefone(telefone?: string): string | undefined {
+export function derivarClienteIdPorTelefone(telefone?: string): string | undefined {
   if (!telefone) return undefined;
   const sanitizado = sanitizeTelefoneCliente(telefone);
   if (sanitizado.length < 10) return undefined;
@@ -459,16 +613,21 @@ export type PedidoParaCreditoPontos = {
  * Chamar sempre que um pedido for persistido com `status === "entregue"` —
  * em QUALQUER um dos caminhos que escrevem na chave "pedidos" do Redis
  * (`/api/orders`, confirmação de entrega pelo WhatsApp, painel do
- * entregador, fechamento de escalonamento). A idempotência é por pedidoId
- * (`eventoId` padrão `confirmado:{pedidoId}`): reprocessar ou resalvar o
- * mesmo pedido entregue nunca credita duas vezes, então não é necessário
- * comparar o status anterior com o novo antes de chamar esta função —
- * chamar sempre que o status observado for "entregue" é seguro.
+ * entregador). A idempotência é por pedidoId (`eventoId` padrão
+ * `confirmado:{pedidoId}`): reprocessar ou resalvar o mesmo pedido entregue
+ * nunca credita duas vezes, então não é necessário comparar o status
+ * anterior com o novo antes de chamar esta função — chamar sempre que o
+ * status observado for "entregue" é seguro.
+ *
+ * Identidade: o telefone é a fonte canônica (ver `derivarClienteIdPorTelefone`)
+ * — pedido sem telefone válido (>= 10 dígitos) NUNCA gera pontos, mesmo que
+ * tenha um `clienteId` preenchido (evita dois saldos divergentes para o
+ * mesmo número). Se `pedido.clienteId` vier preenchido e divergir do
+ * derivado do telefone, o telefone vence e a divergência fica registrada em
+ * log — nunca cria um segundo saldo.
  *
  * Regras aplicadas: só usa o valor dos produtos (total menos taxa de
- * entrega — taxa nunca gera pontos); só credita com `clienteId` explícito
- * no pedido OU derivável de um telefone válido (>= 10 dígitos) — pedido sem
- * nenhum dos dois nunca cria saldo órfão; fidelidade precisa estar ativa na
+ * entrega — taxa nunca gera pontos); fidelidade precisa estar ativa na
  * configuração; pontos <= 0 (valor zerado/negativo) não gera movimento.
  *
  * Nunca lança exceção que impeça o chamador de responder — mesma convenção
@@ -479,8 +638,14 @@ export type PedidoParaCreditoPontos = {
 export async function creditarPontosPedidoEntregue(pedido: PedidoParaCreditoPontos): Promise<void> {
   if (pedido.status !== "entregue" || !pedido.id) return;
 
-  const clienteId = pedido.clienteId || derivarClienteIdPorTelefone(pedido.telefone);
-  if (!clienteId) return; // sem cliente/telefone valido: nunca cria saldo orfao
+  const clienteId = derivarClienteIdPorTelefone(pedido.telefone);
+  if (!clienteId) return; // sem telefone valido: nunca gera pontos, nunca cria saldo orfao
+
+  if (pedido.clienteId && pedido.clienteId !== clienteId) {
+    console.warn(
+      `[ChefeBot] Fidelidade: clienteId do pedido ${pedido.id} (${pedido.clienteId}) diverge do telefone (${clienteId}) — usando o telefone como identidade canonica`
+    );
+  }
 
   const config = await obterConfigFidelidadePontos();
   if (!config.ativo) return;

@@ -248,34 +248,19 @@ async function salvarCancelamentoSolicitado(_phone: string, _session: BotSession
   await redis.set("pedidos", pedidos);
 }
 
+// NUNCA credita pontos de fidelidade aqui: "entregue" é reaproveitado só como
+// marcador de "conversa resolvida" para um pedido que ficou parado em "novo"
+// (nunca passou por preparo/entrega de verdade). Ver PR de ajuste da
+// estrategia oficial de fidelidade — creditar aqui geraria pontos para
+// pedidos que talvez nunca tenham sido realmente entregues.
 async function fecharEscalonamento(phone: string) {
   const pedidos = (await redis.get<Pedido[]>("pedidos")) || [];
-  const idsFechados = new Set(
-    pedidos.filter(p => p.telefone === phone && p.escalonado === true && p.status === "novo").map(p => p.id)
-  );
   const atualizados = pedidos.map(p =>
-    idsFechados.has(p.id) ? { ...p, status: "entregue" as const, escalonado: false } : p
+    p.telefone === phone && p.escalonado === true && p.status === "novo"
+      ? { ...p, status: "entregue" as const, escalonado: false }
+      : p
   );
   await redis.set("pedidos", atualizados);
-
-  // Fidelidade por pontos: idempotente por pedidoId e isolada em try/catch
-  // proprio — falha aqui nunca pode impedir o fechamento do escalonamento,
-  // que ja foi salvo acima.
-  for (const pedido of atualizados) {
-    if (!idsFechados.has(pedido.id)) continue;
-    try {
-      await creditarPontosPedidoEntregue({
-        id: pedido.id,
-        status: "entregue",
-        telefone: pedido.telefone,
-        clienteId: pedido.clienteId,
-        total: pedido.total,
-        taxaEntrega: pedido.taxaEntrega,
-      });
-    } catch (err) {
-      console.error("[ChefeBot] Erro ao creditar pontos de fidelidade (ignorado):", err);
-    }
-  }
 }
 
 async function enviarMensagem(phone: string, message: string, ritmoRapido = false) {
