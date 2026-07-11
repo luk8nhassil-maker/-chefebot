@@ -7,6 +7,8 @@ description: Padrão visual do Perfil do Cliente e da Fidelidade por pontos do C
 
 Referência viva para as telas voltadas ao cliente final autenticado (perfil + fidelidade), distinta do painel administrativo (`admin-ui`) e do cardápio público. Sempre que uma tela desta área for criada ou sofrer mudança visual relevante, seguir este padrão e atualizar esta Skill se o padrão evoluir.
 
+Para o grid de produtos do catálogo/cardápio (cards com foto, categorias, botão "+"), ver a Skill irmã `catalogo-ui` — ela reaproveita os mesmos tokens de cor definidos aqui.
+
 ## Decisão de marca desta área (diferente do resto do app)
 
 Esta área **não** usa o tema escuro/laranja do restante do produto (admin, cardápio). É uma decisão explícita e isolada:
