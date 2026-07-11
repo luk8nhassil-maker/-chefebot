@@ -60,7 +60,7 @@ function getInfoStatus(status: string, tipoEntrega: string): InfoStatus {
   if (tipoEntrega === 'retirada' || tipoEntrega === 'dine_in') {
     const map: Record<string, InfoStatus> = {
       novo:          { emoji: '⏳', label: 'Pedido recebido',       desc: 'Aguardando a pizzaria confirmar.',          color: 'var(--foreground-secondary)' },
-      em_preparo:    { emoji: '👨‍🍳', label: 'Em preparo',            desc: 'Estamos fazendo seu pedido com carinho!',   color: 'var(--primary-text)' },
+      em_preparo:    { emoji: '👨‍🍳', label: 'Em preparo',            desc: 'Estamos fazendo seu pedido com carinho!',   color: 'var(--brand-text)' },
       saiu_entrega:  { emoji: '✅', label: 'Pronto para retirada',  desc: 'Pode vir buscar — está te esperando!',      color: 'var(--success)' },
       entregue:      { emoji: '✓',  label: 'Retirado',              desc: 'Bom apetite!',                              color: 'var(--success)' },
       cancelado:     { emoji: '✗',  label: 'Cancelado',             desc: 'Entre em contato com a pizzaria.',           color: 'var(--danger)' },
@@ -71,8 +71,8 @@ function getInfoStatus(status: string, tipoEntrega: string): InfoStatus {
   // delivery
   const map: Record<string, InfoStatus> = {
     novo:         { emoji: '⏳', label: 'Pedido recebido',  desc: 'Aguardando a pizzaria começar o preparo.',  color: 'var(--foreground-secondary)' },
-    em_preparo:   { emoji: '👨‍🍳', label: 'Em preparo',      desc: 'Estamos fazendo seu pedido com carinho!',  color: 'var(--primary-text)' },
-    saiu_entrega: { emoji: '🛵', label: 'A caminho',        desc: 'Seu pedido está na rua!',                   color: 'var(--primary-text)' },
+    em_preparo:   { emoji: '👨‍🍳', label: 'Em preparo',      desc: 'Estamos fazendo seu pedido com carinho!',  color: 'var(--brand-text)' },
+    saiu_entrega: { emoji: '🛵', label: 'A caminho',        desc: 'Seu pedido está na rua!',                   color: 'var(--brand-text)' },
     entregue:     { emoji: '✓',  label: 'Entregue',         desc: 'Bom apetite!',                              color: 'var(--success)' },
     cancelado:    { emoji: '✗',  label: 'Cancelado',        desc: 'Entre em contato com a pizzaria.',           color: 'var(--danger)' },
   }
@@ -147,7 +147,7 @@ export default function RastrearPage({ params }: PageProps) {
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <span style={{ fontSize: '22px' }}>🍕</span>
           <div>
-            <div style={{ fontSize: '15px', fontWeight: 700, color: 'var(--primary-text)' }}>
+            <div style={{ fontSize: '15px', fontWeight: 700, color: 'var(--brand-text)' }}>
               {pedidoStatus?.numero ? `Pedido #${pedidoStatus.numero}` : 'Acompanhar Pedido'}
             </div>
             <div style={{ fontSize: '11px', color: 'var(--foreground-secondary)' }}>#{pedidoId}</div>
@@ -207,7 +207,7 @@ export default function RastrearPage({ params }: PageProps) {
             {pedidoStatus.itens.map((item, i) => (
               <div key={i} style={{ fontSize: '13px', color: 'var(--foreground)', paddingLeft: '8px', borderLeft: '2px solid var(--surface-elevated)', marginBottom: '3px' }}>{item}</div>
             ))}
-            <div style={{ marginTop: '8px', fontSize: '15px', fontWeight: 700, color: 'var(--primary-text)' }}>
+            <div style={{ marginTop: '8px', fontSize: '15px', fontWeight: 700, color: 'var(--brand-text)' }}>
               Total: R$ {pedidoStatus.total.toFixed(2).replace('.', ',')}
             </div>
           </div>

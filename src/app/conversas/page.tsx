@@ -16,7 +16,7 @@ type ConversaRecente = {
 
 const STATUS_COLOR: Record<StatusConversa, string> = {
   aguardando: "var(--danger)",
-  humano: "var(--primary)",
+  humano: "var(--brand-text)",
   robo: "var(--info)",
   finalizado: "var(--foreground-secondary)",
 }
@@ -450,7 +450,7 @@ export default function ConversasPage() {
 
         /* ── Título "Conversas" — força cor clara (inline style usa dark) ── */
         .cv-list-header > div > div:first-child > div:first-child {
-          color: var(--primary-text) !important;
+          color: var(--brand-text) !important;
           font-size: clamp(18px, 1.6vw, 24px) !important;
           letter-spacing: -0.5px !important;
         }
@@ -465,7 +465,7 @@ export default function ConversasPage() {
           border: none;
           border-radius: 22px;
           padding: 0 14px 0 38px;
-          color: var(--primary-text); font-size: 13px; font-weight: 600;
+          color: var(--brand-text); font-size: 13px; font-weight: 600;
           font-family: 'Archivo', sans-serif;
           box-shadow: 0 1px 4px rgba(0,0,0,.35) inset;
           transition: box-shadow .15s;
@@ -519,7 +519,7 @@ export default function ConversasPage() {
         }
         .cv-item-body { flex: 1; min-width: 0; }
         .cv-item-name {
-          font-size: 13.5px; font-weight: 800; color: var(--primary-text);
+          font-size: 13.5px; font-weight: 800; color: var(--brand-text);
           white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
         }
         .cv-item-preview {
@@ -557,7 +557,7 @@ export default function ConversasPage() {
         }
         .cv-chat-header-info { flex: 1; min-width: 0; }
         .cv-chat-header-name {
-          font-size: 14px; font-weight: 900; color: var(--primary-text);
+          font-size: 14px; font-weight: 900; color: var(--brand-text);
           white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
         }
         .cv-chat-header-sub { font-size: 11px; font-weight: 700; color: var(--foreground-muted); margin-top: 2px; }
@@ -672,7 +672,7 @@ export default function ConversasPage() {
           border: none;
           border-radius: 24px;
           padding: 11px 18px;
-          color: var(--primary-text); font-size: 13.5px; font-weight: 600;
+          color: var(--brand-text); font-size: 13.5px; font-weight: 600;
           font-family: 'Archivo', sans-serif; resize: none;
           line-height: 1.45;
           box-shadow: 0 1px 4px rgba(0,0,0,.35) inset;
@@ -716,7 +716,7 @@ export default function ConversasPage() {
         }
         .cv-badge-pix {
           font-size: 10px; font-weight: 900; padding: 3px 7px; border-radius: 20px;
-          background: color-mix(in srgb, var(--primary) 12%, transparent); color: var(--primary-text);
+          background: var(--attention-surface); color: var(--attention-text);
           white-space: nowrap;
         }
         .cv-dot {
@@ -750,7 +750,7 @@ export default function ConversasPage() {
                   )}
                   {humanoCount > 0 && (
                     <div style={{ background: "color-mix(in srgb, var(--primary) 8%, transparent)", border: "1px solid color-mix(in srgb, var(--primary) 22%, transparent)", borderRadius: 20, padding: "4px 10px" }}>
-                      <span style={{ fontSize: 11, fontWeight: 900, color: "var(--primary-text)" }}>{humanoCount}</span>
+                      <span style={{ fontSize: 11, fontWeight: 900, color: "var(--brand-text)" }}>{humanoCount}</span>
                     </div>
                   )}
                 </div>
@@ -796,7 +796,7 @@ export default function ConversasPage() {
                     onClick={() => setConversaSelecionada(c.phone)}
                     style={{ animationDelay: `${idx * 0.03}s` }}
                   >
-                    <div className="cv-item-avatar" style={{ background: `${cor}18`, border: `1.5px solid ${cor}44`, color: cor }}>
+                    <div className="cv-item-avatar" style={{ background: `color-mix(in srgb, ${cor} 9%, transparent)`, border: `1.5px solid color-mix(in srgb, ${cor} 27%, transparent)`, color: cor }}>
                       {getInitials(c.nome)}
                     </div>
                     <div className="cv-item-body">
@@ -807,7 +807,7 @@ export default function ConversasPage() {
                       <span className="cv-item-time">{formatRelTs(c.ultimaTs)}</span>
                       {pixPendente
                         ? <span className="cv-badge-pix">PIX⏳</span>
-                        : <span style={{ fontSize: 10, fontWeight: 900, padding: "3px 8px", borderRadius: 20, background: `${cor}12`, color: cor, border: `1px solid ${cor}30`, whiteSpace: "nowrap" }}>{STATUS_LABEL[c.status]}</span>
+                        : <span style={{ fontSize: 10, fontWeight: 900, padding: "3px 8px", borderRadius: 20, background: `color-mix(in srgb, ${cor} 7%, transparent)`, color: cor, border: `1px solid color-mix(in srgb, ${cor} 19%, transparent)`, whiteSpace: "nowrap" }}>{STATUS_LABEL[c.status]}</span>
                       }
                     </div>
                   </div>
@@ -859,7 +859,7 @@ export default function ConversasPage() {
                       <button className="cv-btn-back" onClick={() => setConversaSelecionada(null)} aria-label="Voltar">
                         ←
                       </button>
-                      <div className="cv-chat-header-avatar" style={{ background: `${cor}18`, color: cor, border: `1.5px solid ${cor}44` }}>
+                      <div className="cv-chat-header-avatar" style={{ background: `color-mix(in srgb, ${cor} 9%, transparent)`, color: cor, border: `1.5px solid color-mix(in srgb, ${cor} 27%, transparent)` }}>
                         {getInitials(nomeHeader)}
                       </div>
                       <div className="cv-chat-header-info">
@@ -867,7 +867,7 @@ export default function ConversasPage() {
                         <div className="cv-chat-header-sub">{conversaRecenteSelecionada.phone}</div>
                       </div>
                       <div className="cv-chat-header-actions">
-                        <span style={{ fontSize: 10, fontWeight: 900, padding: "3px 8px", borderRadius: 20, background: `${cor}12`, color: cor, border: `1px solid ${cor}30` }}>
+                        <span style={{ fontSize: 10, fontWeight: 900, padding: "3px 8px", borderRadius: 20, background: `color-mix(in srgb, ${cor} 7%, transparent)`, color: cor, border: `1px solid color-mix(in srgb, ${cor} 19%, transparent)` }}>
                           {STATUS_LABEL[conversaRecenteSelecionada.status]}
                         </span>
                         <a href={whatsappLink(conversaRecenteSelecionada.phone)} target="_blank" rel="noreferrer" className="cv-btn-wa">
@@ -901,7 +901,7 @@ export default function ConversasPage() {
 
                 {/* PIX warning strip */}
                 {pedidoSelecionado && temPixPendente(pedidoSelecionado) && (
-                  <div style={{ background: "color-mix(in srgb, var(--primary) 8%, transparent)", borderBottom: "1px solid color-mix(in srgb, var(--primary) 20%, transparent)", padding: "8px 18px", fontSize: 12, fontWeight: 800, color: "var(--primary-text)", flexShrink: 0 }}>
+                  <div style={{ background: "var(--attention-surface)", borderBottom: "1px solid var(--attention-border)", padding: "8px 18px", fontSize: 12, fontWeight: 800, color: "var(--attention-text)", flexShrink: 0 }}>
                     ⚠ Pix pendente de confirmação neste pedido
                   </div>
                 )}
@@ -993,7 +993,7 @@ export default function ConversasPage() {
 
             {temPixPendente(confirmando) && (
               <div style={{ background: "color-mix(in srgb, var(--primary) 7%, transparent)", border: "1px solid color-mix(in srgb, var(--primary) 22%, transparent)", borderRadius: 10, padding: "10px 14px" }}>
-                <div style={{ fontSize: 12, fontWeight: 900, color: "var(--primary-text)", marginBottom: 3 }}>⚠ Pix pendente</div>
+                <div style={{ fontSize: 12, fontWeight: 900, color: "var(--brand-text)", marginBottom: 3 }}>⚠ Pix pendente</div>
                 <div style={{ fontSize: 12, fontWeight: 600, color: "var(--foreground-secondary)", lineHeight: 1.5 }}>
                   Esse pedido aguarda confirmação de Pix. Finalizar removerá o atendimento da fila.
                 </div>
@@ -1013,7 +1013,7 @@ export default function ConversasPage() {
             <div style={{ fontSize: 13, fontWeight: 600, color: "var(--foreground-secondary)", lineHeight: 1.55 }}>
               Esse atendimento será removido da tela de conversas. Nenhuma mensagem será enviada ao cliente.
             </div>
-            <button onClick={() => finalizarAtendimento(confirmando)} style={{ height: 52, borderRadius: 13, background: "var(--success)", border: "1px solid color-mix(in srgb, var(--success) 30%, transparent)", color: "var(--success)", fontSize: 15, fontWeight: 900 }}>
+            <button onClick={() => finalizarAtendimento(confirmando)} style={{ height: 52, borderRadius: 13, background: "var(--success-surface)", border: "1px solid var(--success-border)", color: "var(--success-text)", fontSize: 15, fontWeight: 900 }}>
               Sim, finalizar
             </button>
             <button onClick={() => setConfirmando(null)} style={{ height: 42, background: "transparent", color: "var(--foreground-secondary)", fontSize: 13, fontWeight: 800, border: "none" }}>
@@ -1025,7 +1025,7 @@ export default function ConversasPage() {
 
       {/* Toast */}
       {toast && (
-        <div style={{ position: "fixed", bottom: "calc(env(safe-area-inset-bottom) + 80px)", left: "50%", transform: "translateX(-50%)", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14, padding: "12px 18px", fontSize: 13, fontWeight: 700, color: "var(--primary-text)", zIndex: 80, whiteSpace: "nowrap", maxWidth: "calc(100% - 32px)", fontFamily: "'Archivo', sans-serif", boxShadow: "0 4px 20px rgba(0,0,0,.4)" }}>
+        <div style={{ position: "fixed", bottom: "calc(env(safe-area-inset-bottom) + 80px)", left: "50%", transform: "translateX(-50%)", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14, padding: "12px 18px", fontSize: 13, fontWeight: 700, color: "var(--brand-text)", zIndex: 80, whiteSpace: "nowrap", maxWidth: "calc(100% - 32px)", fontFamily: "'Archivo', sans-serif", boxShadow: "0 4px 20px rgba(0,0,0,.4)" }}>
           {toast}
         </div>
       )}

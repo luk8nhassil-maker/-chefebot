@@ -721,7 +721,7 @@ export default function ConfiguracoesPage() {
                       <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(var(--overlay-rgb), 0.04)', borderRadius: 10, padding: '10px 12px' }}>
                         <span style={{ color: TEXT, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, marginRight: 8 }}>{n.name}</span>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
-                          <span style={{ color: 'var(--primary-text)', fontSize: 13, fontWeight: 800 }}>R$ {n.fee.toFixed(2).replace('.', ',')}</span>
+                          <span style={{ color: 'var(--brand-text)', fontSize: 13, fontWeight: 800 }}>R$ {n.fee.toFixed(2).replace('.', ',')}</span>
                           <button onClick={() => removerBairro(i)} style={btnRemoveRow}>×</button>
                         </div>
                       </div>

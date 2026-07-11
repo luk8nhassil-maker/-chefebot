@@ -33,6 +33,7 @@ export default function PanelShell({
   const onRelatorios = pathname.startsWith("/relatorios")
 
   const convBadgeColor = conversasUrgent ? "var(--danger)" : "var(--primary)"
+  const convBadgeForeground = conversasUrgent ? "var(--on-danger)" : "var(--primary-foreground)"
 
   return (
     <>
@@ -76,7 +77,7 @@ export default function PanelShell({
             text-align: left; width: 100%;
           }
           .ps-sidebar-btn:hover { background: rgba(var(--overlay-rgb), 0.04); }
-          .ps-sidebar-btn.ps-active { color: var(--primary-text); background: color-mix(in srgb, var(--primary) 8%, transparent); }
+          .ps-sidebar-btn.ps-active { color: var(--text-primary); background: var(--primary-soft); }
           .ps-bottom-nav { display: none; }
           .ps-content { margin-left: 220px; padding-bottom: 40px; min-height: 100vh; }
         }
@@ -119,7 +120,7 @@ export default function PanelShell({
         <button className={`ps-sidebar-btn${onConversas ? " ps-active" : ""}`} onClick={() => router.push("/conversas")}>
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="14" rx="5" stroke="currentColor" strokeWidth="2.2"/><circle cx="8.5" cy="11" r="1.3" fill="currentColor"/><circle cx="12" cy="11" r="1.3" fill="currentColor"/><circle cx="15.5" cy="11" r="1.3" fill="currentColor"/></svg>
           Conversas
-          {conversasCount > 0 && <span style={{ marginLeft: "auto", minWidth: 20, height: 20, borderRadius: 10, background: convBadgeColor, color: "var(--foreground)", fontSize: 10, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 5px" }}>{conversasCount}</span>}
+          {conversasCount > 0 && <span style={{ marginLeft: "auto", minWidth: 20, height: 20, borderRadius: 10, background: convBadgeColor, color: convBadgeForeground, fontSize: 10, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 5px" }}>{conversasCount}</span>}
         </button>
         <button className={`ps-sidebar-btn${onCardapio ? " ps-active" : ""}`} onClick={() => router.push("/cardapio")}>
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><rect x="4" y="4" width="7" height="7" rx="2" stroke="currentColor" strokeWidth="2.2"/><rect x="13" y="4" width="7" height="7" rx="2" stroke="currentColor" strokeWidth="2.2"/><rect x="4" y="13" width="7" height="7" rx="2" stroke="currentColor" strokeWidth="2.2"/><rect x="13" y="13" width="7" height="7" rx="2" stroke="currentColor" strokeWidth="2.2"/></svg>
@@ -152,25 +153,26 @@ export default function PanelShell({
         )}
       </nav>
 
-      {/* Mobile: fixed bottom nav */}
+      {/* Mobile: fixed bottom nav — ícone amarelo quando ativo, mas o label
+          NUNCA fica amarelo (texto sempre --text-primary/--text-muted). */}
       <nav className="ps-bottom-nav">
         <button className="ps-nav-btn" onClick={() => router.push("/pedidos")}>
           <span style={{ position: "relative", display: "flex" }}>
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="4" y="3" width="16" height="18" rx="3" stroke={onPedidos ? "var(--primary)" : "var(--foreground-muted)"} strokeWidth="2.2"/><line x1="8" y1="9" x2="16" y2="9" stroke={onPedidos ? "var(--primary)" : "var(--foreground-muted)"} strokeWidth="2.2" strokeLinecap="round"/><line x1="8" y1="14" x2="13" y2="14" stroke={onPedidos ? "var(--primary)" : "var(--foreground-muted)"} strokeWidth="2.2" strokeLinecap="round"/></svg>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="4" y="3" width="16" height="18" rx="3" stroke={onPedidos ? "var(--primary)" : "var(--text-muted)"} strokeWidth="2.2"/><line x1="8" y1="9" x2="16" y2="9" stroke={onPedidos ? "var(--primary)" : "var(--text-muted)"} strokeWidth="2.2" strokeLinecap="round"/><line x1="8" y1="14" x2="13" y2="14" stroke={onPedidos ? "var(--primary)" : "var(--text-muted)"} strokeWidth="2.2" strokeLinecap="round"/></svg>
             {pedidosCount > 0 && <span style={{ position: "absolute", top: -5, right: -9, minWidth: 17, height: 17, borderRadius: 9, background: "var(--primary)", color: 'var(--primary-foreground)', fontSize: 10.5, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 4px" }}>{pedidosCount}</span>}
           </span>
-          <span style={{ fontSize: 11, fontWeight: onPedidos ? 900 : 800, color: onPedidos ? "var(--primary)" : "var(--foreground-muted)" }}>Pedidos</span>
+          <span style={{ fontSize: 11, fontWeight: onPedidos ? 900 : 800, color: onPedidos ? "var(--text-primary)" : "var(--text-muted)" }}>Pedidos</span>
         </button>
         <button className="ps-nav-btn" onClick={() => router.push("/conversas")}>
           <span style={{ position: "relative", display: "flex" }}>
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="14" rx="5" stroke={onConversas ? "var(--primary)" : "var(--foreground-muted)"} strokeWidth="2.2"/><circle cx="8.5" cy="11" r="1.4" fill={onConversas ? "var(--primary)" : "var(--foreground-muted)"}/><circle cx="12" cy="11" r="1.4" fill={onConversas ? "var(--primary)" : "var(--foreground-muted)"}/><circle cx="15.5" cy="11" r="1.4" fill={onConversas ? "var(--primary)" : "var(--foreground-muted)"}/></svg>
-            {conversasCount > 0 && <span style={{ position: "absolute", top: -5, right: -9, minWidth: 17, height: 17, borderRadius: 9, background: convBadgeColor, color: "var(--foreground)", fontSize: 10.5, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 4px" }}>{conversasCount}</span>}
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="14" rx="5" stroke={onConversas ? "var(--primary)" : "var(--text-muted)"} strokeWidth="2.2"/><circle cx="8.5" cy="11" r="1.4" fill={onConversas ? "var(--primary)" : "var(--text-muted)"}/><circle cx="12" cy="11" r="1.4" fill={onConversas ? "var(--primary)" : "var(--text-muted)"}/><circle cx="15.5" cy="11" r="1.4" fill={onConversas ? "var(--primary)" : "var(--text-muted)"}/></svg>
+            {conversasCount > 0 && <span style={{ position: "absolute", top: -5, right: -9, minWidth: 17, height: 17, borderRadius: 9, background: convBadgeColor, color: convBadgeForeground, fontSize: 10.5, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 4px" }}>{conversasCount}</span>}
           </span>
-          <span style={{ fontSize: 11, fontWeight: onConversas ? 900 : 800, color: onConversas ? "var(--primary)" : "var(--foreground-muted)" }}>Conversas</span>
+          <span style={{ fontSize: 11, fontWeight: onConversas ? 900 : 800, color: onConversas ? "var(--text-primary)" : "var(--text-muted)" }}>Conversas</span>
         </button>
         <button className="ps-nav-btn" onClick={() => router.push("/cardapio")}>
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="4" y="4" width="7" height="7" rx="2" stroke={onCardapio ? "var(--primary)" : "var(--foreground-muted)"} strokeWidth="2.2"/><rect x="13" y="4" width="7" height="7" rx="2" stroke={onCardapio ? "var(--primary)" : "var(--foreground-muted)"} strokeWidth="2.2"/><rect x="4" y="13" width="7" height="7" rx="2" stroke={onCardapio ? "var(--primary)" : "var(--foreground-muted)"} strokeWidth="2.2"/><rect x="13" y="13" width="7" height="7" rx="2" stroke={onCardapio ? "var(--primary)" : "var(--foreground-muted)"} strokeWidth="2.2"/></svg>
-          <span style={{ fontSize: 11, fontWeight: onCardapio ? 900 : 800, color: onCardapio ? "var(--primary)" : "var(--foreground-muted)" }}>Cardápio</span>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="4" y="4" width="7" height="7" rx="2" stroke={onCardapio ? "var(--primary)" : "var(--text-muted)"} strokeWidth="2.2"/><rect x="13" y="4" width="7" height="7" rx="2" stroke={onCardapio ? "var(--primary)" : "var(--text-muted)"} strokeWidth="2.2"/><rect x="4" y="13" width="7" height="7" rx="2" stroke={onCardapio ? "var(--primary)" : "var(--text-muted)"} strokeWidth="2.2"/><rect x="13" y="13" width="7" height="7" rx="2" stroke={onCardapio ? "var(--primary)" : "var(--text-muted)"} strokeWidth="2.2"/></svg>
+          <span style={{ fontSize: 11, fontWeight: onCardapio ? 900 : 800, color: onCardapio ? "var(--text-primary)" : "var(--text-muted)" }}>Cardápio</span>
         </button>
       </nav>
 

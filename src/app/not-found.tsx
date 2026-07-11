@@ -107,7 +107,7 @@ export default function NotFound() {
         }
 
         .nf-link {
-          color: var(--primary-text);
+          color: var(--brand-text);
           font-family: 'Archivo', sans-serif;
           font-size: 15px;
           font-weight: 700;

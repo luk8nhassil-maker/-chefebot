@@ -35,6 +35,12 @@
   --foreground: #192230;
   --foreground-secondary: #3d474e;
   --foreground-muted: #66727c;
+  /* Aliases nomeados por função (mesmo valor de --foreground*) — use qualquer
+     um dos dois pares, não crie um terceiro. */
+  --text-primary: var(--foreground);
+  --text-secondary: var(--foreground-secondary);
+  --text-muted: var(--foreground-muted);
+  --text-disabled: #9ca3af;
 
   /* Bordas */
   --border: #dce1e6;
@@ -48,31 +54,51 @@
   /* superfície suave da marca — para item ativo de navegação, chips leves */
   --primary-soft: #fff6cc;
   --primary-soft-foreground: #7a5c00;
-  /* TEXTO/ícone com cor de marca. NUNCA usar --primary puro como texto sobre
-     fundo claro (amarelo ilegível). Este token é ouro-escuro no Light e
-     amarelo no Dark — legível como texto/ícone nos dois temas. */
-  --primary-text: #7a5c00;
+  /* TEXTO/ícone com cor de marca em detalhes pequenos e estratégicos.
+     NUNCA usar --primary puro como cor de tipografia comum (título, nome de
+     produto, valor, descrição) — o amarelo é identidade/ação, não texto.
+     Ouro-escuro no Light (contraste sobre branco), amarelo claro no Dark. */
+  --brand-text: #6b5700;
 
   /* Ação secundária (navy) */
   --secondary: #192230;
   --secondary-hover: #2c2f38;
   --secondary-foreground: #ffffff;
 
-  /* Status — cor sólida */
+  /* Status — cor sólida (ícones, dots, indicadores) */
   --success: #16a34a;
   --danger: #dc2626;
   --info: #2563eb;
   --attention: #7c3aed;
 
-  /* Status — superfície suave + texto sobre ela (contraste alto) */
-  --success-soft: #dcfce7;
-  --success-soft-foreground: #166534;
-  --danger-soft: #fee2e2;
-  --danger-soft-foreground: #991b1b;
-  --info-soft: #dbeafe;
-  --info-soft-foreground: #1e40af;
-  --attention-soft: #ede9fe;
-  --attention-soft-foreground: #5b21b6;
+  /* Status — texto / superfície suave / borda discreta (badges, alerts) */
+  --success-text: #166534;
+  --success-surface: #dcfce7;
+  --success-border: #86efac;
+  --danger-text: #b91c1c;
+  --danger-surface: #fef2f2;
+  --danger-border: #fca5a5;
+  --info-text: #1d4ed8;
+  --info-surface: #eff6ff;
+  --info-border: #93c5fd;
+  --attention-text: #6d28d9;
+  --attention-surface: #f5f3ff;
+  --attention-border: #c4b5fd;
+  /* Aliases de compatibilidade (nomes antigos usados no código existente). */
+  --success-soft: var(--success-surface);
+  --success-soft-foreground: var(--success-text);
+  --danger-soft: var(--danger-surface);
+  --danger-soft-foreground: var(--danger-text);
+  --info-soft: var(--info-surface);
+  --info-soft-foreground: var(--info-text);
+  --attention-soft: var(--attention-surface);
+  --attention-soft-foreground: var(--attention-text);
+
+  /* Texto sobre uma cor sólida (contraste garantido). */
+  --on-primary: var(--primary-foreground);
+  --on-secondary: var(--secondary-foreground);
+  --on-danger: #ffffff;
+  --on-success: #ffffff;
 
   /* Desabilitado / neutro */
   --disabled-background: #e5e7eb;
@@ -111,6 +137,10 @@
   --foreground: #f8fafc;
   --foreground-secondary: #d1d5db;
   --foreground-muted: #9ca3af;
+  --text-primary: var(--foreground);
+  --text-secondary: var(--foreground-secondary);
+  --text-muted: var(--foreground-muted);
+  --text-disabled: #6b7280;
 
   --border: #3d474e;
   --border-strong: #59636b;
@@ -121,7 +151,9 @@
   --primary-foreground: #192230;
   --primary-soft: rgba(255, 205, 0, 0.14);
   --primary-soft-foreground: #ffcd00;
-  --primary-text: #ffcd00;
+  /* Amarelo claro — tem contraste suficiente sobre superfícies escuras, ainda
+     assim reservado a detalhes estratégicos (nunca corpo de texto comum). */
+  --brand-text: #ffda3d;
 
   --secondary: #3d474e;
   --secondary-hover: #4b565e;
@@ -132,14 +164,32 @@
   --info: #60a5fa;
   --attention: #a78bfa;
 
-  --success-soft: rgba(22, 163, 74, 0.16);
-  --success-soft-foreground: #4ade80;
-  --danger-soft: rgba(220, 38, 38, 0.16);
-  --danger-soft-foreground: #fca5a5;
-  --info-soft: rgba(37, 99, 235, 0.16);
-  --info-soft-foreground: #93c5fd;
-  --attention-soft: rgba(124, 58, 237, 0.16);
-  --attention-soft-foreground: #c4b5fd;
+  --success-text: #86efac;
+  --success-surface: rgba(34, 197, 94, 0.14);
+  --success-border: rgba(134, 239, 172, 0.35);
+  --danger-text: #fca5a5;
+  --danger-surface: rgba(239, 68, 68, 0.14);
+  --danger-border: rgba(252, 165, 165, 0.35);
+  --info-text: #93c5fd;
+  --info-surface: rgba(59, 130, 246, 0.14);
+  --info-border: rgba(147, 197, 253, 0.35);
+  --attention-text: #c4b5fd;
+  --attention-surface: rgba(139, 92, 246, 0.14);
+  --attention-border: rgba(196, 181, 253, 0.35);
+  --success-soft: var(--success-surface);
+  --success-soft-foreground: var(--success-text);
+  --danger-soft: var(--danger-surface);
+  --danger-soft-foreground: var(--danger-text);
+  --info-soft: var(--info-surface);
+  --info-soft-foreground: var(--info-text);
+  --attention-soft: var(--attention-surface);
+  --attention-soft-foreground: var(--attention-text);
+
+  --on-primary: var(--primary-foreground);
+  --on-secondary: var(--secondary-foreground);
+  --on-danger: #ffffff;
+  /* Verde escuro/saturado do Dark pede texto navy, não branco, pra contraste. */
+  --on-success: #192230;
 
   --disabled-background: #343a43;
   --disabled-foreground: #6b7280;

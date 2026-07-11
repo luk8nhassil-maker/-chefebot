@@ -112,7 +112,7 @@ export default function EntregadorPage() {
     return (
       <div style={{ background: 'var(--background)', minHeight: '100dvh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '24px', fontFamily: 'Archivo, sans-serif' }}>
         <div style={{ fontSize: '48px', marginBottom: '16px' }}>🛵</div>
-        <h1 style={{ color: 'var(--primary-text)', fontSize: '24px', fontWeight: 700, marginBottom: '8px', textAlign: 'center' }}>Área do Entregador</h1>
+        <h1 style={{ color: 'var(--brand-text)', fontSize: '24px', fontWeight: 700, marginBottom: '8px', textAlign: 'center' }}>Área do Entregador</h1>
         <p style={{ color: 'var(--foreground-secondary)', fontSize: '14px', marginBottom: '32px', textAlign: 'center' }}>Digite seu código de acesso</p>
         <input
           value={inputId}
@@ -136,7 +136,7 @@ export default function EntregadorPage() {
       <div style={{ background: 'var(--surface)', borderBottom: '1px solid var(--surface-secondary)', padding: '16px 20px', display: 'flex', alignItems: 'center', gap: '12px', position: 'sticky', top: 0, zIndex: 10 }}>
         <span style={{ fontSize: '24px' }}>🛵</span>
         <div>
-          <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--primary-text)' }}>Meus Pedidos</div>
+          <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--brand-text)' }}>Meus Pedidos</div>
           <div style={{ fontSize: '12px', color: 'var(--foreground-secondary)' }}>ID: {entregadorId}</div>
         </div>
         <button
@@ -170,7 +170,7 @@ export default function EntregadorPage() {
             key={pedido.pedidoId}
             style={{
               background: 'var(--surface)',
-              border: `1px solid ${pedido.status === 'entregue' ? 'var(--success-soft)' : pedido.status === 'em_rota' ? 'var(--surface)' : 'var(--surface-secondary)'}`,
+              border: `1px solid ${pedido.status === 'entregue' ? 'var(--success-border)' : pedido.status === 'em_rota' ? 'var(--primary)' : 'var(--attention-border)'}`,
               borderRadius: '14px',
               padding: '18px',
               marginBottom: '16px',
@@ -178,10 +178,10 @@ export default function EntregadorPage() {
           >
             {/* Status badge */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-              <span style={{ fontSize: '12px', fontWeight: 700, padding: '4px 10px', borderRadius: '20px', background: pedido.status === 'entregue' ? 'var(--success-soft)' : pedido.status === 'em_rota' ? 'var(--surface)' : 'var(--surface-secondary)', color: pedido.status === 'entregue' ? 'var(--success)' : pedido.status === 'em_rota' ? 'var(--primary)' : 'var(--foreground-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+              <span style={{ fontSize: '12px', fontWeight: 700, padding: '4px 10px', borderRadius: '20px', background: pedido.status === 'entregue' ? 'var(--success-surface)' : pedido.status === 'em_rota' ? 'var(--primary-soft)' : 'var(--attention-surface)', color: pedido.status === 'entregue' ? 'var(--success-text)' : pedido.status === 'em_rota' ? 'var(--brand-text)' : 'var(--attention-text)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
                 {pedido.status === 'entregue' ? '✓ Entregue' : pedido.status === 'em_rota' ? '🛵 Em Rota' : '⏳ Pendente'}
               </span>
-              <span style={{ color: 'var(--primary-text)', fontWeight: 700, fontSize: '18px' }}>R$ {pedido.total.toFixed(2).replace('.', ',')}</span>
+              <span style={{ color: 'var(--brand-text)', fontWeight: 700, fontSize: '18px' }}>R$ {pedido.total.toFixed(2).replace('.', ',')}</span>
             </div>
 
             {/* Cliente */}
@@ -215,7 +215,7 @@ export default function EntregadorPage() {
             )}
             {pedido.status === 'em_rota' && rastreando === pedido.pedidoId && (
               <div>
-                <div style={{ background: 'var(--background)', borderRadius: '8px', padding: '8px 12px', marginBottom: '10px', fontSize: '12px', color: 'var(--primary-text)', textAlign: 'center' }}>
+                <div style={{ background: 'var(--background)', borderRadius: '8px', padding: '8px 12px', marginBottom: '10px', fontSize: '12px', color: 'var(--brand-text)', textAlign: 'center' }}>
                   📡 GPS ativo — transmitindo localização
                 </div>
                 <button

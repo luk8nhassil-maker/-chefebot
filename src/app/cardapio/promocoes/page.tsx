@@ -136,7 +136,7 @@ export default function PromocoesPage() {
   if (!autorizado) return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, background: "var(--background)", color: "var(--foreground)", fontFamily: "system-ui" }}>
       <p>Acesso restrito à equipe.</p>
-      <a href="/login?callbackUrl=/cardapio/promocoes" style={{ color: "var(--primary-text)" }}>Fazer login</a>
+      <a href="/login?callbackUrl=/cardapio/promocoes" style={{ color: "var(--brand-text)" }}>Fazer login</a>
     </div>
   );
 
@@ -210,7 +210,7 @@ export default function PromocoesPage() {
           <label style={labelStyle}>Produto principal (do cardápio)</label>
           {selectProduto(form.mainProductId, (v) => setForm({ ...form, mainProductId: v }), false)}
           {form.mainProductId && nomeEsgotado(prod(form.mainProductId)?.productName || "") && (
-            <div style={{ color: "var(--primary-text)", fontSize: 12, marginTop: 4 }}>⚠️ Este produto está esgotado — a promoção ficará oculta no cardápio enquanto isso.</div>
+            <div style={{ color: "var(--brand-text)", fontSize: 12, marginTop: 4 }}>⚠️ Este produto está esgotado — a promoção ficará oculta no cardápio enquanto isso.</div>
           )}
           <label style={labelStyle}>Quantidade</label>
           <input type="number" min={1} value={form.mainQuantity} onChange={(e) => setForm({ ...form, mainQuantity: Math.max(1, parseInt(e.target.value || "1", 10)) })} style={inputStyle} />
@@ -219,7 +219,7 @@ export default function PromocoesPage() {
           <label style={labelStyle}>Item grátis (brinde)</label>
           {selectProduto(form.freeProductId, (v) => setForm({ ...form, freeProductId: v }), true)}
           {form.freeProductId && nomeEsgotado(prod(form.freeProductId)?.productName || "") && (
-            <div style={{ color: "var(--primary-text)", fontSize: 12, marginTop: 4 }}>⚠️ Brinde esgotado — a promoção ficará oculta enquanto isso.</div>
+            <div style={{ color: "var(--brand-text)", fontSize: 12, marginTop: 4 }}>⚠️ Brinde esgotado — a promoção ficará oculta enquanto isso.</div>
           )}
           {form.freeProductId && (<><label style={labelStyle}>Quantidade do brinde</label>
             <input type="number" min={1} value={form.freeQuantity} onChange={(e) => setForm({ ...form, freeQuantity: Math.max(1, parseInt(e.target.value || "1", 10)) })} style={inputStyle} /></>)}
@@ -244,10 +244,12 @@ export default function PromocoesPage() {
 
           {/* Prévia */}
           <div style={{ margin: "16px 0 4px", fontSize: 11, fontWeight: 800, color: "var(--foreground-secondary)", textTransform: "uppercase", letterSpacing: ".5px" }}>Prévia do card no cardápio</div>
-          <div style={{ background: "linear-gradient(145deg,color-mix(in srgb, var(--danger-soft) 78%, transparent),color-mix(in srgb, var(--danger-soft) 98%, transparent))", border: "1px solid color-mix(in srgb, var(--primary) 28%, transparent)", borderRadius: 18, padding: 16 }}>
-            <div style={{ fontSize: 10.5, fontWeight: 800, color: "var(--primary-text)", letterSpacing: "1px", marginBottom: 6 }}>{form.badge || "PROMO DE HOJE"}</div>
-            <div style={{ fontSize: 20, fontWeight: 850, color: "var(--primary-text)", marginBottom: 5 }}>{form.title || "Nome da promoção"}</div>
-            <div style={{ fontSize: 13, color: "var(--primary-text)", marginBottom: 10 }}>{form.description || "Descrição curta"}{previewPreco !== null ? ` · ${money(previewPreco)}` : ""}</div>
+          {/* Prévia é sempre um "poster" escuro (navy/graphite), independente do
+              tema da tela de admin — texto usa valores fixos claros. */}
+          <div style={{ background: "linear-gradient(145deg,rgba(44,47,56,.9),rgba(25,34,48,.98) 58%,#192230)", border: "1px solid color-mix(in srgb, var(--primary) 28%, transparent)", borderRadius: 18, padding: 16 }}>
+            <div style={{ fontSize: 10.5, fontWeight: 800, color: "#ffda3d", letterSpacing: "1px", marginBottom: 6 }}>{form.badge || "PROMO DE HOJE"}</div>
+            <div style={{ fontSize: 20, fontWeight: 850, color: "#f8fafc", marginBottom: 5 }}>{form.title || "Nome da promoção"}</div>
+            <div style={{ fontSize: 13, color: "#d1d5db", marginBottom: 10 }}>{form.description || "Descrição curta"}{previewPreco !== null ? ` · ${money(previewPreco)}` : ""}</div>
             <div style={{ display: "inline-block", background: "var(--primary)", color: 'var(--primary-foreground)', borderRadius: 10, padding: "9px 14px", fontSize: 13, fontWeight: 800 }}>{form.buttonText || "Pedir essa promoção →"}</div>
           </div>
 

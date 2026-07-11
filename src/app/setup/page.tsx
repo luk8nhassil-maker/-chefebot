@@ -345,7 +345,7 @@ function Step5WhatsApp({ onNext, onBack }: { onNext: () => void; onBack: () => v
             <img
               src={qr}
               alt="QR Code WhatsApp"
-              style={{ width: 220, height: 220, borderRadius: 20, display: 'block', border: `2px solid ${ACCENT}20`, filter: timedOut ? 'blur(5px) brightness(.25)' : 'none', transition: 'filter .3s' }}
+              style={{ width: 220, height: 220, borderRadius: 20, display: 'block', border: `2px solid color-mix(in srgb, ${ACCENT} 13%, transparent)`, filter: timedOut ? 'blur(5px) brightness(.25)' : 'none', transition: 'filter .3s' }}
             />
             {timedOut && (
               <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6 }}>

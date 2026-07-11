@@ -35,7 +35,7 @@ export default function ConversasError({
             background: "color-mix(in srgb, var(--primary) 15%, transparent)",
             border: "1px solid color-mix(in srgb, var(--primary) 30%, transparent)",
             borderRadius: 12,
-            color: "var(--primary-text)",
+            color: "var(--brand-text)",
             fontSize: 13,
             fontWeight: 800,
             padding: "10px 24px",

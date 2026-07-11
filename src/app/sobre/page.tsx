@@ -179,7 +179,7 @@ export default function SobrePage() {
           padding: 5px 14px 5px 10px;
           font-size: 12px;
           font-weight: 700;
-          color: var(--primary-text);
+          color: var(--brand-text);
           letter-spacing: 0.4px;
           text-transform: uppercase;
           margin-bottom: 28px;
@@ -204,7 +204,7 @@ export default function SobrePage() {
           margin-left: auto;
           margin-right: auto;
         }
-        .hero-h1 span { color: var(--primary-text); }
+        .hero-h1 span { color: var(--brand-text); }
         .hero-sub {
           color: var(--foreground-secondary);
           font-size: clamp(15px, 3vw, 18px);
@@ -286,7 +286,7 @@ export default function SobrePage() {
           font-weight: 700;
           letter-spacing: 2px;
           text-transform: uppercase;
-          color: var(--primary-text);
+          color: var(--brand-text);
           margin-bottom: 14px;
           opacity: 0.85;
         }
@@ -370,7 +370,7 @@ export default function SobrePage() {
           font-family: 'Archivo Black', 'Archivo', sans-serif;
           font-size: 13px;
           font-weight: 900;
-          color: var(--primary-text);
+          color: var(--brand-text);
           background: color-mix(in srgb, var(--primary) 8%, transparent);
           border: 1px solid color-mix(in srgb, var(--primary) 15%, transparent);
           border-radius: 10px;
@@ -517,7 +517,7 @@ export default function SobrePage() {
           transform: translateY(-2px);
         }
         .testi-stars {
-          color: var(--primary-text);
+          color: var(--brand-text);
           font-size: 14px;
           letter-spacing: 3px;
           margin-bottom: 16px;

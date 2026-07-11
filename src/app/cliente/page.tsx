@@ -127,7 +127,7 @@ export default function ClientePage() {
       <div style={{ background: 'var(--surface)', borderBottom: '1px solid var(--surface-secondary)', padding: '12px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <span style={{ fontSize: 22 }}>🍕</span>
-          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--primary-text)' }}>Sua fidelidade</div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--brand-text)' }}>Sua fidelidade</div>
         </div>
         <a href="/cardapio" style={{ fontSize: 13, color: 'var(--foreground-secondary)', textDecoration: 'none' }}>← Cardápio</a>
       </div>

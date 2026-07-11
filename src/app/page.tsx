@@ -48,7 +48,7 @@ export default function LandingPage() {
 
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, opacity: visible ? 1 : 0, transition: "opacity 0.8s 0.6s" }}>
           <a href={ctaLink} target="_blank" rel="noopener noreferrer"
-            style={{ display: "inline-flex", alignItems: "center", gap: 10, background: "var(--whatsapp)", color: "var(--foreground)", padding: "16px 32px", borderRadius: 14, fontSize: 17, fontWeight: 800, textDecoration: "none", boxShadow: "0 4px 24px color-mix(in srgb, var(--whatsapp) 40%, transparent)" }}>
+            style={{ display: "inline-flex", alignItems: "center", gap: 10, background: "var(--whatsapp)", color: "var(--whatsapp-foreground)", padding: "16px 32px", borderRadius: 14, fontSize: 17, fontWeight: 800, textDecoration: "none", boxShadow: "0 4px 24px color-mix(in srgb, var(--whatsapp) 40%, transparent)" }}>
             <WhatsAppIcon />
             Quero para minha pizzaria
           </a>
@@ -56,12 +56,12 @@ export default function LandingPage() {
         </div>
 
         {/* Mockup animado */}
-        <div style={{ marginTop: 60, width: "100%", maxWidth: 340, background: "var(--primary)", borderRadius: 20, overflow: "hidden", boxShadow: "0 20px 60px rgba(0,0,0,0.5)", opacity: visible ? 1 : 0, transition: "opacity 0.8s 0.8s" }}>
+        <div style={{ marginTop: 60, width: "100%", maxWidth: 340, background: "#ece5dd", borderRadius: 20, overflow: "hidden", boxShadow: "0 20px 60px rgba(0,0,0,0.5)", opacity: visible ? 1 : 0, transition: "opacity 0.8s 0.8s" }}>
           <div style={{ background: "var(--whatsapp)", padding: "12px 16px", display: "flex", alignItems: "center", gap: 10 }}>
             <div style={{ width: 36, height: 36, borderRadius: "50%", background: "var(--whatsapp)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>🍕</div>
             <div>
-              <p style={{ color: "var(--foreground)", fontWeight: 700, margin: 0, fontSize: 14 }}>Chefe da Pizza</p>
-              <p style={{ color: "rgba(var(--overlay-rgb), 0.6)", margin: 0, fontSize: 11 }}>online agora</p>
+              <p style={{ color: "var(--whatsapp-foreground)", fontWeight: 700, margin: 0, fontSize: 14 }}>Chefe da Pizza</p>
+              <p style={{ color: "rgba(255,255,255,0.75)", margin: 0, fontSize: 11 }}>online agora</p>
             </div>
           </div>
           <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 8, minHeight: 280 }}>
@@ -87,7 +87,7 @@ export default function LandingPage() {
 
       {/* DOR */}
       <section style={{ padding: "80px 24px", background: "var(--surface)", textAlign: "center" }}>
-        <p style={{ color: "var(--primary-text)", fontWeight: 700, fontSize: 13, letterSpacing: 2, textTransform: "uppercase", marginBottom: 16 }}>O problema que todo dono de pizzaria conhece</p>
+        <p style={{ color: "var(--brand-text)", fontWeight: 700, fontSize: 13, letterSpacing: 2, textTransform: "uppercase", marginBottom: 16 }}>O problema que todo dono de pizzaria conhece</p>
         <h2 style={{ fontSize: "clamp(24px, 5vw, 42px)", fontWeight: 900, maxWidth: 600, margin: "0 auto 48px", lineHeight: 1.2 }}>
           Seu cliente odeia clicar em link para fazer pedido.
         </h2>
@@ -132,7 +132,7 @@ export default function LandingPage() {
 
       {/* INCLUSO */}
       <section style={{ padding: "80px 24px", background: "var(--surface)", textAlign: "center" }}>
-        <p style={{ color: "var(--primary-text)", fontWeight: 700, fontSize: 13, letterSpacing: 2, textTransform: "uppercase", marginBottom: 16 }}>Tudo incluso</p>
+        <p style={{ color: "var(--brand-text)", fontWeight: 700, fontSize: 13, letterSpacing: 2, textTransform: "uppercase", marginBottom: 16 }}>Tudo incluso</p>
         <h2 style={{ fontSize: "clamp(24px, 5vw, 38px)", fontWeight: 900, maxWidth: 500, margin: "0 auto 48px", lineHeight: 1.2 }}>
           Plug and play. Instala hoje, vende amanhã.
         </h2>
@@ -166,10 +166,10 @@ export default function LandingPage() {
             <p style={{ color: "var(--whatsapp)", fontSize: 13, fontWeight: 700, margin: 0 }}>🎁 Instalação gratuita para os 3 primeiros clientes</p>
           </div>
           <p style={{ color: "rgba(var(--overlay-rgb), 0.4)", fontSize: 14, margin: "0 0 8px" }}>por pizzaria / por mês</p>
-          <p style={{ color: "var(--primary-text)", fontSize: 64, fontWeight: 900, margin: "0 0 4px", lineHeight: 1 }}>R$150</p>
+          <p style={{ color: "var(--brand-text)", fontSize: 64, fontWeight: 900, margin: "0 0 4px", lineHeight: 1 }}>R$150</p>
           <p style={{ color: "rgba(var(--overlay-rgb), 0.4)", fontSize: 13, margin: "0 0 32px" }}>sem taxa de instalação · sem contrato</p>
           <a href={ctaLink} target="_blank" rel="noopener noreferrer"
-            style={{ display: "block", background: "var(--whatsapp)", color: "var(--foreground)", padding: "16px 0", borderRadius: 12, fontSize: 16, fontWeight: 800, textDecoration: "none", boxShadow: "0 4px 20px color-mix(in srgb, var(--whatsapp) 30%, transparent)" }}>
+            style={{ display: "block", background: "var(--whatsapp)", color: 'var(--whatsapp-foreground)', padding: "16px 0", borderRadius: 12, fontSize: 16, fontWeight: 800, textDecoration: "none", boxShadow: "0 4px 20px color-mix(in srgb, var(--whatsapp) 30%, transparent)" }}>
             Garantir minha vaga
           </a>
           <p style={{ fontSize: 12, color: "rgba(var(--overlay-rgb), 0.25)", margin: "12px 0 0" }}>Resposta em menos de 1 hora</p>
@@ -186,7 +186,7 @@ export default function LandingPage() {
           Fale com a gente agora. Em menos de 24 horas seu robô já está atendendo no WhatsApp.
         </p>
         <a href={ctaLink} target="_blank" rel="noopener noreferrer"
-          style={{ display: "inline-flex", alignItems: "center", gap: 10, background: "var(--whatsapp)", color: "var(--foreground)", padding: "18px 36px", borderRadius: 14, fontSize: 18, fontWeight: 800, textDecoration: "none", boxShadow: "0 4px 24px color-mix(in srgb, var(--whatsapp) 40%, transparent)" }}>
+          style={{ display: "inline-flex", alignItems: "center", gap: 10, background: "var(--whatsapp)", color: 'var(--whatsapp-foreground)', padding: "18px 36px", borderRadius: 14, fontSize: 18, fontWeight: 800, textDecoration: "none", boxShadow: "0 4px 24px color-mix(in srgb, var(--whatsapp) 40%, transparent)" }}>
           <WhatsAppIcon />
           Falar com a Ominix agora
         </a>
@@ -200,7 +200,7 @@ export default function LandingPage() {
       {/* BOTÃO FLUTUANTE MOBILE */}
       <div style={{ position: "fixed", bottom: 20, left: 16, right: 16, zIndex: 9999, display: "flex", justifyContent: "center" }}>
         <a href={ctaLink} target="_blank" rel="noopener noreferrer"
-          style={{ display: "inline-flex", alignItems: "center", gap: 10, background: "var(--whatsapp)", color: "var(--foreground)", padding: "14px 28px", borderRadius: 50, fontSize: 15, fontWeight: 800, textDecoration: "none", boxShadow: "0 4px 24px color-mix(in srgb, var(--whatsapp) 50%, transparent)", width: "100%", maxWidth: 360, justifyContent: "center" }}>
+          style={{ display: "inline-flex", alignItems: "center", gap: 10, background: "var(--whatsapp)", color: 'var(--whatsapp-foreground)', padding: "14px 28px", borderRadius: 50, fontSize: 15, fontWeight: 800, textDecoration: "none", boxShadow: "0 4px 24px color-mix(in srgb, var(--whatsapp) 50%, transparent)", width: "100%", maxWidth: 360, justifyContent: "center" }}>
           <WhatsAppIcon />
           Falar com a Ominix
         </a>

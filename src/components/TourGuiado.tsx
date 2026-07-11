@@ -291,7 +291,7 @@ export default function TourGuiado({ passos, storageKey, onClose }: Props) {
         {/* Botoes */}
         <div style={{ display: 'flex', gap: 8 }}>
           <button onClick={() => { clearParticles(); onClose() }} style={{ background: 'rgba(var(--overlay-rgb), 0.06)', border: '1px solid rgba(var(--overlay-rgb), 0.09)', color: 'rgba(var(--overlay-rgb), 0.3)', borderRadius: 12, padding: '10px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}>Pular</button>
-          <button onClick={advance} style={{ flex: 1, border: 'none', borderRadius: 12, padding: '11px', fontSize: 13, fontWeight: 800, cursor: 'pointer', color: 'var(--foreground)', background: s.nextBg, boxShadow: `0 4px 20px ${s.accent}50`, transition: 'all 0.2s' }}>{s.nextLabel}</button>
+          <button onClick={advance} style={{ flex: 1, border: 'none', borderRadius: 12, padding: '11px', fontSize: 13, fontWeight: 800, cursor: 'pointer', color: s.nextBg.includes('--primary') ? 'var(--primary-foreground)' : 'var(--foreground)', background: s.nextBg, boxShadow: `0 4px 20px color-mix(in srgb, ${s.accent} 31%, transparent)`, transition: 'all 0.2s' }}>{s.nextLabel}</button>
         </div>
 
         {s.showDismiss && (

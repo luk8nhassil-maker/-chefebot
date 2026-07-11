@@ -5,6 +5,7 @@ import PanelShell from "@/components/PanelShell";
 import { useLiveMenu, cartItemEsgotado } from "./liveMenu";
 import { CARDAPIO_ILLUSTRATIONS, CardapioIllustration } from "@/lib/cardapioVisuals";
 import { montarLinkWhatsAppComprovante } from "@/lib/pixCliente";
+import { useTheme } from "@/components/ThemeToggle";
 
 type EsgMetadata = Record<string, { desde: string; ultimaRevisao?: string }>
 
@@ -236,10 +237,10 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
               onClick={() => { setModoSel(!modoSel); setSelecionados(new Set()) }}
               style={{
                 height: 32, padding: "0 11px",
-                border: `1px solid ${modoSel ? "color-mix(in srgb, var(--primary) 60%, transparent)" : "var(--surface-elevated)"}`,
+                border: `1px solid ${modoSel ? "var(--primary)" : "var(--border)"}`,
                 borderRadius: 9,
-                background: modoSel ? "color-mix(in srgb, var(--primary) 12%, transparent)" : "transparent",
-                color: modoSel ? "var(--primary)" : "var(--foreground-muted)",
+                background: modoSel ? "var(--primary-soft)" : "transparent",
+                color: modoSel ? "var(--text-primary)" : "var(--text-secondary)",
                 fontSize: 12, fontWeight: 900,
               }}
             >{modoSel ? "Cancelar" : "Selecionar"}</button>
@@ -247,47 +248,47 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
               href="/pedido"
               target="_blank"
               rel="noopener noreferrer"
-              style={{ height: 32, padding: "0 11px", border: "1px solid var(--border)", borderRadius: 9, background: "transparent", color: "var(--foreground-muted)", fontSize: 12, fontWeight: 700, display: "inline-flex", alignItems: "center", textDecoration: "none" }}
+              style={{ height: 32, padding: "0 11px", border: "1px solid var(--border)", borderRadius: 9, background: "transparent", color: "var(--text-secondary)", fontSize: 12, fontWeight: 700, display: "inline-flex", alignItems: "center", textDecoration: "none" }}
             >🌐 Link cliente</a>
             <button
               onClick={copiarLinkCliente}
               title="Copiar link do cliente"
               aria-label="Copiar link do cliente"
-              style={{ height: 32, width: 32, padding: 0, border: "1px solid var(--border)", borderRadius: 9, background: "transparent", color: "var(--foreground-muted)", fontSize: 13, fontWeight: 700 }}
+              style={{ height: 32, width: 32, padding: 0, border: "1px solid var(--border)", borderRadius: 9, background: "transparent", color: "var(--text-secondary)", fontSize: 13, fontWeight: 700 }}
             >📋</button>
             <button
               onClick={onSair}
-              style={{ height: 32, padding: "0 11px", border: "1px solid var(--border)", borderRadius: 9, background: "transparent", color: "var(--foreground-muted)", fontSize: 12, fontWeight: 700 }}
+              style={{ height: 32, padding: "0 11px", border: "1px solid var(--border)", borderRadius: 9, background: "transparent", color: "var(--text-secondary)", fontSize: 12, fontWeight: 700 }}
             >Sair</button>
           </div>
 
-          <a href="/cardapio/promocoes" style={{ display: "block", textAlign: "center", padding: "9px 0", marginBottom: 10, border: "1px solid var(--surface-elevated)", borderRadius: 10, background: "var(--surface)", color: "var(--foreground-secondary)", fontSize: 12.5, fontWeight: 800, textDecoration: "none" }}>🏷️ Gerenciar promoções</a>
+          <a href="/cardapio/promocoes" style={{ display: "block", textAlign: "center", padding: "9px 0", marginBottom: 10, border: "1px solid var(--border)", borderRadius: 10, background: "var(--surface)", color: "var(--text-primary)", fontSize: 12.5, fontWeight: 800, textDecoration: "none" }}>🏷️ Gerenciar promoções</a>
 
           {/* Linha 2: métricas compactas */}
           <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
-            <div style={{ flex: 1, background: "var(--surface)", border: "1px solid var(--surface)", borderRadius: 10, padding: "8px 10px", display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{ flex: 1, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: "8px 10px", display: "flex", alignItems: "center", gap: 8 }}>
               <span style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--success)", flexShrink: 0 }} />
-              <span style={{ fontSize: 13, fontWeight: 900, color: "var(--foreground)" }}>{totalDisp}</span>
-              <span style={{ fontSize: 10, fontWeight: 700, color: "var(--foreground-muted)", textTransform: "uppercase", letterSpacing: ".4px" }}>disponíveis</span>
+              <span style={{ fontSize: 13, fontWeight: 900, color: "var(--text-primary)" }}>{totalDisp}</span>
+              <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: ".4px" }}>disponíveis</span>
             </div>
             <div style={{
               flex: 1,
-              background: totalEsg > 0 ? "color-mix(in srgb, var(--danger) 5%, transparent)" : "var(--surface)",
-              border: `1px solid ${totalEsg > 0 ? "color-mix(in srgb, var(--danger) 22%, transparent)" : "var(--surface)"}`,
+              background: totalEsg > 0 ? "var(--danger-surface)" : "var(--surface)",
+              border: `1px solid ${totalEsg > 0 ? "var(--danger-border)" : "var(--border)"}`,
               borderRadius: 10, padding: "8px 10px", display: "flex", alignItems: "center", gap: 8,
             }}>
-              <span style={{ width: 8, height: 8, borderRadius: "50%", background: totalEsg > 0 ? "var(--danger)" : "var(--surface-elevated)", flexShrink: 0 }} />
-              <span style={{ fontSize: 13, fontWeight: 900, color: totalEsg > 0 ? "var(--danger)" : "var(--border-strong)" }}>{totalEsg}</span>
-              <span style={{ fontSize: 10, fontWeight: 700, color: totalEsg > 0 ? "color-mix(in srgb, var(--danger) 60%, transparent)" : "var(--border-strong)", textTransform: "uppercase", letterSpacing: ".4px" }}>esgotados</span>
+              <span style={{ width: 8, height: 8, borderRadius: "50%", background: totalEsg > 0 ? "var(--danger)" : "var(--border-strong)", flexShrink: 0 }} />
+              <span style={{ fontSize: 13, fontWeight: 900, color: totalEsg > 0 ? "var(--danger-text)" : "var(--text-muted)" }}>{totalEsg}</span>
+              <span style={{ fontSize: 10, fontWeight: 700, color: totalEsg > 0 ? "var(--danger-text)" : "var(--text-muted)", textTransform: "uppercase", letterSpacing: ".4px" }}>esgotados</span>
             </div>
-            <div style={{ flex: 0, background: "var(--surface)", border: "1px solid var(--surface)", borderRadius: 10, padding: "8px 12px", display: "flex", alignItems: "center" }}>
-              <span style={{ fontSize: 13, fontWeight: 900, color: "var(--foreground-muted)" }}>{totalProd}</span>
+            <div style={{ flex: 0, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: "8px 12px", display: "flex", alignItems: "center" }}>
+              <span style={{ fontSize: 13, fontWeight: 900, color: "var(--text-primary)" }}>{totalProd}</span>
             </div>
           </div>
 
           {/* Aviso bot — só quando há esgotados */}
           {totalEsg > 0 && (
-            <div style={{ background: "color-mix(in srgb, var(--danger) 5%, transparent)", border: "1px solid color-mix(in srgb, var(--danger) 15%, transparent)", borderRadius: 9, padding: "7px 11px", marginBottom: 10, fontSize: 12, fontWeight: 700, color: "var(--danger)" }}>
+            <div style={{ background: "var(--danger-surface)", border: "1px solid var(--danger-border)", borderRadius: 9, padding: "7px 11px", marginBottom: 10, fontSize: 12, fontWeight: 700, color: "var(--danger-text)" }}>
               Bot bloqueando {totalEsg} produto{totalEsg > 1 ? "s" : ""} — cliente{totalEsg > 1 ? "s" : ""} não {totalEsg > 1 ? "receberão" : "receberá"} esse{totalEsg > 1 ? "s" : ""} item{totalEsg > 1 ? "ns" : ""}.
             </div>
           )}
@@ -303,27 +304,27 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
               style={{
                 width: "100%", height: 44,
                 background: "var(--surface)",
-                border: "1px solid var(--surface-secondary)",
+                border: "1px solid var(--border)",
                 borderRadius: 11,
                 padding: "0 38px 0 13px",
-                color: "var(--foreground)",
+                color: "var(--text-primary)",
                 fontSize: 14, fontWeight: 700,
                 fontFamily: "'Archivo', sans-serif",
                 transition: "border-color .15s",
               }}
             />
             {busca
-              ? <button onClick={() => setBusca("")} style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", background: "none", color: "var(--foreground-muted)", fontSize: 19, lineHeight: 1, padding: "2px 5px" }}>×</button>
-              : <svg style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="var(--surface-elevated)" strokeWidth="2.2"/><path d="M16.5 16.5l3.5 3.5" stroke="var(--surface-elevated)" strokeWidth="2.2" strokeLinecap="round"/></svg>
+              ? <button onClick={() => setBusca("")} style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", background: "none", color: "var(--text-muted)", fontSize: 19, lineHeight: 1, padding: "2px 5px" }}>×</button>
+              : <svg style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="var(--text-muted)" strokeWidth="2.2"/><path d="M16.5 16.5l3.5 3.5" stroke="var(--text-muted)" strokeWidth="2.2" strokeLinecap="round"/></svg>
             }
           </div>
 
-          {/* Linha 4: filtros status */}
+          {/* Linha 4: filtros status — ativo sempre em amarelo (marca), nunca
+              texto amarelo: fundo suave + borda amarela + texto navy/claro. */}
           <div style={{ display: "flex", gap: 5, marginBottom: 7 }}>
             {(["todos", "disponivel", "esgotado"] as const).map(f => {
               const COUNT = { todos: totalProd, disponivel: totalDisp, esgotado: totalEsg }
               const LABEL = { todos: "Todos", disponivel: "Disponíveis", esgotado: "Esgotados" }
-              const COLOR = { todos: "var(--primary)", disponivel: "var(--success)", esgotado: "var(--danger)" }
               const active = filtroStatus === f
               return (
                 <button
@@ -331,10 +332,10 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
                   onClick={() => setFiltroStatus(f)}
                   style={{
                     flex: 1, height: 38,
-                    border: `1px solid ${active ? COLOR[f] + "66" : "var(--border)"}`,
+                    border: `1px solid ${active ? "var(--primary)" : "var(--border)"}`,
                     borderRadius: 10,
-                    background: active ? COLOR[f] + "18" : "transparent",
-                    color: active ? COLOR[f] : "var(--foreground-muted)",
+                    background: active ? "var(--primary-soft)" : "transparent",
+                    color: active ? "var(--text-primary)" : "var(--text-secondary)",
                     fontSize: 11, fontWeight: 900,
                     display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 0,
                   }}
@@ -346,7 +347,7 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
             })}
           </div>
 
-          {/* Linha 5: filtros categoria */}
+          {/* Linha 5: filtros categoria — mesmo padrão amarelo ativo / neutro inativo */}
           <div className="cbScroll">
             {CATS.map(cat => {
               const active = filtroCat === cat
@@ -356,10 +357,10 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
                   onClick={() => setFiltroCat(cat)}
                   style={{
                     height: 29, padding: "0 11px",
-                    border: `1px solid ${active ? "color-mix(in srgb, var(--primary) 55%, transparent)" : "var(--border)"}`,
+                    border: `1px solid ${active ? "var(--primary)" : "var(--border)"}`,
                     borderRadius: 8,
-                    background: active ? "color-mix(in srgb, var(--primary) 14%, transparent)" : "var(--surface)",
-                    color: active ? "var(--primary)" : "var(--foreground-muted)",
+                    background: active ? "var(--primary-soft)" : "var(--surface)",
+                    color: active ? "var(--text-primary)" : "var(--text-secondary)",
                     fontSize: 11, fontWeight: 900,
                     whiteSpace: "nowrap", flexShrink: 0,
                   }}
@@ -373,8 +374,8 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
         {modoSel && selecionados.size > 0 && (
           <div style={{ flexShrink: 0, background: "var(--background)", borderBottom: "1px solid var(--border)", padding: "9px 16px", display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ flex: 1, fontSize: 13, fontWeight: 800, color: "var(--foreground-secondary)" }}>{selecionados.size} selecionado{selecionados.size > 1 ? "s" : ""}</span>
-            <button onClick={() => setConfirmLote("esgotado")} style={{ height: 34, padding: "0 12px", border: "1px solid color-mix(in srgb, var(--danger) 30%, transparent)", borderRadius: 9, background: "color-mix(in srgb, var(--danger) 8%, transparent)", color: "var(--danger)", fontSize: 12, fontWeight: 900 }}>Esgotar</button>
-            <button onClick={() => setConfirmLote("disponivel")} style={{ height: 34, padding: "0 12px", border: "1px solid color-mix(in srgb, var(--success) 30%, transparent)", borderRadius: 9, background: "color-mix(in srgb, var(--success) 8%, transparent)", color: "var(--success)", fontSize: 12, fontWeight: 900 }}>Disponibilizar</button>
+            <button onClick={() => setConfirmLote("esgotado")} style={{ height: 34, padding: "0 12px", border: "1px solid var(--danger-border)", borderRadius: 9, background: "var(--danger-surface)", color: "var(--danger-text)", fontSize: 12, fontWeight: 900 }}>Esgotar</button>
+            <button onClick={() => setConfirmLote("disponivel")} style={{ height: 34, padding: "0 12px", border: "1px solid var(--success-border)", borderRadius: 9, background: "var(--success-surface)", color: "var(--success-text)", fontSize: 12, fontWeight: 900 }}>Disponibilizar</button>
           </div>
         )}
 
@@ -388,7 +389,7 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
             <div className="cbGridFull" style={{ background: "color-mix(in srgb, var(--primary) 4%, transparent)", border: "1px solid color-mix(in srgb, var(--primary) 20%, transparent)", borderRadius: 14, padding: "14px 16px", marginBottom: 4, display: "flex", flexDirection: "column", gap: 10 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--primary)", flexShrink: 0 }} />
-                <span style={{ fontSize: 10, fontWeight: 900, color: "var(--primary-text)", textTransform: "uppercase", letterSpacing: "1px" }}>Verificar reposição hoje</span>
+                <span style={{ fontSize: 10, fontWeight: 900, color: "var(--brand-text)", textTransform: "uppercase", letterSpacing: "1px" }}>Verificar reposição hoje</span>
               </div>
               {produtosParaRevisar.map(nome => (
                 <div key={nome} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: "var(--background)", borderRadius: 10, border: "1px solid var(--surface)" }}>
@@ -398,7 +399,7 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
                   </div>
                   <button
                     onClick={() => toggleEsgotado(nome, false)}
-                    style={{ height: 32, padding: "0 10px", border: "1px solid color-mix(in srgb, var(--success) 35%, transparent)", borderRadius: 8, background: "color-mix(in srgb, var(--success) 8%, transparent)", color: "var(--success)", fontSize: 11, fontWeight: 900, flexShrink: 0 }}
+                    style={{ height: 32, padding: "0 10px", border: "1px solid var(--success-border)", borderRadius: 8, background: "var(--success-surface)", color: "var(--success-text)", fontSize: 11, fontWeight: 900, flexShrink: 0 }}
                   >Voltou</button>
                   <button
                     onClick={() => revisarHoje(nome)}
@@ -459,10 +460,10 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
 
                 {/* Conteúdo do card */}
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  {/* Nome */}
+                  {/* Nome — sempre texto principal, nunca amarelo (o status já é indicado no pill abaixo) */}
                   <div style={{
                     fontSize: 15, fontWeight: 800,
-                    color: esg ? "var(--danger)" : "var(--primary)",
+                    color: "var(--text-primary)",
                     overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                     marginBottom: 6, lineHeight: 1.3,
                   }}>
@@ -470,15 +471,15 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
                   </div>
                   {/* Metadados */}
                   <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                    <span style={{ fontSize: 10, fontWeight: 800, color: "var(--surface-elevated)", background: "var(--surface)", padding: "3px 8px", borderRadius: 5, lineHeight: 1.5 }}>
+                    <span style={{ fontSize: 10, fontWeight: 800, color: "var(--text-muted)", background: "var(--surface-secondary)", padding: "3px 8px", borderRadius: 5, lineHeight: 1.5 }}>
                       {produto.categoria}
                     </span>
                     {produto.preco != null && produto.preco > 0 && (
-                      <span style={{ fontSize: 11, fontWeight: 600, color: "var(--foreground-muted)", lineHeight: 1.4 }}>
+                      <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text-muted)", lineHeight: 1.4 }}>
                         R$ {produto.preco.toFixed(2).replace(".", ",")}
                       </span>
                     )}
-                    <span style={{ fontSize: 11, fontWeight: 800, color: esg ? "var(--danger)" : "var(--success)", lineHeight: 1.4 }}>
+                    <span style={{ fontSize: 11, fontWeight: 800, color: esg ? "var(--danger-text)" : "var(--success-text)", lineHeight: 1.4 }}>
                       {esg ? "Esgotado" : "Vendendo"}
                     </span>
                   </div>
@@ -493,10 +494,10 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
                     style={{
                       height: 40,
                       padding: "0 13px",
-                      border: `1px solid ${esg ? "color-mix(in srgb, var(--success) 35%, transparent)" : "color-mix(in srgb, var(--danger) 35%, transparent)"}`,
+                      border: `1px solid ${esg ? "var(--success-border)" : "var(--danger-border)"}`,
                       borderRadius: 10,
-                      background: esg ? "color-mix(in srgb, var(--success) 8%, transparent)" : "color-mix(in srgb, var(--danger) 8%, transparent)",
-                      color: esg ? "var(--success)" : "var(--danger)",
+                      background: esg ? "var(--success-surface)" : "var(--danger-surface)",
+                      color: esg ? "var(--success-text)" : "var(--danger-text)",
                       fontSize: 12, fontWeight: 900,
                       flexShrink: 0,
                       minWidth: 108,
@@ -537,7 +538,7 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
           {toast.nome && (
             <button
               onClick={desfazer}
-              style={{ background: "color-mix(in srgb, var(--primary) 14%, transparent)", color: "var(--primary-text)", fontSize: 12, fontWeight: 900, padding: "8px 12px", borderRadius: 9, flexShrink: 0 }}
+              style={{ background: "color-mix(in srgb, var(--primary) 14%, transparent)", color: "var(--brand-text)", fontSize: 12, fontWeight: 900, padding: "8px 12px", borderRadius: 9, flexShrink: 0 }}
             >Desfazer</button>
           )}
         </div>
@@ -749,7 +750,9 @@ async function copiarTexto(texto: string): Promise<boolean> {
 }
 
 export function PublicCardapio({ menu }: { menu: MenuType }) {
-  const [theme, setTheme] = useState<"dark" | "light">("dark");
+  // Tema compartilhado com o resto do site (localStorage['chefebot-theme']):
+  // Light por padrão, Dark só por escolha explícita — nunca hardcoded aqui.
+  const { theme, setTheme } = useTheme();
   const [screen, setScreen] = useState("sc-start");
   const [previousStepBeforeCart, setPreviousStepBeforeCart] = useState<string | null>(null);
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -821,8 +824,6 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const toastTimer = useRef<any>(null);
   const nomeRef = useRef<HTMLInputElement>(null);
   const telefoneRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => { document.documentElement.setAttribute("data-theme", theme); }, [theme]);
 
   // Vínculo WhatsApp: valida o token do link (?t=) no servidor e guarda só na
   // sessão do navegador. Token inválido/expirado nunca quebra o fluxo — o
@@ -1593,7 +1594,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                 ))}
                 {promoSel.includedText && <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 6 }}>{promoSel.includedText}</div>}
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 16, fontWeight: 800, paddingTop: 10, marginTop: 8, borderTop: "1px solid var(--border)" }}>
-                  <span>Preço promocional</span><span style={{ color: "var(--primary-text)" }}>{typeof promoSel.promotionalPrice === "number" ? money(promoSel.promotionalPrice) : "—"}</span>
+                  <span>Preço promocional</span><span style={{ color: "var(--brand-text)" }}>{typeof promoSel.promotionalPrice === "number" ? money(promoSel.promotionalPrice) : "—"}</span>
                 </div>
               </div>
               {promoPrecisaSabor(promoSel) && (
@@ -1838,7 +1839,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                 {pedidoConfirmado && (
                   <>
                     <p style={{ fontWeight: 700, fontSize: 18, margin: "12px 0 4px" }}>Pedido #{pedidoConfirmado.numero}</p>
-                    <p style={{ color: "var(--primary-text)", fontSize: 15, fontWeight: 800, margin: "0 0 8px" }}>{STATUS_PEDIDO_LABEL[statusPedidoConfirmado]}</p>
+                    <p style={{ color: "var(--brand-text)", fontSize: 15, fontWeight: 800, margin: "0 0 8px" }}>{STATUS_PEDIDO_LABEL[statusPedidoConfirmado]}</p>
                     <p style={{ color: "var(--muted)", fontSize: 14, marginBottom: 16 }}>Total: {money(pedidoConfirmado.total)}</p>
                     <a href="/cliente" style={{ display: "block", background: "var(--surface)", border: "1px solid var(--line-strong)", borderRadius: 12, padding: "12px 14px", marginBottom: 16, textDecoration: "none", textAlign: "left" }}>
                       <span style={{ display: "block", fontSize: 14, fontWeight: 700, color: "var(--text)" }}>🎁 Quer que essa compra conte para sua fidelidade?</span>
@@ -1891,7 +1892,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                               Envie o comprovante pelo WhatsApp da pizzaria. Se o botão não aparecer, copie a chave Pix acima e chame a equipe pelo contato do cardápio.
                             </div>
                           )}
-                          {pedidoConfirmado.pix?.ticketUrl && <a href={pedidoConfirmado.pix.ticketUrl} target="_blank" rel="noreferrer" style={{ display: "block", color: "var(--primary-text)", fontSize: 13, fontWeight: 800, textAlign: "center" }}>Abrir pagamento</a>}
+                          {pedidoConfirmado.pix?.ticketUrl && <a href={pedidoConfirmado.pix.ticketUrl} target="_blank" rel="noreferrer" style={{ display: "block", color: "var(--brand-text)", fontSize: 13, fontWeight: 800, textAlign: "center" }}>Abrir pagamento</a>}
                         </div>
                       </div>
                     )}
@@ -2193,12 +2194,12 @@ export default function CardapioPage() {
 
 const CSS = `
 :root{--font-ui:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;}
-:root[data-theme="dark"]{--bg:var(--danger-soft);--surface:var(--danger-soft);--surface2:var(--danger-soft);--text:var(--primary);--text-sub:var(--foreground-secondary);--text-faint:var(--foreground-muted);--brand:var(--primary);--brand-press:var(--primary);--brand-soft:color-mix(in srgb, var(--primary) 13%, transparent);--gold:var(--primary);--green:var(--success);--green-soft:color-mix(in srgb, var(--success) 16%, transparent);--line:color-mix(in srgb, var(--primary) 8%, transparent);--line-strong:color-mix(in srgb, var(--primary) 16%, transparent);--shadow-sm:0 1px 8px rgba(0,0,0,.22);}
-:root[data-theme="light"]{--bg:var(--primary);--surface:var(--foreground);--surface2:var(--primary);--text:var(--surface-secondary);--text-sub:var(--foreground-muted);--text-faint:var(--primary);--brand:var(--danger);--brand-press:var(--danger);--brand-soft:color-mix(in srgb, var(--danger) 9%, transparent);--gold:var(--primary);--green:var(--success);--green-soft:color-mix(in srgb, var(--success) 12%, transparent);--line:color-mix(in srgb, var(--surface-secondary) 8%, transparent);--line-strong:color-mix(in srgb, var(--surface-secondary) 14%, transparent);--shadow-sm:0 1px 8px color-mix(in srgb, var(--primary) 7%, transparent);}
+:root[data-theme="dark"]{--bg:var(--background);--surface:var(--surface);--surface2:var(--surface-secondary);--text:var(--text-primary);--text-sub:var(--text-secondary);--text-faint:var(--text-muted);--brand:var(--primary);--brand-press:var(--primary-active);--brand-soft:var(--primary-soft);--brand-foreground:var(--on-primary);--gold:var(--brand-text);--green:var(--success);--green-soft:var(--success-surface);--green-foreground:var(--on-success);--line:rgba(var(--overlay-rgb), 0.08);--line-strong:rgba(var(--overlay-rgb), 0.16);--shadow-sm:var(--shadow-sm);}
+:root[data-theme="light"]{--bg:var(--background);--surface:var(--surface);--surface2:var(--surface-secondary);--text:var(--text-primary);--text-sub:var(--text-secondary);--text-faint:var(--text-muted);--brand:var(--primary);--brand-press:var(--primary-active);--brand-soft:var(--primary-soft);--brand-foreground:var(--on-primary);--gold:var(--brand-text);--green:var(--success);--green-soft:var(--success-surface);--green-foreground:var(--on-success);--line:rgba(var(--overlay-rgb), 0.08);--line-strong:rgba(var(--overlay-rgb), 0.14);--shadow-sm:var(--shadow-sm);}
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 body{font-family:var(--font-ui);background:var(--bg);color:var(--text);line-height:1.5;overflow-x:hidden;padding-bottom:112px;transition:background .35s,color .35s;font-size:16px;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
 .wrap{width:min(100%,540px);max-width:540px;margin:0 auto;min-height:100vh;position:relative;font-family:var(--font-ui);padding-top:46px}
-.wrap-start{padding-top:0;background:var(--danger-soft)}
+.wrap-start{padding-top:0;background:var(--bg)}
 .wrap h1,.wrap h2,.wrap h3,.wrap button,.wrap input,.wrap select,.wrap textarea{font-family:var(--font-ui)}
 header{width:100%;background:var(--surface);padding:18px 20px;border-bottom:1px solid var(--line);transition:background .35s}
 .head-row{display:flex;align-items:center;justify-content:space-between;gap:12px}
@@ -2217,9 +2218,9 @@ header{width:100%;background:var(--surface);padding:18px 20px;border-bottom:1px 
 .step-chip{display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:500;color:var(--text-faint);letter-spacing:0}
 .step-chip .num{width:22px;height:22px;border-radius:50%;border:1.5px solid var(--line-strong);display:flex;align-items:center;justify-content:center;font-size:11px;transition:.25s}
 .step-chip.active{color:var(--text);font-weight:600}
-.step-chip.active .num{background:var(--brand);border-color:var(--brand);color:var(--foreground)}
+.step-chip.active .num{background:var(--brand);border-color:var(--brand);color:var(--brand-foreground)}
 .step-chip.done{color:var(--green)}
-.step-chip.done .num{background:var(--green);border-color:var(--green);color:var(--foreground)}
+.step-chip.done .num{background:var(--green);border-color:var(--green);color:var(--green-foreground)}
 .step-line{flex:1;height:1.5px;background:var(--line);border-radius:2px}
 .step-line.done{background:var(--green)}
 main{width:100%;padding:6px 20px 20px}
@@ -2236,11 +2237,11 @@ main{width:100%;padding:6px 20px 20px}
 .header-min .logo p{font-size:12px;margin-top:2px}
 .screen-head{margin:18px 0 20px}
 .top-back + .screen-head{margin-top:8px}
-.eyebrow{font-size:11px;font-weight:600;color:var(--brand);text-transform:uppercase;letter-spacing:1.4px}
+.eyebrow{font-size:11px;font-weight:600;color:var(--gold);text-transform:uppercase;letter-spacing:1.4px}
 .screen-head h2{font-family:var(--font-ui);font-weight:600;font-size:23px;letter-spacing:-.4px;margin-top:7px;line-height:1.2}
 .screen-head p{font-size:14.5px;color:var(--text-sub);margin-top:7px;font-weight:400;line-height:1.5}
 .pizza-ctx{display:flex;align-items:center;gap:11px;background:var(--brand-soft);border-radius:14px;padding:12px 15px;margin:16px 0 2px}
-.pc-badge{background:var(--brand);color:var(--foreground);font-weight:600;font-size:12px;padding:5px 11px;border-radius:20px;white-space:nowrap}
+.pc-badge{background:var(--brand);color:var(--brand-foreground);font-weight:600;font-size:12px;padding:5px 11px;border-radius:20px;white-space:nowrap}
 .pc-txt{font-size:13px;color:var(--text-sub);flex:1}
 .pc-txt strong{color:var(--text);font-weight:600}
 .pizza-dots{display:flex;gap:5px}
@@ -2254,23 +2255,26 @@ main{width:100%;padding:6px 20px 20px}
 .opt-title{font-weight:600;font-size:15.5px;letter-spacing:-.1px}
 .opt-desc{font-size:13px;color:var(--text-sub);margin-top:3px;line-height:1.4;font-weight:400}
 .opt-price{font-weight:600;font-size:14.5px;color:var(--gold);white-space:nowrap}
-.opt-check{width:23px;height:23px;border-radius:50%;border:2px solid var(--line-strong);flex:0 0 auto;display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--foreground);transition:.16s}
+.opt-check{width:23px;height:23px;border-radius:50%;border:2px solid var(--line-strong);flex:0 0 auto;display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--brand-foreground);transition:.16s}
 .opt.sel .opt-check{background:var(--brand);border-color:var(--brand)}
 .opt.sel .opt-check::after{content:"✓"}
 .home-screen{padding-bottom:8px}
 .promo-scroll{display:flex;gap:12px;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none;margin:0 -20px;padding:0 20px 4px}
 .promo-scroll::-webkit-scrollbar{display:none}
-.promo-card{flex:0 0 86%;scroll-snap-align:start;background:linear-gradient(145deg,color-mix(in srgb, var(--danger-soft) 78%, transparent),color-mix(in srgb, var(--danger-soft) 98%, transparent) 58%,var(--danger-soft));border:1px solid color-mix(in srgb, var(--primary) 28%, transparent);border-radius:22px;padding:20px;box-shadow:0 18px 50px rgba(0,0,0,.34),inset 0 1px 0 rgba(var(--overlay-rgb), 0.04)}
-.promo-label{color:var(--primary-text);font-size:10.5px;font-weight:800;letter-spacing:1.4px;margin-bottom:10px}
-.promo-card h2{color:var(--primary-text);font-size:25px;font-weight:850;line-height:1.08;letter-spacing:0;margin-bottom:8px}
-.promo-card p{color:var(--primary-text);font-size:14px;line-height:1.45;margin-bottom:18px}
-.promo-btn{width:100%;border:0;border-radius:15px;background:var(--danger);color:var(--foreground);padding:15px 16px;font-size:15px;font-weight:800;box-shadow:0 12px 26px color-mix(in srgb, var(--danger) 20%, transparent)}
+/* Card de promoção é um "poster" sempre escuro (navy/graphite), independente
+   do tema da página — por isso o texto usa valores fixos claros (não os
+   tokens --text-* que invertem com o tema) para nunca perder contraste. */
+.promo-card{flex:0 0 86%;scroll-snap-align:start;background:linear-gradient(145deg,rgba(44,47,56,.9),rgba(25,34,48,.98) 58%,#192230);border:1px solid color-mix(in srgb, var(--primary) 28%, transparent);border-radius:22px;padding:20px;box-shadow:0 18px 50px rgba(0,0,0,.34),inset 0 1px 0 rgba(255,255,255,.04)}
+.promo-label{color:#ffda3d;font-size:10.5px;font-weight:800;letter-spacing:1.4px;margin-bottom:10px}
+.promo-card h2{color:#f8fafc;font-size:25px;font-weight:850;line-height:1.08;letter-spacing:0;margin-bottom:8px}
+.promo-card p{color:#d1d5db;font-size:14px;line-height:1.45;margin-bottom:18px}
+.promo-btn{width:100%;border:0;border-radius:15px;background:var(--brand);color:var(--brand-foreground);padding:15px 16px;font-size:15px;font-weight:800;box-shadow:0 12px 26px color-mix(in srgb, var(--primary) 30%, transparent)}
 @media (min-width:640px){.promo-card{flex-basis:340px}}
 .home-copy{margin:24px 0 14px}
-.home-copy h2{color:var(--primary-text);font-size:22px;font-weight:850;letter-spacing:0;line-height:1.15}
-.home-copy p{color:var(--foreground-secondary);font-size:14px;margin-top:6px}
+.home-copy h2{color:var(--text-primary);font-size:22px;font-weight:850;letter-spacing:0;line-height:1.15}
+.home-copy p{color:var(--text-secondary);font-size:14px;margin-top:6px}
 .home-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-.home-cat{min-height:118px;text-align:left;background:var(--background);border:1px solid rgba(var(--overlay-rgb), 0.08);border-radius:20px;padding:16px;display:flex;flex-direction:column;justify-content:space-between;color:var(--primary-text);box-shadow:0 10px 28px rgba(0,0,0,.22)}
+.home-cat{min-height:118px;text-align:left;background:var(--surface);border:1px solid var(--line);border-radius:20px;padding:16px;display:flex;flex-direction:column;justify-content:space-between;color:var(--text-primary);box-shadow:var(--shadow-sm)}
 .home-cat:active{transform:scale(.98);border-color:color-mix(in srgb, var(--primary) 50%, transparent)}
 .home-cat span{font-size:27px}
 .home-cat strong{font-size:15.5px;font-weight:800;letter-spacing:0}
@@ -2307,7 +2311,7 @@ main{width:100%;padding:6px 20px 20px}
 .flavor-progress{display:flex;align-items:center;gap:10px;margin:2px 0 14px;padding-left:2px}
 .flavor-progress-dots{display:flex;gap:6px;flex:0 0 auto}
 .flavor-progress-label{font-size:13px;color:var(--text-sub);font-weight:500}
-.btn{width:100%;background:var(--brand);color:var(--foreground);border:none;border-radius:14px;padding:16px;font-family:var(--font-ui);font-size:15.5px;font-weight:600;cursor:pointer;transition:transform .14s,background .14s;box-shadow:0 3px 12px var(--brand-soft);letter-spacing:.1px}
+.btn{width:100%;background:var(--brand);color:var(--brand-foreground);border:none;border-radius:14px;padding:16px;font-family:var(--font-ui);font-size:15.5px;font-weight:600;cursor:pointer;transition:transform .14s,background .14s;box-shadow:0 3px 12px var(--brand-soft);letter-spacing:.1px}
 .btn:active{transform:scale(.98);background:var(--brand-press)}
 .btn:disabled{opacity:.35;box-shadow:none;cursor:not-allowed}
 .btn-ghost{background:transparent;border:1px solid var(--line-strong);color:var(--text);box-shadow:none}
@@ -2318,13 +2322,13 @@ main{width:100%;padding:6px 20px 20px}
 .cart-item{background:var(--surface);border:1px solid var(--line);border-radius:15px;padding:15px 16px;margin-bottom:10px;display:flex;gap:12px;align-items:flex-start;box-shadow:var(--shadow-sm)}
 .ci-emoji{font-size:23px}
 .ci-body{flex:1;min-width:0}
-.ci-tag{background:var(--brand-soft);color:var(--brand);font-size:11px;font-weight:600;padding:2px 9px;border-radius:20px;margin-right:7px}
+.ci-tag{background:var(--brand-soft);color:var(--gold);font-size:11px;font-weight:600;padding:2px 9px;border-radius:20px;margin-right:7px}
 .ci-name{font-weight:600;font-size:14.5px;letter-spacing:-.1px}
 .ci-detail{font-size:13px;color:var(--text-sub);margin-top:3px;line-height:1.4}
 .ci-price{font-weight:600;color:var(--gold);font-size:14.5px;margin-top:6px}
 .ci-remove{background:none;border:none;color:var(--text-faint);font-size:18px;cursor:pointer;padding:2px 4px;line-height:1}
 .qty-pill{display:inline-flex;align-items:center;gap:14px;background:var(--surface2);border:1px solid var(--line);border-radius:30px;padding:5px 7px;margin-top:9px}
-.qty-pill button{width:30px;height:30px;border-radius:50%;border:none;background:var(--brand);color:var(--foreground);font-size:18px;cursor:pointer;font-weight:600}
+.qty-pill button{width:30px;height:30px;border-radius:50%;border:none;background:var(--brand);color:var(--brand-foreground);font-size:18px;cursor:pointer;font-weight:600}
 .qty-pill span{font-weight:600;min-width:20px;text-align:center}
 .field{margin-bottom:14px}
 .field label{display:block;font-size:13px;font-weight:600;margin-bottom:7px;letter-spacing:0}
@@ -2349,7 +2353,7 @@ main{width:100%;padding:6px 20px 20px}
 .order-summary-compact{background:var(--surface);border:1px solid var(--line);border-radius:15px;margin:0 0 16px;box-shadow:var(--shadow-sm);overflow:hidden}
 .order-summary-compact summary{list-style:none;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;cursor:pointer;color:var(--text-sub);font-size:13px;font-weight:700}
 .order-summary-compact summary::-webkit-details-marker{display:none}
-.order-summary-compact summary strong{font-size:16px;color:var(--brand)}
+.order-summary-compact summary strong{font-size:16px;color:var(--gold)}
 .summary-lines{border-top:1px solid var(--line);padding:10px 14px 12px}
 .summary-line{display:flex;justify-content:space-between;gap:12px;color:var(--text-sub);font-size:12.5px;line-height:1.35;padding:4px 0}
 .summary-line span{min-width:0}
@@ -2381,7 +2385,7 @@ main{width:100%;padding:6px 20px 20px}
 .identidade-explicacao{font-size:13px;color:var(--text-sub);line-height:1.5;margin:0 0 14px}
 .pay-divider{height:1px;background:var(--line);margin:0 0 14px}
 .pay-actions-row{display:flex;align-items:center;gap:20px;flex-wrap:wrap}
-.pay-action-link{background:none;border:none;color:var(--brand);font-size:13px;font-weight:700;cursor:pointer;padding:11px 2px;margin:-11px -2px;text-decoration:underline;text-underline-offset:2px;min-height:44px;display:inline-flex;align-items:center}
+.pay-action-link{background:none;border:none;color:var(--gold);font-size:13px;font-weight:700;cursor:pointer;padding:11px 2px;margin:-11px -2px;text-decoration:underline;text-underline-offset:2px;min-height:44px;display:inline-flex;align-items:center}
 .pay-action-link.muted{color:var(--text-sub)}
 .obs-help-row{display:flex;align-items:flex-start;gap:10px;margin-bottom:14px}
 .obs-icon{font-size:16px;line-height:1.5;flex:0 0 auto}
@@ -2389,12 +2393,12 @@ main{width:100%;padding:6px 20px 20px}
 .payment-modal-backdrop{position:fixed;inset:0;z-index:80;background:rgba(0,0,0,.55);display:flex;align-items:flex-end;justify-content:center;padding:20px}
 .payment-modal{width:100%;max-width:500px;background:var(--surface);border:1px solid var(--line-strong);border-radius:20px;padding:16px;box-shadow:0 -14px 45px rgba(0,0,0,.35);animation:sheet .22s ease-out}
 .payment-modal-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:12px}
-.payment-modal-kicker{font-size:11px;color:var(--brand);text-transform:uppercase;letter-spacing:1px;font-weight:800}
+.payment-modal-kicker{font-size:11px;color:var(--gold);text-transform:uppercase;letter-spacing:1px;font-weight:800}
 .payment-modal h3{font-size:21px;line-height:1.15;margin-top:3px}
 .payment-modal-close{width:36px;height:36px;border-radius:999px;background:var(--surface2);border:1px solid var(--line-strong);color:var(--text-sub);font-size:22px;line-height:1}
 .payment-modal-body{color:var(--text-sub);font-size:14px;line-height:1.45}
 .payment-modal-body p + p{margin-top:7px}
-.money-status-badge{display:inline-block;margin-top:6px;padding:3px 10px;border-radius:999px;background:var(--brand-soft);color:var(--brand);font-size:11px;font-weight:700}
+.money-status-badge{display:inline-block;margin-top:6px;padding:3px 10px;border-radius:999px;background:var(--brand-soft);color:var(--gold);font-size:11px;font-weight:700}
 .money-choice-title{font-size:13px;font-weight:800;color:var(--text);margin-bottom:10px}
 .money-choice-row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
 .money-choice-row .btn{padding:12px 8px;font-size:13px}
@@ -2413,7 +2417,7 @@ main{width:100%;padding:6px 20px 20px}
 .flavor-modal-msg{font-size:13.5px;font-weight:700;color:var(--text);margin-top:4px}
 .flavor-modal-hint{font-size:12.5px;color:var(--text-sub);margin-top:3px;line-height:1.35}
 .cartbar{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:540px;z-index:50;background:transparent;padding:0 20px calc(env(safe-area-inset-bottom) + 14px);pointer-events:none}
-.cartbar-inner{margin:0 auto;display:flex;align-items:center;gap:14px;background:var(--background);border:1px solid rgba(var(--overlay-rgb), 0.1);border-radius:20px;padding:12px 12px 12px 16px;box-shadow:0 -10px 34px rgba(0,0,0,.35);pointer-events:auto}
+.cartbar-inner{margin:0 auto;display:flex;align-items:center;gap:14px;background:var(--surface-elevated);border:1px solid var(--line-strong);border-radius:20px;padding:12px 12px 12px 16px;box-shadow:0 -10px 34px rgba(0,0,0,.35);pointer-events:auto}
 .cartbar-info{flex:1}
 .cartbar-count{font-size:12.5px;color:var(--text-sub);font-weight:500}
 .cartbar-total{font-family:var(--font-ui);font-weight:700;font-size:15px;line-height:1.2;letter-spacing:0}
@@ -2425,9 +2429,10 @@ main{width:100%;padding:6px 20px 20px}
 .bnav-icon{font-size:20px;line-height:1}
 .bnav-icon-wrap{position:relative;display:inline-flex}
 .bnav-item.active{color:var(--brand)}
+.bnav-item.active .bnav-label{color:var(--text-primary);font-weight:800}
 .bnav-item.disabled{opacity:.35;cursor:not-allowed}
 .bnav-label{line-height:1.1}
-.bnav-badge{position:absolute;top:-5px;right:-9px;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:var(--brand);color:var(--foreground);font-size:10px;font-weight:800;display:flex;align-items:center;justify-content:center;line-height:1;box-shadow:0 0 0 2px var(--surface)}
+.bnav-badge{position:absolute;top:-5px;right:-9px;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:var(--brand);color:var(--brand-foreground);font-size:10px;font-weight:800;display:flex;align-items:center;justify-content:center;line-height:1;box-shadow:0 0 0 2px var(--surface)}
 .delivery-cta-bar.stacked{bottom:58px}
 .checkout-summary{margin:14px 0 10px;color:var(--text-sub);font-size:13px;font-weight:700;text-align:center}
 .empty{text-align:center;padding:54px 20px;color:var(--text-sub)}
@@ -2440,11 +2445,11 @@ main{width:100%;padding:6px 20px 20px}
 .cardapio-illustration.compact .cardapio-illustration-icon{font-size:22px;margin-bottom:0}
 .cardapio-illustration.compact .cardapio-illustration-title{font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-sub);font-weight:600}
 .success{text-align:center;padding:34px 8px}
-.success .check{width:80px;height:80px;border-radius:50%;background:var(--green);margin:0 auto 20px;display:flex;align-items:center;justify-content:center;font-size:42px;color:var(--foreground);animation:pop .55s cubic-bezier(.2,1.4,.4,1)}
+.success .check{width:80px;height:80px;border-radius:50%;background:var(--green);margin:0 auto 20px;display:flex;align-items:center;justify-content:center;font-size:42px;color:var(--green-foreground);animation:pop .55s cubic-bezier(.2,1.4,.4,1)}
 @keyframes pop{from{transform:scale(0)}to{transform:scale(1)}}
 .success h2{font-family:var(--font-ui);font-weight:600;font-size:24px;margin-bottom:9px;letter-spacing:-.4px}
 .success p{color:var(--text-sub);font-size:15px;margin-bottom:5px}
-.toast{position:fixed;bottom:168px;left:50%;transform:translateX(-50%);background:var(--green);color:var(--foreground);padding:12px 22px;border-radius:30px;font-size:13.5px;font-weight:500;z-index:60;white-space:nowrap}
+.toast{position:fixed;bottom:168px;left:50%;transform:translateX(-50%);background:var(--green);color:var(--green-foreground);padding:12px 22px;border-radius:30px;font-size:13.5px;font-weight:500;z-index:60;white-space:nowrap}
 .qty-grid{display:flex;flex-direction:column;gap:10px}
 @media(min-width:480px){.qty-grid{display:grid;grid-template-columns:1fr 1fr;gap:11px}}
 .qty-card{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:16px 18px;cursor:pointer;display:flex;align-items:center;gap:14px;transition:transform .14s,border-color .14s,background .14s;box-shadow:var(--shadow-sm)}
@@ -2453,7 +2458,7 @@ main{width:100%;padding:6px 20px 20px}
 .qty-card-body{flex:1;min-width:0}
 .qty-card-title{font-weight:600;font-size:15.5px;letter-spacing:-.1px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .qty-card-sub{font-size:13px;color:var(--text-sub);margin-top:3px;font-weight:400}
-.qty-badge{font-size:10px;font-weight:700;color:var(--brand);background:var(--brand-soft);padding:2px 8px;border-radius:20px;white-space:nowrap;letter-spacing:.2px}
+.qty-badge{font-size:10px;font-weight:700;color:var(--gold);background:var(--brand-soft);padding:2px 8px;border-radius:20px;white-space:nowrap;letter-spacing:.2px}
 .sc-build-screen{padding-top:10px;padding-bottom:96px}
 .build-back{position:relative;z-index:1;margin:-2px 0 14px;padding:0}
 .build-back-btn{background:var(--surface2);border:1px solid var(--line-strong);color:var(--text-sub);font-family:var(--font-ui);font-size:13px;font-weight:600;padding:7px 14px;border-radius:30px;cursor:pointer;box-shadow:var(--shadow-sm);transition:transform .14s}

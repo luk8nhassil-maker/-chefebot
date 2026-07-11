@@ -1030,7 +1030,7 @@ export default function PedidosPage() {
           )}
           <div style={{ display: "flex", justifyContent: "space-between" }}>
             <span style={{ fontSize: 11, fontWeight: 700, color: "var(--foreground-muted)" }}>Tipo</span>
-            <span style={{ fontSize: 13, fontWeight: 800, color: isDineInDetail ? "var(--attention)" : isRetirada ? "var(--primary)" : "var(--info)" }}>{isDineInDetail ? "Consumo no local 🍽️" : isRetirada ? "Retirada na loja" : "Delivery"}</span>
+            <span style={{ fontSize: 13, fontWeight: 800, color: isDineInDetail ? "var(--attention)" : isRetirada ? "var(--text-primary)" : "var(--info)" }}>{isDineInDetail ? "Consumo no local 🍽️" : isRetirada ? "Retirada na loja" : "Delivery"}</span>
           </div>
           {!isRetirada && !isDineInDetail && (
             <>
@@ -1058,7 +1058,7 @@ export default function PedidosPage() {
               </div>
             </div>
           ))}
-          {p.observacao && <div style={{ marginTop: 8, fontSize: 12, fontWeight: 700, color: "var(--primary-text)", background: "color-mix(in srgb, var(--primary) 8%, transparent)", borderRadius: 8, padding: "6px 10px" }}>Obs: {p.observacao}</div>}
+          {p.observacao && <div style={{ marginTop: 8, fontSize: 12, fontWeight: 700, color: "var(--brand-text)", background: "color-mix(in srgb, var(--primary) 8%, transparent)", borderRadius: 8, padding: "6px 10px" }}>Obs: {p.observacao}</div>}
         </div>
 
         {/* Pagamento detalhado */}
@@ -1070,7 +1070,7 @@ export default function PedidosPage() {
               const revisaoOuSuspeito = ehPix ? labelPixRevisaoOuSuspeito(p) : null
               return (
                 <div key={i} style={{ marginBottom: 4 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, fontWeight: 800, color: "var(--primary-text)" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, fontWeight: 800, color: "var(--brand-text)" }}>
                     <span>{pp.metodo}</span><span>R$ {pp.valor.toFixed(2).replace(".", ",")}</span>
                   </div>
                   {ehPix && (
@@ -1078,9 +1078,9 @@ export default function PedidosPage() {
                       {p.pixConfirmado ? (
                         <span style={{ fontSize: 11, color: "var(--success)", fontWeight: 800 }}>{labelPixConfirmado(p)}</span>
                       ) : revisaoOuSuspeito ? (
-                        <span style={{ fontSize: 11, color: p.pix?.status === "suspeito" ? "var(--danger)" : "var(--primary)", fontWeight: 800 }}>{revisaoOuSuspeito}</span>
+                        <span style={{ fontSize: 11, color: p.pix?.status === "suspeito" ? "var(--danger)" : "var(--attention-text)", fontWeight: 800 }}>{revisaoOuSuspeito}</span>
                       ) : (
-                        <span style={{ fontSize: 11, color: "var(--primary-text)", fontWeight: 800 }}>⏳ Aguardando confirmação</span>
+                        <span style={{ fontSize: 11, color: "var(--attention-text)", fontWeight: 800 }}>⏳ Aguardando confirmação</span>
                       )}
                       {!p.pixConfirmado && !revisaoOuSuspeito && motivoResumidoPix(p) && (
                         <div style={{ marginTop: 2, fontSize: 11, fontWeight: 700, color: "var(--foreground-secondary)" }}>{motivoResumidoPix(p)}</div>
@@ -1095,7 +1095,7 @@ export default function PedidosPage() {
                 <span>Troco</span><span>{p.troco === "Sem troco" ? "Sem troco" : p.troco}</span>
               </div>
             )}
-            <div style={{ borderTop: "1px solid color-mix(in srgb, var(--primary) 15%, transparent)", marginTop: 6, paddingTop: 6, display: "flex", justifyContent: "space-between", fontSize: 16, fontWeight: 900, color: "var(--primary-text)" }}>
+            <div style={{ borderTop: "1px solid color-mix(in srgb, var(--primary) 15%, transparent)", marginTop: 6, paddingTop: 6, display: "flex", justifyContent: "space-between", fontSize: 16, fontWeight: 900, color: "var(--brand-text)" }}>
               <span>Total</span><span>R$ {p.total.toFixed(2).replace(".", ",")}</span>
             </div>
           </div>
@@ -1107,7 +1107,7 @@ export default function PedidosPage() {
                 {pagamento || "Pagamento não informado"}
                 {p.pixConfirmado && <span style={{ fontSize: 11, color: "var(--success)", fontWeight: 800 }}>{labelPixConfirmado(p)}</span>}
                 {!p.pixConfirmado && labelPixRevisaoOuSuspeito(p) && (
-                  <span style={{ fontSize: 11, color: p.pix?.status === "suspeito" ? "var(--danger)" : "var(--primary)", fontWeight: 800 }}>{labelPixRevisaoOuSuspeito(p)}</span>
+                  <span style={{ fontSize: 11, color: p.pix?.status === "suspeito" ? "var(--danger)" : "var(--attention-text)", fontWeight: 800 }}>{labelPixRevisaoOuSuspeito(p)}</span>
                 )}
               </div>
               <span style={{ fontSize: 15, fontWeight: 900, color: "var(--foreground)" }}>R$ {p.total.toFixed(2).replace(".", ",")}</span>
@@ -1147,7 +1147,7 @@ export default function PedidosPage() {
 
         {/* Confirmar Pix no detalhe */}
         {isPix && !p.pixConfirmado && !isDone && (
-          <button onClick={() => { setDetailId(null); setConfirmPixModal(p.id) }} style={{ height: 46, border: "1px solid color-mix(in srgb, var(--primary) 35%, transparent)", borderRadius: 14, background: "color-mix(in srgb, var(--primary) 8%, transparent)", color: "var(--primary-text)", fontSize: 14, fontWeight: 900, flexShrink: 0 }}>
+          <button onClick={() => { setDetailId(null); setConfirmPixModal(p.id) }} style={{ height: 46, border: "1px solid color-mix(in srgb, var(--primary) 35%, transparent)", borderRadius: 14, background: "color-mix(in srgb, var(--primary) 8%, transparent)", color: "var(--brand-text)", fontSize: 14, fontWeight: 900, flexShrink: 0 }}>
             Confirmar Pix recebido
           </button>
         )}
@@ -1211,8 +1211,8 @@ export default function PedidosPage() {
         .cb-header { background:var(--background); border-bottom:1px solid var(--surface); padding:calc(env(safe-area-inset-top) + 12px) 16px 12px; position:sticky; top:0; z-index:10; }
         .cb-main { padding:12px 16px; display:flex; flex-direction:column; gap:14px; }
         .cbBusca::placeholder { color: var(--border-strong); }
-        .cbBusca:focus { border-color: var(--primary-text) !important; box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 10%, transparent); }
-        .cbInput:focus { border-color: var(--primary-text) !important; outline: none; }
+        .cbBusca:focus { border-color: var(--brand-text) !important; box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 10%, transparent); }
+        .cbInput:focus { border-color: var(--brand-text) !important; outline: none; }
         .cbPipeScroll { display:flex; gap:4px; overflow-x:auto; scrollbar-width:none; flex:1; }
         .cbPipeScroll::-webkit-scrollbar { display:none; }
         .cb-workspace { display:flex; flex:1; min-height:0; overflow:hidden; }
@@ -1254,7 +1254,7 @@ export default function PedidosPage() {
         .cb-assumir-btn:hover { background:var(--primary); }
         .cb-assumir-btn:disabled { opacity:.65; cursor:default; }
         .cb-chat-textarea { width:100%; background:var(--background); border:1px solid var(--surface-secondary); border-radius:10px; padding:9px 12px; color:var(--foreground); font-size:13px; resize:none; font-family:inherit; outline:none; box-sizing:border-box; line-height:1.4; }
-        .cb-chat-textarea:focus { border-color:var(--primary-text); }
+        .cb-chat-textarea:focus { border-color:var(--brand-text); }
         @media (min-width: 768px) {
           .cb-header { border-bottom:1px solid var(--surface); padding:24px 28px 20px; position:static; }
           .cb-list-col { padding:16px 24px; }
@@ -1291,9 +1291,9 @@ export default function PedidosPage() {
             <span style={{ width: 9, height: 9, borderRadius: "50%", background: botAtivo ? "var(--success)" : "var(--primary)", flexShrink: 0, animation: botAtivo ? "cbPulse 2s infinite" : "none" }} />
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: 13, fontWeight: 900, letterSpacing: "-0.2px", color: "var(--foreground)" }}>{botAtivo ? "Bot atendendo" : "Bot pausado"}</div>
-              <div style={{ fontSize: 10, fontWeight: 700, color: botAtivo ? "var(--success)" : "var(--primary)", marginTop: 1 }}>{botAtivo ? "WhatsApp conectado" : "Você no comando"}</div>
+              <div style={{ fontSize: 10, fontWeight: 700, color: botAtivo ? "var(--success)" : "var(--brand-text)", marginTop: 1 }}>{botAtivo ? "WhatsApp conectado" : "Você no comando"}</div>
             </div>
-            <span style={{ fontSize: 11, fontWeight: 900, color: botAtivo ? "var(--success)" : "var(--primary)", background: "var(--background)", padding: "5px 10px", borderRadius: 8, flexShrink: 0 }}>{botAtivo ? "Pausar" : "Ativar"}</span>
+            <span style={{ fontSize: 11, fontWeight: 900, color: botAtivo ? "var(--success)" : "var(--brand-text)", background: "var(--background)", padding: "5px 10px", borderRadius: 8, flexShrink: 0 }}>{botAtivo ? "Pausar" : "Ativar"}</span>
           </button>
 
           {/* Métricas */}
@@ -1303,8 +1303,8 @@ export default function PedidosPage() {
               <div style={{ fontSize: 9.5, fontWeight: 700, color: "var(--foreground-muted)", textTransform: "uppercase", letterSpacing: ".5px", marginTop: 2 }}>Hoje</div>
             </div>
             <div style={{ flex: 1, background: emAberto > 0 ? "var(--background)" : "var(--surface)", border: `1px solid ${emAberto > 0 ? "color-mix(in srgb, var(--primary) 50%, transparent)" : "var(--border)"}`, borderRadius: 12, padding: "10px 10px" }}>
-              <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: "-1px", lineHeight: 1, color: emAberto > 0 ? "var(--primary)" : "var(--border-strong)" }}>{emAberto}</div>
-              <div style={{ fontSize: 9.5, fontWeight: 700, color: emAberto > 0 ? "color-mix(in srgb, var(--primary) 70%, transparent)" : "var(--border-strong)", textTransform: "uppercase", letterSpacing: ".5px", marginTop: 2 }}>Em aberto</div>
+              <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: "-1px", lineHeight: 1, color: emAberto > 0 ? "var(--brand-text)" : "var(--border-strong)" }}>{emAberto}</div>
+              <div style={{ fontSize: 9.5, fontWeight: 700, color: emAberto > 0 ? "var(--brand-text)" : "var(--border-strong)", textTransform: "uppercase", letterSpacing: ".5px", marginTop: 2 }}>Em aberto</div>
             </div>
             <div style={{ flex: 1, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: "10px 10px" }}>
               <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: "-1px", lineHeight: 1, color: "var(--success)" }}>{contagemPorStatus("entregue")}</div>
@@ -1331,7 +1331,7 @@ export default function PedidosPage() {
               <button onClick={() => setFiltro("arquivados")} style={{ border: `1px solid ${filtro === "arquivados" ? "color-mix(in srgb, var(--attention) 60%, transparent)" : "var(--surface-secondary)"}`, background: filtro === "arquivados" ? "color-mix(in srgb, var(--attention) 15%, transparent)" : "transparent", color: filtro === "arquivados" ? "var(--attention)" : "var(--foreground-muted)", fontSize: 11, fontWeight: 900, padding: "6px 11px", borderRadius: 14, flexShrink: 0 }}>📦 Arquivados</button>
             </div>
             <button onClick={() => setModalArquivarExpediente(true)} title="Arquivar não resolvidos do expediente" style={{ height: 32, border: "1px solid color-mix(in srgb, var(--attention) 40%, transparent)", background: "color-mix(in srgb, var(--attention) 8%, transparent)", color: "var(--attention)", fontSize: 11, fontWeight: 900, padding: "0 10px", borderRadius: 10, flexShrink: 0, whiteSpace: "nowrap" }}>📦</button>
-            <button onClick={() => setModalNovoPedido(true)} style={{ height: 32, border: "1px solid color-mix(in srgb, var(--primary) 50%, transparent)", background: "color-mix(in srgb, var(--primary) 10%, transparent)", color: "var(--primary-text)", fontSize: 11, fontWeight: 900, padding: "0 10px", borderRadius: 10, flexShrink: 0 }}>+ Novo</button>
+            <button onClick={() => setModalNovoPedido(true)} style={{ height: 32, border: "1px solid color-mix(in srgb, var(--primary) 50%, transparent)", background: "color-mix(in srgb, var(--primary) 10%, transparent)", color: "var(--brand-text)", fontSize: 11, fontWeight: 900, padding: "0 10px", borderRadius: 10, flexShrink: 0 }}>+ Novo</button>
             <button onClick={() => setModalLimpar(true)} title="Limpar histórico" style={{ width: 32, height: 32, border: "1px solid var(--surface-secondary)", borderRadius: 10, background: "transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><polyline points="3,6 5,6 21,6" stroke="var(--foreground-muted)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" stroke="var(--foreground-muted)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/><path d="M10 11v6M14 11v6" stroke="var(--foreground-muted)" strokeWidth="2.2" strokeLinecap="round"/><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" stroke="var(--foreground-muted)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
             </button>
@@ -1470,12 +1470,12 @@ export default function PedidosPage() {
                           1
                         </span>
                       )}
-                      <div style={{ width: 38, height: 38, borderRadius: "50%", flexShrink: 0, background: s.manual ? "color-mix(in srgb, var(--danger) 13%, transparent)" : s.postOrderPriority ? "color-mix(in srgb, var(--primary) 13%, transparent)" : "color-mix(in srgb, var(--primary) 10%, transparent)", border: `1.5px solid ${s.manual ? "color-mix(in srgb, var(--danger) 30%, transparent)" : s.postOrderPriority ? "color-mix(in srgb, var(--primary) 30%, transparent)" : "color-mix(in srgb, var(--primary) 25%, transparent)"}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 900, color: s.manual ? "var(--danger)" : s.postOrderPriority ? "var(--primary)" : "var(--primary)" }}>
+                      <div style={{ width: 38, height: 38, borderRadius: "50%", flexShrink: 0, background: s.manual ? "color-mix(in srgb, var(--danger) 13%, transparent)" : s.postOrderPriority ? "color-mix(in srgb, var(--primary) 13%, transparent)" : "color-mix(in srgb, var(--primary) 10%, transparent)", border: `1.5px solid ${s.manual ? "color-mix(in srgb, var(--danger) 30%, transparent)" : s.postOrderPriority ? "color-mix(in srgb, var(--primary) 30%, transparent)" : "color-mix(in srgb, var(--primary) 25%, transparent)"}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 900, color: s.manual ? "var(--danger)" : s.postOrderPriority ? "var(--brand-text)" : "var(--brand-text)" }}>
                         {initial}
                       </div>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, marginBottom: 3 }}>
-                          <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 900, color: "var(--primary-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displayName}</span>
+                          <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 900, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displayName}</span>
                           {s.postOrderPriority && !s.manual ? (
                             <button
                               className="cb-assumir-btn"
@@ -1485,7 +1485,7 @@ export default function PedidosPage() {
                               {assumindoSessao === s.phone ? "..." : "Assumir e responder"}
                             </button>
                           ) : s.conversationAlert && !s.manual ? (
-                            <span style={{ fontSize: 9, fontWeight: 900, color: "var(--primary-text)", background: "color-mix(in srgb, var(--primary) 8%, transparent)", border: "1px solid color-mix(in srgb, var(--primary) 30%, transparent)", padding: "2px 7px", borderRadius: 5, flexShrink: 0, whiteSpace: "nowrap" }}>
+                            <span style={{ fontSize: 9, fontWeight: 900, color: "var(--brand-text)", background: "color-mix(in srgb, var(--primary) 8%, transparent)", border: "1px solid color-mix(in srgb, var(--primary) 30%, transparent)", padding: "2px 7px", borderRadius: 5, flexShrink: 0, whiteSpace: "nowrap" }}>
                               ⚠ Atenção
                             </span>
                           ) : hasNovaMsg ? (
@@ -1530,13 +1530,13 @@ export default function PedidosPage() {
                   <>
                     {/* Header da conversa */}
                     <div style={{ padding: "10px 12px", borderBottom: "1px solid var(--background)", display: "flex", alignItems: "center", gap: 8, flexShrink: 0, background: "var(--background)" }}>
-                      <button className="cb-mob-back" onClick={() => setSessaoAtiva(null)} style={{ background: "none", border: "none", color: "var(--primary-text)", fontSize: 20, lineHeight: 1, padding: "0 4px", cursor: "pointer", flexShrink: 0 }}>←</button>
-                      <div style={{ width: 34, height: 34, borderRadius: "50%", flexShrink: 0, background: s.manual ? "color-mix(in srgb, var(--danger) 13%, transparent)" : s.postOrderPriority ? "color-mix(in srgb, var(--primary) 13%, transparent)" : "color-mix(in srgb, var(--primary) 10%, transparent)", border: `1.5px solid ${s.manual ? "color-mix(in srgb, var(--danger) 30%, transparent)" : s.postOrderPriority ? "color-mix(in srgb, var(--primary) 30%, transparent)" : "color-mix(in srgb, var(--primary) 25%, transparent)"}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 900, color: s.manual ? "var(--danger)" : s.postOrderPriority ? "var(--primary)" : "var(--primary)" }}>
+                      <button className="cb-mob-back" onClick={() => setSessaoAtiva(null)} style={{ background: "none", border: "none", color: "var(--brand-text)", fontSize: 20, lineHeight: 1, padding: "0 4px", cursor: "pointer", flexShrink: 0 }}>←</button>
+                      <div style={{ width: 34, height: 34, borderRadius: "50%", flexShrink: 0, background: s.manual ? "color-mix(in srgb, var(--danger) 13%, transparent)" : s.postOrderPriority ? "color-mix(in srgb, var(--primary) 13%, transparent)" : "color-mix(in srgb, var(--primary) 10%, transparent)", border: `1.5px solid ${s.manual ? "color-mix(in srgb, var(--danger) 30%, transparent)" : s.postOrderPriority ? "color-mix(in srgb, var(--primary) 30%, transparent)" : "color-mix(in srgb, var(--primary) 25%, transparent)"}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 900, color: s.manual ? "var(--danger)" : s.postOrderPriority ? "var(--brand-text)" : "var(--brand-text)" }}>
                         {initial}
                       </div>
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 13, fontWeight: 900, color: "var(--primary-text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displayName}</div>
-                        <div style={{ fontSize: 10, fontWeight: 700, color: s.manual ? "var(--danger)" : s.postOrderPriority ? "var(--primary)" : "var(--success)" }}>
+                        <div style={{ fontSize: 13, fontWeight: 900, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displayName}</div>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: s.manual ? "var(--danger)" : s.postOrderPriority ? "var(--brand-text)" : "var(--success)" }}>
                           {s.manual ? "Atendimento humano" : s.postOrderPriority ? "Bot respondendo · pós-pedido" : "Robô atendendo"} · {s.stepLabel}
                         </div>
                       </div>
@@ -1552,7 +1552,7 @@ export default function PedidosPage() {
                           <button onClick={() => devolverSessaoParaBot(s.phone)} disabled={devolvendoSessaoBot === s.phone} style={{ height: 30, padding: "0 9px", border: "none", borderRadius: 8, background: "var(--info)", color: "var(--foreground)", fontSize: 11, fontWeight: 900 }}>
                             {devolvendoSessaoBot === s.phone ? "..." : "🤖 Robô"}
                           </button>
-                          <button onClick={() => reviverConversa(s.phone)} disabled={revivendoConversa === s.phone} title="Reativa o bot. Não envia mensagem ao cliente." style={{ height: 30, padding: "0 8px", border: "1px solid color-mix(in srgb, var(--primary) 35%, transparent)", borderRadius: 8, background: "color-mix(in srgb, var(--primary) 8%, transparent)", color: "var(--primary-text)", fontSize: 11, fontWeight: 800 }}>
+                          <button onClick={() => reviverConversa(s.phone)} disabled={revivendoConversa === s.phone} title="Reativa o bot. Não envia mensagem ao cliente." style={{ height: 30, padding: "0 8px", border: "1px solid color-mix(in srgb, var(--primary) 35%, transparent)", borderRadius: 8, background: "color-mix(in srgb, var(--primary) 8%, transparent)", color: "var(--brand-text)", fontSize: 11, fontWeight: 800 }}>
                             {revivendoConversa === s.phone ? "..." : "🔄"}
                           </button>
                         </div>
@@ -1578,7 +1578,7 @@ export default function PedidosPage() {
                         {s.resumoRapido.cliente && <span style={{ fontSize: 11, fontWeight: 800, color: "var(--foreground-secondary)" }}>{s.resumoRapido.cliente}</span>}
                         {s.resumoRapido.itens.length > 0 && <span style={{ fontSize: 11, color: "var(--foreground-muted)" }}>· {s.resumoRapido.itens.slice(0, 2).join(", ")}{s.resumoRapido.itens.length > 2 ? `... +${s.resumoRapido.itens.length - 2}` : ""}</span>}
                         {s.resumoRapido.total > 0 && <span style={{ fontSize: 11, fontWeight: 900, color: "var(--success)", marginLeft: "auto" }}>R$ {s.resumoRapido.total.toFixed(2).replace(".", ",")}</span>}
-                        {s.resumoRapido.pendencias.length > 0 && <span style={{ fontSize: 10, fontWeight: 900, color: "var(--primary-text)" }}>⚠ {s.resumoRapido.pendencias.length} pendência{s.resumoRapido.pendencias.length > 1 ? "s" : ""}</span>}
+                        {s.resumoRapido.pendencias.length > 0 && <span style={{ fontSize: 10, fontWeight: 900, color: "var(--brand-text)" }}>⚠ {s.resumoRapido.pendencias.length} pendência{s.resumoRapido.pendencias.length > 1 ? "s" : ""}</span>}
                       </div>
                     )}
 
@@ -1617,7 +1617,7 @@ export default function PedidosPage() {
                         return (
                           <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: isCliente ? "flex-start" : "flex-end" }}>
                             {!isCliente && (
-                              <span style={{ fontSize: 9, fontWeight: 700, color: isAtendente ? "var(--primary)" : "var(--foreground-muted)", marginBottom: 2, paddingRight: 4 }}>
+                              <span style={{ fontSize: 9, fontWeight: 700, color: isAtendente ? "var(--brand-text)" : "var(--foreground-muted)", marginBottom: 2, paddingRight: 4 }}>
                                 {isAtendente ? (userName || "Atendente") : "🤖 Bot"}
                               </span>
                             )}
@@ -1641,7 +1641,7 @@ export default function PedidosPage() {
                             bottom: 10,
                             alignSelf: "center",
                             background: "var(--whatsapp)",
-                            color: "var(--foreground)",
+                            color: 'var(--whatsapp-foreground)',
                             border: 0,
                             borderRadius: 20,
                             padding: "5px 14px",
@@ -1697,7 +1697,7 @@ export default function PedidosPage() {
                     ) : (
                       <div style={{ padding: "10px 12px", borderTop: "1px solid var(--background)", background: "var(--background)", flexShrink: 0, textAlign: "center" }}>
                         {s.postOrderPriority ? (
-                          <span style={{ fontSize: 12, color: "var(--primary-text)", fontWeight: 700 }}>Bot respondendo · clique em Atender se precisar intervir</span>
+                          <span style={{ fontSize: 12, color: "var(--brand-text)", fontWeight: 700 }}>Bot respondendo · clique em Atender se precisar intervir</span>
                         ) : (
                           <button onClick={() => assumirSessao(s.phone)} disabled={assumindoSessao === s.phone} style={{ height: 30, padding: "0 16px", border: "1px solid color-mix(in srgb, var(--foreground-secondary) 15%, transparent)", borderRadius: 8, background: "color-mix(in srgb, var(--foreground-secondary) 6%, transparent)", color: "var(--foreground-secondary)", fontSize: 12, fontWeight: 700 }}>
                             {assumindoSessao === s.phone ? "..." : "Assumir e responder"}
@@ -1774,7 +1774,7 @@ export default function PedidosPage() {
                 <div style={{ display: "flex", alignItems: "flex-start", gap: 11 }}>
                   {/* Dot de status */}
                   <div style={{ marginTop: 3, flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
-                    <div style={{ width: 10, height: 10, borderRadius: "50%", background: isDone ? "var(--success)" : isCanceled ? "var(--danger)" : sc.accent, boxShadow: isDone || isCanceled ? "none" : `0 0 6px ${sc.accent}55` }} />
+                    <div style={{ width: 10, height: 10, borderRadius: "50%", background: isDone ? "var(--success)" : isCanceled ? "var(--danger)" : sc.accent, boxShadow: isDone || isCanceled ? "none" : `0 0 6px color-mix(in srgb, ${sc.accent} 33%, transparent)` }} />
                   </div>
 
                   {/* Conteúdo principal */}
@@ -1782,13 +1782,13 @@ export default function PedidosPage() {
                     {/* Linha 1: nome + badges + timer */}
                     <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
                       {pedido.numero != null && <span style={{ fontSize: 10, fontWeight: 900, color: "var(--border-strong)", flexShrink: 0 }}>#{pedido.numero}</span>}
-                      <span style={{ fontSize: 14, fontWeight: 900, color: "var(--primary-text)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{firstName}</span>
+                      <span style={{ fontSize: 14, fontWeight: 900, color: "var(--text-primary)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{firstName}</span>
                       {pedido.escalonado && <span style={{ fontSize: 11, flexShrink: 0 }}>🚨</span>}
                       {(pedido.origem === "site" || pedido.origem === "app") && <span style={{ fontSize: 9, fontWeight: 900, color: "var(--info)", background: "color-mix(in srgb, var(--info) 12%, transparent)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>🌐 Site</span>}
-                      {pixPendente && <span style={{ fontSize: 9, fontWeight: 900, color: "var(--primary-text)", background: "color-mix(in srgb, var(--primary) 12%, transparent)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>{hibridoParts ? "PIX parcial ⏳" : "PIX⏳"}</span>}
-                      {pixEmRevisaoOuSuspeito && <span style={{ fontSize: 9, fontWeight: 900, color: pedido.pix?.status === "suspeito" ? "var(--danger)" : "var(--primary)", background: pedido.pix?.status === "suspeito" ? "color-mix(in srgb, var(--danger) 12%, transparent)" : "color-mix(in srgb, var(--primary) 12%, transparent)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>{pixEmRevisaoOuSuspeito}</span>}
+                      {pixPendente && <span style={{ fontSize: 9, fontWeight: 900, color: "var(--attention-text)", background: "var(--attention-surface)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>{hibridoParts ? "PIX parcial ⏳" : "PIX⏳"}</span>}
+                      {pixEmRevisaoOuSuspeito && <span style={{ fontSize: 9, fontWeight: 900, color: pedido.pix?.status === "suspeito" ? "var(--danger)" : "var(--attention-text)", background: pedido.pix?.status === "suspeito" ? "color-mix(in srgb, var(--danger) 12%, transparent)" : "var(--attention-surface)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>{pixEmRevisaoOuSuspeito}</span>}
                       {pedido.cancelamentoSolicitado && <span style={{ fontSize: 11, flexShrink: 0 }}>⚠️</span>}
-                      <span style={{ fontSize: 10, fontWeight: 900, color: pixPendente ? "var(--primary)" : (isPix && pedido.pixConfirmado && pedido.status === "novo" ? "var(--success)" : sc.accent), background: pixPendente ? "color-mix(in srgb, var(--primary) 12%, transparent)" : (isPix && pedido.pixConfirmado && pedido.status === "novo" ? "color-mix(in srgb, var(--success) 12%, transparent)" : sc.accentBg), padding: "2px 7px", borderRadius: 6, border: `1px solid ${pixPendente ? "color-mix(in srgb, var(--primary) 35%, transparent)" : (isPix && pedido.pixConfirmado && pedido.status === "novo" ? "color-mix(in srgb, var(--success) 35%, transparent)" : sc.accentBorder)}`, textTransform: "uppercase", letterSpacing: ".4px", flexShrink: 0 }}>{pixPendente ? (hibridoParts ? "Aguardando Pix parcial" : "Aguardando Pix") : (isPix && pedido.pixConfirmado && pedido.status === "novo" ? (hibridoParts ? "Pix parcial pago" : "Pago") : sc.label)}</span>
+                      <span style={{ fontSize: 10, fontWeight: 900, color: pixPendente ? "var(--attention-text)" : (isPix && pedido.pixConfirmado && pedido.status === "novo" ? "var(--success)" : sc.accent), background: pixPendente ? "var(--attention-surface)" : (isPix && pedido.pixConfirmado && pedido.status === "novo" ? "color-mix(in srgb, var(--success) 12%, transparent)" : sc.accentBg), padding: "2px 7px", borderRadius: 6, border: `1px solid ${pixPendente ? "var(--attention-border)" : (isPix && pedido.pixConfirmado && pedido.status === "novo" ? "color-mix(in srgb, var(--success) 35%, transparent)" : sc.accentBorder)}`, textTransform: "uppercase", letterSpacing: ".4px", flexShrink: 0 }}>{pixPendente ? (hibridoParts ? "Aguardando Pix parcial" : "Aguardando Pix") : (isPix && pedido.pixConfirmado && pedido.status === "novo" ? (hibridoParts ? "Pix parcial pago" : "Pago") : sc.label)}</span>
                     </div>
 
                     {/* Linha 2: infos compactas */}
@@ -1815,7 +1815,7 @@ export default function PedidosPage() {
                       {!pedido.escalonado && pixPendente && (
                         <button
                           onClick={() => setConfirmPixModal(pedido.id)}
-                          style={{ height: 30, padding: "0 14px", border: "1px solid color-mix(in srgb, var(--primary) 35%, transparent)", borderRadius: 8, background: "color-mix(in srgb, var(--primary) 8%, transparent)", color: "var(--primary-text)", fontSize: 12, fontWeight: 900 }}
+                          style={{ height: 30, padding: "0 14px", border: "1px solid color-mix(in srgb, var(--primary) 35%, transparent)", borderRadius: 8, background: "color-mix(in srgb, var(--primary) 8%, transparent)", color: "var(--brand-text)", fontSize: 12, fontWeight: 900 }}
                         >Confirmar Pix recebido</button>
                       )}
                       {!pedido.escalonado && !pixPendente && !isDone && !isCanceled && nextStatus && (
@@ -1856,14 +1856,14 @@ export default function PedidosPage() {
       {toastVisible && (
         <div style={{ position: "fixed", bottom: 96, left: 0, right: 0, margin: "0 auto", width: "calc(100% - 32px)", maxWidth: 343, background: "var(--surface)", border: "1px solid var(--surface-elevated)", borderRadius: 16, padding: "12px 12px 12px 16px", display: "flex", alignItems: "center", gap: 12, animation: "cbToastIn .25s ease both", zIndex: 50, boxShadow: "0 12px 32px rgba(0,0,0,.55)" }}>
           <span style={{ flex: 1, fontSize: 14, fontWeight: 800, letterSpacing: "-0.2px" }}>{toast?.text}</span>
-          <button onClick={desfazerToast} style={{ border: "none", background: "color-mix(in srgb, var(--primary) 16%, transparent)", color: "var(--primary-text)", fontWeight: 900, fontSize: 14, padding: "11px 14px", borderRadius: 11, flexShrink: 0 }}>Desfazer · {toastSegs}</button>
+          <button onClick={desfazerToast} style={{ border: "none", background: "color-mix(in srgb, var(--primary) 16%, transparent)", color: "var(--brand-text)", fontWeight: 900, fontSize: 14, padding: "11px 14px", borderRadius: 11, flexShrink: 0 }}>Desfazer · {toastSegs}</button>
         </div>
       )}
 
       {/* Simple Toast */}
       {simpleToast && (
         <div style={{ position: "fixed", bottom: 96, left: 0, right: 0, margin: "0 auto", width: "calc(100% - 32px)", maxWidth: 343, background: "var(--surface)", border: "1px solid color-mix(in srgb, var(--primary) 30%, transparent)", borderRadius: 16, padding: "14px 16px", animation: "cbToastIn .25s ease both", zIndex: 50, boxShadow: "0 12px 32px rgba(0,0,0,.55)" }}>
-          <span style={{ fontSize: 13, fontWeight: 800, color: "var(--primary-text)" }}>{simpleToast}</span>
+          <span style={{ fontSize: 13, fontWeight: 800, color: "var(--brand-text)" }}>{simpleToast}</span>
         </div>
       )}
 
@@ -1954,7 +1954,7 @@ export default function PedidosPage() {
                 <label style={labelStyle}>Tipo</label>
                 <div style={{ display: "flex", gap: 8 }}>
                   {(["delivery", "retirada", "dine_in"] as const).map(t => (
-                    <button key={t} onClick={() => setNovoPedidoForm(f => ({ ...f, tipoEntrega: t }))} style={{ flex: 1, height: 40, border: `1px solid ${novoPedidoForm.tipoEntrega === t ? "var(--primary)" : "var(--surface-secondary)"}`, borderRadius: 10, background: novoPedidoForm.tipoEntrega === t ? "color-mix(in srgb, var(--primary) 15%, transparent)" : "transparent", color: novoPedidoForm.tipoEntrega === t ? "var(--primary)" : "var(--foreground-muted)", fontSize: 13, fontWeight: 900 }}>
+                    <button key={t} onClick={() => setNovoPedidoForm(f => ({ ...f, tipoEntrega: t }))} style={{ flex: 1, height: 40, border: `1px solid ${novoPedidoForm.tipoEntrega === t ? "var(--primary)" : "var(--surface-secondary)"}`, borderRadius: 10, background: novoPedidoForm.tipoEntrega === t ? "color-mix(in srgb, var(--primary) 15%, transparent)" : "transparent", color: novoPedidoForm.tipoEntrega === t ? "var(--text-primary)" : "var(--text-muted)", fontSize: 13, fontWeight: 900 }}>
                       {t === "delivery" ? "🛵 Entrega" : t === "dine_in" ? "🍽️ Local" : "🏪 Retirada"}
                     </button>
                   ))}
@@ -1994,7 +1994,7 @@ export default function PedidosPage() {
                 <label style={labelStyle}>Forma de pagamento</label>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                   {["Pix", "Dinheiro", "Cartão", "Misto"].map(p => (
-                    <button key={p} onClick={() => setNovoPedidoForm(f => ({ ...f, pagamento: p }))} style={{ height: 36, padding: "0 14px", border: `1px solid ${novoPedidoForm.pagamento === p ? "var(--primary)" : "var(--surface-secondary)"}`, borderRadius: 10, background: novoPedidoForm.pagamento === p ? "color-mix(in srgb, var(--primary) 15%, transparent)" : "transparent", color: novoPedidoForm.pagamento === p ? "var(--primary)" : "var(--foreground-muted)", fontSize: 12, fontWeight: 900 }}>{p}</button>
+                    <button key={p} onClick={() => setNovoPedidoForm(f => ({ ...f, pagamento: p }))} style={{ height: 36, padding: "0 14px", border: `1px solid ${novoPedidoForm.pagamento === p ? "var(--primary)" : "var(--surface-secondary)"}`, borderRadius: 10, background: novoPedidoForm.pagamento === p ? "color-mix(in srgb, var(--primary) 15%, transparent)" : "transparent", color: novoPedidoForm.pagamento === p ? "var(--text-primary)" : "var(--text-muted)", fontSize: 12, fontWeight: 900 }}>{p}</button>
                   ))}
                 </div>
               </div>
@@ -2133,7 +2133,7 @@ export default function PedidosPage() {
           <span style={{ width: 9, height: 9, borderRadius: "50%", background: botAtivo ? "var(--success)" : "var(--primary)", flexShrink: 0, animation: botAtivo ? "cbPulse 2s infinite" : "none" }} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 13, fontWeight: 900, color: "var(--foreground)" }}>{botAtivo ? "Bot atendendo" : "Bot pausado"}</div>
-            <div style={{ fontSize: 10, fontWeight: 700, color: botAtivo ? "var(--success)" : "var(--primary)", marginTop: 1 }}>{botAtivo ? "WhatsApp ativo" : "Você no comando"}</div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: botAtivo ? "var(--success)" : "var(--brand-text)", marginTop: 1 }}>{botAtivo ? "WhatsApp ativo" : "Você no comando"}</div>
           </div>
         </div>
 
@@ -2145,8 +2145,8 @@ export default function PedidosPage() {
               <div style={{ fontSize: 9.5, fontWeight: 700, color: "var(--border-strong)", textTransform: "uppercase", letterSpacing: ".5px", marginTop: 3 }}>Hoje</div>
             </div>
             <div style={{ background: emAberto > 0 ? "var(--background)" : "var(--surface)", border: `1px solid ${emAberto > 0 ? "color-mix(in srgb, var(--primary) 45%, transparent)" : "var(--surface)"}`, borderRadius: 11, padding: "11px 10px" }}>
-              <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: "-1px", lineHeight: 1, color: emAberto > 0 ? "var(--primary)" : "var(--border-strong)" }}>{emAberto}</div>
-              <div style={{ fontSize: 9.5, fontWeight: 700, color: emAberto > 0 ? "color-mix(in srgb, var(--primary) 60%, transparent)" : "var(--border-strong)", textTransform: "uppercase", letterSpacing: ".5px", marginTop: 3 }}>Em aberto</div>
+              <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: "-1px", lineHeight: 1, color: emAberto > 0 ? "var(--brand-text)" : "var(--border-strong)" }}>{emAberto}</div>
+              <div style={{ fontSize: 9.5, fontWeight: 700, color: emAberto > 0 ? "var(--brand-text)" : "var(--border-strong)", textTransform: "uppercase", letterSpacing: ".5px", marginTop: 3 }}>Em aberto</div>
             </div>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>

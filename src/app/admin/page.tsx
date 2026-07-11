@@ -129,9 +129,9 @@ const CATEGORIAS_FIN = [
 ]
 
 const PASSOS_TOUR_CARDAPIO = [
-  { face: String.fromCodePoint(0x1F468, 0x200D, 0x1F373), tag: 'Bem-vindo!', tagBg: 'color-mix(in srgb, var(--primary) 8%, transparent)', tagColor: 'var(--primary)', title: 'Sou o Chef, seu guia!', text: 'Vou te ensinar como editar seu cardapio em 4 passos rapidos!', nextLabel: 'Bora!', nextBg: 'linear-gradient(135deg,var(--primary),var(--primary))', accent: 'var(--primary)' },
-  { face: String.fromCodePoint(0x1F9D0), tag: 'Passo 1 de 4', tagBg: 'var(--info)', tagColor: 'var(--info)', title: 'Toque no x para remover', text: 'Cada bolinha e um sabor. Quer tirar algum? So tocar no x ao lado do nome!', highlightId: 'cardapio-sabores', arrowId: 'cardapio-sabores', nextLabel: 'Entendi!', nextBg: 'linear-gradient(135deg,var(--info),var(--info))', accent: 'var(--info)', particles: true },
-  { face: String.fromCodePoint(0x1F604), tag: 'Passo 2 de 4', tagBg: 'var(--attention)', tagColor: 'var(--attention)', title: 'Toque + para adicionar', text: 'Clique em + Add para incluir novos sabores. Pode adicionar quantos quiser!', highlightId: 'cardapio-add-btn', arrowId: 'cardapio-add-btn', nextLabel: 'Facil demais!', nextBg: 'linear-gradient(135deg,var(--attention),var(--attention))', accent: 'var(--attention)', particles: true },
+  { face: String.fromCodePoint(0x1F468, 0x200D, 0x1F373), tag: 'Bem-vindo!', tagBg: 'color-mix(in srgb, var(--primary) 8%, transparent)', tagColor: 'var(--brand-text)', title: 'Sou o Chef, seu guia!', text: 'Vou te ensinar como editar seu cardapio em 4 passos rapidos!', nextLabel: 'Bora!', nextBg: 'linear-gradient(135deg,var(--primary),var(--primary))', accent: 'var(--primary)' },
+  { face: String.fromCodePoint(0x1F9D0), tag: 'Passo 1 de 4', tagBg: 'var(--info-soft)', tagColor: 'var(--info-text)', title: 'Toque no x para remover', text: 'Cada bolinha e um sabor. Quer tirar algum? So tocar no x ao lado do nome!', highlightId: 'cardapio-sabores', arrowId: 'cardapio-sabores', nextLabel: 'Entendi!', nextBg: 'linear-gradient(135deg,var(--info),var(--info))', accent: 'var(--info)', particles: true },
+  { face: String.fromCodePoint(0x1F604), tag: 'Passo 2 de 4', tagBg: 'var(--attention-soft)', tagColor: 'var(--attention-text)', title: 'Toque + para adicionar', text: 'Clique em + Add para incluir novos sabores. Pode adicionar quantos quiser!', highlightId: 'cardapio-add-btn', arrowId: 'cardapio-add-btn', nextLabel: 'Facil demais!', nextBg: 'linear-gradient(135deg,var(--attention),var(--attention))', accent: 'var(--attention)', particles: true },
   { face: String.fromCodePoint(0x1F62E), tag: 'Passo 3 - IMPORTANTE', tagBg: 'var(--danger-soft)', tagColor: 'var(--danger)', title: 'Sempre salve no final!', text: 'Depois de editar aperte o botao verde Salvar Cardapio. Sem salvar o bot nao aprende!', highlightId: 'cardapio-salvar', arrowId: 'cardapio-salvar', nextLabel: 'Anotado!', nextBg: 'linear-gradient(135deg,var(--danger),var(--primary))', accent: 'var(--danger)', particles: true, showDismiss: true },
   { face: String.fromCodePoint(0x1F973), tag: 'Pronto!', tagBg: 'var(--success-soft)', tagColor: 'var(--success)', title: 'Voce e um craque!', text: 'Agora e so editar o cardapio do seu jeito. Qualquer duvida e so chamar!', nextLabel: 'Usar agora!', nextBg: 'linear-gradient(135deg,var(--success),var(--success))', accent: 'var(--success)', showDismiss: true, last: true },
 ]
@@ -503,7 +503,7 @@ export default function AdminPage() {
   return (
     <PanelShell showGestaoNav>
     <div style={{ minHeight: '100svh', background: 'var(--background)', fontFamily: "'Archivo', sans-serif", paddingBottom: 'calc(env(safe-area-inset-bottom) + 80px)', overflowX: 'hidden' }}>
-      <style>{`@keyframes slideUp { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } } input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(1); } .ps-bottom-nav { display: none !important; } .ps-content { padding-bottom: 0 !important; } .cb-admin-metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; } .cb-admin-acesso { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; } .cb-admin-bottomnav { left: 0; display: flex; } .cb-admin-desktop-tabs { display: none; } .cb-admin-tab { display: flex; align-items: center; gap: 7px; padding: 9px 16px; border-radius: 10px; background: transparent; color: var(--foreground-muted); font-size: 13px; font-weight: 700; font-family: 'Archivo', sans-serif; border: none; cursor: pointer; } .cb-admin-tab-active { background: color-mix(in srgb, var(--primary) 8%, transparent); color: var(--primary-text); } @media (min-width: 768px) { .cb-admin-bottomnav { left: 220px; display: none; } .cb-admin-desktop-tabs { display: flex; gap: 6px; padding: 12px 16px 0; } } @media (min-width: 1024px) { .cb-admin-metrics { grid-template-columns: repeat(4, minmax(0,1fr)); } .cb-admin-acesso { grid-template-columns: repeat(4, minmax(0,1fr)); } .cb-admin-bottomnav { left: 240px; } }`}</style>
+      <style>{`@keyframes slideUp { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } } input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(1); } .ps-bottom-nav { display: none !important; } .ps-content { padding-bottom: 0 !important; } .cb-admin-metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; } .cb-admin-acesso { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; } .cb-admin-bottomnav { left: 0; display: flex; } .cb-admin-desktop-tabs { display: none; } .cb-admin-tab { display: flex; align-items: center; gap: 7px; padding: 9px 16px; border-radius: 10px; background: transparent; color: var(--foreground-muted); font-size: 13px; font-weight: 700; font-family: 'Archivo', sans-serif; border: none; cursor: pointer; } .cb-admin-tab-active { background: color-mix(in srgb, var(--primary) 8%, transparent); color: var(--brand-text); } @media (min-width: 768px) { .cb-admin-bottomnav { left: 220px; display: none; } .cb-admin-desktop-tabs { display: flex; gap: 6px; padding: 12px 16px 0; } } @media (min-width: 1024px) { .cb-admin-metrics { grid-template-columns: repeat(4, minmax(0,1fr)); } .cb-admin-acesso { grid-template-columns: repeat(4, minmax(0,1fr)); } .cb-admin-bottomnav { left: 240px; } }`}</style>
 
       {/* Header */}
       <div style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)', padding: '18px 16px', paddingTop: 'calc(env(safe-area-inset-top) + 18px)', position: 'sticky', top: 0, zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -573,12 +573,12 @@ export default function AdminPage() {
                   <>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                       <AlertTriangle size={18} color="var(--primary)" aria-hidden="true" />
-                      <p style={{ color: 'var(--primary-text)', fontSize: 14, fontWeight: 700, margin: 0 }}>Conectar WhatsApp</p>
+                      <p style={{ color: 'var(--brand-text)', fontSize: 14, fontWeight: 700, margin: 0 }}>Conectar WhatsApp</p>
                     </div>
                     <p style={{ color: 'var(--foreground-secondary)', fontSize: 12, margin: '0 0 12px', lineHeight: 1.5 }}>
                       Nenhum WhatsApp está conectado. Escaneie o QR Code para ativar o atendimento automático.
                     </p>
-                    <button onClick={fetchQrCode} disabled={waLoadingQr} style={{ width: '100%', background: 'var(--whatsapp)', border: 'none', borderRadius: 10, padding: '14px', color: 'var(--foreground)', fontSize: 14, fontWeight: 700, cursor: waLoadingQr ? 'not-allowed' : 'pointer', opacity: waLoadingQr ? 0.7 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                    <button onClick={fetchQrCode} disabled={waLoadingQr} style={{ width: '100%', background: 'var(--whatsapp)', border: 'none', borderRadius: 10, padding: '14px', color: 'var(--whatsapp-foreground)', fontSize: 14, fontWeight: 700, cursor: waLoadingQr ? 'not-allowed' : 'pointer', opacity: waLoadingQr ? 0.7 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
                       {waLoadingQr ? 'Gerando QR Code...' : <><Camera size={16} aria-hidden="true" /> Escanear QR Code</>}
                     </button>
                     {waQrError && (
@@ -596,7 +596,7 @@ export default function AdminPage() {
                     {waExpired ? (
                       <div style={{ textAlign: 'center', marginBottom: 12 }}>
                         <p style={{ color: 'var(--danger)', fontSize: 13, fontWeight: 600, margin: '0 0 12px' }}>QR Code expirado.</p>
-                        <button onClick={fetchQrCode} disabled={waLoadingQr} style={{ background: 'var(--whatsapp)', border: 'none', borderRadius: 10, padding: '12px 24px', color: 'var(--foreground)', fontSize: 13, fontWeight: 700, cursor: waLoadingQr ? 'not-allowed' : 'pointer', opacity: waLoadingQr ? 0.7 : 1, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                        <button onClick={fetchQrCode} disabled={waLoadingQr} style={{ background: 'var(--whatsapp)', border: 'none', borderRadius: 10, padding: '12px 24px', color: 'var(--whatsapp-foreground)', fontSize: 13, fontWeight: 700, cursor: waLoadingQr ? 'not-allowed' : 'pointer', opacity: waLoadingQr ? 0.7 : 1, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                           {waLoadingQr ? 'Gerando...' : <><RefreshCw size={15} aria-hidden="true" /> Gerar novo QR Code</>}
                         </button>
                       </div>
@@ -659,7 +659,7 @@ export default function AdminPage() {
               </div>
               <div style={{ ...card, background: 'linear-gradient(135deg, var(--surface), var(--surface))' }}>
                 <p style={{ color: 'var(--foreground-secondary)', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 6px', letterSpacing: 0.5 }}>Ticket medio</p>
-                <p style={{ color: 'var(--primary-text)', fontSize: 22, fontWeight: 800, margin: 0, letterSpacing: -0.5, lineHeight: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>R${ticketMedio.toFixed(2).replace('.', ',')}</p>
+                <p style={{ color: 'var(--brand-text)', fontSize: 22, fontWeight: 800, margin: 0, letterSpacing: -0.5, lineHeight: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>R${ticketMedio.toFixed(2).replace('.', ',')}</p>
                 <p style={{ color: 'var(--border-strong)', fontSize: 10, margin: '6px 0 0' }}>por pedido</p>
               </div>
               <div style={{ ...card, background: 'linear-gradient(135deg, var(--surface), var(--surface))', border: emAndamento > 0 ? '1px solid color-mix(in srgb, var(--primary) 19%, transparent)' : '1px solid var(--border)' }}>
@@ -675,7 +675,7 @@ export default function AdminPage() {
                 <p style={sectionTitle}>Pedidos por status</p>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                   {[
-                    { key: 'pendente', label: 'Pendente', color: 'var(--primary-text)' },
+                    { key: 'pendente', label: 'Pendente', color: 'var(--brand-text)' },
                     { key: 'em preparo', label: 'Em preparo', color: 'var(--info)' },
                     { key: 'saiu para entrega', label: 'A caminho', color: 'var(--attention)' },
                     { key: 'entregue', label: 'Entregue', color: 'var(--success)' },
@@ -695,7 +695,7 @@ export default function AdminPage() {
               <div style={{ ...card, marginBottom: 16 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
                   <p style={{ ...sectionTitle, margin: 0 }}>Vendas por hora</p>
-                  <span style={{ color: 'var(--primary-text)', fontSize: 11, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>pico {graficoPico.find(g => g.total === maxPico)?.hora}</span>
+                  <span style={{ color: 'var(--brand-text)', fontSize: 11, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>pico {graficoPico.find(g => g.total === maxPico)?.hora}</span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 90 }}>
                   {graficoPico.map((item, i) => {
@@ -745,13 +745,13 @@ export default function AdminPage() {
               <p style={sectionTitle}>Acesso rapido</p>
               <div className="cb-admin-acesso">
                 {[
-                  { Icon: ChefHat, label: 'Cozinha', sub: 'Pedidos ativos', action: () => router.push('/pedidos'), color: 'var(--primary-text)' },
+                  { Icon: ChefHat, label: 'Cozinha', sub: 'Pedidos ativos', action: () => router.push('/pedidos'), color: 'var(--brand-text)' },
                   { Icon: Settings, label: 'Configuracoes', sub: 'Horario e cardapio', action: () => router.push('/configuracoes'), color: 'var(--info)' },
                   { Icon: DollarSign, label: 'Financeiro', sub: 'Custos e lucro', action: () => router.push('/financeiro'), color: 'var(--success)' },
                   { Icon: TrendingUp, label: 'Relatorios', sub: 'Historico completo', action: () => router.push('/relatorios'), color: 'var(--attention)' },
                 ].map(({ Icon, label, sub, action, color }) => (
                   <button key={label} onClick={action} style={{ background: 'var(--surface)', border: `1px solid var(--border)`, borderRadius: 14, padding: '14px 12px', cursor: 'pointer', textAlign: 'left', display: 'flex', flexDirection: 'column', gap: 2, transition: 'border-color 0.2s', minHeight: 90 }}>
-                    <div style={{ width: 34, height: 34, borderRadius: 10, background: color + '18', border: `1px solid ${color}30`, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 6 }}><Icon size={18} color={color} aria-hidden="true" /></div>
+                    <div style={{ width: 34, height: 34, borderRadius: 10, background: `color-mix(in srgb, ${color} 9%, transparent)`, border: `1px solid color-mix(in srgb, ${color} 19%, transparent)`, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 6 }}><Icon size={18} color={color} aria-hidden="true" /></div>
                     <p style={{ color: 'var(--foreground)', fontSize: 13, fontWeight: 700, margin: 0, fontFamily: "'Archivo', sans-serif" }}>{label}</p>
                     <p style={{ color: 'var(--foreground-muted)', fontSize: 10, margin: 0 }}>{sub}</p>
                   </button>
@@ -764,7 +764,7 @@ export default function AdminPage() {
               <div style={{ ...card, marginBottom: 16 }}>
                 <p style={sectionTitle}>Avaliacoes recentes</p>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-                  <p style={{ color: 'var(--primary-text)', fontSize: 36, fontWeight: 900, margin: 0, letterSpacing: -2 }}>{avaliacoes.media.toFixed(1)}</p>
+                  <p style={{ color: 'var(--brand-text)', fontSize: 36, fontWeight: 900, margin: 0, letterSpacing: -2 }}>{avaliacoes.media.toFixed(1)}</p>
                   <div>
                     <div style={{ display: 'flex', gap: 2 }}>
                       {[1,2,3,4,5].map(s => <Star key={s} size={14} color={s <= Math.round(avaliacoes.media) ? 'var(--primary)' : 'var(--surface-elevated)'} fill={s <= Math.round(avaliacoes.media) ? 'var(--primary)' : 'var(--surface-elevated)'} aria-hidden="true" />)}
@@ -908,7 +908,7 @@ export default function AdminPage() {
                   <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--surface)', borderRadius: 8, padding: '8px 12px' }}>
                     <span style={{ color: 'var(--foreground)', fontSize: 13 }}>{n.name}</span>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{ color: 'var(--primary-text)', fontSize: 13, fontWeight: 700 }}>R$ {n.fee.toFixed(2).replace('.', ',')}</span>
+                      <span style={{ color: 'var(--brand-text)', fontSize: 13, fontWeight: 700 }}>R$ {n.fee.toFixed(2).replace('.', ',')}</span>
                       <button onClick={() => setCardapio(prev => ({ ...prev, neighborhoods: prev.neighborhoods.filter((_, idx) => idx !== i) }))} style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer', fontSize: 16 }}>x</button>
                     </div>
                   </div>
@@ -1060,7 +1060,7 @@ export default function AdminPage() {
                     <p style={{ color: 'var(--border-strong)', fontSize: 11, margin: 0 }}>{(imagens as any)[key] ? 'Imagem carregada' : 'Sem imagem'}</p>
                   </div>
                   <input ref={ref} type="file" accept="image/*" style={{ display: 'none' }} onChange={e => { if (e.target.files?.[0]) uploadImagem(key, e.target.files[0]) }} />
-                  <button onClick={() => ref.current?.click()} disabled={uploadando === key} style={{ background: 'var(--surface-secondary)', border: '1px solid var(--surface-elevated)', color: 'var(--primary-text)', borderRadius: 8, padding: '8px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}>
+                  <button onClick={() => ref.current?.click()} disabled={uploadando === key} style={{ background: 'var(--surface-secondary)', border: '1px solid var(--surface-elevated)', color: 'var(--brand-text)', borderRadius: 8, padding: '8px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}>
                     {uploadando === key ? '...' : 'Carregar'}
                   </button>
                 </div>
@@ -1301,7 +1301,7 @@ export default function AdminPage() {
           })
           return (
             <div style={{ background: 'var(--surface)', border: '1px solid var(--surface-secondary)', borderRadius: 16, padding: 16, marginTop: 8 }}>
-              <p style={{ color: 'var(--primary-text)', fontSize: 12, fontWeight: 900, textTransform: 'uppercase', letterSpacing: 1, margin: '0 0 14px', display: 'flex', alignItems: 'center', gap: 6 }}><Banknote size={14} aria-hidden="true" /> Pagamento de Entregadores</p>
+              <p style={{ color: 'var(--brand-text)', fontSize: 12, fontWeight: 900, textTransform: 'uppercase', letterSpacing: 1, margin: '0 0 14px', display: 'flex', alignItems: 'center', gap: 6 }}><Banknote size={14} aria-hidden="true" /> Pagamento de Entregadores</p>
               {Object.values(porEntregador).map(({ nome, entregas }) => {
                 const total = entregas.reduce((s, p) => s + (p.taxaEntrega || 0), 0)
                 const porBairro: Record<string, { count: number; taxa: number }> = {}
@@ -1326,10 +1326,10 @@ export default function AdminPage() {
                       {Object.entries(porBairro).map(([bairro, { count, taxa }]) => (
                         <div key={bairro} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                            <span style={{ color: 'var(--primary-text)', fontSize: 12, fontWeight: 800 }}>{count}×</span>
+                            <span style={{ color: 'var(--brand-text)', fontSize: 12, fontWeight: 800 }}>{count}×</span>
                             <span style={{ color: 'var(--foreground-secondary)', fontSize: 13, fontWeight: 600 }}>{bairro}</span>
                           </div>
-                          <span style={{ color: 'var(--primary-text)', fontSize: 13, fontWeight: 700 }}>R$ {(count * taxa).toFixed(2).replace('.', ',')}</span>
+                          <span style={{ color: 'var(--brand-text)', fontSize: 13, fontWeight: 700 }}>R$ {(count * taxa).toFixed(2).replace('.', ',')}</span>
                         </div>
                       ))}
                     </div>

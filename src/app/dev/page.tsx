@@ -241,7 +241,7 @@ export default function DevPage() {
             <p style={{ color: 'rgba(var(--overlay-rgb), 0.3)', fontSize: 13, margin: '4px 0 0' }}>Controle exclusivo do criador do sistema</p>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={() => router.push('/admin')} style={{ background: 'color-mix(in srgb, var(--primary) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--primary) 30%, transparent)', color: 'var(--primary-text)', borderRadius: 8, padding: '8px 14px', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>Admin</button>
+            <button onClick={() => router.push('/admin')} style={{ background: 'color-mix(in srgb, var(--primary) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--primary) 30%, transparent)', color: 'var(--brand-text)', borderRadius: 8, padding: '8px 14px', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>Admin</button>
             <button onClick={() => router.push('/dev/mcp')} style={{ background: 'color-mix(in srgb, var(--attention) 15%, transparent)', border: '1px solid color-mix(in srgb, var(--attention) 40%, transparent)', color: 'var(--attention)', borderRadius: 8, padding: '8px 14px', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>IA / MCP</button>
             <button onClick={() => fetch('/api/auth/logout', { method: 'POST' }).then(() => router.push('/login'))} style={{ background: 'rgba(var(--overlay-rgb), 0.05)', border: '1px solid rgba(var(--overlay-rgb), 0.1)', color: 'rgba(var(--overlay-rgb), 0.5)', borderRadius: 8, padding: '8px 14px', cursor: 'pointer', fontSize: 13 }}>Sair</button>
           </div>
@@ -369,7 +369,7 @@ export default function DevPage() {
 
         {/* Criar acesso admin */}
         <div style={{ background: 'color-mix(in srgb, var(--primary) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--primary) 20%, transparent)', borderRadius: 14, padding: 20, marginTop: 24 }}>
-          <p style={{ color: 'var(--primary-text)', fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, margin: '0 0 4px' }}>Liberar acesso de teste</p>
+          <p style={{ color: 'var(--brand-text)', fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, margin: '0 0 4px' }}>Liberar acesso de teste</p>
           <p style={{ color: 'rgba(var(--overlay-rgb), 0.3)', fontSize: 12, margin: '0 0 14px' }}>Cria um admin para uma pizzaria testar o sistema.</p>
           <NovoClienteDevForm onCriado={(username, senha) => setSenhasCriadas(prev => ({ ...prev, [username]: senha }))} />
         </div>
