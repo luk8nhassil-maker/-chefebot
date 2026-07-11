@@ -48,19 +48,21 @@ export function NavBar({ currentPage }: NavBarProps) {
     router.refresh();
   }
 
-  const bg = isDark ? "rgba(255,255,255,0.05)" : "white";
-  const border = isDark ? "1px solid rgba(255,255,255,0.1)" : "1px solid #f0f0f0";
-  const textColor = isDark ? "rgba(255,255,255,0.9)" : "#1f2937";
-  const subColor = isDark ? "rgba(255,255,255,0.4)" : "#9ca3af";
-  const activeColor = isDark ? "#fb923c" : "#16a34a";
-  const inactiveColor = isDark ? "rgba(255,255,255,0.5)" : "#6b7280";
+  const bg = isDark ? "rgba(var(--overlay-rgb), 0.05)" : "var(--surface)";
+  const border = isDark ? "1px solid rgba(var(--overlay-rgb), 0.1)" : "1px solid var(--border)";
+  const textColor = isDark ? "rgba(var(--overlay-rgb), 0.9)" : "var(--foreground)";
+  const subColor = isDark ? "rgba(var(--overlay-rgb), 0.4)" : "var(--foreground-secondary)";
+  // Item ativo: texto escuro/legível + indicador amarelo (nunca texto amarelo).
+  const activeColor = isDark ? "var(--foreground)" : "var(--foreground)";
+  const activeIndicator = "var(--primary)";
+  const inactiveColor = isDark ? "rgba(var(--overlay-rgb), 0.5)" : "var(--foreground-muted)";
 
   const linkStyle = (page: string) => ({
     color: currentPage === page ? activeColor : inactiveColor,
     fontWeight: currentPage === page ? 600 : 400,
     textDecoration: "none",
     fontSize: "14px",
-    borderBottom: currentPage === page ? `2px solid ${activeColor}` : "2px solid transparent",
+    borderBottom: currentPage === page ? `2px solid ${activeIndicator}` : "2px solid transparent",
     paddingBottom: "2px",
     transition: "color 0.2s",
   });
@@ -71,7 +73,7 @@ export function NavBar({ currentPage }: NavBarProps) {
         position: "fixed",
         top: 0, left: 0, right: 0,
         zIndex: 50,
-        background: isDark ? "rgba(26,10,0,0.8)" : "white",
+        background: isDark ? "color-mix(in srgb, var(--background) 80%, transparent)" : "white",
         backdropFilter: isDark ? "blur(20px)" : "none",
         borderBottom: border,
         boxShadow: isDark ? "none" : "0 1px 3px rgba(0,0,0,0.05)",
@@ -95,7 +97,7 @@ export function NavBar({ currentPage }: NavBarProps) {
               <Link href="/relatorios" style={linkStyle("relatorios")}>Relatórios</Link>
             )}
             {user ? (
-              <div style={{ display: "flex", alignItems: "center", gap: "10px", paddingLeft: "12px", borderLeft: `1px solid ${isDark ? "rgba(255,255,255,0.1)" : "#e5e7eb"}` }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "10px", paddingLeft: "12px", borderLeft: `1px solid ${isDark ? "rgba(var(--overlay-rgb), 0.1)" : "var(--foreground)"}` }}>
                 <div className="hidden sm:block" style={{ textAlign: "right" }}>
                   <div style={{ fontSize: "12px", fontWeight: 600, color: textColor }}>{user.name}</div>
                   <div style={{ fontSize: "10px", color: subColor }}>{roleLabel[user.role]}</div>
@@ -105,8 +107,8 @@ export function NavBar({ currentPage }: NavBarProps) {
                   disabled={loggingOut}
                   style={{
                     fontSize: "12px",
-                    background: isDark ? "rgba(255,255,255,0.1)" : "#f3f4f6",
-                    color: isDark ? "rgba(255,255,255,0.7)" : "#6b7280",
+                    background: isDark ? "rgba(var(--overlay-rgb), 0.1)" : "var(--foreground)",
+                    color: isDark ? "rgba(var(--overlay-rgb), 0.7)" : "var(--foreground-muted)",
                     border: "none",
                     padding: "6px 14px",
                     borderRadius: "20px",
@@ -120,7 +122,7 @@ export function NavBar({ currentPage }: NavBarProps) {
             ) : (
               <Link href="/login" style={{
                 fontSize: "12px",
-                background: "linear-gradient(135deg, #dc2626, #b91c1c)",
+                background: "linear-gradient(135deg, var(--danger), var(--danger))",
                 color: "white",
                 padding: "6px 14px",
                 borderRadius: "20px",

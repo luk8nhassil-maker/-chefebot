@@ -78,11 +78,11 @@ function LoginForm() {
 
   const inputStyle = (focused: boolean, withIcon = false): React.CSSProperties => ({
     width: "100%",
-    background: "#0a0a0a",
-    border: `1.5px solid ${focused ? "#ff6b00" : "#222"}`,
+    background: "var(--surface)",
+    border: `1.5px solid ${focused ? "var(--primary)" : "var(--surface-secondary)"}`,
     borderRadius: 14,
     padding: withIcon ? "0 48px 0 16px" : "0 16px",
-    color: "#f4f1ec",
+    color: "var(--foreground)",
     fontSize: 16,
     outline: "none",
     boxSizing: "border-box",
@@ -91,7 +91,7 @@ function LoginForm() {
     fontFamily: "'Archivo', sans-serif",
     transition: "border-color 0.18s, box-shadow 0.18s",
     WebkitAppearance: "none",
-    boxShadow: focused ? "0 0 0 3px rgba(255,107,0,0.15)" : "none",
+    boxShadow: focused ? "0 0 0 3px color-mix(in srgb, var(--primary) 15%, transparent)" : "none",
     display: "block",
   });
 
@@ -111,8 +111,8 @@ function LoginForm() {
           to   { opacity: 1; transform: scale(1) rotate(0deg); }
         }
         @keyframes glowPulse {
-          0%, 100% { box-shadow: 0 0 48px rgba(255,107,0,0.35), 0 8px 32px rgba(255,107,0,0.25); }
-          50%       { box-shadow: 0 0 72px rgba(255,107,0,0.55), 0 12px 40px rgba(255,107,0,0.35); }
+          0%, 100% { box-shadow: 0 0 48px color-mix(in srgb, var(--primary) 35%, transparent), 0 8px 32px color-mix(in srgb, var(--primary) 25%, transparent); }
+          50%       { box-shadow: 0 0 72px color-mix(in srgb, var(--primary) 55%, transparent), 0 12px 40px color-mix(in srgb, var(--primary) 35%, transparent); }
         }
         @keyframes spin {
           to { transform: rotate(360deg); }
@@ -122,12 +122,12 @@ function LoginForm() {
           100% { background-position: 200% center; }
         }
 
-        input::placeholder { color: #333; }
+        input::placeholder { color: var(--surface-elevated); }
         input:-webkit-autofill,
         input:-webkit-autofill:focus {
-          -webkit-box-shadow: 0 0 0 1000px #0a0a0a inset !important;
-          -webkit-text-fill-color: #f4f1ec !important;
-          caret-color: #f4f1ec;
+          -webkit-box-shadow: 0 0 0 1000px var(--surface) inset !important;
+          -webkit-text-fill-color: var(--foreground) !important;
+          caret-color: var(--foreground);
         }
         button:active:not(:disabled) {
           transform: scale(0.98);
@@ -136,8 +136,8 @@ function LoginForm() {
 
       <div style={{
         minHeight: "100svh",
-        background: "#050505",
-        backgroundImage: "radial-gradient(ellipse 80% 50% at 50% -10%, rgba(255,107,0,0.08) 0%, transparent 70%)",
+        background: "var(--background)",
+        backgroundImage: "radial-gradient(ellipse 80% 50% at 50% -10%, color-mix(in srgb, var(--primary) 8%, transparent) 0%, transparent 70%)",
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
@@ -188,7 +188,7 @@ function LoginForm() {
             </div>
 
             <h1 style={{
-              color: "#f4f1ec",
+              color: "var(--foreground)",
               fontSize: 38,
               fontWeight: 900,
               margin: "0 0 10px",
@@ -200,7 +200,7 @@ function LoginForm() {
             </h1>
 
             <p style={{
-              color: "#6b6259",
+              color: "var(--foreground-muted)",
               fontSize: 15,
               margin: 0,
               fontWeight: 500,
@@ -213,11 +213,11 @@ function LoginForm() {
 
           {/* Card */}
           <div style={{
-            background: "#0e0e0e",
-            border: "1px solid #1c1c1c",
+            background: "var(--surface)",
+            border: "1px solid var(--surface)",
             borderRadius: 22,
             padding: "28px 24px",
-            boxShadow: "0 24px 64px rgba(0,0,0,0.6), 0 1px 0 rgba(255,255,255,0.03) inset",
+            boxShadow: "0 24px 64px rgba(0,0,0,0.6), 0 1px 0 rgba(var(--overlay-rgb), 0.03) inset",
           }}>
             <form onSubmit={handleSubmit} noValidate>
 
@@ -225,7 +225,7 @@ function LoginForm() {
               <div style={{ marginBottom: 14 }}>
                 <label style={{
                   display: "block",
-                  color: "#5a5450",
+                  color: "var(--border-strong)",
                   fontSize: 11,
                   fontWeight: 700,
                   marginBottom: 8,
@@ -255,7 +255,7 @@ function LoginForm() {
               <div style={{ marginBottom: 24 }}>
                 <label style={{
                   display: "block",
-                  color: "#5a5450",
+                  color: "var(--border-strong)",
                   fontSize: 11,
                   fontWeight: 700,
                   marginBottom: 8,
@@ -292,7 +292,7 @@ function LoginForm() {
                       padding: 4,
                       lineHeight: 1,
                       fontSize: 18,
-                      color: "#5a5450",
+                      color: "var(--border-strong)",
                       WebkitTapHighlightColor: "transparent",
                       display: "flex",
                       alignItems: "center",
@@ -313,11 +313,11 @@ function LoginForm() {
                   width: "100%",
                   height: 56,
                   background: loading
-                    ? "#1a1008"
-                    : "linear-gradient(135deg, #ff7a1a 0%, #ff5500 100%)",
+                    ? "var(--background)"
+                    : "linear-gradient(135deg, var(--primary) 0%, var(--primary) 100%)",
                   border: "none",
                   borderRadius: 16,
-                  color: "#fff",
+                  color: loading ? "var(--foreground)" : "var(--primary-foreground)",
                   fontSize: 16,
                   fontWeight: 800,
                   cursor: loading ? "not-allowed" : "pointer",
@@ -327,7 +327,7 @@ function LoginForm() {
                   alignItems: "center",
                   justifyContent: "center",
                   transition: "opacity 0.2s, transform 0.15s, box-shadow 0.2s",
-                  boxShadow: loading ? "none" : "0 6px 28px rgba(255,107,0,0.38), 0 2px 8px rgba(255,107,0,0.2)",
+                  boxShadow: loading ? "none" : "0 6px 28px color-mix(in srgb, var(--primary) 38%, transparent), 0 2px 8px color-mix(in srgb, var(--primary) 20%, transparent)",
                   WebkitTapHighlightColor: "transparent",
                   opacity: loading ? 0.8 : 1,
                 }}
@@ -336,8 +336,8 @@ function LoginForm() {
                   <span style={{
                     width: 22,
                     height: 22,
-                    border: "2.5px solid rgba(255,255,255,0.25)",
-                    borderTopColor: "#fff",
+                    border: "2.5px solid rgba(var(--overlay-rgb), 0.25)",
+                    borderTopColor: "var(--foreground)",
                     borderRadius: "50%",
                     display: "inline-block",
                     animation: "spin 0.6s linear infinite",
@@ -353,7 +353,7 @@ function LoginForm() {
                   display: "flex",
                   alignItems: "flex-start",
                   gap: 8,
-                  color: "#f87171",
+                  color: "var(--danger)",
                   fontSize: 13,
                   fontWeight: 500,
                   lineHeight: 1.45,
@@ -369,14 +369,14 @@ function LoginForm() {
           {/* Rodapé */}
           <p style={{
             textAlign: "center",
-            color: "#2a2826",
+            color: "var(--surface-secondary)",
             fontSize: 12,
             marginTop: 28,
             lineHeight: 1.6,
             fontFamily: "'Archivo', sans-serif",
           }}>
             Simulador público —{" "}
-            <a href="/simulador" style={{ color: "#4a4640", textDecoration: "none" }}>
+            <a href="/simulador" style={{ color: "var(--foreground-muted)", textDecoration: "none" }}>
               acessar sem login
             </a>
           </p>

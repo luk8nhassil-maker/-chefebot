@@ -15,10 +15,10 @@ type ConversaRecente = {
 }
 
 const STATUS_COLOR: Record<StatusConversa, string> = {
-  aguardando: "#e05050",
-  humano: "#ff6b00",
-  robo: "#5577ee",
-  finalizado: "#8a8278",
+  aguardando: "var(--danger)",
+  humano: "var(--primary)",
+  robo: "var(--info)",
+  finalizado: "var(--foreground-secondary)",
 }
 
 const STATUS_LABEL: Record<StatusConversa, string> = {
@@ -75,7 +75,7 @@ function getUrgency(min: number): Urgency {
   return "normal"
 }
 
-const UC: Record<Urgency, string> = { normal: "#56b87e", atencao: "#e0893a", urgente: "#e05050", critico: "#c0373a" }
+const UC: Record<Urgency, string> = { normal: "var(--success)", atencao: "var(--primary)", urgente: "var(--danger)", critico: "var(--danger)" }
 
 function labelEspera(min: number, u: Urgency): string {
   if (u === "critico") return `Crítico · ${min}min`
@@ -346,10 +346,10 @@ export default function ConversasPage() {
   const humanoCount = conversasRecentes.filter(c => c.status === 'humano').length
 
   if (loading) return (
-    <div style={{ height: "100svh", background: "#060606", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Archivo', sans-serif" }}>
+    <div style={{ height: "100svh", background: "var(--background)", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Archivo', sans-serif" }}>
       <div style={{ textAlign: "center" }}>
         <div style={{ fontSize: 32, marginBottom: 10 }}>💬</div>
-        <p style={{ color: "#5a564d", fontSize: 13, fontWeight: 700, margin: 0 }}>Carregando…</p>
+        <p style={{ color: "var(--foreground-muted)", fontSize: 13, fontWeight: 700, margin: 0 }}>Carregando…</p>
       </div>
     </div>
   )
@@ -359,7 +359,7 @@ export default function ConversasPage() {
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800;900&display=swap');
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-        html, body { margin: 0; padding: 0; background: #060606; }
+        html, body { margin: 0; padding: 0; background: var(--background); }
         button { cursor: pointer; font-family: 'Archivo', sans-serif; border: none; }
         @keyframes cbPulse { 0%{opacity:1} 50%{opacity:.4} 100%{opacity:1} }
         @keyframes cbFadeIn { from{opacity:0;transform:translateY(5px)} to{opacity:1;transform:none} }
@@ -372,16 +372,16 @@ export default function ConversasPage() {
           display: flex !important;
           flex-direction: column !important;
           background:
-            radial-gradient(ellipse 55% 45% at 96% 4%, rgba(255,107,0,.09) 0%, transparent 65%),
-            radial-gradient(ellipse 38% 30% at 4% 96%, rgba(180,110,30,.07) 0%, transparent 60%),
-            #060606 !important;
+            radial-gradient(ellipse 55% 45% at 96% 4%, color-mix(in srgb, var(--primary) 9%, transparent) 0%, transparent 65%),
+            radial-gradient(ellipse 38% 30% at 4% 96%, color-mix(in srgb, var(--primary) 7%, transparent) 0%, transparent 60%),
+            var(--background) !important;
         }
 
         /* ── Chat root ── */
         .cv-root {
           display: flex;
           flex-direction: row;
-          background: #17140f;
+          background: var(--background);
           border-radius: 0;
           overflow: hidden;
           height: calc(100svh - 72px - env(safe-area-inset-bottom));
@@ -393,7 +393,7 @@ export default function ConversasPage() {
             box-shadow:
               0 24px 80px rgba(0,0,0,.72),
               0 4px 24px rgba(0,0,0,.42),
-              0 0 0 1px rgba(255,255,255,.05);
+              0 0 0 1px rgba(var(--overlay-rgb), 0.05);
             height: calc(100vh - 32px);
           }
         }
@@ -406,7 +406,7 @@ export default function ConversasPage() {
           display: flex;
           flex-direction: column;
           width: 100%;
-          background: #17140f;
+          background: var(--background);
           overflow: hidden;
           flex-shrink: 0;
           position: relative;
@@ -424,7 +424,7 @@ export default function ConversasPage() {
           display: none;
           flex-direction: column;
           flex: 1;
-          background: #17140f;
+          background: var(--background);
           overflow: hidden;
         }
         @media (min-width: 768px) {
@@ -450,28 +450,28 @@ export default function ConversasPage() {
 
         /* ── Título "Conversas" — força cor clara (inline style usa dark) ── */
         .cv-list-header > div > div:first-child > div:first-child {
-          color: #ede9e3 !important;
+          color: var(--primary-text) !important;
           font-size: clamp(18px, 1.6vw, 24px) !important;
           letter-spacing: -0.5px !important;
         }
         .cv-list-header > div > div:first-child > div:last-child {
-          color: #504840 !important;
+          color: var(--border-strong) !important;
         }
 
         /* ── Search ── */
         .cv-search {
           width: 100%; height: 40px;
-          background: rgba(255,255,255,.07);
+          background: rgba(var(--overlay-rgb), 0.07);
           border: none;
           border-radius: 22px;
           padding: 0 14px 0 38px;
-          color: #ede9e3; font-size: 13px; font-weight: 600;
+          color: var(--primary-text); font-size: 13px; font-weight: 600;
           font-family: 'Archivo', sans-serif;
           box-shadow: 0 1px 4px rgba(0,0,0,.35) inset;
           transition: box-shadow .15s;
         }
-        .cv-search::placeholder { color: #4a4840; }
-        .cv-search:focus { outline: none; box-shadow: 0 0 0 2.5px rgba(255,107,0,.3), 0 1px 4px rgba(0,0,0,.35) inset; }
+        .cv-search::placeholder { color: var(--border-strong); }
+        .cv-search:focus { outline: none; box-shadow: 0 0 0 2.5px color-mix(in srgb, var(--primary) 30%, transparent), 0 1px 4px rgba(0,0,0,.35) inset; }
 
         /* ── List scroll area ── */
         .cv-list-scroll {
@@ -481,12 +481,12 @@ export default function ConversasPage() {
         }
         .cv-list-scroll::-webkit-scrollbar { width: 3px; }
         .cv-list-scroll::-webkit-scrollbar-track { background: transparent; }
-        .cv-list-scroll::-webkit-scrollbar-thumb { background: #302820; border-radius: 2px; }
+        .cv-list-scroll::-webkit-scrollbar-thumb { background: var(--surface-secondary); border-radius: 2px; }
 
         /* ── Section label ── */
         .cv-section-label {
           font-size: 10px; font-weight: 900; letter-spacing: .7px;
-          text-transform: uppercase; color: #4a4840;
+          text-transform: uppercase; color: var(--border-strong);
           padding: 14px 20px 5px;
         }
 
@@ -501,14 +501,14 @@ export default function ConversasPage() {
           animation: cbFadeIn .22s ease both;
         }
         .cv-item:hover {
-          background: rgba(255,255,255,.06);
+          background: rgba(var(--overlay-rgb), 0.06);
           box-shadow: 0 3px 14px rgba(0,0,0,.3);
           transform: translateY(-1px);
         }
         .cv-item.cv-item-active {
-          background: rgba(255,255,255,.09);
+          background: rgba(var(--overlay-rgb), 0.09);
           box-shadow:
-            0 6px 20px rgba(255,107,0,.16),
+            0 6px 20px color-mix(in srgb, var(--primary) 16%, transparent),
             0 2px 6px rgba(0,0,0,.3);
         }
         .cv-item-avatar {
@@ -519,32 +519,32 @@ export default function ConversasPage() {
         }
         .cv-item-body { flex: 1; min-width: 0; }
         .cv-item-name {
-          font-size: 13.5px; font-weight: 800; color: #ede9e3;
+          font-size: 13.5px; font-weight: 800; color: var(--primary-text);
           white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
         }
         .cv-item-preview {
-          font-size: 12px; font-weight: 600; color: #6a6258;
+          font-size: 12px; font-weight: 600; color: var(--foreground-muted);
           white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
           margin-top: 2px;
         }
         .cv-item-meta {
           display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex-shrink: 0;
         }
-        .cv-item-time { font-size: 11px; font-weight: 700; color: #504840; }
+        .cv-item-time { font-size: 11px; font-weight: 700; color: var(--border-strong); }
 
         /* ── Empty states ── */
         .cv-list-empty { padding: 44px 24px; text-align: center; }
         .cv-no-select {
           flex: 1; display: flex; flex-direction: column;
           align-items: center; justify-content: center;
-          color: #6a6258; gap: 12px;
+          color: var(--foreground-muted); gap: 12px;
         }
 
         /* ── Chat header ── */
         .cv-chat-header {
           display: flex; align-items: center; gap: 12px;
           padding: 16px 20px;
-          background: #201c17;
+          background: var(--surface);
           flex-shrink: 0;
           min-height: 72px;
           position: relative; z-index: 1;
@@ -557,29 +557,29 @@ export default function ConversasPage() {
         }
         .cv-chat-header-info { flex: 1; min-width: 0; }
         .cv-chat-header-name {
-          font-size: 14px; font-weight: 900; color: #ede9e3;
+          font-size: 14px; font-weight: 900; color: var(--primary-text);
           white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
         }
-        .cv-chat-header-sub { font-size: 11px; font-weight: 700; color: #6a6258; margin-top: 2px; }
+        .cv-chat-header-sub { font-size: 11px; font-weight: 700; color: var(--foreground-muted); margin-top: 2px; }
         .cv-chat-header-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 
         /* Header buttons */
         .cv-btn-wa {
           display: flex; align-items: center; gap: 5px;
           height: 36px; padding: 0 13px;
-          background: #25d366; border-radius: 22px;
-          color: #fff; font-family: 'Archivo', sans-serif;
+          background: var(--whatsapp); border-radius: 22px;
+          color: var(--foreground); font-family: 'Archivo', sans-serif;
           font-size: 12px; font-weight: 900; text-decoration: none;
-          box-shadow: 0 2px 8px rgba(37,211,102,.3);
+          box-shadow: 0 2px 8px color-mix(in srgb, var(--whatsapp) 30%, transparent);
           transition: opacity .15s, transform .1s;
         }
         .cv-btn-wa:hover { opacity: .92; transform: translateY(-1px); }
         .cv-btn-wa:active { opacity: .8; transform: none; }
         .cv-btn-bot {
           height: 36px; padding: 0 12px;
-          background: rgba(100,140,255,.1);
-          border: 1.5px solid rgba(100,140,255,.25);
-          border-radius: 22px; color: #7799ee;
+          background: color-mix(in srgb, var(--info) 10%, transparent);
+          border: 1.5px solid color-mix(in srgb, var(--info) 25%, transparent);
+          border-radius: 22px; color: var(--info);
           font-size: 12px; font-weight: 900;
           transition: opacity .15s;
         }
@@ -587,22 +587,22 @@ export default function ConversasPage() {
         .cv-btn-fin {
           height: 36px; padding: 0 12px;
           background: transparent;
-          border: 1.5px solid rgba(255,255,255,.12);
-          border-radius: 22px; color: #7a7268;
+          border: 1.5px solid rgba(var(--overlay-rgb), 0.12);
+          border-radius: 22px; color: var(--foreground-muted);
           font-size: 12px; font-weight: 800;
           transition: background .15s;
         }
-        .cv-btn-fin:hover:not(:disabled) { background: rgba(255,255,255,.06); }
+        .cv-btn-fin:hover:not(:disabled) { background: rgba(var(--overlay-rgb), 0.06); }
         .cv-btn-fin:disabled { opacity: .4; }
         .cv-btn-back {
           height: 36px; width: 36px;
           background: transparent; border: none;
-          color: #7a7268; font-size: 18px;
+          color: var(--foreground-muted); font-size: 18px;
           display: flex; align-items: center; justify-content: center;
           border-radius: 50%; flex-shrink: 0;
           transition: background .12s;
         }
-        .cv-btn-back:hover { background: rgba(255,255,255,.06); }
+        .cv-btn-back:hover { background: rgba(var(--overlay-rgb), 0.06); }
         @media (min-width: 768px) {
           .cv-btn-back { display: none !important; }
         }
@@ -612,11 +612,11 @@ export default function ConversasPage() {
           flex: 1; overflow-y: auto;
           padding: 20px 20px 12px;
           display: flex; flex-direction: column; gap: 10px;
-          background: #131008;
+          background: var(--background);
         }
         .cv-msgs::-webkit-scrollbar { width: 3px; }
         .cv-msgs::-webkit-scrollbar-track { background: transparent; }
-        .cv-msgs::-webkit-scrollbar-thumb { background: #302820; border-radius: 2px; }
+        .cv-msgs::-webkit-scrollbar-thumb { background: var(--surface-secondary); border-radius: 2px; }
 
         /* Message rows */
         .cv-msg-row { display: flex; flex-direction: column; max-width: 74%; gap: 3px; }
@@ -631,33 +631,33 @@ export default function ConversasPage() {
           word-break: break-word;
         }
         .cv-bubble-client {
-          background: #2a2420; color: #cfc9c1;
+          background: var(--surface-secondary); color: var(--foreground);
           border-bottom-left-radius: 6px;
         }
         .cv-bubble-atendente {
-          background: linear-gradient(135deg, #ff7e1f 0%, #ff5f00 100%);
-          color: #fff;
+          background: linear-gradient(135deg, var(--primary) 0%, var(--primary) 100%);
+          color: var(--foreground);
           border-bottom-right-radius: 6px;
-          box-shadow: 0 3px 10px rgba(255,107,0,.28);
+          box-shadow: 0 3px 10px color-mix(in srgb, var(--primary) 28%, transparent);
         }
         .cv-bubble-bot {
-          background: #1a1d30; color: #8899cc;
+          background: var(--info-soft); color: var(--info);
           border-bottom-right-radius: 6px;
         }
 
         /* Sender label + time */
-        .cv-msg-sender { font-size: 10.5px; font-weight: 700; color: #5a5248; padding: 0 4px; }
-        .cv-msg-time { font-size: 10.5px; font-weight: 700; color: #3e3830; padding: 0 4px; }
+        .cv-msg-sender { font-size: 10.5px; font-weight: 700; color: var(--border-strong); padding: 0 4px; }
+        .cv-msg-time { font-size: 10.5px; font-weight: 700; color: var(--surface-elevated); padding: 0 4px; }
         .cv-msgs-empty {
           flex: 1; display: flex; align-items: center; justify-content: center;
-          color: #4a4440; font-size: 13px; font-weight: 700;
+          color: var(--border-strong); font-size: 13px; font-weight: 700;
         }
 
         /* ── Input area ── */
         .cv-input-wrap {
           display: flex; align-items: flex-end; gap: 10px;
           padding: 14px 18px calc(14px + env(safe-area-inset-bottom));
-          background: #201c17;
+          background: var(--surface);
           flex-shrink: 0;
           box-shadow: 0 -3px 16px rgba(0,0,0,.3);
         }
@@ -668,55 +668,55 @@ export default function ConversasPage() {
         /* Textarea */
         .cv-textarea {
           flex: 1; min-height: 44px; max-height: 110px;
-          background: #2a2520;
+          background: var(--surface-secondary);
           border: none;
           border-radius: 24px;
           padding: 11px 18px;
-          color: #ede9e3; font-size: 13.5px; font-weight: 600;
+          color: var(--primary-text); font-size: 13.5px; font-weight: 600;
           font-family: 'Archivo', sans-serif; resize: none;
           line-height: 1.45;
           box-shadow: 0 1px 4px rgba(0,0,0,.35) inset;
           transition: box-shadow .15s;
         }
-        .cv-textarea::placeholder { color: #4a4840; }
+        .cv-textarea::placeholder { color: var(--border-strong); }
         .cv-textarea:focus {
           outline: none;
-          box-shadow: 0 0 0 2.5px rgba(255,107,0,.25), 0 1px 4px rgba(0,0,0,.35) inset;
+          box-shadow: 0 0 0 2.5px color-mix(in srgb, var(--primary) 25%, transparent), 0 1px 4px rgba(0,0,0,.35) inset;
         }
 
         /* Send button */
         .cv-send-btn {
           width: 46px; height: 46px; border-radius: 50%; flex-shrink: 0;
-          background: linear-gradient(135deg, #ff8a2b 0%, #ff5000 100%);
-          color: #fff;
+          background: linear-gradient(135deg, var(--primary) 0%, var(--danger) 100%);
+          color: var(--foreground);
           display: flex; align-items: center; justify-content: center;
-          box-shadow: 0 4px 14px rgba(255,107,0,.4);
+          box-shadow: 0 4px 14px color-mix(in srgb, var(--primary) 40%, transparent);
           transition: opacity .15s, transform .1s, box-shadow .15s;
         }
         .cv-send-btn:hover:not(:disabled) {
           opacity: .95;
           transform: translateY(-1px);
-          box-shadow: 0 6px 18px rgba(255,107,0,.5);
+          box-shadow: 0 6px 18px color-mix(in srgb, var(--primary) 50%, transparent);
         }
-        .cv-send-btn:active:not(:disabled) { transform: scale(.92); box-shadow: 0 2px 8px rgba(255,107,0,.3); }
-        .cv-send-btn:disabled { background: #2a2520; color: #4a4840; box-shadow: none; }
+        .cv-send-btn:active:not(:disabled) { transform: scale(.92); box-shadow: 0 2px 8px color-mix(in srgb, var(--primary) 30%, transparent); }
+        .cv-send-btn:disabled { background: var(--surface-secondary); color: var(--border-strong); box-shadow: none; }
 
         /* ── Status badges ── */
         .cv-badge-fila {
           font-size: 10px; font-weight: 900; padding: 3px 8px; border-radius: 20px;
-          background: rgba(224,80,80,.12); color: #e05050;
-          border: 1px solid rgba(224,80,80,.25);
+          background: color-mix(in srgb, var(--danger) 12%, transparent); color: var(--danger);
+          border: 1px solid color-mix(in srgb, var(--danger) 25%, transparent);
           white-space: nowrap;
         }
         .cv-badge-atend {
           font-size: 10px; font-weight: 900; padding: 3px 8px; border-radius: 20px;
-          background: rgba(86,184,126,.1); color: #56b87e;
-          border: 1px solid rgba(86,184,126,.25);
+          background: color-mix(in srgb, var(--success) 10%, transparent); color: var(--success);
+          border: 1px solid color-mix(in srgb, var(--success) 25%, transparent);
           white-space: nowrap;
         }
         .cv-badge-pix {
           font-size: 10px; font-weight: 900; padding: 3px 7px; border-radius: 20px;
-          background: rgba(255,170,0,.12); color: #d09000;
+          background: color-mix(in srgb, var(--primary) 12%, transparent); color: var(--primary-text);
           white-space: nowrap;
         }
         .cv-dot {
@@ -738,19 +738,19 @@ export default function ConversasPage() {
             <div className="cv-list-header">
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
                 <div>
-                  <div style={{ fontSize: 17, fontWeight: 900, color: "#1a1715", letterSpacing: "-0.3px" }}>Conversas</div>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: "#a09790", marginTop: 1 }}>Últimas 30 minutos</div>
+                  <div style={{ fontSize: 17, fontWeight: 900, color: "var(--surface)", letterSpacing: "-0.3px" }}>Conversas</div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--foreground-secondary)", marginTop: 1 }}>Últimas 30 minutos</div>
                 </div>
                 <div style={{ display: "flex", gap: 6 }}>
                   {aguardandoCount > 0 && (
-                    <div style={{ display: "flex", alignItems: "center", gap: 5, background: "rgba(224,80,80,.08)", border: "1px solid rgba(224,80,80,.22)", borderRadius: 20, padding: "4px 10px" }}>
-                      <span className="cv-dot" style={{ background: "#e05050" }} />
-                      <span style={{ fontSize: 11, fontWeight: 900, color: "#e05050" }}>{aguardandoCount}</span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 5, background: "color-mix(in srgb, var(--danger) 8%, transparent)", border: "1px solid color-mix(in srgb, var(--danger) 22%, transparent)", borderRadius: 20, padding: "4px 10px" }}>
+                      <span className="cv-dot" style={{ background: "var(--danger)" }} />
+                      <span style={{ fontSize: 11, fontWeight: 900, color: "var(--danger)" }}>{aguardandoCount}</span>
                     </div>
                   )}
                   {humanoCount > 0 && (
-                    <div style={{ background: "rgba(255,107,0,.08)", border: "1px solid rgba(255,107,0,.22)", borderRadius: 20, padding: "4px 10px" }}>
-                      <span style={{ fontSize: 11, fontWeight: 900, color: "#ff6b00" }}>{humanoCount}</span>
+                    <div style={{ background: "color-mix(in srgb, var(--primary) 8%, transparent)", border: "1px solid color-mix(in srgb, var(--primary) 22%, transparent)", borderRadius: 20, padding: "4px 10px" }}>
+                      <span style={{ fontSize: 11, fontWeight: 900, color: "var(--primary-text)" }}>{humanoCount}</span>
                     </div>
                   )}
                 </div>
@@ -759,8 +759,8 @@ export default function ConversasPage() {
               {/* Search */}
               <div style={{ position: "relative" }}>
                 <svg style={{ position: "absolute", left: 11, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} width="14" height="14" viewBox="0 0 24 24" fill="none">
-                  <circle cx="11" cy="11" r="7" stroke="#b0a89e" strokeWidth="2.2" />
-                  <path d="M16.5 16.5l3.5 3.5" stroke="#b0a89e" strokeWidth="2.2" strokeLinecap="round" />
+                  <circle cx="11" cy="11" r="7" stroke="var(--foreground-secondary)" strokeWidth="2.2" />
+                  <path d="M16.5 16.5l3.5 3.5" stroke="var(--foreground-secondary)" strokeWidth="2.2" strokeLinecap="round" />
                 </svg>
                 <input
                   className="cv-search"
@@ -770,13 +770,13 @@ export default function ConversasPage() {
                   onChange={e => setBusca(e.target.value)}
                 />
                 {busca && (
-                  <button onClick={() => setBusca("")} style={{ position: "absolute", right: 9, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: "#a09790", fontSize: 17, lineHeight: 1, padding: 4 }}>×</button>
+                  <button onClick={() => setBusca("")} style={{ position: "absolute", right: 9, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: "var(--foreground-secondary)", fontSize: 17, lineHeight: 1, padding: 4 }}>×</button>
                 )}
               </div>
 
               {/* Compact metrics */}
               {aguardandoCount > 0 && maxEsperaMin > 0 && (
-                <div style={{ marginTop: 10, fontSize: 11, fontWeight: 700, color: maxEsperaMin >= 8 ? "#e05050" : "#a09790" }}>
+                <div style={{ marginTop: 10, fontSize: 11, fontWeight: 700, color: maxEsperaMin >= 8 ? "var(--danger)" : "var(--foreground-secondary)" }}>
                   Aguardando há {maxEsperaMin}min (mais antigo)
                 </div>
               )}
@@ -820,13 +820,13 @@ export default function ConversasPage() {
                   {busca ? (
                     <>
                       <div style={{ fontSize: 26, marginBottom: 8 }}>🔍</div>
-                      <div style={{ fontSize: 13, fontWeight: 800, color: "#a09790" }}>Nenhum resultado para "{busca}"</div>
+                      <div style={{ fontSize: 13, fontWeight: 800, color: "var(--foreground-secondary)" }}>Nenhum resultado para "{busca}"</div>
                     </>
                   ) : (
                     <>
                       <div style={{ fontSize: 30, marginBottom: 10 }}>✅</div>
-                      <div style={{ fontSize: 14, fontWeight: 900, color: "#56b87e", marginBottom: 6 }}>Nenhuma conversa recente</div>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: "#b0a89e", lineHeight: 1.6 }}>
+                      <div style={{ fontSize: 14, fontWeight: 900, color: "var(--success)", marginBottom: 6 }}>Nenhuma conversa recente</div>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: "var(--foreground-secondary)", lineHeight: 1.6 }}>
                         As conversas das últimas 30 minutos aparecem aqui automaticamente.
                       </div>
                     </>
@@ -841,10 +841,10 @@ export default function ConversasPage() {
             {!conversaRecenteSelecionada ? (
               <div className="cv-no-select">
                 <div style={{ fontSize: 36 }}>💬</div>
-                <div style={{ fontSize: 15, fontWeight: 800, color: "#8a8278" }}>
+                <div style={{ fontSize: 15, fontWeight: 800, color: "var(--foreground-secondary)" }}>
                   {conversaSelecionada ? "Carregando…" : "Selecione uma conversa"}
                 </div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: "#b0a89e", textAlign: "center", maxWidth: 240 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "var(--foreground-secondary)", textAlign: "center", maxWidth: 240 }}>
                   {!conversaSelecionada && "Escolha um cliente na lista ao lado para ver o histórico."}
                 </div>
               </div>
@@ -901,7 +901,7 @@ export default function ConversasPage() {
 
                 {/* PIX warning strip */}
                 {pedidoSelecionado && temPixPendente(pedidoSelecionado) && (
-                  <div style={{ background: "rgba(255,170,0,.08)", borderBottom: "1px solid rgba(255,170,0,.2)", padding: "8px 18px", fontSize: 12, fontWeight: 800, color: "#c08000", flexShrink: 0 }}>
+                  <div style={{ background: "color-mix(in srgb, var(--primary) 8%, transparent)", borderBottom: "1px solid color-mix(in srgb, var(--primary) 20%, transparent)", padding: "8px 18px", fontSize: 12, fontWeight: 800, color: "var(--primary-text)", flexShrink: 0 }}>
                     ⚠ Pix pendente de confirmação neste pedido
                   </div>
                 )}
@@ -983,40 +983,40 @@ export default function ConversasPage() {
           <div onClick={() => setConfirmando(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", zIndex: 90 }} />
           <div style={{
             position: "fixed", bottom: 0, left: 0, right: 0, margin: "0 auto", maxWidth: 480,
-            background: "#ffffff", border: "1px solid #e2ddd6", borderBottom: "none",
+            background: "var(--foreground)", border: "1px solid var(--primary)", borderBottom: "none",
             borderRadius: "22px 22px 0 0", zIndex: 91,
             animation: "cbSheetUp .3s cubic-bezier(.2,.9,.3,1) both",
             padding: "18px 20px calc(env(safe-area-inset-bottom) + 28px)",
             display: "flex", flexDirection: "column", gap: 10,
           }}>
-            <div style={{ width: 40, height: 4, borderRadius: 2, background: "#e2ddd6", margin: "0 auto 6px" }} />
+            <div style={{ width: 40, height: 4, borderRadius: 2, background: "var(--primary)", margin: "0 auto 6px" }} />
 
             {temPixPendente(confirmando) && (
-              <div style={{ background: "rgba(255,170,0,.07)", border: "1px solid rgba(255,170,0,.22)", borderRadius: 10, padding: "10px 14px" }}>
-                <div style={{ fontSize: 12, fontWeight: 900, color: "#c08000", marginBottom: 3 }}>⚠ Pix pendente</div>
-                <div style={{ fontSize: 12, fontWeight: 600, color: "#8a8278", lineHeight: 1.5 }}>
+              <div style={{ background: "color-mix(in srgb, var(--primary) 7%, transparent)", border: "1px solid color-mix(in srgb, var(--primary) 22%, transparent)", borderRadius: 10, padding: "10px 14px" }}>
+                <div style={{ fontSize: 12, fontWeight: 900, color: "var(--primary-text)", marginBottom: 3 }}>⚠ Pix pendente</div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "var(--foreground-secondary)", lineHeight: 1.5 }}>
                   Esse pedido aguarda confirmação de Pix. Finalizar removerá o atendimento da fila.
                 </div>
               </div>
             )}
 
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <div style={{ width: 44, height: 44, borderRadius: "50%", background: "rgba(90,86,77,.1)", border: "1px solid #e2ddd6", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, fontWeight: 900, color: "#8a8278", flexShrink: 0 }}>
+              <div style={{ width: 44, height: 44, borderRadius: "50%", background: "color-mix(in srgb, var(--foreground-muted) 10%, transparent)", border: "1px solid var(--primary)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, fontWeight: 900, color: "var(--foreground-secondary)", flexShrink: 0 }}>
                 {getInitials(confirmando.cliente)}
               </div>
               <div>
-                <div style={{ fontSize: 17, fontWeight: 900, letterSpacing: "-0.3px", color: "#1a1715" }}>Finalizar atendimento?</div>
-                <div style={{ fontSize: 12, fontWeight: 600, color: "#8a8278" }}>{ss(confirmando.cliente).split(" ")[0] || "Cliente"}</div>
+                <div style={{ fontSize: 17, fontWeight: 900, letterSpacing: "-0.3px", color: "var(--surface)" }}>Finalizar atendimento?</div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "var(--foreground-secondary)" }}>{ss(confirmando.cliente).split(" ")[0] || "Cliente"}</div>
               </div>
             </div>
 
-            <div style={{ fontSize: 13, fontWeight: 600, color: "#8a8278", lineHeight: 1.55 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: "var(--foreground-secondary)", lineHeight: 1.55 }}>
               Esse atendimento será removido da tela de conversas. Nenhuma mensagem será enviada ao cliente.
             </div>
-            <button onClick={() => finalizarAtendimento(confirmando)} style={{ height: 52, borderRadius: 13, background: "#e8f5ed", border: "1px solid rgba(86,184,126,.3)", color: "#3a7a52", fontSize: 15, fontWeight: 900 }}>
+            <button onClick={() => finalizarAtendimento(confirmando)} style={{ height: 52, borderRadius: 13, background: "var(--success)", border: "1px solid color-mix(in srgb, var(--success) 30%, transparent)", color: "var(--success)", fontSize: 15, fontWeight: 900 }}>
               Sim, finalizar
             </button>
-            <button onClick={() => setConfirmando(null)} style={{ height: 42, background: "transparent", color: "#8a8278", fontSize: 13, fontWeight: 800, border: "none" }}>
+            <button onClick={() => setConfirmando(null)} style={{ height: 42, background: "transparent", color: "var(--foreground-secondary)", fontSize: 13, fontWeight: 800, border: "none" }}>
               Cancelar
             </button>
           </div>
@@ -1025,7 +1025,7 @@ export default function ConversasPage() {
 
       {/* Toast */}
       {toast && (
-        <div style={{ position: "fixed", bottom: "calc(env(safe-area-inset-bottom) + 80px)", left: "50%", transform: "translateX(-50%)", background: "#1a1715", border: "1px solid #2a2723", borderRadius: 14, padding: "12px 18px", fontSize: 13, fontWeight: 700, color: "#f8f5f1", zIndex: 80, whiteSpace: "nowrap", maxWidth: "calc(100% - 32px)", fontFamily: "'Archivo', sans-serif", boxShadow: "0 4px 20px rgba(0,0,0,.4)" }}>
+        <div style={{ position: "fixed", bottom: "calc(env(safe-area-inset-bottom) + 80px)", left: "50%", transform: "translateX(-50%)", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14, padding: "12px 18px", fontSize: 13, fontWeight: 700, color: "var(--primary-text)", zIndex: 80, whiteSpace: "nowrap", maxWidth: "calc(100% - 32px)", fontFamily: "'Archivo', sans-serif", boxShadow: "0 4px 20px rgba(0,0,0,.4)" }}>
           {toast}
         </div>
       )}

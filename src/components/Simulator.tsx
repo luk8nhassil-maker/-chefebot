@@ -90,33 +90,33 @@ export function Simulator({ fullScreen = false }: { fullScreen?: boolean }) {
 
   const containerStyle = fullScreen
     ? { display: "flex", flexDirection: "column" as const, height: "100%", width: "100%" }
-    : { display: "flex", flexDirection: "column" as const, height: "600px", maxWidth: "400px", margin: "0 auto", borderRadius: "16px", overflow: "hidden", boxShadow: "0 4px 24px rgba(0,0,0,0.12)", border: "1px solid #e0e0e0" };
+    : { display: "flex", flexDirection: "column" as const, height: "600px", maxWidth: "400px", margin: "0 auto", borderRadius: "16px", overflow: "hidden", boxShadow: "0 4px 24px rgba(0,0,0,0.12)", border: "1px solid var(--foreground)" };
 
   const inputBarStyle = fullScreen
-    ? { position: "fixed" as const, bottom: 0, left: 0, right: 0, background: "#F0F0F0", padding: "10px 12px", display: "flex", alignItems: "center", gap: "8px", borderTop: "1px solid #ddd", zIndex: 100 }
-    : { background: "#F0F0F0", padding: "10px 12px", display: "flex", alignItems: "center", gap: "8px", borderTop: "1px solid #ddd", flexShrink: 0 as const };
+    ? { position: "fixed" as const, bottom: 0, left: 0, right: 0, background: "var(--foreground)", padding: "10px 12px", display: "flex", alignItems: "center", gap: "8px", borderTop: "1px solid var(--foreground)", zIndex: 100 }
+    : { background: "var(--foreground)", padding: "10px 12px", display: "flex", alignItems: "center", gap: "8px", borderTop: "1px solid var(--foreground)", flexShrink: 0 as const };
 
   return (
     <div style={containerStyle}>
       {/* Header */}
-      <div style={{ background: "#075E54", padding: "12px 16px", display: "flex", alignItems: "center", gap: "12px", flexShrink: 0 }}>
-        <div style={{ width: "40px", height: "40px", borderRadius: "50%", background: "#25D366", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "20px" }}>🍕</div>
+      <div style={{ background: "var(--whatsapp)", padding: "12px 16px", display: "flex", alignItems: "center", gap: "12px", flexShrink: 0 }}>
+        <div style={{ width: "40px", height: "40px", borderRadius: "50%", background: "var(--whatsapp)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "20px" }}>🍕</div>
         <div>
           <p style={{ color: "white", fontWeight: 600, fontSize: "15px", margin: 0 }}>Chefe da Pizza</p>
-          <p style={{ color: "#B2DFDB", fontSize: "12px", margin: 0 }}>{started ? (typing ? "digitando..." : "online") : "Atendimento via WhatsApp"}</p>
+          <p style={{ color: "var(--info)", fontSize: "12px", margin: 0 }}>{started ? (typing ? "digitando..." : "online") : "Atendimento via WhatsApp"}</p>
         </div>
       </div>
 
       {/* Mensagens */}
-      <div style={{ flex: 1, overflowY: "auto", padding: "12px 16px", background: "#ECE5DD", display: "flex", flexDirection: "column", gap: "4px", paddingBottom: started && fullScreen ? "80px" : "12px" }}>
+      <div style={{ flex: 1, overflowY: "auto", padding: "12px 16px", background: "var(--primary)", display: "flex", flexDirection: "column", gap: "4px", paddingBottom: started && fullScreen ? "80px" : "12px" }}>
         {!started && (
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", gap: "12px" }}>
             <div style={{ fontSize: "48px" }}>🍕</div>
-            <p style={{ color: "#666", fontSize: "14px", textAlign: "center", maxWidth: "260px" }}>Simule um pedido pelo WhatsApp da Chefe da Pizza</p>
+            <p style={{ color: "var(--foreground-muted)", fontSize: "14px", textAlign: "center", maxWidth: "260px" }}>Simule um pedido pelo WhatsApp da Chefe da Pizza</p>
             <button
               type="button"
               onClick={handleStart}
-              style={{ background: "#25D366", color: "white", border: "none", borderRadius: "24px", padding: "12px 28px", fontSize: "15px", fontWeight: 600, cursor: "pointer" }}
+              style={{ background: "var(--whatsapp)", color: "white", border: "none", borderRadius: "24px", padding: "12px 28px", fontSize: "15px", fontWeight: 600, cursor: "pointer" }}
             >
               Iniciar conversa
             </button>
@@ -127,9 +127,9 @@ export function Simulator({ fullScreen = false }: { fullScreen?: boolean }) {
         ))}
         {typing && (
           <div style={{ display: "flex", alignItems: "center", gap: "4px", padding: "8px 12px", background: "white", borderRadius: "12px", borderBottomLeftRadius: "4px", alignSelf: "flex-start", maxWidth: "80px" }}>
-            <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#999", animation: "bounce 1s infinite" }}></span>
-            <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#999", animation: "bounce 1s infinite 0.2s" }}></span>
-            <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#999", animation: "bounce 1s infinite 0.4s" }}></span>
+            <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "var(--foreground-secondary)", animation: "bounce 1s infinite" }}></span>
+            <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "var(--foreground-secondary)", animation: "bounce 1s infinite 0.2s" }}></span>
+            <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "var(--foreground-secondary)", animation: "bounce 1s infinite 0.4s" }}></span>
           </div>
         )}
         <div ref={bottomRef} />
@@ -151,7 +151,7 @@ export function Simulator({ fullScreen = false }: { fullScreen?: boolean }) {
             type="button"
             onClick={handleSend}
             disabled={loading || typing || !input.trim()}
-            style={{ width: "48px", height: "48px", borderRadius: "50%", background: input.trim() ? "#25D366" : "#ccc", border: "none", cursor: input.trim() ? "pointer" : "not-allowed", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "20px", flexShrink: 0 }}
+            style={{ width: "48px", height: "48px", borderRadius: "50%", background: input.trim() ? "var(--whatsapp)" : "var(--foreground)", border: "none", cursor: input.trim() ? "pointer" : "not-allowed", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "20px", flexShrink: 0 }}
           >
             ➤
           </button>

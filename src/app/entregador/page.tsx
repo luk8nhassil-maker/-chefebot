@@ -110,19 +110,19 @@ export default function EntregadorPage() {
 
   if (!entregadorId) {
     return (
-      <div style={{ background: '#060606', minHeight: '100dvh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '24px', fontFamily: 'Archivo, sans-serif' }}>
+      <div style={{ background: 'var(--background)', minHeight: '100dvh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '24px', fontFamily: 'Archivo, sans-serif' }}>
         <div style={{ fontSize: '48px', marginBottom: '16px' }}>🛵</div>
-        <h1 style={{ color: '#ff6b00', fontSize: '24px', fontWeight: 700, marginBottom: '8px', textAlign: 'center' }}>Área do Entregador</h1>
-        <p style={{ color: '#888', fontSize: '14px', marginBottom: '32px', textAlign: 'center' }}>Digite seu código de acesso</p>
+        <h1 style={{ color: 'var(--primary-text)', fontSize: '24px', fontWeight: 700, marginBottom: '8px', textAlign: 'center' }}>Área do Entregador</h1>
+        <p style={{ color: 'var(--foreground-secondary)', fontSize: '14px', marginBottom: '32px', textAlign: 'center' }}>Digite seu código de acesso</p>
         <input
           value={inputId}
           onChange={e => setInputId(e.target.value)}
           placeholder="Código do entregador"
-          style={{ width: '100%', maxWidth: '320px', padding: '14px 16px', borderRadius: '12px', border: '2px solid #222', background: '#111', color: '#fff', fontSize: '16px', marginBottom: '16px', outline: 'none', boxSizing: 'border-box' }}
+          style={{ width: '100%', maxWidth: '320px', padding: '14px 16px', borderRadius: '12px', border: '2px solid var(--surface-secondary)', background: 'var(--surface)', color: 'var(--foreground)', fontSize: '16px', marginBottom: '16px', outline: 'none', boxSizing: 'border-box' }}
         />
         <button
           onClick={() => { if (inputId.trim()) setEntregadorId(inputId.trim()) }}
-          style={{ width: '100%', maxWidth: '320px', padding: '14px', borderRadius: '12px', background: '#ff6b00', color: '#fff', fontSize: '16px', fontWeight: 700, border: 'none', cursor: 'pointer' }}
+          style={{ width: '100%', maxWidth: '320px', padding: '14px', borderRadius: '12px', background: 'var(--primary)', color: 'var(--primary-foreground)', fontSize: '16px', fontWeight: 700, border: 'none', cursor: 'pointer' }}
         >
           Entrar
         </button>
@@ -131,17 +131,17 @@ export default function EntregadorPage() {
   }
 
   return (
-    <div style={{ background: '#060606', minHeight: '100dvh', fontFamily: 'Archivo, sans-serif', color: '#fff', paddingBottom: '32px' }}>
+    <div style={{ background: 'var(--background)', minHeight: '100dvh', fontFamily: 'Archivo, sans-serif', color: 'var(--foreground)', paddingBottom: '32px' }}>
       {/* Header */}
-      <div style={{ background: '#111', borderBottom: '1px solid #222', padding: '16px 20px', display: 'flex', alignItems: 'center', gap: '12px', position: 'sticky', top: 0, zIndex: 10 }}>
+      <div style={{ background: 'var(--surface)', borderBottom: '1px solid var(--surface-secondary)', padding: '16px 20px', display: 'flex', alignItems: 'center', gap: '12px', position: 'sticky', top: 0, zIndex: 10 }}>
         <span style={{ fontSize: '24px' }}>🛵</span>
         <div>
-          <div style={{ fontSize: '16px', fontWeight: 700, color: '#ff6b00' }}>Meus Pedidos</div>
-          <div style={{ fontSize: '12px', color: '#888' }}>ID: {entregadorId}</div>
+          <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--primary-text)' }}>Meus Pedidos</div>
+          <div style={{ fontSize: '12px', color: 'var(--foreground-secondary)' }}>ID: {entregadorId}</div>
         </div>
         <button
           onClick={() => buscarPedidos(entregadorId)}
-          style={{ marginLeft: 'auto', background: '#222', border: 'none', color: '#fff', padding: '8px 14px', borderRadius: '8px', fontSize: '13px', cursor: 'pointer' }}
+          style={{ marginLeft: 'auto', background: 'var(--surface-secondary)', border: 'none', color: 'var(--foreground)', padding: '8px 14px', borderRadius: '8px', fontSize: '13px', cursor: 'pointer' }}
         >
           Atualizar
         </button>
@@ -149,17 +149,17 @@ export default function EntregadorPage() {
 
       <div style={{ padding: '20px' }}>
         {erro && (
-          <div style={{ background: '#1a0a0a', border: '1px solid #ff3333', borderRadius: '10px', padding: '12px 16px', marginBottom: '16px', color: '#ff6666', fontSize: '14px' }}>
+          <div style={{ background: 'var(--danger-soft)', border: '1px solid var(--danger)', borderRadius: '10px', padding: '12px 16px', marginBottom: '16px', color: 'var(--danger)', fontSize: '14px' }}>
             {erro}
           </div>
         )}
 
         {loading && (
-          <div style={{ textAlign: 'center', color: '#888', padding: '40px 0', fontSize: '15px' }}>Carregando pedidos...</div>
+          <div style={{ textAlign: 'center', color: 'var(--foreground-secondary)', padding: '40px 0', fontSize: '15px' }}>Carregando pedidos...</div>
         )}
 
         {!loading && pedidos.length === 0 && (
-          <div style={{ textAlign: 'center', color: '#888', padding: '60px 0' }}>
+          <div style={{ textAlign: 'center', color: 'var(--foreground-secondary)', padding: '60px 0' }}>
             <div style={{ fontSize: '48px', marginBottom: '12px' }}>📭</div>
             <div style={{ fontSize: '15px' }}>Nenhum pedido atribuído ainda.</div>
           </div>
@@ -169,8 +169,8 @@ export default function EntregadorPage() {
           <div
             key={pedido.pedidoId}
             style={{
-              background: '#111',
-              border: `1px solid ${pedido.status === 'entregue' ? '#1a3a1a' : pedido.status === 'em_rota' ? '#3a2800' : '#222'}`,
+              background: 'var(--surface)',
+              border: `1px solid ${pedido.status === 'entregue' ? 'var(--success-soft)' : pedido.status === 'em_rota' ? 'var(--surface)' : 'var(--surface-secondary)'}`,
               borderRadius: '14px',
               padding: '18px',
               marginBottom: '16px',
@@ -178,29 +178,29 @@ export default function EntregadorPage() {
           >
             {/* Status badge */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-              <span style={{ fontSize: '12px', fontWeight: 700, padding: '4px 10px', borderRadius: '20px', background: pedido.status === 'entregue' ? '#1a3a1a' : pedido.status === 'em_rota' ? '#3a2800' : '#1a1a1a', color: pedido.status === 'entregue' ? '#4caf50' : pedido.status === 'em_rota' ? '#ff6b00' : '#888', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+              <span style={{ fontSize: '12px', fontWeight: 700, padding: '4px 10px', borderRadius: '20px', background: pedido.status === 'entregue' ? 'var(--success-soft)' : pedido.status === 'em_rota' ? 'var(--surface)' : 'var(--surface-secondary)', color: pedido.status === 'entregue' ? 'var(--success)' : pedido.status === 'em_rota' ? 'var(--primary)' : 'var(--foreground-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
                 {pedido.status === 'entregue' ? '✓ Entregue' : pedido.status === 'em_rota' ? '🛵 Em Rota' : '⏳ Pendente'}
               </span>
-              <span style={{ color: '#ff6b00', fontWeight: 700, fontSize: '18px' }}>R$ {pedido.total.toFixed(2).replace('.', ',')}</span>
+              <span style={{ color: 'var(--primary-text)', fontWeight: 700, fontSize: '18px' }}>R$ {pedido.total.toFixed(2).replace('.', ',')}</span>
             </div>
 
             {/* Cliente */}
             <div style={{ marginBottom: '8px' }}>
               <div style={{ fontSize: '17px', fontWeight: 700, marginBottom: '2px' }}>{pedido.clienteNome}</div>
-              <div style={{ color: '#888', fontSize: '13px' }}>📞 {pedido.clienteTelefone}</div>
+              <div style={{ color: 'var(--foreground-secondary)', fontSize: '13px' }}>📞 {pedido.clienteTelefone}</div>
             </div>
 
             {/* Endereço */}
-            <div style={{ background: '#0a0a0a', borderRadius: '8px', padding: '10px 12px', marginBottom: '10px' }}>
-              <div style={{ color: '#888', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '3px' }}>Endereço</div>
+            <div style={{ background: 'var(--surface)', borderRadius: '8px', padding: '10px 12px', marginBottom: '10px' }}>
+              <div style={{ color: 'var(--foreground-secondary)', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '3px' }}>Endereço</div>
               <div style={{ fontSize: '14px', fontWeight: 500 }}>📍 {pedido.endereco}</div>
             </div>
 
             {/* Itens */}
             <div style={{ marginBottom: '14px' }}>
-              <div style={{ color: '#888', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px' }}>Itens</div>
+              <div style={{ color: 'var(--foreground-secondary)', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px' }}>Itens</div>
               {pedido.itens.map((item, i) => (
-                <div key={i} style={{ fontSize: '13px', color: '#ccc', paddingLeft: '8px', borderLeft: '2px solid #333', marginBottom: '3px' }}>{item}</div>
+                <div key={i} style={{ fontSize: '13px', color: 'var(--foreground)', paddingLeft: '8px', borderLeft: '2px solid var(--surface-elevated)', marginBottom: '3px' }}>{item}</div>
               ))}
             </div>
 
@@ -208,19 +208,19 @@ export default function EntregadorPage() {
             {pedido.status === 'pendente' && (
               <button
                 onClick={() => iniciarRastreamento(pedido.pedidoId)}
-                style={{ width: '100%', padding: '14px', borderRadius: '10px', background: '#ff6b00', color: '#fff', fontSize: '15px', fontWeight: 700, border: 'none', cursor: 'pointer' }}
+                style={{ width: '100%', padding: '14px', borderRadius: '10px', background: 'var(--primary)', color: 'var(--primary-foreground)', fontSize: '15px', fontWeight: 700, border: 'none', cursor: 'pointer' }}
               >
                 🛵 Iniciar Entrega
               </button>
             )}
             {pedido.status === 'em_rota' && rastreando === pedido.pedidoId && (
               <div>
-                <div style={{ background: '#1a1200', borderRadius: '8px', padding: '8px 12px', marginBottom: '10px', fontSize: '12px', color: '#ff9933', textAlign: 'center' }}>
+                <div style={{ background: 'var(--background)', borderRadius: '8px', padding: '8px 12px', marginBottom: '10px', fontSize: '12px', color: 'var(--primary-text)', textAlign: 'center' }}>
                   📡 GPS ativo — transmitindo localização
                 </div>
                 <button
                   onClick={() => confirmarEntrega(pedido.pedidoId)}
-                  style={{ width: '100%', padding: '14px', borderRadius: '10px', background: '#1a8a1a', color: '#fff', fontSize: '15px', fontWeight: 700, border: 'none', cursor: 'pointer' }}
+                  style={{ width: '100%', padding: '14px', borderRadius: '10px', background: 'var(--success)', color: 'var(--foreground)', fontSize: '15px', fontWeight: 700, border: 'none', cursor: 'pointer' }}
                 >
                   ✓ Confirmar Entrega
                 </button>
@@ -229,7 +229,7 @@ export default function EntregadorPage() {
             {pedido.status === 'em_rota' && rastreando !== pedido.pedidoId && (
               <button
                 onClick={() => iniciarRastreamento(pedido.pedidoId)}
-                style={{ width: '100%', padding: '14px', borderRadius: '10px', background: '#333', color: '#fff', fontSize: '15px', fontWeight: 700, border: 'none', cursor: 'pointer' }}
+                style={{ width: '100%', padding: '14px', borderRadius: '10px', background: 'var(--surface-elevated)', color: 'var(--foreground)', fontSize: '15px', fontWeight: 700, border: 'none', cursor: 'pointer' }}
               >
                 Retomar GPS
               </button>

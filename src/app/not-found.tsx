@@ -31,10 +31,10 @@ export default function NotFound() {
           position: relative;
           min-height: 100svh;
           overflow: hidden;
-          background: #060606;
+          background: var(--background);
           background-image:
             radial-gradient(ellipse 85% 65% at 50% 48%,
-              rgba(255,107,0,0.08) 0%,
+              color-mix(in srgb, var(--primary) 8%, transparent) 0%,
               transparent 62%);
           display: flex;
           align-items: center;
@@ -57,7 +57,7 @@ export default function NotFound() {
           font-size: clamp(180px, 46vw, 760px);
           line-height: 0.85;
           letter-spacing: -6px;
-          color: rgba(255, 107, 0, 0.06);
+          color: color-mix(in srgb, var(--primary) 6%, transparent);
           white-space: nowrap;
           user-select: none;
           pointer-events: none;
@@ -91,14 +91,14 @@ export default function NotFound() {
           font-family: 'Archivo Black', 'Archivo', sans-serif;
           font-size: clamp(54px, 14vw, 84px);
           font-weight: 900;
-          color: #ffffff;
+          color: var(--foreground);
           letter-spacing: -2.5px;
           line-height: 1;
           margin-bottom: 16px;
         }
 
         .nf-sub {
-          color: #a39b8b;
+          color: var(--foreground-secondary);
           font-size: clamp(15px, 3.5vw, 17px);
           font-weight: 400;
           line-height: 1.65;
@@ -107,7 +107,7 @@ export default function NotFound() {
         }
 
         .nf-link {
-          color: #ff6b00;
+          color: var(--primary-text);
           font-family: 'Archivo', sans-serif;
           font-size: 15px;
           font-weight: 700;
@@ -117,13 +117,13 @@ export default function NotFound() {
           align-items: center;
           gap: 7px;
           padding: 3px 0 4px;
-          border-bottom: 1.5px solid rgba(255,107,0,0);
+          border-bottom: 1.5px solid color-mix(in srgb, var(--primary) 1%, transparent);
           transition: border-color 0.18s, opacity 0.18s, gap 0.2s;
           -webkit-tap-highlight-color: transparent;
         }
 
         .nf-link:hover {
-          border-bottom-color: rgba(255,107,0,0.4);
+          border-bottom-color: color-mix(in srgb, var(--primary) 40%, transparent);
           gap: 11px;
         }
 

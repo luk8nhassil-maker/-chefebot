@@ -35,8 +35,8 @@ type Form = {
 
 const FORM_VAZIO: Form = { active: false, featured: true, badge: "PROMO DE HOJE", title: "", description: "", buttonText: "Pedir essa promoção →", type: "combo_fixed_price", mainProductId: "", mainQuantity: 1, freeProductId: "", freeQuantity: 1, promotionalPrice: "", includedText: "", maxUsesPerOrder: "" };
 
-const inputStyle = { width: "100%", background: "#101010", border: "1px solid #272320", borderRadius: 10, padding: "10px 12px", color: "#f5f2ee", fontSize: 14 } as const;
-const labelStyle = { display: "block", fontSize: 11, fontWeight: 800, color: "#8a8375", textTransform: "uppercase" as const, letterSpacing: ".5px", margin: "12px 0 5px" };
+const inputStyle = { width: "100%", background: "var(--surface)", border: "1px solid var(--surface-elevated)", borderRadius: 10, padding: "10px 12px", color: "var(--foreground)", fontSize: 14 } as const;
+const labelStyle = { display: "block", fontSize: 11, fontWeight: 800, color: "var(--foreground-secondary)", textTransform: "uppercase" as const, letterSpacing: ".5px", margin: "12px 0 5px" };
 
 export default function PromocoesPage() {
   const [autorizado, setAutorizado] = useState<boolean | null>(null);
@@ -132,11 +132,11 @@ export default function PromocoesPage() {
     });
   }
 
-  if (autorizado === null) return <div style={{ minHeight: "100vh", background: "#060606" }} />;
+  if (autorizado === null) return <div style={{ minHeight: "100vh", background: "var(--background)" }} />;
   if (!autorizado) return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, background: "#060606", color: "#f5f2ee", fontFamily: "system-ui" }}>
+    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, background: "var(--background)", color: "var(--foreground)", fontFamily: "system-ui" }}>
       <p>Acesso restrito à equipe.</p>
-      <a href="/login?callbackUrl=/cardapio/promocoes" style={{ color: "#ff6b00" }}>Fazer login</a>
+      <a href="/login?callbackUrl=/cardapio/promocoes" style={{ color: "var(--primary-text)" }}>Fazer login</a>
     </div>
   );
 
@@ -153,41 +153,41 @@ export default function PromocoesPage() {
   );
 
   return (
-    <div style={{ minHeight: "100vh", background: "#060606", color: "#f5f2ee", fontFamily: "system-ui", padding: "16px 16px 60px", maxWidth: 560, margin: "0 auto" }}>
+    <div style={{ minHeight: "100vh", background: "var(--background)", color: "var(--foreground)", fontFamily: "system-ui", padding: "16px 16px 60px", maxWidth: 560, margin: "0 auto" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
-        <a href="/cardapio" style={{ color: "#8a8375", textDecoration: "none", fontSize: 13 }}>← Cardápio</a>
+        <a href="/cardapio" style={{ color: "var(--foreground-secondary)", textDecoration: "none", fontSize: 13 }}>← Cardápio</a>
         <h1 style={{ flex: 1, fontSize: 19, fontWeight: 900, margin: 0 }}>🏷️ Promoções</h1>
-        <button onClick={() => { setForm({ ...FORM_VAZIO }); setErros([]); setAviso(""); }} style={{ border: "none", borderRadius: 10, background: "#ff6b00", color: "#fff", fontSize: 13, fontWeight: 800, padding: "9px 13px", cursor: "pointer" }}>+ Nova promoção</button>
+        <button onClick={() => { setForm({ ...FORM_VAZIO }); setErros([]); setAviso(""); }} style={{ border: "none", borderRadius: 10, background: "var(--primary)", color: 'var(--primary-foreground)', fontSize: 13, fontWeight: 800, padding: "9px 13px", cursor: "pointer" }}>+ Nova promoção</button>
       </div>
 
-      {aviso && <div style={{ background: "rgba(98,162,86,.15)", border: "1px solid #62a256", borderRadius: 10, padding: "9px 12px", fontSize: 13, marginBottom: 12 }}>{aviso}</div>}
+      {aviso && <div style={{ background: "color-mix(in srgb, var(--success) 15%, transparent)", border: "1px solid var(--success)", borderRadius: 10, padding: "9px 12px", fontSize: 13, marginBottom: 12 }}>{aviso}</div>}
 
       {/* Lista */}
       {!form && (promos.length === 0
-        ? <p style={{ color: "#8a8375", fontSize: 14 }}>Nenhuma promoção ainda. Crie a primeira com o botão acima.</p>
+        ? <p style={{ color: "var(--foreground-secondary)", fontSize: 14 }}>Nenhuma promoção ainda. Crie a primeira com o botão acima.</p>
         : promos.map((p) => (
-          <div key={p.id} style={{ background: "#101010", border: `1px solid ${p.active ? "rgba(255,107,0,.4)" : "#272320"}`, borderRadius: 14, padding: "12px 14px", marginBottom: 10 }}>
+          <div key={p.id} style={{ background: "var(--surface)", border: `1px solid ${p.active ? "color-mix(in srgb, var(--primary) 40%, transparent)" : "var(--surface-elevated)"}`, borderRadius: 14, padding: "12px 14px", marginBottom: 10 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 15, fontWeight: 800 }}>{p.title || "(sem título)"} {p.featured && <span title="Destaque">⭐</span>}</div>
-                <div style={{ fontSize: 12.5, color: "#8a8375", marginTop: 2 }}>
+                <div style={{ fontSize: 12.5, color: "var(--foreground-secondary)", marginTop: 2 }}>
                   {p.mainItems.map((m) => m.productName).join(" + ") || "sem produto"}
                   {p.freeItems.length > 0 && ` + ${p.freeItems.map((f) => f.productName).join(" + ")} grátis`}
                   {typeof p.promotionalPrice === "number" && ` · ${money(p.promotionalPrice)}`}
                 </div>
               </div>
-              <button onClick={() => alternarAtiva(p)} style={{ border: "none", borderRadius: 999, padding: "7px 12px", fontSize: 12, fontWeight: 800, cursor: "pointer", background: p.active ? "rgba(98,162,86,.2)" : "#1c1a18", color: p.active ? "#62a256" : "#8a8375" }}>{p.active ? "Ativa" : "Inativa"}</button>
-              <button onClick={() => editar(p)} style={{ border: "1px solid #272320", borderRadius: 10, background: "transparent", color: "#c9c2b4", fontSize: 12, fontWeight: 700, padding: "7px 11px", cursor: "pointer" }}>Editar</button>
+              <button onClick={() => alternarAtiva(p)} style={{ border: "none", borderRadius: 999, padding: "7px 12px", fontSize: 12, fontWeight: 800, cursor: "pointer", background: p.active ? "color-mix(in srgb, var(--success) 20%, transparent)" : "var(--surface)", color: p.active ? "var(--success)" : "var(--foreground-secondary)" }}>{p.active ? "Ativa" : "Inativa"}</button>
+              <button onClick={() => editar(p)} style={{ border: "1px solid var(--surface-elevated)", borderRadius: 10, background: "transparent", color: "var(--foreground-secondary)", fontSize: 12, fontWeight: 700, padding: "7px 11px", cursor: "pointer" }}>Editar</button>
             </div>
           </div>
         )))}
 
       {/* Formulário */}
       {form && (
-        <div style={{ background: "#0c0c0c", border: "1px solid #272320", borderRadius: 14, padding: 16 }}>
+        <div style={{ background: "var(--surface)", border: "1px solid var(--surface-elevated)", borderRadius: 14, padding: 16 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <strong style={{ fontSize: 15 }}>{form.id ? "Editar promoção" : "Nova promoção"}</strong>
-            <button onClick={() => setForm(null)} style={{ background: "none", border: "none", color: "#8a8375", fontSize: 13, cursor: "pointer" }}>Cancelar</button>
+            <button onClick={() => setForm(null)} style={{ background: "none", border: "none", color: "var(--foreground-secondary)", fontSize: 13, cursor: "pointer" }}>Cancelar</button>
           </div>
 
           <label style={labelStyle}>Tipo da promoção</label>
@@ -210,16 +210,16 @@ export default function PromocoesPage() {
           <label style={labelStyle}>Produto principal (do cardápio)</label>
           {selectProduto(form.mainProductId, (v) => setForm({ ...form, mainProductId: v }), false)}
           {form.mainProductId && nomeEsgotado(prod(form.mainProductId)?.productName || "") && (
-            <div style={{ color: "#facc15", fontSize: 12, marginTop: 4 }}>⚠️ Este produto está esgotado — a promoção ficará oculta no cardápio enquanto isso.</div>
+            <div style={{ color: "var(--primary-text)", fontSize: 12, marginTop: 4 }}>⚠️ Este produto está esgotado — a promoção ficará oculta no cardápio enquanto isso.</div>
           )}
           <label style={labelStyle}>Quantidade</label>
           <input type="number" min={1} value={form.mainQuantity} onChange={(e) => setForm({ ...form, mainQuantity: Math.max(1, parseInt(e.target.value || "1", 10)) })} style={inputStyle} />
-          {prod(form.mainProductId)?.category === "pizza" && <div style={{ color: "#8a8375", fontSize: 12, marginTop: 4 }}>Cliente escolhe o sabor na hora, com os sabores reais do cardápio.</div>}
+          {prod(form.mainProductId)?.category === "pizza" && <div style={{ color: "var(--foreground-secondary)", fontSize: 12, marginTop: 4 }}>Cliente escolhe o sabor na hora, com os sabores reais do cardápio.</div>}
 
           <label style={labelStyle}>Item grátis (brinde)</label>
           {selectProduto(form.freeProductId, (v) => setForm({ ...form, freeProductId: v }), true)}
           {form.freeProductId && nomeEsgotado(prod(form.freeProductId)?.productName || "") && (
-            <div style={{ color: "#facc15", fontSize: 12, marginTop: 4 }}>⚠️ Brinde esgotado — a promoção ficará oculta enquanto isso.</div>
+            <div style={{ color: "var(--primary-text)", fontSize: 12, marginTop: 4 }}>⚠️ Brinde esgotado — a promoção ficará oculta enquanto isso.</div>
           )}
           {form.freeProductId && (<><label style={labelStyle}>Quantidade do brinde</label>
             <input type="number" min={1} value={form.freeQuantity} onChange={(e) => setForm({ ...form, freeQuantity: Math.max(1, parseInt(e.target.value || "1", 10)) })} style={inputStyle} /></>)}
@@ -229,7 +229,7 @@ export default function PromocoesPage() {
             <input value={form.promotionalPrice} onChange={(e) => setForm({ ...form, promotionalPrice: e.target.value })} inputMode="decimal" placeholder="Ex: 49,90" style={inputStyle} />
           </>)}
           {form.type === "buy_get_free" && prod(form.mainProductId) && (
-            <div style={{ color: "#8a8375", fontSize: 12.5, marginTop: 8 }}>Preço cobrado: valor normal do produto principal ({money(prod(form.mainProductId)!.price * form.mainQuantity)}). O brinde sai por R$ 0,00.</div>
+            <div style={{ color: "var(--foreground-secondary)", fontSize: 12.5, marginTop: 8 }}>Preço cobrado: valor normal do produto principal ({money(prod(form.mainProductId)!.price * form.mainQuantity)}). O brinde sai por R$ 0,00.</div>
           )}
 
           <label style={labelStyle}>Texto do que está incluso (opcional)</label>
@@ -243,23 +243,23 @@ export default function PromocoesPage() {
           </label>
 
           {/* Prévia */}
-          <div style={{ margin: "16px 0 4px", fontSize: 11, fontWeight: 800, color: "#8a8375", textTransform: "uppercase", letterSpacing: ".5px" }}>Prévia do card no cardápio</div>
-          <div style={{ background: "linear-gradient(145deg,rgba(72,36,20,.78),rgba(24,15,12,.98))", border: "1px solid rgba(240,81,47,.28)", borderRadius: 18, padding: 16 }}>
-            <div style={{ fontSize: 10.5, fontWeight: 800, color: "#f0512f", letterSpacing: "1px", marginBottom: 6 }}>{form.badge || "PROMO DE HOJE"}</div>
-            <div style={{ fontSize: 20, fontWeight: 850, color: "#fff4ec", marginBottom: 5 }}>{form.title || "Nome da promoção"}</div>
-            <div style={{ fontSize: 13, color: "#b9aaa0", marginBottom: 10 }}>{form.description || "Descrição curta"}{previewPreco !== null ? ` · ${money(previewPreco)}` : ""}</div>
-            <div style={{ display: "inline-block", background: "#f0512f", color: "#fff", borderRadius: 10, padding: "9px 14px", fontSize: 13, fontWeight: 800 }}>{form.buttonText || "Pedir essa promoção →"}</div>
+          <div style={{ margin: "16px 0 4px", fontSize: 11, fontWeight: 800, color: "var(--foreground-secondary)", textTransform: "uppercase", letterSpacing: ".5px" }}>Prévia do card no cardápio</div>
+          <div style={{ background: "linear-gradient(145deg,color-mix(in srgb, var(--danger-soft) 78%, transparent),color-mix(in srgb, var(--danger-soft) 98%, transparent))", border: "1px solid color-mix(in srgb, var(--primary) 28%, transparent)", borderRadius: 18, padding: 16 }}>
+            <div style={{ fontSize: 10.5, fontWeight: 800, color: "var(--primary-text)", letterSpacing: "1px", marginBottom: 6 }}>{form.badge || "PROMO DE HOJE"}</div>
+            <div style={{ fontSize: 20, fontWeight: 850, color: "var(--primary-text)", marginBottom: 5 }}>{form.title || "Nome da promoção"}</div>
+            <div style={{ fontSize: 13, color: "var(--primary-text)", marginBottom: 10 }}>{form.description || "Descrição curta"}{previewPreco !== null ? ` · ${money(previewPreco)}` : ""}</div>
+            <div style={{ display: "inline-block", background: "var(--primary)", color: 'var(--primary-foreground)', borderRadius: 10, padding: "9px 14px", fontSize: 13, fontWeight: 800 }}>{form.buttonText || "Pedir essa promoção →"}</div>
           </div>
 
           {erros.length > 0 && (
-            <div style={{ background: "rgba(239,68,68,.1)", border: "1px solid rgba(239,68,68,.4)", borderRadius: 10, padding: "10px 12px", marginTop: 12 }}>
-              {erros.map((e, i) => <div key={i} style={{ color: "#ef4444", fontSize: 13 }}>• {e}</div>)}
+            <div style={{ background: "color-mix(in srgb, var(--danger) 10%, transparent)", border: "1px solid color-mix(in srgb, var(--danger) 40%, transparent)", borderRadius: 10, padding: "10px 12px", marginTop: 12 }}>
+              {erros.map((e, i) => <div key={i} style={{ color: "var(--danger)", fontSize: 13 }}>• {e}</div>)}
             </div>
           )}
 
           <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
-            <button disabled={salvando} onClick={() => salvar(false)} style={{ flex: 1, border: "1px solid #272320", borderRadius: 12, background: "transparent", color: "#c9c2b4", fontSize: 14, fontWeight: 800, padding: "12px 0", cursor: "pointer" }}>Salvar rascunho</button>
-            <button disabled={salvando} onClick={() => salvar(true)} style={{ flex: 1.4, border: "none", borderRadius: 12, background: "#ff6b00", color: "#fff", fontSize: 14, fontWeight: 900, padding: "12px 0", cursor: "pointer", opacity: salvando ? 0.6 : 1 }}>{salvando ? "Salvando…" : "Salvar e ativar"}</button>
+            <button disabled={salvando} onClick={() => salvar(false)} style={{ flex: 1, border: "1px solid var(--surface-elevated)", borderRadius: 12, background: "transparent", color: "var(--foreground-secondary)", fontSize: 14, fontWeight: 800, padding: "12px 0", cursor: "pointer" }}>Salvar rascunho</button>
+            <button disabled={salvando} onClick={() => salvar(true)} style={{ flex: 1.4, border: "none", borderRadius: 12, background: "var(--primary)", color: 'var(--primary-foreground)', fontSize: 14, fontWeight: 900, padding: "12px 0", cursor: "pointer", opacity: salvando ? 0.6 : 1 }}>{salvando ? "Salvando…" : "Salvar e ativar"}</button>
           </div>
         </div>
       )}
