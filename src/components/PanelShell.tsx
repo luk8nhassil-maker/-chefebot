@@ -1,4 +1,6 @@
 "use client"
+import { useState } from "react"
+import Image from "next/image"
 import { usePathname, useRouter } from "next/navigation"
 
 interface PanelShellProps {
@@ -20,6 +22,7 @@ export default function PanelShell({
 }: PanelShellProps) {
   const router = useRouter()
   const pathname = usePathname()
+  const [logoError, setLogoError] = useState(false)
 
   const onPedidos = pathname.startsWith("/pedidos")
   const onConversas = pathname.startsWith("/conversas")
@@ -87,7 +90,18 @@ export default function PanelShell({
       <nav className="ps-sidebar">
         <div className="ps-sidebar-brand">
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
-            <div style={{ width: 34, height: 34, borderRadius: 10, background: "rgba(255,107,0,.15)", border: "1px solid rgba(255,107,0,.3)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17, flexShrink: 0 }}>🍕</div>
+            {logoError ? (
+              <div style={{ width: 34, height: 34, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, flexShrink: 0 }}>🍕</div>
+            ) : (
+              <Image
+                src="/logo-chefe-da-pizza.jpg"
+                alt="Chefe da Pizza"
+                width={38}
+                height={38}
+                style={{ objectFit: "contain", flexShrink: 0 }}
+                onError={() => setLogoError(true)}
+              />
+            )}
             <div>
               <div style={{ fontSize: 15, fontWeight: 900, letterSpacing: "-0.4px", color: "#f5f2ee" }}>ChefeBot</div>
               <div style={{ fontSize: 10, color: "#4a4640", fontWeight: 700 }}>Painel operacional</div>

@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import Image from "next/image";
 
 function getDestino(role: string, callbackUrl: string | null): string {
   if (callbackUrl) return callbackUrl;
@@ -25,6 +26,7 @@ function LoginForm() {
   const [userFocus, setUserFocus] = useState(false);
   const [passFocus, setPassFocus] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [logoError, setLogoError] = useState(false);
 
   useEffect(() => {
     const t = setTimeout(() => setVisible(true), 60);
@@ -158,7 +160,6 @@ function LoginForm() {
             <div style={{
               width: 96,
               height: 96,
-              background: "linear-gradient(145deg, #ff7a1a, #ff5500)",
               borderRadius: 28,
               display: "flex",
               alignItems: "center",
@@ -169,8 +170,21 @@ function LoginForm() {
               flexShrink: 0,
               lineHeight: 1,
               userSelect: "none",
+              overflow: "hidden",
             }}>
-              🍕
+              {logoError ? (
+                <span>🍕</span>
+              ) : (
+                <Image
+                  src="/logo-chefe-da-pizza.jpg"
+                  alt="Chefe da Pizza"
+                  width={96}
+                  height={96}
+                  style={{ width: "100%", height: "100%", objectFit: "contain" }}
+                  onError={() => setLogoError(true)}
+                  priority
+                />
+              )}
             </div>
 
             <h1 style={{
