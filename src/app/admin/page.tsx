@@ -509,14 +509,14 @@ export default function AdminPage() {
       <div style={{ background: '#0a0a0a', borderBottom: '1px solid #1f1d1a', padding: '18px 16px', paddingTop: 'calc(env(safe-area-inset-top) + 18px)', position: 'sticky', top: 0, zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: 1 }}>
           {logoError ? (
-            <div style={{ width: 36, height: 36, borderRadius: 10, background: '#ff6b00', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0 }}>🍕</div>
+            <div style={{ width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0 }}>🍕</div>
           ) : (
             <Image
               src="/logo-chefe-da-pizza.jpg"
               alt="Chefe da Pizza"
-              width={36}
-              height={36}
-              style={{ borderRadius: 10, objectFit: 'cover', flexShrink: 0, border: '1px solid #2a2a2a' }}
+              width={40}
+              height={40}
+              style={{ objectFit: 'contain', flexShrink: 0 }}
               onError={() => setLogoError(true)}
             />
           )}
