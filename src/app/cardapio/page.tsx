@@ -452,7 +452,7 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
                     border: `2px solid ${sel ? "var(--primary)" : "var(--border-strong)"}`,
                     background: sel ? "var(--primary)" : "transparent",
                     display: "flex", alignItems: "center", justifyContent: "center",
-                    flexShrink: 0, fontSize: 14, color: "var(--foreground)", fontWeight: 900,
+                    flexShrink: 0, fontSize: 14, color: "var(--primary-foreground)", fontWeight: 900,
                   }}>
                     {sel && "✓"}
                   </div>

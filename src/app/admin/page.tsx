@@ -659,13 +659,13 @@ export default function AdminPage() {
               </div>
               <div style={{ ...card, background: 'linear-gradient(135deg, var(--surface), var(--surface))' }}>
                 <p style={{ color: 'var(--foreground-secondary)', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 6px', letterSpacing: 0.5 }}>Ticket medio</p>
-                <p style={{ color: 'var(--brand-text)', fontSize: 22, fontWeight: 800, margin: 0, letterSpacing: -0.5, lineHeight: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>R${ticketMedio.toFixed(2).replace('.', ',')}</p>
+                <p style={{ color: 'var(--text-primary)', fontSize: 22, fontWeight: 800, margin: 0, letterSpacing: -0.5, lineHeight: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>R${ticketMedio.toFixed(2).replace('.', ',')}</p>
                 <p style={{ color: 'var(--border-strong)', fontSize: 10, margin: '6px 0 0' }}>por pedido</p>
               </div>
               <div style={{ ...card, background: 'linear-gradient(135deg, var(--surface), var(--surface))', border: emAndamento > 0 ? '1px solid color-mix(in srgb, var(--primary) 19%, transparent)' : '1px solid var(--border)' }}>
                 <p style={{ color: 'var(--foreground-secondary)', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 6px', letterSpacing: 0.5 }}>Em andamento</p>
-                <p style={{ color: emAndamento > 0 ? 'var(--primary)' : 'var(--foreground)', fontSize: 30, fontWeight: 900, margin: 0, letterSpacing: -1, lineHeight: 1 }}>{emAndamento}</p>
-                <p style={{ color: emAndamento > 0 ? 'color-mix(in srgb, var(--primary) 50%, transparent)' : 'var(--border-strong)', fontSize: 10, margin: '6px 0 0' }}>{emAndamento > 0 ? 'ativos agora' : 'nenhum ativo'}</p>
+                <p style={{ color: emAndamento > 0 ? 'var(--text-primary)' : 'var(--foreground)', fontSize: 30, fontWeight: 900, margin: 0, letterSpacing: -1, lineHeight: 1 }}>{emAndamento}</p>
+                <p style={{ color: emAndamento > 0 ? 'var(--text-secondary)' : 'var(--border-strong)', fontSize: 10, margin: '6px 0 0' }}>{emAndamento > 0 ? 'ativos agora' : 'nenhum ativo'}</p>
               </div>
             </div>
 
@@ -675,12 +675,12 @@ export default function AdminPage() {
                 <p style={sectionTitle}>Pedidos por status</p>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                   {[
-                    { key: 'pendente', label: 'Pendente', color: 'var(--brand-text)' },
+                    { key: 'pendente', label: 'Pendente', color: 'var(--attention)' },
                     { key: 'em preparo', label: 'Em preparo', color: 'var(--info)' },
                     { key: 'saiu para entrega', label: 'A caminho', color: 'var(--attention)' },
                     { key: 'entregue', label: 'Entregue', color: 'var(--success)' },
                   ].map(({ key, label, color }) => (
-                    <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'var(--surface)', borderRadius: 20, padding: '7px 12px', border: `1px solid ${statusCounts[key] ? color + '30' : 'var(--border)'}` }}>
+                    <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'var(--surface)', borderRadius: 20, padding: '7px 12px', border: `1px solid ${statusCounts[key] ? `color-mix(in srgb, ${color} 19%, transparent)` : 'var(--border)'}` }}>
                       <div style={{ width: 7, height: 7, borderRadius: '50%', background: statusCounts[key] ? color : 'var(--surface-elevated)', flexShrink: 0 }} />
                       <span style={{ color: 'var(--foreground-secondary)', fontSize: 11 }}>{label}</span>
                       <span style={{ color: statusCounts[key] ? 'var(--foreground)' : 'var(--border-strong)', fontSize: 13, fontWeight: 800 }}>{statusCounts[key] || 0}</span>
@@ -1386,7 +1386,7 @@ export default function AdminPage() {
         {ABA_TABS.map(({ key, Icon, label }) => (
           <button key={key} onClick={() => setAba(key)} style={{ flex: 1, background: 'none', border: 'none', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, padding: '6px 0', minHeight: 48, fontFamily: "'Archivo', sans-serif" }}>
             <Icon size={20} color={aba === key ? 'var(--primary)' : 'var(--border-strong)'} opacity={aba === key ? 1 : 0.3} aria-hidden="true" />
-            <span style={{ fontSize: 10, color: aba === key ? 'var(--primary)' : 'var(--border-strong)', fontWeight: aba === key ? 700 : 400 }}>{label}</span>
+            <span style={{ fontSize: 10, color: aba === key ? 'var(--text-primary)' : 'var(--text-muted)', fontWeight: aba === key ? 700 : 400 }}>{label}</span>
             {aba === key && <div style={{ width: 4, height: 4, borderRadius: '50%', background: 'var(--primary)' }} />}
           </button>
         ))}
