@@ -12,19 +12,33 @@ function defaultSetImpl(key: string, value: unknown, opts?: { nx?: boolean }) {
   return Promise.resolve("OK");
 }
 
+// Replica os dois scripts Lua reais da fidelidade por pontos, sem interpretar
+// Lua: liberarLockPontosSeDono (1 chave: GET==token -> DEL) e
+// persistirEstadoPontosSeDono (2 chaves: GET(lock)==token -> SET(estado)).
+function defaultEvalImpl(_script: string, keys: string[], args: string[]) {
+  if (keys.length === 1) {
+    const [key] = keys;
+    const [token] = args;
+    if (redisStore.get(key) === token) {
+      redisStore.delete(key);
+      return Promise.resolve(1);
+    }
+    return Promise.resolve(0);
+  }
+  const [lockKey, estadoKey] = keys;
+  const [token, estadoJson] = args;
+  if (redisStore.get(lockKey) === token) {
+    redisStore.set(estadoKey, JSON.parse(estadoJson));
+    return Promise.resolve(1);
+  }
+  return Promise.resolve(0);
+}
+
 vi.mock("@/lib/redis", () => ({
   redis: {
     get: vi.fn(defaultGetImpl),
     set: vi.fn(defaultSetImpl),
-    eval: vi.fn(async (_script: string, keys: string[], args: string[]) => {
-      const [key] = keys;
-      const [token] = args;
-      if (redisStore.get(key) === token) {
-        redisStore.delete(key);
-        return 1;
-      }
-      return 0;
-    }),
+    eval: vi.fn(defaultEvalImpl),
   },
 }));
 
@@ -73,15 +87,7 @@ beforeEach(async () => {
   const redisLib = await import("@/lib/redis");
   vi.mocked(redisLib.redis.get).mockImplementation(defaultGetImpl);
   vi.mocked(redisLib.redis.set).mockImplementation(defaultSetImpl);
-  vi.mocked(redisLib.redis.eval).mockImplementation(async (_script: string, keys: string[], args: string[]) => {
-    const [key] = keys;
-    const [token] = args;
-    if (redisStore.get(key) === token) {
-      redisStore.delete(key);
-      return 1;
-    }
-    return 0;
-  });
+  vi.mocked(redisLib.redis.eval).mockImplementation(defaultEvalImpl);
   await salvarConfigFidelidadePontos({ ativo: true, metaPontos: 720, descricaoRecompensa: "1 Pizza Familia" });
 });
 

@@ -392,6 +392,44 @@ export async function liberarLockPontosSeDono(clienteId: string, token: string):
   return resultado === 1;
 }
 
+// Grava o EstadoPontosCliente só se o lock ainda pertencer a quem está
+// gravando — checagem e escrita na MESMA operação atômica (Lua), sem janela
+// entre "verificar dono" e "gravar". Isso é o que falta ao compare-and-delete
+// sozinho: aquele protege a LIBERAÇÃO do lock, mas sem isto um processo cujo
+// TTL expirou ainda poderia escrever o estado depois que outro processo já
+// assumiu o mesmo cliente (a escrita em si não checava dono nenhum).
+const PERSISTIR_ESTADO_SE_DONO_SCRIPT = `
+if redis.call("GET", KEYS[1]) == ARGV[1] then
+  redis.call("SET", KEYS[2], ARGV[2])
+  return 1
+else
+  return 0
+end
+`;
+
+/**
+ * Grava `EstadoPontosCliente` (extrato + recompensas) SÓ SE a chave de lock
+ * do cliente ainda contiver exatamente este `token` — verificação e escrita
+ * atômicas via Lua, na mesma operação. Retorna `false` sem escrever nada
+ * quando o token não é mais o dono (TTL expirou e outro processo já assumiu
+ * o lock): nesse caso o chamador (`registrarMovimentoPontosIdempotente`)
+ * lança erro, nunca reporta sucesso — o pedido pode ser reprocessado depois
+ * com segurança, porque nada foi escrito (nem o estado, nem qualquer marca
+ * de "processado").
+ */
+export async function persistirEstadoPontosSeDono(
+  clienteId: string,
+  token: string,
+  estado: EstadoPontosCliente
+): Promise<boolean> {
+  const resultado = await redis.eval(
+    PERSISTIR_ESTADO_SE_DONO_SCRIPT,
+    [chaveLockPontos(clienteId), chaveEstadoPontos(clienteId)],
+    [token, JSON.stringify(estado)]
+  );
+  return resultado === 1;
+}
+
 /**
  * Serializa qualquer leitura-modificação-escrita do estado (extrato +
  * recompensas) de UM cliente por vez, via lock exclusivo em Redis (`SET NX`
@@ -417,14 +455,14 @@ export async function liberarLockPontosSeDono(clienteId: string, token: string):
  * pode ser reprocessado depois com segurança, já que nada é marcado como
  * "processado" antes da escrita real do estado.
  */
-async function comBloqueioCliente<T>(clienteId: string, fn: () => Promise<T>): Promise<T> {
+async function comBloqueioCliente<T>(clienteId: string, fn: (token: string) => Promise<T>): Promise<T> {
   const chave = chaveLockPontos(clienteId);
   for (let tentativa = 0; tentativa < LOCK_MAX_TENTATIVAS; tentativa++) {
     const token = gerarTokenLock();
     const obtido = await redis.set(chave, token, { nx: true, ex: LOCK_TTL_SEGUNDOS });
     if (obtido) {
       try {
-        return await fn();
+        return await fn(token);
       } finally {
         await liberarLockPontosSeDono(clienteId, token);
       }
@@ -613,6 +651,43 @@ function aplicarDeteccaoRecompensa(
 }
 
 /**
+ * Revalida recompensas abertas ("disponivel"/"notificada") contra o saldo
+ * ATUAL — chamada depois de QUALQUER movimento (estorno, resgate, ajuste
+ * negativo, ou mesmo um novo crédito). Se o saldo já não atende mais à meta,
+ * a recompensa vira "expirada": nunca é apagada do histórico, só muda de
+ * status. Função PURA (não lê/escreve Redis) — o resultado é combinado com
+ * o novo extrato e persistido na mesma escrita atômica.
+ *
+ * Idempotente por natureza: uma vez "expirada", o `some(...)` de recompensa
+ * aberta não encontra mais nada para essa recompensa, então reprocessar o
+ * mesmo ou outro evento que mantenha o saldo abaixo da meta não muda nada
+ * de novo (sem-op seguro, sem necessidade de chave de dedupe própria).
+ *
+ * Importante: isto mantém o status em sincronia com o saldo no momento de
+ * cada movimento, mas NÃO substitui uma revalidação em tempo de resgate —
+ * qualquer fluxo futuro de resgate deve sempre recalcular saldo/meta atuais
+ * na hora, nunca confiar só neste status salvo ou no snapshot de desbloqueio.
+ */
+function aplicarQuedaAbaixoDaMeta(
+  recompensasAtuais: RecompensaPontosDesbloqueada[],
+  meta: number,
+  saldoAtual: number
+): RecompensaPontosDesbloqueada[] {
+  if (meta <= 0) return recompensasAtuais;
+  if (saldoAtual >= meta) return recompensasAtuais; // ainda atende a meta, nada muda
+
+  let mudou = false;
+  const atualizadas = recompensasAtuais.map((r) => {
+    if (r.status === "disponivel" || r.status === "notificada") {
+      mudou = true;
+      return { ...r, status: "expirada" as StatusRecompensaPontos };
+    }
+    return r;
+  });
+  return mudou ? atualizadas : recompensasAtuais;
+}
+
+/**
  * Registra um movimento de pontos de forma idempotente, atômica e segura
  * contra concorrência. Toda a operação roda dentro de um lock exclusivo por
  * cliente (`comBloqueioCliente`):
@@ -643,7 +718,7 @@ export async function registrarMovimentoPontosIdempotente(
 ): Promise<MovimentoPontos | null> {
   const eventoId = evento.eventoId ?? construirEventoIdPontos(evento.pedidoId, evento.tipo);
 
-  return comBloqueioCliente(clienteId, async () => {
+  return comBloqueioCliente(clienteId, async (token) => {
     const estado = await obterEstadoPontos(clienteId);
     if (estado.extrato.some((m) => m.eventoId === eventoId)) return null; // ja processado
 
@@ -666,22 +741,31 @@ export async function registrarMovimentoPontosIdempotente(
     const registro: MovimentoPontos = { ...registroSemSaldo, saldoApos };
     novoExtrato[novoExtrato.length - 1] = registro;
 
-    // Detecta cruzamento de meta genericamente (qualquer tipo que tenha
-    // aumentado o saldo — hoje só "confirmado"/"ajuste" positivo fazem
-    // isso). Só uma computação em memória — a escrita real é uma só, abaixo,
-    // junto com o extrato.
+    // Recompensas: cruzamento pra cima (desbloqueio) e queda abaixo da meta
+    // (expiração) são sempre revalidados a partir do saldo real — nunca só
+    // incrementais. Tudo em memória; a escrita real é uma só, abaixo, junto
+    // com o extrato.
+    const config = await obterConfigFidelidadePontos();
+    const meta = calcularMetaPontos(config);
     let novasRecompensas = estado.recompensas;
     if (saldoApos > saldoAnterior) {
-      const config = await obterConfigFidelidadePontos();
-      const meta = calcularMetaPontos(config);
-      novasRecompensas = aplicarDeteccaoRecompensa(clienteId, estado.recompensas, meta, {
+      novasRecompensas = aplicarDeteccaoRecompensa(clienteId, novasRecompensas, meta, {
         saldoAnterior,
         saldoAtual: saldoApos,
         pedidoId: evento.pedidoId,
       });
     }
+    novasRecompensas = aplicarQuedaAbaixoDaMeta(novasRecompensas, meta, saldoApos);
 
-    await redis.set(chaveEstadoPontos(clienteId), { extrato: novoExtrato, recompensas: novasRecompensas });
+    const persistiu = await persistirEstadoPontosSeDono(clienteId, token, { extrato: novoExtrato, recompensas: novasRecompensas });
+    if (!persistiu) {
+      // Perdemos a propriedade do lock (TTL expirou e outro processo ja
+      // assumiu este cliente) — nada foi escrito. Nunca reportar sucesso
+      // nem seguir adiante: quem chama trata como falha best-effort (ver
+      // creditarPontosPedidoEntregue) e o pedido pode ser reprocessado
+      // depois com seguranca, porque nao existe nenhum estado parcial.
+      throw new Error(`Fidelidade por pontos: lock de ${clienteId} expirou antes da escrita — reprocessar depois`);
+    }
 
     return registro;
   });
@@ -704,6 +788,17 @@ export function derivarClienteIdPorTelefone(telefone?: string): string | undefin
   const sanitizado = sanitizeTelefoneCliente(telefone);
   if (sanitizado.length < 10) return undefined;
   return clienteIdDoTelefone(sanitizado);
+}
+
+/**
+ * Mascara um identificador (clienteId ou telefone) para uso em log —
+ * mostra só os últimos 4 dígitos. Nunca logar clienteId/telefone completos:
+ * `clienteId` embute o telefone (`cli_{telefone}`), então vazar o valor
+ * inteiro em log equivale a vazar o telefone do cliente.
+ */
+function mascararIdentidadePontos(valor: string): string {
+  const digitos = valor.replace(/\D/g, "");
+  return digitos.length >= 4 ? `…${digitos.slice(-4)}` : "…";
 }
 
 export type PedidoParaCreditoPontos = {
@@ -749,8 +844,11 @@ export async function creditarPontosPedidoEntregue(pedido: PedidoParaCreditoPont
   if (!clienteId) return; // sem telefone valido: nunca gera pontos, nunca cria saldo orfao
 
   if (pedido.clienteId && pedido.clienteId !== clienteId) {
+    // Aviso seguro: nunca logar o clienteId (que embute o telefone) nem o
+    // telefone em texto pleno — só os últimos 4 dígitos, suficiente para
+    // correlacionar em suporte sem expor o número completo em log.
     console.warn(
-      `[ChefeBot] Fidelidade: clienteId do pedido ${pedido.id} (${pedido.clienteId}) diverge do telefone (${clienteId}) — usando o telefone como identidade canonica`
+      `[ChefeBot] Fidelidade: pedido ${pedido.id} tem clienteId (${mascararIdentidadePontos(pedido.clienteId)}) divergente do telefone (${mascararIdentidadePontos(clienteId)}) — usando o telefone como identidade canonica`
     );
   }
 

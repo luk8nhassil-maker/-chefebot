@@ -15,11 +15,23 @@ function realDel(key: string) {
   return 1;
 }
 
+// Replica a semântica dos dois scripts Lua reais sem interpretar Lua:
+// - liberarLockPontosSeDono (1 chave): GET == token -> DEL
+// - persistirEstadoPontosSeDono (2 chaves): GET(lock) == token -> SET(estado)
 function realEval(_script: string, keys: string[], args: string[]) {
-  const [key] = keys;
-  const [token] = args;
-  if (store.get(key) === token) {
-    store.delete(key);
+  if (keys.length === 1) {
+    const [key] = keys;
+    const [token] = args;
+    if (store.get(key) === token) {
+      store.delete(key);
+      return 1;
+    }
+    return 0;
+  }
+  const [lockKey, estadoKey] = keys;
+  const [token, estadoJson] = args;
+  if (store.get(lockKey) === token) {
+    store.set(estadoKey, JSON.parse(estadoJson as unknown as string));
     return 1;
   }
   return 0;
@@ -47,6 +59,9 @@ import {
   derivarClienteIdPorTelefone,
   chaveLockPontos,
   liberarLockPontosSeDono,
+  persistirEstadoPontosSeDono,
+  registrarMovimentoPontosIdempotente,
+  type EstadoPontosCliente,
 } from "./fidelidade";
 import { obterOuCriarCliente, clienteIdDoTelefone } from "./clientes";
 
@@ -203,17 +218,18 @@ describe("concorrência — lock exclusivo por cliente", () => {
   });
 
   test("13. falha durante persistência permite reprocessamento posterior, sem deixar o pedido preso", async () => {
-    const setMock = vi.mocked(redis.set);
-    const implementacaoReal = setMock.getMockImplementation()!;
-
-    setMock.mockImplementationOnce(implementacaoReal); // 1) SET NX do lock — passa normalmente
-    setMock.mockImplementationOnce(async () => {
+    // A persistência real acontece via persistirEstadoPontosSeDono (redis.eval),
+    // não redis.set — simula a falha exatamente nessa chamada.
+    const evalMock = vi.mocked(redis.eval);
+    const implementacaoRealEval = evalMock.getMockImplementation()!;
+    evalMock.mockImplementationOnce(async () => {
       throw new Error("falha simulada de persistencia do estado");
-    }); // 2) escrita do estado (extrato+recompensas) — falha
+    });
 
     await expect(
       creditarPontosPedidoEntregue({ id: "ped_13", status: "entregue", telefone: "86999990013", total: 44 })
     ).rejects.toThrow("falha simulada de persistencia do estado");
+    evalMock.mockImplementation(implementacaoRealEval);
 
     // nada foi marcado como "processado" antes da escrita real — o estado continua vazio
     expect(await obterExtratoPontos("cli_86999990013")).toHaveLength(0);
@@ -234,13 +250,12 @@ describe("atomicidade — movimento e recompensa desbloqueada são um único reg
     expect(await obterRecompensasPontos("cli_86999990030")).toHaveLength(0);
 
     // segundo pedido cruzaria a meta (80 + 30 = 110 >= 100) — mas a escrita (que
-    // gravaria extrato E recompensa juntos, na mesma chamada) falha simulada
-    const setMock = vi.mocked(redis.set);
-    const implementacaoReal = setMock.getMockImplementation()!;
-    setMock.mockImplementationOnce(implementacaoReal); // 1) SET NX do lock — passa
-    setMock.mockImplementationOnce(async () => {
+    // gravaria extrato E recompensa juntos, na mesma chamada via redis.eval) falha simulada
+    const evalMock = vi.mocked(redis.eval);
+    const implementacaoRealEval = evalMock.getMockImplementation()!;
+    evalMock.mockImplementationOnce(async () => {
       throw new Error("falha simulada ao persistir estado com recompensa");
-    }); // 2) escrita do estado — falha ANTES de gravar qualquer coisa
+    }); // escrita do estado — falha ANTES de gravar qualquer coisa
 
     await expect(
       creditarPontosPedidoEntregue({ id: "ped_atom_b", status: "entregue", telefone: "86999990030", total: 30 })
@@ -398,5 +413,234 @@ describe("16. notificação de recompensa protegida por feature flag", () => {
     const recompensas = await obterRecompensasPontos("cli_86999990016");
     expect(recompensas[0].notificacaoStatus).toBe("pendente");
     delete process.env.FIDELIDADE_NOTIFICACAO_RECOMPENSA_ATIVA;
+  });
+});
+
+// ============================================================================
+// FASE A — endurecimento final antes do merge do PR #171
+// ============================================================================
+
+describe("1. proteção contra stale writer — escrita condicionada à propriedade do lock", () => {
+  test("processo com token antigo nunca sobrescreve o estado gravado pelo novo dono do lock", async () => {
+    const clienteId = "cli_stale_writer";
+    const chave = chaveLockPontos(clienteId);
+
+    // "Processo A" adquire o lock
+    const tokenA = "token-A-stale";
+    await redis.set(chave, tokenA, { nx: true, ex: 5 });
+
+    // TTL expira (simulado removendo a chave) — "processo B" assume com token próprio
+    store.delete(chave);
+    const tokenB = "token-B-novo-dono";
+    await redis.set(chave, tokenB, { nx: true, ex: 5 });
+
+    // B grava seu próprio estado normalmente (escrita condicionada, seu token ainda é o dono)
+    const estadoDoB: EstadoPontosCliente = {
+      extrato: [
+        { movimentoId: "m-b", clienteId, pedidoId: "ped_b", tipo: "confirmado", pontos: 50, motivo: "credito do B", createdAt: new Date().toISOString(), eventoId: "confirmado:ped_b", saldoApos: 50 },
+      ],
+      recompensas: [],
+    };
+    expect(await persistirEstadoPontosSeDono(clienteId, tokenB, estadoDoB)).toBe(true);
+
+    // "Processo A" tenta concluir com o token ANTIGO — nunca pode sobrescrever o estado do B
+    const estadoDoA: EstadoPontosCliente = {
+      extrato: [
+        { movimentoId: "m-a", clienteId, pedidoId: "ped_a", tipo: "confirmado", pontos: 999, motivo: "credito do A (obsoleto)", createdAt: new Date().toISOString(), eventoId: "confirmado:ped_a", saldoApos: 999 },
+      ],
+      recompensas: [],
+    };
+    expect(await persistirEstadoPontosSeDono(clienteId, tokenA, estadoDoA)).toBe(false);
+
+    // o estado gravado continua sendo o do B, intacto — nunca sobrescrito
+    const extratoFinal = await obterExtratoPontos(clienteId);
+    expect(extratoFinal).toHaveLength(1);
+    expect(extratoFinal[0].pedidoId).toBe("ped_b");
+
+    // A também não apaga o lock do B ao tentar liberar com seu token velho
+    expect(await liberarLockPontosSeDono(clienteId, tokenA)).toBe(false);
+    expect(store.get(chave)).toBe(tokenB);
+  });
+
+  test("perda de propriedade do lock na escrita: registrarMovimentoPontosIdempotente lança, sem estado parcial; retry funciona e credita uma única vez", async () => {
+    const evalMock = vi.mocked(redis.eval);
+    const implementacaoRealEval = evalMock.getMockImplementation()!;
+
+    // Simula que, na hora exata de persistir, o script Lua constata que o
+    // token não é mais o dono (retorna 0) — é exatamente o que aconteceria
+    // se o TTL tivesse expirado e outro processo já tivesse assumido.
+    evalMock.mockImplementationOnce(async () => 0);
+
+    await expect(
+      creditarPontosPedidoEntregue({ id: "ped_stale_1", status: "entregue", telefone: "86999990040", total: 33 })
+    ).rejects.toThrow(/lock/i);
+
+    // nada foi escrito — não existe estado parcial (nem movimento, nem recompensa)
+    expect(await obterExtratoPontos("cli_86999990040")).toHaveLength(0);
+    expect(await obterRecompensasPontos("cli_86999990040")).toHaveLength(0);
+    // o lock foi liberado normalmente no finally (usa a implementação real do eval)
+    expect(store.has(chaveLockPontos("cli_86999990040"))).toBe(false);
+
+    // reprocessamento (retry): sem a falha simulada, funciona normalmente e credita uma única vez
+    await creditarPontosPedidoEntregue({ id: "ped_stale_1", status: "entregue", telefone: "86999990040", total: 33 });
+    await creditarPontosPedidoEntregue({ id: "ped_stale_1", status: "entregue", telefone: "86999990040", total: 33 }); // resave, nao duplica
+
+    expect((await obterSaldoPontos("cli_86999990040")).disponivel).toBe(33);
+    expect(await obterExtratoPontos("cli_86999990040")).toHaveLength(1);
+
+    evalMock.mockImplementation(implementacaoRealEval);
+  });
+
+  test("duas operações concorrentes continuam preservando todos os movimentos com o novo mecanismo", async () => {
+    const telefone = "86999990041";
+    await Promise.all([
+      creditarPontosPedidoEntregue({ id: "ped_conc_stale_a", status: "entregue", telefone, total: 15 }),
+      creditarPontosPedidoEntregue({ id: "ped_conc_stale_b", status: "entregue", telefone, total: 25 }),
+    ]);
+
+    const extrato = await obterExtratoPontos("cli_86999990041");
+    expect(extrato).toHaveLength(2);
+    expect((await obterSaldoPontos("cli_86999990041")).disponivel).toBe(40);
+  });
+});
+
+describe("2. consistência da recompensa após estorno/ajuste — expira quando o saldo cai abaixo da meta", () => {
+  test("crédito cruza a meta e abre recompensa; estorno derruba o saldo abaixo da meta -> expira", async () => {
+    await salvarConfigFidelidadePontos({ ativo: true, metaPontos: 100, descricaoRecompensa: "1 Pizza Família" });
+    await creditarPontosPedidoEntregue({ id: "ped_exp_1", status: "entregue", telefone: "86999990050", total: 110 });
+
+    let recompensas = await obterRecompensasPontos("cli_86999990050");
+    expect(recompensas).toHaveLength(1);
+    expect(recompensas[0].status).toBe("disponivel");
+
+    // estorno de 50 pontos: saldo vai de 110 para 60 — abaixo da meta de 100
+    await registrarMovimentoPontosIdempotente("cli_86999990050", {
+      eventoId: "estornado:ped_exp_1",
+      pedidoId: "ped_exp_1",
+      tipo: "estornado",
+      pontos: 50,
+      motivo: "correção",
+    });
+
+    recompensas = await obterRecompensasPontos("cli_86999990050");
+    expect(recompensas).toHaveLength(1); // preserva o histórico, nunca apaga
+    expect(recompensas[0].status).toBe("expirada");
+  });
+
+  test("estorno repetido (mesmo eventoId) não altera novamente a recompensa já expirada", async () => {
+    await salvarConfigFidelidadePontos({ ativo: true, metaPontos: 100, descricaoRecompensa: "1 Pizza Família" });
+    await creditarPontosPedidoEntregue({ id: "ped_exp_2", status: "entregue", telefone: "86999990051", total: 110 });
+    await registrarMovimentoPontosIdempotente("cli_86999990051", {
+      eventoId: "estornado:ped_exp_2",
+      pedidoId: "ped_exp_2",
+      tipo: "estornado",
+      pontos: 50,
+      motivo: "correção",
+    });
+    const recompensasAntes = await obterRecompensasPontos("cli_86999990051");
+    expect(recompensasAntes).toHaveLength(1);
+    expect(recompensasAntes[0].status).toBe("expirada");
+
+    // mesmo eventoId de novo — deduplicado, nada muda
+    const repeticao = await registrarMovimentoPontosIdempotente("cli_86999990051", {
+      eventoId: "estornado:ped_exp_2",
+      pedidoId: "ped_exp_2",
+      tipo: "estornado",
+      pontos: 50,
+      motivo: "correção (tentativa duplicada)",
+    });
+    expect(repeticao).toBeNull();
+
+    const recompensasDepois = await obterRecompensasPontos("cli_86999990051");
+    expect(recompensasDepois).toHaveLength(1);
+    expect(recompensasDepois[0].status).toBe("expirada");
+    expect(recompensasDepois[0].recompensaId).toBe(recompensasAntes[0].recompensaId);
+  });
+
+  test("ajuste negativo produz o mesmo comportamento (expira quando derruba abaixo da meta)", async () => {
+    await salvarConfigFidelidadePontos({ ativo: true, metaPontos: 100, descricaoRecompensa: "1 Pizza Família" });
+    await creditarPontosPedidoEntregue({ id: "ped_exp_3", status: "entregue", telefone: "86999990052", total: 120 });
+    expect((await obterRecompensasPontos("cli_86999990052"))[0].status).toBe("disponivel");
+
+    await registrarMovimentoPontosIdempotente("cli_86999990052", {
+      eventoId: "ajuste:correcao-manual-1",
+      pedidoId: "ped_exp_3",
+      tipo: "ajuste",
+      pontos: -30, // 120 -> 90, abaixo da meta de 100
+      motivo: "correção manual",
+    });
+
+    expect((await obterRecompensasPontos("cli_86999990052"))[0].status).toBe("expirada");
+  });
+
+  test("saldo ainda acima da meta após redução parcial mantém a recompensa aberta (disponivel)", async () => {
+    await salvarConfigFidelidadePontos({ ativo: true, metaPontos: 100, descricaoRecompensa: "1 Pizza Família" });
+    await creditarPontosPedidoEntregue({ id: "ped_exp_4", status: "entregue", telefone: "86999990053", total: 150 });
+
+    await registrarMovimentoPontosIdempotente("cli_86999990053", {
+      eventoId: "estornado:ped_exp_4",
+      pedidoId: "ped_exp_4",
+      tipo: "estornado",
+      pontos: 20, // 150 -> 130, ainda >= 100
+      motivo: "correção parcial",
+    });
+
+    const recompensas = await obterRecompensasPontos("cli_86999990053");
+    expect(recompensas).toHaveLength(1);
+    expect(recompensas[0].status).toBe("disponivel");
+  });
+
+  test("novo ciclo pode gerar nova recompensa depois que a anterior encerrou (expirou)", async () => {
+    await salvarConfigFidelidadePontos({ ativo: true, metaPontos: 100, descricaoRecompensa: "1 Pizza Família" });
+    await creditarPontosPedidoEntregue({ id: "ped_exp_5a", status: "entregue", telefone: "86999990054", total: 110 });
+    await registrarMovimentoPontosIdempotente("cli_86999990054", {
+      eventoId: "estornado:ped_exp_5a",
+      pedidoId: "ped_exp_5a",
+      tipo: "estornado",
+      pontos: 50, // 110 -> 60, expira
+      motivo: "correção",
+    });
+    expect((await obterRecompensasPontos("cli_86999990054"))[0].status).toBe("expirada");
+
+    // novo crédito traz o saldo de volta pra cima da meta — novo ciclo, nova recompensa
+    await creditarPontosPedidoEntregue({ id: "ped_exp_5b", status: "entregue", telefone: "86999990054", total: 60 });
+
+    const recompensas = await obterRecompensasPontos("cli_86999990054");
+    expect(recompensas).toHaveLength(2); // histórico preservado: a expirada + a nova
+    expect(recompensas[0].status).toBe("expirada");
+    expect(recompensas[1].status).toBe("disponivel");
+    expect(recompensas[1].recompensaId).not.toBe(recompensas[0].recompensaId);
+  });
+});
+
+describe("3. regra oficial de origem — mesmo pedido por múltiplos caminhos gera um único evento confirmado", () => {
+  test("processar o mesmo pedido como se viesse de /api/orders, WhatsApp e painel do entregador produz um único movimento", async () => {
+    const pedido = { id: "ped_multi_origem", status: "entregue", telefone: "86999990060", total: 77 };
+    // Todos os endpoints reais delegam para creditarPontosPedidoEntregue — chamar
+    // várias vezes simula exatamente múltiplas confirmações da mesma entrega.
+    await creditarPontosPedidoEntregue(pedido); // ex.: PATCH /api/orders (painel operacional)
+    await creditarPontosPedidoEntregue(pedido); // ex.: confirmação via WhatsApp
+    await creditarPontosPedidoEntregue(pedido); // ex.: painel do entregador
+
+    const extrato = await obterExtratoPontos("cli_86999990060");
+    expect(extrato).toHaveLength(1);
+    expect((await obterSaldoPontos("cli_86999990060")).disponivel).toBe(77);
+  });
+
+  test("aviso de clienteId divergente nunca expõe telefone ou clienteId completos em log", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await creditarPontosPedidoEntregue({
+      id: "ped_mask",
+      status: "entregue",
+      telefone: "86999990070",
+      clienteId: "cli_outro_numero_1234567890",
+      total: 10,
+    });
+    expect(warnSpy).toHaveBeenCalled();
+    const mensagem = String(warnSpy.mock.calls[0][0]);
+    expect(mensagem).not.toContain("86999990070");
+    expect(mensagem).not.toContain("cli_86999990070");
+    expect(mensagem).not.toContain("cli_outro_numero_1234567890");
+    warnSpy.mockRestore();
   });
 });
