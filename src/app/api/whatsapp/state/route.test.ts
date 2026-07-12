@@ -1,6 +1,14 @@
 import { vi, describe, test, expect, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
+const redisStore = new Map<string, unknown>();
+vi.mock("@/lib/redis", () => ({
+  redis: {
+    get: vi.fn(async (key: string) => (redisStore.has(key) ? redisStore.get(key) : null)),
+    set: vi.fn(async (key: string, value: unknown) => { redisStore.set(key, value); return "OK"; }),
+  },
+}));
+
 vi.mock("@/lib/auth", async () => {
   const actual = await vi.importActual<typeof import("@/lib/auth")>("@/lib/auth");
   return {
@@ -29,6 +37,9 @@ function requestComCookie(token?: string) {
 
 beforeEach(() => {
   vi.mocked(fetch).mockReset();
+  redisStore.clear();
+  process.env.EVOLUTION_API_URL = "https://evolution.teste.com.br";
+  process.env.EVOLUTION_API_KEY = "chave-de-teste";
 });
 
 describe("GET /api/whatsapp/state — autenticacao", () => {

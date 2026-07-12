@@ -1,0 +1,31 @@
+# Proxy HTTPS estático da infraestrutura da Evolution API do ChefeBot.
+# Caddy obtém e renova o certificado automaticamente (ACME/Let's Encrypt)
+# para cada domínio abaixo — nenhuma configuração manual de certificado.
+#
+# {$VAR} lê variáveis de ambiente do container (definidas no .env do compose).
+
+{$EVOLUTION_DOMAIN} {
+	encode gzip
+	reverse_proxy evolution-api:8080
+
+	log {
+		output file /data/logs/evolution-access.log {
+			roll_size 20mb
+			roll_keep 5
+		}
+	}
+}
+
+# Painel de monitoramento (Uptime Kuma) — só é servido se UPTIME_KUMA_DOMAIN
+# estiver definido no .env; senão, este bloco fica com host vazio e o Caddy
+# o ignora. Proteja com autenticação própria do Kuma antes de expor.
+{$UPTIME_KUMA_DOMAIN} {
+	reverse_proxy uptime-kuma:3001
+
+	log {
+		output file /data/logs/uptime-kuma-access.log {
+			roll_size 10mb
+			roll_keep 3
+		}
+	}
+}
