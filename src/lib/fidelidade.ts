@@ -298,13 +298,60 @@ function chaveEstadoPontos(clienteId: string): string {
   return `fidelidade:pontos:estado:${clienteId}`;
 }
 
+function chaveExtratoPontosLegado(clienteId: string): string {
+  return `fidelidade:pontos:extrato:${clienteId}`;
+}
+
 export function chaveLockPontos(clienteId: string): string {
   return `fidelidade:pontos:lock:${clienteId}`;
 }
 
+function normalizarEstadoPontos(estado: EstadoPontosCliente | null | undefined): EstadoPontosCliente {
+  return {
+    extrato: Array.isArray(estado?.extrato) ? estado.extrato : [],
+    recompensas: Array.isArray(estado?.recompensas) ? estado.recompensas : [],
+  };
+}
+
+function chaveDedupMovimentoPontos(movimento: MovimentoPontos): string {
+  if (movimento.eventoId) return `evento:${movimento.eventoId}`;
+  if (movimento.movimentoId) return `movimento:${movimento.movimentoId}`;
+  if (movimento.pedidoId) return `pedido:${movimento.tipo}:${movimento.pedidoId}`;
+  return `sem-chave:${movimento.tipo}:${movimento.createdAt}:${movimento.pontos}`;
+}
+
+function unirExtratosPontos(principal: MovimentoPontos[], legado: MovimentoPontos[]): MovimentoPontos[] {
+  const unidos: MovimentoPontos[] = [];
+  const vistos = new Set<string>();
+
+  for (const movimento of [...principal, ...legado]) {
+    const chave = chaveDedupMovimentoPontos(movimento);
+    if (vistos.has(chave)) continue;
+    vistos.add(chave);
+    unidos.push(movimento);
+  }
+
+  return unidos;
+}
+
 async function obterEstadoPontos(clienteId: string): Promise<EstadoPontosCliente> {
-  const estado = await redis.get<EstadoPontosCliente>(chaveEstadoPontos(clienteId));
-  return estado ?? { extrato: [], recompensas: [] };
+  const [estadoAtual, extratoLegado] = await Promise.all([
+    redis.get<EstadoPontosCliente>(chaveEstadoPontos(clienteId)),
+    redis.get<MovimentoPontos[]>(chaveExtratoPontosLegado(clienteId)),
+  ]);
+
+  const estado = normalizarEstadoPontos(estadoAtual);
+  const legado = Array.isArray(extratoLegado) ? extratoLegado : [];
+
+  // Compatibilidade com o PR #172: ele persistiu movimentos em
+  // fidelidade:pontos:extrato:{clienteId}. Enquanto a chave combinada nova
+  // ainda nao existir, ou enquanto a chave legada continuar presente, as
+  // leituras enxergam os dois formatos. A primeira escrita nova grava o
+  // extrato unido dentro de EstadoPontosCliente, sem apagar a chave legada.
+  return {
+    extrato: unirExtratosPontos(estado.extrato, legado),
+    recompensas: estado.recompensas,
+  };
 }
 
 const LOCK_TTL_SEGUNDOS = 5;
@@ -734,4 +781,64 @@ export async function creditarPontosPedidoEntregue(pedido: PedidoParaCreditoPont
 export async function obterSaldoAntigoPizzas(clienteId: string): Promise<number> {
   const progresso = await obterProgressoFidelidade(clienteId);
   return progresso.progresso;
+}
+
+// ============================================================================
+// LEITURA — Etapa 3 (API de saldo/progresso/extrato da Área do Cliente)
+// Funções puras (não leem/escrevem Redis) para permitir testar cálculo de
+// saldo/progresso sem infraestrutura, seguindo o mesmo padrão de
+// `calcularSaldoDoExtrato` acima.
+// ============================================================================
+
+/**
+ * Soma dos pontos "previstos" ainda informativos: só conta o "previsto" de um
+ * pedido que AINDA não teve seu evento resolvido (nenhum "confirmado" ou
+ * "cancelado" registrado para o mesmo pedidoId no extrato). Um pedido cujo
+ * "previsto" já virou "confirmado" ou "cancelado" não deve contar aqui de
+ * novo — o valor já está refletido no saldo confirmado (ou foi descartado).
+ * Nunca soma ao saldo confirmado — é só a estimativa "isto ainda pode virar
+ * saldo".
+ */
+export function calcularPontosPrevistos(movimentos: MovimentoPontos[]): number {
+  if (!Array.isArray(movimentos)) return 0;
+  const resolvidos = new Set(
+    movimentos
+      .filter((m) => (m.tipo === "confirmado" || m.tipo === "cancelado") && m.pedidoId)
+      .map((m) => m.pedidoId)
+  );
+  return movimentos
+    .filter((m) => m.tipo === "previsto" && m.pedidoId && !resolvidos.has(m.pedidoId))
+    .reduce((soma, m) => soma + m.pontos, 0);
+}
+
+export type ProgressoPontos = {
+  pontosFaltantes: number;
+  /** 0–100, sempre limitado ao intervalo (nunca ultrapassa 100 nem fica negativo). */
+  progressoPercentual: number;
+  metaAtingida: boolean;
+};
+
+/**
+ * Progresso do saldo confirmado em relação à meta. Sem meta válida (<= 0),
+ * retorna um progresso neutro (0%, não atingida) — meta é responsabilidade de
+ * configuração, esta função não decide um valor padrão.
+ */
+export function calcularProgressoPontos(saldo: number, meta: number): ProgressoPontos {
+  const saldoSeguro = Number.isFinite(saldo) && saldo > 0 ? saldo : 0;
+  const metaSegura = Number.isFinite(meta) && meta > 0 ? meta : 0;
+  if (metaSegura <= 0) {
+    return { pontosFaltantes: 0, progressoPercentual: 0, metaAtingida: false };
+  }
+  const pontosFaltantes = Math.max(metaSegura - saldoSeguro, 0);
+  const progressoPercentual = Math.min(100, Math.max(0, Math.floor((saldoSeguro / metaSegura) * 100)));
+  return { pontosFaltantes, progressoPercentual, metaAtingida: saldoSeguro >= metaSegura };
+}
+
+/**
+ * Extrato ordenado do mais recente para o mais antigo. Não muta a lista
+ * recebida.
+ */
+export function ordenarExtratoPontosDesc(movimentos: MovimentoPontos[]): MovimentoPontos[] {
+  if (!Array.isArray(movimentos)) return [];
+  return [...movimentos].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 }

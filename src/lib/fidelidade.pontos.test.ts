@@ -34,12 +34,16 @@ import {
   calcularPontosPorValor,
   calcularPontosElegiveisPedido,
   calcularSaldoDoExtrato,
+  calcularPontosPrevistos,
+  calcularProgressoPontos,
+  ordenarExtratoPontosDesc,
   obterConfigFidelidadePontos,
   salvarConfigFidelidadePontos,
   obterExtratoPontos,
   obterSaldoPontos,
   registrarMovimentoPontosIdempotente,
   construirEventoIdPontos,
+  creditarPontosPedidoEntregue,
   obterSaldoAntigoPizzas,
   CONFIG_FIDELIDADE_PONTOS_PADRAO,
   type MovimentoPontos,
@@ -326,6 +330,58 @@ describe("registrarMovimentoPontosIdempotente — impede crédito/débito duplic
   });
 });
 
+describe("compatibilidade com extrato legado de pontos do PR #172", () => {
+  function legado(overrides: Partial<MovimentoPontos>): MovimentoPontos {
+    return {
+      movimentoId: "legado_1",
+      clienteId: "cli_86999990100",
+      pedidoId: "ped_legado_1",
+      tipo: "confirmado",
+      pontos: 45,
+      motivo: "Pedido legado entregue",
+      createdAt: "2026-07-11T20:00:00.000Z",
+      eventoId: "confirmado:ped_legado_1",
+      ...overrides,
+    };
+  }
+
+  test("extrato legado do PR #172 continua visivel e mantendo o mesmo saldo", async () => {
+    store.set("fidelidade:pontos:extrato:cli_86999990100", [legado({})]);
+
+    const extrato = await obterExtratoPontos("cli_86999990100");
+    expect(extrato).toHaveLength(1);
+    expect(extrato[0].pedidoId).toBe("ped_legado_1");
+    expect((await obterSaldoPontos("cli_86999990100")).disponivel).toBe(45);
+  });
+
+  test("primeiro credito novo migra o legado para o estado combinado sem perda", async () => {
+    await salvarConfigFidelidadePontos({ ativo: true, metaPontos: 720, descricaoRecompensa: "1 Pizza Familia" });
+    store.set("fidelidade:pontos:extrato:cli_86999990100", [legado({})]);
+
+    const saldoAntes = (await obterSaldoPontos("cli_86999990100")).disponivel;
+    await creditarPontosPedidoEntregue({ id: "ped_novo_migracao", status: "entregue", telefone: "86999990100", total: 20 });
+
+    const estado = store.get("fidelidade:pontos:estado:cli_86999990100") as { extrato: MovimentoPontos[] };
+    expect(estado.extrato.map((m) => m.pedidoId)).toEqual(["ped_legado_1", "ped_novo_migracao"]);
+    expect(store.has("fidelidade:pontos:extrato:cli_86999990100")).toBe(true);
+    expect(saldoAntes).toBe(45);
+    expect((await obterSaldoPontos("cli_86999990100")).disponivel).toBe(65);
+  });
+
+  test("migracao repetida nao duplica movimentos legados", async () => {
+    await salvarConfigFidelidadePontos({ ativo: true, metaPontos: 720, descricaoRecompensa: "1 Pizza Familia" });
+    store.set("fidelidade:pontos:extrato:cli_86999990100", [legado({})]);
+
+    await creditarPontosPedidoEntregue({ id: "ped_novo_migracao", status: "entregue", telefone: "86999990100", total: 20 });
+    await creditarPontosPedidoEntregue({ id: "ped_novo_migracao", status: "entregue", telefone: "86999990100", total: 20 });
+
+    const extrato = await obterExtratoPontos("cli_86999990100");
+    expect(extrato).toHaveLength(2);
+    expect(extrato.filter((m) => m.pedidoId === "ped_legado_1")).toHaveLength(1);
+    expect(extrato.filter((m) => m.pedidoId === "ped_novo_migracao")).toHaveLength(1);
+  });
+});
+
 describe("compatibilidade com o modelo antigo (pizzas)", () => {
   test("funções antigas continuam funcionando sem alteração de comportamento", async () => {
     expect(contarPizzas([{ kind: "pizza", qty: 2 }, { kind: "simple", qty: 3 }])).toBe(2);
@@ -356,5 +412,107 @@ describe("compatibilidade com o modelo antigo (pizzas)", () => {
     const novo = await obterSaldoPontos("cli_dual");
     expect(antigo.progresso).toBe(3);
     expect(novo.disponivel).toBe(99);
+  });
+});
+
+describe("calcularPontosPrevistos — soma só o 'previsto' de pedidos ainda não resolvidos", () => {
+  function mov(overrides: Partial<MovimentoPontos>): MovimentoPontos {
+    return { movimentoId: "m", clienteId: "cli_x", tipo: "previsto", pontos: 0, motivo: "teste", createdAt: new Date().toISOString(), ...overrides };
+  }
+
+  test("previsto sem confirmado/cancelado correspondente conta como estimativa", () => {
+    const extrato = [mov({ tipo: "previsto", pontos: 40, pedidoId: "p1" })];
+    expect(calcularPontosPrevistos(extrato)).toBe(40);
+  });
+
+  test("previsto cujo pedido já foi confirmado não conta mais (evita contar 2x)", () => {
+    const extrato = [
+      mov({ tipo: "previsto", pontos: 40, pedidoId: "p1" }),
+      mov({ tipo: "confirmado", pontos: 40, pedidoId: "p1" }),
+    ];
+    expect(calcularPontosPrevistos(extrato)).toBe(0);
+  });
+
+  test("previsto cujo pedido foi cancelado também não conta mais", () => {
+    const extrato = [
+      mov({ tipo: "previsto", pontos: 25, pedidoId: "p2" }),
+      mov({ tipo: "cancelado", pontos: 25, pedidoId: "p2" }),
+    ];
+    expect(calcularPontosPrevistos(extrato)).toBe(0);
+  });
+
+  test("soma vários previstos ainda pendentes de pedidos diferentes", () => {
+    const extrato = [
+      mov({ tipo: "previsto", pontos: 10, pedidoId: "p1" }),
+      mov({ tipo: "previsto", pontos: 15, pedidoId: "p2" }),
+    ];
+    expect(calcularPontosPrevistos(extrato)).toBe(25);
+  });
+
+  test("array vazio ou inválido retorna 0", () => {
+    expect(calcularPontosPrevistos([])).toBe(0);
+    expect(calcularPontosPrevistos(undefined as unknown as MovimentoPontos[])).toBe(0);
+  });
+});
+
+describe("calcularProgressoPontos — progresso, faltantes e meta atingida", () => {
+  test("progresso parcial calcula percentual, faltantes e meta não atingida", () => {
+    const r = calcularProgressoPontos(360, 720);
+    expect(r.progressoPercentual).toBe(50);
+    expect(r.pontosFaltantes).toBe(360);
+    expect(r.metaAtingida).toBe(false);
+  });
+
+  test("saldo igual à meta: meta atingida, sem faltantes", () => {
+    const r = calcularProgressoPontos(720, 720);
+    expect(r.progressoPercentual).toBe(100);
+    expect(r.pontosFaltantes).toBe(0);
+    expect(r.metaAtingida).toBe(true);
+  });
+
+  test("saldo acima da meta: percentual nunca ultrapassa 100 e faltantes nunca fica negativo", () => {
+    const r = calcularProgressoPontos(5000, 720);
+    expect(r.progressoPercentual).toBe(100);
+    expect(r.pontosFaltantes).toBe(0);
+    expect(r.metaAtingida).toBe(true);
+  });
+
+  test("meta inválida (<= 0) retorna progresso neutro, nunca divide por zero", () => {
+    expect(calcularProgressoPontos(100, 0)).toEqual({ pontosFaltantes: 0, progressoPercentual: 0, metaAtingida: false });
+    expect(calcularProgressoPontos(100, -10)).toEqual({ pontosFaltantes: 0, progressoPercentual: 0, metaAtingida: false });
+  });
+
+  test("saldo negativo ou não finito é tratado como 0", () => {
+    const r = calcularProgressoPontos(-50, 100);
+    expect(r.progressoPercentual).toBe(0);
+    expect(r.pontosFaltantes).toBe(100);
+  });
+});
+
+describe("ordenarExtratoPontosDesc — mais recente primeiro, sem mutar a lista original", () => {
+  function mov(id: string, createdAt: string): MovimentoPontos {
+    return { movimentoId: id, clienteId: "cli_x", tipo: "confirmado", pontos: 1, motivo: "x", createdAt };
+  }
+
+  test("ordena do mais recente para o mais antigo", () => {
+    const extrato = [
+      mov("a", "2026-01-01T00:00:00.000Z"),
+      mov("b", "2026-03-01T00:00:00.000Z"),
+      mov("c", "2026-02-01T00:00:00.000Z"),
+    ];
+    const ordenado = ordenarExtratoPontosDesc(extrato);
+    expect(ordenado.map((m) => m.movimentoId)).toEqual(["b", "c", "a"]);
+  });
+
+  test("não muta o array original", () => {
+    const extrato = [mov("a", "2026-01-01T00:00:00.000Z"), mov("b", "2026-03-01T00:00:00.000Z")];
+    const original = [...extrato];
+    ordenarExtratoPontosDesc(extrato);
+    expect(extrato).toEqual(original);
+  });
+
+  test("array vazio ou inválido retorna array vazio", () => {
+    expect(ordenarExtratoPontosDesc([])).toEqual([]);
+    expect(ordenarExtratoPontosDesc(undefined as unknown as MovimentoPontos[])).toEqual([]);
   });
 });

@@ -9,7 +9,7 @@ import { PROMOS_KEY, catalogoDoMenu, dentroDaJanela, precoFinalPromocao, promoca
 import { validarTokenCardapio } from "@/lib/cardapioToken";
 import { temDinheiroNoPagamento, valorDinheiroEsperado } from "@/lib/bot";
 import { verificarTokenCliente, CLIENTE_COOKIE } from "@/lib/clienteAuth";
-import { contarPizzas } from "@/lib/fidelidade";
+import { contarPizzas, calcularPontosElegiveisPedido, registrarMovimentoPontosIdempotente, construirEventoIdPontos, derivarClienteIdPorTelefone } from "@/lib/fidelidade";
 
 export const maxDuration = 20;
 
@@ -276,6 +276,27 @@ export async function POST(req: NextRequest) {
     };
 
     await redis.set("pedidos", [...pedidos, novoPedido]);
+
+    // Pontos previstos (modelo novo): a identidade canonica e o telefone do
+    // pedido, nao a existencia de perfil ativo. A estimativa nunca afeta o
+    // saldo confirmado e falhas aqui nao impedem a criacao do pedido.
+    const clienteIdPontos = derivarClienteIdPorTelefone(telefonePedido);
+    if (clienteIdPontos) {
+      try {
+        const pontosElegiveis = calcularPontosElegiveisPedido({ total, taxaEntrega: taxa });
+        if (pontosElegiveis > 0) {
+          await registrarMovimentoPontosIdempotente(clienteIdPontos, {
+            eventoId: construirEventoIdPontos(pedidoId, "previsto"),
+            pedidoId,
+            tipo: "previsto",
+            pontos: pontosElegiveis,
+            motivo: `Pontos previstos do pedido ${pedidoId}`,
+          });
+        }
+      } catch (err) {
+        console.error("[ChefeBot] Erro ao registrar pontos previstos (ignorado):", err);
+      }
+    }
 
     // Dispara notificação push para a Kellyne (mesmo canal do WhatsApp)
     try {
