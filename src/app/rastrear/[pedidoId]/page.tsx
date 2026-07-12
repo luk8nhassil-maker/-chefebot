@@ -3,6 +3,8 @@
 import { useState, useEffect, useRef } from 'react'
 import dynamic from 'next/dynamic'
 import type { LocalizacaoEntregador } from '@/types/entregador'
+import ClientBottomNav from '@/components/ClientBottomNav'
+import { CF_OPEN_CART_KEY } from '@/lib/pedidoAtivoCliente'
 
 const MapaEntregador = dynamic(() => import('@/components/MapaEntregador'), { ssr: false })
 
@@ -90,6 +92,11 @@ export default function RastrearPage({ params }: PageProps) {
     params.then(p => setPedidoId(p.pedidoId))
   }, [params])
 
+  function abrirSacola() {
+    try { sessionStorage.setItem(CF_OPEN_CART_KEY, '1') } catch {}
+    window.location.href = '/pedido'
+  }
+
   useEffect(() => {
     if (!pedidoId) return
 
@@ -153,7 +160,7 @@ export default function RastrearPage({ params }: PageProps) {
             <div style={{ fontSize: '11px', color: 'var(--foreground-secondary)' }}>#{pedidoId}</div>
           </div>
         </div>
-        <a href="/cardapio" style={{ fontSize: '13px', color: 'var(--foreground-secondary)', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '4px' }}>
+        <a href="/pedido" style={{ fontSize: '13px', color: 'var(--foreground-secondary)', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '4px' }}>
           ← Cardápio
         </a>
       </div>
@@ -166,7 +173,7 @@ export default function RastrearPage({ params }: PageProps) {
       )}
 
       {/* Card de informações */}
-      <div style={{ background: 'var(--surface)', borderTop: mostrarMapa ? '1px solid var(--surface-secondary)' : 'none', padding: '28px 20px 20px', borderRadius: mostrarMapa ? '20px 20px 0 0' : 0, marginTop: mostrarMapa ? '-20px' : 0, position: 'relative', zIndex: 10, flex: mostrarMapa ? 'none' : 1 }}>
+      <div style={{ background: 'var(--surface)', borderTop: mostrarMapa ? '1px solid var(--surface-secondary)' : 'none', padding: '28px 20px calc(env(safe-area-inset-bottom) + 96px)', borderRadius: mostrarMapa ? '20px 20px 0 0' : 0, marginTop: mostrarMapa ? '-20px' : 0, position: 'relative', zIndex: 10, flex: mostrarMapa ? 'none' : 1 }}>
 
         {/* Status principal */}
         <div style={{ textAlign: 'center', marginBottom: '24px' }}>
@@ -215,7 +222,7 @@ export default function RastrearPage({ params }: PageProps) {
 
         {/* Botão novo pedido */}
         <a
-          href="/cardapio"
+          href="/pedido"
           style={{ display: 'block', width: '100%', padding: '14px', borderRadius: '12px', background: 'var(--primary)', color: 'var(--primary-foreground)', fontSize: '15px', fontWeight: 700, textDecoration: 'none', textAlign: 'center', boxSizing: 'border-box', marginBottom: '10px' }}
         >
           Fazer novo pedido
@@ -232,6 +239,8 @@ export default function RastrearPage({ params }: PageProps) {
           Falar com a Pizzaria
         </a>
       </div>
+
+      <ClientBottomNav active="pedido" onSacolaClick={abrirSacola} pedidoHref={pedidoId ? `/rastrear/${pedidoId}` : null} />
     </div>
   )
 }

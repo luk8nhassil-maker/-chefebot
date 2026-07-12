@@ -1,12 +1,14 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { Pizza, Sandwich, Soup, CupSoda, GlassWater, Home, ShoppingCart, Receipt, User, Zap, Banknote, CreditCard, Shuffle, Wallet, Bike, Store, UtensilsCrossed, Sun, Moon } from "lucide-react";
+import { Pizza, Sandwich, Soup, CupSoda, GlassWater, Zap, Banknote, CreditCard, Shuffle, Wallet, Bike, Store, UtensilsCrossed, Sun, Moon } from "lucide-react";
 import PanelShell from "@/components/PanelShell";
 import { useLiveMenu, cartItemEsgotado } from "./liveMenu";
 import { CARDAPIO_ILLUSTRATIONS, CardapioIllustration } from "@/lib/cardapioVisuals";
 import { montarLinkWhatsAppComprovante } from "@/lib/pixCliente";
 import { useTheme } from "@/components/ThemeToggle";
+import ClientBottomNav from "@/components/ClientBottomNav";
+import { tabAtivaCardapio, consumirFlagAbrirSacola } from "@/lib/pedidoAtivoCliente";
 
 // Ícones de categoria da home (menu/navegação) — lucide-react, sem emoji.
 // Mantidos separados de ICONS (que continua usando emoji para os itens
@@ -935,6 +937,9 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
         }
       }
     } catch {}
+    // Veio da aba "Sacola" do menu inferior em /cliente ou /rastrear — abre a
+    // sacola aqui, preservando o que já foi restaurado do rascunho acima.
+    if (consumirFlagAbrirSacola(sessionStorage)) setScreen("sc-cart");
     setHydrated(true);
   }, []);
 
@@ -2009,36 +2014,13 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
       )}
       {cartCount > 0 && !showStrongCartCta && !showBottomNav && screen !== "sc-done" && screen !== "sc-cart" && screen !== "sc-delivery" && screen !== "sc-pay" && (<div className="cartbar show"><div className="cartbar-inner"><div className="cartbar-info"><div className="cartbar-count">Sacola</div><div className="cartbar-total">{cartCount} {cartCount === 1 ? "item" : "itens"} · {money(finalTotal)}</div></div><button className="cartbar-link" onClick={() => go("sc-cart")}>Editar</button></div></div>)}
       {showBottomNav && (
-        <nav className="bottom-nav" aria-label="Navegação principal">
-          <div className="bottom-nav-inner">
-            <button type="button" className={`bnav-item ${screen === "sc-start" ? "active" : ""}`} onClick={() => go("sc-start")}>
-              <span className="bnav-icon"><Home size={20} aria-hidden="true" /></span>
-              <span className="bnav-label">Início</span>
-            </button>
-            <button type="button" className={`bnav-item ${screen === "sc-cart" ? "active" : ""}`} onClick={() => go("sc-cart")}>
-              <span className="bnav-icon-wrap">
-                <span className="bnav-icon"><ShoppingCart size={20} aria-hidden="true" /></span>
-                {cartCount > 0 && <span className="bnav-badge">{cartCount > 99 ? "99+" : cartCount}</span>}
-              </span>
-              <span className="bnav-label">Sacola</span>
-            </button>
-            {pedidoAtivoId ? (
-              <a className={`bnav-item ${screen === "sc-done" ? "active" : ""}`} href={`/rastrear/${pedidoAtivoId}`}>
-                <span className="bnav-icon"><Receipt size={20} aria-hidden="true" /></span>
-                <span className="bnav-label">Pedido</span>
-              </a>
-            ) : (
-              <span className="bnav-item disabled" aria-disabled="true">
-                <span className="bnav-icon"><Receipt size={20} aria-hidden="true" /></span>
-                <span className="bnav-label">Pedido</span>
-              </span>
-            )}
-            <a className="bnav-item" href="/cliente">
-              <span className="bnav-icon"><User size={20} aria-hidden="true" /></span>
-              <span className="bnav-label">Perfil</span>
-            </a>
-          </div>
-        </nav>
+        <ClientBottomNav
+          active={tabAtivaCardapio(screen)}
+          cartCount={cartCount}
+          onInicioClick={() => go("sc-start")}
+          onSacolaClick={() => go("sc-cart")}
+          pedidoHref={pedidoAtivoId ? `/rastrear/${pedidoAtivoId}` : null}
+        />
       )}
       {paymentModal && (
         <div className="payment-modal-backdrop" role="presentation" onClick={() => setPaymentModal(null)}>
@@ -2457,17 +2439,6 @@ main{width:100%;padding:6px 20px 20px}
 .cartbar-count{font-size:12.5px;color:var(--text-sub);font-weight:500}
 .cartbar-total{font-family:var(--font-ui);font-weight:700;font-size:15px;line-height:1.2;letter-spacing:0}
 .cartbar-link{border:1px solid var(--line-strong);background:transparent;color:var(--text-sub);border-radius:999px;padding:9px 13px;font-size:12.5px;font-weight:700}
-.bottom-nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:540px;z-index:54;background:var(--surface);border-top:1px solid var(--line);box-shadow:0 -6px 20px rgba(0,0,0,.16);padding:6px 8px calc(env(safe-area-inset-bottom) + 6px)}
-.bottom-nav-inner{display:flex;align-items:stretch;justify-content:space-around;gap:4px;min-height:46px}
-.bnav-item{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:4px 4px;border:none;background:none;color:var(--text-sub);font-family:var(--font-ui);font-size:11px;font-weight:600;border-radius:12px;cursor:pointer;text-decoration:none;transition:color .15s}
-.bnav-item:active{transform:scale(.96)}
-.bnav-icon{font-size:20px;line-height:1;display:inline-flex;align-items:center;justify-content:center}
-.bnav-icon-wrap{position:relative;display:inline-flex}
-.bnav-item.active{color:var(--brand)}
-.bnav-item.active .bnav-label{color:var(--text-primary);font-weight:800}
-.bnav-item.disabled{opacity:.35;cursor:not-allowed}
-.bnav-label{line-height:1.1}
-.bnav-badge{position:absolute;top:-5px;right:-9px;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:var(--brand);color:var(--brand-foreground);font-size:10px;font-weight:800;display:flex;align-items:center;justify-content:center;line-height:1;box-shadow:0 0 0 2px var(--surface)}
 .delivery-cta-bar.stacked{bottom:58px}
 .checkout-summary{margin:14px 0 10px;color:var(--text-sub);font-size:13px;font-weight:700;text-align:center}
 .empty{text-align:center;padding:54px 20px;color:var(--text-sub)}

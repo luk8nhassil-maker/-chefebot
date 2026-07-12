@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react'
 import { Gift, Phone, MessageCircle, LogOut, Receipt, Sparkles, Clock, Pizza } from 'lucide-react'
+import ClientBottomNav from '@/components/ClientBottomNav'
+import { lerPedidoAtivoId, CF_OPEN_CART_KEY } from '@/lib/pedidoAtivoCliente'
 
 type Movimento = {
   id: string
@@ -78,6 +80,18 @@ export default function ClientePage() {
   const [fidelidade, setFidelidade] = useState<Fidelidade | null>(null)
   const [resgatando, setResgatando] = useState(false)
   const [resgateErro, setResgateErro] = useState('')
+  const [pedidoAtivoId, setPedidoAtivoId] = useState<string | null>(null)
+
+  useEffect(() => {
+    try {
+      setPedidoAtivoId(lerPedidoAtivoId(localStorage.getItem('cf_ultimo_pedido')))
+    } catch {}
+  }, [])
+
+  function abrirSacola() {
+    try { sessionStorage.setItem(CF_OPEN_CART_KEY, '1') } catch {}
+    window.location.href = '/pedido'
+  }
 
   async function carregarPerfil() {
     try {
@@ -167,7 +181,7 @@ export default function ClientePage() {
           expiraEm: data.expiraEm,
         }))
       } catch {}
-      window.location.href = '/cardapio'
+      window.location.href = '/pedido'
     } catch {
       setResgateErro('Erro de conexão. Tente novamente.')
       setResgatando(false)
@@ -204,7 +218,7 @@ export default function ClientePage() {
       <div style={{ background: cores.cardBg, borderBottom: `1px solid ${cores.cardBorda}`, padding: '12px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <Pizza size={22} color={cores.navy} />
-          <div style={{ fontSize: 15, fontWeight: 700, color: cores.navy }}>Sua fidelidade</div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: cores.navy }}>Meus pontos</div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           {step === 'perfil' && (
@@ -212,7 +226,6 @@ export default function ClientePage() {
               <LogOut size={16} /> Sair
             </button>
           )}
-          <a href="/cardapio" style={{ fontSize: 13, color: cores.textoSecundario, textDecoration: 'none' }}>← Cardápio</a>
         </div>
       </div>
 
@@ -220,7 +233,7 @@ export default function ClientePage() {
         className="cliente-conteudo"
         style={{
           flex: 1,
-          padding: '28px 20px',
+          padding: '28px 20px calc(env(safe-area-inset-bottom) + 96px)',
           maxWidth: 1180,
           width: '100%',
           margin: '0 auto',
@@ -256,7 +269,7 @@ export default function ClientePage() {
             <button onClick={pedirCodigo} disabled={enviando} style={{ ...botaoPrimario, opacity: enviando ? 0.6 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
               <Phone size={16} /> {enviando ? 'Enviando...' : 'Receber código no WhatsApp'}
             </button>
-            <a href="/cardapio" style={{ textAlign: 'center', fontSize: 13, color: cores.textoSecundario, textDecoration: 'none' }}>
+            <a href="/pedido" style={{ textAlign: 'center', fontSize: 13, color: cores.textoSecundario, textDecoration: 'none' }}>
               Prefiro pedir sem entrar agora
             </a>
           </div>
@@ -303,7 +316,7 @@ export default function ClientePage() {
 
               {!fidelidade.ativo && (
                 <div style={{ background: cores.cardBg, border: `1px solid ${cores.cardBorda}`, borderRadius: 14, padding: 18, textAlign: 'center' }}>
-                  <p style={{ color: cores.textoSecundario, fontSize: 14, margin: 0 }}>A fidelidade ainda não está ativa por aqui. Volte em breve!</p>
+                  <p style={{ color: cores.textoSecundario, fontSize: 14, margin: 0 }}>O programa de pontos ainda não está ativo por aqui. Volte em breve!</p>
                 </div>
               )}
 
@@ -366,7 +379,7 @@ export default function ClientePage() {
                 </>
               )}
 
-              <a href="/cardapio" style={{ ...botaoPrimario, textDecoration: 'none', textAlign: 'center', boxSizing: 'border-box', display: 'block' }}>
+              <a href="/pedido" style={{ ...botaoPrimario, textDecoration: 'none', textAlign: 'center', boxSizing: 'border-box', display: 'block' }}>
                 Continuar comprando
               </a>
             </div>
@@ -416,7 +429,9 @@ export default function ClientePage() {
         )}
       </div>
 
-      <style>{`.cliente-grid { display: flex; flex-direction: column; } @media (min-width: 1024px) { .cliente-grid { display: grid; grid-template-columns: 1.35fr 1fr; gap: 24px; align-items: start; } } @media (min-width: 768px) and (max-width: 1023.98px) { .cliente-conteudo { padding: 32px 32px; } }`}</style>
+      <ClientBottomNav active="pontos" onSacolaClick={abrirSacola} pedidoHref={pedidoAtivoId ? `/rastrear/${pedidoAtivoId}` : null} />
+
+      <style>{`.cliente-grid { display: flex; flex-direction: column; } @media (min-width: 1024px) { .cliente-grid { display: grid; grid-template-columns: 1.35fr 1fr; gap: 24px; align-items: start; } } @media (min-width: 768px) and (max-width: 1023.98px) { .cliente-conteudo { padding: 32px 32px calc(env(safe-area-inset-bottom) + 96px); } }`}</style>
     </div>
   )
 }
