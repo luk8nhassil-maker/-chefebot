@@ -2394,7 +2394,9 @@ const CSS = `
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 body{font-family:var(--font-ui);background:var(--bg);color:var(--text);line-height:1.5;overflow-x:hidden;padding-bottom:112px;transition:background .35s,color .35s;font-size:16px;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
 .wrap{width:min(100%,540px);max-width:540px;margin:0 auto;min-height:100vh;position:relative;font-family:var(--font-ui);padding-top:46px}
-.wrap-start{padding-top:0;background:#0b0807}
+.wrap-start{padding-top:0}
+@media (min-width:768px){.wrap{max-width:640px}}
+@media (min-width:1024px){.wrap{max-width:780px}}
 .wrap h1,.wrap h2,.wrap h3,.wrap button,.wrap input,.wrap select,.wrap textarea{font-family:var(--font-ui)}
 header{width:100%;background:var(--surface);padding:18px 20px;border-bottom:1px solid var(--line);transition:background .35s}
 .head-row{display:flex;align-items:center;justify-content:space-between;gap:12px}
@@ -2463,10 +2465,11 @@ main{width:100%;padding:6px 20px 20px}
 .promo-btn{width:100%;border:0;border-radius:15px;background:#f05a28;color:#fff;padding:15px 16px;font-size:15px;font-weight:800;box-shadow:0 12px 26px rgba(240,90,40,.2)}
 @media (min-width:640px){.promo-card{flex-basis:340px}}
 .home-copy{margin:24px 0 14px}
-.home-copy h2{color:#f7efe7;font-size:22px;font-weight:850;letter-spacing:0;line-height:1.15}
-.home-copy p{color:#9d8f85;font-size:14px;margin-top:6px}
+.home-copy h2{color:var(--text);font-size:22px;font-weight:850;letter-spacing:0;line-height:1.15}
+.home-copy p{color:var(--text-sub);font-size:14px;margin-top:6px}
 .home-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-.home-cat{min-height:118px;text-align:left;background:#15110f;border:1px solid rgba(255,255,255,.08);border-radius:20px;padding:16px;display:flex;flex-direction:column;justify-content:space-between;color:#f4ece5;box-shadow:0 10px 28px rgba(0,0,0,.22)}
+@media (min-width:768px){.home-grid{grid-template-columns:1fr 1fr 1fr}}
+.home-cat{min-height:118px;text-align:left;background:var(--surface);border:1px solid var(--line-strong);border-radius:20px;padding:16px;display:flex;flex-direction:column;justify-content:space-between;color:var(--text);box-shadow:var(--shadow-sm)}
 .home-cat:active{transform:scale(.98);border-color:rgba(240,81,47,.5)}
 .home-cat span{font-size:27px}
 .home-cat strong{font-size:15.5px;font-weight:800;letter-spacing:0}
