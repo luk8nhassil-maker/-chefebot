@@ -12,10 +12,33 @@ function defaultSetImpl(key: string, value: unknown, opts?: { nx?: boolean }) {
   return Promise.resolve("OK");
 }
 
+// Replica os dois scripts Lua reais da fidelidade por pontos, sem interpretar
+// Lua: liberarLockPontosSeDono (1 chave: GET==token -> DEL) e
+// persistirEstadoPontosSeDono (2 chaves: GET(lock)==token -> SET(estado)).
+function defaultEvalImpl(_script: string, keys: string[], args: string[]) {
+  if (keys.length === 1) {
+    const [key] = keys;
+    const [token] = args;
+    if (redisStore.get(key) === token) {
+      redisStore.delete(key);
+      return Promise.resolve(1);
+    }
+    return Promise.resolve(0);
+  }
+  const [lockKey, estadoKey] = keys;
+  const [token, estadoJson] = args;
+  if (redisStore.get(lockKey) === token) {
+    redisStore.set(estadoKey, JSON.parse(estadoJson));
+    return Promise.resolve(1);
+  }
+  return Promise.resolve(0);
+}
+
 vi.mock("@/lib/redis", () => ({
   redis: {
     get: vi.fn(defaultGetImpl),
     set: vi.fn(defaultSetImpl),
+    eval: vi.fn(defaultEvalImpl),
   },
 }));
 
@@ -34,7 +57,7 @@ vi.mock("@/lib/clienteAuth", () => ({
 vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({}) })));
 
 import { POST } from "./route";
-import { obterExtratoPontos, obterSaldoPontos } from "@/lib/fidelidade";
+import { derivarClienteIdPorTelefone, obterExtratoPontos, obterSaldoPontos } from "@/lib/fidelidade";
 import { PROMOS_KEY } from "@/lib/promocoes";
 
 beforeEach(async () => {
@@ -43,6 +66,7 @@ beforeEach(async () => {
   const redisLib = await import("@/lib/redis");
   vi.mocked(redisLib.redis.get).mockImplementation(defaultGetImpl);
   vi.mocked(redisLib.redis.set).mockImplementation(defaultSetImpl);
+  vi.mocked(redisLib.redis.eval).mockImplementation(defaultEvalImpl);
 });
 
 const itemPizzaRetirada = { kind: "pizza" as const, name: "Pizza G", detail: "Calabresa", price: 50, qty: 1 };
@@ -65,36 +89,37 @@ function pedidoRequest(opts: { clienteToken?: string; itens?: unknown[]; tipoEnt
 }
 
 describe("POST /api/pedido-app — pontos previstos (modelo novo)", () => {
-  test("pedido com clienteId cria movimento 'previsto' com pontos = floor(total - taxa)", async () => {
+  test("pedido com clienteId cria movimento 'previsto' no cliente canonico do telefone", async () => {
     const res = await POST(pedidoRequest({ clienteToken: "token-cliente-logado" }));
     const data = await res.json();
     expect(res.status).toBe(200);
     expect(data.total).toBe(50);
 
-    const extrato = await obterExtratoPontos("cli_pontos");
+    const extrato = await obterExtratoPontos(derivarClienteIdPorTelefone("86999998888")!);
     expect(extrato).toHaveLength(1);
     expect(extrato[0].tipo).toBe("previsto");
     expect(extrato[0].pontos).toBe(50);
 
     // previsto nunca entra no saldo confirmado
-    const saldo = await obterSaldoPontos("cli_pontos");
+    const saldo = await obterSaldoPontos(derivarClienteIdPorTelefone("86999998888")!);
     expect(saldo.disponivel).toBe(0);
   });
 
-  test("pedido SEM clienteId (anonimo) nao cria nenhum movimento de pontos", async () => {
+  test("pedido SEM clienteId (anonimo) cria previsto pelo telefone canonico", async () => {
     const res = await POST(pedidoRequest());
     expect(res.status).toBe(200);
 
-    // sem clienteId nao ha chave de extrato para nenhum cliente vinculado a este pedido
-    const extratoAnonimo = await obterExtratoPontos("cli_pontos");
-    expect(extratoAnonimo).toHaveLength(0);
+    const extratoAnonimo = await obterExtratoPontos(derivarClienteIdPorTelefone("86999998888")!);
+    expect(extratoAnonimo).toHaveLength(1);
+    expect(extratoAnonimo[0].tipo).toBe("previsto");
   });
 
-  test("pedidos manuais/WhatsApp sem clienteId (cookie ausente ou invalido) permanecem fora do novo credito", async () => {
+  test("cookie invalido nao impede previsao quando o telefone do pedido e valido", async () => {
     const res = await POST(pedidoRequest({ clienteToken: "token-adulterado-ou-expirado" }));
     expect(res.status).toBe(200);
-    const extrato = await obterExtratoPontos("cli_pontos");
-    expect(extrato).toHaveLength(0);
+    const extrato = await obterExtratoPontos(derivarClienteIdPorTelefone("86999998888")!);
+    expect(extrato).toHaveLength(1);
+    expect(extrato[0].tipo).toBe("previsto");
   });
 
   test("taxa de entrega nunca gera pontos: total igual a taxa reduz pontos elegiveis a 0 e nao registra movimento", async () => {
@@ -111,7 +136,7 @@ describe("POST /api/pedido-app — pontos previstos (modelo novo)", () => {
     const data = await res.json();
     expect(data.total).toBe(10);
 
-    const extrato = await obterExtratoPontos("cli_pontos");
+    const extrato = await obterExtratoPontos(derivarClienteIdPorTelefone("86999998888")!);
     expect(extrato).toHaveLength(1);
     expect(extrato[0].pontos).toBe(3); // 10 - 7 (taxa), nao os 10 inteiros
   });
@@ -149,7 +174,7 @@ describe("POST /api/pedido-app — pontos previstos (modelo novo)", () => {
     expect(res.status).toBe(200);
     expect(data.total).toBe(49.9); // preço normal da pizza G seria 50 — desconto aplicado
 
-    const extrato = await obterExtratoPontos("cli_pontos");
+    const extrato = await obterExtratoPontos(derivarClienteIdPorTelefone("86999998888")!);
     expect(extrato).toHaveLength(1);
     expect(extrato[0].pontos).toBe(49); // floor(49.9), nunca 50 nem 49.9 fracionado
   });
@@ -184,7 +209,7 @@ describe("modelo antigo (pizzas) continua funcionando junto com o novo (pontos)"
     expect(pedidosSalvos[0].pizzasCount).toBe(2);
     expect(pedidosSalvos[0].clienteId).toBe("cli_pontos");
 
-    const extratoPontos = await obterExtratoPontos("cli_pontos");
+    const extratoPontos = await obterExtratoPontos(derivarClienteIdPorTelefone("86999998888")!);
     expect(extratoPontos).toHaveLength(1);
     expect(extratoPontos[0].tipo).toBe("previsto");
   });

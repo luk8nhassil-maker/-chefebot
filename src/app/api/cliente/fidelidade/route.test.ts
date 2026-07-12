@@ -14,13 +14,17 @@ vi.mock("@/lib/clienteAuth", () => ({
   }),
 }));
 
-vi.mock("@/lib/clientes", () => ({
-  buscarClientePorId: vi.fn(async (clienteId: string) => {
-    if (clienteId === "cli_a") return { clienteId: "cli_a", telefone: "11900000001", nome: "Cliente A", createdAt: "", updatedAt: "", lastLoginAt: "" };
-    if (clienteId === "cli_b") return { clienteId: "cli_b", telefone: "11900000002", nome: "Cliente B", createdAt: "", updatedAt: "", lastLoginAt: "" };
-    return null;
-  }),
-}));
+vi.mock("@/lib/clientes", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/clientes")>("@/lib/clientes");
+  return {
+    ...actual,
+    buscarClientePorId: vi.fn(async (clienteId: string) => {
+      if (clienteId === "cli_a") return { clienteId: "cli_a", telefone: "cli_a", nome: "Cliente A", createdAt: "", updatedAt: "", lastLoginAt: "" };
+      if (clienteId === "cli_b") return { clienteId: "cli_b", telefone: "cli_b", nome: "Cliente B", createdAt: "", updatedAt: "", lastLoginAt: "" };
+      return null;
+    }),
+  };
+});
 
 vi.mock("@/lib/fidelidade", async () => {
   const actual = await vi.importActual<typeof import("@/lib/fidelidade")>("@/lib/fidelidade");
@@ -267,6 +271,19 @@ describe("GET /api/cliente/fidelidade — compatibilidade com modelo antigo", ()
     const body = await res.json();
     expect(body.legado.pizzasAcumuladas).toBe(7);
     expect(body.saldoPontos).toBe(45); // nao inclui as 7 pizzas
+  });
+
+  test("API retorna movimentos legados de pontos junto com movimentos novos", async () => {
+    extratosPorCliente.set("cli_a", [
+      mov({ movimentoId: "legado", tipo: "confirmado", pontos: 45, pedidoId: "p_legado", createdAt: "2026-07-11T20:00:00.000Z" }),
+      mov({ movimentoId: "novo", tipo: "confirmado", pontos: 20, pedidoId: "p_novo", createdAt: "2026-07-12T20:00:00.000Z" }),
+    ]);
+
+    const res = await GET(requestComCookie("token-cliente-a"));
+    const body = await res.json();
+
+    expect(body.saldoPontos).toBe(65);
+    expect(body.extrato.map((m: { id: string }) => m.id)).toEqual(["novo", "legado"]);
   });
 });
 

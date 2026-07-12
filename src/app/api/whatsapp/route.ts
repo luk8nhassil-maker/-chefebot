@@ -23,6 +23,7 @@ import { avaliarHorarioComprovantePix, extrairDataHoraComprovantePix, FUSO_OPERA
 import { avaliarEvidenciaPix, type ResultadoEvidenciaPix } from "@/lib/pixComprovanteAvaliacao";
 import { encontrarPedidoPixPendentePorTelefone } from "@/lib/pixPedidoMatching";
 import { telefonesCorrespondem } from "@/lib/telefone";
+import { creditarPontosPedidoEntregue } from "@/lib/fidelidade";
 import type { BotStep } from "@/lib/bot";
 
 export const maxDuration = 30;
@@ -51,6 +52,8 @@ type Pedido = {
   horarioInicio?: string;
   pagamento?: string;
   troco?: string;
+  clienteId?: string;
+  taxaEntrega?: number;
 };
 
 type ConfigPizzaria = {
@@ -245,6 +248,11 @@ async function salvarCancelamentoSolicitado(_phone: string, _session: BotSession
   await redis.set("pedidos", pedidos);
 }
 
+// NUNCA credita pontos de fidelidade aqui: "entregue" é reaproveitado só como
+// marcador de "conversa resolvida" para um pedido que ficou parado em "novo"
+// (nunca passou por preparo/entrega de verdade). Ver PR de ajuste da
+// estrategia oficial de fidelidade — creditar aqui geraria pontos para
+// pedidos que talvez nunca tenham sido realmente entregues.
 async function fecharEscalonamento(phone: string) {
   const pedidos = (await redis.get<Pedido[]>("pedidos")) || [];
   const atualizados = pedidos.map(p =>
@@ -996,6 +1004,23 @@ export async function POST(req: NextRequest) {
         if (index !== -1 && pedidos[index].status === 'saiu_entrega') {
           pedidos[index] = { ...pedidos[index], status: 'entregue' }
           await redis.set('pedidos', pedidos)
+
+          // Fidelidade por pontos: idempotente por pedidoId, isolada em
+          // try/catch proprio — falha aqui nunca pode impedir a confirmacao
+          // de entrega, que ja foi salva acima.
+          try {
+            await creditarPontosPedidoEntregue({
+              id: pedidos[index].id,
+              status: 'entregue',
+              telefone: pedidos[index].telefone,
+              clienteId: pedidos[index].clienteId,
+              total: pedidos[index].total,
+              taxaEntrega: pedidos[index].taxaEntrega,
+            })
+          } catch (err) {
+            console.error('[ChefeBot] Erro ao creditar pontos de fidelidade (ignorado):', err)
+          }
+
           await redis.del(`entregador_aguardando:${phone}`)
           const pedido = pedidos[index]
           const firstName = pedido.cliente.split(' ')[0]

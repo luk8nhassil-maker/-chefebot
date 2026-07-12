@@ -10,6 +10,7 @@ import {
   calcularMetaPontos,
   calcularProgressoPontos,
   ordenarExtratoPontosDesc,
+  derivarClienteIdPorTelefone,
 } from "@/lib/fidelidade";
 
 // GET /api/cliente/fidelidade — saldo, progresso e extrato da fidelidade por
@@ -41,9 +42,10 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
   const limite = resolverLimite(searchParams);
+  const clienteIdPontos = derivarClienteIdPorTelefone(cliente.telefone) ?? cliente.clienteId;
 
   const [extratoCompleto, config, pizzasAcumuladas] = await Promise.all([
-    obterExtratoPontos(cliente.clienteId),
+    obterExtratoPontos(clienteIdPontos),
     obterConfigFidelidadePontos(),
     obterSaldoAntigoPizzas(cliente.clienteId).catch(() => 0),
   ]);

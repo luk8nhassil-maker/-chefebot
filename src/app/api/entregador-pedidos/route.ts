@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { Redis } from '@upstash/redis'
 import type { PedidoEntregador } from '@/types/entregador'
+import { creditarPontosPedidoEntregue } from '@/lib/fidelidade'
 
 const redis = new Redis({
   url: process.env.KV_REST_API_URL!,
@@ -37,12 +38,28 @@ export async function POST(req: NextRequest) {
     pedidos[index] = { ...pedidos[index], status: 'entregue' }
 
     // Atualiza o pedido principal
-    type PedidoMain = { id: string; status: string }
+    type PedidoMain = { id: string; status: string; telefone?: string; total?: number; taxaEntrega?: number; clienteId?: string }
     const todosPedidos = await redis.get<PedidoMain[]>('pedidos') || []
     const pi = todosPedidos.findIndex(p => p.id === pedidoId)
     if (pi !== -1) {
       todosPedidos[pi] = { ...todosPedidos[pi], status: 'entregue' }
       await redis.set('pedidos', todosPedidos)
+
+      // Fidelidade por pontos: idempotente por pedidoId, isolada em
+      // try/catch proprio — falha aqui nunca pode impedir a confirmacao de
+      // entrega pelo entregador, que ja foi salva acima.
+      try {
+        await creditarPontosPedidoEntregue({
+          id: todosPedidos[pi].id,
+          status: 'entregue',
+          telefone: todosPedidos[pi].telefone,
+          clienteId: todosPedidos[pi].clienteId,
+          total: todosPedidos[pi].total ?? 0,
+          taxaEntrega: todosPedidos[pi].taxaEntrega,
+        })
+      } catch (err) {
+        console.error('[ChefeBot] Erro ao creditar pontos de fidelidade (ignorado):', err)
+      }
     }
   } else {
     return NextResponse.json({ error: 'acao inválida' }, { status: 400 })

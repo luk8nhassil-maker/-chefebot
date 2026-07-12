@@ -14,6 +14,27 @@ vi.mock("@/lib/redis", () => ({
       store.delete(key);
       return 1;
     }),
+    // Replica a semântica dos dois scripts Lua reais sem interpretar Lua:
+    // - liberarLockPontosSeDono (1 chave): GET == token -> DEL
+    // - persistirEstadoPontosSeDono (2 chaves): GET(lock) == token -> SET(estado)
+    eval: vi.fn(async (_script: string, keys: string[], args: string[]) => {
+      if (keys.length === 1) {
+        const [key] = keys;
+        const [token] = args;
+        if (store.get(key) === token) {
+          store.delete(key);
+          return 1;
+        }
+        return 0;
+      }
+      const [lockKey, estadoKey] = keys;
+      const [token, estadoJson] = args;
+      if (store.get(lockKey) === token) {
+        store.set(estadoKey, JSON.parse(estadoJson));
+        return 1;
+      }
+      return 0;
+    }),
   },
 }));
 
@@ -31,6 +52,7 @@ import {
   obterSaldoPontos,
   registrarMovimentoPontosIdempotente,
   construirEventoIdPontos,
+  creditarPontosPedidoEntregue,
   obterSaldoAntigoPizzas,
   CONFIG_FIDELIDADE_PONTOS_PADRAO,
   type MovimentoPontos,
@@ -314,6 +336,58 @@ describe("registrarMovimentoPontosIdempotente — impede crédito/débito duplic
     expect(estornoRepetido).toBeNull();
     expect((await obterExtratoPontos(clienteId))).toHaveLength(2);
     expect((await obterSaldoPontos(clienteId)).disponivel).toBe(0);
+  });
+});
+
+describe("compatibilidade com extrato legado de pontos do PR #172", () => {
+  function legado(overrides: Partial<MovimentoPontos>): MovimentoPontos {
+    return {
+      movimentoId: "legado_1",
+      clienteId: "cli_86999990100",
+      pedidoId: "ped_legado_1",
+      tipo: "confirmado",
+      pontos: 45,
+      motivo: "Pedido legado entregue",
+      createdAt: "2026-07-11T20:00:00.000Z",
+      eventoId: "confirmado:ped_legado_1",
+      ...overrides,
+    };
+  }
+
+  test("extrato legado do PR #172 continua visivel e mantendo o mesmo saldo", async () => {
+    store.set("fidelidade:pontos:extrato:cli_86999990100", [legado({})]);
+
+    const extrato = await obterExtratoPontos("cli_86999990100");
+    expect(extrato).toHaveLength(1);
+    expect(extrato[0].pedidoId).toBe("ped_legado_1");
+    expect((await obterSaldoPontos("cli_86999990100")).disponivel).toBe(45);
+  });
+
+  test("primeiro credito novo migra o legado para o estado combinado sem perda", async () => {
+    await salvarConfigFidelidadePontos({ ativo: true, metaPontos: 720, descricaoRecompensa: "1 Pizza Familia" });
+    store.set("fidelidade:pontos:extrato:cli_86999990100", [legado({})]);
+
+    const saldoAntes = (await obterSaldoPontos("cli_86999990100")).disponivel;
+    await creditarPontosPedidoEntregue({ id: "ped_novo_migracao", status: "entregue", telefone: "86999990100", total: 20 });
+
+    const estado = store.get("fidelidade:pontos:estado:cli_86999990100") as { extrato: MovimentoPontos[] };
+    expect(estado.extrato.map((m) => m.pedidoId)).toEqual(["ped_legado_1", "ped_novo_migracao"]);
+    expect(store.has("fidelidade:pontos:extrato:cli_86999990100")).toBe(true);
+    expect(saldoAntes).toBe(45);
+    expect((await obterSaldoPontos("cli_86999990100")).disponivel).toBe(65);
+  });
+
+  test("migracao repetida nao duplica movimentos legados", async () => {
+    await salvarConfigFidelidadePontos({ ativo: true, metaPontos: 720, descricaoRecompensa: "1 Pizza Familia" });
+    store.set("fidelidade:pontos:extrato:cli_86999990100", [legado({})]);
+
+    await creditarPontosPedidoEntregue({ id: "ped_novo_migracao", status: "entregue", telefone: "86999990100", total: 20 });
+    await creditarPontosPedidoEntregue({ id: "ped_novo_migracao", status: "entregue", telefone: "86999990100", total: 20 });
+
+    const extrato = await obterExtratoPontos("cli_86999990100");
+    expect(extrato).toHaveLength(2);
+    expect(extrato.filter((m) => m.pedidoId === "ped_legado_1")).toHaveLength(1);
+    expect(extrato.filter((m) => m.pedidoId === "ped_novo_migracao")).toHaveLength(1);
   });
 });
 

@@ -6,10 +6,12 @@ import { confirmarPixMetadata, criarPixMetadata, sanitizarPedidoPixResposta, typ
 import type { PedidoEntregador } from '@/types/entregador'
 import {
   creditarFidelidadePedido,
+  creditarPontosPedidoEntregue,
   calcularPontosElegiveisPedido,
   registrarMovimentoPontosIdempotente,
   construirEventoIdPontos,
   obterExtratoPontos,
+  derivarClienteIdPorTelefone,
 } from '@/lib/fidelidade'
 
 const APP_BASE_URL = 'https://chefebot-pjif.vercel.app'
@@ -157,12 +159,12 @@ export async function PATCH(req: NextRequest) {
   }
   await redis.set('pedidos', pedidos)
 
-  if (silent) return NextResponse.json(sanitizarPedidoPixResposta(pedidos[index]))
-
-  await notificarCliente(pedidos[index].telefone, status, pedidos[index].cliente)
+  if (!silent) {
+    await notificarCliente(pedidos[index].telefone, status, pedidos[index].cliente)
+  }
 
   // Notifica entregador no WhatsApp quando pedido sai para entrega + salva no Redis + envia link de rastreamento ao cliente
-  if (status === 'saiu_entrega' && entregador?.telefone) {
+  if (!silent && status === 'saiu_entrega' && entregador?.telefone) {
     const pedido = pedidos[index]
     const phone = entregador.telefone.replace(/\D/g, '')
     const phoneFormatado = phone.startsWith('55') ? phone : '55' + phone
@@ -213,6 +215,7 @@ export async function PATCH(req: NextRequest) {
   }
 
   if (status === 'entregue') {
+    if (!silent) {
     const phone = sanitizePhone(pedidos[index].telefone)
     const chaveAvaliacao = `avaliacao_enviada:${id}`
     const jaEnviou = await redis.get(chaveAvaliacao)
@@ -237,6 +240,8 @@ export async function PATCH(req: NextRequest) {
       }
     }
 
+    }
+
     // Credito de fidelidade: so conta quando o pedido chega a 'entregue'
     // (finalizado com sucesso). Idempotente por pedidoId — nunca duplica.
     // Isolado em try/catch proprio: falha aqui jamais pode afetar a resposta
@@ -251,48 +256,31 @@ export async function PATCH(req: NextRequest) {
       console.error('[ChefeBot] Erro ao creditar fidelidade (ignorado):', err)
     }
 
-    // Pontos confirmados (modelo novo) — so quando o pedido tem clienteId.
-    // Mesmo valor elegivel do "previsto" (recalculado do total/taxa salvos no
-    // pedido). Idempotente por eventoId — repetir 'entregue' nunca duplica.
-    // Isolado em try/catch proprio, mesma garantia do credito antigo acima.
+    // Fidelidade por pontos (novo modelo, R$1 = 1 ponto): roda em paralelo ao
+    // credito antigo acima, sem substitui-lo. Mesma protecao — isolado em
+    // try/catch proprio, idempotente por pedidoId, nunca impede o pedido de
+    // ser marcado como entregue nem a resposta do PATCH.
     try {
-      const clienteIdPontos = pedidos[index].clienteId
-      if (clienteIdPontos) {
-        const pontosElegiveis = calcularPontosElegiveisPedido({
-          total: pedidos[index].total,
-          taxaEntrega: pedidos[index].taxaEntrega,
-        })
-        if (pontosElegiveis > 0) {
-          await registrarMovimentoPontosIdempotente(clienteIdPontos, {
-            eventoId: construirEventoIdPontos(id, 'confirmado'),
-            pedidoId: id,
-            tipo: 'confirmado',
-            pontos: pontosElegiveis,
-            motivo: `Pedido ${id} entregue`,
-          })
-        }
-      }
+      await creditarPontosPedidoEntregue({
+        id,
+        status: 'entregue',
+        telefone: pedidos[index].telefone,
+        clienteId: pedidos[index].clienteId,
+        total: pedidos[index].total,
+        taxaEntrega: pedidos[index].taxaEntrega,
+      })
     } catch (err) {
-      console.error('[ChefeBot] Erro ao registrar pontos confirmados (ignorado):', err)
+      console.error('[ChefeBot] Erro ao creditar pontos de fidelidade (ignorado):', err)
     }
   }
 
-  // Cancelamento (modelo novo de pontos) — so quando o pedido tem clienteId.
-  // Duas situacoes distintas:
-  //  - pedido ainda nao tinha chegado a "entregue": o "previsto" nunca virou
-  //    saldo real, entao so registramos "cancelado" para transparencia (nunca
-  //    mexe no saldo confirmado).
-  //  - pedido JA estava "entregue" (ja gerou "confirmado") e foi corrigido
-  //    para cancelado depois do fato: precisa de um "estornado" que subtrai
-  //    exatamente o que tinha sido confirmado, sem apagar o credito original.
-  // Isolado em try/catch proprio — nunca pode afetar a resposta do PATCH.
-  // So processa em transicao REAL para cancelado: repetir 'cancelado' quando
-  // ja estava cancelado nao deve reavaliar statusAnterior (ja teria virado
-  // 'cancelado' na primeira chamada), o que geraria um eventoId diferente e
-  // burlaria a idempotencia por eventoId.
+  // Cancelamento (modelo novo de pontos): registra a resolucao do previsto ou
+  // o estorno de um credito confirmado, sempre no cliente canonico derivado
+  // do telefone. Repetir "cancelado" nao cria novo evento; estorno so existe
+  // se houver confirmado original no extrato.
   if (status === 'cancelado' && statusAnterior !== 'cancelado') {
     try {
-      const clienteIdPontos = pedidos[index].clienteId
+      const clienteIdPontos = derivarClienteIdPorTelefone(pedidos[index].telefone)
       if (clienteIdPontos) {
         const pontosElegiveis = calcularPontosElegiveisPedido({
           total: pedidos[index].total,
