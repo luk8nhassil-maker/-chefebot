@@ -2433,9 +2433,8 @@ main{width:100%;padding:6px 20px 20px}
 .payment-modal-actions .btn{padding:13px 10px}
 @keyframes sheet{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
 .flavor-modal-backdrop{position:fixed;inset:0;z-index:85;background:rgba(0,0,0,.6);display:flex;align-items:flex-end;justify-content:center;padding:16px}
-.flavor-modal{max-height:82vh;display:flex;flex-direction:column;padding-bottom:14px;background:#ffffff;overflow:hidden}
-.flavor-modal-body{overflow-y:auto;flex:1 1 auto;padding-right:2px;margin:2px 0 4px;scrollbar-width:thin;background:#ffffff}
-:root[data-theme="dark"] .flavor-modal,:root[data-theme="dark"] .flavor-modal-body{background:#232a33}
+.flavor-modal{max-height:82vh;display:flex;flex-direction:column;padding-bottom:14px;background:var(--surface);overflow:hidden}
+.flavor-modal-body{overflow-y:auto;flex:1 1 auto;padding-right:2px;margin:2px 0 4px;scrollbar-width:thin;background:var(--surface)}
 .flavor-modal-body .opt{margin-bottom:8px}
 .flavor-modal-msg{font-size:13.5px;font-weight:700;color:var(--text);margin-top:4px}
 .flavor-modal-hint{font-size:12.5px;color:var(--text-sub);margin-top:3px;line-height:1.35}
