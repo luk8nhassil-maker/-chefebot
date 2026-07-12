@@ -283,16 +283,28 @@ export const CONFIG_FIDELIDADE_PONTOS_PADRAO: ConfigFidelidadePontos = {
 
 const CHAVE_CONFIG_PONTOS = "config:fidelidade:pontos";
 
-function chaveExtratoPontos(clienteId: string): string {
-  return `fidelidade:pontos:extrato:${clienteId}`;
+// Extrato e recompensas do modelo por pontos vivem numa ÚNICA chave por
+// cliente (EstadoPontosCliente) — não em duas chaves separadas. É essa
+// escolha, e não o lock sozinho, que garante que um movimento e a eventual
+// recompensa que ele desbloqueia sejam persistidos atomicamente: os dois só
+// existem juntos porque são escritos num único `redis.set`. Não há como um
+// ser gravado sem o outro (ver `registrarMovimentoPontosIdempotente`).
+export type EstadoPontosCliente = {
+  extrato: MovimentoPontos[];
+  recompensas: RecompensaPontosDesbloqueada[];
+};
+
+function chaveEstadoPontos(clienteId: string): string {
+  return `fidelidade:pontos:estado:${clienteId}`;
 }
 
-function chaveLockPontos(clienteId: string): string {
+export function chaveLockPontos(clienteId: string): string {
   return `fidelidade:pontos:lock:${clienteId}`;
 }
 
-function chaveRecompensasPontos(clienteId: string): string {
-  return `fidelidade:pontos:recompensas:${clienteId}`;
+async function obterEstadoPontos(clienteId: string): Promise<EstadoPontosCliente> {
+  const estado = await redis.get<EstadoPontosCliente>(chaveEstadoPontos(clienteId));
+  return estado ?? { extrato: [], recompensas: [] };
 }
 
 const LOCK_TTL_SEGUNDOS = 5;
@@ -303,32 +315,71 @@ function esperar(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function gerarTokenLock(): string {
+  return `${Date.now()}_${Math.random().toString(36).slice(2, 10)}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+// Compare-and-delete atômico via Lua: só apaga o lock se o valor atual ainda
+// for exatamente o token de quem está liberando. Isso é o que impede um
+// processo cujo lock já expirou (TTL) de apagar o lock de outro processo que
+// tenha assumido a chave depois da expiração — um `DEL` incondicional não
+// tem como saber se ainda é o dono.
+const LOCK_UNLOCK_SCRIPT = `
+if redis.call("GET", KEYS[1]) == ARGV[1] then
+  return redis.call("DEL", KEYS[1])
+else
+  return 0
+end
+`;
+
 /**
- * Serializa qualquer leitura-modificação-escrita do extrato/recompensas de
- * UM cliente por vez, via lock exclusivo em Redis (`SET NX` + TTL curto,
- * liberado no fim). Isso é o que impede duas requisições concorrentes (dois
- * pedidos entregues quase ao mesmo tempo, ou o mesmo pedido reprocessado em
- * paralelo) de lerem o mesmo extrato "antes" e se sobrescreverem uma à
- * outra na escrita — o cenário que um `SET NX` de idempotência sozinho,
- * seguido de leitura/escrita de array sem proteção, não resolve.
+ * Libera o lock de fidelidade por pontos de um cliente, mas só se o valor
+ * atual da chave ainda for exatamente este `token` (comparação e exclusão
+ * atômicas via script Lua — `GET` + `DEL` condicional numa única operação,
+ * sem janela entre checar e apagar). Retorna `true` se de fato apagou (era
+ * o dono do lock), `false` caso contrário (não era mais o dono — nada é
+ * apagado, o lock do outro processo fica intacto).
+ */
+export async function liberarLockPontosSeDono(clienteId: string, token: string): Promise<boolean> {
+  const resultado = await redis.eval(LOCK_UNLOCK_SCRIPT, [chaveLockPontos(clienteId)], [token]);
+  return resultado === 1;
+}
+
+/**
+ * Serializa qualquer leitura-modificação-escrita do estado (extrato +
+ * recompensas) de UM cliente por vez, via lock exclusivo em Redis (`SET NX`
+ * + TTL curto, com token próprio por aquisição). Isso é o que impede duas
+ * requisições concorrentes (dois pedidos entregues quase ao mesmo tempo, ou
+ * o mesmo pedido reprocessado em paralelo) de lerem o mesmo estado "antes" e
+ * se sobrescreverem uma à outra na escrita — o cenário que um `SET NX` de
+ * idempotência sozinho, seguido de leitura/escrita de array sem proteção,
+ * não resolve.
+ *
+ * Propriedade do lock: cada aquisição gera um token aleatório único: o
+ * `finally` libera com `liberarLockPontosSeDono`, que só apaga se o valor
+ * atual ainda for o MESMO token — se o TTL expirou no meio da operação e
+ * outro processo já assumiu a chave com um token diferente, este `finally`
+ * NUNCA apaga o lock do outro (nunca um `DEL` incondicional).
  *
  * TTL curto (5s) é uma rede de segurança contra deadlock se o processo
  * morrer com o lock preso — não é o mecanismo principal de liberação (isso
- * é o `finally`). Backoff simples com várias tentativas curtas: em caso de
- * falha real (não conseguiu o lock em nenhuma tentativa), lança erro — quem
- * chama (sempre em try/catch, ver `creditarPontosPedidoEntregue`) trata como
- * falha best-effort e o pedido pode ser reprocessado depois com segurança,
- * já que nada é marcado como "processado" antes da escrita real do extrato.
+ * é o `finally`/compare-and-delete). Backoff simples com várias tentativas
+ * curtas: em caso de falha real (não conseguiu o lock em nenhuma
+ * tentativa), lança erro — quem chama (sempre em try/catch, ver
+ * `creditarPontosPedidoEntregue`) trata como falha best-effort e o pedido
+ * pode ser reprocessado depois com segurança, já que nada é marcado como
+ * "processado" antes da escrita real do estado.
  */
 async function comBloqueioCliente<T>(clienteId: string, fn: () => Promise<T>): Promise<T> {
   const chave = chaveLockPontos(clienteId);
   for (let tentativa = 0; tentativa < LOCK_MAX_TENTATIVAS; tentativa++) {
-    const obtido = await redis.set(chave, "1", { nx: true, ex: LOCK_TTL_SEGUNDOS });
+    const token = gerarTokenLock();
+    const obtido = await redis.set(chave, token, { nx: true, ex: LOCK_TTL_SEGUNDOS });
     if (obtido) {
       try {
         return await fn();
       } finally {
-        await redis.del(chave);
+        await liberarLockPontosSeDono(clienteId, token);
       }
     }
     await esperar(LOCK_ESPERA_MS);
@@ -426,11 +477,11 @@ export async function salvarConfigFidelidadePontos(config: ConfigFidelidadePonto
 }
 
 export async function obterExtratoPontos(clienteId: string): Promise<MovimentoPontos[]> {
-  return (await redis.get<MovimentoPontos[]>(chaveExtratoPontos(clienteId))) ?? [];
+  return (await obterEstadoPontos(clienteId)).extrato;
 }
 
 export async function obterSaldoPontos(clienteId: string): Promise<SaldoPontos> {
-  const extrato = await obterExtratoPontos(clienteId);
+  const { extrato } = await obterEstadoPontos(clienteId);
   return { disponivel: calcularSaldoDoExtrato(extrato) };
 }
 
@@ -461,7 +512,7 @@ export type RecompensaPontosDesbloqueada = {
 };
 
 export async function obterRecompensasPontos(clienteId: string): Promise<RecompensaPontosDesbloqueada[]> {
-  return (await redis.get<RecompensaPontosDesbloqueada[]>(chaveRecompensasPontos(clienteId))) ?? [];
+  return (await obterEstadoPontos(clienteId)).recompensas;
 }
 
 /**
@@ -479,29 +530,27 @@ export function notificacaoRecompensaHabilitada(): boolean {
 }
 
 /**
- * Detecta a passagem de saldoAnterior < meta para saldoAtual >= meta e
- * registra um evento auditável de recompensa desbloqueada, com a
- * notificação marcada como "pendente". Nunca cria duas recompensas abertas
- * para o mesmo cliente ao mesmo tempo — enquanto existir uma com status
- * "disponivel" ou "notificada", nenhuma nova é criada, mesmo que novos
- * pedidos continuem empurrando o saldo pra cima. Só depois de um resgate
- * (fora do escopo desta etapa) é que um novo cruzamento pode gerar outra.
- * Chamada sempre dentro do lock de `registrarMovimentoPontosIdempotente` —
- * não faz sentido chamar isoladamente fora dessa seção crítica.
+ * Calcula a lista de recompensas resultante depois de um movimento —
+ * função PURA (não lê nem escreve Redis), para poder ser combinada com o
+ * novo extrato e persistida junto, na mesma escrita atômica. Detecta a
+ * passagem de saldoAnterior < meta para saldoAtual >= meta; nunca cria duas
+ * recompensas abertas para o mesmo cliente ao mesmo tempo — enquanto
+ * existir uma com status "disponivel" ou "notificada" na lista recebida,
+ * devolve a lista sem alteração. Só depois de um resgate (fora do escopo
+ * desta etapa) é que um novo cruzamento pode gerar outra.
  */
-async function detectarRecompensaDesbloqueada(
+function aplicarDeteccaoRecompensa(
   clienteId: string,
+  recompensasAtuais: RecompensaPontosDesbloqueada[],
+  meta: number,
   params: { saldoAnterior: number; saldoAtual: number; pedidoId?: string }
-): Promise<void> {
-  const config = await obterConfigFidelidadePontos();
-  const meta = calcularMetaPontos(config);
-  if (meta <= 0) return;
-  if (params.saldoAnterior >= meta) return; // ja tinha cruzado antes (ciclo ja aberto ou nao resolvido)
-  if (params.saldoAtual < meta) return; // ainda nao cruzou
+): RecompensaPontosDesbloqueada[] {
+  if (meta <= 0) return recompensasAtuais;
+  if (params.saldoAnterior >= meta) return recompensasAtuais; // ja tinha cruzado antes (ciclo ja aberto ou nao resolvido)
+  if (params.saldoAtual < meta) return recompensasAtuais; // ainda nao cruzou
 
-  const recompensas = await obterRecompensasPontos(clienteId);
-  const jaTemCicloAberto = recompensas.some((r) => r.status === "disponivel" || r.status === "notificada");
-  if (jaTemCicloAberto) return; // nunca duplica enquanto a recompensa anterior nao for resgatada
+  const jaTemCicloAberto = recompensasAtuais.some((r) => r.status === "disponivel" || r.status === "notificada");
+  if (jaTemCicloAberto) return recompensasAtuais; // nunca duplica enquanto a recompensa anterior nao for resgatada
 
   const recompensa: RecompensaPontosDesbloqueada = {
     recompensaId: novoId("rcp"),
@@ -513,24 +562,28 @@ async function detectarRecompensaDesbloqueada(
     notificacaoStatus: "pendente",
     createdAt: new Date().toISOString(),
   };
-  await redis.set(chaveRecompensasPontos(clienteId), [...recompensas, recompensa]);
+  return [...recompensasAtuais, recompensa];
 }
 
 /**
- * Registra um movimento de pontos de forma idempotente e seguindo contra
- * concorrência. Toda a operação — checar se o evento já foi processado,
- * calcular o saldo antes/depois, gravar o movimento no extrato e detectar
- * recompensa desbloqueada — roda dentro de um lock exclusivo por cliente
- * (`comBloqueioCliente`), então duas chamadas concorrentes para o mesmo
- * cliente nunca se sobrescrevem.
+ * Registra um movimento de pontos de forma idempotente, atômica e segura
+ * contra concorrência. Toda a operação roda dentro de um lock exclusivo por
+ * cliente (`comBloqueioCliente`):
  *
- * A idempotência NÃO é uma chave separada marcada antes da escrita (o que
- * deixaria o pedido "preso" sem pontos se o processo falhasse entre marcar
- * e escrever) — é uma checagem direta contra o próprio extrato: se já existe
- * um movimento com este `eventoId`, nada é escrito de novo. Isso também
- * permite reprocessar com segurança após uma falha parcial: como nada é
- * marcado antes da escrita real, uma tentativa anterior que falhou no meio
- * do caminho não deixa rastro que bloqueie a próxima tentativa.
+ * 1. checa se o evento já foi processado (contra o próprio extrato);
+ * 2. calcula saldo antes/depois e monta o novo movimento;
+ * 3. calcula a lista de recompensas resultante (função pura, em memória);
+ * 4. grava extrato E recompensas juntos, numa ÚNICA chamada `redis.set`
+ *    sobre uma única chave (`EstadoPontosCliente`).
+ *
+ * O passo 4 ser uma escrita só é o que garante atomicidade entre movimento
+ * e recompensa: não existe um estado intermediário onde o movimento foi
+ * gravado mas a recompensa não (ou vice-versa) — ou os dois são persistidos
+ * juntos, ou nenhuma escrita acontece. Se a escrita falhar, nada muda: como
+ * a idempotência é checada contra o extrato real (não uma flag marcada
+ * antes), uma tentativa que falhou no meio do caminho não deixa rastro —
+ * o reprocessamento seguinte recalcula tudo do zero (movimento + saldo +
+ * recompensa) com segurança.
  *
  * `eventoId` explícito (opcional) permite diferenciar múltiplos eventos do
  * mesmo tipo no mesmo pedido; sem ele, cai no padrão `${tipo}:${pedidoId}`.
@@ -544,10 +597,10 @@ export async function registrarMovimentoPontosIdempotente(
   const eventoId = evento.eventoId ?? construirEventoIdPontos(evento.pedidoId, evento.tipo);
 
   return comBloqueioCliente(clienteId, async () => {
-    const extrato = await obterExtratoPontos(clienteId);
-    if (extrato.some((m) => m.eventoId === eventoId)) return null; // ja processado
+    const estado = await obterEstadoPontos(clienteId);
+    if (estado.extrato.some((m) => m.eventoId === eventoId)) return null; // ja processado
 
-    const saldoAnterior = calcularSaldoDoExtrato(extrato);
+    const saldoAnterior = calcularSaldoDoExtrato(estado.extrato);
     const registroSemSaldo: MovimentoPontos = {
       movimentoId: novoId("pt"),
       clienteId,
@@ -559,22 +612,29 @@ export async function registrarMovimentoPontosIdempotente(
       eventoId,
       ...(evento.valorElegivel !== undefined ? { valorElegivel: evento.valorElegivel } : {}),
     };
-    const novoExtrato = [...extrato, registroSemSaldo];
+    const novoExtrato = [...estado.extrato, registroSemSaldo];
     // saldoApos é um snapshot de auditoria — sempre recalculável a partir do
     // extrato completo (calcularSaldoDoExtrato), nunca a fonte de verdade.
     const saldoApos = calcularSaldoDoExtrato(novoExtrato);
     const registro: MovimentoPontos = { ...registroSemSaldo, saldoApos };
     novoExtrato[novoExtrato.length - 1] = registro;
 
-    await redis.set(chaveExtratoPontos(clienteId), novoExtrato);
-
     // Detecta cruzamento de meta genericamente (qualquer tipo que tenha
     // aumentado o saldo — hoje só "confirmado"/"ajuste" positivo fazem
-    // isso), dentro do mesmo lock, para nunca competir com outra escrita
-    // concorrente na leitura de recompensas.
+    // isso). Só uma computação em memória — a escrita real é uma só, abaixo,
+    // junto com o extrato.
+    let novasRecompensas = estado.recompensas;
     if (saldoApos > saldoAnterior) {
-      await detectarRecompensaDesbloqueada(clienteId, { saldoAnterior, saldoAtual: saldoApos, pedidoId: evento.pedidoId });
+      const config = await obterConfigFidelidadePontos();
+      const meta = calcularMetaPontos(config);
+      novasRecompensas = aplicarDeteccaoRecompensa(clienteId, estado.recompensas, meta, {
+        saldoAnterior,
+        saldoAtual: saldoApos,
+        pedidoId: evento.pedidoId,
+      });
     }
+
+    await redis.set(chaveEstadoPontos(clienteId), { extrato: novoExtrato, recompensas: novasRecompensas });
 
     return registro;
   });

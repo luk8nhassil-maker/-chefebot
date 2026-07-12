@@ -14,6 +14,18 @@ vi.mock("@/lib/redis", () => ({
       store.delete(key);
       return 1;
     }),
+    // Compare-and-delete do lock de fidelidade por pontos (ver liberarLockPontosSeDono):
+    // o mock replica a semântica do script Lua real (GET == token -> DEL), sem
+    // precisar interpretar Lua de verdade.
+    eval: vi.fn(async (_script: string, keys: string[], args: string[]) => {
+      const [key] = keys;
+      const [token] = args;
+      if (store.get(key) === token) {
+        store.delete(key);
+        return 1;
+      }
+      return 0;
+    }),
   },
 }));
 
