@@ -1,7 +1,8 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, type ReactNode } from 'react'
 import dynamic from 'next/dynamic'
+import { Inbox, ChefHat, CheckCircle2, Flag, UtensilsCrossed, Bike, Check, Hourglass, X, Pizza, ArrowLeft } from 'lucide-react'
 import type { LocalizacaoEntregador } from '@/types/entregador'
 
 const MapaEntregador = dynamic(() => import('@/components/MapaEntregador'), { ssr: false })
@@ -24,59 +25,62 @@ type InfoStatus = {
   label: string
   desc: string
   color: string
-  emoji: string
+  icon: ReactNode
 }
 
 // Ordem operacional dos status já usados pelo sistema. Status desconhecido é
 // tratado como "novo" (primeira etapa), sem quebrar a página.
 const ORDEM_STATUS = ['novo', 'em_preparo', 'saiu_entrega', 'entregue']
 
-function getEtapasTimeline(tipoEntrega: string): { emoji: string; label: string }[] {
+const ICON_SIZE = 18
+
+function getEtapasTimeline(tipoEntrega: string): { icon: ReactNode; label: string }[] {
   if (tipoEntrega === 'retirada') {
     return [
-      { emoji: '📥', label: 'Pedido recebido' },
-      { emoji: '👨‍🍳', label: 'Em preparo' },
-      { emoji: '✅', label: 'Pronto para retirada' },
-      { emoji: '🏁', label: 'Finalizado' },
+      { icon: <Inbox size={ICON_SIZE} aria-hidden="true" />, label: 'Pedido recebido' },
+      { icon: <ChefHat size={ICON_SIZE} aria-hidden="true" />, label: 'Em preparo' },
+      { icon: <CheckCircle2 size={ICON_SIZE} aria-hidden="true" />, label: 'Pronto para retirada' },
+      { icon: <Flag size={ICON_SIZE} aria-hidden="true" />, label: 'Finalizado' },
     ]
   }
   if (tipoEntrega === 'dine_in') {
     return [
-      { emoji: '📥', label: 'Pedido recebido' },
-      { emoji: '👨‍🍳', label: 'Em preparo' },
-      { emoji: '🍽️', label: 'Pronto para servir' },
-      { emoji: '🏁', label: 'Finalizado' },
+      { icon: <Inbox size={ICON_SIZE} aria-hidden="true" />, label: 'Pedido recebido' },
+      { icon: <ChefHat size={ICON_SIZE} aria-hidden="true" />, label: 'Em preparo' },
+      { icon: <UtensilsCrossed size={ICON_SIZE} aria-hidden="true" />, label: 'Pronto para servir' },
+      { icon: <Flag size={ICON_SIZE} aria-hidden="true" />, label: 'Finalizado' },
     ]
   }
   return [
-    { emoji: '📥', label: 'Pedido recebido' },
-    { emoji: '👨‍🍳', label: 'Em preparo' },
-    { emoji: '🛵', label: 'Saiu para entrega' },
-    { emoji: '✓', label: 'Entregue' },
+    { icon: <Inbox size={ICON_SIZE} aria-hidden="true" />, label: 'Pedido recebido' },
+    { icon: <ChefHat size={ICON_SIZE} aria-hidden="true" />, label: 'Em preparo' },
+    { icon: <Bike size={ICON_SIZE} aria-hidden="true" />, label: 'Saiu para entrega' },
+    { icon: <Check size={ICON_SIZE} aria-hidden="true" />, label: 'Entregue' },
   ]
 }
 
 function getInfoStatus(status: string, tipoEntrega: string): InfoStatus {
+  const tamanhoGrande = 40
   if (tipoEntrega === 'retirada' || tipoEntrega === 'dine_in') {
     const map: Record<string, InfoStatus> = {
-      novo:          { emoji: '⏳', label: 'Pedido recebido',       desc: 'Aguardando a pizzaria confirmar.',          color: '#888' },
-      em_preparo:    { emoji: '👨‍🍳', label: 'Em preparo',            desc: 'Estamos fazendo seu pedido com carinho!',   color: '#ff6b00' },
-      saiu_entrega:  { emoji: '✅', label: 'Pronto para retirada',  desc: 'Pode vir buscar — está te esperando!',      color: '#4caf50' },
-      entregue:      { emoji: '✓',  label: 'Retirado',              desc: 'Bom apetite!',                              color: '#4caf50' },
-      cancelado:     { emoji: '✗',  label: 'Cancelado',             desc: 'Entre em contato com a pizzaria.',           color: '#ef4444' },
+      novo:          { icon: <Hourglass size={tamanhoGrande} aria-hidden="true" />, label: 'Pedido recebido',       desc: 'Aguardando a pizzaria confirmar.',          color: '#888' },
+      em_preparo:    { icon: <ChefHat size={tamanhoGrande} aria-hidden="true" />, label: 'Em preparo',            desc: 'Estamos fazendo seu pedido com carinho!',   color: '#ff6b00' },
+      saiu_entrega:  { icon: <CheckCircle2 size={tamanhoGrande} aria-hidden="true" />, label: 'Pronto para retirada',  desc: 'Pode vir buscar — está te esperando!',      color: '#4caf50' },
+      entregue:      { icon: <Check size={tamanhoGrande} aria-hidden="true" />, label: 'Retirado',              desc: 'Bom apetite!',                              color: '#4caf50' },
+      cancelado:     { icon: <X size={tamanhoGrande} aria-hidden="true" />, label: 'Cancelado',             desc: 'Entre em contato com a pizzaria.',           color: '#ef4444' },
     }
-    return map[status] ?? { emoji: '⏳', label: 'Pedido recebido', desc: 'Aguardando confirmação.', color: '#888' }
+    return map[status] ?? { icon: <Hourglass size={tamanhoGrande} aria-hidden="true" />, label: 'Pedido recebido', desc: 'Aguardando confirmação.', color: '#888' }
   }
 
   // delivery
   const map: Record<string, InfoStatus> = {
-    novo:         { emoji: '⏳', label: 'Pedido recebido',  desc: 'Aguardando a pizzaria começar o preparo.',  color: '#888' },
-    em_preparo:   { emoji: '👨‍🍳', label: 'Em preparo',      desc: 'Estamos fazendo seu pedido com carinho!',  color: '#ff6b00' },
-    saiu_entrega: { emoji: '🛵', label: 'A caminho',        desc: 'Seu pedido está na rua!',                   color: '#ff6b00' },
-    entregue:     { emoji: '✓',  label: 'Entregue',         desc: 'Bom apetite!',                              color: '#4caf50' },
-    cancelado:    { emoji: '✗',  label: 'Cancelado',        desc: 'Entre em contato com a pizzaria.',           color: '#ef4444' },
+    novo:         { icon: <Hourglass size={tamanhoGrande} aria-hidden="true" />, label: 'Pedido recebido',  desc: 'Aguardando a pizzaria começar o preparo.',  color: '#888' },
+    em_preparo:   { icon: <ChefHat size={tamanhoGrande} aria-hidden="true" />, label: 'Em preparo',      desc: 'Estamos fazendo seu pedido com carinho!',  color: '#ff6b00' },
+    saiu_entrega: { icon: <Bike size={tamanhoGrande} aria-hidden="true" />, label: 'A caminho',        desc: 'Seu pedido está na rua!',                   color: '#ff6b00' },
+    entregue:     { icon: <Check size={tamanhoGrande} aria-hidden="true" />, label: 'Entregue',         desc: 'Bom apetite!',                              color: '#4caf50' },
+    cancelado:    { icon: <X size={tamanhoGrande} aria-hidden="true" />, label: 'Cancelado',        desc: 'Entre em contato com a pizzaria.',           color: '#ef4444' },
   }
-  return map[status] ?? { emoji: '⏳', label: 'Pedido recebido', desc: 'Aguardando confirmação.', color: '#888' }
+  return map[status] ?? { icon: <Hourglass size={tamanhoGrande} aria-hidden="true" />, label: 'Pedido recebido', desc: 'Aguardando confirmação.', color: '#888' }
 }
 
 export default function RastrearPage({ params }: PageProps) {
@@ -130,7 +134,7 @@ export default function RastrearPage({ params }: PageProps) {
 
   const info = pedidoStatus
     ? getInfoStatus(pedidoStatus.status, pedidoStatus.tipoEntrega)
-    : { emoji: '⏳', label: 'Carregando...', desc: '', color: '#888' }
+    : { icon: <Hourglass size={40} aria-hidden="true" />, label: 'Carregando...', desc: '', color: '#888' }
 
   const isDelivery = pedidoStatus?.tipoEntrega === 'delivery'
   const emRota = pedidoStatus?.status === 'saiu_entrega'
@@ -145,7 +149,7 @@ export default function RastrearPage({ params }: PageProps) {
       {/* Header */}
       <div style={{ background: '#111', borderBottom: '1px solid #222', padding: '12px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <span style={{ fontSize: '22px' }}>🍕</span>
+          <Pizza size={22} aria-hidden="true" />
           <div>
             <div style={{ fontSize: '15px', fontWeight: 700, color: '#ff6b00' }}>
               {pedidoStatus?.numero ? `Pedido #${pedidoStatus.numero}` : 'Acompanhar Pedido'}
@@ -154,7 +158,7 @@ export default function RastrearPage({ params }: PageProps) {
           </div>
         </div>
         <a href="/cardapio" style={{ fontSize: '13px', color: '#888', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '4px' }}>
-          ← Cardápio
+          <ArrowLeft size={14} aria-hidden="true" /> Cardápio
         </a>
       </div>
 
@@ -170,7 +174,7 @@ export default function RastrearPage({ params }: PageProps) {
 
         {/* Status principal */}
         <div style={{ textAlign: 'center', marginBottom: '24px' }}>
-          <div style={{ fontSize: '48px', marginBottom: '8px' }}>{info.emoji}</div>
+          <div style={{ marginBottom: '8px', display: 'flex', justifyContent: 'center', color: info.color }}>{info.icon}</div>
           <div style={{ fontSize: '18px', fontWeight: 800, color: info.color, marginBottom: '6px' }}>{info.label}</div>
           {info.desc && <div style={{ fontSize: '13px', color: '#888' }}>{info.desc}</div>}
         </div>
@@ -187,12 +191,12 @@ export default function RastrearPage({ params }: PageProps) {
                 <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                     <div style={{ width: '22px', height: '22px', borderRadius: '50%', background: concluida ? '#4caf50' : atual ? '#ff6b00' : '#1c1c1c', border: `2px solid ${corBorda}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: 800, color: '#fff', boxSizing: 'border-box', flexShrink: 0 }}>
-                      {concluida ? '✓' : atual ? '●' : ''}
+                      {concluida ? <Check size={12} strokeWidth={3} aria-hidden="true" /> : atual ? <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#fff', display: 'block' }} aria-hidden="true" /> : ''}
                     </div>
                     {i < etapas.length - 1 && <div style={{ width: '2px', height: '22px', background: i < idxAtual ? '#4caf50' : '#222' }} />}
                   </div>
                   <div style={{ paddingBottom: i < etapas.length - 1 ? '8px' : 0, marginTop: '2px' }}>
-                    <div style={{ fontSize: '14px', fontWeight: atual ? 800 : 600, color: atual ? '#ff6b00' : concluida ? '#ccc' : '#666' }}>{etapa.emoji} {etapa.label}</div>
+                    <div style={{ fontSize: '14px', fontWeight: atual ? 800 : 600, color: atual ? '#ff6b00' : concluida ? '#ccc' : '#666', display: 'flex', alignItems: 'center', gap: 6 }}>{etapa.icon} {etapa.label}</div>
                   </div>
                 </div>
               )

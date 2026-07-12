@@ -1,8 +1,9 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Gift } from 'lucide-react'
+import { Gift, Palette } from 'lucide-react'
 import PanelShell from '@/components/PanelShell'
+import ThemeToggle from '@/components/ThemeToggle'
 
 type Config = {
   nomePizzaria: string
@@ -463,6 +464,22 @@ export default function ConfiguracoesPage() {
                       Botão "Falar com a pizzaria" · inclua o código do país (55)
                     </p>
                   </FieldGroup>
+                </SectionCard>
+
+                {/* Aparência — controla o tema Light/Dark da Área do Cliente
+                    (/cliente). Light é o padrão do sistema; Dark é opcional e
+                    fica salvo no navegador de quem escolher. O restante do
+                    painel administrativo mantém seu tema escuro/laranja fixo
+                    (ver Skill admin-ui), independente desta escolha. */}
+                <SectionCard>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: -4 }}>
+                    <Palette size={16} color={TEXT2} style={{ flexShrink: 0 }} aria-hidden="true" />
+                    <span style={{ fontSize: 13, fontWeight: 900, color: TEXT, textTransform: 'uppercase', letterSpacing: '0.8px' }}>Aparência</span>
+                  </div>
+                  <p style={{ color: TEXT2, fontSize: 12, margin: '-10px 0 0', lineHeight: 1.5 }}>
+                    Tema da Área do Cliente (/cliente). Light é o padrão do sistema.
+                  </p>
+                  <ThemeToggle />
                 </SectionCard>
 
                 {/* Horário */}

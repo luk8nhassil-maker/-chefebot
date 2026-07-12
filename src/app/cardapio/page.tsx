@@ -1,7 +1,40 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { Gift } from "lucide-react";
+import {
+  Gift,
+  Home,
+  ShoppingCart,
+  Receipt,
+  Pizza,
+  Sandwich,
+  Soup,
+  CupSoda,
+  Citrus,
+  Bike,
+  Store,
+  UtensilsCrossed,
+  Wallet,
+  Zap,
+  CreditCard,
+  Banknote,
+  Shuffle,
+  X,
+  Plus,
+  ArrowLeft,
+  Check,
+  CheckCircle2,
+  AlertTriangle,
+  Search,
+  Pencil,
+  Clock,
+  MapPin,
+  User,
+  NotebookPen,
+  Moon,
+  Sun,
+  Ban,
+} from "lucide-react";
 import PanelShell from "@/components/PanelShell";
 import { useLiveMenu, cartItemEsgotado } from "./liveMenu";
 import { CARDAPIO_ILLUSTRATIONS, CardapioIllustration } from "@/lib/cardapioVisuals";
@@ -709,37 +742,40 @@ function extrairHibrido(pagamento: string | null): { pix: number; dinheiro: numb
   return { pix, dinheiro };
 }
 
-// Sistema inicial de ícones do fluxo público, reaproveitável em qualquer tela
-// (bottom nav, categorias, símbolos de ação). Sem biblioteca externa — só emoji.
+// Sistema de ícones do fluxo público, reaproveitável em qualquer tela (bottom
+// nav, categorias, símbolos de ação). Ícones de lucide-react — nunca emoji
+// como ícone funcional/decorativo. `size="1em"` faz o ícone acompanhar o
+// `font-size` do container (mesmo comportamento de escala que o emoji tinha
+// antes em cada contexto: home-cat, bnav-icon, opt-emoji etc.).
 const ICONS = {
-  inicio: "🏠",
-  sacola: "🛒",
-  pedido: "🧾",
-  pizza: "🍕",
-  lanche: "🍔",
-  macarronada: "🍝",
-  bebidas: "🥤",
-  sucos: "🧃",
-  entrega: "🛵",
-  retirada: "🏪",
-  consumoLocal: "🍽️",
-  pagamento: "💰",
-  pix: "⚡",
-  cartao: "💳",
-  dinheiro: "💵",
-  misto: "🔀",
-  remover: "✕",
-  adicionar: "➕",
-  voltar: "←",
-  check: "✓",
-  alerta: "⚠️",
-  vazio: "🛒",
-  busca: "🔍",
-  editar: "✎",
-  relogio: "🕐",
-  localizacao: "📍",
-  pessoa: "👤",
-  nota: "📝",
+  inicio: <Home size="1em" strokeWidth={2.2} aria-hidden="true" />,
+  sacola: <ShoppingCart size="1em" strokeWidth={2.2} aria-hidden="true" />,
+  pedido: <Receipt size="1em" strokeWidth={2.2} aria-hidden="true" />,
+  pizza: <Pizza size="1em" strokeWidth={2} aria-hidden="true" />,
+  lanche: <Sandwich size="1em" strokeWidth={2} aria-hidden="true" />,
+  macarronada: <Soup size="1em" strokeWidth={2} aria-hidden="true" />,
+  bebidas: <CupSoda size="1em" strokeWidth={2} aria-hidden="true" />,
+  sucos: <Citrus size="1em" strokeWidth={2} aria-hidden="true" />,
+  entrega: <Bike size="1em" strokeWidth={2} aria-hidden="true" />,
+  retirada: <Store size="1em" strokeWidth={2} aria-hidden="true" />,
+  consumoLocal: <UtensilsCrossed size="1em" strokeWidth={2} aria-hidden="true" />,
+  pagamento: <Wallet size="1em" strokeWidth={2} aria-hidden="true" />,
+  pix: <Zap size="1em" strokeWidth={2} aria-hidden="true" />,
+  cartao: <CreditCard size="1em" strokeWidth={2} aria-hidden="true" />,
+  dinheiro: <Banknote size="1em" strokeWidth={2} aria-hidden="true" />,
+  misto: <Shuffle size="1em" strokeWidth={2} aria-hidden="true" />,
+  remover: <X size="1em" strokeWidth={2.4} aria-hidden="true" />,
+  adicionar: <Plus size="1em" strokeWidth={2.4} aria-hidden="true" />,
+  voltar: <ArrowLeft size="1em" strokeWidth={2.2} aria-hidden="true" />,
+  check: <Check size="1em" strokeWidth={2.6} aria-hidden="true" />,
+  alerta: <AlertTriangle size="1em" strokeWidth={2} aria-hidden="true" />,
+  vazio: <ShoppingCart size="1em" strokeWidth={2} aria-hidden="true" />,
+  busca: <Search size="1em" strokeWidth={2} aria-hidden="true" />,
+  editar: <Pencil size="1em" strokeWidth={2} aria-hidden="true" />,
+  relogio: <Clock size="1em" strokeWidth={2} aria-hidden="true" />,
+  localizacao: <MapPin size="1em" strokeWidth={2} aria-hidden="true" />,
+  pessoa: <User size="1em" strokeWidth={2} aria-hidden="true" />,
+  nota: <NotebookPen size="1em" strokeWidth={2} aria-hidden="true" />,
 } as const;
 
 // Banco de ilustrações leves (src/lib/cardapioVisuals.tsx) já aplicado em:
@@ -767,7 +803,10 @@ async function copiarTexto(texto: string): Promise<boolean> {
 }
 
 export function PublicCardapio({ menu }: { menu: MenuType }) {
-  const [theme, setTheme] = useState<"dark" | "light">("dark");
+  // Light é o tema padrão do sistema (nunca dark por CSS hardcoded quando o
+  // tema ativo é Light) — o cliente pode alternar para Dark pelo botão no
+  // topo, mas a escolha não persiste entre visitas (mesmo padrão de antes).
+  const [theme, setTheme] = useState<"dark" | "light">("light");
   const [screen, setScreen] = useState("sc-start");
   const [previousStepBeforeCart, setPreviousStepBeforeCart] = useState<string | null>(null);
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -1323,7 +1362,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   }
 
   function paymentLabel(value: string) { return value === "Cartao" ? "Cartão" : value === "Misto" ? "Pagamento misto" : value; }
-  function paymentIcon(value: string) { return ({ Pix: ICONS.pix, Dinheiro: ICONS.dinheiro, Cartao: ICONS.cartao, Misto: ICONS.misto } as Record<string, string>)[value] || ICONS.pagamento; }
+  function paymentIcon(value: string) { return ({ Pix: ICONS.pix, Dinheiro: ICONS.dinheiro, Cartao: ICONS.cartao, Misto: ICONS.misto } as Record<string, React.ReactNode>)[value] || ICONS.pagamento; }
   function paymentHint(value: string) {
     return ({ Pix: "Confirmacao manual pela pizzaria.", Dinheiro: "Configure o troco.", Cartao: "Pagamento na maquina.", Misto: "Divida entre Pix e Dinheiro." } as Record<string, string>)[value] || "Forma de pagamento";
   }
@@ -1562,8 +1601,8 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
         {screen === "sc-start" && (
           <header className="header-min">
             <div className="head-row">
-              <div className="logo"><div className="logo-mark">🍕</div><div><h1>CHEFE DA PIZZA</h1><p>Alto Alegre do MA · <span style={{ color: "var(--green)", fontWeight: 600 }}>● Aberto agora</span> · 40 a 60 min</p></div></div>
-              <button className="theme-btn" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} aria-label="Trocar tema">{theme === "dark" ? "🌙" : "☀️"}</button>
+              <div className="logo"><div className="logo-mark"><Pizza size={22} strokeWidth={2} aria-hidden="true" /></div><div><h1>CHEFE DA PIZZA</h1><p>Alto Alegre do MA · <span style={{ color: "var(--green)", fontWeight: 600 }}>● Aberto agora</span> · 40 a 60 min</p></div></div>
+              <button className="theme-btn" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} aria-label="Trocar tema">{theme === "dark" ? <Moon size={18} strokeWidth={2} aria-hidden="true" /> : <Sun size={18} strokeWidth={2} aria-hidden="true" />}</button>
             </div>
           </header>
         )}
@@ -1573,7 +1612,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
               {pedidoRecente && (
                 <div style={{ display: "flex", alignItems: "center", gap: 10, background: "var(--brand-soft)", border: "1px solid var(--brand)", borderRadius: 14, padding: "10px 12px", marginBottom: 14 }}>
                   <a href={`/rastrear/${pedidoRecente.id}`} style={{ flex: 1, display: "flex", alignItems: "center", gap: 10, textDecoration: "none" }}>
-                    <span style={{ fontSize: 20, flexShrink: 0 }}>🛵</span>
+                    <Bike size={20} strokeWidth={2} aria-hidden="true" style={{ flexShrink: 0 }} />
                     <span style={{ flex: 1 }}>
                       <span style={{ display: "block", fontSize: 14, fontWeight: 700, color: "var(--text)" }}>Acompanhar pedido{pedidoRecente.numero ? ` #${pedidoRecente.numero}` : ""}</span>
                       <span style={{ display: "block", fontSize: 12.5, color: "var(--text-sub)", marginTop: 2 }}>Seu último pedido está em andamento. Toque para ver o status.</span>
@@ -1583,7 +1622,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                 </div>
               )}
               <a href="/cliente" style={{ display: "flex", alignItems: "center", gap: 10, background: "var(--surface)", border: "1px solid var(--line-strong)", borderRadius: 14, padding: "10px 12px", marginBottom: 14, textDecoration: "none" }}>
-                <span style={{ fontSize: 20, flexShrink: 0 }}>🎁</span>
+                <Gift size={20} strokeWidth={2} aria-hidden="true" style={{ flexShrink: 0, color: "var(--brand, #ff6b00)" }} />
                 <span style={{ flex: 1 }}>
                   <span style={{ display: "block", fontSize: 14, fontWeight: 700, color: "var(--text)" }}>Entre com seu WhatsApp e acompanhe suas pizzas</span>
                   <span style={{ display: "block", fontSize: 12.5, color: "var(--text-sub)", marginTop: 2 }}>Rumo à sua recompensa — sem precisar entrar para pedir.</span>
@@ -1632,14 +1671,14 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                   {(menu.sizes || []).map((s) => (
                     <div key={s.code} className={`opt ${!miniPizzaMode && size === s.code ? "sel" : ""}`} onClick={() => pickSize(s.code)}>
                       <div className="opt-check" />
-                      <div className="opt-emoji">🍕</div>
+                      <div className="opt-emoji"><Pizza size="1em" strokeWidth={2} aria-hidden="true" /></div>
                       <div className="opt-body"><div className="opt-title">{s.label}</div><div className="opt-desc">{money(s.price)}</div></div>
                     </div>
                   ))}
                   {miniPizzaItem && (
                     <div className={`opt mini-size-opt ${miniPizzaMode ? "sel" : ""}`} onClick={pickMiniPizza} style={{ opacity: miniPizzaEsgotada ? 0.5 : 1, cursor: miniPizzaEsgotada ? "not-allowed" : "pointer" }}>
                       <div className="opt-check" />
-                      <div className="opt-emoji">🍕</div>
+                      <div className="opt-emoji"><Pizza size="1em" strokeWidth={2} aria-hidden="true" /></div>
                       <div className="opt-body"><div className="opt-title">Mini-pizza</div><div className="opt-desc" style={miniPizzaEsgotada ? { color: "#ef4444" } : undefined}>{miniPizzaEsgotada ? "Esgotado" : "Produto do cardapio"}</div></div>
                       <div className="opt-price">{miniPizzaEsgotada ? "" : money(miniPizzaItem.price)}</div>
                     </div>
@@ -1669,7 +1708,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                           const esg = esgotados.includes(f)
                           return (
                             <div key={`${section.title}-${f}`} className={`opt flavor-opt ${f === f1 || f === f2 ? "sel" : ""} ${esg ? "esg" : ""}`} onClick={() => !esg && pickFlavor(f)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }}>
-                              <div className="opt-emoji">🍕</div><div className="opt-body"><div className="opt-title">{f}</div>{esg && <div className="opt-desc" style={{ color: "#ef4444" }}>Esgotado</div>}</div><div className="opt-check" />
+                              <div className="opt-emoji"><Pizza size="1em" strokeWidth={2} aria-hidden="true" /></div><div className="opt-body"><div className="opt-title">{f}</div>{esg && <div className="opt-desc" style={{ color: "#ef4444" }}>Esgotado</div>}</div><div className="opt-check" />
                             </div>
                           )
                         })}
@@ -1688,7 +1727,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
               <TopBack onClick={() => go("sc-build")} title="Borda" />
               <PizzaCtx />
               <div className="screen-head"><h2>Escolha a borda</h2><p>Toque em uma opcao para adicionar direto ao pedido.</p></div>
-              <div className="opt" onClick={() => addPizzaWithBorder(null, 0)}><div className="opt-emoji">⭕</div><div className="opt-body"><div className="opt-title">Sem borda</div></div><div className="opt-check" /></div>
+              <div className="opt" onClick={() => addPizzaWithBorder(null, 0)}><div className="opt-emoji"><Ban size="1em" strokeWidth={2} aria-hidden="true" /></div><div className="opt-body"><div className="opt-title">Sem borda</div></div><div className="opt-check" /></div>
               {(menu.borders || []).map((b, i) => { const p = bigBorder(size!) ? b.priceLarge : b.priceSmall; const esg = esgotados.includes(b.label); return (<div key={i} className={`opt ${border === b.label ? "sel" : ""}`} onClick={() => !esg && addPizzaWithBorder(b.label, p)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }}><div className="opt-emoji">🧀</div><div className="opt-body"><div className="opt-title">{b.label}</div>{esg && <div className="opt-desc" style={{ color: "#ef4444" }}>Esgotado</div>}</div><div className="opt-price">{esg ? "" : `+${money(p)}`}</div><div className="opt-check" /></div>); })}
             </section>
           )}
@@ -1716,7 +1755,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                     const esg = esgotados.includes(f);
                     return (
                       <div key={f} className={`opt ${promoSabor === f ? "sel" : ""}`} onClick={() => !esg && setPromoSabor(f)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }}>
-                        <div className="opt-emoji">🍕</div><div className="opt-body"><div className="opt-title">{f}</div>{esg && <div className="opt-desc" style={{ color: "#ef4444" }}>Esgotado</div>}</div><div className="opt-check" />
+                        <div className="opt-emoji"><Pizza size="1em" strokeWidth={2} aria-hidden="true" /></div><div className="opt-body"><div className="opt-title">{f}</div>{esg && <div className="opt-desc" style={{ color: "#ef4444" }}>Esgotado</div>}</div><div className="opt-check" />
                       </div>
                     );
                   })}
@@ -1734,9 +1773,9 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
               </div>
               {showUpsellBebida && (
                 <div className="grid2">
-                  <div className="opt" onClick={() => goCat("bebida")}><div className="opt-emoji">🥤</div><div className="opt-body"><div className="opt-title">Refrigerantes</div></div></div>
+                  <div className="opt" onClick={() => goCat("bebida")}><div className="opt-emoji"><CupSoda size="1em" strokeWidth={2} aria-hidden="true" /></div><div className="opt-body"><div className="opt-title">Refrigerantes</div></div></div>
                   {(menu.sucos || []).length > 0 && (
-                    <div className="opt" onClick={() => goCat("suco")}><div className="opt-emoji">🧃</div><div className="opt-body"><div className="opt-title">Sucos</div></div></div>
+                    <div className="opt" onClick={() => goCat("suco")}><div className="opt-emoji"><Citrus size="1em" strokeWidth={2} aria-hidden="true" /></div><div className="opt-body"><div className="opt-title">Sucos</div></div></div>
                   )}
                 </div>
               )}
@@ -1748,7 +1787,11 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
               <TopBack onClick={() => go("sc-start")} title={({ lanche: "Lanches", macarronada: "Macarronada", bebida: "Bebidas", suco: "Sucos" } as Record<string, string>)[listCat] || "Escolha o produto"} />
               {(() => {
                 const lanches = menu.lanches || [];
-                const cfg = { lanche: { eb: "Lanches & Porções", t: "Escolha seu lanche", data: lanches.filter((it) => !isMacarronada(it)), emoji: "🍽️" }, macarronada: { eb: "", t: "Escolha sua macarronada", data: lanches.filter(isMacarronada), emoji: ICONS.macarronada }, bebida: { eb: "", t: "Bebidas geladas", data: menu.bebidas || [], emoji: ICONS.bebidas }, suco: { eb: "Sucos naturais", t: "Sucos da casa", data: menu.sucos || [], emoji: ICONS.sucos } }[listCat];
+                {/* `emoji` aqui é um campo de DADO persistido no item do carrinho
+                    (serializado no rascunho da sacola em sessionStorage), não um
+                    ícone de interface — mantido como emoji de propósito, separado
+                    da constante ICONS (que agora é só lucide-react). */}
+                const cfg = { lanche: { eb: "Lanches & Porções", t: "Escolha seu lanche", data: lanches.filter((it) => !isMacarronada(it)), emoji: "🍽️" }, macarronada: { eb: "", t: "Escolha sua macarronada", data: lanches.filter(isMacarronada), emoji: "🍝" }, bebida: { eb: "", t: "Bebidas geladas", data: menu.bebidas || [], emoji: "🥤" }, suco: { eb: "Sucos naturais", t: "Sucos da casa", data: menu.sucos || [], emoji: "🧃" } }[listCat];
                 return (<><div className="screen-head">{cfg.eb && <div className="eyebrow">{cfg.eb}</div>}<h2>{cfg.t}</h2><p>Toque para adicionar.</p></div>{cfg.data.length === 0 ? <CardapioIllustration {...CARDAPIO_ILLUSTRATIONS.semResultado} /> : cfg.data.map((it, i) => { const esg = esgotados.includes(it.name); return (<div key={i} className="opt" onClick={() => !esg && addSimple(it, cfg.emoji)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }}><div className="opt-emoji">{cfg.emoji}</div><div className="opt-body"><div className="opt-title">{it.name}</div>{esg && <div className="opt-desc" style={{ color: "#ef4444" }}>Esgotado</div>}</div><div className="opt-price">{simplePriceLabel(it)}</div></div>); })}</>);
               })()}
             </section>
@@ -1765,7 +1808,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
               <TopBack onClick={() => { setMacarronadaPendente(null); go("sc-list"); }} title={macarronadaPendente.name} />
               <div className="screen-head"><h2>Escolha o tamanho</h2><p>{macarronadaPendente.name}</p></div>
               {(macarronadaPendente.sizes || []).map((s) => (
-                <div key={s.code} className="opt" onClick={() => addMacarronadaSize(s.code)}><div className="opt-emoji">🍽️</div><div className="opt-body"><div className="opt-title">Tamanho {s.code}</div></div><div className="opt-price">{money(s.price)}</div></div>
+                <div key={s.code} className="opt" onClick={() => addMacarronadaSize(s.code)}><div className="opt-emoji"><UtensilsCrossed size="1em" strokeWidth={2} aria-hidden="true" /></div><div className="opt-body"><div className="opt-title">Tamanho {s.code}</div></div><div className="opt-price">{money(s.price)}</div></div>
               ))}
             </section>
           )}
@@ -1774,7 +1817,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
               <TopBack onClick={backFromCart} title="Sacola" />
               {restoredDraft && (
                 <div style={{ display: "flex", alignItems: "flex-start", gap: 10, background: "var(--brand-soft)", border: "1px solid var(--brand)", borderRadius: 14, padding: "12px 14px", marginBottom: 14 }}>
-                  <span style={{ fontSize: 20, flexShrink: 0 }}>🍕</span>
+                  <Pizza size={20} strokeWidth={2} aria-hidden="true" style={{ flexShrink: 0 }} />
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text)" }}>Seu pedido continua aqui</div>
                     <div style={{ fontSize: 13, color: "var(--text-sub)", marginTop: 2 }}>Restauramos o que você já tinha escolhido.</div>
@@ -1990,13 +2033,16 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                         Desconto da recompensa aplicado: {money(pedidoConfirmado.descontoResgateCentavos / 100)}
                       </p>
                     )}
-                    <a href="/cliente" style={{ display: "block", background: "var(--surface)", border: "1px solid var(--line-strong)", borderRadius: 12, padding: "12px 14px", marginBottom: 16, textDecoration: "none", textAlign: "left" }}>
-                      <span style={{ display: "block", fontSize: 14, fontWeight: 700, color: "var(--text)" }}>🎁 Quer que essa compra conte para sua fidelidade?</span>
-                      <span style={{ display: "block", fontSize: 12.5, color: "var(--text-sub)", marginTop: 2 }}>Entre com seu WhatsApp e acompanhe seu progresso.</span>
+                    <a href="/cliente" style={{ display: "flex", alignItems: "center", gap: 10, background: "var(--surface)", border: "1px solid var(--line-strong)", borderRadius: 12, padding: "12px 14px", marginBottom: 16, textDecoration: "none", textAlign: "left" }}>
+                      <Gift size={18} strokeWidth={2} aria-hidden="true" style={{ flexShrink: 0, color: "var(--brand, #ff6b00)" }} />
+                      <span style={{ flex: 1 }}>
+                        <span style={{ display: "block", fontSize: 14, fontWeight: 700, color: "var(--text)" }}>Quer que essa compra conte para sua fidelidade?</span>
+                        <span style={{ display: "block", fontSize: 12.5, color: "var(--text-sub)", marginTop: 2 }}>Entre com seu WhatsApp e acompanhe seu progresso.</span>
+                      </span>
                     </a>
                     {isPagamentoPix && (
                       <div style={{ textAlign: "left", background: "var(--surface)", border: "1px solid var(--line-strong)", borderRadius: 10, padding: "14px", marginBottom: 16 }}>
-                        <CardapioIllustration compact icon={statusPixCliente === "pago" ? ICONS.check : CARDAPIO_ILLUSTRATIONS.aguardandoPix.icon} title={statusPixCliente === "aguardando_pix" ? "Quase lá, falta o Pix" : PIX_STATUS_LABEL[statusPixCliente]} />
+                        <CardapioIllustration compact icon={statusPixCliente === "pago" ? CheckCircle2 : CARDAPIO_ILLUSTRATIONS.aguardandoPix.icon} title={statusPixCliente === "aguardando_pix" ? "Quase lá, falta o Pix" : PIX_STATUS_LABEL[statusPixCliente]} />
                         <div style={{ display: "inline-flex", marginTop: 12, marginBottom: 12, padding: "5px 10px", borderRadius: 999, background: statusPixCliente === "pago" ? "var(--green-soft)" : "var(--brand-soft)", color: statusPixCliente === "pago" ? "var(--green)" : "var(--brand)", fontSize: 12, fontWeight: 800 }}>
                           {PIX_STATUS_LABEL[statusPixCliente]}
                         </div>
@@ -2281,7 +2327,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                     const esg = esgotados.includes(f);
                     return (
                       <div key={`modal-${section.title}-${f}`} className={`opt flavor-opt ${f === f1 || f === f2 ? "sel" : ""} ${esg ? "esg" : ""}`} onClick={() => !esg && pickFlavor(f)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }}>
-                        <div className="opt-emoji">🍕</div><div className="opt-body"><div className="opt-title">{f}</div>{esg && <div className="opt-desc" style={{ color: "#ef4444" }}>Esgotado</div>}</div><div className="opt-check" />
+                        <div className="opt-emoji"><Pizza size="1em" strokeWidth={2} aria-hidden="true" /></div><div className="opt-body"><div className="opt-title">{f}</div>{esg && <div className="opt-desc" style={{ color: "#ef4444" }}>Esgotado</div>}</div><div className="opt-check" />
                       </div>
                     );
                   })}
@@ -2325,7 +2371,7 @@ export default function CardapioPage() {
 
   if (erro) return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, background: "#060606", color: "#f5f2ee", fontFamily: "system-ui", padding: 24 }}>
-      <div style={{ fontSize: 40 }}>🍕</div>
+      <AlertTriangle size={40} strokeWidth={2} aria-hidden="true" />
       <p style={{ fontWeight: 700, fontSize: 16, margin: 0 }}>Não foi possível carregar o cardápio.</p>
       <button onClick={retry} style={{ border: "1px solid #333", background: "transparent", color: "#f5f2ee", padding: "10px 20px", borderRadius: 10, cursor: "pointer", fontSize: 14 }}>Tentar de novo</button>
     </div>
@@ -2333,7 +2379,7 @@ export default function CardapioPage() {
 
   if (!menu) return (
     <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#060606", color: "#f5f2ee", fontFamily: "system-ui" }}>
-      <div style={{ textAlign: "center" }}><div style={{ fontSize: 36, marginBottom: 12 }}>🍕</div><p>Carregando cardápio…</p></div>
+      <div style={{ textAlign: "center" }}><div style={{ marginBottom: 12, display: "flex", justifyContent: "center" }}><Pizza size={36} strokeWidth={2} aria-hidden="true" /></div><p>Carregando cardápio…</p></div>
     </div>
   );
 
