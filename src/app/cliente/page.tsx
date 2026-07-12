@@ -84,6 +84,9 @@ export default function ClientePage() {
 
   useEffect(() => {
     try {
+      // localStorage não existe no SSR — leitura só pode acontecer no efeito,
+      // após a hidratação, por isso o setState aqui é intencional.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setPedidoAtivoId(lerPedidoAtivoId(localStorage.getItem('cf_ultimo_pedido')))
     } catch {}
   }, [])
