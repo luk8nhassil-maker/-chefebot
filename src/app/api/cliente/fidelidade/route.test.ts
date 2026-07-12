@@ -5,9 +5,11 @@ const extratosPorCliente = new Map<string, unknown[]>();
 let configPontos: Record<string, unknown> | null = null;
 let pizzasAntigasPorCliente = new Map<string, number>();
 let recompensasPorCliente = new Map<string, unknown[]>();
+let clientesAtivados = new Set<string>();
 
 vi.mock("@/lib/clienteAuth", () => ({
   CLIENTE_COOKIE: "cliente-token",
+  cookieOptionsSessaoCliente: () => ({ httpOnly: true, sameSite: "lax", secure: false, path: "/", maxAge: 1296000 }),
   verificarTokenCliente: vi.fn(async (token: string) => {
     if (token === "token-cliente-a") return { clienteId: "cli_a", telefone: "11900000001" };
     if (token === "token-cliente-b") return { clienteId: "cli_b", telefone: "11900000002" };
@@ -35,6 +37,7 @@ vi.mock("@/lib/fidelidade", async () => {
     obterConfigFidelidadePontos: vi.fn(async () => configPontos ?? actual.CONFIG_FIDELIDADE_PONTOS_PADRAO),
     obterSaldoAntigoPizzas: vi.fn(async (clienteId: string) => pizzasAntigasPorCliente.get(clienteId) ?? 0),
     obterRecompensasPontos: vi.fn(async (clienteId: string) => recompensasPorCliente.get(clienteId) ?? []),
+    clienteAtivouPontos: vi.fn(async (clienteId: string) => clientesAtivados.has(clienteId)),
   };
 });
 
@@ -60,6 +63,7 @@ beforeEach(() => {
   extratosPorCliente.clear();
   pizzasAntigasPorCliente = new Map();
   recompensasPorCliente = new Map();
+  clientesAtivados = new Set();
   configPontos = null;
 });
 
@@ -338,6 +342,30 @@ describe("GET /api/cliente/fidelidade — recompensas abertas e historico (CTA n
 
     expect(body.ativo).toBe(false);
     expect(body.recompensas).toHaveLength(1); // dado bruto exposto; front so mostra CTA se ativo && metaAtingida && recompensas.length>0
+  });
+});
+
+describe("GET /api/cliente/fidelidade — ativacao do programa por cliente", () => {
+  test("cliente que nunca ativou recebe clienteAtivou=false, mesmo com saldo e config ativa", async () => {
+    configPontos = { ativo: true, metaPontos: 100, descricaoRecompensa: "x" };
+    extratosPorCliente.set("cli_a", [mov({ tipo: "confirmado", pontos: 50, pedidoId: "p1" })]);
+    const res = await GET(requestComCookie("token-cliente-a"));
+    const body = await res.json();
+    expect(body.clienteAtivou).toBe(false);
+  });
+
+  test("cliente que ativou recebe clienteAtivou=true", async () => {
+    clientesAtivados.add("cli_a");
+    const res = await GET(requestComCookie("token-cliente-a"));
+    const body = await res.json();
+    expect(body.clienteAtivou).toBe(true);
+  });
+
+  test("ativacao de um cliente nunca vaza para outro", async () => {
+    clientesAtivados.add("cli_a");
+    const res = await GET(requestComCookie("token-cliente-b"));
+    const body = await res.json();
+    expect(body.clienteAtivou).toBe(false);
   });
 });
 

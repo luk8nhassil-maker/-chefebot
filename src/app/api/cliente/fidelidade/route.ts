@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verificarTokenCliente, CLIENTE_COOKIE } from "@/lib/clienteAuth";
+import { verificarTokenCliente, CLIENTE_COOKIE, cookieOptionsSessaoCliente } from "@/lib/clienteAuth";
 import { buscarClientePorId } from "@/lib/clientes";
 import {
   obterExtratoPontos,
@@ -12,6 +12,7 @@ import {
   calcularProgressoPontos,
   ordenarExtratoPontosDesc,
   derivarClienteIdPorTelefone,
+  clienteAtivouPontos,
 } from "@/lib/fidelidade";
 
 // GET /api/cliente/fidelidade — saldo, progresso e extrato da fidelidade por
@@ -45,11 +46,12 @@ export async function GET(req: NextRequest) {
   const limite = resolverLimite(searchParams);
   const clienteIdPontos = derivarClienteIdPorTelefone(cliente.telefone) ?? cliente.clienteId;
 
-  const [extratoCompleto, config, pizzasAcumuladas, recompensasCompletas] = await Promise.all([
+  const [extratoCompleto, config, pizzasAcumuladas, recompensasCompletas, clienteAtivou] = await Promise.all([
     obterExtratoPontos(clienteIdPontos),
     obterConfigFidelidadePontos(),
     obterSaldoAntigoPizzas(cliente.clienteId).catch(() => 0),
     obterRecompensasPontos(clienteIdPontos),
+    clienteAtivouPontos(clienteIdPontos),
   ]);
 
   const saldoPontos = calcularSaldoDoExtrato(extratoCompleto);
@@ -81,7 +83,12 @@ export async function GET(req: NextRequest) {
     .filter((r) => r.status === "resgatada" || r.status === "expirada")
     .map((r) => ({ recompensaId: r.recompensaId, status: r.status, criadoEm: r.createdAt }));
 
-  return NextResponse.json({
+  const res = NextResponse.json({
+    // Ativacao do programa é POR CLIENTE (opt-in explícito na Área do
+    // Cliente) — distinta de `ativo`, que é a configuração global da loja.
+    // O front nunca mostra saldo/progresso/recompensa quando `clienteAtivou`
+    // é false, mesmo que `ativo` seja true.
+    clienteAtivou,
     ativo: config.ativo,
     descricaoRecompensa: config.descricaoRecompensa,
     saldoPontos,
@@ -97,4 +104,6 @@ export async function GET(req: NextRequest) {
       pizzasAcumuladas,
     },
   });
+  res.cookies.set(CLIENTE_COOKIE, token, cookieOptionsSessaoCliente());
+  return res;
 }

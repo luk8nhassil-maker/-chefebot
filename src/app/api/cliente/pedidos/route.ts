@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verificarTokenCliente, CLIENTE_COOKIE } from "@/lib/clienteAuth";
+import { verificarTokenCliente, CLIENTE_COOKIE, cookieOptionsSessaoCliente } from "@/lib/clienteAuth";
 import { buscarClientePorId } from "@/lib/clientes";
 import { redis } from "@/lib/redis";
 import {
@@ -41,8 +41,10 @@ export async function GET(req: NextRequest) {
   const ordenados = ordenarPedidosMaisNovoPrimeiro(doCliente);
   const resumos = ordenados.map(paraResumoPublico);
 
-  return new NextResponse(JSON.stringify({ pedidos: resumos }), {
+  const res = new NextResponse(JSON.stringify({ pedidos: resumos }), {
     status: 200,
     headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
   });
+  res.cookies.set(CLIENTE_COOKIE, token, cookieOptionsSessaoCliente());
+  return res;
 }

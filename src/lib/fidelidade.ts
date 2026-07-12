@@ -1041,6 +1041,30 @@ export async function registrarMovimentoPontosIdempotente(
  * saldo — nunca dois saldos para o mesmo telefone, com ou sem o cliente
  * ainda ter ativado o perfil no app.
  */
+function chaveAtivacaoPontos(clienteId: string): string {
+  return `fidelidade:pontos:ativacao:${clienteId}`;
+}
+
+/**
+ * Ativacao do programa de pontos POR CLIENTE — distinta da config global
+ * `ConfigFidelidadePontos.ativo` (que liga/desliga o programa pra toda a
+ * loja). Um cliente so ve saldo/progresso/recompensa depois de ativar
+ * explicitamente (botao "Ativar meus pontos" na Area do Cliente); antes
+ * disso a tela mostra só o convite pra ativar, mesmo que o programa já
+ * esteja ligado na loja inteira. Idempotente: ativar de novo não apaga o
+ * `ativadoEm` original.
+ */
+export async function clienteAtivouPontos(clienteId: string): Promise<boolean> {
+  const registro = await redis.get<{ ativadoEm: string }>(chaveAtivacaoPontos(clienteId));
+  return !!registro;
+}
+
+export async function ativarPontosCliente(clienteId: string): Promise<void> {
+  const jaAtivo = await redis.get(chaveAtivacaoPontos(clienteId));
+  if (jaAtivo) return;
+  await redis.set(chaveAtivacaoPontos(clienteId), { ativadoEm: new Date().toISOString() });
+}
+
 export function derivarClienteIdPorTelefone(telefone?: string): string | undefined {
   if (!telefone) return undefined;
   const sanitizado = sanitizeTelefoneCliente(telefone);

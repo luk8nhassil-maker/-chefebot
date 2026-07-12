@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verificarTokenCliente, CLIENTE_COOKIE } from "@/lib/clienteAuth";
+import { verificarTokenCliente, CLIENTE_COOKIE, cookieOptionsSessaoCliente } from "@/lib/clienteAuth";
 import { buscarClientePorId } from "@/lib/clientes";
 import { obterProgressoFidelidade } from "@/lib/fidelidade";
 import { redis } from "@/lib/redis";
@@ -38,9 +38,13 @@ export async function GET(req: NextRequest) {
     console.error("[ChefeBot] Erro ao buscar pedidos do cliente:", err);
   }
 
-  return NextResponse.json({
+  const res = NextResponse.json({
     cliente: { nome: cliente.nome ?? null, telefone: cliente.telefone },
     fidelidade,
     ultimosPedidos,
   });
+  // Expiracao deslizante: todo acesso autenticado renova o cookie (e o TTL
+  // no Redis, ja renovado dentro de verificarTokenCliente) para mais 15 dias.
+  res.cookies.set(CLIENTE_COOKIE, token, cookieOptionsSessaoCliente());
+  return res;
 }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verificarTokenCliente, CLIENTE_COOKIE } from "@/lib/clienteAuth";
+import { verificarTokenCliente, CLIENTE_COOKIE, cookieOptionsSessaoCliente } from "@/lib/clienteAuth";
 import { buscarClientePorId } from "@/lib/clientes";
 import {
   derivarClienteIdPorTelefone,
@@ -53,13 +53,15 @@ export async function POST(req: NextRequest) {
 
   try {
     const reserva = await reservarResgatePontos(clienteIdPontos, recompensaId);
-    return NextResponse.json({
+    const res = NextResponse.json({
       ok: true,
       resgateId: reserva.resgateId,
       valorDescontoMaximo: reserva.valorDescontoMaximo,
       pontosReservados: reserva.pontosReservados,
       expiraEm: reserva.expiraEm,
     });
+    res.cookies.set(CLIENTE_COOKIE, token, cookieOptionsSessaoCliente());
+    return res;
   } catch (err) {
     const mensagem = err instanceof Error ? err.message : "Erro ao reservar resgate";
     return NextResponse.json({ error: mensagem }, { status: 409 });

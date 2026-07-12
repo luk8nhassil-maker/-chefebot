@@ -18,6 +18,7 @@ type Movimento = {
 type Recompensa = { recompensaId: string; status: string; criadoEm: string }
 
 type Fidelidade = {
+  clienteAtivou: boolean
   ativo: boolean
   descricaoRecompensa: string
   saldoPontos: number
@@ -72,7 +73,7 @@ const cores = {
 }
 
 export default function ClientePage() {
-  const [step, setStep] = useState<'carregando' | 'telefone' | 'otp' | 'perfil'>('carregando')
+  const [step, setStep] = useState<'carregando' | 'convite' | 'telefone' | 'otp' | 'perfil'>('carregando')
   const [telefone, setTelefone] = useState('')
   const [codigo, setCodigo] = useState('')
   const [erro, setErro] = useState('')
@@ -81,6 +82,14 @@ export default function ClientePage() {
   const [fidelidade, setFidelidade] = useState<Fidelidade | null>(null)
   const [resgatando, setResgatando] = useState(false)
   const [resgateErro, setResgateErro] = useState('')
+  const [autenticado, setAutenticado] = useState(false)
+  // Marca que o login foi iniciado a partir do botão "Ativar meus pontos"
+  // (cliente ainda não autenticado): assim que o WhatsApp for confirmado, o
+  // programa é ativado automaticamente, sem exigir um segundo toque.
+  const [ativarAposLogin, setAtivarAposLogin] = useState(false)
+  const [ativando, setAtivando] = useState(false)
+  const [ativarErro, setAtivarErro] = useState('')
+  const [comoFuncionamAberto, setComoFuncionamAberto] = useState(false)
 
   // Retorno seguro pós-login (ex.: veio de "Pedido" no menu inferior sem
   // sessão ativa): só aceita destinos de uma allowlist explícita, nunca uma
@@ -106,9 +115,14 @@ export default function ClientePage() {
         fetch('/api/cliente/fidelidade', { cache: 'no-store' }),
       ])
       if (resPerfil.ok && resFidelidade.ok) {
+        const dadosFidelidade: Fidelidade = await resFidelidade.json()
         setPerfil(await resPerfil.json())
-        setFidelidade(await resFidelidade.json())
-        setStep('perfil')
+        setFidelidade(dadosFidelidade)
+        setAutenticado(true)
+        // Cliente que ainda não ativou o programa nunca vê saldo, progresso
+        // ou recompensa — só o convite para ativar (ver render do step
+        // 'convite' mais abaixo).
+        setStep(dadosFidelidade.clienteAtivou ? 'perfil' : 'convite')
         return true
       }
     } catch {}
@@ -117,11 +131,39 @@ export default function ClientePage() {
 
   useEffect(() => {
     carregarPerfil().then((ok) => {
-      if (!ok) { setStep('telefone'); return }
+      if (!ok) { setStep('convite'); return }
       const destino = nextPermitidoAtual()
       if (destino) window.location.href = destino
     })
   }, [])
+
+  // Botão "Ativar meus pontos": se já autenticado, ativa direto; se não,
+  // inicia o fluxo atual de login por WhatsApp e ativa assim que a
+  // autenticação for concluída (ver confirmarCodigo).
+  function iniciarAtivacao() {
+    setAtivarErro('')
+    if (autenticado) {
+      confirmarAtivacao()
+      return
+    }
+    setAtivarAposLogin(true)
+    setErro('')
+    setStep('telefone')
+  }
+
+  async function confirmarAtivacao() {
+    setAtivando(true)
+    setAtivarErro('')
+    try {
+      const res = await fetch('/api/cliente/fidelidade/ativar', { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok || !data.ok) { setAtivarErro(data.error || 'Não foi possível ativar agora.'); setAtivando(false); return }
+      await carregarPerfil()
+    } catch {
+      setAtivarErro('Erro de conexão. Tente novamente.')
+    }
+    setAtivando(false)
+  }
 
   async function pedirCodigo() {
     setErro('')
@@ -154,6 +196,10 @@ export default function ClientePage() {
       if (!res.ok || !data.ok) { setErro(data.error || 'Código inválido'); setEnviando(false); return }
       const ok = await carregarPerfil()
       if (ok) {
+        if (ativarAposLogin) {
+          setAtivarAposLogin(false)
+          await confirmarAtivacao()
+        }
         const destino = nextPermitidoAtual()
         if (destino) { window.location.href = destino; return }
       }
@@ -167,7 +213,9 @@ export default function ClientePage() {
     setFidelidade(null)
     setTelefone('')
     setCodigo('')
-    setStep('telefone')
+    setAutenticado(false)
+    setAtivarAposLogin(false)
+    setStep('convite')
   }
 
   // CTA de resgate só aparece quando a meta atual (recalculada no servidor,
@@ -235,7 +283,7 @@ export default function ClientePage() {
           <div style={{ fontSize: 15, fontWeight: 700, color: cores.navy }}>Meus pontos</div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          {step === 'perfil' && (
+          {autenticado && (
             <button onClick={sair} aria-label="Sair da conta" style={{ background: 'none', border: 'none', color: cores.textoSecundario, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontFamily: 'Archivo, sans-serif' }}>
               <LogOut size={16} /> Sair
             </button>
@@ -256,6 +304,37 @@ export default function ClientePage() {
       >
         {step === 'carregando' && (
           <p style={{ textAlign: 'center', color: cores.textoSecundario, fontSize: 14 }}>Carregando...</p>
+        )}
+
+        {step === 'convite' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14, maxWidth: 420, margin: '0 auto' }}>
+            <div style={{ textAlign: 'center', marginBottom: 4 }}>
+              <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
+                <div style={{ background: cores.navyCard, borderRadius: 999, width: 64, height: 64, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Gift size={30} color={cores.amarelo} />
+                </div>
+              </div>
+              <h1 style={{ fontSize: 18, fontWeight: 800, margin: '0 0 6px' }}>Ative seus pontos</h1>
+              <p style={{ fontSize: 13.5, color: cores.textoSecundario, margin: 0, lineHeight: 1.5 }}>
+                A cada pedido você acumula pontos e troca por recompensas. Ative para começar a acompanhar seu saldo.
+              </p>
+            </div>
+            {ativarErro && <p style={{ color: cores.perigo, fontSize: 13, margin: 0, textAlign: 'center' }}>{ativarErro}</p>}
+            <button onClick={iniciarAtivacao} disabled={ativando} style={{ ...botaoPrimario, opacity: ativando ? 0.6 : 1 }}>
+              {ativando ? 'Ativando...' : 'Ativar meus pontos'}
+            </button>
+            {!autenticado && (
+              <button
+                onClick={() => { setAtivarAposLogin(false); setErro(''); setStep('telefone') }}
+                style={{ background: 'none', border: 'none', color: cores.textoSecundario, fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, fontFamily: 'Archivo, sans-serif' }}
+              >
+                <Phone size={14} /> Entrar com WhatsApp
+              </button>
+            )}
+            <a href="/pedido" style={{ textAlign: 'center', fontSize: 13, color: cores.textoSecundario, textDecoration: 'none' }}>
+              Prefiro pedir sem entrar agora
+            </a>
+          </div>
         )}
 
         {step === 'telefone' && (
@@ -340,7 +419,7 @@ export default function ClientePage() {
                   <div style={{ background: cores.cardBg, border: `1px solid ${cores.cardBorda}`, borderRadius: 16, padding: 22 }}>
                     <div style={{ fontSize: 13, color: cores.textoSecundario, marginBottom: 4 }}>Seu saldo de pontos</div>
                     <div style={{ fontSize: 56, fontWeight: 800, lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
-                      {fidelidade.saldoPontos}
+                      {fidelidade.saldoPontos} <span style={{ fontSize: 22, fontWeight: 700 }}>pts</span>
                     </div>
                     <div style={{ fontSize: 12.5, color: cores.textoTerciario, marginTop: 10 }}>A cada R$1 gasto = 1 ponto</div>
                   </div>
@@ -365,20 +444,32 @@ export default function ClientePage() {
                     </div>
                   ) : (
                     <div style={{ background: cores.cardBg, border: `1px solid ${cores.cardBorda}`, borderRadius: 16, padding: 22 }}>
+                      <p style={{ fontSize: 11, color: cores.textoTerciario, textTransform: 'uppercase', letterSpacing: 0.5, margin: '0 0 12px' }}>Seu progresso</p>
                       <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>
                         {fidelidade.saldoPontos} de {fidelidade.metaPontos} pontos
                       </div>
                       <div style={{ background: cores.moldura, borderRadius: 999, height: 12, overflow: 'hidden' }}>
                         <div style={{
-                          width: `${Math.min(100, fidelidade.progressoPercentual)}%`,
+                          width: `${Math.min(100, Math.max(0, fidelidade.progressoPercentual))}%`,
                           height: '100%',
                           background: cores.amarelo,
                           borderRadius: 999,
                         }} />
                       </div>
                       <p style={{ fontSize: 13, color: cores.textoSecundario, margin: '10px 0 0' }}>
-                        Faltam {fidelidade.pontosFaltantes} pontos para: {fidelidade.descricaoRecompensa}
+                        Faltam {fidelidade.pontosFaltantes} pontos para você ganhar {fidelidade.descricaoRecompensa}
                       </p>
+                      <button
+                        onClick={() => setComoFuncionamAberto((v) => !v)}
+                        style={{ background: 'none', border: 'none', color: cores.amarelo, fontSize: 12.5, fontWeight: 700, cursor: 'pointer', padding: 0, marginTop: 12, fontFamily: 'Archivo, sans-serif' }}
+                      >
+                        Como funcionam os pontos?
+                      </button>
+                      {comoFuncionamAberto && (
+                        <p style={{ fontSize: 12.5, color: cores.textoSecundario, margin: '8px 0 0', lineHeight: 1.5 }}>
+                          A cada R$1 gasto em pedidos você ganha 1 ponto. Os pontos entram no seu saldo quando o pedido é entregue — a taxa de entrega não conta. Ao atingir a meta, sua recompensa fica disponível para resgate.
+                        </p>
+                      )}
                     </div>
                   )}
 

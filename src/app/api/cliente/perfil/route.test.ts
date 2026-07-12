@@ -3,6 +3,7 @@ import { NextRequest } from "next/server";
 
 vi.mock("@/lib/clienteAuth", () => ({
   CLIENTE_COOKIE: "cliente-token",
+  cookieOptionsSessaoCliente: () => ({ httpOnly: true, sameSite: "lax", secure: false, path: "/", maxAge: 1296000 }),
   verificarTokenCliente: vi.fn(async (token: string) => {
     if (token === "token-cliente-a") return { clienteId: "cli_a", telefone: "11900000001" };
     return null;
