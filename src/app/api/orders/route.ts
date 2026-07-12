@@ -12,6 +12,7 @@ import {
   construirEventoIdPontos,
   obterExtratoPontos,
   derivarClienteIdPorTelefone,
+  reverterResgateConfirmado,
 } from '@/lib/fidelidade'
 
 const APP_BASE_URL = 'https://chefebot-pjif.vercel.app'
@@ -40,6 +41,8 @@ type Pedido = {
   horarioInicio?: string
   clienteId?: string
   pizzasCount?: number
+  resgateId?: string
+  descontoFidelidade?: number
   // Campos de arquivamento
   isArchived?: boolean
   archivedAt?: string
@@ -312,6 +315,25 @@ export async function PATCH(req: NextRequest) {
       }
     } catch (err) {
       console.error('[ChefeBot] Erro ao registrar cancelamento de pontos (ignorado):', err)
+    }
+
+    // Reverte resgate de fidelidade (Etapa 5), se este pedido tinha usado
+    // um: devolve os pontos gastos e reabre a recompensa. Idempotente por
+    // eventoId proprio — reprocessar o cancelamento nunca devolve pontos
+    // duas vezes.
+    if (pedidos[index].resgateId) {
+      try {
+        const clienteIdResgate = derivarClienteIdPorTelefone(pedidos[index].telefone)
+        if (clienteIdResgate) {
+          await reverterResgateConfirmado(
+            clienteIdResgate,
+            pedidos[index].resgateId,
+            `Pedido ${id} cancelado apos usar resgate de fidelidade`
+          )
+        }
+      } catch (err) {
+        console.error('[ChefeBot] Erro ao reverter resgate de fidelidade (ignorado):', err)
+      }
     }
   }
 

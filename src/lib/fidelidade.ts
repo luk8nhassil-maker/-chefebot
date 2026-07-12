@@ -292,6 +292,7 @@ const CHAVE_CONFIG_PONTOS = "config:fidelidade:pontos";
 export type EstadoPontosCliente = {
   extrato: MovimentoPontos[];
   recompensas: RecompensaPontosDesbloqueada[];
+  reservas: ReservaResgatePontos[];
 };
 
 function chaveEstadoPontos(clienteId: string): string {
@@ -310,6 +311,7 @@ function normalizarEstadoPontos(estado: EstadoPontosCliente | null | undefined):
   return {
     extrato: Array.isArray(estado?.extrato) ? estado.extrato : [],
     recompensas: Array.isArray(estado?.recompensas) ? estado.recompensas : [],
+    reservas: Array.isArray(estado?.reservas) ? estado.reservas : [],
   };
 }
 
@@ -351,6 +353,7 @@ async function obterEstadoPontos(clienteId: string): Promise<EstadoPontosCliente
   return {
     extrato: unirExtratosPontos(estado.extrato, legado),
     recompensas: estado.recompensas,
+    reservas: estado.reservas,
   };
 }
 
@@ -601,6 +604,261 @@ export async function obterRecompensasPontos(clienteId: string): Promise<Recompe
 }
 
 /**
+ * Estado de uma reserva de resgate (Etapa 5):
+ * - reservado: criada, aguardando o checkout confirmar (ou expirar).
+ * - confirmado: pedido criado com sucesso usando esta reserva; o movimento
+ *   "resgatado" já foi registrado no extrato.
+ * - cancelado: descartada antes de confirmar (checkout abandonado) ou
+ *   revertida depois de confirmada (pedido cancelado — ver
+ *   `reverterResgateConfirmado`).
+ * - expirado: passou da validade sem ser confirmada nem cancelada
+ *   explicitamente — tratado como cancelada na prática (nunca mais pode ser
+ *   confirmada), a diferenciação existe só para auditoria.
+ */
+export type StatusReservaResgatePontos = "reservado" | "confirmado" | "cancelado" | "expirado";
+
+export type ReservaResgatePontos = {
+  resgateId: string;
+  clienteId: string;
+  recompensaId: string;
+  /** Pontos que serão debitados do saldo confirmado quando a reserva for confirmada — sempre a meta vigente no momento da reserva. */
+  pontosReservados: number;
+  /** Valor máximo de desconto em R$ (valor-base da Pizza Família configurado), calculado na hora da reserva — nunca confia em valor vindo do cliente. */
+  valorDescontoMaximo: number;
+  status: StatusReservaResgatePontos;
+  createdAt: string;
+  expiraEm: string;
+  /** Preenchido só depois de confirmada. */
+  pedidoId?: string;
+};
+
+export async function obterReservasResgatePontos(clienteId: string): Promise<ReservaResgatePontos[]> {
+  return (await obterEstadoPontos(clienteId)).reservas;
+}
+
+const RESERVA_RESGATE_VALIDADE_MINUTOS = 15;
+
+function novaExpiracaoReservaResgate(): string {
+  return new Date(Date.now() + RESERVA_RESGATE_VALIDADE_MINUTOS * 60_000).toISOString();
+}
+
+function reservaResgateExpirada(reserva: ReservaResgatePontos, agora: Date = new Date()): boolean {
+  return new Date(reserva.expiraEm).getTime() < agora.getTime();
+}
+
+/**
+ * Reserva o resgate de uma recompensa disponível — SEMPRE revalida saldo,
+ * meta e configuração atuais no momento da reserva (nunca confia só no
+ * `status` salvo da recompensa nem no snapshot de desbloqueio
+ * `pontosNaDesbloqueio`). Atômica por cliente, dentro do mesmo lock/escrita
+ * condicionada usados pelo crédito — nenhuma escrita se a recompensa não
+ * existir, não estiver mais disponível, ou o saldo atual não bater mais a
+ * meta. Reserva ativa (não expirada) para a mesma recompensa é devolvida em
+ * vez de duplicada. Não desconta pontos aqui — só o resgate CONFIRMADO
+ * (`confirmarResgatePontos`) debita o saldo; reserva sozinha nunca move o
+ * extrato, então cancelar/deixar expirar uma reserva não confirmada não
+ * exige nenhuma restauração.
+ */
+export async function reservarResgatePontos(clienteId: string, recompensaId: string): Promise<ReservaResgatePontos> {
+  return comBloqueioCliente(clienteId, async (token) => {
+    const estado = await obterEstadoPontos(clienteId);
+
+    const recompensa = estado.recompensas.find((r) => r.recompensaId === recompensaId);
+    if (!recompensa) throw new Error("Recompensa nao encontrada");
+    if (recompensa.status !== "disponivel" && recompensa.status !== "notificada") {
+      throw new Error("Recompensa nao esta mais disponivel para resgate");
+    }
+
+    const config = await obterConfigFidelidadePontos();
+    if (!config.ativo) throw new Error("Fidelidade nao esta ativa");
+    const meta = calcularMetaPontos(config);
+    const saldoAtual = calcularSaldoDoExtrato(estado.extrato);
+    if (meta <= 0 || saldoAtual < meta) {
+      throw new Error("Saldo atual nao atende mais a meta da recompensa");
+    }
+
+    const reservaAtiva = estado.reservas.find(
+      (r) => r.recompensaId === recompensaId && r.status === "reservado" && !reservaResgateExpirada(r)
+    );
+    if (reservaAtiva) return reservaAtiva;
+
+    const valorDescontoMaximo = Number(config.valorPizzaFamiliaReferencia) > 0 ? Number(config.valorPizzaFamiliaReferencia) : 0;
+
+    const reserva: ReservaResgatePontos = {
+      resgateId: novoId("rsg"),
+      clienteId,
+      recompensaId,
+      pontosReservados: meta,
+      valorDescontoMaximo,
+      status: "reservado",
+      createdAt: new Date().toISOString(),
+      expiraEm: novaExpiracaoReservaResgate(),
+    };
+
+    // limpa reservas antigas expiradas da mesma recompensa (nao acumula lixo)
+    const reservasFiltradas = estado.reservas.filter(
+      (r) => !(r.recompensaId === recompensaId && r.status === "reservado" && reservaResgateExpirada(r))
+    );
+    const novasReservas = [...reservasFiltradas, reserva];
+
+    const persistiu = await persistirEstadoPontosSeDono(clienteId, token, {
+      extrato: estado.extrato,
+      recompensas: estado.recompensas,
+      reservas: novasReservas,
+    });
+    if (!persistiu) throw new Error("Fidelidade por pontos: lock expirou antes de reservar — tente novamente");
+
+    return reserva;
+  });
+}
+
+/**
+ * Confirma uma reserva de resgate — SEMPRE junto com a criação real do
+ * pedido que a usa. Debita `pontosReservados` do saldo (movimento
+ * "resgatado"), marca a recompensa como "resgatada" e a reserva como
+ * "confirmado" — tudo na mesma escrita atômica condicionada ao lock.
+ * Idempotente por `eventoId` (`resgatado:{pedidoId}:{resgateId}`):
+ * reprocessar a confirmação do mesmo pedido/reserva nunca debita duas
+ * vezes. Lança erro se a reserva não existir, já não for mais "reservado"
+ * (exceto se já confirmada para o MESMO pedido — nesse caso devolve o
+ * movimento existente), ou tiver expirado.
+ */
+export async function confirmarResgatePontos(
+  clienteId: string,
+  resgateId: string,
+  pedidoId: string
+): Promise<MovimentoPontos | null> {
+  const eventoId = `resgatado:${pedidoId}:${resgateId}`;
+
+  return comBloqueioCliente(clienteId, async (token) => {
+    const estado = await obterEstadoPontos(clienteId);
+    const jaProcessado = estado.extrato.find((m) => m.eventoId === eventoId);
+    if (jaProcessado) return jaProcessado; // reprocessamento idempotente
+
+    const reserva = estado.reservas.find((r) => r.resgateId === resgateId);
+    if (!reserva) throw new Error("Reserva de resgate nao encontrada");
+    if (reserva.status !== "reservado") throw new Error(`Reserva nao esta mais disponivel para confirmar (status atual: ${reserva.status})`);
+    if (reservaResgateExpirada(reserva)) throw new Error("Reserva de resgate expirada");
+
+    const registroSemSaldo: MovimentoPontos = {
+      movimentoId: novoId("pt"),
+      clienteId,
+      pedidoId,
+      tipo: "resgatado",
+      pontos: reserva.pontosReservados,
+      motivo: `Resgate da recompensa ${reserva.recompensaId} no pedido ${pedidoId}`,
+      createdAt: new Date().toISOString(),
+      eventoId,
+    };
+    const novoExtrato = [...estado.extrato, registroSemSaldo];
+    const saldoApos = calcularSaldoDoExtrato(novoExtrato);
+    const registro: MovimentoPontos = { ...registroSemSaldo, saldoApos };
+    novoExtrato[novoExtrato.length - 1] = registro;
+
+    const config = await obterConfigFidelidadePontos();
+    const meta = calcularMetaPontos(config);
+    let novasRecompensas = estado.recompensas.map((r) =>
+      r.recompensaId === reserva.recompensaId ? { ...r, status: "resgatada" as StatusRecompensaPontos } : r
+    );
+    novasRecompensas = aplicarQuedaAbaixoDaMeta(novasRecompensas, meta, saldoApos);
+
+    const novasReservas = estado.reservas.map((r) =>
+      r.resgateId === resgateId ? { ...r, status: "confirmado" as StatusReservaResgatePontos, pedidoId } : r
+    );
+
+    const persistiu = await persistirEstadoPontosSeDono(clienteId, token, {
+      extrato: novoExtrato,
+      recompensas: novasRecompensas,
+      reservas: novasReservas,
+    });
+    if (!persistiu) throw new Error("Fidelidade por pontos: lock expirou antes de confirmar o resgate — tente novamente");
+
+    return registro;
+  });
+}
+
+/**
+ * Cancela uma reserva ainda não confirmada — idempotente (cancelar de novo,
+ * ou uma reserva que já não existe mais/já expirou, nunca lança erro, só
+ * retorna `false`). Como a reserva sozinha nunca debitou pontos, cancelar
+ * não precisa devolver nada ao saldo — a recompensa continua "disponivel"
+ * (ela nunca deixou de estar) para uma nova tentativa de resgate.
+ */
+export async function cancelarReservaResgatePontos(clienteId: string, resgateId: string): Promise<boolean> {
+  return comBloqueioCliente(clienteId, async (token) => {
+    const estado = await obterEstadoPontos(clienteId);
+    const reserva = estado.reservas.find((r) => r.resgateId === resgateId);
+    if (!reserva || reserva.status !== "reservado") return false;
+
+    const novasReservas = estado.reservas.map((r) =>
+      r.resgateId === resgateId ? { ...r, status: "cancelado" as StatusReservaResgatePontos } : r
+    );
+    return persistirEstadoPontosSeDono(clienteId, token, {
+      extrato: estado.extrato,
+      recompensas: estado.recompensas,
+      reservas: novasReservas,
+    });
+  });
+}
+
+/**
+ * Reverte um resgate JÁ CONFIRMADO — usado quando o pedido que o usou é
+ * cancelado depois do fato (ex.: pagamento não confirmado, pedido cancelado
+ * pelo cliente/painel). Devolve os pontos gastos (movimento "ajuste"
+ * positivo, nunca reescreve o "resgatado" original — histórico preservado),
+ * e a recompensa volta a ficar "disponivel" para um novo resgate.
+ * Idempotente por `eventoId` (`reversao:{resgateId}`): reverter duas vezes
+ * nunca devolve pontos duas vezes. Sem efeito (retorna `null`) se a reserva
+ * não existir ou não estiver "confirmado".
+ */
+export async function reverterResgateConfirmado(
+  clienteId: string,
+  resgateId: string,
+  motivo: string
+): Promise<MovimentoPontos | null> {
+  const eventoId = `reversao-resgate:${resgateId}`;
+
+  return comBloqueioCliente(clienteId, async (token) => {
+    const estado = await obterEstadoPontos(clienteId);
+    if (estado.extrato.some((m) => m.eventoId === eventoId)) return null; // ja revertido
+
+    const reserva = estado.reservas.find((r) => r.resgateId === resgateId);
+    if (!reserva || reserva.status !== "confirmado") return null;
+
+    const registroSemSaldo: MovimentoPontos = {
+      movimentoId: novoId("pt"),
+      clienteId,
+      pedidoId: reserva.pedidoId,
+      tipo: "ajuste",
+      pontos: reserva.pontosReservados,
+      motivo,
+      createdAt: new Date().toISOString(),
+      eventoId,
+    };
+    const novoExtrato = [...estado.extrato, registroSemSaldo];
+    const saldoApos = calcularSaldoDoExtrato(novoExtrato);
+    const registro: MovimentoPontos = { ...registroSemSaldo, saldoApos };
+    novoExtrato[novoExtrato.length - 1] = registro;
+
+    const novasRecompensas = estado.recompensas.map((r) =>
+      r.recompensaId === reserva.recompensaId && r.status === "resgatada" ? { ...r, status: "disponivel" as StatusRecompensaPontos } : r
+    );
+    const novasReservas = estado.reservas.map((r) =>
+      r.resgateId === resgateId ? { ...r, status: "cancelado" as StatusReservaResgatePontos } : r
+    );
+
+    const persistiu = await persistirEstadoPontosSeDono(clienteId, token, {
+      extrato: novoExtrato,
+      recompensas: novasRecompensas,
+      reservas: novasReservas,
+    });
+    if (!persistiu) throw new Error("Fidelidade por pontos: lock expirou antes de reverter o resgate — tente novamente");
+
+    return registro;
+  });
+}
+
+/**
  * Lê a flag de ambiente que habilita o ENVIO real da notificação de
  * recompensa desbloqueada. Nenhuma função deste arquivo envia mensagem —
  * esta etapa só registra o evento auditável e o estado "pendente"; o envio
@@ -757,7 +1015,7 @@ export async function registrarMovimentoPontosIdempotente(
     }
     novasRecompensas = aplicarQuedaAbaixoDaMeta(novasRecompensas, meta, saldoApos);
 
-    const persistiu = await persistirEstadoPontosSeDono(clienteId, token, { extrato: novoExtrato, recompensas: novasRecompensas });
+    const persistiu = await persistirEstadoPontosSeDono(clienteId, token, { extrato: novoExtrato, recompensas: novasRecompensas, reservas: estado.reservas });
     if (!persistiu) {
       // Perdemos a propriedade do lock (TTL expirou e outro processo ja
       // assumiu este cliente) — nada foi escrito. Nunca reportar sucesso

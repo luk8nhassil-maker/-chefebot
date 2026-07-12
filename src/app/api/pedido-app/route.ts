@@ -9,7 +9,7 @@ import { PROMOS_KEY, catalogoDoMenu, dentroDaJanela, precoFinalPromocao, promoca
 import { validarTokenCardapio } from "@/lib/cardapioToken";
 import { temDinheiroNoPagamento, valorDinheiroEsperado } from "@/lib/bot";
 import { verificarTokenCliente, CLIENTE_COOKIE } from "@/lib/clienteAuth";
-import { contarPizzas, calcularPontosElegiveisPedido, registrarMovimentoPontosIdempotente, construirEventoIdPontos, derivarClienteIdPorTelefone } from "@/lib/fidelidade";
+import { contarPizzas, calcularPontosElegiveisPedido, registrarMovimentoPontosIdempotente, construirEventoIdPontos, derivarClienteIdPorTelefone, obterReservasResgatePontos, confirmarResgatePontos } from "@/lib/fidelidade";
 
 export const maxDuration = 20;
 
@@ -37,6 +37,8 @@ type PedidoApp = {
   troco?: string;
   observacao?: string;
   email?: string;
+  /** resgateId de uma reserva de fidelidade (POST /api/cliente/fidelidade/resgate) aplicada neste pedido. */
+  resgateId?: string;
 };
 
 type MenuSimpleItem = { name: string; price: number; sizes?: { code: string; price: number }[] };
@@ -201,8 +203,42 @@ export async function POST(req: NextRequest) {
     const itens = itensValidados.map((item) => item.linha);
 
     const subtotal = itensValidados.reduce((s, item) => s + item.unitPrice! * item.qty, 0);
+
+    // Resgate de fidelidade (Etapa 5): desconto calculado EXCLUSIVAMENTE no
+    // servidor, a partir de uma reserva já validada (nunca um valor vindo do
+    // cliente). Identidade canônica é sempre o telefone do pedido — a mesma
+    // regra usada para crédito/previsto. Reserva expirada, inexistente ou já
+    // usada rejeita o pedido (isto é dinheiro, não um efeito colateral
+    // best-effort como o crédito de pontos).
+    let descontoFidelidade = 0;
+    let resgateAplicado: { clienteId: string; resgateId: string } | null = null;
+    if (body.resgateId) {
+      const clienteIdResgate = derivarClienteIdPorTelefone(telefonePedido);
+      if (!clienteIdResgate) {
+        return NextResponse.json({ ok: false, error: "Telefone inválido para aplicar o resgate" }, { status: 400 });
+      }
+      const reservas = await obterReservasResgatePontos(clienteIdResgate);
+      const reserva = reservas.find((r) => r.resgateId === body.resgateId);
+      if (!reserva || reserva.status !== "reservado") {
+        return NextResponse.json({ ok: false, error: "Resgate inválido ou já utilizado" }, { status: 400 });
+      }
+      if (new Date(reserva.expiraEm).getTime() < Date.now()) {
+        return NextResponse.json({ ok: false, error: "Resgate expirado — gere um novo resgate no app" }, { status: 400 });
+      }
+      // Desconto nunca ultrapassa o valor-base configurado nem o próprio
+      // subtotal (nunca deixa o pedido negativo); adicionais/borda/entrega já
+      // ficam de fora por construção (o desconto incide só sobre o subtotal
+      // dos produtos, antes da taxa de entrega).
+      descontoFidelidade = Math.max(0, Math.min(reserva.valorDescontoMaximo, subtotal));
+      if (descontoFidelidade <= 0) {
+        return NextResponse.json({ ok: false, error: "Pedido não atinge o valor mínimo para usar o resgate" }, { status: 400 });
+      }
+      resgateAplicado = { clienteId: clienteIdResgate, resgateId: reserva.resgateId };
+    }
+
+    const subtotalComDesconto = subtotal - descontoFidelidade;
     const taxa = computeTaxaApp(body.tipoEntrega, body.bairro, menu.neighborhoods as Array<{ name: string; fee: number }>);
-    const total = subtotal + taxa;
+    const total = subtotalComDesconto + taxa;
 
     // Troco (quando há dinheiro no pagamento, puro ou híbrido) é validado só
     // contra a parte em dinheiro — mesma regra do fluxo do WhatsApp (bot.ts).
@@ -257,6 +293,7 @@ export async function POST(req: NextRequest) {
       ...(whatsappVinculado ? { whatsappVinculado: true } : {}),
       ...(clienteId ? { clienteId } : {}),
       ...(pizzasCount > 0 ? { pizzasCount } : {}),
+      ...(resgateAplicado ? { resgateId: resgateAplicado.resgateId, descontoFidelidade } : {}),
       itens,
       total,
       status: "novo" as const,
@@ -276,6 +313,20 @@ export async function POST(req: NextRequest) {
     };
 
     await redis.set("pedidos", [...pedidos, novoPedido]);
+
+    // Confirma o resgate (Etapa 5): debita os pontos e marca a recompensa
+    // como usada, na mesma reserva já validada acima. O pedido já foi criado
+    // com o desconto aplicado independente do resultado desta chamada — se
+    // falhar, o pedido continua válido (o cliente já viu o preço com
+    // desconto), mas fica registrado para investigação; a reserva expira
+    // sozinha e nunca permite um segundo desconto sem nova validação.
+    if (resgateAplicado) {
+      try {
+        await confirmarResgatePontos(resgateAplicado.clienteId, resgateAplicado.resgateId, pedidoId);
+      } catch (err) {
+        console.error("[ChefeBot] Erro ao confirmar resgate de fidelidade (ignorado):", err);
+      }
+    }
 
     // Pontos previstos (modelo novo): a identidade canonica e o telefone do
     // pedido, nao a existencia de perfil ativo. A estimativa nunca afeta o
