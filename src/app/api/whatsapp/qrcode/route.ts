@@ -14,11 +14,13 @@ async function checkAuth(req: NextRequest): Promise<{ status: 401 | 403 } | { st
   return { status: 200 }
 }
 
-// Endpoint leve: apenas obtém o QR atual da instância existente.
+// Endpoint leve: apenas obtém o QR atual da instância existente. Chama
+// /instance/connect na Evolution API, que pode iniciar uma conexão/gerar QR
+// novo — por isso é POST, nunca GET (GET nunca deve alterar estado).
 // Não depende de Redis. Usado pelo botão e pelo auto-QR ao abrir a tela.
 // Para reset completo (delete + create), usar POST /api/whatsapp/reset.
 // Restrito a admin/dev — QR code dá acesso a conectar o WhatsApp da pizzaria.
-export async function GET(req: NextRequest) {
+export async function POST(req: NextRequest) {
   const auth = await checkAuth(req)
   if (auth.status === 401) return NextResponse.json({ error: 'Nao autorizado' }, { status: 401 })
   if (auth.status === 403) return NextResponse.json({ error: 'Sem permissao' }, { status: 403 })
@@ -37,10 +39,10 @@ export async function GET(req: NextRequest) {
       cache: 'no-store',
     })
     const data = await res.json().catch(() => ({}))
-    console.log('[QR] connect status:', res.status, 'has base64:', !!data?.base64, 'keys:', Object.keys(data || {}).join(','))
+    console.log('[QR] connect status:', res.status, 'has qr:', !!data?.base64)
 
     if (!res.ok) {
-      console.error('[QR] connect error:', JSON.stringify(data).slice(0, 300))
+      console.error('[QR] connect error, status:', res.status)
       // Repassa só a mensagem da Evolution API (ex.: "Application not found"
       // quando a instância foi perdida/apagada) — o admin precisa saber que
       // precisa resetar a conexão, não só que "deu erro". Nunca repassa o
@@ -55,7 +57,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json(data)
   } catch (e) {
-    console.error('[QR] erro inesperado:', e)
+    console.error('[QR] erro inesperado:', e instanceof Error ? e.name : 'erro desconhecido')
     return NextResponse.json({ error: 'Falha ao conectar à Evolution API' }, { status: 502 })
   }
 }

@@ -186,3 +186,111 @@ describe("POST /api/whatsapp/reset — erro sanitizado, sem segredos", () => {
     expect(data.error).toContain("QR code não gerado");
   });
 });
+
+describe("POST /api/whatsapp/reset — nenhum marcador sensivel aparece nos logs", () => {
+  const QR_MARCADOR = "QRSECRETO-NUNCA-DEVERIA-APARECER-NO-LOG";
+  const APIKEY_MARCADOR = "chave-de-teste";
+  const PAIRING_MARCADOR = "PAIRINGCODE-SECRETO-NUNCA-LOGAR";
+  const CORPO_BRUTO_MARCADOR = "CAMPO-INTERNO-SENSIVEL-NUNCA-LOGAR";
+
+  function textoDosLogs(logSpy: ReturnType<typeof vi.spyOn>, errorSpy: ReturnType<typeof vi.spyOn>): string {
+    return [...logSpy.mock.calls, ...errorSpy.mock.calls].map(c => c.map((a: unknown) => JSON.stringify(a)).join(" ")).join(" | ");
+  }
+
+  test("fluxo de criacao com QR: nenhum marcador de QR/apikey/pairingCode/corpo bruto aparece no log", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({ ok: false, status: 404, json: async () => ({ message: "not found" }) } as Response) // connectionState
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          instance: { campoInterno: CORPO_BRUTO_MARCADOR },
+          base64: QR_MARCADOR,
+          pairingCode: PAIRING_MARCADOR,
+        }),
+      } as Response) // create — já vem com QR
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({}) } as Response); // webhook
+
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const res = await POST(requestComCookie("token-admin"));
+    const data = await res.json();
+    expect(res.status).toBe(200);
+    expect(data.qrcode.base64).toBe(QR_MARCADOR); // a resposta HTTP pode conter o QR — só o log não pode
+
+    const texto = textoDosLogs(logSpy, errorSpy);
+    expect(texto).not.toContain(QR_MARCADOR);
+    expect(texto).not.toContain(APIKEY_MARCADOR);
+    expect(texto).not.toContain(PAIRING_MARCADOR);
+    expect(texto).not.toContain(CORPO_BRUTO_MARCADOR);
+
+    logSpy.mockRestore();
+    errorSpy.mockRestore();
+  });
+
+  test("fluxo de connect com QR: nenhum marcador de QR/pairingCode/corpo bruto aparece no log", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ instance: { state: "close" } }) } as Response) // connectionState
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ base64: QR_MARCADOR, pairingCode: PAIRING_MARCADOR, detalheInterno: CORPO_BRUTO_MARCADOR }),
+      } as Response); // connect
+
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const res = await POST(requestComCookie("token-admin"));
+    const data = await res.json();
+    expect(res.status).toBe(200);
+    expect(data.qrcode.base64).toBe(QR_MARCADOR);
+
+    const texto = textoDosLogs(logSpy, errorSpy);
+    expect(texto).not.toContain(QR_MARCADOR);
+    expect(texto).not.toContain(PAIRING_MARCADOR);
+    expect(texto).not.toContain(CORPO_BRUTO_MARCADOR);
+
+    logSpy.mockRestore();
+    errorSpy.mockRestore();
+  });
+
+  test("falha ao criar instancia: corpo bruto da resposta de erro nunca aparece no log", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({ ok: false, status: 404, json: async () => ({ message: "not found" }) } as Response) // connectionState
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        json: async () => ({ message: "Internal error", stack: CORPO_BRUTO_MARCADOR }),
+      } as Response); // create falha
+
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const res = await POST(requestComCookie("token-admin"));
+    expect(res.status).toBe(502);
+
+    const texto = textoDosLogs(logSpy, errorSpy);
+    expect(texto).not.toContain(CORPO_BRUTO_MARCADOR);
+
+    logSpy.mockRestore();
+    errorSpy.mockRestore();
+  });
+
+  test("erro inesperado (excecao de rede): mensagem do erro nunca aparece no log", async () => {
+    const MENSAGEM_SENSIVEL_DO_ERRO = "erro-com-detalhe-interno-sensivel-nunca-logar";
+    vi.mocked(fetch).mockRejectedValueOnce(new Error(MENSAGEM_SENSIVEL_DO_ERRO));
+
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const res = await POST(requestComCookie("token-admin"));
+    expect(res.status).toBe(502);
+
+    const texto = textoDosLogs(logSpy, errorSpy);
+    expect(texto).not.toContain(MENSAGEM_SENSIVEL_DO_ERRO);
+
+    logSpy.mockRestore();
+    errorSpy.mockRestore();
+  });
+});

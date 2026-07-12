@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { salvarStatusConexao } from '@/lib/conexaoWhatsapp'
 import { verifyToken } from '@/lib/auth'
 import { obterConfigEvolution } from '@/lib/evolutionApi'
 
@@ -16,7 +15,10 @@ async function checkAuth(req: NextRequest): Promise<{ status: 401 | 403 } | { st
 }
 
 // Consumido só por /admin e /setup (telas de admin/dev) — nenhum outro
-// papel precisa consultar o estado da conexão do WhatsApp.
+// papel precisa consultar o estado da conexão do WhatsApp. Só leitura: quem
+// mantém o Redis atualizado com o status real da conexão é o evento
+// "connection.update" recebido pelo webhook (src/app/api/whatsapp/route.ts),
+// nunca esta rota GET.
 export async function GET(req: NextRequest) {
   const auth = await checkAuth(req)
   if (auth.status === 401) return NextResponse.json({ error: 'Nao autorizado' }, { status: 401 })
@@ -36,14 +38,6 @@ export async function GET(req: NextRequest) {
       cache: 'no-store',
     })
     const data = await res.json()
-
-    // Sincroniza o Redis com o estado real da Evolution API (fonte de verdade em caso de dúvida)
-    const state = data?.instance?.state as string | undefined
-    if (state) {
-      const status = state === 'open' ? 'connected' : state === 'connecting' ? 'connecting' : 'disconnected'
-      await salvarStatusConexao(status)
-    }
-
     return NextResponse.json(data)
   } catch {
     return NextResponse.json({ error: 'Falha ao conectar à API' }, { status: 502 })

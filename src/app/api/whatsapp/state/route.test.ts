@@ -21,6 +21,7 @@ vi.mock("@/lib/conexaoWhatsapp", () => ({
 vi.stubGlobal("fetch", vi.fn());
 
 import { GET } from "./route";
+import { salvarStatusConexao } from "@/lib/conexaoWhatsapp";
 
 function requestComCookie(token?: string) {
   const init = token ? { headers: { cookie: `auth-token=${token}` } } : undefined;
@@ -63,6 +64,17 @@ describe("GET /api/whatsapp/state — autenticacao", () => {
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.instance.state).toBe("open");
+  });
+
+  test("GET nunca altera estado: nao chama salvarStatusConexao, mesmo com a instancia conectada", async () => {
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ instance: { state: "open" } }),
+    } as Response);
+
+    await GET(requestComCookie("token-admin"));
+    expect(salvarStatusConexao).not.toHaveBeenCalled();
   });
 
   test("dev continua consultando o estado normalmente", async () => {

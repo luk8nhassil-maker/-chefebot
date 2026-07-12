@@ -12,10 +12,10 @@ async function enviarOtpPorWhatsapp(telefone: string, codigo: string): Promise<v
   const texto = `Seu código para entrar no ChefeBot é: *${codigo}*\n\nVale por 5 minutos.`;
   const config = obterConfigEvolution();
   if (!config) {
-    // Provider não configurado (ou mal configurado): fallback seguro de
-    // dev/teste — nunca retornar o codigo na resposta HTTP, apenas
-    // registrar no log do servidor. Nunca tenta um host hardcoded antigo.
-    console.log(`[ChefeBot][dev] OTP para ${telefone}: ${codigo}`);
+    // Provider não configurado (ou mal configurado): não envia o OTP.
+    // Nunca registra telefone ou código no log — apenas uma mensagem
+    // genérica. Nunca tenta um host hardcoded antigo.
+    console.log("[ChefeBot] Provider de WhatsApp não configurado — OTP não enviado.");
     return;
   }
   try {

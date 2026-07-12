@@ -39,7 +39,7 @@ export async function POST(req: NextRequest) {
     });
     const stateData = await stateRes.json().catch(() => ({}));
     const estadoAtual = (stateData as { instance?: { state?: string } })?.instance?.state;
-    console.log("[RESET] connectionState:", stateRes.status, "state:", estadoAtual ?? "n/a");
+    console.log("[RESET] etapa: connectionState, status:", stateRes.status, "estado:", estadoAtual ?? "desconhecido");
 
     if (stateRes.ok && estadoAtual === "open") {
       await salvarStatusConexao("connected");
@@ -61,7 +61,8 @@ export async function POST(req: NextRequest) {
         cache: "no-store",
       });
       const createData = await createRes.json().catch(() => ({}));
-      console.log("[RESET] create:", createRes.status, JSON.stringify(createData).slice(0, 200));
+      const base64DoCreate = extrairQrBase64(createData);
+      console.log("[RESET] etapa: create, status:", createRes.status, "has qr:", !!base64DoCreate);
 
       if (createRes.status === 401 || createRes.status === 403) {
         return NextResponse.json({ ok: false, error: "Credencial inválida (EVOLUTION_API_KEY)." }, { status: 502 });
@@ -69,7 +70,7 @@ export async function POST(req: NextRequest) {
 
       const jaExiste = createRes.status === 409;
       if (!createRes.ok && !jaExiste) {
-        console.error("[RESET] create failed:", JSON.stringify(createData));
+        console.error("[RESET] etapa: create, falhou, status:", createRes.status);
         return NextResponse.json({ ok: false, error: "Falha ao criar instância" }, { status: 502 });
       }
 
@@ -88,9 +89,8 @@ export async function POST(req: NextRequest) {
         }),
         cache: "no-store",
       }).catch(() => null);
-      console.log("[RESET] webhook:", webhookRes?.status ?? "network-error");
+      console.log("[RESET] etapa: webhook, status:", webhookRes?.status ?? "network-error");
 
-      const base64DoCreate = extrairQrBase64(createData);
       if (base64DoCreate) {
         await salvarStatusConexao("connecting");
         return NextResponse.json({
@@ -112,15 +112,15 @@ export async function POST(req: NextRequest) {
       cache: "no-store",
     });
     const qrData = await connRes.json().catch(() => ({}));
-    console.log("[RESET] connect:", connRes.status, "has base64:", !!extrairQrBase64(qrData), "keys:", Object.keys(qrData || {}).join(","));
+    const base64 = extrairQrBase64(qrData);
+    console.log("[RESET] etapa: connect, status:", connRes.status, "has qr:", !!base64);
 
     if (connRes.status === 401 || connRes.status === 403) {
       return NextResponse.json({ ok: false, error: "Credencial inválida (EVOLUTION_API_KEY)." }, { status: 502 });
     }
 
-    const base64 = extrairQrBase64(qrData);
     if (!base64) {
-      console.error("[RESET] QR não gerado:", JSON.stringify(qrData).slice(0, 300));
+      console.error("[RESET] etapa: connect, QR não gerado, status:", connRes.status);
       return NextResponse.json({ ok: false, error: "QR code não gerado pela Evolution API" }, { status: 502 });
     }
 
@@ -136,7 +136,7 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (e) {
-    console.error("[RESET] Erro inesperado:", e);
+    console.error("[RESET] etapa: inesperada, erro:", e instanceof Error ? e.name : "erro desconhecido");
     return NextResponse.json({ ok: false, error: "Falha ao resetar conexão" }, { status: 502 });
   }
 }

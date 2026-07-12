@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import Image from 'next/image'
 import TourGuiado from '@/components/TourGuiado'
 import PanelShell from '@/components/PanelShell'
+import { interpretarRespostaReset } from '@/lib/whatsappResetResposta'
 import { LayoutDashboard, Pizza, Settings, Wallet, Wrench, ChefHat, DollarSign, TrendingUp, AlertTriangle, Camera, RefreshCw, Calendar, Star, Banknote } from 'lucide-react'
 
 type Pedido = {
@@ -314,7 +315,7 @@ export default function AdminPage() {
   // Tenta exibir QR atual sem reset (usado na abertura automática da tela)
   const tryAutoQr = async () => {
     try {
-      const res = await fetch('/api/whatsapp/qrcode')
+      const res = await fetch('/api/whatsapp/qrcode', { method: 'POST' })
       const d = await res.json()
       const base64 = d?.base64 || d?.qrcode?.base64 || null
       if (base64) startQrTimer(base64)
@@ -327,7 +328,7 @@ export default function AdminPage() {
     setWaExpired(false)
     setWaQrError(null)
     try {
-      const res = await fetch('/api/whatsapp/qrcode')
+      const res = await fetch('/api/whatsapp/qrcode', { method: 'POST' })
       const d = await res.json()
       const base64 = d?.base64 || d?.qrcode?.base64 || null
       if (base64) {
@@ -351,10 +352,10 @@ export default function AdminPage() {
     try {
       const res = await fetch('/api/whatsapp/reset', { method: 'POST' })
       const d = await res.json()
-      const base64 = d?.qrcode?.base64 || null
-      if (d?.ok && base64) {
-        startQrTimer(base64)
-      } else if (d?.ok && d?.estado === 'connected') {
+      const resultado = interpretarRespostaReset(d)
+      if (resultado.tipo === 'qr') {
+        startQrTimer(resultado.base64)
+      } else if (resultado.tipo === 'connected') {
         // Já estava conectado — reconectar não apaga nada, não é erro.
         setWaStatus('connected')
         setWaShowQr(false)
@@ -362,7 +363,7 @@ export default function AdminPage() {
         if (waPollRef.current) { clearInterval(waPollRef.current); waPollRef.current = null }
         if (waTimerRef.current) { clearInterval(waTimerRef.current); waTimerRef.current = null }
       } else {
-        setWaQrError(d?.error || 'Não foi possível resetar a conexão do WhatsApp.')
+        setWaQrError(resultado.mensagem)
       }
     } catch {
       setWaQrError('Erro de rede ao resetar a conexão.')
