@@ -1,5 +1,6 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { salvarStatusConexao } from "@/lib/conexaoWhatsapp";
+import { verifyToken } from "@/lib/auth";
 
 const _baseUrl    = process.env.EVOLUTION_API_URL ?? "evolution-api-production-8f99.up.railway.app";
 const BASE        = _baseUrl.startsWith("http") ? _baseUrl : `https://${_baseUrl}`;
@@ -7,7 +8,25 @@ const KEY         = process.env.EVOLUTION_API_KEY!;
 const INSTANCE    = "chefebot";
 const WEBHOOK_URL = "https://chefebot-pjif.vercel.app/api/whatsapp";
 
-export async function POST() {
+// Sem cookie ou token invalido/expirado -> 401 (sem sessao).
+// Sessao valida mas papel sem permissao -> 403.
+// Papel autorizado -> segue normalmente.
+async function checkAuth(req: NextRequest): Promise<{ status: 401 | 403 } | { status: 200; role: string }> {
+  const token = req.cookies.get("auth-token")?.value ?? null;
+  if (!token) return { status: 401 };
+  const payload = await verifyToken(token);
+  if (!payload) return { status: 401 };
+  if (!["admin", "dev"].includes(payload.role as string)) return { status: 403 };
+  return { status: 200, role: payload.role as string };
+}
+
+// Reseta a instância inteira (logout+delete+create) — mais destrutivo que o
+// simples "escanear QR", por isso restrito a admin/dev (nunca atendente).
+export async function POST(req: NextRequest) {
+  const auth = await checkAuth(req);
+  if (auth.status === 401) return NextResponse.json({ error: "Nao autorizado" }, { status: 401 });
+  if (auth.status === 403) return NextResponse.json({ error: "Sem permissao" }, { status: 403 });
+
   try {
     // 1) Logout (ignora erro — pode já estar desconectada)
     const logoutRes = await fetch(`${BASE}/instance/logout/${INSTANCE}`, {
@@ -41,7 +60,7 @@ export async function POST() {
 
     if (!createRes.ok) {
       console.error("[RESET] create failed:", JSON.stringify(createData));
-      return NextResponse.json({ ok: false, error: "Falha ao criar instância", detail: createData }, { status: 502 });
+      return NextResponse.json({ ok: false, error: "Falha ao criar instância" }, { status: 502 });
     }
 
     // 5) Configurar webhook na nova instância
@@ -72,7 +91,7 @@ export async function POST() {
     const base64 = qrData?.base64 || qrData?.qrcode?.base64 || null;
     if (!base64) {
       console.error("[RESET] QR não gerado:", JSON.stringify(qrData).slice(0, 300));
-      return NextResponse.json({ ok: false, error: "QR code não gerado pela Evolution API", detail: qrData }, { status: 502 });
+      return NextResponse.json({ ok: false, error: "QR code não gerado pela Evolution API" }, { status: 502 });
     }
 
     await salvarStatusConexao("connecting");
@@ -83,6 +102,6 @@ export async function POST() {
     });
   } catch (e) {
     console.error("[RESET] Erro inesperado:", e);
-    return NextResponse.json({ ok: false, error: "Falha ao resetar conexão", detail: String(e) }, { status: 502 });
+    return NextResponse.json({ ok: false, error: "Falha ao resetar conexão" }, { status: 502 });
   }
 }
