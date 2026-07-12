@@ -4,11 +4,11 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
 const FONT = "'Archivo', sans-serif"
-const BG = '#060606'
-const CARD = '#101010'
-const BORDER = '1px solid #1f1d1a'
-const TEXT = '#f4f1ec'
-const TEXT2 = '#a39b8b'
+const BG = 'var(--background)'
+const CARD = 'var(--surface)'
+const BORDER = '1px solid var(--border)'
+const TEXT = 'var(--foreground)'
+const TEXT2 = 'var(--foreground-secondary)'
 
 export default function RelatoriosPage() {
   const router = useRouter()
@@ -72,9 +72,9 @@ export default function RelatoriosPage() {
       <style>{`@keyframes slideUp { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }`}</style>
 
       {/* Header */}
-      <div style={{ background: '#0a0a0a', borderBottom: BORDER, padding: '18px 16px', paddingTop: 'calc(env(safe-area-inset-top) + 18px)', position: 'sticky', top: 0, zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <div style={{ background: 'var(--surface)', borderBottom: BORDER, padding: '18px 16px', paddingTop: 'calc(env(safe-area-inset-top) + 18px)', position: 'sticky', top: 0, zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: 1 }}>
-          <div style={{ width: 36, height: 36, borderRadius: 10, background: '#ff6b00', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0 }}>📊</div>
+          <div style={{ width: 36, height: 36, borderRadius: 10, background: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0 }}>📊</div>
           <div style={{ minWidth: 0 }}>
             <p style={{ color: TEXT, fontSize: 15, fontWeight: 700, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Relatórios</p>
             {userName && <p style={{ color: TEXT2, fontSize: 10, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Olá, {userName}</p>}
@@ -99,9 +99,9 @@ export default function RelatoriosPage() {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16 }}>
           {[
             { label: 'Total de pedidos', value: pedidos.length, color: TEXT },
-            { label: 'Entregues', value: entregues.length, color: '#4ade80' },
-            { label: 'Cancelados', value: cancelados.length, color: '#f87171' },
-            { label: 'Taxa de conclusão', value: `${taxaConclusao}%`, color: '#60a5fa' },
+            { label: 'Entregues', value: entregues.length, color: 'var(--success)' },
+            { label: 'Cancelados', value: cancelados.length, color: 'var(--danger)' },
+            { label: 'Taxa de conclusão', value: `${taxaConclusao}%`, color: 'var(--info)' },
           ].map(({ label, value, color }) => (
             <div key={label} style={{ background: CARD, border: BORDER, borderRadius: 14, padding: 14 }}>
               <p style={{ color: TEXT2, fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, margin: '0 0 6px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</p>
@@ -118,8 +118,8 @@ export default function RelatoriosPage() {
               <div key={sabor} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                 <span style={{ color: TEXT, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{sabor}</span>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                  <div style={{ width: 60, background: '#1a1a1a', borderRadius: 4, height: 6 }}>
-                    <div style={{ height: 6, borderRadius: 4, background: '#ff6b00', width: `${(count / pedidos.length) * 100}%` }} />
+                  <div style={{ width: 60, background: 'var(--surface-secondary)', borderRadius: 4, height: 6 }}>
+                    <div style={{ height: 6, borderRadius: 4, background: 'var(--primary)', width: `${(count / pedidos.length) * 100}%` }} />
                   </div>
                   <span style={{ color: TEXT, fontSize: 13, fontWeight: 600, minWidth: 16, textAlign: 'right' }}>{count}</span>
                 </div>
@@ -136,8 +136,8 @@ export default function RelatoriosPage() {
               <div key={hora} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                 <span style={{ color: TEXT, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{hora}</span>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                  <div style={{ width: 60, background: '#1a1a1a', borderRadius: 4, height: 6 }}>
-                    <div style={{ height: 6, borderRadius: 4, background: '#f97316', width: `${(count / pedidos.length) * 100}%` }} />
+                  <div style={{ width: 60, background: 'var(--surface-secondary)', borderRadius: 4, height: 6 }}>
+                    <div style={{ height: 6, borderRadius: 4, background: 'var(--primary)', width: `${(count / pedidos.length) * 100}%` }} />
                   </div>
                   <span style={{ color: TEXT, fontSize: 13, fontWeight: 600, minWidth: 16, textAlign: 'right' }}>{count}</span>
                 </div>
@@ -154,8 +154,8 @@ export default function RelatoriosPage() {
               <div key={bairro} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                 <span style={{ color: TEXT, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{bairro}</span>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                  <div style={{ width: 60, background: '#1a1a1a', borderRadius: 4, height: 6 }}>
-                    <div style={{ height: 6, borderRadius: 4, background: '#3b82f6', width: `${(count / pedidos.length) * 100}%` }} />
+                  <div style={{ width: 60, background: 'var(--surface-secondary)', borderRadius: 4, height: 6 }}>
+                    <div style={{ height: 6, borderRadius: 4, background: 'var(--info)', width: `${(count / pedidos.length) * 100}%` }} />
                   </div>
                   <span style={{ color: TEXT, fontSize: 13, fontWeight: 600, minWidth: 16, textAlign: 'right' }}>{count}</span>
                 </div>

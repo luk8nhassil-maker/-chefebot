@@ -4,18 +4,18 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 
 // ─── design tokens ────────────────────────────────────────────────────────────
-const BG     = '#060606'
-const CARD   = '#101010'
-const BORDER = '1px solid #1f1d1a'
-const TEXT   = '#f4f1ec'
-const MUTED  = '#a39b8b'
-const ACCENT = '#ff6b00'
+const BG     = 'var(--background)'
+const CARD   = 'var(--surface)'
+const BORDER = '1px solid var(--border)'
+const TEXT   = 'var(--foreground)'
+const MUTED  = 'var(--foreground-secondary)'
+const ACCENT = 'var(--primary)'
 const FONT   = "'Archivo', sans-serif"
 
 const inp: React.CSSProperties = {
   width: '100%',
-  background: '#1a1208',
-  border: '1px solid #2a2420',
+  background: 'var(--background)',
+  border: '1px solid var(--surface-secondary)',
   borderRadius: 12,
   padding: '14px 16px',
   color: TEXT,
@@ -36,7 +36,7 @@ const btn = (variant: 'primary' | 'ghost' = 'primary'): React.CSSProperties => (
   border: 'none',
   cursor: 'pointer',
   background: variant === 'primary' ? ACCENT : 'transparent',
-  color: variant === 'primary' ? '#fff' : MUTED,
+  color: variant === 'primary' ? 'var(--foreground)' : MUTED,
   transition: 'opacity .15s',
 })
 
@@ -87,8 +87,8 @@ function Toggle({ value, onChange, label }: { value: boolean; onChange: (v: bool
       style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: CARD, border: BORDER, borderRadius: 12, padding: '14px 16px', cursor: 'pointer', userSelect: 'none' }}
     >
       <span style={{ fontSize: 15, color: TEXT, fontFamily: FONT }}>{label}</span>
-      <div style={{ width: 46, height: 26, borderRadius: 13, background: value ? ACCENT : '#2a2420', position: 'relative', transition: 'background .2s', flexShrink: 0 }}>
-        <div style={{ position: 'absolute', top: 3, left: value ? 23 : 3, width: 20, height: 20, borderRadius: '50%', background: '#fff', transition: 'left .2s' }} />
+      <div style={{ width: 46, height: 26, borderRadius: 13, background: value ? ACCENT : 'var(--surface-secondary)', position: 'relative', transition: 'background .2s', flexShrink: 0 }}>
+        <div style={{ position: 'absolute', top: 3, left: value ? 23 : 3, width: 20, height: 20, borderRadius: '50%', background: 'var(--foreground)', transition: 'left .2s' }} />
       </div>
     </div>
   )
@@ -101,7 +101,7 @@ function ProgressBar({ step, total }: { step: number; total: number }) {
     <div style={{ padding: '16px 20px 0', paddingTop: 'max(16px, env(safe-area-inset-top))' }}>
       <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
         {Array.from({ length: total }).map((_, i) => (
-          <div key={i} style={{ flex: 1, height: 4, borderRadius: 2, background: i < step ? ACCENT : '#1f1d1a', transition: 'background .3s' }} />
+          <div key={i} style={{ flex: 1, height: 4, borderRadius: 2, background: i < step ? ACCENT : 'var(--border)', transition: 'background .3s' }} />
         ))}
       </div>
       <div style={{ fontSize: 12, color: MUTED, fontFamily: FONT }}>
@@ -130,7 +130,7 @@ function HourSelect({ value, onChange }: { value: number; onChange: (v: number) 
       style={{ ...inp, appearance: 'none', WebkitAppearance: 'none' }}
     >
       {Array.from({ length: 24 }, (_, i) => i).map(h => (
-        <option key={h} value={h} style={{ background: '#1a1208' }}>
+        <option key={h} value={h} style={{ background: 'var(--background)' }}>
           {String(h).padStart(2, '0')}:00
         </option>
       ))}
@@ -223,9 +223,9 @@ function Step4({ form, set, onNext, onBack, saving }: { form: Form; set: (f: Par
       <h2 style={{ fontSize: 20, fontWeight: 700, color: TEXT, fontFamily: FONT, margin: '0 0 4px' }}>Entrega</h2>
       <p style={{ fontSize: 14, color: MUTED, fontFamily: FONT, margin: '0 0 24px' }}>Defina como funciona seu delivery</p>
 
-      <div style={{ background: '#0d1a0d', border: '1px solid #1a2e1a', borderRadius: 12, padding: '12px 14px', marginBottom: 20 }}>
-        <p style={{ fontSize: 13, color: '#7aad7a', fontFamily: FONT, margin: 0, lineHeight: 1.6 }}>
-          💡 As taxas de entrega são configuradas por bairro depois que você terminar o setup. Você pode adicionar quantos bairros quiser com taxas individuais em <strong style={{ color: '#9dcc9d' }}>Configurações</strong>.
+      <div style={{ background: 'var(--success-soft)', border: '1px solid var(--success-soft)', borderRadius: 12, padding: '12px 14px', marginBottom: 20 }}>
+        <p style={{ fontSize: 13, color: 'var(--success)', fontFamily: FONT, margin: 0, lineHeight: 1.6 }}>
+          💡 As taxas de entrega são configuradas por bairro depois que você terminar o setup. Você pode adicionar quantos bairros quiser com taxas individuais em <strong style={{ color: 'var(--success)' }}>Configurações</strong>.
         </p>
       </div>
 
@@ -324,17 +324,17 @@ function Step5WhatsApp({ onNext, onBack }: { onNext: () => void; onBack: () => v
 
         {status === 'connected' && (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14 }}>
-            <div style={{ width: 88, height: 88, borderRadius: '50%', background: 'rgba(74,222,128,.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', animation: 'popIn .4s cubic-bezier(.34,1.56,.64,1) both' }}>
+            <div style={{ width: 88, height: 88, borderRadius: '50%', background: 'color-mix(in srgb, var(--success) 12%, transparent)', display: 'flex', alignItems: 'center', justifyContent: 'center', animation: 'popIn .4s cubic-bezier(.34,1.56,.64,1) both' }}>
               <span style={{ fontSize: 44 }}>✅</span>
             </div>
-            <p style={{ fontSize: 17, fontWeight: 700, color: '#4ade80', fontFamily: FONT, margin: 0 }}>WhatsApp conectado!</p>
+            <p style={{ fontSize: 17, fontWeight: 700, color: 'var(--success)', fontFamily: FONT, margin: 0 }}>WhatsApp conectado!</p>
           </div>
         )}
 
         {status === 'error' && (
           <div style={{ textAlign: 'center' }}>
             <span style={{ fontSize: 40 }}>⚠️</span>
-            <p style={{ fontSize: 14, color: '#f87171', fontFamily: FONT, margin: '10px 0 0', lineHeight: 1.5 }}>
+            <p style={{ fontSize: 14, color: 'var(--danger)', fontFamily: FONT, margin: '10px 0 0', lineHeight: 1.5 }}>
               Não foi possível gerar o QR Code.<br />Verifique sua conexão.
             </p>
           </div>
@@ -345,7 +345,7 @@ function Step5WhatsApp({ onNext, onBack }: { onNext: () => void; onBack: () => v
             <img
               src={qr}
               alt="QR Code WhatsApp"
-              style={{ width: 220, height: 220, borderRadius: 20, display: 'block', border: `2px solid ${ACCENT}20`, filter: timedOut ? 'blur(5px) brightness(.25)' : 'none', transition: 'filter .3s' }}
+              style={{ width: 220, height: 220, borderRadius: 20, display: 'block', border: `2px solid color-mix(in srgb, ${ACCENT} 13%, transparent)`, filter: timedOut ? 'blur(5px) brightness(.25)' : 'none', transition: 'filter .3s' }}
             />
             {timedOut && (
               <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
@@ -407,7 +407,7 @@ function Step6({ form, onGoPanel }: { form: Form; onGoPanel: () => void }) {
 
   return (
     <div style={{ padding: '40px 20px 24px', flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-      <div style={{ width: 80, height: 80, borderRadius: '50%', background: 'rgba(255,107,0,.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 24, animation: 'popIn .4s cubic-bezier(.34,1.56,.64,1) both' }}>
+      <div style={{ width: 80, height: 80, borderRadius: '50%', background: 'color-mix(in srgb, var(--primary) 12%, transparent)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 24, animation: 'popIn .4s cubic-bezier(.34,1.56,.64,1) both' }}>
         <span style={{ fontSize: 40 }}>🚀</span>
       </div>
 

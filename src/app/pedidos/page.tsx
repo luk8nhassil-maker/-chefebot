@@ -90,11 +90,11 @@ const STATUS_OPTS: { value: Status; label: string }[] = [
 ]
 
 const STATUS_COLOR: Record<Status, { accent: string; accentSoft: string; accentBg: string; accentBorder: string; cardBg: string; cardBorder: string; glow: string; btnBg: string; btnFg: string; label: string }> = {
-  novo:         { accent: "#ff6b00", accentSoft: "#ff9a3d", accentBg: "rgba(255,107,0,.15)", accentBorder: "rgba(255,107,0,.5)",  cardBg: "linear-gradient(180deg,rgba(255,107,0,.12),rgba(255,107,0,.02) 30%,#0d0906 65%)", cardBorder: "1.5px solid rgba(255,107,0,.55)",  glow: "cbGlowO", btnBg: "linear-gradient(180deg,#ff7d1a,#ff6b00)", btnFg: "#fff",    label: "Novo" },
-  em_preparo:   { accent: "#facc15", accentSoft: "#fde68a", accentBg: "rgba(250,204,21,.12)", accentBorder: "rgba(250,204,21,.45)", cardBg: "linear-gradient(180deg,rgba(250,204,21,.1),rgba(250,204,21,.02) 30%,#0d0d06 65%)",  cardBorder: "1.5px solid rgba(250,204,21,.4)",  glow: "cbGlowY", btnBg: "#facc15",                              btnFg: "#060606", label: "Fazendo" },
-  saiu_entrega: { accent: "#60a5fa", accentSoft: "#93c5fd", accentBg: "rgba(96,165,250,.12)",  accentBorder: "rgba(96,165,250,.45)",  cardBg: "linear-gradient(180deg,rgba(96,165,250,.1),rgba(96,165,250,.02) 30%,#06080d 65%)",  cardBorder: "1.5px solid rgba(96,165,250,.4)",  glow: "cbGlowB", btnBg: "#60a5fa",                              btnFg: "#060606", label: "Na rua" },
-  entregue:     { accent: "#22c55e", accentSoft: "#4ade80", accentBg: "rgba(34,197,94,.12)",   accentBorder: "rgba(34,197,94,.4)",    cardBg: "linear-gradient(180deg,rgba(34,197,94,.1),rgba(34,197,94,.02) 30%,#060d08 65%)",    cardBorder: "1.5px solid rgba(34,197,94,.35)",  glow: "cbGlowG", btnBg: "#22c55e",                              btnFg: "#060606", label: "Entregue" },
-  cancelado:    { accent: "#ef4444", accentSoft: "#f87171", accentBg: "rgba(239,68,68,.12)",   accentBorder: "rgba(239,68,68,.45)",   cardBg: "linear-gradient(180deg,rgba(239,68,68,.1),rgba(239,68,68,.02) 30%,#0d0606 65%)",   cardBorder: "1.5px solid rgba(239,68,68,.4)",   glow: "cbGlowR", btnBg: "#ef4444",                              btnFg: "#fff",    label: "Cancelado" },
+  novo:         { accent: "var(--primary)", accentSoft: "var(--primary)", accentBg: "color-mix(in srgb, var(--primary) 15%, transparent)", accentBorder: "color-mix(in srgb, var(--primary) 50%, transparent)",  cardBg: "linear-gradient(180deg,color-mix(in srgb, var(--primary) 12%, transparent),color-mix(in srgb, var(--primary) 2%, transparent) 30%,var(--background) 65%)", cardBorder: "1.5px solid color-mix(in srgb, var(--primary) 55%, transparent)",  glow: "cbGlowO", btnBg: "linear-gradient(180deg,var(--primary),var(--primary))", btnFg: "var(--foreground)",    label: "Novo" },
+  em_preparo:   { accent: "var(--primary)", accentSoft: "var(--primary)", accentBg: "color-mix(in srgb, var(--primary) 12%, transparent)", accentBorder: "color-mix(in srgb, var(--primary) 45%, transparent)", cardBg: "linear-gradient(180deg,color-mix(in srgb, var(--primary) 10%, transparent),color-mix(in srgb, var(--primary) 2%, transparent) 30%,var(--background) 65%)",  cardBorder: "1.5px solid color-mix(in srgb, var(--primary) 40%, transparent)",  glow: "cbGlowY", btnBg: "var(--primary)",                              btnFg: "var(--background)", label: "Fazendo" },
+  saiu_entrega: { accent: "var(--info)", accentSoft: "var(--info)", accentBg: "color-mix(in srgb, var(--info) 12%, transparent)",  accentBorder: "color-mix(in srgb, var(--info) 45%, transparent)",  cardBg: "linear-gradient(180deg,color-mix(in srgb, var(--info) 10%, transparent),color-mix(in srgb, var(--info) 2%, transparent) 30%,var(--info-soft) 65%)",  cardBorder: "1.5px solid color-mix(in srgb, var(--info) 40%, transparent)",  glow: "cbGlowB", btnBg: "var(--info)",                              btnFg: "var(--background)", label: "Na rua" },
+  entregue:     { accent: "var(--success)", accentSoft: "var(--success)", accentBg: "color-mix(in srgb, var(--success) 12%, transparent)",   accentBorder: "color-mix(in srgb, var(--success) 40%, transparent)",    cardBg: "linear-gradient(180deg,color-mix(in srgb, var(--success) 10%, transparent),color-mix(in srgb, var(--success) 2%, transparent) 30%,var(--success-soft) 65%)",    cardBorder: "1.5px solid color-mix(in srgb, var(--success) 35%, transparent)",  glow: "cbGlowG", btnBg: "var(--success)",                              btnFg: "var(--background)", label: "Entregue" },
+  cancelado:    { accent: "var(--danger)", accentSoft: "var(--danger)", accentBg: "color-mix(in srgb, var(--danger) 12%, transparent)",   accentBorder: "color-mix(in srgb, var(--danger) 45%, transparent)",   cardBg: "linear-gradient(180deg,color-mix(in srgb, var(--danger) 10%, transparent),color-mix(in srgb, var(--danger) 2%, transparent) 30%,var(--danger-soft) 65%)",   cardBorder: "1.5px solid color-mix(in srgb, var(--danger) 40%, transparent)",   glow: "cbGlowR", btnBg: "var(--danger)",                              btnFg: "var(--foreground)",    label: "Cancelado" },
 }
 
 function getItemIcon(item: string): string {
@@ -142,7 +142,7 @@ function tempoDesde(horario: string, horarioInicio?: string, now?: number): numb
 function timerDash(mins: number, meta: number = 40): { dash: number; color: string } {
   const CIRC = 131.9
   const progress = Math.min(mins / meta, 1)
-  const color = progress < 0.5 ? "#34d399" : progress < 0.85 ? "#fbbf24" : "#f87171"
+  const color = progress < 0.5 ? "var(--success)" : progress < 0.85 ? "var(--primary)" : "var(--danger)"
   return { dash: CIRC * (1 - progress), color }
 }
 
@@ -942,13 +942,13 @@ export default function PedidosPage() {
   ]
 
   if (loading) return (
-    <div style={{ minHeight: "100vh", background: "#060606", display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ textAlign: "center" }}><div style={{ fontSize: 36, marginBottom: 12 }}>🍕</div><p style={{ color: "#a39b8b", fontSize: 14, fontFamily: "'Archivo', sans-serif" }}>Carregando...</p></div>
+    <div style={{ minHeight: "100vh", background: "var(--background)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ textAlign: "center" }}><div style={{ fontSize: 36, marginBottom: 12 }}>🍕</div><p style={{ color: "var(--foreground-secondary)", fontSize: 14, fontFamily: "'Archivo', sans-serif" }}>Carregando...</p></div>
     </div>
   )
 
-  const inputStyle: React.CSSProperties = { width: "100%", height: 46, background: "#0b0b0b", border: "1px solid #242220", borderRadius: 12, padding: "0 14px", color: "#f5f2ee", fontSize: 14, fontFamily: "'Archivo', sans-serif", outline: "none", boxSizing: "border-box" }
-  const labelStyle: React.CSSProperties = { display: "block", fontSize: 11, fontWeight: 900, color: "#56524b", textTransform: "uppercase", letterSpacing: ".8px", marginBottom: 6 }
+  const inputStyle: React.CSSProperties = { width: "100%", height: 46, background: "var(--surface)", border: "1px solid var(--surface-secondary)", borderRadius: 12, padding: "0 14px", color: "var(--foreground)", fontSize: 14, fontFamily: "'Archivo', sans-serif", outline: "none", boxSizing: "border-box" }
+  const labelStyle: React.CSSProperties = { display: "block", fontSize: 11, fontWeight: 900, color: "var(--foreground-muted)", textTransform: "uppercase", letterSpacing: ".8px", marginBottom: 6 }
 
   const showSimpleToast = (msg: string) => {
     setSimpleToast(msg); clearTimeout(simpleToastTimerRef.current)
@@ -979,8 +979,8 @@ export default function PedidosPage() {
 
   const Row = ({ label, value, missing }: { label: string; value: string; missing?: boolean }) => (
     <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
-      <span style={{ fontSize: 11, fontWeight: 800, color: "#56524b", minWidth: 72, flexShrink: 0 }}>{label}</span>
-      <span style={{ fontSize: 13, fontWeight: 700, color: missing ? "#ef4444" : "#c9c2b4" }}>{value || (missing ? "—" : "—")}</span>
+      <span style={{ fontSize: 11, fontWeight: 800, color: "var(--foreground-muted)", minWidth: 72, flexShrink: 0 }}>{label}</span>
+      <span style={{ fontSize: 13, fontWeight: 700, color: missing ? "var(--danger)" : "var(--foreground-secondary)" }}>{value || (missing ? "—" : "—")}</span>
     </div>
   )
 
@@ -997,7 +997,7 @@ export default function PedidosPage() {
     const pagamento = p.pagamento || ""
     const isPix = pagamento.toLowerCase().includes("pix")
     const hibridoParts = parseHybridPayment(pagamento)
-    const payDot = isPix ? "#22c55e" : pagamento.toLowerCase().includes("cart") ? "#60a5fa" : "#facc15"
+    const payDot = isPix ? "var(--success)" : pagamento.toLowerCase().includes("cart") ? "var(--info)" : "var(--primary)"
     const isRetirada = !isDineInDetail && (!p.tipoEntrega || p.tipoEntrega === "pickup" || p.tipoEntrega === "retirada" || p.endereco === "Retirada na loja")
     return (
       <>
@@ -1006,84 +1006,84 @@ export default function PedidosPage() {
           <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 7 }}>
             <span style={{ alignSelf: "flex-start", background: sc.accentBg, color: sc.accent, fontSize: 11, fontWeight: 900, letterSpacing: "1.2px", padding: "5px 10px", borderRadius: 8, textTransform: "uppercase", border: `1px solid ${sc.accentBorder}` }}>{sc.label}</span>
             <h2 style={{ margin: 0, fontSize: 22, fontWeight: 900, letterSpacing: "-0.6px", lineHeight: 1.1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.numero != null ? `#${p.numero} · ` : ""}{p.cliente}</h2>
-            <span style={{ fontSize: 12, color: "#a39b8b", fontWeight: 600 }}>Recebido às {p.horario} · há {mins} min</span>
+            <span style={{ fontSize: 12, color: "var(--foreground-secondary)", fontWeight: 600 }}>Recebido às {p.horario} · há {mins} min</span>
           </div>
           <div style={{ position: "relative", width: 50, height: 50, flexShrink: 0 }}>
             <svg width="50" height="50" viewBox="0 0 50 50" style={{ transform: "rotate(-90deg)", display: "block" }}>
-              <circle cx="25" cy="25" r="21" fill="none" stroke="#1a1a1a" strokeWidth="4" />
-              <circle cx="25" cy="25" r="21" fill="none" stroke={isDone ? "#34d399" : ringColor} strokeWidth="4" strokeLinecap="round" strokeDasharray="131.9" strokeDashoffset={isDone ? 0 : dash} style={{ transition: "stroke-dashoffset 1s linear, stroke .4s" }} />
+              <circle cx="25" cy="25" r="21" fill="none" stroke="var(--surface-secondary)" strokeWidth="4" />
+              <circle cx="25" cy="25" r="21" fill="none" stroke={isDone ? "var(--success)" : ringColor} strokeWidth="4" strokeLinecap="round" strokeDasharray="131.9" strokeDashoffset={isDone ? 0 : dash} style={{ transition: "stroke-dashoffset 1s linear, stroke .4s" }} />
             </svg>
             <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
-              <span style={{ fontSize: 16, fontWeight: 900, lineHeight: 1, color: isDone ? "#34d399" : ringColor }}>{mins}</span>
-              <span style={{ fontSize: 7.5, fontWeight: 800, color: "#a39b8b", letterSpacing: "1px" }}>MIN</span>
+              <span style={{ fontSize: 16, fontWeight: 900, lineHeight: 1, color: isDone ? "var(--success)" : ringColor }}>{mins}</span>
+              <span style={{ fontSize: 7.5, fontWeight: 800, color: "var(--foreground-secondary)", letterSpacing: "1px" }}>MIN</span>
             </div>
           </div>
         </div>
 
         {/* Informações completas */}
-        <div style={{ background: "#0b0b0b", borderRadius: 14, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
+        <div style={{ background: "var(--surface)", borderRadius: 14, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
           {p.telefone && p.telefone !== "App" && (
             <div style={{ display: "flex", justifyContent: "space-between" }}>
-              <span style={{ fontSize: 11, fontWeight: 700, color: "#5a564d" }}>Telefone</span>
-              <span style={{ fontSize: 13, fontWeight: 800, color: "#c9c2b4" }}>{p.telefone}</span>
+              <span style={{ fontSize: 11, fontWeight: 700, color: "var(--foreground-muted)" }}>Telefone</span>
+              <span style={{ fontSize: 13, fontWeight: 800, color: "var(--foreground-secondary)" }}>{p.telefone}</span>
             </div>
           )}
           <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <span style={{ fontSize: 11, fontWeight: 700, color: "#5a564d" }}>Tipo</span>
-            <span style={{ fontSize: 13, fontWeight: 800, color: isDineInDetail ? "#a78bfa" : isRetirada ? "#facc15" : "#38bdf8" }}>{isDineInDetail ? "Consumo no local 🍽️" : isRetirada ? "Retirada na loja" : "Delivery"}</span>
+            <span style={{ fontSize: 11, fontWeight: 700, color: "var(--foreground-muted)" }}>Tipo</span>
+            <span style={{ fontSize: 13, fontWeight: 800, color: isDineInDetail ? "var(--attention)" : isRetirada ? "var(--text-primary)" : "var(--info)" }}>{isDineInDetail ? "Consumo no local 🍽️" : isRetirada ? "Retirada na loja" : "Delivery"}</span>
           </div>
           {!isRetirada && !isDineInDetail && (
             <>
-              {p.bairro && <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ fontSize: 11, fontWeight: 700, color: "#5a564d" }}>Bairro</span><span style={{ fontSize: 13, fontWeight: 800, color: "#f4f1ec" }}>{p.bairro}</span></div>}
+              {p.bairro && <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ fontSize: 11, fontWeight: 700, color: "var(--foreground-muted)" }}>Bairro</span><span style={{ fontSize: 13, fontWeight: 800, color: "var(--foreground)" }}>{p.bairro}</span></div>}
               <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span style={{ fontSize: 11, fontWeight: 700, color: "#5a564d" }}>Endereço</span>
-                <span style={{ fontSize: 13, fontWeight: 800, color: "#f4f1ec", textAlign: "right", maxWidth: "60%" }}>{p.endereco}</span>
+                <span style={{ fontSize: 11, fontWeight: 700, color: "var(--foreground-muted)" }}>Endereço</span>
+                <span style={{ fontSize: 13, fontWeight: 800, color: "var(--foreground)", textAlign: "right", maxWidth: "60%" }}>{p.endereco}</span>
               </div>
-              {p.referencia && <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ fontSize: 11, fontWeight: 700, color: "#5a564d" }}>Referência</span><span style={{ fontSize: 13, fontWeight: 800, color: "#f4f1ec", textAlign: "right", maxWidth: "60%" }}>{p.referencia}</span></div>}
-              {p.taxaEntrega != null && p.taxaEntrega > 0 && <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ fontSize: 11, fontWeight: 700, color: "#5a564d" }}>Taxa entrega</span><span style={{ fontSize: 13, fontWeight: 800, color: "#f4f1ec" }}>R$ {p.taxaEntrega.toFixed(2).replace(".", ",")}</span></div>}
+              {p.referencia && <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ fontSize: 11, fontWeight: 700, color: "var(--foreground-muted)" }}>Referência</span><span style={{ fontSize: 13, fontWeight: 800, color: "var(--foreground)", textAlign: "right", maxWidth: "60%" }}>{p.referencia}</span></div>}
+              {p.taxaEntrega != null && p.taxaEntrega > 0 && <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ fontSize: 11, fontWeight: 700, color: "var(--foreground-muted)" }}>Taxa entrega</span><span style={{ fontSize: 13, fontWeight: 800, color: "var(--foreground)" }}>R$ {p.taxaEntrega.toFixed(2).replace(".", ",")}</span></div>}
             </>
           )}
         </div>
 
         {/* Itens */}
         <div style={{ background: sc.accentBg, borderRadius: 14, padding: "12px 13px" }}>
-          <span style={{ fontSize: 10, fontWeight: 900, textTransform: "uppercase", letterSpacing: "1px", color: "#a39b8b", display: "block", marginBottom: 8 }}>Pedido</span>
+          <span style={{ fontSize: 10, fontWeight: 900, textTransform: "uppercase", letterSpacing: "1px", color: "var(--foreground-secondary)", display: "block", marginBottom: 8 }}>Pedido</span>
           {p.itens.map((item, i) => (
             <div key={i}>
-              {i > 0 && <div style={{ height: 1, background: "rgba(255,255,255,.04)", margin: "6px 0" }} />}
+              {i > 0 && <div style={{ height: 1, background: "rgba(var(--overlay-rgb), 0.04)", margin: "6px 0" }} />}
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <div style={{ width: 34, height: 34, borderRadius: 9, background: "rgba(255,255,255,.06)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: 17 }}>{getItemIcon(item)}</div>
-                <span style={{ flex: 1, fontSize: 14, fontWeight: 700, color: "#f4f1ec" }}>{item}</span>
-                <span style={{ fontSize: 12, fontWeight: 900, color: sc.accentSoft, background: "rgba(255,255,255,.06)", padding: "3px 9px", borderRadius: 7, flexShrink: 0 }}>×1</span>
+                <div style={{ width: 34, height: 34, borderRadius: 9, background: "rgba(var(--overlay-rgb), 0.06)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: 17 }}>{getItemIcon(item)}</div>
+                <span style={{ flex: 1, fontSize: 14, fontWeight: 700, color: "var(--foreground)" }}>{item}</span>
+                <span style={{ fontSize: 12, fontWeight: 900, color: sc.accentSoft, background: "rgba(var(--overlay-rgb), 0.06)", padding: "3px 9px", borderRadius: 7, flexShrink: 0 }}>×1</span>
               </div>
             </div>
           ))}
-          {p.observacao && <div style={{ marginTop: 8, fontSize: 12, fontWeight: 700, color: "#facc15", background: "rgba(250,204,21,.08)", borderRadius: 8, padding: "6px 10px" }}>Obs: {p.observacao}</div>}
+          {p.observacao && <div style={{ marginTop: 8, fontSize: 12, fontWeight: 700, color: "var(--brand-text)", background: "color-mix(in srgb, var(--primary) 8%, transparent)", borderRadius: 8, padding: "6px 10px" }}>Obs: {p.observacao}</div>}
         </div>
 
         {/* Pagamento detalhado */}
         {hibridoParts ? (
-          <div style={{ background: "rgba(250,204,21,.07)", border: "1px solid rgba(250,204,21,.2)", borderRadius: 12, padding: "12px 14px" }}>
-            <div style={{ fontSize: 10, fontWeight: 900, color: "#a39b8b", textTransform: "uppercase", letterSpacing: ".8px", marginBottom: 8 }}>Pagamento Misto</div>
+          <div style={{ background: "color-mix(in srgb, var(--primary) 7%, transparent)", border: "1px solid color-mix(in srgb, var(--primary) 20%, transparent)", borderRadius: 12, padding: "12px 14px" }}>
+            <div style={{ fontSize: 10, fontWeight: 900, color: "var(--foreground-secondary)", textTransform: "uppercase", letterSpacing: ".8px", marginBottom: 8 }}>Pagamento Misto</div>
             {hibridoParts.map((pp, i) => {
               const ehPix = /pix/i.test(pp.metodo)
               const revisaoOuSuspeito = ehPix ? labelPixRevisaoOuSuspeito(p) : null
               return (
                 <div key={i} style={{ marginBottom: 4 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, fontWeight: 800, color: "#fde68a" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, fontWeight: 800, color: "var(--brand-text)" }}>
                     <span>{pp.metodo}</span><span>R$ {pp.valor.toFixed(2).replace(".", ",")}</span>
                   </div>
                   {ehPix && (
                     <div style={{ marginTop: 2 }}>
                       {p.pixConfirmado ? (
-                        <span style={{ fontSize: 11, color: "#34d399", fontWeight: 800 }}>{labelPixConfirmado(p)}</span>
+                        <span style={{ fontSize: 11, color: "var(--success)", fontWeight: 800 }}>{labelPixConfirmado(p)}</span>
                       ) : revisaoOuSuspeito ? (
-                        <span style={{ fontSize: 11, color: p.pix?.status === "suspeito" ? "#f87171" : "#fbbf24", fontWeight: 800 }}>{revisaoOuSuspeito}</span>
+                        <span style={{ fontSize: 11, color: p.pix?.status === "suspeito" ? "var(--danger)" : "var(--attention-text)", fontWeight: 800 }}>{revisaoOuSuspeito}</span>
                       ) : (
-                        <span style={{ fontSize: 11, color: "#fbbf24", fontWeight: 800 }}>⏳ Aguardando confirmação</span>
+                        <span style={{ fontSize: 11, color: "var(--attention-text)", fontWeight: 800 }}>⏳ Aguardando confirmação</span>
                       )}
                       {!p.pixConfirmado && !revisaoOuSuspeito && motivoResumidoPix(p) && (
-                        <div style={{ marginTop: 2, fontSize: 11, fontWeight: 700, color: "#a39b8b" }}>{motivoResumidoPix(p)}</div>
+                        <div style={{ marginTop: 2, fontSize: 11, fontWeight: 700, color: "var(--foreground-secondary)" }}>{motivoResumidoPix(p)}</div>
                       )}
                     </div>
                   )}
@@ -1091,29 +1091,29 @@ export default function PedidosPage() {
               )
             })}
             {p.troco && (
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, fontWeight: 700, color: "#a39b8b", marginTop: 6 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, fontWeight: 700, color: "var(--foreground-secondary)", marginTop: 6 }}>
                 <span>Troco</span><span>{p.troco === "Sem troco" ? "Sem troco" : p.troco}</span>
               </div>
             )}
-            <div style={{ borderTop: "1px solid rgba(250,204,21,.15)", marginTop: 6, paddingTop: 6, display: "flex", justifyContent: "space-between", fontSize: 16, fontWeight: 900, color: "#facc15" }}>
+            <div style={{ borderTop: "1px solid color-mix(in srgb, var(--primary) 15%, transparent)", marginTop: 6, paddingTop: 6, display: "flex", justifyContent: "space-between", fontSize: 16, fontWeight: 900, color: "var(--brand-text)" }}>
               <span>Total</span><span>R$ {p.total.toFixed(2).replace(".", ",")}</span>
             </div>
           </div>
         ) : (
           <div>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 700, color: "#c9c2b4" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 700, color: "var(--foreground-secondary)" }}>
                 <span style={{ width: 8, height: 8, borderRadius: 2, background: payDot, flexShrink: 0 }} />
                 {pagamento || "Pagamento não informado"}
-                {p.pixConfirmado && <span style={{ fontSize: 11, color: "#34d399", fontWeight: 800 }}>{labelPixConfirmado(p)}</span>}
+                {p.pixConfirmado && <span style={{ fontSize: 11, color: "var(--success)", fontWeight: 800 }}>{labelPixConfirmado(p)}</span>}
                 {!p.pixConfirmado && labelPixRevisaoOuSuspeito(p) && (
-                  <span style={{ fontSize: 11, color: p.pix?.status === "suspeito" ? "#f87171" : "#fbbf24", fontWeight: 800 }}>{labelPixRevisaoOuSuspeito(p)}</span>
+                  <span style={{ fontSize: 11, color: p.pix?.status === "suspeito" ? "var(--danger)" : "var(--attention-text)", fontWeight: 800 }}>{labelPixRevisaoOuSuspeito(p)}</span>
                 )}
               </div>
-              <span style={{ fontSize: 15, fontWeight: 900, color: "#f4f1ec" }}>R$ {p.total.toFixed(2).replace(".", ",")}</span>
+              <span style={{ fontSize: 15, fontWeight: 900, color: "var(--foreground)" }}>R$ {p.total.toFixed(2).replace(".", ",")}</span>
             </div>
             {!p.pixConfirmado && motivoResumidoPix(p) && (
-              <div style={{ marginTop: 6, fontSize: 11, fontWeight: 700, color: "#a39b8b" }}>{motivoResumidoPix(p)}</div>
+              <div style={{ marginTop: 6, fontSize: 11, fontWeight: 700, color: "var(--foreground-secondary)" }}>{motivoResumidoPix(p)}</div>
             )}
           </div>
         )}
@@ -1122,17 +1122,17 @@ export default function PedidosPage() {
         {!isDone && !isCanceled && (
           <div>
             {modalAlterarStatus === p.id ? (
-              <div style={{ background: "#0b0b0b", border: "1px solid #242220", borderRadius: 14, overflow: "hidden" }}>
-                <div style={{ padding: "10px 14px", fontSize: 11, fontWeight: 900, color: "#56524b", textTransform: "uppercase", letterSpacing: ".8px" }}>Alterar status</div>
+              <div style={{ background: "var(--surface)", border: "1px solid var(--surface-secondary)", borderRadius: 14, overflow: "hidden" }}>
+                <div style={{ padding: "10px 14px", fontSize: 11, fontWeight: 900, color: "var(--foreground-muted)", textTransform: "uppercase", letterSpacing: ".8px" }}>Alterar status</div>
                 {STATUS_OPTS.map(opt => (
-                  <button key={opt.value} onClick={() => avancarStatus(p.id, opt.value)} disabled={p.status === opt.value} style={{ width: "100%", padding: "12px 14px", background: p.status === opt.value ? STATUS_COLOR[opt.value].accentBg : "transparent", border: "none", borderTop: "1px solid #1a1a1a", color: p.status === opt.value ? STATUS_COLOR[opt.value].accent : "#c9c2b4", fontSize: 14, fontWeight: 800, textAlign: "left", cursor: p.status === opt.value ? "default" : "pointer" }}>
+                  <button key={opt.value} onClick={() => avancarStatus(p.id, opt.value)} disabled={p.status === opt.value} style={{ width: "100%", padding: "12px 14px", background: p.status === opt.value ? STATUS_COLOR[opt.value].accentBg : "transparent", border: "none", borderTop: "1px solid var(--surface-secondary)", color: p.status === opt.value ? STATUS_COLOR[opt.value].accent : "var(--foreground-secondary)", fontSize: 14, fontWeight: 800, textAlign: "left", cursor: p.status === opt.value ? "default" : "pointer" }}>
                     {opt.label} {p.status === opt.value && "· atual"}
                   </button>
                 ))}
-                <button onClick={() => setModalAlterarStatus(null)} style={{ width: "100%", padding: "12px 14px", background: "transparent", border: "none", borderTop: "1px solid #1a1a1a", color: "#5a564d", fontSize: 13, fontWeight: 800, textAlign: "center" }}>Cancelar</button>
+                <button onClick={() => setModalAlterarStatus(null)} style={{ width: "100%", padding: "12px 14px", background: "transparent", border: "none", borderTop: "1px solid var(--surface-secondary)", color: "var(--foreground-muted)", fontSize: 13, fontWeight: 800, textAlign: "center" }}>Cancelar</button>
               </div>
             ) : (
-              <button onClick={() => setModalAlterarStatus(p.id)} style={{ width: "100%", height: 44, border: "1px solid #242220", borderRadius: 12, background: "transparent", color: "#c9c2b4", fontSize: 13, fontWeight: 800 }}>Alterar status</button>
+              <button onClick={() => setModalAlterarStatus(p.id)} style={{ width: "100%", height: 44, border: "1px solid var(--surface-secondary)", borderRadius: 12, background: "transparent", color: "var(--foreground-secondary)", fontSize: 13, fontWeight: 800 }}>Alterar status</button>
             )}
           </div>
         )}
@@ -1143,43 +1143,43 @@ export default function PedidosPage() {
             {getActionLabel(p)}
           </button>
         )}
-        {isDone && <div style={{ height: 54, borderRadius: 16, background: "rgba(34,197,94,.1)", border: "1px solid rgba(34,197,94,.3)", color: "#22c55e", fontSize: 15, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>Entregue · tudo certo ✓</div>}
+        {isDone && <div style={{ height: 54, borderRadius: 16, background: "color-mix(in srgb, var(--success) 10%, transparent)", border: "1px solid color-mix(in srgb, var(--success) 30%, transparent)", color: "var(--success)", fontSize: 15, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>Entregue · tudo certo ✓</div>}
 
         {/* Confirmar Pix no detalhe */}
         {isPix && !p.pixConfirmado && !isDone && (
-          <button onClick={() => { setDetailId(null); setConfirmPixModal(p.id) }} style={{ height: 46, border: "1px solid rgba(251,191,36,.35)", borderRadius: 14, background: "rgba(251,191,36,.08)", color: "#fbbf24", fontSize: 14, fontWeight: 900, flexShrink: 0 }}>
+          <button onClick={() => { setDetailId(null); setConfirmPixModal(p.id) }} style={{ height: 46, border: "1px solid color-mix(in srgb, var(--primary) 35%, transparent)", borderRadius: 14, background: "color-mix(in srgb, var(--primary) 8%, transparent)", color: "var(--brand-text)", fontSize: 14, fontWeight: 900, flexShrink: 0 }}>
             Confirmar Pix recebido
           </button>
         )}
 
         {/* Finalizar no detalhe */}
         {!isDone && !isCanceled && (
-          <button onClick={() => { setDetailId(null); setFinalizarModal(p.id) }} style={{ height: 44, border: "1px solid rgba(255,255,255,.07)", borderRadius: 14, background: "transparent", color: "#56524b", fontSize: 13, fontWeight: 800, flexShrink: 0 }}>
+          <button onClick={() => { setDetailId(null); setFinalizarModal(p.id) }} style={{ height: 44, border: "1px solid rgba(var(--overlay-rgb), 0.07)", borderRadius: 14, background: "transparent", color: "var(--foreground-muted)", fontSize: 13, fontWeight: 800, flexShrink: 0 }}>
             Finalizar pedido
           </button>
         )}
 
         {/* WhatsApp */}
         {p.telefone && p.telefone !== "App" && (
-          <button onClick={() => window.open(whatsappLink(p.telefone), "_blank")} style={{ height: 46, border: "1px solid #2a2723", borderRadius: 14, background: "transparent", color: "#c9c2b4", fontSize: 14, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, flexShrink: 0 }}>
-            <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#22c55e" }} />
+          <button onClick={() => window.open(whatsappLink(p.telefone), "_blank")} style={{ height: 46, border: "1px solid var(--border)", borderRadius: 14, background: "transparent", color: "var(--foreground-secondary)", fontSize: 14, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, flexShrink: 0 }}>
+            <span style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--success)" }} />
             Falar com {firstName} no WhatsApp
           </button>
         )}
 
         {/* Cancelar */}
         {!isDone && !isCanceled && (
-          <button onClick={() => cancelarPedido(p.id)} disabled={cancelandoId === p.id} style={{ height: 46, border: "1px solid rgba(239,68,68,.35)", borderRadius: 14, background: "rgba(239,68,68,.06)", color: "#ef4444", fontSize: 14, fontWeight: 800, flexShrink: 0, opacity: cancelandoId === p.id ? 0.6 : 1 }}>
+          <button onClick={() => cancelarPedido(p.id)} disabled={cancelandoId === p.id} style={{ height: 46, border: "1px solid color-mix(in srgb, var(--danger) 35%, transparent)", borderRadius: 14, background: "color-mix(in srgb, var(--danger) 6%, transparent)", color: "var(--danger)", fontSize: 14, fontWeight: 800, flexShrink: 0, opacity: cancelandoId === p.id ? 0.6 : 1 }}>
             {cancelandoId === p.id ? "Cancelando..." : "Cancelar pedido"}
           </button>
         )}
 
         {/* Imprimir pedido */}
-        <button onClick={() => window.open(`/pedidos/${p.id}/imprimir`, "_blank")} style={{ height: 44, border: "1px solid rgba(255,255,255,.1)", borderRadius: 14, background: "transparent", color: "#a39b8b", fontSize: 14, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, flexShrink: 0 }}>
+        <button onClick={() => window.open(`/pedidos/${p.id}/imprimir`, "_blank")} style={{ height: 44, border: "1px solid rgba(var(--overlay-rgb), 0.1)", borderRadius: 14, background: "transparent", color: "var(--foreground-secondary)", fontSize: 14, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, flexShrink: 0 }}>
           🖨️ Imprimir pedido
         </button>
 
-        <button onClick={() => setDetailId(null)} style={{ height: 44, border: "none", background: "transparent", color: "#a39b8b", fontSize: 14, fontWeight: 800, flexShrink: 0 }}>Fechar</button>
+        <button onClick={() => setDetailId(null)} style={{ height: 44, border: "none", background: "transparent", color: "var(--foreground-secondary)", fontSize: 14, fontWeight: 800, flexShrink: 0 }}>Fechar</button>
       </>
     )
   }
@@ -1189,30 +1189,30 @@ export default function PedidosPage() {
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800;900&display=swap');
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-        html, body { margin: 0; padding: 0; background: #060606; }
+        html, body { margin: 0; padding: 0; background: var(--background); }
         button { cursor: pointer; font-family: 'Archivo', sans-serif; }
-        @keyframes cbPulse { 0%{box-shadow:0 0 0 0 rgba(34,197,94,.55)} 70%{box-shadow:0 0 0 7px rgba(34,197,94,0)} 100%{box-shadow:0 0 0 0 rgba(34,197,94,0)} }
-        @keyframes cbRedPulse { 0%{box-shadow:0 0 0 0 rgba(239,68,68,.5)} 70%{box-shadow:0 0 0 7px rgba(239,68,68,0)} 100%{box-shadow:0 0 0 0 rgba(239,68,68,0)} }
-        @keyframes cbUrgentGlow { 0%,100%{border-color:rgba(239,68,68,.45)} 50%{border-color:rgba(239,68,68,.9)} }
-        @keyframes cbGlowO { 0%,100%{box-shadow:0 0 0 0 rgba(255,107,0,.15)} 50%{box-shadow:0 0 0 10px rgba(255,107,0,.04)} }
-        @keyframes cbGlowY { 0%,100%{box-shadow:0 0 0 0 rgba(250,204,21,.15)} 50%{box-shadow:0 0 0 10px rgba(250,204,21,.04)} }
-        @keyframes cbGlowB { 0%,100%{box-shadow:0 0 0 0 rgba(96,165,250,.15)} 50%{box-shadow:0 0 0 10px rgba(96,165,250,.04)} }
-        @keyframes cbGlowG { 0%,100%{box-shadow:0 0 0 0 rgba(34,197,94,.15)} 50%{box-shadow:0 0 0 10px rgba(34,197,94,.04)} }
-        @keyframes cbGlowR { 0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,.15)} 50%{box-shadow:0 0 0 10px rgba(239,68,68,.04)} }
+        @keyframes cbPulse { 0%{box-shadow:0 0 0 0 color-mix(in srgb, var(--success) 55%, transparent)} 70%{box-shadow:0 0 0 7px color-mix(in srgb, var(--success) 1%, transparent)} 100%{box-shadow:0 0 0 0 color-mix(in srgb, var(--success) 1%, transparent)} }
+        @keyframes cbRedPulse { 0%{box-shadow:0 0 0 0 color-mix(in srgb, var(--danger) 50%, transparent)} 70%{box-shadow:0 0 0 7px color-mix(in srgb, var(--danger) 1%, transparent)} 100%{box-shadow:0 0 0 0 color-mix(in srgb, var(--danger) 1%, transparent)} }
+        @keyframes cbUrgentGlow { 0%,100%{border-color:color-mix(in srgb, var(--danger) 45%, transparent)} 50%{border-color:color-mix(in srgb, var(--danger) 90%, transparent)} }
+        @keyframes cbGlowO { 0%,100%{box-shadow:0 0 0 0 color-mix(in srgb, var(--primary) 15%, transparent)} 50%{box-shadow:0 0 0 10px color-mix(in srgb, var(--primary) 4%, transparent)} }
+        @keyframes cbGlowY { 0%,100%{box-shadow:0 0 0 0 color-mix(in srgb, var(--primary) 15%, transparent)} 50%{box-shadow:0 0 0 10px color-mix(in srgb, var(--primary) 4%, transparent)} }
+        @keyframes cbGlowB { 0%,100%{box-shadow:0 0 0 0 color-mix(in srgb, var(--info) 15%, transparent)} 50%{box-shadow:0 0 0 10px color-mix(in srgb, var(--info) 4%, transparent)} }
+        @keyframes cbGlowG { 0%,100%{box-shadow:0 0 0 0 color-mix(in srgb, var(--success) 15%, transparent)} 50%{box-shadow:0 0 0 10px color-mix(in srgb, var(--success) 4%, transparent)} }
+        @keyframes cbGlowR { 0%,100%{box-shadow:0 0 0 0 color-mix(in srgb, var(--danger) 15%, transparent)} 50%{box-shadow:0 0 0 10px color-mix(in srgb, var(--danger) 4%, transparent)} }
         @keyframes cbCardIn { from{opacity:0;transform:translateY(16px) scale(.97)} to{opacity:1;transform:none} }
         @keyframes cbCardOut { to{opacity:0;transform:translateX(48px) scale(.96)} }
-        @keyframes cbFlash { 0%{transform:scale(1)} 30%{transform:scale(1.012);box-shadow:0 0 0 3px rgba(255,107,0,.55)} 100%{transform:scale(1);box-shadow:0 0 0 0 rgba(255,107,0,0)} }
+        @keyframes cbFlash { 0%{transform:scale(1)} 30%{transform:scale(1.012);box-shadow:0 0 0 3px color-mix(in srgb, var(--primary) 55%, transparent)} 100%{transform:scale(1);box-shadow:0 0 0 0 color-mix(in srgb, var(--primary) 1%, transparent)} }
         @keyframes cbToastIn { from{opacity:0;transform:translateY(14px)} to{opacity:1;transform:none} }
         @keyframes cbSheetUp { from{transform:translateY(100%)} to{transform:none} }
         @keyframes cbFadeIn { from{opacity:0} to{opacity:1} }
-        @keyframes cbCancelGlow { 0%,100%{border-color:rgba(239,68,68,.3)} 50%{border-color:rgba(239,68,68,.7)} }
+        @keyframes cbCancelGlow { 0%,100%{border-color:color-mix(in srgb, var(--danger) 30%, transparent)} 50%{border-color:color-mix(in srgb, var(--danger) 70%, transparent)} }
         @keyframes cbShimmer { 0%{background-position:-200% 0} 100%{background-position:200% 0} }
         @keyframes cbWait { 0%,100%{opacity:1} 50%{opacity:.35} }
-        .cb-header { background:#060606; border-bottom:1px solid #1a1816; padding:calc(env(safe-area-inset-top) + 12px) 16px 12px; position:sticky; top:0; z-index:10; }
+        .cb-header { background:var(--background); border-bottom:1px solid var(--surface); padding:calc(env(safe-area-inset-top) + 12px) 16px 12px; position:sticky; top:0; z-index:10; }
         .cb-main { padding:12px 16px; display:flex; flex-direction:column; gap:14px; }
-        .cbBusca::placeholder { color: #3a3730; }
-        .cbBusca:focus { border-color: #ff6b00 !important; box-shadow: 0 0 0 3px rgba(255,107,0,.1); }
-        .cbInput:focus { border-color: #ff6b00 !important; outline: none; }
+        .cbBusca::placeholder { color: var(--border-strong); }
+        .cbBusca:focus { border-color: var(--brand-text) !important; box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 10%, transparent); }
+        .cbInput:focus { border-color: var(--brand-text) !important; outline: none; }
         .cbPipeScroll { display:flex; gap:4px; overflow-x:auto; scrollbar-width:none; flex:1; }
         .cbPipeScroll::-webkit-scrollbar { display:none; }
         .cb-workspace { display:flex; flex:1; min-height:0; overflow:hidden; }
@@ -1236,31 +1236,31 @@ export default function PedidosPage() {
         .cb-mob-back { display:inline-flex; }
         .cb-chat-msg-area { flex:1; overflow-y:auto; padding:12px 14px; display:flex; flex-direction:column; gap:6px; }
         .cb-chat-msg-area::-webkit-scrollbar { width:4px; }
-        .cb-chat-msg-area::-webkit-scrollbar-thumb { background:#2a2723; border-radius:2px; }
+        .cb-chat-msg-area::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
         .cb-chat-left-inner::-webkit-scrollbar { width:3px; }
-        .cb-chat-left-inner::-webkit-scrollbar-thumb { background:#1e1c19; border-radius:2px; }
-        .cb-chat-item { width:100%; text-align:left; background:transparent; border:none; border-bottom:1px solid #111; padding:10px 14px; cursor:pointer; display:flex; align-items:center; gap:10px; transition:background .1s; }
-        .cb-chat-item:hover { background:rgba(255,255,255,.03); }
-        .cb-chat-item.cb-chat-item-active { background:#131110; border-left:3px solid #ff6b00; padding-left:11px; }
-        @keyframes cb-pulse-urgent { 0%,100%{background:rgba(251,191,36,.04)} 50%{background:rgba(251,191,36,.11)} }
-        .cb-chat-item.cb-chat-item-urgente { animation:cb-pulse-urgent 2s ease-in-out infinite; border-left:3px solid #fbbf24; padding-left:11px; }
-        .cb-chat-item.cb-chat-item-urgente:hover { background:rgba(251,191,36,.09) !important; }
-        .cb-chat-item.cb-chat-item-alerta { border-left:3px solid #f97316; padding-left:11px; }
-        .cb-chat-item.cb-chat-item-alerta:hover { background:rgba(249,115,22,.07) !important; }
-        @keyframes cb-pulse-nova-msg { 0%,100%{background:rgba(34,197,94,.04)} 50%{background:rgba(34,197,94,.11)} }
-        .cb-chat-item.cb-chat-item-nova-msg { animation:cb-pulse-nova-msg 1.8s ease-in-out infinite; border-left:3px solid #22c55e; padding-left:11px; }
-        .cb-chat-item.cb-chat-item-nova-msg:hover { background:rgba(34,197,94,.09) !important; }
-        .cb-assumir-btn { background:#fbbf24; color:#060606; border:none; border-radius:5px; padding:3px 8px; font-size:9px; font-weight:900; cursor:pointer; white-space:nowrap; flex-shrink:0; line-height:1.4; }
-        .cb-assumir-btn:hover { background:#f59e0b; }
+        .cb-chat-left-inner::-webkit-scrollbar-thumb { background:var(--surface); border-radius:2px; }
+        .cb-chat-item { width:100%; text-align:left; background:transparent; border:none; border-bottom:1px solid var(--surface); padding:10px 14px; cursor:pointer; display:flex; align-items:center; gap:10px; transition:background .1s; }
+        .cb-chat-item:hover { background:rgba(var(--overlay-rgb), 0.03); }
+        .cb-chat-item.cb-chat-item-active { background:var(--background); border-left:3px solid var(--primary); padding-left:11px; }
+        @keyframes cb-pulse-urgent { 0%,100%{background:color-mix(in srgb, var(--primary) 4%, transparent)} 50%{background:color-mix(in srgb, var(--primary) 11%, transparent)} }
+        .cb-chat-item.cb-chat-item-urgente { animation:cb-pulse-urgent 2s ease-in-out infinite; border-left:3px solid var(--primary); padding-left:11px; }
+        .cb-chat-item.cb-chat-item-urgente:hover { background:color-mix(in srgb, var(--primary) 9%, transparent) !important; }
+        .cb-chat-item.cb-chat-item-alerta { border-left:3px solid var(--primary); padding-left:11px; }
+        .cb-chat-item.cb-chat-item-alerta:hover { background:color-mix(in srgb, var(--primary) 7%, transparent) !important; }
+        @keyframes cb-pulse-nova-msg { 0%,100%{background:color-mix(in srgb, var(--success) 4%, transparent)} 50%{background:color-mix(in srgb, var(--success) 11%, transparent)} }
+        .cb-chat-item.cb-chat-item-nova-msg { animation:cb-pulse-nova-msg 1.8s ease-in-out infinite; border-left:3px solid var(--success); padding-left:11px; }
+        .cb-chat-item.cb-chat-item-nova-msg:hover { background:color-mix(in srgb, var(--success) 9%, transparent) !important; }
+        .cb-assumir-btn { background:var(--primary); color:var(--background); border:none; border-radius:5px; padding:3px 8px; font-size:9px; font-weight:900; cursor:pointer; white-space:nowrap; flex-shrink:0; line-height:1.4; }
+        .cb-assumir-btn:hover { background:var(--primary); }
         .cb-assumir-btn:disabled { opacity:.65; cursor:default; }
-        .cb-chat-textarea { width:100%; background:#0d0c0b; border:1px solid #252220; border-radius:10px; padding:9px 12px; color:#f4f1ec; font-size:13px; resize:none; font-family:inherit; outline:none; box-sizing:border-box; line-height:1.4; }
-        .cb-chat-textarea:focus { border-color:#ff6b00; }
+        .cb-chat-textarea { width:100%; background:var(--background); border:1px solid var(--surface-secondary); border-radius:10px; padding:9px 12px; color:var(--foreground); font-size:13px; resize:none; font-family:inherit; outline:none; box-sizing:border-box; line-height:1.4; }
+        .cb-chat-textarea:focus { border-color:var(--brand-text); }
         @media (min-width: 768px) {
-          .cb-header { border-bottom:1px solid #1a1816; padding:24px 28px 20px; position:static; }
+          .cb-header { border-bottom:1px solid var(--surface); padding:24px 28px 20px; position:static; }
           .cb-list-col { padding:16px 24px; }
-          .cb-detail-col { display:flex; flex-direction:column; width:420px; min-width:380px; flex-shrink:0; border-left:1px solid #1a1816; background:#080708; overflow-y:auto; padding:16px 20px 32px; gap:12px; }
+          .cb-detail-col { display:flex; flex-direction:column; width:420px; min-width:380px; flex-shrink:0; border-left:1px solid var(--surface); background:var(--background); overflow-y:auto; padding:16px 20px 32px; gap:12px; }
           .cb-mob-sheet-wrap { display:none !important; }
-          .cb-chat-left { width:280px; min-width:240px; flex-shrink:0; border-right:1px solid #1a1816; display:flex !important; }
+          .cb-chat-left { width:280px; min-width:240px; flex-shrink:0; border-right:1px solid var(--surface); display:flex !important; }
           .cb-chat-right { display:flex !important; }
           .cb-mob-back { display:none !important; }
         }
@@ -1277,71 +1277,71 @@ export default function PedidosPage() {
           <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 10 }}>
             <div>
               <div style={{ fontSize: 20, fontWeight: 900, letterSpacing: "-0.4px", lineHeight: 1.1 }}>Pedidos</div>
-              <div style={{ fontSize: 11, color: "#5a564d", fontWeight: 700, marginTop: 2 }}>Controle de pedidos da pizzaria</div>
+              <div style={{ fontSize: 11, color: "var(--foreground-muted)", fontWeight: 700, marginTop: 2 }}>Controle de pedidos da pizzaria</div>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <button onClick={toggleMute} title={muteado ? "Sons desativados" : "Sons ativados"} style={{ fontSize: 15, lineHeight: 1, background: muteado ? "rgba(239,68,68,.1)" : "transparent", border: `1px solid ${muteado ? "rgba(239,68,68,.35)" : "#242220"}`, padding: "5px 8px", borderRadius: 16 }}>{muteado ? "🔇" : "🔊"}</button>
-              {isAdmin && <button onClick={() => router.push("/admin")} style={{ fontSize: 11, fontWeight: 800, color: "#a39b8b", background: "transparent", border: "1px solid #242220", padding: "6px 10px", borderRadius: 16 }}>Admin</button>}
-              <button onClick={() => fetch("/api/auth/logout", { method: "POST" }).then(() => router.push("/login"))} style={{ fontSize: 11, fontWeight: 800, color: "#5a564d", background: "transparent", border: "1px solid #1f1d1a", padding: "6px 10px", borderRadius: 16 }}>Sair</button>
+              <button onClick={toggleMute} title={muteado ? "Sons desativados" : "Sons ativados"} style={{ fontSize: 15, lineHeight: 1, background: muteado ? "color-mix(in srgb, var(--danger) 10%, transparent)" : "transparent", border: `1px solid ${muteado ? "color-mix(in srgb, var(--danger) 35%, transparent)" : "var(--surface-secondary)"}`, padding: "5px 8px", borderRadius: 16 }}>{muteado ? "🔇" : "🔊"}</button>
+              {isAdmin && <button onClick={() => router.push("/admin")} style={{ fontSize: 11, fontWeight: 800, color: "var(--foreground-secondary)", background: "transparent", border: "1px solid var(--surface-secondary)", padding: "6px 10px", borderRadius: 16 }}>Admin</button>}
+              <button onClick={() => fetch("/api/auth/logout", { method: "POST" }).then(() => router.push("/login"))} style={{ fontSize: 11, fontWeight: 800, color: "var(--foreground-muted)", background: "transparent", border: "1px solid var(--border)", padding: "6px 10px", borderRadius: 16 }}>Sair</button>
             </div>
           </div>
 
           {/* Bot toggle */}
-          <button onClick={alternarBot} disabled={salvandoBot} style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", padding: "10px 12px", background: botAtivo ? "rgba(34,197,94,.06)" : "rgba(250,204,21,.06)", border: `1px solid ${botAtivo ? "rgba(34,197,94,.28)" : "rgba(250,204,21,.3)"}`, borderRadius: 12, color: "#f5f2ee", textAlign: "left", marginBottom: 10 }}>
-            <span style={{ width: 9, height: 9, borderRadius: "50%", background: botAtivo ? "#22c55e" : "#facc15", flexShrink: 0, animation: botAtivo ? "cbPulse 2s infinite" : "none" }} />
+          <button onClick={alternarBot} disabled={salvandoBot} style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", padding: "10px 12px", background: botAtivo ? "color-mix(in srgb, var(--success) 6%, transparent)" : "color-mix(in srgb, var(--primary) 6%, transparent)", border: `1px solid ${botAtivo ? "color-mix(in srgb, var(--success) 28%, transparent)" : "color-mix(in srgb, var(--primary) 30%, transparent)"}`, borderRadius: 12, color: "var(--foreground)", textAlign: "left", marginBottom: 10 }}>
+            <span style={{ width: 9, height: 9, borderRadius: "50%", background: botAtivo ? "var(--success)" : "var(--primary)", flexShrink: 0, animation: botAtivo ? "cbPulse 2s infinite" : "none" }} />
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 13, fontWeight: 900, letterSpacing: "-0.2px", color: "#f5f2ee" }}>{botAtivo ? "Bot atendendo" : "Bot pausado"}</div>
-              <div style={{ fontSize: 10, fontWeight: 700, color: botAtivo ? "#22c55e" : "#facc15", marginTop: 1 }}>{botAtivo ? "WhatsApp conectado" : "Você no comando"}</div>
+              <div style={{ fontSize: 13, fontWeight: 900, letterSpacing: "-0.2px", color: "var(--foreground)" }}>{botAtivo ? "Bot atendendo" : "Bot pausado"}</div>
+              <div style={{ fontSize: 10, fontWeight: 700, color: botAtivo ? "var(--success)" : "var(--brand-text)", marginTop: 1 }}>{botAtivo ? "WhatsApp conectado" : "Você no comando"}</div>
             </div>
-            <span style={{ fontSize: 11, fontWeight: 900, color: botAtivo ? "#22c55e" : "#facc15", background: "#060606", padding: "5px 10px", borderRadius: 8, flexShrink: 0 }}>{botAtivo ? "Pausar" : "Ativar"}</span>
+            <span style={{ fontSize: 11, fontWeight: 900, color: botAtivo ? "var(--success)" : "var(--brand-text)", background: "var(--background)", padding: "5px 10px", borderRadius: 8, flexShrink: 0 }}>{botAtivo ? "Pausar" : "Ativar"}</span>
           </button>
 
           {/* Métricas */}
           <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
-            <div style={{ flex: 1, background: "#101010", border: "1px solid #1f1d1a", borderRadius: 12, padding: "10px 10px" }}>
-              <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: "-1px", lineHeight: 1, color: "#f5f2ee" }}>{totalHoje}</div>
-              <div style={{ fontSize: 9.5, fontWeight: 700, color: "#5a564d", textTransform: "uppercase", letterSpacing: ".5px", marginTop: 2 }}>Hoje</div>
+            <div style={{ flex: 1, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: "10px 10px" }}>
+              <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: "-1px", lineHeight: 1, color: "var(--foreground)" }}>{totalHoje}</div>
+              <div style={{ fontSize: 9.5, fontWeight: 700, color: "var(--foreground-muted)", textTransform: "uppercase", letterSpacing: ".5px", marginTop: 2 }}>Hoje</div>
             </div>
-            <div style={{ flex: 1, background: emAberto > 0 ? "#1a0d00" : "#101010", border: `1px solid ${emAberto > 0 ? "rgba(255,107,0,.5)" : "#1f1d1a"}`, borderRadius: 12, padding: "10px 10px" }}>
-              <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: "-1px", lineHeight: 1, color: emAberto > 0 ? "#ff6b00" : "#3a3730" }}>{emAberto}</div>
-              <div style={{ fontSize: 9.5, fontWeight: 700, color: emAberto > 0 ? "rgba(255,107,0,.7)" : "#3a3730", textTransform: "uppercase", letterSpacing: ".5px", marginTop: 2 }}>Em aberto</div>
+            <div style={{ flex: 1, background: emAberto > 0 ? "var(--background)" : "var(--surface)", border: `1px solid ${emAberto > 0 ? "color-mix(in srgb, var(--primary) 50%, transparent)" : "var(--border)"}`, borderRadius: 12, padding: "10px 10px" }}>
+              <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: "-1px", lineHeight: 1, color: emAberto > 0 ? "var(--brand-text)" : "var(--border-strong)" }}>{emAberto}</div>
+              <div style={{ fontSize: 9.5, fontWeight: 700, color: emAberto > 0 ? "var(--brand-text)" : "var(--border-strong)", textTransform: "uppercase", letterSpacing: ".5px", marginTop: 2 }}>Em aberto</div>
             </div>
-            <div style={{ flex: 1, background: "#101010", border: "1px solid #1f1d1a", borderRadius: 12, padding: "10px 10px" }}>
-              <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: "-1px", lineHeight: 1, color: "#22c55e" }}>{contagemPorStatus("entregue")}</div>
-              <div style={{ fontSize: 9.5, fontWeight: 700, color: "#5a564d", textTransform: "uppercase", letterSpacing: ".5px", marginTop: 2 }}>Prontos</div>
+            <div style={{ flex: 1, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: "10px 10px" }}>
+              <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: "-1px", lineHeight: 1, color: "var(--success)" }}>{contagemPorStatus("entregue")}</div>
+              <div style={{ fontSize: 9.5, fontWeight: 700, color: "var(--foreground-muted)", textTransform: "uppercase", letterSpacing: ".5px", marginTop: 2 }}>Prontos</div>
             </div>
-            <div style={{ flex: 1, background: "#101010", border: "1px solid #1f1d1a", borderRadius: 12, padding: "10px 10px" }}>
-              <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: "-1px", lineHeight: 1, color: "#60a5fa" }}>{tempoMedioPreparo !== null ? `${tempoMedioPreparo}` : "—"}<span style={{ fontSize: 10, fontWeight: 700, marginLeft: 2 }}>{tempoMedioPreparo !== null ? "m" : ""}</span></div>
-              <div style={{ fontSize: 9.5, fontWeight: 700, color: "#5a564d", textTransform: "uppercase", letterSpacing: ".5px", marginTop: 2 }}>⏱ Média</div>
+            <div style={{ flex: 1, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: "10px 10px" }}>
+              <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: "-1px", lineHeight: 1, color: "var(--info)" }}>{tempoMedioPreparo !== null ? `${tempoMedioPreparo}` : "—"}<span style={{ fontSize: 10, fontWeight: 700, marginLeft: 2 }}>{tempoMedioPreparo !== null ? "m" : ""}</span></div>
+              <div style={{ fontSize: 9.5, fontWeight: 700, color: "var(--foreground-muted)", textTransform: "uppercase", letterSpacing: ".5px", marginTop: 2 }}>⏱ Média</div>
             </div>
           </div>
 
           {/* Pipeline + Novo + Limpar */}
           <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
             <div className="cbPipeScroll">
-              <button onClick={() => setFiltro("tempo_real")} style={{ border: `1px solid ${filtro === "tempo_real" ? "#60a5fa" : "#242220"}`, background: filtro === "tempo_real" ? "#60a5fa" : "transparent", color: filtro === "tempo_real" ? "#060606" : "#c9c2b4", fontSize: 11, fontWeight: 900, padding: "6px 11px", borderRadius: 14, flexShrink: 0 }}>⚡ Tempo real · {sessoes.length}</button>
+              <button onClick={() => setFiltro("tempo_real")} style={{ border: `1px solid ${filtro === "tempo_real" ? "var(--info)" : "var(--surface-secondary)"}`, background: filtro === "tempo_real" ? "var(--info)" : "transparent", color: filtro === "tempo_real" ? "var(--background)" : "var(--foreground-secondary)", fontSize: 11, fontWeight: 900, padding: "6px 11px", borderRadius: 14, flexShrink: 0 }}>⚡ Tempo real · {sessoes.length}</button>
               {steps.map((s) => {
                 const active = filtro === s.key; const sc = STATUS_COLOR[s.key]
                 return (
-                  <button key={s.key} onClick={() => setFiltro(active ? "todos" : s.key)} style={{ border: `1px solid ${active ? sc.accentBorder : "#242220"}`, background: active ? sc.accentBg : "#101010", color: active ? sc.accent : "#c9c2b4", fontSize: 11, fontWeight: 900, padding: "6px 11px", borderRadius: 14, flexShrink: 0 }}>
+                  <button key={s.key} onClick={() => setFiltro(active ? "todos" : s.key)} style={{ border: `1px solid ${active ? sc.accentBorder : "var(--surface-secondary)"}`, background: active ? sc.accentBg : "var(--surface)", color: active ? sc.accent : "var(--foreground-secondary)", fontSize: 11, fontWeight: 900, padding: "6px 11px", borderRadius: 14, flexShrink: 0 }}>
                     {s.stepLabel} · {s.count}
                   </button>
                 )
               })}
-              <button onClick={() => setFiltro("arquivados")} style={{ border: `1px solid ${filtro === "arquivados" ? "rgba(139,92,246,.6)" : "#242220"}`, background: filtro === "arquivados" ? "rgba(139,92,246,.15)" : "transparent", color: filtro === "arquivados" ? "#a78bfa" : "#5a564d", fontSize: 11, fontWeight: 900, padding: "6px 11px", borderRadius: 14, flexShrink: 0 }}>📦 Arquivados</button>
+              <button onClick={() => setFiltro("arquivados")} style={{ border: `1px solid ${filtro === "arquivados" ? "color-mix(in srgb, var(--attention) 60%, transparent)" : "var(--surface-secondary)"}`, background: filtro === "arquivados" ? "color-mix(in srgb, var(--attention) 15%, transparent)" : "transparent", color: filtro === "arquivados" ? "var(--attention)" : "var(--foreground-muted)", fontSize: 11, fontWeight: 900, padding: "6px 11px", borderRadius: 14, flexShrink: 0 }}>📦 Arquivados</button>
             </div>
-            <button onClick={() => setModalArquivarExpediente(true)} title="Arquivar não resolvidos do expediente" style={{ height: 32, border: "1px solid rgba(139,92,246,.4)", background: "rgba(139,92,246,.08)", color: "#a78bfa", fontSize: 11, fontWeight: 900, padding: "0 10px", borderRadius: 10, flexShrink: 0, whiteSpace: "nowrap" }}>📦</button>
-            <button onClick={() => setModalNovoPedido(true)} style={{ height: 32, border: "1px solid rgba(255,107,0,.5)", background: "rgba(255,107,0,.1)", color: "#ff6b00", fontSize: 11, fontWeight: 900, padding: "0 10px", borderRadius: 10, flexShrink: 0 }}>+ Novo</button>
-            <button onClick={() => setModalLimpar(true)} title="Limpar histórico" style={{ width: 32, height: 32, border: "1px solid #242220", borderRadius: 10, background: "transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><polyline points="3,6 5,6 21,6" stroke="#5a564d" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" stroke="#5a564d" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/><path d="M10 11v6M14 11v6" stroke="#5a564d" strokeWidth="2.2" strokeLinecap="round"/><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" stroke="#5a564d" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            <button onClick={() => setModalArquivarExpediente(true)} title="Arquivar não resolvidos do expediente" style={{ height: 32, border: "1px solid color-mix(in srgb, var(--attention) 40%, transparent)", background: "color-mix(in srgb, var(--attention) 8%, transparent)", color: "var(--attention)", fontSize: 11, fontWeight: 900, padding: "0 10px", borderRadius: 10, flexShrink: 0, whiteSpace: "nowrap" }}>📦</button>
+            <button onClick={() => setModalNovoPedido(true)} style={{ height: 32, border: "1px solid color-mix(in srgb, var(--primary) 50%, transparent)", background: "color-mix(in srgb, var(--primary) 10%, transparent)", color: "var(--brand-text)", fontSize: 11, fontWeight: 900, padding: "0 10px", borderRadius: 10, flexShrink: 0 }}>+ Novo</button>
+            <button onClick={() => setModalLimpar(true)} title="Limpar histórico" style={{ width: 32, height: 32, border: "1px solid var(--surface-secondary)", borderRadius: 10, background: "transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><polyline points="3,6 5,6 21,6" stroke="var(--foreground-muted)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" stroke="var(--foreground-muted)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/><path d="M10 11v6M14 11v6" stroke="var(--foreground-muted)" strokeWidth="2.2" strokeLinecap="round"/><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" stroke="var(--foreground-muted)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
             </button>
           </div>
 
           {/* Busca */}
           <div style={{ position: "relative" }}>
-            <input className="cbBusca" type="text" placeholder="Buscar por nome, telefone, bairro ou #número..." value={busca} onChange={e => setBusca(e.target.value)} style={{ width: "100%", height: 44, background: "#101010", border: "1px solid #242220", borderRadius: 12, padding: "0 40px 0 14px", color: "#f5f2ee", fontSize: 13, fontWeight: 700, fontFamily: "'Archivo', sans-serif", outline: "none", boxSizing: "border-box" }} />
-            {busca ? <button onClick={() => setBusca("")} style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: "#5a564d", fontSize: 18, lineHeight: 1, padding: "4px", cursor: "pointer" }}>×</button>
-              : <svg style={{ position: "absolute", right: 14, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="#3a3730" strokeWidth="2.2"/><path d="M16.5 16.5l3.5 3.5" stroke="#3a3730" strokeWidth="2.2" strokeLinecap="round"/></svg>}
+            <input className="cbBusca" type="text" placeholder="Buscar por nome, telefone, bairro ou #número..." value={busca} onChange={e => setBusca(e.target.value)} style={{ width: "100%", height: 44, background: "var(--surface)", border: "1px solid var(--surface-secondary)", borderRadius: 12, padding: "0 40px 0 14px", color: "var(--foreground)", fontSize: 13, fontWeight: 700, fontFamily: "'Archivo', sans-serif", outline: "none", boxSizing: "border-box" }} />
+            {busca ? <button onClick={() => setBusca("")} style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: "var(--foreground-muted)", fontSize: 18, lineHeight: 1, padding: "4px", cursor: "pointer" }}>×</button>
+              : <svg style={{ position: "absolute", right: 14, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }} width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="var(--border-strong)" strokeWidth="2.2"/><path d="M16.5 16.5l3.5 3.5" stroke="var(--border-strong)" strokeWidth="2.2" strokeLinecap="round"/></svg>}
           </div>
         </header>
 
@@ -1352,26 +1352,26 @@ export default function PedidosPage() {
         {/* Install Banner */}
         {showInstallBanner && (
           <div style={{ padding: "0 0 2px" }}>
-            <div style={{ padding: "14px 16px", background: "linear-gradient(135deg,rgba(255,107,0,.15),rgba(255,107,0,.05))", border: "1.5px solid rgba(255,107,0,.4)", borderRadius: 18, display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ padding: "14px 16px", background: "linear-gradient(135deg,color-mix(in srgb, var(--primary) 15%, transparent),color-mix(in srgb, var(--primary) 5%, transparent))", border: "1.5px solid color-mix(in srgb, var(--primary) 40%, transparent)", borderRadius: 18, display: "flex", alignItems: "center", gap: 12 }}>
               <span style={{ fontSize: 32, flexShrink: 0 }}>🍕</span>
-              <div style={{ flex: 1, minWidth: 0 }}><p style={{ margin: 0, fontSize: 14, fontWeight: 900, color: "#f4f1ec" }}>Instalar ChefeBot</p><p style={{ margin: "2px 0 0", fontSize: 11, fontWeight: 700, color: "#a39b8b" }}>Acesse mais rápido pela tela inicial</p></div>
+              <div style={{ flex: 1, minWidth: 0 }}><p style={{ margin: 0, fontSize: 14, fontWeight: 900, color: "var(--foreground)" }}>Instalar ChefeBot</p><p style={{ margin: "2px 0 0", fontSize: 11, fontWeight: 700, color: "var(--foreground-secondary)" }}>Acesse mais rápido pela tela inicial</p></div>
               <div style={{ display: "flex", flexDirection: "column", gap: 6, flexShrink: 0 }}>
-                <button onClick={async () => { if (installPrompt) { installPrompt.prompt(); const r = await installPrompt.userChoice; if (r.outcome === "accepted") setShowInstallBanner(false); } }} style={{ border: "none", background: "#ff6b00", color: "#fff", fontSize: 12, fontWeight: 900, padding: "8px 14px", borderRadius: 10 }}>Instalar</button>
-                <button onClick={() => setShowInstallBanner(false)} style={{ border: "none", background: "transparent", color: "#5a564d", fontSize: 11, fontWeight: 800, padding: "4px 0" }}>Agora não</button>
+                <button onClick={async () => { if (installPrompt) { installPrompt.prompt(); const r = await installPrompt.userChoice; if (r.outcome === "accepted") setShowInstallBanner(false); } }} style={{ border: "none", background: "var(--primary)", color: 'var(--primary-foreground)', fontSize: 12, fontWeight: 900, padding: "8px 14px", borderRadius: 10 }}>Instalar</button>
+                <button onClick={() => setShowInstallBanner(false)} style={{ border: "none", background: "transparent", color: "var(--foreground-muted)", fontSize: 11, fontWeight: 800, padding: "4px 0" }}>Agora não</button>
               </div>
             </div>
           </div>
         )}
         {/* Urgência */}
         {escalonados.length > 0 && !cardUrgenciaFechado && (
-          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "rgba(239,68,68,.06)", border: "1px solid rgba(239,68,68,.35)", borderLeft: "3px solid #ef4444", borderRadius: 10, animation: "cbUrgentGlow 1.6s infinite" }}>
-            <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#ef4444", flexShrink: 0, animation: "cbRedPulse 1.6s infinite" }} />
-            <span style={{ fontSize: 11, fontWeight: 900, color: "#ef4444", textTransform: "uppercase", letterSpacing: "1px", flexShrink: 0 }}>🚨 URGENTE</span>
-            <span style={{ fontSize: 12, fontWeight: 700, color: "#f4f1ec", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "color-mix(in srgb, var(--danger) 6%, transparent)", border: "1px solid color-mix(in srgb, var(--danger) 35%, transparent)", borderLeft: "3px solid var(--danger)", borderRadius: 10, animation: "cbUrgentGlow 1.6s infinite" }}>
+            <span style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--danger)", flexShrink: 0, animation: "cbRedPulse 1.6s infinite" }} />
+            <span style={{ fontSize: 11, fontWeight: 900, color: "var(--danger)", textTransform: "uppercase", letterSpacing: "1px", flexShrink: 0 }}>🚨 URGENTE</span>
+            <span style={{ fontSize: 12, fontWeight: 700, color: "var(--foreground)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {escalonados.length === 1 ? `${escalonados[0].cliente.split(" ")[0]} quer falar` : `${escalonados.length} conversas aguardando`}
             </span>
-            <button onClick={() => { assumirConversa(escalonados[0].telefone); setCardUrgenciaFechado(true) }} style={{ height: 26, padding: "0 10px", border: "none", borderRadius: 7, background: "#ef4444", color: "#fff", fontSize: 11, fontWeight: 900, flexShrink: 0 }}>Assumir</button>
-            <button onClick={() => setCardUrgenciaFechado(true)} style={{ height: 26, width: 26, border: "1px solid rgba(239,68,68,.25)", borderRadius: 7, background: "transparent", color: "#ef4444", fontSize: 16, fontWeight: 900, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
+            <button onClick={() => { assumirConversa(escalonados[0].telefone); setCardUrgenciaFechado(true) }} style={{ height: 26, padding: "0 10px", border: "none", borderRadius: 7, background: "var(--danger)", color: "var(--foreground)", fontSize: 11, fontWeight: 900, flexShrink: 0 }}>Assumir</button>
+            <button onClick={() => setCardUrgenciaFechado(true)} style={{ height: 26, width: 26, border: "1px solid color-mix(in srgb, var(--danger) 25%, transparent)", borderRadius: 7, background: "transparent", color: "var(--danger)", fontSize: 16, fontWeight: 900, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
           </div>
         )}
 
@@ -1379,14 +1379,14 @@ export default function PedidosPage() {
         {filtro === "arquivados" && (
           <>
             {carregandoArquivados ? (
-              <div style={{ background: "#101010", border: "1px dashed #2a2723", borderRadius: 20, padding: "36px 20px", textAlign: "center" }}>
-                <span style={{ fontSize: 13, fontWeight: 700, color: "#5a564d" }}>Carregando...</span>
+              <div style={{ background: "var(--surface)", border: "1px dashed var(--border)", borderRadius: 20, padding: "36px 20px", textAlign: "center" }}>
+                <span style={{ fontSize: 13, fontWeight: 700, color: "var(--foreground-muted)" }}>Carregando...</span>
               </div>
             ) : pedidosArquivados.length === 0 ? (
-              <div style={{ background: "#101010", border: "1px dashed #2a2723", borderRadius: 20, padding: "36px 20px", textAlign: "center" }}>
+              <div style={{ background: "var(--surface)", border: "1px dashed var(--border)", borderRadius: 20, padding: "36px 20px", textAlign: "center" }}>
                 <span style={{ fontSize: 32, display: "block", marginBottom: 8 }}>📦</span>
-                <span style={{ fontSize: 15, fontWeight: 900, color: "#c9c2b4", display: "block" }}>Nenhum pedido arquivado.</span>
-                <span style={{ fontSize: 12, fontWeight: 600, color: "#5a564d", display: "block", marginTop: 4 }}>Pedidos arquivados ficam aqui para consulta.</span>
+                <span style={{ fontSize: 15, fontWeight: 900, color: "var(--foreground-secondary)", display: "block" }}>Nenhum pedido arquivado.</span>
+                <span style={{ fontSize: 12, fontWeight: 600, color: "var(--foreground-muted)", display: "block", marginTop: 4 }}>Pedidos arquivados ficam aqui para consulta.</span>
               </div>
             ) : pedidosArquivados.map(p => {
               const sc = STATUS_COLOR[p.status] || STATUS_COLOR["cancelado"]
@@ -1394,19 +1394,19 @@ export default function PedidosPage() {
               const archivedDate = p.archivedAt ? new Date(p.archivedAt).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" }) : ""
               const motivo = p.archivedReason === "fim_expediente" ? "Fim de expediente" : p.archivedReason === "manual" ? "Arquivado manualmente" : "Arquivado"
               return (
-                <article key={p.id} style={{ background: "rgba(139,92,246,.05)", border: "1px solid rgba(139,92,246,.2)", borderRadius: 20, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 8, opacity: 0.85 }}>
+                <article key={p.id} style={{ background: "color-mix(in srgb, var(--attention) 5%, transparent)", border: "1px solid color-mix(in srgb, var(--attention) 20%, transparent)", borderRadius: 20, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 8, opacity: 0.85 }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
                     <div>
-                      {p.numero != null && <span style={{ fontSize: 10, fontWeight: 900, color: "#5a564d", marginRight: 6 }}>#{p.numero}</span>}
-                      <span style={{ fontSize: 16, fontWeight: 900, color: "#c9c2b4" }}>{firstName}</span>
+                      {p.numero != null && <span style={{ fontSize: 10, fontWeight: 900, color: "var(--foreground-muted)", marginRight: 6 }}>#{p.numero}</span>}
+                      <span style={{ fontSize: 16, fontWeight: 900, color: "var(--foreground-secondary)" }}>{firstName}</span>
                       <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 800, color: sc.accent, background: sc.accentBg, padding: "2px 6px", borderRadius: 6, border: `1px solid ${sc.accentBorder}` }}>{sc.label}</span>
                     </div>
-                    <span style={{ fontSize: 9, fontWeight: 800, color: "#a78bfa", background: "rgba(139,92,246,.12)", padding: "3px 8px", borderRadius: 8 }}>📦 {motivo}</span>
+                    <span style={{ fontSize: 9, fontWeight: 800, color: "var(--attention)", background: "color-mix(in srgb, var(--attention) 12%, transparent)", padding: "3px 8px", borderRadius: 8 }}>📦 {motivo}</span>
                   </div>
-                  <div style={{ fontSize: 12, color: "#5a564d", fontWeight: 700 }}>
+                  <div style={{ fontSize: 12, color: "var(--foreground-muted)", fontWeight: 700 }}>
                     {p.itens.slice(0, 2).join(", ")}{p.itens.length > 2 ? "..." : ""}
                   </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#3a3730", fontWeight: 700 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--border-strong)", fontWeight: 700 }}>
                     <span>Arquivado: {archivedDate}</span>
                     <span>R$ {p.total.toFixed(2).replace(".", ",")}</span>
                   </div>
@@ -1422,8 +1422,8 @@ export default function PedidosPage() {
 
             {/* ── Coluna esquerda: lista de sessões ── */}
             <div className={`cb-chat-left${sessaoAtiva ? " cb-mob-hidden" : ""}`}>
-              <div style={{ padding: "10px 14px 8px", borderBottom: "1px solid #141210", flexShrink: 0 }}>
-                <div style={{ fontSize: 11, fontWeight: 900, color: "#4a4640", textTransform: "uppercase", letterSpacing: ".5px" }}>
+              <div style={{ padding: "10px 14px 8px", borderBottom: "1px solid var(--background)", flexShrink: 0 }}>
+                <div style={{ fontSize: 11, fontWeight: 900, color: "var(--foreground-muted)", textTransform: "uppercase", letterSpacing: ".5px" }}>
                   ⚡ Conversas · {sessoes.length}
                 </div>
               </div>
@@ -1431,7 +1431,7 @@ export default function PedidosPage() {
                 {sessoes.length === 0 ? (
                   <div style={{ padding: "40px 16px", textAlign: "center" }}>
                     <div style={{ fontSize: 26, marginBottom: 8 }}>⚡</div>
-                    <div style={{ fontSize: 13, fontWeight: 800, color: "#3a3730" }}>Nenhuma conversa ativa</div>
+                    <div style={{ fontSize: 13, fontWeight: 800, color: "var(--border-strong)" }}>Nenhuma conversa ativa</div>
                   </div>
                 ) : [...sessoes].sort((a, b) => {
                     // 1. Nova mensagem não vista: sobe ao topo imediatamente
@@ -1465,17 +1465,17 @@ export default function PedidosPage() {
                       {hasNovaMsg && (
                         <span
                           title="Nova mensagem"
-                          style={{ position: "absolute", right: 12, bottom: 10, zIndex: 20, minWidth: 20, height: 20, borderRadius: 10, background: "#22c55e", color: "#fff", fontSize: 11, fontWeight: 900, display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "0 5px", lineHeight: 1, boxShadow: "0 1px 4px rgba(0,0,0,.4)" }}
+                          style={{ position: "absolute", right: 12, bottom: 10, zIndex: 20, minWidth: 20, height: 20, borderRadius: 10, background: "var(--success)", color: "var(--foreground)", fontSize: 11, fontWeight: 900, display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "0 5px", lineHeight: 1, boxShadow: "0 1px 4px rgba(0,0,0,.4)" }}
                         >
                           1
                         </span>
                       )}
-                      <div style={{ width: 38, height: 38, borderRadius: "50%", flexShrink: 0, background: s.manual ? "rgba(239,68,68,.13)" : s.postOrderPriority ? "rgba(251,191,36,.13)" : "rgba(255,107,0,.1)", border: `1.5px solid ${s.manual ? "rgba(239,68,68,.3)" : s.postOrderPriority ? "rgba(251,191,36,.3)" : "rgba(255,107,0,.25)"}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 900, color: s.manual ? "#ef4444" : s.postOrderPriority ? "#fbbf24" : "#ff6b00" }}>
+                      <div style={{ width: 38, height: 38, borderRadius: "50%", flexShrink: 0, background: s.manual ? "color-mix(in srgb, var(--danger) 13%, transparent)" : s.postOrderPriority ? "color-mix(in srgb, var(--primary) 13%, transparent)" : "color-mix(in srgb, var(--primary) 10%, transparent)", border: `1.5px solid ${s.manual ? "color-mix(in srgb, var(--danger) 30%, transparent)" : s.postOrderPriority ? "color-mix(in srgb, var(--primary) 30%, transparent)" : "color-mix(in srgb, var(--primary) 25%, transparent)"}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 900, color: s.manual ? "var(--danger)" : s.postOrderPriority ? "var(--brand-text)" : "var(--brand-text)" }}>
                         {initial}
                       </div>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, marginBottom: 3 }}>
-                          <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 900, color: "#f0ede8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displayName}</span>
+                          <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: 900, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displayName}</span>
                           {s.postOrderPriority && !s.manual ? (
                             <button
                               className="cb-assumir-btn"
@@ -1485,20 +1485,20 @@ export default function PedidosPage() {
                               {assumindoSessao === s.phone ? "..." : "Assumir e responder"}
                             </button>
                           ) : s.conversationAlert && !s.manual ? (
-                            <span style={{ fontSize: 9, fontWeight: 900, color: "#f97316", background: "rgba(249,115,22,.08)", border: "1px solid rgba(249,115,22,.3)", padding: "2px 7px", borderRadius: 5, flexShrink: 0, whiteSpace: "nowrap" }}>
+                            <span style={{ fontSize: 9, fontWeight: 900, color: "var(--brand-text)", background: "color-mix(in srgb, var(--primary) 8%, transparent)", border: "1px solid color-mix(in srgb, var(--primary) 30%, transparent)", padding: "2px 7px", borderRadius: 5, flexShrink: 0, whiteSpace: "nowrap" }}>
                               ⚠ Atenção
                             </span>
                           ) : hasNovaMsg ? (
-                            <span style={{ fontSize: 10, fontWeight: 900, color: "#22c55e", background: "rgba(34,197,94,.12)", border: "1px solid rgba(34,197,94,.4)", padding: "2px 8px", borderRadius: 5, flexShrink: 0, whiteSpace: "nowrap" }}>
+                            <span style={{ fontSize: 10, fontWeight: 900, color: "var(--success)", background: "color-mix(in srgb, var(--success) 12%, transparent)", border: "1px solid color-mix(in srgb, var(--success) 40%, transparent)", padding: "2px 8px", borderRadius: 5, flexShrink: 0, whiteSpace: "nowrap" }}>
                               ● Nova mensagem
                             </span>
                           ) : (
-                            <span style={{ fontSize: 9, fontWeight: 900, color: s.manual ? "#ef4444" : "#34d399", background: s.manual ? "rgba(239,68,68,.08)" : "rgba(52,211,153,.08)", border: `1px solid ${s.manual ? "rgba(239,68,68,.25)" : "rgba(52,211,153,.2)"}`, padding: "2px 7px", borderRadius: 5, flexShrink: 0, whiteSpace: "nowrap" }}>
+                            <span style={{ fontSize: 9, fontWeight: 900, color: s.manual ? "var(--danger)" : "var(--success)", background: s.manual ? "color-mix(in srgb, var(--danger) 8%, transparent)" : "color-mix(in srgb, var(--success) 8%, transparent)", border: `1px solid ${s.manual ? "color-mix(in srgb, var(--danger) 25%, transparent)" : "color-mix(in srgb, var(--success) 20%, transparent)"}`, padding: "2px 7px", borderRadius: 5, flexShrink: 0, whiteSpace: "nowrap" }}>
                               {s.manual ? "Em atendimento" : "Bot atendendo"}
                             </span>
                           )}
                         </div>
-                        <div style={{ fontSize: 11, color: hasNovaMsg ? "#b8f5c8" : "#4a4640", fontWeight: hasNovaMsg ? 800 : 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", paddingRight: hasNovaMsg ? 28 : 0 }}>
+                        <div style={{ fontSize: 11, color: hasNovaMsg ? "var(--success)" : "var(--foreground-muted)", fontWeight: hasNovaMsg ? 800 : 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", paddingRight: hasNovaMsg ? 28 : 0 }}>
                           {s.ultimaMensagem || s.stepLabel || "—"}
                         </div>
                       </div>
@@ -1513,13 +1513,13 @@ export default function PedidosPage() {
               {!sessaoAtiva ? (
                 <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 10 }}>
                   <div style={{ fontSize: 32 }}>💬</div>
-                  <div style={{ fontSize: 13, fontWeight: 800, color: "#3a3730" }}>Selecione uma conversa</div>
+                  <div style={{ fontSize: 13, fontWeight: 800, color: "var(--border-strong)" }}>Selecione uma conversa</div>
                 </div>
               ) : (() => {
                 const s = sessoes.find(x => x.phone === sessaoAtiva)
                 if (!s) return (
                   <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                    <span style={{ color: "#3a3730", fontSize: 13, fontWeight: 700 }}>Conversa encerrada</span>
+                    <span style={{ color: "var(--border-strong)", fontSize: 13, fontWeight: 700 }}>Conversa encerrada</span>
                   </div>
                 )
                 const displayName = s.customerName || `…${s.lastDigits}`
@@ -1529,44 +1529,44 @@ export default function PedidosPage() {
                 return (
                   <>
                     {/* Header da conversa */}
-                    <div style={{ padding: "10px 12px", borderBottom: "1px solid #141210", display: "flex", alignItems: "center", gap: 8, flexShrink: 0, background: "#0a0908" }}>
-                      <button className="cb-mob-back" onClick={() => setSessaoAtiva(null)} style={{ background: "none", border: "none", color: "#ff6b00", fontSize: 20, lineHeight: 1, padding: "0 4px", cursor: "pointer", flexShrink: 0 }}>←</button>
-                      <div style={{ width: 34, height: 34, borderRadius: "50%", flexShrink: 0, background: s.manual ? "rgba(239,68,68,.13)" : s.postOrderPriority ? "rgba(251,191,36,.13)" : "rgba(255,107,0,.1)", border: `1.5px solid ${s.manual ? "rgba(239,68,68,.3)" : s.postOrderPriority ? "rgba(251,191,36,.3)" : "rgba(255,107,0,.25)"}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 900, color: s.manual ? "#ef4444" : s.postOrderPriority ? "#fbbf24" : "#ff6b00" }}>
+                    <div style={{ padding: "10px 12px", borderBottom: "1px solid var(--background)", display: "flex", alignItems: "center", gap: 8, flexShrink: 0, background: "var(--background)" }}>
+                      <button className="cb-mob-back" onClick={() => setSessaoAtiva(null)} style={{ background: "none", border: "none", color: "var(--brand-text)", fontSize: 20, lineHeight: 1, padding: "0 4px", cursor: "pointer", flexShrink: 0 }}>←</button>
+                      <div style={{ width: 34, height: 34, borderRadius: "50%", flexShrink: 0, background: s.manual ? "color-mix(in srgb, var(--danger) 13%, transparent)" : s.postOrderPriority ? "color-mix(in srgb, var(--primary) 13%, transparent)" : "color-mix(in srgb, var(--primary) 10%, transparent)", border: `1.5px solid ${s.manual ? "color-mix(in srgb, var(--danger) 30%, transparent)" : s.postOrderPriority ? "color-mix(in srgb, var(--primary) 30%, transparent)" : "color-mix(in srgb, var(--primary) 25%, transparent)"}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 900, color: s.manual ? "var(--danger)" : s.postOrderPriority ? "var(--brand-text)" : "var(--brand-text)" }}>
                         {initial}
                       </div>
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 13, fontWeight: 900, color: "#f0ede8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displayName}</div>
-                        <div style={{ fontSize: 10, fontWeight: 700, color: s.manual ? "#ef4444" : s.postOrderPriority ? "#fbbf24" : "#34d399" }}>
+                        <div style={{ fontSize: 13, fontWeight: 900, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displayName}</div>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: s.manual ? "var(--danger)" : s.postOrderPriority ? "var(--brand-text)" : "var(--success)" }}>
                           {s.manual ? "Atendimento humano" : s.postOrderPriority ? "Bot respondendo · pós-pedido" : "Robô atendendo"} · {s.stepLabel}
                         </div>
                       </div>
                       {/* Botões de ação — Arquivar sempre na 1ª posição para garantir visibilidade */}
                       {s.manual ? (
                         <div style={{ display: "flex", gap: 5, flexShrink: 0 }}>
-                          <button onClick={() => arquivarConversa(s.phone, s.step)} disabled={arquivandoConversa === s.phone} title="Arquivar conversa. Histórico preservado." style={{ height: 30, padding: "0 9px", border: "1px solid rgba(239,68,68,.35)", borderRadius: 8, background: "rgba(239,68,68,.09)", color: "#ef4444", fontSize: 11, fontWeight: 800 }}>
+                          <button onClick={() => arquivarConversa(s.phone, s.step)} disabled={arquivandoConversa === s.phone} title="Arquivar conversa. Histórico preservado." style={{ height: 30, padding: "0 9px", border: "1px solid color-mix(in srgb, var(--danger) 35%, transparent)", borderRadius: 8, background: "color-mix(in srgb, var(--danger) 9%, transparent)", color: "var(--danger)", fontSize: 11, fontWeight: 800 }}>
                             {arquivandoConversa === s.phone ? "..." : "📦 Arquivar"}
                           </button>
-                          <button onClick={() => abrirPedidoCombinado(s.phone)} disabled={carregandoPedidoCombinado && pedidoCombinadoPhone === s.phone} style={{ height: 30, padding: "0 9px", border: "none", borderRadius: 8, background: "#22c55e", color: "#060606", fontSize: 11, fontWeight: 900 }}>
+                          <button onClick={() => abrirPedidoCombinado(s.phone)} disabled={carregandoPedidoCombinado && pedidoCombinadoPhone === s.phone} style={{ height: 30, padding: "0 9px", border: "none", borderRadius: 8, background: "var(--success)", color: "var(--background)", fontSize: 11, fontWeight: 900 }}>
                             {carregandoPedidoCombinado && pedidoCombinadoPhone === s.phone ? "..." : "🧾 Pedido"}
                           </button>
-                          <button onClick={() => devolverSessaoParaBot(s.phone)} disabled={devolvendoSessaoBot === s.phone} style={{ height: 30, padding: "0 9px", border: "none", borderRadius: 8, background: "#2563eb", color: "#fff", fontSize: 11, fontWeight: 900 }}>
+                          <button onClick={() => devolverSessaoParaBot(s.phone)} disabled={devolvendoSessaoBot === s.phone} style={{ height: 30, padding: "0 9px", border: "none", borderRadius: 8, background: "var(--info)", color: "var(--foreground)", fontSize: 11, fontWeight: 900 }}>
                             {devolvendoSessaoBot === s.phone ? "..." : "🤖 Robô"}
                           </button>
-                          <button onClick={() => reviverConversa(s.phone)} disabled={revivendoConversa === s.phone} title="Reativa o bot. Não envia mensagem ao cliente." style={{ height: 30, padding: "0 8px", border: "1px solid rgba(251,191,36,.35)", borderRadius: 8, background: "rgba(251,191,36,.08)", color: "#fbbf24", fontSize: 11, fontWeight: 800 }}>
+                          <button onClick={() => reviverConversa(s.phone)} disabled={revivendoConversa === s.phone} title="Reativa o bot. Não envia mensagem ao cliente." style={{ height: 30, padding: "0 8px", border: "1px solid color-mix(in srgb, var(--primary) 35%, transparent)", borderRadius: 8, background: "color-mix(in srgb, var(--primary) 8%, transparent)", color: "var(--brand-text)", fontSize: 11, fontWeight: 800 }}>
                             {revivendoConversa === s.phone ? "..." : "🔄"}
                           </button>
                         </div>
                       ) : s.postOrderPriority ? (
                         <div style={{ display: "flex", gap: 5, flexShrink: 0 }}>
-                          <button onClick={() => arquivarConversa(s.phone, s.step)} disabled={arquivandoConversa === s.phone} title="Arquivar conversa. Histórico preservado." style={{ height: 30, padding: "0 9px", border: "1px solid rgba(239,68,68,.35)", borderRadius: 8, background: "rgba(239,68,68,.09)", color: "#ef4444", fontSize: 11, fontWeight: 800 }}>
+                          <button onClick={() => arquivarConversa(s.phone, s.step)} disabled={arquivandoConversa === s.phone} title="Arquivar conversa. Histórico preservado." style={{ height: 30, padding: "0 9px", border: "1px solid color-mix(in srgb, var(--danger) 35%, transparent)", borderRadius: 8, background: "color-mix(in srgb, var(--danger) 9%, transparent)", color: "var(--danger)", fontSize: 11, fontWeight: 800 }}>
                             {arquivandoConversa === s.phone ? "..." : "📦 Arquivar"}
                           </button>
-                          <button onClick={() => assumirSessao(s.phone)} disabled={assumindoSessao === s.phone} style={{ height: 30, padding: "0 12px", border: "2px solid #fbbf24", borderRadius: 8, background: "#fbbf24", color: "#060606", fontSize: 11, fontWeight: 900, boxShadow: "0 0 10px rgba(251,191,36,.4)" }}>
+                          <button onClick={() => assumirSessao(s.phone)} disabled={assumindoSessao === s.phone} style={{ height: 30, padding: "0 12px", border: "2px solid var(--primary)", borderRadius: 8, background: "var(--primary)", color: 'var(--primary-foreground)', fontSize: 11, fontWeight: 900, boxShadow: "0 0 10px color-mix(in srgb, var(--primary) 40%, transparent)" }}>
                             {assumindoSessao === s.phone ? "..." : "Assumir e responder"}
                           </button>
                         </div>
                       ) : (
-                        <button onClick={() => arquivarConversa(s.phone, s.step)} disabled={arquivandoConversa === s.phone} title="Arquivar conversa. Histórico preservado." style={{ height: 30, padding: "0 9px", border: "1px solid rgba(239,68,68,.35)", borderRadius: 8, background: "rgba(239,68,68,.09)", color: "#ef4444", fontSize: 11, fontWeight: 800, flexShrink: 0 }}>
+                        <button onClick={() => arquivarConversa(s.phone, s.step)} disabled={arquivandoConversa === s.phone} title="Arquivar conversa. Histórico preservado." style={{ height: 30, padding: "0 9px", border: "1px solid color-mix(in srgb, var(--danger) 35%, transparent)", borderRadius: 8, background: "color-mix(in srgb, var(--danger) 9%, transparent)", color: "var(--danger)", fontSize: 11, fontWeight: 800, flexShrink: 0 }}>
                           {arquivandoConversa === s.phone ? "..." : "📦 Arquivar"}
                         </button>
                       )}
@@ -1574,11 +1574,11 @@ export default function PedidosPage() {
 
                     {/* Resumo rápido compacto (só quando há dados relevantes) */}
                     {s.manual && s.resumoRapido && (s.resumoRapido.cliente || s.resumoRapido.itens.length > 0 || s.resumoRapido.total > 0) && (
-                      <div style={{ padding: "6px 14px", background: "rgba(255,107,0,.04)", borderBottom: "1px solid #141210", display: "flex", alignItems: "center", gap: 8, flexShrink: 0, flexWrap: "wrap" }}>
-                        {s.resumoRapido.cliente && <span style={{ fontSize: 11, fontWeight: 800, color: "#c9c2b4" }}>{s.resumoRapido.cliente}</span>}
-                        {s.resumoRapido.itens.length > 0 && <span style={{ fontSize: 11, color: "#6a6460" }}>· {s.resumoRapido.itens.slice(0, 2).join(", ")}{s.resumoRapido.itens.length > 2 ? `... +${s.resumoRapido.itens.length - 2}` : ""}</span>}
-                        {s.resumoRapido.total > 0 && <span style={{ fontSize: 11, fontWeight: 900, color: "#4ade80", marginLeft: "auto" }}>R$ {s.resumoRapido.total.toFixed(2).replace(".", ",")}</span>}
-                        {s.resumoRapido.pendencias.length > 0 && <span style={{ fontSize: 10, fontWeight: 900, color: "#fbbf24" }}>⚠ {s.resumoRapido.pendencias.length} pendência{s.resumoRapido.pendencias.length > 1 ? "s" : ""}</span>}
+                      <div style={{ padding: "6px 14px", background: "color-mix(in srgb, var(--primary) 4%, transparent)", borderBottom: "1px solid var(--background)", display: "flex", alignItems: "center", gap: 8, flexShrink: 0, flexWrap: "wrap" }}>
+                        {s.resumoRapido.cliente && <span style={{ fontSize: 11, fontWeight: 800, color: "var(--foreground-secondary)" }}>{s.resumoRapido.cliente}</span>}
+                        {s.resumoRapido.itens.length > 0 && <span style={{ fontSize: 11, color: "var(--foreground-muted)" }}>· {s.resumoRapido.itens.slice(0, 2).join(", ")}{s.resumoRapido.itens.length > 2 ? `... +${s.resumoRapido.itens.length - 2}` : ""}</span>}
+                        {s.resumoRapido.total > 0 && <span style={{ fontSize: 11, fontWeight: 900, color: "var(--success)", marginLeft: "auto" }}>R$ {s.resumoRapido.total.toFixed(2).replace(".", ",")}</span>}
+                        {s.resumoRapido.pendencias.length > 0 && <span style={{ fontSize: 10, fontWeight: 900, color: "var(--brand-text)" }}>⚠ {s.resumoRapido.pendencias.length} pendência{s.resumoRapido.pendencias.length > 1 ? "s" : ""}</span>}
                       </div>
                     )}
 
@@ -1598,14 +1598,14 @@ export default function PedidosPage() {
                         <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "flex-end", paddingBottom: 8 }}>
                           {s.ultimaMensagem ? (
                             <>
-                              <div style={{ fontSize: 10, fontWeight: 700, color: "#3a3730", textAlign: "center", marginBottom: 8 }}>Histórico não disponível · última mensagem recebida</div>
-                              <div style={{ background: "#141210", border: "1px solid #222", borderRadius: 14, borderBottomLeftRadius: 4, padding: "9px 13px", maxWidth: "78%", alignSelf: "flex-start" }}>
-                                <div style={{ fontSize: 13, color: "#c9c2b4", lineHeight: 1.5 }}>{s.ultimaMensagem}</div>
+                              <div style={{ fontSize: 10, fontWeight: 700, color: "var(--border-strong)", textAlign: "center", marginBottom: 8 }}>Histórico não disponível · última mensagem recebida</div>
+                              <div style={{ background: "var(--background)", border: "1px solid var(--surface-secondary)", borderRadius: 14, borderBottomLeftRadius: 4, padding: "9px 13px", maxWidth: "78%", alignSelf: "flex-start" }}>
+                                <div style={{ fontSize: 13, color: "var(--foreground-secondary)", lineHeight: 1.5 }}>{s.ultimaMensagem}</div>
                               </div>
                             </>
                           ) : (
                             <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                              <span style={{ fontSize: 12, color: "#3a3730", fontWeight: 700 }}>Sem mensagens registradas</span>
+                              <span style={{ fontSize: 12, color: "var(--border-strong)", fontWeight: 700 }}>Sem mensagens registradas</span>
                             </div>
                           )}
                         </div>
@@ -1617,14 +1617,14 @@ export default function PedidosPage() {
                         return (
                           <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: isCliente ? "flex-start" : "flex-end" }}>
                             {!isCliente && (
-                              <span style={{ fontSize: 9, fontWeight: 700, color: isAtendente ? "#ff8533" : "#5a564d", marginBottom: 2, paddingRight: 4 }}>
+                              <span style={{ fontSize: 9, fontWeight: 700, color: isAtendente ? "var(--brand-text)" : "var(--foreground-muted)", marginBottom: 2, paddingRight: 4 }}>
                                 {isAtendente ? (userName || "Atendente") : "🤖 Bot"}
                               </span>
                             )}
-                            <div style={{ maxWidth: "76%", background: isCliente ? "#141210" : isAtendente ? "rgba(255,107,0,.15)" : "#0d1117", border: `1px solid ${isCliente ? "#222" : isAtendente ? "rgba(255,107,0,.3)" : "#1a2030"}`, borderRadius: 14, borderBottomLeftRadius: isCliente ? 4 : 14, borderBottomRightRadius: isCliente ? 14 : 4, padding: "8px 12px" }}>
-                              <div style={{ fontSize: 13, color: isCliente ? "#c9c2b4" : isAtendente ? "#f4f1ec" : "#7a8fa6", lineHeight: 1.5, wordBreak: "break-word" }}>{textoLimpo}</div>
+                            <div style={{ maxWidth: "76%", background: isCliente ? "var(--background)" : isAtendente ? "color-mix(in srgb, var(--primary) 15%, transparent)" : "var(--info-soft)", border: `1px solid ${isCliente ? "var(--surface-secondary)" : isAtendente ? "color-mix(in srgb, var(--primary) 30%, transparent)" : "var(--info-soft)"}`, borderRadius: 14, borderBottomLeftRadius: isCliente ? 4 : 14, borderBottomRightRadius: isCliente ? 14 : 4, padding: "8px 12px" }}>
+                              <div style={{ fontSize: 13, color: isCliente ? "var(--foreground-secondary)" : isAtendente ? "var(--foreground)" : "var(--info)", lineHeight: 1.5, wordBreak: "break-word" }}>{textoLimpo}</div>
                             </div>
-                            {ts && <span style={{ fontSize: 9, color: "#3a3730", fontWeight: 600, marginTop: 2, paddingLeft: isCliente ? 4 : 0, paddingRight: isCliente ? 0 : 4 }}>{ts}</span>}
+                            {ts && <span style={{ fontSize: 9, color: "var(--border-strong)", fontWeight: 600, marginTop: 2, paddingLeft: isCliente ? 4 : 0, paddingRight: isCliente ? 0 : 4 }}>{ts}</span>}
                           </div>
                         )
                       })}
@@ -1640,8 +1640,8 @@ export default function PedidosPage() {
                             position: "sticky",
                             bottom: 10,
                             alignSelf: "center",
-                            background: "#25d366",
-                            color: "#fff",
+                            background: "var(--whatsapp)",
+                            color: 'var(--whatsapp-foreground)',
                             border: 0,
                             borderRadius: 20,
                             padding: "5px 14px",
@@ -1662,14 +1662,14 @@ export default function PedidosPage() {
 
                     {/* Carrinho (barra compacta) */}
                     {s.cart && s.cart.length > 0 && (
-                      <div style={{ padding: "5px 14px", borderTop: "1px solid #141210", background: "#0a0908", fontSize: 11, color: "#5a564d", fontWeight: 600, flexShrink: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      <div style={{ padding: "5px 14px", borderTop: "1px solid var(--background)", background: "var(--background)", fontSize: 11, color: "var(--foreground-muted)", fontWeight: 600, flexShrink: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         🛒 {s.cart.join(" · ")}
                       </div>
                     )}
 
                     {/* Input de resposta */}
                     {s.manual ? (
-                      <div style={{ padding: "10px 12px", borderTop: "1px solid #141210", display: "flex", gap: 8, alignItems: "flex-end", flexShrink: 0, background: "#080706" }}>
+                      <div style={{ padding: "10px 12px", borderTop: "1px solid var(--background)", display: "flex", gap: 8, alignItems: "flex-end", flexShrink: 0, background: "var(--background)" }}>
                         <div style={{ flex: 1 }}>
                           <textarea
                             className="cb-chat-textarea"
@@ -1680,13 +1680,13 @@ export default function PedidosPage() {
                             rows={2}
                           />
                           {erroEnvioMensagem[s.phone] && (
-                            <span style={{ color: "#f87171", fontSize: 11, fontWeight: 600, display: "block", marginTop: 3 }}>{erroEnvioMensagem[s.phone]}</span>
+                            <span style={{ color: "var(--danger)", fontSize: 11, fontWeight: 600, display: "block", marginTop: 3 }}>{erroEnvioMensagem[s.phone]}</span>
                           )}
                         </div>
                         <button
                           onClick={() => enviarMensagemHumana(s.phone)}
                           disabled={enviandoMensagem === s.phone || !canSend}
-                          style={{ width: 42, height: 42, border: "none", borderRadius: 10, flexShrink: 0, background: enviandoMensagem === s.phone || !canSend ? "#1a1a1a" : "#25d366", color: enviandoMensagem === s.phone || !canSend ? "#444" : "#fff", display: "flex", alignItems: "center", justifyContent: "center", transition: "background .15s", cursor: enviandoMensagem === s.phone || !canSend ? "not-allowed" : "pointer" }}
+                          style={{ width: 42, height: 42, border: "none", borderRadius: 10, flexShrink: 0, background: enviandoMensagem === s.phone || !canSend ? "var(--surface-secondary)" : "var(--whatsapp)", color: enviandoMensagem === s.phone || !canSend ? "var(--border-strong)" : "var(--foreground)", display: "flex", alignItems: "center", justifyContent: "center", transition: "background .15s", cursor: enviandoMensagem === s.phone || !canSend ? "not-allowed" : "pointer" }}
                         >
                           {enviandoMensagem === s.phone
                             ? <span style={{ fontSize: 10, fontWeight: 900 }}>...</span>
@@ -1695,11 +1695,11 @@ export default function PedidosPage() {
                         </button>
                       </div>
                     ) : (
-                      <div style={{ padding: "10px 12px", borderTop: "1px solid #141210", background: "#0a0908", flexShrink: 0, textAlign: "center" }}>
+                      <div style={{ padding: "10px 12px", borderTop: "1px solid var(--background)", background: "var(--background)", flexShrink: 0, textAlign: "center" }}>
                         {s.postOrderPriority ? (
-                          <span style={{ fontSize: 12, color: "#fbbf24", fontWeight: 700 }}>Bot respondendo · clique em Atender se precisar intervir</span>
+                          <span style={{ fontSize: 12, color: "var(--brand-text)", fontWeight: 700 }}>Bot respondendo · clique em Atender se precisar intervir</span>
                         ) : (
-                          <button onClick={() => assumirSessao(s.phone)} disabled={assumindoSessao === s.phone} style={{ height: 30, padding: "0 16px", border: "1px solid rgba(201,194,180,.15)", borderRadius: 8, background: "rgba(201,194,180,.06)", color: "#9a9590", fontSize: 12, fontWeight: 700 }}>
+                          <button onClick={() => assumirSessao(s.phone)} disabled={assumindoSessao === s.phone} style={{ height: 30, padding: "0 16px", border: "1px solid color-mix(in srgb, var(--foreground-secondary) 15%, transparent)", borderRadius: 8, background: "color-mix(in srgb, var(--foreground-secondary) 6%, transparent)", color: "var(--foreground-secondary)", fontSize: 12, fontWeight: 700 }}>
                             {assumindoSessao === s.phone ? "..." : "Assumir e responder"}
                           </button>
                         )}
@@ -1715,9 +1715,9 @@ export default function PedidosPage() {
 
         {/* Lista */}
           {filtro !== "tempo_real" && filtro !== "arquivados" && pedidosFiltrados.length === 0 && (
-            <div style={{ background: "#101010", border: "1px dashed #2a2723", borderRadius: 20, padding: "36px 20px", textAlign: "center" }}>
-              <span style={{ fontSize: 17, fontWeight: 900, color: "#c9c2b4", display: "block" }}>Nada por aqui</span>
-              <span style={{ fontSize: 13, fontWeight: 600, color: "#a39b8b", display: "block", marginTop: 4 }}>Nenhum pedido nesse estado agora.</span>
+            <div style={{ background: "var(--surface)", border: "1px dashed var(--border)", borderRadius: 20, padding: "36px 20px", textAlign: "center" }}>
+              <span style={{ fontSize: 17, fontWeight: 900, color: "var(--foreground-secondary)", display: "block" }}>Nada por aqui</span>
+              <span style={{ fontSize: 13, fontWeight: 600, color: "var(--foreground-secondary)", display: "block", marginTop: 4 }}>Nenhum pedido nesse estado agora.</span>
             </div>
           )}
 
@@ -1731,7 +1731,7 @@ export default function PedidosPage() {
             const isCanceled = pedido.status === "cancelado"
             const isNovo = pedido.status === "novo"
             const timerMins = isNovo ? minsDesde : minsPrep
-            const timerColor = isNovo ? (minsDesde < 3 ? "#34d399" : minsDesde < 7 ? "#fbbf24" : "#f87171") : isDone ? "#34d399" : minsPrep < 20 ? "#34d399" : minsPrep < 34 ? "#fbbf24" : "#f87171"
+            const timerColor = isNovo ? (minsDesde < 3 ? "var(--success)" : minsDesde < 7 ? "var(--primary)" : "var(--danger)") : isDone ? "var(--success)" : minsPrep < 20 ? "var(--success)" : minsPrep < 34 ? "var(--primary)" : "var(--danger)"
             const firstName = pedido.cliente.split(" ")[0]
             const pagamento = pedido.pagamento || ""
             const isPix = pagamento.toLowerCase().includes("pix")
@@ -1741,10 +1741,10 @@ export default function PedidosPage() {
             const isRetirada = !isDineIn && (!pedido.tipoEntrega || pedido.tipoEntrega === "pickup" || pedido.tipoEntrega === "retirada" || pedido.endereco === "Retirada na loja")
 
             let rowBorder = sc.accentBorder
-            if (pedido.escalonado) rowBorder = "rgba(239,68,68,.7)"
-            if (pedido.cancelamentoSolicitado) rowBorder = "rgba(239,68,68,.5)"
-            if (isDone) rowBorder = "rgba(34,197,94,.3)"
-            if (isCanceled) rowBorder = "rgba(239,68,68,.2)"
+            if (pedido.escalonado) rowBorder = "color-mix(in srgb, var(--danger) 70%, transparent)"
+            if (pedido.cancelamentoSolicitado) rowBorder = "color-mix(in srgb, var(--danger) 50%, transparent)"
+            if (isDone) rowBorder = "color-mix(in srgb, var(--success) 30%, transparent)"
+            if (isCanceled) rowBorder = "color-mix(in srgb, var(--danger) 20%, transparent)"
 
             let rowAnim = `cbCardIn .35s ease both`
             if (flashId === pedido.id) rowAnim = "cbFlash .7s ease"
@@ -1758,7 +1758,7 @@ export default function PedidosPage() {
                 className="cb-row"
                 onClick={() => setDetailId(pedido.id === detailId ? null : pedido.id)}
                 style={{
-                  background: isSelected ? "#131110" : "#0d0c0b",
+                  background: isSelected ? "var(--background)" : "var(--background)",
                   border: `1.5px solid ${isSelected ? sc.accentBorder : rowBorder}`,
                   borderRadius: 14,
                   padding: "11px 13px",
@@ -1774,33 +1774,33 @@ export default function PedidosPage() {
                 <div style={{ display: "flex", alignItems: "flex-start", gap: 11 }}>
                   {/* Dot de status */}
                   <div style={{ marginTop: 3, flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
-                    <div style={{ width: 10, height: 10, borderRadius: "50%", background: isDone ? "#22c55e" : isCanceled ? "#ef4444" : sc.accent, boxShadow: isDone || isCanceled ? "none" : `0 0 6px ${sc.accent}55` }} />
+                    <div style={{ width: 10, height: 10, borderRadius: "50%", background: isDone ? "var(--success)" : isCanceled ? "var(--danger)" : sc.accent, boxShadow: isDone || isCanceled ? "none" : `0 0 6px color-mix(in srgb, ${sc.accent} 33%, transparent)` }} />
                   </div>
 
                   {/* Conteúdo principal */}
                   <div style={{ flex: 1, minWidth: 0 }}>
                     {/* Linha 1: nome + badges + timer */}
                     <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
-                      {pedido.numero != null && <span style={{ fontSize: 10, fontWeight: 900, color: "#3a3730", flexShrink: 0 }}>#{pedido.numero}</span>}
-                      <span style={{ fontSize: 14, fontWeight: 900, color: "#f0ede8", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{firstName}</span>
+                      {pedido.numero != null && <span style={{ fontSize: 10, fontWeight: 900, color: "var(--border-strong)", flexShrink: 0 }}>#{pedido.numero}</span>}
+                      <span style={{ fontSize: 14, fontWeight: 900, color: "var(--text-primary)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{firstName}</span>
                       {pedido.escalonado && <span style={{ fontSize: 11, flexShrink: 0 }}>🚨</span>}
-                      {(pedido.origem === "site" || pedido.origem === "app") && <span style={{ fontSize: 9, fontWeight: 900, color: "#60a5fa", background: "rgba(96,165,250,.12)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>🌐 Site</span>}
-                      {pixPendente && <span style={{ fontSize: 9, fontWeight: 900, color: "#fbbf24", background: "rgba(251,191,36,.12)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>{hibridoParts ? "PIX parcial ⏳" : "PIX⏳"}</span>}
-                      {pixEmRevisaoOuSuspeito && <span style={{ fontSize: 9, fontWeight: 900, color: pedido.pix?.status === "suspeito" ? "#f87171" : "#fbbf24", background: pedido.pix?.status === "suspeito" ? "rgba(248,113,113,.12)" : "rgba(251,191,36,.12)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>{pixEmRevisaoOuSuspeito}</span>}
+                      {(pedido.origem === "site" || pedido.origem === "app") && <span style={{ fontSize: 9, fontWeight: 900, color: "var(--info)", background: "color-mix(in srgb, var(--info) 12%, transparent)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>🌐 Site</span>}
+                      {pixPendente && <span style={{ fontSize: 9, fontWeight: 900, color: "var(--attention-text)", background: "var(--attention-surface)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>{hibridoParts ? "PIX parcial ⏳" : "PIX⏳"}</span>}
+                      {pixEmRevisaoOuSuspeito && <span style={{ fontSize: 9, fontWeight: 900, color: pedido.pix?.status === "suspeito" ? "var(--danger)" : "var(--attention-text)", background: pedido.pix?.status === "suspeito" ? "color-mix(in srgb, var(--danger) 12%, transparent)" : "var(--attention-surface)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>{pixEmRevisaoOuSuspeito}</span>}
                       {pedido.cancelamentoSolicitado && <span style={{ fontSize: 11, flexShrink: 0 }}>⚠️</span>}
-                      <span style={{ fontSize: 10, fontWeight: 900, color: pixPendente ? "#fbbf24" : (isPix && pedido.pixConfirmado && pedido.status === "novo" ? "#34d399" : sc.accent), background: pixPendente ? "rgba(251,191,36,.12)" : (isPix && pedido.pixConfirmado && pedido.status === "novo" ? "rgba(52,211,153,.12)" : sc.accentBg), padding: "2px 7px", borderRadius: 6, border: `1px solid ${pixPendente ? "rgba(251,191,36,.35)" : (isPix && pedido.pixConfirmado && pedido.status === "novo" ? "rgba(52,211,153,.35)" : sc.accentBorder)}`, textTransform: "uppercase", letterSpacing: ".4px", flexShrink: 0 }}>{pixPendente ? (hibridoParts ? "Aguardando Pix parcial" : "Aguardando Pix") : (isPix && pedido.pixConfirmado && pedido.status === "novo" ? (hibridoParts ? "Pix parcial pago" : "Pago") : sc.label)}</span>
+                      <span style={{ fontSize: 10, fontWeight: 900, color: pixPendente ? "var(--attention-text)" : (isPix && pedido.pixConfirmado && pedido.status === "novo" ? "var(--success)" : sc.accent), background: pixPendente ? "var(--attention-surface)" : (isPix && pedido.pixConfirmado && pedido.status === "novo" ? "color-mix(in srgb, var(--success) 12%, transparent)" : sc.accentBg), padding: "2px 7px", borderRadius: 6, border: `1px solid ${pixPendente ? "var(--attention-border)" : (isPix && pedido.pixConfirmado && pedido.status === "novo" ? "color-mix(in srgb, var(--success) 35%, transparent)" : sc.accentBorder)}`, textTransform: "uppercase", letterSpacing: ".4px", flexShrink: 0 }}>{pixPendente ? (hibridoParts ? "Aguardando Pix parcial" : "Aguardando Pix") : (isPix && pedido.pixConfirmado && pedido.status === "novo" ? (hibridoParts ? "Pix parcial pago" : "Pago") : sc.label)}</span>
                     </div>
 
                     {/* Linha 2: infos compactas */}
-                    <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 700, color: "#4a4640", marginBottom: 9 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 700, color: "var(--foreground-muted)", marginBottom: 9 }}>
                       <span style={{ flexShrink: 0 }}>{isDineIn ? "🍽️" : isRetirada ? "🏪" : "🛵"}</span>
-                      <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#5a564d" }}>{isDineIn ? "No local" : isRetirada ? "Retirada" : (pedido.bairro || pedido.endereco || "—")}</span>
-                      <span style={{ flexShrink: 0, color: "#3a3730" }}>·</span>
+                      <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--foreground-muted)" }}>{isDineIn ? "No local" : isRetirada ? "Retirada" : (pedido.bairro || pedido.endereco || "—")}</span>
+                      <span style={{ flexShrink: 0, color: "var(--border-strong)" }}>·</span>
                       <span style={{ flexShrink: 0 }}>{pedido.itens.length}it</span>
-                      <span style={{ flexShrink: 0, color: "#3a3730" }}>·</span>
-                      <span style={{ flexShrink: 0, color: isPix ? "#22c55e" : "#5a564d" }}>{isPix ? "Pix" : (pagamento.split(" ")[0] || "—")}</span>
-                      <span style={{ flexShrink: 0, color: "#3a3730" }}>·</span>
-                      <span style={{ flexShrink: 0, fontWeight: 900, color: "#c9c2b4" }}>R${pedido.total.toFixed(2).replace(".", ",")}</span>
+                      <span style={{ flexShrink: 0, color: "var(--border-strong)" }}>·</span>
+                      <span style={{ flexShrink: 0, color: isPix ? "var(--success)" : "var(--foreground-muted)" }}>{isPix ? "Pix" : (pagamento.split(" ")[0] || "—")}</span>
+                      <span style={{ flexShrink: 0, color: "var(--border-strong)" }}>·</span>
+                      <span style={{ flexShrink: 0, fontWeight: 900, color: "var(--foreground-secondary)" }}>R${pedido.total.toFixed(2).replace(".", ",")}</span>
                       <span style={{ flexShrink: 0, fontWeight: 900, color: timerColor, marginLeft: 2, fontSize: 11 }}>{timerMins}m</span>
                     </div>
 
@@ -1809,13 +1809,13 @@ export default function PedidosPage() {
                       {pedido.escalonado && (
                         <button
                           onClick={() => { assumirConversa(pedido.telefone); setCardUrgenciaFechado(true) }}
-                          style={{ height: 30, padding: "0 14px", border: "none", borderRadius: 8, background: "#ef4444", color: "#fff", fontSize: 12, fontWeight: 900 }}
+                          style={{ height: 30, padding: "0 14px", border: "none", borderRadius: 8, background: "var(--danger)", color: "var(--foreground)", fontSize: 12, fontWeight: 900 }}
                         >🚨 Assumir conversa</button>
                       )}
                       {!pedido.escalonado && pixPendente && (
                         <button
                           onClick={() => setConfirmPixModal(pedido.id)}
-                          style={{ height: 30, padding: "0 14px", border: "1px solid rgba(251,191,36,.35)", borderRadius: 8, background: "rgba(251,191,36,.08)", color: "#fbbf24", fontSize: 12, fontWeight: 900 }}
+                          style={{ height: 30, padding: "0 14px", border: "1px solid color-mix(in srgb, var(--primary) 35%, transparent)", borderRadius: 8, background: "color-mix(in srgb, var(--primary) 8%, transparent)", color: "var(--brand-text)", fontSize: 12, fontWeight: 900 }}
                         >Confirmar Pix recebido</button>
                       )}
                       {!pedido.escalonado && !pixPendente && !isDone && !isCanceled && nextStatus && (
@@ -1833,8 +1833,8 @@ export default function PedidosPage() {
                           {atualizando === pedido.id ? "..." : getActionLabel(pedido)}
                         </button>
                       )}
-                      {isDone && <span style={{ fontSize: 11, fontWeight: 800, color: "#22c55e" }}>✓ Entregue</span>}
-                      {isCanceled && <span style={{ fontSize: 11, fontWeight: 800, color: "#5a564d" }}>✗ Cancelado</span>}
+                      {isDone && <span style={{ fontSize: 11, fontWeight: 800, color: "var(--success)" }}>✓ Entregue</span>}
+                      {isCanceled && <span style={{ fontSize: 11, fontWeight: 800, color: "var(--foreground-muted)" }}>✗ Cancelado</span>}
                     </div>
                   </div>
                 </div>
@@ -1854,16 +1854,16 @@ export default function PedidosPage() {
 
       {/* Toast */}
       {toastVisible && (
-        <div style={{ position: "fixed", bottom: 96, left: 0, right: 0, margin: "0 auto", width: "calc(100% - 32px)", maxWidth: 343, background: "#1c1a16", border: "1px solid #33302a", borderRadius: 16, padding: "12px 12px 12px 16px", display: "flex", alignItems: "center", gap: 12, animation: "cbToastIn .25s ease both", zIndex: 50, boxShadow: "0 12px 32px rgba(0,0,0,.55)" }}>
+        <div style={{ position: "fixed", bottom: 96, left: 0, right: 0, margin: "0 auto", width: "calc(100% - 32px)", maxWidth: 343, background: "var(--surface)", border: "1px solid var(--surface-elevated)", borderRadius: 16, padding: "12px 12px 12px 16px", display: "flex", alignItems: "center", gap: 12, animation: "cbToastIn .25s ease both", zIndex: 50, boxShadow: "0 12px 32px rgba(0,0,0,.55)" }}>
           <span style={{ flex: 1, fontSize: 14, fontWeight: 800, letterSpacing: "-0.2px" }}>{toast?.text}</span>
-          <button onClick={desfazerToast} style={{ border: "none", background: "rgba(255,107,0,.16)", color: "#ff6b00", fontWeight: 900, fontSize: 14, padding: "11px 14px", borderRadius: 11, flexShrink: 0 }}>Desfazer · {toastSegs}</button>
+          <button onClick={desfazerToast} style={{ border: "none", background: "color-mix(in srgb, var(--primary) 16%, transparent)", color: "var(--brand-text)", fontWeight: 900, fontSize: 14, padding: "11px 14px", borderRadius: 11, flexShrink: 0 }}>Desfazer · {toastSegs}</button>
         </div>
       )}
 
       {/* Simple Toast */}
       {simpleToast && (
-        <div style={{ position: "fixed", bottom: 96, left: 0, right: 0, margin: "0 auto", width: "calc(100% - 32px)", maxWidth: 343, background: "#1a1a0d", border: "1px solid rgba(251,191,36,.3)", borderRadius: 16, padding: "14px 16px", animation: "cbToastIn .25s ease both", zIndex: 50, boxShadow: "0 12px 32px rgba(0,0,0,.55)" }}>
-          <span style={{ fontSize: 13, fontWeight: 800, color: "#fbbf24" }}>{simpleToast}</span>
+        <div style={{ position: "fixed", bottom: 96, left: 0, right: 0, margin: "0 auto", width: "calc(100% - 32px)", maxWidth: 343, background: "var(--surface)", border: "1px solid color-mix(in srgb, var(--primary) 30%, transparent)", borderRadius: 16, padding: "14px 16px", animation: "cbToastIn .25s ease both", zIndex: 50, boxShadow: "0 12px 32px rgba(0,0,0,.55)" }}>
+          <span style={{ fontSize: 13, fontWeight: 800, color: "var(--brand-text)" }}>{simpleToast}</span>
         </div>
       )}
 
@@ -1871,8 +1871,8 @@ export default function PedidosPage() {
         {detalhePedido && (
           <div className="cb-mob-sheet-wrap">
             <div onClick={() => setDetailId(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 60, animation: "cbFadeIn .2s ease both" }} />
-            <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, margin: "0 auto", maxWidth: 375, background: "#121110", border: "1px solid #242220", borderBottom: "none", borderRadius: "26px 26px 0 0", zIndex: 61, animation: "cbSheetUp .32s cubic-bezier(.2,.9,.3,1) both", padding: "10px 20px 26px", display: "flex", flexDirection: "column", gap: 12, maxHeight: "88vh", overflowY: "auto" }}>
-              <div style={{ width: 44, height: 5, borderRadius: 3, background: "#2e2b26", margin: "2px auto 0", flexShrink: 0 }} />
+            <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, margin: "0 auto", maxWidth: 375, background: "var(--background)", border: "1px solid var(--surface-secondary)", borderBottom: "none", borderRadius: "26px 26px 0 0", zIndex: 61, animation: "cbSheetUp .32s cubic-bezier(.2,.9,.3,1) both", padding: "10px 20px 26px", display: "flex", flexDirection: "column", gap: 12, maxHeight: "88vh", overflowY: "auto" }}>
+              <div style={{ width: 44, height: 5, borderRadius: 3, background: "var(--surface-elevated)", margin: "2px auto 0", flexShrink: 0 }} />
               {renderDetalhe(detalhePedido)}
             </div>
           </div>
@@ -1882,11 +1882,11 @@ export default function PedidosPage() {
         {modalEntrega && (
           <>
             <div onClick={() => setModalEntrega(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 60, animation: "cbFadeIn .2s ease both" }} />
-            <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, margin: "0 auto", maxWidth: 375, background: "#121110", border: "1px solid #242220", borderBottom: "none", borderRadius: "26px 26px 0 0", zIndex: 61, animation: "cbSheetUp .32s cubic-bezier(.2,.9,.3,1) both", padding: "20px 20px 36px", display: "flex", flexDirection: "column", gap: 14 }}>
-              <div style={{ width: 44, height: 5, borderRadius: 3, background: "#2e2b26", margin: "0 auto 6px" }} />
+            <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, margin: "0 auto", maxWidth: 375, background: "var(--background)", border: "1px solid var(--surface-secondary)", borderBottom: "none", borderRadius: "26px 26px 0 0", zIndex: 61, animation: "cbSheetUp .32s cubic-bezier(.2,.9,.3,1) both", padding: "20px 20px 36px", display: "flex", flexDirection: "column", gap: 14 }}>
+              <div style={{ width: 44, height: 5, borderRadius: 3, background: "var(--surface-elevated)", margin: "0 auto 6px" }} />
               <p style={{ margin: 0, fontSize: 18, fontWeight: 900, letterSpacing: "-0.3px" }}>Selecionar entregador</p>
-              {entregadores.filter(e => e.ativo).map(e => (<button key={e.id} onClick={() => avancarStatus(modalEntrega.pedidoId, modalEntrega.proxStatus, e)} style={{ height: 56, border: "1px solid #242220", borderRadius: 16, background: "#101010", color: "#f5f2ee", fontSize: 16, fontWeight: 800, textAlign: "left", padding: "0 16px" }}>{e.nome}</button>))}
-              <button onClick={() => avancarStatus(modalEntrega.pedidoId, modalEntrega.proxStatus)} style={{ height: 48, border: "1px solid #2a2723", borderRadius: 14, background: "transparent", color: "#a39b8b", fontSize: 14, fontWeight: 800 }}>Sem entregador</button>
+              {entregadores.filter(e => e.ativo).map(e => (<button key={e.id} onClick={() => avancarStatus(modalEntrega.pedidoId, modalEntrega.proxStatus, e)} style={{ height: 56, border: "1px solid var(--surface-secondary)", borderRadius: 16, background: "var(--surface)", color: "var(--foreground)", fontSize: 16, fontWeight: 800, textAlign: "left", padding: "0 16px" }}>{e.nome}</button>))}
+              <button onClick={() => avancarStatus(modalEntrega.pedidoId, modalEntrega.proxStatus)} style={{ height: 48, border: "1px solid var(--border)", borderRadius: 14, background: "transparent", color: "var(--foreground-secondary)", fontSize: 14, fontWeight: 800 }}>Sem entregador</button>
             </div>
           </>
         )}
@@ -1895,19 +1895,19 @@ export default function PedidosPage() {
         {modalLimpar && (
           <>
             <div onClick={() => setModalLimpar(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.7)", zIndex: 60, animation: "cbFadeIn .2s ease both" }} />
-            <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, margin: "0 auto", maxWidth: 375, background: "#121110", border: "1px solid #242220", borderBottom: "none", borderRadius: "26px 26px 0 0", zIndex: 61, animation: "cbSheetUp .32s cubic-bezier(.2,.9,.3,1) both", padding: "20px 20px 36px", display: "flex", flexDirection: "column", gap: 16 }}>
-              <div style={{ width: 44, height: 5, borderRadius: 3, background: "#2e2b26", margin: "0 auto 4px" }} />
-              <div style={{ width: 48, height: 48, borderRadius: 14, background: "rgba(239,68,68,.1)", border: "1px solid rgba(239,68,68,.25)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><polyline points="3,6 5,6 21,6" stroke="#ef4444" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" stroke="#ef4444" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/><path d="M10 11v6M14 11v6" stroke="#ef4444" strokeWidth="2.2" strokeLinecap="round"/><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" stroke="#ef4444" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, margin: "0 auto", maxWidth: 375, background: "var(--background)", border: "1px solid var(--surface-secondary)", borderBottom: "none", borderRadius: "26px 26px 0 0", zIndex: 61, animation: "cbSheetUp .32s cubic-bezier(.2,.9,.3,1) both", padding: "20px 20px 36px", display: "flex", flexDirection: "column", gap: 16 }}>
+              <div style={{ width: 44, height: 5, borderRadius: 3, background: "var(--surface-elevated)", margin: "0 auto 4px" }} />
+              <div style={{ width: 48, height: 48, borderRadius: 14, background: "color-mix(in srgb, var(--danger) 10%, transparent)", border: "1px solid color-mix(in srgb, var(--danger) 25%, transparent)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><polyline points="3,6 5,6 21,6" stroke="var(--danger)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" stroke="var(--danger)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/><path d="M10 11v6M14 11v6" stroke="var(--danger)" strokeWidth="2.2" strokeLinecap="round"/><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" stroke="var(--danger)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 <p style={{ margin: 0, fontSize: 19, fontWeight: 900, letterSpacing: "-0.4px", lineHeight: 1.2 }}>Tem certeza?</p>
-                <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "#a39b8b", lineHeight: 1.5 }}>Isso vai arquivar todos os pedidos entregues. Pedidos em aberto não serão afetados.</p>
+                <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "var(--foreground-secondary)", lineHeight: 1.5 }}>Isso vai arquivar todos os pedidos entregues. Pedidos em aberto não serão afetados.</p>
               </div>
-              <button onClick={limparHistorico} disabled={limpando} style={{ height: 56, border: "none", borderRadius: 16, background: limpando ? "#7f1d1d" : "#ef4444", color: "#fff", fontSize: 16, fontWeight: 900, letterSpacing: "-0.2px", opacity: limpando ? 0.7 : 1 }}>
+              <button onClick={limparHistorico} disabled={limpando} style={{ height: 56, border: "none", borderRadius: 16, background: limpando ? "var(--danger)" : "var(--danger)", color: "var(--foreground)", fontSize: 16, fontWeight: 900, letterSpacing: "-0.2px", opacity: limpando ? 0.7 : 1 }}>
                 {limpando ? "Arquivando..." : "Sim, arquivar entregues"}
               </button>
-              <button onClick={() => setModalLimpar(false)} disabled={limpando} style={{ height: 46, border: "none", background: "transparent", color: "#a39b8b", fontSize: 14, fontWeight: 800 }}>Cancelar</button>
+              <button onClick={() => setModalLimpar(false)} disabled={limpando} style={{ height: 46, border: "none", background: "transparent", color: "var(--foreground-secondary)", fontSize: 14, fontWeight: 800 }}>Cancelar</button>
             </div>
           </>
         )}
@@ -1916,20 +1916,20 @@ export default function PedidosPage() {
         {modalArquivarExpediente && (
           <>
             <div onClick={() => setModalArquivarExpediente(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.7)", zIndex: 60, animation: "cbFadeIn .2s ease both" }} />
-            <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, margin: "0 auto", maxWidth: 375, background: "#121110", border: "1px solid #242220", borderBottom: "none", borderRadius: "26px 26px 0 0", zIndex: 61, animation: "cbSheetUp .32s cubic-bezier(.2,.9,.3,1) both", padding: "20px 20px 36px", display: "flex", flexDirection: "column", gap: 16 }}>
-              <div style={{ width: 44, height: 5, borderRadius: 3, background: "#2e2b26", margin: "0 auto 4px" }} />
-              <div style={{ width: 48, height: 48, borderRadius: 14, background: "rgba(139,92,246,.1)", border: "1px solid rgba(139,92,246,.25)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, margin: "0 auto", maxWidth: 375, background: "var(--background)", border: "1px solid var(--surface-secondary)", borderBottom: "none", borderRadius: "26px 26px 0 0", zIndex: 61, animation: "cbSheetUp .32s cubic-bezier(.2,.9,.3,1) both", padding: "20px 20px 36px", display: "flex", flexDirection: "column", gap: 16 }}>
+              <div style={{ width: 44, height: 5, borderRadius: 3, background: "var(--surface-elevated)", margin: "0 auto 4px" }} />
+              <div style={{ width: 48, height: 48, borderRadius: 14, background: "color-mix(in srgb, var(--attention) 10%, transparent)", border: "1px solid color-mix(in srgb, var(--attention) 25%, transparent)", display: "flex", alignItems: "center", justifyContent: "center" }}>
                 <span style={{ fontSize: 22 }}>📦</span>
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 <p style={{ margin: 0, fontSize: 19, fontWeight: 900, letterSpacing: "-0.4px", lineHeight: 1.2 }}>Arquivar não resolvidos?</p>
-                <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "#a39b8b", lineHeight: 1.5 }}>Pedidos pendentes, em preparo, na rua, aguardando Pix e conversas abertas serão movidos para a aba Arquivados. Nenhum dado será apagado.</p>
-                <p style={{ margin: 0, fontSize: 12, fontWeight: 700, color: "#5a564d", lineHeight: 1.5 }}>Pedidos entregues e cancelados não são afetados.</p>
+                <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "var(--foreground-secondary)", lineHeight: 1.5 }}>Pedidos pendentes, em preparo, na rua, aguardando Pix e conversas abertas serão movidos para a aba Arquivados. Nenhum dado será apagado.</p>
+                <p style={{ margin: 0, fontSize: 12, fontWeight: 700, color: "var(--foreground-muted)", lineHeight: 1.5 }}>Pedidos entregues e cancelados não são afetados.</p>
               </div>
-              <button onClick={arquivarExpediente} disabled={arquivandoExpediente} style={{ height: 56, border: "none", borderRadius: 16, background: arquivandoExpediente ? "#3b1e6e" : "#7c3aed", color: "#fff", fontSize: 16, fontWeight: 900, letterSpacing: "-0.2px", opacity: arquivandoExpediente ? 0.7 : 1 }}>
+              <button onClick={arquivarExpediente} disabled={arquivandoExpediente} style={{ height: 56, border: "none", borderRadius: 16, background: arquivandoExpediente ? "var(--attention)" : "var(--attention)", color: "var(--foreground)", fontSize: 16, fontWeight: 900, letterSpacing: "-0.2px", opacity: arquivandoExpediente ? 0.7 : 1 }}>
                 {arquivandoExpediente ? "Arquivando..." : "📦 Sim, arquivar não resolvidos"}
               </button>
-              <button onClick={() => setModalArquivarExpediente(false)} disabled={arquivandoExpediente} style={{ height: 46, border: "none", background: "transparent", color: "#a39b8b", fontSize: 14, fontWeight: 800 }}>Cancelar</button>
+              <button onClick={() => setModalArquivarExpediente(false)} disabled={arquivandoExpediente} style={{ height: 46, border: "none", background: "transparent", color: "var(--foreground-secondary)", fontSize: 14, fontWeight: 800 }}>Cancelar</button>
             </div>
           </>
         )}
@@ -1938,8 +1938,8 @@ export default function PedidosPage() {
         {modalNovoPedido && (
           <>
             <div onClick={() => setModalNovoPedido(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.75)", zIndex: 70, animation: "cbFadeIn .2s ease both" }} />
-            <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, margin: "0 auto", maxWidth: 375, background: "#121110", border: "1px solid #242220", borderBottom: "none", borderRadius: "26px 26px 0 0", zIndex: 71, animation: "cbSheetUp .32s cubic-bezier(.2,.9,.3,1) both", padding: "12px 20px 32px", display: "flex", flexDirection: "column", gap: 12, maxHeight: "90vh", overflowY: "auto" }}>
-              <div style={{ width: 44, height: 5, borderRadius: 3, background: "#2e2b26", margin: "0 auto 4px", flexShrink: 0 }} />
+            <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, margin: "0 auto", maxWidth: 375, background: "var(--background)", border: "1px solid var(--surface-secondary)", borderBottom: "none", borderRadius: "26px 26px 0 0", zIndex: 71, animation: "cbSheetUp .32s cubic-bezier(.2,.9,.3,1) both", padding: "12px 20px 32px", display: "flex", flexDirection: "column", gap: 12, maxHeight: "90vh", overflowY: "auto" }}>
+              <div style={{ width: 44, height: 5, borderRadius: 3, background: "var(--surface-elevated)", margin: "0 auto 4px", flexShrink: 0 }} />
               <p style={{ margin: 0, fontSize: 19, fontWeight: 900, letterSpacing: "-0.4px", flexShrink: 0 }}>Novo pedido</p>
 
               <div>
@@ -1954,7 +1954,7 @@ export default function PedidosPage() {
                 <label style={labelStyle}>Tipo</label>
                 <div style={{ display: "flex", gap: 8 }}>
                   {(["delivery", "retirada", "dine_in"] as const).map(t => (
-                    <button key={t} onClick={() => setNovoPedidoForm(f => ({ ...f, tipoEntrega: t }))} style={{ flex: 1, height: 40, border: `1px solid ${novoPedidoForm.tipoEntrega === t ? "#ff6b00" : "#242220"}`, borderRadius: 10, background: novoPedidoForm.tipoEntrega === t ? "rgba(255,107,0,.15)" : "transparent", color: novoPedidoForm.tipoEntrega === t ? "#ff6b00" : "#5a564d", fontSize: 13, fontWeight: 900 }}>
+                    <button key={t} onClick={() => setNovoPedidoForm(f => ({ ...f, tipoEntrega: t }))} style={{ flex: 1, height: 40, border: `1px solid ${novoPedidoForm.tipoEntrega === t ? "var(--primary)" : "var(--surface-secondary)"}`, borderRadius: 10, background: novoPedidoForm.tipoEntrega === t ? "color-mix(in srgb, var(--primary) 15%, transparent)" : "transparent", color: novoPedidoForm.tipoEntrega === t ? "var(--text-primary)" : "var(--text-muted)", fontSize: 13, fontWeight: 900 }}>
                       {t === "delivery" ? "🛵 Entrega" : t === "dine_in" ? "🍽️ Local" : "🏪 Retirada"}
                     </button>
                   ))}
@@ -1981,10 +1981,10 @@ export default function PedidosPage() {
                 {novoPedidoForm.itens.map((item, i) => (
                   <div key={i} style={{ display: "flex", gap: 6, marginBottom: 6 }}>
                     <input className="cbInput" value={item} onChange={e => { const arr = [...novoPedidoForm.itens]; arr[i] = e.target.value; setNovoPedidoForm(f => ({ ...f, itens: arr })) }} placeholder={`Item ${i + 1}`} style={{ ...inputStyle, flex: 1 }} />
-                    {novoPedidoForm.itens.length > 1 && <button onClick={() => setNovoPedidoForm(f => ({ ...f, itens: f.itens.filter((_, j) => j !== i) }))} style={{ width: 40, height: 46, border: "1px solid #242220", borderRadius: 10, background: "transparent", color: "#ef4444", fontSize: 18, flexShrink: 0 }}>×</button>}
+                    {novoPedidoForm.itens.length > 1 && <button onClick={() => setNovoPedidoForm(f => ({ ...f, itens: f.itens.filter((_, j) => j !== i) }))} style={{ width: 40, height: 46, border: "1px solid var(--surface-secondary)", borderRadius: 10, background: "transparent", color: "var(--danger)", fontSize: 18, flexShrink: 0 }}>×</button>}
                   </div>
                 ))}
-                <button onClick={() => setNovoPedidoForm(f => ({ ...f, itens: [...f.itens, ""] }))} style={{ height: 36, width: "100%", border: "1px dashed #242220", borderRadius: 10, background: "transparent", color: "#5a564d", fontSize: 13, fontWeight: 800 }}>+ Adicionar item</button>
+                <button onClick={() => setNovoPedidoForm(f => ({ ...f, itens: [...f.itens, ""] }))} style={{ height: 36, width: "100%", border: "1px dashed var(--surface-secondary)", borderRadius: 10, background: "transparent", color: "var(--foreground-muted)", fontSize: 13, fontWeight: 800 }}>+ Adicionar item</button>
               </div>
               <div>
                 <label style={labelStyle}>Observação</label>
@@ -1994,7 +1994,7 @@ export default function PedidosPage() {
                 <label style={labelStyle}>Forma de pagamento</label>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                   {["Pix", "Dinheiro", "Cartão", "Misto"].map(p => (
-                    <button key={p} onClick={() => setNovoPedidoForm(f => ({ ...f, pagamento: p }))} style={{ height: 36, padding: "0 14px", border: `1px solid ${novoPedidoForm.pagamento === p ? "#ff6b00" : "#242220"}`, borderRadius: 10, background: novoPedidoForm.pagamento === p ? "rgba(255,107,0,.15)" : "transparent", color: novoPedidoForm.pagamento === p ? "#ff6b00" : "#5a564d", fontSize: 12, fontWeight: 900 }}>{p}</button>
+                    <button key={p} onClick={() => setNovoPedidoForm(f => ({ ...f, pagamento: p }))} style={{ height: 36, padding: "0 14px", border: `1px solid ${novoPedidoForm.pagamento === p ? "var(--primary)" : "var(--surface-secondary)"}`, borderRadius: 10, background: novoPedidoForm.pagamento === p ? "color-mix(in srgb, var(--primary) 15%, transparent)" : "transparent", color: novoPedidoForm.pagamento === p ? "var(--text-primary)" : "var(--text-muted)", fontSize: 12, fontWeight: 900 }}>{p}</button>
                   ))}
                 </div>
               </div>
@@ -2002,10 +2002,10 @@ export default function PedidosPage() {
                 <label style={labelStyle}>Total (R$)</label>
                 <input className="cbInput" value={novoPedidoForm.total} onChange={e => setNovoPedidoForm(f => ({ ...f, total: e.target.value }))} placeholder="0,00" style={inputStyle} inputMode="decimal" />
               </div>
-              <button onClick={salvarNovoPedido} disabled={salvandoNovoPedido || !novoPedidoForm.cliente.trim() || !novoPedidoForm.itens.filter(Boolean).length} style={{ height: 56, border: "none", borderRadius: 16, background: "linear-gradient(180deg,#ff7d1a,#ff6b00)", color: "#fff", fontSize: 17, fontWeight: 900, opacity: (salvandoNovoPedido || !novoPedidoForm.cliente.trim() || !novoPedidoForm.itens.filter(Boolean).length) ? 0.5 : 1, flexShrink: 0 }}>
+              <button onClick={salvarNovoPedido} disabled={salvandoNovoPedido || !novoPedidoForm.cliente.trim() || !novoPedidoForm.itens.filter(Boolean).length} style={{ height: 56, border: "none", borderRadius: 16, background: "linear-gradient(180deg,var(--primary),var(--primary))", color: 'var(--primary-foreground)', fontSize: 17, fontWeight: 900, opacity: (salvandoNovoPedido || !novoPedidoForm.cliente.trim() || !novoPedidoForm.itens.filter(Boolean).length) ? 0.5 : 1, flexShrink: 0 }}>
                 {salvandoNovoPedido ? "Salvando..." : "Criar pedido"}
               </button>
-              <button onClick={() => setModalNovoPedido(false)} style={{ height: 44, border: "none", background: "transparent", color: "#a39b8b", fontSize: 14, fontWeight: 800, flexShrink: 0 }}>Cancelar</button>
+              <button onClick={() => setModalNovoPedido(false)} style={{ height: 44, border: "none", background: "transparent", color: "var(--foreground-secondary)", fontSize: 14, fontWeight: 800, flexShrink: 0 }}>Cancelar</button>
             </div>
           </>
         )}
@@ -2014,17 +2014,17 @@ export default function PedidosPage() {
       {confirmPixModal && (
         <>
           <div onClick={() => setConfirmPixModal(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.7)", zIndex: 70, animation: "cbFadeIn .2s ease both" }} />
-          <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, margin: "0 auto", maxWidth: 480, background: "#121110", border: "1px solid #242220", borderBottom: "none", borderRadius: "26px 26px 0 0", zIndex: 71, animation: "cbSheetUp .32s cubic-bezier(.2,.9,.3,1) both", padding: "20px 20px 36px", display: "flex", flexDirection: "column", gap: 16 }}>
-            <div style={{ width: 44, height: 5, borderRadius: 3, background: "#2e2b26", margin: "0 auto 4px" }} />
-            <div style={{ width: 48, height: 48, borderRadius: 14, background: "rgba(251,191,36,.1)", border: "1px solid rgba(251,191,36,.25)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="#fbbf24" strokeWidth="2.2"/><polyline points="12,6 12,12 16,14" stroke="#fbbf24" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, margin: "0 auto", maxWidth: 480, background: "var(--background)", border: "1px solid var(--surface-secondary)", borderBottom: "none", borderRadius: "26px 26px 0 0", zIndex: 71, animation: "cbSheetUp .32s cubic-bezier(.2,.9,.3,1) both", padding: "20px 20px 36px", display: "flex", flexDirection: "column", gap: 16 }}>
+            <div style={{ width: 44, height: 5, borderRadius: 3, background: "var(--surface-elevated)", margin: "0 auto 4px" }} />
+            <div style={{ width: 48, height: 48, borderRadius: 14, background: "color-mix(in srgb, var(--primary) 10%, transparent)", border: "1px solid color-mix(in srgb, var(--primary) 25%, transparent)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="var(--primary)" strokeWidth="2.2"/><polyline points="12,6 12,12 16,14" stroke="var(--primary)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               <p style={{ margin: 0, fontSize: 19, fontWeight: 900, letterSpacing: "-0.4px", lineHeight: 1.2 }}>Confirmar Pix manualmente?</p>
-              <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "#a39b8b", lineHeight: 1.5 }}>Use apenas se o pagamento já foi verificado. Nenhuma mensagem será enviada ao cliente.</p>
+              <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "var(--foreground-secondary)", lineHeight: 1.5 }}>Use apenas se o pagamento já foi verificado. Nenhuma mensagem será enviada ao cliente.</p>
             </div>
-            <button onClick={() => confirmarPixManual(confirmPixModal)} style={{ height: 56, border: "none", borderRadius: 16, background: "#fbbf24", color: "#060606", fontSize: 16, fontWeight: 900 }}>Confirmar Pix</button>
-            <button onClick={() => setConfirmPixModal(null)} style={{ height: 46, border: "none", background: "transparent", color: "#a39b8b", fontSize: 14, fontWeight: 800 }}>Cancelar</button>
+            <button onClick={() => confirmarPixManual(confirmPixModal)} style={{ height: 56, border: "none", borderRadius: 16, background: "var(--primary)", color: 'var(--primary-foreground)', fontSize: 16, fontWeight: 900 }}>Confirmar Pix</button>
+            <button onClick={() => setConfirmPixModal(null)} style={{ height: 46, border: "none", background: "transparent", color: "var(--foreground-secondary)", fontSize: 14, fontWeight: 800 }}>Cancelar</button>
           </div>
         </>
       )}
@@ -2033,17 +2033,17 @@ export default function PedidosPage() {
       {finalizarModal && (
         <>
           <div onClick={() => setFinalizarModal(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.7)", zIndex: 70, animation: "cbFadeIn .2s ease both" }} />
-          <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, margin: "0 auto", maxWidth: 480, background: "#121110", border: "1px solid #242220", borderBottom: "none", borderRadius: "26px 26px 0 0", zIndex: 71, animation: "cbSheetUp .32s cubic-bezier(.2,.9,.3,1) both", padding: "20px 20px 36px", display: "flex", flexDirection: "column", gap: 16 }}>
-            <div style={{ width: 44, height: 5, borderRadius: 3, background: "#2e2b26", margin: "0 auto 4px" }} />
-            <div style={{ width: 48, height: 48, borderRadius: 14, background: "rgba(34,197,94,.1)", border: "1px solid rgba(34,197,94,.25)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M22 11.08V12a10 10 0 11-5.93-9.14" stroke="#22c55e" strokeWidth="2.2" strokeLinecap="round"/><polyline points="22,4 12,14.01 9,11.01" stroke="#22c55e" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, margin: "0 auto", maxWidth: 480, background: "var(--background)", border: "1px solid var(--surface-secondary)", borderBottom: "none", borderRadius: "26px 26px 0 0", zIndex: 71, animation: "cbSheetUp .32s cubic-bezier(.2,.9,.3,1) both", padding: "20px 20px 36px", display: "flex", flexDirection: "column", gap: 16 }}>
+            <div style={{ width: 44, height: 5, borderRadius: 3, background: "var(--surface-elevated)", margin: "0 auto 4px" }} />
+            <div style={{ width: 48, height: 48, borderRadius: 14, background: "color-mix(in srgb, var(--success) 10%, transparent)", border: "1px solid color-mix(in srgb, var(--success) 25%, transparent)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M22 11.08V12a10 10 0 11-5.93-9.14" stroke="var(--success)" strokeWidth="2.2" strokeLinecap="round"/><polyline points="22,4 12,14.01 9,11.01" stroke="var(--success)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               <p style={{ margin: 0, fontSize: 19, fontWeight: 900, letterSpacing: "-0.4px", lineHeight: 1.2 }}>Finalizar pedido?</p>
-              <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "#a39b8b", lineHeight: 1.5 }}>O pedido será marcado como finalizado no painel. Nenhuma mensagem será enviada ao cliente.</p>
+              <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "var(--foreground-secondary)", lineHeight: 1.5 }}>O pedido será marcado como finalizado no painel. Nenhuma mensagem será enviada ao cliente.</p>
             </div>
-            <button onClick={() => finalizarPedidoSilencioso(finalizarModal)} style={{ height: 56, border: "none", borderRadius: 16, background: "#22c55e", color: "#060606", fontSize: 16, fontWeight: 900 }}>Finalizar pedido</button>
-            <button onClick={() => setFinalizarModal(null)} style={{ height: 46, border: "none", background: "transparent", color: "#a39b8b", fontSize: 14, fontWeight: 800 }}>Cancelar</button>
+            <button onClick={() => finalizarPedidoSilencioso(finalizarModal)} style={{ height: 56, border: "none", borderRadius: 16, background: "var(--success)", color: "var(--background)", fontSize: 16, fontWeight: 900 }}>Finalizar pedido</button>
+            <button onClick={() => setFinalizarModal(null)} style={{ height: 46, border: "none", background: "transparent", color: "var(--foreground-secondary)", fontSize: 14, fontWeight: 800 }}>Cancelar</button>
           </div>
         </>
       )}
@@ -2052,26 +2052,26 @@ export default function PedidosPage() {
       {modalPedidoCombinado && pedidoCombinadoRascunho && (
         <>
           <div onClick={() => { setModalPedidoCombinado(false) }} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.75)", zIndex: 70, animation: "cbFadeIn .2s ease both" }} />
-          <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, margin: "0 auto", maxWidth: 480, background: "#121110", border: "1px solid #242220", borderBottom: "none", borderRadius: "26px 26px 0 0", zIndex: 71, animation: "cbSheetUp .32s cubic-bezier(.2,.9,.3,1) both", padding: "12px 20px 36px", display: "flex", flexDirection: "column", gap: 14, maxHeight: "90vh", overflowY: "auto" }}>
-            <div style={{ width: 44, height: 5, borderRadius: 3, background: "#2e2b26", margin: "0 auto 4px", flexShrink: 0 }} />
+          <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, margin: "0 auto", maxWidth: 480, background: "var(--background)", border: "1px solid var(--surface-secondary)", borderBottom: "none", borderRadius: "26px 26px 0 0", zIndex: 71, animation: "cbSheetUp .32s cubic-bezier(.2,.9,.3,1) both", padding: "12px 20px 36px", display: "flex", flexDirection: "column", gap: 14, maxHeight: "90vh", overflowY: "auto" }}>
+            <div style={{ width: 44, height: 5, borderRadius: 3, background: "var(--surface-elevated)", margin: "0 auto 4px", flexShrink: 0 }} />
             <p style={{ margin: 0, fontSize: 18, fontWeight: 900, letterSpacing: "-0.3px", flexShrink: 0 }}>Revise o pedido antes de enviar para a cozinha</p>
 
             {/* Itens */}
-            <div style={{ background: "#0d0c0b", borderRadius: 12, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 6 }}>
-              <span style={{ fontSize: 10, fontWeight: 800, color: "#5a564d", textTransform: "uppercase", letterSpacing: ".8px" }}>Itens</span>
+            <div style={{ background: "var(--background)", borderRadius: 12, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 6 }}>
+              <span style={{ fontSize: 10, fontWeight: 800, color: "var(--foreground-muted)", textTransform: "uppercase", letterSpacing: ".8px" }}>Itens</span>
               {pedidoCombinadoRascunho.itens.length === 0 ? (
-                <span style={{ fontSize: 13, color: "#ef4444", fontWeight: 700 }}>Nenhum item</span>
+                <span style={{ fontSize: 13, color: "var(--danger)", fontWeight: 700 }}>Nenhum item</span>
               ) : pedidoCombinadoRascunho.itens.map((item, i) => (
-                <div key={i} style={{ fontSize: 13, fontWeight: 700, color: "#c9c2b4" }}>{getItemIcon(item)} {item}</div>
+                <div key={i} style={{ fontSize: 13, fontWeight: 700, color: "var(--foreground-secondary)" }}>{getItemIcon(item)} {item}</div>
               ))}
               {pedidoCombinadoRascunho.total > 0 && (
-                <div style={{ marginTop: 4, paddingTop: 8, borderTop: "1px solid #1a1816", fontSize: 14, fontWeight: 900, color: "#f5f2ee" }}>Total: R$ {pedidoCombinadoRascunho.total.toFixed(2).replace(".", ",")}</div>
+                <div style={{ marginTop: 4, paddingTop: 8, borderTop: "1px solid var(--surface)", fontSize: 14, fontWeight: 900, color: "var(--foreground)" }}>Total: R$ {pedidoCombinadoRascunho.total.toFixed(2).replace(".", ",")}</div>
               )}
             </div>
 
             {/* Dados do pedido */}
-            <div style={{ background: "#0d0c0b", borderRadius: 12, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 7 }}>
-              <span style={{ fontSize: 10, fontWeight: 800, color: "#5a564d", textTransform: "uppercase", letterSpacing: ".8px" }}>Dados</span>
+            <div style={{ background: "var(--background)", borderRadius: 12, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 7 }}>
+              <span style={{ fontSize: 10, fontWeight: 800, color: "var(--foreground-muted)", textTransform: "uppercase", letterSpacing: ".8px" }}>Dados</span>
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 <Row label="Cliente" value={pedidoCombinadoRascunho.cliente} missing={!pedidoCombinadoRascunho.cliente} />
                 <Row label="Tipo" value={pedidoCombinadoRascunho.tipoEntrega === "delivery" ? "🛵 Entrega" : pedidoCombinadoRascunho.tipoEntrega === "retirada" ? "🏪 Retirada" : pedidoCombinadoRascunho.tipoEntrega === "dine_in" ? "🍽️ Consumo no local" : ""} missing={!pedidoCombinadoRascunho.tipoEntrega} />
@@ -2084,24 +2084,24 @@ export default function PedidosPage() {
 
             {/* Pendencias */}
             {pedidoCombinadoPendencias.length > 0 && (
-              <div style={{ background: "rgba(239,68,68,.06)", border: "1px solid rgba(239,68,68,.3)", borderRadius: 12, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 6 }}>
-                <span style={{ fontSize: 10, fontWeight: 800, color: "#ef4444", textTransform: "uppercase", letterSpacing: ".8px" }}>Informações que faltam</span>
+              <div style={{ background: "color-mix(in srgb, var(--danger) 6%, transparent)", border: "1px solid color-mix(in srgb, var(--danger) 30%, transparent)", borderRadius: 12, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 6 }}>
+                <span style={{ fontSize: 10, fontWeight: 800, color: "var(--danger)", textTransform: "uppercase", letterSpacing: ".8px" }}>Informações que faltam</span>
                 {pedidoCombinadoPendencias.map((p, i) => (
-                  <div key={i} style={{ fontSize: 13, fontWeight: 700, color: "#f87171", display: "flex", alignItems: "center", gap: 6 }}>
+                  <div key={i} style={{ fontSize: 13, fontWeight: 700, color: "var(--danger)", display: "flex", alignItems: "center", gap: 6 }}>
                     <span style={{ fontSize: 10 }}>●</span> {p}
                   </div>
                 ))}
-                <p style={{ margin: "4px 0 0", fontSize: 12, fontWeight: 600, color: "#7f1d1d" }}>Volte para a conversa para pegar as informações que faltam.</p>
+                <p style={{ margin: "4px 0 0", fontSize: 12, fontWeight: 600, color: "var(--danger)" }}>Volte para a conversa para pegar as informações que faltam.</p>
               </div>
             )}
 
             {/* Histórico da conversa */}
             {pedidoCombinadoConversa.length > 0 && (
-              <div style={{ background: "#0d0c0b", borderRadius: 12, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 6 }}>
-                <span style={{ fontSize: 10, fontWeight: 800, color: "#5a564d", textTransform: "uppercase", letterSpacing: ".8px" }}>Histórico da conversa</span>
+              <div style={{ background: "var(--background)", borderRadius: 12, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 6 }}>
+                <span style={{ fontSize: 10, fontWeight: 800, color: "var(--foreground-muted)", textTransform: "uppercase", letterSpacing: ".8px" }}>Histórico da conversa</span>
                 {pedidoCombinadoConversa.map((m, i) => (
-                  <div key={i} style={{ fontSize: 12, color: m.autor === "atendente" ? "#60a5fa" : "#c9c2b4", fontWeight: 600 }}>
-                    <span style={{ fontWeight: 800, color: m.autor === "atendente" ? "#60a5fa" : "#a39b8b" }}>{m.autor === "atendente" ? "Atendente" : "Cliente"}: </span>{m.texto}
+                  <div key={i} style={{ fontSize: 12, color: m.autor === "atendente" ? "var(--info)" : "var(--foreground-secondary)", fontWeight: 600 }}>
+                    <span style={{ fontWeight: 800, color: m.autor === "atendente" ? "var(--info)" : "var(--foreground-secondary)" }}>{m.autor === "atendente" ? "Atendente" : "Cliente"}: </span>{m.texto}
                   </div>
                 ))}
               </div>
@@ -2112,13 +2112,13 @@ export default function PedidosPage() {
               <button
                 onClick={criarPedidoCombinado}
                 disabled={criandoPedidoCombinado}
-                style={{ height: 56, border: "none", borderRadius: 16, background: criandoPedidoCombinado ? "#14532d" : "#22c55e", color: "#060606", fontSize: 16, fontWeight: 900, opacity: criandoPedidoCombinado ? 0.7 : 1 }}
+                style={{ height: 56, border: "none", borderRadius: 16, background: criandoPedidoCombinado ? "var(--success-soft)" : "var(--success)", color: "var(--background)", fontSize: 16, fontWeight: 900, opacity: criandoPedidoCombinado ? 0.7 : 1 }}
               >{criandoPedidoCombinado ? "Criando..." : "✅ Criar pedido"}</button>
             )}
             <button
               onClick={() => { setModalPedidoCombinado(false) }}
               disabled={criandoPedidoCombinado}
-              style={{ height: 46, border: "none", background: "transparent", color: "#a39b8b", fontSize: 14, fontWeight: 800 }}
+              style={{ height: 46, border: "none", background: "transparent", color: "var(--foreground-secondary)", fontSize: 14, fontWeight: 800 }}
             >← Voltar para conversa</button>
           </div>
         </>
@@ -2126,60 +2126,60 @@ export default function PedidosPage() {
 
       {/* OLD_SIDEBAR - REMOVED */}
       {false && <aside style={{ display: "none" }}>
-        <div style={{ fontSize: 9, fontWeight: 900, textTransform: "uppercase", letterSpacing: "1.2px", color: "#3a3730", marginBottom: 4 }}>Dashboard</div>
+        <div style={{ fontSize: 9, fontWeight: 900, textTransform: "uppercase", letterSpacing: "1.2px", color: "var(--border-strong)", marginBottom: 4 }}>Dashboard</div>
 
         {/* Bot status */}
-        <div style={{ padding: "12px 14px", borderRadius: 13, background: botAtivo ? "rgba(34,197,94,.06)" : "rgba(250,204,21,.06)", border: `1px solid ${botAtivo ? "rgba(34,197,94,.25)" : "rgba(250,204,21,.28)"}`, display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ width: 9, height: 9, borderRadius: "50%", background: botAtivo ? "#22c55e" : "#facc15", flexShrink: 0, animation: botAtivo ? "cbPulse 2s infinite" : "none" }} />
+        <div style={{ padding: "12px 14px", borderRadius: 13, background: botAtivo ? "color-mix(in srgb, var(--success) 6%, transparent)" : "color-mix(in srgb, var(--primary) 6%, transparent)", border: `1px solid ${botAtivo ? "color-mix(in srgb, var(--success) 25%, transparent)" : "color-mix(in srgb, var(--primary) 28%, transparent)"}`, display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ width: 9, height: 9, borderRadius: "50%", background: botAtivo ? "var(--success)" : "var(--primary)", flexShrink: 0, animation: botAtivo ? "cbPulse 2s infinite" : "none" }} />
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 13, fontWeight: 900, color: "#f5f2ee" }}>{botAtivo ? "Bot atendendo" : "Bot pausado"}</div>
-            <div style={{ fontSize: 10, fontWeight: 700, color: botAtivo ? "#22c55e" : "#facc15", marginTop: 1 }}>{botAtivo ? "WhatsApp ativo" : "Você no comando"}</div>
+            <div style={{ fontSize: 13, fontWeight: 900, color: "var(--foreground)" }}>{botAtivo ? "Bot atendendo" : "Bot pausado"}</div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: botAtivo ? "var(--success)" : "var(--brand-text)", marginTop: 1 }}>{botAtivo ? "WhatsApp ativo" : "Você no comando"}</div>
           </div>
         </div>
 
         {/* Métricas */}
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-            <div style={{ background: "#0e0e0e", border: "1px solid #1a1816", borderRadius: 11, padding: "11px 10px" }}>
-              <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: "-1px", lineHeight: 1, color: "#f5f2ee" }}>{totalHoje}</div>
-              <div style={{ fontSize: 9.5, fontWeight: 700, color: "#3a3730", textTransform: "uppercase", letterSpacing: ".5px", marginTop: 3 }}>Hoje</div>
+            <div style={{ background: "var(--surface)", border: "1px solid var(--surface)", borderRadius: 11, padding: "11px 10px" }}>
+              <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: "-1px", lineHeight: 1, color: "var(--foreground)" }}>{totalHoje}</div>
+              <div style={{ fontSize: 9.5, fontWeight: 700, color: "var(--border-strong)", textTransform: "uppercase", letterSpacing: ".5px", marginTop: 3 }}>Hoje</div>
             </div>
-            <div style={{ background: emAberto > 0 ? "#1a0d00" : "#0e0e0e", border: `1px solid ${emAberto > 0 ? "rgba(255,107,0,.45)" : "#1a1816"}`, borderRadius: 11, padding: "11px 10px" }}>
-              <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: "-1px", lineHeight: 1, color: emAberto > 0 ? "#ff6b00" : "#3a3730" }}>{emAberto}</div>
-              <div style={{ fontSize: 9.5, fontWeight: 700, color: emAberto > 0 ? "rgba(255,107,0,.6)" : "#3a3730", textTransform: "uppercase", letterSpacing: ".5px", marginTop: 3 }}>Em aberto</div>
+            <div style={{ background: emAberto > 0 ? "var(--background)" : "var(--surface)", border: `1px solid ${emAberto > 0 ? "color-mix(in srgb, var(--primary) 45%, transparent)" : "var(--surface)"}`, borderRadius: 11, padding: "11px 10px" }}>
+              <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: "-1px", lineHeight: 1, color: emAberto > 0 ? "var(--brand-text)" : "var(--border-strong)" }}>{emAberto}</div>
+              <div style={{ fontSize: 9.5, fontWeight: 700, color: emAberto > 0 ? "var(--brand-text)" : "var(--border-strong)", textTransform: "uppercase", letterSpacing: ".5px", marginTop: 3 }}>Em aberto</div>
             </div>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-            <div style={{ background: "#0e0e0e", border: "1px solid #1a1816", borderRadius: 11, padding: "11px 10px" }}>
-              <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: "-1px", lineHeight: 1, color: "#22c55e" }}>{pedidos.filter(p => p.status === "entregue").length}</div>
-              <div style={{ fontSize: 9.5, fontWeight: 700, color: "#3a3730", textTransform: "uppercase", letterSpacing: ".5px", marginTop: 3 }}>Entregues</div>
+            <div style={{ background: "var(--surface)", border: "1px solid var(--surface)", borderRadius: 11, padding: "11px 10px" }}>
+              <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: "-1px", lineHeight: 1, color: "var(--success)" }}>{pedidos.filter(p => p.status === "entregue").length}</div>
+              <div style={{ fontSize: 9.5, fontWeight: 700, color: "var(--border-strong)", textTransform: "uppercase", letterSpacing: ".5px", marginTop: 3 }}>Entregues</div>
             </div>
-            <div style={{ background: "#0e0e0e", border: "1px solid #1a1816", borderRadius: 11, padding: "11px 10px" }}>
-              <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: "-1px", lineHeight: 1, color: "#60a5fa" }}>{tempoMedioPreparo !== null ? `${tempoMedioPreparo}` : "--"}<span style={{ fontSize: 11, fontWeight: 700, marginLeft: 2 }}>{tempoMedioPreparo !== null ? "m" : ""}</span></div>
-              <div style={{ fontSize: 9.5, fontWeight: 700, color: "#3a3730", textTransform: "uppercase", letterSpacing: ".5px", marginTop: 3 }}>⏱ Média</div>
+            <div style={{ background: "var(--surface)", border: "1px solid var(--surface)", borderRadius: 11, padding: "11px 10px" }}>
+              <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: "-1px", lineHeight: 1, color: "var(--info)" }}>{tempoMedioPreparo !== null ? `${tempoMedioPreparo}` : "--"}<span style={{ fontSize: 11, fontWeight: 700, marginLeft: 2 }}>{tempoMedioPreparo !== null ? "m" : ""}</span></div>
+              <div style={{ fontSize: 9.5, fontWeight: 700, color: "var(--border-strong)", textTransform: "uppercase", letterSpacing: ".5px", marginTop: 3 }}>⏱ Média</div>
             </div>
           </div>
         </div>
 
         {/* Divisor */}
-        <div style={{ height: 1, background: "#1a1816", margin: "4px 0" }} />
+        <div style={{ height: 1, background: "var(--surface)", margin: "4px 0" }} />
 
         {/* Navegação */}
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           <button
             onClick={() => router.push("/conversas")}
-            style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 14px", borderRadius: 12, border: escalonados.length > 0 ? "1px solid rgba(239,68,68,.35)" : "1px solid #1e1c19", background: escalonados.length > 0 ? "rgba(239,68,68,.05)" : "#0e0e0e", cursor: "pointer", fontFamily: "'Archivo', sans-serif" }}
+            style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 14px", borderRadius: 12, border: escalonados.length > 0 ? "1px solid color-mix(in srgb, var(--danger) 35%, transparent)" : "1px solid var(--surface)", background: escalonados.length > 0 ? "color-mix(in srgb, var(--danger) 5%, transparent)" : "var(--surface)", cursor: "pointer", fontFamily: "'Archivo', sans-serif" }}
           >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="14" rx="5" stroke={escalonados.length > 0 ? "#ef4444" : "#5a564d"} strokeWidth="2.2"/><circle cx="8.5" cy="11" r="1.4" fill={escalonados.length > 0 ? "#ef4444" : "#5a564d"}/><circle cx="12" cy="11" r="1.4" fill={escalonados.length > 0 ? "#ef4444" : "#5a564d"}/><circle cx="15.5" cy="11" r="1.4" fill={escalonados.length > 0 ? "#ef4444" : "#5a564d"}/></svg>
-            <span style={{ flex: 1, fontSize: 13, fontWeight: 800, color: escalonados.length > 0 ? "#ef4444" : "#8a8278", textAlign: "left" }}>Conversas</span>
-            {escalonados.length > 0 && <span style={{ minWidth: 20, height: 20, borderRadius: 10, background: "#ef4444", color: "#fff", fontSize: 11, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 5px" }}>{escalonados.length}</span>}
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="14" rx="5" stroke={escalonados.length > 0 ? "var(--danger)" : "var(--foreground-muted)"} strokeWidth="2.2"/><circle cx="8.5" cy="11" r="1.4" fill={escalonados.length > 0 ? "var(--danger)" : "var(--foreground-muted)"}/><circle cx="12" cy="11" r="1.4" fill={escalonados.length > 0 ? "var(--danger)" : "var(--foreground-muted)"}/><circle cx="15.5" cy="11" r="1.4" fill={escalonados.length > 0 ? "var(--danger)" : "var(--foreground-muted)"}/></svg>
+            <span style={{ flex: 1, fontSize: 13, fontWeight: 800, color: escalonados.length > 0 ? "var(--danger)" : "var(--foreground-secondary)", textAlign: "left" }}>Conversas</span>
+            {escalonados.length > 0 && <span style={{ minWidth: 20, height: 20, borderRadius: 10, background: "var(--danger)", color: "var(--foreground)", fontSize: 11, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 5px" }}>{escalonados.length}</span>}
           </button>
           <button
             onClick={() => router.push("/cardapio")}
-            style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 14px", borderRadius: 12, border: "1px solid #1e1c19", background: "#0e0e0e", cursor: "pointer", fontFamily: "'Archivo', sans-serif" }}
+            style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 14px", borderRadius: 12, border: "1px solid var(--surface)", background: "var(--surface)", cursor: "pointer", fontFamily: "'Archivo', sans-serif" }}
           >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><rect x="4" y="4" width="7" height="7" rx="2" stroke="#5a564d" strokeWidth="2.2"/><rect x="13" y="4" width="7" height="7" rx="2" stroke="#5a564d" strokeWidth="2.2"/><rect x="4" y="13" width="7" height="7" rx="2" stroke="#5a564d" strokeWidth="2.2"/><rect x="13" y="13" width="7" height="7" rx="2" stroke="#5a564d" strokeWidth="2.2"/></svg>
-            <span style={{ fontSize: 13, fontWeight: 800, color: "#8a8278", textAlign: "left" }}>Cardápio</span>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><rect x="4" y="4" width="7" height="7" rx="2" stroke="var(--foreground-muted)" strokeWidth="2.2"/><rect x="13" y="4" width="7" height="7" rx="2" stroke="var(--foreground-muted)" strokeWidth="2.2"/><rect x="4" y="13" width="7" height="7" rx="2" stroke="var(--foreground-muted)" strokeWidth="2.2"/><rect x="13" y="13" width="7" height="7" rx="2" stroke="var(--foreground-muted)" strokeWidth="2.2"/></svg>
+            <span style={{ fontSize: 13, fontWeight: 800, color: "var(--foreground-secondary)", textAlign: "left" }}>Cardápio</span>
           </button>
         </div>
       </aside>}

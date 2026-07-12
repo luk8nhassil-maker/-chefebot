@@ -4,20 +4,20 @@ import { useRouter } from 'next/navigation'
 import type { DadosMcp } from '@/mcp/lib/mcpReader'
 import type { PadraoObservado } from '@/mcp/types'
 
-const BG = '#0a0a1a'
-const BG_S = '#0f0f1c'
-const BG_R = '#161626'
-const BORDER = '1px solid #1e1e32'
+const BG = 'var(--info-soft)'
+const BG_S = 'var(--info-soft)'
+const BG_R = 'var(--info-soft)'
+const BORDER = '1px solid var(--info-soft)'
 
-const TEXT = '#e8e8f4'
-const TEXT2 = '#8888aa'
-const TEXT3 = '#44446a'
-const PURPLE = '#7c3aed'
-const PURPLE_L = '#a78bfa'
-const GREEN = '#34d399'
-const YELLOW = '#fbbf24'
-const RED = '#f87171'
-const ORANGE = '#fb923c'
+const TEXT = 'var(--info)'
+const TEXT2 = 'var(--info)'
+const TEXT3 = 'var(--info)'
+const PURPLE = 'var(--attention)'
+const PURPLE_L = 'var(--attention)'
+const GREEN = 'var(--success)'
+const YELLOW = 'var(--primary)'
+const RED = 'var(--danger)'
+const ORANGE = 'var(--primary)'
 const FONT = "system-ui, -apple-system, 'Segoe UI', sans-serif"
 
 function getUserRole(): string | null {
@@ -40,13 +40,13 @@ function getUserRole(): string | null {
 }
 
 const PADRAO_COR: Record<PadraoObservado, string> = {
-  avanco_normal: '#a78bfa',
-  interpretacao_ok: '#60a5fa',
-  sem_mudanca: '#4444aa',
-  confusao_simples: '#fbbf24',
-  confusao_com_escalacao: '#f87171',
-  escalacao_direta: '#ef4444',
-  desconhecido: '#44446a',
+  avanco_normal: 'var(--attention)',
+  interpretacao_ok: 'var(--info)',
+  sem_mudanca: 'var(--info)',
+  confusao_simples: 'var(--primary)',
+  confusao_com_escalacao: 'var(--danger)',
+  escalacao_direta: 'var(--danger)',
+  desconhecido: 'var(--info)',
 }
 
 const PADRAO_LABEL: Record<PadraoObservado, string> = {
@@ -79,7 +79,7 @@ function ScoreRing({ score }: { score: number }) {
   const deg = Math.min(360, (score / 100) * 360)
   const color = score >= 70 ? GREEN : score >= 40 ? YELLOW : RED
   return (
-    <div style={{ width: 88, height: 88, borderRadius: '50%', background: `conic-gradient(${color} 0deg ${deg}deg, #1e1e32 ${deg}deg 360deg)`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+    <div style={{ width: 88, height: 88, borderRadius: '50%', background: `conic-gradient(${color} 0deg ${deg}deg, var(--info-soft) ${deg}deg 360deg)`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
       <div style={{ width: 66, height: 66, borderRadius: '50%', background: BG_R, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, fontWeight: 900, color }}>
         {score}%
       </div>
@@ -146,7 +146,7 @@ function ScorePanel({ dados }: { dados: DadosMcp }) {
           </div>
         </div>
       </div>
-      <div style={{ background: pronto ? 'rgba(52,211,153,.08)' : 'rgba(251,191,36,.07)', border: `1px solid ${pronto ? 'rgba(52,211,153,.25)' : 'rgba(251,191,36,.2)'}`, borderRadius: 8, padding: '8px 12px' }}>
+      <div style={{ background: pronto ? 'color-mix(in srgb, var(--success) 8%, transparent)' : 'color-mix(in srgb, var(--primary) 7%, transparent)', border: `1px solid ${pronto ? 'color-mix(in srgb, var(--success) 25%, transparent)' : 'color-mix(in srgb, var(--primary) 20%, transparent)'}`, borderRadius: 8, padding: '8px 12px' }}>
         <p style={{ color: pronto ? GREEN : YELLOW, fontSize: 11, fontWeight: 700, margin: 0 }}>
           {pronto ? '✓ Pronto para avaliar Fase 2A' : '◌ Aguardando volume e qualidade suficientes'}
         </p>
@@ -205,10 +205,10 @@ function PiiPanel({ dados }: { dados: DadosMcp }) {
     { label: 'Sem valores monetários nos logs', ok: p.semValorMonetario },
   ]
   return (
-    <div style={{ background: BG_S, border: `1px solid ${p.ok ? 'rgba(52,211,153,.2)' : 'rgba(248,113,113,.3)'}`, borderRadius: 12, padding: 18 }}>
+    <div style={{ background: BG_S, border: `1px solid ${p.ok ? 'color-mix(in srgb, var(--success) 20%, transparent)' : 'color-mix(in srgb, var(--danger) 30%, transparent)'}`, borderRadius: 12, padding: 18 }}>
       <p style={{ color: TEXT3, fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.8, margin: '0 0 12px' }}>
         Segurança / PII
-        {!p.ok && <span style={{ marginLeft: 8, background: 'rgba(248,113,113,.15)', color: RED, fontSize: 10, padding: '2px 8px', borderRadius: 4, fontWeight: 800 }}>BLOQUEIO FASE 2</span>}
+        {!p.ok && <span style={{ marginLeft: 8, background: 'color-mix(in srgb, var(--danger) 15%, transparent)', color: RED, fontSize: 10, padding: '2px 8px', borderRadius: 4, fontWeight: 800 }}>BLOQUEIO FASE 2</span>}
       </p>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         {checks.map(({ label, ok }) => (
@@ -219,7 +219,7 @@ function PiiPanel({ dados }: { dados: DadosMcp }) {
         ))}
       </div>
       {!p.ok && (
-        <p style={{ color: RED, fontSize: 11, marginTop: 10, background: 'rgba(248,113,113,.08)', border: '1px solid rgba(248,113,113,.2)', borderRadius: 6, padding: '8px 10px' }}>
+        <p style={{ color: RED, fontSize: 11, marginTop: 10, background: 'color-mix(in srgb, var(--danger) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--danger) 20%, transparent)', borderRadius: 6, padding: '8px 10px' }}>
           PII detectado nos logs MCP. Fase 2A bloqueada até resolução. Verificar mcpLogger.sanitizarMensagemErro().
         </p>
       )}
@@ -248,7 +248,7 @@ function QualidadePanel({ dados }: { dados: DadosMcp }) {
           return (
             <div key={padrao} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
               <span style={{ color: TEXT2, fontSize: 11, width: 160, flexShrink: 0 }}>{PADRAO_LABEL[padrao]}</span>
-              <div style={{ flex: 1, height: 6, background: '#1e1e32', borderRadius: 3, overflow: 'hidden' }}>
+              <div style={{ flex: 1, height: 6, background: 'var(--info-soft)', borderRadius: 3, overflow: 'hidden' }}>
                 <div style={{ height: '100%', width: `${Math.round(ratio * 100)}%`, background: PADRAO_COR[padrao], borderRadius: 3 }} />
               </div>
               <span style={{ color: TEXT3, fontSize: 10, width: 36, textAlign: 'right', flexShrink: 0 }}>{count} ({Math.round(ratio * 100)}%)</span>
@@ -277,7 +277,7 @@ function GargalosPanel({ dados }: { dados: DadosMcp }) {
                   <span style={{ color: TEXT, fontSize: 12, fontFamily: 'monospace', fontWeight: 700 }}>{item.step}</span>
                   <span style={{ color: cor, fontSize: 12, fontWeight: 800 }}>{pct(item.taxaProblema)}</span>
                 </div>
-                <div style={{ height: 5, background: '#1e1e32', borderRadius: 3, overflow: 'hidden' }}>
+                <div style={{ height: 5, background: 'var(--info-soft)', borderRadius: 3, overflow: 'hidden' }}>
                   <div style={{ height: '100%', width: pct(item.taxaProblema), background: cor, borderRadius: 3 }} />
                 </div>
                 <p style={{ color: TEXT3, fontSize: 10, margin: '4px 0 0' }}>
@@ -302,7 +302,7 @@ function ErrosPanel({ dados }: { dados: DadosMcp }) {
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           {erros.map((e, i) => (
-            <div key={i} style={{ background: 'rgba(248,113,113,.06)', border: '1px solid rgba(248,113,113,.2)', borderRadius: 8, padding: '9px 12px' }}>
+            <div key={i} style={{ background: 'color-mix(in srgb, var(--danger) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--danger) 20%, transparent)', borderRadius: 8, padding: '9px 12px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
                 <div>
                   <span style={{ color: RED, fontSize: 11, fontWeight: 800, fontFamily: 'monospace' }}>{e.origem}</span>
@@ -330,7 +330,7 @@ function TimelinePanel({ dados }: { dados: DadosMcp }) {
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 0, maxHeight: 360, overflowY: 'auto' }}>
           {obs.map((e, i) => (
-            <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '7px 0', borderBottom: i < obs.length - 1 ? '1px solid #1e1e32' : 'none' }}>
+            <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '7px 0', borderBottom: i < obs.length - 1 ? '1px solid var(--info-soft)' : 'none' }}>
               <span style={{ color: TEXT3, fontSize: 10, fontFamily: 'monospace', width: 40, flexShrink: 0, paddingTop: 1 }}>
                 {new Date(e.ts).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
               </span>
@@ -383,7 +383,7 @@ export default function DevMcpPage() {
         <div style={{ textAlign: 'center' }}>
           <p style={{ color: RED, fontSize: 14, fontWeight: 700 }}>Erro ao carregar dados MCP</p>
           <p style={{ color: TEXT3, fontSize: 12, marginTop: 6 }}>{erro || 'Resposta inválida'}</p>
-          <button onClick={() => window.location.reload()} style={{ marginTop: 16, background: PURPLE, border: 'none', color: '#fff', borderRadius: 8, padding: '8px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>Tentar novamente</button>
+          <button onClick={() => window.location.reload()} style={{ marginTop: 16, background: PURPLE, border: 'none', color: 'var(--foreground)', borderRadius: 8, padding: '8px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>Tentar novamente</button>
         </div>
       </div>
     )
@@ -409,10 +409,10 @@ export default function DevMcpPage() {
             <p style={{ color: TEXT3, fontSize: 12, margin: '4px 0 0' }}>Somente leitura · Nenhuma ação na IA disponível aqui</p>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={() => router.push('/dev')} style={{ background: 'rgba(124,58,237,.1)', border: '1px solid rgba(124,58,237,.3)', color: PURPLE_L, borderRadius: 8, padding: '8px 14px', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>
+            <button onClick={() => router.push('/dev')} style={{ background: 'color-mix(in srgb, var(--attention) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--attention) 30%, transparent)', color: PURPLE_L, borderRadius: 8, padding: '8px 14px', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>
               ← Dev
             </button>
-            <button onClick={() => window.location.reload()} style={{ background: 'rgba(255,255,255,.05)', border: BORDER, color: TEXT3, borderRadius: 8, padding: '8px 14px', cursor: 'pointer', fontSize: 12 }}>
+            <button onClick={() => window.location.reload()} style={{ background: 'rgba(var(--overlay-rgb), 0.05)', border: BORDER, color: TEXT3, borderRadius: 8, padding: '8px 14px', cursor: 'pointer', fontSize: 12 }}>
               Atualizar
             </button>
           </div>
@@ -424,7 +424,7 @@ export default function DevMcpPage() {
             <button
               key={t}
               onClick={() => setAba(t)}
-              style={{ padding: '9px 20px', borderRadius: 9, border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: 13, fontFamily: FONT, background: aba === t ? PURPLE : 'rgba(255,255,255,.05)', color: aba === t ? '#fff' : TEXT3 }}
+              style={{ padding: '9px 20px', borderRadius: 9, border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: 13, fontFamily: FONT, background: aba === t ? PURPLE : 'rgba(var(--overlay-rgb), 0.05)', color: aba === t ? 'var(--foreground)' : TEXT3 }}
             >
               {t === 'status' ? 'Status e Score' : 'Padrões e Logs'}
             </button>

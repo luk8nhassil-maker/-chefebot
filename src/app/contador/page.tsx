@@ -17,14 +17,14 @@ type Mensagem = {
 }
 
 const CATEGORIAS = [
-  { key: 'ingredientes', label: '🧄 Ingredientes', cor: '#f97316' },
-  { key: 'embalagens', label: '📦 Embalagens', cor: '#3b82f6' },
-  { key: 'energia', label: '💡 Energia/Gás', cor: '#eab308' },
-  { key: 'funcionarios', label: '👥 Funcionários', cor: '#8b5cf6' },
-  { key: 'aluguel', label: '🏠 Aluguel', cor: '#ec4899' },
-  { key: 'marketing', label: '📱 Marketing', cor: '#06b6d4' },
-  { key: 'manutencao', label: '🔧 Manutenção', cor: '#84cc16' },
-  { key: 'outros', label: '📋 Outros', cor: '#6b7280' },
+  { key: 'ingredientes', label: '🧄 Ingredientes', cor: 'var(--primary)' },
+  { key: 'embalagens', label: '📦 Embalagens', cor: 'var(--info)' },
+  { key: 'energia', label: '💡 Energia/Gás', cor: 'var(--primary)' },
+  { key: 'funcionarios', label: '👥 Funcionários', cor: 'var(--attention)' },
+  { key: 'aluguel', label: '🏠 Aluguel', cor: 'var(--attention)' },
+  { key: 'marketing', label: '📱 Marketing', cor: 'var(--info)' },
+  { key: 'manutencao', label: '🔧 Manutenção', cor: 'var(--success)' },
+  { key: 'outros', label: '📋 Outros', cor: 'var(--foreground-muted)' },
 ]
 
 export default function ContadorPage() {
@@ -107,32 +107,32 @@ export default function ContadorPage() {
   const lucro = faturamento - totalCustos
   const custosPorCategoria = CATEGORIAS.map(cat => ({ ...cat, total: custos.filter(c => c.categoria === cat.key).reduce((s, c) => s + c.valor, 0) })).filter(c => c.total > 0)
 
-  const inp = { width: '100%', background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 10, padding: '11px 14px', color: '#fff', fontSize: 14, outline: 'none', boxSizing: 'border-box' as const }
+  const inp = { width: '100%', background: 'var(--surface-secondary)', border: '1px solid var(--surface-elevated)', borderRadius: 10, padding: '11px 14px', color: 'var(--foreground)', fontSize: 14, outline: 'none', boxSizing: 'border-box' as const }
 
   if (loading) return (
-    <div style={{ minHeight: '100vh', background: '#080808', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <p style={{ color: '#333' }}>Carregando...</p>
+    <div style={{ minHeight: '100vh', background: 'var(--background)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <p style={{ color: 'var(--surface-elevated)' }}>Carregando...</p>
     </div>
   )
 
   return (
-    <div style={{ minHeight: '100vh', background: '#080808', fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", paddingBottom: 80 }}>
+    <div style={{ minHeight: '100vh', background: 'var(--background)', fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", paddingBottom: 80 }}>
       <style>{`@keyframes slideUp { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } } @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }`}</style>
 
       {/* Header */}
-      <div style={{ background: '#0d0d0d', borderBottom: '1px solid #161616', padding: '14px 16px', position: 'sticky', top: 0, zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <div style={{ background: 'var(--surface)', borderBottom: '1px solid var(--surface)', padding: '14px 16px', position: 'sticky', top: 0, zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{ width: 36, height: 36, borderRadius: 10, background: '#1a3a1a', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>📊</div>
+          <div style={{ width: 36, height: 36, borderRadius: 10, background: 'var(--success-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>📊</div>
           <div>
-            <p style={{ color: '#fff', fontSize: 15, fontWeight: 700, margin: 0 }}>Painel do Contador</p>
-            <p style={{ color: '#444', fontSize: 10, margin: 0 }}>{mesLabel} {mesFechado ? '· 🔒 Fechado' : '· Em aberto'}</p>
+            <p style={{ color: 'var(--foreground)', fontSize: 15, fontWeight: 700, margin: 0 }}>Painel do Contador</p>
+            <p style={{ color: 'var(--border-strong)', fontSize: 10, margin: 0 }}>{mesLabel} {mesFechado ? '· 🔒 Fechado' : '· Em aberto'}</p>
           </div>
         </div>
-        <button onClick={() => fetch('/api/auth/logout', { method: 'POST' }).then(() => router.push('/login'))} style={{ background: '#1a1a1a', border: '1px solid #2a2a2a', color: '#555', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontSize: 12 }}>Sair</button>
+        <button onClick={() => fetch('/api/auth/logout', { method: 'POST' }).then(() => router.push('/login'))} style={{ background: 'var(--surface-secondary)', border: '1px solid var(--surface-elevated)', color: 'var(--border-strong)', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontSize: 12 }}>Sair</button>
       </div>
 
       {mensagem && (
-        <div style={{ background: mensagem.includes('✅') ? '#14532d' : '#7f1d1d', margin: '12px 16px 0', borderRadius: 10, padding: '10px 14px', color: mensagem.includes('✅') ? '#4ade80' : '#f87171', fontWeight: 600, fontSize: 13, animation: 'slideUp 0.2s ease' }}>
+        <div style={{ background: mensagem.includes('✅') ? 'var(--success-soft)' : 'var(--danger)', margin: '12px 16px 0', borderRadius: 10, padding: '10px 14px', color: mensagem.includes('✅') ? 'var(--success)' : 'var(--danger)', fontWeight: 600, fontSize: 13, animation: 'slideUp 0.2s ease' }}>
           {mensagem}
         </div>
       )}
@@ -140,7 +140,7 @@ export default function ContadorPage() {
       {/* Abas */}
       <div style={{ display: 'flex', gap: 6, padding: '12px 16px 0' }}>
         {[{ key: 'resumo', label: '📋 Resumo' }, { key: 'chat', label: '🤖 Assistente' }].map(a => (
-          <button key={a.key} onClick={() => setAba(a.key as any)} style={{ flex: 1, padding: '10px', borderRadius: 10, border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: 13, background: aba === a.key ? '#16a34a' : '#1a1a1a', color: '#fff' }}>
+          <button key={a.key} onClick={() => setAba(a.key as any)} style={{ flex: 1, padding: '10px', borderRadius: 10, border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: 13, background: aba === a.key ? 'var(--success)' : 'var(--surface-secondary)', color: 'var(--foreground)' }}>
             {a.label}
           </button>
         ))}
@@ -154,27 +154,27 @@ export default function ContadorPage() {
 
             {/* Métricas */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
-              <div style={{ background: '#111', border: '1px solid #1e1e1e', borderRadius: 14, padding: 14 }}>
-                <p style={{ color: '#555', fontSize: 9, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 6px', letterSpacing: 0.5 }}>Faturamento</p>
-                <p style={{ color: '#4ade80', fontSize: 15, fontWeight: 800, margin: 0 }}>R$ {faturamento.toFixed(2).replace('.', ',')}</p>
+              <div style={{ background: 'var(--surface)', border: '1px solid var(--surface-secondary)', borderRadius: 14, padding: 14 }}>
+                <p style={{ color: 'var(--border-strong)', fontSize: 9, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 6px', letterSpacing: 0.5 }}>Faturamento</p>
+                <p style={{ color: 'var(--success)', fontSize: 15, fontWeight: 800, margin: 0 }}>R$ {faturamento.toFixed(2).replace('.', ',')}</p>
               </div>
-              <div style={{ background: '#111', border: '1px solid #1e1e1e', borderRadius: 14, padding: 14 }}>
-                <p style={{ color: '#555', fontSize: 9, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 6px', letterSpacing: 0.5 }}>Custos</p>
-                <p style={{ color: '#f87171', fontSize: 15, fontWeight: 800, margin: 0 }}>R$ {totalCustos.toFixed(2).replace('.', ',')}</p>
+              <div style={{ background: 'var(--surface)', border: '1px solid var(--surface-secondary)', borderRadius: 14, padding: 14 }}>
+                <p style={{ color: 'var(--border-strong)', fontSize: 9, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 6px', letterSpacing: 0.5 }}>Custos</p>
+                <p style={{ color: 'var(--danger)', fontSize: 15, fontWeight: 800, margin: 0 }}>R$ {totalCustos.toFixed(2).replace('.', ',')}</p>
               </div>
-              <div style={{ background: '#111', border: `1px solid ${lucro >= 0 ? '#16a34a30' : '#dc262630'}`, borderRadius: 14, padding: 14 }}>
-                <p style={{ color: '#555', fontSize: 9, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 6px', letterSpacing: 0.5 }}>Lucro</p>
-                <p style={{ color: lucro >= 0 ? '#4ade80' : '#f87171', fontSize: 15, fontWeight: 800, margin: 0 }}>R$ {lucro.toFixed(2).replace('.', ',')}</p>
+              <div style={{ background: 'var(--surface)', border: `1px solid ${lucro >= 0 ? 'color-mix(in srgb, var(--success) 19%, transparent)' : 'color-mix(in srgb, var(--danger) 19%, transparent)'}`, borderRadius: 14, padding: 14 }}>
+                <p style={{ color: 'var(--border-strong)', fontSize: 9, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 6px', letterSpacing: 0.5 }}>Lucro</p>
+                <p style={{ color: lucro >= 0 ? 'var(--success)' : 'var(--danger)', fontSize: 15, fontWeight: 800, margin: 0 }}>R$ {lucro.toFixed(2).replace('.', ',')}</p>
               </div>
             </div>
 
             {/* Por categoria */}
             {custosPorCategoria.length > 0 && (
-              <div style={{ background: '#111', border: '1px solid #1e1e1e', borderRadius: 14, padding: 16 }}>
-                <p style={{ color: '#555', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, margin: '0 0 12px' }}>Custos por categoria</p>
+              <div style={{ background: 'var(--surface)', border: '1px solid var(--surface-secondary)', borderRadius: 14, padding: 16 }}>
+                <p style={{ color: 'var(--border-strong)', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, margin: '0 0 12px' }}>Custos por categoria</p>
                 {custosPorCategoria.map(cat => (
                   <div key={cat.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                    <span style={{ color: '#e0e0e0', fontSize: 13 }}>{cat.label}</span>
+                    <span style={{ color: 'var(--foreground)', fontSize: 13 }}>{cat.label}</span>
                     <span style={{ color: cat.cor, fontSize: 13, fontWeight: 700 }}>R$ {cat.total.toFixed(2).replace('.', ',')}</span>
                   </div>
                 ))}
@@ -183,18 +183,18 @@ export default function ContadorPage() {
 
             {/* Lista de custos */}
             {custos.length > 0 && (
-              <div style={{ background: '#111', border: '1px solid #1e1e1e', borderRadius: 14, padding: 16 }}>
-                <p style={{ color: '#555', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, margin: '0 0 12px' }}>Todos os lançamentos</p>
+              <div style={{ background: 'var(--surface)', border: '1px solid var(--surface-secondary)', borderRadius: 14, padding: 16 }}>
+                <p style={{ color: 'var(--border-strong)', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, margin: '0 0 12px' }}>Todos os lançamentos</p>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                   {custos.slice().reverse().map(c => {
                     const cat = CATEGORIAS.find(cat => cat.key === c.categoria)
                     return (
-                      <div key={c.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#0d0d0d', borderRadius: 8, padding: '8px 12px' }}>
+                      <div key={c.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--surface)', borderRadius: 8, padding: '8px 12px' }}>
                         <div>
-                          <p style={{ color: '#e0e0e0', fontSize: 13, fontWeight: 600, margin: 0 }}>{c.descricao}</p>
-                          <p style={{ color: '#444', fontSize: 11, margin: '2px 0 0' }}>{cat?.label} · {c.data}</p>
+                          <p style={{ color: 'var(--foreground)', fontSize: 13, fontWeight: 600, margin: 0 }}>{c.descricao}</p>
+                          <p style={{ color: 'var(--border-strong)', fontSize: 11, margin: '2px 0 0' }}>{cat?.label} · {c.data}</p>
                         </div>
-                        <span style={{ color: '#f87171', fontSize: 13, fontWeight: 700 }}>R$ {c.valor.toFixed(2).replace('.', ',')}</span>
+                        <span style={{ color: 'var(--danger)', fontSize: 13, fontWeight: 700 }}>R$ {c.valor.toFixed(2).replace('.', ',')}</span>
                       </div>
                     )
                   })}
@@ -204,13 +204,13 @@ export default function ContadorPage() {
 
             {/* Botão fechar mês */}
             {!mesFechado ? (
-              <button onClick={fecharMes} disabled={fechandoMes} style={{ width: '100%', background: fechandoMes ? '#1a1a1a' : '#16a34a', border: 'none', borderRadius: 14, padding: '16px', color: '#fff', fontSize: 15, fontWeight: 700, cursor: fechandoMes ? 'not-allowed' : 'pointer' }}>
+              <button onClick={fecharMes} disabled={fechandoMes} style={{ width: '100%', background: fechandoMes ? 'var(--surface-secondary)' : 'var(--success)', border: 'none', borderRadius: 14, padding: '16px', color: 'var(--foreground)', fontSize: 15, fontWeight: 700, cursor: fechandoMes ? 'not-allowed' : 'pointer' }}>
                 {fechandoMes ? 'Fechando...' : `🔒 Fechar ${mesLabel}`}
               </button>
             ) : (
-              <div style={{ background: '#14532d20', border: '1px solid #16a34a30', borderRadius: 14, padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{ background: 'color-mix(in srgb, var(--success-soft) 13%, transparent)', border: '1px solid color-mix(in srgb, var(--success) 19%, transparent)', borderRadius: 14, padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 10 }}>
                 <span style={{ fontSize: 20 }}>🔒</span>
-                <p style={{ color: '#4ade80', fontSize: 13, fontWeight: 700, margin: 0 }}>Mês fechado — dados protegidos</p>
+                <p style={{ color: 'var(--success)', fontSize: 13, fontWeight: 700, margin: 0 }}>Mês fechado — dados protegidos</p>
               </div>
             )}
           </div>
@@ -222,18 +222,18 @@ export default function ContadorPage() {
             {mensagens.map((m, i) => (
               <div key={i} style={{ display: 'flex', justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start', animation: 'fadeIn 0.2s ease' }}>
                 {m.role === 'assistant' && (
-                  <div style={{ width: 28, height: 28, borderRadius: 8, background: '#1a3a1a', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, marginRight: 8, flexShrink: 0, marginTop: 2 }}>📊</div>
+                  <div style={{ width: 28, height: 28, borderRadius: 8, background: 'var(--success-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, marginRight: 8, flexShrink: 0, marginTop: 2 }}>📊</div>
                 )}
-                <div style={{ maxWidth: '80%', background: m.role === 'user' ? '#1a3a2a' : '#111', border: `1px solid ${m.role === 'user' ? '#16a34a30' : '#1e1e1e'}`, borderRadius: m.role === 'user' ? '18px 18px 4px 18px' : '18px 18px 18px 4px', padding: '12px 16px' }}>
-                  <p style={{ color: '#e0e0e0', fontSize: 14, margin: 0, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{m.content}</p>
+                <div style={{ maxWidth: '80%', background: m.role === 'user' ? 'var(--success-soft)' : 'var(--surface)', border: `1px solid ${m.role === 'user' ? 'color-mix(in srgb, var(--success) 19%, transparent)' : 'var(--surface-secondary)'}`, borderRadius: m.role === 'user' ? '18px 18px 4px 18px' : '18px 18px 18px 4px', padding: '12px 16px' }}>
+                  <p style={{ color: 'var(--foreground)', fontSize: 14, margin: 0, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{m.content}</p>
                 </div>
               </div>
             ))}
             {chatLoading && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <div style={{ width: 28, height: 28, borderRadius: 8, background: '#1a3a1a', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14 }}>📊</div>
-                <div style={{ background: '#111', border: '1px solid #1e1e1e', borderRadius: '18px 18px 18px 4px', padding: '12px 16px' }}>
-                  <p style={{ color: '#444', fontSize: 14, margin: 0 }}>Analisando...</p>
+                <div style={{ width: 28, height: 28, borderRadius: 8, background: 'var(--success-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14 }}>📊</div>
+                <div style={{ background: 'var(--surface)', border: '1px solid var(--surface-secondary)', borderRadius: '18px 18px 18px 4px', padding: '12px 16px' }}>
+                  <p style={{ color: 'var(--border-strong)', fontSize: 14, margin: 0 }}>Analisando...</p>
                 </div>
               </div>
             )}
@@ -244,10 +244,10 @@ export default function ContadorPage() {
 
       {/* Input chat */}
       {aba === 'chat' && (
-        <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: '#0d0d0d', borderTop: '1px solid #1a1a1a', padding: '12px 16px' }}>
+        <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: 'var(--surface)', borderTop: '1px solid var(--surface-secondary)', padding: '12px 16px' }}>
           <div style={{ display: 'flex', gap: 8 }}>
             <input value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && !e.shiftKey && enviarChat()} placeholder="Pergunte algo sobre os dados..." style={{ ...inp, flex: 1 }} />
-            <button onClick={enviarChat} disabled={chatLoading || !input.trim()} style={{ background: chatLoading ? '#1a1a1a' : '#16a34a', border: 'none', color: '#fff', borderRadius: 12, padding: '12px 20px', cursor: chatLoading ? 'not-allowed' : 'pointer', fontSize: 14, fontWeight: 700 }}>
+            <button onClick={enviarChat} disabled={chatLoading || !input.trim()} style={{ background: chatLoading ? 'var(--surface-secondary)' : 'var(--success)', border: 'none', color: 'var(--foreground)', borderRadius: 12, padding: '12px 20px', cursor: chatLoading ? 'not-allowed' : 'pointer', fontSize: 14, fontWeight: 700 }}>
               {chatLoading ? '...' : '➤'}
             </button>
           </div>

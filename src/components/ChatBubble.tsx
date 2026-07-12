@@ -20,7 +20,7 @@ export default function ChatBubble({ message, sender, timestamp }: ChatBubblePro
     <div className={`flex ${isCustomer ? "justify-end" : "justify-start"} mb-1 px-2`}>
       <div
         style={{
-          backgroundColor: isCustomer ? "#DCF8C6" : "#FFFFFF",
+          backgroundColor: isCustomer ? "var(--success)" : "var(--foreground)",
           maxWidth: "75%",
           borderRadius: isCustomer ? "12px 0px 12px 12px" : "0px 12px 12px 12px",
           padding: "6px 10px 4px 10px",
@@ -28,13 +28,13 @@ export default function ChatBubble({ message, sender, timestamp }: ChatBubblePro
         }}
       >
         <p
-          style={{ fontSize: "14px", color: "#111", margin: 0, lineHeight: "19px", whiteSpace: "pre-wrap" }}
+          style={{ fontSize: "14px", color: "var(--surface)", margin: 0, lineHeight: "19px", whiteSpace: "pre-wrap" }}
           dangerouslySetInnerHTML={{ __html: formatMessage(message) }}
         />
         <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: "3px", marginTop: "2px" }}>
-          <span style={{ fontSize: "11px", color: "#888", lineHeight: 1 }}>{time}</span>
+          <span style={{ fontSize: "11px", color: "var(--foreground-secondary)", lineHeight: 1 }}>{time}</span>
           {isCustomer && (
-            <span style={{ color: "#53bdeb", fontSize: "13px", lineHeight: 1 }}>✓✓</span>
+            <span style={{ color: "var(--info)", fontSize: "13px", lineHeight: 1 }}>✓✓</span>
           )}
         </div>
       </div>

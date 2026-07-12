@@ -78,8 +78,8 @@ export default function SobrePage() {
         html { scroll-behavior: smooth; }
 
         body {
-          background: #060606;
-          color: #f4f1ec;
+          background: var(--background);
+          color: var(--foreground);
           font-family: 'Archivo', sans-serif;
           -webkit-font-smoothing: antialiased;
         }
@@ -107,10 +107,10 @@ export default function SobrePage() {
           position: sticky;
           top: 0;
           z-index: 100;
-          background: rgba(6,6,6,0.88);
+          background: color-mix(in srgb, var(--background) 88%, transparent);
           backdrop-filter: blur(16px);
           -webkit-backdrop-filter: blur(16px);
-          border-bottom: 1px solid #161616;
+          border-bottom: 1px solid var(--surface);
           padding-top: env(safe-area-inset-top);
         }
         .header-inner {
@@ -130,7 +130,7 @@ export default function SobrePage() {
         .header-pizza {
           width: 36px;
           height: 36px;
-          background: linear-gradient(145deg, #ff7a1a, #ff5500);
+          background: linear-gradient(145deg, var(--primary), var(--primary));
           border-radius: 10px;
           display: flex;
           align-items: center;
@@ -143,22 +143,22 @@ export default function SobrePage() {
           font-family: 'Archivo Black', 'Archivo', sans-serif;
           font-size: 20px;
           font-weight: 900;
-          color: #f4f1ec;
+          color: var(--foreground);
           letter-spacing: -0.5px;
         }
         .header-login {
-          color: #a39b8b;
+          color: var(--foreground-secondary);
           font-size: 14px;
           font-weight: 600;
           text-decoration: none;
           padding: 8px 16px;
-          border: 1px solid #222;
+          border: 1px solid var(--surface-secondary);
           border-radius: 10px;
           transition: color 0.15s, border-color 0.15s;
           white-space: nowrap;
           flex-shrink: 0;
         }
-        .header-login:hover { color: #f4f1ec; border-color: #3a3730; }
+        .header-login:hover { color: var(--foreground); border-color: var(--border-strong); }
 
         /* ── Hero ────────────────────────────────────── */
         .hero {
@@ -166,20 +166,20 @@ export default function SobrePage() {
           text-align: center;
           background-image:
             radial-gradient(ellipse 80% 55% at 50% -5%,
-              rgba(255,107,0,0.10) 0%, transparent 65%);
+              color-mix(in srgb, var(--primary) 10%, transparent) 0%, transparent 65%);
           animation: fadeUp 0.55s cubic-bezier(0.22,1,0.36,1) both;
         }
         .hero-badge {
           display: inline-flex;
           align-items: center;
           gap: 7px;
-          background: rgba(255,107,0,0.1);
-          border: 1px solid rgba(255,107,0,0.22);
+          background: color-mix(in srgb, var(--primary) 10%, transparent);
+          border: 1px solid color-mix(in srgb, var(--primary) 22%, transparent);
           border-radius: 100px;
           padding: 5px 14px 5px 10px;
           font-size: 12px;
           font-weight: 700;
-          color: #ff6b00;
+          color: var(--brand-text);
           letter-spacing: 0.4px;
           text-transform: uppercase;
           margin-bottom: 28px;
@@ -187,7 +187,7 @@ export default function SobrePage() {
         .hero-badge-dot {
           width: 7px;
           height: 7px;
-          background: #ff6b00;
+          background: var(--primary);
           border-radius: 50%;
           animation: float 2s ease-in-out infinite;
           flex-shrink: 0;
@@ -196,7 +196,7 @@ export default function SobrePage() {
           font-family: 'Archivo Black', 'Archivo', sans-serif;
           font-size: clamp(32px, 7vw, 62px);
           font-weight: 900;
-          color: #ffffff;
+          color: var(--foreground);
           letter-spacing: -2px;
           line-height: 1.08;
           margin-bottom: 22px;
@@ -204,9 +204,9 @@ export default function SobrePage() {
           margin-left: auto;
           margin-right: auto;
         }
-        .hero-h1 span { color: #ff6b00; }
+        .hero-h1 span { color: var(--brand-text); }
         .hero-sub {
-          color: #a39b8b;
+          color: var(--foreground-secondary);
           font-size: clamp(15px, 3vw, 18px);
           font-weight: 400;
           line-height: 1.65;
@@ -220,22 +220,22 @@ export default function SobrePage() {
           gap: 9px;
           height: 58px;
           padding: 0 36px;
-          background: linear-gradient(135deg, #ff7a1a 0%, #ff5500 100%);
-          color: #fff;
+          background: linear-gradient(135deg, var(--primary) 0%, var(--primary) 100%);
+          color: var(--foreground);
           font-family: 'Archivo', sans-serif;
           font-size: 16px;
           font-weight: 800;
           letter-spacing: -0.3px;
           border-radius: 16px;
           text-decoration: none;
-          box-shadow: 0 8px 32px rgba(255,107,0,0.4), 0 2px 8px rgba(255,107,0,0.2);
+          box-shadow: 0 8px 32px color-mix(in srgb, var(--primary) 40%, transparent), 0 2px 8px color-mix(in srgb, var(--primary) 20%, transparent);
           transition: opacity 0.18s, transform 0.15s, box-shadow 0.18s;
           -webkit-tap-highlight-color: transparent;
         }
         .hero-cta:hover {
           opacity: 0.9;
           transform: translateY(-2px);
-          box-shadow: 0 12px 40px rgba(255,107,0,0.52), 0 4px 12px rgba(255,107,0,0.28);
+          box-shadow: 0 12px 40px color-mix(in srgb, var(--primary) 52%, transparent), 0 4px 12px color-mix(in srgb, var(--primary) 28%, transparent);
         }
         .hero-cta:active { transform: scale(0.97); opacity: 1; }
         .hero-stats {
@@ -255,25 +255,25 @@ export default function SobrePage() {
           font-family: 'Archivo Black', 'Archivo', sans-serif;
           font-size: 22px;
           font-weight: 900;
-          color: #f4f1ec;
+          color: var(--foreground);
           letter-spacing: -0.8px;
         }
         .hero-stat-l {
           font-size: 12px;
-          color: #5a5450;
+          color: var(--border-strong);
           font-weight: 500;
           margin-top: 2px;
         }
         .hero-divider {
           width: 1px;
           height: 32px;
-          background: #1f1d1a;
+          background: var(--border);
         }
 
         /* ── Divider line ────────────────────────────── */
         .section-divider {
           height: 1px;
-          background: linear-gradient(90deg, transparent, #1f1d1a 20%, #1f1d1a 80%, transparent);
+          background: linear-gradient(90deg, transparent, var(--border) 20%, var(--border) 80%, transparent);
           margin: 0 24px;
         }
 
@@ -286,7 +286,7 @@ export default function SobrePage() {
           font-weight: 700;
           letter-spacing: 2px;
           text-transform: uppercase;
-          color: #ff6b00;
+          color: var(--brand-text);
           margin-bottom: 14px;
           opacity: 0.85;
         }
@@ -294,7 +294,7 @@ export default function SobrePage() {
           font-family: 'Archivo Black', 'Archivo', sans-serif;
           font-size: clamp(26px, 5vw, 40px);
           font-weight: 900;
-          color: #ffffff;
+          color: var(--foreground);
           letter-spacing: -1.2px;
           line-height: 1.1;
           margin-bottom: 48px;
@@ -306,21 +306,21 @@ export default function SobrePage() {
           gap: 16px;
         }
         .feat-card {
-          background: #0e0e0e;
-          border: 1px solid #1c1c1c;
+          background: var(--surface);
+          border: 1px solid var(--surface);
           border-radius: 20px;
           padding: 28px 24px;
           transition: border-color 0.2s, transform 0.2s;
         }
         .feat-card:hover {
-          border-color: rgba(255,107,0,0.2);
+          border-color: color-mix(in srgb, var(--primary) 20%, transparent);
           transform: translateY(-2px);
         }
         .feat-icon {
           width: 52px;
           height: 52px;
-          background: rgba(255,107,0,0.1);
-          border: 1px solid rgba(255,107,0,0.15);
+          background: color-mix(in srgb, var(--primary) 10%, transparent);
+          border: 1px solid color-mix(in srgb, var(--primary) 15%, transparent);
           border-radius: 14px;
           display: flex;
           align-items: center;
@@ -333,13 +333,13 @@ export default function SobrePage() {
         .feat-title {
           font-size: 18px;
           font-weight: 800;
-          color: #f4f1ec;
+          color: var(--foreground);
           letter-spacing: -0.4px;
           margin-bottom: 10px;
         }
         .feat-desc {
           font-size: 14px;
-          color: #6b6259;
+          color: var(--foreground-muted);
           line-height: 1.65;
           font-weight: 400;
         }
@@ -349,7 +349,7 @@ export default function SobrePage() {
           padding: 80px 0;
           background-image:
             radial-gradient(ellipse 60% 40% at 50% 50%,
-              rgba(255,107,0,0.05) 0%, transparent 70%);
+              color-mix(in srgb, var(--primary) 5%, transparent) 0%, transparent 70%);
         }
         .steps {
           display: flex;
@@ -363,16 +363,16 @@ export default function SobrePage() {
           gap: 24px;
           align-items: flex-start;
           padding: 28px 0;
-          border-bottom: 1px solid #161616;
+          border-bottom: 1px solid var(--surface);
         }
         .step:last-child { border-bottom: none; }
         .step-num {
           font-family: 'Archivo Black', 'Archivo', sans-serif;
           font-size: 13px;
           font-weight: 900;
-          color: #ff6b00;
-          background: rgba(255,107,0,0.08);
-          border: 1px solid rgba(255,107,0,0.15);
+          color: var(--brand-text);
+          background: color-mix(in srgb, var(--primary) 8%, transparent);
+          border: 1px solid color-mix(in srgb, var(--primary) 15%, transparent);
           border-radius: 10px;
           width: 44px;
           height: 44px;
@@ -386,13 +386,13 @@ export default function SobrePage() {
         .step-title {
           font-size: 17px;
           font-weight: 800;
-          color: #f4f1ec;
+          color: var(--foreground);
           letter-spacing: -0.3px;
           margin-bottom: 8px;
         }
         .step-desc {
           font-size: 14px;
-          color: #6b6259;
+          color: var(--foreground-muted);
           line-height: 1.65;
         }
 
@@ -402,8 +402,8 @@ export default function SobrePage() {
           text-align: center;
         }
         .cta-card {
-          background: #0e0e0e;
-          border: 1px solid #1c1c1c;
+          background: var(--surface);
+          border: 1px solid var(--surface);
           border-radius: 28px;
           padding: 56px 32px;
           position: relative;
@@ -414,7 +414,7 @@ export default function SobrePage() {
           position: absolute;
           inset: 0;
           background: radial-gradient(ellipse 80% 70% at 50% 0%,
-            rgba(255,107,0,0.07) 0%, transparent 60%);
+            color-mix(in srgb, var(--primary) 7%, transparent) 0%, transparent 60%);
           pointer-events: none;
         }
         .cta-pizza {
@@ -428,14 +428,14 @@ export default function SobrePage() {
           font-family: 'Archivo Black', 'Archivo', sans-serif;
           font-size: clamp(26px, 5vw, 42px);
           font-weight: 900;
-          color: #ffffff;
+          color: var(--foreground);
           letter-spacing: -1.5px;
           line-height: 1.1;
           margin-bottom: 16px;
           position: relative;
         }
         .cta-sub {
-          color: #6b6259;
+          color: var(--foreground-muted);
           font-size: 15px;
           line-height: 1.65;
           margin-bottom: 36px;
@@ -451,15 +451,15 @@ export default function SobrePage() {
           gap: 9px;
           height: 58px;
           padding: 0 36px;
-          background: linear-gradient(135deg, #ff7a1a 0%, #ff5500 100%);
-          color: #fff;
+          background: linear-gradient(135deg, var(--primary) 0%, var(--primary) 100%);
+          color: var(--foreground);
           font-family: 'Archivo', sans-serif;
           font-size: 16px;
           font-weight: 800;
           letter-spacing: -0.3px;
           border-radius: 16px;
           text-decoration: none;
-          box-shadow: 0 8px 32px rgba(255,107,0,0.4), 0 2px 8px rgba(255,107,0,0.2);
+          box-shadow: 0 8px 32px color-mix(in srgb, var(--primary) 40%, transparent), 0 2px 8px color-mix(in srgb, var(--primary) 20%, transparent);
           transition: opacity 0.18s, transform 0.15s, box-shadow 0.18s;
           position: relative;
           -webkit-tap-highlight-color: transparent;
@@ -467,31 +467,31 @@ export default function SobrePage() {
         .cta-btn:hover {
           opacity: 0.9;
           transform: translateY(-2px);
-          box-shadow: 0 12px 40px rgba(255,107,0,0.52), 0 4px 12px rgba(255,107,0,0.28);
+          box-shadow: 0 12px 40px color-mix(in srgb, var(--primary) 52%, transparent), 0 4px 12px color-mix(in srgb, var(--primary) 28%, transparent);
         }
         .cta-btn:active { transform: scale(0.97); opacity: 1; }
         .cta-note {
           margin-top: 18px;
           font-size: 12px;
-          color: #3a3830;
+          color: var(--border-strong);
           position: relative;
         }
 
         /* ── Footer ──────────────────────────────────── */
         .site-footer {
-          border-top: 1px solid #161616;
+          border-top: 1px solid var(--surface);
           padding: 28px 0;
           text-align: center;
         }
         .footer-text {
           font-size: 12px;
-          color: #2a2826;
+          color: var(--surface-secondary);
         }
         .footer-text a {
-          color: #3a3830;
+          color: var(--border-strong);
           text-decoration: none;
         }
-        .footer-text a:hover { color: #5a5450; }
+        .footer-text a:hover { color: var(--border-strong); }
 
         /* ── Testimonials ───────────────────────────── */
         .testimonials {
@@ -503,8 +503,8 @@ export default function SobrePage() {
           gap: 16px;
         }
         .testi-card {
-          background: #0e0e0e;
-          border: 1px solid rgba(255,107,0,0.12);
+          background: var(--surface);
+          border: 1px solid color-mix(in srgb, var(--primary) 12%, transparent);
           border-radius: 20px;
           padding: 28px 24px;
           display: flex;
@@ -513,18 +513,18 @@ export default function SobrePage() {
           transition: border-color 0.2s, transform 0.2s;
         }
         .testi-card:hover {
-          border-color: rgba(255,107,0,0.28);
+          border-color: color-mix(in srgb, var(--primary) 28%, transparent);
           transform: translateY(-2px);
         }
         .testi-stars {
-          color: #ff6b00;
+          color: var(--brand-text);
           font-size: 14px;
           letter-spacing: 3px;
           margin-bottom: 16px;
         }
         .testi-text {
           font-size: 15px;
-          color: #c9c2b4;
+          color: var(--foreground-secondary);
           line-height: 1.72;
           font-weight: 400;
           flex: 1;
@@ -537,33 +537,33 @@ export default function SobrePage() {
           align-items: center;
           gap: 12px;
           padding-top: 20px;
-          border-top: 1px solid #161616;
+          border-top: 1px solid var(--surface);
         }
         .testi-avatar {
           width: 42px;
           height: 42px;
           border-radius: 12px;
-          background: linear-gradient(135deg, #ff7a1a, #ff5500);
+          background: linear-gradient(135deg, var(--primary), var(--primary));
           display: flex;
           align-items: center;
           justify-content: center;
           font-family: 'Archivo Black', 'Archivo', sans-serif;
           font-size: 17px;
           font-weight: 900;
-          color: #fff;
+          color: var(--foreground);
           flex-shrink: 0;
           user-select: none;
         }
         .testi-name {
           font-size: 14px;
           font-weight: 700;
-          color: #f4f1ec;
+          color: var(--foreground);
           letter-spacing: -0.2px;
           margin-bottom: 3px;
         }
         .testi-place {
           font-size: 12px;
-          color: #5a5450;
+          color: var(--border-strong);
           font-weight: 400;
         }
 

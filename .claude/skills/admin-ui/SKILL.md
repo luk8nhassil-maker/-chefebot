@@ -41,25 +41,31 @@ Toda tela do painel usa `src/components/PanelShell.tsx` como casca:
 - Cards de acesso rápido / navegação secundária: mesma lógica — linha horizontal de 4 no desktop, grid 2×2 no mobile.
 - Áreas com conteúdo desigual (ex.: gráfico + ranking) viram 2 colunas no desktop (`1.4fr 1fr` ou similar) e empilham no mobile.
 
-## Cores e tipografia (tema fixo do painel — não é adaptativo a light/dark do host)
+## Cores e tipografia (tokens semânticos — adaptativo Light/Dark)
 
-| Papel | Valor |
+**A cor do painel agora vem de tokens da Skill [[chefebot-theme]]** (`src/app/globals.css`).
+O painel deixou de ser tema fixo escuro: usa o sistema oficial Light (padrão) / Dark.
+Nunca hardcode hex — sempre `var(--token)`.
+
+| Papel | Token |
 |---|---|
-| Fundo página | `#060606` |
-| Fundo card | `#101010` / gradiente `#101010→#0d0d0d` |
-| Borda padrão | `#1f1d1a` |
-| Texto principal | `#f4f1ec` |
-| Texto secundário/muted | `#a39b8b` / `#6b665c` |
-| Texto hint | `#4a4640` |
-| Acento primário | `#ff6b00` (laranja da marca) |
-| Sucesso | `#4ade80` / WhatsApp `#25d366` |
-| Atenção | `#fbbf24` |
-| Urgente/erro | `#e05050` / `#f87171` |
-| Info secundária | `#3b82f6` (azul), `#8b5cf6` (roxo) — usar só para diferenciar categorias de card de acesso rápido, não como cor de estado |
+| Fundo página | `var(--background)` |
+| Fundo card | `var(--surface)` |
+| Borda padrão | `var(--border)` |
+| Texto principal | `var(--foreground)` |
+| Texto secundário/muted | `var(--foreground-secondary)` / `var(--foreground-muted)` |
+| Acento primário (marca) | `var(--primary)` (amarelo `#FFCD00`) — texto sobre ele `var(--primary-foreground)` |
+| Texto/ícone com cor de marca | `var(--primary-text)` (nunca `--primary` puro como texto claro) |
+| Sucesso | `var(--success)` / WhatsApp `var(--whatsapp)` |
+| Pendente/atenção | `var(--attention)` (**roxo**, nunca amarelo) |
+| Urgente/erro | `var(--danger)` |
+| Info | `var(--info)` |
 
+- **O acento de marca mudou de laranja `#ff6b00` para amarelo `#FFCD00`.** Detalhes e regras
+  completas (hierarquia de ações, badges, botões, contraste) em [[chefebot-theme]].
 - Fonte: `'Archivo', sans-serif` em todo o painel.
 - Título de página: 18–20px / 700. Rótulo de métrica: 10px uppercase / 700 / letter-spacing. Valor de métrica: 22–30px / 800.
-- Não introduzir nova paleta por tela — todo card novo reaproveita esta tabela.
+- Não introduzir nova paleta por tela — todo card novo reaproveita estes tokens.
 
 ## Formulários (telas tipo /configuracoes)
 
@@ -79,7 +85,7 @@ Ao desenhar uma tela nova do painel, cobrir pelo menos:
 
 ## Acessibilidade e interação
 
-- Item ativo da sidebar/nav: cor de acento + fundo `rgba(255,107,0,.08)` — nunca depender só de cor sem mudança de peso/fundo.
+- Item ativo da sidebar/nav: fundo `var(--primary-soft)` + texto escuro (`var(--foreground)`) — nunca depender só de cor sem mudança de peso/fundo, e nunca texto amarelo.
 - Áreas clicáveis (cards de navegação) devem ser `<button>`, não `<div onClick>`.
 - Ícones decorativos não carregam texto alternativo obrigatório; ícones que são o único conteúdo de um botão precisam de `aria-label` ou texto visível ao lado (o padrão atual sempre acompanha o ícone de um label em texto — manter).
 

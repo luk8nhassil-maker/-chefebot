@@ -115,7 +115,7 @@ export default function TourGuiado({ passos, storageKey, onClose }: Props) {
   function confete() {
     const container = containerRef.current
     if (!container) return
-    const cols = ['#ff6b00','#ffd700','#4ade80','#60a5fa','#ec4899','#f87171','#fff']
+    const cols = ['var(--primary)','var(--primary)','var(--success)','var(--info)','var(--attention)','var(--danger)','var(--foreground)']
     for (let i = 0; i < 50; i++) {
       const c = document.createElement('div')
       const sz = 4 + Math.random() * 8
@@ -223,13 +223,13 @@ export default function TourGuiado({ passos, storageKey, onClose }: Props) {
 
       {/* Arrow */}
       {arrowRect && (
-        <div style={{ position: 'absolute', top: arrowRect.top - 36, left: arrowRect.left + arrowRect.w/2 - 12, fontSize: 24, zIndex: 202, pointerEvents: 'none', animation: 'arrowFloat 0.9s ease-in-out infinite', filter: 'drop-shadow(0 4px 12px rgba(255,107,0,0.8))' }}>👇</div>
+        <div style={{ position: 'absolute', top: arrowRect.top - 36, left: arrowRect.left + arrowRect.w/2 - 12, fontSize: 24, zIndex: 202, pointerEvents: 'none', animation: 'arrowFloat 0.9s ease-in-out infinite', filter: 'drop-shadow(0 4px 12px color-mix(in srgb, var(--primary) 80%, transparent))' }}>👇</div>
       )}
 
       {/* Circular progress */}
       <div style={{ position: 'absolute', top: 12, right: 12, zIndex: 216 }}>
         <svg width="36" height="36" viewBox="0 0 36 36" style={{ transform: 'rotate(-90deg)' }}>
-          <circle cx="18" cy="18" r="14" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={3} />
+          <circle cx="18" cy="18" r="14" fill="none" stroke="rgba(var(--overlay-rgb), 0.06)" strokeWidth={3} />
           <circle cx="18" cy="18" r="14" fill="none" stroke={s.accent} strokeWidth={3} strokeLinecap="round" strokeDasharray={circumference} strokeDashoffset={dashOffset} style={{ transition: 'stroke-dashoffset 0.7s cubic-bezier(0.34,1.56,0.64,1), stroke 0.4s' }} />
         </svg>
         <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 800, color: s.accent }}>{cur+1}/{passos.length}</div>
@@ -244,16 +244,16 @@ export default function TourGuiado({ passos, storageKey, onClose }: Props) {
         {/* Step pips */}
         <div style={{ display: 'flex', gap: 4, marginBottom: 10 }}>
           {passos.map((_, idx) => (
-            <div key={idx} style={{ height: 4, borderRadius: 2, flex: idx === cur ? 2.5 : 1, background: idx < cur ? 'rgba(255,255,255,0.25)' : idx === cur ? s.accent : 'rgba(255,255,255,0.08)', transition: 'all 0.4s cubic-bezier(0.34,1.56,0.64,1)' }} />
+            <div key={idx} style={{ height: 4, borderRadius: 2, flex: idx === cur ? 2.5 : 1, background: idx < cur ? 'rgba(var(--overlay-rgb), 0.25)' : idx === cur ? s.accent : 'rgba(var(--overlay-rgb), 0.08)', transition: 'all 0.4s cubic-bezier(0.34,1.56,0.64,1)' }} />
           ))}
         </div>
 
         {/* Swipe hint */}
         {cur === 0 && (
           <div style={{ textAlign: 'center', marginBottom: 10 }}>
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 20, padding: '3px 10px', animation: 'swipeHint 1.6s ease-in-out infinite' }}>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'rgba(var(--overlay-rgb), 0.04)', border: '1px solid rgba(var(--overlay-rgb), 0.07)', borderRadius: 20, padding: '3px 10px', animation: 'swipeHint 1.6s ease-in-out infinite' }}>
               <span style={{ fontSize: 13 }}>👉</span>
-              <span style={{ color: 'rgba(255,255,255,0.3)', fontSize: 10, fontWeight: 600 }}>Deslize para avancar</span>
+              <span style={{ color: 'rgba(var(--overlay-rgb), 0.3)', fontSize: 10, fontWeight: 600 }}>Deslize para avancar</span>
             </div>
           </div>
         )}
@@ -273,16 +273,16 @@ export default function TourGuiado({ passos, storageKey, onClose }: Props) {
 
           {/* Balao */}
           <div style={{ flex: 1 }}>
-            <div style={{ background: '#fff', borderRadius: '4px 16px 16px 16px', padding: '11px 13px 10px', position: 'relative', boxShadow: '0 8px 28px rgba(0,0,0,0.6)' }}>
+            <div style={{ background: 'var(--foreground)', borderRadius: '4px 16px 16px 16px', padding: '11px 13px 10px', position: 'relative', boxShadow: '0 8px 28px rgba(0,0,0,0.6)' }}>
               {/* Triangle */}
-              <div style={{ position: 'absolute', left: -8, bottom: 12, width: 0, height: 0, borderTop: '5px solid transparent', borderBottom: '5px solid transparent', borderRight: `9px solid #fff` }} />
+              <div style={{ position: 'absolute', left: -8, bottom: 12, width: 0, height: 0, borderTop: '5px solid transparent', borderBottom: '5px solid transparent', borderRight: `9px solid var(--foreground)` }} />
               {/* Accent bar */}
               <div style={{ height: 3, background: s.accent, borderRadius: '4px 16px 0 0', margin: '-11px -13px 8px', transition: 'background 0.3s' }} />
               {/* Tag */}
               <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 9, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.5, padding: '2px 7px', borderRadius: 20, marginBottom: 5, background: s.tagBg, color: s.tagColor, transition: 'all 0.3s' }}>{s.tag}</div>
-              <div style={{ fontSize: 13, fontWeight: 800, color: '#111', lineHeight: 1.2, marginBottom: 3 }}>{s.title}</div>
-              <div style={{ fontSize: 11, color: '#666', lineHeight: 1.45, minHeight: 48, wordBreak: 'break-word', overflowWrap: 'break-word' }}>
-                <span ref={typingRef}></span>{isMouthing && <span style={{ display: 'inline-block', width: 2, height: 11, background: '#ccc', marginLeft: 1, verticalAlign: 'middle', animation: 'arrowFloat 0.7s step-end infinite' }} />}
+              <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--surface)', lineHeight: 1.2, marginBottom: 3 }}>{s.title}</div>
+              <div style={{ fontSize: 11, color: 'var(--foreground-muted)', lineHeight: 1.45, minHeight: 48, wordBreak: 'break-word', overflowWrap: 'break-word' }}>
+                <span ref={typingRef}></span>{isMouthing && <span style={{ display: 'inline-block', width: 2, height: 11, background: 'var(--foreground)', marginLeft: 1, verticalAlign: 'middle', animation: 'arrowFloat 0.7s step-end infinite' }} />}
               </div>
             </div>
           </div>
@@ -290,16 +290,16 @@ export default function TourGuiado({ passos, storageKey, onClose }: Props) {
 
         {/* Botoes */}
         <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={() => { clearParticles(); onClose() }} style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.09)', color: 'rgba(255,255,255,0.3)', borderRadius: 12, padding: '10px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}>Pular</button>
-          <button onClick={advance} style={{ flex: 1, border: 'none', borderRadius: 12, padding: '11px', fontSize: 13, fontWeight: 800, cursor: 'pointer', color: '#fff', background: s.nextBg, boxShadow: `0 4px 20px ${s.accent}50`, transition: 'all 0.2s' }}>{s.nextLabel}</button>
+          <button onClick={() => { clearParticles(); onClose() }} style={{ background: 'rgba(var(--overlay-rgb), 0.06)', border: '1px solid rgba(var(--overlay-rgb), 0.09)', color: 'rgba(var(--overlay-rgb), 0.3)', borderRadius: 12, padding: '10px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}>Pular</button>
+          <button onClick={advance} style={{ flex: 1, border: 'none', borderRadius: 12, padding: '11px', fontSize: 13, fontWeight: 800, cursor: 'pointer', color: s.nextBg.includes('--primary') ? 'var(--primary-foreground)' : 'var(--foreground)', background: s.nextBg, boxShadow: `0 4px 20px color-mix(in srgb, ${s.accent} 31%, transparent)`, transition: 'all 0.2s' }}>{s.nextLabel}</button>
         </div>
 
         {s.showDismiss && (
           <div onClick={() => setDismissed(!dismissed)} style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 7, cursor: 'pointer' }}>
-            <div style={{ width: 16, height: 16, borderRadius: 4, border: `1.5px solid ${dismissed ? s.accent : 'rgba(255,255,255,0.15)'}`, background: dismissed ? s.accent : 'rgba(255,255,255,0.04)', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s' }}>
-              {dismissed && <span style={{ color: '#fff', fontSize: 10, fontWeight: 800 }}>✓</span>}
+            <div style={{ width: 16, height: 16, borderRadius: 4, border: `1.5px solid ${dismissed ? s.accent : 'rgba(var(--overlay-rgb), 0.15)'}`, background: dismissed ? s.accent : 'rgba(var(--overlay-rgb), 0.04)', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s' }}>
+              {dismissed && <span style={{ color: 'var(--foreground)', fontSize: 10, fontWeight: 800 }}>✓</span>}
             </div>
-            <span style={{ color: 'rgba(255,255,255,0.25)', fontSize: 10.5 }}>Nao mostrar mais esse tutorial</span>
+            <span style={{ color: 'rgba(var(--overlay-rgb), 0.25)', fontSize: 10.5 }}>Nao mostrar mais esse tutorial</span>
           </div>
         )}
       </div>

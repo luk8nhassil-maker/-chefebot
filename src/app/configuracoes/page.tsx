@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import PanelShell from '@/components/PanelShell'
+import ThemeToggle from '@/components/ThemeToggle'
 
 type Config = {
   nomePizzaria: string
@@ -74,17 +75,17 @@ function getUserRole(): string | null {
 }
 
 const FONT = "'Archivo', sans-serif"
-const BG = '#060606'
-const CARD_BG = '#101010'
-const BORDER = '1px solid #1f1d1a'
-const TEXT = '#f4f1ec'
-const TEXT2 = '#a39b8b'
-const ACCENT = '#ff6b00'
+const BG = 'var(--background)'
+const CARD_BG = 'var(--surface)'
+const BORDER = '1px solid var(--border)'
+const TEXT = 'var(--foreground)'
+const TEXT2 = 'var(--foreground-secondary)'
+const ACCENT = 'var(--primary)'
 
 const inputStyle: React.CSSProperties = {
   width: '100%',
-  background: '#1a1208',
-  border: '1px solid #2a2420',
+  background: 'var(--background)',
+  border: '1px solid var(--surface-secondary)',
   borderRadius: 10,
   padding: '13px 14px',
   color: TEXT,
@@ -106,9 +107,9 @@ const labelStyle: React.CSSProperties = {
 }
 
 const btnAdicionar: React.CSSProperties = {
-  background: '#e53e3e',
+  background: 'var(--danger)',
   border: 'none',
-  color: '#fff',
+  color: 'var(--foreground)',
   borderRadius: 8,
   padding: '13px 14px',
   cursor: 'pointer',
@@ -124,8 +125,8 @@ const tagStyle: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   gap: 6,
-  background: 'rgba(255,255,255,0.06)',
-  border: '1px solid #1f1d1a',
+  background: 'rgba(var(--overlay-rgb), 0.06)',
+  border: '1px solid var(--border)',
   borderRadius: 20,
   padding: '6px 12px',
   fontSize: 13,
@@ -137,7 +138,7 @@ const tagStyle: React.CSSProperties = {
 const btnRemoveTag: React.CSSProperties = {
   background: 'none',
   border: 'none',
-  color: '#f87171',
+  color: 'var(--danger)',
   cursor: 'pointer',
   fontSize: 16,
   padding: '0 2px',
@@ -153,7 +154,7 @@ const btnRemoveTag: React.CSSProperties = {
 const btnRemoveRow: React.CSSProperties = {
   background: 'none',
   border: 'none',
-  color: '#f87171',
+  color: 'var(--danger)',
   cursor: 'pointer',
   fontSize: 18,
   padding: '0 4px',
@@ -334,8 +335,8 @@ export default function ConfiguracoesPage() {
           position: 'sticky',
           top: 0,
           zIndex: 100,
-          background: '#0a0a0a',
-          borderBottom: '1px solid #1a1a1a',
+          background: 'var(--surface)',
+          borderBottom: '1px solid var(--surface-secondary)',
           paddingTop: 'calc(env(safe-area-inset-top) + 14px)',
           paddingBottom: 14,
           paddingLeft: 16,
@@ -344,7 +345,7 @@ export default function ConfiguracoesPage() {
           <div style={{ maxWidth: 680, display: 'flex', alignItems: 'center', gap: 12 }}>
             <button
               onClick={() => router.push('/admin')}
-              style={{ background: 'rgba(255,255,255,0.06)', border: BORDER, color: TEXT2, borderRadius: 10, padding: '10px 14px', cursor: 'pointer', fontSize: 14, minHeight: 48, fontFamily: FONT, fontWeight: 700, flexShrink: 0 }}
+              style={{ background: 'rgba(var(--overlay-rgb), 0.06)', border: BORDER, color: TEXT2, borderRadius: 10, padding: '10px 14px', cursor: 'pointer', fontSize: 14, minHeight: 48, fontFamily: FONT, fontWeight: 700, flexShrink: 0 }}
             >←</button>
             <div style={{ minWidth: 0, flex: 1 }}>
               <h1 style={{ color: TEXT, fontSize: 20, fontWeight: 900, margin: 0, letterSpacing: '-0.3px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Configurações</h1>
@@ -358,12 +359,12 @@ export default function ConfiguracoesPage() {
           <div style={{ maxWidth: 680 }}>
 
             {/* Abas */}
-            <div style={{ display: 'flex', gap: 6, marginBottom: 20, background: '#0d0d0d', border: BORDER, borderRadius: 12, padding: 4 }}>
+            <div style={{ display: 'flex', gap: 6, marginBottom: 20, background: 'var(--surface)', border: BORDER, borderRadius: 12, padding: 4 }}>
               {(['geral', 'cardapio'] as const).map(a => (
                 <button
                   key={a}
                   onClick={() => setAba(a)}
-                  style={{ flex: 1, padding: '10px 0', minHeight: 48, borderRadius: 9, border: 'none', cursor: 'pointer', fontWeight: 800, fontSize: 13, fontFamily: FONT, transition: 'all .15s', background: aba === a ? ACCENT : 'transparent', color: aba === a ? '#fff' : TEXT2 }}
+                  style={{ flex: 1, padding: '10px 0', minHeight: 48, borderRadius: 9, border: 'none', cursor: 'pointer', fontWeight: 800, fontSize: 13, fontFamily: FONT, transition: 'all .15s', background: aba === a ? ACCENT : 'transparent', color: aba === a ? 'var(--foreground)' : TEXT2 }}
                 >
                   {a === 'geral' ? '⚙️  Geral' : '🍕  Cardápio'}
                 </button>
@@ -373,6 +374,21 @@ export default function ConfiguracoesPage() {
             {/* ── ABA GERAL ── */}
             {aba === 'geral' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+
+                {/* Aparência (tema Light / Dark) */}
+                <SectionCard>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: -4 }}>
+                    <span style={{ fontSize: 16, flexShrink: 0 }}>🎨</span>
+                    <span style={{ fontSize: 13, fontWeight: 900, color: TEXT, textTransform: 'uppercase', letterSpacing: '0.8px' }}>Aparência</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+                    <div style={{ minWidth: 0 }}>
+                      <p style={{ color: TEXT, fontSize: 14, fontWeight: 700, margin: 0 }}>Tema do painel</p>
+                      <p style={{ color: TEXT2, fontSize: 12, fontWeight: 600, margin: '2px 0 0' }}>Claro é o padrão. Escuro fica salvo só neste dispositivo.</p>
+                    </div>
+                    <ThemeToggle />
+                  </div>
+                </SectionCard>
 
                 {/* Identidade */}
                 <SectionCard>
@@ -402,7 +418,7 @@ export default function ConfiguracoesPage() {
                         maxLength={15}
                       />
                     </div>
-                    <p style={{ color: '#56524b', fontSize: 11, fontWeight: 700, margin: '6px 0 0' }}>
+                    <p style={{ color: 'var(--foreground-muted)', fontSize: 11, fontWeight: 700, margin: '6px 0 0' }}>
                       Botão "Falar com a pizzaria" · inclua o código do país (55)
                     </p>
                   </FieldGroup>
@@ -417,7 +433,7 @@ export default function ConfiguracoesPage() {
                   <button
                     onClick={toggle24h}
                     disabled={salvando}
-                    style={{ width: '100%', background: is24h ? 'rgba(34,197,94,.1)' : 'rgba(255,255,255,.04)', border: `1.5px solid ${is24h ? 'rgba(34,197,94,.4)' : '#1f1d1a'}`, borderRadius: 12, padding: '13px 16px', color: is24h ? '#4ade80' : TEXT2, fontSize: 13, fontWeight: 800, cursor: salvando ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 48, fontFamily: FONT, letterSpacing: '-0.1px' }}
+                    style={{ width: '100%', background: is24h ? 'color-mix(in srgb, var(--success) 10%, transparent)' : 'rgba(var(--overlay-rgb), 0.04)', border: `1.5px solid ${is24h ? 'color-mix(in srgb, var(--success) 40%, transparent)' : 'var(--border)'}`, borderRadius: 12, padding: '13px 16px', color: is24h ? 'var(--success)' : TEXT2, fontSize: 13, fontWeight: 800, cursor: salvando ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 48, fontFamily: FONT, letterSpacing: '-0.1px' }}
                   >
                     <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {is24h ? '✅ Aberto 24h — toque para voltar ao normal' : '🕐 Ativar funcionamento 24 horas'}
@@ -440,7 +456,7 @@ export default function ConfiguracoesPage() {
                     <span style={{ fontSize: 16, flexShrink: 0 }}>🛵</span>
                     <span style={{ fontSize: 13, fontWeight: 900, color: TEXT, textTransform: 'uppercase', letterSpacing: '0.8px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Tempo Estimado de Entrega</span>
                   </div>
-                  <p style={{ color: '#56524b', fontSize: 11, fontWeight: 700, margin: '-10px 0 -4px' }}>
+                  <p style={{ color: 'var(--foreground-muted)', fontSize: 11, fontWeight: 700, margin: '-10px 0 -4px' }}>
                     O bot usa esse texto na confirmação do pedido
                   </p>
                   <FieldGroup label="Delivery 🛵">
@@ -464,9 +480,9 @@ export default function ConfiguracoesPage() {
                     />
                   </FieldGroup>
 
-                  <div style={{ background: 'rgba(255,107,0,.06)', border: '1px solid rgba(255,107,0,.2)', borderRadius: 12, padding: '12px 14px' }}>
+                  <div style={{ background: 'color-mix(in srgb, var(--primary) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--primary) 20%, transparent)', borderRadius: 12, padding: '12px 14px' }}>
                     <p style={{ color: TEXT2, fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.5px', margin: '0 0 6px' }}>Preview da mensagem</p>
-                    <p style={{ color: '#c9c2b4', fontSize: 13, fontWeight: 600, margin: 0, lineHeight: 1.5 }}>
+                    <p style={{ color: 'var(--foreground-secondary)', fontSize: 13, fontWeight: 600, margin: 0, lineHeight: 1.5 }}>
                       {"\"Pedido confirmado! 🎉 Sua pizza chega em "}<span style={{ color: ACCENT, fontWeight: 900 }}>{config.tempoEntregaDelivery}</span>{" 🛵\""}
                     </p>
                   </div>
@@ -474,11 +490,11 @@ export default function ConfiguracoesPage() {
 
                 {/* Pix + Admin */}
                 {isAdmin && (
-                  <SectionCard style={{ border: '1px solid rgba(255,200,0,0.15)', background: 'rgba(255,200,0,0.03)' }}>
+                  <SectionCard style={{ border: '1px solid color-mix(in srgb, var(--primary) 15%, transparent)', background: 'color-mix(in srgb, var(--primary) 3%, transparent)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: -4, flexWrap: 'wrap' }}>
                       <span style={{ fontSize: 16, flexShrink: 0 }}>💸</span>
-                      <span style={{ fontSize: 13, fontWeight: 900, color: 'rgba(255,220,100,0.9)', textTransform: 'uppercase', letterSpacing: '0.8px' }}>Pagamento</span>
-                      <span style={{ fontSize: 10, background: 'rgba(255,200,0,0.12)', color: 'rgba(255,220,100,0.8)', padding: '2px 8px', borderRadius: 20, fontWeight: 800, whiteSpace: 'nowrap' }}>Somente Admin</span>
+                      <span style={{ fontSize: 13, fontWeight: 900, color: 'color-mix(in srgb, var(--primary) 90%, transparent)', textTransform: 'uppercase', letterSpacing: '0.8px' }}>Pagamento</span>
+                      <span style={{ fontSize: 10, background: 'color-mix(in srgb, var(--primary) 12%, transparent)', color: 'color-mix(in srgb, var(--primary) 80%, transparent)', padding: '2px 8px', borderRadius: 20, fontWeight: 800, whiteSpace: 'nowrap' }}>Somente Admin</span>
                     </div>
                     <FieldGroup label="Chave Pix">
                       <input
@@ -486,7 +502,7 @@ export default function ConfiguracoesPage() {
                         placeholder="CPF, CNPJ, email ou telefone"
                         value={config.chavePix}
                         onChange={e => setConfig(prev => ({ ...prev, chavePix: e.target.value }))}
-                        style={{ ...inputStyle, border: '1px solid rgba(255,200,0,0.2)' }}
+                        style={{ ...inputStyle, border: '1px solid color-mix(in srgb, var(--primary) 20%, transparent)' }}
                       />
                     </FieldGroup>
                     <FieldGroup label="Nome do Titular Pix">
@@ -495,9 +511,9 @@ export default function ConfiguracoesPage() {
                         placeholder="Nome como aparece no Pix"
                         value={config.nomeTitularPix}
                         onChange={e => setConfig(prev => ({ ...prev, nomeTitularPix: e.target.value }))}
-                        style={{ ...inputStyle, border: '1px solid rgba(255,200,0,0.2)' }}
+                        style={{ ...inputStyle, border: '1px solid color-mix(in srgb, var(--primary) 20%, transparent)' }}
                       />
-                      <p style={{ color: '#56524b', fontSize: 11, fontWeight: 700, margin: '6px 0 0' }}>
+                      <p style={{ color: 'var(--foreground-muted)', fontSize: 11, fontWeight: 700, margin: '6px 0 0' }}>
                         Usado na validação automática do comprovante
                       </p>
                     </FieldGroup>
@@ -507,10 +523,10 @@ export default function ConfiguracoesPage() {
                         min={0}
                         value={config.limitePico}
                         onChange={e => setConfig(prev => ({ ...prev, limitePico: Number(e.target.value) }))}
-                        style={{ ...inputStyle, border: '1px solid rgba(255,200,0,0.2)' }}
+                        style={{ ...inputStyle, border: '1px solid color-mix(in srgb, var(--primary) 20%, transparent)' }}
                         placeholder="0 = sem limite"
                       />
-                      <p style={{ color: '#56524b', fontSize: 11, fontWeight: 700, margin: '6px 0 0' }}>
+                      <p style={{ color: 'var(--foreground-muted)', fontSize: 11, fontWeight: 700, margin: '6px 0 0' }}>
                         Acima desse número, o bot avisa sobre demora extra · 0 = desativado
                       </p>
                     </FieldGroup>
@@ -523,11 +539,11 @@ export default function ConfiguracoesPage() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: -4, flexWrap: 'wrap' }}>
                       <span style={{ fontSize: 16, flexShrink: 0 }}>🎁</span>
                       <span style={{ fontSize: 13, fontWeight: 900, color: TEXT, textTransform: 'uppercase', letterSpacing: '0.8px' }}>Fidelidade</span>
-                      <span style={{ fontSize: 10, background: 'rgba(255,200,0,0.12)', color: 'rgba(255,220,100,0.8)', padding: '2px 8px', borderRadius: 20, fontWeight: 800, whiteSpace: 'nowrap' }}>Somente Admin</span>
+                      <span style={{ fontSize: 10, background: 'color-mix(in srgb, var(--primary) 12%, transparent)', color: 'color-mix(in srgb, var(--primary) 80%, transparent)', padding: '2px 8px', borderRadius: 20, fontWeight: 800, whiteSpace: 'nowrap' }}>Somente Admin</span>
                     </div>
                     <button
                       onClick={() => setFidelidade(prev => ({ ...prev, ativo: !prev.ativo }))}
-                      style={{ width: '100%', background: fidelidade.ativo ? 'rgba(34,197,94,.1)' : 'rgba(255,255,255,.04)', border: `1.5px solid ${fidelidade.ativo ? 'rgba(34,197,94,.4)' : '#1f1d1a'}`, borderRadius: 12, padding: '13px 16px', color: fidelidade.ativo ? '#4ade80' : TEXT2, fontSize: 13, fontWeight: 800, cursor: 'pointer', minHeight: 48, fontFamily: FONT }}
+                      style={{ width: '100%', background: fidelidade.ativo ? 'color-mix(in srgb, var(--success) 10%, transparent)' : 'rgba(var(--overlay-rgb), 0.04)', border: `1.5px solid ${fidelidade.ativo ? 'color-mix(in srgb, var(--success) 40%, transparent)' : 'var(--border)'}`, borderRadius: 12, padding: '13px 16px', color: fidelidade.ativo ? 'var(--success)' : TEXT2, fontSize: 13, fontWeight: 800, cursor: 'pointer', minHeight: 48, fontFamily: FONT }}
                     >
                       {fidelidade.ativo ? '✅ Fidelidade ativa — toque para desativar' : '⭕ Fidelidade desativada — toque para ativar'}
                     </button>
@@ -574,12 +590,12 @@ export default function ConfiguracoesPage() {
                     <button
                       onClick={salvarFidelidade}
                       disabled={salvandoFidelidade}
-                      style={{ width: '100%', height: 48, background: salvandoFidelidade ? '#1a1208' : `linear-gradient(180deg, ${ACCENT}, #d95e00)`, border: 'none', borderRadius: 12, color: '#fff', fontSize: 14, fontWeight: 900, cursor: salvandoFidelidade ? 'not-allowed' : 'pointer', fontFamily: FONT, opacity: salvandoFidelidade ? 0.6 : 1 }}
+                      style={{ width: '100%', height: 48, background: salvandoFidelidade ? 'var(--background)' : `linear-gradient(180deg, ${ACCENT}, var(--primary))`, border: 'none', borderRadius: 12, color: 'var(--primary-foreground)', fontSize: 14, fontWeight: 900, cursor: salvandoFidelidade ? 'not-allowed' : 'pointer', fontFamily: FONT, opacity: salvandoFidelidade ? 0.6 : 1 }}
                     >
                       {salvandoFidelidade ? 'Salvando...' : 'Salvar Fidelidade'}
                     </button>
                     {mensagemFidelidade && (
-                      <p style={{ textAlign: 'center', color: mensagemFidelidade.includes('✅') ? '#4ade80' : '#f87171', fontWeight: 800, fontSize: 13, margin: 0 }}>{mensagemFidelidade}</p>
+                      <p style={{ textAlign: 'center', color: mensagemFidelidade.includes('✅') ? 'var(--success)' : 'var(--danger)', fontWeight: 800, fontSize: 13, margin: 0 }}>{mensagemFidelidade}</p>
                     )}
                   </SectionCard>
                 )}
@@ -587,14 +603,14 @@ export default function ConfiguracoesPage() {
                 <button
                   onClick={salvar}
                   disabled={salvando}
-                  style={{ width: '100%', height: 56, background: salvando ? '#1a1208' : `linear-gradient(180deg, ${ACCENT}, #d95e00)`, border: 'none', borderRadius: 14, color: '#fff', fontSize: 16, fontWeight: 900, cursor: salvando ? 'not-allowed' : 'pointer', fontFamily: FONT, letterSpacing: '-0.2px', opacity: salvando ? 0.6 : 1 }}
+                  style={{ width: '100%', height: 56, background: salvando ? 'var(--background)' : `linear-gradient(180deg, ${ACCENT}, var(--primary))`, border: 'none', borderRadius: 14, color: 'var(--primary-foreground)', fontSize: 16, fontWeight: 900, cursor: salvando ? 'not-allowed' : 'pointer', fontFamily: FONT, letterSpacing: '-0.2px', opacity: salvando ? 0.6 : 1 }}
                 >
                   {salvando ? 'Salvando...' : 'Salvar Configurações'}
                 </button>
 
                 {mensagem && (
-                  <div style={{ textAlign: 'center', padding: '12px 16px', background: mensagem.includes('✅') ? 'rgba(34,197,94,.1)' : 'rgba(239,68,68,.1)', border: `1px solid ${mensagem.includes('✅') ? 'rgba(34,197,94,.3)' : 'rgba(239,68,68,.3)'}`, borderRadius: 12 }}>
-                    <p style={{ color: mensagem.includes('✅') ? '#4ade80' : '#f87171', fontWeight: 800, fontSize: 14, margin: 0 }}>{mensagem}</p>
+                  <div style={{ textAlign: 'center', padding: '12px 16px', background: mensagem.includes('✅') ? 'color-mix(in srgb, var(--success) 10%, transparent)' : 'color-mix(in srgb, var(--danger) 10%, transparent)', border: `1px solid ${mensagem.includes('✅') ? 'color-mix(in srgb, var(--success) 30%, transparent)' : 'color-mix(in srgb, var(--danger) 30%, transparent)'}`, borderRadius: 12 }}>
+                    <p style={{ color: mensagem.includes('✅') ? 'var(--success)' : 'var(--danger)', fontWeight: 800, fontSize: 14, margin: 0 }}>{mensagem}</p>
                   </div>
                 )}
               </div>
@@ -654,10 +670,10 @@ export default function ConfiguracoesPage() {
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                     {cardapio.bebidas.map((b, i) => (
-                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,.04)', borderRadius: 10, padding: '10px 12px' }}>
+                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(var(--overlay-rgb), 0.04)', borderRadius: 10, padding: '10px 12px' }}>
                         <span style={{ color: TEXT, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, marginRight: 8 }}>{b.name}</span>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
-                          <span style={{ color: '#4ade80', fontSize: 13, fontWeight: 800 }}>R$ {b.price.toFixed(2).replace('.', ',')}</span>
+                          <span style={{ color: 'var(--success)', fontSize: 13, fontWeight: 800 }}>R$ {b.price.toFixed(2).replace('.', ',')}</span>
                           <button onClick={() => removerBebida('bebidas', i)} style={btnRemoveRow}>×</button>
                         </div>
                       </div>
@@ -678,10 +694,10 @@ export default function ConfiguracoesPage() {
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                     {cardapio.sucos.map((s, i) => (
-                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,.04)', borderRadius: 10, padding: '10px 12px' }}>
+                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(var(--overlay-rgb), 0.04)', borderRadius: 10, padding: '10px 12px' }}>
                         <span style={{ color: TEXT, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, marginRight: 8 }}>{s.name}</span>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
-                          <span style={{ color: '#4ade80', fontSize: 13, fontWeight: 800 }}>R$ {s.price.toFixed(2).replace('.', ',')}</span>
+                          <span style={{ color: 'var(--success)', fontSize: 13, fontWeight: 800 }}>R$ {s.price.toFixed(2).replace('.', ',')}</span>
                           <button onClick={() => removerBebida('sucos', i)} style={btnRemoveRow}>×</button>
                         </div>
                       </div>
@@ -702,10 +718,10 @@ export default function ConfiguracoesPage() {
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                     {cardapio.neighborhoods.map((n, i) => (
-                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,.04)', borderRadius: 10, padding: '10px 12px' }}>
+                      <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(var(--overlay-rgb), 0.04)', borderRadius: 10, padding: '10px 12px' }}>
                         <span style={{ color: TEXT, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, marginRight: 8 }}>{n.name}</span>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
-                          <span style={{ color: '#fbbf24', fontSize: 13, fontWeight: 800 }}>R$ {n.fee.toFixed(2).replace('.', ',')}</span>
+                          <span style={{ color: 'var(--brand-text)', fontSize: 13, fontWeight: 800 }}>R$ {n.fee.toFixed(2).replace('.', ',')}</span>
                           <button onClick={() => removerBairro(i)} style={btnRemoveRow}>×</button>
                         </div>
                       </div>
@@ -765,14 +781,14 @@ export default function ConfiguracoesPage() {
                 <button
                   onClick={salvarCardapio}
                   disabled={salvando}
-                  style={{ width: '100%', height: 56, background: salvando ? '#1a1208' : `linear-gradient(180deg, ${ACCENT}, #d95e00)`, border: 'none', borderRadius: 14, color: '#fff', fontSize: 16, fontWeight: 900, cursor: salvando ? 'not-allowed' : 'pointer', fontFamily: FONT, letterSpacing: '-0.2px', opacity: salvando ? 0.6 : 1 }}
+                  style={{ width: '100%', height: 56, background: salvando ? 'var(--background)' : `linear-gradient(180deg, ${ACCENT}, var(--primary))`, border: 'none', borderRadius: 14, color: 'var(--primary-foreground)', fontSize: 16, fontWeight: 900, cursor: salvando ? 'not-allowed' : 'pointer', fontFamily: FONT, letterSpacing: '-0.2px', opacity: salvando ? 0.6 : 1 }}
                 >
                   {salvando ? 'Salvando...' : '💾 Salvar Cardápio'}
                 </button>
 
                 {mensagem && (
-                  <div style={{ textAlign: 'center', padding: '12px 16px', background: mensagem.includes('✅') ? 'rgba(34,197,94,.1)' : 'rgba(239,68,68,.1)', border: `1px solid ${mensagem.includes('✅') ? 'rgba(34,197,94,.3)' : 'rgba(239,68,68,.3)'}`, borderRadius: 12 }}>
-                    <p style={{ color: mensagem.includes('✅') ? '#4ade80' : '#f87171', fontWeight: 800, fontSize: 14, margin: 0 }}>{mensagem}</p>
+                  <div style={{ textAlign: 'center', padding: '12px 16px', background: mensagem.includes('✅') ? 'color-mix(in srgb, var(--success) 10%, transparent)' : 'color-mix(in srgb, var(--danger) 10%, transparent)', border: `1px solid ${mensagem.includes('✅') ? 'color-mix(in srgb, var(--success) 30%, transparent)' : 'color-mix(in srgb, var(--danger) 30%, transparent)'}`, borderRadius: 12 }}>
+                    <p style={{ color: mensagem.includes('✅') ? 'var(--success)' : 'var(--danger)', fontWeight: 800, fontSize: 14, margin: 0 }}>{mensagem}</p>
                   </div>
                 )}
               </div>

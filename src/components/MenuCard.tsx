@@ -12,7 +12,7 @@ export function MenuCard() {
           <h3 className="font-semibold text-gray-700 mb-2">Tamanhos</h3>
           <div className="grid grid-cols-2 gap-2">
             {MENU.sizes.map((s) => (
-              <div key={s.code} className="bg-orange-50 border border-orange-100 rounded-lg px-3 py-2 flex justify-between items-center">
+              <div key={s.code} className="rounded-lg px-3 py-2 flex justify-between items-center" style={{ background: 'var(--primary-soft)', border: '1px solid var(--primary)' }}>
                 <span className="font-medium text-gray-700">{s.code} - {s.label}</span>
                 <span className="text-green-700 font-bold">R$ {s.price},00</span>
               </div>

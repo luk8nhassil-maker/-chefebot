@@ -53,15 +53,19 @@ function dataCurta(iso: string) {
 }
 
 const cores = {
-  fundo: '#FAFAF8',
-  moldura: '#F1EFEA',
-  cardBg: '#FFFFFF',
-  cardBorda: '#E7E4DC',
-  navy: '#10193A',
-  textoSecundario: '#5B6478',
-  textoTerciario: '#9AA1B4',
-  amarelo: '#FFCD00',
-  sucesso: '#1F7A4D',
+  fundo: 'var(--background)',
+  moldura: 'var(--surface-secondary)',
+  cardBg: 'var(--surface)',
+  cardBorda: 'var(--border)',
+  navy: 'var(--foreground)',
+  navyCard: 'var(--secondary)',
+  navyCardTexto: 'var(--secondary-foreground)',
+  textoSecundario: 'var(--foreground-secondary)',
+  textoTerciario: 'var(--foreground-muted)',
+  amarelo: 'var(--primary)',
+  amareloTexto: 'var(--primary-foreground)',
+  sucesso: 'var(--success-text)',
+  perigo: 'var(--danger-text)',
 }
 
 export default function ClientePage() {
@@ -176,7 +180,7 @@ export default function ClientePage() {
     padding: '14px 16px',
     borderRadius: 12,
     border: `1px solid ${cores.cardBorda}`,
-    background: '#FFFFFF',
+    background: cores.cardBg,
     color: cores.navy,
     fontSize: 16,
     fontFamily: 'Archivo, sans-serif',
@@ -187,7 +191,7 @@ export default function ClientePage() {
     padding: 14,
     borderRadius: 12,
     background: cores.amarelo,
-    color: cores.navy,
+    color: cores.amareloTexto,
     fontSize: 15,
     fontWeight: 700,
     border: 'none',
@@ -231,7 +235,7 @@ export default function ClientePage() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14, maxWidth: 420, margin: '0 auto' }}>
             <div style={{ textAlign: 'center', marginBottom: 4 }}>
               <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
-                <div style={{ background: cores.navy, borderRadius: 999, width: 64, height: 64, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <div style={{ background: cores.navyCard, borderRadius: 999, width: 64, height: 64, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   <Gift size={30} color={cores.amarelo} />
                 </div>
               </div>
@@ -248,7 +252,7 @@ export default function ClientePage() {
               onChange={(e) => setTelefone(e.target.value)}
               style={inputStyle}
             />
-            {erro && <p style={{ color: '#B3261E', fontSize: 13, margin: 0 }}>{erro}</p>}
+            {erro && <p style={{ color: cores.perigo, fontSize: 13, margin: 0 }}>{erro}</p>}
             <button onClick={pedirCodigo} disabled={enviando} style={{ ...botaoPrimario, opacity: enviando ? 0.6 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
               <Phone size={16} /> {enviando ? 'Enviando...' : 'Receber código no WhatsApp'}
             </button>
@@ -262,7 +266,7 @@ export default function ClientePage() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14, maxWidth: 420, margin: '0 auto' }}>
             <div style={{ textAlign: 'center', marginBottom: 4 }}>
               <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
-                <div style={{ background: cores.navy, borderRadius: 999, width: 64, height: 64, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <div style={{ background: cores.navyCard, borderRadius: 999, width: 64, height: 64, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   <MessageCircle size={28} color={cores.amarelo} />
                 </div>
               </div>
@@ -280,7 +284,7 @@ export default function ClientePage() {
               style={{ ...inputStyle, textAlign: 'center', letterSpacing: 4, fontSize: 20 }}
               maxLength={6}
             />
-            {erro && <p style={{ color: '#B3261E', fontSize: 13, margin: 0 }}>{erro}</p>}
+            {erro && <p style={{ color: cores.perigo, fontSize: 13, margin: 0 }}>{erro}</p>}
             <button onClick={confirmarCodigo} disabled={enviando} style={{ ...botaoPrimario, opacity: enviando ? 0.6 : 1 }}>
               {enviando ? 'Confirmando...' : 'Entrar'}
             </button>
@@ -317,13 +321,13 @@ export default function ClientePage() {
                   {podeResgatar ? (
                     // Meta atingida: substitui o card de progresso pelo card
                     // navy com CTA — único lugar da tela com fundo escuro.
-                    <div style={{ background: cores.navy, borderRadius: 16, padding: 22, color: '#fff' }}>
+                    <div style={{ background: cores.navyCard, borderRadius: 16, padding: 22, color: cores.navyCardTexto }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
                         <Sparkles size={20} color={cores.amarelo} />
                         <span style={{ fontSize: 13, fontWeight: 700, color: cores.amarelo, textTransform: 'uppercase', letterSpacing: 0.5 }}>Recompensa disponível</span>
                       </div>
                       <p style={{ fontSize: 16, fontWeight: 700, margin: '0 0 16px' }}>{fidelidade.descricaoRecompensa}</p>
-                      {resgateErro && <p style={{ color: '#FCA5A5', fontSize: 13, margin: '0 0 12px' }}>{resgateErro}</p>}
+                      {resgateErro && <p style={{ color: 'var(--danger-border)', fontSize: 13, margin: '0 0 12px' }}>{resgateErro}</p>}
                       <button
                         onClick={resgatar}
                         disabled={resgatando}
@@ -341,7 +345,7 @@ export default function ClientePage() {
                         <div style={{
                           width: `${Math.min(100, fidelidade.progressoPercentual)}%`,
                           height: '100%',
-                          background: `linear-gradient(90deg, ${cores.amarelo}, #FFE066)`,
+                          background: cores.amarelo,
                           borderRadius: 999,
                         }} />
                       </div>
