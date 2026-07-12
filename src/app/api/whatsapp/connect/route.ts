@@ -14,13 +14,10 @@ async function checkAuth(req: NextRequest): Promise<{ status: 401 | 403 } | { st
   return { status: 200 };
 }
 
-// POST /api/whatsapp/reset — MANTIDO POR COMPATIBILIDADE apenas. Não faz
-// mais logout/delete automático: redireciona internamente para o mesmo
-// fluxo seguro de POST /api/whatsapp/connect (reconecta a instância
-// existente, ou cria se realmente não existir — nunca apaga nada). A ação
-// destrutiva (logout+delete+create) hoje só existe em
-// POST /api/whatsapp/rebuild, atrás de confirmação textual explícita e
-// rate limit. Use /connect (ou este endpoint) como ação padrão do painel.
+// POST /api/whatsapp/connect — Fase 4, ação 2 (ação PADRÃO do painel):
+// nunca faz logout/delete. Se a instância existe, só conecta; se não
+// existe, cria, configura webhook e conecta. Sempre com retry limitado
+// pro QR. Para reconstrução destrutiva, ver POST /api/whatsapp/rebuild.
 export async function POST(req: NextRequest) {
   const auth = await checkAuth(req);
   if (auth.status === 401) return NextResponse.json({ error: "Nao autorizado" }, { status: 401 });

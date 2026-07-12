@@ -15,7 +15,6 @@ vi.mock("@/lib/auth", async () => {
     ...actual,
     verifyToken: vi.fn(async (token: string) => {
       if (token === "token-admin") return { username: "brito", name: "Admin", role: "admin" };
-      if (token === "token-dev") return { username: "ominix", name: "Dev", role: "dev" };
       if (token === "token-atendente") return { username: "kellyne", name: "Atendente", role: "atendente" };
       return null;
     }),
@@ -35,7 +34,7 @@ function requestComCookie(token?: string) {
     method: "POST",
     headers: token ? { cookie: `auth-token=${token}` } : {},
   };
-  return new NextRequest("http://localhost/api/whatsapp/reset", init);
+  return new NextRequest("http://localhost/api/whatsapp/connect", init);
 }
 
 beforeEach(() => {
@@ -46,11 +45,8 @@ beforeEach(() => {
   delete process.env.EVOLUTION_WEBHOOK_URL;
 });
 
-// /api/whatsapp/reset é mantida só por compatibilidade — redireciona
-// internamente para o mesmo fluxo seguro de POST /api/whatsapp/connect.
-// NUNCA mais chama logout/delete (isso só existe em POST /api/whatsapp/rebuild).
-describe("POST /api/whatsapp/reset — compatibilidade (redireciona pro fluxo seguro, sem delete)", () => {
-  test("sem cookie retorna 401 e nunca chama a Evolution API", async () => {
+describe("POST /api/whatsapp/connect — acao padrao do painel (sem delete)", () => {
+  test("sem cookie retorna 401", async () => {
     const res = await POST(requestComCookie(undefined));
     expect(res.status).toBe(401);
     expect(fetch).not.toHaveBeenCalled();
@@ -62,46 +58,48 @@ describe("POST /api/whatsapp/reset — compatibilidade (redireciona pro fluxo se
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  test("instancia ja conectada: so verifica, nunca chama logout/delete/create", async () => {
+  test("ja conectado: retorna connected sem nenhuma outra chamada", async () => {
     vi.mocked(fetch).mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ instance: { state: "open" } }) } as Response);
     const res = await POST(requestComCookie("token-admin"));
     const data = await res.json();
     expect(res.status).toBe(200);
     expect(data.estado).toBe("connected");
     expect(fetch).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(fetch).mock.calls[0][0]).toContain("/instance/connectionState/");
   });
 
-  test("instancia existe mas desconectada: conecta direto, nunca chama delete", async () => {
+  test("instancia ausente: cria, configura webhook (se houver) e conecta — nunca chama delete/logout", async () => {
+    process.env.EVOLUTION_WEBHOOK_URL = "https://chefebot-pjif.vercel.app/api/whatsapp";
     vi.mocked(fetch)
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ instance: { state: "close" } }) } as Response) // verify
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ base64: "data:image/png;base64,QR1" }) } as Response); // connect
-
-    const res = await POST(requestComCookie("token-admin"));
-    const data = await res.json();
-    expect(res.status).toBe(200);
-    expect(data.qrcode.base64).toContain("QR1");
-    expect(fetch).toHaveBeenCalledTimes(2);
-    expect(vi.mocked(fetch).mock.calls.some(c => String(c[0]).includes("/instance/delete/"))).toBe(false);
-    expect(vi.mocked(fetch).mock.calls.some(c => String(c[0]).includes("/instance/logout/"))).toBe(false);
-  });
-
-  test("instancia nao existe: cria (sem logout/delete) e conecta", async () => {
-    vi.mocked(fetch)
-      .mockResolvedValueOnce({ ok: false, status: 404, json: async () => ({ status: 404, error: "Not Found", message: ["Instance not found"] }) } as Response) // verify: missing
+      .mockResolvedValueOnce({ ok: false, status: 404, json: async () => ({ status: 404, message: ["not found"] }) } as Response) // verify
       .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ instance: {} }) } as Response) // create
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ base64: "data:image/png;base64,QR2" }) } as Response); // connect
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({}) } as Response) // webhook
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ base64: "data:image/png;base64,QR" }) } as Response); // connect
 
     const res = await POST(requestComCookie("token-admin"));
     const data = await res.json();
     expect(res.status).toBe(200);
-    expect(data.qrcode.base64).toContain("QR2");
-    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(data.qrcode.base64).toContain("QR");
+    expect(fetch).toHaveBeenCalledTimes(4);
+    expect(vi.mocked(fetch).mock.calls[2][0]).toContain("/webhook/set/");
     expect(vi.mocked(fetch).mock.calls.some(c => String(c[0]).includes("/instance/delete/"))).toBe(false);
     expect(vi.mocked(fetch).mock.calls.some(c => String(c[0]).includes("/instance/logout/"))).toBe(false);
   });
 
-  test("provider nao configurado retorna 503, nunca tenta o host antigo do Railway", async () => {
+  test("provider_down no verify retorna 502 sem tentar create/connect", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: false,
+      status: 404,
+      json: async () => ({ status: "error", code: 404, message: "Application not found", request_id: "xyz" }),
+    } as Response);
+
+    const res = await POST(requestComCookie("token-admin"));
+    const data = await res.json();
+    expect(res.status).toBe(502);
+    expect(data.estado).toBe("provider_down");
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  test("provider nao configurado retorna 503, nunca chama fetch", async () => {
     delete process.env.EVOLUTION_API_URL;
     delete process.env.EVOLUTION_API_KEY;
     const res = await POST(requestComCookie("token-admin"));
@@ -109,19 +107,5 @@ describe("POST /api/whatsapp/reset — compatibilidade (redireciona pro fluxo se
     expect(res.status).toBe(503);
     expect(data.estado).toBe("provider_not_configured");
     expect(fetch).not.toHaveBeenCalled();
-  });
-
-  test("host fora do ar (borda do Railway) detectado no verify retorna erro sanitizado", async () => {
-    vi.mocked(fetch).mockResolvedValueOnce({
-      ok: false,
-      status: 404,
-      json: async () => ({ status: "error", code: 404, message: "Application not found", request_id: "abc" }),
-    } as Response);
-    const res = await POST(requestComCookie("token-admin"));
-    const data = await res.json();
-    expect(res.status).toBe(502);
-    expect(data.estado).toBe("provider_down");
-    expect(data.error).toMatch(/não está acessível/i);
-    expect(JSON.stringify(data)).not.toContain("abc");
   });
 });

@@ -1,6 +1,62 @@
 // Helpers compartilhados entre as rotas que falam com a Evolution API
-// (qrcode, reset) — extração do QR e diagnóstico de erro, sem duplicar a
-// mesma lógica em cada rota.
+// (qrcode, state, verify, connect, rebuild, e os pontos do bot que enviam
+// mensagem) — configuração validada centralmente (sem fallback hardcoded
+// pra um host de PaaS efêmero), extração do QR e diagnóstico de erro, sem
+// duplicar a mesma lógica em cada arquivo.
+
+export type EvolutionConfig = {
+  baseUrl: string;
+  apiKey: string;
+  instanceName: string;
+  webhookUrl: string;
+};
+
+function ehUrlValida(url: string): boolean {
+  try {
+    const normalizada = url.startsWith("http://") || url.startsWith("https://") ? url : `https://${url}`;
+    const u = new URL(normalizada);
+    return u.protocol === "https:" && u.hostname.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Fonte única de verdade da configuração da Evolution API. Nunca cai para
+ * um host hardcoded (ex.: o antigo `evolution-api-production-8f99.up.railway.app`
+ * do Railway) — se a env var não existir ou não for uma URL válida, retorna
+ * `null` e quem chamou deve tratar isso como `provider_not_configured`,
+ * nunca tentar adivinhar um host.
+ */
+export function obterConfigEvolution(): EvolutionConfig | null {
+  const urlBruta = process.env.EVOLUTION_API_URL;
+  const apiKey = process.env.EVOLUTION_API_KEY;
+  const instanceName = process.env.EVOLUTION_INSTANCE_NAME || "chefebot";
+  const webhookUrl = process.env.EVOLUTION_WEBHOOK_URL || "";
+
+  if (!urlBruta || !ehUrlValida(urlBruta)) return null;
+  if (!apiKey) return null;
+
+  const baseUrl = urlBruta.startsWith("http://") || urlBruta.startsWith("https://") ? urlBruta : `https://${urlBruta}`;
+  return { baseUrl, apiKey, instanceName, webhookUrl };
+}
+
+/**
+ * Estados possíveis do provider de WhatsApp (Evolution API), usados pelo
+ * admin para decidir o que mostrar e qual ação recomendar. Nunca inferido só
+ * de um código HTTP isolado — sempre combinando configuração + resposta real.
+ */
+export type EstadoProviderWhatsapp =
+  | "provider_not_configured"
+  | "provider_down"
+  | "provider_unauthorized"
+  | "instance_missing"
+  | "instance_disconnected"
+  | "qr_required"
+  | "connecting"
+  | "connected"
+  | "webhook_error"
+  | "unknown";
 
 /**
  * Extrai o QR em base64 de qualquer um dos formatos observados/documentados

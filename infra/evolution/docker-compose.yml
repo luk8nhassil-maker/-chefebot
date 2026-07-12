@@ -1,0 +1,241 @@
+name: chefebot-evolution
+
+# Infraestrutura oficial da Evolution API do ChefeBot — VPS dedicado, sem
+# depender de PaaS efêmero (Railway) nem de fallback hardcoded no código da
+# aplicação. Ver infra/evolution/README.md para provisionamento completo.
+#
+# IMPORTANTE: a tag da imagem da Evolution API abaixo (EVOLUTION_IMAGE_TAG no
+# .env) precisa ser conferida contra https://hub.docker.com/r/atendai/evolution-api/tags
+# antes do primeiro deploy — este arquivo não foi validado contra um registry
+# real a partir deste ambiente (sem acesso de rede externo). Nunca use
+# `latest`: fixe sempre uma tag exata (ex.: v2.2.3) e só suba de versão via
+# scripts/update.sh, de forma consciente.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-evolution}
+      TZ: ${TZ:-America/Sao_Paulo}
+    volumes:
+      - evolution_postgres_data:/var/lib/postgresql/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB:-evolution}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1g
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    # Nunca publicado na rede externa — só acessível pela rede interna
+    # (nenhum "ports:" aqui, de propósito).
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD}"]
+    volumes:
+      - evolution_redis_data:/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a $$REDIS_PASSWORD ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    # Sem "ports:" — só acessível pela rede interna.
+
+  evolution-api:
+    image: atendai/evolution-api:${EVOLUTION_IMAGE_TAG:?defina EVOLUTION_IMAGE_TAG no .env, ex. v2.2.3 — nunca latest}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      TZ: ${TZ:-America/Sao_Paulo}
+
+      # Identidade/servidor — domínio próprio estável, nunca endereço de PaaS.
+      SERVER_URL: https://${EVOLUTION_DOMAIN}
+      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY:?defina EVOLUTION_API_KEY no .env}
+      AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES: "true"
+
+      # Nunca apagar instância automaticamente por inatividade/erro — a
+      # exclusão só pode acontecer pela ação explícita de reconstrução do
+      # ChefeBot (ver docs/WHATSAPP_RUNBOOK.md).
+      DEL_INSTANCE: "false"
+
+      # Persistência real em PostgreSQL — nada de estado só em memória.
+      DATABASE_ENABLED: "true"
+      DATABASE_PROVIDER: postgresql
+      DATABASE_CONNECTION_URI: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-evolution}
+      DATABASE_SAVE_DATA_INSTANCE: "true"
+      DATABASE_SAVE_DATA_NEW_MESSAGE: "true"
+      DATABASE_SAVE_MESSAGE_UPDATE: "true"
+      DATABASE_SAVE_DATA_CONTACTS: "true"
+      DATABASE_SAVE_DATA_CHATS: "true"
+
+      # Cache/sessão em Redis persistente (volume próprio, appendonly).
+      CACHE_REDIS_ENABLED: "true"
+      CACHE_REDIS_URI: redis://:${REDIS_PASSWORD}@redis:6379/6
+      CACHE_REDIS_PREFIX_KEY: evolution
+      CACHE_REDIS_SAVE_INSTANCES: "true"
+      CACHE_LOCAL_ENABLED: "false"
+
+      # CORS restrito só aos domínios oficiais do ChefeBot — nunca "*".
+      CORS_ORIGIN: ${CHEFEBOT_ALLOWED_ORIGINS}
+      CORS_METHODS: "GET,POST,PUT,DELETE"
+      CORS_CREDENTIALS: "true"
+
+      # Webhook oficial do ChefeBot, configurável por ambiente
+      # (produção/preview têm URLs diferentes — nunca hardcode aqui).
+      WEBHOOK_GLOBAL_URL: ${CHEFEBOT_WEBHOOK_URL}
+      WEBHOOK_GLOBAL_ENABLED: "false" # o ChefeBot configura o webhook por instância via /webhook/set
+
+      LOG_LEVEL: ${EVOLUTION_LOG_LEVEL:-ERROR,WARN}
+      LOG_COLOR: "false"
+      LOG_BAILEYS: error
+    volumes:
+      - evolution_instances:/evolution/instances
+    networks:
+      - internal
+      - proxy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2g
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+    # Nenhuma porta publicada diretamente — só acessível pelo proxy HTTPS,
+    # via rede "proxy", roteado pelo Caddyfile estático (ver ./Caddyfile).
+
+  proxy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    depends_on:
+      evolution-api:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      TZ: ${TZ:-America/Sao_Paulo}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - evolution_caddy_data:/data
+      - evolution_caddy_config:/config
+    networks:
+      - proxy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:2019/config/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  uptime-kuma:
+    image: louislam/uptime-kuma:1
+    restart: unless-stopped
+    volumes:
+      - evolution_uptime_kuma_data:/app/data
+    networks:
+      - proxy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://localhost:3001/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # Painel do Uptime Kuma, se exposto via UPTIME_KUMA_DOMAIN no Caddyfile,
+    # deve ficar atrás de autenticação própria (login do Kuma) — nunca deixar
+    # sem senha configurada.
+
+  backup:
+    image: postgres:16-alpine
+    restart: "no"
+    profiles: ["backup"] # só roda via `docker compose --profile backup run backup` (chamado pelo cron do host, ver scripts/backup.sh)
+    depends_on:
+      - postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-evolution}
+      TZ: ${TZ:-America/Sao_Paulo}
+    volumes:
+      - evolution_instances:/backup-source/instances:ro
+      - ./scripts:/scripts:ro
+      - evolution_backup_staging:/backup-staging
+    networks:
+      - internal
+    entrypoint: ["/bin/sh", "/scripts/backup.sh"]
+
+networks:
+  internal:
+    driver: bridge
+    internal: true # sem saída para a internet — só Postgres/Redis/Evolution conversam aqui
+  proxy:
+    driver: bridge
+
+volumes:
+  evolution_postgres_data:
+  evolution_redis_data:
+  evolution_instances:
+  evolution_caddy_data:
+  evolution_caddy_config:
+  evolution_uptime_kuma_data:
+  evolution_backup_staging:

@@ -25,6 +25,8 @@ function requestComCookie(token?: string) {
 
 beforeEach(() => {
   vi.mocked(fetch).mockReset();
+  process.env.EVOLUTION_API_URL = "https://evolution.teste.com.br";
+  process.env.EVOLUTION_API_KEY = "chave-de-teste";
 });
 
 describe("GET /api/whatsapp/qrcode — autenticacao", () => {
@@ -66,6 +68,20 @@ describe("GET /api/whatsapp/qrcode — autenticacao", () => {
     } as Response);
     const res = await GET(requestComCookie("token-dev"));
     expect(res.status).toBe(200);
+  });
+});
+
+describe("GET /api/whatsapp/qrcode — provider nao configurado", () => {
+  test("sem EVOLUTION_API_URL/EVOLUTION_API_KEY retorna provider_not_configured, nunca tenta o host antigo do Railway", async () => {
+    delete process.env.EVOLUTION_API_URL;
+    delete process.env.EVOLUTION_API_KEY;
+
+    const res = await GET(requestComCookie("token-admin"));
+    const data = await res.json();
+
+    expect(res.status).toBe(503);
+    expect(data.estado).toBe("provider_not_configured");
+    expect(fetch).not.toHaveBeenCalled();
   });
 });
 

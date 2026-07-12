@@ -14,6 +14,7 @@ import {
   derivarClienteIdPorTelefone,
   reverterResgateConfirmado,
 } from '@/lib/fidelidade'
+import { obterConfigEvolution } from '@/lib/evolutionApi'
 
 const APP_BASE_URL = 'https://chefebot-pjif.vercel.app'
 
@@ -51,11 +52,6 @@ type Pedido = {
 }
 
 
-const _evOrdersUrl = process.env.EVOLUTION_API_URL ?? 'evolution-api-production-8f99.up.railway.app'
-const EVOLUTION_API_URL = _evOrdersUrl.startsWith('http') ? _evOrdersUrl : `https://${_evOrdersUrl}`
-const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY!
-const EVOLUTION_INSTANCE = 'chefebot'
-
 function getMensagemStatus(status: Status, nomeCliente: string): string | null {
   const firstName = nomeCliente.split(' ')[0];
   const mensagens: Partial<Record<Status, string>> = {
@@ -76,13 +72,15 @@ function sanitizePhone(telefone: string): string {
 async function notificarCliente(telefone: string, status: Status, nomeCliente: string): Promise<void> {
   const mensagem = getMensagemStatus(status, nomeCliente)
   if (!mensagem) return
+  const config = obterConfigEvolution()
+  if (!config) { console.error('[ChefeBot] Provider de WhatsApp não configurado — notificação de status não enviada.'); return }
   const phone = sanitizePhone(telefone)
   try {
-    await fetch(`${EVOLUTION_API_URL}/message/sendText/${EVOLUTION_INSTANCE}`, {
+    await fetch(`${config.baseUrl}/message/sendText/${config.instanceName}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'apikey': EVOLUTION_API_KEY,
+        'apikey': config.apiKey,
       },
       body: JSON.stringify({ number: phone, text: mensagem }),
     })
@@ -191,11 +189,15 @@ export async function PATCH(req: NextRequest) {
     const filtrado = filaMotoboy.filter(p => p.pedidoId !== pedido.id)
     await redis.set(`entregador:pedidos:${entregador.id}`, [...filtrado, pedidoEntregador], { ex: 86400 })
 
+    const configEntrega = obterConfigEvolution()
+    if (!configEntrega) {
+      console.error('[ChefeBot] Provider de WhatsApp não configurado — aviso de saída para entrega não enviado.')
+    } else {
     try {
       // Mensagem para o motoboy com link da área do entregador
-      await fetch(`${EVOLUTION_API_URL}/message/sendText/${EVOLUTION_INSTANCE}`, {
+      await fetch(`${configEntrega.baseUrl}/message/sendText/${configEntrega.instanceName}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'apikey': EVOLUTION_API_KEY },
+        headers: { 'Content-Type': 'application/json', 'apikey': configEntrega.apiKey },
         body: JSON.stringify({
           number: phoneFormatado,
           text: `🛵 *Novo pedido para entregar!*\n👤 Cliente: ${pedido.cliente}\n📍 Endereço: ${pedido.endereco}\n💰 Total: R$ ${pedido.total.toFixed(2).replace('.', ',')}\nAcesse: ${APP_BASE_URL}/entregador?id=${entregador.id}`,
@@ -204,9 +206,9 @@ export async function PATCH(req: NextRequest) {
 
       // Mensagem para o cliente com link de rastreamento
       const clientePhone = sanitizePhone(pedido.telefone)
-      await fetch(`${EVOLUTION_API_URL}/message/sendText/${EVOLUTION_INSTANCE}`, {
+      await fetch(`${configEntrega.baseUrl}/message/sendText/${configEntrega.instanceName}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'apikey': EVOLUTION_API_KEY },
+        headers: { 'Content-Type': 'application/json', 'apikey': configEntrega.apiKey },
         body: JSON.stringify({
           number: clientePhone,
           text: `Seu pedido saiu! 🛵\nEntregador: *${entregador.nome}*\nAcompanhe: ${APP_BASE_URL}/rastrear/${pedido.id}`,
@@ -215,6 +217,7 @@ export async function PATCH(req: NextRequest) {
 
       await redis.set(`entregador_aguardando:${phoneFormatado}`, pedido.id, { ex: 3 * 60 * 60 })
     } catch {}
+    }
   }
 
   if (status === 'entregue') {
@@ -226,12 +229,16 @@ export async function PATCH(req: NextRequest) {
       await redis.set(chaveAvaliacao, true, { ex: 86400 })
       await redis.set(`avaliacao:${phone}`, true, { ex: 3600 })
       const firstName = pedidos[index].cliente.split(' ')[0]
+      const configAvaliacao = obterConfigEvolution()
+      if (!configAvaliacao) {
+        console.error('[ChefeBot] Provider de WhatsApp não configurado — pesquisa de avaliação não enviada.')
+      } else {
       try {
-        await fetch(`${EVOLUTION_API_URL}/message/sendText/${EVOLUTION_INSTANCE}`, {
+        await fetch(`${configAvaliacao.baseUrl}/message/sendText/${configAvaliacao.instanceName}`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'apikey': EVOLUTION_API_KEY,
+            'apikey': configAvaliacao.apiKey,
           },
           body: JSON.stringify({
             number: phone,
@@ -240,6 +247,7 @@ export async function PATCH(req: NextRequest) {
         })
       } catch (err) {
         console.error('[ChefeBot] Erro ao enviar pesquisa:', err)
+      }
       }
     }
 

@@ -3,6 +3,7 @@
     {"path": "/api/cron", "schedule": "0 3 * * *"},
     {"path": "/api/cron/sessoes", "schedule": "0 4 * * *"},
     {"path": "/api/cron/pix-pendente", "schedule": "0 5 * * *"},
-    {"path": "/api/cron/mcp-observer", "schedule": "0 6 * * *"}
+    {"path": "/api/cron/mcp-observer", "schedule": "0 6 * * *"},
+    {"path": "/api/cron/whatsapp-health", "schedule": "*/5 * * * *"}
   ]
 }

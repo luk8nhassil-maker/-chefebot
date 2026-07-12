@@ -44,6 +44,8 @@ function mockFetchFail() {
 beforeEach(() => {
   store.clear();
   vi.clearAllMocks();
+  process.env.EVOLUTION_API_URL = "https://evolution.teste.com.br";
+  process.env.EVOLUTION_API_KEY = "chave-de-teste";
   // Conversa em atendimento humano por padrão
   store.set(`manual:${PHONE}`, true);
   mockFetchOk();
