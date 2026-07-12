@@ -1105,6 +1105,16 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const flavorModalTitle = miniPizzaMode ? (miniPizzaItem?.name || "Mini-pizza") : `Pizza ${selectedSizeLabel}`;
   const flavorModalMessage = miniPizzaMode ? "Escolha o sabor da sua mini-pizza." : "Você pode escolher até 2 sabores.";
   const flavorModalHint = miniPizzaMode ? null : "Escolha 1 sabor para pizza inteira ou 2 sabores para meio a meio.";
+  const flavorProgressLabel = f2 ? `${f1} / ${f2}` : f1 ? `${f1} — toque em outro para meio a meio` : "Nenhum sabor escolhido ainda";
+  const renderFlavorProgress = () => !miniPizzaMode && (
+    <div className="flavor-progress">
+      <div className="flavor-progress-dots">
+        <span className={`pd ${f1 ? "done" : "cur"}`} />
+        <span className={`pd ${f2 ? "done" : f1 ? "cur" : ""}`} />
+      </div>
+      <span className="flavor-progress-label">{flavorProgressLabel}</span>
+    </div>
+  );
   function addPizzaWithBorder(chosenBorder: string | null, chosenBorderPrice: number) {
     setBorder(chosenBorder); setBorderPrice(chosenBorderPrice);
     const flavor = mam ? `${f1} / ${f2}` : f1;
@@ -1572,17 +1582,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
               {size ? (
                 <>
                   {miniPizzaMode && <div className="mini-flow-note">Mini-pizza usa preco e produto existentes do cardapio.</div>}
-                  {!miniPizzaMode && (
-                    <div className="flavor-progress">
-                      <div className="flavor-progress-dots">
-                        <span className={`pd ${f1 ? "done" : "cur"}`} />
-                        <span className={`pd ${f2 ? "done" : f1 ? "cur" : ""}`} />
-                      </div>
-                      <span className="flavor-progress-label">
-                        {f2 ? `${f1} / ${f2}` : f1 ? `${f1} — toque em outro para meio a meio` : "Nenhum sabor escolhido ainda"}
-                      </span>
-                    </div>
-                  )}
+                  {renderFlavorProgress()}
                   <div className="flavor-list">
                     {flavorSections.map((section) => (
                       <div key={section.title}>
@@ -2155,6 +2155,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                 <h3 id="flavor-modal-title">{flavorModalTitle}</h3>
                 <p className="flavor-modal-msg">{flavorModalMessage}</p>
                 {flavorModalHint && <p className="flavor-modal-hint">{flavorModalHint}</p>}
+                {renderFlavorProgress()}
               </div>
               <button type="button" className="payment-modal-close" aria-label="Fechar" onClick={() => setFlavorModalOpen(false)}>×</button>
             </div>
@@ -2445,8 +2446,8 @@ main{width:100%;padding:6px 20px 20px}
 .payment-modal-actions .btn{padding:13px 10px}
 @keyframes sheet{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
 .flavor-modal-backdrop{position:fixed;inset:0;z-index:85;background:rgba(0,0,0,.6);display:flex;align-items:flex-end;justify-content:center;padding:16px}
-.flavor-modal{max-height:82vh;display:flex;flex-direction:column;padding-bottom:14px}
-.flavor-modal-body{overflow-y:auto;flex:1 1 auto;padding-right:2px;margin:2px 0 4px;scrollbar-width:thin}
+.flavor-modal{max-height:82vh;display:flex;flex-direction:column;padding-bottom:14px;background:var(--surface);overflow:hidden}
+.flavor-modal-body{overflow-y:auto;flex:1 1 auto;padding-right:2px;margin:2px 0 4px;scrollbar-width:thin;background:var(--surface)}
 .flavor-modal-body .opt{margin-bottom:8px}
 .flavor-modal-msg{font-size:13.5px;font-weight:700;color:var(--text);margin-top:4px}
 .flavor-modal-hint{font-size:12.5px;color:var(--text-sub);margin-top:3px;line-height:1.35}
