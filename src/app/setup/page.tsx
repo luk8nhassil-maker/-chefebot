@@ -263,7 +263,7 @@ function Step5WhatsApp({ onNext, onBack }: { onNext: () => void; onBack: () => v
     setQr(null)
     setElapsed(0)
 
-    fetch('/api/whatsapp/qrcode')
+    fetch('/api/whatsapp/qrcode', { method: 'POST' })
       .then(r => r.json())
       .then((data: Record<string, unknown>) => {
         if (cancelled) return

@@ -2,6 +2,7 @@
 import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
+import { Pizza } from "lucide-react";
 
 function getDestino(role: string, callbackUrl: string | null): string {
   if (callbackUrl) return callbackUrl;
@@ -173,7 +174,7 @@ function LoginForm() {
               overflow: "hidden",
             }}>
               {logoError ? (
-                <span>🍕</span>
+                <Pizza size={44} color="var(--foreground)" aria-hidden="true" />
               ) : (
                 <Image
                   src="/logo-chefe-da-pizza.jpg"

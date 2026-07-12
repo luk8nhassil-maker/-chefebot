@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import Image from 'next/image'
 import TourGuiado from '@/components/TourGuiado'
 import PanelShell from '@/components/PanelShell'
+import { interpretarRespostaReset } from '@/lib/whatsappResetResposta'
 import { LayoutDashboard, Pizza, Settings, Wallet, Wrench, ChefHat, DollarSign, TrendingUp, AlertTriangle, Camera, RefreshCw, Calendar, Star, Banknote } from 'lucide-react'
 
 type Pedido = {
@@ -197,6 +198,7 @@ export default function AdminPage() {
   const [waExpired, setWaExpired] = useState(false)
   const [waLoadingQr, setWaLoadingQr] = useState(false)
   const [waQrError, setWaQrError] = useState<string | null>(null)
+  const [waResetting, setWaResetting] = useState(false)
   const [mpConfig, setMpConfig] = useState<MercadoPagoConfig | null>(null)
   const [mpToken, setMpToken] = useState('')
   const [mpPayerEmail, setMpPayerEmail] = useState('')
@@ -313,7 +315,7 @@ export default function AdminPage() {
   // Tenta exibir QR atual sem reset (usado na abertura automática da tela)
   const tryAutoQr = async () => {
     try {
-      const res = await fetch('/api/whatsapp/qrcode')
+      const res = await fetch('/api/whatsapp/qrcode', { method: 'POST' })
       const d = await res.json()
       const base64 = d?.base64 || d?.qrcode?.base64 || null
       if (base64) startQrTimer(base64)
@@ -326,7 +328,7 @@ export default function AdminPage() {
     setWaExpired(false)
     setWaQrError(null)
     try {
-      const res = await fetch('/api/whatsapp/qrcode')
+      const res = await fetch('/api/whatsapp/qrcode', { method: 'POST' })
       const d = await res.json()
       const base64 = d?.base64 || d?.qrcode?.base64 || null
       if (base64) {
@@ -338,6 +340,35 @@ export default function AdminPage() {
       setWaQrError('Erro de rede ao buscar QR code.')
     } finally {
       setWaLoadingQr(false)
+    }
+  }
+
+  // Reconecta com segurança na Evolution API — nunca apaga uma instância já
+  // conectada. Se a instância existir mas estiver desconectada, reconecta; se
+  // não existir, cria e conecta (buscar QR sozinho nunca resolve esse caso).
+  const resetWhatsapp = async () => {
+    setWaResetting(true)
+    setWaQrError(null)
+    try {
+      const res = await fetch('/api/whatsapp/reset', { method: 'POST' })
+      const d = await res.json()
+      const resultado = interpretarRespostaReset(d)
+      if (resultado.tipo === 'qr') {
+        startQrTimer(resultado.base64)
+      } else if (resultado.tipo === 'connected') {
+        // Já estava conectado — reconectar não apaga nada, não é erro.
+        setWaStatus('connected')
+        setWaShowQr(false)
+        setWaQrBase64(null)
+        if (waPollRef.current) { clearInterval(waPollRef.current); waPollRef.current = null }
+        if (waTimerRef.current) { clearInterval(waTimerRef.current); waTimerRef.current = null }
+      } else {
+        setWaQrError(resultado.mensagem)
+      }
+    } catch {
+      setWaQrError('Erro de rede ao resetar a conexão.')
+    } finally {
+      setWaResetting(false)
     }
   }
 
@@ -509,7 +540,7 @@ export default function AdminPage() {
       <div style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)', padding: '18px 16px', paddingTop: 'calc(env(safe-area-inset-top) + 18px)', position: 'sticky', top: 0, zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: 1 }}>
           {logoError ? (
-            <div style={{ width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0 }}>🍕</div>
+            <div style={{ width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><Pizza size={20} color="var(--foreground)" aria-hidden="true" /></div>
           ) : (
             <Image
               src="/logo-chefe-da-pizza.jpg"
@@ -578,11 +609,26 @@ export default function AdminPage() {
                     <p style={{ color: 'var(--foreground-secondary)', fontSize: 12, margin: '0 0 12px', lineHeight: 1.5 }}>
                       Nenhum WhatsApp está conectado. Escaneie o QR Code para ativar o atendimento automático.
                     </p>
-                    <button onClick={fetchQrCode} disabled={waLoadingQr} style={{ width: '100%', background: 'var(--whatsapp)', border: 'none', borderRadius: 10, padding: '14px', color: 'var(--whatsapp-foreground)', fontSize: 14, fontWeight: 700, cursor: waLoadingQr ? 'not-allowed' : 'pointer', opacity: waLoadingQr ? 0.7 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                    <button onClick={fetchQrCode} disabled={waLoadingQr || waResetting} style={{ width: '100%', background: 'var(--whatsapp)', border: 'none', borderRadius: 10, padding: '14px', color: 'var(--whatsapp-foreground)', fontSize: 14, fontWeight: 700, cursor: (waLoadingQr || waResetting) ? 'not-allowed' : 'pointer', opacity: (waLoadingQr || waResetting) ? 0.7 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
                       {waLoadingQr ? 'Gerando QR Code...' : <><Camera size={16} aria-hidden="true" /> Escanear QR Code</>}
                     </button>
                     {waQrError && (
-                      <p style={{ color: 'var(--danger)', fontSize: 12, margin: '10px 0 0', textAlign: 'center' }}>{waQrError}</p>
+                      <>
+                        <p style={{ color: 'var(--danger)', fontSize: 12, margin: '10px 0 0', textAlign: 'center' }}>{waQrError}</p>
+                        {/* Reset é mais destrutivo que só reconectar (derruba e recria a
+                            instância) — nunca oferecido a atendente, só admin/dev. A rota
+                            já exige o mesmo no servidor; isso é só a UI não oferecer a ação
+                            a quem não pode usá-la. */}
+                        {(getUserInfo()?.role === 'admin' || getUserInfo()?.role === 'dev') && (
+                          <button
+                            onClick={() => { if (confirm('Isso desconecta e recria a instância do WhatsApp do zero. Um novo QR Code será gerado. Continuar?')) resetWhatsapp() }}
+                            disabled={waResetting || waLoadingQr}
+                            style={{ width: '100%', marginTop: 10, background: 'transparent', border: '1px solid var(--danger)', borderRadius: 10, padding: '10px', color: 'var(--danger)', fontSize: 12.5, fontWeight: 700, cursor: (waResetting || waLoadingQr) ? 'not-allowed' : 'pointer', opacity: (waResetting || waLoadingQr) ? 0.7 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+                          >
+                            <RefreshCw size={14} aria-hidden="true" /> {waResetting ? 'Resetando conexão...' : 'Resetar conexão do WhatsApp'}
+                          </button>
+                        )}
+                      </>
                     )}
                   </>
                 ) : (

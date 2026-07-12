@@ -1,18 +1,17 @@
 import { NextResponse } from "next/server";
 import { redis } from "@/lib/redis";
+import { obterConfigEvolution } from "@/lib/evolutionApi";
 
-const _rawUrl = process.env.EVOLUTION_API_URL || 'evolution-api-production-8f99.up.railway.app'
-const EVOLUTION_BASE = _rawUrl.startsWith('http') ? _rawUrl : `https://${_rawUrl}`
-const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY!
-const EVOLUTION_INSTANCE = 'chefebot'
 const TIMEOUT_MS = 15 * 60 * 1000 // 15 minutos
 const STEPS_IGNORADOS = ['done', 'escalado', 'confirm', 'welcome']
 
 async function enviarMensagem(phone: string, text: string) {
+  const config = obterConfigEvolution()
+  if (!config) { console.error('[cron sessoes] Provider de WhatsApp não configurado — mensagem não enviada.'); return }
   try {
-    await fetch(`${EVOLUTION_BASE}/message/sendText/${EVOLUTION_INSTANCE}`, {
+    await fetch(`${config.baseUrl}/message/sendText/${config.instanceName}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', apikey: EVOLUTION_API_KEY },
+      headers: { 'Content-Type': 'application/json', apikey: config.apiKey },
       body: JSON.stringify({ number: phone, text }),
     })
   } catch {}

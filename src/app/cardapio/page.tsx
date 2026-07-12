@@ -1,11 +1,24 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
+import { Pizza, Sandwich, Soup, CupSoda, GlassWater, Home, ShoppingCart, Receipt, User, Zap, Banknote, CreditCard, Shuffle, Wallet, Bike, Store, UtensilsCrossed, Sun, Moon } from "lucide-react";
 import PanelShell from "@/components/PanelShell";
 import { useLiveMenu, cartItemEsgotado } from "./liveMenu";
 import { CARDAPIO_ILLUSTRATIONS, CardapioIllustration } from "@/lib/cardapioVisuals";
 import { montarLinkWhatsAppComprovante } from "@/lib/pixCliente";
 import { useTheme } from "@/components/ThemeToggle";
+
+// Ícones de categoria da home (menu/navegação) — lucide-react, sem emoji.
+// Mantidos separados de ICONS (que continua usando emoji para os itens
+// individuais do cardápio/carrinho, conteúdo decorativo por produto, não
+// tocado aqui).
+const CATEGORIA_ICON = {
+  pizza: Pizza,
+  lanche: Sandwich,
+  macarronada: Soup,
+  bebidas: CupSoda,
+  sucos: GlassWater,
+} as const;
 
 type EsgMetadata = Record<string, { desde: string; ultimaRevisao?: string }>
 
@@ -1253,7 +1266,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   }
 
   function paymentLabel(value: string) { return value === "Cartao" ? "Cartão" : value === "Misto" ? "Pagamento misto" : value; }
-  function paymentIcon(value: string) { return ({ Pix: ICONS.pix, Dinheiro: ICONS.dinheiro, Cartao: ICONS.cartao, Misto: ICONS.misto } as Record<string, string>)[value] || ICONS.pagamento; }
+  function paymentIcon(value: string) { const Icon = ({ Pix: Zap, Dinheiro: Banknote, Cartao: CreditCard, Misto: Shuffle } as Record<string, typeof Wallet>)[value] || Wallet; return <Icon size={20} aria-hidden="true" />; }
   function paymentHint(value: string) {
     return ({ Pix: "Confirmacao manual pela pizzaria.", Dinheiro: "Configure o troco.", Cartao: "Pagamento na maquina.", Misto: "Divida entre Pix e Dinheiro." } as Record<string, string>)[value] || "Forma de pagamento";
   }
@@ -1482,7 +1495,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
           <header className="header-min">
             <div className="head-row">
               <div className="logo"><div className="logo-mark">🍕</div><div><h1>CHEFE DA PIZZA</h1><p>Alto Alegre do MA · <span style={{ color: "var(--green)", fontWeight: 600 }}>● Aberto agora</span> · 40 a 60 min</p></div></div>
-              <button className="theme-btn" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} aria-label="Trocar tema">{theme === "dark" ? "🌙" : "☀️"}</button>
+              <button className="theme-btn" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} aria-label="Trocar tema">{theme === "dark" ? <Moon size={18} aria-hidden="true" /> : <Sun size={18} aria-hidden="true" />}</button>
             </div>
           </header>
         )}
@@ -1529,12 +1542,12 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                 <p>Escolha uma categoria pra começar do seu jeito.</p>
               </div>
               <div className="home-grid">
-                <button className="home-cat" onClick={goPizza}><span>{ICONS.pizza}</span><strong>Pizzas</strong></button>
-                <button className="home-cat" onClick={() => goCat("lanche")}><span>{ICONS.lanche}</span><strong>Lanches</strong></button>
-                <button className="home-cat" onClick={() => goCat("macarronada")}><span>{ICONS.macarronada}</span><strong>Macarronada</strong></button>
-                <button className="home-cat" onClick={() => goCat("bebida")}><span>{ICONS.bebidas}</span><strong>Bebidas</strong></button>
+                <button className="home-cat" onClick={goPizza}><CATEGORIA_ICON.pizza size={27} color="var(--gold)" aria-hidden="true" /><strong>Pizzas</strong></button>
+                <button className="home-cat" onClick={() => goCat("lanche")}><CATEGORIA_ICON.lanche size={27} color="var(--gold)" aria-hidden="true" /><strong>Lanches</strong></button>
+                <button className="home-cat" onClick={() => goCat("macarronada")}><CATEGORIA_ICON.macarronada size={27} color="var(--gold)" aria-hidden="true" /><strong>Macarronada</strong></button>
+                <button className="home-cat" onClick={() => goCat("bebida")}><CATEGORIA_ICON.bebidas size={27} color="var(--gold)" aria-hidden="true" /><strong>Bebidas</strong></button>
                 {(menu.sucos || []).length > 0 && (
-                  <button className="home-cat" onClick={() => goCat("suco")}><span>{ICONS.sucos}</span><strong>Sucos</strong></button>
+                  <button className="home-cat" onClick={() => goCat("suco")}><CATEGORIA_ICON.sucos size={27} color="var(--gold)" aria-hidden="true" /><strong>Sucos</strong></button>
                 )}
               </div>
             </section>
@@ -1703,9 +1716,9 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
             <section className="screen active delivery-screen">
               <TopBack onClick={() => go("sc-cart")} title="Entrega" />
               <div className="screen-head"><h2>Como prefere receber?</h2></div>
-              <div className={`opt ${delType === "delivery" ? "sel" : ""}`} onClick={() => { setDelType("delivery"); if (erroEntrega) setErroEntrega(""); }}><div className="opt-emoji">{ICONS.entrega}</div><div className="opt-body"><div className="opt-title">Entrega (delivery)</div><div className="opt-desc">Levamos até você</div></div><div className="opt-check" /></div>
-              <div className={`opt ${delType === "retirada" ? "sel" : ""}`} onClick={() => { setDelType("retirada"); setBairroIdx(""); setErroEntrega(""); }}><div className="opt-emoji">{ICONS.retirada}</div><div className="opt-body"><div className="opt-title">Buscar na loja</div><div className="opt-desc">Sem taxa de entrega</div></div><div className="opt-check" /></div>
-              <div className={`opt ${delType === "dine_in" ? "sel" : ""}`} onClick={() => { setDelType("dine_in"); setBairroIdx(""); setErroEntrega(""); }}><div className="opt-emoji">{ICONS.consumoLocal}</div><div className="opt-body"><div className="opt-title">Consumo no local</div><div className="opt-desc">Comer aqui na pizzaria</div></div><div className="opt-check" /></div>
+              <div className={`opt ${delType === "delivery" ? "sel" : ""}`} onClick={() => { setDelType("delivery"); if (erroEntrega) setErroEntrega(""); }}><div className="opt-emoji"><Bike size={22} aria-hidden="true" /></div><div className="opt-body"><div className="opt-title">Entrega (delivery)</div><div className="opt-desc">Levamos até você</div></div><div className="opt-check" /></div>
+              <div className={`opt ${delType === "retirada" ? "sel" : ""}`} onClick={() => { setDelType("retirada"); setBairroIdx(""); setErroEntrega(""); }}><div className="opt-emoji"><Store size={22} aria-hidden="true" /></div><div className="opt-body"><div className="opt-title">Buscar na loja</div><div className="opt-desc">Sem taxa de entrega</div></div><div className="opt-check" /></div>
+              <div className={`opt ${delType === "dine_in" ? "sel" : ""}`} onClick={() => { setDelType("dine_in"); setBairroIdx(""); setErroEntrega(""); }}><div className="opt-emoji"><UtensilsCrossed size={22} aria-hidden="true" /></div><div className="opt-body"><div className="opt-title">Consumo no local</div><div className="opt-desc">Comer aqui na pizzaria</div></div><div className="opt-check" /></div>
               {delType === "delivery" && (
                 <div>
                   <div className="section-label">Endereço</div>
@@ -1999,29 +2012,29 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
         <nav className="bottom-nav" aria-label="Navegação principal">
           <div className="bottom-nav-inner">
             <button type="button" className={`bnav-item ${screen === "sc-start" ? "active" : ""}`} onClick={() => go("sc-start")}>
-              <span className="bnav-icon">{ICONS.inicio}</span>
+              <span className="bnav-icon"><Home size={20} aria-hidden="true" /></span>
               <span className="bnav-label">Início</span>
             </button>
             <button type="button" className={`bnav-item ${screen === "sc-cart" ? "active" : ""}`} onClick={() => go("sc-cart")}>
               <span className="bnav-icon-wrap">
-                <span className="bnav-icon">{ICONS.sacola}</span>
+                <span className="bnav-icon"><ShoppingCart size={20} aria-hidden="true" /></span>
                 {cartCount > 0 && <span className="bnav-badge">{cartCount > 99 ? "99+" : cartCount}</span>}
               </span>
               <span className="bnav-label">Sacola</span>
             </button>
             {pedidoAtivoId ? (
               <a className={`bnav-item ${screen === "sc-done" ? "active" : ""}`} href={`/rastrear/${pedidoAtivoId}`}>
-                <span className="bnav-icon">{ICONS.pedido}</span>
+                <span className="bnav-icon"><Receipt size={20} aria-hidden="true" /></span>
                 <span className="bnav-label">Pedido</span>
               </a>
             ) : (
               <span className="bnav-item disabled" aria-disabled="true">
-                <span className="bnav-icon">{ICONS.pedido}</span>
+                <span className="bnav-icon"><Receipt size={20} aria-hidden="true" /></span>
                 <span className="bnav-label">Pedido</span>
               </span>
             )}
             <a className="bnav-item" href="/cliente">
-              <span className="bnav-icon">{ICONS.pessoa}</span>
+              <span className="bnav-icon"><User size={20} aria-hidden="true" /></span>
               <span className="bnav-label">Perfil</span>
             </a>
           </div>
@@ -2216,8 +2229,8 @@ export default function CardapioPage() {
 
 const CSS = `
 :root{--font-ui:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;}
-:root[data-theme="dark"]{--bg:var(--background);--surface:var(--surface);--surface2:var(--surface-secondary);--text:var(--text-primary);--text-sub:var(--text-secondary);--text-faint:var(--text-muted);--brand:var(--primary);--brand-press:var(--primary-active);--brand-soft:var(--primary-soft);--brand-foreground:var(--on-primary);--gold:var(--brand-text);--green:var(--success);--green-soft:var(--success-surface);--green-foreground:var(--on-success);--line:rgba(var(--overlay-rgb), 0.08);--line-strong:rgba(var(--overlay-rgb), 0.16);--shadow-sm:var(--shadow-sm);}
-:root[data-theme="light"]{--bg:var(--background);--surface:var(--surface);--surface2:var(--surface-secondary);--text:var(--text-primary);--text-sub:var(--text-secondary);--text-faint:var(--text-muted);--brand:var(--primary);--brand-press:var(--primary-active);--brand-soft:var(--primary-soft);--brand-foreground:var(--on-primary);--gold:var(--brand-text);--green:var(--success);--green-soft:var(--success-surface);--green-foreground:var(--on-success);--line:rgba(var(--overlay-rgb), 0.08);--line-strong:rgba(var(--overlay-rgb), 0.14);--shadow-sm:var(--shadow-sm);}
+:root[data-theme="dark"]{--bg:var(--background);--surface2:var(--surface-secondary);--text:var(--text-primary);--text-sub:var(--text-secondary);--text-faint:var(--text-muted);--brand:var(--primary);--brand-press:var(--primary-active);--brand-soft:var(--primary-soft);--brand-foreground:var(--on-primary);--gold:var(--brand-text);--green:var(--success);--green-soft:var(--success-surface);--green-foreground:var(--on-success);--line:rgba(var(--overlay-rgb), 0.08);--line-strong:rgba(var(--overlay-rgb), 0.16);}
+:root[data-theme="light"]{--bg:var(--background);--surface2:var(--surface-secondary);--text:var(--text-primary);--text-sub:var(--text-secondary);--text-faint:var(--text-muted);--brand:var(--primary);--brand-press:var(--primary-active);--brand-soft:var(--primary-soft);--brand-foreground:var(--on-primary);--gold:var(--brand-text);--green:var(--success);--green-soft:var(--success-surface);--green-foreground:var(--on-success);--line:rgba(var(--overlay-rgb), 0.08);--line-strong:rgba(var(--overlay-rgb), 0.14);}
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 body{font-family:var(--font-ui);background:var(--bg);color:var(--text);line-height:1.5;overflow-x:hidden;padding-bottom:112px;transition:background .35s,color .35s;font-size:16px;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
 .wrap{width:min(100%,540px);max-width:540px;margin:0 auto;min-height:100vh;position:relative;font-family:var(--font-ui);padding-top:46px}
@@ -2448,7 +2461,7 @@ main{width:100%;padding:6px 20px 20px}
 .bottom-nav-inner{display:flex;align-items:stretch;justify-content:space-around;gap:4px;min-height:46px}
 .bnav-item{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:4px 4px;border:none;background:none;color:var(--text-sub);font-family:var(--font-ui);font-size:11px;font-weight:600;border-radius:12px;cursor:pointer;text-decoration:none;transition:color .15s}
 .bnav-item:active{transform:scale(.96)}
-.bnav-icon{font-size:20px;line-height:1}
+.bnav-icon{font-size:20px;line-height:1;display:inline-flex;align-items:center;justify-content:center}
 .bnav-icon-wrap{position:relative;display:inline-flex}
 .bnav-item.active{color:var(--brand)}
 .bnav-item.active .bnav-label{color:var(--text-primary);font-weight:800}

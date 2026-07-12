@@ -44,6 +44,8 @@ function mockFetchFail() {
 beforeEach(() => {
   store.clear();
   vi.clearAllMocks();
+  process.env.EVOLUTION_API_URL = "https://evolution.teste.com.br";
+  process.env.EVOLUTION_API_KEY = "chave-de-teste";
   // Conversa em atendimento humano por padrão
   store.set(`manual:${PHONE}`, true);
   mockFetchOk();
@@ -113,5 +115,14 @@ describe("POST /api/conversas/enviar-mensagem-humana — TTL 7200", () => {
       k === `manual:${PHONE}`
     );
     expect(manualRenewal).toBeUndefined();
+  });
+
+  it("provider nao configurado retorna 503, nunca chama fetch, nunca vaza segredo", async () => {
+    delete process.env.EVOLUTION_API_URL;
+    delete process.env.EVOLUTION_API_KEY;
+    const token = await createToken({ username: "kellyne", name: "Kellyne", role: "atendente" });
+    const res = await POST(postReq({ phone: PHONE, text: "Olá!" }, token));
+    expect(res.status).toBe(503);
+    expect(fetch).not.toHaveBeenCalled();
   });
 });
