@@ -3,10 +3,7 @@ import { redis } from "@/lib/redis";
 import { verifyToken } from "@/lib/auth";
 import { registrarMensagem } from "@/lib/conversa";
 import { validarEnvioMensagemHumana } from "@/lib/validarEnvioMensagemHumana";
-
-const _evUrl =
-  process.env.EVOLUTION_API_URL ?? "evolution-api-production-8f99.up.railway.app";
-const EVOLUTION_BASE = _evUrl.startsWith("http") ? _evUrl : `https://${_evUrl}`;
+import { obterConfigEvolution } from "@/lib/evolutionApi";
 
 async function checkAuth(req: NextRequest) {
   const token = req.cookies.get("auth-token")?.value ?? null;
@@ -50,13 +47,20 @@ export async function POST(req: NextRequest) {
   }
 
   // Envia a mensagem pelo WhatsApp real via Evolution API
+  const config = obterConfigEvolution();
+  if (!config) {
+    return NextResponse.json(
+      { ok: false, error: "Provider de WhatsApp não configurado (EVOLUTION_API_URL/EVOLUTION_API_KEY)" },
+      { status: 503 },
+    );
+  }
   try {
     const delay = Math.min(2500, Math.max(900, text.length * 22));
-    const evResponse = await fetch(`${EVOLUTION_BASE}/message/sendText/chefebot`, {
+    const evResponse = await fetch(`${config.baseUrl}/message/sendText/${config.instanceName}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        apikey: process.env.EVOLUTION_API_KEY!,
+        apikey: config.apiKey,
       },
       body: JSON.stringify({
         number: phone,

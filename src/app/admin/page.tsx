@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import Image from 'next/image'
 import TourGuiado from '@/components/TourGuiado'
 import PanelShell from '@/components/PanelShell'
+import { interpretarRespostaReset } from '@/lib/whatsappResetResposta'
 import { LayoutDashboard, Pizza, Settings, Wallet, Wrench, ChefHat, DollarSign, TrendingUp, AlertTriangle, Camera, RefreshCw, Calendar, Star, Banknote } from 'lucide-react'
 
 type Pedido = {
@@ -314,7 +315,7 @@ export default function AdminPage() {
   // Tenta exibir QR atual sem reset (usado na abertura automática da tela)
   const tryAutoQr = async () => {
     try {
-      const res = await fetch('/api/whatsapp/qrcode')
+      const res = await fetch('/api/whatsapp/qrcode', { method: 'POST' })
       const d = await res.json()
       const base64 = d?.base64 || d?.qrcode?.base64 || null
       if (base64) startQrTimer(base64)
@@ -327,7 +328,7 @@ export default function AdminPage() {
     setWaExpired(false)
     setWaQrError(null)
     try {
-      const res = await fetch('/api/whatsapp/qrcode')
+      const res = await fetch('/api/whatsapp/qrcode', { method: 'POST' })
       const d = await res.json()
       const base64 = d?.base64 || d?.qrcode?.base64 || null
       if (base64) {
@@ -342,21 +343,27 @@ export default function AdminPage() {
     }
   }
 
-  // Recria a instância na Evolution API (logout + delete + create + webhook).
-  // Necessário quando a instância foi perdida (ex.: "Application not found"
-  // no connect) — buscar QR sozinho nunca resolve esse caso, só reconecta uma
-  // instância que já existe.
+  // Reconecta com segurança na Evolution API — nunca apaga uma instância já
+  // conectada. Se a instância existir mas estiver desconectada, reconecta; se
+  // não existir, cria e conecta (buscar QR sozinho nunca resolve esse caso).
   const resetWhatsapp = async () => {
     setWaResetting(true)
     setWaQrError(null)
     try {
       const res = await fetch('/api/whatsapp/reset', { method: 'POST' })
       const d = await res.json()
-      const base64 = d?.qrcode?.base64 || null
-      if (d?.ok && base64) {
-        startQrTimer(base64)
+      const resultado = interpretarRespostaReset(d)
+      if (resultado.tipo === 'qr') {
+        startQrTimer(resultado.base64)
+      } else if (resultado.tipo === 'connected') {
+        // Já estava conectado — reconectar não apaga nada, não é erro.
+        setWaStatus('connected')
+        setWaShowQr(false)
+        setWaQrBase64(null)
+        if (waPollRef.current) { clearInterval(waPollRef.current); waPollRef.current = null }
+        if (waTimerRef.current) { clearInterval(waTimerRef.current); waTimerRef.current = null }
       } else {
-        setWaQrError(d?.error || 'Não foi possível resetar a conexão do WhatsApp.')
+        setWaQrError(resultado.mensagem)
       }
     } catch {
       setWaQrError('Erro de rede ao resetar a conexão.')

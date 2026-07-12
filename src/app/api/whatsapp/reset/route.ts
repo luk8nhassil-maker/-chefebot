@@ -1,96 +1,126 @@
 import { NextRequest, NextResponse } from "next/server";
 import { salvarStatusConexao } from "@/lib/conexaoWhatsapp";
 import { verifyToken } from "@/lib/auth";
-
-const _baseUrl    = process.env.EVOLUTION_API_URL ?? "evolution-api-production-8f99.up.railway.app";
-const BASE        = _baseUrl.startsWith("http") ? _baseUrl : `https://${_baseUrl}`;
-const KEY         = process.env.EVOLUTION_API_KEY!;
-const INSTANCE    = "chefebot";
-const WEBHOOK_URL = "https://chefebot-pjif.vercel.app/api/whatsapp";
+import { obterConfigEvolution, extrairQrBase64 } from "@/lib/evolutionApi";
 
 // Sem cookie ou token invalido/expirado -> 401 (sem sessao).
 // Sessao valida mas papel sem permissao -> 403.
 // Papel autorizado -> segue normalmente.
-async function checkAuth(req: NextRequest): Promise<{ status: 401 | 403 } | { status: 200; role: string }> {
+async function checkAuth(req: NextRequest): Promise<{ status: 401 | 403 } | { status: 200 }> {
   const token = req.cookies.get("auth-token")?.value ?? null;
   if (!token) return { status: 401 };
   const payload = await verifyToken(token);
   if (!payload) return { status: 401 };
   if (!["admin", "dev"].includes(payload.role as string)) return { status: 403 };
-  return { status: 200, role: payload.role as string };
+  return { status: 200 };
 }
 
-// Reseta a instância inteira (logout+delete+create) — mais destrutivo que o
-// simples "escanear QR", por isso restrito a admin/dev (nunca atendente).
+// Reconecta com segurança — NUNCA faz logout/delete de uma instância já
+// conectada. Se a instância existir mas estiver desconectada, reconecta; se
+// não existir, cria e conecta. Restrito a admin/dev.
 export async function POST(req: NextRequest) {
   const auth = await checkAuth(req);
   if (auth.status === 401) return NextResponse.json({ error: "Nao autorizado" }, { status: 401 });
   if (auth.status === 403) return NextResponse.json({ error: "Sem permissao" }, { status: 403 });
 
+  const config = obterConfigEvolution();
+  if (!config) {
+    return NextResponse.json(
+      { ok: false, estado: "provider_not_configured", error: "EVOLUTION_API_URL/EVOLUTION_API_KEY não configurados." },
+      { status: 503 }
+    );
+  }
+
   try {
-    // 1) Logout (ignora erro — pode já estar desconectada)
-    const logoutRes = await fetch(`${BASE}/instance/logout/${INSTANCE}`, {
-      method: "DELETE",
-      headers: { apikey: KEY },
-      cache: "no-store",
-    }).catch(() => null);
-    console.log("[RESET] logout:", logoutRes?.status ?? "network-error");
-
-    // 2) Deletar instância completamente
-    const deleteRes = await fetch(`${BASE}/instance/delete/${INSTANCE}`, {
-      method: "DELETE",
-      headers: { apikey: KEY },
-      cache: "no-store",
-    }).catch(() => null);
-    const deleteText = await deleteRes?.text().catch(() => "");
-    console.log("[RESET] delete:", deleteRes?.status ?? "network-error", deleteText?.slice(0, 200));
-
-    // 3) Pausa o bot imediatamente
-    await salvarStatusConexao("disconnected");
-
-    // 4) Criar nova instância limpa
-    const createRes = await fetch(`${BASE}/instance/create`, {
-      method: "POST",
-      headers: { apikey: KEY, "Content-Type": "application/json" },
-      body: JSON.stringify({ instanceName: INSTANCE, qrcode: true, integration: "WHATSAPP-BAILEYS" }),
+    // 1) Verifica o estado atual — nunca apaga uma instância já conectada.
+    const stateRes = await fetch(`${config.baseUrl}/instance/connectionState/${config.instanceName}`, {
+      headers: { apikey: config.apiKey },
       cache: "no-store",
     });
-    const createData = await createRes.json().catch(() => ({}));
-    console.log("[RESET] create:", createRes.status, JSON.stringify(createData).slice(0, 200));
+    const stateData = await stateRes.json().catch(() => ({}));
+    const estadoAtual = (stateData as { instance?: { state?: string } })?.instance?.state;
+    console.log("[RESET] etapa: connectionState, status:", stateRes.status, "estado:", estadoAtual ?? "desconhecido");
 
-    if (!createRes.ok) {
-      console.error("[RESET] create failed:", JSON.stringify(createData));
-      return NextResponse.json({ ok: false, error: "Falha ao criar instância" }, { status: 502 });
+    if (stateRes.ok && estadoAtual === "open") {
+      await salvarStatusConexao("connected");
+      return NextResponse.json({ ok: true, estado: "connected" });
     }
 
-    // 5) Configurar webhook na nova instância
-    const webhookRes = await fetch(`${BASE}/webhook/set/${INSTANCE}`, {
-      method: "POST",
-      headers: { apikey: KEY, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        webhook: {
-          enabled: true,
-          url: WEBHOOK_URL,
-          webhookByEvents: false,
-          webhookBase64: false,
-          events: ["MESSAGES_UPSERT", "MESSAGES_UPDATE", "CONNECTION_UPDATE", "QRCODE_UPDATED", "SEND_MESSAGE", "CALL"],
-        },
-      }),
-      cache: "no-store",
-    }).catch(() => null);
-    console.log("[RESET] webhook:", webhookRes?.status ?? "network-error");
+    if (stateRes.status === 401 || stateRes.status === 403) {
+      return NextResponse.json({ ok: false, error: "Credencial inválida (EVOLUTION_API_KEY)." }, { status: 502 });
+    }
 
-    // 6) Conectar para obter QR code
-    const connRes = await fetch(`${BASE}/instance/connect/${INSTANCE}`, {
-      headers: { apikey: KEY },
+    const instanciaExiste = stateRes.status !== 404;
+
+    if (!instanciaExiste) {
+      // 2) Instância não existe: cria (nunca faz logout/delete de nada).
+      const createRes = await fetch(`${config.baseUrl}/instance/create`, {
+        method: "POST",
+        headers: { apikey: config.apiKey, "Content-Type": "application/json" },
+        body: JSON.stringify({ instanceName: config.instanceName, qrcode: true, integration: "WHATSAPP-BAILEYS" }),
+        cache: "no-store",
+      });
+      const createData = await createRes.json().catch(() => ({}));
+      const base64DoCreate = extrairQrBase64(createData);
+      console.log("[RESET] etapa: create, status:", createRes.status, "has qr:", !!base64DoCreate);
+
+      if (createRes.status === 401 || createRes.status === 403) {
+        return NextResponse.json({ ok: false, error: "Credencial inválida (EVOLUTION_API_KEY)." }, { status: 502 });
+      }
+
+      const jaExiste = createRes.status === 409;
+      if (!createRes.ok && !jaExiste) {
+        console.error("[RESET] etapa: create, falhou, status:", createRes.status);
+        return NextResponse.json({ ok: false, error: "Falha ao criar instância" }, { status: 502 });
+      }
+
+      // 3) Configura o webhook na instância (nova ou já existente)
+      const webhookRes = await fetch(`${config.baseUrl}/webhook/set/${config.instanceName}`, {
+        method: "POST",
+        headers: { apikey: config.apiKey, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          webhook: {
+            enabled: true,
+            url: config.webhookUrl,
+            webhookByEvents: false,
+            webhookBase64: false,
+            events: ["MESSAGES_UPSERT", "MESSAGES_UPDATE", "CONNECTION_UPDATE", "QRCODE_UPDATED", "SEND_MESSAGE", "CALL"],
+          },
+        }),
+        cache: "no-store",
+      }).catch(() => null);
+      console.log("[RESET] etapa: webhook, status:", webhookRes?.status ?? "network-error");
+
+      if (base64DoCreate) {
+        await salvarStatusConexao("connecting");
+        return NextResponse.json({
+          ok: true,
+          estado: "qr_required",
+          qrcode: {
+            base64: base64DoCreate,
+            code: (createData as Record<string, unknown>)?.code as string | undefined ?? null,
+            pairingCode: null,
+          },
+        });
+      }
+    }
+
+    // 4) Instância existe mas está desconectada (ou acabou de ser criada sem
+    // QR direto na resposta) — conecta para obter o QR. Nunca faz logout/delete.
+    const connRes = await fetch(`${config.baseUrl}/instance/connect/${config.instanceName}`, {
+      headers: { apikey: config.apiKey },
       cache: "no-store",
     });
     const qrData = await connRes.json().catch(() => ({}));
-    console.log("[RESET] connect:", connRes.status, "has base64:", !!qrData?.base64, "keys:", Object.keys(qrData || {}).join(","));
+    const base64 = extrairQrBase64(qrData);
+    console.log("[RESET] etapa: connect, status:", connRes.status, "has qr:", !!base64);
 
-    const base64 = qrData?.base64 || qrData?.qrcode?.base64 || null;
+    if (connRes.status === 401 || connRes.status === 403) {
+      return NextResponse.json({ ok: false, error: "Credencial inválida (EVOLUTION_API_KEY)." }, { status: 502 });
+    }
+
     if (!base64) {
-      console.error("[RESET] QR não gerado:", JSON.stringify(qrData).slice(0, 300));
+      console.error("[RESET] etapa: connect, QR não gerado, status:", connRes.status);
       return NextResponse.json({ ok: false, error: "QR code não gerado pela Evolution API" }, { status: 502 });
     }
 
@@ -98,10 +128,15 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      qrcode: { base64, code: qrData?.code ?? null, pairingCode: qrData?.pairingCode ?? null },
+      estado: "qr_required",
+      qrcode: {
+        base64,
+        code: (qrData as Record<string, unknown>)?.code as string | undefined ?? null,
+        pairingCode: (qrData as Record<string, unknown>)?.pairingCode as string | undefined ?? null,
+      },
     });
   } catch (e) {
-    console.error("[RESET] Erro inesperado:", e);
+    console.error("[RESET] etapa: inesperada, erro:", e instanceof Error ? e.name : "erro desconhecido");
     return NextResponse.json({ ok: false, error: "Falha ao resetar conexão" }, { status: 502 });
   }
 }
