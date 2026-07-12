@@ -2612,7 +2612,7 @@ main{width:100%;padding:6px 20px 20px}
 .flavor-modal-msg{font-size:13.5px;font-weight:700;color:var(--text);margin-top:4px}
 .flavor-modal-hint{font-size:12.5px;color:var(--text-sub);margin-top:3px;line-height:1.35}
 .cartbar{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:540px;z-index:50;background:transparent;padding:0 20px calc(env(safe-area-inset-bottom) + 14px);pointer-events:none}
-.cartbar-inner{margin:0 auto;display:flex;align-items:center;gap:14px;background:#15110f;border:1px solid rgba(255,255,255,.1);border-radius:20px;padding:12px 12px 12px 16px;box-shadow:0 -10px 34px rgba(0,0,0,.35);pointer-events:auto}
+.cartbar-inner{margin:0 auto;display:flex;align-items:center;gap:14px;background:var(--surface);border:1px solid var(--line-strong);border-radius:20px;padding:12px 12px 12px 16px;box-shadow:0 -10px 34px rgba(0,0,0,.16);pointer-events:auto}
 .cartbar-info{flex:1}
 .cartbar-count{font-size:12.5px;color:var(--text-sub);font-weight:500}
 .cartbar-total{font-family:var(--font-ui);font-weight:700;font-size:15px;line-height:1.2;letter-spacing:0}
