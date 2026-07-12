@@ -64,6 +64,16 @@ export async function GET(req: NextRequest) {
       criadoEm: m.createdAt,
     }));
 
+  const recompensa = config.recompensa
+    ? {
+        ativa: config.recompensa.ativa,
+        custoPontos: config.recompensa.custoPontos,
+        tipo: config.recompensa.tipo,
+        descricao: config.recompensa.descricao,
+        disponivel: config.recompensa.ativa && saldoPontos >= config.recompensa.custoPontos,
+      }
+    : null;
+
   return NextResponse.json({
     saldoPontos,
     pontosPrevistos,
@@ -72,6 +82,7 @@ export async function GET(req: NextRequest) {
     progressoPercentual,
     metaAtingida,
     extrato,
+    recompensa,
     legado: {
       pizzasAcumuladas,
     },

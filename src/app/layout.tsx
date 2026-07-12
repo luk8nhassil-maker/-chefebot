@@ -24,6 +24,7 @@ export default function RootLayout({
   return (
     <html
       lang="pt-BR"
+      data-theme="light"
       className={`${archivo.variable} ${geistMono.variable} h-full antialiased`}
     >
       <head>
@@ -31,11 +32,28 @@ export default function RootLayout({
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         <meta name="apple-mobile-web-app-title" content="ChefeBot" />
-        <meta name="theme-color" content="#ff6b00" />
+        <meta name="theme-color" content="#ffcd00" />
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
         <link rel="manifest" href="/manifest.json" />
         <link rel="apple-touch-icon" href="/icon-192.png" />
+        {/* Inicializa o tema ANTES da hidratação para evitar flash.
+            Padrão fixo = Light. Nunca segue o tema do SO/navegador: só ativa
+            Dark quando o usuário salvou explicitamente 'dark'. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              (function(){
+                try {
+                  var t = localStorage.getItem('chefebot-theme');
+                  document.documentElement.setAttribute('data-theme', t === 'dark' ? 'dark' : 'light');
+                } catch (e) {
+                  document.documentElement.setAttribute('data-theme', 'light');
+                }
+              })();
+            `,
+          }}
+        />
         <script
           dangerouslySetInnerHTML={{
             __html: `

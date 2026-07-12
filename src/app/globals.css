@@ -1,13 +1,194 @@
 @import "tailwindcss";
 
-:root {
-  --background: #060606;
-  --foreground: #f4f1ec;
+/* ============================================================================
+   ChefeBot — Sistema oficial de temas e cores
+   ----------------------------------------------------------------------------
+   Fonte ÚNICA da verdade para cor. Nunca use hex/rgb soltos em páginas ou
+   componentes novos: consuma sempre um token semântico via var(--token).
+
+   Marca oficial:  primary #FFCD00 · navy #192230 · slate #3D474E · graphite #2C2F38
+   O amarelo é a AÇÃO PRINCIPAL / identidade — use com contenção (botões, item
+   ativo, foco, detalhes). Nunca amarelo em grandes áreas, warning ou texto
+   amarelo sobre fundo claro. Estados "pendente/atenção" usam roxo (--attention).
+
+   Tema padrão FIXO: Light. Dark só quando o usuário escolher (data-theme="dark").
+   Nunca alternar automaticamente pelo tema do SO/navegador.
+   ========================================================================== */
+
+:root,
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --background: #f6f7f9;
+  --surface: #ffffff;
+  --surface-secondary: #eef1f4;
+  --surface-elevated: #ffffff;
+
+  --foreground: #192230;
+  --foreground-secondary: #3d474e;
+  --foreground-muted: #66727c;
+  --text-primary: var(--foreground);
+  --text-secondary: var(--foreground-secondary);
+  --text-muted: var(--foreground-muted);
+  --text-disabled: #9ca3af;
+
+  --border: #dce1e6;
+  --border-strong: #c7cdd3;
+
+  --primary: #ffcd00;
+  --primary-hover: #e6b900;
+  --primary-active: #cca400;
+  --primary-foreground: #192230;
+  --primary-soft: #fff6cc;
+  --primary-soft-foreground: #7a5c00;
+  --brand-text: #6b5700;
+
+  --secondary: #192230;
+  --secondary-hover: #2c2f38;
+  --secondary-foreground: #ffffff;
+
+  --success: #16a34a;
+  --danger: #dc2626;
+  --info: #2563eb;
+  --attention: #7c3aed;
+
+  --success-text: #166534;
+  --success-surface: #dcfce7;
+  --success-border: #86efac;
+  --danger-text: #b91c1c;
+  --danger-surface: #fef2f2;
+  --danger-border: #fca5a5;
+  --info-text: #1d4ed8;
+  --info-surface: #eff6ff;
+  --info-border: #93c5fd;
+  --attention-text: #6d28d9;
+  --attention-surface: #f5f3ff;
+  --attention-border: #c4b5fd;
+  --success-soft: var(--success-surface);
+  --success-soft-foreground: var(--success-text);
+  --danger-soft: var(--danger-surface);
+  --danger-soft-foreground: var(--danger-text);
+  --info-soft: var(--info-surface);
+  --info-soft-foreground: var(--info-text);
+  --attention-soft: var(--attention-surface);
+  --attention-soft-foreground: var(--attention-text);
+
+  --on-primary: var(--primary-foreground);
+  --on-secondary: var(--secondary-foreground);
+  --on-danger: #ffffff;
+  --on-success: #ffffff;
+
+  --disabled-background: #e5e7eb;
+  --disabled-foreground: #9ca3af;
+
+  --focus-ring: #cca400;
+  --overlay-rgb: 25, 34, 48;
+
+  --shadow-sm: 0 1px 2px rgba(25, 34, 48, 0.06);
+  --shadow-md: 0 4px 12px rgba(25, 34, 48, 0.08);
+  --shadow-lg: 0 12px 32px rgba(25, 34, 48, 0.12);
+
+  --whatsapp: #25d366;
+  --whatsapp-foreground: #ffffff;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --background: #192230;
+  --surface: #232a33;
+  --surface-secondary: #2c2f38;
+  --surface-elevated: #343a43;
+
+  --foreground: #f8fafc;
+  --foreground-secondary: #d1d5db;
+  --foreground-muted: #9ca3af;
+  --text-primary: var(--foreground);
+  --text-secondary: var(--foreground-secondary);
+  --text-muted: var(--foreground-muted);
+  --text-disabled: #6b7280;
+
+  --border: #3d474e;
+  --border-strong: #59636b;
+
+  --primary: #ffcd00;
+  --primary-hover: #ffd633;
+  --primary-active: #e6b900;
+  --primary-foreground: #192230;
+  --primary-soft: rgba(255, 205, 0, 0.14);
+  --primary-soft-foreground: #ffcd00;
+  --brand-text: #ffda3d;
+
+  --secondary: #3d474e;
+  --secondary-hover: #4b565e;
+  --secondary-foreground: #ffffff;
+
+  --success: #22c55e;
+  --danger: #ef4444;
+  --info: #60a5fa;
+  --attention: #a78bfa;
+
+  --success-text: #86efac;
+  --success-surface: rgba(34, 197, 94, 0.14);
+  --success-border: rgba(134, 239, 172, 0.35);
+  --danger-text: #fca5a5;
+  --danger-surface: rgba(239, 68, 68, 0.14);
+  --danger-border: rgba(252, 165, 165, 0.35);
+  --info-text: #93c5fd;
+  --info-surface: rgba(59, 130, 246, 0.14);
+  --info-border: rgba(147, 197, 253, 0.35);
+  --attention-text: #c4b5fd;
+  --attention-surface: rgba(139, 92, 246, 0.14);
+  --attention-border: rgba(196, 181, 253, 0.35);
+  --success-soft: var(--success-surface);
+  --success-soft-foreground: var(--success-text);
+  --danger-soft: var(--danger-surface);
+  --danger-soft-foreground: var(--danger-text);
+  --info-soft: var(--info-surface);
+  --info-soft-foreground: var(--info-text);
+  --attention-soft: var(--attention-surface);
+  --attention-soft-foreground: var(--attention-text);
+
+  --on-primary: var(--primary-foreground);
+  --on-secondary: var(--secondary-foreground);
+  --on-danger: #ffffff;
+  --on-success: #192230;
+
+  --disabled-background: #343a43;
+  --disabled-foreground: #6b7280;
+
+  --focus-ring: #ffd633;
+  --overlay-rgb: 255, 255, 255;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.5);
+
+  --whatsapp: #25d366;
+  --whatsapp-foreground: #ffffff;
 }
 
 @theme inline {
   --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-secondary: var(--surface-secondary);
+  --color-surface-elevated: var(--surface-elevated);
   --color-foreground: var(--foreground);
+  --color-foreground-secondary: var(--foreground-secondary);
+  --color-foreground-muted: var(--foreground-muted);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-active: var(--primary-active);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-success: var(--success);
+  --color-danger: var(--danger);
+  --color-info: var(--info);
+  --color-attention: var(--attention);
+  --color-whatsapp: var(--whatsapp);
   --font-sans: var(--font-archivo);
   --font-mono: var(--font-geist-mono);
 }
@@ -22,4 +203,9 @@ body {
   color: var(--foreground);
   font-family: 'Archivo', var(--font-archivo), sans-serif;
   overflow-x: hidden;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
 }

@@ -4,8 +4,8 @@
   "description": "Painel de pedidos ChefeBot",
   "start_url": "/pedidos",
   "display": "standalone",
-  "background_color": "#060606",
-  "theme_color": "#ff6b00",
+  "background_color": "#f6f7f9",
+  "theme_color": "#ffcd00",
   "orientation": "portrait",
   "categories": [
     "food",
