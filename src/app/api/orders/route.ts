@@ -4,7 +4,16 @@ import { redis } from '@/lib/redis'
 import { proximoNumeroPedido } from '@/lib/numeracao'
 import { confirmarPixMetadata, criarPixMetadata, sanitizarPedidoPixResposta, type PixMetadata } from '@/lib/pix'
 import type { PedidoEntregador } from '@/types/entregador'
-import { creditarFidelidadePedido } from '@/lib/fidelidade'
+import {
+  creditarFidelidadePedido,
+  creditarPontosPedidoEntregue,
+  calcularPontosElegiveisPedido,
+  registrarMovimentoPontosIdempotente,
+  construirEventoIdPontos,
+  obterExtratoPontos,
+  derivarClienteIdPorTelefone,
+  reverterResgateConfirmado,
+} from '@/lib/fidelidade'
 
 const APP_BASE_URL = 'https://chefebot-pjif.vercel.app'
 
@@ -32,6 +41,8 @@ type Pedido = {
   horarioInicio?: string
   clienteId?: string
   pizzasCount?: number
+  resgateId?: string
+  descontoFidelidade?: number
   // Campos de arquivamento
   isArchived?: boolean
   archivedAt?: string
@@ -124,6 +135,7 @@ export async function PATCH(req: NextRequest) {
   const pedidos = await getPedidos()
   const index = pedidos.findIndex(p => p.id === id)
   if (index === -1) return NextResponse.json({ error: 'Pedido nao encontrado' }, { status: 404 })
+  const statusAnterior = pedidos[index].status
 
   // Confirmação de PIX manual — sem alterar status, sem enviar mensagem.
   // Registra origem/horário no metadata (auditoria); confirmação anterior
@@ -150,12 +162,12 @@ export async function PATCH(req: NextRequest) {
   }
   await redis.set('pedidos', pedidos)
 
-  if (silent) return NextResponse.json(sanitizarPedidoPixResposta(pedidos[index]))
-
-  await notificarCliente(pedidos[index].telefone, status, pedidos[index].cliente)
+  if (!silent) {
+    await notificarCliente(pedidos[index].telefone, status, pedidos[index].cliente)
+  }
 
   // Notifica entregador no WhatsApp quando pedido sai para entrega + salva no Redis + envia link de rastreamento ao cliente
-  if (status === 'saiu_entrega' && entregador?.telefone) {
+  if (!silent && status === 'saiu_entrega' && entregador?.telefone) {
     const pedido = pedidos[index]
     const phone = entregador.telefone.replace(/\D/g, '')
     const phoneFormatado = phone.startsWith('55') ? phone : '55' + phone
@@ -206,6 +218,7 @@ export async function PATCH(req: NextRequest) {
   }
 
   if (status === 'entregue') {
+    if (!silent) {
     const phone = sanitizePhone(pedidos[index].telefone)
     const chaveAvaliacao = `avaliacao_enviada:${id}`
     const jaEnviou = await redis.get(chaveAvaliacao)
@@ -230,6 +243,8 @@ export async function PATCH(req: NextRequest) {
       }
     }
 
+    }
+
     // Credito de fidelidade: so conta quando o pedido chega a 'entregue'
     // (finalizado com sucesso). Idempotente por pedidoId — nunca duplica.
     // Isolado em try/catch proprio: falha aqui jamais pode afetar a resposta
@@ -242,6 +257,83 @@ export async function PATCH(req: NextRequest) {
       })
     } catch (err) {
       console.error('[ChefeBot] Erro ao creditar fidelidade (ignorado):', err)
+    }
+
+    // Fidelidade por pontos (novo modelo, R$1 = 1 ponto): roda em paralelo ao
+    // credito antigo acima, sem substitui-lo. Mesma protecao — isolado em
+    // try/catch proprio, idempotente por pedidoId, nunca impede o pedido de
+    // ser marcado como entregue nem a resposta do PATCH.
+    try {
+      await creditarPontosPedidoEntregue({
+        id,
+        status: 'entregue',
+        telefone: pedidos[index].telefone,
+        clienteId: pedidos[index].clienteId,
+        total: pedidos[index].total,
+        taxaEntrega: pedidos[index].taxaEntrega,
+      })
+    } catch (err) {
+      console.error('[ChefeBot] Erro ao creditar pontos de fidelidade (ignorado):', err)
+    }
+  }
+
+  // Cancelamento (modelo novo de pontos): registra a resolucao do previsto ou
+  // o estorno de um credito confirmado, sempre no cliente canonico derivado
+  // do telefone. Repetir "cancelado" nao cria novo evento; estorno so existe
+  // se houver confirmado original no extrato.
+  if (status === 'cancelado' && statusAnterior !== 'cancelado') {
+    try {
+      const clienteIdPontos = derivarClienteIdPorTelefone(pedidos[index].telefone)
+      if (clienteIdPontos) {
+        const pontosElegiveis = calcularPontosElegiveisPedido({
+          total: pedidos[index].total,
+          taxaEntrega: pedidos[index].taxaEntrega,
+        })
+        if (statusAnterior === 'entregue') {
+          if (pontosElegiveis > 0) {
+            const extratoAtual = await obterExtratoPontos(clienteIdPontos)
+            const teveConfirmado = extratoAtual.some(m => m.pedidoId === id && m.tipo === 'confirmado')
+            if (teveConfirmado) {
+              await registrarMovimentoPontosIdempotente(clienteIdPontos, {
+                eventoId: construirEventoIdPontos(id, 'estornado'),
+                pedidoId: id,
+                tipo: 'estornado',
+                pontos: pontosElegiveis,
+                motivo: `Pedido ${id} corrigido para cancelado apos entrega`,
+              })
+            }
+          }
+        } else if (pontosElegiveis > 0) {
+          await registrarMovimentoPontosIdempotente(clienteIdPontos, {
+            eventoId: construirEventoIdPontos(id, 'cancelado'),
+            pedidoId: id,
+            tipo: 'cancelado',
+            pontos: pontosElegiveis,
+            motivo: `Pedido ${id} cancelado antes da entrega`,
+          })
+        }
+      }
+    } catch (err) {
+      console.error('[ChefeBot] Erro ao registrar cancelamento de pontos (ignorado):', err)
+    }
+
+  }
+
+  // Reverte resgate de fidelidade (Etapa 5), se este pedido tinha usado um:
+  // fica fora do guard de transicao para permitir reprocessar falha anterior
+  // quando o pedido ja esta cancelado. A lib garante idempotencia.
+  if (status === 'cancelado' && pedidos[index].resgateId) {
+    try {
+      const clienteIdResgate = derivarClienteIdPorTelefone(pedidos[index].telefone)
+      if (clienteIdResgate) {
+        await reverterResgateConfirmado(
+          clienteIdResgate,
+          pedidos[index].resgateId,
+          `Pedido ${id} cancelado apos usar resgate de fidelidade`
+        )
+      }
+    } catch (err) {
+      console.error('[ChefeBot] Erro ao reverter resgate de fidelidade (ignorado):', err)
     }
   }
 

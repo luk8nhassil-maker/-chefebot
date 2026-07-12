@@ -1,15 +1,30 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { Gift, Phone, MessageCircle, LogOut, Receipt, Sparkles, Clock, Pizza } from 'lucide-react'
+
+type Movimento = {
+  id: string
+  pedidoId: string | null
+  tipo: string
+  pontos: number
+  descricao: string
+  criadoEm: string
+}
+
+type Recompensa = { recompensaId: string; status: string; criadoEm: string }
 
 type Fidelidade = {
   ativo: boolean
-  progresso: number
-  meta: number
-  faltam: number
-  tipoRecompensa: string
   descricaoRecompensa: string
-  recompensasDisponiveis: { recompensaId: string; descricao: string }[]
+  saldoPontos: number
+  pontosPrevistos: number
+  metaPontos: number
+  pontosFaltantes: number
+  progressoPercentual: number
+  metaAtingida: boolean
+  extrato: Movimento[]
+  recompensas: Recompensa[]
 }
 
 type PedidoResumo = {
@@ -22,37 +37,35 @@ type PedidoResumo = {
 
 type Perfil = {
   cliente: { nome: string | null; telefone: string }
-  fidelidade: Fidelidade
   ultimosPedidos: PedidoResumo[]
-}
-
-const inputStyle: React.CSSProperties = {
-  width: '100%',
-  boxSizing: 'border-box',
-  padding: '14px 16px',
-  borderRadius: 12,
-  border: '1px solid var(--surface-secondary)',
-  background: 'var(--surface)',
-  color: 'var(--foreground)',
-  fontSize: 16,
-  fontFamily: 'Archivo, sans-serif',
-}
-
-const botaoPrimario: React.CSSProperties = {
-  width: '100%',
-  padding: 14,
-  borderRadius: 12,
-  background: 'var(--primary)',
-  color: 'var(--foreground)',
-  fontSize: 15,
-  fontWeight: 700,
-  border: 'none',
-  cursor: 'pointer',
-  fontFamily: 'Archivo, sans-serif',
 }
 
 function money(v?: number) {
   return `R$ ${(v ?? 0).toFixed(2).replace('.', ',')}`
+}
+
+function dataCurta(iso: string) {
+  try {
+    return new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
+  } catch {
+    return ''
+  }
+}
+
+const cores = {
+  fundo: 'var(--background)',
+  moldura: 'var(--surface-secondary)',
+  cardBg: 'var(--surface)',
+  cardBorda: 'var(--border)',
+  navy: 'var(--foreground)',
+  navyCard: 'var(--secondary)',
+  navyCardTexto: 'var(--secondary-foreground)',
+  textoSecundario: 'var(--foreground-secondary)',
+  textoTerciario: 'var(--foreground-muted)',
+  amarelo: 'var(--primary)',
+  amareloTexto: 'var(--primary-foreground)',
+  sucesso: 'var(--success-text)',
+  perigo: 'var(--danger-text)',
 }
 
 export default function ClientePage() {
@@ -62,13 +75,19 @@ export default function ClientePage() {
   const [erro, setErro] = useState('')
   const [enviando, setEnviando] = useState(false)
   const [perfil, setPerfil] = useState<Perfil | null>(null)
+  const [fidelidade, setFidelidade] = useState<Fidelidade | null>(null)
+  const [resgatando, setResgatando] = useState(false)
+  const [resgateErro, setResgateErro] = useState('')
 
   async function carregarPerfil() {
     try {
-      const res = await fetch('/api/cliente/perfil', { cache: 'no-store' })
-      if (res.ok) {
-        const data = await res.json()
-        setPerfil(data)
+      const [resPerfil, resFidelidade] = await Promise.all([
+        fetch('/api/cliente/perfil', { cache: 'no-store' }),
+        fetch('/api/cliente/fidelidade', { cache: 'no-store' }),
+      ])
+      if (resPerfil.ok && resFidelidade.ok) {
+        setPerfil(await resPerfil.json())
+        setFidelidade(await resFidelidade.json())
         setStep('perfil')
         return true
       }
@@ -117,32 +136,111 @@ export default function ClientePage() {
   async function sair() {
     try { await fetch('/api/cliente/logout', { method: 'POST' }) } catch {}
     setPerfil(null)
+    setFidelidade(null)
     setTelefone('')
     setCodigo('')
     setStep('telefone')
   }
 
+  // CTA de resgate só aparece quando a meta atual (recalculada no servidor,
+  // não um snapshot antigo) bate, a fidelidade está ativa e existe pelo menos
+  // uma recompensa aberta de verdade — nunca confia só na existência de um
+  // texto de "próxima recompensa".
+  const podeResgatar = !!fidelidade && fidelidade.ativo && fidelidade.metaAtingida && fidelidade.recompensas.length > 0
+
+  async function resgatar() {
+    if (!fidelidade || fidelidade.recompensas.length === 0) return
+    setResgateErro('')
+    setResgatando(true)
+    try {
+      const res = await fetch('/api/cliente/fidelidade/resgate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recompensaId: fidelidade.recompensas[0].recompensaId }),
+      })
+      const data = await res.json()
+      if (!res.ok || !data.ok) { setResgateErro(data.error || 'Não foi possível reservar o resgate agora.'); setResgatando(false); return }
+      try {
+        sessionStorage.setItem('cf_resgate_pontos', JSON.stringify({
+          resgateId: data.resgateId,
+          valorDescontoMaximo: data.valorDescontoMaximo,
+          expiraEm: data.expiraEm,
+        }))
+      } catch {}
+      window.location.href = '/cardapio'
+    } catch {
+      setResgateErro('Erro de conexão. Tente novamente.')
+      setResgatando(false)
+    }
+  }
+
+  const inputStyle: React.CSSProperties = {
+    width: '100%',
+    boxSizing: 'border-box',
+    padding: '14px 16px',
+    borderRadius: 12,
+    border: `1px solid ${cores.cardBorda}`,
+    background: cores.cardBg,
+    color: cores.navy,
+    fontSize: 16,
+    fontFamily: 'Archivo, sans-serif',
+  }
+
+  const botaoPrimario: React.CSSProperties = {
+    width: '100%',
+    padding: 14,
+    borderRadius: 12,
+    background: cores.amarelo,
+    color: cores.amareloTexto,
+    fontSize: 15,
+    fontWeight: 700,
+    border: 'none',
+    cursor: 'pointer',
+    fontFamily: 'Archivo, sans-serif',
+  }
+
   return (
-    <div style={{ background: 'var(--background)', minHeight: '100dvh', fontFamily: 'Archivo, sans-serif', color: 'var(--foreground)', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ background: 'var(--surface)', borderBottom: '1px solid var(--surface-secondary)', padding: '12px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+    <div style={{ background: cores.fundo, minHeight: '100dvh', fontFamily: 'Archivo, sans-serif', color: cores.navy, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ background: cores.cardBg, borderBottom: `1px solid ${cores.cardBorda}`, padding: '12px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span style={{ fontSize: 22 }}>🍕</span>
-          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--brand-text)' }}>Sua fidelidade</div>
+          <Pizza size={22} color={cores.navy} />
+          <div style={{ fontSize: 15, fontWeight: 700, color: cores.navy }}>Sua fidelidade</div>
         </div>
-        <a href="/cardapio" style={{ fontSize: 13, color: 'var(--foreground-secondary)', textDecoration: 'none' }}>← Cardápio</a>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          {step === 'perfil' && (
+            <button onClick={sair} aria-label="Sair da conta" style={{ background: 'none', border: 'none', color: cores.textoSecundario, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontFamily: 'Archivo, sans-serif' }}>
+              <LogOut size={16} /> Sair
+            </button>
+          )}
+          <a href="/cardapio" style={{ fontSize: 13, color: cores.textoSecundario, textDecoration: 'none' }}>← Cardápio</a>
+        </div>
       </div>
 
-      <div style={{ flex: 1, padding: '28px 20px', maxWidth: 420, width: '100%', margin: '0 auto', boxSizing: 'border-box' }}>
+      <div
+        className="cliente-conteudo"
+        style={{
+          flex: 1,
+          padding: '28px 20px',
+          maxWidth: 1180,
+          width: '100%',
+          margin: '0 auto',
+          boxSizing: 'border-box',
+        }}
+      >
         {step === 'carregando' && (
-          <p style={{ textAlign: 'center', color: 'var(--foreground-secondary)', fontSize: 14 }}>Carregando...</p>
+          <p style={{ textAlign: 'center', color: cores.textoSecundario, fontSize: 14 }}>Carregando...</p>
         )}
 
         {step === 'telefone' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14, maxWidth: 420, margin: '0 auto' }}>
             <div style={{ textAlign: 'center', marginBottom: 4 }}>
-              <div style={{ fontSize: 40, marginBottom: 8 }}>🎁</div>
+              <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
+                <div style={{ background: cores.navyCard, borderRadius: 999, width: 64, height: 64, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Gift size={30} color={cores.amarelo} />
+                </div>
+              </div>
               <h1 style={{ fontSize: 18, fontWeight: 800, margin: '0 0 6px' }}>Entre com seu WhatsApp</h1>
-              <p style={{ fontSize: 13.5, color: 'var(--foreground-secondary)', margin: 0, lineHeight: 1.5 }}>
+              <p style={{ fontSize: 13.5, color: cores.textoSecundario, margin: 0, lineHeight: 1.5 }}>
                 Suas pizzas começam a contar rumo à sua recompensa.
               </p>
             </div>
@@ -154,22 +252,26 @@ export default function ClientePage() {
               onChange={(e) => setTelefone(e.target.value)}
               style={inputStyle}
             />
-            {erro && <p style={{ color: 'var(--danger)', fontSize: 13, margin: 0 }}>{erro}</p>}
-            <button onClick={pedirCodigo} disabled={enviando} style={{ ...botaoPrimario, opacity: enviando ? 0.6 : 1 }}>
-              {enviando ? 'Enviando...' : 'Receber código no WhatsApp'}
+            {erro && <p style={{ color: cores.perigo, fontSize: 13, margin: 0 }}>{erro}</p>}
+            <button onClick={pedirCodigo} disabled={enviando} style={{ ...botaoPrimario, opacity: enviando ? 0.6 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+              <Phone size={16} /> {enviando ? 'Enviando...' : 'Receber código no WhatsApp'}
             </button>
-            <a href="/cardapio" style={{ textAlign: 'center', fontSize: 13, color: 'var(--foreground-secondary)', textDecoration: 'none' }}>
+            <a href="/cardapio" style={{ textAlign: 'center', fontSize: 13, color: cores.textoSecundario, textDecoration: 'none' }}>
               Prefiro pedir sem entrar agora
             </a>
           </div>
         )}
 
         {step === 'otp' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14, maxWidth: 420, margin: '0 auto' }}>
             <div style={{ textAlign: 'center', marginBottom: 4 }}>
-              <div style={{ fontSize: 40, marginBottom: 8 }}>💬</div>
+              <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
+                <div style={{ background: cores.navyCard, borderRadius: 999, width: 64, height: 64, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <MessageCircle size={28} color={cores.amarelo} />
+                </div>
+              </div>
               <h1 style={{ fontSize: 18, fontWeight: 800, margin: '0 0 6px' }}>Digite o código</h1>
-              <p style={{ fontSize: 13.5, color: 'var(--foreground-secondary)', margin: 0, lineHeight: 1.5 }}>
+              <p style={{ fontSize: 13.5, color: cores.textoSecundario, margin: 0, lineHeight: 1.5 }}>
                 Enviamos um código de 6 dígitos pro seu WhatsApp.
               </p>
             </div>
@@ -182,82 +284,139 @@ export default function ClientePage() {
               style={{ ...inputStyle, textAlign: 'center', letterSpacing: 4, fontSize: 20 }}
               maxLength={6}
             />
-            {erro && <p style={{ color: 'var(--danger)', fontSize: 13, margin: 0 }}>{erro}</p>}
+            {erro && <p style={{ color: cores.perigo, fontSize: 13, margin: 0 }}>{erro}</p>}
             <button onClick={confirmarCodigo} disabled={enviando} style={{ ...botaoPrimario, opacity: enviando ? 0.6 : 1 }}>
               {enviando ? 'Confirmando...' : 'Entrar'}
             </button>
-            <button onClick={() => setStep('telefone')} style={{ background: 'none', border: 'none', color: 'var(--foreground-secondary)', fontSize: 13, cursor: 'pointer' }}>
+            <button onClick={() => setStep('telefone')} style={{ background: 'none', border: 'none', color: cores.textoSecundario, fontSize: 13, cursor: 'pointer', fontFamily: 'Archivo, sans-serif' }}>
               Trocar número
             </button>
           </div>
         )}
 
-        {step === 'perfil' && perfil && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: 15, color: 'var(--foreground-secondary)' }}>Olá{perfil.cliente.nome ? `, ${perfil.cliente.nome.split(' ')[0]}` : ''}!</div>
+        {step === 'perfil' && perfil && fidelidade && (
+          <div className="cliente-grid">
+            <div className="cliente-col-esquerda" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div style={{ fontSize: 15, color: cores.textoSecundario }}>
+                Olá{perfil.cliente.nome ? `, ${perfil.cliente.nome.split(' ')[0]}` : ''}!
+              </div>
+
+              {!fidelidade.ativo && (
+                <div style={{ background: cores.cardBg, border: `1px solid ${cores.cardBorda}`, borderRadius: 14, padding: 18, textAlign: 'center' }}>
+                  <p style={{ color: cores.textoSecundario, fontSize: 14, margin: 0 }}>A fidelidade ainda não está ativa por aqui. Volte em breve!</p>
+                </div>
+              )}
+
+              {fidelidade.ativo && (
+                <>
+                  {/* Hero de saldo */}
+                  <div style={{ background: cores.cardBg, border: `1px solid ${cores.cardBorda}`, borderRadius: 16, padding: 22 }}>
+                    <div style={{ fontSize: 13, color: cores.textoSecundario, marginBottom: 4 }}>Seu saldo de pontos</div>
+                    <div style={{ fontSize: 56, fontWeight: 800, lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
+                      {fidelidade.saldoPontos}
+                    </div>
+                    <div style={{ fontSize: 12.5, color: cores.textoTerciario, marginTop: 10 }}>A cada R$1 gasto = 1 ponto</div>
+                  </div>
+
+                  {podeResgatar ? (
+                    // Meta atingida: substitui o card de progresso pelo card
+                    // navy com CTA — único lugar da tela com fundo escuro.
+                    <div style={{ background: cores.navyCard, borderRadius: 16, padding: 22, color: cores.navyCardTexto }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                        <Sparkles size={20} color={cores.amarelo} />
+                        <span style={{ fontSize: 13, fontWeight: 700, color: cores.amarelo, textTransform: 'uppercase', letterSpacing: 0.5 }}>Recompensa disponível</span>
+                      </div>
+                      <p style={{ fontSize: 16, fontWeight: 700, margin: '0 0 16px' }}>{fidelidade.descricaoRecompensa}</p>
+                      {resgateErro && <p style={{ color: 'var(--danger-border)', fontSize: 13, margin: '0 0 12px' }}>{resgateErro}</p>}
+                      <button
+                        onClick={resgatar}
+                        disabled={resgatando}
+                        style={{ ...botaoPrimario, opacity: resgatando ? 0.6 : 1 }}
+                      >
+                        {resgatando ? 'Preparando resgate...' : 'Resgatar minha Pizza Família'}
+                      </button>
+                    </div>
+                  ) : (
+                    <div style={{ background: cores.cardBg, border: `1px solid ${cores.cardBorda}`, borderRadius: 16, padding: 22 }}>
+                      <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>
+                        {fidelidade.saldoPontos} de {fidelidade.metaPontos} pontos
+                      </div>
+                      <div style={{ background: cores.moldura, borderRadius: 999, height: 12, overflow: 'hidden' }}>
+                        <div style={{
+                          width: `${Math.min(100, fidelidade.progressoPercentual)}%`,
+                          height: '100%',
+                          background: cores.amarelo,
+                          borderRadius: 999,
+                        }} />
+                      </div>
+                      <p style={{ fontSize: 13, color: cores.textoSecundario, margin: '10px 0 0' }}>
+                        Faltam {fidelidade.pontosFaltantes} pontos para: {fidelidade.descricaoRecompensa}
+                      </p>
+                    </div>
+                  )}
+
+                  {fidelidade.pontosPrevistos > 0 && (
+                    <div style={{ background: cores.cardBg, border: `1px dashed ${cores.cardBorda}`, borderRadius: 14, padding: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <Clock size={20} color={cores.textoTerciario} />
+                      <p style={{ fontSize: 13, color: cores.textoSecundario, margin: 0 }}>
+                        Seu pedido em andamento vai render +{fidelidade.pontosPrevistos} pontos assim que for entregue.
+                      </p>
+                    </div>
+                  )}
+                </>
+              )}
+
+              <a href="/cardapio" style={{ ...botaoPrimario, textDecoration: 'none', textAlign: 'center', boxSizing: 'border-box', display: 'block' }}>
+                Continuar comprando
+              </a>
             </div>
 
-            {!perfil.fidelidade.ativo && (
-              <div style={{ background: 'var(--surface)', border: '1px solid var(--surface-secondary)', borderRadius: 14, padding: 18, textAlign: 'center' }}>
-                <p style={{ color: 'var(--foreground-secondary)', fontSize: 14, margin: 0 }}>A fidelidade ainda não está ativa por aqui. Volte em breve!</p>
-              </div>
-            )}
-
-            {perfil.fidelidade.ativo && (
-              <div style={{ background: 'var(--surface)', border: '1px solid var(--surface-secondary)', borderRadius: 14, padding: 20 }}>
-                <p style={{ fontSize: 16, fontWeight: 800, margin: '0 0 12px', textAlign: 'center' }}>
-                  Você tem {perfil.fidelidade.progresso} de {perfil.fidelidade.meta} pizzas 🍕
-                </p>
-                <div style={{ background: 'var(--surface)', borderRadius: 999, height: 14, overflow: 'hidden' }}>
-                  <div style={{
-                    width: `${Math.min(100, (perfil.fidelidade.progresso / Math.max(1, perfil.fidelidade.meta)) * 100)}%`,
-                    height: '100%',
-                    background: 'var(--primary)',
-                    borderRadius: 999,
-                  }} />
+            <div className="cliente-col-direita" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {perfil.ultimosPedidos.length > 0 && (
+                <div style={{ background: cores.cardBg, border: `1px solid ${cores.cardBorda}`, borderRadius: 14, padding: 18 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                    <Receipt size={16} color={cores.textoTerciario} />
+                    <p style={{ fontSize: 11, color: cores.textoTerciario, textTransform: 'uppercase', letterSpacing: 0.5, margin: 0 }}>Últimos pedidos</p>
+                  </div>
+                  {perfil.ultimosPedidos.map((p) => (
+                    <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13.5, color: cores.navy, padding: '8px 0', borderTop: `1px solid ${cores.moldura}` }}>
+                      <span>{p.numero ? `#${p.numero}` : p.id} · {p.data}</span>
+                      <span>{money(p.total)}</span>
+                    </div>
+                  ))}
                 </div>
-                <p style={{ textAlign: 'center', fontSize: 13, color: 'var(--foreground-secondary)', margin: '10px 0 0' }}>
-                  {perfil.fidelidade.faltam > 0
-                    ? `Faltam só ${perfil.fidelidade.faltam} pizzas para liberar: ${perfil.fidelidade.descricaoRecompensa}`
-                    : `Você já pode liberar: ${perfil.fidelidade.descricaoRecompensa}`}
-                </p>
+              )}
 
-                {perfil.fidelidade.recompensasDisponiveis.length > 0 && (
-                  <div style={{ marginTop: 14, background: 'color-mix(in srgb, var(--success) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--success) 30%, transparent)', borderRadius: 10, padding: 12 }}>
-                    {perfil.fidelidade.recompensasDisponiveis.map((r) => (
-                      <p key={r.recompensaId} style={{ color: 'var(--success)', fontWeight: 700, fontSize: 14, margin: 0 }}>
-                        🎉 Recompensa disponível: {r.descricao}
-                      </p>
-                    ))}
-                    <p style={{ color: 'var(--foreground-secondary)', fontSize: 12, margin: '6px 0 0' }}>Combine o resgate no seu próximo pedido.</p>
-                  </div>
-                )}
-              </div>
-            )}
-
-            <a href="/cardapio" style={{ ...botaoPrimario, textDecoration: 'none', textAlign: 'center', boxSizing: 'border-box', display: 'block' }}>
-              Continuar comprando
-            </a>
-
-            {perfil.ultimosPedidos.length > 0 && (
-              <div style={{ background: 'var(--surface)', border: '1px solid var(--surface-secondary)', borderRadius: 14, padding: 16 }}>
-                <p style={{ fontSize: 11, color: 'var(--foreground-secondary)', textTransform: 'uppercase', letterSpacing: 0.5, margin: '0 0 10px' }}>Últimos pedidos</p>
-                {perfil.ultimosPedidos.map((p) => (
-                  <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13.5, color: 'var(--foreground)', padding: '6px 0', borderTop: '1px solid var(--surface-secondary)' }}>
-                    <span>{p.numero ? `#${p.numero}` : p.id} · {p.data}</span>
-                    <span>{money(p.total)}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            <button onClick={sair} style={{ background: 'none', border: 'none', color: 'var(--foreground-secondary)', fontSize: 13, cursor: 'pointer', padding: 8 }}>
-              Sair da conta
-            </button>
+              {fidelidade.ativo && (
+                <div style={{ background: cores.cardBg, border: `1px solid ${cores.cardBorda}`, borderRadius: 14, padding: 18 }}>
+                  <p style={{ fontSize: 11, color: cores.textoTerciario, textTransform: 'uppercase', letterSpacing: 0.5, margin: '0 0 12px' }}>Extrato de pontos</p>
+                  {fidelidade.extrato.length === 0 && (
+                    <p style={{ fontSize: 13, color: cores.textoSecundario, margin: 0 }}>Nenhuma movimentação ainda — seu primeiro pedido entra aqui.</p>
+                  )}
+                  {fidelidade.extrato.map((m) => {
+                    const positivo = m.tipo === 'confirmado' || m.tipo === 'ajuste' && m.pontos > 0
+                    const negativo = m.tipo === 'resgatado' || m.tipo === 'estornado' || (m.tipo === 'ajuste' && m.pontos < 0)
+                    const semPontos = m.tipo === 'cancelado' || m.tipo === 'previsto'
+                    const delta = semPontos ? '—' : `${positivo ? '+' : negativo ? '−' : ''}${Math.abs(m.pontos)}`
+                    const corDelta = semPontos ? cores.textoTerciario : positivo ? cores.sucesso : cores.navy
+                    return (
+                      <div key={m.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 13.5, padding: '8px 0', borderTop: `1px solid ${cores.moldura}` }}>
+                        <div>
+                          <div style={{ color: cores.navy }}>{m.descricao}</div>
+                          <div style={{ color: cores.textoTerciario, fontSize: 11.5 }}>{dataCurta(m.criadoEm)}</div>
+                        </div>
+                        <span style={{ color: corDelta, fontWeight: 700 }}>{delta}</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>
+
+      <style>{`.cliente-grid { display: flex; flex-direction: column; } @media (min-width: 1024px) { .cliente-grid { display: grid; grid-template-columns: 1.35fr 1fr; gap: 24px; align-items: start; } } @media (min-width: 768px) and (max-width: 1023.98px) { .cliente-conteudo { padding: 32px 32px; } }`}</style>
     </div>
   )
 }
