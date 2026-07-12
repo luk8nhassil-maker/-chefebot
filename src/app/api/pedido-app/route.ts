@@ -314,17 +314,19 @@ export async function POST(req: NextRequest) {
 
     await redis.set("pedidos", [...pedidos, novoPedido]);
 
-    // Confirma o resgate (Etapa 5): debita os pontos e marca a recompensa
-    // como usada, na mesma reserva já validada acima. O pedido já foi criado
-    // com o desconto aplicado independente do resultado desta chamada — se
-    // falhar, o pedido continua válido (o cliente já viu o preço com
-    // desconto), mas fica registrado para investigação; a reserva expira
-    // sozinha e nunca permite um segundo desconto sem nova validação.
+    // Confirma o resgate (Etapa 5): se o debito nao persistir, o pedido com
+    // desconto e revertido e a API nao devolve sucesso com estado inconsistente.
     if (resgateAplicado) {
       try {
         await confirmarResgatePontos(resgateAplicado.clienteId, resgateAplicado.resgateId, pedidoId);
       } catch (err) {
-        console.error("[ChefeBot] Erro ao confirmar resgate de fidelidade (ignorado):", err);
+        const pedidosAtuais = (await redis.get<unknown[]>("pedidos")) || [];
+        await redis.set(
+          "pedidos",
+          pedidosAtuais.filter((pedido) => (pedido as { id?: unknown } | null)?.id !== pedidoId)
+        );
+        console.error("[ChefeBot] Erro ao confirmar resgate de fidelidade; pedido com desconto revertido:", err);
+        return NextResponse.json({ ok: false, error: "Nao foi possivel confirmar o resgate. Tente novamente." }, { status: 409 });
       }
     }
 

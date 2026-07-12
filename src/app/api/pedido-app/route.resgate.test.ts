@@ -254,7 +254,7 @@ describe("POST /api/pedido-app — resgate de pontos no checkout (Etapa 5)", () 
     expect(data.error).toMatch(/resgate inv/i);
   });
 
-  test("falha ao confirmar o resgate (erro ignorado) nunca impede a criacao do pedido ja com desconto aplicado", async () => {
+  test("falha ao confirmar o resgate rejeita a resposta e remove o pedido com desconto", async () => {
     const { reserva } = await prepararRecompensaDisponivel();
 
     const redisLib = await import("@/lib/redis");
@@ -273,11 +273,14 @@ describe("POST /api/pedido-app — resgate de pontos no checkout (Etapa 5)", () 
     const data = await res.json();
     consoleSpy.mockRestore();
 
-    expect(res.status).toBe(200);
-    expect(data.ok).toBe(true);
+    expect(res.status).toBe(409);
+    expect(data.ok).toBe(false);
     const pedidosSalvos = redisStore.get("pedidos") as Array<Record<string, unknown>>;
-    expect(pedidosSalvos).toHaveLength(1);
-    expect(pedidosSalvos[0].descontoFidelidade).toBe(50);
+    expect(pedidosSalvos).toHaveLength(0);
+
+    const clienteId = derivarClienteIdPorTelefone(TELEFONE)!;
+    const reservas = await obterReservasResgatePontos(clienteId);
+    expect(reservas.find((r) => r.resgateId === reserva.resgateId)!.status).toBe("reservado");
   });
 
   test("pedido sem resgateId continua funcionando normalmente (sem desconto)", async () => {

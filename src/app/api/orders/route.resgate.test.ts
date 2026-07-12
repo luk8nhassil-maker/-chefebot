@@ -231,4 +231,19 @@ describe("PATCH /api/orders — reversao de resgate de pontos ao cancelar (Etapa
     const data = await res.json();
     expect(data.status).toBe("cancelado");
   });
+
+  test("reprocessar pedido ja cancelado tenta reverter resgate pendente", async () => {
+    const clienteId = derivarClienteIdPorTelefone(TELEFONE)!;
+    seedPedidoComResgate({ status: "cancelado" });
+    seedEstadoComResgateConfirmado(clienteId);
+
+    const res = await PATCH(patchRequest({ id: "ped_resgate_1", status: "cancelado" }));
+    expect(res.status).toBe(200);
+
+    const reservas = await obterReservasResgatePontos(clienteId);
+    expect(reservas.find((r) => r.resgateId === "rsg_seed_1")!.status).toBe("cancelado");
+
+    const recompensas = await obterRecompensasPontos(clienteId);
+    expect(recompensas.find((r) => r.recompensaId === "rcp_seed_1")!.status).toBe("disponivel");
+  });
 });
