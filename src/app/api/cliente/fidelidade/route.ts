@@ -5,6 +5,7 @@ import {
   obterExtratoPontos,
   obterConfigFidelidadePontos,
   obterSaldoAntigoPizzas,
+  obterRecompensasPontos,
   calcularSaldoDoExtrato,
   calcularPontosPrevistos,
   calcularMetaPontos,
@@ -44,10 +45,11 @@ export async function GET(req: NextRequest) {
   const limite = resolverLimite(searchParams);
   const clienteIdPontos = derivarClienteIdPorTelefone(cliente.telefone) ?? cliente.clienteId;
 
-  const [extratoCompleto, config, pizzasAcumuladas] = await Promise.all([
+  const [extratoCompleto, config, pizzasAcumuladas, recompensasCompletas] = await Promise.all([
     obterExtratoPontos(clienteIdPontos),
     obterConfigFidelidadePontos(),
     obterSaldoAntigoPizzas(cliente.clienteId).catch(() => 0),
+    obterRecompensasPontos(clienteIdPontos),
   ]);
 
   const saldoPontos = calcularSaldoDoExtrato(extratoCompleto);
@@ -66,7 +68,22 @@ export async function GET(req: NextRequest) {
       criadoEm: m.createdAt,
     }));
 
+  // Recompensas abertas (ainda resgatáveis) e histórico separado — o front
+  // nunca deve inferir elegibilidade só pelo snapshot `pontosNaDesbloqueio`:
+  // a fonte da verdade de "pode resgatar agora" é sempre `metaAtingida`
+  // (saldo atual) combinado com `ativo` e a existência de uma recompensa
+  // aberta abaixo, revalidados de novo no próprio endpoint de reserva.
+  const recompensasAbertas = recompensasCompletas
+    .filter((r) => r.status === "disponivel" || r.status === "notificada")
+    .map((r) => ({ recompensaId: r.recompensaId, status: r.status, criadoEm: r.createdAt }));
+
+  const recompensasHistorico = recompensasCompletas
+    .filter((r) => r.status === "resgatada" || r.status === "expirada")
+    .map((r) => ({ recompensaId: r.recompensaId, status: r.status, criadoEm: r.createdAt }));
+
   return NextResponse.json({
+    ativo: config.ativo,
+    descricaoRecompensa: config.descricaoRecompensa,
     saldoPontos,
     pontosPrevistos,
     metaPontos,
@@ -74,6 +91,8 @@ export async function GET(req: NextRequest) {
     progressoPercentual,
     metaAtingida,
     extrato,
+    recompensas: recompensasAbertas,
+    recompensasHistorico,
     legado: {
       pizzasAcumuladas,
     },

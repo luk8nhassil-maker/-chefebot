@@ -4,6 +4,7 @@ import { NextRequest } from "next/server";
 const extratosPorCliente = new Map<string, unknown[]>();
 let configPontos: Record<string, unknown> | null = null;
 let pizzasAntigasPorCliente = new Map<string, number>();
+let recompensasPorCliente = new Map<string, unknown[]>();
 
 vi.mock("@/lib/clienteAuth", () => ({
   CLIENTE_COOKIE: "cliente-token",
@@ -33,6 +34,7 @@ vi.mock("@/lib/fidelidade", async () => {
     obterExtratoPontos: vi.fn(async (clienteId: string) => extratosPorCliente.get(clienteId) ?? []),
     obterConfigFidelidadePontos: vi.fn(async () => configPontos ?? actual.CONFIG_FIDELIDADE_PONTOS_PADRAO),
     obterSaldoAntigoPizzas: vi.fn(async (clienteId: string) => pizzasAntigasPorCliente.get(clienteId) ?? 0),
+    obterRecompensasPontos: vi.fn(async (clienteId: string) => recompensasPorCliente.get(clienteId) ?? []),
   };
 });
 
@@ -57,6 +59,7 @@ function requestComCookie(token?: string, query = "") {
 beforeEach(() => {
   extratosPorCliente.clear();
   pizzasAntigasPorCliente = new Map();
+  recompensasPorCliente = new Map();
   configPontos = null;
 });
 
@@ -284,6 +287,57 @@ describe("GET /api/cliente/fidelidade — compatibilidade com modelo antigo", ()
 
     expect(body.saldoPontos).toBe(65);
     expect(body.extrato.map((m: { id: string }) => m.id)).toEqual(["novo", "legado"]);
+  });
+});
+
+describe("GET /api/cliente/fidelidade — recompensas abertas e historico (CTA no front)", () => {
+  test("expõe ativo, descricaoRecompensa e separa recompensas abertas de historico", async () => {
+    configPontos = { ativo: true, metaPontos: 60, descricaoRecompensa: "1 Pizza Família" };
+    recompensasPorCliente.set("cli_a", [
+      { recompensaId: "rcp_aberta", status: "disponivel", createdAt: "2026-01-01T00:00:00.000Z" },
+      { recompensaId: "rcp_notificada", status: "notificada", createdAt: "2026-01-02T00:00:00.000Z" },
+      { recompensaId: "rcp_usada", status: "resgatada", createdAt: "2026-01-03T00:00:00.000Z" },
+      { recompensaId: "rcp_vencida", status: "expirada", createdAt: "2026-01-04T00:00:00.000Z" },
+    ]);
+
+    const res = await GET(requestComCookie("token-cliente-a"));
+    const body = await res.json();
+
+    expect(body.ativo).toBe(true);
+    expect(body.descricaoRecompensa).toBe("1 Pizza Família");
+    expect(body.recompensas.map((r: { recompensaId: string }) => r.recompensaId).sort()).toEqual(
+      ["rcp_aberta", "rcp_notificada"].sort()
+    );
+    expect(body.recompensasHistorico.map((r: { recompensaId: string }) => r.recompensaId).sort()).toEqual(
+      ["rcp_usada", "rcp_vencida"].sort()
+    );
+  });
+
+  test("recompensa expirada nunca aparece na lista de recompensas abertas, mesmo com saldo alto", async () => {
+    configPontos = { ativo: true, metaPontos: 60, descricaoRecompensa: "1 Pizza Família" };
+    extratosPorCliente.set("cli_a", [mov({ tipo: "confirmado", pontos: 1000, pedidoId: "p1" })]);
+    recompensasPorCliente.set("cli_a", [
+      { recompensaId: "rcp_vencida", status: "expirada", createdAt: "2026-01-01T00:00:00.000Z" },
+    ]);
+
+    const res = await GET(requestComCookie("token-cliente-a"));
+    const body = await res.json();
+
+    expect(body.metaAtingida).toBe(true);
+    expect(body.recompensas).toHaveLength(0); // sem recompensa aberta -> front nunca mostra CTA
+  });
+
+  test("sem fidelidade ativa: ativo=false, mesmo com recompensa aberta cadastrada", async () => {
+    configPontos = { ativo: false, metaPontos: 60, descricaoRecompensa: "1 Pizza Família" };
+    recompensasPorCliente.set("cli_a", [
+      { recompensaId: "rcp_aberta", status: "disponivel", createdAt: "2026-01-01T00:00:00.000Z" },
+    ]);
+
+    const res = await GET(requestComCookie("token-cliente-a"));
+    const body = await res.json();
+
+    expect(body.ativo).toBe(false);
+    expect(body.recompensas).toHaveLength(1); // dado bruto exposto; front so mostra CTA se ativo && metaAtingida && recompensas.length>0
   });
 });
 
