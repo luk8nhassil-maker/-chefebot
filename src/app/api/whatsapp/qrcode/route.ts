@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyToken } from '@/lib/auth'
+import { mensagemErroEvolution } from '@/lib/evolutionApi'
 
 const _baseUrl = process.env.EVOLUTION_API_URL ?? 'evolution-api-production-8f99.up.railway.app'
 const BASE     = _baseUrl.startsWith('http') ? _baseUrl : `https://${_baseUrl}`
@@ -38,13 +39,11 @@ export async function GET(req: NextRequest) {
     if (!res.ok) {
       console.error('[QR] connect error:', JSON.stringify(data).slice(0, 300))
       // Repassa só a mensagem da Evolution API (ex.: "Application not found"
-      // quando a instância foi perdida/apagada) — o admin precisa saber que
-      // precisa resetar a conexão, não só que "deu erro". Nunca repassa o
-      // corpo bruto da Evolution API (pode conter URL/infra interna) nem a
-      // apikey usada na chamada.
-      const detalhe = typeof data?.message === 'string' ? data.message : null
+      // quando a instância foi perdida/apagada, ou o diagnóstico de
+      // infraestrutura quando o próprio host configurado em
+      // EVOLUTION_API_URL não responde) — nunca o corpo bruto nem a apikey.
       return NextResponse.json(
-        { error: detalhe ? `Evolution API: ${detalhe}` : 'Evolution API retornou erro', status: res.status },
+        { error: mensagemErroEvolution(res.status, data), status: res.status },
         { status: res.status }
       )
     }

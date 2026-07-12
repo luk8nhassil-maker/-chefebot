@@ -70,7 +70,7 @@ describe("GET /api/whatsapp/qrcode — autenticacao", () => {
 });
 
 describe("GET /api/whatsapp/qrcode — erro da Evolution API sanitizado", () => {
-  test("404 'Application not found' repassa so a mensagem, nunca o corpo bruto nem a apikey", async () => {
+  test("404 no formato de borda do Railway (host fora do ar) vira diagnostico de infraestrutura, nunca expoe o corpo bruto", async () => {
     vi.mocked(fetch).mockResolvedValue({
       ok: false,
       status: 404,
@@ -82,10 +82,23 @@ describe("GET /api/whatsapp/qrcode — erro da Evolution API sanitizado", () => 
     const texto = JSON.stringify(data);
 
     expect(res.status).toBe(404);
-    expect(data.error).toMatch(/Application not found/i);
+    expect(data.error).toMatch(/não está acessível/i);
     // nunca expõe o corpo bruto da Evolution API (ex.: request_id) nem chaves internas
     expect(texto).not.toContain("request_id");
     expect(texto).not.toContain("abc123");
+  });
+
+  test("404 da propria Evolution API (formato de app, sem request_id) repassa a mensagem normalmente", async () => {
+    vi.mocked(fetch).mockResolvedValue({
+      ok: false,
+      status: 404,
+      json: async () => ({ status: 404, error: "Not Found", message: ["The instance chefebot does not exist"] }),
+    } as Response);
+
+    const res = await GET(requestComCookie("token-admin"));
+    const data = await res.json();
+    expect(res.status).toBe(404);
+    expect(data.error).toMatch(/does not exist/i);
   });
 
   test("resposta de erro nunca inclui o campo bruto 'detail' (corpo interno da Evolution API)", async () => {
