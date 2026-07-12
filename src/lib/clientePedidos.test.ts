@@ -11,9 +11,75 @@ import {
   campoBuscavelPedido,
   filtrarPedidosPorBusca,
   destinoNextPermitido,
+  telefoneCanonicoBr,
+  telefonesBrEquivalentes,
   type PedidoClienteFonte,
   type PedidoClienteResumo,
 } from "./clientePedidos";
+
+describe("telefoneCanonicoBr — normalização canônica de telefone brasileiro", () => {
+  test("10 dígitos (fixo, sem DDI) -> nacional, prefixa 55", () => {
+    expect(telefoneCanonicoBr("9974000691")).toBe("559974000691");
+  });
+
+  test("11 dígitos (celular, sem DDI) -> nacional, prefixa 55", () => {
+    expect(telefoneCanonicoBr("99974000691")).toBe("5599974000691");
+  });
+
+  test("12/13 dígitos começando com 55 -> mantém como está", () => {
+    expect(telefoneCanonicoBr("5599974000691")).toBe("5599974000691");
+    expect(telefoneCanonicoBr("559974000691")).toBe("559974000691");
+  });
+
+  test("12/13 dígitos que NÃO começam com 55 -> inválido (null), nunca correspondência parcial", () => {
+    expect(telefoneCanonicoBr("119974000691")).toBeNull(); // 12 dígitos, não começa com 55
+    expect(telefoneCanonicoBr("1199974000691")).toBeNull(); // 13 dígitos, não começa com 55
+  });
+
+  test("número incompleto (menos de 10 dígitos) -> inválido", () => {
+    expect(telefoneCanonicoBr("999740006")).toBeNull(); // 9 dígitos
+    expect(telefoneCanonicoBr("123")).toBeNull();
+  });
+
+  test("número longo demais (14+ dígitos) -> inválido", () => {
+    expect(telefoneCanonicoBr("55999740006911")).toBeNull(); // 14 dígitos
+  });
+
+  test("aceita formatação com parênteses/espaço/traço — só os dígitos importam", () => {
+    expect(telefoneCanonicoBr("(99) 97400-0691")).toBe("5599974000691");
+  });
+
+  test("vazio/ausente -> inválido, nunca combina com outro inválido", () => {
+    expect(telefoneCanonicoBr("")).toBeNull();
+    expect(telefoneCanonicoBr(null)).toBeNull();
+    expect(telefoneCanonicoBr(undefined)).toBeNull();
+  });
+
+  test("nunca usa correspondência pelos últimos dígitos (endsWith/slice) — dois nacionais diferentes com mesmo sufixo não colidem", () => {
+    // DDDs diferentes, mesmo número local de 9 dígitos — não podem ser iguais.
+    expect(telefoneCanonicoBr("11974000691")).not.toBe(telefoneCanonicoBr("21974000691"));
+  });
+});
+
+describe("telefonesBrEquivalentes", () => {
+  test("perfil sem 55 e pedido com 55 -> equivalentes", () => {
+    expect(telefonesBrEquivalentes("99974000691", "5599974000691")).toBe(true);
+  });
+
+  test("perfil com 55 e pedido sem 55 -> equivalentes (ordem dos argumentos não importa)", () => {
+    expect(telefonesBrEquivalentes("5599974000691", "99974000691")).toBe(true);
+  });
+
+  test("telefones brasileiros diferentes -> nunca equivalentes", () => {
+    expect(telefonesBrEquivalentes("99974000691", "5599974000699")).toBe(false);
+  });
+
+  test("um dos dois inválido -> nunca equivalente, mesmo que os dois sejam inválidos", () => {
+    expect(telefonesBrEquivalentes("123", "5599974000691")).toBe(false);
+    expect(telefonesBrEquivalentes("123", "456")).toBe(false);
+    expect(telefonesBrEquivalentes("", "")).toBe(false);
+  });
+});
 
 describe("pedidoPertenceAoCliente / filtrarPedidosDoCliente", () => {
   test("clienteId direto tem prioridade — nunca cai para telefone quando presente", () => {
@@ -35,6 +101,21 @@ describe("pedidoPertenceAoCliente / filtrarPedidosDoCliente", () => {
   test("sem clienteId e sem telefone -> nunca pertence a ninguém", () => {
     const p: PedidoClienteFonte = { id: "4" };
     expect(pedidoPertenceAoCliente(p, "cli_a", "11900000001")).toBe(false);
+  });
+
+  test("perfil verificado sem DDI e pedido antigo salvo com DDI 55 -> mesmo cliente", () => {
+    const p: PedidoClienteFonte = { id: "5", telefone: "5599974000691" };
+    expect(pedidoPertenceAoCliente(p, "cli_a", "99974000691")).toBe(true);
+  });
+
+  test("perfil verificado com DDI e pedido antigo salvo sem DDI -> mesmo cliente", () => {
+    const p: PedidoClienteFonte = { id: "6", telefone: "99974000691" };
+    expect(pedidoPertenceAoCliente(p, "cli_a", "5599974000691")).toBe(true);
+  });
+
+  test("pedido com clienteId diferente nunca coincide só pelo telefone bater", () => {
+    const p: PedidoClienteFonte = { id: "7", clienteId: "cli_b", telefone: "99974000691" };
+    expect(pedidoPertenceAoCliente(p, "cli_a", "99974000691")).toBe(false);
   });
 
   test("filtrarPedidosDoCliente deduplica por id e ignora pedidos sem id", () => {

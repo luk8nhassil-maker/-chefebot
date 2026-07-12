@@ -3,8 +3,6 @@
 // decide autenticação (isso é `clienteAuth.ts`/`clientes.ts`); este arquivo só
 // sabe filtrar/ordenar/sanitizar/buscar a partir de dados já carregados.
 
-import { sanitizeTelefoneCliente } from "./clientes";
-
 // ==================== Tipos ====================
 
 // Formato mínimo do pedido como vem do Redis (chave "pedidos") — só os campos
@@ -44,14 +42,46 @@ export type PedidoClienteResumo = {
   isArchived?: boolean;
 };
 
+// ==================== Telefone brasileiro canônico ====================
+
+// O mesmo telefone brasileiro pode estar salvo em formatos diferentes
+// conforme a origem do dado: perfil da Área do Cliente costuma guardar só o
+// número nacional (sem DDI), enquanto pedidos antigos vindos do WhatsApp
+// (bot.ts) guardam o telefone completo do JID, com DDI 55. Sem canonizar os
+// dois para o mesmo formato antes de comparar, "99974000691" (perfil) e
+// "5599974000691" (pedido) seriam tratados como telefones diferentes e o
+// pedido antigo nunca apareceria em /cliente/pedidos.
+//
+// Retorna null para qualquer formato que não seja um telefone brasileiro
+// plausível (nacional ou com DDI) — nunca correspondência parcial: um valor
+// inválido nunca é considerado igual a outro, mesmo que ambos sejam null.
+export function telefoneCanonicoBr(telefone: string | null | undefined): string | null {
+  const digitos = (telefone || "").replace(/\D/g, "");
+  if (digitos.length === 10 || digitos.length === 11) return `55${digitos}`;
+  if (digitos.length === 12 || digitos.length === 13) return digitos.startsWith("55") ? digitos : null;
+  return null;
+}
+
+// Compara dois telefones brasileiros pela forma canônica — nunca por
+// endsWith/slice de sufixo, sempre o valor completo canonizado dos dois
+// lados. Só verdadeiro quando ambos são válidos e idênticos.
+export function telefonesBrEquivalentes(a: string | null | undefined, b: string | null | undefined): boolean {
+  const canA = telefoneCanonicoBr(a);
+  const canB = telefoneCanonicoBr(b);
+  return canA !== null && canB !== null && canA === canB;
+}
+
 // ==================== Propriedade / dedupe ====================
 
 // Um pedido pertence ao cliente autenticado se:
 // - o clienteId bate diretamente (pedidos criados depois da Área do Cliente); ou
 // - não tem clienteId (pedido antigo, anterior à Área do Cliente) mas o
-//   telefone normalizado bate com o telefone já verificado por OTP.
+//   telefone (canonizado, com ou sem DDI) bate com o telefone já verificado
+//   por OTP.
 // Nunca decide pertencimento por um dado vindo do navegador — telefone e
 // clienteId aqui sempre vêm do payload do token já validado no servidor.
+// Prioridade mantida: havendo clienteId no pedido, só ele decide — telefone
+// é fallback exclusivo de pedidos antigos sem clienteId.
 export function pedidoPertenceAoCliente(
   pedido: PedidoClienteFonte,
   clienteId: string,
@@ -59,7 +89,7 @@ export function pedidoPertenceAoCliente(
 ): boolean {
   if (pedido.clienteId) return pedido.clienteId === clienteId;
   if (!pedido.telefone) return false;
-  return sanitizeTelefoneCliente(pedido.telefone) === telefoneVerificado;
+  return telefonesBrEquivalentes(pedido.telefone, telefoneVerificado);
 }
 
 export function filtrarPedidosDoCliente(

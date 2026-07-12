@@ -7,6 +7,12 @@ vi.mock("@/lib/clienteAuth", () => ({
     if (token === "token-cliente-a") return { clienteId: "cli_a", telefone: "11900000001" };
     if (token === "token-cliente-b") return { clienteId: "cli_b", telefone: "11900000002" };
     if (token === "token-cliente-fantasma") return { clienteId: "cli_fantasma", telefone: "11900000099" };
+    // Perfil com telefone verificado salvo SEM DDI — pedido antigo (abaixo)
+    // está salvo COM DDI 55.
+    if (token === "token-cliente-c") return { clienteId: "cli_c", telefone: "99974000691" };
+    // Perfil com telefone verificado salvo COM DDI — pedido antigo (abaixo)
+    // está salvo SEM DDI.
+    if (token === "token-cliente-d") return { clienteId: "cli_d", telefone: "5588988887777" };
     return null;
   }),
 }));
@@ -15,12 +21,11 @@ vi.mock("@/lib/clientes", () => ({
   buscarClientePorId: vi.fn(async (clienteId: string) => {
     if (clienteId === "cli_a") return { clienteId: "cli_a", telefone: "11900000001", nome: "Cliente A", createdAt: "", updatedAt: "", lastLoginAt: "" };
     if (clienteId === "cli_b") return { clienteId: "cli_b", telefone: "11900000002", nome: "Cliente B", createdAt: "", updatedAt: "", lastLoginAt: "" };
+    if (clienteId === "cli_c") return { clienteId: "cli_c", telefone: "99974000691", nome: "Cliente C", createdAt: "", updatedAt: "", lastLoginAt: "" };
+    if (clienteId === "cli_d") return { clienteId: "cli_d", telefone: "5588988887777", nome: "Cliente D", createdAt: "", updatedAt: "", lastLoginAt: "" };
     // cli_fantasma: token válido mas cliente não existe mais no cadastro.
     return null;
   }),
-  // clientePedidos.ts usa sanitizeTelefoneCliente para comparar telefone de
-  // pedidos antigos sem clienteId — mesma implementação real (só dígitos).
-  sanitizeTelefoneCliente: (telefone: string) => (telefone || "").replace(/\D/g, ""),
 }));
 
 const PEDIDOS_FIXTURE = [
@@ -90,6 +95,36 @@ const PEDIDOS_FIXTURE = [
     total: 55.9,
     status: "entregue",
     itens: ["1x Pizza G - Calabresa"],
+  },
+  // Pedido antigo do cliente C, salvo COM DDI 55 — perfil do cliente C está
+  // salvo SEM DDI ("99974000691"). Precisa aparecer (hotfix de canonização).
+  {
+    id: "1500000000000",
+    telefone: "5599974000691",
+    numero: 1,
+    total: 20,
+    status: "entregue",
+    itens: ["1x Pizza P - Calabresa"],
+  },
+  // Pedido antigo do cliente D, salvo SEM DDI — perfil do cliente D está
+  // salvo COM DDI ("5588988887777"). Precisa aparecer (caso inverso).
+  {
+    id: "1500000000001",
+    telefone: "88988887777",
+    numero: 2,
+    total: 25,
+    status: "entregue",
+    itens: ["1x Pizza P - Frango"],
+  },
+  // Pedido antigo de um telefone parecido mas diferente do cliente C —
+  // nunca deve aparecer para cli_c mesmo após a canonização.
+  {
+    id: "1500000000002",
+    telefone: "5599974000699",
+    numero: 5,
+    total: 99,
+    status: "entregue",
+    itens: ["1x Pizza G - Baiana"],
   },
 ];
 
@@ -172,6 +207,39 @@ describe("GET /api/cliente/pedidos — associação por clienteId e telefone ver
     const body = await res.json();
     const ids = body.pedidos.map((p: { id: string }) => p.id);
     expect(ids).toEqual(["1700000000000", "1650000000000", "1600000000000"]);
+  });
+});
+
+describe("GET /api/cliente/pedidos — hotfix: associação por telefone com/sem DDI 55", () => {
+  test("perfil salvo sem DDI + pedido antigo salvo com DDI -> pedido aparece", async () => {
+    const res = await GET(requestComCookie("token-cliente-c"));
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.pedidos.some((p: { id: string }) => p.id === "1500000000000")).toBe(true);
+  });
+
+  test("caso inverso: perfil salvo com DDI + pedido antigo salvo sem DDI -> pedido aparece", async () => {
+    const res = await GET(requestComCookie("token-cliente-d"));
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.pedidos.some((p: { id: string }) => p.id === "1500000000001")).toBe(true);
+  });
+
+  test("pedido antigo de outro telefone nunca aparece, mesmo canonizando DDI", async () => {
+    const res = await GET(requestComCookie("token-cliente-c"));
+    const body = await res.json();
+    expect(body.pedidos.some((p: { id: string }) => p.id === "1500000000002")).toBe(false);
+    expect(body.pedidos).toHaveLength(1);
+  });
+
+  test("resposta desses pedidos continua sanitizada (sem telefone/clienteId/tokens)", async () => {
+    const res = await GET(requestComCookie("token-cliente-c"));
+    const texto = JSON.stringify(await res.json());
+    expect(texto).not.toContain("99974000691");
+    expect(texto).not.toContain("5599974000691");
+    expect(texto).not.toContain("cli_c");
+    expect(texto).not.toContain("telefone");
+    expect(texto).not.toContain("clienteId");
   });
 });
 
