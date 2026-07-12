@@ -10,19 +10,21 @@ type ClientBottomNavProps = {
   onInicioClick?: () => void;
   sacolaHref?: string;
   onSacolaClick?: () => void;
-  pedidoHref?: string | null;
 };
 
 // Menu inferior compartilhado entre o cardápio público (/pedido e /cardapio
-// sem sessão admin), a Área do Cliente (/cliente) e o rastreamento de pedido
-// (/rastrear/[pedidoId]) — mesmo padrão visual/CSS do bottom nav original do
-// cardápio (antes duplicado ali), com tokens globais de tema em vez dos
-// aliases locais daquela página, para funcionar em qualquer tela.
+// sem sessão admin), a Área do Cliente (/cliente, /cliente/pedidos) e o
+// rastreamento de pedido (/rastrear/[pedidoId]) — mesmo padrão visual/CSS do
+// bottom nav original do cardápio (antes duplicado ali), com tokens globais
+// de tema em vez dos aliases locais daquela página, para funcionar em
+// qualquer tela.
 //
 // Início/Sacola aceitam um onClick (usado dentro do cardápio, que já navega
 // internamente entre telas sem reload); sem onClick, viram link normal para
-// inicioHref/sacolaHref (usado por /cliente e /rastrear, que precisam sair da
-// página).
+// inicioHref/sacolaHref (usado por /cliente, /cliente/pedidos e /rastrear,
+// que precisam sair da página). Pedido é sempre um link estático para
+// /cliente/pedidos — nunca desabilitada, nunca depende de haver um "pedido
+// recente" no localStorage (a própria listagem cobre o estado vazio).
 export default function ClientBottomNav({
   active,
   cartCount = 0,
@@ -30,7 +32,6 @@ export default function ClientBottomNav({
   onInicioClick,
   sacolaHref = "/pedido",
   onSacolaClick,
-  pedidoHref = null,
 }: ClientBottomNavProps) {
   return (
     <>
@@ -66,17 +67,10 @@ export default function ClientBottomNav({
             </a>
           )}
 
-          {pedidoHref ? (
-            <a className={`cbn-item ${active === "pedido" ? "active" : ""}`} href={pedidoHref}>
-              <span className="cbn-icon"><Receipt size={20} aria-hidden="true" /></span>
-              <span className="cbn-label">Pedido</span>
-            </a>
-          ) : (
-            <span className="cbn-item disabled" aria-disabled="true">
-              <span className="cbn-icon"><Receipt size={20} aria-hidden="true" /></span>
-              <span className="cbn-label">Pedido</span>
-            </span>
-          )}
+          <a className={`cbn-item ${active === "pedido" ? "active" : ""}`} href="/cliente/pedidos">
+            <span className="cbn-icon"><Receipt size={20} aria-hidden="true" /></span>
+            <span className="cbn-label">Pedido</span>
+          </a>
 
           <a className={`cbn-item ${active === "pontos" ? "active" : ""}`} href="/cliente">
             <span className="cbn-icon"><User size={20} aria-hidden="true" /></span>
@@ -93,7 +87,6 @@ export default function ClientBottomNav({
         .cbn-icon-wrap{position:relative;display:inline-flex}
         .cbn-item.active{color:var(--primary)}
         .cbn-item.active .cbn-label{color:var(--text-primary);font-weight:800}
-        .cbn-item.disabled{opacity:.35;cursor:not-allowed}
         .cbn-label{line-height:1.1}
         .cbn-badge{position:absolute;top:-5px;right:-9px;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:var(--primary);color:var(--on-primary);font-size:10px;font-weight:800;display:flex;align-items:center;justify-content:center;line-height:1;box-shadow:0 0 0 2px var(--surface)}
       `}</style>

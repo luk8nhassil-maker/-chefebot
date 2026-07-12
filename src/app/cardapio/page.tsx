@@ -1444,9 +1444,6 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   // escolha/foco (tamanho, sabor, borda, com/sem leite, entrega, pagamento
   // etc.) pra não competir com o CTA principal daquela etapa.
   const showBottomNav = ["sc-start", "sc-list", "sc-cart", "sc-done"].includes(screen);
-  // Aba "Pedido" só fica ativa com um pedido real (recém-enviado nesta sessão
-  // ou lembrado do navegador nas últimas 3h) — nunca rastreamento fake.
-  const pedidoAtivoId = pedidoConfirmado?.id || pedidoRecente?.id || null;
   const feitas = pizzasNoCarrinho();
   let ctxBadge = "", ctxTxt = "", ctxDots: { cls: string }[] = [];
   if (plan.openEnded) { ctxBadge = `Pizza ${feitas + 1}`; ctxTxt = feitas === 0 ? "Sua 1ª pizza" : `${feitas} já no carrinho`; }
@@ -2019,7 +2016,6 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
           cartCount={cartCount}
           onInicioClick={() => go("sc-start")}
           onSacolaClick={() => go("sc-cart")}
-          pedidoHref={pedidoAtivoId ? `/rastrear/${pedidoAtivoId}` : null}
         />
       )}
       {paymentModal && (
