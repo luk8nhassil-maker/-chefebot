@@ -608,13 +608,19 @@ export default function AdminPage() {
                     {waQrError && (
                       <>
                         <p style={{ color: 'var(--danger)', fontSize: 12, margin: '10px 0 0', textAlign: 'center' }}>{waQrError}</p>
-                        <button
-                          onClick={() => { if (confirm('Isso desconecta e recria a instância do WhatsApp do zero. Um novo QR Code será gerado. Continuar?')) resetWhatsapp() }}
-                          disabled={waResetting || waLoadingQr}
-                          style={{ width: '100%', marginTop: 10, background: 'transparent', border: '1px solid var(--danger)', borderRadius: 10, padding: '10px', color: 'var(--danger)', fontSize: 12.5, fontWeight: 700, cursor: (waResetting || waLoadingQr) ? 'not-allowed' : 'pointer', opacity: (waResetting || waLoadingQr) ? 0.7 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
-                        >
-                          <RefreshCw size={14} aria-hidden="true" /> {waResetting ? 'Resetando conexão...' : 'Resetar conexão do WhatsApp'}
-                        </button>
+                        {/* Reset é mais destrutivo que só reconectar (derruba e recria a
+                            instância) — nunca oferecido a atendente, só admin/dev. A rota
+                            já exige o mesmo no servidor; isso é só a UI não oferecer a ação
+                            a quem não pode usá-la. */}
+                        {(getUserInfo()?.role === 'admin' || getUserInfo()?.role === 'dev') && (
+                          <button
+                            onClick={() => { if (confirm('Isso desconecta e recria a instância do WhatsApp do zero. Um novo QR Code será gerado. Continuar?')) resetWhatsapp() }}
+                            disabled={waResetting || waLoadingQr}
+                            style={{ width: '100%', marginTop: 10, background: 'transparent', border: '1px solid var(--danger)', borderRadius: 10, padding: '10px', color: 'var(--danger)', fontSize: 12.5, fontWeight: 700, cursor: (waResetting || waLoadingQr) ? 'not-allowed' : 'pointer', opacity: (waResetting || waLoadingQr) ? 0.7 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+                          >
+                            <RefreshCw size={14} aria-hidden="true" /> {waResetting ? 'Resetando conexão...' : 'Resetar conexão do WhatsApp'}
+                          </button>
+                        )}
                       </>
                     )}
                   </>
