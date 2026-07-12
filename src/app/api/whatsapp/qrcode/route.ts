@@ -19,7 +19,14 @@ export async function GET() {
 
     if (!res.ok) {
       console.error('[QR] connect error:', JSON.stringify(data).slice(0, 300))
-      return NextResponse.json({ error: 'Evolution API retornou erro', detail: data }, { status: res.status })
+      // Repassa a mensagem real da Evolution API (ex.: "Application not found"
+      // quando a instância foi perdida/apagada) — o admin precisa saber que
+      // precisa resetar a conexão, não só que "deu erro".
+      const detalhe = typeof data?.message === 'string' ? data.message : null
+      return NextResponse.json(
+        { error: detalhe ? `Evolution API: ${detalhe}` : 'Evolution API retornou erro', status: res.status, detail: data },
+        { status: res.status }
+      )
     }
 
     return NextResponse.json(data)
