@@ -3,7 +3,8 @@
 import { useEffect, useState } from 'react'
 import { Gift, Phone, MessageCircle, LogOut, Receipt, Sparkles, Clock, Pizza } from 'lucide-react'
 import ClientBottomNav from '@/components/ClientBottomNav'
-import { lerPedidoAtivoId, CF_OPEN_CART_KEY } from '@/lib/pedidoAtivoCliente'
+import { CF_OPEN_CART_KEY } from '@/lib/pedidoAtivoCliente'
+import { destinoNextPermitido } from '@/lib/clientePedidos'
 
 type Movimento = {
   id: string
@@ -80,16 +81,18 @@ export default function ClientePage() {
   const [fidelidade, setFidelidade] = useState<Fidelidade | null>(null)
   const [resgatando, setResgatando] = useState(false)
   const [resgateErro, setResgateErro] = useState('')
-  const [pedidoAtivoId, setPedidoAtivoId] = useState<string | null>(null)
 
-  useEffect(() => {
+  // Retorno seguro pós-login (ex.: veio de "Pedido" no menu inferior sem
+  // sessão ativa): só aceita destinos de uma allowlist explícita, nunca uma
+  // URL externa/absoluta vinda do navegador — evita open redirect.
+  function nextPermitidoAtual(): string | null {
     try {
-      // localStorage não existe no SSR — leitura só pode acontecer no efeito,
-      // após a hidratação, por isso o setState aqui é intencional.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setPedidoAtivoId(lerPedidoAtivoId(localStorage.getItem('cf_ultimo_pedido')))
-    } catch {}
-  }, [])
+      const params = new URLSearchParams(window.location.search)
+      return destinoNextPermitido(params.get('next'))
+    } catch {
+      return null
+    }
+  }
 
   function abrirSacola() {
     try { sessionStorage.setItem(CF_OPEN_CART_KEY, '1') } catch {}
@@ -113,7 +116,11 @@ export default function ClientePage() {
   }
 
   useEffect(() => {
-    carregarPerfil().then((ok) => { if (!ok) setStep('telefone') })
+    carregarPerfil().then((ok) => {
+      if (!ok) { setStep('telefone'); return }
+      const destino = nextPermitidoAtual()
+      if (destino) window.location.href = destino
+    })
   }, [])
 
   async function pedirCodigo() {
@@ -145,7 +152,11 @@ export default function ClientePage() {
       })
       const data = await res.json()
       if (!res.ok || !data.ok) { setErro(data.error || 'Código inválido'); setEnviando(false); return }
-      await carregarPerfil()
+      const ok = await carregarPerfil()
+      if (ok) {
+        const destino = nextPermitidoAtual()
+        if (destino) { window.location.href = destino; return }
+      }
     } catch { setErro('Erro de conexão. Tente novamente.') }
     setEnviando(false)
   }
@@ -432,7 +443,7 @@ export default function ClientePage() {
         )}
       </div>
 
-      <ClientBottomNav active="pontos" onSacolaClick={abrirSacola} pedidoHref={pedidoAtivoId ? `/rastrear/${pedidoAtivoId}` : null} />
+      <ClientBottomNav active="pontos" onSacolaClick={abrirSacola} />
 
       <style>{`.cliente-grid { display: flex; flex-direction: column; } @media (min-width: 1024px) { .cliente-grid { display: grid; grid-template-columns: 1.35fr 1fr; gap: 24px; align-items: start; } } @media (min-width: 768px) and (max-width: 1023.98px) { .cliente-conteudo { padding: 32px 32px calc(env(safe-area-inset-bottom) + 96px); } }`}</style>
     </div>

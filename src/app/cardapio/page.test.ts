@@ -22,8 +22,13 @@ describe("/cardapio (PublicCardapio) — menu inferior unificado com /cliente e 
     expect(fonte).toMatch(/onSacolaClick=\{\(\) => go\("sc-cart"\)\}/);
   });
 
-  test("aba Pedido usa o mesmo pedidoAtivoId de antes (rastreamento ou desabilitada)", () => {
-    expect(fonte).toMatch(/pedidoHref=\{pedidoAtivoId \? `\/rastrear\/\$\{pedidoAtivoId\}` : null\}/);
+  test("não passa mais pedidoHref — aba Pedido é sempre o link estático /cliente/pedidos do componente", () => {
+    expect(fonte).not.toContain("pedidoHref");
+  });
+
+  test("pedidoRecente (banner 'Acompanhar pedido') continua funcionando fora do menu inferior", () => {
+    expect(fonte).toContain("pedidoRecente");
+    expect(fonte).toMatch(/href=\{`\/rastrear\/\$\{pedidoRecente\.id\}`\}/);
   });
 
   test("consome a flag de 'abrir sacola' vinda de /cliente ou /rastrear na hidratação", () => {

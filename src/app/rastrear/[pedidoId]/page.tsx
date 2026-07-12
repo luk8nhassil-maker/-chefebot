@@ -160,8 +160,8 @@ export default function RastrearPage({ params }: PageProps) {
             <div style={{ fontSize: '11px', color: 'var(--foreground-secondary)' }}>#{pedidoId}</div>
           </div>
         </div>
-        <a href="/pedido" style={{ fontSize: '13px', color: 'var(--foreground-secondary)', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '4px' }}>
-          ← Cardápio
+        <a href="/cliente/pedidos" style={{ fontSize: '13px', color: 'var(--foreground-secondary)', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '4px' }}>
+          ← Meus pedidos
         </a>
       </div>
 
@@ -240,7 +240,7 @@ export default function RastrearPage({ params }: PageProps) {
         </a>
       </div>
 
-      <ClientBottomNav active="pedido" onSacolaClick={abrirSacola} pedidoHref={pedidoId ? `/rastrear/${pedidoId}` : null} />
+      <ClientBottomNav active="pedido" onSacolaClick={abrirSacola} />
     </div>
   )
 }

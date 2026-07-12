@@ -59,4 +59,17 @@ describe("/cliente — Área do Cliente renomeada para Pontos", () => {
     expect(fonte).toContain("/api/cliente/fidelidade");
     expect(fonte).toContain("type Fidelidade");
   });
+
+  test("não passa mais pedidoHref para o menu inferior (aba Pedido é sempre estática)", () => {
+    expect(fonte).not.toContain("pedidoHref");
+    expect(fonte).not.toContain("cf_ultimo_pedido");
+  });
+
+  test("aceita retorno seguro (?next=) após login/verificação, via allowlist", () => {
+    expect(fonte).toContain("import { destinoNextPermitido } from '@/lib/clientePedidos'");
+    expect(fonte).toContain("nextPermitidoAtual");
+    // usado tanto no carregamento inicial (já logado) quanto após confirmar OTP
+    const usos = fonte.match(/nextPermitidoAtual\(\)/g) ?? [];
+    expect(usos.length).toBeGreaterThanOrEqual(2);
+  });
 });

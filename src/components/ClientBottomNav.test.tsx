@@ -20,6 +20,11 @@ describe("ClientBottomNav — quatro opções fixas do menu inferior do cliente"
     const html = renderToStaticMarkup(<ClientBottomNav active="pontos" />);
     expect(html).toContain('href="/cliente"');
   });
+
+  test("aba Pedido sempre aponta para /cliente/pedidos, independente de haver pedido recente", () => {
+    const html = renderToStaticMarkup(<ClientBottomNav active="pontos" />);
+    expect(html).toContain('href="/cliente/pedidos"');
+  });
 });
 
 describe("ClientBottomNav — estado ativo por aba", () => {
@@ -29,9 +34,9 @@ describe("ClientBottomNav — estado ativo por aba", () => {
     expect(pontosLink).toContain("active");
   });
 
-  test("active='pedido' marca a aba Pedido quando há pedidoHref", () => {
-    const html = renderToStaticMarkup(<ClientBottomNav active="pedido" pedidoHref="/rastrear/abc" />);
-    const pedidoLink = html.match(/<a[^>]*href="\/rastrear\/abc"[^>]*>/)?.[0] ?? "";
+  test("active='pedido' marca a aba Pedido (link estático /cliente/pedidos)", () => {
+    const html = renderToStaticMarkup(<ClientBottomNav active="pedido" />);
+    const pedidoLink = html.match(/<a[^>]*href="\/cliente\/pedidos"[^>]*>/)?.[0] ?? "";
     expect(pedidoLink).toContain("active");
   });
 
@@ -44,17 +49,19 @@ describe("ClientBottomNav — estado ativo por aba", () => {
   });
 });
 
-describe("ClientBottomNav — aba Pedido: link de rastreio ou desabilitada", () => {
-  test("sem pedidoHref -> item desabilitado, sem link", () => {
-    const html = renderToStaticMarkup(<ClientBottomNav active="inicio" pedidoHref={null} />);
-    expect(html).toContain("cbn-item disabled");
-    expect(html).not.toContain('href="/rastrear');
+describe("ClientBottomNav — aba Pedido nunca fica desabilitada", () => {
+  test("sempre é um link habilitado para /cliente/pedidos, em qualquer combinação de props", () => {
+    const html = renderToStaticMarkup(<ClientBottomNav active="inicio" />);
+    expect(html).not.toContain("disabled");
+    expect(html).toContain('href="/cliente/pedidos"');
   });
 
-  test("com pedidoHref -> vira link para a rota de rastreio", () => {
-    const html = renderToStaticMarkup(<ClientBottomNav active="inicio" pedidoHref="/rastrear/xyz" />);
-    expect(html).toContain('href="/rastrear/xyz"');
-    expect(html).not.toContain("cbn-item disabled");
+  test("continua habilitada mesmo com onInicioClick/onSacolaClick presentes", () => {
+    const html = renderToStaticMarkup(
+      <ClientBottomNav active="inicio" onInicioClick={vi.fn()} onSacolaClick={vi.fn()} />
+    );
+    expect(html).not.toContain("disabled");
+    expect(html).toContain('href="/cliente/pedidos"');
   });
 });
 

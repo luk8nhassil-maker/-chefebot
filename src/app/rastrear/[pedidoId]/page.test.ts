@@ -26,12 +26,23 @@ describe("/rastrear/[pedidoId] — menu inferior fixo com Pedido ativo", () => {
     expect(fonte).toContain("window.location.href = '/pedido'");
   });
 
-  test("aba Pedido aponta para a própria página de rastreio quando o id já carregou", () => {
-    expect(fonte).toMatch(/pedidoHref=\{pedidoId \? `\/rastrear\/\$\{pedidoId\}` : null\}/);
+  test("não passa mais pedidoHref — aba Pedido é o link estático /cliente/pedidos do componente", () => {
+    expect(fonte).not.toContain("pedidoHref");
+  });
+
+  test("clicar em 'Pedido' no menu abre a listagem /cliente/pedidos, nunca recarrega o próprio rastreamento", () => {
+    // Sem pedidoHref/override: o link vem do padrão do componente compartilhado
+    // (sempre /cliente/pedidos), conferido em ClientBottomNav.test.tsx.
+    expect(fonte).not.toMatch(/href=\{`\/rastrear\/\$\{pedidoId\}`\}/);
   });
 
   test("navegação de 'continuar comprando' usa /pedido, nunca /cardapio", () => {
     expect(fonte).not.toContain("/cardapio");
+  });
+
+  test("retorno do cabeçalho é '← Meus pedidos', apontando para /cliente/pedidos", () => {
+    expect(fonte).toMatch(/href="\/cliente\/pedidos"[^>]*>[\s\S]{0,40}← Meus pedidos/);
+    expect(fonte).not.toContain("← Cardápio");
   });
 
   test("preserva token/polling/status/Pix/mapa: params, fetchStatus, fetchLocalizacao e intervalo continuam intactos", () => {
