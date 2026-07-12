@@ -440,6 +440,7 @@ describe("1. proteção contra stale writer — escrita condicionada à propried
         { movimentoId: "m-b", clienteId, pedidoId: "ped_b", tipo: "confirmado", pontos: 50, motivo: "credito do B", createdAt: new Date().toISOString(), eventoId: "confirmado:ped_b", saldoApos: 50 },
       ],
       recompensas: [],
+      reservas: [],
     };
     expect(await persistirEstadoPontosSeDono(clienteId, tokenB, estadoDoB)).toBe(true);
 
@@ -449,6 +450,7 @@ describe("1. proteção contra stale writer — escrita condicionada à propried
         { movimentoId: "m-a", clienteId, pedidoId: "ped_a", tipo: "confirmado", pontos: 999, motivo: "credito do A (obsoleto)", createdAt: new Date().toISOString(), eventoId: "confirmado:ped_a", saldoApos: 999 },
       ],
       recompensas: [],
+      reservas: [],
     };
     expect(await persistirEstadoPontosSeDono(clienteId, tokenA, estadoDoA)).toBe(false);
 
