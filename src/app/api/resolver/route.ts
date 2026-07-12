@@ -1,6 +1,7 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
 import { verifyToken } from "@/lib/auth";
 import { redis } from "@/lib/redis";
+import { obterConfigEvolution } from "@/lib/evolutionApi";
 
 async function checkAuth(req: NextRequest) {
   const token = req.cookies.get("auth-token")?.value ?? null;
@@ -9,11 +10,6 @@ async function checkAuth(req: NextRequest) {
   if (!payload || !["atendente", "admin"].includes(payload.role as string)) return null;
   return payload;
 }
-
-const _evResolverUrl = process.env.EVOLUTION_API_URL ?? 'evolution-api-production-8f99.up.railway.app'
-const EVOLUTION_API_URL = _evResolverUrl.startsWith('http') ? _evResolverUrl : `https://${_evResolverUrl}`
-const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY!
-const EVOLUTION_INSTANCE = "chefebot";
 
 type Pedido = {
   id: string;
@@ -30,14 +26,20 @@ type Pedido = {
 };
 
 async function enviarMensagem(phone: string, message: string) {
-  await fetch(`${EVOLUTION_API_URL}/message/sendText/${EVOLUTION_INSTANCE}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      apikey: EVOLUTION_API_KEY,
-    },
-    body: JSON.stringify({ number: phone, text: message }),
-  });
+  const config = obterConfigEvolution();
+  if (!config) { console.error("[ChefeBot] Provider de WhatsApp não configurado — mensagem de encerramento não enviada."); return; }
+  try {
+    await fetch(`${config.baseUrl}/message/sendText/${config.instanceName}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: config.apiKey,
+      },
+      body: JSON.stringify({ number: phone, text: message }),
+    });
+  } catch (err) {
+    console.error("[ChefeBot] Erro ao enviar mensagem de encerramento:", err);
+  }
 }
 
 export async function POST(req: NextRequest) {

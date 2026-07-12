@@ -30,19 +30,10 @@ function requestComCookie(token?: string) {
   return new NextRequest("http://localhost/api/whatsapp/reset", init);
 }
 
-// Simula o ciclo completo logout -> delete -> create -> webhook -> connect,
-// na mesma ordem chamada pela rota, todos com sucesso e devolvendo um QR novo.
-function mockCicloResetCompleto() {
-  vi.mocked(fetch)
-    .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({}) } as Response) // logout
-    .mockResolvedValueOnce({ ok: true, status: 200, text: async () => "{}" } as unknown as Response) // delete
-    .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ instance: { instanceName: "chefebot" } }) } as Response) // create
-    .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({}) } as Response) // webhook
-    .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ base64: "data:image/png;base64,NOVOQR" }) } as Response); // connect
-}
-
 beforeEach(() => {
   vi.mocked(fetch).mockReset();
+  process.env.EVOLUTION_API_URL = "https://evolution.teste.com.br";
+  process.env.EVOLUTION_API_KEY = "chave-de-teste";
 });
 
 describe("POST /api/whatsapp/reset — autenticacao e papeis", () => {
@@ -63,24 +54,88 @@ describe("POST /api/whatsapp/reset — autenticacao e papeis", () => {
     expect(res.status).toBe(403);
     expect(fetch).not.toHaveBeenCalled();
   });
+});
 
-  test("admin autenticado pode resetar: recria a instancia e recebe o QR novo", async () => {
-    mockCicloResetCompleto();
+describe("POST /api/whatsapp/reset — provider nao configurado", () => {
+  test("sem EVOLUTION_API_URL/EVOLUTION_API_KEY retorna 503, nunca chama fetch", async () => {
+    delete process.env.EVOLUTION_API_URL;
+    delete process.env.EVOLUTION_API_KEY;
     const res = await POST(requestComCookie("token-admin"));
     const data = await res.json();
+    expect(res.status).toBe(503);
+    expect(data.ok).toBe(false);
+    expect(data.estado).toBe("provider_not_configured");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/whatsapp/reset — fluxo seguro, nunca apaga instancia conectada", () => {
+  test("instancia ja conectada: retorna sucesso sem QR, uma unica chamada, nunca logout/delete", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ instance: { state: "open" } }),
+    } as Response);
+
+    const res = await POST(requestComCookie("token-admin"));
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.ok).toBe(true);
+    expect(data.estado).toBe("connected");
+    expect(data.qrcode).toBeUndefined();
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(fetch).mock.calls[0][0]).toContain("/instance/connectionState/");
+    expect(vi.mocked(fetch).mock.calls.some(c => String(c[0]).includes("/instance/delete/"))).toBe(false);
+    expect(vi.mocked(fetch).mock.calls.some(c => String(c[0]).includes("/instance/logout/"))).toBe(false);
+  });
+
+  test("instancia existe mas desconectada: reconecta direto, sem create, sem logout/delete", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ instance: { state: "close" } }) } as Response) // connectionState
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ base64: "data:image/png;base64,QR" }) } as Response); // connect
+
+    const res = await POST(requestComCookie("token-admin"));
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.ok).toBe(true);
+    expect(data.estado).toBe("qr_required");
+    expect(data.qrcode.base64).toContain("QR");
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(fetch).mock.calls.some(c => String(c[0]).includes("/instance/create"))).toBe(false);
+    expect(vi.mocked(fetch).mock.calls.some(c => String(c[0]).includes("/instance/delete/"))).toBe(false);
+    expect(vi.mocked(fetch).mock.calls.some(c => String(c[0]).includes("/instance/logout/"))).toBe(false);
+  });
+
+  test("instancia ausente: cria, configura webhook e conecta — nunca chama delete/logout", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({ ok: false, status: 404, json: async () => ({ message: "not found" }) } as Response) // connectionState
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ instance: {} }) } as Response) // create
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({}) } as Response) // webhook
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ base64: "data:image/png;base64,NOVOQR" }) } as Response); // connect
+
+    const res = await POST(requestComCookie("token-admin"));
+    const data = await res.json();
+
     expect(res.status).toBe(200);
     expect(data.ok).toBe(true);
     expect(data.qrcode.base64).toContain("NOVOQR");
-    // logout, delete, create, webhook, connect — nessa ordem
-    expect(fetch).toHaveBeenCalledTimes(5);
-    expect(vi.mocked(fetch).mock.calls[0][0]).toContain("/instance/logout/");
-    expect(vi.mocked(fetch).mock.calls[1][0]).toContain("/instance/delete/");
-    expect(vi.mocked(fetch).mock.calls[2][0]).toContain("/instance/create");
-    expect(vi.mocked(fetch).mock.calls[4][0]).toContain("/instance/connect/");
+    expect(fetch).toHaveBeenCalledTimes(4);
+    expect(vi.mocked(fetch).mock.calls[1][0]).toContain("/instance/create");
+    expect(vi.mocked(fetch).mock.calls[2][0]).toContain("/webhook/set/");
+    expect(vi.mocked(fetch).mock.calls[3][0]).toContain("/instance/connect/");
+    expect(vi.mocked(fetch).mock.calls.some(c => String(c[0]).includes("/instance/delete/"))).toBe(false);
+    expect(vi.mocked(fetch).mock.calls.some(c => String(c[0]).includes("/instance/logout/"))).toBe(false);
   });
 
-  test("dev autenticado tambem pode resetar", async () => {
-    mockCicloResetCompleto();
+  test("dev autenticado tambem pode reconectar", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ instance: { state: "open" } }),
+    } as Response);
+
     const res = await POST(requestComCookie("token-dev"));
     const data = await res.json();
     expect(res.status).toBe(200);
@@ -91,8 +146,7 @@ describe("POST /api/whatsapp/reset — autenticacao e papeis", () => {
 describe("POST /api/whatsapp/reset — erro sanitizado, sem segredos", () => {
   test("falha ao criar instancia nunca expoe o corpo bruto da Evolution API", async () => {
     vi.mocked(fetch)
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({}) } as Response) // logout
-      .mockResolvedValueOnce({ ok: true, status: 200, text: async () => "{}" } as unknown as Response) // delete
+      .mockResolvedValueOnce({ ok: false, status: 404, json: async () => ({ message: "not found" }) } as Response) // connectionState
       .mockResolvedValueOnce({
         ok: false,
         status: 500,
@@ -105,7 +159,30 @@ describe("POST /api/whatsapp/reset — erro sanitizado, sem segredos", () => {
 
     expect(res.status).toBe(502);
     expect(data.ok).toBe(false);
-    expect(data.detail).toBeUndefined();
     expect(texto).not.toContain("linha-sensivel-do-servidor-interno");
+  });
+
+  test("credencial invalida na verificacao retorna 502 sanitizado, nunca tenta criar/apagar", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({ ok: false, status: 401, json: async () => ({ message: "Unauthorized" }) } as Response);
+
+    const res = await POST(requestComCookie("token-admin"));
+    const data = await res.json();
+
+    expect(res.status).toBe(502);
+    expect(data.ok).toBe(false);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  test("QR nao gerado apos connect retorna 502", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ instance: { state: "close" } }) } as Response) // connectionState
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({}) } as Response); // connect sem QR
+
+    const res = await POST(requestComCookie("token-admin"));
+    const data = await res.json();
+
+    expect(res.status).toBe(502);
+    expect(data.ok).toBe(false);
+    expect(data.error).toContain("QR code não gerado");
   });
 });

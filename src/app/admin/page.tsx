@@ -342,10 +342,9 @@ export default function AdminPage() {
     }
   }
 
-  // Recria a instância na Evolution API (logout + delete + create + webhook).
-  // Necessário quando a instância foi perdida (ex.: "Application not found"
-  // no connect) — buscar QR sozinho nunca resolve esse caso, só reconecta uma
-  // instância que já existe.
+  // Reconecta com segurança na Evolution API — nunca apaga uma instância já
+  // conectada. Se a instância existir mas estiver desconectada, reconecta; se
+  // não existir, cria e conecta (buscar QR sozinho nunca resolve esse caso).
   const resetWhatsapp = async () => {
     setWaResetting(true)
     setWaQrError(null)
@@ -355,6 +354,13 @@ export default function AdminPage() {
       const base64 = d?.qrcode?.base64 || null
       if (d?.ok && base64) {
         startQrTimer(base64)
+      } else if (d?.ok && d?.estado === 'connected') {
+        // Já estava conectado — reconectar não apaga nada, não é erro.
+        setWaStatus('connected')
+        setWaShowQr(false)
+        setWaQrBase64(null)
+        if (waPollRef.current) { clearInterval(waPollRef.current); waPollRef.current = null }
+        if (waTimerRef.current) { clearInterval(waTimerRef.current); waTimerRef.current = null }
       } else {
         setWaQrError(d?.error || 'Não foi possível resetar a conexão do WhatsApp.')
       }

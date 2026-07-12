@@ -1,11 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { gerarOtp, podeReenviarOtp } from "@/lib/clienteAuth";
 import { sanitizeTelefoneCliente } from "@/lib/clientes";
-
-const _evUrl = process.env.EVOLUTION_API_URL ?? "evolution-api-production-8f99.up.railway.app";
-const EVOLUTION_API_URL = _evUrl.startsWith("http") ? _evUrl : `https://${_evUrl}`;
-const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY;
-const EVOLUTION_INSTANCE = "chefebot";
+import { obterConfigEvolution } from "@/lib/evolutionApi";
 
 function sanitizePhoneEnvio(telefone: string): string {
   const digits = telefone.replace(/\D/g, "");
@@ -14,16 +10,18 @@ function sanitizePhoneEnvio(telefone: string): string {
 
 async function enviarOtpPorWhatsapp(telefone: string, codigo: string): Promise<void> {
   const texto = `Seu código para entrar no ChefeBot é: *${codigo}*\n\nVale por 5 minutos.`;
-  if (!EVOLUTION_API_KEY) {
-    // Sem credenciais configuradas: fallback seguro de dev/teste — nunca
-    // retornar o codigo na resposta HTTP, apenas registrar no log do servidor.
+  const config = obterConfigEvolution();
+  if (!config) {
+    // Provider não configurado (ou mal configurado): fallback seguro de
+    // dev/teste — nunca retornar o codigo na resposta HTTP, apenas
+    // registrar no log do servidor. Nunca tenta um host hardcoded antigo.
     console.log(`[ChefeBot][dev] OTP para ${telefone}: ${codigo}`);
     return;
   }
   try {
-    await fetch(`${EVOLUTION_API_URL}/message/sendText/${EVOLUTION_INSTANCE}`, {
+    await fetch(`${config.baseUrl}/message/sendText/${config.instanceName}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
+      headers: { "Content-Type": "application/json", apikey: config.apiKey },
       body: JSON.stringify({ number: sanitizePhoneEnvio(telefone), text: texto }),
     });
   } catch (err) {
