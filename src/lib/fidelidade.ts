@@ -228,7 +228,17 @@ export async function obterProgressoFidelidade(clienteId: string): Promise<Progr
  * - resgatado: débito de pontos por resgate de recompensa.
  * - ajuste: correção manual (positiva ou negativa), fora do fluxo automático.
  */
-export type TipoMovimentoPontos = "previsto" | "confirmado" | "cancelado" | "estornado" | "resgatado" | "ajuste";
+export type TipoMovimentoPontos =
+  | "previsto"
+  | "confirmado"
+  | "cancelado"
+  | "estornado"
+  | "resgatado"
+  | "ajuste"
+  /** Restitui pontos de um resgate (`resgatado`) cujo pedido foi cancelado
+   * antes de ser concluído — o cliente nunca chegou a receber a recompensa.
+   * Aditivo: nunca reescreve o movimento `resgatado` original. */
+  | "resgate_estornado";
 
 export type MovimentoPontos = {
   movimentoId: string;
@@ -245,6 +255,30 @@ export type MovimentoPontos = {
 export type SaldoPontos = {
   /** Pontos confirmados e ainda não resgatados/estornados. Nunca inclui "previstos". */
   disponivel: number;
+};
+
+/**
+ * Recompensa resgatável configurada pelo admin — Etapa 5, aditivo dentro de
+ * `ConfigFidelidadePontos`. Dois tipos suportados:
+ * - `desconto_fixo`: valor fixo em centavos, limitado ao subtotal elegível
+ *   (nunca desconta a taxa de entrega, nunca gera total negativo).
+ * - `pizza_gratis`: aplica ao item de menor preço com `kind === "pizza"` no
+ *   carrinho (identificação estrutural, nunca por texto), limitado a
+ *   `valorMaximoCentavos` quando informado.
+ */
+export type TipoRecompensaPontos = "desconto_fixo" | "pizza_gratis";
+
+export type RecompensaPontosConfig = {
+  ativa: boolean;
+  /** Custo em pontos para resgatar esta recompensa. */
+  custoPontos: number;
+  tipo: TipoRecompensaPontos;
+  /** Texto apresentado ao cliente (ex.: "R$20 de desconto", "1 Pizza Família grátis"). */
+  descricao: string;
+  /** Obrigatório para `desconto_fixo`. */
+  valorDescontoCentavos?: number;
+  /** Opcional para `pizza_gratis` — teto de valor descontado. */
+  valorMaximoCentavos?: number;
 };
 
 export type ConfigFidelidadePontos = {
@@ -266,6 +300,8 @@ export type ConfigFidelidadePontos = {
   metaPizzasFamilia?: number;
   descricaoRecompensa: string;
   validadeDias?: number;
+  /** Recompensa resgatável — opcional, aditiva (Etapa 5). Sem ela, o resgate fica indisponível. */
+  recompensa?: RecompensaPontosConfig;
 };
 
 export const CONFIG_FIDELIDADE_PONTOS_PADRAO: ConfigFidelidadePontos = {
@@ -352,6 +388,7 @@ export function calcularSaldoDoExtrato(movimentos: MovimentoPontos[]): number {
   return movimentos.reduce((saldo, mov) => {
     switch (mov.tipo) {
       case "confirmado":
+      case "resgate_estornado":
         return saldo + mov.pontos;
       case "resgatado":
       case "estornado":
@@ -491,4 +528,260 @@ export function calcularProgressoPontos(saldo: number, meta: number): ProgressoP
 export function ordenarExtratoPontosDesc(movimentos: MovimentoPontos[]): MovimentoPontos[] {
   if (!Array.isArray(movimentos)) return [];
   return [...movimentos].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+}
+
+// ============================================================================
+// RESGATE — Etapa 5 (reserva + aplicação segura da recompensa no pedido)
+// Fluxo: reserva (bloqueia pontos + trava concorrência por lock curto) →
+// checkout recebe só o resgateId → aplicação recalcula tudo no servidor no
+// momento da criação do pedido → cancelamento restitui uma única vez.
+// ============================================================================
+
+export type StatusResgate = "reservado" | "aplicado" | "cancelado" | "expirado" | "estornado";
+
+export type Resgate = {
+  resgateId: string;
+  clienteId: string;
+  status: StatusResgate;
+  tipoRecompensa: TipoRecompensaPontos;
+  pontosUtilizados: number;
+  /** Só preenchido quando `status === 'aplicado'` — calculado no servidor na aplicação. */
+  valorAplicadoCentavos: number;
+  criadoEm: string;
+  expiraEm: string;
+  pedidoId?: string;
+};
+
+const RESERVA_TTL_MINUTOS = 15;
+const LOCK_TTL_SEGUNDOS = 5;
+
+function chaveResgate(resgateId: string): string {
+  return `fidelidade:pontos:resgate:${resgateId}`;
+}
+function chaveResgatesCliente(clienteId: string): string {
+  return `fidelidade:pontos:resgates:${clienteId}`;
+}
+function chaveLockResgate(clienteId: string): string {
+  return `fidelidade:pontos:lock:${clienteId}`;
+}
+
+async function salvarResgate(resgate: Resgate): Promise<void> {
+  await redis.set(chaveResgate(resgate.resgateId), resgate);
+  const lista = (await redis.get<string[]>(chaveResgatesCliente(resgate.clienteId))) ?? [];
+  if (!lista.includes(resgate.resgateId)) {
+    await redis.set(chaveResgatesCliente(resgate.clienteId), [...lista, resgate.resgateId]);
+  }
+}
+
+export async function obterResgatePorId(resgateId: string): Promise<Resgate | null> {
+  return (await redis.get<Resgate>(chaveResgate(resgateId))) ?? null;
+}
+
+/**
+ * Marca uma reserva como expirada quando detectada vencida fora do fluxo
+ * normal de `aplicarResgateAoPedido` (ex.: numa prévia somente-leitura que
+ * bloqueia o uso, mas ainda quer refletir o estado real no extrato de
+ * resgates do cliente). Só age se o resgate ainda está `reservado` e
+ * realmente venceu — nunca sobrescreve um resgate já aplicado/cancelado.
+ */
+export async function marcarResgateExpiradoSeVencido(resgateId: string): Promise<void> {
+  const resgate = await obterResgatePorId(resgateId);
+  if (!resgate || resgate.status !== "reservado") return;
+  if (new Date(resgate.expiraEm).getTime() >= Date.now()) return;
+  await salvarResgate({ ...resgate, status: "expirado" });
+}
+
+/** Lista os resgates do cliente, mais recente primeiro. */
+export async function obterResgatesCliente(clienteId: string): Promise<Resgate[]> {
+  const ids = (await redis.get<string[]>(chaveResgatesCliente(clienteId))) ?? [];
+  const resgates = await Promise.all(ids.map((id) => obterResgatePorId(id)));
+  return resgates
+    .filter((r): r is Resgate => !!r)
+    .sort((a, b) => new Date(b.criadoEm).getTime() - new Date(a.criadoEm).getTime());
+}
+
+/**
+ * Cria uma reserva de resgate para o cliente, validando saldo e configuração
+ * no servidor. Usa um lock curto por cliente (`SET NX` com expiração) para
+ * evitar duas reservas simultâneas disputando o mesmo saldo — o lock é
+ * sempre liberado ao final da operação (sucesso ou erro), nunca preso
+ * indefinidamente (expira sozinho em `LOCK_TTL_SEGUNDOS` mesmo se o processo
+ * cair antes do `finally`).
+ */
+export async function criarReservaResgate(clienteId: string): Promise<{ ok: true; resgate: Resgate } | { ok: false; error: string }> {
+  const lockKey = chaveLockResgate(clienteId);
+  const obtido = await redis.set(lockKey, true, { nx: true, ex: LOCK_TTL_SEGUNDOS });
+  if (!obtido) return { ok: false, error: "Já existe uma solicitação de resgate em andamento" };
+
+  try {
+    const config = await obterConfigFidelidadePontos();
+    const recompensa = config.recompensa;
+    if (!recompensa || !recompensa.ativa) return { ok: false, error: "Recompensa indisponível" };
+    if (!Number.isFinite(recompensa.custoPontos) || recompensa.custoPontos <= 0) {
+      return { ok: false, error: "Recompensa mal configurada" };
+    }
+
+    const saldo = await obterSaldoPontos(clienteId);
+    if (saldo.disponivel < recompensa.custoPontos) {
+      return { ok: false, error: "Saldo de pontos insuficiente" };
+    }
+
+    const agora = new Date();
+    const resgate: Resgate = {
+      resgateId: novoId("res"),
+      clienteId,
+      status: "reservado",
+      tipoRecompensa: recompensa.tipo,
+      pontosUtilizados: recompensa.custoPontos,
+      valorAplicadoCentavos: 0,
+      criadoEm: agora.toISOString(),
+      expiraEm: new Date(agora.getTime() + RESERVA_TTL_MINUTOS * 60000).toISOString(),
+    };
+    await salvarResgate(resgate);
+    return { ok: true, resgate };
+  } finally {
+    await redis.del(lockKey);
+  }
+}
+
+/**
+ * Cancela uma reserva ainda não aplicada. Só o dono pode cancelar; reservas
+ * já aplicadas a um pedido não podem ser canceladas manualmente.
+ */
+export async function cancelarReservaResgate(clienteId: string, resgateId: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  const resgate = await obterResgatePorId(resgateId);
+  if (!resgate || resgate.clienteId !== clienteId) return { ok: false, error: "Resgate não encontrado" };
+  if (resgate.status !== "reservado") return { ok: false, error: "Este resgate não pode mais ser cancelado" };
+  await salvarResgate({ ...resgate, status: "cancelado" });
+  return { ok: true };
+}
+
+export type ItemCarrinhoElegibilidade = { kind?: string; price: number; qty: number };
+
+/**
+ * Calcula o valor do desconto no servidor a partir do carrinho real e da
+ * configuração atual — nunca aceita o valor vindo do cliente. Função pura,
+ * não lê/escreve Redis.
+ * - `desconto_fixo`: valor configurado, limitado ao subtotal elegível
+ *   (nunca gera desconto maior que o próprio subtotal).
+ * - `pizza_gratis`: identifica a pizza pela estrutura (`kind === "pizza"`),
+ *   nunca por nome/texto. Com mais de uma pizza elegível, aplica à de menor
+ *   preço (nunca dá mais benefício que o configurado). Sem pizza no
+ *   carrinho, retorna erro — nunca inventa um valor.
+ */
+export function calcularDescontoRecompensa(params: {
+  recompensa: RecompensaPontosConfig;
+  itens: ItemCarrinhoElegibilidade[];
+  /** Subtotal dos produtos, SEM taxa de entrega. */
+  subtotalElegivel: number;
+}): { valorDescontoCentavos: number; erro?: string } {
+  const { recompensa, itens, subtotalElegivel } = params;
+  const subtotalSeguro = Number.isFinite(subtotalElegivel) && subtotalElegivel > 0 ? subtotalElegivel : 0;
+  const subtotalCentavos = Math.round(subtotalSeguro * 100);
+
+  if (recompensa.tipo === "desconto_fixo") {
+    const valor = Number(recompensa.valorDescontoCentavos) || 0;
+    if (valor <= 0) return { valorDescontoCentavos: 0, erro: "Recompensa mal configurada" };
+    const desconto = Math.min(valor, subtotalCentavos);
+    if (desconto <= 0) return { valorDescontoCentavos: 0, erro: "Nada elegível para desconto" };
+    return { valorDescontoCentavos: desconto };
+  }
+
+  if (recompensa.tipo === "pizza_gratis") {
+    const pizzas = (Array.isArray(itens) ? itens : []).filter(
+      (i) => i?.kind === "pizza" && Number.isFinite(i.price) && i.price > 0
+    );
+    if (pizzas.length === 0) return { valorDescontoCentavos: 0, erro: "Nenhuma pizza elegível no carrinho" };
+    const maisBarata = pizzas.reduce((menor, atual) => (atual.price < menor.price ? atual : menor));
+    let desconto = Math.round(maisBarata.price * 100);
+    if (Number.isFinite(recompensa.valorMaximoCentavos) && (recompensa.valorMaximoCentavos as number) > 0) {
+      desconto = Math.min(desconto, recompensa.valorMaximoCentavos as number);
+    }
+    desconto = Math.min(desconto, subtotalCentavos);
+    if (desconto <= 0) return { valorDescontoCentavos: 0, erro: "Nada elegível para desconto" };
+    return { valorDescontoCentavos: desconto };
+  }
+
+  return { valorDescontoCentavos: 0, erro: "Tipo de recompensa desconhecido" };
+}
+
+/**
+ * Aplica um resgate reservado a um pedido em criação. Nunca confia em valor
+ * de desconto, quantidade de pontos ou tipo de recompensa vindos do cliente —
+ * recalcula tudo a partir do carrinho e da configuração atuais no servidor.
+ * Idempotente por pedidoId: reprocessar a mesma criação de pedido nunca
+ * debita pontos duas vezes.
+ */
+export async function aplicarResgateAoPedido(params: {
+  resgateId: string;
+  clienteId: string;
+  pedidoId: string;
+  itens: ItemCarrinhoElegibilidade[];
+  subtotalElegivel: number;
+}): Promise<{ ok: true; valorDescontoCentavos: number } | { ok: false; error: string }> {
+  const { resgateId, clienteId, pedidoId, itens, subtotalElegivel } = params;
+  const resgate = await obterResgatePorId(resgateId);
+  if (!resgate || resgate.clienteId !== clienteId) return { ok: false, error: "Resgate inválido" };
+
+  if (resgate.status === "aplicado" && resgate.pedidoId === pedidoId) {
+    return { ok: true, valorDescontoCentavos: resgate.valorAplicadoCentavos };
+  }
+  if (resgate.status !== "reservado") return { ok: false, error: "Resgate não está disponível" };
+  if (new Date(resgate.expiraEm).getTime() < Date.now()) {
+    await salvarResgate({ ...resgate, status: "expirado" });
+    return { ok: false, error: "Resgate expirado" };
+  }
+
+  const config = await obterConfigFidelidadePontos();
+  const recompensa = config.recompensa;
+  if (!recompensa || !recompensa.ativa || recompensa.tipo !== resgate.tipoRecompensa) {
+    return { ok: false, error: "Recompensa indisponível" };
+  }
+
+  const saldo = await obterSaldoPontos(clienteId);
+  if (saldo.disponivel < resgate.pontosUtilizados) {
+    return { ok: false, error: "Saldo de pontos insuficiente" };
+  }
+
+  const { valorDescontoCentavos, erro } = calcularDescontoRecompensa({ recompensa, itens, subtotalElegivel });
+  if (erro || valorDescontoCentavos <= 0) {
+    return { ok: false, error: erro || "Recompensa não aplicável a este pedido" };
+  }
+
+  // Idempotente: reprocessar a mesma criação de pedido (mesmo pedidoId) nunca
+  // registra o débito duas vezes — `registro === null` na segunda tentativa.
+  await registrarMovimentoPontosIdempotente(clienteId, {
+    eventoId: construirEventoIdPontos(pedidoId, "resgatado"),
+    pedidoId,
+    tipo: "resgatado",
+    pontos: resgate.pontosUtilizados,
+    motivo: `Resgate de recompensa no pedido ${pedidoId}`,
+  });
+
+  await salvarResgate({ ...resgate, status: "aplicado", pedidoId, valorAplicadoCentavos: valorDescontoCentavos });
+  return { ok: true, valorDescontoCentavos };
+}
+
+/**
+ * Restitui os pontos de um resgate já aplicado quando o pedido correspondente
+ * é cancelado antes de o cliente receber a recompensa. Idempotente por
+ * pedidoId (eventoId próprio, tipo `resgate_estornado`) — nunca restitui duas
+ * vezes nem apaga o movimento `resgatado` original.
+ */
+export async function restaurarPontosResgate(params: { clienteId: string; resgateId: string; pedidoId: string }): Promise<void> {
+  const { clienteId, resgateId, pedidoId } = params;
+  const resgate = await obterResgatePorId(resgateId);
+  if (!resgate || resgate.clienteId !== clienteId) return;
+  if (resgate.status !== "aplicado") return;
+
+  const registro = await registrarMovimentoPontosIdempotente(clienteId, {
+    eventoId: construirEventoIdPontos(pedidoId, "resgate_estornado"),
+    pedidoId,
+    tipo: "resgate_estornado",
+    pontos: resgate.pontosUtilizados,
+    motivo: `Pontos restituídos — pedido ${pedidoId} cancelado após resgate`,
+  });
+  if (registro) {
+    await salvarResgate({ ...resgate, status: "estornado" });
+  }
 }

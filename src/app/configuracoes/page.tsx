@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { Gift } from 'lucide-react'
 import PanelShell from '@/components/PanelShell'
 
 type Config = {
@@ -28,6 +29,39 @@ const FIDELIDADE_PADRAO: ConfigFidelidade = {
   pizzasParaPremio: 10,
   tipoRecompensa: 'pizza_gratis',
   descricaoRecompensa: 'Pizza grátis',
+}
+
+// Modelo novo (Etapa 5) — aditivo e independente do modelo antigo por
+// pizzas acima. Persistido em endpoint separado (/api/fidelidade/config/pontos).
+type RecompensaPontos = {
+  ativa: boolean
+  custoPontos: number
+  tipo: 'desconto_fixo' | 'pizza_gratis'
+  descricao: string
+  valorDescontoCentavos?: number
+  valorMaximoCentavos?: number
+}
+
+type ConfigFidelidadePontos = {
+  ativo: boolean
+  metaPontos?: number
+  descricaoRecompensa: string
+  recompensa?: RecompensaPontos
+}
+
+const RECOMPENSA_PONTOS_PADRAO: RecompensaPontos = {
+  ativa: false,
+  custoPontos: 500,
+  tipo: 'desconto_fixo',
+  descricao: '',
+  valorDescontoCentavos: 2000,
+}
+
+const FIDELIDADE_PONTOS_PADRAO: ConfigFidelidadePontos = {
+  ativo: false,
+  metaPontos: 720,
+  descricaoRecompensa: '1 Pizza Família',
+  recompensa: RECOMPENSA_PONTOS_PADRAO,
 }
 
 type ItemCardapio = { name: string; price: number }
@@ -165,6 +199,10 @@ const btnRemoveRow: React.CSSProperties = {
   flexShrink: 0,
 }
 
+function fidelidepontosCorAtivo(ativo: boolean): string {
+  return ativo ? '#4ade80' : TEXT2
+}
+
 function SectionCard({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
   return (
     <div style={{ background: CARD_BG, border: BORDER, borderRadius: 16, padding: 20, display: 'flex', flexDirection: 'column', gap: 18, ...style }}>
@@ -198,6 +236,9 @@ export default function ConfiguracoesPage() {
   const [fidelidade, setFidelidade] = useState<ConfigFidelidade>(FIDELIDADE_PADRAO)
   const [salvandoFidelidade, setSalvandoFidelidade] = useState(false)
   const [mensagemFidelidade, setMensagemFidelidade] = useState('')
+  const [fidelidadePontos, setFidelidadePontos] = useState<ConfigFidelidadePontos>(FIDELIDADE_PONTOS_PADRAO)
+  const [salvandoFidelidadePontos, setSalvandoFidelidadePontos] = useState(false)
+  const [mensagemFidelidadePontos, setMensagemFidelidadePontos] = useState('')
   const is24h = config.horaAbertura === 0 && config.horaFechamento === 24
 
   useEffect(() => {
@@ -210,6 +251,10 @@ export default function ConfiguracoesPage() {
         .then(r => (r.ok ? r.json() : null))
         .then(data => { if (data) setFidelidade({ ...FIDELIDADE_PADRAO, ...data }) })
         .catch(err => console.error('Falha ao carregar fidelidade:', err))
+      fetch('/api/fidelidade/config/pontos')
+        .then(r => (r.ok ? r.json() : null))
+        .then(data => { if (data) setFidelidadePontos({ ...FIDELIDADE_PONTOS_PADRAO, ...data, recompensa: { ...RECOMPENSA_PONTOS_PADRAO, ...(data.recompensa || {}) } }) })
+        .catch(err => console.error('Falha ao carregar fidelidade por pontos:', err))
     }
     fetch('/api/configuracoes')
       .then(r => { if (r.status === 401) { router.push('/login?callbackUrl=/configuracoes'); return null } return r.json() })
@@ -279,6 +324,18 @@ export default function ConfiguracoesPage() {
     } catch { setMensagemFidelidade('❌ Erro ao salvar.') }
     setSalvandoFidelidade(false)
     setTimeout(() => setMensagemFidelidade(''), 3000)
+  }
+
+  const salvarFidelidadePontos = async () => {
+    setSalvandoFidelidadePontos(true)
+    setMensagemFidelidadePontos('')
+    try {
+      const res = await fetch('/api/fidelidade/config/pontos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(fidelidadePontos) })
+      const data = await res.json().catch(() => null)
+      setMensagemFidelidadePontos(res.ok ? '✅ Fidelidade por pontos salva!' : `❌ ${data?.error || 'Erro ao salvar.'}`)
+    } catch { setMensagemFidelidadePontos('❌ Erro ao salvar.') }
+    setSalvandoFidelidadePontos(false)
+    setTimeout(() => setMensagemFidelidadePontos(''), 4000)
   }
 
   const salvarCardapio = async () => {
@@ -580,6 +637,130 @@ export default function ConfiguracoesPage() {
                     </button>
                     {mensagemFidelidade && (
                       <p style={{ textAlign: 'center', color: mensagemFidelidade.includes('✅') ? '#4ade80' : '#f87171', fontWeight: 800, fontSize: 13, margin: 0 }}>{mensagemFidelidade}</p>
+                    )}
+                  </SectionCard>
+                )}
+
+                {/* Fidelidade por Pontos — modelo novo (Etapa 5), aditivo e independente do modelo antigo acima */}
+                {isAdmin && (
+                  <SectionCard>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: -4, flexWrap: 'wrap' }}>
+                      <Gift size={16} color={TEXT2} style={{ flexShrink: 0 }} aria-hidden="true" />
+                      <span style={{ fontSize: 13, fontWeight: 900, color: TEXT, textTransform: 'uppercase', letterSpacing: '0.8px' }}>Fidelidade por pontos</span>
+                      <span style={{ fontSize: 10, background: 'rgba(255,200,0,0.12)', color: 'rgba(255,220,100,0.8)', padding: '2px 8px', borderRadius: 20, fontWeight: 800, whiteSpace: 'nowrap' }}>Somente Admin</span>
+                    </div>
+                    <p style={{ color: TEXT2, fontSize: 12, margin: '-10px 0 0', lineHeight: 1.5 }}>
+                      Modelo novo — a cada R$1 gasto o cliente ganha 1 ponto. Independente da fidelidade por pizzas acima.
+                    </p>
+                    <button
+                      onClick={() => setFidelidadePontos(prev => ({ ...prev, ativo: !prev.ativo }))}
+                      style={{ width: '100%', background: fidelidadePontos.ativo ? 'rgba(34,197,94,.1)' : 'rgba(255,255,255,.04)', border: `1.5px solid ${fidelidadePontos.ativo ? 'rgba(34,197,94,.4)' : '#1f1d1a'}`, borderRadius: 12, padding: '13px 16px', color: fidelidepontosCorAtivo(fidelidadePontos.ativo), fontSize: 13, fontWeight: 800, cursor: 'pointer', minHeight: 48, fontFamily: FONT }}
+                    >
+                      {fidelidadePontos.ativo ? '✅ Fidelidade por pontos ativa — toque para desativar' : '⭕ Fidelidade por pontos desativada — toque para ativar'}
+                    </button>
+                    <FieldGroup label="Meta em pontos">
+                      <input
+                        type="number"
+                        min={1}
+                        value={fidelidadePontos.metaPontos ?? 720}
+                        onChange={e => setFidelidadePontos(prev => ({ ...prev, metaPontos: Number(e.target.value) }))}
+                        style={inputStyle}
+                      />
+                      <p style={{ color: '#56524b', fontSize: 11, fontWeight: 700, margin: '6px 0 0' }}>
+                        Ex.: 720 pontos ≈ 12 Pizzas Família de R$60
+                      </p>
+                    </FieldGroup>
+                    <FieldGroup label="Descrição da meta (exibida ao cliente)">
+                      <input
+                        type="text"
+                        placeholder="Ex: 1 Pizza Família"
+                        value={fidelidadePontos.descricaoRecompensa}
+                        onChange={e => setFidelidadePontos(prev => ({ ...prev, descricaoRecompensa: e.target.value }))}
+                        style={inputStyle}
+                        maxLength={120}
+                      />
+                    </FieldGroup>
+
+                    <div style={{ height: 1, background: '#1f1d1a', margin: '2px 0' }} />
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontSize: 12, fontWeight: 900, color: TEXT, textTransform: 'uppercase', letterSpacing: '0.6px' }}>Recompensa resgatável</span>
+                    </div>
+                    <button
+                      onClick={() => setFidelidadePontos(prev => ({ ...prev, recompensa: { ...(prev.recompensa || RECOMPENSA_PONTOS_PADRAO), ativa: !(prev.recompensa?.ativa) } }))}
+                      style={{ width: '100%', background: fidelidadePontos.recompensa?.ativa ? 'rgba(34,197,94,.1)' : 'rgba(255,255,255,.04)', border: `1.5px solid ${fidelidadePontos.recompensa?.ativa ? 'rgba(34,197,94,.4)' : '#1f1d1a'}`, borderRadius: 12, padding: '13px 16px', color: fidelidepontosCorAtivo(!!fidelidadePontos.recompensa?.ativa), fontSize: 13, fontWeight: 800, cursor: 'pointer', minHeight: 48, fontFamily: FONT }}
+                    >
+                      {fidelidadePontos.recompensa?.ativa ? '✅ Resgate ativo — toque para desativar' : '⭕ Resgate desativado — toque para ativar'}
+                    </button>
+                    <FieldGroup label="Custo em pontos">
+                      <input
+                        type="number"
+                        min={1}
+                        value={fidelidadePontos.recompensa?.custoPontos ?? RECOMPENSA_PONTOS_PADRAO.custoPontos}
+                        onChange={e => setFidelidadePontos(prev => ({ ...prev, recompensa: { ...(prev.recompensa || RECOMPENSA_PONTOS_PADRAO), custoPontos: Number(e.target.value) } }))}
+                        style={inputStyle}
+                      />
+                    </FieldGroup>
+                    <FieldGroup label="Tipo de recompensa">
+                      <select
+                        value={fidelidadePontos.recompensa?.tipo ?? 'desconto_fixo'}
+                        onChange={e => setFidelidadePontos(prev => ({ ...prev, recompensa: { ...(prev.recompensa || RECOMPENSA_PONTOS_PADRAO), tipo: e.target.value as RecompensaPontos['tipo'] } }))}
+                        style={inputStyle}
+                      >
+                        <option value="desconto_fixo">Desconto fixo (R$)</option>
+                        <option value="pizza_gratis">Pizza grátis (item mais barato do carrinho)</option>
+                      </select>
+                    </FieldGroup>
+                    <FieldGroup label="Descrição (exibida ao cliente no resgate)">
+                      <input
+                        type="text"
+                        placeholder="Ex: R$20 de desconto"
+                        value={fidelidadePontos.recompensa?.descricao ?? ''}
+                        onChange={e => setFidelidadePontos(prev => ({ ...prev, recompensa: { ...(prev.recompensa || RECOMPENSA_PONTOS_PADRAO), descricao: e.target.value } }))}
+                        style={inputStyle}
+                        maxLength={120}
+                      />
+                    </FieldGroup>
+                    {(fidelidadePontos.recompensa?.tipo ?? 'desconto_fixo') === 'desconto_fixo' ? (
+                      <FieldGroup label="Valor do desconto (R$)">
+                        <input
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          value={((fidelidadePontos.recompensa?.valorDescontoCentavos ?? 0) / 100) || ''}
+                          onChange={e => setFidelidadePontos(prev => ({ ...prev, recompensa: { ...(prev.recompensa || RECOMPENSA_PONTOS_PADRAO), valorDescontoCentavos: Math.round((Number(e.target.value) || 0) * 100) } }))}
+                          style={inputStyle}
+                          placeholder="Ex: 20,00"
+                        />
+                        <p style={{ color: '#56524b', fontSize: 11, fontWeight: 700, margin: '6px 0 0' }}>
+                          Nunca desconta a taxa de entrega; limitado ao subtotal do pedido.
+                        </p>
+                      </FieldGroup>
+                    ) : (
+                      <FieldGroup label="Valor máximo do desconto (R$, opcional)">
+                        <input
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          value={((fidelidadePontos.recompensa?.valorMaximoCentavos ?? 0) / 100) || ''}
+                          onChange={e => setFidelidadePontos(prev => ({ ...prev, recompensa: { ...(prev.recompensa || RECOMPENSA_PONTOS_PADRAO), valorMaximoCentavos: Math.round((Number(e.target.value) || 0) * 100) || undefined } }))}
+                          style={inputStyle}
+                          placeholder="0 = sem teto (limitado ao valor da pizza)"
+                        />
+                        <p style={{ color: '#56524b', fontSize: 11, fontWeight: 700, margin: '6px 0 0' }}>
+                          Aplica-se à pizza mais barata do carrinho; nunca inclui taxa de entrega, adicionais ou bordas.
+                        </p>
+                      </FieldGroup>
+                    )}
+                    <button
+                      onClick={salvarFidelidadePontos}
+                      disabled={salvandoFidelidadePontos}
+                      style={{ width: '100%', height: 48, background: salvandoFidelidadePontos ? '#1a1208' : `linear-gradient(180deg, ${ACCENT}, #d95e00)`, border: 'none', borderRadius: 12, color: '#fff', fontSize: 14, fontWeight: 900, cursor: salvandoFidelidadePontos ? 'not-allowed' : 'pointer', fontFamily: FONT, opacity: salvandoFidelidadePontos ? 0.6 : 1 }}
+                    >
+                      {salvandoFidelidadePontos ? 'Salvando...' : 'Salvar Fidelidade por Pontos'}
+                    </button>
+                    {mensagemFidelidadePontos && (
+                      <p style={{ textAlign: 'center', color: mensagemFidelidadePontos.includes('✅') ? '#4ade80' : '#f87171', fontWeight: 800, fontSize: 13, margin: 0 }}>{mensagemFidelidadePontos}</p>
                     )}
                   </SectionCard>
                 )}

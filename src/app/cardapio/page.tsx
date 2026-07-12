@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
+import { Gift } from "lucide-react";
 import PanelShell from "@/components/PanelShell";
 import { useLiveMenu, cartItemEsgotado } from "./liveMenu";
 import { CARDAPIO_ILLUSTRATIONS, CardapioIllustration } from "@/lib/cardapioVisuals";
@@ -21,6 +22,22 @@ export type MenuType = {
   payments: string[];
   esgotados?: string[];
   esgotadosMetadata?: EsgMetadata;
+};
+
+// Resgate de recompensa por pontos (Etapa 5) — tipos do checkout público.
+type RecompensaResgateInfo = {
+  ativa: boolean;
+  custoPontos: number;
+  tipo: "desconto_fixo" | "pizza_gratis";
+  descricao: string;
+  disponivel: boolean;
+  valorDescontoCentavos?: number;
+  valorMaximoCentavos?: number;
+};
+type ResgateReserva = {
+  resgateId: string;
+  status: "reservado" | "aplicado" | "cancelado" | "expirado" | "estornado";
+  expiraEm: string;
 };
 
 // ==================== ADMIN CARDÁPIO ====================
@@ -654,6 +671,7 @@ type PedidoConfirmadoCliente = {
   total: number;
   statusToken?: string;
   pix?: PixClientePedido;
+  descontoResgateCentavos?: number;
 };
 
 const PIX_STATUS_LABEL: Record<PagamentoPixClienteStatus, string> = {
@@ -805,6 +823,14 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const [erroMisto, setErroMisto] = useState("");
   const [miniPizzaMode, setMiniPizzaMode] = useState(false);
   const [paymentModal, setPaymentModal] = useState<string | null>(null);
+  // Resgate de recompensa por pontos (Etapa 5) — só existe para cliente
+  // autenticado (cookie cliente-token). O valor do desconto mostrado aqui é
+  // sempre uma PRÉVIA a partir dos termos configurados pelo admin; o valor
+  // realmente aplicado é recalculado no servidor na criação do pedido.
+  const [recompensaCliente, setRecompensaCliente] = useState<RecompensaResgateInfo | null>(null);
+  const [resgateReservado, setResgateReservado] = useState<ResgateReserva | null>(null);
+  const [aplicandoResgate, setAplicandoResgate] = useState(false);
+  const [erroResgate, setErroResgate] = useState("");
   const [editandoIdentidade, setEditandoIdentidade] = useState(false);
   const [hydrated, setHydrated] = useState(false);
   const [restoredDraft, setRestoredDraft] = useState(false);
@@ -823,6 +849,30 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const telefoneRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { document.documentElement.setAttribute("data-theme", theme); }, [theme]);
+
+  // Recompensa de fidelidade (Etapa 5): só existe pra cliente autenticado.
+  // 401 (cliente não logado / sem sessão) é tratado como estado normal do
+  // checkout anônimo — nunca força login nem quebra o fluxo do pedido.
+  useEffect(() => {
+    let ativo = true;
+    (async () => {
+      try {
+        const res = await fetch("/api/cliente/fidelidade", { cache: "no-store" });
+        if (!res.ok || !ativo) return;
+        const data = await res.json();
+        if (ativo && data.recompensa) setRecompensaCliente(data.recompensa as RecompensaResgateInfo);
+      } catch {}
+      try {
+        const res2 = await fetch("/api/cliente/fidelidade/resgates", { cache: "no-store" });
+        if (!res2.ok || !ativo) return;
+        const data2 = await res2.json();
+        const reservas = (data2.resgates || []) as ResgateReserva[];
+        const ativaEncontrada = reservas.find((r) => r.status === "reservado" && new Date(r.expiraEm).getTime() > Date.now());
+        if (ativo && ativaEncontrada) setResgateReservado(ativaEncontrada);
+      } catch {}
+    })();
+    return () => { ativo = false; };
+  }, []);
 
   // Vínculo WhatsApp: valida o token do link (?t=) no servidor e guarda só na
   // sessão do navegador. Token inválido/expirado nunca quebra o fluxo — o
@@ -1150,7 +1200,27 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   function chQty(idx: number, d: number) { setCart(cart.map((c, i) => (i === idx ? { ...c, qty: Math.max(1, c.qty + d) } : c))); }
   function rmItem(idx: number) { const nc = cart.filter((_, i) => i !== idx); setCart(nc); if (nc.length === 0) go("sc-start"); }
   const fee = delType === "delivery" && bairroIdx !== "" ? ((menu.neighborhoods || [])[+bairroIdx]?.fee ?? 0) : 0;
-  const finalTotal = cartTotal + fee;
+  // Prévia do desconto de resgate (Etapa 5) — só para exibição no checkout.
+  // Espelha a regra do servidor (calcularDescontoRecompensa em fidelidade.ts)
+  // mas NUNCA é a fonte de verdade: o valor realmente aplicado é sempre
+  // recalculado no servidor em /api/pedido-app a partir do resgateId.
+  const resgateAplicado = !!resgateReservado && !!recompensaCliente;
+  const descontoPrevistoCentavos = (() => {
+    if (!resgateAplicado || !recompensaCliente) return 0;
+    const subtotalCentavos = Math.round(cartTotal * 100);
+    if (subtotalCentavos <= 0) return 0;
+    if (recompensaCliente.tipo === "desconto_fixo") {
+      return Math.min(recompensaCliente.valorDescontoCentavos || 0, subtotalCentavos);
+    }
+    const pizzas = cart.filter((c) => c.kind === "pizza" && c.price > 0);
+    if (pizzas.length === 0) return 0;
+    const maisBarata = pizzas.reduce((menor, atual) => (atual.price < menor.price ? atual : menor));
+    let desconto = Math.round(maisBarata.price * 100);
+    if (recompensaCliente.valorMaximoCentavos) desconto = Math.min(desconto, recompensaCliente.valorMaximoCentavos);
+    return Math.min(desconto, subtotalCentavos);
+  })();
+  const descontoPrevistoReais = descontoPrevistoCentavos / 100;
+  const finalTotal = Math.max(0, cartTotal - descontoPrevistoReais) + fee;
   // Pagamento misto confirmado: re-parseado do próprio `payment` (fonte única
   // de verdade), então some sozinho se o cliente trocar para outro método.
   const hibridoAtual = extrairHibrido(payment);
@@ -1218,6 +1288,38 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     }
     setErroEntrega("");
     go("sc-pay");
+  }
+
+  async function aplicarResgateCheckout() {
+    setErroResgate("");
+    setAplicandoResgate(true);
+    try {
+      // Reaproveita uma reserva já ativa (criada na Área do Cliente), evita
+      // criar reservas duplicadas sobre o mesmo saldo.
+      if (resgateReservado && new Date(resgateReservado.expiraEm).getTime() > Date.now()) {
+        setAplicandoResgate(false);
+        return;
+      }
+      const res = await fetch("/api/cliente/fidelidade/resgates", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) { setErroResgate(data.error || "Não foi possível aplicar a recompensa."); setAplicandoResgate(false); return; }
+      setResgateReservado(data.resgate);
+    } catch {
+      setErroResgate("Erro de conexão. Tente novamente.");
+    } finally {
+      setAplicandoResgate(false);
+    }
+  }
+
+  async function removerResgateCheckout() {
+    if (!resgateReservado) return;
+    setAplicandoResgate(true);
+    setErroResgate("");
+    try {
+      await fetch(`/api/cliente/fidelidade/resgates/${resgateReservado.resgateId}`, { method: "DELETE" });
+    } catch {}
+    setResgateReservado(null);
+    setAplicandoResgate(false);
   }
 
   function paymentLabel(value: string) { return value === "Cartao" ? "Cartão" : value === "Misto" ? "Pagamento misto" : value; }
@@ -1376,12 +1478,23 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
       } else { setErroTroco(""); }
     } else { setErroTroco(""); }
     if (hasError) return;
+    // Resgate expirado antes do envio: remove o benefício silenciosamente do
+    // payload e explica o motivo, mas nunca bloqueia o pedido em si.
+    let resgateIdParaEnviar: string | undefined;
+    if (resgateReservado) {
+      if (new Date(resgateReservado.expiraEm).getTime() <= Date.now()) {
+        setResgateReservado(null);
+        showToast("Sua recompensa expirou e foi removida do pedido. Você pode resgatar de novo depois.");
+      } else {
+        resgateIdParaEnviar = resgateReservado.resgateId;
+      }
+    }
     setSending(true);
-    const payload = { cliente: nome.trim(), telefone: telefone.trim() || undefined, whatsappToken: waToken || undefined, usarOutroWhatsapp: usarOutroWhatsapp || undefined, itens: cart.map((c) => ({ kind: c.kind, name: c.name, detail: c.detail, price: c.price, qty: c.qty, ...(c.promoId ? { promoId: c.promoId } : {}) })), tipoEntrega: delType, bairro: delType === "delivery" ? menu.neighborhoods[+bairroIdx].name : undefined, rua: delType === "delivery" ? rua : undefined, numero: delType === "delivery" && numero.trim() ? numero.trim() : undefined, referencia: delType === "delivery" && referencia.trim() ? referencia.trim() : undefined, observacao: observacao.trim() || undefined, taxaEntrega: fee, pagamento: payment, troco: (payment === "Dinheiro" || isHibrido) ? (trocoOpcao === "nao" ? "Sem troco" : troco.trim()) : undefined };
+    const payload = { cliente: nome.trim(), telefone: telefone.trim() || undefined, whatsappToken: waToken || undefined, usarOutroWhatsapp: usarOutroWhatsapp || undefined, itens: cart.map((c) => ({ kind: c.kind, name: c.name, detail: c.detail, price: c.price, qty: c.qty, ...(c.promoId ? { promoId: c.promoId } : {}) })), tipoEntrega: delType, bairro: delType === "delivery" ? menu.neighborhoods[+bairroIdx].name : undefined, rua: delType === "delivery" ? rua : undefined, numero: delType === "delivery" && numero.trim() ? numero.trim() : undefined, referencia: delType === "delivery" && referencia.trim() ? referencia.trim() : undefined, observacao: observacao.trim() || undefined, taxaEntrega: fee, pagamento: payment, troco: (payment === "Dinheiro" || isHibrido) ? (trocoOpcao === "nao" ? "Sem troco" : troco.trim()) : undefined, resgateId: resgateIdParaEnviar };
     try {
       const r = await fetch("/api/pedido-app", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const data = await r.json();
-      if (data.ok) { try { localStorage.setItem("cf_nome", nome.trim()); if (telefone.trim()) localStorage.setItem("cf_tel", telefone.trim()); } catch {} try { sessionStorage.removeItem("cf_draft"); } catch {} try { const resumo = { id: String(data.pedidoId), numero: typeof data.numero === "number" ? data.numero : undefined, ts: Date.now() }; localStorage.setItem("cf_ultimo_pedido", JSON.stringify(resumo)); setPedidoRecente(resumo); } catch {} setStatusPedidoConfirmado("novo"); setStatusPixCliente(payment?.toLowerCase().includes("pix") ? "aguardando_pix" : "nao_pix"); setPedidoConfirmado({ id: data.pedidoId, numero: data.numero, total: data.total, ...(typeof data.statusToken === "string" ? { statusToken: data.statusToken } : {}), ...(data.pix ? { pix: data.pix } : {}) }); go("sc-done"); } else { showToast("Erro ao enviar. Tente de novo."); }
+      if (data.ok) { try { localStorage.setItem("cf_nome", nome.trim()); if (telefone.trim()) localStorage.setItem("cf_tel", telefone.trim()); } catch {} try { sessionStorage.removeItem("cf_draft"); } catch {} try { const resumo = { id: String(data.pedidoId), numero: typeof data.numero === "number" ? data.numero : undefined, ts: Date.now() }; localStorage.setItem("cf_ultimo_pedido", JSON.stringify(resumo)); setPedidoRecente(resumo); } catch {} setStatusPedidoConfirmado("novo"); setStatusPixCliente(payment?.toLowerCase().includes("pix") ? "aguardando_pix" : "nao_pix"); setPedidoConfirmado({ id: data.pedidoId, numero: data.numero, total: data.total, ...(typeof data.statusToken === "string" ? { statusToken: data.statusToken } : {}), ...(data.pix ? { pix: data.pix } : {}), ...(data.descontoResgateCentavos ? { descontoResgateCentavos: data.descontoResgateCentavos } : {}) }); setResgateReservado(null); go("sc-done"); } else if (resgateIdParaEnviar) { setResgateReservado(null); setErroResgate(""); showToast(data.error || "Sua recompensa não pôde ser aplicada. Removemos do pedido — tente enviar de novo."); } else { showToast("Erro ao enviar. Tente de novo."); }
     } catch { showToast("Sem conexão. Tente de novo."); } finally { setSending(false); }
   }
   function resetAll() { setCart([]); resetBuild(); setDelType(null); setBairroIdx(""); setRua(""); setNumero(""); setReferencia(""); setPayment(null); setTroco(""); setTrocoOpcao(null); setPaymentModal(null); setMistoPixInput(""); setMistoDinheiroInput(""); setErroMisto(""); setObservacao(""); setErroNome(""); setErroTelefone(""); setErroPagamento(""); setErroEntrega(""); setErroTroco(""); setPedidoConfirmado(null); setStatusPedidoConfirmado("novo"); setStatusPixCliente("aguardando_pix"); setRestoredDraft(false); setEditandoIdentidade(false); setLastAddedKind(null); setUpsellBebidaIgnorado(false); try { sessionStorage.removeItem("cf_draft"); } catch {} go("sc-start"); }
@@ -1730,9 +1843,41 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                     </div>
                   ))}
                   {fee > 0 && <div className="summary-line"><span>Taxa de entrega</span><strong>{money(fee)}</strong></div>}
+                  {resgateAplicado && descontoPrevistoCentavos > 0 && (
+                    <div className="summary-line" style={{ color: "var(--green, #1f8f4d)" }}>
+                      <span>Desconto da recompensa</span>
+                      <strong>−{money(descontoPrevistoReais)}</strong>
+                    </div>
+                  )}
                   <button type="button" className="summary-edit" onClick={() => go("sc-cart")}>Editar carrinho</button>
                 </div>
               </details>
+
+              {recompensaCliente && recompensaCliente.disponivel && (
+                <div className="pay-section-card">
+                  <div className="pay-section-title">Recompensa disponível</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                    <div style={{ width: 34, height: 34, borderRadius: 9, background: "var(--brand-soft, rgba(255,205,0,.15))", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }} aria-hidden="true"><Gift size={17} color="var(--brand, #10193A)" /></div>
+                    <div>
+                      <div style={{ fontSize: 14, fontWeight: 800, color: "var(--text)" }}>{recompensaCliente.descricao}</div>
+                      <div style={{ fontSize: 12, color: "var(--text-sub)" }}>{recompensaCliente.custoPontos} pontos</div>
+                    </div>
+                  </div>
+                  {resgateAplicado ? (
+                    <>
+                      <div style={{ fontSize: 12.5, color: "var(--green, #1f8f4d)", fontWeight: 700, marginBottom: 8 }}>
+                        Aplicada neste pedido{descontoPrevistoCentavos > 0 ? ` — desconto estimado de ${money(descontoPrevistoReais)}` : ""}.
+                      </div>
+                      <button type="button" className="pay-action-link muted" onClick={removerResgateCheckout} disabled={aplicandoResgate}>Remover recompensa</button>
+                    </>
+                  ) : (
+                    <button type="button" className="btn btn-sm" onClick={aplicarResgateCheckout} disabled={aplicandoResgate}>
+                      {aplicandoResgate ? "Aplicando..." : "Aplicar recompensa"}
+                    </button>
+                  )}
+                  {erroResgate && <div className="pay-error">{erroResgate}</div>}
+                </div>
+              )}
 
               <div ref={pagamentoRef} className="pay-section-card payment-choice">
                 <div className="pay-section-title">Escolha o pagamento</div>
@@ -1839,7 +1984,12 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                   <>
                     <p style={{ fontWeight: 700, fontSize: 18, margin: "12px 0 4px" }}>Pedido #{pedidoConfirmado.numero}</p>
                     <p style={{ color: "#ff6b00", fontSize: 15, fontWeight: 800, margin: "0 0 8px" }}>{STATUS_PEDIDO_LABEL[statusPedidoConfirmado]}</p>
-                    <p style={{ color: "var(--muted)", fontSize: 14, marginBottom: 16 }}>Total: {money(pedidoConfirmado.total)}</p>
+                    <p style={{ color: "var(--muted)", fontSize: 14, marginBottom: pedidoConfirmado.descontoResgateCentavos ? 4 : 16 }}>Total: {money(pedidoConfirmado.total)}</p>
+                    {!!pedidoConfirmado.descontoResgateCentavos && (
+                      <p style={{ color: "var(--green, #1f8f4d)", fontSize: 13, fontWeight: 700, marginBottom: 16 }}>
+                        Desconto da recompensa aplicado: {money(pedidoConfirmado.descontoResgateCentavos / 100)}
+                      </p>
+                    )}
                     <a href="/cliente" style={{ display: "block", background: "var(--surface)", border: "1px solid var(--line-strong)", borderRadius: 12, padding: "12px 14px", marginBottom: 16, textDecoration: "none", textAlign: "left" }}>
                       <span style={{ display: "block", fontSize: 14, fontWeight: 700, color: "var(--text)" }}>🎁 Quer que essa compra conte para sua fidelidade?</span>
                       <span style={{ display: "block", fontSize: 12.5, color: "var(--text-sub)", marginTop: 2 }}>Entre com seu WhatsApp e acompanhe seu progresso.</span>

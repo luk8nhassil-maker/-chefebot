@@ -26,6 +26,8 @@ export type RecompensaInfo = {
   tipo: 'desconto_fixo' | 'pizza_gratis'
   descricao: string
   disponivel: boolean
+  valorDescontoCentavos?: number
+  valorMaximoCentavos?: number
 } | null
 
 export type Fidelidade = {

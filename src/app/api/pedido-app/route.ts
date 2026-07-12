@@ -9,7 +9,18 @@ import { PROMOS_KEY, catalogoDoMenu, dentroDaJanela, precoFinalPromocao, promoca
 import { validarTokenCardapio } from "@/lib/cardapioToken";
 import { temDinheiroNoPagamento, valorDinheiroEsperado } from "@/lib/bot";
 import { verificarTokenCliente, CLIENTE_COOKIE } from "@/lib/clienteAuth";
-import { contarPizzas, calcularPontosElegiveisPedido, registrarMovimentoPontosIdempotente, construirEventoIdPontos } from "@/lib/fidelidade";
+import {
+  contarPizzas,
+  calcularPontosElegiveisPedido,
+  registrarMovimentoPontosIdempotente,
+  construirEventoIdPontos,
+  aplicarResgateAoPedido,
+  obterResgatePorId,
+  obterConfigFidelidadePontos,
+  calcularDescontoRecompensa,
+  marcarResgateExpiradoSeVencido,
+  type ItemCarrinhoElegibilidade,
+} from "@/lib/fidelidade";
 
 export const maxDuration = 20;
 
@@ -37,6 +48,7 @@ type PedidoApp = {
   troco?: string;
   observacao?: string;
   email?: string;
+  resgateId?: string;
 };
 
 type MenuSimpleItem = { name: string; price: number; sizes?: { code: string; price: number }[] };
@@ -64,6 +76,41 @@ function criarTokenPublicoAcompanhamento(): string {
 
 async function getConfigPix(): Promise<ConfigPizzariaPix> {
   return (await redis.get<ConfigPizzariaPix>("config:pizzaria")) || {};
+}
+
+/**
+ * Prévia SOMENTE-LEITURA do desconto de um resgate — nunca debita pontos nem
+ * marca o resgate como aplicado. Usada só para validar o troco/pagamento
+ * híbrido contra o total correto antes de efetivamente aplicar o resgate
+ * (aplicarResgateAoPedido), evitando debitar pontos de um pedido que pode
+ * acabar rejeitado por outro motivo.
+ */
+async function calcularPreviaResgate(params: {
+  resgateId: string;
+  clienteId: string;
+  itens: ItemCarrinhoElegibilidade[];
+  subtotalElegivel: number;
+}): Promise<{ ok: true; valorDescontoCentavos: number } | { ok: false; error: string }> {
+  const { resgateId, clienteId, itens, subtotalElegivel } = params;
+  const resgate = await obterResgatePorId(resgateId);
+  if (!resgate || resgate.clienteId !== clienteId) return { ok: false, error: "Resgate inválido" };
+  if (resgate.status !== "reservado") return { ok: false, error: "Resgate não está disponível" };
+  if (new Date(resgate.expiraEm).getTime() < Date.now()) {
+    await marcarResgateExpiradoSeVencido(resgateId);
+    return { ok: false, error: "Resgate expirado" };
+  }
+
+  const config = await obterConfigFidelidadePontos();
+  const recompensa = config.recompensa;
+  if (!recompensa || !recompensa.ativa || recompensa.tipo !== resgate.tipoRecompensa) {
+    return { ok: false, error: "Recompensa indisponível" };
+  }
+
+  const { valorDescontoCentavos, erro } = calcularDescontoRecompensa({ recompensa, itens, subtotalElegivel });
+  if (erro || valorDescontoCentavos <= 0) {
+    return { ok: false, error: erro || "Recompensa não aplicável a este pedido" };
+  }
+  return { ok: true, valorDescontoCentavos };
 }
 
 function norm(value: string): string {
@@ -204,16 +251,6 @@ export async function POST(req: NextRequest) {
     const taxa = computeTaxaApp(body.tipoEntrega, body.bairro, menu.neighborhoods as Array<{ name: string; fee: number }>);
     const total = subtotal + taxa;
 
-    // Troco (quando há dinheiro no pagamento, puro ou híbrido) é validado só
-    // contra a parte em dinheiro — mesma regra do fluxo do WhatsApp (bot.ts).
-    if (temDinheiroNoPagamento(body.pagamento) && body.troco?.trim() && !/sem\s*troco/i.test(body.troco)) {
-      const valorTroco = parseFloat(body.troco.replace(",", ".").replace(/[^0-9.]/g, ""));
-      const baseTroco = valorDinheiroEsperado(body.pagamento, total);
-      if (isNaN(valorTroco) || valorTroco < baseTroco) {
-        return NextResponse.json({ ok: false, error: "Valor de troco insuficiente para a parte em dinheiro" }, { status: 400 });
-      }
-    }
-
     const endereco = buildEnderecoApp({ tipoEntrega: body.tipoEntrega, rua: body.rua, numero: body.numero, bairro: body.bairro });
 
     // Vinculo com area do cliente (opcional): se o cliente estiver logado
@@ -240,9 +277,75 @@ export async function POST(req: NextRequest) {
     }
 
     const pedidoId = Date.now().toString();
+
+    // Resgate de recompensa por pontos (Etapa 5): o frontend so envia o
+    // resgateId — valor do desconto, tipo de recompensa e cliente dono sao
+    // sempre recalculados/validados no servidor a partir do carrinho oficial
+    // (itensValidados/subtotal), nunca do que o cliente enviou. Resgate
+    // invalido, expirado, de outro cliente ou sem elegibilidade no carrinho
+    // BLOQUEIA a criacao do pedido — nunca cria pedido com desconto incerto.
+    //
+    // O débito de pontos (aplicarResgateAoPedido) só acontece depois de TODAS
+    // as outras validações (troco, híbrido) passarem — antes disso, calculamos
+    // só uma PRÉVIA somente-leitura do desconto (mesma regra pura,
+    // calcularDescontoRecompensa) para poder validar o troco contra o total
+    // correto sem debitar pontos de um pedido que pode acabar rejeitado por
+    // outro motivo.
+    let itensParaResgate: ItemCarrinhoElegibilidade[] = [];
+    if (body.resgateId) {
+      if (!clienteId) {
+        return NextResponse.json({ ok: false, error: "Resgate requer login" }, { status: 400 });
+      }
+      itensParaResgate = body.itens.map((item, i) => ({
+        kind: item.kind,
+        price: itensValidados[i].unitPrice ?? 0,
+        qty: item.qty,
+      }));
+    }
+    const previaResgate = body.resgateId
+      ? await calcularPreviaResgate({ resgateId: body.resgateId, clienteId: clienteId!, itens: itensParaResgate, subtotalElegivel: subtotal })
+      : null;
+    if (body.resgateId && (!previaResgate || !previaResgate.ok)) {
+      return NextResponse.json({ ok: false, error: previaResgate?.error || "Resgate inválido" }, { status: 400 });
+    }
+    const descontoPrevistoCentavos = previaResgate?.ok ? previaResgate.valorDescontoCentavos : 0;
+    let totalFinal = Math.max(0, subtotal - descontoPrevistoCentavos / 100) + taxa;
+
+    // Troco (quando há dinheiro no pagamento, puro ou híbrido) é validado só
+    // contra a parte em dinheiro — mesma regra do fluxo do WhatsApp (bot.ts).
+    // Usa o total ja com a prévia do desconto de resgate (quando houver).
+    if (temDinheiroNoPagamento(body.pagamento) && body.troco?.trim() && !/sem\s*troco/i.test(body.troco)) {
+      const valorTroco = parseFloat(body.troco.replace(",", ".").replace(/[^0-9.]/g, ""));
+      const baseTroco = valorDinheiroEsperado(body.pagamento, totalFinal);
+      if (isNaN(valorTroco) || valorTroco < baseTroco) {
+        return NextResponse.json({ ok: false, error: "Valor de troco insuficiente para a parte em dinheiro" }, { status: 400 });
+      }
+    }
+
+    // Só agora — depois de todas as outras validações terem passado — o
+    // resgate é efetivamente aplicado (débito de pontos + marcação
+    // "aplicado"). Isso evita debitar pontos de um pedido que acabaria
+    // rejeitado por outro motivo (ex.: troco insuficiente) e nunca chega a
+    // ser salvo.
+    let descontoResgateCentavos = 0;
+    if (body.resgateId && clienteId) {
+      const resultadoResgate = await aplicarResgateAoPedido({
+        resgateId: body.resgateId,
+        clienteId,
+        pedidoId,
+        itens: itensParaResgate,
+        subtotalElegivel: subtotal,
+      });
+      if (!resultadoResgate.ok) {
+        return NextResponse.json({ ok: false, error: resultadoResgate.error }, { status: 400 });
+      }
+      descontoResgateCentavos = resultadoResgate.valorDescontoCentavos;
+      totalFinal = Math.max(0, subtotal - descontoResgateCentavos / 100) + taxa;
+    }
+
     const numeroPedido = await proximoNumeroPedido();
     const statusToken = criarTokenPublicoAcompanhamento();
-    const pixBase = criarPixMetadata(pedidoId, body.pagamento, total);
+    const pixBase = criarPixMetadata(pedidoId, body.pagamento, totalFinal);
     const pix = await prepararPixProviderMercadoPago({
       pedidoId,
       pix: pixBase,
@@ -258,7 +361,7 @@ export async function POST(req: NextRequest) {
       ...(clienteId ? { clienteId } : {}),
       ...(pizzasCount > 0 ? { pizzasCount } : {}),
       itens,
-      total,
+      total: totalFinal,
       status: "novo" as const,
       horario: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" }),
       endereco,
@@ -273,6 +376,7 @@ export async function POST(req: NextRequest) {
       ...(body.bairro ? { bairro: body.bairro } : {}),
       ...(body.referencia ? { referencia: body.referencia } : {}),
       ...(body.tipoEntrega ? { tipoEntrega: body.tipoEntrega } : {}),
+      ...(body.resgateId && descontoResgateCentavos > 0 ? { resgateId: body.resgateId, descontoResgateCentavos } : {}),
     };
 
     await redis.set("pedidos", [...pedidos, novoPedido]);
@@ -280,10 +384,12 @@ export async function POST(req: NextRequest) {
     // Pontos previstos (modelo novo) — só quando o pedido tem clienteId
     // (cliente autenticado na Área do Cliente). Estimativa, nunca afeta o
     // saldo confirmado. Isolado em try/catch próprio: falha aqui jamais pode
-    // impedir a criação do pedido, que já foi salva na linha acima.
+    // impedir a criação do pedido, que já foi salva na linha acima. Usa o
+    // total ja com desconto de resgate (nunca gera pontos sobre a parte paga
+    // com pontos).
     if (clienteId) {
       try {
-        const pontosElegiveis = calcularPontosElegiveisPedido({ total, taxaEntrega: taxa });
+        const pontosElegiveis = calcularPontosElegiveisPedido({ total: totalFinal, taxaEntrega: taxa });
         if (pontosElegiveis > 0) {
           await registrarMovimentoPontosIdempotente(clienteId, {
             eventoId: construirEventoIdPontos(pedidoId, "previsto"),
@@ -316,7 +422,15 @@ export async function POST(req: NextRequest) {
 
     const configPix = await getConfigPix();
     const pixCliente = serializarPixCliente(pix, configPix);
-    return NextResponse.json({ ok: true, pedidoId, numero: numeroPedido, total, statusToken, ...(pixCliente ? { pix: pixCliente } : {}) });
+    return NextResponse.json({
+      ok: true,
+      pedidoId,
+      numero: numeroPedido,
+      total: totalFinal,
+      statusToken,
+      ...(descontoResgateCentavos > 0 ? { descontoResgateCentavos } : {}),
+      ...(pixCliente ? { pix: pixCliente } : {}),
+    });
   } catch (error) {
     console.error("Erro ao salvar pedido do site:", error);
     return NextResponse.json({ ok: false, error: "Erro interno" }, { status: 500 });

@@ -10,6 +10,7 @@ import {
   registrarMovimentoPontosIdempotente,
   construirEventoIdPontos,
   obterExtratoPontos,
+  restaurarPontosResgate,
 } from '@/lib/fidelidade'
 
 const APP_BASE_URL = 'https://chefebot-pjif.vercel.app'
@@ -38,6 +39,8 @@ type Pedido = {
   horarioInicio?: string
   clienteId?: string
   pizzasCount?: number
+  resgateId?: string
+  descontoResgateCentavos?: number
   // Campos de arquivamento
   isArchived?: boolean
   archivedAt?: string
@@ -324,6 +327,20 @@ export async function PATCH(req: NextRequest) {
       }
     } catch (err) {
       console.error('[ChefeBot] Erro ao registrar cancelamento de pontos (ignorado):', err)
+    }
+
+    // Restauracao dos pontos de um resgate usado neste pedido, quando o
+    // pedido e cancelado (antes ou depois de 'entregue' — restaurarPontosResgate
+    // e idempotente por pedidoId e so age se o resgate estava 'aplicado').
+    // Isolado em try/catch proprio, mesma garantia dos blocos acima.
+    try {
+      const clienteIdPontos = pedidos[index].clienteId
+      const resgateId = pedidos[index].resgateId
+      if (clienteIdPontos && resgateId) {
+        await restaurarPontosResgate({ clienteId: clienteIdPontos, resgateId, pedidoId: id })
+      }
+    } catch (err) {
+      console.error('[ChefeBot] Erro ao restaurar pontos de resgate (ignorado):', err)
     }
   }
 

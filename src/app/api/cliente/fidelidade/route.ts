@@ -71,6 +71,12 @@ export async function GET(req: NextRequest) {
         tipo: config.recompensa.tipo,
         descricao: config.recompensa.descricao,
         disponivel: config.recompensa.ativa && saldoPontos >= config.recompensa.custoPontos,
+        // Termos configurados pelo admin — só para o cliente ter uma previa do
+        // benefício no checkout. O valor efetivamente aplicado é SEMPRE
+        // recalculado no servidor em aplicarResgateAoPedido, nunca aceito do
+        // frontend.
+        ...(config.recompensa.valorDescontoCentavos ? { valorDescontoCentavos: config.recompensa.valorDescontoCentavos } : {}),
+        ...(config.recompensa.valorMaximoCentavos ? { valorMaximoCentavos: config.recompensa.valorMaximoCentavos } : {}),
       }
     : null;
 
