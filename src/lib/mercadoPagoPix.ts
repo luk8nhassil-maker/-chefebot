@@ -5,6 +5,8 @@ export type CriarCobrancaPixMercadoPagoInput = {
   descricao?: string;
   clienteNome?: string;
   payerEmail?: string;
+  accessTokenOverride?: string | null;
+  payerEmailFallbackOverride?: string;
 };
 
 export type CobrancaPixMercadoPago = {
@@ -37,12 +39,12 @@ function normalizarValor(valor: number): number {
 export async function criarCobrancaPixMercadoPago(
   input: CriarCobrancaPixMercadoPagoInput
 ): Promise<CobrancaPixMercadoPago> {
-  const accessToken = process.env.MERCADOPAGO_ACCESS_TOKEN;
+  const accessToken = input.accessTokenOverride || process.env.MERCADOPAGO_ACCESS_TOKEN;
   if (!accessToken) {
     throw new MercadoPagoPixError("MERCADOPAGO_ACCESS_TOKEN ausente");
   }
 
-  const payerEmail = input.payerEmail || process.env.MERCADOPAGO_PAYER_EMAIL_FALLBACK;
+  const payerEmail = input.payerEmail || input.payerEmailFallbackOverride || process.env.MERCADOPAGO_PAYER_EMAIL_FALLBACK;
   if (!payerEmail) {
     throw new MercadoPagoPixError("payerEmail ausente");
   }

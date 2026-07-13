@@ -1,20 +1,34 @@
 import { beforeEach, vi, describe, test, expect } from "vitest";
 
-vi.mock("./redis", () => ({ redis: { get: vi.fn().mockResolvedValue(null) } }));
-
-const { criarCobrancaPixMercadoPagoMock } = vi.hoisted(() => ({
+const { criarCobrancaPixMercadoPagoMock, redisGetMock } = vi.hoisted(() => ({
   criarCobrancaPixMercadoPagoMock: vi.fn(),
+  redisGetMock: vi.fn().mockResolvedValue(null),
 }));
+
+vi.mock("./redis", () => ({ redis: { get: redisGetMock } }));
 
 vi.mock("./mercadoPagoPix", () => ({
   criarCobrancaPixMercadoPago: criarCobrancaPixMercadoPagoMock,
 }));
 
 import { anexarPixMercadoPagoEmMensagens, criarPixMetadata, gerarTxidPixInterno, prepararPixProviderMercadoPago, sanitizarPedidoPixResposta, serializarPixCliente } from "./pix";
+import { encryptMercadoPagoToken } from "./mercadoPagoIntegracao";
+
+function configAdminAtiva(overrides?: { accessToken?: string; payerEmailFallback?: string }) {
+  return {
+    provider: "mercadopago" as const,
+    enabled: true,
+    accessTokenEncrypted: encryptMercadoPagoToken(overrides?.accessToken || "token-admin-123"),
+    accessTokenLast4: "1123",
+    ...(overrides?.payerEmailFallback ? { payerEmailFallback: overrides.payerEmailFallback } : {}),
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  };
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
   vi.unstubAllEnvs();
+  redisGetMock.mockResolvedValue(null);
 });
 
 describe("metadados internos de Pix", () => {
@@ -55,6 +69,44 @@ describe("metadados internos de Pix", () => {
     vi.stubEnv("PIX_PROVIDER", "manual");
     const pix = criarPixMetadata("123", "Pix", 50);
 
+    const resultado = await prepararPixProviderMercadoPago({ pedidoId: "123", pix });
+
+    expect(criarCobrancaPixMercadoPagoMock).not.toHaveBeenCalled();
+    expect(resultado).toEqual(pix);
+  });
+
+  test("integracao admin ativa com token salvo chama Mercado Pago mesmo sem PIX_PROVIDER", async () => {
+    redisGetMock.mockResolvedValue(configAdminAtiva({ payerEmailFallback: "loja@example.com" }));
+    criarCobrancaPixMercadoPagoMock.mockResolvedValue({
+      provider: "mercadopago",
+      providerPaymentId: "mp-admin",
+      qrCode: "copia-e-cola-admin",
+      qrCodeBase64: "base64",
+      ticketUrl: "https://mp.test/admin",
+      idempotencyKey: "chefebot_pix_chefebot_123",
+      statusOriginal: "pending",
+    });
+
+    const pix = criarPixMetadata("123", "Pix", 50);
+    const resultado = await prepararPixProviderMercadoPago({ pedidoId: "123", pix });
+
+    expect(criarCobrancaPixMercadoPagoMock).toHaveBeenCalledWith(expect.objectContaining({
+      accessTokenOverride: "token-admin-123",
+      payerEmailFallbackOverride: "loja@example.com",
+    }));
+    expect(resultado).toMatchObject({ provider: "mercadopago", qrCode: "copia-e-cola-admin" });
+  });
+
+  test("integracao admin desativada e sem env nao chama Mercado Pago", async () => {
+    redisGetMock.mockResolvedValue({
+      provider: "mercadopago",
+      enabled: false,
+      accessTokenEncrypted: encryptMercadoPagoToken("token-desativado"),
+      accessTokenLast4: "vado",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    const pix = criarPixMetadata("123", "Pix", 50);
     const resultado = await prepararPixProviderMercadoPago({ pedidoId: "123", pix });
 
     expect(criarCobrancaPixMercadoPagoMock).not.toHaveBeenCalled();
