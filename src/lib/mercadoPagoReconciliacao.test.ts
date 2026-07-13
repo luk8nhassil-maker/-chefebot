@@ -9,6 +9,10 @@ const { store, redisMock } = vi.hoisted(() => {
       store.set(key, value);
       return "OK";
     }),
+    del: vi.fn(async (key: string) => {
+      const existia = store.delete(key);
+      return existia ? 1 : 0;
+    }),
     // Simula EVAL o suficiente para o compare-and-delete do lock: só o
     // script usado por liberarLockSeDono (get==arg -> del) é suportado.
     eval: vi.fn(async (_script: string, keys: string[], args: string[]) => {
@@ -37,6 +41,14 @@ vi.mock("./mercadoPagoWebhook", async () => {
     buscarPagamentoMercadoPagoDetalhado: (...args: unknown[]) => buscarPagamentoMock(...args),
   };
 });
+
+const { enviarTextoMock } = vi.hoisted(() => ({
+  enviarTextoMock: vi.fn(),
+}));
+
+vi.mock("./whatsappMensagem", () => ({
+  enviarTextoWhatsApp: (...args: unknown[]) => enviarTextoMock(...args),
+}));
 
 import {
   elegivelParaReconciliacao,
@@ -82,6 +94,11 @@ function falha(status: number | null, motivo: string) {
 beforeEach(() => {
   store.clear();
   vi.clearAllMocks();
+  // Default seguro: qualquer teste que não mockar explicitamente o envio
+  // continua funcionando como "sucesso" — só é chamado quando o pedido é
+  // elegível para notificação (origem whatsapp + telefone + confirmado pelo
+  // conciliador), o que a fixture pedidoMP() padrão nunca satisfaz sozinha.
+  enviarTextoMock.mockResolvedValue({ ok: true });
 });
 
 afterEach(() => {
@@ -470,6 +487,131 @@ describe("reconciliarPixMercadoPago", () => {
       await reconciliarPixMercadoPago();
 
       expect(store.get("cooldown:pix:ped-1")).toBeUndefined();
+    });
+  });
+
+  describe("Nível 6.6A — notificação WhatsApp pós-conciliação", () => {
+    function pedidoWhatsApp(overrides: Record<string, unknown> = {}) {
+      return pedidoMP({ origem: "whatsapp", telefone: "5511999998888", ...overrides });
+    }
+
+    test("pedido WhatsApp confirmado pelo conciliador envia uma mensagem", async () => {
+      store.set("pedidos", [pedidoWhatsApp()]);
+      buscarPagamentoMock.mockResolvedValue(ok());
+
+      const resumo = await reconciliarPixMercadoPago();
+
+      expect(resumo.confirmados).toBe(1);
+      expect(enviarTextoMock).toHaveBeenCalledTimes(1);
+      expect(enviarTextoMock).toHaveBeenCalledWith(
+        "5511999998888",
+        "Pagamento confirmado ✅ Recebemos seu Pix e seu pedido foi confirmado."
+      );
+      expect(store.get("pix:notificado:ped-1")).toBe("1");
+    });
+
+    test("segunda execução não envia novamente", async () => {
+      store.set("pedidos", [pedidoWhatsApp()]);
+      buscarPagamentoMock.mockResolvedValue(ok());
+      await reconciliarPixMercadoPago();
+      expect(enviarTextoMock).toHaveBeenCalledTimes(1);
+
+      // Nada mais pendente para reconciliar — segunda rodada só teria o
+      // pedido já confirmado (ainda assim passa pelo caminho de retry).
+      const segundo = await reconciliarPixMercadoPago();
+
+      expect(segundo.verificados).toBe(0);
+      expect(enviarTextoMock).toHaveBeenCalledTimes(1);
+    });
+
+    test("falha da Evolution não marca como notificado e permite retry", async () => {
+      store.set("pedidos", [pedidoWhatsApp()]);
+      buscarPagamentoMock.mockResolvedValue(ok());
+      enviarTextoMock.mockResolvedValueOnce({ ok: false, motivo: "http_500" });
+
+      await reconciliarPixMercadoPago();
+
+      expect(enviarTextoMock).toHaveBeenCalledTimes(1);
+      expect(store.get("pix:notificado:ped-1")).toBeUndefined();
+
+      // Rodada seguinte: nada novo para reconciliar, mas o retry de
+      // notificação deve tentar de novo porque não há marcador permanente.
+      enviarTextoMock.mockResolvedValueOnce({ ok: true });
+      await reconciliarPixMercadoPago();
+
+      expect(enviarTextoMock).toHaveBeenCalledTimes(2);
+      expect(store.get("pix:notificado:ped-1")).toBe("1");
+    });
+
+    test("exceção no envio (ex.: erro de rede) também não marca como notificado", async () => {
+      store.set("pedidos", [pedidoWhatsApp()]);
+      buscarPagamentoMock.mockResolvedValue(ok());
+      enviarTextoMock.mockRejectedValueOnce(new Error("network down"));
+
+      const resumo = await reconciliarPixMercadoPago();
+
+      expect(resumo.confirmados).toBe(1);
+      expect(store.get("pix:notificado:ped-1")).toBeUndefined();
+    });
+
+    test("pedido de app/site com telefone não recebe mensagem (sem origem whatsapp)", async () => {
+      store.set("pedidos", [pedidoMP({ telefone: "5511999998888" })]);
+      buscarPagamentoMock.mockResolvedValue(ok());
+
+      const resumo = await reconciliarPixMercadoPago();
+
+      expect(resumo.confirmados).toBe(1);
+      expect(enviarTextoMock).not.toHaveBeenCalled();
+    });
+
+    test("pagamento ainda pendente não envia mensagem", async () => {
+      store.set("pedidos", [pedidoWhatsApp()]);
+      buscarPagamentoMock.mockResolvedValue(ok({ status: "pending" }));
+
+      const resumo = await reconciliarPixMercadoPago();
+
+      expect(resumo.pendentes).toBe(1);
+      expect(enviarTextoMock).not.toHaveBeenCalled();
+    });
+
+    test("Pix manual (confirmado por comprovante) não envia mensagem via conciliador", async () => {
+      store.set("pedidos", [
+        pedidoWhatsApp({
+          pix: { provider: "manual", status: "confirmado", confirmadoPor: "comprovante", valorEsperado: 50 },
+        }),
+      ]);
+
+      const resumo = await reconciliarPixMercadoPago();
+
+      expect(resumo.verificados).toBe(0);
+      expect(enviarTextoMock).not.toHaveBeenCalled();
+    });
+
+    test("confirmação do Pix continua salva mesmo se a notificação falhar", async () => {
+      store.set("pedidos", [pedidoWhatsApp()]);
+      buscarPagamentoMock.mockResolvedValue(ok());
+      enviarTextoMock.mockRejectedValueOnce(new Error("network down"));
+
+      const resumo = await reconciliarPixMercadoPago();
+
+      expect(resumo.confirmados).toBe(1);
+      const pedidos = store.get("pedidos") as ReturnType<typeof pedidoWhatsApp>[];
+      expect(pedidos[0].pixConfirmado).toBe(true);
+      expect(pedidos[0].pix.status).toBe("confirmado");
+      expect(pedidos[0].pix.confirmadoPor).toBe("conciliador_mercadopago");
+    });
+
+    test("lock curto de notificação evita reenvio dentro da mesma rodada mesmo sem marcador permanente ainda", async () => {
+      // Simula concorrência: o lock de notificação já foi adquirido por outra
+      // chamada, então esta rodada não deve tentar enviar de novo.
+      store.set("pedidos", [pedidoWhatsApp()]);
+      store.set("lock:pix:notificacao:ped-1", "1");
+      buscarPagamentoMock.mockResolvedValue(ok());
+
+      await reconciliarPixMercadoPago();
+
+      expect(enviarTextoMock).not.toHaveBeenCalled();
+      expect(store.get("pix:notificado:ped-1")).toBeUndefined();
     });
   });
 });

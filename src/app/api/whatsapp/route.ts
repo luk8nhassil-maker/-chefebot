@@ -26,6 +26,7 @@ import { telefonesCorrespondem } from "@/lib/telefone";
 import { creditarPontosPedidoEntregue } from "@/lib/fidelidade";
 import type { BotStep } from "@/lib/bot";
 import { obterConfigEvolution } from "@/lib/evolutionApi";
+import { enviarTextoWhatsApp } from "@/lib/whatsappMensagem";
 
 export const maxDuration = 30;
 
@@ -52,6 +53,11 @@ type Pedido = {
   troco?: string;
   clienteId?: string;
   taxaEntrega?: number;
+  // Origem/canal do pedido (Nível 6.6A) — só é gravada em pedidos criados
+  // por salvarPedido() aqui no webhook do WhatsApp. Pedidos de app/site e
+  // pedidos antigos (sem o campo) nunca são tratados como WhatsApp por
+  // quem depende deste campo (ex.: notificação pós-conciliação Pix).
+  origem?: "whatsapp";
 };
 
 type ConfigPizzaria = {
@@ -172,6 +178,7 @@ async function salvarPedido(session: BotSession, phone: string, _config: ConfigP
     numero: numeroPedido,
     cliente: session.customerName || phone,
     telefone: phone,
+    origem: "whatsapp" as const,
     itens,
     total,
     status: "novo" as const,
@@ -271,21 +278,17 @@ async function enviarMensagem(phone: string, message: string, ritmoRapido = fals
       message = anexarTokenAoLinkCardapio(message, token);
     } catch {}
   }
-  const config = obterConfigEvolution();
-  if (!config) { console.error("[ChefeBot] Provider de WhatsApp não configurado — mensagem não enviada."); return; }
-  const url = `${config.baseUrl}/message/sendText/${config.instanceName}`;
   // Delay "digitando" proporcional ao tamanho do texto (parece mais humano).
   // Cliente apressado (responde só com número) recebe respostas bem rápidas (~400ms).
   // Cliente calmo (digita por extenso) mantém o ritmo humano (~22ms por caractere).
   const delay = ritmoRapido
     ? Math.min(600, Math.max(400, message.length * 6))
     : Math.min(2500, Math.max(900, message.length * 22));
-  await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", apikey: config.apiKey },
-    // delay no topo (Evolution v2) + options.delay/presence (Evolution v1) p/ compatibilidade
-    body: JSON.stringify({ number: phone, text: message, delay, options: { delay, presence: "composing" } }),
-  });
+  // delay no topo (Evolution v2) + options.delay/presence (Evolution v1) p/ compatibilidade
+  const resultado = await enviarTextoWhatsApp(phone, message, { delay });
+  if (!resultado.ok && resultado.motivo === "provider_not_configured") {
+    console.error("[ChefeBot] Provider de WhatsApp não configurado — mensagem não enviada.");
+  }
 }
 
 async function enviarImagem(phone: string, imageUrl: string) {

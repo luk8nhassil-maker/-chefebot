@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { redis } from "./redis";
 import { buscarPagamentoMercadoPagoDetalhado, mapearStatusMercadoPago } from "./mercadoPagoWebhook";
+import { enviarTextoWhatsApp } from "./whatsappMensagem";
 import type { PedidoComPix } from "./pix";
 
 // Conciliador manual/sob-demanda do Pix Mercado Pago (Nivel 6.2A) — usado
@@ -20,7 +21,14 @@ import type { PedidoComPix } from "./pix";
 // txid batendo (quando ambos existem) confirma — timeout, erro de API e rate
 // limit nunca confirmam.
 
-type PedidoReconciliavel = PedidoComPix & { pixConfirmado?: boolean };
+type PedidoReconciliavel = PedidoComPix & {
+  pixConfirmado?: boolean;
+  // Aditivos (Nível 6.6A) — presentes só em pedidos criados pelo webhook do
+  // WhatsApp (origem) ou que já tinham telefone (app/site/WhatsApp). Nunca
+  // usados para decidir CONFIRMAÇÃO do Pix — só para decidir NOTIFICAÇÃO.
+  origem?: string;
+  telefone?: string;
+};
 
 export type ReconciliacaoOutcome = "confirmado" | "pendente" | "ignorado" | "erro";
 
@@ -55,6 +63,18 @@ const COOLDOWN_PEDIDO_TTL_SEGUNDOS = 60;
 const LOTE_MAXIMO = 20;
 const CONCORRENCIA_MAXIMA = 3;
 const TIMEOUT_CONSULTA_MS = 5000;
+
+// Nível 6.6A — notificação ao cliente WhatsApp quando o conciliador confirma
+// o Pix. Duas chaves distintas por pedido:
+// - lock curto (NX + TTL curto): evita duplicidade entre chamadas concorrentes
+//   a esta função (defesa em profundidade além do lock global acima).
+// - marcador permanente: só é gravado DEPOIS que a Evolution confirma sucesso.
+//   Sem ele, a próxima rodada tenta notificar de novo (retry natural).
+const PIX_NOTIFICADO_PREFIXO = "pix:notificado:";
+const PIX_NOTIFICACAO_LOCK_PREFIXO = "lock:pix:notificacao:";
+const PIX_NOTIFICACAO_LOCK_TTL_SEGUNDOS = 30;
+
+const MSG_PIX_CONFIRMADO_WHATSAPP = "Pagamento confirmado ✅ Recebemos seu Pix e seu pedido foi confirmado.";
 
 // Compare-and-delete atômico (Lua via EVAL, suportado pelo @upstash/redis e
 // pela REST API da Upstash): só apaga o lock se o valor gravado ainda for o
@@ -113,6 +133,74 @@ export function selecionarPedidosPixMercadoPagoPendentes(
   return pedidos.filter(elegivelParaReconciliacao);
 }
 
+// Elegibilidade para NOTIFICAÇÃO (Nível 6.6A) — distinta e mais restrita que
+// elegivelParaReconciliacao (que decide CONFIRMAÇÃO). Só considera pedidos:
+// - com origem === "whatsapp" (nunca app/site, mesmo com telefone);
+// - com telefone válido (não vazio após trim);
+// - já confirmados, e confirmados especificamente por este conciliador
+//   (confirmadoPor === "conciliador_mercadopago" — nunca por comprovante,
+//   que já dispara sua própria mensagem inline no webhook, nem por Pix
+//   manual, que nunca chega a este confirmadoPor).
+// Recalculada a cada rodada a partir do array de pedidos já em memória —
+// não depende de nenhuma fila/flag adicional: o único "estado" de retry é a
+// ausência do marcador permanente pix:notificado:{id}.
+export function elegivelParaNotificacaoWhatsApp(pedido: PedidoReconciliavel): boolean {
+  const telefone = typeof pedido.telefone === "string" ? pedido.telefone.trim() : "";
+  return (
+    typeof pedido.id === "string" &&
+    pedido.id.length > 0 &&
+    pedido.origem === "whatsapp" &&
+    telefone.length > 0 &&
+    pedido.pix?.status === "confirmado" &&
+    pedido.pix?.confirmadoPor === "conciliador_mercadopago"
+  );
+}
+
+// Best-effort: qualquer falha (rede, HTTP, exceção) é isolada aqui e nunca
+// propaga — a confirmação do Pix já foi persistida antes desta chamada e não
+// pode ser revertida ou impedida por um problema de envio de WhatsApp.
+async function notificarClienteWhatsAppSeElegivel(pedido: PedidoReconciliavel): Promise<void> {
+  if (!elegivelParaNotificacaoWhatsApp(pedido)) return;
+  const pedidoId = pedido.id as string;
+
+  try {
+    const marcadorKey = `${PIX_NOTIFICADO_PREFIXO}${pedidoId}`;
+    const jaNotificado = await redis.get(marcadorKey);
+    if (jaNotificado) return;
+
+    const lockKey = `${PIX_NOTIFICACAO_LOCK_PREFIXO}${pedidoId}`;
+    const lockAdquirido = await redis.set(lockKey, "1", { nx: true, ex: PIX_NOTIFICACAO_LOCK_TTL_SEGUNDOS });
+    if (!lockAdquirido) return;
+
+    try {
+      const telefone = (pedido.telefone as string).trim();
+      const resultado = await enviarTextoWhatsApp(telefone, MSG_PIX_CONFIRMADO_WHATSAPP);
+      if (resultado.ok) {
+        // Marcador permanente (sem TTL) — só gravado após sucesso confirmado
+        // pela Evolution. Enquanto ausente, a próxima rodada tenta de novo.
+        await redis.set(marcadorKey, "1");
+      }
+    } finally {
+      // Libera o lock assim que o envio termina (sucesso ou falha) em vez de
+      // depender só do TTL — a próxima rodada da reconciliação (ex.: a
+      // auto-verificação de 20s) pode tentar de novo sem esperar.
+      await redis.del(lockKey).catch(() => {});
+    }
+  } catch {
+    // Falha isolada: não grava marcador, não relança. Próxima rodada tenta de novo.
+  }
+}
+
+// Roda a cada rodada em que o lock principal foi adquirido, mesmo quando não
+// há nenhum pedido pendente para reconciliar — é exatamente o caso em que um
+// pedido já confirmado numa rodada anterior, mas cuja notificação falhou,
+// precisa ser re-tentado (ele nunca mais aparece em `elegiveis`, então este é
+// o único lugar que o pega de novo).
+async function notificarConfirmadosWhatsApp(pedidos: PedidoReconciliavel[]): Promise<void> {
+  const candidatos = pedidos.filter(elegivelParaNotificacaoWhatsApp);
+  await Promise.all(candidatos.map((pedido) => notificarClienteWhatsAppSeElegivel(pedido)));
+}
+
 // Timeout defensivo por consulta — não cancela de fato o fetch (evita mexer
 // no fetch/webhook além do necessário), mas garante que, do ponto de vista do
 // conciliador, uma consulta lenta nunca trava o lote: após ~5s vira erro
@@ -149,7 +237,12 @@ export async function reconciliarPixMercadoPago(): Promise<ResumoReconciliacaoPi
     const elegiveis = selecionarPedidosPixMercadoPagoPendentes(pedidos);
 
     const resumo: ResumoReconciliacaoPix = resumoVazio();
-    if (elegiveis.length === 0) return resumo;
+    if (elegiveis.length === 0) {
+      // Nada para reconciliar agora, mas ainda pode haver notificação
+      // pendente de uma rodada anterior (pedido já confirmado, envio falhou).
+      await notificarConfirmadosWhatsApp(pedidos);
+      return resumo;
+    }
 
     // Pula pedidos consultados recentemente (cooldown por pedido) antes de
     // aplicar o corte de lote, para o lote priorizar pedidos "frescos".
@@ -272,6 +365,12 @@ export async function reconciliarPixMercadoPago(): Promise<ResumoReconciliacaoPi
     }
 
     if (mudou) await redis.set("pedidos", atualizados);
+
+    // Notificação Nível 6.6A — roda só APÓS persistir a confirmação, e nunca
+    // pode afetar `resumo`/`atualizados`. Cobre tanto os pedidos recém
+    // confirmados nesta rodada quanto retries de rodadas anteriores cuja
+    // notificação tinha falhado.
+    await notificarConfirmadosWhatsApp(atualizados);
 
     return resumo;
   } finally {
