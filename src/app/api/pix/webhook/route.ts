@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { redis } from "@/lib/redis";
 import { avaliarWebhookPixPassivo, type PedidoComPix, type PixWebhookPayload } from "@/lib/pix";
+import {
+  isMercadoPagoWebhook,
+  extrairPaymentIdMercadoPago,
+  validarAssinaturaMercadoPago,
+  buscarPagamentoMercadoPago,
+  mapearPagamentoParaPayloadInterno,
+} from "@/lib/mercadoPagoWebhook";
 
 type PedidoWebhookPix = PedidoComPix & {
   pixConfirmado?: boolean;
@@ -8,10 +15,50 @@ type PedidoWebhookPix = PedidoComPix & {
 
 export async function POST(req: NextRequest) {
   try {
-    const payload = (await req.json()) as PixWebhookPayload;
+    const corpo = await req.json();
     const pedidos = (await redis.get<PedidoWebhookPix[]>("pedidos")) || [];
-    const resultado = avaliarWebhookPixPassivo(payload, pedidos);
     const autoConfirm = process.env.PIX_WEBHOOK_AUTO_CONFIRM === "true";
+
+    // Branch adaptador Mercado Pago: notificacao real do MP ({ type: "payment",
+    // data: { id } }). Traduz para o payload interno e reutiliza toda a logica
+    // passiva/idempotente abaixo. O webhook generico (x-pix-webhook-secret)
+    // segue intacto no `else`.
+    let payload: PixWebhookPayload;
+    let mpAutorizado = false;
+
+    if (isMercadoPagoWebhook(corpo)) {
+      const paymentId = extrairPaymentIdMercadoPago(corpo);
+      const assinaturaValida = validarAssinaturaMercadoPago({
+        dataId: paymentId ?? "",
+        xSignature: req.headers.get("x-signature"),
+        xRequestId: req.headers.get("x-request-id"),
+        secret: process.env.MERCADOPAGO_WEBHOOK_SECRET,
+      });
+
+      // Passivo (flag desligada): nunca grava e nunca chama a API do MP.
+      if (!autoConfirm) {
+        return NextResponse.json({ ok: true, passive: true, provider: "mercadopago", assinaturaValida });
+      }
+      // Ativo exige assinatura MP valida: ausente/invalida -> 401, sem gravar.
+      if (!assinaturaValida || !paymentId) {
+        return NextResponse.json(
+          { ok: true, passive: false, provider: "mercadopago", wouldConfirm: false, reason: "assinatura_invalida" },
+          { status: 401 }
+        );
+      }
+      // Busca autoritativa: status/valor/external_reference vem da API do MP,
+      // nunca do corpo da notificacao.
+      const pagamento = await buscarPagamentoMercadoPago(paymentId);
+      if (!pagamento) {
+        return NextResponse.json({ ok: true, passive: false, provider: "mercadopago", wouldConfirm: false, reason: "pagamento_indisponivel" });
+      }
+      payload = mapearPagamentoParaPayloadInterno(pagamento);
+      mpAutorizado = true;
+    } else {
+      payload = corpo as PixWebhookPayload;
+    }
+
+    const resultado = avaliarWebhookPixPassivo(payload, pedidos);
 
     if (!autoConfirm) {
       return NextResponse.json({
@@ -21,15 +68,19 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const expectedSecret = process.env.PIX_WEBHOOK_SECRET;
-    const receivedSecret = req.headers.get("x-pix-webhook-secret");
-    if (!expectedSecret || receivedSecret !== expectedSecret) {
-      return NextResponse.json({
-        ok: true,
-        passive: false,
-        wouldConfirm: false,
-        reason: "segredo_invalido",
-      });
+    // Autorizacao para gravar: MP ja validou por assinatura; o webhook generico
+    // continua exigindo o segredo compartilhado.
+    if (!mpAutorizado) {
+      const expectedSecret = process.env.PIX_WEBHOOK_SECRET;
+      const receivedSecret = req.headers.get("x-pix-webhook-secret");
+      if (!expectedSecret || receivedSecret !== expectedSecret) {
+        return NextResponse.json({
+          ok: true,
+          passive: false,
+          wouldConfirm: false,
+          reason: "segredo_invalido",
+        });
+      }
     }
 
     const index = pedidos.findIndex((p) => p.pix?.txid === payload.txid);
