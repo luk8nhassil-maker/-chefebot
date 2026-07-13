@@ -67,7 +67,6 @@ function seedPedido(overrides: Record<string, unknown> = {}) {
     status: "saiu_entrega",
     horario: "12:00",
     endereco: "Rua X, 10",
-    clienteId: "cli_pontos_api",
     ...overrides,
   };
   redisStore.set("pedidos", [pedido]);
@@ -84,6 +83,19 @@ function seedPedido(overrides: Record<string, unknown> = {}) {
     });
   }
   return pedido;
+}
+
+function seedClienteAtivo(telefone: string) {
+  const telefoneLimpo = telefone.replace(/\D/g, "");
+  redisStore.set(`cliente:${telefoneLimpo}`, {
+    clienteId: derivarClienteIdPorTelefone(telefoneLimpo),
+    telefone: telefoneLimpo,
+    createdAt: "2026-07-13T11:00:00.000Z",
+    updatedAt: "2026-07-13T11:00:00.000Z",
+    lastLoginAt: "2026-07-13T11:00:00.000Z",
+    pontosAtivos: true,
+    pontosAtivadoEm: "2026-07-13T11:00:00.000Z",
+  });
 }
 
 function patchRequest(body: Record<string, unknown>) {
@@ -312,5 +324,59 @@ describe("PATCH /api/orders - primeira confirmacao confiavel gera pontos", () =>
     const extrato = await obterExtratoPontos(derivarClienteIdPorTelefone("86999998888")!);
     expect(extrato.map((m) => m.tipo)).toEqual(["confirmado", "estornado"]);
     expect((await obterSaldoPontos(derivarClienteIdPorTelefone("86999998888")!)).disponivel).toBe(0);
+  });
+
+  test("cliente logado com outro telefone de contato recebe pontos na conta da sessao", async () => {
+    seedClienteAtivo("99974000691");
+    seedClienteAtivo("86999999999");
+    seedPedido({
+      status: "novo",
+      telefone: "86999999999",
+      clienteId: "cli_99974000691",
+      clienteVinculo: "sessao",
+    });
+
+    await PATCH(patchRequest({ id: "ped_pt_1", status: "em_preparo" }));
+
+    expect((await obterSaldoPontos("cli_99974000691")).disponivel).toBe(45);
+    expect((await obterSaldoPontos(derivarClienteIdPorTelefone("86999999999")!)).disponivel).toBe(0);
+  });
+
+  test("Pix e primeiro clique em pedido com contato divergente geram somente um credito para a sessao", async () => {
+    seedClienteAtivo("99974000691");
+    seedClienteAtivo("86999999999");
+    seedPedido({
+      status: "novo",
+      telefone: "86999999999",
+      clienteId: "cli_99974000691",
+      clienteVinculo: "sessao",
+      pix: { status: "pendente", txid: "tx-sessao", valorEsperado: 50 },
+    });
+
+    await PATCH(patchRequest({ id: "ped_pt_1", pixConfirmado: true }));
+    await PATCH(patchRequest({ id: "ped_pt_1", status: "em_preparo" }));
+
+    const extratoSessao = await obterExtratoPontos("cli_99974000691");
+    expect(extratoSessao.filter((m) => m.tipo === "confirmado")).toHaveLength(1);
+    expect((await obterSaldoPontos("cli_99974000691")).disponivel).toBe(45);
+    expect((await obterSaldoPontos(derivarClienteIdPorTelefone("86999999999")!)).disponivel).toBe(0);
+  });
+
+  test("cancelamento estorna da mesma conta proprietaria da sessao", async () => {
+    seedClienteAtivo("99974000691");
+    seedClienteAtivo("86999999999");
+    seedPedido({
+      status: "novo",
+      telefone: "86999999999",
+      clienteId: "cli_99974000691",
+      clienteVinculo: "sessao",
+    });
+
+    await PATCH(patchRequest({ id: "ped_pt_1", status: "em_preparo" }));
+    await PATCH(patchRequest({ id: "ped_pt_1", status: "cancelado" }));
+
+    expect((await obterExtratoPontos("cli_99974000691")).map((m) => m.tipo)).toEqual(["confirmado", "estornado"]);
+    expect((await obterSaldoPontos("cli_99974000691")).disponivel).toBe(0);
+    expect((await obterExtratoPontos(derivarClienteIdPorTelefone("86999999999")!))).toHaveLength(0);
   });
 });

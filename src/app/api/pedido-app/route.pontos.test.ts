@@ -15,7 +15,7 @@ function defaultSetImpl(key: string, value: unknown, opts?: { nx?: boolean }) {
 // Replica os dois scripts Lua reais da fidelidade por pontos, sem interpretar
 // Lua: liberarLockPontosSeDono (1 chave: GET==token -> DEL) e
 // persistirEstadoPontosSeDono (2 chaves: GET(lock)==token -> SET(estado)).
-function defaultEvalImpl(_script: string, keys: string[], args: string[]) {
+function defaultEvalImpl(_script: string, keys: string[], args: unknown[]) {
   if (keys.length === 1) {
     const [key] = keys;
     const [token] = args;
@@ -28,7 +28,7 @@ function defaultEvalImpl(_script: string, keys: string[], args: string[]) {
   const [lockKey, estadoKey] = keys;
   const [token, estadoJson] = args;
   if (redisStore.get(lockKey) === token) {
-    redisStore.set(estadoKey, JSON.parse(estadoJson));
+    redisStore.set(estadoKey, JSON.parse(String(estadoJson)));
     return Promise.resolve(1);
   }
   return Promise.resolve(0);
@@ -71,7 +71,7 @@ beforeEach(async () => {
 
 const itemPizzaRetirada = { kind: "pizza" as const, name: "Pizza G", detail: "Calabresa", price: 50, qty: 1 };
 
-function pedidoRequest(opts: { clienteToken?: string; itens?: unknown[]; tipoEntrega?: string; bairro?: string; rua?: string; numero?: string } = {}) {
+function pedidoRequest(opts: { clienteToken?: string; itens?: unknown[]; tipoEntrega?: string; bairro?: string; rua?: string; numero?: string; body?: Record<string, unknown> } = {}) {
   const body = {
     cliente: "Fulano de Tal",
     telefone: "86999998888",
@@ -82,6 +82,7 @@ function pedidoRequest(opts: { clienteToken?: string; itens?: unknown[]; tipoEnt
     numero: opts.numero,
     pagamento: "Dinheiro",
     troco: "Sem troco",
+    ...opts.body,
   };
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (opts.clienteToken) headers.cookie = `cliente-token=${opts.clienteToken}`;
@@ -89,20 +90,36 @@ function pedidoRequest(opts: { clienteToken?: string; itens?: unknown[]; tipoEnt
 }
 
 describe("POST /api/pedido-app — pontos previstos (modelo novo)", () => {
-  test("pedido com clienteId cria movimento 'previsto' no cliente canonico do telefone", async () => {
+  test("pedido autenticado cria movimento 'previsto' no cliente canonico da sessao", async () => {
     const res = await POST(pedidoRequest({ clienteToken: "token-cliente-logado" }));
     const data = await res.json();
     expect(res.status).toBe(200);
     expect(data.total).toBe(50);
 
-    const extrato = await obterExtratoPontos(derivarClienteIdPorTelefone("86999998888")!);
+    const pedidosSalvos = redisStore.get("pedidos") as Array<Record<string, unknown>>;
+    expect(pedidosSalvos[0].clienteId).toBe(derivarClienteIdPorTelefone("11900000001"));
+    expect(pedidosSalvos[0].clienteVinculo).toBe("sessao");
+
+    const extrato = await obterExtratoPontos(derivarClienteIdPorTelefone("11900000001")!);
     expect(extrato).toHaveLength(1);
     expect(extrato[0].tipo).toBe("previsto");
     expect(extrato[0].pontos).toBe(50);
+    expect(await obterExtratoPontos(derivarClienteIdPorTelefone("86999998888")!)).toHaveLength(0);
 
     // previsto nunca entra no saldo confirmado
-    const saldo = await obterSaldoPontos(derivarClienteIdPorTelefone("86999998888")!);
+    const saldo = await obterSaldoPontos(derivarClienteIdPorTelefone("11900000001")!);
     expect(saldo.disponivel).toBe(0);
+  });
+
+  test("clienteId enviado no body nao vira vinculo de fidelidade", async () => {
+    const res = await POST(pedidoRequest({ body: { clienteId: "cli_99974000691" } }));
+    expect(res.status).toBe(200);
+
+    const pedidosSalvos = redisStore.get("pedidos") as Array<Record<string, unknown>>;
+    expect(pedidosSalvos[0].clienteId).toBeUndefined();
+    expect(pedidosSalvos[0].clienteVinculo).toBeUndefined();
+    expect(await obterExtratoPontos("cli_99974000691")).toHaveLength(0);
+    expect(await obterExtratoPontos(derivarClienteIdPorTelefone("86999998888")!)).toHaveLength(1);
   });
 
   test("pedido SEM clienteId (anonimo) cria previsto pelo telefone canonico", async () => {
@@ -136,7 +153,7 @@ describe("POST /api/pedido-app — pontos previstos (modelo novo)", () => {
     const data = await res.json();
     expect(data.total).toBe(10);
 
-    const extrato = await obterExtratoPontos(derivarClienteIdPorTelefone("86999998888")!);
+    const extrato = await obterExtratoPontos(derivarClienteIdPorTelefone("11900000001")!);
     expect(extrato).toHaveLength(1);
     expect(extrato[0].pontos).toBe(3); // 10 - 7 (taxa), nao os 10 inteiros
   });
@@ -174,7 +191,7 @@ describe("POST /api/pedido-app — pontos previstos (modelo novo)", () => {
     expect(res.status).toBe(200);
     expect(data.total).toBe(49.9); // preço normal da pizza G seria 50 — desconto aplicado
 
-    const extrato = await obterExtratoPontos(derivarClienteIdPorTelefone("86999998888")!);
+    const extrato = await obterExtratoPontos(derivarClienteIdPorTelefone("11900000001")!);
     expect(extrato).toHaveLength(1);
     expect(extrato[0].pontos).toBe(49); // floor(49.9), nunca 50 nem 49.9 fracionado
   });
@@ -207,9 +224,10 @@ describe("modelo antigo (pizzas) continua funcionando junto com o novo (pontos)"
 
     const pedidosSalvos = redisStore.get("pedidos") as Array<Record<string, unknown>>;
     expect(pedidosSalvos[0].pizzasCount).toBe(2);
-    expect(pedidosSalvos[0].clienteId).toBe("cli_pontos");
+    expect(pedidosSalvos[0].clienteId).toBe(derivarClienteIdPorTelefone("11900000001"));
+    expect(pedidosSalvos[0].clienteVinculo).toBe("sessao");
 
-    const extratoPontos = await obterExtratoPontos(derivarClienteIdPorTelefone("86999998888")!);
+    const extratoPontos = await obterExtratoPontos(derivarClienteIdPorTelefone("11900000001")!);
     expect(extratoPontos).toHaveLength(1);
     expect(extratoPontos[0].tipo).toBe("previsto");
   });

@@ -26,6 +26,7 @@ type PedidoReconciliavel = PedidoComPix & {
   status: string;
   telefone?: string;
   clienteId?: string;
+  clienteVinculo?: "sessao" | "telefone";
   taxaEntrega?: number;
   criadoEm?: string;
   pixConfirmado?: boolean;

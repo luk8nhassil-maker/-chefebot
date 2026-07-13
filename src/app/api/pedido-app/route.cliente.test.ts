@@ -60,6 +60,7 @@ describe("POST /api/pedido-app — vinculo opcional com area do cliente", () => 
     const pedidosSalvos = redisStore.get("pedidos") as Array<Record<string, unknown>>;
     expect(pedidosSalvos).toHaveLength(1);
     expect(pedidosSalvos[0].clienteId).toBeUndefined();
+    expect(pedidosSalvos[0].clienteVinculo).toBeUndefined();
   });
 
   test("cliente logado tem o pedido vinculado ao clienteId e a contagem de pizzas", async () => {
@@ -67,7 +68,8 @@ describe("POST /api/pedido-app — vinculo opcional com area do cliente", () => 
     expect(res.status).toBe(200);
 
     const pedidosSalvos = redisStore.get("pedidos") as Array<Record<string, unknown>>;
-    expect(pedidosSalvos[0].clienteId).toBe("cli_logado");
+    expect(pedidosSalvos[0].clienteId).toBe("cli_11900000001");
+    expect(pedidosSalvos[0].clienteVinculo).toBe("sessao");
     expect(pedidosSalvos[0].pizzasCount).toBe(2);
   });
 
@@ -79,6 +81,7 @@ describe("POST /api/pedido-app — vinculo opcional com area do cliente", () => 
 
     const pedidosSalvos = redisStore.get("pedidos") as Array<Record<string, unknown>>;
     expect(pedidosSalvos[0].clienteId).toBeUndefined();
+    expect(pedidosSalvos[0].clienteVinculo).toBeUndefined();
   });
 
   test("bebida nao entra na contagem de pizzas para fidelidade", async () => {

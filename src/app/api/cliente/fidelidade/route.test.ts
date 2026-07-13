@@ -42,6 +42,21 @@ vi.mock("@/lib/clienteAuth", () => ({
         deveRenovar: false,
       };
     }
+    if (token === "token-cliente-0691") {
+      return {
+        cliente: {
+          clienteId: "cli_99974000691",
+          telefone: "99974000691",
+          nome: "Cliente 0691",
+          createdAt: "2026-07-13T10:00:00.000Z",
+          updatedAt: "2026-07-13T10:00:00.000Z",
+          lastLoginAt: "2026-07-13T10:00:00.000Z",
+          pontosAtivos: true,
+          pontosAtivadoEm: "2026-07-13T11:00:00.000Z",
+        },
+        deveRenovar: false,
+      };
+    }
     return null;
   }),
   definirCookieSessaoCliente: vi.fn(),
@@ -59,7 +74,11 @@ vi.mock("@/lib/fidelidade", async () => {
       const clienteId = actual.derivarClienteIdPorTelefone(cliente.telefone) ?? cliente.clienteId;
       const existente = extratosPorCliente.get(clienteId) ?? [];
       const novos = pedidos
-        .filter((pedido) => pedido.telefone === cliente.telefone && pedido.pixConfirmado === true && pedido.status !== "cancelado")
+        .filter((pedido) => {
+          const donoSessao = typeof pedido.clienteId === "string" && actual.derivarClienteIdPorTelefone(pedido.clienteId) === clienteId;
+          const donoTelefone = !pedido.clienteId && actual.derivarClienteIdPorTelefone(String(pedido.telefone ?? "")) === clienteId;
+          return (donoSessao || donoTelefone) && pedido.pixConfirmado === true && pedido.status !== "cancelado";
+        })
         .filter((pedido) => !existente.some((m) => (m as { pedidoId?: unknown; tipo?: unknown }).pedidoId === pedido.id && (m as { tipo?: unknown }).tipo === "confirmado"))
         .map((pedido) => ({
           movimentoId: `mov_${String(pedido.id)}`,
@@ -413,5 +432,29 @@ describe("GET /api/cliente/fidelidade - reconciliacao de pedidos proprios", () =
     expect(res.status).toBe(200);
     expect(body.saldoPontos).toBe(45);
     expect(body.extrato[0]).toMatchObject({ pedidoId: "pedido-recuperavel", tipo: "confirmado", pontos: 45 });
+  });
+
+  test("recupera pedido real com telefone de contato divergente para a conta autenticada", async () => {
+    configPontos = { ativo: true, metaPontos: 60, descricaoRecompensa: "1 Pizza Familia" };
+    pedidosCliente = [
+      {
+        id: "pedido-real-0691-9999",
+        criadoEm: "2026-07-13T12:00:00.000Z",
+        telefone: "86999999999",
+        clienteId: "cli_99974000691",
+        status: "novo",
+        pixConfirmado: true,
+        total: 50,
+        taxaEntrega: 5,
+      },
+    ];
+
+    const res = await GET(requestComCookie("token-cliente-0691"));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.saldoPontos).toBe(45);
+    expect(body.extrato[0]).toMatchObject({ pedidoId: "pedido-real-0691-9999", tipo: "confirmado", pontos: 45 });
+    expect(extratosPorCliente.get("cli_86999999999")).toBeUndefined();
   });
 });

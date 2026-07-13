@@ -1081,6 +1081,7 @@ export type PedidoParaCreditoPontos = {
   status: string;
   telefone?: string;
   clienteId?: string;
+  clienteVinculo?: "sessao" | "telefone";
   total?: number;
   taxaEntrega?: number;
   criadoEm?: string;
@@ -1090,6 +1091,13 @@ export type PedidoParaCreditoPontos = {
 };
 
 export type OrigemConfirmacaoPontos = "pix_manual" | "pix_automatico" | "pix_webhook" | "confirmacao_operacional";
+export type OrigemProprietarioFidelidade = "sessao" | "telefone";
+
+export type ProprietarioFidelidadePedido = {
+  clienteId: string;
+  cliente?: Cliente;
+  origem: OrigemProprietarioFidelidade;
+};
 
 function timestampCriacaoPedidoMs(pedido: PedidoParaCreditoPontos): number | null {
   for (const candidato of [pedido.criadoEm, pedido.createdAt]) {
@@ -1112,23 +1120,55 @@ function pedidoCriadoDepoisDaAtivacao(pedido: PedidoParaCreditoPontos, cliente: 
   return pedidoMs >= ativadoMs;
 }
 
-async function resolverClienteCanonicoPontos(pedido: PedidoParaCreditoPontos): Promise<{ clienteId: string; cliente: Cliente } | null> {
-  const clienteId = derivarClienteIdPorTelefone(pedido.telefone) ?? "";
-  if (!clienteId) return null;
+function normalizarClienteIdPontos(clienteId?: string): string | undefined {
+  if (!clienteId) return undefined;
+  const raw = clienteId.startsWith("cli_") ? clienteId.slice(4) : clienteId;
+  const normalizado = normalizarTelefonePontos(raw);
+  if (normalizado.length < 10) return undefined;
+  return clienteIdDoTelefone(normalizado);
+}
 
-  if (pedido.clienteId && pedido.clienteId !== clienteId) {
-    console.warn(
-      `[ChefeBot] Fidelidade: pedido ${pedido.id} tem clienteId (${mascararIdentidadePontos(pedido.clienteId)}) divergente do telefone (${mascararIdentidadePontos(clienteId)}) - usando o telefone como identidade canonica`
-    );
+function variantesClienteIdPontos(clienteId?: string): string[] {
+  const canonico = normalizarClienteIdPontos(clienteId);
+  if (!canonico) return [];
+  return variantesTelefonePontos(canonico).map(clienteIdDoTelefone);
+}
+
+async function buscarClientePorVariantesClienteId(clienteId?: string): Promise<Cliente | null> {
+  for (const variante of variantesClienteIdPontos(clienteId)) {
+    const cliente = await buscarClientePorId(variante);
+    if (cliente) return cliente;
+  }
+  return null;
+}
+
+async function buscarClientePorTelefonePontos(telefone?: string): Promise<Cliente | null> {
+  for (const variante of variantesTelefonePontos(telefone)) {
+    const cliente = await buscarClientePorId(clienteIdDoTelefone(variante));
+    if (cliente) return cliente;
+  }
+  return null;
+}
+
+export async function resolverProprietarioFidelidadePedido(pedido: PedidoParaCreditoPontos): Promise<ProprietarioFidelidadePedido | null> {
+  const clienteIdSessao = normalizarClienteIdPontos(pedido.clienteId);
+  const clienteIdTelefone = derivarClienteIdPorTelefone(pedido.telefone);
+  const podeUsarVinculoSessao = !!clienteIdSessao && pedido.clienteVinculo !== "telefone";
+
+  if (podeUsarVinculoSessao) {
+    const clienteSessao = await buscarClientePorVariantesClienteId(clienteIdSessao);
+    const clienteId = clienteSessao ? derivarClienteIdPorTelefone(clienteSessao.telefone) ?? clienteSessao.clienteId : clienteIdSessao;
+    if (clienteIdTelefone && clienteIdTelefone !== clienteId) {
+      console.warn(
+        `[ChefeBot] Fidelidade: pedido ${pedido.id} usa proprietario da sessao (${mascararIdentidadePontos(clienteId)}) e telefone de contato divergente (${mascararIdentidadePontos(clienteIdTelefone)})`
+      );
+    }
+    return { clienteId, cliente: clienteSessao ?? undefined, origem: "sessao" };
   }
 
-  let cliente: Cliente | null = null;
-  for (const variante of variantesTelefonePontos(pedido.telefone)) {
-    cliente = await buscarClientePorId(clienteIdDoTelefone(variante));
-    if (cliente) break;
-  }
-  if (!cliente) return null;
-  return { clienteId, cliente };
+  if (!clienteIdTelefone) return null;
+  const clienteTelefone = await buscarClientePorTelefonePontos(pedido.telefone);
+  return { clienteId: clienteIdTelefone, cliente: clienteTelefone ?? undefined, origem: "telefone" };
 }
 
 export async function confirmarPontosPedido(
@@ -1140,10 +1180,11 @@ export async function confirmarPontosPedido(
   const config = await obterConfigFidelidadePontos();
   if (!config.ativo) return null;
 
-  const resolvido = await resolverClienteCanonicoPontos(pedido);
+  const resolvido = await resolverProprietarioFidelidadePedido(pedido);
   if (!resolvido) return null;
   const { clienteId, cliente } = resolvido;
 
+  if (!cliente) return null;
   if (!pedidoCriadoDepoisDaAtivacao(pedido, cliente)) return null;
 
   const valorElegivel = Math.max((Number(pedido.total) || 0) - (Number(pedido.taxaEntrega) || 0), 0);
@@ -1163,8 +1204,9 @@ export async function confirmarPontosPedido(
 export async function estornarPontosPedidoConfirmado(pedido: PedidoParaCreditoPontos): Promise<MovimentoPontos | null> {
   if (!pedido.id) return null;
 
-  const clienteId = derivarClienteIdPorTelefone(pedido.telefone) ?? "";
-  if (!clienteId) return null;
+  const proprietario = await resolverProprietarioFidelidadePedido(pedido);
+  if (!proprietario) return null;
+  const { clienteId } = proprietario;
 
   const extratoAtual = await obterExtratoPontos(clienteId);
   const confirmado = extratoAtual.find((m) => m.pedidoId === pedido.id && m.tipo === "confirmado");
@@ -1195,29 +1237,30 @@ export async function reconciliarPontosClientePedidos(
   const limite = Math.max(1, Math.min(opcoes.limite ?? 50, 100));
   const dias = Math.max(1, Math.min(opcoes.dias ?? 90, 365));
   const desdeMs = Date.now() - dias * 24 * 60 * 60 * 1000;
-  const telefoneCanonico = normalizarTelefonePontos(cliente.telefone);
 
-  const candidatos = pedidos
-    .filter((pedido) => {
-      if (!pedido?.id || pedido.status === "cancelado") return false;
-      if (derivarClienteIdPorTelefone(pedido.telefone) !== clienteId) return false;
-      if (normalizarTelefonePontos(pedido.telefone ?? "") !== telefoneCanonico) return false;
-      const criadoMs = timestampCriacaoPedidoMs(pedido);
-      if (criadoMs === null || criadoMs < desdeMs) return false;
-      return pedido.pixConfirmado === true || pedido.pix?.status === "confirmado" || pedidoJaPassouConfirmacaoOperacional(pedido.status);
-    })
+  const candidatos: PedidoParaCreditoPontos[] = [];
+  for (const pedido of pedidos) {
+    if (!pedido?.id || pedido.status === "cancelado") continue;
+    const criadoMs = timestampCriacaoPedidoMs(pedido);
+    if (criadoMs === null || criadoMs < desdeMs) continue;
+    if (!(pedido.pixConfirmado === true || pedido.pix?.status === "confirmado" || pedidoJaPassouConfirmacaoOperacional(pedido.status))) continue;
+    const proprietario = await resolverProprietarioFidelidadePedido(pedido);
+    if (proprietario?.clienteId === clienteId) candidatos.push(pedido);
+  }
+
+  const ordenados = candidatos
     .sort((a, b) => (timestampCriacaoPedidoMs(b) ?? 0) - (timestampCriacaoPedidoMs(a) ?? 0))
     .slice(0, limite);
 
   let creditados = 0;
-  for (const pedido of candidatos) {
+  for (const pedido of ordenados) {
     const origem: OrigemConfirmacaoPontos =
       pedido.pixConfirmado === true || pedido.pix?.status === "confirmado" ? "pix_automatico" : "confirmacao_operacional";
     const movimento = await confirmarPontosPedido(pedido, origem);
     if (movimento) creditados++;
   }
 
-  return { verificados: candidatos.length, creditados };
+  return { verificados: ordenados.length, creditados };
 }
 
 /**
@@ -1231,12 +1274,10 @@ export async function reconciliarPontosClientePedidos(
  * anterior com o novo antes de chamar esta função — chamar sempre que o
  * status observado for "entregue" é seguro.
  *
- * Identidade: o telefone é a fonte canônica (ver `derivarClienteIdPorTelefone`)
- * — pedido sem telefone válido (>= 10 dígitos) NUNCA gera pontos, mesmo que
- * tenha um `clienteId` preenchido (evita dois saldos divergentes para o
- * mesmo número). Se `pedido.clienteId` vier preenchido e divergir do
- * derivado do telefone, o telefone vence e a divergência fica registrada em
- * log — nunca cria um segundo saldo.
+ * Identidade: se o pedido foi vinculado server-side a uma sessão válida,
+ * `clienteId` é o proprietário da compra/fidelidade. O telefone do pedido é
+ * contato. Sem vínculo confiável de sessão, o telefone canônico segue como
+ * fallback para compras anônimas/WhatsApp.
  *
  * Regras aplicadas: só usa o valor dos produtos (total menos taxa de
  * entrega — taxa nunca gera pontos); fidelidade precisa estar ativa na
@@ -1254,34 +1295,6 @@ async function creditarPontosPedidoEntregueComConfig(
   if (pedido.status !== "entregue" || !pedido.id) return;
   if (!config.ativo) return;
   await confirmarPontosPedido(pedido, "confirmacao_operacional");
-  return;
-
-  const clienteId = derivarClienteIdPorTelefone(pedido.telefone) ?? "";
-  if (!clienteId) return; // sem telefone valido: nunca gera pontos, nunca cria saldo orfao
-
-  if (pedido.clienteId && pedido.clienteId !== clienteId) {
-    // Aviso seguro: nunca logar o clienteId (que embute o telefone) nem o
-    // telefone em texto pleno — só os últimos 4 dígitos, suficiente para
-    // correlacionar em suporte sem expor o número completo em log.
-    console.warn(
-      `[ChefeBot] Fidelidade: pedido ${pedido.id} tem clienteId (${mascararIdentidadePontos(pedido.clienteId)}) divergente do telefone (${mascararIdentidadePontos(clienteId)}) — usando o telefone como identidade canonica`
-    );
-  }
-
-  if (!config.ativo) return;
-
-  const valorElegivel = Math.max((Number(pedido.total) || 0) - (Number(pedido.taxaEntrega) || 0), 0);
-  const pontos = calcularPontosElegiveisPedido({ total: pedido.total ?? 0, taxaEntrega: pedido.taxaEntrega });
-  if (pontos <= 0) return;
-
-  await registrarMovimentoPontosIdempotente(clienteId, {
-    eventoId: construirEventoIdPontos(pedido.id, "confirmado"),
-    pedidoId: pedido.id,
-    tipo: "confirmado",
-    pontos,
-    valorElegivel,
-    motivo: `Credito por pedido ${pedido.id} entregue`,
-  });
 }
 
 export async function creditarPontosPedidoEntregue(pedido: PedidoParaCreditoPontos): Promise<void> {

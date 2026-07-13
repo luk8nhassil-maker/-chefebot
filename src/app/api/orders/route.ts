@@ -6,13 +6,9 @@ import { confirmarPixMetadata, criarPixMetadata, sanitizarPedidoPixResposta, typ
 import type { PedidoEntregador } from '@/types/entregador'
 import {
   creditarFidelidadeEfetiva,
-  calcularPontosElegiveisPedido,
-  registrarMovimentoPontosIdempotente,
-  construirEventoIdPontos,
-  obterExtratoPontos,
   confirmarPontosPedido,
   estornarPontosPedidoConfirmado,
-  derivarClienteIdPorTelefone,
+  resolverProprietarioFidelidadePedido,
   reverterResgateConfirmado,
 } from '@/lib/fidelidade'
 import { obterConfigEvolution } from '@/lib/evolutionApi'
@@ -43,6 +39,7 @@ type Pedido = {
   horarioInicio?: string
   criadoEm?: string
   clienteId?: string
+  clienteVinculo?: 'sessao' | 'telefone'
   pizzasCount?: number
   resgateId?: string
   descontoFidelidade?: number
@@ -306,53 +303,15 @@ export async function PATCH(req: NextRequest) {
     }
   }
 
-  if (status === 'cancelado' && statusAnterior === 'entregue') {
-    try {
-      const clienteIdPontos = derivarClienteIdPorTelefone(pedidos[index].telefone)
-      if (clienteIdPontos) {
-        const pontosElegiveis = calcularPontosElegiveisPedido({
-          total: pedidos[index].total,
-          taxaEntrega: pedidos[index].taxaEntrega,
-        })
-        if (statusAnterior === 'entregue') {
-          if (pontosElegiveis > 0) {
-            const extratoAtual = await obterExtratoPontos(clienteIdPontos)
-            const teveConfirmado = extratoAtual.some(m => m.pedidoId === id && m.tipo === 'confirmado')
-            if (teveConfirmado) {
-              await registrarMovimentoPontosIdempotente(clienteIdPontos, {
-                eventoId: construirEventoIdPontos(id, 'estornado'),
-                pedidoId: id,
-                tipo: 'estornado',
-                pontos: pontosElegiveis,
-                motivo: `Pedido ${id} corrigido para cancelado apos entrega`,
-              })
-            }
-          }
-        } else if (pontosElegiveis > 0) {
-          await registrarMovimentoPontosIdempotente(clienteIdPontos, {
-            eventoId: construirEventoIdPontos(id, 'cancelado'),
-            pedidoId: id,
-            tipo: 'cancelado',
-            pontos: pontosElegiveis,
-            motivo: `Pedido ${id} cancelado antes da entrega`,
-          })
-        }
-      }
-    } catch (err) {
-      console.error('[ChefeBot] Erro ao registrar cancelamento de pontos (ignorado):', err)
-    }
-
-  }
-
   // Reverte resgate de fidelidade (Etapa 5), se este pedido tinha usado um:
   // fica fora do guard de transicao para permitir reprocessar falha anterior
   // quando o pedido ja esta cancelado. A lib garante idempotencia.
   if (status === 'cancelado' && pedidos[index].resgateId) {
     try {
-      const clienteIdResgate = derivarClienteIdPorTelefone(pedidos[index].telefone)
-      if (clienteIdResgate) {
+      const proprietarioResgate = await resolverProprietarioFidelidadePedido(pedidos[index])
+      if (proprietarioResgate) {
         await reverterResgateConfirmado(
-          clienteIdResgate,
+          proprietarioResgate.clienteId,
           pedidos[index].resgateId,
           `Pedido ${id} cancelado apos usar resgate de fidelidade`
         )
