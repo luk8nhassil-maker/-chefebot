@@ -176,7 +176,7 @@ export default function ImprimirPedidoPage({ params }: PageProps) {
     <>
       <style>{`
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        html, body { background: var(--foreground); }
+        html, body { background: #ffffff; color: #000000; color-scheme: light; }
         .cupom {
           font-family: 'Courier New', Courier, monospace;
           font-size: 14px;
@@ -185,23 +185,23 @@ export default function ImprimirPedidoPage({ params }: PageProps) {
           width: 72mm;
           max-width: 72mm;
           padding: 4mm 3mm;
-          background: var(--foreground);
-          color: var(--background);
+          background: #ffffff;
+          color: #000000;
         }
         .centro { text-align: center; }
         .negrito { font-weight: 800; }
         .grande { font-size: 16px; font-weight: 800; text-align: center; margin: 4px 0; }
         .total-linha { font-size: 17px; font-weight: 800; text-align: center; margin-top: 6px; }
         .alerta { font-weight: 800; text-align: center; }
-        .linha { border: none; border-top: 1px dashed var(--background); margin: 7px 0; }
+        .linha { border: none; border-top: 1px dashed #000000; margin: 7px 0; }
         .secao { margin: 3px 0; }
         .secao-titulo { font-weight: 800; text-align: center; margin: 5px 0 3px; }
         .btn-imprimir {
           display: block;
           margin: 16px auto;
           padding: 10px 28px;
-          background: var(--background);
-          color: var(--foreground);
+          background: #000000;
+          color: #ffffff;
           border: none;
           font-family: 'Courier New', monospace;
           font-size: 14px;
@@ -210,13 +210,14 @@ export default function ImprimirPedidoPage({ params }: PageProps) {
         }
         @media print {
           @page { size: 80mm auto; margin: 0; }
-          html, body { margin: 0; }
+          html, body { margin: 0; background: #ffffff !important; color: #000000 !important; }
           .btn-imprimir { display: none !important; }
           .cupom {
             padding: 2mm;
-            -webkit-print-color-adjust: exact;
-            print-color-adjust: exact;
-            color: var(--background) !important;
+            background: #ffffff !important;
+            color: #000000 !important;
+            box-shadow: none !important;
+            text-shadow: none !important;
           }
         }
       `}</style>
