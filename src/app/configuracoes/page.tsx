@@ -47,6 +47,27 @@ const PONTOS_PADRAO: ConfigPontos = {
   descricaoRecompensa: '1 Pizza Família',
 }
 
+type PreviaRecuperacaoPontos = {
+  ok: boolean
+  encontrado: boolean
+  numero?: number
+  proprietarioClienteIdMascarado?: string
+  pontosCalculados?: number
+  motivoRecusaAutomatica?: string
+  elegivelParaRecuperacao: boolean
+  error?: string
+}
+
+type ResultadoRecuperacaoPontos = {
+  ok: boolean
+  numero?: number
+  pontosCreditados?: number
+  eventoId?: string
+  jaExistia?: boolean
+  motivoRecusa?: string
+  error?: string
+}
+
 type ItemCardapio = { name: string; price: number }
 
 type Cardapio = {
@@ -218,6 +239,13 @@ export default function ConfiguracoesPage() {
   const [pontos, setPontos] = useState<ConfigPontos>(PONTOS_PADRAO)
   const [salvandoPontos, setSalvandoPontos] = useState(false)
   const [mensagemPontos, setMensagemPontos] = useState('')
+  const [recuperarPedidoId, setRecuperarPedidoId] = useState('')
+  const [recuperarMotivo, setRecuperarMotivo] = useState('')
+  const [recuperarPrevia, setRecuperarPrevia] = useState<PreviaRecuperacaoPontos | null>(null)
+  const [recuperarCarregandoPrevia, setRecuperarCarregandoPrevia] = useState(false)
+  const [recuperarProcessando, setRecuperarProcessando] = useState(false)
+  const [recuperarErro, setRecuperarErro] = useState('')
+  const [recuperarResultado, setRecuperarResultado] = useState<ResultadoRecuperacaoPontos | null>(null)
   const is24h = config.horaAbertura === 0 && config.horaFechamento === 24
 
   useEffect(() => {
@@ -314,6 +342,54 @@ export default function ConfiguracoesPage() {
     } catch { setMensagemPontos('❌ Erro ao salvar.') }
     setSalvandoPontos(false)
     setTimeout(() => setMensagemPontos(''), 3000)
+  }
+
+  const buscarPreviaRecuperacaoPontos = async () => {
+    const pedidoId = recuperarPedidoId.trim()
+    if (!pedidoId) return
+    setRecuperarCarregandoPrevia(true)
+    setRecuperarErro('')
+    setRecuperarPrevia(null)
+    setRecuperarResultado(null)
+    try {
+      const res = await fetch(`/api/admin/fidelidade/pontos/recuperar-pedido?pedidoId=${encodeURIComponent(pedidoId)}`)
+      const data: PreviaRecuperacaoPontos = await res.json().catch(() => ({ ok: false, encontrado: false, elegivelParaRecuperacao: false }))
+      if (!res.ok || !data.ok) {
+        setRecuperarErro(data.error || 'Pedido nao encontrado.')
+        return
+      }
+      setRecuperarPrevia(data)
+    } catch {
+      setRecuperarErro('Erro de conexao ao buscar o pedido.')
+    } finally {
+      setRecuperarCarregandoPrevia(false)
+    }
+  }
+
+  const confirmarRecuperacaoPontos = async () => {
+    const pedidoId = recuperarPedidoId.trim()
+    const motivo = recuperarMotivo.trim()
+    if (!pedidoId || !motivo) return
+    setRecuperarProcessando(true)
+    setRecuperarErro('')
+    try {
+      const res = await fetch('/api/admin/fidelidade/pontos/recuperar-pedido', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pedidoId, motivo }),
+      })
+      const data: ResultadoRecuperacaoPontos = await res.json().catch(() => ({ ok: false }))
+      if (!res.ok || !data.ok) {
+        setRecuperarErro(data.motivoRecusa || data.error || 'Nao foi possivel recuperar os pontos deste pedido.')
+        return
+      }
+      setRecuperarResultado(data)
+      setRecuperarPrevia(null)
+    } catch {
+      setRecuperarErro('Erro de conexao ao reprocessar os pontos.')
+    } finally {
+      setRecuperarProcessando(false)
+    }
   }
 
   const salvarCardapio = async () => {
@@ -685,6 +761,83 @@ export default function ConfiguracoesPage() {
                     </button>
                     {mensagemPontos && (
                       <p style={{ textAlign: 'center', color: mensagemPontos.includes('✅') ? 'var(--success)' : 'var(--danger)', fontWeight: 800, fontSize: 13, margin: 0 }}>{mensagemPontos}</p>
+                    )}
+                  </SectionCard>
+                )}
+
+                {/* Correção operacional pontual (Nível 6.7) — recupera UM pedido cujo
+                    crédito automático foi corretamente recusado por ativação não
+                    persistida. Nunca aceita quantidade de pontos digitada. */}
+                {isAdmin && (
+                  <SectionCard>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: -4, flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: 16, flexShrink: 0 }}>🛠️</span>
+                      <span style={{ fontSize: 13, fontWeight: 900, color: TEXT, textTransform: 'uppercase', letterSpacing: '0.8px' }}>Corrigir pontos de um pedido</span>
+                      <span style={{ fontSize: 10, background: 'color-mix(in srgb, var(--primary) 12%, transparent)', color: 'color-mix(in srgb, var(--primary) 80%, transparent)', padding: '2px 8px', borderRadius: 20, fontWeight: 800, whiteSpace: 'nowrap' }}>Somente Admin</span>
+                    </div>
+                    <p style={{ fontSize: 12, color: TEXT2, margin: '-10px 0 0' }}>
+                      Uso excepcional: recupera o crédito de um único pedido cujo crédito automático foi recusado apenas por a ativação individual não constar como anterior ao pedido. Os pontos são sempre calculados pelo servidor — nunca informe a quantidade manualmente.
+                    </p>
+                    <FieldGroup label="ID interno do pedido">
+                      <input
+                        type="text"
+                        placeholder="Ex: 1783967630709"
+                        value={recuperarPedidoId}
+                        onChange={e => { setRecuperarPedidoId(e.target.value); setRecuperarPrevia(null); setRecuperarResultado(null); setRecuperarErro('') }}
+                        style={inputStyle}
+                      />
+                    </FieldGroup>
+                    <FieldGroup label="Motivo da correção">
+                      <input
+                        type="text"
+                        placeholder="Ex: RECUPERACAO_VALIDACAO_ATIVACAO_NAO_PERSISTIDA"
+                        value={recuperarMotivo}
+                        onChange={e => setRecuperarMotivo(e.target.value)}
+                        style={inputStyle}
+                        maxLength={200}
+                      />
+                    </FieldGroup>
+                    <button
+                      onClick={buscarPreviaRecuperacaoPontos}
+                      disabled={recuperarCarregandoPrevia || !recuperarPedidoId.trim()}
+                      style={{ width: '100%', height: 44, background: 'rgba(var(--overlay-rgb), 0.04)', border: `1.5px solid ${'var(--border)'}`, borderRadius: 12, color: TEXT, fontSize: 13, fontWeight: 800, cursor: recuperarCarregandoPrevia ? 'not-allowed' : 'pointer', fontFamily: FONT, opacity: recuperarCarregandoPrevia ? 0.6 : 1 }}
+                    >
+                      {recuperarCarregandoPrevia ? 'Buscando...' : 'Buscar pedido'}
+                    </button>
+
+                    {recuperarPrevia && (
+                      <div style={{ background: 'rgba(var(--overlay-rgb), 0.04)', border: '1px solid var(--border)', borderRadius: 12, padding: 14, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        <p style={{ margin: 0, fontSize: 13, color: TEXT }}>Pedido nº <strong>{recuperarPrevia.numero ?? '—'}</strong></p>
+                        <p style={{ margin: 0, fontSize: 13, color: TEXT }}>Proprietário: <strong>{recuperarPrevia.proprietarioClienteIdMascarado ?? '—'}</strong></p>
+                        <p style={{ margin: 0, fontSize: 13, color: TEXT }}>Pontos calculados: <strong>{recuperarPrevia.pontosCalculados ?? 0}</strong></p>
+                        <p style={{ margin: 0, fontSize: 13, color: TEXT }}>Motivo da recusa automática: <strong>{recuperarPrevia.motivoRecusaAutomatica ?? '—'}</strong></p>
+                        {!recuperarPrevia.elegivelParaRecuperacao && (
+                          <p style={{ margin: 0, fontSize: 12, color: 'var(--danger)' }}>Este pedido não é elegível para recuperação administrativa (motivo diferente de ativação não persistida).</p>
+                        )}
+                        {recuperarPrevia.elegivelParaRecuperacao && (
+                          <button
+                            onClick={confirmarRecuperacaoPontos}
+                            disabled={recuperarProcessando || !recuperarMotivo.trim()}
+                            style={{ width: '100%', height: 44, background: recuperarProcessando ? 'var(--background)' : `linear-gradient(180deg, ${ACCENT}, var(--primary))`, border: 'none', borderRadius: 12, color: 'var(--primary-foreground)', fontSize: 13, fontWeight: 900, cursor: recuperarProcessando || !recuperarMotivo.trim() ? 'not-allowed' : 'pointer', fontFamily: FONT, opacity: recuperarProcessando || !recuperarMotivo.trim() ? 0.6 : 1 }}
+                          >
+                            {recuperarProcessando ? 'Reprocessando...' : 'Reprocessar pontos'}
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    {recuperarResultado && (
+                      <div style={{ background: 'color-mix(in srgb, var(--success) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--success) 40%, transparent)', borderRadius: 12, padding: 14, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        <p style={{ margin: 0, fontSize: 13, color: 'var(--success)', fontWeight: 800 }}>
+                          {recuperarResultado.jaExistia ? 'Este pedido já tinha crédito registrado — nenhum ponto duplicado.' : `✅ ${recuperarResultado.pontosCreditados ?? 0} pontos creditados.`}
+                        </p>
+                        <p style={{ margin: 0, fontSize: 12, color: TEXT2 }}>Evento: {recuperarResultado.eventoId}</p>
+                        <p style={{ margin: 0, fontSize: 12, color: TEXT2 }}>Horário da auditoria: {new Date().toLocaleString('pt-BR')}</p>
+                      </div>
+                    )}
+
+                    {recuperarErro && (
+                      <p style={{ margin: 0, fontSize: 12, color: 'var(--danger)', fontWeight: 700 }}>{recuperarErro}</p>
                     )}
                   </SectionCard>
                 )}

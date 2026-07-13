@@ -106,6 +106,21 @@ describe("/cliente — Estados A/B/C de ativação individual (Nível 6.6)", () 
     expect(fonte).toContain("MOVIMENTO_JA_EXISTE");
   });
 
+  test("17. pedidos antigos corretamente ignorados (PEDIDO_ANTERIOR_ATIVACAO etc.) nunca disparam o alerta falso", () => {
+    expect(fonte).toContain("MOTIVOS_PONTOS_SEM_ALERTA");
+    expect(fonte).toContain("'PEDIDO_ANTERIOR_ATIVACAO'");
+    expect(fonte).toContain("'PEDIDO_CANCELADO'");
+    expect(fonte).toContain("'COMPRA_NAO_CONFIRMADA'");
+    expect(fonte).toContain("'VALOR_ELEGIVEL_ZERO'");
+    expect(fonte).toMatch(/!MOTIVOS_PONTOS_SEM_ALERTA\.has\(detalhe\.motivo\)/);
+  });
+
+  test("18. falha real (Redis/lock — resposta HTTP de erro) continua exibindo o alerta via res.ok/data.error", () => {
+    expect(fonte).toContain("if (res.status === 401) return");
+    expect(fonte).toContain("if (!res.ok) {");
+    expect(fonte).toContain("setReconciliacaoErro(msg)");
+  });
+
   test("intenção 'ativar' aciona a ativação automaticamente após confirmar o código", () => {
     expect(fonte).toMatch(/intent === 'ativar'/);
   });

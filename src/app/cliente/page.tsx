@@ -30,6 +30,19 @@ type Fidelidade = {
   recompensas: Recompensa[]
 }
 
+// Motivos de recusa esperados do gate de crédito de pontos (ver
+// GatesAvaliacaoCreditoPontos em src/lib/fidelidade.ts) — pedidos antigos
+// corretamente ignorados por regra de negócio nunca disparam alerta na área
+// do cliente. Qualquer outro motivo (proprietário inconsistente, cliente
+// esperado não encontrado, estado malformado etc.) é tratado como erro real.
+const MOTIVOS_PONTOS_SEM_ALERTA = new Set([
+  'PEDIDO_ANTERIOR_ATIVACAO',
+  'MOVIMENTO_JA_EXISTE',
+  'PEDIDO_CANCELADO',
+  'COMPRA_NAO_CONFIRMADA',
+  'VALOR_ELEGIVEL_ZERO',
+])
+
 type PedidoResumo = {
   id: string
   numero?: number
@@ -122,8 +135,16 @@ export default function ClientePage() {
       }
       const data = await res.json().catch(() => ({}))
       const detalhes = Array.isArray(data?.detalhes) ? data.detalhes : []
+      // Rejeições esperadas de negócio (pedido ainda não elegível por regra,
+      // não por falha técnica) nunca disparam o alerta — só recusas
+      // realmente acionáveis (proprietário inconsistente, cliente não
+      // encontrado etc.) chegam aqui como "rejeição recente".
       const rejeicoesRecentes = detalhes.filter((detalhe: { movimentoGravado?: boolean; motivo?: string }) => {
-        return detalhe?.movimentoGravado !== true && detalhe?.motivo && detalhe.motivo !== 'MOVIMENTO_JA_EXISTE'
+        return (
+          detalhe?.movimentoGravado !== true &&
+          detalhe?.motivo &&
+          !MOTIVOS_PONTOS_SEM_ALERTA.has(detalhe.motivo)
+        )
       })
       if (Number(data?.creditados) === 0 && rejeicoesRecentes.length > 0) {
         setReconciliacaoErro('Encontramos seu pedido, mas nao conseguimos validar os pontos. Tentar novamente.')

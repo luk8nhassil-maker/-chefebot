@@ -1522,6 +1522,222 @@ export async function confirmarCompraECreditarPontos(
   return resultado;
 }
 
+const CHAVE_AUDITORIA_RECUPERACAO_PONTOS = "auditoria:fidelidade:recuperacao-pontos";
+const MAX_AUDITORIA_RECUPERACAO_PONTOS = 500;
+const TTL_AUDITORIA_RECUPERACAO_PONTOS_S = 180 * 24 * 60 * 60; // 180 dias
+
+export type ResultadoAuditoriaRecuperacaoPontos = "creditado" | "ja_existia" | "recusado";
+
+export type EntradaAuditoriaRecuperacaoPontos = {
+  ts: string;
+  pedidoId: string;
+  numero?: number;
+  clienteIdMascarado?: string;
+  pontosCreditados: number;
+  admin?: string;
+  motivo: string;
+  resultado: ResultadoAuditoriaRecuperacaoPontos;
+  eventoId?: string;
+  motivoRecusa?: MotivoAvaliacaoCreditoPontos;
+};
+
+// Nunca grava telefone completo, token ou cookie — só o clienteId mascarado
+// (ver mascararIdentidadePontos) e o motivo textual informado pelo admin.
+async function registrarAuditoriaRecuperacaoPontos(entrada: EntradaAuditoriaRecuperacaoPontos): Promise<void> {
+  try {
+    await redis.rpush(CHAVE_AUDITORIA_RECUPERACAO_PONTOS, JSON.stringify(entrada));
+    await redis.ltrim(CHAVE_AUDITORIA_RECUPERACAO_PONTOS, -MAX_AUDITORIA_RECUPERACAO_PONTOS, -1);
+    await redis.expire(CHAVE_AUDITORIA_RECUPERACAO_PONTOS, TTL_AUDITORIA_RECUPERACAO_PONTOS_S);
+  } catch (err) {
+    console.error("[ChefeBot] Falha ao registrar auditoria de recuperacao de pontos:", err instanceof Error ? err.message : err);
+  }
+}
+
+export async function obterAuditoriaRecuperacaoPontos(limite = 50): Promise<EntradaAuditoriaRecuperacaoPontos[]> {
+  const tamanho = Math.max(1, Math.min(limite, MAX_AUDITORIA_RECUPERACAO_PONTOS));
+  const bruto = (await redis.lrange<string>(CHAVE_AUDITORIA_RECUPERACAO_PONTOS, -tamanho, -1)) || [];
+  return bruto
+    .map((linha) => {
+      try {
+        return JSON.parse(typeof linha === "string" ? linha : JSON.stringify(linha)) as EntradaAuditoriaRecuperacaoPontos;
+      } catch {
+        return null;
+      }
+    })
+    .filter((v): v is EntradaAuditoriaRecuperacaoPontos => v !== null)
+    .reverse();
+}
+
+export type PreviaRecuperacaoAdminPontos = {
+  encontrado: boolean;
+  pedidoId: string;
+  numero?: number;
+  proprietarioClienteIdMascarado?: string;
+  pontosCalculados?: number;
+  motivoRecusaAutomatica?: MotivoAvaliacaoCreditoPontos;
+  elegivelParaRecuperacao: boolean;
+};
+
+/**
+ * Prévia somente-leitura para a confirmação exigida no painel admin antes de
+ * reprocessar: mostra número do pedido, proprietário mascarado, pontos
+ * calculados e o motivo pelo qual o crédito automático foi recusado — sem
+ * creditar nada. `elegivelParaRecuperacao` só é true quando o único motivo de
+ * recusa automática é `PEDIDO_ANTERIOR_ATIVACAO` (o gate que a recuperação
+ * pode ignorar) ou quando já estaria elegível de qualquer forma.
+ */
+export async function previsualizarRecuperacaoCreditoPontosPedidoAdmin(pedidoId: string): Promise<PreviaRecuperacaoAdminPontos> {
+  const pedidos = (await redis.get<PedidoParaCreditoPontos[]>("pedidos")) || [];
+  const pedido = pedidos.find((p) => p?.id === pedidoId);
+  if (!pedido) return { encontrado: false, pedidoId, elegivelParaRecuperacao: false };
+
+  const config = await obterConfigFidelidadePontos();
+  const proprietario = await resolverProprietarioFidelidadePedido(pedido);
+  const estado = proprietario ? await consolidarEstadoPontosCliente(proprietario.clienteId) : normalizarEstadoPontos(null);
+  const avaliacao = avaliarCreditoPontosPedido(pedido, proprietario?.cliente, config, estado, {
+    proprietarioClienteId: proprietario?.clienteId,
+    origemProprietario: proprietario?.origem,
+  });
+
+  return {
+    encontrado: true,
+    pedidoId,
+    numero: pedido.numero,
+    proprietarioClienteIdMascarado: avaliacao.proprietarioClienteIdMascarado,
+    pontosCalculados: avaliacao.pontosCalculados,
+    motivoRecusaAutomatica: avaliacao.motivo === "ELEGIVEL" ? undefined : avaliacao.motivo,
+    elegivelParaRecuperacao: avaliacao.motivo === "ELEGIVEL" || avaliacao.motivo === "PEDIDO_ANTERIOR_ATIVACAO",
+  };
+}
+
+export type ContextoAdminRecuperacaoPontos = {
+  motivo: string;
+  adminId?: string;
+};
+
+export type ResultadoRecuperacaoAdminPontos = {
+  ok: boolean;
+  pedidoId: string;
+  numero?: number;
+  pontosCreditados: number;
+  eventoId?: string;
+  jaExistia: boolean;
+  motivoRecusa?: MotivoAvaliacaoCreditoPontos;
+};
+
+/**
+ * Recuperação administrativa auditada de um único pedido cujo crédito
+ * automático foi (corretamente) recusado só por `ativacaoAnteriorAoPedido`
+ * — ver Nível 6.7. Reaplica TODOS os demais gates de
+ * `avaliarCreditoPontosPedido` (programa ativo, pedido não cancelado,
+ * proprietário resolvido, cliente participante, compra confirmada, valor
+ * elegível positivo, idempotência) e só ignora esse gate específico. Nunca
+ * aceita pontos, clienteId ou telefone vindos de fora — pontos são sempre
+ * recalculados no servidor a partir do próprio pedido persistido, e o
+ * proprietário é sempre resolvido por `resolverProprietarioFidelidadePedido`.
+ */
+export async function recuperarCreditoPontosPedidoAdmin(
+  pedidoId: string,
+  contextoAdmin: ContextoAdminRecuperacaoPontos
+): Promise<ResultadoRecuperacaoAdminPontos> {
+  const pedidos = (await redis.get<PedidoParaCreditoPontos[]>("pedidos")) || [];
+  const pedido = pedidos.find((p) => p?.id === pedidoId);
+  if (!pedido) {
+    await registrarAuditoriaRecuperacaoPontos({
+      ts: new Date().toISOString(),
+      pedidoId,
+      pontosCreditados: 0,
+      admin: contextoAdmin.adminId,
+      motivo: contextoAdmin.motivo,
+      resultado: "recusado",
+      motivoRecusa: "PEDIDO_INVALIDO",
+    });
+    return { ok: false, pedidoId, pontosCreditados: 0, jaExistia: false, motivoRecusa: "PEDIDO_INVALIDO" };
+  }
+
+  const config = await obterConfigFidelidadePontos();
+  const proprietario = await resolverProprietarioFidelidadePedido(pedido);
+  const estado = proprietario ? await consolidarEstadoPontosCliente(proprietario.clienteId) : normalizarEstadoPontos(null);
+  const avaliacao = avaliarCreditoPontosPedido(pedido, proprietario?.cliente, config, estado, {
+    proprietarioClienteId: proprietario?.clienteId,
+    origemProprietario: proprietario?.origem,
+  });
+  const gates = avaliacao.gates;
+  const clienteIdMascarado = avaliacao.proprietarioClienteIdMascarado;
+
+  // Prioridade idêntica à de avaliarCreditoPontosPedido — a única diferença é
+  // que `ativacaoAnteriorAoPedido` nunca é checado aqui.
+  let recusa: MotivoAvaliacaoCreditoPontos | null = null;
+  if (!gates.programaAtivo) recusa = "PROGRAMA_INATIVO";
+  else if (gates.pedidoCancelado) recusa = "PEDIDO_CANCELADO";
+  else if (!gates.proprietarioResolvido) recusa = "PROPRIETARIO_NAO_RESOLVIDO";
+  else if (!gates.clienteEncontrado) recusa = "CLIENTE_NAO_ENCONTRADO";
+  else if (!gates.participacaoAtiva) recusa = "CLIENTE_NAO_ATIVOU_PONTOS";
+  else if (!gates.compraConfirmada) recusa = "COMPRA_NAO_CONFIRMADA";
+  else if (!gates.valorElegivelPositivo) recusa = "VALOR_ELEGIVEL_ZERO";
+
+  if (recusa) {
+    await registrarAuditoriaRecuperacaoPontos({
+      ts: new Date().toISOString(),
+      pedidoId,
+      numero: pedido.numero,
+      clienteIdMascarado,
+      pontosCreditados: 0,
+      admin: contextoAdmin.adminId,
+      motivo: contextoAdmin.motivo,
+      resultado: "recusado",
+      motivoRecusa: recusa,
+    });
+    return { ok: false, pedidoId, numero: pedido.numero, pontosCreditados: 0, jaExistia: false, motivoRecusa: recusa };
+  }
+
+  const pontos = calcularPontosElegiveisPedido({ total: pedido.total ?? 0, taxaEntrega: pedido.taxaEntrega });
+  const valorElegivel = Math.max((Number(pedido.total) || 0) - (Number(pedido.taxaEntrega) || 0), 0);
+  const eventoId = construirEventoIdPontos(pedido.id, "confirmado");
+
+  if (gates.movimentoJaExiste) {
+    await registrarAuditoriaRecuperacaoPontos({
+      ts: new Date().toISOString(),
+      pedidoId,
+      numero: pedido.numero,
+      clienteIdMascarado,
+      pontosCreditados: 0,
+      admin: contextoAdmin.adminId,
+      motivo: contextoAdmin.motivo,
+      resultado: "ja_existia",
+      eventoId,
+    });
+    return { ok: true, pedidoId, numero: pedido.numero, pontosCreditados: 0, eventoId, jaExistia: true };
+  }
+
+  const movimento = await registrarMovimentoPontosIdempotente(proprietario!.clienteId, {
+    eventoId,
+    pedidoId: pedido.id,
+    tipo: "confirmado",
+    pontos,
+    valorElegivel,
+    motivo: `Recuperacao administrativa: ${contextoAdmin.motivo}`,
+  });
+
+  // movimento === null aqui só acontece se outro processo creditou o mesmo
+  // evento entre a checagem de gates acima e a escrita — trata igual a
+  // "já existia", nunca duplica.
+  const jaExistia = !movimento;
+  await registrarAuditoriaRecuperacaoPontos({
+    ts: new Date().toISOString(),
+    pedidoId,
+    numero: pedido.numero,
+    clienteIdMascarado,
+    pontosCreditados: jaExistia ? 0 : pontos,
+    admin: contextoAdmin.adminId,
+    motivo: contextoAdmin.motivo,
+    resultado: jaExistia ? "ja_existia" : "creditado",
+    eventoId,
+  });
+
+  return { ok: true, pedidoId, numero: pedido.numero, pontosCreditados: jaExistia ? 0 : pontos, eventoId, jaExistia };
+}
+
 export async function estornarPontosPedidoConfirmado(pedido: PedidoParaCreditoPontos): Promise<MovimentoPontos | null> {
   if (!pedido.id) return null;
 
