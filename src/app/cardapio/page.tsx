@@ -1,11 +1,11 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
+import { QRCodeSVG } from "qrcode.react";
 import { Pizza, Sandwich, Soup, CupSoda, GlassWater, Zap, Banknote, CreditCard, Shuffle, Wallet, Bike, Store, UtensilsCrossed, Sun, Moon } from "lucide-react";
 import PanelShell from "@/components/PanelShell";
 import { useLiveMenu, cartItemEsgotado } from "./liveMenu";
 import { CARDAPIO_ILLUSTRATIONS, CardapioIllustration } from "@/lib/cardapioVisuals";
-import { montarLinkWhatsAppComprovante } from "@/lib/pixCliente";
 import { useTheme } from "@/components/ThemeToggle";
 import ClientBottomNav from "@/components/ClientBottomNav";
 import { tabAtivaCardapio, consumirFlagAbrirSacola } from "@/lib/pedidoAtivoCliente";
@@ -1461,7 +1461,8 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const pixPedido = pedidoConfirmado?.pix;
   const isPagamentoPix = (!!payment && payment.toLowerCase().includes("pix")) || !!pixPedido;
   const pixValor = typeof pixPedido?.valorEsperado === "number" ? pixPedido.valorEsperado : pedidoConfirmado?.total;
-  const pixCodigoCopiaECola = pixPedido?.copiaECola || pixPedido?.qrCode || "";
+  const pixCodigoCopiaECola = (pixPedido?.copiaECola || pixPedido?.qrCode || "").trim();
+  const temPixCopiaECola = pixCodigoCopiaECola.length > 0;
   // Resumo da tela final (sc-done): reaproveita os mesmos estados/helpers já
   // usados na etapa de pagamento (payment, hibridoAtual, trocoOpcao/troco) —
   // nenhum recalculo novo, só apresentação. Só mostra troco quando a escolha
@@ -1469,13 +1470,6 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const isDinheiroPuro = payment === "Dinheiro";
   const isCartaoPuro = payment === "Cartao";
   const trocoConfirmadoTexto = trocoOpcao === "nao" ? "Sem troco" : trocoOpcao === "sim" && troco.trim() ? `Troco para ${troco}` : null;
-  const whatsappComprovanteUrl = pedidoConfirmado && pixPedido?.whatsappPizzaria
-    ? montarLinkWhatsAppComprovante(pixPedido.whatsappPizzaria, {
-      pedidoId: pedidoConfirmado.id,
-      numero: pedidoConfirmado.numero,
-      total: pedidoConfirmado.total,
-    })
-    : undefined;
 
   return (
     <>
@@ -1909,27 +1903,14 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                         <p style={{ color: "var(--text-sub)", fontSize: 13, lineHeight: 1.5, margin: "12px 0 0" }}>
                           {PIX_STATUS_TEXT[statusPixCliente]}
                         </p>
-                        {statusPixCliente !== "pago" && (
-                          <p style={{ color: "var(--text)", fontSize: 13, fontWeight: 700, lineHeight: 1.5, margin: "8px 0 0" }}>
-                            Use o botão abaixo para enviar o comprovante pelo WhatsApp da pizzaria.
-                          </p>
+                        {temPixCopiaECola && (
+                          <div className="pix-qrcode-wrap">
+                            <QRCodeSVG className="pix-qrcode" value={pixCodigoCopiaECola} size={220} level="M" aria-label="QR Code Pix" />
+                          </div>
                         )}
-                        <div style={{ display: "grid", gap: 10, marginTop: 14 }}>
-                          {pixPedido?.chavePix && (
-                            <button className="btn btn-sm" onClick={async () => showToast((await copiarTexto(pixPedido.chavePix || "")) ? "Chave Pix copiada!" : "Não consegui copiar. Toque na chave e copie manualmente.")}>Copiar chave Pix</button>
-                          )}
-                          {pixCodigoCopiaECola && (
-                            <button className="btn btn-sm btn-ghost" onClick={async () => showToast((await copiarTexto(pixCodigoCopiaECola)) ? "Pix copia e cola copiado!" : "Não consegui copiar. Toque no código e copie manualmente.")}>Copiar Pix copia e cola</button>
-                          )}
-                          {whatsappComprovanteUrl ? (
-                            <a href={whatsappComprovanteUrl} target="_blank" rel="noreferrer" className="btn btn-sm" style={{ display: "block", textAlign: "center", textDecoration: "none", background: "var(--success)" }}>Enviar comprovante no WhatsApp</a>
-                          ) : (
-                            <div style={{ border: "1px dashed var(--line-strong)", borderRadius: 10, padding: "10px 12px", color: "var(--text-sub)", fontSize: 13, lineHeight: 1.45 }}>
-                              Envie o comprovante pelo WhatsApp da pizzaria. Se o botão não aparecer, copie a chave Pix acima e chame a equipe pelo contato do cardápio.
-                            </div>
-                          )}
-                          {pedidoConfirmado.pix?.ticketUrl && <a href={pedidoConfirmado.pix.ticketUrl} target="_blank" rel="noreferrer" style={{ display: "block", color: "var(--brand-text)", fontSize: 13, fontWeight: 800, textAlign: "center" }}>Abrir pagamento</a>}
-                        </div>
+                        {temPixCopiaECola && (
+                          <button className="btn btn-sm pix-copy-btn" onClick={async () => showToast((await copiarTexto(pixCodigoCopiaECola)) ? "Pix copiado" : "Não consegui copiar. Toque no código e copie manualmente.")}>Copiar e colar</button>
+                        )}
                       </div>
                     )}
                     {!isPagamentoPix && isDinheiroPuro && (
@@ -2451,6 +2432,9 @@ main{width:100%;padding:6px 20px 20px}
 @keyframes pop{from{transform:scale(0)}to{transform:scale(1)}}
 .success h2{font-family:var(--font-ui);font-weight:600;font-size:24px;margin-bottom:9px;letter-spacing:-.4px}
 .success p{color:var(--text-sub);font-size:15px;margin-bottom:5px}
+.pix-qrcode-wrap{display:flex;justify-content:center;margin:16px 0 12px}
+.pix-qrcode{width:min(220px,100%);height:auto;border-radius:14px;border:1px solid var(--line);box-shadow:var(--shadow-sm)}
+.pix-copy-btn{margin-top:12px}
 .toast{position:fixed;bottom:168px;left:50%;transform:translateX(-50%);background:var(--green);color:var(--green-foreground);padding:12px 22px;border-radius:30px;font-size:13.5px;font-weight:500;z-index:60;white-space:nowrap}
 .qty-grid{display:flex;flex-direction:column;gap:10px}
 @media(min-width:480px){.qty-grid{display:grid;grid-template-columns:1fr 1fr;gap:11px}}
