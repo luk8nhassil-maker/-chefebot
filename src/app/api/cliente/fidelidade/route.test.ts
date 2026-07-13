@@ -217,6 +217,55 @@ describe("GET /api/cliente/fidelidade — meta e progresso", () => {
   });
 });
 
+// Guarda contra a confusao entre "saldo zerado" e "programa inativo" (tela
+// /cliente): `ativo` vem exclusivamente de `config.ativo` (boolean explicito),
+// nunca de uma checagem falsy sobre o saldo em pontos — 0 e um saldo valido,
+// nao ausencia de dado.
+describe("GET /api/cliente/fidelidade — saldo zero nunca e confundido com programa inativo", () => {
+  test("cliente com 0 pontos e programa ativo: ativo=true e progresso zerado, nao 'inativo'", async () => {
+    configPontos = { ativo: true, metaPontos: 720, descricaoRecompensa: "1 Pizza Família" };
+    // sem nenhum movimento no extrato (cliente novo, saldo genuinamente 0)
+    const res = await GET(requestComCookie("token-cliente-a"));
+    const body = await res.json();
+    expect(body.ativo).toBe(true);
+    expect(body.saldoPontos).toBe(0);
+    expect(body.metaPontos).toBe(720);
+    expect(body.pontosFaltantes).toBe(720);
+    expect(body.progressoPercentual).toBe(0);
+    expect(body.metaAtingida).toBe(false);
+    expect(body.descricaoRecompensa).toBe("1 Pizza Família");
+    expect(body.extrato).toEqual([]);
+  });
+
+  test("cliente com pontos > 0 e programa ativo: saldo e progresso refletem o extrato", async () => {
+    configPontos = { ativo: true, metaPontos: 720, descricaoRecompensa: "1 Pizza Família" };
+    extratosPorCliente.set("cli_a", [mov({ tipo: "confirmado", pontos: 300, pedidoId: "p1" })]);
+    const res = await GET(requestComCookie("token-cliente-a"));
+    const body = await res.json();
+    expect(body.ativo).toBe(true);
+    expect(body.saldoPontos).toBe(300);
+    expect(body.metaAtingida).toBe(false);
+    expect(body.pontosFaltantes).toBe(420);
+  });
+
+  test("programa realmente inativo (config.ativo=false): ativo=false mesmo com saldo>0", async () => {
+    configPontos = { ativo: false, metaPontos: 720, descricaoRecompensa: "1 Pizza Família" };
+    extratosPorCliente.set("cli_a", [mov({ tipo: "confirmado", pontos: 300, pedidoId: "p1" })]);
+    const res = await GET(requestComCookie("token-cliente-a"));
+    const body = await res.json();
+    expect(body.ativo).toBe(false);
+    expect(body.saldoPontos).toBe(300); // saldo real continua exposto; front so decide copy pela flag `ativo`
+  });
+
+  test("configuracao ausente (nunca salva): cai no padrao com ativo=false", async () => {
+    configPontos = null; // obterConfigFidelidadePontos mockado cai em CONFIG_FIDELIDADE_PONTOS_PADRAO
+    const res = await GET(requestComCookie("token-cliente-a"));
+    const body = await res.json();
+    expect(body.ativo).toBe(false);
+    expect(body.saldoPontos).toBe(0);
+  });
+});
+
 describe("GET /api/cliente/fidelidade — extrato: ordenacao e limites", () => {
   test("extrato vem ordenado do mais recente para o mais antigo", async () => {
     extratosPorCliente.set("cli_a", [

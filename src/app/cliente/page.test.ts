@@ -73,3 +73,49 @@ describe("/cliente — Área do Cliente renomeada para Pontos", () => {
     expect(usos.length).toBeGreaterThanOrEqual(2);
   });
 });
+
+// Guarda estrutural do bug "saldo 0 confundido com programa inativo": a tela
+// só pode decidir "inativo" pela flag booleana `fidelidade.ativo` (vinda do
+// backend), nunca por uma checagem falsy sobre saldo/pontos (ex.: `!pontos`,
+// `!fidelidade.saldoPontos`), que trataria 0 como "sem dado". Ver
+// src/app/api/cliente/fidelidade/route.test.ts para a cobertura do lado do
+// servidor (config ativo/inativo/ausente, saldo 0 vs. saldo > 0).
+describe("/cliente — saldo 0 pontos nunca é tratado como programa inativo", () => {
+  test("a mensagem de 'inativo' depende só de !fidelidade.ativo, nunca do saldo", () => {
+    expect(fonte).toMatch(/\{!fidelidade\.ativo && \(/);
+    expect(fonte).not.toMatch(/!fidelidade\.saldoPontos/);
+    expect(fonte).not.toMatch(/!pontos\b/);
+  });
+
+  test("o painel de progresso (saldo, meta, barra, faltantes) só depende de fidelidade.ativo", () => {
+    expect(fonte).toMatch(/\{fidelidade\.ativo && \(/);
+    // Saldo e meta são exibidos como vêm do backend (inclui 0), sem `|| valorPadrao`
+    // nem checagem de truthiness que apagaria o zero.
+    expect(fonte).toContain("{fidelidade.saldoPontos}");
+    expect(fonte).toContain("{fidelidade.saldoPontos} de {fidelidade.metaPontos} pontos");
+    expect(fonte).not.toMatch(/fidelidade\.saldoPontos \|\|/);
+    expect(fonte).not.toMatch(/fidelidade\.metaPontos \|\|/);
+  });
+
+  test("a barra de progresso usa progressoPercentual diretamente (0% quando saldo é 0)", () => {
+    expect(fonte).toContain("width: `${Math.min(100, fidelidade.progressoPercentual)}%`");
+  });
+
+  test("pontos faltantes e recompensa configurada continuam exibidos com saldo 0", () => {
+    expect(fonte).toContain("Faltam {fidelidade.pontosFaltantes} pontos para: {fidelidade.descricaoRecompensa}");
+  });
+
+  test("extrato vazio mostra estado vazio simples, não é confundido com 'inativo'", () => {
+    expect(fonte).toContain("{fidelidade.extrato.length === 0 && (");
+    expect(fonte).toContain("Nenhuma movimentação ainda — seu primeiro pedido entra aqui.");
+  });
+
+  test("'Continuar comprando' é renderizado depois dos dois blocos condicionais de ativo/inativo (sempre visível)", () => {
+    const inicioBlocoInativo = fonte.indexOf("{!fidelidade.ativo && (");
+    const inicioBlocoAtivo = fonte.indexOf("{fidelidade.ativo && (");
+    const botaoContinuar = fonte.indexOf("Continuar comprando");
+    expect(inicioBlocoInativo).toBeGreaterThan(-1);
+    expect(inicioBlocoAtivo).toBeGreaterThan(inicioBlocoInativo);
+    expect(botaoContinuar).toBeGreaterThan(inicioBlocoAtivo);
+  });
+});
