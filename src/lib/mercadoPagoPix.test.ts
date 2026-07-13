@@ -147,6 +147,45 @@ describe("criarCobrancaPixMercadoPago", () => {
     expect(body.payer.email).toBe("fallback@example.com");
   });
 
+  test("usa accessTokenOverride no lugar do MERCADOPAGO_ACCESS_TOKEN do ambiente", async () => {
+    const fetchMock = mockFetchOk();
+
+    await criarCobrancaPixMercadoPago({ ...baseInput(), accessTokenOverride: "token-painel-admin" });
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(init.headers.Authorization).toBe("Bearer token-painel-admin");
+  });
+
+  test("accessTokenOverride ausente cai para MERCADOPAGO_ACCESS_TOKEN do ambiente", async () => {
+    const fetchMock = mockFetchOk();
+
+    await criarCobrancaPixMercadoPago({ ...baseInput(), accessTokenOverride: undefined });
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(init.headers.Authorization).toBe("Bearer token-123");
+  });
+
+  test("falha com erro claro quando accessTokenOverride e env estao ausentes", async () => {
+    vi.stubEnv("MERCADOPAGO_ACCESS_TOKEN", "");
+    const fetchMock = mockFetchOk();
+
+    await expect(criarCobrancaPixMercadoPago(baseInput())).rejects.toThrow("MERCADOPAGO_ACCESS_TOKEN ausente");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  test("usa payerEmailFallbackOverride quando payerEmail nao vem no input", async () => {
+    const fetchMock = mockFetchOk();
+
+    await criarCobrancaPixMercadoPago({
+      ...baseInput(),
+      payerEmail: undefined,
+      payerEmailFallbackOverride: "loja@example.com",
+    });
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.payer.email).toBe("loja@example.com");
+  });
+
   test("trata erro HTTP do Mercado Pago sem quebrar silenciosamente", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: false,

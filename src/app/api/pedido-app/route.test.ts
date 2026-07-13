@@ -28,6 +28,7 @@ vi.mock("@/lib/mercadoPagoPix", () => ({
 }));
 
 import { POST } from "./route";
+import { encryptMercadoPagoToken } from "@/lib/mercadoPagoIntegracao";
 
 function postReq(body: unknown) {
   return {
@@ -226,6 +227,29 @@ describe("POST /api/pedido-app", () => {
       valorEsperado: 33,
     });
     expect(data.pix).not.toHaveProperty("qrCodeBase64");
+  });
+
+  it("integracao Mercado Pago ativa no painel admin chama adaptador sem depender de PIX_PROVIDER", async () => {
+    store.set("integracao:mercadopago", {
+      provider: "mercadopago",
+      enabled: true,
+      accessTokenEncrypted: encryptMercadoPagoToken("token-painel-admin"),
+      accessTokenLast4: "dmin",
+      payerEmailFallback: "loja@example.com",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    const res = await POST(postReq(basePayload));
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(criarCobrancaPixMercadoPagoMock).toHaveBeenCalledWith(expect.objectContaining({
+      accessTokenOverride: "token-painel-admin",
+      payerEmailFallbackOverride: "loja@example.com",
+    }));
+    const pedidos = store.get("pedidos") as PedidoSalvo[];
+    expect(pedidos[0].pix).toMatchObject({ provider: "mercadopago", qrCode: "pix-copia-e-cola" });
+    expect(data.pix).toMatchObject({ provider: "mercadopago", qrCode: "pix-copia-e-cola" });
   });
 
   it("PIX_PROVIDER mercadopago com Pix hibrido usa somente pix.valorEsperado", async () => {

@@ -164,3 +164,42 @@ export async function resolveActiveMercadoPagoToken(): Promise<string | null> {
   }
   return process.env.MERCADOPAGO_ACCESS_TOKEN || null;
 }
+
+export type MercadoPagoAuthResolution = {
+  active: boolean;
+  source: "admin" | "env" | "none";
+  accessToken: string | null;
+  payerEmailFallback?: string;
+};
+
+// Decide de onde vem a credencial usada para criar a cobranca Pix (Nivel 5.6):
+// o painel admin (Redis, token criptografado) e a fonte preferencial quando
+// habilitado e com token valido; PIX_PROVIDER=mercadopago + env continua
+// funcionando como fallback/legado quando o painel nao esta ativo.
+export async function resolveActiveMercadoPagoAuth(): Promise<MercadoPagoAuthResolution> {
+  const config = await getMercadoPagoIntegrationConfig();
+  if (config?.enabled && config.accessTokenEncrypted) {
+    const decrypted = decryptMercadoPagoToken(config.accessTokenEncrypted);
+    if (decrypted) {
+      const payerEmailFallback = config.payerEmailFallback || process.env.MERCADOPAGO_PAYER_EMAIL_FALLBACK;
+      return {
+        active: true,
+        source: "admin",
+        accessToken: decrypted,
+        ...(payerEmailFallback ? { payerEmailFallback } : {}),
+      };
+    }
+  }
+
+  if (process.env.PIX_PROVIDER === "mercadopago") {
+    const payerEmailFallback = process.env.MERCADOPAGO_PAYER_EMAIL_FALLBACK;
+    return {
+      active: true,
+      source: "env",
+      accessToken: process.env.MERCADOPAGO_ACCESS_TOKEN || null,
+      ...(payerEmailFallback ? { payerEmailFallback } : {}),
+    };
+  }
+
+  return { active: false, source: "none", accessToken: null };
+}

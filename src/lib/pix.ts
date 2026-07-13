@@ -1,4 +1,5 @@
 import { temPixNoPagamento, valorPixEsperado } from "./bot";
+import { resolveActiveMercadoPagoAuth } from "./mercadoPagoIntegracao";
 import { criarCobrancaPixMercadoPago } from "./mercadoPagoPix";
 import { normalizarWhatsAppPizzaria } from "./pixCliente";
 import { gerarPixCopiaEColaEstatico } from "./pixCopiaECola";
@@ -184,8 +185,10 @@ export function criarPixMetadata(pedidoId: string, pagamento: string | undefined
 export async function prepararPixProviderMercadoPago(input: PrepararPixProviderInput): Promise<PixMetadata | undefined> {
   const pix = input.pix;
   if (!pix) return undefined;
-  if (process.env.PIX_PROVIDER !== "mercadopago") return pix;
   if (!pix.txid || typeof pix.valorEsperado !== "number" || !Number.isFinite(pix.valorEsperado)) return pix;
+
+  const auth = await resolveActiveMercadoPagoAuth();
+  if (!auth.active) return pix;
 
   try {
     const cobranca = await criarCobrancaPixMercadoPago({
@@ -195,6 +198,8 @@ export async function prepararPixProviderMercadoPago(input: PrepararPixProviderI
       descricao: input.descricao,
       clienteNome: input.clienteNome,
       payerEmail: input.payerEmail,
+      accessTokenOverride: auth.accessToken ?? undefined,
+      payerEmailFallbackOverride: auth.payerEmailFallback,
     });
 
     return {
