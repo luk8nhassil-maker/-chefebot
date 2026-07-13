@@ -14,6 +14,23 @@ const { store, redisMock } = vi.hoisted(() => {
 
 vi.mock("@/lib/redis", () => ({ redis: redisMock }));
 
+// Adaptador MP: detecção/extração/mapeamento ficam reais (importActual); só a
+// validação de assinatura (crypto) e a busca do pagamento (rede) são
+// controladas aqui, para testar a orquestração da rota sem HMAC/fetch reais.
+const { assinaturaMock, buscarPagamentoMock } = vi.hoisted(() => ({
+  assinaturaMock: vi.fn(),
+  buscarPagamentoMock: vi.fn(),
+}));
+
+vi.mock("@/lib/mercadoPagoWebhook", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/mercadoPagoWebhook")>("@/lib/mercadoPagoWebhook");
+  return {
+    ...actual,
+    validarAssinaturaMercadoPago: (...args: unknown[]) => assinaturaMock(...args),
+    buscarPagamentoMercadoPago: (...args: unknown[]) => buscarPagamentoMock(...args),
+  };
+});
+
 import { POST } from "./route";
 
 function postReq(body: unknown, headers: Record<string, string> = {}) {
@@ -216,5 +233,119 @@ describe("POST /api/pix/webhook", () => {
     expect(pedidos[0].status).toBe("novo");
     expect(pedidos[0].pixConfirmado).toBe(true);
     expect(pedidos[0].pix.status).toBe("confirmado");
+  });
+});
+
+describe("POST /api/pix/webhook — adaptador Mercado Pago", () => {
+  const mpBody = { type: "payment", data: { id: "MP-9001" } };
+  const mpHeaders = { "x-signature": "ts=1,v1=abc", "x-request-id": "req-1" };
+
+  function pagamento(overrides: Record<string, unknown> = {}) {
+    return { id: "MP-9001", status: "approved", transactionAmount: 50, externalReference: "tx-1", ...overrides };
+  }
+
+  it("payload MP type=payment é detectado; passivo (flag off) não grava nada", async () => {
+    store.set("pedidos", [pedidoPix]);
+    assinaturaMock.mockReturnValue(true);
+
+    const res = await POST(postReq(mpBody, mpHeaders));
+    const body = await json(res);
+
+    expect(body).toMatchObject({ ok: true, passive: true, provider: "mercadopago", assinaturaValida: true });
+    expect(buscarPagamentoMock).not.toHaveBeenCalled(); // passivo nunca chama a API do MP
+    expect(redisMock.set).not.toHaveBeenCalled();
+  });
+
+  it("type diferente de payment é tratado pelo caminho genérico, não pelo MP", async () => {
+    store.set("pedidos", [pedidoPix]);
+
+    // Sem flag: caminho genérico passivo. Payload não-MP não deve reportar provider mercadopago.
+    const res = await POST(postReq({ type: "merchant_order", data: { id: "X" } }));
+    const body = await json(res);
+
+    expect(body.provider).toBeUndefined();
+    expect(body).toMatchObject({ ok: true, passive: true });
+    expect(buscarPagamentoMock).not.toHaveBeenCalled();
+    expect(redisMock.set).not.toHaveBeenCalled();
+  });
+
+  it("ativo + assinatura válida + pagamento aprovado confirma e grava (external_reference casa com pix.txid)", async () => {
+    vi.stubEnv("PIX_WEBHOOK_AUTO_CONFIRM", "true");
+    store.set("pedidos", [pedidoPix]);
+    assinaturaMock.mockReturnValue(true);
+    buscarPagamentoMock.mockResolvedValue(pagamento());
+
+    const res = await POST(postReq(mpBody, mpHeaders));
+    const body = await json(res);
+    const pedidos = store.get("pedidos") as any[];
+
+    expect(body).toMatchObject({ passive: false, wouldConfirm: true, confirmed: true, pedidoId: "pedido-1", txid: "tx-1" });
+    expect(pedidos[0].pixConfirmado).toBe(true);
+    expect(pedidos[0].pix).toMatchObject({ status: "confirmado", confirmadoPor: "webhook", providerPaymentId: "MP-9001" });
+    expect(redisMock.set).toHaveBeenCalledTimes(1);
+  });
+
+  it("ativo + assinatura inválida/ausente retorna 401 e não grava (nem busca o pagamento)", async () => {
+    vi.stubEnv("PIX_WEBHOOK_AUTO_CONFIRM", "true");
+    store.set("pedidos", [pedidoPix]);
+    assinaturaMock.mockReturnValue(false);
+
+    const res = await POST(postReq(mpBody, {}));
+    const body = await json(res);
+
+    expect(res.status).toBe(401);
+    expect(body).toMatchObject({ passive: false, provider: "mercadopago", wouldConfirm: false, reason: "assinatura_invalida" });
+    expect(buscarPagamentoMock).not.toHaveBeenCalled();
+    expect(redisMock.set).not.toHaveBeenCalled();
+  });
+
+  it("ativo + assinatura válida + pagamento pendente não confirma", async () => {
+    vi.stubEnv("PIX_WEBHOOK_AUTO_CONFIRM", "true");
+    store.set("pedidos", [pedidoPix]);
+    assinaturaMock.mockReturnValue(true);
+    buscarPagamentoMock.mockResolvedValue(pagamento({ status: "pending" }));
+
+    const body = await json(await POST(postReq(mpBody, mpHeaders)));
+
+    expect(body).toMatchObject({ wouldConfirm: false, reason: "status_nao_pago" });
+    expect(redisMock.set).not.toHaveBeenCalled();
+  });
+
+  it("ativo + assinatura válida + valor divergente não confirma", async () => {
+    vi.stubEnv("PIX_WEBHOOK_AUTO_CONFIRM", "true");
+    store.set("pedidos", [pedidoPix]);
+    assinaturaMock.mockReturnValue(true);
+    buscarPagamentoMock.mockResolvedValue(pagamento({ transactionAmount: 49.99 }));
+
+    const body = await json(await POST(postReq(mpBody, mpHeaders)));
+
+    expect(body).toMatchObject({ wouldConfirm: false, reason: "valor_divergente" });
+    expect(redisMock.set).not.toHaveBeenCalled();
+  });
+
+  it("ativo + pagamento indisponível na API do MP não confirma", async () => {
+    vi.stubEnv("PIX_WEBHOOK_AUTO_CONFIRM", "true");
+    store.set("pedidos", [pedidoPix]);
+    assinaturaMock.mockReturnValue(true);
+    buscarPagamentoMock.mockResolvedValue(null);
+
+    const body = await json(await POST(postReq(mpBody, mpHeaders)));
+
+    expect(body).toMatchObject({ passive: false, provider: "mercadopago", wouldConfirm: false, reason: "pagamento_indisponivel" });
+    expect(redisMock.set).not.toHaveBeenCalled();
+  });
+
+  it("idempotência: segunda notificação MP de pedido já confirmado não reconfirma", async () => {
+    vi.stubEnv("PIX_WEBHOOK_AUTO_CONFIRM", "true");
+    store.set("pedidos", [
+      { ...pedidoPix, pixConfirmado: true, pix: { ...pedidoPix.pix, status: "confirmado" } },
+    ]);
+    assinaturaMock.mockReturnValue(true);
+    buscarPagamentoMock.mockResolvedValue(pagamento({ id: "MP-duplicado" }));
+
+    const body = await json(await POST(postReq(mpBody, mpHeaders)));
+
+    expect(body).toMatchObject({ confirmed: true, idempotent: true, reason: "pix_ja_confirmado", pedidoId: "pedido-1" });
+    expect(redisMock.set).not.toHaveBeenCalled();
   });
 });
