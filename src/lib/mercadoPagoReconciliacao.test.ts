@@ -9,6 +9,17 @@ const { store, redisMock } = vi.hoisted(() => {
       store.set(key, value);
       return "OK";
     }),
+    // Simula EVAL o suficiente para o compare-and-delete do lock: só o
+    // script usado por liberarLockSeDono (get==arg -> del) é suportado.
+    eval: vi.fn(async (_script: string, keys: string[], args: string[]) => {
+      const [key] = keys;
+      const [esperado] = args;
+      if (store.get(key) === esperado) {
+        store.delete(key);
+        return 1;
+      }
+      return 0;
+    }),
   };
   return { store, redisMock };
 });
@@ -310,16 +321,80 @@ describe("reconciliarPixMercadoPago", () => {
       expect(buscarPagamentoMock).not.toHaveBeenCalled();
     });
 
-    test("lock não apaga lock de outra execução (nunca chama del/apaga a chave)", async () => {
+    test("libera o lock ao final quando a execução ainda é dona (lockId bate)", async () => {
       store.set("pedidos", [pedidoMP()]);
       buscarPagamentoMock.mockResolvedValue(ok());
 
       await reconciliarPixMercadoPago();
 
-      // O lock continua no store: a implementação nunca remove manualmente,
-      // só expira por TTL (não simulado aqui) — nunca corre risco de apagar
-      // o lock de outra execução concorrente.
-      expect(store.get("lock:mercadopago:reconciliacao")).toBe("1");
+      expect(store.get("lock:mercadopago:reconciliacao")).toBeUndefined();
+    });
+
+    test("não remove lock quando o valor atual não é mais o lockId desta execução", async () => {
+      store.set("pedidos", [pedidoMP()]);
+      // Simula outra execução assumindo o lock (ex.: TTL expirou e outro
+      // processo já gravou seu próprio lockId) enquanto esta ainda está em
+      // andamento — o compare-and-delete no finally não pode apagar isso.
+      buscarPagamentoMock.mockImplementation(async () => {
+        store.set("lock:mercadopago:reconciliacao", "lock-de-outra-execucao");
+        return ok();
+      });
+
+      await reconciliarPixMercadoPago();
+
+      expect(store.get("lock:mercadopago:reconciliacao")).toBe("lock-de-outra-execucao");
+    });
+
+    test("segunda execução após a primeira finalizar consegue rodar sem esperar 90s (não fica locked)", async () => {
+      store.set("pedidos", [pedidoMP({ id: "ped-1" })]);
+      buscarPagamentoMock.mockResolvedValue(ok());
+      const primeira = await reconciliarPixMercadoPago();
+      expect(primeira.locked).toBeUndefined();
+
+      store.set("pedidos", [pedidoMP({ id: "ped-2", pix: { ...pedidoMP().pix, providerPaymentId: "MP-2", txid: "chefebot_ped-2" } })]);
+      buscarPagamentoMock.mockResolvedValue(ok({ id: "MP-2", externalReference: "chefebot_ped-2" }));
+      const segunda = await reconciliarPixMercadoPago();
+
+      expect(segunda.locked).toBeUndefined();
+      expect(segunda.confirmados).toBe(1);
+    });
+
+    test("execução concorrente enquanto a primeira ainda não terminou retorna locked:true", async () => {
+      store.set("pedidos", [pedidoMP()]);
+      let liberarPrimeira: (() => void) | undefined;
+      buscarPagamentoMock.mockImplementation(
+        () => new Promise((resolve) => { liberarPrimeira = () => resolve(ok()); })
+      );
+
+      const primeira = reconciliarPixMercadoPago();
+      await vi.waitFor(() => {
+        if (!store.has("lock:mercadopago:reconciliacao")) throw new Error("lock ainda não adquirido");
+      });
+
+      const segunda = await reconciliarPixMercadoPago();
+      expect(segunda).toMatchObject({ locked: true });
+
+      liberarPrimeira?.();
+      await primeira;
+    });
+
+    test("em timeout, o lock também é liberado com segurança quando ainda é dono", async () => {
+      vi.useFakeTimers();
+      store.set("pedidos", [pedidoMP()]);
+      buscarPagamentoMock.mockImplementation(
+        (_paymentId: string, signal?: AbortSignal) =>
+          new Promise((_resolve, reject) => {
+            signal?.addEventListener("abort", () => {
+              reject(Object.assign(new Error("timeout"), { name: "AbortError" }));
+            });
+          })
+      );
+
+      const promise = reconciliarPixMercadoPago();
+      await vi.advanceTimersByTimeAsync(5000);
+      await promise;
+
+      expect(store.get("lock:mercadopago:reconciliacao")).toBeUndefined();
     });
 
     test("cooldown global de rate limit impede nova chamada ao Mercado Pago", async () => {

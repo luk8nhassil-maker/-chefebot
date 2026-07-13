@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { redis } from "./redis";
 import { buscarPagamentoMercadoPagoDetalhado, mapearStatusMercadoPago } from "./mercadoPagoWebhook";
 import type { PedidoComPix } from "./pix";
@@ -55,6 +56,28 @@ const LOTE_MAXIMO = 20;
 const CONCORRENCIA_MAXIMA = 3;
 const TIMEOUT_CONSULTA_MS = 5000;
 
+// Compare-and-delete atômico (Lua via EVAL, suportado pelo @upstash/redis e
+// pela REST API da Upstash): só apaga o lock se o valor gravado ainda for o
+// lockId desta execução. Evita a corrida de um get+del "manual" (que poderia
+// apagar o lock de uma execução seguinte que já tivesse adquirido o lock
+// entre o get e o del desta).
+const LIBERAR_LOCK_SE_DONO_SCRIPT = `
+if redis.call("get", KEYS[1]) == ARGV[1] then
+  return redis.call("del", KEYS[1])
+else
+  return 0
+end
+`;
+
+async function liberarLockSeDono(lockId: string): Promise<void> {
+  try {
+    await redis.eval(LIBERAR_LOCK_SE_DONO_SCRIPT, [LOCK_KEY], [lockId]);
+  } catch {
+    // Se o EVAL falhar por qualquer motivo, não faz nada: o lock expira
+    // sozinho pelo TTL (90s) em vez de arriscar um del sem confirmar dono.
+  }
+}
+
 function resumoVazio(): ResumoReconciliacaoPix {
   return { verificados: 0, confirmados: 0, pendentes: 0, ignorados: 0, erros: 0, detalhes: [] };
 }
@@ -111,142 +134,151 @@ export async function reconciliarPixMercadoPago(): Promise<ResumoReconciliacaoPi
   if (emCooldownGlobal) return { ...resumoVazio(), rateLimited: true };
 
   // Lock via Redis (NX): evita duas execuções concorrentes (abas/admins
-  // diferentes chamando a rota ao mesmo tempo). TTL 90s cobre folgadamente o
-  // pior caso (lote de 20, concorrência 3, timeout 5s ⇒ ~35s) sem depender de
-  // remoção manual — não há forma segura de comparar/apagar apenas o lock
-  // desta execução sem uma operação atômica (CAS/Lua) que este projeto não
-  // usa em nenhum outro lugar, então preferimos deixar expirar pelo TTL a
-  // arriscar apagar o lock de outra execução.
-  const lockAdquirido = await redis.set(LOCK_KEY, "1", { nx: true, ex: LOCK_TTL_SEGUNDOS });
+  // diferentes chamando a rota ao mesmo tempo). TTL 90s continua como rede de
+  // segurança contra crash/travamento (execução nunca libera e nunca some);
+  // no caminho feliz, o lock é liberado no finally logo ao terminar, via
+  // compare-and-delete atômico por lockId — não apaga o lock de execução
+  // nenhuma que não seja a própria, então a auto-verificação de 20s não fica
+  // bloqueada 90s inteiros por uma reconciliação rápida.
+  const lockId = randomUUID();
+  const lockAdquirido = await redis.set(LOCK_KEY, lockId, { nx: true, ex: LOCK_TTL_SEGUNDOS });
   if (!lockAdquirido) return { ...resumoVazio(), locked: true };
 
-  const pedidos = (await redis.get<PedidoReconciliavel[]>("pedidos")) || [];
-  const elegiveis = selecionarPedidosPixMercadoPagoPendentes(pedidos);
+  try {
+    const pedidos = (await redis.get<PedidoReconciliavel[]>("pedidos")) || [];
+    const elegiveis = selecionarPedidosPixMercadoPagoPendentes(pedidos);
 
-  const resumo: ResumoReconciliacaoPix = resumoVazio();
-  if (elegiveis.length === 0) return resumo;
+    const resumo: ResumoReconciliacaoPix = resumoVazio();
+    if (elegiveis.length === 0) return resumo;
 
-  // Pula pedidos consultados recentemente (cooldown por pedido) antes de
-  // aplicar o corte de lote, para o lote priorizar pedidos "frescos".
-  const cooldowns = await Promise.all(
-    elegiveis.map((p) => redis.get(`${COOLDOWN_PEDIDO_PREFIXO}${p.id}`))
-  );
-  const disponiveis = elegiveis.filter((_, i) => !cooldowns[i]);
-
-  // Sem campo de data confiável nos pedidos (horario é só "HH:MM", sem data)
-  // — mantém a ordem atual em vez de inventar critério de recência.
-  const lote = disponiveis.slice(0, LOTE_MAXIMO);
-  const limitados = disponiveis.length - lote.length;
-  if (limitados > 0) resumo.limitados = limitados;
-
-  let atualizados = pedidos;
-  let mudou = false;
-  let rateLimited = false;
-
-  for (const grupo of chunk(lote, CONCORRENCIA_MAXIMA)) {
-    if (rateLimited) break;
-
-    const resultados = await Promise.all(
-      grupo.map(async (pedido) => {
-        const pedidoId = pedido.id as string;
-        const paymentId = (pedido.pix?.providerPaymentId as string).trim();
-        const resultado = await consultarComTimeout(paymentId).catch((err) => ({
-          ok: false as const,
-          status: null,
-          motivo: err instanceof Error ? err.message : "erro_desconhecido",
-        }));
-        return { pedido, pedidoId, resultado };
-      })
+    // Pula pedidos consultados recentemente (cooldown por pedido) antes de
+    // aplicar o corte de lote, para o lote priorizar pedidos "frescos".
+    const cooldowns = await Promise.all(
+      elegiveis.map((p) => redis.get(`${COOLDOWN_PEDIDO_PREFIXO}${p.id}`))
     );
+    const disponiveis = elegiveis.filter((_, i) => !cooldowns[i]);
 
-    for (const { pedido, pedidoId, resultado } of resultados) {
-      resumo.verificados++;
+    // Sem campo de data confiável nos pedidos (horario é só "HH:MM", sem data)
+    // — mantém a ordem atual em vez de inventar critério de recência.
+    const lote = disponiveis.slice(0, LOTE_MAXIMO);
+    const limitados = disponiveis.length - lote.length;
+    if (limitados > 0) resumo.limitados = limitados;
 
-      if (!resultado.ok) {
-        if (resultado.status === 429) {
-          rateLimited = true;
+    let atualizados = pedidos;
+    let mudou = false;
+    let rateLimited = false;
+
+    for (const grupo of chunk(lote, CONCORRENCIA_MAXIMA)) {
+      if (rateLimited) break;
+
+      const resultados = await Promise.all(
+        grupo.map(async (pedido) => {
+          const pedidoId = pedido.id as string;
+          const paymentId = (pedido.pix?.providerPaymentId as string).trim();
+          const resultado = await consultarComTimeout(paymentId).catch((err) => ({
+            ok: false as const,
+            status: null,
+            motivo: err instanceof Error ? err.message : "erro_desconhecido",
+          }));
+          return { pedido, pedidoId, resultado };
+        })
+      );
+
+      for (const { pedido, pedidoId, resultado } of resultados) {
+        resumo.verificados++;
+
+        if (!resultado.ok) {
+          if (resultado.status === 429) {
+            rateLimited = true;
+            resumo.erros++;
+            resumo.detalhes.push({ pedidoId, outcome: "erro", motivo: "rate_limited" });
+            continue;
+          }
           resumo.erros++;
-          resumo.detalhes.push({ pedidoId, outcome: "erro", motivo: "rate_limited" });
+          resumo.detalhes.push({ pedidoId, outcome: "erro", motivo: resultado.motivo });
+          await redis.set(`${COOLDOWN_PEDIDO_PREFIXO}${pedidoId}`, "1", { ex: COOLDOWN_PEDIDO_TTL_SEGUNDOS });
           continue;
         }
-        resumo.erros++;
-        resumo.detalhes.push({ pedidoId, outcome: "erro", motivo: resultado.motivo });
-        await redis.set(`${COOLDOWN_PEDIDO_PREFIXO}${pedidoId}`, "1", { ex: COOLDOWN_PEDIDO_TTL_SEGUNDOS });
-        continue;
-      }
 
-      const pagamento = resultado.pagamento;
-      const statusInterno = mapearStatusMercadoPago(pagamento.status);
+        const pagamento = resultado.pagamento;
+        const statusInterno = mapearStatusMercadoPago(pagamento.status);
 
-      if (statusInterno === "pendente") {
-        resumo.pendentes++;
-        resumo.detalhes.push({ pedidoId, outcome: "pendente", motivo: pagamento.status });
-        await redis.set(`${COOLDOWN_PEDIDO_PREFIXO}${pedidoId}`, "1", { ex: COOLDOWN_PEDIDO_TTL_SEGUNDOS });
-        continue;
-      }
-      if (statusInterno !== "pago") {
-        // rejected/cancelled/refunded e demais: nunca confirma.
-        resumo.ignorados++;
-        resumo.detalhes.push({ pedidoId, outcome: "ignorado", motivo: pagamento.status });
-        await redis.set(`${COOLDOWN_PEDIDO_PREFIXO}${pedidoId}`, "1", { ex: COOLDOWN_PEDIDO_TTL_SEGUNDOS });
-        continue;
-      }
+        if (statusInterno === "pendente") {
+          resumo.pendentes++;
+          resumo.detalhes.push({ pedidoId, outcome: "pendente", motivo: pagamento.status });
+          await redis.set(`${COOLDOWN_PEDIDO_PREFIXO}${pedidoId}`, "1", { ex: COOLDOWN_PEDIDO_TTL_SEGUNDOS });
+          continue;
+        }
+        if (statusInterno !== "pago") {
+          // rejected/cancelled/refunded e demais: nunca confirma.
+          resumo.ignorados++;
+          resumo.detalhes.push({ pedidoId, outcome: "ignorado", motivo: pagamento.status });
+          await redis.set(`${COOLDOWN_PEDIDO_PREFIXO}${pedidoId}`, "1", { ex: COOLDOWN_PEDIDO_TTL_SEGUNDOS });
+          continue;
+        }
 
-      const valorEsperado = pedido.pix?.valorEsperado;
-      if (typeof valorEsperado !== "number" || !Number.isFinite(valorEsperado)) {
-        resumo.ignorados++;
-        resumo.detalhes.push({ pedidoId, outcome: "ignorado", motivo: "pix_valor_esperado_ausente" });
-        await redis.set(`${COOLDOWN_PEDIDO_PREFIXO}${pedidoId}`, "1", { ex: COOLDOWN_PEDIDO_TTL_SEGUNDOS });
-        continue;
-      }
-      if (pagamento.transactionAmount === null || emCentavos(pagamento.transactionAmount) !== emCentavos(valorEsperado)) {
-        resumo.ignorados++;
-        resumo.detalhes.push({ pedidoId, outcome: "ignorado", motivo: "valor_divergente" });
-        await redis.set(`${COOLDOWN_PEDIDO_PREFIXO}${pedidoId}`, "1", { ex: COOLDOWN_PEDIDO_TTL_SEGUNDOS });
-        continue;
-      }
-      // external_reference só bloqueia quando ambos existem e divergem —
-      // ausência de qualquer um dos dois lados não impede a confirmação.
-      if (pedido.pix?.txid && pagamento.externalReference && pagamento.externalReference !== pedido.pix.txid) {
-        resumo.ignorados++;
-        resumo.detalhes.push({ pedidoId, outcome: "ignorado", motivo: "external_reference_divergente" });
-        await redis.set(`${COOLDOWN_PEDIDO_PREFIXO}${pedidoId}`, "1", { ex: COOLDOWN_PEDIDO_TTL_SEGUNDOS });
-        continue;
-      }
+        const valorEsperado = pedido.pix?.valorEsperado;
+        if (typeof valorEsperado !== "number" || !Number.isFinite(valorEsperado)) {
+          resumo.ignorados++;
+          resumo.detalhes.push({ pedidoId, outcome: "ignorado", motivo: "pix_valor_esperado_ausente" });
+          await redis.set(`${COOLDOWN_PEDIDO_PREFIXO}${pedidoId}`, "1", { ex: COOLDOWN_PEDIDO_TTL_SEGUNDOS });
+          continue;
+        }
+        if (pagamento.transactionAmount === null || emCentavos(pagamento.transactionAmount) !== emCentavos(valorEsperado)) {
+          resumo.ignorados++;
+          resumo.detalhes.push({ pedidoId, outcome: "ignorado", motivo: "valor_divergente" });
+          await redis.set(`${COOLDOWN_PEDIDO_PREFIXO}${pedidoId}`, "1", { ex: COOLDOWN_PEDIDO_TTL_SEGUNDOS });
+          continue;
+        }
+        // external_reference só bloqueia quando ambos existem e divergem —
+        // ausência de qualquer um dos dois lados não impede a confirmação.
+        if (pedido.pix?.txid && pagamento.externalReference && pagamento.externalReference !== pedido.pix.txid) {
+          resumo.ignorados++;
+          resumo.detalhes.push({ pedidoId, outcome: "ignorado", motivo: "external_reference_divergente" });
+          await redis.set(`${COOLDOWN_PEDIDO_PREFIXO}${pedidoId}`, "1", { ex: COOLDOWN_PEDIDO_TTL_SEGUNDOS });
+          continue;
+        }
 
-      const index = atualizados.findIndex((p) => p.id === pedidoId);
-      if (index < 0) {
-        resumo.erros++;
-        resumo.detalhes.push({ pedidoId, outcome: "erro", motivo: "pedido_nao_encontrado" });
-        continue;
+        const index = atualizados.findIndex((p) => p.id === pedidoId);
+        if (index < 0) {
+          resumo.erros++;
+          resumo.detalhes.push({ pedidoId, outcome: "erro", motivo: "pedido_nao_encontrado" });
+          continue;
+        }
+
+        const confirmadoEm = new Date().toISOString();
+        atualizados = [...atualizados];
+        atualizados[index] = {
+          ...atualizados[index],
+          pixConfirmado: true,
+          pix: {
+            ...atualizados[index].pix,
+            status: "confirmado",
+            confirmadoPor: "conciliador_mercadopago",
+            confirmadoEm,
+            providerPaymentId: pagamento.id,
+          },
+        };
+        mudou = true;
+
+        resumo.confirmados++;
+        resumo.detalhes.push({ pedidoId, outcome: "confirmado" });
       }
-
-      const confirmadoEm = new Date().toISOString();
-      atualizados = [...atualizados];
-      atualizados[index] = {
-        ...atualizados[index],
-        pixConfirmado: true,
-        pix: {
-          ...atualizados[index].pix,
-          status: "confirmado",
-          confirmadoPor: "conciliador_mercadopago",
-          confirmadoEm,
-          providerPaymentId: pagamento.id,
-        },
-      };
-      mudou = true;
-
-      resumo.confirmados++;
-      resumo.detalhes.push({ pedidoId, outcome: "confirmado" });
     }
+
+    if (rateLimited) {
+      resumo.rateLimited = true;
+      await redis.set(COOLDOWN_RATE_LIMIT_KEY, "1", { ex: COOLDOWN_RATE_LIMIT_TTL_SEGUNDOS });
+    }
+
+    if (mudou) await redis.set("pedidos", atualizados);
+
+    return resumo;
+  } finally {
+    // Libera o lock só se ainda formos o dono (compare-and-delete atômico) —
+    // sucesso, erro ou exceção, sempre tenta liberar para não segurar a
+    // auto-verificação de 20s por mais tempo que o necessário. Se o EVAL
+    // falhar, o TTL de 90s continua como rede de segurança.
+    await liberarLockSeDono(lockId);
   }
-
-  if (rateLimited) {
-    resumo.rateLimited = true;
-    await redis.set(COOLDOWN_RATE_LIMIT_KEY, "1", { ex: COOLDOWN_RATE_LIMIT_TTL_SEGUNDOS });
-  }
-
-  if (mudou) await redis.set("pedidos", atualizados);
-
-  return resumo;
 }
