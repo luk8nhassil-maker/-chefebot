@@ -22,6 +22,8 @@ import {
   creditarFidelidadePedido,
   obterProgressoFidelidade,
   salvarConfigFidelidade,
+  obterConfigFidelidadePontosEfetiva,
+  salvarConfigFidelidadePontos,
 } from "./fidelidade";
 
 beforeEach(() => {
@@ -81,5 +83,64 @@ describe("creditarFidelidadePedido", () => {
 
     const progresso = await obterProgressoFidelidade("cli_999");
     expect(progresso.progresso).toBe(5);
+  });
+});
+
+// Ponte de compatibilidade (Nivel 5.9): enquanto config:fidelidade:pontos
+// nunca foi salva, obterConfigFidelidadePontosEfetiva() herda so o `ativo` do
+// modelo legado (config:fidelidade) — nunca grava no Redis durante a leitura,
+// e a config nova, uma vez salva, passa a ser totalmente autoritativa.
+describe("obterConfigFidelidadePontosEfetiva — ponte com o modelo legado", () => {
+  test("chave nova ausente + legado ativo: programa efetivo fica ativo, com os padroes do modelo por pontos", async () => {
+    await salvarConfigFidelidade({ ativo: true, pizzasParaPremio: 10, tipoRecompensa: "pizza_gratis", descricaoRecompensa: "Pizza gratis" });
+
+    const efetiva = await obterConfigFidelidadePontosEfetiva();
+
+    expect(efetiva.ativo).toBe(true);
+    expect(efetiva.metaPontos).toBe(720);
+    expect(efetiva.descricaoRecompensa).toBe("1 Pizza Família");
+  });
+
+  test("chave nova ausente + legado inativo: programa efetivo fica inativo", async () => {
+    await salvarConfigFidelidade({ ativo: false, pizzasParaPremio: 10, tipoRecompensa: "pizza_gratis", descricaoRecompensa: "Pizza gratis" });
+
+    const efetiva = await obterConfigFidelidadePontosEfetiva();
+
+    expect(efetiva.ativo).toBe(false);
+  });
+
+  test("chave nova ausente + legado nunca configurado: cai no padrao (inativo)", async () => {
+    const efetiva = await obterConfigFidelidadePontosEfetiva();
+    expect(efetiva.ativo).toBe(false);
+  });
+
+  test("chave nova presente e ativa: usa integralmente a config nova, sem olhar o legado", async () => {
+    await salvarConfigFidelidade({ ativo: false, pizzasParaPremio: 10, tipoRecompensa: "pizza_gratis", descricaoRecompensa: "Pizza gratis" });
+    await salvarConfigFidelidadePontos({ ativo: true, metaPontos: 500, descricaoRecompensa: "Desconto especial" });
+
+    const efetiva = await obterConfigFidelidadePontosEfetiva();
+
+    expect(efetiva).toEqual({ ativo: true, metaPontos: 500, descricaoRecompensa: "Desconto especial" });
+  });
+
+  test("chave nova presente e inativa: nao herda o legado ativo", async () => {
+    await salvarConfigFidelidade({ ativo: true, pizzasParaPremio: 10, tipoRecompensa: "pizza_gratis", descricaoRecompensa: "Pizza gratis" });
+    await salvarConfigFidelidadePontos({ ativo: false, metaPontos: 500, descricaoRecompensa: "Desconto especial" });
+
+    const efetiva = await obterConfigFidelidadePontosEfetiva();
+
+    expect(efetiva.ativo).toBe(false);
+  });
+
+  test("leitura nunca grava no Redis (efetiva calculada na hora, nao persiste a heranca)", async () => {
+    await salvarConfigFidelidade({ ativo: true, pizzasParaPremio: 10, tipoRecompensa: "pizza_gratis", descricaoRecompensa: "Pizza gratis" });
+
+    await obterConfigFidelidadePontosEfetiva();
+    await obterConfigFidelidadePontosEfetiva();
+
+    // A chave nova continua ausente: uma leitura nao "materializa" a heranca.
+    const { redis } = await import("@/lib/redis");
+    const salvaDireto = await redis.get("config:fidelidade:pontos");
+    expect(salvaDireto).toBeNull();
   });
 });

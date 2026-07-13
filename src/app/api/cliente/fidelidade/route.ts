@@ -3,7 +3,7 @@ import { verificarTokenCliente, CLIENTE_COOKIE } from "@/lib/clienteAuth";
 import { buscarClientePorId } from "@/lib/clientes";
 import {
   obterExtratoPontos,
-  obterConfigFidelidadePontos,
+  obterConfigFidelidadePontosEfetiva,
   obterSaldoAntigoPizzas,
   obterRecompensasPontos,
   calcularSaldoDoExtrato,
@@ -47,7 +47,7 @@ export async function GET(req: NextRequest) {
 
   const [extratoCompleto, config, pizzasAcumuladas, recompensasCompletas] = await Promise.all([
     obterExtratoPontos(clienteIdPontos),
-    obterConfigFidelidadePontos(),
+    obterConfigFidelidadePontosEfetiva(),
     obterSaldoAntigoPizzas(cliente.clienteId).catch(() => 0),
     obterRecompensasPontos(clienteIdPontos),
   ]);

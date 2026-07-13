@@ -564,6 +564,26 @@ export async function salvarConfigFidelidadePontos(config: ConfigFidelidadePonto
   await redis.set(CHAVE_CONFIG_PONTOS, config);
 }
 
+/**
+ * Configuracao efetiva do programa por pontos, para as leituras publicas
+ * (tela "Meus pontos" e painel admin) — nunca para os portoes de
+ * credito/resgate, que continuam em `obterConfigFidelidadePontos()` sem
+ * qualquer mudanca de comportamento (a regra de geracao de pontos nao muda
+ * aqui). Enquanto `config:fidelidade:pontos` nunca foi salva, herda somente o
+ * `ativo` do modelo legado (`config:fidelidade`), mantendo meta/recompensa
+ * nos padroes do modelo por pontos — e uma leitura pura, nunca grava no
+ * Redis. Assim que a config nova e salva (mesmo uma unica vez), ela passa a
+ * ser totalmente autoritativa e o legado deixa de ser consultado aqui,
+ * podendo inclusive ficar inativa mesmo com o legado ativo.
+ */
+export async function obterConfigFidelidadePontosEfetiva(): Promise<ConfigFidelidadePontos> {
+  const salva = await redis.get<ConfigFidelidadePontos>(CHAVE_CONFIG_PONTOS);
+  if (salva) return salva;
+
+  const legado = await obterConfigFidelidade();
+  return { ...CONFIG_FIDELIDADE_PONTOS_PADRAO, ativo: legado.ativo };
+}
+
 export async function obterExtratoPontos(clienteId: string): Promise<MovimentoPontos[]> {
   return (await obterEstadoPontos(clienteId)).extrato;
 }

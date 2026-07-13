@@ -32,7 +32,7 @@ vi.mock("@/lib/fidelidade", async () => {
   return {
     ...actual,
     obterExtratoPontos: vi.fn(async (clienteId: string) => extratosPorCliente.get(clienteId) ?? []),
-    obterConfigFidelidadePontos: vi.fn(async () => configPontos ?? actual.CONFIG_FIDELIDADE_PONTOS_PADRAO),
+    obterConfigFidelidadePontosEfetiva: vi.fn(async () => configPontos ?? actual.CONFIG_FIDELIDADE_PONTOS_PADRAO),
     obterSaldoAntigoPizzas: vi.fn(async (clienteId: string) => pizzasAntigasPorCliente.get(clienteId) ?? 0),
     obterRecompensasPontos: vi.fn(async (clienteId: string) => recompensasPorCliente.get(clienteId) ?? []),
   };
