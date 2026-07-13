@@ -90,6 +90,7 @@ export default function ClientePage() {
   const [ativando, setAtivando] = useState(false)
   const [ativacaoErro, setAtivacaoErro] = useState('')
   const [comoFuncionaAberto, setComoFuncionaAberto] = useState(false)
+  const [reconciliacaoErro, setReconciliacaoErro] = useState('')
 
   // Retorno seguro pós-login (ex.: veio de "Pedido" no menu inferior sem
   // sessão ativa): só aceita destinos de uma allowlist explícita, nunca uma
@@ -108,6 +109,24 @@ export default function ClientePage() {
     window.location.href = '/pedido'
   }
 
+  async function reconciliarPontos(): Promise<void> {
+    try {
+      const res = await fetch('/api/cliente/fidelidade/reconciliar', { method: 'POST', cache: 'no-store' })
+      if (res.status === 401) return
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        const msg = data?.error || 'Nao foi possivel atualizar seus pontos agora.'
+        setReconciliacaoErro(msg)
+        console.warn('[ChefeBot] Falha ao reconciliar pontos do cliente', { status: res.status, error: msg })
+        return
+      }
+      setReconciliacaoErro('')
+    } catch (err) {
+      setReconciliacaoErro('Erro de conexao ao atualizar pontos.')
+      console.warn('[ChefeBot] Falha de rede ao reconciliar pontos do cliente', err)
+    }
+  }
+
   // Estados A/B/C (Nível 6.6): "ativo" abaixo é o programa GLOBAL (config do
   // restaurante), nunca a participação individual do cliente.
   //   - !fidelidade.ativo               -> 'indisponivel' (nunca mostra ativação)
@@ -115,6 +134,7 @@ export default function ClientePage() {
   //   - ativo && cliente.pontosAtivos   -> 'perfil' (estado C: saldo/progresso)
   async function carregarPerfil() {
     try {
+      await reconciliarPontos()
       const [resPerfil, resFidelidade] = await Promise.all([
         fetch('/api/cliente/perfil', { cache: 'no-store' }),
         fetch('/api/cliente/fidelidade', { cache: 'no-store' }),
@@ -175,6 +195,7 @@ export default function ClientePage() {
       window.removeEventListener('focus', atualizarAoVoltar)
       document.removeEventListener('visibilitychange', atualizarAoVoltar)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   async function pedirCodigo() {
@@ -459,6 +480,15 @@ export default function ClientePage() {
               <div style={{ fontSize: 15, color: cores.textoSecundario }}>
                 Olá{perfil.cliente.nome ? `, ${perfil.cliente.nome.split(' ')[0]}` : ''}!
               </div>
+
+              {reconciliacaoErro && (
+                <div style={{ background: cores.cardBg, border: `1px solid ${cores.cardBorda}`, borderRadius: 14, padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <p style={{ fontSize: 13, color: cores.textoSecundario, margin: 0 }}>Não foi possível atualizar seus pontos agora.</p>
+                  <button onClick={() => void carregarPerfil()} style={{ background: 'none', border: `1px solid ${cores.cardBorda}`, borderRadius: 10, padding: 10, color: cores.navy, fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'Archivo, sans-serif' }}>
+                    Tentar atualizar pontos
+                  </button>
+                </div>
+              )}
 
               {/* Hero de saldo — sempre visível, inclusive com saldo 0 (nunca é confundido com "programa desativado": chegar aqui já exige fidelidade.ativo). */}
               <div style={{ background: cores.cardBg, border: `1px solid ${cores.cardBorda}`, borderRadius: 16, padding: 22 }}>

@@ -1071,13 +1071,15 @@ function variantesTelefonePontos(telefone?: string): string[] {
  * `clienteId` embute o telefone (`cli_{telefone}`), então vazar o valor
  * inteiro em log equivale a vazar o telefone do cliente.
  */
-function mascararIdentidadePontos(valor?: string): string {
+export function mascararIdentidadePontos(valor?: string): string {
   const digitos = (valor ?? "").replace(/\D/g, "");
   return digitos.length >= 4 ? `…${digitos.slice(-4)}` : "…";
 }
 
 export type PedidoParaCreditoPontos = {
   id: string;
+  numero?: number;
+  origem?: string;
   status: string;
   telefone?: string;
   clienteId?: string;
@@ -1087,16 +1089,64 @@ export type PedidoParaCreditoPontos = {
   criadoEm?: string;
   createdAt?: string;
   pixConfirmado?: boolean;
-  pix?: { status?: string } | null;
+  pix?: { status?: string; provider?: string; confirmadoEm?: string; confirmadoPor?: string } | null;
+  confirmacaoCompra?: ConfirmacaoCompra | null;
 };
 
 export type OrigemConfirmacaoPontos = "pix_manual" | "pix_automatico" | "pix_webhook" | "confirmacao_operacional";
 export type OrigemProprietarioFidelidade = "sessao" | "telefone";
+export type ConfirmacaoCompra = {
+  confirmadoEm: string;
+  origem: OrigemConfirmacaoPontos;
+};
 
 export type ProprietarioFidelidadePedido = {
   clienteId: string;
   cliente?: Cliente;
   origem: OrigemProprietarioFidelidade;
+};
+
+export type MotivoAvaliacaoCreditoPontos =
+  | "PROGRAMA_INATIVO"
+  | "PEDIDO_INVALIDO"
+  | "PEDIDO_CANCELADO"
+  | "PROPRIETARIO_NAO_RESOLVIDO"
+  | "CLIENTE_NAO_ENCONTRADO"
+  | "CLIENTE_NAO_ATIVOU_PONTOS"
+  | "PEDIDO_ANTERIOR_ATIVACAO"
+  | "COMPRA_NAO_CONFIRMADA"
+  | "VALOR_ELEGIVEL_ZERO"
+  | "MOVIMENTO_JA_EXISTE"
+  | "ELEGIVEL";
+
+export type GatesAvaliacaoCreditoPontos = {
+  programaAtivo: boolean;
+  pedidoValido: boolean;
+  pedidoCancelado: boolean;
+  proprietarioResolvido: boolean;
+  clienteEncontrado: boolean;
+  participacaoAtiva: boolean;
+  ativacaoAnteriorAoPedido: boolean;
+  compraConfirmada: boolean;
+  valorElegivelPositivo: boolean;
+  movimentoJaExiste: boolean;
+};
+
+export type AvaliacaoCreditoPontos = {
+  elegivel: boolean;
+  motivo: MotivoAvaliacaoCreditoPontos;
+  gates: GatesAvaliacaoCreditoPontos;
+  proprietarioClienteIdMascarado?: string;
+  origemProprietario?: OrigemProprietarioFidelidade;
+  origemConfirmacao?: string;
+  pontosCalculados?: number;
+};
+
+export type ResultadoConfirmarCompraPontos = AvaliacaoCreditoPontos & {
+  pedidoId?: string;
+  numero?: number;
+  movimento?: MovimentoPontos;
+  confirmacaoPersistida?: boolean;
 };
 
 function timestampCriacaoPedidoMs(pedido: PedidoParaCreditoPontos): number | null {
@@ -1150,7 +1200,33 @@ async function buscarClientePorTelefonePontos(telefone?: string): Promise<Client
   return null;
 }
 
-export async function resolverProprietarioFidelidadePedido(pedido: PedidoParaCreditoPontos): Promise<ProprietarioFidelidadePedido | null> {
+function clienteIdPontosDoCliente(cliente: Cliente): string {
+  return derivarClienteIdPorTelefone(cliente.telefone) ?? cliente.clienteId;
+}
+
+function pedidoPertenceAoClienteSessao(pedido: PedidoParaCreditoPontos, cliente: Cliente): boolean {
+  if (!pedido.clienteId) return false;
+  if (pedido.clienteId === cliente.clienteId) return true;
+  const pedidoNormalizado = normalizarClienteIdPontos(pedido.clienteId);
+  const clienteNormalizado = derivarClienteIdPorTelefone(cliente.telefone);
+  return !!pedidoNormalizado && !!clienteNormalizado && pedidoNormalizado === clienteNormalizado;
+}
+
+export async function resolverProprietarioFidelidadePedido(
+  pedido: PedidoParaCreditoPontos,
+  clienteSessao?: Cliente
+): Promise<ProprietarioFidelidadePedido | null> {
+  if (clienteSessao && pedidoPertenceAoClienteSessao(pedido, clienteSessao)) {
+    const clienteId = clienteIdPontosDoCliente(clienteSessao);
+    const clienteIdTelefone = derivarClienteIdPorTelefone(pedido.telefone);
+    if (clienteIdTelefone && clienteIdTelefone !== clienteId) {
+      console.warn(
+        `[ChefeBot] Fidelidade: pedido ${pedido.id} usa proprietario da sessao (${mascararIdentidadePontos(clienteId)}) e telefone de contato divergente (${mascararIdentidadePontos(clienteIdTelefone)})`
+      );
+    }
+    return { clienteId, cliente: clienteSessao, origem: "sessao" };
+  }
+
   const clienteIdSessao = normalizarClienteIdPontos(pedido.clienteId);
   const clienteIdTelefone = derivarClienteIdPorTelefone(pedido.telefone);
   const podeUsarVinculoSessao = !!clienteIdSessao && pedido.clienteVinculo !== "telefone";
@@ -1171,6 +1247,96 @@ export async function resolverProprietarioFidelidadePedido(pedido: PedidoParaCre
   return { clienteId: clienteIdTelefone, cliente: clienteTelefone ?? undefined, origem: "telefone" };
 }
 
+function gatesBase(): GatesAvaliacaoCreditoPontos {
+  return {
+    programaAtivo: false,
+    pedidoValido: false,
+    pedidoCancelado: false,
+    proprietarioResolvido: false,
+    clienteEncontrado: false,
+    participacaoAtiva: false,
+    ativacaoAnteriorAoPedido: false,
+    compraConfirmada: false,
+    valorElegivelPositivo: false,
+    movimentoJaExiste: false,
+  };
+}
+
+function resultadoAvaliacao(
+  motivo: MotivoAvaliacaoCreditoPontos,
+  gates: GatesAvaliacaoCreditoPontos,
+  extra: Omit<AvaliacaoCreditoPontos, "elegivel" | "motivo" | "gates"> = {}
+): AvaliacaoCreditoPontos {
+  return { elegivel: motivo === "ELEGIVEL", motivo, gates, ...extra };
+}
+
+function statusPixConfirmado(status?: string): boolean {
+  const normalizado = String(status ?? "").trim().toLowerCase();
+  return ["confirmado", "pago", "paid", "approved", "aprovado", "aprovada"].includes(normalizado);
+}
+
+export function pedidoTemCompraConfirmada(pedido: PedidoParaCreditoPontos): { confirmada: boolean; origem?: OrigemConfirmacaoPontos } {
+  if (pedido.confirmacaoCompra?.confirmadoEm && pedido.confirmacaoCompra.origem) {
+    return { confirmada: true, origem: pedido.confirmacaoCompra.origem };
+  }
+  if (pedido.pixConfirmado === true) return { confirmada: true, origem: "pix_automatico" };
+  if (statusPixConfirmado(pedido.pix?.status)) return { confirmada: true, origem: "pix_automatico" };
+  if (pedidoJaPassouConfirmacaoOperacional(pedido.status)) return { confirmada: true, origem: "confirmacao_operacional" };
+  return { confirmada: false };
+}
+
+export function avaliarCreditoPontosPedido(
+  pedido: PedidoParaCreditoPontos | null | undefined,
+  cliente: Cliente | null | undefined,
+  config: ConfigFidelidadePontos,
+  estadoPontos: EstadoPontosCliente,
+  contexto: {
+    proprietarioClienteId?: string;
+    origemProprietario?: OrigemProprietarioFidelidade;
+    origemConfirmacaoPreferida?: OrigemConfirmacaoPontos;
+  } = {}
+): AvaliacaoCreditoPontos {
+  const gates = gatesBase();
+  gates.programaAtivo = config.ativo === true;
+  gates.pedidoValido = !!pedido?.id;
+  gates.pedidoCancelado = pedido?.status === "cancelado";
+  gates.proprietarioResolvido = !!contexto.proprietarioClienteId;
+  gates.clienteEncontrado = !!cliente;
+  gates.participacaoAtiva = cliente?.pontosAtivos === true && !!cliente?.pontosAtivadoEm;
+
+  const confirmacao = pedido ? pedidoTemCompraConfirmada(pedido) : { confirmada: false as const };
+  gates.compraConfirmada = confirmacao.confirmada;
+
+  const valorElegivel = pedido ? Math.max((Number(pedido.total) || 0) - (Number(pedido.taxaEntrega) || 0), 0) : 0;
+  const pontos = pedido ? calcularPontosElegiveisPedido({ total: pedido.total ?? 0, taxaEntrega: pedido.taxaEntrega }) : 0;
+  gates.valorElegivelPositivo = pontos > 0 && valorElegivel > 0;
+
+  const eventoConfirmado = pedido?.id ? construirEventoIdPontos(pedido.id, "confirmado") : "";
+  gates.movimentoJaExiste = !!eventoConfirmado && estadoPontos.extrato.some((m) => m.eventoId === eventoConfirmado || (m.pedidoId === pedido?.id && m.tipo === "confirmado"));
+
+  if (cliente && pedido) gates.ativacaoAnteriorAoPedido = pedidoCriadoDepoisDaAtivacao(pedido, cliente);
+
+  const origemConfirmacao = contexto.origemConfirmacaoPreferida ?? confirmacao.origem;
+  const extra = {
+    ...(contexto.proprietarioClienteId ? { proprietarioClienteIdMascarado: mascararIdentidadePontos(contexto.proprietarioClienteId) } : {}),
+    ...(contexto.origemProprietario ? { origemProprietario: contexto.origemProprietario } : {}),
+    ...(origemConfirmacao ? { origemConfirmacao } : {}),
+    ...(pontos > 0 ? { pontosCalculados: pontos } : {}),
+  };
+
+  if (!gates.programaAtivo) return resultadoAvaliacao("PROGRAMA_INATIVO", gates, extra);
+  if (!gates.pedidoValido) return resultadoAvaliacao("PEDIDO_INVALIDO", gates, extra);
+  if (gates.pedidoCancelado) return resultadoAvaliacao("PEDIDO_CANCELADO", gates, extra);
+  if (!gates.proprietarioResolvido) return resultadoAvaliacao("PROPRIETARIO_NAO_RESOLVIDO", gates, extra);
+  if (!gates.clienteEncontrado) return resultadoAvaliacao("CLIENTE_NAO_ENCONTRADO", gates, extra);
+  if (!gates.participacaoAtiva) return resultadoAvaliacao("CLIENTE_NAO_ATIVOU_PONTOS", gates, extra);
+  if (!gates.ativacaoAnteriorAoPedido) return resultadoAvaliacao("PEDIDO_ANTERIOR_ATIVACAO", gates, extra);
+  if (!gates.compraConfirmada) return resultadoAvaliacao("COMPRA_NAO_CONFIRMADA", gates, extra);
+  if (!gates.valorElegivelPositivo) return resultadoAvaliacao("VALOR_ELEGIVEL_ZERO", gates, extra);
+  if (gates.movimentoJaExiste) return resultadoAvaliacao("MOVIMENTO_JA_EXISTE", gates, extra);
+  return resultadoAvaliacao("ELEGIVEL", gates, extra);
+}
+
 export async function confirmarPontosPedido(
   pedido: PedidoParaCreditoPontos,
   origem: OrigemConfirmacaoPontos
@@ -1178,18 +1344,20 @@ export async function confirmarPontosPedido(
   if (!pedido.id || pedido.status === "cancelado") return null;
 
   const config = await obterConfigFidelidadePontos();
-  if (!config.ativo) return null;
-
   const resolvido = await resolverProprietarioFidelidadePedido(pedido);
   if (!resolvido) return null;
   const { clienteId, cliente } = resolvido;
 
-  if (!cliente) return null;
-  if (!pedidoCriadoDepoisDaAtivacao(pedido, cliente)) return null;
+  const estado = await obterEstadoPontos(clienteId);
+  const avaliacao = avaliarCreditoPontosPedido(pedido, cliente, config, estado, {
+    proprietarioClienteId: clienteId,
+    origemProprietario: resolvido.origem,
+    origemConfirmacaoPreferida: origem,
+  });
+  if (!avaliacao.elegivel) return null;
 
   const valorElegivel = Math.max((Number(pedido.total) || 0) - (Number(pedido.taxaEntrega) || 0), 0);
   const pontos = calcularPontosElegiveisPedido({ total: pedido.total ?? 0, taxaEntrega: pedido.taxaEntrega });
-  if (pontos <= 0) return null;
 
   return registrarMovimentoPontosIdempotente(clienteId, {
     eventoId: construirEventoIdPontos(pedido.id, "confirmado"),
@@ -1199,6 +1367,100 @@ export async function confirmarPontosPedido(
     valorElegivel,
     motivo: `Credito por pedido ${pedido.id} confirmado (${origem})`,
   });
+}
+
+function origemConfirmacaoCanonica(pedido: PedidoParaCreditoPontos, origem: OrigemConfirmacaoPontos): OrigemConfirmacaoPontos {
+  if (pedido.confirmacaoCompra?.origem) return pedido.confirmacaoCompra.origem;
+  return origem;
+}
+
+function pedidoComConfirmacaoCanonica(pedido: PedidoParaCreditoPontos, origem: OrigemConfirmacaoPontos): { pedido: PedidoParaCreditoPontos; mudou: boolean } {
+  if (pedido.confirmacaoCompra?.confirmadoEm && pedido.confirmacaoCompra.origem) return { pedido, mudou: false };
+  return {
+    pedido: {
+      ...pedido,
+      confirmacaoCompra: {
+        confirmadoEm: new Date().toISOString(),
+        origem: origemConfirmacaoCanonica(pedido, origem),
+      },
+    },
+    mudou: true,
+  };
+}
+
+function logAvaliacaoCreditoPontos(prefixo: string, pedido: PedidoParaCreditoPontos | null | undefined, avaliacao: AvaliacaoCreditoPontos): void {
+  const payload = {
+    pedidoId: pedido?.id,
+    numero: pedido?.numero,
+    motivo: avaliacao.motivo,
+    origemProprietario: avaliacao.origemProprietario,
+    clienteId: avaliacao.proprietarioClienteIdMascarado,
+    origemConfirmacao: avaliacao.origemConfirmacao,
+  };
+  console.info(prefixo, payload);
+}
+
+export async function confirmarCompraECreditarPontos(
+  pedidoId: string,
+  origem: OrigemConfirmacaoPontos,
+  opcoes: { clienteSessao?: Cliente } = {}
+): Promise<ResultadoConfirmarCompraPontos> {
+  const pedidos = (await redis.get<PedidoParaCreditoPontos[]>("pedidos")) || [];
+  const index = pedidos.findIndex((p) => p?.id === pedidoId);
+  if (index < 0) {
+    const gates = gatesBase();
+    gates.programaAtivo = true;
+    const avaliacao = resultadoAvaliacao("PEDIDO_INVALIDO", gates, { origemConfirmacao: origem });
+    return { ...avaliacao, pedidoId };
+  }
+
+  const original = pedidos[index];
+  const { pedido, mudou } = pedidoComConfirmacaoCanonica(original, origem);
+  if (mudou) {
+    const atualizados = [...pedidos];
+    atualizados[index] = pedido;
+    await redis.set("pedidos", atualizados);
+  }
+
+  const config = await obterConfigFidelidadePontos();
+  const proprietario = await resolverProprietarioFidelidadePedido(pedido, opcoes.clienteSessao);
+  const estado = proprietario ? await obterEstadoPontos(proprietario.clienteId) : normalizarEstadoPontos(null);
+  const avaliacao = avaliarCreditoPontosPedido(pedido, proprietario?.cliente, config, estado, {
+    proprietarioClienteId: proprietario?.clienteId,
+    origemProprietario: proprietario?.origem,
+    origemConfirmacaoPreferida: pedido.confirmacaoCompra?.origem ?? origem,
+  });
+
+  if (!avaliacao.elegivel) {
+    logAvaliacaoCreditoPontos("[ChefeBot] Fidelidade: compra nao creditada", pedido, avaliacao);
+    return { ...avaliacao, pedidoId, numero: pedido.numero, confirmacaoPersistida: mudou };
+  }
+
+  const valorElegivel = Math.max((Number(pedido.total) || 0) - (Number(pedido.taxaEntrega) || 0), 0);
+  const pontos = calcularPontosElegiveisPedido({ total: pedido.total ?? 0, taxaEntrega: pedido.taxaEntrega });
+  const movimento = await registrarMovimentoPontosIdempotente(proprietario!.clienteId, {
+    eventoId: construirEventoIdPontos(pedido.id, "confirmado"),
+    pedidoId: pedido.id,
+    tipo: "confirmado",
+    pontos,
+    valorElegivel,
+    motivo: `Credito por pedido ${pedido.id} confirmado (${pedido.confirmacaoCompra?.origem ?? origem})`,
+  });
+
+  if (!movimento) {
+    const estadoAtual = await obterEstadoPontos(proprietario!.clienteId);
+    const jaExiste = avaliarCreditoPontosPedido(pedido, proprietario!.cliente, config, estadoAtual, {
+      proprietarioClienteId: proprietario!.clienteId,
+      origemProprietario: proprietario!.origem,
+      origemConfirmacaoPreferida: pedido.confirmacaoCompra?.origem ?? origem,
+    });
+    logAvaliacaoCreditoPontos("[ChefeBot] Fidelidade: compra ja creditada", pedido, jaExiste);
+    return { ...jaExiste, pedidoId, numero: pedido.numero, confirmacaoPersistida: mudou };
+  }
+
+  const resultado = { ...avaliacao, pedidoId, numero: pedido.numero, movimento, confirmacaoPersistida: mudou };
+  logAvaliacaoCreditoPontos("[ChefeBot] Fidelidade: compra creditada", pedido, resultado);
+  return resultado;
 }
 
 export async function estornarPontosPedidoConfirmado(pedido: PedidoParaCreditoPontos): Promise<MovimentoPontos | null> {
@@ -1230,9 +1492,9 @@ export async function reconciliarPontosClientePedidos(
   cliente: Cliente,
   pedidos: PedidoParaCreditoPontos[],
   opcoes: { limite?: number; dias?: number } = {}
-): Promise<{ verificados: number; creditados: number }> {
-  const clienteId = derivarClienteIdPorTelefone(cliente.telefone) ?? cliente.clienteId;
-  if (!cliente.pontosAtivos || !cliente.pontosAtivadoEm || !clienteId) return { verificados: 0, creditados: 0 };
+): Promise<{ verificados: number; creditados: number; detalhes: ResultadoConfirmarCompraPontos[] }> {
+  const clienteId = clienteIdPontosDoCliente(cliente);
+  if (!cliente.pontosAtivos || !cliente.pontosAtivadoEm || !clienteId) return { verificados: 0, creditados: 0, detalhes: [] };
 
   const limite = Math.max(1, Math.min(opcoes.limite ?? 50, 100));
   const dias = Math.max(1, Math.min(opcoes.dias ?? 90, 365));
@@ -1243,8 +1505,7 @@ export async function reconciliarPontosClientePedidos(
     if (!pedido?.id || pedido.status === "cancelado") continue;
     const criadoMs = timestampCriacaoPedidoMs(pedido);
     if (criadoMs === null || criadoMs < desdeMs) continue;
-    if (!(pedido.pixConfirmado === true || pedido.pix?.status === "confirmado" || pedidoJaPassouConfirmacaoOperacional(pedido.status))) continue;
-    const proprietario = await resolverProprietarioFidelidadePedido(pedido);
+    const proprietario = await resolverProprietarioFidelidadePedido(pedido, cliente);
     if (proprietario?.clienteId === clienteId) candidatos.push(pedido);
   }
 
@@ -1253,14 +1514,25 @@ export async function reconciliarPontosClientePedidos(
     .slice(0, limite);
 
   let creditados = 0;
+  const detalhes: ResultadoConfirmarCompraPontos[] = [];
   for (const pedido of ordenados) {
-    const origem: OrigemConfirmacaoPontos =
-      pedido.pixConfirmado === true || pedido.pix?.status === "confirmado" ? "pix_automatico" : "confirmacao_operacional";
-    const movimento = await confirmarPontosPedido(pedido, origem);
-    if (movimento) creditados++;
+    const confirmacao = pedidoTemCompraConfirmada(pedido);
+    if (!confirmacao.confirmada) {
+      const config = await obterConfigFidelidadePontos();
+      const estado = await obterEstadoPontos(clienteId);
+      const avaliacao = avaliarCreditoPontosPedido(pedido, cliente, config, estado, {
+        proprietarioClienteId: clienteId,
+        origemProprietario: "sessao",
+      });
+      detalhes.push({ ...avaliacao, pedidoId: pedido.id, numero: pedido.numero });
+      continue;
+    }
+    const resultado = await confirmarCompraECreditarPontos(pedido.id, confirmacao.origem ?? "confirmacao_operacional", { clienteSessao: cliente });
+    detalhes.push(resultado);
+    if (resultado.movimento) creditados++;
   }
 
-  return { verificados: ordenados.length, creditados };
+  return { verificados: ordenados.length, creditados, detalhes };
 }
 
 /**
@@ -1294,7 +1566,21 @@ async function creditarPontosPedidoEntregueComConfig(
 ): Promise<void> {
   if (pedido.status !== "entregue" || !pedido.id) return;
   if (!config.ativo) return;
-  await confirmarPontosPedido(pedido, "confirmacao_operacional");
+  const pedidos = (await redis.get<PedidoParaCreditoPontos[]>("pedidos")) || [];
+  if (pedidos.some((p) => p?.id === pedido.id)) {
+    await confirmarCompraECreditarPontos(pedido.id, "confirmacao_operacional");
+    return;
+  }
+  await confirmarPontosPedido(
+    {
+      ...pedido,
+      confirmacaoCompra: pedido.confirmacaoCompra ?? {
+        confirmadoEm: new Date().toISOString(),
+        origem: "confirmacao_operacional",
+      },
+    },
+    "confirmacao_operacional"
+  );
 }
 
 export async function creditarPontosPedidoEntregue(pedido: PedidoParaCreditoPontos): Promise<void> {

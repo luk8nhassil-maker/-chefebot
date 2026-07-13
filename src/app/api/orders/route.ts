@@ -6,7 +6,7 @@ import { confirmarPixMetadata, criarPixMetadata, sanitizarPedidoPixResposta, typ
 import type { PedidoEntregador } from '@/types/entregador'
 import {
   creditarFidelidadeEfetiva,
-  confirmarPontosPedido,
+  confirmarCompraECreditarPontos,
   estornarPontosPedidoConfirmado,
   resolverProprietarioFidelidadePedido,
   reverterResgateConfirmado,
@@ -40,6 +40,7 @@ type Pedido = {
   criadoEm?: string
   clienteId?: string
   clienteVinculo?: 'sessao' | 'telefone'
+  confirmacaoCompra?: { confirmadoEm: string; origem: 'pix_manual' | 'pix_automatico' | 'pix_webhook' | 'confirmacao_operacional' }
   pizzasCount?: number
   resgateId?: string
   descontoFidelidade?: number
@@ -139,13 +140,14 @@ export async function PATCH(req: NextRequest) {
   // por webhook/comprovante nunca é sobrescrita pelo clique manual.
   if (pixConfirmado !== undefined) {
     const pixJaConfirmado = pedidos[index].pixConfirmado === true || pedidos[index].pix?.status === 'confirmado'
+    const confirmadoEm = new Date().toISOString()
     pedidos[index] = pixConfirmado === true
-      ? { ...pedidos[index], pixConfirmado: true, pix: confirmarPixMetadata(pedidos[index].pix, 'manual') }
+      ? { ...pedidos[index], pixConfirmado: true, pix: confirmarPixMetadata(pedidos[index].pix, 'manual', confirmadoEm), confirmacaoCompra: pedidos[index].confirmacaoCompra ?? { confirmadoEm, origem: 'pix_manual' as const } }
       : { ...pedidos[index], pixConfirmado }
     await redis.set('pedidos', pedidos)
     if (pixConfirmado === true && !pixJaConfirmado) {
       try {
-        await confirmarPontosPedido(pedidos[index], 'pix_manual')
+        await confirmarCompraECreditarPontos(id, 'pix_manual')
       } catch (err) {
         console.error('[ChefeBot] Erro ao confirmar pontos por Pix manual (ignorado):', err)
       }
@@ -159,6 +161,7 @@ export async function PATCH(req: NextRequest) {
     status,
     ...(status === 'cancelado' ? { cancelamentoSolicitado: false } : {}),
     ...(status === 'em_preparo' && !pedidos[index].horarioInicio ? { horarioInicio: agora } : {}),
+    ...(statusAnterior === 'novo' && status === 'em_preparo' && !pedidos[index].confirmacaoCompra ? { confirmacaoCompra: { confirmadoEm: new Date().toISOString(), origem: 'confirmacao_operacional' as const } } : {}),
   }
 
   // Salva entregador no pedido se informado
@@ -169,7 +172,7 @@ export async function PATCH(req: NextRequest) {
 
   if (statusAnterior === 'novo' && status === 'em_preparo') {
     try {
-      await confirmarPontosPedido(pedidos[index], 'confirmacao_operacional')
+      await confirmarCompraECreditarPontos(id, 'confirmacao_operacional')
     } catch (err) {
       console.error('[ChefeBot] Erro ao confirmar pontos por acao operacional (ignorado):', err)
     }
@@ -281,6 +284,7 @@ export async function PATCH(req: NextRequest) {
         status: 'entregue',
         telefone: pedidos[index].telefone,
         clienteId: pedidos[index].clienteId,
+        clienteVinculo: pedidos[index].clienteVinculo,
         total: pedidos[index].total,
         taxaEntrega: pedidos[index].taxaEntrega,
         criadoEm: pedidos[index].criadoEm,

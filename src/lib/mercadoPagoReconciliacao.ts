@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { redis } from "./redis";
 import { buscarPagamentoMercadoPagoDetalhado, mapearStatusMercadoPago } from "./mercadoPagoWebhook";
 import type { PedidoComPix } from "./pix";
-import { confirmarPontosPedido } from "./fidelidade";
+import { confirmarCompraECreditarPontos } from "./fidelidade";
 
 // Conciliador manual/sob-demanda do Pix Mercado Pago (Nivel 6.2A) — usado
 // enquanto nao ha webhook configurado no painel MP. Consulta a API do MP pelo
@@ -27,6 +27,7 @@ type PedidoReconciliavel = PedidoComPix & {
   telefone?: string;
   clienteId?: string;
   clienteVinculo?: "sessao" | "telefone";
+  confirmacaoCompra?: { confirmadoEm: string; origem: "pix_manual" | "pix_automatico" | "pix_webhook" | "confirmacao_operacional" };
   taxaEntrega?: number;
   criadoEm?: string;
   pixConfirmado?: boolean;
@@ -262,6 +263,7 @@ export async function reconciliarPixMercadoPago(): Promise<ResumoReconciliacaoPi
         atualizados[index] = {
           ...atualizados[index],
           pixConfirmado: true,
+          confirmacaoCompra: atualizados[index].confirmacaoCompra ?? { confirmadoEm, origem: "pix_automatico" },
           pix: {
             ...atualizados[index].pix,
             status: "confirmado",
@@ -287,7 +289,7 @@ export async function reconciliarPixMercadoPago(): Promise<ResumoReconciliacaoPi
       await redis.set("pedidos", atualizados);
       for (const pedido of pedidosConfirmadosParaPontuar) {
         try {
-          await confirmarPontosPedido(pedido, "pix_automatico");
+          await confirmarCompraECreditarPontos(pedido.id, "pix_automatico");
         } catch (err) {
           console.error("[ChefeBot] Erro ao confirmar pontos por conciliacao Pix (ignorado):", err);
         }
