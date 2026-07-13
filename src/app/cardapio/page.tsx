@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { QRCodeSVG } from "qrcode.react";
-import { Pizza, Sandwich, Soup, CupSoda, GlassWater, Zap, Banknote, CreditCard, Shuffle, Wallet, Bike, Store, UtensilsCrossed, Sun, Moon } from "lucide-react";
+import { Pizza, Sandwich, Soup, CupSoda, GlassWater, Zap, Banknote, CreditCard, Shuffle, Wallet, Bike, Store, UtensilsCrossed, Sun, Moon, Copy } from "lucide-react";
 import PanelShell from "@/components/PanelShell";
 import { useLiveMenu, cartItemEsgotado } from "./liveMenu";
 import { CARDAPIO_ILLUSTRATIONS, CardapioIllustration } from "@/lib/cardapioVisuals";
@@ -678,14 +678,6 @@ const PIX_STATUS_LABEL: Record<PagamentoPixClienteStatus, string> = {
   em_revisao: "Comprovante em análise",
   conferencia_manual: "Conferência manual necessária",
   nao_pix: "Pedido recebido",
-};
-
-const PIX_STATUS_TEXT: Record<PagamentoPixClienteStatus, string> = {
-  aguardando_pix: "Depois de pagar, envie o comprovante pelo WhatsApp. Assim que o sistema validar, seu pedido será confirmado automaticamente.",
-  pago: "Seu pagamento foi confirmado e o pedido foi liberado para preparo.",
-  em_revisao: "Recebemos o comprovante. A equipe vai conferir os detalhes antes de liberar o pedido.",
-  conferencia_manual: "Recebemos o comprovante, mas a equipe precisa conferir esse pagamento manualmente.",
-  nao_pix: "Acompanhe o andamento do pedido por aqui.",
 };
 
 const money = (v: number) => "R$ " + v.toFixed(2).replace(".", ",");
@@ -1460,7 +1452,6 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   );
   const pixPedido = pedidoConfirmado?.pix;
   const isPagamentoPix = (!!payment && payment.toLowerCase().includes("pix")) || !!pixPedido;
-  const pixValor = typeof pixPedido?.valorEsperado === "number" ? pixPedido.valorEsperado : pedidoConfirmado?.total;
   const pixCodigoCopiaECola = (pixPedido?.copiaECola || pixPedido?.qrCode || "").trim();
   const temPixCopiaECola = pixCodigoCopiaECola.length > 0;
   // Resumo da tela final (sc-done): reaproveita os mesmos estados/helpers já
@@ -1881,35 +1872,27 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                         <div style={{ display: "inline-flex", marginTop: 12, marginBottom: 12, padding: "5px 10px", borderRadius: 999, background: statusPixCliente === "pago" ? "var(--green-soft)" : "var(--brand-soft)", color: statusPixCliente === "pago" ? "var(--green)" : "var(--brand)", fontSize: 12, fontWeight: 800 }}>
                           {PIX_STATUS_LABEL[statusPixCliente]}
                         </div>
-                        {isHibrido && hibridoAtual ? (
+                        {isHibrido && hibridoAtual && (
                           <div style={{ display: "grid", gap: 4, fontSize: 14, color: "var(--text)", lineHeight: 1.5, marginBottom: 12 }}>
                             <p style={{ margin: 0 }}><strong>Pix:</strong> {money(hibridoAtual.pix)} — {PIX_STATUS_LABEL[statusPixCliente]}</p>
                             <p style={{ margin: 0 }}><strong>Dinheiro:</strong> {money(hibridoAtual.dinheiro)} na hora de receber o pedido</p>
                             {trocoConfirmadoTexto && <p style={{ margin: 0 }}><strong>Troco:</strong> {trocoConfirmadoTexto}</p>}
                           </div>
-                        ) : (
-                          statusPixCliente !== "pago" && (
-                            <p style={{ margin: "0 0 12px", fontWeight: 700, fontSize: 14, color: "var(--text)" }}>
-                              Agora falta fazer o Pix de {money(pixValor ?? pedidoConfirmado.total)}.
-                            </p>
-                          )
                         )}
                         <div style={{ display: "grid", gap: 8, fontSize: 14, color: "var(--text)", lineHeight: 1.45 }}>
-                          <div><strong>Pedido:</strong> #{pedidoConfirmado.numero}</div>
-                          <div><strong>Total:</strong> {money(pedidoConfirmado.total)}</div>
                           {pixPedido?.chavePix && <div style={{ wordBreak: "break-word" }}><strong>Chave Pix:</strong> {pixPedido.chavePix}</div>}
                           {pixPedido?.beneficiario && <div><strong>Beneficiário:</strong> {pixPedido.beneficiario}</div>}
                         </div>
-                        <p style={{ color: "var(--text-sub)", fontSize: 13, lineHeight: 1.5, margin: "12px 0 0" }}>
-                          {PIX_STATUS_TEXT[statusPixCliente]}
-                        </p>
                         {temPixCopiaECola && (
                           <div className="pix-qrcode-wrap">
                             <QRCodeSVG className="pix-qrcode" value={pixCodigoCopiaECola} size={220} level="M" aria-label="QR Code Pix" />
                           </div>
                         )}
                         {temPixCopiaECola && (
-                          <button className="btn btn-sm pix-copy-btn" onClick={async () => showToast((await copiarTexto(pixCodigoCopiaECola)) ? "Pix copiado" : "Não consegui copiar. Toque no código e copie manualmente.")}>Copiar e colar</button>
+                          <button className="btn btn-sm btn-ghost pix-copy-btn" onClick={async () => showToast((await copiarTexto(pixCodigoCopiaECola)) ? "Pix copiado" : "Não consegui copiar. Toque no código e copie manualmente.")}>
+                            <Copy size={17} aria-hidden="true" />
+                            <span>Copiar código Pix</span>
+                          </button>
                         )}
                       </div>
                     )}
@@ -2434,7 +2417,8 @@ main{width:100%;padding:6px 20px 20px}
 .success p{color:var(--text-sub);font-size:15px;margin-bottom:5px}
 .pix-qrcode-wrap{display:flex;justify-content:center;margin:16px 0 12px}
 .pix-qrcode{width:min(220px,100%);height:auto;border-radius:14px;border:1px solid var(--line);box-shadow:var(--shadow-sm)}
-.pix-copy-btn{margin-top:12px}
+.pix-copy-btn{margin-top:12px;display:flex;align-items:center;justify-content:center;gap:8px;background:var(--surface2);border:1px solid var(--line-strong);color:var(--text);box-shadow:none}
+.pix-copy-btn svg{flex:0 0 auto}
 .toast{position:fixed;bottom:168px;left:50%;transform:translateX(-50%);background:var(--green);color:var(--green-foreground);padding:12px 22px;border-radius:30px;font-size:13.5px;font-weight:500;z-index:60;white-space:nowrap}
 .qty-grid{display:flex;flex-direction:column;gap:10px}
 @media(min-width:480px){.qty-grid{display:grid;grid-template-columns:1fr 1fr;gap:11px}}
