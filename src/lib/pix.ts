@@ -10,7 +10,7 @@ import type { CriteriosEvidenciaPix, DecisaoEvidenciaPix } from "./pixComprovant
 // segue reservado para uso futuro. Pedidos antigos podem nao ter status algum (ou nem
 // ter pix): todo leitor deve tratar ausencia como pendente.
 export type PixStatus = "pendente" | "comprovante_recebido" | "em_revisao" | "suspeito" | "confirmado";
-export type PixConfirmadoPor = "manual" | "webhook" | "comprovante";
+export type PixConfirmadoPor = "manual" | "webhook" | "comprovante" | "conciliador_mercadopago";
 export type PixEvidenciaOrigem = "texto" | "midia";
 export type PixEvidencia = {
   e2eId?: string;

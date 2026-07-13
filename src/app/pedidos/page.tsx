@@ -265,6 +265,7 @@ export default function PedidosPage() {
   const [showInstallBanner, setShowInstallBanner] = useState(false)
   const [flashId, setFlashId] = useState<string | null>(null)
   const [entregadores, setEntregadores] = useState<{id: string; nome: string; telefone: string; ativo: boolean}[]>([])
+  const [reconciliandoPix, setReconciliandoPix] = useState(false)
   const [modalEntrega, setModalEntrega] = useState<{pedidoId: string; proxStatus: Status} | null>(null)
   const [muteado, setMuteado] = useState(false)
   const [busca, setBusca] = useState("")
@@ -617,6 +618,26 @@ export default function PedidosPage() {
     setSalvandoBot(true)
     try { const novo = !botAtivo; const r = await fetch("/api/bot-status", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ativo: novo }) }); if (r.ok) setBotAtivo(novo) } catch {}
     setSalvandoBot(false)
+  }
+
+  // Conciliador manual de Pix Mercado Pago (Nivel 6.2A) — enquanto não há
+  // webhook configurado no painel MP, consulta a API do MP pelos
+  // providerPaymentId já salvos e confirma sob demanda. Não gera Pix nem
+  // mexe no fallback manual, só reconcilia pedidos já existentes.
+  const reconciliarPixMercadoPago = async () => {
+    setReconciliandoPix(true)
+    try {
+      const r = await fetch("/api/admin/mercadopago/reconciliar-pix", { method: "POST" })
+      const data = await r.json().catch(() => null)
+      if (r.ok && data) {
+        alert(`Pix Mercado Pago verificado:\n${data.verificados} verificados, ${data.confirmados} confirmados, ${data.pendentes} pendentes, ${data.ignorados} ignorados, ${data.erros} erros.`)
+      } else {
+        alert("Não foi possível verificar os pagamentos Pix Mercado Pago.")
+      }
+    } catch {
+      alert("Erro de conexão ao verificar pagamentos Pix Mercado Pago.")
+    }
+    setReconciliandoPix(false)
   }
 
   const assumirConversa = async (phone: string) => {
@@ -1282,6 +1303,7 @@ export default function PedidosPage() {
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <button onClick={toggleMute} title={muteado ? "Sons desativados" : "Sons ativados"} style={{ fontSize: 15, lineHeight: 1, background: muteado ? "color-mix(in srgb, var(--danger) 10%, transparent)" : "transparent", border: `1px solid ${muteado ? "color-mix(in srgb, var(--danger) 35%, transparent)" : "var(--surface-secondary)"}`, padding: "5px 8px", borderRadius: 16 }}>{muteado ? "🔇" : "🔊"}</button>
               {isAdmin && <button onClick={() => router.push("/admin")} style={{ fontSize: 11, fontWeight: 800, color: "var(--foreground-secondary)", background: "transparent", border: "1px solid var(--surface-secondary)", padding: "6px 10px", borderRadius: 16 }}>Admin</button>}
+              {isAdmin && <button onClick={reconciliarPixMercadoPago} disabled={reconciliandoPix} title="Consulta a API do Mercado Pago para confirmar Pix pendentes" style={{ fontSize: 11, fontWeight: 800, color: "var(--foreground-secondary)", background: "transparent", border: "1px solid var(--surface-secondary)", padding: "6px 10px", borderRadius: 16, opacity: reconciliandoPix ? 0.6 : 1, cursor: reconciliandoPix ? "not-allowed" : "pointer" }}>{reconciliandoPix ? "Verificando..." : "Verificar pagamentos Pix Mercado Pago"}</button>}
               <button onClick={() => fetch("/api/auth/logout", { method: "POST" }).then(() => router.push("/login"))} style={{ fontSize: 11, fontWeight: 800, color: "var(--foreground-muted)", background: "transparent", border: "1px solid var(--border)", padding: "6px 10px", borderRadius: 16 }}>Sair</button>
             </div>
           </div>
