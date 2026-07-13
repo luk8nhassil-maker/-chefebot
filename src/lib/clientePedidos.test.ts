@@ -18,17 +18,17 @@ import {
 } from "./clientePedidos";
 
 describe("telefoneCanonicoBr — normalização canônica de telefone brasileiro", () => {
-  test("10 dígitos (fixo, sem DDI) -> nacional, prefixa 55", () => {
-    expect(telefoneCanonicoBr("9974000691")).toBe("559974000691");
+  test("10 dígitos (fixo, sem DDI) -> nacional sem DDI", () => {
+    expect(telefoneCanonicoBr("9974000691")).toBe("9974000691");
   });
 
-  test("11 dígitos (celular, sem DDI) -> nacional, prefixa 55", () => {
-    expect(telefoneCanonicoBr("99974000691")).toBe("5599974000691");
+  test("11 dígitos (celular, sem DDI) -> nacional sem DDI", () => {
+    expect(telefoneCanonicoBr("99974000691")).toBe("99974000691");
   });
 
-  test("12/13 dígitos começando com 55 -> mantém como está", () => {
-    expect(telefoneCanonicoBr("5599974000691")).toBe("5599974000691");
-    expect(telefoneCanonicoBr("559974000691")).toBe("559974000691");
+  test("12/13 dígitos começando com 55 -> remove DDI", () => {
+    expect(telefoneCanonicoBr("5599974000691")).toBe("99974000691");
+    expect(telefoneCanonicoBr("559974000691")).toBe("9974000691");
   });
 
   test("12/13 dígitos que NÃO começam com 55 -> inválido (null), nunca correspondência parcial", () => {
@@ -46,7 +46,7 @@ describe("telefoneCanonicoBr — normalização canônica de telefone brasileiro
   });
 
   test("aceita formatação com parênteses/espaço/traço — só os dígitos importam", () => {
-    expect(telefoneCanonicoBr("(99) 97400-0691")).toBe("5599974000691");
+    expect(telefoneCanonicoBr("(99) 97400-0691")).toBe("99974000691");
   });
 
   test("vazio/ausente -> inválido, nunca combina com outro inválido", () => {

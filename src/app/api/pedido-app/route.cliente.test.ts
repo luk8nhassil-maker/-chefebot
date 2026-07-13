@@ -3,6 +3,25 @@ import { NextRequest } from "next/server";
 
 const redisStore = new Map<string, unknown>();
 
+function defaultEvalImpl(_script: string, keys: string[], args: unknown[]) {
+  if (keys.length === 1) {
+    const [key] = keys;
+    const [token] = args;
+    if (redisStore.get(key) === token) {
+      redisStore.delete(key);
+      return Promise.resolve(1);
+    }
+    return Promise.resolve(0);
+  }
+  const [lockKey, estadoKey] = keys;
+  const [token, estadoJson] = args;
+  if (redisStore.get(lockKey) === token) {
+    redisStore.set(estadoKey, JSON.parse(String(estadoJson)));
+    return Promise.resolve(1);
+  }
+  return Promise.resolve(0);
+}
+
 vi.mock("@/lib/redis", () => ({
   redis: {
     get: vi.fn(async (key: string) => (redisStore.has(key) ? redisStore.get(key) : null)),
@@ -10,6 +29,7 @@ vi.mock("@/lib/redis", () => ({
       redisStore.set(key, value);
       return "OK";
     }),
+    eval: vi.fn(defaultEvalImpl),
   },
 }));
 
@@ -18,9 +38,19 @@ vi.mock("@/lib/numeracao", () => ({
 }));
 
 vi.mock("@/lib/clienteAuth", () => ({
-  CLIENTE_COOKIE: "cliente-token",
-  verificarTokenCliente: vi.fn(async (token: string) => {
-    if (token === "token-cliente-logado") return { clienteId: "cli_logado", telefone: "11900000001" };
+  resolverSessaoCliente: vi.fn(async (req: NextRequest) => {
+    if (req.cookies.get("cliente-token")?.value === "token-cliente-logado") {
+      return {
+        cliente: {
+          clienteId: "cli_11900000001",
+          telefone: "11900000001",
+          createdAt: "2026-07-13T10:00:00.000Z",
+          updatedAt: "2026-07-13T10:00:00.000Z",
+          lastLoginAt: "2026-07-13T10:00:00.000Z",
+        },
+        deveRenovar: false,
+      };
+    }
     return null;
   }),
 }));
@@ -60,6 +90,7 @@ describe("POST /api/pedido-app — vinculo opcional com area do cliente", () => 
     const pedidosSalvos = redisStore.get("pedidos") as Array<Record<string, unknown>>;
     expect(pedidosSalvos).toHaveLength(1);
     expect(pedidosSalvos[0].clienteId).toBeUndefined();
+    expect(pedidosSalvos[0].clienteVinculo).toBeUndefined();
   });
 
   test("cliente logado tem o pedido vinculado ao clienteId e a contagem de pizzas", async () => {
@@ -67,7 +98,8 @@ describe("POST /api/pedido-app — vinculo opcional com area do cliente", () => 
     expect(res.status).toBe(200);
 
     const pedidosSalvos = redisStore.get("pedidos") as Array<Record<string, unknown>>;
-    expect(pedidosSalvos[0].clienteId).toBe("cli_logado");
+    expect(pedidosSalvos[0].clienteId).toBe("cli_11900000001");
+    expect(pedidosSalvos[0].clienteVinculo).toBe("sessao");
     expect(pedidosSalvos[0].pizzasCount).toBe(2);
   });
 
@@ -79,6 +111,7 @@ describe("POST /api/pedido-app — vinculo opcional com area do cliente", () => 
 
     const pedidosSalvos = redisStore.get("pedidos") as Array<Record<string, unknown>>;
     expect(pedidosSalvos[0].clienteId).toBeUndefined();
+    expect(pedidosSalvos[0].clienteVinculo).toBeUndefined();
   });
 
   test("bebida nao entra na contagem de pizzas para fidelidade", async () => {

@@ -1,3 +1,5 @@
+import { normalizarTelefoneClienteBr } from "./clientes";
+
 // Lógica pura da área "Meus pedidos" do cliente (/cliente/pedidos) — extraída
 // da API e da tela para ser testável sem depender de Redis/DOM. Nada aqui
 // decide autenticação (isso é `clienteAuth.ts`/`clientes.ts`); este arquivo só
@@ -56,10 +58,7 @@ export type PedidoClienteResumo = {
 // plausível (nacional ou com DDI) — nunca correspondência parcial: um valor
 // inválido nunca é considerado igual a outro, mesmo que ambos sejam null.
 export function telefoneCanonicoBr(telefone: string | null | undefined): string | null {
-  const digitos = (telefone || "").replace(/\D/g, "");
-  if (digitos.length === 10 || digitos.length === 11) return `55${digitos}`;
-  if (digitos.length === 12 || digitos.length === 13) return digitos.startsWith("55") ? digitos : null;
-  return null;
+  return normalizarTelefoneClienteBr(telefone) || null;
 }
 
 // Compara dois telefones brasileiros pela forma canônica — nunca por

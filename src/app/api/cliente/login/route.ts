@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { gerarOtp, podeReenviarOtp } from "@/lib/clienteAuth";
-import { sanitizeTelefoneCliente } from "@/lib/clientes";
+import { normalizarTelefoneClienteBr } from "@/lib/clientes";
 import { obterConfigEvolution } from "@/lib/evolutionApi";
 
 function sanitizePhoneEnvio(telefone: string): string {
@@ -32,7 +32,7 @@ async function enviarOtpPorWhatsapp(telefone: string, codigo: string): Promise<v
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const telefone = sanitizeTelefoneCliente(body?.telefone || "");
+    const telefone = normalizarTelefoneClienteBr(body?.telefone || "");
     if (telefone.length < 10) {
       return NextResponse.json({ ok: false, error: "Telefone inválido" }, { status: 400 });
     }

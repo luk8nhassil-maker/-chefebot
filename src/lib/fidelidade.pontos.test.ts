@@ -4,7 +4,23 @@ const store = new Map<string, unknown>();
 
 vi.mock("@/lib/redis", () => ({
   redis: {
-    get: vi.fn(async (key: string) => (store.has(key) ? store.get(key) : null)),
+    get: vi.fn(async (key: string) => {
+      if (!store.has(key) && key.startsWith("cliente:")) {
+        const telefone = key.slice("cliente:".length);
+        if (telefone.replace(/\D/g, "").length >= 10) {
+          return {
+            clienteId: `cli_${telefone}`,
+            telefone,
+            createdAt: "2020-01-01T00:00:00.000Z",
+            updatedAt: "2020-01-01T00:00:00.000Z",
+            lastLoginAt: "2020-01-01T00:00:00.000Z",
+            pontosAtivos: true,
+            pontosAtivadoEm: "2020-01-01T00:00:00.000Z",
+          };
+        }
+      }
+      return store.has(key) ? store.get(key) : null;
+    }),
     set: vi.fn(async (key: string, value: unknown, opts?: { nx?: boolean }) => {
       if (opts?.nx && store.has(key)) return null;
       store.set(key, value);

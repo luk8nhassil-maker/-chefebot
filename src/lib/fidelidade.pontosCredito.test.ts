@@ -1,8 +1,23 @@
 import { vi, describe, test, expect, beforeEach } from "vitest";
 
 const store = new Map<string, unknown>();
+let clientesAutoAtivos = true;
 
 function realGet(key: string) {
+  if (!store.has(key) && clientesAutoAtivos && key.startsWith("cliente:")) {
+    const telefone = key.slice("cliente:".length);
+    if (telefone.replace(/\D/g, "").length >= 10) {
+      return {
+        clienteId: `cli_${telefone}`,
+        telefone,
+        createdAt: "2020-01-01T00:00:00.000Z",
+        updatedAt: "2020-01-01T00:00:00.000Z",
+        lastLoginAt: "2020-01-01T00:00:00.000Z",
+        pontosAtivos: true,
+        pontosAtivadoEm: "2020-01-01T00:00:00.000Z",
+      };
+    }
+  }
   return store.has(key) ? store.get(key) : null;
 }
 function realSet(key: string, value: unknown, opts?: { nx?: boolean; ex?: number }) {
@@ -18,10 +33,10 @@ function realDel(key: string) {
 // Replica a semântica dos dois scripts Lua reais sem interpretar Lua:
 // - liberarLockPontosSeDono (1 chave): GET == token -> DEL
 // - persistirEstadoPontosSeDono (2 chaves): GET(lock) == token -> SET(estado)
-function realEval(_script: string, keys: string[], args: string[]) {
+function realEval(_script: string, keys: string[], args: unknown[]) {
   if (keys.length === 1) {
     const [key] = keys;
-    const [token] = args;
+    const [token] = args as string[];
     if (store.get(key) === token) {
       store.delete(key);
       return 1;
@@ -29,7 +44,7 @@ function realEval(_script: string, keys: string[], args: string[]) {
     return 0;
   }
   const [lockKey, estadoKey] = keys;
-  const [token, estadoJson] = args;
+  const [token, estadoJson] = args as string[];
   if (store.get(lockKey) === token) {
     store.set(estadoKey, JSON.parse(estadoJson as unknown as string));
     return 1;
@@ -67,10 +82,11 @@ import { obterOuCriarCliente, clienteIdDoTelefone } from "./clientes";
 
 beforeEach(async () => {
   store.clear();
+  clientesAutoAtivos = true;
   vi.mocked(redis.get).mockImplementation(async (key: string) => realGet(key));
   vi.mocked(redis.set).mockImplementation(async (key: string, value: unknown, opts?: { nx?: boolean; ex?: number }) => realSet(key, value, opts));
   vi.mocked(redis.del).mockImplementation(async (key: string) => realDel(key));
-  vi.mocked(redis.eval).mockImplementation(async (script: string, keys: string[], args: string[]) => realEval(script, keys, args));
+  vi.mocked(redis.eval).mockImplementation(async (script: string, keys: string[], args: unknown[]) => realEval(script, keys, args));
   await salvarConfigFidelidadePontos({
     ativo: true,
     metaPontos: 720,
@@ -110,13 +126,14 @@ describe("creditarPontosPedidoEntregue — identidade canônica por telefone", (
     expect(saldo.disponivel).toBe(50);
   });
 
-  test("4. cliente sem perfil ativado no app acumula normalmente", async () => {
+  test("4. cliente sem participacao ativada nao acumula saldo confirmado", async () => {
+    clientesAutoAtivos = false;
     await creditarPontosPedidoEntregue({ id: "ped_sem_perfil", status: "entregue", telefone: "86999990098", total: 77 });
 
     // nenhum registro de Cliente (obterOuCriarCliente) foi criado — o extrato
     // de fidelidade existe pelo telefone independente do perfil no app.
     const saldo = await obterSaldoPontos(clienteIdDoTelefone("86999990098"));
-    expect(saldo.disponivel).toBe(77);
+    expect(saldo.disponivel).toBe(0);
   });
 
   test("5. ao ativar perfil com o mesmo telefone, o saldo já existente é encontrado", async () => {
@@ -252,7 +269,6 @@ describe("atomicidade — movimento e recompensa desbloqueada são um único reg
     // segundo pedido cruzaria a meta (80 + 30 = 110 >= 100) — mas a escrita (que
     // gravaria extrato E recompensa juntos, na mesma chamada via redis.eval) falha simulada
     const evalMock = vi.mocked(redis.eval);
-    const implementacaoRealEval = evalMock.getMockImplementation()!;
     evalMock.mockImplementationOnce(async () => {
       throw new Error("falha simulada ao persistir estado com recompensa");
     }); // escrita do estado — falha ANTES de gravar qualquer coisa
@@ -343,7 +359,7 @@ describe("propriedade do lock — token único e compare-and-delete seguro", () 
     const implementacaoReal = setMock.getMockImplementation()!;
     setMock.mockImplementation(async (key: string, value: unknown, opts?: { nx?: boolean; ex?: number }) => {
       if (key === chave) tokensObservados.push(value);
-      return implementacaoReal(key, value, opts);
+      return implementacaoReal(key, value, opts as never);
     });
 
     await creditarPontosPedidoEntregue({ id: "ped_tok_1", status: "entregue", telefone: "86999990032", total: 10 });
@@ -422,7 +438,7 @@ describe("16. notificação de recompensa protegida por feature flag", () => {
 
 describe("1. proteção contra stale writer — escrita condicionada à propriedade do lock", () => {
   test("processo com token antigo nunca sobrescreve o estado gravado pelo novo dono do lock", async () => {
-    const clienteId = "cli_stale_writer";
+    const clienteId = "cli_11999998888";
     const chave = chaveLockPontos(clienteId);
 
     // "Processo A" adquire o lock

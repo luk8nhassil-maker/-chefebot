@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verificarTokenCliente, CLIENTE_COOKIE } from "@/lib/clienteAuth";
-import { buscarClientePorId } from "@/lib/clientes";
+import { resolverSessaoCliente, definirCookieSessaoCliente } from "@/lib/clienteAuth";
 import { redis } from "@/lib/redis";
 import {
   filtrarPedidosDoCliente,
@@ -16,14 +15,9 @@ import {
 // aqui, de propósito. Sem sessão válida -> sempre 401 (cookie ausente, token
 // inválido ou cliente inexistente tratam-se igual, mesma resposta genérica).
 export async function GET(req: NextRequest) {
-  const token = req.cookies.get(CLIENTE_COOKIE)?.value ?? null;
-  if (!token) return NextResponse.json({ error: "Nao autorizado" }, { status: 401 });
-
-  const payload = await verificarTokenCliente(token);
-  if (!payload) return NextResponse.json({ error: "Nao autorizado" }, { status: 401 });
-
-  const cliente = await buscarClientePorId(payload.clienteId);
-  if (!cliente) return NextResponse.json({ error: "Nao autorizado" }, { status: 401 });
+  const sessao = await resolverSessaoCliente(req);
+  if (!sessao) return NextResponse.json({ error: "Nao autorizado" }, { status: 401 });
+  const { cliente } = sessao;
 
   let pedidos: PedidoClienteFonte[] = [];
   try {
@@ -41,8 +35,10 @@ export async function GET(req: NextRequest) {
   const ordenados = ordenarPedidosMaisNovoPrimeiro(doCliente);
   const resumos = ordenados.map(paraResumoPublico);
 
-  return new NextResponse(JSON.stringify({ pedidos: resumos }), {
+  const res = new NextResponse(JSON.stringify({ pedidos: resumos }), {
     status: 200,
     headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
   });
+  if (sessao.deveRenovar && sessao.novoToken) definirCookieSessaoCliente(res, sessao.novoToken);
+  return res;
 }

@@ -5,13 +5,10 @@ import { proximoNumeroPedido } from '@/lib/numeracao'
 import { confirmarPixMetadata, criarPixMetadata, sanitizarPedidoPixResposta, type PixMetadata } from '@/lib/pix'
 import type { PedidoEntregador } from '@/types/entregador'
 import {
-  creditarFidelidadePedido,
-  creditarPontosPedidoEntregue,
-  calcularPontosElegiveisPedido,
-  registrarMovimentoPontosIdempotente,
-  construirEventoIdPontos,
-  obterExtratoPontos,
-  derivarClienteIdPorTelefone,
+  creditarFidelidadeEfetiva,
+  confirmarCompraECreditarPontos,
+  estornarPontosPedidoConfirmado,
+  resolverProprietarioFidelidadePedido,
   reverterResgateConfirmado,
 } from '@/lib/fidelidade'
 import { obterConfigEvolution } from '@/lib/evolutionApi'
@@ -40,7 +37,10 @@ type Pedido = {
   referencia?: string
   observacao?: string
   horarioInicio?: string
+  criadoEm?: string
   clienteId?: string
+  clienteVinculo?: 'sessao' | 'telefone'
+  confirmacaoCompra?: { confirmadoEm: string; origem: 'pix_manual' | 'pix_automatico' | 'pix_webhook' | 'confirmacao_operacional' }
   pizzasCount?: number
   resgateId?: string
   descontoFidelidade?: number
@@ -139,10 +139,19 @@ export async function PATCH(req: NextRequest) {
   // Registra origem/horário no metadata (auditoria); confirmação anterior
   // por webhook/comprovante nunca é sobrescrita pelo clique manual.
   if (pixConfirmado !== undefined) {
+    const pixJaConfirmado = pedidos[index].pixConfirmado === true || pedidos[index].pix?.status === 'confirmado'
+    const confirmadoEm = new Date().toISOString()
     pedidos[index] = pixConfirmado === true
-      ? { ...pedidos[index], pixConfirmado: true, pix: confirmarPixMetadata(pedidos[index].pix, 'manual') }
+      ? { ...pedidos[index], pixConfirmado: true, pix: confirmarPixMetadata(pedidos[index].pix, 'manual', confirmadoEm), confirmacaoCompra: pedidos[index].confirmacaoCompra ?? { confirmadoEm, origem: 'pix_manual' as const } }
       : { ...pedidos[index], pixConfirmado }
     await redis.set('pedidos', pedidos)
+    if (pixConfirmado === true && !pixJaConfirmado) {
+      try {
+        await confirmarCompraECreditarPontos(id, 'pix_manual')
+      } catch (err) {
+        console.error('[ChefeBot] Erro ao confirmar pontos por Pix manual (ignorado):', err)
+      }
+    }
     return NextResponse.json({ ok: true })
   }
 
@@ -152,6 +161,7 @@ export async function PATCH(req: NextRequest) {
     status,
     ...(status === 'cancelado' ? { cancelamentoSolicitado: false } : {}),
     ...(status === 'em_preparo' && !pedidos[index].horarioInicio ? { horarioInicio: agora } : {}),
+    ...(statusAnterior === 'novo' && status === 'em_preparo' && !pedidos[index].confirmacaoCompra ? { confirmacaoCompra: { confirmadoEm: new Date().toISOString(), origem: 'confirmacao_operacional' as const } } : {}),
   }
 
   // Salva entregador no pedido se informado
@@ -159,6 +169,14 @@ export async function PATCH(req: NextRequest) {
     pedidos[index] = { ...pedidos[index], entregador }
   }
   await redis.set('pedidos', pedidos)
+
+  if (statusAnterior === 'novo' && status === 'em_preparo') {
+    try {
+      await confirmarCompraECreditarPontos(id, 'confirmacao_operacional')
+    } catch (err) {
+      console.error('[ChefeBot] Erro ao confirmar pontos por acao operacional (ignorado):', err)
+    }
+  }
 
   if (!silent) {
     await notificarCliente(pedidos[index].telefone, status, pedidos[index].cliente)
@@ -254,34 +272,26 @@ export async function PATCH(req: NextRequest) {
     }
 
     // Credito de fidelidade: so conta quando o pedido chega a 'entregue'
-    // (finalizado com sucesso). Idempotente por pedidoId — nunca duplica.
-    // Isolado em try/catch proprio: falha aqui jamais pode afetar a resposta
-    // do PATCH nem impedir a mudanca de status do pedido, que ja foi salva.
+    // (finalizado com sucesso). `creditarFidelidadeEfetiva` decide, a partir
+    // de uma unica leitura de config:fidelidade:pontos, qual dos dois
+    // modelos credita (nunca os dois — ver Nivel 6.6.1). Idempotente por
+    // pedidoId em ambos os modelos — nunca duplica. Isolado em try/catch
+    // proprio: falha aqui jamais pode afetar a resposta do PATCH nem impedir
+    // a mudanca de status do pedido, que ja foi salva.
     try {
-      await creditarFidelidadePedido({
-        pedidoId: id,
-        clienteId: pedidos[index].clienteId,
-        pizzas: pedidos[index].pizzasCount ?? 0,
-      })
-    } catch (err) {
-      console.error('[ChefeBot] Erro ao creditar fidelidade (ignorado):', err)
-    }
-
-    // Fidelidade por pontos (novo modelo, R$1 = 1 ponto): roda em paralelo ao
-    // credito antigo acima, sem substitui-lo. Mesma protecao — isolado em
-    // try/catch proprio, idempotente por pedidoId, nunca impede o pedido de
-    // ser marcado como entregue nem a resposta do PATCH.
-    try {
-      await creditarPontosPedidoEntregue({
+      await creditarFidelidadeEfetiva({
         id,
         status: 'entregue',
         telefone: pedidos[index].telefone,
         clienteId: pedidos[index].clienteId,
+        clienteVinculo: pedidos[index].clienteVinculo,
         total: pedidos[index].total,
         taxaEntrega: pedidos[index].taxaEntrega,
+        criadoEm: pedidos[index].criadoEm,
+        pizzasCount: pedidos[index].pizzasCount ?? 0,
       })
     } catch (err) {
-      console.error('[ChefeBot] Erro ao creditar pontos de fidelidade (ignorado):', err)
+      console.error('[ChefeBot] Erro ao creditar fidelidade (ignorado):', err)
     }
   }
 
@@ -291,40 +301,10 @@ export async function PATCH(req: NextRequest) {
   // se houver confirmado original no extrato.
   if (status === 'cancelado' && statusAnterior !== 'cancelado') {
     try {
-      const clienteIdPontos = derivarClienteIdPorTelefone(pedidos[index].telefone)
-      if (clienteIdPontos) {
-        const pontosElegiveis = calcularPontosElegiveisPedido({
-          total: pedidos[index].total,
-          taxaEntrega: pedidos[index].taxaEntrega,
-        })
-        if (statusAnterior === 'entregue') {
-          if (pontosElegiveis > 0) {
-            const extratoAtual = await obterExtratoPontos(clienteIdPontos)
-            const teveConfirmado = extratoAtual.some(m => m.pedidoId === id && m.tipo === 'confirmado')
-            if (teveConfirmado) {
-              await registrarMovimentoPontosIdempotente(clienteIdPontos, {
-                eventoId: construirEventoIdPontos(id, 'estornado'),
-                pedidoId: id,
-                tipo: 'estornado',
-                pontos: pontosElegiveis,
-                motivo: `Pedido ${id} corrigido para cancelado apos entrega`,
-              })
-            }
-          }
-        } else if (pontosElegiveis > 0) {
-          await registrarMovimentoPontosIdempotente(clienteIdPontos, {
-            eventoId: construirEventoIdPontos(id, 'cancelado'),
-            pedidoId: id,
-            tipo: 'cancelado',
-            pontos: pontosElegiveis,
-            motivo: `Pedido ${id} cancelado antes da entrega`,
-          })
-        }
-      }
+      await estornarPontosPedidoConfirmado(pedidos[index])
     } catch (err) {
-      console.error('[ChefeBot] Erro ao registrar cancelamento de pontos (ignorado):', err)
+      console.error('[ChefeBot] Erro ao estornar pontos confirmados (ignorado):', err)
     }
-
   }
 
   // Reverte resgate de fidelidade (Etapa 5), se este pedido tinha usado um:
@@ -332,10 +312,10 @@ export async function PATCH(req: NextRequest) {
   // quando o pedido ja esta cancelado. A lib garante idempotencia.
   if (status === 'cancelado' && pedidos[index].resgateId) {
     try {
-      const clienteIdResgate = derivarClienteIdPorTelefone(pedidos[index].telefone)
-      if (clienteIdResgate) {
+      const proprietarioResgate = await resolverProprietarioFidelidadePedido(pedidos[index])
+      if (proprietarioResgate) {
         await reverterResgateConfirmado(
-          clienteIdResgate,
+          proprietarioResgate.clienteId,
           pedidos[index].resgateId,
           `Pedido ${id} cancelado apos usar resgate de fidelidade`
         )
@@ -361,6 +341,7 @@ export async function POST(req: NextRequest) {
 
   const pedidos = await getPedidos()
   const numeroPedido = await proximoNumeroPedido()
+  const criadoEm = new Date().toISOString()
   const agora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' })
   const pedidoId = Date.now().toString()
   const pix = criarPixMetadata(pedidoId, pagamento ? String(pagamento) : undefined, Number(total) || 0)
@@ -368,6 +349,7 @@ export async function POST(req: NextRequest) {
   const novoPedido: Pedido = {
     id: pedidoId,
     numero: numeroPedido,
+    criadoEm,
     cliente: String(cliente),
     telefone: String(telefone || ''),
     itens: Array.isArray(itens) ? itens.filter(Boolean) : [String(itens)],

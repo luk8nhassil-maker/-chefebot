@@ -8,8 +8,8 @@ import { criarPixMetadata, prepararPixProviderMercadoPago, serializarPixCliente 
 import { PROMOS_KEY, catalogoDoMenu, dentroDaJanela, precoFinalPromocao, promocaoIndisponivel, type Promocao } from "@/lib/promocoes";
 import { validarTokenCardapio } from "@/lib/cardapioToken";
 import { temDinheiroNoPagamento, valorDinheiroEsperado } from "@/lib/bot";
-import { verificarTokenCliente, CLIENTE_COOKIE } from "@/lib/clienteAuth";
-import { contarPizzas, calcularPontosElegiveisPedido, registrarMovimentoPontosIdempotente, construirEventoIdPontos, derivarClienteIdPorTelefone, obterReservasResgatePontos, confirmarResgatePontos } from "@/lib/fidelidade";
+import { resolverSessaoCliente } from "@/lib/clienteAuth";
+import { contarPizzas, calcularPontosElegiveisPedido, registrarMovimentoPontosIdempotente, construirEventoIdPontos, derivarClienteIdPorTelefone, obterReservasResgatePontos, confirmarResgatePontos, resolverProprietarioFidelidadePedido } from "@/lib/fidelidade";
 
 export const maxDuration = 20;
 
@@ -204,16 +204,24 @@ export async function POST(req: NextRequest) {
 
     const subtotal = itensValidados.reduce((s, item) => s + item.unitPrice! * item.qty, 0);
 
+    let clienteId: string | undefined;
+    try {
+      const sessaoCliente = await resolverSessaoCliente(req);
+      if (sessaoCliente) clienteId = derivarClienteIdPorTelefone(sessaoCliente.cliente.telefone) ?? sessaoCliente.cliente.clienteId;
+    } catch (err) {
+      console.error("[ChefeBot] Erro ao resolver cliente do pedido (ignorado):", err);
+    }
+
     // Resgate de fidelidade (Etapa 5): desconto calculado EXCLUSIVAMENTE no
     // servidor, a partir de uma reserva já validada (nunca um valor vindo do
-    // cliente). Identidade canônica é sempre o telefone do pedido — a mesma
-    // regra usada para crédito/previsto. Reserva expirada, inexistente ou já
-    // usada rejeita o pedido (isto é dinheiro, não um efeito colateral
-    // best-effort como o crédito de pontos).
+    // cliente). Com sessão válida, a conta autenticada é a proprietária do
+    // resgate; sem sessão, o telefone do pedido segue como fallback. Reserva
+    // expirada, inexistente ou já usada rejeita o pedido (isto é dinheiro,
+    // não um efeito colateral best-effort como o crédito de pontos).
     let descontoFidelidade = 0;
     let resgateAplicado: { clienteId: string; resgateId: string } | null = null;
     if (body.resgateId) {
-      const clienteIdResgate = derivarClienteIdPorTelefone(telefonePedido);
+      const clienteIdResgate = clienteId ?? derivarClienteIdPorTelefone(telefonePedido);
       if (!clienteIdResgate) {
         return NextResponse.json({ ok: false, error: "Telefone inválido para aplicar o resgate" }, { status: 400 });
       }
@@ -253,21 +261,10 @@ export async function POST(req: NextRequest) {
     const endereco = buildEnderecoApp({ tipoEntrega: body.tipoEntrega, rua: body.rua, numero: body.numero, bairro: body.bairro });
 
     // Vinculo com area do cliente (opcional): se o cliente estiver logado
-    // (cookie cliente-token valido), o pedido recebe clienteId + contagem de
-    // pizzas para credito de fidelidade futuro. Pedido anonimo/convidado
-    // segue funcionando normalmente — qualquer falha aqui e ignorada e o
-    // pedido NUNCA deixa de ser criado por causa da fidelidade/login.
-    let clienteId: string | undefined;
-    try {
-      const clienteToken = req.cookies.get(CLIENTE_COOKIE)?.value;
-      if (clienteToken) {
-        const payloadCliente = await verificarTokenCliente(clienteToken);
-        if (payloadCliente) clienteId = payloadCliente.clienteId;
-      }
-    } catch (err) {
-      console.error("[ChefeBot] Erro ao resolver cliente do pedido (ignorado):", err);
-    }
-
+    // (cookie cliente-token valido), o pedido recebe clienteId server-side e
+    // marcador de sessao. Pedido anonimo/convidado segue funcionando
+    // normalmente — qualquer falha aqui e ignorada e o pedido NUNCA deixa de
+    // ser criado por causa da fidelidade/login.
     let pizzasCount = 0;
     try {
       pizzasCount = contarPizzas(body.itens);
@@ -275,6 +272,7 @@ export async function POST(req: NextRequest) {
       console.error("[ChefeBot] Erro ao contar pizzas para fidelidade (ignorado):", err);
     }
 
+    const criadoEm = new Date().toISOString();
     const pedidoId = Date.now().toString();
     const numeroPedido = await proximoNumeroPedido();
     const statusToken = criarTokenPublicoAcompanhamento();
@@ -288,10 +286,11 @@ export async function POST(req: NextRequest) {
     const novoPedido = {
       id: pedidoId,
       numero: numeroPedido,
+      criadoEm,
       cliente: body.cliente,
       telefone: telefonePedido,
       ...(whatsappVinculado ? { whatsappVinculado: true } : {}),
-      ...(clienteId ? { clienteId } : {}),
+      ...(clienteId ? { clienteId, clienteVinculo: "sessao" as const } : {}),
       ...(pizzasCount > 0 ? { pizzasCount } : {}),
       ...(resgateAplicado ? { resgateId: resgateAplicado.resgateId, descontoFidelidade } : {}),
       itens,
@@ -330,15 +329,15 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Pontos previstos (modelo novo): a identidade canonica e o telefone do
-    // pedido, nao a existencia de perfil ativo. A estimativa nunca afeta o
-    // saldo confirmado e falhas aqui nao impedem a criacao do pedido.
-    const clienteIdPontos = derivarClienteIdPorTelefone(telefonePedido);
-    if (clienteIdPontos) {
+    // Pontos previstos (modelo novo): usa o mesmo proprietario resolvido para
+    // credito efetivo. A estimativa nunca afeta o saldo confirmado e falhas
+    // aqui nao impedem a criacao do pedido.
+    const proprietarioPontos = await resolverProprietarioFidelidadePedido(novoPedido);
+    if (proprietarioPontos) {
       try {
         const pontosElegiveis = calcularPontosElegiveisPedido({ total, taxaEntrega: taxa });
         if (pontosElegiveis > 0) {
-          await registrarMovimentoPontosIdempotente(clienteIdPontos, {
+          await registrarMovimentoPontosIdempotente(proprietarioPontos.clienteId, {
             eventoId: construirEventoIdPontos(pedidoId, "previsto"),
             pedidoId,
             tipo: "previsto",

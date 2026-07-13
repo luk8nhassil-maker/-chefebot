@@ -5,27 +5,62 @@ const extratosPorCliente = new Map<string, unknown[]>();
 let configPontos: Record<string, unknown> | null = null;
 let pizzasAntigasPorCliente = new Map<string, number>();
 let recompensasPorCliente = new Map<string, unknown[]>();
+let pedidosCliente: unknown[] = [];
+
+vi.mock("@/lib/redis", () => ({
+  redis: {
+    get: vi.fn(async (key: string) => (key === "pedidos" ? pedidosCliente : null)),
+  },
+}));
 
 vi.mock("@/lib/clienteAuth", () => ({
   CLIENTE_COOKIE: "cliente-token",
-  verificarTokenCliente: vi.fn(async (token: string) => {
-    if (token === "token-cliente-a") return { clienteId: "cli_a", telefone: "11900000001" };
-    if (token === "token-cliente-b") return { clienteId: "cli_b", telefone: "11900000002" };
+  // telefone "cli_a"/"cli_b" (sem dígitos) é proposital: derivarClienteIdPorTelefone
+  // não consegue derivar nada dele (menos de 10 dígitos), então a rota cai no
+  // fallback `cliente.clienteId` — é isso que faz `extratosPorCliente.set("cli_a", ...)`
+  // bater com o clienteIdPontos resolvido de fato.
+  resolverSessaoCliente: vi.fn(async (req: NextRequest) => {
+    const token = req.cookies.get("cliente-token")?.value;
+    if (token === "token-cliente-a") {
+      return { cliente: { clienteId: "cli_a", telefone: "cli_a", nome: "Cliente A", createdAt: "", updatedAt: "", lastLoginAt: "" }, deveRenovar: false };
+    }
+    if (token === "token-cliente-b") {
+      return { cliente: { clienteId: "cli_b", telefone: "cli_b", nome: "Cliente B", createdAt: "", updatedAt: "", lastLoginAt: "" }, deveRenovar: false };
+    }
+    if (token === "token-cliente-real") {
+      return {
+        cliente: {
+          clienteId: "cli_86999998888",
+          telefone: "86999998888",
+          nome: "Cliente Real",
+          createdAt: "2026-07-13T10:00:00.000Z",
+          updatedAt: "2026-07-13T10:00:00.000Z",
+          lastLoginAt: "2026-07-13T10:00:00.000Z",
+          pontosAtivos: true,
+          pontosAtivadoEm: "2026-07-13T11:00:00.000Z",
+        },
+        deveRenovar: false,
+      };
+    }
+    if (token === "token-cliente-0691") {
+      return {
+        cliente: {
+          clienteId: "cli_99974000691",
+          telefone: "99974000691",
+          nome: "Cliente 0691",
+          createdAt: "2026-07-13T10:00:00.000Z",
+          updatedAt: "2026-07-13T10:00:00.000Z",
+          lastLoginAt: "2026-07-13T10:00:00.000Z",
+          pontosAtivos: true,
+          pontosAtivadoEm: "2026-07-13T11:00:00.000Z",
+        },
+        deveRenovar: false,
+      };
+    }
     return null;
   }),
+  definirCookieSessaoCliente: vi.fn(),
 }));
-
-vi.mock("@/lib/clientes", async () => {
-  const actual = await vi.importActual<typeof import("@/lib/clientes")>("@/lib/clientes");
-  return {
-    ...actual,
-    buscarClientePorId: vi.fn(async (clienteId: string) => {
-      if (clienteId === "cli_a") return { clienteId: "cli_a", telefone: "cli_a", nome: "Cliente A", createdAt: "", updatedAt: "", lastLoginAt: "" };
-      if (clienteId === "cli_b") return { clienteId: "cli_b", telefone: "cli_b", nome: "Cliente B", createdAt: "", updatedAt: "", lastLoginAt: "" };
-      return null;
-    }),
-  };
-});
 
 vi.mock("@/lib/fidelidade", async () => {
   const actual = await vi.importActual<typeof import("@/lib/fidelidade")>("@/lib/fidelidade");
@@ -35,6 +70,28 @@ vi.mock("@/lib/fidelidade", async () => {
     obterConfigFidelidadePontos: vi.fn(async () => configPontos ?? actual.CONFIG_FIDELIDADE_PONTOS_PADRAO),
     obterSaldoAntigoPizzas: vi.fn(async (clienteId: string) => pizzasAntigasPorCliente.get(clienteId) ?? 0),
     obterRecompensasPontos: vi.fn(async (clienteId: string) => recompensasPorCliente.get(clienteId) ?? []),
+    reconciliarPontosClientePedidos: vi.fn(async (cliente: { clienteId: string; telefone: string }, pedidos: Array<Record<string, unknown>>) => {
+      const clienteId = actual.derivarClienteIdPorTelefone(cliente.telefone) ?? cliente.clienteId;
+      const existente = extratosPorCliente.get(clienteId) ?? [];
+      const novos = pedidos
+        .filter((pedido) => {
+          const donoSessao = typeof pedido.clienteId === "string" && actual.derivarClienteIdPorTelefone(pedido.clienteId) === clienteId;
+          const donoTelefone = !pedido.clienteId && actual.derivarClienteIdPorTelefone(String(pedido.telefone ?? "")) === clienteId;
+          return (donoSessao || donoTelefone) && pedido.pixConfirmado === true && pedido.status !== "cancelado";
+        })
+        .filter((pedido) => !existente.some((m) => (m as { pedidoId?: unknown; tipo?: unknown }).pedidoId === pedido.id && (m as { tipo?: unknown }).tipo === "confirmado"))
+        .map((pedido) => ({
+          movimentoId: `mov_${String(pedido.id)}`,
+          clienteId,
+          pedidoId: pedido.id,
+          tipo: "confirmado",
+          pontos: 45,
+          motivo: "recuperado",
+          createdAt: "2026-07-13T12:30:00.000Z",
+        }));
+      if (novos.length > 0) extratosPorCliente.set(clienteId, [...existente, ...novos]);
+      return { verificados: pedidos.length, creditados: novos.length };
+    }),
   };
 });
 
@@ -60,6 +117,7 @@ beforeEach(() => {
   extratosPorCliente.clear();
   pizzasAntigasPorCliente = new Map();
   recompensasPorCliente = new Map();
+  pedidosCliente = [];
   configPontos = null;
 });
 

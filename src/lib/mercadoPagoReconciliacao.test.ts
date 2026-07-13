@@ -12,6 +12,15 @@ const { store, redisMock } = vi.hoisted(() => {
     // Simula EVAL o suficiente para o compare-and-delete do lock: só o
     // script usado por liberarLockSeDono (get==arg -> del) é suportado.
     eval: vi.fn(async (_script: string, keys: string[], args: string[]) => {
+      if (keys.length === 2) {
+        const [lockKey, estadoKey] = keys;
+        const [token, estadoJson] = args;
+        if (store.get(lockKey) === token) {
+          store.set(estadoKey, JSON.parse(estadoJson));
+          return 1;
+        }
+        return 0;
+      }
       const [key] = keys;
       const [esperado] = args;
       if (store.get(key) === esperado) {
@@ -43,11 +52,39 @@ import {
   selecionarPedidosPixMercadoPagoPendentes,
   reconciliarPixMercadoPago,
 } from "./mercadoPagoReconciliacao";
+import { obterExtratoPontos, obterSaldoPontos } from "./fidelidade";
 
-function pedidoMP(overrides: Record<string, unknown> = {}) {
+type PedidoMPTeste = {
+  id: string;
+  criadoEm: string;
+  total: number;
+  taxaEntrega: number;
+  telefone: string;
+  status: string;
+  pix?: {
+    provider?: "mercadopago";
+    providerPaymentId?: string;
+    txid?: string;
+    valorEsperado?: number;
+    status?: "pendente" | "confirmado";
+  };
+  pixConfirmado?: boolean;
+};
+
+type PedidoSalvoTeste = Record<string, unknown> & {
+  pix?: Record<string, unknown>;
+  pixConfirmado?: boolean;
+  total?: number;
+  status?: string;
+};
+
+function pedidoMP(overrides: Record<string, unknown> = {}): PedidoMPTeste {
   return {
     id: "ped-1",
+    criadoEm: "2026-07-13T12:00:00.000Z",
     total: 50,
+    taxaEntrega: 5,
+    telefone: "86999998888",
     status: "novo",
     pix: {
       provider: "mercadopago",
@@ -57,7 +94,7 @@ function pedidoMP(overrides: Record<string, unknown> = {}) {
       status: "pendente",
     },
     ...overrides,
-  };
+  } as PedidoMPTeste;
 }
 
 function pagamento(overrides: Record<string, unknown> = {}) {
@@ -81,6 +118,16 @@ function falha(status: number | null, motivo: string) {
 
 beforeEach(() => {
   store.clear();
+  store.set("cliente:86999998888", {
+    clienteId: "cli_86999998888",
+    telefone: "86999998888",
+    createdAt: "2026-07-13T11:00:00.000Z",
+    updatedAt: "2026-07-13T11:00:00.000Z",
+    lastLoginAt: "2026-07-13T11:00:00.000Z",
+    pontosAtivos: true,
+    pontosAtivadoEm: "2026-07-13T11:00:00.000Z",
+  });
+  store.set("config:fidelidade:pontos", { ativo: true, metaPontos: 720, descricaoRecompensa: "1 Pizza Familia" });
   vi.clearAllMocks();
 });
 
@@ -133,14 +180,19 @@ describe("reconciliarPixMercadoPago", () => {
     const resumo = await reconciliarPixMercadoPago();
 
     expect(resumo).toMatchObject({ verificados: 1, confirmados: 1, pendentes: 0, ignorados: 0, erros: 0 });
-    const pedidos = store.get("pedidos") as any[];
+    const pedidos = store.get("pedidos") as PedidoSalvoTeste[];
     expect(pedidos[0].pixConfirmado).toBe(true);
     expect(pedidos[0].pix).toMatchObject({
       status: "confirmado",
       confirmadoPor: "conciliador_mercadopago",
       providerPaymentId: "MP-1",
     });
-    expect(typeof pedidos[0].pix.confirmadoEm).toBe("string");
+    expect(typeof pedidos[0].pix!.confirmadoEm).toBe("string");
+    const extrato = await obterExtratoPontos("cli_86999998888");
+    expect(extrato).toHaveLength(1);
+    expect(extrato[0]).toMatchObject({ tipo: "confirmado", pontos: 45, eventoId: "confirmado:ped-1" });
+    expect(extrato[0].motivo).toContain("pix_automatico");
+    expect((await obterSaldoPontos("cli_86999998888")).disponivel).toBe(45);
   });
 
   test("valor divergente não confirma", async () => {
@@ -151,7 +203,7 @@ describe("reconciliarPixMercadoPago", () => {
 
     expect(resumo).toMatchObject({ verificados: 1, confirmados: 0, ignorados: 1 });
     expect(resumo.detalhes[0]).toMatchObject({ outcome: "ignorado", motivo: "valor_divergente" });
-    const pedidos = store.get("pedidos") as any[];
+    const pedidos = store.get("pedidos") as PedidoSalvoTeste[];
     expect(pedidos[0].pixConfirmado).toBeUndefined();
   });
 
@@ -181,9 +233,9 @@ describe("reconciliarPixMercadoPago", () => {
     const resumo = await reconciliarPixMercadoPago();
 
     expect(resumo).toMatchObject({ confirmados: 0, pendentes: 1, ignorados: 0 });
-    const pedidos = store.get("pedidos") as any[];
+    const pedidos = store.get("pedidos") as PedidoSalvoTeste[];
     expect(pedidos[0].pixConfirmado).toBeUndefined();
-    expect(pedidos[0].pix.status).toBe("pendente");
+    expect(pedidos[0].pix!.status).toBe("pendente");
   });
 
   test("in_process também é tratado como pendente, não confirma", async () => {
@@ -273,9 +325,9 @@ describe("reconciliarPixMercadoPago", () => {
     const resumo = await reconciliarPixMercadoPago();
 
     expect(resumo).toMatchObject({ verificados: 2, confirmados: 1, pendentes: 1 });
-    const pedidos = store.get("pedidos") as any[];
-    expect(pedidos.find((p) => p.id === "ped-1").pixConfirmado).toBe(true);
-    expect(pedidos.find((p) => p.id === "ped-2").pixConfirmado).toBeUndefined();
+    const pedidos = store.get("pedidos") as PedidoSalvoTeste[];
+    expect(pedidos.find((p) => p.id === "ped-1")!.pixConfirmado).toBe(true);
+    expect(pedidos.find((p) => p.id === "ped-2")!.pixConfirmado).toBeUndefined();
   });
 
   test("Pix copia e cola / fallback manual não são tocados (nenhum campo chavePix/beneficiario é alterado)", async () => {
@@ -288,7 +340,7 @@ describe("reconciliarPixMercadoPago", () => {
 
     await reconciliarPixMercadoPago();
 
-    const pedidos = store.get("pedidos") as any[];
+    const pedidos = store.get("pedidos") as PedidoSalvoTeste[];
     expect(pedidos[0].chavePix).toBe("99984430294");
     expect(pedidos[0].beneficiario).toBe("Geovane Sousa da Silva");
   });
@@ -427,7 +479,7 @@ describe("reconciliarPixMercadoPago", () => {
 
       expect(resumo).toMatchObject({ confirmados: 0, erros: 1 });
       expect(resumo.detalhes[0].outcome).toBe("erro");
-      const pedidos = store.get("pedidos") as any[];
+      const pedidos = store.get("pedidos") as PedidoSalvoTeste[];
       expect(pedidos[0].pixConfirmado).toBeUndefined();
     });
 

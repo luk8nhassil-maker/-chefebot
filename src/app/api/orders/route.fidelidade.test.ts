@@ -21,11 +21,14 @@ vi.mock("@/lib/auth", async () => {
   };
 });
 
-const creditarFidelidadePedidoMock = vi.fn(async () => undefined);
-const creditarPontosPedidoEntregueMock = vi.fn(async () => undefined);
+// A rota chama só `creditarFidelidadeEfetiva` (Nível 6.6.1) — a decisão de
+// qual modelo credita (antigo vs. pontos) foi centralizada em
+// src/lib/fidelidade.ts e é testada separadamente em
+// src/lib/fidelidade.creditoEfetivo.test.ts contra Redis real, não aqui.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- assinatura precisa aceitar args variádicos para bater com creditarFidelidadeEfetiva
+const creditarFidelidadeEfetivaMock = vi.fn(async (..._args: unknown[]) => undefined);
 vi.mock("@/lib/fidelidade", () => ({
-  creditarFidelidadePedido: (...args: unknown[]) => creditarFidelidadePedidoMock(...args),
-  creditarPontosPedidoEntregue: (...args: unknown[]) => creditarPontosPedidoEntregueMock(...args),
+  creditarFidelidadeEfetiva: (...args: unknown[]) => creditarFidelidadeEfetivaMock(...args),
 }));
 
 vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({}) })));
@@ -60,74 +63,37 @@ function patchRequest(body: Record<string, unknown>) {
 
 beforeEach(() => {
   redisStore.clear();
-  creditarFidelidadePedidoMock.mockClear();
-  creditarFidelidadePedidoMock.mockResolvedValue(undefined);
-  creditarPontosPedidoEntregueMock.mockClear();
-  creditarPontosPedidoEntregueMock.mockResolvedValue(undefined);
+  creditarFidelidadeEfetivaMock.mockClear();
+  creditarFidelidadeEfetivaMock.mockResolvedValue(undefined);
 });
 
-describe("PATCH /api/orders — credito de fidelidade ao finalizar pedido", () => {
-  test("status 'entregue' aciona o credito de fidelidade com pedidoId/clienteId/pizzas corretos", async () => {
-    seedPedido();
-    const res = await PATCH(patchRequest({ id: "ped_1", status: "entregue" }));
-    expect(res.status).toBe(200);
-    expect(creditarFidelidadePedidoMock).toHaveBeenCalledWith({ pedidoId: "ped_1", clienteId: "cli_abc", pizzas: 2 });
-  });
-
-  test("status intermediario (em_preparo) NAO aciona credito de fidelidade", async () => {
-    seedPedido({ status: "novo" })
-    const res = await PATCH(patchRequest({ id: "ped_1", status: "em_preparo", silent: true }));
-    expect(res.status).toBe(200);
-    expect(creditarFidelidadePedidoMock).not.toHaveBeenCalled();
-    expect(creditarPontosPedidoEntregueMock).not.toHaveBeenCalled();
-  });
-
-  test("falha no credito de fidelidade NAO impede o pedido de ser salvo/respondido", async () => {
-    seedPedido();
-    creditarFidelidadePedidoMock.mockRejectedValueOnce(new Error("falha redis fidelidade"));
-
-    const res = await PATCH(patchRequest({ id: "ped_1", status: "entregue" }));
-    const data = await res.json();
-
-    expect(res.status).toBe(200);
-    expect(data.status).toBe("entregue");
-    const pedidosSalvos = redisStore.get("pedidos") as Array<Record<string, unknown>>;
-    expect(pedidosSalvos[0].status).toBe("entregue");
-  });
-
-  test("pedido anonimo (sem clienteId) tambem finaliza normalmente, credito e ignorado dentro do helper", async () => {
-    seedPedido({ clienteId: undefined, pizzasCount: undefined });
-    const res = await PATCH(patchRequest({ id: "ped_1", status: "entregue" }));
-    expect(res.status).toBe(200);
-    expect(creditarFidelidadePedidoMock).toHaveBeenCalledWith({ pedidoId: "ped_1", clienteId: undefined, pizzas: 0 });
-  });
-});
-
-describe("PATCH /api/orders — credito de PONTOS de fidelidade (novo modelo) ao finalizar pedido", () => {
-  test("status 'entregue' aciona o credito de pontos com id/telefone/clienteId/total/taxaEntrega corretos", async () => {
+describe("PATCH /api/orders — credito de fidelidade ao finalizar pedido (Nível 6.6.1: modelo único por chamada)", () => {
+  test("status 'entregue' aciona creditarFidelidadeEfetiva com todos os campos dos dois modelos", async () => {
     seedPedido({ taxaEntrega: 5 });
     const res = await PATCH(patchRequest({ id: "ped_1", status: "entregue" }));
     expect(res.status).toBe(200);
-    expect(creditarPontosPedidoEntregueMock).toHaveBeenCalledWith({
+    expect(creditarFidelidadeEfetivaMock).toHaveBeenCalledTimes(1);
+    expect(creditarFidelidadeEfetivaMock).toHaveBeenCalledWith({
       id: "ped_1",
       status: "entregue",
       telefone: "86999998888",
       clienteId: "cli_abc",
       total: 50,
       taxaEntrega: 5,
+      pizzasCount: 2,
     });
   });
 
-  test("status intermediario (saiu_entrega) NAO aciona credito de pontos", async () => {
-    seedPedido();
-    const res = await PATCH(patchRequest({ id: "ped_1", status: "saiu_entrega", silent: true }));
+  test("status intermediario (em_preparo) NAO aciona nenhum credito", async () => {
+    seedPedido({ status: "novo" });
+    const res = await PATCH(patchRequest({ id: "ped_1", status: "em_preparo", silent: true }));
     expect(res.status).toBe(200);
-    expect(creditarPontosPedidoEntregueMock).not.toHaveBeenCalled();
+    expect(creditarFidelidadeEfetivaMock).not.toHaveBeenCalled();
   });
 
-  test("8. falha controlada no credito de PONTOS NAO impede o pedido de ser salvo/respondido", async () => {
+  test("falha no credito de fidelidade NAO impede o pedido de ser salvo/respondido", async () => {
     seedPedido();
-    creditarPontosPedidoEntregueMock.mockRejectedValueOnce(new Error("falha redis pontos"));
+    creditarFidelidadeEfetivaMock.mockRejectedValueOnce(new Error("falha redis fidelidade"));
 
     const res = await PATCH(patchRequest({ id: "ped_1", status: "entregue" }));
     const data = await res.json();
@@ -136,15 +102,29 @@ describe("PATCH /api/orders — credito de PONTOS de fidelidade (novo modelo) ao
     expect(data.status).toBe("entregue");
     const pedidosSalvos = redisStore.get("pedidos") as Array<Record<string, unknown>>;
     expect(pedidosSalvos[0].status).toBe("entregue");
-    // o credito antigo (pizzas) continua rodando normalmente, independente da falha no de pontos
-    expect(creditarFidelidadePedidoMock).toHaveBeenCalled();
+  });
+
+  test("pedido anonimo (sem clienteId/pizzasCount) tambem finaliza normalmente — validacao e responsabilidade do helper", async () => {
+    seedPedido({ clienteId: undefined, pizzasCount: undefined });
+    const res = await PATCH(patchRequest({ id: "ped_1", status: "entregue" }));
+    expect(res.status).toBe(200);
+    expect(creditarFidelidadeEfetivaMock).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "ped_1", clienteId: undefined, pizzasCount: 0 })
+    );
+  });
+
+  test("status intermediario (saiu_entrega) tambem nao credita nada", async () => {
+    seedPedido();
+    const res = await PATCH(patchRequest({ id: "ped_1", status: "saiu_entrega", silent: true }));
+    expect(res.status).toBe(200);
+    expect(creditarFidelidadeEfetivaMock).not.toHaveBeenCalled();
   });
 
   test("pedido sem telefone valido (string vazia) ainda assim aciona a chamada — a validacao e responsabilidade do helper", async () => {
     seedPedido({ telefone: "" });
     const res = await PATCH(patchRequest({ id: "ped_1", status: "entregue" }));
     expect(res.status).toBe(200);
-    expect(creditarPontosPedidoEntregueMock).toHaveBeenCalledWith(
+    expect(creditarFidelidadeEfetivaMock).toHaveBeenCalledWith(
       expect.objectContaining({ id: "ped_1", status: "entregue", telefone: "" })
     );
   });

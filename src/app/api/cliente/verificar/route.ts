@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verificarOtp, criarTokenCliente, CLIENTE_COOKIE } from "@/lib/clienteAuth";
-import { obterOuCriarCliente, sanitizeTelefoneCliente } from "@/lib/clientes";
+import { verificarOtp, criarSessaoCliente, definirCookieSessaoCliente } from "@/lib/clienteAuth";
+import { obterOuCriarCliente, normalizarTelefoneClienteBr } from "@/lib/clientes";
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const telefone = sanitizeTelefoneCliente(body?.telefone || "");
+    const telefone = normalizarTelefoneClienteBr(body?.telefone || "");
     const codigo = String(body?.codigo || "").trim();
 
     if (telefone.length < 10 || !codigo) {
@@ -18,16 +18,10 @@ export async function POST(req: NextRequest) {
     }
 
     const cliente = await obterOuCriarCliente(telefone, body?.nome);
-    const token = await criarTokenCliente({ clienteId: cliente.clienteId, telefone: cliente.telefone });
+    const token = await criarSessaoCliente({ clienteId: cliente.clienteId, telefone: cliente.telefone });
 
     const res = NextResponse.json({ ok: true, cliente: { nome: cliente.nome ?? null, telefone: cliente.telefone } });
-    res.cookies.set(CLIENTE_COOKIE, token, {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
-      path: "/",
-      maxAge: 60 * 60 * 24 * 30,
-    });
+    definirCookieSessaoCliente(res, token);
     return res;
   } catch (error) {
     console.error("[ChefeBot] Erro ao verificar OTP do cliente:", error);

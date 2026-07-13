@@ -8,8 +8,17 @@ import {
   buscarPagamentoMercadoPago,
   mapearPagamentoParaPayloadInterno,
 } from "@/lib/mercadoPagoWebhook";
+import { confirmarCompraECreditarPontos } from "@/lib/fidelidade";
 
 type PedidoWebhookPix = PedidoComPix & {
+  id: string;
+  status: string;
+  telefone?: string;
+  clienteId?: string;
+  clienteVinculo?: "sessao" | "telefone";
+  confirmacaoCompra?: { confirmadoEm: string; origem: "pix_manual" | "pix_automatico" | "pix_webhook" | "confirmacao_operacional" };
+  taxaEntrega?: number;
+  criadoEm?: string;
   pixConfirmado?: boolean;
 };
 
@@ -115,8 +124,13 @@ export async function POST(req: NextRequest) {
       ...(payload.providerPaymentId ? { providerPaymentId: payload.providerPaymentId } : {}),
     };
     const atualizados = [...pedidos];
-    atualizados[index] = { ...pedido, pixConfirmado: true, pix };
+    atualizados[index] = { ...pedido, pixConfirmado: true, pix, confirmacaoCompra: pedido.confirmacaoCompra ?? { confirmadoEm, origem: "pix_webhook" } };
     await redis.set("pedidos", atualizados);
+    try {
+      await confirmarCompraECreditarPontos(atualizados[index].id, "pix_webhook");
+    } catch (err) {
+      console.error("[ChefeBot] Erro ao confirmar pontos por webhook Pix (ignorado):", err);
+    }
 
     return NextResponse.json({
       ok: true,

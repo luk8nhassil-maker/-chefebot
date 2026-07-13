@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verificarTokenCliente, CLIENTE_COOKIE } from "@/lib/clienteAuth";
-import { buscarClientePorId } from "@/lib/clientes";
+import { resolverSessaoCliente, definirCookieSessaoCliente } from "@/lib/clienteAuth";
 import {
   obterExtratoPontos,
   obterConfigFidelidadePontos,
@@ -32,14 +31,9 @@ function resolverLimite(searchParams: URLSearchParams): number {
 }
 
 export async function GET(req: NextRequest) {
-  const token = req.cookies.get(CLIENTE_COOKIE)?.value ?? null;
-  if (!token) return NextResponse.json({ error: "Nao autorizado" }, { status: 401 });
-
-  const payload = await verificarTokenCliente(token);
-  if (!payload) return NextResponse.json({ error: "Nao autorizado" }, { status: 401 });
-
-  const cliente = await buscarClientePorId(payload.clienteId);
-  if (!cliente) return NextResponse.json({ error: "Nao autorizado" }, { status: 401 });
+  const sessao = await resolverSessaoCliente(req);
+  if (!sessao) return NextResponse.json({ error: "Nao autorizado" }, { status: 401 });
+  const { cliente } = sessao;
 
   const { searchParams } = new URL(req.url);
   const limite = resolverLimite(searchParams);
@@ -81,7 +75,7 @@ export async function GET(req: NextRequest) {
     .filter((r) => r.status === "resgatada" || r.status === "expirada")
     .map((r) => ({ recompensaId: r.recompensaId, status: r.status, criadoEm: r.createdAt }));
 
-  return NextResponse.json({
+  const res = NextResponse.json({
     ativo: config.ativo,
     descricaoRecompensa: config.descricaoRecompensa,
     saldoPontos,
@@ -97,4 +91,6 @@ export async function GET(req: NextRequest) {
       pizzasAcumuladas,
     },
   });
+  if (sessao.deveRenovar && sessao.novoToken) definirCookieSessaoCliente(res, sessao.novoToken);
+  return res;
 }
