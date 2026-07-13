@@ -266,6 +266,8 @@ export default function PedidosPage() {
   const [flashId, setFlashId] = useState<string | null>(null)
   const [entregadores, setEntregadores] = useState<{id: string; nome: string; telefone: string; ativo: boolean}[]>([])
   const [reconciliandoPix, setReconciliandoPix] = useState(false)
+  const reconciliandoPixRef = useRef(false)
+  const [ultimaVerificacaoPix, setUltimaVerificacaoPix] = useState("")
   const [modalEntrega, setModalEntrega] = useState<{pedidoId: string; proxStatus: Status} | null>(null)
   const [muteado, setMuteado] = useState(false)
   const [busca, setBusca] = useState("")
@@ -620,25 +622,53 @@ export default function PedidosPage() {
     setSalvandoBot(false)
   }
 
-  // Conciliador manual de Pix Mercado Pago (Nivel 6.2A) — enquanto não há
-  // webhook configurado no painel MP, consulta a API do MP pelos
-  // providerPaymentId já salvos e confirma sob demanda. Não gera Pix nem
-  // mexe no fallback manual, só reconcilia pedidos já existentes.
-  const reconciliarPixMercadoPago = async () => {
+  // Conciliador de Pix Mercado Pago (Nivel 6.2A/6.3B) — chama a rota admin
+  // já validada em produção (POST /api/admin/mercadopago/reconciliar-pix).
+  // Nunca confirma nada no frontend: a decisão inteira (approved + valor +
+  // txid batendo) continua no backend, em mercadoPagoReconciliacao.ts —
+  // aqui só disparamos a chamada e reagimos ao resultado. `manual` controla
+  // só a apresentação: clique no botão mostra o resumo em alert (mesmo
+  // comportamento já validado); a verificação automática do painel aberto
+  // nunca interrompe com alert, só atualiza a lista quando confirmou algo.
+  // `reconciliandoPixRef` (não só o state) evita duas chamadas concorrentes
+  // — manual e automática compartilham o mesmo guard.
+  const executarReconciliacaoPix = async (manual: boolean) => {
+    if (reconciliandoPixRef.current) return
+    reconciliandoPixRef.current = true
     setReconciliandoPix(true)
     try {
       const r = await fetch("/api/admin/mercadopago/reconciliar-pix", { method: "POST" })
       const data = await r.json().catch(() => null)
       if (r.ok && data) {
-        alert(`Pix Mercado Pago verificado:\n${data.verificados} verificados, ${data.confirmados} confirmados, ${data.pendentes} pendentes, ${data.ignorados} ignorados, ${data.erros} erros.`)
-      } else {
+        const resumo = `${data.verificados} verificados, ${data.confirmados} confirmados, ${data.pendentes} pendentes, ${data.ignorados} ignorados, ${data.erros} erros.`
+        setUltimaVerificacaoPix(resumo)
+        if (manual) alert(`Pix Mercado Pago verificado:\n${resumo}`)
+        if (typeof data.confirmados === "number" && data.confirmados > 0) carregarPedidos()
+      } else if (manual) {
         alert("Não foi possível verificar os pagamentos Pix Mercado Pago.")
       }
     } catch {
-      alert("Erro de conexão ao verificar pagamentos Pix Mercado Pago.")
+      if (manual) alert("Erro de conexão ao verificar pagamentos Pix Mercado Pago.")
     }
+    reconciliandoPixRef.current = false
     setReconciliandoPix(false)
   }
+
+  const reconciliarPixMercadoPago = () => executarReconciliacaoPix(true)
+
+  // Auto-verificação (Nivel 6.3B): sem webhook e sem cron (Vercel Hobby não
+  // comporta cron frequente), o próprio painel aberto assume o papel de
+  // gatilho. Só para admin/dev, só depois do painel carregar, pausa quando a
+  // aba está oculta (document.hidden) e nunca sobrepõe uma verificação já em
+  // andamento (guard compartilhado com o botão manual acima).
+  useEffect(() => {
+    if (!isAdmin || loading) return
+    const rodar = () => { if (!document.hidden) executarReconciliacaoPix(false) }
+    rodar()
+    const intervalo = setInterval(rodar, 120000)
+    return () => clearInterval(intervalo)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin, loading])
 
   const assumirConversa = async (phone: string) => {
     try { await fetch("/api/assumir", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ telefone: phone }) }); setManuais(prev => ({ ...prev, [phone]: true })) } catch {}
@@ -1303,7 +1333,7 @@ export default function PedidosPage() {
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <button onClick={toggleMute} title={muteado ? "Sons desativados" : "Sons ativados"} style={{ fontSize: 15, lineHeight: 1, background: muteado ? "color-mix(in srgb, var(--danger) 10%, transparent)" : "transparent", border: `1px solid ${muteado ? "color-mix(in srgb, var(--danger) 35%, transparent)" : "var(--surface-secondary)"}`, padding: "5px 8px", borderRadius: 16 }}>{muteado ? "🔇" : "🔊"}</button>
               {isAdmin && <button onClick={() => router.push("/admin")} style={{ fontSize: 11, fontWeight: 800, color: "var(--foreground-secondary)", background: "transparent", border: "1px solid var(--surface-secondary)", padding: "6px 10px", borderRadius: 16 }}>Admin</button>}
-              {isAdmin && <button onClick={reconciliarPixMercadoPago} disabled={reconciliandoPix} title="Consulta a API do Mercado Pago para confirmar Pix pendentes" style={{ fontSize: 11, fontWeight: 800, color: "var(--foreground-secondary)", background: "transparent", border: "1px solid var(--surface-secondary)", padding: "6px 10px", borderRadius: 16, opacity: reconciliandoPix ? 0.6 : 1, cursor: reconciliandoPix ? "not-allowed" : "pointer" }}>{reconciliandoPix ? "Verificando..." : "Verificar pagamentos Pix Mercado Pago"}</button>}
+              {isAdmin && <button onClick={reconciliarPixMercadoPago} disabled={reconciliandoPix} title={ultimaVerificacaoPix ? `Última verificação: ${ultimaVerificacaoPix}` : "Consulta a API do Mercado Pago para confirmar Pix pendentes"} style={{ fontSize: 11, fontWeight: 800, color: "var(--foreground-secondary)", background: "transparent", border: "1px solid var(--surface-secondary)", padding: "6px 10px", borderRadius: 16, opacity: reconciliandoPix ? 0.6 : 1, cursor: reconciliandoPix ? "not-allowed" : "pointer" }}>{reconciliandoPix ? "Verificando..." : "Verificar pagamentos Pix Mercado Pago"}</button>}
               <button onClick={() => fetch("/api/auth/logout", { method: "POST" }).then(() => router.push("/login"))} style={{ fontSize: 11, fontWeight: 800, color: "var(--foreground-muted)", background: "transparent", border: "1px solid var(--border)", padding: "6px 10px", borderRadius: 16 }}>Sair</button>
             </div>
           </div>
