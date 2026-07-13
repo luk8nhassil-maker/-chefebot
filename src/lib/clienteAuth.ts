@@ -1,7 +1,7 @@
 import type { NextRequest, NextResponse } from "next/server";
 import { SignJWT, jwtVerify } from "jose";
 import { redis } from "./redis";
-import { sanitizeTelefoneCliente, buscarClientePorId, type Cliente } from "./clientes";
+import { normalizarTelefoneClienteBr, clienteIdDoTelefone, buscarClientePorId, sanitizeTelefoneCliente, type Cliente } from "./clientes";
 
 export const CLIENTE_COOKIE = "cliente-token";
 
@@ -53,22 +53,23 @@ function getSecret() {
 }
 
 function chaveOtp(telefoneSanitizado: string): string {
-  return `cliente:otp:${telefoneSanitizado}`;
+  return `cliente:otp:${normalizarTelefoneClienteBr(telefoneSanitizado) || telefoneSanitizado}`;
 }
 
 function chaveCooldown(telefoneSanitizado: string): string {
-  return `cliente:otp_cooldown:${telefoneSanitizado}`;
+  return `cliente:otp_cooldown:${normalizarTelefoneClienteBr(telefoneSanitizado) || telefoneSanitizado}`;
 }
 
 export async function podeReenviarOtp(telefone: string): Promise<boolean> {
-  const tel = sanitizeTelefoneCliente(telefone);
+  const tel = normalizarTelefoneClienteBr(telefone);
   if (!tel) return false;
   const emCooldown = await redis.get(chaveCooldown(tel));
   return !emCooldown;
 }
 
 export async function gerarOtp(telefone: string): Promise<string> {
-  const tel = sanitizeTelefoneCliente(telefone);
+  const tel = normalizarTelefoneClienteBr(telefone);
+  if (!tel) throw new Error("Telefone brasileiro invalido");
   const codigo = String(Math.floor(100000 + Math.random() * 900000));
   const registro: RegistroOtp = { codigo, tentativas: 0 };
   await redis.set(chaveOtp(tel), registro, { ex: OTP_TTL_SEGUNDOS });
@@ -77,7 +78,7 @@ export async function gerarOtp(telefone: string): Promise<string> {
 }
 
 export async function verificarOtp(telefone: string, codigo: string): Promise<boolean> {
-  const tel = sanitizeTelefoneCliente(telefone);
+  const tel = normalizarTelefoneClienteBr(telefone);
   if (!tel || !codigo) return false;
   const chave = chaveOtp(tel);
   const registro = await redis.get<RegistroOtp>(chave);
@@ -126,9 +127,12 @@ function chaveSessaoCliente(clienteId: string): string {
  */
 export async function criarSessaoCliente(payload: ClienteTokenPayload): Promise<string> {
   const agora = new Date().toISOString();
+  const telefone = normalizarTelefoneClienteBr(payload.telefone);
+  if (!telefone) throw new Error("Telefone brasileiro invalido");
+  const clienteId = clienteIdDoTelefone(telefone);
   const registro: RegistroSessaoCliente = { criadoEm: agora, ultimoAcessoEm: agora };
-  await redis.set(chaveSessaoCliente(payload.clienteId), registro, { ex: SESSAO_TTL_SEGUNDOS });
-  return criarTokenCliente(payload);
+  await redis.set(chaveSessaoCliente(clienteId), registro, { ex: SESSAO_TTL_SEGUNDOS });
+  return criarTokenCliente({ clienteId, telefone });
 }
 
 /**
@@ -152,10 +156,13 @@ export async function resolverSessaoCliente(req: NextRequest): Promise<SessaoCli
   const payload = await verificarTokenCliente(token);
   if (!payload) return null;
 
-  const registro = await redis.get<RegistroSessaoCliente>(chaveSessaoCliente(payload.clienteId));
+  const clienteIdCanonico = payload.telefone ? clienteIdDoTelefone(payload.telefone) : payload.clienteId;
+  const registro =
+    (await redis.get<RegistroSessaoCliente>(chaveSessaoCliente(clienteIdCanonico))) ??
+    (await redis.get<RegistroSessaoCliente>(chaveSessaoCliente(payload.clienteId)));
   if (!registro) return null;
 
-  const cliente = await buscarClientePorId(payload.clienteId);
+  const cliente = await buscarClientePorId(clienteIdCanonico);
   if (!cliente) return null;
 
   const ultimoAcessoMs = new Date(registro.ultimoAcessoEm).getTime();
@@ -166,15 +173,24 @@ export async function resolverSessaoCliente(req: NextRequest): Promise<SessaoCli
   }
 
   const novoRegistro: RegistroSessaoCliente = { criadoEm: registro.criadoEm, ultimoAcessoEm: new Date().toISOString() };
-  await redis.set(chaveSessaoCliente(payload.clienteId), novoRegistro, { ex: SESSAO_TTL_SEGUNDOS });
-  const novoToken = await criarTokenCliente(payload);
+  await redis.set(chaveSessaoCliente(cliente.clienteId), novoRegistro, { ex: SESSAO_TTL_SEGUNDOS });
+  const novoToken = await criarTokenCliente({ clienteId: cliente.clienteId, telefone: cliente.telefone });
 
   return { cliente, deveRenovar: true, novoToken };
 }
 
 /** Invalida a sessão imediatamente no servidor (usado pelo logout). */
 export async function invalidarSessaoCliente(clienteId: string): Promise<void> {
-  await redis.del(chaveSessaoCliente(clienteId));
+  const raw = clienteId.startsWith("cli_") ? clienteId.slice(4) : clienteId;
+  const canonico = normalizarTelefoneClienteBr(raw);
+  const variantes = new Set<string>([clienteId]);
+  if (canonico) {
+    variantes.add(clienteIdDoTelefone(canonico));
+    variantes.add(`cli_55${canonico}`);
+  }
+  const rawSanitizado = sanitizeTelefoneCliente(raw);
+  if (rawSanitizado) variantes.add(`cli_${rawSanitizado}`);
+  await Promise.all([...variantes].map((id) => redis.del(chaveSessaoCliente(id))));
 }
 
 /** Aplica o cookie de sessão (mesmos atributos no login e nas renovações). */

@@ -8,7 +8,7 @@ import { criarPixMetadata, prepararPixProviderMercadoPago, serializarPixCliente 
 import { PROMOS_KEY, catalogoDoMenu, dentroDaJanela, precoFinalPromocao, promocaoIndisponivel, type Promocao } from "@/lib/promocoes";
 import { validarTokenCardapio } from "@/lib/cardapioToken";
 import { temDinheiroNoPagamento, valorDinheiroEsperado } from "@/lib/bot";
-import { verificarTokenCliente, CLIENTE_COOKIE } from "@/lib/clienteAuth";
+import { resolverSessaoCliente } from "@/lib/clienteAuth";
 import { contarPizzas, calcularPontosElegiveisPedido, registrarMovimentoPontosIdempotente, construirEventoIdPontos, derivarClienteIdPorTelefone, obterReservasResgatePontos, confirmarResgatePontos, resolverProprietarioFidelidadePedido } from "@/lib/fidelidade";
 
 export const maxDuration = 20;
@@ -206,11 +206,8 @@ export async function POST(req: NextRequest) {
 
     let clienteId: string | undefined;
     try {
-      const clienteToken = req.cookies.get(CLIENTE_COOKIE)?.value;
-      if (clienteToken) {
-        const payloadCliente = await verificarTokenCliente(clienteToken);
-        if (payloadCliente) clienteId = derivarClienteIdPorTelefone(payloadCliente.telefone) ?? payloadCliente.clienteId;
-      }
+      const sessaoCliente = await resolverSessaoCliente(req);
+      if (sessaoCliente) clienteId = derivarClienteIdPorTelefone(sessaoCliente.cliente.telefone) ?? sessaoCliente.cliente.clienteId;
     } catch (err) {
       console.error("[ChefeBot] Erro ao resolver cliente do pedido (ignorado):", err);
     }

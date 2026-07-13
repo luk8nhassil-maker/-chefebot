@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verificarOtp, criarSessaoCliente, definirCookieSessaoCliente } from "@/lib/clienteAuth";
-import { obterOuCriarCliente, sanitizeTelefoneCliente } from "@/lib/clientes";
+import { obterOuCriarCliente, normalizarTelefoneClienteBr } from "@/lib/clientes";
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const telefone = sanitizeTelefoneCliente(body?.telefone || "");
+    const telefone = normalizarTelefoneClienteBr(body?.telefone || "");
     const codigo = String(body?.codigo || "").trim();
 
     if (telefone.length < 10 || !codigo) {

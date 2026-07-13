@@ -100,6 +100,12 @@ describe("/cliente — Estados A/B/C de ativação individual (Nível 6.6)", () 
     expect(fonte).toContain("/api/cliente/fidelidade/ativar");
   });
 
+  test("reconciliacao com pedido rejeitado nao trata creditados 0 como sucesso silencioso", () => {
+    expect(fonte).toContain("Encontramos seu pedido, mas nao conseguimos validar os pontos. Tentar novamente.");
+    expect(fonte).toContain("Reconciliacao de pontos sem credito");
+    expect(fonte).toContain("MOVIMENTO_JA_EXISTE");
+  });
+
   test("intenção 'ativar' aciona a ativação automaticamente após confirmar o código", () => {
     expect(fonte).toMatch(/intent === 'ativar'/);
   });

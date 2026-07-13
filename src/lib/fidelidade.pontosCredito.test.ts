@@ -438,7 +438,7 @@ describe("16. notificação de recompensa protegida por feature flag", () => {
 
 describe("1. proteção contra stale writer — escrita condicionada à propriedade do lock", () => {
   test("processo com token antigo nunca sobrescreve o estado gravado pelo novo dono do lock", async () => {
-    const clienteId = "cli_stale_writer";
+    const clienteId = "cli_11999998888";
     const chave = chaveLockPontos(clienteId);
 
     // "Processo A" adquire o lock

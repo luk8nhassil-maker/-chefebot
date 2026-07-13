@@ -120,6 +120,18 @@ export default function ClientePage() {
         console.warn('[ChefeBot] Falha ao reconciliar pontos do cliente', { status: res.status, error: msg })
         return
       }
+      const data = await res.json().catch(() => ({}))
+      const detalhes = Array.isArray(data?.detalhes) ? data.detalhes : []
+      const rejeicoesRecentes = detalhes.filter((detalhe: { movimentoGravado?: boolean; motivo?: string }) => {
+        return detalhe?.movimentoGravado !== true && detalhe?.motivo && detalhe.motivo !== 'MOVIMENTO_JA_EXISTE'
+      })
+      if (Number(data?.creditados) === 0 && rejeicoesRecentes.length > 0) {
+        setReconciliacaoErro('Encontramos seu pedido, mas nao conseguimos validar os pontos. Tentar novamente.')
+        console.warn('[ChefeBot] Reconciliacao de pontos sem credito', {
+          motivos: rejeicoesRecentes.map((detalhe: { motivo?: string }) => detalhe.motivo),
+        })
+        return
+      }
       setReconciliacaoErro('')
     } catch (err) {
       setReconciliacaoErro('Erro de conexao ao atualizar pontos.')

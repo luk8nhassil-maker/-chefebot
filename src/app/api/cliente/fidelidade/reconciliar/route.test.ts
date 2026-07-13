@@ -7,11 +7,21 @@ const clienteSessao = vi.hoisted(() => ({
   telefone: "99974000691",
   nome: "Cliente 0691",
   createdAt: "2026-07-13T10:00:00.000Z",
-  updatedAt: "2026-07-13T10:00:00.000Z",
-  lastLoginAt: "2026-07-13T10:00:00.000Z",
+  updatedAt: "2026-07-13T19:00:00.000Z",
+  lastLoginAt: "2026-07-13T19:00:00.000Z",
   pontosAtivos: true,
-  pontosAtivadoEm: "2026-07-13T11:00:00.000Z",
+  pontosAtivadoEm: "2026-07-13T19:00:00.000Z",
 }));
+
+const clienteSessaoLegadoCom55 = {
+  ...clienteSessao,
+  clienteId: "cli_5599974000691",
+  telefone: "5599974000691",
+  createdAt: "2026-07-13T09:00:00.000Z",
+  updatedAt: "2026-07-13T18:00:00.000Z",
+  lastLoginAt: "2026-07-13T18:00:00.000Z",
+  pontosAtivadoEm: "2026-07-13T18:00:00.000Z",
+};
 
 function defaultGetImpl(key: string) {
   return Promise.resolve(redisStore.has(key) ? redisStore.get(key) : null);
@@ -70,16 +80,16 @@ import {
 } from "@/lib/fidelidade";
 
 const pedido14Real: PedidoParaCreditoPontos = {
-  id: "1783976400000",
+  id: "1783967630709",
   numero: 14,
   origem: "site",
   clienteId: "cli_99974000691",
   telefone: "86999999999",
-  criadoEm: "2026-07-13T12:00:00.000Z",
+  criadoEm: "2026-07-13T18:33:50.709Z",
   status: "novo",
   pixConfirmado: false,
   pix: { provider: "mercadopago", status: "approved" },
-  total: 50,
+  total: 68,
   taxaEntrega: 5,
 };
 
@@ -97,18 +107,21 @@ beforeEach(() => {
   redisStore.clear();
   redisStore.set("config:fidelidade:pontos", configAtiva);
   redisStore.set("cliente:99974000691", clienteSessao);
+  redisStore.set("cliente:5599974000691", clienteSessaoLegadoCom55);
   redisStore.set("cliente:86999999999", {
     ...clienteSessao,
     clienteId: "cli_86999999999",
     telefone: "86999999999",
     nome: "Contato 9999",
+    pontosAtivadoEm: "2026-07-13T18:00:00.000Z",
   });
 });
 
 describe("POST /api/cliente/fidelidade/reconciliar", () => {
   test("fixture real do pedido #14 retorna ELEGIVEL", () => {
     const estadoVazio: EstadoPontosCliente = { extrato: [], recompensas: [], reservas: [] };
-    const avaliacao = avaliarCreditoPontosPedido(pedido14Real, clienteSessao, configAtiva, estadoVazio, {
+    const clienteConsolidado = { ...clienteSessao, pontosAtivadoEm: clienteSessaoLegadoCom55.pontosAtivadoEm };
+    const avaliacao = avaliarCreditoPontosPedido(pedido14Real, clienteConsolidado, configAtiva, estadoVazio, {
       proprietarioClienteId: derivarClienteIdPorTelefone(clienteSessao.telefone),
       origemProprietario: "sessao",
     });
@@ -116,7 +129,7 @@ describe("POST /api/cliente/fidelidade/reconciliar", () => {
     expect(avaliacao.motivo).toBe("ELEGIVEL");
     expect(avaliacao.gates.compraConfirmada).toBe(true);
     expect(avaliacao.origemConfirmacao).toBe("pix_automatico");
-    expect(avaliacao.pontosCalculados).toBe(45);
+    expect(avaliacao.pontosCalculados).toBe(63);
   });
 
   test("reconcilia pedido real #14 para a conta autenticada e nao credita o contato", async () => {
@@ -126,14 +139,14 @@ describe("POST /api/cliente/fidelidade/reconciliar", () => {
     const body = await res.json();
 
     expect(res.status).toBe(200);
-    expect(body).toMatchObject({ ok: true, verificados: 1, creditados: 1, saldoPontos: 45 });
+    expect(body).toMatchObject({ ok: true, verificados: 1, creditados: 1, saldoPontos: 63 });
     expect(body.detalhes[0]).toMatchObject({
       pedidoId: pedido14Real.id,
       numero: 14,
       motivo: "ELEGIVEL",
       movimentoGravado: true,
       eventoId: `confirmado:${pedido14Real.id}`,
-      pontosCalculados: 45,
+      pontosCalculados: 63,
     });
 
     const clienteIdSessao = derivarClienteIdPorTelefone("99974000691")!;
@@ -148,8 +161,8 @@ describe("POST /api/cliente/fidelidade/reconciliar", () => {
       pedidoId: pedido14Real.id,
       tipo: "confirmado",
       eventoId: `confirmado:${pedido14Real.id}`,
-      pontos: 45,
-      valorElegivel: 45,
+      pontos: 63,
+      valorElegivel: 63,
     });
     expect(extratoContato).toHaveLength(0);
     expect(pedidos[0].confirmacaoCompra).toMatchObject({ origem: "pix_automatico" });
@@ -165,7 +178,7 @@ describe("POST /api/cliente/fidelidade/reconciliar", () => {
     const clienteIdSessao = derivarClienteIdPorTelefone("99974000691")!;
     const extratoSessao = await obterExtratoPontos(clienteIdSessao);
     expect(extratoSessao.filter((m) => m.eventoId === `confirmado:${pedido14Real.id}`)).toHaveLength(1);
-    expect((await obterSaldoPontos(clienteIdSessao)).disponivel).toBe(45);
+    expect((await obterSaldoPontos(clienteIdSessao)).disponivel).toBe(63);
   });
 
   test("pix manual e reconciliacao concorrentes nao duplicam", async () => {
@@ -197,6 +210,39 @@ describe("POST /api/cliente/fidelidade/reconciliar", () => {
       ["PEDIDO_ANTERIOR_ATIVACAO"].sort()
     );
     expect(await obterExtratoPontos(derivarClienteIdPorTelefone("99974000691")!)).toHaveLength(0);
+  });
+
+  test("consolida ativacao e estado legados com 55 sem duplicar extrato", async () => {
+    redisStore.set("fidelidade:pontos:estado:cli_5599974000691", {
+      extrato: [
+        {
+          movimentoId: "pt_legado",
+          clienteId: "cli_5599974000691",
+          pedidoId: "legado",
+          tipo: "ajuste",
+          pontos: 0,
+          motivo: "movimento legado neutro",
+          createdAt: "2026-07-13T18:10:00.000Z",
+          eventoId: "ajuste:legado",
+          saldoApos: 0,
+        },
+      ],
+      recompensas: [],
+      reservas: [],
+    });
+    redisStore.set("pedidos", [pedido14Real]);
+
+    await POST(request());
+    await POST(request());
+
+    const clienteCanonico = redisStore.get("cliente:99974000691") as typeof clienteSessao;
+    const estadoCanonico = redisStore.get("fidelidade:pontos:estado:cli_99974000691") as EstadoPontosCliente;
+
+    expect(clienteCanonico.clienteId).toBe("cli_99974000691");
+    expect(clienteCanonico.telefone).toBe("99974000691");
+    expect(clienteCanonico.pontosAtivadoEm).toBe("2026-07-13T18:00:00.000Z");
+    expect(estadoCanonico.extrato.filter((m) => m.eventoId === "ajuste:legado")).toHaveLength(1);
+    expect(estadoCanonico.extrato.filter((m) => m.eventoId === `confirmado:${pedido14Real.id}`)).toHaveLength(1);
   });
 
   test("pedido anonimo usa fallback por telefone", async () => {

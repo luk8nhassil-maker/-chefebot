@@ -12,22 +12,95 @@ export type Cliente = {
   pontosAtivadoEm?: string;
 };
 
+/**
+ * Telefone brasileiro canônico do ChefeBot: somente DDD + número, sem DDI 55.
+ * Aceita números nacionais de 10/11 dígitos ou legados com 55 + 10/11 dígitos.
+ * Retorna string vazia quando não há telefone brasileiro plausível.
+ */
+export function normalizarTelefoneClienteBr(telefone: string | null | undefined): string {
+  const digitos = sanitizeTelefoneCliente(telefone ?? "");
+  if ((digitos.length === 12 || digitos.length === 13) && digitos.startsWith("55")) {
+    return digitos.slice(2);
+  }
+  if (digitos.length === 10 || digitos.length === 11) return digitos;
+  return "";
+}
+
 export function sanitizeTelefoneCliente(telefone: string): string {
   return (telefone || "").replace(/\D/g, "");
 }
 
-function chaveCliente(telefoneSanitizado: string): string {
-  return `cliente:${telefoneSanitizado}`;
+export function variantesTelefoneClienteBr(telefone: string | null | undefined): string[] {
+  const bruto = sanitizeTelefoneCliente(telefone ?? "");
+  const canonico = normalizarTelefoneClienteBr(bruto);
+  const variantes = new Set<string>();
+  if (canonico) {
+    variantes.add(canonico);
+    variantes.add(`55${canonico}`);
+  }
+  if (bruto) variantes.add(bruto);
+  return [...variantes].filter(Boolean);
+}
+
+function chaveCliente(telefone: string): string {
+  return `cliente:${sanitizeTelefoneCliente(telefone)}`;
 }
 
 export function clienteIdDoTelefone(telefone: string): string {
-  return `cli_${sanitizeTelefoneCliente(telefone)}`;
+  const canonico = normalizarTelefoneClienteBr(telefone);
+  return `cli_${canonico || sanitizeTelefoneCliente(telefone)}`;
+}
+
+function menorDataValida(a?: string, b?: string): string | undefined {
+  const datas = [a, b]
+    .filter((v): v is string => !!v)
+    .filter((v) => Number.isFinite(new Date(v).getTime()))
+    .sort((x, y) => new Date(x).getTime() - new Date(y).getTime());
+  return datas[0];
+}
+
+function maiorDataValida(a?: string, b?: string): string | undefined {
+  const datas = [a, b]
+    .filter((v): v is string => !!v)
+    .filter((v) => Number.isFinite(new Date(v).getTime()))
+    .sort((x, y) => new Date(y).getTime() - new Date(x).getTime());
+  return datas[0];
+}
+
+function consolidarClientesMesmoTelefone(telefone: string, registros: Cliente[]): Cliente | null {
+  const canonico = normalizarTelefoneClienteBr(telefone);
+  if (!canonico || registros.length === 0) return null;
+
+  const base = registros.find((c) => normalizarTelefoneClienteBr(c.telefone) === canonico) ?? registros[0];
+  const pontosAtivos = registros.some((c) => c.pontosAtivos === true);
+  const pontosAtivadoEm = registros
+    .filter((c) => c.pontosAtivos === true)
+    .reduce<string | undefined>((menor, c) => menorDataValida(menor, c.pontosAtivadoEm), undefined);
+
+  return {
+    ...base,
+    clienteId: clienteIdDoTelefone(canonico),
+    telefone: canonico,
+    nome: registros.find((c) => typeof c.nome === "string" && c.nome.trim())?.nome ?? base.nome,
+    createdAt: registros.reduce<string | undefined>((menor, c) => menorDataValida(menor, c.createdAt), undefined) ?? base.createdAt,
+    updatedAt: registros.reduce<string | undefined>((maior, c) => maiorDataValida(maior, c.updatedAt), undefined) ?? base.updatedAt,
+    lastLoginAt: registros.reduce<string | undefined>((maior, c) => maiorDataValida(maior, c.lastLoginAt), undefined) ?? base.lastLoginAt,
+    pontosAtivos,
+    ...(pontosAtivadoEm ? { pontosAtivadoEm } : {}),
+  };
 }
 
 export async function buscarClientePorTelefone(telefone: string): Promise<Cliente | null> {
-  const tel = sanitizeTelefoneCliente(telefone);
-  if (!tel) return null;
-  return (await redis.get<Cliente>(chaveCliente(tel))) ?? null;
+  const canonico = normalizarTelefoneClienteBr(telefone);
+  if (!canonico) return null;
+  const chaves = [...new Set(variantesTelefoneClienteBr(canonico).map(chaveCliente))];
+  const registros = (await Promise.all(chaves.map((chave) => redis.get<Cliente>(chave)))).filter((c): c is Cliente => !!c);
+  if (registros.length === 0) return null;
+
+  const consolidado = consolidarClientesMesmoTelefone(canonico, registros);
+  if (!consolidado) return null;
+  await redis.set(chaveCliente(canonico), consolidado);
+  return consolidado;
 }
 
 export async function buscarClientePorId(clienteId: string): Promise<Cliente | null> {
@@ -36,7 +109,8 @@ export async function buscarClientePorId(clienteId: string): Promise<Cliente | n
 }
 
 export async function obterOuCriarCliente(telefone: string, nome?: string): Promise<Cliente> {
-  const tel = sanitizeTelefoneCliente(telefone);
+  const tel = normalizarTelefoneClienteBr(telefone);
+  if (!tel) throw new Error("Telefone brasileiro invalido");
   const agora = new Date().toISOString();
   const existente = await buscarClientePorTelefone(tel);
 
@@ -73,15 +147,15 @@ export async function obterOuCriarCliente(telefone: string, nome?: string): Prom
 export async function ativarParticipacaoPontos(clienteId: string): Promise<Cliente | null> {
   const cliente = await buscarClientePorId(clienteId);
   if (!cliente) return null;
-  if (cliente.pontosAtivos) return cliente;
+  if (cliente.pontosAtivos && cliente.pontosAtivadoEm) return cliente;
 
   const agora = new Date().toISOString();
   const atualizado: Cliente = {
     ...cliente,
     pontosAtivos: true,
-    pontosAtivadoEm: agora,
+    pontosAtivadoEm: cliente.pontosAtivadoEm ?? agora,
     updatedAt: agora,
   };
   await redis.set(chaveCliente(cliente.telefone), atualizado);
-  return atualizado;
+  return buscarClientePorId(atualizado.clienteId);
 }

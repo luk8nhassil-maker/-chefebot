@@ -85,7 +85,7 @@ describe("POST /api/cliente/fidelidade/ativar", () => {
     const persistidoA = await buscarClientePorTelefone("11900000001");
     const persistidoB = await buscarClientePorTelefone("11900000002");
     expect(persistidoA?.pontosAtivos).toBe(true);
-    expect(persistidoB?.pontosAtivos).toBeUndefined();
+    expect(persistidoB?.pontosAtivos).not.toBe(true);
   });
 
   describe("programa global desativado (Nível 6.6.1)", () => {
@@ -109,7 +109,7 @@ describe("POST /api/cliente/fidelidade/ativar", () => {
       await POST(req(token));
 
       const persistido = await buscarClientePorTelefone("11999998888");
-      expect(persistido?.pontosAtivos).toBeUndefined();
+      expect(persistido?.pontosAtivos).not.toBe(true);
     });
 
     test("programa ativo permite ativacao normalmente (contraste com os testes acima)", async () => {

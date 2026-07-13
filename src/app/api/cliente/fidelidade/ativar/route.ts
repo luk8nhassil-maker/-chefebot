@@ -26,6 +26,9 @@ export async function POST(req: NextRequest) {
 
   const cliente = await ativarParticipacaoPontos(sessao.cliente.clienteId);
   if (!cliente) return NextResponse.json({ error: "Nao autorizado" }, { status: 401 });
+  if (cliente.pontosAtivos !== true || !cliente.pontosAtivadoEm) {
+    return NextResponse.json({ error: "Nao foi possivel confirmar a ativacao dos pontos", codigo: "ATIVACAO_NAO_CONFIRMADA" }, { status: 502 });
+  }
 
   const res = NextResponse.json({
     ok: true,

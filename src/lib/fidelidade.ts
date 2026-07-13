@@ -1,5 +1,5 @@
 import { redis } from "./redis";
-import { buscarClientePorId, sanitizeTelefoneCliente, clienteIdDoTelefone, type Cliente } from "./clientes";
+import { buscarClientePorId, sanitizeTelefoneCliente, clienteIdDoTelefone, normalizarTelefoneClienteBr, variantesTelefoneClienteBr, type Cliente } from "./clientes";
 
 export type TipoRecompensa = "pizza_gratis" | "desconto_fixo" | "desconto_percentual";
 
@@ -336,14 +336,43 @@ function unirExtratosPontos(principal: MovimentoPontos[], legado: MovimentoPonto
   return unidos;
 }
 
+function unirRecompensasPontos(listas: RecompensaPontosDesbloqueada[][]): RecompensaPontosDesbloqueada[] {
+  const resultado: RecompensaPontosDesbloqueada[] = [];
+  const vistos = new Set<string>();
+  for (const lista of listas) {
+    for (const recompensa of lista) {
+      const chave = recompensa.recompensaId || `${recompensa.pedidoId}:${recompensa.createdAt}:${recompensa.status}`;
+      if (vistos.has(chave)) continue;
+      vistos.add(chave);
+      resultado.push(recompensa);
+    }
+  }
+  return resultado;
+}
+
+function unirReservasPontos(listas: ReservaResgatePontos[][]): ReservaResgatePontos[] {
+  const resultado: ReservaResgatePontos[] = [];
+  const vistos = new Set<string>();
+  for (const lista of listas) {
+    for (const reserva of lista) {
+      const chave = reserva.resgateId;
+      if (vistos.has(chave)) continue;
+      vistos.add(chave);
+      resultado.push(reserva);
+    }
+  }
+  return resultado;
+}
+
 async function obterEstadoPontos(clienteId: string): Promise<EstadoPontosCliente> {
-  const [estadoAtual, extratoLegado] = await Promise.all([
-    redis.get<EstadoPontosCliente>(chaveEstadoPontos(clienteId)),
-    redis.get<MovimentoPontos[]>(chaveExtratoPontosLegado(clienteId)),
+  const clienteIds = [...new Set(variantesClienteIdPontos(clienteId))];
+  const [estados, extratosLegados] = await Promise.all([
+    Promise.all(clienteIds.map((id) => redis.get<EstadoPontosCliente>(chaveEstadoPontos(id)))),
+    Promise.all(clienteIds.map((id) => redis.get<MovimentoPontos[]>(chaveExtratoPontosLegado(id)))),
   ]);
 
-  const estado = normalizarEstadoPontos(estadoAtual);
-  const legado = Array.isArray(extratoLegado) ? extratoLegado : [];
+  const estadosNormalizados = estados.map(normalizarEstadoPontos);
+  const legado = extratosLegados.flatMap((extrato) => (Array.isArray(extrato) ? extrato : []));
 
   // Compatibilidade com o PR #172: ele persistiu movimentos em
   // fidelidade:pontos:extrato:{clienteId}. Enquanto a chave combinada nova
@@ -351,10 +380,35 @@ async function obterEstadoPontos(clienteId: string): Promise<EstadoPontosCliente
   // leituras enxergam os dois formatos. A primeira escrita nova grava o
   // extrato unido dentro de EstadoPontosCliente, sem apagar a chave legada.
   return {
-    extrato: unirExtratosPontos(estado.extrato, legado),
-    recompensas: estado.recompensas,
-    reservas: estado.reservas,
+    extrato: unirExtratosPontos(estadosNormalizados.flatMap((estado) => estado.extrato), legado),
+    recompensas: unirRecompensasPontos(estadosNormalizados.map((estado) => estado.recompensas)),
+    reservas: unirReservasPontos(estadosNormalizados.map((estado) => estado.reservas)),
   };
+}
+
+async function consolidarEstadoPontosCliente(clienteId: string): Promise<EstadoPontosCliente> {
+  const clienteIdCanonico = normalizarClienteIdPontos(clienteId);
+  if (!clienteIdCanonico) return normalizarEstadoPontos(null);
+  const variantesLegadas = variantesClienteIdPontos(clienteIdCanonico).filter((id) => id !== clienteIdCanonico);
+  const [estadosLegados, extratosLegados] = await Promise.all([
+    Promise.all(variantesLegadas.map((id) => redis.get<EstadoPontosCliente>(chaveEstadoPontos(id)))),
+    Promise.all(variantesLegadas.map((id) => redis.get<MovimentoPontos[]>(chaveExtratoPontosLegado(id)))),
+  ]);
+  const temEstadoLegado = estadosLegados.some((estado) => {
+    const normalizado = normalizarEstadoPontos(estado);
+    return normalizado.extrato.length > 0 || normalizado.recompensas.length > 0 || normalizado.reservas.length > 0;
+  });
+  const temExtratoLegado = extratosLegados.some((extrato) => Array.isArray(extrato) && extrato.length > 0);
+  if (!temEstadoLegado && !temExtratoLegado) return obterEstadoPontos(clienteIdCanonico);
+
+  return comBloqueioCliente(clienteIdCanonico, async (token) => {
+    const estado = await obterEstadoPontos(clienteIdCanonico);
+    const persistiu = await persistirEstadoPontosSeDono(clienteIdCanonico, token, estado);
+    if (!persistiu) {
+      throw new Error(`Fidelidade por pontos: lock de ${clienteIdCanonico} expirou antes da consolidacao`);
+    }
+    return estado;
+  });
 }
 
 const LOCK_TTL_SEGUNDOS = 5;
@@ -1043,26 +1097,17 @@ export async function registrarMovimentoPontosIdempotente(
  */
 export function derivarClienteIdPorTelefone(telefone?: string): string | undefined {
   if (!telefone) return undefined;
-  const sanitizado = normalizarTelefonePontos(telefone);
+  const sanitizado = normalizarTelefoneClienteBr(telefone);
   if (sanitizado.length < 10) return undefined;
   return clienteIdDoTelefone(sanitizado);
 }
 
 function normalizarTelefonePontos(telefone: string): string {
-  const sanitizado = sanitizeTelefoneCliente(telefone);
-  if ((sanitizado.length === 12 || sanitizado.length === 13) && sanitizado.startsWith("55")) {
-    return sanitizado.slice(2);
-  }
-  return sanitizado;
+  return normalizarTelefoneClienteBr(telefone) || sanitizeTelefoneCliente(telefone);
 }
 
 function variantesTelefonePontos(telefone?: string): string[] {
-  if (!telefone) return [];
-  const sanitizado = sanitizeTelefoneCliente(telefone);
-  const normalizado = normalizarTelefonePontos(telefone);
-  const variantes = new Set<string>([normalizado, sanitizado]);
-  if (normalizado.length >= 10 && !normalizado.startsWith("55")) variantes.add(`55${normalizado}`);
-  return [...variantes].filter((v) => v.length >= 10);
+  return variantesTelefoneClienteBr(telefone).filter((v) => v.length >= 10);
 }
 
 /**
@@ -1174,14 +1219,27 @@ function normalizarClienteIdPontos(clienteId?: string): string | undefined {
   if (!clienteId) return undefined;
   const raw = clienteId.startsWith("cli_") ? clienteId.slice(4) : clienteId;
   const normalizado = normalizarTelefonePontos(raw);
-  if (normalizado.length < 10) return undefined;
+  if (normalizado.length < 10) return clienteId.startsWith("cli_") ? clienteId : undefined;
   return clienteIdDoTelefone(normalizado);
+}
+
+function normalizarClienteIdTelefonePontos(clienteId?: string): string | undefined {
+  if (!clienteId) return undefined;
+  const raw = clienteId.startsWith("cli_") ? clienteId.slice(4) : clienteId;
+  const telefone = normalizarTelefoneClienteBr(raw);
+  return telefone ? clienteIdDoTelefone(telefone) : undefined;
 }
 
 function variantesClienteIdPontos(clienteId?: string): string[] {
   const canonico = normalizarClienteIdPontos(clienteId);
   if (!canonico) return [];
-  return variantesTelefonePontos(canonico).map(clienteIdDoTelefone);
+  const telefoneCanonico = normalizarTelefoneClienteBr(canonico.startsWith("cli_") ? canonico.slice(4) : canonico);
+  if (!telefoneCanonico) return [canonico];
+  const bruto = clienteId?.startsWith("cli_") ? clienteId.slice(4) : clienteId;
+  const variantes = new Set<string>([canonico, `cli_55${telefoneCanonico}`]);
+  const brutoSanitizado = sanitizeTelefoneCliente(bruto ?? "");
+  if (brutoSanitizado.length >= 10) variantes.add(`cli_${brutoSanitizado}`);
+  return [...variantes];
 }
 
 async function buscarClientePorVariantesClienteId(clienteId?: string): Promise<Cliente | null> {
@@ -1207,7 +1265,7 @@ function clienteIdPontosDoCliente(cliente: Cliente): string {
 function pedidoPertenceAoClienteSessao(pedido: PedidoParaCreditoPontos, cliente: Cliente): boolean {
   if (!pedido.clienteId) return false;
   if (pedido.clienteId === cliente.clienteId) return true;
-  const pedidoNormalizado = normalizarClienteIdPontos(pedido.clienteId);
+  const pedidoNormalizado = normalizarClienteIdTelefonePontos(pedido.clienteId);
   const clienteNormalizado = derivarClienteIdPorTelefone(cliente.telefone);
   return !!pedidoNormalizado && !!clienteNormalizado && pedidoNormalizado === clienteNormalizado;
 }
@@ -1217,17 +1275,18 @@ export async function resolverProprietarioFidelidadePedido(
   clienteSessao?: Cliente
 ): Promise<ProprietarioFidelidadePedido | null> {
   if (clienteSessao && pedidoPertenceAoClienteSessao(pedido, clienteSessao)) {
-    const clienteId = clienteIdPontosDoCliente(clienteSessao);
+    const clienteConsolidado = (await buscarClientePorVariantesClienteId(clienteSessao.clienteId)) ?? clienteSessao;
+    const clienteId = clienteIdPontosDoCliente(clienteConsolidado);
     const clienteIdTelefone = derivarClienteIdPorTelefone(pedido.telefone);
     if (clienteIdTelefone && clienteIdTelefone !== clienteId) {
       console.warn(
         `[ChefeBot] Fidelidade: pedido ${pedido.id} usa proprietario da sessao (${mascararIdentidadePontos(clienteId)}) e telefone de contato divergente (${mascararIdentidadePontos(clienteIdTelefone)})`
       );
     }
-    return { clienteId, cliente: clienteSessao, origem: "sessao" };
+    return { clienteId, cliente: clienteConsolidado, origem: "sessao" };
   }
 
-  const clienteIdSessao = normalizarClienteIdPontos(pedido.clienteId);
+  const clienteIdSessao = normalizarClienteIdTelefonePontos(pedido.clienteId);
   const clienteIdTelefone = derivarClienteIdPorTelefone(pedido.telefone);
   const podeUsarVinculoSessao = !!clienteIdSessao && pedido.clienteVinculo !== "telefone";
 
@@ -1348,7 +1407,7 @@ export async function confirmarPontosPedido(
   if (!resolvido) return null;
   const { clienteId, cliente } = resolvido;
 
-  const estado = await obterEstadoPontos(clienteId);
+  const estado = await consolidarEstadoPontosCliente(clienteId);
   const avaliacao = avaliarCreditoPontosPedido(pedido, cliente, config, estado, {
     proprietarioClienteId: clienteId,
     origemProprietario: resolvido.origem,
@@ -1424,7 +1483,7 @@ export async function confirmarCompraECreditarPontos(
 
   const config = await obterConfigFidelidadePontos();
   const proprietario = await resolverProprietarioFidelidadePedido(pedido, opcoes.clienteSessao);
-  const estado = proprietario ? await obterEstadoPontos(proprietario.clienteId) : normalizarEstadoPontos(null);
+  const estado = proprietario ? await consolidarEstadoPontosCliente(proprietario.clienteId) : normalizarEstadoPontos(null);
   const avaliacao = avaliarCreditoPontosPedido(pedido, proprietario?.cliente, config, estado, {
     proprietarioClienteId: proprietario?.clienteId,
     origemProprietario: proprietario?.origem,
@@ -1448,7 +1507,7 @@ export async function confirmarCompraECreditarPontos(
   });
 
   if (!movimento) {
-    const estadoAtual = await obterEstadoPontos(proprietario!.clienteId);
+    const estadoAtual = await consolidarEstadoPontosCliente(proprietario!.clienteId);
     const jaExiste = avaliarCreditoPontosPedido(pedido, proprietario!.cliente, config, estadoAtual, {
       proprietarioClienteId: proprietario!.clienteId,
       origemProprietario: proprietario!.origem,
@@ -1493,8 +1552,10 @@ export async function reconciliarPontosClientePedidos(
   pedidos: PedidoParaCreditoPontos[],
   opcoes: { limite?: number; dias?: number } = {}
 ): Promise<{ verificados: number; creditados: number; detalhes: ResultadoConfirmarCompraPontos[] }> {
-  const clienteId = clienteIdPontosDoCliente(cliente);
-  if (!cliente.pontosAtivos || !cliente.pontosAtivadoEm || !clienteId) return { verificados: 0, creditados: 0, detalhes: [] };
+  const clienteConsolidado = (await buscarClientePorVariantesClienteId(cliente.clienteId)) ?? cliente;
+  const clienteId = clienteIdPontosDoCliente(clienteConsolidado);
+  if (!clienteConsolidado.pontosAtivos || !clienteConsolidado.pontosAtivadoEm || !clienteId) return { verificados: 0, creditados: 0, detalhes: [] };
+  await consolidarEstadoPontosCliente(clienteId);
 
   const limite = Math.max(1, Math.min(opcoes.limite ?? 50, 100));
   const dias = Math.max(1, Math.min(opcoes.dias ?? 90, 365));
@@ -1505,7 +1566,7 @@ export async function reconciliarPontosClientePedidos(
     if (!pedido?.id || pedido.status === "cancelado") continue;
     const criadoMs = timestampCriacaoPedidoMs(pedido);
     if (criadoMs === null || criadoMs < desdeMs) continue;
-    const proprietario = await resolverProprietarioFidelidadePedido(pedido, cliente);
+    const proprietario = await resolverProprietarioFidelidadePedido(pedido, clienteConsolidado);
     if (proprietario?.clienteId === clienteId) candidatos.push(pedido);
   }
 
@@ -1520,14 +1581,14 @@ export async function reconciliarPontosClientePedidos(
     if (!confirmacao.confirmada) {
       const config = await obterConfigFidelidadePontos();
       const estado = await obterEstadoPontos(clienteId);
-      const avaliacao = avaliarCreditoPontosPedido(pedido, cliente, config, estado, {
+      const avaliacao = avaliarCreditoPontosPedido(pedido, clienteConsolidado, config, estado, {
         proprietarioClienteId: clienteId,
         origemProprietario: "sessao",
       });
       detalhes.push({ ...avaliacao, pedidoId: pedido.id, numero: pedido.numero });
       continue;
     }
-    const resultado = await confirmarCompraECreditarPontos(pedido.id, confirmacao.origem ?? "confirmacao_operacional", { clienteSessao: cliente });
+    const resultado = await confirmarCompraECreditarPontos(pedido.id, confirmacao.origem ?? "confirmacao_operacional", { clienteSessao: clienteConsolidado });
     detalhes.push(resultado);
     if (resultado.movimento) creditados++;
   }

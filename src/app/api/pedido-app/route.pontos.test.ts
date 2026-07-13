@@ -47,9 +47,19 @@ vi.mock("@/lib/numeracao", () => ({
 }));
 
 vi.mock("@/lib/clienteAuth", () => ({
-  CLIENTE_COOKIE: "cliente-token",
-  verificarTokenCliente: vi.fn(async (token: string) => {
-    if (token === "token-cliente-logado") return { clienteId: "cli_pontos", telefone: "11900000001" };
+  resolverSessaoCliente: vi.fn(async (req: NextRequest) => {
+    if (req.cookies.get("cliente-token")?.value === "token-cliente-logado") {
+      return {
+        cliente: {
+          clienteId: "cli_11900000001",
+          telefone: "11900000001",
+          createdAt: "2026-07-13T10:00:00.000Z",
+          updatedAt: "2026-07-13T10:00:00.000Z",
+          lastLoginAt: "2026-07-13T10:00:00.000Z",
+        },
+        deveRenovar: false,
+      };
+    }
     return null;
   }),
 }));
