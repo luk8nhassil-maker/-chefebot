@@ -206,6 +206,7 @@ export default function AdminPage() {
   const [mpSaving, setMpSaving] = useState(false)
   const [mpTesting, setMpTesting] = useState(false)
   const [mpRemoving, setMpRemoving] = useState(false)
+  const [mpToggling, setMpToggling] = useState(false)
   const cameraRef = useRef<HTMLInputElement>(null)
   const inputPizzaRef = useRef<HTMLInputElement>(null)
   const inputLancheRef = useRef<HTMLInputElement>(null)
@@ -445,6 +446,33 @@ export default function AdminPage() {
       msg('Erro ao remover token Mercado Pago.')
     } finally {
       setMpRemoving(false)
+    }
+  }
+
+  // Ativa/desativa o Pix automatico Mercado Pago via campo `enabled` que a API
+  // ja aceita. Envia SOMENTE { enabled } — token e e-mail fallback existentes
+  // sao preservados pela API (updateMercadoPagoIntegrationConfig so troca esses
+  // campos quando recebidos). Sem token configurado, ativar nao e permitido.
+  const alternarPixAutomatico = async (ativar: boolean) => {
+    if (ativar && !mpConfig?.configured) {
+      msg('Configure e salve o token do Mercado Pago antes de ativar o Pix automatico.')
+      return
+    }
+    setMpToggling(true)
+    try {
+      const res = await fetch('/api/admin/integracoes/mercadopago', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: ativar }),
+      })
+      const data = await res.json().catch(() => null)
+      if (!res.ok) throw new Error(data?.error || 'erro')
+      setMpConfig(data.config)
+      msg(ativar ? 'Pix automatico Mercado Pago ativado.' : 'Pix automatico Mercado Pago desativado.')
+    } catch {
+      msg('Erro ao atualizar o Pix automatico.')
+    } finally {
+      setMpToggling(false)
     }
   }
 
@@ -1013,7 +1041,7 @@ export default function AdminPage() {
                 <div>
                   <p style={{ ...sectionTitle, marginBottom: 4 }}>Integracoes / Mercado Pago</p>
                   <p style={{ color: 'var(--border-strong)', fontSize: 11, margin: 0, lineHeight: 1.45 }}>
-                    Preparacao da integracao. Esta etapa nao ativa Pix automatico nem altera o Pix manual.
+                    Salve o token e ative o Pix automatico aqui. O Pix manual continua como fallback e nao e alterado.
                   </p>
                 </div>
                 <span style={{
@@ -1044,6 +1072,26 @@ export default function AdminPage() {
                       {mpConfig?.tokenMasked || '-'}
                     </p>
                   </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--surface-secondary)' }}>
+                  <div>
+                    <p style={{ color: 'var(--border-strong)', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 4px' }}>Pix automatico</p>
+                    <p style={{ color: mpConfig?.enabled ? 'var(--success)' : 'var(--foreground-muted)', fontSize: 13, fontWeight: 800, margin: 0 }}>
+                      {mpConfig?.enabled ? 'Ativo' : 'Inativo'}
+                    </p>
+                  </div>
+                  <span style={{
+                    background: mpConfig?.enabled ? 'var(--success-soft)' : 'var(--surface-secondary)',
+                    border: `1px solid ${mpConfig?.enabled ? 'color-mix(in srgb, var(--success) 25%, transparent)' : 'var(--surface-elevated)'}`,
+                    color: mpConfig?.enabled ? 'var(--success)' : 'var(--foreground-secondary)',
+                    borderRadius: 999,
+                    padding: '5px 10px',
+                    fontSize: 11,
+                    fontWeight: 800,
+                    whiteSpace: 'nowrap',
+                  }}>
+                    {mpConfig?.enabled ? 'Cobrando via Mercado Pago' : 'Usando Pix manual'}
+                  </span>
                 </div>
                 {mpConfig?.lastTestMessage && (
                   <p style={{ color: mpConfig.lastTestOk ? 'var(--success)' : 'var(--danger)', fontSize: 12, fontWeight: 700, margin: '10px 0 0', lineHeight: 1.4 }}>
@@ -1078,6 +1126,20 @@ export default function AdminPage() {
                 <button onClick={salvarMercadoPago} disabled={mpSaving || mpLoading} style={{ width: '100%', background: mpSaving ? 'var(--surface-secondary)' : 'var(--primary)', border: 'none', borderRadius: 10, padding: '12px', color: 'var(--foreground)', fontSize: 14, fontWeight: 800, cursor: mpSaving || mpLoading ? 'not-allowed' : 'pointer' }}>
                   {mpSaving ? 'Salvando...' : 'Salvar configuracao'}
                 </button>
+                {mpConfig?.enabled ? (
+                  <button onClick={() => alternarPixAutomatico(false)} disabled={mpToggling} style={{ width: '100%', background: mpToggling ? 'var(--surface-secondary)' : 'var(--danger-soft, var(--surface-secondary))', border: '1px solid color-mix(in srgb, var(--danger) 30%, transparent)', borderRadius: 10, padding: '12px', color: 'var(--danger)', fontSize: 14, fontWeight: 800, cursor: mpToggling ? 'not-allowed' : 'pointer' }}>
+                    {mpToggling ? 'Atualizando...' : 'Desativar Pix automatico'}
+                  </button>
+                ) : (
+                  <button onClick={() => alternarPixAutomatico(true)} disabled={mpToggling || !mpConfig?.configured} title={!mpConfig?.configured ? 'Salve o token do Mercado Pago antes de ativar' : undefined} style={{ width: '100%', background: mpToggling || !mpConfig?.configured ? 'var(--surface-secondary)' : 'var(--success)', border: 'none', borderRadius: 10, padding: '12px', color: mpConfig?.configured ? 'var(--foreground)' : 'var(--border-strong)', fontSize: 14, fontWeight: 800, cursor: mpToggling || !mpConfig?.configured ? 'not-allowed' : 'pointer' }}>
+                    {mpToggling ? 'Atualizando...' : 'Ativar Pix automatico'}
+                  </button>
+                )}
+                {!mpConfig?.configured && (
+                  <p style={{ color: 'var(--border-strong)', fontSize: 11, margin: 0, lineHeight: 1.4, textAlign: 'center' }}>
+                    Configure e salve o token do Mercado Pago para poder ativar o Pix automatico.
+                  </p>
+                )}
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button onClick={testarMercadoPago} disabled={mpTesting || !mpConfig?.configured} style={{ flex: 1, background: mpTesting || !mpConfig?.configured ? 'var(--background)' : 'var(--surface-secondary)', border: '1px solid var(--surface-elevated)', color: mpConfig?.configured ? 'var(--success)' : 'var(--border-strong)', borderRadius: 10, padding: '11px', fontSize: 13, fontWeight: 800, cursor: mpTesting || !mpConfig?.configured ? 'not-allowed' : 'pointer' }}>
                     {mpTesting ? 'Testando...' : 'Testar conexao'}
