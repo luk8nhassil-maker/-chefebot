@@ -1,5 +1,5 @@
 import { redis } from "./redis";
-import { buscarPagamentoMercadoPago, mapearStatusMercadoPago } from "./mercadoPagoWebhook";
+import { buscarPagamentoMercadoPagoDetalhado, mapearStatusMercadoPago } from "./mercadoPagoWebhook";
 import type { PedidoComPix } from "./pix";
 
 // Conciliador manual/sob-demanda do Pix Mercado Pago (Nivel 6.2A) — usado
@@ -9,6 +9,15 @@ import type { PedidoComPix } from "./pix";
 // mexe no serializador do cliente nem no fallback manual — só lê pedidos já
 // existentes e, quando elegível, atualiza pix.status/pixConfirmado, igual ao
 // que o webhook (route.ts) já faz.
+//
+// Nivel 6.5 — robustez para múltiplos Pix pendentes simultâneos: lock Redis
+// (evita duas execuções concorrentes de abas/admins diferentes), lote máximo
+// por rodada, concorrência limitada às consultas ao MP, timeout por consulta,
+// isolamento de erro por pedido, cooldown global em caso de rate limit (429)
+// e cooldown curto por pedido para não reconsultar o mesmo pending demais
+// vezes. Nenhuma regra de confirmação muda: só approved + centavos batendo +
+// txid batendo (quando ambos existem) confirma — timeout, erro de API e rate
+// limit nunca confirmam.
 
 type PedidoReconciliavel = PedidoComPix & { pixConfirmado?: boolean };
 
@@ -27,10 +36,37 @@ export type ResumoReconciliacaoPix = {
   ignorados: number;
   erros: number;
   detalhes: ReconciliacaoDetalhe[];
+  // Campos aditivos (Nivel 6.5) — frontend existente ignora o que não conhece.
+  locked?: boolean;
+  rateLimited?: boolean;
+  limitados?: number;
 };
+
+const LOCK_KEY = "lock:mercadopago:reconciliacao";
+const LOCK_TTL_SEGUNDOS = 90;
+
+const COOLDOWN_RATE_LIMIT_KEY = "cooldown:mercadopago:reconciliacao";
+const COOLDOWN_RATE_LIMIT_TTL_SEGUNDOS = 60;
+
+const COOLDOWN_PEDIDO_PREFIXO = "cooldown:pix:";
+const COOLDOWN_PEDIDO_TTL_SEGUNDOS = 60;
+
+const LOTE_MAXIMO = 20;
+const CONCORRENCIA_MAXIMA = 3;
+const TIMEOUT_CONSULTA_MS = 5000;
+
+function resumoVazio(): ResumoReconciliacaoPix {
+  return { verificados: 0, confirmados: 0, pendentes: 0, ignorados: 0, erros: 0, detalhes: [] };
+}
 
 function emCentavos(valor: number): number {
   return Math.round(valor * 100);
+}
+
+function chunk<T>(itens: T[], tamanho: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < itens.length; i += tamanho) chunks.push(itens.slice(i, i + tamanho));
+  return chunks;
 }
 
 // Critérios de elegibilidade (Nivel 6.2A, item 3): provider mercadopago,
@@ -54,46 +90,105 @@ export function selecionarPedidosPixMercadoPagoPendentes(
   return pedidos.filter(elegivelParaReconciliacao);
 }
 
+// Timeout defensivo por consulta — não cancela de fato o fetch (evita mexer
+// no fetch/webhook além do necessário), mas garante que, do ponto de vista do
+// conciliador, uma consulta lenta nunca trava o lote: após ~5s vira erro
+// "timeout" e nunca confirma.
+async function consultarComTimeout(paymentId: string) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_CONSULTA_MS);
+  try {
+    return await buscarPagamentoMercadoPagoDetalhado(paymentId, controller.signal);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 export async function reconciliarPixMercadoPago(): Promise<ResumoReconciliacaoPix> {
+  // Cooldown global de rate limit primeiro — nem tenta o lock nem lê pedidos
+  // se uma rodada recente já tomou 429 do Mercado Pago.
+  const emCooldownGlobal = await redis.get(COOLDOWN_RATE_LIMIT_KEY);
+  if (emCooldownGlobal) return { ...resumoVazio(), rateLimited: true };
+
+  // Lock via Redis (NX): evita duas execuções concorrentes (abas/admins
+  // diferentes chamando a rota ao mesmo tempo). TTL 90s cobre folgadamente o
+  // pior caso (lote de 20, concorrência 3, timeout 5s ⇒ ~35s) sem depender de
+  // remoção manual — não há forma segura de comparar/apagar apenas o lock
+  // desta execução sem uma operação atômica (CAS/Lua) que este projeto não
+  // usa em nenhum outro lugar, então preferimos deixar expirar pelo TTL a
+  // arriscar apagar o lock de outra execução.
+  const lockAdquirido = await redis.set(LOCK_KEY, "1", { nx: true, ex: LOCK_TTL_SEGUNDOS });
+  if (!lockAdquirido) return { ...resumoVazio(), locked: true };
+
   const pedidos = (await redis.get<PedidoReconciliavel[]>("pedidos")) || [];
   const elegiveis = selecionarPedidosPixMercadoPagoPendentes(pedidos);
 
-  const resumo: ResumoReconciliacaoPix = {
-    verificados: 0,
-    confirmados: 0,
-    pendentes: 0,
-    ignorados: 0,
-    erros: 0,
-    detalhes: [],
-  };
+  const resumo: ResumoReconciliacaoPix = resumoVazio();
   if (elegiveis.length === 0) return resumo;
+
+  // Pula pedidos consultados recentemente (cooldown por pedido) antes de
+  // aplicar o corte de lote, para o lote priorizar pedidos "frescos".
+  const cooldowns = await Promise.all(
+    elegiveis.map((p) => redis.get(`${COOLDOWN_PEDIDO_PREFIXO}${p.id}`))
+  );
+  const disponiveis = elegiveis.filter((_, i) => !cooldowns[i]);
+
+  // Sem campo de data confiável nos pedidos (horario é só "HH:MM", sem data)
+  // — mantém a ordem atual em vez de inventar critério de recência.
+  const lote = disponiveis.slice(0, LOTE_MAXIMO);
+  const limitados = disponiveis.length - lote.length;
+  if (limitados > 0) resumo.limitados = limitados;
 
   let atualizados = pedidos;
   let mudou = false;
+  let rateLimited = false;
 
-  for (const pedido of elegiveis) {
-    resumo.verificados++;
-    const pedidoId = pedido.id as string;
-    const paymentId = (pedido.pix?.providerPaymentId as string).trim();
+  for (const grupo of chunk(lote, CONCORRENCIA_MAXIMA)) {
+    if (rateLimited) break;
 
-    try {
-      const pagamento = await buscarPagamentoMercadoPago(paymentId);
-      if (!pagamento) {
+    const resultados = await Promise.all(
+      grupo.map(async (pedido) => {
+        const pedidoId = pedido.id as string;
+        const paymentId = (pedido.pix?.providerPaymentId as string).trim();
+        const resultado = await consultarComTimeout(paymentId).catch((err) => ({
+          ok: false as const,
+          status: null,
+          motivo: err instanceof Error ? err.message : "erro_desconhecido",
+        }));
+        return { pedido, pedidoId, resultado };
+      })
+    );
+
+    for (const { pedido, pedidoId, resultado } of resultados) {
+      resumo.verificados++;
+
+      if (!resultado.ok) {
+        if (resultado.status === 429) {
+          rateLimited = true;
+          resumo.erros++;
+          resumo.detalhes.push({ pedidoId, outcome: "erro", motivo: "rate_limited" });
+          continue;
+        }
         resumo.erros++;
-        resumo.detalhes.push({ pedidoId, outcome: "erro", motivo: "pagamento_indisponivel" });
+        resumo.detalhes.push({ pedidoId, outcome: "erro", motivo: resultado.motivo });
+        await redis.set(`${COOLDOWN_PEDIDO_PREFIXO}${pedidoId}`, "1", { ex: COOLDOWN_PEDIDO_TTL_SEGUNDOS });
         continue;
       }
 
+      const pagamento = resultado.pagamento;
       const statusInterno = mapearStatusMercadoPago(pagamento.status);
+
       if (statusInterno === "pendente") {
         resumo.pendentes++;
         resumo.detalhes.push({ pedidoId, outcome: "pendente", motivo: pagamento.status });
+        await redis.set(`${COOLDOWN_PEDIDO_PREFIXO}${pedidoId}`, "1", { ex: COOLDOWN_PEDIDO_TTL_SEGUNDOS });
         continue;
       }
       if (statusInterno !== "pago") {
         // rejected/cancelled/refunded e demais: nunca confirma.
         resumo.ignorados++;
         resumo.detalhes.push({ pedidoId, outcome: "ignorado", motivo: pagamento.status });
+        await redis.set(`${COOLDOWN_PEDIDO_PREFIXO}${pedidoId}`, "1", { ex: COOLDOWN_PEDIDO_TTL_SEGUNDOS });
         continue;
       }
 
@@ -101,11 +196,13 @@ export async function reconciliarPixMercadoPago(): Promise<ResumoReconciliacaoPi
       if (typeof valorEsperado !== "number" || !Number.isFinite(valorEsperado)) {
         resumo.ignorados++;
         resumo.detalhes.push({ pedidoId, outcome: "ignorado", motivo: "pix_valor_esperado_ausente" });
+        await redis.set(`${COOLDOWN_PEDIDO_PREFIXO}${pedidoId}`, "1", { ex: COOLDOWN_PEDIDO_TTL_SEGUNDOS });
         continue;
       }
       if (pagamento.transactionAmount === null || emCentavos(pagamento.transactionAmount) !== emCentavos(valorEsperado)) {
         resumo.ignorados++;
         resumo.detalhes.push({ pedidoId, outcome: "ignorado", motivo: "valor_divergente" });
+        await redis.set(`${COOLDOWN_PEDIDO_PREFIXO}${pedidoId}`, "1", { ex: COOLDOWN_PEDIDO_TTL_SEGUNDOS });
         continue;
       }
       // external_reference só bloqueia quando ambos existem e divergem —
@@ -113,6 +210,7 @@ export async function reconciliarPixMercadoPago(): Promise<ResumoReconciliacaoPi
       if (pedido.pix?.txid && pagamento.externalReference && pagamento.externalReference !== pedido.pix.txid) {
         resumo.ignorados++;
         resumo.detalhes.push({ pedidoId, outcome: "ignorado", motivo: "external_reference_divergente" });
+        await redis.set(`${COOLDOWN_PEDIDO_PREFIXO}${pedidoId}`, "1", { ex: COOLDOWN_PEDIDO_TTL_SEGUNDOS });
         continue;
       }
 
@@ -140,14 +238,12 @@ export async function reconciliarPixMercadoPago(): Promise<ResumoReconciliacaoPi
 
       resumo.confirmados++;
       resumo.detalhes.push({ pedidoId, outcome: "confirmado" });
-    } catch (err) {
-      resumo.erros++;
-      resumo.detalhes.push({
-        pedidoId,
-        outcome: "erro",
-        motivo: err instanceof Error ? err.message : "erro_desconhecido",
-      });
     }
+  }
+
+  if (rateLimited) {
+    resumo.rateLimited = true;
+    await redis.set(COOLDOWN_RATE_LIMIT_KEY, "1", { ex: COOLDOWN_RATE_LIMIT_TTL_SEGUNDOS });
   }
 
   if (mudou) await redis.set("pedidos", atualizados);

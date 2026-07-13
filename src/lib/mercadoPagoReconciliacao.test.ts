@@ -3,8 +3,9 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 const { store, redisMock } = vi.hoisted(() => {
   const store = new Map<string, unknown>();
   const redisMock = {
-    get: vi.fn(async (key: string) => store.get(key) ?? null),
-    set: vi.fn(async (key: string, value: unknown) => {
+    get: vi.fn(async (key: string) => (store.has(key) ? store.get(key) : null)),
+    set: vi.fn(async (key: string, value: unknown, opts?: { nx?: boolean; ex?: number }) => {
+      if (opts?.nx && store.has(key)) return null;
       store.set(key, value);
       return "OK";
     }),
@@ -22,7 +23,7 @@ vi.mock("./mercadoPagoWebhook", async () => {
   const actual = await vi.importActual<typeof import("./mercadoPagoWebhook")>("./mercadoPagoWebhook");
   return {
     ...actual,
-    buscarPagamentoMercadoPago: (...args: unknown[]) => buscarPagamentoMock(...args),
+    buscarPagamentoMercadoPagoDetalhado: (...args: unknown[]) => buscarPagamentoMock(...args),
   };
 });
 
@@ -58,6 +59,15 @@ function pagamento(overrides: Record<string, unknown> = {}) {
   };
 }
 
+// Helper: formato de retorno de buscarPagamentoMercadoPagoDetalhado (usada
+// pelo conciliador desde o Nivel 6.5 no lugar da função simples do webhook).
+function ok(pagamentoOverrides: Record<string, unknown> = {}) {
+  return { ok: true as const, pagamento: pagamento(pagamentoOverrides) };
+}
+function falha(status: number | null, motivo: string) {
+  return { ok: false as const, status, motivo };
+}
+
 beforeEach(() => {
   store.clear();
   vi.clearAllMocks();
@@ -65,6 +75,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.clearAllMocks();
+  vi.useRealTimers();
 });
 
 describe("elegivelParaReconciliacao / selecionarPedidosPixMercadoPagoPendentes", () => {
@@ -106,7 +117,7 @@ describe("elegivelParaReconciliacao / selecionarPedidosPixMercadoPagoPendentes",
 describe("reconciliarPixMercadoPago", () => {
   test("pedido approved confirma: grava pixConfirmado, pix.status, confirmadoPor e confirmadoEm", async () => {
     store.set("pedidos", [pedidoMP()]);
-    buscarPagamentoMock.mockResolvedValue(pagamento());
+    buscarPagamentoMock.mockResolvedValue(ok());
 
     const resumo = await reconciliarPixMercadoPago();
 
@@ -123,7 +134,7 @@ describe("reconciliarPixMercadoPago", () => {
 
   test("valor divergente não confirma", async () => {
     store.set("pedidos", [pedidoMP()]);
-    buscarPagamentoMock.mockResolvedValue(pagamento({ transactionAmount: 49.99 }));
+    buscarPagamentoMock.mockResolvedValue(ok({ transactionAmount: 49.99 }));
 
     const resumo = await reconciliarPixMercadoPago();
 
@@ -135,7 +146,7 @@ describe("reconciliarPixMercadoPago", () => {
 
   test("external_reference divergente não confirma", async () => {
     store.set("pedidos", [pedidoMP()]);
-    buscarPagamentoMock.mockResolvedValue(pagamento({ externalReference: "chefebot_outro_pedido" }));
+    buscarPagamentoMock.mockResolvedValue(ok({ externalReference: "chefebot_outro_pedido" }));
 
     const resumo = await reconciliarPixMercadoPago();
 
@@ -145,7 +156,7 @@ describe("reconciliarPixMercadoPago", () => {
 
   test("external_reference ausente no pedido ou no pagamento não bloqueia a confirmação", async () => {
     store.set("pedidos", [pedidoMP({ pix: { ...pedidoMP().pix, txid: undefined } })]);
-    buscarPagamentoMock.mockResolvedValue(pagamento());
+    buscarPagamentoMock.mockResolvedValue(ok());
 
     const resumo = await reconciliarPixMercadoPago();
 
@@ -154,7 +165,7 @@ describe("reconciliarPixMercadoPago", () => {
 
   test("pending não confirma", async () => {
     store.set("pedidos", [pedidoMP()]);
-    buscarPagamentoMock.mockResolvedValue(pagamento({ status: "pending" }));
+    buscarPagamentoMock.mockResolvedValue(ok({ status: "pending" }));
 
     const resumo = await reconciliarPixMercadoPago();
 
@@ -166,7 +177,7 @@ describe("reconciliarPixMercadoPago", () => {
 
   test("in_process também é tratado como pendente, não confirma", async () => {
     store.set("pedidos", [pedidoMP()]);
-    buscarPagamentoMock.mockResolvedValue(pagamento({ status: "in_process" }));
+    buscarPagamentoMock.mockResolvedValue(ok({ status: "in_process" }));
 
     const resumo = await reconciliarPixMercadoPago();
 
@@ -175,7 +186,7 @@ describe("reconciliarPixMercadoPago", () => {
 
   test("rejected não confirma", async () => {
     store.set("pedidos", [pedidoMP()]);
-    buscarPagamentoMock.mockResolvedValue(pagamento({ status: "rejected" }));
+    buscarPagamentoMock.mockResolvedValue(ok({ status: "rejected" }));
 
     const resumo = await reconciliarPixMercadoPago();
 
@@ -185,8 +196,8 @@ describe("reconciliarPixMercadoPago", () => {
   test("cancelled e refunded também não confirmam", async () => {
     store.set("pedidos", [pedidoMP({ id: "ped-a" }), pedidoMP({ id: "ped-b" })]);
     buscarPagamentoMock
-      .mockResolvedValueOnce(pagamento({ id: "MP-a", status: "cancelled" }))
-      .mockResolvedValueOnce(pagamento({ id: "MP-b", status: "refunded" }));
+      .mockResolvedValueOnce(ok({ id: "MP-a", status: "cancelled" }))
+      .mockResolvedValueOnce(ok({ id: "MP-b", status: "refunded" }));
 
     const resumo = await reconciliarPixMercadoPago();
 
@@ -203,7 +214,8 @@ describe("reconciliarPixMercadoPago", () => {
 
     expect(resumo.verificados).toBe(0);
     expect(buscarPagamentoMock).not.toHaveBeenCalled();
-    expect(redisMock.set).not.toHaveBeenCalled();
+    // "pedidos" nunca é regravado quando não há mudança (lock/cooldown usam outras chaves).
+    expect(redisMock.set).not.toHaveBeenCalledWith("pedidos", expect.anything());
   });
 
   test("pedido sem providerPaymentId é ignorado — nem entra na verificação", async () => {
@@ -217,19 +229,21 @@ describe("reconciliarPixMercadoPago", () => {
     expect(buscarPagamentoMock).not.toHaveBeenCalled();
   });
 
-  test("sem pedidos elegíveis: resumo zerado, nunca chama a API nem grava", async () => {
+  test("sem pedidos elegíveis: resumo zerado, nunca chama a API nem grava 'pedidos'", async () => {
     store.set("pedidos", [{ id: "ped-cartao", total: 30, pagamento: "Cartao" }]);
 
     const resumo = await reconciliarPixMercadoPago();
 
-    expect(resumo).toEqual({ verificados: 0, confirmados: 0, pendentes: 0, ignorados: 0, erros: 0, detalhes: [] });
+    expect(resumo).toMatchObject({ verificados: 0, confirmados: 0, pendentes: 0, ignorados: 0, erros: 0, detalhes: [] });
     expect(buscarPagamentoMock).not.toHaveBeenCalled();
-    expect(redisMock.set).not.toHaveBeenCalled();
+    expect(redisMock.set).not.toHaveBeenCalledWith("pedidos", expect.anything());
   });
 
   test("pagamento indisponível na API do MP conta como erro, não interrompe os demais", async () => {
     store.set("pedidos", [pedidoMP({ id: "ped-a" }), pedidoMP({ id: "ped-b" })]);
-    buscarPagamentoMock.mockResolvedValueOnce(null).mockResolvedValueOnce(pagamento({ id: "MP-b" }));
+    buscarPagamentoMock
+      .mockResolvedValueOnce(falha(404, "http_404"))
+      .mockResolvedValueOnce(ok({ id: "MP-b" }));
 
     const resumo = await reconciliarPixMercadoPago();
 
@@ -242,8 +256,8 @@ describe("reconciliarPixMercadoPago", () => {
       pedidoMP({ id: "ped-2", pix: { ...pedidoMP().pix, providerPaymentId: "MP-2", txid: "chefebot_ped-2" } }),
     ]);
     buscarPagamentoMock
-      .mockResolvedValueOnce(pagamento({ id: "MP-1", externalReference: "chefebot_ped-1" }))
-      .mockResolvedValueOnce(pagamento({ id: "MP-2", externalReference: "chefebot_ped-2", status: "pending" }));
+      .mockResolvedValueOnce(ok({ id: "MP-1", externalReference: "chefebot_ped-1" }))
+      .mockResolvedValueOnce(ok({ id: "MP-2", externalReference: "chefebot_ped-2", status: "pending" }));
 
     const resumo = await reconciliarPixMercadoPago();
 
@@ -259,12 +273,128 @@ describe("reconciliarPixMercadoPago", () => {
       beneficiario: "Geovane Sousa da Silva",
     });
     store.set("pedidos", [pedidoComFallback]);
-    buscarPagamentoMock.mockResolvedValue(pagamento());
+    buscarPagamentoMock.mockResolvedValue(ok());
 
     await reconciliarPixMercadoPago();
 
     const pedidos = store.get("pedidos") as any[];
     expect(pedidos[0].chavePix).toBe("99984430294");
     expect(pedidos[0].beneficiario).toBe("Geovane Sousa da Silva");
+  });
+
+  describe("Nivel 6.5 — robustez para múltiplos Pix pendentes", () => {
+    test("muitos Pix pendentes: processa no máximo 20 por rodada", async () => {
+      const pedidos = Array.from({ length: 35 }, (_, i) =>
+        pedidoMP({
+          id: `ped-${i}`,
+          pix: { ...pedidoMP().pix, providerPaymentId: `MP-${i}`, txid: `chefebot_ped-${i}` },
+        })
+      );
+      store.set("pedidos", pedidos);
+      buscarPagamentoMock.mockImplementation(async () => ok({ status: "pending" }));
+
+      const resumo = await reconciliarPixMercadoPago();
+
+      expect(resumo.verificados).toBe(20);
+      expect(resumo.limitados).toBe(15);
+      expect(buscarPagamentoMock).toHaveBeenCalledTimes(20);
+    });
+
+    test("lock ativo impede segunda execução simultânea", async () => {
+      store.set("lock:mercadopago:reconciliacao", "1");
+      store.set("pedidos", [pedidoMP()]);
+
+      const resumo = await reconciliarPixMercadoPago();
+
+      expect(resumo).toMatchObject({ locked: true, verificados: 0 });
+      expect(buscarPagamentoMock).not.toHaveBeenCalled();
+    });
+
+    test("lock não apaga lock de outra execução (nunca chama del/apaga a chave)", async () => {
+      store.set("pedidos", [pedidoMP()]);
+      buscarPagamentoMock.mockResolvedValue(ok());
+
+      await reconciliarPixMercadoPago();
+
+      // O lock continua no store: a implementação nunca remove manualmente,
+      // só expira por TTL (não simulado aqui) — nunca corre risco de apagar
+      // o lock de outra execução concorrente.
+      expect(store.get("lock:mercadopago:reconciliacao")).toBe("1");
+    });
+
+    test("cooldown global de rate limit impede nova chamada ao Mercado Pago", async () => {
+      store.set("cooldown:mercadopago:reconciliacao", "1");
+      store.set("pedidos", [pedidoMP()]);
+
+      const resumo = await reconciliarPixMercadoPago();
+
+      expect(resumo).toMatchObject({ rateLimited: true, verificados: 0 });
+      expect(buscarPagamentoMock).not.toHaveBeenCalled();
+      // Nem tenta o lock quando já está em cooldown global.
+      expect(store.get("lock:mercadopago:reconciliacao")).toBeUndefined();
+    });
+
+    test("timeout não confirma e conta erro", async () => {
+      vi.useFakeTimers();
+      store.set("pedidos", [pedidoMP()]);
+      buscarPagamentoMock.mockImplementation(
+        (_paymentId: string, signal?: AbortSignal) =>
+          new Promise((_resolve, reject) => {
+            signal?.addEventListener("abort", () => {
+              reject(Object.assign(new Error("timeout"), { name: "AbortError" }));
+            });
+          })
+      );
+
+      const promise = reconciliarPixMercadoPago();
+      await vi.advanceTimersByTimeAsync(5000);
+      const resumo = await promise;
+
+      expect(resumo).toMatchObject({ confirmados: 0, erros: 1 });
+      expect(resumo.detalhes[0].outcome).toBe("erro");
+      const pedidos = store.get("pedidos") as any[];
+      expect(pedidos[0].pixConfirmado).toBeUndefined();
+    });
+
+    test("429/rate limit não confirma, para o lote e retorna rateLimited=true com cooldown global gravado", async () => {
+      store.set("pedidos", [pedidoMP({ id: "ped-a" }), pedidoMP({ id: "ped-b" })]);
+      buscarPagamentoMock
+        .mockResolvedValueOnce(falha(429, "http_429"))
+        .mockResolvedValueOnce(falha(429, "http_429"));
+
+      const resumo = await reconciliarPixMercadoPago();
+
+      expect(resumo.confirmados).toBe(0);
+      expect(resumo.rateLimited).toBe(true);
+      expect(store.get("cooldown:mercadopago:reconciliacao")).toBe("1");
+    });
+
+    test("cooldown por pedido pula pedido consultado recentemente", async () => {
+      store.set("cooldown:pix:ped-1", "1");
+      store.set("pedidos", [pedidoMP({ id: "ped-1" })]);
+
+      const resumo = await reconciliarPixMercadoPago();
+
+      expect(resumo.verificados).toBe(0);
+      expect(buscarPagamentoMock).not.toHaveBeenCalled();
+    });
+
+    test("pedido não confirmado recebe cooldown próprio após ser consultado", async () => {
+      store.set("pedidos", [pedidoMP()]);
+      buscarPagamentoMock.mockResolvedValue(ok({ status: "pending" }));
+
+      await reconciliarPixMercadoPago();
+
+      expect(store.get("cooldown:pix:ped-1")).toBe("1");
+    });
+
+    test("pedido confirmado não recebe cooldown próprio (não precisa)", async () => {
+      store.set("pedidos", [pedidoMP()]);
+      buscarPagamentoMock.mockResolvedValue(ok());
+
+      await reconciliarPixMercadoPago();
+
+      expect(store.get("cooldown:pix:ped-1")).toBeUndefined();
+    });
   });
 });
