@@ -52,6 +52,7 @@ import { redis } from "@/lib/redis";
 import {
   creditarPontosPedidoEntregue,
   salvarConfigFidelidadePontos,
+  salvarConfigFidelidade,
   obterSaldoPontos,
   obterExtratoPontos,
   obterRecompensasPontos,
@@ -644,5 +645,67 @@ describe("3. regra oficial de origem — mesmo pedido por múltiplos caminhos ge
     expect(mensagem).not.toContain("cli_86999990070");
     expect(mensagem).not.toContain("cli_outro_numero_1234567890");
     warnSpy.mockRestore();
+  });
+});
+
+// Nivel 5.9.1: creditarPontosPedidoEntregue precisa usar a MESMA config
+// efetiva que a tela "Meus pontos" — senao o cliente veria o programa como
+// ativo enquanto o credito real continuava desligado por ler uma fonte
+// diferente (obterConfigFidelidadePontos, sem a ponte com o legado).
+describe("creditarPontosPedidoEntregue — ponte com o modelo legado (config:fidelidade:pontos ausente)", () => {
+  beforeEach(async () => {
+    // O beforeEach global do arquivo ja deixa a chave nova salva e ativa;
+    // aqui testamos justamente o cenario em que ela NUNCA foi salva.
+    await redis.del("config:fidelidade:pontos");
+  });
+
+  test("chave nova ausente + legado ativo: pedido elegivel gera pontos normalmente", async () => {
+    await salvarConfigFidelidade({ ativo: true, pizzasParaPremio: 10, tipoRecompensa: "pizza_gratis", descricaoRecompensa: "Pizza gratis" });
+
+    await creditarPontosPedidoEntregue({ id: "ped_legado_ativo", status: "entregue", telefone: "86999991001", total: 50 });
+
+    expect((await obterSaldoPontos("cli_86999991001")).disponivel).toBe(50);
+  });
+
+  test("chave nova ausente + legado inativo: nenhum credito", async () => {
+    await salvarConfigFidelidade({ ativo: false, pizzasParaPremio: 10, tipoRecompensa: "pizza_gratis", descricaoRecompensa: "Pizza gratis" });
+
+    await creditarPontosPedidoEntregue({ id: "ped_legado_inativo", status: "entregue", telefone: "86999991002", total: 50 });
+
+    expect(await obterExtratoPontos("cli_86999991002")).toHaveLength(0);
+    expect((await obterSaldoPontos("cli_86999991002")).disponivel).toBe(0);
+  });
+
+  test("chave nova ausente + legado nunca configurado: nenhum credito (padrao inativo)", async () => {
+    await creditarPontosPedidoEntregue({ id: "ped_sem_config", status: "entregue", telefone: "86999991003", total: 50 });
+
+    expect(await obterExtratoPontos("cli_86999991003")).toHaveLength(0);
+  });
+
+  test("chave nova presente e inativa + legado ativo: nao herda o legado, nenhum credito", async () => {
+    await salvarConfigFidelidade({ ativo: true, pizzasParaPremio: 10, tipoRecompensa: "pizza_gratis", descricaoRecompensa: "Pizza gratis" });
+    await salvarConfigFidelidadePontos({ ativo: false, metaPontos: 720, descricaoRecompensa: "1 Pizza Família" });
+
+    await creditarPontosPedidoEntregue({ id: "ped_nova_inativa", status: "entregue", telefone: "86999991004", total: 50 });
+
+    expect(await obterExtratoPontos("cli_86999991004")).toHaveLength(0);
+  });
+
+  test("chave nova presente e ativa: comportamento normal (config nova manda, legado ignorado)", async () => {
+    await salvarConfigFidelidade({ ativo: false, pizzasParaPremio: 10, tipoRecompensa: "pizza_gratis", descricaoRecompensa: "Pizza gratis" });
+    await salvarConfigFidelidadePontos({ ativo: true, metaPontos: 720, descricaoRecompensa: "1 Pizza Família" });
+
+    await creditarPontosPedidoEntregue({ id: "ped_nova_ativa", status: "entregue", telefone: "86999991005", total: 50 });
+
+    expect((await obterSaldoPontos("cli_86999991005")).disponivel).toBe(50);
+  });
+
+  test("a formula (R$1 = 1 ponto, taxa nunca gera ponto) nao muda herdando o legado", async () => {
+    await salvarConfigFidelidade({ ativo: true, pizzasParaPremio: 10, tipoRecompensa: "pizza_gratis", descricaoRecompensa: "Pizza gratis" });
+
+    await creditarPontosPedidoEntregue({ id: "ped_formula", status: "entregue", telefone: "86999991006", total: 123, taxaEntrega: 23 });
+
+    // mesma regra de sempre: total - taxa, arredondado para baixo
+    expect((await obterSaldoPontos("cli_86999991006")).disponivel).toBe(100);
   });
 });

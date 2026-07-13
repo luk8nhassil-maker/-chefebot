@@ -565,11 +565,15 @@ export async function salvarConfigFidelidadePontos(config: ConfigFidelidadePonto
 }
 
 /**
- * Configuracao efetiva do programa por pontos, para as leituras publicas
- * (tela "Meus pontos" e painel admin) — nunca para os portoes de
- * credito/resgate, que continuam em `obterConfigFidelidadePontos()` sem
- * qualquer mudanca de comportamento (a regra de geracao de pontos nao muda
- * aqui). Enquanto `config:fidelidade:pontos` nunca foi salva, herda somente o
+ * Configuracao efetiva do programa por pontos — fonte usada tanto pelas
+ * leituras publicas (tela "Meus pontos", painel admin) quanto pelos portoes
+ * operacionais de credito/previsao/resgate (`creditarPontosPedidoEntregue`,
+ * `registrarMovimentoPontosIdempotente`, `reservarResgatePontos`,
+ * `confirmarResgatePontos`). Isso evita a tela mostrar o programa como ativo
+ * enquanto o credito real continua desligado por olhar uma fonte diferente.
+ * A formula/quantidade de pontos e as regras de resgate em si nao mudam aqui
+ * — so a fonte de `ativo`/`metaPontos`/`descricaoRecompensa` consultada.
+ * Enquanto `config:fidelidade:pontos` nunca foi salva, herda somente o
  * `ativo` do modelo legado (`config:fidelidade`), mantendo meta/recompensa
  * nos padroes do modelo por pontos — e uma leitura pura, nunca grava no
  * Redis. Assim que a config nova e salva (mesmo uma unica vez), ela passa a
@@ -689,7 +693,7 @@ export async function reservarResgatePontos(clienteId: string, recompensaId: str
       throw new Error("Recompensa nao esta mais disponivel para resgate");
     }
 
-    const config = await obterConfigFidelidadePontos();
+    const config = await obterConfigFidelidadePontosEfetiva();
     if (!config.ativo) throw new Error("Fidelidade nao esta ativa");
     const meta = calcularMetaPontos(config);
     const saldoAtual = calcularSaldoDoExtrato(estado.extrato);
@@ -775,7 +779,7 @@ export async function confirmarResgatePontos(
     const registro: MovimentoPontos = { ...registroSemSaldo, saldoApos };
     novoExtrato[novoExtrato.length - 1] = registro;
 
-    const config = await obterConfigFidelidadePontos();
+    const config = await obterConfigFidelidadePontosEfetiva();
     const meta = calcularMetaPontos(config);
     let novasRecompensas = estado.recompensas.map((r) =>
       r.recompensaId === reserva.recompensaId ? { ...r, status: "resgatada" as StatusRecompensaPontos } : r
@@ -1023,7 +1027,7 @@ export async function registrarMovimentoPontosIdempotente(
     // (expiração) são sempre revalidados a partir do saldo real — nunca só
     // incrementais. Tudo em memória; a escrita real é uma só, abaixo, junto
     // com o extrato.
-    const config = await obterConfigFidelidadePontos();
+    const config = await obterConfigFidelidadePontosEfetiva();
     const meta = calcularMetaPontos(config);
     let novasRecompensas = estado.recompensas;
     if (saldoApos > saldoAnterior) {
@@ -1130,7 +1134,7 @@ export async function creditarPontosPedidoEntregue(pedido: PedidoParaCreditoPont
     );
   }
 
-  const config = await obterConfigFidelidadePontos();
+  const config = await obterConfigFidelidadePontosEfetiva();
   if (!config.ativo) return;
 
   const valorElegivel = Math.max((Number(pedido.total) || 0) - (Number(pedido.taxaEntrega) || 0), 0);
