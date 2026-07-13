@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { redis } from "./redis";
 import { buscarPagamentoMercadoPagoDetalhado, mapearStatusMercadoPago } from "./mercadoPagoWebhook";
 import type { PedidoComPix } from "./pix";
+import { confirmarPontosPedido } from "./fidelidade";
 
 // Conciliador manual/sob-demanda do Pix Mercado Pago (Nivel 6.2A) — usado
 // enquanto nao ha webhook configurado no painel MP. Consulta a API do MP pelo
@@ -20,7 +21,15 @@ import type { PedidoComPix } from "./pix";
 // txid batendo (quando ambos existem) confirma — timeout, erro de API e rate
 // limit nunca confirmam.
 
-type PedidoReconciliavel = PedidoComPix & { pixConfirmado?: boolean };
+type PedidoReconciliavel = PedidoComPix & {
+  id: string;
+  status: string;
+  telefone?: string;
+  clienteId?: string;
+  taxaEntrega?: number;
+  criadoEm?: string;
+  pixConfirmado?: boolean;
+};
 
 export type ReconciliacaoOutcome = "confirmado" | "pendente" | "ignorado" | "erro";
 
@@ -167,6 +176,7 @@ export async function reconciliarPixMercadoPago(): Promise<ResumoReconciliacaoPi
     let atualizados = pedidos;
     let mudou = false;
     let rateLimited = false;
+    const pedidosConfirmadosParaPontuar: PedidoReconciliavel[] = [];
 
     for (const grupo of chunk(lote, CONCORRENCIA_MAXIMA)) {
       if (rateLimited) break;
@@ -260,6 +270,7 @@ export async function reconciliarPixMercadoPago(): Promise<ResumoReconciliacaoPi
           },
         };
         mudou = true;
+        pedidosConfirmadosParaPontuar.push(atualizados[index]);
 
         resumo.confirmados++;
         resumo.detalhes.push({ pedidoId, outcome: "confirmado" });
@@ -271,7 +282,16 @@ export async function reconciliarPixMercadoPago(): Promise<ResumoReconciliacaoPi
       await redis.set(COOLDOWN_RATE_LIMIT_KEY, "1", { ex: COOLDOWN_RATE_LIMIT_TTL_SEGUNDOS });
     }
 
-    if (mudou) await redis.set("pedidos", atualizados);
+    if (mudou) {
+      await redis.set("pedidos", atualizados);
+      for (const pedido of pedidosConfirmadosParaPontuar) {
+        try {
+          await confirmarPontosPedido(pedido, "pix_automatico");
+        } catch (err) {
+          console.error("[ChefeBot] Erro ao confirmar pontos por conciliacao Pix (ignorado):", err);
+        }
+      }
+    }
 
     return resumo;
   } finally {

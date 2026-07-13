@@ -8,8 +8,15 @@ import {
   buscarPagamentoMercadoPago,
   mapearPagamentoParaPayloadInterno,
 } from "@/lib/mercadoPagoWebhook";
+import { confirmarPontosPedido } from "@/lib/fidelidade";
 
 type PedidoWebhookPix = PedidoComPix & {
+  id: string;
+  status: string;
+  telefone?: string;
+  clienteId?: string;
+  taxaEntrega?: number;
+  criadoEm?: string;
   pixConfirmado?: boolean;
 };
 
@@ -117,6 +124,11 @@ export async function POST(req: NextRequest) {
     const atualizados = [...pedidos];
     atualizados[index] = { ...pedido, pixConfirmado: true, pix };
     await redis.set("pedidos", atualizados);
+    try {
+      await confirmarPontosPedido(atualizados[index], "pix_webhook");
+    } catch (err) {
+      console.error("[ChefeBot] Erro ao confirmar pontos por webhook Pix (ignorado):", err);
+    }
 
     return NextResponse.json({
       ok: true,

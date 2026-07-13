@@ -9,6 +9,17 @@ import { vi, describe, test, expect, beforeEach } from "vitest";
 const store = new Map<string, unknown>();
 
 function realGet(key: string) {
+  if (!store.has(key) && key === `cliente:${TELEFONE}`) {
+    return {
+      clienteId: clienteIdPontos,
+      telefone: TELEFONE,
+      createdAt: "2020-01-01T00:00:00.000Z",
+      updatedAt: "2020-01-01T00:00:00.000Z",
+      lastLoginAt: "2020-01-01T00:00:00.000Z",
+      pontosAtivos: true,
+      pontosAtivadoEm: "2020-01-01T00:00:00.000Z",
+    };
+  }
   return store.has(key) ? store.get(key) : null;
 }
 function realSet(key: string, value: unknown, opts?: { nx?: boolean; ex?: number }) {

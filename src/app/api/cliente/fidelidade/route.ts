@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { redis } from "@/lib/redis";
 import { resolverSessaoCliente, definirCookieSessaoCliente } from "@/lib/clienteAuth";
 import {
   obterExtratoPontos,
@@ -11,6 +12,7 @@ import {
   calcularProgressoPontos,
   ordenarExtratoPontosDesc,
   derivarClienteIdPorTelefone,
+  reconciliarPontosClientePedidos,
 } from "@/lib/fidelidade";
 
 // GET /api/cliente/fidelidade — saldo, progresso e extrato da fidelidade por
@@ -38,6 +40,13 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const limite = resolverLimite(searchParams);
   const clienteIdPontos = derivarClienteIdPorTelefone(cliente.telefone) ?? cliente.clienteId;
+
+  try {
+    const pedidos = (await redis.get<Parameters<typeof reconciliarPontosClientePedidos>[1]>("pedidos")) || [];
+    await reconciliarPontosClientePedidos(cliente, pedidos);
+  } catch (err) {
+    console.error("[ChefeBot] Erro ao reconciliar pontos do cliente (ignorado):", err);
+  }
 
   const [extratoCompleto, config, pizzasAcumuladas, recompensasCompletas] = await Promise.all([
     obterExtratoPontos(clienteIdPontos),

@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 // e cliente/page.test.ts para o mesmo padrão. Os requisitos da
 // auto-verificação de Pix Mercado Pago (Nível 6.3B/6.4) ficam garantidos
 // estruturalmente na fonte, sem precisar montar a árvore inteira.
-const fonte = readFileSync(fileURLToPath(new URL("./page.tsx", import.meta.url)), "utf-8");
+const fonte = readFileSync(fileURLToPath(new URL("./page.tsx", import.meta.url)), "utf-8").replace(/\r\n/g, "\n");
 
 // Corpo do useEffect de auto-verificação, isolado para os testes de cadência.
 const inicioEfeitoMarcador = "useEffect(() => {\n    if (!isAdmin || loading) return";

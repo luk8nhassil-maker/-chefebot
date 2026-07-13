@@ -152,6 +152,7 @@ export default function ClientePage() {
   }
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     carregarPerfil().then(async (ok) => {
       if (ok) {
         const destino = nextPermitidoAtual()
@@ -160,6 +161,20 @@ export default function ClientePage() {
       }
       await irParaEstadoInicial()
     })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    function atualizarAoVoltar() {
+      if (document.visibilityState === 'visible') void carregarPerfil()
+    }
+
+    window.addEventListener('focus', atualizarAoVoltar)
+    document.addEventListener('visibilitychange', atualizarAoVoltar)
+    return () => {
+      window.removeEventListener('focus', atualizarAoVoltar)
+      document.removeEventListener('visibilitychange', atualizarAoVoltar)
+    }
   }, [])
 
   async function pedirCodigo() {

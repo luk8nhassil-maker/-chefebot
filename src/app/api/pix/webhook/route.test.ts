@@ -4,9 +4,28 @@ const { store, redisMock } = vi.hoisted(() => {
   const store = new Map<string, unknown>();
   const redisMock = {
     get: vi.fn(async (key: string) => store.get(key) ?? null),
-    set: vi.fn(async (key: string, value: unknown) => {
+    set: vi.fn(async (key: string, value: unknown, opts?: { nx?: boolean }) => {
+      if (opts?.nx && store.has(key)) return null;
       store.set(key, value);
       return "OK";
+    }),
+    eval: vi.fn(async (_script: string, keys: string[], args: string[]) => {
+      if (keys.length === 2) {
+        const [lockKey, estadoKey] = keys;
+        const [token, estadoJson] = args;
+        if (store.get(lockKey) === token) {
+          store.set(estadoKey, JSON.parse(estadoJson));
+          return 1;
+        }
+        return 0;
+      }
+      const [key] = keys;
+      const [token] = args;
+      if (store.get(key) === token) {
+        store.delete(key);
+        return 1;
+      }
+      return 0;
     }),
   };
   return { store, redisMock };
@@ -32,6 +51,14 @@ vi.mock("@/lib/mercadoPagoWebhook", async () => {
 });
 
 import { POST } from "./route";
+import { obterExtratoPontos, obterSaldoPontos } from "@/lib/fidelidade";
+
+type PedidoSalvoTeste = Record<string, unknown> & {
+  pix?: Record<string, unknown>;
+  pixConfirmado?: boolean;
+  status?: string;
+  total?: number;
+};
 
 function postReq(body: unknown, headers: Record<string, string> = {}) {
   return {
@@ -92,7 +119,7 @@ describe("POST /api/pix/webhook", () => {
       { "x-pix-webhook-secret": "secret-ok" }
     ));
     const body = await json(res);
-    const pedidos = store.get("pedidos") as any[];
+    const pedidos = store.get("pedidos") as PedidoSalvoTeste[];
 
     expect(body).toMatchObject({ passive: false, wouldConfirm: true, confirmed: true, pedidoId: "pedido-1" });
     expect(pedidos[0].pixConfirmado).toBe(true);
@@ -104,8 +131,43 @@ describe("POST /api/pix/webhook", () => {
       confirmadoPor: "webhook",
       providerPaymentId: "prov-1",
     });
-    expect(typeof pedidos[0].pix.confirmadoEm).toBe("string");
+    expect(typeof pedidos[0].pix!.confirmadoEm).toBe("string");
     expect(redisMock.set).toHaveBeenCalledTimes(1);
+  });
+
+  it("flag ligada + pedido elegivel confirma pontos pelo webhook Pix", async () => {
+    vi.stubEnv("PIX_WEBHOOK_AUTO_CONFIRM", "true");
+    vi.stubEnv("PIX_WEBHOOK_SECRET", "secret-ok");
+    store.set("config:fidelidade:pontos", { ativo: true, metaPontos: 720, descricaoRecompensa: "1 Pizza Familia" });
+    store.set("cliente:86999998888", {
+      clienteId: "cli_86999998888",
+      telefone: "86999998888",
+      createdAt: "2026-07-13T11:00:00.000Z",
+      updatedAt: "2026-07-13T11:00:00.000Z",
+      lastLoginAt: "2026-07-13T11:00:00.000Z",
+      pontosAtivos: true,
+      pontosAtivadoEm: "2026-07-13T11:00:00.000Z",
+    });
+    store.set("pedidos", [{
+      ...pedidoPix,
+      id: "pedido-webhook-pontos",
+      criadoEm: "2026-07-13T12:00:00.000Z",
+      status: "novo",
+      telefone: "86999998888",
+      taxaEntrega: 5,
+    }]);
+
+    const res = await POST(postReq(
+      { txid: "tx-1", valor: 50, status: "confirmed", providerPaymentId: "prov-1" },
+      { "x-pix-webhook-secret": "secret-ok" }
+    ));
+    expect(res.status).toBe(200);
+
+    const extrato = await obterExtratoPontos("cli_86999998888");
+    expect(extrato).toHaveLength(1);
+    expect(extrato[0]).toMatchObject({ tipo: "confirmado", pontos: 45, eventoId: "confirmado:pedido-webhook-pontos" });
+    expect(extrato[0].motivo).toContain("pix_webhook");
+    expect((await obterSaldoPontos("cli_86999998888")).disponivel).toBe(45);
   });
 
   it("segredo ausente ou incorreto nao confirma", async () => {
@@ -220,7 +282,7 @@ describe("POST /api/pix/webhook", () => {
       { txid: "tx-hibrido", valor: 30, status: "liquidado" },
       { "x-pix-webhook-secret": "secret-ok" }
     )));
-    const pedidos = store.get("pedidos") as any[];
+    const pedidos = store.get("pedidos") as PedidoSalvoTeste[];
 
     expect(body).toMatchObject({
       wouldConfirm: true,
@@ -232,7 +294,7 @@ describe("POST /api/pix/webhook", () => {
     expect(pedidos[0].total).toBe(50);
     expect(pedidos[0].status).toBe("novo");
     expect(pedidos[0].pixConfirmado).toBe(true);
-    expect(pedidos[0].pix.status).toBe("confirmado");
+    expect(pedidos[0].pix!.status).toBe("confirmado");
   });
 });
 
@@ -277,7 +339,7 @@ describe("POST /api/pix/webhook — adaptador Mercado Pago", () => {
 
     const res = await POST(postReq(mpBody, mpHeaders));
     const body = await json(res);
-    const pedidos = store.get("pedidos") as any[];
+    const pedidos = store.get("pedidos") as PedidoSalvoTeste[];
 
     expect(body).toMatchObject({ passive: false, wouldConfirm: true, confirmed: true, pedidoId: "pedido-1", txid: "tx-1" });
     expect(pedidos[0].pixConfirmado).toBe(true);

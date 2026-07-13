@@ -275,6 +275,7 @@ export async function POST(req: NextRequest) {
       console.error("[ChefeBot] Erro ao contar pizzas para fidelidade (ignorado):", err);
     }
 
+    const criadoEm = new Date().toISOString();
     const pedidoId = Date.now().toString();
     const numeroPedido = await proximoNumeroPedido();
     const statusToken = criarTokenPublicoAcompanhamento();
@@ -288,6 +289,7 @@ export async function POST(req: NextRequest) {
     const novoPedido = {
       id: pedidoId,
       numero: numeroPedido,
+      criadoEm,
       cliente: body.cliente,
       telefone: telefonePedido,
       ...(whatsappVinculado ? { whatsappVinculado: true } : {}),

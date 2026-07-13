@@ -1,5 +1,5 @@
 import { redis } from "./redis";
-import { sanitizeTelefoneCliente, clienteIdDoTelefone } from "./clientes";
+import { buscarClientePorId, sanitizeTelefoneCliente, clienteIdDoTelefone, type Cliente } from "./clientes";
 
 export type TipoRecompensa = "pizza_gratis" | "desconto_fixo" | "desconto_percentual";
 
@@ -1043,9 +1043,26 @@ export async function registrarMovimentoPontosIdempotente(
  */
 export function derivarClienteIdPorTelefone(telefone?: string): string | undefined {
   if (!telefone) return undefined;
-  const sanitizado = sanitizeTelefoneCliente(telefone);
+  const sanitizado = normalizarTelefonePontos(telefone);
   if (sanitizado.length < 10) return undefined;
   return clienteIdDoTelefone(sanitizado);
+}
+
+function normalizarTelefonePontos(telefone: string): string {
+  const sanitizado = sanitizeTelefoneCliente(telefone);
+  if ((sanitizado.length === 12 || sanitizado.length === 13) && sanitizado.startsWith("55")) {
+    return sanitizado.slice(2);
+  }
+  return sanitizado;
+}
+
+function variantesTelefonePontos(telefone?: string): string[] {
+  if (!telefone) return [];
+  const sanitizado = sanitizeTelefoneCliente(telefone);
+  const normalizado = normalizarTelefonePontos(telefone);
+  const variantes = new Set<string>([normalizado, sanitizado]);
+  if (normalizado.length >= 10 && !normalizado.startsWith("55")) variantes.add(`55${normalizado}`);
+  return [...variantes].filter((v) => v.length >= 10);
 }
 
 /**
@@ -1054,8 +1071,8 @@ export function derivarClienteIdPorTelefone(telefone?: string): string | undefin
  * `clienteId` embute o telefone (`cli_{telefone}`), então vazar o valor
  * inteiro em log equivale a vazar o telefone do cliente.
  */
-function mascararIdentidadePontos(valor: string): string {
-  const digitos = valor.replace(/\D/g, "");
+function mascararIdentidadePontos(valor?: string): string {
+  const digitos = (valor ?? "").replace(/\D/g, "");
   return digitos.length >= 4 ? `…${digitos.slice(-4)}` : "…";
 }
 
@@ -1066,7 +1083,142 @@ export type PedidoParaCreditoPontos = {
   clienteId?: string;
   total?: number;
   taxaEntrega?: number;
+  criadoEm?: string;
+  createdAt?: string;
+  pixConfirmado?: boolean;
+  pix?: { status?: string } | null;
 };
+
+export type OrigemConfirmacaoPontos = "pix_manual" | "pix_automatico" | "pix_webhook" | "confirmacao_operacional";
+
+function timestampCriacaoPedidoMs(pedido: PedidoParaCreditoPontos): number | null {
+  for (const candidato of [pedido.criadoEm, pedido.createdAt]) {
+    if (!candidato) continue;
+    const ms = new Date(candidato).getTime();
+    if (Number.isFinite(ms)) return ms;
+  }
+
+  const idComoTimestamp = Number(pedido.id);
+  if (Number.isFinite(idComoTimestamp) && idComoTimestamp > 0) return idComoTimestamp;
+  return null;
+}
+
+function pedidoCriadoDepoisDaAtivacao(pedido: PedidoParaCreditoPontos, cliente: Cliente): boolean {
+  if (!cliente.pontosAtivos || !cliente.pontosAtivadoEm) return false;
+  const ativadoMs = new Date(cliente.pontosAtivadoEm).getTime();
+  const pedidoMs = timestampCriacaoPedidoMs(pedido);
+  if (!Number.isFinite(ativadoMs)) return false;
+  if (pedidoMs === null) return true;
+  return pedidoMs >= ativadoMs;
+}
+
+async function resolverClienteCanonicoPontos(pedido: PedidoParaCreditoPontos): Promise<{ clienteId: string; cliente: Cliente } | null> {
+  const clienteId = derivarClienteIdPorTelefone(pedido.telefone) ?? "";
+  if (!clienteId) return null;
+
+  if (pedido.clienteId && pedido.clienteId !== clienteId) {
+    console.warn(
+      `[ChefeBot] Fidelidade: pedido ${pedido.id} tem clienteId (${mascararIdentidadePontos(pedido.clienteId)}) divergente do telefone (${mascararIdentidadePontos(clienteId)}) - usando o telefone como identidade canonica`
+    );
+  }
+
+  let cliente: Cliente | null = null;
+  for (const variante of variantesTelefonePontos(pedido.telefone)) {
+    cliente = await buscarClientePorId(clienteIdDoTelefone(variante));
+    if (cliente) break;
+  }
+  if (!cliente) return null;
+  return { clienteId, cliente };
+}
+
+export async function confirmarPontosPedido(
+  pedido: PedidoParaCreditoPontos,
+  origem: OrigemConfirmacaoPontos
+): Promise<MovimentoPontos | null> {
+  if (!pedido.id || pedido.status === "cancelado") return null;
+
+  const config = await obterConfigFidelidadePontos();
+  if (!config.ativo) return null;
+
+  const resolvido = await resolverClienteCanonicoPontos(pedido);
+  if (!resolvido) return null;
+  const { clienteId, cliente } = resolvido;
+
+  if (!pedidoCriadoDepoisDaAtivacao(pedido, cliente)) return null;
+
+  const valorElegivel = Math.max((Number(pedido.total) || 0) - (Number(pedido.taxaEntrega) || 0), 0);
+  const pontos = calcularPontosElegiveisPedido({ total: pedido.total ?? 0, taxaEntrega: pedido.taxaEntrega });
+  if (pontos <= 0) return null;
+
+  return registrarMovimentoPontosIdempotente(clienteId, {
+    eventoId: construirEventoIdPontos(pedido.id, "confirmado"),
+    pedidoId: pedido.id,
+    tipo: "confirmado",
+    pontos,
+    valorElegivel,
+    motivo: `Credito por pedido ${pedido.id} confirmado (${origem})`,
+  });
+}
+
+export async function estornarPontosPedidoConfirmado(pedido: PedidoParaCreditoPontos): Promise<MovimentoPontos | null> {
+  if (!pedido.id) return null;
+
+  const clienteId = derivarClienteIdPorTelefone(pedido.telefone) ?? "";
+  if (!clienteId) return null;
+
+  const extratoAtual = await obterExtratoPontos(clienteId);
+  const confirmado = extratoAtual.find((m) => m.pedidoId === pedido.id && m.tipo === "confirmado");
+  if (!confirmado || confirmado.pontos <= 0) return null;
+
+  return registrarMovimentoPontosIdempotente(clienteId, {
+    eventoId: construirEventoIdPontos(pedido.id, "estornado"),
+    pedidoId: pedido.id,
+    tipo: "estornado",
+    pontos: confirmado.pontos,
+    valorElegivel: confirmado.valorElegivel,
+    motivo: `Pedido ${pedido.id} cancelado apos credito confirmado`,
+  });
+}
+
+function pedidoJaPassouConfirmacaoOperacional(status?: string): boolean {
+  return status === "em_preparo" || status === "saiu_entrega" || status === "entregue";
+}
+
+export async function reconciliarPontosClientePedidos(
+  cliente: Cliente,
+  pedidos: PedidoParaCreditoPontos[],
+  opcoes: { limite?: number; dias?: number } = {}
+): Promise<{ verificados: number; creditados: number }> {
+  const clienteId = derivarClienteIdPorTelefone(cliente.telefone) ?? cliente.clienteId;
+  if (!cliente.pontosAtivos || !cliente.pontosAtivadoEm || !clienteId) return { verificados: 0, creditados: 0 };
+
+  const limite = Math.max(1, Math.min(opcoes.limite ?? 50, 100));
+  const dias = Math.max(1, Math.min(opcoes.dias ?? 90, 365));
+  const desdeMs = Date.now() - dias * 24 * 60 * 60 * 1000;
+  const telefoneCanonico = normalizarTelefonePontos(cliente.telefone);
+
+  const candidatos = pedidos
+    .filter((pedido) => {
+      if (!pedido?.id || pedido.status === "cancelado") return false;
+      if (derivarClienteIdPorTelefone(pedido.telefone) !== clienteId) return false;
+      if (normalizarTelefonePontos(pedido.telefone ?? "") !== telefoneCanonico) return false;
+      const criadoMs = timestampCriacaoPedidoMs(pedido);
+      if (criadoMs === null || criadoMs < desdeMs) return false;
+      return pedido.pixConfirmado === true || pedido.pix?.status === "confirmado" || pedidoJaPassouConfirmacaoOperacional(pedido.status);
+    })
+    .sort((a, b) => (timestampCriacaoPedidoMs(b) ?? 0) - (timestampCriacaoPedidoMs(a) ?? 0))
+    .slice(0, limite);
+
+  let creditados = 0;
+  for (const pedido of candidatos) {
+    const origem: OrigemConfirmacaoPontos =
+      pedido.pixConfirmado === true || pedido.pix?.status === "confirmado" ? "pix_automatico" : "confirmacao_operacional";
+    const movimento = await confirmarPontosPedido(pedido, origem);
+    if (movimento) creditados++;
+  }
+
+  return { verificados: candidatos.length, creditados };
+}
 
 /**
  * Ponto único de integração entre pedidos reais e a fidelidade por pontos.
@@ -1100,8 +1252,11 @@ async function creditarPontosPedidoEntregueComConfig(
   config: ConfigFidelidadePontos
 ): Promise<void> {
   if (pedido.status !== "entregue" || !pedido.id) return;
+  if (!config.ativo) return;
+  await confirmarPontosPedido(pedido, "confirmacao_operacional");
+  return;
 
-  const clienteId = derivarClienteIdPorTelefone(pedido.telefone);
+  const clienteId = derivarClienteIdPorTelefone(pedido.telefone) ?? "";
   if (!clienteId) return; // sem telefone valido: nunca gera pontos, nunca cria saldo orfao
 
   if (pedido.clienteId && pedido.clienteId !== clienteId) {

@@ -10,6 +10,8 @@ import {
   registrarMovimentoPontosIdempotente,
   construirEventoIdPontos,
   obterExtratoPontos,
+  confirmarPontosPedido,
+  estornarPontosPedidoConfirmado,
   derivarClienteIdPorTelefone,
   reverterResgateConfirmado,
 } from '@/lib/fidelidade'
@@ -39,6 +41,7 @@ type Pedido = {
   referencia?: string
   observacao?: string
   horarioInicio?: string
+  criadoEm?: string
   clienteId?: string
   pizzasCount?: number
   resgateId?: string
@@ -138,10 +141,18 @@ export async function PATCH(req: NextRequest) {
   // Registra origem/horário no metadata (auditoria); confirmação anterior
   // por webhook/comprovante nunca é sobrescrita pelo clique manual.
   if (pixConfirmado !== undefined) {
+    const pixJaConfirmado = pedidos[index].pixConfirmado === true || pedidos[index].pix?.status === 'confirmado'
     pedidos[index] = pixConfirmado === true
       ? { ...pedidos[index], pixConfirmado: true, pix: confirmarPixMetadata(pedidos[index].pix, 'manual') }
       : { ...pedidos[index], pixConfirmado }
     await redis.set('pedidos', pedidos)
+    if (pixConfirmado === true && !pixJaConfirmado) {
+      try {
+        await confirmarPontosPedido(pedidos[index], 'pix_manual')
+      } catch (err) {
+        console.error('[ChefeBot] Erro ao confirmar pontos por Pix manual (ignorado):', err)
+      }
+    }
     return NextResponse.json({ ok: true })
   }
 
@@ -158,6 +169,14 @@ export async function PATCH(req: NextRequest) {
     pedidos[index] = { ...pedidos[index], entregador }
   }
   await redis.set('pedidos', pedidos)
+
+  if (statusAnterior === 'novo' && status === 'em_preparo') {
+    try {
+      await confirmarPontosPedido(pedidos[index], 'confirmacao_operacional')
+    } catch (err) {
+      console.error('[ChefeBot] Erro ao confirmar pontos por acao operacional (ignorado):', err)
+    }
+  }
 
   if (!silent) {
     await notificarCliente(pedidos[index].telefone, status, pedidos[index].cliente)
@@ -267,6 +286,7 @@ export async function PATCH(req: NextRequest) {
         clienteId: pedidos[index].clienteId,
         total: pedidos[index].total,
         taxaEntrega: pedidos[index].taxaEntrega,
+        criadoEm: pedidos[index].criadoEm,
         pizzasCount: pedidos[index].pizzasCount ?? 0,
       })
     } catch (err) {
@@ -279,6 +299,14 @@ export async function PATCH(req: NextRequest) {
   // do telefone. Repetir "cancelado" nao cria novo evento; estorno so existe
   // se houver confirmado original no extrato.
   if (status === 'cancelado' && statusAnterior !== 'cancelado') {
+    try {
+      await estornarPontosPedidoConfirmado(pedidos[index])
+    } catch (err) {
+      console.error('[ChefeBot] Erro ao estornar pontos confirmados (ignorado):', err)
+    }
+  }
+
+  if (status === 'cancelado' && statusAnterior === 'entregue') {
     try {
       const clienteIdPontos = derivarClienteIdPorTelefone(pedidos[index].telefone)
       if (clienteIdPontos) {
@@ -350,6 +378,7 @@ export async function POST(req: NextRequest) {
 
   const pedidos = await getPedidos()
   const numeroPedido = await proximoNumeroPedido()
+  const criadoEm = new Date().toISOString()
   const agora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' })
   const pedidoId = Date.now().toString()
   const pix = criarPixMetadata(pedidoId, pagamento ? String(pagamento) : undefined, Number(total) || 0)
@@ -357,6 +386,7 @@ export async function POST(req: NextRequest) {
   const novoPedido: Pedido = {
     id: pedidoId,
     numero: numeroPedido,
+    criadoEm,
     cliente: String(cliente),
     telefone: String(telefone || ''),
     itens: Array.isArray(itens) ? itens.filter(Boolean) : [String(itens)],

@@ -5,6 +5,13 @@ const extratosPorCliente = new Map<string, unknown[]>();
 let configPontos: Record<string, unknown> | null = null;
 let pizzasAntigasPorCliente = new Map<string, number>();
 let recompensasPorCliente = new Map<string, unknown[]>();
+let pedidosCliente: unknown[] = [];
+
+vi.mock("@/lib/redis", () => ({
+  redis: {
+    get: vi.fn(async (key: string) => (key === "pedidos" ? pedidosCliente : null)),
+  },
+}));
 
 vi.mock("@/lib/clienteAuth", () => ({
   CLIENTE_COOKIE: "cliente-token",
@@ -20,6 +27,21 @@ vi.mock("@/lib/clienteAuth", () => ({
     if (token === "token-cliente-b") {
       return { cliente: { clienteId: "cli_b", telefone: "cli_b", nome: "Cliente B", createdAt: "", updatedAt: "", lastLoginAt: "" }, deveRenovar: false };
     }
+    if (token === "token-cliente-real") {
+      return {
+        cliente: {
+          clienteId: "cli_86999998888",
+          telefone: "86999998888",
+          nome: "Cliente Real",
+          createdAt: "2026-07-13T10:00:00.000Z",
+          updatedAt: "2026-07-13T10:00:00.000Z",
+          lastLoginAt: "2026-07-13T10:00:00.000Z",
+          pontosAtivos: true,
+          pontosAtivadoEm: "2026-07-13T11:00:00.000Z",
+        },
+        deveRenovar: false,
+      };
+    }
     return null;
   }),
   definirCookieSessaoCliente: vi.fn(),
@@ -33,6 +55,24 @@ vi.mock("@/lib/fidelidade", async () => {
     obterConfigFidelidadePontos: vi.fn(async () => configPontos ?? actual.CONFIG_FIDELIDADE_PONTOS_PADRAO),
     obterSaldoAntigoPizzas: vi.fn(async (clienteId: string) => pizzasAntigasPorCliente.get(clienteId) ?? 0),
     obterRecompensasPontos: vi.fn(async (clienteId: string) => recompensasPorCliente.get(clienteId) ?? []),
+    reconciliarPontosClientePedidos: vi.fn(async (cliente: { clienteId: string; telefone: string }, pedidos: Array<Record<string, unknown>>) => {
+      const clienteId = actual.derivarClienteIdPorTelefone(cliente.telefone) ?? cliente.clienteId;
+      const existente = extratosPorCliente.get(clienteId) ?? [];
+      const novos = pedidos
+        .filter((pedido) => pedido.telefone === cliente.telefone && pedido.pixConfirmado === true && pedido.status !== "cancelado")
+        .filter((pedido) => !existente.some((m) => (m as { pedidoId?: unknown; tipo?: unknown }).pedidoId === pedido.id && (m as { tipo?: unknown }).tipo === "confirmado"))
+        .map((pedido) => ({
+          movimentoId: `mov_${String(pedido.id)}`,
+          clienteId,
+          pedidoId: pedido.id,
+          tipo: "confirmado",
+          pontos: 45,
+          motivo: "recuperado",
+          createdAt: "2026-07-13T12:30:00.000Z",
+        }));
+      if (novos.length > 0) extratosPorCliente.set(clienteId, [...existente, ...novos]);
+      return { verificados: pedidos.length, creditados: novos.length };
+    }),
   };
 });
 
@@ -58,6 +98,7 @@ beforeEach(() => {
   extratosPorCliente.clear();
   pizzasAntigasPorCliente = new Map();
   recompensasPorCliente = new Map();
+  pedidosCliente = [];
   configPontos = null;
 });
 
@@ -348,5 +389,29 @@ describe("GET /api/cliente/fidelidade — nenhuma informacao sensivel exposta", 
     expect(texto).not.toContain("11900000001");
     expect(texto).not.toContain("token-cliente-a");
     expect(texto).not.toContain("fidelidade:pontos:");
+  });
+});
+
+describe("GET /api/cliente/fidelidade - reconciliacao de pedidos proprios", () => {
+  test("recupera pedido proprio ja confirmado antes de calcular saldo", async () => {
+    configPontos = { ativo: true, metaPontos: 60, descricaoRecompensa: "1 Pizza Familia" };
+    pedidosCliente = [
+      {
+        id: "pedido-recuperavel",
+        criadoEm: "2026-07-13T12:00:00.000Z",
+        telefone: "86999998888",
+        status: "novo",
+        pixConfirmado: true,
+        total: 50,
+        taxaEntrega: 5,
+      },
+    ];
+
+    const res = await GET(requestComCookie("token-cliente-real"));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.saldoPontos).toBe(45);
+    expect(body.extrato[0]).toMatchObject({ pedidoId: "pedido-recuperavel", tipo: "confirmado", pontos: 45 });
   });
 });
