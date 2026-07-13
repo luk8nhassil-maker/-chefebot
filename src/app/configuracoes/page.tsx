@@ -567,14 +567,17 @@ export default function ConfiguracoesPage() {
                   </SectionCard>
                 )}
 
-                {/* Fidelidade */}
+                {/* Fidelidade (legado — mantido só por compatibilidade, ver Programa de Pontos abaixo) */}
                 {isAdmin && (
                   <SectionCard>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: -4, flexWrap: 'wrap' }}>
                       <span style={{ fontSize: 16, flexShrink: 0 }}>🎁</span>
-                      <span style={{ fontSize: 13, fontWeight: 900, color: TEXT, textTransform: 'uppercase', letterSpacing: '0.8px' }}>Fidelidade</span>
+                      <span style={{ fontSize: 13, fontWeight: 900, color: TEXT, textTransform: 'uppercase', letterSpacing: '0.8px' }}>Fidelidade antiga</span>
                       <span style={{ fontSize: 10, background: 'color-mix(in srgb, var(--primary) 12%, transparent)', color: 'color-mix(in srgb, var(--primary) 80%, transparent)', padding: '2px 8px', borderRadius: 20, fontWeight: 800, whiteSpace: 'nowrap' }}>Somente Admin</span>
                     </div>
+                    <p style={{ fontSize: 12, color: TEXT2, margin: '-10px 0 0' }}>
+                      Fidelidade antiga — usada somente quando o Programa de Pontos está desativado.
+                    </p>
                     <button
                       onClick={() => setFidelidade(prev => ({ ...prev, ativo: !prev.ativo }))}
                       style={{ width: '100%', background: fidelidade.ativo ? 'color-mix(in srgb, var(--success) 10%, transparent)' : 'rgba(var(--overlay-rgb), 0.04)', border: `1.5px solid ${fidelidade.ativo ? 'color-mix(in srgb, var(--success) 40%, transparent)' : 'var(--border)'}`, borderRadius: 12, padding: '13px 16px', color: fidelidade.ativo ? 'var(--success)' : TEXT2, fontSize: 13, fontWeight: 800, cursor: 'pointer', minHeight: 48, fontFamily: FONT }}
@@ -643,7 +646,7 @@ export default function ConfiguracoesPage() {
                       <span style={{ fontSize: 10, background: 'color-mix(in srgb, var(--primary) 12%, transparent)', color: 'color-mix(in srgb, var(--primary) 80%, transparent)', padding: '2px 8px', borderRadius: 20, fontWeight: 800, whiteSpace: 'nowrap' }}>Somente Admin</span>
                     </div>
                     <p style={{ fontSize: 12, color: TEXT2, margin: '-10px 0 0' }}>
-                      Isso é o que aparece para o cliente em &quot;Meus pontos&quot;. Independente da seção Fidelidade acima (modelo antigo, mantido só por histórico).
+                      Isso é o que aparece para o cliente em &quot;Meus pontos&quot;. Quando ativo, tem prioridade sobre a Fidelidade antiga acima — só um dos dois modelos credita por pedido entregue.
                     </p>
                     <button
                       onClick={() => setPontos(prev => ({ ...prev, ativo: !prev.ativo }))}

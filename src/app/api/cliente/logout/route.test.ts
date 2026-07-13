@@ -17,9 +17,11 @@ vi.mock("@/lib/redis", () => ({
   },
 }));
 
+import { redis } from "@/lib/redis";
 import { criarSessaoCliente, resolverSessaoCliente } from "@/lib/clienteAuth";
 import { obterOuCriarCliente } from "@/lib/clientes";
 import { POST } from "./route";
+import { GET as GET_PERFIL } from "../perfil/route";
 
 function req(token?: string) {
   const init = token ? { method: "POST", headers: { cookie: `cliente-token=${token}` } } : { method: "POST" };
@@ -63,5 +65,52 @@ describe("POST /api/cliente/logout", () => {
   test("token invalido/adulterado: nao lanca erro, so limpa o cookie", async () => {
     const res = await POST(req("token-adulterado"));
     expect(res.status).toBe(200);
+    const setCookie = (res.headers.get("set-cookie") || "").toLowerCase();
+    expect(setCookie).toContain("max-age=0");
+  });
+
+  describe("Nível 6.6.1 — cookie sempre limpo, mesmo se o Redis falhar", () => {
+    test("falha simulada do Redis na invalidacao ainda assim remove o cookie, com resposta explicita de indisponibilidade", async () => {
+      const cliente = await obterOuCriarCliente("11999998888");
+      const token = await criarSessaoCliente({ clienteId: cliente.clienteId, telefone: cliente.telefone });
+
+      vi.mocked(redis.del).mockImplementationOnce(async () => {
+        throw new Error("Redis indisponivel");
+      });
+
+      const res = await POST(req(token));
+      const data = await res.json();
+      const setCookie = (res.headers.get("set-cookie") || "").toLowerCase();
+
+      expect(res.status).toBe(503);
+      expect(data.ok).toBe(false);
+      expect(setCookie).toContain("cliente-token=");
+      expect(setCookie).toContain("max-age=0");
+    });
+
+    test("erro logado no console nunca inclui o token", async () => {
+      const cliente = await obterOuCriarCliente("11999998888");
+      const token = await criarSessaoCliente({ clienteId: cliente.clienteId, telefone: cliente.telefone });
+      vi.mocked(redis.del).mockImplementationOnce(async () => {
+        throw new Error("Redis indisponivel");
+      });
+      const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      await POST(req(token));
+
+      const chamadas = spy.mock.calls.map((args) => args.join(" "));
+      expect(chamadas.some((linha) => linha.includes(token))).toBe(false);
+      spy.mockRestore();
+    });
+  });
+
+  test("token reutilizado apos logout normal recebe 401 numa rota protegida (nao so no helper de sessao)", async () => {
+    const cliente = await obterOuCriarCliente("11999998888");
+    const token = await criarSessaoCliente({ clienteId: cliente.clienteId, telefone: cliente.telefone });
+
+    await POST(req(token));
+
+    const resPerfil = await GET_PERFIL(requestComCookie(token));
+    expect(resPerfil.status).toBe(401);
   });
 });

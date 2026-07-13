@@ -41,18 +41,32 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Nao autorizado" }, { status: 403 });
   }
 
+  // Carrega a config atual e faz merge por cima dela — nunca cria um objeto
+  // novo do zero. O formulário do admin só edita ativo/metaPontos/
+  // descricaoRecompensa; campos que ele não conhece (valorPizzaFamiliaReferencia,
+  // metaPizzasFamilia, validadeDias) precisam sobreviver ao salvamento, senão
+  // o resgate (que usa valorPizzaFamiliaReferencia para calcular
+  // valorDescontoMaximo) quebra silenciosamente depois do primeiro save.
+  const atual = await obterConfigFidelidadePontos();
+
   const body = await req.json();
+
   const metaBruta = Number(body?.metaPontos);
-  const metaPontos = Number.isFinite(metaBruta) && metaBruta > 0
-    ? Math.round(metaBruta)
+  const metaAtualValida = Number.isFinite(Number(atual.metaPontos)) && Number(atual.metaPontos) > 0
+    ? Number(atual.metaPontos)
     : CONFIG_FIDELIDADE_PONTOS_PADRAO.metaPontos;
+  const metaPontos = Number.isFinite(metaBruta) && metaBruta > 0 ? Math.round(metaBruta) : metaAtualValida;
+
+  const descricaoBruta = typeof body?.descricaoRecompensa === "string" ? body.descricaoRecompensa.trim() : "";
+  const descricaoRecompensa = (descricaoBruta || atual.descricaoRecompensa || CONFIG_FIDELIDADE_PONTOS_PADRAO.descricaoRecompensa)
+    .toString()
+    .slice(0, 120);
 
   const config: ConfigFidelidadePontos = {
+    ...atual,
     ativo: Boolean(body?.ativo),
     metaPontos,
-    descricaoRecompensa: (body?.descricaoRecompensa || CONFIG_FIDELIDADE_PONTOS_PADRAO.descricaoRecompensa)
-      .toString()
-      .slice(0, 120),
+    descricaoRecompensa,
   };
 
   await salvarConfigFidelidadePontos(config);

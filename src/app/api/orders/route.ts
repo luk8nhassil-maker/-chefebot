@@ -5,8 +5,7 @@ import { proximoNumeroPedido } from '@/lib/numeracao'
 import { confirmarPixMetadata, criarPixMetadata, sanitizarPedidoPixResposta, type PixMetadata } from '@/lib/pix'
 import type { PedidoEntregador } from '@/types/entregador'
 import {
-  creditarFidelidadePedido,
-  creditarPontosPedidoEntregue,
+  creditarFidelidadeEfetiva,
   calcularPontosElegiveisPedido,
   registrarMovimentoPontosIdempotente,
   construirEventoIdPontos,
@@ -254,34 +253,24 @@ export async function PATCH(req: NextRequest) {
     }
 
     // Credito de fidelidade: so conta quando o pedido chega a 'entregue'
-    // (finalizado com sucesso). Idempotente por pedidoId — nunca duplica.
-    // Isolado em try/catch proprio: falha aqui jamais pode afetar a resposta
-    // do PATCH nem impedir a mudanca de status do pedido, que ja foi salva.
+    // (finalizado com sucesso). `creditarFidelidadeEfetiva` decide, a partir
+    // de uma unica leitura de config:fidelidade:pontos, qual dos dois
+    // modelos credita (nunca os dois — ver Nivel 6.6.1). Idempotente por
+    // pedidoId em ambos os modelos — nunca duplica. Isolado em try/catch
+    // proprio: falha aqui jamais pode afetar a resposta do PATCH nem impedir
+    // a mudanca de status do pedido, que ja foi salva.
     try {
-      await creditarFidelidadePedido({
-        pedidoId: id,
-        clienteId: pedidos[index].clienteId,
-        pizzas: pedidos[index].pizzasCount ?? 0,
-      })
-    } catch (err) {
-      console.error('[ChefeBot] Erro ao creditar fidelidade (ignorado):', err)
-    }
-
-    // Fidelidade por pontos (novo modelo, R$1 = 1 ponto): roda em paralelo ao
-    // credito antigo acima, sem substitui-lo. Mesma protecao — isolado em
-    // try/catch proprio, idempotente por pedidoId, nunca impede o pedido de
-    // ser marcado como entregue nem a resposta do PATCH.
-    try {
-      await creditarPontosPedidoEntregue({
+      await creditarFidelidadeEfetiva({
         id,
         status: 'entregue',
         telefone: pedidos[index].telefone,
         clienteId: pedidos[index].clienteId,
         total: pedidos[index].total,
         taxaEntrega: pedidos[index].taxaEntrega,
+        pizzasCount: pedidos[index].pizzasCount ?? 0,
       })
     } catch (err) {
-      console.error('[ChefeBot] Erro ao creditar pontos de fidelidade (ignorado):', err)
+      console.error('[ChefeBot] Erro ao creditar fidelidade (ignorado):', err)
     }
   }
 

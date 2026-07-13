@@ -1,6 +1,7 @@
 import { vi, describe, test, expect } from "vitest";
 import { NextRequest } from "next/server";
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- assinatura precisa aceitar args variádicos para bater com salvarConfigFidelidadePontos
 const salvarMock = vi.fn(async (..._args: unknown[]) => undefined);
 
 vi.mock("@/lib/fidelidade", () => ({
@@ -31,6 +32,7 @@ vi.mock("@/lib/auth", async () => {
 });
 
 import { GET, POST } from "./route";
+import { obterConfigFidelidadePontos } from "@/lib/fidelidade";
 
 function getRequest(token?: string) {
   const url = "http://localhost/api/fidelidade/config/pontos";
@@ -85,10 +87,23 @@ describe("POST /api/fidelidade/config/pontos", () => {
     expect(res.status).toBe(403);
   });
 
-  test("metaPontos invalido cai para o padrao (nunca grava 0/negativo/NaN)", async () => {
+  test("metaPontos invalido (0/negativo/NaN) preserva o metaPontos atual, nunca grava o valor invalido", async () => {
     salvarMock.mockClear();
     await POST(postRequest("token-admin", { ativo: true, metaPontos: -5, descricaoRecompensa: "x" }));
-    expect(salvarMock).toHaveBeenCalledWith(expect.objectContaining({ metaPontos: 720 }));
+    // obterConfigFidelidadePontos mockado devolve metaPontos:500 como "atual" —
+    // preservado em vez de resetar para o padrao hardcoded (720).
+    expect(salvarMock).toHaveBeenCalledWith(expect.objectContaining({ metaPontos: 500 }));
+  });
+
+  test("metaPontos invalido cai para o padrao hardcoded só quando não existe config atual válida", async () => {
+    salvarMock.mockClear();
+    vi.mocked(obterConfigFidelidadePontos).mockResolvedValueOnce({
+      ativo: false,
+      metaPontos: 0,
+      descricaoRecompensa: "",
+    });
+    await POST(postRequest("token-admin", { ativo: true, metaPontos: -5, descricaoRecompensa: "" }));
+    expect(salvarMock).toHaveBeenCalledWith(expect.objectContaining({ metaPontos: 720, descricaoRecompensa: "1 Pizza Família" }));
   });
 
   test("descricaoRecompensa ausente cai para o padrao", async () => {

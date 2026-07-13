@@ -1095,7 +1095,10 @@ export type PedidoParaCreditoPontos = {
  * em try/catch, para que uma falha aqui nunca impeça o pedido de ser salvo
  * como entregue nem a resposta HTTP de ser enviada.
  */
-export async function creditarPontosPedidoEntregue(pedido: PedidoParaCreditoPontos): Promise<void> {
+async function creditarPontosPedidoEntregueComConfig(
+  pedido: PedidoParaCreditoPontos,
+  config: ConfigFidelidadePontos
+): Promise<void> {
   if (pedido.status !== "entregue" || !pedido.id) return;
 
   const clienteId = derivarClienteIdPorTelefone(pedido.telefone);
@@ -1110,7 +1113,6 @@ export async function creditarPontosPedidoEntregue(pedido: PedidoParaCreditoPont
     );
   }
 
-  const config = await obterConfigFidelidadePontos();
   if (!config.ativo) return;
 
   const valorElegivel = Math.max((Number(pedido.total) || 0) - (Number(pedido.taxaEntrega) || 0), 0);
@@ -1124,6 +1126,48 @@ export async function creditarPontosPedidoEntregue(pedido: PedidoParaCreditoPont
     pontos,
     valorElegivel,
     motivo: `Credito por pedido ${pedido.id} entregue`,
+  });
+}
+
+export async function creditarPontosPedidoEntregue(pedido: PedidoParaCreditoPontos): Promise<void> {
+  const config = await obterConfigFidelidadePontos();
+  await creditarPontosPedidoEntregueComConfig(pedido, config);
+}
+
+export type PedidoParaCreditoFidelidadeEfetiva = PedidoParaCreditoPontos & {
+  /** Só usado pelo modelo antigo (pizzas) quando o programa por pontos está desativado. */
+  pizzasCount?: number;
+};
+
+/**
+ * Ponto único de decisão entre os dois modelos de fidelidade ao marcar um
+ * pedido como entregue (Nível 6.6.1 — corrige crédito duplo entre modelos).
+ * Lê `config:fidelidade:pontos` UMA única vez e decide, de forma
+ * centralizada, qual modelo credita:
+ * - `ativo === true`  -> só o modelo por pontos credita (o antigo é ignorado
+ *   nesta chamada, mesmo que também esteja ativo).
+ * - `ativo === false` -> só o modelo antigo credita, respeitando sua própria
+ *   config (`creditarFidelidadePedido` já checa `config:fidelidade.ativo`
+ *   internamente — se os dois estiverem desativados, nenhum credita).
+ *
+ * Nunca lê a config duas vezes nem deixa o chamador decidir isso sozinho
+ * (evita a leitura dupla/potencialmente inconsistente que existia antes,
+ * com `/api/orders` chamando os dois créditos incondicionalmente). Não
+ * apaga, não migra e não credita retroativamente nada dos dois modelos —
+ * só decide, a partir de agora, qual dos dois pode gerar NOVO crédito.
+ */
+export async function creditarFidelidadeEfetiva(pedido: PedidoParaCreditoFidelidadeEfetiva): Promise<void> {
+  const configPontos = await obterConfigFidelidadePontos();
+
+  if (configPontos.ativo) {
+    await creditarPontosPedidoEntregueComConfig(pedido, configPontos);
+    return;
+  }
+
+  await creditarFidelidadePedido({
+    pedidoId: pedido.id,
+    clienteId: pedido.clienteId,
+    pizzas: pedido.pizzasCount ?? 0,
   });
 }
 
