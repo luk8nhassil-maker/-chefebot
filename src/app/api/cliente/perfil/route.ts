@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verificarTokenCliente, CLIENTE_COOKIE } from "@/lib/clienteAuth";
-import { buscarClientePorId } from "@/lib/clientes";
+import { resolverSessaoCliente, definirCookieSessaoCliente } from "@/lib/clienteAuth";
 import { obterProgressoFidelidade } from "@/lib/fidelidade";
 import { redis } from "@/lib/redis";
 
@@ -15,14 +14,9 @@ type PedidoResumo = {
 };
 
 export async function GET(req: NextRequest) {
-  const token = req.cookies.get(CLIENTE_COOKIE)?.value ?? null;
-  if (!token) return NextResponse.json({ error: "Nao autorizado" }, { status: 401 });
-
-  const payload = await verificarTokenCliente(token);
-  if (!payload) return NextResponse.json({ error: "Nao autorizado" }, { status: 401 });
-
-  const cliente = await buscarClientePorId(payload.clienteId);
-  if (!cliente) return NextResponse.json({ error: "Nao autorizado" }, { status: 401 });
+  const sessao = await resolverSessaoCliente(req);
+  if (!sessao) return NextResponse.json({ error: "Nao autorizado" }, { status: 401 });
+  const { cliente } = sessao;
 
   const fidelidade = await obterProgressoFidelidade(cliente.clienteId);
 
@@ -38,9 +32,11 @@ export async function GET(req: NextRequest) {
     console.error("[ChefeBot] Erro ao buscar pedidos do cliente:", err);
   }
 
-  return NextResponse.json({
-    cliente: { nome: cliente.nome ?? null, telefone: cliente.telefone },
+  const res = NextResponse.json({
+    cliente: { nome: cliente.nome ?? null, telefone: cliente.telefone, pontosAtivos: cliente.pontosAtivos === true },
     fidelidade,
     ultimosPedidos,
   });
+  if (sessao.deveRenovar && sessao.novoToken) definirCookieSessaoCliente(res, sessao.novoToken);
+  return res;
 }

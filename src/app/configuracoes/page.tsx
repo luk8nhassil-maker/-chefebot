@@ -31,6 +31,22 @@ const FIDELIDADE_PADRAO: ConfigFidelidade = {
   descricaoRecompensa: 'Pizza grátis',
 }
 
+// Config efetiva do programa de pontos — é ESTA que a área do cliente (/cliente)
+// realmente lê. Distinta do modelo antigo de pizzas acima (ConfigFidelidade):
+// os dois convivem em chaves separadas no Redis, mas só esta afeta o que o
+// cliente vê e o crédito/débito de pontos em /api/orders.
+type ConfigPontos = {
+  ativo: boolean
+  metaPontos: number
+  descricaoRecompensa: string
+}
+
+const PONTOS_PADRAO: ConfigPontos = {
+  ativo: false,
+  metaPontos: 720,
+  descricaoRecompensa: '1 Pizza Família',
+}
+
 type ItemCardapio = { name: string; price: number }
 
 type Cardapio = {
@@ -199,6 +215,9 @@ export default function ConfiguracoesPage() {
   const [fidelidade, setFidelidade] = useState<ConfigFidelidade>(FIDELIDADE_PADRAO)
   const [salvandoFidelidade, setSalvandoFidelidade] = useState(false)
   const [mensagemFidelidade, setMensagemFidelidade] = useState('')
+  const [pontos, setPontos] = useState<ConfigPontos>(PONTOS_PADRAO)
+  const [salvandoPontos, setSalvandoPontos] = useState(false)
+  const [mensagemPontos, setMensagemPontos] = useState('')
   const is24h = config.horaAbertura === 0 && config.horaFechamento === 24
 
   useEffect(() => {
@@ -211,6 +230,10 @@ export default function ConfiguracoesPage() {
         .then(r => (r.ok ? r.json() : null))
         .then(data => { if (data) setFidelidade({ ...FIDELIDADE_PADRAO, ...data }) })
         .catch(err => console.error('Falha ao carregar fidelidade:', err))
+      fetch('/api/fidelidade/config/pontos')
+        .then(r => (r.ok ? r.json() : null))
+        .then(data => { if (data) setPontos({ ...PONTOS_PADRAO, ...data }) })
+        .catch(err => console.error('Falha ao carregar programa de pontos:', err))
     }
     fetch('/api/configuracoes')
       .then(r => { if (r.status === 401) { router.push('/login?callbackUrl=/configuracoes'); return null } return r.json() })
@@ -280,6 +303,17 @@ export default function ConfiguracoesPage() {
     } catch { setMensagemFidelidade('❌ Erro ao salvar.') }
     setSalvandoFidelidade(false)
     setTimeout(() => setMensagemFidelidade(''), 3000)
+  }
+
+  const salvarPontos = async () => {
+    setSalvandoPontos(true)
+    setMensagemPontos('')
+    try {
+      const res = await fetch('/api/fidelidade/config/pontos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(pontos) })
+      setMensagemPontos(res.ok ? '✅ Programa de pontos salvo!' : '❌ Erro ao salvar.')
+    } catch { setMensagemPontos('❌ Erro ao salvar.') }
+    setSalvandoPontos(false)
+    setTimeout(() => setMensagemPontos(''), 3000)
   }
 
   const salvarCardapio = async () => {
@@ -596,6 +630,58 @@ export default function ConfiguracoesPage() {
                     </button>
                     {mensagemFidelidade && (
                       <p style={{ textAlign: 'center', color: mensagemFidelidade.includes('✅') ? 'var(--success)' : 'var(--danger)', fontWeight: 800, fontSize: 13, margin: 0 }}>{mensagemFidelidade}</p>
+                    )}
+                  </SectionCard>
+                )}
+
+                {/* Programa de Pontos — é esta configuração que a área do cliente (/cliente) realmente usa */}
+                {isAdmin && (
+                  <SectionCard>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: -4, flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: 16, flexShrink: 0 }}>⭐</span>
+                      <span style={{ fontSize: 13, fontWeight: 900, color: TEXT, textTransform: 'uppercase', letterSpacing: '0.8px' }}>Programa de Pontos</span>
+                      <span style={{ fontSize: 10, background: 'color-mix(in srgb, var(--primary) 12%, transparent)', color: 'color-mix(in srgb, var(--primary) 80%, transparent)', padding: '2px 8px', borderRadius: 20, fontWeight: 800, whiteSpace: 'nowrap' }}>Somente Admin</span>
+                    </div>
+                    <p style={{ fontSize: 12, color: TEXT2, margin: '-10px 0 0' }}>
+                      Isso é o que aparece para o cliente em &quot;Meus pontos&quot;. Independente da seção Fidelidade acima (modelo antigo, mantido só por histórico).
+                    </p>
+                    <button
+                      onClick={() => setPontos(prev => ({ ...prev, ativo: !prev.ativo }))}
+                      style={{ width: '100%', background: pontos.ativo ? 'color-mix(in srgb, var(--success) 10%, transparent)' : 'rgba(var(--overlay-rgb), 0.04)', border: `1.5px solid ${pontos.ativo ? 'color-mix(in srgb, var(--success) 40%, transparent)' : 'var(--border)'}`, borderRadius: 12, padding: '13px 16px', color: pontos.ativo ? 'var(--success)' : TEXT2, fontSize: 13, fontWeight: 800, cursor: 'pointer', minHeight: 48, fontFamily: FONT }}
+                    >
+                      {pontos.ativo ? '✅ Programa de pontos ativo — toque para desativar' : '⭕ Programa de pontos desativado — toque para ativar'}
+                    </button>
+                    <FieldGroup label="Pontos necessários para a recompensa">
+                      <input
+                        type="number"
+                        min={1}
+                        value={pontos.metaPontos}
+                        onChange={e => setPontos(prev => ({ ...prev, metaPontos: Number(e.target.value) }))}
+                        style={inputStyle}
+                      />
+                    </FieldGroup>
+                    <FieldGroup label="Descrição da recompensa">
+                      <input
+                        type="text"
+                        placeholder="Ex: 1 Pizza Família"
+                        value={pontos.descricaoRecompensa}
+                        onChange={e => setPontos(prev => ({ ...prev, descricaoRecompensa: e.target.value }))}
+                        style={inputStyle}
+                        maxLength={120}
+                      />
+                    </FieldGroup>
+                    <p style={{ fontSize: 11.5, color: TEXT2, margin: 0 }}>
+                      Regra fixa: a cada R$1 gasto em pedidos (sem contar taxa de entrega), o cliente ganha 1 ponto. Pontos são confirmados quando o pedido é marcado como entregue.
+                    </p>
+                    <button
+                      onClick={salvarPontos}
+                      disabled={salvandoPontos}
+                      style={{ width: '100%', height: 48, background: salvandoPontos ? 'var(--background)' : `linear-gradient(180deg, ${ACCENT}, var(--primary))`, border: 'none', borderRadius: 12, color: 'var(--primary-foreground)', fontSize: 14, fontWeight: 900, cursor: salvandoPontos ? 'not-allowed' : 'pointer', fontFamily: FONT, opacity: salvandoPontos ? 0.6 : 1 }}
+                    >
+                      {salvandoPontos ? 'Salvando...' : 'Salvar Programa de Pontos'}
+                    </button>
+                    {mensagemPontos && (
+                      <p style={{ textAlign: 'center', color: mensagemPontos.includes('✅') ? 'var(--success)' : 'var(--danger)', fontWeight: 800, fontSize: 13, margin: 0 }}>{mensagemPontos}</p>
                     )}
                   </SectionCard>
                 )}

@@ -39,7 +39,7 @@ type PedidoResumo = {
 }
 
 type Perfil = {
-  cliente: { nome: string | null; telefone: string }
+  cliente: { nome: string | null; telefone: string; pontosAtivos: boolean }
   ultimosPedidos: PedidoResumo[]
 }
 
@@ -72,7 +72,13 @@ const cores = {
 }
 
 export default function ClientePage() {
-  const [step, setStep] = useState<'carregando' | 'telefone' | 'otp' | 'perfil'>('carregando')
+  const [step, setStep] = useState<'carregando' | 'erro' | 'indisponivel' | 'ativacao' | 'telefone' | 'otp' | 'perfil'>('carregando')
+  // Intenção que trouxe o cliente até o login: 'ativar' (tocou "Ativar meus
+  // pontos" sem sessão) ativa a participação automaticamente assim que o OTP
+  // é confirmado; 'login' (tocou "Entrar com WhatsApp") só autentica — se
+  // ainda não tiver ativado, o cliente continua vendo o card de ativação
+  // (estado B) normalmente, sem ativação automática.
+  const [intent, setIntent] = useState<'ativar' | 'login'>('login')
   const [telefone, setTelefone] = useState('')
   const [codigo, setCodigo] = useState('')
   const [erro, setErro] = useState('')
@@ -81,6 +87,9 @@ export default function ClientePage() {
   const [fidelidade, setFidelidade] = useState<Fidelidade | null>(null)
   const [resgatando, setResgatando] = useState(false)
   const [resgateErro, setResgateErro] = useState('')
+  const [ativando, setAtivando] = useState(false)
+  const [ativacaoErro, setAtivacaoErro] = useState('')
+  const [comoFuncionaAberto, setComoFuncionaAberto] = useState(false)
 
   // Retorno seguro pós-login (ex.: veio de "Pedido" no menu inferior sem
   // sessão ativa): só aceita destinos de uma allowlist explícita, nunca uma
@@ -99,6 +108,11 @@ export default function ClientePage() {
     window.location.href = '/pedido'
   }
 
+  // Estados A/B/C (Nível 6.6): "ativo" abaixo é o programa GLOBAL (config do
+  // restaurante), nunca a participação individual do cliente.
+  //   - !fidelidade.ativo               -> 'indisponivel' (nunca mostra ativação)
+  //   - ativo && !cliente.pontosAtivos  -> 'ativacao' (estado A sem sessão / estado B com sessão)
+  //   - ativo && cliente.pontosAtivos   -> 'perfil' (estado C: saldo/progresso)
   async function carregarPerfil() {
     try {
       const [resPerfil, resFidelidade] = await Promise.all([
@@ -106,20 +120,45 @@ export default function ClientePage() {
         fetch('/api/cliente/fidelidade', { cache: 'no-store' }),
       ])
       if (resPerfil.ok && resFidelidade.ok) {
-        setPerfil(await resPerfil.json())
-        setFidelidade(await resFidelidade.json())
-        setStep('perfil')
+        const perfilData: Perfil = await resPerfil.json()
+        const fidelidadeData: Fidelidade = await resFidelidade.json()
+        setPerfil(perfilData)
+        setFidelidade(fidelidadeData)
+        if (!fidelidadeData.ativo) { setStep('indisponivel'); return true }
+        setStep(perfilData.cliente.pontosAtivos ? 'perfil' : 'ativacao')
         return true
       }
     } catch {}
     return false
   }
 
+  async function buscarStatusPublico(): Promise<{ ativo: boolean } | null> {
+    try {
+      const res = await fetch('/api/fidelidade/status', { cache: 'no-store' })
+      if (!res.ok) return null
+      return await res.json()
+    } catch {
+      return null
+    }
+  }
+
+  // Usado quando não há sessão (bootstrap inicial e logo após "Sair"): só
+  // aqui é preciso perguntar o status do programa sem depender de login,
+  // porque /api/cliente/fidelidade (que já traz esse campo) exige sessão.
+  async function irParaEstadoInicial() {
+    const status = await buscarStatusPublico()
+    if (!status) { setStep('erro'); return }
+    setStep(status.ativo ? 'ativacao' : 'indisponivel')
+  }
+
   useEffect(() => {
-    carregarPerfil().then((ok) => {
-      if (!ok) { setStep('telefone'); return }
-      const destino = nextPermitidoAtual()
-      if (destino) window.location.href = destino
+    carregarPerfil().then(async (ok) => {
+      if (ok) {
+        const destino = nextPermitidoAtual()
+        if (destino) window.location.href = destino
+        return
+      }
+      await irParaEstadoInicial()
     })
   }, [])
 
@@ -152,6 +191,13 @@ export default function ClientePage() {
       })
       const data = await res.json()
       if (!res.ok || !data.ok) { setErro(data.error || 'Código inválido'); setEnviando(false); return }
+      // "Ativar meus pontos" sem sessão -> ativa a participação assim que o
+      // login termina, sem exigir um segundo toque (best-effort: se falhar,
+      // carregarPerfil() abaixo ainda cai no estado B, e o cliente pode
+      // tocar "Ativar meus pontos" de novo).
+      if (intent === 'ativar') {
+        try { await fetch('/api/cliente/fidelidade/ativar', { method: 'POST' }) } catch {}
+      }
       const ok = await carregarPerfil()
       if (ok) {
         const destino = nextPermitidoAtual()
@@ -161,13 +207,41 @@ export default function ClientePage() {
     setEnviando(false)
   }
 
+  // Estado A/B: ativa direto se já autenticado; sem sessão, leva ao login
+  // (telefone/otp) guardando a intenção para ativar automaticamente depois.
+  async function ativarOuEntrar() {
+    if (perfil) {
+      setAtivacaoErro('')
+      setAtivando(true)
+      try {
+        const res = await fetch('/api/cliente/fidelidade/ativar', { method: 'POST' })
+        if (!res.ok) { setAtivacaoErro('Não foi possível ativar agora. Tente novamente.'); setAtivando(false); return }
+        await carregarPerfil()
+      } catch { setAtivacaoErro('Erro de conexão. Tente novamente.') }
+      setAtivando(false)
+      return
+    }
+    setIntent('ativar')
+    setErro('')
+    setStep('telefone')
+  }
+
+  function entrarComWhatsapp() {
+    setIntent('login')
+    setErro('')
+    setStep('telefone')
+  }
+
   async function sair() {
     try { await fetch('/api/cliente/logout', { method: 'POST' }) } catch {}
     setPerfil(null)
     setFidelidade(null)
     setTelefone('')
     setCodigo('')
-    setStep('telefone')
+    setIntent('login')
+    setAtivacaoErro('')
+    setStep('carregando')
+    await irParaEstadoInicial()
   }
 
   // CTA de resgate só aparece quando a meta atual (recalculada no servidor,
@@ -235,7 +309,7 @@ export default function ClientePage() {
           <div style={{ fontSize: 15, fontWeight: 700, color: cores.navy }}>Meus pontos</div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          {step === 'perfil' && (
+          {!!perfil && (
             <button onClick={sair} aria-label="Sair da conta" style={{ background: 'none', border: 'none', color: cores.textoSecundario, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontFamily: 'Archivo, sans-serif' }}>
               <LogOut size={16} /> Sair
             </button>
@@ -256,6 +330,49 @@ export default function ClientePage() {
       >
         {step === 'carregando' && (
           <p style={{ textAlign: 'center', color: cores.textoSecundario, fontSize: 14 }}>Carregando...</p>
+        )}
+
+        {step === 'erro' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 420, margin: '0 auto', textAlign: 'center' }}>
+            <p style={{ color: cores.textoSecundario, fontSize: 14, margin: 0 }}>Não foi possível carregar agora. Verifique sua conexão.</p>
+            <button onClick={() => { setStep('carregando'); irParaEstadoInicial() }} style={botaoPrimario}>
+              Tentar novamente
+            </button>
+          </div>
+        )}
+
+        {step === 'indisponivel' && (
+          <div style={{ background: cores.cardBg, border: `1px solid ${cores.cardBorda}`, borderRadius: 14, padding: 18, textAlign: 'center', maxWidth: 420, margin: '0 auto' }}>
+            <p style={{ color: cores.textoSecundario, fontSize: 14, margin: 0 }}>O programa de pontos ainda não está ativo por aqui. Volte em breve!</p>
+          </div>
+        )}
+
+        {step === 'ativacao' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14, maxWidth: 420, margin: '0 auto' }}>
+            <div style={{ textAlign: 'center', marginBottom: 4 }}>
+              <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
+                <div style={{ background: cores.navyCard, borderRadius: 999, width: 64, height: 64, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Gift size={30} color={cores.amarelo} />
+                </div>
+              </div>
+              <h1 style={{ fontSize: 18, fontWeight: 800, margin: '0 0 6px' }}>Ative seus pontos</h1>
+              <p style={{ fontSize: 13.5, color: cores.textoSecundario, margin: 0, lineHeight: 1.5 }}>
+                Acumule pontos nos seus pedidos e acompanhe seu progresso até a próxima recompensa.
+              </p>
+            </div>
+            {ativacaoErro && <p style={{ color: cores.perigo, fontSize: 13, margin: 0 }}>{ativacaoErro}</p>}
+            <button onClick={ativarOuEntrar} disabled={ativando} style={{ ...botaoPrimario, opacity: ativando ? 0.6 : 1 }}>
+              {ativando ? 'Ativando...' : 'Ativar meus pontos'}
+            </button>
+            {!perfil && (
+              <button
+                onClick={entrarComWhatsapp}
+                style={{ background: 'none', border: `1px solid ${cores.cardBorda}`, borderRadius: 12, padding: 14, color: cores.navy, fontSize: 14, fontWeight: 700, cursor: 'pointer', fontFamily: 'Archivo, sans-serif' }}
+              >
+                Entrar com WhatsApp
+              </button>
+            )}
+          </div>
         )}
 
         {step === 'telefone' && (
@@ -328,69 +445,103 @@ export default function ClientePage() {
                 Olá{perfil.cliente.nome ? `, ${perfil.cliente.nome.split(' ')[0]}` : ''}!
               </div>
 
-              {!fidelidade.ativo && (
-                <div style={{ background: cores.cardBg, border: `1px solid ${cores.cardBorda}`, borderRadius: 14, padding: 18, textAlign: 'center' }}>
-                  <p style={{ color: cores.textoSecundario, fontSize: 14, margin: 0 }}>O programa de pontos ainda não está ativo por aqui. Volte em breve!</p>
+              {/* Hero de saldo — sempre visível, inclusive com saldo 0 (nunca é confundido com "programa desativado": chegar aqui já exige fidelidade.ativo). */}
+              <div style={{ background: cores.cardBg, border: `1px solid ${cores.cardBorda}`, borderRadius: 16, padding: 22 }}>
+                <div style={{ fontSize: 13, color: cores.textoSecundario, marginBottom: 4 }}>Seu saldo de pontos</div>
+                <div style={{ fontSize: 56, fontWeight: 800, lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
+                  {fidelidade.saldoPontos}
                 </div>
-              )}
+                <div style={{ fontSize: 12.5, color: cores.textoTerciario, marginTop: 10 }}>A cada R$1 gasto = 1 ponto</div>
+              </div>
 
-              {fidelidade.ativo && (
-                <>
-                  {/* Hero de saldo */}
-                  <div style={{ background: cores.cardBg, border: `1px solid ${cores.cardBorda}`, borderRadius: 16, padding: 22 }}>
-                    <div style={{ fontSize: 13, color: cores.textoSecundario, marginBottom: 4 }}>Seu saldo de pontos</div>
-                    <div style={{ fontSize: 56, fontWeight: 800, lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
-                      {fidelidade.saldoPontos}
-                    </div>
-                    <div style={{ fontSize: 12.5, color: cores.textoTerciario, marginTop: 10 }}>A cada R$1 gasto = 1 ponto</div>
+              {podeResgatar ? (
+                // Meta atingida: substitui o card de progresso pelo card
+                // navy com CTA — único lugar da tela com fundo escuro.
+                <div style={{ background: cores.navyCard, borderRadius: 16, padding: 22, color: cores.navyCardTexto }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                    <Sparkles size={20} color={cores.amarelo} />
+                    <span style={{ fontSize: 13, fontWeight: 700, color: cores.amarelo, textTransform: 'uppercase', letterSpacing: 0.5 }}>Recompensa disponível</span>
                   </div>
-
-                  {podeResgatar ? (
-                    // Meta atingida: substitui o card de progresso pelo card
-                    // navy com CTA — único lugar da tela com fundo escuro.
-                    <div style={{ background: cores.navyCard, borderRadius: 16, padding: 22, color: cores.navyCardTexto }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-                        <Sparkles size={20} color={cores.amarelo} />
-                        <span style={{ fontSize: 13, fontWeight: 700, color: cores.amarelo, textTransform: 'uppercase', letterSpacing: 0.5 }}>Recompensa disponível</span>
+                  <p style={{ fontSize: 16, fontWeight: 700, margin: '0 0 16px' }}>{fidelidade.descricaoRecompensa}</p>
+                  {resgateErro && <p style={{ color: 'var(--danger-border)', fontSize: 13, margin: '0 0 12px' }}>{resgateErro}</p>}
+                  <button
+                    onClick={resgatar}
+                    disabled={resgatando}
+                    style={{ ...botaoPrimario, opacity: resgatando ? 0.6 : 1 }}
+                  >
+                    {resgatando ? 'Preparando resgate...' : `Resgatar ${fidelidade.descricaoRecompensa}`}
+                  </button>
+                </div>
+              ) : (
+                // Card "Seu progresso" — nunca escondido com saldo 0. Meta
+                // não configurada (<=0) tem mensagem própria em vez de uma
+                // barra 0/0 sem sentido; calcularProgressoPontos (backend)
+                // já garante 0<=progressoPercentual<=100 sempre.
+                <div style={{ background: cores.cardBg, border: `1px solid ${cores.cardBorda}`, borderRadius: 16, padding: 22 }}>
+                  <p style={{ fontSize: 11, color: cores.textoTerciario, textTransform: 'uppercase', letterSpacing: 0.5, margin: '0 0 12px' }}>Seu progresso</p>
+                  {fidelidade.metaPontos > 0 ? (
+                    <>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, fontWeight: 700, marginBottom: 12 }}>
+                        <span>{fidelidade.saldoPontos} pontos</span>
+                        <span style={{ color: cores.textoSecundario, fontWeight: 600 }}>Meta: {fidelidade.metaPontos}</span>
                       </div>
-                      <p style={{ fontSize: 16, fontWeight: 700, margin: '0 0 16px' }}>{fidelidade.descricaoRecompensa}</p>
-                      {resgateErro && <p style={{ color: 'var(--danger-border)', fontSize: 13, margin: '0 0 12px' }}>{resgateErro}</p>}
-                      <button
-                        onClick={resgatar}
-                        disabled={resgatando}
-                        style={{ ...botaoPrimario, opacity: resgatando ? 0.6 : 1 }}
+                      <div
+                        role="progressbar"
+                        aria-valuenow={Math.min(100, Math.max(0, fidelidade.progressoPercentual))}
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        aria-label={`Progresso: ${fidelidade.saldoPontos} de ${fidelidade.metaPontos} pontos`}
+                        style={{ background: cores.moldura, borderRadius: 999, height: 12, overflow: 'hidden' }}
                       >
-                        {resgatando ? 'Preparando resgate...' : 'Resgatar minha Pizza Família'}
-                      </button>
-                    </div>
-                  ) : (
-                    <div style={{ background: cores.cardBg, border: `1px solid ${cores.cardBorda}`, borderRadius: 16, padding: 22 }}>
-                      <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>
-                        {fidelidade.saldoPontos} de {fidelidade.metaPontos} pontos
-                      </div>
-                      <div style={{ background: cores.moldura, borderRadius: 999, height: 12, overflow: 'hidden' }}>
                         <div style={{
-                          width: `${Math.min(100, fidelidade.progressoPercentual)}%`,
+                          width: `${Math.min(100, Math.max(0, fidelidade.progressoPercentual))}%`,
                           height: '100%',
                           background: cores.amarelo,
                           borderRadius: 999,
                         }} />
                       </div>
                       <p style={{ fontSize: 13, color: cores.textoSecundario, margin: '10px 0 0' }}>
-                        Faltam {fidelidade.pontosFaltantes} pontos para: {fidelidade.descricaoRecompensa}
+                        Faltam {fidelidade.pontosFaltantes} pontos para você ganhar {fidelidade.descricaoRecompensa}
                       </p>
-                    </div>
+                    </>
+                  ) : (
+                    <p style={{ fontSize: 13, color: cores.textoSecundario, margin: 0 }}>
+                      A recompensa ainda não foi configurada por aqui. Volte em breve!
+                    </p>
                   )}
+                </div>
+              )}
 
-                  {fidelidade.pontosPrevistos > 0 && (
-                    <div style={{ background: cores.cardBg, border: `1px dashed ${cores.cardBorda}`, borderRadius: 14, padding: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
-                      <Clock size={20} color={cores.textoTerciario} />
-                      <p style={{ fontSize: 13, color: cores.textoSecundario, margin: 0 }}>
-                        Seu pedido em andamento vai render +{fidelidade.pontosPrevistos} pontos assim que for entregue.
-                      </p>
-                    </div>
+              {fidelidade.pontosPrevistos > 0 && (
+                <div style={{ background: cores.cardBg, border: `1px dashed ${cores.cardBorda}`, borderRadius: 14, padding: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <Clock size={20} color={cores.textoTerciario} />
+                  <p style={{ fontSize: 13, color: cores.textoSecundario, margin: 0 }}>
+                    Seu pedido em andamento vai render +{fidelidade.pontosPrevistos} pontos assim que for entregue.
+                  </p>
+                </div>
+              )}
+
+              <button
+                onClick={() => setComoFuncionaAberto((v) => !v)}
+                aria-expanded={comoFuncionaAberto}
+                style={{ background: 'none', border: 'none', color: cores.textoSecundario, fontSize: 13, fontWeight: 700, textDecoration: 'underline', cursor: 'pointer', padding: '4px 0', textAlign: 'left', fontFamily: 'Archivo, sans-serif', minHeight: 44 }}
+              >
+                Como funcionam os pontos?
+              </button>
+              {comoFuncionaAberto && (
+                <div style={{ background: cores.cardBg, border: `1px solid ${cores.cardBorda}`, borderRadius: 14, padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <p style={{ fontSize: 13, color: cores.textoSecundario, margin: 0 }}>
+                    • Você ganha 1 ponto para cada R$1 gasto em pedidos (a taxa de entrega não conta).
+                  </p>
+                  {fidelidade.metaPontos > 0 && (
+                    <p style={{ fontSize: 13, color: cores.textoSecundario, margin: 0 }}>
+                      • Junte {fidelidade.metaPontos} pontos para resgatar: {fidelidade.descricaoRecompensa}.
+                    </p>
                   )}
-                </>
+                  <p style={{ fontSize: 13, color: cores.textoSecundario, margin: 0 }}>
+                    • Os pontos são confirmados quando seu pedido é marcado como entregue. Pedidos cancelados não geram pontos.
+                  </p>
+                </div>
               )}
 
               <a href="/pedido" style={{ ...botaoPrimario, textDecoration: 'none', textAlign: 'center', boxSizing: 'border-box', display: 'block' }}>

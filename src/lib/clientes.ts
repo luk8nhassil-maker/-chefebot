@@ -7,6 +7,9 @@ export type Cliente = {
   createdAt: string;
   updatedAt: string;
   lastLoginAt: string;
+  /** Participação individual no programa de pontos — opt-in explícito, separado da ativação global (ConfigFidelidadePontos.ativo). Ausente/false = cliente ainda não ativou. */
+  pontosAtivos?: boolean;
+  pontosAtivadoEm?: string;
 };
 
 export function sanitizeTelefoneCliente(telefone: string): string {
@@ -58,4 +61,27 @@ export async function obterOuCriarCliente(telefone: string, nome?: string): Prom
   };
   await redis.set(chaveCliente(tel), novo);
   return novo;
+}
+
+/**
+ * Ativa a participação individual do cliente no programa de pontos.
+ * Idempotente: se já estava ativo, retorna o registro como está, sem
+ * sobrescrever `pontosAtivadoEm` nem tocar em saldo/histórico (que vivem em
+ * chaves de fidelidade separadas, nunca lidas/escritas aqui) — ativar duas
+ * vezes nunca duplica dados nem gera pontos retroativos.
+ */
+export async function ativarParticipacaoPontos(clienteId: string): Promise<Cliente | null> {
+  const cliente = await buscarClientePorId(clienteId);
+  if (!cliente) return null;
+  if (cliente.pontosAtivos) return cliente;
+
+  const agora = new Date().toISOString();
+  const atualizado: Cliente = {
+    ...cliente,
+    pontosAtivos: true,
+    pontosAtivadoEm: agora,
+    updatedAt: agora,
+  };
+  await redis.set(chaveCliente(cliente.telefone), atualizado);
+  return atualizado;
 }

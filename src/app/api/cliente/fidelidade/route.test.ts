@@ -8,24 +8,22 @@ let recompensasPorCliente = new Map<string, unknown[]>();
 
 vi.mock("@/lib/clienteAuth", () => ({
   CLIENTE_COOKIE: "cliente-token",
-  verificarTokenCliente: vi.fn(async (token: string) => {
-    if (token === "token-cliente-a") return { clienteId: "cli_a", telefone: "11900000001" };
-    if (token === "token-cliente-b") return { clienteId: "cli_b", telefone: "11900000002" };
+  // telefone "cli_a"/"cli_b" (sem dígitos) é proposital: derivarClienteIdPorTelefone
+  // não consegue derivar nada dele (menos de 10 dígitos), então a rota cai no
+  // fallback `cliente.clienteId` — é isso que faz `extratosPorCliente.set("cli_a", ...)`
+  // bater com o clienteIdPontos resolvido de fato.
+  resolverSessaoCliente: vi.fn(async (req: NextRequest) => {
+    const token = req.cookies.get("cliente-token")?.value;
+    if (token === "token-cliente-a") {
+      return { cliente: { clienteId: "cli_a", telefone: "cli_a", nome: "Cliente A", createdAt: "", updatedAt: "", lastLoginAt: "" }, deveRenovar: false };
+    }
+    if (token === "token-cliente-b") {
+      return { cliente: { clienteId: "cli_b", telefone: "cli_b", nome: "Cliente B", createdAt: "", updatedAt: "", lastLoginAt: "" }, deveRenovar: false };
+    }
     return null;
   }),
+  definirCookieSessaoCliente: vi.fn(),
 }));
-
-vi.mock("@/lib/clientes", async () => {
-  const actual = await vi.importActual<typeof import("@/lib/clientes")>("@/lib/clientes");
-  return {
-    ...actual,
-    buscarClientePorId: vi.fn(async (clienteId: string) => {
-      if (clienteId === "cli_a") return { clienteId: "cli_a", telefone: "cli_a", nome: "Cliente A", createdAt: "", updatedAt: "", lastLoginAt: "" };
-      if (clienteId === "cli_b") return { clienteId: "cli_b", telefone: "cli_b", nome: "Cliente B", createdAt: "", updatedAt: "", lastLoginAt: "" };
-      return null;
-    }),
-  };
-});
 
 vi.mock("@/lib/fidelidade", async () => {
   const actual = await vi.importActual<typeof import("@/lib/fidelidade")>("@/lib/fidelidade");

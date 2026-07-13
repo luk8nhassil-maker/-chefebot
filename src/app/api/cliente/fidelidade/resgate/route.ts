@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verificarTokenCliente, CLIENTE_COOKIE } from "@/lib/clienteAuth";
-import { buscarClientePorId } from "@/lib/clientes";
+import { resolverSessaoCliente, definirCookieSessaoCliente } from "@/lib/clienteAuth";
 import {
   derivarClienteIdPorTelefone,
   obterRecompensasPontos,
@@ -20,14 +19,9 @@ import {
 // autenticado, dentro do app.
 
 export async function POST(req: NextRequest) {
-  const token = req.cookies.get(CLIENTE_COOKIE)?.value ?? null;
-  if (!token) return NextResponse.json({ error: "Nao autorizado" }, { status: 401 });
-
-  const payload = await verificarTokenCliente(token);
-  if (!payload) return NextResponse.json({ error: "Nao autorizado" }, { status: 401 });
-
-  const cliente = await buscarClientePorId(payload.clienteId);
-  if (!cliente) return NextResponse.json({ error: "Nao autorizado" }, { status: 401 });
+  const sessao = await resolverSessaoCliente(req);
+  if (!sessao) return NextResponse.json({ error: "Nao autorizado" }, { status: 401 });
+  const { cliente } = sessao;
 
   const clienteIdPontos = derivarClienteIdPorTelefone(cliente.telefone) ?? cliente.clienteId;
 
@@ -53,13 +47,15 @@ export async function POST(req: NextRequest) {
 
   try {
     const reserva = await reservarResgatePontos(clienteIdPontos, recompensaId);
-    return NextResponse.json({
+    const res = NextResponse.json({
       ok: true,
       resgateId: reserva.resgateId,
       valorDescontoMaximo: reserva.valorDescontoMaximo,
       pontosReservados: reserva.pontosReservados,
       expiraEm: reserva.expiraEm,
     });
+    if (sessao.deveRenovar && sessao.novoToken) definirCookieSessaoCliente(res, sessao.novoToken);
+    return res;
   } catch (err) {
     const mensagem = err instanceof Error ? err.message : "Erro ao reservar resgate";
     return NextResponse.json({ error: mensagem }, { status: 409 });

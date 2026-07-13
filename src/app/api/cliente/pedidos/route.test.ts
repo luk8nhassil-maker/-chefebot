@@ -1,31 +1,29 @@
 import { vi, describe, test, expect } from "vitest";
 import { NextRequest } from "next/server";
 
+const CLIENTES_POR_TOKEN: Record<string, { clienteId: string; telefone: string; nome: string } | null> = {
+  "token-cliente-a": { clienteId: "cli_a", telefone: "11900000001", nome: "Cliente A" },
+  "token-cliente-b": { clienteId: "cli_b", telefone: "11900000002", nome: "Cliente B" },
+  // token válido mas cliente não existe mais no cadastro -> resolverSessaoCliente retorna null.
+  "token-cliente-fantasma": null,
+  // Perfil com telefone verificado salvo SEM DDI — pedido antigo (abaixo)
+  // está salvo COM DDI 55.
+  "token-cliente-c": { clienteId: "cli_c", telefone: "99974000691", nome: "Cliente C" },
+  // Perfil com telefone verificado salvo COM DDI — pedido antigo (abaixo)
+  // está salvo SEM DDI.
+  "token-cliente-d": { clienteId: "cli_d", telefone: "5588988887777", nome: "Cliente D" },
+};
+
 vi.mock("@/lib/clienteAuth", () => ({
   CLIENTE_COOKIE: "cliente-token",
-  verificarTokenCliente: vi.fn(async (token: string) => {
-    if (token === "token-cliente-a") return { clienteId: "cli_a", telefone: "11900000001" };
-    if (token === "token-cliente-b") return { clienteId: "cli_b", telefone: "11900000002" };
-    if (token === "token-cliente-fantasma") return { clienteId: "cli_fantasma", telefone: "11900000099" };
-    // Perfil com telefone verificado salvo SEM DDI — pedido antigo (abaixo)
-    // está salvo COM DDI 55.
-    if (token === "token-cliente-c") return { clienteId: "cli_c", telefone: "99974000691" };
-    // Perfil com telefone verificado salvo COM DDI — pedido antigo (abaixo)
-    // está salvo SEM DDI.
-    if (token === "token-cliente-d") return { clienteId: "cli_d", telefone: "5588988887777" };
-    return null;
+  resolverSessaoCliente: vi.fn(async (req: NextRequest) => {
+    const token = req.cookies.get("cliente-token")?.value;
+    if (!token) return null;
+    const cliente = CLIENTES_POR_TOKEN[token];
+    if (!cliente) return null;
+    return { cliente: { ...cliente, createdAt: "", updatedAt: "", lastLoginAt: "" }, deveRenovar: false };
   }),
-}));
-
-vi.mock("@/lib/clientes", () => ({
-  buscarClientePorId: vi.fn(async (clienteId: string) => {
-    if (clienteId === "cli_a") return { clienteId: "cli_a", telefone: "11900000001", nome: "Cliente A", createdAt: "", updatedAt: "", lastLoginAt: "" };
-    if (clienteId === "cli_b") return { clienteId: "cli_b", telefone: "11900000002", nome: "Cliente B", createdAt: "", updatedAt: "", lastLoginAt: "" };
-    if (clienteId === "cli_c") return { clienteId: "cli_c", telefone: "99974000691", nome: "Cliente C", createdAt: "", updatedAt: "", lastLoginAt: "" };
-    if (clienteId === "cli_d") return { clienteId: "cli_d", telefone: "5588988887777", nome: "Cliente D", createdAt: "", updatedAt: "", lastLoginAt: "" };
-    // cli_fantasma: token válido mas cliente não existe mais no cadastro.
-    return null;
-  }),
+  definirCookieSessaoCliente: vi.fn(),
 }));
 
 const PEDIDOS_FIXTURE = [

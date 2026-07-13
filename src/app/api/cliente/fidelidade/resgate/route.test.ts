@@ -3,24 +3,18 @@ import { NextRequest } from "next/server";
 
 vi.mock("@/lib/clienteAuth", () => ({
   CLIENTE_COOKIE: "cliente-token",
-  verificarTokenCliente: vi.fn(async (token: string) => {
-    if (token === "token-cliente-a") return { clienteId: "cli_a", telefone: "11900000001" };
-    if (token === "token-cliente-b") return { clienteId: "cli_b", telefone: "11900000002" };
+  resolverSessaoCliente: vi.fn(async (req: NextRequest) => {
+    const token = req.cookies.get("cliente-token")?.value;
+    if (token === "token-cliente-a") {
+      return { cliente: { clienteId: "cli_a", telefone: "cli_a", nome: "Cliente A", createdAt: "", updatedAt: "", lastLoginAt: "" }, deveRenovar: false };
+    }
+    if (token === "token-cliente-b") {
+      return { cliente: { clienteId: "cli_b", telefone: "cli_b", nome: "Cliente B", createdAt: "", updatedAt: "", lastLoginAt: "" }, deveRenovar: false };
+    }
     return null;
   }),
+  definirCookieSessaoCliente: vi.fn(),
 }));
-
-vi.mock("@/lib/clientes", async () => {
-  const actual = await vi.importActual<typeof import("@/lib/clientes")>("@/lib/clientes");
-  return {
-    ...actual,
-    buscarClientePorId: vi.fn(async (clienteId: string) => {
-      if (clienteId === "cli_a") return { clienteId: "cli_a", telefone: "cli_a", nome: "Cliente A", createdAt: "", updatedAt: "", lastLoginAt: "" };
-      if (clienteId === "cli_b") return { clienteId: "cli_b", telefone: "cli_b", nome: "Cliente B", createdAt: "", updatedAt: "", lastLoginAt: "" };
-      return null;
-    }),
-  };
-});
 
 const recompensasPorCliente = new Map<string, Array<{ recompensaId: string; status: string }>>();
 const reservarMock = vi.fn();

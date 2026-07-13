@@ -73,3 +73,72 @@ describe("/cliente — Área do Cliente renomeada para Pontos", () => {
     expect(usos.length).toBeGreaterThanOrEqual(2);
   });
 });
+
+describe("/cliente — Estados A/B/C de ativação individual (Nível 6.6)", () => {
+  test("card de ativação: título, texto e os dois botões (\"Ativar meus pontos\" e \"Entrar com WhatsApp\")", () => {
+    expect(fonte).toContain("Ative seus pontos");
+    expect(fonte).toContain("Ativar meus pontos");
+    expect(fonte).toContain("Entrar com WhatsApp");
+    expect(fonte).toMatch(/onClick=\{ativarOuEntrar\}/);
+    expect(fonte).toMatch(/onClick=\{entrarComWhatsapp\}/);
+  });
+
+  test("\"Entrar com WhatsApp\" só aparece sem sessão (nunca exigido, sempre disponível antes do login)", () => {
+    const indiceGuarda = fonte.indexOf("{!perfil && (");
+    const indiceBotao = fonte.indexOf("Entrar com WhatsApp", indiceGuarda);
+    expect(indiceGuarda).toBeGreaterThan(-1);
+    expect(indiceBotao).toBeGreaterThan(indiceGuarda);
+    expect(indiceBotao - indiceGuarda).toBeLessThan(600);
+  });
+
+  test("status público do programa é consultado sem exigir sessão (estado antes do login)", () => {
+    expect(fonte).toContain("/api/fidelidade/status");
+    expect(fonte).toContain("buscarStatusPublico");
+  });
+
+  test("ativação individual chama a rota dedicada, nunca reaproveita a rota de fidelidade só-leitura", () => {
+    expect(fonte).toContain("/api/cliente/fidelidade/ativar");
+  });
+
+  test("intenção 'ativar' aciona a ativação automaticamente após confirmar o código", () => {
+    expect(fonte).toMatch(/intent === 'ativar'/);
+  });
+
+  test("estado de erro de carregamento tem retentativa, nunca fica preso sem saída", () => {
+    expect(fonte).toContain("Tentar novamente");
+    expect(fonte).toContain("irParaEstadoInicial");
+  });
+
+  test("pontosAtivos do perfil decide entre estado de ativação e estado de pontos (C)", () => {
+    expect(fonte).toContain("perfilData.cliente.pontosAtivos");
+  });
+});
+
+describe("/cliente — barra de progresso sempre visível, mesmo com 0 pontos (Nível 6.6)", () => {
+  test("card \"Seu progresso\" com aria de progressbar", () => {
+    expect(fonte).toContain("Seu progresso");
+    expect(fonte).toContain('role="progressbar"');
+    expect(fonte).toContain("aria-valuenow");
+    expect(fonte).toContain("aria-valuemin={0}");
+    expect(fonte).toContain("aria-valuemax={100}");
+  });
+
+  test("progresso nunca usa valor fixo — sempre lê de fidelidade.* (meta, saldo, recompensa dinâmicos)", () => {
+    expect(fonte).toContain("fidelidade.metaPontos");
+    expect(fonte).toContain("fidelidade.saldoPontos");
+    expect(fonte).toContain("fidelidade.progressoPercentual");
+    expect(fonte).toContain("fidelidade.descricaoRecompensa");
+  });
+
+  test("meta não configurada (<=0) tem mensagem própria, em vez de barra 0/0 sem sentido", () => {
+    expect(fonte).toMatch(/fidelidade\.metaPontos > 0/);
+    expect(fonte).toContain("A recompensa ainda não foi configurada");
+  });
+
+  test("\"Como funcionam os pontos?\" explica a regra real (sem inventar condição não configurada)", () => {
+    expect(fonte).toContain("Como funcionam os pontos?");
+    expect(fonte).toContain("comoFuncionaAberto");
+    expect(fonte).toContain("R$1 gasto");
+    expect(fonte).toContain("marcado como entregue");
+  });
+});
