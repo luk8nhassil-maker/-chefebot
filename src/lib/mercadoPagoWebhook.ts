@@ -78,27 +78,65 @@ export function validarAssinaturaMercadoPago(params: {
   return timingSafeEqual(a, b);
 }
 
-// 3. Busca autoritativa do pagamento no Mercado Pago (nunca confia no corpo).
-export async function buscarPagamentoMercadoPago(paymentId: string): Promise<PagamentoMercadoPago | null> {
-  const token = await resolveActiveMercadoPagoToken();
-  if (!token) return null;
+// Resultado detalhado da busca (Nivel 6.5) — usado pelo conciliador para
+// distinguir 429/timeout de outros erros, o que a assinatura simples de
+// `buscarPagamentoMercadoPago` (abaixo, inalterada) não permite. `signal` é
+// opcional; o webhook não passa nenhum, então seu comportamento é idêntico
+// ao de antes desta função existir.
+export type ResultadoBuscaPagamentoMercadoPago =
+  | { ok: true; pagamento: PagamentoMercadoPago }
+  | { ok: false; status: number | null; motivo: string };
 
-  const res = await fetch(`${MP_PAYMENTS_URL}/${encodeURIComponent(paymentId)}`, {
-    method: "GET",
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!res.ok) return null;
+async function buscarPagamentoMercadoPagoInterno(
+  paymentId: string,
+  signal?: AbortSignal
+): Promise<ResultadoBuscaPagamentoMercadoPago> {
+  const token = await resolveActiveMercadoPagoToken();
+  if (!token) return { ok: false, status: null, motivo: "token_indisponivel" };
+
+  let res: Response;
+  try {
+    res = await fetch(`${MP_PAYMENTS_URL}/${encodeURIComponent(paymentId)}`, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${token}` },
+      signal,
+    });
+  } catch (err) {
+    const timeout = err instanceof Error && err.name === "AbortError";
+    return { ok: false, status: null, motivo: timeout ? "timeout" : "erro_rede" };
+  }
+  if (!res.ok) return { ok: false, status: res.status, motivo: `http_${res.status}` };
 
   const data = await res.json().catch(() => null);
-  if (!data || typeof data !== "object") return null;
+  if (!data || typeof data !== "object") return { ok: false, status: res.status, motivo: "resposta_invalida" };
 
   const bruto = data as Record<string, unknown>;
   return {
-    id: String(bruto.id ?? paymentId),
-    status: typeof bruto.status === "string" ? bruto.status : "",
-    transactionAmount: typeof bruto.transaction_amount === "number" ? bruto.transaction_amount : null,
-    externalReference: typeof bruto.external_reference === "string" ? bruto.external_reference : null,
+    ok: true,
+    pagamento: {
+      id: String(bruto.id ?? paymentId),
+      status: typeof bruto.status === "string" ? bruto.status : "",
+      transactionAmount: typeof bruto.transaction_amount === "number" ? bruto.transaction_amount : null,
+      externalReference: typeof bruto.external_reference === "string" ? bruto.external_reference : null,
+    },
   };
+}
+
+// 3. Busca autoritativa do pagamento no Mercado Pago (nunca confia no corpo).
+// Assinatura/comportamento inalterados — usada pelo webhook.
+export async function buscarPagamentoMercadoPago(paymentId: string): Promise<PagamentoMercadoPago | null> {
+  const resultado = await buscarPagamentoMercadoPagoInterno(paymentId);
+  return resultado.ok ? resultado.pagamento : null;
+}
+
+// Variante detalhada (Nivel 6.5) — usada pelo conciliador para timeout e
+// deteccao de rate limit (429). Nao afeta o webhook, que continua usando a
+// funcao simples acima.
+export async function buscarPagamentoMercadoPagoDetalhado(
+  paymentId: string,
+  signal?: AbortSignal
+): Promise<ResultadoBuscaPagamentoMercadoPago> {
+  return buscarPagamentoMercadoPagoInterno(paymentId, signal);
 }
 
 // 4. Mapeamento MP -> interno.
