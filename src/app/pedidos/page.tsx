@@ -28,7 +28,7 @@ type Pedido = {
   pagamento?: string
   troco?: string
   pixConfirmado?: boolean
-  pix?: { status?: string; confirmadoPor?: string; confirmadoEm?: string; evidencia?: { motivos?: string[] } }
+  pix?: { status?: string; confirmadoPor?: string; confirmadoEm?: string; evidencia?: { motivos?: string[] }; provider?: string; providerPaymentId?: string }
   tipoEntrega?: string
   horarioInicio?: string
   horarioEntrega?: string
@@ -41,6 +41,11 @@ type Pedido = {
   archivedReason?: string
   origem?: string
 }
+
+// Cadência da auto-verificação de Pix Mercado Pago (Nível 6.4). 20s é o piso
+// desta etapa — nunca menor, para não sobrecarregar a API do Mercado Pago.
+const INTERVALO_PIX_RAPIDO = 20_000
+const INTERVALO_PIX_LENTO = 120_000
 
 const NEXT_STATUS: Record<Status, Status | null> = {
   novo: "em_preparo", em_preparo: "saiu_entrega", saiu_entrega: "entregue", entregue: null, cancelado: null,
@@ -73,6 +78,17 @@ function labelPixRevisaoOuSuspeito(p: Pick<Pedido, "pix">): string | null {
 }
 function motivoResumidoPix(p: Pick<Pedido, "pix">): string | undefined {
   return p.pix?.evidencia?.motivos?.[0]
+}
+// Mesmo critério de elegibilidade usado no backend (elegivelParaReconciliacao
+// em mercadoPagoReconciliacao.ts) — só para decidir a cadência da
+// auto-verificação (Nível 6.4), nunca para confirmar nada aqui no frontend.
+function temPixMercadoPagoPendente(lista: Pick<Pedido, "pix" | "pixConfirmado">[]): boolean {
+  return lista.some(p =>
+    p.pix?.provider === "mercadopago" &&
+    !!p.pix?.providerPaymentId &&
+    p.pix?.status !== "confirmado" &&
+    p.pixConfirmado !== true
+  )
 }
 function getActionLabel(p: Pedido): string {
   if (p.status === "em_preparo") {
@@ -307,6 +323,7 @@ export default function PedidosPage() {
   const [criandoPedidoCombinado, setCriandoPedidoCombinado] = useState(false)
 
   const prevIdsRef = useRef<string[]>([])
+  const pedidosRef = useRef<Pedido[]>([])
   const piscarRef = useRef<NodeJS.Timeout | null>(null)
   const somRepetidoRef = useRef<NodeJS.Timeout | null>(null)
   const tituloOriginalRef = useRef(typeof document !== "undefined" ? document.title : "Pedidos")
@@ -656,17 +673,41 @@ export default function PedidosPage() {
 
   const reconciliarPixMercadoPago = () => executarReconciliacaoPix(true)
 
-  // Auto-verificação (Nivel 6.3B): sem webhook e sem cron (Vercel Hobby não
-  // comporta cron frequente), o próprio painel aberto assume o papel de
+  // pedidosRef espelha o state `pedidos` para a auto-verificação (efeito
+  // abaixo) ler a lista sempre atual sem precisar reagendar o loop a cada
+  // atualização (o polling normal de /api/orders roda a cada 3s).
+  useEffect(() => { pedidosRef.current = pedidos }, [pedidos])
+
+  // Auto-verificação (Nível 6.3B/6.4): sem webhook e sem cron (Vercel Hobby
+  // não comporta cron frequente), o próprio painel aberto assume o papel de
   // gatilho. Só para admin/dev, só depois do painel carregar, pausa quando a
   // aba está oculta (document.hidden) e nunca sobrepõe uma verificação já em
   // andamento (guard compartilhado com o botão manual acima).
+  //
+  // Cadência adaptativa (Nível 6.4): enquanto houver Pix Mercado Pago
+  // pendente na lista atual, verifica a cada 20s (piso mínimo desta etapa —
+  // nunca mais agressivo); sem nenhum Pix MP pendente, volta para o
+  // intervalo leve de 2 minutos. Reavaliado a cada ciclo via setTimeout
+  // auto-reagendado (não setInterval fixo), sempre olhando pedidosRef.current
+  // no momento do agendamento — nunca precisa recriar o loop quando a lista
+  // muda.
   useEffect(() => {
     if (!isAdmin || loading) return
-    const rodar = () => { if (!document.hidden) executarReconciliacaoPix(false) }
+    let cancelado = false
+    let timeoutId: ReturnType<typeof setTimeout> | null = null
+
+    const agendarProxima = () => {
+      if (cancelado) return
+      const intervalo = temPixMercadoPagoPendente(pedidosRef.current) ? INTERVALO_PIX_RAPIDO : INTERVALO_PIX_LENTO
+      timeoutId = setTimeout(rodar, intervalo)
+    }
+    const rodar = async () => {
+      if (!document.hidden) await executarReconciliacaoPix(false)
+      agendarProxima()
+    }
+
     rodar()
-    const intervalo = setInterval(rodar, 120000)
-    return () => clearInterval(intervalo)
+    return () => { cancelado = true; if (timeoutId) clearTimeout(timeoutId) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAdmin, loading])
 

@@ -5,9 +5,16 @@ import { fileURLToPath } from "node:url";
 // Sem jsdom/testing-library neste repo para telas grandes com efeitos de
 // browser (cookies, Notification, wake lock, push) — ver admin/page.test.ts
 // e cliente/page.test.ts para o mesmo padrão. Os requisitos da
-// auto-verificação de Pix Mercado Pago (Nível 6.3B) ficam garantidos
+// auto-verificação de Pix Mercado Pago (Nível 6.3B/6.4) ficam garantidos
 // estruturalmente na fonte, sem precisar montar a árvore inteira.
 const fonte = readFileSync(fileURLToPath(new URL("./page.tsx", import.meta.url)), "utf-8");
+
+// Corpo do useEffect de auto-verificação, isolado para os testes de cadência.
+const inicioEfeitoMarcador = "useEffect(() => {\n    if (!isAdmin || loading) return";
+const corpoEfeito = fonte.slice(
+  fonte.indexOf(inicioEfeitoMarcador),
+  fonte.indexOf("}, [isAdmin, loading])") + "}, [isAdmin, loading])".length
+);
 
 describe("/pedidos — botão manual de verificação Pix Mercado Pago (preservado)", () => {
   test("botão manual continua renderizado, visível só para admin/dev, chamando reconciliarPixMercadoPago", () => {
@@ -28,7 +35,7 @@ describe("/pedidos — botão manual de verificação Pix Mercado Pago (preserva
   });
 });
 
-describe("/pedidos — auto-verificação de Pix Mercado Pago (Nível 6.3B)", () => {
+describe("/pedidos — auto-verificação de Pix Mercado Pago (Nível 6.3B/6.4)", () => {
   test("dispara a mesma rota já validada (POST /api/admin/mercadopago/reconciliar-pix)", () => {
     const ocorrencias = fonte.match(/fetch\("\/api\/admin\/mercadopago\/reconciliar-pix", \{ method: "POST" \}\)/g) ?? [];
     // uma única chamada de fetch compartilhada entre manual e automática
@@ -36,36 +43,22 @@ describe("/pedidos — auto-verificação de Pix Mercado Pago (Nível 6.3B)", ()
   });
 
   test("useEffect de auto-verificação só roda para admin/dev e depois do painel carregar", () => {
-    const inicioEfeito = fonte.indexOf("useEffect(() => {\n    if (!isAdmin || loading) return");
-    expect(inicioEfeito).toBeGreaterThan(-1);
+    expect(fonte.indexOf(inicioEfeitoMarcador)).toBeGreaterThan(-1);
   });
 
-  test("chama a verificação automaticamente ao montar (uma vez) e depois a cada 2 minutos", () => {
-    const corpo = fonte.slice(
-      fonte.indexOf("useEffect(() => {\n    if (!isAdmin || loading) return"),
-      fonte.indexOf("}, [isAdmin, loading])") + "}, [isAdmin, loading])".length
-    );
-    expect(corpo).toContain("rodar()"); // dispara uma vez ao montar
-    expect(corpo).toContain("setInterval(rodar, 120000)"); // repete a cada 2 minutos
-    expect(corpo).toContain("clearInterval(intervalo)"); // limpa ao desmontar/reavaliar
+  test("dispara a verificação automaticamente ao montar (uma vez), via rodar()", () => {
+    expect(corpoEfeito).toContain("rodar()");
   });
 
-  test("pausa quando a aba está oculta (document.hidden)", () => {
-    const corpo = fonte.slice(
-      fonte.indexOf("useEffect(() => {\n    if (!isAdmin || loading) return"),
-      fonte.indexOf("}, [isAdmin, loading])") + "}, [isAdmin, loading])".length
-    );
-    expect(corpo).toContain("if (!document.hidden) executarReconciliacaoPix(false)");
+  test("pausa quando a aba está oculta (document.hidden), mas continua reagendando o próximo ciclo", () => {
+    expect(corpoEfeito).toContain("if (!document.hidden) await executarReconciliacaoPix(false)");
+    expect(corpoEfeito).toContain("agendarProxima()");
   });
 
   test("auto-verificação chama executarReconciliacaoPix(false) — nunca (true), nunca dispara alert direto", () => {
-    const corpo = fonte.slice(
-      fonte.indexOf("useEffect(() => {\n    if (!isAdmin || loading) return"),
-      fonte.indexOf("}, [isAdmin, loading])") + "}, [isAdmin, loading])".length
-    );
-    expect(corpo).toContain("executarReconciliacaoPix(false)");
-    expect(corpo).not.toContain("executarReconciliacaoPix(true)");
-    expect(corpo).not.toContain("alert(");
+    expect(corpoEfeito).toContain("executarReconciliacaoPix(false)");
+    expect(corpoEfeito).not.toContain("executarReconciliacaoPix(true)");
+    expect(corpoEfeito).not.toContain("alert(");
   });
 
   test("alert só é chamado dentro de blocos condicionados a `manual`, nunca incondicionalmente", () => {
@@ -82,6 +75,73 @@ describe("/pedidos — auto-verificação de Pix Mercado Pago (Nível 6.3B)", ()
       const janela = linhas.slice(Math.max(0, i - 1), i + 1).join("\n");
       expect(janela).toMatch(/manual/);
     }
+  });
+});
+
+describe("/pedidos — cadência adaptativa da auto-verificação (Nível 6.4)", () => {
+  test("define 20s como intervalo rápido e 2min como intervalo lento (constantes nomeadas, não mágicas)", () => {
+    expect(fonte).toContain("const INTERVALO_PIX_RAPIDO = 20_000");
+    expect(fonte).toContain("const INTERVALO_PIX_LENTO = 120_000");
+  });
+
+  test("nunca usa um intervalo literal menor que 20 segundos no agendamento", () => {
+    // Único uso de setTimeout no arquivo é o do agendamento adaptativo —
+    // garante que não existe nenhum setTimeout(rodar, <valor menor que 20000>).
+    const chamadasSetTimeout = fonte.match(/setTimeout\(rodar,\s*([^)]+)\)/g) ?? [];
+    expect(chamadasSetTimeout.length).toBeGreaterThan(0);
+    for (const chamada of chamadasSetTimeout) {
+      expect(chamada).toContain("intervalo"); // usa a variável calculada, não um número solto
+    }
+    // A variável só pode assumir os dois valores nomeados — nenhum terceiro
+    // valor (menor) é atribuído a `intervalo` no agendamento.
+    expect(corpoEfeito).toMatch(/const intervalo = temPixMercadoPagoPendente\(pedidosRef\.current\) \? INTERVALO_PIX_RAPIDO : INTERVALO_PIX_LENTO/);
+  });
+
+  test("com Pix Mercado Pago pendente na lista atual, agenda o próximo ciclo em INTERVALO_PIX_RAPIDO (20s)", () => {
+    expect(corpoEfeito).toContain("temPixMercadoPagoPendente(pedidosRef.current) ? INTERVALO_PIX_RAPIDO : INTERVALO_PIX_LENTO");
+  });
+
+  test("sem Pix Mercado Pago pendente, cai para INTERVALO_PIX_LENTO (2min) — não fica verificando agressivamente", () => {
+    // mesma expressão ternária acima cobre os dois ramos; conferimos que o
+    // ramo "sem pendente" aponta para a constante lenta, não para a rápida.
+    const trecho = corpoEfeito.match(/temPixMercadoPagoPendente\(pedidosRef\.current\) \? (\w+) : (\w+)/);
+    expect(trecho?.[1]).toBe("INTERVALO_PIX_RAPIDO");
+    expect(trecho?.[2]).toBe("INTERVALO_PIX_LENTO");
+  });
+
+  test("temPixMercadoPagoPendente usa o mesmo critério de elegibilidade do backend (provider mercadopago + providerPaymentId + não confirmado)", () => {
+    const corpoFuncao = fonte.slice(
+      fonte.indexOf("function temPixMercadoPagoPendente"),
+      fonte.indexOf("function getActionLabel")
+    );
+    expect(corpoFuncao).toContain('p.pix?.provider === "mercadopago"');
+    expect(corpoFuncao).toContain("!!p.pix?.providerPaymentId");
+    expect(corpoFuncao).toContain('p.pix?.status !== "confirmado"');
+    expect(corpoFuncao).toContain("p.pixConfirmado !== true");
+  });
+
+  test("temPixMercadoPagoPendente é uma leitura pura — nunca escreve pix.status/pixConfirmado nem chama fetch", () => {
+    const corpoFuncao = fonte.slice(
+      fonte.indexOf("function temPixMercadoPagoPendente"),
+      fonte.indexOf("function getActionLabel")
+    );
+    expect(corpoFuncao).not.toContain("fetch(");
+    expect(corpoFuncao).not.toMatch(/pixConfirmado\s*=/);
+  });
+
+  test("pedidosRef é mantido sincronizado com o state `pedidos` (lista sempre atual, sem recriar o loop a cada mudança)", () => {
+    expect(fonte).toContain("const pedidosRef = useRef<Pedido[]>([])");
+    expect(fonte).toContain("useEffect(() => { pedidosRef.current = pedidos }, [pedidos])");
+  });
+
+  test("o loop se reagenda sozinho (setTimeout recursivo via agendarProxima), não usa setInterval fixo", () => {
+    expect(corpoEfeito).not.toContain("setInterval(");
+    expect(corpoEfeito).toContain("setTimeout(rodar, intervalo)");
+  });
+
+  test("cancela o agendamento pendente ao desmontar/reavaliar (sem vazar timers)", () => {
+    expect(corpoEfeito).toContain("cancelado = true");
+    expect(corpoEfeito).toContain("if (timeoutId) clearTimeout(timeoutId)");
   });
 });
 
