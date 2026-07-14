@@ -2,6 +2,11 @@
 import { useEffect, useState, useRef } from "react"
 import { useRouter } from "next/navigation"
 import PanelShell from "@/components/PanelShell"
+import {
+  calcularIntervaloPorIdade,
+  aplicarJitter,
+  PIX_AUTO_CHECK_INTERVAL_SEM_PENDENTE_MS,
+} from "@/lib/pixAutoCheckConfig"
 
 function whatsappLink(telefoneBruto: string, mensagem?: string): string {
   let numero = (telefoneBruto || "").replace(/\D/g, "")
@@ -37,6 +42,7 @@ type Pedido = {
     evidencia?: { motivos?: string[] }
     provider?: string
     providerPaymentId?: string
+    criadoEm?: string
   }
   tipoEntrega?: string
   horarioInicio?: string
@@ -51,10 +57,10 @@ type Pedido = {
   origem?: string
 }
 
-// Cadência da auto-verificação de Pix Mercado Pago (Nível 6.4). 20s é o piso
-// desta etapa — nunca menor, para não sobrecarregar a API do Mercado Pago.
-const INTERVALO_PIX_RAPIDO = 20_000
-const INTERVALO_PIX_LENTO = 120_000
+// Cadência adaptativa da auto-verificação de Pix Mercado Pago (Guardião Pix
+// — evolução do Nível 6.4). Todos os números vêm de pixAutoCheckConfig.ts —
+// nenhum valor mágico aqui. 0-2min: intervalo inicial configurável (10s por
+// padrão); 2-5min: 20s; acima de 5min: 30s; sem nenhum Pix MP pendente: 2min.
 
 const NEXT_STATUS: Record<Status, Status | null> = {
   novo: "em_preparo", em_preparo: "saiu_entrega", saiu_entrega: "entregue", entregue: null, cancelado: null,
@@ -122,6 +128,34 @@ function temPixMercadoPagoPendente(lista: Pick<Pedido, "pix" | "pixConfirmado">[
     p.pix?.status !== "confirmado" &&
     p.pixConfirmado !== true
   )
+}
+function pixMercadoPagoPendentes(lista: Pick<Pedido, "pix" | "pixConfirmado">[]): Pick<Pedido, "pix" | "pixConfirmado">[] {
+  return lista.filter(p =>
+    p.pix?.provider === "mercadopago" &&
+    !!p.pix?.providerPaymentId &&
+    p.pix?.status !== "confirmado" &&
+    p.pixConfirmado !== true
+  )
+}
+// Próximo intervalo da auto-verificação (Guardião Pix): entre todos os Pix
+// Mercado Pago ainda pendentes, usa o intervalo do MAIS URGENTE (o mais
+// jovem), calculado por calcularIntervaloPorIdade (mesma cadência de
+// pixAutoCheckConfig.ts usada pelo backend). Pedidos legados sem
+// pix.criadoEm (criados antes desta mudança) usam a camada intermediária
+// (20s) — nem tão agressivo quanto assumir "recém-criado", nem tão lento
+// quanto o piso de 30s, já que não há como saber a idade real.
+function calcularProximoIntervaloAutoVerificacaoPix(lista: Pick<Pedido, "pix" | "pixConfirmado">[], agora: number): number {
+  const pendentes = pixMercadoPagoPendentes(lista)
+  if (pendentes.length === 0) return PIX_AUTO_CHECK_INTERVAL_SEM_PENDENTE_MS
+
+  const intervalos = pendentes.map(p => {
+    const criadoEm = p.pix?.criadoEm
+    if (!criadoEm) return 20_000
+    const criado = new Date(criadoEm).getTime()
+    if (!Number.isFinite(criado)) return 20_000
+    return calcularIntervaloPorIdade(Math.max(0, agora - criado))
+  })
+  return aplicarJitter(Math.min(...intervalos))
 }
 function getActionLabel(p: Pedido): string {
   if (p.status === "em_preparo") {
@@ -745,24 +779,49 @@ export default function PedidosPage() {
 
   const reconciliarPixMercadoPago = () => executarReconciliacaoPix(true)
 
+  // Guardião Pix — desde a cadeia server-side via QStash (pixGuardiaoScheduler.ts,
+  // iniciada assim que o Pix Mercado Pago é criado), esta chamada do painel é
+  // REDUNDÂNCIA, não o caminho principal: a verificação 10s/20s/30s continua
+  // avançando sozinha mesmo com o painel fechado. Mantida aqui só como camada
+  // extra (nunca um timer separado por pagamento). Best-effort: nunca mostra
+  // alert, nunca bloqueia a UI; só atualiza o texto de "última verificação"
+  // quando recuperou algo, reaproveitando o mesmo espaço já existente no painel.
+  const executarGuardiaoPixPainel = async () => {
+    try {
+      const r = await fetch("/api/admin/mercadopago/guardiao-pix", { method: "POST" })
+      const data = await r.json().catch(() => null)
+      if (r.ok && data?.recuperacoesBemSucedidas > 0) {
+        setUltimaVerificacaoPix(prev => `${prev} · Guardião recuperou ${data.recuperacoesBemSucedidas} pagamento(s).`)
+        carregarPedidos()
+      }
+    } catch {
+      // Best-effort: falha do Guardião nunca deve afetar a auto-verificação normal.
+    }
+  }
+
   // pedidosRef espelha o state `pedidos` para a auto-verificação (efeito
   // abaixo) ler a lista sempre atual sem precisar reagendar o loop a cada
   // atualização (o polling normal de /api/orders roda a cada 3s).
   useEffect(() => { pedidosRef.current = pedidos }, [pedidos])
 
-  // Auto-verificação (Nível 6.3B/6.4): sem webhook e sem cron (Vercel Hobby
-  // não comporta cron frequente), o próprio painel aberto assume o papel de
-  // gatilho. Só para admin/dev, só depois do painel carregar, pausa quando a
-  // aba está oculta (document.hidden) e nunca sobrepõe uma verificação já em
-  // andamento (guard compartilhado com o botão manual acima).
+  // Auto-verificação (Guardião Pix — evolução do Nível 6.3B/6.4): sem
+  // webhook configurado no painel MP e sem cron frequente (Vercel Hobby não
+  // comporta), o próprio painel aberto assume o papel de gatilho. Só para
+  // admin/dev, só depois do painel carregar, pausa quando a aba está oculta
+  // (document.hidden) e nunca sobrepõe uma verificação já em andamento
+  // (guard compartilhado com o botão manual acima). O webhook continua
+  // sendo o caminho prioritário — este polling é fallback/conciliação.
   //
-  // Cadência adaptativa (Nível 6.4): enquanto houver Pix Mercado Pago
-  // pendente na lista atual, verifica a cada 20s (piso mínimo desta etapa —
-  // nunca mais agressivo); sem nenhum Pix MP pendente, volta para o
-  // intervalo leve de 2 minutos. Reavaliado a cada ciclo via setTimeout
-  // auto-reagendado (não setInterval fixo), sempre olhando pedidosRef.current
-  // no momento do agendamento — nunca precisa recriar o loop quando a lista
-  // muda.
+  // Cadência adaptativa (pixAutoCheckConfig.ts): 0-2min desde a criação do
+  // Pix → intervalo inicial configurável (10s por padrão, rollback via
+  // PIX_AUTO_CHECK_INITIAL_INTERVAL_MS=20000); 2-5min → 20s; acima de 5min →
+  // 30s; sem nenhum Pix MP pendente → 2 minutos. Um único timer para TODOS
+  // os pagamentos pendentes (nunca um timer por pagamento): usa o intervalo
+  // do mais urgente entre eles. Guardião Pix roda no mesmo ciclo (nunca um
+  // timer concorrente separado) para detectar e recuperar travamentos.
+  // Reavaliado a cada ciclo via setTimeout auto-reagendado (não setInterval
+  // fixo), sempre olhando pedidosRef.current no momento do agendamento —
+  // nunca precisa recriar o loop quando a lista muda.
   useEffect(() => {
     if (!isAdmin || loading) return
     let cancelado = false
@@ -770,11 +829,14 @@ export default function PedidosPage() {
 
     const agendarProxima = () => {
       if (cancelado) return
-      const intervalo = temPixMercadoPagoPendente(pedidosRef.current) ? INTERVALO_PIX_RAPIDO : INTERVALO_PIX_LENTO
+      const intervalo = calcularProximoIntervaloAutoVerificacaoPix(pedidosRef.current, Date.now())
       timeoutId = setTimeout(rodar, intervalo)
     }
     const rodar = async () => {
-      if (!document.hidden) await executarReconciliacaoPix(false)
+      if (!document.hidden) {
+        await executarReconciliacaoPix(false)
+        if (temPixMercadoPagoPendente(pedidosRef.current)) await executarGuardiaoPixPainel()
+      }
       agendarProxima()
     }
 

@@ -51,7 +51,8 @@ describe("/pedidos — auto-verificação de Pix Mercado Pago (Nível 6.3B/6.4)"
   });
 
   test("pausa quando a aba está oculta (document.hidden), mas continua reagendando o próximo ciclo", () => {
-    expect(corpoEfeito).toContain("if (!document.hidden) await executarReconciliacaoPix(false)");
+    expect(corpoEfeito).toContain("if (!document.hidden) {");
+    expect(corpoEfeito).toContain("await executarReconciliacaoPix(false)");
     expect(corpoEfeito).toContain("agendarProxima()");
   });
 
@@ -78,35 +79,39 @@ describe("/pedidos — auto-verificação de Pix Mercado Pago (Nível 6.3B/6.4)"
   });
 });
 
-describe("/pedidos — cadência adaptativa da auto-verificação (Nível 6.4)", () => {
-  test("define 20s como intervalo rápido e 2min como intervalo lento (constantes nomeadas, não mágicas)", () => {
-    expect(fonte).toContain("const INTERVALO_PIX_RAPIDO = 20_000");
-    expect(fonte).toContain("const INTERVALO_PIX_LENTO = 120_000");
+describe("/pedidos — cadência adaptativa da auto-verificação (Guardião Pix)", () => {
+  test("importa a cadência de pixAutoCheckConfig.ts — nenhuma constante mágica local de intervalo", () => {
+    expect(fonte).toMatch(/from ["']@\/lib\/pixAutoCheckConfig["']/);
+    expect(fonte).toContain("calcularIntervaloPorIdade");
+    expect(fonte).toContain("aplicarJitter");
+    expect(fonte).not.toContain("const INTERVALO_PIX_RAPIDO");
+    expect(fonte).not.toContain("const INTERVALO_PIX_LENTO");
   });
 
-  test("nunca usa um intervalo literal menor que 20 segundos no agendamento", () => {
-    // Único uso de setTimeout no arquivo é o do agendamento adaptativo —
-    // garante que não existe nenhum setTimeout(rodar, <valor menor que 20000>).
+  test("agenda o próximo ciclo usando calcularProximoIntervaloAutoVerificacaoPix (não um valor fixo)", () => {
     const chamadasSetTimeout = fonte.match(/setTimeout\(rodar,\s*([^)]+)\)/g) ?? [];
     expect(chamadasSetTimeout.length).toBeGreaterThan(0);
     for (const chamada of chamadasSetTimeout) {
-      expect(chamada).toContain("intervalo"); // usa a variável calculada, não um número solto
+      expect(chamada).toContain("intervalo");
     }
-    // A variável só pode assumir os dois valores nomeados — nenhum terceiro
-    // valor (menor) é atribuído a `intervalo` no agendamento.
-    expect(corpoEfeito).toMatch(/const intervalo = temPixMercadoPagoPendente\(pedidosRef\.current\) \? INTERVALO_PIX_RAPIDO : INTERVALO_PIX_LENTO/);
+    expect(corpoEfeito).toContain("const intervalo = calcularProximoIntervaloAutoVerificacaoPix(pedidosRef.current, Date.now())");
   });
 
-  test("com Pix Mercado Pago pendente na lista atual, agenda o próximo ciclo em INTERVALO_PIX_RAPIDO (20s)", () => {
-    expect(corpoEfeito).toContain("temPixMercadoPagoPendente(pedidosRef.current) ? INTERVALO_PIX_RAPIDO : INTERVALO_PIX_LENTO");
+  test("sem nenhum Pix Mercado Pago pendente, usa PIX_AUTO_CHECK_INTERVAL_SEM_PENDENTE_MS", () => {
+    const corpoFuncao = fonte.slice(
+      fonte.indexOf("function calcularProximoIntervaloAutoVerificacaoPix"),
+      fonte.indexOf("function calcularProximoIntervaloAutoVerificacaoPix") + 700
+    );
+    expect(corpoFuncao).toContain("if (pendentes.length === 0) return PIX_AUTO_CHECK_INTERVAL_SEM_PENDENTE_MS");
   });
 
-  test("sem Pix Mercado Pago pendente, cai para INTERVALO_PIX_LENTO (2min) — não fica verificando agressivamente", () => {
-    // mesma expressão ternária acima cobre os dois ramos; conferimos que o
-    // ramo "sem pendente" aponta para a constante lenta, não para a rápida.
-    const trecho = corpoEfeito.match(/temPixMercadoPagoPendente\(pedidosRef\.current\) \? (\w+) : (\w+)/);
-    expect(trecho?.[1]).toBe("INTERVALO_PIX_RAPIDO");
-    expect(trecho?.[2]).toBe("INTERVALO_PIX_LENTO");
+  test("com Pix Mercado Pago pendente, usa o intervalo do mais urgente (calcularIntervaloPorIdade) com jitter", () => {
+    const corpoFuncao = fonte.slice(
+      fonte.indexOf("function calcularProximoIntervaloAutoVerificacaoPix"),
+      fonte.indexOf("function calcularProximoIntervaloAutoVerificacaoPix") + 700
+    );
+    expect(corpoFuncao).toContain("calcularIntervaloPorIdade(");
+    expect(corpoFuncao).toContain("aplicarJitter(Math.min(...intervalos))");
   });
 
   test("temPixMercadoPagoPendente usa o mesmo critério de elegibilidade do backend (provider mercadopago + providerPaymentId + não confirmado)", () => {

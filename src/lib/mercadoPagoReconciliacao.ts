@@ -3,6 +3,7 @@ import { redis } from "./redis";
 import { buscarPagamentoMercadoPagoDetalhado, mapearStatusMercadoPago } from "./mercadoPagoWebhook";
 import { enviarTextoWhatsApp } from "./whatsappMensagem";
 import type { PedidoComPix } from "./pix";
+import { incrementarContadorPix } from "./pixMetricas";
 
 // Conciliador manual/sob-demanda do Pix Mercado Pago (Nivel 6.2A) — usado
 // enquanto nao ha webhook configurado no painel MP. Consulta a API do MP pelo
@@ -64,6 +65,33 @@ const LOTE_MAXIMO = 20;
 const CONCORRENCIA_MAXIMA = 3;
 const TIMEOUT_CONSULTA_MS = 5000;
 
+// Instrumentação por pedido (Guardião Pix) — última tentativa, última
+// resposta válida (não-erro, independente de aprovar) e falhas consecutivas.
+// Puramente observacional: nunca influencia se um pagamento é confirmado,
+// só alimenta a avaliação de saúde do Guardião (pixGuardiao.ts). TTL de 24h
+// é suficiente para qualquer janela de detecção usada pelo Guardião.
+const ULTIMA_TENTATIVA_PREFIXO = "pix:verificacao:ultimaTentativa:";
+const ULTIMO_SUCESSO_PREFIXO = "pix:verificacao:ultimoSucesso:";
+const FALHAS_CONSECUTIVAS_PREFIXO = "pix:verificacao:falhasConsecutivas:";
+const INSTRUMENTACAO_TTL_SEGUNDOS = 24 * 60 * 60;
+
+async function registrarTentativaVerificacao(pedidoId: string, sucesso: boolean): Promise<void> {
+  try {
+    const agora = Date.now().toString();
+    await redis.set(`${ULTIMA_TENTATIVA_PREFIXO}${pedidoId}`, agora, { ex: INSTRUMENTACAO_TTL_SEGUNDOS });
+    if (sucesso) {
+      await redis.set(`${ULTIMO_SUCESSO_PREFIXO}${pedidoId}`, agora, { ex: INSTRUMENTACAO_TTL_SEGUNDOS });
+      await redis.set(`${FALHAS_CONSECUTIVAS_PREFIXO}${pedidoId}`, "0", { ex: INSTRUMENTACAO_TTL_SEGUNDOS });
+    } else {
+      const chave = `${FALHAS_CONSECUTIVAS_PREFIXO}${pedidoId}`;
+      const atual = Number((await redis.get<string | number>(chave)) || 0);
+      await redis.set(chave, String(atual + 1), { ex: INSTRUMENTACAO_TTL_SEGUNDOS });
+    }
+  } catch {
+    // Observabilidade nunca pode impedir a reconciliação de seguir.
+  }
+}
+
 // Nível 6.6A — notificação ao cliente WhatsApp quando o conciliador confirma
 // o Pix. Duas chaves distintas por pedido:
 // - lock curto (NX + TTL curto): evita duplicidade entre chamadas concorrentes
@@ -100,6 +128,35 @@ async function liberarLockSeDono(lockId: string): Promise<void> {
 
 function resumoVazio(): ResumoReconciliacaoPix {
   return { verificados: 0, confirmados: 0, pendentes: 0, ignorados: 0, erros: 0, detalhes: [] };
+}
+
+// Leitura (só leitura) da instrumentação acima, usada pelo Guardião Pix para
+// avaliar saúde sem duplicar nenhum estado próprio de tentativa.
+export type EstadoVerificacaoPix = {
+  ultimaTentativaMs: number | null;
+  ultimoSucessoMs: number | null;
+  falhasConsecutivas: number;
+};
+
+export async function obterEstadoVerificacaoPix(pedidoId: string): Promise<EstadoVerificacaoPix> {
+  const [ultimaTentativa, ultimoSucesso, falhas] = await Promise.all([
+    redis.get<string>(`${ULTIMA_TENTATIVA_PREFIXO}${pedidoId}`),
+    redis.get<string>(`${ULTIMO_SUCESSO_PREFIXO}${pedidoId}`),
+    redis.get<string | number>(`${FALHAS_CONSECUTIVAS_PREFIXO}${pedidoId}`),
+  ]);
+  return {
+    ultimaTentativaMs: ultimaTentativa ? Number(ultimaTentativa) : null,
+    ultimoSucessoMs: ultimoSucesso ? Number(ultimoSucesso) : null,
+    falhasConsecutivas: Number(falhas || 0),
+  };
+}
+
+// Só leitura: nunca apaga nem cria o lock — o Guardião usa isto apenas para
+// classificar saúde ("recovering" quando alguém já está processando). A
+// posse/liberação do lock continua 100% dentro desta função, via
+// compare-and-delete atômico (liberarLockSeDono).
+export async function lockReconciliacaoAtivo(): Promise<boolean> {
+  return !!(await redis.get(LOCK_KEY));
 }
 
 function emCentavos(valor: number): number {
@@ -215,7 +272,15 @@ async function consultarComTimeout(paymentId: string) {
   }
 }
 
-export async function reconciliarPixMercadoPago(): Promise<ResumoReconciliacaoPix> {
+export type ReconciliarPixOpts = {
+  // Restringe a rodada a pedidos específicos (usado pelo Guardião Pix para
+  // recolocar um pagamento travado na fila sem esperar o próximo ciclo do
+  // lote completo). Ausente/omitido = comportamento padrão (todos os
+  // elegíveis), igual a antes desta mudança.
+  apenasPedidoIds?: string[];
+};
+
+export async function reconciliarPixMercadoPago(opts?: ReconciliarPixOpts): Promise<ResumoReconciliacaoPix> {
   // Cooldown global de rate limit primeiro — nem tenta o lock nem lê pedidos
   // se uma rodada recente já tomou 429 do Mercado Pago.
   const emCooldownGlobal = await redis.get(COOLDOWN_RATE_LIMIT_KEY);
@@ -234,7 +299,10 @@ export async function reconciliarPixMercadoPago(): Promise<ResumoReconciliacaoPi
 
   try {
     const pedidos = (await redis.get<PedidoReconciliavel[]>("pedidos")) || [];
-    const elegiveis = selecionarPedidosPixMercadoPagoPendentes(pedidos);
+    const idsFiltro = opts?.apenasPedidoIds?.length ? new Set(opts.apenasPedidoIds) : null;
+    const elegiveis = selecionarPedidosPixMercadoPagoPendentes(pedidos).filter(
+      (p) => !idsFiltro || idsFiltro.has(p.id as string)
+    );
 
     const resumo: ResumoReconciliacaoPix = resumoVazio();
     if (elegiveis.length === 0) {
@@ -260,6 +328,7 @@ export async function reconciliarPixMercadoPago(): Promise<ResumoReconciliacaoPi
     let atualizados = pedidos;
     let mudou = false;
     let rateLimited = false;
+    const idsConfirmadosNestaRodada = new Set<string>();
 
     for (const grupo of chunk(lote, CONCORRENCIA_MAXIMA)) {
       if (rateLimited) break;
@@ -279,16 +348,19 @@ export async function reconciliarPixMercadoPago(): Promise<ResumoReconciliacaoPi
 
       for (const { pedido, pedidoId, resultado } of resultados) {
         resumo.verificados++;
+        await registrarTentativaVerificacao(pedidoId, resultado.ok);
 
         if (!resultado.ok) {
           if (resultado.status === 429) {
             rateLimited = true;
             resumo.erros++;
             resumo.detalhes.push({ pedidoId, outcome: "erro", motivo: "rate_limited" });
+            await incrementarContadorPix("rate_limited");
             continue;
           }
           resumo.erros++;
           resumo.detalhes.push({ pedidoId, outcome: "erro", motivo: resultado.motivo });
+          if (resultado.motivo === "timeout") await incrementarContadorPix("timeout");
           await redis.set(`${COOLDOWN_PEDIDO_PREFIXO}${pedidoId}`, "1", { ex: COOLDOWN_PEDIDO_TTL_SEGUNDOS });
           continue;
         }
@@ -353,6 +425,7 @@ export async function reconciliarPixMercadoPago(): Promise<ResumoReconciliacaoPi
           },
         };
         mudou = true;
+        idsConfirmadosNestaRodada.add(pedidoId);
 
         resumo.confirmados++;
         resumo.detalhes.push({ pedidoId, outcome: "confirmado" });
@@ -364,13 +437,36 @@ export async function reconciliarPixMercadoPago(): Promise<ResumoReconciliacaoPi
       await redis.set(COOLDOWN_RATE_LIMIT_KEY, "1", { ex: COOLDOWN_RATE_LIMIT_TTL_SEGUNDOS });
     }
 
-    if (mudou) await redis.set("pedidos", atualizados);
+    // Persistência com merge por id (Guardião Pix — corrida webhook x
+    // polling): em vez de sobrescrever "pedidos" com o snapshot lido no
+    // início da rodada (que pode estar desatualizado se o webhook ou a
+    // confirmação manual gravaram nesse meio-tempo), relê o estado mais
+    // recente e aplica só o patch dos pedidos que ESTA rodada confirmou —
+    // e, mesmo assim, nunca sobre um pedido que essa releitura já mostra
+    // confirmado por outro caminho ("primeira confirmação vence").
+    let resultadoFinal = atualizados;
+    if (mudou) {
+      const maisRecente = (await redis.get<PedidoReconciliavel[]>("pedidos")) || atualizados;
+      const idsComDuplicidadeEvitada: string[] = [];
+      resultadoFinal = maisRecente.map((p) => {
+        const id = p.id as string;
+        if (!idsConfirmadosNestaRodada.has(id)) return p;
+        if (p.pixConfirmado === true || p.pix?.status === "confirmado") {
+          idsComDuplicidadeEvitada.push(id);
+          return p;
+        }
+        const patch = atualizados.find((a) => a.id === id);
+        return patch || p;
+      });
+      await redis.set("pedidos", resultadoFinal);
+      await Promise.all(idsComDuplicidadeEvitada.map(() => incrementarContadorPix("duplicidade_evitada")));
+    }
 
     // Notificação Nível 6.6A — roda só APÓS persistir a confirmação, e nunca
     // pode afetar `resumo`/`atualizados`. Cobre tanto os pedidos recém
     // confirmados nesta rodada quanto retries de rodadas anteriores cuja
     // notificação tinha falhado.
-    await notificarConfirmadosWhatsApp(atualizados);
+    await notificarConfirmadosWhatsApp(resultadoFinal);
 
     return resumo;
   } finally {
