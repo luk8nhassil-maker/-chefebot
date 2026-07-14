@@ -177,14 +177,19 @@ describe("metadados internos de Pix", () => {
   test("erro do Mercado Pago mantem fallback Pix interno", async () => {
     vi.stubEnv("PIX_PROVIDER", "mercadopago");
     criarCobrancaPixMercadoPagoMock.mockRejectedValue(new Error("mp fora"));
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     const pix = criarPixMetadata("123", "Pix", 50);
     const resultado = await prepararPixProviderMercadoPago({ pedidoId: "123", pix });
 
     expect(resultado).toEqual(pix);
     expect(resultado?.provider).toBeUndefined();
-    warnSpy.mockRestore();
+    // Nivel 6.7: erro estruturado com pedidoId e motivo, sem expor token.
+    expect(errorSpy).toHaveBeenCalledWith(
+      "[Pix] Falha ao criar cobranca Mercado Pago — usando Pix manual",
+      { pedidoId: "123", motivo: "mp fora" }
+    );
+    errorSpy.mockRestore();
   });
 
   test("pedido sem Pix nao chama Mercado Pago", async () => {
