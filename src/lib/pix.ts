@@ -34,6 +34,12 @@ export type PixMetadata = {
   status?: PixStatus;
   confirmadoPor?: PixConfirmadoPor;
   confirmadoEm?: string;
+  // Identidade da sessão autenticada que confirmou manualmente (Kellyne, Brito etc.)
+  // — só preenchido quando confirmadoPor === "manual" e nunca sobrescrito depois,
+  // pela mesma regra de "primeira confirmação vence" de confirmarPixMetadata.
+  confirmadoPorNome?: string;
+  confirmadoPorUsuario?: string;
+  confirmadoPorRole?: string;
   evidencia?: PixEvidencia;
   provider?: "mercadopago";
   providerPaymentId?: string;
@@ -41,6 +47,14 @@ export type PixMetadata = {
   qrCodeBase64?: string;
   ticketUrl?: string;
   idempotencyKey?: string;
+};
+
+// Identidade da sessão autenticada (nunca um nome enviado livremente pelo
+// frontend) usada para auditar quem confirmou o Pix manualmente.
+export type PixConfirmacaoIdentidade = {
+  usuario: string;
+  nome: string;
+  role: string;
 };
 
 export type PixWebhookPayload = {
@@ -110,14 +124,23 @@ export function gerarTxidPixInterno(pedidoId: string): string {
 export function confirmarPixMetadata(
   pix: PixMetadata | undefined,
   confirmadoPor: PixConfirmadoPor,
-  confirmadoEm: string = new Date().toISOString()
+  confirmadoEm: string = new Date().toISOString(),
+  identidade?: PixConfirmacaoIdentidade
 ): PixMetadata {
   if (pix?.status === "confirmado" && pix.confirmadoPor) return pix;
+  const jaTinhaOrigem = !!pix?.confirmadoPor;
   return {
     ...(pix || {}),
     status: "confirmado",
     confirmadoPor: pix?.confirmadoPor || confirmadoPor,
     confirmadoEm: pix?.confirmadoEm || confirmadoEm,
+    ...(identidade && !jaTinhaOrigem
+      ? {
+          confirmadoPorNome: identidade.nome,
+          confirmadoPorUsuario: identidade.usuario,
+          confirmadoPorRole: identidade.role,
+        }
+      : {}),
   };
 }
 
