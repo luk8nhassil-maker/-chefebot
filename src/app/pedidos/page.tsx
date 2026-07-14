@@ -28,7 +28,16 @@ type Pedido = {
   pagamento?: string
   troco?: string
   pixConfirmado?: boolean
-  pix?: { status?: string; confirmadoPor?: string; confirmadoEm?: string; evidencia?: { motivos?: string[] }; provider?: string; providerPaymentId?: string }
+  pix?: {
+    status?: string
+    confirmadoPor?: string
+    confirmadoEm?: string
+    confirmadoPorNome?: string
+    valorEsperado?: number
+    evidencia?: { motivos?: string[] }
+    provider?: string
+    providerPaymentId?: string
+  }
   tipoEntrega?: string
   horarioInicio?: string
   horarioEntrega?: string
@@ -78,6 +87,30 @@ function labelPixRevisaoOuSuspeito(p: Pick<Pedido, "pix">): string | null {
 }
 function motivoResumidoPix(p: Pick<Pedido, "pix">): string | undefined {
   return p.pix?.evidencia?.motivos?.[0]
+}
+// Reaproveita dados já existentes (status em_revisao/suspeito/comprovante_recebido
+// ou qualquer evidência já registrada pelo bot) para sinalizar "comprovante
+// recebido, mas ainda não validado" — não é um estado novo, só uma leitura
+// diferente do mesmo pix.status/pix.evidencia que já existe hoje.
+function pixTemComprovanteNaoValidado(p: Pick<Pedido, "pix" | "pixConfirmado">): boolean {
+  if (p.pixConfirmado) return false
+  const status = p.pix?.status
+  if (status === "em_revisao" || status === "suspeito" || status === "comprovante_recebido") return true
+  const ev = p.pix?.evidencia
+  return !!(ev && ev.motivos?.length)
+}
+function formatarValorReais(v?: number): string {
+  return typeof v === "number" && Number.isFinite(v) ? `R$ ${v.toFixed(2).replace(".", ",")}` : "—"
+}
+function formatarDataHoraBR(iso?: string): string {
+  if (!iso) return "—"
+  try {
+    const d = new Date(iso)
+    if (Number.isNaN(d.getTime())) return "—"
+    const data = d.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" })
+    const hora = d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" })
+    return `${data} às ${hora}`
+  } catch { return "—" }
 }
 // Mesmo critério de elegibilidade usado no backend (elegivelParaReconciliacao
 // em mercadoPagoReconciliacao.ts) — só para decidir a cadência da
@@ -301,6 +334,45 @@ export default function PedidosPage() {
   const [modalAlterarStatus, setModalAlterarStatus] = useState<string | null>(null)
   const [cancelandoId, setCancelandoId] = useState<string | null>(null)
   const [confirmPixModal, setConfirmPixModal] = useState<string | null>(null)
+  const [pixChecklist, setPixChecklist] = useState({ conferiu: false, valorBate: false, clienteCorreto: false })
+  const [pixSenha, setPixSenha] = useState("")
+  const [pixSenhaVisivel, setPixSenhaVisivel] = useState(false)
+  const [pixConfirmando, setPixConfirmando] = useState(false)
+  const [pixErro, setPixErro] = useState<string | null>(null)
+  const pixModalRef = useRef<HTMLDivElement | null>(null)
+  const pixSenhaInputRef = useRef<HTMLInputElement | null>(null)
+  const pixConfirmandoRef = useRef(false)
+  useEffect(() => { pixConfirmandoRef.current = pixConfirmando }, [pixConfirmando])
+
+  // Acessibilidade do modal de segurança: foco inicial no diálogo, Tab preso
+  // dentro dele, Escape fecha sem confirmar (exceto durante o envio).
+  useEffect(() => {
+    if (!confirmPixModal) return
+    pixModalRef.current?.focus()
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault()
+        if (pixConfirmandoRef.current) return
+        setConfirmPixModal(null)
+        setPixChecklist({ conferiu: false, valorBate: false, clienteCorreto: false })
+        setPixSenha("")
+        setPixSenhaVisivel(false)
+        setPixErro(null)
+        return
+      }
+      if (e.key !== "Tab") return
+      const container = pixModalRef.current
+      if (!container) return
+      const focusables = container.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), [tabindex]:not([tabindex="-1"])')
+      if (focusables.length === 0) return
+      const first = focusables[0]
+      const last = focusables[focusables.length - 1]
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus() }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus() }
+    }
+    document.addEventListener("keydown", onKeyDown)
+    return () => document.removeEventListener("keydown", onKeyDown)
+  }, [confirmPixModal])
   const [finalizarModal, setFinalizarModal] = useState<string | null>(null)
   const [simpleToast, setSimpleToast] = useState("")
   const [arquivandoConversa, setArquivandoConversa] = useState<string | null>(null)
@@ -1047,15 +1119,66 @@ export default function PedidosPage() {
     simpleToastTimerRef.current = setTimeout(() => setSimpleToast(""), 3500)
   }
 
+  const abrirVerificacaoPix = (id: string) => {
+    setPixChecklist({ conferiu: false, valorBate: false, clienteCorreto: false })
+    setPixSenha("")
+    setPixSenhaVisivel(false)
+    setPixErro(null)
+    setConfirmPixModal(id)
+  }
+  const fecharVerificacaoPix = () => {
+    if (pixConfirmando) return
+    setConfirmPixModal(null)
+    setPixChecklist({ conferiu: false, valorBate: false, clienteCorreto: false })
+    setPixSenha("")
+    setPixSenhaVisivel(false)
+    setPixErro(null)
+  }
+  const checklistCompleto = pixChecklist.conferiu && pixChecklist.valorBate && pixChecklist.clienteCorreto
+  const podeConfirmarPix = checklistCompleto && pixSenha.length > 0 && !pixConfirmando
+
   const confirmarPixManual = async (id: string) => {
+    if (!podeConfirmarPix) return
+    setPixConfirmando(true)
+    setPixErro(null)
     try {
-      const r = await fetch("/api/orders", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, pixConfirmado: true }) })
+      const r = await fetch("/api/orders/confirmar-pix-manual", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, senha: pixSenha }),
+      })
+      const data = await r.json().catch(() => ({}))
       if (r.ok) {
-        setPedidos(prev => prev.map(p => p.id === id ? { ...p, pixConfirmado: true } : p))
-        setConfirmPixModal(null)
-        showSimpleToast("Pix confirmado manualmente. Nenhuma mensagem foi enviada.")
+        setPedidos(prev => prev.map(p => p.id === id ? {
+          ...p,
+          pixConfirmado: true,
+          pix: { ...p.pix, status: "confirmado", confirmadoPor: data.confirmadoPor || "manual", confirmadoEm: data.confirmadoEm, confirmadoPorNome: data.confirmadoPorNome },
+        } : p))
+        showSimpleToast(`PAGAMENTO CONFIRMADO COM SEGURANÇA — ${formatarValorReais(data.valorConfirmado)} foi registrado como recebido.`)
+        setPixConfirmando(false)
+        fecharVerificacaoPix()
+        return
       }
-    } catch {}
+      if (r.status === 409) {
+        // Corrida com a confirmação automática (webhook/conciliador): ela venceu,
+        // então só refletimos o estado real e fechamos — nunca duplicamos.
+        setPedidos(prev => prev.map(p => p.id === id && data.pedido ? { ...p, ...data.pedido } : p))
+        setPixErro(data.error || "Este pagamento já foi confirmado.")
+        setPixConfirmando(false)
+        setTimeout(fecharVerificacaoPix, 1800)
+        return
+      }
+      if (r.status === 401) {
+        setPixErro(data.error || "Senha incorreta. O pagamento não foi confirmado.")
+        setPixConfirmando(false)
+        return
+      }
+      setPixErro(data.error || "Não foi possível confirmar agora. Verifique a conexão e tente novamente.")
+      setPixConfirmando(false)
+    } catch {
+      setPixErro("Não foi possível confirmar agora. Verifique a conexão e tente novamente.")
+      setPixConfirmando(false)
+    }
   }
 
   const finalizarPedidoSilencioso = async (id: string) => {
@@ -1191,22 +1314,84 @@ export default function PedidosPage() {
               <span>Total</span><span>R$ {p.total.toFixed(2).replace(".", ",")}</span>
             </div>
           </div>
+        ) : isPix && !isCanceled ? (
+          p.pixConfirmado ? (
+            p.pix?.confirmadoPor === "manual" ? (
+              <div style={{ background: "color-mix(in srgb, var(--success) 10%, transparent)", border: "1.5px solid color-mix(in srgb, var(--success) 35%, transparent)", borderRadius: 14, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 6 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="4" stroke="var(--success)" strokeWidth="2"/><path d="M4 21c0-4 3.6-6 8-6s8 2 8 6" stroke="var(--success)" strokeWidth="2" strokeLinecap="round"/><path d="M9 12l2 2 4-4" stroke="var(--success)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                  <span style={{ fontSize: 12, fontWeight: 900, color: "var(--success)", textTransform: "uppercase", letterSpacing: ".6px" }}>Pagamento confirmado manualmente</span>
+                </div>
+                <div style={{ fontSize: 22, fontWeight: 900, color: "var(--foreground)" }}>{formatarValorReais(p.pix?.valorEsperado ?? p.total)}</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "var(--foreground-secondary)", lineHeight: 1.5 }}>
+                  Confirmado manualmente por <strong>{p.pix?.confirmadoPorNome || "atendente"}</strong> em {formatarDataHoraBR(p.pix?.confirmadoEm)}.
+                </div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "var(--foreground-muted)" }}>Origem: painel /pedidos · Pedido {p.numero != null ? `#${p.numero}` : p.id}</div>
+              </div>
+            ) : (
+              <div style={{ background: "color-mix(in srgb, var(--success) 10%, transparent)", border: "1.5px solid color-mix(in srgb, var(--success) 35%, transparent)", borderRadius: 14, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 6 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 2l7 3v6c0 5-3.2 8.4-7 9.7C8.2 19.4 5 16 5 11V5l7-3z" stroke="var(--success)" strokeWidth="2" strokeLinejoin="round"/><path d="M9 12l2 2 4-4" stroke="var(--success)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                  <span style={{ fontSize: 12, fontWeight: 900, color: "var(--success)", textTransform: "uppercase", letterSpacing: ".6px" }}>Pagamento confirmado automaticamente</span>
+                </div>
+                <div style={{ fontSize: 22, fontWeight: 900, color: "var(--foreground)" }}>{formatarValorReais(p.pix?.valorEsperado ?? p.total)}</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "var(--foreground-secondary)" }}>
+                  {p.pix?.confirmadoPor === "comprovante" ? "Confirmado por comprovante validado." : "Mercado Pago confirmou a entrada deste valor."}
+                  {p.pix?.confirmadoEm ? ` ${formatarDataHoraBR(p.pix.confirmadoEm)}.` : ""}
+                </div>
+              </div>
+            )
+          ) : (
+            <div style={{ background: "var(--attention-surface)", border: "1.5px solid var(--attention-border)", borderRadius: 14, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="var(--attention-text)" strokeWidth="2"/><path d="M12 7v6l4 2" stroke="var(--attention-text)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                <span style={{ fontSize: 13, fontWeight: 900, color: "var(--attention-text)", textTransform: "uppercase", letterSpacing: ".6px" }}>PIX ainda não confirmado</span>
+              </div>
+              <div style={{ fontSize: 13, fontWeight: 800, color: "var(--attention-text)", lineHeight: 1.5 }}>Não libere este pedido antes de conferir a entrada do dinheiro.</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4, background: "rgba(var(--overlay-rgb), 0.04)", borderRadius: 10, padding: "10px 12px" }}>
+                <Row label="Valor esperado" value={formatarValorReais(p.pix?.valorEsperado ?? p.total)} />
+                <Row label="Cliente" value={p.cliente} />
+                <Row label="Pedido" value={p.numero != null ? `#${p.numero}` : p.id} />
+                <Row label="Provider" value={p.pix?.provider === "mercadopago" ? "Mercado Pago" : "Pix manual"} />
+                <Row label="Criado às" value={p.horario} />
+                <Row label="Status atual" value="Ainda não confirmado pelo sistema" />
+              </div>
+              {pixTemComprovanteNaoValidado(p) && (
+                <div style={{ background: p.pix?.status === "suspeito" ? "color-mix(in srgb, var(--danger) 12%, transparent)" : "color-mix(in srgb, var(--attention-text) 12%, transparent)", border: `1px solid ${p.pix?.status === "suspeito" ? "var(--danger)" : "var(--attention-border)"}`, borderRadius: 10, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 3 }}>
+                  <span style={{ fontSize: 12, fontWeight: 900, color: p.pix?.status === "suspeito" ? "var(--danger)" : "var(--attention-text)", textTransform: "uppercase", letterSpacing: ".4px" }}>Comprovante recebido</span>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: "var(--foreground-secondary)" }}>Confira no banco ou Mercado Pago se o dinheiro realmente entrou.</span>
+                  <span style={{ fontSize: 11, fontWeight: 800, color: "var(--foreground-muted)" }}>Comprovante não é confirmação de pagamento.</span>
+                </div>
+              )}
+              {!isDone && (
+                <>
+                  <button onClick={() => abrirVerificacaoPix(p.id)} style={{ height: 48, border: "none", borderRadius: 12, background: "var(--attention-text)", color: "var(--background)", fontSize: 14, fontWeight: 900, letterSpacing: ".2px" }}>
+                    VERIFICAR PAGAMENTO
+                  </button>
+                  <span style={{ fontSize: 10, fontWeight: 800, color: "var(--foreground-muted)", textAlign: "center", textTransform: "uppercase", letterSpacing: ".4px" }}>Ação manual de exceção</span>
+                </>
+              )}
+            </div>
+          )
         ) : (
           <div>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 700, color: "var(--foreground-secondary)" }}>
                 <span style={{ width: 8, height: 8, borderRadius: 2, background: payDot, flexShrink: 0 }} />
                 {pagamento || "Pagamento não informado"}
-                {p.pixConfirmado && <span style={{ fontSize: 11, color: "var(--success)", fontWeight: 800 }}>{labelPixConfirmado(p)}</span>}
-                {!p.pixConfirmado && labelPixRevisaoOuSuspeito(p) && (
-                  <span style={{ fontSize: 11, color: p.pix?.status === "suspeito" ? "var(--danger)" : "var(--attention-text)", fontWeight: 800 }}>{labelPixRevisaoOuSuspeito(p)}</span>
-                )}
               </div>
               <span style={{ fontSize: 15, fontWeight: 900, color: "var(--foreground)" }}>R$ {p.total.toFixed(2).replace(".", ",")}</span>
             </div>
-            {!p.pixConfirmado && motivoResumidoPix(p) && (
-              <div style={{ marginTop: 6, fontSize: 11, fontWeight: 700, color: "var(--foreground-secondary)" }}>{motivoResumidoPix(p)}</div>
-            )}
+          </div>
+        )}
+
+        {/* Verificar pagamento — pagamento misto com Pix ainda não confirmado (breakdown acima não é alterado) */}
+        {hibridoParts && isPix && !p.pixConfirmado && !isDone && !isCanceled && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <button onClick={() => abrirVerificacaoPix(p.id)} style={{ height: 46, border: "1px solid var(--attention-border)", borderRadius: 14, background: "var(--attention-surface)", color: "var(--attention-text)", fontSize: 14, fontWeight: 900, flexShrink: 0 }}>
+              VERIFICAR PAGAMENTO
+            </button>
+            <span style={{ fontSize: 10, fontWeight: 800, color: "var(--foreground-muted)", textAlign: "center", textTransform: "uppercase", letterSpacing: ".4px" }}>Ação manual de exceção</span>
           </div>
         )}
 
@@ -1236,13 +1421,6 @@ export default function PedidosPage() {
           </button>
         )}
         {isDone && <div style={{ height: 54, borderRadius: 16, background: "color-mix(in srgb, var(--success) 10%, transparent)", border: "1px solid color-mix(in srgb, var(--success) 30%, transparent)", color: "var(--success)", fontSize: 15, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>Entregue · tudo certo ✓</div>}
-
-        {/* Confirmar Pix no detalhe */}
-        {isPix && !p.pixConfirmado && !isDone && (
-          <button onClick={() => { setDetailId(null); setConfirmPixModal(p.id) }} style={{ height: 46, border: "1px solid color-mix(in srgb, var(--primary) 35%, transparent)", borderRadius: 14, background: "color-mix(in srgb, var(--primary) 8%, transparent)", color: "var(--brand-text)", fontSize: 14, fontWeight: 900, flexShrink: 0 }}>
-            Confirmar Pix recebido
-          </button>
-        )}
 
         {/* Finalizar no detalhe */}
         {!isDone && !isCanceled && (
@@ -1906,10 +2084,13 @@ export default function PedidosPage() {
                         >🚨 Assumir conversa</button>
                       )}
                       {!pedido.escalonado && pixPendente && (
-                        <button
-                          onClick={() => setConfirmPixModal(pedido.id)}
-                          style={{ height: 30, padding: "0 14px", border: "1px solid color-mix(in srgb, var(--primary) 35%, transparent)", borderRadius: 8, background: "color-mix(in srgb, var(--primary) 8%, transparent)", color: "var(--brand-text)", fontSize: 12, fontWeight: 900 }}
-                        >Confirmar Pix recebido</button>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 2, alignItems: "flex-start" }}>
+                          <button
+                            onClick={() => abrirVerificacaoPix(pedido.id)}
+                            style={{ height: 30, padding: "0 14px", border: "1px solid var(--attention-border)", borderRadius: 8, background: "var(--attention-surface)", color: "var(--attention-text)", fontSize: 12, fontWeight: 900 }}
+                          >VERIFICAR PAGAMENTO</button>
+                          <span style={{ fontSize: 9, fontWeight: 800, color: "var(--foreground-muted)", textTransform: "uppercase", letterSpacing: ".3px" }}>Ação manual de exceção</span>
+                        </div>
                       )}
                       {!pedido.escalonado && !pixPendente && !isDone && !isCanceled && nextStatus && (
                         <button
@@ -2103,24 +2284,152 @@ export default function PedidosPage() {
           </>
         )}
 
-      {/* Modal Confirmar Pix */}
-      {confirmPixModal && (
-        <>
-          <div onClick={() => setConfirmPixModal(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.7)", zIndex: 70, animation: "cbFadeIn .2s ease both" }} />
-          <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, margin: "0 auto", maxWidth: 480, background: "var(--background)", border: "1px solid var(--surface-secondary)", borderBottom: "none", borderRadius: "26px 26px 0 0", zIndex: 71, animation: "cbSheetUp .32s cubic-bezier(.2,.9,.3,1) both", padding: "20px 20px 36px", display: "flex", flexDirection: "column", gap: 16 }}>
-            <div style={{ width: 44, height: 5, borderRadius: 3, background: "var(--surface-elevated)", margin: "0 auto 4px" }} />
-            <div style={{ width: 48, height: 48, borderRadius: 14, background: "color-mix(in srgb, var(--primary) 10%, transparent)", border: "1px solid color-mix(in srgb, var(--primary) 25%, transparent)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="var(--primary)" strokeWidth="2.2"/><polyline points="12,6 12,12 16,14" stroke="var(--primary)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+      {/* Modal de segurança — Verificar pagamento Pix manualmente */}
+      {confirmPixModal && (() => {
+        const pedidoModal = pedidos.find(p => p.id === confirmPixModal)
+        if (!pedidoModal) return null
+        const valorEsperado = pedidoModal.pix?.valorEsperado ?? pedidoModal.total
+        const valorFormatado = formatarValorReais(valorEsperado)
+        const checklistItens: Array<{ chave: keyof typeof pixChecklist; texto: string }> = [
+          { chave: "conferiu", texto: "Conferi a entrada do dinheiro no banco ou Mercado Pago." },
+          { chave: "valorBate", texto: `O valor recebido é exatamente ${valorFormatado}.` },
+          { chave: "clienteCorreto", texto: `O pagamento corresponde ao cliente ${pedidoModal.cliente} e a este pedido.` },
+        ]
+        const faltando: string[] = []
+        if (!checklistCompleto) faltando.push("marcar os três itens do checklist")
+        if (!pixSenha) faltando.push("digitar sua senha")
+        return (
+          <>
+            <div onClick={fecharVerificacaoPix} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.8)", zIndex: 300, animation: "cbFadeIn .2s ease both" }} />
+            <div
+              ref={pixModalRef}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="pix-modal-titulo"
+              tabIndex={-1}
+              style={{
+                position: "fixed", inset: 0, zIndex: 301, display: "flex", alignItems: "flex-end", justifyContent: "center",
+                padding: 0, outline: "none",
+              }}
+            >
+              <div style={{
+                width: "100%", maxWidth: 560, maxHeight: "92vh", overflowY: "auto",
+                background: "var(--background)", border: "1.5px solid var(--attention-border)",
+                borderBottom: "none", borderRadius: "26px 26px 0 0",
+                animation: "cbSheetUp .32s cubic-bezier(.2,.9,.3,1) both",
+                padding: "22px 22px 32px", display: "flex", flexDirection: "column", gap: 18,
+                boxSizing: "border-box",
+              }}>
+                <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+                  <div style={{ width: 44, height: 5, borderRadius: 3, background: "var(--surface-elevated)", margin: "0 auto" }} />
+                  <button
+                    onClick={fecharVerificacaoPix}
+                    aria-label="Fechar sem confirmar"
+                    disabled={pixConfirmando}
+                    style={{ position: "absolute", top: 16, right: 16, width: 36, height: 36, border: "none", borderRadius: 10, background: "rgba(var(--overlay-rgb), 0.06)", color: "var(--foreground-secondary)", fontSize: 18, fontWeight: 900, cursor: pixConfirmando ? "not-allowed" : "pointer" }}
+                  >✕</button>
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: 8, textAlign: "center" }}>
+                  <div style={{ fontSize: 32, lineHeight: 1 }} aria-hidden="true">⚠️</div>
+                  <h2 id="pix-modal-titulo" style={{ margin: 0, fontSize: 24, fontWeight: 900, letterSpacing: "-0.6px", lineHeight: 1.15 }}>O DINHEIRO JÁ ENTROU NA CONTA?</h2>
+                  <p style={{ margin: 0, fontSize: 15, fontWeight: 800, color: "var(--attention-text)" }}>Este Pix ainda NÃO foi confirmado pelo banco.</p>
+                </div>
+
+                <div style={{ background: "var(--attention-surface)", border: "1.5px solid var(--attention-border)", borderRadius: 14, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 6 }}>
+                  <p style={{ margin: 0, fontSize: 14, fontWeight: 900, color: "var(--attention-text)", lineHeight: 1.5 }}>Não confirme apenas porque o cliente enviou um comprovante.</p>
+                  <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: "var(--attention-text)", lineHeight: 1.5 }}>Abra o banco ou Mercado Pago e confira se o valor realmente entrou antes de continuar.</p>
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: 8, background: "var(--surface)", border: "1px solid var(--surface-secondary)", borderRadius: 14, padding: "14px 16px" }}>
+                  <Row label="Pedido" value={pedidoModal.numero != null ? `#${pedidoModal.numero}` : pedidoModal.id} />
+                  <Row label="Cliente" value={pedidoModal.cliente} />
+                  <Row label="Pagamento" value="Pix" />
+                  <Row label="Provider" value={pedidoModal.pix?.provider === "mercadopago" ? "Mercado Pago" : "Pix manual"} />
+                  <Row label="Status" value="Ainda não confirmado" />
+                  <Row label="Pedido criado às" value={pedidoModal.horario} />
+                  <div style={{ borderTop: "1px solid var(--surface-secondary)", marginTop: 4, paddingTop: 10, display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
+                    <span style={{ fontSize: 11, fontWeight: 900, color: "var(--foreground-muted)", textTransform: "uppercase", letterSpacing: ".6px" }}>Valor esperado</span>
+                    <span style={{ fontSize: 34, fontWeight: 900, letterSpacing: "-0.8px", color: "var(--foreground)" }}>{valorFormatado}</span>
+                  </div>
+                </div>
+
+                <fieldset style={{ border: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 12 }}>
+                  <legend style={{ fontSize: 12, fontWeight: 900, color: "var(--foreground-muted)", textTransform: "uppercase", letterSpacing: ".6px", padding: 0, marginBottom: 2 }}>Checklist obrigatório</legend>
+                  {checklistItens.map(item => (
+                    <label key={item.chave} style={{ display: "flex", alignItems: "flex-start", gap: 12, cursor: "pointer", padding: "4px 0" }}>
+                      <input
+                        type="checkbox"
+                        checked={pixChecklist[item.chave]}
+                        onChange={e => setPixChecklist(prev => ({ ...prev, [item.chave]: e.target.checked }))}
+                        style={{ width: 22, height: 22, marginTop: 1, flexShrink: 0, accentColor: "var(--attention-text)" }}
+                      />
+                      <span style={{ fontSize: 14, fontWeight: 700, color: "var(--foreground)", lineHeight: 1.5 }}>{item.texto}</span>
+                    </label>
+                  ))}
+                </fieldset>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <label htmlFor="pix-senha-input" style={{ fontSize: 13, fontWeight: 800, color: "var(--foreground)", lineHeight: 1.5 }}>
+                    Digite sua senha para autorizar esta confirmação financeira.
+                  </label>
+                  <div style={{ position: "relative" }}>
+                    <input
+                      id="pix-senha-input"
+                      ref={pixSenhaInputRef}
+                      type={pixSenhaVisivel ? "text" : "password"}
+                      value={pixSenha}
+                      onChange={e => setPixSenha(e.target.value)}
+                      autoComplete="current-password"
+                      placeholder="Sua senha"
+                      style={{ width: "100%", height: 50, background: "var(--surface)", border: "1px solid var(--surface-secondary)", borderRadius: 12, padding: "0 48px 0 14px", color: "var(--foreground)", fontSize: 15, boxSizing: "border-box", outline: "none" }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setPixSenhaVisivel(v => !v)}
+                      aria-label={pixSenhaVisivel ? "Ocultar senha" : "Mostrar senha"}
+                      style={{ position: "absolute", right: 6, top: 6, height: 38, width: 38, border: "none", borderRadius: 8, background: "transparent", color: "var(--foreground-secondary)", fontSize: 13, fontWeight: 800 }}
+                    >{pixSenhaVisivel ? "🙈" : "👁️"}</button>
+                  </div>
+                </div>
+
+                <div aria-live="assertive" role="status">
+                  {pixErro && (
+                    <div style={{ background: "color-mix(in srgb, var(--danger) 12%, transparent)", border: "1px solid var(--danger)", borderRadius: 12, padding: "10px 14px", fontSize: 13, fontWeight: 800, color: "var(--danger)" }}>
+                      {pixErro}
+                    </div>
+                  )}
+                </div>
+
+                {!checklistCompleto || !pixSenha ? (
+                  <p style={{ margin: 0, fontSize: 12, fontWeight: 700, color: "var(--foreground-muted)", textAlign: "center" }}>
+                    Falta {faltando.join(" e ")} para liberar a confirmação.
+                  </p>
+                ) : null}
+
+                <button
+                  onClick={() => confirmarPixManual(confirmPixModal)}
+                  disabled={!podeConfirmarPix}
+                  aria-disabled={!podeConfirmarPix}
+                  style={{
+                    height: 60, border: "none", borderRadius: 16,
+                    background: podeConfirmarPix ? "var(--danger)" : "var(--surface-secondary)",
+                    color: podeConfirmarPix ? "var(--foreground)" : "var(--foreground-muted)",
+                    fontSize: 16, fontWeight: 900, letterSpacing: "-0.2px",
+                    cursor: podeConfirmarPix ? "pointer" : "not-allowed",
+                    transition: "background .15s, color .15s",
+                  }}
+                >
+                  {pixConfirmando ? "Confirmando..." : `CONFIRMAR ${valorFormatado} COMO RECEBIDO`}
+                </button>
+                <button onClick={fecharVerificacaoPix} disabled={pixConfirmando} style={{ height: 46, border: "none", background: "transparent", color: "var(--foreground-secondary)", fontSize: 14, fontWeight: 800, cursor: pixConfirmando ? "not-allowed" : "pointer" }}>
+                  Voltar e conferir novamente
+                </button>
+              </div>
             </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <p style={{ margin: 0, fontSize: 19, fontWeight: 900, letterSpacing: "-0.4px", lineHeight: 1.2 }}>Confirmar Pix manualmente?</p>
-              <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "var(--foreground-secondary)", lineHeight: 1.5 }}>Use apenas se o pagamento já foi verificado. Nenhuma mensagem será enviada ao cliente.</p>
-            </div>
-            <button onClick={() => confirmarPixManual(confirmPixModal)} style={{ height: 56, border: "none", borderRadius: 16, background: "var(--primary)", color: 'var(--primary-foreground)', fontSize: 16, fontWeight: 900 }}>Confirmar Pix</button>
-            <button onClick={() => setConfirmPixModal(null)} style={{ height: 46, border: "none", background: "transparent", color: "var(--foreground-secondary)", fontSize: 14, fontWeight: 800 }}>Cancelar</button>
-          </div>
-        </>
-      )}
+          </>
+        )
+      })()}
 
       {/* Modal Finalizar Pedido */}
       {finalizarModal && (

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { verifyToken } from '@/lib/auth'
 import { redis } from '@/lib/redis'
 import { proximoNumeroPedido } from '@/lib/numeracao'
-import { confirmarPixMetadata, criarPixMetadata, sanitizarPedidoPixResposta, type PixMetadata } from '@/lib/pix'
+import { criarPixMetadata, sanitizarPedidoPixResposta, type PixMetadata } from '@/lib/pix'
 import type { PedidoEntregador } from '@/types/entregador'
 import {
   creditarFidelidadePedido,
@@ -129,22 +129,15 @@ export async function PATCH(req: NextRequest) {
   const auth = await checkAuth(req)
   if (!auth) return NextResponse.json({ error: 'Nao autorizado' }, { status: 401 })
 
-  const { id, status, entregador, pixConfirmado, silent } = await req.json()
+  const { id, status, entregador, silent } = await req.json()
   const pedidos = await getPedidos()
   const index = pedidos.findIndex(p => p.id === id)
   if (index === -1) return NextResponse.json({ error: 'Pedido nao encontrado' }, { status: 404 })
   const statusAnterior = pedidos[index].status
 
-  // Confirmação de PIX manual — sem alterar status, sem enviar mensagem.
-  // Registra origem/horário no metadata (auditoria); confirmação anterior
-  // por webhook/comprovante nunca é sobrescrita pelo clique manual.
-  if (pixConfirmado !== undefined) {
-    pedidos[index] = pixConfirmado === true
-      ? { ...pedidos[index], pixConfirmado: true, pix: confirmarPixMetadata(pedidos[index].pix, 'manual') }
-      : { ...pedidos[index], pixConfirmado }
-    await redis.set('pedidos', pedidos)
-    return NextResponse.json({ ok: true })
-  }
+  // A confirmação manual de Pix não passa mais por aqui: ela exige senha e
+  // checklist de segurança e vive em /api/orders/confirmar-pix-manual, que
+  // reaproveita confirmarPixMetadata (mesma idempotência de sempre).
 
   const agora = new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" })
   pedidos[index] = {
