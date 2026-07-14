@@ -11,7 +11,7 @@ vi.mock("./mercadoPagoPix", () => ({
   criarCobrancaPixMercadoPago: criarCobrancaPixMercadoPagoMock,
 }));
 
-import { anexarPixMercadoPagoEmMensagens, criarPixMetadata, gerarTxidPixInterno, montarMensagensPixMercadoPagoWhatsApp, prepararPixProviderMercadoPago, sanitizarPedidoPixResposta, serializarPixCliente } from "./pix";
+import { anexarPixMercadoPagoEmMensagens, clientePediuChavePixManual, criarPixMetadata, gerarTxidPixInterno, montarMensagensChavePixManual, montarMensagensPixMercadoPagoWhatsApp, prepararPixProviderMercadoPago, sanitizarPedidoPixResposta, serializarPixCliente } from "./pix";
 import { encryptMercadoPagoToken } from "./mercadoPagoIntegracao";
 
 function configAdminAtiva(overrides?: { accessToken?: string; payerEmailFallback?: string }) {
@@ -322,23 +322,68 @@ describe("metadados internos de Pix", () => {
     expect(montarMensagensPixMercadoPagoWhatsApp({ provider: "mercadopago" })).toBeUndefined();
   });
 
-  test("montarMensagensPixMercadoPagoWhatsApp retorna exatamente 3 mensagens, com o payload isolado na segunda", () => {
+  test("montarMensagensPixMercadoPagoWhatsApp retorna exatamente 4 mensagens, com o payload isolado na segunda", () => {
     const mensagens = montarMensagensPixMercadoPagoWhatsApp({
       provider: "mercadopago",
       qrCode: "000201010212...copia-e-cola-completo...6304ABCD",
       valorEsperado: 30,
     });
 
-    expect(mensagens).toHaveLength(3);
-    // Mensagem 1: aviso, sem o payload.
+    expect(mensagens).toHaveLength(4);
+    // Mensagem 1: aviso, sem o payload, com o emoji 👇 indicando o próximo passo.
     expect(mensagens![0]).toContain("Pagamento via Pix");
     expect(mensagens![0]).toContain("só será liberado após a confirmação do pagamento");
+    expect(mensagens![0]).toContain("👇");
     expect(mensagens![0]).not.toContain("000201010212");
     // Mensagem 2: SOMENTE o payload, nada mais.
     expect(mensagens![1]).toBe("000201010212...copia-e-cola-completo...6304ABCD");
-    // Mensagem 3: instrução final, sem o payload.
-    expect(mensagens![2]).toContain("Copie o código acima");
-    expect(mensagens![2]).toContain("liberado automaticamente");
+    // Mensagem 3: instrução final, curta e direta, sem o payload.
+    expect(mensagens![2]).toBe("Copie o código acima e pague no app do seu banco.\n\nPagamento confirmado, pedido liberado automaticamente ✅");
     expect(mensagens![2]).not.toContain("000201010212");
+    // Mensagem 4: convite discreto ao fallback de chave Pix manual.
+    expect(mensagens![3]).toContain("Se preferir a chave Pix");
+    expect(mensagens![3]).toContain("envie o comprovante");
+  });
+});
+
+describe("fallback opcional de chave Pix manual (Nível 6.7B)", () => {
+  test("clientePediuChavePixManual detecta pedidos explicitos pela chave", () => {
+    expect(clientePediuChavePixManual("quero a chave pix")).toBe(true);
+    expect(clientePediuChavePixManual("prefiro a chave")).toBe(true);
+    expect(clientePediuChavePixManual("me manda a chave por favor")).toBe(true);
+    expect(clientePediuChavePixManual("não está copiando o código")).toBe(true);
+    expect(clientePediuChavePixManual("Chave Pix, por favor")).toBe(true);
+  });
+
+  test("clientePediuChavePixManual nao reconhece mensagens sem pedido explicito", () => {
+    expect(clientePediuChavePixManual("oi")).toBe(false);
+    expect(clientePediuChavePixManual("já paguei")).toBe(false);
+    expect(clientePediuChavePixManual("obrigado")).toBe(false);
+  });
+
+  test("montarMensagensChavePixManual retorna nome, chave e instrucao de comprovante, em mensagens separadas", () => {
+    const mensagens = montarMensagensChavePixManual({
+      chavePix: "99984430294",
+      nomeTitularPix: "Chefe da Pizza",
+    });
+
+    expect(mensagens).toHaveLength(3);
+    expect(mensagens![0]).toBe("Nome: Chefe da Pizza");
+    expect(mensagens![1]).toBe("Chave Pix: 99984430294");
+    expect(mensagens![2]).toBe("Envie o comprovante aqui na conversa para confirmar seu pedido.");
+  });
+
+  test("montarMensagensChavePixManual usa nomePizzaria quando nao ha nomeTitularPix configurado", () => {
+    const mensagens = montarMensagensChavePixManual({
+      chavePix: "99984430294",
+      nomePizzaria: "Chefe da Pizza",
+    });
+
+    expect(mensagens![0]).toBe("Nome: Chefe da Pizza");
+  });
+
+  test("montarMensagensChavePixManual retorna undefined sem chave Pix configurada", () => {
+    expect(montarMensagensChavePixManual({})).toBeUndefined();
+    expect(montarMensagensChavePixManual({ chavePix: "" })).toBeUndefined();
   });
 });
