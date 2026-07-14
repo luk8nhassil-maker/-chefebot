@@ -601,6 +601,71 @@ describe("reconciliarPixMercadoPago", () => {
       expect(pedidos[0].pix.confirmadoPor).toBe("conciliador_mercadopago");
     });
 
+    test("apenasPedidoIds restringe a rodada aos IDs informados (Guardião Pix recolocando um pagamento específico na fila)", async () => {
+      store.set("pedidos", [
+        pedidoMP({ id: "ped-alvo" }),
+        pedidoMP({ id: "ped-outro", pix: { ...pedidoMP().pix, providerPaymentId: "MP-outro", txid: "chefebot_ped-outro" } }),
+      ]);
+      buscarPagamentoMock.mockResolvedValue(ok());
+
+      const resumo = await reconciliarPixMercadoPago({ apenasPedidoIds: ["ped-alvo"] });
+
+      expect(resumo.verificados).toBe(1);
+      expect(buscarPagamentoMock).toHaveBeenCalledTimes(1);
+      const pedidos = store.get("pedidos") as any[];
+      expect(pedidos.find((p) => p.id === "ped-alvo").pixConfirmado).toBe(true);
+      expect(pedidos.find((p) => p.id === "ped-outro").pixConfirmado).toBeUndefined();
+    });
+
+    test("webhook confirma o mesmo pedido enquanto a consulta do conciliador está em voo: não sobrescreve/reverte a confirmação (primeira confirmação vence)", async () => {
+      const pedidoInicial = pedidoMP();
+      store.set("pedidos", [pedidoInicial]);
+
+      buscarPagamentoMock.mockImplementation(async () => {
+        // Simula o webhook gravando a confirmação nesse meio-tempo.
+        store.set("pedidos", [
+          { ...pedidoInicial, pixConfirmado: true, pix: { ...pedidoInicial.pix, status: "confirmado", confirmadoPor: "webhook", confirmadoEm: "2026-01-01T00:00:00.000Z" } },
+        ]);
+        return ok();
+      });
+
+      await reconciliarPixMercadoPago();
+
+      const pedidos = store.get("pedidos") as any[];
+      expect(pedidos).toHaveLength(1);
+      expect(pedidos[0].pix.confirmadoPor).toBe("webhook");
+      expect(pedidos[0].pix.confirmadoEm).toBe("2026-01-01T00:00:00.000Z");
+    });
+
+    test("confirmação manual grava um pedido diferente enquanto o conciliador roda: as duas mudanças convivem (merge por id, não overwrite total)", async () => {
+      const pedidoAlvo = pedidoMP({ id: "ped-a", pix: { ...pedidoMP().pix, txid: "chefebot_ped-a" } });
+      const pedidoOutro = pedidoMP({
+        id: "ped-b",
+        pix: { ...pedidoMP().pix, providerPaymentId: "MP-b", txid: "chefebot_ped-b" },
+      });
+      store.set("pedidos", [pedidoAlvo, pedidoOutro]);
+
+      buscarPagamentoMock.mockImplementation(async (paymentId: string) => {
+        if (paymentId === "MP-1") {
+          // Confirmação manual do OUTRO pedido acontece durante a consulta.
+          const atuais = store.get("pedidos") as any[];
+          store.set(
+            "pedidos",
+            atuais.map((p) =>
+              p.id === "ped-b" ? { ...p, pixConfirmado: true, pix: { ...p.pix, status: "confirmado", confirmadoPor: "manual" } } : p
+            )
+          );
+        }
+        return ok({ id: paymentId, externalReference: paymentId === "MP-1" ? "chefebot_ped-a" : "chefebot_ped-b" });
+      });
+
+      await reconciliarPixMercadoPago();
+
+      const pedidos = store.get("pedidos") as any[];
+      expect(pedidos.find((p) => p.id === "ped-a").pix.confirmadoPor).toBe("conciliador_mercadopago");
+      expect(pedidos.find((p) => p.id === "ped-b").pix.confirmadoPor).toBe("manual");
+    });
+
     test("lock curto de notificação evita reenvio dentro da mesma rodada mesmo sem marcador permanente ainda", async () => {
       // Simula concorrência: o lock de notificação já foi adquirido por outra
       // chamada, então esta rodada não deve tentar enviar de novo.

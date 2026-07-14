@@ -37,7 +37,7 @@ describe("metadados internos de Pix", () => {
   });
 
   test("cria metadados para Pix puro usando o total do pedido", () => {
-    expect(criarPixMetadata("123", "Pix", 50)).toEqual({
+    expect(criarPixMetadata("123", "Pix", 50)).toMatchObject({
       txid: "chefebot_123",
       valorEsperado: 50,
       status: "pendente",
@@ -45,11 +45,17 @@ describe("metadados internos de Pix", () => {
   });
 
   test("cria metadados para Pix hibrido usando apenas a parte Pix", () => {
-    expect(criarPixMetadata("123", "Pix (R$ 30,00) + Dinheiro (R$ 20,00)", 50)).toEqual({
+    expect(criarPixMetadata("123", "Pix (R$ 30,00) + Dinheiro (R$ 20,00)", 50)).toMatchObject({
       txid: "chefebot_123",
       valorEsperado: 30,
       status: "pendente",
     });
+  });
+
+  test("registra criadoEm (ISO 8601) para cadência da auto-verificação", () => {
+    const pix = criarPixMetadata("123", "Pix", 50);
+    expect(typeof pix?.criadoEm).toBe("string");
+    expect(Number.isNaN(new Date(pix!.criadoEm as string).getTime())).toBe(false);
   });
 
   test("nao cria metadados quando o pagamento nao tem Pix", () => {

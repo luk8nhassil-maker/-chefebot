@@ -32,6 +32,9 @@ export type PixMetadata = {
   txid?: string;
   valorEsperado?: number;
   status?: PixStatus;
+  // Horário de criação da cobrança (ISO 8601) — só observabilidade/cadência
+  // da auto-verificação (Guardião Pix). Nunca usado para decidir confirmação.
+  criadoEm?: string;
   confirmadoPor?: PixConfirmadoPor;
   confirmadoEm?: string;
   // Identidade da sessão autenticada que confirmou manualmente (Kellyne, Brito etc.)
@@ -202,6 +205,7 @@ export function criarPixMetadata(pedidoId: string, pagamento: string | undefined
     txid: gerarTxidPixInterno(pedidoId),
     valorEsperado: valorPixEsperado(pagamento, total),
     status: "pendente",
+    criadoEm: new Date().toISOString(),
   };
 }
 
