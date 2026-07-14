@@ -302,9 +302,10 @@ export function anexarPixMercadoPagoEmMensagens(messages: string[], pix: PixClie
   ));
 }
 
-// Nivel 6.7A — mensagens dedicadas de Pix dinamico Mercado Pago no WhatsApp,
-// enviadas como 3 mensagens SEPARADAS (uma por item do array) para o payload
-// Pix ficar isolado e fácil de copiar. Retorna undefined quando nao ha
+// Nivel 6.7A/6.7B — mensagens dedicadas de Pix dinamico Mercado Pago no
+// WhatsApp, enviadas como 4 mensagens SEPARADAS (uma por item do array) para
+// o payload Pix ficar isolado e fácil de copiar, seguidas de um convite
+// discreto ao fallback manual (chave Pix). Retorna undefined quando nao ha
 // cobranca Mercado Pago valida (provider manual ou qrCode ausente) — quem
 // chama deve manter a mensagem de fallback manual original nesse caso, nunca
 // substituir por esta. A mensagem 2 eh SEMPRE só o payload Pix completo
@@ -315,9 +316,43 @@ export function montarMensagensPixMercadoPagoWhatsApp(pix: PixCliente | undefine
   if (pix?.provider !== "mercadopago" || !pix.qrCode) return undefined;
 
   return [
-    `Pagamento via Pix 💸\n\nPra confirmar seu pedido, faça o pagamento do Pix abaixo.\n\n⚠️ Seu pedido só será liberado após a confirmação do pagamento.`,
+    `Pagamento via Pix 💸\n\nPra confirmar seu pedido, faça o pagamento do Pix abaixo.\n\n⚠️ Seu pedido só será liberado após a confirmação do pagamento. 👇`,
     pix.qrCode,
-    `Copie o código acima e pague no app do seu banco.\n\nAssim que o pagamento for confirmado, seu pedido será liberado automaticamente ✅`,
+    `Copie o código acima e pague no app do seu banco.\n\nPagamento confirmado, pedido liberado automaticamente ✅`,
+    `Se preferir a chave Pix, me avise.\nNesse caso, envie o comprovante aqui na conversa.`,
+  ];
+}
+
+// Nivel 6.7B — deteccao de pedido explicito do cliente pela chave Pix manual
+// (fallback), enquanto aguarda o pagamento do Pix dinamico Mercado Pago. Esse
+// caminho e puramente informativo: nunca confirma o pedido sozinho, so troca
+// o payload copia-e-cola pela chave estatica configurada + nome do titular, e
+// segue exigindo o comprovante — mesmo fallback manual ja validado nos niveis
+// anteriores, sem criar nenhuma nova regra de confirmacao.
+export function clientePediuChavePixManual(texto: string): boolean {
+  const n = texto.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+  const frases = [
+    "chave pix", "chave do pix", "quero a chave", "prefiro a chave",
+    "manda a chave", "me manda a chave", "pode mandar a chave", "envia a chave",
+    "so a chave", "prefiro pix manual", "pix manual", "prefiro pagar pela chave",
+    "nao consigo pagar o qr", "nao ta funcionando o pix", "da erro no pix", "pix nao funciona",
+    "nao consigo copiar", "nao esta copiando",
+  ];
+  return frases.some((f) => n.includes(f));
+}
+
+// Monta as 3 mensagens do fallback manual (nome, chave, instrucao de
+// comprovante), enviadas SEPARADAS para o cliente copiar a chave com
+// facilidade. Retorna undefined quando nao ha chave Pix configurada.
+export function montarMensagensChavePixManual(config: PixClienteManualConfig): string[] | undefined {
+  const chavePix = String(config.chavePix || "").trim();
+  if (!chavePix) return undefined;
+  const nome = String(config.nomeTitularPix || config.nomePizzaria || "").trim();
+
+  return [
+    `Nome: ${nome}`,
+    `Chave Pix: ${chavePix}`,
+    `Envie o comprovante aqui na conversa para confirmar seu pedido.`,
   ];
 }
 

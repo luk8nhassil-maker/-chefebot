@@ -16,7 +16,7 @@ import { proximoNumeroPedido } from "@/lib/numeracao";
 import { salvarStatusConexao, botPodeResponder, StatusConexao } from "@/lib/conexaoWhatsapp";
 import { ehConfirmacaoPedido } from "@/lib/confirmacaoPedido";
 import { escolherStepDeRetomada, detectarConversaMorta } from "@/lib/reviverConversa";
-import { confirmarPixMetadata, criarPixMetadata, marcarPixRevisaoOuSuspeito, montarMensagensPixMercadoPagoWhatsApp, prepararPixProviderMercadoPago, registrarPixEvidencia, serializarPixCliente, type PixCliente, type PixEvidenciaOrigem, type PixMetadata } from "@/lib/pix";
+import { clientePediuChavePixManual, confirmarPixMetadata, criarPixMetadata, marcarPixRevisaoOuSuspeito, montarMensagensChavePixManual, montarMensagensPixMercadoPagoWhatsApp, prepararPixProviderMercadoPago, registrarPixEvidencia, serializarPixCliente, type PixCliente, type PixEvidenciaOrigem, type PixMetadata } from "@/lib/pix";
 import { chaveDedupIdentificadorComprovantePix, extrairIdentificadorComprovantePix, normalizarIdentificadorComprovantePix, PIX_COMPROVANTE_E2E_TTL_SEGUNDOS, type PixComprovanteIdentificador } from "@/lib/pixComprovanteEvidencia";
 import { chaveDedupComprovantePix, gerarHashComprovantePixMidia, gerarHashComprovantePixTexto, PIX_COMPROVANTE_DEDUP_TTL_SEGUNDOS } from "@/lib/pixComprovanteHash";
 import { avaliarHorarioComprovantePix, extrairDataHoraComprovantePix, FUSO_OPERACIONAL_PIX, type PixComprovanteHorarioExtraido, type ResultadoHorarioComprovantePix } from "@/lib/pixComprovanteHorario";
@@ -1269,6 +1269,20 @@ export async function POST(req: NextRequest) {
     if (currentSession.step === "aguardando_pix") {
       const pixIniciadoEm = (currentSession as any).pixIniciadoEm || Date.now();
       const cobrancas = (currentSession as any).pixCobrancas || 0;
+
+      // Fluxo opcional (Nivel 6.7B): cliente pediu explicitamente a chave Pix
+      // manual em vez do QR/copia-e-cola dinamico. Puramente informativo —
+      // nao confirma nada sozinho, so troca o payload pela chave estatica e
+      // segue exigindo o comprovante (mesmo caminho manual ja validado).
+      if (clientePediuChavePixManual(messageText)) {
+        const mensagensChaveManual = montarMensagensChavePixManual(config);
+        if (mensagensChaveManual) {
+          for (const msg of mensagensChaveManual) await enviarMensagem(phone, msg);
+          await redis.set(sessionKey, { ...currentSession, pixIniciadoEm }, { ex: 1800 });
+          return NextResponse.json({ ok: true });
+        }
+      }
+
       await enviarMensagem(phone, `Para confirmar seu pedido, preciso do comprovante do Pix! 📄\n\nSó enviar a imagem ou PDF aqui no chat. 😊`);
       await redis.set(sessionKey, { ...currentSession, pixIniciadoEm, pixCobrancas: cobrancas + 1 }, { ex: 1800 });
       if (cobrancas >= 1) {

@@ -177,7 +177,7 @@ describe("Nível 6.7 — Pix dinâmico Mercado Pago no fluxo de retirada (pickup
     await POST(webhook("Pix"));
 
     const textosEnviados = textosSendTextEnviados();
-    expect(textosEnviados).toHaveLength(3);
+    expect(textosEnviados.length).toBeGreaterThanOrEqual(3);
 
     // Mensagem 1: aviso — pedido só liberado após confirmação, sem o payload.
     expect(textosEnviados[0]).toContain("Pagamento via Pix");
@@ -191,6 +191,64 @@ describe("Nível 6.7 — Pix dinâmico Mercado Pago no fluxo de retirada (pickup
     expect(textosEnviados[2]).toContain("Copie o código acima");
     expect(textosEnviados[2]).toContain("liberado automaticamente");
     expect(textosEnviados[2]).not.toContain("000201010212");
+  });
+
+  test("Nível 6.7B: novo texto com emoji 👇 na mensagem 1 e mensagem final curta e direta", async () => {
+    vi.stubEnv("PIX_PROVIDER", "mercadopago");
+    criarCobrancaPixMercadoPagoMock.mockResolvedValue(cobranca());
+
+    await POST(webhook("Pix"));
+
+    const textosEnviados = textosSendTextEnviados();
+    expect(textosEnviados[0]).toContain("👇");
+    // Mensagem 3 (final da copy dinâmica) ficou curta e direta.
+    expect(textosEnviados[2]).toBe("Copie o código acima e pague no app do seu banco.\n\nPagamento confirmado, pedido liberado automaticamente ✅");
+    expect(textosEnviados[2].length).toBeLessThan(120);
+  });
+
+  test("Nível 6.7B: envia 4ª mensagem convidando ao fallback de chave Pix manual", async () => {
+    vi.stubEnv("PIX_PROVIDER", "mercadopago");
+    criarCobrancaPixMercadoPagoMock.mockResolvedValue(cobranca());
+
+    await POST(webhook("Pix"));
+
+    const textosEnviados = textosSendTextEnviados();
+    expect(textosEnviados).toHaveLength(4);
+    expect(textosEnviados[3]).toContain("Se preferir a chave Pix");
+    expect(textosEnviados[3]).toContain("envie o comprovante");
+  });
+
+  test("Nível 6.7B: cliente pede explicitamente a chave Pix manual e recebe nome + chave + instrução de comprovante, separados", async () => {
+    vi.stubEnv("PIX_PROVIDER", "mercadopago");
+    criarCobrancaPixMercadoPagoMock.mockResolvedValue(cobranca());
+
+    await POST(webhook("Pix")); // entra em aguardando_pix, recebe o Pix dinâmico
+    await POST(webhook("prefiro a chave pix"));
+
+    const textosEnviados = textosSendTextEnviados();
+    // 4 mensagens do Pix dinâmico + 3 do fallback manual.
+    expect(textosEnviados).toHaveLength(7);
+    expect(textosEnviados[4]).toBe("Nome: Chefe da Pizza");
+    expect(textosEnviados[5]).toBe("Chave Pix: 99984430294");
+    expect(textosEnviados[6]).toBe("Envie o comprovante aqui na conversa para confirmar seu pedido.");
+
+    // Não finge confirmação automática nesse fluxo: pedido continua pendente.
+    const pedidos = pedidosSalvos();
+    expect(pedidos[0].pix.status).not.toBe("confirmado");
+  });
+
+  test("Nível 6.7B: fallback manual (Mercado Pago inativo) continua funcional após o refinamento de copy", async () => {
+    // Sem PIX_PROVIDER: cai direto no Pix manual (fluxo já validado nos níveis anteriores).
+    criarCobrancaPixMercadoPagoMock.mockResolvedValue(cobranca());
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await POST(webhook("Pix"));
+
+    const textosEnviados = textosSendTextEnviados();
+    expect(textosEnviados).toHaveLength(1);
+    expect(textosEnviados[0]).toContain("envie o comprovante do Pix");
+    expect(textosEnviados[0]).toContain("Chave Pix: 99984430294");
+    warnSpy.mockRestore();
   });
 
   test("falha do Mercado Pago cai no Pix manual e mantém o pedido pedindo comprovante", async () => {
