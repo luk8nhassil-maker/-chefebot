@@ -61,11 +61,13 @@ describe("/cardapio (PublicCardapio) - card Pix premium (aguardando pagamento)",
     expect(fonteCombinada).not.toContain("envie o comprovante pelo WhatsApp");
   });
 
-  test("page.tsx delega o card Pix ao componente extraído, passando os mesmos dados de origem", () => {
+  test("page.tsx delega o card Pix ao componente extraído, passando os mesmos dados de origem (incluindo número e total do pedido)", () => {
     expect(fonte).toContain('import PixPagamentoCard from "./PixPagamentoCard"');
     expect(blocoPixFinal).toContain("<PixPagamentoCard");
     expect(blocoPixFinal).toContain("statusPix={statusPixCliente}");
     expect(blocoPixFinal).toContain("statusLabel={PIX_STATUS_LABEL[statusPixCliente]}");
+    expect(blocoPixFinal).toContain("pedidoNumero={pedidoConfirmado.numero}");
+    expect(blocoPixFinal).toContain("pedidoTotal={pedidoConfirmado.total}");
     expect(blocoPixFinal).toContain("pixPedido={pixPedido}");
     expect(blocoPixFinal).toContain("pixCodigoCopiaECola={pixCodigoCopiaECola}");
     expect(blocoPixFinal).toContain("temPixCopiaECola={temPixCopiaECola}");
@@ -74,11 +76,19 @@ describe("/cardapio (PublicCardapio) - card Pix premium (aguardando pagamento)",
     expect(blocoPixFinal).toContain("trocoConfirmadoTexto={trocoConfirmadoTexto}");
   });
 
-  test("remove instrucao de WhatsApp e duplicidade de pedido e total no card Pix", () => {
+  test("remove instrucao de WhatsApp e nao duplica pedido/total no bloco Pix (número/total do Pix vêm só via props do PixPagamentoCard)", () => {
     expect(blocoPixFinal).not.toContain("<strong>Pedido:</strong>");
     expect(blocoPixFinal).not.toContain("<strong>Total:</strong>");
+    expect(blocoPixFinal).not.toContain("Pedido #{pedidoConfirmado.numero}");
+    // O texto solto "Pedido #..." continua existindo só no ramo não-Pix (dinheiro/cartão).
     expect(fonte).toContain("Pedido #{pedidoConfirmado.numero}");
-    expect(fonte).toContain("Total: {money(pedidoConfirmado.total)}");
+  });
+
+  test("reduz o protagonismo do cabeçalho genérico ('Pedido recebido!') quando o pagamento é Pix", () => {
+    expect(fonte).toContain('className={`check ${isPagamentoPix ? "check-compact" : ""}`}');
+    expect(fonte).toContain('className={isPagamentoPix ? "success-h2-compact" : ""}');
+    expect(fonte).toContain(".check.check-compact{");
+    expect(fonte).toContain(".success-h2-compact{");
   });
 
   test("mantem o CTA principal de acompanhamento do pedido", () => {
@@ -106,24 +116,43 @@ describe("PixPagamentoCard — card premium do Pix dinâmico (QR, copia-e-cola, 
     expect(fontePixCard).toContain("setTimeout(() => setCopiado(false)");
   });
 
-  test("mensagem principal deixa claro que a confirmação só ocorre após o pagamento do Pix", () => {
-    expect(fontePixCard).toContain("Seu pedido será confirmado somente");
-    expect(fontePixCard).toContain("após o pagamento do Pix");
-    expect(fontePixCard).toContain("Assim que o pagamento for identificado, a confirmação acontece automaticamente.");
+  test("headline principal grita 'FALTA PAGAR O PIX', com bloco de aviso e ação em destaque máximo", () => {
+    expect(fontePixCard).toContain("FALTA PAGAR");
+    expect(fontePixCard).toContain('<span className="destaque">O PIX</span>');
+    expect(fontePixCard).toContain("Seu pedido ainda não foi confirmado.");
+    expect(fontePixCard).toContain("A confirmação acontece somente após o pagamento do Pix.");
+    expect(fontePixCard).toContain("Escaneie o QR Code ou copie o código Pix abaixo");
+    expect(fontePixCard).toContain("Assim que o pagamento for identificado, seu pedido será confirmado automaticamente.");
   });
 
-  test("card de status 'Aguardando pagamento' é exibido com texto (não depende só de cor)", () => {
+  test("bloco de alerta domina a tela com tipografia grande e contraste forte (não é mais um card discreto)", () => {
+    expect(fonte).toContain(".pix-alerta-headline{margin:0;font-size:clamp(24px,7vw,32px);font-weight:800");
+    expect(fonte).toContain(".pix-alerta{position:relative;text-align:center;background:linear-gradient");
+    expect(fonte).toContain("border:2px solid var(--brand)");
+  });
+
+  test("card de status 'Aguardando pagamento' é exibido com texto (não depende só de cor) e nunca fica escondido em um chip pequeno", () => {
     expect(fontePixCard).toContain('"Aguardando pagamento"');
     expect(fontePixCard).toContain("role=\"status\"");
     expect(fontePixCard).toContain('aria-live="polite"');
+    expect(fontePixCard).toContain("pix-alerta-eyebrow");
   });
 
-  test("estado confirmado (pago) substitui a espera, usa verde e para a mensagem de aguardando", () => {
+  test("estado confirmado (pago) substitui todo o bloco de alerta, usa verde e para a mensagem de aguardando", () => {
     expect(fontePixCard).toContain('const pago = statusPix === "pago"');
     expect(fontePixCard).toContain('"Pagamento confirmado"');
-    expect(fontePixCard).toMatch(/pix-status-card \$\{pago \? "pago" : "aguardando"\}/);
-    expect(fonte).toContain(".pix-status-card.pago");
-    expect(fonte).toContain(".pix-status-card.aguardando .pix-status-icon{animation:pixPulse");
+    expect(fontePixCard).toContain("Pagamento confirmado! ✅");
+    expect(fontePixCard).toMatch(/pix-alerta \$\{pago \? "pago" : ""\}/);
+    expect(fonte).toContain(".pix-alerta.pago{background:linear-gradient(180deg, var(--green-soft)");
+  });
+
+  test("animações ficam perceptíveis: glow pulsante no alerta, glow no QR, seta animada e feedback de cópia", () => {
+    expect(fonte).toContain("@keyframes pixGlow{");
+    expect(fonte).toContain("@keyframes pixQrGlow{");
+    expect(fonte).toContain("@keyframes pixBounce{");
+    expect(fonte).toContain("@keyframes pixPop{");
+    expect(fontePixCard).toContain('className="pix-alerta-seta"');
+    expect(fontePixCard).toContain('className={`pix-copiar-btn ${copiado ? "copiado" : ""}`}');
   });
 
   test("preserva o valor, o pedido híbrido (Pix + Dinheiro) e o troco já validados", () => {

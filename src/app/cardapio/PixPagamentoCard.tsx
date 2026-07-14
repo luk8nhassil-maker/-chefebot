@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
-import { Check, CheckCircle2, ChevronDown, Clock, Copy, KeyRound, QrCode, Smartphone } from "lucide-react";
+import { Check, CheckCircle2, ChevronDown, Copy, KeyRound, QrCode, Sparkles, Smartphone } from "lucide-react";
 import { copiarTexto } from "@/lib/clipboard";
 
 // Card premium do pagamento Pix (tela "Pedido recebido!" do /cardapio).
@@ -14,6 +14,8 @@ export type PixPagamentoCardStatus = "aguardando_pix" | "pago" | "em_revisao" | 
 export type PixPagamentoCardProps = {
   statusPix: PixPagamentoCardStatus;
   statusLabel: string;
+  pedidoNumero: number;
+  pedidoTotal: number;
   pixPedido?: { chavePix?: string; beneficiario?: string };
   pixCodigoCopiaECola: string;
   temPixCopiaECola: boolean;
@@ -33,6 +35,8 @@ const PASSOS_COMO_FUNCIONA = [
 export default function PixPagamentoCard({
   statusPix,
   statusLabel,
+  pedidoNumero,
+  pedidoTotal,
   pixPedido,
   pixCodigoCopiaECola,
   temPixCopiaECola,
@@ -58,34 +62,41 @@ export default function PixPagamentoCard({
 
   return (
     <div className={`pix-premium ${pago ? "is-pago" : ""}`}>
-      {/* Card de status — nunca depende só da cor: sempre tem ícone + texto */}
-      <div className={`pix-status-card ${pago ? "pago" : "aguardando"}`} role="status" aria-live="polite">
-        <div className="pix-status-icon" aria-hidden="true">
-          {pago ? <CheckCircle2 size={22} /> : <Clock size={22} />}
-        </div>
-        <div className="pix-status-copy">
-          <span className="pix-status-titulo">{pago ? "Pagamento confirmado" : "Aguardando pagamento"}</span>
-          <span className="pix-status-sub">
-            {pago ? statusLabel : "Estamos verificando seu pagamento automaticamente"}
-          </span>
-        </div>
-        <span className={`pix-status-badge ${pago ? "pago" : "aguardando"}`}>{statusLabel}</span>
+      {/* Bloco 1+2 — alerta principal. Nunca depende só de cor: título +
+          badge + texto explícito sempre presentes. */}
+      <div className={`pix-alerta ${pago ? "pago" : ""}`} role="status" aria-live="polite">
+        <span className={`pix-alerta-eyebrow ${pago ? "pago" : ""}`}>
+          {!pago && <span className="pix-alerta-dot" aria-hidden="true" />}
+          {pago ? "Pagamento confirmado" : "Aguardando pagamento"}
+        </span>
+
+        {!pago ? (
+          <>
+            <p className="pix-alerta-headline">
+              FALTA PAGAR <span className="destaque">O PIX</span>
+            </p>
+            <p className="pix-alerta-regra">Seu pedido ainda não foi confirmado.</p>
+            <p className="pix-alerta-sub">A confirmação acontece somente após o pagamento do Pix.</p>
+            {temPixCopiaECola && (
+              <div className="pix-alerta-acao">
+                <span>Escaneie o QR Code ou copie o código Pix abaixo</span>
+                <ChevronDown size={18} className="pix-alerta-seta" aria-hidden="true" />
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            <p className="pix-alerta-headline">Pagamento confirmado! ✅</p>
+            <p className="pix-alerta-sub">Seu pedido já foi confirmado e a pizzaria já recebeu.</p>
+          </>
+        )}
       </div>
 
-      {/* Mensagem principal — não pode deixar dúvida sobre a regra do Pix */}
-      {!pago ? (
-        <div className="pix-mensagem-principal">
-          <p className="pix-mensagem-titulo">
-            Seu pedido será confirmado somente <span className="pix-destaque">após o pagamento do Pix</span>.
-          </p>
-          <p className="pix-mensagem-sub">Assim que o pagamento for identificado, a confirmação acontece automaticamente.</p>
-        </div>
-      ) : (
-        <div className="pix-mensagem-principal pago">
-          <p className="pix-mensagem-titulo">Pagamento confirmado com sucesso! ✅</p>
-          <p className="pix-mensagem-sub">Seu pedido já está com a pizzaria.</p>
-        </div>
-      )}
+      {/* Bloco 3 — valor do pedido, logo abaixo do alerta */}
+      <div className="pix-resumo-linha">
+        <span>Pedido #{pedidoNumero}</span>
+        <strong>{money(pedidoTotal)}</strong>
+      </div>
 
       {isHibrido && hibridoAtual && (
         <div className="pix-hibrido-card">
@@ -97,6 +108,7 @@ export default function PixPagamentoCard({
 
       {!pago && temPixCopiaECola && (
         <>
+          {/* Bloco 4 — QR Code */}
           <div className="pix-qr-card">
             <div className="pix-qr-glow">
               <QRCodeSVG className="pix-qr-svg" value={pixCodigoCopiaECola} size={220} level="M" aria-label="QR Code Pix" />
@@ -107,17 +119,39 @@ export default function PixPagamentoCard({
           <div className="pix-copia-cola-card">
             <span className="pix-copia-cola-label">Pix copia e cola</span>
             <div className="pix-copia-cola-campo" title={pixCodigoCopiaECola}>{pixCodigoCopiaECola}</div>
+            {/* Bloco 5 — botão principal de copiar */}
             <button
               type="button"
               className={`pix-copiar-btn ${copiado ? "copiado" : ""}`}
               onClick={handleCopiar}
               aria-label="Copiar código Pix copia e cola"
             >
-              {copiado ? <Check size={18} aria-hidden="true" /> : <Copy size={18} aria-hidden="true" />}
+              {copiado ? <Check size={20} aria-hidden="true" /> : <Copy size={20} aria-hidden="true" />}
               <span>{copiado ? "Código copiado" : "Copiar código Pix"}</span>
             </button>
           </div>
 
+          {/* Bloco 4 (reforço final) — reafirma a confirmação automática */}
+          <div className="pix-reforco">
+            <Sparkles size={16} aria-hidden="true" />
+            <span>Assim que o pagamento for identificado, seu pedido será confirmado automaticamente.</span>
+          </div>
+
+          {/* Bloco 6 — instrução simples em três passos */}
+          <div className="pix-como-funciona">
+            <span className="pix-como-funciona-titulo">Como funciona</span>
+            <div className="pix-como-funciona-passos">
+              {PASSOS_COMO_FUNCIONA.map(({ Icon, texto }, i) => (
+                <div className="pix-passo" key={texto}>
+                  <div className="pix-passo-icone" aria-hidden="true"><Icon size={18} /></div>
+                  <span className="pix-passo-num">{i + 1}</span>
+                  <span className="pix-passo-texto">{texto}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Bloco 7 — informação secundária (fallback manual já existente) */}
           {temChaveManual && (
             <div className="pix-chave-manual">
               <button
@@ -137,19 +171,6 @@ export default function PixPagamentoCard({
               )}
             </div>
           )}
-
-          <div className="pix-como-funciona">
-            <span className="pix-como-funciona-titulo">Como funciona</span>
-            <div className="pix-como-funciona-passos">
-              {PASSOS_COMO_FUNCIONA.map(({ Icon, texto }, i) => (
-                <div className="pix-passo" key={texto}>
-                  <div className="pix-passo-icone" aria-hidden="true"><Icon size={18} /></div>
-                  <span className="pix-passo-num">{i + 1}</span>
-                  <span className="pix-passo-texto">{texto}</span>
-                </div>
-              ))}
-            </div>
-          </div>
         </>
       )}
 
