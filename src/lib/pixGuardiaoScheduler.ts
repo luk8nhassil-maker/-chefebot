@@ -28,6 +28,25 @@ const QSTASH_CHAIN_LOCK_PREFIXO = "pix:guardiao:cadeia:lock:";
 // nosso lado), o QStash aceita a segunda mas não enfileira de novo.
 const QSTASH_MAX_TENTATIVAS_CADEIA = 400; // rede de segurança adicional além da idade máxima
 
+// Tamanho máximo do trecho sanitizado do pedidoId dentro do deduplicationId —
+// generoso o bastante para qualquer id real (timestamp/uuid), só evita um
+// valor sem limite se algo inesperado for passado como pedidoId.
+const DEDUPLICATION_ID_PEDIDO_MAX_LEN = 100;
+
+// Gera o deduplicationId enviado ao QStash — NUNCA usa o pedidoId cru: o
+// QStash rejeita ":" (retorno real em produção: "DeduplicationId não pode
+// conter ':'"), então qualquer caractere fora de [A-Za-z0-9_-] é substituído
+// por "_". Determinístico (mesmo pedidoId+tentativa => mesmo id, tentativas
+// diferentes => ids diferentes); nunca inclui dado sensível (o pedidoId já é
+// só um identificador interno, não dado financeiro). Isso NUNCA afeta o
+// `pedidoId` usado para localizar o pedido no Redis — só o rótulo enviado ao
+// QStash para deduplicação.
+export function gerarDeduplicationIdGuardiaoPix(pedidoId: string, tentativa: number): string {
+  const pedidoIdSeguro = pedidoId.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, DEDUPLICATION_ID_PEDIDO_MAX_LEN);
+  const tentativaSegura = Number.isFinite(tentativa) ? Math.trunc(tentativa) : 0;
+  return `pix-guardiao-${pedidoIdSeguro}-${tentativaSegura}`;
+}
+
 let avisoSemTokenEmitido = false;
 
 function resolveBaseUrl(): string {
@@ -79,7 +98,7 @@ export async function agendarProximaVerificacaoPixGuardiao(input: AgendarTickInp
       url: endpointVerificacaoUrl(),
       body: { pedidoId: input.pedidoId, tentativa: input.tentativa },
       delay: delaySegundos,
-      deduplicationId: `pix-guardiao:${input.pedidoId}:${input.tentativa}`,
+      deduplicationId: gerarDeduplicationIdGuardiaoPix(input.pedidoId, input.tentativa),
       retries: 3,
     });
     return true;
@@ -110,11 +129,21 @@ export async function iniciarCadeiaGuardiaoPix(pedidoId: string): Promise<void> 
     });
     if (!lockAdquirido) return;
 
-    await agendarProximaVerificacaoPixGuardiao({
+    const publicado = await agendarProximaVerificacaoPixGuardiao({
       pedidoId,
       tentativa: 1,
       delayMs: PIX_AUTO_CHECK_INITIAL_INTERVAL_MS,
     });
+
+    // Publicação falhou (rede, QStash indisponível, payload rejeitado etc.):
+    // libera o lock imediatamente em vez de deixar o pedido bloqueado até o
+    // TTL expirar — sem isso, nenhuma nova tentativa de iniciar a cadeia
+    // seria possível por até PIX_GUARDIAO_IDADE_MAXIMA_MS + 60s. Quando a
+    // publicação tem sucesso, o lock é preservado normalmente (cadeia já
+    // está em andamento; uma segunda chamada deve continuar sendo no-op).
+    if (!publicado) {
+      await redis.del(`${QSTASH_CHAIN_LOCK_PREFIXO}${pedidoId}`).catch(() => {});
+    }
   } catch (error) {
     console.error("[Guardiao Pix] Falha ao iniciar cadeia server-side", {
       pedidoId,
