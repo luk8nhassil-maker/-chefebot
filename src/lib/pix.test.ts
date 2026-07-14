@@ -11,7 +11,7 @@ vi.mock("./mercadoPagoPix", () => ({
   criarCobrancaPixMercadoPago: criarCobrancaPixMercadoPagoMock,
 }));
 
-import { anexarPixMercadoPagoEmMensagens, criarPixMetadata, gerarTxidPixInterno, prepararPixProviderMercadoPago, sanitizarPedidoPixResposta, serializarPixCliente } from "./pix";
+import { anexarPixMercadoPagoEmMensagens, criarPixMetadata, gerarTxidPixInterno, montarMensagensPixMercadoPagoWhatsApp, prepararPixProviderMercadoPago, sanitizarPedidoPixResposta, serializarPixCliente } from "./pix";
 import { encryptMercadoPagoToken } from "./mercadoPagoIntegracao";
 
 function configAdminAtiva(overrides?: { accessToken?: string; payerEmailFallback?: string }) {
@@ -314,5 +314,31 @@ describe("metadados internos de Pix", () => {
     expect(resultado[0]).toContain("Valor do Pix: R$ 30,00");
     expect(resultado[0]).toContain("000201-copia-e-cola");
     expect(resultado[0]).toContain("https://mp.test/ticket");
+  });
+
+  test("montarMensagensPixMercadoPagoWhatsApp retorna undefined sem Pix Mercado Pago valido", () => {
+    expect(montarMensagensPixMercadoPagoWhatsApp(undefined)).toBeUndefined();
+    expect(montarMensagensPixMercadoPagoWhatsApp({ provider: "manual", chavePix: "123" })).toBeUndefined();
+    expect(montarMensagensPixMercadoPagoWhatsApp({ provider: "mercadopago" })).toBeUndefined();
+  });
+
+  test("montarMensagensPixMercadoPagoWhatsApp retorna exatamente 3 mensagens, com o payload isolado na segunda", () => {
+    const mensagens = montarMensagensPixMercadoPagoWhatsApp({
+      provider: "mercadopago",
+      qrCode: "000201010212...copia-e-cola-completo...6304ABCD",
+      valorEsperado: 30,
+    });
+
+    expect(mensagens).toHaveLength(3);
+    // Mensagem 1: aviso, sem o payload.
+    expect(mensagens![0]).toContain("Pagamento via Pix");
+    expect(mensagens![0]).toContain("só será liberado após a confirmação do pagamento");
+    expect(mensagens![0]).not.toContain("000201010212");
+    // Mensagem 2: SOMENTE o payload, nada mais.
+    expect(mensagens![1]).toBe("000201010212...copia-e-cola-completo...6304ABCD");
+    // Mensagem 3: instrução final, sem o payload.
+    expect(mensagens![2]).toContain("Copie o código acima");
+    expect(mensagens![2]).toContain("liberado automaticamente");
+    expect(mensagens![2]).not.toContain("000201010212");
   });
 });

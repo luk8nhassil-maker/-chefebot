@@ -16,7 +16,7 @@ import { proximoNumeroPedido } from "@/lib/numeracao";
 import { salvarStatusConexao, botPodeResponder, StatusConexao } from "@/lib/conexaoWhatsapp";
 import { ehConfirmacaoPedido } from "@/lib/confirmacaoPedido";
 import { escolherStepDeRetomada, detectarConversaMorta } from "@/lib/reviverConversa";
-import { confirmarPixMetadata, criarPixMetadata, marcarPixRevisaoOuSuspeito, montarMensagemPixMercadoPagoWhatsApp, prepararPixProviderMercadoPago, registrarPixEvidencia, serializarPixCliente, type PixCliente, type PixEvidenciaOrigem, type PixMetadata } from "@/lib/pix";
+import { confirmarPixMetadata, criarPixMetadata, marcarPixRevisaoOuSuspeito, montarMensagensPixMercadoPagoWhatsApp, prepararPixProviderMercadoPago, registrarPixEvidencia, serializarPixCliente, type PixCliente, type PixEvidenciaOrigem, type PixMetadata } from "@/lib/pix";
 import { chaveDedupIdentificadorComprovantePix, extrairIdentificadorComprovantePix, normalizarIdentificadorComprovantePix, PIX_COMPROVANTE_E2E_TTL_SEGUNDOS, type PixComprovanteIdentificador } from "@/lib/pixComprovanteEvidencia";
 import { chaveDedupComprovantePix, gerarHashComprovantePixMidia, gerarHashComprovantePixTexto, PIX_COMPROVANTE_DEDUP_TTL_SEGUNDOS } from "@/lib/pixComprovanteHash";
 import { avaliarHorarioComprovantePix, extrairDataHoraComprovantePix, FUSO_OPERACIONAL_PIX, type PixComprovanteHorarioExtraido, type ResultadoHorarioComprovantePix } from "@/lib/pixComprovanteHorario";
@@ -1394,8 +1394,11 @@ export async function POST(req: NextRequest) {
       result.session = { ...result.session, pedidoId, pixIniciadoEm: Date.now(), pixCobrancas: 0 } as any;
       // Só substitui a mensagem quando a cobranca Mercado Pago foi criada de fato —
       // nunca troca o texto de fallback manual (que já orienta a enviar comprovante).
-      const mensagemPixDinamico = montarMensagemPixMercadoPagoWhatsApp(pixCliente);
-      if (mensagemPixDinamico) result.messages = [mensagemPixDinamico];
+      // 3 mensagens separadas (Nível 6.7A): aviso + payload Pix isolado (fácil de
+      // copiar) + instrução final — enviarRespostas já manda cada item do array
+      // como uma mensagem WhatsApp distinta, em ordem.
+      const mensagensPixDinamico = montarMensagensPixMercadoPagoWhatsApp(pixCliente);
+      if (mensagensPixDinamico) result.messages = mensagensPixDinamico;
     }
 
     // Salva pedido nao-Pix na confirmacao — pedidos Pix ja foram salvos acima,

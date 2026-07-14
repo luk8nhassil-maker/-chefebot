@@ -92,6 +92,15 @@ function pedidosSalvos(): PedidoSalvo[] {
   return (store.get("pedidos") as PedidoSalvo[]) || [];
 }
 
+// Extrai, em ordem, o texto de cada chamada sendText feita ao Evolution API —
+// usado para validar quantas mensagens o bot mandou e o conteúdo de cada uma.
+function textosSendTextEnviados(): string[] {
+  const chamadas = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls as [string, RequestInit][];
+  return chamadas
+    .filter((call) => typeof call[0] === "string" && call[0].includes("sendText"))
+    .map((call) => JSON.parse(call[1].body as string).text as string);
+}
+
 function cobranca(overrides: Record<string, unknown> = {}) {
   return {
     provider: "mercadopago" as const,
@@ -148,20 +157,40 @@ describe("Nível 6.7 — Pix dinâmico Mercado Pago no fluxo de retirada (pickup
     });
   });
 
-  test("mensagem enviada ao cliente contém o payload Pix completo (não só a chave estática)", async () => {
+  test("mensagem com o payload Pix completo contém o código (não só a chave estática)", async () => {
     vi.stubEnv("PIX_PROVIDER", "mercadopago");
     criarCobrancaPixMercadoPagoMock.mockResolvedValue(cobranca());
 
     await POST(webhook("Pix"));
 
-    const chamadasFetch = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls as [string, RequestInit][];
-    const chamadaSendText = chamadasFetch.find((call) => typeof call[0] === "string" && call[0].includes("sendText"));
-    expect(chamadaSendText).toBeDefined();
-    const body = JSON.parse(chamadaSendText![1].body as string);
-    expect(body.text).toContain("000201010212...copia-e-cola-completo...6304ABCD");
-    expect(body.text).not.toBe("Chave Pix: 99984430294");
-    expect(body.text.trim()).not.toBe("");
+    const textosEnviados = textosSendTextEnviados();
+    const mensagemComPayload = textosEnviados.find((texto) => texto.includes("000201010212...copia-e-cola-completo...6304ABCD"));
+    expect(mensagemComPayload).toBeDefined();
+    expect(mensagemComPayload).not.toBe("Chave Pix: 99984430294");
     expect(pedidosSalvos()[0].pix.provider).toBe("mercadopago");
+  });
+
+  test("Nível 6.7A: envia exatamente 3 mensagens separadas, na ordem correta, com o payload isolado na segunda", async () => {
+    vi.stubEnv("PIX_PROVIDER", "mercadopago");
+    criarCobrancaPixMercadoPagoMock.mockResolvedValue(cobranca());
+
+    await POST(webhook("Pix"));
+
+    const textosEnviados = textosSendTextEnviados();
+    expect(textosEnviados).toHaveLength(3);
+
+    // Mensagem 1: aviso — pedido só liberado após confirmação, sem o payload.
+    expect(textosEnviados[0]).toContain("Pagamento via Pix");
+    expect(textosEnviados[0]).toContain("só será liberado após a confirmação do pagamento");
+    expect(textosEnviados[0]).not.toContain("000201010212");
+
+    // Mensagem 2: SOMENTE o payload Pix, nada mais — fácil de copiar.
+    expect(textosEnviados[1]).toBe("000201010212...copia-e-cola-completo...6304ABCD");
+
+    // Mensagem 3: instrução final, sem o payload.
+    expect(textosEnviados[2]).toContain("Copie o código acima");
+    expect(textosEnviados[2]).toContain("liberado automaticamente");
+    expect(textosEnviados[2]).not.toContain("000201010212");
   });
 
   test("falha do Mercado Pago cai no Pix manual e mantém o pedido pedindo comprovante", async () => {
@@ -181,6 +210,12 @@ describe("Nível 6.7 — Pix dinâmico Mercado Pago no fluxo de retirada (pickup
       "[Pix] Falha ao criar cobranca Mercado Pago — usando Pix manual",
       expect.objectContaining({ pedidoId: expect.any(String), motivo: "mp indisponivel" })
     );
+    // Fallback manual: continua pedindo comprovante, nunca finge automação —
+    // mensagem única (não as 3 do fluxo dinâmico) com a chave estática do admin.
+    const textosEnviados = textosSendTextEnviados();
+    expect(textosEnviados).toHaveLength(1);
+    expect(textosEnviados[0]).toContain("envie o comprovante do Pix");
+    expect(textosEnviados[0]).toContain("Chave Pix: 99984430294");
     errorSpy.mockRestore();
   });
 

@@ -302,20 +302,23 @@ export function anexarPixMercadoPagoEmMensagens(messages: string[], pix: PixClie
   ));
 }
 
-// Nivel 6.7 — mensagem dedicada de Pix dinamico Mercado Pago no WhatsApp.
-// Retorna undefined quando nao ha cobranca Mercado Pago valida (provider
-// manual ou qrCode ausente) — quem chama deve manter a mensagem de fallback
-// manual original nesse caso, nunca substituir por esta. O corpo eh sempre o
-// payload Pix completo devolvido pelo Mercado Pago (pix.qrCode, formato EMV
-// "000201..."), nunca a chave estatica configurada pelo admin.
-export function montarMensagemPixMercadoPagoWhatsApp(pix: PixCliente | undefined): string | undefined {
+// Nivel 6.7A — mensagens dedicadas de Pix dinamico Mercado Pago no WhatsApp,
+// enviadas como 3 mensagens SEPARADAS (uma por item do array) para o payload
+// Pix ficar isolado e fácil de copiar. Retorna undefined quando nao ha
+// cobranca Mercado Pago valida (provider manual ou qrCode ausente) — quem
+// chama deve manter a mensagem de fallback manual original nesse caso, nunca
+// substituir por esta. A mensagem 2 eh SEMPRE só o payload Pix completo
+// devolvido pelo Mercado Pago (pix.qrCode, formato EMV "000201..."), sem
+// nenhum texto adicional antes ou depois — nunca a chave estatica configurada
+// pelo admin, nunca misturada com o restante da copy.
+export function montarMensagensPixMercadoPagoWhatsApp(pix: PixCliente | undefined): string[] | undefined {
   if (pix?.provider !== "mercadopago" || !pix.qrCode) return undefined;
 
-  const valor = typeof pix.valorEsperado === "number" && Number.isFinite(pix.valorEsperado)
-    ? pix.valorEsperado.toFixed(2).replace(".", ",")
-    : "0,00";
-
-  return `Pagamento via Pix\n\nValor: R$ ${valor}\n\nCopie o código abaixo e pague no aplicativo do seu banco:\n\n${pix.qrCode}\n\nAssim que o Mercado Pago confirmar, seu pedido será liberado automaticamente.`;
+  return [
+    `Pagamento via Pix 💸\n\nPra confirmar seu pedido, faça o pagamento do Pix abaixo.\n\n⚠️ Seu pedido só será liberado após a confirmação do pagamento.`,
+    pix.qrCode,
+    `Copie o código acima e pague no app do seu banco.\n\nAssim que o pagamento for confirmado, seu pedido será liberado automaticamente ✅`,
+  ];
 }
 
 export function avaliarWebhookPixPassivo(payload: PixWebhookPayload, pedidos: PedidoComPix[]): PixWebhookResultado {
