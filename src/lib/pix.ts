@@ -188,7 +188,15 @@ export async function prepararPixProviderMercadoPago(input: PrepararPixProviderI
   if (!pix.txid || typeof pix.valorEsperado !== "number" || !Number.isFinite(pix.valorEsperado)) return pix;
 
   const auth = await resolveActiveMercadoPagoAuth();
-  if (!auth.active) return pix;
+  if (!auth.active) {
+    // Fallback nao pode ser silencioso (Nivel 6.7): registra que este pedido
+    // caiu no Pix manual por falta de integracao ativa, sem expor token.
+    console.warn("[Pix] Mercado Pago nao configurado/ativo — usando Pix manual", {
+      pedidoId: input.pedidoId,
+      motivo: "integracao_inativa",
+    });
+    return pix;
+  }
 
   try {
     const cobranca = await criarCobrancaPixMercadoPago({
@@ -213,7 +221,12 @@ export async function prepararPixProviderMercadoPago(input: PrepararPixProviderI
       status: "pendente",
     };
   } catch (error) {
-    console.warn("[Pix] Mercado Pago indisponivel; mantendo Pix manual", error);
+    // Erro estruturado com pedidoId e motivo, sem expor token (MercadoPagoPixError
+    // nunca inclui o access token na mensagem — ver mercadoPagoPix.ts).
+    console.error("[Pix] Falha ao criar cobranca Mercado Pago — usando Pix manual", {
+      pedidoId: input.pedidoId,
+      motivo: error instanceof Error ? error.message : "erro_desconhecido",
+    });
     return pix;
   }
 }
@@ -287,6 +300,22 @@ export function anexarPixMercadoPagoEmMensagens(messages: string[], pix: PixClie
   return messages.map((message, index) => (
     index === messages.length - 1 ? `${message}${textoPix}` : message
   ));
+}
+
+// Nivel 6.7 — mensagem dedicada de Pix dinamico Mercado Pago no WhatsApp.
+// Retorna undefined quando nao ha cobranca Mercado Pago valida (provider
+// manual ou qrCode ausente) — quem chama deve manter a mensagem de fallback
+// manual original nesse caso, nunca substituir por esta. O corpo eh sempre o
+// payload Pix completo devolvido pelo Mercado Pago (pix.qrCode, formato EMV
+// "000201..."), nunca a chave estatica configurada pelo admin.
+export function montarMensagemPixMercadoPagoWhatsApp(pix: PixCliente | undefined): string | undefined {
+  if (pix?.provider !== "mercadopago" || !pix.qrCode) return undefined;
+
+  const valor = typeof pix.valorEsperado === "number" && Number.isFinite(pix.valorEsperado)
+    ? pix.valorEsperado.toFixed(2).replace(".", ",")
+    : "0,00";
+
+  return `Pagamento via Pix\n\nValor: R$ ${valor}\n\nCopie o código abaixo e pague no aplicativo do seu banco:\n\n${pix.qrCode}\n\nAssim que o Mercado Pago confirmar, seu pedido será liberado automaticamente.`;
 }
 
 export function avaliarWebhookPixPassivo(payload: PixWebhookPayload, pedidos: PedidoComPix[]): PixWebhookResultado {

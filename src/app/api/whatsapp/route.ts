@@ -16,7 +16,7 @@ import { proximoNumeroPedido } from "@/lib/numeracao";
 import { salvarStatusConexao, botPodeResponder, StatusConexao } from "@/lib/conexaoWhatsapp";
 import { ehConfirmacaoPedido } from "@/lib/confirmacaoPedido";
 import { escolherStepDeRetomada, detectarConversaMorta } from "@/lib/reviverConversa";
-import { anexarPixMercadoPagoEmMensagens, confirmarPixMetadata, criarPixMetadata, marcarPixRevisaoOuSuspeito, prepararPixProviderMercadoPago, registrarPixEvidencia, serializarPixCliente, type PixCliente, type PixEvidenciaOrigem, type PixMetadata } from "@/lib/pix";
+import { confirmarPixMetadata, criarPixMetadata, marcarPixRevisaoOuSuspeito, montarMensagemPixMercadoPagoWhatsApp, prepararPixProviderMercadoPago, registrarPixEvidencia, serializarPixCliente, type PixCliente, type PixEvidenciaOrigem, type PixMetadata } from "@/lib/pix";
 import { chaveDedupIdentificadorComprovantePix, extrairIdentificadorComprovantePix, normalizarIdentificadorComprovantePix, PIX_COMPROVANTE_E2E_TTL_SEGUNDOS, type PixComprovanteIdentificador } from "@/lib/pixComprovanteEvidencia";
 import { chaveDedupComprovantePix, gerarHashComprovantePixMidia, gerarHashComprovantePixTexto, PIX_COMPROVANTE_DEDUP_TTL_SEGUNDOS } from "@/lib/pixComprovanteHash";
 import { avaliarHorarioComprovantePix, extrairDataHoraComprovantePix, FUSO_OPERACIONAL_PIX, type PixComprovanteHorarioExtraido, type ResultadoHorarioComprovantePix } from "@/lib/pixComprovanteHorario";
@@ -1378,18 +1378,31 @@ export async function POST(req: NextRequest) {
     const stepAnterior = currentSession!.step;
     const result = processMessage(mensagemProcessada, currentSession!);
 
-    // Se acabou de entrar em aguardando_pix, registra timestamp
-    if (result.session?.step === "aguardando_pix" && currentSession!.step === "confirm") {
-      result.session = { ...result.session, pixIniciadoEm: Date.now(), pixCobrancas: 0 } as any;
+    // Pix chegando em aguardando_pix — cobre tanto a tela de confirmacao (delivery/dine_in)
+    // quanto o fluxo de retirada, que fecha o pedido direto sem passar por "confirm"
+    // (finalizarPedidoPickup, em bot.ts). Antes do Nivel 6.7, esse segundo caminho nunca
+    // chamava salvarPedido() aqui — o pedido só era criado (e a cobranca Mercado Pago
+    // só era tentada) quando o comprovante chegava, e o cliente via nesse meio-tempo
+    // só a chave Pix estatica. Detectar a TRANSICAO para aguardando_pix (em vez de
+    // depender do step anterior ser "confirm") cobre os dois fluxos com o mesmo código.
+    const entrouEmAguardandoPixAgora = result.session?.step === "aguardando_pix" && !(result.session as any).pedidoId;
+    if (entrouEmAguardandoPixAgora) {
+      // Usa result.session (pós-processMessage), não currentSession — no fluxo de
+      // retirada o pagamento é escolhido e o pedido fecha no MESMO turno, então
+      // paymentMethod/cart/troco só existem na sessão já processada.
+      const { pedidoId, pixCliente } = await salvarPedido(result.session, phone, config);
+      result.session = { ...result.session, pedidoId, pixIniciadoEm: Date.now(), pixCobrancas: 0 } as any;
+      // Só substitui a mensagem quando a cobranca Mercado Pago foi criada de fato —
+      // nunca troca o texto de fallback manual (que já orienta a enviar comprovante).
+      const mensagemPixDinamico = montarMensagemPixMercadoPagoWhatsApp(pixCliente);
+      if (mensagemPixDinamico) result.messages = [mensagemPixDinamico];
     }
 
-    // Salva pedido na confirmacao — Pix e nao-Pix salvos aqui.
-    // Para Pix, o pedido fica visivel no painel com pixConfirmado:false ate o comprovante chegar.
-    // processarComprovante verifica se o pedido ja existe antes de salvar novamente.
-    if (currentSession!.step === "confirm" && ehConfirmacaoPedido(messageText)) {
-      const { pedidoId, pixCliente } = await salvarPedido(currentSession!, phone, config);
+    // Salva pedido nao-Pix na confirmacao — pedidos Pix ja foram salvos acima,
+    // no momento em que entraram em aguardando_pix (delivery/dine_in ou retirada).
+    if (currentSession!.step === "confirm" && ehConfirmacaoPedido(messageText) && !temPixNoPagamento(currentSession!.paymentMethod)) {
+      const { pedidoId } = await salvarPedido(currentSession!, phone, config);
       result.session = { ...result.session, pedidoId } as any;
-      result.messages = anexarPixMercadoPagoEmMensagens(result.messages, pixCliente);
       if (config.limitePico > 0) {
         const pedidosAtivos = (await redis.get<Pedido[]>("pedidos") || []).filter(p => p.status === "em_preparo" && !p.escalonado).length;
         if (pedidosAtivos >= config.limitePico) {
