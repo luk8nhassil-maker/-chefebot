@@ -1,14 +1,14 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { QRCodeSVG } from "qrcode.react";
-import { Pizza, Sandwich, Soup, CupSoda, GlassWater, Zap, Banknote, CreditCard, Shuffle, Wallet, Bike, Store, UtensilsCrossed, Sun, Moon, Copy } from "lucide-react";
+import { Pizza, Sandwich, Soup, CupSoda, GlassWater, Zap, Banknote, CreditCard, Shuffle, Wallet, Bike, Store, UtensilsCrossed, Sun, Moon } from "lucide-react";
 import PanelShell from "@/components/PanelShell";
 import { useLiveMenu, cartItemEsgotado } from "./liveMenu";
 import { CARDAPIO_ILLUSTRATIONS, CardapioIllustration } from "@/lib/cardapioVisuals";
 import { useTheme } from "@/components/ThemeToggle";
 import ClientBottomNav from "@/components/ClientBottomNav";
 import { tabAtivaCardapio, consumirFlagAbrirSacola } from "@/lib/pedidoAtivoCliente";
+import PixPagamentoCard from "./PixPagamentoCard";
 
 // Ícones de categoria da home (menu/navegação) — lucide-react, sem emoji.
 // Mantidos separados de ICONS (que continua usando emoji para os itens
@@ -740,21 +740,6 @@ const ICONS = {
 // pedido em preparo / saiu para entrega (STATUS_PEDIDO_LABEL), cardápio
 // vazio e erro de carregamento — este último some no fallback isolado de
 // `CardapioPage` (fora do <style>{CSS}</style> de PublicCardapio).
-
-async function copiarTexto(texto: string): Promise<boolean> {
-  try { await navigator.clipboard.writeText(texto); return true } catch {}
-  try {
-    const ta = document.createElement("textarea")
-    ta.value = texto
-    ta.style.position = "fixed"
-    ta.style.opacity = "0"
-    document.body.appendChild(ta)
-    ta.select()
-    const ok = document.execCommand("copy")
-    document.body.removeChild(ta)
-    return ok
-  } catch { return false }
-}
 
 export function PublicCardapio({ menu }: { menu: MenuType }) {
   // Tema compartilhado com o resto do site (localStorage['chefebot-theme']):
@@ -1859,42 +1844,42 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                 <p>Valeu, {nome.split(" ")[0]}! A pizzaria já recebeu seu pedido e vai começar a preparar em breve.</p>
                 {pedidoConfirmado && (
                   <>
-                    <p style={{ fontWeight: 700, fontSize: 18, margin: "12px 0 4px" }}>Pedido #{pedidoConfirmado.numero}</p>
-                    <p style={{ color: "var(--brand-text)", fontSize: 15, fontWeight: 800, margin: "0 0 8px" }}>{STATUS_PEDIDO_LABEL[statusPedidoConfirmado]}</p>
-                    <p style={{ color: "var(--muted)", fontSize: 14, marginBottom: 16 }}>Total: {money(pedidoConfirmado.total)}</p>
+                    {isPagamentoPix ? (
+                      <div className="pix-order-card">
+                        <div className="pix-order-row">
+                          <div>
+                            <p className="pix-order-numero">Pedido #{pedidoConfirmado.numero}</p>
+                            <p className="pix-order-status">{STATUS_PEDIDO_LABEL[statusPedidoConfirmado]}</p>
+                          </div>
+                          <div className="pix-order-total">
+                            <p className="pix-order-total-valor">Total: {money(pedidoConfirmado.total)}</p>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <p style={{ fontWeight: 700, fontSize: 18, margin: "12px 0 4px" }}>Pedido #{pedidoConfirmado.numero}</p>
+                        <p style={{ color: "var(--brand-text)", fontSize: 15, fontWeight: 800, margin: "0 0 8px" }}>{STATUS_PEDIDO_LABEL[statusPedidoConfirmado]}</p>
+                        <p style={{ color: "var(--muted)", fontSize: 14, marginBottom: 16 }}>Total: {money(pedidoConfirmado.total)}</p>
+                      </>
+                    )}
                     <a href="/cliente" style={{ display: "block", background: "var(--surface)", border: "1px solid var(--line-strong)", borderRadius: 12, padding: "12px 14px", marginBottom: 16, textDecoration: "none", textAlign: "left" }}>
                       <span style={{ display: "block", fontSize: 14, fontWeight: 700, color: "var(--text)" }}>🎁 Quer que essa compra conte para sua fidelidade?</span>
                       <span style={{ display: "block", fontSize: 12.5, color: "var(--text-sub)", marginTop: 2 }}>Entre com seu WhatsApp e acompanhe seu progresso.</span>
                     </a>
                     {isPagamentoPix && (
-                      <div style={{ textAlign: "left", background: "var(--surface)", border: "1px solid var(--line-strong)", borderRadius: 10, padding: "14px", marginBottom: 16 }}>
-                        <CardapioIllustration compact icon={statusPixCliente === "pago" ? ICONS.check : CARDAPIO_ILLUSTRATIONS.aguardandoPix.icon} title={statusPixCliente === "aguardando_pix" ? "Quase lá, falta o Pix" : PIX_STATUS_LABEL[statusPixCliente]} />
-                        <div style={{ display: "inline-flex", marginTop: 12, marginBottom: 12, padding: "5px 10px", borderRadius: 999, background: statusPixCliente === "pago" ? "var(--green-soft)" : "var(--brand-soft)", color: statusPixCliente === "pago" ? "var(--green)" : "var(--brand)", fontSize: 12, fontWeight: 800 }}>
-                          {PIX_STATUS_LABEL[statusPixCliente]}
-                        </div>
-                        {isHibrido && hibridoAtual && (
-                          <div style={{ display: "grid", gap: 4, fontSize: 14, color: "var(--text)", lineHeight: 1.5, marginBottom: 12 }}>
-                            <p style={{ margin: 0 }}><strong>Pix:</strong> {money(hibridoAtual.pix)} — {PIX_STATUS_LABEL[statusPixCliente]}</p>
-                            <p style={{ margin: 0 }}><strong>Dinheiro:</strong> {money(hibridoAtual.dinheiro)} na hora de receber o pedido</p>
-                            {trocoConfirmadoTexto && <p style={{ margin: 0 }}><strong>Troco:</strong> {trocoConfirmadoTexto}</p>}
-                          </div>
-                        )}
-                        <div style={{ display: "grid", gap: 8, fontSize: 14, color: "var(--text)", lineHeight: 1.45 }}>
-                          {pixPedido?.chavePix && <div style={{ wordBreak: "break-word" }}><strong>Chave Pix:</strong> {pixPedido.chavePix}</div>}
-                          {pixPedido?.beneficiario && <div><strong>Beneficiário:</strong> {pixPedido.beneficiario}</div>}
-                        </div>
-                        {temPixCopiaECola && (
-                          <div className="pix-qrcode-wrap">
-                            <QRCodeSVG className="pix-qrcode" value={pixCodigoCopiaECola} size={220} level="M" aria-label="QR Code Pix" />
-                          </div>
-                        )}
-                        {temPixCopiaECola && (
-                          <button className="btn btn-sm btn-ghost pix-copy-btn" onClick={async () => showToast((await copiarTexto(pixCodigoCopiaECola)) ? "Pix copiado" : "Não consegui copiar. Toque no código e copie manualmente.")}>
-                            <Copy size={17} aria-hidden="true" />
-                            <span>Copiar código Pix</span>
-                          </button>
-                        )}
-                      </div>
+                      <PixPagamentoCard
+                        statusPix={statusPixCliente}
+                        statusLabel={PIX_STATUS_LABEL[statusPixCliente]}
+                        pixPedido={pixPedido}
+                        pixCodigoCopiaECola={pixCodigoCopiaECola}
+                        temPixCopiaECola={temPixCopiaECola}
+                        isHibrido={isHibrido}
+                        hibridoAtual={hibridoAtual}
+                        trocoConfirmadoTexto={trocoConfirmadoTexto}
+                        money={money}
+                        onToast={showToast}
+                      />
                     )}
                     {!isPagamentoPix && isDinheiroPuro && (
                       <div style={{ textAlign: "left", background: "var(--surface)", border: "1px solid var(--line-strong)", borderRadius: 10, padding: "14px", marginBottom: 16, fontSize: 14, color: "var(--text)", lineHeight: 1.5 }}>
@@ -2415,10 +2400,59 @@ main{width:100%;padding:6px 20px 20px}
 @keyframes pop{from{transform:scale(0)}to{transform:scale(1)}}
 .success h2{font-family:var(--font-ui);font-weight:600;font-size:24px;margin-bottom:9px;letter-spacing:-.4px}
 .success p{color:var(--text-sub);font-size:15px;margin-bottom:5px}
-.pix-qrcode-wrap{display:flex;justify-content:center;margin:16px 0 12px}
-.pix-qrcode{width:min(220px,100%);height:auto;border-radius:14px;border:1px solid var(--line);box-shadow:var(--shadow-sm)}
-.pix-copy-btn{margin-top:12px;display:flex;align-items:center;justify-content:center;gap:8px;background:var(--surface2);border:1px solid var(--line-strong);color:var(--text);box-shadow:none}
-.pix-copy-btn svg{flex:0 0 auto}
+.pix-order-card{text-align:left;background:var(--surface);border:1px solid var(--line-strong);border-radius:18px;padding:16px 18px;margin-bottom:14px;box-shadow:var(--shadow-sm);animation:pixCardIn .4s ease-out both}
+.pix-order-row{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.pix-order-numero{margin:0 0 4px;font-size:17px;font-weight:800;letter-spacing:-.2px}
+.pix-order-status{margin:0;font-size:13px;font-weight:600;color:var(--text-sub)}
+.pix-order-total{text-align:right;flex:0 0 auto}
+.pix-order-total-valor{margin:0;font-size:16px;font-weight:800;color:var(--brand-text);white-space:nowrap}
+.pix-premium{display:flex;flex-direction:column;gap:14px;text-align:left;margin-bottom:16px}
+.pix-status-card{display:flex;align-items:center;gap:12px;background:var(--surface);border:1px solid var(--line-strong);border-radius:18px;padding:14px 16px;box-shadow:var(--shadow-sm);animation:pixCardIn .4s ease-out .05s both}
+.pix-status-icon{flex:0 0 auto;width:42px;height:42px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:var(--brand-soft);color:var(--brand-text)}
+.pix-status-card.aguardando .pix-status-icon{animation:pixPulse 2.2s ease-in-out infinite}
+.pix-status-card.pago .pix-status-icon{background:var(--green-soft);color:var(--green)}
+.pix-status-copy{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.pix-status-titulo{font-size:14.5px;font-weight:700;color:var(--text)}
+.pix-status-sub{font-size:12.5px;color:var(--text-sub);line-height:1.35}
+.pix-status-badge{flex:0 0 auto;padding:5px 11px;border-radius:999px;font-size:11.5px;font-weight:800;background:var(--brand-soft);color:var(--brand-text);white-space:nowrap}
+.pix-status-badge.pago{background:var(--green-soft);color:var(--green)}
+.pix-mensagem-principal{text-align:center;padding:4px 6px 2px;animation:pixCardIn .4s ease-out .1s both}
+.pix-mensagem-titulo{margin:0 0 6px;font-size:19px;font-weight:800;line-height:1.35;letter-spacing:-.2px}
+.pix-mensagem-principal.pago .pix-mensagem-titulo{color:var(--green)}
+.pix-destaque{color:var(--brand-text);background:var(--brand-soft);padding:1px 6px;border-radius:6px}
+.pix-mensagem-sub{margin:0;font-size:13.5px;color:var(--text-sub);line-height:1.5}
+.pix-hibrido-card{text-align:left;background:var(--surface);border:1px solid var(--line-strong);border-radius:16px;padding:14px 16px;display:grid;gap:4px;font-size:14px;color:var(--text);line-height:1.5;animation:pixCardIn .4s ease-out .12s both}
+.pix-hibrido-card p{margin:0}
+.pix-qr-card{display:flex;flex-direction:column;align-items:center;gap:10px;background:var(--surface);border:1px solid var(--line-strong);border-radius:20px;padding:22px 18px;box-shadow:var(--shadow-sm);animation:pixCardIn .4s ease-out .16s both}
+.pix-qr-glow{padding:10px;border-radius:16px;background:var(--surface);box-shadow:0 0 0 1px var(--line),0 0 26px color-mix(in srgb, var(--primary) 22%, transparent)}
+.pix-qr-svg{width:min(220px,60vw);max-width:220px;height:auto;display:block;border-radius:10px}
+.pix-qr-legenda{margin:0;font-size:12.5px;color:var(--text-sub);text-align:center}
+.pix-copia-cola-card{text-align:left;background:var(--surface);border:1px solid var(--line-strong);border-radius:18px;padding:16px;display:flex;flex-direction:column;gap:10px;box-shadow:var(--shadow-sm);animation:pixCardIn .4s ease-out .2s both}
+.pix-copia-cola-label{font-size:11px;font-weight:700;color:var(--text-sub);text-transform:uppercase;letter-spacing:.14em}
+.pix-copia-cola-campo{background:var(--surface2);border:1px solid var(--line);border-radius:12px;padding:11px 13px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;color:var(--text-sub);line-height:1.5;word-break:break-all;max-height:74px;overflow:hidden}
+.pix-copiar-btn{width:100%;display:flex;align-items:center;justify-content:center;gap:8px;background:var(--brand);color:var(--brand-foreground);border:none;border-radius:14px;padding:14px;font-family:var(--font-ui);font-size:15px;font-weight:700;cursor:pointer;transition:transform .14s,background .18s,color .18s;box-shadow:0 3px 12px var(--brand-soft)}
+.pix-copiar-btn:active{transform:scale(.98)}
+.pix-copiar-btn.copiado{background:var(--green);box-shadow:0 3px 12px var(--green-soft)}
+.pix-chave-manual{background:var(--surface);border:1px solid var(--line-strong);border-radius:16px;overflow:hidden;animation:pixCardIn .4s ease-out .22s both}
+.pix-chave-manual-toggle{width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;background:transparent;border:none;padding:13px 16px;font-family:var(--font-ui);font-size:13.5px;font-weight:700;color:var(--text);cursor:pointer}
+.pix-chave-manual-toggle-label{display:flex;align-items:center;gap:8px;color:var(--text-sub)}
+.pix-chave-manual-chevron{transition:transform .2s}
+.pix-chave-manual-chevron.open{transform:rotate(180deg)}
+.pix-chave-manual-conteudo{padding:0 16px 14px;display:grid;gap:4px;font-size:13.5px;color:var(--text);line-height:1.5;animation:pixFadeIn .2s ease-out both}
+.pix-chave-manual-conteudo p{margin:0}
+.pix-como-funciona{background:var(--surface);border:1px solid var(--line-strong);border-radius:18px;padding:16px;animation:pixCardIn .4s ease-out .26s both}
+.pix-como-funciona-titulo{display:block;font-size:11px;font-weight:700;color:var(--text-sub);text-transform:uppercase;letter-spacing:.14em;margin-bottom:12px}
+.pix-como-funciona-passos{display:flex;flex-direction:column;gap:12px}
+.pix-passo{display:flex;align-items:center;gap:10px}
+.pix-passo-icone{flex:0 0 auto;width:34px;height:34px;border-radius:10px;background:var(--brand-soft);color:var(--brand-text);display:flex;align-items:center;justify-content:center}
+.pix-passo-num{flex:0 0 auto;width:18px;height:18px;border-radius:50%;background:var(--line-strong);color:var(--text-sub);font-size:10.5px;font-weight:800;display:flex;align-items:center;justify-content:center}
+.pix-passo-texto{font-size:13.5px;color:var(--text);font-weight:600;line-height:1.4}
+@keyframes pixCardIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@keyframes pixFadeIn{from{opacity:0}to{opacity:1}}
+@keyframes pixPulse{0%,100%{box-shadow:0 0 0 0 var(--brand-soft)}50%{box-shadow:0 0 0 6px transparent}}
+@media(min-width:640px){.pix-como-funciona-passos{flex-direction:row}.pix-passo{flex-direction:column;text-align:center;flex:1;gap:6px}}
+@media(max-width:380px){.pix-status-card{flex-wrap:wrap}.pix-status-copy{flex-basis:100%}.pix-status-badge{margin-left:54px;margin-top:4px}}
+@media(prefers-reduced-motion:reduce){.pix-order-card,.pix-status-card,.pix-mensagem-principal,.pix-hibrido-card,.pix-qr-card,.pix-copia-cola-card,.pix-chave-manual,.pix-como-funciona,.pix-chave-manual-conteudo{animation:none}.pix-status-card.aguardando .pix-status-icon{animation:none}.pix-copiar-btn{transition:none}}
 .toast{position:fixed;bottom:168px;left:50%;transform:translateX(-50%);background:var(--green);color:var(--green-foreground);padding:12px 22px;border-radius:30px;font-size:13.5px;font-weight:500;z-index:60;white-space:nowrap}
 .qty-grid{display:flex;flex-direction:column;gap:10px}
 @media(min-width:480px){.qty-grid{display:grid;grid-template-columns:1fr 1fr;gap:11px}}
