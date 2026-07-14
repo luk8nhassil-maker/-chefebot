@@ -9,6 +9,10 @@ const { store, redisMock } = vi.hoisted(() => {
       store.set(key, value);
       return "OK";
     }),
+    del: vi.fn(async (key: string) => {
+      const existia = store.delete(key);
+      return existia ? 1 : 0;
+    }),
   };
   return { store, redisMock };
 });
@@ -34,6 +38,7 @@ describe("pixGuardiaoScheduler", () => {
     store.clear();
     publishJSONMock.mockClear();
     clientCtorMock.mockClear();
+    redisMock.del.mockClear();
     vi.resetModules();
     delete process.env.QSTASH_TOKEN;
     delete process.env.VERCEL_URL;
@@ -62,7 +67,8 @@ describe("pixGuardiaoScheduler", () => {
     const chamada = publishJSONMock.mock.calls[0][0];
     expect(chamada.body).toEqual({ pedidoId: "pedido-1", tentativa: 1 });
     expect(chamada.delay).toBe(10);
-    expect(chamada.deduplicationId).toBe("pix-guardiao:pedido-1:1");
+    expect(chamada.deduplicationId).toBe("pix-guardiao-pedido-1-1");
+    expect(chamada.deduplicationId).not.toContain(":");
     expect(chamada.url).toBe("https://chefebot-pjif.vercel.app/api/interno/pix-guardiao/verificar");
 
     // Segunda chamada para o mesmo pedido: lock NX ja adquirido -> no-op.
@@ -96,5 +102,113 @@ describe("pixGuardiaoScheduler", () => {
     publishJSONMock.mockRejectedValueOnce(new Error("qstash indisponivel"));
     const falhou = await mod.agendarProximaVerificacaoPixGuardiao({ pedidoId: "pedido-5", tentativa: 1, delayMs: 10_000 });
     expect(falhou).toBe(false);
+  });
+
+  describe("gerarDeduplicationIdGuardiaoPix", () => {
+    test("nunca contem ':' mesmo com pedidoId contendo caracteres especiais", async () => {
+      const { gerarDeduplicationIdGuardiaoPix } = await import("./pixGuardiaoScheduler");
+      const id = gerarDeduplicationIdGuardiaoPix("pedido:123:abc", 1);
+      expect(id).not.toContain(":");
+    });
+
+    test("nunca contem espacos", async () => {
+      const { gerarDeduplicationIdGuardiaoPix } = await import("./pixGuardiaoScheduler");
+      const id = gerarDeduplicationIdGuardiaoPix("pedido com espaco 123", 2);
+      expect(id).not.toMatch(/\s/);
+    });
+
+    test("substitui qualquer caractere fora de letras, numeros, hifen e underscore", async () => {
+      const { gerarDeduplicationIdGuardiaoPix } = await import("./pixGuardiaoScheduler");
+      const id = gerarDeduplicationIdGuardiaoPix("pedido#123@abc!/xyz", 1);
+      expect(id).toMatch(/^[A-Za-z0-9_-]+$/);
+    });
+
+    test("mesmo pedidoId e tentativa geram sempre o mesmo id (deterministico)", async () => {
+      const { gerarDeduplicationIdGuardiaoPix } = await import("./pixGuardiaoScheduler");
+      const id1 = gerarDeduplicationIdGuardiaoPix("pedido-abc", 3);
+      const id2 = gerarDeduplicationIdGuardiaoPix("pedido-abc", 3);
+      expect(id1).toBe(id2);
+    });
+
+    test("tentativas diferentes geram ids diferentes para o mesmo pedido", async () => {
+      const { gerarDeduplicationIdGuardiaoPix } = await import("./pixGuardiaoScheduler");
+      const id1 = gerarDeduplicationIdGuardiaoPix("pedido-abc", 1);
+      const id2 = gerarDeduplicationIdGuardiaoPix("pedido-abc", 2);
+      expect(id1).not.toBe(id2);
+    });
+
+    test("mantem tamanho seguro mesmo com pedidoId muito longo", async () => {
+      const { gerarDeduplicationIdGuardiaoPix } = await import("./pixGuardiaoScheduler");
+      const pedidoIdGigante = "x".repeat(5000);
+      const id = gerarDeduplicationIdGuardiaoPix(pedidoIdGigante, 1);
+      expect(id.length).toBeLessThan(200);
+    });
+  });
+
+  test("publishJSON recebe o deduplicationId corrigido (sem ':')", async () => {
+    process.env.QSTASH_TOKEN = "token-teste";
+    const mod = await import("./pixGuardiaoScheduler");
+    await mod.agendarProximaVerificacaoPixGuardiao({ pedidoId: "pedido:com:dois-pontos", tentativa: 4, delayMs: 10_000 });
+    const chamada = publishJSONMock.mock.calls[0][0];
+    expect(chamada.deduplicationId).toBe(mod.gerarDeduplicationIdGuardiaoPix("pedido:com:dois-pontos", 4));
+    expect(chamada.deduplicationId).not.toContain(":");
+    // O pedidoId usado no corpo (para localizar o pedido no endpoint) continua intacto.
+    expect(chamada.body).toEqual({ pedidoId: "pedido:com:dois-pontos", tentativa: 4 });
+  });
+
+  test("publicacao bem-sucedida mantem o lock da cadeia (segunda chamada nao duplica)", async () => {
+    process.env.QSTASH_TOKEN = "token-teste";
+    const mod = await import("./pixGuardiaoScheduler");
+
+    await mod.iniciarCadeiaGuardiaoPix("pedido-lock-ok");
+    expect(publishJSONMock).toHaveBeenCalledTimes(1);
+    expect(store.has("pix:guardiao:cadeia:lock:pedido-lock-ok")).toBe(true);
+
+    await mod.iniciarCadeiaGuardiaoPix("pedido-lock-ok");
+    expect(publishJSONMock).toHaveBeenCalledTimes(1);
+  });
+
+  test("publicacao com falha libera o lock imediatamente", async () => {
+    process.env.QSTASH_TOKEN = "token-teste";
+    const mod = await import("./pixGuardiaoScheduler");
+
+    publishJSONMock.mockRejectedValueOnce(new Error("qstash indisponivel"));
+    await mod.iniciarCadeiaGuardiaoPix("pedido-lock-falha");
+
+    expect(store.has("pix:guardiao:cadeia:lock:pedido-lock-falha")).toBe(false);
+    expect(redisMock.del).toHaveBeenCalledWith("pix:guardiao:cadeia:lock:pedido-lock-falha");
+  });
+
+  test("apos falha, uma nova tentativa de iniciar a cadeia e permitida (nao fica bloqueada ate o TTL)", async () => {
+    process.env.QSTASH_TOKEN = "token-teste";
+    const mod = await import("./pixGuardiaoScheduler");
+
+    publishJSONMock.mockRejectedValueOnce(new Error("qstash indisponivel"));
+    await mod.iniciarCadeiaGuardiaoPix("pedido-retry");
+    expect(publishJSONMock).toHaveBeenCalledTimes(1);
+
+    // Segunda tentativa (ex.: próxima criação/replay) — lock foi liberado, publica de novo.
+    await mod.iniciarCadeiaGuardiaoPix("pedido-retry");
+    expect(publishJSONMock).toHaveBeenCalledTimes(2);
+    expect(store.has("pix:guardiao:cadeia:lock:pedido-retry")).toBe(true);
+  });
+
+  test("chamadas repetidas para o mesmo pedidoId+tentativa sempre enviam o mesmo deduplicationId ao QStash (dedup do lado do QStash depende disso)", async () => {
+    process.env.QSTASH_TOKEN = "token-teste";
+    const mod = await import("./pixGuardiaoScheduler");
+
+    await mod.agendarProximaVerificacaoPixGuardiao({ pedidoId: "pedido-dup", tentativa: 1, delayMs: 10_000 });
+    await mod.agendarProximaVerificacaoPixGuardiao({ pedidoId: "pedido-dup", tentativa: 1, delayMs: 10_000 });
+
+    expect(publishJSONMock).toHaveBeenCalledTimes(2);
+    const [primeira, segunda] = publishJSONMock.mock.calls;
+    expect(primeira[0].deduplicationId).toBe(segunda[0].deduplicationId);
+  });
+
+  test("criacao do Pix (iniciarCadeiaGuardiaoPix) nunca lanca mesmo se o QStash estiver indisponivel", async () => {
+    process.env.QSTASH_TOKEN = "token-teste";
+    const mod = await import("./pixGuardiaoScheduler");
+    publishJSONMock.mockRejectedValueOnce(new Error("qstash indisponivel"));
+    await expect(mod.iniciarCadeiaGuardiaoPix("pedido-sem-throw")).resolves.toBeUndefined();
   });
 });
