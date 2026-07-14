@@ -1,6 +1,7 @@
 import { temPixNoPagamento, valorPixEsperado } from "./bot";
 import { resolveActiveMercadoPagoAuth } from "./mercadoPagoIntegracao";
 import { criarCobrancaPixMercadoPago } from "./mercadoPagoPix";
+import { iniciarCadeiaGuardiaoPix } from "./pixGuardiaoScheduler";
 import { normalizarWhatsAppPizzaria } from "./pixCliente";
 import { gerarPixCopiaEColaEstatico } from "./pixCopiaECola";
 import type { CriteriosEvidenciaPix, DecisaoEvidenciaPix } from "./pixComprovanteAvaliacao";
@@ -236,6 +237,13 @@ export async function prepararPixProviderMercadoPago(input: PrepararPixProviderI
       accessTokenOverride: auth.accessToken ?? undefined,
       payerEmailFallbackOverride: auth.payerEmailFallback,
     });
+
+    // Inicia a cadeia server-side do Guardião Pix (QStash) — best-effort e
+    // desacoplada do painel: mesmo que ninguém abra /pedidos, a verificação
+    // 10s/20s/30s continua avançando sozinha até confirmar/cancelar/expirar.
+    // Aguardado (mas nunca lança) para não correr risco de a função
+    // serverless encerrar antes do publish em fire-and-forget.
+    await iniciarCadeiaGuardiaoPix(input.pedidoId);
 
     return {
       ...pix,

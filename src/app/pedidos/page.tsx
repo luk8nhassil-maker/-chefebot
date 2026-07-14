@@ -779,10 +779,13 @@ export default function PedidosPage() {
 
   const reconciliarPixMercadoPago = () => executarReconciliacaoPix(true)
 
-  // Guardião Pix — roda no mesmo ciclo da auto-verificação (nunca um timer
-  // separado por pagamento). Best-effort: nunca mostra alert, nunca bloqueia
-  // a UI; só atualiza o texto de "última verificação" quando recuperou algo,
-  // reaproveitando o mesmo espaço já existente no painel (sem novas telas).
+  // Guardião Pix — desde a cadeia server-side via QStash (pixGuardiaoScheduler.ts,
+  // iniciada assim que o Pix Mercado Pago é criado), esta chamada do painel é
+  // REDUNDÂNCIA, não o caminho principal: a verificação 10s/20s/30s continua
+  // avançando sozinha mesmo com o painel fechado. Mantida aqui só como camada
+  // extra (nunca um timer separado por pagamento). Best-effort: nunca mostra
+  // alert, nunca bloqueia a UI; só atualiza o texto de "última verificação"
+  // quando recuperou algo, reaproveitando o mesmo espaço já existente no painel.
   const executarGuardiaoPixPainel = async () => {
     try {
       const r = await fetch("/api/admin/mercadopago/guardiao-pix", { method: "POST" })

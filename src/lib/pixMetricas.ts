@@ -118,7 +118,9 @@ export type ContadorPixMetrica =
   | "locks_recuperados"
   | "duplicidade_evitada"
   | "guardiao_recuperado"
-  | "guardiao_failed";
+  | "guardiao_failed"
+  | "guardiao_cadeia_tick"
+  | "guardiao_cadeia_finalizada";
 
 const PREFIXO_CONTADOR = "pix:metricas:contador:";
 
@@ -140,6 +142,8 @@ export async function obterContadoresPix(): Promise<Record<ContadorPixMetrica, n
     "duplicidade_evitada",
     "guardiao_recuperado",
     "guardiao_failed",
+    "guardiao_cadeia_tick",
+    "guardiao_cadeia_finalizada",
   ];
   const valores = await Promise.all(
     nomes.map(async (nome) => {
