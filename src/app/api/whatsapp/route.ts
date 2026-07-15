@@ -506,6 +506,39 @@ async function bloquearComprovantePixAnterior(
   await log("aviso", "Comprovante Pix anterior ao pedido", `Phone: ${phone} origem: ${origem} motivo: ${avaliacao.motivo}`);
 }
 
+// ── Etapa 2A: representação segura no histórico para entradas do cliente que
+// hoje desviam para caminhos especiais (imagem, PDF, áudio) antes de chegar ao
+// registro genérico de texto. Nunca inclui base64, payload bruto, URL
+// temporária ou qualquer dado técnico — só um marcador curto + o texto real
+// (legenda/nome de arquivo/transcrição) já extraído pelos campos do payload.
+
+function extrairTextoSeguro(valor: unknown): string {
+  return typeof valor === "string" ? valor.trim() : "";
+}
+
+// Remove caracteres de controle (quebra de linha, tab, BEL etc.) que
+// quebrariam o formato do marcador, e limita o nome a um tamanho seguro.
+function higienizarNomeArquivo(nome: unknown): string {
+  const bruto = extrairTextoSeguro(nome).replace(/[\x00-\x1F\x7F]/g, "").trim();
+  const LIMITE = 80;
+  return bruto.length > LIMITE ? bruto.slice(0, LIMITE) : bruto;
+}
+
+function montarMarcadorImagem(data: any): string {
+  const legenda = extrairTextoSeguro(data?.message?.imageMessage?.caption);
+  return legenda ? `[Imagem recebida] ${legenda}` : `[Imagem recebida]`;
+}
+
+function montarMarcadorDocumento(data: any): string {
+  const doc = data?.message?.documentMessage;
+  const nome = higienizarNomeArquivo(doc?.fileName);
+  const legenda = extrairTextoSeguro(doc?.caption);
+  if (nome && legenda) return `[Documento recebido: ${nome}] ${legenda}`;
+  if (nome) return `[Documento recebido: ${nome}]`;
+  if (legenda) return `[Documento PDF recebido] ${legenda}`;
+  return `[Documento PDF recebido]`;
+}
+
 async function processarComprovanteTexto(phone: string, texto: string, config: ConfigPizzaria) {
   try {
     const sessionKey = `session:${phone}`;
@@ -942,6 +975,11 @@ export async function POST(req: NextRequest) {
     );
     console.log("[PIX-DEBUG2] messageType:", messageType, "isImagem:", isImagem, "isPDF:", isPDF);
     if (isImagem || isPDF) {
+      // Registra a entrada do cliente (marcador seguro, nunca base64/payload)
+      // ANTES de processarComprovante() — garante que a mídia sempre apareça
+      // no histórico, independente do resultado da validação de Pix.
+      const marcadorMidia = isImagem ? montarMarcadorImagem(data) : montarMarcadorDocumento(data);
+      await registrarMensagem(phone, "cliente", marcadorMidia);
       await processarComprovante(phone, data, config, isImagem);
       return NextResponse.json({ ok: true });
     }
@@ -960,6 +998,10 @@ export async function POST(req: NextRequest) {
     );
     if (isPixReceipt) {
       console.log("[PIX-TEXT] Comprovante em texto detectado:", msgText.slice(0, 200));
+      // Registra o texto original do cliente (mesmo caminho/limite do log
+      // genérico de texto, aplicado dentro de registrarMensagem) antes de
+      // processar a validação do comprovante — nunca adiciona marcador extra.
+      await registrarMensagem(phone, "cliente", msgText);
       await processarComprovanteTexto(phone, msgText, config);
       return NextResponse.json({ ok: true });
     }
@@ -967,6 +1009,10 @@ export async function POST(req: NextRequest) {
     // Detecta áudio
     const isAudio = !!data?.message?.audioMessage || !!data?.message?.pttMessage
     if (isAudio) {
+      // Controla se a entrada do cliente já foi registrada nesta requisição,
+      // para nunca duplicar caso a transcrição tenha sucesso mas o restante
+      // do processamento caia no caminho de fallback (ex.: sessão ausente).
+      let clienteAudioRegistrado = false
       try {
         const configAudio = obterConfigEvolution()
         if (!configAudio) throw new Error("Provider de WhatsApp não configurado")
@@ -983,6 +1029,11 @@ export async function POST(req: NextRequest) {
           if (base64) {
             const transcricao = await transcreverAudio(base64, mimeType)
             if (transcricao) {
+              // Registra a entrada do cliente (só o texto já transcrito, nunca
+              // o áudio/base64 original) antes de qualquer resposta do bot,
+              // inclusive o eco da transcrição abaixo.
+              await registrarMensagem(phone, "cliente", `[Áudio transcrito] ${transcricao}`)
+              clienteAudioRegistrado = true
               await enviarMensagem(phone, `🎤 _"${transcricao}"_`)
               // Processa o texto transcrito como se o cliente tivesse digitado
               // Continua o fluxo normalmente com o texto transcrito
@@ -1003,7 +1054,12 @@ export async function POST(req: NextRequest) {
           }
         }
       } catch {}
-      // Não conseguiu transcrever — escala para Kellyne
+      // Não conseguiu transcrever (ou a transcrição não pôde ser usada) —
+      // escala para Kellyne. Só registra o marcador de indisponibilidade se a
+      // entrada do cliente ainda não foi registrada acima, para nunca duplicar.
+      if (!clienteAudioRegistrado) {
+        await registrarMensagem(phone, "cliente", "[Áudio recebido — transcrição indisponível]")
+      }
       await enviarMensagem(phone, `Recebi seu áudio! 😊 Já chamo alguém para te atender melhor. Um instante!`)
       const sessionAudio = await redis.get<BotSession>(`session:${phone}`) || { step: "escalado" as any, cart: [], deliveryFee: 0 }
       await salvarEscalonamento(phone, sessionAudio)
