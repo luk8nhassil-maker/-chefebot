@@ -143,6 +143,12 @@ export default function PixPendenteBar({ pendente }: { pendente: PixPendente | n
           display:flex;align-items:center;gap:11px;
           width:100%;max-width:540px;box-sizing:border-box;
           padding:9px 13px;
+          /* Cantos superiores arredondados, inferiores retos (encosta rente
+             no ClientBottomNav, sem "flutuar"). 20px reaproveita o mesmo
+             raio já usado pelos outros painéis flutuantes fixos do app
+             (.delivery-cta-inner, .cartbar-inner, .payment-modal) — não é
+             um valor novo. */
+          border-radius:20px 20px 0 0;
           background:color-mix(in srgb, var(--secondary) 86%, transparent);
           -webkit-backdrop-filter:blur(20px) saturate(160%);
           backdrop-filter:blur(20px) saturate(160%);

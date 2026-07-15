@@ -76,12 +76,13 @@ describe("/cardapio (PublicCardapio) — Etapa 2: home limpa + barra global de P
   });
 
   test("usa o hook central usePixPendente (uma única fonte, evita fetch duplicado com o badge do menu)", () => {
-    expect(fonte).toContain('import PixPendenteBar, { usePixPendente } from "@/components/PixPendenteBar"');
+    expect(fonte).toContain('import PixPendenteBar, { usePixPendente, PIX_PENDENTE_BAR_HEIGHT_PX } from "@/components/PixPendenteBar"');
     expect(fonte).toContain("usePixPendente()");
   });
 
   test("barra de Pix pendente nunca aparece na tela sc-done (a própria tela de pagamento)", () => {
-    expect(fonte).toContain('showBottomNav && screen !== "sc-done" && <PixPendenteBar pendente={pixPendente} />');
+    expect(fonte).toMatch(/const pixBarVisivel = showBottomNav && screen !== "sc-done" && !!pixPendente;/);
+    expect(fonte).toContain("{pixBarVisivel && <PixPendenteBar pendente={pixPendente} />}");
   });
 
   test("indicador da aba Pedido recebe o mesmo estado resolvido pelo hook", () => {
@@ -91,6 +92,40 @@ describe("/cardapio (PublicCardapio) — Etapa 2: home limpa + barra global de P
   test("salva a referência mínima local só quando o pagamento é Pix, nunca QR/copia-e-cola/chave", () => {
     expect(fonte).toContain("salvarReferenciaPixPendente(localStorage, { pedidoId: String(data.pedidoId), statusToken: data.statusToken, numero:");
     expect(fonte).toMatch(/if \(payment\?\.toLowerCase\(\)\.includes\("pix"\) && typeof data\.statusToken === "string"\)/);
+  });
+});
+
+// Correção isolada: a barra fixa "Pix pendente" não pode sobrepor os
+// painéis de ação fixos das etapas do fluxo /pedido (ex.: Sacola). Regra
+// única, sem número mágico duplicado por tela: uma variável CSS
+// compartilhada (--pix-pendente-fixed-offset) que os painéis fixos somam
+// ao próprio `bottom`.
+describe("/cardapio (PublicCardapio) — correção: barra Pix pendente não cobre ações fixas do fluxo", () => {
+  test("[caso 1 e 2] painel fixo (.delivery-cta-bar.stacked) soma o offset compartilhado ao bottom original, sem duplicar a altura como número novo", () => {
+    expect(fonte).toContain(".delivery-cta-bar.stacked{bottom:calc(58px + var(--pix-pendente-fixed-offset, 0px));transition:bottom .2s ease}");
+  });
+
+  test("[caso 9] a variável compartilhada é derivada de PIX_PENDENTE_BAR_HEIGHT_PX (import da própria constante já usada pelo espaçador da barra), nunca de um valor novo", () => {
+    expect(fonte).toContain('import PixPendenteBar, { usePixPendente, PIX_PENDENTE_BAR_HEIGHT_PX } from "@/components/PixPendenteBar"');
+    expect(fonte).toContain("`:root{--pix-pendente-fixed-offset:${pixBarVisivel ? PIX_PENDENTE_BAR_HEIGHT_PX : 0}px}`");
+  });
+
+  test("[caso 3] sem Pix pendente (pixBarVisivel=false), o offset cai para 0px — painel volta à posição original, sem espaço sobrando", () => {
+    expect(fonte).toMatch(/\$\{pixBarVisivel \? PIX_PENDENTE_BAR_HEIGHT_PX : 0\}px/);
+  });
+
+  test("[caso 10] nenhum outro lugar do arquivo declara um novo número mágico de altura da barra Pix (só reaproveita a constante importada)", () => {
+    const declaraNovaAltura = /--pix-pendente-fixed-offset:\s*\d/;
+    expect(fonte).not.toMatch(declaraNovaAltura);
+  });
+
+  test("[caso 8] offset não mexe em padding/safe-area do painel fixo — só desloca o `bottom`, safe-area continua isolada no próprio padding do painel", () => {
+    expect(fonte).toContain(".delivery-cta-bar{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:540px;z-index:55;background:linear-gradient(to top,var(--bg) 78%,transparent);padding:18px 20px calc(env(safe-area-inset-bottom) + 14px);pointer-events:none}");
+  });
+
+  test("[caso 11] telas sem painel .stacked (entrega/pagamento) não recebem o offset — showBottomNav (e portanto a barra) não aparece nessas etapas, então não há sobreposição a corrigir ali", () => {
+    expect(fonte).toContain('.delivery-cta-bar{position:fixed;bottom:0;');
+    expect(fonte).not.toMatch(/screen === "sc-delivery"[\s\S]{0,80}"delivery-cta-bar stacked"/);
   });
 });
 

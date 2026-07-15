@@ -175,3 +175,27 @@ describe("PixPendenteBar — refino visual glass (só camada visual, mesmo compo
     expect(PIX_PENDENTE_BAR_HEIGHT_PX).toBeGreaterThanOrEqual(60);
   });
 });
+
+describe("PixPendenteBar — correção: cantos superiores arredondados, inferiores retos (rente ao nav)", () => {
+  const pendente = { pedidoId: "p1", statusToken: "tok-123", numero: 4821, valorPix: 89.9 };
+
+  test("[caso 16 e 17] border-radius só nos cantos de cima — embaixo fica reto (0), encostando no ClientBottomNav", () => {
+    const html = renderToStaticMarkup(<PixPendenteBar pendente={pendente} />);
+    expect(html).toMatch(/\.pix-pendente-bar\{[^}]*border-radius:20px 20px 0 0/);
+  });
+
+  test("[caso 18] reaproveita o mesmo raio (20px) já usado pelos outros painéis flutuantes fixos do app (delivery-cta-inner/cartbar-inner/payment-modal), não inventa um valor novo", () => {
+    const html = renderToStaticMarkup(<PixPendenteBar pendente={pendente} />);
+    expect(html).toMatch(/\.pix-pendente-bar\{[^}]*border-radius:20px/);
+  });
+
+  test("[caso 19] glass (blur/saturate/cor) continua intacto junto com o novo raio", () => {
+    const html = renderToStaticMarkup(<PixPendenteBar pendente={pendente} />);
+    expect(html).toMatch(/backdrop-filter:blur\(20px\) saturate\(160%\)/);
+    expect(html).toMatch(/\.pix-pendente-bar\{[^}]*background:color-mix\(in srgb, var\(--secondary\) 86%, transparent\)/);
+  });
+
+  test("[caso 22] o novo raio não altera a altura real exportada da barra", () => {
+    expect(PIX_PENDENTE_BAR_HEIGHT_PX).toBe(61);
+  });
+});
