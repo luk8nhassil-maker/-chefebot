@@ -15,11 +15,19 @@ import {
   reverterResgateConfirmado,
 } from '@/lib/fidelidade'
 import { obterConfigEvolution } from '@/lib/evolutionApi'
+import {
+  adquirirMutexEdicao,
+  liberarMutexEdicao,
+  lockEdicaoAtivo,
+  limparEdicaoExpiradaSeNecessario,
+  sanitizarPedidoParaPainel,
+  type PedidoComEdicao,
+} from '@/lib/pedidoEdicao'
 
 const APP_BASE_URL = 'https://chefebot-pjif.vercel.app'
 
 type Status = 'novo' | 'em_preparo' | 'saiu_entrega' | 'entregue' | 'cancelado'
-type Pedido = {
+type Pedido = PedidoComEdicao & {
   id: string
   numero?: number
   cliente: string
@@ -112,17 +120,31 @@ export async function GET(req: NextRequest) {
   if (!auth) return NextResponse.json({ error: 'Nao autorizado' }, { status: 401 })
   const pedidos = await getPedidos()
 
+  // Limpeza preguiçosa de locks de edição expirados (mesmo mecanismo de
+  // polling já usado pelo painel — sem infraestrutura nova): se o cliente
+  // fechou a aba ou perdeu a conexão sem descartar, o próximo carregamento
+  // do painel libera o "Aceitar pedido" sozinho, sem precisar de cron.
+  let mudouAlgum = false
+  const limpos = pedidos.map(p => {
+    const { pedido, mudou } = limparEdicaoExpiradaSeNecessario(p)
+    if (mudou) mudouAlgum = true
+    return mudou ? (pedido as Pedido) : p
+  })
+  if (mudouAlgum) {
+    await redis.set('pedidos', limpos)
+  }
+
   const url = new URL(req.url)
   const soArquivados = url.searchParams.get('arquivados') === 'true'
 
   if (soArquivados) {
-    const arquivados = pedidos.filter(p => p.isArchived)
-    return NextResponse.json([...arquivados].reverse().map(sanitizarPedidoPixResposta))
+    const arquivados = limpos.filter(p => p.isArchived)
+    return NextResponse.json([...arquivados].reverse().map(sanitizarPedidoPixResposta).map(sanitizarPedidoParaPainel))
   }
 
   // Padrão: exclui arquivados da área de trabalho principal
-  const ativos = pedidos.filter(p => !p.isArchived)
-  return NextResponse.json([...ativos].reverse().map(sanitizarPedidoPixResposta))
+  const ativos = limpos.filter(p => !p.isArchived)
+  return NextResponse.json([...ativos].reverse().map(sanitizarPedidoPixResposta).map(sanitizarPedidoParaPainel))
 }
 
 export async function PATCH(req: NextRequest) {
@@ -130,28 +152,51 @@ export async function PATCH(req: NextRequest) {
   if (!auth) return NextResponse.json({ error: 'Nao autorizado' }, { status: 401 })
 
   const { id, status, entregador, silent } = await req.json()
-  const pedidos = await getPedidos()
-  const index = pedidos.findIndex(p => p.id === id)
-  if (index === -1) return NextResponse.json({ error: 'Pedido nao encontrado' }, { status: 404 })
-  const statusAnterior = pedidos[index].status
 
-  // A confirmação manual de Pix não passa mais por aqui: ela exige senha e
-  // checklist de segurança e vive em /api/orders/confirmar-pix-manual, que
-  // reaproveita confirmarPixMetadata (mesma idempotência de sempre).
-
-  const agora = new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" })
-  pedidos[index] = {
-    ...pedidos[index],
-    status,
-    ...(status === 'cancelado' ? { cancelamentoSolicitado: false } : {}),
-    ...(status === 'em_preparo' && !pedidos[index].horarioInicio ? { horarioInicio: agora } : {}),
+  // Toda transição de status (inclusive o aceite, novo → em_preparo) passa
+  // pelo mesmo mutex curto usado pela edição do cliente: garante que a
+  // Kellyne nunca aceita/altera um pedido no exato instante em que o
+  // cliente acabou de adquirir (ou está adquirindo) o lock de edição.
+  const mutexToken = await adquirirMutexEdicao(id)
+  if (!mutexToken) {
+    return NextResponse.json({ error: 'Não foi possível atualizar agora. Tente de novo.' }, { status: 409 })
   }
 
-  // Salva entregador no pedido se informado
-  if (entregador) {
-    pedidos[index] = { ...pedidos[index], entregador }
-  }
-  await redis.set('pedidos', pedidos)
+  try {
+    const pedidos = await getPedidos()
+    const index = pedidos.findIndex(p => p.id === id)
+    if (index === -1) return NextResponse.json({ error: 'Pedido nao encontrado' }, { status: 404 })
+
+    const limpeza = limparEdicaoExpiradaSeNecessario(pedidos[index])
+    if (limpeza.mudou) pedidos[index] = limpeza.pedido as Pedido
+
+    if (lockEdicaoAtivo(pedidos[index])) {
+      if (limpeza.mudou) await redis.set('pedidos', pedidos)
+      return NextResponse.json(
+        { error: 'O cliente está editando este pedido. Aguarde ele concluir ou o tempo de edição expirar.' },
+        { status: 409 }
+      )
+    }
+
+    const statusAnterior = pedidos[index].status
+
+    // A confirmação manual de Pix não passa mais por aqui: ela exige senha e
+    // checklist de segurança e vive em /api/orders/confirmar-pix-manual, que
+    // reaproveita confirmarPixMetadata (mesma idempotência de sempre).
+
+    const agora = new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" })
+    pedidos[index] = {
+      ...pedidos[index],
+      status,
+      ...(status === 'cancelado' ? { cancelamentoSolicitado: false } : {}),
+      ...(status === 'em_preparo' && !pedidos[index].horarioInicio ? { horarioInicio: agora } : {}),
+    }
+
+    // Salva entregador no pedido se informado
+    if (entregador) {
+      pedidos[index] = { ...pedidos[index], entregador }
+    }
+    await redis.set('pedidos', pedidos)
 
   if (!silent) {
     await notificarCliente(pedidos[index].telefone, status, pedidos[index].cliente)
@@ -338,7 +383,10 @@ export async function PATCH(req: NextRequest) {
     }
   }
 
-  return NextResponse.json(sanitizarPedidoPixResposta(pedidos[index]))
+    return NextResponse.json(sanitizarPedidoPixResposta(pedidos[index]))
+  } finally {
+    await liberarMutexEdicao(id, mutexToken)
+  }
 }
 
 export async function POST(req: NextRequest) {

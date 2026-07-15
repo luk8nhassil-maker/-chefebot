@@ -22,6 +22,11 @@ type PedidoStatus = {
   total: number
 }
 
+type EdicaoStatus = {
+  editStatus?: "none" | "editing" | "edited"
+  lockAtivo?: boolean
+}
+
 type InfoStatus = {
   label: string
   desc: string
@@ -87,10 +92,33 @@ export default function RastrearPage({ params }: PageProps) {
   const [localizacao, setLocalizacao] = useState<LocalizacaoEntregador | null>(null)
   const [carregando, setCarregando] = useState(true)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  // Token público — só presente quando o cliente chega por um link que o
+  // inclui (ex: confirmação de pedido do site). Sem token, a página segue
+  // funcionando normalmente (rastreio do motoboy), só sem a opção de editar.
+  const [statusToken, setStatusToken] = useState<string | null>(null)
+  const [edicao, setEdicao] = useState<EdicaoStatus | null>(null)
 
   useEffect(() => {
     params.then(p => setPedidoId(p.pedidoId))
+    try {
+      const sp = new URLSearchParams(window.location.search)
+      setStatusToken(sp.get('token'))
+    } catch {}
   }, [params])
+
+  useEffect(() => {
+    if (!pedidoId || !statusToken) return
+    let ativo = true
+    async function fetchEdicao() {
+      try {
+        const res = await fetch(`/api/pedido-app/${pedidoId}/editar/status?token=${encodeURIComponent(statusToken as string)}`, { cache: 'no-store' })
+        if (res.ok && ativo) setEdicao(await res.json())
+      } catch {}
+    }
+    fetchEdicao()
+    const iv = setInterval(fetchEdicao, 10000)
+    return () => { ativo = false; clearInterval(iv) }
+  }, [pedidoId, statusToken])
 
   function abrirSacola() {
     try { sessionStorage.setItem(CF_OPEN_CART_KEY, '1') } catch {}
@@ -218,6 +246,26 @@ export default function RastrearPage({ params }: PageProps) {
               Total: R$ {pedidoStatus.total.toFixed(2).replace('.', ',')}
             </div>
           </div>
+        )}
+
+        {/* Editar/cancelar pedido — só quando temos o token público e o pedido ainda aguarda aceite */}
+        {statusToken && pedidoStatus?.status === 'novo' && (
+          <>
+            <p style={{ fontSize: '12px', color: 'var(--foreground-secondary)', marginBottom: '8px', textAlign: 'center' }}>
+              Você ainda pode corrigir seu pedido enquanto ele não for aceito.
+            </p>
+            <a
+              href={`/pedido/editar/${pedidoId}?token=${encodeURIComponent(statusToken)}`}
+              style={{ display: 'block', width: '100%', padding: '14px', borderRadius: '12px', background: edicao?.lockAtivo ? 'var(--surface-elevated)' : 'var(--primary)', color: edicao?.lockAtivo ? 'var(--foreground-secondary)' : 'var(--primary-foreground)', fontSize: '15px', fontWeight: 700, textDecoration: 'none', textAlign: 'center', boxSizing: 'border-box', marginBottom: '10px' }}
+            >
+              {edicao?.lockAtivo ? 'Edição em andamento' : 'Editar pedido'}
+            </a>
+          </>
+        )}
+        {statusToken && pedidoStatus && pedidoStatus.status !== 'novo' && pedidoStatus.status !== 'cancelado' && (
+          <p style={{ fontSize: '12px', color: 'var(--foreground-secondary)', marginBottom: '10px', textAlign: 'center' }}>
+            Seu pedido já foi aceito pela loja. Para solicitar alguma mudança, fale diretamente com a loja.
+          </p>
         )}
 
         {/* Botão novo pedido */}
