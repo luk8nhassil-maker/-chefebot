@@ -5,7 +5,7 @@ import PanelShell from "@/components/PanelShell"
 
 type StatusConversa = 'aguardando' | 'humano' | 'robo' | 'finalizado'
 
-type ConversaRecente = {
+export type ConversaRecente = {
   phone: string
   nome: string
   ultimaMensagem: string
@@ -104,13 +104,25 @@ function ss(val: unknown, fallback = ""): string {
   return typeof val === "string" ? val : fallback
 }
 
-function normalizarConversa(raw: unknown): ConversaRecente {
+// Defesa em segunda camada: mesmo com a API normalizando o phone (camada 1),
+// o telefone pode chegar aqui como number (proxy/serialização intermediária)
+// ou vir de um registro antigo só com o campo "telefone". Nunca aceitar só
+// string — e nunca deixar cair em "" (string vazia é falsy e quebra a
+// comparação de seleção `conversaSelecionada === c.phone`).
+export function normalizarTelefone(val: unknown): string {
+  if (typeof val === "number" && Number.isFinite(val)) return String(val)
+  if (typeof val === "string") return val.trim()
+  return ""
+}
+
+export function normalizarConversa(raw: unknown): ConversaRecente | null {
   const c = (raw ?? {}) as Record<string, unknown>
   const validStatuses: StatusConversa[] = ["aguardando", "humano", "robo", "finalizado"]
-  const phone = ss(c.phone)
+  const phone = normalizarTelefone(c.phone) || normalizarTelefone(c.telefone)
+  if (!phone) return null
   return {
     phone,
-    nome: ss(c.nome) || phone || "?",
+    nome: ss(c.nome) || phone,
     ultimaMensagem: ss(c.ultimaMensagem),
     ultimaTs: typeof c.ultimaTs === "number" ? c.ultimaTs : 0,
     status: validStatuses.includes(c.status as StatusConversa)
@@ -173,7 +185,10 @@ export default function ConversasPage() {
       const r = await fetch("/api/conversas/recentes")
       if (r.ok) {
         const json = await r.json()
-        setConversasRecentes(Array.isArray(json) ? json.map(normalizarConversa) : [])
+        const normalizadas = Array.isArray(json)
+          ? json.map(normalizarConversa).filter((c): c is ConversaRecente => c !== null)
+          : []
+        setConversasRecentes(normalizadas)
       }
     } catch {}
   }
@@ -793,7 +808,7 @@ export default function ConversasPage() {
                   <div
                     key={c.phone}
                     className={`cv-item${isActive ? " cv-item-active" : ""}`}
-                    onClick={() => setConversaSelecionada(c.phone)}
+                    onClick={() => { if (c.phone) setConversaSelecionada(c.phone) }}
                     style={{ animationDelay: `${idx * 0.03}s` }}
                   >
                     <div className="cv-item-avatar" style={{ background: `color-mix(in srgb, ${cor} 9%, transparent)`, border: `1.5px solid color-mix(in srgb, ${cor} 27%, transparent)`, color: cor }}>
