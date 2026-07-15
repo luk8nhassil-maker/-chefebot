@@ -27,7 +27,7 @@ import { creditarPontosPedidoEntregue } from "@/lib/fidelidade";
 import type { BotStep } from "@/lib/bot";
 import { obterConfigEvolution } from "@/lib/evolutionApi";
 import { enviarTextoWhatsApp } from "@/lib/whatsappMensagem";
-import { consumirEcoPainel } from "@/lib/conversaEcoPainel";
+import { ehEcoPainel, validarMessageId } from "@/lib/conversaEcoPainel";
 
 export const maxDuration = 30;
 
@@ -535,6 +535,21 @@ function obterCampo(valor: unknown, chave: string): unknown {
   return ehObjeto(valor) ? valor[chave] : undefined;
 }
 
+const SUFIXO_JID_INDIVIDUAL = "@s.whatsapp.net";
+
+// Extrai o telefone só quando o remoteJid é uma conversa individual válida
+// (`{numero}@s.whatsapp.net`). Ignora grupos (`@g.us`), broadcasts
+// (`status@broadcast`, qualquer `@broadcast`), `@lid` e qualquer outro
+// formato ainda não suportado, além de remoteJid vazio ou não-string — nunca
+// cria histórico/sessão/chave de conversa para esses casos. `endsWith` aqui
+// só valida o domínio exato do JID (nunca aproxima números de telefone).
+function extrairTelefoneIndividual(remoteJid: unknown): string | undefined {
+  if (typeof remoteJid !== "string" || !remoteJid) return undefined;
+  if (!remoteJid.endsWith(SUFIXO_JID_INDIVIDUAL)) return undefined;
+  const numero = remoteJid.slice(0, -SUFIXO_JID_INDIVIDUAL.length);
+  return numero ? numero : undefined;
+}
+
 export function montarMarcadorImagem(data: unknown): string {
   const imageMessage = obterCampo(obterCampo(data, "message"), "imageMessage");
   const legenda = extrairTextoSeguro(obterCampo(imageMessage, "caption"));
@@ -935,14 +950,18 @@ export async function POST(req: NextRequest) {
       // dada pela Kellyne diretamente pelo WhatsApp Business apareça no
       // painel, mesmo com o bot ativo e a conversa não assumida. Exceção: se
       // este messageId já foi marcado como eco de um envio feito pelo painel
-      // (/api/conversas/enviar-mensagem-humana já registrou a mensagem), não
-      // registra de novo — só consome a marca. Bot nunca responde — always
-      // early-return.
+      // (/api/conversas/enviar-mensagem-humana já registrou a mensagem antes
+      // de enviar, fechando a janela de corrida), não registra de novo — a
+      // marca só é consultada (nunca apagada), para que reentregas repetidas
+      // do mesmo webhook continuem suprimidas até o TTL expirar. Só processa
+      // conversa individual (`@s.whatsapp.net`) — grupos, broadcasts, `@lid`
+      // e outros formatos são ignorados sem criar histórico/sessão. Bot
+      // nunca responde — always early-return.
       try {
-        const fromPhone = data?.key?.remoteJid?.replace("@s.whatsapp.net", "");
-        const msgIdFrom = data?.key?.id as string | undefined;
+        const fromPhone = extrairTelefoneIndividual(data?.key?.remoteJid);
         if (fromPhone) {
-          const ecoDoPainel = msgIdFrom ? await consumirEcoPainel(msgIdFrom) : false;
+          const msgIdFrom = validarMessageId(data?.key?.id);
+          const ecoDoPainel = msgIdFrom ? await ehEcoPainel(msgIdFrom) : false;
           if (!ecoDoPainel) {
             const txtFrom =
               data?.message?.conversation ||

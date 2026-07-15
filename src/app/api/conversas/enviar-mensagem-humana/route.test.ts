@@ -182,4 +182,18 @@ describe("POST /api/conversas/enviar-mensagem-humana — eco do painel (Etapa 2B
     const ecoCalls = redisMock.set.mock.calls.filter(([k]: [string]) => k.startsWith("conversa:echo-painel:"));
     expect(ecoCalls).toHaveLength(0);
   });
+
+  it("marca a chave de eco ANTES de registrar a mensagem (fecha a janela de corrida do webhook fromMe)", async () => {
+    mockFetchOkComMessageId("WHATS-MSG-ORDEM-1");
+    const token = await createToken({ username: "kellyne", name: "Kellyne", role: "atendente" });
+    const res = await POST(postReq({ phone: PHONE, text: "Chegando em instantes!" }, token));
+    expect(res.status).toBe(200);
+
+    const chaves = redisMock.set.mock.calls.map(([k]: [string]) => k);
+    const idxEco = chaves.indexOf("conversa:echo-painel:WHATS-MSG-ORDEM-1");
+    const idxConversa = chaves.indexOf(`conversa:${PHONE}`);
+    expect(idxEco).toBeGreaterThanOrEqual(0);
+    expect(idxConversa).toBeGreaterThanOrEqual(0);
+    expect(idxEco).toBeLessThan(idxConversa);
+  });
 });

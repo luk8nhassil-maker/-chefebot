@@ -88,6 +88,19 @@ export async function POST(req: NextRequest) {
     } catch {
       messageId = undefined;
     }
+
+    // Marca o messageId como eco do painel IMEDIATAMENTE após confirmar o
+    // envio, ANTES de registrar a mensagem no histórico — fecha a janela de
+    // corrida em que o webhook fromMe (eco da Evolution) chegaria entre o
+    // registro e a marcação e registraria a mensagem de novo. Sem messageId
+    // confiável, não há deduplicação: a mensagem do painel será registrada
+    // normalmente abaixo, e um eventual eco (se vier) será tratado no
+    // webhook como uma mensagem "atendente" adicional — melhor um possível
+    // duplicado raro do que descartar mensagens reais por dedup baseada só
+    // em texto.
+    if (messageId) {
+      await marcarEcoPainel(messageId);
+    }
   } catch {
     return NextResponse.json(
       { ok: false, error: "Falha ao enviar mensagem para o WhatsApp" },
@@ -98,16 +111,6 @@ export async function POST(req: NextRequest) {
   // Só registra após confirmação de envio bem-sucedido pela Evolution API
   await registrarMensagem(phone, "atendente", `[${senderName}] ${text}`);
   await redis.del(`nova_msg_manual:${phone}`);
-
-  // Marca o messageId como eco do painel — se a Evolution devolver este
-  // mesmo envio no webhook com fromMe=true, o webhook não registra de novo.
-  // Sem messageId confiável, não há deduplicação: a mensagem do painel já
-  // foi registrada aqui, e o eco (se vier) será tratado no webhook como uma
-  // mensagem "atendente" adicional — melhor um possível duplicado raro do
-  // que descartar mensagens reais por dedup baseada só em texto.
-  if (messageId) {
-    await marcarEcoPainel(messageId);
-  }
 
   // Renova TTL de manual e session enquanto o atendimento está ativo.
   // Previne que o flag manual expire durante conversas longas e o bot reassuma.

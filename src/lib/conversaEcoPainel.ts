@@ -4,7 +4,10 @@ import { redis } from "./redis";
 // (/api/conversas/enviar-mensagem-humana) seja registrado uma segunda vez
 // quando a Evolution devolve o mesmo envio como evento fromMe no webhook.
 // TTL curto (5–10 min) — só precisa sobreviver ao tempo entre o envio e o
-// eco da Evolution chegar no webhook.
+// eco da Evolution chegar no webhook. A chave permanece até o TTL (nunca é
+// apagada no primeiro eco) porque a Evolution pode reentregar o mesmo
+// webhook mais de uma vez (reenvio/retry) e todas as entregas repetidas do
+// mesmo messageId precisam continuar suprimidas.
 export const CONVERSA_ECO_PAINEL_TTL_SEGUNDOS = 600;
 
 function chaveEcoPainel(messageId: string): string {
@@ -19,9 +22,17 @@ function obterCampo(valor: unknown, chave: string): unknown {
   return ehObjeto(valor) ? valor[chave] : undefined;
 }
 
+// Único ponto de validação de um ID de mensagem vindo de dado externo
+// (`unknown`): só aceita string não vazia após trim(). Usado tanto para o
+// retorno de envio da Evolution quanto para `data.key.id` do webhook —
+// nunca cria uma chave Redis a partir de `undefined`, `null`, número ou
+// objeto convertidos silenciosamente em string (ex.: "[object Object]").
+export function validarMessageId(valor: unknown): string | undefined {
+  return typeof valor === "string" && valor.trim() ? valor.trim() : undefined;
+}
+
 function idDeChaveMensagem(valor: unknown): string | undefined {
-  const id = obterCampo(obterCampo(valor, "key"), "id");
-  return typeof id === "string" && id.trim() ? id : undefined;
+  return validarMessageId(obterCampo(obterCampo(valor, "key"), "id"));
 }
 
 // Extrai o ID real da mensagem a partir do JSON retornado por
@@ -36,8 +47,11 @@ export function extrairMessageIdEnvio(payload: unknown): string | undefined {
 }
 
 // Marca que este messageId foi enviado pelo painel — chamado só depois de
-// confirmação de envio bem-sucedido pela Evolution. Nunca armazena texto,
-// telefone ou nome: só a chave (o próprio ID) e um valor booleano.
+// confirmação de envio bem-sucedido pela Evolution, e ANTES de registrar a
+// mensagem no histórico (fecha a janela de corrida: se o webhook fromMe
+// chegar entre o envio e o registro, ele já encontra a marca). Nunca
+// armazena texto, telefone ou nome: só a chave (o próprio ID) e um valor
+// booleano.
 export async function marcarEcoPainel(messageId: string): Promise<void> {
   if (!messageId) return;
   try {
@@ -47,18 +61,14 @@ export async function marcarEcoPainel(messageId: string): Promise<void> {
   }
 }
 
-// Verifica se este messageId foi marcado pelo painel e, se sim, apaga a
-// chave (consumo único) e retorna true. Usado pelo webhook fromMe para
-// distinguir o eco de uma mensagem do painel de uma mensagem enviada
-// diretamente pelo WhatsApp da pizzaria.
-export async function consumirEcoPainel(messageId: string): Promise<boolean> {
+// Verifica se este messageId foi marcado pelo painel. Só consulta — nunca
+// apaga a chave, para que reentregas repetidas do mesmo webhook (retry da
+// Evolution) continuem suprimidas até o TTL expirar naturalmente.
+export async function ehEcoPainel(messageId: string): Promise<boolean> {
   if (!messageId) return false;
   try {
-    const chave = chaveEcoPainel(messageId);
-    const existe = await redis.get(chave);
-    if (!existe) return false;
-    await redis.del(chave);
-    return true;
+    const existe = await redis.get(chaveEcoPainel(messageId));
+    return !!existe;
   } catch {
     return false;
   }

@@ -128,14 +128,74 @@ describe("7. Texto vazio", () => {
 });
 
 describe("9. Eco fromMe com o mesmo message ID de um envio do painel", () => {
-  it("não registra de novo e apaga a chave de deduplicação", async () => {
+  it("não registra de novo e mantém a chave (não apaga no primeiro eco)", async () => {
     await marcarEcoPainel("EVO-MSG-ECO-1");
     expect(store.has("conversa:echo-painel:EVO-MSG-ECO-1")).toBe(true);
 
     const res = await POST(webhookFromMe({}, "EVO-MSG-ECO-1"));
     expect(res.status ?? 200).toBe(200);
     expect(chamadasAtendente()).toHaveLength(0);
-    expect(store.has("conversa:echo-painel:EVO-MSG-ECO-1")).toBe(false);
+    // A marca continua existindo até o TTL — nunca é apagada no primeiro eco.
+    expect(store.has("conversa:echo-painel:EVO-MSG-ECO-1")).toBe(true);
+  });
+
+  it("dois webhooks repetidos com o mesmo message ID: nenhum dos dois registra, chave sobrevive", async () => {
+    await marcarEcoPainel("EVO-MSG-ECO-REPETIDO");
+
+    const res1 = await POST(webhookFromMe({}, "EVO-MSG-ECO-REPETIDO"));
+    const res2 = await POST(webhookFromMe({}, "EVO-MSG-ECO-REPETIDO"));
+
+    expect(res1.status ?? 200).toBe(200);
+    expect(res2.status ?? 200).toBe(200);
+    expect(chamadasAtendente()).toHaveLength(0);
+    expect(store.has("conversa:echo-painel:EVO-MSG-ECO-REPETIDO")).toBe(true);
+  });
+});
+
+describe("11. ID de mensagem externo (data.key.id) inválido nunca vira chave Redis", () => {
+  it("aceita apenas string não vazia — número, objeto, null, undefined, string vazia são ignorados", async () => {
+    const casosInvalidos: unknown[] = [12345, { foo: "bar" }, null, undefined, "", "   "];
+    for (const idInvalido of casosInvalidos) {
+      redisMock.get.mockClear();
+      await POST(webhookFromMe({ key: { remoteJid: `${PHONE}@s.whatsapp.net`, id: idInvalido, fromMe: true } }));
+      const chavesConsultadas = redisMock.get.mock.calls.map(([k]: [string]) => k);
+      expect(chavesConsultadas.some((k) => k.startsWith("conversa:echo-painel:"))).toBe(false);
+    }
+    // Mensagem direta continua sendo registrada mesmo sem message id válido.
+    expect(chamadasAtendente().length).toBe(casosInvalidos.length);
+  });
+
+  it("string válida consulta a chave de eco correta", async () => {
+    await POST(webhookFromMe({}, "ID-VALIDO-123"));
+    const chavesConsultadas = redisMock.get.mock.calls.map(([k]: [string]) => k);
+    expect(chavesConsultadas).toContain("conversa:echo-painel:ID-VALIDO-123");
+  });
+});
+
+describe("12. Grupos e broadcasts são ignorados no ramo fromMe", () => {
+  const formatosIgnorados: Array<[string, unknown]> = [
+    ["grupo (@g.us)", "12036302@g.us"],
+    ["status broadcast", "status@broadcast"],
+    ["broadcast genérico", "123456@broadcast"],
+    ["@lid", `${PHONE}@lid`],
+    ["remoteJid vazio", ""],
+    ["remoteJid não-string (número)", 5586999990001],
+    ["remoteJid não-string (objeto)", { numero: PHONE }],
+    ["remoteJid ausente", undefined],
+  ];
+
+  for (const [rotulo, remoteJid] of formatosIgnorados) {
+    it(`ignora ${rotulo} sem registrar histórico`, async () => {
+      const res = await POST(webhookFromMe({ key: { remoteJid, id: `id-${Math.random()}`, fromMe: true } }));
+      expect(res.status ?? 200).toBe(200);
+      expect(registrarMensagemMock).not.toHaveBeenCalled();
+    });
+  }
+
+  it("conversa individual válida (@s.whatsapp.net) continua registrando normalmente", async () => {
+    await POST(webhookFromMe({ message: { conversation: "Mensagem válida da Kellyne" } }));
+    expect(chamadasAtendente()).toHaveLength(1);
+    expect(chamadasAtendente()[0][2]).toBe("Mensagem válida da Kellyne");
   });
 });
 
