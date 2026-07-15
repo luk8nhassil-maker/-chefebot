@@ -139,8 +139,8 @@ describe("/cardapio (PublicCardapio) - card Pix premium (aguardando pagamento)",
   });
 
   test("mantem o CTA principal de acompanhamento do pedido", () => {
-    expect(fonte).toContain('className="btn"');
-    expect(fonte).toContain(">Acompanhar pedido</a>");
+    expect(fonte).toContain('className="btn btn-icon"');
+    expect(fonte).toMatch(/Acompanhar pedido\s*<\/a>/);
   });
 });
 

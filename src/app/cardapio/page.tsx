@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { Pizza, Sandwich, Soup, CupSoda, GlassWater, Zap, Banknote, CreditCard, Shuffle, Wallet, Bike, Store, UtensilsCrossed, Sun, Moon } from "lucide-react";
+import { Pizza, Sandwich, Soup, CupSoda, GlassWater, Zap, Banknote, CreditCard, Shuffle, Wallet, Bike, Store, UtensilsCrossed, Sun, Moon, Receipt, Gift, Pencil, Plus, Clock, ChevronRight, Sparkles } from "lucide-react";
 import PanelShell from "@/components/PanelShell";
 import { useLiveMenu, cartItemEsgotado } from "./liveMenu";
 import { CARDAPIO_ILLUSTRATIONS, CardapioIllustration } from "@/lib/cardapioVisuals";
@@ -1882,12 +1882,32 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                   <>
                     {!isPagamentoPix && (
                       <>
-                        <p style={{ fontWeight: 700, fontSize: 18, margin: "12px 0 4px" }}>Pedido #{pedidoConfirmado.numero}</p>
-                        <p style={{ color: "var(--brand-text)", fontSize: 15, fontWeight: 800, margin: "0 0 8px" }}>{STATUS_PEDIDO_LABEL[statusPedidoConfirmado]}</p>
-                        <p style={{ color: "var(--muted)", fontSize: 14, marginBottom: 16 }}>Total: {money(pedidoConfirmado.total)}</p>
-                        <a href="/cliente" style={{ display: "block", background: "var(--surface)", border: "1px solid var(--line-strong)", borderRadius: 12, padding: "12px 14px", marginBottom: 16, textDecoration: "none", textAlign: "left" }}>
-                          <span style={{ display: "block", fontSize: 14, fontWeight: 700, color: "var(--text)" }}>🎁 Quer que essa compra conte para sua fidelidade?</span>
-                          <span style={{ display: "block", fontSize: 12.5, color: "var(--text-sub)", marginTop: 2 }}>Entre com seu WhatsApp e acompanhe seu progresso.</span>
+                        <div className="pedido-pill">Pedido #{pedidoConfirmado.numero}</div>
+                        {statusPedidoConfirmado !== "novo" && (
+                          <p style={{ color: "var(--brand-text)", fontSize: 13, fontWeight: 800, margin: "-10px 0 4px" }}>{STATUS_PEDIDO_LABEL[statusPedidoConfirmado]}</p>
+                        )}
+                        <div className="ticket-card">
+                          <div className="ticket-stub">
+                            <div className="ticket-icon"><Receipt size={24} aria-hidden="true" /></div>
+                          </div>
+                          <div className="ticket-body">
+                            <span className="ticket-label"><Sparkles size={13} aria-hidden="true" /> Total do pedido <Sparkles size={13} aria-hidden="true" /></span>
+                            <span className="ticket-value">{money(pedidoConfirmado.total)}</span>
+                            {(isDinheiroPuro || isCartaoPuro) && (
+                              <span className="ticket-badge">
+                                <Sparkles size={11} aria-hidden="true" />
+                                {isDinheiroPuro ? "Pagamento em dinheiro" : "Pagamento no cartão"}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <a href="/cliente" className="info-card-v2">
+                          <span className="info-icon-v2"><Gift size={20} aria-hidden="true" /></span>
+                          <span className="info-text-v2">
+                            <strong>Quer que essa compra conte para sua fidelidade?</strong>
+                            <span>Entre com seu WhatsApp e acompanhe seu progresso.</span>
+                          </span>
+                          <ChevronRight size={18} className="info-chevron" aria-hidden="true" />
                         </a>
                       </>
                     )}
@@ -1908,27 +1928,33 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                       />
                     )}
                     {!isPagamentoPix && isDinheiroPuro && (
-                      <div style={{ textAlign: "left", background: "var(--surface)", border: "1px solid var(--line-strong)", borderRadius: 10, padding: "14px", marginBottom: 16, fontSize: 14, color: "var(--text)", lineHeight: 1.5 }}>
-                        <p style={{ margin: trocoConfirmadoTexto ? "0 0 4px" : 0, fontWeight: 700 }}>Pagamento em dinheiro na hora de receber o pedido.</p>
-                        {trocoConfirmadoTexto && <p style={{ margin: 0, color: "var(--text-sub)" }}>Troco: {trocoConfirmadoTexto}</p>}
+                      <div className="info-card-v2">
+                        <span className="info-icon-v2"><Banknote size={20} aria-hidden="true" /></span>
+                        <span className="info-text-v2">
+                          <strong>Pagamento em dinheiro na hora de receber o pedido.</strong>
+                          {trocoConfirmadoTexto && <span>Troco: {trocoConfirmadoTexto}</span>}
+                        </span>
                       </div>
                     )}
                     {!isPagamentoPix && isCartaoPuro && (
-                      <div style={{ textAlign: "left", background: "var(--surface)", border: "1px solid var(--line-strong)", borderRadius: 10, padding: "14px", marginBottom: 16, fontSize: 14, color: "var(--text)", lineHeight: 1.5 }}>
-                        <p style={{ margin: 0, fontWeight: 700 }}>Pagamento no cartão na hora de receber o pedido.</p>
+                      <div className="info-card-v2">
+                        <span className="info-icon-v2"><CreditCard size={20} aria-hidden="true" /></span>
+                        <span className="info-text-v2"><strong>Pagamento no cartão na hora de receber o pedido.</strong></span>
                       </div>
                     )}
-                    <a href={`/rastrear/${pedidoConfirmado.id}${pedidoConfirmado.statusToken ? `?token=${encodeURIComponent(pedidoConfirmado.statusToken)}` : ""}`} className="btn" style={{ display: "block", marginBottom: 10, textAlign: "center", textDecoration: "none" }}>Acompanhar pedido</a>
+                    <a href={`/rastrear/${pedidoConfirmado.id}${pedidoConfirmado.statusToken ? `?token=${encodeURIComponent(pedidoConfirmado.statusToken)}` : ""}`} className="btn btn-icon" style={{ marginBottom: 10, textDecoration: "none" }}>
+                      <Bike size={19} aria-hidden="true" /> Acompanhar pedido
+                    </a>
                     {statusPedidoConfirmado === "novo" && pedidoConfirmado.statusToken && (
                       <>
-                        <p style={{ fontSize: 13, color: "var(--text-sub)", margin: "0 0 8px" }}>Você ainda pode corrigir seu pedido enquanto ele não for aceito.</p>
                         <a
                           href={`/pedido/editar/${pedidoConfirmado.id}?token=${encodeURIComponent(pedidoConfirmado.statusToken)}`}
-                          className="btn btn-ghost"
-                          style={{ display: "block", marginBottom: 10, textAlign: "center", textDecoration: "none" }}
+                          className="btn btn-outline-v2 btn-icon"
+                          style={{ marginBottom: 8, textDecoration: "none" }}
                         >
-                          Editar pedido
+                          <Pencil size={17} aria-hidden="true" /> Editar pedido
                         </a>
+                        <p className="hint-row"><Clock size={13} aria-hidden="true" /> Você ainda pode corrigir seu pedido enquanto ele não for aceito.</p>
                       </>
                     )}
                     {statusPedidoConfirmado !== "novo" && statusPedidoConfirmado !== "cancelado" && (
@@ -1944,7 +1970,9 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                     )}
                   </>
                 )}
-                <button className="btn btn-ghost" style={{ marginTop: pedidoConfirmado ? 0 : 22 }} onClick={resetAll}>Fazer novo pedido</button>
+                <button className="btn btn-ghost btn-icon" style={{ marginTop: pedidoConfirmado ? 0 : 22 }} onClick={resetAll}>
+                  <Plus size={17} aria-hidden="true" /> Fazer novo pedido
+                </button>
               </div>
             </section>
           )}
@@ -2454,6 +2482,27 @@ main{width:100%;padding:6px 20px 20px}
 .success h2.success-h2-compact{font-size:17px;margin-bottom:4px;color:var(--text-sub);font-weight:600}
 .success p{color:var(--text-sub);font-size:15px;margin-bottom:5px}
 .success p.success-p-compact{font-size:12.5px;margin-bottom:14px}
+.pedido-pill{display:inline-block;margin:14px 0 18px;padding:8px 18px;border-radius:999px;background:var(--surface2);color:var(--text);font-size:15px;font-weight:800;letter-spacing:-.2px}
+.ticket-card{position:relative;display:flex;align-items:stretch;margin:0 0 18px;border-radius:22px;background:linear-gradient(160deg, var(--brand-soft), var(--surface) 65%);border:1px solid color-mix(in srgb, var(--primary) 45%, transparent);box-shadow:0 14px 30px color-mix(in srgb, var(--primary) 18%, transparent);overflow:hidden}
+.ticket-card::before,.ticket-card::after{content:"";position:absolute;top:50%;width:26px;height:26px;border-radius:50%;background:var(--bg);transform:translateY(-50%);z-index:1}
+.ticket-card::before{left:-13px}
+.ticket-card::after{right:-13px}
+.ticket-stub{flex:0 0 auto;width:88px;display:flex;align-items:center;justify-content:center;position:relative}
+.ticket-stub::after{content:"";position:absolute;top:10%;bottom:10%;right:0;border-left:2px dashed color-mix(in srgb, var(--primary) 55%, transparent)}
+.ticket-icon{width:52px;height:52px;border-radius:50%;border:2px solid var(--brand);display:flex;align-items:center;justify-content:center;color:var(--brand-text)}
+.ticket-body{flex:1 1 auto;text-align:center;padding:22px 18px;display:flex;flex-direction:column;align-items:center;gap:6px}
+.ticket-label{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:800;color:var(--brand-text);text-transform:uppercase;letter-spacing:.04em}
+.ticket-value{font-family:var(--font-ui);font-size:clamp(34px,10vw,44px);font-weight:800;letter-spacing:-1px;color:var(--text);line-height:1.05}
+.ticket-badge{display:inline-flex;align-items:center;gap:6px;margin-top:4px;padding:6px 14px;border-radius:999px;background:color-mix(in srgb, var(--primary) 16%, transparent);border:1px solid color-mix(in srgb, var(--primary) 40%, transparent);color:var(--brand-text);font-size:12.5px;font-weight:800}
+.info-card-v2{display:flex;align-items:center;gap:12px;text-align:left;background:var(--surface);border:1px solid var(--line-strong);border-radius:16px;padding:14px 16px;margin-bottom:10px;text-decoration:none;color:inherit}
+.info-icon-v2{flex:0 0 auto;width:40px;height:40px;border-radius:50%;background:var(--brand-soft);color:var(--brand-text);display:flex;align-items:center;justify-content:center}
+.info-text-v2{flex:1 1 auto;min-width:0}
+.info-text-v2 strong{display:block;font-size:14px;font-weight:800;color:var(--text);line-height:1.3}
+.info-text-v2 span{display:block;font-size:12.5px;color:var(--text-sub);margin-top:2px}
+.info-chevron{flex:0 0 auto;color:var(--text-faint)}
+.btn-icon{display:flex;align-items:center;justify-content:center;gap:9px}
+.btn-outline-v2{background:transparent;border:1.5px solid var(--brand);color:var(--text)}
+.hint-row{display:flex;align-items:center;justify-content:center;gap:6px;font-size:12.5px;color:var(--text-sub);margin:0 0 14px}
 .pix-resumo-linha{display:flex;align-items:baseline;justify-content:center;gap:8px;flex-wrap:wrap;margin:2px 0 16px;font-size:13.5px;color:var(--text-sub);font-weight:600}
 .pix-resumo-linha strong{color:var(--text);font-weight:800}
 .pix-premium{display:flex;flex-direction:column;gap:14px;text-align:left;margin-bottom:16px}
