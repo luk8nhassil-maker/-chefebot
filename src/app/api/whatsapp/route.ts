@@ -268,7 +268,7 @@ async function fecharEscalonamento(phone: string) {
   await redis.set("pedidos", atualizados);
 }
 
-async function enviarMensagem(phone: string, message: string, ritmoRapido = false) {
+export async function enviarMensagem(phone: string, message: string, ritmoRapido = false) {
   // Link do cardápio personalizado: injeta token opaco (?t=) que o site
   // resolve de volta para este phone. Best-effort — falha no Redis nunca
   // impede o envio (o link segue funcionando sem vínculo).
@@ -286,9 +286,20 @@ async function enviarMensagem(phone: string, message: string, ritmoRapido = fals
     : Math.min(2500, Math.max(900, message.length * 22));
   // delay no topo (Evolution v2) + options.delay/presence (Evolution v1) p/ compatibilidade
   const resultado = await enviarTextoWhatsApp(phone, message, { delay });
-  if (!resultado.ok && resultado.motivo === "provider_not_configured") {
-    console.error("[ChefeBot] Provider de WhatsApp não configurado — mensagem não enviada.");
+  if (!resultado.ok) {
+    if (resultado.motivo === "provider_not_configured") {
+      console.error("[ChefeBot] Provider de WhatsApp não configurado — mensagem não enviada.");
+    }
+    // Envio não confirmado (provider ausente ou falha HTTP/rede): nunca registra
+    // no histórico uma mensagem que o cliente pode não ter recebido de fato.
+    return;
   }
+  // Só registra no histórico (autor "bot") após confirmação de envio — usa o
+  // texto FINAL (já com token de cardápio/substituições aplicadas), igual ao
+  // que realmente chegou ao cliente. Centraliza aqui o que antes só
+  // enviarRespostas() fazia, para que toda chamada de enviarMensagem() passe
+  // a aparecer no histórico/painel.
+  await registrarMensagem(phone, "bot", message);
 }
 
 async function enviarImagem(phone: string, imageUrl: string) {
@@ -789,11 +800,12 @@ async function processarComprovante(phone: string, data: any, config: ConfigPizz
   }
 }
 
-async function enviarRespostas(phone: string, messages: string[], config: ConfigPizzaria, ritmoRapido = false) {
+export async function enviarRespostas(phone: string, messages: string[], config: ConfigPizzaria, ritmoRapido = false) {
   for (const msg of messages) {
     const msgFinal = config.chavePix ? msg.replace("(configurada pelo admin)", config.chavePix) : msg;
+    // enviarMensagem() já registra a mensagem como "bot" após confirmação de
+    // envio — não duplicar aqui.
     await enviarMensagem(phone, msgFinal, ritmoRapido);
-    await registrarMensagem(phone, "bot", msgFinal);
     await new Promise(resolve => setTimeout(resolve, ritmoRapido ? 150 : 300));
   }
 }

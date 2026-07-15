@@ -28,7 +28,18 @@ export async function registrarMensagem(
   } catch {
     // log de conversa é best-effort; nunca propaga erro
   }
-  atualizarHistorico(phone, autor, texto, ts).catch(() => {});
+  // Aguarda a tentativa de gravação do histórico permanente (conversa_full)
+  // antes de registrarMensagem() finalizar — antes era fire-and-forget
+  // (.catch() sem await), o que podia deixar a escrita pendente quando a
+  // função serverless já havia encerrado, perdendo a mensagem em silêncio.
+  // atualizarHistorico() já isola suas próprias falhas de Redis internamente
+  // e nunca lança; o try/catch aqui é só uma segunda camada de segurança,
+  // sem nunca logar telefone ou texto da mensagem.
+  try {
+    await atualizarHistorico(phone, autor, texto, ts);
+  } catch {
+    console.error("[ChefeBot] Falha ao gravar histórico permanente da conversa.");
+  }
 }
 
 // Retorna as N mensagens mais recentes da conversa (mais antiga → mais nova).
