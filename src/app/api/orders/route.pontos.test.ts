@@ -39,6 +39,7 @@ vi.mock("@/lib/redis", () => ({
     get: vi.fn(defaultGetImpl),
     set: vi.fn(defaultSetImpl),
     eval: vi.fn(defaultEvalImpl),
+    del: vi.fn((key: string) => { redisStore.delete(key); return Promise.resolve(1); }),
   },
 }));
 

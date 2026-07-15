@@ -39,6 +39,11 @@ describe("/cardapio (PublicCardapio) — menu inferior unificado com /cliente e 
     expect(fonte).not.toContain("Seu último pedido está em andamento");
   });
 
+  test("edição de pedido (main) não depende do banner removido — usa pedidoConfirmado.statusToken na tela sc-done", () => {
+    expect(fonte).toMatch(/href=\{`\/pedido\/editar\/\$\{pedidoConfirmado\.id\}\?token=\$\{encodeURIComponent\(pedidoConfirmado\.statusToken\)\}`\}/);
+    expect(fonte).toContain("Editar pedido");
+  });
+
   test("consome a flag de 'abrir sacola' vinda de /cliente ou /rastrear na hidratação", () => {
     expect(fonte).toContain("consumirFlagAbrirSacola(sessionStorage)");
   });

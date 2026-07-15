@@ -299,4 +299,29 @@ describe("GET /api/pedido-app/pagamento-pix", () => {
     expect(body).not.toHaveProperty("chavePix");
     expect(body).not.toHaveProperty("nomeTitularPix");
   });
+
+  it("[caso 1] continua recuperável com o formato de pedido ampliado pela edição de pedido (main): campos aditivos (itensDetalhados, revision, rua, enderecoNumero) não quebram nada", async () => {
+    store.set("pedidos", [{
+      id: "pedido-1",
+      numero: 4821,
+      statusToken: "token-ok",
+      status: "novo",
+      total: 89.9,
+      pagamento: "Pix",
+      pix: { status: "pendente", provider: "mercadopago", qrCode: "000201...emv...6304F2A1", valorEsperado: 89.9 },
+      // Campos novos, puramente aditivos, introduzidos por "editar pedido":
+      itensDetalhados: [{ kind: "pizza", name: "Pizza G", price: 89.9, qty: 1 }],
+      revision: 1,
+      rua: "Rua Secreta",
+      enderecoNumero: "123",
+    }]);
+
+    const body = await json(await GET(getReq("?token=token-ok")));
+
+    expect(body).toMatchObject({ ok: true, estado: "aguardando", numero: 4821, total: 89.9, valorPix: 89.9 });
+    expect(body).not.toHaveProperty("itensDetalhados");
+    expect(body).not.toHaveProperty("rua");
+    expect(body).not.toHaveProperty("enderecoNumero");
+    expect(body).not.toHaveProperty("revision");
+  });
 });

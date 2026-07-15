@@ -10,17 +10,9 @@ import { validarTokenCardapio } from "@/lib/cardapioToken";
 import { temDinheiroNoPagamento, valorDinheiroEsperado } from "@/lib/bot";
 import { verificarTokenCliente, CLIENTE_COOKIE } from "@/lib/clienteAuth";
 import { contarPizzas, calcularPontosElegiveisPedido, registrarMovimentoPontosIdempotente, construirEventoIdPontos, derivarClienteIdPorTelefone, obterReservasResgatePontos, confirmarResgatePontos } from "@/lib/fidelidade";
+import { type ItemApp, type MenuPedidoApp, formatItem, officialUnitPrice, makePromoUnitPrice } from "@/lib/pedidoAppItens";
 
 export const maxDuration = 20;
-
-type ItemApp = {
-  kind: "pizza" | "simple" | "promo";
-  name: string;     // ex: "Pizza G (meio a meio)" ou "Refrigerante 2L"
-  detail?: string;  // ex: "Calabresa / Baiana · borda Catupiry"
-  price: number;
-  qty: number;
-  promoId?: string; // presente quando kind === "promo"
-};
 
 type PedidoApp = {
   cliente: string;
@@ -41,18 +33,6 @@ type PedidoApp = {
   resgateId?: string;
 };
 
-type MenuSimpleItem = { name: string; price: number; sizes?: { code: string; price: number }[] };
-
-type MenuPedidoApp = {
-  sizes: { code: string; price: number }[];
-  saltyFlavors: string[];
-  sweetFlavors: string[];
-  lanches: { name: string; price: number; sizes?: { code: string; price: number }[] }[];
-  bebidas: { name: string; price: number }[];
-  sucos: { name: string; price: number }[];
-  borders: { label: string; priceSmall: number; priceLarge: number }[];
-};
-
 type ConfigPizzariaPix = {
   nomePizzaria?: string;
   chavePix?: string;
@@ -66,80 +46,6 @@ function criarTokenPublicoAcompanhamento(): string {
 
 async function getConfigPix(): Promise<ConfigPizzariaPix> {
   return (await redis.get<ConfigPizzariaPix>("config:pizzaria")) || {};
-}
-
-function norm(value: string): string {
-  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
-}
-
-function formatItem(item: ItemApp): string {
-  const qtyPrefix = item.qty > 1 ? `${item.qty}x ` : "";
-  const detalhe = item.detail ? ` ${item.detail}` : "";
-  return `${qtyPrefix}${item.name}${detalhe}`.trim();
-}
-
-function officialUnitPrice(item: ItemApp, menu: MenuPedidoApp): number | null {
-  if (!Number.isInteger(item.qty) || item.qty < 1) return null;
-
-  if (item.kind === "simple") {
-    const produtos: MenuSimpleItem[] = [...menu.lanches, ...menu.bebidas, ...menu.sucos];
-    const found = produtos.find((produto) => norm(produto.name) === norm(item.name));
-    if (!found) return null;
-
-    const suco = menu.sucos.find((entry) => norm(entry.name) === norm(item.name));
-    if (suco) {
-      const detail = norm(item.detail || "");
-      if (!detail || detail === "sem leite") return Number.isFinite(suco.price) ? suco.price : null;
-      if (detail === "com leite") return Number.isFinite(suco.price) ? suco.price + 1 : null;
-      return null;
-    }
-    if (norm(found.name).includes("macarronada")) {
-      const sizeCode = item.detail?.match(/^Tamanho\s+([A-Za-z])$/i)?.[1]?.toUpperCase();
-      const size = sizeCode ? found.sizes?.find((entry) => entry.code.toUpperCase() === sizeCode) : null;
-      return size && Number.isFinite(size.price) ? size.price : null;
-    }
-
-    // Calzone é vendido com exatamente 1 sabor (nunca meio a meio). O
-    // frontend manda `detail: "Sabor: <flavor>"` — payload adulterado com
-    // 2+ sabores, sem sabor ou com sabor fora da lista da pizza é rejeitado
-    // aqui (não confiamos em nada vindo do cliente além do nome/qty).
-    if (norm(found.name) === "calzone") {
-      const match = (item.detail || "").trim().match(/^Sabor:\s*(.+)$/i);
-      if (!match) return null;
-      const sabor = match[1].trim();
-      if (!sabor || sabor.includes("/") || sabor.includes("·")) return null;
-      const saboresPermitidos = [...menu.saltyFlavors, ...menu.sweetFlavors].map(norm);
-      if (!saboresPermitidos.includes(norm(sabor))) return null;
-      return Number.isFinite(found.price) ? found.price : null;
-    }
-
-    return Number.isFinite(found.price) ? found.price : null;
-  }
-
-  if (item.kind !== "pizza") return null;
-
-  const sizeCode = item.name.match(/^Pizza\s+([A-Za-z])/i)?.[1]?.toUpperCase();
-  const size = sizeCode ? menu.sizes.find((entry) => entry.code.toUpperCase() === sizeCode) : null;
-  if (!size || !Number.isFinite(size.price)) return null;
-
-  const detail = item.detail || "";
-  const detailParts = detail.split("·").map((part) => part.trim()).filter(Boolean);
-  const flavorsText = detailParts[0] || "";
-  const flavors = flavorsText.split("/").map((part) => part.trim()).filter(Boolean);
-  const allowedFlavors = [...menu.saltyFlavors, ...menu.sweetFlavors].map(norm);
-  if (flavors.length === 0 || flavors.some((flavor) => !allowedFlavors.includes(norm(flavor)))) {
-    return null;
-  }
-
-  const borderText = detailParts.find((part) => norm(part).startsWith("borda "));
-  if (!borderText) return size.price;
-
-  const borderName = borderText.replace(/^borda\s+/i, "").trim();
-  const border = menu.borders.find((entry) => norm(entry.label) === norm(borderName));
-  if (!border) return null;
-
-  const isSmallOrMedium = size.code === "P" || size.code === "M";
-  return size.price + (isSmallOrMedium ? border.priceSmall : border.priceLarge);
 }
 
 export async function POST(req: NextRequest) {
@@ -191,17 +97,13 @@ export async function POST(req: NextRequest) {
     const esgotadosPromo = temPromo ? ((await redis.get<string[]>("esgotados")) || []) : [];
     const catalogoPromo = temPromo ? catalogoDoMenu(menu as never) : [];
 
-    function promoUnitPrice(item: ItemApp): number | null {
-      if (!Number.isInteger(item.qty) || item.qty < 1) return null;
-      const promo = promos.find((p) => p.id === item.promoId);
-      if (!promo || !promo.active || !dentroDaJanela(promo)) return null;
-      if (promo.maxUsesPerOrder && item.qty > promo.maxUsesPerOrder) return null;
-      if (promocaoIndisponivel(promo, esgotadosPromo)) return null;
-      const sabor = item.detail?.match(/Sabor:\s*([^·]+)/i)?.[1]?.trim();
-      if (sabor && esgotadosPromo.some((e) => norm(e) === norm(sabor))) return null;
-      const preco = precoFinalPromocao(promo, catalogoPromo);
-      return preco !== null && Number.isFinite(preco) && preco >= 0 ? preco : null;
-    }
+    const promoUnitPrice = makePromoUnitPrice({
+      promos,
+      esgotadosPromo,
+      dentroDaJanela,
+      promocaoIndisponivel,
+      precoFinalPromocao: (promo) => precoFinalPromocao(promo, catalogoPromo),
+    });
 
     const itensValidados = body.itens.map((item) => ({
       linha: formatItem(item),
@@ -324,6 +226,14 @@ export async function POST(req: NextRequest) {
       ...(body.bairro ? { bairro: body.bairro } : {}),
       ...(body.referencia ? { referencia: body.referencia } : {}),
       ...(body.tipoEntrega ? { tipoEntrega: body.tipoEntrega } : {}),
+      ...(body.tipoEntrega === "delivery" && body.rua ? { rua: body.rua } : {}),
+      ...(body.tipoEntrega === "delivery" && body.numero ? { enderecoNumero: body.numero } : {}),
+      // Snapshot estruturado dos itens (Etapa edição de pedido): permite
+      // recarregar o carrinho fielmente ao iniciar uma edição, sem depender
+      // de reinterpretar as strings formatadas de `itens`. Puramente aditivo
+      // — nenhum consumidor existente lê este campo.
+      itensDetalhados: body.itens,
+      revision: 1,
     };
 
     await redis.set("pedidos", [...pedidos, novoPedido]);

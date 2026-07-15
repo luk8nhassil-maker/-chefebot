@@ -354,4 +354,42 @@ describe("POST /api/pix/webhook — adaptador Mercado Pago", () => {
     expect(body).toMatchObject({ confirmed: true, idempotent: true, reason: "pix_ja_confirmado", pedidoId: "pedido-1" });
     expect(redisMock.set).not.toHaveBeenCalled();
   });
+
+  // Edição de pedido (ver AGENTS.md): quando o cliente troca de Pix para
+  // outro valor/forma de pagamento, a edição gera uma cobrança NOVA
+  // (providerPaymentId diferente) mas o txid interno continua o mesmo
+  // (chefebot_<pedidoId>). Sem esta proteção, o pagamento de uma cobrança já
+  // substituída poderia confirmar incorretamente a revisão nova do pedido.
+  it("cobrança antiga (providerPaymentId diferente da cobrança ativa) NUNCA confirma a revisão nova do pedido", async () => {
+    vi.stubEnv("PIX_WEBHOOK_AUTO_CONFIRM", "true");
+    store.set("pedidos", [
+      { ...pedidoPix, pix: { ...pedidoPix.pix, providerPaymentId: "MP-NOVO-9999" } },
+    ]);
+    assinaturaMock.mockReturnValue(true);
+    // O pagamento que chega agora é da cobrança ANTIGA (MP-9001), já substituída.
+    buscarPagamentoMock.mockResolvedValue(pagamento({ id: "MP-9001" }));
+
+    const res = await POST(postReq(mpBody, mpHeaders));
+    const body = await json(res);
+
+    expect(body).toMatchObject({ wouldConfirm: false, reason: "cobranca_substituida", pedidoId: "pedido-1" });
+    expect(redisMock.set).not.toHaveBeenCalled();
+    const pedidos = store.get("pedidos") as any[];
+    expect(pedidos[0].pixConfirmado).toBeFalsy();
+  });
+
+  it("cobrança ativa (mesmo providerPaymentId) confirma normalmente", async () => {
+    vi.stubEnv("PIX_WEBHOOK_AUTO_CONFIRM", "true");
+    store.set("pedidos", [
+      { ...pedidoPix, pix: { ...pedidoPix.pix, providerPaymentId: "MP-9001" } },
+    ]);
+    assinaturaMock.mockReturnValue(true);
+    buscarPagamentoMock.mockResolvedValue(pagamento({ id: "MP-9001" }));
+
+    const body = await json(await POST(postReq(mpBody, mpHeaders)));
+
+    expect(body).toMatchObject({ confirmed: true, wouldConfirm: true });
+    const pedidos = store.get("pedidos") as any[];
+    expect(pedidos[0].pixConfirmado).toBe(true);
+  });
 });

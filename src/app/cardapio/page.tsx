@@ -1449,7 +1449,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     try {
       const r = await fetch("/api/pedido-app", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const data = await r.json();
-      if (data.ok) { try { localStorage.setItem("cf_nome", nome.trim()); if (telefone.trim()) localStorage.setItem("cf_tel", telefone.trim()); } catch {} try { sessionStorage.removeItem("cf_draft"); } catch {} try { sessionStorage.removeItem("cf_resgate_pontos"); } catch {} setResgatePontos(null); try { const resumo = { id: String(data.pedidoId), numero: typeof data.numero === "number" ? data.numero : undefined, ts: Date.now() }; localStorage.setItem("cf_ultimo_pedido", JSON.stringify(resumo)); } catch {} setStatusPedidoConfirmado("novo"); setStatusPixCliente(payment?.toLowerCase().includes("pix") ? "aguardando_pix" : "nao_pix"); setPedidoConfirmado({ id: data.pedidoId, numero: data.numero, total: data.total, ...(typeof data.statusToken === "string" ? { statusToken: data.statusToken } : {}), ...(data.pix ? { pix: data.pix } : {}) }); if (payment?.toLowerCase().includes("pix") && typeof data.statusToken === "string") { salvarReferenciaPixPendente(localStorage, { pedidoId: String(data.pedidoId), statusToken: data.statusToken, numero: typeof data.numero === "number" ? data.numero : undefined }); } go("sc-done"); } else { if (resgatePontos && typeof data.error === "string" && /resgate/i.test(data.error)) { try { sessionStorage.removeItem("cf_resgate_pontos"); } catch {} setResgatePontos(null); } showToast(typeof data.error === "string" ? data.error : "Erro ao enviar. Tente de novo."); }
+      if (data.ok) { try { localStorage.setItem("cf_nome", nome.trim()); if (telefone.trim()) localStorage.setItem("cf_tel", telefone.trim()); } catch {} try { sessionStorage.removeItem("cf_draft"); } catch {} try { sessionStorage.removeItem("cf_resgate_pontos"); } catch {} setResgatePontos(null); try { const resumo = { id: String(data.pedidoId), numero: typeof data.numero === "number" ? data.numero : undefined, ts: Date.now(), statusToken: typeof data.statusToken === "string" ? data.statusToken : undefined }; localStorage.setItem("cf_ultimo_pedido", JSON.stringify(resumo)); } catch {} setStatusPedidoConfirmado("novo"); setStatusPixCliente(payment?.toLowerCase().includes("pix") ? "aguardando_pix" : "nao_pix"); setPedidoConfirmado({ id: data.pedidoId, numero: data.numero, total: data.total, ...(typeof data.statusToken === "string" ? { statusToken: data.statusToken } : {}), ...(data.pix ? { pix: data.pix } : {}) }); if (payment?.toLowerCase().includes("pix") && typeof data.statusToken === "string") { salvarReferenciaPixPendente(localStorage, { pedidoId: String(data.pedidoId), statusToken: data.statusToken, numero: typeof data.numero === "number" ? data.numero : undefined }); } go("sc-done"); } else { if (resgatePontos && typeof data.error === "string" && /resgate/i.test(data.error)) { try { sessionStorage.removeItem("cf_resgate_pontos"); } catch {} setResgatePontos(null); } showToast(typeof data.error === "string" ? data.error : "Erro ao enviar. Tente de novo."); }
     } catch { showToast("Sem conexão. Tente de novo."); } finally { setSending(false); }
   }
   function resetAll() { setCart([]); resetBuild(); setDelType(null); setBairroIdx(""); setRua(""); setNumero(""); setReferencia(""); setPayment(null); setTroco(""); setTrocoOpcao(null); setPaymentModal(null); setMistoPixInput(""); setMistoDinheiroInput(""); setErroMisto(""); setObservacao(""); setErroNome(""); setErroTelefone(""); setErroPagamento(""); setErroEntrega(""); setErroTroco(""); setPedidoConfirmado(null); setStatusPedidoConfirmado("novo"); setStatusPixCliente("aguardando_pix"); setRestoredDraft(false); setEditandoIdentidade(false); setLastAddedKind(null); setUpsellBebidaIgnorado(false); try { sessionStorage.removeItem("cf_draft"); } catch {} go("sc-start"); }
@@ -1519,7 +1519,9 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                   acompanhamento de pedido e Pix pendente vivem na barra
                   global (PixPendenteBar) e no indicador da aba Pedido, nunca
                   dentro do conteúdo rolável da home. Só promoção ativa e
-                  convites não-operacionais (ex.: fidelidade abaixo) seguem. */}
+                  convites não-operacionais (ex.: fidelidade abaixo) seguem.
+                  A edição de pedido (main) não depende deste banner: usa
+                  pedidoConfirmado.statusToken na própria tela sc-done. */}
               <a href="/cliente" style={{ display: "flex", alignItems: "center", gap: 10, background: "var(--surface)", border: "1px solid var(--line-strong)", borderRadius: 14, padding: "10px 12px", marginBottom: 14, textDecoration: "none" }}>
                 <span style={{ fontSize: 20, flexShrink: 0 }}>🎁</span>
                 <span style={{ flex: 1 }}>
@@ -1916,7 +1918,24 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                         <p style={{ margin: 0, fontWeight: 700 }}>Pagamento no cartão na hora de receber o pedido.</p>
                       </div>
                     )}
-                    <a href={`/rastrear/${pedidoConfirmado.id}`} className="btn" style={{ display: "block", marginBottom: 10, textAlign: "center", textDecoration: "none" }}>Acompanhar pedido</a>
+                    <a href={`/rastrear/${pedidoConfirmado.id}${pedidoConfirmado.statusToken ? `?token=${encodeURIComponent(pedidoConfirmado.statusToken)}` : ""}`} className="btn" style={{ display: "block", marginBottom: 10, textAlign: "center", textDecoration: "none" }}>Acompanhar pedido</a>
+                    {statusPedidoConfirmado === "novo" && pedidoConfirmado.statusToken && (
+                      <>
+                        <p style={{ fontSize: 13, color: "var(--text-sub)", margin: "0 0 8px" }}>Você ainda pode corrigir seu pedido enquanto ele não for aceito.</p>
+                        <a
+                          href={`/pedido/editar/${pedidoConfirmado.id}?token=${encodeURIComponent(pedidoConfirmado.statusToken)}`}
+                          className="btn btn-ghost"
+                          style={{ display: "block", marginBottom: 10, textAlign: "center", textDecoration: "none" }}
+                        >
+                          Editar pedido
+                        </a>
+                      </>
+                    )}
+                    {statusPedidoConfirmado !== "novo" && statusPedidoConfirmado !== "cancelado" && (
+                      <p style={{ fontSize: 13, color: "var(--text-sub)", margin: "0 0 10px", textAlign: "left" }}>
+                        Seu pedido já foi aceito pela loja. Para solicitar alguma mudança, fale diretamente com a loja.
+                      </p>
+                    )}
                     {isPagamentoPix && (
                       <a href="/cliente" style={{ display: "block", background: "var(--surface)", border: "1px solid var(--line-strong)", borderRadius: 12, padding: "12px 14px", marginBottom: 10, textDecoration: "none", textAlign: "left" }}>
                         <span style={{ display: "block", fontSize: 14, fontWeight: 700, color: "var(--text)" }}>🎁 Quer que essa compra conte para sua fidelidade?</span>

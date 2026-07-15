@@ -55,6 +55,19 @@ type Pedido = {
   archivedBy?: string
   archivedReason?: string
   origem?: string
+  // Edição de pedido pelo cliente antes da aceitação (ver AGENTS.md).
+  editStatus?: "none" | "editing" | "edited"
+  editExpiresAt?: string
+  changesSummary?: string[]
+}
+
+function pedidoEmEdicao(p: Pick<Pedido, "editStatus" | "editExpiresAt">): boolean {
+  if (p.editStatus !== "editing") return false
+  if (!p.editExpiresAt) return false
+  return new Date(p.editExpiresAt).getTime() > Date.now()
+}
+function pedidoFoiEditado(p: Pick<Pedido, "editStatus">): boolean {
+  return p.editStatus === "edited"
 }
 
 // Cadência adaptativa da auto-verificação de Pix Mercado Pago (Guardião Pix
@@ -1276,6 +1289,8 @@ export default function PedidosPage() {
     const hibridoParts = parseHybridPayment(pagamento)
     const payDot = isPix ? "var(--success)" : pagamento.toLowerCase().includes("cart") ? "var(--info)" : "var(--primary)"
     const isRetirada = !isDineInDetail && (!p.tipoEntrega || p.tipoEntrega === "pickup" || p.tipoEntrega === "retirada" || p.endereco === "Retirada na loja")
+    const emEdicaoDetail = pedidoEmEdicao(p)
+    const foiEditadoDetail = pedidoFoiEditado(p)
     return (
       <>
         {/* Cabeçalho */}
@@ -1296,6 +1311,28 @@ export default function PedidosPage() {
             </div>
           </div>
         </div>
+
+        {emEdicaoDetail && (
+          <div style={{ background: "color-mix(in srgb, var(--info) 10%, transparent)", border: "1px solid color-mix(in srgb, var(--info) 30%, transparent)", borderRadius: 14, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 4 }}>
+            <span style={{ fontSize: 13, fontWeight: 900, color: "var(--info)" }}>✎ Cliente editando o pedido</span>
+            <span style={{ fontSize: 12, fontWeight: 600, color: "var(--foreground-secondary)" }}>O cliente está alterando este pedido. Aguarde a finalização para revisar e aceitar.</span>
+            {p.editExpiresAt && <span style={{ fontSize: 11, fontWeight: 700, color: "var(--foreground-muted)" }}>Edição expira em alguns minutos</span>}
+          </div>
+        )}
+        {!emEdicaoDetail && foiEditadoDetail && (
+          <div style={{ background: "var(--attention-surface)", border: "1px solid var(--attention-border)", borderRadius: 14, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 6 }}>
+            <span style={{ fontSize: 13, fontWeight: 900, color: "var(--attention-text)" }}>✎ Pedido alterado pelo cliente</span>
+            <span style={{ fontSize: 12, fontWeight: 600, color: "var(--foreground-secondary)" }}>Revise as alterações antes de aceitar.</span>
+            {p.changesSummary && p.changesSummary.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 3, marginTop: 4 }}>
+                <span style={{ fontSize: 10, fontWeight: 900, color: "var(--foreground-muted)", textTransform: "uppercase", letterSpacing: ".5px" }}>Alterações realizadas</span>
+                {p.changesSummary.map((linha, i) => (
+                  <span key={i} style={{ fontSize: 12, fontWeight: 700, color: "var(--foreground)" }}>• {linha}</span>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Informações completas */}
         <div style={{ background: "var(--surface)", borderRadius: 14, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
@@ -1457,8 +1494,8 @@ export default function PedidosPage() {
           </div>
         )}
 
-        {/* Alterar status dropdown */}
-        {!isDone && !isCanceled && (
+        {/* Alterar status dropdown — indisponível enquanto o cliente edita */}
+        {!isDone && !isCanceled && !emEdicaoDetail && (
           <div>
             {modalAlterarStatus === p.id ? (
               <div style={{ background: "var(--surface)", border: "1px solid var(--surface-secondary)", borderRadius: 14, overflow: "hidden" }}>
@@ -1476,16 +1513,21 @@ export default function PedidosPage() {
           </div>
         )}
 
-        {/* Ação principal */}
+        {/* Ação principal — bloqueada enquanto o cliente edita (o backend também rejeita) */}
         {!isDone && !isCanceled && nextStatus && (
-          <button onClick={() => { avancarStatus(p.id, nextStatus); setDetailId(null) }} disabled={atualizando === p.id} style={{ height: 58, border: "none", borderRadius: 16, background: sc.btnBg, color: sc.btnFg, fontSize: 17, fontWeight: 900, letterSpacing: "-0.2px", flexShrink: 0, opacity: atualizando === p.id ? 0.6 : 1 }}>
-            {getActionLabel(p)}
+          <button
+            onClick={() => { if (emEdicaoDetail) return; avancarStatus(p.id, nextStatus); setDetailId(null) }}
+            disabled={atualizando === p.id || emEdicaoDetail}
+            title={emEdicaoDetail ? "Aguarde o cliente concluir a edição" : undefined}
+            style={{ height: 58, border: "none", borderRadius: 16, background: emEdicaoDetail ? "var(--surface-secondary)" : sc.btnBg, color: emEdicaoDetail ? "var(--foreground-muted)" : sc.btnFg, fontSize: 17, fontWeight: 900, letterSpacing: "-0.2px", flexShrink: 0, opacity: atualizando === p.id ? 0.6 : 1, cursor: emEdicaoDetail ? "not-allowed" : "pointer" }}
+          >
+            {emEdicaoDetail ? "Aguarde o cliente concluir" : getActionLabel(p)}
           </button>
         )}
         {isDone && <div style={{ height: 54, borderRadius: 16, background: "color-mix(in srgb, var(--success) 10%, transparent)", border: "1px solid color-mix(in srgb, var(--success) 30%, transparent)", color: "var(--success)", fontSize: 15, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>Entregue · tudo certo ✓</div>}
 
-        {/* Finalizar no detalhe */}
-        {!isDone && !isCanceled && (
+        {/* Finalizar no detalhe — bloqueado durante edição do cliente */}
+        {!isDone && !isCanceled && !emEdicaoDetail && (
           <button onClick={() => { setDetailId(null); setFinalizarModal(p.id) }} style={{ height: 44, border: "1px solid rgba(var(--overlay-rgb), 0.07)", borderRadius: 14, background: "transparent", color: "var(--foreground-muted)", fontSize: 13, fontWeight: 800, flexShrink: 0 }}>
             Finalizar pedido
           </button>
@@ -1499,17 +1541,19 @@ export default function PedidosPage() {
           </button>
         )}
 
-        {/* Cancelar */}
-        {!isDone && !isCanceled && (
+        {/* Cancelar — bloqueado durante edição do cliente (mesma regra do aceite) */}
+        {!isDone && !isCanceled && !emEdicaoDetail && (
           <button onClick={() => cancelarPedido(p.id)} disabled={cancelandoId === p.id} style={{ height: 46, border: "1px solid color-mix(in srgb, var(--danger) 35%, transparent)", borderRadius: 14, background: "color-mix(in srgb, var(--danger) 6%, transparent)", color: "var(--danger)", fontSize: 14, fontWeight: 800, flexShrink: 0, opacity: cancelandoId === p.id ? 0.6 : 1 }}>
             {cancelandoId === p.id ? "Cancelando..." : "Cancelar pedido"}
           </button>
         )}
 
-        {/* Imprimir pedido */}
-        <button onClick={() => window.open(`/pedidos/${p.id}/imprimir`, "_blank")} style={{ height: 44, border: "1px solid rgba(var(--overlay-rgb), 0.1)", borderRadius: 14, background: "transparent", color: "var(--foreground-secondary)", fontSize: 14, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, flexShrink: 0 }}>
-          🖨️ Imprimir pedido
-        </button>
+        {/* Imprimir pedido — bloqueado antes do aceite enquanto o cliente edita, para nunca imprimir uma versão desatualizada */}
+        {!emEdicaoDetail && (
+          <button onClick={() => window.open(`/pedidos/${p.id}/imprimir`, "_blank")} style={{ height: 44, border: "1px solid rgba(var(--overlay-rgb), 0.1)", borderRadius: 14, background: "transparent", color: "var(--foreground-secondary)", fontSize: 14, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, flexShrink: 0 }}>
+            🖨️ Imprimir pedido
+          </button>
+        )}
 
         <button onClick={() => setDetailId(null)} style={{ height: 44, border: "none", background: "transparent", color: "var(--foreground-secondary)", fontSize: 14, fontWeight: 800, flexShrink: 0 }}>Fechar</button>
       </>
@@ -2072,6 +2116,8 @@ export default function PedidosPage() {
             const pixPendente = isPix && !pedido.pixConfirmado && pedido.status === "novo"
             const pixEmRevisaoOuSuspeito = isPix && !pedido.pixConfirmado && labelPixRevisaoOuSuspeito(pedido)
             const isRetirada = !isDineIn && (!pedido.tipoEntrega || pedido.tipoEntrega === "pickup" || pedido.tipoEntrega === "retirada" || pedido.endereco === "Retirada na loja")
+            const emEdicao = pedidoEmEdicao(pedido)
+            const foiEditado = pedidoFoiEditado(pedido)
 
             let rowBorder = sc.accentBorder
             if (pedido.escalonado) rowBorder = "color-mix(in srgb, var(--danger) 70%, transparent)"
@@ -2120,6 +2166,8 @@ export default function PedidosPage() {
                       {(pedido.origem === "site" || pedido.origem === "app") && <span style={{ fontSize: 9, fontWeight: 900, color: "var(--info)", background: "color-mix(in srgb, var(--info) 12%, transparent)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>🌐 Site</span>}
                       {pixPendente && <span style={{ fontSize: 9, fontWeight: 900, color: "var(--attention-text)", background: "var(--attention-surface)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>{hibridoParts ? "PIX parcial ⏳" : "PIX⏳"}</span>}
                       {pixEmRevisaoOuSuspeito && <span style={{ fontSize: 9, fontWeight: 900, color: pedido.pix?.status === "suspeito" ? "var(--danger)" : "var(--attention-text)", background: pedido.pix?.status === "suspeito" ? "color-mix(in srgb, var(--danger) 12%, transparent)" : "var(--attention-surface)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>{pixEmRevisaoOuSuspeito}</span>}
+                      {emEdicao && <span style={{ fontSize: 9, fontWeight: 900, color: "var(--info)", background: "color-mix(in srgb, var(--info) 14%, transparent)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>✎ Cliente editando</span>}
+                      {!emEdicao && foiEditado && <span style={{ fontSize: 9, fontWeight: 900, color: "var(--attention-text)", background: "var(--attention-surface)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>✎ Alterado pelo cliente</span>}
                       {pedido.cancelamentoSolicitado && <span style={{ fontSize: 11, flexShrink: 0 }}>⚠️</span>}
                       <span style={{ fontSize: 10, fontWeight: 900, color: pixPendente ? "var(--attention-text)" : (isPix && pedido.pixConfirmado && pedido.status === "novo" ? "var(--success)" : sc.accent), background: pixPendente ? "var(--attention-surface)" : (isPix && pedido.pixConfirmado && pedido.status === "novo" ? "color-mix(in srgb, var(--success) 12%, transparent)" : sc.accentBg), padding: "2px 7px", borderRadius: 6, border: `1px solid ${pixPendente ? "var(--attention-border)" : (isPix && pedido.pixConfirmado && pedido.status === "novo" ? "color-mix(in srgb, var(--success) 35%, transparent)" : sc.accentBorder)}`, textTransform: "uppercase", letterSpacing: ".4px", flexShrink: 0 }}>{pixPendente ? (hibridoParts ? "Aguardando Pix parcial" : "Aguardando Pix") : (isPix && pedido.pixConfirmado && pedido.status === "novo" ? (hibridoParts ? "Pix parcial pago" : "Pago") : sc.label)}</span>
                     </div>
@@ -2137,6 +2185,18 @@ export default function PedidosPage() {
                       <span style={{ flexShrink: 0, fontWeight: 900, color: timerColor, marginLeft: 2, fontSize: 11 }}>{timerMins}m</span>
                     </div>
 
+                    {/* Aviso de edição em andamento — pedido continua na fila, só o aceite fica bloqueado */}
+                    {emEdicao && (
+                      <div style={{ marginBottom: 8, padding: "6px 10px", borderRadius: 8, background: "color-mix(in srgb, var(--info) 10%, transparent)", border: "1px solid color-mix(in srgb, var(--info) 30%, transparent)" }}>
+                        <span style={{ fontSize: 11, fontWeight: 800, color: "var(--info)" }}>O cliente está alterando este pedido. Aguarde a finalização para revisar e aceitar.</span>
+                      </div>
+                    )}
+                    {!emEdicao && foiEditado && (
+                      <div style={{ marginBottom: 8, padding: "6px 10px", borderRadius: 8, background: "var(--attention-surface)", border: "1px solid var(--attention-border)" }}>
+                        <span style={{ fontSize: 11, fontWeight: 800, color: "var(--attention-text)" }}>Revise as alterações antes de aceitar.</span>
+                      </div>
+                    )}
+
                     {/* Linha 3: botão de ação */}
                     <div onClick={e => e.stopPropagation()}>
                       {pedido.escalonado && (
@@ -2145,7 +2205,7 @@ export default function PedidosPage() {
                           style={{ height: 30, padding: "0 14px", border: "none", borderRadius: 8, background: "var(--danger)", color: "var(--foreground)", fontSize: 12, fontWeight: 900 }}
                         >🚨 Assumir conversa</button>
                       )}
-                      {!pedido.escalonado && pixPendente && (
+                      {!pedido.escalonado && pixPendente && !emEdicao && (
                         <div style={{ display: "flex", flexDirection: "column", gap: 2, alignItems: "flex-start" }}>
                           <button
                             onClick={() => abrirVerificacaoPix(pedido.id)}
@@ -2157,16 +2217,18 @@ export default function PedidosPage() {
                       {!pedido.escalonado && !pixPendente && !isDone && !isCanceled && nextStatus && (
                         <button
                           onClick={() => {
+                            if (emEdicao) return
                             if (nextStatus === "saiu_entrega" && entregadores.length > 0 && pedido.tipoEntrega !== "pickup") {
                               setModalEntrega({ pedidoId: pedido.id, proxStatus: nextStatus })
                             } else {
                               avancarStatus(pedido.id, nextStatus)
                             }
                           }}
-                          disabled={atualizando === pedido.id}
-                          style={{ height: 30, padding: "0 14px", border: "none", borderRadius: 8, background: sc.btnBg, color: sc.btnFg, fontSize: 12, fontWeight: 900, opacity: atualizando === pedido.id ? 0.6 : 1 }}
+                          disabled={atualizando === pedido.id || emEdicao}
+                          title={emEdicao ? "Aguarde o cliente concluir a edição" : undefined}
+                          style={{ height: 30, padding: "0 14px", border: "none", borderRadius: 8, background: emEdicao ? "var(--surface-secondary)" : sc.btnBg, color: emEdicao ? "var(--foreground-muted)" : sc.btnFg, fontSize: 12, fontWeight: 900, opacity: atualizando === pedido.id ? 0.6 : 1, cursor: emEdicao ? "not-allowed" : "pointer" }}
                         >
-                          {atualizando === pedido.id ? "..." : getActionLabel(pedido)}
+                          {atualizando === pedido.id ? "..." : emEdicao ? "Edição em andamento" : getActionLabel(pedido)}
                         </button>
                       )}
                       {isDone && <span style={{ fontSize: 11, fontWeight: 800, color: "var(--success)" }}>✓ Entregue</span>}

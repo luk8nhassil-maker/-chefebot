@@ -52,4 +52,42 @@ describe("/rastrear/[pedidoId] — menu inferior fixo com Pedido ativo", () => {
     expect(fonte).toContain("setInterval(() => {");
     expect(fonte).toContain("MapaEntregador");
   });
+
+  test("usa o hook central usePixPendente e repassa para a barra + indicador do menu", () => {
+    expect(fonte).toContain("import PixPendenteBar, { usePixPendente } from '@/components/PixPendenteBar'");
+    expect(fonte).toContain("usePixPendente()");
+    expect(fonte).toContain("<PixPendenteBar pendente={pixPendente} />");
+    expect(fonte).toMatch(/<ClientBottomNav[\s\S]{0,220}pixPendente=\{!!pixPendente\}/);
+  });
+
+  test("preserva a edição de pedido trazida da main: token/edição por query string continuam intactos", () => {
+    expect(fonte).toContain("setStatusToken(sp.get('token'))");
+    expect(fonte).toContain("EdicaoStatus");
+    expect(fonte).toContain("/editar/status?token=");
+  });
+});
+
+describe("/rastrear/[pedidoId] — [bloqueio] WhatsApp dinâmico, sem número fictício", () => {
+  test("[caso 14] número de telefone fixo não existe mais neste arquivo", () => {
+    expect(fonte).not.toContain("PIZZARIA_NUMERO");
+    expect(fonte).not.toContain("5586999999999");
+  });
+
+  test("[caso 12] reaproveita a mesma solução de /pedido/pagamento/[token] — mesmo endpoint, nenhuma segunda lógica de contato", () => {
+    expect(fonte).toContain("/api/pedido-app/pagamento-pix?token=");
+    expect(fonte).toMatch(/href=\{`https:\/\/wa\.me\/\$\{whatsappPizzaria\}`\}/);
+  });
+
+  test("[caso 13] botão de WhatsApp só renderiza quando há número configurado", () => {
+    expect(fonte).toMatch(/\{whatsappPizzaria && \(/);
+  });
+
+  test("busca o contato só quando há statusToken — sem token (rastreio do motoboy), nunca tenta buscar", () => {
+    expect(fonte).toMatch(/if \(!statusToken\) return/);
+  });
+
+  test("nenhuma cor hexadecimal nova (ex.: #fff) — só tokens do design system", () => {
+    expect(fonte).not.toMatch(/#[0-9a-fA-F]{3,6}/);
+    expect(fonte).toContain("var(--on-success)");
+  });
 });
