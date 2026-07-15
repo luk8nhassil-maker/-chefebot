@@ -524,15 +524,26 @@ function higienizarNomeArquivo(nome: unknown): string {
   return bruto.length > LIMITE ? bruto.slice(0, LIMITE) : bruto;
 }
 
-function montarMarcadorImagem(data: any): string {
-  const legenda = extrairTextoSeguro(data?.message?.imageMessage?.caption);
+// Payload do webhook é `unknown` (JSON externo, formato não confiável) —
+// acesso a propriedades feito só através destes dois helpers, nunca com `any`.
+function ehObjeto(valor: unknown): valor is Record<string, unknown> {
+  return typeof valor === "object" && valor !== null;
+}
+
+function obterCampo(valor: unknown, chave: string): unknown {
+  return ehObjeto(valor) ? valor[chave] : undefined;
+}
+
+export function montarMarcadorImagem(data: unknown): string {
+  const imageMessage = obterCampo(obterCampo(data, "message"), "imageMessage");
+  const legenda = extrairTextoSeguro(obterCampo(imageMessage, "caption"));
   return legenda ? `[Imagem recebida] ${legenda}` : `[Imagem recebida]`;
 }
 
-function montarMarcadorDocumento(data: any): string {
-  const doc = data?.message?.documentMessage;
-  const nome = higienizarNomeArquivo(doc?.fileName);
-  const legenda = extrairTextoSeguro(doc?.caption);
+export function montarMarcadorDocumento(data: unknown): string {
+  const doc = obterCampo(obterCampo(data, "message"), "documentMessage");
+  const nome = higienizarNomeArquivo(obterCampo(doc, "fileName"));
+  const legenda = extrairTextoSeguro(obterCampo(doc, "caption"));
   if (nome && legenda) return `[Documento recebido: ${nome}] ${legenda}`;
   if (nome) return `[Documento recebido: ${nome}]`;
   if (legenda) return `[Documento PDF recebido] ${legenda}`;

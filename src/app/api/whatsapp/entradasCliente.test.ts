@@ -39,7 +39,7 @@ vi.mock("@/lib/transcribeAudio", () => ({
   transcreverAudio: transcreverAudioMock,
 }));
 
-import { POST } from "./route";
+import { POST, montarMarcadorImagem, montarMarcadorDocumento } from "./route";
 
 const PHONE = "5586999990001";
 
@@ -332,5 +332,47 @@ describe("QA local — sequência completa (texto, imagem, Pix texto, áudio, PD
       expect(typeof texto).toBe("string");
       expect(texto.length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("13. montarMarcadorImagem/montarMarcadorDocumento — payload inseguro (tipagem, sem any)", () => {
+  test("data === null nunca lança e cai no marcador padrão", () => {
+    expect(montarMarcadorImagem(null)).toBe("[Imagem recebida]");
+    expect(montarMarcadorDocumento(null)).toBe("[Documento PDF recebido]");
+  });
+
+  test("data === undefined nunca lança e cai no marcador padrão", () => {
+    expect(montarMarcadorImagem(undefined)).toBe("[Imagem recebida]");
+    expect(montarMarcadorDocumento(undefined)).toBe("[Documento PDF recebido]");
+  });
+
+  test("objeto vazio ({}) nunca lança e cai no marcador padrão", () => {
+    expect(montarMarcadorImagem({})).toBe("[Imagem recebida]");
+    expect(montarMarcadorDocumento({})).toBe("[Documento PDF recebido]");
+  });
+
+  test("sem 'message' nunca lança e cai no marcador padrão", () => {
+    expect(montarMarcadorImagem({ key: {} })).toBe("[Imagem recebida]");
+    expect(montarMarcadorDocumento({ key: {} })).toBe("[Documento PDF recebido]");
+  });
+
+  test("'message' com tipo inesperado (string, número, array) nunca lança", () => {
+    expect(montarMarcadorImagem({ message: "texto solto" })).toBe("[Imagem recebida]");
+    expect(montarMarcadorImagem({ message: 123 })).toBe("[Imagem recebida]");
+    expect(montarMarcadorImagem({ message: [] })).toBe("[Imagem recebida]");
+    expect(montarMarcadorDocumento({ message: "texto solto" })).toBe("[Documento PDF recebido]");
+  });
+
+  test("caption/fileName com tipo inesperado (número, objeto, array) são ignorados com segurança", () => {
+    expect(montarMarcadorImagem({ message: { imageMessage: { caption: 123 } } })).toBe("[Imagem recebida]");
+    expect(montarMarcadorImagem({ message: { imageMessage: { caption: {} } } })).toBe("[Imagem recebida]");
+    expect(montarMarcadorImagem({ message: { imageMessage: { caption: null } } })).toBe("[Imagem recebida]");
+    expect(montarMarcadorDocumento({ message: { documentMessage: { fileName: 42, caption: [] } } })).toBe("[Documento PDF recebido]");
+  });
+
+  test("continua funcionando normalmente com payload bem formado", () => {
+    expect(montarMarcadorImagem({ message: { imageMessage: { caption: "oi" } } })).toBe("[Imagem recebida] oi");
+    expect(montarMarcadorDocumento({ message: { documentMessage: { fileName: "nota.pdf", caption: "segue" } } }))
+      .toBe("[Documento recebido: nota.pdf] segue");
   });
 });
