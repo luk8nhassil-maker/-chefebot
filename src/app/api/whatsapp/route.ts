@@ -860,6 +860,33 @@ export async function POST(req: NextRequest) {
 
     if (body.event !== "messages.upsert") return NextResponse.json({ ok: true });
 
+    const data = body.data;
+
+    // Mensagens enviadas pelo próprio número (celular ou API) devem ser capturadas
+    // ANTES do check de conexão — a conexão pode estar "connecting" durante reenvio
+    // mas ainda assim precisamos registrar o que a Kellyne enviou pelo WhatsApp Business.
+    if (data?.key?.fromMe) {
+      try {
+        const fromPhone = data?.key?.remoteJid?.replace("@s.whatsapp.net", "");
+        console.log("[FROMME]", JSON.stringify({ fromPhone, remoteJid: data?.key?.remoteJid, keys: Object.keys(data || {}) }));
+        if (fromPhone && fromPhone.includes("@") === false) {
+          const emManualFrom = await redis.get<boolean>(`manual:${fromPhone}`);
+          const botGlobalAtivo = await redis.get<boolean>("bot_ativo");
+          console.log("[FROMME-STATE]", { emManualFrom, botGlobalAtivo });
+          if (emManualFrom === true || botGlobalAtivo === false) {
+            const rawFromMsg = data?.data?.message || data?.message || {};
+            const txtFrom =
+              rawFromMsg?.conversation ||
+              rawFromMsg?.extendedTextMessage?.text ||
+              "";
+            console.log("[FROMME-TEXT]", JSON.stringify({ txtFrom: txtFrom.slice(0, 100), rawFromMsgKeys: Object.keys(rawFromMsg) }));
+            if (txtFrom) await registrarMensagem(fromPhone, "atendente", txtFrom);
+          }
+        }
+      } catch {}
+      return NextResponse.json({ ok: true });
+    }
+
     // Se a conexão não está ativa, ainda assim aceitamos a requisição (não perdemos a
     // mensagem que a Evolution já recebeu), mas pausamos a RESPOSTA automática do bot.
     // Quando a conexão voltar, o cliente pode reenviar e o bot responde normalmente —
@@ -867,30 +894,6 @@ export async function POST(req: NextRequest) {
     const conexaoAtiva = await botPodeResponder();
     if (!conexaoAtiva) {
       await log("info", "Mensagem recebida com WhatsApp desconectado/conectando — resposta pausada", "");
-      return NextResponse.json({ ok: true });
-    }
-
-    const data = body.data;
-    if (data?.key?.fromMe) {
-      // Mensagem enviada pelo próprio número (celular ou API).
-      // Salva como "atendente" quando o bot está pausado globalmente (bot_ativo=false)
-      // ou quando a conversa está em atendimento manual (manual:{phone}=true).
-      // Isso garante que respostas dadas pela Kellyne pelo WhatsApp Business apareçam
-      // no painel Tempo Real. Bot nunca responde — always early-return.
-      try {
-        const fromPhone = data?.key?.remoteJid?.replace("@s.whatsapp.net", "");
-        if (fromPhone) {
-          const emManualFrom = await redis.get<boolean>(`manual:${fromPhone}`);
-          const botGlobalAtivo = await redis.get<boolean>("bot_ativo");
-          if (emManualFrom === true || botGlobalAtivo === false) {
-            const txtFrom =
-              data?.message?.conversation ||
-              data?.message?.extendedTextMessage?.text ||
-              "";
-            if (txtFrom) await registrarMensagem(fromPhone, "atendente", txtFrom);
-          }
-        }
-      } catch {}
       return NextResponse.json({ ok: true });
     }
     const phone = data?.key?.remoteJid?.replace("@s.whatsapp.net", "");
