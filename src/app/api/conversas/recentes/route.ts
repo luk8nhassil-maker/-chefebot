@@ -32,17 +32,28 @@ const STATUS_ORDER: Record<StatusConversa, number> = {
 
 const STEPS_BOT_ATIVOS = ['done', 'welcome']
 
+// O SDK do Upstash tenta fazer JSON.parse em cada valor bruto retornado pelo
+// Redis; um member de ZSET que seja só dígitos (ex.: telefone "5511999998888")
+// vira um number em runtime, mesmo com o tipo declarado como string[]. Nunca
+// confiar no generic do zrange() — normalizar explicitamente cada member antes
+// de usá-lo para montar chaves (conversa_meta:, session:, manual:).
+function normalizarPhoneRedis(raw: unknown): string {
+  if (typeof raw === 'number' && Number.isFinite(raw)) return String(raw)
+  if (typeof raw === 'string') return raw.trim()
+  return ''
+}
+
 export async function GET(req: NextRequest) {
   const auth = await checkAuth(req)
   if (!auth) return NextResponse.json({ ok: false, error: 'Não autorizado' }, { status: 401 })
 
   try {
     // Prefer permanent ZSET index; fall back to TTL scan if not yet populated
-    const phonesFromZset = await redis.zrange<string[]>(CONVERSAS_ZSET, 0, -1, { rev: true })
+    const phonesFromZset = await redis.zrange<unknown[]>(CONVERSAS_ZSET, 0, -1, { rev: true })
     let phones: string[]
 
     if (phonesFromZset.length > 0) {
-      phones = phonesFromZset
+      phones = phonesFromZset.map(normalizarPhoneRedis).filter(p => p.length >= 8)
     } else {
       const chaves = await redis.keys('conversa:*')
       phones = chaves.map(k => k.replace('conversa:', '')).filter(p => p.length >= 8)
