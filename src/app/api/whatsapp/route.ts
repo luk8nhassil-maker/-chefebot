@@ -27,6 +27,7 @@ import { creditarPontosPedidoEntregue } from "@/lib/fidelidade";
 import type { BotStep } from "@/lib/bot";
 import { obterConfigEvolution } from "@/lib/evolutionApi";
 import { enviarTextoWhatsApp } from "@/lib/whatsappMensagem";
+import { consumirEcoPainel } from "@/lib/conversaEcoPainel";
 
 export const maxDuration = 30;
 
@@ -928,17 +929,21 @@ export async function POST(req: NextRequest) {
 
     const data = body.data;
     if (data?.key?.fromMe) {
-      // Mensagem enviada pelo próprio número (celular ou API).
-      // Salva como "atendente" quando o bot está pausado globalmente (bot_ativo=false)
-      // ou quando a conversa está em atendimento manual (manual:{phone}=true).
-      // Isso garante que respostas dadas pela Kellyne pelo WhatsApp Business apareçam
-      // no painel Tempo Real. Bot nunca responde — always early-return.
+      // Mensagem enviada pelo próprio número (celular ou API) — sempre
+      // registrada como "atendente" no histórico, independente de
+      // manual:{phone} ou bot_ativo (Etapa 2B): garante que qualquer resposta
+      // dada pela Kellyne diretamente pelo WhatsApp Business apareça no
+      // painel, mesmo com o bot ativo e a conversa não assumida. Exceção: se
+      // este messageId já foi marcado como eco de um envio feito pelo painel
+      // (/api/conversas/enviar-mensagem-humana já registrou a mensagem), não
+      // registra de novo — só consome a marca. Bot nunca responde — always
+      // early-return.
       try {
         const fromPhone = data?.key?.remoteJid?.replace("@s.whatsapp.net", "");
+        const msgIdFrom = data?.key?.id as string | undefined;
         if (fromPhone) {
-          const emManualFrom = await redis.get<boolean>(`manual:${fromPhone}`);
-          const botGlobalAtivo = await redis.get<boolean>("bot_ativo");
-          if (emManualFrom === true || botGlobalAtivo === false) {
+          const ecoDoPainel = msgIdFrom ? await consumirEcoPainel(msgIdFrom) : false;
+          if (!ecoDoPainel) {
             const txtFrom =
               data?.message?.conversation ||
               data?.message?.extendedTextMessage?.text ||
