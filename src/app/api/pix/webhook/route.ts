@@ -114,6 +114,29 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    // Edição de pedido (ver AGENTS.md): quando o cliente altera valor/forma
+    // de pagamento com um Pix ainda não pago, uma cobrança nova é criada mas
+    // o txid interno (chefebot_<pedidoId>) permanece o mesmo por design — o
+    // webhook casa por txid+valor. Sem esta checagem, o pagamento de uma
+    // cobrança JÁ SUBSTITUÍDA (QR antigo, ainda visível em algum print/cache
+    // do cliente) poderia confirmar a revisão nova do pedido. providerPaymentId
+    // é o identificador da cobrança específica no Mercado Pago — só confirma
+    // quando ele bate com a cobrança atualmente ativa no pedido.
+    if (
+      payload.providerPaymentId &&
+      pedido.pix.providerPaymentId &&
+      payload.providerPaymentId !== pedido.pix.providerPaymentId
+    ) {
+      return NextResponse.json({
+        ok: true,
+        passive: false,
+        wouldConfirm: false,
+        reason: "cobranca_substituida",
+        pedidoId: pedido.id,
+        txid: payload.txid,
+      });
+    }
+
     const confirmadoEm = new Date().toISOString();
     const pix = {
       ...pedido.pix,

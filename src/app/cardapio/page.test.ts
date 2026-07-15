@@ -35,7 +35,9 @@ describe("/cardapio (PublicCardapio) — menu inferior unificado com /cliente e 
 
   test("pedidoRecente (banner 'Acompanhar pedido') continua funcionando fora do menu inferior", () => {
     expect(fonte).toContain("pedidoRecente");
-    expect(fonte).toMatch(/href=\{`\/rastrear\/\$\{pedidoRecente\.id\}`\}/);
+    // Inclui o statusToken (quando disponível) para a edição de pedido
+    // (/pedido/editar) funcionar mesmo depois de recarregar a página.
+    expect(fonte).toMatch(/href=\{`\/rastrear\/\$\{pedidoRecente\.id\}/);
   });
 
   test("consome a flag de 'abrir sacola' vinda de /cliente ou /rastrear na hidratação", () => {

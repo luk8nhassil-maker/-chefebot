@@ -10,6 +10,10 @@ vi.mock("@/lib/redis", () => ({
       redisStore.set(key, value);
       return "OK";
     }),
+    del: vi.fn(async (key: string) => {
+      redisStore.delete(key);
+      return 1;
+    }),
   },
 }));
 

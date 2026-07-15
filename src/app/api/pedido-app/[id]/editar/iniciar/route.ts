@@ -1,0 +1,113 @@
+import { NextRequest, NextResponse } from "next/server";
+import { redis } from "@/lib/redis";
+import type { PedidoRedis } from "@/types/pedidoRedis";
+import {
+  EDICAO_DURACAO_MS,
+  adquirirMutexEdicao,
+  liberarMutexEdicao,
+  criarSessaoEdicao,
+  tokensIguais,
+  lockEdicaoAtivo,
+  limparEdicaoExpiradaSeNecessario,
+  pedidoAguardandoAceite,
+  pagamentoJaConfirmado,
+} from "@/lib/pedidoEdicao";
+
+export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  let body: { statusToken?: string };
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ ok: false, error: "Payload inválido" }, { status: 400 });
+  }
+  const statusToken = (body.statusToken || "").trim();
+  if (!id || !statusToken) {
+    return NextResponse.json({ ok: false, error: "id e statusToken obrigatórios" }, { status: 400 });
+  }
+
+  const mutexToken = await adquirirMutexEdicao(id);
+  if (!mutexToken) {
+    return NextResponse.json({ ok: false, error: "Não foi possível iniciar a edição agora. Tente de novo." }, { status: 409 });
+  }
+
+  try {
+    const pedidos = (await redis.get<PedidoRedis[]>("pedidos")) || [];
+    const index = pedidos.findIndex((p) => p.id === id);
+    if (index < 0 || !tokensIguais(pedidos[index].statusToken, statusToken)) {
+      return NextResponse.json({ ok: false, error: "Pedido não encontrado" }, { status: 404 });
+    }
+
+    let pedido = pedidos[index];
+    const limpeza = limparEdicaoExpiradaSeNecessario(pedido);
+    if (limpeza.mudou) pedido = limpeza.pedido;
+
+    if (!pedidoAguardandoAceite(pedido)) {
+      if (limpeza.mudou) { pedidos[index] = pedido; await redis.set("pedidos", pedidos); }
+      return NextResponse.json(
+        { ok: false, error: "Este pedido acabou de ser aceito pela loja e não pode mais ser alterado." },
+        { status: 409 }
+      );
+    }
+
+    if (pagamentoJaConfirmado(pedido)) {
+      if (limpeza.mudou) { pedidos[index] = pedido; await redis.set("pedidos", pedidos); }
+      return NextResponse.json(
+        { ok: false, error: "O pagamento deste pedido já foi confirmado. Para alterar o pedido, fale diretamente com a loja." },
+        { status: 409 }
+      );
+    }
+
+    if (lockEdicaoAtivo(pedido)) {
+      if (limpeza.mudou) { pedidos[index] = pedido; await redis.set("pedidos", pedidos); }
+      return NextResponse.json(
+        { ok: false, error: "Este pedido já está sendo editado. Aguarde a edição atual terminar." },
+        { status: 409 }
+      );
+    }
+
+    const agora = Date.now();
+    const editSessionId = criarSessaoEdicao();
+    const editExpiresAt = new Date(agora + EDICAO_DURACAO_MS).toISOString();
+    const atualizado: PedidoRedis = {
+      ...pedido,
+      editStatus: "editing",
+      editSessionId,
+      editStartedAt: new Date(agora).toISOString(),
+      editExpiresAt,
+      editHistory: [
+        ...(pedido.editHistory || []),
+        { tipo: "iniciado", horario: new Date(agora).toISOString(), revisaoAnterior: pedido.revision ?? 1 },
+      ],
+    };
+    pedidos[index] = atualizado;
+    await redis.set("pedidos", pedidos);
+
+    return NextResponse.json({
+      ok: true,
+      editSessionId,
+      revision: atualizado.revision ?? 1,
+      editExpiresAt,
+      pedido: {
+        id: atualizado.id,
+        numero: atualizado.numero,
+        cliente: atualizado.cliente,
+        telefone: atualizado.telefone,
+        itens: atualizado.itens,
+        itensDetalhados: atualizado.itensDetalhados || null,
+        total: atualizado.total,
+        tipoEntrega: atualizado.tipoEntrega,
+        bairro: atualizado.bairro,
+        rua: atualizado.rua,
+        enderecoNumero: atualizado.enderecoNumero,
+        referencia: atualizado.referencia,
+        endereco: atualizado.endereco,
+        pagamento: atualizado.pagamento,
+        troco: atualizado.troco,
+        observacao: atualizado.observacao,
+      },
+    });
+  } finally {
+    await liberarMutexEdicao(id, mutexToken);
+  }
+}
