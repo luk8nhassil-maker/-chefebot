@@ -42,9 +42,11 @@ vi.mock("@/lib/redis", () => ({
   },
 }));
 
+import { redis } from "@/lib/redis";
 import {
   creditarPontosPedidoEntregue,
   salvarConfigFidelidadePontos,
+  salvarConfigFidelidade,
   obterSaldoPontos,
   obterRecompensasPontos,
   obterReservasResgatePontos,
@@ -306,5 +308,61 @@ describe("reverterResgateConfirmado — restauração idempotente no cancelament
     const progressoAntigo = await obterProgressoFidelidade("cli_legado_x");
     expect(progressoAntigo.progresso).toBe(5); // intacto, nao afetado pelo resgate do modelo novo
     expect(contarPizzas([{ kind: "pizza", qty: 1 }])).toBe(1);
+  });
+});
+
+// Nivel 5.9.1: reservarResgatePontos/confirmarResgatePontos precisam usar a
+// mesma config efetiva do credito e da tela "Meus pontos" — senao o cliente
+// veria a recompensa disponivel mas o resgate falharia com "Fidelidade nao
+// esta ativa" por causa de uma fonte de configuracao diferente.
+describe("reservarResgatePontos/confirmarResgatePontos — ponte com o modelo legado (config:fidelidade:pontos ausente)", () => {
+  beforeEach(async () => {
+    await redis.del("config:fidelidade:pontos");
+  });
+
+  test("chave nova ausente + legado ativo: resgate fica disponivel conforme saldo/meta (usa o padrao de meta=720 do modelo por pontos)", async () => {
+    await salvarConfigFidelidade({ ativo: true, pizzasParaPremio: 10, tipoRecompensa: "pizza_gratis", descricaoRecompensa: "Pizza gratis" });
+
+    await creditarPontosPedidoEntregue({ id: "ped_resgate_legado", status: "entregue", telefone: "86999995001", total: 720 });
+    const clienteId = "cli_86999995001";
+    const [recompensa] = await obterRecompensasPontos(clienteId);
+    expect(recompensa).toBeDefined();
+
+    const reserva = await reservarResgatePontos(clienteId, recompensa.recompensaId);
+    expect(reserva.status).toBe("reservado");
+    expect(reserva.pontosReservados).toBe(720);
+  });
+
+  test("chave nova ausente + legado inativo: nenhum credito e nenhuma recompensa para resgatar", async () => {
+    await salvarConfigFidelidade({ ativo: false, pizzasParaPremio: 10, tipoRecompensa: "pizza_gratis", descricaoRecompensa: "Pizza gratis" });
+
+    await creditarPontosPedidoEntregue({ id: "ped_resgate_legado_inativo", status: "entregue", telefone: "86999995002", total: 720 });
+
+    expect(await obterRecompensasPontos("cli_86999995002")).toHaveLength(0);
+  });
+
+  test("chave nova presente e inativa + legado ativo: reserva de resgate falha (nao herda o legado)", async () => {
+    // Credita e gera a recompensa ainda com a chave nova ausente / legado ativo.
+    await salvarConfigFidelidade({ ativo: true, pizzasParaPremio: 10, tipoRecompensa: "pizza_gratis", descricaoRecompensa: "Pizza gratis" });
+    await creditarPontosPedidoEntregue({ id: "ped_resgate_nova_inativa", status: "entregue", telefone: "86999995003", total: 720 });
+    const clienteId = "cli_86999995003";
+    const [recompensa] = await obterRecompensasPontos(clienteId);
+    expect(recompensa).toBeDefined();
+
+    // Agora a config nova passa a existir, explicitamente inativa: o resgate
+    // (revalidado no momento da reserva) deve recusar, mesmo com o legado ativo.
+    await salvarConfigFidelidadePontos({ ativo: false, metaPontos: 720, descricaoRecompensa: "1 Pizza Família" });
+
+    await expect(reservarResgatePontos(clienteId, recompensa.recompensaId)).rejects.toThrow("Fidelidade nao esta ativa");
+  });
+
+  test("chave nova presente e ativa: comportamento normal de resgate (config nova manda)", async () => {
+    await salvarConfigFidelidade({ ativo: false, pizzasParaPremio: 10, tipoRecompensa: "pizza_gratis", descricaoRecompensa: "Pizza gratis" });
+    await salvarConfigFidelidadePontos({ ativo: true, metaPontos: 100, descricaoRecompensa: "1 Pizza Família" });
+
+    const { clienteId, recompensaId } = await clienteComRecompensaDisponivel("86999995004", 100);
+    const reserva = await reservarResgatePontos(clienteId, recompensaId);
+    expect(reserva.status).toBe("reservado");
+    expect(reserva.pontosReservados).toBe(100);
   });
 });

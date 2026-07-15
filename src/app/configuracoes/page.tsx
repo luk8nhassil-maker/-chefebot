@@ -31,6 +31,21 @@ const FIDELIDADE_PADRAO: ConfigFidelidade = {
   descricaoRecompensa: 'Pizza grátis',
 }
 
+// Modelo novo (por pontos), usado pela tela "Meus pontos" do cliente —
+// independente do modelo legado (pizzas) acima. Mesmo shape de
+// ConfigFidelidadePontos em src/lib/fidelidade.ts, sem campos inventados.
+type ConfigFidelidadePontos = {
+  ativo: boolean
+  metaPontos?: number
+  descricaoRecompensa: string
+}
+
+const FIDELIDADE_PONTOS_PADRAO: ConfigFidelidadePontos = {
+  ativo: false,
+  metaPontos: 720,
+  descricaoRecompensa: '1 Pizza Família',
+}
+
 type ItemCardapio = { name: string; price: number }
 
 type Cardapio = {
@@ -199,6 +214,9 @@ export default function ConfiguracoesPage() {
   const [fidelidade, setFidelidade] = useState<ConfigFidelidade>(FIDELIDADE_PADRAO)
   const [salvandoFidelidade, setSalvandoFidelidade] = useState(false)
   const [mensagemFidelidade, setMensagemFidelidade] = useState('')
+  const [fidelidadePontos, setFidelidadePontos] = useState<ConfigFidelidadePontos>(FIDELIDADE_PONTOS_PADRAO)
+  const [salvandoFidelidadePontos, setSalvandoFidelidadePontos] = useState(false)
+  const [mensagemFidelidadePontos, setMensagemFidelidadePontos] = useState('')
   const is24h = config.horaAbertura === 0 && config.horaFechamento === 24
 
   useEffect(() => {
@@ -211,6 +229,10 @@ export default function ConfiguracoesPage() {
         .then(r => (r.ok ? r.json() : null))
         .then(data => { if (data) setFidelidade({ ...FIDELIDADE_PADRAO, ...data }) })
         .catch(err => console.error('Falha ao carregar fidelidade:', err))
+      fetch('/api/fidelidade/config-pontos')
+        .then(r => (r.ok ? r.json() : null))
+        .then(data => { if (data) setFidelidadePontos({ ...FIDELIDADE_PONTOS_PADRAO, ...data }) })
+        .catch(err => console.error('Falha ao carregar fidelidade por pontos:', err))
     }
     fetch('/api/configuracoes')
       .then(r => { if (r.status === 401) { router.push('/login?callbackUrl=/configuracoes'); return null } return r.json() })
@@ -280,6 +302,19 @@ export default function ConfiguracoesPage() {
     } catch { setMensagemFidelidade('❌ Erro ao salvar.') }
     setSalvandoFidelidade(false)
     setTimeout(() => setMensagemFidelidade(''), 3000)
+  }
+
+  const salvarFidelidadePontos = async () => {
+    setSalvandoFidelidadePontos(true)
+    setMensagemFidelidadePontos('')
+    try {
+      const res = await fetch('/api/fidelidade/config-pontos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(fidelidadePontos) })
+      const data = await res.json().catch(() => null)
+      setMensagemFidelidadePontos(res.ok ? '✅ Programa de pontos salvo!' : `❌ ${data?.error || 'Erro ao salvar.'}`)
+      if (res.ok && data?.config) setFidelidadePontos({ ...FIDELIDADE_PONTOS_PADRAO, ...data.config })
+    } catch { setMensagemFidelidadePontos('❌ Erro ao salvar.') }
+    setSalvandoFidelidadePontos(false)
+    setTimeout(() => setMensagemFidelidadePontos(''), 3000)
   }
 
   const salvarCardapio = async () => {
@@ -596,6 +631,55 @@ export default function ConfiguracoesPage() {
                     </button>
                     {mensagemFidelidade && (
                       <p style={{ textAlign: 'center', color: mensagemFidelidade.includes('✅') ? 'var(--success)' : 'var(--danger)', fontWeight: 800, fontSize: 13, margin: 0 }}>{mensagemFidelidade}</p>
+                    )}
+                  </SectionCard>
+                )}
+
+                {/* Programa de pontos (modelo novo, tela "Meus pontos" do cliente) */}
+                {isAdmin && (
+                  <SectionCard>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: -4, flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: 16, flexShrink: 0 }}>⭐</span>
+                      <span style={{ fontSize: 13, fontWeight: 900, color: TEXT, textTransform: 'uppercase', letterSpacing: '0.8px' }}>Programa de pontos</span>
+                      <span style={{ fontSize: 10, background: 'color-mix(in srgb, var(--primary) 12%, transparent)', color: 'color-mix(in srgb, var(--primary) 80%, transparent)', padding: '2px 8px', borderRadius: 20, fontWeight: 800, whiteSpace: 'nowrap' }}>Somente Admin</span>
+                    </div>
+                    <p style={{ fontSize: 11.5, color: TEXT2, margin: '-4px 0 0', lineHeight: 1.5 }}>
+                      Controla a tela &quot;Meus pontos&quot; do cliente (R$1 gasto = 1 ponto). Independente da Fidelidade acima.
+                    </p>
+                    <button
+                      onClick={() => setFidelidadePontos(prev => ({ ...prev, ativo: !prev.ativo }))}
+                      style={{ width: '100%', background: fidelidadePontos.ativo ? 'color-mix(in srgb, var(--success) 10%, transparent)' : 'rgba(var(--overlay-rgb), 0.04)', border: `1.5px solid ${fidelidadePontos.ativo ? 'color-mix(in srgb, var(--success) 40%, transparent)' : 'var(--border)'}`, borderRadius: 12, padding: '13px 16px', color: fidelidadePontos.ativo ? 'var(--success)' : TEXT2, fontSize: 13, fontWeight: 800, cursor: 'pointer', minHeight: 48, fontFamily: FONT }}
+                    >
+                      {fidelidadePontos.ativo ? '✅ Programa de pontos ativo — toque para desativar' : '⭕ Programa de pontos desativado — toque para ativar'}
+                    </button>
+                    <FieldGroup label="Meta de pontos para a recompensa">
+                      <input
+                        type="number"
+                        min={1}
+                        value={fidelidadePontos.metaPontos ?? ''}
+                        onChange={e => setFidelidadePontos(prev => ({ ...prev, metaPontos: Number(e.target.value) }))}
+                        style={inputStyle}
+                      />
+                    </FieldGroup>
+                    <FieldGroup label="Descrição da recompensa">
+                      <input
+                        type="text"
+                        placeholder="Ex: 1 Pizza Família"
+                        value={fidelidadePontos.descricaoRecompensa}
+                        onChange={e => setFidelidadePontos(prev => ({ ...prev, descricaoRecompensa: e.target.value }))}
+                        style={inputStyle}
+                        maxLength={120}
+                      />
+                    </FieldGroup>
+                    <button
+                      onClick={salvarFidelidadePontos}
+                      disabled={salvandoFidelidadePontos}
+                      style={{ width: '100%', height: 48, background: salvandoFidelidadePontos ? 'var(--background)' : `linear-gradient(180deg, ${ACCENT}, var(--primary))`, border: 'none', borderRadius: 12, color: 'var(--primary-foreground)', fontSize: 14, fontWeight: 900, cursor: salvandoFidelidadePontos ? 'not-allowed' : 'pointer', fontFamily: FONT, opacity: salvandoFidelidadePontos ? 0.6 : 1 }}
+                    >
+                      {salvandoFidelidadePontos ? 'Salvando...' : 'Salvar programa de pontos'}
+                    </button>
+                    {mensagemFidelidadePontos && (
+                      <p style={{ textAlign: 'center', color: mensagemFidelidadePontos.includes('✅') ? 'var(--success)' : 'var(--danger)', fontWeight: 800, fontSize: 13, margin: 0 }}>{mensagemFidelidadePontos}</p>
                     )}
                   </SectionCard>
                 )}
