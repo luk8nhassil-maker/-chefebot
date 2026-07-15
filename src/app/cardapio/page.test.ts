@@ -1,6 +1,7 @@
 import { describe, test, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { nextFlavorSelection } from "./page";
 
 const fonte = readFileSync(fileURLToPath(new URL("./page.tsx", import.meta.url)), "utf-8");
 const fontePixCard = readFileSync(fileURLToPath(new URL("./PixPagamentoCard.tsx", import.meta.url)), "utf-8");
@@ -94,6 +95,100 @@ describe("/cardapio (PublicCardapio) - card Pix premium (aguardando pagamento)",
   test("mantem o CTA principal de acompanhamento do pedido", () => {
     expect(fonte).toContain('className="btn"');
     expect(fonte).toContain(">Acompanhar pedido</a>");
+  });
+});
+
+describe("nextFlavorSelection — regra de sabor compartilhada por pizza, mini-pizza e calzone", () => {
+  test("pizza normal (singleFlavor=false) aceita até 2 sabores (meio a meio)", () => {
+    let sel = nextFlavorSelection({ f1: null, f2: null }, "Calabresa", false);
+    expect(sel).toEqual({ f1: "Calabresa", f2: null });
+    sel = nextFlavorSelection(sel, "Portuguesa", false);
+    expect(sel).toEqual({ f1: "Calabresa", f2: "Portuguesa" });
+  });
+
+  test("pizza normal: tocar num 3º sabor substitui o 2º, nunca ultrapassa 2", () => {
+    const sel = nextFlavorSelection({ f1: "Calabresa", f2: "Portuguesa" }, "Baiana", false);
+    expect(sel).toEqual({ f1: "Calabresa", f2: "Baiana" });
+  });
+
+  test("calzone/mini-pizza (singleFlavor=true) aceita só 1 sabor, mesmo tentando escolher um 2º em seguida", () => {
+    let sel = nextFlavorSelection({ f1: null, f2: null }, "Calabresa", true);
+    expect(sel).toEqual({ f1: "Calabresa", f2: null });
+    // Tentativa de "manipular o estado" escolhendo um segundo sabor diferente:
+    // f2 nunca é preenchido quando singleFlavor é true.
+    sel = nextFlavorSelection(sel, "Portuguesa", true);
+    expect(sel).toEqual({ f1: "Portuguesa", f2: null });
+    expect(sel.f2).toBeNull();
+  });
+
+  test("calzone/mini-pizza: tocar no mesmo sabor selecionado desmarca (sem deixar f2 residual)", () => {
+    const sel = nextFlavorSelection({ f1: "Calabresa", f2: null }, "Calabresa", true);
+    expect(sel).toEqual({ f1: null, f2: null });
+  });
+});
+
+describe("/cardapio (PublicCardapio) — Calzone entra no mesmo fluxo de sabores das pizzas", () => {
+  test("addSimple desvia o Calzone para pickCalzone antes de qualquer outra regra de lanche", () => {
+    expect(fonte).toMatch(/function addSimple\([^)]*\)\s*\{\s*if \(isCalzoneName\(it\.name\)\) \{ pickCalzone\(\); return; \}/);
+  });
+
+  test("pickCalzone abre o mesmo modal de sabores (flavorModalOpen) e zera qualquer sabor anterior", () => {
+    expect(fonte).toContain("function pickCalzone() {");
+    const bloco = fonte.slice(fonte.indexOf("function pickCalzone() {"), fonte.indexOf("function pickCalzone() {") + 400);
+    expect(bloco).toContain("setCalzoneMode(true)");
+    expect(bloco).toContain("setF1(null)");
+    expect(bloco).toContain("setF2(null)");
+    expect(bloco).toContain("setFlavorModalOpen(true)");
+  });
+
+  test("o modal de sabores (mesmo componente da pizza) também renderiza fora da sc-build quando é o calzone", () => {
+    expect(fonte).toContain('{(screen === "sc-build" || (screen === "sc-list" && calzoneMode)) && flavorModalOpen && size && (');
+  });
+
+  test("pickFlavor usa nextFlavorSelection travando calzone/mini-pizza em 1 sabor (sem duplicar a lógica da pizza)", () => {
+    expect(fonte).toContain("const next = nextFlavorSelection({ f1, f2 }, f, miniPizzaMode || calzoneMode);");
+  });
+
+  test("calzone consome a mesma lista efetiva de sabores da pizza (pizzaFlavorSections), sem lista própria", () => {
+    expect(fonte).toContain('const pizzaFlavorSections = [{ title: "Salgadas", flavors: menu.saltyFlavors || [] }, { title: "Doces", flavors: menu.sweetFlavors || [] }];');
+    expect(fonte).toContain("const flavorSections = miniPizzaMode\n    ? [{ title: \"Sabores da mini-pizza\", flavors: miniPizzaFlavors }]\n    : pizzaFlavorSections;");
+    // Não existe mais lista própria de sabores do calzone no código do cardápio público.
+    expect(fonte).not.toContain("calzoneFlavors");
+    expect(fonte).not.toContain("calzoneFlavorsList");
+  });
+
+  test("buildOk bloqueia confirmar quando o calzone escolhido está esgotado", () => {
+    expect(fonte).toContain("const buildOk = !!size && flavorOk && !(miniPizzaMode && miniPizzaEsgotada) && !(calzoneMode && calzoneEsgotada);");
+  });
+
+  test("addCalzone cria item 'simple' no carrinho com o nome do Calzone e o sabor escolhido, preservando o preço-base do cardápio", () => {
+    expect(fonte).toContain("function addCalzone() {");
+    const bloco = fonte.slice(fonte.indexOf("function addCalzone() {"), fonte.indexOf("function continueBuild()"));
+    expect(bloco).toContain("if (!calzoneItem || !f1) return;");
+    expect(bloco).toContain("const detail = `Sabor: ${f1}`;");
+    expect(bloco).toContain("name: calzoneItem.name, detail, price: calzoneItem.price, qty: 1, keys: [calzoneItem.name, f1]");
+  });
+
+  test("continueBuild roteia calzoneMode para addCalzone sem tocar no fluxo de borda/plan das pizzas", () => {
+    expect(fonte).toContain('function continueBuild() { if (!buildOk) return; if (miniPizzaMode) addMiniPizza(); else if (calzoneMode) addCalzone(); else go("sc-border"); }');
+  });
+
+  test("calzone não conta como pizza no contador 'Pizza N' (pizzasNoCarrinho continua só pizza/mini-pizza)", () => {
+    expect(fonte).toContain('function pizzasNoCarrinho() { return cart.filter((c) => c.kind === "pizza" || (c.kind === "simple" && isMiniPizzaName(c.name))).length; }');
+  });
+
+  test("adicionar o mesmo calzone+sabor de novo soma quantidade (dedup por nome+detalhe) em vez de duplicar a linha", () => {
+    expect(fonte).toContain('const ex = cart.find((c) => c.kind === "simple" && isCalzoneName(c.name) && c.detail === detail);');
+  });
+
+  // Não existe, em nenhum produto do carrinho (pizza, mini-pizza, calzone,
+  // lanche simples), um fluxo de "editar item" que reabra a escolha de sabor
+  // a partir da sacola — só qty +/- (chQty) e remover (rmItem). Por isso não
+  // há teste de "editar calzone no carrinho": a funcionalidade não existe.
+  test("sacola (sc-cart) não tem ação de editar item — só qty +/- e remover, para todo tipo de item", () => {
+    expect(fonte).toContain("function chQty(idx: number, d: number)");
+    expect(fonte).toContain("function rmItem(idx: number)");
+    expect(fonte).not.toMatch(/ci-edit|onEditItem|editarItemCarrinho/);
   });
 });
 

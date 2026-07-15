@@ -99,6 +99,20 @@ function officialUnitPrice(item: ItemApp, menu: MenuPedidoApp): number | null {
       return size && Number.isFinite(size.price) ? size.price : null;
     }
 
+    // Calzone é vendido com exatamente 1 sabor (nunca meio a meio). O
+    // frontend manda `detail: "Sabor: <flavor>"` — payload adulterado com
+    // 2+ sabores, sem sabor ou com sabor fora da lista da pizza é rejeitado
+    // aqui (não confiamos em nada vindo do cliente além do nome/qty).
+    if (norm(found.name) === "calzone") {
+      const match = (item.detail || "").trim().match(/^Sabor:\s*(.+)$/i);
+      if (!match) return null;
+      const sabor = match[1].trim();
+      if (!sabor || sabor.includes("/") || sabor.includes("·")) return null;
+      const saboresPermitidos = [...menu.saltyFlavors, ...menu.sweetFlavors].map(norm);
+      if (!saboresPermitidos.includes(norm(sabor))) return null;
+      return Number.isFinite(found.price) ? found.price : null;
+    }
+
     return Number.isFinite(found.price) ? found.price : null;
   }
 

@@ -532,6 +532,59 @@ describe("POST /api/pedido-app", () => {
     expect(res.status).toBe(400);
     expect(store.get("pedidos")).toBeUndefined();
   });
+  it("aceita calzone com 1 sabor salgado usando preco oficial do cardapio", async () => {
+    const res = await POST(postReq({
+      ...basePayload,
+      itens: [{ kind: "simple", name: "Calzone", detail: "Sabor: Calabresa", price: 1, qty: 1 }],
+    }));
+
+    expect(res.status).toBe(200);
+    const pedidos = store.get("pedidos") as PedidoSalvo[];
+    expect(pedidos[0].itens).toEqual(["Calzone Sabor: Calabresa"]);
+    expect(pedidos[0].total).toBe(38);
+  });
+
+  it("aceita calzone com sabor doce — mesma lista de sabores da pizza, nao um subconjunto proprio", async () => {
+    const res = await POST(postReq({
+      ...basePayload,
+      itens: [{ kind: "simple", name: "Calzone", detail: "Sabor: Chocolate", price: 1, qty: 1 }],
+    }));
+
+    expect(res.status).toBe(200);
+    const pedidos = store.get("pedidos") as PedidoSalvo[];
+    expect(pedidos[0].total).toBe(38);
+  });
+
+  it("rejeita calzone adulterado com 2 sabores (meio a meio nao existe para calzone)", async () => {
+    const res = await POST(postReq({
+      ...basePayload,
+      itens: [{ kind: "simple", name: "Calzone", detail: "Sabor: Calabresa / Portuguesa", price: 1, qty: 1 }],
+    }));
+
+    expect(res.status).toBe(400);
+    expect(store.get("pedidos")).toBeUndefined();
+  });
+
+  it("rejeita calzone sem sabor", async () => {
+    const res = await POST(postReq({
+      ...basePayload,
+      itens: [{ kind: "simple", name: "Calzone", detail: "", price: 1, qty: 1 }],
+    }));
+
+    expect(res.status).toBe(400);
+    expect(store.get("pedidos")).toBeUndefined();
+  });
+
+  it("rejeita calzone com sabor inventado (fora da lista oficial de sabores)", async () => {
+    const res = await POST(postReq({
+      ...basePayload,
+      itens: [{ kind: "simple", name: "Calzone", detail: "Sabor: Sabor Que Nao Existe", price: 1, qty: 1 }],
+    }));
+
+    expect(res.status).toBe(400);
+    expect(store.get("pedidos")).toBeUndefined();
+  });
+
   it("rejeita item que nao existe no cardapio oficial", async () => {
     const res = await POST(postReq({
       ...basePayload,

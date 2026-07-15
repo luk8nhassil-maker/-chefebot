@@ -684,6 +684,24 @@ const money = (v: number) => "R$ " + v.toFixed(2).replace(".", ",");
 const bigBorder = (sz: string) => !(sz === "P" || sz === "M");
 const itemSlug = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
 const isMiniPizzaName = (value: string) => itemSlug(value) === "minipizza";
+const isCalzoneName = (value: string) => itemSlug(value) === "calzone";
+
+// Regra central de seleção de sabor, compartilhada pela pizza normal (até 2
+// sabores, o 2º vira meio a meio), pela mini-pizza e pelo calzone (1 sabor
+// só, travado por singleFlavor). Extraída para função pura para poder testar
+// a trava de "nunca aceitar um 2º sabor" sem depender de estado do React.
+export function nextFlavorSelection(
+  current: { f1: string | null; f2: string | null },
+  f: string,
+  singleFlavor: boolean
+): { f1: string | null; f2: string | null } {
+  if (singleFlavor) return { f1: current.f1 === f ? null : f, f2: null };
+  if (current.f1 === f) return { f1: current.f2, f2: null };
+  if (current.f2 === f) return { f1: current.f1, f2: null };
+  if (!current.f1) return { f1: f, f2: current.f2 };
+  if (!current.f2) return { f1: current.f1, f2: f };
+  return { f1: current.f1, f2: f };
+}
 
 // Pagamento misto (Pix + Dinheiro): mesma string canônica já validada no
 // backend/WhatsApp ("Pix (R$ X,XX) + Dinheiro (R$ Y,YY)"), ver src/lib/bot.ts
@@ -816,6 +834,9 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const [mistoDinheiroInput, setMistoDinheiroInput] = useState("");
   const [erroMisto, setErroMisto] = useState("");
   const [miniPizzaMode, setMiniPizzaMode] = useState(false);
+  // Calzone reaproveita o mesmo modal de sabores da pizza (ver flavorSections/
+  // pickFlavor/flavorModalOpen abaixo), só que travado em exatamente 1 sabor.
+  const [calzoneMode, setCalzoneMode] = useState(false);
   const [paymentModal, setPaymentModal] = useState<string | null>(null);
   const [editandoIdentidade, setEditandoIdentidade] = useState(false);
   const [hydrated, setHydrated] = useState(false);
@@ -1052,43 +1073,64 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const miniPizzaItem = (menu.lanches || []).find((it) => isMiniPizzaName(it.name) && Number.isFinite(it.price));
   const miniPizzaEsgotada = !!miniPizzaItem && esgotados.includes(miniPizzaItem.name);
   const miniPizzaFlavors = (menu.miniPizzaFlavors?.length ? menu.miniPizzaFlavors : [...(menu.saltyFlavors || []), ...(menu.sweetFlavors || [])]).filter(Boolean);
+  const calzoneItem = (menu.lanches || []).find((it) => isCalzoneName(it.name) && Number.isFinite(it.price));
+  const calzoneEsgotada = !!calzoneItem && esgotados.includes(calzoneItem.name);
 
-  function resetBuild() { setSize(null); setSizePrice(0); setF1(null); setF2(null); setBorder(null); setBorderPrice(0); setMiniPizzaMode(false); setFlavorModalOpen(false); }
+  function resetBuild() { setSize(null); setSizePrice(0); setF1(null); setF2(null); setBorder(null); setBorderPrice(0); setMiniPizzaMode(false); setCalzoneMode(false); setFlavorModalOpen(false); }
   function goPizza() { setPlan({ total: 0, current: 1, openEnded: true }); resetBuild(); go("sc-build"); }
   function pizzasNoCarrinho() { return cart.filter((c) => c.kind === "pizza" || (c.kind === "simple" && isMiniPizzaName(c.name))).length; }
-  function pickSize(code: string) { const s = (menu.sizes || []).find((x) => x.code === code); if (!s) return; setMiniPizzaMode(false); setSize(code); setSizePrice(s.price); setFlavorModalOpen(true); }
-  function pickMiniPizza() { if (!miniPizzaItem || miniPizzaEsgotada) return; setMiniPizzaMode(true); setSize("MINI"); setSizePrice(miniPizzaItem.price); setF2(null); setFlavorModalOpen(true); }
+  function pickSize(code: string) { const s = (menu.sizes || []).find((x) => x.code === code); if (!s) return; setMiniPizzaMode(false); setCalzoneMode(false); setSize(code); setSizePrice(s.price); setFlavorModalOpen(true); }
+  function pickMiniPizza() { if (!miniPizzaItem || miniPizzaEsgotada) return; setMiniPizzaMode(true); setCalzoneMode(false); setSize("MINI"); setSizePrice(miniPizzaItem.price); setF2(null); setFlavorModalOpen(true); }
+  // Calzone abre o mesmo modal de sabores da pizza (sem sair da lista de
+  // Lanches): trava em 1 sabor só, sem meio a meio. Ver pickFlavor abaixo.
+  function pickCalzone() {
+    if (!calzoneItem || calzoneEsgotada) return;
+    setMiniPizzaMode(false);
+    setCalzoneMode(true);
+    setSize("CALZONE");
+    setSizePrice(calzoneItem.price);
+    setF1(null);
+    setF2(null);
+    setFlavorModalOpen(true);
+  }
   // Toque direto em até 2 sabores: o 1º sabor já forma uma pizza normal, o 2º
   // vira meio a meio automaticamente (sem etapa de escolher o "modo" antes).
+  // Mini-pizza e calzone são produtos de 1 sabor só: qualquer toque em outro
+  // sabor troca a escolha em vez de somar um 2º (nunca formam meio a meio),
+  // mesmo chamando pickFlavor várias vezes seguidas — ver nextFlavorSelection.
   function pickFlavor(f: string) {
-    if (f1 === f) { setF1(f2); setF2(null); return; }
-    if (f2 === f) { setF2(null); return; }
-    if (!f1) { setF1(f); return; }
-    if (!f2) { setF2(f); return; }
-    setF2(f);
+    const next = nextFlavorSelection({ f1, f2 }, f, miniPizzaMode || calzoneMode);
+    setF1(next.f1);
+    setF2(next.f2);
   }
   const mam = !!(f1 && f2);
   const flavorOk = !!f1;
-  const buildOk = !!size && flavorOk && !(miniPizzaMode && miniPizzaEsgotada);
+  const buildOk = !!size && flavorOk && !(miniPizzaMode && miniPizzaEsgotada) && !(calzoneMode && calzoneEsgotada);
+  // Fonte efetiva de sabores do fluxo de pizza (a mesma usada pela pizza
+  // normal). O calzone consome exatamente essa lista — sem lista própria —
+  // só limitando a escolha a 1 sabor (ver nextFlavorSelection/singleFlavor).
+  const pizzaFlavorSections = [{ title: "Salgadas", flavors: menu.saltyFlavors || [] }, { title: "Doces", flavors: menu.sweetFlavors || [] }];
   const flavorSections = miniPizzaMode
     ? [{ title: "Sabores da mini-pizza", flavors: miniPizzaFlavors }]
-    : [{ title: "Salgadas", flavors: menu.saltyFlavors || [] }, { title: "Doces", flavors: menu.sweetFlavors || [] }];
+    : pizzaFlavorSections;
   const selectedSizeLabel = miniPizzaMode && miniPizzaItem ? miniPizzaItem.name : size ? ((menu.sizes || []).find((s) => s.code === size)?.label || size) : "";
   const buildFootHint = !size
     ? "Escolha um tamanho para continuar"
     : miniPizzaMode
       ? (flavorOk ? "Mini-pizza pronta para a sacola" : "Escolha 1 sabor para a mini-pizza")
-      : !f1
-        ? "Escolha até 2 sabores"
-        : !f2
-          ? "Você pode escolher até 2 sabores"
-          : "Sabores prontos — agora escolha a borda";
-  const buildActionLabel = miniPizzaMode ? "Adicionar mini-pizza" : "Confirmar pizza";
-  const flavorModalTitle = miniPizzaMode ? (miniPizzaItem?.name || "Mini-pizza") : `Pizza ${selectedSizeLabel}`;
-  const flavorModalMessage = miniPizzaMode ? "Escolha o sabor da sua mini-pizza." : "Você pode escolher até 2 sabores.";
-  const flavorModalHint = miniPizzaMode ? null : "Escolha 1 sabor para pizza inteira ou 2 sabores para meio a meio.";
+      : calzoneMode
+        ? (flavorOk ? "Calzone pronto para a sacola" : "Escolha 1 sabor para o calzone")
+        : !f1
+          ? "Escolha até 2 sabores"
+          : !f2
+            ? "Você pode escolher até 2 sabores"
+            : "Sabores prontos — agora escolha a borda";
+  const buildActionLabel = miniPizzaMode ? "Adicionar mini-pizza" : calzoneMode ? "Adicionar calzone" : "Confirmar pizza";
+  const flavorModalTitle = miniPizzaMode ? (miniPizzaItem?.name || "Mini-pizza") : calzoneMode ? (calzoneItem?.name || "Calzone") : `Pizza ${selectedSizeLabel}`;
+  const flavorModalMessage = miniPizzaMode ? "Escolha o sabor da sua mini-pizza." : calzoneMode ? "Escolha o sabor do seu calzone." : "Você pode escolher até 2 sabores.";
+  const flavorModalHint = miniPizzaMode || calzoneMode ? null : "Escolha 1 sabor para pizza inteira ou 2 sabores para meio a meio.";
   const flavorProgressLabel = f2 ? `${f1} / ${f2}` : f1 ? `${f1} — toque em outro para meio a meio` : "Nenhum sabor escolhido ainda";
-  const renderFlavorProgress = () => !miniPizzaMode && (
+  const renderFlavorProgress = () => !miniPizzaMode && !calzoneMode && (
     <div className="flavor-progress">
       <div className="flavor-progress-dots">
         <span className={`pd ${f1 ? "done" : "cur"}`} />
@@ -1120,7 +1162,17 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     else if (plan.openEnded) { showToast("Mini-pizza adicionada!"); go("sc-another"); }
     else { showToast("Tudo pronto!"); go("sc-cart"); }
   }
-  function continueBuild() { if (!buildOk) return; if (miniPizzaMode) addMiniPizza(); else go("sc-border"); }
+  function addCalzone() {
+    if (!calzoneItem || !f1) return;
+    const detail = `Sabor: ${f1}`;
+    const ex = cart.find((c) => c.kind === "simple" && isCalzoneName(c.name) && c.detail === detail);
+    if (ex) setCart(cart.map((c) => (c === ex ? { ...c, qty: c.qty + 1 } : c)));
+    else setCart([...cart, { emoji: "🍽️", kind: "simple", name: calzoneItem.name, detail, price: calzoneItem.price, qty: 1, keys: [calzoneItem.name, f1] }]);
+    setLastAddedKind("lanche");
+    showToast(`${calzoneItem.name} adicionado!`);
+    resetBuild();
+  }
+  function continueBuild() { if (!buildOk) return; if (miniPizzaMode) addMiniPizza(); else if (calzoneMode) addCalzone(); else go("sc-border"); }
   function confirmFromModal() { if (!buildOk) return; setFlavorModalOpen(false); continueBuild(); }
   function addAnother() { setPlan({ total: 0, current: pizzasNoCarrinho() + 1, openEnded: true }); resetBuild(); go("sc-build"); }
   function goCat(cat: "lanche" | "macarronada" | "bebida" | "suco") { setListCat(cat); go("sc-list"); }
@@ -1132,6 +1184,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     return money(it.price);
   }
   function addSimple(it: { name: string; price: number; sizes?: { code: string; price: number }[] }, emoji: string) {
+    if (isCalzoneName(it.name)) { pickCalzone(); return; }
     if (isMacarronada(it)) { setMacarronadaPendente(it); go("sc-macarronada-size"); return; }
     if (listCat === "suco") { setSucoPendente(it); go("sc-suco-leite"); return; }
     const ex = cart.find((c) => c.kind === "simple" && c.name === it.name);
@@ -2070,7 +2123,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
           </div>
         </div>
       )}
-      {screen === "sc-build" && flavorModalOpen && size && (
+      {(screen === "sc-build" || (screen === "sc-list" && calzoneMode)) && flavorModalOpen && size && (
         <div className="flavor-modal-backdrop" role="presentation" onClick={() => setFlavorModalOpen(false)}>
           <div className="flavor-modal payment-modal" role="dialog" aria-modal="true" aria-labelledby="flavor-modal-title" onClick={(e) => e.stopPropagation()}>
             <div className="payment-modal-head">
