@@ -105,7 +105,11 @@ describe("POST /api/pix/webhook", () => {
       providerPaymentId: "prov-1",
     });
     expect(typeof pedidos[0].pix.confirmadoEm).toBe("string");
-    expect(redisMock.set).toHaveBeenCalledTimes(1);
+    // 1 gravação do pedido + 2 chamadas best-effort do Sentinela Pix
+    // (encerrarSentinela grava o estado; incrementarContadorPix grava o
+    // contador sentinela_encerrado_webhook) — nenhuma delas afeta a
+    // confirmação em si, que já está persistida antes dessas chamadas.
+    expect(redisMock.set).toHaveBeenCalledTimes(3);
   });
 
   it("segredo ausente ou incorreto nao confirma", async () => {
@@ -282,7 +286,9 @@ describe("POST /api/pix/webhook — adaptador Mercado Pago", () => {
     expect(body).toMatchObject({ passive: false, wouldConfirm: true, confirmed: true, pedidoId: "pedido-1", txid: "tx-1" });
     expect(pedidos[0].pixConfirmado).toBe(true);
     expect(pedidos[0].pix).toMatchObject({ status: "confirmado", confirmadoPor: "webhook", providerPaymentId: "MP-9001" });
-    expect(redisMock.set).toHaveBeenCalledTimes(1);
+    // 1 gravação do pedido + 2 chamadas best-effort do Sentinela Pix (ver
+    // comentário equivalente acima).
+    expect(redisMock.set).toHaveBeenCalledTimes(3);
   });
 
   it("ativo + assinatura inválida/ausente retorna 401 e não grava (nem busca o pagamento)", async () => {

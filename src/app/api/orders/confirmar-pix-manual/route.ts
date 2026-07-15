@@ -3,6 +3,8 @@ import { verifyToken, validateCredentials } from '@/lib/auth'
 import { redis } from '@/lib/redis'
 import { confirmarPixMetadata, type PixMetadata } from '@/lib/pix'
 import { registrarAuditoriaPixManual } from '@/lib/pixAuditoria'
+import { encerrarSentinela } from '@/lib/pixSentinela'
+import { incrementarContadorPix } from '@/lib/pixMetricas'
 
 type Status = 'novo' | 'em_preparo' | 'saiu_entrega' | 'entregue' | 'cancelado'
 type Pedido = {
@@ -112,6 +114,17 @@ export async function POST(req: NextRequest) {
 
   pedidosNaGravacao[index] = { ...pedidoNaGravacao, pixConfirmado: true, pix: pixConfirmadoMeta }
   await redis.set('pedidos', pedidosNaGravacao)
+
+  // Best-effort — nunca pode afetar a confirmação acima, que já foi
+  // persistida. A confirmação manual NUNCA é bloqueada pelo Sentinela; aqui
+  // só encerramos a cadeia server-side do Guardião (se existir) para que
+  // nenhum tick QStash já agendado tente consultar o Mercado Pago à toa.
+  try {
+    await encerrarSentinela(id, 'confirmado_manual')
+    await incrementarContadorPix('sentinela_encerrado_manual')
+  } catch (err) {
+    console.error('[ChefeBot] Falha ao encerrar Sentinela na confirmação manual (ignorado):', err)
+  }
 
   try {
     await registrarAuditoriaPixManual({
