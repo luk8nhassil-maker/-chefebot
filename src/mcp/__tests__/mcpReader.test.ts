@@ -281,6 +281,26 @@ describe('lerDadosMcp — estado vazio', () => {
   });
 });
 
+describe('lerDadosMcp — Redis indisponível', () => {
+  it('T17: erro no Redis (env ausente/timeout/credenciais inválidas) não propaga — retorna estado vazio seguro', async () => {
+    mockLrange.mockRejectedValue(new Error('ECONNREFUSED: Redis indisponível'));
+    mockGet.mockRejectedValue(new Error('ECONNREFUSED: Redis indisponível'));
+
+    const d = await lerDadosMcp();
+
+    expect(d.obsCount).toBe(0);
+    expect(d.filaCount).toBe(0);
+    expect(d.errosCount).toBe(0);
+    expect(d.scoreMaturidade).toEqual({ total: 0, volume: 0, qualidade: 0, diversidade: 0, saude: 0 });
+    expect(d.gargalos).toEqual([]);
+    expect(d.ultimasObs).toEqual([]);
+    expect(d.ultimosErros).toEqual([]);
+    expect(d.cronMeta).toBeNull();
+    expect(d.piiCheck.ok).toBe(true);
+    expect(d.prontoParaFase2).toBe(false);
+  });
+});
+
 describe('lerDadosMcp — com dados', () => {
   it('T7: retorna no máximo 50 ultimas observações', async () => {
     const obs = Array.from({ length: 100 }, () => obsFactory());

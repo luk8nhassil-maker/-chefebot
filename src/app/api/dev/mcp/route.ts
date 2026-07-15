@@ -20,8 +20,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Acesso negado' }, { status: 403 });
   }
 
-  const dados = await lerDadosMcp();
-  return NextResponse.json(dados);
+  try {
+    const dados = await lerDadosMcp();
+    return NextResponse.json(dados);
+  } catch (err) {
+    console.error('[api/dev/mcp] Falha inesperada ao ler dados MCP:', err);
+    return NextResponse.json({ error: 'Dados MCP indisponíveis' }, { status: 503 });
+  }
 }
 
 // Nenhum POST, PUT, DELETE ou PATCH — painel somente leitura
