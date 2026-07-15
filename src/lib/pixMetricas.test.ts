@@ -274,6 +274,32 @@ describe("registrarEventoObservabilidadePix — teto rígido de 100ms mesmo quan
     redisMock.set.mockImplementation(setOriginal!);
   });
 
+  test("gravação resolve imediatamente: não deixa nenhum timer pendente (clearTimeout foi chamado)", async () => {
+    vi.useFakeTimers();
+    expect(vi.getTimerCount()).toBe(0);
+
+    await registrarEventoObservabilidadePix("sentinela_confirmou", { agora: Date.now() });
+
+    // Se o timer do limite de 100ms não tivesse sido cancelado no finally,
+    // ele continuaria pendente no relógio falso até ser disparado.
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  test("gravação que nunca resolve: a função ainda assim termina em até 100ms mesmo com o clearTimeout no finally", async () => {
+    vi.useFakeTimers();
+    const getOriginal = redisMock.get.getMockImplementation();
+    redisMock.get.mockImplementation(() => new Promise(() => {})); // nunca resolve
+
+    let resolvido = false;
+    const chamada = registrarEventoObservabilidadePix("sentinela_bloqueio_cooldown", { agora: Date.now() }).then(() => { resolvido = true; });
+
+    await vi.advanceTimersByTimeAsync(100);
+    await chamada;
+    expect(resolvido).toBe(true);
+
+    redisMock.get.mockImplementation(getOriginal!);
+  });
+
   test("nunca gera rejeição não tratada quando a gravação trava e só rejeita depois que o timeout já venceu a corrida", async () => {
     const rejeicoesNaoTratadas: unknown[] = [];
     const handler = (reason: unknown) => rejeicoesNaoTratadas.push(reason);

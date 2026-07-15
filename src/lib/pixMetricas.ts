@@ -318,10 +318,19 @@ export async function registrarEventoObservabilidadePix(
 ): Promise<void> {
   const gravacao = executarGravacaoObservabilidadePix(tipo, opts).catch(() => {});
 
-  await Promise.race([
-    gravacao,
-    new Promise<void>((resolve) => setTimeout(resolve, TIMEOUT_TELEMETRIA_MS)),
-  ]);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const limite = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, TIMEOUT_TELEMETRIA_MS);
+  });
+
+  try {
+    await Promise.race([gravacao, limite]);
+  } finally {
+    // Gravação terminou antes do limite: cancela o timer pendente em vez de
+    // deixá-lo rodar até os 100ms à toa (nunca prende o event loop do
+    // ambiente serverless por mais tempo do que o necessário).
+    if (timer) clearTimeout(timer);
+  }
 }
 
 export type UltimoEventoPix = { tipo: string; ts: number } | null;
