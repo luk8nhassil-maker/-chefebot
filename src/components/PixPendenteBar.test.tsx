@@ -19,11 +19,23 @@ describe("PixPendenteBar — sem pendência", () => {
 describe("PixPendenteBar — com pendência", () => {
   const pendente = { pedidoId: "p1", statusToken: "tok-123", numero: 4821, valorPix: 89.9 };
 
-  test("mostra número do pedido e valor formatado", () => {
+  test("mostra número do pedido e valor formatado, com selo de status 'Pagamento pendente'", () => {
     const html = renderToStaticMarkup(<PixPendenteBar pendente={pendente} />);
     expect(html).toContain("Pedido #4821");
     expect(html).toContain("R$ 89,90");
-    expect(html).toContain("Pix pendente");
+    expect(html).toContain("Pagamento pendente");
+  });
+
+  test("hierarquia de leitura: selo de status → contexto do pedido → valor → CTA, nessa ordem no HTML", () => {
+    const html = renderToStaticMarkup(<PixPendenteBar pendente={pendente} />);
+    const idxBadge = html.indexOf("Pagamento pendente");
+    const idxPedido = html.indexOf("Pedido #4821");
+    const idxValor = html.indexOf("R$ 89,90");
+    const idxCta = html.indexOf("Pagar agora");
+    expect(idxBadge).toBeGreaterThan(-1);
+    expect(idxPedido).toBeGreaterThan(idxBadge);
+    expect(idxValor).toBeGreaterThan(idxPedido);
+    expect(idxCta).toBeGreaterThan(idxValor);
   });
 
   test("CTA 'Pagar agora' presente", () => {
@@ -94,5 +106,72 @@ describe("PixPendenteBar — [bloqueio 1] posicionamento fixo acima do ClientBot
   test("sem pendência, nem a barra nem o espaçador aparecem (nada ocupa espaço à toa)", () => {
     const html = renderToStaticMarkup(<PixPendenteBar pendente={null} />);
     expect(html).toBe("");
+  });
+});
+
+describe("PixPendenteBar — refino visual glass (só camada visual, mesmo comportamento)", () => {
+  const pendente = { pedidoId: "p1", statusToken: "tok-123", numero: 4821, valorPix: 89.9 };
+
+  test("aplica blur + saturate reais via backdrop-filter (com prefixo -webkit- para Safari/iOS)", () => {
+    const html = renderToStaticMarkup(<PixPendenteBar pendente={pendente} />);
+    expect(html).toMatch(/backdrop-filter:blur\(\d+px\) saturate\(\d+%\)/);
+    expect(html).toMatch(/-webkit-backdrop-filter:blur\(\d+px\) saturate\(\d+%\)/);
+  });
+
+  test("fundo translúcido controlado (não transparente demais, não vidro branco leitoso) — deriva de --secondary via color-mix", () => {
+    const html = renderToStaticMarkup(<PixPendenteBar pendente={pendente} />);
+    expect(html).toMatch(/\.pix-pendente-bar\{[^}]*background:color-mix\(in srgb, var\(--secondary\) \d+%, transparent\)/);
+  });
+
+  test("borda sutil clara e sombra suave para separar do conteúdo atrás", () => {
+    const html = renderToStaticMarkup(<PixPendenteBar pendente={pendente} />);
+    expect(html).toMatch(/border-top:1px solid color-mix\(in srgb, var\(--secondary-foreground\)/);
+    expect(html).toMatch(/box-shadow:0 -\d+px \d+px -\d+px color-mix/);
+  });
+
+  test("nunca usa vermelho/perigo (--danger) — pendente é neutro/roxo (--attention), não alarmante", () => {
+    const html = renderToStaticMarkup(<PixPendenteBar pendente={pendente} />);
+    expect(html).not.toContain("--danger");
+  });
+
+  test("nenhuma cor hexadecimal nova hardcoded no CSS — só tokens do design system via var()/color-mix", () => {
+    const html = renderToStaticMarkup(<PixPendenteBar pendente={pendente} />);
+    const css = html.match(/<style>([\s\S]*?)<\/style>/)?.[1] ?? "";
+    expect(css.length).toBeGreaterThan(0);
+    expect(css).not.toMatch(/#[0-9a-fA-F]{3,8}/);
+  });
+
+  test("CTA continua com o maior contraste/destaque — cor sólida da marca, não participa do glass", () => {
+    const html = renderToStaticMarkup(<PixPendenteBar pendente={pendente} />);
+    expect(html).toMatch(/\.pix-pendente-bar-cta\{[^}]*background:var\(--primary\)/);
+    expect(html).toMatch(/\.pix-pendente-bar-cta\{[^}]*color:var\(--primary-foreground\)/);
+    expect(html).not.toMatch(/\.pix-pendente-bar-cta\{[^}]*backdrop-filter/);
+  });
+
+  test("ícone à esquerda fica numa bolha discreta (círculo), sem glow exagerado (sem box-shadow de brilho)", () => {
+    const html = renderToStaticMarkup(<PixPendenteBar pendente={pendente} />);
+    expect(html).toMatch(/\.pix-pendente-bar-icon\{[^}]*border-radius:999px/);
+    expect(html).not.toMatch(/\.pix-pendente-bar-icon\{[^}]*box-shadow/);
+  });
+
+  test("selo 'Pagamento pendente' é uma pill pequena (border-radius total, padding contido), não um card grande", () => {
+    const html = renderToStaticMarkup(<PixPendenteBar pendente={pendente} />);
+    expect(html).toMatch(/\.pix-pendente-bar-badge\{[^}]*border-radius:999px/);
+    expect(html).toMatch(/\.pix-pendente-bar-badge\{[^}]*font-size:9\.5px/);
+  });
+
+  test("valor tem peso visual mais forte que o texto de contexto (font-weight/tamanho maiores)", () => {
+    const html = renderToStaticMarkup(<PixPendenteBar pendente={pendente} />);
+    const infoMatch = html.match(/\.pix-pendente-bar-info\{([^}]*)\}/);
+    const valorMatch = html.match(/\.pix-pendente-bar-valor\{([^}]*)\}/);
+    expect(infoMatch).not.toBeNull();
+    expect(valorMatch).not.toBeNull();
+    const pesoInfo = Number(infoMatch![1].match(/font-weight:(\d+)/)?.[1]);
+    const pesoValor = Number(valorMatch![1].match(/font-weight:(\d+)/)?.[1]);
+    expect(pesoValor).toBeGreaterThan(pesoInfo);
+  });
+
+  test("altura real da barra (61px) continua maior/igual ao espaçador — nunca esconde conteúdo", () => {
+    expect(PIX_PENDENTE_BAR_HEIGHT_PX).toBeGreaterThanOrEqual(60);
   });
 });

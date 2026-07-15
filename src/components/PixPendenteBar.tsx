@@ -12,12 +12,12 @@ import {
 } from "@/lib/pixPendenteLocal";
 
 // Altura real renderizada da barra (sem safe-area, que entra só no
-// deslocamento `bottom`) — medida via getBoundingClientRect em 390×844 e
-// 1440×900 com uma pendência real: 54px. Não é só padding(20) + ícone(24):
-// o CTA "Pagar agora" (padding 7px + line-height do texto) é o elemento
-// mais alto da linha. Mantida como constante para o espaçador nunca
+// deslocamento `bottom`) — medida via getBoundingClientRect em 390×844,
+// 390×667 e 1440×900 com uma pendência real: 60.5px. Layout de duas linhas
+// (badge "Pagamento pendente" + linha de contexto/valor) é o elemento mais
+// alto, não o CTA. Mantida como constante para o espaçador nunca
 // dessincronizar do CSS real caso o conteúdo da barra mude.
-export const PIX_PENDENTE_BAR_HEIGHT_PX = 54;
+export const PIX_PENDENTE_BAR_HEIGHT_PX = 61;
 
 export type PixPendente = PixPendenteResolvido;
 
@@ -97,15 +97,19 @@ function money(v: number) {
 // por completo da árvore quando não há pendência — inclusive o espaçador,
 // que só existe para abrir espaço no fluxo normal da página enquanto a
 // barra (fixa, fora do fluxo) está de fato visível.
+//
+// Visual "glass" (vidro escuro translúcido, sempre sobre --secondary/navy
+// independente do tema Light/Dark do site): resolve o problema de a barra
+// se confundir com cards claros atrás dela — um painel escuro com blur real
+// garante contraste alto de texto sobre qualquer conteúdo. Só a camada
+// visual muda aqui; posicionamento, hook, dados e navegação são os mesmos.
 export default function PixPendenteBar({ pendente }: { pendente: PixPendente | null }) {
   if (!pendente) return null;
 
   // Mostra o valor efetivamente pendente no Pix (valorPix) — em pedido
   // misto é só a parcela do Pix, nunca o total do pedido; em Pix integral
   // coincide com o total (ver calcularDivisaoPixDinheiro/valorPixEsperado).
-  const rotulo = pendente.numero
-    ? `Pix pendente · Pedido #${pendente.numero} · ${money(pendente.valorPix)}`
-    : `Pix pendente · ${money(pendente.valorPix)}`;
+  const contexto = pendente.numero ? `Pedido #${pendente.numero}` : "Seu pedido";
 
   return (
     <>
@@ -119,15 +123,64 @@ export default function PixPendenteBar({ pendente }: { pendente: PixPendente | n
         <span className="pix-pendente-bar-icon" aria-hidden="true">
           <Zap size={14} />
         </span>
-        <span className="pix-pendente-bar-txt">{rotulo}</span>
+        <span className="pix-pendente-bar-content">
+          <span className="pix-pendente-bar-badge">
+            <span className="pix-pendente-bar-dot" aria-hidden="true" />
+            Pagamento pendente
+          </span>
+          <span className="pix-pendente-bar-info">
+            {contexto} <span className="pix-pendente-bar-sep">·</span>{" "}
+            <strong className="pix-pendente-bar-valor">{money(pendente.valorPix)}</strong>
+          </span>
+        </span>
         <span className="pix-pendente-bar-cta">Pagar agora</span>
       </a>
       <style>{`
         .pix-pendente-bar-spacer{flex-shrink:0;height:${PIX_PENDENTE_BAR_HEIGHT_PX}px}
-        .pix-pendente-bar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(${CLIENT_BOTTOM_NAV_HEIGHT_PX}px + env(safe-area-inset-bottom));display:flex;align-items:center;gap:10px;width:100%;max-width:540px;box-sizing:border-box;padding:10px 14px;background:var(--attention-soft);color:var(--attention-soft-foreground);text-decoration:none;border-top:1px solid rgba(var(--overlay-rgb),.06);border-bottom:1px solid rgba(var(--overlay-rgb),.06);z-index:55}
-        .pix-pendente-bar-icon{width:24px;height:24px;border-radius:8px;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:color-mix(in srgb, var(--attention) 16%, transparent)}
-        .pix-pendente-bar-txt{flex:1;min-width:0;font-size:12.5px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-        .pix-pendente-bar-cta{flex-shrink:0;background:var(--primary);color:var(--primary-foreground);font-size:12px;font-weight:800;padding:7px 12px;border-radius:999px;white-space:nowrap}
+        .pix-pendente-bar{
+          position:fixed;left:50%;transform:translateX(-50%);
+          bottom:calc(${CLIENT_BOTTOM_NAV_HEIGHT_PX}px + env(safe-area-inset-bottom));
+          display:flex;align-items:center;gap:11px;
+          width:100%;max-width:540px;box-sizing:border-box;
+          padding:9px 13px;
+          background:color-mix(in srgb, var(--secondary) 86%, transparent);
+          -webkit-backdrop-filter:blur(20px) saturate(160%);
+          backdrop-filter:blur(20px) saturate(160%);
+          border-top:1px solid color-mix(in srgb, var(--secondary-foreground) 14%, transparent);
+          border-left:1px solid color-mix(in srgb, var(--secondary-foreground) 14%, transparent);
+          border-right:1px solid color-mix(in srgb, var(--secondary-foreground) 14%, transparent);
+          box-shadow:0 -12px 28px -12px color-mix(in srgb, var(--secondary) 60%, transparent), inset 0 1px 0 color-mix(in srgb, var(--secondary-foreground) 8%, transparent);
+          color:var(--secondary-foreground);
+          text-decoration:none;
+          z-index:55;
+        }
+        .pix-pendente-bar-icon{
+          width:30px;height:30px;border-radius:999px;flex-shrink:0;
+          display:flex;align-items:center;justify-content:center;
+          background:color-mix(in srgb, var(--secondary-foreground) 13%, transparent);
+          border:1px solid color-mix(in srgb, var(--secondary-foreground) 18%, transparent);
+          color:var(--primary);
+        }
+        .pix-pendente-bar-content{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+        .pix-pendente-bar-badge{
+          align-self:flex-start;display:inline-flex;align-items:center;gap:5px;
+          background:color-mix(in srgb, var(--attention) 46%, transparent);
+          color:var(--secondary-foreground);
+          font-size:9.5px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;
+          padding:2px 8px 2px 6px;border-radius:999px;line-height:1.5;
+        }
+        .pix-pendente-bar-dot{width:5px;height:5px;border-radius:999px;background:var(--secondary-foreground);flex-shrink:0}
+        .pix-pendente-bar-info{
+          font-size:12.5px;font-weight:600;
+          color:color-mix(in srgb, var(--secondary-foreground) 88%, transparent);
+          white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+        }
+        .pix-pendente-bar-sep{opacity:.55}
+        .pix-pendente-bar-valor{font-size:13.5px;font-weight:800;color:var(--secondary-foreground)}
+        .pix-pendente-bar-cta{
+          flex-shrink:0;background:var(--primary);color:var(--primary-foreground);
+          font-size:12.5px;font-weight:800;padding:8px 14px;border-radius:999px;white-space:nowrap;
+        }
       `}</style>
     </>
   );
