@@ -29,7 +29,6 @@ export type MenuType = {
   saltyFlavors: string[];
   sweetFlavors: string[];
   miniPizzaFlavors?: string[];
-  calzoneFlavors?: string[];
   lanches: { name: string; price: number; sizes?: { code: string; price: number }[] }[];
   bebidas: { name: string; price: number }[];
   sucos: { name: string; price: number }[];
@@ -1076,7 +1075,6 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const miniPizzaFlavors = (menu.miniPizzaFlavors?.length ? menu.miniPizzaFlavors : [...(menu.saltyFlavors || []), ...(menu.sweetFlavors || [])]).filter(Boolean);
   const calzoneItem = (menu.lanches || []).find((it) => isCalzoneName(it.name) && Number.isFinite(it.price));
   const calzoneEsgotada = !!calzoneItem && esgotados.includes(calzoneItem.name);
-  const calzoneFlavorsList = (menu.calzoneFlavors?.length ? menu.calzoneFlavors : [...(menu.saltyFlavors || []), ...(menu.sweetFlavors || [])]).filter(Boolean);
 
   function resetBuild() { setSize(null); setSizePrice(0); setF1(null); setF2(null); setBorder(null); setBorderPrice(0); setMiniPizzaMode(false); setCalzoneMode(false); setFlavorModalOpen(false); }
   function goPizza() { setPlan({ total: 0, current: 1, openEnded: true }); resetBuild(); go("sc-build"); }
@@ -1108,11 +1106,13 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const mam = !!(f1 && f2);
   const flavorOk = !!f1;
   const buildOk = !!size && flavorOk && !(miniPizzaMode && miniPizzaEsgotada) && !(calzoneMode && calzoneEsgotada);
+  // Fonte efetiva de sabores do fluxo de pizza (a mesma usada pela pizza
+  // normal). O calzone consome exatamente essa lista — sem lista própria —
+  // só limitando a escolha a 1 sabor (ver nextFlavorSelection/singleFlavor).
+  const pizzaFlavorSections = [{ title: "Salgadas", flavors: menu.saltyFlavors || [] }, { title: "Doces", flavors: menu.sweetFlavors || [] }];
   const flavorSections = miniPizzaMode
     ? [{ title: "Sabores da mini-pizza", flavors: miniPizzaFlavors }]
-    : calzoneMode
-      ? [{ title: "Sabores do calzone", flavors: calzoneFlavorsList }]
-      : [{ title: "Salgadas", flavors: menu.saltyFlavors || [] }, { title: "Doces", flavors: menu.sweetFlavors || [] }];
+    : pizzaFlavorSections;
   const selectedSizeLabel = miniPizzaMode && miniPizzaItem ? miniPizzaItem.name : size ? ((menu.sizes || []).find((s) => s.code === size)?.label || size) : "";
   const buildFootHint = !size
     ? "Escolha um tamanho para continuar"

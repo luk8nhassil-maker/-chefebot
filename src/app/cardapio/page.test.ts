@@ -149,6 +149,14 @@ describe("/cardapio (PublicCardapio) — Calzone entra no mesmo fluxo de sabores
     expect(fonte).toContain("const next = nextFlavorSelection({ f1, f2 }, f, miniPizzaMode || calzoneMode);");
   });
 
+  test("calzone consome a mesma lista efetiva de sabores da pizza (pizzaFlavorSections), sem lista própria", () => {
+    expect(fonte).toContain('const pizzaFlavorSections = [{ title: "Salgadas", flavors: menu.saltyFlavors || [] }, { title: "Doces", flavors: menu.sweetFlavors || [] }];');
+    expect(fonte).toContain("const flavorSections = miniPizzaMode\n    ? [{ title: \"Sabores da mini-pizza\", flavors: miniPizzaFlavors }]\n    : pizzaFlavorSections;");
+    // Não existe mais lista própria de sabores do calzone no código do cardápio público.
+    expect(fonte).not.toContain("calzoneFlavors");
+    expect(fonte).not.toContain("calzoneFlavorsList");
+  });
+
   test("buildOk bloqueia confirmar quando o calzone escolhido está esgotado", () => {
     expect(fonte).toContain("const buildOk = !!size && flavorOk && !(miniPizzaMode && miniPizzaEsgotada) && !(calzoneMode && calzoneEsgotada);");
   });
@@ -169,8 +177,18 @@ describe("/cardapio (PublicCardapio) — Calzone entra no mesmo fluxo de sabores
     expect(fonte).toContain('function pizzasNoCarrinho() { return cart.filter((c) => c.kind === "pizza" || (c.kind === "simple" && isMiniPizzaName(c.name))).length; }');
   });
 
-  test("edição do carrinho preserva o sabor: item de calzone é reaproveitado (qty++) só quando nome e detalhe (sabor) batem", () => {
+  test("adicionar o mesmo calzone+sabor de novo soma quantidade (dedup por nome+detalhe) em vez de duplicar a linha", () => {
     expect(fonte).toContain('const ex = cart.find((c) => c.kind === "simple" && isCalzoneName(c.name) && c.detail === detail);');
+  });
+
+  // Não existe, em nenhum produto do carrinho (pizza, mini-pizza, calzone,
+  // lanche simples), um fluxo de "editar item" que reabra a escolha de sabor
+  // a partir da sacola — só qty +/- (chQty) e remover (rmItem). Por isso não
+  // há teste de "editar calzone no carrinho": a funcionalidade não existe.
+  test("sacola (sc-cart) não tem ação de editar item — só qty +/- e remover, para todo tipo de item", () => {
+    expect(fonte).toContain("function chQty(idx: number, d: number)");
+    expect(fonte).toContain("function rmItem(idx: number)");
+    expect(fonte).not.toMatch(/ci-edit|onEditItem|editarItemCarrinho/);
   });
 });
 
