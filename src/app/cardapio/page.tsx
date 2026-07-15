@@ -8,6 +8,8 @@ import { CARDAPIO_ILLUSTRATIONS, CardapioIllustration } from "@/lib/cardapioVisu
 import { useTheme } from "@/components/ThemeToggle";
 import ClientBottomNav from "@/components/ClientBottomNav";
 import { tabAtivaCardapio, consumirFlagAbrirSacola } from "@/lib/pedidoAtivoCliente";
+import { salvarReferenciaPixPendente } from "@/lib/pixPendenteLocal";
+import PixPendenteBar, { usePixPendente } from "@/components/PixPendenteBar";
 import PixPagamentoCard from "./PixPagamentoCard";
 
 // Ícones de categoria da home (menu/navegação) — lucide-react, sem emoji.
@@ -840,10 +842,8 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const [paymentModal, setPaymentModal] = useState<string | null>(null);
   const [editandoIdentidade, setEditandoIdentidade] = useState(false);
   const [hydrated, setHydrated] = useState(false);
+  const { pendente: pixPendente } = usePixPendente();
   const [restoredDraft, setRestoredDraft] = useState(false);
-  // Último pedido confirmado neste navegador (sem telefone/endereço), para o
-  // cliente reencontrar o rastreio se fechar a página. Expira em 3 horas.
-  const [pedidoRecente, setPedidoRecente] = useState<{ id: string; numero?: number; ts: number } | null>(null);
   // Promoções ativas vindas do servidor (substituem o antigo card fixo).
   const [promos, setPromos] = useState<PromocaoPublica[]>([]);
   const [promoSel, setPromoSel] = useState<PromocaoPublica | null>(null);
@@ -902,17 +902,6 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
       if (n && n.trim() && (telValido || temVinculoWa)) setEditandoIdentidade(false);
       else setEditandoIdentidade(true);
     } catch { setEditandoIdentidade(true); }
-    try {
-      const rawPedido = localStorage.getItem("cf_ultimo_pedido");
-      if (rawPedido) {
-        const up = JSON.parse(rawPedido);
-        if (up && up.id && typeof up.ts === "number" && Date.now() - up.ts <= 3 * 60 * 60 * 1000) {
-          setPedidoRecente({ id: String(up.id), numero: typeof up.numero === "number" ? up.numero : undefined, ts: up.ts });
-        } else {
-          localStorage.removeItem("cf_ultimo_pedido");
-        }
-      }
-    } catch {}
     try {
       const raw = sessionStorage.getItem("cf_draft");
       if (raw) {
@@ -1001,7 +990,6 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   }, [pedidoConfirmado?.id, pedidoConfirmado?.statusToken]);
 
   function showToast(m: string) { setToast(m); clearTimeout(toastTimer.current); toastTimer.current = setTimeout(() => setToast(""), 1700); }
-  function dispensarPedidoRecente() { setPedidoRecente(null); try { localStorage.removeItem("cf_ultimo_pedido"); } catch {} }
 
   useEffect(() => {
     let alive = true;
@@ -1461,7 +1449,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     try {
       const r = await fetch("/api/pedido-app", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const data = await r.json();
-      if (data.ok) { try { localStorage.setItem("cf_nome", nome.trim()); if (telefone.trim()) localStorage.setItem("cf_tel", telefone.trim()); } catch {} try { sessionStorage.removeItem("cf_draft"); } catch {} try { sessionStorage.removeItem("cf_resgate_pontos"); } catch {} setResgatePontos(null); try { const resumo = { id: String(data.pedidoId), numero: typeof data.numero === "number" ? data.numero : undefined, ts: Date.now() }; localStorage.setItem("cf_ultimo_pedido", JSON.stringify(resumo)); setPedidoRecente(resumo); } catch {} setStatusPedidoConfirmado("novo"); setStatusPixCliente(payment?.toLowerCase().includes("pix") ? "aguardando_pix" : "nao_pix"); setPedidoConfirmado({ id: data.pedidoId, numero: data.numero, total: data.total, ...(typeof data.statusToken === "string" ? { statusToken: data.statusToken } : {}), ...(data.pix ? { pix: data.pix } : {}) }); go("sc-done"); } else { if (resgatePontos && typeof data.error === "string" && /resgate/i.test(data.error)) { try { sessionStorage.removeItem("cf_resgate_pontos"); } catch {} setResgatePontos(null); } showToast(typeof data.error === "string" ? data.error : "Erro ao enviar. Tente de novo."); }
+      if (data.ok) { try { localStorage.setItem("cf_nome", nome.trim()); if (telefone.trim()) localStorage.setItem("cf_tel", telefone.trim()); } catch {} try { sessionStorage.removeItem("cf_draft"); } catch {} try { sessionStorage.removeItem("cf_resgate_pontos"); } catch {} setResgatePontos(null); try { const resumo = { id: String(data.pedidoId), numero: typeof data.numero === "number" ? data.numero : undefined, ts: Date.now() }; localStorage.setItem("cf_ultimo_pedido", JSON.stringify(resumo)); } catch {} setStatusPedidoConfirmado("novo"); setStatusPixCliente(payment?.toLowerCase().includes("pix") ? "aguardando_pix" : "nao_pix"); setPedidoConfirmado({ id: data.pedidoId, numero: data.numero, total: data.total, ...(typeof data.statusToken === "string" ? { statusToken: data.statusToken } : {}), ...(data.pix ? { pix: data.pix } : {}) }); if (payment?.toLowerCase().includes("pix") && typeof data.statusToken === "string") { salvarReferenciaPixPendente(localStorage, { pedidoId: String(data.pedidoId), statusToken: data.statusToken, numero: typeof data.numero === "number" ? data.numero : undefined }); } go("sc-done"); } else { if (resgatePontos && typeof data.error === "string" && /resgate/i.test(data.error)) { try { sessionStorage.removeItem("cf_resgate_pontos"); } catch {} setResgatePontos(null); } showToast(typeof data.error === "string" ? data.error : "Erro ao enviar. Tente de novo."); }
     } catch { showToast("Sem conexão. Tente de novo."); } finally { setSending(false); }
   }
   function resetAll() { setCart([]); resetBuild(); setDelType(null); setBairroIdx(""); setRua(""); setNumero(""); setReferencia(""); setPayment(null); setTroco(""); setTrocoOpcao(null); setPaymentModal(null); setMistoPixInput(""); setMistoDinheiroInput(""); setErroMisto(""); setObservacao(""); setErroNome(""); setErroTelefone(""); setErroPagamento(""); setErroEntrega(""); setErroTroco(""); setPedidoConfirmado(null); setStatusPedidoConfirmado("novo"); setStatusPixCliente("aguardando_pix"); setRestoredDraft(false); setEditandoIdentidade(false); setLastAddedKind(null); setUpsellBebidaIgnorado(false); try { sessionStorage.removeItem("cf_draft"); } catch {} go("sc-start"); }
@@ -1527,18 +1515,11 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
         <main>
           {screen === "sc-start" && (
             <section className="screen active home-screen">
-              {pedidoRecente && (
-                <div style={{ display: "flex", alignItems: "center", gap: 10, background: "var(--brand-soft)", border: "1px solid var(--brand)", borderRadius: 14, padding: "10px 12px", marginBottom: 14 }}>
-                  <a href={`/rastrear/${pedidoRecente.id}`} style={{ flex: 1, display: "flex", alignItems: "center", gap: 10, textDecoration: "none" }}>
-                    <span style={{ fontSize: 20, flexShrink: 0 }}>🛵</span>
-                    <span style={{ flex: 1 }}>
-                      <span style={{ display: "block", fontSize: 14, fontWeight: 700, color: "var(--text)" }}>Acompanhar pedido{pedidoRecente.numero ? ` #${pedidoRecente.numero}` : ""}</span>
-                      <span style={{ display: "block", fontSize: 12.5, color: "var(--text-sub)", marginTop: 2 }}>Seu último pedido está em andamento. Toque para ver o status.</span>
-                    </span>
-                  </a>
-                  <button onClick={dispensarPedidoRecente} aria-label="Fechar acompanhamento" style={{ background: "none", border: "none", color: "var(--text-faint)", fontSize: 18, cursor: "pointer", padding: "0 2px", lineHeight: 1 }}>×</button>
-                </div>
-              )}
+              {/* Home limpa (Etapa 2): nenhum card de estado operacional aqui —
+                  acompanhamento de pedido e Pix pendente vivem na barra
+                  global (PixPendenteBar) e no indicador da aba Pedido, nunca
+                  dentro do conteúdo rolável da home. Só promoção ativa e
+                  convites não-operacionais (ex.: fidelidade abaixo) seguem. */}
               <a href="/cliente" style={{ display: "flex", alignItems: "center", gap: 10, background: "var(--surface)", border: "1px solid var(--line-strong)", borderRadius: 14, padding: "10px 12px", marginBottom: 14, textDecoration: "none" }}>
                 <span style={{ fontSize: 20, flexShrink: 0 }}>🎁</span>
                 <span style={{ flex: 1 }}>
@@ -2008,12 +1989,14 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
         </div>
       )}
       {cartCount > 0 && !showStrongCartCta && !showBottomNav && screen !== "sc-done" && screen !== "sc-cart" && screen !== "sc-delivery" && screen !== "sc-pay" && (<div className="cartbar show"><div className="cartbar-inner"><div className="cartbar-info"><div className="cartbar-count">Sacola</div><div className="cartbar-total">{cartCount} {cartCount === 1 ? "item" : "itens"} · {money(finalTotal)}</div></div><button className="cartbar-link" onClick={() => go("sc-cart")}>Editar</button></div></div>)}
+      {showBottomNav && screen !== "sc-done" && <PixPendenteBar pendente={pixPendente} />}
       {showBottomNav && (
         <ClientBottomNav
           active={tabAtivaCardapio(screen)}
           cartCount={cartCount}
           onInicioClick={() => go("sc-start")}
           onSacolaClick={() => go("sc-cart")}
+          pixPendente={!!pixPendente}
         />
       )}
       {paymentModal && (

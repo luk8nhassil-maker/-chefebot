@@ -10,6 +10,10 @@ type ClientBottomNavProps = {
   onInicioClick?: () => void;
   sacolaHref?: string;
   onSacolaClick?: () => void;
+  /** Indicador discreto (ponto, sem número) na aba Pedido — true só quando
+   * o backend confirma um Pix pendente (ver usePixPendente). Nunca decide
+   * isso a partir de localStorage sozinho. */
+  pixPendente?: boolean;
 };
 
 // Menu inferior compartilhado entre o cardápio público (/pedido e /cardapio
@@ -32,6 +36,7 @@ export default function ClientBottomNav({
   onInicioClick,
   sacolaHref = "/pedido",
   onSacolaClick,
+  pixPendente = false,
 }: ClientBottomNavProps) {
   return (
     <>
@@ -67,8 +72,15 @@ export default function ClientBottomNav({
             </a>
           )}
 
-          <a className={`cbn-item ${active === "pedido" ? "active" : ""}`} href="/cliente/pedidos">
-            <span className="cbn-icon"><Receipt size={20} aria-hidden="true" /></span>
+          <a
+            className={`cbn-item ${active === "pedido" ? "active" : ""}`}
+            href="/cliente/pedidos"
+            aria-label={pixPendente ? "Pedido — pagamento Pix pendente" : undefined}
+          >
+            <span className="cbn-icon-wrap">
+              <span className="cbn-icon"><Receipt size={20} aria-hidden="true" /></span>
+              {pixPendente && <span className="cbn-dot" aria-hidden="true" />}
+            </span>
             <span className="cbn-label">Pedido</span>
           </a>
 
@@ -89,6 +101,7 @@ export default function ClientBottomNav({
         .cbn-item.active .cbn-label{color:var(--text-primary);font-weight:800}
         .cbn-label{line-height:1.1}
         .cbn-badge{position:absolute;top:-5px;right:-9px;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:var(--primary);color:var(--on-primary);font-size:10px;font-weight:800;display:flex;align-items:center;justify-content:center;line-height:1;box-shadow:0 0 0 2px var(--surface)}
+        .cbn-dot{position:absolute;top:-2px;right:-6px;width:8px;height:8px;border-radius:999px;background:var(--attention);box-shadow:0 0 0 2px var(--surface)}
       `}</style>
     </>
   );

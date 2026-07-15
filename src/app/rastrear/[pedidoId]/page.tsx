@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import dynamic from 'next/dynamic'
 import type { LocalizacaoEntregador } from '@/types/entregador'
 import ClientBottomNav from '@/components/ClientBottomNav'
+import PixPendenteBar, { usePixPendente } from '@/components/PixPendenteBar'
 import { CF_OPEN_CART_KEY } from '@/lib/pedidoAtivoCliente'
 
 const MapaEntregador = dynamic(() => import('@/components/MapaEntregador'), { ssr: false })
@@ -87,6 +88,7 @@ export default function RastrearPage({ params }: PageProps) {
   const [localizacao, setLocalizacao] = useState<LocalizacaoEntregador | null>(null)
   const [carregando, setCarregando] = useState(true)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const { pendente: pixPendente } = usePixPendente()
 
   useEffect(() => {
     params.then(p => setPedidoId(p.pedidoId))
@@ -240,7 +242,8 @@ export default function RastrearPage({ params }: PageProps) {
         </a>
       </div>
 
-      <ClientBottomNav active="pedido" onSacolaClick={abrirSacola} />
+      <PixPendenteBar pendente={pixPendente} />
+      <ClientBottomNav active="pedido" onSacolaClick={abrirSacola} pixPendente={!!pixPendente} />
     </div>
   )
 }

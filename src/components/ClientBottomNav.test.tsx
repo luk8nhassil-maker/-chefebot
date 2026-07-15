@@ -85,6 +85,26 @@ describe("ClientBottomNav — badge da sacola", () => {
   });
 });
 
+describe("ClientBottomNav — indicador de Pix pendente na aba Pedido", () => {
+  test("pixPendente=true mostra o ponto discreto (sem texto/número)", () => {
+    const html = renderToStaticMarkup(<ClientBottomNav active="inicio" pixPendente />);
+    expect(html).toContain("cbn-dot");
+    expect(html).toContain('aria-label="Pedido — pagamento Pix pendente"');
+  });
+
+  test("pixPendente=false (padrão) não mostra o ponto", () => {
+    const html = renderToStaticMarkup(<ClientBottomNav active="inicio" />);
+    expect(html).not.toContain("cbn-dot\"");
+    expect(html).not.toMatch(/<span class="cbn-dot"/);
+  });
+
+  test("indicador não depende só de cor — aria-label explica o motivo", () => {
+    const html = renderToStaticMarkup(<ClientBottomNav active="inicio" pixPendente />);
+    const pedidoLink = html.match(/<a[^>]*href="\/cliente\/pedidos"[^>]*>/)?.[0] ?? "";
+    expect(pedidoLink).toContain("aria-label");
+  });
+});
+
 describe("ClientBottomNav — Início/Sacola internos (cardápio) viram <button>, não <a>", () => {
   test("com onInicioClick/onSacolaClick, não navegam via href", () => {
     const html = renderToStaticMarkup(
