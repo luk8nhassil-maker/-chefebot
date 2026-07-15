@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { Receipt, ChevronRight, Clock, ChefHat, CheckCircle2, Check, X as XIcon } from 'lucide-react'
 import ClientBottomNav from '@/components/ClientBottomNav'
+import PixPendenteBar, { usePixPendente } from '@/components/PixPendenteBar'
 import { CF_OPEN_CART_KEY } from '@/lib/pedidoAtivoCliente'
 import {
   filtrarPedidosPorBusca,
@@ -117,6 +118,7 @@ function CardPedido({ p }: { p: PedidoClienteResumo }) {
 
 export default function ClientePedidosPage() {
   const [tela, setTela] = useState<Tela>('carregando')
+  const { pendente: pixPendente } = usePixPendente()
   const [pedidos, setPedidos] = useState<PedidoClienteResumo[]>([])
   const [busca, setBusca] = useState('')
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -310,7 +312,8 @@ export default function ClientePedidosPage() {
         )}
       </div>
 
-      <ClientBottomNav active="pedido" onSacolaClick={abrirSacola} />
+      <PixPendenteBar pendente={pixPendente} />
+      <ClientBottomNav active="pedido" onSacolaClick={abrirSacola} pixPendente={!!pixPendente} />
     </div>
   )
 }

@@ -73,3 +73,22 @@ describe("/cliente — Área do Cliente renomeada para Pontos", () => {
     expect(usos.length).toBeGreaterThanOrEqual(2);
   });
 });
+
+describe("/cliente — Etapa 2: sem lembrete operacional de pedido + barra global de Pix pendente", () => {
+  test("[caso 10] não mostra mais o card de 'pedido em andamento' (pontos previstos)", () => {
+    expect(fonte).not.toContain("Seu pedido em andamento vai render");
+    expect(fonte).not.toContain("pontosPrevistos > 0");
+  });
+
+  test("mantém saldo, progresso e extrato de pontos (não são notificação de pedido)", () => {
+    expect(fonte).toContain("Seu saldo de pontos");
+    expect(fonte).toContain("Extrato de pontos");
+  });
+
+  test("usa o hook central usePixPendente e repassa para a barra + indicador do menu", () => {
+    expect(fonte).toContain("import PixPendenteBar, { usePixPendente } from '@/components/PixPendenteBar'");
+    expect(fonte).toContain("usePixPendente()");
+    expect(fonte).toContain("<PixPendenteBar pendente={pixPendente} />");
+    expect(fonte).toMatch(/<ClientBottomNav[\s\S]{0,120}pixPendente=\{!!pixPendente\}/);
+  });
+});

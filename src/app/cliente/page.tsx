@@ -1,8 +1,9 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Gift, Phone, MessageCircle, LogOut, Receipt, Sparkles, Clock, Pizza } from 'lucide-react'
+import { Gift, Phone, MessageCircle, LogOut, Receipt, Sparkles, Pizza } from 'lucide-react'
 import ClientBottomNav from '@/components/ClientBottomNav'
+import PixPendenteBar, { usePixPendente } from '@/components/PixPendenteBar'
 import { CF_OPEN_CART_KEY } from '@/lib/pedidoAtivoCliente'
 import { destinoNextPermitido } from '@/lib/clientePedidos'
 
@@ -73,6 +74,7 @@ const cores = {
 
 export default function ClientePage() {
   const [step, setStep] = useState<'carregando' | 'telefone' | 'otp' | 'perfil'>('carregando')
+  const { pendente: pixPendente } = usePixPendente()
   const [telefone, setTelefone] = useState('')
   const [codigo, setCodigo] = useState('')
   const [erro, setErro] = useState('')
@@ -382,14 +384,10 @@ export default function ClientePage() {
                     </div>
                   )}
 
-                  {fidelidade.pontosPrevistos > 0 && (
-                    <div style={{ background: cores.cardBg, border: `1px dashed ${cores.cardBorda}`, borderRadius: 14, padding: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
-                      <Clock size={20} color={cores.textoTerciario} />
-                      <p style={{ fontSize: 13, color: cores.textoSecundario, margin: 0 }}>
-                        Seu pedido em andamento vai render +{fidelidade.pontosPrevistos} pontos assim que for entregue.
-                      </p>
-                    </div>
-                  )}
+                  {/* Etapa 2: nenhum card de estado operacional (pedido em
+                      andamento, lembrete, pagamento) na home/Pontos —
+                      informações de pedido ficam em Pedido/Pedidos, no
+                      rastreamento e na barra global de Pix pendente. */}
                 </>
               )}
 
@@ -443,7 +441,8 @@ export default function ClientePage() {
         )}
       </div>
 
-      <ClientBottomNav active="pontos" onSacolaClick={abrirSacola} />
+      <PixPendenteBar pendente={pixPendente} />
+      <ClientBottomNav active="pontos" onSacolaClick={abrirSacola} pixPendente={!!pixPendente} />
 
       <style>{`.cliente-grid { display: flex; flex-direction: column; } @media (min-width: 1024px) { .cliente-grid { display: grid; grid-template-columns: 1.35fr 1fr; gap: 24px; align-items: start; } } @media (min-width: 768px) and (max-width: 1023.98px) { .cliente-conteudo { padding: 32px 32px calc(env(safe-area-inset-bottom) + 96px); } }`}</style>
     </div>

@@ -33,11 +33,15 @@ describe("/cardapio (PublicCardapio) — menu inferior unificado com /cliente e 
     expect(fonte).not.toContain("pedidoHref");
   });
 
-  test("pedidoRecente (banner 'Acompanhar pedido') continua funcionando fora do menu inferior", () => {
-    expect(fonte).toContain("pedidoRecente");
-    // Inclui o statusToken (quando disponível) para a edição de pedido
-    // (/pedido/editar) funcionar mesmo depois de recarregar a página.
-    expect(fonte).toMatch(/href=\{`\/rastrear\/\$\{pedidoRecente\.id\}/);
+  test("home (sc-start) não tem mais o card/banner 'Acompanhar pedido' (Etapa 2: card operacional removido)", () => {
+    expect(fonte).not.toContain("pedidoRecente");
+    expect(fonte).not.toContain("dispensarPedidoRecente");
+    expect(fonte).not.toContain("Seu último pedido está em andamento");
+  });
+
+  test("edição de pedido (main) não depende do banner removido — usa pedidoConfirmado.statusToken na tela sc-done", () => {
+    expect(fonte).toMatch(/href=\{`\/pedido\/editar\/\$\{pedidoConfirmado\.id\}\?token=\$\{encodeURIComponent\(pedidoConfirmado\.statusToken\)\}`\}/);
+    expect(fonte).toContain("Editar pedido");
   });
 
   test("consome a flag de 'abrir sacola' vinda de /cliente ou /rastrear na hidratação", () => {
@@ -47,6 +51,46 @@ describe("/cardapio (PublicCardapio) — menu inferior unificado com /cliente e 
   test("isAdmin ainda decide entre AdminCardapio e PublicCardapio em /cardapio (lógica intocada)", () => {
     expect(fonte).toMatch(/if \(isAdmin\) return <AdminCardapio menu=\{menu\} onSair=\{[^}]*\} \/>;/);
     expect(fonte).toContain("return <PublicCardapio menu={menu} />;");
+  });
+});
+
+// Etapa 2 do fluxo de "Pix pendente": home (tela sc-start) só pode mostrar
+// promoção ativa — nenhum card de notificação/estado operacional de pedido.
+describe("/cardapio (PublicCardapio) — Etapa 2: home limpa + barra global de Pix pendente", () => {
+  const blocoHome = fonte.slice(fonte.indexOf('screen === "sc-start" && ('), fonte.indexOf("promos.length > 0"));
+
+  test("[caso 10] home não renderiza nenhum card de pedido em andamento/acompanhamento/pagamento", () => {
+    expect(blocoHome).not.toContain("pedidoRecente");
+    expect(blocoHome).not.toContain("Acompanhar pedido");
+    expect(blocoHome).not.toContain("em andamento");
+    expect(fonte).not.toContain("dispensarPedidoRecente");
+  });
+
+  test("[caso 11] promoção ativa continua aparecendo na home", () => {
+    expect(fonte).toContain('{promos.length > 0 && (');
+    expect(fonte).toContain('className="promo-scroll"');
+  });
+
+  test("convite não-operacional de fidelidade (não é estado de pedido) continua permitido na home", () => {
+    expect(fonte).toContain("Entre com seu WhatsApp e acompanhe suas pizzas");
+  });
+
+  test("usa o hook central usePixPendente (uma única fonte, evita fetch duplicado com o badge do menu)", () => {
+    expect(fonte).toContain('import PixPendenteBar, { usePixPendente } from "@/components/PixPendenteBar"');
+    expect(fonte).toContain("usePixPendente()");
+  });
+
+  test("barra de Pix pendente nunca aparece na tela sc-done (a própria tela de pagamento)", () => {
+    expect(fonte).toContain('showBottomNav && screen !== "sc-done" && <PixPendenteBar pendente={pixPendente} />');
+  });
+
+  test("indicador da aba Pedido recebe o mesmo estado resolvido pelo hook", () => {
+    expect(fonte).toMatch(/<ClientBottomNav[\s\S]{0,220}pixPendente=\{!!pixPendente\}/);
+  });
+
+  test("salva a referência mínima local só quando o pagamento é Pix, nunca QR/copia-e-cola/chave", () => {
+    expect(fonte).toContain("salvarReferenciaPixPendente(localStorage, { pedidoId: String(data.pedidoId), statusToken: data.statusToken, numero:");
+    expect(fonte).toMatch(/if \(payment\?\.toLowerCase\(\)\.includes\("pix"\) && typeof data\.statusToken === "string"\)/);
   });
 });
 
