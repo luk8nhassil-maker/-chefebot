@@ -21,6 +21,11 @@ import {
   incrementarContadorPix,
   obterContadoresPix,
   mascararIdentificador,
+  registrarEventoObservabilidadePix,
+  obterUltimoEventoPix,
+  obterUltimaConfirmacaoAutomaticaPix,
+  chaveBucketHoraPix,
+  chaveBucketDiaPix,
 } from "./pixMetricas";
 
 beforeEach(() => {
@@ -122,6 +127,86 @@ describe("contadores cumulativos (Redis, best-effort)", () => {
   test("falha do Redis nunca lança (best-effort)", async () => {
     redisMock.set.mockRejectedValueOnce(new Error("down"));
     await expect(incrementarContadorPix("timeout")).resolves.toBeUndefined();
+  });
+});
+
+describe("registrarEventoObservabilidadePix — observabilidade adicional (Nível 6.10), fallback sem pipeline", () => {
+  test("grava bucket de hora e de dia e o último evento (sem pedidoId nenhum)", async () => {
+    const agora = Date.parse("2026-03-15T10:30:00.000Z");
+    await registrarEventoObservabilidadePix("sentinela_confirmou", { agora });
+
+    const chH = chaveBucketHoraPix("sentinela_confirmou", agora);
+    const chD = chaveBucketDiaPix("sentinela_confirmou", agora);
+    expect(await redisMock.get(chH)).toBe(1);
+    expect(await redisMock.get(chD)).toBe(1);
+
+    const ultimo = await obterUltimoEventoPix();
+    expect(ultimo).toEqual({ tipo: "sentinela_confirmou", ts: agora });
+    // "último evento" nunca inclui pedidoId, nem mascarado.
+    expect(JSON.stringify(ultimo)).not.toMatch(/pedido/i);
+  });
+
+  test("incrementa o bucket em chamadas repetidas na mesma hora/dia", async () => {
+    const agora = Date.parse("2026-03-15T10:30:00.000Z");
+    await registrarEventoObservabilidadePix("sentinela_bloqueio_lock", { agora });
+    await registrarEventoObservabilidadePix("sentinela_bloqueio_lock", { agora: agora + 1000 });
+    expect(await redisMock.get(chaveBucketHoraPix("sentinela_bloqueio_lock", agora))).toBe(2);
+    expect(await redisMock.get(chaveBucketDiaPix("sentinela_bloqueio_lock", agora))).toBe(2);
+  });
+
+  test("só grava 'última confirmação automática' quando explicitamente pedido", async () => {
+    const agora = Date.now();
+    await registrarEventoObservabilidadePix("sentinela_bloqueio_cooldown", { agora });
+    expect(await obterUltimaConfirmacaoAutomaticaPix()).toBeNull();
+
+    await registrarEventoObservabilidadePix("sentinela_confirmou", { agora, ultimaConfirmacaoAutomatica: true });
+    expect(await obterUltimaConfirmacaoAutomaticaPix()).toEqual({ tipo: "sentinela_confirmou", ts: agora });
+  });
+
+  test("falha do Redis nunca lança — telemetria é best-effort", async () => {
+    redisMock.set.mockRejectedValueOnce(new Error("redis indisponível"));
+    await expect(registrarEventoObservabilidadePix("sentinela_bloqueio_rate_limit")).resolves.toBeUndefined();
+  });
+
+  test("falha ao gravar não impede chamadas seguintes de continuarem funcionando", async () => {
+    redisMock.get.mockRejectedValueOnce(new Error("timeout"));
+    await registrarEventoObservabilidadePix("sentinela_confirmou", { agora: Date.now() });
+    // Chamada seguinte, sem a falha simulada, funciona normalmente.
+    const agora2 = Date.now();
+    await registrarEventoObservabilidadePix("sentinela_confirmou", { agora: agora2 });
+    expect(await obterUltimoEventoPix()).toEqual({ tipo: "sentinela_confirmou", ts: agora2 });
+  });
+
+  test("nunca escreve nas chaves dos contadores cumulativos existentes (pix:metricas:contador:*)", async () => {
+    await incrementarContadorPix("sentinela_consulta_evitada");
+    const antes = await obterContadoresPix();
+    await registrarEventoObservabilidadePix("sentinela_bloqueio_cooldown");
+    const depois = await obterContadoresPix();
+    expect(depois).toEqual(antes);
+  });
+});
+
+describe("registrarEventoObservabilidadePix — usa pipeline quando o cliente Redis suporta (produção)", () => {
+  test("grava tudo em uma única chamada de pipeline.exec()", async () => {
+    const chamadas: string[] = [];
+    const pipelineMock = {
+      incr: vi.fn(function (this: unknown, key: string) { chamadas.push(`incr:${key}`); return this; }),
+      expire: vi.fn(function (this: unknown, key: string) { chamadas.push(`expire:${key}`); return this; }),
+      set: vi.fn(function (this: unknown, key: string) { chamadas.push(`set:${key}`); return this; }),
+      exec: vi.fn(async () => []),
+    };
+    const clientComPipeline = { ...redisMock, pipeline: vi.fn(() => pipelineMock) };
+
+    vi.resetModules();
+    vi.doMock("./redis", () => ({ redis: clientComPipeline }));
+    const mod = await import("./pixMetricas");
+    await mod.registrarEventoObservabilidadePix("sentinela_confirmou", { agora: Date.now(), ultimaConfirmacaoAutomatica: true });
+
+    expect(clientComPipeline.pipeline).toHaveBeenCalledTimes(1);
+    expect(pipelineMock.exec).toHaveBeenCalledTimes(1);
+    expect(chamadas.filter((c) => c.startsWith("incr:")).length).toBe(2);
+    expect(chamadas.filter((c) => c.startsWith("set:")).length).toBe(2); // último evento + última confirmação automática
+    vi.doUnmock("./redis");
   });
 });
 

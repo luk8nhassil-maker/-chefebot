@@ -396,6 +396,39 @@ describe("solicitarVerificacaoOficialPix — orquestração (Redis + conciliador
     const estado = await carregarEstadoSentinela("p1");
     expect(estado?.estadoOperacional).toBe("confirmado");
   });
+
+  describe("observabilidade adicional (Nível 6.10) nunca afeta o retorno do Sentinela", () => {
+    test("falha de registrarEventoObservabilidadePix na confirmação não impede a confirmação nem muda o retorno", async () => {
+      seedPedido();
+      const pixMetricas = await import("./pixMetricas");
+      const spy = vi.spyOn(pixMetricas, "registrarEventoObservabilidadePix").mockRejectedValue(new Error("telemetria indisponível"));
+      reconciliarMock.mockResolvedValueOnce({ verificados: 1, confirmados: 1, pendentes: 0, ignorados: 0, erros: 0, detalhes: [{ pedidoId: "p1", outcome: "confirmado" }] });
+
+      const r = await solicitarVerificacaoOficialPix({ pedidoId: "p1", origem: "guardiao_qstash" });
+
+      expect(r.encerrado).toBe(true);
+      expect(r.motivoEncerramento).toBe("confirmado");
+      const estado = await carregarEstadoSentinela("p1");
+      expect(estado?.estadoOperacional).toBe("confirmado");
+      spy.mockRestore();
+    });
+
+    test("falha de registrarEventoObservabilidadePix num bloqueio não muda o motivo nem o encerrado retornado", async () => {
+      seedPedido();
+      const pixMetricas = await import("./pixMetricas");
+      const spy = vi.spyOn(pixMetricas, "registrarEventoObservabilidadePix").mockRejectedValue(new Error("telemetria indisponível"));
+      // Lock já ativo -> motivo "lock_ativo" (mapeia para sentinela_bloqueio_lock).
+      await redisMock.set("pix:sentinela:lock:MP-1", "1", { nx: true, ex: 12 });
+
+      const r = await solicitarVerificacaoOficialPix({ pedidoId: "p1", origem: "guardiao_qstash" });
+
+      expect(r.consultou).toBe(false);
+      expect(r.motivo).toBe("lock_ativo");
+      expect(r.encerrado).toBe(false);
+      expect(reconciliarMock).not.toHaveBeenCalled();
+      spy.mockRestore();
+    });
+  });
 });
 
 describe("encerrarSentinela / iniciarEstadoSentinela / registrarAtividadeWebhookSentinela", () => {

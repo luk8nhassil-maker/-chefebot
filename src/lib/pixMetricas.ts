@@ -191,6 +191,133 @@ export function mascararIdentificador(valor: string | undefined | null): string 
   return `***${limpo.slice(-4)}`;
 }
 
+// --- Observabilidade adicional do Sentinela Pix (Nível 6.10) -------------
+// Estritamente ADITIVA: nunca substitui, nunca altera o comportamento de
+// incrementarContadorPix acima — os contadores cumulativos existentes
+// continuam exatamente como estavam, gravados exatamente como antes. Esta
+// seção só adiciona uma segunda trilha de observabilidade (buckets por
+// hora/dia + "último evento") para alimentar o painel /dev/pix. Nunca é
+// aguardada de forma bloqueante-crítica pelo caminho financeiro: qualquer
+// falha aqui (Redis indisponível, TypeError etc.) é engolida internamente e
+// jamais propaga, jamais muda o retorno de quem chamou, jamais impede
+// confirmação, reagendamento, lock ou cooldown.
+
+export type EventoObservabilidadePix =
+  | "sentinela_confirmou"
+  | "sentinela_bloqueio_cooldown"
+  | "sentinela_bloqueio_rate_limit"
+  | "sentinela_bloqueio_proxima_consulta"
+  | "sentinela_bloqueio_lock";
+
+const PREFIXO_BUCKET_OBSERVABILIDADE = "pix:metricas:bucket:";
+const BUCKET_HORA_TTL_SEGUNDOS = 72 * 60 * 60; // 3 dias
+const BUCKET_DIA_TTL_SEGUNDOS = 35 * 24 * 60 * 60; // 35 dias
+const CHAVE_ULTIMO_EVENTO_PIX = "pix:metricas:ultimoEvento";
+const CHAVE_ULTIMA_CONFIRMACAO_AUTOMATICA_PIX = "pix:metricas:ultimaConfirmacaoAutomatica";
+
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+// Chaves em UTC — determinístico, sem depender de fuso do servidor.
+function sufixoHora(agora: number): string {
+  const d = new Date(agora);
+  return `${d.getUTCFullYear()}${pad2(d.getUTCMonth() + 1)}${pad2(d.getUTCDate())}${pad2(d.getUTCHours())}`;
+}
+function sufixoDia(agora: number): string {
+  const d = new Date(agora);
+  return `${d.getUTCFullYear()}${pad2(d.getUTCMonth() + 1)}${pad2(d.getUTCDate())}`;
+}
+
+export function chaveBucketHoraPix(nome: EventoObservabilidadePix, agora: number): string {
+  return `${PREFIXO_BUCKET_OBSERVABILIDADE}${nome}:h:${sufixoHora(agora)}`;
+}
+export function chaveBucketDiaPix(nome: EventoObservabilidadePix, agora: number): string {
+  return `${PREFIXO_BUCKET_OBSERVABILIDADE}${nome}:d:${sufixoDia(agora)}`;
+}
+
+type RedisPipelineLike = {
+  incr: (key: string) => RedisPipelineLike;
+  expire: (key: string, seconds: number) => RedisPipelineLike;
+  set: (key: string, value: unknown) => RedisPipelineLike;
+  exec: () => Promise<unknown[]>;
+};
+
+/**
+ * Registra um evento de observabilidade adicional do Sentinela Pix —
+ * SEPARADO de incrementarContadorPix (que não é alterado). Grava, em uma
+ * única viagem de rede quando o cliente Redis suporta pipeline (produção):
+ *   - contador do bucket da hora atual (TTL 72h)
+ *   - contador do bucket do dia atual (TTL 35 dias)
+ *   - "último evento": { tipo, ts } — NUNCA inclui pedidoId, nem mascarado
+ *   - opcionalmente "última confirmação automática": { tipo, ts }
+ * Sem suporte a pipeline (ex.: mocks de teste), cai para o menor número
+ * possível de escritas sequenciais equivalentes. NUNCA lança — qualquer
+ * falha é capturada e a função retorna normalmente.
+ */
+export async function registrarEventoObservabilidadePix(
+  tipo: EventoObservabilidadePix,
+  opts?: { ultimaConfirmacaoAutomatica?: boolean; agora?: number }
+): Promise<void> {
+  try {
+    const agora = opts?.agora ?? Date.now();
+    const chaveHora = chaveBucketHoraPix(tipo, agora);
+    const chaveDia = chaveBucketDiaPix(tipo, agora);
+    const registro = { tipo, ts: agora };
+
+    const clienteComPipeline = redis as unknown as { pipeline?: () => RedisPipelineLike };
+    if (typeof clienteComPipeline.pipeline === "function") {
+      const p = clienteComPipeline.pipeline();
+      p.incr(chaveHora);
+      p.expire(chaveHora, BUCKET_HORA_TTL_SEGUNDOS);
+      p.incr(chaveDia);
+      p.expire(chaveDia, BUCKET_DIA_TTL_SEGUNDOS);
+      p.set(CHAVE_ULTIMO_EVENTO_PIX, registro);
+      if (opts?.ultimaConfirmacaoAutomatica) {
+        p.set(CHAVE_ULTIMA_CONFIRMACAO_AUTOMATICA_PIX, registro);
+      }
+      await p.exec();
+      return;
+    }
+
+    // Fallback sem pipeline — mesmo padrão get+set de incrementarContadorPix.
+    const [horaAtual, diaAtual] = await Promise.all([
+      redis.get<number>(chaveHora),
+      redis.get<number>(chaveDia),
+    ]);
+    const escritas: Promise<unknown>[] = [
+      redis.set(chaveHora, (horaAtual || 0) + 1, { ex: BUCKET_HORA_TTL_SEGUNDOS }),
+      redis.set(chaveDia, (diaAtual || 0) + 1, { ex: BUCKET_DIA_TTL_SEGUNDOS }),
+      redis.set(CHAVE_ULTIMO_EVENTO_PIX, registro),
+    ];
+    if (opts?.ultimaConfirmacaoAutomatica) {
+      escritas.push(redis.set(CHAVE_ULTIMA_CONFIRMACAO_AUTOMATICA_PIX, registro));
+    }
+    await Promise.all(escritas);
+  } catch {
+    // Observabilidade adicional nunca pode afetar o Sentinela, o webhook,
+    // a confirmação manual ou o conciliador.
+  }
+}
+
+export type UltimoEventoPix = { tipo: string; ts: number } | null;
+
+export async function obterUltimoEventoPix(): Promise<UltimoEventoPix> {
+  try {
+    return (await redis.get<{ tipo: string; ts: number }>(CHAVE_ULTIMO_EVENTO_PIX)) || null;
+  } catch {
+    return null;
+  }
+}
+
+export async function obterUltimaConfirmacaoAutomaticaPix(): Promise<UltimoEventoPix> {
+  try {
+    return (await redis.get<{ tipo: string; ts: number }>(CHAVE_ULTIMA_CONFIRMACAO_AUTOMATICA_PIX)) || null;
+  } catch {
+    return null;
+  }
+}
+
 // Proporção consultasMercadoPago / mensagensQStash (Sentinela Pix) — quanto
 // menor, maior a economia do Sentinela (mais ticks QStash resultaram em
 // "evitada"/"coalescida"/"geração antiga" em vez de uma consulta real ao
