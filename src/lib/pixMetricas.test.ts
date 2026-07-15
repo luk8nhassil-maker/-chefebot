@@ -210,6 +210,94 @@ describe("registrarEventoObservabilidadePix — usa pipeline quando o cliente Re
   });
 });
 
+describe("registrarEventoObservabilidadePix — teto rígido de 100ms mesmo quando a operação Redis nunca resolve", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.doUnmock("./redis");
+  });
+
+  test("pipeline.exec() que nunca resolve não trava o helper — resolve em até 100ms (relógio falso)", async () => {
+    vi.useFakeTimers();
+    const pipelineMock = {
+      incr: vi.fn(function (this: unknown) { return this; }),
+      expire: vi.fn(function (this: unknown) { return this; }),
+      set: vi.fn(function (this: unknown) { return this; }),
+      exec: vi.fn(() => new Promise<unknown[]>(() => {})), // nunca resolve
+    };
+    const clienteComPipeline = { ...redisMock, pipeline: vi.fn(() => pipelineMock) };
+
+    vi.resetModules();
+    vi.doMock("./redis", () => ({ redis: clienteComPipeline }));
+    const mod = await import("./pixMetricas");
+
+    let resolvido = false;
+    const chamada = mod.registrarEventoObservabilidadePix("sentinela_confirmou", { agora: Date.now() }).then(() => { resolvido = true; });
+
+    await vi.advanceTimersByTimeAsync(99);
+    expect(resolvido).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await chamada;
+    expect(resolvido).toBe(true);
+  });
+
+  test("fallback sem pipeline: redis.get() que nunca resolve não trava o helper — resolve em até 100ms", async () => {
+    vi.useFakeTimers();
+    const getOriginal = redisMock.get.getMockImplementation();
+    redisMock.get.mockImplementation(() => new Promise(() => {})); // nunca resolve
+
+    let resolvido = false;
+    const chamada = registrarEventoObservabilidadePix("sentinela_bloqueio_lock", { agora: Date.now() }).then(() => { resolvido = true; });
+
+    await vi.advanceTimersByTimeAsync(99);
+    expect(resolvido).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await chamada;
+    expect(resolvido).toBe(true);
+
+    redisMock.get.mockImplementation(getOriginal!);
+  });
+
+  test("fallback sem pipeline: redis.set() que nunca resolve não trava o helper — resolve em até 100ms", async () => {
+    vi.useFakeTimers();
+    const setOriginal = redisMock.set.getMockImplementation();
+    redisMock.set.mockImplementation(() => new Promise(() => {})); // nunca resolve
+
+    let resolvido = false;
+    const chamada = registrarEventoObservabilidadePix("sentinela_bloqueio_rate_limit", { agora: Date.now() }).then(() => { resolvido = true; });
+
+    await vi.advanceTimersByTimeAsync(99);
+    expect(resolvido).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await chamada;
+    expect(resolvido).toBe(true);
+
+    redisMock.set.mockImplementation(setOriginal!);
+  });
+
+  test("nunca gera rejeição não tratada quando a gravação trava e só rejeita depois que o timeout já venceu a corrida", async () => {
+    const rejeicoesNaoTratadas: unknown[] = [];
+    const handler = (reason: unknown) => rejeicoesNaoTratadas.push(reason);
+    process.on("unhandledRejection", handler);
+
+    let rejeitarDepois: ((e: Error) => void) | null = null;
+    const getOriginal = redisMock.get.getMockImplementation();
+    redisMock.get.mockImplementation(() => new Promise((_resolve, reject) => { rejeitarDepois = reject; }));
+
+    try {
+      const chamada = registrarEventoObservabilidadePix("sentinela_bloqueio_proxima_consulta", { agora: Date.now() });
+      // Sem relógio falso aqui: espera o timeout real (curto, 100ms) vencer a corrida.
+      await chamada;
+      // Só agora, bem depois do helper já ter resolvido, a operação original rejeita.
+      rejeitarDepois!(new Error("chegou tarde, depois do timeout"));
+      await new Promise((r) => setTimeout(r, 10));
+      expect(rejeicoesNaoTratadas).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", handler);
+      redisMock.get.mockImplementation(getOriginal!);
+    }
+  });
+});
+
 describe("mascararIdentificador — nunca loga identificador completo", () => {
   test("mantém só um sufixo curto", () => {
     expect(mascararIdentificador("1234567890123")).toBe("***0123");

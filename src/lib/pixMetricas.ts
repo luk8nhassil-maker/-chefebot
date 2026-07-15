@@ -243,6 +243,57 @@ type RedisPipelineLike = {
   exec: () => Promise<unknown[]>;
 };
 
+// Teto rígido de latência para a observabilidade adicional. Um `.catch()`
+// sozinho protege contra REJEIÇÃO, mas não contra uma promise que nunca
+// resolve (pipeline.exec()/get()/set() pendurados) — como as duas chamadas
+// em pixSentinela.ts acontecem ANTES do retorno do Sentinela (bloqueio e
+// confirmação), uma gravação lenta atrasaria a resposta ao QStash. Esta
+// constante é o limite de quanto tempo registrarEventoObservabilidadePix
+// pode, no máximo, atrasar quem a chamou.
+const TIMEOUT_TELEMETRIA_MS = 100;
+
+// Corpo real da gravação — extraído para que a Promise que ele retorna possa
+// ser mantida viva (nunca "void simples") e corrida contra o timeout abaixo.
+async function executarGravacaoObservabilidadePix(
+  tipo: EventoObservabilidadePix,
+  opts?: { ultimaConfirmacaoAutomatica?: boolean; agora?: number }
+): Promise<void> {
+  const agora = opts?.agora ?? Date.now();
+  const chaveHora = chaveBucketHoraPix(tipo, agora);
+  const chaveDia = chaveBucketDiaPix(tipo, agora);
+  const registro = { tipo, ts: agora };
+
+  const clienteComPipeline = redis as unknown as { pipeline?: () => RedisPipelineLike };
+  if (typeof clienteComPipeline.pipeline === "function") {
+    const p = clienteComPipeline.pipeline();
+    p.incr(chaveHora);
+    p.expire(chaveHora, BUCKET_HORA_TTL_SEGUNDOS);
+    p.incr(chaveDia);
+    p.expire(chaveDia, BUCKET_DIA_TTL_SEGUNDOS);
+    p.set(CHAVE_ULTIMO_EVENTO_PIX, registro);
+    if (opts?.ultimaConfirmacaoAutomatica) {
+      p.set(CHAVE_ULTIMA_CONFIRMACAO_AUTOMATICA_PIX, registro);
+    }
+    await p.exec();
+    return;
+  }
+
+  // Fallback sem pipeline — mesmo padrão get+set de incrementarContadorPix.
+  const [horaAtual, diaAtual] = await Promise.all([
+    redis.get<number>(chaveHora),
+    redis.get<number>(chaveDia),
+  ]);
+  const escritas: Promise<unknown>[] = [
+    redis.set(chaveHora, (horaAtual || 0) + 1, { ex: BUCKET_HORA_TTL_SEGUNDOS }),
+    redis.set(chaveDia, (diaAtual || 0) + 1, { ex: BUCKET_DIA_TTL_SEGUNDOS }),
+    redis.set(CHAVE_ULTIMO_EVENTO_PIX, registro),
+  ];
+  if (opts?.ultimaConfirmacaoAutomatica) {
+    escritas.push(redis.set(CHAVE_ULTIMA_CONFIRMACAO_AUTOMATICA_PIX, registro));
+  }
+  await Promise.all(escritas);
+}
+
 /**
  * Registra um evento de observabilidade adicional do Sentinela Pix —
  * SEPARADO de incrementarContadorPix (que não é alterado). Grava, em uma
@@ -250,54 +301,27 @@ type RedisPipelineLike = {
  *   - contador do bucket da hora atual (TTL 72h)
  *   - contador do bucket do dia atual (TTL 35 dias)
  *   - "último evento": { tipo, ts } — NUNCA inclui pedidoId, nem mascarado
- *   - opcionalmente "última confirmação automática": { tipo, ts }
+ *   - opcionalmente "última confirmação pelo Sentinela": { tipo, ts }
  * Sem suporte a pipeline (ex.: mocks de teste), cai para o menor número
- * possível de escritas sequenciais equivalentes. NUNCA lança — qualquer
- * falha é capturada e a função retorna normalmente.
+ * possível de escritas sequenciais equivalentes.
+ *
+ * NUNCA lança e SEMPRE resolve em no máximo TIMEOUT_TELEMETRIA_MS (100ms),
+ * mesmo que a operação Redis nunca resolva: a gravação real roda numa
+ * Promise mantida viva (com seu próprio `.catch()`, para nunca virar uma
+ * rejeição não tratada depois que o timeout já tiver vencido a corrida) e
+ * disputa um `Promise.race` contra um timer — quem resolver primeiro decide
+ * o retorno desta função, mas a gravação em si nunca é cancelada.
  */
 export async function registrarEventoObservabilidadePix(
   tipo: EventoObservabilidadePix,
   opts?: { ultimaConfirmacaoAutomatica?: boolean; agora?: number }
 ): Promise<void> {
-  try {
-    const agora = opts?.agora ?? Date.now();
-    const chaveHora = chaveBucketHoraPix(tipo, agora);
-    const chaveDia = chaveBucketDiaPix(tipo, agora);
-    const registro = { tipo, ts: agora };
+  const gravacao = executarGravacaoObservabilidadePix(tipo, opts).catch(() => {});
 
-    const clienteComPipeline = redis as unknown as { pipeline?: () => RedisPipelineLike };
-    if (typeof clienteComPipeline.pipeline === "function") {
-      const p = clienteComPipeline.pipeline();
-      p.incr(chaveHora);
-      p.expire(chaveHora, BUCKET_HORA_TTL_SEGUNDOS);
-      p.incr(chaveDia);
-      p.expire(chaveDia, BUCKET_DIA_TTL_SEGUNDOS);
-      p.set(CHAVE_ULTIMO_EVENTO_PIX, registro);
-      if (opts?.ultimaConfirmacaoAutomatica) {
-        p.set(CHAVE_ULTIMA_CONFIRMACAO_AUTOMATICA_PIX, registro);
-      }
-      await p.exec();
-      return;
-    }
-
-    // Fallback sem pipeline — mesmo padrão get+set de incrementarContadorPix.
-    const [horaAtual, diaAtual] = await Promise.all([
-      redis.get<number>(chaveHora),
-      redis.get<number>(chaveDia),
-    ]);
-    const escritas: Promise<unknown>[] = [
-      redis.set(chaveHora, (horaAtual || 0) + 1, { ex: BUCKET_HORA_TTL_SEGUNDOS }),
-      redis.set(chaveDia, (diaAtual || 0) + 1, { ex: BUCKET_DIA_TTL_SEGUNDOS }),
-      redis.set(CHAVE_ULTIMO_EVENTO_PIX, registro),
-    ];
-    if (opts?.ultimaConfirmacaoAutomatica) {
-      escritas.push(redis.set(CHAVE_ULTIMA_CONFIRMACAO_AUTOMATICA_PIX, registro));
-    }
-    await Promise.all(escritas);
-  } catch {
-    // Observabilidade adicional nunca pode afetar o Sentinela, o webhook,
-    // a confirmação manual ou o conciliador.
-  }
+  await Promise.race([
+    gravacao,
+    new Promise<void>((resolve) => setTimeout(resolve, TIMEOUT_TELEMETRIA_MS)),
+  ]);
 }
 
 export type UltimoEventoPix = { tipo: string; ts: number } | null;

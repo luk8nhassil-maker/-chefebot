@@ -129,11 +129,13 @@ export function calcularHistogramaLatenciaPix(pedidos: PedidoDashboard[]): Histo
 }
 
 export type OrigemPixDashboard = ConfirmacoesPorOrigemPix & {
-  // Contagem cumulativa (desde o deploy desta versão) de confirmações que o
-  // Sentinela detectou nesta própria consulta — subconjunto do total
-  // "conciliador_mercadopago" acima (o mesmo confirmadoPor é gravado nos
-  // dois casos; este número é aditivo, não substitui o total).
-  identificadasPeloSentinelaDesdeVersao: number;
+  // Soma dos buckets diários dos últimos 30 dias (janela móvel, não
+  // cumulativa desde sempre) de confirmações que o Sentinela detectou
+  // nesta própria consulta — subconjunto do total "conciliador_mercadopago"
+  // acima (o mesmo confirmadoPor é gravado nos dois casos; este número é
+  // aditivo, não substitui o total). Os buckets só existem a partir desta
+  // implantação — ver `metricasTemporaisDesde` no painel.
+  identificadasPeloSentinelaUltimos30Dias: number;
 };
 
 export type EficienciaPixDashboard = {
@@ -143,10 +145,13 @@ export type EficienciaPixDashboard = {
   mensagensAntigasIgnoradas: number;
   mensagensDuplicadasIgnoradas: number;
   consultasCoalescidas: number;
-  bloqueiosCooldownDesdeVersao: number;
-  bloqueiosRateLimitDesdeVersao: number;
-  bloqueiosProximaConsultaDesdeVersao: number;
-  bloqueiosLockDesdeVersao: number;
+  // Os 4 campos abaixo são soma dos buckets diários dos últimos 30 dias
+  // (janela móvel) — não são contadores cumulativos desde sempre. Os
+  // buckets só existem a partir desta implantação.
+  bloqueiosCooldownUltimos30Dias: number;
+  bloqueiosRateLimitUltimos30Dias: number;
+  bloqueiosProximaConsultaUltimos30Dias: number;
+  bloqueiosLockUltimos30Dias: number;
   proporcaoConsultaPorMensagem: number | null;
 };
 
@@ -281,7 +286,7 @@ export async function montarPainelPixDashboard(agora: number = Date.now()): Prom
     resumo: calcularResumoPixDashboard(pedidosBrutos, agora),
     origem: {
       ...contarConfirmacoesPorOrigemPix(pedidosBrutos),
-      identificadasPeloSentinelaDesdeVersao: somarSerie(serieConfirmou?.dias || []),
+      identificadasPeloSentinelaUltimos30Dias: somarSerie(serieConfirmou?.dias || []),
     },
     latencia: calcularHistogramaLatenciaPix(pedidosBrutos),
     eficiencia: {
@@ -291,10 +296,10 @@ export async function montarPainelPixDashboard(agora: number = Date.now()): Prom
       mensagensAntigasIgnoradas: contador("sentinela_mensagem_antiga_ignorada"),
       mensagensDuplicadasIgnoradas: contador("sentinela_mensagem_duplicada_ignorada"),
       consultasCoalescidas: contador("sentinela_consulta_coalescida"),
-      bloqueiosCooldownDesdeVersao: somarSerie(serieCooldown?.dias || []),
-      bloqueiosRateLimitDesdeVersao: somarSerie(serieRateLimit?.dias || []),
-      bloqueiosProximaConsultaDesdeVersao: somarSerie(serieProximaConsulta?.dias || []),
-      bloqueiosLockDesdeVersao: somarSerie(serieLock?.dias || []),
+      bloqueiosCooldownUltimos30Dias: somarSerie(serieCooldown?.dias || []),
+      bloqueiosRateLimitUltimos30Dias: somarSerie(serieRateLimit?.dias || []),
+      bloqueiosProximaConsultaUltimos30Dias: somarSerie(serieProximaConsulta?.dias || []),
+      bloqueiosLockUltimos30Dias: somarSerie(serieLock?.dias || []),
       proporcaoConsultaPorMensagem: calcularProporcaoConsultaPorMensagemQstash(contadores),
     },
     saude: {

@@ -10,7 +10,7 @@ type PainelPix = {
   geradoEm: string
   metricasTemporaisDesde: string
   resumo: { encontrados: number; confirmados: number; pendentes: number; expirados: number; taxaConfirmacao: number | null }
-  origem: Record<string, number> & { identificadasPeloSentinelaDesdeVersao: number }
+  origem: Record<string, number> & { identificadasPeloSentinelaUltimos30Dias: number }
   latencia: {
     amostras: number
     mediaMs: number | null
@@ -26,10 +26,10 @@ type PainelPix = {
     mensagensAntigasIgnoradas: number
     mensagensDuplicadasIgnoradas: number
     consultasCoalescidas: number
-    bloqueiosCooldownDesdeVersao: number
-    bloqueiosRateLimitDesdeVersao: number
-    bloqueiosProximaConsultaDesdeVersao: number
-    bloqueiosLockDesdeVersao: number
+    bloqueiosCooldownUltimos30Dias: number
+    bloqueiosRateLimitUltimos30Dias: number
+    bloqueiosProximaConsultaUltimos30Dias: number
+    bloqueiosLockUltimos30Dias: number
     proporcaoConsultaPorMensagem: number | null
   }
   saude: {
@@ -133,7 +133,7 @@ function OrigemCard({ dados }: { dados: PainelPix }) {
         <Stat label="Webhook" valor={o.webhook || 0} />
         <Stat label="Confirmação manual" valor={o.manual || 0} />
         <Stat label="Conciliador Mercado Pago" valor={o.conciliador_mercadopago || 0} />
-        <Stat label="Identificadas pelo Sentinela (desde esta versão)" valor={o.identificadasPeloSentinelaDesdeVersao} cor={PURPLE_L} />
+        <Stat label="Identificadas pelo Sentinela (últimos 30 dias)" valor={o.identificadasPeloSentinelaUltimos30Dias} cor={PURPLE_L} />
       </div>
     </Card>
   )
@@ -172,10 +172,10 @@ function EficienciaCard({ dados }: { dados: PainelPix }) {
         <Stat label="Consultas coalescidas" valor={e.consultasCoalescidas} cor={GREEN} />
         <Stat label="Mensagens antigas ignoradas" valor={e.mensagensAntigasIgnoradas} />
         <Stat label="Mensagens duplicadas ignoradas" valor={e.mensagensDuplicadasIgnoradas} />
-        <Stat label="Bloqueios · cooldown (desde versão)" valor={e.bloqueiosCooldownDesdeVersao} />
-        <Stat label="Bloqueios · rate limit (desde versão)" valor={e.bloqueiosRateLimitDesdeVersao} />
-        <Stat label="Bloqueios · próxima consulta (desde versão)" valor={e.bloqueiosProximaConsultaDesdeVersao} />
-        <Stat label="Bloqueios · lock (desde versão)" valor={e.bloqueiosLockDesdeVersao} />
+        <Stat label="Bloqueios · cooldown (últimos 30 dias)" valor={e.bloqueiosCooldownUltimos30Dias} />
+        <Stat label="Bloqueios · rate limit (últimos 30 dias)" valor={e.bloqueiosRateLimitUltimos30Dias} />
+        <Stat label="Bloqueios · próxima consulta (últimos 30 dias)" valor={e.bloqueiosProximaConsultaUltimos30Dias} />
+        <Stat label="Bloqueios · lock (últimos 30 dias)" valor={e.bloqueiosLockUltimos30Dias} />
         <Stat label="Proporção consultas/mensagens" valor={e.proporcaoConsultaPorMensagem === null ? '—' : e.proporcaoConsultaPorMensagem} cor={PURPLE_L} />
       </div>
     </Card>
@@ -200,7 +200,7 @@ function SaudeCard({ dados }: { dados: PainelPix }) {
           </span>
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
-          <span style={{ color: TEXT3 }}>Última confirmação automática</span>
+          <span style={{ color: TEXT3 }}>Última confirmação pelo Sentinela</span>
           <span style={{ color: TEXT, fontFamily: 'monospace' }}>
             {s.ultimaConfirmacaoAutomatica ? formatTs(s.ultimaConfirmacaoAutomatica.ts) : 'Nenhuma ainda'}
           </span>

@@ -428,6 +428,56 @@ describe("solicitarVerificacaoOficialPix — orquestração (Redis + conciliador
       expect(reconciliarMock).not.toHaveBeenCalled();
       spy.mockRestore();
     });
+
+    test("telemetria travada (Redis nunca resolve) no branch de confirmação: ainda assim retorna 'confirmado' rapidamente (teto de 100ms), sem mock da função de telemetria", async () => {
+      vi.useFakeTimers();
+      try {
+        seedPedido();
+        const getOriginal = redisMock.get.getMockImplementation();
+        redisMock.get.mockImplementation((key: string) => {
+          if (key.startsWith("pix:metricas:bucket:")) return new Promise(() => {}); // nunca resolve
+          return Promise.resolve(store.has(key) ? store.get(key) : null);
+        });
+        reconciliarMock.mockResolvedValueOnce({ verificados: 1, confirmados: 1, pendentes: 0, ignorados: 0, erros: 0, detalhes: [{ pedidoId: "p1", outcome: "confirmado" }] });
+
+        const promessa = solicitarVerificacaoOficialPix({ pedidoId: "p1", origem: "guardiao_qstash" });
+        await vi.advanceTimersByTimeAsync(100);
+        const r = await promessa;
+
+        expect(r.encerrado).toBe(true);
+        expect(r.motivoEncerramento).toBe("confirmado");
+        const estado = await carregarEstadoSentinela("p1");
+        expect(estado?.estadoOperacional).toBe("confirmado");
+        redisMock.get.mockImplementation(getOriginal!);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    test("telemetria travada (Redis nunca resolve) num bloqueio: ainda assim retorna o mesmo motivo/decisão rapidamente (teto de 100ms), sem mock da função de telemetria", async () => {
+      vi.useFakeTimers();
+      try {
+        seedPedido();
+        const getOriginal = redisMock.get.getMockImplementation();
+        redisMock.get.mockImplementation((key: string) => {
+          if (key.startsWith("pix:metricas:bucket:")) return new Promise(() => {}); // nunca resolve
+          return Promise.resolve(store.has(key) ? store.get(key) : null);
+        });
+        await redisMock.set("pix:sentinela:lock:MP-1", "1", { nx: true, ex: 12 });
+
+        const promessa = solicitarVerificacaoOficialPix({ pedidoId: "p1", origem: "guardiao_qstash" });
+        await vi.advanceTimersByTimeAsync(100);
+        const r = await promessa;
+
+        expect(r.consultou).toBe(false);
+        expect(r.motivo).toBe("lock_ativo");
+        expect(r.encerrado).toBe(false);
+        expect(reconciliarMock).not.toHaveBeenCalled();
+        redisMock.get.mockImplementation(getOriginal!);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 });
 
