@@ -156,13 +156,41 @@ export function verificarPii(
   };
 }
 
+function estadoVazio(): DadosMcp {
+  const scoreZero: ScoreMaturidade = { total: 0, volume: 0, qualidade: 0, diversidade: 0, saude: 0 };
+  return {
+    filaCount: 0,
+    obsCount: 0,
+    errosCount: 0,
+    scoreMaturidade: scoreZero,
+    padraoDistribuicao: {},
+    gargalos: [],
+    ultimosErros: [],
+    ultimasObs: [],
+    cronMeta: null,
+    piiCheck: { ok: true, phoneHashOk: true, semDadosCrus: true, semValorMonetario: true },
+    prontoParaFase2: false,
+  };
+}
+
 export async function lerDadosMcp(): Promise<DadosMcp> {
-  const [rawObs, rawErros, rawFila, cronMeta] = await Promise.all([
-    roRedis.lrange<unknown>(CHAVE_OBS, -MAX_OBS_LEITURA, -1),
-    roRedis.lrange<unknown>(CHAVE_ERROS, -MAX_ERROS_LEITURA, -1),
-    roRedis.lrange<unknown>(CHAVE_FILA, 0, MAX_FILA_LEITURA),
-    roRedis.get<CronMeta>(CHAVE_CRON_META),
-  ]);
+  // Redis indisponível (env ausente, timeout, credenciais inválidas etc.) não
+  // pode derrubar o painel — cai para estado vazio seguro.
+  let rawObs: unknown[];
+  let rawErros: unknown[];
+  let rawFila: unknown[];
+  let cronMeta: CronMeta | null;
+  try {
+    [rawObs, rawErros, rawFila, cronMeta] = await Promise.all([
+      roRedis.lrange<unknown>(CHAVE_OBS, -MAX_OBS_LEITURA, -1),
+      roRedis.lrange<unknown>(CHAVE_ERROS, -MAX_ERROS_LEITURA, -1),
+      roRedis.lrange<unknown>(CHAVE_FILA, 0, MAX_FILA_LEITURA),
+      roRedis.get<CronMeta>(CHAVE_CRON_META),
+    ]);
+  } catch (err) {
+    console.error('[mcpReader] Redis indisponível, retornando estado vazio:', err);
+    return estadoVazio();
+  }
 
   const obs = rawObs
     .map(r => parseEntry<McpLogEntryObs>(r))

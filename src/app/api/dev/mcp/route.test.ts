@@ -82,6 +82,19 @@ describe('GET /api/dev/mcp — token expirado', () => {
   });
 });
 
+// ─── T17: lerDadosMcp lança erro inesperado → 503 (nunca 500 estourado) ──────
+
+describe('GET /api/dev/mcp — lerDadosMcp lança erro inesperado', () => {
+  it('T17: retorna 503 com JSON em vez de deixar a exceção estourar', async () => {
+    mockLerDadosMcp.mockRejectedValueOnce(new Error('falha inesperada'));
+    const token = await createToken({ username: 'ominix', name: 'Ominix Dev', role: 'dev' });
+    const res = await GET(makeReq(token));
+    expect(res.status).toBe(503);
+    const body = await res.json();
+    expect(body.error).toBeDefined();
+  });
+});
+
 // ─── T16: POST → 405 ─────────────────────────────────────────────────────────
 
 describe('GET /api/dev/mcp — método POST', () => {
