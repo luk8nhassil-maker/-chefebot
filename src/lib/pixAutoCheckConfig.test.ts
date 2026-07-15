@@ -9,9 +9,9 @@ describe("pixAutoCheckConfig — janela inicial configurável", () => {
     vi.unstubAllEnvs();
   });
 
-  test("sem env var definida, usa o novo padrão seguro de 10s", async () => {
+  test("sem env var definida, usa o novo padrão seguro de 5s", async () => {
     const mod = await import("./pixAutoCheckConfig");
-    expect(mod.PIX_AUTO_CHECK_INITIAL_INTERVAL_MS).toBe(10_000);
+    expect(mod.PIX_AUTO_CHECK_INITIAL_INTERVAL_MS).toBe(5_000);
   });
 
   test("PIX_AUTO_CHECK_INITIAL_INTERVAL_MS=20000 permite rollback simples para 20s", async () => {
@@ -40,19 +40,26 @@ describe("pixAutoCheckConfig — janela inicial configurável", () => {
     expect(mod.PIX_AUTO_CHECK_INITIAL_INTERVAL_MS).toBe(20_000);
   });
 
-  test("string vazia é tratada como ausente — usa o padrão de 10s, não o fallback", async () => {
+  test("string vazia é tratada como ausente — usa o padrão de 5s, não o fallback", async () => {
     vi.stubEnv("PIX_AUTO_CHECK_INITIAL_INTERVAL_MS", "");
     const mod = await import("./pixAutoCheckConfig");
-    expect(mod.PIX_AUTO_CHECK_INITIAL_INTERVAL_MS).toBe(10_000);
+    expect(mod.PIX_AUTO_CHECK_INITIAL_INTERVAL_MS).toBe(5_000);
   });
 });
 
-describe("calcularIntervaloPorIdade — cadência adaptativa por janela", () => {
-  test("0 a 2 minutos: usa o intervalo inicial (10s por padrão)", async () => {
+describe("calcularIntervaloPorIdade — cadência adaptativa por janela (Sentinela Pix)", () => {
+  test("0 a 30s: usa o intervalo inicial (5s por padrão)", async () => {
     const { calcularIntervaloPorIdade, PIX_AUTO_CHECK_INITIAL_INTERVAL_MS } = await import("./pixAutoCheckConfig");
     expect(calcularIntervaloPorIdade(0)).toBe(PIX_AUTO_CHECK_INITIAL_INTERVAL_MS);
-    expect(calcularIntervaloPorIdade(60_000)).toBe(PIX_AUTO_CHECK_INITIAL_INTERVAL_MS);
-    expect(calcularIntervaloPorIdade(119_999)).toBe(PIX_AUTO_CHECK_INITIAL_INTERVAL_MS);
+    expect(calcularIntervaloPorIdade(15_000)).toBe(PIX_AUTO_CHECK_INITIAL_INTERVAL_MS);
+    expect(calcularIntervaloPorIdade(29_999)).toBe(PIX_AUTO_CHECK_INITIAL_INTERVAL_MS);
+  });
+
+  test("30s a 2 minutos: usa 10s", async () => {
+    const { calcularIntervaloPorIdade } = await import("./pixAutoCheckConfig");
+    expect(calcularIntervaloPorIdade(30_000)).toBe(10_000);
+    expect(calcularIntervaloPorIdade(60_000)).toBe(10_000);
+    expect(calcularIntervaloPorIdade(119_999)).toBe(10_000);
   });
 
   test("2 a 5 minutos: usa 20s", async () => {
@@ -62,10 +69,24 @@ describe("calcularIntervaloPorIdade — cadência adaptativa por janela", () => 
     expect(calcularIntervaloPorIdade(299_999)).toBe(20_000);
   });
 
-  test("acima de 5 minutos: usa 30s", async () => {
+  test("5 a 15 minutos: usa 60s", async () => {
     const { calcularIntervaloPorIdade } = await import("./pixAutoCheckConfig");
-    expect(calcularIntervaloPorIdade(300_000)).toBe(30_000);
-    expect(calcularIntervaloPorIdade(60 * 60_000)).toBe(30_000);
+    expect(calcularIntervaloPorIdade(300_000)).toBe(60_000);
+    expect(calcularIntervaloPorIdade(10 * 60_000)).toBe(60_000);
+    expect(calcularIntervaloPorIdade(15 * 60_000 - 1)).toBe(60_000);
+  });
+
+  test("15 a 45 minutos: usa 180s", async () => {
+    const { calcularIntervaloPorIdade } = await import("./pixAutoCheckConfig");
+    expect(calcularIntervaloPorIdade(15 * 60_000)).toBe(180_000);
+    expect(calcularIntervaloPorIdade(30 * 60_000)).toBe(180_000);
+    expect(calcularIntervaloPorIdade(44 * 60_000)).toBe(180_000);
+  });
+
+  test("após 45 minutos: calcularIntervaloPorIdade ainda responde 180s (o encerramento da cadeia é decisão de quem chama, via PIX_GUARDIAO_IDADE_MAXIMA_MS)", async () => {
+    const { calcularIntervaloPorIdade, PIX_GUARDIAO_IDADE_MAXIMA_MS } = await import("./pixAutoCheckConfig");
+    expect(PIX_GUARDIAO_IDADE_MAXIMA_MS).toBe(45 * 60 * 1000);
+    expect(calcularIntervaloPorIdade(60 * 60_000)).toBe(180_000);
   });
 
   test("idade inválida (negativa/NaN) é tratada como zero — nunca gera intervalo negativo", async () => {

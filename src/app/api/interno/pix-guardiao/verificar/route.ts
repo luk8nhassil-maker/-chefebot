@@ -1,31 +1,31 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Receiver } from "@upstash/qstash";
 import { redis } from "@/lib/redis";
-import type { PedidoComPix } from "@/lib/pix";
-import { reconciliarPixMercadoPago } from "@/lib/mercadoPagoReconciliacao";
 import { agendarProximaVerificacaoPixGuardiao } from "@/lib/pixGuardiaoScheduler";
-import { calcularIntervaloPorIdade, PIX_GUARDIAO_IDADE_MAXIMA_MS } from "@/lib/pixAutoCheckConfig";
+import { calcularIntervaloPorIdade } from "@/lib/pixAutoCheckConfig";
 import { incrementarContadorPix } from "@/lib/pixMetricas";
+import { solicitarVerificacaoOficialPix, carregarEstadoSentinela } from "@/lib/pixSentinela";
 
 // Endpoint interno de cada tick da cadeia server-side do Guardião Pix
 // (chamado exclusivamente pelo QStash — nunca pelo navegador nem pelo
 // painel). Autenticação por ASSINATURA (upstash-signature), não por sessão
 // de admin: quem entrega a requisição é o QStash, não um usuário logado.
 //
-// Cada tick: (1) verifica assinatura, (2) dedupe por pedidoId+tentativa,
-// (3) checa se o pedido já foi resolvido (confirmado/cancelado/idade
-// máxima) — se sim, ENCERRA a cadeia sem reagendar, (4) senão reconcilia
-// esse pedido pelo MESMO mecanismo central (reconciliarPixMercadoPago,
-// idêntico ao usado pelo painel e pelo Guardião sob-demanda) e agenda o
-// próximo tick com o intervalo correto para a idade atual (10s/20s/30s).
+// Fluxo: QStash → este endpoint → Sentinela Pix → conciliador central
+// (reconciliarPixMercadoPago) → Mercado Pago. Este endpoint NUNCA consulta
+// o Mercado Pago diretamente — sempre delega ao Sentinela
+// (solicitarVerificacaoOficialPix), que decide se a consulta é realmente
+// necessária (cadência, geração da cadeia, lock, cooldown, rate limit) antes
+// de chamar o mecanismo central. Nunca confirma nada por si mesmo, nunca
+// inventa paymentId, nunca cria um segundo caminho de confirmação.
 //
-// Nunca confirma nada por si mesmo, nunca inventa paymentId, nunca cria um
-// segundo caminho de confirmação — apenas decide QUANDO chamar o caminho
-// que já existe.
+// Retorno HTTP: mensagens antigas (geração superada), pagamentos já
+// finalizados e payload permanentemente inválido retornam 200 — não há
+// nenhuma condição em que reenviar o mesmo corpo mudaria o resultado, então
+// não faz sentido o QStash gastar retries nelas. Assinatura ausente/inválida
+// continua 401 (é uma fronteira de segurança, não uma condição de retry).
 
-type PedidoGuardiaoTick = PedidoComPix & { pixConfirmado?: boolean; status?: string };
-
-type CorpoTick = { pedidoId?: unknown; tentativa?: unknown };
+type CorpoTick = { pedidoId?: unknown; geracao?: unknown; tentativa?: unknown };
 
 const TICK_DEDUPE_PREFIXO = "pix:guardiao:tick:dedupe:";
 const TICK_DEDUPE_TTL_SEGUNDOS = 55;
@@ -35,17 +35,6 @@ function receiver(): Receiver | null {
   const nextSigningKey = process.env.QSTASH_NEXT_SIGNING_KEY;
   if (!currentSigningKey || !nextSigningKey) return null;
   return new Receiver({ currentSigningKey, nextSigningKey });
-}
-
-function pedidoResolvido(pedido: PedidoGuardiaoTick | undefined, agora: number): boolean {
-  if (!pedido) return true;
-  if (pedido.status === "cancelado") return true;
-  if (pedido.pixConfirmado === true || pedido.pix?.status === "confirmado") return true;
-
-  const criadoEm = pedido.pix?.criadoEm ? new Date(pedido.pix.criadoEm).getTime() : NaN;
-  if (Number.isFinite(criadoEm) && agora - criadoEm >= PIX_GUARDIAO_IDADE_MAXIMA_MS) return true;
-
-  return false;
 }
 
 export async function POST(req: NextRequest) {
@@ -75,54 +64,63 @@ export async function POST(req: NextRequest) {
   try {
     corpo = JSON.parse(corpoTexto) as CorpoTick;
   } catch {
-    return NextResponse.json({ ok: false, motivo: "corpo_invalido" }, { status: 400 });
+    // Payload permanentemente malformado — reenviar o mesmo corpo nunca vai
+    // funcionar, então 200 evita retries inúteis do QStash.
+    return NextResponse.json({ ok: false, ignorado: true, motivo: "corpo_invalido" });
   }
 
   const pedidoId = typeof corpo.pedidoId === "string" ? corpo.pedidoId.trim() : "";
+  const geracao = typeof corpo.geracao === "number" && Number.isFinite(corpo.geracao) ? corpo.geracao : undefined;
   const tentativa = typeof corpo.tentativa === "number" && Number.isFinite(corpo.tentativa) ? corpo.tentativa : 0;
   if (!pedidoId || tentativa < 1) {
-    return NextResponse.json({ ok: false, motivo: "payload_invalido" }, { status: 400 });
+    return NextResponse.json({ ok: false, ignorado: true, motivo: "payload_invalido" });
   }
 
   // Dedupe do tick: o QStash garante entrega "at-least-once" — retries de
-  // rede podem entregar o mesmo tick mais de uma vez. NX curto evita rodar a
-  // reconciliação em dobro para o mesmo (pedidoId, tentativa); não impede o
-  // PRÓXIMO tick de ser agendado normalmente.
-  const chaveDedupe = `${TICK_DEDUPE_PREFIXO}${pedidoId}:${tentativa}`;
+  // rede podem entregar o mesmo tick mais de uma vez. NX curto evita chamar
+  // o Sentinela em dobro para o mesmo (pedidoId, geração, tentativa); não
+  // impede o PRÓXIMO tick de ser agendado normalmente.
+  const chaveDedupe = `${TICK_DEDUPE_PREFIXO}${pedidoId}:${geracao ?? "s"}:${tentativa}`;
   const primeiraEntrega = await redis.set(chaveDedupe, "1", { nx: true, ex: TICK_DEDUPE_TTL_SEGUNDOS });
   if (!primeiraEntrega) {
-    return NextResponse.json({ ok: true, duplicado: true });
+    await incrementarContadorPix("sentinela_mensagem_duplicada_ignorada");
+    return NextResponse.json({ ok: true, duplicado: true, ignorado: true });
   }
 
   await incrementarContadorPix("guardiao_cadeia_tick");
 
   const agora = Date.now();
-  const pedidos = (await redis.get<PedidoGuardiaoTick[]>("pedidos")) || [];
-  let pedido = pedidos.find((p) => p.id === pedidoId);
+  const resultado = await solicitarVerificacaoOficialPix({
+    pedidoId,
+    origem: "guardiao_qstash",
+    geracaoMensagem: geracao,
+    agora,
+  });
 
-  if (pedidoResolvido(pedido, agora)) {
-    await incrementarContadorPix("guardiao_cadeia_finalizada");
-    return NextResponse.json({ ok: true, encerrado: true, motivo: "resolvido_antes_da_reconciliacao" });
+  if (resultado.motivo === "geracao_antiga") {
+    await incrementarContadorPix("sentinela_mensagem_antiga_ignorada");
+    return NextResponse.json({ ok: true, ignorado: true, motivo: "geracao_antiga" });
   }
 
-  // Reconciliação restrita a este pedido — mesmo mecanismo central usado
-  // pelo painel e pelo Guardião sob-demanda; lock/cooldown/rate-limit já são
-  // tratados dentro dele (uma reconciliação concorrente do painel não causa
-  // dupla confirmação, só retorna `locked`).
-  await reconciliarPixMercadoPago({ apenasPedidoIds: [pedidoId] });
-
-  const pedidosAtualizados = (await redis.get<PedidoGuardiaoTick[]>("pedidos")) || [];
-  pedido = pedidosAtualizados.find((p) => p.id === pedidoId);
-
-  if (pedidoResolvido(pedido, Date.now())) {
+  if (resultado.encerrado) {
     await incrementarContadorPix("guardiao_cadeia_finalizada");
-    return NextResponse.json({ ok: true, encerrado: true, motivo: "resolvido_apos_reconciliacao" });
+    return NextResponse.json({ ok: true, encerrado: true, motivo: resultado.motivoEncerramento || resultado.motivo });
   }
 
-  const idadeMs = pedido?.pix?.criadoEm ? Date.now() - new Date(pedido.pix.criadoEm).getTime() : 0;
-  const proximoDelayMs = calcularIntervaloPorIdade(idadeMs);
+  // Chain segue ativa: agenda o próximo tick usando o horário decidido pelo
+  // Sentinela (proximaConsultaMercadoPagoEm), que já reflete cadência normal,
+  // backoff por falha ou cooldown de rate limit — nunca um número mágico
+  // local. Se por algum motivo o Sentinela não expôs esse horário (ex.:
+  // consulta evitada sem estado ainda gravado), cai no cálculo padrão de
+  // cadência a partir da idade do pedido.
+  const estadoAtual = await carregarEstadoSentinela(pedidoId);
+  const idadeMs = estadoAtual?.criadoEm ? agora - estadoAtual.criadoEm : 0;
+  const proximaConsultaEm = resultado.proximaConsultaMercadoPagoEm ?? estadoAtual?.proximaConsultaMercadoPagoEm;
+  const proximoDelayMs = proximaConsultaEm ? Math.max(1000, proximaConsultaEm - agora) : calcularIntervaloPorIdade(idadeMs);
+
   const agendado = await agendarProximaVerificacaoPixGuardiao({
     pedidoId,
+    geracao: estadoAtual?.geracao ?? geracao ?? 1,
     tentativa: tentativa + 1,
     delayMs: proximoDelayMs,
   });

@@ -120,7 +120,19 @@ export type ContadorPixMetrica =
   | "guardiao_recuperado"
   | "guardiao_failed"
   | "guardiao_cadeia_tick"
-  | "guardiao_cadeia_finalizada";
+  | "guardiao_cadeia_finalizada"
+  // Sentinela Pix (Nível 6.9) — coordenação de consultas, nunca decide
+  // confirmação. Ver src/lib/pixSentinela.ts.
+  | "sentinela_consulta_realizada"
+  | "sentinela_consulta_evitada"
+  | "sentinela_consulta_coalescida"
+  | "sentinela_cadeia_encerrada"
+  | "sentinela_mensagem_antiga_ignorada"
+  | "sentinela_mensagem_duplicada_ignorada"
+  | "sentinela_encerrado_webhook"
+  | "sentinela_encerrado_manual"
+  | "sentinela_painel_reaproveitado"
+  | "qstash_mensagens_publicadas";
 
 const PREFIXO_CONTADOR = "pix:metricas:contador:";
 
@@ -144,6 +156,16 @@ export async function obterContadoresPix(): Promise<Record<ContadorPixMetrica, n
     "guardiao_failed",
     "guardiao_cadeia_tick",
     "guardiao_cadeia_finalizada",
+    "sentinela_consulta_realizada",
+    "sentinela_consulta_evitada",
+    "sentinela_consulta_coalescida",
+    "sentinela_cadeia_encerrada",
+    "sentinela_mensagem_antiga_ignorada",
+    "sentinela_mensagem_duplicada_ignorada",
+    "sentinela_encerrado_webhook",
+    "sentinela_encerrado_manual",
+    "sentinela_painel_reaproveitado",
+    "qstash_mensagens_publicadas",
   ];
   const valores = await Promise.all(
     nomes.map(async (nome) => {
@@ -167,4 +189,18 @@ export function mascararIdentificador(valor: string | undefined | null): string 
   const limpo = String(valor).trim();
   if (limpo.length <= 4) return "***";
   return `***${limpo.slice(-4)}`;
+}
+
+// Proporção consultasMercadoPago / mensagensQStash (Sentinela Pix) — quanto
+// menor, maior a economia do Sentinela (mais ticks QStash resultaram em
+// "evitada"/"coalescida"/"geração antiga" em vez de uma consulta real ao
+// Mercado Pago). null quando ainda não houve nenhuma mensagem QStash
+// publicada (evita divisão por zero / proporção sem sentido).
+export function calcularProporcaoConsultaPorMensagemQstash(
+  contadores: Pick<Record<ContadorPixMetrica, number>, "sentinela_consulta_realizada" | "qstash_mensagens_publicadas">
+): number | null {
+  const mensagens = contadores.qstash_mensagens_publicadas || 0;
+  if (mensagens === 0) return null;
+  const consultas = contadores.sentinela_consulta_realizada || 0;
+  return Math.round((consultas / mensagens) * 1000) / 1000;
 }

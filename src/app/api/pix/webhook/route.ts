@@ -8,6 +8,8 @@ import {
   buscarPagamentoMercadoPago,
   mapearPagamentoParaPayloadInterno,
 } from "@/lib/mercadoPagoWebhook";
+import { registrarAtividadeWebhookSentinela } from "@/lib/pixSentinela";
+import { incrementarContadorPix } from "@/lib/pixMetricas";
 
 type PedidoWebhookPix = PedidoComPix & {
   pixConfirmado?: boolean;
@@ -86,6 +88,12 @@ export async function POST(req: NextRequest) {
     const index = pedidos.findIndex((p) => p.pix?.txid === payload.txid);
     const pedido = index >= 0 ? pedidos[index] : null;
     if (pedido?.pixConfirmado || pedido?.pix?.status === "confirmado") {
+      // Não chama o Sentinela aqui de propósito: esta é uma notificação
+      // REDUNDANTE (o pedido já estava confirmado antes desta chamada). Se
+      // uma cadeia QStash ainda estiver ativa, o próprio tick seguinte já se
+      // encerra sozinho ao reler o pedido (decisão 4 do Sentinela) — sem
+      // precisar de mais uma escrita no Redis para uma notificação que não
+      // mudou nada.
       return NextResponse.json({
         ok: true,
         passive: false,
@@ -117,6 +125,15 @@ export async function POST(req: NextRequest) {
     const atualizados = [...pedidos];
     atualizados[index] = { ...pedido, pixConfirmado: true, pix };
     await redis.set("pedidos", atualizados);
+
+    // Best-effort — nunca pode afetar a confirmação acima, que já foi
+    // persistida. Encerra a cadeia server-side do Guardião (se existir):
+    // incrementa a geração, fazendo qualquer tick QStash já agendado virar
+    // no-op assim que chegar, sem precisar cancelar a mensagem no QStash.
+    if (pedido.id) {
+      await registrarAtividadeWebhookSentinela(pedido.id, { confirmado: true }).catch(() => {});
+      await incrementarContadorPix("sentinela_encerrado_webhook");
+    }
 
     return NextResponse.json({
       ok: true,
