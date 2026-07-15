@@ -9,7 +9,7 @@ import {
   PIX_SENTINELA_COOLDOWN_RATE_LIMIT_SEGUNDOS,
 } from "./pixAutoCheckConfig";
 import { reconciliarPixMercadoPago, type ResumoReconciliacaoPix } from "./mercadoPagoReconciliacao";
-import { incrementarContadorPix } from "./pixMetricas";
+import { incrementarContadorPix, registrarEventoObservabilidadePix, type EventoObservabilidadePix } from "./pixMetricas";
 import type { PedidoComPix } from "./pix";
 
 // Sentinela Pix (Nível 6.9) — camada determinística de COORDENAÇÃO de
@@ -278,6 +278,26 @@ function backoffMs(intervaloBaseMs: number, falhasConsecutivas: number): number 
   return Math.round(intervaloBaseMs * Math.max(1, multiplicador));
 }
 
+// Mapeia o motivo (já existente, produzido por avaliarDecisaoSentinela) para
+// o evento específico de observabilidade adicional (Nível 6.10) — só
+// telemetria, não influencia nenhuma decisão. motivos sem correspondência
+// (ex.: "geracao_antiga", já coberto por sentinela_mensagem_antiga_ignorada
+// no endpoint) retornam null e não geram evento extra.
+function eventoObservabilidadeParaMotivo(motivo: string): EventoObservabilidadePix | null {
+  switch (motivo) {
+    case "lock_ativo":
+      return "sentinela_bloqueio_lock";
+    case "cooldown_ativo":
+      return "sentinela_bloqueio_cooldown";
+    case "rate_limit_global":
+      return "sentinela_bloqueio_rate_limit";
+    case "antes_da_janela":
+      return "sentinela_bloqueio_proxima_consulta";
+    default:
+      return null;
+  }
+}
+
 type PedidoSentinelaBruto = PedidoComPix & { pixConfirmado?: boolean; status?: string };
 
 // Função central de coalescência — webhook, Guardião/QStash, painel e
@@ -333,7 +353,15 @@ export async function solicitarVerificacaoOficialPix(input: {
   }
 
   if (!decisaoPreliminar.podeConsultar) {
+    // Contador agregado existente — preservado exatamente como estava.
     await incrementarContadorPix("sentinela_consulta_evitada");
+    // Observabilidade adicional (best-effort, nunca lança, nunca substitui
+    // o contador agregado acima) — só quando o motivo mapeia para um dos
+    // bloqueios específicos do painel /dev/pix.
+    const eventoEspecifico = eventoObservabilidadeParaMotivo(decisaoPreliminar.motivo);
+    if (eventoEspecifico) {
+      await registrarEventoObservabilidadePix(eventoEspecifico, { agora }).catch(() => {});
+    }
     return { consultou: false, motivo: decisaoPreliminar.motivo, encerrado: false };
   }
 
@@ -371,6 +399,12 @@ export async function solicitarVerificacaoOficialPix(input: {
 
     if (detalhe?.outcome === "confirmado" || resumo.confirmados > 0) {
       await encerrarSentinela(input.pedidoId, "confirmado", agoraPosConsulta);
+      // Observabilidade adicional (best-effort, nunca lança, não afeta o
+      // retorno abaixo, que já reflete a confirmação persistida acima).
+      await registrarEventoObservabilidadePix("sentinela_confirmou", {
+        ultimaConfirmacaoAutomatica: true,
+        agora: agoraPosConsulta,
+      }).catch(() => {});
       return { consultou: true, motivo: "confirmado", encerrado: true, motivoEncerramento: "confirmado", resumoReconciliacao: resumo };
     }
 
