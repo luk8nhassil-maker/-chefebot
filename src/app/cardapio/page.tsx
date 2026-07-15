@@ -9,7 +9,7 @@ import { useTheme } from "@/components/ThemeToggle";
 import ClientBottomNav from "@/components/ClientBottomNav";
 import { tabAtivaCardapio, consumirFlagAbrirSacola } from "@/lib/pedidoAtivoCliente";
 import { salvarReferenciaPixPendente } from "@/lib/pixPendenteLocal";
-import PixPendenteBar, { usePixPendente } from "@/components/PixPendenteBar";
+import PixPendenteBar, { usePixPendente, PIX_PENDENTE_BAR_HEIGHT_PX } from "@/components/PixPendenteBar";
 import PixPagamentoCard from "./PixPagamentoCard";
 
 // Ícones de categoria da home (menu/navegação) — lucide-react, sem emoji.
@@ -1462,6 +1462,13 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   // escolha/foco (tamanho, sabor, borda, com/sem leite, entrega, pagamento
   // etc.) pra não competir com o CTA principal daquela etapa.
   const showBottomNav = ["sc-start", "sc-list", "sc-cart", "sc-done"].includes(screen);
+  // Único ponto que decide se a PixPendenteBar está de fato visível nesta
+  // tela (mesma condição usada para renderizá-la, linha ~2039) — usado só
+  // para calcular o deslocamento que os painéis fixos de ação (ex.:
+  // .delivery-cta-bar.stacked) somam ao próprio `bottom`, via a variável
+  // CSS compartilhada --pix-pendente-fixed-offset. Nunca duplica a altura
+  // como número mágico: reaproveita PIX_PENDENTE_BAR_HEIGHT_PX.
+  const pixBarVisivel = showBottomNav && screen !== "sc-done" && !!pixPendente;
   const feitas = pizzasNoCarrinho();
   let ctxBadge = "", ctxTxt = "", ctxDots: { cls: string }[] = [];
   if (plan.openEnded) { ctxBadge = `Pizza ${feitas + 1}`; ctxTxt = feitas === 0 ? "Sua 1ª pizza" : `${feitas} já no carrinho`; }
@@ -2036,7 +2043,8 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
         </div>
       )}
       {cartCount > 0 && !showStrongCartCta && !showBottomNav && screen !== "sc-done" && screen !== "sc-cart" && screen !== "sc-delivery" && screen !== "sc-pay" && (<div className="cartbar show"><div className="cartbar-inner"><div className="cartbar-info"><div className="cartbar-count">Sacola</div><div className="cartbar-total">{cartCount} {cartCount === 1 ? "item" : "itens"} · {money(finalTotal)}</div></div><button className="cartbar-link" onClick={() => go("sc-cart")}>Editar</button></div></div>)}
-      {showBottomNav && screen !== "sc-done" && <PixPendenteBar pendente={pixPendente} />}
+      <style>{`:root{--pix-pendente-fixed-offset:${pixBarVisivel ? PIX_PENDENTE_BAR_HEIGHT_PX : 0}px}`}</style>
+      {pixBarVisivel && <PixPendenteBar pendente={pixPendente} />}
       {showBottomNav && (
         <ClientBottomNav
           active={tabAtivaCardapio(screen)}
@@ -2463,7 +2471,7 @@ main{width:100%;padding:6px 20px 20px}
 .cartbar-count{font-size:12.5px;color:var(--text-sub);font-weight:500}
 .cartbar-total{font-family:var(--font-ui);font-weight:700;font-size:15px;line-height:1.2;letter-spacing:0}
 .cartbar-link{border:1px solid var(--line-strong);background:transparent;color:var(--text-sub);border-radius:999px;padding:9px 13px;font-size:12.5px;font-weight:700}
-.delivery-cta-bar.stacked{bottom:58px}
+.delivery-cta-bar.stacked{bottom:calc(58px + var(--pix-pendente-fixed-offset, 0px));transition:bottom .2s ease}
 .checkout-summary{margin:14px 0 10px;color:var(--text-sub);font-size:13px;font-weight:700;text-align:center}
 .empty{text-align:center;padding:54px 20px;color:var(--text-sub)}
 .empty .big{font-size:56px;margin-bottom:14px;opacity:.4}
