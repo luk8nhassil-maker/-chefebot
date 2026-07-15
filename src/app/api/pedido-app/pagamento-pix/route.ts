@@ -2,6 +2,7 @@ import { timingSafeEqual } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { redis } from "@/lib/redis";
 import { serializarPixCliente, type PixCliente, type PixMetadata } from "@/lib/pix";
+import { normalizarWhatsAppPizzaria } from "@/lib/pixCliente";
 import {
   classificarPagamentoPixPublico,
   mensagemPagamentoPixPublico,
@@ -90,6 +91,19 @@ export async function GET(req: NextRequest) {
   const pagamentoStatus = classificarPagamentoPixPublico(pedido);
   const texto = mensagemPagamentoPixPublico(pagamentoStatus);
 
+  // Valor efetivamente devido no Pix (nunca o total do pedido) — vem
+  // exclusivamente de pixCliente.valorEsperado, que já é a parcela correta
+  // tanto em Pix integral quanto em pagamento misto Pix+Dinheiro (ver
+  // valorPixEsperado em src/lib/bot.ts). Nunca calculado aqui nem no
+  // frontend a partir de outro dado.
+  const valorPix = typeof pixCliente?.valorEsperado === "number" ? pixCliente.valorEsperado : undefined;
+
+  // Contato do WhatsApp da pizzaria: só de config:pizzaria, normalizado
+  // pelo mesmo helper já usado em serializarPixCliente — nunca depende do
+  // estado do pagamento (útil mesmo quando o Pix já não está mais
+  // disponível, para o cliente conseguir falar com a pizzaria).
+  const whatsappPizzaria = normalizarWhatsAppPizzaria(configPix.whatsappPizzaria);
+
   // Nunca inclui providerPaymentId, credenciais, telefone, endereço ou
   // qualquer outro dado interno/pessoal — pixCliente já vem sanitizado por
   // serializarPixCliente (o mesmo helper usado na criação do pedido) e o
@@ -104,6 +118,7 @@ export async function GET(req: NextRequest) {
     estado,
     titulo: texto.titulo,
     mensagem: texto.mensagem,
-    ...(estado === "aguardando" && pixCliente ? { pix: pixCliente } : {}),
+    ...(whatsappPizzaria ? { whatsappPizzaria } : {}),
+    ...(estado === "aguardando" && pixCliente ? { pix: pixCliente, ...(valorPix !== undefined ? { valorPix } : {}) } : {}),
   });
 }

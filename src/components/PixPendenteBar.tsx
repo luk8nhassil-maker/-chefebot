@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Zap } from "lucide-react";
+import { CLIENT_BOTTOM_NAV_HEIGHT_PX } from "@/components/ClientBottomNav";
 import {
   lerReferenciaPixPendenteDoStorage,
   limparReferenciaPixPendente,
@@ -10,12 +11,20 @@ import {
   type ReferenciaPixPendente,
 } from "@/lib/pixPendenteLocal";
 
+// Altura real renderizada da barra (sem safe-area, que entra só no
+// deslocamento `bottom`) — medida via getBoundingClientRect em 390×844 e
+// 1440×900 com uma pendência real: 54px. Não é só padding(20) + ícone(24):
+// o CTA "Pagar agora" (padding 7px + line-height do texto) é o elemento
+// mais alto da linha. Mantida como constante para o espaçador nunca
+// dessincronizar do CSS real caso o conteúdo da barra mude.
+export const PIX_PENDENTE_BAR_HEIGHT_PX = 54;
+
 export type PixPendente = PixPendenteResolvido;
 
 type RespostaPagamentoPix = {
   ok?: boolean;
   numero?: number;
-  total?: number;
+  valorPix?: number;
   estado?: "aguardando" | "confirmado" | "em_analise" | "indisponivel";
 };
 
@@ -83,15 +92,24 @@ function money(v: number) {
   return `R$ ${v.toFixed(2).replace(".", ",")}`;
 }
 
+// Fixa imediatamente acima do ClientBottomNav (nunca sobrepõe: usa a altura
+// real do nav, CLIENT_BOTTOM_NAV_HEIGHT_PX, como offset de `bottom`) e some
+// por completo da árvore quando não há pendência — inclusive o espaçador,
+// que só existe para abrir espaço no fluxo normal da página enquanto a
+// barra (fixa, fora do fluxo) está de fato visível.
 export default function PixPendenteBar({ pendente }: { pendente: PixPendente | null }) {
   if (!pendente) return null;
 
+  // Mostra o valor efetivamente pendente no Pix (valorPix) — em pedido
+  // misto é só a parcela do Pix, nunca o total do pedido; em Pix integral
+  // coincide com o total (ver calcularDivisaoPixDinheiro/valorPixEsperado).
   const rotulo = pendente.numero
-    ? `Pix pendente · Pedido #${pendente.numero} · ${money(pendente.total)}`
-    : `Pix pendente · ${money(pendente.total)}`;
+    ? `Pix pendente · Pedido #${pendente.numero} · ${money(pendente.valorPix)}`
+    : `Pix pendente · ${money(pendente.valorPix)}`;
 
   return (
     <>
+      <div className="pix-pendente-bar-spacer" aria-hidden="true" />
       <a
         className="pix-pendente-bar"
         href={`/pedido/pagamento/${pendente.statusToken}`}
@@ -105,7 +123,8 @@ export default function PixPendenteBar({ pendente }: { pendente: PixPendente | n
         <span className="pix-pendente-bar-cta">Pagar agora</span>
       </a>
       <style>{`
-        .pix-pendente-bar{display:flex;align-items:center;gap:10px;width:100%;max-width:540px;margin:0 auto;padding:10px 14px;background:var(--attention-soft);color:var(--attention-soft-foreground);text-decoration:none;border-top:1px solid rgba(var(--overlay-rgb),.06);flex-shrink:0}
+        .pix-pendente-bar-spacer{flex-shrink:0;height:${PIX_PENDENTE_BAR_HEIGHT_PX}px}
+        .pix-pendente-bar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(${CLIENT_BOTTOM_NAV_HEIGHT_PX}px + env(safe-area-inset-bottom));display:flex;align-items:center;gap:10px;width:100%;max-width:540px;box-sizing:border-box;padding:10px 14px;background:var(--attention-soft);color:var(--attention-soft-foreground);text-decoration:none;border-top:1px solid rgba(var(--overlay-rgb),.06);border-bottom:1px solid rgba(var(--overlay-rgb),.06);z-index:55}
         .pix-pendente-bar-icon{width:24px;height:24px;border-radius:8px;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:color-mix(in srgb, var(--attention) 16%, transparent)}
         .pix-pendente-bar-txt{flex:1;min-width:0;font-size:12.5px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
         .pix-pendente-bar-cta{flex-shrink:0;background:var(--primary);color:var(--primary-foreground);font-size:12px;font-weight:800;padding:7px 12px;border-radius:999px;white-space:nowrap}

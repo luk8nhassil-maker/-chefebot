@@ -3,6 +3,14 @@
 import { Home, ShoppingCart, Receipt, User } from "lucide-react";
 import type { ClientBottomNavTab } from "@/lib/pedidoAtivoCliente";
 
+// Altura real renderizada do .cbn-nav (medida via getBoundingClientRect em
+// 390×667, 390×844 e 1440×900: 59px sem safe-area-inset-bottom) — soma de
+// padding-top(6) + min-height do conteúdo(46) + padding-bottom(6) +
+// border-top(1) do CSS abaixo. Exportada para quem precisa empilhar um
+// elemento fixo imediatamente acima do nav (ver PixPendenteBar.tsx) sem
+// duplicar um número mágico dessincronizável do CSS real.
+export const CLIENT_BOTTOM_NAV_HEIGHT_PX = 59;
+
 type ClientBottomNavProps = {
   active: ClientBottomNavTab | null;
   cartCount?: number;

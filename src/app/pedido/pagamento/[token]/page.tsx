@@ -10,8 +10,7 @@ import {
   deveLimparReferenciaPixPendente,
   limparReferenciaPixPendente,
 } from '@/lib/pixPendenteLocal'
-
-const PIZZARIA_NUMERO = '5586999999999'
+import { calcularDivisaoPixDinheiro } from '@/lib/pixValores'
 
 interface PageProps {
   params: Promise<{ token: string }>
@@ -28,7 +27,13 @@ type RespostaPagamentoPix = {
   estado?: EstadoPagamentoPix
   titulo?: string
   mensagem?: string
-  pix?: { provider?: string; qrCode?: string; copiaECola?: string; chavePix?: string; beneficiario?: string }
+  /** Contato do WhatsApp da pizzaria (config:pizzaria, já normalizado pelo
+   * backend) — nunca hardcoded no frontend; ausente quando não configurado. */
+  whatsappPizzaria?: string
+  /** Valor efetivamente devido no Pix (parcela, em pagamento misto) — vem
+   * só do backend (pixCliente.valorEsperado), nunca calculado aqui. */
+  valorPix?: number
+  pix?: { provider?: string; qrCode?: string; copiaECola?: string; chavePix?: string; beneficiario?: string; valorEsperado?: number }
 }
 
 type TelaPagamento =
@@ -151,52 +156,60 @@ export default function PagamentoPixPage({ params }: PageProps) {
         )}
 
         {tela.tipo === 'nao_encontrado' && (
-          <TelaIndisponivel pedidoId={undefined} />
+          <TelaIndisponivel pedidoId={undefined} whatsappPizzaria={undefined} />
         )}
 
         {dados && estado === 'indisponivel' && (
-          <TelaIndisponivel pedidoId={dados.id} />
+          <TelaIndisponivel pedidoId={dados.id} whatsappPizzaria={dados.whatsappPizzaria} />
         )}
 
         {dados && estado === 'em_analise' && (
           <TelaEmAnalise titulo={dados.titulo} mensagem={dados.mensagem} pedidoId={dados.id} />
         )}
 
-        {dados && (estado === 'aguardando' || estado === 'confirmado') && (
-          <>
-            <PixPagamentoCard
-              statusPix={(estado === 'confirmado' ? 'pago' : 'aguardando_pix') as PixPagamentoCardStatus}
-              statusLabel={dados.titulo || ''}
-              pedidoNumero={dados.numero || 0}
-              pedidoTotal={dados.total || 0}
-              pixPedido={{ chavePix: dados.pix?.chavePix, beneficiario: dados.pix?.beneficiario }}
-              pixCodigoCopiaECola={(dados.pix?.copiaECola || dados.pix?.qrCode || '').trim()}
-              temPixCopiaECola={!!(dados.pix?.copiaECola || dados.pix?.qrCode)}
-              isHibrido={false}
-              hibridoAtual={null}
-              trocoConfirmadoTexto={null}
-              money={money}
-              onToast={showToast}
-            />
+        {dados && (estado === 'aguardando' || estado === 'confirmado') && (() => {
+          // Pagamento misto Pix + Dinheiro: valorPix (ou, em fallback, o
+          // valorEsperado dentro de `pix`) vem só do backend — nunca
+          // recalculado no cliente. Cálculo em centavos para nunca gerar
+          // diferença de ponto flutuante nem valor negativo.
+          const valorPixBackend = dados.valorPix ?? dados.pix?.valorEsperado
+          const divisao = calcularDivisaoPixDinheiro(dados.total || 0, valorPixBackend)
+          return (
+            <>
+              <PixPagamentoCard
+                statusPix={(estado === 'confirmado' ? 'pago' : 'aguardando_pix') as PixPagamentoCardStatus}
+                statusLabel={dados.titulo || ''}
+                pedidoNumero={dados.numero || 0}
+                pedidoTotal={dados.total || 0}
+                pixPedido={{ chavePix: dados.pix?.chavePix, beneficiario: dados.pix?.beneficiario }}
+                pixCodigoCopiaECola={(dados.pix?.copiaECola || dados.pix?.qrCode || '').trim()}
+                temPixCopiaECola={!!(dados.pix?.copiaECola || dados.pix?.qrCode)}
+                isHibrido={divisao.isHibrido}
+                hibridoAtual={divisao.isHibrido ? { pix: divisao.pix, dinheiro: divisao.dinheiro } : null}
+                trocoConfirmadoTexto={null}
+                money={money}
+                onToast={showToast}
+              />
 
-            {estado === 'aguardando' && (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 14, fontSize: 12, color: 'var(--foreground-muted)' }}>
-                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <Clock3 size={14} /> Verificando automaticamente
-                </span>
-                <button type="button" onClick={handleVerificarManual} disabled={verificandoManual} style={botaoLink}>
-                  {verificandoManual ? 'Verificando...' : 'Verificar agora'}
-                </button>
-              </div>
-            )}
+              {estado === 'aguardando' && (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 14, fontSize: 12, color: 'var(--foreground-muted)' }}>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Clock3 size={14} /> Verificando automaticamente
+                  </span>
+                  <button type="button" onClick={handleVerificarManual} disabled={verificandoManual} style={botaoLink}>
+                    {verificandoManual ? 'Verificando...' : 'Verificar agora'}
+                  </button>
+                </div>
+              )}
 
-            {estado === 'confirmado' && dados.id && (
-              <Link href={`/rastrear/${dados.id}`} style={{ ...botaoPrimario, marginTop: 16, textDecoration: 'none', textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-                <CheckCircle2 size={18} /> Acompanhar meu pedido
-              </Link>
-            )}
-          </>
-        )}
+              {estado === 'confirmado' && dados.id && (
+                <Link href={`/rastrear/${dados.id}`} style={{ ...botaoPrimario, marginTop: 16, textDecoration: 'none', textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                  <CheckCircle2 size={18} /> Acompanhar meu pedido
+                </Link>
+              )}
+            </>
+          )
+        })()}
       </main>
 
       {toast && (
@@ -282,7 +295,10 @@ function TelaAvisoSimples({ titulo, mensagem, children }: { titulo: string; mens
 // Item 7 do escopo: quando o Pix não pode ser recuperado (token inválido,
 // pedido cancelado ou sem QR/copia-e-cola disponível), NUNCA cria uma nova
 // cobrança nem regenera QR aqui — só oferece ações seguras já existentes.
-function TelaIndisponivel({ pedidoId }: { pedidoId?: string }) {
+// O contato do WhatsApp vem só da configuração pública já sanitizada pelo
+// backend (whatsappPizzaria) — nunca um número fixo no código; sem
+// configuração válida, o botão simplesmente não aparece.
+function TelaIndisponivel({ pedidoId, whatsappPizzaria }: { pedidoId?: string; whatsappPizzaria?: string }) {
   return (
     <div style={{ background: 'var(--danger-soft)', color: 'var(--danger-soft-foreground)', borderRadius: 16, padding: 22, textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div>
@@ -300,14 +316,16 @@ function TelaIndisponivel({ pedidoId }: { pedidoId?: string }) {
         <Link href="/cliente/pedidos" style={{ ...botaoSecundario, textDecoration: 'none' }}>
           Voltar aos pedidos
         </Link>
-        <a
-          href={`https://wa.me/${PIZZARIA_NUMERO}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{ ...botaoSecundario, textDecoration: 'none', background: 'var(--success)', color: '#fff', border: 'none' }}
-        >
-          Falar com a Pizzaria
-        </a>
+        {whatsappPizzaria && (
+          <a
+            href={`https://wa.me/${whatsappPizzaria}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ ...botaoSecundario, textDecoration: 'none', background: 'var(--success)', color: 'var(--on-success)', border: 'none' }}
+          >
+            Falar com a Pizzaria
+          </a>
+        )}
       </div>
     </div>
   )

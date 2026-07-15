@@ -177,4 +177,126 @@ describe("GET /api/pedido-app/pagamento-pix", () => {
     const res = await GET(getReq("?token=qualquer"));
     expect(res.status).toBe(404);
   });
+
+  it("[caso 4] Pix integral de R$ 100 retorna valorPix igual ao total", async () => {
+    store.set("pedidos", [{
+      id: "pedido-1",
+      numero: 4821,
+      statusToken: "token-ok",
+      status: "novo",
+      total: 100,
+      pagamento: "Pix",
+      pix: { status: "pendente", provider: "mercadopago", qrCode: "000201...", valorEsperado: 100 },
+    }]);
+
+    const body = await json(await GET(getReq("?token=token-ok")));
+
+    expect(body.valorPix).toBe(100);
+    expect(body.total).toBe(100);
+  });
+
+  it("[caso 5] pedido misto total R$ 100 com Pix R$ 40 retorna valorPix 40 (nunca o total)", async () => {
+    store.set("pedidos", [{
+      id: "pedido-1",
+      numero: 4821,
+      statusToken: "token-ok",
+      status: "novo",
+      total: 100,
+      pagamento: "Pix (R$ 40,00) + Dinheiro (R$ 60,00)",
+      pix: { status: "pendente", provider: "mercadopago", qrCode: "000201...", valorEsperado: 40 },
+    }]);
+
+    const body = await json(await GET(getReq("?token=token-ok")));
+
+    expect(body.valorPix).toBe(40);
+    expect(body.total).toBe(100);
+  });
+
+  it("[caso 8] valorPix vem exclusivamente de pixCliente.valorEsperado, nunca recalculado", async () => {
+    store.set("pedidos", [{
+      id: "pedido-1",
+      numero: 4821,
+      statusToken: "token-ok",
+      status: "novo",
+      total: 250.5,
+      pagamento: "Pix (R$ 33,33) + Dinheiro (R$ 217,17)",
+      pix: { status: "pendente", provider: "manual", valorEsperado: 33.33 },
+    }, ]);
+    // pedido acima usa provider "manual" sem chavePix configurada — sem
+    // config, serializarPixCliente não monta pixCliente; ajusta para ter
+    // config válida no mesmo teste via segundo pedido com token distinto.
+    store.set("config:pizzaria", { chavePix: "11999999999", nomeTitularPix: "Chefe da Pizza" });
+
+    const body = await json(await GET(getReq("?token=token-ok")));
+
+    expect(body.valorPix).toBe(33.33);
+  });
+
+  it("estado diferente de 'aguardando' nunca retorna valorPix", async () => {
+    store.set("pedidos", [{
+      id: "pedido-1",
+      numero: 4821,
+      statusToken: "token-ok",
+      status: "novo",
+      total: 100,
+      pagamento: "Pix",
+      pixConfirmado: true,
+      pix: { status: "confirmado", provider: "mercadopago", qrCode: "000201...", valorEsperado: 100 },
+    }]);
+
+    const body = await json(await GET(getReq("?token=token-ok")));
+
+    expect(body).not.toHaveProperty("valorPix");
+  });
+
+  it("[caso 11] whatsappPizzaria vem de config:pizzaria normalizado pelo helper existente", async () => {
+    store.set("pedidos", [{
+      id: "pedido-1", numero: 4821, statusToken: "token-ok", status: "novo", total: 100,
+      pagamento: "Pix", pix: { status: "pendente", provider: "mercadopago", qrCode: "000201...", valorEsperado: 100 },
+    }]);
+    store.set("config:pizzaria", { whatsappPizzaria: "86999999999" });
+
+    const body = await json(await GET(getReq("?token=token-ok")));
+
+    expect(body.whatsappPizzaria).toBe("5586999999999");
+  });
+
+  it("whatsappPizzaria aparece mesmo quando o pedido não está mais 'aguardando' (não depende do estado)", async () => {
+    store.set("pedidos", [{
+      id: "pedido-1", numero: 4821, statusToken: "token-ok", status: "novo", total: 100,
+      pagamento: "Pix", pixConfirmado: true,
+      pix: { status: "confirmado", provider: "mercadopago", qrCode: "000201...", valorEsperado: 100 },
+    }]);
+    store.set("config:pizzaria", { whatsappPizzaria: "86999999999" });
+
+    const body = await json(await GET(getReq("?token=token-ok")));
+
+    expect(body.estado).toBe("confirmado");
+    expect(body.whatsappPizzaria).toBe("5586999999999");
+  });
+
+  it("sem número configurado (ou inválido), whatsappPizzaria não aparece na resposta", async () => {
+    store.set("pedidos", [{
+      id: "pedido-1", numero: 4821, statusToken: "token-ok", status: "novo", total: 100,
+      pagamento: "Pix", pix: { status: "pendente", provider: "mercadopago", qrCode: "000201...", valorEsperado: 100 },
+    }]);
+    store.set("config:pizzaria", {});
+
+    const body = await json(await GET(getReq("?token=token-ok")));
+
+    expect(body).not.toHaveProperty("whatsappPizzaria");
+  });
+
+  it("nunca expõe nenhuma outra configuração de config:pizzaria além do WhatsApp normalizado", async () => {
+    store.set("pedidos", [{
+      id: "pedido-1", numero: 4821, statusToken: "token-ok", status: "novo", total: 100,
+      pagamento: "Pix", pix: { status: "pendente", provider: "mercadopago", qrCode: "000201...", valorEsperado: 100 },
+    }]);
+    store.set("config:pizzaria", { whatsappPizzaria: "86999999999", chavePix: "chave-secreta-interna", nomeTitularPix: "Titular Secreto" });
+
+    const body = await json(await GET(getReq("?token=token-ok")));
+
+    expect(body).not.toHaveProperty("chavePix");
+    expect(body).not.toHaveProperty("nomeTitularPix");
+  });
 });

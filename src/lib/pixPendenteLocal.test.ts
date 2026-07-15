@@ -127,8 +127,8 @@ describe("resolverPixPendenteAPartirDaResposta — regra central do hook usePixP
   const ref = { pedidoId: "p1", statusToken: "tok-123", numero: 4821 };
 
   it("[caso 5] só mostra a barra quando o backend confirma estado 'aguardando'", () => {
-    const { pendente, deveLimpar } = resolverPixPendenteAPartirDaResposta(ref, { estado: "aguardando", total: 89.9 });
-    expect(pendente).toEqual({ pedidoId: "p1", statusToken: "tok-123", numero: 4821, total: 89.9 });
+    const { pendente, deveLimpar } = resolverPixPendenteAPartirDaResposta(ref, { estado: "aguardando", valorPix: 89.9 });
+    expect(pendente).toEqual({ pedidoId: "p1", statusToken: "tok-123", numero: 4821, valorPix: 89.9 });
     expect(deveLimpar).toBe(false);
   });
 
@@ -138,7 +138,7 @@ describe("resolverPixPendenteAPartirDaResposta — regra central do hook usePixP
   });
 
   it("[caso 6] barra desaparece quando o backend confirma o pagamento", () => {
-    const { pendente, deveLimpar } = resolverPixPendenteAPartirDaResposta(ref, { estado: "confirmado", total: 89.9 });
+    const { pendente, deveLimpar } = resolverPixPendenteAPartirDaResposta(ref, { estado: "confirmado", valorPix: 89.9 });
     expect(pendente).toBeNull();
     expect(deveLimpar).toBe(true);
   });
@@ -160,14 +160,22 @@ describe("resolverPixPendenteAPartirDaResposta — regra central do hook usePixP
     expect(deveLimpar).toBe(false);
   });
 
-  it("estado 'aguardando' sem total numérico não mostra a barra (resposta incompleta)", () => {
+  it("estado 'aguardando' sem valorPix numérico não mostra a barra (resposta incompleta)", () => {
     const { pendente } = resolverPixPendenteAPartirDaResposta(ref, { estado: "aguardando" });
     expect(pendente).toBeNull();
   });
 
   it("usa numero da resposta do backend quando presente, preservando fallback do ref", () => {
-    const { pendente } = resolverPixPendenteAPartirDaResposta(ref, { estado: "aguardando", total: 10, numero: 9999 });
+    const { pendente } = resolverPixPendenteAPartirDaResposta(ref, { estado: "aguardando", valorPix: 10, numero: 9999 });
     expect(pendente?.numero).toBe(9999);
+  });
+
+  it("[caso 8] valorPix vem só da resposta do backend, nunca é lido/derivado do localStorage", () => {
+    // A referência local (ref) nunca carrega valorPix — só pedidoId/statusToken/numero.
+    // O valor exibido é sempre o que a resposta do backend traz.
+    const { pendente } = resolverPixPendenteAPartirDaResposta(ref, { estado: "aguardando", valorPix: 40 });
+    expect(pendente?.valorPix).toBe(40);
+    expect(ref).not.toHaveProperty("valorPix");
   });
 });
 

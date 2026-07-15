@@ -92,13 +92,16 @@ export type PixPendenteResolvido = {
   pedidoId: string;
   statusToken: string;
   numero?: number;
-  total: number;
+  /** Valor efetivamente pendente no Pix — vem só de `valorPix` (backend,
+   * derivado de `pixCliente.valorEsperado`). Em pedido misto é a parcela do
+   * Pix, nunca o total do pedido; em Pix integral, coincide com o total. */
+  valorPix: number;
 };
 
 export type RespostaPagamentoPixSimplificada = {
   estado?: EstadoPagamentoPixResposta;
   numero?: number;
-  total?: number;
+  valorPix?: number;
 };
 
 // Regra pura central do hook usePixPendente (src/components/PixPendenteBar.tsx):
@@ -113,13 +116,13 @@ export function resolverPixPendenteAPartirDaResposta(
   if (!resposta) {
     return { pendente: null, deveLimpar: true };
   }
-  if (resposta.estado === "aguardando" && typeof resposta.total === "number") {
+  if (resposta.estado === "aguardando" && typeof resposta.valorPix === "number") {
     return {
       pendente: {
         pedidoId: ref.pedidoId,
         statusToken: ref.statusToken,
         numero: resposta.numero ?? ref.numero,
-        total: resposta.total,
+        valorPix: resposta.valorPix,
       },
       deveLimpar: false,
     };
