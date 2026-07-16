@@ -950,10 +950,12 @@ export async function POST(req: NextRequest) {
       // dada pela Kellyne diretamente pelo WhatsApp Business apareça no
       // painel, mesmo com o bot ativo e a conversa não assumida. Exceção: se
       // este messageId já foi marcado como eco de um envio feito pelo painel
-      // (/api/conversas/enviar-mensagem-humana já registrou a mensagem antes
-      // de enviar, fechando a janela de corrida), não registra de novo — a
-      // marca só é consultada (nunca apagada), para que reentregas repetidas
-      // do mesmo webhook continuem suprimidas até o TTL expirar. Só processa
+      // (/api/conversas/enviar-mensagem-humana confirma o envio pela
+      // Evolution, cria a marca de eco e só então registra a mensagem no
+      // histórico — nessa ordem, fechando a janela de corrida), não registra
+      // de novo aqui: o webhook só consulta a marca (nunca apaga), para que
+      // reentregas repetidas do mesmo webhook continuem suprimidas até o TTL
+      // expirar. Só processa
       // conversa individual (`@s.whatsapp.net`) — grupos, broadcasts, `@lid`
       // e outros formatos são ignorados sem criar histórico/sessão. Bot
       // nunca responde — always early-return.
