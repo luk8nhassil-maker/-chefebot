@@ -243,6 +243,7 @@ export default function DevPage() {
           <div style={{ display: 'flex', gap: 8 }}>
             <button onClick={() => router.push('/admin')} style={{ background: 'color-mix(in srgb, var(--primary) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--primary) 30%, transparent)', color: 'var(--brand-text)', borderRadius: 8, padding: '8px 14px', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>Admin</button>
             <button onClick={() => router.push('/dev/mcp')} style={{ background: 'color-mix(in srgb, var(--attention) 15%, transparent)', border: '1px solid color-mix(in srgb, var(--attention) 40%, transparent)', color: 'var(--attention)', borderRadius: 8, padding: '8px 14px', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>IA / MCP</button>
+            <button onClick={() => router.push('/dev/redis-status')} style={{ background: 'color-mix(in srgb, var(--info) 15%, transparent)', border: '1px solid color-mix(in srgb, var(--info) 40%, transparent)', color: 'var(--info)', borderRadius: 8, padding: '8px 14px', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>Redis</button>
             <button onClick={() => fetch('/api/auth/logout', { method: 'POST' }).then(() => router.push('/login'))} style={{ background: 'rgba(var(--overlay-rgb), 0.05)', border: '1px solid rgba(var(--overlay-rgb), 0.1)', color: 'rgba(var(--overlay-rgb), 0.5)', borderRadius: 8, padding: '8px 14px', cursor: 'pointer', fontSize: 13 }}>Sair</button>
           </div>
         </div>
