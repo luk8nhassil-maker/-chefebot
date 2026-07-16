@@ -41,6 +41,13 @@ function mockFetchFail() {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 500 }));
 }
 
+function mockFetchOkComMessageId(messageId: string) {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue({ ok: true, json: async () => ({ key: { id: messageId } }) })
+  );
+}
+
 beforeEach(() => {
   store.clear();
   vi.clearAllMocks();
@@ -124,5 +131,69 @@ describe("POST /api/conversas/enviar-mensagem-humana — TTL 7200", () => {
     const res = await POST(postReq({ phone: PHONE, text: "Olá!" }, token));
     expect(res.status).toBe(503);
     expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+// Etapa 2B: auditoria do retorno de envio da Evolution para deduplicação
+// do eco fromMe no webhook (ver conversaEcoPainel.ts).
+describe("POST /api/conversas/enviar-mensagem-humana — eco do painel (Etapa 2B)", () => {
+  it("registra a mensagem e cria chave de eco com TTL quando a Evolution retorna key.id", async () => {
+    mockFetchOkComMessageId("WHATS-MSG-ID-1");
+    const token = await createToken({ username: "kellyne", name: "Kellyne", role: "atendente" });
+    const res = await POST(postReq({ phone: PHONE, text: "Seu pedido está pronto!" }, token));
+    expect(res.status).toBe(200);
+
+    const ecoCall = redisMock.set.mock.calls.find(([k]: [string]) => k === "conversa:echo-painel:WHATS-MSG-ID-1");
+    expect(ecoCall).toBeDefined();
+    expect(ecoCall[1]).toBe(true);
+    expect(ecoCall[2]).toEqual({ ex: 600 });
+    // A chave/valor não contêm texto, telefone ou nome da atendente.
+    expect(ecoCall[0]).not.toContain(PHONE);
+    expect(ecoCall[0]).not.toContain("Kellyne");
+    expect(JSON.stringify(ecoCall)).not.toContain("Seu pedido está pronto");
+  });
+
+  it("registra a mensagem mesmo quando a Evolution não retorna message id, sem criar chave de eco inválida", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }));
+    const token = await createToken({ username: "kellyne", name: "Kellyne", role: "atendente" });
+    const res = await POST(postReq({ phone: PHONE, text: "Olá!" }, token));
+    expect(res.status).toBe(200);
+
+    const ecoCalls = redisMock.set.mock.calls.filter(([k]: [string]) => k.startsWith("conversa:echo-painel:"));
+    expect(ecoCalls).toHaveLength(0);
+  });
+
+  it("registra a mensagem mesmo quando o corpo da resposta não é JSON válido (sem método json)", async () => {
+    mockFetchOk(); // resposta sem .json()
+    const token = await createToken({ username: "kellyne", name: "Kellyne", role: "atendente" });
+    const res = await POST(postReq({ phone: PHONE, text: "Olá!" }, token));
+    expect(res.status).toBe(200);
+
+    const ecoCalls = redisMock.set.mock.calls.filter(([k]: [string]) => k.startsWith("conversa:echo-painel:"));
+    expect(ecoCalls).toHaveLength(0);
+  });
+
+  it("falha no envio: não registra mensagem e não cria chave de eco", async () => {
+    mockFetchFail();
+    const token = await createToken({ username: "kellyne", name: "Kellyne", role: "atendente" });
+    const res = await POST(postReq({ phone: PHONE, text: "Olá!" }, token));
+    expect(res.status).toBe(502);
+
+    const ecoCalls = redisMock.set.mock.calls.filter(([k]: [string]) => k.startsWith("conversa:echo-painel:"));
+    expect(ecoCalls).toHaveLength(0);
+  });
+
+  it("marca a chave de eco ANTES de registrar a mensagem (fecha a janela de corrida do webhook fromMe)", async () => {
+    mockFetchOkComMessageId("WHATS-MSG-ORDEM-1");
+    const token = await createToken({ username: "kellyne", name: "Kellyne", role: "atendente" });
+    const res = await POST(postReq({ phone: PHONE, text: "Chegando em instantes!" }, token));
+    expect(res.status).toBe(200);
+
+    const chaves = redisMock.set.mock.calls.map(([k]: [string]) => k);
+    const idxEco = chaves.indexOf("conversa:echo-painel:WHATS-MSG-ORDEM-1");
+    const idxConversa = chaves.indexOf(`conversa:${PHONE}`);
+    expect(idxEco).toBeGreaterThanOrEqual(0);
+    expect(idxConversa).toBeGreaterThanOrEqual(0);
+    expect(idxEco).toBeLessThan(idxConversa);
   });
 });

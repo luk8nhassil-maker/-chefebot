@@ -27,6 +27,7 @@ import { creditarPontosPedidoEntregue } from "@/lib/fidelidade";
 import type { BotStep } from "@/lib/bot";
 import { obterConfigEvolution } from "@/lib/evolutionApi";
 import { enviarTextoWhatsApp } from "@/lib/whatsappMensagem";
+import { ehEcoPainel, validarMessageId } from "@/lib/conversaEcoPainel";
 
 export const maxDuration = 30;
 
@@ -534,6 +535,21 @@ function obterCampo(valor: unknown, chave: string): unknown {
   return ehObjeto(valor) ? valor[chave] : undefined;
 }
 
+const SUFIXO_JID_INDIVIDUAL = "@s.whatsapp.net";
+
+// Extrai o telefone só quando o remoteJid é uma conversa individual válida
+// (`{numero}@s.whatsapp.net`). Ignora grupos (`@g.us`), broadcasts
+// (`status@broadcast`, qualquer `@broadcast`), `@lid` e qualquer outro
+// formato ainda não suportado, além de remoteJid vazio ou não-string — nunca
+// cria histórico/sessão/chave de conversa para esses casos. `endsWith` aqui
+// só valida o domínio exato do JID (nunca aproxima números de telefone).
+function extrairTelefoneIndividual(remoteJid: unknown): string | undefined {
+  if (typeof remoteJid !== "string" || !remoteJid) return undefined;
+  if (!remoteJid.endsWith(SUFIXO_JID_INDIVIDUAL)) return undefined;
+  const numero = remoteJid.slice(0, -SUFIXO_JID_INDIVIDUAL.length);
+  return numero ? numero : undefined;
+}
+
 export function montarMarcadorImagem(data: unknown): string {
   const imageMessage = obterCampo(obterCampo(data, "message"), "imageMessage");
   const legenda = extrairTextoSeguro(obterCampo(imageMessage, "caption"));
@@ -928,17 +944,27 @@ export async function POST(req: NextRequest) {
 
     const data = body.data;
     if (data?.key?.fromMe) {
-      // Mensagem enviada pelo próprio número (celular ou API).
-      // Salva como "atendente" quando o bot está pausado globalmente (bot_ativo=false)
-      // ou quando a conversa está em atendimento manual (manual:{phone}=true).
-      // Isso garante que respostas dadas pela Kellyne pelo WhatsApp Business apareçam
-      // no painel Tempo Real. Bot nunca responde — always early-return.
+      // Mensagem enviada pelo próprio número (celular ou API) — sempre
+      // registrada como "atendente" no histórico, independente de
+      // manual:{phone} ou bot_ativo (Etapa 2B): garante que qualquer resposta
+      // dada pela Kellyne diretamente pelo WhatsApp Business apareça no
+      // painel, mesmo com o bot ativo e a conversa não assumida. Exceção: se
+      // este messageId já foi marcado como eco de um envio feito pelo painel
+      // (/api/conversas/enviar-mensagem-humana confirma o envio pela
+      // Evolution, cria a marca de eco e só então registra a mensagem no
+      // histórico — nessa ordem, fechando a janela de corrida), não registra
+      // de novo aqui: o webhook só consulta a marca (nunca apaga), para que
+      // reentregas repetidas do mesmo webhook continuem suprimidas até o TTL
+      // expirar. Só processa
+      // conversa individual (`@s.whatsapp.net`) — grupos, broadcasts, `@lid`
+      // e outros formatos são ignorados sem criar histórico/sessão. Bot
+      // nunca responde — always early-return.
       try {
-        const fromPhone = data?.key?.remoteJid?.replace("@s.whatsapp.net", "");
+        const fromPhone = extrairTelefoneIndividual(data?.key?.remoteJid);
         if (fromPhone) {
-          const emManualFrom = await redis.get<boolean>(`manual:${fromPhone}`);
-          const botGlobalAtivo = await redis.get<boolean>("bot_ativo");
-          if (emManualFrom === true || botGlobalAtivo === false) {
+          const msgIdFrom = validarMessageId(data?.key?.id);
+          const ecoDoPainel = msgIdFrom ? await ehEcoPainel(msgIdFrom) : false;
+          if (!ecoDoPainel) {
             const txtFrom =
               data?.message?.conversation ||
               data?.message?.extendedTextMessage?.text ||

@@ -4,6 +4,7 @@ import { verifyToken } from "@/lib/auth";
 import { registrarMensagem } from "@/lib/conversa";
 import { validarEnvioMensagemHumana } from "@/lib/validarEnvioMensagemHumana";
 import { obterConfigEvolution } from "@/lib/evolutionApi";
+import { extrairMessageIdEnvio, marcarEcoPainel } from "@/lib/conversaEcoPainel";
 
 async function checkAuth(req: NextRequest) {
   const token = req.cookies.get("auth-token")?.value ?? null;
@@ -54,6 +55,7 @@ export async function POST(req: NextRequest) {
       { status: 503 },
     );
   }
+  let messageId: string | undefined;
   try {
     const delay = Math.min(2500, Math.max(900, text.length * 22));
     const evResponse = await fetch(`${config.baseUrl}/message/sendText/${config.instanceName}`, {
@@ -75,6 +77,29 @@ export async function POST(req: NextRequest) {
         { ok: false, error: "Falha ao enviar mensagem para o WhatsApp" },
         { status: 502 },
       );
+    }
+
+    // Leitura best-effort do corpo — a Evolution API pode devolver um JSON
+    // sem o formato esperado (ou nenhum), e isso nunca deve impedir o envio
+    // já confirmado de seguir para o registro no histórico.
+    try {
+      const respostaJson: unknown = typeof evResponse.json === "function" ? await evResponse.json() : undefined;
+      messageId = extrairMessageIdEnvio(respostaJson);
+    } catch {
+      messageId = undefined;
+    }
+
+    // Marca o messageId como eco do painel IMEDIATAMENTE após confirmar o
+    // envio, ANTES de registrar a mensagem no histórico — fecha a janela de
+    // corrida em que o webhook fromMe (eco da Evolution) chegaria entre o
+    // registro e a marcação e registraria a mensagem de novo. Sem messageId
+    // confiável, não há deduplicação: a mensagem do painel será registrada
+    // normalmente abaixo, e um eventual eco (se vier) será tratado no
+    // webhook como uma mensagem "atendente" adicional — melhor um possível
+    // duplicado raro do que descartar mensagens reais por dedup baseada só
+    // em texto.
+    if (messageId) {
+      await marcarEcoPainel(messageId);
     }
   } catch {
     return NextResponse.json(
