@@ -1,8 +1,16 @@
 # Arquitetura de dados do ChefeBot — estado atual e visão alvo
 
-Status: **diagnóstico**, sem nenhuma implementação de banco novo, sem alteração
-de variável de ambiente, sem deploy. Ver `ADR-POSTGRES-SOURCE-OF-TRUTH.md` para
-a justificativa da decisão e `DATABASE_MIGRATION_PLAN.md` para o passo a passo.
+Status: **diagnóstico da Etapa B em diante** (nenhum banco novo, nenhuma
+variável de ambiente alterada). A **Etapa C (telemetria, alertas e health
+checks) foi implementada** — ver `REDIS_TELEMETRY.md` para o desenho e
+`docs/operations/REDIS_RUNBOOK.md` para os procedimentos operacionais. A
+seção 3 abaixo (orçamento de comandos) permanece como a estimativa ESTÁTICA
+original desta auditoria (leitura de código); a Etapa C mede o volume REAL
+agregado por grupo, disponível em `/dev/redis-status`, e serve para
+comparar contra essas estimativas — não as substitui aqui. Ver
+`ADR-POSTGRES-SOURCE-OF-TRUTH.md` para a justificativa da decisão de mover
+dado permanente para PostgreSQL e `DATABASE_MIGRATION_PLAN.md` para o passo
+a passo (ainda não iniciado a partir da Etapa D).
 
 ## 1. Estado atual comprovado
 
@@ -138,6 +146,11 @@ velocidade com que a cota de 500.000/mês esgotou.
 Nenhuma otimização foi aplicada nesta etapa — este documento é só a
 evidência, por instrução explícita ("não otimize ainda, primeiro apresente
 evidência").
+
+**Atualização (Etapa C):** a estimativa estática acima agora pode ser
+comparada contra o volume real medido, agregado por grupo de chave, em
+`/dev/redis-status` (role `dev`/`admin`). Ver `REDIS_TELEMETRY.md` para como
+a medição funciona e por que ela é por grupo de chave, não por rota HTTP.
 
 ## 4. Dados que devem sair do Redis primeiro (prioridade)
 

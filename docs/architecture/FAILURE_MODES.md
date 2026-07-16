@@ -1,28 +1,70 @@
 # Proteções operacionais e modos de falha — ChefeBot
 
-Nenhuma proteção descrita aqui está implementada nesta etapa — é projeto,
-para implementação em etapas futuras (principalmente C, D e I do
-`DATABASE_MIGRATION_PLAN.md`).
+As seções 1-3 abaixo foram **implementadas na Etapa C** (ver
+`REDIS_TELEMETRY.md` para o desenho completo e
+`docs/operations/REDIS_RUNBOOK.md` para os procedimentos operacionais) — o
+texto foi atualizado para refletir o que existe de fato, não mais só
+projeto. As seções 4 em diante permanecem como projeto, para as Etapas D e I
+(dependem de PostgreSQL, ainda não iniciado).
 
-## 1. Health check independente
+## 1. Health check independente — implementado
 
-Dois endpoints separados, nunca um checando o outro por dependência forte:
+Diferente do desenho original (endpoints `/api/health/*` públicos), a
+implementação real ficou sob `/api/dev/*` com a mesma proteção de role
+`dev`/`admin` já usada por `/api/dev/mcp` — decisão de segurança tomada
+durante a implementação (health check pode expor detalhe técnico interno,
+mesmo sanitizado, e não há necessidade comprovada de monitor externo
+público nesta etapa):
 
-- `GET /api/health/redis` — faz um `PING`/`GET` trivial e barato (ex. `GET health:check`, TTL 5s) com timeout curto (ex. 1500ms). Responde `200 {status: "ok", latencyMs}` ou `503 {status: "down", error}`. Nunca conta como uso relevante de cota (é 1 comando a cada chamada, e o endpoint deve ele mesmo ter rate limit para não virar fonte de consumo).
-- `GET /api/health/postgres` — `SELECT 1` com timeout curto, mesmo padrão de resposta.
-- `GET /api/health` — agrega os dois, mais o status de configuração da Evolution API (`obterConfigEvolution() !== null`, sem chamada de rede) e do Mercado Pago (mesma checagem de presença de config, sem chamada de rede — não queremos gastar chamada de API de pagamento só para health check). Resposta agregada nunca mascara qual componente específico falhou.
+- `GET /api/dev/health` (`src/app/api/dev/health/route.ts`) — agrega 3
+  checagens isoladas (`src/lib/healthChecks.ts`): `checkRedisHealth()`
+  (leitura trivial `GET healthcheck:probe`, timeout 1500ms, classifica
+  cota/timeout/rede), `checkWhatsappHealth()` (só confirma
+  `obterConfigEvolution() !== null`, sem chamada de rede), `checkOrdersHealth()`
+  (confirma que a chave `pedidos` é legível e tem formato de array). Nenhuma
+  chamada à Evolution API ou ao Mercado Pago pela rede.
+- `GET /api/dev/redis-status` (`src/app/api/dev/redis-status/route.ts`) —
+  mesmas 3 checagens + telemetria agregada + avaliação de alerta, tudo numa
+  resposta. A falha de um componente nunca mascara nem impede a checagem
+  dos outros (`Promise.all` + checagem síncrona isolada).
+- **Não existe** health check de PostgreSQL — não há PostgreSQL nesta etapa
+  (Etapa D ainda não iniciada).
 
-## 2. Monitor de uso de comandos Redis
+## 2. Monitor de uso de comandos Redis — implementado
 
-- Wrapper (`src/lib/redisMetrics.ts`, ver Etapa C) em volta do client `@upstash/redis` existente: intercepta cada chamada, incrementa um contador local (em memória do processo serverless, resetado a cada cold start — não perfeito, mas suficiente para amostragem) e, periodicamente (ou a cada N chamadas), grava um snapshot agregado.
-- Fonte de verdade real de uso deve ser a própria API/console da Upstash (`GET /v1/... ` ou o que a REST API da Upstash expuser de uso), não uma reimplementação — o wrapper serve para atribuir consumo por rota (`requestPath` → contagem), que a Upstash não expõe nativamente.
-- Painel simples (reaproveitando o padrão de `/dev/mcp`): `/dev/redis-usage` mostra: uso do mês atual vs. limite do plano, top 10 rotas por comando, comparação com o dia anterior.
+- `src/lib/redisTelemetry.ts`: wrapper `Proxy` transparente em volta do
+  client `@upstash/redis` (aplicado uma única vez em `src/lib/redis.ts`,
+  nenhum outro arquivo mudou). Classifica cada comando por **grupo de chave**
+  (`orders`, `whatsapp`, `loyalty`, `pix_coordination`, `mcp`, `config`,
+  `push`, `orders_lock`, `other`) — não por rota HTTP (decisão de segurança
+  de escopo, ver `REDIS_TELEMETRY.md` seção 6 para a justificativa completa
+  de por que isso evita tocar em `orders/route.ts`/`whatsapp/route.ts`).
+- Contadores vivem em memória por processo; persistência é amostrada por
+  probabilidade (padrão 5%, `REDIS_TELEMETRY_SAMPLE_PROBABILITY`) — nunca 1
+  gravação por comando observado. Overhead estimado: ~2-3% de comandos
+  adicionais sobre o volume real (cálculo em `REDIS_TELEMETRY.md` seção 5).
+- Painel: `/dev/redis-status` (mesmo padrão de proteção de `/dev/mcp`) —
+  mostra uso estimado do mês, saúde dos 3 componentes, e grupos com maior
+  consumo na invocação atual. Sem polling automático (atualização manual).
+- **Limitação documentada:** não existe leitura do uso OFICIAL da Upstash a
+  partir do runtime (exigiria a Management API deles) — todo número do
+  painel é `fonte: "estimativa_interna"`. O número oficial continua sendo
+  conferido manualmente no console da Upstash (procedimento no runbook).
 
-## 3. Alertas em 50%, 70%, 85%, 95% da cota
+## 3. Alertas em 50%, 70%, 85%, 95%, 100% da cota — parcialmente implementado
 
-- Job agendado (cron existente do projeto, ou QStash, reaproveitando o mecanismo já usado pelo Guardião Pix) que consulta o uso real via API da Upstash a cada N minutos (ex. 15 min — barato, é 1 chamada de API de billing, não conta como comando de dado).
-- Ao cruzar cada limiar pela primeira vez no ciclo de billing atual, dispara notificação (mesmo canal usado hoje para incidentes — a definir com o dono do sistema qual canal: WhatsApp para número interno, e-mail, ou os dois). Nunca dispara de novo pelo mesmo limiar no mesmo ciclo (marca de idempotência em Redis mesmo — chave de baixíssimo custo, `alert:redis-quota:{limiar}:{ciclo}`, TTL até o fim do ciclo).
-- 95% dispara também um sinalizador de "modo degradado iminente" consultável pelo `/api/health`, para o frontend poder avisar o atendente proativamente, não só quando já quebrou.
+- `src/lib/redisUsageAlerts.ts`: limiares configuráveis por env var
+  (`REDIS_USAGE_ALERT_50`/`_70`/`_85`/`_95`/`_100`, todos habilitados por
+  padrão), avaliados contra `REDIS_MONTHLY_COMMAND_LIMIT` (padrão 500.000).
+- Ao cruzar um limiar pela primeira vez no ciclo mensal, `/api/dev/redis-status`
+  registra via `console.error` (visível nos runtime logs da Vercel) e marca
+  dedup em Redis (`telemetry:redis:alerta-marcado:{limiar}:{ciclo}`, TTL até
+  o fim do ciclo) — nunca loga o mesmo limiar duas vezes no mesmo mês.
+- **Não implementado nesta etapa: notificação externa real** (push/e-mail/
+  WhatsApp). Não existe canal de notificação operacional integrado ao
+  projeto hoje — isso fica como pendência explícita, documentada, não
+  implementada por engano. Até existir, o alerta só é visível para quem
+  olha o painel ou os runtime logs ativamente (ver runbook, seção 3).
 
 ## 4. Alerta de falha de persistência
 
