@@ -11,6 +11,7 @@ import { tabAtivaCardapio, consumirFlagAbrirSacola } from "@/lib/pedidoAtivoClie
 import { salvarReferenciaPixPendente } from "@/lib/pixPendenteLocal";
 import PixPendenteBar, { usePixPendente, PIX_PENDENTE_BAR_HEIGHT_PX } from "@/components/PixPendenteBar";
 import PixPagamentoCard from "./PixPagamentoCard";
+import LayoutDebugPanel from "./LayoutDebugPanel";
 
 // Ícones de categoria da home (menu/navegação) — lucide-react, sem emoji.
 // Mantidos separados de ICONS (que continua usando emoji para os itens
@@ -1498,6 +1499,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   return (
     <>
       <style>{CSS}</style>
+      <LayoutDebugPanel />
       <div className={`wrap ${screen === "sc-start" ? "wrap-start" : ""}`}>
         {screen !== "sc-start" && (
           <div className="steps">
