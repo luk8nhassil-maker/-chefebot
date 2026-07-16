@@ -17,9 +17,9 @@ type TelemetrySnapshot = {
 type StatusResponse = {
   health: AggregateHealth
   memoria: TelemetrySnapshot
-  usoEstimado: { mesAtual: Record<string, number>; diaAtual: Record<string, number>; fonte: string }
-  alerta: { usoEstimado: number; limite: number; percentual: number; fonte: string; limiaresCruzados: number[]; limiarMaisAlto: number | null }
-  configuracao: { limiteComandosMensal: number; avisoFonte: string }
+  amostra: { mesAtual: Record<string, number>; diaAtual: Record<string, number>; fonte: string; avisoOficial: string }
+  tendencia: { amostraObservada: number; limiteReferencia: number; percentualDaAmostra: number; tipo: string; limiaresCruzados: number[]; limiarMaisAlto: number | null; avisoOficial: string }
+  configuracao: { limiteReferenciaComandosMensal: number; avisoOficial: string }
   geradoEm: number
 }
 
@@ -149,19 +149,22 @@ export default function RedisStatusPage() {
               <ComponentCard title="Pedidos" health={data.health.orders} />
             </div>
 
-            <div style={{ background: data.alerta.limiarMaisAlto && data.alerta.limiarMaisAlto >= 85 ? 'color-mix(in srgb, var(--danger) 8%, transparent)' : 'color-mix(in srgb, var(--info) 6%, transparent)', border: `1px solid ${data.alerta.limiarMaisAlto && data.alerta.limiarMaisAlto >= 85 ? 'color-mix(in srgb, var(--danger) 25%, transparent)' : 'rgba(var(--overlay-rgb), 0.08)'}`, borderRadius: 12, padding: 18, marginBottom: 24 }}>
-              <p style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, margin: '0 0 8px', color: 'rgba(var(--overlay-rgb), 0.5)' }}>Uso estimado do mês (fonte: {data.alerta.fonte})</p>
+            <div style={{ background: data.tendencia.limiarMaisAlto && data.tendencia.limiarMaisAlto >= 85 ? 'color-mix(in srgb, var(--danger) 8%, transparent)' : 'color-mix(in srgb, var(--info) 6%, transparent)', border: `1px solid ${data.tendencia.limiarMaisAlto && data.tendencia.limiarMaisAlto >= 85 ? 'color-mix(in srgb, var(--danger) 25%, transparent)' : 'rgba(var(--overlay-rgb), 0.08)'}`, borderRadius: 12, padding: 18, marginBottom: 24 }}>
+              <p style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, margin: '0 0 8px', color: 'rgba(var(--overlay-rgb), 0.5)' }}>Amostra interna observada do mês — NÃO é o uso oficial</p>
               <p style={{ fontSize: 28, fontWeight: 800, margin: '0 0 4px', color: 'var(--foreground)' }}>
-                {data.alerta.usoEstimado.toLocaleString('pt-BR')} <span style={{ fontSize: 16, fontWeight: 500, color: 'rgba(var(--overlay-rgb), 0.4)' }}>/ {data.alerta.limite.toLocaleString('pt-BR')} ({Math.round(data.alerta.percentual)}%)</span>
+                {data.tendencia.amostraObservada.toLocaleString('pt-BR')} <span style={{ fontSize: 16, fontWeight: 500, color: 'rgba(var(--overlay-rgb), 0.4)' }}>/ {data.tendencia.limiteReferencia.toLocaleString('pt-BR')} referência ({Math.round(data.tendencia.percentualDaAmostra)}% da amostra)</span>
               </p>
-              {data.alerta.limiarMaisAlto && (
-                <p style={{ fontSize: 13, color: 'var(--danger)', fontWeight: 700, margin: '4px 0 0' }}>⚠ Limiar de {data.alerta.limiarMaisAlto}% cruzado</p>
+              {data.tendencia.limiarMaisAlto && (
+                <p style={{ fontSize: 13, color: 'var(--danger)', fontWeight: 700, margin: '4px 0 0' }}>⚠ Tendência interna cruzou {data.tendencia.limiarMaisAlto}% da referência (não confirma proximidade real da cota)</p>
               )}
-              <p style={{ fontSize: 11, color: 'rgba(var(--overlay-rgb), 0.35)', margin: '10px 0 0', lineHeight: 1.5 }}>{data.configuracao.avisoFonte}</p>
+              <p style={{ fontSize: 11, color: 'rgba(var(--overlay-rgb), 0.4)', margin: '10px 0 0', lineHeight: 1.6, fontWeight: 600 }}>⚠ {data.configuracao.avisoOficial}</p>
             </div>
 
             <p style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, margin: '0 0 10px', color: 'rgba(var(--overlay-rgb), 0.5)' }}>
-              Rotas/grupos com maior consumo (invocação atual do processo)
+              Distribuição relativa por grupo de chave (invocação atual do processo)
+            </p>
+            <p style={{ fontSize: 11, color: 'rgba(var(--overlay-rgb), 0.35)', margin: '-6px 0 10px', lineHeight: 1.5 }}>
+              Medição por grupo de chave (orders, whatsapp, loyalty...), não por rota HTTP — ver REDIS_TELEMETRY.md. Útil para comparar proporção entre grupos, não para saber o total absoluto de comandos.
             </p>
             {gruposOrdenados.length === 0 ? (
               <div style={{ background: 'rgba(var(--overlay-rgb), 0.03)', borderRadius: 12, padding: 20, textAlign: 'center', marginBottom: 24 }}>

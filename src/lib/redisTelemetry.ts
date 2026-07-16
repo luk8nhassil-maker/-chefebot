@@ -20,8 +20,14 @@
 // 5. Nunca registra telefone completo, token, payload de mensagem ou
 //    qualquer dado de cliente — só nome de chave classificado por grupo
 //    (ver classifyKey) e metadados técnicos (latência, tipo de erro).
+// 6. Nada aqui é "o uso oficial da Upstash". Tudo é AMOSTRA — perdida tanto
+//    pela amostragem probabilística quanto por processos serverless que
+//    terminam antes do flush (ver lerAmostraInterna). Todo consumidor
+//    (API/painel/log) deve tratar isso como tendência interna, nunca como
+//    substituto do console da Upstash (ver src/lib/redisUsageAlerts.ts).
 
 import type { Redis } from '@upstash/redis'
+import { AVISO_AMOSTRA_NAO_OFICIAL } from './redisUsageAlerts'
 
 /** Grupos de chave — mesmos grupos documentados em REDIS_KEY_INVENTORY.md. */
 export type RedisKeyGroup =
@@ -287,13 +293,23 @@ function somarMapas(mapas: Record<string, number>[]): Record<string, number> {
  * requisição) fica mais barato gravando só 1 bucket por flush; o caminho de
  * LEITURA (frio, só quando um humano abre o painel /dev/redis-status) pode
  * pagar até ~31 comandos extra sem impacto relevante na cota. Nunca lança —
- * qualquer falha em qualquer dia individual é ignorada (mês fica
- * parcialmente subestimado, nunca quebra o painel).
+ * qualquer falha em qualquer dia individual é ignorada (mês fica com a
+ * amostra ainda mais incompleta, nunca quebra o painel).
+ *
+ * IMPORTANTE (revisão corretiva pós-implementação): o valor retornado é uma
+ * AMOSTRA, não uma estimativa completa nem o uso oficial. Além da
+ * amostragem probabilística do flush (~5%), comandos observados num
+ * processo serverless que é encerrado (fim da invocação) ANTES do flush
+ * amostrado disparar são PERDIDOS — nunca persistidos, nunca recuperados.
+ * Isso pode subestimar o volume real de forma severa, não só marginal. Ver
+ * `AVISO_AMOSTRA_NAO_OFICIAL` (retornado no campo `avisoOficial`) e
+ * `docs/architecture/REDIS_TELEMETRY.md` para a explicação completa.
  */
-export async function lerUsoEstimado(redisClient: Redis): Promise<{
+export async function lerAmostraInterna(redisClient: Redis): Promise<{
   mesAtual: Record<string, number>
   diaAtual: Record<string, number>
-  fonte: 'estimativa_interna'
+  fonte: 'amostra_interna_observada'
+  avisoOficial: string
 }> {
   try {
     const hoje = new Date()
@@ -311,9 +327,9 @@ export async function lerUsoEstimado(redisClient: Redis): Promise<{
     const mesAtual = somarMapas(mapas)
     const diaAtual = mapas[mapas.length - 1] ?? {}
 
-    return { mesAtual, diaAtual, fonte: 'estimativa_interna' }
+    return { mesAtual, diaAtual, fonte: 'amostra_interna_observada', avisoOficial: AVISO_AMOSTRA_NAO_OFICIAL }
   } catch {
-    return { mesAtual: {}, diaAtual: {}, fonte: 'estimativa_interna' }
+    return { mesAtual: {}, diaAtual: {}, fonte: 'amostra_interna_observada', avisoOficial: AVISO_AMOSTRA_NAO_OFICIAL }
   }
 }
 

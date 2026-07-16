@@ -10,26 +10,40 @@ todo).
 
 1. **Painel interno:** `https://chefebot-pjif.vercel.app/dev/redis-status`
    (login com role `dev` ou `admin`). Mostra saúde de Redis/WhatsApp/Pedidos,
-   uso estimado do mês, e as rotas/grupos com maior consumo na invocação
-   atual.
+   a **amostra interna observada** do mês (nunca o uso oficial), e a
+   distribuição relativa por grupo de chave na invocação atual.
 2. **Console oficial da Upstash:** `https://console.upstash.com` → banco
    `upstash-kv-rose-flower` (ou o banco que substituiu esse, se já migrado
-   para Pay-as-you-go) → aba de uso/plano. **Este é o número que importa
-   para faturamento** — o painel interno mostra só uma estimativa.
+   para Pay-as-you-go) → aba de uso/plano. **Este é o único número que
+   importa para faturamento** — o painel interno mostra uma amostra parcial,
+   nunca o consumo real (ver seção 2).
 3. **Runtime logs da Vercel:** projeto `chefebot-pjif` → aba Observability
    → filtrar por `UpstashError` ou `[redisUsageAlerts]`.
 
 ## 2. "O painel interno e o console da Upstash não batem — qual eu confio?"
 
-O console da Upstash. Sempre. O painel interno (`/dev/redis-status`) é uma
-**estimativa interna** (campo `fonte: "estimativa_interna"` em toda
-resposta), calculada por amostragem probabilística dentro da própria
-aplicação — ver `REDIS_TELEMETRY.md` seção 6. Ele existe para dar uma
-tendência e permitir alertar cedo, não para ser a fonte de faturamento. Se
-os dois divergirem, é esperado (amostragem tem margem de erro) — o que
-importa é a **tendência** (subindo rápido? platô?), não o número exato.
+O console da Upstash. **Sempre.** O painel interno (`/dev/redis-status`) é
+uma **amostra interna observada** (campo `fonte: "amostra_interna_observada"`
+em toda resposta, nunca `"oficial"` ou `"completa"`), calculada por
+amostragem probabilística (~5%) dentro da própria aplicação — ver
+`REDIS_TELEMETRY.md` seção 0 e 6. Além da amostragem em si, o número pode
+subestimar ainda mais porque processos serverless podem terminar antes do
+flush persistir o que foi observado — comandos "vistos" mas nunca
+persistidos são perdidos, sem retry.
 
-## 3. Um limiar de alerta foi cruzado (log `[redisUsageAlerts]`)
+Ele existe para dar uma **tendência** e permitir perceber crescimento cedo,
+**nunca** para ser a fonte de faturamento nem para afirmar "estamos a X% da
+cota real". Se os dois divergirem, é esperado — o painel interno tende a
+mostrar um número **menor** que o real (nunca maior), então se ele já estiver
+alto, o real provavelmente está pelo menos tão alto quanto. O oposto (painel
+baixo, real alto) é o cenário perigoso e não detectável por este painel —
+por isso o console da Upstash nunca deve ser substituído por ele.
+
+## 3. Um limiar de TENDÊNCIA interna foi cruzado (log `[redisUsageAlerts]`)
+
+Nunca chame isso de "alerta de cota" ao comunicar para outras pessoas — é
+tendência sobre uma amostra parcial, sem fator de correção validado contra o
+número oficial.
 
 1. Confira o número oficial no console da Upstash (passo 1.2).
 2. Se estiver de fato perto do limite do plano:
@@ -97,10 +111,13 @@ Vercel, com redeploy:
   incidente original).
 - `REDIS_TELEMETRY_SAMPLE_PROBABILITY` — só reduzir (menos amostragem) se
   o overhead de telemetria (ver `REDIS_TELEMETRY.md` seção 5) precisar
-  ficar ainda menor; aumentar dá mais precisão à estimativa, ao custo de
-  mais comandos de telemetria.
+  ficar ainda menor; aumentar dá uma amostra maior (menos subestimada), ao
+  custo de mais comandos de telemetria. Nunca elimina a perda por
+  encerramento de processo antes do flush (ver seção 2 acima).
 - `REDIS_USAGE_ALERT_50` / `_70` / `_85` / `_95` / `_100` — definir como
-  `"false"` para silenciar um limiar específico (raramente necessário).
+  `"false"` para silenciar um limiar de tendência específico (raramente
+  necessário; nomes de env var mantidos por estabilidade, o conceito por
+  trás é tendência interna, não cota oficial).
 
 ## 8. O que este runbook NÃO cobre
 

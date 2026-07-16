@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { avaliarLimiaresUso, limiteComandosMensal } from './redisUsageAlerts'
+import { avaliarLimiaresUso, limiteComandosMensal, AVISO_AMOSTRA_NAO_OFICIAL } from './redisUsageAlerts'
 
 afterEach(() => {
   vi.unstubAllEnvs()
@@ -31,7 +31,7 @@ describe('avaliarLimiaresUso', () => {
 
   it('respeita limite zero sem lançar (percentual 0, sem cruzar nada)', () => {
     const avaliacao = avaliarLimiaresUso(100, 0)
-    expect(avaliacao.percentual).toBe(0)
+    expect(avaliacao.percentualDaAmostra).toBe(0)
     expect(avaliacao.limiarMaisAlto).toBeNull()
   })
 
@@ -40,6 +40,45 @@ describe('avaliarLimiaresUso', () => {
     const avaliacao = avaliarLimiaresUso(480_000, 500_000)
     expect(avaliacao.limiaresCruzados).not.toContain(95)
     expect(avaliacao.limiarMaisAlto).toBe(85)
+  })
+})
+
+describe('terminologia — nunca pode ser confundida com uso oficial ou estimativa completa (cenário obrigatório 8)', () => {
+  it('o tipo é explicitamente "tendencia_interna_nao_oficial", nunca um valor que sugira dado oficial', () => {
+    const avaliacao = avaliarLimiaresUso(250_000, 500_000)
+    expect(avaliacao.tipo).toBe('tendencia_interna_nao_oficial')
+    expect(avaliacao.tipo).toMatch(/nao_oficial$/)
+    expect(avaliacao.tipo).not.toBe('cota_oficial')
+    expect(avaliacao.tipo).not.toBe('uso_oficial')
+    expect(avaliacao.tipo).not.toBe('estimativa_completa')
+  })
+
+  it('todo resultado carrega o aviso completo em avisoOficial, nunca omitido', () => {
+    const casos = [
+      avaliarLimiaresUso(0, 500_000),
+      avaliarLimiaresUso(250_000, 500_000),
+      avaliarLimiaresUso(600_000, 500_000),
+    ]
+    for (const avaliacao of casos) {
+      expect(avaliacao.avisoOficial).toBe(AVISO_AMOSTRA_NAO_OFICIAL)
+    }
+  })
+
+  it('o aviso menciona explicitamente Upstash, amostragem e não ser estimativa completa/oficial', () => {
+    expect(AVISO_AMOSTRA_NAO_OFICIAL).toMatch(/Upstash/)
+    expect(AVISO_AMOSTRA_NAO_OFICIAL).toMatch(/AMOSTRA INTERNA/)
+    expect(AVISO_AMOSTRA_NAO_OFICIAL).toMatch(/NÃO.*oficial/i)
+    expect(AVISO_AMOSTRA_NAO_OFICIAL).toMatch(/NÃO.*estimativa completa/i)
+    expect(AVISO_AMOSTRA_NAO_OFICIAL).toMatch(/subestimar/i)
+  })
+
+  it('os campos numéricos usam nomes que não afirmam ser "uso"/"estimativa" (amostraObservada, limiteReferencia, percentualDaAmostra)', () => {
+    const avaliacao = avaliarLimiaresUso(250_000, 500_000)
+    expect(avaliacao).toHaveProperty('amostraObservada')
+    expect(avaliacao).toHaveProperty('limiteReferencia')
+    expect(avaliacao).toHaveProperty('percentualDaAmostra')
+    expect(avaliacao).not.toHaveProperty('usoEstimado')
+    expect(avaliacao).not.toHaveProperty('usoOficial')
   })
 })
 

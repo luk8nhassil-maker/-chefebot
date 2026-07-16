@@ -1,8 +1,39 @@
 # Telemetria do Redis — Etapa C do Programa de Saúde de Dados
 
-Status: **implementado**. Esta etapa criou visibilidade real sobre o consumo
-de comandos Redis, sem migrar nenhum dado para PostgreSQL e sem alterar
-nenhum comportamento de leitura/escrita já validado (pedidos, WhatsApp, Pix).
+Status: **implementado**, com uma **revisão corretiva de terminologia**
+aplicada antes do merge do PR (ver seção 0). Esta etapa criou visibilidade
+real sobre o consumo de comandos Redis, sem migrar nenhum dado para
+PostgreSQL e sem alterar nenhum comportamento de leitura/escrita já validado
+(pedidos, WhatsApp, Pix).
+
+## 0. Revisão corretiva — por que a terminologia mudou
+
+A primeira versão desta etapa usava os termos "uso estimado" e "alerta de
+cota" de um jeito que, lido rápido, sugeria um número confiável de consumo
+real. Isso está errado por um motivo que só fica óbvio olhando o desenho de
+perto: **em ambiente serverless, um processo pode ser encerrado (fim da
+invocação) antes do flush amostrado da telemetria disparar.** Como os
+contadores vivem só em memória e o flush é fire-and-forget, qualquer comando
+observado nesse intervalo é **perdido, não recuperado** — isso é adicional à
+perda já esperada pela amostragem de ~5%. A soma dos dois efeitos pode
+subestimar o volume real de forma severa, não marginal.
+
+Por isso toda a nomenclatura foi revisada:
+
+| Antes (impreciso) | Depois (honesto) |
+|---|---|
+| `fonte: "estimativa_interna"` | `fonte: "amostra_interna_observada"` |
+| `lerUsoEstimado()` | `lerAmostraInterna()` |
+| `AvaliacaoAlerta` / "alerta de cota" | `TendenciaInterna` / "tendência interna" |
+| `usoEstimado`, `limite`, `percentual` | `amostraObservada`, `limiteReferencia`, `percentualDaAmostra` |
+| "Limiar cruzado" (implicava proximidade real da cota) | "Tendência interna cruzou X% (não confirma proximidade real da cota)" |
+
+Nenhum comportamento de coleta/flush mudou nesta revisão (mesma amostragem
+de 5%, mesmo overhead ~2-3%) — só a forma como o número é rotulado e
+comunicado, para que nunca seja confundido com o dado oficial da Upstash.
+Ver `src/lib/redisUsageAlerts.ts` (`AVISO_AMOSTRA_NAO_OFICIAL`) para o texto
+canônico do aviso, reutilizado em todo lugar que expõe o número (API, painel,
+log) — nunca reescrito parcialmente.
 
 ## 1. Por que esta arquitetura
 
@@ -138,11 +169,20 @@ Com os parâmetros padrão (probabilidade 5%, ~2-4 grupos tocados por flush):
 - **Leitura do uso OFICIAL da Upstash via API**: não existe, a partir do
   runtime desta aplicação, uma forma confiável de consultar o número real
   cobrado pela Upstash (isso exigiria a Management API deles, com
-  credenciais próprias, fora do escopo). Todo número aqui é
-  **estimativa interna**, e cada resposta do painel/API traz explicitamente
-  `fonte: "estimativa_interna"` para nunca ser confundido com o número
-  oficial. Ver `docs/operations/REDIS_RUNBOOK.md` para o procedimento de
-  conferência manual no console da Upstash.
+  credenciais próprias, fora do escopo). Todo número aqui é uma
+  **amostra interna observada** (nunca "estimativa completa"), e cada
+  resposta do painel/API traz explicitamente `fonte: "amostra_interna_observada"`
+  e o disclaimer completo (`avisoOficial`) para nunca ser confundido com o
+  número oficial. Ver `docs/operations/REDIS_RUNBOOK.md` para o procedimento
+  de conferência manual no console da Upstash.
+
+### 6.1 Três números diferentes — nunca confundir
+
+| Número | O que é | Onde conferir | Confiabilidade |
+|---|---|---|---|
+| **Consumo oficial Upstash** | O que a Upstash de fato cobra/limita. | Console da Upstash (`console.upstash.com`) — ver `REDIS_RUNBOOK.md`. | Fonte da verdade. Sempre confiar nele. |
+| **Amostra interna observada** (`amostra`/`tendencia` na API) | Soma dos comandos que a telemetria deste app conseguiu observar E persistir (sobreviveu à amostragem de 5% E ao processo não ter sido encerrado antes do flush). | `/dev/redis-status`, campo "Amostra interna observada". | Pode subestimar severamente. Serve só para perceber TENDÊNCIA de crescimento, nunca para afirmar "estamos a X% da cota". |
+| **Distribuição relativa por grupo** (`memoria.byGroup` na API) | Proporção de comandos por grupo de chave (`orders`, `whatsapp` etc.) dentro da amostra observada na invocação atual do processo. | `/dev/redis-status`, seção "Distribuição relativa por grupo". | Útil para comparar "orders" vs. "whatsapp" proporcionalmente entre si — não é um total absoluto nem confiável isoladamente (é só uma invocação/processo). |
 
 ## 7. Modo degradado
 
@@ -181,13 +221,18 @@ precisar existir):
 | Variável | Padrão | Efeito |
 |---|---|---|
 | `REDIS_TELEMETRY_SAMPLE_PROBABILITY` | `0.05` | Probabilidade (0–1) de cada comando observado disparar um flush. |
-| `REDIS_MONTHLY_COMMAND_LIMIT` | `500000` | Limite mensal usado para calcular o percentual de uso (ajustar após upgrade de plano). |
-| `REDIS_USAGE_ALERT_50` / `_70` / `_85` / `_95` / `_100` | habilitado | Definir como `"false"` desliga o limiar individual. |
+| `REDIS_MONTHLY_COMMAND_LIMIT` | `500000` | Limite de REFERÊNCIA usado para calcular o percentual da amostra (não é lido da Upstash — ajustar manualmente após upgrade de plano). |
+| `REDIS_USAGE_ALERT_50` / `_70` / `_85` / `_95` / `_100` | habilitado | Definir como `"false"` desliga o limiar de TENDÊNCIA individual (nomes de env var mantidos por estabilidade, mas o conceito é tendência interna, não cota oficial — ver seção 0). |
 
 ## 10. Testes
 
 `src/lib/redisTelemetry.test.ts`, `src/lib/healthChecks.test.ts`,
-`src/lib/redisUsageAlerts.test.ts` — cobrem os 10 cenários obrigatórios desta
-etapa (comando bem-sucedido, erro de cota, timeout, Redis indisponível,
-telemetria falhando sem quebrar a rota, agregação por grupo, TTL das
-métricas, ausência de PII, health check saudável, health check degradado).
+`src/lib/redisUsageAlerts.test.ts`, `src/app/api/dev/redis-status/route.test.ts`
+— cobrem os 10 cenários obrigatórios da implementação original (comando
+bem-sucedido, erro de cota, timeout, Redis indisponível, telemetria falhando
+sem quebrar a rota, agregação por grupo, TTL das métricas, ausência de PII,
+health check saudável, health check degradado) **mais** os testes da revisão
+corretiva de terminologia: garantem que nenhuma resposta de API/UI usa
+`tipo`/`fonte` que sugira dado oficial ou estimativa completa, e que o
+disclaimer (`avisoOficial`) está sempre presente e nunca é reescrito
+parcialmente.

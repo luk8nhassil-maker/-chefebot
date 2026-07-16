@@ -6,8 +6,9 @@ import {
   flushToRedis,
   obterSnapshotEmMemoria,
   resetarTelemetriaParaTeste,
-  lerUsoEstimado,
+  lerAmostraInterna,
 } from './redisTelemetry'
+import { AVISO_AMOSTRA_NAO_OFICIAL } from './redisUsageAlerts'
 
 beforeEach(() => {
   resetarTelemetriaParaTeste()
@@ -250,19 +251,19 @@ describe('ausência de PII nas mensagens registradas (cenário obrigatório 8)',
   })
 })
 
-describe('lerUsoEstimado — nunca lança mesmo se o Redis falhar', () => {
-  it('retorna estrutura vazia com fonte "estimativa_interna" quando hgetall falha em todos os dias', async () => {
+describe('lerAmostraInterna — nunca lança mesmo se o Redis falhar', () => {
+  it('retorna estrutura vazia com fonte "amostra_interna_observada" quando hgetall falha em todos os dias', async () => {
     const client = { hgetall: vi.fn(async () => { throw new Error('Redis indisponível') }) }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const resultado = await lerUsoEstimado(client as any)
-    expect(resultado.fonte).toBe('estimativa_interna')
+    const resultado = await lerAmostraInterna(client as any)
+    expect(resultado.fonte).toBe('amostra_interna_observada')
     expect(resultado.mesAtual).toEqual({})
   })
 
   it('soma os buckets diários do mês corrente no total mensal', async () => {
     const client = { hgetall: vi.fn(async () => ({ total: '10', 'group:orders': '4' })) }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const resultado = await lerUsoEstimado(client as any)
+    const resultado = await lerAmostraInterna(client as any)
     const diasChamados = (client.hgetall as ReturnType<typeof vi.fn>).mock.calls.length
     expect(diasChamados).toBeGreaterThan(0)
     expect(resultado.mesAtual.total).toBe(10 * diasChamados)
@@ -271,7 +272,30 @@ describe('lerUsoEstimado — nunca lança mesmo se o Redis falhar', () => {
   it('nunca faz mais que 31 leituras, mesmo em teoria', async () => {
     const client = { hgetall: vi.fn(async () => ({ total: '1' })) }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await lerUsoEstimado(client as any)
+    await lerAmostraInterna(client as any)
     expect((client.hgetall as ReturnType<typeof vi.fn>).mock.calls.length).toBeLessThanOrEqual(31)
+  })
+})
+
+describe('terminologia de lerAmostraInterna — nunca oficial nem estimativa completa (cenário obrigatório 8)', () => {
+  it('sempre retorna o aviso completo em avisoOficial, mesmo em caso de falha total', async () => {
+    const clienteFalhando = { hgetall: vi.fn(async () => { throw new Error('indisponível') }) }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const semDados = await lerAmostraInterna(clienteFalhando as any)
+    expect(semDados.avisoOficial).toBe(AVISO_AMOSTRA_NAO_OFICIAL)
+
+    const clienteOk = { hgetall: vi.fn(async () => ({ total: '5' })) }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const comDados = await lerAmostraInterna(clienteOk as any)
+    expect(comDados.avisoOficial).toBe(AVISO_AMOSTRA_NAO_OFICIAL)
+  })
+
+  it('a fonte nunca é rotulada como "oficial" ou "completa"', async () => {
+    const client = { hgetall: vi.fn(async () => ({ total: '5' })) }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const resultado = await lerAmostraInterna(client as any)
+    expect(resultado.fonte).not.toMatch(/oficial/i)
+    expect(resultado.fonte).not.toMatch(/completa/i)
+    expect(resultado.fonte).toBe('amostra_interna_observada')
   })
 })
