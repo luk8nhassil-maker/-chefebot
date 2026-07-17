@@ -131,7 +131,7 @@ describe("POST /api/financeiro (registrar/editar custo)", () => {
 });
 
 describe("PATCH /api/financeiro (fechar mês)", () => {
-  const body = { mes: "2026-07", fechadoPor: "contador" };
+  const body = { mes: "2026-07" };
 
   it("401 sem cookie", async () => {
     const res = await PATCH(reqBody("PATCH", body, false));
@@ -139,23 +139,40 @@ describe("PATCH /api/financeiro (fechar mês)", () => {
   });
 
   it("403 para financeiro (sem call site — só /contador fecha o mês)", async () => {
-    verifyTokenMock.mockResolvedValue({ role: "financeiro" });
+    verifyTokenMock.mockResolvedValue({ username: "ana", role: "financeiro" });
     const res = await PATCH(reqBody("PATCH", body));
     expect(res.status).toBe(403);
     expect(store.get("mes_status:2026-07")).toBeUndefined();
   });
 
   it("200 para contador e fecha o mês", async () => {
-    verifyTokenMock.mockResolvedValue({ role: "contador" });
+    verifyTokenMock.mockResolvedValue({ username: "carlos", role: "contador" });
     const res = await PATCH(reqBody("PATCH", body));
     expect(res.status).toBe(200);
     expect((store.get("mes_status:2026-07") as { fechado: boolean }).fechado).toBe(true);
   });
 
   it("200 para admin", async () => {
-    verifyTokenMock.mockResolvedValue({ role: "admin" });
+    verifyTokenMock.mockResolvedValue({ username: "brito", role: "admin" });
     const res = await PATCH(reqBody("PATCH", body));
     expect(res.status).toBe(200);
+  });
+
+  it("deriva fechadoPor do usuário autenticado, nunca do body — um body com fechadoPor: 'admin' não falsifica a identidade", async () => {
+    verifyTokenMock.mockResolvedValue({ username: "carlos", role: "contador" });
+    const res = await PATCH(reqBody("PATCH", { mes: "2026-07", fechadoPor: "admin" }));
+    expect(res.status).toBe(200);
+    const status = store.get("mes_status:2026-07") as { fechadoPor: string };
+    expect(status.fechadoPor).toBe("carlos");
+    expect(status.fechadoPor).not.toBe("admin");
+  });
+
+  it("o valor persistido de fechadoPor vem do JWT mesmo quando o body tenta sobrescrevê-lo com outro nome", async () => {
+    verifyTokenMock.mockResolvedValue({ username: "maria", role: "admin" });
+    const res = await PATCH(reqBody("PATCH", { mes: "2026-07", fechadoPor: "invasor" }));
+    expect(res.status).toBe(200);
+    const status = store.get("mes_status:2026-07") as { fechadoPor: string };
+    expect(status.fechadoPor).toBe("maria");
   });
 });
 

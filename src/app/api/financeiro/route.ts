@@ -76,11 +76,18 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  const negado = exigirRole(await autenticarRequisicao(req), ROLES_FECHAR_MES)
+  const usuario = await autenticarRequisicao(req)
+  const negado = exigirRole(usuario, ROLES_FECHAR_MES)
   if (negado) return negado
   try {
-    const { mes, fechadoPor } = await req.json()
-    const status: MesStatus = { fechado: true, fechadoEm: new Date().toISOString(), fechadoPor }
+    // fechadoPor nunca vem do body — o cliente não é fonte confiável para
+    // afirmar quem fechou o mês. Deriva sempre do usuário autenticado.
+    const { mes } = await req.json()
+    const status: MesStatus = {
+      fechado: true,
+      fechadoEm: new Date().toISOString(),
+      fechadoPor: usuario!.username,
+    }
     await redis.set(`mes_status:${mes}`, status, { ex: 365 * 24 * 60 * 60 * 5 })
     return NextResponse.json({ ok: true })
   } catch {

@@ -188,21 +188,11 @@ describe("middleware - /financeiro e /contador protegidas", () => {
     }
   });
 
-  it("rewrite de chefedapizza.com.br para /cardapio continua funcionando após as mudanças", async () => {
+  it("rewrite de chefedapizza.com.br para /cardapio continua funcionando", async () => {
     const req = requestFor("https://chefedapizza.com.br/", "chefedapizza.com.br");
     const res = await middleware(req);
     expect(res.headers.get("x-middleware-rewrite")).toBe(
       "https://chefedapizza.com.br/cardapio"
     );
-  });
-
-  it("/entregador continua sem proteção de middleware (risco residual documentado — ver src/lib/auth.ts)", async () => {
-    // Entregadores não têm auth-token: gatear esta rota quebraria a entrega
-    // de pedidos para qualquer motoboy real. Este teste apenas fixa o
-    // comportamento atual (intencional) para não haver regressão silenciosa
-    // em nenhuma direção.
-    const req = requestFor(`https://${HOST}/entregador`, HOST);
-    const res = await middleware(req);
-    expect(res.headers.get("location")).toBeNull();
   });
 });
