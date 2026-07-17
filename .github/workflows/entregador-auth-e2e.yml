@@ -33,7 +33,11 @@ env:
   UPSTASH_DISABLE_TELEMETRY: "1"
   VERCEL_ENV: "preview"
   CHEFEBOT_E2E: "1"
-  NODE_ENV: "production"
+  # NODE_ENV=production NÃO fica aqui: `npm ci` interpreta NODE_ENV=production
+  # como sinal para pular devDependencies inteiras (vitest, eslint, etc. nunca
+  # seriam instalados). `next build`/`next start` já forçam NODE_ENV=production
+  # sozinhos, e VERCEL_ENV=preview acima já é suficiente para o gate de
+  # AUTH_SECRET/cookie Secure — não precisamos declarar NODE_ENV aqui.
 
 jobs:
   entregador-auth-e2e:
