@@ -85,6 +85,16 @@ local function semPedido(fila, pedidoId)
   return resultado
 end
 
+-- cjson.encode de uma tabela Lua vazia produz "{}" (objeto), nunca "[]"
+-- (array) — tabelas vazias são ambíguas em Lua. Sem este guard, a última
+-- remoção de uma fila (esvaziando-a) corrompe a chave no Redis: ela deixa
+-- de ser um array JSON válido para quem lê com JSON.parse (ex.: GET
+-- /api/entregador-pedidos), quebrando ".filter"/".map" no consumidor.
+local function encodeArray(fila)
+  if #fila == 0 then return "[]" end
+  return cjson.encode(fila)
+end
+
 local pedidoId = ARGV[2]
 local filaAtual = semPedido(lerFila(KEYS[2]), pedidoId)
 table.insert(filaAtual, cjson.decode(ARGV[3]))
@@ -98,9 +108,9 @@ if mudouEntregador then
 end
 
 redis.call("SET", KEYS[1], ARGV[1])
-redis.call("SET", KEYS[2], cjson.encode(filaAtual), "EX", ARGV[5])
+redis.call("SET", KEYS[2], encodeArray(filaAtual), "EX", ARGV[5])
 if mudouEntregador then
-  redis.call("SET", KEYS[3], cjson.encode(filaAnterior))
+  redis.call("SET", KEYS[3], encodeArray(filaAnterior))
   if ttlAnterior > 0 then
     redis.call("PEXPIRE", KEYS[3], ttlAnterior)
   else
