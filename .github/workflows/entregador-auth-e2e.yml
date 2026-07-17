@@ -92,7 +92,7 @@ jobs:
 
       - name: Testes focados da autenticação do entregador
         run: >-
-          npx vitest run
+          npm test --
           src/lib/entregadorAuth.test.ts
           src/app/api/entregador/auth/logout/route.test.ts
           src/app/api/entregador/auth/me/route.test.ts
@@ -105,7 +105,7 @@ jobs:
 
       - name: Lint dos arquivos relacionados à autenticação do entregador
         run: >-
-          npx eslint
+          npm run lint --
           src/lib/entregadorAuth.ts
           src/lib/entregadorAuth.test.ts
           src/app/api/entregador/auth/logout/route.ts
