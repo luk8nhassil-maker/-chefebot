@@ -31,6 +31,20 @@ Só considerar uma tarefa em produção quando o deploy estiver `Ready` no proje
 
 ---
 
+## Canário de diagnóstico do WhatsApp (`/dev/whatsapp`)
+
+Painel só-leitura/ação explícita em `/dev/whatsapp` (admin/dev) com um teste
+real ponta-a-ponta sob demanda (`POST /api/dev/whatsapp/canary`), sem cron
+nem polling. Requer a env var `WHATSAPP_CANARY_PHONE` configurada em
+Production na Vercel — único telefone que pode receber o teste, nunca aceito
+por parâmetro da requisição. Nunca commitar o valor real dessa variável em
+código, teste, log ou documentação versionada; configurar só no painel da
+Vercel. Rate limit de 1 início a cada 5 minutos; TTL do teste de 10 minutos.
+Ver `src/lib/whatsappCanary.ts` para a lógica e `src/app/dev/whatsapp/page.tsx`
+para o painel.
+
+---
+
 ## Checklist manual final antes da PWA
 
 Executar manualmente em produção (`chefebot-pjif.vercel.app`) antes de iniciar a implementação da PWA:

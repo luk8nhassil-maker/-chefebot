@@ -28,6 +28,8 @@ import type { BotStep } from "@/lib/bot";
 import { obterConfigEvolution } from "@/lib/evolutionApi";
 import { enviarTextoWhatsApp } from "@/lib/whatsappMensagem";
 import { ehEcoPainel, validarMessageId } from "@/lib/conversaEcoPainel";
+import { processarPossivelInboundCanario } from "@/lib/whatsappCanary";
+import { marcarInboundRecebido, marcarOutboundConfirmado } from "@/lib/whatsappDiag";
 
 export const maxDuration = 30;
 
@@ -301,6 +303,7 @@ export async function enviarMensagem(phone: string, message: string, ritmoRapido
   // enviarRespostas() fazia, para que toda chamada de enviarMensagem() passe
   // a aparecer no histórico/painel.
   await registrarMensagem(phone, "bot", message);
+  marcarOutboundConfirmado().catch(() => {});
 }
 
 async function enviarImagem(phone: string, imageUrl: string) {
@@ -983,8 +986,27 @@ export async function POST(req: NextRequest) {
     const phone = data?.key?.remoteJid?.replace("@s.whatsapp.net", "");
     if (!phone) return NextResponse.json({ ok: true });
 
-    // Idempotência global: ignora mensagens já processadas (Evolution pode reenviar webhooks)
     const msgId = data?.key?.id as string | undefined;
+
+    // Canário de diagnóstico (Etapa G): se o remetente for exatamente
+    // WHATSAPP_CANARY_PHONE e o texto for exatamente o token do teste ativo,
+    // trata como round-trip do canário e retorna — nunca cai no fluxo normal
+    // do cliente (sem sessão, pedido, carrinho, bot_ativo/manual/spam gates).
+    // Qualquer outra combinação (telefone diferente, token errado/expirado)
+    // devolve false sem efeito colateral e segue o fluxo normal abaixo.
+    try {
+      const textoCanario =
+        data?.message?.conversation || data?.message?.extendedTextMessage?.text || "";
+      const foiCanario = await processarPossivelInboundCanario(phone, textoCanario, msgId);
+      if (foiCanario) return NextResponse.json({ ok: true });
+    } catch (err) {
+      console.error("[ChefeBot] Erro ao avaliar canário (ignorado, segue fluxo normal):", err);
+    }
+
+    // Sinal de saúde best-effort (nunca gate) — mensagem real recebida agora.
+    marcarInboundRecebido().catch(() => {});
+
+    // Idempotência global: ignora mensagens já processadas (Evolution pode reenviar webhooks)
     if (msgId) {
       const idempotencyKey = `msg_processed:${msgId}`;
       const jaProcessado = await redis.get(idempotencyKey);
