@@ -69,9 +69,13 @@ describe("enviarMensagem — falha da Evolution não registra mensagem falsa", (
     expect(registrarMensagemMock).not.toHaveBeenCalled();
   });
 
-  test("exceção de rede propaga (comportamento já existente) e não registra", async () => {
-    enviarTextoWhatsAppMock.mockRejectedValue(new Error("network down"));
-    await expect(enviarMensagem(PHONE, "oi")).rejects.toThrow("network down");
+  test("se enviarTextoWhatsApp lançar por algum motivo inesperado, a exceção propaga e não registra", async () => {
+    // enviarTextoWhatsApp real não lança mais para falha de rede (agora vira
+    // ok:false motivo network_error/timeout, ver whatsappMensagem.test.ts) —
+    // este teste cobre o caso defensivo de uma exceção verdadeiramente
+    // inesperada vinda do mock, não o caminho normal de falha de rede.
+    enviarTextoWhatsAppMock.mockRejectedValue(new Error("erro inesperado"));
+    await expect(enviarMensagem(PHONE, "oi")).rejects.toThrow("erro inesperado");
     expect(registrarMensagemMock).not.toHaveBeenCalled();
   });
 });
