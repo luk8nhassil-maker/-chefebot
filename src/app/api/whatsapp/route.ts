@@ -28,8 +28,13 @@ import type { BotStep } from "@/lib/bot";
 import { obterConfigEvolution } from "@/lib/evolutionApi";
 import { enviarTextoWhatsApp } from "@/lib/whatsappMensagem";
 import { ehEcoPainel, validarMessageId } from "@/lib/conversaEcoPainel";
-import { processarPossivelInboundCanario } from "@/lib/whatsappCanary";
+import {
+  CanaryInboundRetryableError,
+  ehEcoOutboundCanario,
+  processarPossivelInboundCanario,
+} from "@/lib/whatsappCanary";
 import { marcarInboundRecebido, marcarOutboundConfirmado } from "@/lib/whatsappDiag";
+import { sanitizeErrorMessage } from "@/lib/sanitizeLog";
 
 export const maxDuration = 30;
 
@@ -972,13 +977,12 @@ export async function POST(req: NextRequest) {
         if (fromPhone) {
           const msgIdFrom = validarMessageId(data?.key?.id);
           const ecoDoPainel = msgIdFrom ? await ehEcoPainel(msgIdFrom) : false;
-          if (!ecoDoPainel) {
-            const txtFrom =
-              data?.message?.conversation ||
-              data?.message?.extendedTextMessage?.text ||
-              "";
-            if (txtFrom) await registrarMensagem(fromPhone, "atendente", txtFrom);
-          }
+          const txtFrom =
+            data?.message?.conversation ||
+            data?.message?.extendedTextMessage?.text ||
+            "";
+          const ecoDoCanario = txtFrom ? ehEcoOutboundCanario(fromPhone, txtFrom) : false;
+          if (!ecoDoPainel && !ecoDoCanario && txtFrom) await registrarMensagem(fromPhone, "atendente", txtFrom);
         }
       } catch {}
       return NextResponse.json({ ok: true });
@@ -988,23 +992,30 @@ export async function POST(req: NextRequest) {
 
     const msgId = data?.key?.id as string | undefined;
 
+    // Sinal de saúde best-effort (nunca gate), inclusive para o inbound do
+    // canário que retorna antes do fluxo comercial normal.
+    marcarInboundRecebido().catch(() => {});
+
     // Canário de diagnóstico (Etapa G): se o remetente for exatamente
     // WHATSAPP_CANARY_PHONE e o texto for exatamente o token do teste ativo,
     // trata como round-trip do canário e retorna — nunca cai no fluxo normal
     // do cliente (sem sessão, pedido, carrinho, bot_ativo/manual/spam gates).
-    // Qualquer outra combinação (telefone diferente, token errado/expirado)
-    // devolve false sem efeito colateral e segue o fluxo normal abaixo.
+    // Token reconhecível do número autorizado é sempre consumido, mesmo se
+    // expirado/superseded; só texto comum ou outro telefone segue o bot.
     try {
       const textoCanario =
         data?.message?.conversation || data?.message?.extendedTextMessage?.text || "";
       const foiCanario = await processarPossivelInboundCanario(phone, textoCanario, msgId);
       if (foiCanario) return NextResponse.json({ ok: true });
     } catch (err) {
-      console.error("[ChefeBot] Erro ao avaliar canário (ignorado, segue fluxo normal):", err);
+      if (err instanceof CanaryInboundRetryableError) {
+        return NextResponse.json(
+          { ok: false, retry: true },
+          { status: 503, headers: { "Retry-After": String(Math.max(1, err.retryAfterSeconds)) } }
+        );
+      }
+      console.error("[ChefeBot] Erro ao avaliar canário (sanitizado):", sanitizeErrorMessage(err));
     }
-
-    // Sinal de saúde best-effort (nunca gate) — mensagem real recebida agora.
-    marcarInboundRecebido().catch(() => {});
 
     // Idempotência global: ignora mensagens já processadas (Evolution pode reenviar webhooks)
     if (msgId) {
