@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { redis } from "@/lib/redis";
-import { autenticarEntregador } from "@/lib/entregadorAuth";
+import { autenticarEntregador, pedidoIdValido } from "@/lib/entregadorAuth";
 import type {
   LocalizacaoEntregador,
   LocalizacaoPublica,
@@ -15,10 +15,6 @@ type PedidoMain = {
 
 function coordenadaValida(value: unknown, min: number, max: number): value is number {
   return typeof value === "number" && Number.isFinite(value) && value >= min && value <= max;
-}
-
-function pedidoIdValido(value: unknown): value is string {
-  return typeof value === "string" && value.length > 0 && value.length <= 128;
 }
 
 export async function POST(req: NextRequest) {

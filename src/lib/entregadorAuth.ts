@@ -15,6 +15,7 @@ const ENTREGADOR_SESSION_TYPE = "entregador";
 const TICKET_BYTES = 32;
 const TICKET_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
+const PEDIDO_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 
 export type EntregadorSessao = {
   entregadorId: string;
@@ -30,9 +31,23 @@ type RegistroTicket = {
   expiraEm: string;
 };
 
+/**
+ * Verdadeiro em produção e em qualquer Preview hospedado na Vercel. Checar
+ * só `NODE_ENV === "production"` deixa passar silenciosamente ambientes
+ * hospedados onde essa variável não vem exatamente assim — `VERCEL_ENV`
+ * cobre esse caso e nunca é definida fora da Vercel (não afeta dev/CI local).
+ */
+function ambienteExigeSeguranca(): boolean {
+  return (
+    process.env.NODE_ENV === "production" ||
+    process.env.VERCEL_ENV === "production" ||
+    process.env.VERCEL_ENV === "preview"
+  );
+}
+
 function getSecret() {
   const segredoConfigurado = process.env.AUTH_SECRET?.trim();
-  if (!segredoConfigurado && process.env.NODE_ENV === "production") {
+  if (!segredoConfigurado && ambienteExigeSeguranca()) {
     throw new Error("AUTH_SECRET obrigatorio para autenticar entregadores em producao");
   }
   const segredoBase = segredoConfigurado || "chefebot-dev-secret-local-entregador";
@@ -49,6 +64,16 @@ export function entregadorIdValido(value: unknown): value is string {
 
 export function ticketAcessoValido(value: unknown): value is string {
   return typeof value === "string" && TICKET_PATTERN.test(value);
+}
+
+/**
+ * Todo pedidoId usado como componente de chave Redis (`loc:`,
+ * `entregador:pedidos:`, `entregador:rate:localizacao:`) precisa respeitar
+ * este charset, não só o tamanho — evita que um valor com `:` ou espaço
+ * colida com outro padrão de chave no mesmo namespace.
+ */
+export function pedidoIdValido(value: unknown): value is string {
+  return typeof value === "string" && PEDIDO_ID_PATTERN.test(value);
 }
 
 export function hashTicketAcesso(ticket: string): string {
@@ -204,7 +229,7 @@ export function normalizarTelefoneEntregador(telefone: string): string {
 export function cookieEntregadorOptions(maxAge = ENTREGADOR_SESSAO_TTL_SEGUNDOS) {
   return {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: ambienteExigeSeguranca(),
     sameSite: "lax" as const,
     path: "/",
     maxAge,

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { redis } from "@/lib/redis";
-import { autenticarEntregador } from "@/lib/entregadorAuth";
+import { autenticarEntregador, pedidoIdValido } from "@/lib/entregadorAuth";
 import type { PedidoEntregador } from "@/types/entregador";
 import { creditarPontosPedidoEntregue } from "@/lib/fidelidade";
 
@@ -15,10 +15,6 @@ type PedidoMain = {
 };
 
 const ACAO_PATTERN = /^(iniciar|entregar)$/;
-
-function pedidoIdValido(value: unknown): value is string {
-  return typeof value === "string" && value.length > 0 && value.length <= 128;
-}
 
 export async function GET(req: NextRequest) {
   try {

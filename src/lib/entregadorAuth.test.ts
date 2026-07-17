@@ -33,6 +33,7 @@ import {
   criarTokenEntregador,
   hashTicketAcesso,
   montarLinkAcessoEntregador,
+  pedidoIdValido,
   verificarTokenEntregador,
 } from "./entregadorAuth";
 import { createToken } from "./auth";
@@ -45,6 +46,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.stubEnv("AUTH_SECRET", "segredo-de-teste-com-entropia-suficiente");
   vi.stubEnv("NODE_ENV", "test");
+  vi.stubEnv("VERCEL_ENV", "");
   store.set("entregadores", [entregador]);
 });
 
@@ -148,6 +150,22 @@ describe("sessão separada do entregador", () => {
     expect(await verificarTokenEntregador(tokenValido)).toBeNull();
   });
 
+  it("Preview da Vercel sem AUTH_SECRET falha fechado mesmo com NODE_ENV diferente de production", async () => {
+    vi.stubEnv("NODE_ENV", "test");
+    vi.stubEnv("VERCEL_ENV", "preview");
+    vi.stubEnv("AUTH_SECRET", "");
+
+    await expect(criarTokenEntregador(entregador)).rejects.toThrow(/AUTH_SECRET/);
+  });
+
+  it("VERCEL_ENV=production sem AUTH_SECRET falha fechado mesmo com NODE_ENV diferente de production", async () => {
+    vi.stubEnv("NODE_ENV", "test");
+    vi.stubEnv("VERCEL_ENV", "production");
+    vi.stubEnv("AUTH_SECRET", "");
+
+    await expect(criarTokenEntregador(entregador)).rejects.toThrow(/AUTH_SECRET/);
+  });
+
   it("desenvolvimento continua funcional com fallback exclusivamente local", async () => {
     vi.stubEnv("NODE_ENV", "development");
     vi.stubEnv("AUTH_SECRET", "");
@@ -175,5 +193,35 @@ describe("sessão separada do entregador", () => {
     expect(options.path).toBe("/");
     expect(options.maxAge).toBeGreaterThan(0);
     expect(options.expires).toBeInstanceOf(Date);
+  });
+
+  it("cookie é Secure em Preview da Vercel mesmo com NODE_ENV diferente de production", () => {
+    vi.stubEnv("NODE_ENV", "test");
+    vi.stubEnv("VERCEL_ENV", "preview");
+    expect(cookieEntregadorOptions().secure).toBe(true);
+  });
+
+  it("cookie não é Secure fora de produção/Preview", () => {
+    vi.stubEnv("NODE_ENV", "test");
+    vi.stubEnv("VERCEL_ENV", "");
+    expect(cookieEntregadorOptions().secure).toBe(false);
+  });
+});
+
+describe("pedidoIdValido", () => {
+  it("aceita charset seguro dentro do limite de tamanho", () => {
+    expect(pedidoIdValido("1768000000000")).toBe(true);
+    expect(pedidoIdValido("e2e-pedido-222")).toBe(true);
+    expect(pedidoIdValido("a".repeat(128))).toBe(true);
+  });
+
+  it("rejeita valores fora do charset, vazios, longos demais ou não-string", () => {
+    expect(pedidoIdValido("ped:1")).toBe(false);
+    expect(pedidoIdValido("ped 1")).toBe(false);
+    expect(pedidoIdValido("../pedidos")).toBe(false);
+    expect(pedidoIdValido("")).toBe(false);
+    expect(pedidoIdValido("a".repeat(129))).toBe(false);
+    expect(pedidoIdValido(123)).toBe(false);
+    expect(pedidoIdValido(null)).toBe(false);
   });
 });

@@ -20,7 +20,10 @@ const { store, redisMock, authMock, pontosMock } = vi.hoisted(() => {
 });
 
 vi.mock("@/lib/redis", () => ({ redis: redisMock }));
-vi.mock("@/lib/entregadorAuth", () => ({ autenticarEntregador: authMock }));
+vi.mock("@/lib/entregadorAuth", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/entregadorAuth")>();
+  return { ...actual, autenticarEntregador: authMock };
+});
 vi.mock("@/lib/fidelidade", () => ({ creditarPontosPedidoEntregue: pontosMock }));
 
 import { GET, POST } from "./route";
