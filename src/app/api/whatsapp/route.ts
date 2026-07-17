@@ -13,7 +13,7 @@ import { log } from "@/lib/logger";
 import { analisarComprovantePix } from "@/lib/analisarComprovante";
 import { transcreverAudio } from "@/lib/transcribeAudio";
 import { proximoNumeroPedido } from "@/lib/numeracao";
-import { salvarStatusConexao, botPodeResponder, StatusConexao } from "@/lib/conexaoWhatsapp";
+import { salvarStatusConexao, StatusConexao } from "@/lib/conexaoWhatsapp";
 import { ehConfirmacaoPedido } from "@/lib/confirmacaoPedido";
 import { escolherStepDeRetomada, detectarConversaMorta } from "@/lib/reviverConversa";
 import { clientePediuChavePixManual, confirmarPixMetadata, criarPixMetadata, marcarPixRevisaoOuSuspeito, montarMensagensChavePixManual, montarMensagensPixMercadoPagoWhatsApp, prepararPixProviderMercadoPago, registrarPixEvidencia, serializarPixCliente, type PixCliente, type PixEvidenciaOrigem, type PixMetadata } from "@/lib/pix";
@@ -932,14 +932,19 @@ export async function POST(req: NextRequest) {
 
     if (body.event !== "messages.upsert") return NextResponse.json({ ok: true });
 
-    // Se a conexão não está ativa, ainda assim aceitamos a requisição (não perdemos a
-    // mensagem que a Evolution já recebeu), mas pausamos a RESPOSTA automática do bot.
-    // Quando a conexão voltar, o cliente pode reenviar e o bot responde normalmente —
-    // nenhuma intervenção manual é necessária, e o servidor não precisa reiniciar.
-    const conexaoAtiva = await botPodeResponder();
-    if (!conexaoAtiva) {
-      await log("info", "Mensagem recebida com WhatsApp desconectado/conectando — resposta pausada", "");
-      return NextResponse.json({ ok: true });
+    // Um messages.upsert real, entregue pela própria Evolution, já é prova de que o
+    // canal de entrada está operacional — mesmo que whatsapp_connection_status no
+    // Redis ainda guarde um status antigo (ex.: a reconexão já terminou, mas o
+    // connection.update correspondente não chegou ou não foi processado a tempo).
+    // Por isso NÃO pausamos mais a resposta com base só nesse status em cache: só
+    // sincronizamos ele (best-effort, nunca derruba o webhook) e seguimos
+    // processando normalmente. A confirmação real de que o canal de SAÍDA está
+    // ativo continua sendo a resposta HTTP do /message/sendText em enviarMensagem
+    // — nunca este status lido do Redis.
+    try {
+      await salvarStatusConexao("connected");
+    } catch (err) {
+      console.error("[ChefeBot] Falha ao sincronizar status de conexão a partir de messages.upsert (ignorada):", err);
     }
 
     const data = body.data;
