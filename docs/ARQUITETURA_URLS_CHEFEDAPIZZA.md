@@ -69,7 +69,7 @@ Confirmado por leitura direta de código (não apenas grep):
 - `src/lib/evolutionApi.ts:13` — `WEBHOOK_URL_PADRAO = "https://chefebot-pjif.vercel.app/api/whatsapp"` — fallback só usado se `EVOLUTION_WEBHOOK_URL` não estiver setada (`src/lib/evolutionApi.ts:51`); a config real vem de env var, não é hardcode cego.
 - Fallbacks com `process.env.VERCEL_URL` antes do hardcode: `src/app/api/whatsapp/route.ts:201`, `src/app/api/pedido-app/route.ts:280`, `src/lib/pixGuardiaoScheduler.ts:66`, `src/app/api/cardapio-imagens/route.ts:44` (este usa `NEXT_PUBLIC_URL`).
 - **Não existe hoje nenhuma variável de ambiente do tipo `SITE_URL`/`BASE_URL`/`APP_URL` documentada em `.env.example`** — não há uma única fonte de verdade para "URL base do app".
-- **Consequência direta**: o rewrite de `middleware.ts` (item 1.1) faz a *entrada* funcionar em `chefedapizza.com.br`, mas os links que o bot *envia* ao cliente continuam apontando para `chefebot-pjif.vercel.app`. Hoje isso ainda funciona (o domínio antigo continua servindo o app), mas gera inconsistência de marca e é o primeiro ponto a corrigir na migração — **e essa correção é código de produção, fora do escopo "somente auditoria" deste documento**.
+- **Consequência direta**: o rewrite de `middleware.ts` (item 1.1) faz a *entrada* funcionar em `chefedapizza.com.br`, mas os links que o bot *envia* ao cliente continuam apontando para `chefebot-pjif.vercel.app`. Hoje isso ainda funciona (o domínio antigo continua servindo o app), mas gera inconsistência de marca. **Essa correção é código de produção, fora do escopo "somente auditoria" deste documento** — o plano de correção (via `PUBLIC_SITE_URL`/`getCardapioUrl()`, sem misturar com URLs de callback de integração) está nas seções 3 e 10, e sua posição na ordem de execução (depois de fechar o gap de segurança pré-existente) está na seção 15.
 
 ### 1.8 QR Codes
 
@@ -167,25 +167,80 @@ Classificação: **cliente pública**, **cliente autenticada**, **equipe operaci
 
 ## 3. Arquitetura final recomendada
 
-Arquitetura-alvo proposta pelo usuário, adotada como recomendação (não implementada nesta etapa):
+Arquitetura-alvo proposta pelo usuário, adotada como recomendação (não implementada nesta etapa).
 
-**Área do cliente** (apex `chefedapizza.com.br`):
+**Princípio arquitetural central desta seção**: URLs enviadas a pessoas (cliente ou equipe) e URLs usadas por integrações/callbacks técnicos pertencem a **superfícies diferentes** e não devem ser derivadas de uma única constante. As três famílias abaixo (3.1) são o modelo recomendado; o módulo central de criação de URLs (3.2) formaliza essa separação em código; o mapeamento de rotas por área (3.3) é o desenho de produto já proposto pelo usuário.
+
+### 3.1 Três famílias de URL
+
+#### A. Origem pública do cliente — `PUBLIC_SITE_URL`
+
+```bash
+PUBLIC_SITE_URL=https://chefedapizza.com.br
+```
+
+Responsável apenas por endereços destinados ao cliente final: cardápio, conta, pedidos do cliente, rastreamento, promoções públicas, qualquer link compartilhado com clientes (WhatsApp, notificação, futura mensagem de e-mail). **Não deve ser exposta como `NEXT_PUBLIC_*` por padrão** — só deve ganhar o prefixo `NEXT_PUBLIC_` no dia em que um componente client realmente precisar lê-la no navegador (hoje, todos os usos identificados na seção 1.7 são server-side, dentro de rotas de API que montam mensagens de WhatsApp — não há necessidade de expor ao bundle do cliente).
+
+#### B. Origem operacional da equipe — `PANEL_SITE_URL`
+
+```bash
+PANEL_SITE_URL=https://painel.chefedapizza.com.br
+```
+
+Responsável por: login da equipe, `/pedidos`, `/conversas`, `/admin`, `/configuracoes`, `/relatorios`, `/financeiro`, `/contador`, `/entregador`. **Enquanto o subdomínio `painel.chefedapizza.com.br` não estiver ativo** (depende do PR de registro de domínio e da PoC de cookie — seção 14), a implementação futura pode usar `PUBLIC_SITE_URL` como fallback operacional temporário para montar o link do entregador (`APP_BASE_URL` atual, seção 1.7) — mas isso deve ficar **explicitamente documentado no código como transição** (comentário citando este documento), nunca apresentado como arquitetura final. O link do entregador não deve apontar para `painel.chefedapizza.com.br` antes de esse host estar registrado, protegido e validado (ver gate de segurança na seção 11).
+
+#### C. URLs de integrações e callbacks — independentes, uma por integração
+
+Mantidas como configurações explícitas e isoladas, **nunca derivadas automaticamente de `PUBLIC_SITE_URL` nem de `PANEL_SITE_URL`**:
+
+- `EVOLUTION_WEBHOOK_URL` (já existe, `src/lib/evolutionApi.ts:51`);
+- `PIX_GUARDIAO_QSTASH_CALLBACK_URL` (já existe, `.env.example:16-18`);
+- URL do webhook do Mercado Pago — configurada manualmente no painel externo do Mercado Pago (seção 1.11), não vive no código;
+- qualquer callback futuro de cron, imagem (`NEXT_PUBLIC_URL` em `src/app/api/cardapio-imagens/route.ts:44`) ou nova integração.
+
+**Por que não unificar**: uma URL de navegação humana (cardápio, painel) e uma URL de callback de infraestrutura (webhook, cron) têm ciclos de vida, donos e níveis de confiança diferentes — trocar o domínio público do cliente não deveria, por acidente, mudar para onde o Mercado Pago ou o QStash enviam notificações, e vice-versa. Reunir as duas coisas numa única constante (`NEXT_PUBLIC_SITE_URL` genérica, por exemplo) foi uma recomendação inicial deste documento e está **corrigida** aqui: não deve ser adotada.
+
+### 3.2 Módulo central de criação de URLs (recomendação para implementação futura)
+
+Recomenda-se, no PR que introduzir `PUBLIC_SITE_URL`/`PANEL_SITE_URL` (seção 14), criar um módulo tipado `src/lib/appUrls.ts` com funções pequenas e específicas, por exemplo:
+
+- `getCardapioUrl()` — retorna `PUBLIC_SITE_URL` (a raiz; **não** `PUBLIC_SITE_URL + "/cardapio"`, pois a raiz já é o cardápio oficial via o rewrite existente em `middleware.ts:22-26`);
+- `getContaClienteUrl()` — retorna `PUBLIC_SITE_URL/conta` (só depois do PR de aliases da seção 14 existir; até lá, `PUBLIC_SITE_URL/cliente`);
+- `getPedidosClienteUrl()` — mesma lógica para `/meus-pedidos` vs. `/cliente/pedidos`;
+- `getRastreioUrl(pedidoId)` — `PUBLIC_SITE_URL/rastrear/${pedidoId}` até o alias `/acompanhar` existir; só então passa a montar `/acompanhar/${pedidoId}`;
+- `getPainelUrl()` — retorna `PANEL_SITE_URL` (ou `PUBLIC_SITE_URL` como fallback documentado enquanto o subdomínio não estiver ativo, conforme 3.1-B);
+- `getEntregadorUrl(pedidoId)` — mesma regra de fallback de `getPainelUrl()`.
+
+Este módulo deve **separar claramente `PUBLIC_SITE_URL` de `PANEL_SITE_URL`** internamente (funções diferentes, nunca uma função genérica `getBaseUrl()` compartilhada pelas duas famílias) e **não deve conter nenhum segredo** (API keys, tokens de webhook) — só strings de URL de navegação. As URLs de integração (3.1-C) permanecem fora deste módulo, lidas diretamente de suas próprias variáveis de ambiente onde já são usadas hoje (`src/lib/evolutionApi.ts`, `src/lib/pixGuardiaoScheduler.ts`).
+
+### 3.3 Mapeamento de rotas por área
+
+**Área do cliente** (apex `chefedapizza.com.br`, fonte: `PUBLIC_SITE_URL`):
 
 - `https://chefedapizza.com.br` → `/cardapio`
 - `https://chefedapizza.com.br/conta` → `/cliente`
 - `https://chefedapizza.com.br/meus-pedidos` → `/cliente/pedidos`
 - `https://chefedapizza.com.br/acompanhar/[pedidoId]` → `/rastrear/[pedidoId]`
 
-**Área da equipe** (subdomínio `painel.chefedapizza.com.br`):
+**Área da equipe** (subdomínio `painel.chefedapizza.com.br`, fonte: `PANEL_SITE_URL`):
 
 - `https://painel.chefedapizza.com.br` → futuramente `/pedidos`
-- `/pedidos`, `/admin`, `/configuracoes`, `/relatorios`, `/login`
+- `/pedidos`, `/admin`, `/configuracoes`, `/relatorios`, `/login`, `/financeiro`, `/contador`, `/entregador`
 
 **Área técnica**: permanece em `chefebot-pjif.vercel.app` para `/dev`, `/setup` — sem `dev.chefedapizza.com.br`, sem exposição pública de rotas técnicas.
 
 **APIs**: permanecem em `/api/*` do mesmo projeto — sem `api.chefedapizza.com.br`.
 
 **`www`**: `www.chefedapizza.com.br` planejado como redirect permanente para o apex — não implementado nesta etapa (envolve DNS).
+
+### 3.4 Regra canônica final
+
+- `chefedapizza.com.br` é o domínio público do cliente.
+- `painel.chefedapizza.com.br` é o domínio operacional da equipe.
+- `chefebot-pjif.vercel.app` permanece como domínio técnico e de contingência (não é substituído, nem descontinuado por esta migração).
+- `/api/*` permanece no mesmo projeto, sem subdomínio próprio.
+- Rotas antigas (`/cardapio`, `/cliente`, `/cliente/pedidos`, `/rastrear/[pedidoId]`, `/pedidos`, `/admin`, `/configuracoes`, `/relatorios`) permanecem válidas por compatibilidade — nenhuma é removida (seção 5).
+- Nenhum domínio `.com` sem `.br` deve ser usado — `chefedapizza.com.br` é o único domínio oficial (`chefedapizza.com` é outro domínio, não relacionado).
 
 ---
 
@@ -285,30 +340,62 @@ Este documento **não recomenda uma opção final** sem validação em produçã
 
 ## 10. Impacto em APIs, Pix, WhatsApp e webhooks
 
-- **APIs (`/api/*`)**: nenhuma mudança de rota necessária — permanecem no mesmo projeto, chamadas via path relativo (confirmado ausência de CORS e ausência de fetch absoluto — seção 1.10). O plano do usuário de "não criar `api.chefedapizza.com.br`" é consistente com o que já existe.
-- **Pix/Mercado Pago**: nenhuma mudança de código necessária a princípio — o webhook é registrado manualmente no painel do Mercado Pago (seção 1.11), fora do repositório. **Ação operacional (não-código) a não esquecer**: se o host que responde `/api/pix/webhook` mudar (ex.: se o domínio oficial de produção migrar do Vercel para `chefedapizza.com.br` em algum momento futuro), a URL cadastrada no painel do Mercado Pago precisa ser atualizada manualmente — isso é orquestração externa, não uma mudança de PR.
-- **WhatsApp (mensagens enviadas ao cliente)**: **requer mudança de código real** para os links ficarem corretos:
-  - `LINK_CARDAPIO_DIGITAL` (`src/lib/bot.ts:1039`) e a string duplicada em `src/app/api/whatsapp/route.ts:1363` continuam apontando para `chefebot-pjif.vercel.app`.
-  - `APP_BASE_URL` (`src/app/api/orders/route.ts:27`) idem, usada nos links de rastreio e entregador.
-  - Essa correção é necessária **independente** da introdução de `/acompanhar` ou `painel.` — mesmo mantendo `/rastrear/[id]` como path real, o domínio enviado deveria ser `chefedapizza.com.br`, não o domínio Vercel. **Recomenda-se que isso seja o primeiro PR de código desta iniciativa** (antes de qualquer subdomínio), por ser isolado, de baixo risco, e já resolver a inconsistência de marca identificada na seção 1.7.
-- **Evolution API (webhook recebido)**: `EVOLUTION_WEBHOOK_URL` já é configurável por env var (seção 1.7) — não depende de mudança de código, só de configuração de ambiente/infra, se o host de recebimento mudar.
-- **QStash/Guardião Pix**: `PIX_GUARDIAO_QSTASH_CALLBACK_URL` já é configurável por env var (`.env.example:16-18`) — mesma situação.
-- **Cron interno**: paths `/api/cron/*` não mudam de host (mesmo projeto Vercel sempre os executa).
+**Princípio desta seção** (ver 3.1-C): links de navegação humana (WhatsApp para cliente/entregador) e URLs de callback de integração (webhook, cron, QStash) são tratados como **duas categorias separadas**, com PRs independentes (seção 14) — nunca a mesma mudança de código.
+
+### 10.1 Links de navegação humana enviados por WhatsApp
+
+**Requer mudança de código real**, usando `PUBLIC_SITE_URL`/`getCardapioUrl()`/`getRastreioUrl()` (seção 3.2), **nunca** as variáveis de callback de integração:
+
+- `LINK_CARDAPIO_DIGITAL` (`src/lib/bot.ts:1039`) e a string duplicada em `src/app/api/whatsapp/route.ts:1363` continuam apontando para `chefebot-pjif.vercel.app`. Correção: passam a usar `getCardapioUrl()`, que retorna **a raiz** de `PUBLIC_SITE_URL` (`https://chefedapizza.com.br`) — não `PUBLIC_SITE_URL + "/cardapio"`, porque a raiz já é o cardápio oficial (rewrite existente, seção 1.1). Ver ordem de ativação em 10.3.
+- `APP_BASE_URL` (`src/app/api/orders/route.ts:27`), usada em `route.ts:241` (link ao entregador) e `route.ts:252` (link de rastreio ao cliente): o link de rastreio passa a usar `getRastreioUrl(pedidoId)`; o link do entregador passa a usar `getEntregadorUrl(pedidoId)` — que, enquanto `painel.chefedapizza.com.br` não estiver ativo/protegido/validado, cai no fallback documentado de `PUBLIC_SITE_URL` (seção 3.1-B), **não** aponta prematuramente para um subdomínio que ainda não existe.
+- Essa correção (cardápio e rastreio) é necessária **independente** da introdução de `/acompanhar` ou `painel.` — ver ordem de ativação em 10.3. O link do entregador, porém, **depende** da ativação segura do painel (seção 11, gate de segurança) antes de apontar para `painel.chefedapizza.com.br/entregador?id=...`.
+
+### 10.2 URLs de integração e callbacks (isoladas, PR próprio)
+
+- **Pix/Mercado Pago**: nenhuma mudança de código necessária a princípio — o webhook é registrado manualmente no painel do Mercado Pago (seção 1.11), fora do repositório. **Ação operacional (não-código) a não esquecer**: se o host que responde `/api/pix/webhook` mudar, a URL cadastrada no painel do Mercado Pago precisa ser atualizada manualmente — orquestração externa, não uma mudança de PR, e não deve ser derivada de `PUBLIC_SITE_URL`/`PANEL_SITE_URL`.
+- **Evolution API (webhook recebido)**: `EVOLUTION_WEBHOOK_URL` já é configurável por env var própria (seção 1.7) — permanece assim; não deve passar a ser calculada a partir de `PUBLIC_SITE_URL`.
+- **QStash/Guardião Pix**: `PIX_GUARDIAO_QSTASH_CALLBACK_URL` já é configurável por env var própria (`.env.example:16-18`) — mesma situação, mesma independência.
+- **Imagens do cardápio**: `NEXT_PUBLIC_URL` (`src/app/api/cardapio-imagens/route.ts:44`) é uma variável de infraestrutura de assets, não de navegação — se for consolidada, deve ser avaliada separadamente, não misturada a `PUBLIC_SITE_URL` sem análise própria.
+- **Cron interno**: paths `/api/cron/*` não mudam de host (mesmo projeto Vercel sempre os executa); protegido por `CRON_SECRET`, sem relação com as famílias de URL de navegação.
+- **APIs (`/api/*`) em geral**: nenhuma mudança de rota necessária — permanecem no mesmo projeto, chamadas via path relativo (confirmado ausência de CORS e ausência de fetch absoluto — seção 1.10). O plano de "não criar `api.chefedapizza.com.br`" é consistente com o que já existe.
+
+### 10.3 Ordem de ativação dos links (não pular etapas)
+
+1. **Cardápio** — pode ser corrigido imediatamente para `https://chefedapizza.com.br` (raiz), assim que `PUBLIC_SITE_URL`/`getCardapioUrl()` existirem (seção 14). Não depende de nenhum alias novo.
+2. **Rastreamento** — enquanto `/acompanhar/[pedidoId]` não existir, as mensagens continuam usando `https://chefedapizza.com.br/rastrear/[pedidoId]` (via `getRastreioUrl()`, que só muda de path depois que o PR de aliases da seção 14 introduzir `/acompanhar`). Só depois desse PR as mensagens passam a usar `https://chefedapizza.com.br/acompanhar/[pedidoId]`.
+3. **Entregador** — enquanto `painel.chefedapizza.com.br` não estiver ativo, protegido e validado (gate de segurança, seção 11), a mensagem ao motoboy mantém a rota operacional existente em um host válido (fallback de `PUBLIC_SITE_URL`, seção 3.1-B). Só depois da ativação segura do painel a mensagem passa a usar `https://painel.chefedapizza.com.br/entregador?id=...`.
+
+Não se deve, em nenhum PR, criar um link para uma rota que ainda não existe no host de destino.
 
 ---
 
 ## 11. Riscos
 
-Ordenados por severidade, cada um com base em fato comprovado (não hipótese):
+### 11.1 Gate de segurança obrigatório (condição bloqueadora)
 
-1. **Alto — Links enviados por WhatsApp continuam com o domínio antigo.** `LINK_CARDAPIO_DIGITAL`, `APP_BASE_URL` e a string duplicada em `whatsapp/route.ts:1363` (seção 1.7) não usam o domínio oficial. Enquanto não corrigido, toda a migração de domínio é "só de entrada" — o cliente que recebe uma mensagem do bot continua sendo levado ao Vercel antigo.
-2. **Alto — Login cross-host não resolvido para `/cardapio/promocoes`.** Se `/cardapio` fica no apex e `/login` no subdomínio painel, o fluxo de login dessa página específica quebra sem uma decisão de cookie compartilhado (seção 8).
-3. **Alto — Navegação interna do painel (`PanelShell`, `pedidos/page.tsx`) depende de rotas relativas que cruzam o limite proposto para o subdomínio.** `router.push("/cardapio")`, `router.push("/conversas")` a partir de páginas que ficariam em `painel.chefedapizza.com.br` (seção 7, itens 2-3) quebram se o subdomínio não servir essas rotas.
-4. **Médio — Cookies sem `domain` não propagam entre apex e subdomínio por padrão do navegador.** Fato comprovado (seção 1.5); mitigação exige mudança de código de cookie, fora do escopo desta etapa.
-5. **Médio — `callbackUrl` sem allowlist (open redirect) é uma condição pré-existente que qualquer PR que toque `/login` deve ter cuidado para não agravar** (seção 1.6) — por exemplo, ao adicionar suporte a redirecionar para um host diferente (painel), não se deve aceitar qualquer valor de host sem validação.
-6. **Médio — Gap de proteção pré-existente em `/financeiro`, `/contador`, `/entregador` e suas APIs** (seção 1.4) — se essas rotas forem incluídas no subdomínio painel sem correção prévia, o subdomínio herdaria esse gap (hoje mitigado apenas por obscuridade de URL).
+**`painel.chefedapizza.com.br` não pode ser ativado (registrado como domínio público em uso, com links reais divulgados) enquanto as rotas abaixo continuarem sem proteção adequada:**
+
+- `/financeiro`;
+- `/contador`;
+- `/entregador`;
+- as APIs correspondentes (`/api/financeiro`, `/api/entregadores`, `/api/entregador-pedidos`, `/api/anthropic`).
+
+Fato comprovado na seção 1.4: hoje nenhuma dessas rotas/APIs tem middleware nem verificação interna de `auth-token`. Colocá-las atrás de um subdomínio público sem corrigir esse gap primeiro tornaria a falta de proteção **descobrível por URL direta em um domínio de produção com marca oficial**, em vez de um domínio Vercel menos óbvio — um agravamento real de exposição, não apenas teórico. Este gate é tratado como PR isolado e obrigatório antes do PR de rewrite/navegação do painel (seção 14).
+
+Complementarmente, **um PR isolado para validar `callbackUrl` do login da equipe por allowlist** (hoje sem validação, seção 1.6) deve ser feito antes de o fluxo de login precisar lidar com redirecionamento cross-host (apex ↔ painel) — evita que a introdução do subdomínio crie uma nova superfície de open redirect sobre uma vulnerabilidade já existente.
+
+### 11.2 Riscos ordenados por severidade
+
+Cada um com base em fato comprovado (não hipótese):
+
+1. **Alto (bloqueador) — Gap de proteção pré-existente em `/financeiro`, `/contador`, `/entregador` e suas APIs** (seção 1.4, detalhado em 11.1) — condição que bloqueia a ativação do subdomínio painel, não apenas um risco a mitigar depois.
+2. **Alto — Links enviados por WhatsApp continuam com o domínio antigo.** `LINK_CARDAPIO_DIGITAL`, `APP_BASE_URL` e a string duplicada em `whatsapp/route.ts:1363` (seção 1.7) não usam o domínio oficial. Enquanto não corrigido, toda a migração de domínio é "só de entrada" — o cliente que recebe uma mensagem do bot continua sendo levado ao Vercel antigo. Mitigação: seção 10.1, respeitando a ordem de ativação da seção 10.3 (não enviar link para `/acompanhar` ou `painel.entregador` antes de essas rotas existirem/estarem protegidas).
+3. **Alto — Login cross-host não resolvido para `/cardapio/promocoes`.** Se `/cardapio` fica no apex e `/login` no subdomínio painel, o fluxo de login dessa página específica quebra sem uma decisão de cookie compartilhado (seção 8).
+4. **Alto — Navegação interna do painel (`PanelShell`, `pedidos/page.tsx`) depende de rotas relativas que cruzam o limite proposto para o subdomínio.** `router.push("/cardapio")`, `router.push("/conversas")` a partir de páginas que ficariam em `painel.chefedapizza.com.br` (seção 7, itens 2-3) quebram se o subdomínio não servir essas rotas.
+5. **Médio — Cookies sem `domain` não propagam entre apex e subdomínio por padrão do navegador.** Fato comprovado (seção 1.5); mitigação exige mudança de código de cookie, fora do escopo desta etapa.
+6. **Médio (parte do gate 11.1) — `callbackUrl` sem allowlist (open redirect) é uma condição pré-existente** (seção 1.6) que deve ser corrigida por PR isolado antes de qualquer PR que faça `/login` lidar com hosts diferentes (painel) — não se deve aceitar qualquer valor de host sem validação.
 7. **Baixo/médio — PWA/manifest único orientado ao painel, servido em todas as rotas** (seção 1.9) — não bloqueia a migração, mas gera experiência inconsistente para quem instala o "app" a partir do cardápio do cliente.
-8. **Baixo — Ação operacional externa esquecida (Mercado Pago).** Se o host de webhook mudar no futuro, precisa de atualização manual no painel do Mercado Pago — risco de esquecimento, não de código.
+8. **Baixo — Ação operacional externa esquecida (Mercado Pago).** Se o host de webhook mudar no futuro, precisa de atualização manual no painel do Mercado Pago — risco de esquecimento, não de código; reforça por que essa URL não deve ser derivada automaticamente de `PUBLIC_SITE_URL`/`PANEL_SITE_URL` (seção 3.1-C) — trocar o domínio de navegação não deve mudar, por acidente, para onde o Mercado Pago notifica.
 9. **Baixo — `/rastrear/[pedidoId]` sem autenticação forte** (id previsível, token opcional) — condição pré-existente, não criada por este plano, mas relevante se a rota ganhar um alias mais divulgado (`/acompanhar`) que aumente a superfície de descoberta.
 
 ---
@@ -360,32 +447,38 @@ Para cada fase futura (não implementada nesta etapa), replicando o padrão de t
 
 ## 14. Implementação dividida em PRs pequenos e independentes
 
-Cada PR abaixo é desenhado para ser revertível isoladamente e não depender dos seguintes para ficar em estado consistente:
+Cada PR abaixo é desenhado para ser revertível isoladamente e não depender dos seguintes para ficar em estado consistente. **Navegação humana (links de WhatsApp, aliases) e infraestrutura de integração (webhooks, callbacks) ficam sempre em PRs separados** — nunca misturados no mesmo patch (seção 3.1-C, 10.1 vs. 10.2).
 
-1. **PR — Corrigir links do WhatsApp para o domínio oficial.** Atualiza `LINK_CARDAPIO_DIGITAL` (`src/lib/bot.ts:1039`), `APP_BASE_URL` (`src/app/api/orders/route.ts:27`), a string duplicada em `src/app/api/whatsapp/route.ts:1363`, e os fallbacks hardcoded (`src/lib/evolutionApi.ts:13`, `src/lib/pixGuardiaoScheduler.ts:66`, `src/app/api/cardapio-imagens/route.ts:44`, `src/app/api/whatsapp/route.ts:201`, `src/app/api/pedido-app/route.ts:280`) para `chefedapizza.com.br`. Idealmente introduz uma única constante/env var (`NEXT_PUBLIC_SITE_URL` ou similar) reaproveitada em todos esses pontos, eliminando a duplicação atual. **Sem dependência de domínio novo** — pode ir para produção assim que o domínio já estiver servindo o app (já está, pelo PR #219).
-2. **PR — Aliases de rewrite do cliente** (`/conta`, `/meus-pedidos`, `/acompanhar/[pedidoId]`). Segue exatamente o padrão do PR #219: condição de path (não precisa nem de condição de host, já que são aliases dentro do mesmo apex), preservando query string via `req.nextUrl.clone()`. Testes conforme seção 13.
-3. **PR — Decisão e prova de conceito de cookie cross-host** (`domain: ".chefedapizza.com.br"`). PR isolado, testável em ambiente de preview da Vercel com um subdomínio de teste, **antes** de comprometer a arquitetura do painel a uma opção. Este PR não deve ir para produção sem validação manual documentada (seção 8).
-4. **PR — Correção do fluxo de login de `/cardapio/promocoes`** caso a decisão do PR 3 exija cross-host. Depende do PR 3.
-5. **PR — Registro do domínio `painel.chefedapizza.com.br` na Vercel** (ação de infraestrutura, não necessariamente um PR de código — mas deve ser documentado e datado como os demais).
-6. **PR — Rewrite condicional de host para `painel.chefedapizza.com.br`** no `middleware.ts`, seguindo o padrão do PR #219 (host normalizado, matcher explícito, sem captura global). Depende dos PRs 3-5.
-7. **PR — Ajuste de navegação interna do painel** (`PanelShell.tsx`, `src/app/admin/page.tsx`, `src/app/pedidos/page.tsx`) para os botões que cruzam o limite apex/subdomínio (`/cardapio`, `/conversas` se aplicável) usarem link absoluto para o host correto quando detectado que a página está sob `painel.`. Depende do PR 6.
-8. **PR — Fechar o gap de proteção pré-existente em `/financeiro`, `/contador`, `/entregador`** (seção 1.4) — recomendado **antes** do PR 6, já que essas rotas entrariam no escopo do subdomínio painel; tecnicamente independente da migração de domínio, mas relevante o bastante para não ser adiado indefinidamente.
-9. **PR — Separação de manifest/PWA por host** (cliente vs. painel), se a Opção A da seção 7 for confirmada. Depende dos PRs 6-7.
-10. **PR — `www.chefedapizza.com.br` → redirect permanente**, configurado via Vercel (não via middleware) — independente de todos os anteriores, pode ser feito a qualquer momento após validação de DNS (fora do escopo de código).
+1. **PR — Mesclar esta documentação de arquitetura** (este PR, #220). Sem código.
+2. **PR — Fechar o gap de autenticação/autorização de `/financeiro`, `/contador`, `/entregador` e suas APIs** (`/api/financeiro`, `/api/entregadores`, `/api/entregador-pedidos`, `/api/anthropic`) (seção 1.4, gate 11.1). Bloqueador para qualquer PR que amplie a exposição dessas rotas via subdomínio.
+3. **PR — Corrigir a validação de `callbackUrl` do login da equipe por allowlist** (seção 1.6), no mesmo padrão de `destinoNextPermitido()` já usado pelo login do cliente (`src/lib/clientePedidos.ts:271-273`). Bloqueador antes de qualquer PR que introduza redirecionamento cross-host de login.
+4. **PR — Criar `PUBLIC_SITE_URL` e o módulo central de URLs públicas** (`src/lib/appUrls.ts`, seção 3.2) com `getCardapioUrl()`, `getContaClienteUrl()`, `getPedidosClienteUrl()`, `getRastreioUrl(pedidoId)`. Não inclui `PANEL_SITE_URL` nem `getPainelUrl()`/`getEntregadorUrl()` ainda (dependem do PR 9). Não mexe em `EVOLUTION_WEBHOOK_URL`, `PIX_GUARDIAO_QSTASH_CALLBACK_URL` ou no webhook do Mercado Pago — isso é o PR 13.
+5. **PR — Atualizar somente o link canônico do cardápio** para `https://chefedapizza.com.br` (raiz, via `getCardapioUrl()`) em `LINK_CARDAPIO_DIGITAL` (`src/lib/bot.ts:1039`) e na string duplicada de `src/app/api/whatsapp/route.ts:1363`. Depende do PR 4. Não toca no link de rastreio nem no do entregador (seções 6 e 7 deste PR list).
+6. **PR — Criar aliases `/conta`, `/meus-pedidos` e `/acompanhar/[pedidoId]`** via rewrite interno, seguindo exatamente o padrão do PR #219 (condição de path, `req.nextUrl.clone()` para preservar query string). Testes conforme seção 13. Independente dos PRs 4-5 — pode ser feito em paralelo.
+7. **PR — Atualizar links de rastreamento** (`APP_BASE_URL` em `src/app/api/orders/route.ts:27,252`) para `getRastreioUrl(pedidoId)` apontando a `/acompanhar/[pedidoId]`. Depende do PR 6 (o alias precisa existir antes do link ser enviado) e do PR 4 (módulo `appUrls.ts`).
+8. **PR — Prova de conceito de cookies no subdomínio** (`domain: ".chefedapizza.com.br"` em ambiente de preview). Não vai para produção sem validação manual documentada (seção 8). Determina se a Opção A ou B da seção 7 é viável.
+9. **PR — Registrar e validar `painel.chefedapizza.com.br`** (ação de infraestrutura na Vercel + adicionar `PANEL_SITE_URL`/`getPainelUrl()`/`getEntregadorUrl()` ao módulo `appUrls.ts`). Depende do PR 8. Este PR, por si só, **não** torna o painel "ativo" para fins do gate da seção 11.1 — só o registra e valida tecnicamente.
+10. **PR — Implementar rewrite, navegação e links operacionais do painel**: rewrite condicional de host no `middleware.ts` (padrão do PR #219), ajuste de `PanelShell.tsx`/`src/app/admin/page.tsx`/`src/app/pedidos/page.tsx` para navegação cross-host (link absoluto quando sob `painel.`), e só então atualizar o link do entregador para `https://painel.chefedapizza.com.br/entregador?id=...`. Depende dos PRs 2 (gate de segurança), 3 (callbackUrl), 8 e 9. É este PR que efetivamente "ativa" o painel — deve ser validado manualmente em produção antes de ser considerado concluído (seção 13).
+11. **PR — Separar PWA de cliente e painel** (dois manifests por host), se a Opção A da seção 7 for confirmada. Depende do PR 10.
+12. **PR — Configurar `www.chefedapizza.com.br` → redirect permanente** ao apex, via Vercel (não via middleware). Independente de todos os anteriores — pode ser feito a qualquer momento após validação de DNS.
+13. **PR — Auditar e normalizar separadamente os callbacks das integrações** (`EVOLUTION_WEBHOOK_URL`, `PIX_GUARDIAO_QSTASH_CALLBACK_URL`, webhook do Mercado Pago, `NEXT_PUBLIC_URL` de imagens) — com testes próprios, **sem** tocar em `PUBLIC_SITE_URL`/`PANEL_SITE_URL`/`appUrls.ts` (seção 3.1-C, 10.2). Independente de todos os PRs de navegação humana; pode ser feito em paralelo a qualquer um deles.
 
 ---
 
 ## 15. Ordem recomendada de execução
 
-1. **PR 1** (links do WhatsApp) — maior impacto de marca, menor risco técnico, zero dependência de infraestrutura nova.
-2. **PR 8** (fechar gap de proteção `/financeiro`/`/contador`/`/entregador`) — resolve uma condição de risco pré-existente antes de expandir a superfície do painel para um subdomínio público.
-3. **PR 2** (aliases de cliente) — mesmo padrão já aprovado no PR #219, baixo risco, entrega valor de produto (URLs mais amigáveis) sem depender do subdomínio.
-4. **PR 3** (prova de conceito de cookie cross-host) — feito em ambiente de preview, com validação manual documentada antes de prosseguir.
-5. **PR 4** (login cross-host de `/cardapio/promocoes`), somente se PR 3 confirmar a necessidade.
-6. **PR 5** (registrar domínio `painel.` na Vercel) — ação de infraestrutura, feita só depois da PoC de cookie ter uma resposta.
-7. **PR 6** (rewrite de host para `painel.`) — depende de 3-5.
-8. **PR 7** (ajuste de navegação interna do painel) — depende de 6; deve ser validado manualmente em produção antes de considerar o subdomínio "pronto" (não só testes automatizados).
-9. **PR 9** (separação de PWA/manifest por host) — última etapa técnica, menor urgência.
-10. **PR 10** (`www` → redirect) — pode ser feito em paralelo a qualquer momento, é o mais isolado de todos.
+1. Mesclar a documentação de arquitetura (PR 1).
+2. Fechar o gap de autenticação e autorização de `/financeiro`, `/contador`, `/entregador` e APIs correspondentes (PR 2) — condição bloqueadora (seção 11.1) antes de qualquer ampliação de exposição dessas rotas.
+3. Corrigir a validação de `callbackUrl` do login da equipe por allowlist (PR 3) — evita agravar open redirect antes de o login precisar lidar com cross-host.
+4. Criar `PUBLIC_SITE_URL` e o módulo central de URLs públicas (PR 4).
+5. Atualizar somente o link canônico do cardápio para `https://chefedapizza.com.br` (PR 5).
+6. Criar aliases `/conta`, `/meus-pedidos` e `/acompanhar/[pedidoId]` (PR 6).
+7. Atualizar links de rastreamento para `/acompanhar/[pedidoId]` (PR 7) — só depois do alias existir.
+8. Fazer a prova de conceito de cookies no subdomínio (PR 8).
+9. Registrar e validar `painel.chefedapizza.com.br` (PR 9).
+10. Implementar rewrite, navegação e links operacionais do painel (PR 10) — inclui o link do entregador, só agora que o painel está validado.
+11. Separar PWA de cliente e painel (PR 11).
+12. Configurar `www.chefedapizza.com.br` para redirecionar ao apex (PR 12) — pode ser antecipado em paralelo a qualquer etapa acima, é o mais isolado de todos.
+13. Auditar e normalizar separadamente os callbacks das integrações (PR 13) — pode ser feito em paralelo a qualquer etapa acima, nunca junto de um PR de link humano.
 
-Esta ordem prioriza: (a) resolver a inconsistência de marca já existente primeiro, por ser isolada e de baixo risco; (b) fechar o gap de segurança pré-existente antes de aumentar a exposição pública das rotas afetadas; (c) só comprometer a arquitetura a um subdomínio real depois de uma prova de conceito de cookie validada em ambiente de preview — evitando o risco descrito na seção 11, item 3, de quebrar navegação interna do painel sem plano de mitigação já testado.
+Esta ordem prioriza: (a) fechar as duas condições de segurança pré-existentes (gap de proteção e open redirect) antes de qualquer coisa que aumente a exposição pública das rotas afetadas; (b) corrigir o link do cardápio, que é isolado, de baixo risco e não depende de subdomínio, logo em seguida; (c) só criar aliases e migrar o link de rastreio depois que o alias correspondente já existir em produção — nunca enviar um link para uma rota que ainda não existe; (d) só comprometer a arquitetura a um subdomínio painel real depois de uma prova de conceito de cookie validada, e só apontar o link do entregador para esse subdomínio depois de ele estar registrado, protegido e validado — nunca antes; (e) manter os PRs de callback de integração (12-13 relativo ao `www`, 13 relativo às integrações) isolados dos PRs de navegação humana, podendo correr em paralelo por não compartilharem código nem risco.
