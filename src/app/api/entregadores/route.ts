@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { redis } from '@/lib/redis'
+import { autenticarRequisicao, exigirRole } from '@/lib/apiAuth'
 
 type Entregador = {
   id: string
@@ -8,7 +9,14 @@ type Entregador = {
   ativo: boolean
 }
 
-export async function GET() {
+// GET: lido por /pedidos (para atribuir entregador) e por /admin.
+const ROLES_LEITURA: Parameters<typeof exigirRole>[1] = ['admin', 'dev', 'atendente']
+// POST/DELETE (cadastrar, editar, ativar/desativar, remover): só /admin chama.
+const ROLES_GESTAO: Parameters<typeof exigirRole>[1] = ['admin', 'dev']
+
+export async function GET(req: NextRequest) {
+  const negado = exigirRole(await autenticarRequisicao(req), ROLES_LEITURA)
+  if (negado) return negado
   try {
     const entregadores = await redis.get<Entregador[]>('entregadores') || []
     return NextResponse.json(entregadores)
@@ -18,6 +26,8 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  const negado = exigirRole(await autenticarRequisicao(req), ROLES_GESTAO)
+  if (negado) return negado
   try {
     const body = await req.json()
     const entregadores = await redis.get<Entregador[]>('entregadores') || []
@@ -38,6 +48,8 @@ export async function POST(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
+  const negado = exigirRole(await autenticarRequisicao(req), ROLES_GESTAO)
+  if (negado) return negado
   try {
     const { id } = await req.json()
     const entregadores = await redis.get<Entregador[]>('entregadores') || []

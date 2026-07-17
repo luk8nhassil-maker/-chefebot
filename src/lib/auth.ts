@@ -38,10 +38,27 @@ export const ROUTE_ROLES: Array<{ path: string; roles: Role[] }> = [
   { path: "/setup", roles: ["admin", "dev"] },
   { path: "/pedidos", roles: ["admin", "atendente", "dev"] },
   { path: "/configuracoes", roles: ["admin", "atendente", "dev"] },
+  { path: "/financeiro", roles: ["admin", "dev", "financeiro"] },
+  { path: "/contador", roles: ["admin", "dev", "contador"] },
   { path: "/api/orders", roles: ["admin", "atendente", "dev"] },
   { path: "/api/padroes", roles: ["dev"] },
   { path: "/api/funcionarios", roles: ["admin", "dev"] },
 ];
+
+// /entregador NÃO está listada aqui de propósito, e propositalmente FORA DE
+// ESCOPO desta PR (claude/protege-rotas-operacionais). Entregadores não têm
+// conta no sistema de login da equipe (nenhum usuário em USERS tem role
+// "entregador", e a página /entregador não passa por /login — o acesso é
+// hoje só por um entregadorId enviado por WhatsApp ou digitado, sem senha,
+// OTP ou token assinado). Gatear essa rota atrás de auth-token quebraria a
+// atribuição/entrega de pedidos para qualquer entregador real, que nunca
+// recebe esse cookie. A área do entregador (/entregador, /api/entregador-
+// pedidos, /api/localizacao e o link enviado ao motoboy) permanece
+// EXATAMENTE como está hoje — nenhum endurecimento, nem parcial, foi feito
+// aqui. Requer uma PR dedicada introduzindo autenticação real de entregador
+// antes de qualquer proteção ser adicionada, e o subdomínio
+// painel.chefedapizza.com.br continua bloqueado até essa PR ser concluída
+// e validada.
 
 function getSecret() {
   return new TextEncoder().encode(
