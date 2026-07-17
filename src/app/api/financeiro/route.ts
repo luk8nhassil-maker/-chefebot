@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { redis } from '@/lib/redis'
+import { autenticarRequisicao, exigirRole } from '@/lib/apiAuth'
 
 type Custo = {
   id: string
@@ -16,7 +17,17 @@ type MesStatus = {
   fechadoPor?: string
 }
 
+// GET: lido por /financeiro (financeiro) e /contador (contador), além de /admin.
+const ROLES_LEITURA: Parameters<typeof exigirRole>[1] = ['admin', 'dev', 'financeiro', 'contador']
+// POST/DELETE: só /financeiro (e /admin) registram/removem custos — contador
+// não tem call site de escrita comprovado.
+const ROLES_ESCRITA_CUSTO: Parameters<typeof exigirRole>[1] = ['admin', 'dev', 'financeiro']
+// PATCH (fechar mês): só /contador chama — nenhum call site em /financeiro.
+const ROLES_FECHAR_MES: Parameters<typeof exigirRole>[1] = ['admin', 'dev', 'contador']
+
 export async function GET(req: NextRequest) {
+  const negado = exigirRole(await autenticarRequisicao(req), ROLES_LEITURA)
+  if (negado) return negado
   try {
     const { searchParams } = new URL(req.url)
     const mes = searchParams.get('mes') || new Date().toISOString().slice(0, 7)
@@ -29,6 +40,8 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const negado = exigirRole(await autenticarRequisicao(req), ROLES_ESCRITA_CUSTO)
+  if (negado) return negado
   try {
     const body = await req.json()
     const mes = body.mes || new Date().toISOString().slice(0, 7)
@@ -63,6 +76,8 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
+  const negado = exigirRole(await autenticarRequisicao(req), ROLES_FECHAR_MES)
+  if (negado) return negado
   try {
     const { mes, fechadoPor } = await req.json()
     const status: MesStatus = { fechado: true, fechadoEm: new Date().toISOString(), fechadoPor }
@@ -74,6 +89,8 @@ export async function PATCH(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
+  const negado = exigirRole(await autenticarRequisicao(req), ROLES_ESCRITA_CUSTO)
+  if (negado) return negado
   try {
     const { id, mes } = await req.json()
     const status = await redis.get<MesStatus>(`mes_status:${mes}`)

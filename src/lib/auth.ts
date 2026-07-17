@@ -38,10 +38,21 @@ export const ROUTE_ROLES: Array<{ path: string; roles: Role[] }> = [
   { path: "/setup", roles: ["admin", "dev"] },
   { path: "/pedidos", roles: ["admin", "atendente", "dev"] },
   { path: "/configuracoes", roles: ["admin", "atendente", "dev"] },
+  { path: "/financeiro", roles: ["admin", "dev", "financeiro"] },
+  { path: "/contador", roles: ["admin", "dev", "contador"] },
   { path: "/api/orders", roles: ["admin", "atendente", "dev"] },
   { path: "/api/padroes", roles: ["dev"] },
   { path: "/api/funcionarios", roles: ["admin", "dev"] },
 ];
+
+// /entregador NÃO está listada aqui de propósito. Entregadores não têm conta
+// no sistema de login da equipe (nenhum usuário em USERS tem role
+// "entregador", e a página /entregador não passa por /login — o acesso é por
+// um código simples digitado, enviado por WhatsApp). Gatear essa rota atrás
+// de auth-token quebraria a atribuição/entrega de pedidos para qualquer
+// entregador real, que nunca recebe esse cookie. Ver docs do PR
+// claude/protege-rotas-operacionais para o racional completo e o risco
+// residual aceito (endurecimento parcial feito em /api/entregador-pedidos).
 
 function getSecret() {
   return new TextEncoder().encode(

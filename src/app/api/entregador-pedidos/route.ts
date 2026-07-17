@@ -8,10 +8,47 @@ const redis = new Redis({
   token: process.env.KV_REST_API_TOKEN!,
 })
 
+type Entregador = { id: string; nome: string; telefone: string; ativo: boolean }
+
+// RISCO RESIDUAL DOCUMENTADO — NÃO RESOLVIDO NESTA PR.
+//
+// A área do entregador (/entregador) não usa o sistema de login da equipe:
+// não existe usuário com role "entregador" em src/lib/auth.ts (USERS), a
+// página não passa por /login e nunca recebe o cookie auth-token. O acesso
+// hoje é só por um entregadorId enviado por WhatsApp (link
+// `/entregador?id=...`, ver src/app/api/orders/route.ts) ou digitado à mão —
+// sem senha, OTP ou token assinado provando a posse desse id.
+//
+// Por isso, esta rota NÃO PODE "vincular a operação ao usuário autenticado"
+// como pedido pelo escopo desta PR: não existe usuário autenticado no
+// modelo atual para um entregador. Fazer essa rota exigir um auth-token de
+// equipe quebraria a entrega para todo entregador real (nenhum tem esse
+// cookie); e inventar uma associação (ex.: presumir que um JWT com
+// role="entregador" corresponde a um entregadorId específico) seria uma
+// proteção falsa, não uma correção real — por isso não foi feita.
+//
+// O que esta PR faz, com segurança e sem quebrar o fluxo real: valida que o
+// entregadorId corresponde a um registro ATIVO em `entregadores` (cadastrado
+// pelo admin via /api/entregadores) antes de responder — rejeita ids
+// inventados, com erro de digitação, ou de entregadores desativados.
+//
+// O que continua em aberto: um entregador que conheça (ou receba
+// repassado) o id de outro entregador ativo ainda consegue consultar e
+// alterar os pedidos dele — esse ponto crítico exige uma PR própria
+// introduzindo autenticação real de entregador (ex.: OTP por WhatsApp,
+// no mesmo padrão de cliente-token) antes de poder ser considerado resolvido.
+async function entregadorAtivo(entregadorId: string): Promise<boolean> {
+  const entregadores = await redis.get<Entregador[]>('entregadores') || []
+  return entregadores.some(e => e.id === entregadorId && e.ativo)
+}
+
 export async function GET(req: NextRequest) {
   const entregadorId = req.nextUrl.searchParams.get('entregadorId')
   if (!entregadorId) {
     return NextResponse.json({ error: 'entregadorId obrigatório' }, { status: 400 })
+  }
+  if (!(await entregadorAtivo(entregadorId))) {
+    return NextResponse.json({ error: 'Entregador não encontrado' }, { status: 404 })
   }
 
   const pedidos = await redis.get<PedidoEntregador[]>(`entregador:pedidos:${entregadorId}`) || []
@@ -23,6 +60,9 @@ export async function POST(req: NextRequest) {
 
   if (!entregadorId || !pedidoId || !acao) {
     return NextResponse.json({ error: 'Campos obrigatórios faltando' }, { status: 400 })
+  }
+  if (!(await entregadorAtivo(entregadorId))) {
+    return NextResponse.json({ error: 'Entregador não encontrado' }, { status: 404 })
   }
 
   const pedidos = await redis.get<PedidoEntregador[]>(`entregador:pedidos:${entregadorId}`) || []
