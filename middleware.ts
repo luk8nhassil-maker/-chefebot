@@ -8,8 +8,23 @@ function getSecret() {
   );
 }
 
+function getHostname(req: NextRequest): string {
+  const raw =
+    req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? "";
+  return raw.split(",")[0]!.trim().split(":")[0]!.toLowerCase();
+}
+
+const CARDAPIO_DOMAIN = "chefedapizza.com.br";
+
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
+
+  if (pathname === "/" && getHostname(req) === CARDAPIO_DOMAIN) {
+    const url = req.nextUrl.clone();
+    url.pathname = "/cardapio";
+    return NextResponse.rewrite(url);
+  }
+
   const rule = ROUTE_ROLES.find((r) => pathname.startsWith(r.path));
   if (!rule) return NextResponse.next();
 
@@ -37,5 +52,5 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/pedidos/:path*", "/relatorios/:path*", "/admin/:path*", "/dev/:path*", "/configuracoes/:path*", "/setup/:path*"],
+  matcher: ["/", "/pedidos/:path*", "/relatorios/:path*", "/admin/:path*", "/dev/:path*", "/configuracoes/:path*", "/setup/:path*"],
 };
