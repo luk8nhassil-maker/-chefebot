@@ -25,6 +25,23 @@ const { store, redisMock } = vi.hoisted(() => {
       if (opts?.ex) ttls.set(key, opts.ex);
       return "OK";
     }),
+    eval: vi.fn(async (_script: string, keys: string[], args: string[]) => {
+      if (keys.length === 1) {
+        if (store.get(keys[0]) !== args[0]) return 0;
+        store.delete(keys[0]);
+        return 1;
+      }
+      const [activeKey, lastKey] = keys;
+      const [expectedToken, expectedRevision, serialized, activeTtl, lastTtl] = args;
+      const current = store.get(activeKey) as { token?: string; revision?: number } | undefined;
+      if (!current || current.token !== expectedToken || (current.revision ?? 0) !== Number(expectedRevision)) return 0;
+      const record = JSON.parse(serialized);
+      store.set(activeKey, record);
+      store.set(lastKey, record);
+      ttls.set(activeKey, Number(activeTtl));
+      ttls.set(lastKey, Number(lastTtl));
+      return 1;
+    }),
     del: vi.fn(async (key: string) => (store.delete(key) ? 1 : 0)),
     ttl: vi.fn(async (key: string) => ttls.get(key) ?? -1),
   };
@@ -37,7 +54,7 @@ vi.stubGlobal("fetch", vi.fn());
 
 import { GET, POST } from "./route";
 
-const PHONE_AUTORIZADO = "5599974000691";
+const PHONE_AUTORIZADO = "5511900000000";
 
 function req(token?: string, method: "GET" | "POST" = "GET") {
   const init: { headers?: Record<string, string>; method: string } = { method };
@@ -98,6 +115,21 @@ describe("4. rate limit via API", () => {
     const segundo = await POST(req("token-admin", "POST"));
     expect(segundo.status).toBe(429);
   });
+
+  test("mantém 429 enquanto o teste original está ativo mesmo sem a chave curta de rate limit", async () => {
+    const primeiro = await POST(req("token-admin", "POST"));
+    const primeiroBody = await primeiro.json();
+    store.delete("whatsapp:canary:ratelimit");
+
+    const segundo = await POST(req("token-admin", "POST"));
+    const segundoBody = await segundo.json();
+
+    expect(segundo.status).toBe(429);
+    expect(segundoBody.retryAfterSeconds).toBeGreaterThan(0);
+    expect((store.get("whatsapp:canary:active") as { token: string }).token).toBe(primeiroBody.canary.token);
+    const sendTextCalls = vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes("/message/sendText/"));
+    expect(sendTextCalls).toHaveLength(1);
+  });
 });
 
 describe("2. telefone vem apenas da env (nunca do body)", () => {
@@ -126,5 +158,23 @@ describe("GET — diagnóstico agregado", () => {
     expect(data.providerConfigured).toBe(true);
     expect(data.canaryPhoneConfigured).toBe(true);
     expect(typeof data.botGlobalEnabled).toBe("boolean");
+  });
+});
+
+describe("POST — evidências sanitizadas do provider", () => {
+  test("devolve HTTP, tentativas e messageId mascarado sem corpo bruto", async () => {
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      status: 201,
+      json: async () => ({ key: { id: "provider-message-123456" }, segredo: "nao-expor" }),
+    } as Response);
+
+    const res = await POST(req("token-admin", "POST"));
+    const data = await res.json();
+
+    expect(data.canary.outboundHttpStatus).toBe(201);
+    expect(data.canary.outboundAttempts).toBe(1);
+    expect(data.canary.outboundMessageIdMasked).toBe("...123456");
+    expect(JSON.stringify(data)).not.toContain("nao-expor");
   });
 });

@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation'
 
 type CanaryState =
   | 'created' | 'outbound_sent' | 'outbound_failed'
-  | 'inbound_received' | 'acknowledgement_sent' | 'roundtrip_ok' | 'expired'
+  | 'inbound_received' | 'acknowledgement_sent' | 'acknowledgement_failed' | 'roundtrip_ok' | 'expired'
 
 type CanaryRecord = {
   token: string
@@ -14,10 +14,19 @@ type CanaryRecord = {
   expiresAt: number
   outboundAt?: number
   outboundLatencyMs?: number
+  outboundAttempts?: number
+  outboundHttpStatus?: number
+  outboundMessageIdMasked?: string
   outboundError?: string
   inboundAt?: number
   ackAt?: number
+  ackLatencyMs?: number
+  ackAttempts?: number
+  ackHttpStatus?: number
+  ackMessageIdMasked?: string
   ackError?: string
+  roundtripAt?: number
+  transitions?: Array<{ state: CanaryState; at: number }>
 }
 
 type Diagnostico = {
@@ -79,7 +88,8 @@ const ESTADOS_LABEL: Record<CanaryState, string> = {
   outbound_sent: 'Enviado (aguardando resposta)',
   outbound_failed: 'Falha no envio',
   inbound_received: 'Resposta recebida',
-  acknowledgement_sent: 'Confirmação enviada (aguardando entrega)',
+  acknowledgement_sent: 'Confirmação aceita pela Evolution',
+  acknowledgement_failed: 'Falha ao enviar confirmação',
   roundtrip_ok: 'Round-trip confirmado ✅',
   expired: 'Expirado',
 }
@@ -216,14 +226,16 @@ export default function WhatsappDiagPage() {
                 <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid rgba(var(--overlay-rgb), 0.08)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                     <p style={{ fontSize: 13, fontWeight: 700, margin: 0, color: 'var(--foreground)' }}>Último teste — {data.canary.token}</p>
-                    <Pill ok={data.canary.state === 'roundtrip_ok' ? true : data.canary.state === 'expired' || data.canary.state === 'outbound_failed' ? false : null} texto={ESTADOS_LABEL[data.canary.state]} />
+                    <Pill ok={data.canary.state === 'roundtrip_ok' ? true : data.canary.state === 'expired' || data.canary.state === 'outbound_failed' || data.canary.state === 'acknowledgement_failed' ? false : null} texto={ESTADOS_LABEL[data.canary.state]} />
                   </div>
                   <p style={{ fontSize: 12, color: 'rgba(var(--overlay-rgb), 0.5)', margin: '2px 0' }}>Criado: {fmt(data.canary.createdAt)} · Expira: {fmt(data.canary.expiresAt)}</p>
                   {typeof data.canary.outboundLatencyMs === 'number' && (
                     <p style={{ fontSize: 12, color: 'rgba(var(--overlay-rgb), 0.5)', margin: '2px 0' }}>Latência de envio: {data.canary.outboundLatencyMs}ms</p>
                   )}
+                  {typeof data.canary.outboundHttpStatus === 'number' && <p style={{ fontSize: 12, color: 'rgba(var(--overlay-rgb), 0.5)', margin: '2px 0' }}>Evolution outbound: HTTP {data.canary.outboundHttpStatus} · {data.canary.outboundAttempts ?? 0} tentativa(s) · {data.canary.outboundMessageIdMasked || 'sem messageId'}</p>}
                   {data.canary.outboundError && <p style={{ fontSize: 12, color: 'var(--danger)', margin: '2px 0' }}>Erro no envio: {data.canary.outboundError}</p>}
                   {data.canary.inboundAt && <p style={{ fontSize: 12, color: 'rgba(var(--overlay-rgb), 0.5)', margin: '2px 0' }}>Resposta recebida: {fmt(data.canary.inboundAt)}</p>}
+                  {typeof data.canary.ackHttpStatus === 'number' && <p style={{ fontSize: 12, color: 'rgba(var(--overlay-rgb), 0.5)', margin: '2px 0' }}>Evolution confirmação: HTTP {data.canary.ackHttpStatus} · {data.canary.ackAttempts ?? 0} tentativa(s) · {data.canary.ackMessageIdMasked || 'sem messageId'}</p>}
                   {data.canary.ackError && <p style={{ fontSize: 12, color: 'var(--danger)', margin: '2px 0' }}>Erro na confirmação: {data.canary.ackError}</p>}
                 </div>
               )}
