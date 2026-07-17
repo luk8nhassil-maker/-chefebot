@@ -1,3 +1,10 @@
+export interface EntregadorCadastro {
+  id: string
+  nome: string
+  telefone: string
+  ativo: boolean
+}
+
 export interface PedidoEntregador {
   pedidoId: string
   entregadorId: string
@@ -19,3 +26,5 @@ export interface LocalizacaoEntregador {
   lng: number
   timestamp: number
 }
+
+export type LocalizacaoPublica = Omit<LocalizacaoEntregador, "entregadorId">

@@ -3,7 +3,7 @@ import { verifyToken } from '@/lib/auth'
 import { redis } from '@/lib/redis'
 import { proximoNumeroPedido } from '@/lib/numeracao'
 import { criarPixMetadata, sanitizarPedidoPixResposta, type PixMetadata } from '@/lib/pix'
-import type { PedidoEntregador } from '@/types/entregador'
+import type { EntregadorCadastro, PedidoEntregador } from '@/types/entregador'
 import {
   creditarFidelidadePedido,
   creditarPontosPedidoEntregue,
@@ -15,6 +15,13 @@ import {
   reverterResgateConfirmado,
 } from '@/lib/fidelidade'
 import { obterConfigEvolution } from '@/lib/evolutionApi'
+import { enviarTextoWhatsApp } from '@/lib/whatsappMensagem'
+import {
+  criarTicketAcessoEntregador,
+  invalidarTicketAcesso,
+  montarLinkAcessoEntregador,
+  normalizarTelefoneEntregador,
+} from '@/lib/entregadorAuth'
 import {
   adquirirMutexEdicao,
   liberarMutexEdicao,
@@ -152,6 +159,7 @@ export async function PATCH(req: NextRequest) {
   if (!auth) return NextResponse.json({ error: 'Nao autorizado' }, { status: 401 })
 
   const { id, status, entregador, silent } = await req.json()
+  let avisoOperacional: string | null = null
 
   // Toda transição de status (inclusive o aceite, novo → em_preparo) passa
   // pelo mesmo mutex curto usado pela edição do cliente: garante que a
@@ -166,6 +174,16 @@ export async function PATCH(req: NextRequest) {
     const pedidos = await getPedidos()
     const index = pedidos.findIndex(p => p.id === id)
     if (index === -1) return NextResponse.json({ error: 'Pedido nao encontrado' }, { status: 404 })
+
+    let entregadorCanonico: EntregadorCadastro | undefined
+    if (entregador) {
+      const entregadorId = typeof entregador?.id === 'string' ? entregador.id : ''
+      const cadastrados = await redis.get<EntregadorCadastro[]>('entregadores') || []
+      entregadorCanonico = cadastrados.find(e => e.id === entregadorId && e.ativo)
+      if (!entregadorCanonico) {
+        return NextResponse.json({ error: 'Entregador indisponível' }, { status: 409 })
+      }
+    }
 
     const limpeza = limparEdicaoExpiradaSeNecessario(pedidos[index])
     if (limpeza.mudou) pedidos[index] = limpeza.pedido as Pedido
@@ -193,8 +211,8 @@ export async function PATCH(req: NextRequest) {
     }
 
     // Salva entregador no pedido se informado
-    if (entregador) {
-      pedidos[index] = { ...pedidos[index], entregador }
+    if (entregadorCanonico) {
+      pedidos[index] = { ...pedidos[index], entregador: entregadorCanonico }
     }
     await redis.set('pedidos', pedidos)
 
@@ -203,18 +221,17 @@ export async function PATCH(req: NextRequest) {
   }
 
   // Notifica entregador no WhatsApp quando pedido sai para entrega + salva no Redis + envia link de rastreamento ao cliente
-  if (!silent && status === 'saiu_entrega' && entregador?.telefone) {
+  if (!silent && status === 'saiu_entrega' && entregadorCanonico?.telefone) {
     const pedido = pedidos[index]
-    const phone = entregador.telefone.replace(/\D/g, '')
-    const phoneFormatado = phone.startsWith('55') ? phone : '55' + phone
+    const phoneFormatado = normalizarTelefoneEntregador(entregadorCanonico.telefone)
     const agora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' })
 
     // Salva pedido na fila do entregador no Redis
     const pedidoEntregador: PedidoEntregador = {
       pedidoId: pedido.id,
-      entregadorId: entregador.id,
-      entregadorNome: entregador.nome,
-      entregadorTelefone: entregador.telefone,
+      entregadorId: entregadorCanonico.id,
+      entregadorNome: entregadorCanonico.nome,
+      entregadorTelefone: entregadorCanonico.telefone,
       clienteNome: pedido.cliente,
       clienteTelefone: pedido.telefone,
       endereco: pedido.endereco,
@@ -223,24 +240,34 @@ export async function PATCH(req: NextRequest) {
       status: 'pendente',
       horarioSaida: agora,
     }
-    const filaMotoboy = await redis.get<PedidoEntregador[]>(`entregador:pedidos:${entregador.id}`) || []
+    const filaMotoboy = await redis.get<PedidoEntregador[]>(`entregador:pedidos:${entregadorCanonico.id}`) || []
     const filtrado = filaMotoboy.filter(p => p.pedidoId !== pedido.id)
-    await redis.set(`entregador:pedidos:${entregador.id}`, [...filtrado, pedidoEntregador], { ex: 86400 })
+    await redis.set(`entregador:pedidos:${entregadorCanonico.id}`, [...filtrado, pedidoEntregador], { ex: 86400 })
 
     const configEntrega = obterConfigEvolution()
     if (!configEntrega) {
-      console.error('[ChefeBot] Provider de WhatsApp não configurado — aviso de saída para entrega não enviado.')
+      avisoOperacional = 'Pedido atribuído, mas o acesso seguro do entregador não foi enviado.'
+      console.error('[ChefeBot] Provider de WhatsApp não configurado — acesso seguro do entregador não enviado.')
     } else {
+    let ticketAcesso: string | null = null
     try {
-      // Mensagem para o motoboy com link da área do entregador
-      await fetch(`${configEntrega.baseUrl}/message/sendText/${configEntrega.instanceName}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'apikey': configEntrega.apiKey },
-        body: JSON.stringify({
-          number: phoneFormatado,
-          text: `🛵 *Novo pedido para entregar!*\n👤 Cliente: ${pedido.cliente}\n📍 Endereço: ${pedido.endereco}\n💰 Total: R$ ${pedido.total.toFixed(2).replace('.', ',')}\nAcesse: ${APP_BASE_URL}/entregador?id=${entregador.id}`,
-        }),
-      })
+      // Mensagem para o motoboy com ticket opaco. O ticket nunca entra em
+      // logs nem na resposta da API de pedidos.
+      const acesso = await criarTicketAcessoEntregador(entregadorCanonico.id)
+      ticketAcesso = acesso.ticket
+      const resultadoMotoboy = await enviarTextoWhatsApp(
+        phoneFormatado,
+        `🛵 *Novo pedido para entregar!*\n👤 Cliente: ${pedido.cliente}\n📍 Endereço: ${pedido.endereco}\n💰 Total: R$ ${pedido.total.toFixed(2).replace('.', ',')}\nAcesse: ${montarLinkAcessoEntregador(acesso.ticket)}`
+      )
+      if (!resultadoMotoboy.ok) {
+        await invalidarTicketAcesso(acesso.ticket)
+        avisoOperacional = 'Pedido atribuído, mas o acesso seguro do entregador não foi enviado.'
+        console.error('[ChefeBot] Atribuição salva sem envio do acesso seguro ao entregador.', {
+          pedidoId: pedido.id,
+          entregadorId: entregadorCanonico.id,
+          motivo: resultadoMotoboy.motivo,
+        })
+      }
 
       // Mensagem para o cliente com link de rastreamento
       const clientePhone = sanitizePhone(pedido.telefone)
@@ -249,12 +276,21 @@ export async function PATCH(req: NextRequest) {
         headers: { 'Content-Type': 'application/json', 'apikey': configEntrega.apiKey },
         body: JSON.stringify({
           number: clientePhone,
-          text: `Seu pedido saiu! 🛵\nEntregador: *${entregador.nome}*\nAcompanhe: ${APP_BASE_URL}/rastrear/${pedido.id}`,
+          text: `Seu pedido saiu! 🛵\nEntregador: *${entregadorCanonico.nome}*\nAcompanhe: ${APP_BASE_URL}/rastrear/${pedido.id}`,
         }),
       })
 
-      await redis.set(`entregador_aguardando:${phoneFormatado}`, pedido.id, { ex: 3 * 60 * 60 })
-    } catch {}
+      if (resultadoMotoboy.ok) {
+        await redis.set(`entregador_aguardando:${phoneFormatado}`, pedido.id, { ex: 3 * 60 * 60 })
+      }
+    } catch {
+      if (ticketAcesso) await invalidarTicketAcesso(ticketAcesso).catch(() => {})
+      avisoOperacional = 'Pedido atribuído, mas o acesso seguro do entregador não foi enviado.'
+      console.error('[ChefeBot] Atribuição salva sem envio do acesso seguro ao entregador.', {
+        pedidoId: pedido.id,
+        entregadorId: entregadorCanonico.id,
+      })
+    }
     }
   }
 
@@ -383,7 +419,8 @@ export async function PATCH(req: NextRequest) {
     }
   }
 
-    return NextResponse.json(sanitizarPedidoPixResposta(pedidos[index]))
+    const resposta = sanitizarPedidoPixResposta(pedidos[index])
+    return NextResponse.json(avisoOperacional ? { ...resposta, avisoOperacional } : resposta)
   } finally {
     await liberarMutexEdicao(id, mutexToken)
   }
