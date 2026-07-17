@@ -1,0 +1,164 @@
+name: entregador-auth-e2e
+
+# Validação Entregador 2.0 — gate hermético e reproduzível, 100% dentro do
+# GitHub Actions. Nunca toca Preview/Production da Vercel, nunca usa OAuth,
+# Vercel CLI/MCP ou Redis em nuvem (Vercel KV / Upstash). O Redis deste job é
+# um container Redis descartável do próprio workflow, exposto por uma API
+# REST compatível com @upstash/redis via SRH (serverless-redis-http) — a
+# mesma interface que a aplicação já usa em produção, só que 100% local.
+#
+# Este workflow não recebe, nem pode receber, nenhuma credencial de
+# Production: não há "secrets:" em lugar nenhum deste arquivo, e todo valor
+# sensível usado (AUTH_SECRET, token do SRH) é gerado em memória, só para
+# esta execução.
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: entregador-auth-e2e-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Token fixo e exclusivo deste workflow para autenticar contra o SRH local.
+  # Não é segredo de produção nem de nenhum provedor em nuvem — só a "senha"
+  # que o container SRH deste job usa para aceitar chamadas REST do
+  # container da aplicação, ambos efêmeros e isolados nesta execução.
+  SRH_TOKEN: "e2e-entregador-222-srh-local-token-nao-sensivel"
+  KV_REST_API_URL: "http://srh:80"
+  UPSTASH_DISABLE_TELEMETRY: "1"
+  VERCEL_ENV: "preview"
+  CHEFEBOT_E2E: "1"
+  # NODE_ENV=production NÃO fica aqui: `npm ci` interpreta NODE_ENV=production
+  # como sinal para pular devDependencies inteiras (vitest, eslint, etc. nunca
+  # seriam instalados). `next build`/`next start` já forçam NODE_ENV=production
+  # sozinhos, e VERCEL_ENV=preview acima já é suficiente para o gate de
+  # AUTH_SECRET/cookie Secure — não precisamos declarar NODE_ENV aqui.
+
+jobs:
+  entregador-auth-e2e:
+    name: entregador-auth-e2e
+    runs-on: ubuntu-latest
+    container: node:20
+    services:
+      redis:
+        image: redis:6.2.14
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 20
+      srh:
+        image: hiett/serverless-redis-http:0.0.10
+        env:
+          SRH_MODE: env
+          SRH_CONNECTION_STRING: redis://redis:6379
+          SRH_TOKEN: "e2e-entregador-222-srh-local-token-nao-sensivel"
+    env:
+      KV_REST_API_TOKEN: "e2e-entregador-222-srh-local-token-nao-sensivel"
+    steps:
+      - name: Checkout do SHA do PR
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Instalar dependências (npm ci)
+        run: npm ci
+
+      - name: Aguardar Redis local (via SRH) ficar pronto
+        run: |
+          node -e "
+          const { Redis } = require('@upstash/redis');
+          const redis = new Redis({ url: process.env.KV_REST_API_URL, token: process.env.KV_REST_API_TOKEN });
+          (async () => {
+            for (let i = 0; i < 30; i++) {
+              try {
+                const pong = await redis.ping();
+                if (pong === 'PONG' || pong === 'pong') { console.log('SRH + Redis prontos.'); process.exit(0); }
+              } catch {}
+              await new Promise((r) => setTimeout(r, 1000));
+            }
+            console.error('SRH/Redis não respondeu a tempo.');
+            process.exit(1);
+          })();
+          "
+
+      - name: Gerar AUTH_SECRET aleatório (não impresso)
+        run: echo "AUTH_SECRET=$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))')" >> "$GITHUB_ENV"
+
+      - name: Gerar credencial de teste da equipe (não impressa, só para este job)
+        run: echo "ADMIN_PASSWORD=$(node -e 'process.stdout.write(require("node:crypto").randomBytes(24).toString("hex"))')" >> "$GITHUB_ENV"
+
+      - name: Testes focados da autenticação do entregador
+        run: >-
+          npm test --
+          src/lib/entregadorAuth.test.ts
+          src/app/api/entregador/auth/logout/route.test.ts
+          src/app/api/entregador/auth/me/route.test.ts
+          src/app/api/entregador/auth/reenviar-acesso/route.test.ts
+          src/app/api/entregador/auth/trocar-acesso/route.test.ts
+          src/app/api/entregador-pedidos/route.test.ts
+          src/app/api/localizacao/route.test.ts
+          src/app/api/orders/route.entregador.test.ts
+          src/app/entregador/page.test.ts
+
+      - name: Lint dos arquivos relacionados à autenticação do entregador
+        run: >-
+          npm run lint --
+          src/lib/entregadorAuth.ts
+          src/lib/entregadorAuth.test.ts
+          src/app/api/entregador/auth/logout/route.ts
+          src/app/api/entregador/auth/logout/route.test.ts
+          src/app/api/entregador/auth/me/route.ts
+          src/app/api/entregador/auth/me/route.test.ts
+          src/app/api/entregador/auth/reenviar-acesso/route.ts
+          src/app/api/entregador/auth/reenviar-acesso/route.test.ts
+          src/app/api/entregador/auth/trocar-acesso/route.ts
+          src/app/api/entregador/auth/trocar-acesso/route.test.ts
+          src/app/api/entregador-pedidos/route.ts
+          src/app/api/entregador-pedidos/route.test.ts
+          src/app/api/localizacao/route.ts
+          src/app/api/localizacao/route.test.ts
+          src/app/api/orders/route.ts
+          src/app/api/orders/route.entregador.test.ts
+          src/app/entregador/page.tsx
+          src/app/entregador/page.test.ts
+          src/types/entregador.ts
+          scripts/e2e-entregador-auth.mjs
+
+      - name: Build de produção (Next.js)
+        run: npm run build
+
+      - name: Iniciar build compilado (next start) em 127.0.0.1:3000
+        run: |
+          npm run start -- -p 3000 -H 127.0.0.1 &
+          echo $! > /tmp/next-start.pid
+
+      - name: Aguardar health check da aplicação
+        run: |
+          for i in $(seq 1 60); do
+            if node -e "fetch('http://127.0.0.1:3000/api/entregador/auth/me').then(r=>process.exit(r.status===401?0:1)).catch(()=>process.exit(1))"; then
+              echo "Aplicação de pé."
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Aplicação não respondeu a tempo." >&2
+          exit 1
+
+      - name: Suíte E2E — 22 cenários da autenticação do entregador
+        env:
+          E2E_BASE_URL: "http://127.0.0.1:3000"
+        run: node scripts/e2e-entregador-auth.mjs
+
+      - name: Encerrar o servidor Next
+        if: always()
+        run: |
+          if [ -f /tmp/next-start.pid ]; then
+            kill "$(cat /tmp/next-start.pid)" 2>/dev/null || true
+          fi
