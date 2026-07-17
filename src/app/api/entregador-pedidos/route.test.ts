@@ -78,10 +78,25 @@ describe("GET /api/entregador-pedidos", () => {
   it("ignora entregadorId da query e lê somente a fila da sessão", async () => {
     store.set("entregador:pedidos:ent-a", [pedidoFila()]);
     store.set("entregador:pedidos:ent-b", [{ ...pedidoFila(), pedidoId: "ped-b", entregadorId: "ent-b" }]);
+    store.set("pedidos", [pedidoMain("ent-a")]);
     const res = await GET(getRequest("?entregadorId=ent-b"));
     const data = await res.json();
     expect(data).toHaveLength(1);
     expect(data[0].pedidoId).toBe("ped-1");
+  });
+
+  it("filtra defensivamente dados que sobraram na fila após reatribuição", async () => {
+    store.set("entregador:pedidos:ent-a", [pedidoFila()]);
+    store.set("pedidos", [pedidoMain("ent-b")]);
+
+    const res = await GET(getRequest());
+    const data = await res.json();
+    expect(res.status).toBe(200);
+    expect(data).toEqual([]);
+    expect(JSON.stringify(data)).not.toContain("Cliente");
+    expect(JSON.stringify(data)).not.toContain("86988880000");
+    expect(JSON.stringify(data)).not.toContain("Rua 1");
+    expect(JSON.stringify(data)).not.toContain("Pizza");
   });
 });
 

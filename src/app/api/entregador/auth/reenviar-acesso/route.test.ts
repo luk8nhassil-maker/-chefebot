@@ -44,7 +44,8 @@ describe("POST /api/entregador/auth/reenviar-acesso", () => {
     expect(enviarMock).toHaveBeenCalledTimes(1);
     expect(enviarMock.mock.calls[0][0]).toBe("5586999990000");
     expect(enviarMock.mock.calls[0][0]).not.toBe("5511999999999");
-    expect(enviarMock.mock.calls[0][1]).toContain("/entregador?acesso=");
+    expect(enviarMock.mock.calls[0][1]).toContain("/entregador#acesso=");
+    expect(enviarMock.mock.calls[0][1]).not.toContain("?acesso=");
     expect(JSON.stringify(data)).not.toContain("acesso=");
     expect(JSON.stringify(data)).not.toContain("ent-1");
   });

@@ -31,7 +31,11 @@ type RegistroTicket = {
 };
 
 function getSecret() {
-  const segredoBase = process.env.AUTH_SECRET ?? "chefebot-dev-secret-troque-em-producao";
+  const segredoConfigurado = process.env.AUTH_SECRET?.trim();
+  if (!segredoConfigurado && process.env.NODE_ENV === "production") {
+    throw new Error("AUTH_SECRET obrigatorio para autenticar entregadores em producao");
+  }
+  const segredoBase = segredoConfigurado || "chefebot-dev-secret-local-entregador";
   // Deriva uma chave exclusiva para esta sessao. Mesmo com o mesmo segredo
   // operacional, um JWT do entregador nao valida no autenticador da equipe.
   return createHash("sha256")
@@ -188,7 +192,7 @@ export async function autenticarEntregador(req: NextRequest): Promise<{
 }
 
 export function montarLinkAcessoEntregador(ticket: string): string {
-  return `${ENTREGADOR_APP_BASE_URL}/entregador?acesso=${encodeURIComponent(ticket)}`;
+  return `${ENTREGADOR_APP_BASE_URL}/entregador#acesso=${encodeURIComponent(ticket)}`;
 }
 
 export function normalizarTelefoneEntregador(telefone: string): string {

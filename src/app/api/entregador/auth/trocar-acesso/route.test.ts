@@ -54,7 +54,9 @@ describe("POST /api/entregador/auth/trocar-acesso", () => {
     expect(cookie).toContain("Secure");
     expect(cookie).toContain("SameSite=lax");
 
-    expect((await POST(request(ticket))).status).toBe(401);
+    const replay = await POST(request(ticket));
+    expect(replay.status).toBe(401);
+    expect(await replay.json()).toEqual({ ok: false, error: "Acesso inválido ou expirado" });
   });
 
   it("ticket inválido retorna 401 e formato inválido retorna 400", async () => {

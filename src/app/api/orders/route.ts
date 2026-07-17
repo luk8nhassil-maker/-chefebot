@@ -66,6 +66,76 @@ type Pedido = PedidoComEdicao & {
   archivedReason?: string
 }
 
+const FILA_ENTREGADOR_TTL_SEGUNDOS = 86400
+
+const SALVAR_ATRIBUICAO_LUA = `
+local function lerFila(key)
+  local raw = redis.call("GET", key)
+  if not raw then return {} end
+  return cjson.decode(raw)
+end
+
+local function semPedido(fila, pedidoId)
+  local resultado = {}
+  for _, pedido in ipairs(fila) do
+    if pedido.pedidoId ~= pedidoId then
+      table.insert(resultado, pedido)
+    end
+  end
+  return resultado
+end
+
+local pedidoId = ARGV[2]
+local filaAtual = semPedido(lerFila(KEYS[2]), pedidoId)
+table.insert(filaAtual, cjson.decode(ARGV[3]))
+
+local mudouEntregador = ARGV[4] == "1"
+local filaAnterior = nil
+local ttlAnterior = -1
+if mudouEntregador then
+  ttlAnterior = redis.call("PTTL", KEYS[3])
+  filaAnterior = semPedido(lerFila(KEYS[3]), pedidoId)
+end
+
+redis.call("SET", KEYS[1], ARGV[1])
+redis.call("SET", KEYS[2], cjson.encode(filaAtual), "EX", ARGV[5])
+if mudouEntregador then
+  redis.call("SET", KEYS[3], cjson.encode(filaAnterior))
+  if ttlAnterior > 0 then
+    redis.call("PEXPIRE", KEYS[3], ttlAnterior)
+  else
+    redis.call("EXPIRE", KEYS[3], ARGV[5])
+  end
+end
+return 1
+`
+
+async function salvarAtribuicaoComFilas(
+  pedidos: Pedido[],
+  pedidoEntregador: PedidoEntregador,
+  entregadorAnteriorId?: string
+): Promise<void> {
+  const entregadorAtualId = pedidoEntregador.entregadorId
+  const filaAtualKey = `entregador:pedidos:${entregadorAtualId}`
+  const mudouEntregador = Boolean(
+    entregadorAnteriorId && entregadorAnteriorId !== entregadorAtualId
+  )
+  const filaAnteriorKey = mudouEntregador
+    ? `entregador:pedidos:${entregadorAnteriorId}`
+    : filaAtualKey
+  await redis.eval(
+    SALVAR_ATRIBUICAO_LUA,
+    ['pedidos', filaAtualKey, filaAnteriorKey],
+    [
+      JSON.stringify(pedidos),
+      pedidoEntregador.pedidoId,
+      JSON.stringify(pedidoEntregador),
+      mudouEntregador ? '1' : '0',
+      String(FILA_ENTREGADOR_TTL_SEGUNDOS),
+    ]
+  )
+}
+
 
 function getMensagemStatus(status: Status, nomeCliente: string): string | null {
   const firstName = nomeCliente.split(' ')[0];
@@ -159,7 +229,7 @@ export async function PATCH(req: NextRequest) {
   if (!auth) return NextResponse.json({ error: 'Nao autorizado' }, { status: 401 })
 
   const { id, status, entregador, silent } = await req.json()
-  let avisoOperacional: string | null = null
+  const avisosOperacionais: string[] = []
 
   // Toda transição de status (inclusive o aceite, novo → em_preparo) passa
   // pelo mesmo mutex curto usado pela edição do cliente: garante que a
@@ -197,6 +267,7 @@ export async function PATCH(req: NextRequest) {
     }
 
     const statusAnterior = pedidos[index].status
+    const entregadorAnteriorId = pedidos[index].entregador?.id
 
     // A confirmação manual de Pix não passa mais por aqui: ela exige senha e
     // checklist de segurança e vive em /api/orders/confirmar-pix-manual, que
@@ -214,45 +285,42 @@ export async function PATCH(req: NextRequest) {
     if (entregadorCanonico) {
       pedidos[index] = { ...pedidos[index], entregador: entregadorCanonico }
     }
-    await redis.set('pedidos', pedidos)
+    if (entregadorCanonico && status === 'saiu_entrega') {
+      const pedido = pedidos[index]
+      const pedidoEntregador: PedidoEntregador = {
+        pedidoId: pedido.id,
+        entregadorId: entregadorCanonico.id,
+        entregadorNome: entregadorCanonico.nome,
+        entregadorTelefone: entregadorCanonico.telefone,
+        clienteNome: pedido.cliente,
+        clienteTelefone: pedido.telefone,
+        endereco: pedido.endereco,
+        total: pedido.total,
+        itens: pedido.itens,
+        status: 'pendente',
+        horarioSaida: agora,
+      }
+      await salvarAtribuicaoComFilas(
+        pedidos,
+        pedidoEntregador,
+        entregadorAnteriorId
+      )
+    } else {
+      await redis.set('pedidos', pedidos)
+    }
 
   if (!silent) {
     await notificarCliente(pedidos[index].telefone, status, pedidos[index].cliente)
   }
 
-  // Notifica entregador no WhatsApp quando pedido sai para entrega + salva no Redis + envia link de rastreamento ao cliente
+  // O acesso do entregador e o rastreamento do cliente são efeitos separados:
+  // uma falha posterior do cliente nunca invalida um ticket já entregue.
   if (!silent && status === 'saiu_entrega' && entregadorCanonico?.telefone) {
     const pedido = pedidos[index]
     const phoneFormatado = normalizarTelefoneEntregador(entregadorCanonico.telefone)
-    const agora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' })
-
-    // Salva pedido na fila do entregador no Redis
-    const pedidoEntregador: PedidoEntregador = {
-      pedidoId: pedido.id,
-      entregadorId: entregadorCanonico.id,
-      entregadorNome: entregadorCanonico.nome,
-      entregadorTelefone: entregadorCanonico.telefone,
-      clienteNome: pedido.cliente,
-      clienteTelefone: pedido.telefone,
-      endereco: pedido.endereco,
-      total: pedido.total,
-      itens: pedido.itens,
-      status: 'pendente',
-      horarioSaida: agora,
-    }
-    const filaMotoboy = await redis.get<PedidoEntregador[]>(`entregador:pedidos:${entregadorCanonico.id}`) || []
-    const filtrado = filaMotoboy.filter(p => p.pedidoId !== pedido.id)
-    await redis.set(`entregador:pedidos:${entregadorCanonico.id}`, [...filtrado, pedidoEntregador], { ex: 86400 })
-
-    const configEntrega = obterConfigEvolution()
-    if (!configEntrega) {
-      avisoOperacional = 'Pedido atribuído, mas o acesso seguro do entregador não foi enviado.'
-      console.error('[ChefeBot] Provider de WhatsApp não configurado — acesso seguro do entregador não enviado.')
-    } else {
     let ticketAcesso: string | null = null
+    let acessoEntregadorEnviado = false
     try {
-      // Mensagem para o motoboy com ticket opaco. O ticket nunca entra em
-      // logs nem na resposta da API de pedidos.
       const acesso = await criarTicketAcessoEntregador(entregadorCanonico.id)
       ticketAcesso = acesso.ticket
       const resultadoMotoboy = await enviarTextoWhatsApp(
@@ -261,36 +329,56 @@ export async function PATCH(req: NextRequest) {
       )
       if (!resultadoMotoboy.ok) {
         await invalidarTicketAcesso(acesso.ticket)
-        avisoOperacional = 'Pedido atribuído, mas o acesso seguro do entregador não foi enviado.'
+        avisosOperacionais.push('Pedido atribuído, mas o acesso seguro do entregador não foi enviado.')
         console.error('[ChefeBot] Atribuição salva sem envio do acesso seguro ao entregador.', {
           pedidoId: pedido.id,
           entregadorId: entregadorCanonico.id,
           motivo: resultadoMotoboy.motivo,
         })
-      }
-
-      // Mensagem para o cliente com link de rastreamento
-      const clientePhone = sanitizePhone(pedido.telefone)
-      await fetch(`${configEntrega.baseUrl}/message/sendText/${configEntrega.instanceName}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'apikey': configEntrega.apiKey },
-        body: JSON.stringify({
-          number: clientePhone,
-          text: `Seu pedido saiu! 🛵\nEntregador: *${entregadorCanonico.nome}*\nAcompanhe: ${APP_BASE_URL}/rastrear/${pedido.id}`,
-        }),
-      })
-
-      if (resultadoMotoboy.ok) {
-        await redis.set(`entregador_aguardando:${phoneFormatado}`, pedido.id, { ex: 3 * 60 * 60 })
+      } else {
+        acessoEntregadorEnviado = true
       }
     } catch {
-      if (ticketAcesso) await invalidarTicketAcesso(ticketAcesso).catch(() => {})
-      avisoOperacional = 'Pedido atribuído, mas o acesso seguro do entregador não foi enviado.'
+      if (ticketAcesso && !acessoEntregadorEnviado) {
+        await invalidarTicketAcesso(ticketAcesso).catch(() => {})
+      }
+      avisosOperacionais.push('Pedido atribuído, mas o acesso seguro do entregador não foi enviado.')
       console.error('[ChefeBot] Atribuição salva sem envio do acesso seguro ao entregador.', {
         pedidoId: pedido.id,
         entregadorId: entregadorCanonico.id,
       })
     }
+
+    if (acessoEntregadorEnviado) {
+      try {
+        await redis.set(`entregador_aguardando:${phoneFormatado}`, pedido.id, { ex: 3 * 60 * 60 })
+      } catch {
+        console.error('[ChefeBot] Acesso enviado, mas confirmação auxiliar do entregador não foi registrada.', {
+          pedidoId: pedido.id,
+          entregadorId: entregadorCanonico.id,
+        })
+      }
+    }
+
+    try {
+      const resultadoCliente = await enviarTextoWhatsApp(
+        sanitizePhone(pedido.telefone),
+        `Seu pedido saiu! 🛵\nEntregador: *${entregadorCanonico.nome}*\nAcompanhe: ${APP_BASE_URL}/rastrear/${pedido.id}`
+      )
+      if (!resultadoCliente.ok) {
+        avisosOperacionais.push('Acesso do entregador mantido, mas o aviso de rastreamento ao cliente não foi enviado.')
+        console.error('[ChefeBot] Falha ao enviar rastreamento ao cliente; acesso do entregador preservado.', {
+          pedidoId: pedido.id,
+          entregadorId: entregadorCanonico.id,
+          motivo: resultadoCliente.motivo,
+        })
+      }
+    } catch {
+      avisosOperacionais.push('Acesso do entregador mantido, mas o aviso de rastreamento ao cliente não foi enviado.')
+      console.error('[ChefeBot] Falha ao enviar rastreamento ao cliente; acesso do entregador preservado.', {
+        pedidoId: pedido.id,
+        entregadorId: entregadorCanonico.id,
+      })
     }
   }
 
@@ -420,7 +508,15 @@ export async function PATCH(req: NextRequest) {
   }
 
     const resposta = sanitizarPedidoPixResposta(pedidos[index])
-    return NextResponse.json(avisoOperacional ? { ...resposta, avisoOperacional } : resposta)
+    return NextResponse.json(
+      avisosOperacionais.length > 0
+        ? {
+            ...resposta,
+            avisoOperacional: avisosOperacionais.join(' '),
+            avisosOperacionais,
+          }
+        : resposta
+    )
   } finally {
     await liberarMutexEdicao(id, mutexToken)
   }

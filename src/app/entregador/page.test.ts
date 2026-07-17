@@ -6,11 +6,22 @@ const fonte = readFileSync(fileURLToPath(new URL("./page.tsx", import.meta.url))
 
 describe("/entregador — autenticação e sessão", () => {
   it("troca o ticket e limpa o segredo da URL", () => {
-    expect(fonte).toContain("params.get('acesso')");
+    expect(fonte).toContain("window.location.hash.slice(1)");
+    expect(fonte).toContain("fragmento.get('acesso')");
+    expect(fonte).toContain("window.history.replaceState");
     expect(fonte).toContain("/api/entregador/auth/trocar-acesso");
     expect(fonte).toContain("router.replace('/entregador')");
+    expect(fonte.indexOf("window.history.replaceState")).toBeLessThan(
+      fonte.indexOf("fetch('/api/entregador/auth/trocar-acesso'")
+    );
+    expect(fonte).not.toContain("params.get('acesso')");
     expect(fonte).not.toContain("localStorage");
     expect(fonte).not.toContain("sessionStorage");
+  });
+
+  it("não autentica silenciosamente links transitórios com acesso na query", () => {
+    expect(fonte).toContain("params.has('acesso')");
+    expect(fonte).toContain("Este acesso é inválido. Solicite um novo link seguro");
   });
 
   it("sessão válida carrega me e pedidos sem entregadorId", () => {

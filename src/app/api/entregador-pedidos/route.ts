@@ -29,9 +29,19 @@ export async function GET(req: NextRequest) {
 
     // A query string é deliberadamente ignorada. A única identidade aceita
     // vem do entregador-token validado acima.
-    const pedidos =
-      (await redis.get<PedidoEntregador[]>(`entregador:pedidos:${auth.entregador.id}`)) ?? [];
-    return NextResponse.json(pedidos);
+    const [pedidos, principais] = await Promise.all([
+      redis.get<PedidoEntregador[]>(`entregador:pedidos:${auth.entregador.id}`),
+      redis.get<PedidoMain[]>("pedidos"),
+    ]);
+    const atribuidosAtualmente = new Set(
+      (principais ?? [])
+        .filter((pedido) => pedido.entregador?.id === auth.entregador.id)
+        .map((pedido) => pedido.id)
+    );
+    const autorizados = (pedidos ?? []).filter((pedido) =>
+      atribuidosAtualmente.has(pedido.pedidoId)
+    );
+    return NextResponse.json(autorizados);
   } catch {
     return NextResponse.json({ ok: false, error: "Não foi possível carregar os pedidos" }, { status: 503 });
   }

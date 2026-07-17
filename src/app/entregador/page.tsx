@@ -45,9 +45,21 @@ export default function EntregadorPage() {
   useEffect(() => {
     let ativo = true
     const params = new URLSearchParams(window.location.search)
-    const acesso = params.get('acesso')
+    const fragmento = new URLSearchParams(window.location.hash.slice(1))
+    const acesso = fragmento.get('acesso')
+    const acessoQueryInseguro = params.has('acesso')
     const idLegado = params.get('id') || ''
     entregadorIdLegadoRef.current = idLegado
+
+    // Remove o segredo da barra e do histórico antes de qualquer chamada de
+    // rede. O valor permanece somente nesta closure durante a troca.
+    if (acesso) {
+      window.history.replaceState(
+        null,
+        '',
+        `${window.location.pathname}${window.location.search}`
+      )
+    }
 
     async function iniciar() {
       if (acesso) {
@@ -92,6 +104,9 @@ export default function EntregadorPage() {
         }
       } catch {}
 
+      if (acessoQueryInseguro && ativo) {
+        setErro('Este acesso é inválido. Solicite um novo link seguro à pizzaria.')
+      }
       if (ativo) setEstado(idLegado ? 'legado' : 'sem_sessao')
     }
 
