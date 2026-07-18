@@ -31,13 +31,13 @@ describe("ativarFidelidadeCliente", () => {
     const c = await ativarFidelidadeCliente(TEL, "Maria");
     expect(c.nome).toBe("Maria");
     expect(c.fidelidadeAtivadaEm).toBeTruthy();
-    const salvo = store.get(`cliente:${TEL}`) as Cliente;
+    const salvo = store.get(`perfil-cliente:${TEL}`) as Cliente;
     expect(salvo.fidelidadeAtivadaEm).toBe(c.fidelidadeAtivadaEm);
   });
 
   test("cliente pre-existente sem ativacao (nome de pedido) recebe o marco sem perder dados", async () => {
     await obterOuCriarCliente(TEL, "Nome De Pedido");
-    expect(clienteProximaEtapa(store.get(`cliente:${TEL}`) as Cliente)).toBe("name");
+    expect(clienteProximaEtapa(store.get(`perfil-cliente:${TEL}`) as Cliente)).toBe("name");
     const c = await ativarFidelidadeCliente(TEL, "Maria Ativada");
     expect(c.nome).toBe("Maria Ativada");
     expect(clienteProximaEtapa(c)).toBe("points");

@@ -23,7 +23,7 @@ function requestSessao(tk?: string) {
 }
 
 function seedCliente(nome?: string, ativado = false) {
-  redisStore.set(`cliente:${PHONE}`, {
+  redisStore.set(`perfil-cliente:${PHONE}`, {
     clienteId: `cli_${PHONE}`,
     telefone: PHONE,
     ...(nome ? { nome } : {}),

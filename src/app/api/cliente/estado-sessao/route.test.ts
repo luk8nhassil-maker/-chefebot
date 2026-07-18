@@ -35,7 +35,7 @@ describe("GET /api/cliente/estado-sessao — unica fonte de 'estou autenticado?'
   });
 
   test("sessao valida + cliente SEM fidelidadeAtivadaEm: next=name", async () => {
-    redisStore.set(`cliente:${PHONE}`, { clienteId: `cli_${PHONE}`, telefone: PHONE, nome: "Nome De Pedido Legado", createdAt: "x", updatedAt: "x", lastLoginAt: "x" });
+    redisStore.set(`perfil-cliente:${PHONE}`, { clienteId: `cli_${PHONE}`, telefone: PHONE, nome: "Nome De Pedido Legado", createdAt: "x", updatedAt: "x", lastLoginAt: "x" });
     const token = await criarSessaoOpaca({ clienteId: `cli_${PHONE}`, telefone: PHONE });
     const res = await GET(reqComBearer(token));
     const body = await res.json();
@@ -45,7 +45,7 @@ describe("GET /api/cliente/estado-sessao — unica fonte de 'estou autenticado?'
   });
 
   test("sessao valida + fidelidadeAtivadaEm presente: next=points", async () => {
-    redisStore.set(`cliente:${PHONE}`, { clienteId: `cli_${PHONE}`, telefone: PHONE, nome: "Maria", fidelidadeAtivadaEm: "2026-01-01T00:00:00.000Z", createdAt: "x", updatedAt: "x", lastLoginAt: "x" });
+    redisStore.set(`perfil-cliente:${PHONE}`, { clienteId: `cli_${PHONE}`, telefone: PHONE, nome: "Maria", fidelidadeAtivadaEm: "2026-01-01T00:00:00.000Z", createdAt: "x", updatedAt: "x", lastLoginAt: "x" });
     const token = await criarSessaoOpaca({ clienteId: `cli_${PHONE}`, telefone: PHONE });
     const res = await GET(reqComBearer(token));
     expect((await res.json())).toEqual({ authenticated: true, next: "points" });

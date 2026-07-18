@@ -54,7 +54,7 @@ describe("POST /api/cliente/verificar — fluxo de numero reconhecido (waToken)"
     expect(res.headers.get("set-cookie")).toContain("cliente-token=");
     expect(res.headers.get("set-cookie")).toContain("HttpOnly");
     // perfil criado para o phone do token, nunca para o adulterado
-    expect(redisStore.has(`cliente:${PHONE_DO_TOKEN}`)).toBe(true);
+    expect(redisStore.has(`perfil-cliente:${PHONE_DO_TOKEN}`)).toBe(true);
     expect(redisStore.has("cliente:11999990000")).toBe(false);
     // resposta nunca devolve o numero completo ao navegador
     expect(JSON.stringify(data)).not.toContain(PHONE_DO_TOKEN);
@@ -120,7 +120,7 @@ describe("POST /api/cliente/verificar — fluxo de numero reconhecido (waToken)"
 describe("POST /api/cliente/verificar — resposta atomica decide a proxima tela", () => {
   test("cliente novo (sem fidelidadeAtivadaEm): next=name, mesmo que ja exista nome legado", async () => {
     redisStore.set(`cardapio:token:${WA_TOKEN}`, { phone: PHONE_DO_TOKEN, createdAt: Date.now() });
-    redisStore.set(`cliente:${PHONE_DO_TOKEN}`, { clienteId: `cli_${PHONE_DO_TOKEN}`, telefone: PHONE_DO_TOKEN, nome: "Nome De Pedido", createdAt: "x", updatedAt: "x", lastLoginAt: "x" });
+    redisStore.set(`perfil-cliente:${PHONE_DO_TOKEN}`, { clienteId: `cli_${PHONE_DO_TOKEN}`, telefone: PHONE_DO_TOKEN, nome: "Nome De Pedido", createdAt: "x", updatedAt: "x", lastLoginAt: "x" });
     armarOtp(PHONE_DO_TOKEN);
     const res = await POST(requestVerificar({ waToken: WA_TOKEN, codigo: "123456" }));
     const data = await res.json();
@@ -129,7 +129,7 @@ describe("POST /api/cliente/verificar — resposta atomica decide a proxima tela
 
   test("cliente com fidelidade ativada: next=points", async () => {
     redisStore.set(`cardapio:token:${WA_TOKEN}`, { phone: PHONE_DO_TOKEN, createdAt: Date.now() });
-    redisStore.set(`cliente:${PHONE_DO_TOKEN}`, { clienteId: `cli_${PHONE_DO_TOKEN}`, telefone: PHONE_DO_TOKEN, nome: "Maria", fidelidadeAtivadaEm: "2026-01-01T00:00:00.000Z", createdAt: "x", updatedAt: "x", lastLoginAt: "x" });
+    redisStore.set(`perfil-cliente:${PHONE_DO_TOKEN}`, { clienteId: `cli_${PHONE_DO_TOKEN}`, telefone: PHONE_DO_TOKEN, nome: "Maria", fidelidadeAtivadaEm: "2026-01-01T00:00:00.000Z", createdAt: "x", updatedAt: "x", lastLoginAt: "x" });
     armarOtp(PHONE_DO_TOKEN);
     const res = await POST(requestVerificar({ waToken: WA_TOKEN, codigo: "123456" }));
     const data = await res.json();
@@ -154,7 +154,7 @@ describe("POST /api/cliente/verificar — resposta atomica decide a proxima tela
 
   test("cliente com fidelidade ja ativada (next=points) NUNCA recebe ticket de ativacao — nao ha PATCH de nome a proteger", async () => {
     redisStore.set(`cardapio:token:${WA_TOKEN}`, { phone: PHONE_DO_TOKEN, createdAt: Date.now() });
-    redisStore.set(`cliente:${PHONE_DO_TOKEN}`, { clienteId: `cli_${PHONE_DO_TOKEN}`, telefone: PHONE_DO_TOKEN, nome: "Maria", fidelidadeAtivadaEm: "2026-01-01T00:00:00.000Z", createdAt: "x", updatedAt: "x", lastLoginAt: "x" });
+    redisStore.set(`perfil-cliente:${PHONE_DO_TOKEN}`, { clienteId: `cli_${PHONE_DO_TOKEN}`, telefone: PHONE_DO_TOKEN, nome: "Maria", fidelidadeAtivadaEm: "2026-01-01T00:00:00.000Z", createdAt: "x", updatedAt: "x", lastLoginAt: "x" });
     armarOtp(PHONE_DO_TOKEN);
     const res = await POST(requestVerificar({ waToken: WA_TOKEN, codigo: "123456" }));
     const data = await res.json();
@@ -184,7 +184,7 @@ describe("POST /api/cliente/verificar — fluxo manual continua funcionando", ()
     expect(res.status).toBe(200);
     expect(data.ok).toBe(true);
     expect(data.cliente.nome).toBe("Maria da Silva");
-    expect(redisStore.has(`cliente:${TELEFONE_MANUAL}`)).toBe(true);
+    expect(redisStore.has(`perfil-cliente:${TELEFONE_MANUAL}`)).toBe(true);
   });
 
   test("dados invalidos retornam 400", async () => {
