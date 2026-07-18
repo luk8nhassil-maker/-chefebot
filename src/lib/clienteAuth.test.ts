@@ -17,7 +17,7 @@ vi.mock("@/lib/redis", () => ({
 }));
 
 import { redis } from "@/lib/redis";
-import { gerarOtp, verificarOtp, podeReenviarOtp, criarTokenCliente, verificarTokenCliente, criarTicketSessao, consumirTicketSessao, criarSessaoOpaca, resolverSessaoOpaca, revogarSessaoOpaca, extrairBearer, lerSessaoCliente, criarSessaoPortatil, resolverSessaoPortatil, CLIENTE_COOKIE } from "./clienteAuth";
+import { gerarOtp, verificarOtp, podeReenviarOtp, criarTokenCliente, verificarTokenCliente, criarTicketSessao, consumirTicketSessao, criarSessaoOpaca, resolverSessaoOpaca, revogarSessaoOpaca, extrairBearer, lerSessaoCliente, criarSessaoPortatil, resolverSessaoPortatil, lerSessaoClienteDiagnosticada, CLIENTE_COOKIE } from "./clienteAuth";
 
 beforeEach(() => {
   store.clear();
@@ -173,5 +173,102 @@ describe("lerSessaoCliente — cookie primeiro, Bearer como fallback", () => {
   test("nada valido: null", async () => {
     expect(await lerSessaoCliente(reqFake())).toBeNull();
     expect(await lerSessaoCliente(reqFake(undefined, `Bearer ${"b".repeat(32)}`))).toBeNull();
+  });
+});
+
+describe("lerSessaoClienteDiagnosticada — mesma resolução, com motivo categórico sem PII", () => {
+  const PAYLOAD = { clienteId: "cli_5599974000691", telefone: "5599974000691" };
+
+  function reqFake(cookie?: string, auth?: string) {
+    return {
+      cookies: { get: (n: string) => (n === CLIENTE_COOKIE && cookie ? { value: cookie } : undefined) },
+      headers: { get: (n: string) => (n.toLowerCase() === "authorization" ? auth ?? null : null) },
+    };
+  }
+
+  test("nenhuma credencial: authorization ausente e formato 'nenhum'", async () => {
+    const { payload, diagnostico } = await lerSessaoClienteDiagnosticada(reqFake());
+    expect(payload).toBeNull();
+    expect(diagnostico).toEqual({
+      cookiePresente: false,
+      cookieValido: false,
+      authorizationPresente: false,
+      formatoBearer: "nenhum",
+      jweValido: false,
+      opacoValido: false,
+      fonte: "nenhuma",
+    });
+  });
+
+  test("JWE valido e identificado: fonte=jwe, jweValido=true", async () => {
+    const token = await criarSessaoPortatil(PAYLOAD);
+    const { payload, diagnostico } = await lerSessaoClienteDiagnosticada(reqFake(undefined, `Bearer ${token}`));
+    expect(payload).toEqual(PAYLOAD);
+    expect(diagnostico.formatoBearer).toBe("jwe");
+    expect(diagnostico.jweValido).toBe(true);
+    expect(diagnostico.fonte).toBe("jwe");
+  });
+
+  test("JWE adulterado e identificado: formato jwe, porem invalido", async () => {
+    const token = await criarSessaoPortatil(PAYLOAD);
+    const adulterado = token.slice(0, -4) + "abcd";
+    const { payload, diagnostico } = await lerSessaoClienteDiagnosticada(reqFake(undefined, `Bearer ${adulterado}`));
+    expect(payload).toBeNull();
+    expect(diagnostico.formatoBearer).toBe("jwe");
+    expect(diagnostico.jweValido).toBe(false);
+    expect(diagnostico.fonte).toBe("nenhuma");
+  });
+
+  test("sessao opaca legada e identificada: fonte=opaco", async () => {
+    const token = await criarSessaoOpaca(PAYLOAD);
+    const { payload, diagnostico } = await lerSessaoClienteDiagnosticada(reqFake(undefined, `Bearer ${token}`));
+    expect(payload).toEqual(PAYLOAD);
+    expect(diagnostico.formatoBearer).toBe("opaco");
+    expect(diagnostico.opacoValido).toBe(true);
+    expect(diagnostico.fonte).toBe("opaco");
+  });
+
+  test("opaco invalido/inexistente: formato opaco, porem invalido", async () => {
+    const { payload, diagnostico } = await lerSessaoClienteDiagnosticada(reqFake(undefined, `Bearer ${"a".repeat(32)}`));
+    expect(payload).toBeNull();
+    expect(diagnostico.formatoBearer).toBe("opaco");
+    expect(diagnostico.opacoValido).toBe(false);
+  });
+
+  test("formato desconhecido (nem JWE nem opaco): formatoBearer='outro'", async () => {
+    const { payload, diagnostico } = await lerSessaoClienteDiagnosticada(reqFake(undefined, "Bearer valor-qualquer"));
+    expect(payload).toBeNull();
+    expect(diagnostico.authorizationPresente).toBe(true);
+    expect(diagnostico.formatoBearer).toBe("outro");
+    expect(diagnostico.jweValido).toBe(false);
+    expect(diagnostico.opacoValido).toBe(false);
+  });
+
+  test("cookie invalido nao impede a tentativa do Bearer (fonte ainda pode ser jwe)", async () => {
+    const token = await criarSessaoPortatil(PAYLOAD);
+    const { payload, diagnostico } = await lerSessaoClienteDiagnosticada(reqFake("cookie-adulterado", `Bearer ${token}`));
+    expect(payload).toEqual(PAYLOAD);
+    expect(diagnostico.cookiePresente).toBe(true);
+    expect(diagnostico.cookieValido).toBe(false);
+    expect(diagnostico.fonte).toBe("jwe");
+  });
+
+  test("cookie valido: fonte=cookie, nunca tenta decriptar bearer mesmo se presente", async () => {
+    const jwt = await criarTokenCliente(PAYLOAD);
+    const { payload, diagnostico } = await lerSessaoClienteDiagnosticada(reqFake(jwt, "Bearer qualquer-coisa"));
+    expect(payload).toEqual(PAYLOAD);
+    expect(diagnostico.cookiePresente).toBe(true);
+    expect(diagnostico.cookieValido).toBe(true);
+    expect(diagnostico.fonte).toBe("cookie");
+  });
+
+  test("diagnostico nunca contem o token, o cookie, o telefone ou o clienteId", async () => {
+    const token = await criarSessaoPortatil(PAYLOAD);
+    const { diagnostico } = await lerSessaoClienteDiagnosticada(reqFake("cookie-secreto-xyz", `Bearer ${token}`));
+    const serializado = JSON.stringify(diagnostico);
+    expect(serializado).not.toContain(token);
+    expect(serializado).not.toContain("cookie-secreto-xyz");
+    expect(serializado).not.toContain(PAYLOAD.telefone);
+    expect(serializado).not.toContain(PAYLOAD.clienteId);
   });
 });

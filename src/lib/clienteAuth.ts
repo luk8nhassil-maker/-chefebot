@@ -216,6 +216,95 @@ export async function lerSessaoCliente(req: {
   return resolverSessaoOpaca(extrairBearer(`Bearer ${bruto}`));
 }
 
+// ============================================================================
+// DIAGNÓSTICO TEMPORÁRIO DE AUTENTICAÇÃO (Perfil 3.0)
+// Espelha exatamente a resolução de lerSessaoCliente (cookie → JWE → opaca),
+// mas devolve TAMBÉM em qual etapa e por quê a autenticação falhou — nunca o
+// conteúdo do cookie, do Bearer, do telefone ou do clienteId, só booleanos e
+// uma classificação de formato. Função separada, NUNCA usada no lugar de
+// lerSessaoCliente: existe só para instrumentar o PATCH /api/cliente/perfil
+// enquanto se investiga por que sessões válidas (do ponto de vista do
+// cliente) chegam como 401 em produção.
+// ============================================================================
+
+export type DiagnosticoAutenticacao = {
+  cookiePresente: boolean;
+  cookieValido: boolean;
+  authorizationPresente: boolean;
+  formatoBearer: "nenhum" | "jwe" | "opaco" | "outro";
+  jweValido: boolean;
+  opacoValido: boolean;
+  fonte: "cookie" | "jwe" | "opaco" | "nenhuma";
+};
+
+const FORMATO_SESSAO_PORTATIL = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
+
+function classificarFormatoBearer(bruto: string | null): "nenhum" | "jwe" | "opaco" | "outro" {
+  if (!bruto) return "nenhum";
+  if (FORMATO_SESSAO_PORTATIL.test(bruto)) return "jwe";
+  if (FORMATO_TOKEN_OPACO.test(bruto)) return "opaco";
+  return "outro";
+}
+
+export async function lerSessaoClienteDiagnosticada(req: {
+  cookies: { get(name: string): { value: string } | undefined };
+  headers: { get(name: string): string | null };
+}): Promise<{ payload: ClienteTokenPayload | null; diagnostico: DiagnosticoAutenticacao }> {
+  const cookie = req.cookies.get(CLIENTE_COOKIE)?.value;
+  const cookiePresente = !!cookie;
+  let cookieValido = false;
+
+  if (cookie) {
+    const payloadCookie = await verificarTokenCliente(cookie);
+    if (payloadCookie) {
+      cookieValido = true;
+      return {
+        payload: payloadCookie,
+        diagnostico: {
+          cookiePresente,
+          cookieValido,
+          authorizationPresente: !!extrairBearerBruto(req.headers.get("authorization")),
+          formatoBearer: "nenhum",
+          jweValido: false,
+          opacoValido: false,
+          fonte: "cookie",
+        },
+      };
+    }
+  }
+
+  const bruto = extrairBearerBruto(req.headers.get("authorization"));
+  const authorizationPresente = !!bruto;
+  const formatoBearer = classificarFormatoBearer(bruto);
+  let jweValido = false;
+  let opacoValido = false;
+
+  if (formatoBearer === "jwe") {
+    const portatil = await resolverSessaoPortatil(bruto);
+    if (portatil) {
+      jweValido = true;
+      return {
+        payload: portatil,
+        diagnostico: { cookiePresente, cookieValido, authorizationPresente, formatoBearer, jweValido, opacoValido, fonte: "jwe" },
+      };
+    }
+  } else if (formatoBearer === "opaco") {
+    const opaca = await resolverSessaoOpaca(bruto);
+    if (opaca) {
+      opacoValido = true;
+      return {
+        payload: opaca,
+        diagnostico: { cookiePresente, cookieValido, authorizationPresente, formatoBearer, jweValido, opacoValido, fonte: "opaco" },
+      };
+    }
+  }
+
+  return {
+    payload: null,
+    diagnostico: { cookiePresente, cookieValido, authorizationPresente, formatoBearer, jweValido, opacoValido, fonte: "nenhuma" },
+  };
+}
+
 export async function criarTokenCliente(payload: ClienteTokenPayload): Promise<string> {
   return new SignJWT({ clienteId: payload.clienteId, telefone: payload.telefone })
     .setProtectedHeader({ alg: "HS256" })

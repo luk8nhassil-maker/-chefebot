@@ -13,7 +13,7 @@ export const CF_SESSAO_KEY = "cf_sessao";
 
 // Marcador curto da versão do bundle (diagnóstico do Perfil 3.0): aparece na
 // telemetria para provar qual código o aparelho executou. Sem PII.
-export const VERSAO_PERFIL3 = "p3d5";
+export const VERSAO_PERFIL3 = "p3d6";
 
 // Telemetria temporária best-effort — só slugs/booleans/trace da allowlist do
 // backend; nunca envia OTP, telefone, tokens, cookies ou nome.
