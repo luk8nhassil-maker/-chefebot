@@ -6,6 +6,7 @@ import { Receipt, ChevronRight, Clock, ChefHat, CheckCircle2, Check, X as XIcon 
 import ClientBottomNav from '@/components/ClientBottomNav'
 import PixPendenteBar, { usePixPendente } from '@/components/PixPendenteBar'
 import { CF_OPEN_CART_KEY } from '@/lib/pedidoAtivoCliente'
+import { fetchCliente } from '@/lib/clienteSessaoFront'
 import {
   filtrarPedidosPorBusca,
   statusVisualPedido,
@@ -125,7 +126,7 @@ export default function ClientePedidosPage() {
 
   const carregar = useCallback(async () => {
     try {
-      const res = await fetch('/api/cliente/pedidos', { cache: 'no-store' })
+      const res = await fetchCliente('/api/cliente/pedidos', { cache: 'no-store' })
       if (res.status === 401) {
         setTela('sessao_expirada')
         return

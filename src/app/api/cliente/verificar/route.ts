@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verificarOtp, criarTokenCliente, criarTicketSessao, CLIENTE_COOKIE } from "@/lib/clienteAuth";
+import { verificarOtp, criarTokenCliente, criarTicketSessao, criarSessaoOpaca, CLIENTE_COOKIE } from "@/lib/clienteAuth";
 import { obterOuCriarCliente, sanitizeTelefoneCliente, normalizarNomeCliente } from "@/lib/clientes";
 import { validarTokenCardapio } from "@/lib/cardapioToken";
 
@@ -45,7 +45,11 @@ export async function POST(req: NextRequest) {
     // navegador — a tela de Pontos só precisa saber se o cliente já tem nome
     // (para pular a etapa de cadastro).
     const ticket = await criarTicketSessao({ clienteId: cliente.clienteId, telefone: cliente.telefone });
-    const res = NextResponse.json({ ok: true, cliente: { nome: cliente.nome ?? null }, ticket });
+    // Sessão opaca (token aleatório, sem nenhum dado do cliente): o front só a
+    // usa — e só a guarda — quando comprovar que o cookie desta resposta não
+    // foi aplicado (navegador interno do WhatsApp no iPhone).
+    const sessao = await criarSessaoOpaca({ clienteId: cliente.clienteId, telefone: cliente.telefone });
+    const res = NextResponse.json({ ok: true, cliente: { nome: cliente.nome ?? null }, ticket, sessao });
     res.cookies.set(CLIENTE_COOKIE, token, {
       httpOnly: true,
       sameSite: "lax",

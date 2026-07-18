@@ -6,6 +6,7 @@ import ClientBottomNav from '@/components/ClientBottomNav'
 import PixPendenteBar, { usePixPendente } from '@/components/PixPendenteBar'
 import { CF_OPEN_CART_KEY } from '@/lib/pedidoAtivoCliente'
 import { destinoNextPermitido } from '@/lib/clientePedidos'
+import { fetchCliente, guardarSessaoFallback, limparSessaoFallback } from '@/lib/clienteSessaoFront'
 
 type Movimento = {
   id: string
@@ -103,7 +104,7 @@ export default function ClientePage() {
   const [reenvioEm, setReenvioEm] = useState(0)
   // Preenchido após um código validado com sucesso: permite "Tentar de novo"
   // sem re-submeter o código (que é de uso único e já foi consumido).
-  const [posVerificacao, setPosVerificacao] = useState<{ nome: string | null; ticket: string | null } | null>(null)
+  const [posVerificacao, setPosVerificacao] = useState<{ nome: string | null; ticket: string | null; sessao: string | null } | null>(null)
   const codigoRef = useRef<HTMLInputElement>(null)
 
   // Retorno seguro pós-login (ex.: veio de "Pedido" no menu inferior sem
@@ -126,8 +127,8 @@ export default function ClientePage() {
   async function carregarPerfil(): Promise<Perfil | null> {
     try {
       const [resPerfil, resFidelidade] = await Promise.all([
-        fetch('/api/cliente/perfil', { cache: 'no-store' }),
-        fetch('/api/cliente/fidelidade', { cache: 'no-store' }),
+        fetchCliente('/api/cliente/perfil', { cache: 'no-store' }),
+        fetchCliente('/api/cliente/fidelidade', { cache: 'no-store' }),
       ])
       if (resPerfil.ok && resFidelidade.ok) {
         const dados: Perfil = await resPerfil.json()
@@ -201,12 +202,25 @@ export default function ClientePage() {
   }
 
   useEffect(() => {
-    carregarPerfil().then((dados) => {
-      if (!dados) { iniciarSemSessao(); return }
+    let veioDaAtivacao = false
+    try { veioDaAtivacao = new URLSearchParams(window.location.search).get('cadastro') === 'nome' } catch {}
+    // Chegada da ativação por navegação (/api/cliente/sessao): o cookie pode
+    // demorar a valer para fetches — sonda com retry em vez de uma tentativa.
+    const sondar = veioDaAtivacao ? carregarPerfilComRetry : carregarPerfil
+    sondar().then((dados) => {
+      if (!dados) {
+        if (veioDaAtivacao) {
+          // OTP já foi confirmado e consumido: nunca voltar ao início em
+          // silêncio — explica e oferece um novo código na mesma tela.
+          try { window.history.replaceState({}, '', window.location.pathname) } catch {}
+          setErro('Quase lá! Toque em "Confirmar e receber código" para receber um novo código.')
+        }
+        iniciarSemSessao()
+        return
+      }
       const destino = nextPermitidoAtual()
       if (destino) { window.location.href = destino; return }
-      // Retomada do fallback de ativação por navegação (/api/cliente/sessao):
-      // cliente novo volta direto para a etapa do nome.
+      // Cliente novo que chegou pela ativação volta direto à etapa do nome.
       try {
         const params = new URLSearchParams(window.location.search)
         if (params.get('cadastro') === 'nome' && !dados.cliente.nome) {
@@ -295,14 +309,25 @@ export default function ClientePage() {
   // sessão é sondada com retry; se o cookie da resposta de fetch não "pegou"
   // (navegador interno do WhatsApp no iPhone), ativa a sessão numa navegação
   // real usando o ticket de uso único devolvido pelo verificar.
-  async function abrirAposVerificacao(pos: { nome: string | null; ticket: string | null }): Promise<void> {
-    const dados = await carregarPerfilComRetry()
+  async function abrirAposVerificacao(pos: { nome: string | null; ticket: string | null; sessao: string | null }): Promise<void> {
+    // 1) Cookie da resposta do verificar (caminho normal), com retry curto.
+    limparSessaoFallback()
+    let dados = await carregarPerfilComRetry()
+    // 2) Cookie não pegou (navegador interno do WhatsApp no iPhone): usa a
+    //    sessão opaca via Bearer — sem navegação nenhuma. Só grava o token
+    //    depois de comprovado que o cookie falhou.
+    if (!dados && pos.sessao) {
+      guardarSessaoFallback(pos.sessao)
+      dados = await carregarPerfil()
+      if (!dados) limparSessaoFallback()
+    }
     if (dados) {
       const destino = nextPermitidoAtual()
       if (destino) { window.location.href = destino; return }
       if (!pos.nome) { setNome(''); setStep('nome') }
       return
     }
+    // 3) Última linha: ativação por navegação com o ticket de uso único.
     if (pos.ticket) {
       window.location.href = `/api/cliente/sessao?tk=${encodeURIComponent(pos.ticket)}`
       return
@@ -340,7 +365,11 @@ export default function ClientePage() {
         setEnviando(false)
         return
       }
-      const pos = { nome: (data?.cliente?.nome as string | null) ?? null, ticket: (data?.ticket as string | null) ?? null }
+      const pos = {
+        nome: (data?.cliente?.nome as string | null) ?? null,
+        ticket: (data?.ticket as string | null) ?? null,
+        sessao: (data?.sessao as string | null) ?? null,
+      }
       setPosVerificacao(pos)
       await abrirAposVerificacao(pos)
     } catch { setErro('Erro de conexão. Tente novamente.') }
@@ -352,7 +381,7 @@ export default function ClientePage() {
     if (nome.trim().length < 2) { setErro('Digite seu nome'); return }
     setEnviando(true)
     try {
-      const res = await fetch('/api/cliente/perfil', {
+      const res = await fetchCliente('/api/cliente/perfil', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ nome }),
@@ -371,7 +400,8 @@ export default function ClientePage() {
   }
 
   async function sair() {
-    try { await fetch('/api/cliente/logout', { method: 'POST' }) } catch {}
+    try { await fetchCliente('/api/cliente/logout', { method: 'POST' }) } catch {}
+    limparSessaoFallback()
     setPerfil(null)
     setFidelidade(null)
     setTelefone('')
@@ -395,7 +425,7 @@ export default function ClientePage() {
     setResgateErro('')
     setResgatando(true)
     try {
-      const res = await fetch('/api/cliente/fidelidade/resgate', {
+      const res = await fetchCliente('/api/cliente/fidelidade/resgate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ recompensaId: fidelidade.recompensas[0].recompensaId }),

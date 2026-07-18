@@ -83,11 +83,15 @@ check("resposta traz cookie de sessao HttpOnly", cookieFetch && (verificar.heade
 check("cliente novo vem sem nome (etapa do nome no front)", verificarBody?.cliente?.nome === null, JSON.stringify(verificarBody));
 check("resposta nao expoe o telefone completo", !JSON.stringify(verificarBody).includes(PHONE));
 check("resposta traz ticket de ativacao por navegacao", /^[a-f0-9]{32}$/.test(verificarBody?.ticket || ""));
+check("resposta traz sessao opaca (fallback Bearer), sem dado do cliente", /^[a-f0-9]{32}$/.test(verificarBody?.sessao || "") && !String(verificarBody?.sessao).includes(PHONE.slice(-8)));
 
 // 6. sessao criada via cookie do fetch funciona (navegadores normais)
 const perfil = await fetch(`${BASE}/api/cliente/perfil`, { headers: { cookie: cookieFetch } });
 check("perfil abre com a sessao do cookie de fetch", perfil.status === 200, String(perfil.status));
 
+// 6b. fallback Bearer: perfil abre SEM cookie nenhum, so com a sessao opaca
+const perfilBearer = await fetch(`${BASE}/api/cliente/perfil`, { headers: { authorization: `Bearer ${verificarBody.sessao}` } });
+check("perfil abre via Authorization Bearer (navegador sem cookie)", perfilBearer.status === 200, String(perfilBearer.status));
 // 7. replay: o mesmo codigo nao pode ser reutilizado
 const replay = await fetch(`${BASE}/api/cliente/verificar`, {
   method: "POST",
@@ -113,6 +117,19 @@ const patch = await fetch(`${BASE}/api/cliente/perfil`, {
 check("PATCH do nome funciona com a sessao da navegacao", patch.status === 200, String(patch.status));
 const perfil2 = await (await fetch(`${BASE}/api/cliente/perfil`, { headers: { cookie: cookieNav } })).json();
 check("nome salvo aparece no perfil", perfil2?.cliente?.nome === "Cliente E2E", JSON.stringify(perfil2?.cliente?.nome));
+
+// 9b. nome e logout via Bearer (depois do passo do cadastro, para nao
+// poluir o teste de "cliente novo" acima)
+const patchBearer = await fetch(`${BASE}/api/cliente/perfil`, {
+  method: "PATCH",
+  headers: { "Content-Type": "application/json", authorization: `Bearer ${verificarBody.sessao}` },
+  body: JSON.stringify({ nome: "Cliente Bearer" }),
+});
+check("PATCH do nome funciona via Bearer", patchBearer.status === 200, String(patchBearer.status));
+const logoutBearer = await fetch(`${BASE}/api/cliente/logout`, { method: "POST", headers: { authorization: `Bearer ${verificarBody.sessao}` } });
+check("logout revoga a sessao opaca", logoutBearer.status === 200);
+const posLogout = await fetch(`${BASE}/api/cliente/perfil`, { headers: { authorization: `Bearer ${verificarBody.sessao}` } });
+check("sessao opaca revogada nao autentica mais", posLogout.status === 401, String(posLogout.status));
 
 // 10. cooldown de reenvio
 const reenvio = await fetch(`${BASE}/api/cliente/login`, {

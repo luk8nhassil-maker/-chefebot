@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verificarTokenCliente, CLIENTE_COOKIE } from "@/lib/clienteAuth";
+import { lerSessaoCliente } from "@/lib/clienteAuth";
 import { buscarClientePorId } from "@/lib/clientes";
 import {
   derivarClienteIdPorTelefone,
@@ -20,10 +20,9 @@ import {
 // autenticado, dentro do app.
 
 export async function POST(req: NextRequest) {
-  const token = req.cookies.get(CLIENTE_COOKIE)?.value ?? null;
-  if (!token) return NextResponse.json({ error: "Nao autorizado" }, { status: 401 });
-
-  const payload = await verificarTokenCliente(token);
+  // Sessão via cookie HttpOnly ou, em navegadores sem cookie confiável
+  // (WhatsApp no iPhone), via Authorization: Bearer com sessão opaca.
+  const payload = await lerSessaoCliente(req);
   if (!payload) return NextResponse.json({ error: "Nao autorizado" }, { status: 401 });
 
   const cliente = await buscarClientePorId(payload.clienteId);
