@@ -181,7 +181,7 @@ describe("/cliente — hotfix OTP: sessão que não 'pega' nunca deixa a tela mu
 
 describe("/cliente — hotfix final: sessão opaca via Bearer quando o cookie não funciona", () => {
   test("chamadas autenticadas passam pelo fetchCliente (Bearer quando houver fallback)", () => {
-    expect(fonte).toContain("import { fetchCliente, guardarSessaoFallback, limparSessaoFallback } from '@/lib/clienteSessaoFront'");
+    expect(fonte).toMatch(/import \{ fetchCliente, guardarSessaoFallback, limparSessaoFallback[^}]*\} from '@\/lib\/clienteSessaoFront'/);
     // perfil, fidelidade, resgate e logout exigem sessão — sempre fetchCliente.
     for (const rota of ['/api/cliente/perfil', '/api/cliente/fidelidade', '/api/cliente/fidelidade/resgate', '/api/cliente/logout']) {
       expect(fonte).not.toContain(`fetch('${rota}'`);
@@ -206,6 +206,23 @@ describe("/cliente — hotfix final: sessão opaca via Bearer quando o cookie n�
   test("sair limpa a sessão de fallback", () => {
     const bloco = fonte.slice(fonte.indexOf("async function sair"), fonte.indexOf("// CTA de resgate"));
     expect(bloco).toContain("limparSessaoFallback()");
+  });
+});
+
+describe("/cliente — diagnóstico incógnito: HTML sempre do deploy vigente + telemetria sem PII", () => {
+  test("a área do cliente é dinâmica (nunca HTML prerendered de deploy anterior)", () => {
+    const layout = readFileSync(fileURLToPath(new URL("./layout.tsx", import.meta.url)), "utf-8");
+    expect(layout).toContain('export const dynamic = "force-dynamic"');
+  });
+
+  test("telemetria marca a versão do bundle e cobre as etapas críticas", () => {
+    expect(fonte).toContain("telemetria('otp_verified')");
+    expect(fonte).toContain("opaque_session_received");
+    expect(fonte).toContain("opaque_session_storage_ok");
+    expect(fonte).toContain("bearer_session_ok");
+    expect(fonte).toContain("fallback_navigation");
+    expect(fonte).toContain("fallback_to_confirm_screen");
+    expect(fonte).toContain("arrival_activation");
   });
 });
 

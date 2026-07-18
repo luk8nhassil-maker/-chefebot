@@ -10,6 +10,23 @@
 
 export const CF_SESSAO_KEY = "cf_sessao";
 
+// Marcador curto da versão do bundle (diagnóstico do Perfil 3.0): aparece na
+// telemetria para provar qual código o aparelho executou. Sem PII.
+export const VERSAO_PERFIL3 = "p3h3";
+
+// Telemetria temporária best-effort — só slugs/booleans da allowlist do
+// backend; nunca envia OTP, telefone, tokens, cookies ou nome.
+export function telemetria(evt: string, extra?: { ok?: boolean; motivo?: string }): void {
+  try {
+    fetch("/api/cliente/telemetria", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ evt, v: VERSAO_PERFIL3, ...extra }),
+      keepalive: true,
+    }).catch(() => {});
+  } catch {}
+}
+
 const FORMATO_TOKEN_OPACO = /^[a-f0-9]{32}$/;
 
 export function sessaoFallbackAtual(): string | null {
@@ -21,9 +38,16 @@ export function sessaoFallbackAtual(): string | null {
   }
 }
 
-export function guardarSessaoFallback(token: string): void {
-  if (!FORMATO_TOKEN_OPACO.test(token)) return;
-  try { sessionStorage.setItem(CF_SESSAO_KEY, token); } catch {}
+// Retorna se o token realmente ficou legível no storage — sessionStorage
+// pode falhar silenciosamente em navegadores restritos.
+export function guardarSessaoFallback(token: string): boolean {
+  if (!FORMATO_TOKEN_OPACO.test(token)) return false;
+  try {
+    sessionStorage.setItem(CF_SESSAO_KEY, token);
+    return sessionStorage.getItem(CF_SESSAO_KEY) === token;
+  } catch {
+    return false;
+  }
 }
 
 export function limparSessaoFallback(): void {
