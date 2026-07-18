@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { consumirTicketSessao, criarTokenCliente, CLIENTE_COOKIE } from "@/lib/clienteAuth";
-import { buscarClientePorId } from "@/lib/clientes";
+import { buscarClientePorId, clienteProximaEtapa } from "@/lib/clientes";
 
 // GET /api/cliente/sessao?tk=... — ativa a sessão do cliente numa RESPOSTA DE
 // NAVEGAÇÃO (não de fetch), para navegadores que não persistem Set-Cookie de
@@ -18,8 +18,9 @@ export async function GET(req: NextRequest) {
     const cliente = await buscarClientePorId(payload.clienteId);
     if (!cliente) return NextResponse.redirect(destinoNeutro, 303);
 
-    // Cliente ainda sem nome volta direto para a etapa de cadastro do nome.
-    const destino = new URL(cliente.nome ? "/cliente" : "/cliente?cadastro=nome", req.nextUrl.origin);
+    // Mesma fonte de decisão do fluxo: primeira ativação pendente volta
+    // direto para a etapa do nome.
+    const destino = new URL(clienteProximaEtapa(cliente) === "points" ? "/cliente" : "/cliente?cadastro=nome", req.nextUrl.origin);
     const token = await criarTokenCliente({ clienteId: cliente.clienteId, telefone: cliente.telefone });
     const res = NextResponse.redirect(destino, 303);
     res.cookies.set(CLIENTE_COOKIE, token, {

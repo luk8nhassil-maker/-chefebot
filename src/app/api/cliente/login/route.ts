@@ -1,3 +1,4 @@
+import { randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { gerarOtp, podeReenviarOtp } from "@/lib/clienteAuth";
 import { sanitizeTelefoneCliente } from "@/lib/clientes";
@@ -65,7 +66,11 @@ export async function POST(req: NextRequest) {
     const codigo = await gerarOtp(telefone);
     await enviarOtpPorWhatsapp(telefone, codigo);
 
-    return NextResponse.json({ ok: true });
+    // Código de suporte da tentativa (traceId): aleatório, curto, sem PII —
+    // correlaciona telemetria/logs de UMA tentativa sem expor nada.
+    const traceId = `P3-${randomUUID().replace(/[^A-Z0-9]/gi, "").slice(0, 6).toUpperCase()}`;
+    console.log(`[ChefeBot] perfil3-telemetria evt=otp_requested ok=- motivo=- v=srv trace=${traceId}`);
+    return NextResponse.json({ ok: true, traceId });
   } catch (error) {
     console.error("[ChefeBot] Erro no login do cliente:", error);
     return NextResponse.json({ ok: false, error: "Erro interno" }, { status: 500 });

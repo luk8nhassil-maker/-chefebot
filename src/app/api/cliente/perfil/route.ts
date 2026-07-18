@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { lerSessaoCliente } from "@/lib/clienteAuth";
-import { buscarClientePorId, normalizarNomeCliente, obterOuCriarCliente } from "@/lib/clientes";
-import { obterProgressoFidelidade } from "@/lib/fidelidade";
+import { buscarClientePorId, normalizarNomeCliente, ativarFidelidadeCliente } from "@/lib/clientes";
 import { redis } from "@/lib/redis";
 
 type PedidoResumo = {
@@ -23,8 +22,8 @@ export async function GET(req: NextRequest) {
   const cliente = await buscarClientePorId(payload.clienteId);
   if (!cliente) return NextResponse.json({ error: "Nao autorizado" }, { status: 401 });
 
-  const fidelidade = await obterProgressoFidelidade(cliente.clienteId);
-
+  // Desacoplado por incidente: este endpoint NUNCA consulta fidelidade —
+  // uma falha de pontos não pode derrubar o perfil nem parecer logout.
   let ultimosPedidos: PedidoResumo[] = [];
   try {
     const pedidos = (await redis.get<PedidoResumo[]>("pedidos")) || [];
@@ -39,7 +38,6 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     cliente: { nome: cliente.nome ?? null, telefone: cliente.telefone },
-    fidelidade,
     ultimosPedidos,
   });
 }
@@ -63,8 +61,9 @@ export async function PATCH(req: NextRequest) {
     if (nome.length < 2) {
       return NextResponse.json({ ok: false, error: "Digite seu nome" }, { status: 400 });
     }
-    const atualizado = await obterOuCriarCliente(cliente.telefone, nome);
-    return NextResponse.json({ ok: true, cliente: { nome: atualizado.nome ?? null } });
+    // Primeira ativação: grava nome + fidelidadeAtivadaEm na mesma escrita.
+    const atualizado = await ativarFidelidadeCliente(cliente.telefone, nome);
+    return NextResponse.json({ ok: true, next: "points", cliente: { nome: atualizado.nome ?? null } });
   } catch (error) {
     console.error("[ChefeBot] Erro ao atualizar nome do cliente:", error);
     return NextResponse.json({ ok: false, error: "Erro interno" }, { status: 500 });

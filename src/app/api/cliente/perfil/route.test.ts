@@ -11,14 +11,15 @@ vi.mock("@/lib/clienteAuth", () => ({
   }),
 }));
 
-const { obterOuCriarClienteMock } = vi.hoisted(() => ({
-  obterOuCriarClienteMock: vi.fn(async (telefone: string, nome?: string) => ({
+const { ativarFidelidadeClienteMock } = vi.hoisted(() => ({
+  ativarFidelidadeClienteMock: vi.fn(async (telefone: string, nome: string) => ({
     clienteId: `cli_${telefone}`,
     telefone,
-    nome: nome ?? null,
+    nome,
     createdAt: "",
     updatedAt: "",
     lastLoginAt: "",
+    fidelidadeAtivadaEm: "2026-01-01T00:00:00.000Z",
   })),
 }));
 
@@ -26,7 +27,7 @@ vi.mock("@/lib/clientes", async () => {
   const real = await vi.importActual<typeof import("@/lib/clientes")>("@/lib/clientes");
   return {
     normalizarNomeCliente: real.normalizarNomeCliente,
-    obterOuCriarCliente: obterOuCriarClienteMock,
+    ativarFidelidadeCliente: ativarFidelidadeClienteMock,
     buscarClientePorId: vi.fn(async (clienteId: string) => {
       if (clienteId === "cli_a") {
         return { clienteId: "cli_a", telefone: "11900000001", nome: "Cliente A", createdAt: "", updatedAt: "", lastLoginAt: "" };
@@ -88,7 +89,9 @@ describe("GET /api/cliente/perfil", () => {
     const body = await res.json();
     expect(res.status).toBe(200);
     expect(body.cliente.telefone).toBe("11900000001");
-    expect(body.fidelidade.progresso).toBe(3);
+    // desacoplado: o perfil NUNCA embute fidelidade (falha de pontos nao pode
+    // derrubar este endpoint nem parecer logout)
+    expect(body.fidelidade).toBeUndefined();
     expect(body.ultimosPedidos).toHaveLength(1);
     expect(body.ultimosPedidos[0].id).toBe("p1");
   });
@@ -118,8 +121,10 @@ describe("PATCH /api/cliente/perfil — completa so o nome do dono da sessao", (
     expect(res.status).toBe(200);
     expect(body.ok).toBe(true);
     expect(body.cliente.nome).toBe("Maria da Silva");
-    // o telefone usado e sempre o da sessao autenticada
-    expect(obterOuCriarClienteMock).toHaveBeenCalledWith("11900000001", "Maria da Silva");
+    expect(body.next).toBe("points");
+    // o telefone usado e sempre o da sessao autenticada; a primeira ativacao
+    // grava nome + fidelidadeAtivadaEm na mesma escrita
+    expect(ativarFidelidadeClienteMock).toHaveBeenCalledWith("11900000001", "Maria da Silva");
   });
 
   test("nome vazio/curto retorna 400", async () => {

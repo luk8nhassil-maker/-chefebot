@@ -106,6 +106,39 @@ describe("POST /api/cliente/verificar — fluxo de numero reconhecido (waToken)"
   });
 });
 
+describe("POST /api/cliente/verificar — resposta atomica decide a proxima tela", () => {
+  test("cliente novo (sem fidelidadeAtivadaEm): next=name, mesmo que ja exista nome legado", async () => {
+    redisStore.set(`cardapio:token:${WA_TOKEN}`, { phone: PHONE_DO_TOKEN, createdAt: Date.now() });
+    redisStore.set(`cliente:${PHONE_DO_TOKEN}`, { clienteId: `cli_${PHONE_DO_TOKEN}`, telefone: PHONE_DO_TOKEN, nome: "Nome De Pedido", createdAt: "x", updatedAt: "x", lastLoginAt: "x" });
+    armarOtp(PHONE_DO_TOKEN);
+    const res = await POST(requestVerificar({ waToken: WA_TOKEN, codigo: "123456" }));
+    const data = await res.json();
+    expect(data.next).toBe("name");
+  });
+
+  test("cliente com fidelidade ativada: next=points", async () => {
+    redisStore.set(`cardapio:token:${WA_TOKEN}`, { phone: PHONE_DO_TOKEN, createdAt: Date.now() });
+    redisStore.set(`cliente:${PHONE_DO_TOKEN}`, { clienteId: `cli_${PHONE_DO_TOKEN}`, telefone: PHONE_DO_TOKEN, nome: "Maria", fidelidadeAtivadaEm: "2026-01-01T00:00:00.000Z", createdAt: "x", updatedAt: "x", lastLoginAt: "x" });
+    armarOtp(PHONE_DO_TOKEN);
+    const res = await POST(requestVerificar({ waToken: WA_TOKEN, codigo: "123456" }));
+    const data = await res.json();
+    expect(data.next).toBe("points");
+  });
+
+  test("traceId valido e ecoado; invalido vira null; nunca ha PII na resposta", async () => {
+    redisStore.set(`cardapio:token:${WA_TOKEN}`, { phone: PHONE_DO_TOKEN, createdAt: Date.now() });
+    armarOtp(PHONE_DO_TOKEN);
+    const res = await POST(requestVerificar({ waToken: WA_TOKEN, codigo: "123456", traceId: "P3-ABC123" }));
+    const data = await res.json();
+    expect(data.traceId).toBe("P3-ABC123");
+    expect(JSON.stringify(data)).not.toContain(PHONE_DO_TOKEN);
+
+    armarOtp(PHONE_DO_TOKEN);
+    const res2 = await POST(requestVerificar({ waToken: WA_TOKEN, codigo: "123456", traceId: PHONE_DO_TOKEN }));
+    expect((await res2.json()).traceId).toBeNull();
+  });
+});
+
 describe("POST /api/cliente/verificar — fluxo manual continua funcionando", () => {
   test("telefone digitado + codigo valido autentica e cria o cliente", async () => {
     armarOtp(TELEFONE_MANUAL);
