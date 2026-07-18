@@ -1,13 +1,30 @@
-import { vi, describe, test, expect } from "vitest";
+import { vi, describe, test, expect, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
 const BEARER_VALIDO = "f".repeat(32);
+const TICKET_ATIVACAO_VALIDO = "a".repeat(32);
+const CLIENTE_DO_TICKET = { clienteId: "cli_b", telefone: "11900000002" };
 
 function resolverSessaoFake(req: { cookies: { get(n: string): { value: string } | undefined }; headers: { get(n: string): string | null } }) {
   if (req.cookies.get("cliente-token")?.value === "token-cliente-a") return { clienteId: "cli_a", telefone: "11900000001" };
   if (req.headers.get("authorization") === `Bearer ${"f".repeat(32)}`) return { clienteId: "cli_a", telefone: "11900000001" };
   return null;
 }
+
+// Simula o ticket de ativação do perfil (clienteAuth.ts): uso único — a
+// primeira chamada com o ticket "válido" desta suíte consome e devolve o
+// cliente vinculado; qualquer outra (incluindo a mesma de novo) devolve null.
+const { consumirTicketAtivacaoPerfilMock, ticketsValidos } = vi.hoisted(() => {
+  const ticketsValidos = new Set<string>();
+  return {
+    ticketsValidos,
+    consumirTicketAtivacaoPerfilMock: vi.fn(async (ticket: unknown) => {
+      if (typeof ticket !== "string" || !ticketsValidos.has(ticket)) return null;
+      ticketsValidos.delete(ticket);
+      return CLIENTE_DO_TICKET;
+    }),
+  };
+});
 
 vi.mock("@/lib/clienteAuth", () => ({
   CLIENTE_COOKIE: "cliente-token",
@@ -31,6 +48,7 @@ vi.mock("@/lib/clienteAuth", () => ({
       },
     };
   }),
+  consumirTicketAtivacaoPerfil: consumirTicketAtivacaoPerfilMock,
 }));
 
 const { ativarFidelidadeClienteMock } = vi.hoisted(() => ({
@@ -82,6 +100,12 @@ vi.mock("@/lib/redis", () => ({
 
 import { GET, PATCH } from "./route";
 import { buscarClientePorId } from "@/lib/clientes";
+
+beforeEach(() => {
+  ticketsValidos.clear();
+  consumirTicketAtivacaoPerfilMock.mockClear();
+  ativarFidelidadeClienteMock.mockClear();
+});
 
 function requestComCookie(token?: string) {
   const url = "http://localhost/api/cliente/perfil";
@@ -167,19 +191,6 @@ describe("PATCH /api/cliente/perfil — completa so o nome do dono da sessao", (
 });
 
 describe("PATCH /api/cliente/perfil — diagnóstico de autenticação (sem PII no log)", () => {
-  function requestPatchComTrace(trace: string | undefined, auth?: string) {
-    const init: RequestInit = {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-        ...(trace ? { "x-chefebot-trace": trace } : {}),
-        ...(auth ? { authorization: auth } : {}),
-      },
-      body: JSON.stringify({ nome: "Maria" }),
-    };
-    return new NextRequest("http://localhost/api/cliente/perfil", init as ConstructorParameters<typeof NextRequest>[1]);
-  }
-
   test("resposta ao navegador continua genérica (nunca expõe o diagnóstico)", async () => {
     const res = await PATCH(requestPatchComTrace("P3-ABC123"));
     const body = await res.json();
@@ -225,3 +236,95 @@ describe("PATCH /api/cliente/perfil — diagnóstico de autenticação (sem PII 
     logSpy.mockRestore();
   });
 });
+
+describe("PATCH /api/cliente/perfil — fallback do ticket de ativação (P3-ABB28C)", () => {
+  function requestPatchComTicket(body: Record<string, unknown>) {
+    return new NextRequest("http://localhost/api/cliente/perfil", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  }
+
+  test("sessao normal (cookie/JWE) tem prioridade — nunca consulta o ticket se a sessao ja autenticou, mesmo se ele vier junto no corpo", async () => {
+    ticketsValidos.add(TICKET_ATIVACAO_VALIDO);
+    const req = new NextRequest("http://localhost/api/cliente/perfil", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", cookie: "cliente-token=token-cliente-a" },
+      body: JSON.stringify({ nome: "Maria", ativacaoToken: TICKET_ATIVACAO_VALIDO }),
+    });
+    const res = await PATCH(req);
+    expect(res.status).toBe(200);
+    expect(consumirTicketAtivacaoPerfilMock).not.toHaveBeenCalled();
+    // ticket continua intacto (nao foi tocado) — sobra pra uma tentativa real
+    expect(ticketsValidos.has(TICKET_ATIVACAO_VALIDO)).toBe(true);
+  });
+
+  test("sessao ausente + ticket valido: autentica, salva o nome do cliente do ticket (nunca do body)", async () => {
+    ticketsValidos.add(TICKET_ATIVACAO_VALIDO);
+    const res = await PATCH(requestPatchComTicket({ nome: "Bruno", ativacaoToken: TICKET_ATIVACAO_VALIDO, clienteId: "cli_outro", telefone: "00000000000" }));
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(ativarFidelidadeClienteMock).toHaveBeenCalledWith(CLIENTE_DO_TICKET.telefone, "Bruno");
+  });
+
+  test("reuso do mesmo ticket e bloqueado (segunda tentativa vira 401)", async () => {
+    ticketsValidos.add(TICKET_ATIVACAO_VALIDO);
+    const primeira = await PATCH(requestPatchComTicket({ nome: "Bruno", ativacaoToken: TICKET_ATIVACAO_VALIDO }));
+    expect(primeira.status).toBe(200);
+    const segunda = await PATCH(requestPatchComTicket({ nome: "Bruno", ativacaoToken: TICKET_ATIVACAO_VALIDO }));
+    expect(segunda.status).toBe(401);
+  });
+
+  test("ticket inexistente/expirado/adulterado: 401 generico, nunca 500", async () => {
+    const res = await PATCH(requestPatchComTicket({ nome: "Bruno", ativacaoToken: "b".repeat(32) }));
+    expect(res.status).toBe(401);
+    const body = await res.json();
+    expect(body).toEqual({ error: "Nao autorizado" });
+  });
+
+  test("telefone/clienteId/waToken arbitrarios no corpo nunca autorizam sozinhos, sem ticket nem sessao", async () => {
+    const res = await PATCH(requestPatchComTicket({ nome: "Bruno", telefone: "11900000001", clienteId: "cli_a", waToken: "x".repeat(32) }));
+    expect(res.status).toBe(401);
+    expect(consumirTicketAtivacaoPerfilMock).not.toHaveBeenCalled();
+  });
+
+  test("log de falha registra ticket_presente, nunca o valor do ticket", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    await PATCH(requestPatchComTicket({ nome: "Bruno", ativacaoToken: "c".repeat(32) }));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("ticket_presente=1"));
+    const texto = logSpy.mock.calls.map((c) => c.join(" ")).join(" | ");
+    expect(texto).not.toContain("c".repeat(32));
+    logSpy.mockRestore();
+  });
+
+  test("log de falha sem ticket no corpo registra ticket_presente=0", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    await PATCH(requestPatchComTrace(undefined));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("ticket_presente=0"));
+    logSpy.mockRestore();
+  });
+
+  test("GET /api/cliente/perfil nunca aceita o ticket de ativacao (so PATCH tem esse fallback)", async () => {
+    ticketsValidos.add(TICKET_ATIVACAO_VALIDO);
+    // GET nem le corpo — a rota so resolve sessao por cookie/Bearer
+    // (lerSessaoCliente), nunca importa/chama consumirTicketAtivacaoPerfil.
+    const res = await GET(requestComCookie());
+    expect(res.status).toBe(401);
+    expect(consumirTicketAtivacaoPerfilMock).not.toHaveBeenCalled();
+  });
+});
+
+function requestPatchComTrace(trace: string | undefined, auth?: string) {
+  const init: RequestInit = {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      ...(trace ? { "x-chefebot-trace": trace } : {}),
+      ...(auth ? { authorization: auth } : {}),
+    },
+    body: JSON.stringify({ nome: "Maria" }),
+  };
+  return new NextRequest("http://localhost/api/cliente/perfil", init as ConstructorParameters<typeof NextRequest>[1]);
+}

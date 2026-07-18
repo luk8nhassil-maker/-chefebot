@@ -217,6 +217,77 @@ async function resolverSessaoPortatilComDiagnostico(
   }
 }
 
+// ============================================================================
+// TICKET DE ATIVAÇÃO DO PERFIL (fallback de última linha, só para o PATCH do
+// nome) — incidente P3-ABB28C: cookie e sessão portátil (JWE), emitidos
+// juntos pelo mesmo /api/cliente/verificar, falharam no PATCH seguinte por
+// um motivo que a instrumentação de cookie_erro/jwe_erro não conseguiu
+// provar como transitório (retry cego com a MESMA credencial rejeitada foi
+// descartado por não ser uma correção comprovada). Este ticket é uma
+// segunda credencial, gerada na mesma resposta do OTP, com escopo mínimo:
+// - aleatório (128 bits), sem clienteId/telefone legíveis no valor;
+// - finalidade EXCLUSIVA "perfil:ativar" — nunca aceito por nenhuma outra
+//   rota, nunca autentica lerSessaoCliente, nunca vira sessão geral;
+// - TTL curto (10min) e uso único, consumido atomicamente (Lua GET+DEL) —
+//   duas tentativas concorrentes com o mesmo ticket, no máximo uma aceita;
+// - só emitido quando o próprio OTP confirma que o cliente ainda precisa
+//   da primeira ativação (next === "name").
+// ============================================================================
+
+const PREFIXO_TICKET_ATIVACAO = "cliente:ticket-ativacao:";
+const TICKET_ATIVACAO_TTL_SEGUNDOS = 10 * 60;
+const FORMATO_TICKET_ATIVACAO = /^[a-f0-9]{32}$/;
+const FINALIDADE_TICKET_ATIVACAO = "perfil:ativar" as const;
+
+type RegistroTicketAtivacao = ClienteTokenPayload & { finalidade: typeof FINALIDADE_TICKET_ATIVACAO };
+
+function chaveTicketAtivacao(ticket: string): string {
+  return `${PREFIXO_TICKET_ATIVACAO}${ticket}`;
+}
+
+export async function criarTicketAtivacaoPerfil(payload: ClienteTokenPayload): Promise<string> {
+  const ticket = randomUUID().replace(/-/g, "");
+  const registro: RegistroTicketAtivacao = {
+    clienteId: payload.clienteId,
+    telefone: payload.telefone,
+    finalidade: FINALIDADE_TICKET_ATIVACAO,
+  };
+  await redis.set(chaveTicketAtivacao(ticket), registro, { ex: TICKET_ATIVACAO_TTL_SEGUNDOS });
+  return ticket;
+}
+
+// GET+DEL atômico via Lua: sob concorrência (duas requisições quase
+// simultâneas com o mesmo ticket), o Redis executa o script inteiro sem
+// intercalar com outro cliente — só a primeira observa o valor antes do DEL,
+// a segunda sempre recebe null. Mesma técnica de src/lib/whatsappCanary.ts.
+const CONSUMIR_TICKET_ATIVACAO_LUA = `
+local atual = redis.call("GET", KEYS[1])
+if not atual then return false end
+redis.call("DEL", KEYS[1])
+return atual
+`;
+
+export async function consumirTicketAtivacaoPerfil(ticket: string | null | undefined): Promise<ClienteTokenPayload | null> {
+  if (!ticket || !FORMATO_TICKET_ATIVACAO.test(ticket)) return null;
+  const bruto = await redis.eval(CONSUMIR_TICKET_ATIVACAO_LUA, [chaveTicketAtivacao(ticket)], []);
+  if (typeof bruto !== "string") return null;
+  let registro: RegistroTicketAtivacao | null = null;
+  try {
+    registro = JSON.parse(bruto) as RegistroTicketAtivacao;
+  } catch {
+    return null;
+  }
+  if (
+    !registro ||
+    registro.finalidade !== FINALIDADE_TICKET_ATIVACAO ||
+    typeof registro.clienteId !== "string" ||
+    typeof registro.telefone !== "string"
+  ) {
+    return null;
+  }
+  return { clienteId: registro.clienteId, telefone: registro.telefone };
+}
+
 // Leitura única de sessão para as rotas da área do cliente: cookie HttpOnly
 // primeiro (caminho principal). Em seguida, Authorization: Bearer — tentando
 // primeiro a sessão portátil (JWE, sem Redis) e só então a sessão opaca

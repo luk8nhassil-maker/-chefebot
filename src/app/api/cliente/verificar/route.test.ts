@@ -7,11 +7,18 @@ vi.mock("@/lib/redis", () => ({
     get: vi.fn(async (key: string) => (redisStore.has(key) ? redisStore.get(key) : null)),
     set: vi.fn(async (key: string, value: unknown) => { redisStore.set(key, value); return "OK"; }),
     del: vi.fn(async (key: string) => { redisStore.delete(key); return 1; }),
+    // GET+DEL atomico generico — usado por consumirTicketAtivacaoPerfil.
+    eval: vi.fn(async (_script: string, keys: string[]) => {
+      if (!redisStore.has(keys[0])) return null;
+      const valor = redisStore.get(keys[0]);
+      redisStore.delete(keys[0]);
+      return typeof valor === "string" ? valor : JSON.stringify(valor);
+    }),
   },
 }));
 
 import { POST } from "./route";
-import { resolverSessaoPortatil } from "@/lib/clienteAuth";
+import { resolverSessaoPortatil, consumirTicketAtivacaoPerfil } from "@/lib/clienteAuth";
 
 const WA_TOKEN = "d".repeat(32);
 const PHONE_DO_TOKEN = "5599974000691";
@@ -127,6 +134,32 @@ describe("POST /api/cliente/verificar — resposta atomica decide a proxima tela
     const res = await POST(requestVerificar({ waToken: WA_TOKEN, codigo: "123456" }));
     const data = await res.json();
     expect(data.next).toBe("points");
+  });
+
+  test("cliente novo (next=name) recebe tambem o ticket de ativacao do perfil (P3-ABB28C) — opaco, uso unico, vinculado ao cliente certo", async () => {
+    redisStore.set(`cardapio:token:${WA_TOKEN}`, { phone: PHONE_DO_TOKEN, createdAt: Date.now() });
+    armarOtp(PHONE_DO_TOKEN);
+    const res = await POST(requestVerificar({ waToken: WA_TOKEN, codigo: "123456" }));
+    const data = await res.json();
+    expect(data.next).toBe("name");
+    expect(data.ativacaoToken).toMatch(/^[a-f0-9]{32}$/);
+    expect(JSON.stringify(data)).not.toContain(PHONE_DO_TOKEN);
+
+    // round-trip real: o ticket emitido autentica e resolve para o cliente certo
+    const payload = await consumirTicketAtivacaoPerfil(data.ativacaoToken);
+    expect(payload).toEqual({ clienteId: `cli_${PHONE_DO_TOKEN}`, telefone: PHONE_DO_TOKEN });
+    // uso unico: uma segunda tentativa com o mesmo ticket ja falha
+    expect(await consumirTicketAtivacaoPerfil(data.ativacaoToken)).toBeNull();
+  });
+
+  test("cliente com fidelidade ja ativada (next=points) NUNCA recebe ticket de ativacao — nao ha PATCH de nome a proteger", async () => {
+    redisStore.set(`cardapio:token:${WA_TOKEN}`, { phone: PHONE_DO_TOKEN, createdAt: Date.now() });
+    redisStore.set(`cliente:${PHONE_DO_TOKEN}`, { clienteId: `cli_${PHONE_DO_TOKEN}`, telefone: PHONE_DO_TOKEN, nome: "Maria", fidelidadeAtivadaEm: "2026-01-01T00:00:00.000Z", createdAt: "x", updatedAt: "x", lastLoginAt: "x" });
+    armarOtp(PHONE_DO_TOKEN);
+    const res = await POST(requestVerificar({ waToken: WA_TOKEN, codigo: "123456" }));
+    const data = await res.json();
+    expect(data.next).toBe("points");
+    expect(data.ativacaoToken).toBeNull();
   });
 
   test("traceId valido e ecoado; invalido vira null; nunca ha PII na resposta", async () => {
