@@ -19,6 +19,7 @@ import {
   validarTokenCardapio,
   anexarTokenAoLinkCardapio,
   mascararPhone,
+  mascararTelefoneExibicao,
   CARDAPIO_TOKEN_TTL_SEGUNDOS,
 } from "./cardapioToken";
 import { LINK_CARDAPIO_DIGITAL } from "./bot";
@@ -217,5 +218,32 @@ describe("mascararPhone", () => {
   it("devolve só os 4 últimos dígitos", () => {
     expect(mascararPhone(PHONE)).toBe("0691");
     expect(mascararPhone("(99) 9 7400-0691")).toBe("0691");
+  });
+});
+
+describe("mascararTelefoneExibicao", () => {
+  it("celular com DDI 55: formato real com miolo oculto — nunca o número completo", () => {
+    expect(mascararTelefoneExibicao(PHONE)).toBe("(99) 9\u2022\u2022\u2022\u2022-0691");
+    expect(mascararTelefoneExibicao(PHONE)).not.toContain("7400");
+  });
+
+  it("celular sem DDI: mesmo formato", () => {
+    expect(mascararTelefoneExibicao("99974000691")).toBe("(99) 9\u2022\u2022\u2022\u2022-0691");
+  });
+
+  it("fixo de 8 dígitos com DDD: sem o 9 inicial revelado", () => {
+    expect(mascararTelefoneExibicao("556133440691")).toBe("(61) \u2022\u2022\u2022\u2022-0691");
+  });
+
+  it("entrada curta demais devolve vazio (nunca inventa máscara)", () => {
+    expect(mascararTelefoneExibicao("12345")).toBe("");
+    expect(mascararTelefoneExibicao("")).toBe("");
+  });
+
+  it("revela no máximo DDD, 9 inicial e os 4 finais", () => {
+    const mascarado = mascararTelefoneExibicao(PHONE);
+    const digitosVisiveis = mascarado.replace(/\D/g, "");
+    expect(digitosVisiveis).toBe("9990691");
+    expect(mascarado).not.toContain(PHONE.slice(-8));
   });
 });

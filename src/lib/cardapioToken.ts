@@ -36,6 +36,23 @@ export function mascararPhone(phone: string): string {
   return digitos.slice(-4);
 }
 
+// Versão de exibição para a confirmação do número na aba Pontos: formato real
+// brasileiro, mas com o miolo sempre oculto — ex.: "(45) 9••••-0691". Revela
+// no máximo DDD, o 9 inicial de celular e os 4 últimos dígitos; o restante é
+// substituído por "•". Produzida SEMPRE no servidor a partir do phone
+// resolvido do token — o navegador nunca recebe o número completo.
+export function mascararTelefoneExibicao(phone: string): string {
+  const digitos = (phone || "").replace(/\D/g, "");
+  const local = digitos.startsWith("55") && digitos.length >= 12 ? digitos.slice(2) : digitos;
+  if (local.length < 8) return "";
+  const temDdd = local.length >= 10;
+  const ddd = temDdd ? local.slice(0, 2) : "";
+  const numero = temDdd ? local.slice(2) : local;
+  const final = numero.slice(-4);
+  const inicio = numero.length >= 9 ? `${numero[0]}${"•".repeat(numero.length - 5)}` : "•".repeat(numero.length - 4);
+  return temDdd ? `(${ddd}) ${inicio}-${final}` : `${inicio}-${final}`;
+}
+
 // Gera (ou reutiliza, se ainda válido) o token de cardápio do phone.
 // Reutilizar evita encher o Redis a cada mensagem e mantém o mesmo link
 // funcionando durante a conversa. Renova o TTL a cada reuso.

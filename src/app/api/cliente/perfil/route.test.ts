@@ -9,14 +9,30 @@ vi.mock("@/lib/clienteAuth", () => ({
   }),
 }));
 
-vi.mock("@/lib/clientes", () => ({
-  buscarClientePorId: vi.fn(async (clienteId: string) => {
-    if (clienteId === "cli_a") {
-      return { clienteId: "cli_a", telefone: "11900000001", nome: "Cliente A", createdAt: "", updatedAt: "", lastLoginAt: "" };
-    }
-    return null;
-  }),
+const { obterOuCriarClienteMock } = vi.hoisted(() => ({
+  obterOuCriarClienteMock: vi.fn(async (telefone: string, nome?: string) => ({
+    clienteId: `cli_${telefone}`,
+    telefone,
+    nome: nome ?? null,
+    createdAt: "",
+    updatedAt: "",
+    lastLoginAt: "",
+  })),
 }));
+
+vi.mock("@/lib/clientes", async () => {
+  const real = await vi.importActual<typeof import("@/lib/clientes")>("@/lib/clientes");
+  return {
+    normalizarNomeCliente: real.normalizarNomeCliente,
+    obterOuCriarCliente: obterOuCriarClienteMock,
+    buscarClientePorId: vi.fn(async (clienteId: string) => {
+      if (clienteId === "cli_a") {
+        return { clienteId: "cli_a", telefone: "11900000001", nome: "Cliente A", createdAt: "", updatedAt: "", lastLoginAt: "" };
+      }
+      return null;
+    }),
+  };
+});
 
 vi.mock("@/lib/fidelidade", () => ({
   obterProgressoFidelidade: vi.fn(async () => ({
@@ -39,7 +55,7 @@ vi.mock("@/lib/redis", () => ({
   },
 }));
 
-import { GET } from "./route";
+import { GET, PATCH } from "./route";
 
 function requestComCookie(token?: string) {
   const url = "http://localhost/api/cliente/perfil";
@@ -66,5 +82,39 @@ describe("GET /api/cliente/perfil", () => {
     expect(body.fidelidade.progresso).toBe(3);
     expect(body.ultimosPedidos).toHaveLength(1);
     expect(body.ultimosPedidos[0].id).toBe("p1");
+  });
+});
+
+function requestPatch(token: string | undefined, body: unknown) {
+  const init: RequestInit = {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { cookie: `cliente-token=${token}` } : {}),
+    },
+    body: JSON.stringify(body),
+  };
+  return new NextRequest("http://localhost/api/cliente/perfil", init as ConstructorParameters<typeof NextRequest>[1]);
+}
+
+describe("PATCH /api/cliente/perfil — completa so o nome do dono da sessao", () => {
+  test("sem sessao retorna 401", async () => {
+    const res = await PATCH(requestPatch(undefined, { nome: "Maria" }));
+    expect(res.status).toBe(401);
+  });
+
+  test("nome valido e normalizado e salvo no telefone da sessao (nunca do body)", async () => {
+    const res = await PATCH(requestPatch("token-cliente-a", { nome: "  Maria   da Silva ", telefone: "11999990000" }));
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.cliente.nome).toBe("Maria da Silva");
+    // o telefone usado e sempre o da sessao autenticada
+    expect(obterOuCriarClienteMock).toHaveBeenCalledWith("11900000001", "Maria da Silva");
+  });
+
+  test("nome vazio/curto retorna 400", async () => {
+    const res = await PATCH(requestPatch("token-cliente-a", { nome: "   " }));
+    expect(res.status).toBe(400);
   });
 });

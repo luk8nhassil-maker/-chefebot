@@ -21,7 +21,9 @@ describe("/cliente — Área do Cliente renomeada para Pontos", () => {
   });
 
   test("não existe mais link público de retorno para /cardapio", () => {
-    expect(fonte).not.toContain("/cardapio");
+    // A tela pode chamar /api/cardapio-whatsapp-session (vínculo do link do
+    // WhatsApp), mas nunca renderizar um link de navegação para /cardapio.
+    expect(fonte).not.toContain('href="/cardapio"');
     expect(fonte).not.toContain("← Cardápio");
   });
 
@@ -71,6 +73,79 @@ describe("/cliente — Área do Cliente renomeada para Pontos", () => {
     // usado tanto no carregamento inicial (já logado) quanto após confirmar OTP
     const usos = fonte.match(/nextPermitidoAtual\(\)/g) ?? [];
     expect(usos.length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("/cliente — Perfil 3.0: número reconhecido pelo link do WhatsApp", () => {
+  test("etapa de confirmação existe com a copy oficial", () => {
+    expect(fonte).toContain("Encontramos seu WhatsApp");
+    expect(fonte).toContain("Este é o número usado para abrir seu cardápio:");
+    expect(fonte).toContain("Confirme seu WhatsApp para ativar seus pontos, acompanhar suas recompensas e não perder nenhuma vantagem.");
+    expect(fonte).toContain("Confirmar e receber código");
+    expect(fonte).toContain("Vamos enviar um código de segurança para este WhatsApp.");
+    expect(fonte).toContain("Este número não é meu");
+  });
+
+  test("a etapa de confirmação exibe só o número mascarado vindo do servidor (nunca campo de telefone)", () => {
+    // O número renderizado é o estado waMascarado (produzido no servidor);
+    // não existe input de telefone dentro do bloco 'confirmar'.
+    const blocoConfirmar = fonte.slice(fonte.indexOf("step === 'confirmar'"), fonte.indexOf("step === 'telefone'"));
+    expect(blocoConfirmar).toContain("{waMascarado}");
+    expect(blocoConfirmar).not.toContain('type="tel"');
+    expect(blocoConfirmar).not.toContain("setTelefone");
+  });
+
+  test("o envio do código no fluxo reconhecido manda só o token opaco, nunca telefone", () => {
+    const blocoPedirVinculo = fonte.slice(fonte.indexOf("async function pedirCodigoVinculo"), fonte.indexOf("async function pedirCodigo("));
+    expect(blocoPedirVinculo).toContain("JSON.stringify({ waToken })");
+    // nenhum telefone entra no body desse request (o servidor resolve o destino)
+    expect(blocoPedirVinculo).not.toContain("JSON.stringify({ telefone");
+  });
+
+  test("a verificação do código no fluxo reconhecido usa o token, e no manual o telefone digitado", () => {
+    expect(fonte).toContain("otpViaVinculo ? { waToken, codigo } : { telefone, codigo }");
+  });
+
+  test("token da URL é removido do endereço após leitura (nunca fica na barra)", () => {
+    expect(fonte).toContain("params.delete('t')");
+    expect(fonte).toContain("window.history.replaceState");
+  });
+
+  test("reutiliza as mesmas chaves de sessão do cardápio (token opaco + 4 finais), nunca o número completo", () => {
+    expect(fonte).toContain("cf_wa_token");
+    expect(fonte).toContain("cf_wa_final");
+    // nenhum telefone completo hardcoded na fonte
+    expect(fonte).not.toMatch(/\d{10,}/);
+  });
+
+  test("tela de código: copy, reenvio com contador e troca de número", () => {
+    expect(fonte).toContain("Confira seu WhatsApp");
+    expect(fonte).toContain("Enviamos um código para o número final ${waFinal}.");
+    expect(fonte).toContain("Confirmar código");
+    expect(fonte).toContain("Reenviar código em ${reenvioEm}s");
+    expect(fonte).toContain("'Reenviar código'");
+    expect(fonte).toContain("Usar outro número");
+  });
+
+  test("cliente novo informa somente o nome (copy oficial), salvo via PATCH do perfil", () => {
+    expect(fonte).toContain("Como podemos chamar você?");
+    expect(fonte).toContain("Seu WhatsApp já está confirmado. Falta só seu nome para ativar suas vantagens.");
+    expect(fonte).toContain('placeholder="Seu nome"');
+    expect(fonte).toContain("Ativar meus pontos");
+    expect(fonte).toMatch(/method: 'PATCH'/);
+    const blocoNome = fonte.slice(fonte.indexOf("async function salvarNome"), fonte.indexOf("async function sair"));
+    expect(blocoNome).not.toContain("telefone");
+  });
+
+  test("vínculo inválido/expirado volta ao fluxo manual (vinculoInvalido)", () => {
+    expect(fonte).toContain("vinculoInvalido");
+    expect(fonte).toContain("limparVinculo");
+  });
+
+  test("fluxo manual continua existindo (acesso direto sem token)", () => {
+    expect(fonte).toContain("Entre com seu WhatsApp");
+    expect(fonte).toContain("Receber código no WhatsApp");
+    expect(fonte).toContain('type="tel"');
   });
 });
 

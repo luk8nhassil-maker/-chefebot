@@ -80,3 +80,57 @@ describe("POST /api/cliente/login — nunca vaza telefone ou codigo OTP no log",
     errorSpy.mockRestore();
   });
 });
+
+const WA_TOKEN = "b".repeat(32);
+const PHONE_DO_TOKEN = "5599974000691";
+
+describe("POST /api/cliente/login — fluxo de numero reconhecido (waToken)", () => {
+  test("waToken valido: OTP vai para o phone resolvido no servidor, ignorando telefone adulterado do body", async () => {
+    process.env.EVOLUTION_API_URL = "https://evolution.teste.com.br";
+    process.env.EVOLUTION_API_KEY = "chave-de-teste";
+    redisStore.set(`cardapio:token:${WA_TOKEN}`, { phone: PHONE_DO_TOKEN, createdAt: Date.now() });
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({}) } as Response);
+
+    const res = await POST(requestLogin({ waToken: WA_TOKEN, telefone: "11999990000" }));
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.ok).toBe(true);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const corpoEnvio = JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body));
+    // destino = phone do token (ja com DDI), nunca o telefone do body
+    expect(corpoEnvio.number).toBe(PHONE_DO_TOKEN);
+    expect(corpoEnvio.number).not.toContain("11999990000");
+    // o OTP foi gravado para o phone do token, nao para o adulterado
+    expect(redisStore.has(`cliente:otp:${PHONE_DO_TOKEN}`)).toBe(true);
+    expect(redisStore.has("cliente:otp:11999990000")).toBe(false);
+  });
+
+  test("waToken invalido/expirado: 401 generico com vinculoInvalido, nenhum OTP enviado", async () => {
+    process.env.EVOLUTION_API_URL = "https://evolution.teste.com.br";
+    process.env.EVOLUTION_API_KEY = "chave-de-teste";
+
+    const res = await POST(requestLogin({ waToken: "c".repeat(32), telefone: "11999990000" }));
+    const data = await res.json();
+
+    expect(res.status).toBe(401);
+    expect(data.ok).toBe(false);
+    expect(data.vinculoInvalido).toBe(true);
+    expect(fetch).not.toHaveBeenCalled();
+    // resposta nunca revela se o telefone possui ou nao cadastro
+    expect(JSON.stringify(data)).not.toContain("11999990000");
+  });
+
+  test("cooldown de reenvio vale tambem para o fluxo reconhecido", async () => {
+    process.env.EVOLUTION_API_URL = "https://evolution.teste.com.br";
+    process.env.EVOLUTION_API_KEY = "chave-de-teste";
+    redisStore.set(`cardapio:token:${WA_TOKEN}`, { phone: PHONE_DO_TOKEN, createdAt: Date.now() });
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({}) } as Response);
+
+    const primeira = await POST(requestLogin({ waToken: WA_TOKEN }));
+    expect((await primeira.json()).ok).toBe(true);
+
+    const segunda = await POST(requestLogin({ waToken: WA_TOKEN }));
+    expect(segunda.status).toBe(429);
+  });
+});
