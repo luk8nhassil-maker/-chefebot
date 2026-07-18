@@ -100,6 +100,113 @@ describe("anexarTokenAoLinkCardapio", () => {
     expect(out).toBe(msg);
   });
 
+  it("preserva parâmetros adicionais e fragmento ao anexar o token", () => {
+    const msg = `Cardápio: ${LINK_CARDAPIO_DIGITAL}?utm_source=whatsapp&campanha=julho#ofertas`;
+    const out = anexarTokenAoLinkCardapio(msg, TOKEN);
+    const link = out.slice(out.indexOf("https://"));
+    const url = new URL(link);
+
+    expect(url.origin).toBe("https://chefedapizza.com.br");
+    expect(url.pathname).toBe("/cardapio");
+    expect(url.searchParams.get("utm_source")).toBe("whatsapp");
+    expect(url.searchParams.get("campanha")).toBe("julho");
+    expect(url.searchParams.getAll("t")).toEqual([TOKEN]);
+    expect(url.hash).toBe("#ofertas");
+    expect(link).not.toContain("chefedapizza.com.br//");
+  });
+
+  it("preserva um token existente mesmo quando ele não é o primeiro parâmetro", () => {
+    const tokenExistente = "a".repeat(32);
+    const msg = `Cardápio: ${LINK_CARDAPIO_DIGITAL}?origem=retorno&t=${tokenExistente}#menu`;
+    const out = anexarTokenAoLinkCardapio(msg, TOKEN);
+
+    expect(out).toBe(msg);
+    const url = new URL(out.slice(out.indexOf("https://")));
+    expect(url.searchParams.getAll("t")).toEqual([tokenExistente]);
+  });
+
+  it("duas aplicações mantêm exatamente um token por link", () => {
+    const msg = `Primeiro: ${LINK_CARDAPIO_DIGITAL}\nSegundo: ${LINK_CARDAPIO_DIGITAL}?origem=lembrete`;
+    const umaVez = anexarTokenAoLinkCardapio(msg, TOKEN);
+    const duasVezes = anexarTokenAoLinkCardapio(umaVez, "a".repeat(32));
+    const links = duasVezes.match(/https:\/\/\S+/g) ?? [];
+
+    expect(duasVezes).toBe(umaVez);
+    expect(links).toHaveLength(2);
+    for (const link of links) {
+      expect(new URL(link).searchParams.getAll("t")).toEqual([TOKEN]);
+    }
+  });
+
+  it("não injeta token quando o link oficial aparece dentro de uma URL externa", () => {
+    const msg = `Redirecionamento: https://evil.example/?next=${LINK_CARDAPIO_DIGITAL}`;
+
+    expect(anexarTokenAoLinkCardapio(msg, TOKEN)).toBe(msg);
+  });
+
+  it("não altera caminhos apenas parecidos com /cardapio", () => {
+    const msg = [
+      `${LINK_CARDAPIO_DIGITAL}.html`,
+      `${LINK_CARDAPIO_DIGITAL}%2Fprivado`,
+      `${LINK_CARDAPIO_DIGITAL}/promocoes`,
+    ].join("\n");
+
+    expect(anexarTokenAoLinkCardapio(msg, TOKEN)).toBe(msg);
+  });
+
+  it.each([
+    ["ponto final", `${LINK_CARDAPIO_DIGITAL}.`, `${LINK_CARDAPIO_DIGITAL}?t=${TOKEN}.`],
+    ["parênteses", `(${LINK_CARDAPIO_DIGITAL})`, `(${LINK_CARDAPIO_DIGITAL}?t=${TOKEN})`],
+    ["colchetes", `[${LINK_CARDAPIO_DIGITAL}]`, `[${LINK_CARDAPIO_DIGITAL}?t=${TOKEN}]`],
+    ["markup", `*${LINK_CARDAPIO_DIGITAL}*`, `*${LINK_CARDAPIO_DIGITAL}?t=${TOKEN}*`],
+  ])("preserva %s fora da URL", (_caso, msg, esperado) => {
+    expect(anexarTokenAoLinkCardapio(msg, TOKEN)).toBe(esperado);
+  });
+
+  it.each([
+    ["asteriscos e ponto", `*${LINK_CARDAPIO_DIGITAL}*.`, `*${LINK_CARDAPIO_DIGITAL}?t=${TOKEN}*.`],
+    ["underscores e vírgula", `_${LINK_CARDAPIO_DIGITAL}_,`, `_${LINK_CARDAPIO_DIGITAL}?t=${TOKEN}_,`],
+  ])("preserva %s depois do markup", (_caso, msg, esperado) => {
+    expect(anexarTokenAoLinkCardapio(msg, TOKEN)).toBe(esperado);
+  });
+
+  it("preserva query e pontuação delimitadora sem misturar seus valores", () => {
+    const msg = `Veja (${LINK_CARDAPIO_DIGITAL}?utm_source=whatsapp).`;
+    const esperado = `Veja (${LINK_CARDAPIO_DIGITAL}?utm_source=whatsapp&t=${TOKEN}).`;
+    const out = anexarTokenAoLinkCardapio(msg, TOKEN);
+
+    expect(out).toBe(esperado);
+    const link = out.match(/https:\/\/[^)]+/)?.[0];
+    expect(link).toBeTruthy();
+    const url = new URL(link!);
+    expect(url.searchParams.get("utm_source")).toBe("whatsapp");
+    expect(url.searchParams.getAll("t")).toEqual([TOKEN]);
+  });
+
+  it.each([
+    ["underscore", "utm_campaign", "promo_"],
+    ["ponto", "ref", "versao."],
+    ["exclamação", "q", "ola!"],
+    ["asterisco", "marca", "oferta*"],
+  ])("preserva %s legítimo no último parâmetro", (_caso, chave, valor) => {
+    const msg = `${LINK_CARDAPIO_DIGITAL}?${chave}=${valor}`;
+    const out = anexarTokenAoLinkCardapio(msg, TOKEN);
+    const url = new URL(out);
+
+    expect(url.searchParams.get(chave)).toBe(valor);
+    expect(url.searchParams.getAll("t")).toEqual([TOKEN]);
+  });
+
+  it("preserva pontuação legítima no fragmento", () => {
+    const msg = `${LINK_CARDAPIO_DIGITAL}?origem=whatsapp#ofertas.`;
+    const out = anexarTokenAoLinkCardapio(msg, TOKEN);
+    const url = new URL(out);
+
+    expect(url.searchParams.get("origem")).toBe("whatsapp");
+    expect(url.searchParams.getAll("t")).toEqual([TOKEN]);
+    expect(url.hash).toBe("#ofertas.");
+  });
+
   it("mensagem sem o link fica intacta", () => {
     const msg = "Qual a forma de pagamento?";
     expect(anexarTokenAoLinkCardapio(msg, TOKEN)).toBe(msg);
