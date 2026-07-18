@@ -37,7 +37,7 @@ export function normalizarNomeCliente(nome: unknown): string {
 }
 
 function chaveCliente(telefoneSanitizado: string): string {
-  return `cliente:${telefoneSanitizado}`;
+  return `perfil-cliente:${telefoneSanitizado}`;
 }
 
 export function clienteIdDoTelefone(telefone: string): string {
@@ -63,6 +63,8 @@ export async function obterOuCriarCliente(telefone: string, nome?: string): Prom
   if (existente) {
     const atualizado: Cliente = {
       ...existente,
+      clienteId: clienteIdDoTelefone(tel),
+      telefone: tel,
       nome: nome || existente.nome,
       lastLoginAt: agora,
       updatedAt: agora,

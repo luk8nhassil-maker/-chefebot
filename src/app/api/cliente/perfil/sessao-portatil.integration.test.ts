@@ -66,7 +66,7 @@ describe("fluxo real: OTP -> nome -> PATCH com redis de sessão indisponível ->
     expect(dataPatch.next).toBe("points");
     expect(dataPatch.cliente.nome).toBe("Maria da Silva");
 
-    const registro = redisStore.get(`cliente:${TELEFONE}`) as { fidelidadeAtivadaEm?: string };
+    const registro = redisStore.get(`perfil-cliente:${TELEFONE}`) as { fidelidadeAtivadaEm?: string };
     expect(registro?.fidelidadeAtivadaEm).toBeTruthy();
   });
 });
