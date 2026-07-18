@@ -219,6 +219,19 @@ describe("lerSessaoClienteDiagnosticada — mesma resolução, com motivo categ�
     expect(diagnostico.fonte).toBe("nenhuma");
   });
 
+  test("JWE invalido registra o codigo de erro estavel do jose, sem PII", async () => {
+    const token = await criarSessaoPortatil(PAYLOAD);
+    const adulterado = token.slice(0, -4) + "abcd";
+    const { diagnostico } = await lerSessaoClienteDiagnosticada(reqFake(undefined, `Bearer ${adulterado}`));
+    expect(diagnostico.jweErro).toBe("ERR_JWE_DECRYPTION_FAILED");
+  });
+
+  test("JWE valido nunca registra jweErro", async () => {
+    const token = await criarSessaoPortatil(PAYLOAD);
+    const { diagnostico } = await lerSessaoClienteDiagnosticada(reqFake(undefined, `Bearer ${token}`));
+    expect(diagnostico.jweErro).toBeUndefined();
+  });
+
   test("sessao opaca legada e identificada: fonte=opaco", async () => {
     const token = await criarSessaoOpaca(PAYLOAD);
     const { payload, diagnostico } = await lerSessaoClienteDiagnosticada(reqFake(undefined, `Bearer ${token}`));
@@ -251,6 +264,12 @@ describe("lerSessaoClienteDiagnosticada — mesma resolução, com motivo categ�
     expect(diagnostico.cookiePresente).toBe(true);
     expect(diagnostico.cookieValido).toBe(false);
     expect(diagnostico.fonte).toBe("jwe");
+  });
+
+  test("cookie invalido registra o codigo de erro estavel do jose, mesmo quando o Bearer salva a sessao", async () => {
+    const token = await criarSessaoPortatil(PAYLOAD);
+    const { diagnostico } = await lerSessaoClienteDiagnosticada(reqFake("cookie-adulterado", `Bearer ${token}`));
+    expect(diagnostico.cookieErro).toBe("ERR_JWS_INVALID");
   });
 
   test("cookie valido: fonte=cookie, nunca tenta decriptar bearer mesmo se presente", async () => {
