@@ -376,3 +376,123 @@ describe("13. montarMarcadorImagem/montarMarcadorDocumento — payload inseguro 
       .toBe("[Documento recebido: nota.pdf] segue");
   });
 });
+
+describe("14. domínio oficial do cardápio no WhatsApp real", () => {
+  const DOMINIO_ANTIGO = "chefebot-pjif.vercel.app";
+
+  function configurarPizzariaAberta() {
+    store.set("config:pizzaria", {
+      nomePizzaria: "Chefe da Pizza",
+      horaAbertura: 0,
+      horaFechamento: 24,
+      chavePix: "",
+      nomeTitularPix: "",
+      limitePico: 0,
+    });
+    // Mesmo com origens hostis presentes, o link de navegação humana deve
+    // permanecer fail-closed no domínio oficial do cliente.
+    vi.stubEnv("VERCEL_URL", "chefebot-preview-123.vercel.app");
+    vi.stubEnv("NEXT_PUBLIC_URL", "http://localhost:3000");
+  }
+
+  function requestComHostPreview(body: unknown) {
+    return {
+      url: "https://chefebot-preview-123.vercel.app/api/whatsapp",
+      json: async () => body,
+    } as never;
+  }
+
+  function textosDoBot(): string[] {
+    return chamadas().filter(([, autor]) => autor === "bot").map(([, , texto]) => texto);
+  }
+
+  function ultimoTextoDoBot(): string {
+    const textos = textosDoBot();
+    const ultimo = textos.at(-1);
+    if (!ultimo) throw new Error("Resposta do bot não registrada");
+    return ultimo;
+  }
+
+  function extrairLinkOficial(texto: string): { href: string; token: string } {
+    const linksCardapio = (texto.match(/https?:\/\/\S+/g) ?? []).filter((link) =>
+      link.includes("/cardapio")
+    );
+    expect(linksCardapio).toHaveLength(1);
+
+    const href = linksCardapio[0];
+    const url = new URL(href);
+    const tokens = url.searchParams.getAll("t");
+    expect(tokens).toHaveLength(1);
+    expect(tokens[0]).toMatch(/^[a-f0-9]{32}$/);
+    return { href, token: tokens[0] };
+  }
+
+  function esperarLinkSeguro(texto: string) {
+    const link = extrairLinkOficial(texto);
+    const url = new URL(link.href);
+    expect(url.protocol).toBe("https:");
+    expect(url.origin).toBe("https://chefedapizza.com.br");
+    expect(url.pathname).toBe("/cardapio");
+    expect(url.searchParams.getAll("t")).toEqual([link.token]);
+    expect(texto).not.toContain(DOMINIO_ANTIGO);
+    expect(texto).not.toContain("chefebot-preview-123.vercel.app");
+    expect(texto).not.toContain("localhost");
+    expect(texto).not.toContain("chefedapizza.com.br//");
+    return link;
+  }
+
+  function esperarTodasAsMensagensDoBotSemOrigemTecnica() {
+    const textos = textosDoBot();
+    expect(textos.length).toBeGreaterThan(0);
+    for (const texto of textos) {
+      expect(texto).not.toContain(DOMINIO_ANTIGO);
+      expect(texto).not.toContain("chefebot-preview-123.vercel.app");
+      expect(texto).not.toContain("localhost");
+    }
+  }
+
+  test("cliente novo envia 'oi' e recebe /cardapio?t= no domínio oficial", async () => {
+    configurarPizzariaAberta();
+
+    await POST(requestComHostPreview(webhookBody({ message: { conversation: "oi" } })));
+
+    const texto = ultimoTextoDoBot();
+    esperarLinkSeguro(texto);
+    esperarTodasAsMensagensDoBotSemOrigemTecnica();
+    expect(texto).toContain("Se preferir ver o cardápio digital");
+    expect(texto).toContain("1. Pizza");
+    expect(texto).toContain("2. Lanches");
+    expect(texto).toContain("3. Bebidas");
+    expect(texto).toContain("4. Sucos e Vitaminas");
+  });
+
+  test("cliente recorrente recebe o mesmo token no 'oi' e na opção 2", async () => {
+    configurarPizzariaAberta();
+    store.set(`cliente:${PHONE}`, {
+      nome: "Cliente Teste",
+      ultimoPedido: ["Pizza Calabresa G"],
+      ultimoTotal: 50,
+      totalPedidos: 2,
+      ultimaVisita: Date.now() - 60_000,
+    });
+
+    await POST(requestComHostPreview(webhookBody({ message: { conversation: "oi" } })));
+    const saudacao = ultimoTextoDoBot();
+    const primeiroLink = esperarLinkSeguro(saudacao);
+    esperarTodasAsMensagensDoBotSemOrigemTecnica();
+    expect(saudacao).toContain("1. Pedir o de sempre");
+    expect(saudacao).toContain("2. Ver o cardápio");
+
+    registrarMensagemMock.mockClear();
+    await POST(requestComHostPreview(webhookBody({ message: { conversation: "2" } })));
+
+    const respostaOpcao2 = ultimoTextoDoBot();
+    const segundoLink = esperarLinkSeguro(respostaOpcao2);
+    esperarTodasAsMensagensDoBotSemOrigemTecnica();
+    expect(segundoLink.token).toBe(primeiroLink.token);
+    expect(respostaOpcao2).toContain("1. Pizza");
+    expect(respostaOpcao2).toContain("2. Lanches");
+    expect(respostaOpcao2).toContain("3. Bebidas");
+    expect(respostaOpcao2).toContain("4. Sucos e Vitaminas");
+  });
+});

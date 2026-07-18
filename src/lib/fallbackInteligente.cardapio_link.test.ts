@@ -5,9 +5,9 @@ vi.mock("./redis", () => ({ redis: { get: vi.fn().mockResolvedValue(null) } }));
 import { resolverFallbackInteligente } from "./fallbackInteligente";
 import { processMessage, createInitialSession, type BotSession } from "./bot";
 
-const LINK_CARDAPIO = "https://chefebot-pjif.vercel.app/cardapio";
+const LINK_CARDAPIO = "https://chefedapizza.com.br/cardapio";
 const TEXTO_LINK_OBRIGATORIO =
-  "Se preferir ver o cardápio digital, é só acessar:\nhttps://chefebot-pjif.vercel.app/cardapio";
+  "Se preferir ver o cardápio digital, é só acessar:\nhttps://chefedapizza.com.br/cardapio";
 
 function sessaoCategoria(over: Partial<BotSession> = {}): BotSession {
   return { ...createInitialSession(), step: "category", customerName: "Ana", cart: [], deliveryFee: 0, ...over };

@@ -1036,7 +1036,7 @@ function mensagemCategorias(): string {
 // Link do cardápio digital — deve acompanhar toda mensagem que chama o cliente
 // para iniciar ou continuar a montagem do pedido (nunca em mensagens de
 // pós-pedido: done, aguardando_pix, escalado, status/rastreamento).
-export const LINK_CARDAPIO_DIGITAL = "https://chefebot-pjif.vercel.app/cardapio";
+export const LINK_CARDAPIO_DIGITAL = "https://chefedapizza.com.br/cardapio";
 export function textoLinkCardapioDigital(): string {
   return `Se preferir ver o cardápio digital, é só acessar:\n${LINK_CARDAPIO_DIGITAL}`;
 }

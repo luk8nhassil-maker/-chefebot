@@ -16,7 +16,7 @@ import {
 import { resolverFallbackInteligente } from "./fallbackInteligente";
 
 const TEXTO_LINK =
-  "Se preferir ver o cardápio digital, é só acessar:\nhttps://chefebot-pjif.vercel.app/cardapio";
+  "Se preferir ver o cardápio digital, é só acessar:\nhttps://chefedapizza.com.br/cardapio";
 
 function historicoFake(over: Partial<ClienteHistorico> = {}): ClienteHistorico {
   return {
@@ -74,6 +74,19 @@ describe("gate central: entradas de pedido pelo fluxo determinístico", () => {
     const res = processMessage("hmmmm", sess);
     // resposta de retorno é convite de pedido -> deve ter link
     expect(res.messages.join("\n")).toContain(LINK_CARDAPIO_DIGITAL);
+  });
+
+  it("opção 2 do menu de retorno mantém as categorias e usa o domínio oficial", () => {
+    const res = processMessage("2", createReturningSession(historicoFake()));
+    const mensagem = res.messages.join("\n");
+
+    expect(res.session.step).toBe("category");
+    expect(mensagem).toContain("https://chefedapizza.com.br/cardapio");
+    expect(mensagem).not.toContain("chefebot-pjif.vercel.app");
+    expect(mensagem).toContain("1. Pizza");
+    expect(mensagem).toContain("2. Lanches");
+    expect(mensagem).toContain("3. Bebidas");
+    expect(mensagem).toContain("4. Sucos e Vitaminas");
   });
 
   it("sessão 'done' reiniciando atendimento (novo pedido) recebe o link", () => {

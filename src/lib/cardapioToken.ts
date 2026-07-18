@@ -65,11 +65,75 @@ export async function validarTokenCardapio(token: string | null | undefined): Pr
   return { phone: payload.phone };
 }
 
-// Injeta `?t=TOKEN` em todas as ocorrências do link do cardápio numa mensagem
-// já pronta. Idempotente: não injeta se o link já tiver token, e não altera
-// mensagens sem o link.
+const URL_CARDAPIO_DIGITAL = new URL(LINK_CARDAPIO_DIGITAL);
+const PADRAO_URL = /(?<![\p{L}\p{N}])https?:\/\/[^\s<>"']+/gu;
+const SUFIXOS_DE_TEXTO = new Set([".", ",", ";", ":", "!", ")", "]", "}", "*", "_", "~", "`", "”", "’", "»"]);
+const ABERTURA_DO_FECHAMENTO: Record<string, string> = {
+  ")": "(",
+  "]": "[",
+  "}": "{",
+  "”": "“",
+  "’": "‘",
+  "»": "«",
+};
+
+function separarFechamentoSolto(link: string): { url: string; sufixo: string } {
+  const match = link.match(/([)\]}”’»])([.,;:!?]*)$/u);
+  if (!match) return { url: link, sufixo: "" };
+
+  const [sufixo, fechamento] = match;
+  const abertura = ABERTURA_DO_FECHAMENTO[fechamento];
+  const fechamentos = link.split(fechamento).length - 1;
+  const aberturas = link.split(abertura).length - 1;
+  if (fechamentos <= aberturas) return { url: link, sufixo: "" };
+
+  return { url: link.slice(0, -sufixo.length), sufixo };
+}
+
+function lerUrlCardapio(link: string): { url: URL; sufixo: string } | null {
+  let { url: candidato, sufixo } = separarFechamentoSolto(link);
+
+  while (candidato) {
+    try {
+      const url = new URL(candidato);
+      if (
+        url.origin === URL_CARDAPIO_DIGITAL.origin &&
+        url.pathname === URL_CARDAPIO_DIGITAL.pathname
+      ) {
+        return { url, sufixo };
+      }
+
+      if (url.search || url.hash) return null;
+    } catch {
+      return null;
+    }
+
+    const ultimo = candidato.at(-1)!;
+    if (!SUFIXOS_DE_TEXTO.has(ultimo)) return null;
+    candidato = candidato.slice(0, -1);
+    sufixo = `${ultimo}${sufixo}`;
+  }
+
+  return null;
+}
+
+// Injeta `t=TOKEN` em todas as ocorrências do link do cardápio numa mensagem
+// já pronta. URLSearchParams preserva parâmetros adicionais e o fragmento,
+// usando `&` quando a URL já tem query. Idempotente: um token existente nunca
+// é substituído ou duplicado, e mensagens sem o link permanecem intactas.
 export function anexarTokenAoLinkCardapio(mensagem: string, token: string): string {
   if (!mensagem || !token || !mensagem.includes(LINK_CARDAPIO_DIGITAL)) return mensagem;
-  if (mensagem.includes(`${LINK_CARDAPIO_DIGITAL}?t=`)) return mensagem;
-  return mensagem.split(LINK_CARDAPIO_DIGITAL).join(`${LINK_CARDAPIO_DIGITAL}?t=${token}`);
+  return mensagem.replace(PADRAO_URL, (link) => {
+    const resultado = lerUrlCardapio(link);
+    if (!resultado) return link;
+
+    try {
+      const { url, sufixo } = resultado;
+      const tokenExistente = url.searchParams.getAll("t").find(Boolean);
+      url.searchParams.set("t", tokenExistente ?? token);
+      return `${url.toString()}${sufixo}`;
+    } catch {
+      return link;
+    }
+  });
 }
