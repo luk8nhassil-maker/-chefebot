@@ -18,6 +18,7 @@ const EVENTOS_PERMITIDOS = new Set([
   "name_saved",
   "profile_request_status",
   "fidelity_request_status",
+  "name_save_request_status",
   "points_step_opened",
   "unexpected_return_to_confirm",
   // eventos da geração anterior (bundle antigo ainda pode emitir)

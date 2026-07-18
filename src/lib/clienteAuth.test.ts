@@ -16,7 +16,8 @@ vi.mock("@/lib/redis", () => ({
   },
 }));
 
-import { gerarOtp, verificarOtp, podeReenviarOtp, criarTokenCliente, verificarTokenCliente, criarTicketSessao, consumirTicketSessao, criarSessaoOpaca, resolverSessaoOpaca, revogarSessaoOpaca, extrairBearer, lerSessaoCliente, CLIENTE_COOKIE } from "./clienteAuth";
+import { redis } from "@/lib/redis";
+import { gerarOtp, verificarOtp, podeReenviarOtp, criarTokenCliente, verificarTokenCliente, criarTicketSessao, consumirTicketSessao, criarSessaoOpaca, resolverSessaoOpaca, revogarSessaoOpaca, extrairBearer, lerSessaoCliente, criarSessaoPortatil, resolverSessaoPortatil, CLIENTE_COOKIE } from "./clienteAuth";
 
 beforeEach(() => {
   store.clear();
@@ -109,6 +110,36 @@ describe("sessao opaca (fallback Bearer)", () => {
   });
 });
 
+describe("sessao portatil (JWE, sem leitura de Redis para validar)", () => {
+  const PAYLOAD = { clienteId: "cli_5599974000691", telefone: "5599974000691" };
+
+  test("token portatil nao expoe clienteId nem telefone em claro", async () => {
+    const token = await criarSessaoPortatil(PAYLOAD);
+    expect(token.split(".")).toHaveLength(5);
+    expect(token).not.toContain(PAYLOAD.telefone);
+    expect(token).not.toContain(PAYLOAD.clienteId);
+    expect(Buffer.from(token, "base64").toString("utf-8")).not.toContain(PAYLOAD.telefone);
+  });
+
+  test("resolve corretamente SEM nenhuma leitura do redis mockado", async () => {
+    const chamadasAntes = (redis.get as ReturnType<typeof vi.fn>).mock.calls.length;
+    const token = await criarSessaoPortatil(PAYLOAD);
+    const chamadasDepoisDeCriar = (redis.get as ReturnType<typeof vi.fn>).mock.calls.length;
+    expect(await resolverSessaoPortatil(token)).toEqual(PAYLOAD);
+    // nem criar nem resolver a sessao portatil chamam redis.get
+    expect((redis.get as ReturnType<typeof vi.fn>).mock.calls.length).toBe(chamadasDepoisDeCriar);
+    expect(chamadasDepoisDeCriar).toBe(chamadasAntes);
+  });
+
+  test("token adulterado ou de formato antigo (opaco) resolve para null", async () => {
+    expect(await resolverSessaoPortatil("token-invalido")).toBeNull();
+    expect(await resolverSessaoPortatil("a".repeat(32))).toBeNull();
+    const token = await criarSessaoPortatil(PAYLOAD);
+    const adulterado = token.slice(0, -4) + "abcd";
+    expect(await resolverSessaoPortatil(adulterado)).toBeNull();
+  });
+});
+
 describe("lerSessaoCliente — cookie primeiro, Bearer como fallback", () => {
   const PAYLOAD = { clienteId: "cli_5599974000691", telefone: "5599974000691" };
 
@@ -124,13 +155,18 @@ describe("lerSessaoCliente — cookie primeiro, Bearer como fallback", () => {
     expect(await lerSessaoCliente(reqFake(jwt))).toEqual(PAYLOAD);
   });
 
-  test("sem cookie, Bearer com sessao opaca valida autentica", async () => {
+  test("sem cookie, Bearer com sessao PORTATIL (JWE) valida autentica", async () => {
+    const token = await criarSessaoPortatil(PAYLOAD);
+    expect(await lerSessaoCliente(reqFake(undefined, `Bearer ${token}`))).toEqual(PAYLOAD);
+  });
+
+  test("sem cookie, Bearer com sessao opaca legada ainda autentica (compatibilidade)", async () => {
     const token = await criarSessaoOpaca(PAYLOAD);
     expect(await lerSessaoCliente(reqFake(undefined, `Bearer ${token}`))).toEqual(PAYLOAD);
   });
 
-  test("cookie invalido + Bearer valido: o Bearer vale (recuperacao)", async () => {
-    const token = await criarSessaoOpaca(PAYLOAD);
+  test("cookie invalido + Bearer portatil valido: o Bearer vale (recuperacao)", async () => {
+    const token = await criarSessaoPortatil(PAYLOAD);
     expect(await lerSessaoCliente(reqFake("jwt-adulterado", `Bearer ${token}`))).toEqual(PAYLOAD);
   });
 

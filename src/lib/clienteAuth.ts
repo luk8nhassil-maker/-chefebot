@@ -1,5 +1,5 @@
-import { randomUUID } from "crypto";
-import { SignJWT, jwtVerify } from "jose";
+import { randomUUID, createHash } from "crypto";
+import { SignJWT, jwtVerify, EncryptJWT, jwtDecrypt } from "jose";
 import { redis } from "./redis";
 import { sanitizeTelefoneCliente } from "./clientes";
 
@@ -151,9 +151,55 @@ export function extrairBearer(authorization: string | null | undefined): string 
   return m ? m[1] : null;
 }
 
+// Extrai o valor bruto de Authorization: Bearer <valor>, sem restringir o
+// formato — usado para tentar a sessão portátil (JWE) antes da opaca, já que
+// os dois formatos têm formas bem diferentes (JWE tem pontos, opaca é hex).
+function extrairBearerBruto(authorization: string | null | undefined): string | null {
+  const m = (authorization || "").match(/^Bearer (.+)$/);
+  return m ? m[1].trim() : null;
+}
+
+// ============================================================================
+// SESSÃO PORTÁTIL (JWE, sem leitura de Redis para validar)
+// Validação em produção provou uma segunda falha, distinta do problema de
+// cookie: leituras de Redis logo após a escrita (réplica atrasada) faziam a
+// sessão OPACA (que exige um redis.get a cada uso) devolver 401 mesmo com o
+// header correto chegando ao servidor. A sessão portátil resolve isso
+// eliminando essa leitura: o próprio token, cifrado (JWE, AES-256-GCM,
+// alg "dir"), carrega clienteId+telefone e é validado só por decriptação — a
+// mesma garantia de confidencialidade da sessão opaca (o valor é inútil sem a
+// chave do servidor; pode viver em sessionStorage), mas sem depender de o
+// Redis já ter propagado a escrita mais recente.
+// ============================================================================
+
+function chaveSessaoPortatil(): Buffer {
+  return createHash("sha256").update(getSecret()).digest();
+}
+
+export async function criarSessaoPortatil(payload: ClienteTokenPayload): Promise<string> {
+  return new EncryptJWT({ clienteId: payload.clienteId, telefone: payload.telefone })
+    .setProtectedHeader({ alg: "dir", enc: "A256GCM" })
+    .setIssuedAt()
+    .setExpirationTime(SESSAO_DURACAO)
+    .encrypt(chaveSessaoPortatil());
+}
+
+export async function resolverSessaoPortatil(token: string | null | undefined): Promise<ClienteTokenPayload | null> {
+  if (!token || !token.includes(".")) return null;
+  try {
+    const { payload } = await jwtDecrypt(token, chaveSessaoPortatil());
+    if (typeof payload.clienteId !== "string" || typeof payload.telefone !== "string") return null;
+    return { clienteId: payload.clienteId, telefone: payload.telefone };
+  } catch {
+    return null;
+  }
+}
+
 // Leitura única de sessão para as rotas da área do cliente: cookie HttpOnly
-// primeiro (caminho principal), Authorization: Bearer com sessão opaca como
-// fallback. Nunca aceita identificadores arbitrários de query/body.
+// primeiro (caminho principal). Em seguida, Authorization: Bearer — tentando
+// primeiro a sessão portátil (JWE, sem Redis) e só então a sessão opaca
+// legada (compatibilidade com sessões emitidas antes desta mudança). Nunca
+// aceita identificadores arbitrários de query/body.
 export async function lerSessaoCliente(req: {
   cookies: { get(name: string): { value: string } | undefined };
   headers: { get(name: string): string | null };
@@ -163,7 +209,11 @@ export async function lerSessaoCliente(req: {
     const payload = await verificarTokenCliente(cookie);
     if (payload) return payload;
   }
-  return resolverSessaoOpaca(extrairBearer(req.headers.get("authorization")));
+  const bruto = extrairBearerBruto(req.headers.get("authorization"));
+  if (!bruto) return null;
+  const portatil = await resolverSessaoPortatil(bruto);
+  if (portatil) return portatil;
+  return resolverSessaoOpaca(extrairBearer(`Bearer ${bruto}`));
 }
 
 export async function criarTokenCliente(payload: ClienteTokenPayload): Promise<string> {

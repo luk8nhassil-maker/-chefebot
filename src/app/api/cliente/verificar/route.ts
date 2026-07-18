@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verificarOtp, criarTokenCliente, criarTicketSessao, criarSessaoOpaca, CLIENTE_COOKIE } from "@/lib/clienteAuth";
+import { verificarOtp, criarTokenCliente, criarTicketSessao, criarSessaoPortatil, CLIENTE_COOKIE } from "@/lib/clienteAuth";
 import { obterOuCriarCliente, sanitizeTelefoneCliente, normalizarNomeCliente, clienteProximaEtapa } from "@/lib/clientes";
 import { validarTokenCardapio } from "@/lib/cardapioToken";
 
@@ -45,10 +45,11 @@ export async function POST(req: NextRequest) {
     // navegador — a tela de Pontos só precisa saber se o cliente já tem nome
     // (para pular a etapa de cadastro).
     const ticket = await criarTicketSessao({ clienteId: cliente.clienteId, telefone: cliente.telefone });
-    // Sessão opaca (token aleatório, sem nenhum dado do cliente): usável via
-    // Authorization: Bearer em qualquer navegador, inclusive os que descartam
-    // cookies (navegador interno do WhatsApp no iPhone).
-    const sessao = await criarSessaoOpaca({ clienteId: cliente.clienteId, telefone: cliente.telefone });
+    // Sessão portátil (JWE cifrado, sem dado legível e sem leitura de Redis
+    // para validar): usável via Authorization: Bearer em qualquer navegador,
+    // inclusive os que descartam cookies (navegador interno do WhatsApp no
+    // iPhone) — e imune a atraso de réplica do Redis logo após esta escrita.
+    const sessao = await criarSessaoPortatil({ clienteId: cliente.clienteId, telefone: cliente.telefone });
 
     // Resposta ATÔMICA: a próxima tela é decidida AQUI, na mesma execução que
     // validou o OTP e criou cliente+sessão — nenhuma leitura posterior (que
