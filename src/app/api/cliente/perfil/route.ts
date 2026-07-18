@@ -48,13 +48,16 @@ export async function GET(req: NextRequest) {
 // nome salvo.
 export async function PATCH(req: NextRequest) {
   // Sessão via cookie HttpOnly ou, em navegadores sem cookie confiável
-  // (WhatsApp no iPhone), via Authorization: Bearer com sessão opaca.
+  // (WhatsApp no iPhone), via Authorization: Bearer — sessão portátil (JWE)
+  // ou, em compatibilidade, a sessão opaca legada. A validação da sessão em
+  // si já não depende de leitura de Redis (ver lerSessaoCliente).
   const payload = await lerSessaoCliente(req);
   if (!payload) return NextResponse.json({ error: "Nao autorizado" }, { status: 401 });
 
-  const cliente = await buscarClientePorId(payload.clienteId);
-  if (!cliente) return NextResponse.json({ error: "Nao autorizado" }, { status: 401 });
-
+  // Sem gate de leitura do registro do cliente por clienteId: o telefone já
+  // vem autenticado no próprio payload da sessão. Um incidente em produção
+  // provou esse gate rejeitando o PATCH (401) mesmo com sessão válida, por
+  // atraso de réplica do Redis logo após o OTP escrever o registro.
   try {
     const body = await req.json();
     const nome = normalizarNomeCliente(body?.nome);
@@ -62,7 +65,7 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "Digite seu nome" }, { status: 400 });
     }
     // Primeira ativação: grava nome + fidelidadeAtivadaEm na mesma escrita.
-    const atualizado = await ativarFidelidadeCliente(cliente.telefone, nome);
+    const atualizado = await ativarFidelidadeCliente(payload.telefone, nome);
     return NextResponse.json({ ok: true, next: "points", cliente: { nome: atualizado.nome ?? null } });
   } catch (error) {
     console.error("[ChefeBot] Erro ao atualizar nome do cliente:", error);

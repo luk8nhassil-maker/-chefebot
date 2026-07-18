@@ -59,6 +59,7 @@ vi.mock("@/lib/redis", () => ({
 }));
 
 import { GET, PATCH } from "./route";
+import { buscarClientePorId } from "@/lib/clientes";
 
 function requestComCookie(token?: string) {
   const url = "http://localhost/api/cliente/perfil";
@@ -130,5 +131,15 @@ describe("PATCH /api/cliente/perfil — completa so o nome do dono da sessao", (
   test("nome vazio/curto retorna 400", async () => {
     const res = await PATCH(requestPatch("token-cliente-a", { nome: "   " }));
     expect(res.status).toBe(400);
+  });
+
+  test("PATCH nunca usa buscarClientePorId como gate — sessao valida basta para gravar", async () => {
+    // Incidente em produção: esse gate (leitura por clienteId antes de
+    // gravar) 401ava um PATCH com sessão válida por atraso de réplica do
+    // Redis. O telefone vem direto do payload da sessão autenticada.
+    (buscarClientePorId as ReturnType<typeof vi.fn>).mockClear();
+    const res = await PATCH(requestPatch("token-cliente-a", { nome: "Maria" }));
+    expect(res.status).toBe(200);
+    expect(buscarClientePorId).not.toHaveBeenCalled();
   });
 });

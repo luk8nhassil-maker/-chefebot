@@ -204,6 +204,20 @@ describe("/cliente — fluxo determinístico pós-OTP (máquina de estados)", ()
   });
 });
 
+describe("/cliente — sessão portátil: PATCH do nome sem depender de sondagem por clienteId", () => {
+  test("salvarNome registra o status da própria requisição de gravação do nome (telemetria)", () => {
+    const bloco = fonte.slice(fonte.indexOf("async function salvarNome"), fonte.indexOf("async function sair"));
+    expect(bloco).toMatch(/telemetria\('name_save_request_status', \{ status: res\.status, trace: traceId \}\)/);
+  });
+
+  test("tela do nome também mostra o Código de suporte quando há erro (não só na tela do código)", () => {
+    const inicioNome = fonte.indexOf("step === 'nome'");
+    const blocoNome = fonte.slice(inicioNome, fonte.indexOf("step === 'perfil'", inicioNome));
+    expect(blocoNome).toContain("Código de suporte: {traceId}");
+    expect(blocoNome).toMatch(/erro && traceId/);
+  });
+});
+
 describe("/cliente — Etapa 2: sem lembrete operacional de pedido + barra global de Pix pendente", () => {
   test("[caso 10] não mostra mais o card de 'pedido em andamento' (pontos previstos)", () => {
     expect(fonte).not.toContain("Seu pedido em andamento vai render");

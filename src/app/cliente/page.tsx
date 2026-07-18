@@ -380,6 +380,7 @@ export default function ClientePage() {
         body: JSON.stringify({ nome }),
       }, sessaoMemRef.current)
       const data = await res.json().catch(() => ({}))
+      telemetria('name_save_request_status', { status: res.status, trace: traceId })
       if (!res.ok || !data.ok) {
         // Falha (inclusive 401 transitório) mantém a tela do nome com retry —
         // NUNCA pede novo código nem volta para a confirmação.
@@ -646,6 +647,11 @@ export default function ClientePage() {
             <button onClick={salvarNome} disabled={enviando} style={{ ...botaoPrimario, opacity: enviando ? 0.6 : 1 }}>
               {enviando ? 'Ativando...' : 'Ativar meus pontos'}
             </button>
+            {erro && traceId && (
+              <p style={{ fontSize: 11, color: cores.textoTerciario, margin: 0, textAlign: 'center' }}>
+                Código de suporte: {traceId}
+              </p>
+            )}
           </div>
         )}
 
