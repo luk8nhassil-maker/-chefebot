@@ -179,6 +179,36 @@ describe("/cliente — hotfix OTP: sessão que não 'pega' nunca deixa a tela mu
   });
 });
 
+describe("/cliente — hotfix final: sessão opaca via Bearer quando o cookie não funciona", () => {
+  test("chamadas autenticadas passam pelo fetchCliente (Bearer quando houver fallback)", () => {
+    expect(fonte).toContain("import { fetchCliente, guardarSessaoFallback, limparSessaoFallback } from '@/lib/clienteSessaoFront'");
+    // perfil, fidelidade, resgate e logout exigem sessão — sempre fetchCliente.
+    for (const rota of ['/api/cliente/perfil', '/api/cliente/fidelidade', '/api/cliente/fidelidade/resgate', '/api/cliente/logout']) {
+      expect(fonte).not.toContain(`fetch('${rota}'`);
+    }
+    // login e verificar acontecem ANTES de existir sessão — fetch normal.
+    expect(fonte).toContain("fetch('/api/cliente/login'");
+    expect(fonte).toContain("fetch('/api/cliente/verificar'");
+  });
+
+  test("o fallback só é gravado depois de comprovado que o cookie falhou", () => {
+    const bloco = fonte.slice(fonte.indexOf("async function abrirAposVerificacao"), fonte.indexOf("async function tentarAbrirNovamente"));
+    // ordem: limpa fallback -> sonda cookie -> só então guarda a sessão opaca
+    expect(bloco.indexOf("limparSessaoFallback()")).toBeGreaterThan(-1);
+    expect(bloco.indexOf("carregarPerfilComRetry")).toBeLessThan(bloco.indexOf("guardarSessaoFallback"));
+  });
+
+  test("chegada da ativação por navegação nunca volta ao início em silêncio", () => {
+    expect(fonte).toContain("veioDaAtivacao");
+    expect(fonte).toContain("Quase lá!");
+  });
+
+  test("sair limpa a sessão de fallback", () => {
+    const bloco = fonte.slice(fonte.indexOf("async function sair"), fonte.indexOf("// CTA de resgate"));
+    expect(bloco).toContain("limparSessaoFallback()");
+  });
+});
+
 describe("/cliente — Etapa 2: sem lembrete operacional de pedido + barra global de Pix pendente", () => {
   test("[caso 10] não mostra mais o card de 'pedido em andamento' (pontos previstos)", () => {
     expect(fonte).not.toContain("Seu pedido em andamento vai render");

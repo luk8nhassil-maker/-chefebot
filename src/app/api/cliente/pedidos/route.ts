@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verificarTokenCliente, CLIENTE_COOKIE } from "@/lib/clienteAuth";
+import { lerSessaoCliente } from "@/lib/clienteAuth";
 import { buscarClientePorId } from "@/lib/clientes";
 import { redis } from "@/lib/redis";
 import {
@@ -11,15 +11,15 @@ import {
 
 // GET /api/cliente/pedidos — histórico completo do cliente autenticado.
 //
-// Identidade vem só do cookie CLIENTE_COOKIE (JWT verificado no servidor).
+// Identidade vem só da sessão verificada no servidor (cookie HttpOnly ou
+// sessão opaca via Bearer — ver lerSessaoCliente).
 // Nunca aceita telefone/clienteId por query — não há nenhum searchParam lido
 // aqui, de propósito. Sem sessão válida -> sempre 401 (cookie ausente, token
 // inválido ou cliente inexistente tratam-se igual, mesma resposta genérica).
 export async function GET(req: NextRequest) {
-  const token = req.cookies.get(CLIENTE_COOKIE)?.value ?? null;
-  if (!token) return NextResponse.json({ error: "Nao autorizado" }, { status: 401 });
-
-  const payload = await verificarTokenCliente(token);
+  // Sessão via cookie HttpOnly ou, em navegadores sem cookie confiável
+  // (WhatsApp no iPhone), via Authorization: Bearer com sessão opaca.
+  const payload = await lerSessaoCliente(req);
   if (!payload) return NextResponse.json({ error: "Nao autorizado" }, { status: 401 });
 
   const cliente = await buscarClientePorId(payload.clienteId);

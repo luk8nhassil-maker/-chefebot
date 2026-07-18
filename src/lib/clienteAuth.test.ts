@@ -16,7 +16,7 @@ vi.mock("@/lib/redis", () => ({
   },
 }));
 
-import { gerarOtp, verificarOtp, podeReenviarOtp, criarTokenCliente, verificarTokenCliente, criarTicketSessao, consumirTicketSessao } from "./clienteAuth";
+import { gerarOtp, verificarOtp, podeReenviarOtp, criarTokenCliente, verificarTokenCliente, criarTicketSessao, consumirTicketSessao, criarSessaoOpaca, resolverSessaoOpaca, revogarSessaoOpaca, extrairBearer, lerSessaoCliente, CLIENTE_COOKIE } from "./clienteAuth";
 
 beforeEach(() => {
   store.clear();
@@ -77,5 +77,65 @@ describe("ticket de ativacao de sessao por navegacao", () => {
   test("o ticket nao expoe o telefone", async () => {
     const ticket = await criarTicketSessao(PAYLOAD);
     expect(ticket).not.toContain(PAYLOAD.telefone.slice(-8));
+  });
+});
+
+describe("sessao opaca (fallback Bearer)", () => {
+  const PAYLOAD = { clienteId: "cli_5599974000691", telefone: "5599974000691" };
+
+  test("token opaco resolve multiplas vezes e nunca embute o telefone", async () => {
+    const token = await criarSessaoOpaca(PAYLOAD);
+    expect(token).toMatch(/^[a-f0-9]{32}$/);
+    expect(token).not.toContain(PAYLOAD.telefone.slice(-8));
+    expect(await resolverSessaoOpaca(token)).toEqual(PAYLOAD);
+    expect(await resolverSessaoOpaca(token)).toEqual(PAYLOAD); // multi-uso (sessao, nao ticket)
+  });
+
+  test("revogar invalida a sessao opaca", async () => {
+    const token = await criarSessaoOpaca(PAYLOAD);
+    await revogarSessaoOpaca(token);
+    expect(await resolverSessaoOpaca(token)).toBeNull();
+  });
+
+  test("token invalido/inexistente resolve para null", async () => {
+    expect(await resolverSessaoOpaca("x")).toBeNull();
+    expect(await resolverSessaoOpaca("a".repeat(32))).toBeNull();
+  });
+
+  test("extrairBearer aceita so o formato exato", () => {
+    expect(extrairBearer(`Bearer ${"a".repeat(32)}`)).toBe("a".repeat(32));
+    expect(extrairBearer("Bearer abc")).toBeNull();
+    expect(extrairBearer(null)).toBeNull();
+  });
+});
+
+describe("lerSessaoCliente — cookie primeiro, Bearer como fallback", () => {
+  const PAYLOAD = { clienteId: "cli_5599974000691", telefone: "5599974000691" };
+
+  function reqFake(cookie?: string, auth?: string) {
+    return {
+      cookies: { get: (n: string) => (n === CLIENTE_COOKIE && cookie ? { value: cookie } : undefined) },
+      headers: { get: (n: string) => (n.toLowerCase() === "authorization" ? auth ?? null : null) },
+    };
+  }
+
+  test("cookie JWT valido autentica", async () => {
+    const jwt = await criarTokenCliente(PAYLOAD);
+    expect(await lerSessaoCliente(reqFake(jwt))).toEqual(PAYLOAD);
+  });
+
+  test("sem cookie, Bearer com sessao opaca valida autentica", async () => {
+    const token = await criarSessaoOpaca(PAYLOAD);
+    expect(await lerSessaoCliente(reqFake(undefined, `Bearer ${token}`))).toEqual(PAYLOAD);
+  });
+
+  test("cookie invalido + Bearer valido: o Bearer vale (recuperacao)", async () => {
+    const token = await criarSessaoOpaca(PAYLOAD);
+    expect(await lerSessaoCliente(reqFake("jwt-adulterado", `Bearer ${token}`))).toEqual(PAYLOAD);
+  });
+
+  test("nada valido: null", async () => {
+    expect(await lerSessaoCliente(reqFake())).toBeNull();
+    expect(await lerSessaoCliente(reqFake(undefined, `Bearer ${"b".repeat(32)}`))).toBeNull();
   });
 });

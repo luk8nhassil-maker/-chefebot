@@ -1,10 +1,12 @@
 import { vi, describe, test, expect } from "vitest";
 import { NextRequest } from "next/server";
 
+const BEARER_VALIDO = "f".repeat(32);
 vi.mock("@/lib/clienteAuth", () => ({
   CLIENTE_COOKIE: "cliente-token",
-  verificarTokenCliente: vi.fn(async (token: string) => {
-    if (token === "token-cliente-a") return { clienteId: "cli_a", telefone: "11900000001" };
+  lerSessaoCliente: vi.fn(async (req: { cookies: { get(n: string): { value: string } | undefined }; headers: { get(n: string): string | null } }) => {
+    if (req.cookies.get("cliente-token")?.value === "token-cliente-a") return { clienteId: "cli_a", telefone: "11900000001" };
+    if (req.headers.get("authorization") === `Bearer ${"f".repeat(32)}`) return { clienteId: "cli_a", telefone: "11900000001" };
     return null;
   }),
 }));
@@ -72,6 +74,13 @@ describe("GET /api/cliente/perfil", () => {
   test("token invalido retorna 401", async () => {
     const res = await GET(requestComCookie("token-adulterado"));
     expect(res.status).toBe(401);
+  });
+
+  test("sessao opaca via Authorization: Bearer tambem autentica (fallback sem cookie)", async () => {
+    const res = await GET(new NextRequest("http://localhost/api/cliente/perfil", { headers: { authorization: `Bearer ${BEARER_VALIDO}` } }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.cliente.telefone).toBe("11900000001");
   });
 
   test("cliente logado recebe apenas seus proprios dados e pedidos (nunca de outro cliente)", async () => {

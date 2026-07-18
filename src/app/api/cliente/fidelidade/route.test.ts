@@ -8,7 +8,10 @@ let recompensasPorCliente = new Map<string, unknown[]>();
 
 vi.mock("@/lib/clienteAuth", () => ({
   CLIENTE_COOKIE: "cliente-token",
-  verificarTokenCliente: vi.fn(async (token: string) => {
+  // A rota usa lerSessaoCliente (cookie ou Bearer); o mock resolve o mesmo
+  // mapa de tokens de teste a partir do cookie do request.
+  lerSessaoCliente: vi.fn(async (req: { cookies: { get(n: string): { value: string } | undefined } }) => {
+    const token = req.cookies.get("cliente-token")?.value ?? "";
     if (token === "token-cliente-a") return { clienteId: "cli_a", telefone: "11900000001" };
     if (token === "token-cliente-b") return { clienteId: "cli_b", telefone: "11900000002" };
     return null;

@@ -54,6 +54,11 @@ describe("POST /api/cliente/verificar — fluxo de numero reconhecido (waToken)"
     expect(data.ticket).toMatch(/^[a-f0-9]{32}$/);
     const payloadTicket = redisStore.get(`cliente:ticket:${data.ticket}`) as { clienteId: string };
     expect(payloadTicket.clienteId).toBe(`cli_${PHONE_DO_TOKEN}`);
+    // sessao opaca (fallback Bearer): token aleatorio, sem dado do cliente
+    expect(data.sessao).toMatch(/^[a-f0-9]{32}$/);
+    expect(data.sessao).not.toContain(PHONE_DO_TOKEN.slice(-8));
+    const payloadSessao = redisStore.get(`cliente:sessao:${data.sessao}`) as { clienteId: string };
+    expect(payloadSessao.clienteId).toBe(`cli_${PHONE_DO_TOKEN}`);
   });
 
   test("waToken invalido/expirado: 401 com vinculoInvalido, nada autenticado", async () => {
