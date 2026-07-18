@@ -115,7 +115,6 @@ const patch = await fetch(`${BASE}/api/cliente/perfil`, {
   body: JSON.stringify({ nome: "Cliente E2E" }),
 });
 check("PATCH do nome funciona com a sessao da navegacao", patch.status === 200, String(patch.status));
-const patchBody = await patch.clone?.().json?.() ?? null;
 const perfil2 = await (await fetch(`${BASE}/api/cliente/perfil`, { headers: { cookie: cookieNav } })).json();
 check("nome salvo aparece no perfil", perfil2?.cliente?.nome === "Cliente E2E", JSON.stringify(perfil2?.cliente?.nome));
 check("perfil NAO embute fidelidade (desacoplado)", perfil2?.fidelidade === undefined);
