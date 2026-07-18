@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { lerSessaoCliente, lerSessaoClienteDiagnosticada, consumirTicketAtivacaoPerfil } from "@/lib/clienteAuth";
+import { lerSessaoCliente, lerSessaoClienteDiagnosticada, consumirTicketAtivacaoPerfil, criarTicketAtivacaoPerfil } from "@/lib/clienteAuth";
 import { buscarClientePorId, normalizarNomeCliente, ativarFidelidadeCliente } from "@/lib/clientes";
 import { redis } from "@/lib/redis";
 
@@ -75,10 +75,19 @@ export async function PATCH(req: NextRequest) {
   // aceita SÓ o ticket de ativação do perfil (opaco, uso único, finalidade
   // exclusiva "perfil:ativar", nunca uma sessão geral — ver clienteAuth.ts).
   // Nunca aceita telefone/clienteId/waToken do corpo como autorização.
+  // Nome validado ANTES de consumir o ticket: um corpo malformado ou nome
+  // vazio não pode queimar um ticket de uso único à toa (o ticket é a única
+  // credencial de recuperação quando cookie/JWE falham).
+  const nome = normalizarNomeCliente(body.nome);
+  if (nome.length < 2) {
+    return NextResponse.json({ ok: false, error: "Digite seu nome" }, { status: 400 });
+  }
+
   let payload = payloadSessao;
   const ativacaoTokenBruto = typeof body.ativacaoToken === "string" ? body.ativacaoToken : null;
   const ticketPresente = !!ativacaoTokenBruto;
-  if (!payload && ativacaoTokenBruto) {
+  const autenticadoPorTicket = !payload && !!ativacaoTokenBruto;
+  if (autenticadoPorTicket) {
     payload = await consumirTicketAtivacaoPerfil(ativacaoTokenBruto);
   }
 
@@ -97,10 +106,6 @@ export async function PATCH(req: NextRequest) {
   // com sessão válida, por atraso de réplica do Redis logo após o OTP
   // escrever o registro.
   try {
-    const nome = normalizarNomeCliente(body.nome);
-    if (nome.length < 2) {
-      return NextResponse.json({ ok: false, error: "Digite seu nome" }, { status: 400 });
-    }
     // Primeira ativação: grava nome + fidelidadeAtivadaEm na mesma escrita.
     // O ticket de ativação SÓ autoriza exatamente esta operação — nunca vira
     // sessão geral, nunca autoriza outra rota.
@@ -108,6 +113,16 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ ok: true, next: "points", cliente: { nome: atualizado.nome ?? null } });
   } catch (error) {
     console.error("[ChefeBot] Erro ao atualizar nome do cliente:", error);
-    return NextResponse.json({ ok: false, error: "Erro interno" }, { status: 500 });
+    // O ticket original já foi consumido (uso único) antes desta escrita
+    // falhar. Sem compensação, o cliente fica sem QUALQUER credencial válida
+    // — nem sessão (já tinha falhado), nem ticket (já apagado) — e trava na
+    // tela do nome para sempre, só recuperável abrindo um link novo do
+    // WhatsApp do zero. Reemite um ticket novo (mesma finalidade, TTL do
+    // zero) só quando a autenticação desta chamada veio do ticket, para o
+    // frontend poder tentar de novo sem reiniciar o OTP.
+    const ativacaoToken = autenticadoPorTicket
+      ? await criarTicketAtivacaoPerfil({ clienteId: payload.clienteId, telefone: payload.telefone })
+      : undefined;
+    return NextResponse.json({ ok: false, error: "Erro interno", ativacaoToken }, { status: 500 });
   }
 }

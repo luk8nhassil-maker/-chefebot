@@ -14,7 +14,7 @@ function resolverSessaoFake(req: { cookies: { get(n: string): { value: string } 
 // Simula o ticket de ativação do perfil (clienteAuth.ts): uso único — a
 // primeira chamada com o ticket "válido" desta suíte consome e devolve o
 // cliente vinculado; qualquer outra (incluindo a mesma de novo) devolve null.
-const { consumirTicketAtivacaoPerfilMock, ticketsValidos } = vi.hoisted(() => {
+const { consumirTicketAtivacaoPerfilMock, criarTicketAtivacaoPerfilMock, ticketsValidos } = vi.hoisted(() => {
   const ticketsValidos = new Set<string>();
   return {
     ticketsValidos,
@@ -23,6 +23,7 @@ const { consumirTicketAtivacaoPerfilMock, ticketsValidos } = vi.hoisted(() => {
       ticketsValidos.delete(ticket);
       return CLIENTE_DO_TICKET;
     }),
+    criarTicketAtivacaoPerfilMock: vi.fn(async () => "b".repeat(32)),
   };
 });
 
@@ -49,6 +50,7 @@ vi.mock("@/lib/clienteAuth", () => ({
     };
   }),
   consumirTicketAtivacaoPerfil: consumirTicketAtivacaoPerfilMock,
+  criarTicketAtivacaoPerfil: criarTicketAtivacaoPerfilMock,
 }));
 
 const { ativarFidelidadeClienteMock } = vi.hoisted(() => ({
@@ -104,6 +106,7 @@ import { buscarClientePorId } from "@/lib/clientes";
 beforeEach(() => {
   ticketsValidos.clear();
   consumirTicketAtivacaoPerfilMock.mockClear();
+  criarTicketAtivacaoPerfilMock.mockClear();
   ativarFidelidadeClienteMock.mockClear();
 });
 
@@ -267,6 +270,40 @@ describe("PATCH /api/cliente/perfil — fallback do ticket de ativação (P3-ABB
     expect(res.status).toBe(200);
     expect(body.ok).toBe(true);
     expect(ativarFidelidadeClienteMock).toHaveBeenCalledWith(CLIENTE_DO_TICKET.telefone, "Bruno");
+  });
+
+  test("nome invalido nunca consome o ticket (protege a unica credencial de recuperacao)", async () => {
+    ticketsValidos.add(TICKET_ATIVACAO_VALIDO);
+    const res = await PATCH(requestPatchComTicket({ nome: "A", ativacaoToken: TICKET_ATIVACAO_VALIDO }));
+    expect(res.status).toBe(400);
+    expect(consumirTicketAtivacaoPerfilMock).not.toHaveBeenCalled();
+    expect(ticketsValidos.has(TICKET_ATIVACAO_VALIDO)).toBe(true);
+  });
+
+  test("escrita falha DEPOIS do ticket ja consumido: reemite ticket novo em vez de travar o cliente sem credencial nenhuma", async () => {
+    ticketsValidos.add(TICKET_ATIVACAO_VALIDO);
+    ativarFidelidadeClienteMock.mockRejectedValueOnce(new Error("Redis timeout"));
+    const res = await PATCH(requestPatchComTicket({ nome: "Bruno", ativacaoToken: TICKET_ATIVACAO_VALIDO }));
+    const body = await res.json();
+    expect(res.status).toBe(500);
+    expect(body.ok).toBe(false);
+    expect(ticketsValidos.has(TICKET_ATIVACAO_VALIDO)).toBe(false);
+    expect(criarTicketAtivacaoPerfilMock).toHaveBeenCalledWith(CLIENTE_DO_TICKET);
+    expect(body.ativacaoToken).toBe("b".repeat(32));
+  });
+
+  test("escrita falha com sessao normal (sem ticket envolvido): nao reemite ticket nenhum", async () => {
+    ativarFidelidadeClienteMock.mockRejectedValueOnce(new Error("Redis timeout"));
+    const req = new NextRequest("http://localhost/api/cliente/perfil", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", cookie: "cliente-token=token-cliente-a" },
+      body: JSON.stringify({ nome: "Maria" }),
+    });
+    const res = await PATCH(req);
+    const body = await res.json();
+    expect(res.status).toBe(500);
+    expect(criarTicketAtivacaoPerfilMock).not.toHaveBeenCalled();
+    expect(body.ativacaoToken).toBeUndefined();
   });
 
   test("reuso do mesmo ticket e bloqueado (segunda tentativa vira 401)", async () => {

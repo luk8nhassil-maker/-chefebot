@@ -406,6 +406,13 @@ export default function ClientePage() {
       const data = await res.json().catch(() => ({}))
       telemetria('name_save_request_status', { status: res.status, trace: traceId })
       if (!res.ok || !data.ok) {
+        // Se a gravação falhou DEPOIS do ticket original ter sido consumido
+        // (500 com ticket novo devolvido pelo backend), guarda o ticket novo
+        // para o próximo clique em "Ativar meus pontos" funcionar sem exigir
+        // um OTP novo. Uso único: cada ticket só serve para uma tentativa.
+        if (typeof data.ativacaoToken === 'string') {
+          ativacaoTicketRef.current = data.ativacaoToken
+        }
         // Falha (inclusive 401 persistente) mantém a tela do nome com retry —
         // NUNCA pede novo código nem volta para a confirmação.
         setErro(res.status === 400 ? (data.error || 'Digite seu nome') : 'Não conseguimos salvar agora. Tente de novo.')
