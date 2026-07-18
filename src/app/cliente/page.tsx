@@ -374,9 +374,11 @@ export default function ClientePage() {
     if (nome.trim().length < 2) { setErro('Digite seu nome'); return }
     setEnviando(true)
     try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+      if (traceId && /^P3-[A-Z0-9]{6}$/.test(traceId)) headers['X-ChefeBot-Trace'] = traceId
       const res = await fetchCliente('/api/cliente/perfil', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ nome }),
       }, sessaoMemRef.current)
       const data = await res.json().catch(() => ({}))

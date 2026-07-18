@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { lerSessaoCliente } from "@/lib/clienteAuth";
+import { lerSessaoCliente, lerSessaoClienteDiagnosticada } from "@/lib/clienteAuth";
 import { buscarClientePorId, normalizarNomeCliente, ativarFidelidadeCliente } from "@/lib/clientes";
 import { redis } from "@/lib/redis";
+
+const TRACE_RE = /^P3-[A-Z0-9]{6}$/;
 
 type PedidoResumo = {
   id: string;
@@ -51,8 +53,20 @@ export async function PATCH(req: NextRequest) {
   // (WhatsApp no iPhone), via Authorization: Bearer — sessão portátil (JWE)
   // ou, em compatibilidade, a sessão opaca legada. A validação da sessão em
   // si já não depende de leitura de Redis (ver lerSessaoCliente).
-  const payload = await lerSessaoCliente(req);
-  if (!payload) return NextResponse.json({ error: "Nao autorizado" }, { status: 401 });
+  //
+  // Diagnóstico TEMPORÁRIO (Perfil 3.0): usa lerSessaoClienteDiagnosticada em
+  // vez de lerSessaoCliente só para poder registrar, quando a autenticação
+  // falhar, EM QUAL ETAPA ela falhou — nunca o conteúdo do cookie/Bearer. A
+  // resposta ao navegador continua idêntica (genérica, sem detalhe nenhum).
+  const { payload, diagnostico } = await lerSessaoClienteDiagnosticada(req);
+  if (!payload) {
+    const traceBruto = req.headers.get("x-chefebot-trace");
+    const trace = typeof traceBruto === "string" && TRACE_RE.test(traceBruto) ? traceBruto : "-";
+    console.log(
+      `[ChefeBot] perfil3-auth trace=${trace} cookie_presente=${diagnostico.cookiePresente ? 1 : 0} cookie_valido=${diagnostico.cookieValido ? 1 : 0} authorization_presente=${diagnostico.authorizationPresente ? 1 : 0} formato_bearer=${diagnostico.formatoBearer} jwe_valido=${diagnostico.jweValido ? 1 : 0} opaco_valido=${diagnostico.opacoValido ? 1 : 0} fonte=${diagnostico.fonte}`
+    );
+    return NextResponse.json({ error: "Nao autorizado" }, { status: 401 });
+  }
 
   // Sem gate de leitura do registro do cliente por clienteId: o telefone já
   // vem autenticado no próprio payload da sessão. Um incidente em produção

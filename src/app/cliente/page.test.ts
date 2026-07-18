@@ -216,6 +216,12 @@ describe("/cliente — sessão portátil: PATCH do nome sem depender de sondagem
     expect(blocoNome).toContain("Código de suporte: {traceId}");
     expect(blocoNome).toMatch(/erro && traceId/);
   });
+
+  test("salvarNome envia o traceId também no header X-ChefeBot-Trace, só quando no formato seguro", () => {
+    const bloco = fonte.slice(fonte.indexOf("async function salvarNome"), fonte.indexOf("async function sair"));
+    expect(bloco).toContain("X-ChefeBot-Trace");
+    expect(bloco).toMatch(/\/\^P3-\[A-Z0-9\]\{6\}\$\/\.test\(traceId\)/);
+  });
 });
 
 describe("/cliente — Etapa 2: sem lembrete operacional de pedido + barra global de Pix pendente", () => {

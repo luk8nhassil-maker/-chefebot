@@ -2,12 +2,34 @@ import { vi, describe, test, expect } from "vitest";
 import { NextRequest } from "next/server";
 
 const BEARER_VALIDO = "f".repeat(32);
+
+function resolverSessaoFake(req: { cookies: { get(n: string): { value: string } | undefined }; headers: { get(n: string): string | null } }) {
+  if (req.cookies.get("cliente-token")?.value === "token-cliente-a") return { clienteId: "cli_a", telefone: "11900000001" };
+  if (req.headers.get("authorization") === `Bearer ${"f".repeat(32)}`) return { clienteId: "cli_a", telefone: "11900000001" };
+  return null;
+}
+
 vi.mock("@/lib/clienteAuth", () => ({
   CLIENTE_COOKIE: "cliente-token",
-  lerSessaoCliente: vi.fn(async (req: { cookies: { get(n: string): { value: string } | undefined }; headers: { get(n: string): string | null } }) => {
-    if (req.cookies.get("cliente-token")?.value === "token-cliente-a") return { clienteId: "cli_a", telefone: "11900000001" };
-    if (req.headers.get("authorization") === `Bearer ${"f".repeat(32)}`) return { clienteId: "cli_a", telefone: "11900000001" };
-    return null;
+  lerSessaoCliente: vi.fn(async (req: { cookies: { get(n: string): { value: string } | undefined }; headers: { get(n: string): string | null } }) => resolverSessaoFake(req)),
+  lerSessaoClienteDiagnosticada: vi.fn(async (req: { cookies: { get(n: string): { value: string } | undefined }; headers: { get(n: string): string | null } }) => {
+    const payload = resolverSessaoFake(req);
+    const cookiePresente = !!req.cookies.get("cliente-token")?.value;
+    const auth = req.headers.get("authorization");
+    const authorizationPresente = !!auth;
+    const formatoBearer = auth === `Bearer ${"f".repeat(32)}` ? "opaco" : auth ? "outro" : "nenhum";
+    return {
+      payload,
+      diagnostico: {
+        cookiePresente,
+        cookieValido: !!payload && cookiePresente,
+        authorizationPresente,
+        formatoBearer,
+        jweValido: false,
+        opacoValido: !!payload && formatoBearer === "opaco",
+        fonte: payload ? (cookiePresente ? "cookie" : "opaco") : "nenhuma",
+      },
+    };
   }),
 }));
 
@@ -141,5 +163,65 @@ describe("PATCH /api/cliente/perfil — completa so o nome do dono da sessao", (
     const res = await PATCH(requestPatch("token-cliente-a", { nome: "Maria" }));
     expect(res.status).toBe(200);
     expect(buscarClientePorId).not.toHaveBeenCalled();
+  });
+});
+
+describe("PATCH /api/cliente/perfil — diagnóstico de autenticação (sem PII no log)", () => {
+  function requestPatchComTrace(trace: string | undefined, auth?: string) {
+    const init: RequestInit = {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        ...(trace ? { "x-chefebot-trace": trace } : {}),
+        ...(auth ? { authorization: auth } : {}),
+      },
+      body: JSON.stringify({ nome: "Maria" }),
+    };
+    return new NextRequest("http://localhost/api/cliente/perfil", init as ConstructorParameters<typeof NextRequest>[1]);
+  }
+
+  test("resposta ao navegador continua genérica (nunca expõe o diagnóstico)", async () => {
+    const res = await PATCH(requestPatchComTrace("P3-ABC123"));
+    const body = await res.json();
+    expect(res.status).toBe(401);
+    expect(body).toEqual({ error: "Nao autorizado" });
+  });
+
+  test("log registra trace válido e o motivo categórico, sem PII", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    await PATCH(requestPatchComTrace("P3-ABC123", "Bearer valor-qualquer"));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("perfil3-auth"));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("trace=P3-ABC123"));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("authorization_presente=1"));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("formato_bearer=outro"));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("fonte=nenhuma"));
+    const texto = logSpy.mock.calls.map((c) => c.join(" ")).join(" | ");
+    expect(texto).not.toContain("valor-qualquer");
+    logSpy.mockRestore();
+  });
+
+  test("trace invalido/ausente vira '-' no log, nunca é ecoado cru", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    await PATCH(requestPatchComTrace("5599974000691"));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("trace=-"));
+    const texto = logSpy.mock.calls.map((c) => c.join(" ")).join(" | ");
+    expect(texto).not.toContain("5599974000691");
+    logSpy.mockRestore();
+  });
+
+  test("authorization ausente e identificado no log (authorization_presente=0, formato=nenhum)", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    await PATCH(requestPatchComTrace(undefined));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("authorization_presente=0"));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("formato_bearer=nenhum"));
+    logSpy.mockRestore();
+  });
+
+  test("sessao valida (200) nunca gera o log de diagnóstico de falha", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const res = await PATCH(requestPatch("token-cliente-a", { nome: "Maria" }));
+    expect(res.status).toBe(200);
+    expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining("perfil3-auth"));
+    logSpy.mockRestore();
   });
 });

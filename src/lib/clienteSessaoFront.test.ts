@@ -20,8 +20,8 @@ beforeEach(() => {
 });
 
 describe("clienteSessaoFront — sessão portátil (JWE) com compatibilidade com a opaca legada", () => {
-  test("marcador de versão do bundle avançou para p3d5", () => {
-    expect(VERSAO_PERFIL3).toBe("p3d5");
+  test("marcador de versão do bundle avançou para p3d6", () => {
+    expect(VERSAO_PERFIL3).toBe("p3d6");
   });
 
   test("aceita e devolve uma sessão portátil (JWE, 5 partes) do sessionStorage", () => {
