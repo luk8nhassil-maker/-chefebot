@@ -6,7 +6,7 @@ import ClientBottomNav from '@/components/ClientBottomNav'
 import PixPendenteBar, { usePixPendente } from '@/components/PixPendenteBar'
 import { CF_OPEN_CART_KEY } from '@/lib/pedidoAtivoCliente'
 import { destinoNextPermitido } from '@/lib/clientePedidos'
-import { fetchCliente, guardarSessaoFallback, limparSessaoFallback } from '@/lib/clienteSessaoFront'
+import { fetchCliente, guardarSessaoFallback, limparSessaoFallback, telemetria } from '@/lib/clienteSessaoFront'
 
 type Movimento = {
   id: string
@@ -204,6 +204,7 @@ export default function ClientePage() {
   useEffect(() => {
     let veioDaAtivacao = false
     try { veioDaAtivacao = new URLSearchParams(window.location.search).get('cadastro') === 'nome' } catch {}
+    if (veioDaAtivacao) telemetria('arrival_activation')
     // Chegada da ativação por navegação (/api/cliente/sessao): o cookie pode
     // demorar a valer para fetches — sonda com retry em vez de uma tentativa.
     const sondar = veioDaAtivacao ? carregarPerfilComRetry : carregarPerfil
@@ -212,6 +213,7 @@ export default function ClientePage() {
         if (veioDaAtivacao) {
           // OTP já foi confirmado e consumido: nunca voltar ao início em
           // silêncio — explica e oferece um novo código na mesma tela.
+          telemetria('fallback_to_confirm_screen', { motivo: 'chegada_sem_sessao' })
           try { window.history.replaceState({}, '', window.location.pathname) } catch {}
           setErro('Quase lá! Toque em "Confirmar e receber código" para receber um novo código.')
         }
@@ -313,25 +315,32 @@ export default function ClientePage() {
     // 1) Cookie da resposta do verificar (caminho normal), com retry curto.
     limparSessaoFallback()
     let dados = await carregarPerfilComRetry()
+    let viaBearer = false
     // 2) Cookie não pegou (navegador interno do WhatsApp no iPhone): usa a
     //    sessão opaca via Bearer — sem navegação nenhuma. Só grava o token
     //    depois de comprovado que o cookie falhou.
     if (!dados && pos.sessao) {
-      guardarSessaoFallback(pos.sessao)
+      const guardou = guardarSessaoFallback(pos.sessao)
+      telemetria(guardou ? 'opaque_session_storage_ok' : 'opaque_session_storage_failed')
       dados = await carregarPerfil()
+      viaBearer = !!dados
       if (!dados) limparSessaoFallback()
     }
     if (dados) {
+      telemetria(viaBearer ? 'bearer_session_ok' : 'cookie_session_ok')
+      telemetria('profile_loaded')
       const destino = nextPermitidoAtual()
       if (destino) { window.location.href = destino; return }
-      if (!pos.nome) { setNome(''); setStep('nome') }
+      if (!pos.nome) { setNome(''); setStep('nome'); telemetria('name_step_opened') }
       return
     }
     // 3) Última linha: ativação por navegação com o ticket de uso único.
     if (pos.ticket) {
+      telemetria('fallback_navigation', { motivo: pos.sessao ? 'bearer_falhou' : 'sem_sessao_no_body' })
       window.location.href = `/api/cliente/sessao?tk=${encodeURIComponent(pos.ticket)}`
       return
     }
+    telemetria('fallback_navigation', { motivo: 'sem_ticket' })
     setErro('Seu código foi confirmado, mas não conseguimos abrir seus pontos. Toque em "Tentar de novo".')
   }
 
@@ -365,11 +374,13 @@ export default function ClientePage() {
         setEnviando(false)
         return
       }
+      telemetria('otp_verified')
       const pos = {
         nome: (data?.cliente?.nome as string | null) ?? null,
         ticket: (data?.ticket as string | null) ?? null,
         sessao: (data?.sessao as string | null) ?? null,
       }
+      telemetria('opaque_session_received', { ok: !!pos.sessao })
       setPosVerificacao(pos)
       await abrirAposVerificacao(pos)
     } catch { setErro('Erro de conexão. Tente novamente.') }
