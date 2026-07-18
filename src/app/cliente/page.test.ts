@@ -103,7 +103,7 @@ describe("/cliente — Perfil 3.0: número reconhecido pelo link do WhatsApp", (
   });
 
   test("a verificação do código no fluxo reconhecido usa o token, e no manual o telefone digitado", () => {
-    expect(fonte).toContain("otpViaVinculo ? { waToken, codigo } : { telefone, codigo }");
+    expect(fonte).toContain("otpViaVinculo ? { waToken, codigo, traceId } : { telefone, codigo, traceId }");
   });
 
   test("token da URL é removido do endereço após leitura (nunca fica na barra)", () => {
@@ -149,80 +149,58 @@ describe("/cliente — Perfil 3.0: número reconhecido pelo link do WhatsApp", (
   });
 });
 
-describe("/cliente — hotfix OTP: sessão que não 'pega' nunca deixa a tela muda", () => {
-  test("pós-verificação sonda a sessão com retry antes de decidir", () => {
-    expect(fonte).toContain("carregarPerfilComRetry");
-    expect(fonte).toMatch(/esperas = \[0, 500, 1200\]/);
+describe("/cliente — fluxo determinístico pós-OTP (máquina de estados)", () => {
+  test("a próxima tela vem do servidor (next), nunca de sondagem de perfil/fidelidade", () => {
+    expect(fonte).toContain("const next = data.next === 'points' ? 'points' : 'name'");
+    // nenhum retry/sondagem decide etapa: helpers antigos não existem mais
+    expect(fonte).not.toContain("carregarPerfilComRetry");
+    expect(fonte).not.toContain("abrirAposVerificacao");
+    // ticket de navegação não participa do fluxo do front
+    expect(fonte).not.toContain("/api/cliente/sessao?tk=");
   });
 
-  test("fallback de ativação por navegação usa o ticket de uso único", () => {
-    expect(fonte).toContain("/api/cliente/sessao?tk=");
-    expect(fonte).toContain("posVerificacao");
+  test("sessão vive primeiro em memória; storage é best-effort e nunca bloqueia", () => {
+    expect(fonte).toContain("sessaoMemRef.current = sessao");
+    expect(fonte).toMatch(/telemetria\('session_in_memory'/);
+    expect(fonte).toMatch(/guardou \? 'session_storage_ok' : 'session_storage_failed'/);
+    // fetchCliente recebe o token em memória explicitamente
+    expect(fonte).toContain("sessaoMemRef.current)");
   });
 
-  test("retomada do cadastro do nome após ativação por navegação (?cadastro=nome)", () => {
-    expect(fonte).toContain("cadastro");
-    expect(fonte).toMatch(/params\.get\('cadastro'\) === 'nome'/);
+  test("iniciarSemSessao é proibido depois de OTP válido (nunca volta ao início)", () => {
+    const bloco = fonte.slice(fonte.indexOf("async function iniciarSemSessao"), fonte.indexOf("let token = ''"));
+    expect(bloco).toContain("otpValidadoRef.current");
+    expect(bloco).toContain("unexpected_return_to_confirm");
   });
 
-  test("editar o código limpa o erro anterior na hora", () => {
-    expect(fonte).toContain("if (erro) setErro('')");
+  test("mount decide autenticação SÓ pelo estado-sessao (único 401 que volta a confirmar)", () => {
+    expect(fonte).toContain("/api/cliente/estado-sessao");
+    // nenhuma outra rota decide autenticação no mount
+    const mount = fonte.slice(fonte.indexOf("ÚNICA fonte de"), fonte.indexOf("Contador de reenvio"));
+    expect(mount).not.toContain("/api/cliente/perfil");
+    expect(mount).not.toContain("/api/cliente/fidelidade");
   });
 
-  test("depois de código validado o CTA vira 'Tentar de novo' (nunca re-submete código consumido)", () => {
-    expect(fonte).toContain("Tentar de novo");
-    expect(fonte).toContain("tentarAbrirNovamente");
+  test("identidade e fidelidade carregam separadas; falha vira retry local, nunca logout", () => {
+    expect(fonte).toContain("async function carregarIdentidade");
+    expect(fonte).toContain("async function carregarFidelidade");
+    expect(fonte).not.toMatch(/Promise\.all\(\[\s*fetchCliente\('\/api\/cliente\/perfil/);
+    expect(fonte).toContain("Não conseguimos carregar seus pontos agora.");
+    expect(fonte).toContain("Não conseguimos carregar seu perfil agora.");
+    expect(fonte).toContain("Tentar novamente");
   });
 
-  test("falha total mostra mensagem clara em vez de silêncio", () => {
-    expect(fonte).toContain("Seu código foi confirmado, mas não conseguimos abrir seus pontos");
-  });
-});
-
-describe("/cliente — hotfix final: sessão opaca via Bearer quando o cookie não funciona", () => {
-  test("chamadas autenticadas passam pelo fetchCliente (Bearer quando houver fallback)", () => {
-    expect(fonte).toMatch(/import \{ fetchCliente, guardarSessaoFallback, limparSessaoFallback[^}]*\} from '@\/lib\/clienteSessaoFront'/);
-    // perfil, fidelidade, resgate e logout exigem sessão — sempre fetchCliente.
-    for (const rota of ['/api/cliente/perfil', '/api/cliente/fidelidade', '/api/cliente/fidelidade/resgate', '/api/cliente/logout']) {
-      expect(fonte).not.toContain(`fetch('${rota}'`);
-    }
-    // login e verificar acontecem ANTES de existir sessão — fetch normal.
-    expect(fonte).toContain("fetch('/api/cliente/login'");
-    expect(fonte).toContain("fetch('/api/cliente/verificar'");
+  test("salvar nome nunca pede novo código: falha mantém a tela com retry", () => {
+    const bloco = fonte.slice(fonte.indexOf("async function salvarNome"), fonte.indexOf("async function sair"));
+    expect(bloco).toContain("Não conseguimos salvar agora. Tente de novo.");
+    expect(bloco).not.toContain("setStep('telefone')");
+    expect(bloco).not.toContain("setStep('confirmar')");
+    expect(bloco).not.toContain("setStep('otp')");
   });
 
-  test("o fallback só é gravado depois de comprovado que o cookie falhou", () => {
-    const bloco = fonte.slice(fonte.indexOf("async function abrirAposVerificacao"), fonte.indexOf("async function tentarAbrirNovamente"));
-    // ordem: limpa fallback -> sonda cookie -> só então guarda a sessão opaca
-    expect(bloco.indexOf("limparSessaoFallback()")).toBeGreaterThan(-1);
-    expect(bloco.indexOf("carregarPerfilComRetry")).toBeLessThan(bloco.indexOf("guardarSessaoFallback"));
-  });
-
-  test("chegada da ativação por navegação nunca volta ao início em silêncio", () => {
-    expect(fonte).toContain("veioDaAtivacao");
-    expect(fonte).toContain("Quase lá!");
-  });
-
-  test("sair limpa a sessão de fallback", () => {
-    const bloco = fonte.slice(fonte.indexOf("async function sair"), fonte.indexOf("// CTA de resgate"));
-    expect(bloco).toContain("limparSessaoFallback()");
-  });
-});
-
-describe("/cliente — diagnóstico incógnito: HTML sempre do deploy vigente + telemetria sem PII", () => {
-  test("a área do cliente é dinâmica (nunca HTML prerendered de deploy anterior)", () => {
-    const layout = readFileSync(fileURLToPath(new URL("./layout.tsx", import.meta.url)), "utf-8");
-    expect(layout).toContain('export const dynamic = "force-dynamic"');
-  });
-
-  test("telemetria marca a versão do bundle e cobre as etapas críticas", () => {
-    expect(fonte).toContain("telemetria('otp_verified')");
-    expect(fonte).toContain("opaque_session_received");
-    expect(fonte).toContain("opaque_session_storage_ok");
-    expect(fonte).toContain("bearer_session_ok");
-    expect(fonte).toContain("fallback_navigation");
-    expect(fonte).toContain("fallback_to_confirm_screen");
-    expect(fonte).toContain("arrival_activation");
+  test("código de suporte (traceId) aparece discreto e acompanha a telemetria", () => {
+    expect(fonte).toContain("Código de suporte: {traceId}");
+    expect(fonte).toMatch(/trace: traceId/);
   });
 });
 

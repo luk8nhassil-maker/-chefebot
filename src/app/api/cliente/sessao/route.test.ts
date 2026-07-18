@@ -22,11 +22,12 @@ function requestSessao(tk?: string) {
   return new NextRequest(url);
 }
 
-function seedCliente(nome?: string) {
+function seedCliente(nome?: string, ativado = false) {
   redisStore.set(`cliente:${PHONE}`, {
     clienteId: `cli_${PHONE}`,
     telefone: PHONE,
     ...(nome ? { nome } : {}),
+    ...(ativado ? { fidelidadeAtivadaEm: "2026-01-01T00:00:00.000Z" } : {}),
     createdAt: "x",
     updatedAt: "x",
     lastLoginAt: "x",
@@ -38,8 +39,8 @@ beforeEach(() => {
 });
 
 describe("GET /api/cliente/sessao — ativacao da sessao por navegacao", () => {
-  test("ticket valido de cliente com nome: 303 para /cliente com cookie HttpOnly", async () => {
-    seedCliente("Maria");
+  test("ticket valido de cliente com fidelidade ativada: 303 para /cliente com cookie HttpOnly", async () => {
+    seedCliente("Maria", true);
     const ticket = await criarTicketSessao({ clienteId: `cli_${PHONE}`, telefone: PHONE });
 
     const res = await GET(requestSessao(ticket));
@@ -53,8 +54,8 @@ describe("GET /api/cliente/sessao — ativacao da sessao por navegacao", () => {
     expect(cookie).not.toContain(PHONE);
   });
 
-  test("ticket valido de cliente SEM nome: 303 para /cliente?cadastro=nome com cookie", async () => {
-    seedCliente();
+  test("ticket valido de cliente SEM ativacao (mesmo com nome legado): 303 para /cliente?cadastro=nome", async () => {
+    seedCliente("Nome De Pedido Legado");
     const ticket = await criarTicketSessao({ clienteId: `cli_${PHONE}`, telefone: PHONE });
 
     const res = await GET(requestSessao(ticket));
@@ -64,7 +65,7 @@ describe("GET /api/cliente/sessao — ativacao da sessao por navegacao", () => {
   });
 
   test("ticket e de uso unico: a segunda navegacao nao recebe cookie", async () => {
-    seedCliente("Maria");
+    seedCliente("Maria", true);
     const ticket = await criarTicketSessao({ clienteId: `cli_${PHONE}`, telefone: PHONE });
 
     await GET(requestSessao(ticket));

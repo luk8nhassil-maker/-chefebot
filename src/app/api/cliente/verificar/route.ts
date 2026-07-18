@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verificarOtp, criarTokenCliente, criarTicketSessao, criarSessaoOpaca, CLIENTE_COOKIE } from "@/lib/clienteAuth";
-import { obterOuCriarCliente, sanitizeTelefoneCliente, normalizarNomeCliente } from "@/lib/clientes";
+import { obterOuCriarCliente, sanitizeTelefoneCliente, normalizarNomeCliente, clienteProximaEtapa } from "@/lib/clientes";
 import { validarTokenCardapio } from "@/lib/cardapioToken";
 
 export async function POST(req: NextRequest) {
@@ -45,11 +45,20 @@ export async function POST(req: NextRequest) {
     // navegador — a tela de Pontos só precisa saber se o cliente já tem nome
     // (para pular a etapa de cadastro).
     const ticket = await criarTicketSessao({ clienteId: cliente.clienteId, telefone: cliente.telefone });
-    // Sessão opaca (token aleatório, sem nenhum dado do cliente): o front só a
-    // usa — e só a guarda — quando comprovar que o cookie desta resposta não
-    // foi aplicado (navegador interno do WhatsApp no iPhone).
+    // Sessão opaca (token aleatório, sem nenhum dado do cliente): usável via
+    // Authorization: Bearer em qualquer navegador, inclusive os que descartam
+    // cookies (navegador interno do WhatsApp no iPhone).
     const sessao = await criarSessaoOpaca({ clienteId: cliente.clienteId, telefone: cliente.telefone });
-    const res = NextResponse.json({ ok: true, cliente: { nome: cliente.nome ?? null }, ticket, sessao });
+
+    // Resposta ATÔMICA: a próxima tela é decidida AQUI, na mesma execução que
+    // validou o OTP e criou cliente+sessão — nenhuma leitura posterior (que
+    // pode falhar por réplica atrasada/erro secundário) participa da decisão.
+    // "name" = primeira ativação pendente (fidelidadeAtivadaEm ausente);
+    // "points" = fidelidade já ativada. traceId do body (formato estrito) é
+    // só ecoado para correlação de suporte — nunca influencia nada.
+    const next = clienteProximaEtapa(cliente);
+    const traceId = typeof body?.traceId === "string" && /^P3-[A-Z0-9]{6}$/.test(body.traceId) ? body.traceId : null;
+    const res = NextResponse.json({ ok: true, next, sessao, ticket, cliente: { nome: cliente.nome ?? null }, traceId });
     res.cookies.set(CLIENTE_COOKIE, token, {
       httpOnly: true,
       sameSite: "lax",

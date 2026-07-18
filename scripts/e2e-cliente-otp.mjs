@@ -80,7 +80,7 @@ const verificarBody = await verificar.json();
 const cookieFetch = cookieDe(verificar);
 check("codigo valido responde 200", verificar.status === 200, String(verificar.status));
 check("resposta traz cookie de sessao HttpOnly", cookieFetch && (verificar.headers.get("set-cookie") || "").includes("HttpOnly"));
-check("cliente novo vem sem nome (etapa do nome no front)", verificarBody?.cliente?.nome === null, JSON.stringify(verificarBody));
+check("cliente novo: resposta atomica decide next=name", verificarBody?.next === "name", JSON.stringify(verificarBody?.next));
 check("resposta nao expoe o telefone completo", !JSON.stringify(verificarBody).includes(PHONE));
 check("resposta traz ticket de ativacao por navegacao", /^[a-f0-9]{32}$/.test(verificarBody?.ticket || ""));
 check("resposta traz sessao opaca (fallback Bearer), sem dado do cliente", /^[a-f0-9]{32}$/.test(verificarBody?.sessao || "") && !String(verificarBody?.sessao).includes(PHONE.slice(-8)));
@@ -115,8 +115,14 @@ const patch = await fetch(`${BASE}/api/cliente/perfil`, {
   body: JSON.stringify({ nome: "Cliente E2E" }),
 });
 check("PATCH do nome funciona com a sessao da navegacao", patch.status === 200, String(patch.status));
+const patchBody = await patch.clone?.().json?.() ?? null;
 const perfil2 = await (await fetch(`${BASE}/api/cliente/perfil`, { headers: { cookie: cookieNav } })).json();
 check("nome salvo aparece no perfil", perfil2?.cliente?.nome === "Cliente E2E", JSON.stringify(perfil2?.cliente?.nome));
+check("perfil NAO embute fidelidade (desacoplado)", perfil2?.fidelidade === undefined);
+const estado = await (await fetch(`${BASE}/api/cliente/estado-sessao`, { headers: { cookie: cookieNav } })).json();
+check("apos ativar o nome, estado-sessao devolve next=points", estado?.authenticated === true && estado?.next === "points", JSON.stringify(estado));
+const estado401 = await fetch(`${BASE}/api/cliente/estado-sessao`);
+check("estado-sessao sem sessao responde 401", estado401.status === 401, String(estado401.status));
 
 // 9b. nome e logout via Bearer (depois do passo do cadastro, para nao
 // poluir o teste de "cliente novo" acima)

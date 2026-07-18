@@ -102,9 +102,12 @@ export default function ClientePage() {
   // ou pelo telefone digitado no fluxo manual?
   const [otpViaVinculo, setOtpViaVinculo] = useState(false)
   const [reenvioEm, setReenvioEm] = useState(0)
-  // Preenchido após um código validado com sucesso: permite "Tentar de novo"
-  // sem re-submeter o código (que é de uso único e já foi consumido).
-  const [posVerificacao, setPosVerificacao] = useState<{ nome: string | null; ticket: string | null; sessao: string | null } | null>(null)
+  // Código de suporte da tentativa atual (P3-XXXXXX): sem PII, correlaciona a
+  // telemetria de UMA tentativa; exibido discretamente na tela do código.
+  const [traceId, setTraceId] = useState<string | null>(null)
+  // Erros LOCAIS de carregamento — nunca viram logout nem troca de etapa.
+  const [perfilErro, setPerfilErro] = useState(false)
+  const [fidelidadeErro, setFidelidadeErro] = useState(false)
   const codigoRef = useRef<HTMLInputElement>(null)
 
   // Retorno seguro pós-login (ex.: veio de "Pedido" no menu inferior sem
@@ -124,35 +127,47 @@ export default function ClientePage() {
     window.location.href = '/pedido'
   }
 
-  async function carregarPerfil(): Promise<Perfil | null> {
+  // ==========================================================================
+  // MÁQUINA DE ESTADOS PÓS-OTP (determinística)
+  // Depois de um OTP válido, o SERVIDOR é a fonte da verdade da próxima tela
+  // (resposta atômica do verificar: next = "name" | "points"). Nenhuma
+  // consulta a perfil/fidelidade participa dessa decisão, e nenhuma falha de
+  // carregamento devolve o cliente para "Encontramos seu WhatsApp".
+  // ==========================================================================
+
+  // Sessão recém-criada vive PRIMEIRO em memória (funciona mesmo com
+  // sessionStorage bloqueado); o storage é só persistência best-effort.
+  const sessaoMemRef = useRef<string | null>(null)
+  // Depois de um OTP validado nesta página, iniciarSemSessao é proibido.
+  const otpValidadoRef = useRef(false)
+
+  async function carregarIdentidade(): Promise<void> {
+    setPerfilErro(false)
     try {
-      const [resPerfil, resFidelidade] = await Promise.all([
-        fetchCliente('/api/cliente/perfil', { cache: 'no-store' }),
-        fetchCliente('/api/cliente/fidelidade', { cache: 'no-store' }),
-      ])
-      if (resPerfil.ok && resFidelidade.ok) {
-        const dados: Perfil = await resPerfil.json()
-        setPerfil(dados)
-        setFidelidade(await resFidelidade.json())
-        setStep('perfil')
-        return dados
-      }
+      const res = await fetchCliente('/api/cliente/perfil', { cache: 'no-store' }, sessaoMemRef.current)
+      telemetria('profile_request_status', { status: res.status, trace: traceId })
+      if (res.ok) { setPerfil(await res.json()); return }
     } catch {}
-    return null
+    // Falha (inclusive 401 transitório) NUNCA desloga nem muda de etapa —
+    // só marca o erro local com "Tentar novamente".
+    setPerfilErro(true)
   }
 
-  // Alguns navegadores (WhatsApp no iPhone) demoram — ou falham — para
-  // aplicar o cookie de sessão vindo de uma resposta de fetch. A sondagem
-  // tenta algumas vezes com espera curta antes de acionar o fallback de
-  // ativação por navegação (ver confirmarCodigo).
-  async function carregarPerfilComRetry(): Promise<Perfil | null> {
-    const esperas = [0, 500, 1200]
-    for (const ms of esperas) {
-      if (ms > 0) await new Promise((r) => setTimeout(r, ms))
-      const dados = await carregarPerfil()
-      if (dados) return dados
-    }
-    return null
+  async function carregarFidelidade(): Promise<void> {
+    setFidelidadeErro(false)
+    try {
+      const res = await fetchCliente('/api/cliente/fidelidade', { cache: 'no-store' }, sessaoMemRef.current)
+      telemetria('fidelity_request_status', { status: res.status, trace: traceId })
+      if (res.ok) { setFidelidade(await res.json()); return }
+    } catch {}
+    setFidelidadeErro(true)
+  }
+
+  function abrirPontos() {
+    setStep('perfil')
+    telemetria('points_step_opened', { trace: traceId })
+    carregarIdentidade()
+    carregarFidelidade()
   }
 
   function limparVinculo() {
@@ -165,7 +180,13 @@ export default function ClientePage() {
   // Sem sessão de cliente: tenta reconhecer o WhatsApp do link (token opaco da
   // URL ?t= ou o já validado pelo cardápio nesta sessão do navegador). O token
   // é sempre revalidado no servidor; inválido/expirado cai no fluxo manual.
+  // PROIBIDO depois de um OTP validado nesta página — nunca voltar ao início.
   async function iniciarSemSessao() {
+    if (otpValidadoRef.current) {
+      telemetria('unexpected_return_to_confirm', { motivo: 'erro_inesperado', trace: traceId })
+      setErro('Não conseguimos abrir seus pontos agora. Toque em "Tentar novamente".')
+      return
+    }
     let token = ''
     try {
       const params = new URLSearchParams(window.location.search)
@@ -202,37 +223,31 @@ export default function ClientePage() {
   }
 
   useEffect(() => {
-    let veioDaAtivacao = false
-    try { veioDaAtivacao = new URLSearchParams(window.location.search).get('cadastro') === 'nome' } catch {}
-    if (veioDaAtivacao) telemetria('arrival_activation')
-    // Chegada da ativação por navegação (/api/cliente/sessao): o cookie pode
-    // demorar a valer para fetches — sonda com retry em vez de uma tentativa.
-    const sondar = veioDaAtivacao ? carregarPerfilComRetry : carregarPerfil
-    sondar().then((dados) => {
-      if (!dados) {
-        if (veioDaAtivacao) {
-          // OTP já foi confirmado e consumido: nunca voltar ao início em
-          // silêncio — explica e oferece um novo código na mesma tela.
-          telemetria('fallback_to_confirm_screen', { motivo: 'chegada_sem_sessao' })
-          try { window.history.replaceState({}, '', window.location.pathname) } catch {}
-          setErro('Quase lá! Toque em "Confirmar e receber código" para receber um novo código.')
+    // Limpa a marca de retomada de versões anteriores — a decisão de etapa é
+    // sempre do estado-sessao, nunca da URL.
+    try {
+      const params = new URLSearchParams(window.location.search)
+      if (params.get('cadastro')) {
+        params.delete('cadastro')
+        const qs = params.toString()
+        window.history.replaceState({}, '', window.location.pathname + (qs ? `?${qs}` : ''))
+      }
+    } catch {}
+    // ÚNICA fonte de "estou autenticado?": /api/cliente/estado-sessao (valida
+    // só a sessão, sem tocar em dados secundários). Só um 401 DELE leva ao
+    // fluxo de confirmação.
+    fetchCliente('/api/cliente/estado-sessao', { cache: 'no-store' })
+      .then(async (res) => {
+        if (res.ok) {
+          const dados = await res.json()
+          const destino = nextPermitidoAtual()
+          if (destino) { window.location.href = destino; return }
+          if (dados?.next === 'name') { setNome(''); setStep('nome'); telemetria('name_step_opened') } else { abrirPontos() }
+          return
         }
         iniciarSemSessao()
-        return
-      }
-      const destino = nextPermitidoAtual()
-      if (destino) { window.location.href = destino; return }
-      // Cliente novo que chegou pela ativação volta direto à etapa do nome.
-      try {
-        const params = new URLSearchParams(window.location.search)
-        if (params.get('cadastro') === 'nome' && !dados.cliente.nome) {
-          params.delete('cadastro')
-          const qs = params.toString()
-          window.history.replaceState({}, '', window.location.pathname + (qs ? `?${qs}` : ''))
-          setStep('nome')
-        }
-      } catch {}
-    })
+      })
+      .catch(() => { iniciarSemSessao() })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -273,7 +288,7 @@ export default function ClientePage() {
       }
       setOtpViaVinculo(true)
       setCodigo('')
-      setPosVerificacao(null)
+      setTraceId(typeof data.traceId === 'string' ? data.traceId : null)
       setReenvioEm(60)
       setStep('otp')
     } catch { setErro('Erro de conexão. Tente novamente.') }
@@ -294,7 +309,7 @@ export default function ClientePage() {
       if (!res.ok || !data.ok) { setErro(data.error || 'Não foi possível enviar o código'); setEnviando(false); return }
       setOtpViaVinculo(false)
       setCodigo('')
-      setPosVerificacao(null)
+      setTraceId(typeof data.traceId === 'string' ? data.traceId : null)
       setReenvioEm(60)
       setStep('otp')
     } catch { setErro('Erro de conexão. Tente novamente.') }
@@ -307,51 +322,9 @@ export default function ClientePage() {
     await pedirCodigo()
   }
 
-  // Depois de um código VÁLIDO: nunca deixar a tela parada em silêncio. A
-  // sessão é sondada com retry; se o cookie da resposta de fetch não "pegou"
-  // (navegador interno do WhatsApp no iPhone), ativa a sessão numa navegação
-  // real usando o ticket de uso único devolvido pelo verificar.
-  async function abrirAposVerificacao(pos: { nome: string | null; ticket: string | null; sessao: string | null }): Promise<void> {
-    // 1) Cookie da resposta do verificar (caminho normal), com retry curto.
-    limparSessaoFallback()
-    let dados = await carregarPerfilComRetry()
-    let viaBearer = false
-    // 2) Cookie não pegou (navegador interno do WhatsApp no iPhone): usa a
-    //    sessão opaca via Bearer — sem navegação nenhuma. Só grava o token
-    //    depois de comprovado que o cookie falhou.
-    if (!dados && pos.sessao) {
-      const guardou = guardarSessaoFallback(pos.sessao)
-      telemetria(guardou ? 'opaque_session_storage_ok' : 'opaque_session_storage_failed')
-      dados = await carregarPerfil()
-      viaBearer = !!dados
-      if (!dados) limparSessaoFallback()
-    }
-    if (dados) {
-      telemetria(viaBearer ? 'bearer_session_ok' : 'cookie_session_ok')
-      telemetria('profile_loaded')
-      const destino = nextPermitidoAtual()
-      if (destino) { window.location.href = destino; return }
-      if (!pos.nome) { setNome(''); setStep('nome'); telemetria('name_step_opened') }
-      return
-    }
-    // 3) Última linha: ativação por navegação com o ticket de uso único.
-    if (pos.ticket) {
-      telemetria('fallback_navigation', { motivo: pos.sessao ? 'bearer_falhou' : 'sem_sessao_no_body' })
-      window.location.href = `/api/cliente/sessao?tk=${encodeURIComponent(pos.ticket)}`
-      return
-    }
-    telemetria('fallback_navigation', { motivo: 'sem_ticket' })
-    setErro('Seu código foi confirmado, mas não conseguimos abrir seus pontos. Toque em "Tentar de novo".')
-  }
-
-  async function tentarAbrirNovamente() {
-    if (!posVerificacao) return
-    setErro('')
-    setEnviando(true)
-    await abrirAposVerificacao(posVerificacao)
-    setEnviando(false)
-  }
-
+  // ETAPA CRÍTICA: código válido → transição IMEDIATA para a tela que o
+  // servidor mandou (next). Sessão vai para a memória antes de qualquer coisa;
+  // storage é best-effort; nenhum retry/sondagem/navegação decide a etapa.
   async function confirmarCodigo() {
     setErro('')
     if (!codigo.trim()) { setErro('Digite o código recebido no WhatsApp'); return }
@@ -360,7 +333,7 @@ export default function ClientePage() {
       const res = await fetch('/api/cliente/verificar', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(otpViaVinculo ? { waToken, codigo } : { telefone, codigo }),
+        body: JSON.stringify(otpViaVinculo ? { waToken, codigo, traceId } : { telefone, codigo, traceId }),
       })
       const data = await res.json()
       if (!res.ok || !data.ok) {
@@ -374,15 +347,24 @@ export default function ClientePage() {
         setEnviando(false)
         return
       }
-      telemetria('otp_verified')
-      const pos = {
-        nome: (data?.cliente?.nome as string | null) ?? null,
-        ticket: (data?.ticket as string | null) ?? null,
-        sessao: (data?.sessao as string | null) ?? null,
+      otpValidadoRef.current = true
+      telemetria('otp_verified', { trace: traceId })
+      const sessao = typeof data.sessao === 'string' ? data.sessao : null
+      if (sessao) {
+        telemetria('session_created', { trace: traceId })
+        sessaoMemRef.current = sessao
+        telemetria('session_in_memory', { trace: traceId })
+        const guardou = guardarSessaoFallback(sessao)
+        telemetria(guardou ? 'session_storage_ok' : 'session_storage_failed', { trace: traceId })
       }
-      telemetria('opaque_session_received', { ok: !!pos.sessao })
-      setPosVerificacao(pos)
-      await abrirAposVerificacao(pos)
+      const next = data.next === 'points' ? 'points' : 'name'
+      if (next === 'name') {
+        setNome('')
+        setStep('nome')
+        telemetria('name_step_opened', { trace: traceId })
+      } else {
+        abrirPontos()
+      }
     } catch { setErro('Erro de conexão. Tente novamente.') }
     setEnviando(false)
   }
@@ -396,25 +378,30 @@ export default function ClientePage() {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ nome }),
-      })
-      const data = await res.json()
-      if (!res.ok || !data.ok) { setErro(data.error || 'Não foi possível salvar seu nome'); setEnviando(false); return }
-      const dados = await carregarPerfilComRetry()
-      if (dados) {
-        const destino = nextPermitidoAtual()
-        if (destino) { window.location.href = destino; return }
-      } else {
-        setErro('Seu nome foi salvo, mas não conseguimos abrir seus pontos. Tente de novo.')
+      }, sessaoMemRef.current)
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || !data.ok) {
+        // Falha (inclusive 401 transitório) mantém a tela do nome com retry —
+        // NUNCA pede novo código nem volta para a confirmação.
+        setErro(res.status === 400 ? (data.error || 'Digite seu nome') : 'Não conseguimos salvar agora. Tente de novo.')
+        setEnviando(false)
+        return
       }
+      telemetria('name_saved', { trace: traceId })
+      abrirPontos()
     } catch { setErro('Erro de conexão. Tente novamente.') }
     setEnviando(false)
   }
 
   async function sair() {
-    try { await fetchCliente('/api/cliente/logout', { method: 'POST' }) } catch {}
+    try { await fetchCliente('/api/cliente/logout', { method: 'POST' }, sessaoMemRef.current) } catch {}
     limparSessaoFallback()
+    sessaoMemRef.current = null
+    otpValidadoRef.current = false
     setPerfil(null)
     setFidelidade(null)
+    setPerfilErro(false)
+    setFidelidadeErro(false)
     setTelefone('')
     setCodigo('')
     setNome('')
@@ -615,17 +602,9 @@ export default function ClientePage() {
               style={{ ...inputStyle, textAlign: 'center', letterSpacing: 4, fontSize: 20 }}
             />
             {erro && <p style={{ color: cores.perigo, fontSize: 13, margin: 0 }}>{erro}</p>}
-            {/* Depois de um código já validado, o CTA vira "Tentar de novo":
-                reabre o perfil sem re-submeter o código de uso único. */}
-            {posVerificacao ? (
-              <button onClick={tentarAbrirNovamente} disabled={enviando} style={{ ...botaoPrimario, opacity: enviando ? 0.6 : 1 }}>
-                {enviando ? 'Abrindo...' : 'Tentar de novo'}
-              </button>
-            ) : (
-              <button onClick={confirmarCodigo} disabled={enviando} style={{ ...botaoPrimario, opacity: enviando ? 0.6 : 1 }}>
-                {enviando ? 'Confirmando...' : 'Confirmar código'}
-              </button>
-            )}
+            <button onClick={confirmarCodigo} disabled={enviando} style={{ ...botaoPrimario, opacity: enviando ? 0.6 : 1 }}>
+              {enviando ? 'Confirmando...' : 'Confirmar código'}
+            </button>
             <button
               onClick={reenviarCodigo}
               disabled={reenvioEm > 0 || enviando}
@@ -633,9 +612,14 @@ export default function ClientePage() {
             >
               {reenvioEm > 0 ? `Reenviar código em ${reenvioEm}s` : 'Reenviar código'}
             </button>
-            <button onClick={() => { setErro(''); setCodigo(''); setPosVerificacao(null); setStep('telefone') }} style={botaoTextoDiscreto}>
+            <button onClick={() => { setErro(''); setCodigo(''); setStep('telefone') }} style={botaoTextoDiscreto}>
               Usar outro número
             </button>
+            {traceId && (
+              <p style={{ fontSize: 11, color: cores.textoTerciario, margin: 0, textAlign: 'center' }}>
+                Código de suporte: {traceId}
+              </p>
+            )}
           </div>
         )}
 
@@ -665,20 +649,40 @@ export default function ClientePage() {
           </div>
         )}
 
-        {step === 'perfil' && perfil && fidelidade && (
+        {step === 'perfil' && (
           <div className="cliente-grid">
             <div className="cliente-col-esquerda" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               <div style={{ fontSize: 15, color: cores.textoSecundario }}>
-                Olá{perfil.cliente.nome ? `, ${perfil.cliente.nome.split(' ')[0]}` : ''}!
+                Olá{perfil?.cliente.nome ? `, ${perfil.cliente.nome.split(' ')[0]}` : ''}!
               </div>
 
-              {!fidelidade.ativo && (
+              {/* Erros de carregamento são LOCAIS: a sessão continua válida e
+                  a tela continua aqui — nunca volta para a confirmação. */}
+              {perfilErro && (
+                <div style={{ background: cores.cardBg, border: `1px solid ${cores.cardBorda}`, borderRadius: 14, padding: 18, textAlign: 'center' }}>
+                  <p style={{ color: cores.textoSecundario, fontSize: 14, margin: '0 0 12px' }}>Não conseguimos carregar seu perfil agora.</p>
+                  <button onClick={carregarIdentidade} style={{ ...botaoPrimario, width: 'auto', padding: '10px 18px' }}>Tentar novamente</button>
+                </div>
+              )}
+
+              {fidelidadeErro && (
+                <div style={{ background: cores.cardBg, border: `1px solid ${cores.cardBorda}`, borderRadius: 14, padding: 18, textAlign: 'center' }}>
+                  <p style={{ color: cores.textoSecundario, fontSize: 14, margin: '0 0 12px' }}>Não conseguimos carregar seus pontos agora.</p>
+                  <button onClick={carregarFidelidade} style={{ ...botaoPrimario, width: 'auto', padding: '10px 18px' }}>Tentar novamente</button>
+                </div>
+              )}
+
+              {!fidelidade && !fidelidadeErro && (
+                <p style={{ color: cores.textoSecundario, fontSize: 14, margin: 0 }}>Carregando seus pontos...</p>
+              )}
+
+              {fidelidade && !fidelidade.ativo && (
                 <div style={{ background: cores.cardBg, border: `1px solid ${cores.cardBorda}`, borderRadius: 14, padding: 18, textAlign: 'center' }}>
                   <p style={{ color: cores.textoSecundario, fontSize: 14, margin: 0 }}>O programa de pontos ainda não está ativo por aqui. Volte em breve!</p>
                 </div>
               )}
 
-              {fidelidade.ativo && (
+              {fidelidade && fidelidade.ativo && (
                 <>
                   {/* Hero de saldo */}
                   <div style={{ background: cores.cardBg, border: `1px solid ${cores.cardBorda}`, borderRadius: 16, padding: 22 }}>
@@ -739,7 +743,7 @@ export default function ClientePage() {
             </div>
 
             <div className="cliente-col-direita" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              {perfil.ultimosPedidos.length > 0 && (
+              {perfil && perfil.ultimosPedidos.length > 0 && (
                 <div style={{ background: cores.cardBg, border: `1px solid ${cores.cardBorda}`, borderRadius: 14, padding: 18 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
                     <Receipt size={16} color={cores.textoTerciario} />
@@ -754,7 +758,7 @@ export default function ClientePage() {
                 </div>
               )}
 
-              {fidelidade.ativo && (
+              {fidelidade && fidelidade.ativo && (
                 <div style={{ background: cores.cardBg, border: `1px solid ${cores.cardBorda}`, borderRadius: 14, padding: 18 }}>
                   <p style={{ fontSize: 11, color: cores.textoTerciario, textTransform: 'uppercase', letterSpacing: 0.5, margin: '0 0 12px' }}>Extrato de pontos</p>
                   {fidelidade.extrato.length === 0 && (
