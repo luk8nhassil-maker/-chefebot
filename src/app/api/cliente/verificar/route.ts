@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verificarOtp, criarTokenCliente, CLIENTE_COOKIE } from "@/lib/clienteAuth";
+import { verificarOtp, criarTokenCliente, criarTicketSessao, CLIENTE_COOKIE } from "@/lib/clienteAuth";
 import { obterOuCriarCliente, sanitizeTelefoneCliente, normalizarNomeCliente } from "@/lib/clientes";
 import { validarTokenCardapio } from "@/lib/cardapioToken";
 
@@ -39,9 +39,13 @@ export async function POST(req: NextRequest) {
     const cliente = await obterOuCriarCliente(telefone, nome || undefined);
     const token = await criarTokenCliente({ clienteId: cliente.clienteId, telefone: cliente.telefone });
 
-    // Nunca devolve o telefone completo ao navegador — a tela de Pontos só
-    // precisa saber se o cliente já tem nome (para pular a etapa de cadastro).
-    const res = NextResponse.json({ ok: true, cliente: { nome: cliente.nome ?? null } });
+    // Ticket de ativação por navegação (uso único, 60s): fallback para
+    // navegadores que não persistem o Set-Cookie desta resposta de fetch —
+    // ver /api/cliente/sessao. Nunca devolve o telefone completo ao
+    // navegador — a tela de Pontos só precisa saber se o cliente já tem nome
+    // (para pular a etapa de cadastro).
+    const ticket = await criarTicketSessao({ clienteId: cliente.clienteId, telefone: cliente.telefone });
+    const res = NextResponse.json({ ok: true, cliente: { nome: cliente.nome ?? null }, ticket });
     res.cookies.set(CLIENTE_COOKIE, token, {
       httpOnly: true,
       sameSite: "lax",

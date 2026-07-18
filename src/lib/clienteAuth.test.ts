@@ -16,7 +16,7 @@ vi.mock("@/lib/redis", () => ({
   },
 }));
 
-import { gerarOtp, verificarOtp, podeReenviarOtp, criarTokenCliente, verificarTokenCliente } from "./clienteAuth";
+import { gerarOtp, verificarOtp, podeReenviarOtp, criarTokenCliente, verificarTokenCliente, criarTicketSessao, consumirTicketSessao } from "./clienteAuth";
 
 beforeEach(() => {
   store.clear();
@@ -54,5 +54,28 @@ describe("sessao de cliente (JWT)", () => {
 
   test("token invalido/adulterado retorna null", async () => {
     expect(await verificarTokenCliente("token-invalido")).toBeNull();
+  });
+});
+
+describe("ticket de ativacao de sessao por navegacao", () => {
+  const PAYLOAD = { clienteId: "cli_5599974000691", telefone: "5599974000691" };
+
+  test("ticket criado consome uma unica vez e devolve o payload", async () => {
+    const ticket = await criarTicketSessao(PAYLOAD);
+    expect(ticket).toMatch(/^[a-f0-9]{32}$/);
+    expect(await consumirTicketSessao(ticket)).toEqual(PAYLOAD);
+    // uso unico: segundo consumo sempre falha (protecao contra replay)
+    expect(await consumirTicketSessao(ticket)).toBeNull();
+  });
+
+  test("ticket com formato invalido ou inexistente retorna null sem consultar nada sensivel", async () => {
+    expect(await consumirTicketSessao("abc")).toBeNull();
+    expect(await consumirTicketSessao(null)).toBeNull();
+    expect(await consumirTicketSessao("f".repeat(32))).toBeNull();
+  });
+
+  test("o ticket nao expoe o telefone", async () => {
+    const ticket = await criarTicketSessao(PAYLOAD);
+    expect(ticket).not.toContain(PAYLOAD.telefone.slice(-8));
   });
 });

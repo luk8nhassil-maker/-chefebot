@@ -149,6 +149,36 @@ describe("/cliente — Perfil 3.0: número reconhecido pelo link do WhatsApp", (
   });
 });
 
+describe("/cliente — hotfix OTP: sessão que não 'pega' nunca deixa a tela muda", () => {
+  test("pós-verificação sonda a sessão com retry antes de decidir", () => {
+    expect(fonte).toContain("carregarPerfilComRetry");
+    expect(fonte).toMatch(/esperas = \[0, 500, 1200\]/);
+  });
+
+  test("fallback de ativação por navegação usa o ticket de uso único", () => {
+    expect(fonte).toContain("/api/cliente/sessao?tk=");
+    expect(fonte).toContain("posVerificacao");
+  });
+
+  test("retomada do cadastro do nome após ativação por navegação (?cadastro=nome)", () => {
+    expect(fonte).toContain("cadastro");
+    expect(fonte).toMatch(/params\.get\('cadastro'\) === 'nome'/);
+  });
+
+  test("editar o código limpa o erro anterior na hora", () => {
+    expect(fonte).toContain("if (erro) setErro('')");
+  });
+
+  test("depois de código validado o CTA vira 'Tentar de novo' (nunca re-submete código consumido)", () => {
+    expect(fonte).toContain("Tentar de novo");
+    expect(fonte).toContain("tentarAbrirNovamente");
+  });
+
+  test("falha total mostra mensagem clara em vez de silêncio", () => {
+    expect(fonte).toContain("Seu código foi confirmado, mas não conseguimos abrir seus pontos");
+  });
+});
+
 describe("/cliente — Etapa 2: sem lembrete operacional de pedido + barra global de Pix pendente", () => {
   test("[caso 10] não mostra mais o card de 'pedido em andamento' (pontos previstos)", () => {
     expect(fonte).not.toContain("Seu pedido em andamento vai render");

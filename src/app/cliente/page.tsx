@@ -101,6 +101,9 @@ export default function ClientePage() {
   // ou pelo telefone digitado no fluxo manual?
   const [otpViaVinculo, setOtpViaVinculo] = useState(false)
   const [reenvioEm, setReenvioEm] = useState(0)
+  // Preenchido após um código validado com sucesso: permite "Tentar de novo"
+  // sem re-submeter o código (que é de uso único e já foi consumido).
+  const [posVerificacao, setPosVerificacao] = useState<{ nome: string | null; ticket: string | null } | null>(null)
   const codigoRef = useRef<HTMLInputElement>(null)
 
   // Retorno seguro pós-login (ex.: veio de "Pedido" no menu inferior sem
@@ -120,20 +123,35 @@ export default function ClientePage() {
     window.location.href = '/pedido'
   }
 
-  async function carregarPerfil() {
+  async function carregarPerfil(): Promise<Perfil | null> {
     try {
       const [resPerfil, resFidelidade] = await Promise.all([
         fetch('/api/cliente/perfil', { cache: 'no-store' }),
         fetch('/api/cliente/fidelidade', { cache: 'no-store' }),
       ])
       if (resPerfil.ok && resFidelidade.ok) {
-        setPerfil(await resPerfil.json())
+        const dados: Perfil = await resPerfil.json()
+        setPerfil(dados)
         setFidelidade(await resFidelidade.json())
         setStep('perfil')
-        return true
+        return dados
       }
     } catch {}
-    return false
+    return null
+  }
+
+  // Alguns navegadores (WhatsApp no iPhone) demoram — ou falham — para
+  // aplicar o cookie de sessão vindo de uma resposta de fetch. A sondagem
+  // tenta algumas vezes com espera curta antes de acionar o fallback de
+  // ativação por navegação (ver confirmarCodigo).
+  async function carregarPerfilComRetry(): Promise<Perfil | null> {
+    const esperas = [0, 500, 1200]
+    for (const ms of esperas) {
+      if (ms > 0) await new Promise((r) => setTimeout(r, ms))
+      const dados = await carregarPerfil()
+      if (dados) return dados
+    }
+    return null
   }
 
   function limparVinculo() {
@@ -183,10 +201,21 @@ export default function ClientePage() {
   }
 
   useEffect(() => {
-    carregarPerfil().then((ok) => {
-      if (!ok) { iniciarSemSessao(); return }
+    carregarPerfil().then((dados) => {
+      if (!dados) { iniciarSemSessao(); return }
       const destino = nextPermitidoAtual()
-      if (destino) window.location.href = destino
+      if (destino) { window.location.href = destino; return }
+      // Retomada do fallback de ativação por navegação (/api/cliente/sessao):
+      // cliente novo volta direto para a etapa do nome.
+      try {
+        const params = new URLSearchParams(window.location.search)
+        if (params.get('cadastro') === 'nome' && !dados.cliente.nome) {
+          params.delete('cadastro')
+          const qs = params.toString()
+          window.history.replaceState({}, '', window.location.pathname + (qs ? `?${qs}` : ''))
+          setStep('nome')
+        }
+      } catch {}
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -228,6 +257,7 @@ export default function ClientePage() {
       }
       setOtpViaVinculo(true)
       setCodigo('')
+      setPosVerificacao(null)
       setReenvioEm(60)
       setStep('otp')
     } catch { setErro('Erro de conexão. Tente novamente.') }
@@ -248,6 +278,7 @@ export default function ClientePage() {
       if (!res.ok || !data.ok) { setErro(data.error || 'Não foi possível enviar o código'); setEnviando(false); return }
       setOtpViaVinculo(false)
       setCodigo('')
+      setPosVerificacao(null)
       setReenvioEm(60)
       setStep('otp')
     } catch { setErro('Erro de conexão. Tente novamente.') }
@@ -260,13 +291,31 @@ export default function ClientePage() {
     await pedirCodigo()
   }
 
-  async function entrarNoPerfil() {
-    const ok = await carregarPerfil()
-    if (ok) {
+  // Depois de um código VÁLIDO: nunca deixar a tela parada em silêncio. A
+  // sessão é sondada com retry; se o cookie da resposta de fetch não "pegou"
+  // (navegador interno do WhatsApp no iPhone), ativa a sessão numa navegação
+  // real usando o ticket de uso único devolvido pelo verificar.
+  async function abrirAposVerificacao(pos: { nome: string | null; ticket: string | null }): Promise<void> {
+    const dados = await carregarPerfilComRetry()
+    if (dados) {
       const destino = nextPermitidoAtual()
-      if (destino) { window.location.href = destino; return true }
+      if (destino) { window.location.href = destino; return }
+      if (!pos.nome) { setNome(''); setStep('nome') }
+      return
     }
-    return ok
+    if (pos.ticket) {
+      window.location.href = `/api/cliente/sessao?tk=${encodeURIComponent(pos.ticket)}`
+      return
+    }
+    setErro('Seu código foi confirmado, mas não conseguimos abrir seus pontos. Toque em "Tentar de novo".')
+  }
+
+  async function tentarAbrirNovamente() {
+    if (!posVerificacao) return
+    setErro('')
+    setEnviando(true)
+    await abrirAposVerificacao(posVerificacao)
+    setEnviando(false)
   }
 
   async function confirmarCodigo() {
@@ -291,14 +340,9 @@ export default function ClientePage() {
         setEnviando(false)
         return
       }
-      // Cliente novo (sem nome salvo) informa somente o nome — nunca o telefone.
-      if (!data?.cliente?.nome) {
-        setNome('')
-        setStep('nome')
-        setEnviando(false)
-        return
-      }
-      await entrarNoPerfil()
+      const pos = { nome: (data?.cliente?.nome as string | null) ?? null, ticket: (data?.ticket as string | null) ?? null }
+      setPosVerificacao(pos)
+      await abrirAposVerificacao(pos)
     } catch { setErro('Erro de conexão. Tente novamente.') }
     setEnviando(false)
   }
@@ -315,7 +359,13 @@ export default function ClientePage() {
       })
       const data = await res.json()
       if (!res.ok || !data.ok) { setErro(data.error || 'Não foi possível salvar seu nome'); setEnviando(false); return }
-      await entrarNoPerfil()
+      const dados = await carregarPerfilComRetry()
+      if (dados) {
+        const destino = nextPermitidoAtual()
+        if (destino) { window.location.href = destino; return }
+      } else {
+        setErro('Seu nome foi salvo, mas não conseguimos abrir seus pontos. Tente de novo.')
+      }
     } catch { setErro('Erro de conexão. Tente novamente.') }
     setEnviando(false)
   }
@@ -519,13 +569,22 @@ export default function ClientePage() {
               value={codigo}
               // Sem maxLength no atributo: colar "12 34 56" não pode ser
               // truncado pelo navegador antes do filtro de dígitos abaixo.
-              onChange={(e) => setCodigo(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              // Editar o código limpa o erro anterior na hora.
+              onChange={(e) => { if (erro) setErro(''); setCodigo(e.target.value.replace(/\D/g, '').slice(0, 6)) }}
               style={{ ...inputStyle, textAlign: 'center', letterSpacing: 4, fontSize: 20 }}
             />
             {erro && <p style={{ color: cores.perigo, fontSize: 13, margin: 0 }}>{erro}</p>}
-            <button onClick={confirmarCodigo} disabled={enviando} style={{ ...botaoPrimario, opacity: enviando ? 0.6 : 1 }}>
-              {enviando ? 'Confirmando...' : 'Confirmar código'}
-            </button>
+            {/* Depois de um código já validado, o CTA vira "Tentar de novo":
+                reabre o perfil sem re-submeter o código de uso único. */}
+            {posVerificacao ? (
+              <button onClick={tentarAbrirNovamente} disabled={enviando} style={{ ...botaoPrimario, opacity: enviando ? 0.6 : 1 }}>
+                {enviando ? 'Abrindo...' : 'Tentar de novo'}
+              </button>
+            ) : (
+              <button onClick={confirmarCodigo} disabled={enviando} style={{ ...botaoPrimario, opacity: enviando ? 0.6 : 1 }}>
+                {enviando ? 'Confirmando...' : 'Confirmar código'}
+              </button>
+            )}
             <button
               onClick={reenviarCodigo}
               disabled={reenvioEm > 0 || enviando}
@@ -533,7 +592,7 @@ export default function ClientePage() {
             >
               {reenvioEm > 0 ? `Reenviar código em ${reenvioEm}s` : 'Reenviar código'}
             </button>
-            <button onClick={() => { setErro(''); setCodigo(''); setStep('telefone') }} style={botaoTextoDiscreto}>
+            <button onClick={() => { setErro(''); setCodigo(''); setPosVerificacao(null); setStep('telefone') }} style={botaoTextoDiscreto}>
               Usar outro número
             </button>
           </div>

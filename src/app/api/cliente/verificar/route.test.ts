@@ -50,6 +50,10 @@ describe("POST /api/cliente/verificar — fluxo de numero reconhecido (waToken)"
     expect(redisStore.has("cliente:11999990000")).toBe(false);
     // resposta nunca devolve o numero completo ao navegador
     expect(JSON.stringify(data)).not.toContain(PHONE_DO_TOKEN);
+    // ticket de ativacao por navegacao: opaco e apontando para o cliente certo
+    expect(data.ticket).toMatch(/^[a-f0-9]{32}$/);
+    const payloadTicket = redisStore.get(`cliente:ticket:${data.ticket}`) as { clienteId: string };
+    expect(payloadTicket.clienteId).toBe(`cli_${PHONE_DO_TOKEN}`);
   });
 
   test("waToken invalido/expirado: 401 com vinculoInvalido, nada autenticado", async () => {

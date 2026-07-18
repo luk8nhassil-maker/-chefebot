@@ -1,3 +1,4 @@
+import { randomUUID } from "crypto";
 import { SignJWT, jwtVerify } from "jose";
 import { redis } from "./redis";
 import { sanitizeTelefoneCliente } from "./clientes";
@@ -68,6 +69,41 @@ export async function verificarOtp(telefone: string, codigo: string): Promise<bo
 
   await redis.del(chave);
   return true;
+}
+
+// ============================================================================
+// TICKET DE ATIVAÇÃO DE SESSÃO POR NAVEGAÇÃO
+// O navegador interno do WhatsApp no iOS (WKWebView) não persiste de forma
+// confiável um Set-Cookie vindo de resposta de fetch/XHR — comprovado em
+// produção: POST /api/cliente/verificar 200 seguido de GETs 401 mesmo após
+// 60s. Cookies definidos em resposta de NAVEGAÇÃO de documento persistem
+// sempre. O ticket é um valor opaco de uso único (TTL 60s) que o verificar
+// devolve junto com o cookie; se a sessão via fetch não "pegar", o front
+// navega para GET /api/cliente/sessao?tk=..., que consome o ticket, emite o
+// MESMO cookie numa resposta de navegação e redireciona de volta.
+// ============================================================================
+
+const TICKET_TTL_SEGUNDOS = 60;
+
+function chaveTicket(ticket: string): string {
+  return `cliente:ticket:${ticket}`;
+}
+
+export async function criarTicketSessao(payload: ClienteTokenPayload): Promise<string> {
+  const ticket = randomUUID().replace(/-/g, "");
+  await redis.set(chaveTicket(ticket), payload, { ex: TICKET_TTL_SEGUNDOS });
+  return ticket;
+}
+
+// Uso único: o del acontece antes de devolver — um segundo consumo do mesmo
+// ticket sempre retorna null (proteção contra replay do link de ativação).
+export async function consumirTicketSessao(ticket: string | null | undefined): Promise<ClienteTokenPayload | null> {
+  if (!ticket || !/^[a-f0-9]{32}$/.test(ticket)) return null;
+  const chave = chaveTicket(ticket);
+  const payload = await redis.get<ClienteTokenPayload>(chave);
+  await redis.del(chave);
+  if (!payload || typeof payload.clienteId !== "string" || typeof payload.telefone !== "string") return null;
+  return { clienteId: payload.clienteId, telefone: payload.telefone };
 }
 
 export async function criarTokenCliente(payload: ClienteTokenPayload): Promise<string> {
