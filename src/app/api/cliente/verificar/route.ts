@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verificarOtp, criarTokenCliente, criarTicketSessao, criarSessaoPortatil, CLIENTE_COOKIE } from "@/lib/clienteAuth";
+import { verificarOtp, criarTokenCliente, criarTicketSessao, criarSessaoPortatil, criarTicketAtivacaoPerfil, CLIENTE_COOKIE } from "@/lib/clienteAuth";
 import { obterOuCriarCliente, sanitizeTelefoneCliente, normalizarNomeCliente, clienteProximaEtapa } from "@/lib/clientes";
 import { validarTokenCardapio } from "@/lib/cardapioToken";
 
@@ -59,7 +59,18 @@ export async function POST(req: NextRequest) {
     // só ecoado para correlação de suporte — nunca influencia nada.
     const next = clienteProximaEtapa(cliente);
     const traceId = typeof body?.traceId === "string" && /^P3-[A-Z0-9]{6}$/.test(body.traceId) ? body.traceId : null;
-    const res = NextResponse.json({ ok: true, next, sessao, ticket, cliente: { nome: cliente.nome ?? null }, traceId });
+
+    // Ticket de ativação do PERFIL (distinto do "ticket" de navegação acima):
+    // só emitido quando falta a primeira ativação (next === "name") — é o
+    // fallback de última linha do PATCH /api/cliente/perfil se cookie e
+    // sessão portátil, emitidos nesta mesma resposta, falharem por qualquer
+    // motivo (ver src/lib/clienteAuth.ts). Nunca emitido para quem já tem
+    // fidelidade ativa — não há PATCH de nome a proteger nesse caso.
+    const ativacaoToken = next === "name"
+      ? await criarTicketAtivacaoPerfil({ clienteId: cliente.clienteId, telefone: cliente.telefone })
+      : null;
+
+    const res = NextResponse.json({ ok: true, next, sessao, ticket, ativacaoToken, cliente: { nome: cliente.nome ?? null }, traceId });
     res.cookies.set(CLIENTE_COOKIE, token, {
       httpOnly: true,
       sameSite: "lax",

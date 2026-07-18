@@ -13,11 +13,21 @@ vi.mock("@/lib/redis", () => ({
       store.delete(key);
       return 1;
     }),
+    // GET+DEL atômico genérico o bastante para simular qualquer script Lua
+    // deste arquivo que só faz "ler a chave e apagar" (ver consumirTicketAtivacaoPerfil):
+    // reflete o comportamento real do Upstash, onde um valor gravado via
+    // redis.set() chega ao Lua GET como string JSON, nunca como objeto.
+    eval: vi.fn(async (_script: string, keys: string[]) => {
+      if (!store.has(keys[0])) return null;
+      const valor = store.get(keys[0]);
+      store.delete(keys[0]);
+      return typeof valor === "string" ? valor : JSON.stringify(valor);
+    }),
   },
 }));
 
 import { redis } from "@/lib/redis";
-import { gerarOtp, verificarOtp, podeReenviarOtp, criarTokenCliente, verificarTokenCliente, criarTicketSessao, consumirTicketSessao, criarSessaoOpaca, resolverSessaoOpaca, revogarSessaoOpaca, extrairBearer, lerSessaoCliente, criarSessaoPortatil, resolverSessaoPortatil, lerSessaoClienteDiagnosticada, CLIENTE_COOKIE } from "./clienteAuth";
+import { gerarOtp, verificarOtp, podeReenviarOtp, criarTokenCliente, verificarTokenCliente, criarTicketSessao, consumirTicketSessao, criarSessaoOpaca, resolverSessaoOpaca, revogarSessaoOpaca, extrairBearer, lerSessaoCliente, criarSessaoPortatil, resolverSessaoPortatil, lerSessaoClienteDiagnosticada, criarTicketAtivacaoPerfil, consumirTicketAtivacaoPerfil, CLIENTE_COOKIE } from "./clienteAuth";
 
 beforeEach(() => {
   store.clear();
@@ -289,5 +299,73 @@ describe("lerSessaoClienteDiagnosticada — mesma resolução, com motivo categ�
     expect(serializado).not.toContain("cookie-secreto-xyz");
     expect(serializado).not.toContain(PAYLOAD.telefone);
     expect(serializado).not.toContain(PAYLOAD.clienteId);
+  });
+});
+
+describe("ticket de ativacao do perfil — fallback de ultima linha do PATCH do nome (P3-ABB28C)", () => {
+  const PAYLOAD = { clienteId: "cli_5599974000691", telefone: "5599974000691" };
+
+  test("ticket valido e consumido devolve exatamente o cliente vinculado", async () => {
+    const ticket = await criarTicketAtivacaoPerfil(PAYLOAD);
+    expect(ticket).toMatch(/^[a-f0-9]{32}$/);
+    expect(await consumirTicketAtivacaoPerfil(ticket)).toEqual(PAYLOAD);
+  });
+
+  test("uso unico: o segundo consumo do mesmo ticket sempre falha (bloqueia replay)", async () => {
+    const ticket = await criarTicketAtivacaoPerfil(PAYLOAD);
+    expect(await consumirTicketAtivacaoPerfil(ticket)).toEqual(PAYLOAD);
+    expect(await consumirTicketAtivacaoPerfil(ticket)).toBeNull();
+  });
+
+  test("consumo concorrente do mesmo ticket: so uma das duas chamadas simultaneas ganha", async () => {
+    const ticket = await criarTicketAtivacaoPerfil(PAYLOAD);
+    const [a, b] = await Promise.all([
+      consumirTicketAtivacaoPerfil(ticket),
+      consumirTicketAtivacaoPerfil(ticket),
+    ]);
+    const resultados = [a, b].filter((r) => r !== null);
+    expect(resultados).toHaveLength(1);
+    expect(resultados[0]).toEqual(PAYLOAD);
+  });
+
+  test("ticket inexistente/expirado (chave ausente) retorna null", async () => {
+    expect(await consumirTicketAtivacaoPerfil("f".repeat(32))).toBeNull();
+  });
+
+  test("ticket com formato invalido (adulterado) retorna null sem consultar o redis", async () => {
+    (redis.eval as ReturnType<typeof vi.fn>).mockClear();
+    expect(await consumirTicketAtivacaoPerfil("nao-e-um-ticket-valido")).toBeNull();
+    expect(await consumirTicketAtivacaoPerfil(null)).toBeNull();
+    expect(await consumirTicketAtivacaoPerfil(undefined)).toBeNull();
+    expect(redis.eval as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
+  });
+
+  test("finalidade incorreta (registro adulterado no redis) e rejeitada mesmo com formato certo", async () => {
+    const ticket = await criarTicketAtivacaoPerfil(PAYLOAD);
+    // Simula adulteracao: sobrescreve o registro guardado com uma finalidade
+    // diferente da exclusiva "perfil:ativar" esperada.
+    store.set(`cliente:ticket-ativacao:${ticket}`, { ...PAYLOAD, finalidade: "outra-coisa" });
+    expect(await consumirTicketAtivacaoPerfil(ticket)).toBeNull();
+  });
+
+  test("ticket nao expoe telefone nem clienteId no proprio valor", async () => {
+    const ticket = await criarTicketAtivacaoPerfil(PAYLOAD);
+    expect(ticket).not.toContain(PAYLOAD.telefone);
+    expect(ticket).not.toContain(PAYLOAD.clienteId);
+  });
+
+  test("ticket de ativacao nunca autentica lerSessaoCliente (nunca vira sessao geral)", async () => {
+    const ticket = await criarTicketAtivacaoPerfil(PAYLOAD);
+    function reqFake(auth: string) {
+      return {
+        cookies: { get: () => undefined },
+        headers: { get: (n: string) => (n.toLowerCase() === "authorization" ? auth : null) },
+      };
+    }
+    // O ticket tem formato hex de 32 (igual a sessao opaca), mas nao existe
+    // registro em cliente:sessao:* para ele — nunca resolve como sessao.
+    expect(await lerSessaoCliente(reqFake(`Bearer ${ticket}`))).toBeNull();
+    // E o ticket ainda deve estar intacto (lerSessaoCliente nunca o consome).
+    expect(await consumirTicketAtivacaoPerfil(ticket)).toEqual(PAYLOAD);
   });
 });

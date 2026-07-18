@@ -223,13 +223,28 @@ describe("/cliente — sessão portátil: PATCH do nome sem depender de sondagem
     expect(bloco).toMatch(/\/\^P3-\[A-Z0-9\]\{6\}\$\/\.test\(traceId\)/);
   });
 
-  test("um 401 isolado aciona uma única nova tentativa automática (mesma sessão em memória) antes do erro final", () => {
+  test("401 isolado NUNCA reenvia a mesma sessão rejeitada — só retenta com o ticket de ativação, uma única vez", () => {
     const bloco = fonte.slice(fonte.indexOf("async function salvarNome"), fonte.indexOf("async function sair"));
-    expect(bloco).toContain("res.status === 401");
-    expect(bloco).toMatch(/telemetria\('name_save_retry'/);
-    // a segunda chamada reusa a mesma função de envio (mesmo token em memória, mesmo body)
-    const chamadasEnviarPatch = bloco.match(/enviarPatch\(\)/g) ?? [];
-    expect(chamadasEnviarPatch.length).toBeGreaterThanOrEqual(2);
+    expect(bloco).toContain("res.status === 401 && ticket");
+    // uso único do lado do cliente: o ticket é zerado antes de ser reenviado
+    expect(bloco).toMatch(/ativacaoTicketRef\.current = null/);
+    expect(bloco).toMatch(/telemetria\('name_save_retry_ticket'/);
+    // a segunda tentativa manda um corpo DIFERENTE (com ativacaoToken) — não é
+    // um reenvio cego do mesmo PATCH
+    expect(bloco).toMatch(/JSON\.stringify\(\{ nome, ativacaoToken: ticket \}\)/);
+    // sem ticket disponível, não há closure/função reutilizável para retentar
+    // às cegas (o antigo helper enviarPatch() foi removido de propósito)
+    expect(bloco).not.toContain("enviarPatch");
+  });
+
+  test("o ticket de ativação vem do OTP, vive só em memória (nunca em sessionStorage) e nunca é reenviado na primeira tentativa", () => {
+    const blocoConfirmar = fonte.slice(fonte.indexOf("async function confirmarCodigo"), fonte.indexOf("async function salvarNome"));
+    expect(blocoConfirmar).toMatch(/ativacaoTicketRef\.current = typeof data\.ativacaoToken === 'string' \? data\.ativacaoToken : null/);
+    expect(blocoConfirmar).not.toContain("guardarSessaoFallback(data.ativacaoToken");
+
+    const blocoNome = fonte.slice(fonte.indexOf("async function salvarNome"), fonte.indexOf("async function sair"));
+    // primeira tentativa: só { nome }, sem ativacaoToken
+    expect(blocoNome).toMatch(/body: JSON\.stringify\(\{ nome \}\)/);
   });
 });
 

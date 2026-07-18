@@ -140,6 +140,10 @@ export default function ClientePage() {
   const sessaoMemRef = useRef<string | null>(null)
   // Depois de um OTP validado nesta página, iniciarSemSessao é proibido.
   const otpValidadoRef = useRef(false)
+  // Ticket de ativação do perfil (opaco, uso único, só para o PATCH do nome
+  // quando cookie/JWE falharem) — nunca persiste em storage, nunca reenviado
+  // depois de consumido (êxito ou falha). Ver clienteAuth.ts.
+  const ativacaoTicketRef = useRef<string | null>(null)
 
   async function carregarIdentidade(): Promise<void> {
     setPerfilErro(false)
@@ -357,6 +361,9 @@ export default function ClientePage() {
         const guardou = guardarSessaoFallback(sessao)
         telemetria(guardou ? 'session_storage_ok' : 'session_storage_failed', { trace: traceId })
       }
+      // Ticket de ativação do perfil (uso único, só para o PATCH do nome se
+      // cookie/JWE falharem) — só em memória, nunca em sessionStorage.
+      ativacaoTicketRef.current = typeof data.ativacaoToken === 'string' ? data.ativacaoToken : null
       const next = data.next === 'points' ? 'points' : 'name'
       if (next === 'name') {
         setNome('')
@@ -376,20 +383,25 @@ export default function ClientePage() {
     try {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' }
       if (traceId && /^P3-[A-Z0-9]{6}$/.test(traceId)) headers['X-ChefeBot-Trace'] = traceId
-      const enviarPatch = () => fetchCliente('/api/cliente/perfil', {
+      let res = await fetchCliente('/api/cliente/perfil', {
         method: 'PATCH',
         headers,
         body: JSON.stringify({ nome }),
       }, sessaoMemRef.current)
-      let res = await enviarPatch()
-      // 401 isolado logo após o OTP validado é o sintoma conhecido de uma
-      // falha pontual de autenticação (nunca reproduzida de propósito) — uma
-      // única nova tentativa automática, sem pedir nada ao cliente, evita um
-      // beco sem saída por uma falha transitória. Não retenta 400/500.
-      if (res.status === 401) {
-        telemetria('name_save_retry', { trace: traceId })
-        await new Promise(r => setTimeout(r, 600))
-        res = await enviarPatch()
+      // Reenviar a MESMA sessão rejeitada não a torna válida — não é uma
+      // correção comprovada. Se cookie/JWE falharem (401) e ainda houver o
+      // ticket de ativação (uso único, emitido junto com a sessão), a única
+      // nova tentativa usa essa credencial DIFERENTE — nunca a mesma sessão.
+      // Sem ticket disponível, não há nova tentativa automática.
+      const ticket = ativacaoTicketRef.current
+      if (res.status === 401 && ticket) {
+        ativacaoTicketRef.current = null // uso único: nunca reenviado de novo
+        telemetria('name_save_retry_ticket', { trace: traceId })
+        res = await fetchCliente('/api/cliente/perfil', {
+          method: 'PATCH',
+          headers,
+          body: JSON.stringify({ nome, ativacaoToken: ticket }),
+        }, sessaoMemRef.current)
       }
       const data = await res.json().catch(() => ({}))
       telemetria('name_save_request_status', { status: res.status, trace: traceId })

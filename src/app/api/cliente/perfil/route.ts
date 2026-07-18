@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { lerSessaoCliente, lerSessaoClienteDiagnosticada } from "@/lib/clienteAuth";
+import { lerSessaoCliente, lerSessaoClienteDiagnosticada, consumirTicketAtivacaoPerfil } from "@/lib/clienteAuth";
 import { buscarClientePorId, normalizarNomeCliente, ativarFidelidadeCliente } from "@/lib/clientes";
 import { redis } from "@/lib/redis";
 
@@ -58,27 +58,52 @@ export async function PATCH(req: NextRequest) {
   // vez de lerSessaoCliente só para poder registrar, quando a autenticação
   // falhar, EM QUAL ETAPA ela falhou — nunca o conteúdo do cookie/Bearer. A
   // resposta ao navegador continua idêntica (genérica, sem detalhe nenhum).
-  const { payload, diagnostico } = await lerSessaoClienteDiagnosticada(req);
+  const { payload: payloadSessao, diagnostico } = await lerSessaoClienteDiagnosticada(req);
+
+  // Corpo lido cedo (antes da decisão de auth) porque o fallback abaixo
+  // depende dele; corpo malformado nunca derruba a rota — cai para {} e o
+  // fluxo normal decide o 400/401 apropriado.
+  let body: Record<string, unknown> = {};
+  try {
+    body = (await req.json()) ?? {};
+  } catch {}
+
+  // Incidente P3-ABB28C: cookie e sessão portátil (JWE) emitidos juntos pelo
+  // mesmo /api/cliente/verificar falharam aqui sem causa permanente provada
+  // — um retry cego com a MESMA credencial rejeitada foi descartado por não
+  // ser uma correção comprovada. Em vez disso, quando a sessão normal falha,
+  // aceita SÓ o ticket de ativação do perfil (opaco, uso único, finalidade
+  // exclusiva "perfil:ativar", nunca uma sessão geral — ver clienteAuth.ts).
+  // Nunca aceita telefone/clienteId/waToken do corpo como autorização.
+  let payload = payloadSessao;
+  const ativacaoTokenBruto = typeof body.ativacaoToken === "string" ? body.ativacaoToken : null;
+  const ticketPresente = !!ativacaoTokenBruto;
+  if (!payload && ativacaoTokenBruto) {
+    payload = await consumirTicketAtivacaoPerfil(ativacaoTokenBruto);
+  }
+
   if (!payload) {
     const traceBruto = req.headers.get("x-chefebot-trace");
     const trace = typeof traceBruto === "string" && TRACE_RE.test(traceBruto) ? traceBruto : "-";
     console.log(
-      `[ChefeBot] perfil3-auth trace=${trace} cookie_presente=${diagnostico.cookiePresente ? 1 : 0} cookie_valido=${diagnostico.cookieValido ? 1 : 0} cookie_erro=${diagnostico.cookieErro ?? "-"} authorization_presente=${diagnostico.authorizationPresente ? 1 : 0} formato_bearer=${diagnostico.formatoBearer} jwe_valido=${diagnostico.jweValido ? 1 : 0} jwe_erro=${diagnostico.jweErro ?? "-"} opaco_valido=${diagnostico.opacoValido ? 1 : 0} fonte=${diagnostico.fonte}`
+      `[ChefeBot] perfil3-auth trace=${trace} cookie_presente=${diagnostico.cookiePresente ? 1 : 0} cookie_valido=${diagnostico.cookieValido ? 1 : 0} cookie_erro=${diagnostico.cookieErro ?? "-"} authorization_presente=${diagnostico.authorizationPresente ? 1 : 0} formato_bearer=${diagnostico.formatoBearer} jwe_valido=${diagnostico.jweValido ? 1 : 0} jwe_erro=${diagnostico.jweErro ?? "-"} opaco_valido=${diagnostico.opacoValido ? 1 : 0} ticket_presente=${ticketPresente ? 1 : 0} fonte=${diagnostico.fonte}`
     );
     return NextResponse.json({ error: "Nao autorizado" }, { status: 401 });
   }
 
   // Sem gate de leitura do registro do cliente por clienteId: o telefone já
-  // vem autenticado no próprio payload da sessão. Um incidente em produção
-  // provou esse gate rejeitando o PATCH (401) mesmo com sessão válida, por
-  // atraso de réplica do Redis logo após o OTP escrever o registro.
+  // vem autenticado no próprio payload (sessão ou ticket de ativação). Um
+  // incidente em produção provou esse gate rejeitando o PATCH (401) mesmo
+  // com sessão válida, por atraso de réplica do Redis logo após o OTP
+  // escrever o registro.
   try {
-    const body = await req.json();
-    const nome = normalizarNomeCliente(body?.nome);
+    const nome = normalizarNomeCliente(body.nome);
     if (nome.length < 2) {
       return NextResponse.json({ ok: false, error: "Digite seu nome" }, { status: 400 });
     }
     // Primeira ativação: grava nome + fidelidadeAtivadaEm na mesma escrita.
+    // O ticket de ativação SÓ autoriza exatamente esta operação — nunca vira
+    // sessão geral, nunca autoriza outra rota.
     const atualizado = await ativarFidelidadeCliente(payload.telefone, nome);
     return NextResponse.json({ ok: true, next: "points", cliente: { nome: atualizado.nome ?? null } });
   } catch (error) {
