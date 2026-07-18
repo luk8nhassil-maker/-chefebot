@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { gerarOtp, podeReenviarOtp } from "@/lib/clienteAuth";
 import { sanitizeTelefoneCliente } from "@/lib/clientes";
+import { validarTokenCardapio } from "@/lib/cardapioToken";
 import { obterConfigEvolution } from "@/lib/evolutionApi";
 
 function sanitizePhoneEnvio(telefone: string): string {
@@ -32,7 +33,26 @@ async function enviarOtpPorWhatsapp(telefone: string, codigo: string): Promise<v
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const telefone = sanitizeTelefoneCliente(body?.telefone || "");
+
+    // Fluxo de número reconhecido (link do WhatsApp): o destino do OTP é
+    // SEMPRE o phone resolvido do token no servidor — qualquer `telefone`
+    // presente no body é ignorado nesse modo, para que um cliente não consiga
+    // trocar o destino pelo DevTools. Token inválido/expirado devolve um erro
+    // genérico com `vinculoInvalido` para o front voltar ao fluxo manual.
+    const waToken = typeof body?.waToken === "string" && body.waToken ? body.waToken : null;
+    let telefone: string;
+    if (waToken) {
+      const resolvido = await validarTokenCardapio(waToken);
+      if (!resolvido) {
+        return NextResponse.json(
+          { ok: false, error: "Não conseguimos confirmar seu WhatsApp. Digite seu número.", vinculoInvalido: true },
+          { status: 401 }
+        );
+      }
+      telefone = sanitizeTelefoneCliente(resolvido.phone);
+    } else {
+      telefone = sanitizeTelefoneCliente(body?.telefone || "");
+    }
     if (telefone.length < 10) {
       return NextResponse.json({ ok: false, error: "Telefone inválido" }, { status: 400 });
     }

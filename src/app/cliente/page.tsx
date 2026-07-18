@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { Gift, Phone, MessageCircle, LogOut, Receipt, Sparkles, Pizza } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Gift, Phone, MessageCircle, LogOut, Receipt, ShieldCheck, Sparkles, Pizza } from 'lucide-react'
 import ClientBottomNav from '@/components/ClientBottomNav'
 import PixPendenteBar, { usePixPendente } from '@/components/PixPendenteBar'
 import { CF_OPEN_CART_KEY } from '@/lib/pedidoAtivoCliente'
@@ -72,17 +72,36 @@ const cores = {
   perigo: 'var(--danger-text)',
 }
 
+// Chaves compartilhadas com o cardápio (mesma sessão de navegador): o vínculo
+// criado ao abrir o link do WhatsApp sobrevive à navegação entre as abas.
+// Nunca guardam o número — só o token opaco e os 4 dígitos finais.
+const WA_TOKEN_KEY = 'cf_wa_token'
+const WA_FINAL_KEY = 'cf_wa_final'
+
 export default function ClientePage() {
-  const [step, setStep] = useState<'carregando' | 'telefone' | 'otp' | 'perfil'>('carregando')
+  // Etapas: carregando → (perfil | confirmar | telefone) → otp → (nome) → perfil.
+  // "confirmar" é a experiência de número reconhecido pelo link do WhatsApp:
+  // mostra só o número mascarado (produzido no servidor) e nunca pede digitação.
+  const [step, setStep] = useState<'carregando' | 'confirmar' | 'telefone' | 'otp' | 'nome' | 'perfil'>('carregando')
   const { pendente: pixPendente } = usePixPendente()
   const [telefone, setTelefone] = useState('')
   const [codigo, setCodigo] = useState('')
+  const [nome, setNome] = useState('')
   const [erro, setErro] = useState('')
   const [enviando, setEnviando] = useState(false)
   const [perfil, setPerfil] = useState<Perfil | null>(null)
   const [fidelidade, setFidelidade] = useState<Fidelidade | null>(null)
   const [resgatando, setResgatando] = useState(false)
   const [resgateErro, setResgateErro] = useState('')
+  // Vínculo reconhecido: token opaco + máscaras vindas do servidor.
+  const [waToken, setWaToken] = useState('')
+  const [waMascarado, setWaMascarado] = useState('')
+  const [waFinal, setWaFinal] = useState('')
+  // O OTP em andamento foi enviado pelo vínculo (servidor decide o destino)
+  // ou pelo telefone digitado no fluxo manual?
+  const [otpViaVinculo, setOtpViaVinculo] = useState(false)
+  const [reenvioEm, setReenvioEm] = useState(0)
+  const codigoRef = useRef<HTMLInputElement>(null)
 
   // Retorno seguro pós-login (ex.: veio de "Pedido" no menu inferior sem
   // sessão ativa): só aceita destinos de uma allowlist explícita, nunca uma
@@ -117,13 +136,103 @@ export default function ClientePage() {
     return false
   }
 
+  function limparVinculo() {
+    setWaToken('')
+    setWaMascarado('')
+    setWaFinal('')
+    try { sessionStorage.removeItem(WA_TOKEN_KEY); sessionStorage.removeItem(WA_FINAL_KEY) } catch {}
+  }
+
+  // Sem sessão de cliente: tenta reconhecer o WhatsApp do link (token opaco da
+  // URL ?t= ou o já validado pelo cardápio nesta sessão do navegador). O token
+  // é sempre revalidado no servidor; inválido/expirado cai no fluxo manual.
+  async function iniciarSemSessao() {
+    let token = ''
+    try {
+      const params = new URLSearchParams(window.location.search)
+      const t = params.get('t')
+      if (t) {
+        // Remove o token da URL (evita vazar em prints/compartilhamentos) —
+        // mesmo comportamento já validado no cardápio.
+        params.delete('t')
+        const qs = params.toString()
+        window.history.replaceState({}, '', window.location.pathname + (qs ? `?${qs}` : ''))
+        token = t
+      } else {
+        token = sessionStorage.getItem(WA_TOKEN_KEY) || ''
+      }
+    } catch {}
+    if (!token) { setStep('telefone'); return }
+    try {
+      const r = await fetch(`/api/cardapio-whatsapp-session?t=${encodeURIComponent(token)}`, { cache: 'no-store' })
+      const data = await r.json()
+      if (data?.ok && data.phoneMascarado) {
+        setWaToken(token)
+        setWaMascarado(String(data.phoneMascarado))
+        setWaFinal(String(data.phoneFinal || ''))
+        try {
+          sessionStorage.setItem(WA_TOKEN_KEY, token)
+          sessionStorage.setItem(WA_FINAL_KEY, String(data.phoneFinal || ''))
+        } catch {}
+        setStep('confirmar')
+        return
+      }
+      limparVinculo()
+    } catch {}
+    setStep('telefone')
+  }
+
   useEffect(() => {
     carregarPerfil().then((ok) => {
-      if (!ok) { setStep('telefone'); return }
+      if (!ok) { iniciarSemSessao(); return }
       const destino = nextPermitidoAtual()
       if (destino) window.location.href = destino
     })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Contador de reenvio do código (60s, alinhado ao cooldown do servidor).
+  useEffect(() => {
+    if (step !== 'otp' || reenvioEm <= 0) return
+    const id = setTimeout(() => setReenvioEm((s) => (s > 0 ? s - 1 : 0)), 1000)
+    return () => clearTimeout(id)
+  }, [step, reenvioEm])
+
+  // Foco automático no campo de código ao entrar na etapa.
+  useEffect(() => {
+    if (step === 'otp') codigoRef.current?.focus()
+  }, [step])
+
+  // Fluxo de número reconhecido: o body leva SÓ o token opaco — o servidor
+  // resolve o destino do OTP; nenhum telefone sai do navegador.
+  async function pedirCodigoVinculo() {
+    setErro('')
+    setEnviando(true)
+    try {
+      const res = await fetch('/api/cliente/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ waToken }),
+      })
+      const data = await res.json()
+      if (!res.ok || !data.ok) {
+        if (data?.vinculoInvalido) {
+          limparVinculo()
+          setErro('Não conseguimos confirmar seu WhatsApp. Digite seu número.')
+          setStep('telefone')
+        } else {
+          setErro(data.error || 'Não foi possível enviar o código')
+        }
+        setEnviando(false)
+        return
+      }
+      setOtpViaVinculo(true)
+      setCodigo('')
+      setReenvioEm(60)
+      setStep('otp')
+    } catch { setErro('Erro de conexão. Tente novamente.') }
+    setEnviando(false)
+  }
 
   async function pedirCodigo() {
     setErro('')
@@ -137,9 +246,27 @@ export default function ClientePage() {
       })
       const data = await res.json()
       if (!res.ok || !data.ok) { setErro(data.error || 'Não foi possível enviar o código'); setEnviando(false); return }
+      setOtpViaVinculo(false)
+      setCodigo('')
+      setReenvioEm(60)
       setStep('otp')
     } catch { setErro('Erro de conexão. Tente novamente.') }
     setEnviando(false)
+  }
+
+  async function reenviarCodigo() {
+    if (reenvioEm > 0 || enviando) return
+    if (otpViaVinculo) { await pedirCodigoVinculo(); return }
+    await pedirCodigo()
+  }
+
+  async function entrarNoPerfil() {
+    const ok = await carregarPerfil()
+    if (ok) {
+      const destino = nextPermitidoAtual()
+      if (destino) { window.location.href = destino; return true }
+    }
+    return ok
   }
 
   async function confirmarCodigo() {
@@ -150,15 +277,45 @@ export default function ClientePage() {
       const res = await fetch('/api/cliente/verificar', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ telefone, codigo }),
+        body: JSON.stringify(otpViaVinculo ? { waToken, codigo } : { telefone, codigo }),
       })
       const data = await res.json()
-      if (!res.ok || !data.ok) { setErro(data.error || 'Código inválido'); setEnviando(false); return }
-      const ok = await carregarPerfil()
-      if (ok) {
-        const destino = nextPermitidoAtual()
-        if (destino) { window.location.href = destino; return }
+      if (!res.ok || !data.ok) {
+        if (data?.vinculoInvalido) {
+          limparVinculo()
+          setErro('Não conseguimos confirmar seu WhatsApp. Digite seu número.')
+          setStep('telefone')
+        } else {
+          setErro(data.error || 'Código inválido')
+        }
+        setEnviando(false)
+        return
       }
+      // Cliente novo (sem nome salvo) informa somente o nome — nunca o telefone.
+      if (!data?.cliente?.nome) {
+        setNome('')
+        setStep('nome')
+        setEnviando(false)
+        return
+      }
+      await entrarNoPerfil()
+    } catch { setErro('Erro de conexão. Tente novamente.') }
+    setEnviando(false)
+  }
+
+  async function salvarNome() {
+    setErro('')
+    if (nome.trim().length < 2) { setErro('Digite seu nome'); return }
+    setEnviando(true)
+    try {
+      const res = await fetch('/api/cliente/perfil', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nome }),
+      })
+      const data = await res.json()
+      if (!res.ok || !data.ok) { setErro(data.error || 'Não foi possível salvar seu nome'); setEnviando(false); return }
+      await entrarNoPerfil()
     } catch { setErro('Erro de conexão. Tente novamente.') }
     setEnviando(false)
   }
@@ -169,6 +326,11 @@ export default function ClientePage() {
     setFidelidade(null)
     setTelefone('')
     setCodigo('')
+    setNome('')
+    setErro('')
+    // Mantém o vínculo do link (se ainda válido) — sair da conta não apaga o
+    // reconhecimento do WhatsApp desta sessão de navegação.
+    if (waToken && waMascarado) { setStep('confirmar'); return }
     setStep('telefone')
   }
 
@@ -229,6 +391,23 @@ export default function ClientePage() {
     fontFamily: 'Archivo, sans-serif',
   }
 
+  const botaoTextoDiscreto: React.CSSProperties = {
+    background: 'none',
+    border: 'none',
+    color: cores.textoSecundario,
+    fontSize: 13,
+    cursor: 'pointer',
+    fontFamily: 'Archivo, sans-serif',
+  }
+
+  const iconeCirculo = (icone: React.ReactNode) => (
+    <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
+      <div style={{ background: cores.navyCard, borderRadius: 999, width: 64, height: 64, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        {icone}
+      </div>
+    </div>
+  )
+
   return (
     <div style={{ background: cores.fundo, minHeight: '100dvh', fontFamily: 'Archivo, sans-serif', color: cores.navy, display: 'flex', flexDirection: 'column' }}>
       <div style={{ background: cores.cardBg, borderBottom: `1px solid ${cores.cardBorda}`, padding: '12px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -260,14 +439,38 @@ export default function ClientePage() {
           <p style={{ textAlign: 'center', color: cores.textoSecundario, fontSize: 14 }}>Carregando...</p>
         )}
 
+        {step === 'confirmar' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14, maxWidth: 420, margin: '0 auto' }}>
+            <div style={{ textAlign: 'center', marginBottom: 4 }}>
+              {iconeCirculo(<ShieldCheck size={30} color={cores.amarelo} />)}
+              <h1 style={{ fontSize: 18, fontWeight: 800, margin: '0 0 6px' }}>Encontramos seu WhatsApp</h1>
+              <p style={{ fontSize: 13.5, color: cores.textoSecundario, margin: 0, lineHeight: 1.5 }}>
+                Este é o número usado para abrir seu cardápio:
+              </p>
+            </div>
+            <div style={{ background: cores.cardBg, border: `1px solid ${cores.cardBorda}`, borderRadius: 12, padding: '14px 16px', textAlign: 'center', fontSize: 20, fontWeight: 800, letterSpacing: 1, fontVariantNumeric: 'tabular-nums', overflowWrap: 'anywhere' }}>
+              {waMascarado}
+            </div>
+            <p style={{ fontSize: 13.5, color: cores.textoSecundario, margin: 0, lineHeight: 1.5, textAlign: 'center' }}>
+              Confirme seu WhatsApp para ativar seus pontos, acompanhar suas recompensas e não perder nenhuma vantagem.
+            </p>
+            {erro && <p style={{ color: cores.perigo, fontSize: 13, margin: 0, textAlign: 'center' }}>{erro}</p>}
+            <button onClick={pedirCodigoVinculo} disabled={enviando} style={{ ...botaoPrimario, opacity: enviando ? 0.6 : 1 }}>
+              {enviando ? 'Enviando...' : 'Confirmar e receber código'}
+            </button>
+            <p style={{ fontSize: 12.5, color: cores.textoTerciario, margin: 0, textAlign: 'center' }}>
+              Vamos enviar um código de segurança para este WhatsApp.
+            </p>
+            <button onClick={() => { setErro(''); setStep('telefone') }} style={{ ...botaoTextoDiscreto, textAlign: 'center' }}>
+              Este número não é meu
+            </button>
+          </div>
+        )}
+
         {step === 'telefone' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14, maxWidth: 420, margin: '0 auto' }}>
             <div style={{ textAlign: 'center', marginBottom: 4 }}>
-              <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
-                <div style={{ background: cores.navyCard, borderRadius: 999, width: 64, height: 64, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <Gift size={30} color={cores.amarelo} />
-                </div>
-              </div>
+              {iconeCirculo(<Gift size={30} color={cores.amarelo} />)}
               <h1 style={{ fontSize: 18, fontWeight: 800, margin: '0 0 6px' }}>Entre com seu WhatsApp</h1>
               <p style={{ fontSize: 13.5, color: cores.textoSecundario, margin: 0, lineHeight: 1.5 }}>
                 Suas pizzas começam a contar rumo à sua recompensa.
@@ -285,6 +488,11 @@ export default function ClientePage() {
             <button onClick={pedirCodigo} disabled={enviando} style={{ ...botaoPrimario, opacity: enviando ? 0.6 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
               <Phone size={16} /> {enviando ? 'Enviando...' : 'Receber código no WhatsApp'}
             </button>
+            {waToken && waMascarado && (
+              <button onClick={() => { setErro(''); setStep('confirmar') }} style={{ ...botaoTextoDiscreto, textAlign: 'center' }}>
+                Voltar para o número encontrado
+              </button>
+            )}
             <a href="/pedido" style={{ textAlign: 'center', fontSize: 13, color: cores.textoSecundario, textDecoration: 'none' }}>
               Prefiro pedir sem entrar agora
             </a>
@@ -294,31 +502,65 @@ export default function ClientePage() {
         {step === 'otp' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14, maxWidth: 420, margin: '0 auto' }}>
             <div style={{ textAlign: 'center', marginBottom: 4 }}>
-              <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
-                <div style={{ background: cores.navyCard, borderRadius: 999, width: 64, height: 64, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <MessageCircle size={28} color={cores.amarelo} />
-                </div>
-              </div>
-              <h1 style={{ fontSize: 18, fontWeight: 800, margin: '0 0 6px' }}>Digite o código</h1>
+              {iconeCirculo(<MessageCircle size={28} color={cores.amarelo} />)}
+              <h1 style={{ fontSize: 18, fontWeight: 800, margin: '0 0 6px' }}>Confira seu WhatsApp</h1>
               <p style={{ fontSize: 13.5, color: cores.textoSecundario, margin: 0, lineHeight: 1.5 }}>
-                Enviamos um código de 6 dígitos pro seu WhatsApp.
+                {otpViaVinculo && waFinal
+                  ? `Enviamos um código para o número final ${waFinal}.`
+                  : 'Enviamos um código de 6 dígitos pro seu WhatsApp.'}
+              </p>
+            </div>
+            <input
+              ref={codigoRef}
+              type="text"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              placeholder="000000"
+              value={codigo}
+              // Sem maxLength no atributo: colar "12 34 56" não pode ser
+              // truncado pelo navegador antes do filtro de dígitos abaixo.
+              onChange={(e) => setCodigo(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              style={{ ...inputStyle, textAlign: 'center', letterSpacing: 4, fontSize: 20 }}
+            />
+            {erro && <p style={{ color: cores.perigo, fontSize: 13, margin: 0 }}>{erro}</p>}
+            <button onClick={confirmarCodigo} disabled={enviando} style={{ ...botaoPrimario, opacity: enviando ? 0.6 : 1 }}>
+              {enviando ? 'Confirmando...' : 'Confirmar código'}
+            </button>
+            <button
+              onClick={reenviarCodigo}
+              disabled={reenvioEm > 0 || enviando}
+              style={{ ...botaoTextoDiscreto, opacity: reenvioEm > 0 ? 0.6 : 1, cursor: reenvioEm > 0 ? 'default' : 'pointer' }}
+            >
+              {reenvioEm > 0 ? `Reenviar código em ${reenvioEm}s` : 'Reenviar código'}
+            </button>
+            <button onClick={() => { setErro(''); setCodigo(''); setStep('telefone') }} style={botaoTextoDiscreto}>
+              Usar outro número
+            </button>
+          </div>
+        )}
+
+        {step === 'nome' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14, maxWidth: 420, margin: '0 auto' }}>
+            <div style={{ textAlign: 'center', marginBottom: 4 }}>
+              {iconeCirculo(<Sparkles size={28} color={cores.amarelo} />)}
+              <h1 style={{ fontSize: 18, fontWeight: 800, margin: '0 0 6px' }}>Como podemos chamar você?</h1>
+              <p style={{ fontSize: 13.5, color: cores.textoSecundario, margin: 0, lineHeight: 1.5 }}>
+                Seu WhatsApp já está confirmado. Falta só seu nome para ativar suas vantagens.
               </p>
             </div>
             <input
               type="text"
-              inputMode="numeric"
-              placeholder="000000"
-              value={codigo}
-              onChange={(e) => setCodigo(e.target.value)}
-              style={{ ...inputStyle, textAlign: 'center', letterSpacing: 4, fontSize: 20 }}
-              maxLength={6}
+              autoComplete="name"
+              placeholder="Seu nome"
+              value={nome}
+              onChange={(e) => setNome(e.target.value)}
+              maxLength={60}
+              style={inputStyle}
+              autoFocus
             />
             {erro && <p style={{ color: cores.perigo, fontSize: 13, margin: 0 }}>{erro}</p>}
-            <button onClick={confirmarCodigo} disabled={enviando} style={{ ...botaoPrimario, opacity: enviando ? 0.6 : 1 }}>
-              {enviando ? 'Confirmando...' : 'Entrar'}
-            </button>
-            <button onClick={() => setStep('telefone')} style={{ background: 'none', border: 'none', color: cores.textoSecundario, fontSize: 13, cursor: 'pointer', fontFamily: 'Archivo, sans-serif' }}>
-              Trocar número
+            <button onClick={salvarNome} disabled={enviando} style={{ ...botaoPrimario, opacity: enviando ? 0.6 : 1 }}>
+              {enviando ? 'Ativando...' : 'Ativar meus pontos'}
             </button>
           </div>
         )}

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verificarTokenCliente, CLIENTE_COOKIE } from "@/lib/clienteAuth";
-import { buscarClientePorId } from "@/lib/clientes";
+import { buscarClientePorId, normalizarNomeCliente, obterOuCriarCliente } from "@/lib/clientes";
 import { obterProgressoFidelidade } from "@/lib/fidelidade";
 import { redis } from "@/lib/redis";
 
@@ -43,4 +43,32 @@ export async function GET(req: NextRequest) {
     fidelidade,
     ultimosPedidos,
   });
+}
+
+// PATCH /api/cliente/perfil — completa o cadastro do próprio dono da sessão
+// (só o nome; o telefone é sempre o da sessão autenticada, nunca do body).
+// Usado pela tela de Pontos logo após o OTP, quando o cliente ainda não tem
+// nome salvo.
+export async function PATCH(req: NextRequest) {
+  const token = req.cookies.get(CLIENTE_COOKIE)?.value ?? null;
+  if (!token) return NextResponse.json({ error: "Nao autorizado" }, { status: 401 });
+
+  const payload = await verificarTokenCliente(token);
+  if (!payload) return NextResponse.json({ error: "Nao autorizado" }, { status: 401 });
+
+  const cliente = await buscarClientePorId(payload.clienteId);
+  if (!cliente) return NextResponse.json({ error: "Nao autorizado" }, { status: 401 });
+
+  try {
+    const body = await req.json();
+    const nome = normalizarNomeCliente(body?.nome);
+    if (nome.length < 2) {
+      return NextResponse.json({ ok: false, error: "Digite seu nome" }, { status: 400 });
+    }
+    const atualizado = await obterOuCriarCliente(cliente.telefone, nome);
+    return NextResponse.json({ ok: true, cliente: { nome: atualizado.nome ?? null } });
+  } catch (error) {
+    console.error("[ChefeBot] Erro ao atualizar nome do cliente:", error);
+    return NextResponse.json({ ok: false, error: "Erro interno" }, { status: 500 });
+  }
 }

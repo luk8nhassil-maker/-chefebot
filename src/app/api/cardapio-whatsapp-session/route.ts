@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { validarTokenCardapio, mascararPhone } from "@/lib/cardapioToken";
+import { validarTokenCardapio, mascararPhone, mascararTelefoneExibicao } from "@/lib/cardapioToken";
 
 // Resolve o token `?t=` do link do cardápio enviado pelo WhatsApp.
 // NUNCA devolve o phone completo ao navegador — apenas os 4 últimos dígitos
@@ -12,7 +12,14 @@ export async function GET(req: NextRequest) {
     if (!resolvido) {
       return NextResponse.json({ ok: false });
     }
-    return NextResponse.json({ ok: true, origem: "whatsapp", phoneFinal: mascararPhone(resolvido.phone) });
+    // phoneMascarado: formato de exibição "(45) 9••••-0691" para a confirmação
+    // na aba Pontos — nunca o número completo (só DDD + 9 inicial + 4 finais).
+    return NextResponse.json({
+      ok: true,
+      origem: "whatsapp",
+      phoneFinal: mascararPhone(resolvido.phone),
+      phoneMascarado: mascararTelefoneExibicao(resolvido.phone),
+    });
   } catch {
     return NextResponse.json({ ok: false });
   }

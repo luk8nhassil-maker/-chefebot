@@ -13,6 +13,15 @@ export function sanitizeTelefoneCliente(telefone: string): string {
   return (telefone || "").replace(/\D/g, "");
 }
 
+// Nome exibível do cliente: colapsa espaços, remove caracteres de controle e
+// limita o tamanho. Retorna "" quando não sobra nada utilizável — quem chama
+// decide se isso é erro (cadastro) ou só ausência (nome opcional).
+export function normalizarNomeCliente(nome: unknown): string {
+  if (typeof nome !== "string") return "";
+  const limpo = nome.replace(/[\u0000-\u001f\u007f]/g, "").replace(/\s+/g, " ").trim();
+  return limpo.slice(0, 60).trim();
+}
+
 function chaveCliente(telefoneSanitizado: string): string {
   return `cliente:${telefoneSanitizado}`;
 }
