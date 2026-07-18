@@ -63,7 +63,7 @@ export async function PATCH(req: NextRequest) {
     const traceBruto = req.headers.get("x-chefebot-trace");
     const trace = typeof traceBruto === "string" && TRACE_RE.test(traceBruto) ? traceBruto : "-";
     console.log(
-      `[ChefeBot] perfil3-auth trace=${trace} cookie_presente=${diagnostico.cookiePresente ? 1 : 0} cookie_valido=${diagnostico.cookieValido ? 1 : 0} authorization_presente=${diagnostico.authorizationPresente ? 1 : 0} formato_bearer=${diagnostico.formatoBearer} jwe_valido=${diagnostico.jweValido ? 1 : 0} opaco_valido=${diagnostico.opacoValido ? 1 : 0} fonte=${diagnostico.fonte}`
+      `[ChefeBot] perfil3-auth trace=${trace} cookie_presente=${diagnostico.cookiePresente ? 1 : 0} cookie_valido=${diagnostico.cookieValido ? 1 : 0} cookie_erro=${diagnostico.cookieErro ?? "-"} authorization_presente=${diagnostico.authorizationPresente ? 1 : 0} formato_bearer=${diagnostico.formatoBearer} jwe_valido=${diagnostico.jweValido ? 1 : 0} jwe_erro=${diagnostico.jweErro ?? "-"} opaco_valido=${diagnostico.opacoValido ? 1 : 0} fonte=${diagnostico.fonte}`
     );
     return NextResponse.json({ error: "Nao autorizado" }, { status: 401 });
   }

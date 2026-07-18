@@ -376,15 +376,25 @@ export default function ClientePage() {
     try {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' }
       if (traceId && /^P3-[A-Z0-9]{6}$/.test(traceId)) headers['X-ChefeBot-Trace'] = traceId
-      const res = await fetchCliente('/api/cliente/perfil', {
+      const enviarPatch = () => fetchCliente('/api/cliente/perfil', {
         method: 'PATCH',
         headers,
         body: JSON.stringify({ nome }),
       }, sessaoMemRef.current)
+      let res = await enviarPatch()
+      // 401 isolado logo após o OTP validado é o sintoma conhecido de uma
+      // falha pontual de autenticação (nunca reproduzida de propósito) — uma
+      // única nova tentativa automática, sem pedir nada ao cliente, evita um
+      // beco sem saída por uma falha transitória. Não retenta 400/500.
+      if (res.status === 401) {
+        telemetria('name_save_retry', { trace: traceId })
+        await new Promise(r => setTimeout(r, 600))
+        res = await enviarPatch()
+      }
       const data = await res.json().catch(() => ({}))
       telemetria('name_save_request_status', { status: res.status, trace: traceId })
       if (!res.ok || !data.ok) {
-        // Falha (inclusive 401 transitório) mantém a tela do nome com retry —
+        // Falha (inclusive 401 persistente) mantém a tela do nome com retry —
         // NUNCA pede novo código nem volta para a confirmação.
         setErro(res.status === 400 ? (data.error || 'Digite seu nome') : 'Não conseguimos salvar agora. Tente de novo.')
         setEnviando(false)

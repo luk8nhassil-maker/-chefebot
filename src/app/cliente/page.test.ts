@@ -222,6 +222,15 @@ describe("/cliente — sessão portátil: PATCH do nome sem depender de sondagem
     expect(bloco).toContain("X-ChefeBot-Trace");
     expect(bloco).toMatch(/\/\^P3-\[A-Z0-9\]\{6\}\$\/\.test\(traceId\)/);
   });
+
+  test("um 401 isolado aciona uma única nova tentativa automática (mesma sessão em memória) antes do erro final", () => {
+    const bloco = fonte.slice(fonte.indexOf("async function salvarNome"), fonte.indexOf("async function sair"));
+    expect(bloco).toContain("res.status === 401");
+    expect(bloco).toMatch(/telemetria\('name_save_retry'/);
+    // a segunda chamada reusa a mesma função de envio (mesmo token em memória, mesmo body)
+    const chamadasEnviarPatch = bloco.match(/enviarPatch\(\)/g) ?? [];
+    expect(chamadasEnviarPatch.length).toBeGreaterThanOrEqual(2);
+  });
 });
 
 describe("/cliente — Etapa 2: sem lembrete operacional de pedido + barra global de Pix pendente", () => {

@@ -185,13 +185,35 @@ export async function criarSessaoPortatil(payload: ClienteTokenPayload): Promise
 }
 
 export async function resolverSessaoPortatil(token: string | null | undefined): Promise<ClienteTokenPayload | null> {
-  if (!token || !token.includes(".")) return null;
+  return (await resolverSessaoPortatilComDiagnostico(token)).payload;
+}
+
+// Código estável do erro do "jose" (ex.: ERR_JWE_DECRYPTION_FAILED,
+// ERR_JWT_EXPIRED) — nunca a mensagem livre, nunca o token/chave. Usado só
+// pelo diagnóstico temporário abaixo; nunca influencia o resultado real.
+function codigoErroCripto(err: unknown): string {
+  const code = (err as { code?: unknown } | null)?.code;
+  if (typeof code === "string") return code;
+  const name = (err as { name?: unknown } | null)?.name;
+  if (typeof name === "string") return name;
+  return "erro_desconhecido";
+}
+
+// Mesma resolução de resolverSessaoPortatil, mas também devolve o código de
+// erro (sanitizado, sem PII/segredo) quando a decriptação falha — só para
+// lerSessaoClienteDiagnosticada provar a causa exata de um 401 inesperado.
+async function resolverSessaoPortatilComDiagnostico(
+  token: string | null | undefined
+): Promise<{ payload: ClienteTokenPayload | null; erro?: string }> {
+  if (!token || !token.includes(".")) return { payload: null };
   try {
     const { payload } = await jwtDecrypt(token, chaveSessaoPortatil());
-    if (typeof payload.clienteId !== "string" || typeof payload.telefone !== "string") return null;
-    return { clienteId: payload.clienteId, telefone: payload.telefone };
-  } catch {
-    return null;
+    if (typeof payload.clienteId !== "string" || typeof payload.telefone !== "string") {
+      return { payload: null, erro: "payload_invalido" };
+    }
+    return { payload: { clienteId: payload.clienteId, telefone: payload.telefone } };
+  } catch (err) {
+    return { payload: null, erro: codigoErroCripto(err) };
   }
 }
 
@@ -235,6 +257,10 @@ export type DiagnosticoAutenticacao = {
   jweValido: boolean;
   opacoValido: boolean;
   fonte: "cookie" | "jwe" | "opaco" | "nenhuma";
+  /** Código estável do erro (ex.: ERR_JWT_EXPIRED) — só quando cookieValido=false. */
+  cookieErro?: string;
+  /** Código estável do erro (ex.: ERR_JWE_DECRYPTION_FAILED) — só quando jweValido=false. */
+  jweErro?: string;
 };
 
 const FORMATO_SESSAO_PORTATIL = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
@@ -253,9 +279,10 @@ export async function lerSessaoClienteDiagnosticada(req: {
   const cookie = req.cookies.get(CLIENTE_COOKIE)?.value;
   const cookiePresente = !!cookie;
   let cookieValido = false;
+  let cookieErro: string | undefined;
 
   if (cookie) {
-    const payloadCookie = await verificarTokenCliente(cookie);
+    const { payload: payloadCookie, erro } = await verificarTokenClienteComDiagnostico(cookie);
     if (payloadCookie) {
       cookieValido = true;
       return {
@@ -271,6 +298,7 @@ export async function lerSessaoClienteDiagnosticada(req: {
         },
       };
     }
+    cookieErro = erro;
   }
 
   const bruto = extrairBearerBruto(req.headers.get("authorization"));
@@ -278,30 +306,32 @@ export async function lerSessaoClienteDiagnosticada(req: {
   const formatoBearer = classificarFormatoBearer(bruto);
   let jweValido = false;
   let opacoValido = false;
+  let jweErro: string | undefined;
 
   if (formatoBearer === "jwe") {
-    const portatil = await resolverSessaoPortatil(bruto);
+    const { payload: portatil, erro } = await resolverSessaoPortatilComDiagnostico(bruto);
     if (portatil) {
       jweValido = true;
       return {
         payload: portatil,
-        diagnostico: { cookiePresente, cookieValido, authorizationPresente, formatoBearer, jweValido, opacoValido, fonte: "jwe" },
+        diagnostico: { cookiePresente, cookieValido, authorizationPresente, formatoBearer, jweValido, opacoValido, fonte: "jwe", cookieErro },
       };
     }
+    jweErro = erro;
   } else if (formatoBearer === "opaco") {
     const opaca = await resolverSessaoOpaca(bruto);
     if (opaca) {
       opacoValido = true;
       return {
         payload: opaca,
-        diagnostico: { cookiePresente, cookieValido, authorizationPresente, formatoBearer, jweValido, opacoValido, fonte: "opaco" },
+        diagnostico: { cookiePresente, cookieValido, authorizationPresente, formatoBearer, jweValido, opacoValido, fonte: "opaco", cookieErro },
       };
     }
   }
 
   return {
     payload: null,
-    diagnostico: { cookiePresente, cookieValido, authorizationPresente, formatoBearer, jweValido, opacoValido, fonte: "nenhuma" },
+    diagnostico: { cookiePresente, cookieValido, authorizationPresente, formatoBearer, jweValido, opacoValido, fonte: "nenhuma", cookieErro, jweErro },
   };
 }
 
@@ -313,11 +343,22 @@ export async function criarTokenCliente(payload: ClienteTokenPayload): Promise<s
 }
 
 export async function verificarTokenCliente(token: string): Promise<ClienteTokenPayload | null> {
+  return (await verificarTokenClienteComDiagnostico(token)).payload;
+}
+
+// Mesma verificação de verificarTokenCliente, mas também devolve o código de
+// erro (sanitizado, sem PII/segredo) quando a verificação falha — só para
+// lerSessaoClienteDiagnosticada provar a causa exata de um 401 inesperado.
+async function verificarTokenClienteComDiagnostico(
+  token: string
+): Promise<{ payload: ClienteTokenPayload | null; erro?: string }> {
   try {
     const { payload } = await jwtVerify(token, getSecret());
-    if (typeof payload.clienteId !== "string" || typeof payload.telefone !== "string") return null;
-    return { clienteId: payload.clienteId, telefone: payload.telefone };
-  } catch {
-    return null;
+    if (typeof payload.clienteId !== "string" || typeof payload.telefone !== "string") {
+      return { payload: null, erro: "payload_invalido" };
+    }
+    return { payload: { clienteId: payload.clienteId, telefone: payload.telefone } };
+  } catch (err) {
+    return { payload: null, erro: codigoErroCripto(err) };
   }
 }
