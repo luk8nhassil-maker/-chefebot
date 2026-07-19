@@ -24,6 +24,7 @@ import { avaliarEvidenciaPix, type ResultadoEvidenciaPix } from "@/lib/pixCompro
 import { encontrarPedidoPixPendentePorTelefone } from "@/lib/pixPedidoMatching";
 import { telefonesCorrespondem } from "@/lib/telefone";
 import { creditarPontosPedidoEntregue } from "@/lib/fidelidade";
+import { itensJornadaDoCarrinhoWhatsApp, processarConclusaoPedidoJornada } from "@/lib/jornadaChef";
 import type { BotStep } from "@/lib/bot";
 import { obterConfigEvolution } from "@/lib/evolutionApi";
 import { enviarTextoWhatsApp } from "@/lib/whatsappMensagem";
@@ -200,6 +201,10 @@ async function salvarPedido(session: BotSession, phone: string, _config: ConfigP
     ...(session.deliveryFee ? { taxaEntrega: session.deliveryFee } : {}),
     ...(session.neighborhood ? { bairro: session.neighborhood } : {}),
     ...(session.deliveryType ? { tipoEntrega: session.deliveryType } : {}),
+    // Jornada do Chef: captura os itens estruturados do carrinho do bot NO
+    // MOMENTO da criação do pedido (nunca reconstruído depois por parsing de
+    // texto livre) — ver contarPizzasElegiveisPedido em @/lib/jornadaChef.
+    itensJornada: itensJornadaDoCarrinhoWhatsApp(session.cart),
   };
   await redis.set("pedidos", [...pedidos, novoPedido]);
 
@@ -1172,6 +1177,12 @@ export async function POST(req: NextRequest) {
           } catch (err) {
             console.error('[ChefeBot] Erro ao creditar pontos de fidelidade (ignorado):', err)
           }
+
+          // Jornada do Chef: hook centralizado, mesma função chamada em toda
+          // transição oficial para "entregue" — nunca duplica a regra por rota.
+          await processarConclusaoPedidoJornada(pedidos[index]).catch((err) =>
+            console.error('[ChefeBot] Erro ao processar Jornada do Chef (ignorado):', err)
+          )
 
           await redis.del(`entregador_aguardando:${phone}`)
           const pedido = pedidos[index]

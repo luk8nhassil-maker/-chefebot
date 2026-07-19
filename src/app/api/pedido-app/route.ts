@@ -11,6 +11,7 @@ import { temDinheiroNoPagamento, valorDinheiroEsperado } from "@/lib/bot";
 import { verificarTokenCliente, CLIENTE_COOKIE } from "@/lib/clienteAuth";
 import { contarPizzas, calcularPontosElegiveisPedido, registrarMovimentoPontosIdempotente, construirEventoIdPontos, derivarClienteIdPorTelefone, obterReservasResgatePontos, confirmarResgatePontos } from "@/lib/fidelidade";
 import { type ItemApp, type MenuPedidoApp, formatItem, officialUnitPrice, makePromoUnitPrice } from "@/lib/pedidoAppItens";
+import { obterRecompensa, confirmarReservaNoPedido } from "@/lib/jornadaChef";
 
 export const maxDuration = 20;
 
@@ -107,12 +108,33 @@ export async function POST(req: NextRequest) {
 
     const itensValidados = body.itens.map((item) => ({
       linha: formatItem(item),
-      unitPrice: item.kind === "promo" ? promoUnitPrice(item) : officialUnitPrice(item, menu as MenuPedidoApp),
+      // Item do presente da Jornada do Chef: preço sempre 0 — nunca o preço
+      // normal do produto. A legitimidade do `recompensaJornadaId` (pertence
+      // a este cliente, está reservado) é validada logo abaixo, ANTES de
+      // criar o pedido.
+      unitPrice: item.recompensaJornadaId ? 0 : item.kind === "promo" ? promoUnitPrice(item) : officialUnitPrice(item, menu as MenuPedidoApp),
       qty: item.qty,
     }));
 
     if (itensValidados.some((item) => item.unitPrice === null)) {
       return NextResponse.json({ ok: false, error: "Item inválido" }, { status: 400 });
+    }
+
+    // Presente da Jornada do Chef (rule 13/14): no máximo um por pedido,
+    // nunca confia em clienteId/recompensaId vindo do frontend sem checar a
+    // sessão (telefone canônico do pedido) e a propriedade/status no servidor.
+    const itensRecompensaJornada = body.itens.filter((item) => item.recompensaJornadaId);
+    if (itensRecompensaJornada.length > 1) {
+      return NextResponse.json({ ok: false, error: "Apenas um presente da Jornada do Chef por pedido" }, { status: 400 });
+    }
+    const recompensaJornadaId = itensRecompensaJornada[0]?.recompensaJornadaId;
+    let clienteIdJornada: string | undefined;
+    if (recompensaJornadaId) {
+      clienteIdJornada = derivarClienteIdPorTelefone(telefonePedido);
+      const recompensa = clienteIdJornada ? await obterRecompensa(recompensaJornadaId) : null;
+      if (!clienteIdJornada || !recompensa || recompensa.clienteId !== clienteIdJornada || recompensa.status !== "reservada" || recompensa.reservaPedidoId) {
+        return NextResponse.json({ ok: false, error: "Presente da Jornada do Chef inválido ou já utilizado" }, { status: 400 });
+      }
     }
 
     // Formata os itens como strings, no MESMO padrão do fluxo do WhatsApp
@@ -210,6 +232,7 @@ export async function POST(req: NextRequest) {
       ...(clienteId ? { clienteId } : {}),
       ...(pizzasCount > 0 ? { pizzasCount } : {}),
       ...(resgateAplicado ? { resgateId: resgateAplicado.resgateId, descontoFidelidade } : {}),
+      ...(recompensaJornadaId ? { recompensaJornadaId } : {}),
       itens,
       total,
       status: "novo" as const,
@@ -251,6 +274,23 @@ export async function POST(req: NextRequest) {
         );
         console.error("[ChefeBot] Erro ao confirmar resgate de fidelidade; pedido com desconto revertido:", err);
         return NextResponse.json({ ok: false, error: "Nao foi possivel confirmar o resgate. Tente novamente." }, { status: 409 });
+      }
+    }
+
+    // Confirma o vínculo do presente da Jornada do Chef a este pedido (rule
+    // 13): se não persistir, o pedido com o item grátis é revertido — mesmo
+    // tratamento do resgate de pontos acima, o presente também é "dinheiro".
+    if (recompensaJornadaId && clienteIdJornada) {
+      try {
+        await confirmarReservaNoPedido(clienteIdJornada, recompensaJornadaId, pedidoId);
+      } catch (err) {
+        const pedidosAtuais = (await redis.get<unknown[]>("pedidos")) || [];
+        await redis.set(
+          "pedidos",
+          pedidosAtuais.filter((pedido) => (pedido as { id?: unknown } | null)?.id !== pedidoId)
+        );
+        console.error("[ChefeBot] Erro ao confirmar presente da Jornada do Chef; pedido revertido:", err);
+        return NextResponse.json({ ok: false, error: "Nao foi possivel confirmar o presente. Tente novamente." }, { status: 409 });
       }
     }
 

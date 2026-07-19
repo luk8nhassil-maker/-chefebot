@@ -1,6 +1,7 @@
 import type { PixMetadata } from "@/lib/pix";
 import type { PedidoComEdicao } from "@/lib/pedidoEdicao";
 import type { ItemApp } from "@/lib/pedidoAppItens";
+import type { ItemElegibilidadeJornada } from "@/lib/jornadaChef";
 
 /** Forma do pedido tal como persistido em Redis (chave "pedidos"), usada pelos endpoints de edição. */
 export type PedidoRedis = PedidoComEdicao & {
@@ -30,6 +31,12 @@ export type PedidoRedis = PedidoComEdicao & {
   pizzasCount?: number;
   resgateId?: string;
   descontoFidelidade?: number;
+  // Jornada do Chef (fidelidade por recorrência, camada separada dos pontos):
+  // `itensJornada` é preenchido pelo bot de WhatsApp no momento da criação do
+  // pedido (não há itensDetalhados estruturado nesse canal); `recompensaJornadaId`
+  // identifica qual presente da Jornada foi usado neste pedido (rule 13/14).
+  itensJornada?: ItemElegibilidadeJornada[];
+  recompensaJornadaId?: string;
   whatsappVinculado?: boolean;
   pix?: PixMetadata;
   pixConfirmado?: boolean;

@@ -10,6 +10,11 @@ export type ItemApp = {
   price: number;
   qty: number;
   promoId?: string; // presente quando kind === "promo"
+  // Presente quando este item é o presente resgatado da Jornada do Chef —
+  // preço sempre forçado a 0 no servidor (nunca confia no preço vindo do
+  // cliente), nunca soma pontos nem avança a trilha de novo (ver
+  // contarPizzasElegiveisPedido em @/lib/jornadaChef).
+  recompensaJornadaId?: string;
 };
 
 export type MenuSimpleItem = { name: string; price: number; sizes?: { code: string; price: number }[] };
@@ -138,7 +143,11 @@ export function validarEFormatarItens(
 ): { linha: string; unitPrice: number | null; qty: number }[] {
   return itens.map((item) => ({
     linha: formatItem(item),
-    unitPrice: item.kind === "promo" ? promoUnitPrice(item) : officialUnitPrice(item, menu),
+    // Item do presente da Jornada do Chef: preço sempre 0, nunca o preço
+    // normal do produto — quem valida se o `recompensaJornadaId` é legítimo
+    // (pertence ao cliente da sessão, está reservado) é a rota que chama
+    // esta função, antes de persistir o pedido.
+    unitPrice: item.recompensaJornadaId ? 0 : item.kind === "promo" ? promoUnitPrice(item) : officialUnitPrice(item, menu),
     qty: item.qty,
   }));
 }
