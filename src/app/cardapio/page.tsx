@@ -12,6 +12,7 @@ import { salvarReferenciaPixPendente } from "@/lib/pixPendenteLocal";
 import PixPendenteBar, { usePixPendente, PIX_PENDENTE_BAR_HEIGHT_PX } from "@/components/PixPendenteBar";
 import PixPagamentoCard from "./PixPagamentoCard";
 import LayoutDebugPanel from "./LayoutDebugPanel";
+import { fetchCliente } from "@/lib/clienteSessaoFront";
 
 // Ícones de categoria da home (menu/navegação) — lucide-react, sem emoji.
 // Mantidos separados de ICONS (que continua usando emoji para os itens
@@ -616,6 +617,17 @@ type CartItem = {
   keys?: string[];
   // Presente quando o item veio de uma promoção do cardápio.
   promoId?: string;
+  // Presente quando este item é o presente resgatado da Jornada do Chef —
+  // preço sempre 0, nunca combinado visualmente com promoção comum, e a
+  // remoção libera a reserva no servidor (ver rmItem). `name`/`detail` aqui
+  // são só para exibição (vêm da API autenticada, nunca do sessionStorage) —
+  // o servidor reconstrói o item de verdade a partir do snapshot da própria
+  // recompensa no momento do pedido, nunca confia neste item do carrinho.
+  recompensaJornadaId?: string;
+  // Escolha do cliente (só sabor da pizza-presente, hoje) — transportada até
+  // o pedido final; o servidor valida contra os sabores permitidos da
+  // recompensa antes de aceitar.
+  recompensaEscolha?: { sabor?: string };
 };
 
 type PromocaoPublica = {
@@ -786,6 +798,66 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
         sessionStorage.removeItem("cf_resgate_pontos");
       }
     } catch {}
+  }, []);
+
+  // Presente da Jornada do Chef reservado na Área do Cliente (/cliente/jornada),
+  // repassado via sessionStorage — mesmo padrão do resgate de pontos acima.
+  // sessionStorage carrega só uma REFERÊNCIA temporária (recompensaId +
+  // escolha de sabor) — nunca é a fonte de verdade do produto/preço. O nome
+  // exibido no carrinho vem da resposta autenticada de /api/cliente/jornada-chef
+  // (rule 4); se a busca falhar, cai para o rótulo local só como legenda,
+  // nunca para decidir o que o servidor vai cobrar (isso é sempre 0 e sempre
+  // reconstruído no servidor a partir do snapshot da recompensa).
+  // Injeta no carrinho UMA vez (a chave é removida logo em seguida, então
+  // remover o item do carrinho depois nunca o reinjeta sozinho — sem isso
+  // duplicaria o presente a cada remontagem da página).
+  useEffect(() => {
+    const raw = sessionStorage.getItem("cf_recompensa_jornada");
+    sessionStorage.removeItem("cf_recompensa_jornada");
+    if (!raw) return;
+    let parsed: { recompensaId?: string; escolha?: { sabor?: string }; produtoNome?: string; validaAte?: string } | null = null;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return;
+    }
+    if (!parsed?.recompensaId) return;
+    if (parsed.validaAte && new Date(parsed.validaAte).getTime() <= Date.now()) return;
+    const recompensaId = parsed.recompensaId;
+    const escolha = parsed.escolha;
+
+    (async () => {
+      let nomeExibicao = parsed?.produtoNome || "Presente da Jornada do Chef";
+      let detalheExibicao = escolha?.sabor || "";
+      try {
+        const res = await fetchCliente("/api/cliente/jornada-chef", { cache: "no-store" });
+        if (res.ok) {
+          const data = await res.json();
+          const reservada = (data?.recompensasReservadas || []).find((r: { recompensaId: string }) => r.recompensaId === recompensaId);
+          if (reservada?.produtoNome) nomeExibicao = reservada.produtoNome;
+          if (reservada?.tipo === "pizza" && reservada.pizza) {
+            nomeExibicao = `Pizza ${reservada.pizza.tamanho}`;
+            detalheExibicao = escolha?.sabor || "";
+          }
+        }
+      } catch {}
+      setCart((atual) => {
+        if (atual.some((it) => it.recompensaJornadaId === recompensaId)) return atual;
+        return [
+          ...atual,
+          {
+            emoji: "🎁",
+            kind: "simple" as const,
+            name: nomeExibicao,
+            detail: detalheExibicao,
+            price: 0,
+            qty: 1,
+            recompensaJornadaId: recompensaId,
+            ...(escolha ? { recompensaEscolha: escolha } : {}),
+          },
+        ];
+      });
+    })();
   }, []);
 
   const [size, setSize] = useState<string | null>(null);
@@ -1213,7 +1285,22 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const showUpsellBebida = !upsellBebidaIgnorado && !cartTemBebidaOuSuco && ["pizza", "lanche", "macarronada"].includes(lastAddedKind || "");
   function sairDoPosItemSemBebida(destino: "sc-start" | "sc-cart") { if (showUpsellBebida) setUpsellBebidaIgnorado(true); go(destino); }
   function chQty(idx: number, d: number) { setCart(cart.map((c, i) => (i === idx ? { ...c, qty: Math.max(1, c.qty + d) } : c))); }
-  function rmItem(idx: number) { const nc = cart.filter((_, i) => i !== idx); setCart(nc); if (nc.length === 0) go("sc-start"); }
+  function rmItem(idx: number) {
+    const removido = cart[idx];
+    // Remover o presente da Jornada do Chef do carrinho NUNCA perde o prêmio —
+    // só libera a reserva no servidor (volta a ficar "disponivel" no perfil).
+    // Melhor esforço: falha aqui não trava a remoção do item do carrinho.
+    if (removido?.recompensaJornadaId) {
+      fetchCliente("/api/cliente/jornada-chef/cancelar-reserva", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ recompensaId: removido.recompensaJornadaId }),
+      }).catch(() => {});
+    }
+    const nc = cart.filter((_, i) => i !== idx);
+    setCart(nc);
+    if (nc.length === 0) go("sc-start");
+  }
   const fee = delType === "delivery" && bairroIdx !== "" ? ((menu.neighborhoods || [])[+bairroIdx]?.fee ?? 0) : 0;
   // Desconto de fidelidade nunca ultrapassa o valor-base da reserva nem o
   // subtotal — mesma regra aplicada no servidor (POST /api/pedido-app), que
@@ -1446,7 +1533,13 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     } else { setErroTroco(""); }
     if (hasError) return;
     setSending(true);
-    const payload = { cliente: nome.trim(), telefone: telefone.trim() || undefined, whatsappToken: waToken || undefined, usarOutroWhatsapp: usarOutroWhatsapp || undefined, itens: cart.map((c) => ({ kind: c.kind, name: c.name, detail: c.detail, price: c.price, qty: c.qty, ...(c.promoId ? { promoId: c.promoId } : {}) })), tipoEntrega: delType, bairro: delType === "delivery" ? menu.neighborhoods[+bairroIdx].name : undefined, rua: delType === "delivery" ? rua : undefined, numero: delType === "delivery" && numero.trim() ? numero.trim() : undefined, referencia: delType === "delivery" && referencia.trim() ? referencia.trim() : undefined, observacao: observacao.trim() || undefined, taxaEntrega: fee, pagamento: payment, troco: (payment === "Dinheiro" || isHibrido) ? (trocoOpcao === "nao" ? "Sem troco" : troco.trim()) : undefined, resgateId: resgatePontos && new Date(resgatePontos.expiraEm).getTime() > Date.now() ? resgatePontos.resgateId : undefined };
+    // Presente da Jornada do Chef: campo dedicado, nunca um item do carrinho.
+    // O servidor reconstrói produto/preço/quantidade a partir do snapshot da
+    // própria recompensa — o cliente só informa QUAL recompensa reservada
+    // usar e (pizza) o sabor escolhido.
+    const itemRecompensaJornada = cart.find((c) => c.recompensaJornadaId);
+    const itensSemRecompensa = cart.filter((c) => !c.recompensaJornadaId);
+    const payload = { cliente: nome.trim(), telefone: telefone.trim() || undefined, whatsappToken: waToken || undefined, usarOutroWhatsapp: usarOutroWhatsapp || undefined, itens: itensSemRecompensa.map((c) => ({ kind: c.kind, name: c.name, detail: c.detail, price: c.price, qty: c.qty, ...(c.promoId ? { promoId: c.promoId } : {}) })), ...(itemRecompensaJornada ? { recompensaJornada: { recompensaId: itemRecompensaJornada.recompensaJornadaId, ...(itemRecompensaJornada.recompensaEscolha ? { escolha: itemRecompensaJornada.recompensaEscolha } : {}) } } : {}), tipoEntrega: delType, bairro: delType === "delivery" ? menu.neighborhoods[+bairroIdx].name : undefined, rua: delType === "delivery" ? rua : undefined, numero: delType === "delivery" && numero.trim() ? numero.trim() : undefined, referencia: delType === "delivery" && referencia.trim() ? referencia.trim() : undefined, observacao: observacao.trim() || undefined, taxaEntrega: fee, pagamento: payment, troco: (payment === "Dinheiro" || isHibrido) ? (trocoOpcao === "nao" ? "Sem troco" : troco.trim()) : undefined, resgateId: resgatePontos && new Date(resgatePontos.expiraEm).getTime() > Date.now() ? resgatePontos.resgateId : undefined };
     try {
       const r = await fetch("/api/pedido-app", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const data = await r.json();
@@ -1723,7 +1816,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
               )}
               <div className="screen-head"><h2>Confira os itens</h2><p>Tudo certo? Então bora finalizar.</p></div>
               {cart.length === 0 ? (<CardapioIllustration {...CARDAPIO_ILLUSTRATIONS.sacolaVazia} />) : (
-                <>{(() => { let pn = 0; return cart.map((it, i) => { let tag = null; if (it.kind === "pizza") { pn++; tag = <span className="ci-tag">Pizza {pn}</span>; } const nm = it.kind === "pizza" ? it.name.replace(/^Pizza /, "") : it.name; const itemEsg = cartItemEsgotado(it.keys, esgotados); return (<div key={i} className="cart-item"><div className="ci-emoji">{it.emoji}</div><div className="ci-body"><div className="ci-name">{tag}{nm}{it.qty > 1 ? ` ×${it.qty}` : ""}{itemEsg && <span style={{ color: "var(--danger-text)", fontWeight: 800, marginLeft: 6 }}>· Esgotado</span>}</div>{it.detail && <div className="ci-detail">{it.detail}</div>}<div className="ci-price">{money(it.price * it.qty)}</div>{it.kind === "simple" && (<div className="qty-pill"><button onClick={() => chQty(i, -1)}>−</button><span>{it.qty}</span><button onClick={() => chQty(i, 1)}>+</button></div>)}</div><button className="ci-remove" onClick={() => rmItem(i)}>{ICONS.remover}</button></div>); }); })()}<div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 4px 4px", fontWeight: 700, fontSize: 19 }}><span>Subtotal</span><span>{money(cartTotal)}</span></div>{descontoResgate > 0 && (<div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 4px 0", fontWeight: 700, fontSize: 14, color: "var(--success-text)" }}><span>Desconto fidelidade</span><span>−{money(descontoResgate)}</span></div>)}</>
+                <>{(() => { let pn = 0; return cart.map((it, i) => { let tag = null; if (it.recompensaJornadaId) { tag = <span className="ci-tag" style={{ background: "var(--secondary)", color: "var(--secondary-foreground)" }}>Presente da Jornada do Chef</span>; } else if (it.kind === "pizza") { pn++; tag = <span className="ci-tag">Pizza {pn}</span>; } const nm = it.kind === "pizza" ? it.name.replace(/^Pizza /, "") : it.name; const itemEsg = cartItemEsgotado(it.keys, esgotados); return (<div key={i} className="cart-item"><div className="ci-emoji">{it.emoji}</div><div className="ci-body"><div className="ci-name">{tag}{nm}{it.qty > 1 ? ` ×${it.qty}` : ""}{itemEsg && <span style={{ color: "var(--danger-text)", fontWeight: 800, marginLeft: 6 }}>· Esgotado</span>}</div>{it.detail && <div className="ci-detail">{it.detail}</div>}<div className="ci-price">{it.recompensaJornadaId ? <span style={{ color: "var(--success-text)", fontWeight: 800 }}>Grátis</span> : money(it.price * it.qty)}</div>{it.kind === "simple" && !it.recompensaJornadaId && (<div className="qty-pill"><button onClick={() => chQty(i, -1)}>−</button><span>{it.qty}</span><button onClick={() => chQty(i, 1)}>+</button></div>)}</div><button className="ci-remove" onClick={() => rmItem(i)}>{ICONS.remover}</button></div>); }); })()}<div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 4px 4px", fontWeight: 700, fontSize: 19 }}><span>Subtotal</span><span>{money(cartTotal)}</span></div>{descontoResgate > 0 && (<div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 4px 0", fontWeight: 700, fontSize: 14, color: "var(--success-text)" }}><span>Desconto fidelidade</span><span>−{money(descontoResgate)}</span></div>)}</>
               )}
               <button className="btn btn-ghost btn-sm" style={{ marginTop: 4 }} onClick={() => go("sc-start")}>+ Adicionar mais</button>
               {cartEsgotado && <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 10, background: "color-mix(in srgb, var(--danger) 10%, transparent)", color: "var(--danger)", fontSize: 13, fontWeight: 700 }}>{ICONS.alerta} Um item do seu pedido ficou esgotado. Remova para continuar.</div>}

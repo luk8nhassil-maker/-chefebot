@@ -19,6 +19,18 @@ type Movimento = {
 
 type Recompensa = { recompensaId: string; status: string; criadoEm: string }
 
+type Jornada = {
+  ativo: boolean
+  metaPizzas: number
+  pizzasNoCiclo: number
+  faltam: number
+  faseAtual: number
+  mensagem: string
+  totalJornadasConcluidas: number
+  textos: { tituloTrilha: string; subtituloTrilha: string }
+  caixasFechadas: { recompensaId: string }[]
+}
+
 type Fidelidade = {
   ativo: boolean
   descricaoRecompensa: string
@@ -92,6 +104,7 @@ export default function ClientePage() {
   const [enviando, setEnviando] = useState(false)
   const [perfil, setPerfil] = useState<Perfil | null>(null)
   const [fidelidade, setFidelidade] = useState<Fidelidade | null>(null)
+  const [jornada, setJornada] = useState<Jornada | null>(null)
   const [resgatando, setResgatando] = useState(false)
   const [resgateErro, setResgateErro] = useState('')
   // Vínculo reconhecido: token opaco + máscaras vindas do servidor.
@@ -167,11 +180,22 @@ export default function ClientePage() {
     setFidelidadeErro(true)
   }
 
+  async function carregarJornada(): Promise<void> {
+    // Best-effort, nunca bloqueia nem afeta o card de pontos: a Jornada do
+    // Chef é uma camada separada, opcional (feature flag), sem estado de
+    // erro próprio na tela — ausência de dados só oculta o card.
+    try {
+      const res = await fetchCliente('/api/cliente/jornada-chef', { cache: 'no-store' }, sessaoMemRef.current)
+      if (res.ok) setJornada(await res.json())
+    } catch {}
+  }
+
   function abrirPontos() {
     setStep('perfil')
     telemetria('points_step_opened', { trace: traceId })
     carregarIdentidade()
     carregarFidelidade()
+    carregarJornada()
   }
 
   function limparVinculo() {
@@ -432,6 +456,7 @@ export default function ClientePage() {
     otpValidadoRef.current = false
     setPerfil(null)
     setFidelidade(null)
+    setJornada(null)
     setPerfilErro(false)
     setFidelidadeErro(false)
     setTelefone('')
@@ -772,6 +797,51 @@ export default function ClientePage() {
                       informações de pedido ficam em Pedido/Pedidos, no
                       rastreamento e na barra global de Pix pendente. */}
                 </>
+              )}
+
+              {/* Jornada do Chef: segunda camada de fidelidade (recorrência),
+                  sempre ABAIXO do card de pontos — nunca substitui ou some com
+                  ele. Card só aparece quando a feature está ativa. */}
+              {jornada && jornada.ativo && (
+                <a
+                  href="/cliente/jornada"
+                  style={{
+                    background: cores.cardBg,
+                    border: `1px solid ${cores.cardBorda}`,
+                    borderRadius: 16,
+                    padding: 22,
+                    textDecoration: 'none',
+                    color: cores.navy,
+                    display: 'block',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                    <Gift size={18} color={cores.amarelo} />
+                    <span style={{ fontSize: 13, fontWeight: 700, color: cores.textoSecundario, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                      {jornada.textos.tituloTrilha}
+                    </span>
+                  </div>
+                  {jornada.caixasFechadas.length > 0 ? (
+                    <p style={{ fontSize: 15, fontWeight: 700, margin: '0 0 4px' }}>
+                      Você tem {jornada.caixasFechadas.length} presente{jornada.caixasFechadas.length === 1 ? '' : 's'} esperando 🎁
+                    </p>
+                  ) : (
+                    <>
+                      <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>
+                        {jornada.pizzasNoCiclo} de {jornada.metaPizzas} pizzas
+                      </div>
+                      <div style={{ background: cores.moldura, borderRadius: 999, height: 12, overflow: 'hidden' }}>
+                        <div style={{
+                          width: `${Math.min(100, (jornada.pizzasNoCiclo / jornada.metaPizzas) * 100)}%`,
+                          height: '100%',
+                          background: cores.amarelo,
+                          borderRadius: 999,
+                        }} />
+                      </div>
+                    </>
+                  )}
+                  <p style={{ fontSize: 13, color: cores.textoSecundario, margin: '10px 0 0' }}>{jornada.mensagem}</p>
+                </a>
               )}
 
               <a href="/pedido" style={{ ...botaoPrimario, textDecoration: 'none', textAlign: 'center', boxSizing: 'border-box', display: 'block' }}>

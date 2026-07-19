@@ -14,6 +14,9 @@ import {
   derivarClienteIdPorTelefone,
   reverterResgateConfirmado,
 } from '@/lib/fidelidade'
+import { processarConclusaoPedidoJornada, reverterConclusaoPedidoJornada, liberarRecompensaDePedidoCancelado } from '@/lib/jornadaChef'
+import type { ItemElegibilidadeJornada } from '@/lib/jornadaChef'
+import type { ItemApp } from '@/lib/pedidoAppItens'
 import { obterConfigEvolution } from '@/lib/evolutionApi'
 import { enviarTextoWhatsApp } from '@/lib/whatsappMensagem'
 import {
@@ -59,6 +62,10 @@ type Pedido = PedidoComEdicao & {
   pizzasCount?: number
   resgateId?: string
   descontoFidelidade?: number
+  origem?: string
+  itensDetalhados?: ItemApp[]
+  itensJornada?: ItemElegibilidadeJornada[]
+  recompensaJornadaId?: string
   // Campos de arquivamento
   isArchived?: boolean
   archivedAt?: string
@@ -455,6 +462,13 @@ export async function PATCH(req: NextRequest) {
     } catch (err) {
       console.error('[ChefeBot] Erro ao creditar pontos de fidelidade (ignorado):', err)
     }
+
+    // Jornada do Chef: hook centralizado, mesma função chamada em toda
+    // transição oficial para "entregue" (aqui, no app do entregador e na
+    // confirmação via WhatsApp) — nunca duplica a regra por rota.
+    await processarConclusaoPedidoJornada(pedidos[index]).catch((err) =>
+      console.error('[ChefeBot] Erro ao processar Jornada do Chef (ignorado):', err)
+    )
   }
 
   // Cancelamento (modelo novo de pontos): registra a resolucao do previsto ou
@@ -514,6 +528,19 @@ export async function PATCH(req: NextRequest) {
       }
     } catch (err) {
       console.error('[ChefeBot] Erro ao reverter resgate de fidelidade (ignorado):', err)
+    }
+  }
+
+  // Jornada do Chef: reverte (ou sinaliza para revisão da Kellyne, nunca
+  // silenciosamente) o crédito de trilha e libera/sinaliza o presente usado
+  // neste pedido, se houver. Idempotente — fica fora do guard de transição
+  // pelo mesmo motivo do resgate de pontos acima.
+  if (status === 'cancelado') {
+    try {
+      await reverterConclusaoPedidoJornada(id, `Pedido ${id} cancelado`)
+      await liberarRecompensaDePedidoCancelado(pedidos[index])
+    } catch (err) {
+      console.error('[ChefeBot] Erro ao reverter Jornada do Chef (ignorado):', err)
     }
   }
 

@@ -3,6 +3,9 @@ import { redis } from "@/lib/redis";
 import { autenticarEntregador, pedidoIdValido } from "@/lib/entregadorAuth";
 import type { PedidoEntregador } from "@/types/entregador";
 import { creditarPontosPedidoEntregue } from "@/lib/fidelidade";
+import { processarConclusaoPedidoJornada } from "@/lib/jornadaChef";
+import type { ItemApp } from "@/lib/pedidoAppItens";
+import type { ItemElegibilidadeJornada } from "@/lib/jornadaChef";
 
 type PedidoMain = {
   id: string;
@@ -12,6 +15,11 @@ type PedidoMain = {
   taxaEntrega?: number;
   clienteId?: string;
   entregador?: { id: string; nome: string; telefone: string };
+  origem?: string;
+  tipoEntrega?: string;
+  itensDetalhados?: ItemApp[];
+  itensJornada?: ItemElegibilidadeJornada[];
+  recompensaJornadaId?: string;
 };
 
 const ACAO_PATTERN = /^(iniciar|entregar)$/;
@@ -124,6 +132,12 @@ export async function POST(req: NextRequest) {
     } catch (error) {
       console.error("[ChefeBot] Erro ao creditar pontos de fidelidade do pedido entregue (ignorado):", error);
     }
+
+    // Jornada do Chef: hook centralizado, mesma função chamada em toda
+    // transição oficial para "entregue" — nunca duplica a regra por rota.
+    await processarConclusaoPedidoJornada({ ...pedidoMain, status: "entregue" }).catch((error) =>
+      console.error("[ChefeBot] Erro ao processar Jornada do Chef (ignorado):", error)
+    );
 
     return NextResponse.json({ ok: true, pedido: filaAtualizada[indexFila] });
   } catch {

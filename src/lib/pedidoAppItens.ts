@@ -10,6 +10,11 @@ export type ItemApp = {
   price: number;
   qty: number;
   promoId?: string; // presente quando kind === "promo"
+  // Presente quando este item é o presente resgatado da Jornada do Chef —
+  // preço sempre forçado a 0 no servidor (nunca confia no preço vindo do
+  // cliente), nunca soma pontos nem avança a trilha de novo (ver
+  // contarPizzasElegiveisPedido em @/lib/jornadaChef).
+  recompensaJornadaId?: string;
 };
 
 export type MenuSimpleItem = { name: string; price: number; sizes?: { code: string; price: number }[] };
@@ -32,6 +37,22 @@ export function formatItem(item: ItemApp): string {
   const qtyPrefix = item.qty > 1 ? `${item.qty}x ` : "";
   const detalhe = item.detail ? ` ${item.detail}` : "";
   return `${qtyPrefix}${item.name}${detalhe}`.trim();
+}
+
+/**
+ * Conta pizzas PAGAS para a fidelidade antiga (compra N pizzas, ganha 1
+ * grátis — `creditarFidelidadePedido`/`pizzasParaPremio`). Exclui
+ * explicitamente o presente da Jornada do Chef (`recompensaJornadaId`) e
+ * qualquer item inválido/quantidade não positiva — uma pizza que o cliente
+ * não pagou nunca pode avançar o progresso de OUTRO programa de fidelidade.
+ * Distinta de `contarPizzas` (@/lib/fidelidade), que conta toda pizza sem
+ * essa exclusão e é usada só para exibição (não credita nada sozinha).
+ */
+export function contarPizzasPagasParaFidelidade(itens: ItemApp[] | undefined): number {
+  if (!Array.isArray(itens)) return 0;
+  return itens
+    .filter((item) => item?.kind === "pizza" && !item.recompensaJornadaId)
+    .reduce((soma, item) => soma + Math.max(0, Math.trunc(Number(item.qty)) || 0), 0);
 }
 
 export function officialUnitPrice(item: ItemApp, menu: MenuPedidoApp): number | null {
@@ -130,7 +151,15 @@ export function makePromoUnitPrice<P extends { id: string; active: boolean; maxU
   };
 }
 
-/** Valida e formata uma lista de itens vinda do cliente, recalculando preço 100% no servidor. */
+/**
+ * Valida e formata uma lista de itens vinda do cliente, recalculando preço
+ * 100% no servidor. Nunca aceita `recompensaJornadaId` como fonte de preço —
+ * um campo vindo do navegador nunca pode zerar o preço de um item arbitrário.
+ * O presente da Jornada do Chef nunca passa por aqui: é materializado à parte
+ * pelo chamador a partir do snapshot da própria recompensa (ver
+ * `materializarItensRecompensa` em @/lib/jornadaChef), sempre com preço 0
+ * atribuído pelo servidor, nunca por este helper genérico.
+ */
 export function validarEFormatarItens(
   itens: ItemApp[],
   menu: MenuPedidoApp,

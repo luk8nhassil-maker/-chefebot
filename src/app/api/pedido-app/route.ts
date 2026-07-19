@@ -9,8 +9,10 @@ import { PROMOS_KEY, catalogoDoMenu, dentroDaJanela, precoFinalPromocao, promoca
 import { validarTokenCardapio } from "@/lib/cardapioToken";
 import { temDinheiroNoPagamento, valorDinheiroEsperado } from "@/lib/bot";
 import { verificarTokenCliente, CLIENTE_COOKIE } from "@/lib/clienteAuth";
-import { contarPizzas, calcularPontosElegiveisPedido, registrarMovimentoPontosIdempotente, construirEventoIdPontos, derivarClienteIdPorTelefone, obterReservasResgatePontos, confirmarResgatePontos } from "@/lib/fidelidade";
-import { type ItemApp, type MenuPedidoApp, formatItem, officialUnitPrice, makePromoUnitPrice } from "@/lib/pedidoAppItens";
+import { buscarClientePorId, sanitizeTelefoneCliente } from "@/lib/clientes";
+import { calcularPontosElegiveisPedido, registrarMovimentoPontosIdempotente, construirEventoIdPontos, derivarClienteIdPorTelefone, obterReservasResgatePontos, confirmarResgatePontos } from "@/lib/fidelidade";
+import { type ItemApp, type MenuPedidoApp, formatItem, officialUnitPrice, makePromoUnitPrice, contarPizzasPagasParaFidelidade } from "@/lib/pedidoAppItens";
+import { prepararResgateParaPedido, confirmarReservaNoPedido, liberarVinculoRecompensaPedidoNaoCriado, type EscolhaRecompensaJornada } from "@/lib/jornadaChef";
 
 export const maxDuration = 20;
 
@@ -31,6 +33,13 @@ type PedidoApp = {
   email?: string;
   /** resgateId de uma reserva de fidelidade (POST /api/cliente/fidelidade/resgate) aplicada neste pedido. */
   resgateId?: string;
+  /** Presente da Jornada do Chef aplicado neste pedido — campo dedicado,
+   * nunca um item arbitrário do carrinho. O frontend só pode informar QUAL
+   * recompensa reservada usar e (quando aplicável) o sabor da pizza; tudo o
+   * mais (produto, preço, quantidade, tamanho, composição) é reconstruído no
+   * servidor a partir do snapshot da própria recompensa — nunca confiado do
+   * cliente (ver `materializarItensRecompensa` em @/lib/jornadaChef). */
+  recompensaJornada?: { recompensaId: string; escolha?: EscolhaRecompensaJornada };
 };
 
 type ConfigPizzariaPix = {
@@ -89,6 +98,15 @@ export async function POST(req: NextRequest) {
     const menu = await getMENUDinamico();
     const pedidos = (await redis.get<unknown[]>("pedidos")) || [];
 
+    // O frontend NUNCA decide o que é gratuito (bloqueio econômico crítico):
+    // `recompensaJornadaId` num item do carrinho não é mais um campo aceito
+    // do cliente — só o servidor marca um item como presente da Jornada,
+    // sempre a partir do snapshot da recompensa (ver bloco dedicado abaixo).
+    // Qualquer item que chegue com este campo é rejeitado de imediato.
+    if (body.itens.some((item) => Boolean((item as ItemApp & { recompensaJornadaId?: unknown }).recompensaJornadaId))) {
+      return NextResponse.json({ ok: false, error: "Item inválido" }, { status: 400 });
+    }
+
     // Itens promocionais: o preço NUNCA vem do cliente — é recalculado a
     // partir da promoção ativa salva no Redis. Promoção inexistente,
     // inativa, fora da janela ou com produto esgotado invalida o pedido.
@@ -115,10 +133,77 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "Item inválido" }, { status: 400 });
     }
 
-    // Formata os itens como strings, no MESMO padrão do fluxo do WhatsApp
-    const itens = itensValidados.map((item) => item.linha);
+    // Presente da Jornada do Chef (rule 1/2/3): campo dedicado no payload —
+    // o frontend só informa QUAL recompensa reservada usar e (só para pizza)
+    // o sabor escolhido. Produto, preço, quantidade, tamanho e composição são
+    // SEMPRE reconstruídos no servidor a partir do snapshot da própria
+    // recompensa (nunca do carrinho) — ver `materializarItensRecompensa`.
+    //
+    // Autorização é SEMPRE pela sessão da Área do Cliente, nunca pelo
+    // telefone digitado no checkout: o telefone do body/whatsappToken não
+    // prova propriedade da recompensa (qualquer um pode digitar o telefone
+    // de outra pessoa). Pedido comum sem presente continua funcionando como
+    // convidado, sem exigir login.
+    let clienteIdJornada: string | undefined;
+    let recompensaJornadaId: string | undefined;
+    let itensRecompensaMaterializados: ItemApp[] = [];
+    if (body.recompensaJornada && typeof body.recompensaJornada === "object") {
+      recompensaJornadaId = String(body.recompensaJornada.recompensaId ?? "").trim();
+      if (!recompensaJornadaId) {
+        return NextResponse.json({ ok: false, error: "Presente da Jornada do Chef inválido ou já utilizado" }, { status: 400 });
+      }
 
-    const subtotal = itensValidados.reduce((s, item) => s + item.unitPrice! * item.qty, 0);
+      const tokenSessaoJornada = req.cookies.get(CLIENTE_COOKIE)?.value;
+      const payloadSessaoJornada = tokenSessaoJornada ? await verificarTokenCliente(tokenSessaoJornada) : null;
+      if (!payloadSessaoJornada) {
+        return NextResponse.json({ ok: false, error: "Faça login na área do cliente para usar o presente da Jornada do Chef" }, { status: 401 });
+      }
+      const clienteSessaoJornada = await buscarClientePorId(payloadSessaoJornada.clienteId);
+      if (!clienteSessaoJornada) {
+        return NextResponse.json({ ok: false, error: "Sessão inválida" }, { status: 401 });
+      }
+      // O telefone do pedido precisa corresponder ao telefone canônico da
+      // sessão autenticada (após normalização) — nunca transfere
+      // silenciosamente uma recompensa para outro número.
+      if (sanitizeTelefoneCliente(telefonePedido) !== sanitizeTelefoneCliente(clienteSessaoJornada.telefone)) {
+        return NextResponse.json({ ok: false, error: "O telefone do pedido não corresponde ao seu perfil. Presente da Jornada do Chef não aplicado." }, { status: 403 });
+      }
+      clienteIdJornada = derivarClienteIdPorTelefone(clienteSessaoJornada.telefone) ?? clienteSessaoJornada.clienteId;
+
+      const escolhaBruta = body.recompensaJornada.escolha;
+      const escolha: EscolhaRecompensaJornada | undefined =
+        escolhaBruta && typeof escolhaBruta === "object"
+          ? { sabor: typeof escolhaBruta.sabor === "string" ? escolhaBruta.sabor : undefined }
+          : undefined;
+      const materializado = await prepararResgateParaPedido(clienteIdJornada, recompensaJornadaId, escolha);
+      if (!materializado.ok) {
+        return NextResponse.json({ ok: false, error: materializado.erro }, { status: 400 });
+      }
+      itensRecompensaMaterializados = materializado.itens.map((item) => ({
+        kind: item.kind,
+        name: item.name,
+        ...(item.detail ? { detail: item.detail } : {}),
+        price: 0,
+        qty: item.qty,
+        recompensaJornadaId,
+      }));
+    }
+
+    const itensRecompensaValidados = itensRecompensaMaterializados.map((item) => ({
+      linha: formatItem(item),
+      unitPrice: 0,
+      qty: item.qty,
+    }));
+
+    // Itens finais = itens normais do carrinho (preço sempre recalculado no
+    // servidor acima) + itens do presente da Jornada, se houver (sempre
+    // materializados no servidor, preço sempre 0). Formata como strings, no
+    // MESMO padrão do fluxo do WhatsApp.
+    const itensDetalhadosFinais: ItemApp[] = [...body.itens, ...itensRecompensaMaterializados];
+    const itensValidadosFinais = [...itensValidados, ...itensRecompensaValidados];
+    const itens = itensValidadosFinais.map((item) => item.linha);
+
+    const subtotal = itensValidadosFinais.reduce((s, item) => s + item.unitPrice! * item.qty, 0);
 
     // Resgate de fidelidade (Etapa 5): desconto calculado EXCLUSIVAMENTE no
     // servidor, a partir de uma reserva já validada (nunca um valor vindo do
@@ -184,14 +269,33 @@ export async function POST(req: NextRequest) {
       console.error("[ChefeBot] Erro ao resolver cliente do pedido (ignorado):", err);
     }
 
+    // pizzasCount alimenta a fidelidade antiga (compra N pizzas, ganha 1
+    // grátis) quando o pedido é marcado como entregue — nunca pode incluir a
+    // pizza-presente da Jornada do Chef, que o cliente não pagou.
     let pizzasCount = 0;
     try {
-      pizzasCount = contarPizzas(body.itens);
+      pizzasCount = contarPizzasPagasParaFidelidade(itensDetalhadosFinais);
     } catch (err) {
       console.error("[ChefeBot] Erro ao contar pizzas para fidelidade (ignorado):", err);
     }
 
     const pedidoId = Date.now().toString();
+
+    // Vincula a recompensa da Jornada do Chef a ESTE pedidoId ANTES de
+    // persistir o pedido (rule 6): se a vinculação falhar (recompensa
+    // consumida por outra requisição concorrente, expirada nesse meio-tempo,
+    // etc.), nenhum pedido chega a ser criado — nunca é preciso compensar
+    // reescrevendo a lista inteira de "pedidos". `confirmarReservaNoPedido`
+    // já é idempotente e protegida por lock por cliente.
+    if (recompensaJornadaId && clienteIdJornada) {
+      try {
+        await confirmarReservaNoPedido(clienteIdJornada, recompensaJornadaId, pedidoId);
+      } catch (err) {
+        console.error("[ChefeBot] Erro ao vincular presente da Jornada do Chef ao pedido:", err);
+        return NextResponse.json({ ok: false, error: "Nao foi possivel confirmar o presente. Tente novamente." }, { status: 409 });
+      }
+    }
+
     const numeroPedido = await proximoNumeroPedido();
     const statusToken = criarTokenPublicoAcompanhamento();
     const pixBase = criarPixMetadata(pedidoId, body.pagamento, total);
@@ -210,6 +314,7 @@ export async function POST(req: NextRequest) {
       ...(clienteId ? { clienteId } : {}),
       ...(pizzasCount > 0 ? { pizzasCount } : {}),
       ...(resgateAplicado ? { resgateId: resgateAplicado.resgateId, descontoFidelidade } : {}),
+      ...(recompensaJornadaId ? { recompensaJornadaId } : {}),
       itens,
       total,
       status: "novo" as const,
@@ -230,13 +335,24 @@ export async function POST(req: NextRequest) {
       ...(body.tipoEntrega === "delivery" && body.numero ? { enderecoNumero: body.numero } : {}),
       // Snapshot estruturado dos itens (Etapa edição de pedido): permite
       // recarregar o carrinho fielmente ao iniciar uma edição, sem depender
-      // de reinterpretar as strings formatadas de `itens`. Puramente aditivo
-      // — nenhum consumidor existente lê este campo.
-      itensDetalhados: body.itens,
+      // de reinterpretar as strings formatadas de `itens`. Inclui o(s) item(ns)
+      // materializados do presente da Jornada do Chef, se houver.
+      itensDetalhados: itensDetalhadosFinais,
       revision: 1,
     };
 
-    await redis.set("pedidos", [...pedidos, novoPedido]);
+    try {
+      await redis.set("pedidos", [...pedidos, novoPedido]);
+    } catch (err) {
+      // O pedido não chegou a ser persistido — libera só o vínculo desta
+      // recompensa com este pedidoId (nunca reescreve a lista inteira de
+      // "pedidos" como compensação, rule 6).
+      if (recompensaJornadaId && clienteIdJornada) {
+        await liberarVinculoRecompensaPedidoNaoCriado(clienteIdJornada, recompensaJornadaId, pedidoId).catch(() => {});
+      }
+      console.error("[ChefeBot] Erro ao persistir pedido do site:", err);
+      return NextResponse.json({ ok: false, error: "Erro interno" }, { status: 500 });
+    }
 
     // Confirma o resgate (Etapa 5): se o debito nao persistir, o pedido com
     // desconto e revertido e a API nao devolve sucesso com estado inconsistente.
