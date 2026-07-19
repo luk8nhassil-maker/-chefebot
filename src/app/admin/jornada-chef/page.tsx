@@ -6,7 +6,7 @@ import PanelShell from '@/components/PanelShell'
 type TipoRecompensa = 'bebida_sobremesa' | 'pizza' | 'presente_especial'
 type CategoriaItem = 'bebida' | 'suco' | 'lanche' | 'macarronada'
 
-type ItemCatalogo = { produtoId: string; produtoNome: string; categoria: CategoriaItem; esgotado: boolean }
+type ItemCatalogo = { produtoId: string; produtoNome: string; categoria: CategoriaItem; esgotado: boolean; preco: number }
 type Catalogo = {
   sizes: { code: string; label?: string; price: number }[]
   saltyFlavors: string[]
@@ -52,6 +52,7 @@ type RecompensaAdmin = {
   validaAte?: string
   resgatadaEm?: string
   motivoSuspensao?: string
+  valorReferencia?: number
 }
 
 type ProgressoAdmin = {
@@ -127,6 +128,20 @@ export default function AdminJornadaChefPage() {
   const [composicaoRascunho, setComposicaoRascunho] = useState<ItemComposicao[]>([])
   const [composicaoItemId, setComposicaoItemId] = useState('')
   const [composicaoQty, setComposicaoQty] = useState(1)
+
+  // Formulário de substituição estruturada de uma recompensa (rule 8) — nunca
+  // aceita produtoId/produtoNome livres, sempre um produto real do catálogo.
+  const [substituindoId, setSubstituindoId] = useState<string | null>(null)
+  const [substTipo, setSubstTipo] = useState<TipoRecompensa>('bebida_sobremesa')
+  const [substItemId, setSubstItemId] = useState('')
+  const [substTamanho, setSubstTamanho] = useState('')
+  const [substSabores, setSubstSabores] = useState<string[]>([])
+  const [substComposicao, setSubstComposicao] = useState<ItemComposicao[]>([])
+  const [substComposicaoItemId, setSubstComposicaoItemId] = useState('')
+  const [substComposicaoQty, setSubstComposicaoQty] = useState(1)
+  const [substMotivo, setSubstMotivo] = useState('')
+  const [substErro, setSubstErro] = useState('')
+  const [substSalvando, setSubstSalvando] = useState(false)
 
   async function carregarConfig() {
     const res = await fetch('/api/jornada-chef/config', { cache: 'no-store' })
@@ -289,6 +304,90 @@ export default function AdminJornadaChefPage() {
     } catch {
       setMsgAcao('Erro de conexão')
     }
+  }
+
+  function iniciarSubstituicao(r: RecompensaAdmin) {
+    setSubstituindoId(r.recompensaId)
+    setSubstTipo((r.tipo as TipoRecompensa) || 'bebida_sobremesa')
+    setSubstItemId('')
+    setSubstTamanho('')
+    setSubstSabores([])
+    setSubstComposicao([])
+    setSubstComposicaoItemId('')
+    setSubstComposicaoQty(1)
+    setSubstMotivo('')
+    setSubstErro('')
+  }
+
+  function cancelarSubstituicao() {
+    setSubstituindoId(null)
+    setSubstErro('')
+  }
+
+  function adicionarItemComposicaoSubstituicao() {
+    const item = itensDisponiveis.find((i) => i.produtoId === substComposicaoItemId)
+    if (!item) return
+    setSubstComposicao((atual) => [...atual, { item: { produtoId: item.produtoId, produtoNome: item.produtoNome, categoria: item.categoria }, quantidade: Math.max(1, substComposicaoQty) }])
+    setSubstComposicaoItemId('')
+    setSubstComposicaoQty(1)
+  }
+
+  // Estimativa só para exibição no painel — o valor que realmente vale é
+  // sempre recalculado no servidor a partir do catálogo real (rule 9); esta
+  // conta local nunca é enviada nem é a fonte de verdade da comparação.
+  function previaValorNovo(): number | null {
+    if (!catalogo) return null
+    if (substTipo === 'bebida_sobremesa') {
+      const item = catalogo.itensIndividuais.find((i) => i.produtoId === substItemId)
+      return item?.preco ?? null
+    }
+    if (substTipo === 'pizza') {
+      const size = catalogo.sizes.find((s) => s.code === substTamanho)
+      return size?.price ?? null
+    }
+    if (substTipo === 'presente_especial') {
+      return substComposicao.reduce((soma, c) => {
+        const item = catalogo.itensIndividuais.find((i) => i.produtoId === c.item.produtoId)
+        return soma + (item?.preco ?? 0) * c.quantidade
+      }, 0)
+    }
+    return null
+  }
+
+  async function confirmarSubstituicao(recompensaId: string) {
+    setSubstErro('')
+    if (!substMotivo.trim()) { setSubstErro('Informe o motivo da substituição.'); return }
+    let novaEspecificacao: Record<string, unknown> | null = null
+    if (substTipo === 'bebida_sobremesa') {
+      const item = itensDisponiveis.find((i) => i.produtoId === substItemId)
+      if (!item) { setSubstErro('Selecione um produto.'); return }
+      novaEspecificacao = { tipo: substTipo, item: { produtoId: item.produtoId, produtoNome: item.produtoNome, categoria: item.categoria } }
+    } else if (substTipo === 'pizza') {
+      if (!substTamanho || substSabores.length === 0) { setSubstErro('Selecione tamanho e ao menos um sabor.'); return }
+      novaEspecificacao = { tipo: substTipo, pizza: { tamanho: substTamanho, sabores: substSabores } }
+    } else {
+      if (substComposicao.length === 0) { setSubstErro('Adicione ao menos um item à composição.'); return }
+      novaEspecificacao = { tipo: substTipo, composicao: substComposicao }
+    }
+
+    setSubstSalvando(true)
+    try {
+      const res = await fetch('/api/admin/jornada-chef/resgate-manual', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ acao: 'substituir', recompensaId, novaEspecificacao, motivo: substMotivo.trim() }),
+      })
+      const data = await res.json().catch(() => null)
+      if (res.ok) {
+        setSubstituindoId(null)
+        if (telefone) await buscarCliente()
+      } else {
+        setSubstErro(data?.error || 'Não foi possível substituir.')
+      }
+    } catch {
+      setSubstErro('Erro de conexão.')
+    }
+    setSubstSalvando(false)
   }
 
   async function resolverPendencia(pendenciaId: string) {
@@ -555,21 +654,110 @@ export default function AdminJornadaChefPage() {
               <div>
                 <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--foreground-muted)', textTransform: 'uppercase', margin: '0 0 8px' }}>Recompensas</p>
                 {progresso.recompensas.length === 0 && <p style={{ fontSize: 13, color: 'var(--foreground-secondary)' }}>Nenhuma recompensa ainda.</p>}
-                {progresso.recompensas.map((r) => (
-                  <div key={r.recompensaId} style={{ borderTop: '1px solid var(--border)', padding: '10px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-                    <div>
-                      <div style={{ fontSize: 13, fontWeight: 700 }}>Ciclo {r.ciclo} · {r.status}{r.produtoNome ? ` · ${r.produtoNome}` : ''}</div>
-                      <div style={{ fontSize: 12, color: 'var(--foreground-muted)' }}>
-                        {r.codigoPublico ? `Código: ${r.codigoPublico}` : 'Sem código ativo'}
-                        {r.validaAte ? ` · válido até ${new Date(r.validaAte).toLocaleDateString('pt-BR')}` : ''}
-                        {r.motivoSuspensao ? ` · ${r.motivoSuspensao}` : ''}
+                {progresso.recompensas.map((r) => {
+                  const elegivelParaSubstituir = !['resgatada', 'cancelada', 'expirada'].includes(r.status)
+                  return (
+                    <div key={r.recompensaId} style={{ borderTop: '1px solid var(--border)', padding: '10px 0', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                        <div>
+                          <div style={{ fontSize: 13, fontWeight: 700 }}>Ciclo {r.ciclo} · {r.status}{r.produtoNome ? ` · ${r.produtoNome}` : ''}</div>
+                          <div style={{ fontSize: 12, color: 'var(--foreground-muted)' }}>
+                            {r.codigoPublico ? `Código: ${r.codigoPublico}` : 'Sem código ativo'}
+                            {r.validaAte ? ` · válido até ${new Date(r.validaAte).toLocaleDateString('pt-BR')}` : ''}
+                            {r.motivoSuspensao ? ` · ${r.motivoSuspensao}` : ''}
+                            {typeof r.valorReferencia === 'number' ? ` · valor de referência: R$ ${r.valorReferencia.toFixed(2)}` : ''}
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                          {r.codigoPublico && (r.status === 'disponivel' || r.status === 'reservada') && (
+                            <button onClick={() => acaoManual({ acao: 'revogar_codigo', recompensaId: r.recompensaId })} style={botaoSecundario}>Revogar código</button>
+                          )}
+                          {elegivelParaSubstituir && substituindoId !== r.recompensaId && (
+                            <button onClick={() => iniciarSubstituicao(r)} style={botaoSecundario}>Substituir presente</button>
+                          )}
+                        </div>
                       </div>
+
+                      {substituindoId === r.recompensaId && catalogo && (
+                        <div style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                          <p style={{ fontSize: 12, fontWeight: 700, margin: 0 }}>Novo presente (substitui &quot;{r.produtoNome ?? '(sem produto)'}&quot;)</p>
+                          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                            {(['bebida_sobremesa', 'pizza', 'presente_especial'] as TipoRecompensa[]).map((t) => (
+                              <button key={t} onClick={() => setSubstTipo(t)} style={{ ...(substTipo === t ? botaoPrimario : botaoSecundario), padding: '8px 14px' }}>
+                                {t === 'bebida_sobremesa' ? 'Bebida/item individual' : t === 'pizza' ? 'Pizza' : 'Presente especial'}
+                              </button>
+                            ))}
+                          </div>
+
+                          {substTipo === 'bebida_sobremesa' && (
+                            <select value={substItemId} onChange={(e) => setSubstItemId(e.target.value)} style={{ ...inputStyle, minWidth: 240 }}>
+                              <option value="">Selecione um produto...</option>
+                              {itensDisponiveis.map((i) => (
+                                <option key={i.produtoId} value={i.produtoId}>{i.produtoNome} ({i.categoria})</option>
+                              ))}
+                            </select>
+                          )}
+
+                          {substTipo === 'pizza' && (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                              <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                                <span style={label}>Tamanho</span>
+                                <select value={substTamanho} onChange={(e) => setSubstTamanho(e.target.value)} style={inputStyle}>
+                                  <option value="">Selecione...</option>
+                                  {catalogo.sizes.map((s) => (
+                                    <option key={s.code} value={s.code}>{s.label ? `${s.label} (${s.code})` : s.code}</option>
+                                  ))}
+                                </select>
+                              </div>
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, maxWidth: 640 }}>
+                                {todosSabores.map((s) => (
+                                  <label key={s} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, border: '1px solid var(--border)', borderRadius: 8, padding: '4px 8px' }}>
+                                    <input type="checkbox" checked={substSabores.includes(s)} onChange={(e) => setSubstSabores((atual) => (e.target.checked ? [...atual, s] : atual.filter((x) => x !== s)))} />
+                                    {s}
+                                  </label>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {substTipo === 'presente_especial' && (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                              <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                                <select value={substComposicaoItemId} onChange={(e) => setSubstComposicaoItemId(e.target.value)} style={{ ...inputStyle, minWidth: 220 }}>
+                                  <option value="">Selecione um item...</option>
+                                  {itensDisponiveis.map((i) => (
+                                    <option key={i.produtoId} value={i.produtoId}>{i.produtoNome} ({i.categoria})</option>
+                                  ))}
+                                </select>
+                                <input type="number" min={1} value={substComposicaoQty} onChange={(e) => setSubstComposicaoQty(Math.max(1, Number(e.target.value)))} style={{ ...inputStyle, width: 70 }} />
+                                <button onClick={adicionarItemComposicaoSubstituicao} disabled={!substComposicaoItemId} style={{ ...botaoSecundario, opacity: !substComposicaoItemId ? 0.6 : 1 }}>+ Item</button>
+                              </div>
+                              {substComposicao.length > 0 && (
+                                <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13 }}>
+                                  {substComposicao.map((c, idx) => (<li key={idx}>{c.quantidade}x {c.item.produtoNome}</li>))}
+                                </ul>
+                              )}
+                            </div>
+                          )}
+
+                          <div style={{ fontSize: 12.5, color: 'var(--foreground-muted)' }}>
+                            {typeof r.valorReferencia === 'number' && <span>Valor atual: R$ {r.valorReferencia.toFixed(2)} · </span>}
+                            {previaValorNovo() !== null ? <span>Novo valor estimado: R$ {previaValorNovo()!.toFixed(2)}</span> : <span>Selecione o novo presente para ver o valor estimado.</span>}
+                          </div>
+
+                          <input placeholder="Motivo da substituição (obrigatório)" value={substMotivo} onChange={(e) => setSubstMotivo(e.target.value)} style={inputStyle} />
+                          {substErro && <p style={{ color: 'var(--danger-text)', fontSize: 12.5, margin: 0 }}>{substErro}</p>}
+                          <div style={{ display: 'flex', gap: 8 }}>
+                            <button onClick={() => confirmarSubstituicao(r.recompensaId)} disabled={substSalvando} style={{ ...botaoPrimario, opacity: substSalvando ? 0.6 : 1 }}>
+                              {substSalvando ? 'Aplicando...' : 'Confirmar substituição'}
+                            </button>
+                            <button onClick={cancelarSubstituicao} style={botaoSecundario}>Cancelar</button>
+                          </div>
+                        </div>
+                      )}
                     </div>
-                    {r.codigoPublico && (r.status === 'disponivel' || r.status === 'reservada') && (
-                      <button onClick={() => acaoManual({ acao: 'revogar_codigo', recompensaId: r.recompensaId })} style={botaoSecundario}>Revogar código</button>
-                    )}
-                  </div>
-                ))}
+                  )
+                })}
               </div>
 
               <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>

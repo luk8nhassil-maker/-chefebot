@@ -65,8 +65,23 @@ export async function GET(req: NextRequest) {
       produtoNome: r.produtoNome,
       abertaEm: r.abertaEm,
       validaAte: r.validaAte,
+      // Estrutura necessária para o cliente escolher o sabor da pizza-presente
+      // (rule 2/4) e para exibir a composição do presente especial — nunca
+      // fonte de preço/quantidade, só de exibição/escolha permitida.
+      pizza: r.pizza,
+      composicao: r.composicao,
     })),
-    recompensasReservadas: reservadas.map((r) => ({ recompensaId: r.recompensaId, produtoNome: r.produtoNome, validaAte: r.validaAte })),
+    recompensasReservadas: reservadas.map((r) => ({
+      recompensaId: r.recompensaId,
+      tipo: r.tipo,
+      produtoNome: r.produtoNome,
+      validaAte: r.validaAte,
+      pizza: r.pizza,
+      composicao: r.composicao,
+      // Vazio até o pedido ser criado — o carrinho usa isso para saber que a
+      // reserva ainda não foi vinculada a um pedido real.
+      reservaPedidoId: r.reservaPedidoId,
+    })),
     historico: historico.map((r) => ({ recompensaId: r.recompensaId, status: r.status, produtoNome: r.produtoNome, criadoEm: r.criadaEm })),
   });
 }

@@ -111,16 +111,21 @@ export type RecompensaConfigCiclo = {
   /** Preenchido quando tipo === "presente_especial" — composição estruturada,
    * nunca uma string livre. */
   composicao?: ItemComposicaoRecompensa[];
+  /** Valor econômico de referência, calculado no servidor a partir do preço
+   * oficial do catálogo (nunca informado pelo admin) — usado para impedir que
+   * uma substituição manual entregue um produto de valor inferior (rule 9). */
+  valorReferencia?: number;
 };
 
 /** Catálogo real usado para validar e construir a sequência de presentes —
  * carregado do cardápio dinâmico oficial (@/lib/menu), nunca duplicado ou
- * hardcodado no frontend. */
+ * hardcodado no frontend. `preco`/`price` vêm sempre do cardápio real — nunca
+ * do frontend — e são a única fonte usada para calcular `valorReferencia`. */
 export type CatalogoJornada = {
   sizes: { code: string; label?: string; price: number }[];
   saltyFlavors: string[];
   sweetFlavors: string[];
-  itensIndividuais: { produtoId: string; produtoNome: string; categoria: CategoriaItemJornada; esgotado: boolean }[];
+  itensIndividuais: { produtoId: string; produtoNome: string; categoria: CategoriaItemJornada; esgotado: boolean; preco: number }[];
 };
 
 export type ErroValidacaoRecompensa = { indice: number; id?: string; mensagens: string[] };
@@ -225,6 +230,10 @@ export type RecompensaJornada = {
   item?: ItemCatalogoJornada;
   pizza?: PizzaRecompensa;
   composicao?: ItemComposicaoRecompensa[];
+  /** Snapshot do valor econômico oficial no momento da criação/última
+   * substituição — nunca informado pelo frontend/admin (rule 9). Ausente em
+   * recompensas criadas antes desta proteção existir. */
+  valorReferencia?: number;
   versaoConfig: number;
   codigoPublico: string;
   pedidoOrigemId: string;
@@ -239,7 +248,15 @@ export type RecompensaJornada = {
   suspensaEm?: string;
   canceladaEm?: string;
   motivoSuspensao?: string;
-  historicoSubstituicao?: { produtoIdAnterior: string; produtoIdNovo: string; produtoNomeNovo: string; motivo: string; em: string }[];
+  historicoSubstituicao?: {
+    produtoIdAnterior: string;
+    produtoIdNovo: string;
+    produtoNomeNovo: string;
+    valorReferenciaAnterior?: number;
+    valorReferenciaNovo?: number;
+    motivo: string;
+    em: string;
+  }[];
 };
 
 export type RegistroProcessamentoPedidoJornada = {
@@ -327,6 +344,7 @@ export async function obterCatalogoJornada(): Promise<CatalogoJornada> {
       produtoNome: p.productName,
       categoria: p.category as CategoriaItemJornada,
       esgotado: esgotados.includes(norm(p.productName)),
+      preco: Number.isFinite(p.price) ? p.price : 0,
     }));
   return {
     sizes: menu.sizes,
@@ -349,6 +367,34 @@ export function resumoRecompensaConfig(r: Pick<RecompensaConfigCiclo, "tipo" | "
     return r.composicao.map((c) => (c.quantidade > 1 ? `${c.quantidade}x ${c.item.produtoNome}` : c.item.produtoNome)).join(" + ");
   }
   return "(tipo desconhecido)";
+}
+
+/** Valor econômico de referência — SEMPRE calculado a partir do preço oficial
+ * do catálogo real (nunca de um valor informado pelo admin/frontend). Usado
+ * para impedir que uma substituição manual entregue um produto mais barato
+ * que o presente original (rule 9). Item/pizza/composição inexistente no
+ * catálogo conta como preço 0 (a validação de existência é feita à parte, em
+ * `validarSequenciaRecompensas`). */
+export function calcularValorReferencia(
+  r: Pick<RecompensaConfigCiclo, "tipo" | "item" | "pizza" | "composicao">,
+  catalogo: CatalogoJornada
+): number {
+  if (r.tipo === "bebida_sobremesa") {
+    const item = r.item ? catalogo.itensIndividuais.find((i) => i.produtoId === r.item!.produtoId) : null;
+    return item?.preco ?? 0;
+  }
+  if (r.tipo === "pizza") {
+    const size = r.pizza ? catalogo.sizes.find((s) => s.code === r.pizza!.tamanho) : null;
+    return size?.price ?? 0;
+  }
+  if (r.tipo === "presente_especial") {
+    return (r.composicao ?? []).reduce((soma, c) => {
+      const item = catalogo.itensIndividuais.find((i) => i.produtoId === c.item.produtoId);
+      const quantidade = Number.isInteger(c.quantidade) && c.quantidade > 0 ? c.quantidade : 1;
+      return soma + (item?.preco ?? 0) * quantidade;
+    }, 0);
+  }
+  return 0;
 }
 
 /** Regras de segurança para a sequência de presentes poder ser salva (rule
@@ -461,7 +507,7 @@ export async function salvarConfigJornadaChef(
   const validadeRecompensaDias = clamp(Math.trunc(Number(input.validadeRecompensaDias ?? atual.validadeRecompensaDias)) || atual.validadeRecompensaDias, 1, 365);
 
   const sequenciaFornecida = Array.isArray(input.sequenciaRecompensas);
-  const sequenciaRecompensas = sequenciaFornecida ? normalizarSequencia(input.sequenciaRecompensas as unknown[]) : atual.sequenciaRecompensas;
+  let sequenciaRecompensas = sequenciaFornecida ? normalizarSequencia(input.sequenciaRecompensas as unknown[]) : atual.sequenciaRecompensas;
 
   if (sequenciaFornecida) {
     const catalogo = await obterCatalogoJornada();
@@ -469,6 +515,9 @@ export async function salvarConfigJornadaChef(
     if (erros.length > 0) {
       return { ok: false, erro: "A sequência de presentes contém itens inválidos, removidos ou indisponíveis.", detalhes: erros };
     }
+    // Valor de referência sempre recalculado a partir do preço oficial do
+    // catálogo neste momento — nunca informado pelo admin (rule 9).
+    sequenciaRecompensas = sequenciaRecompensas.map((r) => ({ ...r, valorReferencia: calcularValorReferencia(r, catalogo) }));
   }
 
   const MODOS_ROLLOUT_VALIDOS: ModoRolloutJornada[] = ["off", "canary", "on"];
@@ -845,30 +894,36 @@ async function criarRecompensa(
   // (não só no momento em que a Kellyne salvou a config) — um produto pode
   // ter ficado esgotado entre a configuração e a conclusão do ciclo. Nunca
   // entrega um produto que sumiu do cardápio (rule 7/12).
+  const catalogoAtual = await obterCatalogoJornada();
   if (escolhida) {
-    const catalogoAtual = await obterCatalogoJornada();
     const erros = validarSequenciaRecompensas([escolhida], catalogoAtual);
     if (erros.length > 0) escolhida = null;
   }
   const agora = new Date().toISOString();
   const recompensaId = `rec_${Date.now()}_${randomBytes(4).toString("hex")}`;
+  const motivoSemProduto = `Ciclo ${ciclo} concluído (pedido ${pedidoOrigemId}), mas nenhum produto elegível (ou disponível no cardápio agora) está configurado para a Jornada do Chef.`;
   const recompensa: RecompensaJornada = {
     recompensaId,
     tenantId,
     clienteId,
     ciclo,
-    status: "fechada",
+    // Sem produto válido, a recompensa nasce "suspensa" (nunca uma caixa
+    // "fechada" abrível vazia) — o cliente não a vê como abrível até a
+    // Kellyne substituir por um produto válido (rule 12).
+    status: escolhida ? "fechada" : "suspensa",
     tipo: escolhida?.tipo ?? null,
     produtoId: escolhida ? derivarProdutoIdRecompensa(escolhida) : null,
     produtoNome: escolhida?.produtoNome ?? null,
     ...(escolhida?.item ? { item: escolhida.item } : {}),
     ...(escolhida?.pizza ? { pizza: escolhida.pizza } : {}),
     ...(escolhida?.composicao ? { composicao: escolhida.composicao } : {}),
+    ...(escolhida ? { valorReferencia: calcularValorReferencia(escolhida, catalogoAtual) } : {}),
     versaoConfig: config.versaoRegra,
     codigoPublico: gerarCodigoPublico(),
     pedidoOrigemId,
     criadaEm: agora,
     atualizadaEm: agora,
+    ...(escolhida ? {} : { suspensaEm: agora, motivoSuspensao: motivoSemProduto }),
   };
   await redis.set(chaveRecompensa(tenantId, recompensaId), recompensa);
   await redis.set(chaveCodigoResgate(tenantId, recompensa.codigoPublico), recompensaId);
@@ -880,7 +935,7 @@ async function criarRecompensa(
       clienteId,
       recompensaId,
       tipo: "produtos_nao_configurados",
-      motivo: `Ciclo ${ciclo} concluído (pedido ${pedidoOrigemId}), mas nenhum produto elegível (ou disponível no cardápio agora) está configurado para a Jornada do Chef.`,
+      motivo: motivoSemProduto,
     });
   }
   return recompensa;
@@ -985,6 +1040,108 @@ export async function confirmarReservaNoPedido(clienteId: string, recompensaId: 
   });
 }
 
+/** Libera o vínculo de uma recompensa com um pedido que NÃO chegou a ser
+ * persistido (falha ao salvar o pedido logo após vincular) — devolve a
+ * recompensa para "reservada" sem `reservaPedidoId`, pronta para uma nova
+ * tentativa. Nunca usa remoção ampla da lista de pedidos como compensação
+ * (rule 6): aqui a única mutação é o próprio registro da recompensa, sob o
+ * mesmo lock por cliente. Idempotente/seguro mesmo se chamado por engano
+ * (só desfaz o vínculo se ele ainda apontar para ESTE pedidoId). */
+export async function liberarVinculoRecompensaPedidoNaoCriado(clienteId: string, recompensaId: string, pedidoId: string, tenantId: string = TENANT_PADRAO): Promise<void> {
+  await comBloqueioJornada(tenantId, clienteId, async () => {
+    const recompensa = await obterRecompensa(recompensaId, tenantId);
+    if (!recompensa) return;
+    if (recompensa.status === "reservada" && recompensa.reservaPedidoId === pedidoId) {
+      await salvarRecompensa(tenantId, { ...recompensa, reservaPedidoId: undefined });
+    }
+  });
+}
+
+/** Item gratuito construído inteiramente no servidor a partir do snapshot
+ * estruturado da recompensa — nunca a partir de campos vindos do frontend. */
+export type ItemMaterializadoRecompensa = {
+  kind: "pizza" | "simple";
+  name: string;
+  detail?: string;
+  qty: number;
+};
+
+/** Escolha do cliente permitida para materializar o presente — hoje só o
+ * sabor da pizza-presente (rule 2/3). Tamanho, produto, quantidade,
+ * categoria, composição, borda e adicionais NUNCA são escolha do cliente. */
+export type EscolhaRecompensaJornada = { sabor?: string };
+
+export type ResultadoMaterializacaoRecompensa =
+  | { ok: true; itens: ItemMaterializadoRecompensa[] }
+  | { ok: false; erro: string };
+
+/**
+ * Constrói os itens gratuitos de um pedido EXCLUSIVAMENTE a partir do
+ * snapshot estruturado persistido na recompensa (rule 1/3) — nunca a partir
+ * de nome, preço, quantidade, tamanho ou composição informados pelo
+ * navegador. A única entrada do cliente aceita é `escolha.sabor` para a
+ * pizza-presente, e mesmo essa é validada contra `recompensa.pizza.sabores`
+ * (os sabores permitidos configurados pela Kellyne) antes de ser aceita.
+ */
+export function materializarItensRecompensa(
+  recompensa: Pick<RecompensaJornada, "tipo" | "item" | "pizza" | "composicao">,
+  escolha?: EscolhaRecompensaJornada
+): ResultadoMaterializacaoRecompensa {
+  if (recompensa.tipo === "bebida_sobremesa") {
+    if (!recompensa.item) return { ok: false, erro: "Presente sem produto configurado" };
+    return { ok: true, itens: [{ kind: "simple", name: recompensa.item.produtoNome, qty: 1 }] };
+  }
+  if (recompensa.tipo === "pizza") {
+    if (!recompensa.pizza || !Array.isArray(recompensa.pizza.sabores) || recompensa.pizza.sabores.length === 0) {
+      return { ok: false, erro: "Presente sem pizza configurada" };
+    }
+    const saborEscolhido = (escolha?.sabor ?? "").trim();
+    const saborOficial = recompensa.pizza.sabores.find((s) => norm(s) === norm(saborEscolhido));
+    if (!saborEscolhido || !saborOficial) {
+      return { ok: false, erro: "Selecione um sabor permitido para a pizza do presente" };
+    }
+    // Tamanho fixo do snapshot; nunca o tamanho enviado pelo cliente. Borda e
+    // adicionais nunca entram no presente (rule 3).
+    return { ok: true, itens: [{ kind: "pizza", name: `Pizza ${recompensa.pizza.tamanho}`, detail: saborOficial, qty: 1 }] };
+  }
+  if (recompensa.tipo === "presente_especial") {
+    if (!recompensa.composicao || recompensa.composicao.length === 0) {
+      return { ok: false, erro: "Presente sem composição configurada" };
+    }
+    return {
+      ok: true,
+      itens: recompensa.composicao.map((c) => ({ kind: "simple" as const, name: c.item.produtoNome, qty: c.quantidade })),
+    };
+  }
+  return { ok: false, erro: "Presente sem produto válido (aguardando substituição)" };
+}
+
+/**
+ * Valida a propriedade/status/validade de uma recompensa e materializa seus
+ * itens gratuitos — chamado pela rota de criação de pedido ANTES de gerar o
+ * pedidoId. A checagem aqui é defesa em profundidade: a garantia real contra
+ * uso duplicado/concorrente é o lock+idempotência de `confirmarReservaNoPedido`,
+ * chamado depois com o pedidoId já gerado.
+ */
+export async function prepararResgateParaPedido(
+  clienteId: string,
+  recompensaId: string,
+  escolha: EscolhaRecompensaJornada | undefined,
+  tenantId: string = TENANT_PADRAO
+): Promise<ResultadoMaterializacaoRecompensa> {
+  const recompensa = await obterRecompensa(recompensaId, tenantId);
+  if (!recompensa || recompensa.clienteId !== clienteId) {
+    return { ok: false, erro: "Presente da Jornada do Chef inválido ou já utilizado" };
+  }
+  if (recompensa.status !== "reservada" || recompensa.reservaPedidoId) {
+    return { ok: false, erro: "Presente da Jornada do Chef inválido ou já utilizado" };
+  }
+  if (recompensaExpirada(recompensa)) {
+    return { ok: false, erro: "Presente da Jornada do Chef expirado" };
+  }
+  return materializarItensRecompensa(recompensa, escolha);
+}
+
 /** Confirma o resgate definitivo — chamado quando o pedido que usou o
  * presente chega ao status final (entregue/retirado/finalizado). */
 async function confirmarResgateRecompensa(clienteId: string, recompensaId: string, pedidoId: string, tenantId: string): Promise<void> {
@@ -1065,30 +1222,90 @@ export async function revogarCodigoResgate(recompensaId: string, tenantId: strin
 
 /** Substituição manual — só por produto permitido e valor igual/superior;
  * toda substituição fica registrada (rule 14). */
+/** Especificação estruturada de substituição — o mesmo formato usado para
+ * configurar a sequência de presentes (rule 8): nunca nome/preço livres. O
+ * backend valida contra o catálogo real, ignora qualquer nome/preço que
+ * porventura venha do frontend, e reconstrói produtoId/produtoNome. */
+export type EspecificacaoSubstituicaoRecompensa = {
+  tipo: TipoRecompensaJornada;
+  item?: ItemCatalogoJornada;
+  pizza?: PizzaRecompensa;
+  composicao?: ItemComposicaoRecompensa[];
+};
+
+/** Substituição manual estruturada (rule 8/9) — só por produto real do
+ * catálogo e valor igual/superior ao valor de referência original; toda
+ * substituição fica registrada com o antes/depois (rule 14). Nunca aceita
+ * `produtoId`/`produtoNome`/preço livres vindos do frontend. */
 export async function substituirRecompensa(
   recompensaId: string,
-  novoProdutoId: string,
-  novoProdutoNome: string,
+  especificacao: EspecificacaoSubstituicaoRecompensa,
   motivo: string,
   por: string,
   tenantId: string = TENANT_PADRAO
 ): Promise<RecompensaJornada> {
   const recompensa = await obterRecompensa(recompensaId, tenantId);
   if (!recompensa) throw new Error("Recompensa nao encontrada");
+  const motivoLimpo = (motivo ?? "").trim();
+  if (!motivoLimpo) throw new Error("Motivo obrigatorio");
   return comBloqueioJornada(tenantId, recompensa.clienteId, async () => {
     const atual = await obterRecompensa(recompensaId, tenantId);
     if (!atual) throw new Error("Recompensa nao encontrada");
     if (atual.status === "resgatada" || atual.status === "cancelada" || atual.status === "expirada") {
       throw new Error(`Recompensa nao pode ser substituida (status atual: ${atual.status})`);
     }
+
+    const catalogo = await obterCatalogoJornada();
+    const candidato: RecompensaConfigCiclo = {
+      id: "substituicao_temp",
+      tipo: especificacao.tipo,
+      ativo: true,
+      produtoNome: "",
+      ...(especificacao.item ? { item: especificacao.item } : {}),
+      ...(especificacao.pizza ? { pizza: especificacao.pizza } : {}),
+      ...(especificacao.composicao ? { composicao: especificacao.composicao } : {}),
+    };
+    const erros = validarSequenciaRecompensas([candidato], catalogo);
+    if (erros.length > 0) throw new Error(erros[0].mensagens.join(" "));
+
+    const valorReferenciaAnterior = atual.valorReferencia ?? 0;
+    const valorReferenciaNovo = calcularValorReferencia(candidato, catalogo);
+    if (valorReferenciaNovo < valorReferenciaAnterior) {
+      throw new Error(
+        `O novo presente (R$ ${valorReferenciaNovo.toFixed(2)}) tem valor menor que o presente original (R$ ${valorReferenciaAnterior.toFixed(2)}).`
+      );
+    }
+
+    const novoProdutoId = derivarProdutoIdRecompensa(candidato);
+    const novoProdutoNome = resumoRecompensaConfig(candidato);
     const historico = atual.historicoSubstituicao ?? [];
+    // Uma recompensa "suspensa" (sem produto válido) nunca foi vista como
+    // abrível pelo cliente — uma substituição válida a devolve para
+    // "fechada", nunca "disponivel": a validade só começa quando o cliente
+    // efetivamente abrir a caixa corrigida (rule 12).
+    const eraSuspensa = atual.status === "suspensa";
+
     const atualizada: RecompensaJornada = {
       ...atual,
+      tipo: candidato.tipo,
       produtoId: novoProdutoId,
       produtoNome: novoProdutoNome,
+      item: candidato.tipo === "bebida_sobremesa" ? candidato.item : undefined,
+      pizza: candidato.tipo === "pizza" ? candidato.pizza : undefined,
+      composicao: candidato.tipo === "presente_especial" ? candidato.composicao : undefined,
+      valorReferencia: valorReferenciaNovo,
+      ...(eraSuspensa ? { status: "fechada" as const, suspensaEm: undefined, motivoSuspensao: undefined } : {}),
       historicoSubstituicao: [
         ...historico,
-        { produtoIdAnterior: atual.produtoId ?? "(nenhum)", produtoIdNovo: novoProdutoId, produtoNomeNovo: novoProdutoNome, motivo: `${motivo} (por ${por})`, em: new Date().toISOString() },
+        {
+          produtoIdAnterior: atual.produtoId ?? "(nenhum)",
+          produtoIdNovo: novoProdutoId,
+          produtoNomeNovo: novoProdutoNome,
+          valorReferenciaAnterior,
+          valorReferenciaNovo,
+          motivo: `${motivoLimpo} (por ${por})`,
+          em: new Date().toISOString(),
+        },
       ],
     };
     await salvarRecompensa(tenantId, atualizada);
@@ -1411,7 +1628,7 @@ export async function reverterConclusaoPedidoJornada(pedidoId: string, motivo: s
     // Só é seguro reverter automaticamente se NENHUMA recompensa criada por
     // este pedido já foi aberta (o cliente ainda não viu o prêmio) — "disponivel"
     // já significa "caixa aberta", e rule 9 proíbe reverter isso sem sinalização.
-    const nenhumaFoiAberta = recompensas.every((r) => !r || r.status === "fechada");
+    const nenhumaFoiAberta = recompensas.every((r) => !r || r.status === "fechada" || r.status === "suspensa");
 
     const estadoAtual = await obterEstadoJornada(atual.clienteId, tenantId);
     const nadaMudouDesdeEntao = estadoAtual.cicloAtual === atual.progressoDepois.ciclo && estadoAtual.pizzasNoCiclo === atual.progressoDepois.pizzasNoCiclo;

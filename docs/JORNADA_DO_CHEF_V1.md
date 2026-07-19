@@ -136,6 +136,52 @@ idempotentes — refresh, clique duplo e reprocessamento nunca alteram o
 resultado já decidido. Validade de 30 dias (configurável) começa na
 abertura, não na criação da caixa.
 
+Se, no momento em que o ciclo se completa, nenhum produto configurado
+resolve contra o catálogo real (removido/esgotado), a recompensa nasce
+**`suspensa`** — nunca uma caixa `fechada` abrível que resultaria num prêmio
+vazio. `suspensa` nunca aparece como caixa abrível para o cliente e
+`abrirRecompensa` a rejeita. Uma substituição válida pela Kellyne
+(`substituirRecompensa`) devolve a recompensa para `fechada` — a validade só
+começa quando o cliente efetivamente abrir a caixa corrigida.
+
+### Materialização server-side do presente no pedido (bloqueio econômico crítico)
+
+O pedido do site (`POST /api/pedido-app`) recebe o presente da Jornada como um
+campo **dedicado**, nunca como um item arbitrário do carrinho:
+
+```ts
+recompensaJornada?: {
+  recompensaId: string;
+  escolha?: { sabor?: string }; // só a pizza-presente usa isso
+}
+```
+
+O frontend só informa QUAL recompensa reservada usar e, quando aplicável, o
+sabor escolhido para a pizza. Produto, preço, quantidade, tamanho e
+composição **nunca** vêm do carrinho — são sempre reconstruídos no servidor a
+partir do snapshot estruturado da própria recompensa
+(`materializarItensRecompensa`, em `@/lib/jornadaChef`):
+
+- **Bebida/item individual**: exatamente 1 unidade do produto do snapshot, preço 0.
+- **Pizza**: tamanho fixo do snapshot; o cliente escolhe um sabor entre
+  `recompensa.pizza.sabores` (sabor fora da lista é rejeitado); sem borda,
+  sem adicional, quantidade sempre 1.
+- **Presente especial**: materializa a composição exata configurada (todos os
+  itens e quantidades), sempre vinculados à mesma recompensa — a regra "um
+  presente por pedido" continua valendo mesmo quando isso gera vários itens
+  gratuitos no pedido.
+
+Qualquer item que chegue com `recompensaJornadaId` (o contrato antigo,
+inseguro) é rejeitado de imediato — um campo vindo do navegador nunca decide
+o que é gratuito.
+
+**Ordem atômica da vinculação** (rule 6): a recompensa é vinculada ao
+`pedidoId` (`confirmarReservaNoPedido`, já idempotente e protegida por lock)
+**antes** de persistir o pedido. Se a vinculação falhar, nenhum pedido chega
+a ser criado. Se a persistência do pedido falhar depois, só o vínculo desta
+recompensa é liberado (`liberarVinculoRecompensaPedidoNaoCriado`) — nunca uma
+reescrita ampla da lista inteira de pedidos como compensação.
+
 ## Reversão (pedido reaberto/cancelado/estornado)
 
 `reverterConclusaoPedidoJornada`:
@@ -187,14 +233,29 @@ progresso e recompensa são permanentes.
 - Toda ação do cliente (abrir, reservar, cancelar reserva) exige sessão
   válida (`lerSessaoCliente`) e sempre resolve o `clienteId` a partir do
   telefone da SESSÃO — nunca de um id enviado pelo frontend.
-- O item-presente no pedido do site (`ItemApp.recompensaJornadaId`) tem o
-  preço sempre forçado a 0 no servidor; a legitimidade (pertence a este
-  cliente, está `reservada`) é validada antes de criar o pedido, e a
-  confirmação do vínculo usa o mesmo padrão de rollback do resgate de pontos
-  (se falhar, o pedido é desfeito).
+- O presente no pedido do site é sempre materializado no servidor a partir do
+  snapshot da própria recompensa (ver "Materialização server-side" acima) —
+  preço sempre 0 calculado pelo servidor, nunca por um campo do carrinho. A
+  legitimidade (pertence a este cliente, está `reservada`, não expirada, não
+  vinculada a outro pedido) é validada antes de vincular ao pedido, e a
+  vinculação acontece antes da persistência do pedido (nunca depois, nunca
+  compensada reescrevendo a lista inteira de pedidos).
 - Código de resgate manual (`codigoPublico`) é aleatório
   (`crypto.randomBytes`), não deriva de telefone/clienteId, não pode ser
   reutilizado, é revogável e nunca aparece em log/analytics.
+- **Substituição manual estruturada** (`substituirRecompensa`): nunca aceita
+  `produtoId`/`produtoNome` livres. Recebe uma especificação estruturada
+  (`{tipo, item?, pizza?, composicao?}`, o mesmo formato da sequência de
+  presentes), valida contra o catálogo real, reconstrói `produtoId`/`produtoNome`
+  no servidor e limpa os campos do tipo antigo (ex.: trocar bebida→pizza
+  remove `item`, define `pizza`, sem deixar os dois ao mesmo tempo).
+- **Valor de referência** (`valorReferencia`): calculado no servidor a partir
+  do preço oficial do catálogo (nunca informado pelo admin), salvo tanto na
+  configuração da sequência quanto na recompensa concreta. Uma substituição só
+  é aceita se o novo valor for igual ou superior ao valor de referência
+  original — protege contra trocar um presente por um produto mais barato.
+  Toda substituição registra o antes/depois (produto e valor) em
+  `historicoSubstituicao`.
 
 ## Analytics
 

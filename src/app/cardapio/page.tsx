@@ -619,8 +619,15 @@ type CartItem = {
   promoId?: string;
   // Presente quando este item é o presente resgatado da Jornada do Chef —
   // preço sempre 0, nunca combinado visualmente com promoção comum, e a
-  // remoção libera a reserva no servidor (ver rmItem).
+  // remoção libera a reserva no servidor (ver rmItem). `name`/`detail` aqui
+  // são só para exibição (vêm da API autenticada, nunca do sessionStorage) —
+  // o servidor reconstrói o item de verdade a partir do snapshot da própria
+  // recompensa no momento do pedido, nunca confia neste item do carrinho.
   recompensaJornadaId?: string;
+  // Escolha do cliente (só sabor da pizza-presente, hoje) — transportada até
+  // o pedido final; o servidor valida contra os sabores permitidos da
+  // recompensa antes de aceitar.
+  recompensaEscolha?: { sabor?: string };
 };
 
 type PromocaoPublica = {
@@ -795,22 +802,62 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
 
   // Presente da Jornada do Chef reservado na Área do Cliente (/cliente/jornada),
   // repassado via sessionStorage — mesmo padrão do resgate de pontos acima.
+  // sessionStorage carrega só uma REFERÊNCIA temporária (recompensaId +
+  // escolha de sabor) — nunca é a fonte de verdade do produto/preço. O nome
+  // exibido no carrinho vem da resposta autenticada de /api/cliente/jornada-chef
+  // (rule 4); se a busca falhar, cai para o rótulo local só como legenda,
+  // nunca para decidir o que o servidor vai cobrar (isso é sempre 0 e sempre
+  // reconstruído no servidor a partir do snapshot da recompensa).
   // Injeta no carrinho UMA vez (a chave é removida logo em seguida, então
   // remover o item do carrinho depois nunca o reinjeta sozinho — sem isso
   // duplicaria o presente a cada remontagem da página).
   useEffect(() => {
+    const raw = sessionStorage.getItem("cf_recompensa_jornada");
+    sessionStorage.removeItem("cf_recompensa_jornada");
+    if (!raw) return;
+    let parsed: { recompensaId?: string; escolha?: { sabor?: string }; produtoNome?: string; validaAte?: string } | null = null;
     try {
-      const raw = sessionStorage.getItem("cf_recompensa_jornada");
-      sessionStorage.removeItem("cf_recompensa_jornada");
-      if (!raw) return;
-      const parsed = JSON.parse(raw);
-      if (!parsed?.recompensaId || !parsed?.produtoNome) return;
-      if (parsed.validaAte && new Date(parsed.validaAte).getTime() <= Date.now()) return;
+      parsed = JSON.parse(raw);
+    } catch {
+      return;
+    }
+    if (!parsed?.recompensaId) return;
+    if (parsed.validaAte && new Date(parsed.validaAte).getTime() <= Date.now()) return;
+    const recompensaId = parsed.recompensaId;
+    const escolha = parsed.escolha;
+
+    (async () => {
+      let nomeExibicao = parsed?.produtoNome || "Presente da Jornada do Chef";
+      let detalheExibicao = escolha?.sabor || "";
+      try {
+        const res = await fetchCliente("/api/cliente/jornada-chef", { cache: "no-store" });
+        if (res.ok) {
+          const data = await res.json();
+          const reservada = (data?.recompensasReservadas || []).find((r: { recompensaId: string }) => r.recompensaId === recompensaId);
+          if (reservada?.produtoNome) nomeExibicao = reservada.produtoNome;
+          if (reservada?.tipo === "pizza" && reservada.pizza) {
+            nomeExibicao = `Pizza ${reservada.pizza.tamanho}`;
+            detalheExibicao = escolha?.sabor || "";
+          }
+        }
+      } catch {}
       setCart((atual) => {
-        if (atual.some((it) => it.recompensaJornadaId === parsed.recompensaId)) return atual;
-        return [...atual, { emoji: "🎁", kind: "simple" as const, name: parsed.produtoNome, detail: "", price: 0, qty: 1, recompensaJornadaId: parsed.recompensaId }];
+        if (atual.some((it) => it.recompensaJornadaId === recompensaId)) return atual;
+        return [
+          ...atual,
+          {
+            emoji: "🎁",
+            kind: "simple" as const,
+            name: nomeExibicao,
+            detail: detalheExibicao,
+            price: 0,
+            qty: 1,
+            recompensaJornadaId: recompensaId,
+            ...(escolha ? { recompensaEscolha: escolha } : {}),
+          },
+        ];
       });
-    } catch {}
+    })();
   }, []);
 
   const [size, setSize] = useState<string | null>(null);
@@ -1486,7 +1533,13 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     } else { setErroTroco(""); }
     if (hasError) return;
     setSending(true);
-    const payload = { cliente: nome.trim(), telefone: telefone.trim() || undefined, whatsappToken: waToken || undefined, usarOutroWhatsapp: usarOutroWhatsapp || undefined, itens: cart.map((c) => ({ kind: c.kind, name: c.name, detail: c.detail, price: c.price, qty: c.qty, ...(c.promoId ? { promoId: c.promoId } : {}), ...(c.recompensaJornadaId ? { recompensaJornadaId: c.recompensaJornadaId } : {}) })), tipoEntrega: delType, bairro: delType === "delivery" ? menu.neighborhoods[+bairroIdx].name : undefined, rua: delType === "delivery" ? rua : undefined, numero: delType === "delivery" && numero.trim() ? numero.trim() : undefined, referencia: delType === "delivery" && referencia.trim() ? referencia.trim() : undefined, observacao: observacao.trim() || undefined, taxaEntrega: fee, pagamento: payment, troco: (payment === "Dinheiro" || isHibrido) ? (trocoOpcao === "nao" ? "Sem troco" : troco.trim()) : undefined, resgateId: resgatePontos && new Date(resgatePontos.expiraEm).getTime() > Date.now() ? resgatePontos.resgateId : undefined };
+    // Presente da Jornada do Chef: campo dedicado, nunca um item do carrinho.
+    // O servidor reconstrói produto/preço/quantidade a partir do snapshot da
+    // própria recompensa — o cliente só informa QUAL recompensa reservada
+    // usar e (pizza) o sabor escolhido.
+    const itemRecompensaJornada = cart.find((c) => c.recompensaJornadaId);
+    const itensSemRecompensa = cart.filter((c) => !c.recompensaJornadaId);
+    const payload = { cliente: nome.trim(), telefone: telefone.trim() || undefined, whatsappToken: waToken || undefined, usarOutroWhatsapp: usarOutroWhatsapp || undefined, itens: itensSemRecompensa.map((c) => ({ kind: c.kind, name: c.name, detail: c.detail, price: c.price, qty: c.qty, ...(c.promoId ? { promoId: c.promoId } : {}) })), ...(itemRecompensaJornada ? { recompensaJornada: { recompensaId: itemRecompensaJornada.recompensaJornadaId, ...(itemRecompensaJornada.recompensaEscolha ? { escolha: itemRecompensaJornada.recompensaEscolha } : {}) } } : {}), tipoEntrega: delType, bairro: delType === "delivery" ? menu.neighborhoods[+bairroIdx].name : undefined, rua: delType === "delivery" ? rua : undefined, numero: delType === "delivery" && numero.trim() ? numero.trim() : undefined, referencia: delType === "delivery" && referencia.trim() ? referencia.trim() : undefined, observacao: observacao.trim() || undefined, taxaEntrega: fee, pagamento: payment, troco: (payment === "Dinheiro" || isHibrido) ? (trocoOpcao === "nao" ? "Sem troco" : troco.trim()) : undefined, resgateId: resgatePontos && new Date(resgatePontos.expiraEm).getTime() > Date.now() ? resgatePontos.resgateId : undefined };
     try {
       const r = await fetch("/api/pedido-app", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const data = await r.json();

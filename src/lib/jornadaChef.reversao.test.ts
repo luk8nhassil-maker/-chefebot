@@ -50,6 +50,14 @@ beforeEach(async () => {
   });
 });
 
+// Contador simples para IDs de pedido únicos nos fixtures — zero Math.random
+// em toda a Jornada do Chef (rule 12), mesmo em testes.
+let contadorPedidoTeste = 0;
+function idPedidoUnico(prefixo: string): string {
+  contadorPedidoTeste += 1;
+  return `${prefixo}_${contadorPedidoTeste}`;
+}
+
 describe("reversao de credito", () => {
   test("pedido reaberto/cancelado ANTES de qualquer outra coisa acontecer: reversao total, sem sobra", async () => {
     const telefone = "86944440001";
@@ -91,7 +99,7 @@ describe("reversao de credito", () => {
     const telefone = "86944440003";
     for (const qty of [4, 4, 4]) {
       await processarConclusaoPedidoJornada({
-        id: `ped_rev_3_${qty}_${Math.random()}`,
+        id: idPedidoUnico(`ped_rev_3_${qty}`),
         telefone,
         status: "entregue",
         itensDetalhados: [{ kind: "pizza", name: "Pizza G", detail: "Calabresa", price: 50, qty }],
@@ -115,7 +123,7 @@ describe("reversao de credito", () => {
     const telefone = "86944440004";
     let ultimoPedidoId = "";
     for (const qty of [4, 4, 4]) {
-      const id = `ped_rev_4_${qty}_${Math.random()}`;
+      const id = idPedidoUnico(`ped_rev_4_${qty}`);
       ultimoPedidoId = id;
       await processarConclusaoPedidoJornada({
         id,

@@ -7,9 +7,20 @@ import PixPendenteBar, { usePixPendente } from '@/components/PixPendenteBar'
 import { CF_OPEN_CART_KEY } from '@/lib/pedidoAtivoCliente'
 import { fetchCliente } from '@/lib/clienteSessaoFront'
 
+type PizzaRecompensa = { tamanho: string; sabores: string[] }
+type ItemComposicao = { item: { produtoNome: string }; quantidade: number }
+
 type CaixaFechada = { recompensaId: string }
-type RecompensaAberta = { recompensaId: string; tipo: string; produtoNome: string | null; abertaEm?: string; validaAte?: string }
-type RecompensaReservada = { recompensaId: string; produtoNome: string | null; validaAte?: string }
+type RecompensaAberta = {
+  recompensaId: string
+  tipo: string
+  produtoNome: string | null
+  abertaEm?: string
+  validaAte?: string
+  pizza?: PizzaRecompensa
+  composicao?: ItemComposicao[]
+}
+type RecompensaReservada = { recompensaId: string; tipo: string; produtoNome: string | null; validaAte?: string; pizza?: PizzaRecompensa; composicao?: ItemComposicao[] }
 
 type Jornada = {
   ativo: boolean
@@ -56,6 +67,26 @@ const botaoPrimario: React.CSSProperties = {
   boxSizing: 'border-box',
 }
 
+const botaoSecundario: React.CSSProperties = {
+  padding: '8px 14px',
+  borderRadius: 10,
+  background: 'transparent',
+  color: cores.textoSecundario,
+  fontSize: 13,
+  fontWeight: 700,
+  border: `1px solid ${cores.cardBorda}`,
+  cursor: 'pointer',
+  fontFamily: 'Archivo, sans-serif',
+}
+
+const label: React.CSSProperties = {
+  fontSize: 11,
+  fontWeight: 700,
+  color: cores.textoTerciario,
+  textTransform: 'uppercase',
+  letterSpacing: 0.4,
+}
+
 function diasRestantes(validaAte?: string): number | null {
   if (!validaAte) return null
   const ms = new Date(validaAte).getTime() - Date.now()
@@ -69,6 +100,11 @@ export default function JornadaDoChefPage() {
   const [erro, setErro] = useState('')
   const [abrindo, setAbrindo] = useState(false)
   const [reservando, setReservando] = useState<string | null>(null)
+  // Pizza-presente exige escolher o sabor ANTES de reservar/enviar ao
+  // carrinho (rule 4) — nunca uma quantidade/tamanho livre, só um sabor entre
+  // os permitidos configurados pela Kellyne (recompensa.pizza.sabores).
+  const [escolhendoSaborPara, setEscolhendoSaborPara] = useState<string | null>(null)
+  const [saborSelecionado, setSaborSelecionado] = useState('')
 
   async function carregar() {
     setErro('')
@@ -98,7 +134,19 @@ export default function JornadaDoChefPage() {
     setAbrindo(false)
   }
 
-  async function usarNoProximoPedido(recompensaId: string) {
+  function iniciarUsoDoPresente(recompensaId: string) {
+    const recompensa = jornada?.recompensasDisponiveis.find((r) => r.recompensaId === recompensaId)
+    if (recompensa?.tipo === 'pizza' && recompensa.pizza) {
+      // Pizza-presente sempre exige um sabor escolhido antes de prosseguir —
+      // nunca reserva sem essa escolha.
+      setEscolhendoSaborPara(recompensaId)
+      setSaborSelecionado('')
+      return
+    }
+    usarNoProximoPedido(recompensaId)
+  }
+
+  async function usarNoProximoPedido(recompensaId: string, sabor?: string) {
     setReservando(recompensaId)
     try {
       const res = await fetchCliente('/api/cliente/jornada-chef/reservar', {
@@ -109,8 +157,13 @@ export default function JornadaDoChefPage() {
       if (res.ok) {
         const recompensa = jornada?.recompensasDisponiveis.find((r) => r.recompensaId === recompensaId)
         try {
+          // Só recompensaId + a escolha permitida (sabor) são guardados —
+          // nome, preço e demais dados do presente nunca são fonte de
+          // verdade aqui; o carrinho busca os dados reais na API autenticada
+          // (rule 4).
           sessionStorage.setItem('cf_recompensa_jornada', JSON.stringify({
             recompensaId,
+            ...(sabor ? { escolha: { sabor } } : {}),
             produtoNome: recompensa?.produtoNome ?? 'Presente da Jornada do Chef',
             validaAte: recompensa?.validaAte,
           }))
@@ -121,6 +174,7 @@ export default function JornadaDoChefPage() {
       }
     } catch {}
     setReservando(null)
+    setEscolhendoSaborPara(null)
   }
 
   function abrirSacola() {
@@ -187,14 +241,54 @@ export default function JornadaDoChefPage() {
                     <span style={{ fontSize: 13, fontWeight: 700, color: cores.amarelo, textTransform: 'uppercase', letterSpacing: 0.5 }}>Presente revelado</span>
                   </div>
                   <p style={{ fontSize: 16, fontWeight: 700, margin: '0 0 6px' }}>{rec.produtoNome ?? 'Presente especial'}</p>
+                  {rec.tipo === 'pizza' && rec.pizza && (
+                    <p style={{ fontSize: 12.5, color: cores.textoSecundario, margin: '0 0 12px' }}>Borda e adicionais não estão incluídos no presente.</p>
+                  )}
+                  {rec.tipo === 'presente_especial' && rec.composicao && rec.composicao.length > 0 && (
+                    <ul style={{ fontSize: 12.5, color: cores.textoSecundario, margin: '0 0 12px', paddingLeft: 18 }}>
+                      {rec.composicao.map((c, idx) => (
+                        <li key={idx}>{c.quantidade > 1 ? `${c.quantidade}x ${c.item.produtoNome}` : c.item.produtoNome}</li>
+                      ))}
+                    </ul>
+                  )}
                   {dias !== null && (
                     <p style={{ fontSize: 13, color: dias <= 3 ? cores.perigo : cores.textoSecundario, margin: '0 0 16px' }}>
                       {dias <= 3 ? `Válido por mais ${dias} dia${dias === 1 ? '' : 's'}` : 'Válido por 30 dias após a abertura'}
                     </p>
                   )}
-                  <button onClick={() => usarNoProximoPedido(rec.recompensaId)} disabled={reservando === rec.recompensaId} style={{ ...botaoPrimario, opacity: reservando === rec.recompensaId ? 0.6 : 1, marginBottom: 10 }}>
-                    {reservando === rec.recompensaId ? 'Preparando...' : 'Usar no próximo pedido'}
-                  </button>
+
+                  {escolhendoSaborPara === rec.recompensaId && rec.pizza ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 10 }}>
+                      <span style={label}>Escolha o sabor da sua pizza {rec.pizza.tamanho}</span>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                        {rec.pizza.sabores.map((sabor) => (
+                          <button
+                            key={sabor}
+                            onClick={() => setSaborSelecionado(sabor)}
+                            style={{
+                              ...botaoSecundario,
+                              padding: '6px 12px',
+                              ...(saborSelecionado === sabor ? { background: cores.amarelo, color: cores.amareloTexto, border: 'none' } : {}),
+                            }}
+                          >
+                            {sabor}
+                          </button>
+                        ))}
+                      </div>
+                      <button
+                        onClick={() => usarNoProximoPedido(rec.recompensaId, saborSelecionado)}
+                        disabled={!saborSelecionado || reservando === rec.recompensaId}
+                        style={{ ...botaoPrimario, opacity: !saborSelecionado || reservando === rec.recompensaId ? 0.6 : 1 }}
+                      >
+                        {reservando === rec.recompensaId ? 'Preparando...' : 'Confirmar sabor e usar no próximo pedido'}
+                      </button>
+                      <button onClick={() => setEscolhendoSaborPara(null)} style={{ ...botaoSecundario, width: 'fit-content' }}>Cancelar</button>
+                    </div>
+                  ) : (
+                    <button onClick={() => iniciarUsoDoPresente(rec.recompensaId)} disabled={reservando === rec.recompensaId} style={{ ...botaoPrimario, opacity: reservando === rec.recompensaId ? 0.6 : 1, marginBottom: 10 }}>
+                      {reservando === rec.recompensaId ? 'Preparando...' : 'Usar no próximo pedido'}
+                    </button>
+                  )}
                 </div>
               )
             })}

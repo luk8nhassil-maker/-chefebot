@@ -60,6 +60,14 @@ async function ativarJornada(overrides: Record<string, unknown> = {}) {
   return salvarConfigJornadaChef({ modoRollout: "on", sequenciaRecompensas: SEQUENCIA_PADRAO_TESTE, ...overrides });
 }
 
+// Contador simples para IDs de pedido únicos nos fixtures — zero Math.random
+// em toda a Jornada do Chef (rule 12), mesmo em testes.
+let contadorPedidoTeste = 0;
+function idPedidoUnico(prefixo: string): string {
+  contadorPedidoTeste += 1;
+  return `${prefixo}_${contadorPedidoTeste}`;
+}
+
 describe("contarPizzasElegiveisPedido", () => {
   test("pizza normal paga conta como 1", () => {
     const total = contarPizzasElegiveisPedido({
@@ -205,7 +213,7 @@ describe("processarConclusaoPedidoJornada — progresso e teto economico", () =>
     // Teto de 4 por pedido: chega a 10/12 via 3 pedidos (4 + 4 + 2), nunca um so pedido de 10.
     for (const qty of [4, 4, 2]) {
       await processarConclusaoPedidoJornada({
-        id: `ped_b1_${qty}_${Math.random()}`,
+        id: idPedidoUnico(`ped_b1_${qty}`),
         telefone,
         status: "entregue",
         itensDetalhados: [{ kind: "pizza", name: "Pizza G", detail: "Calabresa", price: 50, qty }],
@@ -229,7 +237,7 @@ describe("processarConclusaoPedidoJornada — progresso e teto economico", () =>
     // Teto de 4 por pedido: chega a 11/12 via 3 pedidos (4 + 4 + 3).
     for (const qty of [4, 4, 3]) {
       await processarConclusaoPedidoJornada({
-        id: `ped_c1_${qty}_${Math.random()}`,
+        id: idPedidoUnico(`ped_c1_${qty}`),
         telefone,
         status: "entregue",
         itensDetalhados: [{ kind: "pizza", name: "Pizza G", detail: "Calabresa", price: 50, qty }],

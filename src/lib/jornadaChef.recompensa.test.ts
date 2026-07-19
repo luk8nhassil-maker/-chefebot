@@ -47,6 +47,14 @@ beforeEach(() => {
   store.clear();
 });
 
+// Contador simples para IDs de pedido únicos nos fixtures — zero Math.random
+// em toda a Jornada do Chef (rule 12), mesmo em testes.
+let contadorPedidoTeste = 0;
+function idPedidoUnico(prefixo: string): string {
+  contadorPedidoTeste += 1;
+  return `${prefixo}_${contadorPedidoTeste}`;
+}
+
 // Itens reais do cardápio estático (fallback de getMENUDinamico quando não
 // há override em Redis) — usados aqui para que a validação de catálogo real
 // (rule 7) aceite a sequência de presentes nos testes.
@@ -71,7 +79,7 @@ async function clienteComCaixaDesbloqueada(telefone: string, sequencia?: Recompe
   let ultimoResultado;
   for (const qty of [4, 4, 4]) {
     ultimoResultado = await processarConclusaoPedidoJornada({
-      id: `ped_${telefone}_${qty}_${Math.random()}`,
+      id: idPedidoUnico(`ped_${telefone}_${qty}`),
       telefone,
       status: "entregue",
       itensDetalhados: [{ kind: "pizza", name: "Pizza G", detail: "Calabresa", price: 50, qty }],
@@ -108,7 +116,7 @@ describe("recompensa determinística", () => {
     let resultado2;
     for (const qty of [4, 4, 4]) {
       resultado2 = await processarConclusaoPedidoJornada({
-        id: `ped_2ciclo_${qty}_${Math.random()}`,
+        id: idPedidoUnico(`ped_2ciclo_${qty}`),
         telefone: "86911110001",
         status: "entregue",
         itensDetalhados: [{ kind: "pizza", name: "Pizza G", detail: "Calabresa", price: 50, qty }],
@@ -119,27 +127,32 @@ describe("recompensa determinística", () => {
     expect(r2.produtoId).toBe("suco:Laranja"); // ciclo 2 -> indice 1
   });
 
-  test("produto configurado mas esgotado no momento da conclusao do ciclo: caixa fica fechada, sem inventar produto, e gera pendencia", async () => {
+  test("produto configurado mas esgotado no momento da conclusao do ciclo: recompensa nasce suspensa, NUNCA uma caixa fechada abrivel vazia", async () => {
     // A ativação exige ao menos uma recompensa válida (rule 8) — não dá mais
     // para persistir "ativo: true" com sequência vazia. O gap real testado
     // aqui é outro: o produto era válido quando configurado, mas ficou
     // esgotado ANTES do ciclo se completar — a revalidação em `criarRecompensa`
-    // precisa pegar isso, nunca entregando um produto que sumiu do cardápio.
+    // precisa pegar isso, nunca entregando um produto que sumiu do cardápio,
+    // nem uma caixa "fechada" que abre para um prêmio vazio (rule 12).
     await salvarConfigJornadaChef({ modoRollout: "on", sequenciaRecompensas: [BEBIDA_GUARANA] });
     store.set("esgotados", ["Guarana 2L"]);
     const telefone = "86911110002";
     let ultimoResultado;
     for (const qty of [4, 4, 4]) {
       ultimoResultado = await processarConclusaoPedidoJornada({
-        id: `ped_${telefone}_${qty}_${Math.random()}`,
+        id: idPedidoUnico(`ped_${telefone}_${qty}`),
         telefone,
         status: "entregue",
         itensDetalhados: [{ kind: "pizza", name: "Pizza G", detail: "Calabresa", price: 50, qty }],
       });
     }
     const recompensaId = ultimoResultado!.recompensasDesbloqueadas[0].recompensaId;
-    const aberta = await abrirRecompensa("cli_86911110002", recompensaId);
-    expect(aberta.produtoId).toBeNull();
+    const [recompensa] = await obterRecompensasCliente("cli_86911110002");
+    expect(recompensa.status).toBe("suspensa");
+    expect(recompensa.produtoId).toBeNull();
+    expect(recompensa.motivoSuspensao).toBeTruthy();
+    // Não é nem uma "caixa fechada" visível ao cliente, nem abrível.
+    await expect(abrirRecompensa("cli_86911110002", recompensaId)).rejects.toThrow();
   });
 
   test("abrir a caixa é idempotente: refresh (chamar de novo) devolve o MESMO resultado", async () => {
@@ -213,7 +226,7 @@ describe("reserva e resgate", () => {
     let resultado;
     for (const qty of [4, 4, 4]) {
       resultado = await processarConclusaoPedidoJornada({
-        id: `ped_exp_${qty}_${Math.random()}`,
+        id: idPedidoUnico(`ped_exp_${qty}`),
         telefone: "86922220005",
         status: "entregue",
         itensDetalhados: [{ kind: "pizza", name: "Pizza G", detail: "Calabresa", price: 50, qty }],
@@ -244,12 +257,51 @@ describe("fallback manual da Kellyne", () => {
     await expect(aplicarResgateManual("JC-INEXISTENTE", "kellyne")).rejects.toThrow();
   });
 
-  test("substituicao manual fica registrada no historico", async () => {
+  test("substituicao manual estruturada fica registrada no historico e reconstroi produtoId/nome no servidor", async () => {
     const { clienteId, recompensaId } = await clienteComCaixaDesbloqueada("86933330002");
     await abrirRecompensa(clienteId, recompensaId);
-    const substituida = await substituirRecompensa(recompensaId, "pizza-g-calabresa", "Pizza G Calabresa", "item original esgotado", "kellyne");
-    expect(substituida.produtoId).toBe("pizza-g-calabresa");
+    // Guarana 2L (R$13) -> Pizza P (R$35): valor sempre igual ou superior ao original (rule 9).
+    const substituida = await substituirRecompensa(
+      recompensaId,
+      { tipo: "pizza", pizza: { tamanho: "P", sabores: ["Calabresa"] } },
+      "item original esgotado",
+      "kellyne"
+    );
+    expect(substituida.tipo).toBe("pizza");
+    expect(substituida.pizza).toEqual({ tamanho: "P", sabores: ["Calabresa"] });
+    expect(substituida.item).toBeUndefined(); // campo do tipo antigo removido
+    expect(substituida.produtoId).toBe("pizza:P:Calabresa");
+    expect(substituida.valorReferencia).toBe(35);
     expect(substituida.historicoSubstituicao).toHaveLength(1);
     expect(substituida.historicoSubstituicao![0].motivo).toContain("kellyne");
+    expect(substituida.historicoSubstituicao![0].valorReferenciaAnterior).toBe(13);
+    expect(substituida.historicoSubstituicao![0].valorReferenciaNovo).toBe(35);
+  });
+
+  test("substituicao manual rejeita produto de valor inferior ao original", async () => {
+    const { clienteId, recompensaId } = await clienteComCaixaDesbloqueada("86933330003");
+    await abrirRecompensa(clienteId, recompensaId);
+    // Guarana 2L (R$13) -> Agua sem Gas (R$3): valor inferior, deve ser rejeitado.
+    await expect(
+      substituirRecompensa(
+        recompensaId,
+        { tipo: "bebida_sobremesa", item: { produtoId: "bebida:Agua sem Gas", produtoNome: "Agua sem Gas", categoria: "bebida" } },
+        "tentativa de baratear",
+        "kellyne"
+      )
+    ).rejects.toThrow();
+  });
+
+  test("substituicao manual rejeita produto inexistente no catalogo", async () => {
+    const { clienteId, recompensaId } = await clienteComCaixaDesbloqueada("86933330004");
+    await abrirRecompensa(clienteId, recompensaId);
+    await expect(
+      substituirRecompensa(
+        recompensaId,
+        { tipo: "bebida_sobremesa", item: { produtoId: "bebida:Produto Fantasma", produtoNome: "Produto Fantasma", categoria: "bebida" } },
+        "motivo qualquer",
+        "kellyne"
+      )
+    ).rejects.toThrow();
   });
 });

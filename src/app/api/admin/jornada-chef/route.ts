@@ -53,6 +53,7 @@ export async function GET(req: NextRequest) {
       validaAte: r.validaAte,
       resgatadaEm: r.resgatadaEm,
       motivoSuspensao: r.motivoSuspensao,
+      valorReferencia: r.valorReferencia,
     })),
   });
 }

@@ -135,7 +135,15 @@ export function makePromoUnitPrice<P extends { id: string; active: boolean; maxU
   };
 }
 
-/** Valida e formata uma lista de itens vinda do cliente, recalculando preço 100% no servidor. */
+/**
+ * Valida e formata uma lista de itens vinda do cliente, recalculando preço
+ * 100% no servidor. Nunca aceita `recompensaJornadaId` como fonte de preço —
+ * um campo vindo do navegador nunca pode zerar o preço de um item arbitrário.
+ * O presente da Jornada do Chef nunca passa por aqui: é materializado à parte
+ * pelo chamador a partir do snapshot da própria recompensa (ver
+ * `materializarItensRecompensa` em @/lib/jornadaChef), sempre com preço 0
+ * atribuído pelo servidor, nunca por este helper genérico.
+ */
 export function validarEFormatarItens(
   itens: ItemApp[],
   menu: MenuPedidoApp,
@@ -143,11 +151,7 @@ export function validarEFormatarItens(
 ): { linha: string; unitPrice: number | null; qty: number }[] {
   return itens.map((item) => ({
     linha: formatItem(item),
-    // Item do presente da Jornada do Chef: preço sempre 0, nunca o preço
-    // normal do produto — quem valida se o `recompensaJornadaId` é legítimo
-    // (pertence ao cliente da sessão, está reservado) é a rota que chama
-    // esta função, antes de persistir o pedido.
-    unitPrice: item.recompensaJornadaId ? 0 : item.kind === "promo" ? promoUnitPrice(item) : officialUnitPrice(item, menu),
+    unitPrice: item.kind === "promo" ? promoUnitPrice(item) : officialUnitPrice(item, menu),
     qty: item.qty,
   }));
 }
