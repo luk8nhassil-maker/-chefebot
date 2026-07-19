@@ -40,14 +40,33 @@ import {
   substituirRecompensa,
   obterRecompensasCliente,
   salvarConfigJornadaChef,
+  type RecompensaConfigCiclo,
 } from "./jornadaChef";
 
 beforeEach(() => {
   store.clear();
 });
 
-async function clienteComCaixaDesbloqueada(telefone: string, sequencia?: Array<{ tipo: "bebida_sobremesa" | "pizza" | "presente_especial"; produtoId: string; produtoNome: string; ativo: boolean }>) {
-  await salvarConfigJornadaChef({ ativo: true, sequenciaRecompensas: sequencia ?? [{ tipo: "bebida_sobremesa", produtoId: "guarana-2l", produtoNome: "Guaraná 2L", ativo: true }] });
+// Itens reais do cardápio estático (fallback de getMENUDinamico quando não
+// há override em Redis) — usados aqui para que a validação de catálogo real
+// (rule 7) aceite a sequência de presentes nos testes.
+const BEBIDA_GUARANA: RecompensaConfigCiclo = {
+  id: "cfg_guarana",
+  tipo: "bebida_sobremesa",
+  ativo: true,
+  produtoNome: "Guarana 2L",
+  item: { produtoId: "bebida:Guarana 2L", produtoNome: "Guarana 2L", categoria: "bebida" },
+};
+const SUCO_LARANJA: RecompensaConfigCiclo = {
+  id: "cfg_laranja",
+  tipo: "bebida_sobremesa",
+  ativo: true,
+  produtoNome: "Laranja",
+  item: { produtoId: "suco:Laranja", produtoNome: "Laranja", categoria: "suco" },
+};
+
+async function clienteComCaixaDesbloqueada(telefone: string, sequencia?: RecompensaConfigCiclo[]) {
+  await salvarConfigJornadaChef({ ativo: true, sequenciaRecompensas: sequencia ?? [BEBIDA_GUARANA] });
   // Teto de 4 pizzas por pedido: fecha o ciclo de 12 via 3 pedidos (4 + 4 + 4).
   let ultimoResultado;
   for (const qty of [4, 4, 4]) {
@@ -65,13 +84,10 @@ async function clienteComCaixaDesbloqueada(telefone: string, sequencia?: Array<{
 
 describe("recompensa determinística", () => {
   test("prêmio é determinado no servidor a partir da configuração (sem RNG) — mesmo ciclo sempre produz o mesmo produto", async () => {
-    const sequencia = [
-      { tipo: "bebida_sobremesa" as const, produtoId: "a", produtoNome: "A", ativo: true },
-      { tipo: "pizza" as const, produtoId: "b", produtoNome: "B", ativo: true },
-    ];
+    const sequencia = [BEBIDA_GUARANA, SUCO_LARANJA];
     const { recompensaId: rec1 } = await clienteComCaixaDesbloqueada("86911110001", sequencia);
     const r1 = await abrirRecompensa("cli_86911110001", rec1);
-    expect(r1.produtoId).toBe("a"); // ciclo 1 -> indice 0
+    expect(r1.produtoId).toBe("bebida:Guarana 2L"); // ciclo 1 -> indice 0
 
     // Segundo ciclo do MESMO cliente deve escolher o proximo item da sequencia (b), nao aleatorio.
     let resultado2;
@@ -85,11 +101,28 @@ describe("recompensa determinística", () => {
     }
     const rec2 = resultado2!.recompensasDesbloqueadas[0].recompensaId;
     const r2 = await abrirRecompensa("cli_86911110001", rec2);
-    expect(r2.produtoId).toBe("b"); // ciclo 2 -> indice 1
+    expect(r2.produtoId).toBe("suco:Laranja"); // ciclo 2 -> indice 1
   });
 
-  test("sem produtos elegiveis configurados: caixa fica fechada, sem inventar produto, e gera pendencia", async () => {
-    const { recompensaId } = await clienteComCaixaDesbloqueada("86911110002", []);
+  test("produto configurado mas esgotado no momento da conclusao do ciclo: caixa fica fechada, sem inventar produto, e gera pendencia", async () => {
+    // A ativação exige ao menos uma recompensa válida (rule 8) — não dá mais
+    // para persistir "ativo: true" com sequência vazia. O gap real testado
+    // aqui é outro: o produto era válido quando configurado, mas ficou
+    // esgotado ANTES do ciclo se completar — a revalidação em `criarRecompensa`
+    // precisa pegar isso, nunca entregando um produto que sumiu do cardápio.
+    await salvarConfigJornadaChef({ ativo: true, sequenciaRecompensas: [BEBIDA_GUARANA] });
+    store.set("esgotados", ["Guarana 2L"]);
+    const telefone = "86911110002";
+    let ultimoResultado;
+    for (const qty of [4, 4, 4]) {
+      ultimoResultado = await processarConclusaoPedidoJornada({
+        id: `ped_${telefone}_${qty}_${Math.random()}`,
+        telefone,
+        status: "entregue",
+        itensDetalhados: [{ kind: "pizza", name: "Pizza G", detail: "Calabresa", price: 50, qty }],
+      });
+    }
+    const recompensaId = ultimoResultado!.recompensasDesbloqueadas[0].recompensaId;
     const aberta = await abrirRecompensa("cli_86911110002", recompensaId);
     expect(aberta.produtoId).toBeNull();
   });
@@ -161,7 +194,7 @@ describe("reserva e resgate", () => {
   });
 
   test("expiracao apos abertura: recompensa expirada nao pode ser reservada", async () => {
-    await salvarConfigJornadaChef({ ativo: true, validadeRecompensaDias: 1, sequenciaRecompensas: [{ tipo: "bebida_sobremesa", produtoId: "a", produtoNome: "A", ativo: true }] });
+    await salvarConfigJornadaChef({ ativo: true, validadeRecompensaDias: 1, sequenciaRecompensas: [BEBIDA_GUARANA] });
     let resultado;
     for (const qty of [4, 4, 4]) {
       resultado = await processarConclusaoPedidoJornada({

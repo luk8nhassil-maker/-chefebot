@@ -1,7 +1,30 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import PanelShell from '@/components/PanelShell'
+
+type TipoRecompensa = 'bebida_sobremesa' | 'pizza' | 'presente_especial'
+type CategoriaItem = 'bebida' | 'suco' | 'lanche' | 'macarronada'
+
+type ItemCatalogo = { produtoId: string; produtoNome: string; categoria: CategoriaItem; esgotado: boolean }
+type Catalogo = {
+  sizes: { code: string; label?: string; price: number }[]
+  saltyFlavors: string[]
+  sweetFlavors: string[]
+  itensIndividuais: ItemCatalogo[]
+}
+
+type ItemComposicao = { item: { produtoId: string; produtoNome: string; categoria: CategoriaItem }; quantidade: number }
+
+type RecompensaConfig = {
+  id: string
+  tipo: TipoRecompensa
+  ativo: boolean
+  produtoNome: string
+  item?: { produtoId: string; produtoNome: string; categoria: CategoriaItem }
+  pizza?: { tamanho: string; sabores: string[] }
+  composicao?: ItemComposicao[]
+}
 
 type ConfigJornada = {
   ativo: boolean
@@ -9,7 +32,7 @@ type ConfigJornada = {
   limitePizzasPorPedido: number
   validadeRecompensaDias: number
   mensagensWhatsappAtivas: boolean
-  sequenciaRecompensas: { tipo: string; produtoId: string; produtoNome: string; ativo: boolean }[]
+  sequenciaRecompensas: RecompensaConfig[]
 }
 
 type RecompensaAdmin = {
@@ -52,12 +75,31 @@ const cardStyle: React.CSSProperties = { background: 'var(--surface)', border: '
 const inputStyle: React.CSSProperties = { padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--foreground)', fontSize: 14, fontFamily: 'Archivo, sans-serif' }
 const botaoPrimario: React.CSSProperties = { padding: '10px 16px', borderRadius: 10, background: 'var(--primary)', color: 'var(--primary-foreground)', fontWeight: 700, fontSize: 13, border: 'none', cursor: 'pointer', fontFamily: 'Archivo, sans-serif' }
 const botaoSecundario: React.CSSProperties = { ...botaoPrimario, background: 'transparent', color: 'var(--foreground-secondary)', border: '1px solid var(--border)' }
+const botaoIcone: React.CSSProperties = { ...botaoSecundario, padding: '6px 10px', fontSize: 12 }
 const titulo: React.CSSProperties = { fontSize: 15, fontWeight: 800, margin: '0 0 12px' }
 const label: React.CSSProperties = { fontSize: 11, fontWeight: 700, color: 'var(--foreground-muted)', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 4, display: 'block' }
+
+function gerarIdLocal(): string {
+  return `cfg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+}
+
+function resumoLocal(r: RecompensaConfig): string {
+  if (r.tipo === 'bebida_sobremesa') return r.item?.produtoNome ?? '(produto não selecionado)'
+  if (r.tipo === 'pizza') return r.pizza ? `Pizza ${r.pizza.tamanho} — ${r.pizza.sabores.join(' / ') || '(sem sabor)'}` : '(pizza não configurada)'
+  if (r.tipo === 'presente_especial') {
+    if (!r.composicao || r.composicao.length === 0) return '(composição vazia)'
+    return r.composicao.map((c) => (c.quantidade > 1 ? `${c.quantidade}x ${c.item.produtoNome}` : c.item.produtoNome)).join(' + ')
+  }
+  return '(tipo desconhecido)'
+}
 
 export default function AdminJornadaChefPage() {
   const [config, setConfig] = useState<ConfigJornada | null>(null)
   const [salvandoConfig, setSalvandoConfig] = useState(false)
+  const [erroConfig, setErroConfig] = useState('')
+  const [detalhesErro, setDetalhesErro] = useState<{ indice: number; mensagens: string[] }[]>([])
+  const [catalogo, setCatalogo] = useState<Catalogo | null>(null)
+
   const [telefone, setTelefone] = useState('')
   const [progresso, setProgresso] = useState<ProgressoAdmin | null>(null)
   const [buscaErro, setBuscaErro] = useState('')
@@ -66,9 +108,23 @@ export default function AdminJornadaChefPage() {
   const [msgAcao, setMsgAcao] = useState('')
   const [pendencias, setPendencias] = useState<Pendencia[]>([])
 
+  // Formulário de nova recompensa
+  const [novoTipo, setNovoTipo] = useState<TipoRecompensa>('bebida_sobremesa')
+  const [novoItemId, setNovoItemId] = useState('')
+  const [novoTamanho, setNovoTamanho] = useState('')
+  const [novosSabores, setNovosSabores] = useState<string[]>([])
+  const [composicaoRascunho, setComposicaoRascunho] = useState<ItemComposicao[]>([])
+  const [composicaoItemId, setComposicaoItemId] = useState('')
+  const [composicaoQty, setComposicaoQty] = useState(1)
+
   async function carregarConfig() {
     const res = await fetch('/api/jornada-chef/config', { cache: 'no-store' })
     if (res.ok) setConfig(await res.json())
+  }
+
+  async function carregarCatalogo() {
+    const res = await fetch('/api/admin/jornada-chef/catalogo', { cache: 'no-store' })
+    if (res.ok) setCatalogo(await res.json())
   }
 
   async function carregarPendencias() {
@@ -76,11 +132,72 @@ export default function AdminJornadaChefPage() {
     if (res.ok) setPendencias((await res.json()).pendencias ?? [])
   }
 
-  useEffect(() => { carregarConfig(); carregarPendencias() }, [])
+  useEffect(() => { carregarConfig(); carregarCatalogo(); carregarPendencias() }, [])
+
+  const itensDisponiveis = useMemo(() => (catalogo?.itensIndividuais ?? []).filter((i) => !i.esgotado), [catalogo])
+  const todosSabores = useMemo(() => [...(catalogo?.saltyFlavors ?? []), ...(catalogo?.sweetFlavors ?? [])], [catalogo])
+
+  function limparFormularioNovaRecompensa() {
+    setNovoItemId('')
+    setNovoTamanho('')
+    setNovosSabores([])
+    setComposicaoRascunho([])
+    setComposicaoItemId('')
+    setComposicaoQty(1)
+  }
+
+  function adicionarItemComposicao() {
+    const item = itensDisponiveis.find((i) => i.produtoId === composicaoItemId)
+    if (!item) return
+    setComposicaoRascunho((atual) => [...atual, { item: { produtoId: item.produtoId, produtoNome: item.produtoNome, categoria: item.categoria }, quantidade: Math.max(1, composicaoQty) }])
+    setComposicaoItemId('')
+    setComposicaoQty(1)
+  }
+
+  function adicionarRecompensa() {
+    if (!config) return
+    let nova: RecompensaConfig
+    if (novoTipo === 'bebida_sobremesa') {
+      const item = itensDisponiveis.find((i) => i.produtoId === novoItemId)
+      if (!item) return
+      nova = { id: gerarIdLocal(), tipo: 'bebida_sobremesa', ativo: true, produtoNome: '', item: { produtoId: item.produtoId, produtoNome: item.produtoNome, categoria: item.categoria } }
+    } else if (novoTipo === 'pizza') {
+      if (!novoTamanho || novosSabores.length === 0) return
+      nova = { id: gerarIdLocal(), tipo: 'pizza', ativo: true, produtoNome: '', pizza: { tamanho: novoTamanho, sabores: novosSabores } }
+    } else {
+      if (composicaoRascunho.length === 0) return
+      nova = { id: gerarIdLocal(), tipo: 'presente_especial', ativo: true, produtoNome: '', composicao: composicaoRascunho }
+    }
+    nova.produtoNome = resumoLocal(nova)
+    setConfig({ ...config, sequenciaRecompensas: [...config.sequenciaRecompensas, nova] })
+    limparFormularioNovaRecompensa()
+  }
+
+  function removerRecompensa(id: string) {
+    if (!config) return
+    setConfig({ ...config, sequenciaRecompensas: config.sequenciaRecompensas.filter((r) => r.id !== id) })
+  }
+
+  function alternarAtivoRecompensa(id: string) {
+    if (!config) return
+    setConfig({ ...config, sequenciaRecompensas: config.sequenciaRecompensas.map((r) => (r.id === id ? { ...r, ativo: !r.ativo } : r)) })
+  }
+
+  function moverRecompensa(id: string, direcao: -1 | 1) {
+    if (!config) return
+    const lista = [...config.sequenciaRecompensas]
+    const indice = lista.findIndex((r) => r.id === id)
+    const novoIndice = indice + direcao
+    if (indice === -1 || novoIndice < 0 || novoIndice >= lista.length) return
+    ;[lista[indice], lista[novoIndice]] = [lista[novoIndice], lista[indice]]
+    setConfig({ ...config, sequenciaRecompensas: lista })
+  }
 
   async function salvarConfig() {
     if (!config) return
     setSalvandoConfig(true)
+    setErroConfig('')
+    setDetalhesErro([])
     try {
       const res = await fetch('/api/jornada-chef/config', {
         method: 'POST',
@@ -88,8 +205,15 @@ export default function AdminJornadaChefPage() {
         body: JSON.stringify(config),
       })
       const data = await res.json().catch(() => null)
-      if (res.ok && data?.config) setConfig(data.config)
-    } catch {}
+      if (res.ok && data?.config) {
+        setConfig(data.config)
+      } else {
+        setErroConfig(data?.error || 'Não foi possível salvar a configuração.')
+        setDetalhesErro(Array.isArray(data?.detalhes) ? data.detalhes : [])
+      }
+    } catch {
+      setErroConfig('Erro de conexão.')
+    }
     setSalvandoConfig(false)
   }
 
@@ -133,6 +257,8 @@ export default function AdminJornadaChefPage() {
     carregarPendencias()
   }
 
+  const sequenciaAtiva = (config?.sequenciaRecompensas ?? []).filter((r) => r.ativo)
+
   return (
     <PanelShell showGestaoNav>
       <div style={{ padding: 20, maxWidth: 1400, display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -166,14 +292,144 @@ export default function AdminJornadaChefPage() {
                 <input type="checkbox" checked={config.mensagensWhatsappAtivas} onChange={(e) => setConfig({ ...config, mensagensWhatsappAtivas: e.target.checked })} />
                 Enviar mensagens de progresso pelo WhatsApp
               </label>
-              <p style={{ fontSize: 12, color: 'var(--foreground-muted)', margin: 0 }}>
-                {config.sequenciaRecompensas.length === 0
-                  ? 'Nenhum produto elegível configurado ainda — caixas ficarão fechadas até definir os produtos que podem ser presente.'
-                  : `${config.sequenciaRecompensas.length} produto(s) configurado(s) na sequência de presentes.`}
-              </p>
+
+              {erroConfig && (
+                <div style={{ background: 'color-mix(in srgb, var(--danger) 10%, transparent)', borderRadius: 10, padding: '10px 12px' }}>
+                  <p style={{ color: 'var(--danger-text)', fontSize: 13, fontWeight: 700, margin: 0 }}>{erroConfig}</p>
+                  {detalhesErro.map((d) => (
+                    <p key={d.indice} style={{ color: 'var(--danger-text)', fontSize: 12.5, margin: '4px 0 0' }}>
+                      Item {d.indice + 1}: {d.mensagens.join(' ')}
+                    </p>
+                  ))}
+                </div>
+              )}
+
               <button onClick={salvarConfig} disabled={salvandoConfig} style={{ ...botaoPrimario, width: 'fit-content', opacity: salvandoConfig ? 0.6 : 1 }}>
                 {salvandoConfig ? 'Salvando...' : 'Salvar configuração'}
               </button>
+            </div>
+          )}
+        </div>
+
+        {/* Sequência de presentes */}
+        <div style={cardStyle}>
+          <p style={titulo}>Sequência de presentes</p>
+          {!catalogo && <p style={{ fontSize: 13, color: 'var(--foreground-secondary)' }}>Carregando cardápio...</p>}
+          {config && catalogo && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <p style={{ fontSize: 12.5, color: 'var(--foreground-muted)', margin: 0 }}>
+                {config.sequenciaRecompensas.length === 0
+                  ? 'Nenhum presente configurado ainda — a Jornada do Chef não pode ser ativada sem ao menos um presente ativo.'
+                  : 'A ordem abaixo é a ordem determinística dos ciclos (ciclo 1 → primeiro presente ativo, ciclo 2 → segundo, e assim por diante, repetindo).'}
+              </p>
+
+              {config.sequenciaRecompensas.map((r, i) => (
+                <div key={r.id} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 700 }}>
+                      {r.ativo
+                        ? `Ciclo ${sequenciaAtiva.findIndex((s) => s.id === r.id) + 1} (e múltiplos de ${sequenciaAtiva.length}) · `
+                        : '(inativo) · '}
+                      {r.tipo === 'bebida_sobremesa' ? 'Bebida/item individual' : r.tipo === 'pizza' ? 'Pizza' : 'Presente especial'}
+                    </div>
+                    <div style={{ fontSize: 13, color: 'var(--foreground-secondary)' }}>{resumoLocal(r)}</div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <button onClick={() => moverRecompensa(r.id, -1)} disabled={i === 0} style={{ ...botaoIcone, opacity: i === 0 ? 0.4 : 1 }} aria-label="Mover para cima">↑</button>
+                    <button onClick={() => moverRecompensa(r.id, 1)} disabled={i === config.sequenciaRecompensas.length - 1} style={{ ...botaoIcone, opacity: i === config.sequenciaRecompensas.length - 1 ? 0.4 : 1 }} aria-label="Mover para baixo">↓</button>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+                      <input type="checkbox" checked={r.ativo} onChange={() => alternarAtivoRecompensa(r.id)} /> Ativo
+                    </label>
+                    <button onClick={() => removerRecompensa(r.id)} style={botaoIcone}>Remover</button>
+                  </div>
+                </div>
+              ))}
+
+              {/* Formulário de nova recompensa */}
+              <div style={{ borderTop: '1px solid var(--border)', paddingTop: 14 }}>
+                <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--foreground-muted)', textTransform: 'uppercase', margin: '0 0 10px' }}>Adicionar presente</p>
+                <div style={{ display: 'flex', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
+                  {(['bebida_sobremesa', 'pizza', 'presente_especial'] as TipoRecompensa[]).map((t) => (
+                    <button
+                      key={t}
+                      onClick={() => { setNovoTipo(t); limparFormularioNovaRecompensa() }}
+                      style={{ ...(novoTipo === t ? botaoPrimario : botaoSecundario), padding: '8px 14px' }}
+                    >
+                      {t === 'bebida_sobremesa' ? 'Bebida/item individual' : t === 'pizza' ? 'Pizza' : 'Presente especial'}
+                    </button>
+                  ))}
+                </div>
+
+                {novoTipo === 'bebida_sobremesa' && (
+                  <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <select value={novoItemId} onChange={(e) => setNovoItemId(e.target.value)} style={{ ...inputStyle, minWidth: 240 }}>
+                      <option value="">Selecione um produto...</option>
+                      {itensDisponiveis.map((i) => (
+                        <option key={i.produtoId} value={i.produtoId}>{i.produtoNome} ({i.categoria})</option>
+                      ))}
+                    </select>
+                    <button onClick={adicionarRecompensa} disabled={!novoItemId} style={{ ...botaoPrimario, opacity: !novoItemId ? 0.6 : 1 }}>Adicionar</button>
+                  </div>
+                )}
+
+                {novoTipo === 'pizza' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <span style={label}>Tamanho</span>
+                      <select value={novoTamanho} onChange={(e) => setNovoTamanho(e.target.value)} style={inputStyle}>
+                        <option value="">Selecione...</option>
+                        {catalogo.sizes.map((s) => (
+                          <option key={s.code} value={s.code}>{s.label ? `${s.label} (${s.code})` : s.code}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <span style={label}>Sabores permitidos</span>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, maxWidth: 640 }}>
+                        {todosSabores.map((s) => (
+                          <label key={s} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, border: '1px solid var(--border)', borderRadius: 8, padding: '4px 8px' }}>
+                            <input
+                              type="checkbox"
+                              checked={novosSabores.includes(s)}
+                              onChange={(e) => setNovosSabores((atual) => (e.target.checked ? [...atual, s] : atual.filter((x) => x !== s)))}
+                            />
+                            {s}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                    <button onClick={adicionarRecompensa} disabled={!novoTamanho || novosSabores.length === 0} style={{ ...botaoPrimario, width: 'fit-content', opacity: !novoTamanho || novosSabores.length === 0 ? 0.6 : 1 }}>
+                      Adicionar
+                    </button>
+                    <p style={{ fontSize: 11.5, color: 'var(--foreground-muted)', margin: 0 }}>Borda e adicionais não estão incluídos no presente.</p>
+                  </div>
+                )}
+
+                {novoTipo === 'presente_especial' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <select value={composicaoItemId} onChange={(e) => setComposicaoItemId(e.target.value)} style={{ ...inputStyle, minWidth: 220 }}>
+                        <option value="">Selecione um item...</option>
+                        {itensDisponiveis.map((i) => (
+                          <option key={i.produtoId} value={i.produtoId}>{i.produtoNome} ({i.categoria})</option>
+                        ))}
+                      </select>
+                      <input type="number" min={1} value={composicaoQty} onChange={(e) => setComposicaoQty(Math.max(1, Number(e.target.value)))} style={{ ...inputStyle, width: 70 }} />
+                      <button onClick={adicionarItemComposicao} disabled={!composicaoItemId} style={{ ...botaoSecundario, opacity: !composicaoItemId ? 0.6 : 1 }}>+ Item</button>
+                    </div>
+                    {composicaoRascunho.length > 0 && (
+                      <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13 }}>
+                        {composicaoRascunho.map((c, idx) => (
+                          <li key={idx}>{c.quantidade}x {c.item.produtoNome}</li>
+                        ))}
+                      </ul>
+                    )}
+                    <button onClick={adicionarRecompensa} disabled={composicaoRascunho.length === 0} style={{ ...botaoPrimario, width: 'fit-content', opacity: composicaoRascunho.length === 0 ? 0.6 : 1 }}>
+                      Adicionar presente especial
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>

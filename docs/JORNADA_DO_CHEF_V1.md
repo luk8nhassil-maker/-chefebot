@@ -80,13 +80,51 @@ namespace próprio.
 ## Recompensa determinística — zero RNG
 
 `escolherRecompensaDoCiclo` escolhe o prêmio por índice
-`(cicloConcluido - 1) % sequenciaRecompensas.length` sobre a lista
-configurada pela Kellyne (`config:jornada_chef`). Sem sorteio, sem
-`Math.random`, sem tabela de probabilidade. Se a sequência estiver vazia
-(nenhum produto configurado ainda), a caixa é criada mas fica sem produto
-definido — uma pendência de revisão é aberta automaticamente
-(`produtos_nao_configurados`) e o painel mostra "nenhum produto elegível
-configurado".
+`(cicloConcluido - 1) % ativos.length` sobre as entradas **ativas** da
+sequência configurada pela Kellyne (`config:jornada_chef`). Sem sorteio, sem
+`Math.random`, sem tabela de probabilidade.
+
+### Modelo estruturado da sequência de presentes
+
+Cada entrada de `sequenciaRecompensas` (`RecompensaConfigCiclo`) é sempre uma
+referência estruturada ao cardápio real — nunca um `produtoId` genérico nem
+texto livre:
+
+- **`bebida_sobremesa`**: `item` — referência estável (`ItemCatalogoJornada`,
+  `produtoId` de `catalogoDoMenu`/`@/lib/promocoes`, `produtoNome` snapshot,
+  `categoria`).
+- **`pizza`**: `pizza` — `tamanho` (código de `menu.sizes`) + `sabores`
+  (lista de sabores permitidos, de `menu.saltyFlavors`/`sweetFlavors`). Borda
+  e adicionais nunca estão incluídos. Não há opção de "pagar a diferença"
+  nesta V1 — decidimos não implementar isso ainda porque exigiria integração
+  adicional com o cálculo de carrinho para ser aplicado com segurança.
+- **`presente_especial`**: `composicao` — lista estruturada de
+  `{ item, quantidade }`, nunca uma string livre.
+
+O catálogo real (tamanhos, sabores, itens individuais com status de
+esgotado) é servido por `obterCatalogoJornada()` — lido de
+`getMENUDinamico()` (@/lib/menu) e `catalogoDoMenu` (@/lib/promocoes), nunca
+duplicado ou hardcodado no frontend. O painel da Kellyne consome isso via
+`GET /api/admin/jornada-chef/catalogo`.
+
+### Validação e ativação
+
+`validarSequenciaRecompensas` rejeita, em `salvarConfigJornadaChef` (chamado
+por `POST /api/jornada-chef/config`): produto inexistente/removido/esgotado,
+tamanho de pizza inválido, sabor inválido ou ausente, composição vazia de
+presente especial. A configuração inteira é rejeitada (nada é salvo
+parcialmente) se qualquer entrada for inválida.
+
+A Jornada do Chef **não pode ser ativada** (`ativo: true`) sem ao menos uma
+recompensa configurada e ativa na sequência — tentar ativar sem isso retorna
+erro claro, sem ativar parcialmente (rule 8).
+
+Além da validação no momento de salvar, `criarRecompensa` **revalida contra
+o catálogo atual** no momento em que uma caixa é de fato criada (um produto
+configurado pode ter ficado esgotado entre a configuração e a conclusão do
+ciclo) — nesse caso a caixa é criada "fechada" sem produto definido, e uma
+pendência de revisão é aberta automaticamente (`produtos_nao_configurados`),
+nunca entregando um produto que já não existe no cardápio.
 
 ## Ciclo de vida da recompensa
 

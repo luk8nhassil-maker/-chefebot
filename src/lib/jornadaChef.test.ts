@@ -37,6 +37,7 @@ import {
   processarConclusaoPedidoJornada,
   obterEstadoJornada,
   obterEventosFase,
+  obterConfigJornadaChef,
   salvarConfigJornadaChef,
   derivarFaseAtual,
   calcularMensagemProgresso,
@@ -47,8 +48,16 @@ beforeEach(() => {
   store.clear();
 });
 
+// Sequência mínima válida (produto real do cardápio estático), só para que
+// a ativação (rule 8: exige ao menos uma recompensa configurada e ativa)
+// seja possível nos testes de contagem/progresso/idempotência abaixo, que
+// não se importam com QUAL produto é entregue.
+const SEQUENCIA_PADRAO_TESTE = [
+  { id: "padrao", tipo: "bebida_sobremesa" as const, ativo: true, produtoNome: "", item: { produtoId: "bebida:Guarana 2L", produtoNome: "Guarana 2L", categoria: "bebida" as const } },
+];
+
 async function ativarJornada(overrides: Record<string, unknown> = {}) {
-  return salvarConfigJornadaChef({ ativo: true, ...overrides });
+  return salvarConfigJornadaChef({ ativo: true, sequenciaRecompensas: SEQUENCIA_PADRAO_TESTE, ...overrides });
 }
 
 describe("contarPizzasElegiveisPedido", () => {
@@ -364,16 +373,70 @@ describe("derivarFaseAtual / calcularMensagemProgresso", () => {
 
 describe("salvarConfigJornadaChef — blindagem economica", () => {
   test("nunca aceita limite por pedido acima do maximo seguro (4), mesmo se enviado maior", async () => {
-    const config = await salvarConfigJornadaChef({ ativo: true, limitePizzasPorPedido: 999 });
-    expect(config.limitePizzasPorPedido).toBeLessThanOrEqual(4);
+    const resultado = await salvarConfigJornadaChef({ limitePizzasPorPedido: 999 });
+    expect(resultado.ok).toBe(true);
+    expect(resultado.ok && resultado.config.limitePizzasPorPedido).toBeLessThanOrEqual(4);
   });
 
   test("nunca aceita meta abaixo do minimo seguro", async () => {
-    const config = await salvarConfigJornadaChef({ ativo: true, metaPizzas: 1 });
-    expect(config.metaPizzas).toBeGreaterThanOrEqual(4);
+    const resultado = await salvarConfigJornadaChef({ metaPizzas: 1 });
+    expect(resultado.ok).toBe(true);
+    expect(resultado.ok && resultado.config.metaPizzas).toBeGreaterThanOrEqual(4);
   });
 
   test("TENANT_PADRAO e usado por padrao (namespace pronto para multi-tenant)", () => {
     expect(TENANT_PADRAO).toBe("default");
+  });
+
+  test("nao ativa quando a sequencia de presentes esta vazia", async () => {
+    const resultado = await salvarConfigJornadaChef({ ativo: true });
+    expect(resultado.ok).toBe(false);
+  });
+
+  test("nao ativa quando nenhuma recompensa da sequencia esta ativa", async () => {
+    const resultado = await salvarConfigJornadaChef({
+      ativo: true,
+      sequenciaRecompensas: [
+        { id: "x", tipo: "bebida_sobremesa", ativo: false, produtoNome: "", item: { produtoId: "bebida:Guarana 2L", produtoNome: "Guarana 2L", categoria: "bebida" } },
+      ],
+    });
+    expect(resultado.ok).toBe(false);
+  });
+
+  test("rejeita produto inexistente/removido na sequencia de presentes", async () => {
+    const resultado = await salvarConfigJornadaChef({
+      sequenciaRecompensas: [
+        { id: "x", tipo: "bebida_sobremesa", ativo: true, produtoNome: "", item: { produtoId: "bebida:Produto Que Nao Existe", produtoNome: "???", categoria: "bebida" } },
+      ],
+    });
+    expect(resultado.ok).toBe(false);
+  });
+
+  test("rejeita pizza sem tamanho/sabor valido", async () => {
+    const resultado = await salvarConfigJornadaChef({
+      sequenciaRecompensas: [{ id: "x", tipo: "pizza", ativo: true, produtoNome: "", pizza: { tamanho: "ZZ", sabores: ["Sabor Inexistente"] } }],
+    });
+    expect(resultado.ok).toBe(false);
+  });
+
+  test("rejeita presente especial sem composicao valida", async () => {
+    const resultado = await salvarConfigJornadaChef({
+      sequenciaRecompensas: [{ id: "x", tipo: "presente_especial", ativo: true, produtoNome: "" }],
+    });
+    expect(resultado.ok).toBe(false);
+  });
+
+  test("aceita e ativa com uma sequencia valida (bebida real do cardapio) e mantem a ordem apos reload", async () => {
+    const resultado = await salvarConfigJornadaChef({
+      ativo: true,
+      sequenciaRecompensas: [
+        { id: "um", tipo: "bebida_sobremesa", ativo: true, produtoNome: "", item: { produtoId: "bebida:Guarana 2L", produtoNome: "Guarana 2L", categoria: "bebida" } },
+        { id: "dois", tipo: "pizza", ativo: true, produtoNome: "", pizza: { tamanho: "M", sabores: ["Calabresa"] } },
+      ],
+    });
+    expect(resultado.ok).toBe(true);
+    const recarregado = await obterConfigJornadaChef();
+    expect(recarregado.sequenciaRecompensas.map((r) => r.id)).toEqual(["um", "dois"]);
+    expect(recarregado.sequenciaRecompensas[1].produtoNome).toContain("Pizza M");
   });
 });

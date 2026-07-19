@@ -11,6 +11,8 @@ import { derivarClienteIdPorTelefone } from "./fidelidade";
 import { enviarTextoWhatsApp } from "./whatsappMensagem";
 import { norm } from "./pedidoAppItens";
 import type { ItemApp } from "./pedidoAppItens";
+import { getMENUDinamico } from "./menu";
+import { catalogoDoMenu } from "./promocoes";
 
 // ============================================================================
 // Constantes e namespaces
@@ -62,12 +64,66 @@ function chaveMensagemEnviada(tenantId: string, pedidoId: string, tipo: string):
 
 export type TipoRecompensaJornada = "bebida_sobremesa" | "pizza" | "presente_especial";
 
-export type RecompensaConfigCiclo = {
-  tipo: TipoRecompensaJornada;
+/** Categorias de item individual do cardápio real (pizza fica de fora daqui
+ * — pizza é sempre tamanho + sabores, nunca um productId genérico). */
+export type CategoriaItemJornada = "bebida" | "suco" | "lanche" | "macarronada";
+
+/** Item do cardápio real referenciado por uma recompensa — sempre com o
+ * `produtoId` estável de `catalogoDoMenu` (@/lib/promocoes), nunca por nome
+ * livre. `produtoNome` é um snapshot (nome no momento da configuração),
+ * usado só para exibição — a identidade é sempre `produtoId`. */
+export type ItemCatalogoJornada = {
   produtoId: string;
   produtoNome: string;
-  ativo: boolean;
+  categoria: CategoriaItemJornada;
 };
+
+/** Especificação de uma pizza-presente: tamanho e sabores permitidos, ambos
+ * do cardápio real — nunca um productId genérico (pizza depende de tamanho
+ * e sabor, que o produtoId de bebida/lanche não capturaria). Borda e
+ * adicionais NÃO estão incluídos no presente (rule 14). */
+export type PizzaRecompensa = {
+  tamanho: string;
+  sabores: string[];
+};
+
+/** Item de uma composição de "presente especial" — sempre uma referência
+ * estruturada ao catálogo real, nunca texto livre. */
+export type ItemComposicaoRecompensa = {
+  item: ItemCatalogoJornada;
+  quantidade: number;
+};
+
+export type RecompensaConfigCiclo = {
+  /** Identidade estável desta entrada na sequência — usada para editar,
+   * reordenar (a ORDEM no array já é a ordem determinística de ciclos) e
+   * remover sem depender de índice. */
+  id: string;
+  tipo: TipoRecompensaJornada;
+  ativo: boolean;
+  /** Resumo de exibição, sempre derivado (nunca fonte de verdade) — ver
+   * `resumoRecompensaConfig`. */
+  produtoNome: string;
+  /** Preenchido quando tipo === "bebida_sobremesa". */
+  item?: ItemCatalogoJornada;
+  /** Preenchido quando tipo === "pizza". */
+  pizza?: PizzaRecompensa;
+  /** Preenchido quando tipo === "presente_especial" — composição estruturada,
+   * nunca uma string livre. */
+  composicao?: ItemComposicaoRecompensa[];
+};
+
+/** Catálogo real usado para validar e construir a sequência de presentes —
+ * carregado do cardápio dinâmico oficial (@/lib/menu), nunca duplicado ou
+ * hardcodado no frontend. */
+export type CatalogoJornada = {
+  sizes: { code: string; label?: string; price: number }[];
+  saltyFlavors: string[];
+  sweetFlavors: string[];
+  itensIndividuais: { produtoId: string; produtoNome: string; categoria: CategoriaItemJornada; esgotado: boolean }[];
+};
+
+export type ErroValidacaoRecompensa = { indice: number; id?: string; mensagens: string[] };
 
 export type ConfigJornadaChef = {
   ativo: boolean;
@@ -139,6 +195,11 @@ export type RecompensaJornada = {
   tipo: TipoRecompensaJornada | null;
   produtoId: string | null;
   produtoNome: string | null;
+  /** Snapshot estruturado da composição no momento em que a caixa foi
+   * criada — imune a mudanças posteriores no cardápio/config (rule 4). */
+  item?: ItemCatalogoJornada;
+  pizza?: PizzaRecompensa;
+  composicao?: ItemComposicaoRecompensa[];
   versaoConfig: number;
   codigoPublico: string;
   pedidoOrigemId: string;
@@ -224,13 +285,147 @@ export async function obterConfigJornadaChef(tenantId: string = TENANT_PADRAO): 
   };
 }
 
-/** Valida e persiste a config, sempre reforçando os limites econômicos
- * aprovados (rule 18/5) — nenhum valor perigoso passa, mesmo vindo de um
- * admin autenticado. */
+/**
+ * Carrega o catálogo real do cardápio dinâmico oficial (@/lib/menu +
+ * @/lib/promocoes) para validar/exibir a sequência de presentes — nunca
+ * duplicado ou hardcodado no frontend. Pizza entra separada (tamanho +
+ * sabores), nunca como um productId genérico de `catalogoDoMenu`.
+ */
+export async function obterCatalogoJornada(): Promise<CatalogoJornada> {
+  const menu = await getMENUDinamico();
+  const esgotados = ((await redis.get<string[]>("esgotados")) ?? []).map((nome) => norm(nome));
+  const catalogoCompleto = catalogoDoMenu(menu as never);
+  const itensIndividuais = catalogoCompleto
+    .filter((p) => p.category !== "pizza")
+    .map((p) => ({
+      produtoId: p.productId,
+      produtoNome: p.productName,
+      categoria: p.category as CategoriaItemJornada,
+      esgotado: esgotados.includes(norm(p.productName)),
+    }));
+  return {
+    sizes: menu.sizes,
+    saltyFlavors: menu.saltyFlavors,
+    sweetFlavors: menu.sweetFlavors,
+    itensIndividuais,
+  };
+}
+
+/** Resumo de exibição, sempre derivado da estrutura — nunca editável
+ * livremente (rule 4/6: o nome visível nunca é a identidade do produto). */
+export function resumoRecompensaConfig(r: Pick<RecompensaConfigCiclo, "tipo" | "item" | "pizza" | "composicao">): string {
+  if (r.tipo === "bebida_sobremesa") return r.item?.produtoNome ?? "(produto não selecionado)";
+  if (r.tipo === "pizza") {
+    if (!r.pizza) return "(pizza não configurada)";
+    return `Pizza ${r.pizza.tamanho} — ${r.pizza.sabores.join(" / ") || "(sem sabor)"}`;
+  }
+  if (r.tipo === "presente_especial") {
+    if (!r.composicao || r.composicao.length === 0) return "(composição vazia)";
+    return r.composicao.map((c) => (c.quantidade > 1 ? `${c.quantidade}x ${c.item.produtoNome}` : c.item.produtoNome)).join(" + ");
+  }
+  return "(tipo desconhecido)";
+}
+
+/** Regras de segurança para a sequência de presentes poder ser salva (rule
+ * 7) — retorna a lista de erros por entrada; vazia = tudo válido. Nunca
+ * confia em produtoId/tamanho/sabor vindo do admin sem checar o catálogo
+ * real (esgotado/removido conta como inválido). */
+export function validarSequenciaRecompensas(sequencia: RecompensaConfigCiclo[], catalogo: CatalogoJornada): ErroValidacaoRecompensa[] {
+  const idsDisponiveis = new Set(catalogo.itensIndividuais.filter((i) => !i.esgotado).map((i) => i.produtoId));
+  const saboresValidos = new Set([...catalogo.saltyFlavors, ...catalogo.sweetFlavors].map((s) => norm(s)));
+  const tamanhosValidos = new Set(catalogo.sizes.map((s) => s.code));
+  const erros: ErroValidacaoRecompensa[] = [];
+
+  sequencia.forEach((r, indice) => {
+    const mensagens: string[] = [];
+    if (r.tipo === "bebida_sobremesa") {
+      if (!r.item || !idsDisponiveis.has(r.item.produtoId)) mensagens.push("Produto inexistente, removido ou indisponível no cardápio.");
+    } else if (r.tipo === "pizza") {
+      if (!r.pizza || !tamanhosValidos.has(r.pizza.tamanho)) mensagens.push("Tamanho de pizza inválido.");
+      if (!r.pizza || !Array.isArray(r.pizza.sabores) || r.pizza.sabores.length === 0 || r.pizza.sabores.some((s) => !saboresValidos.has(norm(s)))) {
+        mensagens.push("Sabor de pizza inválido ou não selecionado.");
+      }
+    } else if (r.tipo === "presente_especial") {
+      if (!Array.isArray(r.composicao) || r.composicao.length === 0) {
+        mensagens.push("Presente especial precisa de ao menos um item na composição.");
+      } else {
+        for (const c of r.composicao) {
+          if (!c?.item || !idsDisponiveis.has(c.item.produtoId) || !Number.isInteger(c.quantidade) || c.quantidade < 1) {
+            mensagens.push(`Item de composição inválido: ${c?.item?.produtoNome ?? "desconhecido"}.`);
+          }
+        }
+      }
+    } else {
+      mensagens.push("Tipo de recompensa desconhecido.");
+    }
+    if (mensagens.length > 0) erros.push({ indice, id: r.id, mensagens });
+  });
+
+  return erros;
+}
+
+function normalizarSequencia(bruta: unknown[]): RecompensaConfigCiclo[] {
+  const tiposValidos: TipoRecompensaJornada[] = ["bebida_sobremesa", "pizza", "presente_especial"];
+  return bruta
+    .filter((r): r is Record<string, unknown> => !!r && typeof r === "object")
+    .map((r) => {
+      const tipo = tiposValidos.includes(r.tipo as TipoRecompensaJornada) ? (r.tipo as TipoRecompensaJornada) : "bebida_sobremesa";
+      const item =
+        r.item && typeof r.item === "object"
+          ? {
+              produtoId: String((r.item as Record<string, unknown>).produtoId ?? "").trim(),
+              produtoNome: String((r.item as Record<string, unknown>).produtoNome ?? "").trim(),
+              categoria: (r.item as Record<string, unknown>).categoria as CategoriaItemJornada,
+            }
+          : undefined;
+      const pizza =
+        r.pizza && typeof r.pizza === "object"
+          ? {
+              tamanho: String((r.pizza as Record<string, unknown>).tamanho ?? "").trim(),
+              sabores: Array.isArray((r.pizza as Record<string, unknown>).sabores)
+                ? ((r.pizza as Record<string, unknown>).sabores as unknown[]).map((s) => String(s).trim()).filter(Boolean)
+                : [],
+            }
+          : undefined;
+      const composicao = Array.isArray(r.composicao)
+        ? (r.composicao as unknown[])
+            .filter((c): c is Record<string, unknown> => !!c && typeof c === "object")
+            .map((c) => ({
+              item: {
+                produtoId: String((c.item as Record<string, unknown> | undefined)?.produtoId ?? "").trim(),
+                produtoNome: String((c.item as Record<string, unknown> | undefined)?.produtoNome ?? "").trim(),
+                categoria: (c.item as Record<string, unknown> | undefined)?.categoria as CategoriaItemJornada,
+              },
+              quantidade: Math.max(1, Math.trunc(Number(c.quantidade)) || 1),
+            }))
+        : undefined;
+
+      const base: RecompensaConfigCiclo = {
+        id: typeof r.id === "string" && r.id.trim() ? r.id.trim() : `rec_cfg_${Date.now()}_${randomBytes(4).toString("hex")}`,
+        tipo,
+        ativo: r.ativo !== false,
+        produtoNome: "",
+        ...(item ? { item } : {}),
+        ...(pizza ? { pizza } : {}),
+        ...(composicao ? { composicao } : {}),
+      };
+      return { ...base, produtoNome: resumoRecompensaConfig(base) };
+    });
+}
+
+export type ResultadoSalvarConfigJornada = { ok: true; config: ConfigJornadaChef } | { ok: false; erro: string; detalhes?: ErroValidacaoRecompensa[] };
+
+/**
+ * Valida e persiste a config, sempre reforçando os limites econômicos
+ * aprovados (rule 18/5) e a integridade da sequência de presentes (rule 7)
+ * — nenhum valor perigoso ou produto inválido passa, mesmo vindo de um admin
+ * autenticado. A ativação da feature (rule 8) exige uma sequência não-vazia
+ * com ao menos uma recompensa ativa; nunca ativa parcialmente.
+ */
 export async function salvarConfigJornadaChef(
   input: Partial<ConfigJornadaChef>,
   tenantId: string = TENANT_PADRAO
-): Promise<ConfigJornadaChef> {
+): Promise<ResultadoSalvarConfigJornada> {
   const atual = await obterConfigJornadaChef(tenantId);
   const metaPizzas = clamp(Math.trunc(Number(input.metaPizzas ?? atual.metaPizzas)) || atual.metaPizzas, META_MINIMA_SEGURA, META_MAXIMA_SEGURA);
   const limitePizzasPorPedido = clamp(
@@ -240,19 +435,30 @@ export async function salvarConfigJornadaChef(
   );
   const validadeRecompensaDias = clamp(Math.trunc(Number(input.validadeRecompensaDias ?? atual.validadeRecompensaDias)) || atual.validadeRecompensaDias, 1, 365);
 
-  const sequenciaRecompensas = Array.isArray(input.sequenciaRecompensas)
-    ? input.sequenciaRecompensas
-        .filter((r) => r && typeof r.produtoId === "string" && r.produtoId.trim().length > 0)
-        .map((r) => ({
-          tipo: (["bebida_sobremesa", "pizza", "presente_especial"] as TipoRecompensaJornada[]).includes(r.tipo) ? r.tipo : "bebida_sobremesa",
-          produtoId: r.produtoId.trim(),
-          produtoNome: (r.produtoNome || r.produtoId).toString().slice(0, 120),
-          ativo: r.ativo !== false,
-        }))
-    : atual.sequenciaRecompensas;
+  const sequenciaFornecida = Array.isArray(input.sequenciaRecompensas);
+  const sequenciaRecompensas = sequenciaFornecida ? normalizarSequencia(input.sequenciaRecompensas as unknown[]) : atual.sequenciaRecompensas;
+
+  if (sequenciaFornecida) {
+    const catalogo = await obterCatalogoJornada();
+    const erros = validarSequenciaRecompensas(sequenciaRecompensas, catalogo);
+    if (erros.length > 0) {
+      return { ok: false, erro: "A sequência de presentes contém itens inválidos, removidos ou indisponíveis.", detalhes: erros };
+    }
+  }
+
+  const ativoSolicitado = Boolean(input.ativo ?? atual.ativo);
+  if (ativoSolicitado) {
+    const temRecompensaResgatavel = sequenciaRecompensas.length > 0 && sequenciaRecompensas.some((r) => r.ativo);
+    if (!temRecompensaResgatavel) {
+      return {
+        ok: false,
+        erro: "Não é possível ativar a Jornada do Chef sem ao menos uma recompensa configurada e ativa na sequência de presentes.",
+      };
+    }
+  }
 
   const config: ConfigJornadaChef = {
-    ativo: Boolean(input.ativo ?? atual.ativo),
+    ativo: ativoSolicitado,
     metaPizzas,
     limitePizzasPorPedido,
     validadeRecompensaDias,
@@ -266,7 +472,7 @@ export async function salvarConfigJornadaChef(
     atualizadoEm: new Date().toISOString(),
   };
   await redis.set(chaveConfig(tenantId), config);
-  return config;
+  return { ok: true, config };
 }
 
 function clamp(valor: number, min: number, max: number): number {
@@ -460,6 +666,17 @@ function escolherRecompensaDoCiclo(config: ConfigJornadaChef, cicloConcluido: nu
   return ativos[indice];
 }
 
+/** Deriva o `produtoId` estável desta recompensa concreta a partir da
+ * estrutura escolhida — usado só para exibição/auditoria em `RecompensaJornada`,
+ * nunca como fonte de verdade (a composição estruturada, salva junto, é a
+ * fonte de verdade real). */
+function derivarProdutoIdRecompensa(r: RecompensaConfigCiclo): string {
+  if (r.tipo === "bebida_sobremesa") return r.item?.produtoId ?? "";
+  if (r.tipo === "pizza") return r.pizza ? `pizza:${r.pizza.tamanho}:${r.pizza.sabores.join("+")}` : "";
+  if (r.tipo === "presente_especial") return (r.composicao ?? []).map((c) => c.item.produtoId).join("+");
+  return "";
+}
+
 async function criarRecompensa(
   tenantId: string,
   clienteId: string,
@@ -467,7 +684,16 @@ async function criarRecompensa(
   pedidoOrigemId: string,
   config: ConfigJornadaChef
 ): Promise<RecompensaJornada> {
-  const escolhida = escolherRecompensaDoCiclo(config, ciclo);
+  let escolhida = escolherRecompensaDoCiclo(config, ciclo);
+  // Revalida contra o catálogo REAL e atual no momento da entrega da caixa
+  // (não só no momento em que a Kellyne salvou a config) — um produto pode
+  // ter ficado esgotado entre a configuração e a conclusão do ciclo. Nunca
+  // entrega um produto que sumiu do cardápio (rule 7/12).
+  if (escolhida) {
+    const catalogoAtual = await obterCatalogoJornada();
+    const erros = validarSequenciaRecompensas([escolhida], catalogoAtual);
+    if (erros.length > 0) escolhida = null;
+  }
   const agora = new Date().toISOString();
   const recompensaId = `rec_${Date.now()}_${randomBytes(4).toString("hex")}`;
   const recompensa: RecompensaJornada = {
@@ -477,8 +703,11 @@ async function criarRecompensa(
     ciclo,
     status: "fechada",
     tipo: escolhida?.tipo ?? null,
-    produtoId: escolhida?.produtoId ?? null,
+    produtoId: escolhida ? derivarProdutoIdRecompensa(escolhida) : null,
     produtoNome: escolhida?.produtoNome ?? null,
+    ...(escolhida?.item ? { item: escolhida.item } : {}),
+    ...(escolhida?.pizza ? { pizza: escolhida.pizza } : {}),
+    ...(escolhida?.composicao ? { composicao: escolhida.composicao } : {}),
     versaoConfig: config.versaoRegra,
     codigoPublico: gerarCodigoPublico(),
     pedidoOrigemId,
@@ -495,7 +724,7 @@ async function criarRecompensa(
       clienteId,
       recompensaId,
       tipo: "produtos_nao_configurados",
-      motivo: `Ciclo ${ciclo} concluído (pedido ${pedidoOrigemId}), mas nenhum produto elegível está configurado para a Jornada do Chef.`,
+      motivo: `Ciclo ${ciclo} concluído (pedido ${pedidoOrigemId}), mas nenhum produto elegível (ou disponível no cardápio agora) está configurado para a Jornada do Chef.`,
     });
   }
   return recompensa;

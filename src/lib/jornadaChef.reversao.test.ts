@@ -42,7 +42,12 @@ import {
 
 beforeEach(async () => {
   store.clear();
-  await salvarConfigJornadaChef({ ativo: true });
+  await salvarConfigJornadaChef({
+    ativo: true,
+    sequenciaRecompensas: [
+      { id: "padrao", tipo: "bebida_sobremesa", ativo: true, produtoNome: "", item: { produtoId: "bebida:Guarana 2L", produtoNome: "Guarana 2L", categoria: "bebida" } },
+    ],
+  });
 });
 
 describe("reversao de credito", () => {

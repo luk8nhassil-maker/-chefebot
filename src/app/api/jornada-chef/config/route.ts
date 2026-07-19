@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyToken } from "@/lib/auth";
-import { obterConfigJornadaChef, salvarConfigJornadaChef, type TipoRecompensaJornada } from "@/lib/jornadaChef";
-
-const TIPOS_VALIDOS: TipoRecompensaJornada[] = ["bebida_sobremesa", "pizza", "presente_especial"];
+import { obterConfigJornadaChef, salvarConfigJornadaChef } from "@/lib/jornadaChef";
 
 async function checkAuthLeitura(req: NextRequest) {
   const token = req.cookies.get("auth-token")?.value ?? null;
@@ -27,28 +25,23 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json();
-  const sequenciaRecompensas = Array.isArray(body?.sequenciaRecompensas)
-    ? body.sequenciaRecompensas
-        .map((r: Record<string, unknown>) => ({
-          tipo: TIPOS_VALIDOS.includes(r?.tipo as TipoRecompensaJornada) ? r.tipo : "bebida_sobremesa",
-          produtoId: String(r?.produtoId ?? "").trim(),
-          produtoNome: String(r?.produtoNome ?? "").trim(),
-          ativo: r?.ativo !== false,
-        }))
-        .filter((r: { produtoId: string }) => r.produtoId.length > 0)
-    : undefined;
 
-  // Mantém a blindagem econômica aprovada mesmo com body adulterado — a
-  // validação final (limites seguros) é sempre feita dentro de
-  // `salvarConfigJornadaChef`, nunca confiando só nesta camada.
-  const config = await salvarConfigJornadaChef({
+  // A normalização e a validação (limites econômicos seguros, integridade da
+  // sequência de presentes contra o cardápio real, guard de ativação) vivem
+  // inteiramente em `salvarConfigJornadaChef` — esta rota nunca confia em
+  // nada do body além de repassar bruto para lá.
+  const resultado = await salvarConfigJornadaChef({
     ativo: Boolean(body?.ativo),
     metaPizzas: Number(body?.metaPizzas),
     limitePizzasPorPedido: Number(body?.limitePizzasPorPedido),
     validadeRecompensaDias: Number(body?.validadeRecompensaDias),
     mensagensWhatsappAtivas: Boolean(body?.mensagensWhatsappAtivas),
-    sequenciaRecompensas,
+    sequenciaRecompensas: Array.isArray(body?.sequenciaRecompensas) ? body.sequenciaRecompensas : undefined,
     textos: body?.textos && typeof body.textos === "object" ? body.textos : undefined,
   });
-  return NextResponse.json({ ok: true, config });
+
+  if (!resultado.ok) {
+    return NextResponse.json({ ok: false, error: resultado.erro, detalhes: resultado.detalhes }, { status: 400 });
+  }
+  return NextResponse.json({ ok: true, config: resultado.config });
 }
