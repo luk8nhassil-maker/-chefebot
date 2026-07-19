@@ -44,7 +44,7 @@ type RecompensaAdmin = {
   status: string
   tipo: string | null
   produtoNome: string | null
-  codigoPublico?: string
+  codigoMascarado?: string
   pedidoOrigemId: string
   reservaPedidoId?: string
   criadaEm: string
@@ -662,14 +662,14 @@ export default function AdminJornadaChefPage() {
                         <div>
                           <div style={{ fontSize: 13, fontWeight: 700 }}>Ciclo {r.ciclo} · {r.status}{r.produtoNome ? ` · ${r.produtoNome}` : ''}</div>
                           <div style={{ fontSize: 12, color: 'var(--foreground-muted)' }}>
-                            {r.codigoPublico ? `Código: ${r.codigoPublico}` : 'Sem código ativo'}
+                            {r.codigoMascarado ? `Código: ${r.codigoMascarado}` : 'Sem código ativo'}
                             {r.validaAte ? ` · válido até ${new Date(r.validaAte).toLocaleDateString('pt-BR')}` : ''}
                             {r.motivoSuspensao ? ` · ${r.motivoSuspensao}` : ''}
                             {typeof r.valorReferencia === 'number' ? ` · valor de referência: R$ ${r.valorReferencia.toFixed(2)}` : ''}
                           </div>
                         </div>
                         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                          {r.codigoPublico && (r.status === 'disponivel' || r.status === 'reservada') && (
+                          {r.codigoMascarado && (r.status === 'disponivel' || r.status === 'reservada') && (
                             <button onClick={() => acaoManual({ acao: 'revogar_codigo', recompensaId: r.recompensaId })} style={botaoSecundario}>Revogar código</button>
                           )}
                           {elegivelParaSubstituir && substituindoId !== r.recompensaId && (

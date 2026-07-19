@@ -6,11 +6,12 @@ vi.mock("@/lib/jornadaChef", () => ({
     if (codigo === "JC-INVALIDO") throw new Error("Codigo de resgate invalido ou revogado");
     return { recompensaId: "rec_1", status: "resgatada" };
   }),
-  revogarCodigoResgate: vi.fn(async () => ({ codigoPublico: "JC-NOVOCODIGO" })),
+  revogarCodigoResgate: vi.fn(async () => ({ codigoPublico: "JC-1122334455NOVO" })),
   substituirRecompensa: vi.fn(async (recompensaId: string, especificacao: { tipo: string }) => {
     if (especificacao.tipo === "pizza") throw new Error("Sabor de pizza inválido ou não selecionado.");
     return { recompensaId, produtoNome: "Guarana 2L", status: "fechada", valorReferencia: 13 };
   }),
+  mascararCodigoResgate: vi.fn((codigo: string) => `JC-${"•".repeat(8)}${codigo.slice(-4)}`),
 }));
 
 vi.mock("@/lib/auth", async () => {
@@ -50,6 +51,22 @@ describe("POST /api/admin/jornada-chef/resgate-manual — aplicar/revogar", () =
   test("codigo invalido retorna 400", async () => {
     const res = await POST(req("token-atendente", { acao: "aplicar", codigoPublico: "JC-INVALIDO" }));
     expect(res.status).toBe(400);
+  });
+
+  test("erro de codigo invalido nunca ecoa o codigo digitado na resposta", async () => {
+    const res = await POST(req("token-atendente", { acao: "aplicar", codigoPublico: "JC-INVALIDO" }));
+    const data = await res.json();
+    expect(JSON.stringify(data)).not.toContain("JC-INVALIDO");
+  });
+
+  test("revogar_codigo nunca devolve o codigo integral, so o mascarado", async () => {
+    const res = await POST(req("token-admin", { acao: "revogar_codigo", recompensaId: "rec_1" }));
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.ok).toBe(true);
+    expect(data.codigoMascarado).toBe("JC-••••••••NOVO");
+    expect(data).not.toHaveProperty("codigoPublico");
+    expect(JSON.stringify(data)).not.toContain("JC-1122334455NOVO");
   });
 });
 

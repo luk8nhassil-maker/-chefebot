@@ -2,7 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { verifyToken } from "@/lib/auth";
 import { derivarClienteIdPorTelefone } from "@/lib/fidelidade";
 import { sanitizeTelefoneCliente } from "@/lib/clientes";
-import { obterEstadoJornada, obterRecompensasCliente, obterConfigJornadaChef, derivarFaseAtual, jornadaAtivaParaCliente } from "@/lib/jornadaChef";
+import {
+  obterEstadoJornada,
+  obterRecompensasCliente,
+  obterConfigJornadaChef,
+  derivarFaseAtual,
+  jornadaAtivaParaCliente,
+  mascararCodigoResgate,
+} from "@/lib/jornadaChef";
 
 // GET /api/admin/jornada-chef?telefone=... — painel da Kellyne: progresso,
 // ciclo, pizzas na trilha, caixas e recompensas de um cliente pelo telefone
@@ -45,7 +52,9 @@ export async function GET(req: NextRequest) {
       status: r.status,
       tipo: r.tipo,
       produtoNome: r.produtoNome,
-      codigoPublico: r.status === "resgatada" || r.status === "cancelada" ? undefined : r.codigoPublico,
+      // Nunca o código integral (rule 2) — só a versão mascarada, e só
+      // enquanto a recompensa ainda pode ser resgatada.
+      codigoMascarado: r.status === "resgatada" || r.status === "cancelada" ? undefined : mascararCodigoResgate(r.codigoPublico),
       pedidoOrigemId: r.pedidoOrigemId,
       reservaPedidoId: r.reservaPedidoId,
       criadaEm: r.criadaEm,

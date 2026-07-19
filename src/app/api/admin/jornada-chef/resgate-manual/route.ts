@@ -4,6 +4,7 @@ import {
   aplicarResgateManual,
   revogarCodigoResgate,
   substituirRecompensa,
+  mascararCodigoResgate,
   type EspecificacaoSubstituicaoRecompensa,
   type TipoRecompensaJornada,
 } from "@/lib/jornadaChef";
@@ -90,7 +91,9 @@ export async function POST(req: NextRequest) {
       const recompensaId = String(body?.recompensaId ?? "").trim();
       if (!recompensaId) return NextResponse.json({ ok: false, error: "recompensaId obrigatorio" }, { status: 400 });
       const recompensa = await revogarCodigoResgate(recompensaId);
-      return NextResponse.json({ ok: true, codigoPublico: recompensa.codigoPublico });
+      // Só a versão mascarada volta para o painel — o novo código integral
+      // fica só no servidor (rule 2/8).
+      return NextResponse.json({ ok: true, codigoMascarado: mascararCodigoResgate(recompensa.codigoPublico) });
     }
     if (acao === "substituir") {
       if (auth.role !== "admin" && auth.role !== "dev") {
