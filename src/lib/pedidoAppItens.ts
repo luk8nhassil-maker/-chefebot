@@ -39,6 +39,22 @@ export function formatItem(item: ItemApp): string {
   return `${qtyPrefix}${item.name}${detalhe}`.trim();
 }
 
+/**
+ * Conta pizzas PAGAS para a fidelidade antiga (compra N pizzas, ganha 1
+ * grátis — `creditarFidelidadePedido`/`pizzasParaPremio`). Exclui
+ * explicitamente o presente da Jornada do Chef (`recompensaJornadaId`) e
+ * qualquer item inválido/quantidade não positiva — uma pizza que o cliente
+ * não pagou nunca pode avançar o progresso de OUTRO programa de fidelidade.
+ * Distinta de `contarPizzas` (@/lib/fidelidade), que conta toda pizza sem
+ * essa exclusão e é usada só para exibição (não credita nada sozinha).
+ */
+export function contarPizzasPagasParaFidelidade(itens: ItemApp[] | undefined): number {
+  if (!Array.isArray(itens)) return 0;
+  return itens
+    .filter((item) => item?.kind === "pizza" && !item.recompensaJornadaId)
+    .reduce((soma, item) => soma + Math.max(0, Math.trunc(Number(item.qty)) || 0), 0);
+}
+
 export function officialUnitPrice(item: ItemApp, menu: MenuPedidoApp): number | null {
   if (!Number.isInteger(item.qty) || item.qty < 1) return null;
 

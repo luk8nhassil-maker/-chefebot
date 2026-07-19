@@ -182,6 +182,41 @@ a ser criado. Se a persistência do pedido falhar depois, só o vínculo desta
 recompensa é liberado (`liberarVinculoRecompensaPedidoNaoCriado`) — nunca uma
 reescrita ampla da lista inteira de pedidos como compensação.
 
+### Autorização pela sessão, nunca pelo telefone digitado
+
+Quando `recompensaJornada` está presente no pedido, o servidor **exige uma
+sessão válida da Área do Cliente** antes de qualquer outra validação: lê
+`CLIENTE_COOKIE`, chama `verificarTokenCliente`, e busca o cliente real por
+`payload.clienteId` (`buscarClientePorId`). `clienteIdJornada` é derivado
+exclusivamente do telefone canônico desse perfil autenticado — nunca de
+`body.telefone`, `whatsappToken`, nome digitado ou qualquer `clienteId`
+enviado pelo frontend (nenhum desses prova propriedade da recompensa). O
+telefone do pedido precisa corresponder (após normalização) ao telefone
+canônico da sessão; divergência é rejeitada com 403, nunca transferindo a
+recompensa silenciosamente para outro número. Sem cookie ou com sessão
+inválida: 401. Pedido comum sem presente continua funcionando como convidado,
+sem exigir login — a exigência de sessão vale só quando uma recompensa da
+Jornada está sendo usada.
+
+`prepararResgateParaPedido` também reforça a checagem central de rollout
+(`jornadaAtivaParaCliente`): modo `off` bloqueia todos, `canary` só libera
+quem está na lista (um cliente removido nunca completa o resgate mesmo com
+sessão válida), `on` libera todo cliente elegível.
+
+### Pizza-presente nunca conta para a fidelidade antiga (por pizzas)
+
+`pizzasCount` — o contador que alimenta o programa antigo de fidelidade
+(compra N pizzas, ganha 1 grátis, creditado quando o pedido chega a
+`entregue`) — é calculado por `contarPizzasPagasParaFidelidade`
+(`@/lib/pedidoAppItens`), que exclui explicitamente qualquer item com
+`recompensaJornadaId` (e quantidade não positiva). A pizza-presente da
+Jornada do Chef nunca pode avançar o progresso de OUTRO programa de
+fidelidade que o cliente não pagou. Distinta de `contarPizzas`
+(`@/lib/fidelidade`), usada só para exibição/registro, sem essa exclusão.
+Pontos por valor (`calcularPontosElegiveisPedido`) e a própria trilha da
+Jornada (`contarPizzasElegiveisPedido`, via `gratuito: true`) já excluíam
+corretamente o presente — nada mudou aí.
+
 ## Reversão (pedido reaberto/cancelado/estornado)
 
 `reverterConclusaoPedidoJornada`:

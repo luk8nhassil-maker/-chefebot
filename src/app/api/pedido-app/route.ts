@@ -9,8 +9,9 @@ import { PROMOS_KEY, catalogoDoMenu, dentroDaJanela, precoFinalPromocao, promoca
 import { validarTokenCardapio } from "@/lib/cardapioToken";
 import { temDinheiroNoPagamento, valorDinheiroEsperado } from "@/lib/bot";
 import { verificarTokenCliente, CLIENTE_COOKIE } from "@/lib/clienteAuth";
-import { contarPizzas, calcularPontosElegiveisPedido, registrarMovimentoPontosIdempotente, construirEventoIdPontos, derivarClienteIdPorTelefone, obterReservasResgatePontos, confirmarResgatePontos } from "@/lib/fidelidade";
-import { type ItemApp, type MenuPedidoApp, formatItem, officialUnitPrice, makePromoUnitPrice } from "@/lib/pedidoAppItens";
+import { buscarClientePorId, sanitizeTelefoneCliente } from "@/lib/clientes";
+import { calcularPontosElegiveisPedido, registrarMovimentoPontosIdempotente, construirEventoIdPontos, derivarClienteIdPorTelefone, obterReservasResgatePontos, confirmarResgatePontos } from "@/lib/fidelidade";
+import { type ItemApp, type MenuPedidoApp, formatItem, officialUnitPrice, makePromoUnitPrice, contarPizzasPagasParaFidelidade } from "@/lib/pedidoAppItens";
 import { prepararResgateParaPedido, confirmarReservaNoPedido, liberarVinculoRecompensaPedidoNaoCriado, type EscolhaRecompensaJornada } from "@/lib/jornadaChef";
 
 export const maxDuration = 20;
@@ -137,6 +138,12 @@ export async function POST(req: NextRequest) {
     // o sabor escolhido. Produto, preço, quantidade, tamanho e composição são
     // SEMPRE reconstruídos no servidor a partir do snapshot da própria
     // recompensa (nunca do carrinho) — ver `materializarItensRecompensa`.
+    //
+    // Autorização é SEMPRE pela sessão da Área do Cliente, nunca pelo
+    // telefone digitado no checkout: o telefone do body/whatsappToken não
+    // prova propriedade da recompensa (qualquer um pode digitar o telefone
+    // de outra pessoa). Pedido comum sem presente continua funcionando como
+    // convidado, sem exigir login.
     let clienteIdJornada: string | undefined;
     let recompensaJornadaId: string | undefined;
     let itensRecompensaMaterializados: ItemApp[] = [];
@@ -145,10 +152,24 @@ export async function POST(req: NextRequest) {
       if (!recompensaJornadaId) {
         return NextResponse.json({ ok: false, error: "Presente da Jornada do Chef inválido ou já utilizado" }, { status: 400 });
       }
-      clienteIdJornada = derivarClienteIdPorTelefone(telefonePedido);
-      if (!clienteIdJornada) {
-        return NextResponse.json({ ok: false, error: "Telefone inválido para aplicar o presente da Jornada do Chef" }, { status: 400 });
+
+      const tokenSessaoJornada = req.cookies.get(CLIENTE_COOKIE)?.value;
+      const payloadSessaoJornada = tokenSessaoJornada ? await verificarTokenCliente(tokenSessaoJornada) : null;
+      if (!payloadSessaoJornada) {
+        return NextResponse.json({ ok: false, error: "Faça login na área do cliente para usar o presente da Jornada do Chef" }, { status: 401 });
       }
+      const clienteSessaoJornada = await buscarClientePorId(payloadSessaoJornada.clienteId);
+      if (!clienteSessaoJornada) {
+        return NextResponse.json({ ok: false, error: "Sessão inválida" }, { status: 401 });
+      }
+      // O telefone do pedido precisa corresponder ao telefone canônico da
+      // sessão autenticada (após normalização) — nunca transfere
+      // silenciosamente uma recompensa para outro número.
+      if (sanitizeTelefoneCliente(telefonePedido) !== sanitizeTelefoneCliente(clienteSessaoJornada.telefone)) {
+        return NextResponse.json({ ok: false, error: "O telefone do pedido não corresponde ao seu perfil. Presente da Jornada do Chef não aplicado." }, { status: 403 });
+      }
+      clienteIdJornada = derivarClienteIdPorTelefone(clienteSessaoJornada.telefone) ?? clienteSessaoJornada.clienteId;
+
       const escolhaBruta = body.recompensaJornada.escolha;
       const escolha: EscolhaRecompensaJornada | undefined =
         escolhaBruta && typeof escolhaBruta === "object"
@@ -248,9 +269,12 @@ export async function POST(req: NextRequest) {
       console.error("[ChefeBot] Erro ao resolver cliente do pedido (ignorado):", err);
     }
 
+    // pizzasCount alimenta a fidelidade antiga (compra N pizzas, ganha 1
+    // grátis) quando o pedido é marcado como entregue — nunca pode incluir a
+    // pizza-presente da Jornada do Chef, que o cliente não pagou.
     let pizzasCount = 0;
     try {
-      pizzasCount = contarPizzas(itensDetalhadosFinais);
+      pizzasCount = contarPizzasPagasParaFidelidade(itensDetalhadosFinais);
     } catch (err) {
       console.error("[ChefeBot] Erro ao contar pizzas para fidelidade (ignorado):", err);
     }

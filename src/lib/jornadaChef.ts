@@ -1129,6 +1129,13 @@ export async function prepararResgateParaPedido(
   escolha: EscolhaRecompensaJornada | undefined,
   tenantId: string = TENANT_PADRAO
 ): Promise<ResultadoMaterializacaoRecompensa> {
+  const config = await obterConfigJornadaChef(tenantId);
+  // Mesma checagem central de rollout usada em toda a Jornada (rule 6): off
+  // bloqueia todos, canary só libera quem está na lista, on libera todo
+  // elegível — nunca reimplementada de outro jeito aqui.
+  if (!jornadaAtivaParaCliente(config, clienteId)) {
+    return { ok: false, erro: "Presente da Jornada do Chef inválido ou já utilizado" };
+  }
   const recompensa = await obterRecompensa(recompensaId, tenantId);
   if (!recompensa || recompensa.clienteId !== clienteId) {
     return { ok: false, erro: "Presente da Jornada do Chef inválido ou já utilizado" };
