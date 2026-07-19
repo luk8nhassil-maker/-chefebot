@@ -859,6 +859,19 @@ function gerarCodigoPublico(): string {
   return `JC-${randomBytes(5).toString("hex").toUpperCase()}`;
 }
 
+/**
+ * Mascara o código de resgate para exibição no painel administrativo —
+ * preserva só o prefixo (ex.: "JC-") e os últimos 4 caracteres. O código
+ * integral nunca deve deixar o servidor pela API de consulta administrativa;
+ * ele segue existindo exclusivamente no Redis para validar o resgate
+ * automático e o resgate manual digitado pela Kellyne.
+ */
+export function mascararCodigoResgate(codigo: string): string {
+  const prefixo = codigo.match(/^[A-Za-z]+-/)?.[0] ?? "";
+  const sufixo = codigo.slice(-4);
+  return `${prefixo}${"•".repeat(8)}${sufixo}`;
+}
+
 /** Escolha 100% determinística do prêmio de um ciclo concluído — zero RNG,
  * zero sorteio. Configurada pela Kellyne (`sequenciaRecompensas`), rotacionada
  * pelo número do ciclo concluído. Se não houver produtos configurados ainda,

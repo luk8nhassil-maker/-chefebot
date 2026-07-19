@@ -40,6 +40,7 @@ import {
   substituirRecompensa,
   obterRecompensasCliente,
   salvarConfigJornadaChef,
+  mascararCodigoResgate,
   type RecompensaConfigCiclo,
 } from "./jornadaChef";
 
@@ -255,6 +256,19 @@ describe("fallback manual da Kellyne", () => {
 
   test("codigo invalido nao aplica nada", async () => {
     await expect(aplicarResgateManual("JC-INEXISTENTE", "kellyne")).rejects.toThrow();
+  });
+
+  test("mascararCodigoResgate preserva só prefixo e últimos 4 caracteres, nunca o meio do código", async () => {
+    const { clienteId, recompensaId } = await clienteComCaixaDesbloqueada("86933330009");
+    const aberta = await abrirRecompensa(clienteId, recompensaId);
+    const mascarado = mascararCodigoResgate(aberta.codigoPublico);
+    expect(mascarado.startsWith("JC-")).toBe(true);
+    expect(mascarado.endsWith(aberta.codigoPublico.slice(-4))).toBe(true);
+    expect(mascarado).not.toContain(aberta.codigoPublico.slice(3, -4));
+    // Mascarar é só leitura: a recompensa real (status, código no Redis) não muda.
+    const [semAlteracao] = await obterRecompensasCliente(clienteId);
+    expect(semAlteracao.status).toBe("disponivel");
+    expect(semAlteracao.codigoPublico).toBe(aberta.codigoPublico);
   });
 
   test("substituicao manual estruturada fica registrada no historico e reconstroi produtoId/nome no servidor", async () => {
