@@ -26,12 +26,15 @@ type RecompensaConfig = {
   composicao?: ItemComposicao[]
 }
 
+type ModoRollout = 'off' | 'canary' | 'on'
+
 type ConfigJornada = {
-  ativo: boolean
+  modoRollout: ModoRollout
   metaPizzas: number
   limitePizzasPorPedido: number
   validadeRecompensaDias: number
   mensagensWhatsappAtivas: boolean
+  canaryCount: number
   sequenciaRecompensas: RecompensaConfig[]
 }
 
@@ -52,7 +55,8 @@ type RecompensaAdmin = {
 }
 
 type ProgressoAdmin = {
-  ativo: boolean
+  modoRollout: ModoRollout
+  ativoParaEsteCliente: boolean
   metaPizzas: number
   cicloAtual: number
   pizzasNoCiclo: number
@@ -80,7 +84,9 @@ const titulo: React.CSSProperties = { fontSize: 15, fontWeight: 800, margin: '0 
 const label: React.CSSProperties = { fontSize: 11, fontWeight: 700, color: 'var(--foreground-muted)', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 4, display: 'block' }
 
 function gerarIdLocal(): string {
-  return `cfg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+  // Zero Math.random em toda a Jornada do Chef — mesmo aqui, onde é só um id
+  // local de UI (nunca decide prêmio), usamos crypto.randomUUID().
+  return `cfg_${crypto.randomUUID()}`
 }
 
 function resumoLocal(r: RecompensaConfig): string {
@@ -108,6 +114,11 @@ export default function AdminJornadaChefPage() {
   const [msgAcao, setMsgAcao] = useState('')
   const [pendencias, setPendencias] = useState<Pendencia[]>([])
 
+  const [clientesCanario, setClientesCanario] = useState<{ clienteId: string; identificadorMascarado: string }[]>([])
+  const [telefoneCanario, setTelefoneCanario] = useState('')
+  const [erroCanario, setErroCanario] = useState('')
+  const [salvandoCanario, setSalvandoCanario] = useState(false)
+
   // Formulário de nova recompensa
   const [novoTipo, setNovoTipo] = useState<TipoRecompensa>('bebida_sobremesa')
   const [novoItemId, setNovoItemId] = useState('')
@@ -132,7 +143,39 @@ export default function AdminJornadaChefPage() {
     if (res.ok) setPendencias((await res.json()).pendencias ?? [])
   }
 
-  useEffect(() => { carregarConfig(); carregarCatalogo(); carregarPendencias() }, [])
+  async function carregarCanario() {
+    const res = await fetch('/api/admin/jornada-chef/canario', { cache: 'no-store' })
+    if (res.ok) setClientesCanario((await res.json()).clientes ?? [])
+  }
+
+  useEffect(() => { carregarConfig(); carregarCatalogo(); carregarPendencias(); carregarCanario() }, [])
+
+  async function adicionarCanario() {
+    setErroCanario('')
+    setSalvandoCanario(true)
+    try {
+      const res = await fetch('/api/admin/jornada-chef/canario', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ telefone: telefoneCanario }),
+      })
+      const data = await res.json().catch(() => null)
+      if (res.ok) {
+        setTelefoneCanario('')
+        await carregarCanario()
+      } else {
+        setErroCanario(data?.error || 'Não foi possível adicionar este cliente.')
+      }
+    } catch {
+      setErroCanario('Erro de conexão.')
+    }
+    setSalvandoCanario(false)
+  }
+
+  async function removerCanario(clienteId: string) {
+    await fetch(`/api/admin/jornada-chef/canario?clienteId=${encodeURIComponent(clienteId)}`, { method: 'DELETE' })
+    carregarCanario()
+  }
 
   const itensDisponiveis = useMemo(() => (catalogo?.itensIndividuais ?? []).filter((i) => !i.esgotado), [catalogo])
   const todosSabores = useMemo(() => [...(catalogo?.saltyFlavors ?? []), ...(catalogo?.sweetFlavors ?? [])], [catalogo])
@@ -270,10 +313,27 @@ export default function AdminJornadaChefPage() {
           {!config && <p style={{ fontSize: 13, color: 'var(--foreground-secondary)' }}>Carregando...</p>}
           {config && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 700 }}>
-                <input type="checkbox" checked={config.ativo} onChange={(e) => setConfig({ ...config, ativo: e.target.checked })} />
-                Jornada do Chef ativa
-              </label>
+              <div>
+                <span style={label}>Modo de rollout</span>
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                  {([
+                    { valor: 'off' as ModoRollout, texto: 'Desligada' },
+                    { valor: 'canary' as ModoRollout, texto: `Canário (${config.canaryCount} cliente${config.canaryCount === 1 ? '' : 's'})` },
+                    { valor: 'on' as ModoRollout, texto: 'Ligada para todos' },
+                  ]).map((opcao) => (
+                    <button
+                      key={opcao.valor}
+                      onClick={() => setConfig({ ...config, modoRollout: opcao.valor })}
+                      style={config.modoRollout === opcao.valor ? botaoPrimario : botaoSecundario}
+                    >
+                      {opcao.texto}
+                    </button>
+                  ))}
+                </div>
+                <p style={{ fontSize: 11.5, color: 'var(--foreground-muted)', margin: '6px 0 0' }}>
+                  No modo canário, só os clientes da lista abaixo veem a Jornada, acumulam progresso e recebem mensagens — os demais continuam como se a feature estivesse desligada.
+                </p>
+              </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
                 <div>
                   <span style={label}>Meta (pizzas)</span>
@@ -309,6 +369,28 @@ export default function AdminJornadaChefPage() {
               </button>
             </div>
           )}
+        </div>
+
+        {/* Clientes canário */}
+        <div style={cardStyle}>
+          <p style={titulo}>Clientes canário</p>
+          <p style={{ fontSize: 12.5, color: 'var(--foreground-muted)', margin: '0 0 12px' }}>
+            Só precisa disso enquanto o modo de rollout estiver em &quot;Canário&quot;. O telefone nunca fica salvo — só um identificador interno derivado dele.
+          </p>
+          <div style={{ display: 'flex', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
+            <input placeholder="Telefone do cliente de teste" value={telefoneCanario} onChange={(e) => setTelefoneCanario(e.target.value)} style={{ ...inputStyle, flex: 1, minWidth: 200 }} />
+            <button onClick={adicionarCanario} disabled={salvandoCanario || !telefoneCanario.trim()} style={{ ...botaoPrimario, opacity: salvandoCanario || !telefoneCanario.trim() ? 0.6 : 1 }}>
+              {salvandoCanario ? 'Adicionando...' : 'Adicionar'}
+            </button>
+          </div>
+          {erroCanario && <p style={{ color: 'var(--danger-text)', fontSize: 13 }}>{erroCanario}</p>}
+          {clientesCanario.length === 0 && <p style={{ fontSize: 13, color: 'var(--foreground-secondary)' }}>Nenhum cliente canário configurado.</p>}
+          {clientesCanario.map((c) => (
+            <div key={c.clienteId} style={{ borderTop: '1px solid var(--border)', padding: '8px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: 13, fontFamily: 'monospace' }}>{c.identificadorMascarado}</span>
+              <button onClick={() => removerCanario(c.clienteId)} style={botaoIcone}>Remover</button>
+            </div>
+          ))}
         </div>
 
         {/* Sequência de presentes */}
@@ -460,6 +542,9 @@ export default function AdminJornadaChefPage() {
 
           {progresso && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <p style={{ fontSize: 12.5, margin: 0, color: progresso.ativoParaEsteCliente ? 'var(--success-text)' : 'var(--foreground-muted)' }}>
+                {progresso.ativoParaEsteCliente ? '✓ Este cliente participa da Jornada agora' : `Este cliente NÃO participa agora (rollout: ${progresso.modoRollout})`}
+              </p>
               <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', fontSize: 13 }}>
                 <span><strong>Ciclo:</strong> {progresso.cicloAtual}</span>
                 <span><strong>Pizzas na trilha:</strong> {progresso.pizzasNoCiclo} de {progresso.metaPizzas}</span>

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { lerSessaoCliente } from "@/lib/clienteAuth";
 import { buscarClientePorId } from "@/lib/clientes";
 import { derivarClienteIdPorTelefone } from "@/lib/fidelidade";
-import { abrirRecompensa } from "@/lib/jornadaChef";
+import { abrirRecompensa, obterConfigJornadaChef, jornadaAtivaParaCliente } from "@/lib/jornadaChef";
 
 // POST /api/cliente/jornada-chef/abrir — abre a caixa (revela o presente já
 // determinado no servidor). Idempotente: refresh/clique duplo nunca muda o
@@ -20,6 +20,10 @@ export async function POST(req: NextRequest) {
   if (!recompensaId) return NextResponse.json({ error: "recompensaId obrigatorio" }, { status: 400 });
 
   const clienteIdJornada = derivarClienteIdPorTelefone(cliente.telefone) ?? cliente.clienteId;
+  const config = await obterConfigJornadaChef();
+  if (!jornadaAtivaParaCliente(config, clienteIdJornada)) {
+    return NextResponse.json({ ok: false, error: "Jornada do Chef nao disponivel" }, { status: 403 });
+  }
 
   try {
     const recompensa = await abrirRecompensa(clienteIdJornada, recompensaId);

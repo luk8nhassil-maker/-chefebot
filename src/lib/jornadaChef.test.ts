@@ -57,7 +57,7 @@ const SEQUENCIA_PADRAO_TESTE = [
 ];
 
 async function ativarJornada(overrides: Record<string, unknown> = {}) {
-  return salvarConfigJornadaChef({ ativo: true, sequenciaRecompensas: SEQUENCIA_PADRAO_TESTE, ...overrides });
+  return salvarConfigJornadaChef({ modoRollout: "on", sequenciaRecompensas: SEQUENCIA_PADRAO_TESTE, ...overrides });
 }
 
 describe("contarPizzasElegiveisPedido", () => {
@@ -282,7 +282,7 @@ describe("processarConclusaoPedidoJornada — progresso e teto economico", () =>
   });
 
   test("feature flag desativada: nao processa (retorna null), pedido/pontos normais continuam intactos", async () => {
-    await salvarConfigJornadaChef({ ativo: false });
+    await salvarConfigJornadaChef({ modoRollout: "off" });
     const resultado = await processarConclusaoPedidoJornada({
       id: "ped_flag_off",
       telefone: "86988880007",
@@ -389,13 +389,13 @@ describe("salvarConfigJornadaChef — blindagem economica", () => {
   });
 
   test("nao ativa quando a sequencia de presentes esta vazia", async () => {
-    const resultado = await salvarConfigJornadaChef({ ativo: true });
+    const resultado = await salvarConfigJornadaChef({ modoRollout: "on" });
     expect(resultado.ok).toBe(false);
   });
 
-  test("nao ativa quando nenhuma recompensa da sequencia esta ativa", async () => {
+  test("nao ativa (nem canario) quando nenhuma recompensa da sequencia esta ativa", async () => {
     const resultado = await salvarConfigJornadaChef({
-      ativo: true,
+      modoRollout: "canary",
       sequenciaRecompensas: [
         { id: "x", tipo: "bebida_sobremesa", ativo: false, produtoNome: "", item: { produtoId: "bebida:Guarana 2L", produtoNome: "Guarana 2L", categoria: "bebida" } },
       ],
@@ -428,7 +428,7 @@ describe("salvarConfigJornadaChef — blindagem economica", () => {
 
   test("aceita e ativa com uma sequencia valida (bebida real do cardapio) e mantem a ordem apos reload", async () => {
     const resultado = await salvarConfigJornadaChef({
-      ativo: true,
+      modoRollout: "on",
       sequenciaRecompensas: [
         { id: "um", tipo: "bebida_sobremesa", ativo: true, produtoNome: "", item: { produtoId: "bebida:Guarana 2L", produtoNome: "Guarana 2L", categoria: "bebida" } },
         { id: "dois", tipo: "pizza", ativo: true, produtoNome: "", pizza: { tamanho: "M", sabores: ["Calabresa"] } },

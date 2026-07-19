@@ -66,7 +66,7 @@ const SUCO_LARANJA: RecompensaConfigCiclo = {
 };
 
 async function clienteComCaixaDesbloqueada(telefone: string, sequencia?: RecompensaConfigCiclo[]) {
-  await salvarConfigJornadaChef({ ativo: true, sequenciaRecompensas: sequencia ?? [BEBIDA_GUARANA] });
+  await salvarConfigJornadaChef({ modoRollout: "on", sequenciaRecompensas: sequencia ?? [BEBIDA_GUARANA] });
   // Teto de 4 pizzas por pedido: fecha o ciclo de 12 via 3 pedidos (4 + 4 + 4).
   let ultimoResultado;
   for (const qty of [4, 4, 4]) {
@@ -81,6 +81,21 @@ async function clienteComCaixaDesbloqueada(telefone: string, sequencia?: Recompe
   const recompensaId = ultimoResultado!.recompensasDesbloqueadas[0].recompensaId;
   return { clienteId, recompensaId };
 }
+
+describe("sequência comercial aprovada pelo proprietário", () => {
+  test("Guaraná 1L / Refrigerante 1L / Guaraná 1,5L / Pizza P (Calabresa, Mussarela, Frango Catupiry, Portuguesa) valida contra o catálogo real", async () => {
+    const resultado = await salvarConfigJornadaChef({
+      modoRollout: "on",
+      sequenciaRecompensas: [
+        { id: "c1", tipo: "bebida_sobremesa", ativo: true, produtoNome: "", item: { produtoId: "bebida:Guarana 1L", produtoNome: "Guarana 1L", categoria: "bebida" } },
+        { id: "c2", tipo: "bebida_sobremesa", ativo: true, produtoNome: "", item: { produtoId: "bebida:Refrigerante 1L", produtoNome: "Refrigerante 1L", categoria: "bebida" } },
+        { id: "c3", tipo: "bebida_sobremesa", ativo: true, produtoNome: "", item: { produtoId: "bebida:Guarana 1,5L", produtoNome: "Guarana 1,5L", categoria: "bebida" } },
+        { id: "c4", tipo: "pizza", ativo: true, produtoNome: "", pizza: { tamanho: "P", sabores: ["Calabresa", "Mussarela", "Frango Catupiry", "Portuguesa"] } },
+      ],
+    });
+    expect(resultado.ok).toBe(true);
+  });
+});
 
 describe("recompensa determinística", () => {
   test("prêmio é determinado no servidor a partir da configuração (sem RNG) — mesmo ciclo sempre produz o mesmo produto", async () => {
@@ -110,7 +125,7 @@ describe("recompensa determinística", () => {
     // aqui é outro: o produto era válido quando configurado, mas ficou
     // esgotado ANTES do ciclo se completar — a revalidação em `criarRecompensa`
     // precisa pegar isso, nunca entregando um produto que sumiu do cardápio.
-    await salvarConfigJornadaChef({ ativo: true, sequenciaRecompensas: [BEBIDA_GUARANA] });
+    await salvarConfigJornadaChef({ modoRollout: "on", sequenciaRecompensas: [BEBIDA_GUARANA] });
     store.set("esgotados", ["Guarana 2L"]);
     const telefone = "86911110002";
     let ultimoResultado;
@@ -194,7 +209,7 @@ describe("reserva e resgate", () => {
   });
 
   test("expiracao apos abertura: recompensa expirada nao pode ser reservada", async () => {
-    await salvarConfigJornadaChef({ ativo: true, validadeRecompensaDias: 1, sequenciaRecompensas: [BEBIDA_GUARANA] });
+    await salvarConfigJornadaChef({ modoRollout: "on", validadeRecompensaDias: 1, sequenciaRecompensas: [BEBIDA_GUARANA] });
     let resultado;
     for (const qty of [4, 4, 4]) {
       resultado = await processarConclusaoPedidoJornada({

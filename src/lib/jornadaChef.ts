@@ -125,14 +125,26 @@ export type CatalogoJornada = {
 
 export type ErroValidacaoRecompensa = { indice: number; id?: string; mensagens: string[] };
 
+/**
+ * Modo de rollout da Jornada do Chef (substitui o antigo `ativo: boolean`):
+ * - "off": ninguém participa — comportamento equivalente ao antigo `ativo: false`.
+ * - "canary": só os clientes em `canaryClienteIds` participam — permite o
+ *   primeiro teste real em Production sem expor a feature a todo mundo.
+ * - "on": todo cliente elegível participa — equivalente ao antigo `ativo: true`.
+ */
+export type ModoRolloutJornada = "off" | "canary" | "on";
+
 export type ConfigJornadaChef = {
-  ativo: boolean;
+  modoRollout: ModoRolloutJornada;
   metaPizzas: number;
   limitePizzasPorPedido: number;
   validadeRecompensaDias: number;
   mensagensWhatsappAtivas: boolean;
   versaoRegra: number;
   sequenciaRecompensas: RecompensaConfigCiclo[];
+  /** Somente `clienteId` (derivado no servidor a partir do telefone) —
+   * nunca o telefone completo (rule 4 do rollout canário). */
+  canaryClienteIds: string[];
   textos: { tituloTrilha: string; subtituloTrilha: string };
   atualizadoEm: string;
 };
@@ -144,13 +156,14 @@ const META_MAXIMA_SEGURA = 60;
 const LIMITE_MAXIMO_SEGURO = 4;
 
 export const CONFIG_JORNADA_PADRAO: ConfigJornadaChef = {
-  ativo: false,
+  modoRollout: "off",
   metaPizzas: 12,
   limitePizzasPorPedido: 4,
   validadeRecompensaDias: 30,
   mensagensWhatsappAtivas: false,
   versaoRegra: VERSAO_REGRA_ATUAL,
   sequenciaRecompensas: [],
+  canaryClienteIds: [],
   textos: {
     tituloTrilha: "Jornada do Chef",
     subtituloTrilha: "Complete 12 pizzas e desbloqueie seu presente!",
@@ -446,25 +459,30 @@ export async function salvarConfigJornadaChef(
     }
   }
 
-  const ativoSolicitado = Boolean(input.ativo ?? atual.ativo);
-  if (ativoSolicitado) {
+  const MODOS_ROLLOUT_VALIDOS: ModoRolloutJornada[] = ["off", "canary", "on"];
+  const modoRolloutSolicitado: ModoRolloutJornada = MODOS_ROLLOUT_VALIDOS.includes(input.modoRollout as ModoRolloutJornada)
+    ? (input.modoRollout as ModoRolloutJornada)
+    : atual.modoRollout;
+
+  if (modoRolloutSolicitado !== "off") {
     const temRecompensaResgatavel = sequenciaRecompensas.length > 0 && sequenciaRecompensas.some((r) => r.ativo);
     if (!temRecompensaResgatavel) {
       return {
         ok: false,
-        erro: "Não é possível ativar a Jornada do Chef sem ao menos uma recompensa configurada e ativa na sequência de presentes.",
+        erro: "Não é possível ativar a Jornada do Chef (canário ou geral) sem ao menos uma recompensa configurada e ativa na sequência de presentes.",
       };
     }
   }
 
   const config: ConfigJornadaChef = {
-    ativo: ativoSolicitado,
+    modoRollout: modoRolloutSolicitado,
     metaPizzas,
     limitePizzasPorPedido,
     validadeRecompensaDias,
     mensagensWhatsappAtivas: Boolean(input.mensagensWhatsappAtivas ?? atual.mensagensWhatsappAtivas),
     versaoRegra: VERSAO_REGRA_ATUAL,
     sequenciaRecompensas,
+    canaryClienteIds: atual.canaryClienteIds,
     textos: {
       tituloTrilha: (input.textos?.tituloTrilha || atual.textos.tituloTrilha).toString().slice(0, 60),
       subtituloTrilha: (input.textos?.subtituloTrilha || atual.textos.subtituloTrilha).toString().slice(0, 160),
@@ -477,6 +495,68 @@ export async function salvarConfigJornadaChef(
 
 function clamp(valor: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, valor));
+}
+
+// ============================================================================
+// Rollout canário — função central, usada por todos os hooks/APIs/UI/WhatsApp
+// (nunca duplicar esta checagem em cada rota).
+// ============================================================================
+
+/**
+ * Única fonte de verdade sobre "este cliente participa da Jornada do Chef
+ * agora": todo hook de crédito, toda rota (progresso, abrir, reservar,
+ * resgate) e toda mensagem de WhatsApp devem checar por aqui — nunca
+ * reimplementar `modoRollout === ...` em outro lugar.
+ *
+ * - "off": ninguém participa.
+ * - "canary": só quem está em `canaryClienteIds`.
+ * - "on": todo cliente elegível participa.
+ */
+export function jornadaAtivaParaCliente(config: ConfigJornadaChef, clienteId: string | null | undefined): boolean {
+  if (config.modoRollout === "on") return true;
+  if (config.modoRollout === "canary") return !!clienteId && config.canaryClienteIds.includes(clienteId);
+  return false; // "off"
+}
+
+/** Mesmo padrão de mascaramento já usado no modelo de pontos
+ * (`mascararIdentidadePontos` em fidelidade.ts) — só os últimos 4 dígitos,
+ * nunca o identificador completo em log ou resposta de API. */
+function mascararIdentificador(valor: string): string {
+  const digitos = valor.replace(/\D/g, "");
+  return digitos.length >= 4 ? `…${digitos.slice(-4)}` : "…";
+}
+
+/**
+ * Adiciona um cliente à lista canário a partir do telefone — o telefone
+ * NUNCA é persistido; só o `clienteId` derivado no servidor (rule 4). O
+ * telefone mascarado devolvido é só para exibição imediata no painel logo
+ * após a inclusão (nunca o telefone completo).
+ */
+export async function adicionarClienteCanario(telefone: string, tenantId: string = TENANT_PADRAO): Promise<{ clienteId: string; identificadorMascarado: string }> {
+  const clienteId = derivarClienteIdPorTelefone(telefone);
+  if (!clienteId) throw new Error("Telefone inválido");
+  const config = await obterConfigJornadaChef(tenantId);
+  const canaryClienteIds = config.canaryClienteIds.includes(clienteId) ? config.canaryClienteIds : [...config.canaryClienteIds, clienteId];
+  await redis.set(chaveConfig(tenantId), { ...config, canaryClienteIds, atualizadoEm: new Date().toISOString() });
+  return { clienteId, identificadorMascarado: mascararIdentificador(telefone) };
+}
+
+/** Remove um cliente da lista canário (por `clienteId`, nunca por telefone
+ * vindo solto) — passa a bloquear novos créditos/ações para ele imediatamente,
+ * sem apagar progresso ou recompensas já existentes. */
+export async function removerClienteCanario(clienteId: string, tenantId: string = TENANT_PADRAO): Promise<void> {
+  const config = await obterConfigJornadaChef(tenantId);
+  await redis.set(chaveConfig(tenantId), {
+    ...config,
+    canaryClienteIds: config.canaryClienteIds.filter((id) => id !== clienteId),
+    atualizadoEm: new Date().toISOString(),
+  });
+}
+
+/** Lista os clientes canário para o painel — devolve sempre o identificador
+ * mascarado (derivado do próprio `clienteId`), nunca o telefone completo. */
+export function listarClientesCanario(config: ConfigJornadaChef): { clienteId: string; identificadorMascarado: string }[] {
+  return config.canaryClienteIds.map((clienteId) => ({ clienteId, identificadorMascarado: mascararIdentificador(clienteId) }));
 }
 
 // ============================================================================
@@ -1042,11 +1122,10 @@ function statusCorrespondeAConclusao(pedido: PedidoParaJornada): boolean {
 export async function processarConclusaoPedidoJornada(pedido: PedidoParaJornada, tenantId: string = TENANT_PADRAO): Promise<ResultadoProcessamentoJornada | null> {
   try {
     const config = await obterConfigJornadaChef(tenantId);
-    if (!config.ativo) return null;
     if (!statusCorrespondeAConclusao(pedido)) return null;
 
     const clienteId = derivarClienteIdPorTelefone(pedido.telefone) ?? pedido.clienteId;
-    if (!clienteId) return null;
+    if (!clienteId || !jornadaAtivaParaCliente(config, clienteId)) return null;
 
     // Confirma o resgate do presente da Jornada, se este pedido usou um —
     // parte do mesmo hook centralizado (rule 13/14), nunca duplicado em rotas.

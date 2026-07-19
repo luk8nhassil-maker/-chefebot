@@ -204,15 +204,40 @@ Eventos sanitizados em `jornada:analytics:{tenant}` (lista com cap):
 `resgate_manual`, `falha_processamento`. Nunca telefone completo, nome,
 cookie, token, OTP ou código integral de resgate.
 
-## Configuração e feature flag
+## Configuração e feature flag — rollout canário
 
 `GET/POST /api/jornada-chef/config` (admin/atendente leem, só admin/dev
 escrevem). `salvarConfigJornadaChef` sempre reforça os limites econômicos
 aprovados, mesmo com payload adulterado: meta entre 4 e 60, limite por
-pedido entre 1 e min(4, meta), validade entre 1 e 365 dias. Quando
-`ativo: false`: pontos e pedidos continuam funcionando normalmente, dados já
-existentes da Jornada não são apagados, a UI do cliente fica oculta e
-nenhuma nova recompensa é criada (rollback simples, sem migração).
+pedido entre 1 e min(4, meta), validade entre 1 e 365 dias.
+
+A ativação simples (`ativo: boolean`) foi substituída por `modoRollout`:
+
+- **`off`** (padrão): ninguém participa — pontos e pedidos continuam
+  funcionando normalmente, dados já existentes da Jornada não são apagados,
+  a UI do cliente fica oculta e nenhuma nova recompensa é criada.
+- **`canary`**: só os clientes em `canaryClienteIds` participam — permite o
+  primeiro teste real em Production sem expor a feature a ninguém mais.
+- **`on`**: todo cliente elegível participa.
+
+`jornadaAtivaParaCliente(config, clienteId)` em `src/lib/jornadaChef.ts` é a
+**única** função que decide isso — todo hook de crédito
+(`processarConclusaoPedidoJornada`), toda rota do cliente (progresso, abrir,
+reservar, cancelar-reserva) e a mensagem de WhatsApp dependem dela; nenhuma
+rota reimplementa a checagem.
+
+A lista canário guarda **somente `clienteId`** (derivado no servidor a
+partir do telefone via `derivarClienteIdPorTelefone`) — o telefone em si
+nunca é persistido como campo separado. `adicionarClienteCanario(telefone)` /
+`removerClienteCanario(clienteId)` gerenciam a lista; `listarClientesCanario`
+sempre devolve um identificador mascarado (`…últimos 4 dígitos`, mesmo padrão
+já usado no modelo de pontos), nunca o telefone completo. Trocar de modo
+(`off`↔`canary`↔`on`) nunca apaga progresso ou recompensas existentes —
+só muda quem tem acesso a partir de agora.
+
+Painel: `/admin/jornada-chef` tem um seletor de 3 estados para o modo de
+rollout e uma seção "Clientes canário" (adicionar por telefone, remover por
+identificador mascarado) via `/api/admin/jornada-chef/canario`.
 
 ## Painel da Kellyne
 

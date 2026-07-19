@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { verifyToken } from "@/lib/auth";
 import { derivarClienteIdPorTelefone } from "@/lib/fidelidade";
 import { sanitizeTelefoneCliente } from "@/lib/clientes";
-import { obterEstadoJornada, obterRecompensasCliente, obterConfigJornadaChef, derivarFaseAtual } from "@/lib/jornadaChef";
+import { obterEstadoJornada, obterRecompensasCliente, obterConfigJornadaChef, derivarFaseAtual, jornadaAtivaParaCliente } from "@/lib/jornadaChef";
 
 // GET /api/admin/jornada-chef?telefone=... — painel da Kellyne: progresso,
 // ciclo, pizzas na trilha, caixas e recompensas de um cliente pelo telefone
@@ -32,7 +32,8 @@ export async function GET(req: NextRequest) {
   ]);
 
   return NextResponse.json({
-    ativo: config.ativo,
+    modoRollout: config.modoRollout,
+    ativoParaEsteCliente: jornadaAtivaParaCliente(config, clienteId),
     metaPizzas: config.metaPizzas,
     cicloAtual: estado.cicloAtual,
     pizzasNoCiclo: estado.pizzasNoCiclo,

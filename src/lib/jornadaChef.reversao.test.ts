@@ -43,7 +43,7 @@ import {
 beforeEach(async () => {
   store.clear();
   await salvarConfigJornadaChef({
-    ativo: true,
+    modoRollout: "on",
     sequenciaRecompensas: [
       { id: "padrao", tipo: "bebida_sobremesa", ativo: true, produtoNome: "", item: { produtoId: "bebida:Guarana 2L", produtoNome: "Guarana 2L", categoria: "bebida" } },
     ],
