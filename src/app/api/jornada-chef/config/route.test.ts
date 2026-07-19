@@ -2,10 +2,10 @@ import { vi, describe, test, expect } from "vitest";
 import { NextRequest } from "next/server";
 
 vi.mock("@/lib/jornadaChef", () => ({
-  obterConfigJornadaChef: vi.fn(async () => ({ modoRollout: "off", metaPizzas: 12, limitePizzasPorPedido: 4, validadeRecompensaDias: 30, mensagensWhatsappAtivas: false, sequenciaRecompensas: [], canaryClienteIds: [], textos: { tituloTrilha: "Jornada do Chef", subtituloTrilha: "" } })),
+  obterConfigJornadaChef: vi.fn(async () => ({ modoRollout: "off", metaPizzas: 12, limitePizzasPorPedido: 4, validadeRecompensaDias: 30, mensagensWhatsappAtivas: false, sequenciaRecompensas: [], canaryClientes: [], textos: { tituloTrilha: "Jornada do Chef", subtituloTrilha: "" } })),
   salvarConfigJornadaChef: vi.fn(async (input: { sequenciaRecompensas?: unknown[] }) => ({
     ok: true,
-    config: { modoRollout: "on", metaPizzas: 12, limitePizzasPorPedido: 4, validadeRecompensaDias: 30, mensagensWhatsappAtivas: false, sequenciaRecompensas: input.sequenciaRecompensas ?? [], canaryClienteIds: [], textos: { tituloTrilha: "Jornada do Chef", subtituloTrilha: "" } },
+    config: { modoRollout: "on", metaPizzas: 12, limitePizzasPorPedido: 4, validadeRecompensaDias: 30, mensagensWhatsappAtivas: false, sequenciaRecompensas: input.sequenciaRecompensas ?? [], canaryClientes: [], textos: { tituloTrilha: "Jornada do Chef", subtituloTrilha: "" } },
   })),
 }));
 

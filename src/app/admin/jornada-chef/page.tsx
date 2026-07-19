@@ -114,7 +114,7 @@ export default function AdminJornadaChefPage() {
   const [msgAcao, setMsgAcao] = useState('')
   const [pendencias, setPendencias] = useState<Pendencia[]>([])
 
-  const [clientesCanario, setClientesCanario] = useState<{ clienteId: string; identificadorMascarado: string }[]>([])
+  const [clientesCanario, setClientesCanario] = useState<{ idPublico: string; labelMascarado: string }[]>([])
   const [telefoneCanario, setTelefoneCanario] = useState('')
   const [erroCanario, setErroCanario] = useState('')
   const [salvandoCanario, setSalvandoCanario] = useState(false)
@@ -172,8 +172,8 @@ export default function AdminJornadaChefPage() {
     setSalvandoCanario(false)
   }
 
-  async function removerCanario(clienteId: string) {
-    await fetch(`/api/admin/jornada-chef/canario?clienteId=${encodeURIComponent(clienteId)}`, { method: 'DELETE' })
+  async function removerCanario(idPublico: string) {
+    await fetch(`/api/admin/jornada-chef/canario?idPublico=${encodeURIComponent(idPublico)}`, { method: 'DELETE' })
     carregarCanario()
   }
 
@@ -386,9 +386,9 @@ export default function AdminJornadaChefPage() {
           {erroCanario && <p style={{ color: 'var(--danger-text)', fontSize: 13 }}>{erroCanario}</p>}
           {clientesCanario.length === 0 && <p style={{ fontSize: 13, color: 'var(--foreground-secondary)' }}>Nenhum cliente canário configurado.</p>}
           {clientesCanario.map((c) => (
-            <div key={c.clienteId} style={{ borderTop: '1px solid var(--border)', padding: '8px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: 13, fontFamily: 'monospace' }}>{c.identificadorMascarado}</span>
-              <button onClick={() => removerCanario(c.clienteId)} style={botaoIcone}>Remover</button>
+            <div key={c.idPublico} style={{ borderTop: '1px solid var(--border)', padding: '8px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: 13, fontFamily: 'monospace' }}>{c.labelMascarado}</span>
+              <button onClick={() => removerCanario(c.idPublico)} style={botaoIcone}>Remover</button>
             </div>
           ))}
         </div>

@@ -14,11 +14,11 @@ export async function GET(req: NextRequest) {
   const auth = await checkAuthLeitura(req);
   if (!auth) return NextResponse.json({ error: "Nao autorizado" }, { status: 401 });
   const config = await obterConfigJornadaChef();
-  // `canaryClienteIds` nunca sai bruto desta rota (mesmo sendo só clienteId,
-  // não telefone) — a lista canário só é exposta mascarada, e só pela rota
-  // dedicada /api/admin/jornada-chef/canario.
-  const { canaryClienteIds: _canaryClienteIds, ...configPublica } = config;
-  return NextResponse.json({ ...configPublica, canaryCount: config.canaryClienteIds.length });
+  // `canaryClientes` (com a referência HMAC de cada entrada) nunca sai desta
+  // rota — a lista canário só é exposta (já mascarada, via idPublico) pela
+  // rota dedicada /api/admin/jornada-chef/canario.
+  const { canaryClientes: _canaryClientes, ...configPublica } = config;
+  return NextResponse.json({ ...configPublica, canaryCount: config.canaryClientes.length });
 }
 
 export async function POST(req: NextRequest) {
@@ -48,6 +48,6 @@ export async function POST(req: NextRequest) {
   if (!resultado.ok) {
     return NextResponse.json({ ok: false, error: resultado.erro, detalhes: resultado.detalhes }, { status: 400 });
   }
-  const { canaryClienteIds: _canaryClienteIds, ...configPublica } = resultado.config;
-  return NextResponse.json({ ok: true, config: { ...configPublica, canaryCount: resultado.config.canaryClienteIds.length } });
+  const { canaryClientes: _canaryClientes, ...configPublica } = resultado.config;
+  return NextResponse.json({ ok: true, config: { ...configPublica, canaryCount: resultado.config.canaryClientes.length } });
 }

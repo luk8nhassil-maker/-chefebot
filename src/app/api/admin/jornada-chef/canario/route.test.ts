@@ -2,11 +2,11 @@ import { vi, describe, test, expect } from "vitest";
 import { NextRequest } from "next/server";
 
 vi.mock("@/lib/jornadaChef", () => ({
-  obterConfigJornadaChef: vi.fn(async () => ({ modoRollout: "canary", canaryClienteIds: ["cli_86999998888"] })),
-  adicionarClienteCanario: vi.fn(async (telefone: string) => ({ clienteId: `cli_${telefone}`, identificadorMascarado: `…${telefone.slice(-4)}` })),
+  obterConfigJornadaChef: vi.fn(async () => ({ modoRollout: "canary", canaryClientes: [{ ref: "a".repeat(64), idPublico: "aaaaaaaaaaaa", labelMascarado: "…8888" }] })),
+  adicionarClienteCanario: vi.fn(async (telefone: string) => ({ idPublico: "bbbbbbbbbbbb", labelMascarado: `…${telefone.slice(-4)}` })),
   removerClienteCanario: vi.fn(async () => undefined),
-  listarClientesCanario: vi.fn((config: { canaryClienteIds: string[] }) =>
-    config.canaryClienteIds.map((id: string) => ({ clienteId: id, identificadorMascarado: `…${id.slice(-4)}` }))
+  listarClientesCanario: vi.fn((config: { canaryClientes: { idPublico: string; labelMascarado: string }[] }) =>
+    config.canaryClientes.map((c) => ({ idPublico: c.idPublico, labelMascarado: c.labelMascarado }))
   ),
 }));
 
@@ -38,11 +38,14 @@ describe("GET /api/admin/jornada-chef/canario", () => {
     expect(res.status).toBe(401);
   });
 
-  test("admin/atendente conseguem listar — identificador sempre mascarado", async () => {
+  test("admin/atendente conseguem listar — nunca clienteId, telefone ou HMAC completo", async () => {
     const res = await GET(req("GET", "token-atendente"));
     expect(res.status).toBe(200);
     const data = await res.json();
-    expect(data.clientes[0].identificadorMascarado).toBe("…8888");
+    expect(data.clientes[0].labelMascarado).toBe("…8888");
+    expect(Object.keys(data.clientes[0]).sort()).toEqual(["idPublico", "labelMascarado"]);
+    expect(data.clientes[0].idPublico.length).toBeLessThan(64); // nunca o HMAC-SHA256 completo (64 hex)
+    expect(JSON.stringify(data)).not.toContain("cli_");
   });
 });
 
@@ -52,12 +55,14 @@ describe("POST /api/admin/jornada-chef/canario", () => {
     expect(res.status).toBe(403);
   });
 
-  test("admin consegue adicionar por telefone — o campo de exibição é sempre o mascarado", async () => {
+  test("admin consegue adicionar por telefone — resposta nunca inclui clienteId ou telefone", async () => {
     const res = await POST(req("POST", "token-admin", { telefone: "86999997777" }));
     expect(res.status).toBe(200);
     const data = await res.json();
-    expect(data.identificadorMascarado).toBe("…7777");
+    expect(data.labelMascarado).toBe("…7777");
+    expect(data).not.toHaveProperty("clienteId");
     expect(data).not.toHaveProperty("telefone");
+    expect(Object.keys(data).sort()).toEqual(["idPublico", "labelMascarado", "ok"]);
     expect(vi.mocked(adicionarClienteCanario)).toHaveBeenCalledWith("86999997777");
   });
 
@@ -69,17 +74,17 @@ describe("POST /api/admin/jornada-chef/canario", () => {
 
 describe("DELETE /api/admin/jornada-chef/canario", () => {
   test("atendente NAO consegue remover (403)", async () => {
-    const res = await DELETE(req("DELETE", "token-atendente", undefined, "?clienteId=cli_86999998888"));
+    const res = await DELETE(req("DELETE", "token-atendente", undefined, "?idPublico=aaaaaaaaaaaa"));
     expect(res.status).toBe(403);
   });
 
-  test("admin remove por clienteId", async () => {
-    const res = await DELETE(req("DELETE", "token-admin", undefined, "?clienteId=cli_86999998888"));
+  test("admin remove por idPublico (nunca clienteId ou telefone na URL)", async () => {
+    const res = await DELETE(req("DELETE", "token-admin", undefined, "?idPublico=aaaaaaaaaaaa"));
     expect(res.status).toBe(200);
-    expect(vi.mocked(removerClienteCanario)).toHaveBeenCalledWith("cli_86999998888");
+    expect(vi.mocked(removerClienteCanario)).toHaveBeenCalledWith("aaaaaaaaaaaa");
   });
 
-  test("sem clienteId retorna 400", async () => {
+  test("sem idPublico retorna 400", async () => {
     const res = await DELETE(req("DELETE", "token-admin"));
     expect(res.status).toBe(400);
   });

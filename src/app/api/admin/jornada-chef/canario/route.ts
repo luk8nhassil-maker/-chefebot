@@ -4,8 +4,10 @@ import { obterConfigJornadaChef, adicionarClienteCanario, removerClienteCanario,
 
 // GET/POST/DELETE /api/admin/jornada-chef/canario — gerencia a lista de
 // clientes autorizados no modo de rollout "canary" (rule 5). O telefone do
-// cliente de teste é sanitizado e convertido em clienteId no servidor;
-// nunca é persistido nem devolvido por completo em nenhuma resposta.
+// cliente de teste é sanitizado e convertido em clienteId só em memória, no
+// servidor; a persistência e todas as respostas usam apenas uma referência
+// opaca (idPublico) e um rótulo mascarado — nunca telefone, clienteId ou o
+// HMAC completo.
 
 async function checkAuthLeitura(req: NextRequest) {
   const token = req.cookies.get("auth-token")?.value ?? null;
@@ -34,8 +36,8 @@ export async function POST(req: NextRequest) {
   if (!telefone) return NextResponse.json({ ok: false, error: "telefone obrigatorio" }, { status: 400 });
 
   try {
-    const { clienteId, identificadorMascarado } = await adicionarClienteCanario(telefone);
-    return NextResponse.json({ ok: true, clienteId, identificadorMascarado });
+    const { idPublico, labelMascarado } = await adicionarClienteCanario(telefone);
+    return NextResponse.json({ ok: true, idPublico, labelMascarado });
   } catch (err) {
     return NextResponse.json({ ok: false, error: err instanceof Error ? err.message : "Nao foi possivel adicionar o cliente canario" }, { status: 400 });
   }
@@ -48,9 +50,9 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: "Nao autorizado" }, { status: 403 });
   }
 
-  const clienteId = new URL(req.url).searchParams.get("clienteId") ?? "";
-  if (!clienteId) return NextResponse.json({ ok: false, error: "clienteId obrigatorio" }, { status: 400 });
+  const idPublico = new URL(req.url).searchParams.get("idPublico") ?? "";
+  if (!idPublico) return NextResponse.json({ ok: false, error: "idPublico obrigatorio" }, { status: 400 });
 
-  await removerClienteCanario(clienteId);
+  await removerClienteCanario(idPublico);
   return NextResponse.json({ ok: true });
 }

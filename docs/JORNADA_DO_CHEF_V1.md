@@ -216,7 +216,7 @@ A ativação simples (`ativo: boolean`) foi substituída por `modoRollout`:
 - **`off`** (padrão): ninguém participa — pontos e pedidos continuam
   funcionando normalmente, dados já existentes da Jornada não são apagados,
   a UI do cliente fica oculta e nenhuma nova recompensa é criada.
-- **`canary`**: só os clientes em `canaryClienteIds` participam — permite o
+- **`canary`**: só os clientes em `canaryClientes` participam — permite o
   primeiro teste real em Production sem expor a feature a ninguém mais.
 - **`on`**: todo cliente elegível participa.
 
@@ -226,18 +226,44 @@ A ativação simples (`ativo: boolean`) foi substituída por `modoRollout`:
 reservar, cancelar-reserva) e a mensagem de WhatsApp dependem dela; nenhuma
 rota reimplementa a checagem.
 
-A lista canário guarda **somente `clienteId`** (derivado no servidor a
-partir do telefone via `derivarClienteIdPorTelefone`) — o telefone em si
-nunca é persistido como campo separado. `adicionarClienteCanario(telefone)` /
-`removerClienteCanario(clienteId)` gerenciam a lista; `listarClientesCanario`
-sempre devolve um identificador mascarado (`…últimos 4 dígitos`, mesmo padrão
-já usado no modelo de pontos), nunca o telefone completo. Trocar de modo
-(`off`↔`canary`↔`on`) nunca apaga progresso ou recompensas existentes —
-só muda quem tem acesso a partir de agora.
+### Lista canário — modelo opaco, sem telefone recuperável
+
+`clienteId` tem o formato `cli_<telefone sanitizado>` em todo o domínio
+(convenção já existente no modelo de pontos) — ou seja, guardá-lo puro na
+lista canário equivaleria a persistir o telefone completo. Por isso a lista
+guarda uma entrada estruturada, nunca o `clienteId` nem o telefone:
+
+```ts
+type ClienteCanario = {
+  ref: string;            // HMAC-SHA256(AUTH_SECRET, clienteId) — nunca reversível sem o segredo
+  idPublico: string;       // prefixo curto de `ref` (12 hex) — seguro para expor/usar como referência de remoção
+  labelMascarado: string;  // "…últimos 4 dígitos", só para exibição
+};
+```
+
+- `ref` reaproveita o mesmo `AUTH_SECRET` já usado para assinar sessões
+  (`@/lib/auth`, `@/lib/clienteAuth`) — nunca um SHA simples sem segredo.
+  Diferente dessas duas rotinas, aqui **nunca há fallback para um segredo de
+  desenvolvimento**: sem `AUTH_SECRET` configurado, `jornadaAtivaParaCliente`
+  falha fechado (bloqueia o acesso) em vez de calcular uma referência
+  previsível.
+- `jornadaAtivaParaCliente` recebe o `clienteId` interno, calcula a mesma
+  referência (`refCanario`) e compara só com `canaryClientes[].ref` — nunca
+  compara telefone ou `clienteId` puro, e nunca loga a referência completa.
+- `adicionarClienteCanario(telefone)` recebe o telefone só na chamada,
+  deriva o `clienteId` **em memória** (nunca persistido), calcula `ref` e
+  `idPublico`, e devolve só `{ idPublico, labelMascarado }` — nunca
+  `clienteId` nem telefone.
+- `removerClienteCanario(idPublico)` e `listarClientesCanario` operam e
+  devolvem só `idPublico`/`labelMascarado` — a `ref` completa nunca sai do
+  módulo de domínio.
+- Trocar de modo (`off`↔`canary`↔`on`) nunca apaga progresso ou recompensas
+  existentes — só muda quem tem acesso a partir de agora.
 
 Painel: `/admin/jornada-chef` tem um seletor de 3 estados para o modo de
 rollout e uma seção "Clientes canário" (adicionar por telefone, remover por
-identificador mascarado) via `/api/admin/jornada-chef/canario`.
+`idPublico`) via `/api/admin/jornada-chef/canario` — que só aceita
+`telefone` no POST e só `idPublico` no DELETE, nunca `clienteId`.
 
 ## Painel da Kellyne
 

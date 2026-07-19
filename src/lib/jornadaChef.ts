@@ -5,7 +5,7 @@
 //
 // Ver docs/JORNADA_DO_CHEF_V1.md para as regras de negócio completas.
 
-import { randomBytes } from "crypto";
+import { randomBytes, createHmac } from "crypto";
 import { redis } from "./redis";
 import { derivarClienteIdPorTelefone } from "./fidelidade";
 import { enviarTextoWhatsApp } from "./whatsappMensagem";
@@ -128,11 +128,25 @@ export type ErroValidacaoRecompensa = { indice: number; id?: string; mensagens: 
 /**
  * Modo de rollout da Jornada do Chef (substitui o antigo `ativo: boolean`):
  * - "off": ninguém participa — comportamento equivalente ao antigo `ativo: false`.
- * - "canary": só os clientes em `canaryClienteIds` participam — permite o
+ * - "canary": só os clientes em `canaryClientes` participam — permite o
  *   primeiro teste real em Production sem expor a feature a todo mundo.
  * - "on": todo cliente elegível participa — equivalente ao antigo `ativo: true`.
  */
 export type ModoRolloutJornada = "off" | "canary" | "on";
+
+/**
+ * Entrada da lista canário — NUNCA guarda telefone nem `clienteId` (que no
+ * formato `cli_<dígitos>` já embute o telefone completo). `ref` é um
+ * HMAC-SHA256 do `clienteId` com um segredo server-side (nunca reversível
+ * sem o segredo); `idPublico` é um prefixo curto de `ref`, seguro para
+ * expor em API/URL (identifica a entrada sem devolver o HMAC completo);
+ * `labelMascarado` é só os últimos 4 dígitos, para exibição no painel.
+ */
+export type ClienteCanario = {
+  ref: string;
+  idPublico: string;
+  labelMascarado: string;
+};
 
 export type ConfigJornadaChef = {
   modoRollout: ModoRolloutJornada;
@@ -142,9 +156,7 @@ export type ConfigJornadaChef = {
   mensagensWhatsappAtivas: boolean;
   versaoRegra: number;
   sequenciaRecompensas: RecompensaConfigCiclo[];
-  /** Somente `clienteId` (derivado no servidor a partir do telefone) —
-   * nunca o telefone completo (rule 4 do rollout canário). */
-  canaryClienteIds: string[];
+  canaryClientes: ClienteCanario[];
   textos: { tituloTrilha: string; subtituloTrilha: string };
   atualizadoEm: string;
 };
@@ -163,7 +175,7 @@ export const CONFIG_JORNADA_PADRAO: ConfigJornadaChef = {
   mensagensWhatsappAtivas: false,
   versaoRegra: VERSAO_REGRA_ATUAL,
   sequenciaRecompensas: [],
-  canaryClienteIds: [],
+  canaryClientes: [],
   textos: {
     tituloTrilha: "Jornada do Chef",
     subtituloTrilha: "Complete 12 pizzas e desbloqueie seu presente!",
@@ -482,7 +494,7 @@ export async function salvarConfigJornadaChef(
     mensagensWhatsappAtivas: Boolean(input.mensagensWhatsappAtivas ?? atual.mensagensWhatsappAtivas),
     versaoRegra: VERSAO_REGRA_ATUAL,
     sequenciaRecompensas,
-    canaryClienteIds: atual.canaryClienteIds,
+    canaryClientes: atual.canaryClientes,
     textos: {
       tituloTrilha: (input.textos?.tituloTrilha || atual.textos.tituloTrilha).toString().slice(0, 60),
       subtituloTrilha: (input.textos?.subtituloTrilha || atual.textos.subtituloTrilha).toString().slice(0, 160),
@@ -503,18 +515,51 @@ function clamp(valor: number, min: number, max: number): number {
 // ============================================================================
 
 /**
+ * Segredo server-side para a referência opaca da lista canário — reaproveita
+ * o mesmo `AUTH_SECRET` já usado para assinar sessões (staff e cliente) em
+ * `@/lib/auth` e `@/lib/clienteAuth`. Ao contrário daqueles dois, aqui NUNCA
+ * caímos para um segredo de desenvolvimento hardcoded: sem `AUTH_SECRET`
+ * configurado, a checagem de rollout canário falha fechada (ninguém entra),
+ * em vez de calcular uma referência previsível.
+ */
+function segredoCanario(): string | null {
+  const segredo = process.env.AUTH_SECRET;
+  return segredo && segredo.trim().length > 0 ? segredo : null;
+}
+
+/**
+ * Referência opaca e determinística de um `clienteId` para a lista canário
+ * — HMAC-SHA256 com `segredoCanario()`. Nunca reversível ao telefone sem o
+ * segredo (ao contrário de guardar o `clienteId` puro, que no formato
+ * `cli_<dígitos>` já contém o telefone completo). Retorna `null` (nunca uma
+ * referência fraca) se o segredo não estiver disponível.
+ */
+function refCanario(clienteId: string): string | null {
+  const segredo = segredoCanario();
+  if (!segredo) return null;
+  return createHmac("sha256", segredo).update(clienteId).digest("hex");
+}
+
+/**
  * Única fonte de verdade sobre "este cliente participa da Jornada do Chef
  * agora": todo hook de crédito, toda rota (progresso, abrir, reservar,
  * resgate) e toda mensagem de WhatsApp devem checar por aqui — nunca
  * reimplementar `modoRollout === ...` em outro lugar.
  *
  * - "off": ninguém participa.
- * - "canary": só quem está em `canaryClienteIds`.
+ * - "canary": só quem tem a mesma referência HMAC (`refCanario`) de uma
+ *   entrada em `canaryClientes` — nunca compara telefone ou clienteId puro.
+ *   Falha fechada (bloqueia) se a referência não puder ser calculada.
  * - "on": todo cliente elegível participa.
  */
 export function jornadaAtivaParaCliente(config: ConfigJornadaChef, clienteId: string | null | undefined): boolean {
   if (config.modoRollout === "on") return true;
-  if (config.modoRollout === "canary") return !!clienteId && config.canaryClienteIds.includes(clienteId);
+  if (config.modoRollout === "canary") {
+    if (!clienteId) return false;
+    const ref = refCanario(clienteId);
+    if (!ref) return false; // sem segredo disponível: nunca entra em canary
+    return config.canaryClientes.some((c) => c.ref === ref);
+  }
   return false; // "off"
 }
 
@@ -526,37 +571,50 @@ function mascararIdentificador(valor: string): string {
   return digitos.length >= 4 ? `…${digitos.slice(-4)}` : "…";
 }
 
+// Tamanho do prefixo público do HMAC — suficiente (48 bits) para nunca
+// colidir entre os poucos clientes de teste de um canário, curto o bastante
+// para nunca expor o HMAC-SHA256 completo (64 caracteres) em resposta de API.
+const TAMANHO_ID_PUBLICO_CANARIO = 12;
+
 /**
- * Adiciona um cliente à lista canário a partir do telefone — o telefone
- * NUNCA é persistido; só o `clienteId` derivado no servidor (rule 4). O
- * telefone mascarado devolvido é só para exibição imediata no painel logo
- * após a inclusão (nunca o telefone completo).
+ * Adiciona um cliente à lista canário a partir do telefone. O telefone só
+ * existe nesta chamada (parâmetro) e no `clienteId` derivado EM MEMÓRIA — a
+ * partir daí só a referência HMAC (`ref`) e o rótulo mascarado são
+ * persistidos; nenhum dos dois permite recuperar o telefone sem o segredo
+ * do servidor. Nunca devolve `clienteId` nem a `ref` completa ao chamador.
  */
-export async function adicionarClienteCanario(telefone: string, tenantId: string = TENANT_PADRAO): Promise<{ clienteId: string; identificadorMascarado: string }> {
+export async function adicionarClienteCanario(telefone: string, tenantId: string = TENANT_PADRAO): Promise<{ idPublico: string; labelMascarado: string }> {
   const clienteId = derivarClienteIdPorTelefone(telefone);
   if (!clienteId) throw new Error("Telefone inválido");
+  const ref = refCanario(clienteId);
+  if (!ref) throw new Error("Nao foi possivel gerar uma referencia segura (segredo do servidor indisponivel)");
+
+  const idPublico = ref.slice(0, TAMANHO_ID_PUBLICO_CANARIO);
+  const labelMascarado = mascararIdentificador(telefone);
   const config = await obterConfigJornadaChef(tenantId);
-  const canaryClienteIds = config.canaryClienteIds.includes(clienteId) ? config.canaryClienteIds : [...config.canaryClienteIds, clienteId];
-  await redis.set(chaveConfig(tenantId), { ...config, canaryClienteIds, atualizadoEm: new Date().toISOString() });
-  return { clienteId, identificadorMascarado: mascararIdentificador(telefone) };
+  const jaExiste = config.canaryClientes.some((c) => c.ref === ref);
+  const canaryClientes = jaExiste ? config.canaryClientes : [...config.canaryClientes, { ref, idPublico, labelMascarado }];
+  await redis.set(chaveConfig(tenantId), { ...config, canaryClientes, atualizadoEm: new Date().toISOString() });
+  return { idPublico, labelMascarado };
 }
 
-/** Remove um cliente da lista canário (por `clienteId`, nunca por telefone
- * vindo solto) — passa a bloquear novos créditos/ações para ele imediatamente,
- * sem apagar progresso ou recompensas já existentes. */
-export async function removerClienteCanario(clienteId: string, tenantId: string = TENANT_PADRAO): Promise<void> {
+/** Remove um cliente da lista canário pelo `idPublico` (nunca por telefone
+ * ou clienteId) — passa a bloquear novos créditos/ações para ele
+ * imediatamente, sem apagar progresso ou recompensas já existentes. */
+export async function removerClienteCanario(idPublico: string, tenantId: string = TENANT_PADRAO): Promise<void> {
   const config = await obterConfigJornadaChef(tenantId);
   await redis.set(chaveConfig(tenantId), {
     ...config,
-    canaryClienteIds: config.canaryClienteIds.filter((id) => id !== clienteId),
+    canaryClientes: config.canaryClientes.filter((c) => c.idPublico !== idPublico),
     atualizadoEm: new Date().toISOString(),
   });
 }
 
-/** Lista os clientes canário para o painel — devolve sempre o identificador
- * mascarado (derivado do próprio `clienteId`), nunca o telefone completo. */
-export function listarClientesCanario(config: ConfigJornadaChef): { clienteId: string; identificadorMascarado: string }[] {
-  return config.canaryClienteIds.map((clienteId) => ({ clienteId, identificadorMascarado: mascararIdentificador(clienteId) }));
+/** Lista os clientes canário para o painel — devolve só `idPublico` (para a
+ * ação de remover) e `labelMascarado` (para exibição); nunca telefone,
+ * clienteId ou a referência HMAC completa. */
+export function listarClientesCanario(config: ConfigJornadaChef): { idPublico: string; labelMascarado: string }[] {
+  return config.canaryClientes.map((c) => ({ idPublico: c.idPublico, labelMascarado: c.labelMascarado }));
 }
 
 // ============================================================================

@@ -1,4 +1,4 @@
-import { vi, describe, test, expect, beforeEach } from "vitest";
+import { vi, describe, test, expect, beforeEach, afterAll } from "vitest";
 
 const store = new Map<string, unknown>();
 
@@ -45,9 +45,16 @@ import { enviarTextoWhatsApp } from "@/lib/whatsappMensagem";
 
 const enviarTextoWhatsAppMock = vi.mocked(enviarTextoWhatsApp);
 
+const SEGREDO_ORIGINAL = process.env.AUTH_SECRET;
+
 beforeEach(() => {
   store.clear();
   enviarTextoWhatsAppMock.mockClear();
+  process.env.AUTH_SECRET = "segredo-de-teste-nao-usado-em-producao";
+});
+
+afterAll(() => {
+  process.env.AUTH_SECRET = SEGREDO_ORIGINAL;
 });
 
 const SEQUENCIA_VALIDA = [
@@ -67,68 +74,95 @@ function pedidoDe(telefone: string, id: string, qty = 4) {
 }
 
 describe("jornadaAtivaParaCliente — função central de rollout", () => {
-  test("off bloqueia todos, mesmo quem está na lista canário", () => {
-    const config = { modoRollout: "off", canaryClienteIds: ["cli_86977001001"] } as ConfigJornadaChef;
+  test("off bloqueia todos, mesmo quem tem uma entrada canário", async () => {
+    const config = { modoRollout: "off", canaryClientes: [{ ref: "x", idPublico: "x", labelMascarado: "…1001" }] } as ConfigJornadaChef;
     expect(jornadaAtivaParaCliente(config, "cli_86977001001")).toBe(false);
     expect(jornadaAtivaParaCliente(config, "cli_qualquer")).toBe(false);
     expect(jornadaAtivaParaCliente(config, undefined)).toBe(false);
   });
 
-  test("canary aceita somente o clienteId autorizado", () => {
-    const config = { modoRollout: "canary", canaryClienteIds: ["cli_86977001001"] } as ConfigJornadaChef;
-    expect(jornadaAtivaParaCliente(config, "cli_86977001001")).toBe(true);
-    expect(jornadaAtivaParaCliente(config, "cli_86977002002")).toBe(false);
-    expect(jornadaAtivaParaCliente(config, undefined)).toBe(false);
+  test("canary aceita somente quem tem a mesma referencia HMAC autorizada", async () => {
+    await adicionarClienteCanario(TELEFONE_AUTORIZADO);
+    const config = await obterConfigJornadaChef();
+    const configCanary = { ...config, modoRollout: "canary" as const };
+    expect(jornadaAtivaParaCliente(configCanary, `cli_${TELEFONE_AUTORIZADO}`)).toBe(true);
+    expect(jornadaAtivaParaCliente(configCanary, `cli_${TELEFONE_OUTRO}`)).toBe(false);
+    expect(jornadaAtivaParaCliente(configCanary, undefined)).toBe(false);
   });
 
   test("on libera qualquer cliente elegível", () => {
-    const config = { modoRollout: "on", canaryClienteIds: [] } as unknown as ConfigJornadaChef;
+    const config = { modoRollout: "on", canaryClientes: [] } as unknown as ConfigJornadaChef;
     expect(jornadaAtivaParaCliente(config, "cli_86977001001")).toBe(true);
     expect(jornadaAtivaParaCliente(config, "cli_86977002002")).toBe(true);
   });
+
+  test("canary falha fechado (bloqueia) se o segredo do servidor nao estiver disponivel", async () => {
+    await adicionarClienteCanario(TELEFONE_AUTORIZADO);
+    const config = await obterConfigJornadaChef();
+    delete process.env.AUTH_SECRET;
+    expect(jornadaAtivaParaCliente({ ...config, modoRollout: "canary" }, `cli_${TELEFONE_AUTORIZADO}`)).toBe(false);
+  });
 });
 
-describe("gerenciamento da lista canário", () => {
-  test("telefone completo nunca é armazenado na config — só o clienteId derivado", async () => {
-    const { clienteId, identificadorMascarado } = await adicionarClienteCanario(TELEFONE_AUTORIZADO);
-    expect(clienteId).toBe(`cli_${TELEFONE_AUTORIZADO}`);
-    expect(identificadorMascarado).not.toContain(TELEFONE_AUTORIZADO);
-    expect(identificadorMascarado).toContain(TELEFONE_AUTORIZADO.slice(-4));
-
-    const config = await obterConfigJornadaChef();
-    expect(config.canaryClienteIds).toEqual([`cli_${TELEFONE_AUTORIZADO}`]);
-    // Nada na config guarda o telefone bruto como campo separado.
-    expect(JSON.stringify(config)).not.toContain("telefone");
+describe("gerenciamento da lista canário — modelo opaco (HMAC), sem telefone recuperável", () => {
+  test("adicionarClienteCanario nunca devolve clienteId nem telefone — só idPublico e labelMascarado", async () => {
+    const resultado = await adicionarClienteCanario(TELEFONE_AUTORIZADO);
+    expect(resultado).not.toHaveProperty("clienteId");
+    expect(resultado).not.toHaveProperty("telefone");
+    expect(Object.keys(resultado).sort()).toEqual(["idPublico", "labelMascarado"]);
+    expect(resultado.labelMascarado).toBe(`…${TELEFONE_AUTORIZADO.slice(-4)}`);
+    expect(resultado.idPublico).not.toContain(TELEFONE_AUTORIZADO);
   });
 
-  test("listarClientesCanario nunca devolve o identificador em texto claro — sempre mascarado", async () => {
+  test("a config persistida nao contem o telefone normalizado nem cli_<telefone>", async () => {
+    await adicionarClienteCanario(TELEFONE_AUTORIZADO);
+    const config = await obterConfigJornadaChef();
+    const serializado = JSON.stringify(config);
+    expect(serializado).not.toContain(TELEFONE_AUTORIZADO);
+    expect(serializado).not.toContain(`cli_${TELEFONE_AUTORIZADO}`);
+    // A entrada canário só tem ref (HMAC), idPublico (prefixo do HMAC) e o
+    // rótulo mascarado — nada disso permite recuperar o telefone sem o
+    // segredo do servidor.
+    expect(config.canaryClientes).toHaveLength(1);
+    expect(Object.keys(config.canaryClientes[0]).sort()).toEqual(["idPublico", "labelMascarado", "ref"]);
+  });
+
+  test("listarClientesCanario nunca devolve a ref HMAC completa nem clienteId — só idPublico e labelMascarado", async () => {
     await adicionarClienteCanario(TELEFONE_AUTORIZADO);
     const config = await obterConfigJornadaChef();
     const listados = listarClientesCanario(config);
     expect(listados).toHaveLength(1);
-    // O identificador mascarado (o que a tela mostra) nunca expõe o telefone
-    // completo — só os últimos 4 dígitos, mesmo padrão de mascaramento já
-    // usado no modelo de pontos.
-    expect(listados[0].identificadorMascarado).not.toContain(TELEFONE_AUTORIZADO);
-    expect(listados[0].identificadorMascarado).toBe(`…${TELEFONE_AUTORIZADO.slice(-4)}`);
+    expect(Object.keys(listados[0]).sort()).toEqual(["idPublico", "labelMascarado"]);
+    expect(listados[0].labelMascarado).toBe(`…${TELEFONE_AUTORIZADO.slice(-4)}`);
+    // idPublico é só um prefixo curto do HMAC — nunca o HMAC completo (64 hex).
+    expect(listados[0].idPublico.length).toBeLessThan(64);
   });
 
-  test("remover cliente canário bloqueia novos créditos para ele, mas não apaga progresso já existente", async () => {
+  test("remover pelo idPublico bloqueia novos créditos para o cliente, mas não apaga progresso já existente", async () => {
     await salvarConfigJornadaChef({ modoRollout: "canary", sequenciaRecompensas: SEQUENCIA_VALIDA });
-    const { clienteId } = await adicionarClienteCanario(TELEFONE_AUTORIZADO);
+    const { idPublico } = await adicionarClienteCanario(TELEFONE_AUTORIZADO);
 
     const antes = await processarConclusaoPedidoJornada(pedidoDe(TELEFONE_AUTORIZADO, "ped_canario_1"));
     expect(antes?.processado).toBe(true);
-    const estadoAntes = await obterEstadoJornada(clienteId);
+    const estadoAntes = await obterEstadoJornada(`cli_${TELEFONE_AUTORIZADO}`);
     expect(estadoAntes.pizzasNoCiclo).toBe(4);
 
-    await removerClienteCanario(clienteId);
+    await removerClienteCanario(idPublico);
+    const configDepois = await obterConfigJornadaChef();
+    expect(configDepois.canaryClientes).toHaveLength(0);
 
     const depois = await processarConclusaoPedidoJornada(pedidoDe(TELEFONE_AUTORIZADO, "ped_canario_2"));
     expect(depois).toBeNull(); // bloqueado — não processa mais
 
-    const estadoDepois = await obterEstadoJornada(clienteId);
+    const estadoDepois = await obterEstadoJornada(`cli_${TELEFONE_AUTORIZADO}`);
     expect(estadoDepois.pizzasNoCiclo).toBe(4); // progresso anterior intacto, não apagado
+  });
+
+  test("adicionar o mesmo telefone duas vezes nao duplica a entrada canário", async () => {
+    await adicionarClienteCanario(TELEFONE_AUTORIZADO);
+    await adicionarClienteCanario(TELEFONE_AUTORIZADO);
+    const config = await obterConfigJornadaChef();
+    expect(config.canaryClientes).toHaveLength(1);
   });
 });
 
