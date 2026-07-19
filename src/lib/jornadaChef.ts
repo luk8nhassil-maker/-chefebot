@@ -540,6 +540,24 @@ function refCanario(clienteId: string): string | null {
   return createHmac("sha256", segredo).update(clienteId).digest("hex");
 }
 
+// Tamanho da referência opaca de analytics — 24 hex (96 bits) é suficiente
+// para correlacionar eventos do mesmo cliente sem nunca expor o HMAC inteiro.
+const TAMANHO_REF_ANALYTICS = 24;
+
+/**
+ * Referência opaca exclusiva de analytics — HMAC-SHA256 com o mesmo segredo
+ * de `segredoCanario()`, mas com separação de domínio (mensagem prefixada
+ * `"jornada-analytics:v1:"`) para NUNCA reutilizar a mesma referência da
+ * lista canário (`refCanario`) nem permitir cruzar as duas por acidente.
+ * Retorna `null` (nunca cai para o `clienteId` puro) se o segredo do
+ * servidor não estiver disponível — o evento é gravado sem `clienteRef`.
+ */
+function refAnalytics(clienteId: string): string | null {
+  const segredo = segredoCanario();
+  if (!segredo) return null;
+  return createHmac("sha256", segredo).update(`jornada-analytics:v1:${clienteId}`).digest("hex").slice(0, TAMANHO_REF_ANALYTICS);
+}
+
 /**
  * Única fonte de verdade sobre "este cliente participa da Jornada do Chef
  * agora": todo hook de crédito, toda rota (progresso, abrir, reservar,
@@ -908,7 +926,7 @@ export async function abrirRecompensa(clienteId: string, recompensaId: string, t
       validaAte: validaAte.toISOString(),
     };
     await salvarRecompensa(tenantId, atualizada);
-    await registrarEventoAnalytics(tenantId, "caixa_aberta", { clienteId, recompensaId });
+    await registrarEventoAnalytics(tenantId, "caixa_aberta", { clienteRef: refAnalytics(clienteId) ?? undefined, recompensaId });
     return atualizada;
   });
 }
@@ -962,7 +980,7 @@ export async function confirmarReservaNoPedido(clienteId: string, recompensaId: 
     if (recompensaExpirada(recompensa)) throw new Error("Recompensa expirada");
     const atualizada: RecompensaJornada = { ...recompensa, reservaPedidoId: pedidoId };
     await salvarRecompensa(tenantId, atualizada);
-    await registrarEventoAnalytics(tenantId, "recompensa_reservada", { clienteId, recompensaId, pedidoId });
+    await registrarEventoAnalytics(tenantId, "recompensa_reservada", { clienteRef: refAnalytics(clienteId) ?? undefined, recompensaId, pedidoId });
     return atualizada;
   });
 }
@@ -976,7 +994,7 @@ async function confirmarResgateRecompensa(clienteId: string, recompensaId: strin
     if (recompensa.reservaPedidoId !== pedidoId || recompensa.status !== "reservada") return;
     const atualizada: RecompensaJornada = { ...recompensa, status: "resgatada", resgatadaEm: new Date().toISOString() };
     await salvarRecompensa(tenantId, atualizada);
-    await registrarEventoAnalytics(tenantId, "recompensa_resgatada", { clienteId, recompensaId, pedidoId });
+    await registrarEventoAnalytics(tenantId, "recompensa_resgatada", { clienteRef: refAnalytics(clienteId) ?? undefined, recompensaId, pedidoId });
   });
 }
 
@@ -1006,7 +1024,9 @@ async function liberarOuSinalizarRecompensaCancelada(clienteId: string, recompen
 }
 
 /** Aplicação manual pela Kellyne (fallback obrigatório, rule 15) — não passa
- * pelo fluxo automático de carrinho/pedido do site. */
+ * pelo fluxo automático de carrinho/pedido do site. `aplicadoPor` só é usado
+ * para o evento de analytics e deve ser o papel operacional (ex.: "admin"),
+ * nunca um nome de usuário ou nome completo recuperável. */
 export async function aplicarResgateManual(codigoPublico: string, aplicadoPor: string, tenantId: string = TENANT_PADRAO): Promise<RecompensaJornada> {
   const recompensaId = await redis.get<string>(chaveCodigoResgate(tenantId, codigoPublico));
   if (!recompensaId) throw new Error("Codigo de resgate invalido ou revogado");
@@ -1021,7 +1041,7 @@ export async function aplicarResgateManual(codigoPublico: string, aplicadoPor: s
     }
     const atualizada: RecompensaJornada = { ...atual, status: "resgatada", resgatadaEm: new Date().toISOString() };
     await salvarRecompensa(tenantId, atualizada);
-    await registrarEventoAnalytics(tenantId, "resgate_manual", { clienteId: atual.clienteId, recompensaId, aplicadoPor });
+    await registrarEventoAnalytics(tenantId, "resgate_manual", { clienteRef: refAnalytics(atual.clienteId) ?? undefined, recompensaId, papelOperador: aplicadoPor });
     return atualizada;
   });
 }
@@ -1142,11 +1162,41 @@ type EventoAnalyticsJornada =
 
 const LIMITE_EVENTOS_ANALYTICS = 2000;
 
-async function registrarEventoAnalytics(tenantId: string, tipo: EventoAnalyticsJornada, detalhes: Record<string, string | number | undefined>): Promise<void> {
+// Defesa em profundidade: mesmo que um chamador erre e envie um campo
+// sensível (clienteId, telefone, nome, cookie, token, otp, codigoPublico,
+// usuário/nome de quem aplicou), o registrador remove antes de persistir —
+// nunca confiamos apenas na disciplina de cada call site.
+const CHAVES_PROIBIDAS_ANALYTICS = new Set([
+  "clienteid",
+  "telefone",
+  "phone",
+  "nome",
+  "name",
+  "cookie",
+  "token",
+  "otp",
+  "codigopublico",
+  "aplicadopor",
+  "username",
+  "senha",
+  "password",
+]);
+
+function sanitizarDetalhesAnalytics(detalhes: Record<string, string | number | undefined>): Record<string, string | number | undefined> {
+  const limpo: Record<string, string | number | undefined> = {};
+  for (const [chave, valor] of Object.entries(detalhes)) {
+    if (CHAVES_PROIBIDAS_ANALYTICS.has(chave.toLowerCase())) continue;
+    if (valor === undefined) continue;
+    limpo[chave] = valor;
+  }
+  return limpo;
+}
+
+export async function registrarEventoAnalytics(tenantId: string, tipo: EventoAnalyticsJornada, detalhes: Record<string, string | number | undefined>): Promise<void> {
   try {
     const chave = chaveEventosAnalytics(tenantId);
     const eventos = (await redis.get<unknown[]>(chave)) ?? [];
-    const evento = { tipo, criadoEm: new Date().toISOString(), ...detalhes };
+    const evento = { tipo, criadoEm: new Date().toISOString(), ...sanitizarDetalhesAnalytics(detalhes) };
     const atualizados = [...eventos, evento].slice(-LIMITE_EVENTOS_ANALYTICS);
     await redis.set(chave, atualizados);
   } catch {
@@ -1300,12 +1350,12 @@ export async function processarConclusaoPedidoJornada(pedido: PedidoParaJornada,
       };
       await redis.set(chaveIdempotencia, registro);
 
-      await registrarEventoAnalytics(tenantId, "jornada_creditada", { clienteId, pedidoId: pedido.id, pizzasNaTrilha });
+      await registrarEventoAnalytics(tenantId, "jornada_creditada", { clienteRef: refAnalytics(clienteId) ?? undefined, pedidoId: pedido.id, pizzasNaTrilha });
       for (const marco of fasesCruzadas) {
-        if (marco < config.metaPizzas) await registrarEventoAnalytics(tenantId, "fase_concluida", { clienteId, pedidoId: pedido.id, marco });
+        if (marco < config.metaPizzas) await registrarEventoAnalytics(tenantId, "fase_concluida", { clienteRef: refAnalytics(clienteId) ?? undefined, pedidoId: pedido.id, marco });
       }
       for (const recompensa of recompensasDesbloqueadas) {
-        await registrarEventoAnalytics(tenantId, "caixa_desbloqueada", { clienteId, pedidoId: pedido.id, recompensaId: recompensa.recompensaId });
+        await registrarEventoAnalytics(tenantId, "caixa_desbloqueada", { clienteRef: refAnalytics(clienteId) ?? undefined, pedidoId: pedido.id, recompensaId: recompensa.recompensaId });
       }
 
       return { processado: true, pizzasElegiveisTotal, pizzasNaTrilha, progressoAntes, progressoDepois, fasesCruzadas, recompensasDesbloqueadas };
@@ -1377,7 +1427,7 @@ export async function reverterConclusaoPedidoJornada(pedidoId: string, motivo: s
       await persistirEstado(tenantId, estadoRevertido);
       for (const id of atual.recompensasCriadasIds) await cancelarRecompensa(tenantId, id);
       await redis.set(chaveIdempotencia, { ...atual, revertidoEm: new Date().toISOString() });
-      await registrarEventoAnalytics(tenantId, "credito_revertido", { clienteId: atual.clienteId, pedidoId });
+      await registrarEventoAnalytics(tenantId, "credito_revertido", { clienteRef: refAnalytics(atual.clienteId) ?? undefined, pedidoId });
       return { ok: true, pendenciaAberta: false };
     }
 

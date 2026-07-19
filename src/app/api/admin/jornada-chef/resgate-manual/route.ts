@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
     if (acao === "aplicar") {
       const codigo = String(body?.codigoPublico ?? "").trim();
       if (!codigo) return NextResponse.json({ ok: false, error: "codigoPublico obrigatorio" }, { status: 400 });
-      const recompensa = await aplicarResgateManual(codigo, auth.username as string);
+      const recompensa = await aplicarResgateManual(codigo, auth.role as string);
       return NextResponse.json({ ok: true, recompensaId: recompensa.recompensaId, status: recompensa.status });
     }
     if (acao === "revogar_codigo") {

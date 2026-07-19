@@ -265,6 +265,31 @@ rollout e uma seção "Clientes canário" (adicionar por telefone, remover por
 `idPublico`) via `/api/admin/jornada-chef/canario` — que só aceita
 `telefone` no POST e só `idPublico` no DELETE, nunca `clienteId`.
 
+### Analytics sanitizado — pseudonimização, nunca telefone ou clienteId
+
+Os eventos de `jornada:analytics:<tenant>` (`caixa_aberta`,
+`recompensa_reservada`, `recompensa_resgatada`, `resgate_manual`,
+`jornada_creditada`, `fase_concluida`, `caixa_desbloqueada`,
+`credito_revertido`, `falha_processamento`) nunca gravam `clienteId`,
+telefone, nome, cookie, token, OTP ou o código público de resgate completo.
+
+- `refAnalytics(clienteId)` calcula `HMAC-SHA256(AUTH_SECRET,
+  "jornada-analytics:v1:" + clienteId)`, truncado a 24 caracteres hex — uma
+  referência **exclusiva de analytics**, com separação de domínio: a mensagem
+  HMAC é diferente da usada pela lista canário (`refCanario`), então as duas
+  referências nunca podem ser cruzadas entre si mesmo com o mesmo segredo.
+  Sem `AUTH_SECRET` disponível, `clienteRef` fica ausente do evento — nunca
+  cai para o `clienteId` puro como alternativa.
+- `registrarEventoAnalytics` centraliza a sanitização: mesmo que uma chamada
+  erre e envie `clienteId`, `telefone`, `nome`, `cookie`, `token`, `otp`,
+  `codigoPublico` ou um nome de operador, esses campos são removidos antes de
+  persistir — a proteção não depende da disciplina de cada call site.
+- No resgate manual, quem aplicou o resgate é gravado como `papelOperador`
+  (o papel, ex. `"admin"`) — nunca o nome de usuário. Esse campo é diferente
+  do `historicoSubstituicao` de uma recompensa (que continua guardando quem
+  fez a substituição, para auditoria da própria recompensa) — a mudança é
+  só no analytics agregado.
+
 ## Painel da Kellyne
 
 `/admin/jornada-chef` — configuração, pendências de revisão e consulta por
