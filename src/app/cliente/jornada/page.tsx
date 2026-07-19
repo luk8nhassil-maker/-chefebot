@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { ArrowLeft, Gift, Pizza, Sparkles } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, Gift, Pizza, Sparkles } from 'lucide-react'
 import ClientBottomNav from '@/components/ClientBottomNav'
 import PixPendenteBar, { usePixPendente } from '@/components/PixPendenteBar'
 import { CF_OPEN_CART_KEY } from '@/lib/pedidoAtivoCliente'
@@ -187,6 +187,17 @@ export default function JornadaDoChefPage() {
 
   return (
     <div style={{ background: cores.fundo, minHeight: '100dvh', fontFamily: 'Archivo, sans-serif', color: cores.navy, display: 'flex', flexDirection: 'column' }}>
+      <style>{`
+        @keyframes jcReservadoIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+        @keyframes jcReservadoGiftPop { 0% { transform: scale(0.6) rotate(-8deg); } 55% { transform: scale(1.12) rotate(6deg); } 100% { transform: scale(1) rotate(0deg); } }
+        @keyframes jcReservadoCheckIn { from { opacity: 0; transform: scale(0.7); } to { opacity: 1; transform: scale(1); } }
+        .jc-reservado-card { animation: jcReservadoIn 450ms ease-out both; }
+        .jc-reservado-gift { animation: jcReservadoGiftPop 550ms cubic-bezier(.34,1.56,.64,1) both; }
+        .jc-reservado-check { animation: jcReservadoCheckIn 350ms ease-out 300ms both; }
+        @media (prefers-reduced-motion: reduce) {
+          .jc-reservado-card, .jc-reservado-gift, .jc-reservado-check { animation: none; }
+        }
+      `}</style>
       <div style={{ background: cores.cardBg, borderBottom: `1px solid ${cores.cardBorda}`, padding: '12px 20px', display: 'flex', alignItems: 'center', gap: 12 }}>
         <a href="/cliente" aria-label="Voltar" style={{ color: cores.navy, display: 'flex' }}>
           <ArrowLeft size={20} />
@@ -294,10 +305,42 @@ export default function JornadaDoChefPage() {
             })}
 
             {jornada.recompensasReservadas.map((rec) => (
-              <div key={rec.recompensaId} style={{ background: cores.cardBg, border: `1px solid ${cores.cardBorda}`, borderRadius: 16, padding: 22 }}>
-                <p style={{ fontSize: 13, color: cores.textoSecundario, margin: 0 }}>
-                  <strong>{rec.produtoNome ?? 'Seu presente'}</strong> já está reservado no seu carrinho — é só finalizar o pedido.
+              <div
+                key={rec.recompensaId}
+                className="jc-reservado-card"
+                style={{ background: cores.cardBg, border: `1px solid ${cores.cardBorda}`, borderRadius: 16, padding: 20 }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span
+                    className="jc-reservado-gift"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: 36,
+                      height: 36,
+                      borderRadius: 10,
+                      background: 'color-mix(in srgb, var(--primary) 18%, transparent)',
+                      flexShrink: 0,
+                    }}
+                  >
+                    <Gift size={19} color={cores.amarelo} />
+                  </span>
+                  <p style={{ fontSize: 15, fontWeight: 800, margin: 0, flex: 1 }}>Seu presente está no carrinho 🎁</p>
+                  <span className="jc-reservado-check" style={{ display: 'flex', flexShrink: 0 }}>
+                    <CheckCircle2 size={18} color="var(--success-text)" />
+                  </span>
+                </div>
+
+                <p style={{ fontSize: 15, fontWeight: 700, margin: '10px 0 2px' }}>{rec.produtoNome ?? 'Seu presente'}</p>
+                <p style={{ fontSize: 13, color: cores.textoSecundario, margin: '0 0 8px' }}>
+                  Foi adicionado grátis. Finalize seu pedido para aproveitar.
                 </p>
+                <p style={{ fontSize: 12, color: cores.textoTerciario, margin: '0 0 16px' }}>
+                  Se o pedido for cancelado, seu presente volta para a Jornada.
+                </p>
+
+                <button onClick={abrirSacola} style={botaoPrimario}>Ver minha sacola</button>
               </div>
             ))}
 
