@@ -26,7 +26,8 @@ import { telefonesCorrespondem } from "@/lib/telefone";
 import { creditarPontosPedidoEntregue } from "@/lib/fidelidade";
 import { itensJornadaDoCarrinhoWhatsApp, processarConclusaoPedidoJornada } from "@/lib/jornadaChef";
 import type { BotStep } from "@/lib/bot";
-import { obterConfigEvolution } from "@/lib/evolutionApi";
+import { ehEventoQrAtualizado, extrairQrBase64, obterConfigEvolution } from "@/lib/evolutionApi";
+import { limparQrAtual, persistirQrAtual } from "@/lib/whatsappQrCache";
 import { enviarTextoWhatsApp } from "@/lib/whatsappMensagem";
 import { ehEcoPainel, validarMessageId } from "@/lib/conversaEcoPainel";
 import {
@@ -939,7 +940,34 @@ export async function POST(req: NextRequest) {
       const state = body.data?.state as string | undefined;
       const status: StatusConexao = state === "open" ? "connected" : state === "connecting" ? "connecting" : "disconnected";
       await salvarStatusConexao(status);
+      // "connecting" é o estado normal de QR pendente — só limpa o QR
+      // persistido quando a conexão sai desse estado (abriu ou fechou de
+      // vez), nunca durante o próprio pareamento.
+      if (status !== "connecting") {
+        const configConexao = obterConfigEvolution();
+        if (configConexao) await limparQrAtual(configConexao.instanceName);
+      }
       await log("info", `WhatsApp connection.update: ${state} -> ${status}`, "");
+      return NextResponse.json({ ok: true });
+    }
+
+    // A Evolution reentrega a rotação do QR (a cada ~20s em Baileys, padrão
+    // do protocolo) via este evento — nunca ignorar/descartar: é o que
+    // mantém o QR exibido ao admin sempre igual ao QR realmente válido na
+    // Evolution, em vez de um QR já expirado do lado do provider. Nunca
+    // registra o payload do QR em log, só metadados sanitizados.
+    if (ehEventoQrAtualizado(body.event)) {
+      const configQr = obterConfigEvolution();
+      const base64Qr = extrairQrBase64(body.data);
+      if (configQr && base64Qr) {
+        const registro = await persistirQrAtual(configQr.instanceName, base64Qr);
+        console.log(
+          "[WEBHOOK-QR] evento:", body.event,
+          "hash:", registro.hash,
+          "tamanho:", registro.size,
+          "geracao:", registro.generationId
+        );
+      }
       return NextResponse.json({ ok: true });
     }
 

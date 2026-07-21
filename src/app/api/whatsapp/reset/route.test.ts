@@ -18,6 +18,17 @@ vi.mock("@/lib/conexaoWhatsapp", () => ({
   salvarStatusConexao: vi.fn(async () => {}),
 }));
 
+const { qrStore, redisMock } = vi.hoisted(() => {
+  const qrStore = new Map<string, unknown>();
+  const redisMock = {
+    get: vi.fn(async (key: string) => (qrStore.has(key) ? qrStore.get(key) : null)),
+    set: vi.fn(async (key: string, value: unknown) => { qrStore.set(key, value); return "OK"; }),
+    del: vi.fn(async (key: string) => (qrStore.delete(key) ? 1 : 0)),
+  };
+  return { qrStore, redisMock };
+});
+vi.mock("@/lib/redis", () => ({ redis: redisMock }));
+
 vi.stubGlobal("fetch", vi.fn());
 
 import { POST } from "./route";
@@ -32,6 +43,7 @@ function requestComCookie(token?: string) {
 
 beforeEach(() => {
   vi.mocked(fetch).mockReset();
+  qrStore.clear();
   process.env.EVOLUTION_API_URL = "https://evolution.teste.com.br";
   process.env.EVOLUTION_API_KEY = "chave-de-teste";
 });
@@ -93,6 +105,7 @@ describe("POST /api/whatsapp/reset — fluxo seguro, nunca apaga instancia conec
   test("instancia existe mas desconectada: reconecta direto, sem create, sem logout/delete", async () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ instance: { state: "close" } }) } as Response) // connectionState
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({}) } as Response) // webhook (garante config antes de reconectar)
       .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ base64: "data:image/png;base64,QR" }) } as Response); // connect
 
     const res = await POST(requestComCookie("token-admin"));
@@ -102,7 +115,10 @@ describe("POST /api/whatsapp/reset — fluxo seguro, nunca apaga instancia conec
     expect(data.ok).toBe(true);
     expect(data.estado).toBe("qr_required");
     expect(data.qrcode.base64).toContain("QR");
-    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(typeof data.qrcode.generationId).toBe("number");
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(vi.mocked(fetch).mock.calls[1][0]).toContain("/webhook/set/");
+    expect(vi.mocked(fetch).mock.calls[2][0]).toContain("/instance/connect/");
     expect(vi.mocked(fetch).mock.calls.some(c => String(c[0]).includes("/instance/create"))).toBe(false);
     expect(vi.mocked(fetch).mock.calls.some(c => String(c[0]).includes("/instance/delete/"))).toBe(false);
     expect(vi.mocked(fetch).mock.calls.some(c => String(c[0]).includes("/instance/logout/"))).toBe(false);
@@ -176,6 +192,7 @@ describe("POST /api/whatsapp/reset — erro sanitizado, sem segredos", () => {
   test("QR nao gerado apos connect retorna 502", async () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ instance: { state: "close" } }) } as Response) // connectionState
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({}) } as Response) // webhook
       .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({}) } as Response); // connect sem QR
 
     const res = await POST(requestComCookie("token-admin"));
@@ -232,6 +249,7 @@ describe("POST /api/whatsapp/reset — nenhum marcador sensivel aparece nos logs
   test("fluxo de connect com QR: nenhum marcador de QR/pairingCode/corpo bruto aparece no log", async () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ instance: { state: "close" } }) } as Response) // connectionState
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({}) } as Response) // webhook
       .mockResolvedValueOnce({
         ok: true,
         status: 200,

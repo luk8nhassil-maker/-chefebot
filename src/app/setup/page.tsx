@@ -249,57 +249,100 @@ function Step4({ form, set, onNext, onBack, saving }: { form: Form; set: (f: Par
 type QrStatus = 'loading' | 'waiting' | 'connected' | 'error'
 
 function Step5WhatsApp({ onNext, onBack }: { onNext: () => void; onBack: () => void }) {
-  const [qr, setQr]           = useState<string | null>(null)
-  const [status, setStatus]   = useState<QrStatus>('loading')
-  const [elapsed, setElapsed] = useState(0)
-  const [gen, setGen]         = useState(0) // increment → triggers fresh fetch
+  const [qr, setQr]             = useState<string | null>(null)
+  const [status, setStatus]     = useState<QrStatus>('loading')
+  const [secondsLeft, setSecondsLeft] = useState(0)
+  const [timedOut, setTimedOut] = useState(false)
+  const [gen, setGen]           = useState(0) // increment → triggers fresh fetch
 
+  // Ciclo de vida do QR guiado pelo servidor: nunca um timer local
+  // desacoplado. `expiresAt`/`generationId` vêm de POST /api/whatsapp/qrcode
+  // e do polling de GET /api/whatsapp/state (que só lê — nunca chama
+  // /instance/connect). Se o QR expira ou é rotacionado do lado da
+  // Evolution, o polling detecta e troca a imagem sozinho.
   useEffect(() => {
-    let cancelled   = false
-    let timerId: ReturnType<typeof setInterval> | null = null
-    let ticks       = 0
+    let cancelled = false
+    let pollId: ReturnType<typeof setInterval> | null = null
+    let tickId: ReturnType<typeof setInterval> | null = null
+    let generationIdAtual: number | null = null
+    let expiresAtAtual: number | null = null
+    let autoFetching = false
+    let lastAutoFetchAt = 0
 
     setStatus('loading')
     setQr(null)
-    setElapsed(0)
+    setSecondsLeft(0)
+    setTimedOut(false)
 
-    fetch('/api/whatsapp/qrcode', { method: 'POST' })
-      .then(r => r.json())
-      .then((data: Record<string, unknown>) => {
-        if (cancelled) return
+    // Só chamado de callbacks (tick de 1s, aplicarQr) — nunca durante o
+    // render, para nunca ler relógio de dentro do corpo do componente.
+    function atualizarContagem() {
+      if (cancelled) return
+      if (expiresAtAtual === null) { setSecondsLeft(0); setTimedOut(false); return }
+      const agora = Date.now()
+      setSecondsLeft(Math.max(0, Math.round((expiresAtAtual - agora) / 1000)))
+      setTimedOut(agora >= expiresAtAtual)
+    }
+
+    function aplicarQr(raw: string, novoExpiresAt?: number, generationId?: number) {
+      if (cancelled) return
+      const src = raw.startsWith('data:') ? raw : `data:image/png;base64,${raw}`
+      setQr(src)
+      expiresAtAtual = typeof novoExpiresAt === 'number' ? novoExpiresAt : Date.now() + 30_000
+      generationIdAtual = typeof generationId === 'number' ? generationId : Date.now()
+      setStatus('waiting')
+      atualizarContagem()
+      if (!tickId) tickId = setInterval(atualizarContagem, 1000)
+    }
+
+    async function buscarQr(silencioso = false) {
+      try {
+        const res = await fetch('/api/whatsapp/qrcode', { method: 'POST' })
+        const data: Record<string, unknown> = await res.json()
         const raw = (data.base64 as string | undefined) ?? (data.code as string | undefined)
-        if (!raw) { setStatus('error'); return }
-        const src = raw.startsWith('data:') ? raw : `data:image/png;base64,${raw}`
-        setQr(src)
-        setStatus('waiting')
+        if (raw) aplicarQr(raw, data.expiresAt as number | undefined, data.generationId as number | undefined)
+        else if (!silencioso) setStatus('error')
+      } catch {
+        if (!silencioso) setStatus('error')
+      }
+    }
 
-        timerId = setInterval(() => {
-          if (cancelled) return
-          ticks += 3
-          setElapsed(ticks)
-          fetch('/api/whatsapp/state')
-            .then(r => r.json())
-            .then((d: Record<string, unknown>) => {
-              if (cancelled) return
-              const inst = d.instance as Record<string, unknown> | undefined
-              const state = (d.state as string | undefined) ?? (inst?.state as string | undefined)
-              if (state === 'open') {
-                setStatus('connected')
-                if (timerId) clearInterval(timerId)
-              }
-            })
-            .catch(() => {/* ignore poll errors silently */})
-        }, 3000)
-      })
-      .catch(() => { if (!cancelled) setStatus('error') })
+    async function poll() {
+      if (cancelled) return
+      try {
+        const d: Record<string, unknown> = await fetch('/api/whatsapp/state').then(r => r.json())
+        const inst = d.instance as Record<string, unknown> | undefined
+        const state = (d.state as string | undefined) ?? (inst?.state as string | undefined)
+        if (state === 'open') {
+          setStatus('connected')
+          if (pollId) { clearInterval(pollId); pollId = null }
+          if (tickId) { clearInterval(tickId); tickId = null }
+          return
+        }
+        const qrInfo = d.qr as { disponivel?: boolean; base64?: string; expiresAt?: number; generationId?: number } | undefined
+        if (qrInfo?.disponivel && qrInfo.base64) {
+          if (qrInfo.generationId !== generationIdAtual) aplicarQr(qrInfo.base64, qrInfo.expiresAt, qrInfo.generationId)
+        } else if (!autoFetching && Date.now() - lastAutoFetchAt > 10_000) {
+          // Sem QR válido e instância ainda desconectada — busca um novo.
+          // Nunca mais que uma vez a cada 10s (sem rotação contínua própria).
+          autoFetching = true
+          lastAutoFetchAt = Date.now()
+          try { await buscarQr(true) } finally { autoFetching = false }
+        }
+      } catch {/* ignore poll errors silently */}
+    }
+
+    buscarQr().then(() => {
+      if (!cancelled) pollId = setInterval(poll, 3000)
+    })
 
     return () => {
       cancelled = true
-      if (timerId) clearInterval(timerId)
+      if (pollId) clearInterval(pollId)
+      if (tickId) clearInterval(tickId)
     }
   }, [gen])
 
-  const timedOut = elapsed >= 60 && status === 'waiting'
 
   return (
     <div style={{ padding: '24px 20px', flex: 1, display: 'flex', flexDirection: 'column' }}>
@@ -349,8 +392,8 @@ function Step5WhatsApp({ onNext, onBack }: { onNext: () => void; onBack: () => v
             />
             {timedOut && (
               <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-                <span style={{ fontSize: 28 }}>⏱️</span>
-                <span style={{ fontSize: 13, color: TEXT, fontFamily: FONT, fontWeight: 700 }}>QR Code expirado</span>
+                <div style={{ width: 22, height: 22, borderRadius: '50%', border: `2px solid ${ACCENT}`, borderTopColor: 'transparent', animation: 'spin .8s linear infinite' }} />
+                <span style={{ fontSize: 13, color: TEXT, fontFamily: FONT, fontWeight: 700 }}>Gerando um QR atualizado...</span>
               </div>
             )}
           </div>
@@ -359,7 +402,7 @@ function Step5WhatsApp({ onNext, onBack }: { onNext: () => void; onBack: () => v
         {status === 'waiting' && !timedOut && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <div style={{ width: 8, height: 8, borderRadius: '50%', background: ACCENT, animation: 'pulse 1.5s ease-in-out infinite' }} />
-            <span style={{ fontSize: 13, color: MUTED, fontFamily: FONT }}>Aguardando conexão… {elapsed > 0 ? `${elapsed}s` : ''}</span>
+            <span style={{ fontSize: 13, color: MUTED, fontFamily: FONT }}>Aguardando conexão… {secondsLeft}s</span>
           </div>
         )}
       </div>

@@ -194,7 +194,7 @@ export default function AdminPage() {
   const [waStatus, setWaStatus] = useState<'unknown' | 'connected' | 'disconnected'>('unknown')
   const [waQrBase64, setWaQrBase64] = useState<string | null>(null)
   const [waShowQr, setWaShowQr] = useState(false)
-  const [waTimer, setWaTimer] = useState(60)
+  const [waTimer, setWaTimer] = useState(0)
   const [waExpired, setWaExpired] = useState(false)
   const [waLoadingQr, setWaLoadingQr] = useState(false)
   const [waQrError, setWaQrError] = useState<string | null>(null)
@@ -212,8 +212,12 @@ export default function AdminPage() {
   const inputLancheRef = useRef<HTMLInputElement>(null)
   const inputBebidaRef = useRef<HTMLInputElement>(null)
   const inputSucoRef = useRef<HTMLInputElement>(null)
-  const waTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const waPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const waTickRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const waGenerationIdRef = useRef<number | null>(null)
+  const waExpiresAtRef = useRef<number | null>(null)
+  const waAutoFetchingRef = useRef(false)
+  const waLastAutoFetchAtRef = useRef(0)
   const mesAtual = new Date().toISOString().slice(0, 7)
   const mesLabel = new Date().toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
   const is24h = config.horaAbertura === 0 && config.horaFechamento === 24
@@ -251,13 +255,15 @@ export default function AdminPage() {
         setSenhas(s); setNomes(n)
       }
       setLoading(false)
-      // Verifica status do WhatsApp ao carregar e tenta exibir QR se desconectado
+      // Verifica status do WhatsApp ao carregar e tenta exibir QR se desconectado.
+      // O polling (garantirPollingAtivo) começa junto — é ele quem detecta
+      // rotação/expiração do QR depois, nunca precisa de outro mount para isso.
       fetch('/api/whatsapp/state').then(r => r.json()).then(d => {
         const state = d?.instance?.state
         const connected = state === 'open'
         setWaStatus(connected ? 'connected' : 'disconnected')
-        if (!connected) tryAutoQr()
-      }).catch(() => { setWaStatus('disconnected'); tryAutoQr() })
+        if (!connected) { garantirPollingAtivo(); fetchQrCode(true) }
+      }).catch(() => { setWaStatus('disconnected'); garantirPollingAtivo(); fetchQrCode(true) })
       carregarMercadoPago()
     }).catch(err => {
       console.error('Falha ao carregar dados do dashboard:', err)
@@ -276,72 +282,108 @@ export default function AdminPage() {
 
   useEffect(() => {
     return () => {
-      if (waTimerRef.current) clearInterval(waTimerRef.current)
       if (waPollRef.current) clearInterval(waPollRef.current)
+      if (waTickRef.current) clearInterval(waTickRef.current)
     }
   }, [])
 
-  const fetchWaStatus = async () => {
-    try {
-      const d = await fetch('/api/whatsapp/state').then(r => r.json())
-      const state = d?.instance?.state
-      if (state === 'open') {
-        setWaStatus('connected')
-        setWaShowQr(false)
-        setWaQrBase64(null)
-        if (waPollRef.current) { clearInterval(waPollRef.current); waPollRef.current = null }
-        if (waTimerRef.current) { clearInterval(waTimerRef.current); waTimerRef.current = null }
-      } else {
-        setWaStatus('disconnected')
-      }
-    } catch { setWaStatus('disconnected') }
+  const pararPollingEQrTick = () => {
+    if (waPollRef.current) { clearInterval(waPollRef.current); waPollRef.current = null }
+    if (waTickRef.current) { clearInterval(waTickRef.current); waTickRef.current = null }
   }
 
-  const startQrTimer = (base64: string) => {
+  const marcarConectado = () => {
+    setWaStatus('connected')
+    setWaShowQr(false)
+    setWaQrBase64(null)
+    waExpiresAtRef.current = null
+    waGenerationIdRef.current = null
+    setWaTimer(0)
+    setWaExpired(false)
+    pararPollingEQrTick()
+  }
+
+  // Recalcula o timer/expirado a partir do expiresAt do servidor guardado em
+  // ref — chamado só de callbacks (tick de 1s, aplicarQr), nunca durante o
+  // render, para nunca ler relógio de dentro do corpo do componente.
+  const atualizarContagemQr = () => {
+    const exp = waExpiresAtRef.current
+    if (exp === null) { setWaTimer(0); setWaExpired(false); return }
+    const agora = Date.now()
+    setWaTimer(Math.max(0, Math.round((exp - agora) / 1000)))
+    setWaExpired(agora >= exp)
+  }
+
+  // Aplica um QR recebido do servidor (fetchQrCode, reset ou polling de
+  // state) — sempre com generatedAt/expiresAt/generationId vindos do
+  // backend, nunca um timer local desacoplado. Garante polling (para
+  // detectar "open" e rotação/expiração real) e o tick de 1s (só para a
+  // contagem regressiva visual, não decide nada sozinho).
+  const aplicarQr = (base64: string, expiresAt?: number, generationId?: number) => {
     setWaQrBase64(base64)
     setWaShowQr(true)
-    setWaTimer(60)
-    setWaExpired(false)
-    if (waTimerRef.current) clearInterval(waTimerRef.current)
-    let t = 60
-    waTimerRef.current = setInterval(() => {
-      t -= 1
-      setWaTimer(t)
-      if (t <= 0) { clearInterval(waTimerRef.current!); waTimerRef.current = null; setWaExpired(true) }
-    }, 1000)
-    if (waPollRef.current) clearInterval(waPollRef.current)
+    waExpiresAtRef.current = typeof expiresAt === 'number' ? expiresAt : Date.now() + 30_000
+    waGenerationIdRef.current = typeof generationId === 'number' ? generationId : Date.now()
+    atualizarContagemQr()
+    garantirPollingAtivo()
+    if (!waTickRef.current) waTickRef.current = setInterval(atualizarContagemQr, 1000)
+  }
+
+  const garantirPollingAtivo = () => {
+    if (waPollRef.current) return
     waPollRef.current = setInterval(fetchWaStatus, 3000)
   }
 
-  // Tenta exibir QR atual sem reset (usado na abertura automática da tela)
-  const tryAutoQr = async () => {
-    try {
-      const res = await fetch('/api/whatsapp/qrcode', { method: 'POST' })
-      const d = await res.json()
-      const base64 = d?.base64 || d?.qrcode?.base64 || null
-      if (base64) startQrTimer(base64)
-    } catch {}
-  }
-
-  // Busca o QR já existente na instância (sem reset, sem Redis)
-  const fetchQrCode = async () => {
-    setWaLoadingQr(true)
-    setWaExpired(false)
-    setWaQrError(null)
+  // Busca o QR já existente na instância (sem reset). `silencioso` é usado
+  // pela abertura automática da tela e pelo auto-heal do polling — nunca
+  // mostra spinner/erro nesses casos, só aplica o QR se vier um.
+  const fetchQrCode = async (silencioso = false) => {
+    if (!silencioso) { setWaLoadingQr(true); setWaQrError(null) }
     try {
       const res = await fetch('/api/whatsapp/qrcode', { method: 'POST' })
       const d = await res.json()
       const base64 = d?.base64 || d?.qrcode?.base64 || null
       if (base64) {
-        startQrTimer(base64)
-      } else {
+        aplicarQr(base64, d?.expiresAt, d?.generationId)
+        if (!silencioso) setWaQrError(null)
+      } else if (!silencioso) {
         setWaQrError(d?.error || 'QR code não disponível. Tente novamente em instantes.')
       }
     } catch {
-      setWaQrError('Erro de rede ao buscar QR code.')
+      if (!silencioso) setWaQrError('Erro de rede ao buscar QR code.')
     } finally {
-      setWaLoadingQr(false)
+      if (!silencioso) setWaLoadingQr(false)
     }
+  }
+
+  // Polling de estado (3s, só GET — nunca chama /instance/connect). Detecta
+  // conexão aberta, e detecta quando o QR exibido não é mais o QR válido no
+  // servidor (generationId mudou) para trocar a imagem sem esperar o admin
+  // clicar em nada. Se não houver QR válido nenhum e a instância continuar
+  // desconectada, delega para fetchQrCode — nunca chama a Evolution direto
+  // daqui, e nunca mais que uma vez a cada 10s (evita rotação contínua
+  // causada pelo próprio ChefeBot).
+  const fetchWaStatus = async () => {
+    try {
+      const d = await fetch('/api/whatsapp/state').then(r => r.json())
+      const state = d?.instance?.state
+      if (state === 'open') {
+        marcarConectado()
+        return
+      }
+      setWaStatus('disconnected')
+      const qr = d?.qr as { disponivel?: boolean; base64?: string; expiresAt?: number; generationId?: number } | undefined
+      if (qr?.disponivel && qr.base64) {
+        if (qr.generationId !== waGenerationIdRef.current) {
+          aplicarQr(qr.base64, qr.expiresAt, qr.generationId)
+          setWaQrError(null)
+        }
+      } else if (!waAutoFetchingRef.current && Date.now() - waLastAutoFetchAtRef.current > 10_000) {
+        waAutoFetchingRef.current = true
+        waLastAutoFetchAtRef.current = Date.now()
+        try { await fetchQrCode(true) } finally { waAutoFetchingRef.current = false }
+      }
+    } catch { setWaStatus('disconnected') }
   }
 
   // Reconecta com segurança na Evolution API — nunca apaga uma instância já
@@ -355,14 +397,10 @@ export default function AdminPage() {
       const d = await res.json()
       const resultado = interpretarRespostaReset(d)
       if (resultado.tipo === 'qr') {
-        startQrTimer(resultado.base64)
+        aplicarQr(resultado.base64, resultado.expiresAt, resultado.generationId)
       } else if (resultado.tipo === 'connected') {
         // Já estava conectado — reconectar não apaga nada, não é erro.
-        setWaStatus('connected')
-        setWaShowQr(false)
-        setWaQrBase64(null)
-        if (waPollRef.current) { clearInterval(waPollRef.current); waPollRef.current = null }
-        if (waTimerRef.current) { clearInterval(waTimerRef.current); waTimerRef.current = null }
+        marcarConectado()
       } else {
         setWaQrError(resultado.mensagem)
       }
@@ -637,7 +675,7 @@ export default function AdminPage() {
                     <p style={{ color: 'var(--foreground-secondary)', fontSize: 12, margin: '0 0 12px', lineHeight: 1.5 }}>
                       Nenhum WhatsApp está conectado. Escaneie o QR Code para ativar o atendimento automático.
                     </p>
-                    <button onClick={fetchQrCode} disabled={waLoadingQr || waResetting} style={{ width: '100%', background: 'var(--whatsapp)', border: 'none', borderRadius: 10, padding: '14px', color: 'var(--whatsapp-foreground)', fontSize: 14, fontWeight: 700, cursor: (waLoadingQr || waResetting) ? 'not-allowed' : 'pointer', opacity: (waLoadingQr || waResetting) ? 0.7 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                    <button onClick={() => fetchQrCode()} disabled={waLoadingQr || waResetting} style={{ width: '100%', background: 'var(--whatsapp)', border: 'none', borderRadius: 10, padding: '14px', color: 'var(--whatsapp-foreground)', fontSize: 14, fontWeight: 700, cursor: (waLoadingQr || waResetting) ? 'not-allowed' : 'pointer', opacity: (waLoadingQr || waResetting) ? 0.7 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
                       {waLoadingQr ? 'Gerando QR Code...' : <><Camera size={16} aria-hidden="true" /> Escanear QR Code</>}
                     </button>
                     {waQrError && (
@@ -669,17 +707,19 @@ export default function AdminPage() {
                     )}
                     {waExpired ? (
                       <div style={{ textAlign: 'center', marginBottom: 12 }}>
-                        <p style={{ color: 'var(--danger)', fontSize: 13, fontWeight: 600, margin: '0 0 12px' }}>QR Code expirado.</p>
-                        <button onClick={fetchQrCode} disabled={waLoadingQr} style={{ background: 'var(--whatsapp)', border: 'none', borderRadius: 10, padding: '12px 24px', color: 'var(--whatsapp-foreground)', fontSize: 13, fontWeight: 700, cursor: waLoadingQr ? 'not-allowed' : 'pointer', opacity: waLoadingQr ? 0.7 : 1, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                          {waLoadingQr ? 'Gerando...' : <><RefreshCw size={15} aria-hidden="true" /> Gerar novo QR Code</>}
+                        <div style={{ width: 18, height: 18, margin: '0 auto 10px', borderRadius: '50%', border: '2px solid var(--primary)', borderTopColor: 'transparent', animation: 'spin .8s linear infinite' }} />
+                        <p style={{ color: 'var(--foreground-secondary)', fontSize: 13, fontWeight: 600, margin: '0 0 12px' }}>Gerando um QR atualizado...</p>
+                        <button onClick={() => fetchQrCode()} disabled={waLoadingQr} style={{ background: 'var(--whatsapp)', border: 'none', borderRadius: 10, padding: '10px 20px', color: 'var(--whatsapp-foreground)', fontSize: 12.5, fontWeight: 700, cursor: waLoadingQr ? 'not-allowed' : 'pointer', opacity: waLoadingQr ? 0.7 : 1, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                          {waLoadingQr ? 'Gerando...' : <><RefreshCw size={14} aria-hidden="true" /> Forçar agora</>}
                         </button>
+                        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
                       </div>
                     ) : (
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
                         <span style={{ color: 'var(--foreground-secondary)', fontSize: 13 }}>
                           Expira em: <strong style={{ color: waTimer < 15 ? 'var(--danger)' : 'var(--primary)' }}>{waTimer}s</strong>
                         </span>
-                        <button onClick={fetchQrCode} disabled={waLoadingQr} style={{ background: 'transparent', border: '1px solid var(--surface-secondary)', borderRadius: 8, padding: '6px 12px', color: 'var(--foreground-secondary)', fontSize: 11, fontWeight: 700, cursor: waLoadingQr ? 'not-allowed' : 'pointer' }}>
+                        <button onClick={() => fetchQrCode()} disabled={waLoadingQr} style={{ background: 'transparent', border: '1px solid var(--surface-secondary)', borderRadius: 8, padding: '6px 12px', color: 'var(--foreground-secondary)', fontSize: 11, fontWeight: 700, cursor: waLoadingQr ? 'not-allowed' : 'pointer' }}>
                           {waLoadingQr ? '...' : 'Novo QR'}
                         </button>
                       </div>

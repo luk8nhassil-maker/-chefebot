@@ -33,4 +33,16 @@ describe("interpretarRespostaReset — { ok: true, estado: 'connected' } sem QR 
     const resultado = interpretarRespostaReset(undefined);
     expect(resultado.tipo).toBe("erro");
   });
+
+  test("qrcode com metadados de geração: repassa generatedAt/expiresAt/generationId", () => {
+    const resultado = interpretarRespostaReset({
+      ok: true,
+      estado: "qr_required",
+      qrcode: { base64: "ABC123", generatedAt: 1000, expiresAt: 31000, generationId: 1000 },
+    });
+    expect(resultado.tipo).toBe("qr");
+    expect((resultado as { generatedAt?: number }).generatedAt).toBe(1000);
+    expect((resultado as { expiresAt?: number }).expiresAt).toBe(31000);
+    expect((resultado as { generationId?: number }).generationId).toBe(1000);
+  });
 });
