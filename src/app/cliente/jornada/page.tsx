@@ -6,6 +6,7 @@ import ClientBottomNav from '@/components/ClientBottomNav'
 import PixPendenteBar, { usePixPendente } from '@/components/PixPendenteBar'
 import { CF_OPEN_CART_KEY } from '@/lib/pedidoAtivoCliente'
 import { fetchCliente } from '@/lib/clienteSessaoFront'
+import { lerReferenciaRecompensa, gravarReferenciaRecompensa, reconciliarReservaComReferencia } from '@/lib/recompensaJornadaCarrinho'
 
 type PizzaRecompensa = { tamanho: string; sabores: string[] }
 type ItemComposicao = { item: { produtoNome: string }; quantidade: number }
@@ -20,7 +21,7 @@ type RecompensaAberta = {
   pizza?: PizzaRecompensa
   composicao?: ItemComposicao[]
 }
-type RecompensaReservada = { recompensaId: string; tipo: string; produtoNome: string | null; validaAte?: string; pizza?: PizzaRecompensa; composicao?: ItemComposicao[] }
+type RecompensaReservada = { recompensaId: string; tipo: string; produtoNome: string | null; validaAte?: string; pizza?: PizzaRecompensa; composicao?: ItemComposicao[]; reservaPedidoId?: string }
 
 type Jornada = {
   ativo: boolean
@@ -105,6 +106,13 @@ export default function JornadaDoChefPage() {
   // os permitidos configurados pela Kellyne (recompensa.pizza.sabores).
   const [escolhendoSaborPara, setEscolhendoSaborPara] = useState<string | null>(null)
   const [saborSelecionado, setSaborSelecionado] = useState('')
+  // Aviso da reconciliação reserva ↔ carrinho (nunca manter um falso
+  // "presente está no carrinho" quando o item não puder ser rematerializado).
+  const [avisoReserva, setAvisoReserva] = useState('')
+  // O card "presente está no carrinho" só renderiza para uma reserva
+  // CONFIRMADA pela reconciliação (referência local presente) — nunca só
+  // porque o servidor diz "reservada".
+  const [reservaConfirmadaId, setReservaConfirmadaId] = useState<string | null>(null)
 
   async function carregar() {
     setErro('')
@@ -120,6 +128,53 @@ export default function JornadaDoChefPage() {
   }
 
   useEffect(() => { carregar() }, [])
+
+  // Reconciliação da reserva do servidor com o carrinho real do navegador:
+  // o card "presente está no carrinho" só pode existir se a referência local
+  // que rematerializa o item na sacola também existir. Se ela se perdeu
+  // (navegador fechado/reaberto, outra aba):
+  // - presente sem escolha (bebida/composição) → reconstrói a referência com
+  //   segurança (o cardápio volta a injetar o item ao abrir a sacola);
+  // - pizza (o sabor escolhido se perdeu junto) → libera a reserva no
+  //   servidor e devolve a recompensa para "disponivel", com aviso claro —
+  //   nunca inventamos uma escolha que o cliente não fez, nunca consumimos a
+  //   recompensa.
+  useEffect(() => {
+    if (!jornada?.ativo) return
+    const reservada = jornada.recompensasReservadas.find((r) => !r.reservaPedidoId)
+    if (!reservada) return
+    const decisao = reconciliarReservaComReferencia(reservada, lerReferenciaRecompensa(localStorage))
+    if (decisao.acao === 'manter') {
+      setReservaConfirmadaId(reservada.recompensaId)
+      return
+    }
+    if (decisao.acao === 'reconstruir' && gravarReferenciaRecompensa(localStorage, decisao.referencia)) {
+      setReservaConfirmadaId(reservada.recompensaId)
+      return
+    }
+    // "liberar" (pizza sem o sabor escolhido) ou storage bloqueado: devolve a
+    // recompensa para "disponivel" no servidor. Nunca consome/perde o prêmio.
+    ;(async () => {
+      try {
+        const res = await fetchCliente('/api/cliente/jornada-chef/cancelar-reserva', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ recompensaId: reservada.recompensaId }),
+        })
+        if (res.ok) {
+          setAvisoReserva(
+            reservada.tipo === 'pizza'
+              ? 'Seu presente voltou para a Jornada — escolha o sabor de novo para usá-lo no próximo pedido.'
+              : 'Seu presente voltou para a Jornada — toque em "Usar no próximo pedido" para colocá-lo na sacola de novo.'
+          )
+          await carregar()
+          return
+        }
+      } catch {}
+      setAvisoReserva('Não conseguimos confirmar seu presente na sacola agora. Atualize a página para tentar de novo.')
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jornada])
 
   async function abrirCaixa(recompensaId: string) {
     setAbrindo(true)
@@ -156,19 +211,34 @@ export default function JornadaDoChefPage() {
       })
       if (res.ok) {
         const recompensa = jornada?.recompensasDisponiveis.find((r) => r.recompensaId === recompensaId)
-        try {
-          // Só recompensaId + a escolha permitida (sabor) são guardados —
-          // nome, preço e demais dados do presente nunca são fonte de
-          // verdade aqui; o carrinho busca os dados reais na API autenticada
-          // (rule 4).
-          sessionStorage.setItem('cf_recompensa_jornada', JSON.stringify({
-            recompensaId,
-            ...(sabor ? { escolha: { sabor } } : {}),
-            produtoNome: recompensa?.produtoNome ?? 'Presente da Jornada do Chef',
-            validaAte: recompensa?.validaAte,
-          }))
-          sessionStorage.setItem(CF_OPEN_CART_KEY, '1')
-        } catch {}
+        // Só recompensaId + a escolha permitida (sabor) são guardados — nome,
+        // preço e demais dados do presente nunca são fonte de verdade aqui; o
+        // carrinho materializa o item só depois de confirmar a reserva na API
+        // autenticada (rule 4). A referência vive em localStorage para o item
+        // sobreviver a fechar/reabrir o navegador enquanto a reserva valer.
+        const gravou = gravarReferenciaRecompensa(localStorage, {
+          recompensaId,
+          ...(sabor ? { escolha: { sabor } } : {}),
+          produtoNome: recompensa?.produtoNome ?? 'Presente da Jornada do Chef',
+          ...(recompensa?.validaAte ? { validaAte: recompensa.validaAte } : {}),
+        })
+        if (!gravou) {
+          // Sem a referência o item nunca chegaria à sacola — desfaz a
+          // reserva na hora para não nascer um falso "está no carrinho".
+          try {
+            await fetchCliente('/api/cliente/jornada-chef/cancelar-reserva', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ recompensaId }),
+            })
+          } catch {}
+          setAvisoReserva('Seu navegador bloqueou o armazenamento da sacola — não foi possível colocar o presente no carrinho. Seu presente continua disponível na Jornada.')
+          await carregar()
+          setReservando(null)
+          setEscolhendoSaborPara(null)
+          return
+        }
+        try { sessionStorage.setItem(CF_OPEN_CART_KEY, '1') } catch {}
         window.location.href = '/pedido'
         return
       }
@@ -304,7 +374,16 @@ export default function JornadaDoChefPage() {
               )
             })}
 
-            {jornada.recompensasReservadas.map((rec) => (
+            {avisoReserva && (
+              <div style={{ background: cores.cardBg, border: `1px solid ${cores.cardBorda}`, borderRadius: 14, padding: 14 }}>
+                <p style={{ fontSize: 13, color: cores.textoSecundario, margin: 0 }}>{avisoReserva}</p>
+              </div>
+            )}
+
+            {/* Só reservas CONFIRMADAS pela reconciliação (referência local
+                presente ou já vinculadas a um pedido real) — o card "está no
+                carrinho" nunca aparece com a sacola de fato vazia. */}
+            {jornada.recompensasReservadas.filter((rec) => rec.reservaPedidoId || rec.recompensaId === reservaConfirmadaId).map((rec) => (
               <div
                 key={rec.recompensaId}
                 className="jc-reservado-card"

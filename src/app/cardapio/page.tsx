@@ -13,6 +13,7 @@ import PixPendenteBar, { usePixPendente, PIX_PENDENTE_BAR_HEIGHT_PX } from "@/co
 import PixPagamentoCard from "./PixPagamentoCard";
 import LayoutDebugPanel from "./LayoutDebugPanel";
 import { fetchCliente } from "@/lib/clienteSessaoFront";
+import { lerReferenciaRecompensa, limparReferenciaRecompensa, migrarReferenciaLegada } from "@/lib/recompensaJornadaCarrinho";
 
 // Ícones de categoria da home (menu/navegação) — lucide-react, sem emoji.
 // Mantidos separados de ICONS (que continua usando emoji para os itens
@@ -801,62 +802,61 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   }, []);
 
   // Presente da Jornada do Chef reservado na Área do Cliente (/cliente/jornada),
-  // repassado via sessionStorage — mesmo padrão do resgate de pontos acima.
-  // sessionStorage carrega só uma REFERÊNCIA temporária (recompensaId +
-  // escolha de sabor) — nunca é a fonte de verdade do produto/preço. O nome
-  // exibido no carrinho vem da resposta autenticada de /api/cliente/jornada-chef
-  // (rule 4); se a busca falhar, cai para o rótulo local só como legenda,
-  // nunca para decidir o que o servidor vai cobrar (isso é sempre 0 e sempre
-  // reconstruído no servidor a partir do snapshot da recompensa).
-  // Injeta no carrinho UMA vez (a chave é removida logo em seguida, então
-  // remover o item do carrinho depois nunca o reinjeta sozinho — sem isso
-  // duplicaria o presente a cada remontagem da página).
+  // repassado via referência local persistente (localStorage — ver
+  // recompensaJornadaCarrinho.ts). A referência carrega só recompensaId +
+  // escolha de sabor — nunca é a fonte de verdade do produto/preço (o servidor
+  // sempre rematerializa do snapshot da recompensa no POST /api/pedido-app).
+  //
+  // O item grátis só entra no carrinho DEPOIS de a API autenticada confirmar
+  // que a reserva continua de pé no servidor — nunca um item-presente
+  // "fantasma". Se o servidor disser que a reserva não existe mais
+  // (resgatada/cancelada/expirada), a referência é limpa e nada é injetado.
+  // A referência NÃO é consumida na injeção: ela vive enquanto a reserva
+  // viver, para o item ser rematerializado mesmo depois de fechar/reabrir o
+  // navegador (o rascunho da sacola é por aba). Duplicação é impossível: a
+  // injeção é idempotente por recompensaJornadaId, e remover o item da sacola
+  // limpa a referência junto (nunca reinjeta sozinho).
   useEffect(() => {
-    const raw = sessionStorage.getItem("cf_recompensa_jornada");
-    sessionStorage.removeItem("cf_recompensa_jornada");
-    if (!raw) return;
-    let parsed: { recompensaId?: string; escolha?: { sabor?: string }; produtoNome?: string; validaAte?: string } | null = null;
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      return;
-    }
-    if (!parsed?.recompensaId) return;
-    if (parsed.validaAte && new Date(parsed.validaAte).getTime() <= Date.now()) return;
-    const recompensaId = parsed.recompensaId;
-    const escolha = parsed.escolha;
+    migrarReferenciaLegada(sessionStorage, localStorage);
+    const referencia = lerReferenciaRecompensa(localStorage);
+    if (!referencia) return;
+    const recompensaId = referencia.recompensaId;
+    const escolha = referencia.escolha;
 
     (async () => {
-      let nomeExibicao = parsed?.produtoNome || "Presente da Jornada do Chef";
-      let detalheExibicao = escolha?.sabor || "";
       try {
         const res = await fetchCliente("/api/cliente/jornada-chef", { cache: "no-store" });
-        if (res.ok) {
-          const data = await res.json();
-          const reservada = (data?.recompensasReservadas || []).find((r: { recompensaId: string }) => r.recompensaId === recompensaId);
-          if (reservada?.produtoNome) nomeExibicao = reservada.produtoNome;
-          if (reservada?.tipo === "pizza" && reservada.pizza) {
-            nomeExibicao = `Pizza ${reservada.pizza.tamanho}`;
-            detalheExibicao = escolha?.sabor || "";
-          }
+        // Sem sessão/erro transitório: não injeta nem apaga a referência — a
+        // próxima carga tenta de novo e o servidor revalida tudo no POST.
+        if (!res.ok) return;
+        const data = await res.json();
+        const reservada = (data?.recompensasReservadas || []).find(
+          (r: { recompensaId: string; reservaPedidoId?: string }) => r.recompensaId === recompensaId && !r.reservaPedidoId
+        );
+        if (!reservada) {
+          limparReferenciaRecompensa(localStorage);
+          return;
         }
+        let nomeExibicao = reservada.produtoNome || referencia.produtoNome || "Presente da Jornada do Chef";
+        const detalheExibicao = escolha?.sabor || "";
+        if (reservada.tipo === "pizza" && reservada.pizza) nomeExibicao = `Pizza ${reservada.pizza.tamanho}`;
+        setCart((atual) => {
+          if (atual.some((it) => it.recompensaJornadaId === recompensaId)) return atual;
+          return [
+            ...atual,
+            {
+              emoji: "🎁",
+              kind: "simple" as const,
+              name: nomeExibicao,
+              detail: detalheExibicao,
+              price: 0,
+              qty: 1,
+              recompensaJornadaId: recompensaId,
+              ...(escolha ? { recompensaEscolha: escolha } : {}),
+            },
+          ];
+        });
       } catch {}
-      setCart((atual) => {
-        if (atual.some((it) => it.recompensaJornadaId === recompensaId)) return atual;
-        return [
-          ...atual,
-          {
-            emoji: "🎁",
-            kind: "simple" as const,
-            name: nomeExibicao,
-            detail: detalheExibicao,
-            price: 0,
-            qty: 1,
-            recompensaJornadaId: recompensaId,
-            ...(escolha ? { recompensaEscolha: escolha } : {}),
-          },
-        ];
-      });
     })();
   }, []);
 
@@ -1288,9 +1288,12 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   function rmItem(idx: number) {
     const removido = cart[idx];
     // Remover o presente da Jornada do Chef do carrinho NUNCA perde o prêmio —
-    // só libera a reserva no servidor (volta a ficar "disponivel" no perfil).
+    // só libera a reserva no servidor (volta a ficar "disponivel" no perfil)
+    // e limpa a referência local (sem isso, a injeção validada reporia o item
+    // na próxima carga enquanto a reserva existisse).
     // Melhor esforço: falha aqui não trava a remoção do item do carrinho.
     if (removido?.recompensaJornadaId) {
+      limparReferenciaRecompensa(localStorage);
       fetchCliente("/api/cliente/jornada-chef/cancelar-reserva", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1543,7 +1546,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     try {
       const r = await fetch("/api/pedido-app", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const data = await r.json();
-      if (data.ok) { try { localStorage.setItem("cf_nome", nome.trim()); if (telefone.trim()) localStorage.setItem("cf_tel", telefone.trim()); } catch {} try { sessionStorage.removeItem("cf_draft"); } catch {} try { sessionStorage.removeItem("cf_resgate_pontos"); } catch {} setResgatePontos(null); try { const resumo = { id: String(data.pedidoId), numero: typeof data.numero === "number" ? data.numero : undefined, ts: Date.now(), statusToken: typeof data.statusToken === "string" ? data.statusToken : undefined }; localStorage.setItem("cf_ultimo_pedido", JSON.stringify(resumo)); } catch {} setStatusPedidoConfirmado("novo"); setStatusPixCliente(payment?.toLowerCase().includes("pix") ? "aguardando_pix" : "nao_pix"); setPedidoConfirmado({ id: data.pedidoId, numero: data.numero, total: data.total, ...(typeof data.statusToken === "string" ? { statusToken: data.statusToken } : {}), ...(data.pix ? { pix: data.pix } : {}) }); if (payment?.toLowerCase().includes("pix") && typeof data.statusToken === "string") { salvarReferenciaPixPendente(localStorage, { pedidoId: String(data.pedidoId), statusToken: data.statusToken, numero: typeof data.numero === "number" ? data.numero : undefined }); } go("sc-done"); } else { if (resgatePontos && typeof data.error === "string" && /resgate/i.test(data.error)) { try { sessionStorage.removeItem("cf_resgate_pontos"); } catch {} setResgatePontos(null); } showToast(typeof data.error === "string" ? data.error : "Erro ao enviar. Tente de novo."); }
+      if (data.ok) { try { localStorage.setItem("cf_nome", nome.trim()); if (telefone.trim()) localStorage.setItem("cf_tel", telefone.trim()); } catch {} try { sessionStorage.removeItem("cf_draft"); } catch {} if (itemRecompensaJornada) limparReferenciaRecompensa(localStorage); try { sessionStorage.removeItem("cf_resgate_pontos"); } catch {} setResgatePontos(null); try { const resumo = { id: String(data.pedidoId), numero: typeof data.numero === "number" ? data.numero : undefined, ts: Date.now(), statusToken: typeof data.statusToken === "string" ? data.statusToken : undefined }; localStorage.setItem("cf_ultimo_pedido", JSON.stringify(resumo)); } catch {} setStatusPedidoConfirmado("novo"); setStatusPixCliente(payment?.toLowerCase().includes("pix") ? "aguardando_pix" : "nao_pix"); setPedidoConfirmado({ id: data.pedidoId, numero: data.numero, total: data.total, ...(typeof data.statusToken === "string" ? { statusToken: data.statusToken } : {}), ...(data.pix ? { pix: data.pix } : {}) }); if (payment?.toLowerCase().includes("pix") && typeof data.statusToken === "string") { salvarReferenciaPixPendente(localStorage, { pedidoId: String(data.pedidoId), statusToken: data.statusToken, numero: typeof data.numero === "number" ? data.numero : undefined }); } go("sc-done"); } else { if (resgatePontos && typeof data.error === "string" && /resgate/i.test(data.error)) { try { sessionStorage.removeItem("cf_resgate_pontos"); } catch {} setResgatePontos(null); } showToast(typeof data.error === "string" ? data.error : "Erro ao enviar. Tente de novo."); }
     } catch { showToast("Sem conexão. Tente de novo."); } finally { setSending(false); }
   }
   function resetAll() { setCart([]); resetBuild(); setDelType(null); setBairroIdx(""); setRua(""); setNumero(""); setReferencia(""); setPayment(null); setTroco(""); setTrocoOpcao(null); setPaymentModal(null); setMistoPixInput(""); setMistoDinheiroInput(""); setErroMisto(""); setObservacao(""); setErroNome(""); setErroTelefone(""); setErroPagamento(""); setErroEntrega(""); setErroTroco(""); setPedidoConfirmado(null); setStatusPedidoConfirmado("novo"); setStatusPixCliente("aguardando_pix"); setRestoredDraft(false); setEditandoIdentidade(false); setLastAddedKind(null); setUpsellBebidaIgnorado(false); try { sessionStorage.removeItem("cf_draft"); } catch {} go("sc-start"); }

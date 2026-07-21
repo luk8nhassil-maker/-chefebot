@@ -347,3 +347,52 @@ describe("PixPagamentoCard — card premium do Pix dinâmico (QR, copia-e-cola, 
     expect(fonte).toContain("@media(prefers-reduced-motion:reduce)");
   });
 });
+
+describe("/cardapio — materialização do presente da Jornada do Chef na sacola", () => {
+  const blocoInjecao = fonte.slice(
+    fonte.indexOf("migrarReferenciaLegada(sessionStorage, localStorage)"),
+    fonte.indexOf("const [size, setSize]")
+  );
+
+  test("item grátis só entra na sacola DEPOIS de a API autenticada confirmar a reserva no servidor", () => {
+    expect(blocoInjecao).toContain('fetchCliente("/api/cliente/jornada-chef"');
+    // setCart do presente acontece só depois do find em recompensasReservadas.
+    const posConfirmacao = blocoInjecao.indexOf("recompensasReservadas");
+    const posInjecao = blocoInjecao.indexOf("recompensaJornadaId: recompensaId");
+    expect(posConfirmacao).toBeGreaterThan(-1);
+    expect(posInjecao).toBeGreaterThan(posConfirmacao);
+    // Reserva já vinculada a pedido real nunca reinjeta item.
+    expect(blocoInjecao).toContain("!r.reservaPedidoId");
+  });
+
+  test("injeção é idempotente por recompensaJornadaId (vários carregamentos nunca duplicam)", () => {
+    expect(blocoInjecao).toContain("atual.some((it) => it.recompensaJornadaId === recompensaId)");
+  });
+
+  test("referência persistente: lida do localStorage, nunca consumida one-shot no mount", () => {
+    expect(blocoInjecao).toContain("lerReferenciaRecompensa(localStorage)");
+    // A remoção imediata da era sessionStorage (causa raiz da sacola vazia)
+    // não pode voltar.
+    expect(blocoInjecao).not.toContain('sessionStorage.removeItem("cf_recompensa_jornada")');
+    expect(blocoInjecao).toContain("migrarReferenciaLegada(sessionStorage, localStorage)");
+  });
+
+  test("servidor sem a reserva (resgatada/cancelada/expirada) limpa a referência e não injeta nada", () => {
+    expect(blocoInjecao).toContain("limparReferenciaRecompensa(localStorage)");
+  });
+
+  test("remover o presente da sacola limpa a referência E cancela só a reserva (nunca perde o prêmio)", () => {
+    const fnRm = fonte.match(/function rmItem\(idx: number\) \{[\s\S]*?\n  \}/)?.[0] ?? "";
+    expect(fnRm).toContain("limparReferenciaRecompensa(localStorage)");
+    expect(fnRm).toContain("/api/cliente/jornada-chef/cancelar-reserva");
+  });
+
+  test("pedido enviado com o presente limpa a referência (nunca reinjeta depois do pedido)", () => {
+    expect(fonte).toContain("if (itemRecompensaJornada) limparReferenciaRecompensa(localStorage)");
+  });
+
+  test("presente segue como campo dedicado no POST (recompensaJornada), nunca item comum precificado no cliente", () => {
+    expect(fonte).toContain("const itemRecompensaJornada = cart.find((c) => c.recompensaJornadaId)");
+    expect(fonte).toContain("recompensaJornada: { recompensaId: itemRecompensaJornada.recompensaJornadaId");
+  });
+});

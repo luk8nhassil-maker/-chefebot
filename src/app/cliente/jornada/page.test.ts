@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 const fonte = readFileSync(fileURLToPath(new URL("./page.tsx", import.meta.url)), "utf-8");
 
 function blocoRecompensasReservadas(): string {
-  const inicio = fonte.indexOf("jornada.recompensasReservadas.map");
+  const inicio = fonte.indexOf("jornada.recompensasReservadas.filter");
   expect(inicio).toBeGreaterThan(-1);
   // Bloco JSX termina no fechamento do .map(...) desta seção — a próxima
   // ocorrência do fechamento `))}` na mesma indentação da trilha visual.
@@ -92,6 +92,32 @@ describe("/cliente/jornada — card de presente reservado", () => {
     expect(duracaoGift).toBeGreaterThan(0);
     expect(Math.max(duracaoCard, duracaoGift, duracaoCheckTotal)).toBeGreaterThanOrEqual(500);
     expect(Math.max(duracaoCard, duracaoGift, duracaoCheckTotal)).toBeLessThanOrEqual(700);
+  });
+
+  test("card reservado só renderiza reserva CONFIRMADA pela reconciliação (referência local ou pedido real)", () => {
+    expect(fonte).toMatch(/recompensasReservadas\.filter\(\(rec\) => rec\.reservaPedidoId \|\| rec\.recompensaId === reservaConfirmadaId\)/);
+  });
+
+  test("reconciliação usa o módulo compartilhado e cobre reconstruir/liberar", () => {
+    expect(fonte).toContain("reconciliarReservaComReferencia");
+    expect(fonte).toContain("lerReferenciaRecompensa(localStorage)");
+    expect(fonte).toContain("gravarReferenciaRecompensa(localStorage");
+    // Pizza sem o sabor escolhido: libera a reserva (nunca inventa escolha,
+    // nunca consome a recompensa) e avisa o cliente com clareza.
+    expect(fonte).toContain("/api/cliente/jornada-chef/cancelar-reserva");
+    expect(fonte).toContain("Seu presente voltou para a Jornada — escolha o sabor de novo para usá-lo no próximo pedido.");
+  });
+
+  test("reservar só navega para a sacola depois de servidor + referência local terem sucesso", () => {
+    const fn = fonte.match(/async function usarNoProximoPedido[\s\S]*?\n  \}/)?.[0] ?? "";
+    expect(fn).toContain("const gravou = gravarReferenciaRecompensa(localStorage");
+    expect(fn).toContain("if (!gravou)");
+    // Falha ao gravar desfaz a reserva na hora — nunca nasce um falso
+    // "está no carrinho".
+    expect(fn).toContain("cancelar-reserva");
+    // A referência nunca volta para o sessionStorage one-shot (causa raiz do
+    // bug da sacola vazia).
+    expect(fn).not.toContain("sessionStorage.setItem('cf_recompensa_jornada'");
   });
 
   test("não usa confete, roleta ou elementos de cassino", () => {
