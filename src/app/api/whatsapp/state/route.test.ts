@@ -18,10 +18,22 @@ vi.mock("@/lib/conexaoWhatsapp", () => ({
   salvarStatusConexao: vi.fn(async () => {}),
 }));
 
+const { qrStore, redisMock } = vi.hoisted(() => {
+  const qrStore = new Map<string, unknown>();
+  const redisMock = {
+    get: vi.fn(async (key: string) => (qrStore.has(key) ? qrStore.get(key) : null)),
+    set: vi.fn(async (key: string, value: unknown) => { qrStore.set(key, value); return "OK"; }),
+    del: vi.fn(async (key: string) => (qrStore.delete(key) ? 1 : 0)),
+  };
+  return { qrStore, redisMock };
+});
+vi.mock("@/lib/redis", () => ({ redis: redisMock }));
+
 vi.stubGlobal("fetch", vi.fn());
 
 import { GET } from "./route";
 import { salvarStatusConexao } from "@/lib/conexaoWhatsapp";
+import { persistirQrAtual } from "@/lib/whatsappQrCache";
 
 function requestComCookie(token?: string) {
   const init = token ? { headers: { cookie: `auth-token=${token}` } } : undefined;
@@ -30,6 +42,7 @@ function requestComCookie(token?: string) {
 
 beforeEach(() => {
   vi.mocked(fetch).mockReset();
+  qrStore.clear();
   process.env.EVOLUTION_API_URL = "https://evolution.teste.com.br";
   process.env.EVOLUTION_API_KEY = "chave-de-teste";
 });
@@ -86,6 +99,41 @@ describe("GET /api/whatsapp/state — autenticacao", () => {
 
     const res = await GET(requestComCookie("token-dev"));
     expect(res.status).toBe(200);
+  });
+});
+
+describe("GET /api/whatsapp/state — QR em cache (nunca chama /instance/connect)", () => {
+  test("sem QR em cache: qr.disponivel false, uma unica chamada (connectionState)", async () => {
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ instance: { state: "connecting" } }),
+    } as Response);
+
+    const res = await GET(requestComCookie("token-admin"));
+    const data = await res.json();
+    expect(data.qr).toEqual({ disponivel: false });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(fetch).mock.calls[0][0]).toContain("/instance/connectionState/");
+  });
+
+  test("com QR em cache: devolve base64/generatedAt/expiresAt/generationId, sem tocar a Evolution para isso", async () => {
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ instance: { state: "connecting" } }),
+    } as Response);
+
+    const registro = await persistirQrAtual("chefebot", "data:image/png;base64,QRCACHE");
+
+    const res = await GET(requestComCookie("token-admin"));
+    const data = await res.json();
+    expect(data.qr.disponivel).toBe(true);
+    expect(data.qr.base64).toBe("data:image/png;base64,QRCACHE");
+    expect(data.qr.generationId).toBe(registro.generationId);
+    expect(data.qr.expiresAt).toBe(registro.expiresAt);
+    // Continua sendo só leitura: nenhuma chamada extra além de connectionState.
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 });
 

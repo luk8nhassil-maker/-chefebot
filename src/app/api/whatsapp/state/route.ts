@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyToken } from '@/lib/auth'
 import { obterConfigEvolution } from '@/lib/evolutionApi'
+import { lerQrAtual } from '@/lib/whatsappQrCache'
 
 // Sem cookie ou token invalido/expirado -> 401 (sem sessao).
 // Sessao valida mas papel sem permissao -> 403.
@@ -18,7 +19,10 @@ async function checkAuth(req: NextRequest): Promise<{ status: 401 | 403 } | { st
 // papel precisa consultar o estado da conexão do WhatsApp. Só leitura: quem
 // mantém o Redis atualizado com o status real da conexão é o evento
 // "connection.update" recebido pelo webhook (src/app/api/whatsapp/route.ts),
-// nunca esta rota GET.
+// nunca esta rota GET. Também expõe o QR atualmente válido (lido do cache
+// alimentado pelo webhook/pela própria geração) — nunca chama
+// /instance/connect nem qualquer outra ação que mude a instância na
+// Evolution: é seguro fazer polling desta rota.
 export async function GET(req: NextRequest) {
   const auth = await checkAuth(req)
   if (auth.status === 401) return NextResponse.json({ error: 'Nao autorizado' }, { status: 401 })
@@ -38,7 +42,19 @@ export async function GET(req: NextRequest) {
       cache: 'no-store',
     })
     const data = await res.json()
-    return NextResponse.json(data)
+    const qrAtual = await lerQrAtual(config.instanceName)
+    return NextResponse.json({
+      ...data,
+      qr: qrAtual
+        ? {
+            disponivel: true,
+            base64: qrAtual.base64,
+            generatedAt: qrAtual.generatedAt,
+            expiresAt: qrAtual.expiresAt,
+            generationId: qrAtual.generationId,
+          }
+        : { disponivel: false },
+    })
   } catch {
     return NextResponse.json({ error: 'Falha ao conectar à API' }, { status: 502 })
   }

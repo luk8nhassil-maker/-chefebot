@@ -66,3 +66,21 @@ export function extrairQrBase64(data: unknown): string | null {
   if (qr && typeof qr.base64 === "string") return qr.base64;
   return null;
 }
+
+/**
+ * Normaliza o nome de um evento de webhook da Evolution para comparação
+ * resiliente a variações observadas entre versões/integrações — a
+ * inscrição usa SCREAMING_SNAKE_CASE ("QRCODE_UPDATED"), mas o payload
+ * entregue usa dot-case minúsculo ("connection.update"). Nunca lança.
+ */
+export function normalizarEventoWebhook(raw: unknown): string {
+  if (typeof raw !== "string") return "";
+  return raw.trim().toLowerCase().replace(/[\s_-]+/g, ".");
+}
+
+const EVENTOS_QR_CONHECIDOS = new Set(["qrcode.updated", "qrcode.update", "qr.updated", "qr.update"]);
+
+/** true para qualquer variação conhecida do evento de rotação de QR da Evolution. */
+export function ehEventoQrAtualizado(raw: unknown): boolean {
+  return EVENTOS_QR_CONHECIDOS.has(normalizarEventoWebhook(raw));
+}

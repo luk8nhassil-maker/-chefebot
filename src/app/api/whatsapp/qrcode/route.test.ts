@@ -14,6 +14,21 @@ vi.mock("@/lib/auth", async () => {
   };
 });
 
+const { qrStore, redisMock } = vi.hoisted(() => {
+  const qrStore = new Map<string, unknown>();
+  const redisMock = {
+    get: vi.fn(async (key: string) => (qrStore.has(key) ? qrStore.get(key) : null)),
+    set: vi.fn(async (key: string, value: unknown, opts?: { nx?: boolean; ex?: number }) => {
+      if (opts?.nx && qrStore.has(key)) return null;
+      qrStore.set(key, value);
+      return "OK";
+    }),
+    del: vi.fn(async (key: string) => (qrStore.delete(key) ? 1 : 0)),
+  };
+  return { qrStore, redisMock };
+});
+vi.mock("@/lib/redis", () => ({ redis: redisMock }));
+
 vi.stubGlobal("fetch", vi.fn());
 
 import { POST } from "./route";
@@ -28,6 +43,7 @@ function requestComCookie(token?: string) {
 
 beforeEach(() => {
   vi.mocked(fetch).mockReset();
+  qrStore.clear();
   process.env.EVOLUTION_API_URL = "https://evolution.teste.com.br";
   process.env.EVOLUTION_API_KEY = "chave-de-teste";
 });

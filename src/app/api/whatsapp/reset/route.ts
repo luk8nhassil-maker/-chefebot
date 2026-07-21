@@ -2,6 +2,19 @@ import { NextRequest, NextResponse } from "next/server";
 import { salvarStatusConexao } from "@/lib/conexaoWhatsapp";
 import { verifyToken } from "@/lib/auth";
 import { obterConfigEvolution, extrairQrBase64 } from "@/lib/evolutionApi";
+import { garantirWebhookEvolution } from "@/lib/evolutionWebhook";
+import { persistirQrAtual, type WhatsappQrRecord } from "@/lib/whatsappQrCache";
+
+function serializarQrCode(base64: string, extras: { code?: string | null; pairingCode?: string | null }, registro: WhatsappQrRecord) {
+  return {
+    base64,
+    code: extras.code ?? null,
+    pairingCode: extras.pairingCode ?? null,
+    generatedAt: registro.generatedAt,
+    expiresAt: registro.expiresAt,
+    generationId: registro.generationId,
+  };
+}
 
 // Sem cookie ou token invalido/expirado -> 401 (sem sessao).
 // Sessao valida mas papel sem permissao -> 403.
@@ -74,35 +87,30 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ ok: false, error: "Falha ao criar instância" }, { status: 502 });
       }
 
-      // 3) Configura o webhook na instância (nova ou já existente)
-      const webhookRes = await fetch(`${config.baseUrl}/webhook/set/${config.instanceName}`, {
-        method: "POST",
-        headers: { apikey: config.apiKey, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          webhook: {
-            enabled: true,
-            url: config.webhookUrl,
-            webhookByEvents: false,
-            webhookBase64: false,
-            events: ["MESSAGES_UPSERT", "MESSAGES_UPDATE", "CONNECTION_UPDATE", "QRCODE_UPDATED", "SEND_MESSAGE", "CALL"],
-          },
-        }),
-        cache: "no-store",
-      }).catch(() => null);
-      console.log("[RESET] etapa: webhook, status:", webhookRes?.status ?? "network-error");
+      // 3) Configura o webhook na instância (nova ou já existente) — idempotente,
+      // nunca destrutivo. Melhor esforço: uma falha aqui não impede o QR de aparecer.
+      const webhookResultado = await garantirWebhookEvolution(config).catch(() => null);
+      console.log("[RESET] etapa: webhook, status:", webhookResultado?.status ?? "network-error");
 
       if (base64DoCreate) {
         await salvarStatusConexao("connecting");
+        const registro = await persistirQrAtual(config.instanceName, base64DoCreate);
         return NextResponse.json({
           ok: true,
           estado: "qr_required",
-          qrcode: {
-            base64: base64DoCreate,
-            code: (createData as Record<string, unknown>)?.code as string | undefined ?? null,
-            pairingCode: null,
-          },
+          qrcode: serializarQrCode(
+            base64DoCreate,
+            { code: (createData as Record<string, unknown>)?.code as string | undefined ?? null, pairingCode: null },
+            registro
+          ),
         });
       }
+    } else {
+      // Instância já existente e desconectada: garante o webhook correto antes
+      // de reconectar — cobre o caso comum de a instância ter sido criada antes
+      // de eventos como QRCODE_UPDATED existirem/serem exigidos. Melhor esforço.
+      const webhookResultado = await garantirWebhookEvolution(config).catch(() => null);
+      console.log("[RESET] etapa: webhook (instancia existente), status:", webhookResultado?.status ?? "network-error");
     }
 
     // 4) Instância existe mas está desconectada (ou acabou de ser criada sem
@@ -125,15 +133,16 @@ export async function POST(req: NextRequest) {
     }
 
     await salvarStatusConexao("connecting");
+    const registro = await persistirQrAtual(config.instanceName, base64);
 
     return NextResponse.json({
       ok: true,
       estado: "qr_required",
-      qrcode: {
+      qrcode: serializarQrCode(
         base64,
-        code: (qrData as Record<string, unknown>)?.code as string | undefined ?? null,
-        pairingCode: (qrData as Record<string, unknown>)?.pairingCode as string | undefined ?? null,
-      },
+        { code: (qrData as Record<string, unknown>)?.code as string | undefined ?? null, pairingCode: (qrData as Record<string, unknown>)?.pairingCode as string | undefined ?? null },
+        registro
+      ),
     });
   } catch (e) {
     console.error("[RESET] etapa: inesperada, erro:", e instanceof Error ? e.name : "erro desconhecido");

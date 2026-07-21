@@ -34,6 +34,7 @@ vi.mock("@/lib/conversa", () => ({
 }));
 
 import { POST } from "./route";
+import { persistirQrAtual } from "@/lib/whatsappQrCache";
 
 const PHONE = "5586999990001";
 
@@ -60,6 +61,16 @@ function webhookEventoDesconhecido() {
   return {
     json: async () => ({ event: "messages.update", data: {} }),
   } as never;
+}
+
+function webhookQrAtualizado(evento: string, base64: string) {
+  return {
+    json: async () => ({ event: evento, data: { qrcode: { base64 } } }),
+  } as never;
+}
+
+function qrCacheSalvo() {
+  return store.get("whatsapp:qr:chefebot") as { base64: string; hash: string; generationId: number } | undefined;
 }
 
 function chamadasPorAutor(autor: string) {
@@ -155,6 +166,59 @@ describe("7. Eventos diferentes de messages.upsert/connection.update", () => {
     expect(res.status ?? 200).toBe(200);
     expect(registrarMensagemMock).not.toHaveBeenCalled();
     expect(statusConexaoSalvo()).toBeUndefined();
+  });
+});
+
+describe("9. QRCODE_UPDATED (e variações do nome) — antes descartado silenciosamente", () => {
+  it("persiste o QR mais recente no cache, nunca loga o payload", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const res = await POST(webhookQrAtualizado("QRCODE_UPDATED", "data:image/png;base64,SEGREDO-QR"));
+    expect(res.status ?? 200).toBe(200);
+    expect(qrCacheSalvo()?.base64).toBe("data:image/png;base64,SEGREDO-QR");
+    const textoLogs = logSpy.mock.calls.map((c) => JSON.stringify(c)).join(" ");
+    expect(textoLogs).not.toContain("SEGREDO-QR");
+    logSpy.mockRestore();
+  });
+
+  it("reconhece a variação dot-case 'qrcode.updated'", async () => {
+    const res = await POST(webhookQrAtualizado("qrcode.updated", "data:image/png;base64,OUTRO"));
+    expect(res.status ?? 200).toBe(200);
+    expect(qrCacheSalvo()?.base64).toBe("data:image/png;base64,OUTRO");
+  });
+
+  it("um QR mais novo substitui o anterior no cache", async () => {
+    await POST(webhookQrAtualizado("QRCODE_UPDATED", "data:image/png;base64,PRIMEIRO"));
+    const primeiraGeracao = qrCacheSalvo()?.generationId;
+    await POST(webhookQrAtualizado("QRCODE_UPDATED", "data:image/png;base64,SEGUNDO"));
+    expect(qrCacheSalvo()?.base64).toBe("data:image/png;base64,SEGUNDO");
+    expect(qrCacheSalvo()?.generationId).toBeGreaterThanOrEqual(primeiraGeracao ?? 0);
+  });
+
+  it("nunca escreve whatsapp_connection_status nem processa como mensagem", async () => {
+    await POST(webhookQrAtualizado("QRCODE_UPDATED", "data:image/png;base64,X"));
+    expect(statusConexaoSalvo()).toBeUndefined();
+    expect(registrarMensagemMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("10. connection.update limpa o QR persistido quando sai de 'connecting'", () => {
+  it("state 'open' limpa o QR do cache", async () => {
+    await persistirQrAtual("chefebot", "data:image/png;base64,PENDENTE");
+    expect(qrCacheSalvo()).toBeDefined();
+    await POST(webhookConnectionUpdate("open"));
+    expect(qrCacheSalvo()).toBeUndefined();
+  });
+
+  it("state 'close' também limpa o QR do cache (definitivamente inválido)", async () => {
+    await persistirQrAtual("chefebot", "data:image/png;base64,PENDENTE");
+    await POST(webhookConnectionUpdate("close"));
+    expect(qrCacheSalvo()).toBeUndefined();
+  });
+
+  it("state 'connecting' NUNCA limpa o QR — é o estado normal de QR pendente", async () => {
+    await persistirQrAtual("chefebot", "data:image/png;base64,PENDENTE");
+    await POST(webhookConnectionUpdate("connecting"));
+    expect(qrCacheSalvo()).toBeDefined();
   });
 });
 
