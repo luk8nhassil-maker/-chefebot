@@ -12,9 +12,16 @@ function defaultSetImpl(key: string, value: unknown, opts?: { nx?: boolean }) {
   return Promise.resolve("OK");
 }
 
-// Replica os dois scripts Lua reais da fidelidade por pontos, sem interpretar
-// Lua: liberarLockPontosSeDono (1 chave: GET==token -> DEL) e
-// persistirEstadoPontosSeDono (2 chaves: GET(lock)==token -> SET(estado)).
+// Replica os scripts Lua reais usados neste teste, sem interpretar Lua:
+// - 1 chave: liberarLockPontosSeDono (GET==token -> DEL) OU
+//   LIBERAR_CLAIM_SE_DONO_SCRIPT (mesmo formato) — indistinguíveis por
+//   design, mesma semântica de compare-and-delete simples.
+// - 2 chaves + 2 args: persistirEstadoPontosSeDono (fidelidade) —
+//   GET(lock)==token -> SET(estado).
+// - 2 chaves + 3 args: GRAVAR_RESULTADO_E_TOKEN_SCRIPT (Modo Sobrevivência)
+//   — grava registro+token juntos, incondicional.
+// - 2 chaves + 1 arg: INVALIDAR_RESULTADO_SE_TOKEN_SCRIPT (Modo
+//   Sobrevivência) — compare-and-delete atômico do par registro/token.
 function defaultEvalImpl(_script: string, keys: string[], args: string[]) {
   if (keys.length === 1) {
     const [key] = keys;
@@ -24,6 +31,31 @@ function defaultEvalImpl(_script: string, keys: string[], args: string[]) {
       return Promise.resolve(1);
     }
     return Promise.resolve(0);
+  }
+  if (keys.length === 2 && args.length === 3) {
+    const [chaveResultado, chaveToken] = keys;
+    const [registroJson, token] = args;
+    redisStore.set(chaveResultado, JSON.parse(registroJson));
+    redisStore.set(chaveToken, token);
+    return Promise.resolve(1);
+  }
+  if (keys.length === 2 && args.length === 1) {
+    const [chaveToken, chaveResultado] = keys;
+    const [tokenEsperado] = args;
+    const tokenAtual = redisStore.has(chaveToken) ? redisStore.get(chaveToken) : undefined;
+    const resultadoAtual = redisStore.has(chaveResultado) ? redisStore.get(chaveResultado) : undefined;
+    if (tokenAtual === undefined && resultadoAtual === undefined) return Promise.resolve("ja_ausente");
+    if (resultadoAtual === undefined) {
+      redisStore.delete(chaveToken);
+      return Promise.resolve("ja_ausente");
+    }
+    if (tokenAtual === undefined) return Promise.resolve("incerto");
+    if (tokenAtual === tokenEsperado) {
+      redisStore.delete(chaveToken);
+      redisStore.delete(chaveResultado);
+      return Promise.resolve("removido");
+    }
+    return Promise.resolve("substituido_por_outro");
   }
   const [lockKey, estadoKey] = keys;
   const [token, estadoJson] = args;
@@ -493,14 +525,18 @@ describe("POST /api/pedido-app — resgate de pontos no checkout (Etapa 5)", () 
     expect(pedidos).toHaveLength(1);
     expect(pedidos[0].survivalState).not.toBe("completed");
 
-    // O resgate JÁ foi debitado de verdade na 1ª tentativa (diferente das
-    // falhas de CONFIRMAÇÃO, aqui a reserva vira "confirmado" de verdade) —
-    // um retry com o MESMO resgateId é corretamente rejeitado pela proteção
-    // de negócio contra reaproveitamento (400, validação pura), nunca chega
-    // a criar um segundo pedido nem a expor o estado interno de
-    // idempotência. O importante, provado abaixo, é que nada duplica.
+    // Revisão de segurança, 6ª rodada, ponto 1: a recuperação de
+    // idempotência (busca por hash/attempt) roda ANTES de qualquer
+    // validação de negócio mutável — o retry com o MESMO clientRequestId
+    // encontra o pedido pelo hash, vê o survivalState ainda bloqueando
+    // sucesso, e devolve 503 unresolved diretamente, sem sequer chegar a
+    // reavaliar o resgateId (que já foi debitado de verdade e seria
+    // rejeitado como "já utilizado" se a validação de negócio rodasse
+    // primeiro). Nada duplica em nenhum dos dois casos.
     const retry = await POST(pedidoRequest({ resgateId: reserva.resgateId, clientRequestId }));
-    expect(retry.status).toBe(400);
+    expect(retry.status).toBe(503);
+    const retryData = await retry.json();
+    expect(retryData.unresolved).toBe(true);
     const pedidosApos = redisStore.get("pedidos") as Array<Record<string, unknown>>;
     expect(pedidosApos).toHaveLength(1); // retry nunca duplica
   });
@@ -542,14 +578,49 @@ describe("POST /api/pedido-app — resgate de pontos no checkout (Etapa 5)", () 
     expect(pedidos).toHaveLength(1);
     expect(pedidos[0].survivalState).not.toBe("completed");
 
-    // Mesmo raciocínio do teste de GET acima: o resgate já foi debitado de
-    // verdade, então o retry com o MESMO resgateId é rejeitado pela
-    // proteção de negócio contra reaproveitamento (400) antes mesmo de
-    // chegar à camada de idempotência — o que importa é que nada duplica.
+    // Mesmo raciocínio do teste de GET acima: a recuperação de idempotência
+    // roda ANTES da validação de negócio do resgate — o retry encontra o
+    // pedido pelo hash e devolve 503 unresolved diretamente.
     const retry = await POST(pedidoRequest({ resgateId: reserva.resgateId, clientRequestId }));
-    expect(retry.status).toBe(400);
+    expect(retry.status).toBe(503);
+    const retryData = await retry.json();
+    expect(retryData.unresolved).toBe(true);
     const pedidosApos = redisStore.get("pedidos") as Array<Record<string, unknown>>;
     expect(pedidosApos).toHaveLength(1);
+  });
+
+  // [6ª revisão de segurança, ponto 1] Antes desta correção, a rota validava
+  // o resgateId (obterReservasResgatePontos, rejeita "já utilizado") ANTES
+  // de consultar :result/pedido-por-hash. Se o resgate já tivesse sido
+  // confirmado com sucesso mas a resposta original se perdesse (timeout),
+  // um retry legítimo com o MESMO clientRequestId batia primeiro na
+  // validação de negócio — que rejeitaria com 400 "resgate inválido ou já
+  // utilizado" antes de a rota sequer olhar para o pedido já criado. Agora a
+  // recuperação de idempotência roda antes: o retry encontra o pedido pelo
+  // hash e devolve o MESMO pedido, nunca reavaliando o resgateId.
+  test("[6ª revisão] retry com resposta perdida após resgate confirmado com sucesso recupera o MESMO pedido via hash, nunca reavalia o resgateId como já utilizado", async () => {
+    vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
+    const { reserva } = await prepararRecompensaDisponivel();
+    const clientRequestId = "retry-apos-resgate-confirmado-001";
+
+    const r1 = await POST(pedidoRequest({ resgateId: reserva.resgateId, clientRequestId }));
+    expect(r1.status).toBe(200);
+    const body1 = await r1.json();
+
+    // Simula resposta perdida do lado do cliente + :result/:claim já
+    // desaparecidos — só o pedido real (com o hash) resta em Redis.
+    const chaveResultado = `survival:idempotencia:pedido:${clientRequestId}:result`;
+    const chaveClaim = `survival:idempotencia:pedido:${clientRequestId}:claim`;
+    redisStore.delete(chaveResultado);
+    redisStore.delete(chaveClaim);
+
+    const retry = await POST(pedidoRequest({ resgateId: reserva.resgateId, clientRequestId }));
+    expect(retry.status).toBe(200);
+    const body2 = await retry.json();
+    expect(body2.pedidoId).toBe(body1.pedidoId);
+
+    const pedidos = redisStore.get("pedidos") as Array<Record<string, unknown>>;
+    expect(pedidos).toHaveLength(1); // nunca duplica
   });
 
   test("pedido sem resgateId continua funcionando normalmente (sem desconto)", async () => {

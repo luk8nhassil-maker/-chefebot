@@ -12,6 +12,33 @@ function defaultSetImpl(key: string, value: unknown, opts?: { nx?: boolean }) {
   return Promise.resolve("OK");
 }
 function defaultEvalImpl(_script: string, keys: string[], args: unknown[]) {
+  if (keys.length === 2 && args.length === 3) {
+    // GRAVAR_RESULTADO_E_TOKEN_SCRIPT (Modo Sobrevivência)
+    const [chaveResultado, chaveToken] = keys;
+    const [registroJson, token] = args as string[];
+    redisStore.set(chaveResultado, JSON.parse(registroJson));
+    redisStore.set(chaveToken, token);
+    return Promise.resolve(1);
+  }
+  if (keys.length === 2 && args.length === 1) {
+    // INVALIDAR_RESULTADO_SE_TOKEN_SCRIPT (Modo Sobrevivência)
+    const [chaveToken, chaveResultado] = keys;
+    const [tokenEsperado] = args as string[];
+    const tokenAtual = redisStore.has(chaveToken) ? redisStore.get(chaveToken) : undefined;
+    const resultadoAtual = redisStore.has(chaveResultado) ? redisStore.get(chaveResultado) : undefined;
+    if (tokenAtual === undefined && resultadoAtual === undefined) return Promise.resolve("ja_ausente");
+    if (resultadoAtual === undefined) {
+      redisStore.delete(chaveToken);
+      return Promise.resolve("ja_ausente");
+    }
+    if (tokenAtual === undefined) return Promise.resolve("incerto");
+    if (tokenAtual === tokenEsperado) {
+      redisStore.delete(chaveToken);
+      redisStore.delete(chaveResultado);
+      return Promise.resolve("removido");
+    }
+    return Promise.resolve("substituido_por_outro");
+  }
   const [key] = keys;
   const [token] = args as string[];
   if (redisStore.get(key) === token) {
@@ -147,6 +174,7 @@ function pedidoRequest(opts: {
   recompensaJornada?: { recompensaId: string; escolha?: { sabor?: string } };
   clienteToken?: string;
   whatsappToken?: string;
+  clientRequestId?: string;
 }) {
   const body = {
     cliente: "Fulano de Tal",
@@ -157,6 +185,7 @@ function pedidoRequest(opts: {
     troco: "Sem troco",
     ...(opts.recompensaJornada ? { recompensaJornada: opts.recompensaJornada } : {}),
     ...(opts.whatsappToken ? { whatsappToken: opts.whatsappToken } : {}),
+    ...(opts.clientRequestId ? { clientRequestId: opts.clientRequestId } : {}),
   };
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (opts.clienteToken) headers.cookie = `cliente-token=${opts.clienteToken}`;
@@ -653,5 +682,50 @@ describe("POST /api/pedido-app — concorrência e atomicidade", () => {
     const retry = await POST(pedidoRequest({ telefone, clienteToken: tokenDoDono(telefone), recompensaJornada: { recompensaId } }));
     expect(retry.status).toBe(200);
     expect((redisStore.get("pedidos") as unknown[]).length).toBe(1);
+  });
+
+  // [6ª revisão de segurança, ponto 1] Antes desta correção, a rota validava
+  // a disponibilidade da recompensa da Jornada (prepararResgateParaPedido)
+  // ANTES de consultar :result/pedido-por-hash. Se o presente já tivesse
+  // sido vinculado a um pedido com sucesso mas a resposta original se
+  // perdesse (timeout), um retry legítimo com o MESMO clientRequestId batia
+  // primeiro na validação de negócio — que rejeitaria a recompensa como
+  // "já utilizada" (ela realmente está reservaPedidoId != vazio agora) antes
+  // de a rota sequer olhar para o pedido já criado. Agora a recuperação de
+  // idempotência roda antes: o retry encontra o pedido pelo hash e devolve o
+  // MESMO pedido, nunca reavaliando a recompensa.
+  test("[6ª revisão] retry com resposta perdida após presente da Jornada confirmado recupera o MESMO pedido via hash, nunca reavalia a recompensa como indisponível", async () => {
+    const telefone = "86977003005";
+    const { recompensaId } = await desbloquearEReservar(telefone, [BEBIDA_GUARANA]);
+    const clientRequestId = "retry-apos-jornada-confirmada-001";
+
+    process.env.SURVIVAL_MODE_ENABLED = "true";
+    try {
+      const r1 = await POST(
+        pedidoRequest({ telefone, clienteToken: tokenDoDono(telefone), recompensaJornada: { recompensaId }, clientRequestId })
+      );
+      expect(r1.status).toBe(200);
+      const body1 = await r1.json();
+
+      // Simula resposta perdida do lado do cliente + :result/:claim já
+      // desaparecidos (TTL ou nunca gravados) — só o pedido real (com o
+      // hash) resta em Redis.
+      const chaveResultado = `survival:idempotencia:pedido:${clientRequestId}:result`;
+      const chaveClaim = `survival:idempotencia:pedido:${clientRequestId}:claim`;
+      redisStore.delete(chaveResultado);
+      redisStore.delete(chaveClaim);
+
+      const retry = await POST(
+        pedidoRequest({ telefone, clienteToken: tokenDoDono(telefone), recompensaJornada: { recompensaId }, clientRequestId })
+      );
+      expect(retry.status).toBe(200);
+      const body2 = await retry.json();
+      expect(body2.pedidoId).toBe(body1.pedidoId);
+
+      const pedidos = redisStore.get("pedidos") as Array<Record<string, unknown>>;
+      expect(pedidos).toHaveLength(1); // nunca duplica
+    } finally {
+      delete process.env.SURVIVAL_MODE_ENABLED;
+    }
   });
 });

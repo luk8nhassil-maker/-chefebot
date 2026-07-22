@@ -111,6 +111,13 @@ describe("ehAttemptValido", () => {
     requestFingerprint: "a".repeat(64),
     pedidoId: "123",
     txid: "chefebot_123",
+    pricing: {
+      total: 33,
+      subtotal: 30,
+      taxaEntrega: 3,
+      descontoFidelidade: 0,
+      pricingFingerprint: "b".repeat(64),
+    },
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };

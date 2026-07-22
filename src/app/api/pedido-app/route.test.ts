@@ -28,20 +28,37 @@ const { store, redisMock, defaultSetImpl, defaultGetImpl } = vi.hoisted(() => {
       return next;
     }),
     expire: vi.fn(async () => 1),
-    // Simula os DOIS scripts Lua reais usados pela rota, dispatch por
-    // keys.length (mesmo padrão já usado em route.resgate.test.ts para os
-    // scripts de fidelidade):
+    // Simula os TRÊS scripts Lua reais usados pela rota, dispatch por
+    // keys.length + args.length (as duas chaves de result/invalidação têm o
+    // mesmo número de KEYS, mas número de ARGV diferente):
     // - 1 chave: LIBERAR_CLAIM_SE_DONO_SCRIPT — só apaga KEYS[0] se o valor
     //   atual for exatamente ARGV[0] (compare-and-delete simples).
-    // - 2 chaves: INVALIDAR_RESULTADO_SE_TOKEN_SCRIPT — compare-and-delete
-    //   atômico da chave-token (KEYS[0]) + registro principal (KEYS[1]),
-    //   devolvendo "removido"/"ja_ausente"/"substituido_por_outro".
+    // - 2 chaves + 3 args: GRAVAR_RESULTADO_E_TOKEN_SCRIPT — grava
+    //   KEYS[0]=registro (JSON, ARGV[0]) e KEYS[1]=token (ARGV[1]) juntos.
+    // - 2 chaves + 1 arg: INVALIDAR_RESULTADO_SE_TOKEN_SCRIPT —
+    //   compare-and-delete atômico da chave-token (KEYS[0]) + registro
+    //   principal (KEYS[1]), devolvendo
+    //   "removido"/"ja_ausente"/"incerto"/"substituido_por_outro".
     eval: vi.fn(async (_script: string, keys: string[], args: string[]) => {
+      if (keys.length === 2 && args.length === 3) {
+        const [chaveResultado, chaveToken] = keys;
+        const [registroJson, token] = args;
+        store.set(chaveResultado, JSON.parse(registroJson));
+        store.set(chaveToken, token);
+        return 1;
+      }
       if (keys.length === 2) {
         const [chaveToken, chaveResultado] = keys;
         const [tokenEsperado] = args;
-        if (!store.has(chaveToken)) return "ja_ausente";
-        if (store.get(chaveToken) === tokenEsperado) {
+        const tokenAtual = store.has(chaveToken) ? store.get(chaveToken) : undefined;
+        const resultadoAtual = store.has(chaveResultado) ? store.get(chaveResultado) : undefined;
+        if (tokenAtual === undefined && resultadoAtual === undefined) return "ja_ausente";
+        if (resultadoAtual === undefined) {
+          store.delete(chaveToken);
+          return "ja_ausente";
+        }
+        if (tokenAtual === undefined) return "incerto";
+        if (tokenAtual === tokenEsperado) {
           store.delete(chaveToken);
           store.delete(chaveResultado);
           return "removido";
@@ -1032,13 +1049,15 @@ describe("POST /api/pedido-app — idempotência (Modo Sobrevivência)", () => {
       const chaveResultadoKey = chaveResultado(clientRequestId);
       const chaveClaimKey = chaveClaim(clientRequestId);
 
-      // Falha SÓ a gravação do :result — simula exatamente o cenário do
-      // relatório: pedido persistido, :result nunca chega a existir.
-      redisMock.set.mockImplementation(async (key: string, value: unknown, opts?: { nx?: boolean }) => {
-        if (key === chaveResultadoKey) {
+      // Falha SÓ a gravação do :result (agora um EVAL atômico, não um SET) —
+      // simula exatamente o cenário do relatório: pedido persistido, :result
+      // nunca chega a existir.
+      const chamadaOriginalEval = redisMock.eval.getMockImplementation()!;
+      redisMock.eval.mockImplementation(async (script: string, keys: string[], args: string[]) => {
+        if (keys.length === 2 && args.length === 3 && keys[0] === chaveResultadoKey) {
           throw new Error("Redis indisponível (simulado) — :result nunca gravado");
         }
-        return defaultSetImpl(key, value, opts);
+        return chamadaOriginalEval(script, keys, args);
       });
 
       const r1 = await POST(postReq({ ...basePayload, clientRequestId }));
@@ -1049,8 +1068,8 @@ describe("POST /api/pedido-app — idempotência (Modo Sobrevivência)", () => {
       expect((store.get("pedidos") as unknown[]).length).toBe(1);
       expect(store.has(chaveResultadoKey)).toBe(false);
 
-      // Restaura o comportamento normal de .set para o retry.
-      redisMock.set.mockImplementation(defaultSetImpl);
+      // Restaura o comportamento normal do eval para o retry.
+      redisMock.eval.mockImplementation(chamadaOriginalEval);
       // Simula o claim expirando (TTL de 30s decorrido, retry "mais de 30s depois").
       store.delete(chaveClaimKey);
 
@@ -1109,12 +1128,12 @@ describe("POST /api/pedido-app — idempotência (Modo Sobrevivência)", () => {
     it("falha ao ler 'pedidos' durante a busca por hash é tratada como incerta — nunca cria pedido", async () => {
       vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
       const clientRequestId = "busca-por-hash-falha-leitura-001";
-      let primeiraLeituraPedidos = true;
+      // Revisão de segurança, 6ª rodada, ponto 1: a busca por hash agora
+      // roda na FASE 2 (recuperação antecipada de idempotência), antes de
+      // qualquer leitura de "pedidos" na FASE 3 — é a PRIMEIRA (e, neste
+      // teste, única) leitura de "pedidos" da requisição.
       redisMock.get.mockImplementation(async (key: string) => {
-        if (key === "pedidos" && !primeiraLeituraPedidos) {
-          throw new Error("Redis indisponível (simulado) — busca por hash");
-        }
-        if (key === "pedidos") primeiraLeituraPedidos = false;
+        if (key === "pedidos") throw new Error("Redis indisponível (simulado) — busca por hash");
         return defaultGetImpl(key);
       });
 
@@ -1257,6 +1276,69 @@ describe("POST /api/pedido-app — idempotência (Modo Sobrevivência)", () => {
     });
   });
 
+  describe("[6ª revisão — ponto 3] reconciliação de persistência ambígua (redis.set('pedidos') lança não comprova ausência)", () => {
+    it("redis.set('pedidos') aplica a escrita mas LANÇA (timeout na resposta): reconciliação encontra o pedido, responde sucesso, nunca duplica em retry", async () => {
+      vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
+      const clientRequestId = "reconciliacao-set-aplicou-mas-lancou-001";
+
+      let jaFalhouPedidos = false;
+      redisMock.set.mockImplementation(async (key: string, value: unknown, opts?: { nx?: boolean }) => {
+        if (key === "pedidos" && !jaFalhouPedidos && Array.isArray(value)) {
+          jaFalhouPedidos = true;
+          await defaultSetImpl(key, value, opts); // a escrita É aplicada de verdade...
+          throw new Error("timeout simulado — Redis aplicou, mas a resposta HTTP falhou"); // ...mas o cliente Redis lança
+        }
+        return defaultSetImpl(key, value, opts);
+      });
+
+      const res = await POST(postReq({ ...basePayload, clientRequestId }));
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect((store.get("pedidos") as unknown[]).length).toBe(1);
+
+      redisMock.set.mockImplementation(defaultSetImpl);
+      const retry = await POST(postReq({ ...basePayload, clientRequestId }));
+      expect(retry.status).toBe(200);
+      const retryBody = await retry.json();
+      expect(retryBody.pedidoId).toBe(body.pedidoId);
+      expect((store.get("pedidos") as unknown[]).length).toBe(1); // nunca duplica
+    });
+
+    it("leitura de reconciliação (após redis.set('pedidos') lançar) TAMBÉM falha: nunca compensa às cegas, devolve 503 unresolved, claim mantido", async () => {
+      vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
+      const clientRequestId = "reconciliacao-leitura-incerta-001";
+
+      let jaFalhouSet = false;
+      redisMock.set.mockImplementation(async (key: string, value: unknown, opts?: { nx?: boolean }) => {
+        if (key === "pedidos" && Array.isArray(value)) {
+          jaFalhouSet = true;
+          throw new Error("falha simulada ao persistir pedido");
+        }
+        return defaultSetImpl(key, value, opts);
+      });
+      // Só falha a leitura de "pedidos" DEPOIS que o SET de persistência já
+      // lançou — a busca por hash (FASE 2, antes da persistência) precisa
+      // continuar funcionando normalmente para o teste isolar exatamente a
+      // reconciliação pós-falha de SET.
+      redisMock.get.mockImplementation(async (key: string) => {
+        if (key === "pedidos" && jaFalhouSet) throw new Error("falha simulada na leitura de reconciliação");
+        return defaultGetImpl(key);
+      });
+
+      const res = await POST(postReq({ ...basePayload, clientRequestId }));
+      expect(res.status).toBe(503);
+      const body = await res.json();
+      expect(body.ok).toBe(false);
+      expect(body.unresolved).toBe(true);
+
+      // O claim NUNCA é liberado quando a reconciliação está incerta — só
+      // restauramos os mocks para inspecionar o estado, sem simular um
+      // retry (que exigiria uma leitura de "pedidos" funcional).
+      redisMock.get.mockImplementation(defaultGetImpl);
+      expect(store.has(chaveClaim(clientRequestId))).toBe(true);
+    });
+  });
+
   describe("[4ª revisão — ponto 3] identidade estável (attempt) ANTES da cobrança Pix — nunca uma segunda cobrança real", () => {
     it("cobrança Pix criada + persistência de 'pedidos' falha: retry com o MESMO clientRequestId reutiliza o MESMO pedidoId/txid/idempotencyKey — nunca uma segunda cobrança", async () => {
       vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
@@ -1301,6 +1383,41 @@ describe("POST /api/pedido-app — idempotência (Modo Sobrevivência)", () => {
     });
   });
 
+  describe("[6ª revisão — ponto 4] snapshot financeiro estável no attempt — preço nunca muda silenciosamente entre tentativas", () => {
+    it("taxa de entrega do bairro muda entre a criação e o retry: retry reutiliza o TOTAL original do attempt, nunca recalcula com a taxa nova", async () => {
+      vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
+      const clientRequestId = "attempt-pricing-taxa-muda-001";
+
+      let falhouPersistencia = false;
+      redisMock.set.mockImplementation(async (key: string, value: unknown, opts?: { nx?: boolean }) => {
+        if (key === "pedidos" && !falhouPersistencia && Array.isArray(value)) {
+          falhouPersistencia = true;
+          throw new Error("Redis indisponível (simulado) — persistência perdida");
+        }
+        return defaultSetImpl(key, value, opts);
+      });
+
+      const r1 = await POST(postReq({ ...basePayload, clientRequestId }));
+      expect(r1.status).toBe(500);
+      expect(store.get("pedidos")).toBeUndefined();
+
+      redisMock.set.mockImplementation(defaultSetImpl);
+      // A taxa do bairro "Centro" muda de 3 para 999 ANTES do retry —
+      // simula uma atualização de cardápio/taxa entre tentativas.
+      store.set("cardapio", { neighborhoods: [{ name: "Centro", fee: 999 }] });
+
+      const retry = await POST(postReq({ ...basePayload, clientRequestId }));
+      expect(retry.status).toBe(200);
+      const body = await retry.json();
+      // 33 = total original (2x Refrigerante 2L a R$15 + taxa R$3) — NUNCA
+      // 2x15+999, mesmo com a taxa tendo mudado de verdade no "cardápio".
+      expect(body.total).toBe(33);
+      const pedidoFinal = (store.get("pedidos") as Array<Record<string, unknown>>)[0];
+      expect(pedidoFinal.total).toBe(33);
+      expect(pedidoFinal.taxaEntrega).toBe(3);
+    });
+  });
+
   describe("[4ª revisão — ponto 4] :result stale vs. leitura incerta", () => {
     it(":result existe, mas o pedido correspondente comprovadamente NÃO existe (stale): invalida o :result com segurança e permite um retry legítimo", async () => {
       vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
@@ -1332,17 +1449,13 @@ describe("POST /api/pedido-app — idempotência (Modo Sobrevivência)", () => {
       await POST(postReq({ ...basePayload, clientRequestId }));
       const resultadoOriginal = store.get(chaveResultado(clientRequestId));
 
-      // A rota lê "pedidos" duas vezes numa requisição que acerta o fast
-      // path: 1ª na fase de validações puras (sempre acontece), 2ª na
-      // reconstrução a partir do :result (buscarPedidoPersistidoPorId) —
-      // só esta 2ª leitura deve falhar, para isolar exatamente o cenário
-      // "leitura incerta durante a reconstrução".
-      let leiturasDePedidos = 0;
+      // Revisão de segurança, 6ª rodada, ponto 1: a reconstrução a partir de
+      // :result (buscarPedidoPersistidoPorId) roda na FASE 2, ANTES de
+      // qualquer leitura de "pedidos" da FASE 3 — é a PRIMEIRA leitura de
+      // "pedidos" do retry (a requisição acerta o fast path e nunca chega à
+      // FASE 3).
       redisMock.get.mockImplementation(async (key: string) => {
-        if (key === "pedidos") {
-          leiturasDePedidos += 1;
-          if (leiturasDePedidos === 2) throw new Error("Redis indisponível (simulado) — leitura incerta, não ausência");
-        }
+        if (key === "pedidos") throw new Error("Redis indisponível (simulado) — leitura incerta, não ausência");
         return defaultGetImpl(key);
       });
 

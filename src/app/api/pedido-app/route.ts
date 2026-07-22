@@ -7,7 +7,7 @@ import { computeTaxaApp, buildEnderecoApp } from "@/lib/pedidoAppLogic";
 import { criarPixMetadata, prepararPixProviderMercadoPago, serializarPixCliente, gerarTxidPixInterno, type PixMetadata } from "@/lib/pix";
 import { PROMOS_KEY, catalogoDoMenu, dentroDaJanela, precoFinalPromocao, promocaoIndisponivel, type Promocao } from "@/lib/promocoes";
 import { validarTokenCardapio } from "@/lib/cardapioToken";
-import { temDinheiroNoPagamento, valorDinheiroEsperado } from "@/lib/bot";
+import { temDinheiroNoPagamento, valorDinheiroEsperado, temPixNoPagamento, valorPixEsperado } from "@/lib/bot";
 import { verificarTokenCliente, CLIENTE_COOKIE } from "@/lib/clienteAuth";
 import { buscarClientePorId, sanitizeTelefoneCliente } from "@/lib/clientes";
 import { calcularPontosElegiveisPedido, registrarMovimentoPontosIdempotente, construirEventoIdPontos, derivarClienteIdPorTelefone, obterReservasResgatePontos, confirmarResgatePontos } from "@/lib/fidelidade";
@@ -20,11 +20,13 @@ import { logSurvivalErro } from "@/survival/logging";
 import {
   ATTEMPT_TTL_SEGUNDOS,
   CLAIM_TTL_SEGUNDOS,
+  GRAVAR_RESULTADO_E_TOKEN_SCRIPT,
   INVALIDAR_RESULTADO_SE_TOKEN_SCRIPT,
   LIBERAR_CLAIM_SE_DONO_SCRIPT,
   POLL_INTERVALO_MS,
   POLL_TENTATIVAS,
   RESULT_TTL_SEGUNDOS,
+  calcularPricingFingerprint,
   chaveAttemptPedido,
   chaveClaimPedido,
   chaveResultadoPedido,
@@ -35,6 +37,7 @@ import {
   montarValorClaim,
   type RegistroAttemptPedido,
   type ResultadoIdempotenciaPedido,
+  type SnapshotFinanceiroAttempt,
 } from "@/survival/pedidoIdempotencia";
 
 export const maxDuration = 20;
@@ -357,19 +360,18 @@ async function buscarPedidoPorClientRequestIdHash(
   return { tipo: "encontrado", pedido: pedidoEncontrado };
 }
 
-// Grava o registro principal + a chave-token companheira (ver
-// chaveResultadoTokenPedido) — extraído para ser reutilizado tanto na
-// criação normal quanto na recriação best-effort após recuperação via hash.
-// A chave-token é best-effort de propósito: uma falha aqui não desfaz o
-// registro principal (que já é a fonte de verdade do fast path), só torna
-// uma eventual invalidação futura menos precisa (ver
-// invalidarResultadoStaleAtomico, que trata chave-token ausente como
-// "ja_ausente", nunca como erro).
+// Grava o registro principal + a chave-token companheira NUMA ÚNICA
+// OPERAÇÃO ATÔMICA (Lua — revisão de segurança, 5ª rodada, ponto 2): as duas
+// chaves são sempre escritas juntas (nunca dois SETs separados do lado do
+// cliente, que deixariam uma janela em que só uma existe). Se o EVAL
+// lançar, NENHUMA das duas chaves é considerada gravada (o chamador trata
+// como falha completa, nunca como "gravação parcial aceitável").
 async function persistirRegistroResultado(clientRequestId: string, registro: ResultadoIdempotenciaPedido): Promise<void> {
-  await redis.set(chaveResultadoPedido(clientRequestId), registro, { ex: RESULT_TTL_SEGUNDOS });
-  await redis
-    .set(chaveResultadoTokenPedido(clientRequestId), registro.resultToken, { ex: RESULT_TTL_SEGUNDOS })
-    .catch((err) => logSurvivalErro("idempotencia_pedido", "finalizacao", "set_result_token_falhou", err));
+  await redis.eval(
+    GRAVAR_RESULTADO_E_TOKEN_SCRIPT,
+    [chaveResultadoPedido(clientRequestId), chaveResultadoTokenPedido(clientRequestId)],
+    [JSON.stringify(registro), registro.resultToken, String(RESULT_TTL_SEGUNDOS)]
+  );
 }
 
 // Grava o registro durável de idempotência (24h) — só chamado quando o
@@ -499,23 +501,28 @@ async function aguardarResultadoPedido(clientRequestId: string): Promise<Resulta
 }
 
 type ResultadoAttempt =
-  | { tipo: "obtido"; pedidoId: string; txid: string }
+  | { tipo: "obtido"; pedidoId: string; txid: string; pricing: SnapshotFinanceiroAttempt }
   | { tipo: "conflito_fingerprint" }
   | { tipo: "incerto" };
 
 // Cria (SET NX) ou recupera atomicamente a identidade ESTÁVEL da tentativa
 // — pedidoId + txid (txid é uma função pura e determinística de pedidoId,
 // ver gerarTxidPixInterno; a X-Idempotency-Key do Mercado Pago é por sua vez
-// derivada do txid) — ANTES de qualquer efeito externo (vínculo da Jornada
-// do Chef, cobrança Pix). Revisão de segurança, 4ª rodada, ponto 3: sem
-// isto, cada retry gerava um pedidoId novo (Date.now()), e portanto um txid
-// novo, arriscando uma SEGUNDA cobrança real no Mercado Pago quando a
-// tentativa anterior chegou a criar a cobrança mas falhou antes de
-// persistir o pedido. Nunca contém PII/QR/copia-e-cola/credencial.
+// derivada do txid) + o SNAPSHOT FINANCEIRO (5ª rodada, ponto 4: total,
+// subtotal, taxa, desconto, valorPixEsperado) — ANTES de qualquer efeito
+// externo (vínculo da Jornada do Chef, cobrança Pix). Revisão de segurança,
+// 4ª rodada, ponto 3: sem a identidade estável, cada retry gerava um
+// pedidoId novo (Date.now()), e portanto um txid novo, arriscando uma
+// SEGUNDA cobrança real no Mercado Pago. Sem o snapshot financeiro (5ª
+// rodada), um retry que reutilizasse a identidade mas recalculasse o preço
+// na hora (cardápio/promoção/taxa podem ter mudado) poderia cobrar/persistir
+// um valor DIFERENTE do que a cobrança original já usou. Nunca contém
+// PII/QR/copia-e-cola/credencial.
 async function obterOuCriarAttempt(
   clientRequestId: string,
   requestFingerprint: string,
-  pedidoIdCandidato: string
+  pedidoIdCandidato: string,
+  pricingCandidato: SnapshotFinanceiroAttempt
 ): Promise<ResultadoAttempt> {
   const chave = chaveAttemptPedido(clientRequestId);
   const txidCandidato = gerarTxidPixInterno(pedidoIdCandidato);
@@ -524,21 +531,22 @@ async function obterOuCriarAttempt(
     requestFingerprint,
     pedidoId: pedidoIdCandidato,
     txid: txidCandidato,
+    pricing: pricingCandidato,
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
 
   try {
     const criado = await redis.set(chave, registroCandidato, { nx: true, ex: ATTEMPT_TTL_SEGUNDOS });
-    if (criado) return { tipo: "obtido", pedidoId: pedidoIdCandidato, txid: txidCandidato };
+    if (criado) return { tipo: "obtido", pedidoId: pedidoIdCandidato, txid: txidCandidato, pricing: pricingCandidato };
   } catch (err) {
     logSurvivalErro("idempotencia_pedido", "attempt", "set_nx_falhou", err);
     return { tipo: "incerto" };
   }
 
-  // Chave já existia — recupera a identidade já reivindicada (retry de uma
-  // tentativa anterior, incluindo uma que nunca chegou a persistir o
-  // pedido) em vez de gerar uma nova.
+  // Chave já existia — recupera a identidade E O PREÇO já reivindicados
+  // (retry de uma tentativa anterior, incluindo uma que nunca chegou a
+  // persistir o pedido) em vez de gerar/recalcular do zero.
   let atual: unknown;
   try {
     atual = await redis.get(chave);
@@ -551,7 +559,23 @@ async function obterOuCriarAttempt(
     return { tipo: "incerto" };
   }
   if (atual.requestFingerprint !== requestFingerprint) return { tipo: "conflito_fingerprint" };
-  return { tipo: "obtido", pedidoId: atual.pedidoId, txid: atual.txid };
+  return { tipo: "obtido", pedidoId: atual.pedidoId, txid: atual.txid, pricing: atual.pricing };
+}
+
+// Best-effort: marca o attempt como "completed" quando o pedido conclui de
+// verdade (revisão de segurança, 5ª rodada, ponto 6) — só informativo, nada
+// no fluxo depende deste campo mudar (a fonte de verdade de "já concluído" é
+// sempre survivalState no próprio pedido + :result). Nunca sobrescreve um
+// attempt de outra tentativa (confere o fingerprint antes de gravar).
+async function marcarAttemptComoCompleted(clientRequestId: string, requestFingerprint: string): Promise<void> {
+  try {
+    const chave = chaveAttemptPedido(clientRequestId);
+    const atual = await redis.get(chave);
+    if (!ehAttemptValido(atual) || atual.requestFingerprint !== requestFingerprint) return;
+    await redis.set(chave, { ...atual, state: "completed", updatedAt: Date.now() }, { ex: ATTEMPT_TTL_SEGUNDOS });
+  } catch (err) {
+    logSurvivalErro("idempotencia_pedido", "attempt", "marcar_completed_falhou", err);
+  }
 }
 
 // Libera o claim (compare-and-delete atômico via Lua, só se ownerToken +
@@ -577,23 +601,23 @@ export async function POST(req: NextRequest) {
   let ownerToken: string | null = null;
   let claimAdquirido = false;
 
-  // Marcado assim que a persistência do pedido tiver sucesso — usado só
-  // pelo catch externo para decidir 503 recuperável (pedido pode já existir,
-  // nunca finge sucesso) vs. 500 comum (nada foi criado). Ver revisão de
-  // segurança, ponto 5: qualquer exceção NÃO tratada localmente depois da
-  // persistência é, por definição, um caso que nenhuma recuperação
-  // específica já cobriu — nunca vira sucesso degradado às cegas.
+  // Marcado assim que a persistência do pedido tiver sucesso (ou for
+  // reconciliada como já persistida — ver FASE 5) — usado só pelo catch
+  // externo para decidir 503 recuperável vs. 500 comum.
   let pedidoIdCriado: string | null = null;
 
   try {
     const body = (await req.json()) as PedidoApp;
 
-    // ---------------------------------------------------------------
-    // Validações puras: nada aqui escreve dado, reserva recompensa, cria
-    // Pix ou produz qualquer efeito externo — só validação e leitura. O
-    // claim de idempotência (mais abaixo) só entra em cena DEPOIS de tudo
-    // isto, para nunca gastar comandos Redis com um payload inválido.
-    // ---------------------------------------------------------------
+    // =================================================================
+    // FASE 1 — validações ESTRUTURAIS puras (revisão de segurança, 5ª
+    // rodada, ponto 1): dependem só da FORMA do próprio payload, nunca de
+    // estado que muda com o tempo (cardápio, promoções, esgotados, status
+    // de recompensa/resgate). Seguro rodar sempre, incondicionalmente,
+    // antes de qualquer consulta de idempotência ou validação de negócio —
+    // um payload malformado é sempre malformado, não importa quanto tempo
+    // tenha passado desde a tentativa original.
+    // =================================================================
 
     if (!body.cliente || !body.itens || body.itens.length === 0) {
       return NextResponse.json({ ok: false, error: "Pedido inválido" }, { status: 400 });
@@ -620,216 +644,55 @@ export async function POST(req: NextRequest) {
     if (!body.pagamento || !body.pagamento.trim()) {
       return NextResponse.json({ ok: false, error: "Forma de pagamento obrigatória" }, { status: 400 });
     }
-
     if (temDinheiroNoPagamento(body.pagamento) && !body.troco?.trim()) {
       return NextResponse.json({ ok: false, error: "Troco obrigatorio para dinheiro" }, { status: 400 });
     }
-
     if (body.tipoEntrega === "delivery" && (!body.bairro?.trim() || !body.rua?.trim() || !body.numero?.trim())) {
       return NextResponse.json({ ok: false, error: "Endereco obrigatorio para entrega" }, { status: 400 });
     }
-
-    const menu = await getMENUDinamico();
-    const pedidos = (await redis.get<unknown[]>("pedidos")) || [];
-
     // O frontend NUNCA decide o que é gratuito (bloqueio econômico crítico):
     // `recompensaJornadaId` num item do carrinho não é mais um campo aceito
     // do cliente — só o servidor marca um item como presente da Jornada,
-    // sempre a partir do snapshot da recompensa (ver bloco dedicado abaixo).
-    // Qualquer item que chegue com este campo é rejeitado de imediato.
+    // sempre a partir do snapshot da recompensa (ver FASE 3). Qualquer item
+    // que chegue com este campo é rejeitado de imediato.
     if (body.itens.some((item) => Boolean((item as ItemApp & { recompensaJornadaId?: unknown }).recompensaJornadaId))) {
       return NextResponse.json({ ok: false, error: "Item inválido" }, { status: 400 });
     }
 
-    // Itens promocionais: o preço NUNCA vem do cliente — é recalculado a
-    // partir da promoção ativa salva no Redis. Promoção inexistente,
-    // inativa, fora da janela ou com produto esgotado invalida o pedido.
-    const temPromo = body.itens.some((item) => item.kind === "promo");
-    const promos = temPromo ? ((await redis.get<Promocao[]>(PROMOS_KEY)) || []) : [];
-    const esgotadosPromo = temPromo ? ((await redis.get<string[]>("esgotados")) || []) : [];
-    const catalogoPromo = temPromo ? catalogoDoMenu(menu as never) : [];
-
-    const promoUnitPrice = makePromoUnitPrice({
-      promos,
-      esgotadosPromo,
-      dentroDaJanela,
-      promocaoIndisponivel,
-      precoFinalPromocao: (promo) => precoFinalPromocao(promo, catalogoPromo),
-    });
-
-    const itensValidados = body.itens.map((item) => ({
-      linha: formatItem(item),
-      unitPrice: item.kind === "promo" ? promoUnitPrice(item) : officialUnitPrice(item, menu as MenuPedidoApp),
-      qty: item.qty,
-    }));
-
-    if (itensValidados.some((item) => item.unitPrice === null)) {
-      return NextResponse.json({ ok: false, error: "Item inválido" }, { status: 400 });
-    }
-
-    // Presente da Jornada do Chef (rule 1/2/3): campo dedicado no payload —
-    // o frontend só informa QUAL recompensa reservada usar e (só para pizza)
-    // o sabor escolhido. Produto, preço, quantidade, tamanho e composição são
-    // SEMPRE reconstruídos no servidor a partir do snapshot da própria
-    // recompensa (nunca do carrinho) — ver `materializarItensRecompensa`.
-    //
-    // Autorização é SEMPRE pela sessão da Área do Cliente, nunca pelo
-    // telefone digitado no checkout: o telefone do body/whatsappToken não
-    // prova propriedade da recompensa (qualquer um pode digitar o telefone
-    // de outra pessoa). Pedido comum sem presente continua funcionando como
-    // convidado, sem exigir login.
-    //
-    // `prepararResgateParaPedido` é só leitura/validação — a vinculação real
-    // (`confirmarReservaNoPedido`, primeiro efeito irreversível deste fluxo)
-    // acontece mais abaixo, depois do claim de idempotência.
-    let clienteIdJornada: string | undefined;
+    // Presente da Jornada do Chef: só a FORMA do campo (qual recompensa,
+    // qual sabor) é extraída aqui — puro parse, sem tocar Redis além do já
+    // feito acima. A validação de NEGÓCIO (sessão pertence ao telefone,
+    // recompensa realmente disponível — `prepararResgateParaPedido`) é
+    // adiada para a FASE 3, porque o status da recompensa é mutável.
     let recompensaJornadaId: string | undefined;
-    let itensRecompensaMaterializados: ItemApp[] = [];
+    let recompensaEscolha: EscolhaRecompensaJornada | undefined;
     if (body.recompensaJornada && typeof body.recompensaJornada === "object") {
       recompensaJornadaId = String(body.recompensaJornada.recompensaId ?? "").trim();
       if (!recompensaJornadaId) {
         return NextResponse.json({ ok: false, error: "Presente da Jornada do Chef inválido ou já utilizado" }, { status: 400 });
       }
-
-      const tokenSessaoJornada = req.cookies.get(CLIENTE_COOKIE)?.value;
-      const payloadSessaoJornada = tokenSessaoJornada ? await verificarTokenCliente(tokenSessaoJornada) : null;
-      if (!payloadSessaoJornada) {
-        return NextResponse.json({ ok: false, error: "Faça login na área do cliente para usar o presente da Jornada do Chef" }, { status: 401 });
-      }
-      const clienteSessaoJornada = await buscarClientePorId(payloadSessaoJornada.clienteId);
-      if (!clienteSessaoJornada) {
-        return NextResponse.json({ ok: false, error: "Sessão inválida" }, { status: 401 });
-      }
-      // O telefone do pedido precisa corresponder ao telefone canônico da
-      // sessão autenticada (após normalização) — nunca transfere
-      // silenciosamente uma recompensa para outro número.
-      if (sanitizeTelefoneCliente(telefonePedido) !== sanitizeTelefoneCliente(clienteSessaoJornada.telefone)) {
-        return NextResponse.json({ ok: false, error: "O telefone do pedido não corresponde ao seu perfil. Presente da Jornada do Chef não aplicado." }, { status: 403 });
-      }
-      clienteIdJornada = derivarClienteIdPorTelefone(clienteSessaoJornada.telefone) ?? clienteSessaoJornada.clienteId;
-
       const escolhaBruta = body.recompensaJornada.escolha;
-      const escolha: EscolhaRecompensaJornada | undefined =
-        escolhaBruta && typeof escolhaBruta === "object"
-          ? { sabor: typeof escolhaBruta.sabor === "string" ? escolhaBruta.sabor : undefined }
-          : undefined;
-      const materializado = await prepararResgateParaPedido(clienteIdJornada, recompensaJornadaId, escolha);
-      if (!materializado.ok) {
-        return NextResponse.json({ ok: false, error: materializado.erro }, { status: 400 });
-      }
-      itensRecompensaMaterializados = materializado.itens.map((item) => ({
-        kind: item.kind,
-        name: item.name,
-        ...(item.detail ? { detail: item.detail } : {}),
-        price: 0,
-        qty: item.qty,
-        recompensaJornadaId,
-      }));
+      recompensaEscolha = escolhaBruta && typeof escolhaBruta === "object"
+        ? { sabor: typeof escolhaBruta.sabor === "string" ? escolhaBruta.sabor : undefined }
+        : undefined;
     }
 
-    const itensRecompensaValidados = itensRecompensaMaterializados.map((item) => ({
-      linha: formatItem(item),
-      unitPrice: 0,
-      qty: item.qty,
-    }));
-
-    // Itens finais = itens normais do carrinho (preço sempre recalculado no
-    // servidor acima) + itens do presente da Jornada, se houver (sempre
-    // materializados no servidor, preço sempre 0). Formata como strings, no
-    // MESMO padrão do fluxo do WhatsApp.
-    const itensDetalhadosFinais: ItemApp[] = [...body.itens, ...itensRecompensaMaterializados];
-    const itensValidadosFinais = [...itensValidados, ...itensRecompensaValidados];
-    const itens = itensValidadosFinais.map((item) => item.linha);
-
-    const subtotal = itensValidadosFinais.reduce((s, item) => s + item.unitPrice! * item.qty, 0);
-
-    // Resgate de fidelidade (Etapa 5): desconto calculado EXCLUSIVAMENTE no
-    // servidor, a partir de uma reserva já validada (nunca um valor vindo do
-    // cliente). Identidade canônica é sempre o telefone do pedido — a mesma
-    // regra usada para crédito/previsto. Reserva expirada, inexistente ou já
-    // usada rejeita o pedido (isto é dinheiro, não um efeito colateral
-    // best-effort como o crédito de pontos). `obterReservasResgatePontos` é
-    // só leitura — a confirmação real (`confirmarResgatePontos`) acontece
-    // depois da persistência do pedido, mais abaixo.
-    let descontoFidelidade = 0;
-    let resgateAplicado: { clienteId: string; resgateId: string } | null = null;
-    if (body.resgateId) {
-      const clienteIdResgate = derivarClienteIdPorTelefone(telefonePedido);
-      if (!clienteIdResgate) {
-        return NextResponse.json({ ok: false, error: "Telefone inválido para aplicar o resgate" }, { status: 400 });
-      }
-      const reservas = await obterReservasResgatePontos(clienteIdResgate);
-      const reserva = reservas.find((r) => r.resgateId === body.resgateId);
-      if (!reserva || reserva.status !== "reservado") {
-        return NextResponse.json({ ok: false, error: "Resgate inválido ou já utilizado" }, { status: 400 });
-      }
-      if (new Date(reserva.expiraEm).getTime() < Date.now()) {
-        return NextResponse.json({ ok: false, error: "Resgate expirado — gere um novo resgate no app" }, { status: 400 });
-      }
-      // Desconto nunca ultrapassa o valor-base configurado nem o próprio
-      // subtotal (nunca deixa o pedido negativo); adicionais/borda/entrega já
-      // ficam de fora por construção (o desconto incide só sobre o subtotal
-      // dos produtos, antes da taxa de entrega).
-      descontoFidelidade = Math.max(0, Math.min(reserva.valorDescontoMaximo, subtotal));
-      if (descontoFidelidade <= 0) {
-        return NextResponse.json({ ok: false, error: "Pedido não atinge o valor mínimo para usar o resgate" }, { status: 400 });
-      }
-      resgateAplicado = { clienteId: clienteIdResgate, resgateId: reserva.resgateId };
-    }
-
-    const subtotalComDesconto = subtotal - descontoFidelidade;
-    const taxa = computeTaxaApp(body.tipoEntrega, body.bairro, menu.neighborhoods as Array<{ name: string; fee: number }>);
-    const total = subtotalComDesconto + taxa;
-
-    // Troco (quando há dinheiro no pagamento, puro ou híbrido) é validado só
-    // contra a parte em dinheiro — mesma regra do fluxo do WhatsApp (bot.ts).
-    if (temDinheiroNoPagamento(body.pagamento) && body.troco?.trim() && !/sem\s*troco/i.test(body.troco)) {
-      const valorTroco = parseFloat(body.troco.replace(",", ".").replace(/[^0-9.]/g, ""));
-      const baseTroco = valorDinheiroEsperado(body.pagamento, total);
-      if (isNaN(valorTroco) || valorTroco < baseTroco) {
-        return NextResponse.json({ ok: false, error: "Valor de troco insuficiente para a parte em dinheiro" }, { status: 400 });
-      }
-    }
-
-    const endereco = buildEnderecoApp({ tipoEntrega: body.tipoEntrega, rua: body.rua, numero: body.numero, bairro: body.bairro });
-
-    // Vinculo com area do cliente (opcional): se o cliente estiver logado
-    // (cookie cliente-token valido), o pedido recebe clienteId + contagem de
-    // pizzas para credito de fidelidade futuro. Pedido anonimo/convidado
-    // segue funcionando normalmente — qualquer falha aqui e ignorada e o
-    // pedido NUNCA deixa de ser criado por causa da fidelidade/login.
-    let clienteId: string | undefined;
-    try {
-      const clienteToken = req.cookies.get(CLIENTE_COOKIE)?.value;
-      if (clienteToken) {
-        const payloadCliente = await verificarTokenCliente(clienteToken);
-        if (payloadCliente) clienteId = payloadCliente.clienteId;
-      }
-    } catch (err) {
-      console.error("[ChefeBot] Erro ao resolver cliente do pedido (ignorado):", err);
-    }
-
-    // pizzasCount alimenta a fidelidade antiga (compra N pizzas, ganha 1
-    // grátis) quando o pedido é marcado como entregue — nunca pode incluir a
-    // pizza-presente da Jornada do Chef, que o cliente não pagou.
-    let pizzasCount = 0;
-    try {
-      pizzasCount = contarPizzasPagasParaFidelidade(itensDetalhadosFinais);
-    } catch (err) {
-      console.error("[ChefeBot] Erro ao contar pizzas para fidelidade (ignorado):", err);
-    }
-
-    // `let`: reatribuído mais abaixo para o valor ESTÁVEL do "attempt" quando
-    // clientRequestId está presente (revisão de segurança, 4ª rodada, ponto
-    // 3) — todo o resto do fluxo (Jornada, Pix, persistência) usa só esta
-    // variável, nunca um valor recalculado.
-    let pedidoId = Date.now().toString();
-
-    // ---------------------------------------------------------------
-    // Fim das validações puras. A partir daqui, os próximos passos são
-    // efeitos irreversíveis (vincular recompensa, gerar número, criar Pix,
-    // persistir) — é aqui, e só aqui, que a idempotência entra em cena.
-    // ---------------------------------------------------------------
+    // =================================================================
+    // FASE 2 — clientRequestId + fingerprint (só campos BRUTOS do payload,
+    // nunca preço calculado) e RECUPERAÇÃO ANTECIPADA de idempotência
+    // (revisão de segurança, 5ª rodada, ponto 1): se esta tentativa já foi
+    // concluída (ou está em andamento por outra execução concorrente),
+    // devolve o resultado real AGORA — antes de rodar qualquer validação
+    // de negócio que possa ter mudado com o tempo (promoção expirada,
+    // produto esgotado, resgate já debitado por ESTA MESMA tentativa já
+    // confirmada, recompensa da Jornada já usada). Sem isto, um retry
+    // legítimo de uma tentativa JÁ CONCLUÍDA podia receber 400/409 antes de
+    // a rota sequer olhar para o pedido/resultado já existente. Só quando
+    // NENHUM resultado/pedido concluído é encontrado é que seguimos para
+    // as validações mutáveis (FASE 3) e, só então, para o claim de uma
+    // criação genuinamente NOVA (FASE 4) — o claim continua depois das
+    // validações de negócio, como antes; só a RECUPERAÇÃO foi antecipada.
+    // =================================================================
 
     const survivalAtivo = survivalModeEnabled();
     clientRequestId = survivalAtivo ? sanitizeClientRequestId(body.clientRequestId) : null;
@@ -853,10 +716,6 @@ export async function POST(req: NextRequest) {
     }
 
     if (clientRequestId) {
-      const recompensaEscolhaSabor =
-        body.recompensaJornada?.escolha && typeof body.recompensaJornada.escolha === "object"
-          ? body.recompensaJornada.escolha.sabor
-          : undefined;
       requestFingerprint = calcularRequestFingerprint({
         cliente: body.cliente,
         telefonePedido,
@@ -872,17 +731,16 @@ export async function POST(req: NextRequest) {
         troco: body.troco,
         resgateId: body.resgateId,
         recompensaJornadaId,
-        recompensaEscolhaSabor,
+        recompensaEscolhaSabor: recompensaEscolha?.sabor,
       });
 
       const resolucaoRapida = await resolverViaResultadoExistente(clientRequestId, requestFingerprint);
       if (resolucaoRapida.tipo === "resposta") return resolucaoRapida.resposta;
       // "prosseguir" (:result nunca existiu, ou stale já invalidado
-      // atomicamente e comprovado) — antes de
-      // reivindicar um novo claim, verifica se o PEDIDO REAL já existe (caso
-      // em que o :result nunca chegou a ser gravado ou já expirou — ver
-      // revisão de segurança, ponto 1). Nunca cria um segundo pedido quando
-      // o hash bate.
+      // atomicamente e comprovado) — antes de reivindicar um novo claim,
+      // verifica se o PEDIDO REAL já existe (caso em que o :result nunca
+      // chegou a ser gravado ou já expirou). Nunca cria um segundo pedido
+      // quando o hash bate.
       const clientRequestIdHash = hashClientRequestId(clientRequestId);
       const buscaPorHash = await buscarPedidoPorClientRequestIdHash(clientRequestIdHash, requestFingerprint);
       if (buscaPorHash.tipo === "incerto") return respostaClaimIncerto();
@@ -915,8 +773,187 @@ export async function POST(req: NextRequest) {
         );
         return NextResponse.json(respostaRecuperada);
       }
-      // "nao_encontrado" em ambos — segue para tentar reivindicar o claim.
+      // "nao_encontrado" em ambos — genuinamente uma criação nova (ou uma
+      // recuperação via attempt, se a persistência de uma tentativa
+      // anterior tiver falhado — resolvido na FASE 4). Segue para as
+      // validações de negócio (FASE 3).
+    }
 
+    // =================================================================
+    // FASE 3 — validações de NEGÓCIO, que dependem de estado MUTÁVEL
+    // (cardápio, promoções, produtos esgotados, disponibilidade da
+    // recompensa da Jornada, validade do resgate de pontos, cálculo de
+    // preço). Só chega aqui quando a FASE 2 não encontrou nenhuma
+    // tentativa já concluída/em andamento — sempre uma avaliação FRESCA.
+    // =================================================================
+
+    const menu = await getMENUDinamico();
+    const pedidos = (await redis.get<unknown[]>("pedidos")) || [];
+
+    // Itens promocionais: o preço NUNCA vem do cliente — é recalculado a
+    // partir da promoção ativa salva no Redis. Promoção inexistente,
+    // inativa, fora da janela ou com produto esgotado invalida o pedido.
+    const temPromo = body.itens.some((item) => item.kind === "promo");
+    const promos = temPromo ? ((await redis.get<Promocao[]>(PROMOS_KEY)) || []) : [];
+    const esgotadosPromo = temPromo ? ((await redis.get<string[]>("esgotados")) || []) : [];
+    const catalogoPromo = temPromo ? catalogoDoMenu(menu as never) : [];
+
+    const promoUnitPrice = makePromoUnitPrice({
+      promos,
+      esgotadosPromo,
+      dentroDaJanela,
+      promocaoIndisponivel,
+      precoFinalPromocao: (promo) => precoFinalPromocao(promo, catalogoPromo),
+    });
+
+    const itensValidados = body.itens.map((item) => ({
+      linha: formatItem(item),
+      unitPrice: item.kind === "promo" ? promoUnitPrice(item) : officialUnitPrice(item, menu as MenuPedidoApp),
+      qty: item.qty,
+    }));
+
+    if (itensValidados.some((item) => item.unitPrice === null)) {
+      return NextResponse.json({ ok: false, error: "Item inválido" }, { status: 400 });
+    }
+
+    // Presente da Jornada do Chef (rule 1/2/3): produto, preço, quantidade,
+    // tamanho e composição são SEMPRE reconstruídos no servidor a partir do
+    // snapshot da própria recompensa (nunca do carrinho) — ver
+    // `materializarItensRecompensa`. Autorização é SEMPRE pela sessão da
+    // Área do Cliente, nunca pelo telefone digitado no checkout.
+    //
+    // `prepararResgateParaPedido` é só leitura/validação — a vinculação real
+    // (`confirmarReservaNoPedido`, primeiro efeito irreversível deste
+    // fluxo) acontece na FASE 5, depois do claim de idempotência.
+    let clienteIdJornada: string | undefined;
+    let itensRecompensaMaterializados: ItemApp[] = [];
+    if (recompensaJornadaId) {
+      const tokenSessaoJornada = req.cookies.get(CLIENTE_COOKIE)?.value;
+      const payloadSessaoJornada = tokenSessaoJornada ? await verificarTokenCliente(tokenSessaoJornada) : null;
+      if (!payloadSessaoJornada) {
+        return NextResponse.json({ ok: false, error: "Faça login na área do cliente para usar o presente da Jornada do Chef" }, { status: 401 });
+      }
+      const clienteSessaoJornada = await buscarClientePorId(payloadSessaoJornada.clienteId);
+      if (!clienteSessaoJornada) {
+        return NextResponse.json({ ok: false, error: "Sessão inválida" }, { status: 401 });
+      }
+      // O telefone do pedido precisa corresponder ao telefone canônico da
+      // sessão autenticada (após normalização) — nunca transfere
+      // silenciosamente uma recompensa para outro número.
+      if (sanitizeTelefoneCliente(telefonePedido) !== sanitizeTelefoneCliente(clienteSessaoJornada.telefone)) {
+        return NextResponse.json({ ok: false, error: "O telefone do pedido não corresponde ao seu perfil. Presente da Jornada do Chef não aplicado." }, { status: 403 });
+      }
+      clienteIdJornada = derivarClienteIdPorTelefone(clienteSessaoJornada.telefone) ?? clienteSessaoJornada.clienteId;
+
+      const materializado = await prepararResgateParaPedido(clienteIdJornada, recompensaJornadaId, recompensaEscolha);
+      if (!materializado.ok) {
+        return NextResponse.json({ ok: false, error: materializado.erro }, { status: 400 });
+      }
+      itensRecompensaMaterializados = materializado.itens.map((item) => ({
+        kind: item.kind,
+        name: item.name,
+        ...(item.detail ? { detail: item.detail } : {}),
+        price: 0,
+        qty: item.qty,
+        recompensaJornadaId,
+      }));
+    }
+
+    // Itens finais = itens normais do carrinho (preço sempre recalculado no
+    // servidor acima) + itens do presente da Jornada, se houver (sempre
+    // materializados no servidor, preço sempre 0). Formata como strings, no
+    // MESMO padrão do fluxo do WhatsApp.
+    const itensRecompensaValidados = itensRecompensaMaterializados.map((item) => ({
+      linha: formatItem(item),
+      unitPrice: 0,
+      qty: item.qty,
+    }));
+    const itensDetalhadosFinais: ItemApp[] = [...body.itens, ...itensRecompensaMaterializados];
+    const itensValidadosFinais = [...itensValidados, ...itensRecompensaValidados];
+    const itens = itensValidadosFinais.map((item) => item.linha);
+    const subtotal = itensValidadosFinais.reduce((s, item) => s + item.unitPrice! * item.qty, 0);
+
+    // Resgate de fidelidade (Etapa 5): desconto calculado EXCLUSIVAMENTE no
+    // servidor, a partir de uma reserva já validada (nunca um valor vindo do
+    // cliente). `obterReservasResgatePontos` é só leitura — a confirmação
+    // real (`confirmarResgatePontos`) acontece na FASE 5, depois da
+    // persistência do pedido.
+    let descontoFidelidade = 0;
+    let resgateAplicado: { clienteId: string; resgateId: string } | null = null;
+    if (body.resgateId) {
+      const clienteIdResgate = derivarClienteIdPorTelefone(telefonePedido);
+      if (!clienteIdResgate) {
+        return NextResponse.json({ ok: false, error: "Telefone inválido para aplicar o resgate" }, { status: 400 });
+      }
+      const reservas = await obterReservasResgatePontos(clienteIdResgate);
+      const reserva = reservas.find((r) => r.resgateId === body.resgateId);
+      if (!reserva || reserva.status !== "reservado") {
+        return NextResponse.json({ ok: false, error: "Resgate inválido ou já utilizado" }, { status: 400 });
+      }
+      if (new Date(reserva.expiraEm).getTime() < Date.now()) {
+        return NextResponse.json({ ok: false, error: "Resgate expirado — gere um novo resgate no app" }, { status: 400 });
+      }
+      // Desconto nunca ultrapassa o valor-base configurado nem o próprio
+      // subtotal (nunca deixa o pedido negativo); adicionais/borda/entrega já
+      // ficam de fora por construção (o desconto incide só sobre o subtotal
+      // dos produtos, antes da taxa de entrega).
+      descontoFidelidade = Math.max(0, Math.min(reserva.valorDescontoMaximo, subtotal));
+      if (descontoFidelidade <= 0) {
+        return NextResponse.json({ ok: false, error: "Pedido não atinge o valor mínimo para usar o resgate" }, { status: 400 });
+      }
+      resgateAplicado = { clienteId: clienteIdResgate, resgateId: reserva.resgateId };
+    }
+
+    // `let`: os três podem ser SUBSTITUÍDOS na FASE 4 pelo snapshot
+    // financeiro ESTÁVEL do attempt (revisão de segurança, 5ª rodada, ponto
+    // 4), quando esta for a recuperação de uma tentativa anterior cujo
+    // preço já foi cobrado/persistido — nunca cobra/persiste um valor
+    // diferente do que uma cobrança Pix anterior já usou, mesmo que
+    // cardápio/promoção/taxa tenham mudado nesse meio-tempo.
+    let taxa = computeTaxaApp(body.tipoEntrega, body.bairro, menu.neighborhoods as Array<{ name: string; fee: number }>);
+    let total = subtotal - descontoFidelidade + taxa;
+
+    const endereco = buildEnderecoApp({ tipoEntrega: body.tipoEntrega, rua: body.rua, numero: body.numero, bairro: body.bairro });
+
+    // Vinculo com area do cliente (opcional): se o cliente estiver logado
+    // (cookie cliente-token valido), o pedido recebe clienteId + contagem de
+    // pizzas para credito de fidelidade futuro. Pedido anonimo/convidado
+    // segue funcionando normalmente — qualquer falha aqui e ignorada e o
+    // pedido NUNCA deixa de ser criado por causa da fidelidade/login.
+    let clienteId: string | undefined;
+    try {
+      const clienteToken = req.cookies.get(CLIENTE_COOKIE)?.value;
+      if (clienteToken) {
+        const payloadCliente = await verificarTokenCliente(clienteToken);
+        if (payloadCliente) clienteId = payloadCliente.clienteId;
+      }
+    } catch (err) {
+      console.error("[ChefeBot] Erro ao resolver cliente do pedido (ignorado):", err);
+    }
+
+    // pizzasCount alimenta a fidelidade antiga (compra N pizzas, ganha 1
+    // grátis) quando o pedido é marcado como entregue — nunca pode incluir a
+    // pizza-presente da Jornada do Chef, que o cliente não pagou.
+    let pizzasCount = 0;
+    try {
+      pizzasCount = contarPizzasPagasParaFidelidade(itensDetalhadosFinais);
+    } catch (err) {
+      console.error("[ChefeBot] Erro ao contar pizzas para fidelidade (ignorado):", err);
+    }
+
+    // `let`: reatribuído na FASE 4 para o valor ESTÁVEL do "attempt" quando
+    // clientRequestId está presente — todo o resto do fluxo (Jornada, Pix,
+    // persistência) usa só esta variável, nunca um valor recalculado.
+    let pedidoId = Date.now().toString();
+
+    // =================================================================
+    // FASE 4 — claim (só para uma criação NOVA) + identidade/preço
+    // estáveis da tentativa (attempt). O claim continua depois das
+    // validações de negócio (nunca antes) — só a RECUPERAÇÃO de uma
+    // tentativa já concluída foi antecipada para a FASE 2.
+    // =================================================================
+
+    if (clientRequestId && requestFingerprint) {
       ownerToken = randomUUID();
       const claimKey = chaveClaimPedido(clientRequestId);
       const valorClaim = montarValorClaim(ownerToken, requestFingerprint);
@@ -942,25 +979,62 @@ export async function POST(req: NextRequest) {
       claimAdquirido = true;
 
       // Identidade estável da tentativa (revisão de segurança, 4ª rodada,
-      // ponto 3) — resolvida ANTES de qualquer efeito externo. A partir
-      // daqui, `pedidoId` é o valor ESTÁVEL (reaproveitado em qualquer retry
-      // com o mesmo clientRequestId+fingerprint, mesmo que a tentativa
-      // anterior nunca tenha persistido) — todo o resto do fluxo (Jornada,
-      // Pix, persistência, idempotência) usa só esta variável.
-      const attempt = await obterOuCriarAttempt(clientRequestId, requestFingerprint, pedidoId);
+      // ponto 3) + snapshot financeiro estável (5ª rodada, ponto 4) —
+      // resolvidos ANTES de qualquer efeito externo. O candidato é
+      // construído a partir do preço FRESCO calculado acima (FASE 3); se
+      // esta chave já existir (retry), o valor ARMAZENADO é o que vale.
+      const pricingCandidato: SnapshotFinanceiroAttempt = {
+        total,
+        subtotal,
+        taxaEntrega: taxa,
+        descontoFidelidade,
+        ...(temPixNoPagamento(body.pagamento) ? { valorPixEsperado: valorPixEsperado(body.pagamento, total) } : {}),
+        pricingFingerprint: "",
+      };
+      pricingCandidato.pricingFingerprint = calcularPricingFingerprint(pricingCandidato);
+
+      const attempt = await obterOuCriarAttempt(clientRequestId, requestFingerprint, pedidoId, pricingCandidato);
       if (attempt.tipo === "conflito_fingerprint") {
         await liberarClaimSeAdquirido(clientRequestId, ownerToken, requestFingerprint, claimAdquirido);
         return respostaConflitoFingerprint();
       }
       if (attempt.tipo === "incerto") {
         // Não há como saber se o attempt foi criado/recuperado — nunca
-        // prossegue às cegas (poderia gerar um pedidoId divergente do já
-        // eventualmente usado numa cobrança Pix anterior). Mantém o claim:
-        // só liberar quando soubermos com certeza que nada foi criado.
+        // prossegue às cegas (poderia gerar um pedidoId/preço divergente do
+        // já eventualmente usado numa cobrança Pix anterior). Mantém o
+        // claim: só liberar quando soubermos com certeza que nada foi criado.
         return respostaClaimIncerto();
       }
       pedidoId = attempt.pedidoId;
+      // Reaproveita o valor financeiro ESTÁVEL do attempt — numa criação
+      // nova, isto é um no-op (o candidato acabou de ser gravado com este
+      // mesmo valor); numa recuperação, GARANTE que o valor cobrado/
+      // persistido seja EXATAMENTE o mesmo da tentativa original, mesmo que
+      // cardápio/promoção/taxa tenham mudado desde então.
+      total = attempt.pricing.total;
+      taxa = attempt.pricing.taxaEntrega;
+      descontoFidelidade = attempt.pricing.descontoFidelidade;
     }
+
+    // Troco (quando há dinheiro no pagamento, puro ou híbrido) é validado só
+    // contra a parte em dinheiro — mesma regra do fluxo do WhatsApp
+    // (bot.ts). Roda DEPOIS da FASE 4 de propósito: usa o `total` FINAL
+    // (já possivelmente substituído pelo snapshot estável do attempt), nunca
+    // um total recém-calculado que poderia divergir do valor já cobrado.
+    if (temDinheiroNoPagamento(body.pagamento) && body.troco?.trim() && !/sem\s*troco/i.test(body.troco)) {
+      const valorTroco = parseFloat(body.troco.replace(",", ".").replace(/[^0-9.]/g, ""));
+      const baseTroco = valorDinheiroEsperado(body.pagamento, total);
+      if (isNaN(valorTroco) || valorTroco < baseTroco) {
+        await liberarClaimSeAdquirido(clientRequestId, ownerToken, requestFingerprint, claimAdquirido);
+        return NextResponse.json({ ok: false, error: "Valor de troco insuficiente para a parte em dinheiro" }, { status: 400 });
+      }
+    }
+
+    // =================================================================
+    // FASE 5 — efeitos irreversíveis: vínculo da Jornada, preparação do
+    // Pix e persistência do pedido; confirmação do resgate; idempotência
+    // durável.
+    // =================================================================
 
     // Vincula a recompensa da Jornada do Chef a ESTE pedidoId ANTES de
     // persistir o pedido (rule 6): se a vinculação falhar (recompensa
@@ -978,21 +1052,16 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Declaradas fora do try (revisão de segurança, 4ª rodada, ponto 4):
-    // atribuídas uma única vez, DENTRO do try abaixo, que agora cobre todo o
-    // espaço entre o vínculo da Jornada e a persistência — nunca só o
-    // redis.set. Antes desta correção, uma exceção em proximoNumeroPedido()
-    // (ou qualquer outro passo desta preparação) escapava sem passar pelo
-    // catch de compensação, deixando o vínculo da recompensa preso
-    // indefinidamente. `pedidoId` já é estável (ver obterOuCriarAttempt) —
-    // um retry que refizer esta preparação (inclusive recriando a cobrança
-    // Pix) reutiliza a MESMA X-Idempotency-Key, então o Mercado Pago nunca
-    // gera uma segunda cobrança real mesmo que o provider já tenha sido
-    // chamado antes desta exceção.
+    // Declaradas fora do try: atribuídas uma única vez, DENTRO do try
+    // abaixo, que cobre todo o espaço entre o vínculo da Jornada e a
+    // persistência — nunca só o redis.set. `pedidoId` já é estável (ver
+    // FASE 4) — um retry que refizer esta preparação (inclusive recriando
+    // a cobrança Pix) reutiliza a MESMA X-Idempotency-Key e o MESMO valor
+    // financeiro, então o Mercado Pago nunca gera uma segunda cobrança real
+    // mesmo que o provider já tenha sido chamado antes de uma exceção.
     let numeroPedido: number;
     let statusToken: string;
     let pix: PixMetadata | undefined;
-    let novoPedido: Record<string, unknown>;
 
     try {
       numeroPedido = await proximoNumeroPedido();
@@ -1004,86 +1073,141 @@ export async function POST(req: NextRequest) {
         clienteNome: body.cliente,
         payerEmail: body.email,
       });
-      novoPedido = {
-      id: pedidoId,
-      numero: numeroPedido,
-      cliente: body.cliente,
-      telefone: telefonePedido,
-      ...(whatsappVinculado ? { whatsappVinculado: true } : {}),
-      ...(clienteId ? { clienteId } : {}),
-      ...(pizzasCount > 0 ? { pizzasCount } : {}),
-      ...(resgateAplicado ? { resgateId: resgateAplicado.resgateId, descontoFidelidade } : {}),
-      ...(recompensaJornadaId ? { recompensaJornadaId } : {}),
-      // Modo Sobrevivência: hash (nunca o valor bruto) do clientRequestId +
-      // fingerprint da tentativa — única prova durável de idempotência
-      // dentro do próprio pedido, usada quando :claim/:result expiram ou
-      // nunca chegam a ser gravados (ver buscarPedidoPorClientRequestIdHash).
-      // Nunca enviado em recibos/mensagens/APIs públicas: todos os pontos de
-      // leitura voltados ao cliente (montarStatusPublicoPedido, etc.)
-      // projetam campos explícitos, nunca espalham o pedido inteiro.
-      ...(clientRequestId && requestFingerprint
-        ? {
-            survivalClientRequestIdHash: hashClientRequestId(clientRequestId),
-            survivalRequestFingerprint: requestFingerprint,
-            // Resgate é o único efeito crítico posterior à persistência
-            // hoje — pedidos sem resgate já nascem "completed" (nada mais
-            // precisa ser confirmado). Ver survivalStateBloqueiaSucesso.
-            survivalState: (resgateAplicado ? "pending_critical_confirmation" : "completed") satisfies SurvivalPedidoState,
-          }
-        : {}),
-      itens,
-      total,
-      status: "novo" as const,
-      horario: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" }),
-      endereco,
-      data: new Date().toLocaleDateString("pt-BR"),
-      origem: "site",
-      statusToken,
-      ...(body.observacao ? { observacao: body.observacao } : {}),
-      pagamento: body.pagamento,
-      ...(pix ? { pix } : {}),
-      ...(body.troco ? { troco: body.troco } : {}),
-      ...(taxa ? { taxaEntrega: taxa } : {}),
-      ...(body.bairro ? { bairro: body.bairro } : {}),
-      ...(body.referencia ? { referencia: body.referencia } : {}),
-      ...(body.tipoEntrega ? { tipoEntrega: body.tipoEntrega } : {}),
-      ...(body.tipoEntrega === "delivery" && body.rua ? { rua: body.rua } : {}),
-      ...(body.tipoEntrega === "delivery" && body.numero ? { enderecoNumero: body.numero } : {}),
-      // Snapshot estruturado dos itens (Etapa edição de pedido): permite
-      // recarregar o carrinho fielmente ao iniciar uma edição, sem depender
-      // de reinterpretar as strings formatadas de `itens`. Inclui o(s) item(ns)
-      // materializados do presente da Jornada do Chef, se houver.
-      itensDetalhados: itensDetalhadosFinais,
-      revision: 1,
+      const novoPedido = {
+        id: pedidoId,
+        numero: numeroPedido,
+        cliente: body.cliente,
+        telefone: telefonePedido,
+        ...(whatsappVinculado ? { whatsappVinculado: true } : {}),
+        ...(clienteId ? { clienteId } : {}),
+        ...(pizzasCount > 0 ? { pizzasCount } : {}),
+        ...(resgateAplicado ? { resgateId: resgateAplicado.resgateId, descontoFidelidade } : {}),
+        ...(recompensaJornadaId ? { recompensaJornadaId } : {}),
+        // Modo Sobrevivência: hash (nunca o valor bruto) do clientRequestId +
+        // fingerprint da tentativa — única prova durável de idempotência
+        // dentro do próprio pedido, usada quando :claim/:result expiram ou
+        // nunca chegam a ser gravados (ver buscarPedidoPorClientRequestIdHash).
+        // Nunca enviado em recibos/mensagens/APIs públicas: todos os pontos de
+        // leitura voltados ao cliente (montarStatusPublicoPedido, etc.)
+        // projetam campos explícitos, nunca espalham o pedido inteiro.
+        ...(clientRequestId && requestFingerprint
+          ? {
+              survivalClientRequestIdHash: hashClientRequestId(clientRequestId),
+              survivalRequestFingerprint: requestFingerprint,
+              // Resgate é o único efeito crítico posterior à persistência
+              // hoje — pedidos sem resgate já nascem "completed" (nada mais
+              // precisa ser confirmado). Ver survivalStateBloqueiaSucesso.
+              survivalState: (resgateAplicado ? "pending_critical_confirmation" : "completed") satisfies SurvivalPedidoState,
+            }
+          : {}),
+        itens,
+        total,
+        status: "novo" as const,
+        horario: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" }),
+        endereco,
+        data: new Date().toLocaleDateString("pt-BR"),
+        origem: "site",
+        statusToken,
+        ...(body.observacao ? { observacao: body.observacao } : {}),
+        pagamento: body.pagamento,
+        ...(pix ? { pix } : {}),
+        ...(body.troco ? { troco: body.troco } : {}),
+        ...(taxa ? { taxaEntrega: taxa } : {}),
+        ...(body.bairro ? { bairro: body.bairro } : {}),
+        ...(body.referencia ? { referencia: body.referencia } : {}),
+        ...(body.tipoEntrega ? { tipoEntrega: body.tipoEntrega } : {}),
+        ...(body.tipoEntrega === "delivery" && body.rua ? { rua: body.rua } : {}),
+        ...(body.tipoEntrega === "delivery" && body.numero ? { enderecoNumero: body.numero } : {}),
+        // Snapshot estruturado dos itens (Etapa edição de pedido): permite
+        // recarregar o carrinho fielmente ao iniciar uma edição, sem depender
+        // de reinterpretar as strings formatadas de `itens`. Inclui o(s) item(ns)
+        // materializados do presente da Jornada do Chef, se houver.
+        itensDetalhados: itensDetalhadosFinais,
+        revision: 1,
       };
 
       await redis.set("pedidos", [...pedidos, novoPedido]);
       pedidoIdCriado = pedidoId;
     } catch (err) {
-      // Qualquer falha entre o vínculo da Jornada e a persistência (inclusive
-      // proximoNumeroPedido, criação/preparação do Pix ou o próprio
-      // redis.set) — o pedido não chegou a ser persistido: libera só o
-      // vínculo desta recompensa com este pedidoId (nunca reescreve a lista
-      // inteira de "pedidos" como compensação, rule 6), e libera o claim de
-      // idempotência (nenhum pedido existe, retry legítimo deve poder tentar
-      // de novo — reaproveitando a MESMA identidade estável do attempt).
-      if (recompensaJornadaId && clienteIdJornada) {
-        await liberarVinculoRecompensaPedidoNaoCriado(clienteIdJornada, recompensaJornadaId, pedidoId).catch(() => {});
+      // Revisão de segurança, 5ª rodada, ponto 3: uma exceção de
+      // redis.set("pedidos", ...) NÃO comprova que o pedido não foi
+      // persistido — o Redis pode ter aplicado a escrita e a resposta HTTP
+      // ter sofrido timeout. Para tentativas protegidas pelo Modo
+      // Sobrevivência (pedidoId estável via attempt + hash gravado no
+      // pedido), reconcilia com uma leitura FRESCA antes de compensar às
+      // cegas.
+      if (clientRequestId) {
+        const reconciliacao = await buscarPedidoPersistidoPorId(pedidoId);
+        if (reconciliacao.tipo === "incerto") {
+          logSurvivalErro("pedido_app", "reconciliacao_persistencia", "leitura_incerta", err);
+          // Nunca compensa, nunca libera claim/attempt — não há como saber
+          // se o pedido existe ou não.
+          return respostaClaimIncerto();
+        }
+        if (reconciliacao.tipo === "encontrado") {
+          // O pedido FOI persistido de verdade apesar da exceção reportada
+          // — nunca duplicar, nunca liberar o vínculo da Jornada nem o
+          // claim às cegas. Continua o fluxo normal a partir daqui como se
+          // a persistência tivesse retornado com sucesso, usando os dados
+          // REAIS já persistidos (nunca os valores locais não confirmados).
+          pedidoIdCriado = pedidoId;
+          numeroPedido = typeof reconciliacao.pedido.numero === "number" ? reconciliacao.pedido.numero : 0;
+          statusToken = typeof reconciliacao.pedido.statusToken === "string" ? reconciliacao.pedido.statusToken : "";
+          pix = reconciliacao.pedido.pix;
+        } else {
+          // "nao_encontrado" comprovado — agora sim, seguro compensar.
+          if (recompensaJornadaId && clienteIdJornada) {
+            // Revisão de segurança, 5ª rodada, ponto 5: o resultado da
+            // liberação NUNCA é ignorado (nunca só `.catch(() => {})`). Se
+            // não for possível comprovar que a recompensa foi liberada, a
+            // rota NUNCA finge sucesso — mantém claim+attempt estáveis para
+            // uma tentativa de recuperação operacional, e um retry legítimo
+            // continua reutilizando o MESMO pedidoId (nunca vincula a
+            // recompensa a outro).
+            let vinculoLiberado = true;
+            try {
+              await liberarVinculoRecompensaPedidoNaoCriado(clienteIdJornada, recompensaJornadaId, pedidoId);
+            } catch (errLiberacao) {
+              vinculoLiberado = false;
+              logSurvivalErro("pedido_app", "compensacao_jornada", "liberar_vinculo_falhou", errLiberacao);
+            }
+            if (!vinculoLiberado) {
+              return NextResponse.json(
+                {
+                  ok: false,
+                  unresolved: true,
+                  error: "Não foi possível confirmar este pedido. Não tente novamente agora — verifique com a pizzaria antes de fazer um novo pedido.",
+                },
+                { status: 503 }
+              );
+            }
+          }
+          await liberarClaimSeAdquirido(clientRequestId, ownerToken, requestFingerprint, claimAdquirido);
+          console.error("[ChefeBot] Erro ao preparar/persistir pedido do site:", err);
+          return NextResponse.json({ ok: false, error: "Erro interno" }, { status: 500 });
+        }
+      } else {
+        // Sem clientRequestId (flag desligada ou ausente) — comportamento
+        // pré-existente: nenhuma reconciliação de idempotência é possível
+        // (pedidoId não é estável, sem hash gravado no pedido), então
+        // qualquer exceção aqui é tratada como "não persistido".
+        if (recompensaJornadaId && clienteIdJornada) {
+          await liberarVinculoRecompensaPedidoNaoCriado(clienteIdJornada, recompensaJornadaId, pedidoId).catch(() => {});
+        }
+        console.error("[ChefeBot] Erro ao preparar/persistir pedido do site:", err);
+        return NextResponse.json({ ok: false, error: "Erro interno" }, { status: 500 });
       }
-      await liberarClaimSeAdquirido(clientRequestId, ownerToken, requestFingerprint, claimAdquirido);
-      console.error("[ChefeBot] Erro ao preparar/persistir pedido do site:", err);
-      return NextResponse.json({ ok: false, error: "Erro interno" }, { status: 500 });
     }
 
     // A partir daqui o pedido EXISTE de verdade, mas — se houver resgate —
-    // ainda em estado "pending_critical_confirmation" (revisão de segurança,
-    // ponto 1/2): o registro durável (:result) só é gravado DEPOIS de o
-    // efeito crítico (débito do resgate) estar confirmado. Ordem segura:
-    // persistir (já feito) → confirmar crítico → marcar completed →
-    // gravar :result → liberar claim → só então responder sucesso. Pedidos
-    // sem resgate não têm nada crítico pendente e seguem o caminho simples
-    // (gravam :result imediatamente), mas passam pela MESMA função
-    // `gravarResultadoDuravel` — uma regra única e auditável.
+    // ainda em estado "pending_critical_confirmation": o registro durável
+    // (:result) só é gravado DEPOIS de o efeito crítico (débito do resgate)
+    // estar confirmado. Ordem segura: persistir (já feito) → confirmar
+    // crítico → marcar completed → gravar :result → liberar claim → só
+    // então responder sucesso. Pedidos sem resgate não têm nada crítico
+    // pendente e seguem o caminho simples (gravam :result imediatamente),
+    // mas passam pela MESMA função `gravarResultadoDuravel` — uma regra
+    // única e auditável.
     let resultadoGravado = false;
 
     if (resgateAplicado) {
@@ -1107,21 +1231,14 @@ export async function POST(req: NextRequest) {
           await liberarClaimSeAdquirido(clientRequestId, ownerToken, requestFingerprint, claimAdquirido);
           return NextResponse.json({ ok: false, error: "Nao foi possivel confirmar o resgate. Tente novamente." }, { status: 409 });
         } catch (errRollback) {
-          // FALHA CRÍTICA (revisão de segurança, ponto 3): nem a confirmação
-          // do resgate nem o rollback do pedido tiveram sucesso. O pedido
-          // continua existindo em "pending_critical_confirmation" — tenta,
-          // best-effort, marcar "recovery_required" (revisão de segurança,
-          // 4ª rodada, ponto 6: nunca afirmar que foi persistido sem
+          // FALHA CRÍTICA: nem a confirmação do resgate nem o rollback do
+          // pedido tiveram sucesso. O pedido continua existindo em
+          // "pending_critical_confirmation" — tenta, best-effort, marcar
+          // "recovery_required" (nunca afirmar que foi persistido sem
           // realmente ter conseguido — se esta tentativa também falhar, o
           // pedido simplesmente permanece em "pending_critical_confirmation",
-          // que já bloqueia sucesso de forma idêntica). NUNCA devolve sucesso
-          // (nem degradado): a busca por hash/fast path já trata qualquer
-          // estado diferente de "completed" como bloqueante
-          // (survivalStateBloqueiaSucesso), então nenhum retry consegue criar
-          // um segundo pedido enquanto isto não for resolvido
-          // operacionalmente. O claim NUNCA é liberado aqui (liberar não
-          // ajudaria — a busca por hash já bloqueia mesmo sem claim — e
-          // evita qualquer janela extra).
+          // que já bloqueia sucesso de forma idêntica). NUNCA devolve
+          // sucesso (nem degradado). O claim NUNCA é liberado aqui.
           await marcarSurvivalStateDoPedido(pedidoId, "recovery_required").catch(() => {});
           logSurvivalErro("pedido_app", "rollback_resgate", "falha_critica_rollback", errRollback);
           return NextResponse.json(
@@ -1136,13 +1253,12 @@ export async function POST(req: NextRequest) {
       }
 
       // Débito do resgate confirmado com sucesso — agora precisa REGISTRAR
-      // essa consistência no próprio pedido (revisão de segurança, 4ª
-      // rodada, ponto 1) para que o fast path/busca por hash possam
-      // reconstruir sucesso. `marcarSurvivalStateDoPedido` retorna um
-      // boolean explícito — NUNCA ignorado: se a transição não puder ser
-      // comprovada (GET ou SET de "pedidos" falhando), esta resposta NUNCA
-      // finge sucesso, mesmo com o resgate já efetivamente debitado (rollback
-      // aqui seria ERRADO — desfaria um débito que já aconteceu de verdade).
+      // essa consistência no próprio pedido para que o fast path/busca por
+      // hash possam reconstruir sucesso. `marcarSurvivalStateDoPedido`
+      // retorna um boolean explícito — NUNCA ignorado: se a transição não
+      // puder ser comprovada, esta resposta NUNCA finge sucesso, mesmo com
+      // o resgate já efetivamente debitado (rollback aqui seria ERRADO —
+      // desfaria um débito que já aconteceu de verdade).
       if (clientRequestId) {
         const marcadoCompleted = await marcarSurvivalStateDoPedido(pedidoId, "completed");
         if (!marcadoCompleted) {
@@ -1162,6 +1278,11 @@ export async function POST(req: NextRequest) {
 
     if (claimAdquirido && clientRequestId && requestFingerprint) {
       resultadoGravado = await gravarResultadoDuravel(clientRequestId, requestFingerprint, pedidoId, numeroPedido, statusToken);
+      if (resultadoGravado) {
+        // Best-effort (5ª rodada, ponto 6) — só informativo, nada depende
+        // deste campo mudar.
+        await marcarAttemptComoCompleted(clientRequestId, requestFingerprint);
+      }
     }
 
     // Pontos previstos (modelo novo): a identidade canonica e o telefone do
@@ -1202,9 +1323,9 @@ export async function POST(req: NextRequest) {
     } catch {}
 
     // getConfigPix + serializarPixCliente: o pedido já existe de verdade a
-    // partir daqui, então uma falha aqui NUNCA vira um 500 cru (ponto 5) —
-    // devolve a confirmação real do pedido, sinalizando "degradado" e sem
-    // fabricar dado de pagamento algum.
+    // partir daqui, então uma falha aqui NUNCA vira um 500 cru — devolve a
+    // confirmação real do pedido, sinalizando "degradado" e sem fabricar
+    // dado de pagamento algum.
     let pixCliente: ReturnType<typeof serializarPixCliente>;
     let degradado = false;
     try {
@@ -1236,17 +1357,14 @@ export async function POST(req: NextRequest) {
     };
     return NextResponse.json(resposta);
   } catch (error) {
-    // Revisão de segurança, ponto 5: removida a regra genérica de que toda
-    // exceção depois da persistência vira sucesso degradado. As únicas
-    // falhas que podem gerar `ok:true degradado` são secundárias e já
-    // isoladas em seus próprios try/catch (push, pontos previstos,
-    // getConfigPix/Pix) — nenhuma delas propaga exceção até aqui. Qualquer
-    // exceção que ainda chegue neste catch DEPOIS da persistência
-    // (`pedidoIdCriado` setado) é, por definição, um caso que nenhuma
-    // recuperação local já cobriu (o rollback do resgate, por exemplo, já
-    // trata sua própria falha crítica dentro do próprio bloco, sem nunca
-    // relançar) — nunca finge sucesso: resposta recuperável, carrinho
-    // preservado, log sanitizado para investigação.
+    // Removida a regra genérica de que toda exceção depois da persistência
+    // vira sucesso degradado. As únicas falhas que podem gerar `ok:true
+    // degradado` são secundárias e já isoladas em seus próprios try/catch
+    // (push, pontos previstos, getConfigPix/Pix) — nenhuma delas propaga
+    // exceção até aqui. Qualquer exceção que ainda chegue neste catch
+    // DEPOIS da persistência (`pedidoIdCriado` setado) é, por definição, um
+    // caso que nenhuma recuperação local já cobriu — nunca finge sucesso:
+    // resposta recuperável, carrinho preservado, log sanitizado.
     if (pedidoIdCriado) {
       logSurvivalErro("pedido_app", "pos_persistencia", "excecao_nao_tratada_apos_persistir", error);
       return respostaClaimIncerto();

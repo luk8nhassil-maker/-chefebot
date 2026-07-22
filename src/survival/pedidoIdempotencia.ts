@@ -1,3 +1,5 @@
+import { createHash } from "crypto";
+
 // Idempotência de criação de pedido — desenho com QUATRO chaves separadas por
 // clientRequestId, cada uma com seu próprio TTL e propósito:
 //
@@ -104,19 +106,57 @@ export function chaveResultadoTokenPedido(clientRequestId: string): string {
   return `survival:idempotencia:pedido:${clientRequestId}:result:token`;
 }
 
+// Grava o registro principal (JSON) + a chave-token (plana) numa ÚNICA
+// operação atômica (revisão de segurança, 5ª rodada, ponto 2) — nunca dois
+// SETs separados do lado do cliente, que deixariam uma janela em que só uma
+// das duas chaves existe (ex.: processo encerrado entre os dois SETs).
+// Como um script Lua roda inteiro, sem interleaving com outros comandos, os
+// dois SETs abaixo são indivisíveis do ponto de vista de qualquer outra
+// execução observando o Redis. KEYS[1] = chave do registro, KEYS[2] = chave
+// do token; ARGV[1] = registro serializado (JSON), ARGV[2] = resultToken,
+// ARGV[3] = TTL em segundos (igual para as duas chaves).
+export const GRAVAR_RESULTADO_E_TOKEN_SCRIPT = `
+redis.call("set", KEYS[1], ARGV[1], "EX", ARGV[3])
+redis.call("set", KEYS[2], ARGV[2], "EX", ARGV[3])
+return 1
+`;
+
 // Compare-and-delete atômico de um :result "stale" (ver revisão de
-// segurança, 4ª rodada, ponto 2): KEYS[1] é a chave-token (plana), KEYS[2] é
-// o registro principal (JSON); ARGV[1] é o resultToken que esta execução
-// leu e considera stale. Nunca um DEL cego — só apaga os DOIS quando a
-// chave-token ainda contém EXATAMENTE o token esperado, o que garante que
-// nenhuma execução concorrente já gravou um resultado mais novo (que teria
-// sobrescrito a chave-token com outro valor) entre a leitura e esta chamada.
+// segurança, 4ª/5ª rodadas, ponto 2): KEYS[1] é a chave-token (plana),
+// KEYS[2] é o registro principal (JSON); ARGV[1] é o resultToken que esta
+// execução leu e considera stale. Nunca um DEL cego. Distingue
+// explicitamente os quatro estados possíveis do PAR de chaves (elas são
+// sempre escritas/apagadas juntas por este módulo — ver
+// GRAVAR_RESULTADO_E_TOKEN_SCRIPT — então qualquer estado onde só uma delas
+// existe é tratado como corrupção/incerteza, nunca uma condição normal):
+//
+// - as duas ausentes → "ja_ausente" (nada para invalidar, retry pode seguir).
+// - só o registro presente, token ausente (nunca deveria acontecer se toda
+//   escrita passa pelo script de gravação acima; pode indicar corrupção ou
+//   uma versão antiga do dado) → "incerto" — NUNCA decide sozinho, força o
+//   chamador a tratar como leitura incerta (503), nunca como ausência.
+// - só o token presente, registro ausente (órfão — o registro já foi
+//   removido por outra via, mas o token sobrou) → apaga o órfão e trata como
+//   "ja_ausente" (o efeito que importa, "não há :result válido", já é real).
+// - os dois presentes e o token bate com o esperado → apaga os DOIS,
+//   "removido".
+// - os dois presentes mas o token NÃO bate → outra execução já gravou um
+//   registro mais novo entre a nossa leitura e esta chamada → nunca apaga,
+//   "substituido_por_outro" (o chamador reconsulta do zero).
 export const INVALIDAR_RESULTADO_SE_TOKEN_SCRIPT = `
-local atual = redis.call("get", KEYS[1])
-if atual == false then
+local tokenAtual = redis.call("get", KEYS[1])
+local resultadoAtual = redis.call("get", KEYS[2])
+if tokenAtual == false and resultadoAtual == false then
   return "ja_ausente"
 end
-if atual == ARGV[1] then
+if resultadoAtual == false then
+  redis.call("del", KEYS[1])
+  return "ja_ausente"
+end
+if tokenAtual == false then
+  return "incerto"
+end
+if tokenAtual == ARGV[1] then
   redis.call("del", KEYS[1])
   redis.call("del", KEYS[2])
   return "removido"
@@ -125,27 +165,89 @@ else
 end
 `;
 
+/** Snapshot financeiro sanitizado (revisão de segurança, 5ª rodada, ponto 4)
+ * — persistido dentro do "attempt" logo após as validações oficiais de
+ * preço (cardápio/promoção/taxa/resgate) e ANTES de qualquer chamada ao
+ * provider de pagamento. Garante que um retry reutilize EXATAMENTE o mesmo
+ * valor cobrado na tentativa original, mesmo que cardápio/promoção/taxa
+ * mudem entre tentativas — nunca altera silenciosamente uma cobrança já
+ * iniciada. Nunca contém telefone, endereço, nome, itens legíveis, QR,
+ * copia-e-cola, token ou credencial — só números e um hash de auditoria. */
+export type SnapshotFinanceiroAttempt = {
+  total: number;
+  subtotal: number;
+  taxaEntrega: number;
+  descontoFidelidade: number;
+  valorPixEsperado?: number;
+  /** SHA-256 sobre os campos numéricos acima (serialização canônica) — só
+   * para auditoria/detecção de divergência, nunca usado para decidir nada
+   * sozinho. */
+  pricingFingerprint: string;
+};
+
+/** Calcula o `pricingFingerprint` de forma determinística — mesma
+ * serialização sempre produz o mesmo hash, para o mesmo conjunto de
+ * valores. `valorPixEsperado` ausente é normalizado para `null` (nunca
+ * `undefined`, que o JSON.stringify simplesmente omitiria de forma
+ * inconsistente dependendo da ordem de construção do objeto). */
+export function calcularPricingFingerprint(pricing: Omit<SnapshotFinanceiroAttempt, "pricingFingerprint">): string {
+  const canonico = JSON.stringify({
+    total: pricing.total,
+    subtotal: pricing.subtotal,
+    taxaEntrega: pricing.taxaEntrega,
+    descontoFidelidade: pricing.descontoFidelidade,
+    valorPixEsperado: pricing.valorPixEsperado ?? null,
+  });
+  return createHash("sha256").update(canonico).digest("hex");
+}
+
+function ehSnapshotFinanceiroValido(valor: unknown): valor is SnapshotFinanceiroAttempt {
+  if (!valor || typeof valor !== "object") return false;
+  const v = valor as Partial<SnapshotFinanceiroAttempt>;
+  return (
+    typeof v.total === "number" &&
+    Number.isFinite(v.total) &&
+    typeof v.subtotal === "number" &&
+    Number.isFinite(v.subtotal) &&
+    typeof v.taxaEntrega === "number" &&
+    Number.isFinite(v.taxaEntrega) &&
+    typeof v.descontoFidelidade === "number" &&
+    Number.isFinite(v.descontoFidelidade) &&
+    (v.valorPixEsperado === undefined || (typeof v.valorPixEsperado === "number" && Number.isFinite(v.valorPixEsperado))) &&
+    typeof v.pricingFingerprint === "string" &&
+    SHA256_HEX_REGEX.test(v.pricingFingerprint)
+  );
+}
+
 /** Registro do "attempt" — identidade estável da tentativa, criada/recuperada
  * ATOMICAMENTE antes de qualquer efeito externo (vínculo da Jornada do Chef,
  * cobrança Pix — ver revisão de segurança, 4ª rodada, ponto 3). Garante que
  * um retry com o MESMO clientRequestId + MESMO fingerprint sempre reutiliza
  * o MESMO pedidoId (e, por consequência, o mesmo txid — derivado
  * deterministicamente de pedidoId em `gerarTxidPixInterno` — e a mesma
- * X-Idempotency-Key do Mercado Pago, derivada do txid), mesmo que a
- * persistência do pedido tenha falhado na tentativa anterior. Nunca contém
- * PII, QR, copia-e-cola ou credencial — só os identificadores necessários
- * para recuperar o fluxo. */
+ * X-Idempotency-Key do Mercado Pago, derivada do txid) E o MESMO valor
+ * financeiro (`pricing`, 5ª rodada), mesmo que a persistência do pedido
+ * tenha falhado na tentativa anterior. Nunca contém PII, QR, copia-e-cola
+ * ou credencial — só os identificadores e números necessários para
+ * recuperar o fluxo. */
 export type RegistroAttemptPedido = {
   state: "in_progress" | "completed";
   requestFingerprint: string;
   pedidoId: string;
   txid: string;
+  pricing: SnapshotFinanceiroAttempt;
   createdAt: number;
   updatedAt: number;
 };
 
 /** Mesmo TTL do :result (24h) — precisa sobreviver ao menos tanto quanto um
- * retry legítimo possa demorar a chegar. */
+ * retry legítimo possa demorar a chegar. A garantia de identidade/preço
+ * estáveis deste módulo TERMINA quando o attempt expira: um retry que chegue
+ * depois de 24h não encontra mais o attempt e gera uma tentativa nova do
+ * zero (novo pedidoId/txid, preço recalculado na hora) — ver
+ * docs/architecture/MODO_SOBREVIVENCIA_1_0.md, seção 2.5-C, para a análise
+ * completa dessa janela e por que 24h foi mantido sem custo adicional
+ * (revisão de segurança, 5ª rodada, ponto 6). */
 export const ATTEMPT_TTL_SEGUNDOS = RESULT_TTL_SEGUNDOS;
 
 export function chaveAttemptPedido(clientRequestId: string): string {
@@ -163,9 +265,23 @@ export function ehAttemptValido(valor: unknown): valor is RegistroAttemptPedido 
     v.pedidoId.length > 0 &&
     typeof v.txid === "string" &&
     v.txid.length > 0 &&
+    v.txid === gerarTxidDeterministico(v.pedidoId) &&
+    ehSnapshotFinanceiroValido(v.pricing) &&
     typeof v.createdAt === "number" &&
-    Number.isFinite(v.createdAt)
+    Number.isFinite(v.createdAt) &&
+    typeof v.updatedAt === "number" &&
+    Number.isFinite(v.updatedAt)
   );
+}
+
+// Duplicado deliberadamente pequeno de `gerarTxidPixInterno` (src/lib/pix.ts)
+// — este módulo (`src/survival/*`) não importa de `src/lib/*` por convenção
+// de isolamento (ver auditoria da Etapa 0), e o formato do txid é estável o
+// bastante para validar por igualdade de string sem precisar da dependência
+// cruzada. Se `gerarTxidPixInterno` mudar de formato, este teste de
+// consistência (ehAttemptValido) precisa ser atualizado junto.
+function gerarTxidDeterministico(pedidoId: string): string {
+  return `chefebot_${pedidoId}`;
 }
 
 export function montarValorClaim(ownerToken: string, requestFingerprint: string): string {

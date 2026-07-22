@@ -467,13 +467,45 @@ essa MESMA variável.
 
 O registro nunca contém PII, QR, copia-e-cola ou credencial — só
 `state` (`in_progress`/`completed`, informativo), `requestFingerprint`,
-`pedidoId`, `txid`, `createdAt`, `updatedAt`.
+`pedidoId`, `txid`, `pricing` (snapshot financeiro — ver abaixo),
+`createdAt`, `updatedAt`.
 
 Isto **não substitui** a necessidade de um `pedidoId` globalmente único
 entre `clientRequestId`s diferentes (ver
 `docs/architecture/DECISAO-CONCORRENCIA-CHAVE-PEDIDOS.md`, seção 6.1) — o
 attempt resolve a estabilidade INTRA-tentativa (mesmo `clientRequestId`
 sempre com a mesma identidade), não a colisão entre tentativas distintas.
+
+**Extensão — snapshot financeiro estável (6ª revisão de segurança, ponto
+4)**: o attempt estabilizava `pedidoId`/`txid`, mas não o VALOR cobrado.
+Entre tentativas, preço do cardápio, promoção, taxa do bairro e desconto do
+resgate podem mudar — reutilizar a mesma `X-Idempotency-Key` com um valor
+diferente não é seguro (o pedido persistido poderia divergir do valor já
+cobrado na tentativa original). O campo `pricing` (tipo
+`SnapshotFinanceiroAttempt`) é calculado a partir do preço FRESCO da FASE 3
+(cardápio/promoção/taxa/resgate já validados) e embutido no attempt no
+momento da criação — `total`, `subtotal`, `taxaEntrega`,
+`descontoFidelidade`, `valorPixEsperado` (quando há Pix) e um
+`pricingFingerprint` SHA-256 (só para auditoria). Numa criação nova, isso é
+um no-op (o valor gravado É o valor calculado). Numa RECUPERAÇÃO (attempt
+já existia), a rota reatribui `total`/`taxaEntrega`/`descontoFidelidade` a
+partir do `pricing` ARMAZENADO — nunca do valor recém-recalculado — antes
+de qualquer chamada ao provider de pagamento e antes da validação final de
+troco. Nunca contém telefone, endereço, nome, itens legíveis, QR,
+copia-e-cola, token ou credencial.
+
+**Janela real da garantia**: a estabilidade de identidade e preço dura
+exatamente o TTL do attempt (`ATTEMPT_TTL_SEGUNDOS`, 24h, igual ao
+`:result`). Um retry que chegue DEPOIS de 24h não encontra mais o attempt e
+gera uma tentativa genuinamente nova (novo `pedidoId`/`txid`, preço
+recalculado na hora, potencialmente diferente) — isto é uma limitação
+conhecida e documentada, não um bug: estender essa janela teria custo de
+armazenamento adicional (mais tempo de retenção das 4 chaves por
+`clientRequestId`) que não foi calculado nem justificado nesta rodada;
+manter o mesmo TTL do `:result` é a menor solução seguro dentro do
+orçamento atual (nenhum custo adicional, nenhum serviço novo). Não afirmar,
+em nenhuma documentação ou resposta ao cliente, que a rota "nunca cria uma
+segunda cobrança" sem essa ressalva de janela.
 
 ### 2.5-D Compensação uniforme da Jornada do Chef para qualquer falha pré-persistência (5ª revisão de segurança)
 
@@ -498,6 +530,24 @@ preparação — inclusive recriando a cobrança Pix — reutiliza a MESMA
 `X-Idempotency-Key`, então o Mercado Pago nunca gera uma segunda cobrança
 real mesmo que o provider já tenha sido chamado antes da exceção original.
 
+Esta correção roda **independentemente** de `SURVIVAL_MODE_ENABLED` — não é
+um recurso de idempotência, é a correção de um gap pré-existente na
+compensação da Jornada, então também se aplica com a flag desligada (ver
+2.9 para a implicação exata sobre "zero mudança de comportamento").
+
+**6ª revisão de segurança — o resultado da liberação nunca é ignorado**: a
+versão original chamava
+`liberarVinculoRecompensaPedidoNaoCriado(...).catch(() => {})` — qualquer
+falha na própria liberação era silenciosamente engolida. Corrigido: a
+chamada agora está dentro de um `try/catch` explícito que registra
+`vinculoLiberado = false` em caso de erro; se a liberação não puder ser
+comprovada, a rota NUNCA prossegue para liberar o claim e devolver um 500
+comum — retorna 503 `unresolved: true`, mantendo claim e attempt estáveis
+(o `pedidoId` continua reservado, um retry nunca vincula a recompensa a
+outro `pedidoId`). Isto também está amarrado à reconciliação de
+persistência ambígua (2.5-H): a compensação só roda depois de a rota
+comprovar que o pedido está genuinamente ausente.
+
 ### 2.5-E Ativação segura do enforcement de `clientRequestId` (5ª revisão de segurança)
 
 Com `SURVIVAL_MODE_ENABLED=true`, um `clientRequestId` presente porém em
@@ -520,6 +570,117 @@ gerar e persistir um `clientRequestId` válido; só depois de confirmar que
 o valor está chegando corretamente na maioria das tentativas é que o
 enforcement seria considerado para ativação — decisão operacional, fora do
 escopo deste PR (nenhuma das duas flags é ativada aqui).
+
+### 2.5-F Recuperação de idempotência ANTES das validações de negócio mutáveis (6ª revisão de segurança)
+
+**Problema fechado nesta revisão**: a rota validava cardápio, promoções,
+produtos esgotados, disponibilidade da recompensa da Jornada e validade do
+resgate de pontos ANTES de consultar `:result`/pedido-por-hash/attempt. Se
+um pedido já tivesse sido criado com sucesso (resgate confirmado, presente
+da Jornada vinculado) mas a resposta original se perdesse (timeout do lado
+do cliente), e o estado mutável mudasse antes do retry — promoção expirada,
+produto esgotado, resgate já "utilizado" (porque já foi confirmado por essa
+MESMA tentativa), recompensa da Jornada já vinculada — um retry legítimo
+com o MESMO `clientRequestId` recebia 400/409 da validação de negócio ANTES
+de a rota sequer olhar para o pedido/resultado já existente.
+
+**Correção — pipeline reorganizado em 5 fases** (`route.ts`, comentários
+`FASE 1`-`FASE 5` no código):
+
+- **FASE 1** — validações estruturais puras: forma do payload (cliente,
+  itens, telefone/whatsappToken, pagamento, troco presente, endereço
+  presente, presença/formato do campo `recompensaJornada`). Nada aqui
+  depende de estado que muda com o tempo.
+- **FASE 2** — `clientRequestId` + fingerprint (só campos BRUTOS do
+  payload) + **recuperação ANTECIPADA de idempotência**: `:result`, busca
+  por hash no pedido persistido, estado crítico (`survivalState`) já
+  existente. Se encontrado, devolve o resultado real AGORA — antes de
+  qualquer validação mutável.
+- **FASE 3** — validações de NEGÓCIO mutáveis: cardápio, promoções,
+  esgotados, disponibilidade da recompensa da Jornada
+  (`prepararResgateParaPedido`), validade do resgate
+  (`obterReservasResgatePontos`), cálculo de preço. Só roda quando a FASE 2
+  não encontrou nenhuma tentativa já concluída/em andamento.
+- **FASE 4** — claim (`SET NX`) + identidade/preço estáveis do attempt. O
+  claim continua depois das validações de negócio (nunca antes, mesma
+  garantia do "ponto 7" da 2ª/3ª revisões) — só a RECUPERAÇÃO de uma
+  tentativa já concluída foi antecipada para a FASE 2.
+- **FASE 5** — efeitos irreversíveis: vínculo da Jornada, validação final
+  de troco (contra o `total` já possivelmente substituído pelo snapshot do
+  attempt — ver 2.5-C), preparação do Pix e persistência do pedido;
+  confirmação do resgate; gravação do `:result`.
+
+Testado explicitamente: retry depois que a promoção expira/fica inativa,
+depois que o brinde da promoção fica esgotado, depois que o resgate já foi
+confirmado com sucesso, depois que o presente da Jornada já foi vinculado —
+em todos os casos, o retry com o MESMO `clientRequestId` devolve o MESMO
+pedido (nunca 400/409), e um payload estruturalmente inválido continua
+rejeitado na FASE 1, antes de qualquer busca cara.
+
+### 2.5-G Escrita e invalidação atômicas do par `:result`/`:result:token` (6ª revisão de segurança)
+
+**Problema fechado nesta revisão**: a 5ª revisão introduziu a chave-token
+companheira para permitir invalidação atômica de um `:result` stale, mas a
+GRAVAÇÃO ainda era dois `SET`s separados do lado do cliente (`:result`
+depois `:result:token`) — uma falha entre os dois deixava um PAR
+incompleto (registro sem token, ou vice-versa), incompatível com o script
+de invalidação (que decide com base na chave-token).
+
+**Correção — `GRAVAR_RESULTADO_E_TOKEN_SCRIPT`**: um único script Lua
+grava as DUAS chaves numa única operação atômica (`persistirRegistroResultado`
+em `route.ts` agora chama só este `EVAL`, nunca dois `SET`s). Como um
+script Lua roda inteiro, sem interleaving com outros comandos no Redis, os
+dois `SET`s internos são indivisíveis do ponto de vista de qualquer
+execução concorrente — nunca há uma janela em que só uma das duas chaves
+existe.
+
+**`INVALIDAR_RESULTADO_SE_TOKEN_SCRIPT` corrigido**: a versão da 5ª revisão
+tratava "chave-token ausente" como `ja_ausente` incondicionalmente — o que
+seria uma falha de segurança se o registro principal AINDA existisse (token
+ausente + registro presente é um estado corrompido, nunca uma ausência
+comprovada). A versão corrigida lê as DUAS chaves e distingue quatro casos:
+ambas ausentes → `ja_ausente`; só o registro ausente (token órfão) → apaga
+o órfão e trata como `ja_ausente`; só o token ausente (registro presente)
+→ `incerto` (nunca decide sozinho — o chamador trata como leitura incerta,
+503, nunca como ausência); ambos presentes e o token bate → `removido`;
+ambos presentes mas o token não bate → `substituido_por_outro`.
+
+### 2.5-H Reconciliação de persistência ambígua (6ª revisão de segurança)
+
+**Problema fechado nesta revisão**: qualquer exceção de
+`redis.set("pedidos", [...pedidos, novoPedido])` era interpretada como "o
+pedido não foi salvo" — mas isso não é comprovável: o Redis pode ter
+aplicado a escrita e só a resposta HTTP ter sofrido timeout. Compensar às
+cegas nesse caso (liberar vínculo da Jornada, liberar claim) enquanto o
+pedido JÁ EXISTE de verdade abre uma janela para duplicidade num retry
+subsequente.
+
+**Correção**: para tentativas protegidas pelo Modo Sobrevivência
+(`clientRequestId` presente), uma exceção nesse `redis.set` aciona uma
+leitura FRESCA (`buscarPedidoPersistidoPorId`, mesma função usada pelo fast
+path) antes de qualquer compensação:
+
+- **Encontrado** (o pedido FOI persistido de verdade apesar da exceção): a
+  rota NUNCA duplica, NUNCA libera o vínculo da Jornada nem o claim às
+  cegas — continua o fluxo normal a partir daqui (confirmação do resgate,
+  `:result`, etc.) usando os dados REAIS já persistidos (`numero`,
+  `statusToken`, `pix` lidos do pedido reconciliado, nunca os valores locais
+  não confirmados).
+- **Comprovadamente ausente**: só então a compensação roda — e o resultado
+  da liberação do vínculo da Jornada nunca é ignorado (ver 2.5-D, agora
+  atualizado: `liberarVinculoRecompensaPedidoNaoCriado` é chamado dentro de
+  um `try/catch` explícito, não mais um `.catch(() => {})` silencioso; se
+  não puder ser comprovada, a rota retorna 503 `unresolved: true` e MANTÉM
+  claim + attempt estáveis, em vez de liberar o claim e devolver um 500 que
+  poderia mascarar um vínculo de recompensa preso).
+- **Leitura de reconciliação também incerta**: 503 `unresolved: true`
+  direto, nunca compensa, nunca libera claim — mantém tudo estável até a
+  próxima tentativa (que fará a mesma reconciliação).
+
+Sem `clientRequestId` (flag desligada ou ausente), nenhuma reconciliação é
+possível (`pedidoId` não é estável, sem hash gravado no pedido) — qualquer
+exceção nesse `redis.set` continua sendo tratada como "não persistido",
+comportamento idêntico ao anterior a este programa.
 
 ### 2.6 Rascunho local versionado (`src/survival/draftStorage.ts`)
 
@@ -609,32 +770,67 @@ OK — números exatos na descrição do PR (mudam a cada push).
 
 ### 2.9 Custo de Redis adicional (com a flag ligada)
 
-- Caminho feliz (pedido novo, sem disputa, `:result` nunca existiu): **+5
-  comandos** por pedido — 1 `GET` do `:result` (fast path, miss) + 1 `GET`
-  de `pedidos` (busca por hash, miss — adicionado na 3ª revisão) + 1
-  `SET NX` (claim) + 1 `SET NX` (attempt, 5ª revisão — identidade estável
-  antes do Pix/Jornada) + 1 `SET` do resultado durável + 1 `SET` da
-  chave-token companheira do resultado (5ª revisão — invalidação atômica).
-  O claim é liberado ao final via `EVAL` (compare-and-delete), +1 comando
-  best-effort. A busca por hash reaproveita a MESMA chave `pedidos` já lida
-  no fluxo normal (nenhuma chave nova) — o "+1 GET" é uma segunda leitura
-  fresca dessa mesma chave, não uma estrutura de dado adicional. Pedidos com
-  resgate de fidelidade somam mais 1 `GET`+`SET` de `pedidos` para marcar
-  `survivalState: "completed"` após a confirmação (4ª/5ª revisão).
-- Fast path (resultado já existe, retry ou conflito): 1 `GET` — mais barato
-  que uma criação completa, a requisição retorna antes de tocar
-  `pedidos`/menu/promoções.
-- Recuperação via hash (`:result` ausente mas pedido real já existe — o
-  cenário que a 3ª revisão fecha): 2 `GET`s (`:result` miss + `pedidos`
-  hit) + 1 `SET` best-effort para recriar o `:result` + 1 `SET` da
-  chave-token — ainda mais barato que uma criação completa.
-- Invalidação de `:result` stale (5ª revisão): 1 `EVAL` atômico adicional
-  (compare-and-delete da chave-token + registro principal) antes de seguir
-  para a busca por hash; em caso de `substituido_por_outro` (raríssimo), a
-  consulta é reiniciada até 3 vezes no total.
-- Disputa concorrente (raro, mesmo `clientRequestId` em paralelo): até ~10
-  comandos no lado que perde a corrida (2 `GET`s do fast path/hash + 1
-  `SET NX` do claim + 1 `SET NX`/`GET` do attempt + 1 `GET` de inspeção do
-  claim + até 6 `GET`s de polling), *bounded*, nunca ilimitado.
-- Com a flag desligada (estado deste PR em Production): **0 comandos
-  extras** — o bloco inteiro nem executa.
+**Recontagem exata (6ª revisão de segurança — a contagem anterior, "+5
+comandos", estava incorreta: o texto listava 7 itens, e a mudança para
+escrita/invalidação atômica via `EVAL` reduz o total).** A comparação é
+sempre contra a MESMA requisição com a flag desligada (que já executa
+`getMENUDinamico`, a leitura de `pedidos`, `redis.set("pedidos", ...)` e
+`getConfigPix` de qualquer forma) — só o que a flag ADICIONA é contado
+abaixo.
+
+- **Caminho feliz, criação nova, sem resgate, sem disputa**: **+8
+  comandos**:
+  1. `GET :result` (fast path, miss).
+  2. `GET pedidos` (busca por hash, miss) — segunda leitura fresca da MESMA
+     chave já lida pela FASE 3 (nenhuma estrutura de dado nova, mas uma
+     chamada Redis a mais).
+  3. `SET NX claim`.
+  4. `SET NX attempt` (com o snapshot financeiro embutido — 5ª/6ª revisão).
+  5. `EVAL` — grava `:result` + `:result:token` juntos, atomicamente (6ª
+     revisão: antes eram 2 `SET`s separados; agora 1 único `EVAL`).
+  6. `GET attempt` (verificação de fingerprint antes de marcar completed).
+  7. `SET attempt` (marca `state: "completed"`, best-effort, 5ª/6ª
+     revisão).
+  8. `EVAL` — libera o claim (compare-and-delete), best-effort.
+  - Pedidos **com resgate de fidelidade** somam mais **+2** (`GET`+`SET` de
+    `pedidos` para marcar `survivalState: "completed"` após a confirmação)
+    — total **+10**.
+- **Fast path** (`:result` já existe, retry ou conflito de fingerprint): 1
+  `GET` — a requisição retorna antes de tocar `pedidos`/menu/promoções/
+  claim/attempt.
+- **Recuperação via hash** (`:result` ausente mas pedido real já existe —
+  3ª revisão): 2 `GET`s (`:result` miss + `pedidos` hit) + 1 `EVAL` best-effort
+  para recriar `:result`+`:result:token` juntos — ainda mais barato que uma
+  criação completa.
+- **Invalidação de `:result` stale** (5ª/6ª revisão): +1 `EVAL` atômico
+  (compare-and-delete do par registro+token, com detecção de corrupção)
+  antes de seguir para a busca por hash; em caso de `substituido_por_outro`
+  (raríssimo — só ocorre sob corrida real entre duas execuções do MESMO
+  `clientRequestId`), a consulta inteira é reiniciada, até 3 vezes no total.
+- **Disputa concorrente** (raro, mesmo `clientRequestId` em paralelo): até
+  ~10 comandos no lado que perde a corrida (2 `GET`s do fast path/hash + 1
+  `SET NX` do claim + 1 `GET` de inspeção do claim + até 6 `GET`s de
+  polling), *bounded*, nunca ilimitado.
+- **Falha de provider Pix ou de persistência** (caminho de erro, qualquer
+  passo entre o claim e o `redis.set("pedidos", ...)`): sem comando Redis
+  adicional além dos já contados acima — a compensação (liberar vínculo da
+  Jornada, liberar claim) usa comandos já existentes no fluxo (nenhuma
+  chave nova criada só para o caminho de erro).
+- Com a flag desligada: **0 comandos extras** — o bloco de idempotência
+  inteiro nem executa. Isto inclui o attempt, o claim, `:result` e a
+  invalidação atômica.
+
+**Precisão sobre "zero mudança de comportamento com a flag desligada"** (6ª
+revisão, ponto 7): o caminho de SUCESSO é byte-a-byte equivalente ao
+comportamento anterior a este programa. Porém, a correção da compensação da
+Jornada do Chef (seção 2.5-D) — o `try` que envolve `proximoNumeroPedido`/
+preparação do Pix/persistência agora libera o vínculo da recompensa em
+QUALQUER falha nesse espaço, não só em falhas do `redis.set` final — é uma
+correção de robustez que roda **independentemente da flag**
+`SURVIVAL_MODE_ENABLED` (não é um recurso de idempotência, é uma correção
+de um gap pré-existente na compensação da Jornada). Nenhum comando Redis
+novo é executado por essa correção especificamente — ela só amplia o
+`try/catch` já existente. Resumo preciso: caminho de sucesso equivalente;
+falhas pré-persistência da Jornada agora são compensadas mesmo com a flag
+desligada; nenhum recurso de idempotência (`:claim`/`:result`/`:attempt`)
+executa um único comando Redis a mais com a flag desligada.
