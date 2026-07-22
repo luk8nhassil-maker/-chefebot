@@ -22,6 +22,40 @@ describe("parseVolumeListOutput", () => {
     expect(r.usedBytes).toBe(500 * 1024 * 1024);
   });
 
+  it("reconhece o formato real da Railway CLI 5.27.2 ({ environment, project, volumes: [...] } com currentSizeMB/sizeMB)", () => {
+    const raw = JSON.stringify({
+      environment: "production",
+      project: "zestful-liberation",
+      volumes: [
+        {
+          currentSizeMB: 765.21,
+          deletedAt: null,
+          id: "vol_abc",
+          isPendingDeletion: false,
+          mountPath: "/var/lib/postgresql/data",
+          name: "postgres-volume",
+          serviceName: "Postgres",
+          sizeMB: 5120,
+          status: "active",
+        },
+      ],
+    });
+    const r = parseVolumeListOutput(raw, "postgres-volume", "Postgres");
+    expect(r.usedBytes).toBeCloseTo(765.21 * 1024 * 1024, 0);
+    expect(r.capacityBytes).toBe(5120 * 1024 * 1024);
+  });
+
+  it("ignora volumes deletados/pendentes de exclusão ao escolher o volume certo", () => {
+    const raw = JSON.stringify({
+      volumes: [
+        { name: "postgres-volume-antigo", serviceName: "Postgres", currentSizeMB: 1, sizeMB: 500, deletedAt: "2026-01-01T00:00:00Z" },
+        { name: "postgres-volume", serviceName: "Postgres", currentSizeMB: 765.21, sizeMB: 5120, deletedAt: null, isPendingDeletion: false },
+      ],
+    });
+    const r = parseVolumeListOutput(raw, "postgres-volume", "Postgres");
+    expect(r.capacityBytes).toBe(5120 * 1024 * 1024);
+  });
+
   it("retorna null para JSON inválido", () => {
     expect(parseVolumeListOutput("não é json")).toBeNull();
   });

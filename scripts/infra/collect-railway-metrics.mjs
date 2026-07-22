@@ -60,12 +60,17 @@ function isFiniteNonNegative(n) {
 
 /**
  * Extrai uso/capacidade do postgres-volume da saída de `railway volume list
- * --json`. Formato real ainda não calibrado com uma execução manual (ver
- * seção "Como ajustar o parser" em docs/operations/railway-infra-monitor.md)
- * — tenta várias chaves plausíveis (bytes ou MB) e nunca inventa um valor:
- * se não encontrar campo numérico reconhecível, devolve null.
+ * --json`. Formato real calibrado em 22/07/2026 com uma execução manual real
+ * (Railway CLI 5.27.2, ver "Como ajustar o parser" em
+ * docs/operations/railway-infra-monitor.md): um objeto `{ environment,
+ * project, volumes: [...] }`, cada volume com `currentSizeMB` (uso atual) e
+ * `sizeMB` (capacidade alocada) — ambos MB em maiúsculas, mais `name`,
+ * `serviceName`, `deletedAt`, `isPendingDeletion`, `status`. Mantém também as
+ * chaves alternativas (bytes/minúsculas) como fallback tolerante, e nunca
+ * inventa um valor: se não encontrar campo numérico reconhecível, devolve
+ * null.
  */
-export function parseVolumeListOutput(raw, volumeNameHint = "postgres-volume") {
+export function parseVolumeListOutput(raw, volumeNameHint = "postgres-volume", serviceNameHint = "") {
   let parsed;
   try {
     parsed = JSON.parse(raw);
@@ -76,16 +81,22 @@ export function parseVolumeListOutput(raw, volumeNameHint = "postgres-volume") {
   const list = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.volumes) ? parsed.volumes : null;
   if (!list) return null;
 
-  const entry =
-    list.find((v) => typeof v?.name === "string" && v.name.toLowerCase().includes(volumeNameHint.toLowerCase())) ??
-    list[0] ??
-    null;
+  const ativos = list.filter((v) => v && typeof v === "object" && !v.isPendingDeletion && !v.deletedAt);
+  const candidatos = ativos.length > 0 ? ativos : list;
+
+  const porServico = serviceNameHint
+    ? candidatos.find((v) => typeof v?.serviceName === "string" && v.serviceName.toLowerCase() === serviceNameHint.toLowerCase())
+    : null;
+  const porNome = candidatos.find((v) => typeof v?.name === "string" && v.name.toLowerCase().includes(volumeNameHint.toLowerCase()));
+  const entry = porServico ?? porNome ?? candidatos[0] ?? null;
   if (!entry || typeof entry !== "object") return null;
 
   const MB = 1024 * 1024;
-  const usedBytes = firstFiniteBytes(entry, ["usedBytes", "sizeBytes"]) ?? firstFiniteMb(entry, ["usedMb", "sizeMb", "currentSizeMb"], MB);
+  const usedBytes =
+    firstFiniteBytes(entry, ["usedBytes", "sizeBytes"]) ?? firstFiniteMb(entry, ["currentSizeMB", "usedMb", "sizeMb", "currentSizeMb"], MB);
   const capacityBytes =
-    firstFiniteBytes(entry, ["capacityBytes", "totalBytes"]) ?? firstFiniteMb(entry, ["capacityMb", "totalMb", "maxSizeMb"], MB);
+    firstFiniteBytes(entry, ["capacityBytes", "totalBytes"]) ??
+    firstFiniteMb(entry, ["sizeMB", "capacityMb", "totalMb", "maxSizeMb"], MB);
 
   if (!isFiniteNonNegative(usedBytes) || !isFiniteNonNegative(capacityBytes) || capacityBytes <= 0) return null;
   return { usedBytes, capacityBytes };
@@ -217,7 +228,7 @@ async function collectSample() {
   const volumeRes = await runRailwayCli(["volume", "list", "--json"]);
   if (!volumeRes.ok) return { ok: false, errorCode: volumeRes.errorCode };
 
-  const volumeMetrics = parseVolumeListOutput(volumeRes.stdout);
+  const volumeMetrics = parseVolumeListOutput(volumeRes.stdout, "postgres-volume", process.env.RAILWAY_POSTGRES_SERVICE || "Postgres");
   const fallbackCapacityBytes = Number(process.env.RAILWAY_VOLUME_FALLBACK_CAPACITY_BYTES || 0);
 
   let usedBytes = volumeMetrics?.usedBytes;
