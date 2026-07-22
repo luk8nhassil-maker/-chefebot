@@ -4,7 +4,7 @@ import { redis } from "@/lib/redis";
 import { proximoNumeroPedido } from "@/lib/numeracao";
 import { getMENUDinamico } from "@/lib/menu";
 import { computeTaxaApp, buildEnderecoApp } from "@/lib/pedidoAppLogic";
-import { criarPixMetadata, prepararPixProviderMercadoPago, serializarPixCliente } from "@/lib/pix";
+import { criarPixMetadata, prepararPixProviderMercadoPago, serializarPixCliente, type PixMetadata } from "@/lib/pix";
 import { PROMOS_KEY, catalogoDoMenu, dentroDaJanela, precoFinalPromocao, promocaoIndisponivel, type Promocao } from "@/lib/promocoes";
 import { validarTokenCardapio } from "@/lib/cardapioToken";
 import { temDinheiroNoPagamento, valorDinheiroEsperado } from "@/lib/bot";
@@ -15,13 +15,20 @@ import { type ItemApp, type MenuPedidoApp, formatItem, officialUnitPrice, makePr
 import { prepararResgateParaPedido, confirmarReservaNoPedido, liberarVinculoRecompensaPedidoNaoCriado, type EscolhaRecompensaJornada } from "@/lib/jornadaChef";
 import { survivalModeEnabled } from "@/survival/flags";
 import { sanitizeClientRequestId } from "@/survival/clientRequestId";
+import { calcularRequestFingerprint } from "@/survival/requestFingerprint";
+import { logSurvivalErro } from "@/survival/logging";
 import {
-  chaveIdempotenciaPedido,
-  ehMarcadorProcessando,
-  MARCADOR_PEDIDO_PROCESSANDO,
-  PEDIDO_IDEMPOTENCIA_POLL_INTERVALO_MS,
-  PEDIDO_IDEMPOTENCIA_POLL_TENTATIVAS,
-  PEDIDO_IDEMPOTENCIA_TTL_SEGUNDOS,
+  CLAIM_TTL_SEGUNDOS,
+  LIBERAR_CLAIM_SE_DONO_SCRIPT,
+  POLL_INTERVALO_MS,
+  POLL_TENTATIVAS,
+  RESULT_TTL_SEGUNDOS,
+  chaveClaimPedido,
+  chaveResultadoPedido,
+  ehResultadoIdempotenciaValido,
+  extrairFingerprintDoClaim,
+  montarValorClaim,
+  type ResultadoIdempotenciaPedido,
 } from "@/survival/pedidoIdempotencia";
 
 export const maxDuration = 20;
@@ -64,6 +71,21 @@ type ConfigPizzariaPix = {
   whatsappPizzaria?: string;
 };
 
+/** Resposta pública de sucesso — `pix`/`degradado` são opcionais; `degradado`
+ * sinaliza que o pedido foi confirmado de verdade mas algum dado secundário
+ * (ex.: serialização do Pix) não pôde ser recuperado nesta resposta. */
+type PedidoAppRespostaSucesso = {
+  ok: true;
+  pedidoId: string;
+  numero: number;
+  total: number;
+  statusToken: string;
+  pix?: unknown;
+  degradado?: true;
+};
+
+type PedidoArmazenado = { id?: unknown; total?: unknown; pix?: PixMetadata };
+
 function criarTokenPublicoAcompanhamento(): string {
   return randomUUID().replace(/-/g, "");
 }
@@ -72,80 +94,185 @@ async function getConfigPix(): Promise<ConfigPizzariaPix> {
   return (await redis.get<ConfigPizzariaPix>("config:pizzaria")) || {};
 }
 
+function respostaClaimIncerto(): NextResponse {
+  return NextResponse.json(
+    {
+      ok: false,
+      unresolved: true,
+      error: "Não foi possível confirmar se o pedido foi recebido. Seu carrinho foi preservado — verifique antes de tentar novamente.",
+    },
+    { status: 503 }
+  );
+}
+
+function respostaConflitoFingerprint(): NextResponse {
+  return NextResponse.json(
+    { ok: false, error: "Este identificador de tentativa já foi usado com dados diferentes. Reinicie o checkout." },
+    { status: 409 }
+  );
+}
+
+function respostaAindaProcessando(): NextResponse {
+  return NextResponse.json(
+    { ok: false, error: "Este pedido já está sendo processado. Aguarde alguns segundos e verifique antes de tentar de novo." },
+    { status: 409 }
+  );
+}
+
+// Reconstrói a resposta de sucesso a partir do pedido REAL já persistido
+// (nunca de um total/Pix cacheado às cegas — ver revisão de segurança,
+// ponto 6): o registro de idempotência guarda só pedidoId/numero/statusToken;
+// total e Pix são sempre lidos frescos do próprio pedido + config atual.
+async function reconstruirRespostaPedido(registro: ResultadoIdempotenciaPedido): Promise<PedidoAppRespostaSucesso | null> {
+  const pedidosAtuais = (await redis.get<PedidoArmazenado[]>("pedidos").catch(() => null)) || [];
+  const pedidoEncontrado = pedidosAtuais.find((p) => p && p.id === registro.pedidoId);
+  if (!pedidoEncontrado) {
+    logSurvivalErro("idempotencia_pedido", "reconstrucao", "pedido_nao_encontrado");
+    return null;
+  }
+
+  let pixCliente: ReturnType<typeof serializarPixCliente>;
+  let degradado = false;
+  try {
+    const configPix = await getConfigPix();
+    pixCliente = serializarPixCliente(pedidoEncontrado.pix, configPix);
+  } catch (err) {
+    degradado = true;
+    logSurvivalErro("idempotencia_pedido", "reconstrucao", "config_pix_falhou", err);
+  }
+
+  return {
+    ok: true,
+    pedidoId: registro.pedidoId,
+    numero: registro.numero,
+    total: typeof pedidoEncontrado.total === "number" ? pedidoEncontrado.total : 0,
+    statusToken: registro.statusToken,
+    ...(pixCliente ? { pix: pixCliente } : {}),
+    ...(degradado ? { degradado: true as const } : {}),
+  };
+}
+
+type ResultadoConsultaRapida =
+  | { tipo: "nao_encontrado" }
+  | { tipo: "conflito_fingerprint" }
+  | { tipo: "encontrado"; registro: ResultadoIdempotenciaPedido }
+  | { tipo: "incerto" };
+
+// Fast path: já existe um resultado durável (24h) para este clientRequestId?
+// Só GET — nenhuma escrita, nenhum efeito colateral.
+async function consultarResultadoExistente(clientRequestId: string, requestFingerprint: string): Promise<ResultadoConsultaRapida> {
+  let bruto: unknown;
+  try {
+    bruto = await redis.get(chaveResultadoPedido(clientRequestId));
+  } catch (err) {
+    logSurvivalErro("idempotencia_pedido", "leitura_resultado", "get_result_falhou", err);
+    return { tipo: "incerto" };
+  }
+  if (!bruto) return { tipo: "nao_encontrado" };
+  if (!ehResultadoIdempotenciaValido(bruto)) {
+    logSurvivalErro("idempotencia_pedido", "leitura_resultado", "resultado_formato_invalido");
+    return { tipo: "incerto" };
+  }
+  if (bruto.requestFingerprint !== requestFingerprint) return { tipo: "conflito_fingerprint" };
+  return { tipo: "encontrado", registro: bruto };
+}
+
+type ResultadoClaim =
+  | { tipo: "claimed" }
+  | { tipo: "conflito_fingerprint" }
+  | { tipo: "processando_mesmo_fingerprint" }
+  | { tipo: "incerto" };
+
+// Reivindica atomicamente (SET NX) o claim de criação para este
+// clientRequestId. Qualquer resultado que não seja um SET NX bem-sucedido
+// confirmado é tratado com o máximo de cautela: nunca assume "posso criar o
+// pedido" quando o estado real do Redis é desconhecido (ver revisão de
+// segurança, ponto 1).
+async function tentarReivindicarClaim(claimKey: string, valorClaim: string, requestFingerprint: string): Promise<ResultadoClaim> {
+  try {
+    const reivindicado = await redis.set(claimKey, valorClaim, { nx: true, ex: CLAIM_TTL_SEGUNDOS });
+    if (reivindicado) return { tipo: "claimed" };
+  } catch (err) {
+    // O SET NX pode ou não ter sido aplicado no servidor Redis mesmo tendo
+    // lançado (timeout na resposta, por exemplo) — não há como saber a
+    // partir daqui. Nunca prossegue como se tivéssemos reivindicado.
+    logSurvivalErro("idempotencia_pedido", "claim", "set_nx_falhou", err);
+    return { tipo: "incerto" };
+  }
+
+  // SET NX não aplicou (a chave já existia) — inspeciona quem é o dono atual.
+  let claimAtual: unknown;
+  try {
+    claimAtual = await redis.get(claimKey);
+  } catch (err) {
+    logSurvivalErro("idempotencia_pedido", "leitura_claim", "get_claim_falhou", err);
+    return { tipo: "incerto" };
+  }
+  const fingerprintAtual = extrairFingerprintDoClaim(claimAtual);
+  if (fingerprintAtual === null) {
+    // A chave expirou entre o SET NX falhar e este GET (janela mínima), ou o
+    // valor veio corrompido/inesperado — não há base segura para decidir se
+    // é a mesma tentativa ou uma nova. Nunca supõe.
+    return { tipo: "incerto" };
+  }
+  return { tipo: fingerprintAtual === requestFingerprint ? "processando_mesmo_fingerprint" : "conflito_fingerprint" };
+}
+
 // Espera limitada (~1.8s no pior caso) por uma requisição concorrente com o
-// MESMO clientRequestId terminar de criar o pedido. Nunca cria nada aqui —
-// só observa a chave até deixar de ser o marcador "processando" ou esgotar
-// as tentativas. Bem dentro do maxDuration=20s da rota.
-async function aguardarResultadoConcorrente(claimKey: string): Promise<Record<string, unknown> | null> {
-  for (let tentativa = 0; tentativa < PEDIDO_IDEMPOTENCIA_POLL_TENTATIVAS; tentativa++) {
-    await new Promise((resolve) => setTimeout(resolve, PEDIDO_IDEMPOTENCIA_POLL_INTERVALO_MS));
-    const atual = await redis.get<Record<string, unknown>>(claimKey).catch(() => null);
-    if (atual && !ehMarcadorProcessando(atual)) return atual;
+// MESMO clientRequestId (e mesmo fingerprint) terminar de criar o pedido.
+// Nunca cria nada aqui — só observa o registro de RESULTADO (não o claim)
+// até ele aparecer ou esgotar as tentativas. Bem dentro do maxDuration=20s.
+async function aguardarResultadoPedido(clientRequestId: string): Promise<ResultadoIdempotenciaPedido | null> {
+  const chave = chaveResultadoPedido(clientRequestId);
+  for (let tentativa = 0; tentativa < POLL_TENTATIVAS; tentativa++) {
+    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVALO_MS));
+    const atual = await redis.get(chave).catch(() => null);
+    if (ehResultadoIdempotenciaValido(atual)) return atual;
   }
   return null;
 }
 
+// Libera o claim (compare-and-delete atômico via Lua, só se ownerToken +
+// fingerprint ainda baterem) — usado nos caminhos em que NENHUM pedido
+// chegou a ser criado depois de reivindicar (validação/efeito colateral
+// falhou), permitindo um retry legítimo com o mesmo clientRequestId. Nunca
+// chamado depois que o pedido já existe de verdade.
+async function liberarClaimSeAdquirido(
+  clientRequestId: string | null,
+  ownerToken: string | null,
+  requestFingerprint: string | null,
+  claimAdquirido: boolean
+): Promise<void> {
+  if (!claimAdquirido || !clientRequestId || !ownerToken || !requestFingerprint) return;
+  await redis
+    .eval(LIBERAR_CLAIM_SE_DONO_SCRIPT, [chaveClaimPedido(clientRequestId)], [montarValorClaim(ownerToken, requestFingerprint)])
+    .catch((err) => logSurvivalErro("idempotencia_pedido", "liberacao", "eval_falhou", err));
+}
+
 export async function POST(req: NextRequest) {
-  // Declarados fora do try/catch/finally para ficarem visíveis no `finally`
-  // (limpeza da reivindicação de idempotência em caso de falha/validação).
   let clientRequestId: string | null = null;
-  let idempotenciaReivindicada = false;
-  let pedidoCriado = false;
-  let idempotenciaFinalizada = false;
+  let requestFingerprint: string | null = null;
+  let ownerToken: string | null = null;
+  let claimAdquirido = false;
+
+  // Capturados assim que existirem — permitem, no catch externo, responder
+  // de forma recuperável (nunca um 500 cru) se uma exceção ocorrer DEPOIS de
+  // o pedido já ter sido persistido de verdade (ver revisão de segurança,
+  // ponto 5).
+  let pedidoIdCriado: string | null = null;
+  let numeroPedidoCriado: number | null = null;
+  let statusTokenCriado: string | null = null;
+  let totalCriado: number | null = null;
 
   try {
     const body = (await req.json()) as PedidoApp;
 
-    // Modo Sobrevivência (Etapa 1) — idempotência de criação de pedido.
-    // Desligada por padrão (SURVIVAL_MODE_ENABLED=false): zero mudança de
-    // comportamento, zero comando Redis extra. Ligada, um clientRequestId
-    // já visto devolve o MESMO resultado da primeira criação em vez de criar
-    // um segundo pedido — cobre tanto o retry após timeout de rede quanto
-    // duas requisições concorrentes com o mesmo identificador (double-tap,
-    // duas abas). Ver docs/architecture/MODO_SOBREVIVENCIA_1_0.md.
-    clientRequestId = survivalModeEnabled() ? sanitizeClientRequestId(body.clientRequestId) : null;
-    if (clientRequestId) {
-      const claimKey = chaveIdempotenciaPedido(clientRequestId);
-      try {
-        // SET NX: só uma requisição consegue gravar o marcador "processando"
-        // para esta chave — a outra vê o SET falhar (chave já existe) e
-        // nunca chega a criar um segundo pedido. Mesmo padrão de lock já
-        // usado em src/lib/mercadoPagoReconciliacao.ts.
-        const reivindicado = await redis.set(claimKey, MARCADOR_PEDIDO_PROCESSANDO, {
-          nx: true,
-          ex: PEDIDO_IDEMPOTENCIA_TTL_SEGUNDOS,
-        });
-        if (reivindicado) {
-          idempotenciaReivindicada = true;
-        } else {
-          const existente = await redis.get<Record<string, unknown>>(claimKey);
-          if (existente && !ehMarcadorProcessando(existente)) {
-            // Resultado final de uma criação anterior (mesma tentativa,
-            // retry após timeout) — devolve o MESMO pedido, nunca duplica.
-            return NextResponse.json(existente);
-          }
-          // existente === marcador "processando" (ou expirou entre o SET NX
-          // falhar e este GET — janela mínima, tratada como concorrência):
-          // outra requisição com o mesmo clientRequestId está criando o
-          // pedido agora. Espera um resultado em vez de criar um segundo.
-          const resolvidoPorConcorrencia = await aguardarResultadoConcorrente(claimKey);
-          if (resolvidoPorConcorrencia) {
-            return NextResponse.json(resolvidoPorConcorrencia);
-          }
-          return NextResponse.json(
-            { ok: false, error: "Este pedido já está sendo processado. Aguarde alguns segundos e verifique antes de tentar de novo." },
-            { status: 409 }
-          );
-        }
-      } catch (err) {
-        // Redis indisponível bem no momento da checagem de idempotência —
-        // NUNCA bloqueia a criação do pedido por causa disso: prossegue
-        // exatamente como se a flag estivesse desligada para esta tentativa
-        // (idempotenciaReivindicada permanece false, então nada mais deste
-        // mecanismo roda para esta requisição).
-        console.error("[ChefeBot] Redis indisponível para idempotência de pedido (pedido segue sem essa proteção nesta tentativa):", err);
-      }
-    }
+    // ---------------------------------------------------------------
+    // Validações puras: nada aqui escreve dado, reserva recompensa, cria
+    // Pix ou produz qualquer efeito externo — só validação e leitura. O
+    // claim de idempotência (mais abaixo) só entra em cena DEPOIS de tudo
+    // isto, para nunca gastar comandos Redis com um payload inválido.
+    // ---------------------------------------------------------------
 
     if (!body.cliente || !body.itens || body.itens.length === 0) {
       return NextResponse.json({ ok: false, error: "Pedido inválido" }, { status: 400 });
@@ -230,6 +357,10 @@ export async function POST(req: NextRequest) {
     // prova propriedade da recompensa (qualquer um pode digitar o telefone
     // de outra pessoa). Pedido comum sem presente continua funcionando como
     // convidado, sem exigir login.
+    //
+    // `prepararResgateParaPedido` é só leitura/validação — a vinculação real
+    // (`confirmarReservaNoPedido`, primeiro efeito irreversível deste fluxo)
+    // acontece mais abaixo, depois do claim de idempotência.
     let clienteIdJornada: string | undefined;
     let recompensaJornadaId: string | undefined;
     let itensRecompensaMaterializados: ItemApp[] = [];
@@ -296,7 +427,9 @@ export async function POST(req: NextRequest) {
     // cliente). Identidade canônica é sempre o telefone do pedido — a mesma
     // regra usada para crédito/previsto. Reserva expirada, inexistente ou já
     // usada rejeita o pedido (isto é dinheiro, não um efeito colateral
-    // best-effort como o crédito de pontos).
+    // best-effort como o crédito de pontos). `obterReservasResgatePontos` é
+    // só leitura — a confirmação real (`confirmarResgatePontos`) acontece
+    // depois da persistência do pedido, mais abaixo.
     let descontoFidelidade = 0;
     let resgateAplicado: { clienteId: string; resgateId: string } | null = null;
     if (body.resgateId) {
@@ -367,6 +500,62 @@ export async function POST(req: NextRequest) {
 
     const pedidoId = Date.now().toString();
 
+    // ---------------------------------------------------------------
+    // Fim das validações puras. A partir daqui, os próximos passos são
+    // efeitos irreversíveis (vincular recompensa, gerar número, criar Pix,
+    // persistir) — é aqui, e só aqui, que a idempotência entra em cena.
+    // ---------------------------------------------------------------
+
+    clientRequestId = survivalModeEnabled() ? sanitizeClientRequestId(body.clientRequestId) : null;
+
+    if (clientRequestId) {
+      requestFingerprint = calcularRequestFingerprint({
+        cliente: body.cliente,
+        telefonePedido,
+        itens: body.itens,
+        tipoEntrega: body.tipoEntrega,
+        bairro: body.bairro,
+        rua: body.rua,
+        numero: body.numero,
+        referencia: body.referencia,
+        pagamento: body.pagamento,
+        troco: body.troco,
+        resgateId: body.resgateId,
+        recompensaJornadaId,
+      });
+
+      const consultaRapida = await consultarResultadoExistente(clientRequestId, requestFingerprint);
+      if (consultaRapida.tipo === "conflito_fingerprint") return respostaConflitoFingerprint();
+      if (consultaRapida.tipo === "incerto") return respostaClaimIncerto();
+      if (consultaRapida.tipo === "encontrado") {
+        const reconstruida = await reconstruirRespostaPedido(consultaRapida.registro);
+        if (reconstruida) return NextResponse.json(reconstruida);
+        return respostaClaimIncerto();
+      }
+      // "nao_encontrado" — segue para tentar reivindicar o claim.
+
+      ownerToken = randomUUID();
+      const claimKey = chaveClaimPedido(clientRequestId);
+      const valorClaim = montarValorClaim(ownerToken, requestFingerprint);
+      const resultadoClaim = await tentarReivindicarClaim(claimKey, valorClaim, requestFingerprint);
+
+      if (resultadoClaim.tipo === "conflito_fingerprint") {
+        return respostaConflitoFingerprint();
+      }
+      if (resultadoClaim.tipo === "incerto") {
+        return respostaClaimIncerto();
+      }
+      if (resultadoClaim.tipo === "processando_mesmo_fingerprint") {
+        const resolvido = await aguardarResultadoPedido(clientRequestId);
+        if (resolvido) {
+          const reconstruida = await reconstruirRespostaPedido(resolvido);
+          if (reconstruida) return NextResponse.json(reconstruida);
+        }
+        return respostaAindaProcessando();
+      }
+      claimAdquirido = true;
+    }
+
     // Vincula a recompensa da Jornada do Chef a ESTE pedidoId ANTES de
     // persistir o pedido (rule 6): se a vinculação falhar (recompensa
     // consumida por outra requisição concorrente, expirada nesse meio-tempo,
@@ -378,6 +567,7 @@ export async function POST(req: NextRequest) {
         await confirmarReservaNoPedido(clienteIdJornada, recompensaJornadaId, pedidoId);
       } catch (err) {
         console.error("[ChefeBot] Erro ao vincular presente da Jornada do Chef ao pedido:", err);
+        await liberarClaimSeAdquirido(clientRequestId, ownerToken, requestFingerprint, claimAdquirido);
         return NextResponse.json({ ok: false, error: "Nao foi possivel confirmar o presente. Tente novamente." }, { status: 409 });
       }
     }
@@ -429,16 +619,50 @@ export async function POST(req: NextRequest) {
 
     try {
       await redis.set("pedidos", [...pedidos, novoPedido]);
-      pedidoCriado = true;
+      pedidoIdCriado = pedidoId;
+      numeroPedidoCriado = numeroPedido;
+      statusTokenCriado = statusToken;
+      totalCriado = total;
     } catch (err) {
       // O pedido não chegou a ser persistido — libera só o vínculo desta
       // recompensa com este pedidoId (nunca reescreve a lista inteira de
-      // "pedidos" como compensação, rule 6).
+      // "pedidos" como compensação, rule 6), e libera o claim de idempotência
+      // (nenhum pedido existe, retry legítimo deve poder tentar de novo).
       if (recompensaJornadaId && clienteIdJornada) {
         await liberarVinculoRecompensaPedidoNaoCriado(clienteIdJornada, recompensaJornadaId, pedidoId).catch(() => {});
       }
+      await liberarClaimSeAdquirido(clientRequestId, ownerToken, requestFingerprint, claimAdquirido);
       console.error("[ChefeBot] Erro ao persistir pedido do site:", err);
       return NextResponse.json({ ok: false, error: "Erro interno" }, { status: 500 });
+    }
+
+    // A partir daqui o pedido EXISTE de verdade. Grava imediatamente o
+    // registro mínimo e durável de idempotência — antes de qualquer operação
+    // que ainda possa falhar (confirmação de resgate, fidelidade, Pix) — para
+    // que uma falha abaixo nunca vire um 500 cru fingindo que nada aconteceu
+    // (ver revisão de segurança, ponto 5). O registro nunca contém total/Pix
+    // (ponto 6) — só o necessário para localizar o pedido de novo.
+    let resultadoGravado = false;
+    if (claimAdquirido && clientRequestId && requestFingerprint) {
+      try {
+        const registro: ResultadoIdempotenciaPedido = {
+          state: "completed",
+          requestFingerprint,
+          pedidoId,
+          numero: numeroPedido,
+          statusToken,
+          createdAt: Date.now(),
+        };
+        await redis.set(chaveResultadoPedido(clientRequestId), registro, { ex: RESULT_TTL_SEGUNDOS });
+        resultadoGravado = true;
+      } catch (err) {
+        // Não conseguimos gravar o registro durável — o pedido já existe de
+        // verdade. NUNCA libera o claim aqui (liberar reabriria a janela de
+        // duplicação): o claim expira sozinho pelo TTL curto (30s), e um
+        // retry legítimo nesse intervalo recebe "ainda processando" (409),
+        // nunca duplica o pedido.
+        logSurvivalErro("idempotencia_pedido", "finalizacao", "set_result_falhou", err);
+      }
     }
 
     // Confirma o resgate (Etapa 5): se o debito nao persistir, o pedido com
@@ -453,6 +677,14 @@ export async function POST(req: NextRequest) {
           pedidosAtuais.filter((pedido) => (pedido as { id?: unknown } | null)?.id !== pedidoId)
         );
         console.error("[ChefeBot] Erro ao confirmar resgate de fidelidade; pedido com desconto revertido:", err);
+        // O pedido foi removido de verdade — agora é seguro (e correto)
+        // liberar o registro de idempotência e o claim, para um retry
+        // legítimo poder tentar de novo sem ficar preso a um "processando"
+        // ou a um resultado que aponta para um pedido que não existe mais.
+        if (clientRequestId) {
+          await redis.del(chaveResultadoPedido(clientRequestId)).catch(() => {});
+        }
+        await liberarClaimSeAdquirido(clientRequestId, ownerToken, requestFingerprint, claimAdquirido);
         return NextResponse.json({ ok: false, error: "Nao foi possivel confirmar o resgate. Tente novamente." }, { status: 409 });
       }
     }
@@ -494,36 +726,61 @@ export async function POST(req: NextRequest) {
       });
     } catch {}
 
-    const configPix = await getConfigPix();
-    const pixCliente = serializarPixCliente(pix, configPix);
-    const resposta = { ok: true, pedidoId, numero: numeroPedido, total, statusToken, ...(pixCliente ? { pix: pixCliente } : {}) };
-
-    // Substitui o marcador "processando" pelo resultado final (best-effort:
-    // o pedido já foi persistido antes deste ponto — uma falha aqui nunca
-    // desfaz nem impede a resposta de sucesso ao cliente). Se esta gravação
-    // falhar, o `finally` abaixo NUNCA apaga a reivindicação (só faria isso
-    // se o pedido não tivesse sido criado) — o marcador "processando" fica
-    // até o TTL expirar, então o pior caso de um retry nesse intervalo é um
-    // 409 "aguarde e verifique", nunca um segundo pedido.
-    if (idempotenciaReivindicada && clientRequestId) {
-      await redis
-        .set(chaveIdempotenciaPedido(clientRequestId), resposta, { ex: PEDIDO_IDEMPOTENCIA_TTL_SEGUNDOS })
-        .then(() => { idempotenciaFinalizada = true; })
-        .catch((err) => console.error("[ChefeBot] Falha ao gravar idempotência de pedido (ignorada):", err));
+    // getConfigPix + serializarPixCliente: o pedido já existe de verdade a
+    // partir daqui, então uma falha aqui NUNCA vira um 500 cru (ponto 5) —
+    // devolve a confirmação real do pedido, sinalizando "degradado" e sem
+    // fabricar dado de pagamento algum.
+    let pixCliente: ReturnType<typeof serializarPixCliente>;
+    let degradado = false;
+    try {
+      const configPix = await getConfigPix();
+      pixCliente = serializarPixCliente(pix, configPix);
+    } catch (err) {
+      degradado = true;
+      logSurvivalErro("pedido_app", "serializacao_pix", "config_pix_falhou", err);
     }
 
+    if (claimAdquirido && clientRequestId && ownerToken && requestFingerprint && resultadoGravado) {
+      // Best-effort: o registro durável já é a fonte de verdade a partir
+      // daqui — liberar o claim agora só evita segurar a chave até o TTL
+      // curto (30s) expirar sozinho; uma falha aqui não muda nada de
+      // observável para o cliente.
+      await redis
+        .eval(LIBERAR_CLAIM_SE_DONO_SCRIPT, [chaveClaimPedido(clientRequestId)], [montarValorClaim(ownerToken, requestFingerprint)])
+        .catch((err) => logSurvivalErro("idempotencia_pedido", "liberacao", "eval_falhou", err));
+    }
+
+    const resposta: PedidoAppRespostaSucesso = {
+      ok: true,
+      pedidoId,
+      numero: numeroPedido,
+      total,
+      statusToken,
+      ...(pixCliente ? { pix: pixCliente } : {}),
+      ...(degradado ? { degradado: true } : {}),
+    };
     return NextResponse.json(resposta);
   } catch (error) {
+    // Se o pedido já foi persistido antes desta exceção, NUNCA devolve um
+    // 500 cru fingindo que nada aconteceu — o cliente que fez ESTA
+    // requisição recebe a confirmação real, sinalizada como degradada (ver
+    // revisão de segurança, ponto 5).
+    if (pedidoIdCriado && numeroPedidoCriado !== null && statusTokenCriado && totalCriado !== null) {
+      logSurvivalErro("pedido_app", "pos_persistencia", "excecao_apos_persistir", error);
+      const respostaRecuperavel: PedidoAppRespostaSucesso = {
+        ok: true,
+        pedidoId: pedidoIdCriado,
+        numero: numeroPedidoCriado,
+        total: totalCriado,
+        statusToken: statusTokenCriado,
+        degradado: true,
+      };
+      return NextResponse.json(respostaRecuperavel);
+    }
+    // Nenhum pedido foi persistido — se havíamos reivindicado o claim,
+    // libera para permitir um retry legítimo com o mesmo clientRequestId.
+    await liberarClaimSeAdquirido(clientRequestId, ownerToken, requestFingerprint, claimAdquirido);
     console.error("Erro ao salvar pedido do site:", error);
     return NextResponse.json({ ok: false, error: "Erro interno" }, { status: 500 });
-  } finally {
-    // Libera a reivindicação SOMENTE se nenhum pedido chegou a ser criado
-    // (ex.: falhou em alguma validação de negócio depois de reivindicar a
-    // chave) — nesse caso o clientRequestId pode e deve ser reutilizado num
-    // retry legítimo. Se o pedido FOI criado, nunca apagamos aqui: apagar
-    // reabriria a janela para um retry duplicar um pedido que já existe.
-    if (clientRequestId && idempotenciaReivindicada && !idempotenciaFinalizada && !pedidoCriado) {
-      await redis.del(chaveIdempotenciaPedido(clientRequestId)).catch(() => {});
-    }
   }
 }

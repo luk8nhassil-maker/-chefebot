@@ -1,7 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { gerarClientRequestId, sanitizeClientRequestId } from "./clientRequestId";
 
 describe("gerarClientRequestId", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("gera valores diferentes a cada chamada", () => {
     const a = gerarClientRequestId();
     const b = gerarClientRequestId();
@@ -11,6 +15,18 @@ describe("gerarClientRequestId", () => {
   it("o valor gerado sempre passa pelo próprio sanitizador", () => {
     const id = gerarClientRequestId();
     expect(sanitizeClientRequestId(id)).toBe(id);
+  });
+
+  it("usa crypto.getRandomValues quando randomUUID não está disponível", () => {
+    vi.stubGlobal("crypto", { getRandomValues: (arr: Uint8Array) => { arr.fill(7); return arr; } });
+    const id = gerarClientRequestId();
+    expect(sanitizeClientRequestId(id)).toBe(id);
+    expect(id).toBe("07".repeat(16));
+  });
+
+  it("nunca usa Date.now()/Math.random() como fallback — falha de forma controlada sem nenhuma fonte de aleatoriedade criptográfica", () => {
+    vi.stubGlobal("crypto", {});
+    expect(() => gerarClientRequestId()).toThrow(/aleatoriedade criptográfica/);
   });
 });
 

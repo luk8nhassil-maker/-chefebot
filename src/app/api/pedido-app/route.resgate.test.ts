@@ -39,6 +39,11 @@ vi.mock("@/lib/redis", () => ({
     get: vi.fn(defaultGetImpl),
     set: vi.fn(defaultSetImpl),
     eval: vi.fn(defaultEvalImpl),
+    del: vi.fn((key: string) => {
+      const existia = redisStore.has(key);
+      redisStore.delete(key);
+      return Promise.resolve(existia ? 1 : 0);
+    }),
   },
 }));
 
@@ -113,7 +118,7 @@ async function prepararRecompensaDisponivel() {
 
 const itemPizza = { kind: "pizza" as const, name: "Pizza G", detail: "Calabresa", price: 50, qty: 1 };
 
-function pedidoRequest(opts: { resgateId?: string; itens?: unknown[] } = {}) {
+function pedidoRequest(opts: { resgateId?: string; itens?: unknown[]; clientRequestId?: string } = {}) {
   const body = {
     cliente: "Fulano de Tal",
     telefone: TELEFONE,
@@ -122,6 +127,7 @@ function pedidoRequest(opts: { resgateId?: string; itens?: unknown[] } = {}) {
     pagamento: "Dinheiro",
     troco: "Sem troco",
     ...(opts.resgateId ? { resgateId: opts.resgateId } : {}),
+    ...(opts.clientRequestId ? { clientRequestId: opts.clientRequestId } : {}),
   };
   return new NextRequest("http://localhost/api/pedido-app", {
     method: "POST",
@@ -133,10 +139,16 @@ function pedidoRequest(opts: { resgateId?: string; itens?: unknown[] } = {}) {
 beforeEach(async () => {
   redisStore.clear();
   vi.mocked(fetch).mockClear();
+  vi.unstubAllEnvs();
   const redisLib = await import("@/lib/redis");
   vi.mocked(redisLib.redis.get).mockImplementation(defaultGetImpl);
   vi.mocked(redisLib.redis.set).mockImplementation(defaultSetImpl);
   vi.mocked(redisLib.redis.eval).mockImplementation(defaultEvalImpl);
+  vi.mocked(redisLib.redis.del).mockImplementation((key: string) => {
+    const existia = redisStore.has(key);
+    redisStore.delete(key);
+    return Promise.resolve(existia ? 1 : 0);
+  });
 });
 
 describe("POST /api/pedido-app — resgate de pontos no checkout (Etapa 5)", () => {
@@ -281,6 +293,54 @@ describe("POST /api/pedido-app — resgate de pontos no checkout (Etapa 5)", () 
     const clienteId = derivarClienteIdPorTelefone(TELEFONE)!;
     const reservas = await obterReservasResgatePontos(clienteId);
     expect(reservas.find((r) => r.resgateId === reserva.resgateId)!.status).toBe("reservado");
+  });
+
+  // [Modo Sobrevivência — ponto 4 da revisão de segurança] Antes desta
+  // correção, `pedidoCriado` virava `true` na persistência e nunca voltava
+  // a `false` mesmo quando o pedido era removido pelo rollback do resgate
+  // logo em seguida — o claim/resultado de idempotência ficavam presos
+  // como se o pedido ainda existisse, bloqueando qualquer retry legítimo
+  // por até 24h. Este teste prova que, depois do rollback, o claim E o
+  // resultado são liberados de verdade, e um retry com o MESMO
+  // clientRequestId consegue criar um pedido novo (não recebe 409 "ainda
+  // processando" nem devolve o pedido já removido).
+  test("[Modo Sobrevivência] falha ao confirmar resgate libera claim e resultado de idempotência — retry legítimo cria um pedido novo", async () => {
+    vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
+    const { reserva } = await prepararRecompensaDisponivel();
+    const clientRequestId = "rollback-resgate-libera-real-1";
+    const chaveClaim = `survival:idempotencia:pedido:${clientRequestId}:claim`;
+    const chaveResultado = `survival:idempotencia:pedido:${clientRequestId}:result`;
+
+    const redisLib = await import("@/lib/redis");
+    const originalEval = defaultEvalImpl;
+    let jaFalhou = false;
+    vi.mocked(redisLib.redis.eval).mockImplementation((script: string, keys: string[], args: unknown[]) => {
+      if (!jaFalhou && keys.length === 2) {
+        jaFalhou = true;
+        return Promise.reject(new Error("falha simulada ao confirmar resgate"));
+      }
+      return originalEval(script, keys, args as string[]);
+    });
+
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const res = await POST(pedidoRequest({ resgateId: reserva.resgateId, clientRequestId }));
+    consoleSpy.mockRestore();
+
+    expect(res.status).toBe(409);
+    const pedidosAposFalha = redisStore.get("pedidos") as Array<Record<string, unknown>>;
+    expect(pedidosAposFalha).toHaveLength(0);
+    // O rollback removeu o pedido de verdade — claim e resultado de
+    // idempotência precisam ter sido liberados junto, nunca presos.
+    expect(redisStore.has(chaveClaim)).toBe(false);
+    expect(redisStore.has(chaveResultado)).toBe(false);
+
+    // Retry com o MESMO clientRequestId (a mesma reserva continua
+    // "reservada", reutilizável) — precisa criar um pedido NOVO, nunca
+    // ficar preso a "ainda processando" nem devolver o pedido já removido.
+    const retry = await POST(pedidoRequest({ resgateId: reserva.resgateId, clientRequestId }));
+    expect(retry.status).toBe(200);
+    const pedidosAposRetry = redisStore.get("pedidos") as Array<Record<string, unknown>>;
+    expect(pedidosAposRetry).toHaveLength(1);
   });
 
   test("pedido sem resgateId continua funcionando normalmente (sem desconto)", async () => {

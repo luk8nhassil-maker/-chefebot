@@ -18,14 +18,26 @@ const CLIENT_REQUEST_ID_REGEX = /^[a-zA-Z0-9_-]{16,100}$/;
  * Gera um novo identificador de tentativa de checkout. Só deve ser chamado
  * uma vez por tentativa — a garantia de idempotência depende de o mesmo
  * valor ser reaproveitado em qualquer retry dessa tentativa.
+ *
+ * Nunca usa `Date.now()`/`Math.random()` como fallback: um identificador
+ * previsível permitiria a outro cliente adivinhar/colidir com o
+ * clientRequestId de alguém e reaproveitar o cache de idempotência (que
+ * pode expor dados do pedido — ver revisão de segurança do PR). Na
+ * ausência de qualquer fonte de aleatoriedade criptográfica, falha de
+ * forma controlada em vez de gerar um valor inseguro.
  */
 export function gerarClientRequestId(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
   }
-  // Fallback só para ambientes sem crypto.randomUUID (não deveria ocorrer
-  // em navegadores modernos) — ainda assim nunca usa só Math.random.
-  return `crid-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+  if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+  }
+  throw new Error(
+    "Nenhuma fonte de aleatoriedade criptográfica disponível — não é seguro gerar um clientRequestId previsível."
+  );
 }
 
 /**
