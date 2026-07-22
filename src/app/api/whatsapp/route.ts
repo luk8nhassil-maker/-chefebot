@@ -1734,7 +1734,15 @@ export async function POST(req: NextRequest) {
     // Executa APÓS a resposta ao cliente usando after() — zero impacto de latência.
     // MCP_MODE=off (padrão) não executa nenhum código abaixo.
     // Qualquer falha é capturada e logada sem propagar para o fluxo principal.
-    if (process.env.MCP_MODE === 'observador' && msgId) {
+    // DIAGNÓSTICO TEMPORÁRIO (auditoria Fase 1) — apenas booleans/strings curtas,
+    // sem telefone/mensagem/valor. Remover depois de confirmar a causa raiz.
+    const mcpGateAberto = process.env.MCP_MODE === 'observador' && !!msgId;
+    console.log('[mcp:diag] gate', JSON.stringify({
+      modeIgualObservador: process.env.MCP_MODE === 'observador',
+      msgIdPresente: !!msgId,
+      gateAberto: mcpGateAberto,
+    }));
+    if (mcpGateAberto) {
       const mcpEvento = {
         phoneHash: anonimizarConversaId(phone),
         msgId,
@@ -1749,18 +1757,23 @@ export async function POST(req: NextRequest) {
         timestamp:        Date.now(),
       };
       const mcpTask = async () => {
+        console.log('[mcp:diag] mcpTask iniciado');
         try {
           const { enfileirarEventoMcp } = await import('@/mcp/eventTap');
           await enfileirarEventoMcp(mcpEvento);
+          console.log('[mcp:diag] enfileirarEventoMcp concluido');
         } catch (err) {
+          console.error('[mcp:diag] enfileirarEventoMcp falhou', sanitizeErrorMessage(err));
           const { logErroMcp } = await import('@/mcp/logger/mcpLogger');
           logErroMcp('enfileirarEventoMcp', err).catch(() => {});
         }
       };
       try {
         after(mcpTask);
-      } catch {
+        console.log('[mcp:diag] after() agendado com sucesso');
+      } catch (errAfter) {
         // after() indisponível neste contexto (risco controlado: ~5ms de latência)
+        console.error('[mcp:diag] after() lancou, usando fallback sincrono', sanitizeErrorMessage(errAfter));
         mcpTask().catch(() => {});
       }
     }
