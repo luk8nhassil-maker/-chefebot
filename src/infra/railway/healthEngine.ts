@@ -18,6 +18,53 @@ export function severityFromPercent(percentUsed: number): Exclude<Severity, "sta
   return "healthy";
 }
 
+/**
+ * Ordena qualquer histórico por `ts` — usado tanto na leitura (readModel) quanto
+ * na UI (defesa em profundidade: nunca confiar que os dados já chegam
+ * ordenados, mesmo que a camada de persistência já ordene). Não muta o array
+ * de entrada.
+ */
+export function sortHistoryChronologically(history: readonly HistoryPoint[]): HistoryPoint[] {
+  return [...history].sort((a, b) => a.ts - b.ts);
+}
+
+export type ServiceLikeStatus = "online" | "unknown" | "connected" | "disconnected";
+
+/**
+ * Rótulo seguro para exibição de um serviço/conexão: nunca trata ausência de
+ * monitoramento ("unknown") como falha real — "não monitorado" é uma
+ * categoria própria, distinta de "desconectado" (que É uma falha real
+ * observada).
+ */
+export function describeServiceStatusLabel(status: ServiceLikeStatus): string {
+  switch (status) {
+    case "online":
+      return "online";
+    case "connected":
+      return "conectado";
+    case "disconnected":
+      return "desconectado";
+    case "unknown":
+    default:
+      return "não monitorado";
+  }
+}
+
+/**
+ * Guarda contra uma conclusão de saúde geral enganosa: mesmo com o volume
+ * saudável, só permite uma leitura "tudo saudável" quando há pelo menos um
+ * sinal real de serviço monitorado (não apenas o volume). Nunca usado para
+ * ESCONDER o estado do volume — só para decidir se é seguro estendê-lo a uma
+ * conclusão sobre "infraestrutura" como um todo.
+ */
+export function canClaimOverallHealthy(params: {
+  volumeSeverity: Exclude<Severity, "stale" | "unavailable">;
+  serviceStatuses: readonly ServiceLikeStatus[];
+}): boolean {
+  if (params.volumeSeverity !== "healthy") return false;
+  return params.serviceStatuses.some((s) => s !== "unknown");
+}
+
 function sortedAscending(history: readonly HistoryPoint[]): HistoryPoint[] {
   return [...history].sort((a, b) => a.ts - b.ts);
 }

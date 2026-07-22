@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
+  canClaimOverallHealthy,
   computeDailyGrowth,
   computeDelta,
   computeForecast,
+  describeServiceStatusLabel,
   detectAnomaly,
   evaluateAlerts,
   isCollectionStale,
   resolveDisplayState,
   severityFromPercent,
+  sortHistoryChronologically,
   DAY_MS,
 } from "./healthEngine";
 import type { HistoryPoint } from "./types";
@@ -21,7 +24,7 @@ function point(daysAgo: number, usedMb: number): HistoryPoint {
     ts: NOW - daysAgo * DAY_MS,
     usedBytes: usedMb * MB,
     capacityBytes: CAP,
-    percentUsed: (usedMb * MB) / CAP,
+    percentUsed: ((usedMb * MB) / CAP) * 100, // 0–100, nunca fração 0–1 (ver types.ts:HistoryPoint)
     origin: "collector",
   };
 }
@@ -247,5 +250,61 @@ describe("evaluateAlerts", () => {
   it("não duplica alerta em coletas repetidas sem mudança", () => {
     const s1 = evaluateAlerts({ ...base, previousSeverity: "attention", currentSeverity: "attention" });
     expect(s1).toEqual([]);
+  });
+});
+
+describe("sortHistoryChronologically", () => {
+  it("ordena pontos fora de ordem, misturando origem collector e railway-ui-manual", () => {
+    const p1 = { ...point(0, 500), origin: "collector" as const };
+    const p2 = { ...point(30, 300), origin: "railway-ui-manual" as const };
+    const p3 = { ...point(15, 400), origin: "collector" as const };
+    const sorted = sortHistoryChronologically([p1, p2, p3]);
+    expect(sorted.map((p) => p.ts)).toEqual([p2.ts, p3.ts, p1.ts]);
+  });
+
+  it("nunca muta o array de entrada", () => {
+    const p1 = point(0, 500);
+    const p2 = point(10, 400);
+    const input = [p1, p2];
+    sortHistoryChronologically(input);
+    expect(input).toEqual([p1, p2]);
+  });
+
+  it("é estável mesmo já ordenado", () => {
+    const p1 = point(10, 400);
+    const p2 = point(0, 500);
+    expect(sortHistoryChronologically([p1, p2]).map((p) => p.ts)).toEqual([p1.ts, p2.ts]);
+  });
+});
+
+describe("describeServiceStatusLabel", () => {
+  it("mapeia unknown para 'não monitorado', nunca tratando como falha", () => {
+    expect(describeServiceStatusLabel("unknown")).toBe("não monitorado");
+  });
+
+  it("mapeia os estados reais sem alterar seu significado", () => {
+    expect(describeServiceStatusLabel("online")).toBe("online");
+    expect(describeServiceStatusLabel("connected")).toBe("conectado");
+    expect(describeServiceStatusLabel("disconnected")).toBe("desconectado");
+  });
+});
+
+describe("canClaimOverallHealthy", () => {
+  it("nunca declara saudável geral quando o volume não está saudável", () => {
+    expect(
+      canClaimOverallHealthy({ volumeSeverity: "attention", serviceStatuses: ["online", "connected"] })
+    ).toBe(false);
+  });
+
+  it("nunca declara saudável geral quando todos os serviços são 'unknown' (sem dado suficiente)", () => {
+    expect(
+      canClaimOverallHealthy({ volumeSeverity: "healthy", serviceStatuses: ["unknown", "unknown", "unknown", "unknown"] })
+    ).toBe(false);
+  });
+
+  it("permite a declaração só quando o volume está saudável E há ao menos um serviço com sinal real", () => {
+    expect(
+      canClaimOverallHealthy({ volumeSeverity: "healthy", serviceStatuses: ["unknown", "unknown", "online", "unknown"] })
+    ).toBe(true);
   });
 });

@@ -17,6 +17,7 @@ import {
   isCollectionStale,
   resolveDisplayState,
   severityFromPercent,
+  sortHistoryChronologically,
   DAY_MS,
 } from "./healthEngine";
 import { readWhatsappConnectionStateSafe, type WhatsappStatusResult } from "./whatsappStatus";
@@ -100,7 +101,12 @@ export async function buildInfraSnapshot(featureEnabled: boolean, nowTs: number 
     return emptySnapshot(true, whatsapp, false);
   }
 
-  const rawHistory = mergeHistoryWithBaselines(state.history).filter((p) => nowTs - p.ts <= MAX_HISTORY_MS);
+  // sortHistoryChronologically é uma segunda garantia (mergeHistoryWithBaselines
+  // já ordena) — nunca confiar cegamente que a ordem de escrita/leitura do
+  // Redis + a união com as baselines preserva ordem cronológica.
+  const rawHistory = sortHistoryChronologically(
+    mergeHistoryWithBaselines(state.history).filter((p) => nowTs - p.ts <= MAX_HISTORY_MS)
+  );
   const collectorState = collectorStateFrom(state.collectorStatus, nowTs);
 
   if (!state.latestSample || rawHistory.length === 0) {
