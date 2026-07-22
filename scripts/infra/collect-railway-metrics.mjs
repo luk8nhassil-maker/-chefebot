@@ -91,6 +91,27 @@ export function parseVolumeListOutput(raw, volumeNameHint = "postgres-volume") {
   return { usedBytes, capacityBytes };
 }
 
+/**
+ * Descreve a FORMA de um JSON — só nomes de chave, nunca valores — para
+ * calibrar o parser contra o formato real da Railway CLI sem expor nenhum
+ * dado sensível (IDs, tamanhos reais, nomes). Usado só em log de diagnóstico
+ * quando o parser não reconhece a saída (ver `describeShapeIfUnparseable`).
+ */
+export function describeJsonShape(raw) {
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { parseable: false };
+  }
+  const isArray = Array.isArray(parsed);
+  const topKeys = !isArray && parsed && typeof parsed === "object" ? Object.keys(parsed).slice(0, 20) : null;
+  const list = isArray ? parsed : Array.isArray(parsed?.volumes) ? parsed.volumes : null;
+  const firstItemKeys =
+    list && list[0] && typeof list[0] === "object" ? Object.keys(list[0]).slice(0, 20) : null;
+  return { parseable: true, isArray, topKeys, firstItemKeys };
+}
+
 function firstFiniteBytes(obj, keys) {
   for (const k of keys) if (isFiniteNonNegative(obj[k])) return obj[k];
   return null;
@@ -207,6 +228,11 @@ async function collectSample() {
       capacityBytes = fallbackCapacityBytes;
       capacitySource = "configured";
     } else {
+      // Diagnóstico de calibração: só nomes de chave (nunca valores/IDs/
+      // tamanhos reais) para ajustar parseVolumeListOutput ao formato real
+      // da Railway CLI — ver "Como ajustar o parser" na documentação.
+      const shape = describeJsonShape(volumeRes.stdout);
+      console.log(`[infra-monitor] volume list não reconhecido — forma sanitizada: ${JSON.stringify(shape)}`);
       return { ok: false, errorCode: "cli_missing_fields" };
     }
   }

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildCollectorErrorEvent,
   buildMetricSample,
+  describeJsonShape,
   parseStatusOutput,
   parseVolumeListOutput,
   signPayload,
@@ -75,6 +76,29 @@ describe("buildCollectorErrorEvent", () => {
   it("mantém um errorCode permitido", () => {
     const e = buildCollectorErrorEvent({ sampleId: "id1", collectedAt: new Date().toISOString(), errorCode: "cli_timeout" });
     expect(e.collector.errorCode).toBe("cli_timeout");
+  });
+});
+
+describe("describeJsonShape", () => {
+  it("nunca expõe valores, só nomes de chave", () => {
+    const raw = JSON.stringify([{ id: "vol_segredo123", name: "postgres-volume", weirdField: 999999 }]);
+    const shape = describeJsonShape(raw);
+    expect(shape.parseable).toBe(true);
+    expect(shape.isArray).toBe(true);
+    expect(shape.firstItemKeys).toEqual(["id", "name", "weirdField"]);
+    expect(JSON.stringify(shape)).not.toContain("vol_segredo123");
+    expect(JSON.stringify(shape)).not.toContain("999999");
+  });
+
+  it("marca parseable:false para JSON inválido", () => {
+    expect(describeJsonShape("não é json")).toEqual({ parseable: false });
+  });
+
+  it("reconhece formato { volumes: [...] }", () => {
+    const raw = JSON.stringify({ volumes: [{ mountPath: "/data" }], meta: 1 });
+    const shape = describeJsonShape(raw);
+    expect(shape.topKeys).toEqual(["volumes", "meta"]);
+    expect(shape.firstItemKeys).toEqual(["mountPath"]);
   });
 });
 
