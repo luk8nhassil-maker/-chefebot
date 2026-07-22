@@ -146,6 +146,11 @@ domínio oficial. Nenhum desses foi alterado por este PR.
 
 - `SURVIVAL_MODE_ENABLED` (padrão `false`) — liga o núcleo (idempotência de
   criação de pedido).
+- `SURVIVAL_CLIENT_REQUEST_ID_ENFORCEMENT_ENABLED` (padrão `false`, 5ª
+  revisão de segurança) — com o núcleo ligado, endurece a validação de
+  `clientRequestId`: um valor PRESENTE porém malformado passa a ser
+  rejeitado (400) em vez de apenas ignorado. A ausência do campo nunca é
+  rejeitada por esta flag (ver 2.5-E).
 - `SURVIVAL_MANUAL_FALLBACK_ENABLED` (padrão `false`) — reservada para a
   Etapa 2 (UI de fallback manual).
 - `SURVIVAL_LOAD_SHEDDING_ENABLED` (padrão `false`) — reservada para a
@@ -319,9 +324,9 @@ espalham (`...pedido`) o objeto inteiro numa resposta pública. As
 mensagens de WhatsApp (`notificarCliente`, `getMensagemStatus`) são sempre
 texto construído explicitamente, nunca um dump do objeto.
 
-### 2.5-B Estado de consistência crítica do pedido (4ª revisão de segurança)
+### 2.5-B Estado de consistência crítica do pedido (4ª e 5ª revisões de segurança)
 
-**Problema fechado nesta revisão**: a ordem original gravava o `:result`
+**Problema fechado na 4ª revisão**: a ordem original gravava o `:result`
 (`state: "completed"`) logo após persistir o pedido, **antes** de confirmar
 o resgate de fidelidade (`confirmarResgatePontos`). Se a confirmação do
 resgate falhasse, o código tentava reverter o pedido (remover de
@@ -340,53 +345,181 @@ cego), arriscando apagar o resultado de uma execução concorrente mais nova.
   único efeito crítico posterior à persistência hoje) ainda não foi
   confirmado.
 - `completed` — sem efeito crítico pendente (pedidos sem resgate já nascem
-  neste estado) ou o resgate foi confirmado com sucesso.
+  neste estado) ou o resgate foi confirmado com sucesso E a transição para
+  `completed` foi comprovadamente persistida (ver 5ª revisão abaixo).
 - `recovery_required` — a confirmação do resgate falhou E o rollback do
-  pedido TAMBÉM falhou; tratado de forma idêntica a
-  `pending_critical_confirmation` por `survivalStateBloqueiaSucesso` (nunca
-  sucesso), mas logado com um código distinto (`falha_critica_rollback`)
-  para investigação operacional. Na prática, como as duas operações que
-  falharam são exatamente as que atualizariam esse campo, o pedido
-  permanece registrado como `pending_critical_confirmation` — o efeito de
-  bloqueio é idêntico; só a rotulagem exata no dado persistido não muda
-  (documentado aqui para quem for investigar via log/Redis diretamente).
+  pedido TAMBÉM falhou; ou o resgate foi confirmado com sucesso mas a
+  própria transição para `completed` não pôde ser persistida. Tratado de
+  forma idêntica a `pending_critical_confirmation` por
+  `survivalStateBloqueiaSucesso` (nunca sucesso), mas logado com um código
+  distinto (`falha_critica_rollback` / `falha_ao_marcar_completed`) para
+  investigação operacional. A rota **tenta ativamente** persistir este
+  estado (best-effort) em ambos os casos — se essa tentativa também falhar
+  (mesma causa raiz que impediu a transição original), o pedido permanece
+  registrado como `pending_critical_confirmation`; o efeito de bloqueio é
+  idêntico em qualquer um dos dois, só a rotulagem exata no dado persistido
+  pode não refletir `recovery_required` quando o próprio Redis impede
+  qualquer escrita adicional.
+
+**5ª revisão — o retorno de `marcarSurvivalStateDoPedido` nunca é
+ignorado**: a rota original chamava `marcarSurvivalStateDoPedido(pedidoId,
+"completed")` sem checar o boolean que a função já retornava. Se essa
+transição falhasse (o `GET` ou o `SET` de `pedidos` dentro dela lançando), o
+pedido continuava `pending_critical_confirmation`, mas a rota seguia adiante
+e podia gravar `:result` como `completed` e devolver `ok: true` mesmo assim
+— um retry posterior encontraria o pedido pendente e devolveria 503,
+divergindo da primeira resposta (que já tinha confirmado sucesso). Corrigido: o
+boolean é sempre verificado; se `false`, a rota tenta best-effort marcar
+`recovery_required`, loga `"falha_ao_marcar_completed"` e retorna **503
+`unresolved: true` diretamente — nunca `ok: true`, nunca grava `:result`**.
+Importante: este caso NUNCA tenta reverter (remover) o pedido — o resgate já
+foi debitado de verdade nesse ponto; desfazer o pedido duplicaria o
+problema (débito real sem pedido correspondente). `:result` só é gravado
+DEPOIS de `marcarSurvivalStateDoPedido` retornar `true` comprovadamente.
 
 **Ordem segura, única e auditável** (`marcarSurvivalStateDoPedido`,
 `gravarResultadoDuravel`): persistir pedido (`pending_critical_confirmation`
 se houver resgate, `completed` se não houver) → confirmar resgate (se
-houver) → marcar `completed` → **só então** gravar `:result` → liberar
-claim → responder sucesso. `buscarPedidoPorClientRequestIdHash` e
-`reconstruirRespostaPedido` (fast path) verificam `survivalState` antes de
-reconstruir qualquer sucesso — um pedido `pending_critical_confirmation`/
-`recovery_required` encontrado por qualquer um dos dois caminhos devolve
-sempre 503 recuperável, nunca sucesso, **mesmo depois de o `:claim` já ter
-expirado** (o campo no próprio pedido é a barreira, não uma chave efêmera).
+houver) → marcar `completed` **com retorno verificado** → **só então**
+gravar `:result` → liberar claim → responder sucesso.
+`buscarPedidoPorClientRequestIdHash` e `reconstruirRespostaPedido` (fast
+path) verificam `survivalState` antes de reconstruir qualquer sucesso — um
+pedido `pending_critical_confirmation`/`recovery_required` encontrado por
+qualquer um dos dois caminhos devolve sempre 503 recuperável, nunca
+sucesso, **mesmo depois de o `:claim` já ter expirado** (o campo no próprio
+pedido é a barreira, não uma chave efêmera). A checagem
+(`survivalStateBloqueiaSucesso`) recebe o pedido inteiro, não só o campo:
+bloqueia qualquer `survivalState` diferente de `"completed"` — incluindo
+`undefined`/malformado — SE o pedido carrega `survivalClientRequestIdHash`
+(ou seja, passou pelo Modo Sobrevivência); pedidos antigos, sem esse
+campo, nunca são bloqueados por esta checagem (comportamento pré-existente
+preservado).
 
 **Falha dupla (confirmação + rollback) tratada localmente**: o `catch`
 aninhado em torno do rollback nunca deixa a exceção escapar para o catch
-externo — responde diretamente 503 (`unresolved: true`) e loga
-`"falha_critica_rollback"`. Isso elimina a necessidade da regra genérica
-antiga "toda exceção depois da persistência vira sucesso degradado": ela
-foi **removida** do catch externo. As únicas falhas que ainda podem gerar
-`ok: true, degradado: true` são as já isoladas em seus próprios
-`try/catch` locais (notificação push, pontos previstos best-effort,
-`getConfigPix`/serialização do Pix para exibição) — nenhuma delas propaga
-exceção até o catch externo. Qualquer exceção que ainda chegue lá depois da
-persistência é, por definição, um caso não coberto por nenhuma recuperação
-local — vira 503 recuperável, nunca sucesso.
+externo — tenta best-effort marcar `recovery_required`, responde
+diretamente 503 (`unresolved: true`) e loga `"falha_critica_rollback"`. Isso
+elimina a necessidade da regra genérica antiga "toda exceção depois da
+persistência vira sucesso degradado": ela foi **removida** do catch
+externo. As únicas falhas que ainda podem gerar `ok: true, degradado: true`
+são as já isoladas em seus próprios `try/catch` locais (notificação push,
+pontos previstos best-effort, `getConfigPix`/serialização do Pix para
+exibição) — nenhuma delas propaga exceção até o catch externo. Qualquer
+exceção que ainda chegue lá depois da persistência é, por definição, um
+caso não coberto por nenhuma recuperação local — vira 503 recuperável,
+nunca sucesso.
 
-**`:result` stale vs. leitura incerta** (`reconstruirRespostaPedido`,
-`buscarPedidoPersistidoPorId`): as duas situações eram indistinguíveis
-antes desta revisão (qualquer "pedido não encontrado" — por falha de
-leitura ou por ausência real — virava 503 para sempre, até o TTL de 24h).
-Agora: falha ao ler `pedidos` → sempre incerto (503), nunca mexe no
-`:result`. Leitura bem-sucedida e pedido comprovadamente ausente → `:result`
-é **stale**, invalidado via `invalidarResultadoStaleSeAindaValido`
-(compare-and-delete por `pedidoId` + `createdAt`, nunca um `DEL` cego —
-só apaga se, numa leitura fresca imediatamente antes, o registro ainda for
-exatamente o mesmo já examinado), liberando um retry legítimo para criar um
-pedido novo com identidade própria (nunca reutiliza `pedidoId`/
-`statusToken`/Pix do registro invalidado).
+**`:result` stale vs. leitura incerta, com invalidação ATÔMICA (4ª e 5ª
+revisões)** (`reconstruirRespostaPedido`, `buscarPedidoPersistidoPorId`,
+`invalidarResultadoStaleAtomico`): as duas situações (falha de leitura vs.
+ausência real) eram indistinguíveis antes da 4ª revisão. A 4ª revisão as
+distinguiu, mas a invalidação ainda era um `GET` seguido de um `DEL`
+separado — não atômico: entre as duas chamadas, uma execução concorrente
+podia gravar um resultado novo que o `DEL` apagaria por engano. A 5ª
+revisão substitui isso por um **compare-and-delete atômico via Lua**
+(`INVALIDAR_RESULTADO_SE_TOKEN_SCRIPT`): o registro `:result` agora carrega
+um `resultToken` aleatório forte, espelhado numa chave-token companheira
+plana (`:result:token`); o script compara e apaga AMBAS as chaves numa
+única operação atômica, retornando um de quatro resultados explícitos:
+`removido` | `ja_ausente` | `substituido_por_outro` | (erro → tratado como
+`incerto`). Regras: falha ao ler `pedidos` durante a reconstrução → sempre
+incerto (503), nunca mexe no `:result`; leitura bem-sucedida e pedido
+comprovadamente ausente → `:result` é stale, invalidação tentada; `removido`
+ou `ja_ausente` → segue como se `:result` nunca tivesse existido;
+`substituido_por_outro` (uma execução concorrente gravou um `:result` novo
+entre a nossa leitura e a invalidação) → a consulta é REINICIADA (nunca
+assume nada sobre o registro novo), até um limite de 3 tentativas antes de
+pedir para o cliente aguardar. `ehResultadoIdempotenciaValido` também
+passou a validar rigorosamente todos os campos (formato SHA-256 do
+fingerprint, números finitos, strings não vazias, `resultToken` com pelo
+menos 32 caracteres) — um registro malformado nunca é tratado como válido.
+
+### 2.5-C Identidade estável da tentativa antes de qualquer efeito externo (5ª revisão de segurança)
+
+**Problema fechado nesta revisão**: `pedidoId = Date.now().toString()` era
+recalculado a cada execução da rota — inclusive em retries. O `txid` do Pix
+(`gerarTxidPixInterno(pedidoId)`) e, por consequência, a
+`X-Idempotency-Key` do Mercado Pago (`gerarIdempotencyKey(txid)`, em
+`src/lib/mercadoPagoPix.ts`) são funções puras e determinísticas de
+`pedidoId`. Consequência: se `prepararPixProviderMercadoPago` criasse a
+cobrança Pix com sucesso mas a persistência de `pedidos` falhasse logo
+depois (claim liberado, resposta perdida do ponto de vista do cliente), um
+retry com o MESMO `clientRequestId` gerava um `pedidoId` NOVO (outro
+`Date.now()`) e, portanto, um `txid`/`X-Idempotency-Key` novos — o Mercado
+Pago via isso como uma tentativa de pagamento totalmente distinta e podia
+criar uma **segunda cobrança real**.
+
+**Correção — registro "attempt"** (`src/survival/pedidoIdempotencia.ts`,
+`obterOuCriarAttempt` em `route.ts`): uma quarta chave,
+`survival:idempotencia:pedido:{clientRequestId}:attempt` (TTL 24h, igual ao
+`:result`), criada atomicamente (`SET NX`) com `pedidoId`/`txid` ANTES de
+qualquer efeito externo — antes do vínculo da Jornada do Chef, antes de
+`proximoNumeroPedido`, antes da criação da cobrança Pix. Se a chave já
+existir (retry de uma tentativa anterior, mesmo que ela nunca tenha
+persistido o pedido), o attempt é recuperado em vez de recriado: mesmo
+fingerprint → reutiliza o MESMO `pedidoId`/`txid` já reivindicados;
+fingerprint diferente → 409 genérico; falha de leitura/escrita → 503
+`unresolved: true` (mantém o claim — nunca prossegue às cegas, poderia
+gerar um `pedidoId` divergente do já eventualmente usado numa cobrança
+anterior). A partir da resolução do attempt, `pedidoId` deixa de ser
+recalculado — toda a rota (Jornada, Pix, persistência, idempotência) usa
+essa MESMA variável.
+
+O registro nunca contém PII, QR, copia-e-cola ou credencial — só
+`state` (`in_progress`/`completed`, informativo), `requestFingerprint`,
+`pedidoId`, `txid`, `createdAt`, `updatedAt`.
+
+Isto **não substitui** a necessidade de um `pedidoId` globalmente único
+entre `clientRequestId`s diferentes (ver
+`docs/architecture/DECISAO-CONCORRENCIA-CHAVE-PEDIDOS.md`, seção 6.1) — o
+attempt resolve a estabilidade INTRA-tentativa (mesmo `clientRequestId`
+sempre com a mesma identidade), não a colisão entre tentativas distintas.
+
+### 2.5-D Compensação uniforme da Jornada do Chef para qualquer falha pré-persistência (5ª revisão de segurança)
+
+**Problema fechado nesta revisão**: `confirmarReservaNoPedido` (vínculo da
+recompensa ao `pedidoId`) acontece antes de `proximoNumeroPedido`,
+`criarPixMetadata` e `prepararPixProviderMercadoPago` — mas a liberação do
+vínculo (`liberarVinculoRecompensaPedidoNaoCriado`) só existia dentro do
+`catch` da persistência (`redis.set("pedidos", ...)`). Uma exceção em
+qualquer passo ANTES disso (por exemplo, `proximoNumeroPedido` falhando)
+escapava sem passar por nenhuma compensação, deixando o vínculo da
+recompensa preso indefinidamente (a recompensa nunca mais podia ser
+reservada, mesmo com o pedido nunca criado).
+
+**Correção**: o `try` que envolve a persistência foi estendido para cobrir
+TODO o espaço entre o vínculo da Jornada e o `redis.set("pedidos", ...)` —
+`proximoNumeroPedido`, criação do token público, `criarPixMetadata`,
+`prepararPixProviderMercadoPago` e a montagem do objeto do pedido agora
+compartilham o MESMO `catch`, que libera o vínculo da recompensa e o claim
+de idempotência de forma idêntica, qualquer que seja o passo que falhou.
+Como `pedidoId`/`txid` já são estáveis (2.5-C), um retry que refizer essa
+preparação — inclusive recriando a cobrança Pix — reutiliza a MESMA
+`X-Idempotency-Key`, então o Mercado Pago nunca gera uma segunda cobrança
+real mesmo que o provider já tenha sido chamado antes da exceção original.
+
+### 2.5-E Ativação segura do enforcement de `clientRequestId` (5ª revisão de segurança)
+
+Com `SURVIVAL_MODE_ENABLED=true`, um `clientRequestId` presente porém em
+formato inválido (fora do padrão de `sanitizeClientRequestId`) era
+simplesmente ignorado, sem qualquer log/visibilidade, e o pedido seguia
+sendo criado sem proteção de idempotência para aquela tentativa. Uma nova
+flag separada, `SURVIVAL_CLIENT_REQUEST_ID_ENFORCEMENT_ENABLED` (padrão
+`false`, `src/survival/flags.ts`), permite endurecer esse comportamento sem
+quebrar clientes antigos:
+
+- Enforcement desligado (padrão): comportamento anterior preservado (pedido
+  criado sem proteção), mas agora com um log sanitizado
+  (`formato_invalido_ignorado`) para dar visibilidade operacional.
+- Enforcement ligado: um `clientRequestId` PRESENTE e malformado é
+  rejeitado com 400. A AUSÊNCIA do campo nunca é rejeitada por esta
+  checagem — só o valor presente e inválido.
+
+Rollout esperado: PR1/PR2 mantêm as duas flags desligadas; a UI passa a
+gerar e persistir um `clientRequestId` válido; só depois de confirmar que
+o valor está chegando corretamente na maioria das tentativas é que o
+enforcement seria considerado para ativação — decisão operacional, fora do
+escopo deste PR (nenhuma das duas flags é ativada aqui).
 
 ### 2.6 Rascunho local versionado (`src/survival/draftStorage.ts`)
 
@@ -476,24 +609,32 @@ OK — números exatos na descrição do PR (mudam a cada push).
 
 ### 2.9 Custo de Redis adicional (com a flag ligada)
 
-- Caminho feliz (pedido novo, sem disputa, `:result` nunca existiu): **+3
+- Caminho feliz (pedido novo, sem disputa, `:result` nunca existiu): **+5
   comandos** por pedido — 1 `GET` do `:result` (fast path, miss) + 1 `GET`
   de `pedidos` (busca por hash, miss — adicionado na 3ª revisão) + 1
-  `SET NX` (claim) + 1 `SET` do resultado durável. O claim é liberado ao
-  final via `EVAL` (compare-and-delete), +1 comando best-effort. A busca
-  por hash reaproveita a MESMA chave `pedidos` já lida no fluxo normal
-  (nenhuma chave nova) — o "+1 GET" é uma segunda leitura fresca dessa
-  mesma chave, não uma estrutura de dado adicional.
+  `SET NX` (claim) + 1 `SET NX` (attempt, 5ª revisão — identidade estável
+  antes do Pix/Jornada) + 1 `SET` do resultado durável + 1 `SET` da
+  chave-token companheira do resultado (5ª revisão — invalidação atômica).
+  O claim é liberado ao final via `EVAL` (compare-and-delete), +1 comando
+  best-effort. A busca por hash reaproveita a MESMA chave `pedidos` já lida
+  no fluxo normal (nenhuma chave nova) — o "+1 GET" é uma segunda leitura
+  fresca dessa mesma chave, não uma estrutura de dado adicional. Pedidos com
+  resgate de fidelidade somam mais 1 `GET`+`SET` de `pedidos` para marcar
+  `survivalState: "completed"` após a confirmação (4ª/5ª revisão).
 - Fast path (resultado já existe, retry ou conflito): 1 `GET` — mais barato
   que uma criação completa, a requisição retorna antes de tocar
   `pedidos`/menu/promoções.
 - Recuperação via hash (`:result` ausente mas pedido real já existe — o
   cenário que a 3ª revisão fecha): 2 `GET`s (`:result` miss + `pedidos`
-  hit) + 1 `SET` best-effort para recriar o `:result` — ainda mais barato
-  que uma criação completa.
-- Disputa concorrente (raro, mesmo `clientRequestId` em paralelo): até ~9
+  hit) + 1 `SET` best-effort para recriar o `:result` + 1 `SET` da
+  chave-token — ainda mais barato que uma criação completa.
+- Invalidação de `:result` stale (5ª revisão): 1 `EVAL` atômico adicional
+  (compare-and-delete da chave-token + registro principal) antes de seguir
+  para a busca por hash; em caso de `substituido_por_outro` (raríssimo), a
+  consulta é reiniciada até 3 vezes no total.
+- Disputa concorrente (raro, mesmo `clientRequestId` em paralelo): até ~10
   comandos no lado que perde a corrida (2 `GET`s do fast path/hash + 1
-  `SET NX` + 1 `GET` de inspeção do claim + até 6 `GET`s de polling),
-  *bounded*, nunca ilimitado.
+  `SET NX` do claim + 1 `SET NX`/`GET` do attempt + 1 `GET` de inspeção do
+  claim + até 6 `GET`s de polling), *bounded*, nunca ilimitado.
 - Com a flag desligada (estado deste PR em Production): **0 comandos
   extras** — o bloco inteiro nem executa.

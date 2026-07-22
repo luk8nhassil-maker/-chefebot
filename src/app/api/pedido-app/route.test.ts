@@ -28,10 +28,26 @@ const { store, redisMock, defaultSetImpl, defaultGetImpl } = vi.hoisted(() => {
       return next;
     }),
     expire: vi.fn(async () => 1),
-    // Simula o compare-and-delete atômico do script Lua real (ver
-    // LIBERAR_CLAIM_SE_DONO_SCRIPT): só apaga KEYS[0] se o valor atual for
-    // exatamente ARGV[0] — mesma semântica, sem precisar de um Redis real.
+    // Simula os DOIS scripts Lua reais usados pela rota, dispatch por
+    // keys.length (mesmo padrão já usado em route.resgate.test.ts para os
+    // scripts de fidelidade):
+    // - 1 chave: LIBERAR_CLAIM_SE_DONO_SCRIPT — só apaga KEYS[0] se o valor
+    //   atual for exatamente ARGV[0] (compare-and-delete simples).
+    // - 2 chaves: INVALIDAR_RESULTADO_SE_TOKEN_SCRIPT — compare-and-delete
+    //   atômico da chave-token (KEYS[0]) + registro principal (KEYS[1]),
+    //   devolvendo "removido"/"ja_ausente"/"substituido_por_outro".
     eval: vi.fn(async (_script: string, keys: string[], args: string[]) => {
+      if (keys.length === 2) {
+        const [chaveToken, chaveResultado] = keys;
+        const [tokenEsperado] = args;
+        if (!store.has(chaveToken)) return "ja_ausente";
+        if (store.get(chaveToken) === tokenEsperado) {
+          store.delete(chaveToken);
+          store.delete(chaveResultado);
+          return "removido";
+        }
+        return "substituido_por_outro";
+      }
       const [chave] = keys;
       const [valorEsperado] = args;
       if (store.get(chave) === valorEsperado) {
@@ -1241,6 +1257,50 @@ describe("POST /api/pedido-app — idempotência (Modo Sobrevivência)", () => {
     });
   });
 
+  describe("[4ª revisão — ponto 3] identidade estável (attempt) ANTES da cobrança Pix — nunca uma segunda cobrança real", () => {
+    it("cobrança Pix criada + persistência de 'pedidos' falha: retry com o MESMO clientRequestId reutiliza o MESMO pedidoId/txid/idempotencyKey — nunca uma segunda cobrança", async () => {
+      vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
+      vi.stubEnv("PIX_PROVIDER", "mercadopago");
+      const clientRequestId = "attempt-pix-persistencia-falha-001";
+
+      // A cobrança Pix é criada normalmente, mas a persistência de "pedidos"
+      // falha logo em seguida (resposta perdida do ponto de vista do
+      // cliente) — simula exatamente a janela em que, sem identidade
+      // estável, um retry geraria um pedidoId/txid novos e arriscaria uma
+      // segunda cobrança real no Mercado Pago.
+      redisMock.set.mockImplementationOnce(defaultSetImpl); // attempt (SET NX) — sucesso normal
+      let falhouPersistencia = false;
+      redisMock.set.mockImplementation(async (key: string, value: unknown, opts?: { nx?: boolean }) => {
+        if (key === "pedidos" && !falhouPersistencia) {
+          falhouPersistencia = true;
+          throw new Error("Redis indisponível (simulado) — persistência perdida após criar a cobrança Pix");
+        }
+        return defaultSetImpl(key, value, opts);
+      });
+
+      const r1 = await POST(postReq({ ...basePayload, clientRequestId }));
+      expect(r1.status).toBe(500);
+      expect(criarCobrancaPixMercadoPagoMock).toHaveBeenCalledTimes(1);
+      const primeiroTxid = (criarCobrancaPixMercadoPagoMock.mock.calls[0][0] as { txid: string }).txid;
+      expect(store.get("pedidos")).toBeUndefined();
+
+      redisMock.set.mockImplementation(defaultSetImpl); // restaura para o retry
+
+      const retry = await POST(postReq({ ...basePayload, clientRequestId }));
+      expect(retry.status).toBe(200);
+      expect(criarCobrancaPixMercadoPagoMock).toHaveBeenCalledTimes(2);
+      const segundoTxid = (criarCobrancaPixMercadoPagoMock.mock.calls[1][0] as { txid: string }).txid;
+
+      // Mesma identidade estável (attempt) reaproveitada — mesmo txid, logo
+      // mesma X-Idempotency-Key do Mercado Pago (derivada do txid), então o
+      // provider trata como a MESMA tentativa, nunca uma segunda cobrança.
+      expect(segundoTxid).toBe(primeiroTxid);
+      expect((store.get("pedidos") as unknown[]).length).toBe(1);
+      const pedidoFinal = (store.get("pedidos") as Array<Record<string, unknown>>)[0];
+      expect(pedidoFinal.id).toBe(segundoTxid.replace(/^chefebot_/, ""));
+    });
+  });
+
   describe("[4ª revisão — ponto 4] :result stale vs. leitura incerta", () => {
     it(":result existe, mas o pedido correspondente comprovadamente NÃO existe (stale): invalida o :result com segurança e permite um retry legítimo", async () => {
       vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
@@ -1295,27 +1355,109 @@ describe("POST /api/pedido-app — idempotência (Modo Sobrevivência)", () => {
       expect(store.get(chaveResultado(clientRequestId))).toEqual(resultadoOriginal);
     });
 
-    it("nunca reutiliza pedidoId/statusToken/Pix de um :result já invalidado — o retry cria um pedido genuinamente novo com identidade própria", async () => {
+    // [4ª revisão — ponto 3] Com o "attempt" de identidade estável, o MESMO
+    // clientRequestId + MESMO fingerprint SEMPRE reutiliza o MESMO pedidoId
+    // (e portanto o mesmo txid/X-Idempotency-Key do Mercado Pago) — inclusive
+    // depois de um :result stale ser invalidado. Isto é intencional e
+    // desejado: é exatamente o que impede uma SEGUNDA cobrança Pix real numa
+    // tentativa anterior que já tinha gerado a cobrança mas nunca persistiu.
+    // statusToken (não derivado de pedidoId, só usado para o link público de
+    // acompanhamento) É reemitido — o pedido em si é uma entrada nova na
+    // lista "pedidos" (apagada no teste para simular ausência comprovada).
+    it("depois de invalidar um :result stale, o retry com o MESMO clientRequestId reutiliza o MESMO pedidoId/txid (nunca gera uma segunda cobrança Pix)", async () => {
       vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
-      const clientRequestId = "result-stale-nao-reutiliza-identidade-001";
+      vi.stubEnv("PIX_PROVIDER", "mercadopago");
+      const clientRequestId = "result-stale-reutiliza-identidade-001";
 
-      // pedidoId é derivado de Date.now() — força instantes diferentes para
-      // que o teste verifique identidade nova de propósito (não por
-      // coincidência de timestamp), sem depender do risco de colisão já
-      // documentado em DECISAO-CONCORRENCIA-CHAVE-PEDIDOS.md.
-      const nowSpy = vi.spyOn(Date, "now");
-      nowSpy.mockReturnValue(1_700_000_000_000);
+      const r1 = await POST(postReq({ ...basePayload, clientRequestId }));
+      const body1 = await r1.json();
+      expect(criarCobrancaPixMercadoPagoMock).toHaveBeenCalledTimes(1);
+      const primeiroTxid = (criarCobrancaPixMercadoPagoMock.mock.calls[0][0] as { txid: string }).txid;
+
+      // Simula o pedido comprovadamente ausente (rollback/perda) — :result
+      // fica stale.
+      store.set("pedidos", []);
+
+      const r2 = await POST(postReq({ ...basePayload, clientRequestId }));
+      const body2 = await r2.json();
+
+      expect(body2.pedidoId).toBe(body1.pedidoId);
+      expect(criarCobrancaPixMercadoPagoMock).toHaveBeenCalledTimes(2);
+      const segundoTxid = (criarCobrancaPixMercadoPagoMock.mock.calls[1][0] as { txid: string }).txid;
+      expect(segundoTxid).toBe(primeiroTxid);
+      expect((store.get("pedidos") as unknown[]).length).toBe(1);
+    });
+
+    it("clientRequestIds DIFERENTES (tentativas distintas de propósito) sempre geram pedidoId/txid distintos — o compartilhamento de identidade é só intra-tentativa", async () => {
+      vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
+      const r1 = await POST(postReq({ ...basePayload, clientRequestId: "tentativa-distinta-a-0000001" }));
+      const r2 = await POST(postReq({ ...basePayload, clientRequestId: "tentativa-distinta-b-0000002" }));
+      const body1 = await r1.json();
+      const body2 = await r2.json();
+      expect(body2.pedidoId).not.toBe(body1.pedidoId);
+      expect((store.get("pedidos") as unknown[]).length).toBe(2);
+    });
+
+    it("erro no script de invalidação atômica (EVAL falha): nunca prossegue às cegas, devolve 503, nunca cria pedido", async () => {
+      vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
+      const clientRequestId = "invalidacao-eval-falha-001";
+
+      await POST(postReq({ ...basePayload, clientRequestId }));
+      store.set("pedidos", []); // torna o :result stale
+
+      redisMock.eval.mockImplementationOnce(async () => {
+        throw new Error("Redis indisponível (simulado) — EVAL de invalidação");
+      });
+
+      const retry = await POST(postReq({ ...basePayload, clientRequestId }));
+      expect(retry.status).toBe(503);
+      const body = await retry.json();
+      expect(body.unresolved).toBe(true);
+      expect((store.get("pedidos") as unknown[]).length).toBe(0);
+    });
+
+    it("'substituido_por_outro' (execução concorrente já gravou um :result novo bem no meio da invalidação): reinicia a consulta e reconstrói o resultado NOVO, nunca apaga nem ignora", async () => {
+      vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
+      const clientRequestId = "invalidacao-substituido-por-outro-001";
+
       const r1 = await POST(postReq({ ...basePayload, clientRequestId }));
       const body1 = await r1.json();
 
-      store.set("pedidos", []);
-      nowSpy.mockReturnValue(1_700_000_099_000);
-      const r2 = await POST(postReq({ ...basePayload, clientRequestId }));
-      const body2 = await r2.json();
-      nowSpy.mockRestore();
+      const chaveResultado = `survival:idempotencia:pedido:${clientRequestId}:result`;
+      const chaveToken = `survival:idempotencia:pedido:${clientRequestId}:result:token`;
+      const registroOriginal = store.get(chaveResultado) as { requestFingerprint: string };
 
+      store.set("pedidos", []); // pedido da 1ª tentativa removido — :result atual fica stale
+
+      const chamadaOriginalEval = redisMock.eval.getMockImplementation()!;
+      redisMock.eval.mockImplementationOnce(async (script: string, keys: string[], args: string[]) => {
+        // Simula uma execução CONCORRENTE gravando um :result NOVO (para um
+        // pedido2 já existente) bem no meio da nossa tentativa de invalidar
+        // o antigo — troca o registro principal E a chave-token ANTES do
+        // compare-and-delete atômico rodar (com o token ANTIGO ainda em
+        // ARGV). Real Redis garantiria essa mesma janela de corrida.
+        store.set("pedidos", [{ id: "pedido-concorrente-2", numero: 999, statusToken: "tok-concorrente", total: 10, itens: [] }]);
+        store.set(chaveResultado, {
+          state: "completed",
+          requestFingerprint: registroOriginal.requestFingerprint,
+          pedidoId: "pedido-concorrente-2",
+          numero: 999,
+          statusToken: "tok-concorrente",
+          createdAt: Date.now(),
+          resultToken: "token-de-outra-execucao-concorrente",
+        });
+        store.set(chaveToken, "token-de-outra-execucao-concorrente");
+        return chamadaOriginalEval(script, keys, args);
+      });
+
+      const retry = await POST(postReq({ ...basePayload, clientRequestId }));
+      expect(retry.status).toBe(200);
+      const body2 = await retry.json();
+      // Reconstrói a partir do resultado NOVO (da execução concorrente
+      // simulada) — nunca apaga esse resultado nem cria um terceiro pedido.
+      expect(body2.pedidoId).toBe("pedido-concorrente-2");
       expect(body2.pedidoId).not.toBe(body1.pedidoId);
-      expect(body2.statusToken).not.toBe(body1.statusToken);
+      expect((store.get("pedidos") as unknown[]).length).toBe(1);
     });
   });
 
@@ -1333,6 +1475,49 @@ describe("POST /api/pedido-app — idempotência (Modo Sobrevivência)", () => {
     const res = await POST(postReq({ ...basePayload, clientRequestId: "id com espaço e PII (99) 99999-9999" }));
     expect(res.status).toBe(200);
     expect((store.get("pedidos") as unknown[]).length).toBe(1);
+  });
+
+  describe("[4ª revisão — ponto 5] ativação segura do enforcement de clientRequestId", () => {
+    it("enforcement DESLIGADO (padrão): clientRequestId presente porém inválido continua apenas ignorado (200), mesmo com o núcleo ligado", async () => {
+      vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
+      // SURVIVAL_CLIENT_REQUEST_ID_ENFORCEMENT_ENABLED deliberadamente
+      // ausente — deve se comportar como o teste acima.
+      const res = await POST(postReq({ ...basePayload, clientRequestId: "curto" }));
+      expect(res.status).toBe(200);
+      expect((store.get("pedidos") as unknown[]).length).toBe(1);
+    });
+
+    it("enforcement LIGADO: clientRequestId presente porém inválido é rejeitado com 400, nunca cria o pedido", async () => {
+      vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
+      vi.stubEnv("SURVIVAL_CLIENT_REQUEST_ID_ENFORCEMENT_ENABLED", "true");
+      const res = await POST(postReq({ ...basePayload, clientRequestId: "curto" }));
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.ok).toBe(false);
+      expect(store.get("pedidos")).toBeUndefined();
+    });
+
+    it("enforcement LIGADO: clientRequestId AUSENTE nunca é rejeitado (compatibilidade com clientes antigos) — pedido criado normalmente sem idempotência", async () => {
+      vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
+      vi.stubEnv("SURVIVAL_CLIENT_REQUEST_ID_ENFORCEMENT_ENABLED", "true");
+      const res = await POST(postReq(basePayload));
+      expect(res.status).toBe(200);
+      expect((store.get("pedidos") as unknown[]).length).toBe(1);
+    });
+
+    it("enforcement LIGADO: clientRequestId válido continua funcionando normalmente (idempotência intacta)", async () => {
+      vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
+      vi.stubEnv("SURVIVAL_CLIENT_REQUEST_ID_ENFORCEMENT_ENABLED", "true");
+      const clientRequestId = "enforcement-ligado-id-valido-001";
+      const r1 = await POST(postReq({ ...basePayload, clientRequestId }));
+      const r2 = await POST(postReq({ ...basePayload, clientRequestId }));
+      expect(r1.status).toBe(200);
+      expect(r2.status).toBe(200);
+      const body1 = await r1.json();
+      const body2 = await r2.json();
+      expect(body2.pedidoId).toBe(body1.pedidoId);
+      expect((store.get("pedidos") as unknown[]).length).toBe(1);
+    });
   });
 
   it("clientRequestIds diferentes nunca colidem entre si (namespace isolado por chave)", async () => {

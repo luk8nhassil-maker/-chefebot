@@ -220,6 +220,74 @@ formalizado aqui para que a decisão futura sobre a chave `pedidos` (seções
 identidade) numa única mudança coerente, em vez de duas mudanças
 separadas que poderiam se contradizer.
 
+### 6.1 Escopo completo que qualquer implementação futura precisa cobrir junto (4ª revisão de segurança)
+
+A 4ª rodada de revisão de segurança pediu explicitamente que esta decisão
+considere, **em conjunto** (não como mudanças isoladas que poderiam se
+contradizer), todos os pontos abaixo — a lista consolidada, incluindo o que
+já existia nas seções 1-6 e o que foi introduzido pelas correções mais
+recentes do PR 1:
+
+- **Append atômico/lock da chave `pedidos`** (Opções A/B, seção 3): a
+  corrida de escrita entre `clientRequestId`s diferentes.
+- **Atualização `pending_critical_confirmation` → `completed`**
+  (`marcarSurvivalStateDoPedido`): já apontada na seção 6 — busca por
+  `pedidoId` dentro do mesmo array, sofre a mesma ambiguidade de colisão de
+  id, precisa do MESMO lock/atomicidade da criação.
+- **Rollback do resgate** (remoção do pedido de `pedidos` quando
+  `confirmarResgatePontos` falha): é uma terceira operação de
+  read-modify-write sobre a MESMA chave `pedidos`, hoje sem qualquer
+  proteção contra a corrida da seção 1 — se a decisão desta seção adotar um
+  lock/append atômico só para a CRIAÇÃO, o rollback continuaria vulnerável a
+  perder/reintroduzir pedidos de outros clientes por escrita concorrente.
+  Qualquer solução final precisa decidir explicitamente se o rollback
+  entra no mesmo mecanismo de proteção ou se fica deliberadamente fora,
+  com o risco residual documentado (mesma lógica já aplicada à edição/status
+  do painel abaixo).
+- **Edição/status do painel `/pedidos`** (edição de pedido, cancelamento,
+  mudança de status, confirmação de Pix manual): já citados na seção 5 como
+  outros consumidores do padrão `GET pedidos` → `SET pedidos` completo — a
+  decisão final precisa declarar se ficam fora do escopo (risco residual
+  aceito, já que tipicamente é um único atendente por vez) ou se também
+  precisam do mesmo lock/atomicidade.
+- **`pedidoId` único** (seção 6): a colisão por `Date.now()` — resolvida
+  idealmente na MESMA operação atômica que resolve a corrida de escrita
+  (gerar/conferir o id só depois de adquirir o lock, ou dentro do próprio
+  script Lua).
+- **"Attempt" de identidade estável** (revisão de segurança, 4ª rodada,
+  ponto 3, já implementado neste PR em `src/survival/pedidoIdempotencia.ts`
+  — chave separada `survival:idempotencia:pedido:{clientRequestId}:attempt`,
+  fora de `pedidos`): fixa `pedidoId`/`txid` ANTES de qualquer efeito externo
+  (Jornada, Pix), sobrevivendo a uma persistência que falhe. Isso já
+  resolve, por construção, o caso de retry-com-mesmo-clientRequestId gerando
+  um pedidoId novo — mas não substitui a necessidade de um `pedidoId`
+  globalmente único entre `clientRequestId`s DIFERENTES (o risco desta
+  seção 6 continua real mesmo com o attempt implementado). Qualquer solução
+  futura de unicidade de `pedidoId` (ex.: sufixo de `INCR` atômico) precisa
+  ser compatível com o valor já fixado pelo attempt — nunca gerar um
+  `pedidoId` diferente do que o attempt já reivindicou para aquele
+  `clientRequestId`.
+- **Custo Redis**: qualquer lock/atomicidade adicional (Opção A: +2
+  comandos por criação; Opção B: substitui `GET`+`SET` por 1 `EVAL`) se soma
+  ao custo já existente do attempt (+1 `SET NX`/`GET` por criação, ver
+  `docs/architecture/MODO_SOBREVIVENCIA_1_0.md`) — a decisão final deve
+  recalcular o total combinado, não avaliar cada peça isoladamente.
+- **Compatibilidade com Pix e Jornada do Chef**: o `pedidoId` (agora
+  estabilizado pelo attempt) é a base determinística do `txid`
+  (`gerarTxidPixInterno`) e, por consequência, da `X-Idempotency-Key` do
+  Mercado Pago — qualquer mudança futura no formato/geração de `pedidoId`
+  (ex.: sufixo `INCR`) precisa preservar essa cadeia determinística para não
+  reabrir o risco de cobrança duplicada. O vínculo da Jornada do Chef
+  (`confirmarReservaNoPedido`, idempotente por `pedidoId`) tem a mesma
+  dependência: uma mudança de formato de `pedidoId` precisa ser auditada
+  contra os dois fluxos antes de ser adotada.
+
+Nenhuma implementação foi feita para nenhum destes pontos além do que já
+está descrito nas seções anteriores (attempt, estados
+pending/completed/recovery_required). **Sem PostgreSQL, sem dual-write, sem
+contratar serviço novo, sem ativar recurso pago** — a mitigação, quando
+decidida, permanece inteiramente dentro do Redis/Upstash já em uso.
+
 ## 7. Bloqueio explícito
 
 Enquanto esta decisão não for revisada e aprovada, **`SURVIVAL_MODE_ENABLED`

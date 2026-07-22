@@ -619,4 +619,39 @@ describe("POST /api/pedido-app — concorrência e atomicidade", () => {
     const retry = await POST(pedidoRequest({ telefone, clienteToken: tokenDoDono(telefone), recompensaJornada: { recompensaId } }));
     expect(retry.status).toBe(200);
   });
+
+  // [4ª revisão — ponto 4] Antes desta correção, só o catch da PERSISTÊNCIA
+  // (redis.set("pedidos", ...)) liberava o vínculo da recompensa — uma falha
+  // em qualquer passo ANTERIOR a isso (proximoNumeroPedido, preparação do
+  // Pix) escapava sem compensação, deixando `reservaPedidoId` preso
+  // indefinidamente. Este teste força a falha em `proximoNumeroPedido`
+  // (chamado DEPOIS do vínculo da Jornada, ANTES da persistência) e prova
+  // que a recompensa é liberada mesmo assim.
+  test("falha entre o vínculo da recompensa e a persistência (ex.: proximoNumeroPedido) também libera o vínculo — nunca fica preso", async () => {
+    const telefone = "86977003003";
+    const { recompensaId } = await desbloquearEReservar(telefone, [BEBIDA_GUARANA]);
+
+    const numeracaoLib = await import("@/lib/numeracao");
+    vi.mocked(numeracaoLib.proximoNumeroPedido).mockRejectedValueOnce(new Error("falha simulada em proximoNumeroPedido"));
+
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const res = await POST(pedidoRequest({ telefone, clienteToken: tokenDoDono(telefone), recompensaJornada: { recompensaId } }));
+    consoleSpy.mockRestore();
+
+    expect(res.status).toBe(500);
+    const pedidos = (redisStore.get("pedidos") as Array<Record<string, unknown>>) ?? [];
+    expect(pedidos).toHaveLength(0);
+
+    // O vínculo foi liberado mesmo com a falha ocorrendo ANTES do try/catch
+    // de persistência — a recompensa continua "reservada" sem reservaPedidoId.
+    const chave = [...redisStore.keys()].find((k) => k.includes(`jornada:recompensa:default:${recompensaId}`))!;
+    const recompensa = redisStore.get(chave) as { status: string; reservaPedidoId?: string };
+    expect(recompensa.status).toBe("reservada");
+    expect(recompensa.reservaPedidoId).toBeUndefined();
+
+    // Retry funciona normalmente, reaproveitando a mesma recompensa.
+    const retry = await POST(pedidoRequest({ telefone, clienteToken: tokenDoDono(telefone), recompensaJornada: { recompensaId } }));
+    expect(retry.status).toBe(200);
+    expect((redisStore.get("pedidos") as unknown[]).length).toBe(1);
+  });
 });

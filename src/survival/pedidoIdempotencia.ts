@@ -1,4 +1,4 @@
-// Idempotência de criação de pedido — desenho com DUAS chaves separadas por
+// Idempotência de criação de pedido — desenho com QUATRO chaves separadas por
 // clientRequestId, cada uma com seu próprio TTL e propósito:
 //
 // 1. "claim" (survival:idempotencia:pedido:{id}:claim): reivindicação
@@ -22,7 +22,20 @@
 //    partir do pedido real no momento do retry (nunca uma cobrança Pix
 //    antiga/expirada é devolvida às cegas).
 //
-// Nenhuma das duas chaves toca "pedidos" nem qualquer chave já auditada em
+// 3. "result:token" (…:result:token): chave companheira PLANA do "result",
+//    guarda só o `resultToken` atual — existe para permitir invalidar um
+//    "result" stale com um compare-and-delete atômico (Lua) sem precisar
+//    decodificar JSON dentro do script (ver INVALIDAR_RESULTADO_SE_TOKEN_SCRIPT,
+//    revisão de segurança 4ª rodada, ponto 2).
+//
+// 4. "attempt" (…:attempt): identidade estável da tentativa, criada ANTES de
+//    qualquer efeito externo (Jornada do Chef, cobrança Pix) — garante que
+//    um retry com o MESMO clientRequestId sempre reutiliza o MESMO pedidoId
+//    (e portanto o mesmo txid/X-Idempotency-Key do Mercado Pago), mesmo que
+//    a tentativa anterior nunca tenha chegado a persistir o pedido (ver
+//    revisão de segurança 4ª rodada, ponto 3).
+//
+// Nenhuma das quatro chaves toca "pedidos" nem qualquer chave já auditada em
 // docs/architecture/REDIS_KEY_INVENTORY.md — mesmo padrão de isolamento por
 // prefixo já usado por infra:railway:* e mcp:*.
 
@@ -46,7 +59,11 @@ export function chaveResultadoPedido(clientRequestId: string): string {
   return `survival:idempotencia:pedido:${clientRequestId}:result`;
 }
 
-/** Registro durável — nunca contém total/pix (ver comentário acima). */
+/** Registro durável — nunca contém total/pix (ver comentário acima).
+ * `resultToken` (4ª revisão de segurança, ponto 2) é um segredo aleatório
+ * forte gravado JUNTO do registro, usado exclusivamente para uma
+ * invalidação atômica (compare-and-delete via Lua) de um `:result` "stale"
+ * — nunca para autenticação nem exposto ao cliente. */
 export type ResultadoIdempotenciaPedido = {
   state: "completed";
   requestFingerprint: string;
@@ -54,7 +71,10 @@ export type ResultadoIdempotenciaPedido = {
   numero: number;
   statusToken: string;
   createdAt: number;
+  resultToken: string;
 };
+
+const SHA256_HEX_REGEX = /^[a-f0-9]{64}$/;
 
 export function ehResultadoIdempotenciaValido(valor: unknown): valor is ResultadoIdempotenciaPedido {
   if (!valor || typeof valor !== "object") return false;
@@ -62,9 +82,89 @@ export function ehResultadoIdempotenciaValido(valor: unknown): valor is Resultad
   return (
     v.state === "completed" &&
     typeof v.requestFingerprint === "string" &&
+    SHA256_HEX_REGEX.test(v.requestFingerprint) &&
     typeof v.pedidoId === "string" &&
+    v.pedidoId.length > 0 &&
     typeof v.numero === "number" &&
-    typeof v.statusToken === "string"
+    Number.isFinite(v.numero) &&
+    typeof v.statusToken === "string" &&
+    v.statusToken.length > 0 &&
+    typeof v.createdAt === "number" &&
+    Number.isFinite(v.createdAt) &&
+    typeof v.resultToken === "string" &&
+    v.resultToken.length >= 32
+  );
+}
+
+/** Chave companheira, plana (nunca JSON), que guarda só o `resultToken` do
+ * registro atual — existe unicamente para permitir um compare-and-delete
+ * atômico (Lua) do PAR (token, registro) sem precisar decodificar JSON
+ * dentro do script. Mesmo TTL do registro principal. */
+export function chaveResultadoTokenPedido(clientRequestId: string): string {
+  return `survival:idempotencia:pedido:${clientRequestId}:result:token`;
+}
+
+// Compare-and-delete atômico de um :result "stale" (ver revisão de
+// segurança, 4ª rodada, ponto 2): KEYS[1] é a chave-token (plana), KEYS[2] é
+// o registro principal (JSON); ARGV[1] é o resultToken que esta execução
+// leu e considera stale. Nunca um DEL cego — só apaga os DOIS quando a
+// chave-token ainda contém EXATAMENTE o token esperado, o que garante que
+// nenhuma execução concorrente já gravou um resultado mais novo (que teria
+// sobrescrito a chave-token com outro valor) entre a leitura e esta chamada.
+export const INVALIDAR_RESULTADO_SE_TOKEN_SCRIPT = `
+local atual = redis.call("get", KEYS[1])
+if atual == false then
+  return "ja_ausente"
+end
+if atual == ARGV[1] then
+  redis.call("del", KEYS[1])
+  redis.call("del", KEYS[2])
+  return "removido"
+else
+  return "substituido_por_outro"
+end
+`;
+
+/** Registro do "attempt" — identidade estável da tentativa, criada/recuperada
+ * ATOMICAMENTE antes de qualquer efeito externo (vínculo da Jornada do Chef,
+ * cobrança Pix — ver revisão de segurança, 4ª rodada, ponto 3). Garante que
+ * um retry com o MESMO clientRequestId + MESMO fingerprint sempre reutiliza
+ * o MESMO pedidoId (e, por consequência, o mesmo txid — derivado
+ * deterministicamente de pedidoId em `gerarTxidPixInterno` — e a mesma
+ * X-Idempotency-Key do Mercado Pago, derivada do txid), mesmo que a
+ * persistência do pedido tenha falhado na tentativa anterior. Nunca contém
+ * PII, QR, copia-e-cola ou credencial — só os identificadores necessários
+ * para recuperar o fluxo. */
+export type RegistroAttemptPedido = {
+  state: "in_progress" | "completed";
+  requestFingerprint: string;
+  pedidoId: string;
+  txid: string;
+  createdAt: number;
+  updatedAt: number;
+};
+
+/** Mesmo TTL do :result (24h) — precisa sobreviver ao menos tanto quanto um
+ * retry legítimo possa demorar a chegar. */
+export const ATTEMPT_TTL_SEGUNDOS = RESULT_TTL_SEGUNDOS;
+
+export function chaveAttemptPedido(clientRequestId: string): string {
+  return `survival:idempotencia:pedido:${clientRequestId}:attempt`;
+}
+
+export function ehAttemptValido(valor: unknown): valor is RegistroAttemptPedido {
+  if (!valor || typeof valor !== "object") return false;
+  const v = valor as Partial<RegistroAttemptPedido>;
+  return (
+    (v.state === "in_progress" || v.state === "completed") &&
+    typeof v.requestFingerprint === "string" &&
+    v.requestFingerprint.length > 0 &&
+    typeof v.pedidoId === "string" &&
+    v.pedidoId.length > 0 &&
+    typeof v.txid === "string" &&
+    v.txid.length > 0 &&
+    typeof v.createdAt === "number" &&
+    Number.isFinite(v.createdAt)
   );
 }
 

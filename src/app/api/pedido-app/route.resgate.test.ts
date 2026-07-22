@@ -350,7 +350,7 @@ describe("POST /api/pedido-app — resgate de pontos no checkout (Etapa 5)", () 
   // devolvia `ok:true, degradado:true` — confirmando ao cliente um pedido
   // com desconto cujo débito nunca foi confirmado nem revertido. Os dois
   // testes abaixo provam que essa falha dupla NUNCA mais devolve sucesso.
-  test("[Modo Sobrevivência] confirmarResgatePontos falha E o GET do rollback também falha: nunca ok:true, pedido fica pending_critical_confirmation, retry não duplica", async () => {
+  test("[Modo Sobrevivência] confirmarResgatePontos falha E o GET do rollback também falha: nunca ok:true, pedido fica recovery_required, retry não duplica", async () => {
     vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
     const { reserva } = await prepararRecompensaDisponivel();
     const clientRequestId = "rollback-get-falha-001";
@@ -386,7 +386,7 @@ describe("POST /api/pedido-app — resgate de pontos no checkout (Etapa 5)", () 
 
     const pedidos = redisStore.get("pedidos") as Array<Record<string, unknown>>;
     expect(pedidos).toHaveLength(1);
-    expect(pedidos[0].survivalState).toBe("pending_critical_confirmation");
+    expect(pedidos[0].survivalState).toBe("recovery_required");
 
     vi.mocked(redisLib.redis.get).mockImplementation(originalGet);
     const retry = await POST(pedidoRequest({ resgateId: reserva.resgateId, clientRequestId }));
@@ -397,7 +397,7 @@ describe("POST /api/pedido-app — resgate de pontos no checkout (Etapa 5)", () 
     expect(pedidosApos).toHaveLength(1);
   });
 
-  test("[Modo Sobrevivência] confirmarResgatePontos falha E o SET do rollback também falha: nunca ok:true, pedido fica pending_critical_confirmation, retry não duplica", async () => {
+  test("[Modo Sobrevivência] confirmarResgatePontos falha E o SET do rollback também falha: nunca ok:true, pedido fica recovery_required, retry não duplica", async () => {
     vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
     const { reserva } = await prepararRecompensaDisponivel();
     const clientRequestId = "rollback-set-falha-001";
@@ -433,13 +433,121 @@ describe("POST /api/pedido-app — resgate de pontos no checkout (Etapa 5)", () 
 
     const pedidos = redisStore.get("pedidos") as Array<Record<string, unknown>>;
     expect(pedidos).toHaveLength(1);
-    expect(pedidos[0].survivalState).toBe("pending_critical_confirmation");
+    expect(pedidos[0].survivalState).toBe("recovery_required");
 
     vi.mocked(redisLib.redis.set).mockImplementation(originalSet);
     const retry = await POST(pedidoRequest({ resgateId: reserva.resgateId, clientRequestId }));
     expect(retry.status).toBe(503);
     const retryData = await retry.json();
     expect(retryData.unresolved).toBe(true);
+    const pedidosApos = redisStore.get("pedidos") as Array<Record<string, unknown>>;
+    expect(pedidosApos).toHaveLength(1);
+  });
+
+  // [Modo Sobrevivência — 4ª revisão, ponto 1] Antes desta correção, o
+  // boolean retornado por marcarSurvivalStateDoPedido era IGNORADO: se a
+  // transição para "completed" falhasse (mesmo com o resgate JÁ confirmado
+  // de verdade), a rota seguia adiante e podia gravar :result e devolver
+  // sucesso com o pedido ainda em "pending_critical_confirmation". Os dois
+  // testes abaixo provam que essa falha NUNCA mais devolve sucesso nem grava
+  // :result — e que, ao contrário da falha de CONFIRMAÇÃO do resgate, aqui
+  // NUNCA se tenta reverter o pedido (o débito já aconteceu de verdade).
+  test("[Modo Sobrevivência] confirmarResgatePontos funciona, mas o GET usado para marcar survivalState=completed falha: nunca ok:true, nunca grava :result, retry não duplica", async () => {
+    vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
+    const { reserva } = await prepararRecompensaDisponivel();
+    const clientRequestId = "transicao-completed-get-falha-001";
+    const chaveResultado = `survival:idempotencia:pedido:${clientRequestId}:result`;
+
+    const redisLib = await import("@/lib/redis");
+    const originalGet = defaultGetImpl;
+    let contadorPedidosGet = 0;
+    vi.mocked(redisLib.redis.get).mockImplementation((key: string) => {
+      if (key === "pedidos") {
+        contadorPedidosGet += 1;
+        // 1ª leitura de "pedidos" = validação pura (sempre acontece); 2ª =
+        // busca por hash do clientRequestId (idempotência, também sempre
+        // acontece e precisa funcionar normalmente aqui); a partir da 3ª
+        // (marcarSurvivalStateDoPedido "completed", e a tentativa
+        // best-effort seguinte de "recovery_required") falha.
+        if (contadorPedidosGet >= 3) {
+          return Promise.reject(new Error("falha simulada ao marcar completed"));
+        }
+      }
+      return originalGet(key);
+    });
+
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const res = await POST(pedidoRequest({ resgateId: reserva.resgateId, clientRequestId }));
+    const data = await res.json();
+    consoleSpy.mockRestore();
+
+    expect(res.status).toBe(503);
+    expect(data.ok).toBe(false);
+    expect(data.unresolved).toBe(true);
+    expect(redisStore.has(chaveResultado)).toBe(false);
+
+    vi.mocked(redisLib.redis.get).mockImplementation(originalGet);
+    const pedidos = redisStore.get("pedidos") as Array<Record<string, unknown>>;
+    // O pedido NUNCA é removido aqui — o resgate já foi debitado de verdade;
+    // desfazer o pedido duplicaria o problema (dinheiro debitado sem pedido).
+    expect(pedidos).toHaveLength(1);
+    expect(pedidos[0].survivalState).not.toBe("completed");
+
+    // O resgate JÁ foi debitado de verdade na 1ª tentativa (diferente das
+    // falhas de CONFIRMAÇÃO, aqui a reserva vira "confirmado" de verdade) —
+    // um retry com o MESMO resgateId é corretamente rejeitado pela proteção
+    // de negócio contra reaproveitamento (400, validação pura), nunca chega
+    // a criar um segundo pedido nem a expor o estado interno de
+    // idempotência. O importante, provado abaixo, é que nada duplica.
+    const retry = await POST(pedidoRequest({ resgateId: reserva.resgateId, clientRequestId }));
+    expect(retry.status).toBe(400);
+    const pedidosApos = redisStore.get("pedidos") as Array<Record<string, unknown>>;
+    expect(pedidosApos).toHaveLength(1); // retry nunca duplica
+  });
+
+  test("[Modo Sobrevivência] confirmarResgatePontos funciona, mas o SET usado para marcar survivalState=completed falha: nunca ok:true, nunca grava :result, retry não duplica", async () => {
+    vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
+    const { reserva } = await prepararRecompensaDisponivel();
+    const clientRequestId = "transicao-completed-set-falha-001";
+    const chaveResultado = `survival:idempotencia:pedido:${clientRequestId}:result`;
+
+    const redisLib = await import("@/lib/redis");
+    const originalSet = defaultSetImpl;
+    let contadorPedidosSet = 0;
+    vi.mocked(redisLib.redis.set).mockImplementation((key: string, value: unknown, opts?: { nx?: boolean }) => {
+      if (key === "pedidos") {
+        contadorPedidosSet += 1;
+        // 1º SET de "pedidos" = persistência inicial do pedido (sempre
+        // acontece); a partir do 2º (marcarSurvivalStateDoPedido
+        // "completed", e a tentativa seguinte de "recovery_required") falha.
+        if (contadorPedidosSet >= 2) {
+          return Promise.reject(new Error("falha simulada ao marcar completed"));
+        }
+      }
+      return originalSet(key, value, opts);
+    });
+
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const res = await POST(pedidoRequest({ resgateId: reserva.resgateId, clientRequestId }));
+    const data = await res.json();
+    consoleSpy.mockRestore();
+
+    expect(res.status).toBe(503);
+    expect(data.ok).toBe(false);
+    expect(data.unresolved).toBe(true);
+    expect(redisStore.has(chaveResultado)).toBe(false);
+
+    vi.mocked(redisLib.redis.set).mockImplementation(originalSet);
+    const pedidos = redisStore.get("pedidos") as Array<Record<string, unknown>>;
+    expect(pedidos).toHaveLength(1);
+    expect(pedidos[0].survivalState).not.toBe("completed");
+
+    // Mesmo raciocínio do teste de GET acima: o resgate já foi debitado de
+    // verdade, então o retry com o MESMO resgateId é rejeitado pela
+    // proteção de negócio contra reaproveitamento (400) antes mesmo de
+    // chegar à camada de idempotência — o que importa é que nada duplica.
+    const retry = await POST(pedidoRequest({ resgateId: reserva.resgateId, clientRequestId }));
+    expect(retry.status).toBe(400);
     const pedidosApos = redisStore.get("pedidos") as Array<Record<string, unknown>>;
     expect(pedidosApos).toHaveLength(1);
   });
