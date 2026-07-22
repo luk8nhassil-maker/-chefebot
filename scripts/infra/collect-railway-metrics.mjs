@@ -255,6 +255,16 @@ async function main() {
     payload = buildCollectorErrorEvent({ sampleId, collectedAt, errorCode: "unknown_error" });
   }
 
+  // Classificação sanitizada do payload — nunca a saída bruta da CLI, só o
+  // tipo de evento (e o errorCode já permitido, se houver), para dar
+  // visibilidade de calibração do parser sem expor nada sensível (ver
+  // "Como ajustar o parser" em docs/operations/railway-infra-monitor.md).
+  console.log(
+    payload.eventType === "metric_sample"
+      ? `[infra-monitor] payload=metric_sample capacitySource=${payload.postgres.capacitySource}`
+      : `[infra-monitor] payload=collector_error errorCode=${payload.collector.errorCode}`
+  );
+
   const ok = await sendToChefebot(payload, { ingestUrl, hmacSecret });
   if (!ok) process.exitCode = 0; // heartbeat de erro já foi tentado; nunca falha o job por isso.
 }
