@@ -1,0 +1,61 @@
+name: railway-infra-monitor
+
+# Coletor preventivo de infraestrutura Railway (postgres-volume do projeto
+# zestful-liberation), ver docs/operations/railway-infra-monitor.md. Só LÊ a
+# Railway (railway status / railway volume list) e envia um objeto
+# normalizado e sanitizado para /api/internal/infra/railway/metrics —
+# NUNCA executa deploy/redeploy/restart/delete/resize/variable/migration.
+#
+# Cron em UTC (GitHub Actions não suporta timezone nativo em `schedule`):
+# 03:00, 09:00, 15:00, 21:00 UTC ≈ 00:00, 06:00, 12:00, 18:00 América/São
+# Paulo (GMT-3, sem horário de verão desde 2019).
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3,9,15,21 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: railway-infra-monitor
+  cancel-in-progress: false
+
+env:
+  # Versão fixa da Railway CLI — nunca @latest (spec: nenhuma surpresa de
+  # comportamento numa CLI que só faz leitura de produção).
+  RAILWAY_CLI_VERSION: "5.27.2"
+
+jobs:
+  collect:
+    name: collect
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout (main, sem persistir credenciais)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Instalar Railway CLI (versão fixa, nunca @latest)
+        run: npm install -g "@railway/cli@${RAILWAY_CLI_VERSION}"
+
+      - name: Teste estático — nenhum comando destrutivo da Railway neste repositório
+        run: node scripts/infra/check-no-destructive-railway-commands.mjs
+
+      - name: Coletar e enviar métricas (sanitizado — nenhuma saída bruta é impressa)
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          INFRA_METRICS_HMAC_SECRET: ${{ secrets.INFRA_METRICS_HMAC_SECRET }}
+          CHEFEBOT_INFRA_INGEST_URL: ${{ vars.CHEFEBOT_INFRA_INGEST_URL }}
+          RAILWAY_POSTGRES_SERVICE: ${{ vars.RAILWAY_POSTGRES_SERVICE }}
+          RAILWAY_ENVIRONMENT: ${{ vars.RAILWAY_ENVIRONMENT }}
+        run: node scripts/infra/collect-railway-metrics.mjs

@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import type { DadosMcp } from '@/mcp/lib/mcpReader'
 import type { PadraoObservado } from '@/mcp/types'
+import InfraHealthPanel from '@/components/dev/InfraHealthPanel'
 
 const BG = 'var(--info-soft)'
 const BG_S = 'var(--info-soft)'
@@ -355,7 +356,7 @@ export default function DevMcpPage() {
   const [dados, setDados] = useState<DadosMcp | null>(null)
   const [loading, setLoading] = useState(true)
   const [erro, setErro] = useState('')
-  const [aba, setAba] = useState<'status' | 'dados'>('status')
+  const [aba, setAba] = useState<'status' | 'dados' | 'infra'>('status')
 
   useEffect(() => {
     const role = getUserRole()
@@ -420,13 +421,13 @@ export default function DevMcpPage() {
 
         {/* Tabs */}
         <div style={{ display: 'flex', gap: 6, marginBottom: 20 }}>
-          {(['status', 'dados'] as const).map(t => (
+          {(['status', 'dados', 'infra'] as const).map(t => (
             <button
               key={t}
               onClick={() => setAba(t)}
               style={{ padding: '9px 20px', borderRadius: 9, border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: 13, fontFamily: FONT, background: aba === t ? PURPLE : 'rgba(var(--overlay-rgb), 0.05)', color: aba === t ? 'var(--foreground)' : TEXT3 }}
             >
-              {t === 'status' ? 'Status e Score' : 'Padrões e Logs'}
+              {t === 'status' ? 'Status e Score' : t === 'dados' ? 'Padrões e Logs' : 'Saúde da Infraestrutura'}
             </button>
           ))}
         </div>
@@ -454,6 +455,8 @@ export default function DevMcpPage() {
             <TimelinePanel dados={dados} />
           </div>
         )}
+
+        {aba === 'infra' && <InfraHealthPanel />}
 
       </div>
     </div>
