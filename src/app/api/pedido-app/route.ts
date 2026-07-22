@@ -15,7 +15,14 @@ import { type ItemApp, type MenuPedidoApp, formatItem, officialUnitPrice, makePr
 import { prepararResgateParaPedido, confirmarReservaNoPedido, liberarVinculoRecompensaPedidoNaoCriado, type EscolhaRecompensaJornada } from "@/lib/jornadaChef";
 import { survivalModeEnabled } from "@/survival/flags";
 import { sanitizeClientRequestId } from "@/survival/clientRequestId";
-import { chaveIdempotenciaPedido, PEDIDO_IDEMPOTENCIA_TTL_SEGUNDOS } from "@/survival/pedidoIdempotencia";
+import {
+  chaveIdempotenciaPedido,
+  ehMarcadorProcessando,
+  MARCADOR_PEDIDO_PROCESSANDO,
+  PEDIDO_IDEMPOTENCIA_POLL_INTERVALO_MS,
+  PEDIDO_IDEMPOTENCIA_POLL_TENTATIVAS,
+  PEDIDO_IDEMPOTENCIA_TTL_SEGUNDOS,
+} from "@/survival/pedidoIdempotencia";
 
 export const maxDuration = 20;
 
@@ -65,23 +72,78 @@ async function getConfigPix(): Promise<ConfigPizzariaPix> {
   return (await redis.get<ConfigPizzariaPix>("config:pizzaria")) || {};
 }
 
+// Espera limitada (~1.8s no pior caso) por uma requisição concorrente com o
+// MESMO clientRequestId terminar de criar o pedido. Nunca cria nada aqui —
+// só observa a chave até deixar de ser o marcador "processando" ou esgotar
+// as tentativas. Bem dentro do maxDuration=20s da rota.
+async function aguardarResultadoConcorrente(claimKey: string): Promise<Record<string, unknown> | null> {
+  for (let tentativa = 0; tentativa < PEDIDO_IDEMPOTENCIA_POLL_TENTATIVAS; tentativa++) {
+    await new Promise((resolve) => setTimeout(resolve, PEDIDO_IDEMPOTENCIA_POLL_INTERVALO_MS));
+    const atual = await redis.get<Record<string, unknown>>(claimKey).catch(() => null);
+    if (atual && !ehMarcadorProcessando(atual)) return atual;
+  }
+  return null;
+}
+
 export async function POST(req: NextRequest) {
+  // Declarados fora do try/catch/finally para ficarem visíveis no `finally`
+  // (limpeza da reivindicação de idempotência em caso de falha/validação).
+  let clientRequestId: string | null = null;
+  let idempotenciaReivindicada = false;
+  let pedidoCriado = false;
+  let idempotenciaFinalizada = false;
+
   try {
     const body = (await req.json()) as PedidoApp;
 
     // Modo Sobrevivência (Etapa 1) — idempotência de criação de pedido.
-    // Desligado por padrão (SURVIVAL_MODE_ENABLED=false): zero mudança de
-    // comportamento, zero comando Redis extra. Ligado, um clientRequestId
-    // já visto devolve o MESMO resultado da primeira criação em vez de
-    // criar um segundo pedido — cobre o caso de retry após timeout de rede
-    // no fetch original (ver auditoria em docs/architecture/MODO_SOBREVIVENCIA_1_0.md).
-    const clientRequestId = survivalModeEnabled() ? sanitizeClientRequestId(body.clientRequestId) : null;
+    // Desligada por padrão (SURVIVAL_MODE_ENABLED=false): zero mudança de
+    // comportamento, zero comando Redis extra. Ligada, um clientRequestId
+    // já visto devolve o MESMO resultado da primeira criação em vez de criar
+    // um segundo pedido — cobre tanto o retry após timeout de rede quanto
+    // duas requisições concorrentes com o mesmo identificador (double-tap,
+    // duas abas). Ver docs/architecture/MODO_SOBREVIVENCIA_1_0.md.
+    clientRequestId = survivalModeEnabled() ? sanitizeClientRequestId(body.clientRequestId) : null;
     if (clientRequestId) {
-      const respostaAnterior = await redis
-        .get<Record<string, unknown>>(chaveIdempotenciaPedido(clientRequestId))
-        .catch(() => null);
-      if (respostaAnterior) {
-        return NextResponse.json(respostaAnterior);
+      const claimKey = chaveIdempotenciaPedido(clientRequestId);
+      try {
+        // SET NX: só uma requisição consegue gravar o marcador "processando"
+        // para esta chave — a outra vê o SET falhar (chave já existe) e
+        // nunca chega a criar um segundo pedido. Mesmo padrão de lock já
+        // usado em src/lib/mercadoPagoReconciliacao.ts.
+        const reivindicado = await redis.set(claimKey, MARCADOR_PEDIDO_PROCESSANDO, {
+          nx: true,
+          ex: PEDIDO_IDEMPOTENCIA_TTL_SEGUNDOS,
+        });
+        if (reivindicado) {
+          idempotenciaReivindicada = true;
+        } else {
+          const existente = await redis.get<Record<string, unknown>>(claimKey);
+          if (existente && !ehMarcadorProcessando(existente)) {
+            // Resultado final de uma criação anterior (mesma tentativa,
+            // retry após timeout) — devolve o MESMO pedido, nunca duplica.
+            return NextResponse.json(existente);
+          }
+          // existente === marcador "processando" (ou expirou entre o SET NX
+          // falhar e este GET — janela mínima, tratada como concorrência):
+          // outra requisição com o mesmo clientRequestId está criando o
+          // pedido agora. Espera um resultado em vez de criar um segundo.
+          const resolvidoPorConcorrencia = await aguardarResultadoConcorrente(claimKey);
+          if (resolvidoPorConcorrencia) {
+            return NextResponse.json(resolvidoPorConcorrencia);
+          }
+          return NextResponse.json(
+            { ok: false, error: "Este pedido já está sendo processado. Aguarde alguns segundos e verifique antes de tentar de novo." },
+            { status: 409 }
+          );
+        }
+      } catch (err) {
+        // Redis indisponível bem no momento da checagem de idempotência —
+        // NUNCA bloqueia a criação do pedido por causa disso: prossegue
+        // exatamente como se a flag estivesse desligada para esta tentativa
+        // (idempotenciaReivindicada permanece false, então nada mais deste
+        // mecanismo roda para esta requisição).
+        console.error("[ChefeBot] Redis indisponível para idempotência de pedido (pedido segue sem essa proteção nesta tentativa):", err);
       }
     }
 
@@ -367,6 +429,7 @@ export async function POST(req: NextRequest) {
 
     try {
       await redis.set("pedidos", [...pedidos, novoPedido]);
+      pedidoCriado = true;
     } catch (err) {
       // O pedido não chegou a ser persistido — libera só o vínculo desta
       // recompensa com este pedidoId (nunca reescreve a lista inteira de
@@ -435,13 +498,17 @@ export async function POST(req: NextRequest) {
     const pixCliente = serializarPixCliente(pix, configPix);
     const resposta = { ok: true, pedidoId, numero: numeroPedido, total, statusToken, ...(pixCliente ? { pix: pixCliente } : {}) };
 
-    // Guarda o resultado desta criação sob o clientRequestId (best-effort:
+    // Substitui o marcador "processando" pelo resultado final (best-effort:
     // o pedido já foi persistido antes deste ponto — uma falha aqui nunca
-    // desfaz nem impede a resposta de sucesso, só significa que um retry
-    // eventual não vai encontrar cache e cairá na validação normal).
-    if (clientRequestId) {
+    // desfaz nem impede a resposta de sucesso ao cliente). Se esta gravação
+    // falhar, o `finally` abaixo NUNCA apaga a reivindicação (só faria isso
+    // se o pedido não tivesse sido criado) — o marcador "processando" fica
+    // até o TTL expirar, então o pior caso de um retry nesse intervalo é um
+    // 409 "aguarde e verifique", nunca um segundo pedido.
+    if (idempotenciaReivindicada && clientRequestId) {
       await redis
         .set(chaveIdempotenciaPedido(clientRequestId), resposta, { ex: PEDIDO_IDEMPOTENCIA_TTL_SEGUNDOS })
+        .then(() => { idempotenciaFinalizada = true; })
         .catch((err) => console.error("[ChefeBot] Falha ao gravar idempotência de pedido (ignorada):", err));
     }
 
@@ -449,5 +516,14 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     console.error("Erro ao salvar pedido do site:", error);
     return NextResponse.json({ ok: false, error: "Erro interno" }, { status: 500 });
+  } finally {
+    // Libera a reivindicação SOMENTE se nenhum pedido chegou a ser criado
+    // (ex.: falhou em alguma validação de negócio depois de reivindicar a
+    // chave) — nesse caso o clientRequestId pode e deve ser reutilizado num
+    // retry legítimo. Se o pedido FOI criado, nunca apagamos aqui: apagar
+    // reabriria a janela para um retry duplicar um pedido que já existe.
+    if (clientRequestId && idempotenciaReivindicada && !idempotenciaFinalizada && !pedidoCriado) {
+      await redis.del(chaveIdempotenciaPedido(clientRequestId)).catch(() => {});
+    }
   }
 }

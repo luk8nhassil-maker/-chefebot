@@ -1,12 +1,25 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { store, redisMock } = vi.hoisted(() => {
+const { store, redisMock, defaultSetImpl } = vi.hoisted(() => {
   const store = new Map<string, unknown>();
+  // Respeita semântica NX real (SET NX falha se a chave já existe) — sem
+  // isso, um teste de corrida com o mock passaria mesmo com um bug real de
+  // "check-then-set" na rota. Extraído como função nomeada (não só inline no
+  // vi.fn) para que testes que substituem temporariamente a implementação
+  // (ex.: simular falha do Redis num ponto específico) consigam restaurar
+  // o comportamento padrão depois, sem vazar estado para outros testes.
+  const defaultSetImpl = async (key: string, value: unknown, opts?: { nx?: boolean }) => {
+    if (opts?.nx && store.has(key)) return null;
+    store.set(key, value);
+    return "OK";
+  };
   const redisMock = {
     get: vi.fn(async (key: string) => store.get(key) ?? null),
-    set: vi.fn(async (key: string, value: unknown) => {
-      store.set(key, value);
-      return "OK";
+    set: vi.fn(defaultSetImpl),
+    del: vi.fn(async (key: string) => {
+      const existia = store.has(key);
+      store.delete(key);
+      return existia ? 1 : 0;
     }),
     incr: vi.fn(async (key: string) => {
       const next = Number(store.get(key) || 0) + 1;
@@ -15,7 +28,7 @@ const { store, redisMock } = vi.hoisted(() => {
     }),
     expire: vi.fn(async () => 1),
   };
-  return { store, redisMock };
+  return { store, redisMock, defaultSetImpl };
 });
 
 const { criarCobrancaPixMercadoPagoMock } = vi.hoisted(() => ({
@@ -58,6 +71,7 @@ const basePayload = {
 beforeEach(() => {
   store.clear();
   vi.clearAllMocks();
+  redisMock.set.mockImplementation(defaultSetImpl);
   vi.unstubAllEnvs();
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) }));
   criarCobrancaPixMercadoPagoMock.mockResolvedValue({
@@ -597,8 +611,21 @@ describe("POST /api/pedido-app", () => {
 });
 
 describe("POST /api/pedido-app — idempotência (Modo Sobrevivência)", () => {
+  // Todo clientRequestId de teste tem >=16 caracteres — o mínimo exigido por
+  // sanitizeClientRequestId (proteção contra força bruta/baixa entropia).
+
+  it("[cenário 1] primeiro pedido é criado normalmente, com a flag ligada e clientRequestId válido", async () => {
+    vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
+    const res = await POST(postReq({ ...basePayload, clientRequestId: "primeiro-pedido-normal-001" }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.pedidoId).toBeTruthy();
+    expect((store.get("pedidos") as unknown[]).length).toBe(1);
+  });
+
   it("com a flag desligada (padrão), clientRequestId é ignorado e dois envios criam dois pedidos", async () => {
-    const payload = { ...basePayload, clientRequestId: "retry-abc123" };
+    const payload = { ...basePayload, clientRequestId: "retry-abc123456789012" };
     const r1 = await POST(postReq(payload));
     const r2 = await POST(postReq(payload));
     expect(r1.status).toBe(200);
@@ -609,15 +636,17 @@ describe("POST /api/pedido-app — idempotência (Modo Sobrevivência)", () => {
     expect((store.get("pedidos") as unknown[]).length).toBe(2);
   });
 
-  it("com a flag ligada, reenviar o mesmo clientRequestId devolve o pedido já criado (sem duplicar)", async () => {
+  it("[cenário 2/3] reenviar o mesmo clientRequestId (retry após timeout de rede, resposta original nunca chegou ao cliente) devolve o pedido já criado, sem duplicar", async () => {
     vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
-    const payload = { ...basePayload, clientRequestId: "retry-abc123" };
+    const payload = { ...basePayload, clientRequestId: "retry-abc123456789012" };
 
     const r1 = await POST(postReq(payload));
     expect(r1.status).toBe(200);
     const body1 = await r1.json();
     expect((store.get("pedidos") as unknown[]).length).toBe(1);
 
+    // Simula o cliente reenviando porque não recebeu a resposta original
+    // (timeout do fetch) — mesmo clientRequestId, nenhuma UI nova.
     const r2 = await POST(postReq(payload));
     expect(r2.status).toBe(200);
     const body2 = await r2.json();
@@ -625,6 +654,71 @@ describe("POST /api/pedido-app — idempotência (Modo Sobrevivência)", () => {
     expect(body2).toEqual(body1);
     expect((store.get("pedidos") as unknown[]).length).toBe(1);
   });
+
+  it("[cenário 6] duas requisições com o MESMO clientRequestId chegando simultaneamente nunca criam dois pedidos (claim atômico SET NX)", async () => {
+    vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
+    const payload = { ...basePayload, clientRequestId: "concorrencia-simultanea-x1" };
+
+    const [r1, r2] = await Promise.all([POST(postReq(payload)), POST(postReq(payload))]);
+
+    expect(r1.status).toBe(200);
+    expect(r2.status).toBe(200);
+    const body1 = await r1.json();
+    const body2 = await r2.json();
+    // A requisição que perdeu a corrida pelo claim nunca cria um pedido —
+    // ou recebe o mesmo resultado (via polling) ou um 409 pedindo para
+    // aguardar; neste teste a criação é rápida o bastante (só mocks, sem
+    // timers reais no caminho feliz) para o polling encontrar o resultado.
+    expect(body1.pedidoId).toBe(body2.pedidoId);
+    expect((store.get("pedidos") as unknown[]).length).toBe(1);
+  }, 10_000);
+
+  it("[cenário 4] Redis indisponível durante a checagem/claim de idempotência: pedido é criado normalmente, sem bloquear nem fingir sucesso falso", async () => {
+    vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
+    redisMock.set.mockImplementationOnce(async () => {
+      throw new Error("Redis indisponível (simulado) — tentativa de claim");
+    });
+
+    const res = await POST(postReq({ ...basePayload, clientRequestId: "falha-redis-antes-claim-1" }));
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect((store.get("pedidos") as unknown[]).length).toBe(1);
+  });
+
+  it("[cenário 5] Redis falha ao gravar o cache final (pedido JÁ foi persistido): resposta de sucesso real é devolvida, e um retry subsequente nunca duplica o pedido", async () => {
+    vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
+    const clientRequestId = "falha-redis-apos-criacao-1";
+    const claveIdempotencia = `survival:idempotencia:pedido:${clientRequestId}`;
+
+    // Falha só a gravação FINAL do cache de idempotência (identificada pela
+    // própria chave + formato da resposta de sucesso) — nunca o claim
+    // inicial nem qualquer outro .set() incidental (ex.: pontos de
+    // fidelidade), que precisam continuar funcionando normalmente.
+    redisMock.set.mockImplementation(async (key: string, value: unknown, opts?: { nx?: boolean }) => {
+      const ehGravacaoFinalDeIdempotencia = key === claveIdempotencia && !!(value as { ok?: unknown } | null)?.ok;
+      if (ehGravacaoFinalDeIdempotencia) {
+        throw new Error("Redis indisponível (simulado) — gravação final");
+      }
+      return defaultSetImpl(key, value, opts);
+    });
+
+    const r1 = await POST(postReq({ ...basePayload, clientRequestId }));
+    expect(r1.status).toBe(200);
+    const body1 = await r1.json();
+    expect(body1.ok).toBe(true);
+    expect((store.get("pedidos") as unknown[]).length).toBe(1);
+
+    // Retry com o mesmo clientRequestId: a reivindicação nunca foi
+    // finalizada nem apagada (pedido já existe — apagar reabriria a janela
+    // de duplicação), então o retry nunca cria um segundo pedido. Na pior
+    // hipótese recebe 409 pedindo para aguardar/verificar — nunca sucesso
+    // fabricado, nunca duplicidade.
+    const r2 = await POST(postReq({ ...basePayload, clientRequestId }));
+    expect(r2.status).toBe(409);
+    expect((store.get("pedidos") as unknown[]).length).toBe(1);
+  }, 10_000);
 
   it("com a flag ligada, clientRequestId ausente segue criando pedido normalmente (sem cache)", async () => {
     vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
@@ -635,17 +729,17 @@ describe("POST /api/pedido-app — idempotência (Modo Sobrevivência)", () => {
     expect((store.get("pedidos") as unknown[]).length).toBe(2);
   });
 
-  it("com a flag ligada, clientRequestId em formato inválido é ignorado (nunca quebra o pedido)", async () => {
+  it("clientRequestId em formato inválido (< 16 chars ou com PII/símbolos) é ignorado, nunca quebra o pedido", async () => {
     vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
     const res = await POST(postReq({ ...basePayload, clientRequestId: "id com espaço e PII (99) 99999-9999" }));
     expect(res.status).toBe(200);
     expect((store.get("pedidos") as unknown[]).length).toBe(1);
   });
 
-  it("clientRequestIds diferentes nunca colidem entre si", async () => {
+  it("clientRequestIds diferentes nunca colidem entre si (namespace isolado por chave)", async () => {
     vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
-    const r1 = await POST(postReq({ ...basePayload, clientRequestId: "tentativa-um-123" }));
-    const r2 = await POST(postReq({ ...basePayload, clientRequestId: "tentativa-dois-456" }));
+    const r1 = await POST(postReq({ ...basePayload, clientRequestId: "tentativa-um-123456789" }));
+    const r2 = await POST(postReq({ ...basePayload, clientRequestId: "tentativa-dois-4567890" }));
     expect(r1.status).toBe(200);
     expect(r2.status).toBe(200);
     const body1 = await r1.json();

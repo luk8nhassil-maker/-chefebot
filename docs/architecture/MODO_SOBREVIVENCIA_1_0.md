@@ -162,14 +162,39 @@ breakers de carga estiverem implementados).
 
 - `gerarClientRequestId()`: UUID v4 (ou fallback sem `crypto.randomUUID`),
   gerado uma vez por tentativa de checkout no navegador.
-- `sanitizeClientRequestId(raw)`: aceita só `[a-zA-Z0-9_-]{8,100}`, nunca
-  aceita telefone/PII, nunca lança.
+- `sanitizeClientRequestId(raw)`: aceita só `[a-zA-Z0-9_-]{16,100}`
+  (mínimo elevado de 8→16 na revisão de segurança deste PR — ~95 bits de
+  entropia se aleatório, contra enumeração/força bruta do cache, que
+  devolve o pedido inteiro incluindo dados de Pix), nunca aceita
+  telefone/PII, nunca lança.
 
-### 2.4 Idempotência de criação de pedido
+### 2.4 Idempotência de criação de pedido — claim atômico (SET NX)
 
 - `src/survival/pedidoIdempotencia.ts`: namespace isolado
   `survival:idempotencia:pedido:{clientRequestId}`, TTL 24h — mesma janela
   do `idempotencyKey` de webhook do WhatsApp já existente.
+- **Desenho revisado** (a versão original, "GET então SET", tinha uma janela
+  de corrida entre duas requisições com o MESMO `clientRequestId` chegando
+  quase simultaneamente — ambas veriam cache vazio e criariam pedidos
+  duplicados). O desenho final usa `SET NX` (mesmo padrão de lock já usado
+  em `src/lib/mercadoPagoReconciliacao.ts`) para reivindicar atomicamente a
+  chave com um marcador `{ processando: true }` antes de qualquer validação
+  de negócio:
+  - Só uma requisição consegue o `SET NX`; a outra o vê falhar, lê a chave e
+    encontra o marcador "processando" — nunca cria um segundo pedido. Ela
+    espera (polling limitado, até ~1.8s, bem dentro do `maxDuration=20s` da
+    rota) o resultado final; se não aparecer a tempo, responde 409 pedindo
+    para aguardar/verificar — nunca sucesso fabricado.
+  - Se a reivindicação falhar por erro do Redis (não por NX bloqueado), a
+    idempotência é pulada **só para esta tentativa** e o pedido segue sendo
+    criado normalmente — uma falha externa nunca impede um pedido legítimo.
+  - Ao final, o marcador é substituído pela resposta real. Se essa gravação
+    final falhar (Redis instável de novo, agora depois do pedido já criado),
+    a reivindicação **nunca é apagada** enquanto o pedido tiver sido criado —
+    apagar reabriria a janela de duplicação num retry. Só é apagada no
+    `finally` quando o pedido NÃO chegou a ser criado (ex.: falhou alguma
+    validação de negócio depois de reivindicar), liberando o `clientRequestId`
+    para um retry legítimo.
 - `src/app/api/pedido-app/route.ts`: com a flag desligada (padrão), zero
   mudança de comportamento e zero comando Redis extra. Ligada, um
   `clientRequestId` já visto devolve a mesma resposta da primeira criação
@@ -191,15 +216,44 @@ breakers de carga estiverem implementados).
 
 ### 2.6 Testes
 
-72 testes novos (`src/survival/*.test.ts` + `route.test.ts`), cobrindo:
-flags (default off, comparação estrita, modo forçado), modelo de estados
-(prioridade INDISPONIVEL > MANUAL > DEGRADADO > NORMAL), geração/validação
-de `clientRequestId` (incluindo rejeição de PII/símbolos), storage local
-(expiração, schema, corrupção, storage indisponível, ausência de
-token/segredo no payload gravado), e o comportamento de idempotência na
-rota de criação de pedido (flag ligada/desligada, ausência de
-`clientRequestId`, formato inválido, dois IDs distintos nunca colidem).
+77 testes novos/ajustados (`src/survival/*.test.ts` + `route.test.ts`),
+cobrindo: flags (default off, comparação estrita, modo forçado), modelo de
+estados (prioridade INDISPONIVEL > MANUAL > DEGRADADO > NORMAL),
+geração/validação de `clientRequestId` (mínimo de 16 chars, rejeição de
+PII/símbolos), storage local (expiração, schema, corrupção, storage
+indisponível, ausência de token/segredo no payload gravado), e o
+comportamento de idempotência na rota de criação de pedido:
 
-Suíte completa: 3103 testes passando (193 arquivos), typecheck sem novos
+- primeiro pedido criado normalmente (flag ligada);
+- flag desligada → clientRequestId ignorado, dois envios criam dois pedidos
+  (prova que o comportamento de hoje é preservado);
+- retry com o mesmo clientRequestId (timeout de rede) devolve o mesmo
+  pedido, nunca duplica;
+- duas requisições **simultâneas** com o mesmo clientRequestId (via
+  `Promise.all`) nunca criam dois pedidos — prova o claim atômico;
+- Redis indisponível durante o claim → pedido criado normalmente, sem
+  bloquear;
+- Redis falha ao gravar o cache final (pedido já persistido) → resposta de
+  sucesso real é devolvida, e um retry subsequente recebe 409 em vez de
+  duplicar;
+- clientRequestId ausente ou em formato inválido → pedido criado
+  normalmente, sem proteção adicional;
+- dois clientRequestId distintos nunca colidem (namespace isolado por
+  chave).
+
+Suíte completa: 3108 testes passando (193 arquivos), typecheck sem novos
 erros (183 pré-existentes, iguais ao baseline), lint limpo nos arquivos
 alterados, build de produção OK.
+
+### 2.7 Custo de Redis adicional (com a flag ligada)
+
+- Caminho feliz (pedido novo, sem disputa): **+2 comandos** por pedido — 1
+  `SET NX` (claim) + 1 `SET` final (substitui o marcador pela resposta).
+- Retry com resultado já pronto: 2 comandos (`SET NX` que falha + 1 `GET`) —
+  **mais barato** que uma criação completa, porque a requisição retorna
+  antes de tocar `pedidos`/menu/promoções.
+- Disputa concorrente (raro, mesmo `clientRequestId` em paralelo): até 8
+  comandos no lado que perde a corrida (1 `SET NX` + até 6 `GET`s de
+  polling + eventual `GET` inicial), bounded, nunca ilimitado.
+- Com a flag desligada (estado deste PR em Production): **0 comandos
+  extras** — o bloco inteiro nem executa.

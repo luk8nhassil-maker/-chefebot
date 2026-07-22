@@ -6,7 +6,13 @@
 // src/app/api/pedido-app/route.ts) para reconhecer um reenvio do mesmo
 // pedido e devolver o resultado já criado, em vez de criar um duplicado.
 
-const CLIENT_REQUEST_ID_REGEX = /^[a-zA-Z0-9_-]{8,100}$/;
+// Mínimo de 16 caracteres do alfabeto [a-zA-Z0-9_-] (~95 bits de entropia se
+// aleatório) — nunca 8, que permitiria só ~2^47 combinações, pouco o
+// bastante para tornar um ataque de força bruta contra o cache de
+// idempotência (que devolve o pedido inteiro, incluindo dados de Pix)
+// impraticável, mas não trivialmente inviável. UUID v4 (36 ou 32 chars sem
+// hífen) folga muito acima deste piso.
+const CLIENT_REQUEST_ID_REGEX = /^[a-zA-Z0-9_-]{16,100}$/;
 
 /**
  * Gera um novo identificador de tentativa de checkout. Só deve ser chamado

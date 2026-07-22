@@ -27,9 +27,14 @@ describe("sanitizeClientRequestId", () => {
     expect(sanitizeClientRequestId({})).toBeNull();
   });
 
-  it("rejeita string vazia ou curta demais", () => {
+  it("rejeita string vazia ou curta demais (< 16 chars — proteção contra força bruta)", () => {
     expect(sanitizeClientRequestId("")).toBeNull();
     expect(sanitizeClientRequestId("abc")).toBeNull();
+    expect(sanitizeClientRequestId("a".repeat(15))).toBeNull();
+  });
+
+  it("aceita a partir de 16 caracteres", () => {
+    expect(sanitizeClientRequestId("a".repeat(16))).toBe("a".repeat(16));
   });
 
   it("rejeita string longa demais (proteção contra abuso)", () => {
@@ -43,6 +48,6 @@ describe("sanitizeClientRequestId", () => {
   });
 
   it("aceita e mantém espaços nas bordas removidos (trim)", () => {
-    expect(sanitizeClientRequestId("  abcdef1234  ")).toBe("abcdef1234");
+    expect(sanitizeClientRequestId("  abcdef0123456789  ")).toBe("abcdef0123456789");
   });
 });
