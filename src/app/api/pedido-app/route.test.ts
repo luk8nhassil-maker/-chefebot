@@ -1241,6 +1241,84 @@ describe("POST /api/pedido-app — idempotência (Modo Sobrevivência)", () => {
     });
   });
 
+  describe("[4ª revisão — ponto 4] :result stale vs. leitura incerta", () => {
+    it(":result existe, mas o pedido correspondente comprovadamente NÃO existe (stale): invalida o :result com segurança e permite um retry legítimo", async () => {
+      vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
+      const clientRequestId = "result-stale-pedido-ausente-001";
+
+      await POST(postReq({ ...basePayload, clientRequestId }));
+      expect((store.get("pedidos") as unknown[]).length).toBe(1);
+      expect(store.has(chaveResultado(clientRequestId))).toBe(true);
+
+      // Simula o pedido tendo sido removido por qualquer via (nunca deveria
+      // acontecer fora de um rollback, mas o :result não pode confiar
+      // cegamente que o pedido referenciado ainda existe) — leitura de
+      // "pedidos" continua funcionando normalmente, só que vazia.
+      store.set("pedidos", []);
+
+      const retry = await POST(postReq({ ...basePayload, clientRequestId }));
+      expect(retry.status).toBe(200);
+      const body = await retry.json();
+      expect(body.ok).toBe(true);
+      // O :result stale foi invalidado e um pedido NOVO e legítimo foi criado
+      // (nunca ficou preso a um resultado apontando para o vazio).
+      expect((store.get("pedidos") as unknown[]).length).toBe(1);
+    });
+
+    it("falha ao LER 'pedidos' ao reconstruir a partir de :result continua sendo 503 — nunca interpretada como pedido ausente (nunca invalida o :result às cegas)", async () => {
+      vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
+      const clientRequestId = "leitura-incerta-nao-e-ausencia-001";
+
+      await POST(postReq({ ...basePayload, clientRequestId }));
+      const resultadoOriginal = store.get(chaveResultado(clientRequestId));
+
+      // A rota lê "pedidos" duas vezes numa requisição que acerta o fast
+      // path: 1ª na fase de validações puras (sempre acontece), 2ª na
+      // reconstrução a partir do :result (buscarPedidoPersistidoPorId) —
+      // só esta 2ª leitura deve falhar, para isolar exatamente o cenário
+      // "leitura incerta durante a reconstrução".
+      let leiturasDePedidos = 0;
+      redisMock.get.mockImplementation(async (key: string) => {
+        if (key === "pedidos") {
+          leiturasDePedidos += 1;
+          if (leiturasDePedidos === 2) throw new Error("Redis indisponível (simulado) — leitura incerta, não ausência");
+        }
+        return defaultGetImpl(key);
+      });
+
+      const retry = await POST(postReq({ ...basePayload, clientRequestId }));
+      expect(retry.status).toBe(503);
+      const body = await retry.json();
+      expect(body.unresolved).toBe(true);
+      // Leitura incerta NUNCA invalida o :result (diferente do caso "stale"
+      // comprovado) — continua exatamente como estava.
+      expect(store.get(chaveResultado(clientRequestId))).toEqual(resultadoOriginal);
+    });
+
+    it("nunca reutiliza pedidoId/statusToken/Pix de um :result já invalidado — o retry cria um pedido genuinamente novo com identidade própria", async () => {
+      vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
+      const clientRequestId = "result-stale-nao-reutiliza-identidade-001";
+
+      // pedidoId é derivado de Date.now() — força instantes diferentes para
+      // que o teste verifique identidade nova de propósito (não por
+      // coincidência de timestamp), sem depender do risco de colisão já
+      // documentado em DECISAO-CONCORRENCIA-CHAVE-PEDIDOS.md.
+      const nowSpy = vi.spyOn(Date, "now");
+      nowSpy.mockReturnValue(1_700_000_000_000);
+      const r1 = await POST(postReq({ ...basePayload, clientRequestId }));
+      const body1 = await r1.json();
+
+      store.set("pedidos", []);
+      nowSpy.mockReturnValue(1_700_000_099_000);
+      const r2 = await POST(postReq({ ...basePayload, clientRequestId }));
+      const body2 = await r2.json();
+      nowSpy.mockRestore();
+
+      expect(body2.pedidoId).not.toBe(body1.pedidoId);
+      expect(body2.statusToken).not.toBe(body1.statusToken);
+    });
+  });
+
   it("com a flag ligada, clientRequestId ausente segue criando pedido normalmente (sem cache)", async () => {
     vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
     const r1 = await POST(postReq(basePayload));

@@ -319,6 +319,75 @@ espalham (`...pedido`) o objeto inteiro numa resposta pública. As
 mensagens de WhatsApp (`notificarCliente`, `getMensagemStatus`) são sempre
 texto construído explicitamente, nunca um dump do objeto.
 
+### 2.5-B Estado de consistência crítica do pedido (4ª revisão de segurança)
+
+**Problema fechado nesta revisão**: a ordem original gravava o `:result`
+(`state: "completed"`) logo após persistir o pedido, **antes** de confirmar
+o resgate de fidelidade (`confirmarResgatePontos`). Se a confirmação do
+resgate falhasse, o código tentava reverter o pedido (remover de
+`pedidos`) — mas se essa reversão TAMBÉM falhasse (o próprio `GET`/`SET` de
+`pedidos` do rollback lançando), a exceção escapava para o catch externo,
+que via `pedidoIdCriado` preenchido e devolvia `ok: true, degradado: true`
+— **confirmando ao cliente um pedido com desconto cujo débito nunca foi
+confirmado nem revertido**. Havia ainda um segundo problema: o rollback
+apagava o `:result` sem verificar se ainda era o mesmo registro (`DEL`
+cego), arriscando apagar o resultado de uma execução concorrente mais nova.
+
+**Correção — estado explícito por pedido** (`SurvivalPedidoState`, campo
+`survivalState`, nunca exposto ao cliente):
+
+- `pending_critical_confirmation` — pedido persistido, mas o resgate (o
+  único efeito crítico posterior à persistência hoje) ainda não foi
+  confirmado.
+- `completed` — sem efeito crítico pendente (pedidos sem resgate já nascem
+  neste estado) ou o resgate foi confirmado com sucesso.
+- `recovery_required` — a confirmação do resgate falhou E o rollback do
+  pedido TAMBÉM falhou; tratado de forma idêntica a
+  `pending_critical_confirmation` por `survivalStateBloqueiaSucesso` (nunca
+  sucesso), mas logado com um código distinto (`falha_critica_rollback`)
+  para investigação operacional. Na prática, como as duas operações que
+  falharam são exatamente as que atualizariam esse campo, o pedido
+  permanece registrado como `pending_critical_confirmation` — o efeito de
+  bloqueio é idêntico; só a rotulagem exata no dado persistido não muda
+  (documentado aqui para quem for investigar via log/Redis diretamente).
+
+**Ordem segura, única e auditável** (`marcarSurvivalStateDoPedido`,
+`gravarResultadoDuravel`): persistir pedido (`pending_critical_confirmation`
+se houver resgate, `completed` se não houver) → confirmar resgate (se
+houver) → marcar `completed` → **só então** gravar `:result` → liberar
+claim → responder sucesso. `buscarPedidoPorClientRequestIdHash` e
+`reconstruirRespostaPedido` (fast path) verificam `survivalState` antes de
+reconstruir qualquer sucesso — um pedido `pending_critical_confirmation`/
+`recovery_required` encontrado por qualquer um dos dois caminhos devolve
+sempre 503 recuperável, nunca sucesso, **mesmo depois de o `:claim` já ter
+expirado** (o campo no próprio pedido é a barreira, não uma chave efêmera).
+
+**Falha dupla (confirmação + rollback) tratada localmente**: o `catch`
+aninhado em torno do rollback nunca deixa a exceção escapar para o catch
+externo — responde diretamente 503 (`unresolved: true`) e loga
+`"falha_critica_rollback"`. Isso elimina a necessidade da regra genérica
+antiga "toda exceção depois da persistência vira sucesso degradado": ela
+foi **removida** do catch externo. As únicas falhas que ainda podem gerar
+`ok: true, degradado: true` são as já isoladas em seus próprios
+`try/catch` locais (notificação push, pontos previstos best-effort,
+`getConfigPix`/serialização do Pix para exibição) — nenhuma delas propaga
+exceção até o catch externo. Qualquer exceção que ainda chegue lá depois da
+persistência é, por definição, um caso não coberto por nenhuma recuperação
+local — vira 503 recuperável, nunca sucesso.
+
+**`:result` stale vs. leitura incerta** (`reconstruirRespostaPedido`,
+`buscarPedidoPersistidoPorId`): as duas situações eram indistinguíveis
+antes desta revisão (qualquer "pedido não encontrado" — por falha de
+leitura ou por ausência real — virava 503 para sempre, até o TTL de 24h).
+Agora: falha ao ler `pedidos` → sempre incerto (503), nunca mexe no
+`:result`. Leitura bem-sucedida e pedido comprovadamente ausente → `:result`
+é **stale**, invalidado via `invalidarResultadoStaleSeAindaValido`
+(compare-and-delete por `pedidoId` + `createdAt`, nunca um `DEL` cego —
+só apaga se, numa leitura fresca imediatamente antes, o registro ainda for
+exatamente o mesmo já examinado), liberando um retry legítimo para criar um
+pedido novo com identidade própria (nunca reutiliza `pedidoId`/
+`statusToken`/Pix do registro invalidado).
+
 ### 2.6 Rascunho local versionado (`src/survival/draftStorage.ts`)
 
 - Chave `survival:pedido:rascunho:v1`, schema versionado (`v: 1`), TTL de

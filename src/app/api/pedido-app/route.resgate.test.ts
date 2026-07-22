@@ -343,6 +343,107 @@ describe("POST /api/pedido-app — resgate de pontos no checkout (Etapa 5)", () 
     expect(pedidosAposRetry).toHaveLength(1);
   });
 
+  // [Modo Sobrevivência — 4ª revisão, ponto 3] Antes desta correção, se a
+  // confirmação do resgate falhasse E o rollback do pedido TAMBÉM falhasse
+  // (GET ou SET de "pedidos" durante a tentativa de reverter), a exceção
+  // escapava para o catch externo que, vendo `pedidoIdCriado` setado,
+  // devolvia `ok:true, degradado:true` — confirmando ao cliente um pedido
+  // com desconto cujo débito nunca foi confirmado nem revertido. Os dois
+  // testes abaixo provam que essa falha dupla NUNCA mais devolve sucesso.
+  test("[Modo Sobrevivência] confirmarResgatePontos falha E o GET do rollback também falha: nunca ok:true, pedido fica pending_critical_confirmation, retry não duplica", async () => {
+    vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
+    const { reserva } = await prepararRecompensaDisponivel();
+    const clientRequestId = "rollback-get-falha-001";
+
+    const redisLib = await import("@/lib/redis");
+    const originalEval = defaultEvalImpl;
+    const originalGet = defaultGetImpl;
+    let jaFalhouEval = false;
+    let jaFalhouGet = false;
+    vi.mocked(redisLib.redis.eval).mockImplementation((script: string, keys: string[], args: unknown[]) => {
+      if (!jaFalhouEval && keys.length === 2) {
+        jaFalhouEval = true;
+        return Promise.reject(new Error("falha simulada ao confirmar resgate"));
+      }
+      return originalEval(script, keys, args as string[]);
+    });
+    vi.mocked(redisLib.redis.get).mockImplementation((key: string) => {
+      if (key === "pedidos" && jaFalhouEval && !jaFalhouGet) {
+        jaFalhouGet = true;
+        return Promise.reject(new Error("falha simulada no GET do rollback"));
+      }
+      return originalGet(key);
+    });
+
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const res = await POST(pedidoRequest({ resgateId: reserva.resgateId, clientRequestId }));
+    const data = await res.json();
+    consoleSpy.mockRestore();
+
+    expect(res.status).toBe(503);
+    expect(data.ok).toBe(false);
+    expect(data.unresolved).toBe(true);
+
+    const pedidos = redisStore.get("pedidos") as Array<Record<string, unknown>>;
+    expect(pedidos).toHaveLength(1);
+    expect(pedidos[0].survivalState).toBe("pending_critical_confirmation");
+
+    vi.mocked(redisLib.redis.get).mockImplementation(originalGet);
+    const retry = await POST(pedidoRequest({ resgateId: reserva.resgateId, clientRequestId }));
+    expect(retry.status).toBe(503);
+    const retryData = await retry.json();
+    expect(retryData.unresolved).toBe(true);
+    const pedidosApos = redisStore.get("pedidos") as Array<Record<string, unknown>>;
+    expect(pedidosApos).toHaveLength(1);
+  });
+
+  test("[Modo Sobrevivência] confirmarResgatePontos falha E o SET do rollback também falha: nunca ok:true, pedido fica pending_critical_confirmation, retry não duplica", async () => {
+    vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
+    const { reserva } = await prepararRecompensaDisponivel();
+    const clientRequestId = "rollback-set-falha-001";
+
+    const redisLib = await import("@/lib/redis");
+    const originalEval = defaultEvalImpl;
+    const originalSet = defaultSetImpl;
+    let jaFalhouEval = false;
+    let jaFalhouSetRollback = false;
+    vi.mocked(redisLib.redis.eval).mockImplementation((script: string, keys: string[], args: unknown[]) => {
+      if (!jaFalhouEval && keys.length === 2) {
+        jaFalhouEval = true;
+        return Promise.reject(new Error("falha simulada ao confirmar resgate"));
+      }
+      return originalEval(script, keys, args as string[]);
+    });
+    vi.mocked(redisLib.redis.set).mockImplementation((key: string, value: unknown, opts?: { nx?: boolean }) => {
+      if (key === "pedidos" && jaFalhouEval && !jaFalhouSetRollback) {
+        jaFalhouSetRollback = true;
+        return Promise.reject(new Error("falha simulada no SET do rollback"));
+      }
+      return originalSet(key, value, opts);
+    });
+
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const res = await POST(pedidoRequest({ resgateId: reserva.resgateId, clientRequestId }));
+    const data = await res.json();
+    consoleSpy.mockRestore();
+
+    expect(res.status).toBe(503);
+    expect(data.ok).toBe(false);
+    expect(data.unresolved).toBe(true);
+
+    const pedidos = redisStore.get("pedidos") as Array<Record<string, unknown>>;
+    expect(pedidos).toHaveLength(1);
+    expect(pedidos[0].survivalState).toBe("pending_critical_confirmation");
+
+    vi.mocked(redisLib.redis.set).mockImplementation(originalSet);
+    const retry = await POST(pedidoRequest({ resgateId: reserva.resgateId, clientRequestId }));
+    expect(retry.status).toBe(503);
+    const retryData = await retry.json();
+    expect(retryData.unresolved).toBe(true);
+    const pedidosApos = redisStore.get("pedidos") as Array<Record<string, unknown>>;
+    expect(pedidosApos).toHaveLength(1);
+  });
+
   test("pedido sem resgateId continua funcionando normalmente (sem desconto)", async () => {
     const res = await POST(pedidoRequest());
     const data = await res.json();

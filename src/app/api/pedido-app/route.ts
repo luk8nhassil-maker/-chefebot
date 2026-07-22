@@ -84,6 +84,32 @@ type PedidoAppRespostaSucesso = {
   degradado?: true;
 };
 
+/**
+ * Estado interno de consistência do pedido — nunca exposto ao cliente
+ * (revisão de segurança #4). Só existe quando há um efeito crítico
+ * posterior à persistência (hoje, só o resgate de fidelidade):
+ *
+ * - `pending_critical_confirmation`: pedido persistido, mas o efeito
+ *   crítico (débito do resgate) ainda não foi confirmado. NUNCA pode ser
+ *   reconstruído como sucesso pela busca por hash nem pelo fast path.
+ * - `completed`: efeito crítico confirmado (ou não havia nenhum) — único
+ *   estado em que a idempotência pode devolver sucesso.
+ * - `recovery_required`: a confirmação do efeito crítico falhou E o
+ *   rollback do pedido TAMBÉM falhou — inconsistência que exige
+ *   intervenção operacional. Tratado de forma idêntica a
+ *   `pending_critical_confirmation` pelas buscas de idempotência (nunca
+ *   sucesso), mas logado com um código distinto para investigação.
+ *
+ * Pedidos sem `clientRequestId` (flag desligada) nunca recebem este campo —
+ * `undefined` é tratado como equivalente a `completed` (comportamento de
+ * antes deste programa, sem nenhuma verificação adicional).
+ */
+type SurvivalPedidoState = "pending_critical_confirmation" | "completed" | "recovery_required";
+
+function survivalStateBloqueiaSucesso(estado: unknown): boolean {
+  return typeof estado === "string" && estado !== ("completed" satisfies SurvivalPedidoState);
+}
+
 type PedidoArmazenado = {
   id?: unknown;
   numero?: unknown;
@@ -97,6 +123,7 @@ type PedidoArmazenado = {
    * ponto 1 — "lacuna após expiração do claim"). */
   survivalClientRequestIdHash?: unknown;
   survivalRequestFingerprint?: unknown;
+  survivalState?: unknown;
 };
 
 function criarTokenPublicoAcompanhamento(): string {
@@ -166,24 +193,79 @@ async function montarRespostaAPartirDoPedido(
   };
 }
 
-async function reconstruirRespostaPedido(registro: ResultadoIdempotenciaPedido): Promise<PedidoAppRespostaSucesso | null> {
-  const pedidoEncontrado = await buscarPedidoPersistidoPorId(registro.pedidoId);
-  if (!pedidoEncontrado) {
-    logSurvivalErro("idempotencia_pedido", "reconstrucao", "pedido_nao_encontrado");
-    return null;
+type ResultadoBuscaPedidoPorId =
+  | { tipo: "encontrado"; pedido: PedidoArmazenado }
+  | { tipo: "nao_encontrado" }
+  | { tipo: "incerto" };
+
+// Distingue explicitamente "Redis falhou ao ler" de "leitura funcionou e o
+// pedido não existe" (revisão de segurança, ponto 4) — os dois casos exigem
+// tratamento diferente: o primeiro é sempre 503 recuperável; o segundo é
+// que torna um :result "stale" (aponta para um pedido que comprovadamente
+// não existe mais) elegível para invalidação segura.
+async function buscarPedidoPersistidoPorId(pedidoId: string): Promise<ResultadoBuscaPedidoPorId> {
+  let pedidosAtuais: PedidoArmazenado[];
+  try {
+    pedidosAtuais = (await redis.get<PedidoArmazenado[]>("pedidos")) || [];
+  } catch (err) {
+    logSurvivalErro("idempotencia_pedido", "busca_por_id", "get_pedidos_falhou", err);
+    return { tipo: "incerto" };
   }
-  return montarRespostaAPartirDoPedido(pedidoEncontrado, registro.pedidoId, registro.numero, registro.statusToken);
+  const pedido = pedidosAtuais.find((p) => p && p.id === pedidoId);
+  return pedido ? { tipo: "encontrado", pedido } : { tipo: "nao_encontrado" };
 }
 
-async function buscarPedidoPersistidoPorId(pedidoId: string): Promise<PedidoArmazenado | null> {
-  const pedidosAtuais = (await redis.get<PedidoArmazenado[]>("pedidos").catch(() => null)) || [];
-  return pedidosAtuais.find((p) => p && p.id === pedidoId) ?? null;
+type ResultadoReconstrucao =
+  | { tipo: "sucesso"; resposta: PedidoAppRespostaSucesso }
+  | { tipo: "pendente_critico" }
+  | { tipo: "stale" }
+  | { tipo: "incerto" };
+
+async function reconstruirRespostaPedido(registro: ResultadoIdempotenciaPedido): Promise<ResultadoReconstrucao> {
+  const busca = await buscarPedidoPersistidoPorId(registro.pedidoId);
+  if (busca.tipo === "incerto") return { tipo: "incerto" };
+  if (busca.tipo === "nao_encontrado") {
+    // :result aponta para um pedido que comprovadamente não existe mais —
+    // stale, não incerto. O chamador decide invalidar o :result e seguir.
+    logSurvivalErro("idempotencia_pedido", "reconstrucao", "resultado_stale_pedido_ausente");
+    return { tipo: "stale" };
+  }
+  if (survivalStateBloqueiaSucesso(busca.pedido.survivalState)) {
+    // Pedido existe, mas ainda não passou por um efeito crítico posterior à
+    // persistência (resgate) ou ficou em inconsistência que exige
+    // intervenção — NUNCA reconstruído como sucesso (revisão de segurança,
+    // ponto 1/5).
+    return { tipo: "pendente_critico" };
+  }
+  const resposta = await montarRespostaAPartirDoPedido(busca.pedido, registro.pedidoId, registro.numero, registro.statusToken);
+  return { tipo: "sucesso", resposta };
+}
+
+// Invalida (DEL) um :result stale SÓ se, numa leitura fresca imediatamente
+// antes de apagar, ele ainda for exatamente o mesmo registro já examinado
+// (mesmo pedidoId + mesmo createdAt) — nunca um DEL cego que poderia apagar
+// o resultado de uma execução concorrente mais nova (revisão de segurança,
+// ponto 4).
+async function invalidarResultadoStaleSeAindaValido(
+  clientRequestId: string,
+  pedidoIdEsperado: string,
+  createdAtEsperado: number
+): Promise<void> {
+  try {
+    const atual = await redis.get(chaveResultadoPedido(clientRequestId));
+    if (ehResultadoIdempotenciaValido(atual) && atual.pedidoId === pedidoIdEsperado && atual.createdAt === createdAtEsperado) {
+      await redis.del(chaveResultadoPedido(clientRequestId));
+    }
+  } catch (err) {
+    logSurvivalErro("idempotencia_pedido", "invalidacao_resultado_stale", "falhou", err);
+  }
 }
 
 type ResultadoBuscaPorHash =
   | { tipo: "nao_encontrado" }
   | { tipo: "incerto" }
   | { tipo: "conflito_fingerprint" }
+  | { tipo: "pendente_critico" }
   | { tipo: "encontrado"; pedido: PedidoArmazenado };
 
 // Última linha de defesa contra duplicidade (ver revisão de segurança, ponto
@@ -206,7 +288,53 @@ async function buscarPedidoPorClientRequestIdHash(
   const pedidoEncontrado = pedidosAtuais.find((p) => p && p.survivalClientRequestIdHash === clientRequestIdHash);
   if (!pedidoEncontrado) return { tipo: "nao_encontrado" };
   if (pedidoEncontrado.survivalRequestFingerprint !== requestFingerprint) return { tipo: "conflito_fingerprint" };
+  if (survivalStateBloqueiaSucesso(pedidoEncontrado.survivalState)) return { tipo: "pendente_critico" };
   return { tipo: "encontrado", pedido: pedidoEncontrado };
+}
+
+// Grava o registro durável de idempotência (24h) — só chamado quando o
+// pedido já está no estado "completed" (sem efeito crítico pendente). Uma
+// falha aqui NUNCA desfaz o pedido; apenas o claim continua vivo até o TTL
+// curto (30s) expirar sozinho (ver revisão de segurança, ponto 5).
+async function gravarResultadoDuravel(
+  clientRequestId: string,
+  requestFingerprint: string,
+  pedidoId: string,
+  numero: number,
+  statusToken: string
+): Promise<boolean> {
+  try {
+    const registro: ResultadoIdempotenciaPedido = {
+      state: "completed",
+      requestFingerprint,
+      pedidoId,
+      numero,
+      statusToken,
+      createdAt: Date.now(),
+    };
+    await redis.set(chaveResultadoPedido(clientRequestId), registro, { ex: RESULT_TTL_SEGUNDOS });
+    return true;
+  } catch (err) {
+    logSurvivalErro("idempotencia_pedido", "finalizacao", "set_result_falhou", err);
+    return false;
+  }
+}
+
+// Atualiza o campo survivalState DENTRO do pedido já persistido (read-modify-write
+// pontual sobre "pedidos", mesmo padrão já usado pelo rollback do resgate) —
+// nunca cria nem remove um pedido, só corrige seu estado de consistência.
+async function marcarSurvivalStateDoPedido(pedidoId: string, novoEstado: SurvivalPedidoState): Promise<boolean> {
+  try {
+    const pedidosAtuais = (await redis.get<PedidoArmazenado[]>("pedidos")) || [];
+    const idx = pedidosAtuais.findIndex((p) => p && p.id === pedidoId);
+    if (idx < 0) return false;
+    pedidosAtuais[idx] = { ...pedidosAtuais[idx], survivalState: novoEstado };
+    await redis.set("pedidos", pedidosAtuais);
+    return true;
+  } catch (err) {
+    logSurvivalErro("idempotencia_pedido", "estado_pedido", "atualizar_estado_falhou", err);
+    return false;
+  }
 }
 
 type ResultadoConsultaRapida =
@@ -312,14 +440,13 @@ export async function POST(req: NextRequest) {
   let ownerToken: string | null = null;
   let claimAdquirido = false;
 
-  // Capturados assim que existirem — permitem, no catch externo, responder
-  // de forma recuperável (nunca um 500 cru) se uma exceção ocorrer DEPOIS de
-  // o pedido já ter sido persistido de verdade (ver revisão de segurança,
-  // ponto 5).
+  // Marcado assim que a persistência do pedido tiver sucesso — usado só
+  // pelo catch externo para decidir 503 recuperável (pedido pode já existir,
+  // nunca finge sucesso) vs. 500 comum (nada foi criado). Ver revisão de
+  // segurança, ponto 5: qualquer exceção NÃO tratada localmente depois da
+  // persistência é, por definição, um caso que nenhuma recuperação
+  // específica já cobriu — nunca vira sucesso degradado às cegas.
   let pedidoIdCriado: string | null = null;
-  let numeroPedidoCriado: number | null = null;
-  let statusTokenCriado: string | null = null;
-  let totalCriado: number | null = null;
 
   try {
     const body = (await req.json()) as PedidoApp;
@@ -592,18 +719,26 @@ export async function POST(req: NextRequest) {
       if (consultaRapida.tipo === "conflito_fingerprint") return respostaConflitoFingerprint();
       if (consultaRapida.tipo === "incerto") return respostaClaimIncerto();
       if (consultaRapida.tipo === "encontrado") {
-        const reconstruida = await reconstruirRespostaPedido(consultaRapida.registro);
-        if (reconstruida) return NextResponse.json(reconstruida);
-        return respostaClaimIncerto();
+        const reconstrucao = await reconstruirRespostaPedido(consultaRapida.registro);
+        if (reconstrucao.tipo === "sucesso") return NextResponse.json(reconstrucao.resposta);
+        if (reconstrucao.tipo === "pendente_critico") return respostaClaimIncerto();
+        if (reconstrucao.tipo === "incerto") return respostaClaimIncerto();
+        // "stale": :result existe mas o pedido comprovadamente não existe
+        // mais — invalida (compare-and-delete por pedidoId+createdAt, nunca
+        // um DEL cego) e segue como se :result nunca tivesse existido (ver
+        // revisão de segurança, ponto 4).
+        await invalidarResultadoStaleSeAindaValido(clientRequestId, consultaRapida.registro.pedidoId, consultaRapida.registro.createdAt);
       }
-      // "nao_encontrado" no registro durável (:result) — antes de reivindicar
-      // um novo claim, verifica se o PEDIDO REAL já existe (caso em que o
-      // :result nunca chegou a ser gravado ou já expirou — ver revisão de
-      // segurança, ponto 1). Nunca cria um segundo pedido quando o hash bate.
+      // "nao_encontrado" (ou :result stale já invalidado) — antes de
+      // reivindicar um novo claim, verifica se o PEDIDO REAL já existe (caso
+      // em que o :result nunca chegou a ser gravado ou já expirou — ver
+      // revisão de segurança, ponto 1). Nunca cria um segundo pedido quando
+      // o hash bate.
       const clientRequestIdHash = hashClientRequestId(clientRequestId);
       const buscaPorHash = await buscarPedidoPorClientRequestIdHash(clientRequestIdHash, requestFingerprint);
       if (buscaPorHash.tipo === "incerto") return respostaClaimIncerto();
       if (buscaPorHash.tipo === "conflito_fingerprint") return respostaConflitoFingerprint();
+      if (buscaPorHash.tipo === "pendente_critico") return respostaClaimIncerto();
       if (buscaPorHash.tipo === "encontrado") {
         const pedidoExistente = buscaPorHash.pedido;
         const pedidoIdExistente = String(pedidoExistente.id ?? "");
@@ -646,8 +781,11 @@ export async function POST(req: NextRequest) {
       if (resultadoClaim.tipo === "processando_mesmo_fingerprint") {
         const resolvido = await aguardarResultadoPedido(clientRequestId);
         if (resolvido) {
-          const reconstruida = await reconstruirRespostaPedido(resolvido);
-          if (reconstruida) return NextResponse.json(reconstruida);
+          const reconstrucao = await reconstruirRespostaPedido(resolvido);
+          if (reconstrucao.tipo === "sucesso") return NextResponse.json(reconstrucao.resposta);
+          // "pendente_critico"/"incerto"/"stale": nunca inventa sucesso aqui
+          // — cai no mesmo "ainda processando" de baixo, seguro em todos os
+          // casos (o pior efeito é pedir para o cliente aguardar mais).
         }
         return respostaAindaProcessando();
       }
@@ -697,7 +835,14 @@ export async function POST(req: NextRequest) {
       // leitura voltados ao cliente (montarStatusPublicoPedido, etc.)
       // projetam campos explícitos, nunca espalham o pedido inteiro.
       ...(clientRequestId && requestFingerprint
-        ? { survivalClientRequestIdHash: hashClientRequestId(clientRequestId), survivalRequestFingerprint: requestFingerprint }
+        ? {
+            survivalClientRequestIdHash: hashClientRequestId(clientRequestId),
+            survivalRequestFingerprint: requestFingerprint,
+            // Resgate é o único efeito crítico posterior à persistência
+            // hoje — pedidos sem resgate já nascem "completed" (nada mais
+            // precisa ser confirmado). Ver survivalStateBloqueiaSucesso.
+            survivalState: (resgateAplicado ? "pending_critical_confirmation" : "completed") satisfies SurvivalPedidoState,
+          }
         : {}),
       itens,
       total,
@@ -728,9 +873,6 @@ export async function POST(req: NextRequest) {
     try {
       await redis.set("pedidos", [...pedidos, novoPedido]);
       pedidoIdCriado = pedidoId;
-      numeroPedidoCriado = numeroPedido;
-      statusTokenCriado = statusToken;
-      totalCriado = total;
     } catch (err) {
       // O pedido não chegou a ser persistido — libera só o vínculo desta
       // recompensa com este pedidoId (nunca reescreve a lista inteira de
@@ -744,57 +886,65 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "Erro interno" }, { status: 500 });
     }
 
-    // A partir daqui o pedido EXISTE de verdade. Grava imediatamente o
-    // registro mínimo e durável de idempotência — antes de qualquer operação
-    // que ainda possa falhar (confirmação de resgate, fidelidade, Pix) — para
-    // que uma falha abaixo nunca vire um 500 cru fingindo que nada aconteceu
-    // (ver revisão de segurança, ponto 5). O registro nunca contém total/Pix
-    // (ponto 6) — só o necessário para localizar o pedido de novo.
+    // A partir daqui o pedido EXISTE de verdade, mas — se houver resgate —
+    // ainda em estado "pending_critical_confirmation" (revisão de segurança,
+    // ponto 1/2): o registro durável (:result) só é gravado DEPOIS de o
+    // efeito crítico (débito do resgate) estar confirmado. Ordem segura:
+    // persistir (já feito) → confirmar crítico → marcar completed →
+    // gravar :result → liberar claim → só então responder sucesso. Pedidos
+    // sem resgate não têm nada crítico pendente e seguem o caminho simples
+    // (gravam :result imediatamente), mas passam pela MESMA função
+    // `gravarResultadoDuravel` — uma regra única e auditável.
     let resultadoGravado = false;
-    if (claimAdquirido && clientRequestId && requestFingerprint) {
+
+    if (resgateAplicado) {
+      // Confirma o resgate (Etapa 5): se o débito não persistir, o pedido
+      // com desconto é revertido e a API não devolve sucesso com estado
+      // inconsistente.
       try {
-        const registro: ResultadoIdempotenciaPedido = {
-          state: "completed",
-          requestFingerprint,
-          pedidoId,
-          numero: numeroPedido,
-          statusToken,
-          createdAt: Date.now(),
-        };
-        await redis.set(chaveResultadoPedido(clientRequestId), registro, { ex: RESULT_TTL_SEGUNDOS });
-        resultadoGravado = true;
+        await confirmarResgatePontos(resgateAplicado.clienteId, resgateAplicado.resgateId, pedidoId);
+        if (clientRequestId) {
+          await marcarSurvivalStateDoPedido(pedidoId, "completed");
+        }
       } catch (err) {
-        // Não conseguimos gravar o registro durável — o pedido já existe de
-        // verdade. NUNCA libera o claim aqui (liberar reabriria a janela de
-        // duplicação): o claim expira sozinho pelo TTL curto (30s), e um
-        // retry legítimo nesse intervalo recebe "ainda processando" (409),
-        // nunca duplica o pedido.
-        logSurvivalErro("idempotencia_pedido", "finalizacao", "set_result_falhou", err);
+        console.error("[ChefeBot] Erro ao confirmar resgate de fidelidade — tentando reverter o pedido:", err);
+        try {
+          const pedidosAtuais = (await redis.get<unknown[]>("pedidos")) || [];
+          await redis.set(
+            "pedidos",
+            pedidosAtuais.filter((pedido) => (pedido as { id?: unknown } | null)?.id !== pedidoId)
+          );
+          // O pedido foi removido de verdade — nenhum :result foi gravado
+          // ainda (era exatamente o que este bloco adiava), então não há
+          // nada para invalidar. Agora é seguro (e correto) liberar o
+          // claim, para um retry legítimo poder tentar de novo.
+          await liberarClaimSeAdquirido(clientRequestId, ownerToken, requestFingerprint, claimAdquirido);
+          return NextResponse.json({ ok: false, error: "Nao foi possivel confirmar o resgate. Tente novamente." }, { status: 409 });
+        } catch (errRollback) {
+          // FALHA CRÍTICA (revisão de segurança, ponto 3): nem a confirmação
+          // do resgate nem o rollback do pedido tiveram sucesso. O pedido
+          // continua existindo em "pending_critical_confirmation" — NUNCA
+          // devolve sucesso (nem degradado): a busca por hash/fast path já
+          // trata esse estado como bloqueante (survivalStateBloqueiaSucesso),
+          // então nenhum retry consegue criar um segundo pedido enquanto
+          // isto não for resolvido operacionalmente. O claim NUNCA é
+          // liberado aqui (liberar não ajudaria — a busca por hash já
+          // bloqueia mesmo sem claim — e evita qualquer janela extra).
+          logSurvivalErro("pedido_app", "rollback_resgate", "falha_critica_rollback", errRollback);
+          return NextResponse.json(
+            {
+              ok: false,
+              unresolved: true,
+              error: "Não foi possível confirmar nem reverter este pedido. Não tente novamente agora — verifique com a pizzaria antes de fazer um novo pedido.",
+            },
+            { status: 503 }
+          );
+        }
       }
     }
 
-    // Confirma o resgate (Etapa 5): se o debito nao persistir, o pedido com
-    // desconto e revertido e a API nao devolve sucesso com estado inconsistente.
-    if (resgateAplicado) {
-      try {
-        await confirmarResgatePontos(resgateAplicado.clienteId, resgateAplicado.resgateId, pedidoId);
-      } catch (err) {
-        const pedidosAtuais = (await redis.get<unknown[]>("pedidos")) || [];
-        await redis.set(
-          "pedidos",
-          pedidosAtuais.filter((pedido) => (pedido as { id?: unknown } | null)?.id !== pedidoId)
-        );
-        console.error("[ChefeBot] Erro ao confirmar resgate de fidelidade; pedido com desconto revertido:", err);
-        // O pedido foi removido de verdade — agora é seguro (e correto)
-        // liberar o registro de idempotência e o claim, para um retry
-        // legítimo poder tentar de novo sem ficar preso a um "processando"
-        // ou a um resultado que aponta para um pedido que não existe mais.
-        if (clientRequestId) {
-          await redis.del(chaveResultadoPedido(clientRequestId)).catch(() => {});
-        }
-        await liberarClaimSeAdquirido(clientRequestId, ownerToken, requestFingerprint, claimAdquirido);
-        return NextResponse.json({ ok: false, error: "Nao foi possivel confirmar o resgate. Tente novamente." }, { status: 409 });
-      }
+    if (claimAdquirido && clientRequestId && requestFingerprint) {
+      resultadoGravado = await gravarResultadoDuravel(clientRequestId, requestFingerprint, pedidoId, numeroPedido, statusToken);
     }
 
     // Pontos previstos (modelo novo): a identidade canonica e o telefone do
@@ -869,21 +1019,20 @@ export async function POST(req: NextRequest) {
     };
     return NextResponse.json(resposta);
   } catch (error) {
-    // Se o pedido já foi persistido antes desta exceção, NUNCA devolve um
-    // 500 cru fingindo que nada aconteceu — o cliente que fez ESTA
-    // requisição recebe a confirmação real, sinalizada como degradada (ver
-    // revisão de segurança, ponto 5).
-    if (pedidoIdCriado && numeroPedidoCriado !== null && statusTokenCriado && totalCriado !== null) {
-      logSurvivalErro("pedido_app", "pos_persistencia", "excecao_apos_persistir", error);
-      const respostaRecuperavel: PedidoAppRespostaSucesso = {
-        ok: true,
-        pedidoId: pedidoIdCriado,
-        numero: numeroPedidoCriado,
-        total: totalCriado,
-        statusToken: statusTokenCriado,
-        degradado: true,
-      };
-      return NextResponse.json(respostaRecuperavel);
+    // Revisão de segurança, ponto 5: removida a regra genérica de que toda
+    // exceção depois da persistência vira sucesso degradado. As únicas
+    // falhas que podem gerar `ok:true degradado` são secundárias e já
+    // isoladas em seus próprios try/catch (push, pontos previstos,
+    // getConfigPix/Pix) — nenhuma delas propaga exceção até aqui. Qualquer
+    // exceção que ainda chegue neste catch DEPOIS da persistência
+    // (`pedidoIdCriado` setado) é, por definição, um caso que nenhuma
+    // recuperação local já cobriu (o rollback do resgate, por exemplo, já
+    // trata sua própria falha crítica dentro do próprio bloco, sem nunca
+    // relançar) — nunca finge sucesso: resposta recuperável, carrinho
+    // preservado, log sanitizado para investigação.
+    if (pedidoIdCriado) {
+      logSurvivalErro("pedido_app", "pos_persistencia", "excecao_nao_tratada_apos_persistir", error);
+      return respostaClaimIncerto();
     }
     // Nenhum pedido foi persistido — se havíamos reivindicado o claim,
     // libera para permitir um retry legítimo com o mesmo clientRequestId.

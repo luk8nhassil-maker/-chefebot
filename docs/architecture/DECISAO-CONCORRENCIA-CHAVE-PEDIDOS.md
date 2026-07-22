@@ -161,7 +161,66 @@ a instância Upstash real (fora do escopo de uma decisão só de código).
   futuros); reverter = remover o lock/script e voltar ao `GET`+`SET` direto
   de hoje, sem migração de dado nenhuma envolvida.
 
-## 6. Bloqueio explícito
+## 6. Risco adicional identificado (4ª revisão de segurança): colisão de `pedidoId`
+
+`pedidoId = Date.now().toString()` (milissegundos desde epoch) é o único
+identificador do pedido dentro do array `pedidos` — usado como chave de
+busca por `buscarPedidoPersistidoPorId`/`buscarPedidoPorClientRequestIdHash`
+(módulo de idempotência do PR 1) e por praticamente todo o resto do sistema
+(edição, status, Pix, painel). **Duas requisições distintas que persistem
+dentro do mesmo milissegundo recebem o MESMO `pedidoId`** — em pico de
+tráfego (o mesmo cenário de concorrência descrito nas seções 1-2), isso não
+é apenas teórico.
+
+Consequências, combinadas com o risco já descrito:
+
+- Se a Opção A/B desta decisão for implementada (serializando os `SET` em
+  `pedidos`), a colisão de `pedidoId` ainda pode ocorrer entre dois pedidos
+  que — mesmo serializados — foram criados no mesmo milissegundo por
+  execuções sequenciais rápidas. O lock/atomicidade da chave `pedidos`
+  resolve a corrida de **escrita** (nenhum pedido é perdido), mas não
+  resolve a colisão de **identidade** (dois pedidos diferentes, ambos
+  presentes no array, com o mesmo `id`).
+- Um `pedidoId` duplicado quebra qualquer busca por id (`buscarPedidoPersistidoPorId`,
+  edição, status, Pix) de forma ambígua — `Array.find` sempre retorna o
+  **primeiro** match, então o segundo pedido com o mesmo id fica
+  efetivamente invisível para essas buscas, incluindo a própria
+  recuperação de idempotência deste PR.
+- **Necessidade de um identificador realmente único**: um UUID
+  (`crypto.randomUUID()`, já usado em `ownerToken`/`statusToken`/
+  `clientRequestId` neste mesmo programa) elimina a colisão por
+  construção, ao custo de deixar de ser ordenável cronologicamente pelo
+  próprio valor (hoje `pedidoId` também serve, informalmente, de proxy de
+  ordenação temporal em alguns lugares — precisaria de auditoria separada
+  para confirmar se algum consumidor depende disso). Alternativa que
+  preserva ordenação: manter `Date.now()` como prefixo e apensar um sufixo
+  aleatório curto (`${Date.now()}-${crypto.randomUUID().slice(0,8)}`) ou
+  usar um contador atômico Redis (`INCR`, mesmo padrão já usado por
+  `proximoNumeroPedido`) como sufixo de desambiguação.
+- **Relação com o lock/append atômico (seções 3-5)**: qualquer solução para
+  a corrida de escrita da chave `pedidos` deveria, no mesmo trabalho,
+  garantir unicidade de `pedidoId` — por exemplo, a Opção B (script Lua)
+  poderia verificar unicidade antes do `table.insert` e regenerar o id se
+  colidir, dentro da mesma operação atômica; a Opção A (lock) poderia gerar
+  o id **depois** de adquirir o lock (usando o snapshot já lido para
+  conferir colisão) em vez de antes.
+- **Relação com os estados `pending_critical_confirmation`/`completed`/
+  `recovery_required`** (revisão de segurança #4, implementada neste PR):
+  a atualização de estado (`marcarSurvivalStateDoPedido`) também busca por
+  `pedidoId` dentro de `pedidos` — sofre exatamente a mesma ambiguidade se
+  dois pedidos colidirem no mesmo id. Qualquer implementação futura desta
+  decisão precisa cobrir esse update de estado como parte do MESMO
+  lock/atomicidade da criação, não como uma operação separada e
+  desprotegida.
+
+Nenhuma mudança de `pedidoId` foi implementada neste PR — permanece
+`Date.now().toString()`, sem alteração de comportamento. Este risco é
+formalizado aqui para que a decisão futura sobre a chave `pedidos` (seções
+3-5) resolva os dois problemas (corrida de escrita + colisão de
+identidade) numa única mudança coerente, em vez de duas mudanças
+separadas que poderiam se contradizer.
+
+## 7. Bloqueio explícito
 
 Enquanto esta decisão não for revisada e aprovada, **`SURVIVAL_MODE_ENABLED`
 não deve ser ativado em Production** — a idempotência por `clientRequestId`
