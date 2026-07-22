@@ -1,0 +1,82 @@
+name: mcp-observer-cron
+
+# Processamento frequente do MCP Observador Fase 1 nos horários de maior
+# movimento (sexta/sábado/domingo à noite), complementar ao cron diário
+# nativo da Vercel (vercel.json, mantido como fallback — roda 1x/dia mesmo
+# se este workflow for desabilitado). Só CHAMA GET /api/cron/mcp-observer
+# com o mesmo Bearer que o cron nativo já usa (CRON_SECRET) — nenhuma
+# lógica de negócio mora aqui, é só o "despertador" mais frequente.
+#
+# Nunca loga o header Authorization nem o valor do segredo (mascarado
+# explicitamente com ::add-mask:: além do mascaramento automático do GitHub
+# Actions para valores vindos de `secrets.*`). A resposta do endpoint é
+# sempre sanitizada (só contadores e motivo — nunca telefone/mensagem/valor)
+# e pode ser logada com segurança.
+#
+# Janela de pico: sexta/sábado/domingo 18:00–23:59, horário de Brasília
+# (America/Sao_Paulo, UTC-3, sem horário de verão desde 2019 — mesma
+# convenção usada em .github/workflows/railway-infra-monitor.yml). GitHub
+# Actions não suporta timezone nativo em `schedule`, por isso a janela é
+# expressa em UTC (21:00–23:59 do próprio dia + 00:00–02:59 do dia
+# seguinte), repetida para sexta, sábado e domingo:
+#
+#   sex 18:00–23:59 BRT = sex 21:00 UTC – sáb 02:59 UTC
+#   sáb 18:00–23:59 BRT = sáb 21:00 UTC – dom 02:59 UTC
+#   dom 18:00–23:59 BRT = dom 21:00 UTC – seg 02:59 UTC
+#
+# Se o horário de pico real do restaurante mudar, ajuste as 6 linhas de
+# `schedule` abaixo (documentado também em
+# docs/architecture/MCP_OBSERVADOR_CAPACIDADE.md).
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/10 21-23 * * 5" # sexta à noite (parte 1)
+    - cron: "*/10 0-2 * * 6"   # sexta à noite (parte 2, já sábado em UTC)
+    - cron: "*/10 21-23 * * 6" # sábado à noite (parte 1)
+    - cron: "*/10 0-2 * * 0"   # sábado à noite (parte 2, já domingo em UTC)
+    - cron: "*/10 21-23 * * 0" # domingo à noite (parte 1)
+    - cron: "*/10 0-2 * * 1"   # domingo à noite (parte 2, já segunda em UTC)
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mcp-observer-cron
+  cancel-in-progress: false
+
+jobs:
+  chamar-cron-mcp:
+    name: chamar-cron-mcp
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Chamar GET /api/cron/mcp-observer (resposta sanitizada, nunca loga o segredo)
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          MCP_OBSERVER_URL: ${{ vars.MCP_OBSERVER_URL }}
+        run: |
+          set +x
+          echo "::add-mask::${CRON_SECRET}"
+
+          if [ -z "${CRON_SECRET}" ]; then
+            echo "CRON_SECRET não configurado nos GitHub Actions Secrets — abortando sem chamar o endpoint."
+            exit 1
+          fi
+
+          URL="${MCP_OBSERVER_URL:-https://chefebot-pjif.vercel.app/api/cron/mcp-observer}"
+          STATUS=$(curl -sS -o /tmp/mcp-observer-response.json -w '%{http_code}' \
+            --max-time 35 \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "${URL}")
+
+          echo "HTTP status: ${STATUS}"
+          echo "Resposta (sanitizada pelo próprio endpoint — só contadores):"
+          cat /tmp/mcp-observer-response.json
+          echo
+
+          if [ "${STATUS}" != "200" ]; then
+            echo "Status HTTP inesperado do cron do MCP Observer."
+            exit 1
+          fi

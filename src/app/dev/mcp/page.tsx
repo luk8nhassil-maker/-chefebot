@@ -76,6 +76,33 @@ function formatTs(ts: number): string {
   })
 }
 
+function formatIdade(min: number | null): string {
+  if (min === null) return '—'
+  if (min < 60) return `${Math.round(min)}min`
+  return `${(min / 60).toFixed(1)}h`
+}
+
+const STATUS_LABEL: Record<string, string> = {
+  saudavel: 'Saudável',
+  atrasado: 'Atrasado',
+  saturado: 'Saturado',
+  indisponivel: 'Indisponível',
+}
+
+const STATUS_COR: Record<string, string> = {
+  saudavel: 'var(--success)',
+  atrasado: 'var(--primary)',
+  saturado: 'var(--danger)',
+  indisponivel: 'var(--danger)',
+}
+
+const ALERTA_LABEL: Record<string, string> = {
+  atencao: 'Atenção',
+  critico: 'Crítico',
+  saturado: 'Saturado',
+  ausencia_execucao: 'Ausência de execução',
+}
+
 function ScoreRing({ score }: { score: number }) {
   const deg = Math.min(360, (score / 100) * 360)
   const color = score >= 70 ? GREEN : score >= 40 ? YELLOW : RED
@@ -351,12 +378,115 @@ function TimelinePanel({ dados }: { dados: DadosMcp }) {
   )
 }
 
+function CapacidadePanel({ dados }: { dados: DadosMcp }) {
+  const c = dados.capacidade
+  const statusCor = STATUS_COR[c.status] ?? TEXT3
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div style={{ background: BG_S, border: BORDER, borderRadius: 12, padding: 18 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+          <p style={{ color: TEXT3, fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.8, margin: 0 }}>Capacidade — noites movimentadas</p>
+          <span style={{ background: `${statusCor}20`, color: statusCor, fontSize: 11, fontWeight: 800, padding: '3px 10px', borderRadius: 999 }}>
+            {STATUS_LABEL[c.status] ?? c.status}
+          </span>
+        </div>
+        <div className="mcp-status-3col" style={{ marginBottom: 10 }}>
+          <div style={{ background: BG_R, border: BORDER, borderRadius: 8, padding: '10px 12px' }}>
+            <p style={{ color: TEXT3, fontSize: 9, fontWeight: 800, textTransform: 'uppercase', margin: '0 0 4px' }}>Fila atual</p>
+            <p style={{ color: c.filaAtual > 0 ? ORANGE : GREEN, fontSize: 18, fontWeight: 900, margin: 0 }}>{c.filaAtual}</p>
+          </div>
+          <div style={{ background: BG_R, border: BORDER, borderRadius: 8, padding: '10px 12px' }}>
+            <p style={{ color: TEXT3, fontSize: 9, fontWeight: 800, textTransform: 'uppercase', margin: '0 0 4px' }}>Maior fila já vista</p>
+            <p style={{ color: TEXT, fontSize: 18, fontWeight: 900, margin: 0 }}>{c.maiorFilaRegistrada}</p>
+          </div>
+          <div style={{ background: BG_R, border: BORDER, borderRadius: 8, padding: '10px 12px' }}>
+            <p style={{ color: TEXT3, fontSize: 9, fontWeight: 800, textTransform: 'uppercase', margin: '0 0 4px' }}>Evento mais antigo</p>
+            <p style={{ color: TEXT, fontSize: 18, fontWeight: 900, margin: 0 }}>{formatIdade(c.idadeEventoMaisAntigoMin)}</p>
+          </div>
+        </div>
+        <div className="mcp-status-3col" style={{ marginBottom: 10 }}>
+          <div style={{ background: BG_R, border: BORDER, borderRadius: 8, padding: '10px 12px' }}>
+            <p style={{ color: TEXT3, fontSize: 9, fontWeight: 800, textTransform: 'uppercase', margin: '0 0 4px' }}>Últ. execução</p>
+            <p style={{ color: TEXT, fontSize: 18, fontWeight: 900, margin: 0 }}>{c.processadosUltimaExecucao}</p>
+          </div>
+          <div style={{ background: BG_R, border: BORDER, borderRadius: 8, padding: '10px 12px' }}>
+            <p style={{ color: TEXT3, fontSize: 9, fontWeight: 800, textTransform: 'uppercase', margin: '0 0 4px' }}>Processados 24h</p>
+            <p style={{ color: TEXT, fontSize: 18, fontWeight: 900, margin: 0 }}>{c.processados24h}</p>
+          </div>
+          <div style={{ background: BG_R, border: BORDER, borderRadius: 8, padding: '10px 12px' }}>
+            <p style={{ color: TEXT3, fontSize: 9, fontWeight: 800, textTransform: 'uppercase', margin: '0 0 4px' }}>Erros 24h</p>
+            <p style={{ color: c.erros24h > 0 ? RED : GREEN, fontSize: 18, fontWeight: 900, margin: 0 }}>{c.erros24h}</p>
+          </div>
+        </div>
+        <div className="mcp-status-3col">
+          <div style={{ background: BG_R, border: BORDER, borderRadius: 8, padding: '10px 12px' }}>
+            <p style={{ color: TEXT3, fontSize: 9, fontWeight: 800, textTransform: 'uppercase', margin: '0 0 4px' }}>Descartados</p>
+            <p style={{ color: c.eventosDescartados > 0 ? RED : GREEN, fontSize: 18, fontWeight: 900, margin: 0 }}>{c.eventosDescartados}</p>
+          </div>
+          <div style={{ background: BG_R, border: BORDER, borderRadius: 8, padding: '10px 12px', gridColumn: 'span 2' }}>
+            <p style={{ color: TEXT3, fontSize: 9, fontWeight: 800, textTransform: 'uppercase', margin: '0 0 4px' }}>Cobertura estimada</p>
+            <p style={{ color: TEXT, fontSize: 18, fontWeight: 900, margin: 0 }}>
+              {c.coberturaEstimada === null ? '— (dado insuficiente)' : pct(c.coberturaEstimada)}
+            </p>
+          </div>
+        </div>
+        <p style={{ color: TEXT3, fontSize: 10, margin: '10px 0 0', lineHeight: 1.4 }}>
+          Cobertura é uma estimativa (processados nas últimas 24h ÷ processados + descartados por fila cheia) — não inclui falhas de enfileiramento por indisponibilidade do Redis, que ficam registradas em &quot;Erros MCP&quot;.
+        </p>
+      </div>
+
+      <div style={{ background: BG_S, border: BORDER, borderRadius: 12, padding: 18 }}>
+        <p style={{ color: TEXT3, fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.8, margin: '0 0 12px' }}>Alertas</p>
+        {c.alertas.length === 0 ? (
+          <p style={{ color: GREEN, fontSize: 12 }}>✓ Nenhum alerta ativo.</p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {c.alertas.map((a, i) => (
+              <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', background: 'color-mix(in srgb, var(--danger) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--danger) 20%, transparent)', borderRadius: 8, padding: '8px 12px' }}>
+                <span style={{ fontSize: 10, fontWeight: 800, padding: '2px 8px', borderRadius: 4, background: 'color-mix(in srgb, var(--danger) 15%, transparent)', color: RED, flexShrink: 0 }}>
+                  {ALERTA_LABEL[a.nivel] ?? a.nivel}
+                </span>
+                <span style={{ color: TEXT2, fontSize: 12 }}>{a.mensagem}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function ElegibilidadePanel({ dados }: { dados: DadosMcp }) {
+  const e = dados.elegibilidade
+  return (
+    <div style={{ background: BG_S, border: `1px solid ${e.elegivel ? 'color-mix(in srgb, var(--success) 25%, transparent)' : BORDER}`, borderRadius: 12, padding: 18 }}>
+      <p style={{ color: TEXT3, fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.8, margin: '0 0 12px' }}>Critérios para avançar de fase</p>
+      <div style={{ background: e.elegivel ? 'color-mix(in srgb, var(--success) 8%, transparent)' : 'color-mix(in srgb, var(--primary) 7%, transparent)', border: `1px solid ${e.elegivel ? 'color-mix(in srgb, var(--success) 25%, transparent)' : 'color-mix(in srgb, var(--primary) 20%, transparent)'}`, borderRadius: 8, padding: '10px 14px', marginBottom: 14 }}>
+        <p style={{ color: e.elegivel ? GREEN : YELLOW, fontSize: 13, fontWeight: 800, margin: 0 }}>
+          {e.elegivel ? 'Elegível para Modo de Sugestões' : 'Permanecer no Modo Observador'}
+        </p>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {e.criterios.map((c) => (
+          <div key={c.chave} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+            <span style={{ color: c.ok ? GREEN : TEXT3, fontSize: 13, flexShrink: 0 }}>{c.ok ? '✓' : '◌'}</span>
+            <span style={{ color: c.ok ? TEXT2 : TEXT3, fontSize: 12, lineHeight: 1.4 }}>{c.descricao}</span>
+          </div>
+        ))}
+      </div>
+      <p style={{ color: TEXT3, fontSize: 10, margin: '12px 0 0', lineHeight: 1.4 }}>
+        Modo de Sugestões poderá recomendar melhorias para aprovação humana — nunca altera respostas ou regras sozinho.
+      </p>
+    </div>
+  )
+}
+
 export default function DevMcpPage() {
   const router = useRouter()
   const [dados, setDados] = useState<DadosMcp | null>(null)
   const [loading, setLoading] = useState(true)
   const [erro, setErro] = useState('')
-  const [aba, setAba] = useState<'status' | 'dados' | 'infra'>('status')
+  const [aba, setAba] = useState<'status' | 'dados' | 'capacidade' | 'infra'>('status')
 
   useEffect(() => {
     const role = getUserRole()
@@ -421,13 +551,13 @@ export default function DevMcpPage() {
 
         {/* Tabs */}
         <div style={{ display: 'flex', gap: 6, marginBottom: 20 }}>
-          {(['status', 'dados', 'infra'] as const).map(t => (
+          {(['status', 'dados', 'capacidade', 'infra'] as const).map(t => (
             <button
               key={t}
               onClick={() => setAba(t)}
               style={{ padding: '9px 20px', borderRadius: 9, border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: 13, fontFamily: FONT, background: aba === t ? PURPLE : 'rgba(var(--overlay-rgb), 0.05)', color: aba === t ? 'var(--foreground)' : TEXT3 }}
             >
-              {t === 'status' ? 'Status e Score' : t === 'dados' ? 'Padrões e Logs' : 'Saúde da Infraestrutura'}
+              {t === 'status' ? 'Status e Score' : t === 'dados' ? 'Padrões e Logs' : t === 'capacidade' ? 'Capacidade' : 'Saúde da Infraestrutura'}
             </button>
           ))}
         </div>
@@ -453,6 +583,13 @@ export default function DevMcpPage() {
             </div>
             <ErrosPanel dados={dados} />
             <TimelinePanel dados={dados} />
+          </div>
+        )}
+
+        {aba === 'capacidade' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <CapacidadePanel dados={dados} />
+            <ElegibilidadePanel dados={dados} />
           </div>
         )}
 

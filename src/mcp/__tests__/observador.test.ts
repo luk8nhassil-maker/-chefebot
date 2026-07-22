@@ -10,7 +10,7 @@ vi.mock('@/lib/redis', () => ({
   redis: { rpush: mockRpush, ltrim: mockLtrim, expire: mockExpire },
 }));
 
-import { classificarPadrao, processarEventoObservador } from '../modes/observador';
+import { classificarPadrao, processarEventoObservador, classificarLote, processarLoteObservador } from '../modes/observador';
 import type { McpEventoFila } from '../types';
 
 function evento(overrides: Partial<McpEventoFila> = {}): McpEventoFila {
@@ -116,6 +116,59 @@ describe('confiancaEstrutura — valores esperados', () => {
     const entry = JSON.parse(mockRpush.mock.calls[0][1] as string);
     expect(entry.confiancaEstrutura).toBe(confiancaEsperada);
     mockRpush.mockClear();
+  });
+});
+
+describe('classificarLote — puro, sem I/O', () => {
+  it('classifica cada evento do array independentemente', () => {
+    const eventos = [
+      evento({ houveMudancaStep: true, precisouIA: false, escalou: false, foiFallbackSeco: false }),
+      evento({ foiFallbackSeco: true, escalou: true }),
+    ];
+    const [primeiro, segundo] = classificarLote(eventos);
+    expect(primeiro.padraoObservado).toBe('avanco_normal');
+    expect(segundo.padraoObservado).toBe('confusao_com_escalacao');
+  });
+
+  it('não chama Redis (função pura)', () => {
+    classificarLote([evento(), evento(), evento()]);
+    expect(mockRpush).not.toHaveBeenCalled();
+  });
+
+  it('lote vazio retorna array vazio', () => {
+    expect(classificarLote([])).toEqual([]);
+  });
+});
+
+describe('processarLoteObservador', () => {
+  it('lote vazio: sucesso sem chamar Redis', async () => {
+    const resultado = await processarLoteObservador([]);
+    expect(resultado).toEqual({ sucesso: true, quantidade: 0 });
+    expect(mockRpush).not.toHaveBeenCalled();
+  });
+
+  it('processa 1 evento com sucesso', async () => {
+    const resultado = await processarLoteObservador([evento({ houveMudancaStep: true })]);
+    expect(resultado).toEqual({ sucesso: true, quantidade: 1 });
+  });
+
+  it('processa 500 eventos com sucesso em uma única chamada de persistência', async () => {
+    const eventos = Array.from({ length: 500 }, () => evento({ houveMudancaStep: true }));
+    const resultado = await processarLoteObservador(eventos);
+    expect(resultado).toEqual({ sucesso: true, quantidade: 500 });
+    expect(mockRpush).toHaveBeenCalledTimes(1);
+  });
+
+  it('falha no meio do lote: nada é considerado processado (cron não deve remover da fila)', async () => {
+    mockRpush.mockRejectedValueOnce(new Error('redis down no meio do lote'));
+    const eventos = [evento(), evento(), evento()];
+    const resultado = await processarLoteObservador(eventos);
+    expect(resultado).toEqual({ sucesso: false, quantidade: 0 });
+  });
+
+  it('não propaga o erro para o chamador — retorna sucesso:false e loga o erro sanitizado', async () => {
+    mockRpush.mockRejectedValueOnce(new Error('redis down'));
+    await expect(processarLoteObservador([evento()])).resolves.toEqual({ sucesso: false, quantidade: 0 });
   });
 });
 

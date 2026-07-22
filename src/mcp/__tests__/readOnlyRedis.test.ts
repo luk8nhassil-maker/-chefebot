@@ -4,6 +4,7 @@ vi.mock('@/lib/redis', () => ({
   redis: {
     get: vi.fn().mockResolvedValue(null),
     lrange: vi.fn().mockResolvedValue([]),
+    llen: vi.fn().mockResolvedValue(0),
   },
 }));
 
@@ -16,6 +17,10 @@ describe('McpReadOnlyRedisClient — métodos permitidos', () => {
 
   it('expõe lrange()', () => {
     expect(typeof roRedis.lrange).toBe('function');
+  });
+
+  it('expõe llen()', () => {
+    expect(typeof roRedis.llen).toBe('function');
   });
 });
 

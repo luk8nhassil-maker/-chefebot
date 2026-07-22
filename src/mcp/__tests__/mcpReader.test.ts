@@ -1,19 +1,21 @@
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 
 // Mocks devem ser declarados antes de qualquer import que os use
-const { mockLrange, mockGet } = vi.hoisted(() => ({
+const { mockLrange, mockGet, mockLlen } = vi.hoisted(() => ({
   mockLrange: vi.fn().mockResolvedValue([]),
   mockGet: vi.fn().mockResolvedValue(null),
+  mockLlen: vi.fn().mockResolvedValue(0),
 }));
 
 vi.mock('@/lib/redis', () => ({
-  redis: { lrange: mockLrange, get: mockGet },
+  redis: { lrange: mockLrange, get: mockGet, llen: mockLlen },
 }));
 
 import {
   calcularScore,
   agruparGargalos,
   verificarPii,
+  calcularStatusEAlertas,
   lerDadosMcp,
 } from '../lib/mcpReader';
 import type { McpLogEntryObs, McpLogEntryErro } from '../types';
@@ -47,6 +49,7 @@ function erroFactory(overrides: Partial<McpLogEntryErro> = {}): McpLogEntryErro 
 beforeEach(() => {
   mockLrange.mockReset().mockResolvedValue([]);
   mockGet.mockReset().mockResolvedValue(null);
+  mockLlen.mockReset().mockResolvedValue(0);
 });
 
 // ─── calcularScore ───────────────────────────────────────────────────────────
@@ -285,6 +288,7 @@ describe('lerDadosMcp — Redis indisponível', () => {
   it('T17: erro no Redis (env ausente/timeout/credenciais inválidas) não propaga — retorna estado vazio seguro', async () => {
     mockLrange.mockRejectedValue(new Error('ECONNREFUSED: Redis indisponível'));
     mockGet.mockRejectedValue(new Error('ECONNREFUSED: Redis indisponível'));
+    mockLlen.mockRejectedValue(new Error('ECONNREFUSED: Redis indisponível'));
 
     const d = await lerDadosMcp();
 
@@ -326,13 +330,196 @@ describe('lerDadosMcp — com dados', () => {
       timestamp: Date.now(),
     }));
     mockLrange.mockImplementation((key: string) => {
-      if (key === 'mcp:fila:eventos') return Promise.resolve(filaItens);
+      if (key === 'mcp:fila:eventos') return Promise.resolve(filaItens.slice(0, 1)); // só o peek do mais antigo
       return Promise.resolve([]);
     });
+    mockLlen.mockImplementation((key: string) => (key === 'mcp:fila:eventos' ? Promise.resolve(5) : Promise.resolve(0)));
     const d = await lerDadosMcp();
-    // filaCount é só o número — o conteúdo dos eventos não é retornado em ultimasObs
+    // filaCount vem de LLEN — o conteúdo dos eventos não é retornado em ultimasObs
     expect(d.filaCount).toBe(5);
     // ultimasObs vem de mcp:log:obs, não da fila crua
     expect(d.ultimasObs).toEqual([]);
+  });
+});
+
+// ─── calcularStatusEAlertas ─────────────────────────────────────────────────
+
+describe('calcularStatusEAlertas', () => {
+  const base = {
+    filaAtual: 0,
+    idadeEventoMaisAntigoMin: null as number | null,
+    ultimaExecucaoFinishedAt: Date.now(),
+    agora: Date.now(),
+    dentroPeriodoPico: false,
+  };
+
+  it('fila baixa e execução recente → saudavel, sem alertas', () => {
+    const r = calcularStatusEAlertas(base);
+    expect(r.status).toBe('saudavel');
+    expect(r.alertas).toEqual([]);
+  });
+
+  it('fila acima de 500 → atencao', () => {
+    const r = calcularStatusEAlertas({ ...base, filaAtual: 600 });
+    expect(r.status).toBe('atrasado');
+    expect(r.alertas.some(a => a.nivel === 'atencao')).toBe(true);
+  });
+
+  it('evento esperando mais de 20min → atencao', () => {
+    const r = calcularStatusEAlertas({ ...base, idadeEventoMaisAntigoMin: 25 });
+    expect(r.alertas.some(a => a.nivel === 'atencao')).toBe(true);
+  });
+
+  it('fila acima de 2000 → critico (não duplica atencao)', () => {
+    const r = calcularStatusEAlertas({ ...base, filaAtual: 2500 });
+    expect(r.status).toBe('atrasado');
+    expect(r.alertas.filter(a => a.nivel === 'critico')).toHaveLength(1);
+    expect(r.alertas.some(a => a.nivel === 'atencao')).toBe(false);
+  });
+
+  it('evento esperando mais de 60min → critico', () => {
+    const r = calcularStatusEAlertas({ ...base, idadeEventoMaisAntigoMin: 65 });
+    expect(r.alertas.some(a => a.nivel === 'critico')).toBe(true);
+  });
+
+  it('fila próxima do limite (>=9000 de 10000) → saturado', () => {
+    const r = calcularStatusEAlertas({ ...base, filaAtual: 9500 });
+    expect(r.status).toBe('saturado');
+    expect(r.alertas.some(a => a.nivel === 'saturado')).toBe(true);
+  });
+
+  it('sem execução há mais de 20min durante período de pico → ausencia_execucao', () => {
+    const agora = Date.now();
+    const r = calcularStatusEAlertas({
+      ...base,
+      agora,
+      dentroPeriodoPico: true,
+      ultimaExecucaoFinishedAt: agora - 30 * 60_000,
+    });
+    expect(r.alertas.some(a => a.nivel === 'ausencia_execucao')).toBe(true);
+    expect(r.status).toBe('atrasado');
+  });
+
+  it('nunca executou e está em período de pico → ausencia_execucao', () => {
+    const r = calcularStatusEAlertas({ ...base, dentroPeriodoPico: true, ultimaExecucaoFinishedAt: null });
+    expect(r.alertas.some(a => a.nivel === 'ausencia_execucao')).toBe(true);
+  });
+
+  it('fora do período de pico, sem execução recente → não alerta ausência', () => {
+    const agora = Date.now();
+    const r = calcularStatusEAlertas({
+      ...base,
+      agora,
+      dentroPeriodoPico: false,
+      ultimaExecucaoFinishedAt: agora - 10 * 60 * 60_000,
+    });
+    expect(r.alertas.some(a => a.nivel === 'ausencia_execucao')).toBe(false);
+  });
+});
+
+// ─── capacidade e elegibilidade (via lerDadosMcp) ───────────────────────────
+
+describe('lerDadosMcp — capacidade', () => {
+  it('idade do evento mais antigo calculada a partir do timestamp do 1º item da fila', async () => {
+    const agora = Date.now();
+    const antigo = { ...obsFactory(), timestamp: agora - 30 * 60_000 } as unknown as Record<string, unknown>;
+    mockLrange.mockImplementation((key: string) => {
+      if (key === 'mcp:fila:eventos') return Promise.resolve([JSON.stringify(antigo)]);
+      return Promise.resolve([]);
+    });
+    mockLlen.mockResolvedValue(3);
+    const d = await lerDadosMcp();
+    expect(d.capacidade.idadeEventoMaisAntigoMin).toBeGreaterThanOrEqual(29);
+    expect(d.capacidade.idadeEventoMaisAntigoMin).toBeLessThanOrEqual(31);
+  });
+
+  it('fila vazia → idade do evento mais antigo é null', async () => {
+    mockLlen.mockResolvedValue(0);
+    const d = await lerDadosMcp();
+    expect(d.capacidade.idadeEventoMaisAntigoMin).toBeNull();
+  });
+
+  it('cobertura estimada combina processados24h e descartados', async () => {
+    mockGet.mockImplementation((key: string) => {
+      if (key === 'mcp:meta:fila:descartados') return Promise.resolve(10);
+      return Promise.resolve(null);
+    });
+    mockLrange.mockImplementation((key: string) => {
+      if (key === 'mcp:meta:cron:historico') {
+        return Promise.resolve([JSON.stringify({ ts: Date.now(), processed: 90, errors: 0 })]);
+      }
+      return Promise.resolve([]);
+    });
+    const d = await lerDadosMcp();
+    expect(d.capacidade.coberturaEstimada).toBeCloseTo(90 / 100, 5);
+  });
+
+  it('sem processados nem descartados → cobertura null (dado insuficiente)', async () => {
+    const d = await lerDadosMcp();
+    expect(d.capacidade.coberturaEstimada).toBeNull();
+  });
+
+  it('backlog e erros das últimas 24h somam apenas execuções dentro da janela', async () => {
+    const agora = Date.now();
+    mockLrange.mockImplementation((key: string) => {
+      if (key === 'mcp:meta:cron:historico') {
+        return Promise.resolve([
+          JSON.stringify({ ts: agora - 2 * 60 * 60_000, processed: 40, errors: 1 }), // dentro de 24h
+          JSON.stringify({ ts: agora - 30 * 60 * 60_000, processed: 999, errors: 999 }), // fora da janela
+        ]);
+      }
+      return Promise.resolve([]);
+    });
+    const d = await lerDadosMcp();
+    expect(d.capacidade.processados24h).toBe(40);
+    expect(d.capacidade.erros24h).toBe(1);
+  });
+
+  it('Redis indisponível → status indisponivel', async () => {
+    mockLrange.mockRejectedValue(new Error('down'));
+    mockGet.mockRejectedValue(new Error('down'));
+    mockLlen.mockRejectedValue(new Error('down'));
+    const d = await lerDadosMcp();
+    expect(d.capacidade.status).toBe('indisponivel');
+  });
+});
+
+describe('lerDadosMcp — elegibilidade para Modo de Sugestões', () => {
+  it('sem nenhum critério atendido → não elegível', async () => {
+    const d = await lerDadosMcp();
+    expect(d.elegibilidade.elegivel).toBe(false);
+  });
+
+  it('todos os critérios atendidos → elegível', async () => {
+    const agora = Date.now();
+    mockGet.mockImplementation((key: string) => {
+      if (key === 'mcp:meta:fila:descartados') return Promise.resolve(0);
+      if (key === 'mcp:meta:fds:historico') return Promise.resolve(['2026-01-03', '2026-01-10', '2026-01-17']);
+      if (key === 'mcp:meta:processados:total') return Promise.resolve(600);
+      return Promise.resolve(null);
+    });
+    mockLrange.mockImplementation((key: string) => {
+      if (key === 'mcp:meta:cron:historico') {
+        return Promise.resolve([JSON.stringify({ ts: agora, processed: 100, errors: 0 })]);
+      }
+      return Promise.resolve([]);
+    });
+    mockLlen.mockResolvedValue(10); // fila normalizada (< 500)
+    const d = await lerDadosMcp();
+    expect(d.elegibilidade.elegivel).toBe(true);
+    expect(d.elegibilidade.criterios.every(c => c.ok)).toBe(true);
+  });
+
+  it('fila ainda alta (não normalizou depois do pico) bloqueia elegibilidade mesmo com resto ok', async () => {
+    mockGet.mockImplementation((key: string) => {
+      if (key === 'mcp:meta:fds:historico') return Promise.resolve(['a', 'b', 'c']);
+      if (key === 'mcp:meta:processados:total') return Promise.resolve(600);
+      return Promise.resolve(null);
+    });
+    mockLlen.mockResolvedValue(800); // acima do limiar de 500
+    const d = await lerDadosMcp();
+    const criterioFila = d.elegibilidade.criterios.find(c => c.chave === 'fila_normalizada');
+    expect(criterioFila?.ok).toBe(false);
+    expect(d.elegibilidade.elegivel).toBe(false);
   });
 });

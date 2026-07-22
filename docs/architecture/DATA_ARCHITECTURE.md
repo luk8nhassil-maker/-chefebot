@@ -130,7 +130,7 @@ Se o mesmo atendente tiver uma conversa selecionada: `src/app/pedidos/page.tsx:6
 
 ### 3.9 Cron e MCP
 - Cron das 3h (mencionado em `numeracao.ts`) limpa `contador_pedidos:*` — não localizado o arquivo do cron nesta leitura, escopo para etapa futura.
-- MCP: cada log (`logObservacaoMcp`/`logErroMcp`) = 3 comandos (`RPUSH`+`LTRIM`+`EXPIRE`); cada evento de fila (`enfileirarEventoMcp`) = 3 comandos. Volume depende de quanto o MCP é acionado — não medido aqui.
+- MCP: `logErroMcp` = 3 comandos (`RPUSH`+`LTRIM`+`EXPIRE`) por chamada; `logObservacoesEmLoteMcp` = 3 comandos **por lote inteiro** (não por evento — ver `docs/architecture/MCP_OBSERVADOR_CAPACIDADE.md`); `enfileirarEventoMcp` = 1 comando (EVAL Lua atômico). Volume depende de quanto o MCP é acionado — não medido aqui.
 
 ### 3.10 Leitura do orçamento
 

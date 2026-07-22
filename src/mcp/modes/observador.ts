@@ -4,7 +4,7 @@
 // Não altera sessão, pedido, resposta ou qualquer estado do bot.
 
 import type { McpEventoFila, McpLogEntryObs, PadraoObservado } from '../types';
-import { logObservacaoMcp, logErroMcp } from '../logger/mcpLogger';
+import { logObservacaoMcp, logObservacoesEmLoteMcp, logErroMcp } from '../logger/mcpLogger';
 
 const CONFIANCA: Record<PadraoObservado, number> = {
   confusao_com_escalacao: 1.0,
@@ -30,27 +30,54 @@ export function classificarPadrao(evento: McpEventoFila): PadraoObservado {
   return 'desconhecido';
 }
 
+function construirEntrada(evento: McpEventoFila): McpLogEntryObs {
+  const padraoObservado = classificarPadrao(evento);
+  return {
+    ts: evento.timestamp,
+    phoneHash: evento.phoneHash,
+    stepAntes: evento.stepAntes,
+    stepDepois: evento.stepDepois,
+    houveMudancaStep: evento.houveMudancaStep,
+    cartLength: evento.cartLength,
+    deliveryType: evento.deliveryType,
+    precisouIA: evento.precisouIA,
+    escalou: evento.escalou,
+    foiFallbackSeco: evento.foiFallbackSeco,
+    padraoObservado,
+    confiancaEstrutura: CONFIANCA[padraoObservado],
+  };
+}
+
 export async function processarEventoObservador(evento: McpEventoFila): Promise<void> {
   try {
-    const padraoObservado = classificarPadrao(evento);
-
-    const entrada: McpLogEntryObs = {
-      ts: evento.timestamp,
-      phoneHash: evento.phoneHash,
-      stepAntes: evento.stepAntes,
-      stepDepois: evento.stepDepois,
-      houveMudancaStep: evento.houveMudancaStep,
-      cartLength: evento.cartLength,
-      deliveryType: evento.deliveryType,
-      precisouIA: evento.precisouIA,
-      escalou: evento.escalou,
-      foiFallbackSeco: evento.foiFallbackSeco,
-      padraoObservado,
-      confiancaEstrutura: CONFIANCA[padraoObservado],
-    };
-
-    await logObservacaoMcp(entrada);
+    await logObservacaoMcp(construirEntrada(evento));
   } catch (err) {
     await logErroMcp('processarEventoObservador', err);
+  }
+}
+
+// Classificação pura, sem I/O — usada pelo processamento em lote do cron
+// para separar "decidir o padrão de cada evento" (memória, barato, nunca
+// falha) de "persistir o lote" (1 round-trip Redis para o lote inteiro).
+export function classificarLote(eventos: McpEventoFila[]): McpLogEntryObs[] {
+  return eventos.map(construirEntrada);
+}
+
+export type ResultadoLoteObservador =
+  | { sucesso: true; quantidade: number }
+  | { sucesso: false; quantidade: 0 };
+
+// Processa um lote inteiro com um único round-trip de persistência. Se a
+// persistência falhar, NADA do lote é considerado processado — o chamador
+// (cron) não deve remover esses eventos da fila, para tentar de novo depois.
+export async function processarLoteObservador(eventos: McpEventoFila[]): Promise<ResultadoLoteObservador> {
+  if (eventos.length === 0) return { sucesso: true, quantidade: 0 };
+  try {
+    const entradas = classificarLote(eventos);
+    await logObservacoesEmLoteMcp(entradas);
+    return { sucesso: true, quantidade: eventos.length };
+  } catch (err) {
+    await logErroMcp('processarLoteObservador', err);
+    return { sucesso: false, quantidade: 0 };
   }
 }

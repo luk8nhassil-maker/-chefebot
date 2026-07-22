@@ -13,6 +13,10 @@ export class McpReadOnlyRedisClient {
   async lrange<T>(key: string, start: number, stop: number): Promise<T[]> {
     return redis.lrange<T>(key, start, stop);
   }
+
+  async llen(key: string): Promise<number> {
+    return redis.llen(key);
+  }
 }
 
 export const roRedis = new McpReadOnlyRedisClient();
