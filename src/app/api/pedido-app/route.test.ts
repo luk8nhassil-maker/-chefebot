@@ -1009,6 +1009,225 @@ describe("POST /api/pedido-app — idempotência (Modo Sobrevivência)", () => {
     });
   });
 
+  describe("[3ª revisão — ponto 1] recuperação quando :claim e :result já expiraram/nunca foram gravados", () => {
+    it("gravação de :result falha (pedido já persistido); claim expira depois (simulado); retry recupera o MESMO pedido via hash gravado nele — pedidos.length permanece 1, nenhuma segunda cobrança Pix", async () => {
+      vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
+      const clientRequestId = "gap-apos-expiracao-claim-001";
+      const chaveResultadoKey = chaveResultado(clientRequestId);
+      const chaveClaimKey = chaveClaim(clientRequestId);
+
+      // Falha SÓ a gravação do :result — simula exatamente o cenário do
+      // relatório: pedido persistido, :result nunca chega a existir.
+      redisMock.set.mockImplementation(async (key: string, value: unknown, opts?: { nx?: boolean }) => {
+        if (key === chaveResultadoKey) {
+          throw new Error("Redis indisponível (simulado) — :result nunca gravado");
+        }
+        return defaultSetImpl(key, value, opts);
+      });
+
+      const r1 = await POST(postReq({ ...basePayload, clientRequestId }));
+      expect(r1.status).toBe(200);
+      const body1 = await r1.json();
+      // A resposta original é considerada PERDIDA a partir daqui (timeout) —
+      // o teste não a usa mais, só confirma que o pedido existe de verdade.
+      expect((store.get("pedidos") as unknown[]).length).toBe(1);
+      expect(store.has(chaveResultadoKey)).toBe(false);
+
+      // Restaura o comportamento normal de .set para o retry.
+      redisMock.set.mockImplementation(defaultSetImpl);
+      // Simula o claim expirando (TTL de 30s decorrido, retry "mais de 30s depois").
+      store.delete(chaveClaimKey);
+
+      const r2 = await POST(postReq({ ...basePayload, clientRequestId }));
+      expect(r2.status).toBe(200);
+      const body2 = await r2.json();
+      expect(body2.pedidoId).toBe(body1.pedidoId);
+      expect((store.get("pedidos") as unknown[]).length).toBe(1);
+      expect(criarCobrancaPixMercadoPagoMock).not.toHaveBeenCalled(); // Pix manual por padrão neste teste — nenhuma cobrança criada em nenhuma das duas chamadas
+    }, 10_000);
+
+    it("[encerramento simulado] pedido persistido, mas nem :claim nem :result sobrevivem (processo encerrado/TTL) — retry recupera via hash no pedido real, sem duplicar", async () => {
+      vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
+      const clientRequestId = "encerramento-simulado-001";
+
+      const r1 = await POST(postReq({ ...basePayload, clientRequestId }));
+      expect(r1.status).toBe(200);
+      const body1 = await r1.json();
+      expect((store.get("pedidos") as unknown[]).length).toBe(1);
+
+      // Simula: resposta perdida, :result nunca sobreviveu (gravado e já
+      // expirado independentemente, ou nunca gravado), :claim já expirou —
+      // nada resta em Redis exceto o pedido real já persistido.
+      store.delete(chaveResultado(clientRequestId));
+      store.delete(chaveClaim(clientRequestId));
+
+      const r2 = await POST(postReq({ ...basePayload, clientRequestId }));
+      expect(r2.status).toBe(200);
+      const body2 = await r2.json();
+      expect(body2.pedidoId).toBe(body1.pedidoId);
+      expect((store.get("pedidos") as unknown[]).length).toBe(1);
+    });
+
+    it("clientRequestId com fingerprint diferente do pedido real já persistido: 409 genérico, nunca duplica, nunca vaza dado do pedido anterior", async () => {
+      vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
+      const clientRequestId = "conflito-apos-expiracao-001";
+
+      await POST(postReq({ ...basePayload, clientRequestId }));
+      store.delete(chaveResultado(clientRequestId));
+      store.delete(chaveClaim(clientRequestId));
+
+      const r2 = await POST(postReq({ ...basePayload, clientRequestId, cliente: "Outra Pessoa" }));
+      expect(r2.status).toBe(409);
+      const body2 = await r2.json();
+      expect(Object.keys(body2).sort()).toEqual(["error", "ok"]);
+      expect((store.get("pedidos") as unknown[]).length).toBe(1);
+    });
+
+    it("pedido real não encontrado por hash (nunca existiu): segue para reivindicar o claim e cria normalmente", async () => {
+      vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
+      const res = await POST(postReq({ ...basePayload, clientRequestId: "nunca-existiu-antes-001" }));
+      expect(res.status).toBe(200);
+      expect((store.get("pedidos") as unknown[]).length).toBe(1);
+    });
+
+    it("falha ao ler 'pedidos' durante a busca por hash é tratada como incerta — nunca cria pedido", async () => {
+      vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
+      const clientRequestId = "busca-por-hash-falha-leitura-001";
+      let primeiraLeituraPedidos = true;
+      redisMock.get.mockImplementation(async (key: string) => {
+        if (key === "pedidos" && !primeiraLeituraPedidos) {
+          throw new Error("Redis indisponível (simulado) — busca por hash");
+        }
+        if (key === "pedidos") primeiraLeituraPedidos = false;
+        return defaultGetImpl(key);
+      });
+
+      const res = await POST(postReq({ ...basePayload, clientRequestId }));
+      expect(res.status).toBe(503);
+      const body = await res.json();
+      expect(body.unresolved).toBe(true);
+      expect(store.get("pedidos")).toBeUndefined();
+    });
+  });
+
+  describe("[3ª revisão — ponto 2] fingerprint completo (observação, e-mail, sabor da recompensa)", () => {
+    const clientRequestId = "fingerprint-completo-001";
+
+    it("observação diferente: 409 genérico, sem duplicar", async () => {
+      vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
+      await POST(postReq({ ...basePayload, clientRequestId, observacao: "Sem cebola" }));
+      const res = await POST(postReq({ ...basePayload, clientRequestId, observacao: "Capricha no queijo" }));
+      expect(res.status).toBe(409);
+      expect((store.get("pedidos") as unknown[]).length).toBe(1);
+    });
+
+    it("e-mail diferente: 409 genérico, sem duplicar", async () => {
+      vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
+      await POST(postReq({ ...basePayload, clientRequestId, email: "a@teste.com" }));
+      const res = await POST(postReq({ ...basePayload, clientRequestId, email: "b@teste.com" }));
+      expect(res.status).toBe(409);
+      expect((store.get("pedidos") as unknown[]).length).toBe(1);
+    });
+
+    it("mesmos dados normalizados (observação/e-mail com espaços/caixa diferentes) continuam sendo retry legítimo", async () => {
+      vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
+      const r1 = await POST(postReq({ ...basePayload, clientRequestId, observacao: "Capricha!  ", email: "Fulano@Teste.com" }));
+      const r2 = await POST(postReq({ ...basePayload, clientRequestId, observacao: "Capricha!", email: "fulano@teste.com" }));
+      expect(r1.status).toBe(200);
+      expect(r2.status).toBe(200);
+      const body1 = await r1.json();
+      const body2 = await r2.json();
+      expect(body2.pedidoId).toBe(body1.pedidoId);
+      expect((store.get("pedidos") as unknown[]).length).toBe(1);
+    });
+
+    it("conflito nunca devolve pedidoId, statusToken, total ou pix do pedido anterior", async () => {
+      vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
+      await POST(postReq({ ...basePayload, clientRequestId, observacao: "original" }));
+      const res = await POST(postReq({ ...basePayload, clientRequestId, observacao: "diferente" }));
+      const body = await res.json();
+      expect(body).not.toHaveProperty("pedidoId");
+      expect(body).not.toHaveProperty("statusToken");
+      expect(body).not.toHaveProperty("total");
+      expect(body).not.toHaveProperty("pix");
+    });
+  });
+
+  describe("[3ª revisão — ponto 3] reconstrução do Pix no retry: válido, confirmado, sem QR, indisponível", () => {
+    function configurarIntegracaoMercadoPagoAtiva() {
+      store.set("integracao:mercadopago", {
+        provider: "mercadopago",
+        enabled: true,
+        accessTokenEncrypted: encryptMercadoPagoToken("token-teste-idempotencia"),
+        accessTokenLast4: "test",
+        payerEmailFallback: "loja@example.com",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      });
+    }
+
+    it("Pix válido/pendente: retry reconstrói com o qrCode atual do pedido real, sem gerar segunda cobrança", async () => {
+      vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
+      configurarIntegracaoMercadoPagoAtiva();
+      const clientRequestId = "pix-valido-retry-001";
+
+      const r1 = await POST(postReq({ ...basePayload, clientRequestId }));
+      const body1 = await r1.json();
+      expect(body1.pix).toMatchObject({ provider: "mercadopago", qrCode: "pix-copia-e-cola" });
+
+      const r2 = await POST(postReq({ ...basePayload, clientRequestId }));
+      const body2 = await r2.json();
+      expect(body2.pix).toMatchObject({ provider: "mercadopago", qrCode: "pix-copia-e-cola" });
+      expect(criarCobrancaPixMercadoPagoMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("Pix confirmado por caminho independente (webhook/Sentinela) entre a criação e o retry: reconstrução reflete o dado ATUAL, nunca uma cópia antiga, sem segunda cobrança", async () => {
+      vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
+      configurarIntegracaoMercadoPagoAtiva();
+      const clientRequestId = "pix-confirmado-retry-001";
+
+      await POST(postReq({ ...basePayload, clientRequestId }));
+      const pedidosAntes = store.get("pedidos") as Array<Record<string, unknown>>;
+      pedidosAntes[0].pix = { ...(pedidosAntes[0].pix as object), status: "confirmado" };
+      pedidosAntes[0].pixConfirmado = true;
+      store.set("pedidos", pedidosAntes);
+
+      const r2 = await POST(postReq({ ...basePayload, clientRequestId }));
+      const body2 = await r2.json();
+      expect(body2.pix).toMatchObject({ provider: "mercadopago", qrCode: "pix-copia-e-cola" });
+      expect(criarCobrancaPixMercadoPagoMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("Pix sem QR (mercadopago com qrCode vazio): retry cai para Pix manual (comportamento existente de serializarPixCliente), nunca gera segunda cobrança", async () => {
+      vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
+      configurarIntegracaoMercadoPagoAtiva();
+      const clientRequestId = "pix-sem-qr-retry-001";
+
+      await POST(postReq({ ...basePayload, clientRequestId }));
+      store.set("config:pizzaria", { chavePix: "chave-manual-teste", nomeTitularPix: "Titular Teste" });
+      const pedidosAntes = store.get("pedidos") as Array<Record<string, unknown>>;
+      pedidosAntes[0].pix = { ...(pedidosAntes[0].pix as object), qrCode: "" };
+      store.set("pedidos", pedidosAntes);
+
+      const r2 = await POST(postReq({ ...basePayload, clientRequestId }));
+      const body2 = await r2.json();
+      expect(body2.pix?.provider).toBe("manual");
+      expect(body2.pix?.qrCode).toBeUndefined();
+      expect(criarCobrancaPixMercadoPagoMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("Pix indisponível (forma de pagamento não-Pix): retry nunca inclui o campo pix", async () => {
+      vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
+      const clientRequestId = "pix-indisponivel-retry-001";
+      const payload = { ...basePayload, clientRequestId, pagamento: "Dinheiro", troco: "Sem troco" };
+
+      await POST(postReq(payload));
+      const r2 = await POST(postReq(payload));
+      const body2 = await r2.json();
+      expect(body2.pix).toBeUndefined();
+      expect(criarCobrancaPixMercadoPagoMock).not.toHaveBeenCalled();
+    });
+  });
+
   describe("[ponto 7] claim só depois das validações puras", () => {
     it("payload inválido nunca cria chave survival:idempotencia, nunca chama DEL, nunca cria pedido", async () => {
       vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");

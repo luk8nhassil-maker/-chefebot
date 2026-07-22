@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { gerarClientRequestId, sanitizeClientRequestId } from "./clientRequestId";
+import { gerarClientRequestId, hashClientRequestId, sanitizeClientRequestId } from "./clientRequestId";
 
 describe("gerarClientRequestId", () => {
   afterEach(() => {
@@ -65,5 +65,22 @@ describe("sanitizeClientRequestId", () => {
 
   it("aceita e mantém espaços nas bordas removidos (trim)", () => {
     expect(sanitizeClientRequestId("  abcdef0123456789  ")).toBe("abcdef0123456789");
+  });
+});
+
+describe("hashClientRequestId", () => {
+  it("é determinístico e produz um SHA-256 em hex (64 chars)", () => {
+    const hash = hashClientRequestId("abcdef0123456789");
+    expect(hash).toMatch(/^[a-f0-9]{64}$/);
+    expect(hashClientRequestId("abcdef0123456789")).toBe(hash);
+  });
+
+  it("nunca contém o clientRequestId original (é opaco)", () => {
+    const id = "abcdef0123456789";
+    expect(hashClientRequestId(id)).not.toContain(id);
+  });
+
+  it("IDs diferentes produzem hashes diferentes", () => {
+    expect(hashClientRequestId("abcdef0123456789")).not.toBe(hashClientRequestId("0123456789abcdef"));
   });
 });

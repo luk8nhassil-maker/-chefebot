@@ -6,6 +6,8 @@
 // src/app/api/pedido-app/route.ts) para reconhecer um reenvio do mesmo
 // pedido e devolver o resultado já criado, em vez de criar um duplicado.
 
+import { createHash } from "crypto";
+
 // Mínimo de 16 caracteres do alfabeto [a-zA-Z0-9_-] (~95 bits de entropia se
 // aleatório) — nunca 8, que permitiria só ~2^47 combinações, pouco o
 // bastante para tornar um ataque de força bruta contra o cache de
@@ -49,4 +51,16 @@ export function sanitizeClientRequestId(raw: unknown): string | null {
   if (typeof raw !== "string") return null;
   const trimmed = raw.trim();
   return CLIENT_REQUEST_ID_REGEX.test(trimmed) ? trimmed : null;
+}
+
+/**
+ * Hash SHA-256 (hex) do clientRequestId — a única forma permitida de deixar
+ * um traço da tentativa dentro do próprio pedido persistido em `pedidos`
+ * (ver src/app/api/pedido-app/route.ts, campo `survivalClientRequestIdHash`).
+ * Nunca o valor bruto: mesmo sendo um identificador opaco (não PII), gravar
+ * só o hash evita que o `clientRequestId` original apareça em qualquer
+ * dump/leitura direta da chave `pedidos` (painel admin, exportação, etc.).
+ */
+export function hashClientRequestId(clientRequestId: string): string {
+  return createHash("sha256").update(clientRequestId).digest("hex");
 }

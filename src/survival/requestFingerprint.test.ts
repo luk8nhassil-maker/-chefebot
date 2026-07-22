@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calcularRequestFingerprint, type PedidoFingerprintInput } from "./requestFingerprint";
+import { calcularRequestFingerprint, normalizarEmailParaFingerprint, type PedidoFingerprintInput } from "./requestFingerprint";
 
 function base(): PedidoFingerprintInput {
   return {
@@ -59,9 +59,73 @@ describe("calcularRequestFingerprint", () => {
     );
   });
 
-  it("campos ausentes (undefined) e campos ausentes tratados como null não colidem por acaso com valores reais", () => {
+  it("observação diferente produz fingerprint diferente", () => {
+    expect(calcularRequestFingerprint({ ...base(), observacao: "Sem cebola" })).not.toBe(
+      calcularRequestFingerprint({ ...base(), observacao: "Capricha no queijo" })
+    );
+  });
+
+  it("e-mail diferente produz fingerprint diferente", () => {
+    expect(calcularRequestFingerprint({ ...base(), email: "a@teste.com" })).not.toBe(
+      calcularRequestFingerprint({ ...base(), email: "b@teste.com" })
+    );
+  });
+
+  it("sabor/escolha da recompensa da Jornada do Chef diferente produz fingerprint diferente", () => {
+    expect(
+      calcularRequestFingerprint({ ...base(), recompensaJornadaId: "rcp_1", recompensaEscolhaSabor: "Calabresa" })
+    ).not.toBe(calcularRequestFingerprint({ ...base(), recompensaJornadaId: "rcp_1", recompensaEscolhaSabor: "Portuguesa" }));
+  });
+
+  it("campos ausentes (undefined) são tratados de forma consistente (nunca colidem por acaso)", () => {
     const semBairro = calcularRequestFingerprint({ ...base(), bairro: undefined });
     const comBairroNull = calcularRequestFingerprint({ ...base(), bairro: undefined });
     expect(semBairro).toBe(comBairroNull);
+  });
+
+  it("[canônico] ordem das CHAVES de um item do carrinho não muda o fingerprint (mesmo conteúdo lógico)", () => {
+    const itemOrdemA = { kind: "simple", name: "Calabresa", qty: 1, price: 10 };
+    const itemOrdemB = { price: 10, qty: 1, name: "Calabresa", kind: "simple" };
+    expect(calcularRequestFingerprint({ ...base(), itens: [itemOrdemA] })).toBe(
+      calcularRequestFingerprint({ ...base(), itens: [itemOrdemB] })
+    );
+  });
+
+  it("[canônico] ordem dos ITENS no carrinho é preservada — trocar a ordem produz fingerprint diferente", () => {
+    const pizza = { kind: "simple", name: "Calabresa", qty: 1 };
+    const bebida = { kind: "simple", name: "Refrigerante", qty: 1 };
+    expect(calcularRequestFingerprint({ ...base(), itens: [pizza, bebida] })).not.toBe(
+      calcularRequestFingerprint({ ...base(), itens: [bebida, pizza] })
+    );
+  });
+
+  it("[canônico] espaços nas bordas de strings não mudam o fingerprint (trim)", () => {
+    expect(calcularRequestFingerprint({ ...base(), observacao: "  sem cebola  " })).toBe(
+      calcularRequestFingerprint({ ...base(), observacao: "sem cebola" })
+    );
+  });
+
+  it("[canônico] e-mail com caixa diferente (maiúsculas/minúsculas) não muda o fingerprint", () => {
+    expect(calcularRequestFingerprint({ ...base(), email: "Cliente@Teste.COM" })).toBe(
+      calcularRequestFingerprint({ ...base(), email: "cliente@teste.com" })
+    );
+  });
+
+  it("mesmos dados normalizados (mesmo conteúdo lógico, formatação diferente) continuam sendo retry legítimo", () => {
+    const tentativaA: PedidoFingerprintInput = { ...base(), observacao: "Capricha!  ", email: "Fulano@Teste.com" };
+    const tentativaB: PedidoFingerprintInput = { ...base(), observacao: "Capricha!", email: "fulano@teste.com" };
+    expect(calcularRequestFingerprint(tentativaA)).toBe(calcularRequestFingerprint(tentativaB));
+  });
+});
+
+describe("normalizarEmailParaFingerprint", () => {
+  it("normaliza trim + lowercase", () => {
+    expect(normalizarEmailParaFingerprint("  Fulano@Teste.COM  ")).toBe("fulano@teste.com");
+  });
+
+  it("string vazia/ausente vira undefined (nunca string vazia)", () => {
+    expect(normalizarEmailParaFingerprint("")).toBeUndefined();
+    expect(normalizarEmailParaFingerprint("   ")).toBeUndefined();
+    expect(normalizarEmailParaFingerprint(undefined)).toBeUndefined();
   });
 });

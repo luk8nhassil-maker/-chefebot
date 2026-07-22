@@ -183,13 +183,23 @@ breakers de carga estiverem implementados).
 Um `clientRequestId` sozinho **não prova** que duas requisições são a mesma
 tentativa — um cliente malicioso (ou um bug) poderia reaproveitar o ID de
 outro payload. `calcularRequestFingerprint(...)` produz um hash SHA-256
-(64 chars hex, opaco) a partir de uma serialização canônica (ordem de chaves
-fixa) dos campos que definem a tentativa: cliente, telefone, itens brutos,
-tipo de entrega, endereço, pagamento/troco, resgateId, recompensaJornadaId.
-Nunca guarda os dados legíveis — só o hash. Um `clientRequestId` reutilizado
-com um fingerprint **diferente** é tratado como conflito (409 genérico,
-nunca expõe dado do pedido anterior); com o **mesmo** fingerprint, como
-retry legítimo.
+(64 chars hex, opaco) a partir de uma **serialização canônica recursiva**
+de todos os campos capazes de mudar o significado da tentativa: cliente,
+telefone, itens brutos (ordem preservada — trocar a ordem dos itens conta
+como diferente), tipo de entrega, endereço completo (bairro/rua/
+número/referência), observação, e-mail (normalizado: trim + lowercase),
+pagamento/troco, resgateId, recompensaJornadaId e o sabor/escolha do
+presente da Jornada do Chef (adicionados na 3ª revisão de segurança — antes
+só cobriam um subconjunto dos campos). A normalização recursiva
+(`normalizarRecursivo`) ordena alfabeticamente as CHAVES de cada objeto
+(nunca depende da ordem de inserção do JSON recebido), preserva a ORDEM dos
+elementos de arrays, aplica `trim()` em strings e trata `undefined`/ausente
+de forma consistente (`null`) — dois clientes reenviando o mesmo conteúdo
+lógico com formatação incidental diferente (espaços, maiúsculas no e-mail)
+sempre produzem o mesmo fingerprint. Nunca guarda os dados legíveis — só o
+hash. Um `clientRequestId` reutilizado com um fingerprint **diferente** é
+tratado como conflito (409 genérico, nunca expõe dado do pedido anterior);
+com o **mesmo** fingerprint, como retry legítimo.
 
 ### 2.5 Idempotência de criação de pedido — claim atômico + resultado durável (`src/survival/pedidoIdempotencia.ts`)
 
@@ -223,31 +233,40 @@ Fluxo de uma requisição com `clientRequestId` válido (flag ligada):
    durável? Fingerprint bate → reconstrói e devolve a resposta atual
    (retry legítimo). Fingerprint não bate → 409 genérico. Falha de leitura
    → resposta recuperável 503 (nunca assume nada).
-2. **Claim** (`tentarReivindicarClaim`, só se não havia `result`): `SET NX`
-   no `claim`. Sucesso → segue para criar o pedido. Falha por chave já
-   existir → inspeciona o fingerprint de quem possui o claim: mesmo
-   fingerprint → espera (*polling* limitado no `result`, até ~1.8s) o
-   resultado aparecer, senão 409 "ainda processando"; fingerprint diferente
-   → 409 genérico. **Qualquer** erro do Redis durante o `SET NX` ou o `GET`
-   de inspeção (inclusive um `SET NX` que lança mas pode ou não ter sido
-   aplicado do lado do servidor) é tratado como **incerto** — nunca
-   prossegue como se tivesse reivindicado; devolve 503 recuperável, carrinho
-   preservado do lado do cliente (Etapa 2).
-3. **Efeitos irreversíveis** só depois do claim confirmado (ponto 7 da
+2. **Busca por hash no pedido real** (`buscarPedidoPorClientRequestIdHash`,
+   só se não havia `result` — ver seção 2.5 abaixo, correção da 3ª revisão):
+   fecha a lacuna em que `:claim` já expirou (TTL 30s) e `:result` nunca
+   chegou a ser gravado, mas o PEDIDO em si já existe de verdade. Fingerprint
+   bate → reconstrói do pedido real e recria o `result` best-effort.
+   Fingerprint não bate → 409 genérico. Falha de leitura → 503 recuperável.
+3. **Claim** (`tentarReivindicarClaim`, só se não havia `result` nem pedido
+   real encontrado por hash): `SET NX` no `claim`. Sucesso → segue para
+   criar o pedido. Falha por chave já existir → inspeciona o fingerprint de
+   quem possui o claim: mesmo fingerprint → espera (*polling* limitado no
+   `result`, até ~1.8s) o resultado aparecer, senão 409 "ainda processando";
+   fingerprint diferente → 409 genérico. **Qualquer** erro do Redis durante
+   o `SET NX` ou o `GET` de inspeção (inclusive um `SET NX` que lança mas
+   pode ou não ter sido aplicado do lado do servidor) é tratado como
+   **incerto** — nunca prossegue como se tivesse reivindicado; devolve 503
+   recuperável, carrinho preservado do lado do cliente (Etapa 2).
+4. **Efeitos irreversíveis** só depois do claim confirmado (ponto 7 da
    revisão): vínculo de recompensa da Jornada do Chef, geração de número,
    criação de Pix, persistência do pedido. Todas as validações puras (sem
    escrita, sem reserva, sem Pix) já rodaram antes — um payload inválido
    nunca chega a tocar uma chave `survival:*`.
-4. Após `redis.set("pedidos", ...)` ter sucesso, grava **imediatamente** o
+5. Após `redis.set("pedidos", ...)` ter sucesso, grava **imediatamente** o
    `result` mínimo — antes de qualquer operação que ainda possa falhar
    (confirmação de resgate, fidelidade, `getConfigPix`/Pix). Se essa
    gravação falhar, o claim **nunca é apagado** (evita reabrir a janela de
-   duplicação); expira sozinho pelo TTL curto.
-5. Falhas **depois** da persistência (`getConfigPix`, serialização do Pix,
+   duplicação); expira sozinho pelo TTL curto. **O pedido persistido carrega
+   ele mesmo um hash do `clientRequestId` + o fingerprint** (passo 2 acima
+   depende disso), então mesmo se `:claim` e `:result` desaparecerem os
+   dois, o pedido real continua localizável e nunca é duplicado.
+6. Falhas **depois** da persistência (`getConfigPix`, serialização do Pix,
    ou qualquer exceção não prevista) nunca viram um 500 cru: a resposta
    volta `ok: true` com o `pedidoId`/`numero`/`statusToken` reais e
    `degradado: true`, nunca fingindo que o pedido não existe.
-6. Rollback do resgate (falha em `confirmarResgatePontos` depois de
+7. Rollback do resgate (falha em `confirmarResgatePontos` depois de
    persistir): o pedido é removido de verdade — nesse caso (e só nesse
    caso) o `result` é apagado e o claim liberado, permitindo um retry
    legítimo criar um pedido novo, em vez de ficar preso a "processando" por
@@ -257,6 +276,48 @@ Fluxo de uma requisição com `clientRequestId` válido (flag ligada):
 mudança de comportamento e zero comando Redis extra — o bloco inteiro fica
 atrás de `if (clientRequestId)`, que só deixa de ser `null` quando
 `SURVIVAL_MODE_ENABLED=true` e o campo enviado é válido.
+
+### 2.5-A Prova durável dentro do próprio pedido (3ª revisão de segurança)
+
+**Problema fechado nesta revisão**: mesmo com o desenho de `:claim`/`:result`
+acima, existia uma lacuna real — se o pedido for persistido, a gravação do
+`:result` falhar (ou o processo for encerrado antes de tentar gravá-la), a
+resposta se perder (timeout) e o `:claim` (TTL 30s) expirar antes do
+cliente reenviar, um retry posterior não encontrava `:claim` nem `:result`
+e podia criar um segundo pedido — mesmo a execução original já ter
+terminado não ajuda, porque **o pedido que ela criou continua existindo**.
+
+**Correção**: o próprio objeto do pedido, dentro de `pedidos`, passa a
+carregar dois campos internos (só quando `clientRequestId` foi fornecido):
+
+- `survivalClientRequestIdHash` — SHA-256 (`hashClientRequestId`, em
+  `src/survival/clientRequestId.ts`) do `clientRequestId`, **nunca o valor
+  bruto**.
+- `survivalRequestFingerprint` — o mesmo fingerprint já calculado para o
+  claim/result.
+
+Antes de reivindicar um novo claim (quando `:result` não existe),
+`buscarPedidoPorClientRequestIdHash` procura em `pedidos` (leitura fresca,
+não a snapshot inicial da requisição) um pedido com esse hash:
+
+- **Encontrado + fingerprint igual** → reconstrói a resposta do pedido real
+  (mesma função `montarRespostaAPartirDoPedido` usada pelo fast path) e
+  recria o `:result` best-effort (acelera retries futuros, não é crítico se
+  falhar) — **nunca cria um segundo pedido**.
+- **Encontrado + fingerprint diferente** → 409 genérico, sem vazar dado do
+  pedido anterior.
+- **Não encontrado** → segue normalmente para tentar reivindicar o claim.
+- **Falha ao ler `pedidos`** → tratado como incerto (503), nunca prossegue
+  sem essa verificação.
+
+Esses campos **nunca aparecem em recibos, mensagens do WhatsApp, ou
+qualquer API pública** — auditado explicitamente: todos os pontos de
+leitura voltados ao cliente (`montarStatusPublicoPedido` em
+`/api/pedido-app/status`, `/api/pedido-app/[id]/editar/status`,
+`/api/pedido-app/pagamento-pix`) projetam campos explícitos nomeados, nunca
+espalham (`...pedido`) o objeto inteiro numa resposta pública. As
+mensagens de WhatsApp (`notificarCliente`, `getMensagemStatus`) são sempre
+texto construído explicitamente, nunca um dump do objeto.
 
 ### 2.6 Rascunho local versionado (`src/survival/draftStorage.ts`)
 
@@ -324,7 +385,21 @@ da rota:
   `total`/`pix`; se a reconstrução falhar no retry, a resposta vem sem
   `pix` (degradada) em vez de inventar dado ou gerar nova cobrança;
 - **claim só depois das validações puras**: payload inválido nunca cria
-  chave `survival:*`, nunca chama `DEL`, nunca cria pedido.
+  chave `survival:*`, nunca chama `DEL`, nunca cria pedido;
+- **(3ª revisão) recuperação após expiração de `:claim` e `:result`**:
+  gravação do `:result` falha (ou ambas as chaves são apagadas, simulando
+  processo encerrado/TTL) depois do pedido já persistido → retry recupera o
+  MESMO pedido via hash gravado nele, `pedidos.length` permanece 1, nenhuma
+  segunda cobrança Pix; fingerprint diferente nesse cenário → 409 genérico;
+  falha ao ler `pedidos` durante essa busca → 503, nunca cria pedido;
+- **(3ª revisão) fingerprint completo**: observação e e-mail diferentes →
+  409; mesmos dados com formatação incidental diferente (espaços,
+  maiúsculas no e-mail) → retry legítimo; conflito nunca devolve
+  `pedidoId`/`statusToken`/`total`/`pix` do pedido anterior;
+- **(3ª revisão) reconstrução do Pix no retry**: provado explicitamente
+  para Pix válido/pendente, confirmado por caminho independente (webhook),
+  sem QR (cai para manual), e indisponível (pagamento não-Pix) — em todos
+  os casos, `criarCobrancaPixMercadoPago` nunca é chamado uma segunda vez.
 
 Suíte completa passando, typecheck sem novos erros (183 pré-existentes,
 iguais ao baseline), lint limpo nos arquivos alterados, build de produção
@@ -332,14 +407,24 @@ OK — números exatos na descrição do PR (mudam a cada push).
 
 ### 2.9 Custo de Redis adicional (com a flag ligada)
 
-- Caminho feliz (pedido novo, sem disputa): **+2 comandos** por pedido — 1
+- Caminho feliz (pedido novo, sem disputa, `:result` nunca existiu): **+3
+  comandos** por pedido — 1 `GET` do `:result` (fast path, miss) + 1 `GET`
+  de `pedidos` (busca por hash, miss — adicionado na 3ª revisão) + 1
   `SET NX` (claim) + 1 `SET` do resultado durável. O claim é liberado ao
-  final via `EVAL` (compare-and-delete), +1 comando best-effort.
+  final via `EVAL` (compare-and-delete), +1 comando best-effort. A busca
+  por hash reaproveita a MESMA chave `pedidos` já lida no fluxo normal
+  (nenhuma chave nova) — o "+1 GET" é uma segunda leitura fresca dessa
+  mesma chave, não uma estrutura de dado adicional.
 - Fast path (resultado já existe, retry ou conflito): 1 `GET` — mais barato
   que uma criação completa, a requisição retorna antes de tocar
   `pedidos`/menu/promoções.
-- Disputa concorrente (raro, mesmo `clientRequestId` em paralelo): até ~8
-  comandos no lado que perde a corrida (1 `SET NX` + 1 `GET` de inspeção +
-  até 6 `GET`s de polling), *bounded*, nunca ilimitado.
+- Recuperação via hash (`:result` ausente mas pedido real já existe — o
+  cenário que a 3ª revisão fecha): 2 `GET`s (`:result` miss + `pedidos`
+  hit) + 1 `SET` best-effort para recriar o `:result` — ainda mais barato
+  que uma criação completa.
+- Disputa concorrente (raro, mesmo `clientRequestId` em paralelo): até ~9
+  comandos no lado que perde a corrida (2 `GET`s do fast path/hash + 1
+  `SET NX` + 1 `GET` de inspeção do claim + até 6 `GET`s de polling),
+  *bounded*, nunca ilimitado.
 - Com a flag desligada (estado deste PR em Production): **0 comandos
   extras** — o bloco inteiro nem executa.

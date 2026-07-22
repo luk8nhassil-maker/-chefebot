@@ -14,7 +14,7 @@ import { calcularPontosElegiveisPedido, registrarMovimentoPontosIdempotente, con
 import { type ItemApp, type MenuPedidoApp, formatItem, officialUnitPrice, makePromoUnitPrice, contarPizzasPagasParaFidelidade } from "@/lib/pedidoAppItens";
 import { prepararResgateParaPedido, confirmarReservaNoPedido, liberarVinculoRecompensaPedidoNaoCriado, type EscolhaRecompensaJornada } from "@/lib/jornadaChef";
 import { survivalModeEnabled } from "@/survival/flags";
-import { sanitizeClientRequestId } from "@/survival/clientRequestId";
+import { hashClientRequestId, sanitizeClientRequestId } from "@/survival/clientRequestId";
 import { calcularRequestFingerprint } from "@/survival/requestFingerprint";
 import { logSurvivalErro } from "@/survival/logging";
 import {
@@ -84,7 +84,20 @@ type PedidoAppRespostaSucesso = {
   degradado?: true;
 };
 
-type PedidoArmazenado = { id?: unknown; total?: unknown; pix?: PixMetadata };
+type PedidoArmazenado = {
+  id?: unknown;
+  numero?: unknown;
+  statusToken?: unknown;
+  total?: unknown;
+  pix?: PixMetadata;
+  /** Hash (nunca o valor bruto) do clientRequestId da tentativa que criou
+   * este pedido — única prova durável dentro do próprio pedido persistido,
+   * usada para recuperar a idempotência quando `:claim`/`:result` já
+   * expiraram ou nunca chegaram a ser gravados (ver revisão de segurança,
+   * ponto 1 — "lacuna após expiração do claim"). */
+  survivalClientRequestIdHash?: unknown;
+  survivalRequestFingerprint?: unknown;
+};
 
 function criarTokenPublicoAcompanhamento(): string {
   return randomUUID().replace(/-/g, "");
@@ -121,21 +134,22 @@ function respostaAindaProcessando(): NextResponse {
 
 // Reconstrói a resposta de sucesso a partir do pedido REAL já persistido
 // (nunca de um total/Pix cacheado às cegas — ver revisão de segurança,
-// ponto 6): o registro de idempotência guarda só pedidoId/numero/statusToken;
-// total e Pix são sempre lidos frescos do próprio pedido + config atual.
-async function reconstruirRespostaPedido(registro: ResultadoIdempotenciaPedido): Promise<PedidoAppRespostaSucesso | null> {
-  const pedidosAtuais = (await redis.get<PedidoArmazenado[]>("pedidos").catch(() => null)) || [];
-  const pedidoEncontrado = pedidosAtuais.find((p) => p && p.id === registro.pedidoId);
-  if (!pedidoEncontrado) {
-    logSurvivalErro("idempotencia_pedido", "reconstrucao", "pedido_nao_encontrado");
-    return null;
-  }
-
+// ponto 6): total e Pix são sempre lidos frescos do PRÓPRIO PEDIDO + config
+// atual — nunca de um valor gravado antecipadamente no registro de
+// idempotência. Se o Pix não puder ser serializado (config indisponível),
+// a resposta ainda confirma o pedido, só sem o campo `pix` (`degradado`) —
+// nunca gera uma segunda cobrança nem inventa dado de pagamento.
+async function montarRespostaAPartirDoPedido(
+  pedido: PedidoArmazenado,
+  pedidoId: string,
+  numero: number,
+  statusToken: string
+): Promise<PedidoAppRespostaSucesso> {
   let pixCliente: ReturnType<typeof serializarPixCliente>;
   let degradado = false;
   try {
     const configPix = await getConfigPix();
-    pixCliente = serializarPixCliente(pedidoEncontrado.pix, configPix);
+    pixCliente = serializarPixCliente(pedido.pix, configPix);
   } catch (err) {
     degradado = true;
     logSurvivalErro("idempotencia_pedido", "reconstrucao", "config_pix_falhou", err);
@@ -143,13 +157,56 @@ async function reconstruirRespostaPedido(registro: ResultadoIdempotenciaPedido):
 
   return {
     ok: true,
-    pedidoId: registro.pedidoId,
-    numero: registro.numero,
-    total: typeof pedidoEncontrado.total === "number" ? pedidoEncontrado.total : 0,
-    statusToken: registro.statusToken,
+    pedidoId,
+    numero,
+    total: typeof pedido.total === "number" ? pedido.total : 0,
+    statusToken,
     ...(pixCliente ? { pix: pixCliente } : {}),
     ...(degradado ? { degradado: true as const } : {}),
   };
+}
+
+async function reconstruirRespostaPedido(registro: ResultadoIdempotenciaPedido): Promise<PedidoAppRespostaSucesso | null> {
+  const pedidoEncontrado = await buscarPedidoPersistidoPorId(registro.pedidoId);
+  if (!pedidoEncontrado) {
+    logSurvivalErro("idempotencia_pedido", "reconstrucao", "pedido_nao_encontrado");
+    return null;
+  }
+  return montarRespostaAPartirDoPedido(pedidoEncontrado, registro.pedidoId, registro.numero, registro.statusToken);
+}
+
+async function buscarPedidoPersistidoPorId(pedidoId: string): Promise<PedidoArmazenado | null> {
+  const pedidosAtuais = (await redis.get<PedidoArmazenado[]>("pedidos").catch(() => null)) || [];
+  return pedidosAtuais.find((p) => p && p.id === pedidoId) ?? null;
+}
+
+type ResultadoBuscaPorHash =
+  | { tipo: "nao_encontrado" }
+  | { tipo: "incerto" }
+  | { tipo: "conflito_fingerprint" }
+  | { tipo: "encontrado"; pedido: PedidoArmazenado };
+
+// Última linha de defesa contra duplicidade (ver revisão de segurança, ponto
+// 1): mesmo quando NEM `:claim` NEM `:result` existem mais (TTL expirado,
+// gravação de `:result` nunca chegou a acontecer — processo encerrado logo
+// depois de persistir), o pedido REAL já persistido em `pedidos` carrega um
+// hash do clientRequestId que o criou. Antes de reivindicar um novo claim,
+// procura por esse hash — encontrando, NUNCA cria um segundo pedido.
+async function buscarPedidoPorClientRequestIdHash(
+  clientRequestIdHash: string,
+  requestFingerprint: string
+): Promise<ResultadoBuscaPorHash> {
+  let pedidosAtuais: PedidoArmazenado[];
+  try {
+    pedidosAtuais = (await redis.get<PedidoArmazenado[]>("pedidos")) || [];
+  } catch (err) {
+    logSurvivalErro("idempotencia_pedido", "busca_por_hash", "get_pedidos_falhou", err);
+    return { tipo: "incerto" };
+  }
+  const pedidoEncontrado = pedidosAtuais.find((p) => p && p.survivalClientRequestIdHash === clientRequestIdHash);
+  if (!pedidoEncontrado) return { tipo: "nao_encontrado" };
+  if (pedidoEncontrado.survivalRequestFingerprint !== requestFingerprint) return { tipo: "conflito_fingerprint" };
+  return { tipo: "encontrado", pedido: pedidoEncontrado };
 }
 
 type ResultadoConsultaRapida =
@@ -509,6 +566,10 @@ export async function POST(req: NextRequest) {
     clientRequestId = survivalModeEnabled() ? sanitizeClientRequestId(body.clientRequestId) : null;
 
     if (clientRequestId) {
+      const recompensaEscolhaSabor =
+        body.recompensaJornada?.escolha && typeof body.recompensaJornada.escolha === "object"
+          ? body.recompensaJornada.escolha.sabor
+          : undefined;
       requestFingerprint = calcularRequestFingerprint({
         cliente: body.cliente,
         telefonePedido,
@@ -518,10 +579,13 @@ export async function POST(req: NextRequest) {
         rua: body.rua,
         numero: body.numero,
         referencia: body.referencia,
+        observacao: body.observacao,
+        email: body.email,
         pagamento: body.pagamento,
         troco: body.troco,
         resgateId: body.resgateId,
         recompensaJornadaId,
+        recompensaEscolhaSabor,
       });
 
       const consultaRapida = await consultarResultadoExistente(clientRequestId, requestFingerprint);
@@ -532,7 +596,41 @@ export async function POST(req: NextRequest) {
         if (reconstruida) return NextResponse.json(reconstruida);
         return respostaClaimIncerto();
       }
-      // "nao_encontrado" — segue para tentar reivindicar o claim.
+      // "nao_encontrado" no registro durável (:result) — antes de reivindicar
+      // um novo claim, verifica se o PEDIDO REAL já existe (caso em que o
+      // :result nunca chegou a ser gravado ou já expirou — ver revisão de
+      // segurança, ponto 1). Nunca cria um segundo pedido quando o hash bate.
+      const clientRequestIdHash = hashClientRequestId(clientRequestId);
+      const buscaPorHash = await buscarPedidoPorClientRequestIdHash(clientRequestIdHash, requestFingerprint);
+      if (buscaPorHash.tipo === "incerto") return respostaClaimIncerto();
+      if (buscaPorHash.tipo === "conflito_fingerprint") return respostaConflitoFingerprint();
+      if (buscaPorHash.tipo === "encontrado") {
+        const pedidoExistente = buscaPorHash.pedido;
+        const pedidoIdExistente = String(pedidoExistente.id ?? "");
+        const numeroExistente = typeof pedidoExistente.numero === "number" ? pedidoExistente.numero : 0;
+        const statusTokenExistente = typeof pedidoExistente.statusToken === "string" ? pedidoExistente.statusToken : "";
+        const respostaRecuperada = await montarRespostaAPartirDoPedido(
+          pedidoExistente,
+          pedidoIdExistente,
+          numeroExistente,
+          statusTokenExistente
+        );
+        // Recria o registro :result best-effort — acelera retries futuros,
+        // mas não é crítico se falhar (a busca por hash cobre esse caso).
+        const registroRecriado: ResultadoIdempotenciaPedido = {
+          state: "completed",
+          requestFingerprint,
+          pedidoId: pedidoIdExistente,
+          numero: numeroExistente,
+          statusToken: statusTokenExistente,
+          createdAt: Date.now(),
+        };
+        await redis
+          .set(chaveResultadoPedido(clientRequestId), registroRecriado, { ex: RESULT_TTL_SEGUNDOS })
+          .catch((err) => logSurvivalErro("idempotencia_pedido", "recriacao_resultado", "set_falhou", err));
+        return NextResponse.json(respostaRecuperada);
+      }
+      // "nao_encontrado" em ambos — segue para tentar reivindicar o claim.
 
       ownerToken = randomUUID();
       const claimKey = chaveClaimPedido(clientRequestId);
@@ -591,6 +689,16 @@ export async function POST(req: NextRequest) {
       ...(pizzasCount > 0 ? { pizzasCount } : {}),
       ...(resgateAplicado ? { resgateId: resgateAplicado.resgateId, descontoFidelidade } : {}),
       ...(recompensaJornadaId ? { recompensaJornadaId } : {}),
+      // Modo Sobrevivência: hash (nunca o valor bruto) do clientRequestId +
+      // fingerprint da tentativa — única prova durável de idempotência
+      // dentro do próprio pedido, usada quando :claim/:result expiram ou
+      // nunca chegam a ser gravados (ver buscarPedidoPorClientRequestIdHash).
+      // Nunca enviado em recibos/mensagens/APIs públicas: todos os pontos de
+      // leitura voltados ao cliente (montarStatusPublicoPedido, etc.)
+      // projetam campos explícitos, nunca espalham o pedido inteiro.
+      ...(clientRequestId && requestFingerprint
+        ? { survivalClientRequestIdHash: hashClientRequestId(clientRequestId), survivalRequestFingerprint: requestFingerprint }
+        : {}),
       itens,
       total,
       status: "novo" as const,
