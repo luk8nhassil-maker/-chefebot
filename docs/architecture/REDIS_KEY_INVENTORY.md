@@ -95,10 +95,18 @@
 
 | Chave | Lê | Grava | Tipo | TTL | Criticidade | Natureza | Destino |
 |---|---|---|---|---|---|---|---|
-| `mcp:log:obs` | `src/mcp/lib/readOnlyRedis.ts` / painel `/dev/mcp` | `src/mcp/logger/mcpLogger.ts:logObservacaoMcp` (RPUSH + LTRIM + EXPIRE — **3 comandos por log**) | **List** (cap 500) | 30 dias | ⚪ | Efêmero | **Redis** |
+| `mcp:log:obs` | `src/mcp/lib/readOnlyRedis.ts` / painel `/dev/mcp` | `src/mcp/logger/mcpLogger.ts:logObservacaoMcp`/`logObservacoesEmLoteMcp` (RPUSH + LTRIM + EXPIRE — **3 comandos por log OU por lote inteiro**) | **List** (cap 500) | 30 dias | ⚪ | Efêmero | **Redis** |
 | `mcp:log:erros` | idem | `logErroMcp` (idem, 3 comandos) | **List** (cap 200) | 30 dias | ⚪ | Efêmero | **Redis** |
-| `mcp:fila:eventos` | consumidor do MCP (não aberto nesta leitura) | `src/mcp/eventTap.ts:enfileirarEventoMcp` (RPUSH + LTRIM + EXPIRE — **3 comandos por evento**) | **List** (cap 1000) | 2h | ⚪ | Efêmero | **Redis** |
+| `mcp:fila:eventos` | cron `mcp-observer` | `src/mcp/eventTap.ts:enfileirarEventoMcp` (1 EVAL Lua atômico: RPUSH + LLEN + LTRIM condicional + EXPIRE) | **List** (cap 10.000) | 72h | ⚪ | Efêmero | **Redis** |
+| `mcp:meta:fila:descartados` | painel `/dev/mcp` | `eventTap` (Lua, só quando a fila estoura o limite) | Number | 7 dias | ⚪ | Efêmero | **Redis** |
+| `mcp:meta:fila:pico` | painel `/dev/mcp` | cron `mcp-observer` (só quando supera o pico anterior) | Number | 30 dias | ⚪ | Efêmero | **Redis** |
+| `mcp:meta:cron:historico` | painel `/dev/mcp` (agregados 24h) | cron `mcp-observer`, 1 entrada por execução | **List** (cap 300) | 3 dias | ⚪ | Efêmero | **Redis** |
+| `mcp:meta:fds:historico` | painel `/dev/mcp` (elegibilidade) | cron `mcp-observer`, 1 id por fim de semana movimentado | Array (JSON) | 200 dias | ⚪ | Efêmero | **Redis** |
+| `mcp:meta:processados:total` | painel `/dev/mcp` (elegibilidade) | cron `mcp-observer`, INCRBY | Number | 400 dias (renovado) | ⚪ | Efêmero | **Redis** |
 | `system:logs` | painel `/dev/mcp` | fonte não localizada nesta leitura (possivelmente logger central) | tipo não confirmado | não confirmado | ⚪ | A confirmar | **Redis** (mantém, é log operacional) |
+
+Ver `docs/architecture/MCP_OBSERVADOR_CAPACIDADE.md` para o racional completo
+da evolução de capacidade (Fase 1 — noites movimentadas).
 
 ---
 

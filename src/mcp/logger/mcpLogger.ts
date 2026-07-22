@@ -30,6 +30,20 @@ export async function logObservacaoMcp(entrada: McpLogEntryObs): Promise<void> {
   }
 }
 
+// Persiste várias observações de uma vez. RPUSH aceita múltiplos valores —
+// então um lote de 500 observações continua custando só 3 comandos Redis
+// (RPUSH + LTRIM + EXPIRE), igual a um lote de 1. Lança em caso de falha
+// (diferente de logObservacaoMcp) porque o cron precisa saber se o lote
+// realmente foi persistido antes de remover os eventos correspondentes da
+// fila — engolir o erro aqui faria o cron achar que persistiu e perder dados.
+export async function logObservacoesEmLoteMcp(entradas: McpLogEntryObs[]): Promise<void> {
+  if (entradas.length === 0) return;
+  const valores = entradas.map((e) => JSON.stringify(e));
+  await redis.rpush(CHAVE_OBS, ...valores);
+  await redis.ltrim(CHAVE_OBS, -MAX_OBS, -1);
+  await redis.expire(CHAVE_OBS, TTL_LOG_S);
+}
+
 export async function logErroMcp(origem: string, err: unknown): Promise<void> {
   try {
     const entry: McpLogEntryErro = {
