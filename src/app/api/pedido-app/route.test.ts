@@ -595,3 +595,62 @@ describe("POST /api/pedido-app", () => {
     expect(store.get("pedidos")).toBeUndefined();
   });
 });
+
+describe("POST /api/pedido-app — idempotência (Modo Sobrevivência)", () => {
+  it("com a flag desligada (padrão), clientRequestId é ignorado e dois envios criam dois pedidos", async () => {
+    const payload = { ...basePayload, clientRequestId: "retry-abc123" };
+    const r1 = await POST(postReq(payload));
+    const r2 = await POST(postReq(payload));
+    expect(r1.status).toBe(200);
+    expect(r2.status).toBe(200);
+    const body1 = await r1.json();
+    const body2 = await r2.json();
+    expect(body1.pedidoId).not.toBe(body2.pedidoId);
+    expect((store.get("pedidos") as unknown[]).length).toBe(2);
+  });
+
+  it("com a flag ligada, reenviar o mesmo clientRequestId devolve o pedido já criado (sem duplicar)", async () => {
+    vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
+    const payload = { ...basePayload, clientRequestId: "retry-abc123" };
+
+    const r1 = await POST(postReq(payload));
+    expect(r1.status).toBe(200);
+    const body1 = await r1.json();
+    expect((store.get("pedidos") as unknown[]).length).toBe(1);
+
+    const r2 = await POST(postReq(payload));
+    expect(r2.status).toBe(200);
+    const body2 = await r2.json();
+
+    expect(body2).toEqual(body1);
+    expect((store.get("pedidos") as unknown[]).length).toBe(1);
+  });
+
+  it("com a flag ligada, clientRequestId ausente segue criando pedido normalmente (sem cache)", async () => {
+    vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
+    const r1 = await POST(postReq(basePayload));
+    const r2 = await POST(postReq(basePayload));
+    expect(r1.status).toBe(200);
+    expect(r2.status).toBe(200);
+    expect((store.get("pedidos") as unknown[]).length).toBe(2);
+  });
+
+  it("com a flag ligada, clientRequestId em formato inválido é ignorado (nunca quebra o pedido)", async () => {
+    vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
+    const res = await POST(postReq({ ...basePayload, clientRequestId: "id com espaço e PII (99) 99999-9999" }));
+    expect(res.status).toBe(200);
+    expect((store.get("pedidos") as unknown[]).length).toBe(1);
+  });
+
+  it("clientRequestIds diferentes nunca colidem entre si", async () => {
+    vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
+    const r1 = await POST(postReq({ ...basePayload, clientRequestId: "tentativa-um-123" }));
+    const r2 = await POST(postReq({ ...basePayload, clientRequestId: "tentativa-dois-456" }));
+    expect(r1.status).toBe(200);
+    expect(r2.status).toBe(200);
+    const body1 = await r1.json();
+    const body2 = await r2.json();
+    expect(body1.pedidoId).not.toBe(body2.pedidoId);
+    expect((store.get("pedidos") as unknown[]).length).toBe(2);
+  });
+});

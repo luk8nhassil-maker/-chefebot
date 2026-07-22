@@ -13,6 +13,9 @@ import { buscarClientePorId, sanitizeTelefoneCliente } from "@/lib/clientes";
 import { calcularPontosElegiveisPedido, registrarMovimentoPontosIdempotente, construirEventoIdPontos, derivarClienteIdPorTelefone, obterReservasResgatePontos, confirmarResgatePontos } from "@/lib/fidelidade";
 import { type ItemApp, type MenuPedidoApp, formatItem, officialUnitPrice, makePromoUnitPrice, contarPizzasPagasParaFidelidade } from "@/lib/pedidoAppItens";
 import { prepararResgateParaPedido, confirmarReservaNoPedido, liberarVinculoRecompensaPedidoNaoCriado, type EscolhaRecompensaJornada } from "@/lib/jornadaChef";
+import { survivalModeEnabled } from "@/survival/flags";
+import { sanitizeClientRequestId } from "@/survival/clientRequestId";
+import { chaveIdempotenciaPedido, PEDIDO_IDEMPOTENCIA_TTL_SEGUNDOS } from "@/survival/pedidoIdempotencia";
 
 export const maxDuration = 20;
 
@@ -40,6 +43,11 @@ type PedidoApp = {
    * servidor a partir do snapshot da própria recompensa — nunca confiado do
    * cliente (ver `materializarItensRecompensa` em @/lib/jornadaChef). */
   recompensaJornada?: { recompensaId: string; escolha?: EscolhaRecompensaJornada };
+  /** Modo Sobrevivência (Etapa 1): identificador gerado uma vez pelo
+   * navegador por tentativa de checkout, reaproveitado em retries. Só tem
+   * efeito quando SURVIVAL_MODE_ENABLED=true; ausente/ignorado do
+   * contrário. Nunca contém PII (ver src/survival/clientRequestId.ts). */
+  clientRequestId?: string;
 };
 
 type ConfigPizzariaPix = {
@@ -60,6 +68,22 @@ async function getConfigPix(): Promise<ConfigPizzariaPix> {
 export async function POST(req: NextRequest) {
   try {
     const body = (await req.json()) as PedidoApp;
+
+    // Modo Sobrevivência (Etapa 1) — idempotência de criação de pedido.
+    // Desligado por padrão (SURVIVAL_MODE_ENABLED=false): zero mudança de
+    // comportamento, zero comando Redis extra. Ligado, um clientRequestId
+    // já visto devolve o MESMO resultado da primeira criação em vez de
+    // criar um segundo pedido — cobre o caso de retry após timeout de rede
+    // no fetch original (ver auditoria em docs/architecture/MODO_SOBREVIVENCIA_1_0.md).
+    const clientRequestId = survivalModeEnabled() ? sanitizeClientRequestId(body.clientRequestId) : null;
+    if (clientRequestId) {
+      const respostaAnterior = await redis
+        .get<Record<string, unknown>>(chaveIdempotenciaPedido(clientRequestId))
+        .catch(() => null);
+      if (respostaAnterior) {
+        return NextResponse.json(respostaAnterior);
+      }
+    }
 
     if (!body.cliente || !body.itens || body.itens.length === 0) {
       return NextResponse.json({ ok: false, error: "Pedido inválido" }, { status: 400 });
@@ -409,7 +433,19 @@ export async function POST(req: NextRequest) {
 
     const configPix = await getConfigPix();
     const pixCliente = serializarPixCliente(pix, configPix);
-    return NextResponse.json({ ok: true, pedidoId, numero: numeroPedido, total, statusToken, ...(pixCliente ? { pix: pixCliente } : {}) });
+    const resposta = { ok: true, pedidoId, numero: numeroPedido, total, statusToken, ...(pixCliente ? { pix: pixCliente } : {}) };
+
+    // Guarda o resultado desta criação sob o clientRequestId (best-effort:
+    // o pedido já foi persistido antes deste ponto — uma falha aqui nunca
+    // desfaz nem impede a resposta de sucesso, só significa que um retry
+    // eventual não vai encontrar cache e cairá na validação normal).
+    if (clientRequestId) {
+      await redis
+        .set(chaveIdempotenciaPedido(clientRequestId), resposta, { ex: PEDIDO_IDEMPOTENCIA_TTL_SEGUNDOS })
+        .catch((err) => console.error("[ChefeBot] Falha ao gravar idempotência de pedido (ignorada):", err));
+    }
+
+    return NextResponse.json(resposta);
   } catch (error) {
     console.error("Erro ao salvar pedido do site:", error);
     return NextResponse.json({ ok: false, error: "Erro interno" }, { status: 500 });
