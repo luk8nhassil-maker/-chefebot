@@ -66,12 +66,20 @@ export function isMetricSample(p: IngestPayload): p is MetricSample {
   return p.eventType === "metric_sample";
 }
 
-/** Ponto de histórico já unificado (coleta automática ou baseline manual). */
+/**
+ * Ponto de histórico já unificado (coleta automática ou baseline manual).
+ * `percentUsed` é sempre uma PORCENTAGEM na escala 0–100 (ex.: 15.3 = 15,3%),
+ * a mesma escala de `MetricSample.postgres.percentUsed` — nunca uma fração
+ * 0–1. As duas origens (`collector` e `railway-ui-manual`) precisam produzir
+ * esse campo na mesma escala; um dos dois estar em fração e o outro em
+ * porcentagem quebra silenciosamente o gráfico (ver
+ * src/infra/railway/verifiedBaselines.ts e healthEngine.test.ts).
+ */
 export type HistoryPoint = {
   ts: number; // epoch ms
   usedBytes: number;
   capacityBytes: number;
-  percentUsed: number;
+  percentUsed: number; // 0–100, nunca 0–1
   origin: "collector" | "railway-ui-manual";
 };
 

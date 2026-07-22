@@ -22,26 +22,31 @@ function saoPauloMs(iso: string): number {
   return new Date(iso).getTime();
 }
 
+/** Porcentagem 0–100 (nunca fração 0–1) — mesma escala de MetricSample.postgres.percentUsed. */
+function percentualDe(usedBytes: number, capacityBytes: number): number {
+  return (usedBytes / capacityBytes) * 100;
+}
+
 export const VERIFIED_BASELINES: readonly HistoryPoint[] = [
   {
     ts: saoPauloMs("2026-06-22T01:00:00-03:00"),
     usedBytes: Math.round(337.3 * MB),
     capacityBytes: CAPACIDADE_500MB,
-    percentUsed: (337.3 * MB) / CAPACIDADE_500MB,
+    percentUsed: percentualDe(337.3 * MB, CAPACIDADE_500MB),
     origin: "railway-ui-manual",
   },
   {
     ts: saoPauloMs("2026-07-20T21:00:00-03:00"),
     usedBytes: Math.round(495.4 * MB),
     capacityBytes: CAPACIDADE_500MB,
-    percentUsed: (495.4 * MB) / CAPACIDADE_500MB,
+    percentUsed: percentualDe(495.4 * MB, CAPACIDADE_500MB),
     origin: "railway-ui-manual",
   },
   {
     ts: saoPauloMs("2026-07-21T21:00:00-03:00"),
     usedBytes: Math.round(765.21 * MB),
     capacityBytes: CAPACIDADE_5GB,
-    percentUsed: (765.21 * MB) / CAPACIDADE_5GB,
+    percentUsed: percentualDe(765.21 * MB, CAPACIDADE_5GB),
     origin: "railway-ui-manual",
   },
 ];

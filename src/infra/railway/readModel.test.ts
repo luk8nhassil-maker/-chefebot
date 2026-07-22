@@ -38,7 +38,7 @@ function historyPoint(daysAgo: number, usedMb: number): HistoryPoint {
     ts: NOW - daysAgo * 24 * 60 * 60 * 1000,
     usedBytes: usedMb * MB,
     capacityBytes: CAP,
-    percentUsed: (usedMb * MB) / CAP,
+    percentUsed: ((usedMb * MB) / CAP) * 100, // 0–100, nunca fração 0–1
     origin: "collector",
   };
 }
@@ -109,5 +109,40 @@ describe("buildInfraSnapshot", () => {
     });
     const snap = await buildInfraSnapshot(true, NOW);
     expect(snap.history.some((h) => h.origin === "railway-ui-manual")).toBe(true);
+  });
+
+  it("devolve o histórico sempre ordenado cronologicamente, mesmo que a persistência entregue fora de ordem", async () => {
+    mockReadInfraState.mockResolvedValue({
+      ok: true,
+      latestSample: sample(765.21),
+      collectorStatus: { status: "ok", lastRunAt: NOW },
+      // Fora de ordem de propósito: o ponto mais recente vem primeiro no array.
+      history: [historyPoint(0, 765.21), historyPoint(10, 700), historyPoint(1, 495.4)],
+      severityState: null,
+      alerts: [],
+    });
+    const snap = await buildInfraSnapshot(true, NOW);
+    for (let i = 1; i < snap.history.length; i++) {
+      expect(snap.history[i].ts).toBeGreaterThanOrEqual(snap.history[i - 1].ts);
+    }
+  });
+
+  it("percentUsed é comparável (mesma escala 0–100) entre pontos de origem collector e railway-ui-manual", async () => {
+    mockReadInfraState.mockResolvedValue({
+      ok: true,
+      latestSample: sample(500), // 500MB / 5GB = 9.77%
+      collectorStatus: { status: "ok", lastRunAt: NOW },
+      history: [historyPoint(0, 500)],
+      severityState: null,
+      alerts: [],
+    });
+    const snap = await buildInfraSnapshot(true, NOW);
+    const collectorPoint = snap.history.find((h) => h.origin === "collector")!;
+    const baselinePoint = snap.history.find((h) => h.origin === "railway-ui-manual")!;
+    // Ambos precisam estar na faixa 0–100 (porcentagem) — nunca um em fração 0–1.
+    expect(collectorPoint.percentUsed).toBeGreaterThan(1);
+    expect(collectorPoint.percentUsed).toBeLessThanOrEqual(100);
+    expect(baselinePoint.percentUsed).toBeGreaterThan(1);
+    expect(baselinePoint.percentUsed).toBeLessThanOrEqual(100);
   });
 });

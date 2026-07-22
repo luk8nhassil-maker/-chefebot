@@ -5,6 +5,7 @@
 // de aparecer: qualquer erro fica contido no ErrorBoundary local abaixo.
 
 import { Component, type ReactNode, useEffect, useState } from 'react'
+import { describeServiceStatusLabel, sortHistoryChronologically } from '@/infra/railway/healthEngine'
 
 const BG_S = 'var(--info-soft)'
 const BG_R = 'var(--info-soft)'
@@ -117,46 +118,68 @@ function Card({ title, children, accent }: { title: string; children: ReactNode;
 function ServiceDot({ label, status }: { label: string; status: ServiceStatus | WhatsappState }) {
   const ok = status === 'online' || status === 'connected'
   const unknown = status === 'unknown'
+  // "não monitorado" (unknown) é neutro/cinza — nunca vermelho: ausência de
+  // dado não é o mesmo que falha real observada (só "disconnected" é falha real).
   const color = ok ? GREEN : unknown ? TEXT3 : RED
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: BG_R, border: BORDER, borderRadius: 8, padding: '8px 12px' }}>
       <span style={{ width: 9, height: 9, borderRadius: '50%', background: color, flexShrink: 0 }} />
       <span style={{ color: TEXT2, fontSize: 12, flex: 1 }}>{label}</span>
-      <span style={{ color, fontSize: 11, fontWeight: 700 }}>{status}</span>
+      <span style={{ color, fontSize: 11, fontWeight: 700 }}>{describeServiceStatusLabel(status)}</span>
     </div>
   )
 }
 
+/** Nudge de rótulos que colidiriam verticalmente (nunca muda a posição da linha-guia, só do texto). */
+function declutterLabelYs(sortedYsTopToBottom: number[], minGapPx: number): number[] {
+  const out: number[] = []
+  let last = -Infinity
+  for (const rawY of sortedYsTopToBottom) {
+    const labelY = Math.max(rawY, last + minGapPx)
+    out.push(labelY)
+    last = labelY
+  }
+  return out
+}
+
 function HistoryChart({ history }: { history: HistoryPoint[] }) {
-  if (history.length < 2) {
+  // Nunca confia que `history` já chega ordenado (mistura baselines manuais
+  // com coleta automática) — reordena sempre antes de desenhar.
+  const ordenado = sortHistoryChronologically(history)
+  if (ordenado.length < 2) {
     return <p style={{ color: TEXT3, fontSize: 12 }}>Histórico insuficiente para o gráfico ainda.</p>
   }
   const W = 640
-  const H = 180
-  const PAD = 24
-  const minTs = history[0].ts
-  const maxTs = history[history.length - 1].ts
+  const H = 200
+  const PAD_X = 24
+  const PAD_Y = 28
+  const minTs = ordenado[0].ts
+  const maxTs = ordenado[ordenado.length - 1].ts
   const spanTs = Math.max(1, maxTs - minTs)
-  const x = (ts: number) => PAD + ((ts - minTs) / spanTs) * (W - PAD * 2)
-  const y = (pct: number) => H - PAD - (Math.min(pct, 100) / 100) * (H - PAD * 2)
+  const x = (ts: number) => PAD_X + ((ts - minTs) / spanTs) * (W - PAD_X * 2)
+  // percentUsed já está na escala 0–100 para as duas origens (coletor e
+  // baseline manual) — nunca multiplicar de novo aqui (ver
+  // src/infra/railway/types.ts:HistoryPoint e verifiedBaselines.ts).
+  const y = (pct: number) => H - PAD_Y - (Math.min(pct, 100) / 100) * (H - PAD_Y * 2)
 
-  const linePoints = history.map((h) => `${x(h.ts)},${y(h.percentUsed * 100)}`).join(' ')
-  const refs = [70, 80, 90, 95]
+  const linePoints = ordenado.map((h) => `${x(h.ts)},${y(h.percentUsed)}`).join(' ')
+  const refsAltoParaBaixo = [95, 90, 80, 70]
+  const labelYs = declutterLabelYs(refsAltoParaBaixo.map((r) => y(r) - 3), 11)
 
   return (
     <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Histórico de uso do volume Postgres" style={{ width: '100%', height: 'auto', display: 'block' }}>
-      {refs.map((r) => (
+      {refsAltoParaBaixo.map((r, i) => (
         <g key={r}>
-          <line x1={PAD} x2={W - PAD} y1={y(r)} y2={y(r)} stroke="var(--info-soft)" strokeDasharray="4 4" />
-          <text x={W - PAD} y={y(r) - 3} fontSize={9} fill={TEXT3} textAnchor="end">{r}%</text>
+          <line x1={PAD_X} x2={W - PAD_X} y1={y(r)} y2={y(r)} stroke="var(--info-soft)" strokeDasharray="4 4" />
+          <text x={W - PAD_X} y={labelYs[i]} fontSize={9} fill={TEXT3} textAnchor="end">{r}%</text>
         </g>
       ))}
       <polyline points={linePoints} fill="none" stroke={YELLOW} strokeWidth={2} />
-      {history.map((h, i) => (
-        <circle key={i} cx={x(h.ts)} cy={y(h.percentUsed * 100)} r={h.origin === 'railway-ui-manual' ? 4 : 2.5}
+      {ordenado.map((h, i) => (
+        <circle key={i} cx={x(h.ts)} cy={y(h.percentUsed)} r={h.origin === 'railway-ui-manual' ? 4 : 2.5}
           fill={h.origin === 'railway-ui-manual' ? ORANGE : YELLOW}
           stroke={h.origin === 'railway-ui-manual' ? 'var(--background)' : 'none'} strokeWidth={h.origin === 'railway-ui-manual' ? 1 : 0}>
-          <title>{`${new Date(h.ts).toLocaleString('pt-BR')} · ${(h.percentUsed * 100).toFixed(1)}% · ${fmtBytes(h.usedBytes)}${h.origin === 'railway-ui-manual' ? ' (medição manual verificada)' : ''}`}</title>
+          <title>{`${new Date(h.ts).toLocaleString('pt-BR')} · ${h.percentUsed.toFixed(1)}% · ${fmtBytes(h.usedBytes)}${h.origin === 'railway-ui-manual' ? ' (medição manual verificada)' : ''}`}</title>
         </circle>
       ))}
     </svg>
@@ -226,16 +249,25 @@ function InfraHealthPanelInner() {
   }
 
   const pv = dados.postgresVolume
+  // Esta severidade descreve SÓ o volume Postgres — nunca a infraestrutura
+  // como um todo. Os serviços (Postgres/Evolution/Redis/WhatsApp) têm seu
+  // próprio card, com seu próprio estado, para nunca sugerir uma conclusão
+  // geral que os dados ainda não sustentam.
   const severity = (dados.collector.status === 'never' ? 'never' : pv.severity) as Severity
   const color = SEVERITY_COLOR[severity] ?? TEXT3
   const label = SEVERITY_LABEL[severity] ?? severity
-  const pctDisplay = pv.percentUsed !== null ? (pv.percentUsed * 100) : null
+  // percentUsed já vem em escala 0–100 (ver src/infra/railway/types.ts) —
+  // nunca multiplicar de novo por 100 aqui.
+  const pctDisplay = pv.percentUsed
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={{ width: 10, height: 10, borderRadius: '50%', background: color, boxShadow: `0 0 6px ${color}` }} />
         <h2 style={{ color: TEXT, fontSize: 16, fontWeight: 900, margin: 0 }}>Saúde da Infraestrutura</h2>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ width: 10, height: 10, borderRadius: '50%', background: color, boxShadow: `0 0 6px ${color}` }} />
+        <span style={{ color: TEXT3, fontSize: 11 }}>Volume Postgres:</span>
         <span style={{ color, fontSize: 12, fontWeight: 700 }}>{label}</span>
       </div>
 
@@ -282,15 +314,16 @@ function InfraHealthPanelInner() {
         <p style={{ color: TEXT3, fontSize: 10, margin: '8px 0 0' }}>● coleta automática &nbsp; ◆ medição manual verificada</p>
       </Card>
 
-      <Card title="Serviços">
+      <Card title="Serviços — conectividade (separado da saúde do volume acima)">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <ServiceDot label="Postgres" status={dados.services.postgres} />
           <ServiceDot label="Evolution API" status={dados.services.evolution} />
           <ServiceDot label="Redis" status={dados.services.redis} />
           <ServiceDot label="WhatsApp" status={dados.services.whatsapp.connectionState} />
         </div>
+        <p style={{ color: TEXT3, fontSize: 10, margin: '8px 0 0' }}>&quot;Não monitorado&quot; significa que ainda não há coleta real desse serviço — não é o mesmo que uma falha observada.</p>
         {dados.services.whatsapp.limitation && (
-          <p style={{ color: TEXT3, fontSize: 10, margin: '8px 0 0' }}>{dados.services.whatsapp.limitation}</p>
+          <p style={{ color: TEXT3, fontSize: 10, margin: '4px 0 0' }}>{dados.services.whatsapp.limitation}</p>
         )}
       </Card>
 
