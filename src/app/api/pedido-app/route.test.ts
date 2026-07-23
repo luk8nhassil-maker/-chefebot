@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { store, redisMock, defaultSetImpl, defaultGetImpl } = vi.hoisted(() => {
+const { store, redisMock, defaultSetImpl, defaultGetImpl, defaultEvalImpl } = vi.hoisted(() => {
   const store = new Map<string, unknown>();
   // Respeita semântica NX real (SET NX falha se a chave já existe) — sem
   // isso, um teste de corrida com o mock passaria mesmo com um bug real de
@@ -14,6 +14,45 @@ const { store, redisMock, defaultSetImpl, defaultGetImpl } = vi.hoisted(() => {
     return "OK";
   };
   const defaultGetImpl = async (key: string) => store.get(key) ?? null;
+  // Extraído como função nomeada (mesmo racional do defaultSetImpl acima):
+  // testes que substituem temporariamente o EVAL para simular um cenário
+  // específico (ex.: injetar outro "dono" na chave do claim) conseguem
+  // encaminhar qualquer outra chamada de volta para este comportamento
+  // padrão, em vez de precisar duplicá-lo.
+  const defaultEvalImpl = async (_script: string, keys: string[], args: string[]) => {
+    if (keys.length === 2 && args.length === 3) {
+      const [chaveResultado, chaveToken] = keys;
+      const [registroJson, token] = args;
+      store.set(chaveResultado, JSON.parse(registroJson));
+      store.set(chaveToken, token);
+      return 1;
+    }
+    if (keys.length === 2) {
+      const [chaveToken, chaveResultado] = keys;
+      const [tokenEsperado] = args;
+      const tokenAtual = store.has(chaveToken) ? store.get(chaveToken) : undefined;
+      const resultadoAtual = store.has(chaveResultado) ? store.get(chaveResultado) : undefined;
+      if (tokenAtual === undefined && resultadoAtual === undefined) return "ja_ausente";
+      if (resultadoAtual === undefined) {
+        store.delete(chaveToken);
+        return "ja_ausente";
+      }
+      if (tokenAtual === undefined) return "incerto";
+      if (tokenAtual === tokenEsperado) {
+        store.delete(chaveToken);
+        store.delete(chaveResultado);
+        return "removido";
+      }
+      return "substituido_por_outro";
+    }
+    const [chave] = keys;
+    const [valorEsperado] = args;
+    if (store.get(chave) === valorEsperado) {
+      store.delete(chave);
+      return 1;
+    }
+    return 0;
+  };
   const redisMock = {
     get: vi.fn(defaultGetImpl),
     set: vi.fn(defaultSetImpl),
@@ -39,42 +78,9 @@ const { store, redisMock, defaultSetImpl, defaultGetImpl } = vi.hoisted(() => {
     //   compare-and-delete atômico da chave-token (KEYS[0]) + registro
     //   principal (KEYS[1]), devolvendo
     //   "removido"/"ja_ausente"/"incerto"/"substituido_por_outro".
-    eval: vi.fn(async (_script: string, keys: string[], args: string[]) => {
-      if (keys.length === 2 && args.length === 3) {
-        const [chaveResultado, chaveToken] = keys;
-        const [registroJson, token] = args;
-        store.set(chaveResultado, JSON.parse(registroJson));
-        store.set(chaveToken, token);
-        return 1;
-      }
-      if (keys.length === 2) {
-        const [chaveToken, chaveResultado] = keys;
-        const [tokenEsperado] = args;
-        const tokenAtual = store.has(chaveToken) ? store.get(chaveToken) : undefined;
-        const resultadoAtual = store.has(chaveResultado) ? store.get(chaveResultado) : undefined;
-        if (tokenAtual === undefined && resultadoAtual === undefined) return "ja_ausente";
-        if (resultadoAtual === undefined) {
-          store.delete(chaveToken);
-          return "ja_ausente";
-        }
-        if (tokenAtual === undefined) return "incerto";
-        if (tokenAtual === tokenEsperado) {
-          store.delete(chaveToken);
-          store.delete(chaveResultado);
-          return "removido";
-        }
-        return "substituido_por_outro";
-      }
-      const [chave] = keys;
-      const [valorEsperado] = args;
-      if (store.get(chave) === valorEsperado) {
-        store.delete(chave);
-        return 1;
-      }
-      return 0;
-    }),
+    eval: vi.fn(defaultEvalImpl),
   };
-  return { store, redisMock, defaultSetImpl, defaultGetImpl };
+  return { store, redisMock, defaultSetImpl, defaultGetImpl, defaultEvalImpl };
 });
 
 const { criarCobrancaPixMercadoPagoMock } = vi.hoisted(() => ({
@@ -85,9 +91,18 @@ vi.mock("@/lib/redis", () => ({ redis: redisMock }));
 vi.mock("@/lib/mercadoPagoPix", () => ({
   criarCobrancaPixMercadoPago: criarCobrancaPixMercadoPagoMock,
 }));
+// `gerarPedidoIdUnico` real (timestamp + entropia) é mantido por padrão —
+// só um teste específico (colisão de identidade na reconciliação) força um
+// valor determinístico via mockReturnValueOnce, para simular duas
+// tentativas concorrentes que por algum motivo compartilham o mesmo id.
+vi.mock("@/lib/pedidosStore", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/pedidosStore")>();
+  return { ...actual, gerarPedidoIdUnico: vi.fn(actual.gerarPedidoIdUnico) };
+});
 
 import { POST } from "./route";
 import { encryptMercadoPagoToken } from "@/lib/mercadoPagoIntegracao";
+import { gerarPedidoIdUnico } from "@/lib/pedidosStore";
 
 function postReq(body: unknown) {
   return {
@@ -119,6 +134,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   redisMock.set.mockImplementation(defaultSetImpl);
   redisMock.get.mockImplementation(defaultGetImpl);
+  redisMock.eval.mockImplementation(defaultEvalImpl);
   vi.unstubAllEnvs();
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) }));
   criarCobrancaPixMercadoPagoMock.mockResolvedValue({
@@ -878,14 +894,23 @@ describe("POST /api/pedido-app — idempotência (Modo Sobrevivência)", () => {
       // simula que OUTRA execução (TTL já expirado) reivindicou a mesma
       // chave com um ownerToken diferente — o compare-and-delete real,
       // rodando contra o Redis de verdade, veria exatamente essa foto.
+      // Intercepta SÓ o EVAL da chave do claim (por chave, não por ordem):
+      // o PR de concorrência da chave "pedidos" introduziu um EVAL PRÓPRIO
+      // (liberação do lock global de src/lib/pedidosStore.ts) que roda
+      // ANTES deste, e precisa continuar passando pelo dispatch padrão do
+      // mock (compare-and-delete genérico), nunca ser interceptado aqui.
       const valorNovoDono = "novo-dono-token::" + "f".repeat(64);
-      redisMock.eval.mockImplementationOnce(async (_script: string, keys: string[], args: string[]) => {
-        store.set(keys[0], valorNovoDono);
-        if (store.get(keys[0]) === args[0]) {
-          store.delete(keys[0]);
-          return 1;
+      const chaveClaimAlvo = chaveClaim(clientRequestId);
+      redisMock.eval.mockImplementation(async (script: string, keys: string[], args: string[]) => {
+        if (keys[0] === chaveClaimAlvo) {
+          store.set(keys[0], valorNovoDono);
+          if (store.get(keys[0]) === args[0]) {
+            store.delete(keys[0]);
+            return 1;
+          }
+          return 0;
         }
-        return 0;
+        return defaultEvalImpl(script, keys, args);
       });
 
       const res = await POST(postReq({ ...basePayload, clientRequestId }));
@@ -1346,31 +1371,30 @@ describe("POST /api/pedido-app — idempotência (Modo Sobrevivência)", () => {
     it("dois pedidos com o MESMO pedidoId mas identidades DIFERENTES: reconciliação nunca vaza dados do pedido alheio, devolve 503", async () => {
       vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
 
-      const dateNowSpy = vi.spyOn(Date, "now").mockReturnValue(1732000000123);
+      // Força as duas tentativas a competirem pelo MESMO pedidoId — na
+      // prática `gerarPedidoIdUnico()` (timestamp + entropia criptográfica,
+      // ver src/lib/pedidosStore.ts) nunca colide de verdade; este mock
+      // simula deliberadamente essa colisão para provar que a reconciliação
+      // NUNCA confia só no id, mesmo no caso teoricamente impossível dele
+      // se repetir.
+      const PEDIDO_ID_COLISAO = "1732000000123colisao";
+      vi.mocked(gerarPedidoIdUnico).mockReturnValue(PEDIDO_ID_COLISAO);
       try {
         // Pedido A: criado normalmente com clientRequestId A, ocupando o
-        // pedidoId "1732000000123".
+        // pedidoId colidido.
         const clientRequestIdA = "colisao-pedidoid-identidade-A";
         const resA = await POST(postReq({ ...basePayload, clientRequestId: clientRequestIdA }));
         expect(resA.status).toBe(200);
         const bodyA = await resA.json();
-        expect(bodyA.pedidoId).toBe("1732000000123");
+        expect(bodyA.pedidoId).toBe(PEDIDO_ID_COLISAO);
         expect(bodyA.numero).toBeDefined();
 
-        // Tentativa B: MESMO Date.now() (mesmo pedidoId candidato), CLIENT
-        // REQUEST ID DIFERENTE — a persistência de "pedidos" lança (resposta
-        // perdida do ponto de vista do cliente), forçando a reconciliação a
-        // olhar para o pedido já existente com o MESMO id (o da tentativa A).
+        // Tentativa B: MESMO pedidoId (forçado pelo mock acima), CLIENT
+        // REQUEST ID DIFERENTE — `adicionarPedidoAtomico` já detecta
+        // `id_ja_existe` antes mesmo de tentar o SET, forçando a
+        // reconciliação a olhar para o pedido já existente com o MESMO id
+        // (o da tentativa A).
         const clientRequestIdB = "colisao-pedidoid-identidade-B";
-        let jaFalhouSet = false;
-        redisMock.set.mockImplementation(async (key: string, value: unknown, opts?: { nx?: boolean }) => {
-          if (key === "pedidos" && !jaFalhouSet && Array.isArray(value) && (value as unknown[]).length === 2) {
-            jaFalhouSet = true;
-            throw new Error("falha simulada ao persistir pedido (tentativa B)");
-          }
-          return defaultSetImpl(key, value, opts);
-        });
-
         const resB = await POST(postReq({ ...basePayload, clientRequestId: clientRequestIdB }));
         // Identidade (hash/fingerprint) diverge do pedido encontrado com o
         // mesmo id — NUNCA reconstrói sucesso com os dados do pedido A, NUNCA
@@ -1387,9 +1411,9 @@ describe("POST /api/pedido-app — idempotência (Modo Sobrevivência)", () => {
         // nem o remove por causa da tentativa B.
         const pedidos = store.get("pedidos") as Array<{ id: string; survivalClientRequestIdHash?: string }>;
         expect(pedidos).toHaveLength(1);
-        expect(pedidos[0].id).toBe("1732000000123");
+        expect(pedidos[0].id).toBe(PEDIDO_ID_COLISAO);
       } finally {
-        dateNowSpy.mockRestore();
+        vi.mocked(gerarPedidoIdUnico).mockRestore();
       }
     });
   });
