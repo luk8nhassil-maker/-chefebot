@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { redis } from '@/lib/redis'
 import { verifyToken } from '@/lib/auth'
+import { mutarLotePedidosAtomico } from '@/lib/pedidosStore'
 
 const FRASE_CONFIRMACAO = 'RESETAR CHEFEBOT'
 
@@ -42,7 +43,7 @@ export async function POST(req: NextRequest) {
   }
 
   // Reset: apenas dados operacionais
-  await redis.del('pedidos')
+  await mutarLotePedidosAtomico(() => [])
   const nSessoes = await deletarPorPadrao('session:*')
   const nManuais = await deletarPorPadrao('manual:*')
   const nResolvendo = await deletarPorPadrao('resolvendo:*')

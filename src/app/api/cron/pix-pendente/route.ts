@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { redis } from "@/lib/redis";
 import { obterConfigEvolution } from "@/lib/evolutionApi";
+import { mutarPedidoPorIdAtomico } from "@/lib/pedidosStore";
+
+type PedidoEscalavel = { id: string; telefone: string; status: string; escalonado?: boolean; cancelamentoSolicitado?: boolean; [key: string]: unknown };
 
 async function enviarMensagem(phone: string, text: string) {
   const config = obterConfigEvolution();
@@ -41,11 +44,15 @@ export async function GET(req: Request) {
         const pedidoAtivo = pedidos.find(p => p.telefone === phone && p.status === "novo" && !p.escalonado);
 
         if (pedidoAtivo) {
-          // Marca como escalado
-          const pedidosAtualizados = pedidos.map(p =>
-            p.id === pedidoAtivo.id ? { ...p, escalonado: true, cancelamentoSolicitado: false } : p
+          // Marca como escalado — revalida fresco dentro do lock (o mutator
+          // só aplica a marcação se as mesmas condições ainda forem
+          // verdadeiras, evitando escalar um pedido que mudou de status
+          // entre a busca acima e esta mutação).
+          await mutarPedidoPorIdAtomico<PedidoEscalavel>(pedidoAtivo.id, (fresco) =>
+            fresco.status === "novo" && !fresco.escalonado
+              ? { ...fresco, escalonado: true, cancelamentoSolicitado: false }
+              : fresco
           );
-          await redis.set("pedidos", pedidosAtualizados);
         }
 
         await enviarMensagem(phone, `⏰ Ei! Seu pedido está aguardando o comprovante do Pix.\n\nNossa equipe vai entrar em contato para te ajudar. 😊`);
