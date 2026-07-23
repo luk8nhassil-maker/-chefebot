@@ -4,6 +4,7 @@ import { buscarPagamentoMercadoPagoDetalhado, mapearStatusMercadoPago } from "./
 import { enviarTextoWhatsApp } from "./whatsappMensagem";
 import type { PedidoComPix } from "./pix";
 import { incrementarContadorPix } from "./pixMetricas";
+import { executarComLockPedidos } from "./pedidosStore";
 
 // Conciliador manual/sob-demanda do Pix Mercado Pago (Nivel 6.2A) — usado
 // enquanto nao ha webhook configurado no painel MP. Consulta a API do MP pelo
@@ -443,22 +444,37 @@ export async function reconciliarPixMercadoPago(opts?: ReconciliarPixOpts): Prom
     // confirmação manual gravaram nesse meio-tempo), relê o estado mais
     // recente e aplica só o patch dos pedidos que ESTA rodada confirmou —
     // e, mesmo assim, nunca sobre um pedido que essa releitura já mostra
-    // confirmado por outro caminho ("primeira confirmação vence").
+    // confirmado por outro caminho ("primeira confirmação vence"). A
+    // releitura+merge+escrita roda dentro do MESMO lock global do módulo
+    // central (pedidosStore) — fecha a última janela de corrida: sem o
+    // lock, outro writer (painel, WhatsApp) ainda podia gravar entre esta
+    // releitura e este SET e ser sobrescrito por este merge.
     let resultadoFinal = atualizados;
     if (mudou) {
-      const maisRecente = (await redis.get<PedidoReconciliavel[]>("pedidos")) || atualizados;
       const idsComDuplicidadeEvitada: string[] = [];
-      resultadoFinal = maisRecente.map((p) => {
-        const id = p.id as string;
-        if (!idsConfirmadosNestaRodada.has(id)) return p;
-        if (p.pixConfirmado === true || p.pix?.status === "confirmado") {
-          idsComDuplicidadeEvitada.push(id);
-          return p;
-        }
-        const patch = atualizados.find((a) => a.id === id);
-        return patch || p;
+      const resultadoLock = await executarComLockPedidos(async () => {
+        const maisRecente = (await redis.get<PedidoReconciliavel[]>("pedidos")) || atualizados;
+        const mesclado = maisRecente.map((p) => {
+          const id = p.id as string;
+          if (!idsConfirmadosNestaRodada.has(id)) return p;
+          if (p.pixConfirmado === true || p.pix?.status === "confirmado") {
+            idsComDuplicidadeEvitada.push(id);
+            return p;
+          }
+          const patch = atualizados.find((a) => a.id === id);
+          return patch || p;
+        });
+        await redis.set("pedidos", mesclado);
+        return mesclado;
       });
-      await redis.set("pedidos", resultadoFinal);
+      if (resultadoLock.tipo !== "sucesso") {
+        // Nunca finge sucesso: sem o lock, a confirmação já contada em
+        // `resumo` não foi persistida. Propaga em vez de devolver um resumo
+        // que alegaria "confirmado" sem gravação — mesma postura de antes
+        // (um SET que lançasse aqui também propagava sem esta função tratar).
+        throw new Error("reconciliacao_pix_lock_pedidos_indisponivel");
+      }
+      resultadoFinal = resultadoLock.valor;
       await Promise.all(idsComDuplicidadeEvitada.map(() => incrementarContadorPix("duplicidade_evitada")));
     }
 
