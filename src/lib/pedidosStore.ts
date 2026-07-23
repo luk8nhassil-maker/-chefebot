@@ -194,6 +194,28 @@ function fingerprintArrayPorId<P extends PedidoComRevisao>(pedidos: P[]): string
   return JSON.stringify(ordenado);
 }
 
+export type ResultadoReconciliacaoEscritaCercada = "confirmado" | "escrita_incerta";
+
+/** Reconciliação forte para chamadores DIRETOS de `escreverPedidosCercado`
+ * (fora das operações nomeadas deste módulo, que já reconciliam
+ * internamente) — achado MÉDIO da revisão externa do PR #252: um EVAL que
+ * lança (rede/timeout) NUNCA deve ser tratado como falha sem antes reler o
+ * estado fresco. Compara o array completo esperado (fingerprint canônico,
+ * ordenado por id — mesma técnica de `mutarLotePedidosAtomico`) contra o que
+ * está persistido: só "confirmado" quando bater EXATAMENTE; qualquer
+ * divergência, ausência de confirmação ou nova falha de leitura vira
+ * `escrita_incerta` — nunca finge sucesso, nunca repete a mutação
+ * cegamente. Uso: `catch` de uma chamada direta a `escreverPedidosCercado`,
+ * passando o MESMO array que se tentou gravar. */
+export async function reconciliarEscritaCercadaPedidos<P extends PedidoComRevisao>(
+  esperado: P[]
+): Promise<ResultadoReconciliacaoEscritaCercada> {
+  const reconciliacao = await reconciliarEscritaPedidos<P>((atuais) =>
+    fingerprintArrayPorId(atuais) === fingerprintArrayPorId(esperado) ? "confirmado" : "inconsistente"
+  );
+  return reconciliacao === "confirmado" ? "confirmado" : "escrita_incerta";
+}
+
 export type ResultadoAdicionar<P> =
   | { tipo: "sucesso"; pedido: P }
   | { tipo: "id_ja_existe" }

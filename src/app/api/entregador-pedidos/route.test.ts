@@ -8,11 +8,13 @@ const { store, redisMock, authMock, pontosMock } = vi.hoisted(() => {
     redisMock: {
       get: vi.fn(async (key: string) => store.get(key) ?? null),
       set: vi.fn(async (key: string, value: unknown) => { store.set(key, value); return "OK"; }),
-      // Dois scripts: compare-and-delete do lock global (1 key — liberação
+      // Três scripts: compare-and-delete do lock global (1 key — liberação
       // de pedidosStore.ts, roda para TODA chamada que passa pelo lock,
-      // inclusive as que retornam cedo por 403/409 sem escrever nada) e
-      // ENTREGAR_LUA (3 keys: [lockKey, "pedidos", filaKey] — cercado pelo
-      // token do lock, ver src/app/api/entregador-pedidos/route.ts).
+      // inclusive as que retornam cedo por 403/409 sem escrever nada),
+      // INICIAR_LUA (2 keys: [lockKey, filaKey] — cercado pelo token do
+      // lock, ação "iniciar") e ENTREGAR_LUA (3 keys: [lockKey, "pedidos",
+      // filaKey] — cercado pelo token do lock, ação "entregar"). Ver
+      // src/app/api/entregador-pedidos/route.ts.
       eval: vi.fn(async (_script: string, keys: string[], args: string[]) => {
         if (keys.length === 1) {
           const [key] = keys;
@@ -22,6 +24,13 @@ const { store, redisMock, authMock, pontosMock } = vi.hoisted(() => {
             return 1;
           }
           return 0;
+        }
+        if (keys.length === 2) {
+          const [lockKey, filaKey] = keys;
+          const [token, filaJson] = args;
+          if (store.get(lockKey) !== token) return "lock_perdido";
+          store.set(filaKey, JSON.parse(filaJson));
+          return 1;
         }
         const [lockKey, pedidosKey, filaKey] = keys;
         const [token, principaisJson, filaJson] = args;
@@ -128,6 +137,29 @@ describe("POST /api/entregador-pedidos", () => {
     expect(res.status).toBe(200);
     expect((store.get("entregador:pedidos:ent-a") as Array<{ status: string }>)[0].status).toBe("em_rota");
     expect(store.has("entregador:pedidos:ent-b")).toBe(false);
+  });
+
+  it("FENCING: iniciar com lock perdido no instante da escrita é recusado (409), fila permanece intacta", async () => {
+    // Achado MÉDIO da revisão externa do PR #252: antes da correção, a ação
+    // "iniciar" gravava a fila do entregador com um `redis.set` direto,
+    // mesmo dentro do lock global — sem validar atomicamente que o token
+    // ainda era dono do lock NO INSTANTE da escrita. Simula exatamente essa
+    // janela: por qualquer motivo (TTL expirado, outra execução já
+    // adquiriu um lock novo), o EVAL de fencing (2 keys: [lockKey, filaKey])
+    // recusa a escrita em vez de sobrescrever uma atribuição mais nova.
+    store.set("entregador:pedidos:ent-a", [pedidoFila("pendente")]);
+    store.set("pedidos", [pedidoMain()]);
+
+    redisMock.eval.mockImplementationOnce(async (_script: string, keys: string[]) => {
+      expect(keys).toHaveLength(2); // confirma que é a escrita de "iniciar", não outro EVAL
+      return "lock_perdido";
+    });
+
+    const res = await POST(postRequest({ pedidoId: "ped-1", acao: "iniciar" }));
+    expect(res.status).toBe(409);
+    // A fila NUNCA foi sobrescrita com "em_rota" — permanece exatamente como
+    // estava antes da tentativa recusada, nunca ambígua.
+    expect(store.get("entregador:pedidos:ent-a")).toEqual([pedidoFila("pendente")]);
   });
 
   it("A não altera pedido atribuído a B e nenhuma escrita ocorre", async () => {

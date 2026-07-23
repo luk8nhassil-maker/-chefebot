@@ -4,7 +4,14 @@ import { NextRequest } from "next/server";
 const redisStore = new Map<string, unknown>();
 
 function defaultGetImpl(key: string) {
-  return Promise.resolve(redisStore.has(key) ? redisStore.get(key) : null);
+  const valor = redisStore.has(key) ? redisStore.get(key) : null;
+  // Clona via JSON round-trip — como o Redis real, que sempre desserializa
+  // um payload novo a cada GET — para nunca devolver a mesma referência de
+  // objeto armazenada. Sem isso, uma mutação local em memória (ex.:
+  // `pedidos[index] = {...}`) vazaria silenciosamente para o "estado
+  // persistido" do mock mesmo quando a escrita real nunca aconteceu,
+  // mascarando os testes de reconciliação após timeout (mais abaixo).
+  return Promise.resolve(valor === null ? null : JSON.parse(JSON.stringify(valor)));
 }
 function defaultSetImpl(key: string, value: unknown, opts?: { nx?: boolean }) {
   if (opts?.nx && redisStore.has(key)) return Promise.resolve(null);
@@ -56,6 +63,7 @@ vi.mock("@/lib/auth", async () => {
 vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({}) })));
 
 import { PATCH, GET } from "./route";
+import { redis } from "@/lib/redis";
 
 function seedPedido(overrides: Record<string, unknown> = {}) {
   const pedido = {
@@ -140,6 +148,46 @@ describe("PATCH /api/orders — bloqueio durante edição do cliente", () => {
     expect(res.status).toBe(200);
     const pedidos = redisStore.get("pedidos") as Array<Record<string, unknown>>;
     expect(pedidos[0].status).toBe("em_preparo");
+  });
+});
+
+describe("PATCH /api/orders — reconciliação após exceção de rede na escrita cercada (achado MÉDIO da revisão externa do PR #252)", () => {
+  test("EVAL lança (timeout), mas a escrita foi de fato aplicada: reconciliação confirma sucesso (nunca finge falha)", async () => {
+    seedPedido();
+
+    // Simula um EVAL que realmente aplica a escrita no Redis (efeito real
+    // aconteceu do lado do servidor), mas cuja resposta ao cliente sofreu
+    // timeout — exatamente o cenário que a reconciliação existe para tratar.
+    vi.mocked(redis.eval).mockImplementationOnce(async (script: string, keys: string[], args: unknown[]) => {
+      await defaultEvalImpl(script, keys, args as string[]);
+      throw new Error("ECONNRESET");
+    });
+
+    const res = await PATCH(patchRequest({ id: "ped_edicao_1", status: "em_preparo", silent: true }));
+    expect(res.status).toBe(200);
+    const pedidos = redisStore.get("pedidos") as Array<Record<string, unknown>>;
+    expect(pedidos[0].status).toBe("em_preparo");
+  });
+
+  test("EVAL lança (timeout) e a releitura mostra estado divergente: nunca finge sucesso, retorna erro explícito de escrita incerta", async () => {
+    seedPedido();
+
+    // Simula um EVAL que lança SEM aplicar a escrita (falha real, ou
+    // aplicada por outra tentativa concorrente com conteúdo diferente) — a
+    // releitura de reconciliação nunca bate com o que se esperava gravar.
+    vi.mocked(redis.eval).mockImplementationOnce(async () => {
+      throw new Error("ECONNRESET");
+    });
+
+    const res = await PATCH(patchRequest({ id: "ped_edicao_1", status: "em_preparo", silent: true }));
+    expect(res.status).toBe(503);
+    const body = await res.json();
+    expect(body.error).toMatch(/não foi possível confirmar/i);
+    // Estado nunca mudou: nem o status foi promovido a "em_preparo" (a
+    // escrita nunca foi confirmada), nem uma segunda tentativa cega foi
+    // aplicada por cima.
+    const pedidos = redisStore.get("pedidos") as Array<Record<string, unknown>>;
+    expect(pedidos[0].status).toBe("novo");
   });
 });
 

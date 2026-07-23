@@ -29,12 +29,20 @@ const ALLOWLIST_ESCAPE_HATCH = new Set([
   "src/app/api/entregador-pedidos/route.ts",
 ]);
 
+// Referência à chave "pedidos" — literal entre aspas OU o identificador
+// `PEDIDOS_KEY` importado de pedidosStore.ts (achado BAIXO da revisão
+// externa do PR #252: `PEDIDOS_KEY` é exportado, então `redis.set(PEDIDOS_KEY,
+// novosPedidos)` escrevia a chave sem passar pelo detector, que só reconhecia
+// o literal `"pedidos"`). Qualquer chamada de escrita usando o identificador
+// é tão perigosa quanto usar o literal — mesmo padrão de detecção para os dois.
+const REF_CHAVE_PEDIDOS = `(?:['"]pedidos['"]|PEDIDOS_KEY\\b)`;
+
 // Escrita "crua" legada — SET/DEL direto por fora de qualquer fencing.
 // Depois do fencing real (ver FENCING em pedidosStore.ts), nenhum arquivo
 // (nem os da allowlist) deveria mais bater neste padrão — toda escrita passa
 // por `escreverPedidosCercado` (uma chave) ou por um EVAL multichave que
 // verifica a posse do lock na MESMA operação (ver PADRAO_EVAL_MULTICHAVE_PEDIDOS).
-const PADRAO_ESCRITA_PEDIDOS = /redis\.(set|del)\(\s*['"]pedidos['"]/;
+const PADRAO_ESCRITA_PEDIDOS = new RegExp(`redis\\.(set|del)\\(\\s*${REF_CHAVE_PEDIDOS}`);
 
 // EVAL multichave que grava "pedidos" junto com outra(s) chave(s) (ex.:
 // atribuição de entregador com fila, transição "entregue" no app do
@@ -42,15 +50,18 @@ const PADRAO_ESCRITA_PEDIDOS = /redis\.(set|del)\(\s*['"]pedidos['"]/;
 // próprio script Lua (ver `if redis.call("get", KEYS[1]) ~= ARGV[1] then
 // return "lock_perdido" end` nos arquivos allowlistados). `[\s\S]*?` cobre o
 // script Lua multilinha entre `redis.eval(` e o array de KEYS.
-const PADRAO_EVAL_MULTICHAVE_PEDIDOS = /redis\.eval\([\s\S]*?\[[^\]]*['"]pedidos['"][^\]]*\]/;
+const PADRAO_EVAL_MULTICHAVE_PEDIDOS = new RegExp(
+  `redis\\.eval\\([\\s\\S]*?\\[[^\\]]*${REF_CHAVE_PEDIDOS}[^\\]]*\\]`
+);
 
 // pipeline()/multi() do cliente Redis (usado hoje só para telemetria própria,
 // nunca para "pedidos") — detecta `.set`/`.del`/`.hset` etc. encadeados num
-// pipeline/multi que gravem "pedidos" literal, e a própria criação de um
-// pipeline/multi cujo encadeamento (`[\s\S]*?`, até `.exec()`) contenha o
-// literal "pedidos" em qualquer chamada de método.
-const PADRAO_PIPELINE_MULTI_PEDIDOS =
-  /\.(pipeline|multi)\(\)[\s\S]*?\.(set|del|hset|hdel|lpush|rpush)\(\s*['"]pedidos['"]/;
+// pipeline/multi que gravem "pedidos" (literal ou via `PEDIDOS_KEY`), e a
+// própria criação de um pipeline/multi cujo encadeamento (`[\s\S]*?`, até
+// `.exec()`) contenha essa referência em qualquer chamada de método.
+const PADRAO_PIPELINE_MULTI_PEDIDOS = new RegExp(
+  `\\.(pipeline|multi)\\(\\)[\\s\\S]*?\\.(set|del|hset|hdel|lpush|rpush)\\(\\s*${REF_CHAVE_PEDIDOS}`
+);
 
 function escreveForaDoModuloCentral(conteudo: string): boolean {
   return (
@@ -139,5 +150,24 @@ describe("Arquitetura: mutação da chave Redis 'pedidos' só pode passar por sr
     expect(escreveForaDoModuloCentral(violacaoPipeline)).toBe(true);
     expect(escreveForaDoModuloCentral(violacaoMulti)).toBe(true);
     expect(escreveForaDoModuloCentral(pipelineLegitimo)).toBe(false);
+  });
+
+  test("negativo: o detector pega escrita usando o identificador PEDIDOS_KEY (não só o literal \"pedidos\")", () => {
+    // Achado BAIXO da revisão externa do PR #252: PEDIDOS_KEY é exportado por
+    // pedidosStore.ts — um writer futuro poderia importar a constante e
+    // escrever `redis.set(PEDIDOS_KEY, ...)` sem nunca escrever o literal
+    // "pedidos", escapando do detector anterior (que só reconhecia o literal
+    // entre aspas).
+    const violacaoSetComConstante = `await redis.set(PEDIDOS_KEY, novosPedidos)`;
+    const violacaoDelComConstante = `await redis.del(PEDIDOS_KEY)`;
+    const violacaoEvalMultichaveComConstante = `await redis.eval(\n  SCRIPT,\n  [LOCK_KEY, PEDIDOS_KEY],\n  [token, valor]\n)`;
+    const violacaoPipelineComConstante = `const p = redis.pipeline()\np.set(PEDIDOS_KEY, novosPedidos)\nawait p.exec()`;
+    const leituraComConstanteNuncaEViolacao = `await redis.get(PEDIDOS_KEY)`;
+
+    expect(escreveForaDoModuloCentral(violacaoSetComConstante)).toBe(true);
+    expect(escreveForaDoModuloCentral(violacaoDelComConstante)).toBe(true);
+    expect(escreveForaDoModuloCentral(violacaoEvalMultichaveComConstante)).toBe(true);
+    expect(escreveForaDoModuloCentral(violacaoPipelineComConstante)).toBe(true);
+    expect(escreveForaDoModuloCentral(leituraComConstanteNuncaEViolacao)).toBe(false);
   });
 });

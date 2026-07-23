@@ -8,6 +8,7 @@ import {
   gerarPedidoIdUnico,
   LOCK_KEY as PEDIDOS_LOCK_KEY,
   mutarLotePedidosAtomico,
+  reconciliarEscritaCercadaPedidos,
   removerPedidoAtomico,
 } from '@/lib/pedidosStore'
 import { proximoNumeroPedido } from '@/lib/numeracao'
@@ -306,6 +307,17 @@ export async function PATCH(req: NextRequest) {
       { error: 'Não foi possível atualizar agora. Tente de novo.' },
       { status: 409 }
     )
+    // Achado MÉDIO da revisão externa do PR #252: se o EVAL de
+    // `escreverPedidosCercado` lançar (rede/timeout), NUNCA assume falha —
+    // relê o estado fresco e compara pelo fingerprint canônico do array
+    // completo esperado (mesma técnica de `mutarLotePedidosAtomico`). Só
+    // "confirmado" quando bater exatamente; qualquer divergência/incerteza
+    // vira este erro explícito — nunca finge sucesso, nunca repete a
+    // mutação cegamente.
+    const escritaIncertaResponse = () => NextResponse.json(
+      { error: 'Não foi possível confirmar a atualização. Tente de novo.' },
+      { status: 503 }
+    )
 
     const resultadoLock = await executarComLockPedidos<ResultadoPatchInterno>(async (token) => {
       const pedidos = await getPedidos()
@@ -330,8 +342,13 @@ export async function PATCH(req: NextRequest) {
           // Cercado (fenced) pelo token do lock: se o lock já expirou nesse
           // meio-tempo, esta escrita best-effort de limpeza é recusada em vez
           // de sobrescrever o que outra execução já gravou.
-          const escrita = await escreverPedidosCercado(token, pedidos)
-          if (escrita === 'lock_perdido') return { ok: false, response: lockPerdidoResponse() }
+          try {
+            const escrita = await escreverPedidosCercado(token, pedidos)
+            if (escrita === 'lock_perdido') return { ok: false, response: lockPerdidoResponse() }
+          } catch {
+            const reconciliacao = await reconciliarEscritaCercadaPedidos(pedidos)
+            if (reconciliacao !== 'confirmado') return { ok: false, response: escritaIncertaResponse() }
+          }
         }
         return {
           ok: false,
@@ -384,8 +401,13 @@ export async function PATCH(req: NextRequest) {
         )
         if (resultadoAtribuicao === 'lock_perdido') return { ok: false, response: lockPerdidoResponse() }
       } else {
-        const escrita = await escreverPedidosCercado(token, pedidos)
-        if (escrita === 'lock_perdido') return { ok: false, response: lockPerdidoResponse() }
+        try {
+          const escrita = await escreverPedidosCercado(token, pedidos)
+          if (escrita === 'lock_perdido') return { ok: false, response: lockPerdidoResponse() }
+        } catch {
+          const reconciliacao = await reconciliarEscritaCercadaPedidos(pedidos)
+          if (reconciliacao !== 'confirmado') return { ok: false, response: escritaIncertaResponse() }
+        }
       }
 
       return { ok: true, pedidos, index, statusAnterior, entregadorCanonico }

@@ -41,6 +41,23 @@ redis.call("SET", KEYS[3], ARGV[3], "EX", 86400)
 return 1
 `;
 
+// FENCING (achado MÉDIO da revisão externa do PR #252): a ação "iniciar"
+// grava só a fila do entregador (nunca "pedidos"), mas antes desta correção
+// usava um `redis.set` direto — mesmo dentro de `executarComLockPedidos`,
+// nada validava que o token ainda era dono do lock NO INSTANTE da escrita.
+// Uma execução cujo lock já tivesse expirado (GC pause, rede lenta) podia
+// sobrescrever, com uma fila obtida antes de perder o lock, uma atribuição
+// mais nova gravada nesse meio-tempo por `salvarAtribuicaoComFilas`
+// (orders/route.ts) na MESMA `filaKey`. Mesmo padrão de fencing do restante
+// do módulo: GET do dono do lock + SET na MESMA operação Lua.
+const INICIAR_LUA = `
+if redis.call("get", KEYS[1]) ~= ARGV[1] then
+  return "lock_perdido"
+end
+redis.call("SET", KEYS[2], ARGV[2], "EX", 86400)
+return 1
+`;
+
 export async function GET(req: NextRequest) {
   try {
     const auth = await autenticarEntregador(req);
@@ -124,7 +141,17 @@ export async function POST(req: NextRequest) {
         }
         const atualizados = [...fila];
         atualizados[indexFila] = { ...pedidoFila, status: "em_rota" };
-        await redis.set(filaKey, atualizados, { ex: 86400 });
+        // Cercado (fenced) pelo token do lock — se o lock já expirou nesse
+        // meio-tempo, a escrita é recusada em vez de sobrescrever uma
+        // atribuição mais nova gravada na mesma fila por outra execução.
+        const resultadoIniciar = await redis.eval(
+          INICIAR_LUA,
+          [PEDIDOS_LOCK_KEY, filaKey],
+          [token, JSON.stringify(atualizados)]
+        );
+        if (resultadoIniciar === "lock_perdido") {
+          return { ok: false, status: 409, error: "Não foi possível atualizar agora. Tente de novo." };
+        }
         return { ok: true, pedido: atualizados[indexFila] };
       }
 
