@@ -13,12 +13,32 @@ const { store, redisMock } = vi.hoisted(() => {
   const store = new Map<string, unknown>();
   const redisMock = {
     get: vi.fn(async (key: string) => (store.has(key) ? store.get(key) : null)),
-    set: vi.fn(async (key: string, value: unknown) => {
+    set: vi.fn(async (key: string, value: unknown, opts?: { nx?: boolean }) => {
+      if (opts?.nx && store.has(key)) return null;
       store.set(key, value);
       return "OK";
     }),
     del: vi.fn(async (key: string) => (store.delete(key) ? 1 : 0)),
     keys: vi.fn(async () => []),
+    // Dois scripts do lock global de pedidosStore.ts: compare-and-delete (1
+    // key, libera o lock) e a escrita cercada de "pedidos" via
+    // escreverPedidosCercado (2 keys: lock + "pedidos").
+    eval: vi.fn(async (_script: string, keys: string[], args: string[]) => {
+      if (keys.length >= 2) {
+        const [lockKey, pedidosKey] = keys;
+        const [token, jsonValor] = args;
+        if (store.get(lockKey) !== token) return 0;
+        store.set(pedidosKey, JSON.parse(jsonValor));
+        return 1;
+      }
+      const [key] = keys;
+      const [token] = args;
+      if (store.get(key) === token) {
+        store.delete(key);
+        return 1;
+      }
+      return 0;
+    }),
   };
   return { store, redisMock };
 });

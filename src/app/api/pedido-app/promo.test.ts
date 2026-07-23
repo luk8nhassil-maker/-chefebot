@@ -26,6 +26,15 @@ const { store, redisMock } = vi.hoisted(() => {
         store.set(chaveToken, token);
         return 1;
       }
+      if (keys.length === 2 && args.length === 2) {
+        // Escrita cercada de "pedidos" (escreverPedidosCercado,
+        // pedidosStore.ts): [lockKey, "pedidos"], [token, jsonValor].
+        const [lockKey, pedidosKey] = keys;
+        const [token, jsonValor] = args;
+        if (store.get(lockKey) !== token) return 0;
+        store.set(pedidosKey, JSON.parse(jsonValor));
+        return 1;
+      }
       if (keys.length === 2) {
         const [chaveToken, chaveResultado] = keys;
         const [tokenEsperado] = args;
@@ -251,14 +260,15 @@ function restaurarSetPadrao() {
 
 function falharPersistenciaUmaVez() {
   let jaFalhou = false;
-  redisMock.set.mockImplementation(async (key: string, value: unknown, opts?: { nx?: boolean }) => {
-    if (key === "pedidos" && !jaFalhou && Array.isArray(value)) {
+  const originalEval = redisMock.eval.getMockImplementation()!;
+  // Persistência de "pedidos" agora é escreverPedidosCercado (EVAL,
+  // [lockKey, "pedidos"], [token, jsonValor]).
+  redisMock.eval.mockImplementation(async (script: string, keys: string[], args: string[]) => {
+    if (keys.length === 2 && args.length === 2 && keys[1] === "pedidos" && !jaFalhou) {
       jaFalhou = true;
       throw new Error("falha simulada ao persistir pedido (resposta perdida antes da escrita)");
     }
-    if (opts?.nx && store.has(key)) return null;
-    store.set(key, value);
-    return "OK";
+    return originalEval(script, keys, args);
   });
 }
 

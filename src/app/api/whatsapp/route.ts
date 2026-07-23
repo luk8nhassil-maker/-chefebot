@@ -3,6 +3,12 @@ import { processMessage, createInitialSession, createReturningSession, montarSau
 import { criarOuReutilizarTokenCardapio, anexarTokenAoLinkCardapio } from "@/lib/cardapioToken";
 import { getMENUDinamico } from "@/lib/menu";
 import { redis } from "@/lib/redis";
+import {
+  adicionarPedidoAtomico,
+  gerarPedidoIdUnico,
+  mutarLotePedidosAtomico,
+  mutarPedidoPorIdAtomico,
+} from "@/lib/pedidosStore";
 import { interpretarMensagem, gerarRespostaGuardiao } from "@/lib/claude";
 import { registrarMensagem, ultimasMensagensRelevantes } from "@/lib/conversa";
 import { atualizarRascunhoAtendimentoTempoReal } from "@/lib/rascunhoAtendimentoTempoReal";
@@ -162,7 +168,6 @@ type PedidoSalvoResultado = {
 };
 
 async function salvarPedido(session: BotSession, phone: string, _config: ConfigPizzaria): Promise<PedidoSalvoResultado> {
-  const pedidos = (await redis.get<Pedido[]>("pedidos")) || [];
   const itens = session.cart.map((item) => {
     const border = item.border && item.border !== "Sem borda" ? ` + ${item.border}` : "";
     const size = item.size ? ` ${item.size}` : "";
@@ -175,7 +180,7 @@ async function salvarPedido(session: BotSession, phone: string, _config: ConfigP
     : session.deliveryType === "dine_in"
     ? "Consumo no local"
     : "Retirada na loja";
-  const pedidoId = Date.now().toString();
+  const pedidoId = gerarPedidoIdUnico();
   const numeroPedido = await proximoNumeroPedido();
   const pixBase = criarPixMetadata(pedidoId, session.paymentMethod, total);
   const pix = await prepararPixProviderMercadoPago({
@@ -207,7 +212,10 @@ async function salvarPedido(session: BotSession, phone: string, _config: ConfigP
     // texto livre) — ver contarPizzasElegiveisPedido em @/lib/jornadaChef.
     itensJornada: itensJornadaDoCarrinhoWhatsApp(session.cart),
   };
-  await redis.set("pedidos", [...pedidos, novoPedido]);
+  const resultadoAdicionar = await adicionarPedidoAtomico<Pedido>(novoPedido);
+  if (resultadoAdicionar.tipo !== "sucesso") {
+    throw new Error(`pedidos_atomico_${resultadoAdicionar.tipo}`);
+  }
 
   // Dispara Web Push para todos os dispositivos inscritos
   try {
@@ -233,38 +241,35 @@ async function salvarPedido(session: BotSession, phone: string, _config: ConfigP
 }
 
 async function salvarEscalonamento(phone: string, session: BotSession) {
-  const pedidos = (await redis.get<Pedido[]>("pedidos")) || [];
-  const jaExisteAberto = pedidos.some((p) => p.telefone === phone && p.escalonado === true && p.status === "novo");
-  if (jaExisteAberto) return;
-  // Se ja tem pedido ativo do cliente, marca ele como escalonado em vez de criar novo
-  const indexPedidoAtivo = pedidos.findIndex((p) => p.telefone === phone && p.status === "novo" && !p.escalonado);
-  if (indexPedidoAtivo !== -1) {
-    pedidos[indexPedidoAtivo] = { ...pedidos[indexPedidoAtivo], escalonado: true, horarioEscalonado: Date.now() };
-    await redis.set("pedidos", pedidos);
-    return;
-  }
-  const agora = Date.now();
-  const novoPedido: Pedido = {
-    id: agora.toString(),
-    cliente: session.customerName || phone,
-    telefone: phone,
-    itens: ["Cliente precisa de atendimento humano"],
-    total: 0,
-    status: "novo",
-    horario: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" }),
-    endereco: "-",
-    escalonado: true,
-    horarioEscalonado: agora,
-  };
-  await redis.set("pedidos", [...pedidos, novoPedido]);
+  await mutarLotePedidosAtomico<Pedido>((pedidos) => {
+    const jaExisteAberto = pedidos.some((p) => p.telefone === phone && p.escalonado === true && p.status === "novo");
+    if (jaExisteAberto) return pedidos;
+    // Se ja tem pedido ativo do cliente, marca ele como escalonado em vez de criar novo
+    const indexPedidoAtivo = pedidos.findIndex((p) => p.telefone === phone && p.status === "novo" && !p.escalonado);
+    if (indexPedidoAtivo !== -1) {
+      const atualizados = [...pedidos];
+      atualizados[indexPedidoAtivo] = { ...atualizados[indexPedidoAtivo], escalonado: true, horarioEscalonado: Date.now() };
+      return atualizados;
+    }
+    const agora = Date.now();
+    const novoPedido: Pedido = {
+      id: gerarPedidoIdUnico(),
+      cliente: session.customerName || phone,
+      telefone: phone,
+      itens: ["Cliente precisa de atendimento humano"],
+      total: 0,
+      status: "novo",
+      horario: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" }),
+      endereco: "-",
+      escalonado: true,
+      horarioEscalonado: agora,
+    };
+    return [...pedidos, novoPedido];
+  });
 }
 
 async function salvarCancelamentoSolicitado(_phone: string, _session: BotSession, pedidoId: string) {
-  const pedidos = (await redis.get<Pedido[]>("pedidos")) || [];
-  const index = pedidos.findIndex(p => p.id === pedidoId);
-  if (index === -1) return;
-  pedidos[index] = { ...pedidos[index], cancelamentoSolicitado: true };
-  await redis.set("pedidos", pedidos);
+  await mutarPedidoPorIdAtomico<Pedido>(pedidoId, (pedido) => ({ ...pedido, cancelamentoSolicitado: true }));
 }
 
 // NUNCA credita pontos de fidelidade aqui: "entregue" é reaproveitado só como
@@ -273,13 +278,13 @@ async function salvarCancelamentoSolicitado(_phone: string, _session: BotSession
 // estrategia oficial de fidelidade — creditar aqui geraria pontos para
 // pedidos que talvez nunca tenham sido realmente entregues.
 async function fecharEscalonamento(phone: string) {
-  const pedidos = (await redis.get<Pedido[]>("pedidos")) || [];
-  const atualizados = pedidos.map(p =>
-    p.telefone === phone && p.escalonado === true && p.status === "novo"
-      ? { ...p, status: "entregue" as const, escalonado: false }
-      : p
+  await mutarLotePedidosAtomico<Pedido>((pedidos) =>
+    pedidos.map(p =>
+      p.telefone === phone && p.escalonado === true && p.status === "novo"
+        ? { ...p, status: "entregue" as const, escalonado: false }
+        : p
+    )
   );
-  await redis.set("pedidos", atualizados);
 }
 
 export async function enviarMensagem(phone: string, message: string, ritmoRapido = false) {
@@ -507,15 +512,14 @@ async function bloquearComprovantePixAnterior(
   origem: PixEvidenciaOrigem,
   avaliacao: ResultadoHorarioComprovantePix
 ) {
-  const pedidosAtualizados = pedidos.map(p => p.id === pedidoAtivo.id ? {
+  await mutarPedidoPorIdAtomico<Pedido>(pedidoAtivo.id, (p) => ({
     ...p,
     pix: registrarPixEvidencia(p.pix || {}, {
       origem,
       ...(avaliacao.pagamentoEm ? { dataHoraPagamento: avaliacao.pagamentoEm } : {}),
       motivo: avaliacao.motivo,
     }),
-  } : p);
-  await redis.set("pedidos", pedidosAtualizados);
+  }));
   await enviarMensagem(phone, `Recebi seu comprovante, mas não consegui validar automaticamente a data/horário do pagamento para este pedido. Vou encaminhar para conferência.`);
   await salvarEscalonamento(phone, session || { step: "done", cart: [], deliveryFee: 0, customerName: pedidoAtivo.cliente });
   await log("aviso", "Comprovante Pix anterior ao pedido", `Phone: ${phone} origem: ${origem} motivo: ${avaliacao.motivo}`);
@@ -697,7 +701,7 @@ Responda APENAS em JSON:
     const decisaoFinal = decisaoFinalPix(resultado.valido === true, avaliacao);
 
     if (decisaoFinal.decisao === "aprovar") {
-      const pedidosAtualizados = pedidos.map(p => p.id === pedidoAtivo!.id ? {
+      await mutarPedidoPorIdAtomico<Pedido>(pedidoAtivo!.id, (p) => ({
         ...p,
         pixConfirmado: true,
         pix: confirmarPixComEvidencia(
@@ -706,8 +710,7 @@ Responda APENAS em JSON:
           "texto",
           horarioComprovante
         ),
-      } : p);
-      await redis.set("pedidos", pedidosAtualizados);
+      }));
       const firstName = pedidoAtivo.cliente.split(" ")[0];
       const timeMsg = pedidoAtivo.tipoEntrega === "pickup" ? config.tempoEntregaRetirada : config.tempoEntregaDelivery;
       await enviarMensagem(phone, `Pagamento confirmado! ✅🎉
@@ -721,14 +724,13 @@ Qualquer dúvida é só chamar. Bom apetite! 🍕`);
       if (sessionAtual) await redis.set(sessionKey, { ...sessionAtual, step: "done" }, { ex: 1800 });
       await log("info", `Pix texto confirmado para ${firstName}`, `Valor: ${resultado.valor}`);
     } else {
-      const pedidosAtualizados = pedidos.map(p => p.id === pedidoAtivo!.id ? {
+      await mutarPedidoPorIdAtomico<Pedido>(pedidoAtivo!.id, (p) => ({
         ...p,
         pix: marcarPixRevisaoOuSuspeito(
           registrarAvaliacaoPixNoMetadata(p.pix, decisaoFinal, identificador, "texto", hashComprovante, horarioComprovante),
           decisaoFinal.decisao === "suspeito" ? "suspeito" : "em_revisao"
         ),
-      } : p);
-      await redis.set("pedidos", pedidosAtualizados);
+      }));
       await tratarComprovantePixNaoAprovado(phone, session, pedidoAtivo, "texto", decisaoFinal);
     }
   } catch (err) {
@@ -840,7 +842,7 @@ async function processarComprovante(phone: string, data: any, config: ConfigPizz
     const decisaoFinal = decisaoFinalPix(resultado.valido === true, avaliacao);
 
     if (decisaoFinal.decisao === "aprovar") {
-      const pedidosAtualizados = pedidos.map(p => p.id === pedidoAtivo.id ? {
+      await mutarPedidoPorIdAtomico<Pedido>(pedidoAtivo.id, (p) => ({
         ...p,
         pixConfirmado: true,
         pix: confirmarPixComEvidencia(
@@ -849,8 +851,7 @@ async function processarComprovante(phone: string, data: any, config: ConfigPizz
           "midia",
           horarioComprovante
         ),
-      } : p);
-      await redis.set("pedidos", pedidosAtualizados);
+      }));
       const firstName = pedidoAtivo.cliente.split(" ")[0];
       const timeMsg = pedidoAtivo.tipoEntrega === "pickup" ? config.tempoEntregaRetirada : config.tempoEntregaDelivery;
       await enviarMensagem(phone, `Pagamento confirmado! ✅🎉\n\nObrigado, *${firstName}*! Seu pedido já foi pra cozinha. Sua pizza chega em *${timeMsg}* 🛵\n\nQualquer dúvida é só chamar. Bom apetite! 🍕`);
@@ -858,14 +859,13 @@ async function processarComprovante(phone: string, data: any, config: ConfigPizz
       await registrarDedupE2E(identificador)
       await log("info", `Pix confirmado automaticamente para ${firstName}`, `Valor: R$ ${resultado.valorEncontrado}`);
     } else {
-      const pedidosAtualizados = pedidos.map(p => p.id === pedidoAtivo.id ? {
+      await mutarPedidoPorIdAtomico<Pedido>(pedidoAtivo.id, (p) => ({
         ...p,
         pix: marcarPixRevisaoOuSuspeito(
           registrarAvaliacaoPixNoMetadata(p.pix, decisaoFinal, identificador, "midia", hashComprovante, horarioComprovante),
           decisaoFinal.decisao === "suspeito" ? "suspeito" : "em_revisao"
         ),
-      } : p);
-      await redis.set("pedidos", pedidosAtualizados);
+      }));
       await tratarComprovantePixNaoAprovado(phone, session, pedidoAtivo, "midia", decisaoFinal);
     }
   } catch (err) {
@@ -1184,23 +1184,23 @@ export async function POST(req: NextRequest) {
     if (pedidoEntregadorId) {
       const msgNormalizada = messageText.trim()
       if (msgNormalizada === '1') {
-        const pedidos = await redis.get<any[]>('pedidos') || []
-        const index = pedidos.findIndex(p => p.id === pedidoEntregadorId)
-        if (index !== -1 && pedidos[index].status === 'saiu_entrega') {
-          pedidos[index] = { ...pedidos[index], status: 'entregue' }
-          await redis.set('pedidos', pedidos)
+        const resultadoEntrega = await mutarPedidoPorIdAtomico<Pedido>(pedidoEntregadorId, (p) =>
+          p.status === 'saiu_entrega' ? { ...p, status: 'entregue' } : p
+        )
+        if (resultadoEntrega.tipo === 'sucesso' && resultadoEntrega.pedido.status === 'entregue') {
+          const pedido = resultadoEntrega.pedido
 
           // Fidelidade por pontos: idempotente por pedidoId, isolada em
           // try/catch proprio — falha aqui nunca pode impedir a confirmacao
           // de entrega, que ja foi salva acima.
           try {
             await creditarPontosPedidoEntregue({
-              id: pedidos[index].id,
+              id: pedido.id,
               status: 'entregue',
-              telefone: pedidos[index].telefone,
-              clienteId: pedidos[index].clienteId,
-              total: pedidos[index].total,
-              taxaEntrega: pedidos[index].taxaEntrega,
+              telefone: pedido.telefone,
+              clienteId: pedido.clienteId,
+              total: pedido.total,
+              taxaEntrega: pedido.taxaEntrega,
             })
           } catch (err) {
             console.error('[ChefeBot] Erro ao creditar pontos de fidelidade (ignorado):', err)
@@ -1208,12 +1208,11 @@ export async function POST(req: NextRequest) {
 
           // Jornada do Chef: hook centralizado, mesma função chamada em toda
           // transição oficial para "entregue" — nunca duplica a regra por rota.
-          await processarConclusaoPedidoJornada(pedidos[index]).catch((err) =>
+          await processarConclusaoPedidoJornada(pedido).catch((err) =>
             console.error('[ChefeBot] Erro ao processar Jornada do Chef (ignorado):', err)
           )
 
           await redis.del(`entregador_aguardando:${phone}`)
-          const pedido = pedidos[index]
           const firstName = pedido.cliente.split(' ')[0]
           await enviarMensagem(pedido.telefone, `*${firstName}*, pedido entregue! 😊\n\nEsperamos que tenha curtido muito. Volte sempre que quiser — estamos aqui! 🍕`)
           const chaveAvaliacao = `avaliacao_enviada:${pedido.id}`
@@ -1223,7 +1222,8 @@ export async function POST(req: NextRequest) {
             await redis.set(`avaliacao:${pedido.telefone}`, true, { ex: 3600 })
             await enviarMensagem(pedido.telefone, `*${firstName}*, como foi sua experiência hoje? 😊\n\nAvalia nossa pizza de 1 a 5:\n\n  ⭐ 1 — Ruim\n  ⭐⭐ 2 — Regular\n  ⭐⭐⭐ 3 — Bom\n  ⭐⭐⭐⭐ 4 — Muito bom\n  ⭐⭐⭐⭐⭐ 5 — Excelente\n\nÉ só digitar o número! 😄`)
           }
-          const maisEntregas = pedidos.filter((p: any) => p.status === 'saiu_entrega' && p.entregador?.telefone?.replace(/\D/g, '') === phone.replace(/\D/g, ''))
+          const pedidosAtuais = await redis.get<any[]>('pedidos') || []
+          const maisEntregas = pedidosAtuais.filter((p: any) => p.status === 'saiu_entrega' && p.entregador?.telefone?.replace(/\D/g, '') === phone.replace(/\D/g, ''))
           if (maisEntregas.length > 0) {
             const lista = maisEntregas.map((p: any, i: number) => `${i + 1}. *${p.cliente}* — ${p.endereco}\n💰 R$ ${p.total.toFixed(2).replace('.', ',')}`).join('\n\n')
             await enviarMensagem(phone, `✅ Entrega confirmada!\n\nVocê ainda tem *${maisEntregas.length}* entrega${maisEntregas.length > 1 ? 's' : ''} pendente${maisEntregas.length > 1 ? 's' : ''}:\n\n${lista}\n\nQual vai primeiro? Responda o número.`)

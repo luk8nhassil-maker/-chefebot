@@ -26,6 +26,7 @@ import {
   pedidoAguardandoAceite,
   pagamentoJaConfirmado,
 } from "@/lib/pedidoEdicao";
+import { atualizarPedidoAtomico } from "@/lib/pedidosStore";
 
 type SalvarEdicaoBody = {
   statusToken?: string;
@@ -240,37 +241,88 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     const agora = new Date().toISOString();
     const novaRevisao = revisaoAtual + 1;
-    const atualizado: PedidoRedis = {
-      ...pedido,
-      itens,
-      itensDetalhados: body.itens,
-      total,
-      ...(taxa ? { taxaEntrega: taxa } : { taxaEntrega: undefined }),
-      endereco,
-      ...(body.tipoEntrega ? { tipoEntrega: body.tipoEntrega } : {}),
-      ...(body.tipoEntrega === "delivery" ? { bairro: body.bairro, rua: body.rua, enderecoNumero: body.numero } : { bairro: undefined, rua: undefined, enderecoNumero: undefined }),
-      ...(body.referencia ? { referencia: body.referencia } : { referencia: undefined }),
-      pagamento: body.pagamento,
-      ...(body.troco ? { troco: body.troco } : { troco: undefined }),
-      ...(body.observacao ? { observacao: body.observacao } : { observacao: undefined }),
-      pix: novoPix,
-      pixSubstituido,
-      revision: novaRevisao,
-      editStatus: "edited",
-      editSessionId: undefined,
-      editStartedAt: undefined,
-      editExpiresAt: undefined,
-      lastEditSessionId: editSessionId,
-      editedAt: agora,
-      editedBy: "cliente",
-      changesSummary,
-      editHistory: [
-        ...(pedido.editHistory || []),
-        { tipo: "salvo", horario: agora, revisaoAnterior: revisaoAtual, revisaoNova: novaRevisao, resumo: changesSummary },
-      ],
-    };
-    pedidos[index] = atualizado;
-    await redis.set("pedidos", pedidos);
+
+    // Commit final via módulo central: revalida identidade/estado FRESCOS
+    // dentro do lock (defesa em profundidade — as mesmas checagens já
+    // passaram acima contra a leitura inicial, mas o preparo do Pix e do
+    // menu/promoções entre essa leitura e aqui pode ter levado tempo o
+    // bastante para o painel aceitar o pedido ou outra sessão de edição
+    // concorrer). `expectedRevision` garante que nenhuma mudança mais nova
+    // (mesmo uma que as checagens abaixo não cubram) seja sobrescrita
+    // silenciosamente. O lock NUNCA envolve a chamada ao Mercado Pago acima
+    // — só esta escrita final.
+    class SalvarEdicaoAbortada extends Error {
+      constructor(public status: number, public error: string) {
+        super("salvar_edicao_abortada");
+      }
+    }
+
+    let resultadoAtualizar;
+    try {
+      resultadoAtualizar = await atualizarPedidoAtomico<PedidoRedis>(id, revisaoAtual, (fresco) => {
+        if (!tokensIguais(fresco.statusToken, statusToken)) {
+          throw new SalvarEdicaoAbortada(404, "Pedido não encontrado");
+        }
+        if (!pedidoAguardandoAceite(fresco)) {
+          throw new SalvarEdicaoAbortada(409, "Este pedido já foi aceito pela loja e não pode mais ser alterado.");
+        }
+        if (pagamentoJaConfirmado(fresco)) {
+          throw new SalvarEdicaoAbortada(409, "O pagamento deste pedido já foi confirmado. Para alterar o pedido, fale diretamente com a loja.");
+        }
+        if (fresco.editStatus !== "editing" || fresco.editSessionId !== editSessionId) {
+          throw new SalvarEdicaoAbortada(409, "Sessão de edição inválida. Toque em Editar pedido novamente.");
+        }
+        if (!lockEdicaoAtivo(fresco)) {
+          throw new SalvarEdicaoAbortada(410, "O tempo para editar terminou. Seu pedido original foi mantido.");
+        }
+
+        const atualizado: PedidoRedis = {
+          ...fresco,
+          itens,
+          itensDetalhados: body.itens,
+          total,
+          ...(taxa ? { taxaEntrega: taxa } : { taxaEntrega: undefined }),
+          endereco,
+          ...(body.tipoEntrega ? { tipoEntrega: body.tipoEntrega } : {}),
+          ...(body.tipoEntrega === "delivery" ? { bairro: body.bairro, rua: body.rua, enderecoNumero: body.numero } : { bairro: undefined, rua: undefined, enderecoNumero: undefined }),
+          ...(body.referencia ? { referencia: body.referencia } : { referencia: undefined }),
+          pagamento: body.pagamento,
+          ...(body.troco ? { troco: body.troco } : { troco: undefined }),
+          ...(body.observacao ? { observacao: body.observacao } : { observacao: undefined }),
+          pix: novoPix,
+          pixSubstituido,
+          editStatus: "edited",
+          editSessionId: undefined,
+          editStartedAt: undefined,
+          editExpiresAt: undefined,
+          lastEditSessionId: editSessionId,
+          editedAt: agora,
+          editedBy: "cliente",
+          changesSummary,
+          editHistory: [
+            ...(fresco.editHistory || []),
+            { tipo: "salvo", horario: agora, revisaoAnterior: revisaoAtual, revisaoNova: novaRevisao, resumo: changesSummary },
+          ],
+        };
+        return atualizado;
+      });
+    } catch (err) {
+      if (err instanceof SalvarEdicaoAbortada) {
+        return NextResponse.json({ ok: false, error: err.error }, { status: err.status });
+      }
+      throw err;
+    }
+
+    if (resultadoAtualizar.tipo === "conflito_revisao" || resultadoAtualizar.tipo === "nao_encontrado") {
+      return NextResponse.json(
+        { ok: false, error: "O pedido mudou enquanto você editava. Recarregue e tente novamente." },
+        { status: 409 }
+      );
+    }
+    if (resultadoAtualizar.tipo !== "sucesso") {
+      return NextResponse.json({ ok: false, error: "Não foi possível salvar agora. Tente de novo." }, { status: 503 });
+    }
+    const atualizado = resultadoAtualizar.pedido;
 
     const pixCliente = serializarPixCliente(atualizado.pix, configPix);
     return NextResponse.json({
@@ -279,7 +331,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       numero: atualizado.numero,
       total,
       statusToken: atualizado.statusToken,
-      revision: novaRevisao,
+      revision: atualizado.revision ?? novaRevisao,
       changesSummary,
       pixSubstituido: pixSubstituido.length > 0,
       ...(pixCliente ? { pix: pixCliente } : {}),

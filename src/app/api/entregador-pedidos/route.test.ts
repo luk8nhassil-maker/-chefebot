@@ -8,9 +8,35 @@ const { store, redisMock, authMock, pontosMock } = vi.hoisted(() => {
     redisMock: {
       get: vi.fn(async (key: string) => store.get(key) ?? null),
       set: vi.fn(async (key: string, value: unknown) => { store.set(key, value); return "OK"; }),
+      // Três scripts: compare-and-delete do lock global (1 key — liberação
+      // de pedidosStore.ts, roda para TODA chamada que passa pelo lock,
+      // inclusive as que retornam cedo por 403/409 sem escrever nada),
+      // INICIAR_LUA (2 keys: [lockKey, filaKey] — cercado pelo token do
+      // lock, ação "iniciar") e ENTREGAR_LUA (3 keys: [lockKey, "pedidos",
+      // filaKey] — cercado pelo token do lock, ação "entregar"). Ver
+      // src/app/api/entregador-pedidos/route.ts.
       eval: vi.fn(async (_script: string, keys: string[], args: string[]) => {
-        store.set(keys[0], JSON.parse(args[0]));
-        store.set(keys[1], JSON.parse(args[1]));
+        if (keys.length === 1) {
+          const [key] = keys;
+          const [token] = args;
+          if (store.get(key) === token) {
+            store.delete(key);
+            return 1;
+          }
+          return 0;
+        }
+        if (keys.length === 2) {
+          const [lockKey, filaKey] = keys;
+          const [token, filaJson] = args;
+          if (store.get(lockKey) !== token) return "lock_perdido";
+          store.set(filaKey, JSON.parse(filaJson));
+          return 1;
+        }
+        const [lockKey, pedidosKey, filaKey] = keys;
+        const [token, principaisJson, filaJson] = args;
+        if (store.get(lockKey) !== token) return "lock_perdido";
+        store.set(pedidosKey, JSON.parse(principaisJson));
+        store.set(filaKey, JSON.parse(filaJson));
         return 1;
       }),
     },
@@ -113,26 +139,57 @@ describe("POST /api/entregador-pedidos", () => {
     expect(store.has("entregador:pedidos:ent-b")).toBe(false);
   });
 
+  it("FENCING: iniciar com lock perdido no instante da escrita é recusado (409), fila permanece intacta", async () => {
+    // Achado MÉDIO da revisão externa do PR #252: antes da correção, a ação
+    // "iniciar" gravava a fila do entregador com um `redis.set` direto,
+    // mesmo dentro do lock global — sem validar atomicamente que o token
+    // ainda era dono do lock NO INSTANTE da escrita. Simula exatamente essa
+    // janela: por qualquer motivo (TTL expirado, outra execução já
+    // adquiriu um lock novo), o EVAL de fencing (2 keys: [lockKey, filaKey])
+    // recusa a escrita em vez de sobrescrever uma atribuição mais nova.
+    store.set("entregador:pedidos:ent-a", [pedidoFila("pendente")]);
+    store.set("pedidos", [pedidoMain()]);
+
+    redisMock.eval.mockImplementationOnce(async (_script: string, keys: string[]) => {
+      expect(keys).toHaveLength(2); // confirma que é a escrita de "iniciar", não outro EVAL
+      return "lock_perdido";
+    });
+
+    const res = await POST(postRequest({ pedidoId: "ped-1", acao: "iniciar" }));
+    expect(res.status).toBe(409);
+    // A fila NUNCA foi sobrescrita com "em_rota" — permanece exatamente como
+    // estava antes da tentativa recusada, nunca ambígua.
+    expect(store.get("entregador:pedidos:ent-a")).toEqual([pedidoFila("pendente")]);
+  });
+
   it("A não altera pedido atribuído a B e nenhuma escrita ocorre", async () => {
     store.set("entregador:pedidos:ent-a", []);
     store.set("pedidos", [pedidoMain("ent-b")]);
     const res = await POST(postRequest({ pedidoId: "ped-1", acao: "iniciar" }));
     expect(res.status).toBe(403);
-    expect(redisMock.set).not.toHaveBeenCalled();
-    expect(redisMock.eval).not.toHaveBeenCalled();
+    // A resposta é negada antes de qualquer mutação: o estado de "pedidos" e
+    // da fila do entregador continua exatamente como antes (o lock global é
+    // adquirido/liberado mesmo em respostas de erro — isso não é uma
+    // escrita de dados, só release best-effort do mutex).
+    expect(store.get("pedidos")).toEqual([pedidoMain("ent-b")]);
+    expect(store.get("entregador:pedidos:ent-a")).toEqual([]);
   });
 
   it("ação desconhecida é rejeitada antes de qualquer escrita", async () => {
     const res = await POST(postRequest({ pedidoId: "ped-1", acao: "apagar" }));
     expect(res.status).toBe(400);
     expect(redisMock.set).not.toHaveBeenCalled();
+    expect(redisMock.eval).not.toHaveBeenCalled();
   });
 
   it("entregar antes de iniciar retorna 409", async () => {
     store.set("entregador:pedidos:ent-a", [pedidoFila("pendente")]);
     store.set("pedidos", [pedidoMain()]);
     expect((await POST(postRequest({ pedidoId: "ped-1", acao: "entregar" }))).status).toBe(409);
-    expect(redisMock.eval).not.toHaveBeenCalled();
+    // Nenhuma mutação de "pedidos"/fila — só o mutex global foi
+    // adquirido/liberado (1 EVAL de release, não de escrita).
+    expect(store.get("pedidos")).toEqual([pedidoMain()]);
+    expect(store.get("entregador:pedidos:ent-a")).toEqual([pedidoFila("pendente")]);
   });
 
   it("iniciar e entregar preservam o fluxo e a conclusão é atômica", async () => {
@@ -140,13 +197,18 @@ describe("POST /api/entregador-pedidos", () => {
     store.set("pedidos", [pedidoMain()]);
     const res = await POST(postRequest({ pedidoId: "ped-1", acao: "entregar" }));
     expect(res.status).toBe(200);
-    expect(redisMock.eval).toHaveBeenCalledTimes(1);
+    // 1 EVAL da escrita cercada (ENTREGAR_LUA, 3 keys) + 1 EVAL de release
+    // do lock global (1 key) — a escrita cercada em si acontece uma única
+    // vez, exatamente como antes desta correção (que só adicionou o
+    // fencing, não uma segunda escrita).
+    const chamadasDeEscrita = redisMock.eval.mock.calls.filter(([, keys]) => (keys as string[]).length >= 3);
+    expect(chamadasDeEscrita).toHaveLength(1);
     expect((store.get("pedidos") as Array<{ status: string }>)[0].status).toBe("entregue");
     expect((store.get("entregador:pedidos:ent-a") as Array<{ status: string }>)[0].status).toBe("entregue");
     expect(pontosMock).toHaveBeenCalledTimes(1);
 
     const repetida = await POST(postRequest({ pedidoId: "ped-1", acao: "entregar" }));
     expect(repetida.status).toBe(200);
-    expect(redisMock.eval).toHaveBeenCalledTimes(1);
+    expect(redisMock.eval.mock.calls.filter(([, keys]) => (keys as string[]).length >= 3)).toHaveLength(1);
   });
 });

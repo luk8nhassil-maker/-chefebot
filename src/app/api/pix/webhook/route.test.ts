@@ -4,9 +4,29 @@ const { store, redisMock } = vi.hoisted(() => {
   const store = new Map<string, unknown>();
   const redisMock = {
     get: vi.fn(async (key: string) => store.get(key) ?? null),
-    set: vi.fn(async (key: string, value: unknown) => {
+    set: vi.fn(async (key: string, value: unknown, opts?: { nx?: boolean }) => {
+      if (opts?.nx && store.has(key)) return null;
       store.set(key, value);
       return "OK";
+    }),
+    // Dois scripts do lock global de pedidosStore.ts: compare-and-delete (1
+    // key, libera o lock) e a escrita cercada de "pedidos" via
+    // escreverPedidosCercado (2 keys: lock + "pedidos").
+    eval: vi.fn(async (_script: string, keys: string[], args: string[]) => {
+      if (keys.length >= 2) {
+        const [lockKey, pedidosKey] = keys;
+        const [token, jsonValor] = args;
+        if (store.get(lockKey) !== token) return 0;
+        store.set(pedidosKey, JSON.parse(jsonValor));
+        return 1;
+      }
+      const [key] = keys;
+      const [token] = args;
+      if (store.get(key) === token) {
+        store.delete(key);
+        return 1;
+      }
+      return 0;
     }),
   };
   return { store, redisMock };
@@ -105,10 +125,12 @@ describe("POST /api/pix/webhook", () => {
       providerPaymentId: "prov-1",
     });
     expect(typeof pedidos[0].pix.confirmadoEm).toBe("string");
-    // 1 gravação do pedido + 2 chamadas best-effort do Sentinela Pix
-    // (encerrarSentinela grava o estado; incrementarContadorPix grava o
-    // contador sentinela_encerrado_webhook) — nenhuma delas afeta a
-    // confirmação em si, que já está persistida antes dessas chamadas.
+    // 1 SET do lock:pedidos:mutex (módulo central de concorrência) + 2
+    // chamadas best-effort do Sentinela Pix (encerrarSentinela grava o
+    // estado; incrementarContadorPix grava o contador
+    // sentinela_encerrado_webhook) — nenhuma delas afeta a confirmação em
+    // si, que já está persistida antes dessas chamadas. A gravação do
+    // pedido em si é escreverPedidosCercado, um EVAL (fenced), não um SET.
     expect(redisMock.set).toHaveBeenCalledTimes(3);
   });
 
@@ -286,8 +308,8 @@ describe("POST /api/pix/webhook — adaptador Mercado Pago", () => {
     expect(body).toMatchObject({ passive: false, wouldConfirm: true, confirmed: true, pedidoId: "pedido-1", txid: "tx-1" });
     expect(pedidos[0].pixConfirmado).toBe(true);
     expect(pedidos[0].pix).toMatchObject({ status: "confirmado", confirmadoPor: "webhook", providerPaymentId: "MP-9001" });
-    // 1 gravação do pedido + 2 chamadas best-effort do Sentinela Pix (ver
-    // comentário equivalente acima).
+    // 1 SET do lock:pedidos:mutex + 2 chamadas best-effort do Sentinela Pix
+    // (ver comentário equivalente acima) — a gravação do pedido é EVAL, não SET.
     expect(redisMock.set).toHaveBeenCalledTimes(3);
   });
 

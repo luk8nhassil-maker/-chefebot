@@ -5,6 +5,7 @@ import { confirmarPixMetadata, type PixMetadata } from '@/lib/pix'
 import { registrarAuditoriaPixManual } from '@/lib/pixAuditoria'
 import { encerrarSentinela } from '@/lib/pixSentinela'
 import { incrementarContadorPix } from '@/lib/pixMetricas'
+import { atualizarPedidoAtomico } from '@/lib/pedidosStore'
 
 type Status = 'novo' | 'em_preparo' | 'saiu_entrega' | 'entregue' | 'cancelado'
 type Pedido = {
@@ -87,33 +88,62 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Senha incorreta. O pagamento não foi confirmado.' }, { status: 401 })
   }
 
-  // Revalida direto no servidor, o mais próximo possível da gravação, para
-  // reduzir a janela de corrida com a confirmação automática que pode ter
-  // rodado enquanto o modal estava aberto (webhook/conciliador Mercado Pago).
-  const pedidosNaGravacao = await getPedidos()
-  const index = pedidosNaGravacao.findIndex(p => p.id === id)
-  if (index === -1) return NextResponse.json({ error: 'Pedido não encontrado.' }, { status: 404 })
-  const pedidoNaGravacao = pedidosNaGravacao[index]
-  if (pedidoNaGravacao.status === 'cancelado') {
-    return NextResponse.json({ error: 'Este pedido foi cancelado e não pode mais ser confirmado.' }, { status: 409 })
+  // Revalida direto no servidor, dentro do lock global de "pedidos", o mais
+  // próximo possível da gravação — reduz a janela de corrida com a
+  // confirmação automática (webhook/conciliador Mercado Pago) e com qualquer
+  // outro writer concorrente do array. O mutator é síncrono e nunca faz I/O
+  // externo (só monta o metadata Pix a partir do pedido lido fresco dentro
+  // do lock). Rejeições (cancelado/já confirmado) abortam via exceção
+  // sentinela para NUNCA gravar um no-op (nunca bump de revision indevido).
+  class ConfirmacaoAbortada extends Error {
+    constructor(public motivo: 'cancelado' | 'ja_confirmado', public pedido: Pedido) {
+      super('confirmacao_abortada')
+    }
   }
-  if (pixJaConfirmado(pedidoNaGravacao)) return respostaJaConfirmado(pedidoNaGravacao)
 
-  const statusAnterior = pedidoNaGravacao.pix?.status ?? 'pendente'
-  const confirmadoEm = new Date().toISOString()
-  const valorConfirmado =
-    typeof pedidoNaGravacao.pix?.valorEsperado === 'number' && Number.isFinite(pedidoNaGravacao.pix.valorEsperado)
-      ? pedidoNaGravacao.pix.valorEsperado
-      : pedidoNaGravacao.total
+  let statusAnterior: string = 'pendente'
+  let confirmadoEm = ''
+  let valorConfirmado = 0
+  let pixConfirmadoMeta: PixMetadata | undefined
 
-  const pixConfirmadoMeta = confirmarPixMetadata(pedidoNaGravacao.pix, 'manual', confirmadoEm, {
-    usuario: usuario.username,
-    nome: usuario.name,
-    role: usuario.role,
-  })
+  let resultadoAtualizar
+  try {
+    resultadoAtualizar = await atualizarPedidoAtomico<Pedido>(id, null, (pedidoNaGravacao) => {
+      if (pedidoNaGravacao.status === 'cancelado') {
+        throw new ConfirmacaoAbortada('cancelado', pedidoNaGravacao)
+      }
+      if (pixJaConfirmado(pedidoNaGravacao)) {
+        throw new ConfirmacaoAbortada('ja_confirmado', pedidoNaGravacao)
+      }
+      statusAnterior = pedidoNaGravacao.pix?.status ?? 'pendente'
+      confirmadoEm = new Date().toISOString()
+      valorConfirmado =
+        typeof pedidoNaGravacao.pix?.valorEsperado === 'number' && Number.isFinite(pedidoNaGravacao.pix.valorEsperado)
+          ? pedidoNaGravacao.pix.valorEsperado
+          : pedidoNaGravacao.total
+      pixConfirmadoMeta = confirmarPixMetadata(pedidoNaGravacao.pix, 'manual', confirmadoEm, {
+        usuario: usuario.username,
+        nome: usuario.name,
+        role: usuario.role,
+      })
+      return { ...pedidoNaGravacao, pixConfirmado: true, pix: pixConfirmadoMeta }
+    })
+  } catch (err) {
+    if (err instanceof ConfirmacaoAbortada) {
+      if (err.motivo === 'cancelado') {
+        return NextResponse.json({ error: 'Este pedido foi cancelado e não pode mais ser confirmado.' }, { status: 409 })
+      }
+      return respostaJaConfirmado(err.pedido)
+    }
+    throw err
+  }
 
-  pedidosNaGravacao[index] = { ...pedidoNaGravacao, pixConfirmado: true, pix: pixConfirmadoMeta }
-  await redis.set('pedidos', pedidosNaGravacao)
+  if (resultadoAtualizar.tipo === 'nao_encontrado') {
+    return NextResponse.json({ error: 'Pedido não encontrado.' }, { status: 404 })
+  }
+  if (resultadoAtualizar.tipo !== 'sucesso' || !pixConfirmadoMeta) {
+    return NextResponse.json({ error: 'Não foi possível confirmar agora. Tente de novo.' }, { status: 503 })
+  }
 
   // Best-effort — nunca pode afetar a confirmação acima, que já foi
   // persistida. A confirmação manual NUNCA é bloqueada pelo Sentinela; aqui

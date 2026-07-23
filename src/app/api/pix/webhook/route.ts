@@ -10,8 +10,10 @@ import {
 } from "@/lib/mercadoPagoWebhook";
 import { registrarAtividadeWebhookSentinela } from "@/lib/pixSentinela";
 import { incrementarContadorPix } from "@/lib/pixMetricas";
+import { atualizarPedidoAtomico } from "@/lib/pedidosStore";
 
 type PedidoWebhookPix = PedidoComPix & {
+  id: string;
   pixConfirmado?: boolean;
 };
 
@@ -137,17 +139,74 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const confirmadoEm = new Date().toISOString();
-    const pix = {
-      ...pedido.pix,
-      status: "confirmado" as const,
-      confirmadoPor: "webhook" as const,
-      confirmadoEm,
-      ...(payload.providerPaymentId ? { providerPaymentId: payload.providerPaymentId } : {}),
-    };
-    const atualizados = [...pedidos];
-    atualizados[index] = { ...pedido, pixConfirmado: true, pix };
-    await redis.set("pedidos", atualizados);
+    // Confirmação gravada via módulo central (lock + revalidação fresca
+    // dentro da seção crítica): protege contra corrida com a confirmação
+    // manual do painel e com a reconciliação periódica, que também disputam
+    // o mesmo pedido pelo mesmo txid. O mutator nunca faz I/O externo — só
+    // reavalia as MESMAS condições de idempotência/edição já checadas acima,
+    // agora contra o estado fresco lido dentro do lock.
+    class WebhookAbortado extends Error {
+      constructor(public resposta: Record<string, unknown>) {
+        super("webhook_abortado");
+      }
+    }
+
+    let confirmadoEm = "";
+    let pedidoConfirmado: PedidoWebhookPix | null = null;
+    let resultadoAtualizar;
+    try {
+      resultadoAtualizar = await atualizarPedidoAtomico<PedidoWebhookPix>(pedido.id, null, (fresco) => {
+        if (fresco.pixConfirmado || fresco.pix?.status === "confirmado") {
+          throw new WebhookAbortado({
+            ok: true,
+            passive: false,
+            wouldConfirm: false,
+            confirmed: true,
+            idempotent: true,
+            reason: "pix_ja_confirmado",
+            pedidoId: fresco.id,
+            txid: fresco.pix?.txid,
+          });
+        }
+        if (
+          payload.providerPaymentId &&
+          fresco.pix?.providerPaymentId &&
+          payload.providerPaymentId !== fresco.pix.providerPaymentId
+        ) {
+          throw new WebhookAbortado({
+            ok: true,
+            passive: false,
+            wouldConfirm: false,
+            reason: "cobranca_substituida",
+            pedidoId: fresco.id,
+            txid: payload.txid,
+          });
+        }
+        confirmadoEm = new Date().toISOString();
+        const pix = {
+          ...fresco.pix,
+          status: "confirmado" as const,
+          confirmadoPor: "webhook" as const,
+          confirmadoEm,
+          ...(payload.providerPaymentId ? { providerPaymentId: payload.providerPaymentId } : {}),
+        };
+        const atualizado: PedidoWebhookPix = { ...fresco, pixConfirmado: true, pix };
+        pedidoConfirmado = atualizado;
+        return atualizado;
+      });
+    } catch (err) {
+      if (err instanceof WebhookAbortado) {
+        return NextResponse.json(err.resposta);
+      }
+      throw err;
+    }
+
+    if (resultadoAtualizar.tipo !== "sucesso" || !pedidoConfirmado) {
+      return NextResponse.json(
+        { ok: false, passive: false, wouldConfirm: false, reason: "pedidos_atomico_" + resultadoAtualizar.tipo },
+        { status: 503 }
+      );
+    }
 
     // Best-effort — nunca pode afetar a confirmação acima, que já foi
     // persistida. Encerra a cadeia server-side do Guardião (se existir):

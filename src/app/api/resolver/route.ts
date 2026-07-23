@@ -2,6 +2,7 @@
 import { verifyToken } from "@/lib/auth";
 import { redis } from "@/lib/redis";
 import { obterConfigEvolution } from "@/lib/evolutionApi";
+import { mutarLotePedidosAtomico } from "@/lib/pedidosStore";
 
 async function checkAuth(req: NextRequest) {
   const token = req.cookies.get("auth-token")?.value ?? null;
@@ -50,13 +51,13 @@ export async function POST(req: NextRequest) {
   if (!phone) return NextResponse.json({ ok: false }, { status: 400 });
 
   // Fecha o card urgente no painel e devolve o pedido para o fluxo normal (cozinha)
-  const pedidos = (await redis.get<Pedido[]>("pedidos")) || [];
-  const atualizados = pedidos.map(p =>
-    p.telefone === phone && p.escalonado === true && p.status === "novo"
-      ? { ...p, escalonado: false, status: "em_preparo" as const }
-      : p
+  await mutarLotePedidosAtomico<Pedido>((atuais) =>
+    atuais.map(p =>
+      p.telefone === phone && p.escalonado === true && p.status === "novo"
+        ? { ...p, escalonado: false, status: "em_preparo" as const }
+        : p
+    )
   );
-  await redis.set("pedidos", atualizados);
 
   // Limpa tudo relacionado ao cliente — sessão, manual, resolvendo
   await redis.del(`session:${phone}`);

@@ -6,9 +6,29 @@ const redisStore = new Map<string, unknown>();
 vi.mock("@/lib/redis", () => ({
   redis: {
     get: vi.fn(async (key: string) => (redisStore.has(key) ? redisStore.get(key) : null)),
-    set: vi.fn(async (key: string, value: unknown) => {
+    set: vi.fn(async (key: string, value: unknown, opts?: { nx?: boolean; ex?: number }) => {
+      if (opts?.nx && redisStore.has(key)) return null;
       redisStore.set(key, value);
       return "OK";
+    }),
+    // Dois scripts do lock global de pedidosStore.ts: compare-and-delete (1
+    // key, libera o lock) e a escrita cercada de "pedidos" via
+    // escreverPedidosCercado (2 keys: lock + "pedidos").
+    eval: vi.fn(async (_script: string, keys: string[], args: string[]) => {
+      if (keys.length >= 2) {
+        const [lockKey, pedidosKey] = keys;
+        const [token, jsonValor] = args;
+        if (redisStore.get(lockKey) !== token) return 0;
+        redisStore.set(pedidosKey, JSON.parse(jsonValor));
+        return 1;
+      }
+      const [key] = keys;
+      const [token] = args;
+      if (redisStore.get(key) === token) {
+        redisStore.delete(key);
+        return 1;
+      }
+      return 0;
     }),
   },
 }));
@@ -174,7 +194,10 @@ describe("POST /api/orders/confirmar-pix-manual — segurança da confirmação 
     const data = await res.json();
     expect(res.status).toBe(409);
     expect(data.confirmadoPor).toBe("webhook");
-    expect(redis.set).not.toHaveBeenCalled();
+    // Nunca grava a chave "pedidos" nessa corrida (o lock:pedidos:mutex do
+    // módulo central de concorrência é adquirido e liberado normalmente —
+    // isso não é uma escrita no array de pedidos).
+    expect(vi.mocked(redis.set).mock.calls.some(([key]) => key === "pedidos")).toBe(false);
   });
 
   test("10. confirmação correta registra auditoria com os campos esperados (sem senha)", async () => {

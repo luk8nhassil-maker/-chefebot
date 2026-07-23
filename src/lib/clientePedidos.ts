@@ -111,14 +111,25 @@ export function filtrarPedidosDoCliente(
 
 // ==================== Ordenação ====================
 
-// O id de todo pedido criado pelo app é `Date.now().toString()` (timestamp em
-// ms) — por isso é o critério primário de ordenação. Quando o id não é
-// puramente numérico (defensivo, nunca deveria acontecer com os fluxos atuais
-// de criação), cai para data+horario (pt-BR) como fallback seguro; se nem
-// isso der para interpretar, o pedido vai para o fim sem quebrar a ordenação
-// dos demais.
+// Pedidos legados têm id puramente numérico (`Date.now().toString()`).
+// Pedidos novos usam `gerarPedidoIdUnico()` (src/lib/pedidosStore.ts) —
+// timestamp em ms (13 dígitos) seguido de entropia hex, não puramente
+// numérico por design. Extrai o prefixo numérico do id (10+ dígitos —
+// cobre tanto o timestamp de 13 dígitos do id novo quanto o id legado
+// inteiramente numérico) em vez de exigir o id inteiro seja numérico: antes
+// desta correção, TODO id novo falhava o teste `/^\d+$/` (a entropia hex
+// contém letras) e caía no fallback de data+horario, que só tem precisão de
+// MINUTO — dois pedidos novos no mesmo minuto perdiam a ordem real de
+// criação. Com o prefixo extraído, a ordenação usa o timestamp em
+// milissegundos de novo, preservando a ordem real de criação. Se nem isso
+// der para interpretar, o pedido vai para o fim sem quebrar a ordenação dos
+// demais.
 export function timestampOrdenacaoPedido(p: PedidoClienteFonte): number {
-  if (/^\d+$/.test(p.id)) return Number(p.id);
+  const prefixoNumerico = p.id.match(/^(\d{10,})/);
+  if (prefixoNumerico) {
+    const t = Number(prefixoNumerico[1]);
+    if (Number.isFinite(t)) return t;
+  }
 
   if (p.data && p.horario) {
     const m = p.data.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);

@@ -217,7 +217,11 @@ describe("PATCH /api/orders — reversao de resgate de pontos ao cancelar (Etapa
     const originalEval = defaultEvalImpl;
     let jaFalhou = false;
     vi.mocked(redisLib.redis.eval).mockImplementation((script: string, keys: string[], args: string[]) => {
-      if (!jaFalhou && keys.length === 2) {
+      // keys[1] !== "pedidos": a escrita cercada de "pedidos"
+      // (escreverPedidosCercado, pedidosStore.ts) tem a MESMA forma (2 keys,
+      // 2 args) do estado de pontos — sem este guard, intercepta a própria
+      // mutação de status do pedido em vez da reversão do resgate.
+      if (!jaFalhou && keys.length === 2 && keys[1] !== "pedidos") {
         jaFalhou = true;
         return Promise.reject(new Error("falha simulada ao reverter resgate"));
       }

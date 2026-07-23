@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { processMessage, createInitialSession, BotSession } from "@/lib/bot";
 import { resolverFallbackInteligente } from "@/lib/fallbackInteligente";
-import { redis } from "@/lib/redis";
 import { proximoNumeroPedido } from "@/lib/numeracao";
 import { criarPixMetadata, type PixMetadata } from "@/lib/pix";
+import { adicionarPedidoAtomico, gerarPedidoIdUnico, mutarLotePedidosAtomico } from "@/lib/pedidosStore";
 
 type Pedido = {
   id: string;
@@ -26,7 +26,6 @@ type Pedido = {
 };
 
 async function salvarPedido(session: BotSession, phone: string) {
-  const pedidos = (await redis.get<Pedido[]>("pedidos")) || [];
   const itens = session.cart.map((item) => {
     const border = item.border && item.border !== "Sem borda" ? ` + ${item.border}` : "";
     const size = item.size ? ` ${item.size}` : "";
@@ -43,7 +42,7 @@ async function salvarPedido(session: BotSession, phone: string) {
 
   const numeroPedido = await proximoNumeroPedido();
   const agora = new Date();
-  const pedidoId = Date.now().toString();
+  const pedidoId = gerarPedidoIdUnico();
   const pix = criarPixMetadata(pedidoId, session.paymentMethod, total);
   const novoPedido: Pedido = {
     id: pedidoId,
@@ -64,7 +63,7 @@ async function salvarPedido(session: BotSession, phone: string) {
     ...(session.neighborhood ? { bairro: session.neighborhood } : {}),
     ...(session.observacao ? { observacao: session.observacao } : {}),
   };
-  await redis.set("pedidos", [...pedidos, novoPedido]);
+  await adicionarPedidoAtomico<Pedido>(novoPedido);
 }
 
 export async function POST(req: NextRequest) {
@@ -99,6 +98,6 @@ export async function POST(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  await redis.del("pedidos");
+  await mutarLotePedidosAtomico(() => []);
   return NextResponse.json({ ok: true });
 }

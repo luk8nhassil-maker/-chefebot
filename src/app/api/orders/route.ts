@@ -1,6 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyToken } from '@/lib/auth'
 import { redis } from '@/lib/redis'
+import {
+  adicionarPedidoAtomico,
+  escreverPedidosCercado,
+  executarComLockPedidos,
+  gerarPedidoIdUnico,
+  LOCK_KEY as PEDIDOS_LOCK_KEY,
+  mutarLotePedidosAtomico,
+  reconciliarEscritaCercadaPedidos,
+  removerPedidoAtomico,
+} from '@/lib/pedidosStore'
 import { proximoNumeroPedido } from '@/lib/numeracao'
 import { criarPixMetadata, sanitizarPedidoPixResposta, type PixMetadata } from '@/lib/pix'
 import type { EntregadorCadastro, PedidoEntregador } from '@/types/entregador'
@@ -75,7 +85,17 @@ type Pedido = PedidoComEdicao & {
 
 const FILA_ENTREGADOR_TTL_SEGUNDOS = 86400
 
+// FENCING: KEYS[1]/ARGV[1] são o lock de "pedidos" e o token da execução —
+// checados e comparados na MESMA operação atômica que grava "pedidos" e as
+// filas de entregador. Uma execução cujo lock expirou entre a leitura fresca
+// e este EVAL (outra já adquiriu um lock novo) nunca consegue gravar aqui:
+// o script recusa (retorna "lock_perdido") em vez de aplicar a escrita com um
+// snapshot potencialmente desatualizado.
 const SALVAR_ATRIBUICAO_LUA = `
+if redis.call("get", KEYS[1]) ~= ARGV[1] then
+  return "lock_perdido"
+end
+
 local function lerFila(key)
   local raw = redis.call("GET", key)
   if not raw then return {} end
@@ -102,36 +122,39 @@ local function encodeArray(fila)
   return cjson.encode(fila)
 end
 
-local pedidoId = ARGV[2]
-local filaAtual = semPedido(lerFila(KEYS[2]), pedidoId)
-table.insert(filaAtual, cjson.decode(ARGV[3]))
+local pedidoId = ARGV[3]
+local filaAtual = semPedido(lerFila(KEYS[3]), pedidoId)
+table.insert(filaAtual, cjson.decode(ARGV[4]))
 
-local mudouEntregador = ARGV[4] == "1"
+local mudouEntregador = ARGV[5] == "1"
 local filaAnterior = nil
 local ttlAnterior = -1
 if mudouEntregador then
-  ttlAnterior = redis.call("PTTL", KEYS[3])
-  filaAnterior = semPedido(lerFila(KEYS[3]), pedidoId)
+  ttlAnterior = redis.call("PTTL", KEYS[4])
+  filaAnterior = semPedido(lerFila(KEYS[4]), pedidoId)
 end
 
-redis.call("SET", KEYS[1], ARGV[1])
-redis.call("SET", KEYS[2], encodeArray(filaAtual), "EX", ARGV[5])
+redis.call("SET", KEYS[2], ARGV[2])
+redis.call("SET", KEYS[3], encodeArray(filaAtual), "EX", ARGV[6])
 if mudouEntregador then
-  redis.call("SET", KEYS[3], encodeArray(filaAnterior))
+  redis.call("SET", KEYS[4], encodeArray(filaAnterior))
   if ttlAnterior > 0 then
-    redis.call("PEXPIRE", KEYS[3], ttlAnterior)
+    redis.call("PEXPIRE", KEYS[4], ttlAnterior)
   else
-    redis.call("EXPIRE", KEYS[3], ARGV[5])
+    redis.call("EXPIRE", KEYS[4], ARGV[6])
   end
 end
 return 1
 `
 
+type ResultadoSalvarAtribuicao = "ok" | "lock_perdido"
+
 async function salvarAtribuicaoComFilas(
+  token: string,
   pedidos: Pedido[],
   pedidoEntregador: PedidoEntregador,
   entregadorAnteriorId?: string
-): Promise<void> {
+): Promise<ResultadoSalvarAtribuicao> {
   const entregadorAtualId = pedidoEntregador.entregadorId
   const filaAtualKey = `entregador:pedidos:${entregadorAtualId}`
   const mudouEntregador = Boolean(
@@ -140,10 +163,11 @@ async function salvarAtribuicaoComFilas(
   const filaAnteriorKey = mudouEntregador
     ? `entregador:pedidos:${entregadorAnteriorId}`
     : filaAtualKey
-  await redis.eval(
+  const resultado = await redis.eval(
     SALVAR_ATRIBUICAO_LUA,
-    ['pedidos', filaAtualKey, filaAnteriorKey],
+    [PEDIDOS_LOCK_KEY, 'pedidos', filaAtualKey, filaAnteriorKey],
     [
+      token,
       JSON.stringify(pedidos),
       pedidoEntregador.pedidoId,
       JSON.stringify(pedidoEntregador),
@@ -151,6 +175,7 @@ async function salvarAtribuicaoComFilas(
       String(FILA_ENTREGADOR_TTL_SEGUNDOS),
     ]
   )
+  return resultado === 'lock_perdido' ? 'lock_perdido' : 'ok'
 }
 
 
@@ -225,7 +250,15 @@ export async function GET(req: NextRequest) {
     return mudou ? (pedido as Pedido) : p
   })
   if (mudouAlgum) {
-    await redis.set('pedidos', limpos)
+    // Limpeza best-effort: usa lote atômico para nunca perder mutações
+    // concorrentes de outros writers, mas relê o array fresco dentro do lock
+    // (nunca reaplica a limpeza pré-calculada em cima de um snapshot velho).
+    await mutarLotePedidosAtomico<Pedido>((atuais) =>
+      atuais.map(p => {
+        const { pedido, mudou } = limparEdicaoExpiradaSeNecessario(p)
+        return mudou ? (pedido as Pedido) : p
+      })
+    )
   }
 
   const url = new URL(req.url)
@@ -257,74 +290,135 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: 'Não foi possível atualizar agora. Tente de novo.' }, { status: 409 })
   }
 
+  type ResultadoPatchInterno =
+    | { ok: false; response: NextResponse }
+    | { ok: true; pedidos: Pedido[]; index: number; statusAnterior: Status; entregadorCanonico?: EntregadorCadastro }
+
   try {
-    const pedidos = await getPedidos()
-    const index = pedidos.findIndex(p => p.id === id)
-    if (index === -1) return NextResponse.json({ error: 'Pedido nao encontrado' }, { status: 404 })
+    // Toda a leitura+validação+mutação+escrita de "pedidos" roda sob o MESMO
+    // lock global do módulo central — protege contra corrida com QUALQUER
+    // outro writer (WhatsApp, cron, webhooks Pix), além do mutex específico
+    // deste pedido já adquirido acima. A atribuição de entregador usa o
+    // escape hatch `executarComLockPedidos` porque precisa gravar "pedidos" e
+    // a fila `entregador:pedidos:*` atomicamente juntos via um único EVAL Lua
+    // (salvarAtribuicaoComFilas) — não se encaixa em add/update/remove de um
+    // único pedido.
+    const lockPerdidoResponse = () => NextResponse.json(
+      { error: 'Não foi possível atualizar agora. Tente de novo.' },
+      { status: 409 }
+    )
+    // Achado MÉDIO da revisão externa do PR #252: se o EVAL de
+    // `escreverPedidosCercado` lançar (rede/timeout), NUNCA assume falha —
+    // relê o estado fresco e compara pelo fingerprint canônico do array
+    // completo esperado (mesma técnica de `mutarLotePedidosAtomico`). Só
+    // "confirmado" quando bater exatamente; qualquer divergência/incerteza
+    // vira este erro explícito — nunca finge sucesso, nunca repete a
+    // mutação cegamente.
+    const escritaIncertaResponse = () => NextResponse.json(
+      { error: 'Não foi possível confirmar a atualização. Tente de novo.' },
+      { status: 503 }
+    )
 
-    let entregadorCanonico: EntregadorCadastro | undefined
-    if (entregador) {
-      const entregadorId = typeof entregador?.id === 'string' ? entregador.id : ''
-      const cadastrados = await redis.get<EntregadorCadastro[]>('entregadores') || []
-      entregadorCanonico = cadastrados.find(e => e.id === entregadorId && e.ativo)
-      if (!entregadorCanonico) {
-        return NextResponse.json({ error: 'Entregador indisponível' }, { status: 409 })
+    const resultadoLock = await executarComLockPedidos<ResultadoPatchInterno>(async (token) => {
+      const pedidos = await getPedidos()
+      const index = pedidos.findIndex(p => p.id === id)
+      if (index === -1) return { ok: false, response: NextResponse.json({ error: 'Pedido nao encontrado' }, { status: 404 }) }
+
+      let entregadorCanonico: EntregadorCadastro | undefined
+      if (entregador) {
+        const entregadorId = typeof entregador?.id === 'string' ? entregador.id : ''
+        const cadastrados = await redis.get<EntregadorCadastro[]>('entregadores') || []
+        entregadorCanonico = cadastrados.find(e => e.id === entregadorId && e.ativo)
+        if (!entregadorCanonico) {
+          return { ok: false, response: NextResponse.json({ error: 'Entregador indisponível' }, { status: 409 }) }
+        }
       }
-    }
 
-    const limpeza = limparEdicaoExpiradaSeNecessario(pedidos[index])
-    if (limpeza.mudou) pedidos[index] = limpeza.pedido as Pedido
+      const limpeza = limparEdicaoExpiradaSeNecessario(pedidos[index])
+      if (limpeza.mudou) pedidos[index] = limpeza.pedido as Pedido
 
-    if (lockEdicaoAtivo(pedidos[index])) {
-      if (limpeza.mudou) await redis.set('pedidos', pedidos)
-      return NextResponse.json(
-        { error: 'O cliente está editando este pedido. Aguarde ele concluir ou o tempo de edição expirar.' },
-        { status: 409 }
-      )
-    }
-
-    const statusAnterior = pedidos[index].status
-    const entregadorAnteriorId = pedidos[index].entregador?.id
-
-    // A confirmação manual de Pix não passa mais por aqui: ela exige senha e
-    // checklist de segurança e vive em /api/orders/confirmar-pix-manual, que
-    // reaproveita confirmarPixMetadata (mesma idempotência de sempre).
-
-    const agora = new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" })
-    pedidos[index] = {
-      ...pedidos[index],
-      status,
-      ...(status === 'cancelado' ? { cancelamentoSolicitado: false } : {}),
-      ...(status === 'em_preparo' && !pedidos[index].horarioInicio ? { horarioInicio: agora } : {}),
-    }
-
-    // Salva entregador no pedido se informado
-    if (entregadorCanonico) {
-      pedidos[index] = { ...pedidos[index], entregador: entregadorCanonico }
-    }
-    if (entregadorCanonico && status === 'saiu_entrega') {
-      const pedido = pedidos[index]
-      const pedidoEntregador: PedidoEntregador = {
-        pedidoId: pedido.id,
-        entregadorId: entregadorCanonico.id,
-        entregadorNome: entregadorCanonico.nome,
-        entregadorTelefone: entregadorCanonico.telefone,
-        clienteNome: pedido.cliente,
-        clienteTelefone: pedido.telefone,
-        endereco: pedido.endereco,
-        total: pedido.total,
-        itens: pedido.itens,
-        status: 'pendente',
-        horarioSaida: agora,
+      if (lockEdicaoAtivo(pedidos[index])) {
+        if (limpeza.mudou) {
+          // Cercado (fenced) pelo token do lock: se o lock já expirou nesse
+          // meio-tempo, esta escrita best-effort de limpeza é recusada em vez
+          // de sobrescrever o que outra execução já gravou.
+          try {
+            const escrita = await escreverPedidosCercado(token, pedidos)
+            if (escrita === 'lock_perdido') return { ok: false, response: lockPerdidoResponse() }
+          } catch {
+            const reconciliacao = await reconciliarEscritaCercadaPedidos(pedidos)
+            if (reconciliacao !== 'confirmado') return { ok: false, response: escritaIncertaResponse() }
+          }
+        }
+        return {
+          ok: false,
+          response: NextResponse.json(
+            { error: 'O cliente está editando este pedido. Aguarde ele concluir ou o tempo de edição expirar.' },
+            { status: 409 }
+          ),
+        }
       }
-      await salvarAtribuicaoComFilas(
-        pedidos,
-        pedidoEntregador,
-        entregadorAnteriorId
-      )
-    } else {
-      await redis.set('pedidos', pedidos)
+
+      const statusAnterior = pedidos[index].status
+      const entregadorAnteriorId = pedidos[index].entregador?.id
+
+      // A confirmação manual de Pix não passa mais por aqui: ela exige senha e
+      // checklist de segurança e vive em /api/orders/confirmar-pix-manual, que
+      // reaproveita confirmarPixMetadata (mesma idempotência de sempre).
+
+      const agora = new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" })
+      pedidos[index] = {
+        ...pedidos[index],
+        status,
+        ...(status === 'cancelado' ? { cancelamentoSolicitado: false } : {}),
+        ...(status === 'em_preparo' && !pedidos[index].horarioInicio ? { horarioInicio: agora } : {}),
+      }
+
+      // Salva entregador no pedido se informado
+      if (entregadorCanonico) {
+        pedidos[index] = { ...pedidos[index], entregador: entregadorCanonico }
+      }
+      if (entregadorCanonico && status === 'saiu_entrega') {
+        const pedido = pedidos[index]
+        const pedidoEntregador: PedidoEntregador = {
+          pedidoId: pedido.id,
+          entregadorId: entregadorCanonico.id,
+          entregadorNome: entregadorCanonico.nome,
+          entregadorTelefone: entregadorCanonico.telefone,
+          clienteNome: pedido.cliente,
+          clienteTelefone: pedido.telefone,
+          endereco: pedido.endereco,
+          total: pedido.total,
+          itens: pedido.itens,
+          status: 'pendente',
+          horarioSaida: agora,
+        }
+        const resultadoAtribuicao = await salvarAtribuicaoComFilas(
+          token,
+          pedidos,
+          pedidoEntregador,
+          entregadorAnteriorId
+        )
+        if (resultadoAtribuicao === 'lock_perdido') return { ok: false, response: lockPerdidoResponse() }
+      } else {
+        try {
+          const escrita = await escreverPedidosCercado(token, pedidos)
+          if (escrita === 'lock_perdido') return { ok: false, response: lockPerdidoResponse() }
+        } catch {
+          const reconciliacao = await reconciliarEscritaCercadaPedidos(pedidos)
+          if (reconciliacao !== 'confirmado') return { ok: false, response: escritaIncertaResponse() }
+        }
+      }
+
+      return { ok: true, pedidos, index, statusAnterior, entregadorCanonico }
+    })
+
+    if (resultadoLock.tipo === 'lock_indisponivel') {
+      return NextResponse.json({ error: 'Não foi possível atualizar agora. Tente de novo.' }, { status: 409 })
     }
+    const resultadoInterno = resultadoLock.valor
+    if (!resultadoInterno.ok) return resultadoInterno.response
+    const { pedidos, index, statusAnterior, entregadorCanonico } = resultadoInterno
 
   if (!silent) {
     await notificarCliente(pedidos[index].telefone, status, pedidos[index].cliente)
@@ -570,10 +664,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Pedido inválido' }, { status: 400 })
   }
 
-  const pedidos = await getPedidos()
   const numeroPedido = await proximoNumeroPedido()
   const agora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' })
-  const pedidoId = Date.now().toString()
+  const pedidoId = gerarPedidoIdUnico()
   const pix = criarPixMetadata(pedidoId, pagamento ? String(pagamento) : undefined, Number(total) || 0)
 
   const novoPedido: Pedido = {
@@ -596,7 +689,10 @@ export async function POST(req: NextRequest) {
     ...(observacao ? { observacao: String(observacao) } : {}),
   }
 
-  await redis.set('pedidos', [...pedidos, novoPedido])
+  const resultadoAdicionar = await adicionarPedidoAtomico<Pedido>(novoPedido)
+  if (resultadoAdicionar.tipo !== 'sucesso') {
+    return NextResponse.json({ error: 'Não foi possível criar o pedido agora. Tente de novo.' }, { status: 503 })
+  }
   return NextResponse.json(novoPedido, { status: 201 })
 }
 
@@ -606,15 +702,18 @@ export async function DELETE(req: NextRequest) {
 
   const { searchParams } = new URL(req.url)
   const id = searchParams.get('id')
-  const pedidos = await getPedidos()
 
   if (id) {
-    const filtered = pedidos.filter(p => p.id !== id)
-    await redis.set('pedidos', filtered)
+    const resultadoRemover = await removerPedidoAtomico<Pedido>(id)
+    if (resultadoRemover.tipo !== 'sucesso' && resultadoRemover.tipo !== 'nao_encontrado') {
+      return NextResponse.json({ error: 'Não foi possível remover agora. Tente de novo.' }, { status: 503 })
+    }
     return NextResponse.json({ ok: true })
   }
 
-  const filtered = pedidos.filter(p => p.status !== 'entregue')
-  await redis.set('pedidos', filtered)
+  const resultadoLote = await mutarLotePedidosAtomico<Pedido>((atuais) => atuais.filter(p => p.status !== 'entregue'))
+  if (resultadoLote.tipo !== 'sucesso') {
+    return NextResponse.json({ error: 'Não foi possível remover agora. Tente de novo.' }, { status: 503 })
+  }
   return NextResponse.json({ ok: true })
 }

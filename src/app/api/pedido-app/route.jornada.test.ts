@@ -20,6 +20,16 @@ function defaultEvalImpl(_script: string, keys: string[], args: unknown[]) {
     redisStore.set(chaveToken, token);
     return Promise.resolve(1);
   }
+  if (keys.length === 2 && args.length === 2) {
+    // Escrita cercada de "pedidos" (escreverPedidosCercado, pedidosStore.ts):
+    // [lockKey, "pedidos"], [token, jsonValor] — só grava se o token ainda
+    // for o dono do lock.
+    const [lockKey, pedidosKey] = keys;
+    const [token, jsonValor] = args as string[];
+    if (redisStore.get(lockKey) !== token) return Promise.resolve(0);
+    redisStore.set(pedidosKey, JSON.parse(jsonValor));
+    return Promise.resolve(1);
+  }
   if (keys.length === 2 && args.length === 1) {
     // INVALIDAR_RESULTADO_SE_TOKEN_SCRIPT (Modo Sobrevivência)
     const [chaveToken, chaveResultado] = keys;
@@ -618,15 +628,22 @@ describe("POST /api/pedido-app — concorrência e atomicidade", () => {
 
     const redisLib = await import("@/lib/redis");
     let jaFalhou = false;
-    vi.mocked(redisLib.redis.set).mockImplementation((key: string, value: unknown, opts?: { nx?: boolean }) => {
-      // Falha especificamente na gravação de "pedidos" com o pedido novo já
-      // anexado (nunca no lock/estado da recompensa, que já foi gravado
-      // ANTES desta etapa) — simula uma falha real de persistência do pedido.
-      if (!jaFalhou && key === "pedidos" && Array.isArray(value) && (value as unknown[]).length === 2) {
+    // Persistência de "pedidos" agora é escreverPedidosCercado (EVAL,
+    // [lockKey, "pedidos"], [token, jsonValor]) — intercepta especificamente
+    // a gravação com o pedido novo já anexado (nunca o lock/estado da
+    // recompensa, que já foi gravado ANTES desta etapa).
+    vi.mocked(redisLib.redis.eval).mockImplementation((script: string, keys: string[], args: unknown[]) => {
+      if (
+        !jaFalhou &&
+        keys.length === 2 &&
+        args.length === 2 &&
+        keys[1] === "pedidos" &&
+        (JSON.parse(args[1] as string) as unknown[]).length === 2
+      ) {
         jaFalhou = true;
         return Promise.reject(new Error("falha simulada ao persistir pedido"));
       }
-      return defaultSetImpl(key, value, opts);
+      return defaultEvalImpl(script, keys, args);
     });
 
     const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -661,11 +678,21 @@ describe("POST /api/pedido-app — concorrência e atomicidade", () => {
     const redisLib = await import("@/lib/redis");
     let persistenciaJaFalhou = false;
     const chaveRecompensa = `jornada:recompensa:default:${recompensaId}`;
-    vi.mocked(redisLib.redis.set).mockImplementation((key: string, value: unknown, opts?: { nx?: boolean }) => {
-      if (!persistenciaJaFalhou && key === "pedidos" && Array.isArray(value) && (value as unknown[]).length === 1) {
+    // Persistência de "pedidos" agora é escreverPedidosCercado (EVAL).
+    vi.mocked(redisLib.redis.eval).mockImplementation((script: string, keys: string[], args: unknown[]) => {
+      if (
+        !persistenciaJaFalhou &&
+        keys.length === 2 &&
+        args.length === 2 &&
+        keys[1] === "pedidos" &&
+        (JSON.parse(args[1] as string) as unknown[]).length === 1
+      ) {
         persistenciaJaFalhou = true;
         return Promise.reject(new Error("falha simulada ao persistir pedido"));
       }
+      return defaultEvalImpl(script, keys, args);
+    });
+    vi.mocked(redisLib.redis.set).mockImplementation((key: string, value: unknown, opts?: { nx?: boolean }) => {
       // Depois que a persistência falhou, a PRÓPRIA liberação do vínculo
       // (salvarRecompensa, dentro de liberarVinculoRecompensaPedidoNaoCriado)
       // também falha — nunca há como comprovar que a recompensa foi solta.
@@ -700,12 +727,18 @@ describe("POST /api/pedido-app — concorrência e atomicidade", () => {
 
     const redisLib = await import("@/lib/redis");
     let jaFalhou = false;
-    vi.mocked(redisLib.redis.set).mockImplementation((key: string, value: unknown, opts?: { nx?: boolean }) => {
-      if (!jaFalhou && key === "pedidos" && Array.isArray(value) && (value as unknown[]).length === 1) {
+    vi.mocked(redisLib.redis.eval).mockImplementation((script: string, keys: string[], args: unknown[]) => {
+      if (
+        !jaFalhou &&
+        keys.length === 2 &&
+        args.length === 2 &&
+        keys[1] === "pedidos" &&
+        (JSON.parse(args[1] as string) as unknown[]).length === 1
+      ) {
         jaFalhou = true;
         return Promise.reject(new Error("falha simulada ao persistir pedido"));
       }
-      return defaultSetImpl(key, value, opts);
+      return defaultEvalImpl(script, keys, args);
     });
 
     const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -819,12 +852,12 @@ describe("POST /api/pedido-app — concorrência e atomicidade", () => {
     try {
       const redisLib = await import("@/lib/redis");
       let jaFalhouPersistencia = false;
-      vi.mocked(redisLib.redis.set).mockImplementation((key: string, value: unknown, opts?: { nx?: boolean }) => {
-        if (key === "pedidos" && !jaFalhouPersistencia && Array.isArray(value)) {
+      vi.mocked(redisLib.redis.eval).mockImplementation((script: string, keys: string[], args: unknown[]) => {
+        if (keys.length === 2 && args.length === 2 && keys[1] === "pedidos" && !jaFalhouPersistencia) {
           jaFalhouPersistencia = true;
           return Promise.reject(new Error("falha simulada ao persistir pedido (resposta perdida antes da escrita)"));
         }
-        return defaultSetImpl(key, value, opts);
+        return defaultEvalImpl(script, keys, args);
       });
 
       const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});

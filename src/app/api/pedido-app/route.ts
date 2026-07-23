@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import { redis } from "@/lib/redis";
+import {
+  adicionarPedidoAtomico,
+  gerarPedidoIdUnico,
+  mutarPedidoPorIdAtomico,
+  removerPedidoAtomico,
+} from "@/lib/pedidosStore";
 import { proximoNumeroPedido } from "@/lib/numeracao";
 import { getMENUDinamico } from "@/lib/menu";
 import { computeTaxaApp, buildEnderecoApp } from "@/lib/pedidoAppLogic";
@@ -42,6 +48,7 @@ import {
   type ResultadoIdempotenciaPedido,
   type SnapshotFinanceiroAttempt,
 } from "@/survival/pedidoIdempotencia";
+import { validarTransicaoSurvivalState } from "@/survival/pedidoSurvivalStateTransicao";
 
 export const maxDuration = 20;
 
@@ -148,6 +155,13 @@ type PedidoArmazenado = {
   survivalRequestFingerprint?: unknown;
   survivalState?: unknown;
 };
+
+// Forma mínima exigida por src/lib/pedidosStore.ts (`id` já validado como
+// string única, `revision` para concorrência otimista) — usada só nas
+// mutações via módulo central; as buscas/leituras acima continuam com
+// `PedidoArmazenado` (campos `unknown`, validados defensivamente campo a
+// campo antes de qualquer uso).
+type PedidoMutavelGenerico = { id: string; revision?: number; [key: string]: unknown };
 
 function criarTokenPublicoAcompanhamento(): string {
   return randomUUID().replace(/-/g, "");
@@ -482,17 +496,49 @@ async function gravarResultadoDuravel(
   }
 }
 
-// Atualiza o campo survivalState DENTRO do pedido já persistido (read-modify-write
-// pontual sobre "pedidos", mesmo padrão já usado pelo rollback do resgate) —
-// nunca cria nem remove um pedido, só corrige seu estado de consistência.
+// Atualiza o campo survivalState DENTRO do pedido já persistido — agora via
+// o módulo central de mutação atômica (PR de concorrência da chave
+// "pedidos"): protegido pelo mesmo lock global que qualquer outra mutação
+// concorrente (painel, WhatsApp, cron), nunca um GET+SET direto e
+// desprotegido. Nunca cria nem remove um pedido, só corrige seu estado de
+// consistência. Sem checagem de `revision` de propósito (best-effort,
+// puramente interno de idempotência — nunca deve conflitar com uma edição
+// do cliente ou do painel acontecendo ao mesmo tempo nesse campo específico).
+//
+// A transição é validada DENTRO do mutator (ver validarTransicaoSurvivalState)
+// — ou seja, dentro da MESMA seção atômica que lê o estado fresco e decide se
+// a transição é permitida, nunca com uma leitura solta antes do lock. Uma
+// transição inválida (estado atual corrompido, ou o par origem->destino não
+// está na tabela — ex.: completed->pending, recovery_required->completed sem
+// recuperação comprovada) nunca sobrescreve `survivalState`: o mutator
+// devolve o pedido sem alteração — e `atualizarPedidoAtomico` agora só
+// incrementa `revision` quando o conteúdo realmente muda (nunca um bump
+// incondicional), então uma transição rejeitada ou repetida (idempotente)
+// nunca produz um `conflito_revisao` espúrio para uma edição concorrente
+// legítima do cliente/painel que dependa de `expectedRevision` estável.
 async function marcarSurvivalStateDoPedido(pedidoId: string, novoEstado: SurvivalPedidoState): Promise<boolean> {
   try {
-    const pedidosAtuais = (await redis.get<PedidoArmazenado[]>("pedidos")) || [];
-    const idx = pedidosAtuais.findIndex((p) => p && p.id === pedidoId);
-    if (idx < 0) return false;
-    pedidosAtuais[idx] = { ...pedidosAtuais[idx], survivalState: novoEstado };
-    await redis.set("pedidos", pedidosAtuais);
-    return true;
+    let transicaoInvalida: "estado_atual_invalido" | "transicao_nao_permitida" | null = null;
+    let transicaoRepetida = false;
+    const resultado = await mutarPedidoPorIdAtomico<PedidoMutavelGenerico>(pedidoId, (pedido) => {
+      const estadoAtual = typeof pedido.survivalState === "string" ? pedido.survivalState : undefined;
+      const validacao = validarTransicaoSurvivalState(estadoAtual, novoEstado);
+      if (!validacao.permitida) {
+        if (validacao.motivo === "estado_inalterado") {
+          transicaoRepetida = true;
+        } else {
+          transicaoInvalida = validacao.motivo;
+        }
+        return pedido;
+      }
+      return { ...pedido, survivalState: novoEstado };
+    });
+    if (transicaoInvalida) {
+      logSurvivalErro("idempotencia_pedido", "estado_pedido", `transicao_survival_state_invalida_${transicaoInvalida}`);
+      return false;
+    }
+    if (transicaoRepetida) return true;
+    return resultado.tipo === "sucesso";
   } catch (err) {
     logSurvivalErro("idempotencia_pedido", "estado_pedido", "atualizar_estado_falhou", err);
     return false;
@@ -1169,7 +1215,12 @@ export async function POST(req: NextRequest) {
     // `let`: reatribuído na FASE 4 para o valor ESTÁVEL do "attempt" quando
     // clientRequestId está presente — todo o resto do fluxo (Jornada, Pix,
     // persistência) usa só esta variável, nunca um valor recalculado.
-    let pedidoId = attemptRecuperado ? attemptRecuperado.pedidoId : Date.now().toString();
+    // PR de concorrência da chave "pedidos": `gerarPedidoIdUnico()`
+    // substitui o antigo `Date.now().toString()` isolado — timestamp +
+    // entropia criptográfica, nunca colide mesmo com múltiplas criações no
+    // MESMO milissegundo (ver src/lib/pedidosStore.ts para a análise
+    // completa de compatibilidade com txid/Pix/Jornada/ordenação).
+    let pedidoId = attemptRecuperado ? attemptRecuperado.pedidoId : gerarPedidoIdUnico();
 
     // Snapshot do valor Pix ESPERADO gravado no attempt (7ª revisão de
     // segurança, ponto 4) — usado só como referência de comparação em
@@ -1334,7 +1385,6 @@ export async function POST(req: NextRequest) {
     try {
       numeroPedido = await proximoNumeroPedido();
       statusToken = criarTokenPublicoAcompanhamento();
-      const pedidos = (await redis.get<unknown[]>("pedidos")) || [];
       const pixBase = criarPixMetadata(pedidoId, body.pagamento, total);
       pix = await prepararPixProviderMercadoPago({
         pedidoId,
@@ -1395,16 +1445,30 @@ export async function POST(req: NextRequest) {
         revision: 1,
       };
 
-      await redis.set("pedidos", [...pedidos, novoPedido]);
+      // PR de concorrência da chave "pedidos": a inserção agora passa pelo
+      // lock global central (src/lib/pedidosStore.ts) — nunca mais um
+      // GET+SET direto e desprotegido, que perderia silenciosamente um
+      // pedido criado por OUTRO clientRequestId/canal concorrente. Qualquer
+      // resultado que não seja "sucesso" (lock indisponível, leitura/escrita
+      // incerta, ou — no caso raro de um retry cujo pedidoId já existe —
+      // `id_ja_existe`) é tratado como uma falha de persistência: cai no
+      // MESMO catch abaixo, que já faz a reconciliação completa
+      // (hash+fingerprint+campos) antes de decidir compensar ou não. Nunca
+      // duplica: a validação de identidade completa continua sendo a
+      // reconciliação existente, não uma suposição baseada só no id.
+      const resultadoAdicionar = await adicionarPedidoAtomico<PedidoMutavelGenerico>(novoPedido as PedidoMutavelGenerico);
+      if (resultadoAdicionar.tipo !== "sucesso") {
+        throw new Error(`pedidos_atomico_${resultadoAdicionar.tipo}`);
+      }
       pedidoIdCriado = pedidoId;
     } catch (err) {
-      // Revisão de segurança, 5ª rodada, ponto 3: uma exceção de
-      // redis.set("pedidos", ...) NÃO comprova que o pedido não foi
-      // persistido — o Redis pode ter aplicado a escrita e a resposta HTTP
-      // ter sofrido timeout. Para tentativas protegidas pelo Modo
-      // Sobrevivência (pedidoId estável via attempt + hash gravado no
-      // pedido), reconcilia com uma leitura FRESCA antes de compensar às
-      // cegas.
+      // Revisão de segurança, 5ª rodada, ponto 3: uma exceção (inclusive uma
+      // sintética gerada pelo módulo central de concorrência acima) NÃO
+      // comprova que o pedido não foi persistido — o Redis pode ter
+      // aplicado a escrita e a resposta HTTP ter sofrido timeout. Para
+      // tentativas protegidas pelo Modo Sobrevivência (pedidoId estável via
+      // attempt + hash gravado no pedido), reconcilia com uma leitura
+      // FRESCA antes de compensar às cegas.
       if (clientRequestId) {
         // 7ª revisão de segurança, ponto 3: `pedido.id === pedidoId` sozinho
         // não basta para reconciliar — confirma hash+fingerprint+match único
@@ -1527,11 +1591,14 @@ export async function POST(req: NextRequest) {
       } catch (err) {
         console.error("[ChefeBot] Erro ao confirmar resgate de fidelidade — tentando reverter o pedido:", err);
         try {
-          const pedidosAtuais = (await redis.get<unknown[]>("pedidos")) || [];
-          await redis.set(
-            "pedidos",
-            pedidosAtuais.filter((pedido) => (pedido as { id?: unknown } | null)?.id !== pedidoId)
-          );
+          // PR de concorrência da chave "pedidos": remoção pelo módulo
+          // central (lock global) — nunca mais um GET+filter+SET direto,
+          // que poderia reintroduzir/perder pedidos de OUTRO cliente escrito
+          // concorrentemente entre a leitura e a escrita deste rollback.
+          const resultadoRemocao = await removerPedidoAtomico<PedidoMutavelGenerico>(pedidoId);
+          if (resultadoRemocao.tipo !== "sucesso") {
+            throw new Error(`pedidos_atomico_remocao_${resultadoRemocao.tipo}`);
+          }
           // O pedido foi removido de verdade — nenhum :result foi gravado
           // ainda (era exatamente o que este bloco adiava), então não há
           // nada para invalidar. Agora é seguro (e correto) liberar o

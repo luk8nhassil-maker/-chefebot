@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { redis } from "@/lib/redis";
+import { mutarLotePedidosAtomico } from "@/lib/pedidosStore";
 
 type ConfigPizzaria = {
   horaFechamento?: number;
@@ -24,7 +25,6 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   try {
-    const pedidos = (await redis.get<Pedido[]>("pedidos")) || [];
     const agora = new Date();
     const hojeStr = agora.toLocaleDateString("pt-BR");
 
@@ -39,40 +39,54 @@ export async function GET(req: Request) {
     const agoraISO = agora.toISOString();
 
     if (deveArquivar) {
-      const pedidosAtualizados = pedidos.map((p: Pedido) => {
-        if (p.isArchived) return p;
-        if (['entregue', 'cancelado'].includes(p.status)) return p;
-        return { ...p, isArchived: true, archivedAt: agoraISO, archivedBy: 'system', archivedReason: 'fim_expediente' };
-      });
-      await redis.set("pedidos", pedidosAtualizados);
-      return NextResponse.json({ ok: true, acao: 'arquivamento_expediente', arquivados: pedidosAtualizados.filter((p: Pedido) => p.isArchived && p.archivedAt === agoraISO).length });
+      let arquivados = 0;
+      const resultadoArquivar = await mutarLotePedidosAtomico<Pedido>((atuais) =>
+        atuais.map((p: Pedido) => {
+          if (p.isArchived) return p;
+          if (['entregue', 'cancelado'].includes(p.status)) return p;
+          arquivados++;
+          return { ...p, isArchived: true, archivedAt: agoraISO, archivedBy: 'system', archivedReason: 'fim_expediente' };
+        })
+      );
+      if (resultadoArquivar.tipo !== "sucesso") {
+        return NextResponse.json({ ok: false, error: "Não foi possível arquivar agora. Tente de novo." }, { status: 503 });
+      }
+      return NextResponse.json({ ok: true, acao: 'arquivamento_expediente', arquivados });
     }
 
+    let removidos = 0;
+    let mantidos = 0;
+    let total = 0;
+    const resultadoLimpeza = await mutarLotePedidosAtomico<Pedido>((atuais) => {
+      total = atuais.length;
+      const limpo = atuais.filter((p: Pedido) => {
+        // Pedidos ativos nunca são removidos
+        if (!["entregue", "cancelado"].includes(p.status)) return true;
 
-    const limpo = pedidos.filter((p: Pedido) => {
-      // Pedidos ativos nunca são removidos
-      if (!["entregue", "cancelado"].includes(p.status)) return true;
+        // Se tem data salva, remove pedidos com mais de 7 dias
+        if (p.data) {
+          const [dia, mes, ano] = p.data.split("/").map(Number);
+          const dataPedido = new Date(ano, mes - 1, dia);
+          const diffDias = (agora.getTime() - dataPedido.getTime()) / 1000 / 60 / 60 / 24;
+          return diffDias < 7;
+        }
 
-      // Se tem data salva, remove pedidos com mais de 7 dias
-      if (p.data) {
-        const [dia, mes, ano] = p.data.split("/").map(Number);
-        const dataPedido = new Date(ano, mes - 1, dia);
-        const diffDias = (agora.getTime() - dataPedido.getTime()) / 1000 / 60 / 60 / 24;
-        return diffDias < 7;
-      }
-
-      // Pedidos sem data — mantém por 24h baseado no horário
-      const parts = p.horario.split(":");
-      const h = parseInt(parts[0]);
-      const m = parseInt(parts[1]);
-      const horarioPedido = new Date();
-      horarioPedido.setHours(h, m, 0, 0);
-      const diff = (agora.getTime() - horarioPedido.getTime()) / 1000 / 60 / 60;
-      return diff < 24;
+        // Pedidos sem data — mantém por 24h baseado no horário
+        const parts = p.horario.split(":");
+        const h = parseInt(parts[0]);
+        const m = parseInt(parts[1]);
+        const horarioPedido = new Date();
+        horarioPedido.setHours(h, m, 0, 0);
+        const diff = (agora.getTime() - horarioPedido.getTime()) / 1000 / 60 / 60;
+        return diff < 24;
+      });
+      removidos = atuais.length - limpo.length;
+      mantidos = limpo.length;
+      return limpo;
     });
-
-    // Limpa também chaves de sessão expiradas
-    await redis.set("pedidos", limpo);
+    if (resultadoLimpeza.tipo !== "sucesso") {
+      return NextResponse.json({ ok: false, error: "Não foi possível limpar agora. Tente de novo." }, { status: 503 });
+    }
 
     // Reset explícito do contador de numeração de pedidos do dia anterior.
     // A chave já expira sozinha em 36h e muda de nome a cada dia, mas a limpeza
@@ -84,9 +98,9 @@ export async function GET(req: Request) {
 
     return NextResponse.json({
       ok: true,
-      total: pedidos.length,
-      removidos: pedidos.length - limpo.length,
-      mantidos: limpo.length,
+      total,
+      removidos,
+      mantidos,
     });
   } catch {
     return NextResponse.json({ ok: false }, { status: 500 });

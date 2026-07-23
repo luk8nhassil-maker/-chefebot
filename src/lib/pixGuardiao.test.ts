@@ -13,7 +13,17 @@ const { store, redisMock } = vi.hoisted(() => {
       const existia = store.delete(key);
       return existia ? 1 : 0;
     }),
+    // Dois scripts do lock global de pedidosStore.ts: compare-and-delete (1
+    // key, libera o lock) e a escrita cercada de "pedidos" via
+    // escreverPedidosCercado (2 keys: lock + "pedidos").
     eval: vi.fn(async (_script: string, keys: string[], args: string[]) => {
+      if (keys.length >= 2) {
+        const [lockKey, pedidosKey] = keys;
+        const [token, jsonValor] = args;
+        if (store.get(lockKey) !== token) return 0;
+        store.set(pedidosKey, JSON.parse(jsonValor));
+        return 1;
+      }
       const [key] = keys;
       const [esperado] = args;
       if (store.get(key) === esperado) {
