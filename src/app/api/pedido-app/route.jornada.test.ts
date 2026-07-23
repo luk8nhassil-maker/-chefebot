@@ -12,6 +12,33 @@ function defaultSetImpl(key: string, value: unknown, opts?: { nx?: boolean }) {
   return Promise.resolve("OK");
 }
 function defaultEvalImpl(_script: string, keys: string[], args: unknown[]) {
+  if (keys.length === 2 && args.length === 3) {
+    // GRAVAR_RESULTADO_E_TOKEN_SCRIPT (Modo Sobrevivência)
+    const [chaveResultado, chaveToken] = keys;
+    const [registroJson, token] = args as string[];
+    redisStore.set(chaveResultado, JSON.parse(registroJson));
+    redisStore.set(chaveToken, token);
+    return Promise.resolve(1);
+  }
+  if (keys.length === 2 && args.length === 1) {
+    // INVALIDAR_RESULTADO_SE_TOKEN_SCRIPT (Modo Sobrevivência)
+    const [chaveToken, chaveResultado] = keys;
+    const [tokenEsperado] = args as string[];
+    const tokenAtual = redisStore.has(chaveToken) ? redisStore.get(chaveToken) : undefined;
+    const resultadoAtual = redisStore.has(chaveResultado) ? redisStore.get(chaveResultado) : undefined;
+    if (tokenAtual === undefined && resultadoAtual === undefined) return Promise.resolve("ja_ausente");
+    if (resultadoAtual === undefined) {
+      redisStore.delete(chaveToken);
+      return Promise.resolve("ja_ausente");
+    }
+    if (tokenAtual === undefined) return Promise.resolve("incerto");
+    if (tokenAtual === tokenEsperado) {
+      redisStore.delete(chaveToken);
+      redisStore.delete(chaveResultado);
+      return Promise.resolve("removido");
+    }
+    return Promise.resolve("substituido_por_outro");
+  }
   const [key] = keys;
   const [token] = args as string[];
   if (redisStore.get(key) === token) {
@@ -147,6 +174,7 @@ function pedidoRequest(opts: {
   recompensaJornada?: { recompensaId: string; escolha?: { sabor?: string } };
   clienteToken?: string;
   whatsappToken?: string;
+  clientRequestId?: string;
 }) {
   const body = {
     cliente: "Fulano de Tal",
@@ -157,6 +185,7 @@ function pedidoRequest(opts: {
     troco: "Sem troco",
     ...(opts.recompensaJornada ? { recompensaJornada: opts.recompensaJornada } : {}),
     ...(opts.whatsappToken ? { whatsappToken: opts.whatsappToken } : {}),
+    ...(opts.clientRequestId ? { clientRequestId: opts.clientRequestId } : {}),
   };
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (opts.clienteToken) headers.cookie = `cliente-token=${opts.clienteToken}`;
@@ -618,5 +647,220 @@ describe("POST /api/pedido-app — concorrência e atomicidade", () => {
     // Nova tentativa (retry) deve funcionar normalmente.
     const retry = await POST(pedidoRequest({ telefone, clienteToken: tokenDoDono(telefone), recompensaJornada: { recompensaId } }));
     expect(retry.status).toBe(200);
+  });
+
+  // [7ª revisão de segurança, ponto 5] Sem clientRequestId (o caminho ATIVO
+  // hoje, com todas as flags desligadas), uma falha na PRÓPRIA liberação do
+  // vínculo da recompensa (não só na persistência do pedido) nunca pode ser
+  // engolida com `.catch(() => {})` — precisa virar 503 "unresolved", nunca
+  // um 500 que finja ter liberado a recompensa sem prova nenhuma.
+  test("[7ª revisão] sem clientRequestId: falha ao persistir + falha AO LIBERAR o vínculo retorna 503 unresolved, nunca finge sucesso na liberação", async () => {
+    const telefone = "86977003009";
+    const { recompensaId } = await desbloquearEReservar(telefone, [BEBIDA_GUARANA]);
+
+    const redisLib = await import("@/lib/redis");
+    let persistenciaJaFalhou = false;
+    const chaveRecompensa = `jornada:recompensa:default:${recompensaId}`;
+    vi.mocked(redisLib.redis.set).mockImplementation((key: string, value: unknown, opts?: { nx?: boolean }) => {
+      if (!persistenciaJaFalhou && key === "pedidos" && Array.isArray(value) && (value as unknown[]).length === 1) {
+        persistenciaJaFalhou = true;
+        return Promise.reject(new Error("falha simulada ao persistir pedido"));
+      }
+      // Depois que a persistência falhou, a PRÓPRIA liberação do vínculo
+      // (salvarRecompensa, dentro de liberarVinculoRecompensaPedidoNaoCriado)
+      // também falha — nunca há como comprovar que a recompensa foi solta.
+      if (persistenciaJaFalhou && key === chaveRecompensa) {
+        return Promise.reject(new Error("falha simulada ao liberar vinculo da recompensa"));
+      }
+      return defaultSetImpl(key, value, opts);
+    });
+
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const res = await POST(pedidoRequest({ telefone, clienteToken: tokenDoDono(telefone), recompensaJornada: { recompensaId } }));
+    consoleSpy.mockRestore();
+
+    expect(res.status).toBe(503);
+    const data = await res.json();
+    expect(data.ok).toBe(false);
+    expect(data.unresolved).toBe(true);
+    // Nunca vaza cliente/telefone na mensagem de erro.
+    expect(JSON.stringify(data)).not.toContain(telefone);
+
+    // O pedido nunca foi criado; a recompensa continua vinculada ao pedido
+    // que nunca existiu (estado incerto, nunca silenciosamente "liberada").
+    const pedidos = (redisStore.get("pedidos") as Array<Record<string, unknown>>) ?? [];
+    expect(pedidos).toHaveLength(0);
+  });
+
+  // Caminho normal (compensação bem-sucedida) continua devolvendo 500, como
+  // antes desta correção — o 503 só aparece quando a liberação em si falha.
+  test("[7ª revisão] sem clientRequestId: falha ao persistir + liberação do vínculo bem-sucedida mantém o 500 de sempre", async () => {
+    const telefone = "86977003010";
+    const { recompensaId } = await desbloquearEReservar(telefone, [BEBIDA_GUARANA]);
+
+    const redisLib = await import("@/lib/redis");
+    let jaFalhou = false;
+    vi.mocked(redisLib.redis.set).mockImplementation((key: string, value: unknown, opts?: { nx?: boolean }) => {
+      if (!jaFalhou && key === "pedidos" && Array.isArray(value) && (value as unknown[]).length === 1) {
+        jaFalhou = true;
+        return Promise.reject(new Error("falha simulada ao persistir pedido"));
+      }
+      return defaultSetImpl(key, value, opts);
+    });
+
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const res = await POST(pedidoRequest({ telefone, clienteToken: tokenDoDono(telefone), recompensaJornada: { recompensaId } }));
+    consoleSpy.mockRestore();
+
+    expect(res.status).toBe(500);
+    const chave = `jornada:recompensa:default:${recompensaId}`;
+    const recompensa = redisStore.get(chave) as { status: string; reservaPedidoId?: string };
+    expect(recompensa.status).toBe("reservada");
+    expect(recompensa.reservaPedidoId).toBeUndefined();
+  });
+
+  // [4ª revisão — ponto 4] Antes desta correção, só o catch da PERSISTÊNCIA
+  // (redis.set("pedidos", ...)) liberava o vínculo da recompensa — uma falha
+  // em qualquer passo ANTERIOR a isso (proximoNumeroPedido, preparação do
+  // Pix) escapava sem compensação, deixando `reservaPedidoId` preso
+  // indefinidamente. Este teste força a falha em `proximoNumeroPedido`
+  // (chamado DEPOIS do vínculo da Jornada, ANTES da persistência) e prova
+  // que a recompensa é liberada mesmo assim.
+  test("falha entre o vínculo da recompensa e a persistência (ex.: proximoNumeroPedido) também libera o vínculo — nunca fica preso", async () => {
+    const telefone = "86977003003";
+    const { recompensaId } = await desbloquearEReservar(telefone, [BEBIDA_GUARANA]);
+
+    const numeracaoLib = await import("@/lib/numeracao");
+    vi.mocked(numeracaoLib.proximoNumeroPedido).mockRejectedValueOnce(new Error("falha simulada em proximoNumeroPedido"));
+
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const res = await POST(pedidoRequest({ telefone, clienteToken: tokenDoDono(telefone), recompensaJornada: { recompensaId } }));
+    consoleSpy.mockRestore();
+
+    expect(res.status).toBe(500);
+    const pedidos = (redisStore.get("pedidos") as Array<Record<string, unknown>>) ?? [];
+    expect(pedidos).toHaveLength(0);
+
+    // O vínculo foi liberado mesmo com a falha ocorrendo ANTES do try/catch
+    // de persistência — a recompensa continua "reservada" sem reservaPedidoId.
+    const chave = [...redisStore.keys()].find((k) => k.includes(`jornada:recompensa:default:${recompensaId}`))!;
+    const recompensa = redisStore.get(chave) as { status: string; reservaPedidoId?: string };
+    expect(recompensa.status).toBe("reservada");
+    expect(recompensa.reservaPedidoId).toBeUndefined();
+
+    // Retry funciona normalmente, reaproveitando a mesma recompensa.
+    const retry = await POST(pedidoRequest({ telefone, clienteToken: tokenDoDono(telefone), recompensaJornada: { recompensaId } }));
+    expect(retry.status).toBe(200);
+    expect((redisStore.get("pedidos") as unknown[]).length).toBe(1);
+  });
+
+  // [6ª revisão de segurança, ponto 1] Antes desta correção, a rota validava
+  // a disponibilidade da recompensa da Jornada (prepararResgateParaPedido)
+  // ANTES de consultar :result/pedido-por-hash. Se o presente já tivesse
+  // sido vinculado a um pedido com sucesso mas a resposta original se
+  // perdesse (timeout), um retry legítimo com o MESMO clientRequestId batia
+  // primeiro na validação de negócio — que rejeitaria a recompensa como
+  // "já utilizada" (ela realmente está reservaPedidoId != vazio agora) antes
+  // de a rota sequer olhar para o pedido já criado. Agora a recuperação de
+  // idempotência roda antes: o retry encontra o pedido pelo hash e devolve o
+  // MESMO pedido, nunca reavaliando a recompensa.
+  test("[6ª revisão] retry com resposta perdida após presente da Jornada confirmado recupera o MESMO pedido via hash, nunca reavalia a recompensa como indisponível", async () => {
+    const telefone = "86977003005";
+    const { recompensaId } = await desbloquearEReservar(telefone, [BEBIDA_GUARANA]);
+    const clientRequestId = "retry-apos-jornada-confirmada-001";
+
+    process.env.SURVIVAL_MODE_ENABLED = "true";
+    try {
+      const r1 = await POST(
+        pedidoRequest({ telefone, clienteToken: tokenDoDono(telefone), recompensaJornada: { recompensaId }, clientRequestId })
+      );
+      expect(r1.status).toBe(200);
+      const body1 = await r1.json();
+
+      // Simula resposta perdida do lado do cliente + :result/:claim já
+      // desaparecidos (TTL ou nunca gravados) — só o pedido real (com o
+      // hash) resta em Redis.
+      const chaveResultado = `survival:idempotencia:pedido:${clientRequestId}:result`;
+      const chaveClaim = `survival:idempotencia:pedido:${clientRequestId}:claim`;
+      redisStore.delete(chaveResultado);
+      redisStore.delete(chaveClaim);
+
+      const retry = await POST(
+        pedidoRequest({ telefone, clienteToken: tokenDoDono(telefone), recompensaJornada: { recompensaId }, clientRequestId })
+      );
+      expect(retry.status).toBe(200);
+      const body2 = await retry.json();
+      expect(body2.pedidoId).toBe(body1.pedidoId);
+
+      const pedidos = redisStore.get("pedidos") as Array<Record<string, unknown>>;
+      expect(pedidos).toHaveLength(1); // nunca duplica
+    } finally {
+      delete process.env.SURVIVAL_MODE_ENABLED;
+    }
+  });
+
+  // [7ª revisão de segurança, ponto 1] Caso mais difícil que o da 6ª
+  // revisão acima: o PEDIDO NUNCA chegou a ser persistido, só o :attempt
+  // sobrevive, E a recompensa aparece VINCULADA ao pedidoId dessa mesma
+  // tentativa (`reservaPedidoId` já setado — por exemplo, por uma execução
+  // concorrente que chegou a vincular mas não a persistir, ou por qualquer
+  // outra causa externa). Antes desta correção, um retry caía direto na
+  // FASE 3 e `prepararResgateParaPedido` veria a recompensa como
+  // "reservada" (não mais "disponível") e rejeitaria com 400 — mesmo a
+  // vinculação já sendo exatamente a mesma tentativa/pedidoId. Agora a
+  // FASE 2 encontra o :attempt e pula a FASE 3 inteira: `confirmarReservaNoPedido`
+  // (idempotente, FASE 5) simplesmente confirma a MESMA vinculação de novo.
+  test("[7ª revisão] recompensa da Jornada aparece vinculada ao MESMO pedidoId do attempt: retry reutiliza o checkout oficial, nunca reavalia a recompensa como indisponível", async () => {
+    const telefone = "86977003006";
+    const { recompensaId } = await desbloquearEReservar(telefone, [BEBIDA_GUARANA]);
+    const clientRequestId = "attempt-jornada-vinculada-sem-persistir-001";
+
+    process.env.SURVIVAL_MODE_ENABLED = "true";
+    try {
+      const redisLib = await import("@/lib/redis");
+      let jaFalhouPersistencia = false;
+      vi.mocked(redisLib.redis.set).mockImplementation((key: string, value: unknown, opts?: { nx?: boolean }) => {
+        if (key === "pedidos" && !jaFalhouPersistencia && Array.isArray(value)) {
+          jaFalhouPersistencia = true;
+          return Promise.reject(new Error("falha simulada ao persistir pedido (resposta perdida antes da escrita)"));
+        }
+        return defaultSetImpl(key, value, opts);
+      });
+
+      const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      const r1 = await POST(
+        pedidoRequest({ telefone, clienteToken: tokenDoDono(telefone), recompensaJornada: { recompensaId }, clientRequestId })
+      );
+      consoleSpy.mockRestore();
+      expect(r1.status).toBe(500);
+      expect(redisStore.get("pedidos")).toBeUndefined();
+
+      vi.mocked(redisLib.redis.set).mockImplementation(defaultSetImpl);
+
+      // A falha de persistência já foi COMPROVADA ausente, então a
+      // compensação (round 5/6) liberou o vínculo de volta a "disponível" —
+      // simula aqui a recompensa reaparecendo VINCULADA ao MESMO pedidoId
+      // do attempt (por qualquer causa externa à tentativa em si): o ponto
+      // do teste é que a FASE 3, se rodasse de novo, rejeitaria isso como
+      // "já utilizada" mesmo sendo exatamente esta tentativa.
+      const chaveAttempt = `survival:idempotencia:pedido:${clientRequestId}:attempt`;
+      const attemptGravado = redisStore.get(chaveAttempt) as { pedidoId: string };
+      const chaveRecompensa = [...redisStore.keys()].find((k) => k.includes(`jornada:recompensa:default:${recompensaId}`))!;
+      const recompensaAtual = redisStore.get(chaveRecompensa) as Record<string, unknown>;
+      redisStore.set(chaveRecompensa, { ...recompensaAtual, status: "reservada", reservaPedidoId: attemptGravado.pedidoId });
+
+      const retry = await POST(
+        pedidoRequest({ telefone, clienteToken: tokenDoDono(telefone), recompensaJornada: { recompensaId }, clientRequestId })
+      );
+      expect(retry.status).toBe(200);
+      const body = await retry.json();
+
+      const pedidos = redisStore.get("pedidos") as Array<Record<string, unknown>>;
+      expect(pedidos).toHaveLength(1); // nunca duplica
+      expect(pedidos[0].id).toBe(body.pedidoId);
+      expect(pedidos[0].recompensaJornadaId).toBe(recompensaId);
+    } finally {
+      delete process.env.SURVIVAL_MODE_ENABLED;
+    }
   });
 });
