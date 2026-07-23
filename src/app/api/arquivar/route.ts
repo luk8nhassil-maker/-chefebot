@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { verifyToken } from '@/lib/auth'
 import { redis } from '@/lib/redis'
 import { sanitizarPedidoPixResposta } from '@/lib/pix'
+import { mutarLotePedidosAtomico, mutarPedidoPorIdAtomico } from '@/lib/pedidosStore'
 
 type PedidoArquivavel = {
   id: string
@@ -41,31 +42,33 @@ export async function POST(req: NextRequest) {
   const body = await req.json()
   const { id, todos } = body as { id?: string; todos?: boolean }
 
-  const pedidos = (await redis.get<PedidoArquivavel[]>('pedidos')) || []
   const agora = new Date().toISOString()
 
   if (id) {
-    const updated = pedidos.map(p =>
-      p.id === id && !p.isArchived
-        ? { ...p, isArchived: true, archivedAt: agora, archivedBy: 'manual' as const, archivedReason: 'manual' }
-        : p
+    const resultado = await mutarPedidoPorIdAtomico<PedidoArquivavel>(id, (p) =>
+      p.isArchived ? p : { ...p, isArchived: true, archivedAt: agora, archivedBy: 'manual' as const, archivedReason: 'manual' }
     )
-    const found = pedidos.find(p => p.id === id)
-    if (!found) return NextResponse.json({ error: 'Pedido nao encontrado' }, { status: 404 })
-    await redis.set('pedidos', updated)
+    if (resultado.tipo === 'nao_encontrado') return NextResponse.json({ error: 'Pedido nao encontrado' }, { status: 404 })
+    if (resultado.tipo !== 'sucesso') {
+      return NextResponse.json({ error: 'Não foi possível arquivar agora. Tente de novo.' }, { status: 503 })
+    }
     return NextResponse.json({ ok: true, arquivados: 1 })
   }
 
   if (todos) {
     let count = 0
-    const updated = pedidos.map(p => {
-      if (ehArquivavel(p)) {
-        count++
-        return { ...p, isArchived: true, archivedAt: agora, archivedBy: 'system' as const, archivedReason: 'fim_expediente' }
-      }
-      return p
-    })
-    await redis.set('pedidos', updated)
+    const resultado = await mutarLotePedidosAtomico<PedidoArquivavel>((atuais) =>
+      atuais.map(p => {
+        if (ehArquivavel(p)) {
+          count++
+          return { ...p, isArchived: true, archivedAt: agora, archivedBy: 'system' as const, archivedReason: 'fim_expediente' }
+        }
+        return p
+      })
+    )
+    if (resultado.tipo !== 'sucesso') {
+      return NextResponse.json({ error: 'Não foi possível arquivar agora. Tente de novo.' }, { status: 503 })
+    }
     return NextResponse.json({ ok: true, arquivados: count })
   }
 

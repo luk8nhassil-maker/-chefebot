@@ -174,7 +174,10 @@ describe("POST /api/orders/confirmar-pix-manual — segurança da confirmação 
     const data = await res.json();
     expect(res.status).toBe(409);
     expect(data.confirmadoPor).toBe("webhook");
-    expect(redis.set).not.toHaveBeenCalled();
+    // Nunca grava a chave "pedidos" nessa corrida (o lock:pedidos:mutex do
+    // módulo central de concorrência é adquirido e liberado normalmente —
+    // isso não é uma escrita no array de pedidos).
+    expect(vi.mocked(redis.set).mock.calls.some(([key]) => key === "pedidos")).toBe(false);
   });
 
   test("10. confirmação correta registra auditoria com os campos esperados (sem senha)", async () => {
