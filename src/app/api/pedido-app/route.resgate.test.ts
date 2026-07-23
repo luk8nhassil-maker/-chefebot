@@ -92,6 +92,7 @@ vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({}) }))
 
 import { POST } from "./route";
 import {
+  confirmarResgatePontos,
   derivarClienteIdPorTelefone,
   obterExtratoPontos,
   obterSaldoPontos,
@@ -621,6 +622,61 @@ describe("POST /api/pedido-app — resgate de pontos no checkout (Etapa 5)", () 
 
     const pedidos = redisStore.get("pedidos") as Array<Record<string, unknown>>;
     expect(pedidos).toHaveLength(1); // nunca duplica
+  });
+
+  // [7ª revisão de segurança, ponto 1] Caso mais difícil: o pedido NUNCA
+  // chegou a ser persistido (a resposta se perdeu ANTES da escrita, não
+  // depois) — só o :attempt sobrevive. Antes desta correção, um retry caía
+  // direto na FASE 3 e revalidava `obterReservasResgatePontos` — se o
+  // status da reserva mudasse de "reservado" para qualquer outra coisa
+  // ANTES do retry (por qualquer motivo externo à tentativa em si), o
+  // retry legítimo era rejeitado com 400 "resgate inválido ou já utilizado"
+  // mesmo a identidade/cobrança já tendo sido reivindicada. Agora a FASE 2
+  // encontra o :attempt e pula a FASE 3 inteira: o retry reconstrói o
+  // MESMO pedido a partir do checkout oficial já validado, sem consultar
+  // `obterReservasResgatePontos` de novo.
+  test("[7ª revisão] status do resgate muda de 'reservado' para 'confirmado' antes do retry: retry reutiliza o checkout oficial, nunca reavalia o resgate", async () => {
+    vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
+    const { clienteId, reserva } = await prepararRecompensaDisponivel();
+    const clientRequestId = "attempt-resgate-muda-status-001";
+
+    const redisLib = await import("@/lib/redis");
+    let jaFalhouPersistencia = false;
+    vi.mocked(redisLib.redis.set).mockImplementation((key: string, value: unknown, opts?: { nx?: boolean }) => {
+      if (key === "pedidos" && !jaFalhouPersistencia && Array.isArray(value)) {
+        jaFalhouPersistencia = true;
+        return Promise.reject(new Error("falha simulada ao persistir pedido (resposta perdida antes da escrita)"));
+      }
+      return defaultSetImpl(key, value, opts);
+    });
+
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const r1 = await POST(pedidoRequest({ resgateId: reserva.resgateId, clientRequestId }));
+    consoleSpy.mockRestore();
+    expect(r1.status).toBe(500);
+    expect(redisStore.get("pedidos")).toBeUndefined();
+
+    vi.mocked(redisLib.redis.set).mockImplementation(defaultSetImpl);
+
+    // O status da reserva muda para "utilizado" ANTES do retry — usando o
+    // MESMO pedidoId já reivindicado pelo attempt (para que a confirmação
+    // que a rota fará no retry seja idempotente, `eventoId` batendo, em vez
+    // de tentar confirmar de novo uma reserva já "utilizada" por outro
+    // pedidoId, o que geraria um 409 genuíno e não testaria o que importa
+    // aqui: que a FASE 3 nunca revalida o STATUS do resgate).
+    const chaveAttempt = `survival:idempotencia:pedido:${clientRequestId}:attempt`;
+    const attemptGravado = redisStore.get(chaveAttempt) as { pedidoId: string };
+    await confirmarResgatePontos(clienteId, reserva.resgateId, attemptGravado.pedidoId);
+    const reservasAtuais = await obterReservasResgatePontos(clienteId);
+    expect(reservasAtuais.find((r) => r.resgateId === reserva.resgateId)?.status).toBe("confirmado");
+
+    const retry = await POST(pedidoRequest({ resgateId: reserva.resgateId, clientRequestId }));
+    expect(retry.status).toBe(200);
+    const body = await retry.json();
+    expect(body.total).toBe(0); // desconto integral, igual à tentativa original
+    const pedidos = redisStore.get("pedidos") as Array<Record<string, unknown>>;
+    expect(pedidos).toHaveLength(1); // nunca duplica
+    expect(pedidos[0].id).toBe(body.pedidoId);
   });
 
   test("pedido sem resgateId continua funcionando normalmente (sem desconto)", async () => {

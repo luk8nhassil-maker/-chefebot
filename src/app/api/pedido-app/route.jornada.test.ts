@@ -798,4 +798,69 @@ describe("POST /api/pedido-app — concorrência e atomicidade", () => {
       delete process.env.SURVIVAL_MODE_ENABLED;
     }
   });
+
+  // [7ª revisão de segurança, ponto 1] Caso mais difícil que o da 6ª
+  // revisão acima: o PEDIDO NUNCA chegou a ser persistido, só o :attempt
+  // sobrevive, E a recompensa aparece VINCULADA ao pedidoId dessa mesma
+  // tentativa (`reservaPedidoId` já setado — por exemplo, por uma execução
+  // concorrente que chegou a vincular mas não a persistir, ou por qualquer
+  // outra causa externa). Antes desta correção, um retry caía direto na
+  // FASE 3 e `prepararResgateParaPedido` veria a recompensa como
+  // "reservada" (não mais "disponível") e rejeitaria com 400 — mesmo a
+  // vinculação já sendo exatamente a mesma tentativa/pedidoId. Agora a
+  // FASE 2 encontra o :attempt e pula a FASE 3 inteira: `confirmarReservaNoPedido`
+  // (idempotente, FASE 5) simplesmente confirma a MESMA vinculação de novo.
+  test("[7ª revisão] recompensa da Jornada aparece vinculada ao MESMO pedidoId do attempt: retry reutiliza o checkout oficial, nunca reavalia a recompensa como indisponível", async () => {
+    const telefone = "86977003006";
+    const { recompensaId } = await desbloquearEReservar(telefone, [BEBIDA_GUARANA]);
+    const clientRequestId = "attempt-jornada-vinculada-sem-persistir-001";
+
+    process.env.SURVIVAL_MODE_ENABLED = "true";
+    try {
+      const redisLib = await import("@/lib/redis");
+      let jaFalhouPersistencia = false;
+      vi.mocked(redisLib.redis.set).mockImplementation((key: string, value: unknown, opts?: { nx?: boolean }) => {
+        if (key === "pedidos" && !jaFalhouPersistencia && Array.isArray(value)) {
+          jaFalhouPersistencia = true;
+          return Promise.reject(new Error("falha simulada ao persistir pedido (resposta perdida antes da escrita)"));
+        }
+        return defaultSetImpl(key, value, opts);
+      });
+
+      const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      const r1 = await POST(
+        pedidoRequest({ telefone, clienteToken: tokenDoDono(telefone), recompensaJornada: { recompensaId }, clientRequestId })
+      );
+      consoleSpy.mockRestore();
+      expect(r1.status).toBe(500);
+      expect(redisStore.get("pedidos")).toBeUndefined();
+
+      vi.mocked(redisLib.redis.set).mockImplementation(defaultSetImpl);
+
+      // A falha de persistência já foi COMPROVADA ausente, então a
+      // compensação (round 5/6) liberou o vínculo de volta a "disponível" —
+      // simula aqui a recompensa reaparecendo VINCULADA ao MESMO pedidoId
+      // do attempt (por qualquer causa externa à tentativa em si): o ponto
+      // do teste é que a FASE 3, se rodasse de novo, rejeitaria isso como
+      // "já utilizada" mesmo sendo exatamente esta tentativa.
+      const chaveAttempt = `survival:idempotencia:pedido:${clientRequestId}:attempt`;
+      const attemptGravado = redisStore.get(chaveAttempt) as { pedidoId: string };
+      const chaveRecompensa = [...redisStore.keys()].find((k) => k.includes(`jornada:recompensa:default:${recompensaId}`))!;
+      const recompensaAtual = redisStore.get(chaveRecompensa) as Record<string, unknown>;
+      redisStore.set(chaveRecompensa, { ...recompensaAtual, status: "reservada", reservaPedidoId: attemptGravado.pedidoId });
+
+      const retry = await POST(
+        pedidoRequest({ telefone, clienteToken: tokenDoDono(telefone), recompensaJornada: { recompensaId }, clientRequestId })
+      );
+      expect(retry.status).toBe(200);
+      const body = await retry.json();
+
+      const pedidos = redisStore.get("pedidos") as Array<Record<string, unknown>>;
+      expect(pedidos).toHaveLength(1); // nunca duplica
+      expect(pedidos[0].id).toBe(body.pedidoId);
+      expect(pedidos[0].recompensaJornadaId).toBe(recompensaId);
+    } finally {
+      delete process.env.SURVIVAL_MODE_ENABLED;
+    }
+  });
 });

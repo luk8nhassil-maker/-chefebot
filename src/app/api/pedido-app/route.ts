@@ -26,6 +26,7 @@ import {
   POLL_INTERVALO_MS,
   POLL_TENTATIVAS,
   RESULT_TTL_SEGUNDOS,
+  calcularChecklistFingerprint,
   calcularPricingFingerprint,
   chaveAttemptPedido,
   chaveClaimPedido,
@@ -35,6 +36,8 @@ import {
   ehResultadoIdempotenciaValido,
   extrairFingerprintDoClaim,
   montarValorClaim,
+  type ChecklistOficialAttempt,
+  type ItemOficialAttempt,
   type RegistroAttemptPedido,
   type ResultadoIdempotenciaPedido,
   type SnapshotFinanceiroAttempt,
@@ -577,7 +580,7 @@ async function aguardarResultadoPedido(clientRequestId: string): Promise<Resulta
 }
 
 type ResultadoAttempt =
-  | { tipo: "obtido"; pedidoId: string; txid: string; pricing: SnapshotFinanceiroAttempt }
+  | { tipo: "obtido"; pedidoId: string; txid: string; pricing: SnapshotFinanceiroAttempt; checkout: ChecklistOficialAttempt }
   | { tipo: "conflito_fingerprint" }
   | { tipo: "incerto" };
 
@@ -627,7 +630,8 @@ async function obterOuCriarAttempt(
   clientRequestId: string,
   requestFingerprint: string,
   pedidoIdCandidato: string,
-  pricingCandidato: SnapshotFinanceiroAttempt
+  pricingCandidato: SnapshotFinanceiroAttempt,
+  checkoutCandidato: ChecklistOficialAttempt
 ): Promise<ResultadoAttempt> {
   const chave = chaveAttemptPedido(clientRequestId);
   const txidCandidato = gerarTxidPixInterno(pedidoIdCandidato);
@@ -637,21 +641,24 @@ async function obterOuCriarAttempt(
     pedidoId: pedidoIdCandidato,
     txid: txidCandidato,
     pricing: pricingCandidato,
+    checkout: checkoutCandidato,
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
 
   try {
     const criado = await redis.set(chave, registroCandidato, { nx: true, ex: ATTEMPT_TTL_SEGUNDOS });
-    if (criado) return { tipo: "obtido", pedidoId: pedidoIdCandidato, txid: txidCandidato, pricing: pricingCandidato };
+    if (criado) {
+      return { tipo: "obtido", pedidoId: pedidoIdCandidato, txid: txidCandidato, pricing: pricingCandidato, checkout: checkoutCandidato };
+    }
   } catch (err) {
     logSurvivalErro("idempotencia_pedido", "attempt", "set_nx_falhou", err);
     return { tipo: "incerto" };
   }
 
-  // Chave já existia — recupera a identidade E O PREÇO já reivindicados
-  // (retry de uma tentativa anterior, incluindo uma que nunca chegou a
-  // persistir o pedido) em vez de gerar/recalcular do zero.
+  // Chave já existia — recupera a identidade, O PREÇO e o CHECKOUT OFICIAL
+  // já reivindicados (retry de uma tentativa anterior, incluindo uma que
+  // nunca chegou a persistir o pedido) em vez de gerar/recalcular do zero.
   let atual: unknown;
   try {
     atual = await redis.get(chave);
@@ -664,7 +671,7 @@ async function obterOuCriarAttempt(
     return { tipo: "incerto" };
   }
   if (atual.requestFingerprint !== requestFingerprint) return { tipo: "conflito_fingerprint" };
-  return { tipo: "obtido", pedidoId: atual.pedidoId, txid: atual.txid, pricing: atual.pricing };
+  return { tipo: "obtido", pedidoId: atual.pedidoId, txid: atual.txid, pricing: atual.pricing, checkout: atual.checkout };
 }
 
 // Best-effort: marca o attempt como "completed" quando o pedido conclui de
@@ -705,6 +712,15 @@ export async function POST(req: NextRequest) {
   let requestFingerprint: string | null = null;
   let ownerToken: string | null = null;
   let claimAdquirido = false;
+
+  // 7ª revisão de segurança, ponto 1: preenchido na FASE 2 quando um
+  // :attempt válido, com o MESMO requestFingerprint, já existe — sinaliza
+  // uma RECUPERAÇÃO (Pix possivelmente já cobrado, pedido nunca persistido)
+  // e faz a FASE 3 inteira ser PULADA, reconstruindo itens/desconto/resgate/
+  // Jornada a partir do checkout oficial já validado (`attemptRecuperado.
+  // checkout`), nunca revalidando promoção/estoque/resgate/recompensa
+  // contra o estado atual (que pode ter mudado).
+  let attemptRecuperado: RegistroAttemptPedido | null = null;
 
   // Marcado assim que a persistência do pedido tiver sucesso (ou for
   // reconciliada como já persistida — ver FASE 5) — usado só pelo catch
@@ -878,20 +894,18 @@ export async function POST(req: NextRequest) {
       // tentativa cujo attempt já existe (Pix cobrado, pedido nunca
       // persistido) — 7ª revisão de segurança, ponto 1: consulta
       // SOMENTE LEITURA do :attempt aqui, antes das validações mutáveis da
-      // FASE 3, para nunca criar uma segunda identidade nem deixar um
-      // attempt corrompido passar silenciosamente. A reconstrução completa
-      // do snapshot de checkout (para pular a FASE 3 inteira numa
-      // recuperação) permanece um limite conhecido desta rodada — ver
-      // docs/architecture/MODO_SOBREVIVENCIA_1_0.md, seção 2.5-I (item 2),
-      // para o registro explícito do que ainda não está coberto.
+      // FASE 3. Um attempt válido com o MESMO fingerprint faz a FASE 3
+      // inteira ser pulada (ver `attemptRecuperado` abaixo) — nunca
+      // revalida promoção/estoque/resgate/recompensa contra o estado
+      // ATUAL, que pode já ter mudado desde a tentativa original.
       const attemptAntecipado = await consultarAttemptSomenteLeitura(clientRequestId, requestFingerprint);
       if (attemptAntecipado.tipo === "incerto") return respostaClaimIncerto();
       if (attemptAntecipado.tipo === "conflito_fingerprint") return respostaConflitoFingerprint();
-      // "encontrado" (attempt em andamento, mesmo fingerprint) ou
-      // "nao_encontrado": ambos seguem para a resolução de identidade e
-      // FASE 3 abaixo — quando "encontrado", a FASE 4 reaproveita a MESMA
-      // identidade/preço já reivindicados (já implementado desde a 4ª/5ª
-      // rodada).
+      if (attemptAntecipado.tipo === "encontrado") {
+        attemptRecuperado = attemptAntecipado.registro;
+      }
+      // "nao_encontrado": criação genuinamente nova — segue para a
+      // resolução de identidade e FASE 3 abaixo.
     }
 
     // 7ª revisão de segurança, ponto 2: a resolução de verdade do vínculo
@@ -920,139 +934,219 @@ export async function POST(req: NextRequest) {
     // FASE 3 — validações de NEGÓCIO, que dependem de estado MUTÁVEL
     // (cardápio, promoções, produtos esgotados, disponibilidade da
     // recompensa da Jornada, validade do resgate de pontos, cálculo de
-    // preço). Só chega aqui quando a FASE 2 não encontrou nenhuma
-    // tentativa já concluída/em andamento — sempre uma avaliação FRESCA.
+    // preço). Só chega aqui quando a FASE 2 não encontrou nenhum
+    // resultado/pedido já concluído — mas PODE chegar aqui em uma
+    // RECUPERAÇÃO de attempt (`attemptRecuperado` setado na FASE 2), caso em
+    // que a validação mutável inteira é PULADA (7ª revisão de segurança,
+    // ponto 1) — nunca revalida promoção/estoque/resgate/recompensa contra
+    // o estado ATUAL, sempre reconstrói a partir do checkout oficial já
+    // validado.
     // =================================================================
 
-    const menu = await getMENUDinamico();
-    const pedidos = (await redis.get<unknown[]>("pedidos")) || [];
-
-    // Itens promocionais: o preço NUNCA vem do cliente — é recalculado a
-    // partir da promoção ativa salva no Redis. Promoção inexistente,
-    // inativa, fora da janela ou com produto esgotado invalida o pedido.
-    const temPromo = body.itens.some((item) => item.kind === "promo");
-    const promos = temPromo ? ((await redis.get<Promocao[]>(PROMOS_KEY)) || []) : [];
-    const esgotadosPromo = temPromo ? ((await redis.get<string[]>("esgotados")) || []) : [];
-    const catalogoPromo = temPromo ? catalogoDoMenu(menu as never) : [];
-
-    const promoUnitPrice = makePromoUnitPrice({
-      promos,
-      esgotadosPromo,
-      dentroDaJanela,
-      promocaoIndisponivel,
-      precoFinalPromocao: (promo) => precoFinalPromocao(promo, catalogoPromo),
-    });
-
-    const itensValidados = body.itens.map((item) => ({
-      linha: formatItem(item),
-      unitPrice: item.kind === "promo" ? promoUnitPrice(item) : officialUnitPrice(item, menu as MenuPedidoApp),
-      qty: item.qty,
-    }));
-
-    if (itensValidados.some((item) => item.unitPrice === null)) {
-      return NextResponse.json({ ok: false, error: "Item inválido" }, { status: 400 });
-    }
-
-    // Presente da Jornada do Chef (rule 1/2/3): produto, preço, quantidade,
-    // tamanho e composição são SEMPRE reconstruídos no servidor a partir do
-    // snapshot da própria recompensa (nunca do carrinho) — ver
-    // `materializarItensRecompensa`. Autorização é SEMPRE pela sessão da
-    // Área do Cliente, nunca pelo telefone digitado no checkout.
-    //
-    // `prepararResgateParaPedido` é só leitura/validação — a vinculação real
-    // (`confirmarReservaNoPedido`, primeiro efeito irreversível deste
-    // fluxo) acontece na FASE 5, depois do claim de idempotência.
     let clienteIdJornada: string | undefined;
-    let itensRecompensaMaterializados: ItemApp[] = [];
-    if (recompensaJornadaId) {
-      const tokenSessaoJornada = req.cookies.get(CLIENTE_COOKIE)?.value;
-      const payloadSessaoJornada = tokenSessaoJornada ? await verificarTokenCliente(tokenSessaoJornada) : null;
-      if (!payloadSessaoJornada) {
-        return NextResponse.json({ ok: false, error: "Faça login na área do cliente para usar o presente da Jornada do Chef" }, { status: 401 });
-      }
-      const clienteSessaoJornada = await buscarClientePorId(payloadSessaoJornada.clienteId);
-      if (!clienteSessaoJornada) {
-        return NextResponse.json({ ok: false, error: "Sessão inválida" }, { status: 401 });
-      }
-      // O telefone do pedido precisa corresponder ao telefone canônico da
-      // sessão autenticada (após normalização) — nunca transfere
-      // silenciosamente uma recompensa para outro número.
-      if (sanitizeTelefoneCliente(telefonePedido) !== sanitizeTelefoneCliente(clienteSessaoJornada.telefone)) {
-        return NextResponse.json({ ok: false, error: "O telefone do pedido não corresponde ao seu perfil. Presente da Jornada do Chef não aplicado." }, { status: 403 });
-      }
-      clienteIdJornada = derivarClienteIdPorTelefone(clienteSessaoJornada.telefone) ?? clienteSessaoJornada.clienteId;
-
-      const materializado = await prepararResgateParaPedido(clienteIdJornada, recompensaJornadaId, recompensaEscolha);
-      if (!materializado.ok) {
-        return NextResponse.json({ ok: false, error: materializado.erro }, { status: 400 });
-      }
-      itensRecompensaMaterializados = materializado.itens.map((item) => ({
-        kind: item.kind,
-        name: item.name,
-        ...(item.detail ? { detail: item.detail } : {}),
-        price: 0,
-        qty: item.qty,
-        recompensaJornadaId,
-      }));
-    }
-
-    // Itens finais = itens normais do carrinho (preço sempre recalculado no
-    // servidor acima) + itens do presente da Jornada, se houver (sempre
-    // materializados no servidor, preço sempre 0). Formata como strings, no
-    // MESMO padrão do fluxo do WhatsApp.
-    const itensRecompensaValidados = itensRecompensaMaterializados.map((item) => ({
-      linha: formatItem(item),
-      unitPrice: 0,
-      qty: item.qty,
-    }));
-    const itensDetalhadosFinais: ItemApp[] = [...body.itens, ...itensRecompensaMaterializados];
-    const itensValidadosFinais = [...itensValidados, ...itensRecompensaValidados];
-    const itens = itensValidadosFinais.map((item) => item.linha);
+    let itensDetalhadosFinais: ItemApp[];
+    let itens: string[];
     // `let`: reatribuído na FASE 4 para o valor ESTÁVEL do snapshot financeiro
     // do attempt quando clientRequestId está presente (7ª revisão de
     // segurança, ponto 4) — nunca o subtotal recém-calculado, que poderia
     // divergir do já usado numa cobrança Pix anterior.
-    let subtotal = itensValidadosFinais.reduce((s, item) => s + item.unitPrice! * item.qty, 0);
-
-    // Resgate de fidelidade (Etapa 5): desconto calculado EXCLUSIVAMENTE no
-    // servidor, a partir de uma reserva já validada (nunca um valor vindo do
-    // cliente). `obterReservasResgatePontos` é só leitura — a confirmação
-    // real (`confirmarResgatePontos`) acontece na FASE 5, depois da
-    // persistência do pedido.
+    let subtotal: number;
     let descontoFidelidade = 0;
     let resgateAplicado: { clienteId: string; resgateId: string } | null = null;
-    if (body.resgateId) {
-      const clienteIdResgate = derivarClienteIdPorTelefone(telefonePedido);
-      if (!clienteIdResgate) {
-        return NextResponse.json({ ok: false, error: "Telefone inválido para aplicar o resgate" }, { status: 400 });
-      }
-      const reservas = await obterReservasResgatePontos(clienteIdResgate);
-      const reserva = reservas.find((r) => r.resgateId === body.resgateId);
-      if (!reserva || reserva.status !== "reservado") {
-        return NextResponse.json({ ok: false, error: "Resgate inválido ou já utilizado" }, { status: 400 });
-      }
-      if (new Date(reserva.expiraEm).getTime() < Date.now()) {
-        return NextResponse.json({ ok: false, error: "Resgate expirado — gere um novo resgate no app" }, { status: 400 });
-      }
-      // Desconto nunca ultrapassa o valor-base configurado nem o próprio
-      // subtotal (nunca deixa o pedido negativo); adicionais/borda/entrega já
-      // ficam de fora por construção (o desconto incide só sobre o subtotal
-      // dos produtos, antes da taxa de entrega).
-      descontoFidelidade = Math.max(0, Math.min(reserva.valorDescontoMaximo, subtotal));
-      if (descontoFidelidade <= 0) {
-        return NextResponse.json({ ok: false, error: "Pedido não atinge o valor mínimo para usar o resgate" }, { status: 400 });
-      }
-      resgateAplicado = { clienteId: clienteIdResgate, resgateId: reserva.resgateId };
-    }
-
-    // `let`: os três podem ser SUBSTITUÍDOS na FASE 4 pelo snapshot
+    // `let`: os dois podem ser SUBSTITUÍDOS na FASE 4 pelo snapshot
     // financeiro ESTÁVEL do attempt (revisão de segurança, 5ª rodada, ponto
     // 4), quando esta for a recuperação de uma tentativa anterior cujo
     // preço já foi cobrado/persistido — nunca cobra/persiste um valor
     // diferente do que uma cobrança Pix anterior já usou, mesmo que
     // cardápio/promoção/taxa tenham mudado nesse meio-tempo.
-    let taxa = computeTaxaApp(body.tipoEntrega, body.bairro, menu.neighborhoods as Array<{ name: string; fee: number }>);
-    let total = subtotal - descontoFidelidade + taxa;
+    let taxa: number;
+    let total: number;
+    let pizzasCount = 0;
+
+    if (attemptRecuperado) {
+      // 7ª revisão de segurança, ponto 1 — RECUPERAÇÃO: reconstrói tudo a
+      // partir do checkout oficial já validado (`ehAttemptValido` já
+      // confirmou hash+forma+conteúdo antes de chegar aqui). Consistência
+      // extra (defesa em profundidade): o `resgateId`/`recompensaJornadaId`
+      // desta requisição precisa corresponder ao que está gravado no
+      // checkout — divergência aqui só seria possível por corrupção (o
+      // fingerprint já deveria ter barrado antes), nunca prossegue às cegas.
+      const checkout = attemptRecuperado.checkout;
+      if ((body.resgateId ?? undefined) !== checkout.resgateId || (recompensaJornadaId ?? undefined) !== checkout.recompensaJornadaId) {
+        logSurvivalErro("idempotencia_pedido", "recuperacao_attempt", "checkout_inconsistente_com_requisicao");
+        return respostaClaimIncerto();
+      }
+
+      itens = checkout.itens;
+      itensDetalhadosFinais = checkout.itensDetalhados.map((item) => ({ ...item }));
+      subtotal = attemptRecuperado.pricing.subtotal;
+      descontoFidelidade = attemptRecuperado.pricing.descontoFidelidade;
+      taxa = attemptRecuperado.pricing.taxaEntrega;
+      total = attemptRecuperado.pricing.total;
+
+      if (checkout.resgateId) {
+        // `clienteId` de fidelidade é uma função PURA do telefone (sem I/O)
+        // — nunca precisa ser armazenado no attempt, é recalculado aqui a
+        // partir do telefone já resolvido NESTA requisição.
+        const clienteIdResgate = derivarClienteIdPorTelefone(telefonePedido);
+        if (!clienteIdResgate) {
+          logSurvivalErro("idempotencia_pedido", "recuperacao_attempt", "telefone_invalido_para_resgate");
+          return respostaClaimIncerto();
+        }
+        resgateAplicado = { clienteId: clienteIdResgate, resgateId: checkout.resgateId };
+      }
+
+      if (recompensaJornadaId) {
+        // A AUTORIZAÇÃO (sessão da Área do Cliente) ainda é resolvida —
+        // não é "estado mutável" no sentido de disponibilidade da
+        // recompensa (isso já foi validado e está congelado no checkout);
+        // é a identidade de quem pede, necessária para
+        // `confirmarReservaNoPedido` na FASE 5.
+        const tokenSessaoJornada = req.cookies.get(CLIENTE_COOKIE)?.value;
+        const payloadSessaoJornada = tokenSessaoJornada ? await verificarTokenCliente(tokenSessaoJornada) : null;
+        if (!payloadSessaoJornada) {
+          return NextResponse.json({ ok: false, error: "Faça login na área do cliente para usar o presente da Jornada do Chef" }, { status: 401 });
+        }
+        const clienteSessaoJornada = await buscarClientePorId(payloadSessaoJornada.clienteId);
+        if (!clienteSessaoJornada) {
+          return NextResponse.json({ ok: false, error: "Sessão inválida" }, { status: 401 });
+        }
+        if (sanitizeTelefoneCliente(telefonePedido) !== sanitizeTelefoneCliente(clienteSessaoJornada.telefone)) {
+          return NextResponse.json({ ok: false, error: "O telefone do pedido não corresponde ao seu perfil. Presente da Jornada do Chef não aplicado." }, { status: 403 });
+        }
+        clienteIdJornada = derivarClienteIdPorTelefone(clienteSessaoJornada.telefone) ?? clienteSessaoJornada.clienteId;
+      }
+
+      try {
+        pizzasCount = contarPizzasPagasParaFidelidade(itensDetalhadosFinais);
+      } catch (err) {
+        console.error("[ChefeBot] Erro ao contar pizzas para fidelidade (ignorado):", err);
+      }
+    } else {
+      // Criação genuinamente NOVA — avaliação sempre FRESCA do estado
+      // mutável (cardápio, promoções, esgotados, resgate, recompensa).
+      const menu = await getMENUDinamico();
+
+      // Itens promocionais: o preço NUNCA vem do cliente — é recalculado a
+      // partir da promoção ativa salva no Redis. Promoção inexistente,
+      // inativa, fora da janela ou com produto esgotado invalida o pedido.
+      const temPromo = body.itens.some((item) => item.kind === "promo");
+      const promos = temPromo ? ((await redis.get<Promocao[]>(PROMOS_KEY)) || []) : [];
+      const esgotadosPromo = temPromo ? ((await redis.get<string[]>("esgotados")) || []) : [];
+      const catalogoPromo = temPromo ? catalogoDoMenu(menu as never) : [];
+
+      const promoUnitPrice = makePromoUnitPrice({
+        promos,
+        esgotadosPromo,
+        dentroDaJanela,
+        promocaoIndisponivel,
+        precoFinalPromocao: (promo) => precoFinalPromocao(promo, catalogoPromo),
+      });
+
+      const itensValidados = body.itens.map((item) => ({
+        linha: formatItem(item),
+        unitPrice: item.kind === "promo" ? promoUnitPrice(item) : officialUnitPrice(item, menu as MenuPedidoApp),
+        qty: item.qty,
+      }));
+
+      if (itensValidados.some((item) => item.unitPrice === null)) {
+        return NextResponse.json({ ok: false, error: "Item inválido" }, { status: 400 });
+      }
+
+      // Presente da Jornada do Chef (rule 1/2/3): produto, preço, quantidade,
+      // tamanho e composição são SEMPRE reconstruídos no servidor a partir do
+      // snapshot da própria recompensa (nunca do carrinho) — ver
+      // `materializarItensRecompensa`. Autorização é SEMPRE pela sessão da
+      // Área do Cliente, nunca pelo telefone digitado no checkout.
+      //
+      // `prepararResgateParaPedido` é só leitura/validação — a vinculação real
+      // (`confirmarReservaNoPedido`, primeiro efeito irreversível deste
+      // fluxo) acontece na FASE 5, depois do claim de idempotência.
+      let itensRecompensaMaterializados: ItemApp[] = [];
+      if (recompensaJornadaId) {
+        const tokenSessaoJornada = req.cookies.get(CLIENTE_COOKIE)?.value;
+        const payloadSessaoJornada = tokenSessaoJornada ? await verificarTokenCliente(tokenSessaoJornada) : null;
+        if (!payloadSessaoJornada) {
+          return NextResponse.json({ ok: false, error: "Faça login na área do cliente para usar o presente da Jornada do Chef" }, { status: 401 });
+        }
+        const clienteSessaoJornada = await buscarClientePorId(payloadSessaoJornada.clienteId);
+        if (!clienteSessaoJornada) {
+          return NextResponse.json({ ok: false, error: "Sessão inválida" }, { status: 401 });
+        }
+        // O telefone do pedido precisa corresponder ao telefone canônico da
+        // sessão autenticada (após normalização) — nunca transfere
+        // silenciosamente uma recompensa para outro número.
+        if (sanitizeTelefoneCliente(telefonePedido) !== sanitizeTelefoneCliente(clienteSessaoJornada.telefone)) {
+          return NextResponse.json({ ok: false, error: "O telefone do pedido não corresponde ao seu perfil. Presente da Jornada do Chef não aplicado." }, { status: 403 });
+        }
+        clienteIdJornada = derivarClienteIdPorTelefone(clienteSessaoJornada.telefone) ?? clienteSessaoJornada.clienteId;
+
+        const materializado = await prepararResgateParaPedido(clienteIdJornada, recompensaJornadaId, recompensaEscolha);
+        if (!materializado.ok) {
+          return NextResponse.json({ ok: false, error: materializado.erro }, { status: 400 });
+        }
+        itensRecompensaMaterializados = materializado.itens.map((item) => ({
+          kind: item.kind,
+          name: item.name,
+          ...(item.detail ? { detail: item.detail } : {}),
+          price: 0,
+          qty: item.qty,
+          recompensaJornadaId,
+        }));
+      }
+
+      // Itens finais = itens normais do carrinho (preço sempre recalculado no
+      // servidor acima) + itens do presente da Jornada, se houver (sempre
+      // materializados no servidor, preço sempre 0). Formata como strings, no
+      // MESMO padrão do fluxo do WhatsApp.
+      const itensRecompensaValidados = itensRecompensaMaterializados.map((item) => ({
+        linha: formatItem(item),
+        unitPrice: 0,
+        qty: item.qty,
+      }));
+      itensDetalhadosFinais = [...body.itens, ...itensRecompensaMaterializados];
+      const itensValidadosFinais = [...itensValidados, ...itensRecompensaValidados];
+      itens = itensValidadosFinais.map((item) => item.linha);
+      subtotal = itensValidadosFinais.reduce((s, item) => s + item.unitPrice! * item.qty, 0);
+
+      // Resgate de fidelidade (Etapa 5): desconto calculado EXCLUSIVAMENTE no
+      // servidor, a partir de uma reserva já validada (nunca um valor vindo do
+      // cliente). `obterReservasResgatePontos` é só leitura — a confirmação
+      // real (`confirmarResgatePontos`) acontece na FASE 5, depois da
+      // persistência do pedido.
+      if (body.resgateId) {
+        const clienteIdResgate = derivarClienteIdPorTelefone(telefonePedido);
+        if (!clienteIdResgate) {
+          return NextResponse.json({ ok: false, error: "Telefone inválido para aplicar o resgate" }, { status: 400 });
+        }
+        const reservas = await obterReservasResgatePontos(clienteIdResgate);
+        const reserva = reservas.find((r) => r.resgateId === body.resgateId);
+        if (!reserva || reserva.status !== "reservado") {
+          return NextResponse.json({ ok: false, error: "Resgate inválido ou já utilizado" }, { status: 400 });
+        }
+        if (new Date(reserva.expiraEm).getTime() < Date.now()) {
+          return NextResponse.json({ ok: false, error: "Resgate expirado — gere um novo resgate no app" }, { status: 400 });
+        }
+        // Desconto nunca ultrapassa o valor-base configurado nem o próprio
+        // subtotal (nunca deixa o pedido negativo); adicionais/borda/entrega já
+        // ficam de fora por construção (o desconto incide só sobre o subtotal
+        // dos produtos, antes da taxa de entrega).
+        descontoFidelidade = Math.max(0, Math.min(reserva.valorDescontoMaximo, subtotal));
+        if (descontoFidelidade <= 0) {
+          return NextResponse.json({ ok: false, error: "Pedido não atinge o valor mínimo para usar o resgate" }, { status: 400 });
+        }
+        resgateAplicado = { clienteId: clienteIdResgate, resgateId: reserva.resgateId };
+      }
+
+      taxa = computeTaxaApp(body.tipoEntrega, body.bairro, menu.neighborhoods as Array<{ name: string; fee: number }>);
+      total = subtotal - descontoFidelidade + taxa;
+
+      try {
+        pizzasCount = contarPizzasPagasParaFidelidade(itensDetalhadosFinais);
+      } catch (err) {
+        console.error("[ChefeBot] Erro ao contar pizzas para fidelidade (ignorado):", err);
+      }
+    }
 
     const endereco = buildEnderecoApp({ tipoEntrega: body.tipoEntrega, rua: body.rua, numero: body.numero, bairro: body.bairro });
 
@@ -1072,20 +1166,10 @@ export async function POST(req: NextRequest) {
       console.error("[ChefeBot] Erro ao resolver cliente do pedido (ignorado):", err);
     }
 
-    // pizzasCount alimenta a fidelidade antiga (compra N pizzas, ganha 1
-    // grátis) quando o pedido é marcado como entregue — nunca pode incluir a
-    // pizza-presente da Jornada do Chef, que o cliente não pagou.
-    let pizzasCount = 0;
-    try {
-      pizzasCount = contarPizzasPagasParaFidelidade(itensDetalhadosFinais);
-    } catch (err) {
-      console.error("[ChefeBot] Erro ao contar pizzas para fidelidade (ignorado):", err);
-    }
-
     // `let`: reatribuído na FASE 4 para o valor ESTÁVEL do "attempt" quando
     // clientRequestId está presente — todo o resto do fluxo (Jornada, Pix,
     // persistência) usa só esta variável, nunca um valor recalculado.
-    let pedidoId = Date.now().toString();
+    let pedidoId = attemptRecuperado ? attemptRecuperado.pedidoId : Date.now().toString();
 
     // Snapshot do valor Pix ESPERADO gravado no attempt (7ª revisão de
     // segurança, ponto 4) — usado só como referência de comparação em
@@ -1141,7 +1225,20 @@ export async function POST(req: NextRequest) {
       };
       pricingCandidato.pricingFingerprint = calcularPricingFingerprint(pricingCandidato);
 
-      const attempt = await obterOuCriarAttempt(clientRequestId, requestFingerprint, pedidoId, pricingCandidato);
+      // Checkout oficial candidato (7ª revisão de segurança, ponto 1) — os
+      // mesmos itens/referências já usados para persistir o pedido, para
+      // que um FUTURO retry (se a persistência falhar depois daqui) possa
+      // pular a FASE 3 inteira e reconstruir exatamente este pedido.
+      const checkoutCandidato: ChecklistOficialAttempt = {
+        itens,
+        itensDetalhados: itensDetalhadosFinais as ItemOficialAttempt[],
+        ...(resgateAplicado ? { resgateId: resgateAplicado.resgateId } : {}),
+        ...(recompensaJornadaId ? { recompensaJornadaId } : {}),
+        checklistFingerprint: "",
+      };
+      checkoutCandidato.checklistFingerprint = calcularChecklistFingerprint(checkoutCandidato);
+
+      const attempt = await obterOuCriarAttempt(clientRequestId, requestFingerprint, pedidoId, pricingCandidato, checkoutCandidato);
       if (attempt.tipo === "conflito_fingerprint") {
         await liberarClaimSeAdquirido(clientRequestId, ownerToken, requestFingerprint, claimAdquirido);
         return respostaConflitoFingerprint();
@@ -1154,16 +1251,19 @@ export async function POST(req: NextRequest) {
         return respostaClaimIncerto();
       }
       pedidoId = attempt.pedidoId;
-      // Reaproveita o valor financeiro ESTÁVEL do attempt — numa criação
-      // nova, isto é um no-op (o candidato acabou de ser gravado com este
-      // mesmo valor); numa recuperação, GARANTE que o valor cobrado/
-      // persistido seja EXATAMENTE o mesmo da tentativa original, mesmo que
-      // cardápio/promoção/taxa tenham mudado desde então.
+      // Reaproveita o valor financeiro E O CHECKOUT OFICIAL ESTÁVEIS do
+      // attempt — numa criação nova, isto é um no-op (o candidato acabou de
+      // ser gravado com estes mesmos valores); numa recuperação, GARANTE
+      // que o valor cobrado/persistido e os itens sejam EXATAMENTE os da
+      // tentativa original, mesmo que cardápio/promoção/taxa tenham mudado
+      // desde então.
       total = attempt.pricing.total;
       subtotal = attempt.pricing.subtotal;
       taxa = attempt.pricing.taxaEntrega;
       descontoFidelidade = attempt.pricing.descontoFidelidade;
       valorPixEsperadoSnapshot = attempt.pricing.valorPixEsperado;
+      itens = attempt.checkout.itens;
+      itensDetalhadosFinais = attempt.checkout.itensDetalhados.map((item) => ({ ...item }));
     }
 
     // Troco (quando há dinheiro no pagamento, puro ou híbrido) é validado só
@@ -1234,6 +1334,7 @@ export async function POST(req: NextRequest) {
     try {
       numeroPedido = await proximoNumeroPedido();
       statusToken = criarTokenPublicoAcompanhamento();
+      const pedidos = (await redis.get<unknown[]>("pedidos")) || [];
       const pixBase = criarPixMetadata(pedidoId, body.pagamento, total);
       pix = await prepararPixProviderMercadoPago({
         pedidoId,

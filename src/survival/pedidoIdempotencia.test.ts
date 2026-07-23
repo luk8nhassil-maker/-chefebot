@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CLAIM_TTL_SEGUNDOS,
+  calcularChecklistFingerprint,
   calcularPricingFingerprint,
   chaveAttemptPedido,
   chaveClaimPedido,
@@ -113,6 +114,10 @@ describe("ehAttemptValido", () => {
     taxaEntrega: 3,
     descontoFidelidade: 0,
   };
+  const checklistBase = {
+    itens: ["1x Refrigerante 2L - R$ 15,00"],
+    itensDetalhados: [{ kind: "simple" as const, name: "Refrigerante 2L", price: 15, qty: 1 }],
+  };
   const attemptValido = {
     state: "in_progress" as const,
     requestFingerprint: "a".repeat(64),
@@ -121,6 +126,10 @@ describe("ehAttemptValido", () => {
     pricing: {
       ...pricingBase,
       pricingFingerprint: calcularPricingFingerprint(pricingBase),
+    },
+    checkout: {
+      ...checklistBase,
+      checklistFingerprint: calcularChecklistFingerprint(checklistBase),
     },
     createdAt: Date.now(),
     updatedAt: Date.now(),
@@ -210,6 +219,49 @@ describe("ehAttemptValido", () => {
       ehAttemptValido({
         ...attemptValido,
         pricing: { ...pricingComPixValido, pricingFingerprint: calcularPricingFingerprint(pricingComPixValido) },
+      })
+    ).toBe(true);
+  });
+
+  // [7ª revisão de segurança, ponto 1] O snapshot oficial do checkout
+  // (`checkout`) segue a MESMA regra do snapshot financeiro: o
+  // `checklistFingerprint` é RECALCULADO e comparado por igualdade exata,
+  // nunca só validado por formato — e a estrutura dos itens é validada.
+  it("rejeita checkout ausente ou malformado", () => {
+    expect(ehAttemptValido({ ...attemptValido, checkout: undefined })).toBe(false);
+    expect(ehAttemptValido({ ...attemptValido, checkout: { ...attemptValido.checkout, itens: [] } })).toBe(false);
+    expect(ehAttemptValido({ ...attemptValido, checkout: { ...attemptValido.checkout, itensDetalhados: [] } })).toBe(false);
+    expect(
+      ehAttemptValido({
+        ...attemptValido,
+        checkout: { ...attemptValido.checkout, itensDetalhados: [{ kind: "simple", name: "", price: 15, qty: 1 }] },
+      })
+    ).toBe(false);
+  });
+
+  it("rejeita checklistFingerprint com formato válido mas conteúdo adulterado (itens trocados sem recalcular o hash)", () => {
+    expect(
+      ehAttemptValido({
+        ...attemptValido,
+        checkout: { ...attemptValido.checkout, itens: ["1x Pizza G - R$ 1,00 (adulterado)"] },
+      })
+    ).toBe(false);
+  });
+
+  it("aceita checkout com resgateId/recompensaJornadaId quando o checklistFingerprint corresponde", () => {
+    const checklistComRefs = {
+      itens: ["1x Pizza G - R$ 50,00", "1x Presente da Jornada - R$ 0,00"],
+      itensDetalhados: [
+        { kind: "pizza" as const, name: "Pizza G", detail: "Calabresa", price: 50, qty: 1 },
+        { kind: "simple" as const, name: "Guarana 2L", price: 0, qty: 1, recompensaJornadaId: "recompensa_1" },
+      ],
+      resgateId: "resgate_1",
+      recompensaJornadaId: "recompensa_1",
+    };
+    expect(
+      ehAttemptValido({
+        ...attemptValido,
+        checkout: { ...checklistComRefs, checklistFingerprint: calcularChecklistFingerprint(checklistComRefs) },
       })
     ).toBe(true);
   });

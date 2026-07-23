@@ -597,18 +597,28 @@ de a rota sequer olhar para o pedido/resultado já existente.
   identidade BRUTA, não do telefone resolvido — 7ª revisão) +
   **recuperação ANTECIPADA de idempotência**: `:result`, busca por hash no
   pedido persistido, estado crítico (`survivalState`) já existente e, desde
-  a 7ª revisão, uma consulta SOMENTE LEITURA do `:attempt` (ver 2.5-I, item
-  2 — protege contra corrupção/conflito, mas ainda não pula a FASE 3 numa
-  recuperação de attempt em andamento). Se encontrado, devolve o resultado
-  real AGORA — antes de qualquer validação mutável. Só DEPOIS desta fase,
-  se nada foi encontrado, a rota resolve de verdade o vínculo com o
-  WhatsApp (`validarTokenCardapio`) e exige telefone válido para uma
-  criação genuinamente nova.
+  a 7ª revisão, uma consulta SOMENTE LEITURA do `:attempt`
+  (`consultarAttemptSomenteLeitura` — ver 2.5-I, item 1/2). Se `:result` ou
+  o pedido por hash já existirem, devolve o resultado real AGORA — antes de
+  qualquer validação mutável. Se um `:attempt` válido (mesmo
+  `requestFingerprint`) existir, marca `attemptRecuperado` — isso faz a
+  FASE 3 INTEIRA ser pulada (ver abaixo), reconstruindo o pedido a partir
+  do checkout oficial já validado gravado no attempt. Attempt corrompido →
+  503; fingerprint divergente → 409. Só DEPOIS desta fase, se nada foi
+  encontrado, a rota resolve de verdade o vínculo com o WhatsApp
+  (`validarTokenCardapio`) e exige telefone válido para uma criação
+  genuinamente nova.
 - **FASE 3** — validações de NEGÓCIO mutáveis: cardápio, promoções,
   esgotados, disponibilidade da recompensa da Jornada
   (`prepararResgateParaPedido`), validade do resgate
   (`obterReservasResgatePontos`), cálculo de preço. Só roda quando a FASE 2
-  não encontrou nenhuma tentativa já concluída/em andamento.
+  não encontrou nenhuma tentativa já concluída/em andamento/registrada em
+  attempt — numa recuperação via `:attempt` (`attemptRecuperado` setado),
+  a FASE 3 inteira é PULADA e os mesmos itens/preço/referências de
+  resgate/recompensa são reconstruídos a partir do checkout oficial
+  gravado no attempt (ver 2.5-I, item 1) — nunca revalida promoção,
+  estoque, resgate ou recompensa contra o estado ATUAL, que pode já ter
+  mudado.
 - **FASE 4** — claim (`SET NX`) + identidade/preço estáveis do attempt. O
   claim continua depois das validações de negócio (nunca antes, mesma
   garantia do "ponto 7" da 2ª/3ª revisões) — só a RECUPERAÇÃO de uma
@@ -716,26 +726,65 @@ token de novo); criação genuinamente nova com token inválido e sem telefone
 continua bloqueada; Redis falha ao validar o token numa criação
 genuinamente nova (503, nunca 400/500).
 
-**2) Consulta antecipada (somente leitura) do `:attempt` na FASE 2 — escopo
-desta rodada.** Foi adicionada, na FASE 2, uma consulta SOMENTE LEITURA do
-`:attempt` (`consultarAttemptSomenteLeitura`), rodando depois da busca por
-hash e antes da FASE 3: um attempt corrompido (formato inválido) nunca
-passa silenciosamente — devolve 503 `unresolved: true`; um attempt com
-fingerprint divergente do desta requisição devolve 409 (conflito), nunca
-reaproveita a identidade de outra tentativa. **Limite conhecido e
-deliberado desta rodada**: esta consulta só PROTEGE contra corrupção/
-conflito — ela **não** pula a FASE 3. Ou seja, o cenário relatado ("Pix
-cobrado, pedido nunca persistido, promoção expira ou item fica esgotado
-antes do retry") ainda pode, no caso específico de a FASE 3 rejeitar com
-400 antes de chegar à FASE 4, impedir que o retry reaproveite a identidade
-já cobrada — a FASE 4 (que já reaproveita corretamente `pedidoId`/`txid`/
-snapshot financeiro do attempt desde a 4ª/5ª revisão) só é alcançada se a
-FASE 3 não rejeitar antes. Fechar esse gap por completo exigiria ampliar o
-`attempt` com um snapshot oficial de checkout (itens, `itensDetalhados`,
-IDs de promoção/recompensa, referência do resgate — sem PII) para permitir
-pular a FASE 3 inteira numa recuperação; essa ampliação de schema fica
-para uma rodada futura, registrada aqui explicitamente para nunca ser
-apresentada como já implementada.
+**2) Consulta antecipada do `:attempt` na FASE 2 pula a FASE 3 INTEIRA numa
+recuperação — nunca mais revalida promoção/estoque/resgate/recompensa
+contra o estado atual.** Correção fechada nesta rodada (a versão anterior
+desta seção documentava isto como limite conhecido — não é mais o caso). A
+consulta SOMENTE LEITURA do `:attempt` (`consultarAttemptSomenteLeitura`),
+na FASE 2, depois da busca por hash e antes da FASE 3: attempt corrompido
+(formato inválido) devolve 503 `unresolved: true`; fingerprint divergente
+devolve 409 (conflito), nunca reaproveita a identidade de outra tentativa;
+attempt válido com o MESMO fingerprint marca `attemptRecuperado` e faz a
+FASE 3 inteira ser PULADA.
+
+Para isso, o `attempt` (`RegistroAttemptPedido.checkout`,
+`ChecklistOficialAttempt` em `src/survival/pedidoIdempotencia.ts`) foi
+ampliado com um **snapshot oficial e sanitizado do checkout**, criado na
+primeira validação bem-sucedida (FASE 3, ANTES de qualquer efeito
+externo): linhas já formatadas (`itens`), itens detalhados oficiais
+(`itensDetalhados` — kind/name/detail/price/qty/promoId/
+recompensaJornadaId, a mesma forma persistida em `pedido.itensDetalhados`),
+e as referências (IDs, nunca os dados) `resgateId`/`recompensaJornadaId`
+quando houver — mais um `checklistFingerprint` (SHA-256), RECALCULADO e
+comparado por igualdade exata no retry, na mesma regra do
+`pricingFingerprint` (nunca só formato). **Nunca contém** cliente,
+telefone, endereço, observação, e-mail, cookie, QR, copia-e-cola, token de
+provider ou credencial — nome de produto e composição comercial não são
+PII. O `clienteId` de fidelidade/Jornada (que embutiria o telefone em texto
+legível, `cli_{telefone}`) nunca é armazenado — é sempre recalculado, na
+hora, a partir do telefone já resolvido NESTA requisição (função pura, sem
+I/O).
+
+Numa recuperação (`attemptRecuperado` setado), a rota reconstrói, sem
+tocar cardápio/promoções/esgotados/`obterReservasResgatePontos`/
+`prepararResgateParaPedido`: `itens`/`itensDetalhados` (do checkout),
+`subtotal`/`descontoFidelidade`/`taxaEntrega`/`total` (do `pricing`, como já
+acontecia desde a 5ª/6ª revisão), `resgateAplicado` (do `checkout.resgateId`
++ `clienteId` recalculado), `pizzasCount` (recomputado, função pura, do
+`itensDetalhados` recuperado). A ÚNICA parte que ainda executa I/O numa
+recuperação com recompensa da Jornada é a resolução da SESSÃO (login da
+Área do Cliente) — não é revalidação de disponibilidade da recompensa (essa
+já está congelada no checkout), é só a identidade de quem pede, necessária
+para `confirmarReservaNoPedido` (idempotente) na FASE 5. Uma checagem de
+consistência extra (defesa em profundidade) confirma que o `resgateId`/
+`recompensaJornadaId` desta requisição batem com os gravados no checkout
+antes de reconstruir — divergência aqui só seria possível por corrupção (o
+fingerprint já deveria ter barrado antes) e retorna 503, nunca prossegue às
+cegas.
+
+Testado explicitamente (com o pedido NUNCA persistido — só o `:attempt`
+sobrevivendo, o cenário mais difícil que o da 6ª revisão, que já cobria
+"pedido persistido, `:result` perdido"): promoção expira antes do retry;
+produto (brinde) fica esgotado antes do retry; preço/composição da
+promoção muda antes do retry (retry mantém o preço e a composição
+ORIGINAIS); status do resgate muda de "reservado" para "confirmado" antes
+do retry (retry reutiliza o desconto original, nunca reavalia o resgate);
+recompensa da Jornada aparece vinculada ao MESMO `pedidoId` do attempt
+(retry nunca reavalia como indisponível); `clientRequestId` igual com
+payload DIFERENTE (fingerprint diverge) continua 409; attempt com checkout
+adulterado/incompleto retorna 503, nunca cria o pedido. Em todos os casos:
+mesmo `pedidoId`, mesmos itens, mesmo total, nenhuma segunda chamada
+financeira efetiva, `pedidos.length` nunca duplica.
 
 **3) Reconciliação de persistência ambígua agora valida a IDENTIDADE
 COMPLETA, não só `pedido.id === pedidoId`.** A reconciliação da 6ª revisão
@@ -921,6 +970,14 @@ abaixo.
   3ª revisão): 2 `GET`s (`:result` miss + `pedidos` hit) + 1 `EVAL` best-effort
   para recriar `:result`+`:result:token` juntos — ainda mais barato que uma
   criação completa.
+- **Recuperação via `:attempt`** (`:result`/hash ausentes, mas um attempt
+  válido com o MESMO fingerprint existe — 7ª revisão, item 2): 3 `GET`s
+  (`:result` miss + `pedidos` miss na busca por hash + `GET attempt` hit),
+  SEM `getMENUDinamico` nem os `GET`s condicionais de promoções/esgotados
+  nem `obterReservasResgatePontos` (a FASE 3 inteira é pulada) — segue
+  direto para o claim/FASE 4/5, **mais barato** que uma criação nova
+  completa, mesmo contando o `GET pedidos` fresco antes de persistir e a
+  eventual sessão da Área do Cliente (só quando há recompensa da Jornada).
 - **Invalidação de `:result` stale** (5ª/6ª revisão): +1 `EVAL` atômico
   (compare-and-delete do par registro+token, com detecção de corrupção)
   antes de seguir para a busca por hash; em caso de `substituido_por_outro`

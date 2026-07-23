@@ -230,3 +230,161 @@ describe("[6ª revisão] recuperação de idempotência roda antes da validaçã
     }
   });
 });
+
+// [7ª revisão de segurança, ponto 1] Caso mais difícil que o da 6ª revisão
+// acima: o PEDIDO NUNCA chegou a ser persistido (a resposta HTTP se perdeu
+// ANTES da persistência, não depois) — só o :attempt sobrevive. Antes desta
+// correção, o retry caía direto na FASE 3 (não havia recuperação via
+// attempt) e revalidava a promoção contra o estado ATUAL — se a promoção
+// já tivesse expirado/mudado/o brinde esgotado, o retry legítimo era
+// rejeitado com 400 mesmo tendo uma cobrança/identidade já reivindicada.
+// Agora a FASE 2 encontra o :attempt e a FASE 3 inteira é pulada: o retry
+// reconstrói o MESMO pedido a partir do checkout oficial já validado,
+// nunca revalidando a promoção.
+function restaurarSetPadrao() {
+  redisMock.set.mockImplementation(async (key: string, value: unknown, opts?: { nx?: boolean }) => {
+    if (opts?.nx && store.has(key)) return null;
+    store.set(key, value);
+    return "OK";
+  });
+}
+
+function falharPersistenciaUmaVez() {
+  let jaFalhou = false;
+  redisMock.set.mockImplementation(async (key: string, value: unknown, opts?: { nx?: boolean }) => {
+    if (key === "pedidos" && !jaFalhou && Array.isArray(value)) {
+      jaFalhou = true;
+      throw new Error("falha simulada ao persistir pedido (resposta perdida antes da escrita)");
+    }
+    if (opts?.nx && store.has(key)) return null;
+    store.set(key, value);
+    return "OK";
+  });
+}
+
+describe("[7ª revisão de segurança, ponto 1] recuperação via :attempt (pedido NUNCA persistido) pula a FASE 3 inteira", () => {
+  it("promoção expira antes do retry: retry reutiliza o checkout oficial (mesmo pedidoId/itens/total), nunca revalida a promoção, nunca 400", async () => {
+    process.env.SURVIVAL_MODE_ENABLED = "true";
+    try {
+      const clientRequestId = "attempt-promo-expira-sem-persistir-001";
+      falharPersistenciaUmaVez();
+
+      const r1 = await POST(postReq({ ...basePedido, clientRequestId }));
+      expect(r1.status).toBe(500);
+      expect(store.get("pedidos")).toBeUndefined();
+
+      restaurarSetPadrao();
+      // A promoção deixa de existir/fica inativa ANTES do retry — o pedido
+      // ainda NÃO existe (o SET anterior lançou antes de gravar nada).
+      store.set(PROMOS_KEY, [{ ...promo, active: false }]);
+
+      const retry = await POST(postReq({ ...basePedido, clientRequestId }));
+      expect(retry.status).toBe(200);
+      const body = await retry.json();
+      expect(body.total).toBe(49.9); // preço ORIGINAL da promoção, nunca recalculado
+      const pedidos = store.get("pedidos") as Array<{ id: string; itens: string[]; total: number }>;
+      expect(pedidos).toHaveLength(1); // nunca duplica
+      expect(pedidos[0].id).toBe(body.pedidoId);
+      expect(pedidos[0].total).toBe(49.9);
+      expect(pedidos[0].itens.join(" | ")).toContain("Promoção: Pizza G + Guaraná 1L grátis");
+    } finally {
+      delete process.env.SURVIVAL_MODE_ENABLED;
+    }
+  });
+
+  it("produto (brinde) fica esgotado antes do retry: retry reutiliza o checkout oficial, nunca 400", async () => {
+    process.env.SURVIVAL_MODE_ENABLED = "true";
+    try {
+      const clientRequestId = "attempt-brinde-esgota-sem-persistir-001";
+      falharPersistenciaUmaVez();
+
+      const r1 = await POST(postReq({ ...basePedido, clientRequestId }));
+      expect(r1.status).toBe(500);
+      expect(store.get("pedidos")).toBeUndefined();
+
+      restaurarSetPadrao();
+      store.set("esgotados", ["Guarana 1L"]);
+
+      const retry = await POST(postReq({ ...basePedido, clientRequestId }));
+      expect(retry.status).toBe(200);
+      const body = await retry.json();
+      expect(body.total).toBe(49.9);
+      expect((store.get("pedidos") as unknown[]).length).toBe(1);
+    } finally {
+      delete process.env.SURVIVAL_MODE_ENABLED;
+    }
+  });
+
+  it("preço/composição da promoção muda antes do retry: retry mantém o preço e a composição ORIGINAIS, nunca os novos", async () => {
+    process.env.SURVIVAL_MODE_ENABLED = "true";
+    try {
+      const clientRequestId = "attempt-promo-composicao-muda-001";
+      falharPersistenciaUmaVez();
+
+      const r1 = await POST(postReq({ ...basePedido, clientRequestId }));
+      expect(r1.status).toBe(500);
+      expect(store.get("pedidos")).toBeUndefined();
+
+      restaurarSetPadrao();
+      // Preço promocional E o brinde mudam ANTES do retry.
+      store.set(PROMOS_KEY, [
+        { ...promo, promotionalPrice: 999, freeItems: [{ productId: "bebida:Coca 2L", productName: "Coca 2L", category: "bebida", quantity: 1, priceImpact: 0 }] },
+      ]);
+
+      const retry = await POST(postReq({ ...basePedido, clientRequestId }));
+      expect(retry.status).toBe(200);
+      const body = await retry.json();
+      expect(body.total).toBe(49.9); // nunca 999
+      const pedidos = store.get("pedidos") as Array<{ itens: string[] }>;
+      expect(pedidos[0].itens.join(" | ")).toContain("Guarana 1L grátis"); // composição ORIGINAL, nunca a nova (Coca 2L)
+    } finally {
+      delete process.env.SURVIVAL_MODE_ENABLED;
+    }
+  });
+
+  it("clientRequestId igual, payload DIFERENTE (fingerprint diverge): continua 409, mesmo com attempt em andamento", async () => {
+    process.env.SURVIVAL_MODE_ENABLED = "true";
+    try {
+      const clientRequestId = "attempt-fingerprint-diverge-001";
+      falharPersistenciaUmaVez();
+
+      const r1 = await POST(postReq({ ...basePedido, clientRequestId }));
+      expect(r1.status).toBe(500);
+      restaurarSetPadrao();
+
+      // Mesmo clientRequestId, cliente DIFERENTE — fingerprint diverge.
+      const retry = await POST(postReq({ ...basePedido, cliente: "Outra Pessoa", clientRequestId }));
+      expect(retry.status).toBe(409);
+      expect((store.get("pedidos") as unknown[] | undefined) ?? []).toHaveLength(0);
+    } finally {
+      delete process.env.SURVIVAL_MODE_ENABLED;
+    }
+  });
+
+  it("attempt corrompido (checkout ausente/adulterado): retorna 503 unresolved, nunca cria o pedido", async () => {
+    process.env.SURVIVAL_MODE_ENABLED = "true";
+    try {
+      const clientRequestId = "attempt-checkout-adulterado-001";
+      falharPersistenciaUmaVez();
+
+      const r1 = await POST(postReq({ ...basePedido, clientRequestId }));
+      expect(r1.status).toBe(500);
+      restaurarSetPadrao();
+
+      // Adultera o checkout gravado no attempt — remove os itens detalhados
+      // (campo obrigatório) sem recalcular o checklistFingerprint.
+      const chaveAttempt = `survival:idempotencia:pedido:${clientRequestId}:attempt`;
+      const attemptAtual = store.get(chaveAttempt) as { checkout: Record<string, unknown> };
+      store.set(chaveAttempt, { ...attemptAtual, checkout: { ...attemptAtual.checkout, itensDetalhados: [] } });
+
+      const retry = await POST(postReq({ ...basePedido, clientRequestId }));
+      expect(retry.status).toBe(503);
+      const body = await retry.json();
+      expect(body.ok).toBe(false);
+      expect(body.unresolved).toBe(true);
+      expect((store.get("pedidos") as unknown[] | undefined) ?? []).toHaveLength(0);
+    } finally {
+      delete process.env.SURVIVAL_MODE_ENABLED;
+    }
+  });
+});

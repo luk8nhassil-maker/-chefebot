@@ -257,23 +257,120 @@ function ehSnapshotFinanceiroValido(valor: unknown): valor is SnapshotFinanceiro
   return true;
 }
 
+/** Item oficial já validado pelo servidor (7ª revisão de segurança, ponto 1)
+ * — a mesma forma persistida em `pedido.itensDetalhados` hoje. `name`/
+ * `detail` descrevem PRODUTO (nome comercial, sabor, composição) — nunca o
+ * cliente: "nome de produto e composição comercial não são PII". */
+export type ItemOficialAttempt = {
+  kind: "pizza" | "simple" | "promo";
+  name: string;
+  detail?: string;
+  price: number;
+  qty: number;
+  promoId?: string;
+  recompensaJornadaId?: string;
+};
+
+/** Snapshot OFICIAL e SANITIZADO do checkout já validado — criado na
+ * primeira validação bem-sucedida (FASE 3), ANTES de qualquer efeito
+ * externo (7ª revisão de segurança, ponto 1). Permite que um retry cujo
+ * attempt já exista reconstrua o MESMO pedido sem revalidar estado mutável
+ * (promoção ainda ativa, produto ainda disponível, resgate ainda
+ * "reservado", recompensa da Jornada ainda disponível) — que pode ter
+ * mudado entre a tentativa original e o retry. Contém só o necessário para
+ * reconstruir o pedido: linhas já formatadas, itens detalhados oficiais,
+ * referência (ID) do resgate/recompensa quando houver. NUNCA contém
+ * cliente, telefone, endereço, observação, e-mail, cookie, QR,
+ * copia-e-cola, token de provider ou credencial — `clienteId`
+ * (fidelidade/Jornada) é sempre derivado de novo, na hora, a partir do
+ * telefone resolvido NESTA requisição (função pura, sem I/O — nunca
+ * armazenado, porque `cli_{telefone}` embutiria o telefone em texto
+ * legível). */
+export type ChecklistOficialAttempt = {
+  itens: string[];
+  itensDetalhados: ItemOficialAttempt[];
+  resgateId?: string;
+  recompensaJornadaId?: string;
+  /** SHA-256 sobre os campos acima (serialização canônica) — mesma regra
+   * do `pricingFingerprint`: RECALCULADO e comparado por igualdade exata no
+   * retry, nunca só validado por formato. */
+  checklistFingerprint: string;
+};
+
+export function calcularChecklistFingerprint(checklist: Omit<ChecklistOficialAttempt, "checklistFingerprint">): string {
+  const canonico = JSON.stringify({
+    itens: checklist.itens,
+    itensDetalhados: checklist.itensDetalhados,
+    resgateId: checklist.resgateId ?? null,
+    recompensaJornadaId: checklist.recompensaJornadaId ?? null,
+  });
+  return createHash("sha256").update(canonico).digest("hex");
+}
+
+function ehItemOficialValido(valor: unknown): valor is ItemOficialAttempt {
+  if (!valor || typeof valor !== "object") return false;
+  const v = valor as Partial<ItemOficialAttempt>;
+  return (
+    (v.kind === "pizza" || v.kind === "simple" || v.kind === "promo") &&
+    typeof v.name === "string" &&
+    v.name.length > 0 &&
+    (v.detail === undefined || typeof v.detail === "string") &&
+    typeof v.price === "number" &&
+    Number.isFinite(v.price) &&
+    v.price >= 0 &&
+    typeof v.qty === "number" &&
+    Number.isFinite(v.qty) &&
+    v.qty > 0 &&
+    (v.promoId === undefined || typeof v.promoId === "string") &&
+    (v.recompensaJornadaId === undefined || typeof v.recompensaJornadaId === "string")
+  );
+}
+
+function ehChecklistOficialValido(valor: unknown): valor is ChecklistOficialAttempt {
+  if (!valor || typeof valor !== "object") return false;
+  const v = valor as Partial<ChecklistOficialAttempt>;
+  const formaValida =
+    Array.isArray(v.itens) &&
+    v.itens.length > 0 &&
+    v.itens.every((linha) => typeof linha === "string") &&
+    Array.isArray(v.itensDetalhados) &&
+    v.itensDetalhados.length > 0 &&
+    v.itensDetalhados.every(ehItemOficialValido) &&
+    (v.resgateId === undefined || (typeof v.resgateId === "string" && v.resgateId.length > 0)) &&
+    (v.recompensaJornadaId === undefined || (typeof v.recompensaJornadaId === "string" && v.recompensaJornadaId.length > 0)) &&
+    typeof v.checklistFingerprint === "string" &&
+    SHA256_HEX_REGEX.test(v.checklistFingerprint);
+  if (!formaValida) return false;
+
+  const fingerprintRecalculado = calcularChecklistFingerprint({
+    itens: v.itens as string[],
+    itensDetalhados: v.itensDetalhados as ItemOficialAttempt[],
+    resgateId: v.resgateId,
+    recompensaJornadaId: v.recompensaJornadaId,
+  });
+  return fingerprintRecalculado === v.checklistFingerprint;
+}
+
 /** Registro do "attempt" — identidade estável da tentativa, criada/recuperada
  * ATOMICAMENTE antes de qualquer efeito externo (vínculo da Jornada do Chef,
  * cobrança Pix — ver revisão de segurança, 4ª rodada, ponto 3). Garante que
  * um retry com o MESMO clientRequestId + MESMO fingerprint sempre reutiliza
  * o MESMO pedidoId (e, por consequência, o mesmo txid — derivado
  * deterministicamente de pedidoId em `gerarTxidPixInterno` — e a mesma
- * X-Idempotency-Key do Mercado Pago, derivada do txid) E o MESMO valor
- * financeiro (`pricing`, 5ª rodada), mesmo que a persistência do pedido
- * tenha falhado na tentativa anterior. Nunca contém PII, QR, copia-e-cola
- * ou credencial — só os identificadores e números necessários para
- * recuperar o fluxo. */
+ * X-Idempotency-Key do Mercado Pago, derivada do txid), o MESMO valor
+ * financeiro (`pricing`, 5ª rodada) E o MESMO checkout oficial já validado
+ * (`checkout`, 7ª rodada — permite pular a revalidação de estado mutável
+ * inteira numa recuperação), mesmo que a persistência do pedido tenha
+ * falhado na tentativa anterior. Nunca contém PII, QR, copia-e-cola ou
+ * credencial — só os identificadores e números necessários para recuperar
+ * o fluxo. */
 export type RegistroAttemptPedido = {
   state: "in_progress" | "completed";
   requestFingerprint: string;
   pedidoId: string;
   txid: string;
   pricing: SnapshotFinanceiroAttempt;
+  checkout: ChecklistOficialAttempt;
   createdAt: number;
   updatedAt: number;
 };
@@ -305,6 +402,7 @@ export function ehAttemptValido(valor: unknown): valor is RegistroAttemptPedido 
     v.txid.length > 0 &&
     v.txid === gerarTxidDeterministico(v.pedidoId) &&
     ehSnapshotFinanceiroValido(v.pricing) &&
+    ehChecklistOficialValido(v.checkout) &&
     typeof v.createdAt === "number" &&
     Number.isFinite(v.createdAt) &&
     v.createdAt > 0 &&
