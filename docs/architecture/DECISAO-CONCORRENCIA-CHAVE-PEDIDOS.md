@@ -1,8 +1,14 @@
-# Decisão técnica pendente: corrida read-modify-write na chave `pedidos`
+# Decisão técnica: corrida read-modify-write na chave `pedidos`
 
-**Status: proposta para revisão — nada neste documento foi implementado.**
+**Status: IMPLEMENTADO** (ver seção 8) — `src/lib/pedidosStore.ts` e a
+migração de todos os writers de produção da chave `pedidos` para ele. As
+seções 1-7 abaixo são o registro histórico da análise/decisão que motivou a
+implementação; a seção 8 documenta o que foi de fato construído, testado e
+suas garantias/limitações reais.
+
 A ativação do Modo Sobrevivência em Production (`SURVIVAL_MODE_ENABLED=true`)
-permanece bloqueada até esta decisão ser revisada e aprovada separadamente.
+permanece bloqueada — este PR é estritamente estrutural (concorrência da
+chave `pedidos`), não ativa nenhuma flag e não inicia a Etapa 2 de interface.
 
 ## 1. O risco, com precisão
 
@@ -288,7 +294,183 @@ pending/completed/recovery_required). **Sem PostgreSQL, sem dual-write, sem
 contratar serviço novo, sem ativar recurso pago** — a mitigação, quando
 decidida, permanece inteiramente dentro do Redis/Upstash já em uso.
 
-## 7. Bloqueio explícito
+## 8. Implementação (este PR): o que foi construído, custo e limitações
+
+Este PR implementa a variante da **Opção A** (lock distribuído curto), ao
+invés da Opção B (Lua puro), pelo mesmo motivo apontado na seção 4: reaproveita
+100% o padrão já validado em produção (`mercadoPagoReconciliacao.ts`,
+`pedidoEdicao.ts`) sem depender de confirmar suporte a `cjson` no ambiente Lua
+da Upstash. O mecanismo, o desenho de `pedidoId` e a estratégia de `revision`
+foram resolvidos **juntos**, como a seção 6.1 pedia.
+
+### 8.1 Módulo central — `src/lib/pedidosStore.ts`
+
+Único ponto autorizado a fazer `GET`+mutação+`SET` da chave `pedidos`.
+Operações nomeadas (nunca um helper genérico): `adicionarPedidoAtomico`,
+`atualizarPedidoAtomico` (com `expectedRevision` opcional),
+`mutarPedidoPorIdAtomico` (atalho sem checagem de revisão),
+`removerPedidoAtomico`, `mutarLotePedidosAtomico` (escape hatch documentado
+para transformações em lote), `listarPedidos`/`buscarPedido` (leitura, sem
+lock), e `executarComLockPedidos` (escape hatch para os pouquíssimos
+consumidores que precisam gravar `pedidos` atomicamente JUNTO com outra
+chave na mesma operação — ex.: atribuição de entregador com fila em Lua,
+merge por id da reconciliação Mercado Pago).
+
+Lock: `SET lock:pedidos:mutex NX EX 5` + token aleatório (`crypto.randomUUID`)
++ liberação por Lua compare-and-delete (nunca um `DEL` cego — uma execução
+cujo lock expirou por TTL nunca libera o lock de uma execução nova que já
+tenha adquirido a chave). Retry limitado (40 tentativas, 20-50ms + jitter,
+~2s de espera total no pior caso) — nunca espera indefinidamente; esgotar os
+retries devolve `lock_indisponivel`, que cada endpoint traduz em **503
+recuperável** (nunca um 500 cru, nunca finge sucesso).
+
+A seção crítica contém **só** GET fresco → validação de identidade → aplica
+mutação → SET. O lock **nunca** envolve chamada de rede externa (Mercado
+Pago, WhatsApp, cardápio, autenticação) — endpoints que precisam desse
+trabalho pesado (ex.: `editar/salvar`, que cria cobrança Pix) o fazem
+**antes** de entrar na seção crítica, e revalidam o estado fresco dentro do
+lock só no commit final.
+
+### 8.2 `pedidoId` — `gerarPedidoIdUnico()`
+
+`${Date.now()}${randomBytes(4).toString("hex")}` — substitui
+`Date.now().toString()` isolado. Nunca colide, mesmo com centenas de criações
+no mesmo milissegundo (testado com 5000 gerações no mesmo ms — unicidade
+100%). Auditoria de TODOS os consumidores de `pedidoId` confirmou apenas um
+site com suposição numérica (`timestampOrdenacaoPedido` em
+`clientePedidos.ts`), já defensivamente coberto por fallback de data+horario;
+`txid`/`X-Idempotency-Key`/vínculo da Jornada são interpolação de string pura,
+sem suposição numérica. Pedidos legados com id puramente numérico continuam
+funcionando sem qualquer migração de dado.
+
+### 8.3 `revision` — controle de concorrência otimista
+
+Campo já existente (`PedidoComEdicao.revision?: number`) agora é a fonte de
+verdade para conflito controlado: toda atualização via `atualizarPedidoAtomico`
+pode exigir uma revisão esperada — divergência devolve `conflito_revisao`
+(409 para o cliente, nunca sobrescreve silenciosamente uma mudança mais
+nova). Pedidos legados sem `revision` usam o fallback documentado (`1`) e
+ganham uma revisão válida na primeira mutação pelo módulo. `salvar/route.ts`
+(edição do cliente) é o único fluxo que usa `expectedRevision` de verdade
+hoje; os demais usam `mutarPedidoPorIdAtomico` (sem checagem) porque são
+mutações best-effort de campo único sem um "valor esperado" do lado do
+chamador — ainda protegidas pelo MESMO lock global contra perda de mutação
+concorrente de outro pedido, só não contra conflito no MESMO pedido (risco
+residual documentado abaixo, seção 8.6).
+
+### 8.4 Custo Redis (recontado, combinado — não por peça)
+
+Caminho feliz de uma mutação de um único pedido (`adicionarPedidoAtomico`/
+`atualizarPedidoAtomico`/`removerPedidoAtomico`/`mutarPedidoPorIdAtomico`):
+
+| Comando | Quando |
+|---|---|
+| `SET lock:pedidos:mutex NX EX 5` | Sempre (aquisição do lock) |
+| `GET pedidos` | Sempre (leitura fresca dentro do lock) |
+| `SET pedidos` | Sempre (escrita) |
+| `EVAL` (compare-and-delete) | Sempre (liberação do lock) |
+
+**4 comandos por mutação no caminho feliz** — 2 a mais do que o `GET`+`SET`
+direto de antes (a Opção A da seção 3 já previa exatamente isso). Sob
+contenção (lock ocupado por outra execução), soma-se 1 `SET NX` extra por
+tentativa de retry (até 40, mas o caso comum sob concorrência real de poucos
+writers simultâneos são 1-3 tentativas antes de conseguir o lock). O escape
+hatch `executarComLockPedidos` (atribuição de entregador, reconciliação Pix)
+soma o mesmo custo de lock (`SET`+`EVAL`) em cima do que essas operações já
+faziam.
+
+**Latência adicionada:** desprezível no caminho feliz (lock sem contenção =
+1 round-trip de `SET NX` a mais, tipicamente <10ms na rede Upstash). Sob
+contenção, cada tentativa de retry aguarda 20-50ms + jitter — no pior caso
+teórico (40 tentativas esgotadas) chega a ~2s, mas isso só acontece com um
+volume de escritas concorrentes na MESMA janela muito acima do observado em
+produção hoje (pico é dezenas de pedidos por hora, não por segundo).
+
+**Comportamento sob 2/10/50 mutações concorrentes** (medido nos testes de
+concorrência, `src/lib/pedidosStore.concorrencia.test.ts`): nenhuma perdida,
+nenhuma duplicada, em todos os três volumes — o lock serializa a seção
+crítica (GET+SET), então o custo cresce linearmente com o número de mutações
+concorrentes disputando a MESMA janela (cada uma espera a anterior liberar o
+lock), não exponencialmente. Isso é esperado e aceitável para os volumes
+reais do negócio (não há dezenas de pedidos sendo criados por segundo).
+
+**Tamanho atual do array `pedidos`:** não recontado neste PR (nenhuma
+mudança na estratégia de arquivamento/limpeza — `cron/limpeza`,
+`cron/route.ts`, `arquivar` continuam removendo pedidos antigos do array
+normalmente, agora via `mutarLotePedidosAtomico`). O custo de serializar o
+array inteiro a cada `SET` já existia antes deste PR e não piora — só se
+soma o `GET`+`EVAL`+`SET` extra do lock.
+
+**Limite operacional conhecido:** este mecanismo serializa TODAS as mutações
+de `pedidos` atrás de um único lock global, independente de quais pedidos
+estão envolvidos. Isso significa que o sistema tem um teto de throughput de
+escrita = (1 / duração média da seção crítica) mutações por segundo,
+somado entre TODOS os canais (site, WhatsApp, painel, cron, webhooks). Não
+foi medido um número absoluto de mutações/segundo suportável — a suposição
+de segurança é que o volume real de pedidos do negócio está ordens de
+magnitude abaixo desse teto. **Não alegamos escala infinita.** Este é uma
+mitigação segura para a arquitetura Redis/Upstash **atual**, não um
+substituto para um banco transacional — se o volume de escrita concorrente
+crescer significativamente (ex.: múltiplas lojas, volume 10-100x maior), a
+migração a PostgreSQL (`ADR-POSTGRES-SOURCE-OF-TRUTH.md`, programa separado)
+continua sendo a solução definitiva.
+
+### 8.5 Compatibilidade Pix/Jornada/fidelidade (auditada, não alterada além do necessário)
+
+- **Pix:** o mesmo `pedidoId`/`txid`/`X-Idempotency-Key` de uma tentativa é
+  preservado através de qualquer retry (nada mudou na cadeia determinística
+  `gerarTxidPixInterno`). Confirmação manual (`confirmar-pix-manual`) e
+  webhook (`pix/webhook`) agora revalidam idempotência/cobrança-substituída
+  DENTRO do lock antes de gravar — corrida entre os dois nunca gera dupla
+  cobrança nem sobrescreve o resultado um do outro (o que chega primeiro
+  vence, o segundo recebe `pix_ja_confirmado`/409 sem reescrever nada). A
+  reconciliação periódica (`mercadoPagoReconciliacao.ts`) manteve 100% da sua
+  lógica de merge-por-id/"primeira confirmação vence" — só a releitura+escrita
+  final passou a rodar sob o mesmo lock global, fechando a última janela de
+  corrida com outro writer.
+- **Jornada do Chef:** vínculo por `pedidoId` inalterado; rollback
+  (`removerPedidoAtomico`) sempre revalida existência e mira exatamente o id
+  correto dentro do lock, nunca reintroduz nem remove um pedido diferente.
+- **Fidelidade:** nenhuma mudança nos fluxos de crédito/estorno de pontos —
+  eles não escrevem a chave `pedidos` diretamente (confirmado na auditoria de
+  writers, seção 8.7); continuam lendo o pedido (agora sempre via
+  `pedidosStore` nos writers migrados) para decidir o crédito.
+
+### 8.6 Riscos residuais conhecidos (não resolvidos por este PR)
+
+- **`mutarPedidoPorIdAtomico` sem `expectedRevision`:** a maioria dos writers
+  migrados usa a variante sem checagem de revisão (mutação best-effort de
+  campo único). Isso protege contra PERDA de mutação concorrente (o lock
+  global garante isso sempre), mas não contra um CONFLITO SEMÂNTICO no mesmo
+  pedido (ex.: painel aceita o pedido no mesmo instante em que o cliente tenta
+  salvar uma edição) além do que os próprios guards de negócio (`editStatus`,
+  `pedidoAguardandoAceite`, etc., revalidados frescos dentro do lock) já
+  cobrem. `editar/salvar` é o único fluxo com `expectedRevision` real hoje.
+- **Tamanho do array `pedidos`:** continua crescendo indefinidamente até ser
+  arquivado/limpo pelos crons existentes — este PR não muda essa estratégia,
+  só protege as mutações dela.
+- **Teto de throughput:** ver seção 8.4 — não medido em número absoluto,
+  aceito como adequado para o volume real do negócio hoje.
+
+### 8.7 Escopo da migração de writers
+
+Auditoria completa (Explore agent) encontrou 15 read-only consumers (sem
+escrita, fora do escopo) e ~22 read-modify-write writers em produção — todos
+migrados para `pedidosStore.ts` neste PR: `pedido-app/route.ts` (criação,
+rollback de resgate, `survivalState`), `whatsapp/route.ts` (8 sites:
+criação, escalonamento, cancelamento solicitado, fechamento de
+escalonamento, evidência/confirmação/rejeição de Pix por texto e mídia,
+confirmação de entrega), `orders/route.ts` (limpeza preguiçosa, mudança de
+status/atribuição de entregador, criação manual, remoção individual/em
+lote), `confirmar-pix-manual`, `arquivar`, `pix/webhook`,
+`mercadoPagoReconciliacao.ts`, `resolver`, `finalizar-atendimento`, os 4
+endpoints de edição do cliente (`iniciar`/`salvar`/`descartar`/`status`),
+3 crons (`limpeza`, `pix-pendente`, `route.ts`), `bot/route.ts` (simulador,
+incluindo o `DELETE` de reset total) e `dev/reset`. Um teste de arquitetura
+(`src/lib/pedidosStore.arquitetura.test.ts`) falha automaticamente se um novo
+writer direto for criado fora da allowlist explícita do escape hatch.
+
+## 9. Bloqueio explícito
 
 Enquanto esta decisão não for revisada e aprovada, **`SURVIVAL_MODE_ENABLED`
 não deve ser ativado em Production** — a idempotência por `clientRequestId`

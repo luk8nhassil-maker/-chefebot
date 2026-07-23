@@ -111,12 +111,15 @@ export function filtrarPedidosDoCliente(
 
 // ==================== Ordenação ====================
 
-// O id de todo pedido criado pelo app é `Date.now().toString()` (timestamp em
-// ms) — por isso é o critério primário de ordenação. Quando o id não é
-// puramente numérico (defensivo, nunca deveria acontecer com os fluxos atuais
-// de criação), cai para data+horario (pt-BR) como fallback seguro; se nem
-// isso der para interpretar, o pedido vai para o fim sem quebrar a ordenação
-// dos demais.
+// Pedidos legados têm id puramente numérico (`Date.now().toString()`), usado
+// como critério primário de ordenação. Pedidos novos usam
+// `gerarPedidoIdUnico()` (src/lib/pedidosStore.ts) — timestamp + entropia,
+// não puramente numérico por design — então caem no fallback abaixo:
+// data+horario (pt-BR). Como o timestamp continua sendo o prefixo do novo id
+// (largura fixa), a ordenação cronológica seria preservada mesmo com um
+// parse numérico, mas o fallback por data+horario já resolve isso sem
+// precisar tratar o novo formato aqui. Se nem isso der para interpretar, o
+// pedido vai para o fim sem quebrar a ordenação dos demais.
 export function timestampOrdenacaoPedido(p: PedidoClienteFonte): number {
   if (/^\d+$/.test(p.id)) return Number(p.id);
 
