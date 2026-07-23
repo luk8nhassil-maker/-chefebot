@@ -235,6 +235,82 @@ async function buscarPedidoPersistidoPorId(pedidoId: string): Promise<ResultadoB
   return pedido ? { tipo: "encontrado", pedido } : { tipo: "nao_encontrado" };
 }
 
+type ResultadoReconciliacaoCompleta =
+  | { tipo: "encontrado"; pedido: PedidoArmazenado }
+  | { tipo: "nao_encontrado" }
+  | { tipo: "incerto" }
+  | { tipo: "inconsistente" };
+
+// 7ª revisão de segurança, ponto 3: `pedido.id === pedidoId` sozinho NÃO
+// comprova que o pedido encontrado é o MESMO cuja criação lançou a exceção
+// reconciliada — pedidoId é derivado de Date.now() (risco de colisão já
+// documentado em DECISAO-CONCORRENCIA-CHAVE-PEDIDOS.md) e uma leitura da
+// chave única "pedidos" sob concorrência pode, em tese, expor um estado
+// intermediário. Antes de tratar qualquer pedido encontrado como "o pedido
+// desta tentativa", confirma a IDENTIDADE COMPLETA: hash do clientRequestId,
+// fingerprint da requisição, correspondência ÚNICA (nunca mais de um pedido
+// com o mesmo id), e que os campos essenciais (numero, statusToken, total,
+// survivalState, txid do Pix) sejam valores válidos — nunca aproveita
+// numero/statusToken/Pix de um pedido só porque o id bateu.
+async function reconciliarIdentidadeCompletaAposFalha(
+  pedidoId: string,
+  clientRequestIdHash: string,
+  requestFingerprint: string
+): Promise<ResultadoReconciliacaoCompleta> {
+  let pedidosAtuais: PedidoArmazenado[];
+  try {
+    pedidosAtuais = (await redis.get<PedidoArmazenado[]>("pedidos")) || [];
+  } catch (err) {
+    logSurvivalErro("idempotencia_pedido", "reconciliacao_identidade_completa", "get_pedidos_falhou", err);
+    return { tipo: "incerto" };
+  }
+
+  const candidatos = pedidosAtuais.filter((p) => p && p.id === pedidoId);
+  if (candidatos.length === 0) return { tipo: "nao_encontrado" };
+  if (candidatos.length > 1) {
+    logSurvivalErro("idempotencia_pedido", "reconciliacao_identidade_completa", "multiplos_pedidos_mesmo_id");
+    return { tipo: "inconsistente" };
+  }
+
+  const pedido = candidatos[0];
+
+  if (pedido.survivalClientRequestIdHash !== clientRequestIdHash) {
+    logSurvivalErro("idempotencia_pedido", "reconciliacao_identidade_completa", "hash_divergente");
+    return { tipo: "inconsistente" };
+  }
+  if (pedido.survivalRequestFingerprint !== requestFingerprint) {
+    logSurvivalErro("idempotencia_pedido", "reconciliacao_identidade_completa", "fingerprint_divergente");
+    return { tipo: "inconsistente" };
+  }
+  if (
+    pedido.survivalState !== undefined &&
+    pedido.survivalState !== "pending_critical_confirmation" &&
+    pedido.survivalState !== "completed" &&
+    pedido.survivalState !== "recovery_required"
+  ) {
+    logSurvivalErro("idempotencia_pedido", "reconciliacao_identidade_completa", "survival_state_invalido");
+    return { tipo: "inconsistente" };
+  }
+  if (pedido.numero !== undefined && (typeof pedido.numero !== "number" || !Number.isInteger(pedido.numero))) {
+    logSurvivalErro("idempotencia_pedido", "reconciliacao_identidade_completa", "numero_invalido");
+    return { tipo: "inconsistente" };
+  }
+  if (pedido.statusToken !== undefined && typeof pedido.statusToken !== "string") {
+    logSurvivalErro("idempotencia_pedido", "reconciliacao_identidade_completa", "status_token_invalido");
+    return { tipo: "inconsistente" };
+  }
+  if (pedido.total !== undefined && (typeof pedido.total !== "number" || !Number.isFinite(pedido.total) || pedido.total < 0)) {
+    logSurvivalErro("idempotencia_pedido", "reconciliacao_identidade_completa", "total_invalido");
+    return { tipo: "inconsistente" };
+  }
+  if (pedido.pix && typeof pedido.pix.txid === "string" && pedido.pix.txid !== gerarTxidPixInterno(pedidoId)) {
+    logSurvivalErro("idempotencia_pedido", "reconciliacao_identidade_completa", "pix_txid_nao_corresponde");
+    return { tipo: "inconsistente" };
+  }
+
+  return { tipo: "encontrado", pedido };
+}
+
 type ResultadoReconstrucao =
   | { tipo: "sucesso"; resposta: PedidoAppRespostaSucesso }
   | { tipo: "pendente_critico" }
@@ -505,6 +581,35 @@ type ResultadoAttempt =
   | { tipo: "conflito_fingerprint" }
   | { tipo: "incerto" };
 
+type ResultadoConsultaAttempt =
+  | { tipo: "encontrado"; registro: RegistroAttemptPedido }
+  | { tipo: "nao_encontrado" }
+  | { tipo: "conflito_fingerprint" }
+  | { tipo: "incerto" };
+
+// 7ª revisão de segurança, ponto 1: consulta SOMENTE LEITURA do :attempt —
+// roda na FASE 2, ANTES das validações mutáveis (FASE 3), para nunca deixar
+// um attempt corrompido ou de outra tentativa passar silenciosamente. Nunca
+// cria/reivindica nada (isso continua sendo feito só pela FASE 4, via
+// `obterOuCriarAttempt`) — só protege contra colisão de identidade e
+// corrupção antes de rodar validações que dependem de estado mutável.
+async function consultarAttemptSomenteLeitura(clientRequestId: string, requestFingerprint: string): Promise<ResultadoConsultaAttempt> {
+  let atual: unknown;
+  try {
+    atual = await redis.get(chaveAttemptPedido(clientRequestId));
+  } catch (err) {
+    logSurvivalErro("idempotencia_pedido", "attempt_consulta_antecipada", "get_falhou", err);
+    return { tipo: "incerto" };
+  }
+  if (atual === null || atual === undefined) return { tipo: "nao_encontrado" };
+  if (!ehAttemptValido(atual)) {
+    logSurvivalErro("idempotencia_pedido", "attempt_consulta_antecipada", "formato_invalido");
+    return { tipo: "incerto" };
+  }
+  if (atual.requestFingerprint !== requestFingerprint) return { tipo: "conflito_fingerprint" };
+  return { tipo: "encontrado", registro: atual };
+}
+
 // Cria (SET NX) ou recupera atomicamente a identidade ESTÁVEL da tentativa
 // — pedidoId + txid (txid é uma função pura e determinística de pedidoId,
 // ver gerarTxidPixInterno; a X-Idempotency-Key do Mercado Pago é por sua vez
@@ -622,25 +727,21 @@ export async function POST(req: NextRequest) {
     if (!body.cliente || !body.itens || body.itens.length === 0) {
       return NextResponse.json({ ok: false, error: "Pedido inválido" }, { status: 400 });
     }
-    // Vínculo com o WhatsApp: se veio token do link do cardápio, o telefone
-    // resolvido SERVER-SIDE é a fonte principal do pedido — todo cliente já
-    // começou a conversa pelo WhatsApp real, então o vínculo é automático.
-    // O telefone do body (localStorage antigo, campo preenchido sozinho etc.)
-    // é IGNORADO enquanto o token for válido, a menos que o cliente peça
-    // explicitamente para usar outro WhatsApp (`usarOutroWhatsapp: true`) —
-    // aí sim o telefone digitado vence e o pedido NÃO é tratado como vínculo
-    // automático do token. Token inválido/expirado cai na regra normal de
-    // telefone obrigatório digitado no checkout.
-    const vinculoWhatsapp = body.whatsappToken ? await validarTokenCardapio(body.whatsappToken) : null;
+    // 7ª revisão de segurança, ponto 2: a RESOLUÇÃO do vínculo com o
+    // WhatsApp (`validarTokenCardapio`, uma chamada ao Redis com token de
+    // 24h) NUNCA pode rodar antes da recuperação de idempotência (FASE 2) —
+    // um retry legítimo de uma tentativa já concluída não pode receber
+    // "Telefone obrigatório"/500 só porque o token temporário expirou ou o
+    // Redis falhou nessa checagem específica. Aqui extraímos só a
+    // IDENTIDADE BRUTA E ESTÁVEL enviada (o próprio token opaco, quando
+    // presente, ou o telefone digitado) — sem nenhuma chamada ao Redis —
+    // para alimentar o fingerprint. A resolução de verdade (token → telefone
+    // canônico) é adiada para logo após a FASE 2, e só é EXIGIDA quando esta
+    // se revela uma criação genuinamente nova.
     const telefoneDigitado = (body.telefone || "").trim();
     const usarOutroWhatsapp = !!body.usarOutroWhatsapp;
-    const telefonePedido = vinculoWhatsapp && !usarOutroWhatsapp
-      ? vinculoWhatsapp.phone
-      : telefoneDigitado;
-    const whatsappVinculado = !!vinculoWhatsapp && !usarOutroWhatsapp;
-    if (!telefonePedido) {
-      return NextResponse.json({ ok: false, error: "Telefone obrigatório" }, { status: 400 });
-    }
+    const identidadeBrutaTelefone =
+      !usarOutroWhatsapp && body.whatsappToken?.trim() ? body.whatsappToken.trim() : telefoneDigitado;
     if (!body.pagamento || !body.pagamento.trim()) {
       return NextResponse.json({ ok: false, error: "Forma de pagamento obrigatória" }, { status: 400 });
     }
@@ -718,7 +819,7 @@ export async function POST(req: NextRequest) {
     if (clientRequestId) {
       requestFingerprint = calcularRequestFingerprint({
         cliente: body.cliente,
-        telefonePedido,
+        telefonePedido: identidadeBrutaTelefone,
         itens: body.itens,
         tipoEntrega: body.tipoEntrega,
         bairro: body.bairro,
@@ -773,10 +874,46 @@ export async function POST(req: NextRequest) {
         );
         return NextResponse.json(respostaRecuperada);
       }
-      // "nao_encontrado" em ambos — genuinamente uma criação nova (ou uma
-      // recuperação via attempt, se a persistência de uma tentativa
-      // anterior tiver falhado — resolvido na FASE 4). Segue para as
-      // validações de negócio (FASE 3).
+      // "nao_encontrado" em ambos — ainda pode ser uma RECUPERAÇÃO de uma
+      // tentativa cujo attempt já existe (Pix cobrado, pedido nunca
+      // persistido) — 7ª revisão de segurança, ponto 1: consulta
+      // SOMENTE LEITURA do :attempt aqui, antes das validações mutáveis da
+      // FASE 3, para nunca criar uma segunda identidade nem deixar um
+      // attempt corrompido passar silenciosamente. A reconstrução completa
+      // do snapshot de checkout (para pular a FASE 3 inteira numa
+      // recuperação) permanece um limite conhecido desta rodada — ver
+      // docs/architecture/MODO_SOBREVIVENCIA_1_0.md, seção 2.5-I (item 2),
+      // para o registro explícito do que ainda não está coberto.
+      const attemptAntecipado = await consultarAttemptSomenteLeitura(clientRequestId, requestFingerprint);
+      if (attemptAntecipado.tipo === "incerto") return respostaClaimIncerto();
+      if (attemptAntecipado.tipo === "conflito_fingerprint") return respostaConflitoFingerprint();
+      // "encontrado" (attempt em andamento, mesmo fingerprint) ou
+      // "nao_encontrado": ambos seguem para a resolução de identidade e
+      // FASE 3 abaixo — quando "encontrado", a FASE 4 reaproveita a MESMA
+      // identidade/preço já reivindicados (já implementado desde a 4ª/5ª
+      // rodada).
+    }
+
+    // 7ª revisão de segurança, ponto 2: a resolução de verdade do vínculo
+    // com o WhatsApp (chamada ao Redis) só acontece agora — depois que
+    // nenhuma recuperação de idempotência (:result, pedido por hash,
+    // :attempt) encontrou uma tentativa já em andamento/concluída. Só uma
+    // criação genuinamente nova (ou uma recuperação de attempt, que ainda
+    // assim precisa de um telefone para persistir o pedido) exige um
+    // token/telefone válido agora.
+    let vinculoWhatsapp: { phone: string } | null = null;
+    if (body.whatsappToken) {
+      try {
+        vinculoWhatsapp = await validarTokenCardapio(body.whatsappToken);
+      } catch (err) {
+        logSurvivalErro("idempotencia_pedido", "resolucao_whatsapp_token", "redis_falhou", err);
+        return respostaClaimIncerto();
+      }
+    }
+    const telefonePedido = vinculoWhatsapp && !usarOutroWhatsapp ? vinculoWhatsapp.phone : telefoneDigitado;
+    const whatsappVinculado = !!vinculoWhatsapp && !usarOutroWhatsapp;
+    if (!telefonePedido) {
+      return NextResponse.json({ ok: false, error: "Telefone obrigatório" }, { status: 400 });
     }
 
     // =================================================================
@@ -871,7 +1008,11 @@ export async function POST(req: NextRequest) {
     const itensDetalhadosFinais: ItemApp[] = [...body.itens, ...itensRecompensaMaterializados];
     const itensValidadosFinais = [...itensValidados, ...itensRecompensaValidados];
     const itens = itensValidadosFinais.map((item) => item.linha);
-    const subtotal = itensValidadosFinais.reduce((s, item) => s + item.unitPrice! * item.qty, 0);
+    // `let`: reatribuído na FASE 4 para o valor ESTÁVEL do snapshot financeiro
+    // do attempt quando clientRequestId está presente (7ª revisão de
+    // segurança, ponto 4) — nunca o subtotal recém-calculado, que poderia
+    // divergir do já usado numa cobrança Pix anterior.
+    let subtotal = itensValidadosFinais.reduce((s, item) => s + item.unitPrice! * item.qty, 0);
 
     // Resgate de fidelidade (Etapa 5): desconto calculado EXCLUSIVAMENTE no
     // servidor, a partir de uma reserva já validada (nunca um valor vindo do
@@ -946,6 +1087,13 @@ export async function POST(req: NextRequest) {
     // persistência) usa só esta variável, nunca um valor recalculado.
     let pedidoId = Date.now().toString();
 
+    // Snapshot do valor Pix ESPERADO gravado no attempt (7ª revisão de
+    // segurança, ponto 4) — usado só como referência de comparação em
+    // centavos antes de qualquer chamada ao provider: nunca aceita um valor
+    // recalculado que divirja do valor já potencialmente cobrado numa
+    // tentativa anterior.
+    let valorPixEsperadoSnapshot: number | undefined;
+
     // =================================================================
     // FASE 4 — claim (só para uma criação NOVA) + identidade/preço
     // estáveis da tentativa (attempt). O claim continua depois das
@@ -1012,8 +1160,10 @@ export async function POST(req: NextRequest) {
       // persistido seja EXATAMENTE o mesmo da tentativa original, mesmo que
       // cardápio/promoção/taxa tenham mudado desde então.
       total = attempt.pricing.total;
+      subtotal = attempt.pricing.subtotal;
       taxa = attempt.pricing.taxaEntrega;
       descontoFidelidade = attempt.pricing.descontoFidelidade;
+      valorPixEsperadoSnapshot = attempt.pricing.valorPixEsperado;
     }
 
     // Troco (quando há dinheiro no pagamento, puro ou híbrido) é validado só
@@ -1062,6 +1212,24 @@ export async function POST(req: NextRequest) {
     let numeroPedido: number;
     let statusToken: string;
     let pix: PixMetadata | undefined;
+
+    // 7ª revisão de segurança, ponto 4: o valor Pix efetivamente cobrado
+    // nunca pode divergir do valor gravado no snapshot financeiro do attempt
+    // — comparação em CENTAVOS (nunca uma tolerância aproximada), feita
+    // ANTES de qualquer chamada ao provider. Uma divergência aqui só seria
+    // possível por um bug de cálculo (ambos derivam da MESMA função pura a
+    // partir do MESMO `total` estável) — nunca prossegue silenciosamente
+    // nesse caso, nunca chama o provider com um valor diferente do já
+    // potencialmente cobrado.
+    if (valorPixEsperadoSnapshot !== undefined) {
+      const valorPixRecalculado = temPixNoPagamento(body.pagamento) ? valorPixEsperado(body.pagamento, total) : undefined;
+      const divergiu =
+        valorPixRecalculado === undefined || Math.round(valorPixRecalculado * 100) !== Math.round(valorPixEsperadoSnapshot * 100);
+      if (divergiu) {
+        logSurvivalErro("pedido_app", "snapshot_financeiro", "valor_pix_divergente");
+        return respostaClaimIncerto();
+      }
+    }
 
     try {
       numeroPedido = await proximoNumeroPedido();
@@ -1137,11 +1305,26 @@ export async function POST(req: NextRequest) {
       // pedido), reconcilia com uma leitura FRESCA antes de compensar às
       // cegas.
       if (clientRequestId) {
-        const reconciliacao = await buscarPedidoPersistidoPorId(pedidoId);
+        // 7ª revisão de segurança, ponto 3: `pedido.id === pedidoId` sozinho
+        // não basta para reconciliar — confirma hash+fingerprint+match único
+        // antes de aproveitar qualquer campo do pedido encontrado.
+        const reconciliacao = await reconciliarIdentidadeCompletaAposFalha(
+          pedidoId,
+          hashClientRequestId(clientRequestId),
+          requestFingerprint ?? ""
+        );
         if (reconciliacao.tipo === "incerto") {
           logSurvivalErro("pedido_app", "reconciliacao_persistencia", "leitura_incerta", err);
           // Nunca compensa, nunca libera claim/attempt — não há como saber
           // se o pedido existe ou não.
+          return respostaClaimIncerto();
+        }
+        if (reconciliacao.tipo === "inconsistente") {
+          // Encontrou um pedido com o mesmo id, mas a identidade completa
+          // (hash/fingerprint/unicidade/campos essenciais) não bate — trata
+          // como colisão/inconsistência, NUNCA como o pedido desta
+          // tentativa. Nunca compensa, nunca libera claim às cegas.
+          logSurvivalErro("pedido_app", "reconciliacao_persistencia", "identidade_inconsistente", err);
           return respostaClaimIncerto();
         }
         if (reconciliacao.tipo === "encontrado") {
@@ -1187,12 +1370,36 @@ export async function POST(req: NextRequest) {
           return NextResponse.json({ ok: false, error: "Erro interno" }, { status: 500 });
         }
       } else {
-        // Sem clientRequestId (flag desligada ou ausente) — comportamento
-        // pré-existente: nenhuma reconciliação de idempotência é possível
-        // (pedidoId não é estável, sem hash gravado no pedido), então
-        // qualquer exceção aqui é tratada como "não persistido".
+        // Sem clientRequestId (flag desligada ou ausente) — este é o
+        // caminho ATIVO hoje em produção (todas as flags de sobrevivência
+        // desligadas). Nenhuma reconciliação de idempotência é possível
+        // aqui (pedidoId não é estável, sem hash gravado no pedido), então
+        // qualquer exceção é tratada como "não persistido". Mas isso NÃO
+        // justifica ignorar o resultado da liberação do vínculo da
+        // Jornada — 7ª revisão de segurança, ponto 5: um `.catch(() => {})`
+        // fingiria sucesso mesmo quando a recompensa continuasse presa a
+        // um pedido que nunca existiu. Sem clientRequestId não há como
+        // automatizar um retry seguro nem gerar outro vínculo — a única
+        // opção segura é reportar o estado incerto e pedir confirmação
+        // operacional antes de uma nova tentativa.
         if (recompensaJornadaId && clienteIdJornada) {
-          await liberarVinculoRecompensaPedidoNaoCriado(clienteIdJornada, recompensaJornadaId, pedidoId).catch(() => {});
+          let vinculoLiberado = true;
+          try {
+            await liberarVinculoRecompensaPedidoNaoCriado(clienteIdJornada, recompensaJornadaId, pedidoId);
+          } catch (errLiberacao) {
+            vinculoLiberado = false;
+            logSurvivalErro("pedido_app", "compensacao_jornada_sem_client_request_id", "liberar_vinculo_falhou", errLiberacao);
+          }
+          if (!vinculoLiberado) {
+            return NextResponse.json(
+              {
+                ok: false,
+                unresolved: true,
+                error: "Não foi possível confirmar este pedido. Não tente novamente agora — verifique com a pizzaria antes de fazer um novo pedido.",
+              },
+              { status: 503 }
+            );
+          }
         }
         console.error("[ChefeBot] Erro ao preparar/persistir pedido do site:", err);
         return NextResponse.json({ ok: false, error: "Erro interno" }, { status: 500 });

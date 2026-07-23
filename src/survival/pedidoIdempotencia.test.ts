@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CLAIM_TTL_SEGUNDOS,
+  calcularPricingFingerprint,
   chaveAttemptPedido,
   chaveClaimPedido,
   chaveResultadoPedido,
@@ -106,17 +107,20 @@ describe("chaveResultadoTokenPedido / chaveAttemptPedido", () => {
 });
 
 describe("ehAttemptValido", () => {
+  const pricingBase = {
+    total: 33,
+    subtotal: 30,
+    taxaEntrega: 3,
+    descontoFidelidade: 0,
+  };
   const attemptValido = {
     state: "in_progress" as const,
     requestFingerprint: "a".repeat(64),
     pedidoId: "123",
     txid: "chefebot_123",
     pricing: {
-      total: 33,
-      subtotal: 30,
-      taxaEntrega: 3,
-      descontoFidelidade: 0,
-      pricingFingerprint: "b".repeat(64),
+      ...pricingBase,
+      pricingFingerprint: calcularPricingFingerprint(pricingBase),
     },
     createdAt: Date.now(),
     updatedAt: Date.now(),
@@ -140,7 +144,73 @@ describe("ehAttemptValido", () => {
     expect(ehAttemptValido({ ...attemptValido, requestFingerprint: "" })).toBe(false);
   });
 
+  it("rejeita requestFingerprint que não é um SHA-256 hexadecimal válido (formato errado, mesmo não-vazio)", () => {
+    expect(ehAttemptValido({ ...attemptValido, requestFingerprint: "curto-demais" })).toBe(false);
+    expect(ehAttemptValido({ ...attemptValido, requestFingerprint: "A".repeat(64) })).toBe(false);
+  });
+
   it("rejeita createdAt não finito", () => {
     expect(ehAttemptValido({ ...attemptValido, createdAt: NaN })).toBe(false);
+  });
+
+  // [7ª revisão de segurança, ponto 4] Um `pricingFingerprint` com FORMATO
+  // hexadecimal válido, mas cujo CONTEÚDO não corresponde aos números do
+  // próprio snapshot, precisa ser rejeitado — nunca aceito só por "parecer"
+  // um SHA-256 válido.
+  it("rejeita pricingFingerprint com formato válido mas conteúdo adulterado (não recalcula igual)", () => {
+    expect(
+      ehAttemptValido({
+        ...attemptValido,
+        pricing: { ...attemptValido.pricing, pricingFingerprint: "b".repeat(64) },
+      })
+    ).toBe(false);
+  });
+
+  it("rejeita snapshot financeiro com total incompatível com subtotal/desconto/taxa (mesmo com fingerprint recalculado a partir do total adulterado)", () => {
+    const pricingAdulterado = { ...pricingBase, total: 999 };
+    expect(
+      ehAttemptValido({
+        ...attemptValido,
+        pricing: { ...pricingAdulterado, pricingFingerprint: calcularPricingFingerprint(pricingAdulterado) },
+      })
+    ).toBe(false);
+  });
+
+  it("rejeita desconto maior que o subtotal", () => {
+    const pricingAdulterado = { ...pricingBase, subtotal: 10, descontoFidelidade: 20, total: -7 };
+    expect(
+      ehAttemptValido({
+        ...attemptValido,
+        pricing: { ...pricingAdulterado, pricingFingerprint: calcularPricingFingerprint(pricingAdulterado) },
+      })
+    ).toBe(false);
+  });
+
+  it("rejeita valorPixEsperado fora do intervalo [0, total]", () => {
+    const pricingComPixExcedente = { ...pricingBase, valorPixEsperado: 999 };
+    expect(
+      ehAttemptValido({
+        ...attemptValido,
+        pricing: { ...pricingComPixExcedente, pricingFingerprint: calcularPricingFingerprint(pricingComPixExcedente) },
+      })
+    ).toBe(false);
+
+    const pricingComPixNegativo = { ...pricingBase, valorPixEsperado: -1 };
+    expect(
+      ehAttemptValido({
+        ...attemptValido,
+        pricing: { ...pricingComPixNegativo, pricingFingerprint: calcularPricingFingerprint(pricingComPixNegativo) },
+      })
+    ).toBe(false);
+  });
+
+  it("aceita valorPixEsperado dentro do intervalo [0, total]", () => {
+    const pricingComPixValido = { ...pricingBase, valorPixEsperado: 33 };
+    expect(
+      ehAttemptValido({
+        ...attemptValido,
+        pricing: { ...pricingComPixValido, pricingFingerprint: calcularPricingFingerprint(pricingComPixValido) },
+      })
+    ).toBe(true);
   });
 });

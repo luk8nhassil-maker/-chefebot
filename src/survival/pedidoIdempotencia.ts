@@ -201,22 +201,60 @@ export function calcularPricingFingerprint(pricing: Omit<SnapshotFinanceiroAttem
   return createHash("sha256").update(canonico).digest("hex");
 }
 
+// Converte para centavos (arredondando) antes de comparar — evita falsos
+// negativos por erro de ponto flutuante em valores decimais em reais, sem
+// abrir mão de uma comparação EXATA (nunca uma tolerância "aproximada").
+function paraCentavos(valor: number): number {
+  return Math.round(valor * 100);
+}
+
+// 7ª revisão de segurança, ponto 4: aceitar `pricingFingerprint` só por
+// FORMATO (regex hexadecimal) não comprova integridade nenhuma — qualquer
+// string de 64 caracteres hex, mesmo adulterada, passaria. Esta função
+// RECALCULA o fingerprint a partir dos próprios campos numéricos e exige
+// igualdade EXATA com o valor armazenado, além de validar a coerência
+// aritmética do snapshot (desconto <= subtotal; total = subtotal - desconto
+// + taxa, em centavos; valorPixEsperado entre 0 e total).
 function ehSnapshotFinanceiroValido(valor: unknown): valor is SnapshotFinanceiroAttempt {
   if (!valor || typeof valor !== "object") return false;
   const v = valor as Partial<SnapshotFinanceiroAttempt>;
-  return (
+  const numerosValidos =
     typeof v.total === "number" &&
     Number.isFinite(v.total) &&
+    v.total >= 0 &&
     typeof v.subtotal === "number" &&
     Number.isFinite(v.subtotal) &&
+    v.subtotal >= 0 &&
     typeof v.taxaEntrega === "number" &&
     Number.isFinite(v.taxaEntrega) &&
+    v.taxaEntrega >= 0 &&
     typeof v.descontoFidelidade === "number" &&
     Number.isFinite(v.descontoFidelidade) &&
+    v.descontoFidelidade >= 0 &&
     (v.valorPixEsperado === undefined || (typeof v.valorPixEsperado === "number" && Number.isFinite(v.valorPixEsperado))) &&
     typeof v.pricingFingerprint === "string" &&
-    SHA256_HEX_REGEX.test(v.pricingFingerprint)
-  );
+    SHA256_HEX_REGEX.test(v.pricingFingerprint);
+  if (!numerosValidos) return false;
+
+  const total = v.total as number;
+  const subtotal = v.subtotal as number;
+  const taxaEntrega = v.taxaEntrega as number;
+  const descontoFidelidade = v.descontoFidelidade as number;
+
+  if (descontoFidelidade > subtotal) return false;
+  if (paraCentavos(total) !== paraCentavos(subtotal) - paraCentavos(descontoFidelidade) + paraCentavos(taxaEntrega)) return false;
+  if (v.valorPixEsperado !== undefined && (v.valorPixEsperado < 0 || paraCentavos(v.valorPixEsperado) > paraCentavos(total))) return false;
+
+  const fingerprintRecalculado = calcularPricingFingerprint({
+    total,
+    subtotal,
+    taxaEntrega,
+    descontoFidelidade,
+    valorPixEsperado: v.valorPixEsperado,
+  });
+  if (fingerprintRecalculado !== v.pricingFingerprint) return false;
+
+  return true;
 }
 
 /** Registro do "attempt" — identidade estável da tentativa, criada/recuperada
@@ -260,7 +298,7 @@ export function ehAttemptValido(valor: unknown): valor is RegistroAttemptPedido 
   return (
     (v.state === "in_progress" || v.state === "completed") &&
     typeof v.requestFingerprint === "string" &&
-    v.requestFingerprint.length > 0 &&
+    SHA256_HEX_REGEX.test(v.requestFingerprint) &&
     typeof v.pedidoId === "string" &&
     v.pedidoId.length > 0 &&
     typeof v.txid === "string" &&
@@ -269,8 +307,10 @@ export function ehAttemptValido(valor: unknown): valor is RegistroAttemptPedido 
     ehSnapshotFinanceiroValido(v.pricing) &&
     typeof v.createdAt === "number" &&
     Number.isFinite(v.createdAt) &&
+    v.createdAt > 0 &&
     typeof v.updatedAt === "number" &&
-    Number.isFinite(v.updatedAt)
+    Number.isFinite(v.updatedAt) &&
+    v.updatedAt > 0
   );
 }
 

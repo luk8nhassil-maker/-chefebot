@@ -649,6 +649,76 @@ describe("POST /api/pedido-app — concorrência e atomicidade", () => {
     expect(retry.status).toBe(200);
   });
 
+  // [7ª revisão de segurança, ponto 5] Sem clientRequestId (o caminho ATIVO
+  // hoje, com todas as flags desligadas), uma falha na PRÓPRIA liberação do
+  // vínculo da recompensa (não só na persistência do pedido) nunca pode ser
+  // engolida com `.catch(() => {})` — precisa virar 503 "unresolved", nunca
+  // um 500 que finja ter liberado a recompensa sem prova nenhuma.
+  test("[7ª revisão] sem clientRequestId: falha ao persistir + falha AO LIBERAR o vínculo retorna 503 unresolved, nunca finge sucesso na liberação", async () => {
+    const telefone = "86977003009";
+    const { recompensaId } = await desbloquearEReservar(telefone, [BEBIDA_GUARANA]);
+
+    const redisLib = await import("@/lib/redis");
+    let persistenciaJaFalhou = false;
+    const chaveRecompensa = `jornada:recompensa:default:${recompensaId}`;
+    vi.mocked(redisLib.redis.set).mockImplementation((key: string, value: unknown, opts?: { nx?: boolean }) => {
+      if (!persistenciaJaFalhou && key === "pedidos" && Array.isArray(value) && (value as unknown[]).length === 1) {
+        persistenciaJaFalhou = true;
+        return Promise.reject(new Error("falha simulada ao persistir pedido"));
+      }
+      // Depois que a persistência falhou, a PRÓPRIA liberação do vínculo
+      // (salvarRecompensa, dentro de liberarVinculoRecompensaPedidoNaoCriado)
+      // também falha — nunca há como comprovar que a recompensa foi solta.
+      if (persistenciaJaFalhou && key === chaveRecompensa) {
+        return Promise.reject(new Error("falha simulada ao liberar vinculo da recompensa"));
+      }
+      return defaultSetImpl(key, value, opts);
+    });
+
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const res = await POST(pedidoRequest({ telefone, clienteToken: tokenDoDono(telefone), recompensaJornada: { recompensaId } }));
+    consoleSpy.mockRestore();
+
+    expect(res.status).toBe(503);
+    const data = await res.json();
+    expect(data.ok).toBe(false);
+    expect(data.unresolved).toBe(true);
+    // Nunca vaza cliente/telefone na mensagem de erro.
+    expect(JSON.stringify(data)).not.toContain(telefone);
+
+    // O pedido nunca foi criado; a recompensa continua vinculada ao pedido
+    // que nunca existiu (estado incerto, nunca silenciosamente "liberada").
+    const pedidos = (redisStore.get("pedidos") as Array<Record<string, unknown>>) ?? [];
+    expect(pedidos).toHaveLength(0);
+  });
+
+  // Caminho normal (compensação bem-sucedida) continua devolvendo 500, como
+  // antes desta correção — o 503 só aparece quando a liberação em si falha.
+  test("[7ª revisão] sem clientRequestId: falha ao persistir + liberação do vínculo bem-sucedida mantém o 500 de sempre", async () => {
+    const telefone = "86977003010";
+    const { recompensaId } = await desbloquearEReservar(telefone, [BEBIDA_GUARANA]);
+
+    const redisLib = await import("@/lib/redis");
+    let jaFalhou = false;
+    vi.mocked(redisLib.redis.set).mockImplementation((key: string, value: unknown, opts?: { nx?: boolean }) => {
+      if (!jaFalhou && key === "pedidos" && Array.isArray(value) && (value as unknown[]).length === 1) {
+        jaFalhou = true;
+        return Promise.reject(new Error("falha simulada ao persistir pedido"));
+      }
+      return defaultSetImpl(key, value, opts);
+    });
+
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const res = await POST(pedidoRequest({ telefone, clienteToken: tokenDoDono(telefone), recompensaJornada: { recompensaId } }));
+    consoleSpy.mockRestore();
+
+    expect(res.status).toBe(500);
+    const chave = `jornada:recompensa:default:${recompensaId}`;
+    const recompensa = redisStore.get(chave) as { status: string; reservaPedidoId?: string };
+    expect(recompensa.status).toBe("reservada");
+    expect(recompensa.reservaPedidoId).toBeUndefined();
+  });
+
   // [4ª revisão — ponto 4] Antes desta correção, só o catch da PERSISTÊNCIA
   // (redis.set("pedidos", ...)) liberava o vínculo da recompensa — uma falha
   // em qualquer passo ANTERIOR a isso (proximoNumeroPedido, preparação do

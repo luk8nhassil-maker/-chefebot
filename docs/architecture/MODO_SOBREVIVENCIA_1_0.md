@@ -588,14 +588,22 @@ de a rota sequer olhar para o pedido/resultado já existente.
 `FASE 1`-`FASE 5` no código):
 
 - **FASE 1** — validações estruturais puras: forma do payload (cliente,
-  itens, telefone/whatsappToken, pagamento, troco presente, endereço
-  presente, presença/formato do campo `recompensaJornada`). Nada aqui
-  depende de estado que muda com o tempo.
-- **FASE 2** — `clientRequestId` + fingerprint (só campos BRUTOS do
-  payload) + **recuperação ANTECIPADA de idempotência**: `:result`, busca
-  por hash no pedido persistido, estado crítico (`survivalState`) já
-  existente. Se encontrado, devolve o resultado real AGORA — antes de
-  qualquer validação mutável.
+  itens, pagamento, troco presente, endereço presente, presença/formato do
+  campo `recompensaJornada`). Nada aqui depende de estado que muda com o
+  tempo — e, desde a 7ª revisão (ver 2.5-I, item 1), nada aqui faz chamada
+  ao Redis: só extrai a identidade BRUTA do telefone/token (sem resolver o
+  vínculo com o WhatsApp ainda).
+- **FASE 2** — `clientRequestId` + fingerprint (calculado a partir da
+  identidade BRUTA, não do telefone resolvido — 7ª revisão) +
+  **recuperação ANTECIPADA de idempotência**: `:result`, busca por hash no
+  pedido persistido, estado crítico (`survivalState`) já existente e, desde
+  a 7ª revisão, uma consulta SOMENTE LEITURA do `:attempt` (ver 2.5-I, item
+  2 — protege contra corrupção/conflito, mas ainda não pula a FASE 3 numa
+  recuperação de attempt em andamento). Se encontrado, devolve o resultado
+  real AGORA — antes de qualquer validação mutável. Só DEPOIS desta fase,
+  se nada foi encontrado, a rota resolve de verdade o vínculo com o
+  WhatsApp (`validarTokenCardapio`) e exige telefone válido para uma
+  criação genuinamente nova.
 - **FASE 3** — validações de NEGÓCIO mutáveis: cardápio, promoções,
   esgotados, disponibilidade da recompensa da Jornada
   (`prepararResgateParaPedido`), validade do resgate
@@ -681,6 +689,114 @@ Sem `clientRequestId` (flag desligada ou ausente), nenhuma reconciliação é
 possível (`pedidoId` não é estável, sem hash gravado no pedido) — qualquer
 exceção nesse `redis.set` continua sendo tratada como "não persistido",
 comportamento idêntico ao anterior a este programa.
+
+### 2.5-I Correções da 7ª revisão de segurança
+
+**1) Token do WhatsApp não pode bloquear a recuperação de idempotência.**
+Antes desta correção, `validarTokenCardapio` (uma leitura ao Redis, token
+com TTL de 24h) rodava na FASE 1, antes de qualquer consulta de
+idempotência — um retry legítimo cujo token já tivesse expirado recebia
+"Telefone obrigatório" (400), e uma falha do Redis nessa checagem
+específica virava 500, mesmo quando o pedido já existia de verdade.
+Correção: a FASE 1 agora extrai só a **identidade bruta e estável** enviada
+(o próprio token opaco, quando presente e `usarOutroWhatsapp` não foi
+pedido, ou o telefone digitado) — sem nenhuma chamada ao Redis — e usa essa
+identidade bruta (não mais o telefone resolvido) no `requestFingerprint` da
+FASE 2. A resolução de verdade (`validarTokenCardapio`) foi movida para
+**depois** de toda a recuperação de idempotência da FASE 2 (`:result`,
+pedido por hash, `:attempt` — ver item 2 abaixo): só é exigida quando
+nenhuma tentativa já concluída/em andamento foi encontrada. Uma falha do
+Redis nessa resolução tardia devolve 503 `unresolved: true` (erro
+recuperável), nunca 500; ausência de telefone resolvido nesse ponto
+continua sendo 400 (mas só se importa numa criação genuinamente nova).
+Testado: pedido criado só com `whatsappToken` (sem telefone manual); token
+expira antes do retry (retry devolve o MESMO pedido); Redis falha ao
+validar o token mas um `:result` válido existe (recuperado sem consultar o
+token de novo); criação genuinamente nova com token inválido e sem telefone
+continua bloqueada; Redis falha ao validar o token numa criação
+genuinamente nova (503, nunca 400/500).
+
+**2) Consulta antecipada (somente leitura) do `:attempt` na FASE 2 — escopo
+desta rodada.** Foi adicionada, na FASE 2, uma consulta SOMENTE LEITURA do
+`:attempt` (`consultarAttemptSomenteLeitura`), rodando depois da busca por
+hash e antes da FASE 3: um attempt corrompido (formato inválido) nunca
+passa silenciosamente — devolve 503 `unresolved: true`; um attempt com
+fingerprint divergente do desta requisição devolve 409 (conflito), nunca
+reaproveita a identidade de outra tentativa. **Limite conhecido e
+deliberado desta rodada**: esta consulta só PROTEGE contra corrupção/
+conflito — ela **não** pula a FASE 3. Ou seja, o cenário relatado ("Pix
+cobrado, pedido nunca persistido, promoção expira ou item fica esgotado
+antes do retry") ainda pode, no caso específico de a FASE 3 rejeitar com
+400 antes de chegar à FASE 4, impedir que o retry reaproveite a identidade
+já cobrada — a FASE 4 (que já reaproveita corretamente `pedidoId`/`txid`/
+snapshot financeiro do attempt desde a 4ª/5ª revisão) só é alcançada se a
+FASE 3 não rejeitar antes. Fechar esse gap por completo exigiria ampliar o
+`attempt` com um snapshot oficial de checkout (itens, `itensDetalhados`,
+IDs de promoção/recompensa, referência do resgate — sem PII) para permitir
+pular a FASE 3 inteira numa recuperação; essa ampliação de schema fica
+para uma rodada futura, registrada aqui explicitamente para nunca ser
+apresentada como já implementada.
+
+**3) Reconciliação de persistência ambígua agora valida a IDENTIDADE
+COMPLETA, não só `pedido.id === pedidoId`.** A reconciliação da 6ª revisão
+(2.5-H) confiava em `pedido.id === pedidoId` sozinho — insuficiente porque
+`pedidoId` é derivado de `Date.now()` (risco de colisão já documentado em
+`DECISAO-CONCORRENCIA-CHAVE-PEDIDOS.md`). Nova função
+`reconciliarIdentidadeCompletaAposFalha` confirma, antes de reaproveitar
+qualquer campo do pedido encontrado: hash do `clientRequestId` bate;
+`requestFingerprint` bate; correspondência ÚNICA (nunca mais de um pedido
+com o mesmo id); `survivalState`, `numero`, `statusToken`, `total` são
+valores válidos; o `txid` do Pix (quando presente) corresponde ao
+`pedidoId`. Qualquer divergência ou ambiguidade retorna 503 (nunca usa
+`numero`/`statusToken`/`pix` de um pedido só porque o id bateu). Testado
+explicitamente: dois pedidos com o MESMO `pedidoId` e identidades
+DIFERENTES — nenhum dado do pedido alheio aparece na resposta.
+
+**4) Snapshot financeiro do attempt agora é autoritativo e sua integridade
+é VERIFICADA, não só o formato.** Antes, `pricingFingerprint` era validado
+só por regex (formato hexadecimal de 64 caracteres) — um valor adulterado,
+mas com formato válido, passava. `ehSnapshotFinanceiroValido`
+(`src/survival/pedidoIdempotencia.ts`) agora RECALCULA o fingerprint a
+partir dos próprios campos numéricos e exige igualdade EXATA com o valor
+armazenado, além de validar a coerência aritmética: `descontoFidelidade <=
+subtotal`; `total` (em centavos) `= subtotal - descontoFidelidade +
+taxaEntrega`; `valorPixEsperado` entre 0 e `total`. `ehAttemptValido` agora
+também exige que `requestFingerprint` seja um SHA-256 hexadecimal válido
+(antes só checava não-vazio) e que os timestamps sejam positivos. Na rota,
+o `subtotal` também passou a ser reatribuído a partir do snapshot do
+attempt na FASE 4 (antes só `total`/`taxa`/`descontoFidelidade` eram
+reatribuídos). Antes de montar a cobrança Pix (FASE 5), o valor recalculado
+(`valorPixEsperado(pagamento, total)`) é comparado em CENTAVOS contra o
+`valorPixEsperado` armazenado no attempt; qualquer divergência retorna 503
+`unresolved: true` e NUNCA chama o provider — a divergência só seria
+possível por um bug (ambos derivam da mesma função pura a partir do mesmo
+`total` já estabilizado), mas a checagem existe como defesa em profundidade
+explícita, não como algo esperado em operação normal.
+
+**5) Compensação da Jornada do Chef no caminho SEM `clientRequestId`
+(flags desligadas — o caminho ativo hoje em produção).** O
+`.catch(() => {})` que ainda existia nesse ramo (a compensação do caminho
+COM `clientRequestId` já tinha sido corrigida na 6ª revisão) foi substituído
+pelo mesmo padrão: `try/catch` explícito ao redor de
+`liberarVinculoRecompensaPedidoNaoCriado`; sucesso comprovado devolve o 500
+normal de sempre; falha (ou resultado incerto) devolve 503
+`unresolved: true` com mensagem orientando a verificar com a pizzaria antes
+de uma nova tentativa, e log sanitizado (categoria + `pedidoId`, nunca
+cliente/telefone). Como não há `clientRequestId` neste caminho, não há
+automação de retry seguro nem geração de outro vínculo — a mensagem apenas
+sinaliza que pode ser necessária intervenção operacional. Testado com
+`SURVIVAL_MODE_ENABLED=false`: falha pré-persistência + compensação bem
+sucedida (500, igual a antes); falha pré-persistência + falha na própria
+compensação (503, nunca engolido); caminho normal de sucesso inalterado.
+
+**6) Janela de 24h — alinhamento, sem ampliação de TTL.** Reafirmado (ver
+já registrado em 2.5-C): o attempt, o `:result` e o token do WhatsApp
+(`CARDAPIO_TOKEN_TTL_SEGUNDOS`) compartilham a mesma ordem de grandeza de
+janela (24h). Qualquer garantia de "nunca gera uma segunda cobrança" vale
+**só dentro da janela válida do attempt** — depois de expirado, um retry
+gera uma tentativa genuinamente nova (novo `pedidoId`/`txid`, preço
+recalculado na hora), nunca uma recuperação garantida. Esta rodada não
+ampliou nenhum TTL.
 
 ### 2.6 Rascunho local versionado (`src/survival/draftStorage.ts`)
 
@@ -778,23 +894,26 @@ sempre contra a MESMA requisição com a flag desligada (que já executa
 `getConfigPix` de qualquer forma) — só o que a flag ADICIONA é contado
 abaixo.
 
-- **Caminho feliz, criação nova, sem resgate, sem disputa**: **+8
-  comandos**:
+- **Caminho feliz, criação nova, sem resgate, sem disputa**: **+9
+  comandos** (7ª revisão: +1 em relação à 6ª — nova consulta antecipada do
+  attempt na FASE 2, item 3 abaixo):
   1. `GET :result` (fast path, miss).
   2. `GET pedidos` (busca por hash, miss) — segunda leitura fresca da MESMA
      chave já lida pela FASE 3 (nenhuma estrutura de dado nova, mas uma
      chamada Redis a mais).
-  3. `SET NX claim`.
-  4. `SET NX attempt` (com o snapshot financeiro embutido — 5ª/6ª revisão).
-  5. `EVAL` — grava `:result` + `:result:token` juntos, atomicamente (6ª
+  3. `GET attempt` (consulta antecipada SOMENTE LEITURA, FASE 2 — 7ª
+     revisão de segurança, ponto 1: miss numa criação genuinamente nova).
+  4. `SET NX claim`.
+  5. `SET NX attempt` (com o snapshot financeiro embutido — 5ª/6ª revisão).
+  6. `EVAL` — grava `:result` + `:result:token` juntos, atomicamente (6ª
      revisão: antes eram 2 `SET`s separados; agora 1 único `EVAL`).
-  6. `GET attempt` (verificação de fingerprint antes de marcar completed).
-  7. `SET attempt` (marca `state: "completed"`, best-effort, 5ª/6ª
+  7. `GET attempt` (verificação de fingerprint antes de marcar completed).
+  8. `SET attempt` (marca `state: "completed"`, best-effort, 5ª/6ª
      revisão).
-  8. `EVAL` — libera o claim (compare-and-delete), best-effort.
+  9. `EVAL` — libera o claim (compare-and-delete), best-effort.
   - Pedidos **com resgate de fidelidade** somam mais **+2** (`GET`+`SET` de
     `pedidos` para marcar `survivalState: "completed"` após a confirmação)
-    — total **+10**.
+    — total **+11**.
 - **Fast path** (`:result` já existe, retry ou conflito de fingerprint): 1
   `GET` — a requisição retorna antes de tocar `pedidos`/menu/promoções/
   claim/attempt.

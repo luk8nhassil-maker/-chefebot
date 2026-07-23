@@ -1337,6 +1337,142 @@ describe("POST /api/pedido-app — idempotência (Modo Sobrevivência)", () => {
       redisMock.get.mockImplementation(defaultGetImpl);
       expect(store.has(chaveClaim(clientRequestId))).toBe(true);
     });
+
+    // [7ª revisão de segurança, ponto 3] `pedido.id === pedidoId` sozinho não
+    // basta para reconciliar: um pedido de OUTRA tentativa (hash/fingerprint
+    // diferentes) pode ter, por colisão de pedidoId (derivado de Date.now()),
+    // o mesmo id. A reconciliação nunca pode devolver numero/statusToken/pix
+    // desse outro pedido como se fossem da tentativa atual.
+    it("dois pedidos com o MESMO pedidoId mas identidades DIFERENTES: reconciliação nunca vaza dados do pedido alheio, devolve 503", async () => {
+      vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
+
+      const dateNowSpy = vi.spyOn(Date, "now").mockReturnValue(1732000000123);
+      try {
+        // Pedido A: criado normalmente com clientRequestId A, ocupando o
+        // pedidoId "1732000000123".
+        const clientRequestIdA = "colisao-pedidoid-identidade-A";
+        const resA = await POST(postReq({ ...basePayload, clientRequestId: clientRequestIdA }));
+        expect(resA.status).toBe(200);
+        const bodyA = await resA.json();
+        expect(bodyA.pedidoId).toBe("1732000000123");
+        expect(bodyA.numero).toBeDefined();
+
+        // Tentativa B: MESMO Date.now() (mesmo pedidoId candidato), CLIENT
+        // REQUEST ID DIFERENTE — a persistência de "pedidos" lança (resposta
+        // perdida do ponto de vista do cliente), forçando a reconciliação a
+        // olhar para o pedido já existente com o MESMO id (o da tentativa A).
+        const clientRequestIdB = "colisao-pedidoid-identidade-B";
+        let jaFalhouSet = false;
+        redisMock.set.mockImplementation(async (key: string, value: unknown, opts?: { nx?: boolean }) => {
+          if (key === "pedidos" && !jaFalhouSet && Array.isArray(value) && (value as unknown[]).length === 2) {
+            jaFalhouSet = true;
+            throw new Error("falha simulada ao persistir pedido (tentativa B)");
+          }
+          return defaultSetImpl(key, value, opts);
+        });
+
+        const resB = await POST(postReq({ ...basePayload, clientRequestId: clientRequestIdB }));
+        // Identidade (hash/fingerprint) diverge do pedido encontrado com o
+        // mesmo id — NUNCA reconstrói sucesso com os dados do pedido A, NUNCA
+        // duplica: trata como inconsistência recuperável (503).
+        expect(resB.status).toBe(503);
+        const bodyB = await resB.json();
+        expect(bodyB.ok).toBe(false);
+        expect(bodyB.unresolved).toBe(true);
+        // Nenhum campo da resposta reaproveita numero/pedidoId/pix do pedido A.
+        expect(bodyB.numero).toBeUndefined();
+        expect(bodyB.pedidoId).toBeUndefined();
+
+        // O pedido de A continua intacto — reconciliação nunca o sobrescreve
+        // nem o remove por causa da tentativa B.
+        const pedidos = store.get("pedidos") as Array<{ id: string; survivalClientRequestIdHash?: string }>;
+        expect(pedidos).toHaveLength(1);
+        expect(pedidos[0].id).toBe("1732000000123");
+      } finally {
+        dateNowSpy.mockRestore();
+      }
+    });
+  });
+
+  describe("[7ª revisão de segurança, ponto 2] token do WhatsApp não pode bloquear a recuperação de idempotência", () => {
+    const WHATSAPP_TOKEN = "a".repeat(32);
+    const chaveToken = `cardapio:token:${WHATSAPP_TOKEN}`;
+
+    function payloadSemTelefone(clientRequestId: string) {
+      return { ...basePayload, telefone: "", whatsappToken: WHATSAPP_TOKEN, clientRequestId };
+    }
+
+    it("pedido criado com whatsappToken (sem telefone manual); token expira antes do retry: retry com o MESMO clientRequestId devolve o MESMO pedido, nunca 400/500", async () => {
+      vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
+      const clientRequestId = "whatsapp-token-expira-antes-do-retry-001";
+      store.set(chaveToken, { phone: "11988887777", createdAt: Date.now() });
+
+      const res = await POST(postReq(payloadSemTelefone(clientRequestId)));
+      expect(res.status).toBe(200);
+      const body = await res.json();
+
+      // Token "expira" (removido do Redis) ANTES do retry — simula TTL
+      // vencido entre a criação e a nova tentativa.
+      store.delete(chaveToken);
+
+      const retry = await POST(postReq(payloadSemTelefone(clientRequestId)));
+      expect(retry.status).toBe(200);
+      const retryBody = await retry.json();
+      expect(retryBody.pedidoId).toBe(body.pedidoId);
+      expect((store.get("pedidos") as unknown[]).length).toBe(1); // nunca duplica
+    });
+
+    it("Redis falha ao validar o token do WhatsApp, mas um :result válido já existe: recupera o pedido SEM consultar o token de novo", async () => {
+      vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
+      const clientRequestId = "whatsapp-token-redis-falha-result-existe-001";
+      store.set(chaveToken, { phone: "11988887777", createdAt: Date.now() });
+
+      const res = await POST(postReq(payloadSemTelefone(clientRequestId)));
+      expect(res.status).toBe(200);
+      const body = await res.json();
+
+      // O :result durável continua existindo (não removido) — só o Redis
+      // falha especificamente ao ler a chave do TOKEN, nunca ao ler :result.
+      redisMock.get.mockImplementation(async (key: string) => {
+        if (key === chaveToken) throw new Error("falha simulada ao validar token do WhatsApp");
+        return defaultGetImpl(key);
+      });
+
+      const retry = await POST(postReq(payloadSemTelefone(clientRequestId)));
+      redisMock.get.mockImplementation(defaultGetImpl);
+
+      expect(retry.status).toBe(200);
+      const retryBody = await retry.json();
+      expect(retryBody.pedidoId).toBe(body.pedidoId);
+    });
+
+    it("criação genuinamente NOVA (sem :result/hash/attempt prévios) com token inválido e sem telefone digitado continua bloqueada (400)", async () => {
+      vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
+      const clientRequestId = "whatsapp-token-invalido-criacao-nova-001";
+      // Nunca configurado no store — token inválido/inexistente.
+      const res = await POST(postReq(payloadSemTelefone(clientRequestId)));
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toMatch(/telefone/i);
+      expect((store.get("pedidos") as unknown[] | undefined) ?? []).toHaveLength(0);
+    });
+
+    it("Redis falha ao validar o token para uma criação genuinamente NOVA: erro recuperável (503), nunca 400/500", async () => {
+      vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
+      const clientRequestId = "whatsapp-token-redis-falha-criacao-nova-001";
+      redisMock.get.mockImplementation(async (key: string) => {
+        if (key === chaveToken) throw new Error("falha simulada ao validar token do WhatsApp");
+        return defaultGetImpl(key);
+      });
+
+      const res = await POST(postReq(payloadSemTelefone(clientRequestId)));
+      redisMock.get.mockImplementation(defaultGetImpl);
+
+      expect(res.status).toBe(503);
+      const body = await res.json();
+      expect(body.ok).toBe(false);
+      expect(body.unresolved).toBe(true);
+    });
   });
 
   describe("[4ª revisão — ponto 3] identidade estável (attempt) ANTES da cobrança Pix — nunca uma segunda cobrança real", () => {
@@ -1380,6 +1516,39 @@ describe("POST /api/pedido-app — idempotência (Modo Sobrevivência)", () => {
       expect((store.get("pedidos") as unknown[]).length).toBe(1);
       const pedidoFinal = (store.get("pedidos") as Array<Record<string, unknown>>)[0];
       expect(pedidoFinal.id).toBe(segundoTxid.replace(/^chefebot_/, ""));
+    });
+  });
+
+  describe("[7ª revisão de segurança, ponto 1] consulta antecipada (somente leitura) do :attempt na FASE 2", () => {
+    it("attempt corrompido (formato inválido) é consultado na FASE 2 e retorna 503 unresolved, nunca cria um pedido", async () => {
+      vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
+      const clientRequestId = "attempt-corrompido-fase2-001";
+
+      let falhouPersistencia = false;
+      redisMock.set.mockImplementation(async (key: string, value: unknown, opts?: { nx?: boolean }) => {
+        if (key === "pedidos" && !falhouPersistencia && Array.isArray(value)) {
+          falhouPersistencia = true;
+          throw new Error("Redis indisponível (simulado) — persistência perdida após criar o attempt");
+        }
+        return defaultSetImpl(key, value, opts);
+      });
+
+      const r1 = await POST(postReq({ ...basePayload, clientRequestId }));
+      expect(r1.status).toBe(500);
+      expect(store.get("pedidos")).toBeUndefined();
+      redisMock.set.mockImplementation(defaultSetImpl);
+
+      // Corrompe o attempt gravado pela tentativa 1 — formato inválido
+      // (faltam campos obrigatórios do snapshot financeiro).
+      const chaveAttempt = `survival:idempotencia:pedido:${clientRequestId}:attempt`;
+      store.set(chaveAttempt, { state: "in_progress", pedidoId: "123" });
+
+      const retry = await POST(postReq({ ...basePayload, clientRequestId }));
+      expect(retry.status).toBe(503);
+      const body = await retry.json();
+      expect(body.ok).toBe(false);
+      expect(body.unresolved).toBe(true);
+      expect((store.get("pedidos") as unknown[] | undefined) ?? []).toHaveLength(0);
     });
   });
 
