@@ -14,6 +14,19 @@ const { store, redisMock } = vi.hoisted(() => {
       store.delete(key);
       return existed ? 1 : 0;
     }),
+    // Compare-and-delete do lock global de pedidosStore (src/lib/pedidosStore.ts):
+    // sem isto, liberarLockPedidos() falha silenciosamente (try/catch) e o
+    // lock nunca é liberado entre chamadas, travando toda chamada seguinte
+    // em lock_indisponivel.
+    eval: vi.fn(async (_script: string, keys: string[], args: string[]) => {
+      const [key] = keys;
+      const [token] = args;
+      if (store.get(key) === token) {
+        store.delete(key);
+        return 1;
+      }
+      return 0;
+    }),
   };
   return { store, redisMock };
 });

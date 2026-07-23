@@ -9,6 +9,7 @@ import {
   adquirirMutexEdicao,
   liberarMutexEdicao,
 } from "@/lib/pedidoEdicao";
+import { executarComLockPedidos } from "@/lib/pedidosStore";
 
 type ConfigPizzariaPix = { whatsappPizzaria?: string };
 
@@ -34,15 +35,20 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const mutexToken = await adquirirMutexEdicao(id);
     if (mutexToken) {
       try {
-        const atuais = (await redis.get<PedidoRedis[]>("pedidos")) || [];
-        const idx2 = atuais.findIndex((p) => p.id === id);
-        if (idx2 >= 0 && atuais[idx2].editStatus === "editing") {
-          const limpeza2 = limparEdicaoExpiradaSeNecessario(atuais[idx2]);
-          if (limpeza2.mudou) {
-            atuais[idx2] = limpeza2.pedido;
-            await redis.set("pedidos", atuais);
+        // Além do mutex por pedido, a releitura+escrita roda sob o lock
+        // global do módulo central — protege contra corrida com qualquer
+        // outro writer de "pedidos".
+        await executarComLockPedidos(async () => {
+          const atuais = (await redis.get<PedidoRedis[]>("pedidos")) || [];
+          const idx2 = atuais.findIndex((p) => p.id === id);
+          if (idx2 >= 0 && atuais[idx2].editStatus === "editing") {
+            const limpeza2 = limparEdicaoExpiradaSeNecessario(atuais[idx2]);
+            if (limpeza2.mudou) {
+              atuais[idx2] = limpeza2.pedido;
+              await redis.set("pedidos", atuais);
+            }
           }
-        }
+        });
       } finally {
         await liberarMutexEdicao(id, mutexToken);
       }

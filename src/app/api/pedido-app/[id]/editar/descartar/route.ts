@@ -6,6 +6,7 @@ import {
   liberarMutexEdicao,
   tokensIguais,
 } from "@/lib/pedidoEdicao";
+import { executarComLockPedidos } from "@/lib/pedidosStore";
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -26,37 +27,50 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({ ok: false, error: "Não foi possível descartar agora. Tente de novo." }, { status: 409 });
   }
 
+  type ResultadoDescartar = { ok: true; alreadyCleared?: true } | { ok: false; status: number; error: string };
+
   try {
-    const pedidos = (await redis.get<PedidoRedis[]>("pedidos")) || [];
-    const index = pedidos.findIndex((p) => p.id === id);
-    if (index < 0 || !tokensIguais(pedidos[index].statusToken, statusToken)) {
-      return NextResponse.json({ ok: false, error: "Pedido não encontrado" }, { status: 404 });
+    const resultadoLock = await executarComLockPedidos<ResultadoDescartar>(async () => {
+      const pedidos = (await redis.get<PedidoRedis[]>("pedidos")) || [];
+      const index = pedidos.findIndex((p) => p.id === id);
+      if (index < 0 || !tokensIguais(pedidos[index].statusToken, statusToken)) {
+        return { ok: false, status: 404, error: "Pedido não encontrado" };
+      }
+
+      const pedido = pedidos[index];
+
+      // Idempotente: se já não há edição ativa (descarte duplicado, clique
+      // duplo, ou o lock já expirou sozinho), responde sucesso sem reescrever
+      // nada — o pedido original já está preservado de qualquer forma.
+      if (pedido.editStatus !== "editing" || pedido.editSessionId !== editSessionId) {
+        return { ok: true, alreadyCleared: true };
+      }
+
+      const agora = new Date().toISOString();
+      pedidos[index] = {
+        ...pedido,
+        editStatus: "none",
+        editSessionId: undefined,
+        editStartedAt: undefined,
+        editExpiresAt: undefined,
+        editHistory: [
+          ...(pedido.editHistory || []),
+          { tipo: "descartado", horario: agora, revisaoAnterior: pedido.revision ?? 1 },
+        ],
+      };
+      await redis.set("pedidos", pedidos);
+
+      return { ok: true };
+    });
+
+    if (resultadoLock.tipo !== "sucesso") {
+      return NextResponse.json({ ok: false, error: "Não foi possível descartar agora. Tente de novo." }, { status: 409 });
     }
-
-    const pedido = pedidos[index];
-
-    // Idempotente: se já não há edição ativa (descarte duplicado, clique
-    // duplo, ou o lock já expirou sozinho), responde sucesso sem reescrever
-    // nada — o pedido original já está preservado de qualquer forma.
-    if (pedido.editStatus !== "editing" || pedido.editSessionId !== editSessionId) {
-      return NextResponse.json({ ok: true, alreadyCleared: true });
+    const resultado = resultadoLock.valor;
+    if (!resultado.ok) {
+      return NextResponse.json({ ok: false, error: resultado.error }, { status: resultado.status });
     }
-
-    const agora = new Date().toISOString();
-    pedidos[index] = {
-      ...pedido,
-      editStatus: "none",
-      editSessionId: undefined,
-      editStartedAt: undefined,
-      editExpiresAt: undefined,
-      editHistory: [
-        ...(pedido.editHistory || []),
-        { tipo: "descartado", horario: agora, revisaoAnterior: pedido.revision ?? 1 },
-      ],
-    };
-    await redis.set("pedidos", pedidos);
-
-    return NextResponse.json({ ok: true });
+    return NextResponse.json(resultado.alreadyCleared ? { ok: true, alreadyCleared: true } : { ok: true });
   } finally {
     await liberarMutexEdicao(id, mutexToken);
   }
