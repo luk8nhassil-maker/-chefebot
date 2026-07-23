@@ -1,6 +1,6 @@
 import { timingSafeEqual } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
-import { redis } from "@/lib/redis";
+import { buscarPedidoUnico } from "@/lib/pedidosStore";
 import { montarStatusPublicoPedido, type PedidoStatusPublicoFonte } from "@/lib/pedidoStatusPublico";
 
 type PedidoComToken = PedidoStatusPublicoFonte & {
@@ -27,12 +27,22 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "id e token obrigatórios" }, { status: 400 });
   }
 
-  const pedidos = (await redis.get<PedidoComToken[]>("pedidos")) || [];
-  const pedido = pedidos.find((item) => item.id === id);
-
-  if (!pedido || !tokensIguais(tokenDoPedido(pedido), token)) {
+  // Busca única central — nunca escolhe arbitrariamente entre registros
+  // duplicados: este é o status público consultado pelo polling do
+  // cardápio do cliente (autenticado só por id+token, sem sessão de
+  // staff) — `multiplos_encontrados` é erro crítico sanitizado (503),
+  // nunca expõe o status de um pedido possivelmente errado.
+  const resultado = await buscarPedidoUnico<PedidoComToken>(id);
+  if (resultado.tipo === "leitura_incerta") {
+    return NextResponse.json({ error: "Não foi possível consultar o pedido agora. Tente de novo." }, { status: 503 });
+  }
+  if (resultado.tipo === "multiplos_encontrados") {
+    console.error("[ChefeBot] pedido-app/status: múltiplos pedidos com o mesmo id — inconsistência crítica", { id });
+    return NextResponse.json({ error: "Não foi possível consultar o pedido agora. Tente de novo." }, { status: 503 });
+  }
+  if (resultado.tipo === "nao_encontrado" || !tokensIguais(tokenDoPedido(resultado.pedido), token)) {
     return NextResponse.json({ error: "Pedido não encontrado" }, { status: 404 });
   }
 
-  return NextResponse.json(montarStatusPublicoPedido(pedido));
+  return NextResponse.json(montarStatusPublicoPedido(resultado.pedido));
 }

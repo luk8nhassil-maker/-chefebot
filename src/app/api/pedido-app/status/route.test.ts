@@ -137,4 +137,25 @@ describe("GET /api/pedido-app/status", () => {
 
     expect(res.status).toBe(404);
   });
+
+  it("IDs duplicados: nunca escolhe um dos dois arbitrariamente — erro crítico sanitizado (503), nunca expõe o status errado", async () => {
+    store.set("pedidos", [
+      { id: "dup", statusToken: "token-a", status: "novo", total: 10, pagamento: "Pix" },
+      { id: "dup", statusToken: "token-b", status: "entregue", total: 20, pagamento: "Dinheiro" },
+    ]);
+
+    const res = await GET(getReq("?id=dup&token=token-a"));
+    expect(res.status).toBe(503);
+    const body = await json(res);
+    expect(body).not.toHaveProperty("id");
+    expect(body).not.toHaveProperty("status");
+  });
+
+  it("leitura de 'pedidos' indisponível: 503 recuperável, nunca 500 cru nem 404 enganoso", async () => {
+    redisMock.get.mockImplementationOnce(async () => {
+      throw new Error("Redis indisponível (simulado)");
+    });
+    const res = await GET(getReq("?id=qualquer&token=qualquer"));
+    expect(res.status).toBe(503);
+  });
 });
