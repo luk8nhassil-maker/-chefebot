@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { redis } from '@/lib/redis'
 import { verifyToken } from '@/lib/auth'
+import { mutarPedidoPorIdAtomico, removerPedidoAtomico } from '@/lib/pedidosStore'
 
 type Pedido = {
   id: string
@@ -30,35 +31,31 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: 'id e telefone obrigatórios' }, { status: 400 })
   }
 
+  // Busca só para decidir qual dos 3 caminhos seguir (checagem fresca e
+  // definitiva de cada um roda de novo dentro da mutação atômica abaixo).
   const pedidos = (await redis.get<Pedido[]>('pedidos')) || []
-  const idx = pedidos.findIndex(p => p.id === id)
-  if (idx === -1) {
+  const pedido = pedidos.find(p => p.id === id)
+  if (!pedido) {
     return NextResponse.json({ ok: false, error: 'Pedido não encontrado' }, { status: 404 })
   }
 
-  const pedido = pedidos[idx]
   const isPedidoEscalonamentoPuro =
     pedido.itens.length === 1 && pedido.itens[0] === 'Cliente precisa de atendimento humano'
 
-  let novosPedidos: Pedido[]
+  const resultado = isPedidoEscalonamentoPuro
+    ? await removerPedidoAtomico<Pedido>(id)
+    : await mutarPedidoPorIdAtomico<Pedido>(id, (fresco) =>
+        fresco.escalonado
+          ? { ...fresco, escalonado: false, horarioEscalonado: undefined }
+          : { ...fresco, resolvidoConversas: true }
+      )
 
-  if (isPedidoEscalonamentoPuro) {
-    // Ticket puro de escalamento — pode deletar
-    novosPedidos = pedidos.filter(p => p.id !== id)
-  } else if (pedido.escalonado) {
-    // Pedido real da fila (escalonado) — remove flag escalonado, mantém pedido no fluxo
-    novosPedidos = pedidos.map(p =>
-      p.id === id ? { ...p, escalonado: false, horarioEscalonado: undefined } : p
-    )
-  } else {
-    // Pedido da seção "Em atendimento hoje" (não escalonado) — apenas marca como resolvido
-    // na visão de conversas, sem alterar status do pedido e sem enviar mensagem
-    novosPedidos = pedidos.map(p =>
-      p.id === id ? { ...p, resolvidoConversas: true } : p
-    )
+  if (resultado.tipo === 'nao_encontrado') {
+    return NextResponse.json({ ok: false, error: 'Pedido não encontrado' }, { status: 404 })
   }
-
-  await redis.set('pedidos', novosPedidos)
+  if (resultado.tipo !== 'sucesso') {
+    return NextResponse.json({ ok: false, error: 'Não foi possível finalizar agora. Tente de novo.' }, { status: 503 })
+  }
 
   // Limpa sessão do bot para re-engajamento futuro. NÃO envia mensagem WhatsApp.
   const phone = telefone.replace(/\D/g, '')
