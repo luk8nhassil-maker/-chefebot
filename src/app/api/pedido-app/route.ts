@@ -3,7 +3,6 @@ import { randomUUID } from "crypto";
 import { redis } from "@/lib/redis";
 import {
   adicionarPedidoAtomico,
-  buscarPedido,
   gerarPedidoIdUnico,
   mutarPedidoPorIdAtomico,
   removerPedidoAtomico,
