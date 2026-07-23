@@ -6,7 +6,7 @@ import {
   liberarMutexEdicao,
   tokensIguais,
 } from "@/lib/pedidoEdicao";
-import { executarComLockPedidos } from "@/lib/pedidosStore";
+import { escreverPedidosCercado, executarComLockPedidos } from "@/lib/pedidosStore";
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -30,7 +30,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   type ResultadoDescartar = { ok: true; alreadyCleared?: true } | { ok: false; status: number; error: string };
 
   try {
-    const resultadoLock = await executarComLockPedidos<ResultadoDescartar>(async () => {
+    const resultadoLock = await executarComLockPedidos<ResultadoDescartar>(async (token) => {
       const pedidos = (await redis.get<PedidoRedis[]>("pedidos")) || [];
       const index = pedidos.findIndex((p) => p.id === id);
       if (index < 0 || !tokensIguais(pedidos[index].statusToken, statusToken)) {
@@ -58,7 +58,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           { tipo: "descartado", horario: agora, revisaoAnterior: pedido.revision ?? 1 },
         ],
       };
-      await redis.set("pedidos", pedidos);
+      const escrita = await escreverPedidosCercado(token, pedidos);
+      if (escrita === "lock_perdido") {
+        return { ok: false, status: 409, error: "Não foi possível descartar agora. Tente de novo." };
+      }
 
       return { ok: true };
     });

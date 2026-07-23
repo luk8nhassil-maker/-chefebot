@@ -3,8 +3,10 @@ import { verifyToken } from '@/lib/auth'
 import { redis } from '@/lib/redis'
 import {
   adicionarPedidoAtomico,
+  escreverPedidosCercado,
   executarComLockPedidos,
   gerarPedidoIdUnico,
+  LOCK_KEY as PEDIDOS_LOCK_KEY,
   mutarLotePedidosAtomico,
   removerPedidoAtomico,
 } from '@/lib/pedidosStore'
@@ -82,7 +84,17 @@ type Pedido = PedidoComEdicao & {
 
 const FILA_ENTREGADOR_TTL_SEGUNDOS = 86400
 
+// FENCING: KEYS[1]/ARGV[1] são o lock de "pedidos" e o token da execução —
+// checados e comparados na MESMA operação atômica que grava "pedidos" e as
+// filas de entregador. Uma execução cujo lock expirou entre a leitura fresca
+// e este EVAL (outra já adquiriu um lock novo) nunca consegue gravar aqui:
+// o script recusa (retorna "lock_perdido") em vez de aplicar a escrita com um
+// snapshot potencialmente desatualizado.
 const SALVAR_ATRIBUICAO_LUA = `
+if redis.call("get", KEYS[1]) ~= ARGV[1] then
+  return "lock_perdido"
+end
+
 local function lerFila(key)
   local raw = redis.call("GET", key)
   if not raw then return {} end
@@ -109,36 +121,39 @@ local function encodeArray(fila)
   return cjson.encode(fila)
 end
 
-local pedidoId = ARGV[2]
-local filaAtual = semPedido(lerFila(KEYS[2]), pedidoId)
-table.insert(filaAtual, cjson.decode(ARGV[3]))
+local pedidoId = ARGV[3]
+local filaAtual = semPedido(lerFila(KEYS[3]), pedidoId)
+table.insert(filaAtual, cjson.decode(ARGV[4]))
 
-local mudouEntregador = ARGV[4] == "1"
+local mudouEntregador = ARGV[5] == "1"
 local filaAnterior = nil
 local ttlAnterior = -1
 if mudouEntregador then
-  ttlAnterior = redis.call("PTTL", KEYS[3])
-  filaAnterior = semPedido(lerFila(KEYS[3]), pedidoId)
+  ttlAnterior = redis.call("PTTL", KEYS[4])
+  filaAnterior = semPedido(lerFila(KEYS[4]), pedidoId)
 end
 
-redis.call("SET", KEYS[1], ARGV[1])
-redis.call("SET", KEYS[2], encodeArray(filaAtual), "EX", ARGV[5])
+redis.call("SET", KEYS[2], ARGV[2])
+redis.call("SET", KEYS[3], encodeArray(filaAtual), "EX", ARGV[6])
 if mudouEntregador then
-  redis.call("SET", KEYS[3], encodeArray(filaAnterior))
+  redis.call("SET", KEYS[4], encodeArray(filaAnterior))
   if ttlAnterior > 0 then
-    redis.call("PEXPIRE", KEYS[3], ttlAnterior)
+    redis.call("PEXPIRE", KEYS[4], ttlAnterior)
   else
-    redis.call("EXPIRE", KEYS[3], ARGV[5])
+    redis.call("EXPIRE", KEYS[4], ARGV[6])
   end
 end
 return 1
 `
 
+type ResultadoSalvarAtribuicao = "ok" | "lock_perdido"
+
 async function salvarAtribuicaoComFilas(
+  token: string,
   pedidos: Pedido[],
   pedidoEntregador: PedidoEntregador,
   entregadorAnteriorId?: string
-): Promise<void> {
+): Promise<ResultadoSalvarAtribuicao> {
   const entregadorAtualId = pedidoEntregador.entregadorId
   const filaAtualKey = `entregador:pedidos:${entregadorAtualId}`
   const mudouEntregador = Boolean(
@@ -147,10 +162,11 @@ async function salvarAtribuicaoComFilas(
   const filaAnteriorKey = mudouEntregador
     ? `entregador:pedidos:${entregadorAnteriorId}`
     : filaAtualKey
-  await redis.eval(
+  const resultado = await redis.eval(
     SALVAR_ATRIBUICAO_LUA,
-    ['pedidos', filaAtualKey, filaAnteriorKey],
+    [PEDIDOS_LOCK_KEY, 'pedidos', filaAtualKey, filaAnteriorKey],
     [
+      token,
       JSON.stringify(pedidos),
       pedidoEntregador.pedidoId,
       JSON.stringify(pedidoEntregador),
@@ -158,6 +174,7 @@ async function salvarAtribuicaoComFilas(
       String(FILA_ENTREGADOR_TTL_SEGUNDOS),
     ]
   )
+  return resultado === 'lock_perdido' ? 'lock_perdido' : 'ok'
 }
 
 
@@ -285,7 +302,12 @@ export async function PATCH(req: NextRequest) {
     // a fila `entregador:pedidos:*` atomicamente juntos via um único EVAL Lua
     // (salvarAtribuicaoComFilas) — não se encaixa em add/update/remove de um
     // único pedido.
-    const resultadoLock = await executarComLockPedidos<ResultadoPatchInterno>(async () => {
+    const lockPerdidoResponse = () => NextResponse.json(
+      { error: 'Não foi possível atualizar agora. Tente de novo.' },
+      { status: 409 }
+    )
+
+    const resultadoLock = await executarComLockPedidos<ResultadoPatchInterno>(async (token) => {
       const pedidos = await getPedidos()
       const index = pedidos.findIndex(p => p.id === id)
       if (index === -1) return { ok: false, response: NextResponse.json({ error: 'Pedido nao encontrado' }, { status: 404 }) }
@@ -304,7 +326,13 @@ export async function PATCH(req: NextRequest) {
       if (limpeza.mudou) pedidos[index] = limpeza.pedido as Pedido
 
       if (lockEdicaoAtivo(pedidos[index])) {
-        if (limpeza.mudou) await redis.set('pedidos', pedidos)
+        if (limpeza.mudou) {
+          // Cercado (fenced) pelo token do lock: se o lock já expirou nesse
+          // meio-tempo, esta escrita best-effort de limpeza é recusada em vez
+          // de sobrescrever o que outra execução já gravou.
+          const escrita = await escreverPedidosCercado(token, pedidos)
+          if (escrita === 'lock_perdido') return { ok: false, response: lockPerdidoResponse() }
+        }
         return {
           ok: false,
           response: NextResponse.json(
@@ -348,13 +376,16 @@ export async function PATCH(req: NextRequest) {
           status: 'pendente',
           horarioSaida: agora,
         }
-        await salvarAtribuicaoComFilas(
+        const resultadoAtribuicao = await salvarAtribuicaoComFilas(
+          token,
           pedidos,
           pedidoEntregador,
           entregadorAnteriorId
         )
+        if (resultadoAtribuicao === 'lock_perdido') return { ok: false, response: lockPerdidoResponse() }
       } else {
-        await redis.set('pedidos', pedidos)
+        const escrita = await escreverPedidosCercado(token, pedidos)
+        if (escrita === 'lock_perdido') return { ok: false, response: lockPerdidoResponse() }
       }
 
       return { ok: true, pedidos, index, statusAnterior, entregadorCanonico }

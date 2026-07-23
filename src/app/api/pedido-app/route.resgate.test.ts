@@ -22,7 +22,8 @@ function defaultSetImpl(key: string, value: unknown, opts?: { nx?: boolean }) {
 //   — grava registro+token juntos, incondicional.
 // - 2 chaves + 1 arg: INVALIDAR_RESULTADO_SE_TOKEN_SCRIPT (Modo
 //   Sobrevivência) — compare-and-delete atômico do par registro/token.
-function defaultEvalImpl(_script: string, keys: string[], args: string[]) {
+function defaultEvalImpl(_script: string, keys: string[], argsUnknown: unknown[]) {
+  const args = argsUnknown as string[];
   if (keys.length === 1) {
     const [key] = keys;
     const [token] = args;
@@ -37,6 +38,17 @@ function defaultEvalImpl(_script: string, keys: string[], args: string[]) {
     const [registroJson, token] = args;
     redisStore.set(chaveResultado, JSON.parse(registroJson));
     redisStore.set(chaveToken, token);
+    return Promise.resolve(1);
+  }
+  if (keys.length === 2 && args.length === 2) {
+    // Escrita cercada por lock (2 keys, 2 args: token + jsonValor) — forma
+    // compartilhada por escreverPedidosCercado (pedidosStore.ts) e
+    // persistirEstadoPontosSeDono (fidelidade.ts): só grava se o token
+    // ainda for o dono do lock (keys[0]).
+    const [lockKey, valorKey] = keys;
+    const [token, jsonValor] = args;
+    if (redisStore.get(lockKey) !== token) return Promise.resolve(0);
+    redisStore.set(valorKey, JSON.parse(jsonValor));
     return Promise.resolve(1);
   }
   if (keys.length === 2 && args.length === 1) {
@@ -305,12 +317,16 @@ describe("POST /api/pedido-app — resgate de pontos no checkout (Etapa 5)", () 
     const redisLib = await import("@/lib/redis");
     const originalEval = defaultEvalImpl;
     let jaFalhou = false;
-    vi.mocked(redisLib.redis.eval).mockImplementation((script: string, keys: string[], args: string[]) => {
-      if (!jaFalhou && keys.length === 2) {
+    vi.mocked(redisLib.redis.eval).mockImplementation((script: string, keys: string[], args: unknown[]) => {
+      // keys[1] !== "pedidos": a confirmação de pontos (persistirEstadoPontosSeDono,
+      // fidelidade.ts) tem a MESMA forma (2 keys, 2 args) da escrita cercada
+      // de "pedidos" (escreverPedidosCercado) — sem este guard, intercepta a
+      // criação do próprio pedido em vez da confirmação do resgate.
+      if (!jaFalhou && keys.length === 2 && keys[1] !== "pedidos") {
         jaFalhou = true;
         return Promise.reject(new Error("falha simulada ao confirmar resgate"));
       }
-      return originalEval(script, keys, args);
+      return originalEval(script, keys, args as string[]);
     });
 
     const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -348,7 +364,7 @@ describe("POST /api/pedido-app — resgate de pontos no checkout (Etapa 5)", () 
     const originalEval = defaultEvalImpl;
     let jaFalhou = false;
     vi.mocked(redisLib.redis.eval).mockImplementation((script: string, keys: string[], args: unknown[]) => {
-      if (!jaFalhou && keys.length === 2) {
+      if (!jaFalhou && keys.length === 2 && keys[1] !== "pedidos") {
         jaFalhou = true;
         return Promise.reject(new Error("falha simulada ao confirmar resgate"));
       }
@@ -394,7 +410,7 @@ describe("POST /api/pedido-app — resgate de pontos no checkout (Etapa 5)", () 
     let jaFalhouEval = false;
     let jaFalhouGet = false;
     vi.mocked(redisLib.redis.eval).mockImplementation((script: string, keys: string[], args: unknown[]) => {
-      if (!jaFalhouEval && keys.length === 2) {
+      if (!jaFalhouEval && keys.length === 2 && keys[1] !== "pedidos") {
         jaFalhouEval = true;
         return Promise.reject(new Error("falha simulada ao confirmar resgate"));
       }
@@ -437,22 +453,21 @@ describe("POST /api/pedido-app — resgate de pontos no checkout (Etapa 5)", () 
 
     const redisLib = await import("@/lib/redis");
     const originalEval = defaultEvalImpl;
-    const originalSet = defaultSetImpl;
     let jaFalhouEval = false;
-    let jaFalhouSetRollback = false;
+    // Rollback (remoção do pedido com desconto) também é uma escrita cercada
+    // de "pedidos" (escreverPedidosCercado/removerPedidoAtomico, um EVAL) —
+    // força essa segunda escrita a falhar também, depois da confirmação.
+    let jaFalhouRollback = false;
     vi.mocked(redisLib.redis.eval).mockImplementation((script: string, keys: string[], args: unknown[]) => {
-      if (!jaFalhouEval && keys.length === 2) {
+      if (!jaFalhouEval && keys.length === 2 && keys[1] !== "pedidos") {
         jaFalhouEval = true;
         return Promise.reject(new Error("falha simulada ao confirmar resgate"));
       }
-      return originalEval(script, keys, args as string[]);
-    });
-    vi.mocked(redisLib.redis.set).mockImplementation((key: string, value: unknown, opts?: { nx?: boolean }) => {
-      if (key === "pedidos" && jaFalhouEval && !jaFalhouSetRollback) {
-        jaFalhouSetRollback = true;
-        return Promise.reject(new Error("falha simulada no SET do rollback"));
+      if (jaFalhouEval && !jaFalhouRollback && keys.length === 2 && keys[1] === "pedidos") {
+        jaFalhouRollback = true;
+        return Promise.reject(new Error("falha simulada no rollback (remoção do pedido)"));
       }
-      return originalSet(key, value, opts);
+      return originalEval(script, keys, args as string[]);
     });
 
     const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -468,7 +483,7 @@ describe("POST /api/pedido-app — resgate de pontos no checkout (Etapa 5)", () 
     expect(pedidos).toHaveLength(1);
     expect(pedidos[0].survivalState).toBe("recovery_required");
 
-    vi.mocked(redisLib.redis.set).mockImplementation(originalSet);
+    vi.mocked(redisLib.redis.eval).mockImplementation(originalEval);
     const retry = await POST(pedidoRequest({ resgateId: reserva.resgateId, clientRequestId }));
     expect(retry.status).toBe(503);
     const retryData = await retry.json();
@@ -549,19 +564,21 @@ describe("POST /api/pedido-app — resgate de pontos no checkout (Etapa 5)", () 
     const chaveResultado = `survival:idempotencia:pedido:${clientRequestId}:result`;
 
     const redisLib = await import("@/lib/redis");
-    const originalSet = defaultSetImpl;
+    const originalEval = defaultEvalImpl;
     let contadorPedidosSet = 0;
-    vi.mocked(redisLib.redis.set).mockImplementation((key: string, value: unknown, opts?: { nx?: boolean }) => {
-      if (key === "pedidos") {
+    // Persistência/mutação de "pedidos" agora é escreverPedidosCercado (EVAL,
+    // [lockKey, "pedidos"], [token, jsonValor]).
+    vi.mocked(redisLib.redis.eval).mockImplementation((script: string, keys: string[], args: unknown[]) => {
+      if (keys.length === 2 && keys[1] === "pedidos") {
         contadorPedidosSet += 1;
-        // 1º SET de "pedidos" = persistência inicial do pedido (sempre
-        // acontece); a partir do 2º (marcarSurvivalStateDoPedido
+        // 1ª escrita de "pedidos" = persistência inicial do pedido (sempre
+        // acontece); a partir da 2ª (marcarSurvivalStateDoPedido
         // "completed", e a tentativa seguinte de "recovery_required") falha.
         if (contadorPedidosSet >= 2) {
           return Promise.reject(new Error("falha simulada ao marcar completed"));
         }
       }
-      return originalSet(key, value, opts);
+      return originalEval(script, keys, args as string[]);
     });
 
     const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -574,7 +591,7 @@ describe("POST /api/pedido-app — resgate de pontos no checkout (Etapa 5)", () 
     expect(data.unresolved).toBe(true);
     expect(redisStore.has(chaveResultado)).toBe(false);
 
-    vi.mocked(redisLib.redis.set).mockImplementation(originalSet);
+    vi.mocked(redisLib.redis.eval).mockImplementation(originalEval);
     const pedidos = redisStore.get("pedidos") as Array<Record<string, unknown>>;
     expect(pedidos).toHaveLength(1);
     expect(pedidos[0].survivalState).not.toBe("completed");
@@ -642,12 +659,12 @@ describe("POST /api/pedido-app — resgate de pontos no checkout (Etapa 5)", () 
 
     const redisLib = await import("@/lib/redis");
     let jaFalhouPersistencia = false;
-    vi.mocked(redisLib.redis.set).mockImplementation((key: string, value: unknown, opts?: { nx?: boolean }) => {
-      if (key === "pedidos" && !jaFalhouPersistencia && Array.isArray(value)) {
+    vi.mocked(redisLib.redis.eval).mockImplementation((script: string, keys: string[], args: unknown[]) => {
+      if (keys.length === 2 && keys[1] === "pedidos" && !jaFalhouPersistencia) {
         jaFalhouPersistencia = true;
         return Promise.reject(new Error("falha simulada ao persistir pedido (resposta perdida antes da escrita)"));
       }
-      return defaultSetImpl(key, value, opts);
+      return defaultEvalImpl(script, keys, args as string[]);
     });
 
     const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -656,7 +673,7 @@ describe("POST /api/pedido-app — resgate de pontos no checkout (Etapa 5)", () 
     expect(r1.status).toBe(500);
     expect(redisStore.get("pedidos")).toBeUndefined();
 
-    vi.mocked(redisLib.redis.set).mockImplementation(defaultSetImpl);
+    vi.mocked(redisLib.redis.eval).mockImplementation(defaultEvalImpl);
 
     // O status da reserva muda para "utilizado" ANTES do retry — usando o
     // MESMO pedidoId já reivindicado pelo attempt (para que a confirmação

@@ -5,33 +5,78 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 // no Redis de verdade, que é single-threaded), mas o módulo pedidosStore.ts
 // ainda pode intercalar chamadas CONCORRENTES entre si nos pontos de `await`
 // — exatamente a janela de corrida que o lock precisa fechar. Suporta:
-// - SET com `nx` (falha se a chave já existe) — usado pelo lock.
-// - EVAL do script de compare-and-delete usado para liberar o lock.
+// - SET com `nx` (falha se a chave já existe) e `ex` (TTL real, avançado por
+//   `avancarRelogio` — nunca um DEL manual "fingindo" expiração).
+// - EVAL de DOIS scripts, discriminados pelo número de KEYS (mesma forma como
+//   o módulo real os chama): compare-and-delete (1 key, libera o lock) e
+//   escrita cercada (2 keys: lock + "pedidos" — só grava se o token ainda for
+//   o dono do lock, MESMA operação atômica).
 // - Hooks de falha injetável (para simular SET/GET lançando exceção).
-const { redisFake, store } = vi.hoisted(() => {
+const { redisFake, store, avancarRelogio } = vi.hoisted(() => {
   const store = new Map<string, unknown>();
+  const ttlStore = new Map<string, number>(); // key -> instante (ms no relógio fake) em que expira
+  let relogioMs = 0;
+
+  function expirou(key: string): boolean {
+    const expiraEm = ttlStore.get(key);
+    return expiraEm !== undefined && relogioMs >= expiraEm;
+  }
+  function aplicarExpiracaoSeNecessario(key: string) {
+    if (expirou(key)) {
+      store.delete(key);
+      ttlStore.delete(key);
+    }
+  }
+
   const redisFake = {
     async get<T>(key: string): Promise<T | null> {
+      aplicarExpiracaoSeNecessario(key);
       return store.has(key) ? (store.get(key) as T) : null;
     },
     async set(key: string, value: unknown, opts?: { nx?: boolean; ex?: number }) {
+      aplicarExpiracaoSeNecessario(key);
       if (opts?.nx && store.has(key)) return null;
       store.set(key, value);
+      if (opts?.ex) ttlStore.set(key, relogioMs + opts.ex * 1000);
+      else ttlStore.delete(key);
       return "OK";
     },
     async del(key: string) {
+      aplicarExpiracaoSeNecessario(key);
       const existed = store.has(key);
       store.delete(key);
+      ttlStore.delete(key);
       return existed ? 1 : 0;
     },
     async eval(_script: string, keys: string[], args: unknown[]) {
+      if (keys.length >= 2) {
+        // Escrita cercada (escreverPedidosCercado): KEYS=[lockKey, pedidosKey],
+        // ARGV=[token, jsonValor]. GET do dono do lock + SET de "pedidos" na
+        // MESMA chamada — nenhuma outra chamada consegue se intercalar entre
+        // os dois, exatamente como Lua/EVAL é atômico no Redis real.
+        const [lockKey, pedidosKey] = keys;
+        const [token, jsonValor] = args as [string, string];
+        aplicarExpiracaoSeNecessario(lockKey);
+        if (store.get(lockKey) !== token) return 0;
+        store.set(pedidosKey, JSON.parse(jsonValor));
+        return 1;
+      }
+      // Compare-and-delete (liberação do lock): KEYS=[lockKey], ARGV=[token].
       const [key] = keys;
       const [token] = args;
-      if (store.get(key) === token) { store.delete(key); return 1; }
+      aplicarExpiracaoSeNecessario(key);
+      if (store.get(key) === token) {
+        store.delete(key);
+        ttlStore.delete(key);
+        return 1;
+      }
       return 0;
     },
   };
-  return { redisFake, store };
+  const avancarRelogio = (ms: number) => {
+    relogioMs += ms;
+  };
+  return { redisFake, store, avancarRelogio };
 });
 
 vi.mock("@/lib/redis", () => ({ redis: redisFake }));
@@ -40,8 +85,10 @@ import {
   adicionarPedidoAtomico,
   atualizarPedidoAtomico,
   buscarPedido,
+  escreverPedidosCercado,
   gerarPedidoIdUnico,
   listarPedidos,
+  LOCK_KEY,
   mutarLotePedidosAtomico,
   mutarPedidoPorIdAtomico,
   removerPedidoAtomico,
@@ -247,26 +294,74 @@ describe("pedidosStore — concorrência real (Promise.all) sobre mock atômico 
     expect(tokenDaOperacaoAtiva).not.toBe("token-de-execucao-velha-e-expirada");
   });
 
+  test("14b. FENCING real: execução A com lock expirado nunca grava por cima da execução B que já adquiriu um lock novo", async () => {
+    // 1. Execução A adquire o lock (TTL real de 5s via redisFake.set com ex).
+    const tokenA = "token-execucao-A";
+    await redisFake.set(LOCK_KEY, tokenA, { nx: true, ex: 5 });
+
+    // A lê o estado fresco ENQUANTO ainda é dono do lock (snapshot antigo que
+    // A vai tentar gravar mais tarde, já sem ser mais dono).
+    store.set(PEDIDOS_KEY, [pedido("original")]);
+    const snapshotDeA = await listarPedidos<P>();
+
+    // 2. O lock de A expira (avança o relógio real do mock além do TTL).
+    avancarRelogio(5001);
+
+    // 3. Execução B adquire um lock NOVO (token diferente) e grava sua
+    // própria mutação — a chave do lock só é reconhecida como livre porque o
+    // TTL de A realmente expirou no mock.
+    const tokenB = "token-execucao-B";
+    const setB = await redisFake.set(LOCK_KEY, tokenB, { nx: true, ex: 5 });
+    expect(setB).toBe("OK"); // confirma que o slot estava livre (TTL de A expirou de verdade)
+    const estadoAposB = [...snapshotDeA, pedido("mutacao-de-B")];
+    const escritaB = await escreverPedidosCercado(tokenB, estadoAposB);
+    expect(escritaB).toBe("ok");
+
+    // 4. Execução A (que nunca soube que perdeu o lock) tenta gravar usando
+    // o snapshot antigo capturado no passo 1 — a operação continua com
+    // tokenA, que não é mais o dono do lock (é tokenB agora).
+    const tentativaDeAComSnapshotAntigo = [...snapshotDeA, pedido("mutacao-de-A-tardia")];
+    const escritaA = await escreverPedidosCercado(tokenA, tentativaDeAComSnapshotAntigo);
+
+    // 5. A gravação de A é recusada — determinístico, nunca ambíguo.
+    expect(escritaA).toBe("lock_perdido");
+
+    // 6. A nunca remove o lock de B: mesmo tentando o compare-and-delete de
+    // liberação com o token antigo, o lock atual (de B) permanece intacto.
+    const tentativaLiberacaoDeA = await redisFake.eval("", [LOCK_KEY], [tokenA]);
+    expect(tentativaLiberacaoDeA).toBe(0);
+    expect(store.get(LOCK_KEY)).toBe(tokenB);
+
+    // 7. Estado final contém SOMENTE a mutação válida (de B) — nenhuma perda,
+    // nenhuma sobrescrita pelo snapshot antigo de A.
+    const atuais = pedidosAtuais();
+    expect(atuais.map((p) => p.id)).toEqual(["original", "mutacao-de-B"]);
+    expect(atuais.find((p) => p.id === "mutacao-de-A-tardia")).toBeUndefined();
+  });
+
   test("15. lock indisponível após aquisição por terceiro: retorna erro recuperável, nunca finge sucesso", async () => {
     store.set("lock:pedidos:mutex", "outro-dono");
     const resultado = await mutarPedidoPorIdAtomico<P>("qualquer", (p) => p);
     expect(resultado.tipo).toBe("lock_indisponivel");
   });
 
-  test("16. SET lança exceção mas a escrita foi de fato aplicada: reconciliação confirma sucesso (nunca finge falha)", async () => {
+  test("16. EVAL da escrita cercada lança exceção mas a escrita foi de fato aplicada: reconciliação confirma sucesso (nunca finge falha)", async () => {
     const resultado = await (async () => {
-      // Intercepta o próximo SET: simula "aplicado no servidor, resposta
-      // perdida" — o valor abaixo é escrito manualmente no store ANTES de
-      // lançar, reproduzindo exatamente esse cenário.
-      const original = redisFake.set.bind(redisFake);
+      // Intercepta o próximo EVAL de escrita cercada (2 keys: lock + pedidos):
+      // simula "aplicado no servidor, resposta perdida" — o valor abaixo é
+      // escrito manualmente no store ANTES de lançar, reproduzindo
+      // exatamente esse cenário.
+      const original = redisFake.eval.bind(redisFake);
       let jaFalhou = false;
-      const spy = vi.spyOn(redisFake, "set").mockImplementation(async (key: string, value: unknown, opts) => {
-        if (key === PEDIDOS_KEY && !jaFalhou) {
+      const spy = vi.spyOn(redisFake, "eval").mockImplementation(async (script: string, keys: string[], args: unknown[]) => {
+        if (keys.length >= 2 && !jaFalhou) {
           jaFalhou = true;
-          store.set(key, value); // a escrita "aconteceu" no servidor...
+          const [, pedidosKey] = keys;
+          const [, jsonValor] = args as [string, string];
+          store.set(pedidosKey, JSON.parse(jsonValor)); // a escrita "aconteceu" no servidor...
           throw new Error("timeout de rede simulado"); // ...mas o cliente nunca soube
         }
-        return original(key, value, opts);
+        return original(script, keys, args);
       });
       try {
         return await adicionarPedidoAtomico(pedido("ambiguo"));
@@ -278,24 +373,24 @@ describe("pedidosStore — concorrência real (Promise.all) sobre mock atômico 
     expect(pedidosAtuais().map((p) => p.id)).toEqual(["ambiguo"]);
   });
 
-  test("17. SET lança e a releitura de reconciliação também falha: nunca finge sucesso nem repete efeito", async () => {
+  test("17. EVAL da escrita cercada lança e a releitura de reconciliação também falha: nunca finge sucesso nem repete efeito", async () => {
     store.set(PEDIDOS_KEY, []);
     const getOriginal = redisFake.get.bind(redisFake);
-    const setOriginal = redisFake.set.bind(redisFake);
+    const evalOriginal = redisFake.eval.bind(redisFake);
     let leiturasDePedidos = 0;
     const spyGet = vi.spyOn(redisFake, "get").mockImplementation(async (key: string) => {
       if (key === PEDIDOS_KEY) {
         leiturasDePedidos++;
         // 1a leitura (dentro da seção crítica): sucesso normal. Releitura de
-        // reconciliação (após o SET falhar): também falha — nunca confirma
+        // reconciliação (após o EVAL falhar): também falha — nunca confirma
         // às cegas quando nem a reconciliação consegue ler o estado real.
         if (leiturasDePedidos >= 2) throw new Error("leitura de reconciliação também indisponível");
       }
       return getOriginal(key);
     });
-    const spySet = vi.spyOn(redisFake, "set").mockImplementation(async (key: string, value: unknown, opts) => {
-      if (key === PEDIDOS_KEY) throw new Error("falha de rede");
-      return setOriginal(key, value, opts as never);
+    const spyEval = vi.spyOn(redisFake, "eval").mockImplementation(async (script: string, keys: string[], args: unknown[]) => {
+      if (keys.length >= 2) throw new Error("falha de rede");
+      return evalOriginal(script, keys, args);
     });
 
     try {
@@ -305,7 +400,7 @@ describe("pedidosStore — concorrência real (Promise.all) sobre mock atômico 
       // releitura falhou, então não há confirmação nenhuma do lado do cliente).
       expect(pedidosAtuais()).toEqual([]);
     } finally {
-      spySet.mockRestore();
+      spyEval.mockRestore();
       spyGet.mockRestore();
     }
   });

@@ -111,17 +111,25 @@ export function filtrarPedidosDoCliente(
 
 // ==================== Ordenação ====================
 
-// Pedidos legados têm id puramente numérico (`Date.now().toString()`), usado
-// como critério primário de ordenação. Pedidos novos usam
-// `gerarPedidoIdUnico()` (src/lib/pedidosStore.ts) — timestamp + entropia,
-// não puramente numérico por design — então caem no fallback abaixo:
-// data+horario (pt-BR). Como o timestamp continua sendo o prefixo do novo id
-// (largura fixa), a ordenação cronológica seria preservada mesmo com um
-// parse numérico, mas o fallback por data+horario já resolve isso sem
-// precisar tratar o novo formato aqui. Se nem isso der para interpretar, o
-// pedido vai para o fim sem quebrar a ordenação dos demais.
+// Pedidos legados têm id puramente numérico (`Date.now().toString()`).
+// Pedidos novos usam `gerarPedidoIdUnico()` (src/lib/pedidosStore.ts) —
+// timestamp em ms (13 dígitos) seguido de entropia hex, não puramente
+// numérico por design. Extrai o prefixo numérico do id (10+ dígitos —
+// cobre tanto o timestamp de 13 dígitos do id novo quanto o id legado
+// inteiramente numérico) em vez de exigir o id inteiro seja numérico: antes
+// desta correção, TODO id novo falhava o teste `/^\d+$/` (a entropia hex
+// contém letras) e caía no fallback de data+horario, que só tem precisão de
+// MINUTO — dois pedidos novos no mesmo minuto perdiam a ordem real de
+// criação. Com o prefixo extraído, a ordenação usa o timestamp em
+// milissegundos de novo, preservando a ordem real de criação. Se nem isso
+// der para interpretar, o pedido vai para o fim sem quebrar a ordenação dos
+// demais.
 export function timestampOrdenacaoPedido(p: PedidoClienteFonte): number {
-  if (/^\d+$/.test(p.id)) return Number(p.id);
+  const prefixoNumerico = p.id.match(/^(\d{10,})/);
+  if (prefixoNumerico) {
+    const t = Number(prefixoNumerico[1]);
+    if (Number.isFinite(t)) return t;
+  }
 
   if (p.data && p.horario) {
     const m = p.data.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);

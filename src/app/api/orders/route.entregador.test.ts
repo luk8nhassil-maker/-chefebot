@@ -15,17 +15,32 @@ const {
       get: vi.fn(async (key: string) => store.get(key) ?? null),
       set: vi.fn(async (key: string, value: unknown) => { store.set(key, value); return "OK"; }),
       del: vi.fn(async (key: string) => (store.delete(key) ? 1 : 0)),
+      // Dois scripts: compare-and-delete do lock global (1 key — liberação
+      // best-effort do lock de pedidosStore.ts) e SALVAR_ATRIBUICAO_LUA (4
+      // keys: [lockKey, "pedidos", filaAtualKey, filaAnteriorKey] — cercado
+      // (fenced) pelo token do lock, ver src/app/api/orders/route.ts).
       eval: vi.fn(async (_script: string, keys: string[], args: string[]) => {
-        store.set(keys[0], JSON.parse(args[0]));
-        const pedidoId = args[1];
-        const pedidoEntregador = JSON.parse(args[2]);
-        const filaAtual = ((store.get(keys[1]) as Array<{ pedidoId: string }> | undefined) ?? [])
+        if (keys.length === 1) {
+          const [key] = keys;
+          const [token] = args;
+          if (store.get(key) === token) {
+            store.delete(key);
+            return 1;
+          }
+          return 0;
+        }
+        const [lockKey, pedidosKey, filaAtualKey, filaAnteriorKey] = keys;
+        const [token, pedidosJson, pedidoId, pedidoEntregadorJson, mudouEntregador] = args;
+        if (store.get(lockKey) !== token) return "lock_perdido";
+        store.set(pedidosKey, JSON.parse(pedidosJson));
+        const pedidoEntregador = JSON.parse(pedidoEntregadorJson);
+        const filaAtual = ((store.get(filaAtualKey) as Array<{ pedidoId: string }> | undefined) ?? [])
           .filter((pedido) => pedido.pedidoId !== pedidoId);
-        store.set(keys[1], [...filaAtual, pedidoEntregador]);
-        if (args[3] === "1") {
-          const filaAnterior = ((store.get(keys[2]) as Array<{ pedidoId: string }> | undefined) ?? [])
+        store.set(filaAtualKey, [...filaAtual, pedidoEntregador]);
+        if (mudouEntregador === "1") {
+          const filaAnterior = ((store.get(filaAnteriorKey) as Array<{ pedidoId: string }> | undefined) ?? [])
             .filter((pedido) => pedido.pedidoId !== pedidoId);
-          store.set(keys[2], filaAnterior);
+          store.set(filaAnteriorKey, filaAnterior);
         }
         return 1;
       }),

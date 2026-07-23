@@ -12,7 +12,7 @@ import {
   pedidoAguardandoAceite,
   pagamentoJaConfirmado,
 } from "@/lib/pedidoEdicao";
-import { executarComLockPedidos } from "@/lib/pedidosStore";
+import { escreverPedidosCercado, executarComLockPedidos } from "@/lib/pedidosStore";
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -41,7 +41,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     // por pedido já adquirido acima) — protege contra corrida com QUALQUER
     // outro writer de "pedidos" (painel, WhatsApp, webhooks), não só com
     // outra sessão de edição do MESMO pedido.
-    const resultadoLock = await executarComLockPedidos<ResultadoIniciar>(async () => {
+    const resultadoLock = await executarComLockPedidos<ResultadoIniciar>(async (token) => {
       const pedidos = (await redis.get<PedidoRedis[]>("pedidos")) || [];
       const index = pedidos.findIndex((p) => p.id === id);
       if (index < 0 || !tokensIguais(pedidos[index].statusToken, statusToken)) {
@@ -52,18 +52,29 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       const limpeza = limparEdicaoExpiradaSeNecessario(pedido);
       if (limpeza.mudou) pedido = limpeza.pedido;
 
+      // Limpeza best-effort do lock expirado: cercada (fenced) pelo token —
+      // se o lock já não for mais nosso, a escrita é recusada em vez de
+      // sobrescrever silenciosamente uma execução mais nova. Nunca impede a
+      // resposta de erro abaixo (a limpeza é só otimização, não requisito).
+      const gravarLimpezaSeNecessario = async () => {
+        if (!limpeza.mudou) return true;
+        pedidos[index] = pedido;
+        const escrita = await escreverPedidosCercado(token, pedidos);
+        return escrita !== "lock_perdido";
+      };
+
       if (!pedidoAguardandoAceite(pedido)) {
-        if (limpeza.mudou) { pedidos[index] = pedido; await redis.set("pedidos", pedidos); }
+        await gravarLimpezaSeNecessario();
         return { ok: false, status: 409, error: "Este pedido acabou de ser aceito pela loja e não pode mais ser alterado." };
       }
 
       if (pagamentoJaConfirmado(pedido)) {
-        if (limpeza.mudou) { pedidos[index] = pedido; await redis.set("pedidos", pedidos); }
+        await gravarLimpezaSeNecessario();
         return { ok: false, status: 409, error: "O pagamento deste pedido já foi confirmado. Para alterar o pedido, fale diretamente com a loja." };
       }
 
       if (lockEdicaoAtivo(pedido)) {
-        if (limpeza.mudou) { pedidos[index] = pedido; await redis.set("pedidos", pedidos); }
+        await gravarLimpezaSeNecessario();
         return { ok: false, status: 409, error: "Este pedido já está sendo editado. Aguarde a edição atual terminar." };
       }
 
@@ -82,7 +93,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         ],
       };
       pedidos[index] = atualizado;
-      await redis.set("pedidos", pedidos);
+      const escritaFinal = await escreverPedidosCercado(token, pedidos);
+      if (escritaFinal === "lock_perdido") {
+        return { ok: false, status: 409, error: "Não foi possível iniciar a edição agora. Tente de novo." };
+      }
 
       return { ok: true, editSessionId, revision: atualizado.revision ?? 1, editExpiresAt, pedido: atualizado };
     });

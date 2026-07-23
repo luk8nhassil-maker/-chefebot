@@ -16,12 +16,32 @@ function defaultDelImpl(key: string) {
   redisStore.delete(key);
   return Promise.resolve(existed ? 1 : 0);
 }
+// Dois scripts do lock global de pedidosStore.ts: compare-and-delete (1
+// key, libera o lock) e a escrita cercada de "pedidos" via
+// escreverPedidosCercado (2 keys: lock + "pedidos").
+function defaultEvalImpl(_script: string, keys: string[], args: string[]) {
+  if (keys.length >= 2) {
+    const [lockKey, pedidosKey] = keys;
+    const [token, jsonValor] = args;
+    if (redisStore.get(lockKey) !== token) return Promise.resolve(0);
+    redisStore.set(pedidosKey, JSON.parse(jsonValor));
+    return Promise.resolve(1);
+  }
+  const [key] = keys;
+  const [token] = args;
+  if (redisStore.get(key) === token) {
+    redisStore.delete(key);
+    return Promise.resolve(1);
+  }
+  return Promise.resolve(0);
+}
 
 vi.mock("@/lib/redis", () => ({
   redis: {
     get: vi.fn(defaultGetImpl),
     set: vi.fn(defaultSetImpl),
     del: vi.fn(defaultDelImpl),
+    eval: vi.fn(defaultEvalImpl),
   },
 }));
 

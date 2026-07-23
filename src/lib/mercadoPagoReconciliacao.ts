@@ -4,7 +4,7 @@ import { buscarPagamentoMercadoPagoDetalhado, mapearStatusMercadoPago } from "./
 import { enviarTextoWhatsApp } from "./whatsappMensagem";
 import type { PedidoComPix } from "./pix";
 import { incrementarContadorPix } from "./pixMetricas";
-import { executarComLockPedidos } from "./pedidosStore";
+import { executarComLockPedidos, escreverPedidosCercado } from "./pedidosStore";
 
 // Conciliador manual/sob-demanda do Pix Mercado Pago (Nivel 6.2A) — usado
 // enquanto nao ha webhook configurado no painel MP. Consulta a API do MP pelo
@@ -25,6 +25,7 @@ import { executarComLockPedidos } from "./pedidosStore";
 
 type PedidoReconciliavel = PedidoComPix & {
   pixConfirmado?: boolean;
+  revision?: number;
   // Aditivos (Nível 6.6A) — presentes só em pedidos criados pelo webhook do
   // WhatsApp (origem) ou que já tinham telefone (app/site/WhatsApp). Nunca
   // usados para decidir CONFIRMAÇÃO do Pix — só para decidir NOTIFICAÇÃO.
@@ -326,10 +327,19 @@ export async function reconciliarPixMercadoPago(opts?: ReconciliarPixOpts): Prom
     const limitados = disponiveis.length - lote.length;
     if (limitados > 0) resumo.limitados = limitados;
 
-    let atualizados = pedidos;
     let mudou = false;
     let rateLimited = false;
     const idsConfirmadosNestaRodada = new Set<string>();
+    // Dados verificados nesta rodada por pedido — usados só para revalidar
+    // identidade contra o pedido FRESCO na hora do merge (nunca para
+    // substituir o pedido inteiro por este snapshot antigo).
+    type ConfirmacaoVerificada = {
+      providerPaymentId: string;
+      txidVerificado?: string;
+      valorEsperadoVerificado: number;
+      confirmadoEm: string;
+    };
+    const confirmacoesPorId = new Map<string, ConfirmacaoVerificada>();
 
     for (const grupo of chunk(lote, CONCORRENCIA_MAXIMA)) {
       if (rateLimited) break;
@@ -405,26 +415,13 @@ export async function reconciliarPixMercadoPago(opts?: ReconciliarPixOpts): Prom
           continue;
         }
 
-        const index = atualizados.findIndex((p) => p.id === pedidoId);
-        if (index < 0) {
-          resumo.erros++;
-          resumo.detalhes.push({ pedidoId, outcome: "erro", motivo: "pedido_nao_encontrado" });
-          continue;
-        }
-
         const confirmadoEm = new Date().toISOString();
-        atualizados = [...atualizados];
-        atualizados[index] = {
-          ...atualizados[index],
-          pixConfirmado: true,
-          pix: {
-            ...atualizados[index].pix,
-            status: "confirmado",
-            confirmadoPor: "conciliador_mercadopago",
-            confirmadoEm,
-            providerPaymentId: pagamento.id,
-          },
-        };
+        confirmacoesPorId.set(pedidoId, {
+          providerPaymentId: pagamento.id,
+          txidVerificado: pedido.pix?.txid,
+          valorEsperadoVerificado: valorEsperado,
+          confirmadoEm,
+        });
         mudou = true;
         idsConfirmadosNestaRodada.add(pedidoId);
 
@@ -440,20 +437,29 @@ export async function reconciliarPixMercadoPago(opts?: ReconciliarPixOpts): Prom
 
     // Persistência com merge por id (Guardião Pix — corrida webhook x
     // polling): em vez de sobrescrever "pedidos" com o snapshot lido no
-    // início da rodada (que pode estar desatualizado se o webhook ou a
-    // confirmação manual gravaram nesse meio-tempo), relê o estado mais
-    // recente e aplica só o patch dos pedidos que ESTA rodada confirmou —
-    // e, mesmo assim, nunca sobre um pedido que essa releitura já mostra
-    // confirmado por outro caminho ("primeira confirmação vence"). A
+    // início da rodada (que pode estar desatualizado se o webhook, a
+    // confirmação manual, o painel ou a edição do cliente gravaram nesse
+    // meio-tempo), relê o estado mais recente e aplica APENAS os campos de
+    // confirmação Pix sobre o pedido FRESCO — nunca substitui o objeto
+    // inteiro pelo snapshot antigo (`atualizados`/patch), o que apagaria
+    // qualquer mudança de status/entregador/edição/observação ocorrida
+    // durante a consulta ao Mercado Pago. Antes de aplicar, revalida que os
+    // dados financeiros do pedido fresco (valorEsperado/txid) ainda batem
+    // com o que foi verificado — se mudaram nesse meio-tempo, NÃO confirma
+    // com a resposta antiga: registra divergência para reconsulta na próxima
+    // rodada. Também nunca confirma por cima de um pedido que a releitura já
+    // mostra confirmado por outro caminho ("primeira confirmação vence"). A
     // releitura+merge+escrita roda dentro do MESMO lock global do módulo
-    // central (pedidosStore) — fecha a última janela de corrida: sem o
-    // lock, outro writer (painel, WhatsApp) ainda podia gravar entre esta
-    // releitura e este SET e ser sobrescrito por este merge.
-    let resultadoFinal = atualizados;
+    // central (pedidosStore), cercada (fenced) pelo token do lock — fecha a
+    // última janela de corrida: mesmo que o lock tenha expirado entre a
+    // aquisição e esta escrita, a gravação é recusada em vez de sobrescrever
+    // o que uma execução mais nova já gravou.
+    let resultadoFinal = pedidos;
     if (mudou) {
       const idsComDuplicidadeEvitada: string[] = [];
-      const resultadoLock = await executarComLockPedidos(async () => {
-        const maisRecente = (await redis.get<PedidoReconciliavel[]>("pedidos")) || atualizados;
+      const idsDivergentes: string[] = [];
+      const resultadoLock = await executarComLockPedidos(async (token) => {
+        const maisRecente = (await redis.get<PedidoReconciliavel[]>("pedidos")) || pedidos;
         const mesclado = maisRecente.map((p) => {
           const id = p.id as string;
           if (!idsConfirmadosNestaRodada.has(id)) return p;
@@ -461,10 +467,39 @@ export async function reconciliarPixMercadoPago(opts?: ReconciliarPixOpts): Prom
             idsComDuplicidadeEvitada.push(id);
             return p;
           }
-          const patch = atualizados.find((a) => a.id === id);
-          return patch || p;
+          const confirmacao = confirmacoesPorId.get(id);
+          if (!confirmacao) return p;
+
+          const valorEsperadoAtual = p.pix?.valorEsperado;
+          const txidAtual = p.pix?.txid;
+          const identidadeBate =
+            typeof valorEsperadoAtual === "number" &&
+            Number.isFinite(valorEsperadoAtual) &&
+            emCentavos(valorEsperadoAtual) === emCentavos(confirmacao.valorEsperadoVerificado) &&
+            (!confirmacao.txidVerificado || !txidAtual || txidAtual === confirmacao.txidVerificado);
+          if (!identidadeBate) {
+            idsDivergentes.push(id);
+            return p;
+          }
+
+          const revisionAtual = typeof p.revision === "number" && Number.isFinite(p.revision) ? p.revision : 1;
+          return {
+            ...p,
+            pixConfirmado: true,
+            pix: {
+              ...p.pix,
+              status: "confirmado" as const,
+              confirmadoPor: "conciliador_mercadopago" as const,
+              confirmadoEm: confirmacao.confirmadoEm,
+              providerPaymentId: confirmacao.providerPaymentId,
+            },
+            revision: revisionAtual + 1,
+          };
         });
-        await redis.set("pedidos", mesclado);
+        const escrita = await escreverPedidosCercado(token, mesclado);
+        if (escrita === "lock_perdido") {
+          throw new Error("reconciliacao_pix_lock_perdido_durante_escrita");
+        }
         return mesclado;
       });
       if (resultadoLock.tipo !== "sucesso") {
@@ -476,6 +511,17 @@ export async function reconciliarPixMercadoPago(opts?: ReconciliarPixOpts): Prom
       }
       resultadoFinal = resultadoLock.valor;
       await Promise.all(idsComDuplicidadeEvitada.map(() => incrementarContadorPix("duplicidade_evitada")));
+
+      if (idsDivergentes.length > 0) {
+        for (const id of idsDivergentes) {
+          const detalheIdx = resumo.detalhes.findIndex((d) => d.pedidoId === id && d.outcome === "confirmado");
+          if (detalheIdx >= 0) {
+            resumo.detalhes[detalheIdx] = { pedidoId: id, outcome: "pendente", motivo: "divergencia_reconsulta_necessaria" };
+          }
+        }
+        resumo.confirmados -= idsDivergentes.length;
+        resumo.pendentes += idsDivergentes.length;
+      }
     }
 
     // Notificação Nível 6.6A — roda só APÓS persistir a confirmação, e nunca

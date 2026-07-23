@@ -13,9 +13,18 @@ const { store, redisMock } = vi.hoisted(() => {
       const existia = store.delete(key);
       return existia ? 1 : 0;
     }),
-    // Simula EVAL o suficiente para o compare-and-delete do lock: só o
-    // script usado por liberarLockSeDono (get==arg -> del) é suportado.
+    // Simula EVAL o suficiente para os dois scripts usados neste módulo:
+    // compare-and-delete do lock (1 key: get==arg -> del) e a escrita
+    // cercada de "pedidos" via pedidosStore.escreverPedidosCercado (2 keys:
+    // lock + "pedidos" — só grava se o token ainda for o dono do lock).
     eval: vi.fn(async (_script: string, keys: string[], args: string[]) => {
+      if (keys.length >= 2) {
+        const [lockKey, pedidosKey] = keys;
+        const [token, jsonValor] = args;
+        if (store.get(lockKey) !== token) return 0;
+        store.set(pedidosKey, JSON.parse(jsonValor));
+        return 1;
+      }
       const [key] = keys;
       const [esperado] = args;
       if (store.get(key) === esperado) {
