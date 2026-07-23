@@ -44,8 +44,20 @@ const PADRAO_ESCRITA_PEDIDOS = /redis\.(set|del)\(\s*['"]pedidos['"]/;
 // script Lua multilinha entre `redis.eval(` e o array de KEYS.
 const PADRAO_EVAL_MULTICHAVE_PEDIDOS = /redis\.eval\([\s\S]*?\[[^\]]*['"]pedidos['"][^\]]*\]/;
 
+// pipeline()/multi() do cliente Redis (usado hoje só para telemetria própria,
+// nunca para "pedidos") — detecta `.set`/`.del`/`.hset` etc. encadeados num
+// pipeline/multi que gravem "pedidos" literal, e a própria criação de um
+// pipeline/multi cujo encadeamento (`[\s\S]*?`, até `.exec()`) contenha o
+// literal "pedidos" em qualquer chamada de método.
+const PADRAO_PIPELINE_MULTI_PEDIDOS =
+  /\.(pipeline|multi)\(\)[\s\S]*?\.(set|del|hset|hdel|lpush|rpush)\(\s*['"]pedidos['"]/;
+
 function escreveForaDoModuloCentral(conteudo: string): boolean {
-  return PADRAO_ESCRITA_PEDIDOS.test(conteudo) || PADRAO_EVAL_MULTICHAVE_PEDIDOS.test(conteudo);
+  return (
+    PADRAO_ESCRITA_PEDIDOS.test(conteudo) ||
+    PADRAO_EVAL_MULTICHAVE_PEDIDOS.test(conteudo) ||
+    PADRAO_PIPELINE_MULTI_PEDIDOS.test(conteudo)
+  );
 }
 
 function listarArquivosTs(dir: string, arquivos: string[] = []): string[] {
@@ -117,5 +129,15 @@ describe("Arquitetura: mutação da chave Redis 'pedidos' só pode passar por sr
     expect(escreveForaDoModuloCentral(violacaoDelDireto)).toBe(true);
     expect(escreveForaDoModuloCentral(violacaoEvalMultichave)).toBe(true);
     expect(escreveForaDoModuloCentral(semViolacao)).toBe(false);
+  });
+
+  test("negativo: o detector pega escrita via pipeline()/multi() encadeado", () => {
+    const violacaoPipeline = `const p = redis.pipeline()\np.set("pedidos", novosPedidos)\nawait p.exec()`;
+    const violacaoMulti = `const tx = redisClient.multi()\ntx.del('pedidos')\nawait tx.exec()`;
+    const pipelineLegitimo = `const p = redisClient.pipeline()\np.hincrby(diaKey, 'total', 1)\nawait p.exec()`;
+
+    expect(escreveForaDoModuloCentral(violacaoPipeline)).toBe(true);
+    expect(escreveForaDoModuloCentral(violacaoMulti)).toBe(true);
+    expect(escreveForaDoModuloCentral(pipelineLegitimo)).toBe(false);
   });
 });

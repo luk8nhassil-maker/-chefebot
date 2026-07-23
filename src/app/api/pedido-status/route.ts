@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { redis } from '@/lib/redis'
+import { buscarPedidoUnico } from '@/lib/pedidosStore'
 
 type Pedido = {
   id: string
+  revision?: number
   numero?: number
   status: string
   tipoEntrega?: string
@@ -16,12 +17,22 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'pedidoId obrigatório' }, { status: 400 })
   }
 
-  const pedidos = (await redis.get<Pedido[]>('pedidos')) || []
-  const p = pedidos.find((x) => x.id === pedidoId)
-  if (!p) {
+  // Busca única central — nunca escolhe arbitrariamente entre registros
+  // duplicados: `multiplos_encontrados` é erro crítico sanitizado (503),
+  // nunca expõe qualquer um dos dois como se fosse o pedido certo.
+  const resultado = await buscarPedidoUnico<Pedido>(pedidoId)
+  if (resultado.tipo === 'leitura_incerta') {
+    return NextResponse.json({ error: 'Não foi possível consultar o pedido agora. Tente de novo.' }, { status: 503 })
+  }
+  if (resultado.tipo === 'multiplos_encontrados') {
+    console.error('[ChefeBot] pedido-status: múltiplos pedidos com o mesmo id — inconsistência crítica', { pedidoId })
+    return NextResponse.json({ error: 'Não foi possível consultar o pedido agora. Tente de novo.' }, { status: 503 })
+  }
+  if (resultado.tipo === 'nao_encontrado') {
     return NextResponse.json({ error: 'Pedido não encontrado' }, { status: 404 })
   }
 
+  const p = resultado.pedido
   // Expõe somente campos não-sensíveis (sem cliente, telefone, endereço, pagamento)
   return NextResponse.json({
     numero: p.numero,

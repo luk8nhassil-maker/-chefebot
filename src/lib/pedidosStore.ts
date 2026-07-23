@@ -39,6 +39,15 @@ export const PEDIDOS_KEY = "pedidos";
 
 export type PedidoComRevisao = { id: string; revision?: number };
 
+// `revision` válida é sempre um inteiro >= 1. NaN, decimal, zero, negativo ou
+// qualquer valor não numérico (corrupção de dado, bug em outro writer, ou
+// simplesmente um pedido legado sem o campo) nunca é propagado adiante —
+// cai no fallback documentado (1), nunca soma/decrementa a partir de um
+// valor inválido.
+function revisaoValidaOuFallback(valor: unknown): number {
+  return typeof valor === "number" && Number.isInteger(valor) && valor >= 1 ? valor : 1;
+}
+
 // TTL curto o bastante para nunca prender o array por muito tempo se uma
 // execução travar, mas maior que qualquer seção crítica real (GET+validação
 // +SET nunca deveria passar de dezenas de ms) — mesmo racional do
@@ -168,6 +177,23 @@ async function reconciliarEscritaPedidos<P>(
   return verificar(atuais);
 }
 
+// Fingerprint canônico — nunca confirma uma escrita só por tamanho de array,
+// mesmo ID ou mesma revision isoladamente: compara o CONTEÚDO completo do
+// registro (ou do array inteiro, ordenado por id) contra o que esperávamos
+// ter gravado. Mesmo ID com conteúdo diferente (outra tentativa terminou na
+// mesma revision, ou o array tem o mesmo tamanho mas itens diferentes)
+// sempre falha a comparação — nunca vira "confirmado" por engano.
+function fingerprintRegistro(p: unknown): string {
+  return JSON.stringify(p);
+}
+
+function fingerprintArrayPorId<P extends PedidoComRevisao>(pedidos: P[]): string {
+  const ordenado = [...pedidos]
+    .filter((p) => p && p.id != null)
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  return JSON.stringify(ordenado);
+}
+
 export type ResultadoAdicionar<P> =
   | { tipo: "sucesso"; pedido: P }
   | { tipo: "id_ja_existe" }
@@ -193,7 +219,7 @@ export async function adicionarPedidoAtomico<P extends PedidoComRevisao>(novoPed
     if (atuais.some((p) => p && p.id === novoPedido.id)) {
       return { tipo: "id_ja_existe" };
     }
-    const pedidoGravado: P = { ...novoPedido, revision: novoPedido.revision ?? 1 };
+    const pedidoGravado: P = { ...novoPedido, revision: revisaoValidaOuFallback(novoPedido.revision) };
     try {
       const escrita = await escreverPedidosCercado(token, [...atuais, pedidoGravado]);
       if (escrita === "lock_perdido") return { tipo: "lock_perdido" };
@@ -202,7 +228,10 @@ export async function adicionarPedidoAtomico<P extends PedidoComRevisao>(novoPed
         const encontrados = freq.filter((p) => p && p.id === novoPedido.id);
         if (encontrados.length === 0) return "ausente";
         if (encontrados.length > 1) return "inconsistente";
-        return "confirmado";
+        // Confirma o pedido EXATO esperado (fingerprint completo) — mesmo id
+        // com conteúdo diferente (ex.: uma tentativa concorrente distinta
+        // que também gerou/gravou esse id) nunca é tratado como sucesso.
+        return fingerprintRegistro(encontrados[0]) === fingerprintRegistro(pedidoGravado) ? "confirmado" : "inconsistente";
       });
       if (reconciliacao === "confirmado") return { tipo: "sucesso", pedido: pedidoGravado };
       return { tipo: "escrita_incerta" }; // "ausente"/"inconsistente"/"incerto": nunca finge sucesso.
@@ -251,11 +280,24 @@ export async function atualizarPedidoAtomico<P extends PedidoComRevisao>(
     if (candidatos.length === 0) return { tipo: "nao_encontrado" };
     if (candidatos.length > 1) return { tipo: "multiplos_encontrados" };
     const atual = candidatos[0];
-    const revisionAtual = typeof atual.revision === "number" && Number.isFinite(atual.revision) ? atual.revision : 1;
+    const revisionAtual = revisaoValidaOuFallback(atual.revision);
     if (expectedRevision !== null && revisionAtual !== expectedRevision) {
       return { tipo: "conflito_revisao", revisionAtual };
     }
-    const atualizado: P = { ...mutator(atual), id: pedidoId, revision: revisionAtual + 1 };
+    const mutado = mutator(atual);
+    // Incrementa a revision SOMENTE se o mutator realmente mudou algo
+    // (comparação de conteúdo, ignorando o próprio campo `revision`) —
+    // nunca um bump incondicional. Isto importa de verdade: um mutator que
+    // decide não alterar nada (ex.: `marcarSurvivalStateDoPedido` rejeitando
+    // uma transição inválida, ou uma tentativa repetida idempotente) nunca
+    // deve produzir um `conflito_revisao` espúrio para uma edição
+    // concorrente legítima que dependa de `expectedRevision` estável.
+    const restoAntes: Record<string, unknown> = { ...atual };
+    delete restoAntes.revision;
+    const restoDepois: Record<string, unknown> = { ...mutado };
+    delete restoDepois.revision;
+    const mudou = JSON.stringify(restoAntes) !== JSON.stringify(restoDepois);
+    const atualizado: P = { ...mutado, id: pedidoId, revision: mudou ? revisionAtual + 1 : revisionAtual };
     const novosPedidos = atuais.map((p) => (p && p.id === pedidoId ? atualizado : p));
     try {
       const escrita = await escreverPedidosCercado(token, novosPedidos);
@@ -265,7 +307,12 @@ export async function atualizarPedidoAtomico<P extends PedidoComRevisao>(
         const encontrados = freq.filter((p) => p && p.id === pedidoId);
         if (encontrados.length > 1) return "inconsistente";
         if (encontrados.length === 0) return "inconsistente"; // pedido nunca deveria sumir numa atualização
-        return encontrados[0].revision === atualizado.revision ? "confirmado" : "ausente";
+        // Confirma identidade + revision E conteúdo completo — outra
+        // atualização que por coincidência terminasse na MESMA revision
+        // (nunca deveria acontecer sob o lock, mas nunca confia só nisso)
+        // nunca é confundida com esta atualização.
+        if (encontrados[0].revision !== atualizado.revision) return "ausente";
+        return fingerprintRegistro(encontrados[0]) === fingerprintRegistro(atualizado) ? "confirmado" : "inconsistente";
       });
       if (reconciliacao === "confirmado") return { tipo: "sucesso", pedido: atualizado };
       return { tipo: "escrita_incerta" };
@@ -322,7 +369,13 @@ export async function removerPedidoAtomico<P extends PedidoComRevisao>(pedidoId:
       const reconciliacao = await reconciliarEscritaPedidos<P>((freq) => {
         const encontrados = freq.filter((p) => p && p.id === pedidoId);
         if (encontrados.length > 1) return "inconsistente";
-        return encontrados.length === 0 ? "confirmado" : "ausente";
+        if (encontrados.length !== 0) return "ausente";
+        // Ausência do id removido não basta: confirma que os DEMAIS pedidos
+        // continuam exatamente como esperado (preservação comprovada) —
+        // nunca confirma uma remoção que "coincidentemente" também perdeu
+        // outro pedido concorrente.
+        const restantes = freq.filter((p) => !(p && p.id === pedidoId));
+        return fingerprintArrayPorId(restantes) === fingerprintArrayPorId(novosPedidos) ? "confirmado" : "inconsistente";
       });
       if (reconciliacao === "confirmado") return { tipo: "sucesso" };
       return { tipo: "escrita_incerta" };
@@ -375,14 +428,19 @@ export async function mutarLotePedidosAtomico<P extends PedidoComRevisao>(mutato
       const restoDepois: Record<string, unknown> = { ...p };
       delete restoDepois.revision;
       const mudou = JSON.stringify(restoAntes) !== JSON.stringify(restoDepois);
-      const revisionBase = typeof revAntes === "number" && Number.isFinite(revAntes) ? revAntes : 1;
+      const revisionBase = revisaoValidaOuFallback(revAntes);
       return { ...p, revision: mudou ? revisionBase + 1 : revisionBase } as P;
     });
     try {
       const escrita = await escreverPedidosCercado(token, novosPedidos);
       if (escrita === "lock_perdido") return { tipo: "lock_perdido" };
     } catch {
-      const reconciliacao = await reconciliarEscritaPedidos<P>((freq) => (freq.length === novosPedidos.length ? "confirmado" : "ausente"));
+      // Fingerprint completo do array esperado (ordenado por id) — dois
+      // arrays com o mesmo comprimento mas itens diferentes NUNCA são
+      // considerados iguais só pelo tamanho.
+      const reconciliacao = await reconciliarEscritaPedidos<P>((freq) =>
+        fingerprintArrayPorId(freq) === fingerprintArrayPorId(novosPedidos) ? "confirmado" : "ausente"
+      );
       if (reconciliacao === "confirmado") return { tipo: "sucesso", pedidos: novosPedidos };
       return { tipo: "escrita_incerta" };
     }
@@ -431,8 +489,41 @@ export async function listarPedidos<P>(): Promise<P[]> {
   return (await redis.get<P[]>(PEDIDOS_KEY)) || [];
 }
 
-/** Leitura de um único pedido por id — sem lock (só leitura). */
+export type ResultadoBuscaUnica<P> =
+  | { tipo: "encontrado"; pedido: P }
+  | { tipo: "nao_encontrado" }
+  | { tipo: "multiplos_encontrados" }
+  | { tipo: "leitura_incerta" };
+
+/** Busca central por id — leitura, sem lock. Nunca usa `.find()`/`[0]` e
+ * escolhe silenciosamente um registro quando há duplicidade: `id` duplicado
+ * (corrida antiga, bug de migração, reuso indevido) vira `multiplos_encontrados`,
+ * um resultado explícito que o chamador é obrigado a tratar como erro
+ * crítico — nunca dado arbitrário. Leitores críticos (rastreamento, status
+ * público, Pix, edição, painel, Jornada, fidelidade, reconciliação, Modo
+ * Sobrevivência) devem preferir esta função a fazer seu próprio
+ * `pedidos.find(...)`. */
+export async function buscarPedidoUnico<P extends PedidoComRevisao>(pedidoId: string): Promise<ResultadoBuscaUnica<P>> {
+  let atuais: P[];
+  try {
+    atuais = await listarPedidos<P>();
+  } catch {
+    return { tipo: "leitura_incerta" };
+  }
+  const candidatos = atuais.filter((p) => p && p.id === pedidoId);
+  if (candidatos.length === 0) return { tipo: "nao_encontrado" };
+  if (candidatos.length > 1) return { tipo: "multiplos_encontrados" };
+  return { tipo: "encontrado", pedido: candidatos[0] };
+}
+
+/** Leitura de um único pedido por id — sem lock (só leitura). Mantido por
+ * compatibilidade com o formato `P | null` simples; internamente já usa a
+ * busca única — duplicidade (`multiplos_encontrados`) nunca escolhe um dos
+ * dois arbitrariamente, colapsa para `null` como os demais casos "não há um
+ * único pedido válido para devolver". Chamadores que precisam DISTINGUIR
+ * duplicidade de ausência (para tratar como erro crítico, não 404 comum)
+ * devem usar `buscarPedidoUnico` diretamente. */
 export async function buscarPedido<P extends PedidoComRevisao>(pedidoId: string): Promise<P | null> {
-  const pedidos = await listarPedidos<P>();
-  return pedidos.find((p) => p && p.id === pedidoId) ?? null;
+  const resultado = await buscarPedidoUnico<P>(pedidoId);
+  return resultado.tipo === "encontrado" ? resultado.pedido : null;
 }

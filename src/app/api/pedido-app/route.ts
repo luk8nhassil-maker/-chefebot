@@ -48,6 +48,7 @@ import {
   type ResultadoIdempotenciaPedido,
   type SnapshotFinanceiroAttempt,
 } from "@/survival/pedidoIdempotencia";
+import { validarTransicaoSurvivalState } from "@/survival/pedidoSurvivalStateTransicao";
 
 export const maxDuration = 20;
 
@@ -503,9 +504,40 @@ async function gravarResultadoDuravel(
 // consistência. Sem checagem de `revision` de propósito (best-effort,
 // puramente interno de idempotência — nunca deve conflitar com uma edição
 // do cliente ou do painel acontecendo ao mesmo tempo nesse campo específico).
+//
+// A transição é validada DENTRO do mutator (ver validarTransicaoSurvivalState)
+// — ou seja, dentro da MESMA seção atômica que lê o estado fresco e decide se
+// a transição é permitida, nunca com uma leitura solta antes do lock. Uma
+// transição inválida (estado atual corrompido, ou o par origem->destino não
+// está na tabela — ex.: completed->pending, recovery_required->completed sem
+// recuperação comprovada) nunca sobrescreve `survivalState`: o mutator
+// devolve o pedido sem alteração — e `atualizarPedidoAtomico` agora só
+// incrementa `revision` quando o conteúdo realmente muda (nunca um bump
+// incondicional), então uma transição rejeitada ou repetida (idempotente)
+// nunca produz um `conflito_revisao` espúrio para uma edição concorrente
+// legítima do cliente/painel que dependa de `expectedRevision` estável.
 async function marcarSurvivalStateDoPedido(pedidoId: string, novoEstado: SurvivalPedidoState): Promise<boolean> {
   try {
-    const resultado = await mutarPedidoPorIdAtomico<PedidoMutavelGenerico>(pedidoId, (pedido) => ({ ...pedido, survivalState: novoEstado }));
+    let transicaoInvalida: "estado_atual_invalido" | "transicao_nao_permitida" | null = null;
+    let transicaoRepetida = false;
+    const resultado = await mutarPedidoPorIdAtomico<PedidoMutavelGenerico>(pedidoId, (pedido) => {
+      const estadoAtual = typeof pedido.survivalState === "string" ? pedido.survivalState : undefined;
+      const validacao = validarTransicaoSurvivalState(estadoAtual, novoEstado);
+      if (!validacao.permitida) {
+        if (validacao.motivo === "estado_inalterado") {
+          transicaoRepetida = true;
+        } else {
+          transicaoInvalida = validacao.motivo;
+        }
+        return pedido;
+      }
+      return { ...pedido, survivalState: novoEstado };
+    });
+    if (transicaoInvalida) {
+      logSurvivalErro("idempotencia_pedido", "estado_pedido", `transicao_survival_state_invalida_${transicaoInvalida}`);
+      return false;
+    }
+    if (transicaoRepetida) return true;
     return resultado.tipo === "sucesso";
   } catch (err) {
     logSurvivalErro("idempotencia_pedido", "estado_pedido", "atualizar_estado_falhou", err);

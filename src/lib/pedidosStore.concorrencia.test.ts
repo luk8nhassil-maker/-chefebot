@@ -439,6 +439,26 @@ describe("pedidosStore — concorrência real (Promise.all) sobre mock atômico 
     }
   });
 
+  test("20b. revision corrompida (NaN, decimal, zero, negativa) nunca é propagada — sempre cai no fallback documentado (1)", async () => {
+    const casosInvalidos: unknown[] = [NaN, 1.5, 0, -3, "3", null];
+    for (const revisionCorrompida of casosInvalidos) {
+      store.set(PEDIDOS_KEY, [{ id: "corrompido", revision: revisionCorrompida } as unknown as P]);
+      const resultado = await atualizarPedidoAtomico<P>("corrompido", null, (p) => ({ ...p, status: "em_preparo" }));
+      expect(resultado.tipo).toBe("sucesso");
+      if (resultado.tipo === "sucesso") {
+        expect(resultado.pedido.revision).toBe(2); // 1 (fallback) + 1, nunca NaN/negativo/decimal propagado
+      }
+    }
+  });
+
+  test("20c. adicionarPedidoAtomico: revision inválida informada pelo chamador nunca é gravada — cai no fallback (1)", async () => {
+    const resultado = await adicionarPedidoAtomico({ id: "novo-com-revision-invalida", revision: -5 } as P);
+    expect(resultado.tipo).toBe("sucesso");
+    if (resultado.tipo === "sucesso") {
+      expect(resultado.pedido.revision).toBe(1);
+    }
+  });
+
   test("21. concorrência não depende de nenhuma flag de sobrevivência (módulo funciona 100% com flags desligadas)", async () => {
     delete process.env.SURVIVAL_MODE_ENABLED;
     delete process.env.SURVIVAL_MANUAL_FALLBACK_ENABLED;
@@ -465,15 +485,31 @@ describe("pedidosStore — concorrência real (Promise.all) sobre mock atômico 
     ]);
     expect(r1.tipo).toBe("sucesso");
     expect(r2.tipo).toBe("sucesso");
-    // Ambos os mutators rodaram (cada update é legítimo — mutex serializa,
-    // não rejeita), mas o array final tem exatamente UM pedido com esse id,
-    // nunca duplicado, e a revisão avançou exatamente duas vezes (legado sem
-    // revision -> fallback 1 -> +1 na primeira aplicação -> +1 na segunda).
+    // Ambos os mutators RODARAM (cada update é legítimo — mutex serializa,
+    // não rejeita, a segunda execução vê o resultado da primeira), mas o
+    // array final tem exatamente UM pedido com esse id, nunca duplicado. A
+    // revisão avança só UMA vez (legado sem revision -> fallback 1 -> +1 na
+    // primeira aplicação, que realmente mudou o status) — a segunda
+    // aplicação é um no-op de conteúdo (o status já era "confirmado" quando
+    // ela rodou) e NUNCA bumpa a revision só por ter sido chamada: bump
+    // incondicional de revision em mutações no-op é exatamente o problema
+    // que a seção "revision em todos os writers" exige corrigir (evita
+    // `conflito_revisao` espúrio contra uma edição concorrente legítima).
     expect(contadorEfeitoColateral).toBe(2);
     const atuais = pedidosAtuais();
     expect(atuais.filter((p) => p.id === "disputado")).toHaveLength(1);
-    expect(atuais[0].revision).toBe(3);
+    expect(atuais[0].revision).toBe(2);
     expect(atuais[0].status).toBe("confirmado");
+  });
+
+  test("22b. mutação que NÃO muda nada preserva a revision — nunca bump incondicional", async () => {
+    store.set(PEDIDOS_KEY, [pedido("inalterado", { status: "novo", revision: 5 })]);
+    const resultado = await atualizarPedidoAtomico<P>("inalterado", null, (p) => ({ ...p })); // no-op de conteúdo
+    expect(resultado.tipo).toBe("sucesso");
+    if (resultado.tipo === "sucesso") {
+      expect(resultado.pedido.revision).toBe(5); // preservada, nunca 6
+    }
+    expect(pedidosAtuais()[0].revision).toBe(5);
   });
 
   test("listarPedidos/buscarPedido nunca inventam dados: refletem exatamente o array persistido", async () => {
@@ -495,5 +531,94 @@ describe("pedidosStore — concorrência real (Promise.all) sobre mock atômico 
     expect(atuais.find((p) => p.id === "velho-1")).toBeUndefined();
     expect(atuais.find((p) => p.id === "velho-2")).toBeTruthy();
     expect(atuais.find((p) => p.id === "durante-a-limpeza")).toBeTruthy();
+  });
+
+  describe("reconciliação forte — fingerprint canônico, nunca só tamanho/id/revision isolados", () => {
+    test("adicionarPedidoAtomico: EVAL lança, e o estado real tem OUTRO pedido com o MESMO id (conteúdo de outra tentativa) — nunca confirma como sucesso", async () => {
+      store.set(PEDIDOS_KEY, []);
+      const original = redisFake.eval.bind(redisFake);
+      const spy = vi.spyOn(redisFake, "eval").mockImplementation(async (script: string, keys: string[], args: unknown[]) => {
+        if (keys.length >= 2) {
+          // A escrita "lança" do lado do cliente, mas o servidor aplicou um
+          // conteúdo DIFERENTE do que esta execução tentou gravar — simula
+          // uma tentativa concorrente distinta que também terminou com o
+          // mesmo id (nunca deveria acontecer sob o lock, mas a reconciliação
+          // não pode confiar cegamente s­ó no id).
+          store.set(PEDIDOS_KEY, [pedido("mesmo-id", { nome: "pertence-a-outra-tentativa" })]);
+          throw new Error("timeout simulado");
+        }
+        return original(script, keys, args as string[]);
+      });
+      try {
+        const resultado = await adicionarPedidoAtomico(pedido("mesmo-id", { nome: "minha-tentativa" }));
+        expect(resultado.tipo).toBe("escrita_incerta");
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    test("atualizarPedidoAtomico: EVAL lança, e o estado real tem a MESMA revision mas conteúdo diferente — nunca confirma como sucesso", async () => {
+      store.set(PEDIDOS_KEY, [pedido("p1", { status: "novo" })]);
+      const original = redisFake.eval.bind(redisFake);
+      const spy = vi.spyOn(redisFake, "eval").mockImplementation(async (script: string, keys: string[], args: unknown[]) => {
+        if (keys.length >= 2) {
+          // Servidor aplicou uma mutação DIFERENTE que, por coincidência,
+          // termina na mesma revision (2) — nunca deveria acontecer sob o
+          // lock, mas a reconciliação por revision isolada aceitaria isto
+          // como "confirmado" incorretamente.
+          store.set(PEDIDOS_KEY, [pedido("p1", { status: "cancelado", revision: 2 })]);
+          throw new Error("timeout simulado");
+        }
+        return original(script, keys, args as string[]);
+      });
+      try {
+        const resultado = await atualizarPedidoAtomico<P>("p1", null, (p) => ({ ...p, status: "confirmado" }));
+        expect(resultado.tipo).toBe("escrita_incerta");
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    test("removerPedidoAtomico: EVAL lança, id removido está ausente mas OUTRO pedido concorrente também sumiu (preservação falhou) — nunca confirma como sucesso", async () => {
+      store.set(PEDIDOS_KEY, [pedido("a-remover"), pedido("deveria-permanecer")]);
+      const original = redisFake.eval.bind(redisFake);
+      const spy = vi.spyOn(redisFake, "eval").mockImplementation(async (script: string, keys: string[], args: unknown[]) => {
+        if (keys.length >= 2) {
+          // Estado real após a falha: o id-alvo saiu, mas "deveria-permanecer"
+          // também sumiu (bug hipotético de outra execução) — a
+          // reconciliação nunca pode confirmar isso como a remoção esperada.
+          store.set(PEDIDOS_KEY, []);
+          throw new Error("timeout simulado");
+        }
+        return original(script, keys, args as string[]);
+      });
+      try {
+        const resultado = await removerPedidoAtomico("a-remover");
+        expect(resultado.tipo).toBe("escrita_incerta");
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    test("mutarLotePedidosAtomico: EVAL lança, estado real tem o MESMO comprimento mas conteúdo diferente — nunca confirma como sucesso", async () => {
+      store.set(PEDIDOS_KEY, [pedido("x", { status: "novo" }), pedido("y", { status: "novo" })]);
+      const original = redisFake.eval.bind(redisFake);
+      const spy = vi.spyOn(redisFake, "eval").mockImplementation(async (script: string, keys: string[], args: unknown[]) => {
+        if (keys.length >= 2) {
+          // Mesmo comprimento (2), mas o conteúdo real diverge do array
+          // esperado pelo mutator — uma checagem por tamanho sozinha
+          // confirmaria isto incorretamente.
+          store.set(PEDIDOS_KEY, [pedido("x", { status: "diferente-do-esperado" }), pedido("y", { status: "novo" })]);
+          throw new Error("timeout simulado");
+        }
+        return original(script, keys, args as string[]);
+      });
+      try {
+        const resultado = await mutarLotePedidosAtomico<P>((atuais) => atuais.map((p) => ({ ...p, status: "confirmado" })));
+        expect(resultado.tipo).toBe("escrita_incerta");
+      } finally {
+        spy.mockRestore();
+      }
+    });
   });
 });
