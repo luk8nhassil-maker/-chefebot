@@ -326,6 +326,31 @@ export async function mutarLotePedidosAtomico<P extends PedidoComRevisao>(mutato
   }
 }
 
+export type ResultadoComLock<T> =
+  | { tipo: "sucesso"; valor: T }
+  | { tipo: "lock_indisponivel" };
+
+/** Escape hatch para o único caso legítimo que não se encaixa em
+ * add/update/remove/lote: uma mutação de "pedidos" que precisa ser atômica
+ * JUNTO com outra(s) chave(s) Redis na MESMA operação (ex.: atribuição de
+ * entregador em orders/route.ts, que grava "pedidos" e a fila
+ * `entregador:pedidos:*` num único EVAL Lua). Adquire o MESMO lock global,
+ * roda `fn` (que deve fazer sua própria leitura fresca + validação + escrita
+ * — nunca I/O de rede externa), e libera o lock ao final. Não é um helper
+ * genérico para reintroduzir read-modify-write inseguro: continua exigindo
+ * que o chamador só grave a chave "pedidos" dentro da seção crítica, sob o
+ * mesmo lock que todas as outras operações deste módulo usam. */
+export async function executarComLockPedidos<T>(fn: () => Promise<T>): Promise<ResultadoComLock<T>> {
+  const token = await adquirirLockPedidos();
+  if (!token) return { tipo: "lock_indisponivel" };
+  try {
+    const valor = await fn();
+    return { tipo: "sucesso", valor };
+  } finally {
+    await liberarLockPedidos(token);
+  }
+}
+
 /** Leitura pura, sem lock — nunca precisa de proteção de concorrência para
  * simplesmente ler o estado atual. */
 export async function listarPedidos<P>(): Promise<P[]> {
