@@ -70,9 +70,11 @@ export function validateCredentials(
   username: string,
   password: string
 ): AuthUser | null {
-  const user = USERS[username.toLowerCase()];
-  if (!user || user.password !== password) return null;
-  return { username: username.toLowerCase(), name: user.name, role: user.role };
+  const normalizedUsername = username.trim().toLowerCase();
+  const normalizedPassword = password.trim();
+  const user = USERS[normalizedUsername];
+  if (!user || user.password !== normalizedPassword) return null;
+  return { username: normalizedUsername, name: user.name, role: user.role };
 }
 
 export async function createToken(user: AuthUser): Promise<string> {
