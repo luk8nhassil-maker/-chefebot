@@ -8,6 +8,8 @@ import {
   PIX_AUTO_CHECK_INTERVAL_SEM_PENDENTE_MS,
 } from "@/lib/pixAutoCheckConfig"
 import LimpezaOperacionalGate, { limpezaOperacionalAtiva } from "@/components/LimpezaOperacionalPainel"
+import NovoPedidoManual from "./NovoPedidoManual"
+import { adaptarCardapioParaMontagem, type MenuManual } from "@/lib/montagemManual"
 import type { Pendencia, OpcaoResolucao, RegistroLimpeza } from "@/lib/limpezaOperacionalPedidos"
 
 function whatsappLink(telefoneBruto: string, mensagem?: string): string {
@@ -372,6 +374,13 @@ export default function PedidosPage() {
   const [modalEntrega, setModalEntrega] = useState<{pedidoId: string; proxStatus: Status} | null>(null)
   const [muteado, setMuteado] = useState(false)
   const [busca, setBusca] = useState("")
+  // Montagem manual de pedido. O cardápio é buscado sob demanda, só quando
+  // o atendente abre o fluxo — o painel não paga polling de cardápio o dia
+  // inteiro por causa de uma tela que quase sempre está fechada.
+  const [novoPedidoAberto, setNovoPedidoAberto] = useState(false)
+  const [menuManual, setMenuManual] = useState<MenuManual | null>(null)
+  const [carregandoMenu, setCarregandoMenu] = useState(false)
+  const [erroMenu, setErroMenu] = useState<string | null>(null)
   const [modalLimpar, setModalLimpar] = useState(false)
   const [limpando, setLimpando] = useState(false)
   const [pedidosArquivados, setPedidosArquivados] = useState<Pedido[]>([])
@@ -1089,6 +1098,31 @@ export default function PedidosPage() {
     if (!ok) throw new Error("falha ao resolver pendência")
   }
 
+  async function abrirNovoPedido() {
+    setErroMenu(null)
+    // Cardápio já em mãos: abre direto, sem nova requisição.
+    if (menuManual) { setNovoPedidoAberto(true); return }
+    setCarregandoMenu(true)
+    try {
+      const r = await fetch("/api/cardapio", { cache: "no-store" })
+      if (!r.ok) throw new Error("cardapio indisponivel")
+      const data = await r.json()
+      // Adaptador validado em vez de cast: uma resposta corrompida é recusada
+      // AQUI, com a tela ainda fechada, em vez de quebrar no meio do
+      // atendimento (ver adaptarCardapioParaMontagem).
+      const validado = adaptarCardapioParaMontagem(data)
+      if (!validado) throw new Error("cardapio malformado")
+      setMenuManual(validado)
+      setNovoPedidoAberto(true)
+    } catch {
+      // Degrada com aviso em vez de abrir um fluxo sem catálogo: montar um
+      // pedido sem cardápio produziria itens que o servidor recusaria.
+      setErroMenu("Não consegui carregar o cardápio agora. Tente de novo.")
+    } finally {
+      setCarregandoMenu(false)
+    }
+  }
+
   const cancelarPedido = async (id: string) => {
     setCancelandoId(id)
     await avancarStatus(id, "cancelado")
@@ -1677,6 +1711,22 @@ export default function PedidosPage() {
         }
       `}</style>
 
+      {novoPedidoAberto && menuManual && (
+        <NovoPedidoManual
+          menu={menuManual}
+          onFechar={() => setNovoPedidoAberto(false)}
+          onCriado={(pedidoId) => {
+            setNovoPedidoAberto(false)
+            // O pedido entra no painel como qualquer outro canal e imprime no
+            // aceite, pelas regras que já existem — nada especial aqui.
+            carregarPedidos()
+            setToast({ text: `Pedido criado ✓`, expires: Date.now() + 5000, pedidoId, prevStatus: "novo" })
+            if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
+            toastTimerRef.current = setTimeout(() => setToast(null), 5000)
+          }}
+        />
+      )}
+
       {/* Gate de limpeza operacional — bloqueante enquanto houver pendência, e
           só na visão de pedidos ativos: em "arquivados" e "tempo real" a
           operadora está fazendo outra coisa. Desligado por padrão (flag). */}
@@ -1702,12 +1752,26 @@ export default function PedidosPage() {
               <div style={{ fontSize: 11, color: "var(--foreground-muted)", fontWeight: 700, marginTop: 2 }}>Controle de pedidos da pizzaria</div>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <button
+                onClick={abrirNovoPedido}
+                disabled={carregandoMenu}
+                title="Montar um pedido de telefone ou balcão"
+                style={{ fontSize: 11, fontWeight: 900, color: "var(--background)", background: "var(--primary)", border: "1px solid var(--primary)", padding: "6px 12px", borderRadius: 16, cursor: carregandoMenu ? "default" : "pointer", opacity: carregandoMenu ? 0.6 : 1 }}
+              >
+                {carregandoMenu ? "Abrindo…" : "+ Novo pedido"}
+              </button>
               <button onClick={toggleMute} title={muteado ? "Sons desativados" : "Sons ativados"} style={{ fontSize: 15, lineHeight: 1, background: muteado ? "color-mix(in srgb, var(--danger) 10%, transparent)" : "transparent", border: `1px solid ${muteado ? "color-mix(in srgb, var(--danger) 35%, transparent)" : "var(--surface-secondary)"}`, padding: "5px 8px", borderRadius: 16 }}>{muteado ? "🔇" : "🔊"}</button>
               {isAdmin && <button onClick={() => router.push("/admin")} style={{ fontSize: 11, fontWeight: 800, color: "var(--foreground-secondary)", background: "transparent", border: "1px solid var(--surface-secondary)", padding: "6px 10px", borderRadius: 16 }}>Admin</button>}
               {isAdmin && <button onClick={reconciliarPixMercadoPago} disabled={reconciliandoPix} title={ultimaVerificacaoPix ? `Última verificação: ${ultimaVerificacaoPix}` : "Consulta a API do Mercado Pago para confirmar Pix pendentes"} style={{ fontSize: 11, fontWeight: 800, color: "var(--foreground-secondary)", background: "transparent", border: "1px solid var(--surface-secondary)", padding: "6px 10px", borderRadius: 16, opacity: reconciliandoPix ? 0.6 : 1, cursor: reconciliandoPix ? "not-allowed" : "pointer" }}>{reconciliandoPix ? "Verificando..." : "Verificar pagamentos Pix Mercado Pago"}</button>}
               <button onClick={() => fetch("/api/auth/logout", { method: "POST" }).then(() => router.push("/login"))} style={{ fontSize: 11, fontWeight: 800, color: "var(--foreground-muted)", background: "transparent", border: "1px solid var(--border)", padding: "6px 10px", borderRadius: 16 }}>Sair</button>
             </div>
           </div>
+
+          {erroMenu && (
+            <p role="status" aria-live="polite" style={{ fontSize: 11.5, fontWeight: 800, color: "var(--attention-text)", margin: "0 0 10px" }}>
+              {erroMenu}
+            </p>
+          )}
 
           {/* Bot toggle */}
           <button onClick={alternarBot} disabled={salvandoBot} style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", padding: "10px 12px", background: botAtivo ? "color-mix(in srgb, var(--success) 6%, transparent)" : "color-mix(in srgb, var(--primary) 6%, transparent)", border: `1px solid ${botAtivo ? "color-mix(in srgb, var(--success) 28%, transparent)" : "color-mix(in srgb, var(--primary) 30%, transparent)"}`, borderRadius: 12, color: "var(--foreground)", textAlign: "left", marginBottom: 10 }}>
@@ -2209,6 +2273,7 @@ export default function PedidosPage() {
                       {pedido.numero != null && <span style={{ fontSize: 10, fontWeight: 900, color: "var(--border-strong)", flexShrink: 0 }}>#{pedido.numero}</span>}
                       <span style={{ fontSize: 14, fontWeight: 900, color: "var(--text-primary)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{firstName}</span>
                       {pedido.escalonado && <span style={{ fontSize: 11, flexShrink: 0 }}>🚨</span>}
+                      {pedido.origem === "painel" && <span style={{ fontSize: 9, fontWeight: 900, color: "var(--brand-text)", background: "color-mix(in srgb, var(--primary) 14%, transparent)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>🧑‍🍳 Painel</span>}
                       {(pedido.origem === "site" || pedido.origem === "app") && <span style={{ fontSize: 9, fontWeight: 900, color: "var(--info)", background: "color-mix(in srgb, var(--info) 12%, transparent)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>🌐 Site</span>}
                       {pixPendente && <span style={{ fontSize: 9, fontWeight: 900, color: "var(--attention-text)", background: "var(--attention-surface)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>{hibridoParts ? "PIX parcial ⏳" : "PIX⏳"}</span>}
                       {pixEmRevisaoOuSuspeito && <span style={{ fontSize: 9, fontWeight: 900, color: pedido.pix?.status === "suspeito" ? "var(--danger)" : "var(--attention-text)", background: pedido.pix?.status === "suspeito" ? "color-mix(in srgb, var(--danger) 12%, transparent)" : "var(--attention-surface)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>{pixEmRevisaoOuSuspeito}</span>}
