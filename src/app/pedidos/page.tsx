@@ -9,7 +9,7 @@ import {
 } from "@/lib/pixAutoCheckConfig"
 import LimpezaOperacionalGate, { limpezaOperacionalAtiva } from "@/components/LimpezaOperacionalPainel"
 import NovoPedidoManual from "./NovoPedidoManual"
-import type { MenuType } from "@/app/cardapio/page"
+import { adaptarCardapioParaMontagem, type MenuManual } from "@/lib/montagemManual"
 import type { Pendencia, OpcaoResolucao, RegistroLimpeza } from "@/lib/limpezaOperacionalPedidos"
 
 function whatsappLink(telefoneBruto: string, mensagem?: string): string {
@@ -378,7 +378,7 @@ export default function PedidosPage() {
   // o atendente abre o fluxo — o painel não paga polling de cardápio o dia
   // inteiro por causa de uma tela que quase sempre está fechada.
   const [novoPedidoAberto, setNovoPedidoAberto] = useState(false)
-  const [menuManual, setMenuManual] = useState<MenuType | null>(null)
+  const [menuManual, setMenuManual] = useState<MenuManual | null>(null)
   const [carregandoMenu, setCarregandoMenu] = useState(false)
   const [erroMenu, setErroMenu] = useState<string | null>(null)
   const [modalLimpar, setModalLimpar] = useState(false)
@@ -1107,8 +1107,12 @@ export default function PedidosPage() {
       const r = await fetch("/api/cardapio", { cache: "no-store" })
       if (!r.ok) throw new Error("cardapio indisponivel")
       const data = await r.json()
-      if (!data || typeof data !== "object") throw new Error("cardapio malformado")
-      setMenuManual(data as MenuType)
+      // Adaptador validado em vez de cast: uma resposta corrompida é recusada
+      // AQUI, com a tela ainda fechada, em vez de quebrar no meio do
+      // atendimento (ver adaptarCardapioParaMontagem).
+      const validado = adaptarCardapioParaMontagem(data)
+      if (!validado) throw new Error("cardapio malformado")
+      setMenuManual(validado)
       setNovoPedidoAberto(true)
     } catch {
       // Degrada com aviso em vez de abrir um fluxo sem catálogo: montar um
@@ -2269,6 +2273,7 @@ export default function PedidosPage() {
                       {pedido.numero != null && <span style={{ fontSize: 10, fontWeight: 900, color: "var(--border-strong)", flexShrink: 0 }}>#{pedido.numero}</span>}
                       <span style={{ fontSize: 14, fontWeight: 900, color: "var(--text-primary)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{firstName}</span>
                       {pedido.escalonado && <span style={{ fontSize: 11, flexShrink: 0 }}>🚨</span>}
+                      {pedido.origem === "painel" && <span style={{ fontSize: 9, fontWeight: 900, color: "var(--brand-text)", background: "color-mix(in srgb, var(--primary) 14%, transparent)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>🧑‍🍳 Painel</span>}
                       {(pedido.origem === "site" || pedido.origem === "app") && <span style={{ fontSize: 9, fontWeight: 900, color: "var(--info)", background: "color-mix(in srgb, var(--info) 12%, transparent)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>🌐 Site</span>}
                       {pixPendente && <span style={{ fontSize: 9, fontWeight: 900, color: "var(--attention-text)", background: "var(--attention-surface)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>{hibridoParts ? "PIX parcial ⏳" : "PIX⏳"}</span>}
                       {pixEmRevisaoOuSuspeito && <span style={{ fontSize: 9, fontWeight: 900, color: pedido.pix?.status === "suspeito" ? "var(--danger)" : "var(--attention-text)", background: pedido.pix?.status === "suspeito" ? "color-mix(in srgb, var(--danger) 12%, transparent)" : "var(--attention-surface)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>{pixEmRevisaoOuSuspeito}</span>}

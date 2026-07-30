@@ -14,6 +14,7 @@ import { calcularPontosElegiveisPedido, registrarMovimentoPontosIdempotente, con
 import { type ItemApp, type MenuPedidoApp, formatItem, officialUnitPrice, makePromoUnitPrice, contarPizzasPagasParaFidelidade } from "@/lib/pedidoAppItens";
 import { prepararResgateParaPedido, confirmarReservaNoPedido, liberarVinculoRecompensaPedidoNaoCriado, type EscolhaRecompensaJornada } from "@/lib/jornadaChef";
 import { survivalModeEnabled, survivalClientRequestIdEnforcementEnabled } from "@/survival/flags";
+import { lerSessaoAdministrativa, origemDoPedido } from "@/lib/sessaoAdministrativa";
 import { hashClientRequestId, sanitizeClientRequestId } from "@/survival/clientRequestId";
 import { calcularRequestFingerprint } from "@/survival/requestFingerprint";
 import { logSurvivalErro } from "@/survival/logging";
@@ -811,8 +812,22 @@ export async function POST(req: NextRequest) {
     // validações de negócio, como antes; só a RECUPERAÇÃO foi antecipada.
     // =================================================================
 
+    // Sessão administrativa: lida SOMENTE do cookie verificado no servidor.
+    // Nenhum campo do corpo participa desta decisão — se participasse,
+    // qualquer visitante do cardápio público poderia se declarar atendente e
+    // ganhar tanto a origem quanto o caminho de idempotência.
+    const sessaoAdmin = await lerSessaoAdministrativa(req);
+
+    // A proteção de idempotência do pedido administrativo NÃO depende da flag
+    // global do Modo Sobrevivência: ela vale sempre que a requisição vier de
+    // uma sessão de painel. É a MESMA máquina já auditada (claim atômico,
+    // attempt com snapshot financeiro, resultado durável, conflito de
+    // fingerprint, distinção ausente/incerto) — só o gatilho é diferente.
+    // Para o cardápio público nada muda: sem sessão, o comportamento continua
+    // exatamente o de antes, governado só pela flag.
     const survivalAtivo = survivalModeEnabled();
-    clientRequestId = survivalAtivo ? sanitizeClientRequestId(body.clientRequestId) : null;
+    const idempotenciaAtiva = survivalAtivo || sessaoAdmin !== null;
+    clientRequestId = idempotenciaAtiva ? sanitizeClientRequestId(body.clientRequestId) : null;
 
     // Revisão de segurança, 4ª rodada, ponto 5: um clientRequestId PRESENTE
     // porém em formato inválido nunca pode ser silenciosamente ignorado sem
@@ -822,8 +837,13 @@ export async function POST(req: NextRequest) {
     // ainda não geram/enviam o campo) — mas o caso fica logado. Com a
     // enforcement ligada, um valor presente e malformado é rejeitado (400);
     // a AUSÊNCIA do campo nunca é rejeitada por esta checagem.
-    if (survivalAtivo && body.clientRequestId && !clientRequestId) {
-      if (survivalClientRequestIdEnforcementEnabled()) {
+    if (idempotenciaAtiva && body.clientRequestId && !clientRequestId) {
+      // Numa sessão de painel o cliente é o nosso próprio componente, que
+      // sempre gera um identificador válido: um valor presente e malformado
+      // significa defeito ou adulteração, e seguir sem proteção seria
+      // reintroduzir justamente o pedido duplicado que este caminho evita.
+      // A AUSÊNCIA do campo continua nunca sendo rejeitada.
+      if (sessaoAdmin || survivalClientRequestIdEnforcementEnabled()) {
         return NextResponse.json(
           { ok: false, error: "Identificador de tentativa (clientRequestId) inválido." },
           { status: 400 }
@@ -1375,7 +1395,8 @@ export async function POST(req: NextRequest) {
         horario: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" }),
         endereco,
         data: new Date().toLocaleDateString("pt-BR"),
-        origem: "site",
+        // Origem derivada da sessão verificada no servidor, nunca do corpo.
+        origem: origemDoPedido(sessaoAdmin),
         statusToken,
         ...(body.observacao ? { observacao: body.observacao } : {}),
         pagamento: body.pagamento,
