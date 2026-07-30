@@ -14,6 +14,7 @@ import PixPagamentoCard from "./PixPagamentoCard";
 import LayoutDebugPanel from "./LayoutDebugPanel";
 import { fetchCliente } from "@/lib/clienteSessaoFront";
 import { lerReferenciaRecompensa, limparReferenciaRecompensa, migrarReferenciaLegada } from "@/lib/recompensaJornadaCarrinho";
+import { extrairPagamentoComposto, montarPagamentoComposto, parseValorMonetario } from "@/lib/pagamentoComposto";
 
 // Ícones de categoria da home (menu/navegação) — lucide-react, sem emoji.
 // Mantidos separados de ICONS (que continua usando emoji para os itens
@@ -722,16 +723,13 @@ export function nextFlavorSelection(
 // Pagamento misto (Pix + Dinheiro): mesma string canônica já validada no
 // backend/WhatsApp ("Pix (R$ X,XX) + Dinheiro (R$ Y,YY)"), ver src/lib/bot.ts
 // (temPixNoPagamento/temDinheiroNoPagamento/valorPixEsperado/valorDinheiroEsperado).
-const parseValorInput = (v: string): number => parseFloat(v.replace(",", ".").replace(/[^\d.]/g, ""));
-function extrairHibrido(pagamento: string | null): { pix: number; dinheiro: number } | null {
-  if (!pagamento) return null;
-  const m = pagamento.match(/^Pix\s*\(R\$\s*([0-9.,]+)\)\s*\+\s*Dinheiro\s*\(R\$\s*([0-9.,]+)\)$/i);
-  if (!m) return null;
-  const pix = parseValorInput(m[1]);
-  const dinheiro = parseValorInput(m[2]);
-  if (isNaN(pix) || isNaN(dinheiro)) return null;
-  return { pix, dinheiro };
-}
+// O parse, a validação e a montagem da string vivem em src/lib/pagamentoComposto.ts
+// — módulo puro compartilhado com o checkout, a edição do pedido e o servidor,
+// para que exista uma única gramática de pagamento composto no projeto.
+const parseValorInput = (v: string): number => {
+  const valor = parseValorMonetario(v);
+  return valor === null ? NaN : valor;
+};
 
 // Sistema inicial de ícones do fluxo público, reaproveitável em qualquer tela
 // (bottom nav, categorias, símbolos de ação). Sem biblioteca externa — só emoji.
@@ -1312,7 +1310,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const finalTotal = Math.max(0, cartTotal - descontoResgate) + fee;
   // Pagamento misto confirmado: re-parseado do próprio `payment` (fonte única
   // de verdade), então some sozinho se o cliente trocar para outro método.
-  const hibridoAtual = extrairHibrido(payment);
+  const hibridoAtual = extrairPagamentoComposto(payment);
   const isHibrido = !!hibridoAtual;
   const hibridoSomaValida = !hibridoAtual || Math.abs(hibridoAtual.pix + hibridoAtual.dinheiro - finalTotal) <= 0.01;
   const hibridoTrocoValido = !hibridoAtual || hibridoAtual.dinheiro <= 0 || (
@@ -1447,20 +1445,20 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     }
   }
   function confirmMistoPagamento() {
-    const pixNum = parseValorInput(mistoPixInput);
+    // A validação da soma e a forma canônica da string vêm do módulo puro
+    // (src/lib/pagamentoComposto.ts), compartilhado com a edição do pedido e
+    // com o servidor: a tela nunca monta a string de pagamento por conta
+    // própria, o que garante que o formato gravado seja sempre parseável.
+    const composto = montarPagamentoComposto(mistoPixInput, mistoDinheiroInput, finalTotal);
+    if (!composto.ok) { setErroMisto(composto.erro); return; }
     const dinheiroNum = parseValorInput(mistoDinheiroInput);
-    if (isNaN(pixNum) || isNaN(dinheiroNum)) { setErroMisto("Informe os dois valores."); return; }
-    if (pixNum < 0 || dinheiroNum < 0) { setErroMisto("Os valores não podem ser negativos."); return; }
-    if (pixNum === 0 || dinheiroNum === 0) { setErroMisto("Informe um valor maior que zero no Pix e no Dinheiro. Se for só um método, escolha ele direto."); return; }
-    const soma = pixNum + dinheiroNum;
-    if (Math.abs(soma - finalTotal) > 0.01) { setErroMisto(`A soma (${money(soma)}) precisa ser igual ao total do pedido (${money(finalTotal)}).`); return; }
     if (!trocoOpcao) { setErroTroco("Escolha se você precisa de troco."); return; }
     if (trocoOpcao === "sim" && !troco.trim()) { setErroTroco("Informe para quanto precisa de troco."); return; }
     if (trocoOpcao === "sim") {
       const trocoNum = parseValorInput(troco);
       if (isNaN(trocoNum) || trocoNum <= dinheiroNum) { setErroTroco(`O troco é sobre a parte em dinheiro — informe um valor maior que ${money(dinheiroNum)}.`); return; }
     }
-    setPayment(`Pix (${money(pixNum)}) + Dinheiro (${money(dinheiroNum)})`);
+    setPayment(composto.valor);
     setErroPagamento("");
     setErroMisto("");
     setPaymentModal(null);

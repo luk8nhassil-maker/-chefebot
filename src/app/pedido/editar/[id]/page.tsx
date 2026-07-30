@@ -4,6 +4,11 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useLiveMenu } from "@/app/cardapio/liveMenu";
 import type { MenuType } from "@/app/cardapio/page";
+import {
+  extrairPagamentoComposto,
+  montarPagamentoComposto,
+  pagamentoAindaValido,
+} from "@/lib/pagamentoComposto";
 
 type ItemApp = {
   kind: "pizza" | "simple" | "promo";
@@ -46,16 +51,6 @@ const money = (v: number) => "R$ " + v.toFixed(2).replace(".", ",");
 
 function norm(v: string) {
   return v.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
-}
-
-function extrairHibrido(pagamento: string | null): { pix: number; dinheiro: number } | null {
-  if (!pagamento) return null;
-  const m = pagamento.match(/^Pix\s*\(R\$\s*([0-9.,]+)\)\s*\+\s*Dinheiro\s*\(R\$\s*([0-9.,]+)\)$/i);
-  if (!m) return null;
-  const pix = parseFloat(m[1].replace(",", "."));
-  const dinheiro = parseFloat(m[2].replace(",", "."));
-  if (isNaN(pix) || isNaN(dinheiro)) return null;
-  return { pix, dinheiro };
 }
 
 function computeTaxa(tipoEntrega: TipoEntrega | undefined, bairro: string | undefined, neighborhoods: MenuType["neighborhoods"]): number {
@@ -154,7 +149,7 @@ export default function EditarPedidoPage({ params }: { params: Promise<{ id: str
         setReferencia(p.referencia || "");
         const pag = p.pagamento || "Pix";
         setPagamento(pag);
-        const hibrido = extrairHibrido(pag);
+        const hibrido = extrairPagamentoComposto(pag);
         if (hibrido) {
           setMistoPix(hibrido.pix.toFixed(2).replace(".", ","));
           setMistoDinheiro(hibrido.dinheiro.toFixed(2).replace(".", ","));
@@ -205,13 +200,17 @@ export default function EditarPedidoPage({ params }: { params: Promise<{ id: str
     setItens((prev) => prev.filter((_, i) => i !== idx));
   }
 
+  // A string canônica do pagamento misto nunca é montada aqui: quem valida e
+  // formata é montarPagamentoComposto (src/lib/pagamentoComposto.ts). Antes
+  // esta tela gravava "R$ 30.00" com ponto decimal, que os helpers do servidor
+  // leem como separador de milhar — R$ 3.000 na cobrança Pix e no troco.
+  const compostoEditado = useMemo(
+    () => (pagamento === "Misto" ? montarPagamentoComposto(mistoPix, mistoDinheiro, totalEstimado) : null),
+    [pagamento, mistoPix, mistoDinheiro, totalEstimado]
+  );
+
   function pagamentoFinal(): string {
-    if (pagamento === "Misto") {
-      const pix = parseFloat(mistoPix.replace(",", "."));
-      const din = parseFloat(mistoDinheiro.replace(",", "."));
-      if (isNaN(pix) || isNaN(din)) return pagamento;
-      return `Pix (R$ ${pix.toFixed(2)}) + Dinheiro (R$ ${din.toFixed(2)})`;
-    }
+    if (pagamento === "Misto") return compostoEditado?.ok ? compostoEditado.valor : pagamento;
     return pagamento;
   }
 
@@ -219,9 +218,23 @@ export default function EditarPedidoPage({ params }: { params: Promise<{ id: str
     return /dinheiro/i.test(pag);
   }
 
+  // Revalidação contra o total ATUAL, recalculado a cada mudança de item: um
+  // pagamento misto que fechava na criação pode deixar de fechar aqui. O
+  // servidor rejeita de qualquer forma (fonte da verdade), mas o cliente
+  // precisa saber ANTES de tocar em salvar, e com a instrução do que ajustar.
+  const erroPagamento =
+    pagamento === "Misto"
+      ? compostoEditado && !compostoEditado.ok
+        ? compostoEditado.erro
+        : null
+      : !pagamentoAindaValido(pagamento, totalEstimado)
+        ? "A divisão entre Pix e dinheiro não fecha com o total atual. Toque em “Misto” e ajuste os valores."
+        : null;
+
   const podeSalvar =
     !carregando && !expirado && !salvando && itens.length > 0 &&
     (tipoEntrega !== "delivery" || (bairro.trim() && rua.trim() && numeroEndereco.trim())) &&
+    !erroPagamento &&
     (!temDinheiro(pagamentoFinal()) || (trocoOpcao === "nao" || troco.trim()));
 
   async function salvar() {
@@ -394,7 +407,7 @@ export default function EditarPedidoPage({ params }: { params: Promise<{ id: str
           <p style={sectionTitle}>Pagamento</p>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
             {["Pix", "Dinheiro", "Cartao", "Misto"].map((p) => (
-              <button key={p} onClick={() => setPagamento(p)} style={{ ...btnBase, padding: "0 14px", border: `1px solid ${pagamento === p || (p === "Misto" && extrairHibrido(pagamento)) ? "var(--primary)" : "var(--surface-secondary)"}`, background: pagamento === p ? "color-mix(in srgb, var(--primary) 15%, transparent)" : "transparent", color: "var(--foreground)" }}>
+              <button key={p} onClick={() => setPagamento(p)} style={{ ...btnBase, padding: "0 14px", border: `1px solid ${pagamento === p || (p === "Misto" && extrairPagamentoComposto(pagamento)) ? "var(--primary)" : "var(--surface-secondary)"}`, background: pagamento === p ? "color-mix(in srgb, var(--primary) 15%, transparent)" : "transparent", color: "var(--foreground)" }}>
                 {p === "Cartao" ? "Cartão" : p}
               </button>
             ))}
@@ -404,6 +417,11 @@ export default function EditarPedidoPage({ params }: { params: Promise<{ id: str
               <input style={inputStyle} placeholder="Valor no Pix" value={mistoPix} onChange={(e) => setMistoPix(e.target.value)} inputMode="decimal" />
               <input style={inputStyle} placeholder="Valor em dinheiro" value={mistoDinheiro} onChange={(e) => setMistoDinheiro(e.target.value)} inputMode="decimal" />
             </div>
+          )}
+          {erroPagamento && (
+            <p role="status" aria-live="polite" style={{ fontSize: 12.5, fontWeight: 700, color: "var(--attention-text)", margin: "0 0 10px" }}>
+              {erroPagamento}
+            </p>
           )}
           {temDinheiro(pagamentoFinal()) && (
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>

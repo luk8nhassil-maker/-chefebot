@@ -18,6 +18,11 @@ import { processarConclusaoPedidoJornada, reverterConclusaoPedidoJornada, libera
 import type { ItemElegibilidadeJornada } from '@/lib/jornadaChef'
 import type { ItemApp } from '@/lib/pedidoAppItens'
 import { obterConfigEvolution } from '@/lib/evolutionApi'
+import {
+  registrarResolucao,
+  sanitizarEntradaLimpeza,
+  type RegistroLimpeza,
+} from '@/lib/limpezaOperacionalPedidos'
 import { enviarTextoWhatsApp } from '@/lib/whatsappMensagem'
 import {
   criarTicketAcessoEntregador,
@@ -71,6 +76,13 @@ type Pedido = PedidoComEdicao & {
   archivedAt?: string
   archivedBy?: string
   archivedReason?: string
+  /** Carimbo ISO da última mudança de status — permite medir a idade da ETAPA
+   * atual, e não a do pedido inteiro (ver src/lib/limpezaOperacionalPedidos.ts).
+   * Opcional: pedidos anteriores a este campo caem na cadeia de fallback. */
+  statusAtualizadoEm?: string
+  /** Por que uma pendência operacional deste pedido foi resolvida. É o que
+   * fecha o alerta de forma durável e preserva o histórico da decisão. */
+  limpezaOperacional?: RegistroLimpeza
 }
 
 const FILA_ENTREGADOR_TTL_SEGUNDOS = 86400
@@ -245,8 +257,13 @@ export async function PATCH(req: NextRequest) {
   const auth = await checkAuth(req)
   if (!auth) return NextResponse.json({ error: 'Nao autorizado' }, { status: 401 })
 
-  const { id, status, entregador, silent } = await req.json()
+  const { id, status, entregador, silent, limpeza } = await req.json()
   const avisosOperacionais: string[] = []
+  // Resolução de pendência operacional: chega junto com a própria transição de
+  // status que a resolve, para não abrir uma segunda escrita concorrente no
+  // array "pedidos". Entrada malformada é ignorada (o status muda mesmo assim),
+  // nunca gravada como veio.
+  const limpezaResolvida = sanitizarEntradaLimpeza(limpeza)
 
   // Toda transição de status (inclusive o aceite, novo → em_preparo) passa
   // pelo mesmo mutex curto usado pela edição do cliente: garante que a
@@ -294,8 +311,19 @@ export async function PATCH(req: NextRequest) {
     pedidos[index] = {
       ...pedidos[index],
       status,
+      statusAtualizadoEm: new Date().toISOString(),
       ...(status === 'cancelado' ? { cancelamentoSolicitado: false } : {}),
       ...(status === 'em_preparo' && !pedidos[index].horarioInicio ? { horarioInicio: agora } : {}),
+      ...(limpezaResolvida
+        ? {
+            limpezaOperacional: registrarResolucao(
+              limpezaResolvida.motivo,
+              limpezaResolvida.acao,
+              Date.now(),
+              typeof auth.name === 'string' ? auth.name : undefined
+            ),
+          }
+        : {}),
     }
 
     // Salva entregador no pedido se informado
