@@ -7,6 +7,8 @@ import {
   aplicarJitter,
   PIX_AUTO_CHECK_INTERVAL_SEM_PENDENTE_MS,
 } from "@/lib/pixAutoCheckConfig"
+import LimpezaOperacionalGate, { limpezaOperacionalAtiva } from "@/components/LimpezaOperacionalPainel"
+import type { Pendencia, OpcaoResolucao, RegistroLimpeza } from "@/lib/limpezaOperacionalPedidos"
 
 function whatsappLink(telefoneBruto: string, mensagem?: string): string {
   let numero = (telefoneBruto || "").replace(/\D/g, "")
@@ -59,6 +61,9 @@ type Pedido = {
   editStatus?: "none" | "editing" | "edited"
   editExpiresAt?: string
   changesSummary?: string[]
+  // Limpeza operacional (ver src/lib/limpezaOperacionalPedidos.ts).
+  statusAtualizadoEm?: string
+  limpezaOperacional?: RegistroLimpeza
 }
 
 function pedidoEmEdicao(p: Pick<Pedido, "editStatus" | "editExpiresAt">): boolean {
@@ -1017,10 +1022,18 @@ export default function PedidosPage() {
     } catch {}
   }
 
-  const avancarStatus = async (id: string, novoStatus: Status, entregador?: {id: string; nome: string; telefone: string}) => {
-    if (atualizandoRef.current === id) return
+  // `limpeza` acompanha a transição quando ela vem da resolução de uma
+  // pendência operacional: o motivo é gravado no mesmo PATCH que muda o
+  // status, sem uma segunda escrita concorrente sobre o array de pedidos.
+  const avancarStatus = async (
+    id: string,
+    novoStatus: Status,
+    entregador?: {id: string; nome: string; telefone: string},
+    limpeza?: { motivo: Pendencia["motivo"]; acao: OpcaoResolucao["acao"] },
+  ) => {
+    if (atualizandoRef.current === id) return false
     const pedido = pedidos.find(p => p.id === id)
-    if (!pedido) return
+    if (!pedido) return false
     const prevStatus = pedido.status
     const F2S: Record<string, Status> = { novo: "novo", em_preparo: "em_preparo", saiu_entrega: "saiu_entrega", entregue: "entregue" }
     const willLeave = filtro !== "todos" && F2S[filtro] === prevStatus
@@ -1032,7 +1045,7 @@ export default function PedidosPage() {
     if (willLeave) { setLeavingId(id); if (leaveTimerRef.current) clearTimeout(leaveTimerRef.current); leaveTimerRef.current = setTimeout(() => setLeavingId(null), 350) }
     else { setFlashId(id); if (flashTimerRef.current) clearTimeout(flashTimerRef.current); flashTimerRef.current = setTimeout(() => setFlashId(null), 750) }
     try {
-      const r = await fetch("/api/orders", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, status: novoStatus, entregador }) })
+      const r = await fetch("/api/orders", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, status: novoStatus, entregador, ...(limpeza ? { limpeza } : {}) }) })
       if (!r.ok) throw new Error("Falha ao atualizar status")
       const firstName = pedido.cliente.split(" ")[0]
       if (novoStatus === "entregue") { tocarSomEntrega(); temposEntregaRef.current[id] = tempoDesde(pedido.horario, undefined, Date.now()) }
@@ -1042,16 +1055,38 @@ export default function PedidosPage() {
       if (prevStatus === "novo" && novoStatus === "em_preparo") {
         imprimirPedidoSilencioso(id)
       }
+      return true
     } catch {
       setPedidos(prev => prev.map(p => p.id === id ? { ...p, status: prevStatus } : p))
       const firstName = pedido.cliente.split(" ")[0]
       setToast({ text: `⚠️ Não consegui atualizar ${firstName}. Tente de novo.`, expires: Date.now() + 5000, pedidoId: id, prevStatus })
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
       toastTimerRef.current = setTimeout(() => setToast(null), 5000)
+      return false
     } finally {
       atualizandoRef.current = null
       setModalEntrega(null); setAtualizando(null); setModalAlterarStatus(null)
     }
+  }
+
+  // Resolução de uma pendência do gate de limpeza operacional. A ação de
+  // "verificar pagamento" NÃO grava registro de propósito: ela só consulta o
+  // Mercado Pago. Se o Pix tiver entrado, o pedido sai do motivo de pagamento
+  // sozinho na próxima classificação — e o que sobrar (falta de aceite) é uma
+  // pendência legítima, diferente. É assim que se evita cancelar um pedido
+  // que já foi pago.
+  const resolverPendenciaOperacional = async (pendencia: Pendencia, opcao: OpcaoResolucao) => {
+    if (opcao.acao === "verificou_pagamento") {
+      await executarReconciliacaoPix(false)
+      carregarPedidos()
+      return
+    }
+    if (!opcao.status) return
+    const ok = await avancarStatus(pendencia.pedidoId, opcao.status as Status, undefined, {
+      motivo: pendencia.motivo,
+      acao: opcao.acao,
+    })
+    if (!ok) throw new Error("falha ao resolver pendência")
   }
 
   const cancelarPedido = async (id: string) => {
@@ -1641,6 +1676,17 @@ export default function PedidosPage() {
           .cb-mob-back { display:none !important; }
         }
       `}</style>
+
+      {/* Gate de limpeza operacional — bloqueante enquanto houver pendência, e
+          só na visão de pedidos ativos: em "arquivados" e "tempo real" a
+          operadora está fazendo outra coisa. Desligado por padrão (flag). */}
+      {limpezaOperacionalAtiva() && (
+        <LimpezaOperacionalGate
+          pedidos={pedidos}
+          onResolver={resolverPendenciaOperacional}
+          ativo={filtro !== "arquivados" && filtro !== "tempo_real"}
+        />
+      )}
 
       <PanelShell
         pedidosCount={emAberto}

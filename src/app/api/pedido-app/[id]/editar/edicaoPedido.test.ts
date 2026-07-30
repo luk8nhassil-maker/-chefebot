@@ -399,3 +399,69 @@ describe("POST salvar", () => {
     expect(pedidos[0].pix).toBeTruthy();
   });
 });
+
+describe("POST salvar — invariante do pagamento composto", () => {
+  const itensDobrados = [{ kind: "simple", name: "Refrigerante 2L", detail: "", price: 15, qty: 2 }];
+
+  async function iniciarEdicao() {
+    seedPedido({ pagamento: "Pix (R$ 10,00) + Dinheiro (R$ 5,00)", troco: "Sem troco" });
+    const res = await iniciar(req({ statusToken: TOKEN }), paramsFor(PEDIDO_ID));
+    const data = await json(res);
+    return data.editSessionId as string;
+  }
+
+  it("recusa (400) um pagamento misto que deixou de fechar com o total recalculado", async () => {
+    // Pedido de R$ 15 dividido 10 + 5. O cliente dobra a quantidade: o total
+    // passa a R$ 30 e a divisao antiga nao fecha mais.
+    const editSessionId = await iniciarEdicao();
+    const res = await salvar(req({
+      statusToken: TOKEN, editSessionId, revision: 1,
+      itens: itensDobrados, tipoEntrega: "retirada",
+      pagamento: "Pix (R$ 10,00) + Dinheiro (R$ 5,00)", troco: "Sem troco",
+    }), paramsFor(PEDIDO_ID));
+
+    expect(res.status).toBe(400);
+    const pedidos = store.get("pedidos") as Array<Record<string, unknown>>;
+    expect(pedidos[0].total).toBe(15); // pedido intacto
+    expect(pedidos[0].revision).toBe(1);
+  });
+
+  it("aceita o pagamento misto quando a divisao acompanha o novo total", async () => {
+    const editSessionId = await iniciarEdicao();
+    const res = await salvar(req({
+      statusToken: TOKEN, editSessionId, revision: 1,
+      itens: itensDobrados, tipoEntrega: "retirada",
+      pagamento: "Pix (R$ 20,00) + Dinheiro (R$ 10,00)", troco: "Sem troco",
+    }), paramsFor(PEDIDO_ID));
+
+    expect(res.status).toBe(200);
+    const pedidos = store.get("pedidos") as Array<Record<string, unknown>>;
+    expect(pedidos[0].total).toBe(30);
+    expect(pedidos[0].pagamento).toBe("Pix (R$ 20,00) + Dinheiro (R$ 10,00)");
+  });
+
+  it("normaliza a grafia legada com ponto decimal antes de gravar", async () => {
+    // A tela de edicao antiga gravava "R$ 20.00"; os helpers de src/lib/bot.ts
+    // leem o ponto como separador de milhar (R$ 2.000 na cobranca Pix).
+    const editSessionId = await iniciarEdicao();
+    const res = await salvar(req({
+      statusToken: TOKEN, editSessionId, revision: 1,
+      itens: itensDobrados, tipoEntrega: "retirada",
+      pagamento: "Pix (R$ 20.00) + Dinheiro (R$ 10.00)", troco: "Sem troco",
+    }), paramsFor(PEDIDO_ID));
+
+    expect(res.status).toBe(200);
+    const pedidos = store.get("pedidos") as Array<Record<string, unknown>>;
+    expect(pedidos[0].pagamento).toBe("Pix (R$ 20,00) + Dinheiro (R$ 10,00)");
+    expect((pedidos[0].pix as { valorEsperado: number }).valorEsperado).toBe(20);
+  });
+
+  it("pagamento simples continua passando sem invariante de soma", async () => {
+    const editSessionId = await iniciarEdicao();
+    const res = await salvar(req({
+      statusToken: TOKEN, editSessionId, revision: 1,
+      itens: itensDobrados, tipoEntrega: "retirada", pagamento: "Pix",
+    }), paramsFor(PEDIDO_ID));
+    expect(res.status).toBe(200);
+  });
+});
