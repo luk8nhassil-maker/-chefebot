@@ -327,7 +327,11 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
       }
       onCriado(String(data.pedidoId ?? ""))
     } catch {
-      setErroEnvio("Erro de conexão. O pedido não foi criado — pode tentar de novo.")
+      // Falha de rede NÃO prova que o pedido não foi criado: a requisição pode
+      // ter chegado e só a resposta ter se perdido. Dizer "não foi criado"
+      // seria mentira e levaria a um pedido duplicado. A instrução honesta é
+      // conferir a lista antes de repetir.
+      setErroEnvio("Não recebi a confirmação do servidor. Confira se o pedido já apareceu na lista antes de tentar de novo.")
       setEnviando(false)
     }
   }
@@ -655,7 +659,7 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
                 <div style={{ ...card, borderColor: "var(--danger)" }} role="alert">
                   <p style={{ fontSize: 13, fontWeight: 800, color: "var(--danger)", margin: 0 }}>{erroEnvio}</p>
                   <p style={{ fontSize: 11.5, color: "var(--foreground-secondary)", margin: "6px 0 0" }}>
-                    Nada foi perdido. Tentar de novo reaproveita a mesma tentativa — não cria um segundo pedido.
+                    O que você montou continua aqui. Tentar de novo reaproveita a mesma tentativa, em vez de começar uma nova.
                   </p>
                 </div>
               )}
