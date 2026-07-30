@@ -428,10 +428,26 @@ describe("idempotência administrativa (SURVIVAL_MODE_ENABLED desligada)", () =>
     expect(pedidosCriados()).toHaveLength(0);
   });
 
-  it("ausência do identificador nunca é rejeitada", async () => {
+  it("sessão administrativa SEM identificador é rejeitada (400) — idempotência é obrigatória, não opcional", async () => {
+    // O componente do painel sempre gera e envia um clientRequestId (ver
+    // NovoPedidoManual.tsx); a ausência aqui só pode significar defeito ou
+    // adulteração. Diferente do cardápio público, aqui NÃO existe fallback
+    // "cria sem proteção".
     const { itens } = await montarCarrinho();
     const res = await POST(postReqAdmin(payload(itens)));
+    expect(res.status).toBe(400);
+    const data = await res.json();
+    expect(data.ok).toBe(false);
+    expect(pedidosCriados()).toHaveLength(0);
+  });
+
+  it("ausência do identificador no cardápio público continua nunca sendo rejeitada", async () => {
+    // Compatibilidade preservada: cliente antigo do site que ainda não envia
+    // clientRequestId continua criando pedido normalmente.
+    const { itens } = await montarCarrinho();
+    const res = await POST(postReq(payload(itens)));
     expect((await res.json()).ok).toBe(true);
+    expect(pedidosCriados()).toHaveLength(1);
   });
 
   it("o cardápio público continua SEM proteção por sessão — comportamento inalterado", async () => {
@@ -449,7 +465,8 @@ describe("idempotência administrativa (SURVIVAL_MODE_ENABLED desligada)", () =>
 describe("origem do pedido", () => {
   it("pedido criado no painel é gravado com origem 'painel'", async () => {
     const { itens } = await montarCarrinho();
-    await POST(postReqAdmin(payload(itens)));
+    // Sessão administrativa genuína: precisa do clientRequestId (obrigatório).
+    await POST(postReqAdmin(payload(itens, { clientRequestId: "montagem-manual-tentativa-origem" })));
     expect(pedidosCriados()[0].origem).toBe("painel");
   });
 

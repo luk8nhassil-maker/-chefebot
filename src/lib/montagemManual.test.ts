@@ -16,6 +16,7 @@ import {
   alterarQuantidade,
   removerItem,
   pendenciasDoPedido,
+  pendenciaIdentificadorTentativa,
   selecaoVazia,
   adaptarCardapioParaMontagem,
   type MenuManual,
@@ -475,6 +476,26 @@ describe("pendências antes de enviar", () => {
 
   test("pagamento não escolhido bloqueia", () => {
     expect(pendenciasDoPedido({ ...DADOS_BASE, pagamento: "" }, [item])).toContain("Escolha a forma de pagamento.");
+  });
+});
+
+describe("pendenciaIdentificadorTentativa — falha na geração do clientRequestId no navegador", () => {
+  test("com identificador, não há pendência", () => {
+    expect(pendenciaIdentificadorTentativa(true)).toBeNull();
+  });
+
+  test("sem identificador (gerarClientRequestId lançou), devolve mensagem clara e não vazia", () => {
+    const msg = pendenciaIdentificadorTentativa(false);
+    expect(msg).not.toBeNull();
+    expect(typeof msg).toBe("string");
+    expect((msg as string).length).toBeGreaterThan(20);
+  });
+
+  test("a mensagem nunca é confundida com uma pendência de dado de negócio — não fala de cliente/telefone/pagamento", () => {
+    const msg = pendenciaIdentificadorTentativa(false) as string;
+    expect(msg.toLowerCase()).not.toContain("cliente");
+    expect(msg.toLowerCase()).not.toContain("telefone");
+    expect(msg.toLowerCase()).not.toContain("pagamento");
   });
 });
 
