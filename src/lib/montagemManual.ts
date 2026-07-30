@@ -28,11 +28,116 @@ import {
   type MenuPedidoApp,
 } from "./pedidoAppItens";
 
-/** Forma do cardápio que este módulo consome — subconjunto de MenuType. */
+/**
+ * Contrato de cardápio da montagem manual. Declarado AQUI, em `src/lib`, e
+ * não importado de uma página de rota: um módulo de domínio não deve depender
+ * do arquivo de uma tela para saber a forma dos seus próprios dados.
+ */
 export type MenuManual = MenuPedidoApp & {
   sizes: { code: string; label?: string; price: number }[];
+  neighborhoods: { name: string; fee: number }[];
+  payments: string[];
   esgotados?: string[];
 };
+
+// ---------------------------------------------------------------------------
+// Adaptador validado da resposta de GET /api/cardapio
+// ---------------------------------------------------------------------------
+
+function ehObjeto(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+function texto(v: unknown): string | null {
+  return typeof v === "string" && v.trim() ? v : null;
+}
+
+function numeroFinito(v: unknown): number | null {
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
+/** Mapeia um array desconhecido descartando as entradas que não validam. */
+function listaValida<T>(bruto: unknown, ler: (item: Record<string, unknown>) => T | null): T[] {
+  if (!Array.isArray(bruto)) return [];
+  const saida: T[] = [];
+  for (const item of bruto) {
+    if (!ehObjeto(item)) continue;
+    const lido = ler(item);
+    if (lido !== null) saida.push(lido);
+  }
+  return saida;
+}
+
+function listaDeTextos(bruto: unknown): string[] {
+  return Array.isArray(bruto) ? bruto.filter((v): v is string => typeof v === "string" && v.trim().length > 0) : [];
+}
+
+/**
+ * Converte a resposta crua de `GET /api/cardapio` no contrato desta montagem,
+ * validando campo a campo. Substitui o cast — um `as unknown as` aceitaria uma
+ * resposta corrompida e só quebraria mais tarde, no meio de um atendimento.
+ *
+ * Devolve `null` quando o cardápio não tem o mínimo para montar um pedido
+ * (nenhum produto vendável), para que a tela nem chegue a abrir. Entradas
+ * individuais malformadas são descartadas em silêncio: um produto com preço
+ * inválido some da lista, mas não derruba o cardápio inteiro.
+ */
+export function adaptarCardapioParaMontagem(bruto: unknown): MenuManual | null {
+  if (!ehObjeto(bruto)) return null;
+
+  const menu: MenuManual = {
+    sizes: listaValida(bruto.sizes, (s) => {
+      const code = texto(s.code);
+      const price = numeroFinito(s.price);
+      return code !== null && price !== null ? { code, label: texto(s.label) ?? undefined, price } : null;
+    }),
+    saltyFlavors: listaDeTextos(bruto.saltyFlavors),
+    sweetFlavors: listaDeTextos(bruto.sweetFlavors),
+    lanches: listaValida(bruto.lanches, (l) => {
+      const name = texto(l.name);
+      const price = numeroFinito(l.price);
+      if (name === null || price === null) return null;
+      const sizes = listaValida(l.sizes, (t) => {
+        const code = texto(t.code);
+        const preco = numeroFinito(t.price);
+        return code !== null && preco !== null ? { code, price: preco } : null;
+      });
+      return { name, price, ...(sizes.length > 0 ? { sizes } : {}) };
+    }),
+    bebidas: listaValida(bruto.bebidas, (b) => {
+      const name = texto(b.name);
+      const price = numeroFinito(b.price);
+      return name !== null && price !== null ? { name, price } : null;
+    }),
+    sucos: listaValida(bruto.sucos, (s) => {
+      const name = texto(s.name);
+      const price = numeroFinito(s.price);
+      return name !== null && price !== null ? { name, price } : null;
+    }),
+    borders: listaValida(bruto.borders, (b) => {
+      const label = texto(b.label);
+      const priceSmall = numeroFinito(b.priceSmall);
+      const priceLarge = numeroFinito(b.priceLarge);
+      return label !== null && priceSmall !== null && priceLarge !== null
+        ? { label, priceSmall, priceLarge }
+        : null;
+    }),
+    neighborhoods: listaValida(bruto.neighborhoods, (n) => {
+      const name = texto(n.name);
+      const fee = numeroFinito(n.fee);
+      return name !== null && fee !== null ? { name, fee } : null;
+    }),
+    payments: listaDeTextos(bruto.payments),
+    esgotados: listaDeTextos(bruto.esgotados),
+  };
+
+  // Sem nenhum produto vendável não há pedido a montar: falhar aqui, com a
+  // tela fechada, é melhor do que abrir um fluxo que só produziria itens que
+  // o servidor recusaria.
+  const temProduto =
+    menu.sizes.length > 0 || menu.lanches.length > 0 || menu.bebidas.length > 0 || menu.sucos.length > 0;
+  return temProduto ? menu : null;
+}
 
 export type CategoriaManual = "pizza" | "lanches" | "bebidas" | "sucos";
 

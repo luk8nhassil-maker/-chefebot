@@ -16,7 +16,6 @@
 // exatamente o que faz o atendente se perder no meio de uma ligação.
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import type { MenuType } from "@/app/cardapio/page"
 import type { ItemApp } from "@/lib/pedidoAppItens"
 import { computeTaxaApp } from "@/lib/pedidoAppLogic"
 import { montarPagamentoComposto, extrairPagamentoComposto } from "@/lib/pagamentoComposto"
@@ -57,7 +56,8 @@ const PASSOS: { id: Passo; label: string }[] = [
 const money = (v: number) => "R$ " + v.toFixed(2).replace(".", ",")
 
 type Props = {
-  menu: MenuType
+  /** Cardápio JÁ validado pelo adaptador — a tela nunca recebe resposta crua. */
+  menu: MenuManual
   onFechar: () => void
   /** Chamado após o pedido ser criado, para o painel recarregar a lista. */
   onCriado: (pedidoId: string) => void
@@ -106,9 +106,8 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
   const [confirmarSaida, setConfirmarSaida] = useState(false)
 
   // --- catálogo e busca ----------------------------------------------------
-  const menuManual = menu as unknown as MenuManual
   // Recalculado só quando o cardápio muda, não a cada tecla digitada.
-  const produtos = useMemo(() => listarProdutosManuais(menuManual), [menuManual])
+  const produtos = useMemo(() => listarProdutosManuais(menu), [menu])
   const [categoria, setCategoria] = useState<CategoriaManual>("pizza")
   const [termo, setTermo] = useState("")
   const buscando = termo.trim().length > 0
@@ -125,8 +124,8 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
   const [selecao, setSelecao] = useState<SelecaoMontagem>(selecaoVazia())
   const [etapaVisivel, setEtapaVisivel] = useState(0)
   const etapas = useMemo(
-    () => (produtoAberto ? montarEtapas(produtoAberto, menuManual) : []),
-    [produtoAberto, menuManual]
+    () => (produtoAberto ? montarEtapas(produtoAberto, menu) : []),
+    [produtoAberto, menu]
   )
   const etapaAtual = etapas[etapaVisivel]
   const bloqueio = motivoBloqueio(etapaAtual, selecao)
@@ -174,7 +173,7 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
     () => computeTaxaApp(tipoEntrega, bairro, menu.neighborhoods || []),
     [tipoEntrega, bairro, menu.neighborhoods]
   )
-  const totais = useMemo(() => calcularTotalManual(itens, menuManual, taxa), [itens, menuManual, taxa])
+  const totais = useMemo(() => calcularTotalManual(itens, menu, taxa), [itens, menu, taxa])
 
   const compostoAtual = useMemo(
     () => (pagamento === "Misto" ? montarPagamentoComposto(mistoPix, mistoDinheiro, totais.total) : null),
@@ -235,7 +234,7 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
     // UI contra duplo toque. A defesa de servidor é o clientRequestId.
     if (adicionandoRef.current) return
     adicionandoRef.current = true
-    const item = construirItemManual(produto, selecaoVazia(), menuManual)
+    const item = construirItemManual(produto, selecaoVazia(), menu)
     if (item) setItens((atual) => adicionarAoCarrinho(atual, item))
     window.setTimeout(() => { adicionandoRef.current = false }, 400)
   }
@@ -244,7 +243,7 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
     if (!produtoAberto || !completa) return
     if (adicionandoRef.current) return
     adicionandoRef.current = true
-    const item = construirItemManual(produtoAberto, selecao, menuManual)
+    const item = construirItemManual(produtoAberto, selecao, menu)
     if (item) setItens((atual) => adicionarAoCarrinho(atual, item))
     setProdutoAberto(null)
     setTermo("")

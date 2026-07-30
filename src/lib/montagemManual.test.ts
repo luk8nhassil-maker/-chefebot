@@ -17,6 +17,7 @@ import {
   removerItem,
   pendenciasDoPedido,
   selecaoVazia,
+  adaptarCardapioParaMontagem,
   type MenuManual,
   type ProdutoManual,
   type DadosPedidoManual,
@@ -41,6 +42,8 @@ const MENU: MenuManual = {
   bebidas: [{ name: "Refrigerante 2L", price: 12 }],
   sucos: [{ name: "Suco de Açaí", price: 10 }],
   borders: [{ label: "Requeijão", priceSmall: 5, priceLarge: 8 }],
+  neighborhoods: [{ name: "Centro", fee: 7 }],
+  payments: ["Pix", "Dinheiro", "Cartao"],
   esgotados: [],
 };
 
@@ -472,5 +475,74 @@ describe("pendências antes de enviar", () => {
 
   test("pagamento não escolhido bloqueia", () => {
     expect(pendenciasDoPedido({ ...DADOS_BASE, pagamento: "" }, [item])).toContain("Escolha a forma de pagamento.");
+  });
+});
+
+describe("adaptarCardapioParaMontagem — fronteira validada, sem cast", () => {
+  const bruto = {
+    sizes: [{ code: "G", label: "Grande", price: 50 }],
+    saltyFlavors: ["Quatro Queijos"],
+    sweetFlavors: ["Chocolate"],
+    lanches: [{ name: "Calzone", price: 40 }],
+    bebidas: [{ name: "Refrigerante 2L", price: 12 }],
+    sucos: [{ name: "Suco de Açaí", price: 10 }],
+    borders: [{ label: "Requeijão", priceSmall: 5, priceLarge: 8 }],
+    neighborhoods: [{ name: "Centro", fee: 7 }],
+    payments: ["Pix"],
+    esgotados: ["Chocolate"],
+  };
+
+  test("converte uma resposta bem formada", () => {
+    const menu = adaptarCardapioParaMontagem(bruto);
+    expect(menu).not.toBeNull();
+    expect(menu?.sizes).toEqual([{ code: "G", label: "Grande", price: 50 }]);
+    expect(menu?.neighborhoods).toEqual([{ name: "Centro", fee: 7 }]);
+    expect(menu?.payments).toEqual(["Pix"]);
+    expect(menu?.esgotados).toEqual(["Chocolate"]);
+  });
+
+  test("o resultado é utilizável de ponta a ponta pelo resto do módulo", () => {
+    const menu = adaptarCardapioParaMontagem(bruto)!;
+    const pizza = listarProdutosManuais(menu).find((p) => p.id === "pizza:g")!;
+    const item = construirItemManual(pizza, { sabores: ["Quatro Queijos"], borda: "Requeijão" }, menu);
+    expect(item?.price).toBe(58);
+  });
+
+  test("entrada que não é objeto falha de forma segura", () => {
+    for (const v of [null, undefined, "cardapio", 42, [], true]) {
+      expect(adaptarCardapioParaMontagem(v)).toBeNull();
+    }
+  });
+
+  test("cardápio sem nenhum produto vendável é recusado — a tela não deve abrir", () => {
+    expect(adaptarCardapioParaMontagem({ sizes: [], lanches: [], bebidas: [], sucos: [] })).toBeNull();
+    expect(adaptarCardapioParaMontagem({})).toBeNull();
+  });
+
+  test("entradas individuais malformadas são descartadas sem derrubar o cardápio", () => {
+    const menu = adaptarCardapioParaMontagem({
+      ...bruto,
+      sizes: [{ code: "G", label: "Grande", price: 50 }, { code: "P", price: "trinta" }, null, 7],
+      bebidas: [{ name: "Refrigerante 2L", price: 12 }, { name: "", price: 5 }, { name: "X" }],
+      borders: [{ label: "Requeijão", priceSmall: 5 }],
+    });
+    expect(menu?.sizes).toHaveLength(1);
+    expect(menu?.bebidas).toHaveLength(1);
+    expect(menu?.borders).toEqual([]); // priceLarge ausente invalida a borda inteira
+  });
+
+  test("campos ausentes viram listas vazias, nunca undefined", () => {
+    const menu = adaptarCardapioParaMontagem({ bebidas: [{ name: "Água", price: 4 }] })!;
+    expect(menu.sizes).toEqual([]);
+    expect(menu.saltyFlavors).toEqual([]);
+    expect(menu.neighborhoods).toEqual([]);
+    expect(menu.payments).toEqual([]);
+  });
+
+  test("valores não finitos são descartados (NaN/Infinity nunca viram preço)", () => {
+    const menu = adaptarCardapioParaMontagem({
+      bebidas: [{ name: "A", price: Number.NaN }, { name: "B", price: Infinity }, { name: "C", price: 3 }],
+    })!;
+    expect(menu.bebidas).toEqual([{ name: "C", price: 3 }]);
   });
 });
