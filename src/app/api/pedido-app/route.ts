@@ -829,6 +829,26 @@ export async function POST(req: NextRequest) {
     const idempotenciaAtiva = survivalAtivo || sessaoAdmin !== null;
     clientRequestId = idempotenciaAtiva ? sanitizeClientRequestId(body.clientRequestId) : null;
 
+    // Numa sessão administrativa, o clientRequestId é OBRIGATÓRIO — nunca
+    // opcional. O componente do painel sempre gera um identificador antes de
+    // qualquer envio (ver NovoPedidoManual.tsx); ausência ou formato inválido
+    // aqui só pode significar defeito ou adulteração. Diferente do cardápio
+    // público (compatibilidade com clientes antigos que ainda não enviam o
+    // campo), aqui não existe motivo legítimo para seguir sem proteção — e
+    // seguir sem ela reabriria exatamente o pedido duplicado que este
+    // caminho existe para evitar.
+    if (sessaoAdmin && !clientRequestId) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: body.clientRequestId
+            ? "Identificador de tentativa (clientRequestId) inválido."
+            : "Identificador de tentativa (clientRequestId) é obrigatório para pedido administrativo.",
+        },
+        { status: 400 }
+      );
+    }
+
     // Revisão de segurança, 4ª rodada, ponto 5: um clientRequestId PRESENTE
     // porém em formato inválido nunca pode ser silenciosamente ignorado sem
     // visibilidade. Enquanto a flag de enforcement (separada, padrão
@@ -836,14 +856,11 @@ export async function POST(req: NextRequest) {
     // proteção de idempotência (compatibilidade com clientes antigos que
     // ainda não geram/enviam o campo) — mas o caso fica logado. Com a
     // enforcement ligada, um valor presente e malformado é rejeitado (400);
-    // a AUSÊNCIA do campo nunca é rejeitada por esta checagem.
+    // a AUSÊNCIA do campo nunca é rejeitada por esta checagem. Sessão
+    // administrativa já retornou acima, então este bloco só se aplica ao
+    // caminho público com o Modo Sobrevivência ligado.
     if (idempotenciaAtiva && body.clientRequestId && !clientRequestId) {
-      // Numa sessão de painel o cliente é o nosso próprio componente, que
-      // sempre gera um identificador válido: um valor presente e malformado
-      // significa defeito ou adulteração, e seguir sem proteção seria
-      // reintroduzir justamente o pedido duplicado que este caminho evita.
-      // A AUSÊNCIA do campo continua nunca sendo rejeitada.
-      if (sessaoAdmin || survivalClientRequestIdEnforcementEnabled()) {
+      if (survivalClientRequestIdEnforcementEnabled()) {
         return NextResponse.json(
           { ok: false, error: "Identificador de tentativa (clientRequestId) inválido." },
           { status: 400 }
