@@ -690,3 +690,21 @@ export function pendenciasDoPedido(
 
   return faltas;
 }
+
+/**
+ * Pendência técnica (não de negócio) para quando o navegador não conseguiu
+ * gerar um identificador de tentativa (`gerarClientRequestId`, em
+ * src/survival/clientRequestId.ts, lança na ausência de fonte criptográfica).
+ *
+ * Uma sessão administrativa EXIGE esse identificador no servidor (ver POST
+ * /api/pedido-app) — não é opcional como no cardápio público. Por isso esta
+ * função nunca devolve `null` só porque "não há dado de negócio faltando": o
+ * pedido não pode ser enviado sem proteção de idempotência, e a mensagem
+ * precisa deixar isso claro para o atendente, não apenas travar o botão
+ * silenciosamente.
+ */
+export function pendenciaIdentificadorTentativa(temIdentificador: boolean): string | null {
+  return temIdentificador
+    ? null
+    : "Não foi possível preparar o pedido com segurança neste navegador. Recarregue a página e tente novamente.";
+}

@@ -37,6 +37,7 @@ import {
   alterarQuantidade,
   removerItem,
   pendenciasDoPedido,
+  pendenciaIdentificadorTentativa,
   selecaoVazia,
   type CategoriaManual,
   type MenuManual,
@@ -155,19 +156,21 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
   // --- envio ---------------------------------------------------------------
   const [enviando, setEnviando] = useState(false)
   const [erroEnvio, setErroEnvio] = useState<string | null>(null)
-  // Gerado UMA vez por tentativa de pedido e reaproveitado em qualquer retry:
-  // é o que impede que uma falha de rede vire pedido duplicado. Só é trocado
-  // depois de um pedido concluído com sucesso.
-  const clientRequestIdRef = useRef<string | null>(null)
-  if (clientRequestIdRef.current === null) {
+  // Gerado UMA vez por tentativa de pedido (inicializador preguiçoso: roda uma
+  // única vez, mesmo sob StrictMode) e reaproveitado em qualquer retry — é o
+  // que impede que uma falha de rede vire pedido duplicado. `null` quando o
+  // navegador não tem fonte criptográfica (gerarClientRequestId lança): o
+  // servidor EXIGE este identificador para sessão administrativa (nunca é
+  // opcional aqui, diferente do cardápio público), então sem ele o pedido não
+  // pode ser enviado — ver `identificadorTentativaFalhou` abaixo.
+  const [clientRequestId] = useState<string | null>(() => {
     try {
-      clientRequestIdRef.current = gerarClientRequestId()
+      return gerarClientRequestId()
     } catch {
-      // Sem fonte criptográfica não geramos um id previsível: o pedido segue
-      // sem proteção extra de idempotência, exatamente como antes dela existir.
-      clientRequestIdRef.current = ""
+      return null
     }
-  }
+  })
+  const identificadorTentativaFalhou = clientRequestId === null
 
   const taxa = useMemo(
     () => computeTaxaApp(tipoEntrega, bairro, menu.neighborhoods || []),
@@ -196,7 +199,17 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
     pagamento: pagamentoFinal,
     troco: temDinheiro ? (trocoOpcao === "nao" ? "Sem troco" : troco.trim()) : undefined,
   }
-  const pendencias = pendenciasDoPedido(dados, itens)
+  // A ausência do identificador de tentativa entra na MESMA lista de
+  // pendências que bloqueia o envio — é o mesmo padrão visual de "o que falta
+  // para enviar" que o atendente já reconhece, e garante que o botão de
+  // enviar nunca fica habilitado sem proteção de idempotência. A mensagem e a
+  // decisão vêm de pendenciaIdentificadorTentativa (src/lib/montagemManual.ts),
+  // testável sem montar este componente.
+  const pendenciaIdentificador = pendenciaIdentificadorTentativa(!identificadorTentativaFalhou)
+  const pendencias = [
+    ...(pendenciaIdentificador ? [pendenciaIdentificador] : []),
+    ...pendenciasDoPedido(dados, itens),
+  ]
 
   // Fechar com Esc passa pela mesma confirmação do botão de fechar: nunca
   // perder um pedido inteiro por um toque acidental.
@@ -293,7 +306,11 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
   }
 
   async function enviar() {
-    if (enviando || pendencias.length > 0) return
+    // Dupla guarda: `pendencias.length > 0` já cobre isso (o item entra na
+    // lista acima), mas o identificador nunca pode ser enviado ausente —
+    // mesmo que a lista de pendências mude no futuro, esta linha continua
+    // impedindo o envio sem proteção.
+    if (enviando || pendencias.length > 0 || identificadorTentativaFalhou) return
     setEnviando(true)
     setErroEnvio(null)
     try {
@@ -313,7 +330,7 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
           observacao: observacao.trim() || undefined,
           pagamento: pagamentoFinal,
           ...(dados.troco ? { troco: dados.troco } : {}),
-          ...(clientRequestIdRef.current ? { clientRequestId: clientRequestIdRef.current } : {}),
+          ...(clientRequestId ? { clientRequestId } : {}),
         }),
       })
       const data = await r.json().catch(() => null)
