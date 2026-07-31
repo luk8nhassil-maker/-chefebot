@@ -9,6 +9,7 @@ import {
 } from "@/lib/pix";
 import { PROMOS_KEY, catalogoDoMenu, dentroDaJanela, precoFinalPromocao, promocaoIndisponivel, type Promocao } from "@/lib/promocoes";
 import { temDinheiroNoPagamento, valorDinheiroEsperado, temPixNoPagamento } from "@/lib/bot";
+import { normalizarPagamentoComposto, pagamentoAindaValido } from "@/lib/pagamentoComposto";
 import {
   type ItemApp,
   type MenuPedidoApp,
@@ -66,7 +67,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!body.pagamento || !body.pagamento.trim()) {
     return NextResponse.json({ ok: false, error: "Forma de pagamento obrigatória" }, { status: 400 });
   }
-  if (temDinheiroNoPagamento(body.pagamento) && !body.troco?.trim()) {
+  // Forma canônica antes de qualquer efeito: um pagamento composto que chegue
+  // com a grafia legada (ponto decimal) é renormalizado aqui. Os helpers de
+  // src/lib/bot.ts leem o ponto como separador de MILHAR, então "R$ 30.00"
+  // viraria R$ 3.000 na cobrança Pix e na base do troco — ver
+  // src/lib/pagamentoComposto.ts. Pagamento simples passa intacto.
+  const pagamento = normalizarPagamentoComposto(body.pagamento.trim()) ?? body.pagamento.trim();
+  if (temDinheiroNoPagamento(pagamento) && !body.troco?.trim()) {
     return NextResponse.json({ ok: false, error: "Troco obrigatorio para dinheiro" }, { status: 400 });
   }
   if (body.tipoEntrega === "delivery" && (!body.bairro?.trim() || !body.rua?.trim() || !body.numero?.trim())) {
@@ -170,9 +177,21 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const taxa = computeTaxaApp(body.tipoEntrega || "retirada", body.bairro, menu.neighborhoods as Array<{ name: string; fee: number }>);
     const total = subtotalComDesconto + taxa;
 
-    if (temDinheiroNoPagamento(body.pagamento) && body.troco?.trim() && !/sem\s*troco/i.test(body.troco)) {
+    // Invariante do pagamento composto: a soma das partes é revalidada contra
+    // o total RECALCULADO agora, nunca contra o que foi gravado na criação.
+    // Alterar itens muda o total, e um pagamento misto que fechava antes pode
+    // deixar de fechar — sem esta checagem a loja receberia Pix + dinheiro
+    // somando um valor diferente do pedido.
+    if (!pagamentoAindaValido(pagamento, total)) {
+      return NextResponse.json(
+        { ok: false, error: "A divisão entre Pix e dinheiro não fecha com o novo total do pedido. Ajuste os valores antes de salvar." },
+        { status: 400 }
+      );
+    }
+
+    if (temDinheiroNoPagamento(pagamento) && body.troco?.trim() && !/sem\s*troco/i.test(body.troco)) {
       const valorTroco = parseFloat(body.troco.replace(",", ".").replace(/[^0-9.]/g, ""));
-      const baseTroco = valorDinheiroEsperado(body.pagamento, total);
+      const baseTroco = valorDinheiroEsperado(pagamento, total);
       if (isNaN(valorTroco) || valorTroco < baseTroco) {
         return NextResponse.json({ ok: false, error: "Valor de troco insuficiente para a parte em dinheiro" }, { status: 400 });
       }
@@ -181,9 +200,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const endereco = buildEnderecoApp({ tipoEntrega: body.tipoEntrega || "retirada", rua: body.rua, numero: body.numero, bairro: body.bairro });
 
     // --- Pix: nunca deixa a cobrança antiga confirmar a revisão nova ---
-    const pagamentoAnterior = pedido.pagamento;
+    // Comparação sempre entre formas canônicas: um pedido antigo gravado com
+    // a grafia legada não deve contar como "forma mudou" só por ter sido
+    // renormalizado, o que substituiria uma cobrança Pix ainda válida.
+    const pagamentoAnterior = normalizarPagamentoComposto(pedido.pagamento) ?? pedido.pagamento;
     const tinhaPixAnterior = temPixNoPagamento(pagamentoAnterior) && !!pedido.pix;
-    const novoTemPix = temPixNoPagamento(body.pagamento);
+    const novoTemPix = temPixNoPagamento(pagamento);
     const configPix = (await redis.get<ConfigPizzariaPix>("config:pizzaria")) || {};
 
     let novoPix: PedidoRedis["pix"] | undefined = pedido.pix;
@@ -193,7 +215,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       // Qualquer mudança financeira (valor, forma de pagamento) invalida a
       // cobrança anterior — ela nunca deve conseguir confirmar a revisão nova.
       const valorMudou = Math.round((pedido.total || 0) * 100) !== Math.round(total * 100);
-      const formaMudou = (pagamentoAnterior || "") !== (body.pagamento || "");
+      const formaMudou = (pagamentoAnterior || "") !== (pagamento || "");
       if (valorMudou || formaMudou) {
         pixSubstituido = [
           ...pixSubstituido,
@@ -205,7 +227,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           },
         ];
         if (novoTemPix) {
-          const pixBase = criarPixMetadata(id, body.pagamento, total);
+          const pixBase = criarPixMetadata(id, pagamento, total);
           novoPix = await prepararPixProviderMercadoPago({
             pedidoId: id,
             pix: pixBase,
@@ -217,7 +239,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       }
       // Se não mudou valor nem forma, mantém a cobrança Pix existente intacta.
     } else if (novoTemPix) {
-      const pixBase = criarPixMetadata(id, body.pagamento, total);
+      const pixBase = criarPixMetadata(id, pagamento, total);
       novoPix = await prepararPixProviderMercadoPago({
         pedidoId: id,
         pix: pixBase,
@@ -235,7 +257,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         troco: pedido.troco,
         observacao: pedido.observacao,
       },
-      { itens, total, pagamento: body.pagamento, tipoEntrega: body.tipoEntrega, endereco, troco: body.troco, observacao: body.observacao }
+      { itens, total, pagamento, tipoEntrega: body.tipoEntrega, endereco, troco: body.troco, observacao: body.observacao }
     );
 
     const agora = new Date().toISOString();
@@ -250,7 +272,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       ...(body.tipoEntrega ? { tipoEntrega: body.tipoEntrega } : {}),
       ...(body.tipoEntrega === "delivery" ? { bairro: body.bairro, rua: body.rua, enderecoNumero: body.numero } : { bairro: undefined, rua: undefined, enderecoNumero: undefined }),
       ...(body.referencia ? { referencia: body.referencia } : { referencia: undefined }),
-      pagamento: body.pagamento,
+      pagamento,
       ...(body.troco ? { troco: body.troco } : { troco: undefined }),
       ...(body.observacao ? { observacao: body.observacao } : { observacao: undefined }),
       pix: novoPix,

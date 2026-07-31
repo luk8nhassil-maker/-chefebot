@@ -7,6 +7,10 @@ import {
   aplicarJitter,
   PIX_AUTO_CHECK_INTERVAL_SEM_PENDENTE_MS,
 } from "@/lib/pixAutoCheckConfig"
+import LimpezaOperacionalGate, { limpezaOperacionalAtiva } from "@/components/LimpezaOperacionalPainel"
+import NovoPedidoManual from "./NovoPedidoManual"
+import { adaptarCardapioParaMontagem, type MenuManual } from "@/lib/montagemManual"
+import type { Pendencia, OpcaoResolucao, RegistroLimpeza } from "@/lib/limpezaOperacionalPedidos"
 
 function whatsappLink(telefoneBruto: string, mensagem?: string): string {
   let numero = (telefoneBruto || "").replace(/\D/g, "")
@@ -59,6 +63,9 @@ type Pedido = {
   editStatus?: "none" | "editing" | "edited"
   editExpiresAt?: string
   changesSummary?: string[]
+  // Limpeza operacional (ver src/lib/limpezaOperacionalPedidos.ts).
+  statusAtualizadoEm?: string
+  limpezaOperacional?: RegistroLimpeza
 }
 
 function pedidoEmEdicao(p: Pick<Pedido, "editStatus" | "editExpiresAt">): boolean {
@@ -367,6 +374,13 @@ export default function PedidosPage() {
   const [modalEntrega, setModalEntrega] = useState<{pedidoId: string; proxStatus: Status} | null>(null)
   const [muteado, setMuteado] = useState(false)
   const [busca, setBusca] = useState("")
+  // Montagem manual de pedido. O cardápio é buscado sob demanda, só quando
+  // o atendente abre o fluxo — o painel não paga polling de cardápio o dia
+  // inteiro por causa de uma tela que quase sempre está fechada.
+  const [novoPedidoAberto, setNovoPedidoAberto] = useState(false)
+  const [menuManual, setMenuManual] = useState<MenuManual | null>(null)
+  const [carregandoMenu, setCarregandoMenu] = useState(false)
+  const [erroMenu, setErroMenu] = useState<string | null>(null)
   const [modalLimpar, setModalLimpar] = useState(false)
   const [limpando, setLimpando] = useState(false)
   const [pedidosArquivados, setPedidosArquivados] = useState<Pedido[]>([])
@@ -1017,10 +1031,18 @@ export default function PedidosPage() {
     } catch {}
   }
 
-  const avancarStatus = async (id: string, novoStatus: Status, entregador?: {id: string; nome: string; telefone: string}) => {
-    if (atualizandoRef.current === id) return
+  // `limpeza` acompanha a transição quando ela vem da resolução de uma
+  // pendência operacional: o motivo é gravado no mesmo PATCH que muda o
+  // status, sem uma segunda escrita concorrente sobre o array de pedidos.
+  const avancarStatus = async (
+    id: string,
+    novoStatus: Status,
+    entregador?: {id: string; nome: string; telefone: string},
+    limpeza?: { motivo: Pendencia["motivo"]; acao: OpcaoResolucao["acao"] },
+  ) => {
+    if (atualizandoRef.current === id) return false
     const pedido = pedidos.find(p => p.id === id)
-    if (!pedido) return
+    if (!pedido) return false
     const prevStatus = pedido.status
     const F2S: Record<string, Status> = { novo: "novo", em_preparo: "em_preparo", saiu_entrega: "saiu_entrega", entregue: "entregue" }
     const willLeave = filtro !== "todos" && F2S[filtro] === prevStatus
@@ -1032,7 +1054,7 @@ export default function PedidosPage() {
     if (willLeave) { setLeavingId(id); if (leaveTimerRef.current) clearTimeout(leaveTimerRef.current); leaveTimerRef.current = setTimeout(() => setLeavingId(null), 350) }
     else { setFlashId(id); if (flashTimerRef.current) clearTimeout(flashTimerRef.current); flashTimerRef.current = setTimeout(() => setFlashId(null), 750) }
     try {
-      const r = await fetch("/api/orders", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, status: novoStatus, entregador }) })
+      const r = await fetch("/api/orders", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, status: novoStatus, entregador, ...(limpeza ? { limpeza } : {}) }) })
       if (!r.ok) throw new Error("Falha ao atualizar status")
       const firstName = pedido.cliente.split(" ")[0]
       if (novoStatus === "entregue") { tocarSomEntrega(); temposEntregaRef.current[id] = tempoDesde(pedido.horario, undefined, Date.now()) }
@@ -1042,15 +1064,62 @@ export default function PedidosPage() {
       if (prevStatus === "novo" && novoStatus === "em_preparo") {
         imprimirPedidoSilencioso(id)
       }
+      return true
     } catch {
       setPedidos(prev => prev.map(p => p.id === id ? { ...p, status: prevStatus } : p))
       const firstName = pedido.cliente.split(" ")[0]
       setToast({ text: `⚠️ Não consegui atualizar ${firstName}. Tente de novo.`, expires: Date.now() + 5000, pedidoId: id, prevStatus })
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
       toastTimerRef.current = setTimeout(() => setToast(null), 5000)
+      return false
     } finally {
       atualizandoRef.current = null
       setModalEntrega(null); setAtualizando(null); setModalAlterarStatus(null)
+    }
+  }
+
+  // Resolução de uma pendência do gate de limpeza operacional. A ação de
+  // "verificar pagamento" NÃO grava registro de propósito: ela só consulta o
+  // Mercado Pago. Se o Pix tiver entrado, o pedido sai do motivo de pagamento
+  // sozinho na próxima classificação — e o que sobrar (falta de aceite) é uma
+  // pendência legítima, diferente. É assim que se evita cancelar um pedido
+  // que já foi pago.
+  const resolverPendenciaOperacional = async (pendencia: Pendencia, opcao: OpcaoResolucao) => {
+    if (opcao.acao === "verificou_pagamento") {
+      await executarReconciliacaoPix(false)
+      carregarPedidos()
+      return
+    }
+    if (!opcao.status) return
+    const ok = await avancarStatus(pendencia.pedidoId, opcao.status as Status, undefined, {
+      motivo: pendencia.motivo,
+      acao: opcao.acao,
+    })
+    if (!ok) throw new Error("falha ao resolver pendência")
+  }
+
+  async function abrirNovoPedido() {
+    setErroMenu(null)
+    // Cardápio já em mãos: abre direto, sem nova requisição.
+    if (menuManual) { setNovoPedidoAberto(true); return }
+    setCarregandoMenu(true)
+    try {
+      const r = await fetch("/api/cardapio", { cache: "no-store" })
+      if (!r.ok) throw new Error("cardapio indisponivel")
+      const data = await r.json()
+      // Adaptador validado em vez de cast: uma resposta corrompida é recusada
+      // AQUI, com a tela ainda fechada, em vez de quebrar no meio do
+      // atendimento (ver adaptarCardapioParaMontagem).
+      const validado = adaptarCardapioParaMontagem(data)
+      if (!validado) throw new Error("cardapio malformado")
+      setMenuManual(validado)
+      setNovoPedidoAberto(true)
+    } catch {
+      // Degrada com aviso em vez de abrir um fluxo sem catálogo: montar um
+      // pedido sem cardápio produziria itens que o servidor recusaria.
+      setErroMenu("Não consegui carregar o cardápio agora. Tente de novo.")
+    } finally {
+      setCarregandoMenu(false)
     }
   }
 
@@ -1642,6 +1711,33 @@ export default function PedidosPage() {
         }
       `}</style>
 
+      {novoPedidoAberto && menuManual && (
+        <NovoPedidoManual
+          menu={menuManual}
+          onFechar={() => setNovoPedidoAberto(false)}
+          onCriado={(pedidoId) => {
+            setNovoPedidoAberto(false)
+            // O pedido entra no painel como qualquer outro canal e imprime no
+            // aceite, pelas regras que já existem — nada especial aqui.
+            carregarPedidos()
+            setToast({ text: `Pedido criado ✓`, expires: Date.now() + 5000, pedidoId, prevStatus: "novo" })
+            if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
+            toastTimerRef.current = setTimeout(() => setToast(null), 5000)
+          }}
+        />
+      )}
+
+      {/* Gate de limpeza operacional — bloqueante enquanto houver pendência, e
+          só na visão de pedidos ativos: em "arquivados" e "tempo real" a
+          operadora está fazendo outra coisa. Desligado por padrão (flag). */}
+      {limpezaOperacionalAtiva() && (
+        <LimpezaOperacionalGate
+          pedidos={pedidos}
+          onResolver={resolverPendenciaOperacional}
+          ativo={filtro !== "arquivados" && filtro !== "tempo_real"}
+        />
+      )}
+
       <PanelShell
         pedidosCount={emAberto}
         conversasCount={escalonados.length}
@@ -1656,12 +1752,26 @@ export default function PedidosPage() {
               <div style={{ fontSize: 11, color: "var(--foreground-muted)", fontWeight: 700, marginTop: 2 }}>Controle de pedidos da pizzaria</div>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <button
+                onClick={abrirNovoPedido}
+                disabled={carregandoMenu}
+                title="Montar um pedido de telefone ou balcão"
+                style={{ fontSize: 11, fontWeight: 900, color: "var(--background)", background: "var(--primary)", border: "1px solid var(--primary)", padding: "6px 12px", borderRadius: 16, cursor: carregandoMenu ? "default" : "pointer", opacity: carregandoMenu ? 0.6 : 1 }}
+              >
+                {carregandoMenu ? "Abrindo…" : "+ Novo pedido"}
+              </button>
               <button onClick={toggleMute} title={muteado ? "Sons desativados" : "Sons ativados"} style={{ fontSize: 15, lineHeight: 1, background: muteado ? "color-mix(in srgb, var(--danger) 10%, transparent)" : "transparent", border: `1px solid ${muteado ? "color-mix(in srgb, var(--danger) 35%, transparent)" : "var(--surface-secondary)"}`, padding: "5px 8px", borderRadius: 16 }}>{muteado ? "🔇" : "🔊"}</button>
               {isAdmin && <button onClick={() => router.push("/admin")} style={{ fontSize: 11, fontWeight: 800, color: "var(--foreground-secondary)", background: "transparent", border: "1px solid var(--surface-secondary)", padding: "6px 10px", borderRadius: 16 }}>Admin</button>}
               {isAdmin && <button onClick={reconciliarPixMercadoPago} disabled={reconciliandoPix} title={ultimaVerificacaoPix ? `Última verificação: ${ultimaVerificacaoPix}` : "Consulta a API do Mercado Pago para confirmar Pix pendentes"} style={{ fontSize: 11, fontWeight: 800, color: "var(--foreground-secondary)", background: "transparent", border: "1px solid var(--surface-secondary)", padding: "6px 10px", borderRadius: 16, opacity: reconciliandoPix ? 0.6 : 1, cursor: reconciliandoPix ? "not-allowed" : "pointer" }}>{reconciliandoPix ? "Verificando..." : "Verificar pagamentos Pix Mercado Pago"}</button>}
               <button onClick={() => fetch("/api/auth/logout", { method: "POST" }).then(() => router.push("/login"))} style={{ fontSize: 11, fontWeight: 800, color: "var(--foreground-muted)", background: "transparent", border: "1px solid var(--border)", padding: "6px 10px", borderRadius: 16 }}>Sair</button>
             </div>
           </div>
+
+          {erroMenu && (
+            <p role="status" aria-live="polite" style={{ fontSize: 11.5, fontWeight: 800, color: "var(--attention-text)", margin: "0 0 10px" }}>
+              {erroMenu}
+            </p>
+          )}
 
           {/* Bot toggle */}
           <button onClick={alternarBot} disabled={salvandoBot} style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", padding: "10px 12px", background: botAtivo ? "color-mix(in srgb, var(--success) 6%, transparent)" : "color-mix(in srgb, var(--primary) 6%, transparent)", border: `1px solid ${botAtivo ? "color-mix(in srgb, var(--success) 28%, transparent)" : "color-mix(in srgb, var(--primary) 30%, transparent)"}`, borderRadius: 12, color: "var(--foreground)", textAlign: "left", marginBottom: 10 }}>
@@ -2163,6 +2273,7 @@ export default function PedidosPage() {
                       {pedido.numero != null && <span style={{ fontSize: 10, fontWeight: 900, color: "var(--border-strong)", flexShrink: 0 }}>#{pedido.numero}</span>}
                       <span style={{ fontSize: 14, fontWeight: 900, color: "var(--text-primary)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{firstName}</span>
                       {pedido.escalonado && <span style={{ fontSize: 11, flexShrink: 0 }}>🚨</span>}
+                      {pedido.origem === "painel" && <span style={{ fontSize: 9, fontWeight: 900, color: "var(--brand-text)", background: "color-mix(in srgb, var(--primary) 14%, transparent)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>🧑‍🍳 Painel</span>}
                       {(pedido.origem === "site" || pedido.origem === "app") && <span style={{ fontSize: 9, fontWeight: 900, color: "var(--info)", background: "color-mix(in srgb, var(--info) 12%, transparent)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>🌐 Site</span>}
                       {pixPendente && <span style={{ fontSize: 9, fontWeight: 900, color: "var(--attention-text)", background: "var(--attention-surface)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>{hibridoParts ? "PIX parcial ⏳" : "PIX⏳"}</span>}
                       {pixEmRevisaoOuSuspeito && <span style={{ fontSize: 9, fontWeight: 900, color: pedido.pix?.status === "suspeito" ? "var(--danger)" : "var(--attention-text)", background: pedido.pix?.status === "suspeito" ? "color-mix(in srgb, var(--danger) 12%, transparent)" : "var(--attention-surface)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>{pixEmRevisaoOuSuspeito}</span>}

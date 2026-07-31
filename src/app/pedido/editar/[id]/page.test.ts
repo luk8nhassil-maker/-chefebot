@@ -51,8 +51,20 @@ describe("POST /api/pedido-app/[id]/editar/salvar — [caso 5] nunca cria uma se
   });
 
   test("quando o pagamento muda para/continua Pix, reaproveita criarPixMetadata/prepararPixProviderMercadoPago já validados — nunca uma segunda lógica de cobrança", () => {
-    expect(fonteSalvar).toContain("criarPixMetadata(id, body.pagamento, total)");
+    // `pagamento` é a forma canônica de body.pagamento, normalizada no início
+    // da rota (ver src/lib/pagamentoComposto.ts) — a cobrança é montada a
+    // partir dela, nunca da string crua enviada pelo cliente.
+    expect(fonteSalvar).toContain("criarPixMetadata(id, pagamento, total)");
     expect(fonteSalvar).toContain("prepararPixProviderMercadoPago(");
+  });
+
+  test("a forma de pagamento usada na cobrança é a canônica, nunca a string crua do cliente", () => {
+    expect(fonteSalvar).toContain("normalizarPagamentoComposto(body.pagamento.trim())");
+    expect(fonteSalvar).not.toContain("criarPixMetadata(id, body.pagamento");
+  });
+
+  test("a soma de um pagamento composto é revalidada contra o total recalculado", () => {
+    expect(fonteSalvar).toContain("pagamentoAindaValido(pagamento, total)");
   });
 });
 
