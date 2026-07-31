@@ -69,7 +69,7 @@ vi.mock("@/lib/auth", async (original) => ({
 }));
 
 import { POST } from "@/app/api/pedido-app/route";
-import { getMENUDinamico } from "@/lib/menu";
+import { getMENUDinamico } from "@/lib/menu.server";
 import {
   listarProdutosManuais,
   construirItemManual,
