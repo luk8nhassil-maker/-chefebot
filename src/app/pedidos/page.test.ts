@@ -16,6 +16,26 @@ const corpoEfeito = fonte.slice(
   fonte.indexOf("}, [isAdmin, loading])") + "}, [isAdmin, loading])".length
 );
 
+describe("/pedidos — 'Novo pedido' tem um único fluxo seguro (sem modal legado)", () => {
+  test("não existe mais o modal de criação livre que confiava no total digitado pelo atendente", () => {
+    // Esse modal antigo postava direto em POST /api/orders com `total` vindo
+    // do campo de texto do atendente (preço como autoridade no frontend) e
+    // sem clientRequestId — exatamente a fragilidade que o pedido manual em
+    // 5 etapas (NovoPedidoManual.tsx) veio substituir. Ele não pode voltar a
+    // existir como um segundo caminho paralelo para "Novo pedido".
+    expect(fonte).not.toContain("modalNovoPedido");
+    expect(fonte).not.toContain("salvarNovoPedido");
+    expect(fonte).not.toContain("novoPedidoForm");
+  });
+
+  test("os dois botões de 'Novo pedido' do painel abrem o mesmo fluxo em etapas", () => {
+    expect(fonte).toContain("onClick={abrirNovoPedido}");
+    const ocorrencias = [...fonte.matchAll(/onClick=\{abrirNovoPedido\}/g)];
+    expect(ocorrencias.length).toBe(2);
+    expect(fonte).toContain("<NovoPedidoManual");
+  });
+});
+
 describe("/pedidos — botão manual de verificação Pix Mercado Pago (preservado)", () => {
   test("botão manual continua renderizado, visível só para admin/dev, chamando reconciliarPixMercadoPago", () => {
     expect(fonte).toMatch(/\{isAdmin && <button onClick=\{reconciliarPixMercadoPago\}/);

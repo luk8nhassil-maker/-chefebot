@@ -104,9 +104,26 @@ const rotulo: React.CSSProperties = {
   margin: "0 0 6px",
 }
 
+// Ícone oficial do WhatsApp (verde de marca do próprio WhatsApp, não da
+// pizzaria) — usado só para identificar visualmente o canal do cliente
+// reconhecido, nunca como cor de destaque geral da tela.
+function WhatsAppIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="#25d366" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.39 1.26 4.81L2 22l5.42-1.42a9.87 9.87 0 004.62 1.18h.01c5.46 0 9.91-4.45 9.91-9.91C21.96 6.45 17.5 2 12.04 2zm5.8 14.02c-.24.68-1.4 1.3-1.93 1.35-.5.05-.99.24-3.32-.69-2.81-1.12-4.62-3.99-4.76-4.18-.14-.19-1.14-1.52-1.14-2.9 0-1.38.72-2.06.98-2.34.26-.28.56-.35.75-.35.19 0 .38 0 .54.01.18.01.41-.07.64.49.24.58.81 2 .88 2.14.07.14.12.31.02.5-.09.19-.14.31-.28.47-.14.16-.29.36-.42.48-.14.14-.28.29-.12.57.16.28.72 1.19 1.55 1.93 1.06.95 1.96 1.24 2.24 1.38.28.14.44.12.6-.07.16-.19.68-.79.87-1.06.19-.28.37-.23.63-.14.26.09 1.66.78 1.94.93.28.14.47.21.54.33.07.12.07.68-.17 1.36z" />
+    </svg>
+  )
+}
+
 export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
   const [passo, setPasso] = useState<Passo>("cliente")
   const [confirmarSaida, setConfirmarSaida] = useState(false)
+  // Confirmado (telefone reconhecido) esconde o campo de nome atrás de um
+  // card compacto; o lápis abre esta edição explícita sem apagar o nome.
+  // Guarda PARA QUAL telefone a edição foi pedida — assim um telefone novo
+  // volta a mostrar o card automaticamente, sem precisar de um efeito extra
+  // só para "resetar" o estado a cada tecla digitada.
+  const [editarNomeParaTelefone, setEditarNomeParaTelefone] = useState<string | null>(null)
 
   // --- catálogo e busca ----------------------------------------------------
   // Recalculado só quando o cardápio muda, não a cada tecla digitada.
@@ -404,6 +421,7 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
   }
 
   const clienteReconhecido = !semTelefone && telefone.replace(/\D/g, "") === telefoneReconhecido && !!telefoneReconhecido
+  const editandoNome = editarNomeParaTelefone !== null && editarNomeParaTelefone === telefone
 
   // --- validade por etapa (bloqueia avanço; nunca bloqueia voltar) ---------
   const clienteValido = !!cliente.trim() && (semTelefone || telefone.replace(/\D/g, "").length >= 10)
@@ -523,7 +541,8 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
                   <p style={{ fontSize: 12, fontWeight: 700, color: "var(--foreground-muted)", margin: 0 }}>Buscando cliente…</p>
                 )}
                 {clienteReconhecido && !buscandoTelefone && (
-                  <p role="status" style={{ fontSize: 12, fontWeight: 800, color: "var(--success)", margin: 0 }}>
+                  <p role="status" style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 800, color: "var(--success)", margin: 0 }}>
+                    <WhatsAppIcon />
                     ✓ Cliente reconhecido
                   </p>
                 )}
@@ -537,10 +556,32 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
                 </label>
               </div>
 
-              <div style={{ ...card, display: "grid", gap: 10 }}>
-                <p style={rotulo}>Nome do cliente</p>
-                <input style={input} placeholder="Nome do cliente" value={cliente} onChange={(e) => setCliente(e.target.value)} />
-              </div>
+              {/* Cliente reconhecido: card compacto com lápis, sem reexibir o
+                  campo de nome — evita reescrever por cima de um cadastro já
+                  confirmado. Cliente novo, sem telefone, ou edição explícita
+                  (lápis) continuam mostrando o campo normal. */}
+              {clienteReconhecido && !editandoNome ? (
+                <div style={{ ...card, display: "flex", alignItems: "center", gap: 10 }}>
+                  <WhatsAppIcon />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={rotulo}>Nome do cliente</p>
+                    <p style={{ fontSize: 14, fontWeight: 800, color: "var(--foreground)", margin: 0 }}>{cliente || "—"}</p>
+                    <p style={{ fontSize: 12, fontWeight: 600, color: "var(--foreground-secondary)", margin: "2px 0 0" }}>{telefone}</p>
+                  </div>
+                  <button
+                    onClick={() => setEditarNomeParaTelefone(telefone)}
+                    aria-label="Editar nome do cliente"
+                    style={{ background: "none", border: "none", color: "var(--primary)", fontSize: 17, cursor: "pointer", padding: 4, flexShrink: 0 }}
+                  >
+                    ✎
+                  </button>
+                </div>
+              ) : (
+                <div style={{ ...card, display: "grid", gap: 10 }}>
+                  <p style={rotulo}>Nome do cliente</p>
+                  <input style={input} placeholder="Nome do cliente" value={cliente} onChange={(e) => setCliente(e.target.value)} />
+                </div>
+              )}
             </>
           )}
 
@@ -640,6 +681,7 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
                         {item.detail && (
                           <span style={{ display: "block", fontSize: 11.5, color: "var(--foreground-secondary)" }}>{item.detail}</span>
                         )}
+                        <span style={{ display: "block", fontSize: 11.5, fontWeight: 800, color: "var(--brand-text)", marginTop: 2 }}>{money(item.price * item.qty)}</span>
                       </span>
                       <button onClick={() => setItens(alterarQuantidade(itens, i, -1))} aria-label={`Diminuir ${item.name}`} style={{ ...btn, height: 30, width: 30, border: "1px solid var(--surface-secondary)", background: "transparent", color: "var(--foreground)" }}>−</button>
                       <span style={{ fontSize: 13, fontWeight: 900, minWidth: 18, textAlign: "center" }}>{item.qty}</span>

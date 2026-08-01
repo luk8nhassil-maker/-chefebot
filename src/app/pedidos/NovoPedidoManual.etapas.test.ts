@@ -79,6 +79,23 @@ describe("NovoPedidoManual — telefone como primeiro campo e busca administrati
   });
 });
 
+describe("NovoPedidoManual — cliente reconhecido em card compacto", () => {
+  test("ícone oficial do WhatsApp aparece junto do reconhecimento", () => {
+    expect(fonte).toContain("function WhatsAppIcon()");
+    expect(fonte).toContain("<WhatsAppIcon />");
+  });
+
+  test("cliente reconhecido esconde o campo de nome atrás de um card com lápis", () => {
+    expect(fonte).toContain("clienteReconhecido && !editandoNome");
+    expect(fonte).toContain('aria-label="Editar nome do cliente"');
+    expect(fonte).toContain("onClick={() => setEditarNomeParaTelefone(telefone)}");
+  });
+
+  test("o campo de nome editável continua existindo para cliente novo, sem telefone ou em edição", () => {
+    expect(fonte).toContain('value={cliente} onChange={(e) => setCliente(e.target.value)}');
+  });
+});
+
 describe("NovoPedidoManual — opção Sem número de telefone", () => {
   test("existe uma opção explícita, nunca inferida de campo vazio", () => {
     expect(fonte).toContain("Sem número de telefone");
@@ -106,6 +123,16 @@ describe("NovoPedidoManual — opção S/N no número do endereço", () => {
   test("existe um botão dedicado que alterna o número para S/N", () => {
     expect(fonte).toContain('setNumero((n) => (n.trim().toUpperCase() === "S/N" ? "" : "S/N"))');
     expect(fonte).toMatch(/>\s*S\/N\s*<\/button>/);
+  });
+});
+
+describe("NovoPedidoManual — bilhete de itens escolhidos", () => {
+  test("cada item do carrinho mostra nome, detalhe, preço e controles de ajuste/remoção", () => {
+    const etapaProdutos = fonte.slice(fonte.indexOf('passo === "produtos"'), fonte.indexOf('passo === "entrega"'));
+    expect(etapaProdutos).toContain("money(item.price * item.qty)");
+    expect(etapaProdutos).toContain("alterarQuantidade(itens, i, -1)");
+    expect(etapaProdutos).toContain("alterarQuantidade(itens, i, 1)");
+    expect(etapaProdutos).toContain("removerItem(itens, i)");
   });
 });
 
