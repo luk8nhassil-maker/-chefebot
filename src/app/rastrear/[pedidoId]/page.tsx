@@ -118,8 +118,14 @@ export default function RastrearPage({ params }: PageProps) {
       } catch {}
     }
     fetchEdicao()
-    const iv = setInterval(fetchEdicao, 10000)
-    return () => { ativo = false; clearInterval(iv) }
+    // Atualiza a cada 10s só enquanto a aba está visível, e imediatamente ao
+    // voltar para ela — mesmo padrão de src/app/cliente/pedidos/page.tsx.
+    function talvezAtualizar() {
+      if (document.visibilityState === 'visible') fetchEdicao()
+    }
+    const iv = setInterval(talvezAtualizar, 10000)
+    document.addEventListener('visibilitychange', talvezAtualizar)
+    return () => { ativo = false; clearInterval(iv); document.removeEventListener('visibilitychange', talvezAtualizar) }
   }, [pedidoId, statusToken])
 
   // Contato do WhatsApp da pizzaria: reaproveita o mesmo endpoint público já
@@ -173,14 +179,21 @@ export default function RastrearPage({ params }: PageProps) {
     fetchStatus()
     fetchLocalizacao()
 
-    // Atualiza status a cada 15s e localização a cada 10s
-    intervalRef.current = setInterval(() => {
-      fetchStatus()
-      fetchLocalizacao()
-    }, 10000)
+    // Atualiza status e localização a cada 10s, só enquanto a aba está
+    // visível, e imediatamente ao voltar para ela — mesmo padrão de
+    // src/app/cliente/pedidos/page.tsx.
+    function talvezAtualizar() {
+      if (document.visibilityState === 'visible') {
+        fetchStatus()
+        fetchLocalizacao()
+      }
+    }
+    intervalRef.current = setInterval(talvezAtualizar, 10000)
+    document.addEventListener('visibilitychange', talvezAtualizar)
 
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current)
+      document.removeEventListener('visibilitychange', talvezAtualizar)
     }
   }, [pedidoId])
 

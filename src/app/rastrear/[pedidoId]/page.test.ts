@@ -49,7 +49,7 @@ describe("/rastrear/[pedidoId] — menu inferior fixo com Pedido ativo", () => {
     expect(fonte).toContain("params.then(p => setPedidoId(p.pedidoId))");
     expect(fonte).toContain("fetch(`/api/pedido-status?pedidoId=${pedidoId}`");
     expect(fonte).toContain("fetch(`/api/localizacao?pedidoId=${pedidoId}`");
-    expect(fonte).toContain("setInterval(() => {");
+    expect(fonte).toContain("setInterval(talvezAtualizar, 10000)");
     expect(fonte).toContain("MapaEntregador");
   });
 
@@ -89,5 +89,22 @@ describe("/rastrear/[pedidoId] — [bloqueio] WhatsApp dinâmico, sem número fi
   test("nenhuma cor hexadecimal nova (ex.: #fff) — só tokens do design system", () => {
     expect(fonte).not.toMatch(/#[0-9a-fA-F]{3,6}/);
     expect(fonte).toContain("var(--on-success)");
+  });
+});
+
+describe("/rastrear/[pedidoId] — polling pausado com aba oculta", () => {
+  test("polling de status/localização só consulta com document.visibilityState visible", () => {
+    expect(fonte).toMatch(/if \(document\.visibilityState === 'visible'\) \{\s*fetchStatus\(\)\s*fetchLocalizacao\(\)/);
+  });
+
+  test("polling de status/localização escuta visibilitychange e limpa o listener ao desmontar", () => {
+    expect(fonte).toContain("intervalRef.current = setInterval(talvezAtualizar, 10000)");
+    expect(fonte).toMatch(/document\.addEventListener\('visibilitychange', talvezAtualizar\)[\s\S]{0,120}if \(intervalRef\.current\) clearInterval/);
+  });
+
+  test("polling de edição (token) só consulta com aba visível e limpa o listener ao desmontar", () => {
+    expect(fonte).toContain("if (document.visibilityState === 'visible') fetchEdicao()");
+    expect(fonte).toContain("const iv = setInterval(talvezAtualizar, 10000)");
+    expect(fonte).toMatch(/ativo = false; clearInterval\(iv\); document\.removeEventListener\('visibilitychange', talvezAtualizar\)/);
   });
 });
