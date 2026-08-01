@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { redis } from "@/lib/redis";
-import { getMENUDinamico } from "@/lib/menu";
+import { getMENUDinamico } from "@/lib/menu.server";
 import { computeTaxaApp, buildEnderecoApp } from "@/lib/pedidoAppLogic";
 import {
   criarPixMetadata,
@@ -310,4 +310,3 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     await liberarMutexEdicao(id, mutexToken);
   }
 }
-

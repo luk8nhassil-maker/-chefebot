@@ -11,7 +11,7 @@ import { derivarClienteIdPorTelefone } from "./fidelidade";
 import { enviarTextoWhatsApp } from "./whatsappMensagem";
 import { norm } from "./pedidoAppItens";
 import type { ItemApp } from "./pedidoAppItens";
-import { getMENUDinamico } from "./menu";
+import { getMENUDinamico } from "./menu.server";
 import { catalogoDoMenu } from "./promocoes";
 
 // ============================================================================

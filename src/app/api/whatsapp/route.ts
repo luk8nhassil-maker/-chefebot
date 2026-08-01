@@ -1,7 +1,7 @@
 ﻿import { NextRequest, NextResponse, after } from "next/server";
-import { processMessage, createInitialSession, createReturningSession, montarSaudacaoRetorno, garantirLinkCardapioEmMensagens, LINK_CARDAPIO_DIGITAL, textoLinkCardapioDigital, BotSession, ClienteHistorico, setMenuDinamico, setConfigDinamica, setEsgotados, temPixNoPagamento, valorPixEsperado } from "@/lib/bot";
+import { processMessage, createInitialSession, createReturningSession, montarSaudacaoRetorno, garantirLinkCardapioEmMensagens, LINK_CARDAPIO_DIGITAL, textoLinkCardapioDigital, BotSession, ClienteHistorico, setMenuDinamico, setConfigDinamica, setEsgotados, setHorarioFuncionamento, temPixNoPagamento, valorPixEsperado } from "@/lib/bot";
 import { criarOuReutilizarTokenCardapio, anexarTokenAoLinkCardapio } from "@/lib/cardapioToken";
-import { getMENUDinamico } from "@/lib/menu";
+import { getMENUDinamico } from "@/lib/menu.server";
 import { redis } from "@/lib/redis";
 import { interpretarMensagem, gerarRespostaGuardiao } from "@/lib/claude";
 import { registrarMensagem, ultimasMensagensRelevantes } from "@/lib/conversa";
@@ -1062,6 +1062,10 @@ export async function POST(req: NextRequest) {
     const menuDinamico = await getMENUDinamico();
     setMenuDinamico(menuDinamico);
     setConfigDinamica({ tempoEntregaDelivery: config.tempoEntregaDelivery, tempoEntregaRetirada: config.tempoEntregaRetirada });
+    // Mesma fonte de horário usada por estaAberto/mensagemFechado (config:pizzaria
+    // no Redis) — antes o bot tinha um horário próprio hardcoded ("22h") que nunca
+    // acompanhava o horaFechamento real configurado pela pizzaria.
+    setHorarioFuncionamento(`${config.horaFechamento}h`);
     const esgotadosLista = (await redis.get<string[]>('esgotados')) || [];
     setEsgotados(esgotadosLista);
     console.log("[ChefeBot] Tamanhos carregados:", JSON.stringify(menuDinamico.sizes));

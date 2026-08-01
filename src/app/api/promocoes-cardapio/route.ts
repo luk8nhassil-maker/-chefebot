@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { redis } from '@/lib/redis'
-import { getMENUDinamico } from '@/lib/menu'
+import { getMENUDinamico } from '@/lib/menu.server'
 import { PROMOS_KEY, promocoesPublicas, type Promocao } from '@/lib/promocoes'
 
 // Promoções visíveis ao cliente mudam em tempo real (ativar/desativar,

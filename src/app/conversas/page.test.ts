@@ -1,5 +1,10 @@
 import { describe, test, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { normalizarConversa, normalizarTelefone, type ConversaRecente } from "./page";
+
+// Guarda estrutural sem jsdom (mesma abordagem de src/app/rastrear/[pedidoId]/page.test.ts).
+const fonte = readFileSync(fileURLToPath(new URL("./page.tsx", import.meta.url)), "utf-8");
 
 // Regressão: clicar em qualquer conversa selecionava TODAS visualmente e o
 // painel da direita nunca abria. Causa raiz: o Upstash Redis retorna members
@@ -97,5 +102,32 @@ describe("normalizarConversa — phone", () => {
     const c = normalizarConversa({ phone: 5586999990011, status: "bogus" });
     expect(c?.status).toBe("finalizado");
     expect(c?.phone).toBe("5586999990011");
+  });
+});
+
+describe("/conversas — polling pausado com aba oculta", () => {
+  test("lista de pedidos (carregar) só consulta com aba visível e limpa o listener ao desmontar", () => {
+    expect(fonte).toContain("if (document.visibilityState === 'visible') carregar()");
+    expect(fonte).toContain("setInterval(talvezCarregar, 15000)");
+    expect(fonte).toContain("document.addEventListener('visibilitychange', talvezCarregar)");
+    expect(fonte).toContain("document.removeEventListener('visibilitychange', talvezCarregar)");
+  });
+
+  test("relógio de tempo relativo (ivTime) continua rodando sempre — não é polling de rede", () => {
+    expect(fonte).toContain("setInterval(() => setNow(Date.now()), 30000)");
+  });
+
+  test("conversas recentes só consultam com aba visível e limpam o listener ao desmontar", () => {
+    expect(fonte).toContain("if (document.visibilityState === 'visible') carregarRecentes()");
+    expect(fonte).toContain("setInterval(talvezCarregarRecentes, 8000)");
+    expect(fonte).toContain("document.addEventListener('visibilitychange', talvezCarregarRecentes)");
+    expect(fonte).toContain("document.removeEventListener('visibilitychange', talvezCarregarRecentes)");
+  });
+
+  test("histórico da conversa selecionada só consulta com aba visível e limpa o listener ao desmontar", () => {
+    expect(fonte).toContain("if (document.visibilityState === 'visible') carregarHistorico(phone)");
+    expect(fonte).toContain("setInterval(talvezCarregarHistorico, 3000)");
+    expect(fonte).toContain("document.addEventListener('visibilitychange', talvezCarregarHistorico)");
+    expect(fonte).toContain("document.removeEventListener('visibilitychange', talvezCarregarHistorico)");
   });
 });
