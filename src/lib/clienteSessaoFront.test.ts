@@ -5,17 +5,20 @@ const SESSAO_PORTATIL = "eyJhbGciOiJkaXIiLCJlbmMiOiJBMjU2R0NNIn0..kHup-U6l3uDYUf
 const SESSAO_OPACA_LEGADA = "a".repeat(32);
 
 // Repo não usa jsdom nos testes (ver page.test.ts) — polyfill mínimo de
-// sessionStorage só para exercitar guardarSessaoFallback/sessaoFallbackAtual.
-class SessionStorageFake {
+// localStorage/sessionStorage só para exercitar guardarSessaoFallback/
+// sessaoFallbackAtual/limparSessaoFallback e a migração entre os dois.
+class StorageFake {
   private mapa = new Map<string, string>();
   getItem(k: string) { return this.mapa.has(k) ? this.mapa.get(k)! : null; }
   setItem(k: string, v: string) { this.mapa.set(k, v); }
   removeItem(k: string) { this.mapa.delete(k); }
   clear() { this.mapa.clear(); }
 }
-(globalThis as unknown as { sessionStorage: SessionStorageFake }).sessionStorage = new SessionStorageFake();
+(globalThis as unknown as { localStorage: StorageFake }).localStorage = new StorageFake();
+(globalThis as unknown as { sessionStorage: StorageFake }).sessionStorage = new StorageFake();
 
 beforeEach(() => {
+  localStorage.clear();
   sessionStorage.clear();
 });
 
@@ -24,9 +27,9 @@ describe("clienteSessaoFront — sessão portátil (JWE) com compatibilidade com
     expect(VERSAO_PERFIL3).toBe("p3d6");
   });
 
-  test("aceita e devolve uma sessão portátil (JWE, 5 partes) do sessionStorage", () => {
+  test("aceita e devolve uma sessão portátil (JWE, 5 partes) do localStorage — sobrevive fechar a aba", () => {
     expect(guardarSessaoFallback(SESSAO_PORTATIL)).toBe(true);
-    expect(sessionStorage.getItem(CF_SESSAO_KEY)).toBe(SESSAO_PORTATIL);
+    expect(localStorage.getItem(CF_SESSAO_KEY)).toBe(SESSAO_PORTATIL);
     expect(sessaoFallbackAtual()).toBe(SESSAO_PORTATIL);
   });
 
@@ -43,6 +46,33 @@ describe("clienteSessaoFront — sessão portátil (JWE) com compatibilidade com
   test("limparSessaoFallback remove a sessão guardada", () => {
     guardarSessaoFallback(SESSAO_PORTATIL);
     limparSessaoFallback();
+    expect(sessaoFallbackAtual()).toBeNull();
+  });
+
+  test("limparSessaoFallback remove de localStorage E sessionStorage (nunca deixa resquício da era anterior)", () => {
+    localStorage.setItem(CF_SESSAO_KEY, SESSAO_PORTATIL);
+    sessionStorage.setItem(CF_SESSAO_KEY, SESSAO_PORTATIL);
+    limparSessaoFallback();
+    expect(localStorage.getItem(CF_SESSAO_KEY)).toBeNull();
+    expect(sessionStorage.getItem(CF_SESSAO_KEY)).toBeNull();
+  });
+});
+
+describe("clienteSessaoFront — migração de sessão gravada em sessionStorage antes desta mudança", () => {
+  test("sessão só em sessionStorage (aba antiga) é movida para localStorage e devolvida normalmente", () => {
+    sessionStorage.setItem(CF_SESSAO_KEY, SESSAO_PORTATIL);
+    expect(sessaoFallbackAtual()).toBe(SESSAO_PORTATIL);
+    expect(localStorage.getItem(CF_SESSAO_KEY)).toBe(SESSAO_PORTATIL);
+    expect(sessionStorage.getItem(CF_SESSAO_KEY)).toBeNull();
+  });
+
+  test("se já existe sessão em localStorage, ignora qualquer coisa em sessionStorage (localStorage nunca é sobrescrito por um valor mais antigo)", () => {
+    localStorage.setItem(CF_SESSAO_KEY, SESSAO_PORTATIL);
+    sessionStorage.setItem(CF_SESSAO_KEY, SESSAO_OPACA_LEGADA);
+    expect(sessaoFallbackAtual()).toBe(SESSAO_PORTATIL);
+  });
+
+  test("sem sessão em nenhum dos dois storages, continua retornando null (sem erro)", () => {
     expect(sessaoFallbackAtual()).toBeNull();
   });
 });
