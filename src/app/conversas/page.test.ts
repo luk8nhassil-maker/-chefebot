@@ -125,7 +125,7 @@ describe("/conversas — polling pausado com aba oculta", () => {
   });
 
   test("histórico da conversa selecionada só consulta com aba visível e limpa o listener ao desmontar", () => {
-    expect(fonte).toContain("if (document.visibilityState === 'visible') carregarHistorico(conversaSelecionada)");
+    expect(fonte).toContain("if (document.visibilityState === 'visible') carregarHistorico(phone)");
     expect(fonte).toContain("setInterval(talvezCarregarHistorico, 3000)");
     expect(fonte).toContain("document.addEventListener('visibilitychange', talvezCarregarHistorico)");
     expect(fonte).toContain("document.removeEventListener('visibilitychange', talvezCarregarHistorico)");
