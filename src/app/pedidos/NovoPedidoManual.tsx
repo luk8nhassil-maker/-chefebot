@@ -46,12 +46,14 @@ import {
   type DadosPedidoManual,
 } from "@/lib/montagemManual"
 
-type Passo = "itens" | "entrega" | "pagamento"
+type Passo = "cliente" | "produtos" | "entrega" | "pagamento" | "revisar"
 
 const PASSOS: { id: Passo; label: string }[] = [
-  { id: "itens", label: "Itens" },
+  { id: "cliente", label: "Cliente" },
+  { id: "produtos", label: "Produtos" },
   { id: "entrega", label: "Entrega" },
   { id: "pagamento", label: "Pagamento" },
+  { id: "revisar", label: "Revisar" },
 ]
 
 const money = (v: number) => "R$ " + v.toFixed(2).replace(".", ",")
@@ -103,7 +105,7 @@ const rotulo: React.CSSProperties = {
 }
 
 export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
-  const [passo, setPasso] = useState<Passo>("itens")
+  const [passo, setPasso] = useState<Passo>("cliente")
   const [confirmarSaida, setConfirmarSaida] = useState(false)
 
   // --- catálogo e busca ----------------------------------------------------
@@ -139,6 +141,17 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
   // --- dados do pedido -----------------------------------------------------
   const [cliente, setCliente] = useState("")
   const [telefone, setTelefone] = useState("")
+  // "Sem número de telefone": opção explícita, nunca inferida de um campo
+  // vazio. Só o painel oferece isso — o cardápio público sempre exige
+  // telefone. O backend só aceita o pedido sem telefone quando esta flag
+  // vier junto de uma sessão administrativa real (ver semTelefonePainel em
+  // POST /api/pedido-app).
+  const [semTelefone, setSemTelefone] = useState(false)
+  // Dígitos do telefone para o qual a última busca encontrou um cliente —
+  // nunca um booleano solto: comparar contra o telefone atual é o que evita
+  // mostrar "reconhecido" para um número diferente do que está no campo.
+  const [telefoneReconhecido, setTelefoneReconhecido] = useState<string | null>(null)
+  const [buscandoTelefone, setBuscandoTelefone] = useState(false)
   const [tipoEntrega, setTipoEntrega] = useState<"delivery" | "retirada" | "dine_in">("delivery")
   const [bairro, setBairro] = useState("")
   const [rua, setRua] = useState("")
@@ -190,6 +203,7 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
   const dados: DadosPedidoManual = {
     cliente,
     telefone,
+    semTelefone,
     tipoEntrega,
     bairro: tipoEntrega === "delivery" ? bairro : undefined,
     rua: tipoEntrega === "delivery" ? rua : undefined,
@@ -222,6 +236,42 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
     document.addEventListener("keydown", onKey)
     return () => document.removeEventListener("keydown", onKey)
   })
+
+  // Busca administrativa por telefone, com debounce — reconhece o cliente
+  // enquanto a atendente digita, sem disparar uma requisição por tecla.
+  // Nunca sobrescreve um nome já digitado: só sugere quando o campo nome
+  // ainda está vazio no momento em que a resposta chega. Nenhum setState
+  // roda de forma síncrona no corpo do efeito — só dentro do timeout/fetch,
+  // que são callbacks assíncronos.
+  useEffect(() => {
+    if (semTelefone) return
+    const digitos = telefone.replace(/\D/g, "")
+    if (digitos.length < 10) return
+    let cancelado = false
+    const t = window.setTimeout(async () => {
+      setBuscandoTelefone(true)
+      try {
+        const r = await fetch(`/api/admin/clientes/buscar-telefone?telefone=${encodeURIComponent(digitos)}`)
+        const data = await r.json().catch(() => null)
+        if (cancelado) return
+        if (data?.ok && data.encontrado && data.nome) {
+          setTelefoneReconhecido(digitos)
+          setCliente((atual) => (atual.trim() ? atual : data.nome))
+        } else {
+          setTelefoneReconhecido((atual) => (atual === digitos ? null : atual))
+        }
+      } catch {
+        // falha de rede: mantém o último reconhecimento válido, não apaga
+        // um cliente já encontrado por causa de uma tentativa futura falha.
+      } finally {
+        if (!cancelado) setBuscandoTelefone(false)
+      }
+    }, 500)
+    return () => {
+      cancelado = true
+      window.clearTimeout(t)
+    }
+  }, [telefone, semTelefone])
 
   function tentarSair() {
     if (itens.length === 0 && !cliente.trim() && !telefone.trim()) onFechar()
@@ -319,7 +369,8 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           cliente: cliente.trim(),
-          telefone: telefone.trim(),
+          telefone: semTelefone ? "" : telefone.trim(),
+          ...(semTelefone ? { semTelefonePainel: true } : {}),
           usarOutroWhatsapp: true,
           // Preço nunca é confiado: o servidor recalcula item a item.
           itens: itens.map((i) => ({ kind: i.kind, name: i.name, detail: i.detail, price: i.price, qty: i.qty })),
@@ -352,7 +403,32 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
     }
   }
 
-  const podeIrParaEntrega = itens.length > 0
+  const clienteReconhecido = !semTelefone && telefone.replace(/\D/g, "") === telefoneReconhecido && !!telefoneReconhecido
+
+  // --- validade por etapa (bloqueia avanço; nunca bloqueia voltar) ---------
+  const clienteValido = !!cliente.trim() && (semTelefone || telefone.replace(/\D/g, "").length >= 10)
+  const produtosValido = itens.length > 0
+  const entregaValida =
+    tipoEntrega !== "delivery" || (!!bairro.trim() && !!rua.trim() && !!numero.trim())
+  const pagamentoValido =
+    !!pagamentoFinal.trim() && (!temDinheiro || (trocoOpcao === "nao" || !!troco.trim()))
+  const validoPorIndice = [clienteValido, produtosValido, entregaValida, pagamentoValido, true]
+  // Primeira etapa ainda incompleta: até ali (inclusive) é alcançável — dá
+  // para clicar de volta em qualquer etapa já visitada, ou avançar até a
+  // etapa que falta completar, nunca pular além dela.
+  const indiceAlcancavel = (() => {
+    let i = 0
+    while (i < validoPorIndice.length && validoPorIndice[i]) i++
+    return Math.min(i, PASSOS.length - 1)
+  })()
+  const indicePassoAtual = PASSOS.findIndex((p) => p.id === passo)
+
+  function irParaPasso(destino: Passo) {
+    const indiceDestino = PASSOS.findIndex((p) => p.id === destino)
+    if (indiceDestino <= indiceAlcancavel) setPasso(destino)
+  }
+
+  const podeIrParaEntrega = produtosValido
   const bairros = menu.neighborhoods || []
 
   return (
@@ -398,11 +474,14 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
           <div style={{ display: "flex", gap: 6 }}>
             {PASSOS.map((p, i) => {
               const ativo = p.id === passo
-              const indiceAtual = PASSOS.findIndex((x) => x.id === passo)
-              const concluido = i < indiceAtual
+              const concluido = i < indicePassoAtual
+              const alcancavel = i <= indiceAlcancavel
               return (
-                <div
+                <button
                   key={p.id}
+                  onClick={() => irParaPasso(p.id)}
+                  disabled={!alcancavel}
+                  aria-current={ativo ? "step" : undefined}
                   style={{
                     flex: 1,
                     padding: "6px 8px",
@@ -410,12 +489,16 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
                     textAlign: "center",
                     fontSize: 11,
                     fontWeight: 900,
+                    border: "none",
+                    fontFamily: "'Archivo', sans-serif",
+                    cursor: alcancavel ? "pointer" : "not-allowed",
                     background: ativo ? "var(--primary)" : concluido ? "color-mix(in srgb, var(--success) 15%, transparent)" : "var(--surface)",
                     color: ativo ? "var(--background)" : concluido ? "var(--success)" : "var(--foreground-muted)",
+                    opacity: alcancavel ? 1 : 0.5,
                   }}
                 >
                   {i + 1}. {p.label}{concluido ? " ✓" : ""}
-                </div>
+                </button>
               )
             })}
           </div>
@@ -423,7 +506,45 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
 
         {/* Corpo */}
         <div style={{ flex: 1, overflowY: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
-          {passo === "itens" && (
+          {passo === "cliente" && (
+            <>
+              <div style={{ ...card, display: "grid", gap: 10 }}>
+                <p style={rotulo}>Telefone</p>
+                <input
+                  style={input}
+                  placeholder="Telefone com DDD"
+                  value={telefone}
+                  onChange={(e) => setTelefone(e.target.value)}
+                  inputMode="tel"
+                  disabled={semTelefone}
+                  autoFocus
+                />
+                {buscandoTelefone && (
+                  <p style={{ fontSize: 12, fontWeight: 700, color: "var(--foreground-muted)", margin: 0 }}>Buscando cliente…</p>
+                )}
+                {clienteReconhecido && !buscandoTelefone && (
+                  <p role="status" style={{ fontSize: 12, fontWeight: 800, color: "var(--success)", margin: 0 }}>
+                    ✓ Cliente reconhecido
+                  </p>
+                )}
+                <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, fontWeight: 700, color: "var(--foreground-secondary)", cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={semTelefone}
+                    onChange={(e) => setSemTelefone(e.target.checked)}
+                  />
+                  Sem número de telefone
+                </label>
+              </div>
+
+              <div style={{ ...card, display: "grid", gap: 10 }}>
+                <p style={rotulo}>Nome do cliente</p>
+                <input style={input} placeholder="Nome do cliente" value={cliente} onChange={(e) => setCliente(e.target.value)} />
+              </div>
+            </>
+          )}
+
+          {passo === "produtos" && (
             <>
               <div style={{ position: "relative" }}>
                 <input
@@ -539,12 +660,6 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
           {passo === "entrega" && (
             <>
               <div style={{ ...card, display: "grid", gap: 10 }}>
-                <p style={rotulo}>Cliente</p>
-                <input style={input} placeholder="Nome do cliente" value={cliente} onChange={(e) => setCliente(e.target.value)} />
-                <input style={input} placeholder="Telefone com DDD" value={telefone} onChange={(e) => setTelefone(e.target.value)} inputMode="tel" />
-              </div>
-
-              <div style={{ ...card, display: "grid", gap: 10 }}>
                 <p style={rotulo}>Como o cliente recebe</p>
                 <div style={{ display: "flex", gap: 6 }}>
                   {([["delivery", "Entrega"], ["retirada", "Retirada"], ["dine_in", "No local"]] as const).map(([valor, label]) => (
@@ -575,7 +690,23 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
                       ))}
                     </select>
                     <input style={input} placeholder="Rua" value={rua} onChange={(e) => setRua(e.target.value)} />
-                    <input style={input} placeholder="Número" value={numero} onChange={(e) => setNumero(e.target.value)} />
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <input style={{ ...input, flex: 1 }} placeholder="Número" value={numero} onChange={(e) => setNumero(e.target.value)} />
+                      <button
+                        onClick={() => setNumero((n) => (n.trim().toUpperCase() === "S/N" ? "" : "S/N"))}
+                        style={{
+                          ...btn,
+                          height: 44,
+                          padding: "0 14px",
+                          border: "1px solid " + (numero.trim().toUpperCase() === "S/N" ? "var(--primary)" : "var(--surface-secondary)"),
+                          background: numero.trim().toUpperCase() === "S/N" ? "color-mix(in srgb, var(--primary) 15%, transparent)" : "transparent",
+                          color: "var(--foreground)",
+                          fontSize: 13,
+                        }}
+                      >
+                        S/N
+                      </button>
+                    </div>
                     <input style={input} placeholder="Complemento / referência" value={referencia} onChange={(e) => setReferencia(e.target.value)} />
                   </div>
                 )}
@@ -647,6 +778,53 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
                 )}
               </div>
 
+            </>
+          )}
+
+          {passo === "revisar" && (
+            <>
+              <div style={{ ...card, display: "grid", gap: 6 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <p style={{ ...rotulo, margin: 0 }}>Cliente</p>
+                  <button onClick={() => irParaPasso("cliente")} style={{ background: "none", border: "none", color: "var(--primary)", fontSize: 12, fontWeight: 800, cursor: "pointer" }}>Editar ✎</button>
+                </div>
+                <p style={{ fontSize: 13.5, fontWeight: 700, color: "var(--foreground)", margin: 0 }}>{cliente || "—"}</p>
+                <p style={{ fontSize: 12.5, color: "var(--foreground-secondary)", margin: 0 }}>
+                  {semTelefone ? "Sem número de telefone" : telefone || "—"}
+                </p>
+              </div>
+
+              <div style={{ ...card, display: "grid", gap: 6 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <p style={{ ...rotulo, margin: 0 }}>Produtos ({itens.length})</p>
+                  <button onClick={() => irParaPasso("produtos")} style={{ background: "none", border: "none", color: "var(--primary)", fontSize: 12, fontWeight: 800, cursor: "pointer" }}>Editar ✎</button>
+                </div>
+                {itens.map((item, i) => (
+                  <div key={`${item.name}-${item.detail}-${i}`} style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 12.5 }}>
+                    <span style={{ color: "var(--foreground)", fontWeight: 700 }}>{item.qty}× {item.name}</span>
+                    <span style={{ color: "var(--foreground-secondary)" }}>{money(item.price * item.qty)}</span>
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ ...card, display: "grid", gap: 6 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <p style={{ ...rotulo, margin: 0 }}>Entrega</p>
+                  <button onClick={() => irParaPasso("entrega")} style={{ background: "none", border: "none", color: "var(--primary)", fontSize: 12, fontWeight: 800, cursor: "pointer" }}>Editar ✎</button>
+                </div>
+                <p style={{ fontSize: 12.5, color: "var(--foreground-secondary)", margin: 0 }}>
+                  {tipoEntrega === "delivery" ? `${rua}, ${numero} — ${bairro}` : tipoEntrega === "retirada" ? "Retirada no balcão" : "Consumo no local"}
+                </p>
+              </div>
+
+              <div style={{ ...card, display: "grid", gap: 6 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <p style={{ ...rotulo, margin: 0 }}>Pagamento</p>
+                  <button onClick={() => irParaPasso("pagamento")} style={{ background: "none", border: "none", color: "var(--primary)", fontSize: 12, fontWeight: 800, cursor: "pointer" }}>Editar ✎</button>
+                </div>
+                <p style={{ fontSize: 12.5, color: "var(--foreground-secondary)", margin: 0 }}>{pagamentoFinal || "—"}</p>
+              </div>
+
               <div style={{ ...card, display: "grid", gap: 4 }}>
                 <p style={rotulo}>Resumo</p>
                 <Linha label="Subtotal" valor={money(totais.subtotal)} />
@@ -685,7 +863,17 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
 
         {/* Rodapé: sempre o próximo passo, e por que ele está bloqueado */}
         <div style={{ borderTop: "1px solid var(--surface)", padding: "12px 16px calc(12px + env(safe-area-inset-bottom))", flexShrink: 0, display: "grid", gap: 8 }}>
-          {passo === "itens" && (
+          {passo === "cliente" && (
+            <button
+              onClick={() => irParaPasso("produtos")}
+              disabled={!clienteValido}
+              style={{ ...btn, border: "none", background: "var(--primary)", color: "var(--background)", opacity: clienteValido ? 1 : 0.5 }}
+            >
+              Continuar para produtos
+            </button>
+          )}
+
+          {passo === "produtos" && (
             <>
               {!podeIrParaEntrega && (
                 <p style={{ fontSize: 12, fontWeight: 700, color: "var(--foreground-muted)", margin: 0, textAlign: "center" }}>
@@ -696,26 +884,48 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
                 <span style={{ color: "var(--foreground-secondary)" }}>{itens.length} item(ns)</span>
                 <span>{money(totais.subtotal)}</span>
               </div>
-              <button
-                onClick={() => setPasso("entrega")}
-                disabled={!podeIrParaEntrega}
-                style={{ ...btn, border: "none", background: "var(--primary)", color: "var(--background)", opacity: podeIrParaEntrega ? 1 : 0.5 }}
-              >
-                Continuar para entrega
-              </button>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={() => setPasso("cliente")} style={{ ...btn, flex: 1, border: "1px solid var(--surface-secondary)", background: "transparent", color: "var(--foreground-secondary)" }}>Voltar</button>
+                <button
+                  onClick={() => irParaPasso("entrega")}
+                  disabled={!podeIrParaEntrega}
+                  style={{ ...btn, flex: 2, border: "none", background: "var(--primary)", color: "var(--background)", opacity: podeIrParaEntrega ? 1 : 0.5 }}
+                >
+                  Continuar para entrega
+                </button>
+              </div>
             </>
           )}
 
           {passo === "entrega" && (
             <div style={{ display: "flex", gap: 8 }}>
-              <button onClick={() => setPasso("itens")} style={{ ...btn, flex: 1, border: "1px solid var(--surface-secondary)", background: "transparent", color: "var(--foreground-secondary)" }}>Voltar</button>
-              <button onClick={() => setPasso("pagamento")} style={{ ...btn, flex: 2, border: "none", background: "var(--primary)", color: "var(--background)" }}>Continuar para pagamento</button>
+              <button onClick={() => setPasso("produtos")} style={{ ...btn, flex: 1, border: "1px solid var(--surface-secondary)", background: "transparent", color: "var(--foreground-secondary)" }}>Voltar</button>
+              <button
+                onClick={() => irParaPasso("pagamento")}
+                disabled={!entregaValida}
+                style={{ ...btn, flex: 2, border: "none", background: "var(--primary)", color: "var(--background)", opacity: entregaValida ? 1 : 0.5 }}
+              >
+                Continuar para pagamento
+              </button>
             </div>
           )}
 
           {passo === "pagamento" && (
             <div style={{ display: "flex", gap: 8 }}>
-              <button onClick={() => setPasso("entrega")} disabled={enviando} style={{ ...btn, flex: 1, border: "1px solid var(--surface-secondary)", background: "transparent", color: "var(--foreground-secondary)" }}>Voltar</button>
+              <button onClick={() => setPasso("entrega")} style={{ ...btn, flex: 1, border: "1px solid var(--surface-secondary)", background: "transparent", color: "var(--foreground-secondary)" }}>Voltar</button>
+              <button
+                onClick={() => irParaPasso("revisar")}
+                disabled={!pagamentoValido}
+                style={{ ...btn, flex: 2, border: "none", background: "var(--primary)", color: "var(--background)", opacity: pagamentoValido ? 1 : 0.5 }}
+              >
+                Continuar para revisão
+              </button>
+            </div>
+          )}
+
+          {passo === "revisar" && (
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => setPasso("pagamento")} disabled={enviando} style={{ ...btn, flex: 1, border: "1px solid var(--surface-secondary)", background: "transparent", color: "var(--foreground-secondary)" }}>Voltar</button>
               <button
                 onClick={enviar}
                 disabled={enviando || pendencias.length > 0}

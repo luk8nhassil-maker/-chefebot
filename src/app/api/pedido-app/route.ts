@@ -49,6 +49,8 @@ export const maxDuration = 20;
 type PedidoApp = {
   cliente: string;
   telefone?: string;
+  /** Só é honrado quando existir sessão administrativa real no servidor (ver lerSessaoAdministrativa). */
+  semTelefonePainel?: boolean;
   whatsappToken?: string;
   usarOutroWhatsapp?: boolean;
   itens: ItemApp[];
@@ -963,7 +965,10 @@ export async function POST(req: NextRequest) {
     }
     const telefonePedido = vinculoWhatsapp && !usarOutroWhatsapp ? vinculoWhatsapp.phone : telefoneDigitado;
     const whatsappVinculado = !!vinculoWhatsapp && !usarOutroWhatsapp;
-    if (!telefonePedido) {
+    // Pedido administrativo sem telefone: só é aceito com sessão administrativa
+    // real verificada no servidor — nunca confiar apenas na flag vinda do body.
+    const semTelefonePainel = !!body.semTelefonePainel && !!sessaoAdmin;
+    if (!telefonePedido && !semTelefonePainel) {
       return NextResponse.json({ ok: false, error: "Telefone obrigatório" }, { status: 400 });
     }
 

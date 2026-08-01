@@ -651,6 +651,8 @@ export function removerItem(itens: readonly ItemApp[], indice: number): ItemApp[
 export type DadosPedidoManual = {
   cliente: string;
   telefone: string;
+  /** Opção explícita "Sem número de telefone" — dispensa o telefone só quando marcada (nunca por telefone vazio sozinho). */
+  semTelefone?: boolean;
   tipoEntrega: "delivery" | "retirada" | "dine_in";
   bairro?: string;
   rua?: string;
@@ -675,7 +677,9 @@ export function pendenciasDoPedido(
 
   if (itens.length === 0) faltas.push("Adicione pelo menos um item ao pedido.");
   if (!dados.cliente.trim()) faltas.push("Informe o nome do cliente.");
-  if (dados.telefone.replace(/\D/g, "").length < 10) faltas.push("Informe um telefone válido com DDD.");
+  if (!dados.semTelefone && dados.telefone.replace(/\D/g, "").length < 10) {
+    faltas.push("Informe um telefone válido com DDD, ou marque “Sem número de telefone”.");
+  }
 
   if (dados.tipoEntrega === "delivery") {
     if (!dados.bairro?.trim()) faltas.push("Selecione o bairro da entrega.");
