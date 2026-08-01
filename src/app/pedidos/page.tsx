@@ -400,6 +400,10 @@ export default function PedidosPage() {
   const [pixSenhaVisivel, setPixSenhaVisivel] = useState(false)
   const [pixConfirmando, setPixConfirmando] = useState(false)
   const [pixErro, setPixErro] = useState<string | null>(null)
+  const [modalEditarPagamento, setModalEditarPagamento] = useState<string | null>(null)
+  const [formEditarPagamento, setFormEditarPagamento] = useState<{ pagamento: string; troco: string }>({ pagamento: "", troco: "" })
+  const [salvandoEdicaoPagamento, setSalvandoEdicaoPagamento] = useState(false)
+  const [erroEdicaoPagamento, setErroEdicaoPagamento] = useState<string | null>(null)
   const pixModalRef = useRef<HTMLDivElement | null>(null)
   const pixSenhaInputRef = useRef<HTMLInputElement | null>(null)
   const pixConfirmandoRef = useRef(false)
@@ -1325,6 +1329,50 @@ export default function PedidosPage() {
     }
   }
 
+  const pagamentoJaConfirmadoClient = (p: Pick<Pedido, "pixConfirmado" | "pix">): boolean =>
+    p.pixConfirmado === true || p.pix?.status === "confirmado"
+
+  const abrirEditarPagamento = (p: Pedido) => {
+    setModalEditarPagamento(p.id)
+    setFormEditarPagamento({ pagamento: p.pagamento || "", troco: p.troco || "" })
+    setErroEdicaoPagamento(null)
+  }
+  const fecharEditarPagamento = () => {
+    if (salvandoEdicaoPagamento) return
+    setModalEditarPagamento(null)
+    setErroEdicaoPagamento(null)
+  }
+  const salvarEdicaoPagamento = async () => {
+    if (!modalEditarPagamento || salvandoEdicaoPagamento) return
+    setSalvandoEdicaoPagamento(true)
+    setErroEdicaoPagamento(null)
+    try {
+      const r = await fetch(`/api/pedido-app/${modalEditarPagamento}/editar-pagamento-admin`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(formEditarPagamento),
+      })
+      const data = await r.json().catch(() => ({}))
+      if (!r.ok || !data?.ok) {
+        setErroEdicaoPagamento(data?.error || "Não foi possível salvar agora. Tente de novo.")
+        setSalvandoEdicaoPagamento(false)
+        return
+      }
+      setPedidos(prev => prev.map(p => p.id === modalEditarPagamento ? {
+        ...p,
+        pagamento: data.pagamento ?? p.pagamento,
+        troco: data.troco,
+        pix: data.pix ?? (data.pixSubstituido ? undefined : p.pix),
+      } : p))
+      showSimpleToast("Forma de pagamento atualizada.")
+      setSalvandoEdicaoPagamento(false)
+      setModalEditarPagamento(null)
+    } catch {
+      setErroEdicaoPagamento("Não foi possível salvar agora. Verifique a conexão e tente de novo.")
+      setSalvandoEdicaoPagamento(false)
+    }
+  }
+
   const finalizarPedidoSilencioso = async (id: string) => {
     try {
       const r = await fetch("/api/orders", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, status: "entregue", silent: true }) })
@@ -1561,6 +1609,13 @@ export default function PedidosPage() {
             </button>
             <span style={{ fontSize: 10, fontWeight: 800, color: "var(--foreground-muted)", textAlign: "center", textTransform: "uppercase", letterSpacing: ".4px" }}>Ação manual de exceção</span>
           </div>
+        )}
+
+        {/* Editar forma de pagamento — só antes de qualquer confirmação real do dinheiro */}
+        {!isDone && !isCanceled && !emEdicaoDetail && !pagamentoJaConfirmadoClient(p) && (
+          <button onClick={() => abrirEditarPagamento(p)} style={{ height: 40, border: "1px solid var(--surface-secondary)", borderRadius: 12, background: "transparent", color: "var(--foreground-secondary)", fontSize: 13, fontWeight: 800 }}>
+            Editar forma de pagamento
+          </button>
         )}
 
         {/* Alterar status dropdown — indisponível enquanto o cliente edita */}
@@ -2518,6 +2573,60 @@ export default function PedidosPage() {
             </div>
           </>
         )}
+
+      {/* Editar forma de pagamento (administrativo) — troca controlada, nunca confirma Pix sozinha */}
+      {modalEditarPagamento && (() => {
+        const pedidoModal = pedidos.find(p => p.id === modalEditarPagamento)
+        const dinheiroSelecionado = /dinheiro/i.test(formEditarPagamento.pagamento)
+        return (
+          <div role="dialog" aria-modal="true" aria-label="Editar forma de pagamento" style={{ position: "fixed", inset: 0, zIndex: 3200, background: "rgba(var(--overlay-rgb), 0.7)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+            <div style={{ background: "var(--surface)", borderRadius: 18, padding: 20, width: "100%", maxWidth: 380, display: "flex", flexDirection: "column", gap: 12 }}>
+              <p style={{ fontSize: 16, fontWeight: 900, margin: 0, color: "var(--foreground)" }}>Editar forma de pagamento</p>
+              {pedidoModal && (
+                <p style={{ fontSize: 12.5, color: "var(--foreground-secondary)", margin: 0 }}>
+                  Pedido {pedidoModal.numero != null ? `#${pedidoModal.numero}` : pedidoModal.id} · {pedidoModal.cliente} · R$ {pedidoModal.total.toFixed(2).replace(".", ",")}
+                </p>
+              )}
+              <div>
+                <label style={labelStyle}>Forma de pagamento</label>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {["Pix", "Dinheiro", "Cartão", "Misto"].map(opt => (
+                    <button
+                      key={opt}
+                      onClick={() => setFormEditarPagamento(f => ({ ...f, pagamento: opt }))}
+                      style={{ height: 36, padding: "0 14px", border: `1px solid ${formEditarPagamento.pagamento === opt ? "var(--primary)" : "var(--surface-secondary)"}`, borderRadius: 10, background: formEditarPagamento.pagamento === opt ? "color-mix(in srgb, var(--primary) 15%, transparent)" : "transparent", color: "var(--foreground)", fontSize: 12, fontWeight: 900 }}
+                    >
+                      {opt}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {dinheiroSelecionado && (
+                <div>
+                  <label style={labelStyle}>Troco</label>
+                  <input className="cbInput" value={formEditarPagamento.troco} onChange={e => setFormEditarPagamento(f => ({ ...f, troco: e.target.value }))} placeholder="Sem troco, ou troco para quanto" style={inputStyle} />
+                </div>
+              )}
+              {erroEdicaoPagamento && (
+                <p role="alert" style={{ fontSize: 12.5, fontWeight: 700, color: "var(--danger)", margin: 0 }}>{erroEdicaoPagamento}</p>
+              )}
+              <p style={{ fontSize: 11, color: "var(--foreground-muted)", margin: 0 }}>
+                Trocar para Pix cria uma cobrança pendente nova — nunca confirma o pagamento sozinho.
+              </p>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={fecharEditarPagamento} disabled={salvandoEdicaoPagamento} style={{ flex: 1, height: 46, border: "1px solid var(--surface-secondary)", borderRadius: 12, background: "transparent", color: "var(--foreground-secondary)", fontSize: 14, fontWeight: 800 }}>Cancelar</button>
+                <button
+                  onClick={salvarEdicaoPagamento}
+                  disabled={salvandoEdicaoPagamento || !formEditarPagamento.pagamento.trim() || (dinheiroSelecionado && !formEditarPagamento.troco.trim())}
+                  style={{ flex: 2, height: 46, border: "none", borderRadius: 12, background: "var(--primary)", color: "var(--background)", fontSize: 14, fontWeight: 900, opacity: (salvandoEdicaoPagamento || !formEditarPagamento.pagamento.trim() || (dinheiroSelecionado && !formEditarPagamento.troco.trim())) ? 0.5 : 1 }}
+                >
+                  {salvandoEdicaoPagamento ? "Salvando..." : "Salvar"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
 
       {/* Modal de segurança — Verificar pagamento Pix manualmente */}
       {confirmPixModal && (() => {
