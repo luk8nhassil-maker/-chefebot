@@ -14,6 +14,14 @@
 //
 // A navegação é em passos curtos de propósito. Um modal único com tudo é
 // exatamente o que faz o atendente se perder no meio de uma ligação.
+//
+// A montagem guiada (sabores/borda/tamanho/leite) fica DENTRO deste mesmo
+// modal — nunca uma segunda camada fullscreen por cima dele. Trocar de tela
+// inteira faz o cabeçalho "Novo pedido", as etapas Itens/Entrega/Pagamento e
+// o carrinho desaparecerem, e é exatamente isso que deixa o atendente
+// perdido no meio do atendimento. A área de opções (sabores/borda/…) rola só
+// dentro do corpo do modal; o resto da montagem (voltar aos produtos,
+// caminho, categorias) fica fixo, igual ao cabeçalho do modal.
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import type { ItemApp } from "@/lib/pedidoAppItens"
@@ -131,10 +139,19 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
   const etapaAtual = etapas[etapaVisivel]
   const bloqueio = motivoBloqueio(etapaAtual, selecao)
   const completa = montagemCompleta(etapas, selecao)
+  // Trocar de categoria com uma montagem em andamento descarta a seleção
+  // atual — por isso pede confirmação em vez de trocar direto. `null` = sem
+  // troca pendente.
+  const [categoriaPendente, setCategoriaPendente] = useState<CategoriaManual | null>(null)
 
   // --- carrinho ------------------------------------------------------------
   const [itens, setItens] = useState<ItemApp[]>([])
   const adicionandoRef = useRef(false)
+  // Confirmação visível de que o item entrou no pedido — sem isso o
+  // atendente que acabou de "Adicionar ao pedido" não tem nenhum sinal de
+  // que funcionou, só a lista de produtos reaparecendo.
+  const [ultimoAdicionado, setUltimoAdicionado] = useState<string | null>(null)
+  const ultimoAdicionadoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // --- dados do pedido -----------------------------------------------------
   const [cliente, setCliente] = useState("")
@@ -216,7 +233,7 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return
-      if (produtoAberto) setProdutoAberto(null)
+      if (produtoAberto) cancelarConstrutor()
       else tentarSair()
     }
     document.addEventListener("keydown", onKey)
@@ -226,6 +243,12 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
   function tentarSair() {
     if (itens.length === 0 && !cliente.trim() && !telefone.trim()) onFechar()
     else setConfirmarSaida(true)
+  }
+
+  function anunciarAdicionado(nome: string) {
+    setUltimoAdicionado(nome)
+    if (ultimoAdicionadoTimerRef.current) clearTimeout(ultimoAdicionadoTimerRef.current)
+    ultimoAdicionadoTimerRef.current = setTimeout(() => setUltimoAdicionado(null), 2500)
   }
 
   function abrirProduto(produto: ProdutoManual) {
@@ -248,7 +271,7 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
     if (adicionandoRef.current) return
     adicionandoRef.current = true
     const item = construirItemManual(produto, selecaoVazia(), menu)
-    if (item) setItens((atual) => adicionarAoCarrinho(atual, item))
+    if (item) { setItens((atual) => adicionarAoCarrinho(atual, item)); anunciarAdicionado(produto.nome) }
     window.setTimeout(() => { adicionandoRef.current = false }, 400)
   }
 
@@ -257,7 +280,10 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
     if (adicionandoRef.current) return
     adicionandoRef.current = true
     const item = construirItemManual(produtoAberto, selecao, menu)
-    if (item) setItens((atual) => adicionarAoCarrinho(atual, item))
+    if (item) { setItens((atual) => adicionarAoCarrinho(atual, item)); anunciarAdicionado(produtoAberto.nome) }
+    // Volta para a lista, na MESMA categoria do produto que acabou de montar
+    // (abrirProduto já deixou `categoria` nesse valor) — o atendente
+    // continua exatamente onde estava, não no começo.
     setProdutoAberto(null)
     setTermo("")
     window.setTimeout(() => { adicionandoRef.current = false }, 400)
@@ -268,11 +294,39 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
     if (etapaVisivel < etapas.length - 1) setEtapaVisivel(etapaVisivel + 1)
   }
 
+  /** Sai da montagem sem tocar no carrinho nem na busca — só o item em
+   * construção é descartado (ele nunca chegou a ser adicionado). */
+  function cancelarConstrutor() {
+    setProdutoAberto(null)
+  }
+
   function voltarEtapa() {
     // Recua uma etapa por vez sem tocar na seleção; na primeira, fecha o
     // construtor. Nunca há um "voltar" que descarte escolhas silenciosamente.
     if (etapaVisivel > 0) setEtapaVisivel(etapaVisivel - 1)
-    else setProdutoAberto(null)
+    else cancelarConstrutor()
+  }
+
+  /** Clique num chip de categoria. Com montagem em andamento numa categoria
+   * DIFERENTE, pede confirmação antes de descartar — nunca troca direto. */
+  function clicarCategoria(c: CategoriaManual) {
+    if (produtoAberto && c !== categoria) setCategoriaPendente(c)
+    else setCategoria(c)
+  }
+
+  function confirmarTrocaCategoria() {
+    if (!categoriaPendente) return
+    setProdutoAberto(null)
+    setCategoria(categoriaPendente)
+    // A busca antiga não faz sentido contra a categoria recém-escolhida
+    // (buscarProdutos ignora `categoria` enquanto há termo) — limpa para o
+    // chip escolhido realmente filtrar a lista.
+    setTermo("")
+    setCategoriaPendente(null)
+  }
+
+  function cancelarTrocaCategoria() {
+    setCategoriaPendente(null)
   }
 
   function escolher(valor: string) {
@@ -423,8 +477,18 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
 
         {/* Corpo */}
         <div style={{ flex: 1, overflowY: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
-          {passo === "itens" && (
+          {passo === "itens" && !produtoAberto && (
             <>
+              {ultimoAdicionado && (
+                <p
+                  role="status"
+                  aria-live="polite"
+                  style={{ fontSize: 12.5, fontWeight: 800, color: "var(--success)", background: "color-mix(in srgb, var(--success) 12%, transparent)", border: "1px solid color-mix(in srgb, var(--success) 30%, transparent)", borderRadius: 10, padding: "8px 12px", margin: 0 }}
+                >
+                  ✓ {ultimoAdicionado} adicionado ao pedido
+                </p>
+              )}
+
               <div style={{ position: "relative" }}>
                 <input
                   style={input}
@@ -449,7 +513,7 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
                   {CATEGORIAS.map((c) => (
                     <button
                       key={c.id}
-                      onClick={() => setCategoria(c.id)}
+                      onClick={() => clicarCategoria(c.id)}
                       style={{
                         ...btn,
                         height: 34,
@@ -534,6 +598,112 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
                 </div>
               )}
             </>
+          )}
+
+          {/* Montagem guiada (sabores/borda/tamanho/leite) — DENTRO do mesmo
+              modal, nunca uma segunda tela fullscreen. O cabeçalho "Novo
+              pedido" e as etapas Itens/Entrega/Pagamento continuam visíveis
+              acima (fora deste bloco); aqui dentro, só a grade de opções rola
+              — o resto (voltar aos produtos, categorias, caminho, passo)
+              fica fixo no topo do corpo do modal. */}
+          {passo === "itens" && produtoAberto && etapaAtual && (
+            <div style={{ margin: -16, height: "100%", minHeight: 0, display: "flex", flexDirection: "column" }}>
+              <div style={{ flexShrink: 0, padding: "14px 16px 10px", borderBottom: "1px solid var(--surface)" }}>
+                <button
+                  onClick={cancelarConstrutor}
+                  style={{ background: "none", border: "none", color: "var(--brand-text)", fontSize: 13, fontWeight: 800, cursor: "pointer", padding: 0, margin: "0 0 10px", display: "flex", alignItems: "center", gap: 4 }}
+                >
+                  ← Voltar aos produtos
+                </button>
+
+                {/* Categorias continuam acessíveis durante a montagem — trocar
+                    de categoria com uma montagem em andamento pede confirmação
+                    (ver categoriaPendente) antes de descartar a seleção atual. */}
+                <div style={{ display: "flex", gap: 6, overflowX: "auto", marginBottom: 10 }}>
+                  {CATEGORIAS.map((c) => (
+                    <button
+                      key={c.id}
+                      onClick={() => clicarCategoria(c.id)}
+                      style={{
+                        ...btn,
+                        height: 30,
+                        padding: "0 10px",
+                        flexShrink: 0,
+                        border: "1px solid " + (categoria === c.id ? "var(--primary)" : "var(--surface-secondary)"),
+                        background: categoria === c.id ? "color-mix(in srgb, var(--primary) 15%, transparent)" : "transparent",
+                        color: "var(--foreground)",
+                        fontSize: 11.5,
+                      }}
+                    >
+                      {c.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Caminho + passo — nome do produto sempre visível aqui. */}
+                <p style={{ fontSize: 11.5, fontWeight: 700, color: "var(--foreground-muted)", margin: "0 0 2px" }}>
+                  {produtoAberto.categoriaLabel} › {produtoAberto.nome} › {etapaAtual.titulo}
+                </p>
+                <p style={{ ...rotulo, margin: "0 0 6px" }}>Passo {etapaVisivel + 1} de {etapas.length}</p>
+                <p style={{ fontSize: 18, fontWeight: 900, color: "var(--foreground)", margin: "0 0 2px" }}>{etapaAtual.titulo}</p>
+                <p style={{ fontSize: 12.5, fontWeight: 600, color: "var(--foreground-secondary)", margin: 0 }}>{etapaAtual.ajuda}</p>
+
+                {/* O que já foi escolhido — some a dúvida "o que eu já marquei?" */}
+                {etapas.some((e) => resumoEtapa(e, selecao)) && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
+                    {etapas.map((e, i) => {
+                      const resumo = resumoEtapa(e, selecao)
+                      if (!resumo) return null
+                      return (
+                        <button
+                          key={e.tipo}
+                          onClick={() => setEtapaVisivel(i)}
+                          style={{ ...btn, height: 26, padding: "0 10px", fontSize: 11, border: "1px solid var(--surface-secondary)", background: "var(--surface)", color: "var(--foreground-secondary)" }}
+                        >
+                          {e.titulo}: {resumo} ✎
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Única região que rola durante a montagem — nunca a página/o
+                  modal inteiro, em nenhum tamanho de tela. */}
+              <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "12px 16px 16px", display: "grid", gap: 8, alignContent: "start" }}>
+                {etapaAtual.opcoes.map((o) => {
+                  const sel = estaEscolhida(o.valor)
+                  return (
+                    <button
+                      key={o.valor || "__sem__"}
+                      onClick={() => !o.esgotado && escolher(o.valor)}
+                      disabled={o.esgotado}
+                      style={{
+                        ...card,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: 10,
+                        textAlign: "left",
+                        cursor: o.esgotado ? "not-allowed" : "pointer",
+                        opacity: o.esgotado ? 0.45 : 1,
+                        borderColor: sel ? "var(--primary)" : "var(--surface-secondary)",
+                        background: sel ? "color-mix(in srgb, var(--primary) 12%, transparent)" : "var(--surface)",
+                      }}
+                    >
+                      <span style={{ fontSize: 14, fontWeight: 800, color: "var(--foreground)" }}>
+                        {o.label}
+                        {o.esgotado ? " · esgotado" : ""}
+                      </span>
+                      <span style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                        {o.extra ? <span style={{ fontSize: 12.5, fontWeight: 800, color: "var(--brand-text)" }}>+{money(o.extra)}</span> : null}
+                        {sel ? <span style={{ fontSize: 14, color: "var(--primary)" }}>✓</span> : null}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
           )}
 
           {passo === "entrega" && (
@@ -683,9 +853,39 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
           )}
         </div>
 
-        {/* Rodapé: sempre o próximo passo, e por que ele está bloqueado */}
+        {/* Rodapé: sempre o próximo passo, e por que ele está bloqueado.
+            Fica DENTRO do mesmo modal também durante a montagem — troca de
+            conteúdo conforme o contexto, nunca um segundo rodapé fullscreen. */}
         <div style={{ borderTop: "1px solid var(--surface)", padding: "12px 16px calc(12px + env(safe-area-inset-bottom))", flexShrink: 0, display: "grid", gap: 8 }}>
-          {passo === "itens" && (
+          {passo === "itens" && produtoAberto && etapaAtual && (
+            <>
+              {bloqueio && (
+                <p role="status" aria-live="polite" style={{ fontSize: 12.5, fontWeight: 700, color: "var(--attention-text)", margin: 0, textAlign: "center" }}>
+                  {bloqueio}
+                </p>
+              )}
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={voltarEtapa} style={{ ...btn, flex: 1, border: "1px solid var(--surface-secondary)", background: "transparent", color: "var(--foreground-secondary)" }}>
+                  {etapaVisivel > 0 ? "Voltar" : "Cancelar item"}
+                </button>
+                {indiceEtapaPendente(etapas, selecao) === -1 ? (
+                  <button onClick={confirmarMontagem} style={{ ...btn, flex: 2, border: "none", background: "var(--primary)", color: "var(--background)" }}>
+                    Adicionar ao pedido
+                  </button>
+                ) : (
+                  <button
+                    onClick={avancarEtapa}
+                    disabled={!!bloqueio}
+                    style={{ ...btn, flex: 2, border: "none", background: "var(--primary)", color: "var(--background)", opacity: bloqueio ? 0.5 : 1 }}
+                  >
+                    {etapaVisivel < etapas.length - 1 ? `Continuar para ${etapas[etapaVisivel + 1].titulo.toLowerCase()}` : "Continuar"}
+                  </button>
+                )}
+              </div>
+            </>
+          )}
+
+          {passo === "itens" && !produtoAberto && (
             <>
               {!podeIrParaEntrega && (
                 <p style={{ fontSize: 12, fontWeight: 700, color: "var(--foreground-muted)", margin: 0, textAlign: "center" }}>
@@ -728,97 +928,15 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
         </div>
       </div>
 
-      {/* Construtor guiado — uma decisão por tela */}
-      {produtoAberto && etapaAtual && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label={`Montar ${produtoAberto.nome}`}
-          style={{ position: "fixed", inset: 0, zIndex: 2900, background: "var(--background)", display: "flex", flexDirection: "column", fontFamily: "'Archivo', sans-serif" }}
-        >
-          <div style={{ padding: "14px 16px", borderBottom: "1px solid var(--surface)", flexShrink: 0 }}>
-            <p style={{ ...rotulo, margin: 0 }}>
-              {produtoAberto.nome} · passo {etapaVisivel + 1} de {etapas.length}
+      {categoriaPendente && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 3100, background: "rgba(var(--overlay-rgb), 0.7)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div style={{ ...card, maxWidth: 320, display: "grid", gap: 10 }}>
+            <p style={{ fontSize: 16, fontWeight: 900, margin: 0, color: "var(--foreground)" }}>Descartar esta montagem?</p>
+            <p style={{ fontSize: 13, color: "var(--foreground-secondary)", margin: 0 }}>
+              Trocar de categoria descarta as escolhas de {produtoAberto?.nome ?? "este item"}. Ele ainda não foi adicionado ao pedido.
             </p>
-            <p style={{ fontSize: 18, fontWeight: 900, color: "var(--foreground)", margin: "4px 0 2px" }}>{etapaAtual.titulo}</p>
-            <p style={{ fontSize: 12.5, fontWeight: 600, color: "var(--foreground-secondary)", margin: 0 }}>{etapaAtual.ajuda}</p>
-          </div>
-
-          {/* O que já foi escolhido — some a dúvida "o que eu já marquei?" */}
-          <div style={{ padding: "8px 16px", display: "flex", flexWrap: "wrap", gap: 6, flexShrink: 0 }}>
-            {etapas.map((e, i) => {
-              const resumo = resumoEtapa(e, selecao)
-              if (!resumo) return null
-              return (
-                <button
-                  key={e.tipo}
-                  onClick={() => setEtapaVisivel(i)}
-                  style={{ ...btn, height: 28, padding: "0 10px", fontSize: 11.5, border: "1px solid var(--surface-secondary)", background: "var(--surface)", color: "var(--foreground-secondary)" }}
-                >
-                  {e.titulo}: {resumo} ✎
-                </button>
-              )
-            })}
-          </div>
-
-          <div style={{ flex: 1, overflowY: "auto", padding: "4px 16px 16px", display: "grid", gap: 8, alignContent: "start" }}>
-            {etapaAtual.opcoes.map((o) => {
-              const sel = estaEscolhida(o.valor)
-              return (
-                <button
-                  key={o.valor || "__sem__"}
-                  onClick={() => !o.esgotado && escolher(o.valor)}
-                  disabled={o.esgotado}
-                  style={{
-                    ...card,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: 10,
-                    textAlign: "left",
-                    cursor: o.esgotado ? "not-allowed" : "pointer",
-                    opacity: o.esgotado ? 0.45 : 1,
-                    borderColor: sel ? "var(--primary)" : "var(--surface-secondary)",
-                    background: sel ? "color-mix(in srgb, var(--primary) 12%, transparent)" : "var(--surface)",
-                  }}
-                >
-                  <span style={{ fontSize: 14, fontWeight: 800, color: "var(--foreground)" }}>
-                    {o.label}
-                    {o.esgotado ? " · esgotado" : ""}
-                  </span>
-                  <span style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-                    {o.extra ? <span style={{ fontSize: 12.5, fontWeight: 800, color: "var(--brand-text)" }}>+{money(o.extra)}</span> : null}
-                    {sel ? <span style={{ fontSize: 14, color: "var(--primary)" }}>✓</span> : null}
-                  </span>
-                </button>
-              )
-            })}
-          </div>
-
-          <div style={{ borderTop: "1px solid var(--surface)", padding: "12px 16px calc(12px + env(safe-area-inset-bottom))", flexShrink: 0, display: "grid", gap: 8 }}>
-            {bloqueio && (
-              <p role="status" aria-live="polite" style={{ fontSize: 12.5, fontWeight: 700, color: "var(--attention-text)", margin: 0, textAlign: "center" }}>
-                {bloqueio}
-              </p>
-            )}
-            <div style={{ display: "flex", gap: 8 }}>
-              <button onClick={voltarEtapa} style={{ ...btn, flex: 1, border: "1px solid var(--surface-secondary)", background: "transparent", color: "var(--foreground-secondary)" }}>
-                {etapaVisivel > 0 ? "Voltar" : "Cancelar item"}
-              </button>
-              {indiceEtapaPendente(etapas, selecao) === -1 ? (
-                <button onClick={confirmarMontagem} style={{ ...btn, flex: 2, border: "none", background: "var(--primary)", color: "var(--background)" }}>
-                  Adicionar ao pedido
-                </button>
-              ) : (
-                <button
-                  onClick={avancarEtapa}
-                  disabled={!!bloqueio}
-                  style={{ ...btn, flex: 2, border: "none", background: "var(--primary)", color: "var(--background)", opacity: bloqueio ? 0.5 : 1 }}
-                >
-                  {etapaVisivel < etapas.length - 1 ? `Continuar para ${etapas[etapaVisivel + 1].titulo.toLowerCase()}` : "Continuar"}
-                </button>
-              )}
-            </div>
+            <button onClick={cancelarTrocaCategoria} style={{ ...btn, border: "1px solid var(--surface-secondary)", background: "transparent", color: "var(--foreground)" }}>Continuar montando</button>
+            <button onClick={confirmarTrocaCategoria} style={{ ...btn, border: "none", background: "var(--danger)", color: "#fff" }}>Trocar categoria</button>
           </div>
         </div>
       )}

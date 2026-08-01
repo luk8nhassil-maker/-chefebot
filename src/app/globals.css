@@ -120,6 +120,103 @@
   /* Marca WhatsApp (não muda entre temas — é cor de marca externa) */
   --whatsapp: #25d366;
   --whatsapp-foreground: #ffffff;
+
+  /* ---------------------------------------------------------------------
+     Sistema de botões premium (--cb-button-*) — PROPOSTA, não migrada.
+     Cada variante é um ALIAS dos tokens semânticos acima: nenhuma cor nova
+     é introduzida aqui, só nomes estáveis para o componente de botão.
+     Ver docs/DESIGN_SYSTEM.md e o showcase para o racional completo.
+     ------------------------------------------------------------------ */
+  --cb-button-primary-bg: var(--primary);
+  --cb-button-primary-text: var(--primary-foreground);
+  --cb-button-primary-hover: var(--primary-hover);
+  --cb-button-primary-active: var(--primary-active);
+  --cb-button-primary-border: transparent;
+
+  /* Secondary = neutro com borda definida (nunca um segundo amarelo). */
+  --cb-button-secondary-bg: var(--surface);
+  --cb-button-secondary-text: var(--foreground);
+  --cb-button-secondary-hover: var(--surface-secondary);
+  --cb-button-secondary-active: var(--border);
+  --cb-button-secondary-border: var(--border-strong);
+
+  /* Danger = vermelho profundo + texto branco (nunca texto preto sobre
+     vermelho saturado). Escala igual à usada pelo Tailwind red-600/700/800
+     para progressão previsível hover→active. */
+  --cb-button-danger-bg: var(--danger);
+  --cb-button-danger-text: var(--on-danger);
+  --cb-button-danger-hover: #b91c1c;
+  --cb-button-danger-active: #991b1b;
+  --cb-button-danger-border: transparent;
+  /* Variante "soft" para ações destrutivas de risco mais baixo (ex.: linha
+     de item removível dentro de uma lista) — mesmo par usado em badges. */
+  --cb-button-danger-soft-bg: var(--danger-surface);
+  --cb-button-danger-soft-text: var(--danger-text);
+
+  --cb-button-success-bg: var(--success);
+  --cb-button-success-text: var(--on-success);
+  --cb-button-success-hover: #15803d;
+  --cb-button-success-active: #166534;
+  --cb-button-success-border: transparent;
+
+  /* Warning = ROXO (--attention), nunca amarelo/âmbar/laranja — o amarelo é
+     a marca. Mantém a mesma regra já usada pelos badges "pendente". */
+  --cb-button-warning-bg: var(--attention);
+  --cb-button-warning-text: #ffffff;
+  --cb-button-warning-hover: #6d28d9;
+  --cb-button-warning-active: #5b21b6;
+  --cb-button-warning-border: transparent;
+
+  /* Ghost = sem preenchimento forte; apoio/baixo destaque. */
+  --cb-button-ghost-text: var(--foreground-secondary);
+  --cb-button-ghost-hover: rgba(var(--overlay-rgb), 0.06);
+  --cb-button-ghost-active: rgba(var(--overlay-rgb), 0.1);
+
+  /* Icon = mesma família do ghost, área mínima maior (ver tamanhos). */
+  --cb-button-icon-text: var(--foreground-secondary);
+  --cb-button-icon-hover: rgba(var(--overlay-rgb), 0.08);
+  --cb-button-icon-active: rgba(var(--overlay-rgb), 0.14);
+
+  /* Toggle/chip — normal, hover, selecionado, desabilitado, esgotado. */
+  --cb-chip-bg: var(--surface);
+  --cb-chip-text: var(--foreground-secondary);
+  --cb-chip-border: var(--border);
+  --cb-chip-hover-border: var(--border-strong);
+  --cb-chip-selected-bg: var(--primary-soft);
+  --cb-chip-selected-text: var(--primary-soft-foreground);
+  --cb-chip-selected-border: var(--primary);
+  --cb-chip-disabled-bg: var(--disabled-background);
+  --cb-chip-disabled-text: var(--disabled-foreground);
+  --cb-chip-esgotado-bg: var(--surface-secondary);
+  --cb-chip-esgotado-text: var(--text-disabled);
+
+  --cb-button-disabled-bg: var(--disabled-background);
+  --cb-button-disabled-text: var(--disabled-foreground);
+  --cb-button-focus-ring: var(--focus-ring);
+
+  /* Tamanhos — únicos para todo o app (corrige alturas/raios divergentes). */
+  --cb-button-height-sm: 32px;
+  --cb-button-height-md: 40px;
+  --cb-button-height-lg: 48px;
+  --cb-button-padding-x-sm: 12px;
+  --cb-button-padding-x-md: 16px;
+  --cb-button-padding-x-lg: 20px;
+  --cb-button-font-sm: 13px;
+  --cb-button-font-md: 14px;
+  --cb-button-font-lg: 15px;
+  --cb-button-font-weight: 700;
+  --cb-button-icon-size-sm: 32px;
+  --cb-button-icon-size-md: 40px;
+  --cb-button-icon-size-lg: 48px;
+  --cb-button-radius: 10px;
+  --cb-chip-radius: 999px;
+  --cb-button-gap: 8px;
+  --cb-button-shadow: none;
+  --cb-button-shadow-primary: var(--shadow-sm);
+  --cb-button-transition: background-color 120ms ease, border-color 120ms ease,
+    color 120ms ease, box-shadow 120ms ease, opacity 120ms ease;
+  --cb-button-disabled-opacity: 0.55;
+  --cb-button-loading-opacity: 0.85;
 }
 
 /* ---------------------------------------------------------------------------
@@ -205,6 +302,18 @@
 
   --whatsapp: #25d366;
   --whatsapp-foreground: #ffffff;
+
+  /* --cb-button-* — só os valores hex fixos (hover/active de danger/success/
+     warning) precisam de override; o resto é var(--...)-aliased e já
+     acompanha o tema automaticamente. */
+  --cb-button-danger-hover: #dc2626;
+  --cb-button-danger-active: #b91c1c;
+  --cb-button-success-hover: #16a34a;
+  --cb-button-success-active: #15803d;
+  /* Roxo claro do Dark pede texto navy (mesmo ajuste já feito em --on-success). */
+  --cb-button-warning-text: #192230;
+  --cb-button-warning-hover: #8b5cf6;
+  --cb-button-warning-active: #7c3aed;
 }
 
 /* ---------------------------------------------------------------------------
@@ -251,4 +360,28 @@ body {
 :focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
+}
+
+/* ---------------------------------------------------------------------------
+   Spinner de loading do sistema de botões (--cb-button-*). Rotação por
+   padrão; vira pulso de opacidade sob prefers-reduced-motion (menos
+   movimento, ainda comunica "carregando" sem depender só de cor).
+   -------------------------------------------------------------------------- */
+@keyframes cb-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes cb-pulse {
+  50% {
+    opacity: 0.4;
+  }
+}
+.cb-spin {
+  animation: cb-spin 0.8s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cb-spin {
+    animation: cb-pulse 1.4s ease-in-out infinite;
+  }
 }
