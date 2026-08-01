@@ -20,10 +20,20 @@ describe("NovoPedidoManual — cinco etapas clicáveis", () => {
     expect(ordem).toEqual([...ordem].sort((a, b) => a - b));
   });
 
-  test("o cabeçalho de etapas é clicável (botão, não div estática)", () => {
-    const cabecalho = fonte.slice(fonte.indexOf("{PASSOS.map((p, i) => {"), fonte.indexOf("{/* Corpo */}"));
+  test("o progresso é uma linha de cinco círculos clicáveis (botão, não div estática)", () => {
+    const cabecalho = fonte.slice(fonte.indexOf('className="pm-steps-row"'), fonte.indexOf("{/* Corpo */}"));
     expect(cabecalho).toContain("onClick={() => irParaPasso(p.id)}");
     expect(cabecalho).toContain("disabled={!alcancavel}");
+    expect(cabecalho).toContain("pm-step-circle");
+    // Linha conectando os círculos (CSS, via ::after) e rótulo abaixo de cada um.
+    expect(fonte).toContain(".pm-step-col:not(:last-child)::after");
+    expect(cabecalho).toContain("{p.label}");
+  });
+
+  test("cada etapa mostra o indicador 'ETAPA X DE 5' e um título/instrução curta", () => {
+    expect(fonte).toContain("function EtapaHeader(");
+    expect(fonte).toContain("ETAPA {indice + 1} DE {PASSOS.length}");
+    expect(fonte).toContain("const STEP_META: Record<Passo,");
   });
 });
 
@@ -34,27 +44,35 @@ describe("NovoPedidoManual — bloqueio de avanço", () => {
     expect(fonte).toContain("if (indiceDestino <= indiceAlcancavel) setPasso(destino)");
   });
 
-  test("os botões Continuar de cada etapa ficam desabilitados sem os dados obrigatórios", () => {
-    expect(fonte).toContain("disabled={!clienteValido}");
-    expect(fonte).toContain("disabled={!podeIrParaEntrega}");
-    expect(fonte).toContain("disabled={!entregaValida}");
-    expect(fonte).toContain("disabled={!pagamentoValido}");
+  test("o botão Continuar/Criar pedido fica desabilitado sem os dados obrigatórios da etapa atual", () => {
+    expect(fonte).toContain("const clienteValido = !!cliente.trim() && (semTelefone || digitosTelefone.length >= 10)");
+    expect(fonte).toContain("const produtosValido = itens.length > 0");
+    expect(fonte).toContain("const entregaValida =");
+    expect(fonte).toContain("const pagamentoValido =");
+    expect(fonte).toContain("disabled={passo === \"revisar\" ? enviando || pendencias.length > 0 : !etapaValidaAtual}");
   });
 
-  test("voltar nunca é bloqueado pela mesma validação (botões Voltar não usam indiceAlcancavel)", () => {
-    const botoesVoltar = [...fonte.matchAll(/onClick=\{\(\) => setPasso\("(cliente|produtos|entrega|pagamento)"\)\}/g)];
-    expect(botoesVoltar.length).toBeGreaterThanOrEqual(3);
+  test("voltar nunca é bloqueado pela mesma validação (índice anterior, sem checar indiceAlcancavel)", () => {
+    expect(fonte).toContain('onClick={() => setPasso(PASSOS[indicePassoAtual - 1].id)}');
+    expect(fonte).not.toContain("disabled={!alcancavel}\n              onClick={() => setPasso(PASSOS[indicePassoAtual - 1].id)}");
   });
 });
 
 describe("NovoPedidoManual — telefone como primeiro campo e busca administrativa", () => {
   test("a etapa Cliente começa pelo telefone, antes do nome", () => {
     const etapaCliente = fonte.slice(fonte.indexOf('passo === "cliente"'), fonte.indexOf('passo === "produtos"'));
-    const idxTelefone = etapaCliente.indexOf("Telefone com DDD");
-    const idxNome = etapaCliente.indexOf("Nome do cliente");
+    const idxTelefone = etapaCliente.indexOf("TELEFONE *");
+    const idxNome = etapaCliente.indexOf("NOME *");
     expect(idxTelefone).toBeGreaterThan(-1);
     expect(idxNome).toBeGreaterThan(-1);
     expect(idxTelefone).toBeLessThan(idxNome);
+  });
+
+  test("o campo de telefone tem ícone, máscara de exibição e texto de ajuda", () => {
+    const etapaCliente = fonte.slice(fonte.indexOf('passo === "cliente"'), fonte.indexOf('passo === "produtos"'));
+    expect(etapaCliente).toContain("<Phone");
+    expect(etapaCliente).toContain("formatarTelefoneExibicao(telefone)");
+    expect(etapaCliente).toContain("Assim que reconhecemos o telefone");
   });
 
   test("busca por telefone chama a rota administrativa autenticada, com debounce", () => {
@@ -64,13 +82,15 @@ describe("NovoPedidoManual — telefone como primeiro campo e busca administrati
   });
 
   test("normalização do telefone não assume DDD fixo (usa apenas dígitos e comprimento mínimo)", () => {
-    expect(fonte).toContain('telefone.replace(/\\D/g, "")');
+    expect(fonte).toContain('const digitosTelefone = telefone.replace(/\\D/g, "")');
     expect(fonte).not.toMatch(/\b86\d{2,}\b/); // nenhum DDD hardcoded na lógica de validação
   });
 
   test("nome é preenchido automaticamente só quando o campo está vazio, e continua editável", () => {
     expect(fonte).toContain('setCliente((atual) => (atual.trim() ? atual : data.nome))');
-    expect(fonte).toContain('value={cliente} onChange={(e) => setCliente(e.target.value)}');
+    expect(fonte).toContain('id="pm-nome"');
+    expect(fonte).toContain("value={cliente}");
+    expect(fonte).toContain("onChange={(e) => setCliente(e.target.value)}");
   });
 
   test("indicação visual de cliente reconhecido existe e depende do estado de busca", () => {
@@ -79,27 +99,42 @@ describe("NovoPedidoManual — telefone como primeiro campo e busca administrati
   });
 });
 
+describe("NovoPedidoManual — campo de nome condicional", () => {
+  test("o campo de nome só aparece para cliente novo (busca concluída sem correspondência), sem telefone, ou edição explícita", () => {
+    expect(fonte).toContain("const buscaConcluidaParaTelefoneAtual = telefonePesquisado !== null && telefonePesquisado === digitosTelefone");
+    expect(fonte).toContain("const semCorrespondencia = buscaConcluidaParaTelefoneAtual && !clienteReconhecido");
+    expect(fonte).toContain("const mostrarCampoNome = semTelefone || semCorrespondencia || editandoNome");
+    expect(fonte).toContain("{mostrarCampoNome && (");
+  });
+
+  test("a busca só é considerada concluída para o telefone atual (nunca antes do debounce terminar)", () => {
+    expect(fonte).toContain("setTelefonePesquisado(digitos)");
+  });
+});
+
 describe("NovoPedidoManual — cliente reconhecido em card compacto", () => {
-  test("ícone oficial do WhatsApp aparece junto do reconhecimento", () => {
+  test("ícone oficial do WhatsApp aparece junto do reconhecimento, usando o token de marca do WhatsApp", () => {
     expect(fonte).toContain("function WhatsAppIcon()");
     expect(fonte).toContain("<WhatsAppIcon />");
+    expect(fonte).toContain('fill="var(--whatsapp)"');
   });
 
   test("cliente reconhecido esconde o campo de nome atrás de um card com lápis", () => {
     expect(fonte).toContain("clienteReconhecido && !editandoNome");
     expect(fonte).toContain('aria-label="Editar nome do cliente"');
     expect(fonte).toContain("onClick={() => setEditarNomeParaTelefone(telefone)}");
-  });
-
-  test("o campo de nome editável continua existindo para cliente novo, sem telefone ou em edição", () => {
-    expect(fonte).toContain('value={cliente} onChange={(e) => setCliente(e.target.value)}');
+    expect(fonte).toContain("<Pencil size={16} />");
   });
 });
 
-describe("NovoPedidoManual — opção Sem número de telefone", () => {
-  test("existe uma opção explícita, nunca inferida de campo vazio", () => {
-    expect(fonte).toContain("Sem número de telefone");
-    expect(fonte).toContain("checked={semTelefone}");
+describe("NovoPedidoManual — card 'Sem número de telefone' (nunca um checkbox solto)", () => {
+  test("é um card inteiro clicável com indicador de seleção, não um checkbox", () => {
+    const etapaCliente = fonte.slice(fonte.indexOf('passo === "cliente"'), fonte.indexOf('passo === "produtos"'));
+    expect(etapaCliente).toContain("Sem número de telefone");
+    expect(etapaCliente).toContain("onClick={() => setSemTelefone((v) => !v)}");
+    expect(etapaCliente).toContain("aria-pressed={semTelefone}");
+    expect(etapaCliente).toContain("<SelectionDot selecionado={semTelefone} />");
+    expect(etapaCliente).not.toContain('type="checkbox"');
   });
 
   test("marcar a opção desliga a busca (o reconhecimento é derivado de semTelefone, nunca fica preso em true)", () => {
@@ -109,7 +144,7 @@ describe("NovoPedidoManual — opção Sem número de telefone", () => {
 
   test("o telefone só é dispensado da validação quando a flag semTelefone está marcada", () => {
     expect(fonte).toContain(
-      "const clienteValido = !!cliente.trim() && (semTelefone || telefone.replace(/\\D/g, \"\").length >= 10)"
+      "const clienteValido = !!cliente.trim() && (semTelefone || digitosTelefone.length >= 10)"
     );
   });
 
@@ -126,6 +161,40 @@ describe("NovoPedidoManual — opção S/N no número do endereço", () => {
   });
 });
 
+describe("NovoPedidoManual — etapa Entrega com cards clicáveis", () => {
+  test("Entrega/Retirada/No local são cards com ícone, não pílulas de texto", () => {
+    const etapaEntrega = fonte.slice(fonte.indexOf('passo === "entrega"'), fonte.indexOf('passo === "pagamento"'));
+    expect(etapaEntrega).toContain("Bike");
+    expect(etapaEntrega).toContain("Store");
+    expect(etapaEntrega).toContain("UtensilsCrossed");
+    expect(etapaEntrega).toContain("pm-select-card");
+  });
+});
+
+describe("NovoPedidoManual — etapa Pagamento com cards clicáveis", () => {
+  test("cada forma de pagamento é um card com ícone e o total fica visível", () => {
+    const etapaPagamento = fonte.slice(fonte.indexOf('passo === "pagamento" && ('), fonte.indexOf('passo === "revisar" && ('));
+    expect(etapaPagamento).toContain("pm-select-card");
+    expect(etapaPagamento).toContain("Total do pedido");
+    expect(etapaPagamento).toContain("money(totais.total)");
+  });
+});
+
+describe("NovoPedidoManual — montadores no mesmo modal (nunca fullscreen)", () => {
+  test("o construtor guiado é um painel centralizado, não uma camada cobrindo a tela inteira", () => {
+    const construtor = fonte.slice(fonte.indexOf("{/* Construtor guiado"), fonte.indexOf("{confirmarSaida && ("));
+    expect(construtor).toContain('width: "min(94vw, 560px)"');
+    expect(construtor).toContain('justifyContent: "center"');
+  });
+
+  test("radio para escolha única (borda, tamanho, leite, sabor único); checkbox só para sabores de pizza (até 2)", () => {
+    expect(fonte).toContain('const tipoControleEtapa: "radio" | "checkbox" = etapaAtual?.tipo === "sabores" ? "checkbox" : "radio"');
+    expect(fonte).toContain('type={tipoControleEtapa}');
+    expect(fonte).toContain('name="pm-opcao-etapa"');
+    expect(fonte).toContain("checked={sel}");
+  });
+});
+
 describe("NovoPedidoManual — bilhete de itens escolhidos", () => {
   test("cada item do carrinho mostra nome, detalhe, preço e controles de ajuste/remoção", () => {
     const etapaProdutos = fonte.slice(fonte.indexOf('passo === "produtos"'), fonte.indexOf('passo === "entrega"'));
@@ -137,19 +206,45 @@ describe("NovoPedidoManual — bilhete de itens escolhidos", () => {
 });
 
 describe("NovoPedidoManual — etapa final de revisão", () => {
-  test("a etapa Revisar mostra cliente, produtos, entrega e pagamento com edição por seção", () => {
+  test("a etapa Revisar mostra cliente, produtos, entrega e pagamento, cada um em card inteiro clicável com um único lápis", () => {
     const etapaRevisar = fonte.slice(fonte.indexOf('passo === "revisar" && ('), fonte.indexOf("{/* Rodapé"));
     expect(etapaRevisar).toContain('irParaPasso("cliente")');
     expect(etapaRevisar).toContain('irParaPasso("produtos")');
     expect(etapaRevisar).toContain('irParaPasso("entrega")');
     expect(etapaRevisar).toContain('irParaPasso("pagamento")');
     expect(etapaRevisar).toContain("Resumo");
+    expect(etapaRevisar.match(/<CardRevisao/g)?.length).toBe(4);
   });
 
-  test("o botão final Criar pedido só existe na etapa Revisar", () => {
+  test("CardRevisao é inteiro clicável e mostra um único ícone de lápis", () => {
+    expect(fonte).toContain("function CardRevisao(");
+    expect(fonte).toContain("<Pencil size={14}");
+  });
+
+  test("o botão final 'Criar pedido' só existe na etapa Revisar e chama enviar()", () => {
     const ocorrencias = [...fonte.matchAll(/Criar pedido/g)];
     expect(ocorrencias.length).toBeGreaterThan(0);
-    expect(fonte).toContain('onClick={enviar}');
+    expect(fonte).toContain("function irParaProximoPasso()");
+    expect(fonte).toContain('if (passo === "revisar") { enviar(); return }');
+  });
+
+  test("clique duplo é bloqueado e o progresso de envio é visível", () => {
+    expect(fonte).toContain("if (enviando || pendencias.length > 0 || identificadorTentativaFalhou) return");
+    expect(fonte).toContain("Criando pedido…");
+  });
+});
+
+describe("NovoPedidoManual — teclado, foco e responsividade", () => {
+  test("inputs e cards selecionáveis têm estado de foco visível via CSS", () => {
+    expect(fonte).toContain(".pm-input:focus-visible, .pm-input:focus {");
+  });
+
+  test("o modal principal é responsivo (largura relativa, com teto para desktop)", () => {
+    expect(fonte).toContain('width: "min(94vw, 640px)"');
+  });
+
+  test("respeita prefers-reduced-motion no indicador de carregamento", () => {
+    expect(fonte).toContain("@media (prefers-reduced-motion: reduce)");
   });
 });
 
