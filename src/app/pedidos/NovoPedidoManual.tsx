@@ -4,7 +4,9 @@
 //
 // Toda a regra (catálogo pesquisável, etapas obrigatórias, motivo de bloqueio,
 // construção e preço do item, pendências) vive em src/lib/montagemManual.ts,
-// testável sem montar componente. Aqui só existe navegação e formulário.
+// testável sem montar componente. Aqui só existe navegação e formulário —
+// 100% estado React controlado, sem MutationObserver, sem querySelector para
+// decidir fluxo, sem manipulação manual do DOM.
 //
 // O pedido é criado por POST /api/pedido-app — a MESMA rota do cardápio
 // público, com a mesma validação, o mesmo recálculo de preço no servidor e a
@@ -16,10 +18,27 @@
 // exatamente o que faz o atendente se perder no meio de uma ligação.
 
 import { useEffect, useMemo, useRef, useState } from "react"
+import {
+  ArrowRight,
+  Bike,
+  Banknote,
+  CreditCard,
+  LoaderCircle,
+  Pencil,
+  Phone,
+  PhoneOff,
+  Search,
+  Shuffle,
+  Store,
+  UtensilsCrossed,
+  Wallet,
+  X,
+} from "lucide-react"
 import type { ItemApp } from "@/lib/pedidoAppItens"
 import { computeTaxaApp } from "@/lib/pedidoAppLogic"
 import { montarPagamentoComposto, extrairPagamentoComposto } from "@/lib/pagamentoComposto"
 import { gerarClientRequestId } from "@/survival/clientRequestId"
+import { formatarTelefoneExibicao } from "@/lib/telefone"
 import {
   CATEGORIAS,
   listarProdutosManuais,
@@ -56,6 +75,15 @@ const PASSOS: { id: Passo; label: string }[] = [
   { id: "revisar", label: "Revisar" },
 ]
 
+/** Título e texto de apoio de cada etapa — só copy, nenhuma regra aqui. */
+const STEP_META: Record<Passo, { titulo: string; ajuda: string }> = {
+  cliente: { titulo: "Quem é o cliente?", ajuda: "Comece pelo telefone — reconhecemos o cadastro automaticamente." },
+  produtos: { titulo: "Monte o pedido", ajuda: "Busque ou escolha por categoria; itens com opções abrem o montador na hora." },
+  entrega: { titulo: "Entrega ou retirada?", ajuda: "Escolha como o cliente vai receber o pedido." },
+  pagamento: { titulo: "Como vai pagar?", ajuda: "Escolha a forma de pagamento do pedido." },
+  revisar: { titulo: "Revise antes de enviar", ajuda: "Confira cada etapa; o servidor recalcula o valor final ao criar o pedido." },
+}
+
 const money = (v: number) => "R$ " + v.toFixed(2).replace(".", ",")
 
 type Props = {
@@ -69,44 +97,125 @@ type Props = {
 // --- estilos compartilhados (mesma linguagem visual do painel) --------------
 const card: React.CSSProperties = {
   background: "var(--surface)",
-  border: "1px solid var(--surface-secondary)",
-  borderRadius: 14,
-  padding: 14,
+  border: "1px solid var(--border)",
+  borderRadius: 18,
+  padding: 18,
 }
 const input: React.CSSProperties = {
   width: "100%",
-  height: 44,
+  height: 48,
   background: "var(--background)",
-  border: "1px solid var(--surface-secondary)",
-  borderRadius: 10,
-  padding: "0 12px",
+  border: "1.5px solid var(--border)",
+  borderRadius: 12,
+  padding: "0 14px",
   color: "var(--foreground)",
-  fontSize: 14,
+  fontSize: 15,
   fontWeight: 600,
   fontFamily: "'Archivo', sans-serif",
   outline: "none",
   boxSizing: "border-box",
 }
 const btn: React.CSSProperties = {
-  height: 46,
+  height: 48,
   borderRadius: 12,
   fontSize: 14,
   fontWeight: 800,
   cursor: "pointer",
   fontFamily: "'Archivo', sans-serif",
 }
+const btnPrimary: React.CSSProperties = {
+  ...btn,
+  border: "none",
+  background: "var(--primary)",
+  color: "var(--primary-foreground)",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: 8,
+}
+const btnSecondary: React.CSSProperties = {
+  ...btn,
+  border: "1.5px solid var(--border)",
+  background: "transparent",
+  color: "var(--foreground-secondary)",
+}
 const rotulo: React.CSSProperties = {
   fontSize: 11,
   fontWeight: 900,
-  letterSpacing: ".5px",
+  letterSpacing: ".6px",
   textTransform: "uppercase",
   color: "var(--foreground-muted)",
   margin: "0 0 6px",
+  display: "block",
+}
+const eyebrow: React.CSSProperties = {
+  fontSize: 11,
+  fontWeight: 900,
+  letterSpacing: "1px",
+  textTransform: "uppercase",
+  color: "var(--brand-text)",
+  margin: "0 0 4px",
+}
+const stepTitle: React.CSSProperties = {
+  fontSize: 20,
+  fontWeight: 900,
+  color: "var(--foreground)",
+  margin: "0 0 4px",
+  letterSpacing: "-0.3px",
+}
+const stepHelp: React.CSSProperties = {
+  fontSize: 13,
+  fontWeight: 600,
+  color: "var(--foreground-secondary)",
+  margin: 0,
+  lineHeight: 1.4,
+}
+
+/** Cabeçalho comum de toda etapa: "ETAPA X DE 5" + título + instrução curta. */
+function EtapaHeader({ indice, titulo, ajuda }: { indice: number; titulo: string; ajuda: string }) {
+  return (
+    <div>
+      <p style={eyebrow}>ETAPA {indice + 1} DE {PASSOS.length}</p>
+      <h3 style={stepTitle}>{titulo}</h3>
+      <p style={stepHelp}>{ajuda}</p>
+    </div>
+  )
+}
+
+/** Indicador circular de seleção — nunca a única pista de estado (o texto/borda do card já dizem). */
+function SelectionDot({ selecionado }: { selecionado: boolean }) {
+  return (
+    <span
+      aria-hidden="true"
+      style={{
+        width: 22,
+        height: 22,
+        borderRadius: "50%",
+        border: "2px solid " + (selecionado ? "var(--primary)" : "var(--border-strong)"),
+        background: selecionado ? "var(--primary)" : "transparent",
+        color: "var(--primary-foreground)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontSize: 13,
+        fontWeight: 900,
+        flexShrink: 0,
+      }}
+    >
+      {selecionado ? "✓" : ""}
+    </span>
+  )
 }
 
 export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
   const [passo, setPasso] = useState<Passo>("cliente")
   const [confirmarSaida, setConfirmarSaida] = useState(false)
+  // Confirmado (telefone reconhecido) esconde o campo de nome atrás de um
+  // card compacto; o lápis abre esta edição explícita sem apagar o nome.
+  // Guarda PARA QUAL telefone a edição foi pedida — assim um telefone novo
+  // volta a mostrar o card automaticamente, sem precisar de um efeito extra
+  // só para "resetar" o estado a cada tecla digitada.
+  const [editarNomeParaTelefone, setEditarNomeParaTelefone] = useState<string | null>(null)
 
   // --- catálogo e busca ----------------------------------------------------
   // Recalculado só quando o cardápio muda, não a cada tecla digitada.
@@ -133,6 +242,9 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
   const etapaAtual = etapas[etapaVisivel]
   const bloqueio = motivoBloqueio(etapaAtual, selecao)
   const completa = montagemCompleta(etapas, selecao)
+  // Radio (uma escolha) para tipos de decisão única; checkbox (múltiplas)
+  // só para sabores de pizza, que aceitam até 2 (meio a meio).
+  const tipoControleEtapa: "radio" | "checkbox" = etapaAtual?.tipo === "sabores" ? "checkbox" : "radio"
 
   // --- carrinho ------------------------------------------------------------
   const [itens, setItens] = useState<ItemApp[]>([])
@@ -151,6 +263,10 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
   // nunca um booleano solto: comparar contra o telefone atual é o que evita
   // mostrar "reconhecido" para um número diferente do que está no campo.
   const [telefoneReconhecido, setTelefoneReconhecido] = useState<string | null>(null)
+  // Dígitos do telefone para o qual a busca JÁ TERMINOU (achando ou não) —
+  // diferente de telefoneReconhecido, existe mesmo quando não encontrou
+  // ninguém. É o que decide "aguardando" vs. "cliente novo, mostrar nome".
+  const [telefonePesquisado, setTelefonePesquisado] = useState<string | null>(null)
   const [buscandoTelefone, setBuscandoTelefone] = useState(false)
   const [tipoEntrega, setTipoEntrega] = useState<"delivery" | "retirada" | "dine_in">("delivery")
   const [bairro, setBairro] = useState("")
@@ -260,6 +376,7 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
         } else {
           setTelefoneReconhecido((atual) => (atual === digitos ? null : atual))
         }
+        setTelefonePesquisado(digitos)
       } catch {
         // falha de rede: mantém o último reconhecimento válido, não apaga
         // um cliente já encontrado por causa de uma tentativa futura falha.
@@ -403,10 +520,20 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
     }
   }
 
-  const clienteReconhecido = !semTelefone && telefone.replace(/\D/g, "") === telefoneReconhecido && !!telefoneReconhecido
+  const digitosTelefone = telefone.replace(/\D/g, "")
+  const clienteReconhecido = !semTelefone && digitosTelefone === telefoneReconhecido && !!telefoneReconhecido
+  const editandoNome = editarNomeParaTelefone !== null && editarNomeParaTelefone === telefone
+  // A busca terminou PARA ESTE telefone exato (nem cedo demais — antes do
+  // debounce dar início — nem preso num telefone que já mudou).
+  const buscaConcluidaParaTelefoneAtual = telefonePesquisado !== null && telefonePesquisado === digitosTelefone
+  const semCorrespondencia = buscaConcluidaParaTelefoneAtual && !clienteReconhecido
+  // O campo de nome livre só existe para cliente novo (busca terminou sem
+  // achar ninguém), sem telefone, ou quando o lápis pediu edição explícita —
+  // nunca ao lado do card de reconhecimento.
+  const mostrarCampoNome = semTelefone || semCorrespondencia || editandoNome
 
   // --- validade por etapa (bloqueia avanço; nunca bloqueia voltar) ---------
-  const clienteValido = !!cliente.trim() && (semTelefone || telefone.replace(/\D/g, "").length >= 10)
+  const clienteValido = !!cliente.trim() && (semTelefone || digitosTelefone.length >= 10)
   const produtosValido = itens.length > 0
   const entregaValida =
     tipoEntrega !== "delivery" || (!!bairro.trim() && !!rua.trim() && !!numero.trim())
@@ -428,8 +555,42 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
     if (indiceDestino <= indiceAlcancavel) setPasso(destino)
   }
 
-  const podeIrParaEntrega = produtosValido
   const bairros = menu.neighborhoods || []
+
+  // Mensagem curta do que falta na etapa atual — o rodapé nunca deixa a
+  // atendente adivinhando por que "Continuar" está desabilitado.
+  const mensagemFaltante: string | null = (() => {
+    switch (passo) {
+      case "cliente":
+        if (!semTelefone && digitosTelefone.length < 10) return "Informe um telefone válido para continuar."
+        if (!cliente.trim()) return "Informe o nome do cliente."
+        return null
+      case "produtos":
+        return produtosValido ? null : "Adicione pelo menos um item para continuar."
+      case "entrega":
+        if (tipoEntrega !== "delivery") return null
+        if (!bairro.trim()) return "Selecione o bairro da entrega."
+        if (!rua.trim()) return "Informe a rua da entrega."
+        if (!numero.trim()) return "Informe o número do endereço."
+        return null
+      case "pagamento":
+        if (!pagamentoFinal.trim()) return "Escolha a forma de pagamento."
+        if (temDinheiro && trocoOpcao !== "nao" && !troco.trim()) return "Informe o troco, ou marque “sem troco”."
+        return null
+      case "revisar":
+        return pendencias[0] ?? null
+      default:
+        return null
+    }
+  })()
+
+  const etapaValidaAtual = [clienteValido, produtosValido, entregaValida, pagamentoValido, pendencias.length === 0][indicePassoAtual]
+  const proximoPasso = PASSOS[indicePassoAtual + 1]?.id ?? null
+
+  function irParaProximoPasso() {
+    if (passo === "revisar") { enviar(); return }
+    if (proximoPasso) irParaPasso(proximoPasso)
+  }
 
   return (
     <div
@@ -442,113 +603,220 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
         zIndex: 2800,
         background: "rgba(var(--overlay-rgb), 0.6)",
         display: "flex",
-        alignItems: "flex-end",
+        alignItems: "center",
         justifyContent: "center",
+        padding: 16,
         fontFamily: "'Archivo', sans-serif",
       }}
     >
       <div
         style={{
-          width: "100%",
-          maxWidth: 560,
-          maxHeight: "94svh",
+          width: "min(94vw, 640px)",
+          maxHeight: "90vh",
           background: "var(--background)",
-          borderRadius: "18px 18px 0 0",
+          borderRadius: 24,
+          boxShadow: "var(--shadow-lg)",
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",
         }}
       >
         {/* Cabeçalho: onde estou, e como saio */}
-        <div style={{ padding: "14px 16px 10px", borderBottom: "1px solid var(--surface)", flexShrink: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-            <span style={{ fontSize: 17, fontWeight: 900, color: "var(--foreground)" }}>Novo pedido</span>
+        <div style={{ padding: "20px 24px 16px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, marginBottom: 18 }}>
+            <div>
+              <p style={eyebrow}>ATENDIMENTO MANUAL</p>
+              <h2 style={{ fontSize: 23, fontWeight: 900, color: "var(--foreground)", margin: 0, letterSpacing: "-0.4px" }}>Novo pedido</h2>
+            </div>
             <button
               onClick={tentarSair}
               aria-label="Fechar"
-              style={{ background: "none", border: "none", color: "var(--foreground-muted)", fontSize: 22, cursor: "pointer", lineHeight: 1, padding: 4 }}
+              className="pm-close"
+              style={{
+                width: 38,
+                height: 38,
+                borderRadius: 10,
+                border: "1.5px solid var(--border)",
+                background: "var(--surface)",
+                color: "var(--foreground-secondary)",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0,
+              }}
             >
-              ×
+              <X size={18} />
             </button>
           </div>
-          <div style={{ display: "flex", gap: 6 }}>
+
+          {/* Progresso: linha conectando cinco círculos numerados */}
+          <div className="pm-steps-row">
             {PASSOS.map((p, i) => {
               const ativo = p.id === passo
               const concluido = i < indicePassoAtual
               const alcancavel = i <= indiceAlcancavel
+              const estado = ativo ? "atual" : concluido ? "concluida" : alcancavel ? "alcancavel" : "futura"
               return (
-                <button
-                  key={p.id}
-                  onClick={() => irParaPasso(p.id)}
-                  disabled={!alcancavel}
-                  aria-current={ativo ? "step" : undefined}
-                  style={{
-                    flex: 1,
-                    padding: "6px 8px",
-                    borderRadius: 8,
-                    textAlign: "center",
-                    fontSize: 11,
-                    fontWeight: 900,
-                    border: "none",
-                    fontFamily: "'Archivo', sans-serif",
-                    cursor: alcancavel ? "pointer" : "not-allowed",
-                    background: ativo ? "var(--primary)" : concluido ? "color-mix(in srgb, var(--success) 15%, transparent)" : "var(--surface)",
-                    color: ativo ? "var(--background)" : concluido ? "var(--success)" : "var(--foreground-muted)",
-                    opacity: alcancavel ? 1 : 0.5,
-                  }}
-                >
-                  {i + 1}. {p.label}{concluido ? " ✓" : ""}
-                </button>
+                <div key={p.id} className={`pm-step-col${concluido ? " pm-step-done" : ""}`}>
+                  <button
+                    onClick={() => irParaPasso(p.id)}
+                    disabled={!alcancavel}
+                    aria-current={ativo ? "step" : undefined}
+                    aria-label={`${p.label}${concluido ? " (concluída)" : ativo ? " (etapa atual)" : alcancavel ? " (disponível)" : " (bloqueada)"}`}
+                    className="pm-step-circle"
+                    style={{
+                      width: 34,
+                      height: 34,
+                      borderRadius: "50%",
+                      border: "2px solid transparent",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: 13,
+                      fontWeight: 900,
+                      cursor: alcancavel ? "pointer" : "not-allowed",
+                      ...(estado === "atual"
+                        ? { background: "var(--primary)", color: "var(--primary-foreground)", borderColor: "var(--primary)" }
+                        : estado === "concluida"
+                        ? { background: "var(--success)", color: "#fff", borderColor: "var(--success)" }
+                        : estado === "alcancavel"
+                        ? { background: "var(--surface)", color: "var(--foreground)", borderColor: "var(--border-strong)" }
+                        : { background: "var(--disabled-background)", color: "var(--disabled-foreground)", borderColor: "var(--disabled-background)" }),
+                    }}
+                  >
+                    {concluido ? "✓" : i + 1}
+                  </button>
+                  <span
+                    style={{
+                      fontSize: 10.5,
+                      fontWeight: 800,
+                      textAlign: "center",
+                      color: ativo ? "var(--foreground)" : "var(--foreground-muted)",
+                      letterSpacing: ".2px",
+                    }}
+                  >
+                    {p.label}
+                  </span>
+                </div>
               )
             })}
           </div>
         </div>
 
         {/* Corpo */}
-        <div style={{ flex: 1, overflowY: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+        <div style={{ flex: 1, overflowY: "auto", padding: 24, display: "flex", flexDirection: "column", gap: 16 }}>
           {passo === "cliente" && (
             <>
-              <div style={{ ...card, display: "grid", gap: 10 }}>
-                <p style={rotulo}>Telefone</p>
-                <input
-                  style={input}
-                  placeholder="Telefone com DDD"
-                  value={telefone}
-                  onChange={(e) => setTelefone(e.target.value)}
-                  inputMode="tel"
-                  disabled={semTelefone}
-                  autoFocus
-                />
-                {buscandoTelefone && (
-                  <p style={{ fontSize: 12, fontWeight: 700, color: "var(--foreground-muted)", margin: 0 }}>Buscando cliente…</p>
-                )}
-                {clienteReconhecido && !buscandoTelefone && (
-                  <p role="status" style={{ fontSize: 12, fontWeight: 800, color: "var(--success)", margin: 0 }}>
-                    ✓ Cliente reconhecido
+              <EtapaHeader indice={indicePassoAtual} titulo={STEP_META.cliente.titulo} ajuda={STEP_META.cliente.ajuda} />
+
+              <div style={{ ...card, display: "grid", gap: 12 }}>
+                <div>
+                  <label style={rotulo} htmlFor="pm-telefone">TELEFONE *</label>
+                  <div style={{ position: "relative" }}>
+                    <Phone
+                      size={17}
+                      aria-hidden="true"
+                      style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", color: "var(--foreground-muted)" }}
+                    />
+                    <input
+                      id="pm-telefone"
+                      className="pm-input"
+                      style={{ ...input, paddingLeft: 40 }}
+                      placeholder="(00) 00000-0000"
+                      value={formatarTelefoneExibicao(telefone)}
+                      onChange={(e) => setTelefone(e.target.value)}
+                      inputMode="tel"
+                      disabled={semTelefone}
+                      autoFocus
+                    />
+                  </div>
+                  <p style={{ fontSize: 11.5, fontWeight: 600, color: "var(--foreground-muted)", margin: "6px 0 0" }}>
+                    Assim que reconhecemos o telefone, o nome é preenchido sozinho.
                   </p>
+                  {buscandoTelefone && (
+                    <p style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 700, color: "var(--foreground-muted)", margin: "6px 0 0" }}>
+                      <LoaderCircle size={13} className="pm-spin" aria-hidden="true" /> Buscando cliente…
+                    </p>
+                  )}
+                  {clienteReconhecido && !buscandoTelefone && (
+                    <p role="status" style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 800, color: "var(--success)", margin: "6px 0 0" }}>
+                      <WhatsAppIcon />
+                      ✓ Cliente reconhecido
+                    </p>
+                  )}
+                </div>
+
+                {/* Cliente reconhecido: card compacto com lápis, sem reexibir o
+                    campo de nome — evita reescrever por cima de um cadastro já
+                    confirmado. */}
+                {clienteReconhecido && !editandoNome && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, border: "1.5px solid var(--border)", borderRadius: 14, padding: 12, background: "var(--background)" }}>
+                    <WhatsAppIcon />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{ ...rotulo, margin: 0 }}>Nome do cliente</p>
+                      <p style={{ fontSize: 14.5, fontWeight: 800, color: "var(--foreground)", margin: "2px 0 0" }}>{cliente || "—"}</p>
+                      <p style={{ fontSize: 12, fontWeight: 600, color: "var(--foreground-secondary)", margin: "2px 0 0" }}>{formatarTelefoneExibicao(telefone)}</p>
+                    </div>
+                    <button
+                      onClick={() => setEditarNomeParaTelefone(telefone)}
+                      aria-label="Editar nome do cliente"
+                      style={{ background: "none", border: "none", color: "var(--brand-text)", cursor: "pointer", padding: 6, flexShrink: 0, display: "flex" }}
+                    >
+                      <Pencil size={16} />
+                    </button>
+                  </div>
                 )}
-                <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, fontWeight: 700, color: "var(--foreground-secondary)", cursor: "pointer" }}>
-                  <input
-                    type="checkbox"
-                    checked={semTelefone}
-                    onChange={(e) => setSemTelefone(e.target.checked)}
-                  />
-                  Sem número de telefone
-                </label>
+
+                {/* Cliente novo (busca terminou sem achar ninguém), sem
+                    telefone, ou edição explícita pelo lápis — nunca junto do
+                    card de reconhecimento acima. */}
+                {mostrarCampoNome && (
+                  <div>
+                    <label style={rotulo} htmlFor="pm-nome">NOME *</label>
+                    <input
+                      id="pm-nome"
+                      className="pm-input"
+                      style={input}
+                      placeholder="Nome do cliente"
+                      value={cliente}
+                      onChange={(e) => setCliente(e.target.value)}
+                    />
+                  </div>
+                )}
               </div>
 
-              <div style={{ ...card, display: "grid", gap: 10 }}>
-                <p style={rotulo}>Nome do cliente</p>
-                <input style={input} placeholder="Nome do cliente" value={cliente} onChange={(e) => setCliente(e.target.value)} />
-              </div>
+              {/* "Sem telefone": card grande e inteiro clicável, nunca um
+                  checkbox solto — mesma hierarquia visual das demais escolhas
+                  desta etapa. */}
+              <button
+                type="button"
+                onClick={() => setSemTelefone((v) => !v)}
+                aria-pressed={semTelefone}
+                className={`pm-select-card${semTelefone ? " pm-selected" : ""}`}
+                style={{ ...card, display: "flex", alignItems: "center", gap: 14, textAlign: "left", cursor: "pointer", width: "100%" }}
+              >
+                <PhoneOff size={20} aria-hidden="true" style={{ color: semTelefone ? "var(--brand-text)" : "var(--foreground-muted)", flexShrink: 0 }} />
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ display: "block", fontSize: 14.5, fontWeight: 800, color: "var(--foreground)" }}>Sem número de telefone</span>
+                  <span style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--foreground-secondary)", marginTop: 2 }}>
+                    Pedido de balcão — nunca envia WhatsApp
+                  </span>
+                </span>
+                <SelectionDot selecionado={semTelefone} />
+              </button>
             </>
           )}
 
           {passo === "produtos" && (
             <>
+              <EtapaHeader indice={indicePassoAtual} titulo={STEP_META.produtos.titulo} ajuda={STEP_META.produtos.ajuda} />
+
               <div style={{ position: "relative" }}>
+                <Search size={17} aria-hidden="true" style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", color: "var(--foreground-muted)" }} />
                 <input
-                  style={input}
+                  className="pm-input"
+                  style={{ ...input, paddingLeft: 40 }}
                   placeholder="Buscar produto em todas as categorias…"
                   value={termo}
                   onChange={(e) => setTermo(e.target.value)}
@@ -558,26 +826,26 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
                   <button
                     onClick={() => setTermo("")}
                     aria-label="Limpar busca"
-                    style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: "var(--foreground-muted)", fontSize: 18, cursor: "pointer" }}
+                    style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: "var(--foreground-muted)", cursor: "pointer", display: "flex", padding: 4 }}
                   >
-                    ×
+                    <X size={16} />
                   </button>
                 )}
               </div>
 
               {!buscando && (
-                <div style={{ display: "flex", gap: 6, overflowX: "auto" }}>
+                <div style={{ display: "flex", gap: 8, overflowX: "auto" }}>
                   {CATEGORIAS.map((c) => (
                     <button
                       key={c.id}
                       onClick={() => setCategoria(c.id)}
                       style={{
                         ...btn,
-                        height: 34,
-                        padding: "0 12px",
+                        height: 36,
+                        padding: "0 14px",
                         flexShrink: 0,
-                        border: "1px solid " + (categoria === c.id ? "var(--primary)" : "var(--surface-secondary)"),
-                        background: categoria === c.id ? "color-mix(in srgb, var(--primary) 15%, transparent)" : "transparent",
+                        border: "1.5px solid " + (categoria === c.id ? "var(--primary)" : "var(--border)"),
+                        background: categoria === c.id ? "var(--primary-soft)" : "transparent",
                         color: "var(--foreground)",
                         fontSize: 12.5,
                       }}
@@ -600,14 +868,16 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
                 <p style={{ fontSize: 13, color: "var(--foreground-muted)", margin: 0 }}>Nenhum produto nesta categoria.</p>
               )}
 
-              <div style={{ display: "grid", gap: 8 }}>
+              <div style={{ display: "grid", gap: 10 }}>
                 {resultados.map((p) => (
                   <button
                     key={p.id}
                     onClick={() => abrirProduto(p)}
                     disabled={p.esgotado}
+                    className="pm-select-card"
                     style={{
                       ...card,
+                      padding: 14,
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "space-between",
@@ -631,19 +901,20 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
               </div>
 
               {itens.length > 0 && (
-                <div style={{ ...card, display: "grid", gap: 8 }}>
+                <div style={{ ...card, display: "grid", gap: 10 }}>
                   <p style={rotulo}>No pedido ({itens.length})</p>
                   {itens.map((item, i) => (
-                    <div key={`${item.name}-${item.detail}-${i}`} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <div key={`${item.name}-${item.detail}-${i}`} style={{ display: "flex", alignItems: "center", gap: 10, borderBottom: i < itens.length - 1 ? "1px solid var(--border)" : "none", paddingBottom: i < itens.length - 1 ? 10 : 0 }}>
                       <span style={{ flex: 1, minWidth: 0 }}>
-                        <span style={{ display: "block", fontSize: 13, fontWeight: 800, color: "var(--foreground)" }}>{item.name}</span>
+                        <span style={{ display: "block", fontSize: 13.5, fontWeight: 800, color: "var(--foreground)" }}>{item.name}</span>
                         {item.detail && (
                           <span style={{ display: "block", fontSize: 11.5, color: "var(--foreground-secondary)" }}>{item.detail}</span>
                         )}
+                        <span style={{ display: "block", fontSize: 11.5, fontWeight: 800, color: "var(--brand-text)", marginTop: 2 }}>{money(item.price * item.qty)}</span>
                       </span>
-                      <button onClick={() => setItens(alterarQuantidade(itens, i, -1))} aria-label={`Diminuir ${item.name}`} style={{ ...btn, height: 30, width: 30, border: "1px solid var(--surface-secondary)", background: "transparent", color: "var(--foreground)" }}>−</button>
+                      <button onClick={() => setItens(alterarQuantidade(itens, i, -1))} aria-label={`Diminuir ${item.name}`} style={{ ...btn, height: 30, width: 30, border: "1px solid var(--border)", background: "transparent", color: "var(--foreground)" }}>−</button>
                       <span style={{ fontSize: 13, fontWeight: 900, minWidth: 18, textAlign: "center" }}>{item.qty}</span>
-                      <button onClick={() => setItens(alterarQuantidade(itens, i, 1))} aria-label={`Aumentar ${item.name}`} style={{ ...btn, height: 30, width: 30, border: "1px solid var(--surface-secondary)", background: "transparent", color: "var(--foreground)" }}>+</button>
+                      <button onClick={() => setItens(alterarQuantidade(itens, i, 1))} aria-label={`Aumentar ${item.name}`} style={{ ...btn, height: 30, width: 30, border: "1px solid var(--border)", background: "transparent", color: "var(--foreground)" }}>+</button>
                       <button onClick={() => setItens(removerItem(itens, i))} aria-label={`Remover ${item.name}`} style={{ ...btn, height: 30, width: 30, border: "none", background: "transparent", color: "var(--danger)" }}>×</button>
                     </div>
                   ))}
@@ -659,62 +930,68 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
 
           {passo === "entrega" && (
             <>
-              <div style={{ ...card, display: "grid", gap: 10 }}>
-                <p style={rotulo}>Como o cliente recebe</p>
-                <div style={{ display: "flex", gap: 6 }}>
-                  {([["delivery", "Entrega"], ["retirada", "Retirada"], ["dine_in", "No local"]] as const).map(([valor, label]) => (
+              <EtapaHeader indice={indicePassoAtual} titulo={STEP_META.entrega.titulo} ajuda={STEP_META.entrega.ajuda} />
+
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+                {([
+                  ["delivery", "Entrega", Bike],
+                  ["retirada", "Retirada", Store],
+                  ["dine_in", "No local", UtensilsCrossed],
+                ] as const).map(([valor, label, Icone]) => {
+                  const sel = tipoEntrega === valor
+                  return (
                     <button
                       key={valor}
                       onClick={() => setTipoEntrega(valor)}
-                      style={{
-                        ...btn,
-                        flex: 1,
-                        height: 40,
-                        border: "1px solid " + (tipoEntrega === valor ? "var(--primary)" : "var(--surface-secondary)"),
-                        background: tipoEntrega === valor ? "color-mix(in srgb, var(--primary) 15%, transparent)" : "transparent",
-                        color: "var(--foreground)",
-                        fontSize: 13,
-                      }}
+                      className={`pm-select-card${sel ? " pm-selected" : ""}`}
+                      style={{ ...card, padding: 14, display: "grid", justifyItems: "center", gap: 6, textAlign: "center" }}
                     >
-                      {label}
+                      <Icone size={20} aria-hidden="true" style={{ color: sel ? "var(--brand-text)" : "var(--foreground-muted)" }} />
+                      <span style={{ fontSize: 12.5, fontWeight: 800, color: "var(--foreground)" }}>{label}</span>
                     </button>
-                  ))}
-                </div>
+                  )
+                })}
+              </div>
 
-                {tipoEntrega === "delivery" && (
-                  <div style={{ display: "grid", gap: 8 }}>
-                    <select style={input} value={bairro} onChange={(e) => setBairro(e.target.value)} aria-label="Bairro">
+              {tipoEntrega === "delivery" && (
+                <div style={{ ...card, display: "grid", gap: 10 }}>
+                  <div>
+                    <label style={rotulo}>BAIRRO *</label>
+                    <select className="pm-input" style={input} value={bairro} onChange={(e) => setBairro(e.target.value)} aria-label="Bairro">
                       <option value="">Selecione o bairro</option>
                       {bairros.map((b, i) => (
                         <option key={i} value={b.name}>{b.name} — {money(b.fee)}</option>
                       ))}
                     </select>
-                    <input style={input} placeholder="Rua" value={rua} onChange={(e) => setRua(e.target.value)} />
+                  </div>
+                  <div>
+                    <label style={rotulo}>RUA *</label>
+                    <input className="pm-input" style={input} placeholder="Rua" value={rua} onChange={(e) => setRua(e.target.value)} />
+                  </div>
+                  <div>
+                    <label style={rotulo}>NÚMERO *</label>
                     <div style={{ display: "flex", gap: 8 }}>
-                      <input style={{ ...input, flex: 1 }} placeholder="Número" value={numero} onChange={(e) => setNumero(e.target.value)} />
+                      <input className="pm-input" style={{ ...input, flex: 1 }} placeholder="Número" value={numero} onChange={(e) => setNumero(e.target.value)} />
                       <button
                         onClick={() => setNumero((n) => (n.trim().toUpperCase() === "S/N" ? "" : "S/N"))}
-                        style={{
-                          ...btn,
-                          height: 44,
-                          padding: "0 14px",
-                          border: "1px solid " + (numero.trim().toUpperCase() === "S/N" ? "var(--primary)" : "var(--surface-secondary)"),
-                          background: numero.trim().toUpperCase() === "S/N" ? "color-mix(in srgb, var(--primary) 15%, transparent)" : "transparent",
-                          color: "var(--foreground)",
-                          fontSize: 13,
-                        }}
+                        className={`pm-select-card${numero.trim().toUpperCase() === "S/N" ? " pm-selected" : ""}`}
+                        style={{ ...btn, padding: "0 16px", border: "1.5px solid " + (numero.trim().toUpperCase() === "S/N" ? "var(--primary)" : "var(--border)"), background: numero.trim().toUpperCase() === "S/N" ? "var(--primary-soft)" : "transparent", color: "var(--foreground)", fontSize: 13 }}
                       >
                         S/N
                       </button>
                     </div>
-                    <input style={input} placeholder="Complemento / referência" value={referencia} onChange={(e) => setReferencia(e.target.value)} />
                   </div>
-                )}
-              </div>
+                  <div>
+                    <label style={rotulo}>COMPLEMENTO / REFERÊNCIA</label>
+                    <input className="pm-input" style={input} placeholder="Complemento / referência" value={referencia} onChange={(e) => setReferencia(e.target.value)} />
+                  </div>
+                </div>
+              )}
 
-              <div style={{ ...card }}>
-                <p style={rotulo}>Observação</p>
+              <div style={card}>
+                <label style={rotulo}>OBSERVAÇÃO</label>
                 <textarea
+                  className="pm-input"
                   style={{ ...input, height: 68, padding: "10px 12px", resize: "vertical" }}
                   placeholder="Sem cebola, bem passado…"
                   value={observacao}
@@ -726,110 +1003,96 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
 
           {passo === "pagamento" && (
             <>
-              <div style={{ ...card, display: "grid", gap: 10 }}>
-                <p style={rotulo}>Forma de pagamento</p>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                  {[...(menu.payments || []), "Misto"].map((p) => {
-                    const ativo = pagamento === p || (p === "Misto" && !!extrairPagamentoComposto(pagamento))
-                    return (
-                      <button
-                        key={p}
-                        onClick={() => setPagamento(p)}
-                        style={{
-                          ...btn,
-                          height: 40,
-                          padding: "0 14px",
-                          border: "1px solid " + (ativo ? "var(--primary)" : "var(--surface-secondary)"),
-                          background: ativo ? "color-mix(in srgb, var(--primary) 15%, transparent)" : "transparent",
-                          color: "var(--foreground)",
-                          fontSize: 13,
-                        }}
-                      >
-                        {p === "Cartao" ? "Cartão" : p === "Misto" ? "Pagamento misto" : p}
-                      </button>
-                    )
-                  })}
-                </div>
+              <EtapaHeader indice={indicePassoAtual} titulo={STEP_META.pagamento.titulo} ajuda={STEP_META.pagamento.ajuda} />
 
-                {pagamento === "Misto" && (
-                  <div style={{ display: "grid", gap: 8 }}>
-                    <div style={{ display: "flex", gap: 8 }}>
-                      <input style={input} placeholder="Valor no Pix" value={mistoPix} onChange={(e) => setMistoPix(e.target.value)} inputMode="decimal" />
-                      <input style={input} placeholder="Valor em dinheiro" value={mistoDinheiro} onChange={(e) => setMistoDinheiro(e.target.value)} inputMode="decimal" />
-                    </div>
-                    {compostoAtual && !compostoAtual.ok && (
-                      <p role="status" aria-live="polite" style={{ fontSize: 12.5, fontWeight: 700, color: "var(--attention-text)", margin: 0 }}>
-                        {compostoAtual.erro}
-                      </p>
-                    )}
-                  </div>
-                )}
-
-                {temDinheiro && (
-                  <div style={{ display: "grid", gap: 8 }}>
-                    <div style={{ display: "flex", gap: 8 }}>
-                      <button onClick={() => setTrocoOpcao("nao")} style={{ ...btn, flex: 1, height: 40, fontSize: 13, border: "1px solid " + (trocoOpcao === "nao" ? "var(--primary)" : "var(--surface-secondary)"), background: "transparent", color: "var(--foreground)" }}>Sem troco</button>
-                      <button onClick={() => setTrocoOpcao("sim")} style={{ ...btn, flex: 1, height: 40, fontSize: 13, border: "1px solid " + (trocoOpcao === "sim" ? "var(--primary)" : "var(--surface-secondary)"), background: "transparent", color: "var(--foreground)" }}>Precisa de troco</button>
-                    </div>
-                    {trocoOpcao === "sim" && (
-                      <input style={input} placeholder="Troco para quanto?" value={troco} onChange={(e) => setTroco(e.target.value)} inputMode="decimal" />
-                    )}
-                  </div>
-                )}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0 2px" }}>
+                <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--foreground-secondary)" }}>Total do pedido</span>
+                <span style={{ fontSize: 18, fontWeight: 900, color: "var(--foreground)" }}>{money(totais.total)}</span>
               </div>
 
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 8 }}>
+                {[...(menu.payments || []), "Misto"].map((p) => {
+                  const ativo = pagamento === p || (p === "Misto" && !!extrairPagamentoComposto(pagamento))
+                  const Icone = /pix/i.test(p) ? Wallet : /dinheiro/i.test(p) ? Banknote : /cart/i.test(p) ? CreditCard : Shuffle
+                  return (
+                    <button
+                      key={p}
+                      onClick={() => setPagamento(p)}
+                      className={`pm-select-card${ativo ? " pm-selected" : ""}`}
+                      style={{ ...card, padding: 14, display: "flex", alignItems: "center", gap: 10, textAlign: "left" }}
+                    >
+                      <Icone size={18} aria-hidden="true" style={{ color: ativo ? "var(--brand-text)" : "var(--foreground-muted)", flexShrink: 0 }} />
+                      <span style={{ fontSize: 13.5, fontWeight: 800, color: "var(--foreground)" }}>
+                        {p === "Cartao" ? "Cartão" : p === "Misto" ? "Pagamento misto" : p}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+
+              {pagamento === "Misto" && (
+                <div style={{ ...card, display: "grid", gap: 8 }}>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <input className="pm-input" style={input} placeholder="Valor no Pix" value={mistoPix} onChange={(e) => setMistoPix(e.target.value)} inputMode="decimal" />
+                    <input className="pm-input" style={input} placeholder="Valor em dinheiro" value={mistoDinheiro} onChange={(e) => setMistoDinheiro(e.target.value)} inputMode="decimal" />
+                  </div>
+                  {compostoAtual && !compostoAtual.ok && (
+                    <p role="status" aria-live="polite" style={{ fontSize: 12.5, fontWeight: 700, color: "var(--attention-text)", margin: 0 }}>
+                      {compostoAtual.erro}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {temDinheiro && (
+                <div style={{ ...card, display: "grid", gap: 8 }}>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button onClick={() => setTrocoOpcao("nao")} className={`pm-select-card${trocoOpcao === "nao" ? " pm-selected" : ""}`} style={{ ...btn, flex: 1, height: 42, fontSize: 13, border: "1.5px solid " + (trocoOpcao === "nao" ? "var(--primary)" : "var(--border)"), background: trocoOpcao === "nao" ? "var(--primary-soft)" : "transparent", color: "var(--foreground)" }}>Sem troco</button>
+                    <button onClick={() => setTrocoOpcao("sim")} className={`pm-select-card${trocoOpcao === "sim" ? " pm-selected" : ""}`} style={{ ...btn, flex: 1, height: 42, fontSize: 13, border: "1.5px solid " + (trocoOpcao === "sim" ? "var(--primary)" : "var(--border)"), background: trocoOpcao === "sim" ? "var(--primary-soft)" : "transparent", color: "var(--foreground)" }}>Precisa de troco</button>
+                  </div>
+                  {trocoOpcao === "sim" && (
+                    <input className="pm-input" style={input} placeholder="Troco para quanto?" value={troco} onChange={(e) => setTroco(e.target.value)} inputMode="decimal" />
+                  )}
+                </div>
+              )}
             </>
           )}
 
           {passo === "revisar" && (
             <>
-              <div style={{ ...card, display: "grid", gap: 6 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <p style={{ ...rotulo, margin: 0 }}>Cliente</p>
-                  <button onClick={() => irParaPasso("cliente")} style={{ background: "none", border: "none", color: "var(--primary)", fontSize: 12, fontWeight: 800, cursor: "pointer" }}>Editar ✎</button>
-                </div>
-                <p style={{ fontSize: 13.5, fontWeight: 700, color: "var(--foreground)", margin: 0 }}>{cliente || "—"}</p>
-                <p style={{ fontSize: 12.5, color: "var(--foreground-secondary)", margin: 0 }}>
-                  {semTelefone ? "Sem número de telefone" : telefone || "—"}
-                </p>
-              </div>
+              <EtapaHeader indice={indicePassoAtual} titulo={STEP_META.revisar.titulo} ajuda={STEP_META.revisar.ajuda} />
 
-              <div style={{ ...card, display: "grid", gap: 6 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <p style={{ ...rotulo, margin: 0 }}>Produtos ({itens.length})</p>
-                  <button onClick={() => irParaPasso("produtos")} style={{ background: "none", border: "none", color: "var(--primary)", fontSize: 12, fontWeight: 800, cursor: "pointer" }}>Editar ✎</button>
-                </div>
+              <CardRevisao titulo="Cliente" onEditar={() => irParaPasso("cliente")}>
+                <p style={{ fontSize: 13.5, fontWeight: 700, color: "var(--foreground)", margin: 0 }}>{cliente || "—"}</p>
+                <p style={{ fontSize: 12.5, color: "var(--foreground-secondary)", margin: "2px 0 0" }}>
+                  {semTelefone ? "Sem número de telefone" : formatarTelefoneExibicao(telefone) || "—"}
+                </p>
+              </CardRevisao>
+
+              <CardRevisao titulo={`Produtos (${itens.length})`} onEditar={() => irParaPasso("produtos")}>
                 {itens.map((item, i) => (
                   <div key={`${item.name}-${item.detail}-${i}`} style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 12.5 }}>
                     <span style={{ color: "var(--foreground)", fontWeight: 700 }}>{item.qty}× {item.name}</span>
                     <span style={{ color: "var(--foreground-secondary)" }}>{money(item.price * item.qty)}</span>
                   </div>
                 ))}
-              </div>
+              </CardRevisao>
 
-              <div style={{ ...card, display: "grid", gap: 6 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <p style={{ ...rotulo, margin: 0 }}>Entrega</p>
-                  <button onClick={() => irParaPasso("entrega")} style={{ background: "none", border: "none", color: "var(--primary)", fontSize: 12, fontWeight: 800, cursor: "pointer" }}>Editar ✎</button>
-                </div>
+              <CardRevisao titulo="Entrega" onEditar={() => irParaPasso("entrega")}>
                 <p style={{ fontSize: 12.5, color: "var(--foreground-secondary)", margin: 0 }}>
                   {tipoEntrega === "delivery" ? `${rua}, ${numero} — ${bairro}` : tipoEntrega === "retirada" ? "Retirada no balcão" : "Consumo no local"}
                 </p>
-              </div>
+              </CardRevisao>
 
-              <div style={{ ...card, display: "grid", gap: 6 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <p style={{ ...rotulo, margin: 0 }}>Pagamento</p>
-                  <button onClick={() => irParaPasso("pagamento")} style={{ background: "none", border: "none", color: "var(--primary)", fontSize: 12, fontWeight: 800, cursor: "pointer" }}>Editar ✎</button>
-                </div>
+              <CardRevisao titulo="Pagamento" onEditar={() => irParaPasso("pagamento")}>
                 <p style={{ fontSize: 12.5, color: "var(--foreground-secondary)", margin: 0 }}>{pagamentoFinal || "—"}</p>
-              </div>
+              </CardRevisao>
 
-              <div style={{ ...card, display: "grid", gap: 4 }}>
+              <div style={{ ...card, display: "grid", gap: 6, borderColor: "var(--primary)", borderWidth: 2 }}>
                 <p style={rotulo}>Resumo</p>
                 <Linha label="Subtotal" valor={money(totais.subtotal)} />
                 {totais.taxa > 0 && <Linha label="Taxa de entrega" valor={money(totais.taxa)} />}
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 16, fontWeight: 900, marginTop: 4 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 20, fontWeight: 900, marginTop: 6, color: "var(--foreground)" }}>
                   <span>Total</span>
                   <span>{money(totais.total)}</span>
                 </div>
@@ -862,172 +1125,146 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
         </div>
 
         {/* Rodapé: sempre o próximo passo, e por que ele está bloqueado */}
-        <div style={{ borderTop: "1px solid var(--surface)", padding: "12px 16px calc(12px + env(safe-area-inset-bottom))", flexShrink: 0, display: "grid", gap: 8 }}>
-          {passo === "cliente" && (
-            <button
-              onClick={() => irParaPasso("produtos")}
-              disabled={!clienteValido}
-              style={{ ...btn, border: "none", background: "var(--primary)", color: "var(--background)", opacity: clienteValido ? 1 : 0.5 }}
-            >
-              Continuar para produtos
-            </button>
+        <div style={{ borderTop: "1px solid var(--border)", padding: "16px 24px calc(16px + env(safe-area-inset-bottom))", flexShrink: 0, display: "grid", gap: 10 }}>
+          {mensagemFaltante && (
+            <p style={{ fontSize: 12, fontWeight: 700, color: "var(--foreground-muted)", margin: 0, textAlign: "center" }}>
+              {mensagemFaltante}
+            </p>
           )}
-
           {passo === "produtos" && (
-            <>
-              {!podeIrParaEntrega && (
-                <p style={{ fontSize: 12, fontWeight: 700, color: "var(--foreground-muted)", margin: 0, textAlign: "center" }}>
-                  Adicione pelo menos um item para continuar.
-                </p>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 800 }}>
+              <span style={{ color: "var(--foreground-secondary)" }}>{itens.length} item(ns)</span>
+              <span>{money(totais.subtotal)}</span>
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 10 }}>
+            {passo !== "cliente" && (
+              <button
+                onClick={() => setPasso(PASSOS[indicePassoAtual - 1].id)}
+                disabled={passo === "revisar" && enviando}
+                style={{ ...btnSecondary, flex: 1 }}
+              >
+                Voltar
+              </button>
+            )}
+            <button
+              onClick={irParaProximoPasso}
+              disabled={passo === "revisar" ? enviando || pendencias.length > 0 : !etapaValidaAtual}
+              className="pm-cta"
+              style={{ ...btnPrimary, flex: passo === "cliente" ? undefined : 3, width: passo === "cliente" ? "100%" : undefined }}
+            >
+              {passo === "revisar" ? (
+                enviando ? (
+                  <><LoaderCircle size={16} className="pm-spin" aria-hidden="true" /> Criando pedido…</>
+                ) : (
+                  "Criar pedido"
+                )
+              ) : (
+                <>Continuar <ArrowRight size={16} aria-hidden="true" /></>
               )}
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 800 }}>
-                <span style={{ color: "var(--foreground-secondary)" }}>{itens.length} item(ns)</span>
-                <span>{money(totais.subtotal)}</span>
-              </div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <button onClick={() => setPasso("cliente")} style={{ ...btn, flex: 1, border: "1px solid var(--surface-secondary)", background: "transparent", color: "var(--foreground-secondary)" }}>Voltar</button>
-                <button
-                  onClick={() => irParaPasso("entrega")}
-                  disabled={!podeIrParaEntrega}
-                  style={{ ...btn, flex: 2, border: "none", background: "var(--primary)", color: "var(--background)", opacity: podeIrParaEntrega ? 1 : 0.5 }}
-                >
-                  Continuar para entrega
-                </button>
-              </div>
-            </>
-          )}
-
-          {passo === "entrega" && (
-            <div style={{ display: "flex", gap: 8 }}>
-              <button onClick={() => setPasso("produtos")} style={{ ...btn, flex: 1, border: "1px solid var(--surface-secondary)", background: "transparent", color: "var(--foreground-secondary)" }}>Voltar</button>
-              <button
-                onClick={() => irParaPasso("pagamento")}
-                disabled={!entregaValida}
-                style={{ ...btn, flex: 2, border: "none", background: "var(--primary)", color: "var(--background)", opacity: entregaValida ? 1 : 0.5 }}
-              >
-                Continuar para pagamento
-              </button>
-            </div>
-          )}
-
-          {passo === "pagamento" && (
-            <div style={{ display: "flex", gap: 8 }}>
-              <button onClick={() => setPasso("entrega")} style={{ ...btn, flex: 1, border: "1px solid var(--surface-secondary)", background: "transparent", color: "var(--foreground-secondary)" }}>Voltar</button>
-              <button
-                onClick={() => irParaPasso("revisar")}
-                disabled={!pagamentoValido}
-                style={{ ...btn, flex: 2, border: "none", background: "var(--primary)", color: "var(--background)", opacity: pagamentoValido ? 1 : 0.5 }}
-              >
-                Continuar para revisão
-              </button>
-            </div>
-          )}
-
-          {passo === "revisar" && (
-            <div style={{ display: "flex", gap: 8 }}>
-              <button onClick={() => setPasso("pagamento")} disabled={enviando} style={{ ...btn, flex: 1, border: "1px solid var(--surface-secondary)", background: "transparent", color: "var(--foreground-secondary)" }}>Voltar</button>
-              <button
-                onClick={enviar}
-                disabled={enviando || pendencias.length > 0}
-                style={{ ...btn, flex: 2, border: "none", background: "var(--primary)", color: "var(--background)", opacity: enviando || pendencias.length > 0 ? 0.5 : 1 }}
-              >
-                {enviando ? "Criando pedido…" : "Criar pedido"}
-              </button>
-            </div>
-          )}
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Construtor guiado — uma decisão por tela */}
+      {/* Construtor guiado — dentro do mesmo fluxo, nunca uma camada fullscreen */}
       {produtoAberto && etapaAtual && (
         <div
           role="dialog"
           aria-modal="true"
           aria-label={`Montar ${produtoAberto.nome}`}
-          style={{ position: "fixed", inset: 0, zIndex: 2900, background: "var(--background)", display: "flex", flexDirection: "column", fontFamily: "'Archivo', sans-serif" }}
+          style={{ position: "fixed", inset: 0, zIndex: 2900, background: "rgba(var(--overlay-rgb), 0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, fontFamily: "'Archivo', sans-serif" }}
         >
-          <div style={{ padding: "14px 16px", borderBottom: "1px solid var(--surface)", flexShrink: 0 }}>
-            <p style={{ ...rotulo, margin: 0 }}>
-              {produtoAberto.nome} · passo {etapaVisivel + 1} de {etapas.length}
-            </p>
-            <p style={{ fontSize: 18, fontWeight: 900, color: "var(--foreground)", margin: "4px 0 2px" }}>{etapaAtual.titulo}</p>
-            <p style={{ fontSize: 12.5, fontWeight: 600, color: "var(--foreground-secondary)", margin: 0 }}>{etapaAtual.ajuda}</p>
-          </div>
-
-          {/* O que já foi escolhido — some a dúvida "o que eu já marquei?" */}
-          <div style={{ padding: "8px 16px", display: "flex", flexWrap: "wrap", gap: 6, flexShrink: 0 }}>
-            {etapas.map((e, i) => {
-              const resumo = resumoEtapa(e, selecao)
-              if (!resumo) return null
-              return (
-                <button
-                  key={e.tipo}
-                  onClick={() => setEtapaVisivel(i)}
-                  style={{ ...btn, height: 28, padding: "0 10px", fontSize: 11.5, border: "1px solid var(--surface-secondary)", background: "var(--surface)", color: "var(--foreground-secondary)" }}
-                >
-                  {e.titulo}: {resumo} ✎
-                </button>
-              )
-            })}
-          </div>
-
-          <div style={{ flex: 1, overflowY: "auto", padding: "4px 16px 16px", display: "grid", gap: 8, alignContent: "start" }}>
-            {etapaAtual.opcoes.map((o) => {
-              const sel = estaEscolhida(o.valor)
-              return (
-                <button
-                  key={o.valor || "__sem__"}
-                  onClick={() => !o.esgotado && escolher(o.valor)}
-                  disabled={o.esgotado}
-                  style={{
-                    ...card,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: 10,
-                    textAlign: "left",
-                    cursor: o.esgotado ? "not-allowed" : "pointer",
-                    opacity: o.esgotado ? 0.45 : 1,
-                    borderColor: sel ? "var(--primary)" : "var(--surface-secondary)",
-                    background: sel ? "color-mix(in srgb, var(--primary) 12%, transparent)" : "var(--surface)",
-                  }}
-                >
-                  <span style={{ fontSize: 14, fontWeight: 800, color: "var(--foreground)" }}>
-                    {o.label}
-                    {o.esgotado ? " · esgotado" : ""}
-                  </span>
-                  <span style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-                    {o.extra ? <span style={{ fontSize: 12.5, fontWeight: 800, color: "var(--brand-text)" }}>+{money(o.extra)}</span> : null}
-                    {sel ? <span style={{ fontSize: 14, color: "var(--primary)" }}>✓</span> : null}
-                  </span>
-                </button>
-              )
-            })}
-          </div>
-
-          <div style={{ borderTop: "1px solid var(--surface)", padding: "12px 16px calc(12px + env(safe-area-inset-bottom))", flexShrink: 0, display: "grid", gap: 8 }}>
-            {bloqueio && (
-              <p role="status" aria-live="polite" style={{ fontSize: 12.5, fontWeight: 700, color: "var(--attention-text)", margin: 0, textAlign: "center" }}>
-                {bloqueio}
+          <div style={{ width: "min(94vw, 560px)", maxHeight: "88vh", background: "var(--background)", borderRadius: 24, boxShadow: "var(--shadow-lg)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+            <div style={{ padding: "18px 22px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
+              <p style={eyebrow}>
+                {produtoAberto.nome} · PASSO {etapaVisivel + 1} DE {etapas.length}
               </p>
-            )}
-            <div style={{ display: "flex", gap: 8 }}>
-              <button onClick={voltarEtapa} style={{ ...btn, flex: 1, border: "1px solid var(--surface-secondary)", background: "transparent", color: "var(--foreground-secondary)" }}>
-                {etapaVisivel > 0 ? "Voltar" : "Cancelar item"}
-              </button>
-              {indiceEtapaPendente(etapas, selecao) === -1 ? (
-                <button onClick={confirmarMontagem} style={{ ...btn, flex: 2, border: "none", background: "var(--primary)", color: "var(--background)" }}>
-                  Adicionar ao pedido
-                </button>
-              ) : (
-                <button
-                  onClick={avancarEtapa}
-                  disabled={!!bloqueio}
-                  style={{ ...btn, flex: 2, border: "none", background: "var(--primary)", color: "var(--background)", opacity: bloqueio ? 0.5 : 1 }}
-                >
-                  {etapaVisivel < etapas.length - 1 ? `Continuar para ${etapas[etapaVisivel + 1].titulo.toLowerCase()}` : "Continuar"}
-                </button>
+              <p style={{ fontSize: 19, fontWeight: 900, color: "var(--foreground)", margin: "4px 0 2px" }}>{etapaAtual.titulo}</p>
+              <p style={{ fontSize: 12.5, fontWeight: 600, color: "var(--foreground-secondary)", margin: 0 }}>{etapaAtual.ajuda}</p>
+            </div>
+
+            {/* O que já foi escolhido — some a dúvida "o que eu já marquei?" */}
+            <div style={{ padding: "10px 22px 0", display: "flex", flexWrap: "wrap", gap: 6, flexShrink: 0 }}>
+              {etapas.map((e, i) => {
+                const resumo = resumoEtapa(e, selecao)
+                if (!resumo) return null
+                return (
+                  <button
+                    key={e.tipo}
+                    onClick={() => setEtapaVisivel(i)}
+                    style={{ ...btn, height: 28, padding: "0 10px", fontSize: 11.5, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--foreground-secondary)" }}
+                  >
+                    {e.titulo}: {resumo} ✎
+                  </button>
+                )
+              })}
+            </div>
+
+            <div style={{ flex: 1, overflowY: "auto", padding: "14px 22px 22px", display: "grid", gap: 10, alignContent: "start" }}>
+              {etapaAtual.opcoes.map((o) => {
+                const sel = estaEscolhida(o.valor)
+                return (
+                  <label
+                    key={o.valor || "__sem__"}
+                    className={`pm-select-card${sel ? " pm-selected" : ""}`}
+                    style={{
+                      ...card,
+                      padding: 14,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 10,
+                      cursor: o.esgotado ? "not-allowed" : "pointer",
+                      opacity: o.esgotado ? 0.45 : 1,
+                    }}
+                  >
+                    <span style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                      <span style={{ fontSize: 14, fontWeight: 800, color: "var(--foreground)" }}>
+                        {o.label}
+                        {o.esgotado ? " · esgotado" : ""}
+                      </span>
+                      {o.extra ? <span style={{ fontSize: 12.5, fontWeight: 800, color: "var(--brand-text)" }}>+{money(o.extra)}</span> : null}
+                    </span>
+                    <input
+                      type={tipoControleEtapa}
+                      name="pm-opcao-etapa"
+                      checked={sel}
+                      disabled={o.esgotado}
+                      onChange={() => !o.esgotado && escolher(o.valor)}
+                      aria-label={o.label}
+                      style={{ width: 20, height: 20, accentColor: "var(--primary)", flexShrink: 0, cursor: o.esgotado ? "not-allowed" : "pointer" }}
+                    />
+                  </label>
+                )
+              })}
+            </div>
+
+            <div style={{ borderTop: "1px solid var(--border)", padding: "16px 22px calc(16px + env(safe-area-inset-bottom))", flexShrink: 0, display: "grid", gap: 10 }}>
+              {bloqueio && (
+                <p role="status" aria-live="polite" style={{ fontSize: 12.5, fontWeight: 700, color: "var(--attention-text)", margin: 0, textAlign: "center" }}>
+                  {bloqueio}
+                </p>
               )}
+              <div style={{ display: "flex", gap: 10 }}>
+                <button onClick={voltarEtapa} style={{ ...btnSecondary, flex: 1 }}>
+                  {etapaVisivel > 0 ? "Voltar" : "Cancelar item"}
+                </button>
+                {indiceEtapaPendente(etapas, selecao) === -1 ? (
+                  <button onClick={confirmarMontagem} className="pm-cta" style={{ ...btnPrimary, flex: 2 }}>
+                    Adicionar ao pedido
+                  </button>
+                ) : (
+                  <button
+                    onClick={avancarEtapa}
+                    disabled={!!bloqueio}
+                    className="pm-cta"
+                    style={{ ...btnPrimary, flex: 2 }}
+                  >
+                    {etapaVisivel < etapas.length - 1 ? `Continuar para ${etapas[etapaVisivel + 1].titulo.toLowerCase()}` : "Continuar"} <ArrowRight size={16} aria-hidden="true" />
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -1040,12 +1277,58 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
             <p style={{ fontSize: 13, color: "var(--foreground-secondary)", margin: 0 }}>
               O que já foi montado será perdido. O pedido ainda não foi criado.
             </p>
-            <button onClick={() => setConfirmarSaida(false)} style={{ ...btn, border: "1px solid var(--surface-secondary)", background: "transparent", color: "var(--foreground)" }}>Continuar montando</button>
+            <button onClick={() => setConfirmarSaida(false)} style={{ ...btnSecondary }}>Continuar montando</button>
             <button onClick={onFechar} style={{ ...btn, border: "none", background: "var(--danger)", color: "#fff" }}>Descartar</button>
           </div>
         </div>
       )}
+
+      <style jsx>{`
+        .pm-input { transition: border-color .15s ease, box-shadow .15s ease; }
+        .pm-input:focus-visible, .pm-input:focus { border-color: var(--primary) !important; box-shadow: 0 0 0 3px var(--primary-soft); }
+        .pm-close:hover { background: var(--surface-secondary); }
+        .pm-steps-row { display: flex; }
+        .pm-step-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; position: relative; }
+        .pm-step-col:not(:last-child)::after {
+          content: "";
+          position: absolute;
+          top: 17px;
+          left: 50%;
+          width: 100%;
+          height: 2px;
+          background: var(--border);
+          z-index: 0;
+        }
+        .pm-step-col.pm-step-done:not(:last-child)::after { background: var(--success); }
+        .pm-step-circle { position: relative; z-index: 1; }
+        .pm-select-card { transition: border-color .15s ease, background .15s ease; }
+        .pm-select-card:hover:not(:disabled) { border-color: var(--border-strong); }
+        .pm-select-card.pm-selected { border-color: var(--primary) !important; background: var(--primary-soft) !important; }
+        .pm-cta:disabled { opacity: .5; cursor: not-allowed; }
+        .pm-cta:not(:disabled):hover { background: var(--primary-hover); }
+        .pm-spin { animation: pm-spin .8s linear infinite; }
+        @keyframes pm-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        @media (prefers-reduced-motion: reduce) {
+          .pm-spin { animation: none; }
+        }
+      `}</style>
     </div>
+  )
+}
+
+function CardRevisao({ titulo, onEditar, children }: { titulo: string; onEditar: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      onClick={onEditar}
+      aria-label={`Editar ${titulo}`}
+      style={{ ...card, display: "grid", gap: 6, textAlign: "left", cursor: "pointer", width: "100%" }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span style={rotulo}>{titulo}</span>
+        <Pencil size={14} aria-hidden="true" style={{ color: "var(--brand-text)", flexShrink: 0 }} />
+      </div>
+      {children}
+    </button>
   )
 }
 
@@ -1055,5 +1338,16 @@ function Linha({ label, valor }: { label: string; valor: string }) {
       <span>{label}</span>
       <span>{valor}</span>
     </div>
+  )
+}
+
+// Ícone oficial do WhatsApp (cor de marca do próprio WhatsApp, `var(--whatsapp)`
+// — nunca da pizzaria) — usado só para identificar visualmente o canal do
+// cliente reconhecido, nunca como cor de destaque geral da tela.
+function WhatsAppIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="var(--whatsapp)" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.39 1.26 4.81L2 22l5.42-1.42a9.87 9.87 0 004.62 1.18h.01c5.46 0 9.91-4.45 9.91-9.91C21.96 6.45 17.5 2 12.04 2zm5.8 14.02c-.24.68-1.4 1.3-1.93 1.35-.5.05-.99.24-3.32-.69-2.81-1.12-4.62-3.99-4.76-4.18-.14-.19-1.14-1.52-1.14-2.9 0-1.38.72-2.06.98-2.34.26-.28.56-.35.75-.35.19 0 .38 0 .54.01.18.01.41-.07.64.49.24.58.81 2 .88 2.14.07.14.12.31.02.5-.09.19-.14.31-.28.47-.14.16-.29.36-.42.48-.14.14-.28.29-.12.57.16.28.72 1.19 1.55 1.93 1.06.95 1.96 1.24 2.24 1.38.28.14.44.12.6-.07.16-.19.68-.79.87-1.06.19-.28.37-.23.63-.14.26.09 1.66.78 1.94.93.28.14.47.21.54.33.07.12.07.68-.17 1.36z" />
+    </svg>
   )
 }

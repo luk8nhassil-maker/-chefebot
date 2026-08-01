@@ -263,19 +263,6 @@ function parseHybridPayment(pagamento: string): { metodo: string; valor: number 
   return resultado.length >= 2 ? resultado : null
 }
 
-type NovoPedidoForm = {
-  cliente: string
-  telefone: string
-  tipoEntrega: "delivery" | "retirada" | "dine_in"
-  endereco: string
-  bairro: string
-  referencia: string
-  itens: string[]
-  observacao: string
-  pagamento: string
-  total: string
-}
-
 function imprimirPedidoSilencioso(id: string) {
   if (typeof window === "undefined") return
 
@@ -387,11 +374,6 @@ export default function PedidosPage() {
   const [carregandoArquivados, setCarregandoArquivados] = useState(false)
   const [modalArquivarExpediente, setModalArquivarExpediente] = useState(false)
   const [arquivandoExpediente, setArquivandoExpediente] = useState(false)
-  const [modalNovoPedido, setModalNovoPedido] = useState(false)
-  const [novoPedidoForm, setNovoPedidoForm] = useState<NovoPedidoForm>({
-    cliente: "", telefone: "", tipoEntrega: "delivery", endereco: "", bairro: "", referencia: "", itens: [""], observacao: "", pagamento: "", total: ""
-  })
-  const [salvandoNovoPedido, setSalvandoNovoPedido] = useState(false)
   const [modalAlterarStatus, setModalAlterarStatus] = useState<string | null>(null)
   const [cancelandoId, setCancelandoId] = useState<string | null>(null)
   const [confirmPixModal, setConfirmPixModal] = useState<string | null>(null)
@@ -1129,38 +1111,6 @@ export default function PedidosPage() {
     setCancelandoId(null); setDetailId(null)
   }
 
-  const salvarNovoPedido = async () => {
-    const f = novoPedidoForm
-    if (!f.cliente.trim() || !f.itens.filter(Boolean).length) return
-    setSalvandoNovoPedido(true)
-    try {
-      const r = await fetch("/api/orders", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          cliente: f.cliente.trim(),
-          telefone: f.telefone.trim(),
-          tipoEntrega: f.tipoEntrega,
-          endereco: f.tipoEntrega === "delivery" ? f.endereco.trim() : f.tipoEntrega === "dine_in" ? "Consumo no local" : "Retirada na loja",
-          bairro: f.tipoEntrega === "delivery" ? f.bairro.trim() : undefined,
-          referencia: f.referencia.trim() || undefined,
-          itens: f.itens.filter(Boolean),
-          observacao: f.observacao.trim() || undefined,
-          pagamento: f.pagamento || undefined,
-          total: parseFloat(f.total.replace(",", ".")) || 0,
-        }),
-      })
-      if (r.ok) {
-        const novo = await r.json()
-        setPedidos(prev => [novo, ...prev])
-        setModalNovoPedido(false)
-        setNovoPedidoForm({ cliente: "", telefone: "", tipoEntrega: "delivery", endereco: "", bairro: "", referencia: "", itens: [""], observacao: "", pagamento: "", total: "" })
-        tocarSomNormal()
-      }
-    } catch {}
-    setSalvandoNovoPedido(false)
-  }
-
   const desfazerToast = () => {
     if (!toast) return
     setPedidos(prev => prev.map(p => p.id === toast.pedidoId ? { ...p, status: toast.prevStatus } : p))
@@ -1254,9 +1204,6 @@ export default function PedidosPage() {
       <div style={{ textAlign: "center" }}><div style={{ fontSize: 36, marginBottom: 12 }}>🍕</div><p style={{ color: "var(--foreground-secondary)", fontSize: 14, fontFamily: "'Archivo', sans-serif" }}>Carregando...</p></div>
     </div>
   )
-
-  const inputStyle: React.CSSProperties = { width: "100%", height: 46, background: "var(--surface)", border: "1px solid var(--surface-secondary)", borderRadius: 12, padding: "0 14px", color: "var(--foreground)", fontSize: 14, fontFamily: "'Archivo', sans-serif", outline: "none", boxSizing: "border-box" }
-  const labelStyle: React.CSSProperties = { display: "block", fontSize: 11, fontWeight: 900, color: "var(--foreground-muted)", textTransform: "uppercase", letterSpacing: ".8px", marginBottom: 6 }
 
   const showSimpleToast = (msg: string) => {
     setSimpleToast(msg); clearTimeout(simpleToastTimerRef.current)
@@ -1818,7 +1765,7 @@ export default function PedidosPage() {
               <button onClick={() => setFiltro("arquivados")} style={{ border: `1px solid ${filtro === "arquivados" ? "color-mix(in srgb, var(--attention) 60%, transparent)" : "var(--surface-secondary)"}`, background: filtro === "arquivados" ? "color-mix(in srgb, var(--attention) 15%, transparent)" : "transparent", color: filtro === "arquivados" ? "var(--attention)" : "var(--foreground-muted)", fontSize: 11, fontWeight: 900, padding: "6px 11px", borderRadius: 14, flexShrink: 0 }}>📦 Arquivados</button>
             </div>
             <button onClick={() => setModalArquivarExpediente(true)} title="Arquivar não resolvidos do expediente" style={{ height: 32, border: "1px solid color-mix(in srgb, var(--attention) 40%, transparent)", background: "color-mix(in srgb, var(--attention) 8%, transparent)", color: "var(--attention)", fontSize: 11, fontWeight: 900, padding: "0 10px", borderRadius: 10, flexShrink: 0, whiteSpace: "nowrap" }}>📦</button>
-            <button onClick={() => setModalNovoPedido(true)} style={{ height: 32, border: "1px solid color-mix(in srgb, var(--primary) 50%, transparent)", background: "color-mix(in srgb, var(--primary) 10%, transparent)", color: "var(--brand-text)", fontSize: 11, fontWeight: 900, padding: "0 10px", borderRadius: 10, flexShrink: 0 }}>+ Novo</button>
+            <button onClick={abrirNovoPedido} disabled={carregandoMenu} title="Montar um pedido de telefone ou balcão" style={{ height: 32, border: "1px solid color-mix(in srgb, var(--primary) 50%, transparent)", background: "color-mix(in srgb, var(--primary) 10%, transparent)", color: "var(--brand-text)", fontSize: 11, fontWeight: 900, padding: "0 10px", borderRadius: 10, flexShrink: 0, opacity: carregandoMenu ? 0.6 : 1 }}>+ Novo</button>
             <button onClick={() => setModalLimpar(true)} title="Limpar histórico" style={{ width: 32, height: 32, border: "1px solid var(--surface-secondary)", borderRadius: 10, background: "transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><polyline points="3,6 5,6 21,6" stroke="var(--foreground-muted)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" stroke="var(--foreground-muted)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/><path d="M10 11v6M14 11v6" stroke="var(--foreground-muted)" strokeWidth="2.2" strokeLinecap="round"/><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" stroke="var(--foreground-muted)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
             </button>
@@ -2439,82 +2386,6 @@ export default function PedidosPage() {
                 {arquivandoExpediente ? "Arquivando..." : "📦 Sim, arquivar não resolvidos"}
               </button>
               <button onClick={() => setModalArquivarExpediente(false)} disabled={arquivandoExpediente} style={{ height: 46, border: "none", background: "transparent", color: "var(--foreground-secondary)", fontSize: 14, fontWeight: 800 }}>Cancelar</button>
-            </div>
-          </>
-        )}
-
-        {/* Modal Novo Pedido */}
-        {modalNovoPedido && (
-          <>
-            <div onClick={() => setModalNovoPedido(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.75)", zIndex: 70, animation: "cbFadeIn .2s ease both" }} />
-            <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, margin: "0 auto", maxWidth: 375, background: "var(--background)", border: "1px solid var(--surface-secondary)", borderBottom: "none", borderRadius: "26px 26px 0 0", zIndex: 71, animation: "cbSheetUp .32s cubic-bezier(.2,.9,.3,1) both", padding: "12px 20px 32px", display: "flex", flexDirection: "column", gap: 12, maxHeight: "90vh", overflowY: "auto" }}>
-              <div style={{ width: 44, height: 5, borderRadius: 3, background: "var(--surface-elevated)", margin: "0 auto 4px", flexShrink: 0 }} />
-              <p style={{ margin: 0, fontSize: 19, fontWeight: 900, letterSpacing: "-0.4px", flexShrink: 0 }}>Novo pedido</p>
-
-              <div>
-                <label style={labelStyle}>Cliente *</label>
-                <input className="cbInput" value={novoPedidoForm.cliente} onChange={e => setNovoPedidoForm(f => ({ ...f, cliente: e.target.value }))} placeholder="Nome do cliente" style={inputStyle} />
-              </div>
-              <div>
-                <label style={labelStyle}>Telefone</label>
-                <input className="cbInput" value={novoPedidoForm.telefone} onChange={e => setNovoPedidoForm(f => ({ ...f, telefone: e.target.value }))} placeholder="(86) 99999-9999" style={inputStyle} type="tel" />
-              </div>
-              <div>
-                <label style={labelStyle}>Tipo</label>
-                <div style={{ display: "flex", gap: 8 }}>
-                  {(["delivery", "retirada", "dine_in"] as const).map(t => (
-                    <button key={t} onClick={() => setNovoPedidoForm(f => ({ ...f, tipoEntrega: t }))} style={{ flex: 1, height: 40, border: `1px solid ${novoPedidoForm.tipoEntrega === t ? "var(--primary)" : "var(--surface-secondary)"}`, borderRadius: 10, background: novoPedidoForm.tipoEntrega === t ? "color-mix(in srgb, var(--primary) 15%, transparent)" : "transparent", color: novoPedidoForm.tipoEntrega === t ? "var(--text-primary)" : "var(--text-muted)", fontSize: 13, fontWeight: 900 }}>
-                      {t === "delivery" ? "🛵 Entrega" : t === "dine_in" ? "🍽️ Local" : "🏪 Retirada"}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              {novoPedidoForm.tipoEntrega === "delivery" && (
-                <>
-                  <div>
-                    <label style={labelStyle}>Endereço</label>
-                    <input className="cbInput" value={novoPedidoForm.endereco} onChange={e => setNovoPedidoForm(f => ({ ...f, endereco: e.target.value }))} placeholder="Rua, número" style={inputStyle} />
-                  </div>
-                  <div>
-                    <label style={labelStyle}>Bairro</label>
-                    <input className="cbInput" value={novoPedidoForm.bairro} onChange={e => setNovoPedidoForm(f => ({ ...f, bairro: e.target.value }))} placeholder="Centro, Tucum..." style={inputStyle} />
-                  </div>
-                  <div>
-                    <label style={labelStyle}>Referência</label>
-                    <input className="cbInput" value={novoPedidoForm.referencia} onChange={e => setNovoPedidoForm(f => ({ ...f, referencia: e.target.value }))} placeholder="Perto do mercado..." style={inputStyle} />
-                  </div>
-                </>
-              )}
-              <div>
-                <label style={labelStyle}>Itens *</label>
-                {novoPedidoForm.itens.map((item, i) => (
-                  <div key={i} style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-                    <input className="cbInput" value={item} onChange={e => { const arr = [...novoPedidoForm.itens]; arr[i] = e.target.value; setNovoPedidoForm(f => ({ ...f, itens: arr })) }} placeholder={`Item ${i + 1}`} style={{ ...inputStyle, flex: 1 }} />
-                    {novoPedidoForm.itens.length > 1 && <button onClick={() => setNovoPedidoForm(f => ({ ...f, itens: f.itens.filter((_, j) => j !== i) }))} style={{ width: 40, height: 46, border: "1px solid var(--surface-secondary)", borderRadius: 10, background: "transparent", color: "var(--danger)", fontSize: 18, flexShrink: 0 }}>×</button>}
-                  </div>
-                ))}
-                <button onClick={() => setNovoPedidoForm(f => ({ ...f, itens: [...f.itens, ""] }))} style={{ height: 36, width: "100%", border: "1px dashed var(--surface-secondary)", borderRadius: 10, background: "transparent", color: "var(--foreground-muted)", fontSize: 13, fontWeight: 800 }}>+ Adicionar item</button>
-              </div>
-              <div>
-                <label style={labelStyle}>Observação</label>
-                <input className="cbInput" value={novoPedidoForm.observacao} onChange={e => setNovoPedidoForm(f => ({ ...f, observacao: e.target.value }))} placeholder="Sem cebola, bem passado..." style={inputStyle} />
-              </div>
-              <div>
-                <label style={labelStyle}>Forma de pagamento</label>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                  {["Pix", "Dinheiro", "Cartão", "Misto"].map(p => (
-                    <button key={p} onClick={() => setNovoPedidoForm(f => ({ ...f, pagamento: p }))} style={{ height: 36, padding: "0 14px", border: `1px solid ${novoPedidoForm.pagamento === p ? "var(--primary)" : "var(--surface-secondary)"}`, borderRadius: 10, background: novoPedidoForm.pagamento === p ? "color-mix(in srgb, var(--primary) 15%, transparent)" : "transparent", color: novoPedidoForm.pagamento === p ? "var(--text-primary)" : "var(--text-muted)", fontSize: 12, fontWeight: 900 }}>{p}</button>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <label style={labelStyle}>Total (R$)</label>
-                <input className="cbInput" value={novoPedidoForm.total} onChange={e => setNovoPedidoForm(f => ({ ...f, total: e.target.value }))} placeholder="0,00" style={inputStyle} inputMode="decimal" />
-              </div>
-              <button onClick={salvarNovoPedido} disabled={salvandoNovoPedido || !novoPedidoForm.cliente.trim() || !novoPedidoForm.itens.filter(Boolean).length} style={{ height: 56, border: "none", borderRadius: 16, background: "linear-gradient(180deg,var(--primary),var(--primary))", color: 'var(--primary-foreground)', fontSize: 17, fontWeight: 900, opacity: (salvandoNovoPedido || !novoPedidoForm.cliente.trim() || !novoPedidoForm.itens.filter(Boolean).length) ? 0.5 : 1, flexShrink: 0 }}>
-                {salvandoNovoPedido ? "Salvando..." : "Criar pedido"}
-              </button>
-              <button onClick={() => setModalNovoPedido(false)} style={{ height: 44, border: "none", background: "transparent", color: "var(--foreground-secondary)", fontSize: 14, fontWeight: 800, flexShrink: 0 }}>Cancelar</button>
             </div>
           </>
         )}

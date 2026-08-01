@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import { encontrarPedidoPixPendentePorTelefone } from "./pixPedidoMatching";
-import { normalizarTelefoneBrasil, telefonesCorrespondem } from "./telefone";
+import { formatarTelefoneExibicao, normalizarTelefoneBrasil, telefonesCorrespondem } from "./telefone";
 
 describe("matching seguro de telefone", () => {
   test("telefone mascarado do cardapio bate com WhatsApp com 55", () => {
@@ -27,6 +27,21 @@ describe("matching seguro de telefone", () => {
 
   test("caso legado igual continua batendo", () => {
     expect(telefonesCorrespondem("5599999999999", "5599999999999")).toBe(true);
+  });
+});
+
+describe("máscara de exibição do telefone (sem DDD fixo)", () => {
+  test("aplica o padrão conforme o número de dígitos já digitados", () => {
+    expect(formatarTelefoneExibicao("")).toBe("");
+    expect(formatarTelefoneExibicao("86")).toBe("86");
+    expect(formatarTelefoneExibicao("8699")).toBe("(86) 99");
+    expect(formatarTelefoneExibicao("86999998888")).toBe("(86) 99999-8888");
+    expect(formatarTelefoneExibicao("8699998888")).toBe("(86) 9999-8888");
+  });
+
+  test("ignora não-dígitos e trunca em 11 dígitos, sem assumir nenhum DDD", () => {
+    expect(formatarTelefoneExibicao("(11) 91234-5678extra")).toBe("(11) 91234-5678");
+    expect(formatarTelefoneExibicao(null)).toBe("");
   });
 });
 
