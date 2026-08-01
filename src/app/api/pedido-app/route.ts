@@ -15,6 +15,7 @@ import { type ItemApp, type MenuPedidoApp, formatItem, officialUnitPrice, makePr
 import { prepararResgateParaPedido, confirmarReservaNoPedido, liberarVinculoRecompensaPedidoNaoCriado, type EscolhaRecompensaJornada } from "@/lib/jornadaChef";
 import { survivalModeEnabled, survivalClientRequestIdEnforcementEnabled } from "@/survival/flags";
 import { lerSessaoAdministrativa, origemDoPedido } from "@/lib/sessaoAdministrativa";
+import { lerSessaoSalao } from "@/lib/salaoAuth";
 import { hashClientRequestId, sanitizeClientRequestId } from "@/survival/clientRequestId";
 import { calcularRequestFingerprint } from "@/survival/requestFingerprint";
 import { logSurvivalErro } from "@/survival/logging";
@@ -817,6 +818,11 @@ export async function POST(req: NextRequest) {
     // qualquer visitante do cardápio público poderia se declarar atendente e
     // ganhar tanto a origem quanto o caminho de idempotência.
     const sessaoAdmin = await lerSessaoAdministrativa(req);
+    // Sessão do Módulo Salão (cookie e segredo totalmente separados do
+    // painel administrativo — ver src/lib/salaoAuth.ts). Usada só para
+    // dispensar o telefone obrigatório: mesa não tem telefone. Nunca
+    // participa de origem nem de idempotência administrativa.
+    const sessaoSalao = await lerSessaoSalao(req);
 
     // A proteção de idempotência do pedido administrativo NÃO depende da flag
     // global do Modo Sobrevivência: ela vale sempre que a requisição vier de
@@ -963,7 +969,10 @@ export async function POST(req: NextRequest) {
     }
     const telefonePedido = vinculoWhatsapp && !usarOutroWhatsapp ? vinculoWhatsapp.phone : telefoneDigitado;
     const whatsappVinculado = !!vinculoWhatsapp && !usarOutroWhatsapp;
-    if (!telefonePedido) {
+    // Pedido de mesa (Salão) nunca tem telefone — dispensado só com uma
+    // sessão do Salão real, verificada no servidor (nunca por um campo do
+    // corpo).
+    if (!telefonePedido && !sessaoSalao) {
       return NextResponse.json({ ok: false, error: "Telefone obrigatório" }, { status: 400 });
     }
 
