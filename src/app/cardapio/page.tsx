@@ -699,6 +699,24 @@ const PIX_STATUS_LABEL: Record<PagamentoPixClienteStatus, string> = {
 
 const money = (v: number) => "R$ " + v.toFixed(2).replace(".", ",");
 const bigBorder = (sz: string) => !(sz === "P" || sz === "M");
+
+// Cartões de opção (.opt) são <div onClick>, então nativamente inacessíveis
+// por teclado. Este helper só cobre role/tabIndex/aria-disabled — sem
+// closure de callback — para cada cartão continuar tirando do fluxo de tab
+// e sinalizando estado quando `disabled` (ex.: item esgotado), espelhando a
+// mesma guarda que o próprio onClick já usa (`!esg && ...`). O onKeyDown que
+// acorda Enter/Espaço fica inline em cada cartão, ao lado do onClick — nunca
+// roteado por uma função helper, para o analisador de regras dos hooks do
+// React não marcar o fechamento de uma função de seleção como acesso a ref
+// durante o render (só ocorre de fato ao apertar a tecla, nunca no render).
+function optA11yAttrs(disabled?: boolean) {
+  return {
+    role: "button" as const,
+    tabIndex: disabled ? -1 : 0,
+    "aria-disabled": disabled || undefined,
+  };
+}
+const isActivateKey = (e: React.KeyboardEvent) => e.key === "Enter" || e.key === " ";
 const itemSlug = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
 const isMiniPizzaName = (value: string) => itemSlug(value) === "minipizza";
 const isCalzoneName = (value: string) => itemSlug(value) === "calzone";
@@ -1673,14 +1691,14 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                 <div className={`choice-nudge ${size ? "ok" : ""}`}>{size ? `Selecionado: ${selectedSizeLabel}` : "Escolha uma opcao antes de avancar."}</div>
                 <div className="grid2 size-grid">
                   {(menu.sizes || []).map((s) => (
-                    <div key={s.code} className={`opt ${!miniPizzaMode && size === s.code ? "sel" : ""}`} onClick={() => pickSize(s.code)}>
+                    <div key={s.code} className={`opt ${!miniPizzaMode && size === s.code ? "sel" : ""}`} onClick={() => pickSize(s.code)} {...optA11yAttrs()} onKeyDown={(e) => { if (isActivateKey(e)) { e.preventDefault(); pickSize(s.code); } }}>
                       <div className="opt-check" />
                       <div className="opt-emoji">🍕</div>
                       <div className="opt-body"><div className="opt-title">{s.label}</div><div className="opt-desc">{money(s.price)}</div></div>
                     </div>
                   ))}
                   {miniPizzaItem && (
-                    <div className={`opt mini-size-opt ${miniPizzaMode ? "sel" : ""}`} onClick={pickMiniPizza} style={{ opacity: miniPizzaEsgotada ? 0.5 : 1, cursor: miniPizzaEsgotada ? "not-allowed" : "pointer" }}>
+                    <div className={`opt mini-size-opt ${miniPizzaMode ? "sel" : ""}`} onClick={pickMiniPizza} style={{ opacity: miniPizzaEsgotada ? 0.5 : 1, cursor: miniPizzaEsgotada ? "not-allowed" : "pointer" }} {...optA11yAttrs(miniPizzaEsgotada)} onKeyDown={(e) => { if (!miniPizzaEsgotada && isActivateKey(e)) { e.preventDefault(); pickMiniPizza(); } }}>
                       <div className="opt-check" />
                       <div className="opt-emoji">🍕</div>
                       <div className="opt-body"><div className="opt-title">Mini-pizza</div><div className="opt-desc" style={miniPizzaEsgotada ? { color: "var(--danger)" } : undefined}>{miniPizzaEsgotada ? "Esgotado" : "Produto do cardapio"}</div></div>
@@ -1701,7 +1719,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                         {section.flavors.map((f) => {
                           const esg = esgotados.includes(f)
                           return (
-                            <div key={`${section.title}-${f}`} className={`opt flavor-opt ${f === f1 || f === f2 ? "sel" : ""} ${esg ? "esg" : ""}`} onClick={() => !esg && pickFlavor(f)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }}>
+                            <div key={`${section.title}-${f}`} className={`opt flavor-opt ${f === f1 || f === f2 ? "sel" : ""} ${esg ? "esg" : ""}`} onClick={() => !esg && pickFlavor(f)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }} {...optA11yAttrs(esg)} onKeyDown={(e) => { if (!esg && isActivateKey(e)) { e.preventDefault(); pickFlavor(f); } }}>
                               <div className="opt-emoji">🍕</div><div className="opt-body"><div className="opt-title">{f}</div>{esg && <div className="opt-desc" style={{ color: "var(--danger)" }}>Esgotado</div>}</div><div className="opt-check" />
                             </div>
                           )
@@ -1721,8 +1739,8 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
               <TopBack onClick={() => go("sc-build")} title="Borda" />
               <PizzaCtx />
               <div className="screen-head"><h2>Escolha a borda</h2><p>Toque em uma opcao para adicionar direto ao pedido.</p></div>
-              <div className="opt" onClick={() => addPizzaWithBorder(null, 0)}><div className="opt-emoji">⭕</div><div className="opt-body"><div className="opt-title">Sem borda</div></div><div className="opt-check" /></div>
-              {(menu.borders || []).map((b, i) => { const p = bigBorder(size!) ? b.priceLarge : b.priceSmall; const esg = esgotados.includes(b.label); return (<div key={i} className={`opt ${border === b.label ? "sel" : ""}`} onClick={() => !esg && addPizzaWithBorder(b.label, p)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }}><div className="opt-emoji">🧀</div><div className="opt-body"><div className="opt-title">{b.label}</div>{esg && <div className="opt-desc" style={{ color: "var(--danger)" }}>Esgotado</div>}</div><div className="opt-price">{esg ? "" : `+${money(p)}`}</div><div className="opt-check" /></div>); })}
+              <div className="opt" onClick={() => addPizzaWithBorder(null, 0)} {...optA11yAttrs()} onKeyDown={(e) => { if (isActivateKey(e)) { e.preventDefault(); addPizzaWithBorder(null, 0); } }}><div className="opt-emoji">⭕</div><div className="opt-body"><div className="opt-title">Sem borda</div></div><div className="opt-check" /></div>
+              {(menu.borders || []).map((b, i) => { const p = bigBorder(size!) ? b.priceLarge : b.priceSmall; const esg = esgotados.includes(b.label); return (<div key={i} className={`opt ${border === b.label ? "sel" : ""}`} onClick={() => !esg && addPizzaWithBorder(b.label, p)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }} {...optA11yAttrs(esg)} onKeyDown={(e) => { if (!esg && isActivateKey(e)) { e.preventDefault(); addPizzaWithBorder(b.label, p); } }}><div className="opt-emoji">🧀</div><div className="opt-body"><div className="opt-title">{b.label}</div>{esg && <div className="opt-desc" style={{ color: "var(--danger)" }}>Esgotado</div>}</div><div className="opt-price">{esg ? "" : `+${money(p)}`}</div><div className="opt-check" /></div>); })}
             </section>
           )}
           {screen === "sc-promo" && promoSel && (
@@ -1748,7 +1766,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                   {[...(menu.saltyFlavors || []), ...(menu.sweetFlavors || [])].map((f) => {
                     const esg = esgotados.includes(f);
                     return (
-                      <div key={f} className={`opt ${promoSabor === f ? "sel" : ""}`} onClick={() => !esg && setPromoSabor(f)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }}>
+                      <div key={f} className={`opt ${promoSabor === f ? "sel" : ""}`} onClick={() => !esg && setPromoSabor(f)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }} {...optA11yAttrs(esg)} onKeyDown={(e) => { if (!esg && isActivateKey(e)) { e.preventDefault(); setPromoSabor(f); } }}>
                         <div className="opt-emoji">🍕</div><div className="opt-body"><div className="opt-title">{f}</div>{esg && <div className="opt-desc" style={{ color: "var(--danger)" }}>Esgotado</div>}</div><div className="opt-check" />
                       </div>
                     );
@@ -1767,9 +1785,9 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
               </div>
               {showUpsellBebida && (
                 <div className="grid2">
-                  <div className="opt" onClick={() => goCat("bebida")}><div className="opt-emoji">🥤</div><div className="opt-body"><div className="opt-title">Refrigerantes</div></div></div>
+                  <div className="opt" onClick={() => goCat("bebida")} {...optA11yAttrs()} onKeyDown={(e) => { if (isActivateKey(e)) { e.preventDefault(); goCat("bebida"); } }}><div className="opt-emoji">🥤</div><div className="opt-body"><div className="opt-title">Refrigerantes</div></div></div>
                   {(menu.sucos || []).length > 0 && (
-                    <div className="opt" onClick={() => goCat("suco")}><div className="opt-emoji">🧃</div><div className="opt-body"><div className="opt-title">Sucos</div></div></div>
+                    <div className="opt" onClick={() => goCat("suco")} {...optA11yAttrs()} onKeyDown={(e) => { if (isActivateKey(e)) { e.preventDefault(); goCat("suco"); } }}><div className="opt-emoji">🧃</div><div className="opt-body"><div className="opt-title">Sucos</div></div></div>
                   )}
                 </div>
               )}
@@ -1782,7 +1800,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
               {(() => {
                 const lanches = menu.lanches || [];
                 const cfg = { lanche: { eb: "Lanches & Porções", t: "Escolha seu lanche", data: lanches.filter((it) => !isMacarronada(it)), emoji: "🍽️" }, macarronada: { eb: "", t: "Escolha sua macarronada", data: lanches.filter(isMacarronada), emoji: ICONS.macarronada }, bebida: { eb: "", t: "Bebidas geladas", data: menu.bebidas || [], emoji: ICONS.bebidas }, suco: { eb: "Sucos naturais", t: "Sucos da casa", data: menu.sucos || [], emoji: ICONS.sucos } }[listCat];
-                return (<><div className="screen-head">{cfg.eb && <div className="eyebrow">{cfg.eb}</div>}<h2>{cfg.t}</h2><p>Toque para adicionar.</p></div>{cfg.data.length === 0 ? <CardapioIllustration {...CARDAPIO_ILLUSTRATIONS.semResultado} /> : cfg.data.map((it, i) => { const esg = esgotados.includes(it.name); return (<div key={i} className="opt" onClick={() => !esg && addSimple(it, cfg.emoji)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }}><div className="opt-emoji">{cfg.emoji}</div><div className="opt-body"><div className="opt-title">{it.name}</div>{esg && <div className="opt-desc" style={{ color: "var(--danger)" }}>Esgotado</div>}</div><div className="opt-price">{simplePriceLabel(it)}</div></div>); })}</>);
+                return (<><div className="screen-head">{cfg.eb && <div className="eyebrow">{cfg.eb}</div>}<h2>{cfg.t}</h2><p>Toque para adicionar.</p></div>{cfg.data.length === 0 ? <CardapioIllustration {...CARDAPIO_ILLUSTRATIONS.semResultado} /> : cfg.data.map((it, i) => { const esg = esgotados.includes(it.name); return (<div key={i} className="opt" onClick={() => !esg && addSimple(it, cfg.emoji)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }} {...optA11yAttrs(esg)} onKeyDown={(e) => { if (!esg && isActivateKey(e)) { e.preventDefault(); addSimple(it, cfg.emoji); } }}><div className="opt-emoji">{cfg.emoji}</div><div className="opt-body"><div className="opt-title">{it.name}</div>{esg && <div className="opt-desc" style={{ color: "var(--danger)" }}>Esgotado</div>}</div><div className="opt-price">{simplePriceLabel(it)}</div></div>); })}</>);
               })()}
             </section>
           )}
@@ -1790,15 +1808,15 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
             <section className="screen active">
               <TopBack onClick={() => { setSucoPendente(null); go("sc-list"); }} title="Como prefere o suco?" />
               <div className="screen-head"><div className="eyebrow">Suco natural</div><h2>Com leite?</h2><p>{sucoPendente.name}</p></div>
-              <div className="opt" onClick={() => addSucoLeite(false)}><div className="opt-emoji">S</div><div className="opt-body"><div className="opt-title">Sem leite</div></div></div>
-              <div className="opt" onClick={() => addSucoLeite(true)}><div className="opt-emoji">+1</div><div className="opt-body"><div className="opt-title">Com leite</div></div><div className="opt-price">+{money(1)}</div></div>
+              <div className="opt" onClick={() => addSucoLeite(false)} {...optA11yAttrs()} onKeyDown={(e) => { if (isActivateKey(e)) { e.preventDefault(); addSucoLeite(false); } }}><div className="opt-emoji">S</div><div className="opt-body"><div className="opt-title">Sem leite</div></div></div>
+              <div className="opt" onClick={() => addSucoLeite(true)} {...optA11yAttrs()} onKeyDown={(e) => { if (isActivateKey(e)) { e.preventDefault(); addSucoLeite(true); } }}><div className="opt-emoji">+1</div><div className="opt-body"><div className="opt-title">Com leite</div></div><div className="opt-price">+{money(1)}</div></div>
             </section>
           )}          {screen === "sc-macarronada-size" && macarronadaPendente && (
             <section className="screen active">
               <TopBack onClick={() => { setMacarronadaPendente(null); go("sc-list"); }} title={macarronadaPendente.name} />
               <div className="screen-head"><h2>Escolha o tamanho</h2><p>{macarronadaPendente.name}</p></div>
               {(macarronadaPendente.sizes || []).map((s) => (
-                <div key={s.code} className="opt" onClick={() => addMacarronadaSize(s.code)}><div className="opt-emoji">🍽️</div><div className="opt-body"><div className="opt-title">Tamanho {s.code}</div></div><div className="opt-price">{money(s.price)}</div></div>
+                <div key={s.code} className="opt" onClick={() => addMacarronadaSize(s.code)} {...optA11yAttrs()} onKeyDown={(e) => { if (isActivateKey(e)) { e.preventDefault(); addMacarronadaSize(s.code); } }}><div className="opt-emoji">🍽️</div><div className="opt-body"><div className="opt-title">Tamanho {s.code}</div></div><div className="opt-price">{money(s.price)}</div></div>
               ))}
             </section>
           )}
@@ -1827,9 +1845,9 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
             <section className="screen active delivery-screen">
               <TopBack onClick={() => go("sc-cart")} title="Entrega" />
               <div className="screen-head"><h2>Como prefere receber?</h2></div>
-              <div className={`opt ${delType === "delivery" ? "sel" : ""}`} onClick={() => { setDelType("delivery"); if (erroEntrega) setErroEntrega(""); }}><div className="opt-emoji"><Bike size={22} aria-hidden="true" /></div><div className="opt-body"><div className="opt-title">Entrega (delivery)</div><div className="opt-desc">Levamos até você</div></div><div className="opt-check" /></div>
-              <div className={`opt ${delType === "retirada" ? "sel" : ""}`} onClick={() => { setDelType("retirada"); setBairroIdx(""); setErroEntrega(""); }}><div className="opt-emoji"><Store size={22} aria-hidden="true" /></div><div className="opt-body"><div className="opt-title">Buscar na loja</div><div className="opt-desc">Sem taxa de entrega</div></div><div className="opt-check" /></div>
-              <div className={`opt ${delType === "dine_in" ? "sel" : ""}`} onClick={() => { setDelType("dine_in"); setBairroIdx(""); setErroEntrega(""); }}><div className="opt-emoji"><UtensilsCrossed size={22} aria-hidden="true" /></div><div className="opt-body"><div className="opt-title">Consumo no local</div><div className="opt-desc">Comer aqui na pizzaria</div></div><div className="opt-check" /></div>
+              <div className={`opt ${delType === "delivery" ? "sel" : ""}`} onClick={() => { setDelType("delivery"); if (erroEntrega) setErroEntrega(""); }} {...optA11yAttrs()} onKeyDown={(e) => { if (isActivateKey(e)) { e.preventDefault(); setDelType("delivery"); if (erroEntrega) setErroEntrega(""); } }}><div className="opt-emoji"><Bike size={22} aria-hidden="true" /></div><div className="opt-body"><div className="opt-title">Entrega (delivery)</div><div className="opt-desc">Levamos até você</div></div><div className="opt-check" /></div>
+              <div className={`opt ${delType === "retirada" ? "sel" : ""}`} onClick={() => { setDelType("retirada"); setBairroIdx(""); setErroEntrega(""); }} {...optA11yAttrs()} onKeyDown={(e) => { if (isActivateKey(e)) { e.preventDefault(); setDelType("retirada"); setBairroIdx(""); setErroEntrega(""); } }}><div className="opt-emoji"><Store size={22} aria-hidden="true" /></div><div className="opt-body"><div className="opt-title">Buscar na loja</div><div className="opt-desc">Sem taxa de entrega</div></div><div className="opt-check" /></div>
+              <div className={`opt ${delType === "dine_in" ? "sel" : ""}`} onClick={() => { setDelType("dine_in"); setBairroIdx(""); setErroEntrega(""); }} {...optA11yAttrs()} onKeyDown={(e) => { if (isActivateKey(e)) { e.preventDefault(); setDelType("dine_in"); setBairroIdx(""); setErroEntrega(""); } }}><div className="opt-emoji"><UtensilsCrossed size={22} aria-hidden="true" /></div><div className="opt-body"><div className="opt-title">Consumo no local</div><div className="opt-desc">Comer aqui na pizzaria</div></div><div className="opt-check" /></div>
               {delType === "delivery" && (
                 <div>
                   <div className="section-label">Endereço</div>
@@ -2276,7 +2294,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                   {section.flavors.map((f) => {
                     const esg = esgotados.includes(f);
                     return (
-                      <div key={`modal-${section.title}-${f}`} className={`opt flavor-opt ${f === f1 || f === f2 ? "sel" : ""} ${esg ? "esg" : ""}`} onClick={() => !esg && pickFlavor(f)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }}>
+                      <div key={`modal-${section.title}-${f}`} className={`opt flavor-opt ${f === f1 || f === f2 ? "sel" : ""} ${esg ? "esg" : ""}`} onClick={() => !esg && pickFlavor(f)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }} {...optA11yAttrs(esg)} onKeyDown={(e) => { if (!esg && isActivateKey(e)) { e.preventDefault(); pickFlavor(f); } }}>
                         <div className="opt-emoji">🍕</div><div className="opt-body"><div className="opt-title">{f}</div>{esg && <div className="opt-desc" style={{ color: "var(--danger)" }}>Esgotado</div>}</div><div className="opt-check" />
                       </div>
                     );
@@ -2394,6 +2412,7 @@ main{width:100%;padding:6px 20px 20px}
 .pd.done{background:var(--green)}.pd.cur{background:var(--brand);transform:scale(1.3)}
 .opt{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:17px;margin-bottom:10px;cursor:pointer;display:flex;align-items:center;gap:14px;transition:transform .14s,border-color .14s,background .14s;box-shadow:var(--shadow-sm)}
 .opt:active{transform:scale(.98)}
+.opt:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
 .opt.sel{border-color:var(--brand);background:var(--brand-soft)}
 .opt-emoji{font-size:27px;flex:0 0 auto;width:33px;text-align:center}
 .opt-body{flex:1;min-width:0}
