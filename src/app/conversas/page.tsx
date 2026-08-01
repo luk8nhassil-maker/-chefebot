@@ -202,26 +202,42 @@ export default function ConversasPage() {
 
   useEffect(() => {
     carregar()
-    const ivData = setInterval(carregar, 15000)
+    // Atualiza a lista só enquanto a aba está visível, e imediatamente ao
+    // voltar para ela — mesmo padrão de src/app/cliente/pedidos/page.tsx.
+    function talvezCarregar() {
+      if (document.visibilityState === 'visible') carregar()
+    }
+    const ivData = setInterval(talvezCarregar, 15000)
     const ivTime = setInterval(() => setNow(Date.now()), 30000)
-    return () => { clearInterval(ivData); clearInterval(ivTime) }
+    document.addEventListener('visibilitychange', talvezCarregar)
+    return () => { clearInterval(ivData); clearInterval(ivTime); document.removeEventListener('visibilitychange', talvezCarregar) }
   }, [router])
 
   useEffect(() => {
     carregarRecentes()
-    const iv = setInterval(carregarRecentes, 8000)
-    return () => clearInterval(iv)
+    function talvezCarregarRecentes() {
+      if (document.visibilityState === 'visible') carregarRecentes()
+    }
+    const iv = setInterval(talvezCarregarRecentes, 8000)
+    document.addEventListener('visibilitychange', talvezCarregarRecentes)
+    return () => { clearInterval(iv); document.removeEventListener('visibilitychange', talvezCarregarRecentes) }
   }, [])
 
   // Poll history for selected conversation. A conversa permanece aberta enquanto
   // selecionada — mesmo que saia da lista de recentes (ex.: finalizada ou após 30 min),
-  // garantindo leitura do histórico sem fechar sozinha.
+  // garantindo leitura do histórico sem fechar sozinha. Só consulta com a aba
+  // visível, e atualiza imediatamente ao voltar para ela.
   useEffect(() => {
     if (!conversaSelecionada) { setHistoricoMsgs([]); setHistoricoErro(false); return }
+    const phone = conversaSelecionada
     setHistoricoErro(false)
-    carregarHistorico(conversaSelecionada)
-    const iv = setInterval(() => carregarHistorico(conversaSelecionada), 3000)
-    return () => clearInterval(iv)
+    carregarHistorico(phone)
+    function talvezCarregarHistorico() {
+      if (document.visibilityState === 'visible') carregarHistorico(phone)
+    }
+    const iv = setInterval(talvezCarregarHistorico, 3000)
+    document.addEventListener('visibilitychange', talvezCarregarHistorico)
+    return () => { clearInterval(iv); document.removeEventListener('visibilitychange', talvezCarregarHistorico) }
   }, [conversaSelecionada])
 
   // Auto-scroll to newest message

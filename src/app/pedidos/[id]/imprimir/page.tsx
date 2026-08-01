@@ -189,6 +189,7 @@ export default function ImprimirPedidoPage({ params }: PageProps) {
           color: #000000;
         }
         .centro { text-align: center; }
+        .cabecalho-marca { white-space: nowrap; }
         .negrito { font-weight: 800; }
         .grande { font-size: 16px; font-weight: 800; text-align: center; margin: 4px 0; }
         .total-linha { font-size: 17px; font-weight: 800; text-align: center; margin-top: 6px; }
@@ -225,7 +226,7 @@ export default function ImprimirPedidoPage({ params }: PageProps) {
       <div className="cupom">
 
         {/* Cabeçalho */}
-        <div className="centro negrito">====== CHEFE DA PIZZA ======</div>
+        <div className="centro negrito cabecalho-marca">=== CHEFE DA PIZZA ===</div>
         <div className="grande">PEDIDO {numeroCupom}</div>
         {diario != null && (
           <div className="centro" style={{ fontSize: 10 }}>ID interno: {idCurto}</div>

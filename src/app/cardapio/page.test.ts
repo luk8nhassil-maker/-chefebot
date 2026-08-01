@@ -396,3 +396,37 @@ describe("/cardapio — materialização do presente da Jornada do Chef na sacol
     expect(fonte).toContain("recompensaJornada: { recompensaId: itemRecompensaJornada.recompensaJornadaId");
   });
 });
+
+describe("/cardapio (PublicCardapio) — acessibilidade por teclado dos cartões de opção", () => {
+  const contagemOpt = (fonte.match(/className=\{?`?opt /g) || []).length + (fonte.match(/className="opt"/g) || []).length;
+
+  test("todo cartão .opt tem tabIndex/role via optA11yAttrs — nenhum ficou só com onClick", () => {
+    expect(fonte).toContain('function optA11yAttrs(disabled?: boolean) {\n  return {\n    role: "button" as const,');
+    expect((fonte.match(/optA11yAttrs\(/g) || []).length).toBe(contagemOpt + 1); // +1 é a própria definição
+  });
+
+  test("Enter e Espaço ativam o cartão — nunca outra tecla, e nunca durante estado desabilitado", () => {
+    expect(fonte).toContain('const isActivateKey = (e: React.KeyboardEvent) => e.key === "Enter" || e.key === " ";');
+    // amostra: seletor de tamanho de pizza e sabor (com guarda de esgotado)
+    expect(fonte).toContain('onKeyDown={(e) => { if (isActivateKey(e)) { e.preventDefault(); pickSize(s.code); } }}');
+    expect(fonte).toContain('onKeyDown={(e) => { if (!esg && isActivateKey(e)) { e.preventDefault(); pickFlavor(f); } }}');
+  });
+
+  test("item esgotado sai do fluxo de tab (tabIndex -1) e nunca ativa por teclado", () => {
+    expect(fonte).toContain("tabIndex: disabled ? -1 : 0");
+  });
+
+  test("cartões de entrega (delivery/retirada/consumo local) ganham Enter/Espaço sem duplicar a lógica de seleção", () => {
+    expect(fonte).toContain('onKeyDown={(e) => { if (isActivateKey(e)) { e.preventDefault(); setDelType("delivery"); if (erroEntrega) setErroEntrega(""); } }}');
+    expect(fonte).toContain('onKeyDown={(e) => { if (isActivateKey(e)) { e.preventDefault(); setDelType("retirada"); setBairroIdx(""); setErroEntrega(""); } }}');
+    expect(fonte).toContain('onKeyDown={(e) => { if (isActivateKey(e)) { e.preventDefault(); setDelType("dine_in"); setBairroIdx(""); setErroEntrega(""); } }}');
+  });
+
+  test("foco visível nos cartões usa token de marca já existente — nenhuma cor nova", () => {
+    expect(fonte).toContain(".opt:focus-visible{outline:2px solid var(--brand);outline-offset:2px}");
+  });
+
+  test("nenhum cartão passa onActivate por closure para uma função helper — evita falso positivo de react-hooks/refs", () => {
+    expect(fonte).not.toContain("optA11yProps(");
+  });
+});

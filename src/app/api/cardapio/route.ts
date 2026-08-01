@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { redis } from '@/lib/redis'
-import { MENU, getMENUDinamico } from '@/lib/menu'
+import { getMENUDinamico } from '@/lib/menu.server'
 import { verifyToken } from '@/lib/auth'
 
 // Esgotados precisam refletir em tempo real no cardapio publico: nunca cachear.
@@ -21,7 +21,10 @@ export async function GET() {
     const esgotadosMetadata = (await redis.get<EsgMetadata>('esgotadosMetadata')) || {}
     return NextResponse.json({ ...menu, esgotados, esgotadosMetadata })
   } catch {
-    return NextResponse.json({ ...MENU, esgotados: [], esgotadosMetadata: {} })
+    return NextResponse.json(
+      { ok: false, error: 'Cardápio temporariamente indisponível' },
+      { status: 503 },
+    )
   }
 }
 

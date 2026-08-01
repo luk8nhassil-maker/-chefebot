@@ -1,6 +1,4 @@
-﻿import { redis } from './redis'
-
-export const MENU = {
+﻿export const MENU = {
   sizes: [{ code: "P", label: "Pequena", price: 35 },{ code: "M", label: "Media", price: 40 },{ code: "G", label: "Grande", price: 50 },{ code: "F", label: "Familia", price: 55 }],
   saltyFlavors: ["Calabresa","Frango Catupiry","Portuguesa","Carne Seca","Quatro Queijos","Tres Queijos","Napolitana","Baiana","Peruana","Bacon","Mexicana","Mussarela","A Moda","Mazzine"] as string[],
   sweetFlavors: ["Sensacao","Chocolate","Cartola","Romeu e Julieta"] as string[],
@@ -14,24 +12,7 @@ export const MENU = {
   payments: ["Pix","Dinheiro","Cartao"]
 }
 
-export async function getMENUDinamico() {
-  try {
-    const cardapio = await redis.get<any>('cardapio')
-    if (!cardapio) return MENU
-    return {
-      ...MENU,
-      saltyFlavors: cardapio.saltyFlavors?.length ? cardapio.saltyFlavors : MENU.saltyFlavors,
-      sweetFlavors: cardapio.sweetFlavors?.length ? cardapio.sweetFlavors : MENU.sweetFlavors,
-      bebidas: cardapio.bebidas?.length ? cardapio.bebidas : MENU.bebidas,
-      sucos: cardapio.sucos?.length ? cardapio.sucos : MENU.sucos,
-      neighborhoods: cardapio.neighborhoods?.length ? cardapio.neighborhoods : MENU.neighborhoods,
-      sizes: cardapio.sizes?.length ? cardapio.sizes : MENU.sizes,
-      borders: cardapio.borders?.length ? cardapio.borders : MENU.borders,
-    }
-  } catch {
-    return MENU
-  }
-}
+export type Menu = typeof MENU
 
 export function getBorderPrice(size: string): number { return size === "P" || size === "M" ? 8 : 10 }
 export function getBorderByIndex(index: number, size: string): { label: string; price: number } | null { const border = MENU.borders[index]; if (!border) return null; return { label: border.label, price: size === "P" || size === "M" ? border.priceSmall : border.priceLarge } }

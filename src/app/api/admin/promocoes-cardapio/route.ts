@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { redis } from '@/lib/redis'
 import { verifyToken } from '@/lib/auth'
-import { getMENUDinamico } from '@/lib/menu'
+import { getMENUDinamico } from '@/lib/menu.server'
 import { PROMOS_KEY, catalogoDoMenu, precoFinalPromocao, validarPromocao, type Promocao } from '@/lib/promocoes'
 
 export const dynamic = 'force-dynamic'
