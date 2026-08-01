@@ -432,12 +432,19 @@ describe("pendências antes de enviar", () => {
   test("nome e telefone são obrigatórios", () => {
     expect(pendenciasDoPedido({ ...DADOS_BASE, cliente: "  " }, [item])).toContain("Informe o nome do cliente.");
     expect(pendenciasDoPedido({ ...DADOS_BASE, telefone: "99" }, [item])).toContain(
-      "Informe um telefone válido com DDD."
+      "Informe um telefone válido com DDD, ou marque “Sem número de telefone”."
     );
   });
 
   test("telefone com máscara é aceito quando tem dígitos suficientes", () => {
     expect(pendenciasDoPedido({ ...DADOS_BASE, telefone: "(86) 99999-8888" }, [item])).toEqual([]);
+  });
+
+  test("semTelefone dispensa o telefone, mas nunca dispensa o nome", () => {
+    expect(pendenciasDoPedido({ ...DADOS_BASE, telefone: "", semTelefone: true }, [item])).toEqual([]);
+    expect(
+      pendenciasDoPedido({ ...DADOS_BASE, cliente: "  ", telefone: "", semTelefone: true }, [item])
+    ).toContain("Informe o nome do cliente.");
   });
 
   test("delivery exige bairro, rua e número", () => {
