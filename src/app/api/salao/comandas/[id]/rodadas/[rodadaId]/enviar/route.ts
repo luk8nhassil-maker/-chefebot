@@ -4,6 +4,8 @@ import {
   buscarComanda,
   confirmarEnvioRodada,
   falharEnvioRodada,
+  identificacaoClienteComanda,
+  PAGAMENTO_COMANDA_EM_ABERTO,
   reivindicarEnvioRodada,
   totalParcialComanda,
   validarItensComanda,
@@ -12,14 +14,6 @@ import { sanitizeClientRequestId } from "@/survival/clientRequestId";
 import { POST as criarPedidoApp } from "@/app/api/pedido-app/route";
 
 export const dynamic = "force-dynamic";
-
-// Forma de pagamento gravada no pedido oficial criado por uma Rodada 2+ —
-// nunca "de verdade" ainda: o Salão só solicita a conta e o caixa fecha o
-// pagamento de fato em uma etapa futura (Beco 9/10, fora do escopo desta
-// rota). Não é reconhecida como Pix nem dinheiro por nenhuma checagem de
-// /api/pedido-app (temPixNoPagamento/temDinheiroNoPagamento), então não
-// dispara cobrança Pix nem exige troco.
-const PAGAMENTO_COMANDA_EM_ABERTO = "Comanda em aberto";
 
 // Envia uma rodada (Rodada 2+) da comanda para a cozinha: cada rodada
 // enviada vira um pedido oficial independente, contendo somente os itens
@@ -102,11 +96,10 @@ export async function POST(
     return NextResponse.json({ ok: false, error: validacao.error }, { status: 422 });
   }
 
-  const identificacaoMesa = comandaBase.complemento
-    ? `Mesa ${comandaBase.mesa} (${comandaBase.complemento})`
-    : `Mesa ${comandaBase.mesa}`;
+  const identificacaoCliente = identificacaoClienteComanda(comandaBase);
   const observacaoRodada = [
     `Comanda #${comandaBase.numero}`,
+    comandaBase.mesa ? `Mesa ${comandaBase.mesa}${comandaBase.complemento ? ` (${comandaBase.complemento})` : ""}` : "Sem mesa",
     `Rodada ${rodada.numero}`,
     rodada.observacao?.trim() || null,
   ]
@@ -114,7 +107,7 @@ export async function POST(
     .join(" — ");
 
   const payloadPedidoApp = {
-    cliente: identificacaoMesa,
+    cliente: identificacaoCliente,
     usarOutroWhatsapp: true,
     itens: validacao.itens.map((i) => ({ kind: i.kind, name: i.name, detail: i.detail, price: i.price, qty: i.qty })),
     tipoEntrega: "dine_in" as const,

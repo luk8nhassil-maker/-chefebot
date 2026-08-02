@@ -1,17 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 import { lerSessaoSalao } from "@/lib/salaoAuth";
-import { buscarComanda, marcarComandaEnviada } from "@/lib/comandas";
-import { gerarClientRequestId } from "@/survival/clientRequestId";
+import { buscarComanda, identificacaoClienteComanda, marcarComandaEnviada, PAGAMENTO_COMANDA_EM_ABERTO } from "@/lib/comandas";
+import { gerarClientRequestId, sanitizeClientRequestId } from "@/survival/clientRequestId";
 import { POST as criarPedidoApp } from "@/app/api/pedido-app/route";
 
 export const dynamic = "force-dynamic";
 
-// "Enviar pedido" da comanda: cria o pedido de verdade chamando a MESMA
-// rota de criação de pedido de sempre (POST /api/pedido-app, em processo —
-// nunca um segundo motor de pedido). Preço, catálogo, estoque e
-// idempotência continuam sendo decididos inteiramente por aquela rota; esta
-// só monta o payload a partir da comanda e repassa o cookie de sessão do
-// Salão real (a mesma verificação server-side roda de novo lá dentro).
+// "Enviar para a cozinha" do primeiro pedido (Rodada 1/"Pedido inicial") da
+// comanda: cria o pedido de verdade chamando a MESMA rota de criação de
+// pedido de sempre (POST /api/pedido-app, em processo — nunca um segundo
+// motor de pedido). Preço, catálogo, estoque e idempotência continuam
+// sendo decididos inteiramente por aquela rota; esta só monta o payload a
+// partir da comanda e repassa o cookie de sessão do Salão real (a mesma
+// verificação server-side roda de novo lá dentro).
+//
+// Sem pagamento aqui: assim como Rodada 2+ (ver .../rodadas/[rodadaId]/
+// enviar), o Salão só manda para a cozinha — o pagamento de verdade só
+// acontece quando o caixa fechar a conta, em uma etapa futura. O pedido é
+// gravado com PAGAMENTO_COMANDA_EM_ABERTO, o mesmo marcador "pendente" já
+// usado por Rodada 2+, nunca Pix/Dinheiro/Cartão/Misto.
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const sessaoSalao = await lerSessaoSalao(req);
   if (!sessaoSalao) {
@@ -19,16 +26,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   }
 
   const { id } = await params;
-  let body: { pagamento?: string; troco?: string };
+  let body: { clientRequestId?: string };
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ ok: false, error: "Payload inválido" }, { status: 400 });
-  }
-
-  const pagamento = (body.pagamento || "").trim();
-  if (!pagamento) {
-    return NextResponse.json({ ok: false, error: "Forma de pagamento obrigatória" }, { status: 400 });
+    body = {};
   }
 
   const comanda = await buscarComanda(id);
@@ -39,31 +41,35 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({ ok: false, error: "Esta comanda não está mais aberta" }, { status: 409 });
   }
   if (comanda.itens.length === 0) {
-    return NextResponse.json({ ok: false, error: "Adicione pelo menos um item antes de enviar" }, { status: 400 });
+    return NextResponse.json({ ok: false, error: "Adicione pelo menos um item antes de enviar" }, { status: 422 });
   }
 
-  const identificacaoMesa = comanda.complemento ? `Mesa ${comanda.mesa} (${comanda.complemento})` : `Mesa ${comanda.mesa}`;
+  const identificacaoCliente = identificacaoClienteComanda(comanda);
   const observacaoComanda = [
     `Comanda #${comanda.numero}`,
+    comanda.mesa ? `Mesa ${comanda.mesa}${comanda.complemento ? ` (${comanda.complemento})` : ""}` : "Sem mesa",
     comanda.observacao?.trim() || null,
   ]
     .filter(Boolean)
     .join(" — ");
 
-  let clientRequestId: string | null = null;
-  try {
-    clientRequestId = gerarClientRequestId();
-  } catch {
-    clientRequestId = null;
-  }
+  // Reaproveita o clientRequestId gerado pela tela de revisão (retry da
+  // mesma tentativa) — só gera um novo se, por algum motivo, nenhum vier no
+  // corpo (nunca deixa a requisição sem idempotência).
+  const clientRequestId = sanitizeClientRequestId(body.clientRequestId) ?? (() => {
+    try {
+      return gerarClientRequestId();
+    } catch {
+      return null;
+    }
+  })();
 
   const payloadPedidoApp = {
-    cliente: identificacaoMesa,
+    cliente: identificacaoCliente,
     usarOutroWhatsapp: true,
     itens: comanda.itens.map((i) => ({ kind: i.kind, name: i.name, detail: i.detail, price: i.price, qty: i.qty })),
     tipoEntrega: "dine_in" as const,
-    pagamento,
-    ...(body.troco ? { troco: body.troco } : {}),
+    pagamento: PAGAMENTO_COMANDA_EM_ABERTO,
     observacao: observacaoComanda,
     ...(clientRequestId ? { clientRequestId } : {}),
   };

@@ -56,7 +56,7 @@ function paramsFor(id: string, rodadaId: string) {
 }
 
 async function abrirComandaOk(mesa: string): Promise<Comanda> {
-  const r = await abrirComanda(mesa);
+  const r = await abrirComanda({ cliente: "Cliente Teste", mesa });
   if (typeof r !== "object") throw new Error(`esperava Comanda, recebeu "${r}"`);
   return r;
 }
@@ -128,7 +128,7 @@ describe("POST /api/salao/comandas/[id]/rodadas/[rodadaId]/enviar", () => {
 
     const pedidos = store.get("pedidos") as Array<Record<string, unknown>>;
     expect(pedidos).toHaveLength(1);
-    expect(pedidos[0].cliente).toBe("Mesa 5");
+    expect(pedidos[0].cliente).toBe("Cliente Teste");
     expect(pedidos[0].tipoEntrega).toBe("dine_in");
     expect(String(pedidos[0].observacao)).toContain("Rodada 2");
 

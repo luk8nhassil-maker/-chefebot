@@ -66,7 +66,7 @@ describe("PATCH /api/salao/comandas/[id]", () => {
 
   it("adiciona itens a uma comanda aberta, recalculando o preço no servidor", async () => {
     const token = await criarTokenSalao();
-    const aberta = await (await abrir(abrirReq({ mesa: "5" }, token))).json();
+    const aberta = await (await abrir(abrirReq({ cliente: "Ana", mesa: "5" }, token))).json();
     const res = await PATCH(
       patchReq({ itens: [{ kind: "simple", name: "Refrigerante 2L", qty: 3, price: 0.01 }] }, token),
       paramsFor(aberta.comanda.id)
@@ -85,7 +85,7 @@ describe("PATCH /api/salao/comandas/[id]", () => {
 
   it("devolve 409 para comanda que já não está mais aberta", async () => {
     const token = await criarTokenSalao();
-    const aberta = await (await abrir(abrirReq({ mesa: "5" }, token))).json();
+    const aberta = await (await abrir(abrirReq({ cliente: "Ana", mesa: "5" }, token))).json();
     await marcarComandaEnviada(aberta.comanda.id, "ped_1", 1);
     const res = await PATCH(
       patchReq({ itens: [{ kind: "simple", name: "Refrigerante 2L", qty: 1 }] }, token),
@@ -96,7 +96,7 @@ describe("PATCH /api/salao/comandas/[id]", () => {
 
   it("400 quando um item não está no cardápio", async () => {
     const token = await criarTokenSalao();
-    const aberta = await (await abrir(abrirReq({ mesa: "5" }, token))).json();
+    const aberta = await (await abrir(abrirReq({ cliente: "Ana", mesa: "5" }, token))).json();
     const res = await PATCH(
       patchReq({ itens: [{ kind: "simple", name: "Produto Fantasma", qty: 1 }] }, token),
       paramsFor(aberta.comanda.id)

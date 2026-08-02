@@ -36,7 +36,7 @@ function req(token: string) {
   return { cookies: { get: (n: string) => (n === SALAO_COOKIE ? { value: token } : undefined) } } as never;
 }
 async function abrirComandaOk(mesa: string): Promise<Comanda> {
-  const r = await abrirComanda(mesa);
+  const r = await abrirComanda({ cliente: "Cliente Teste", mesa });
   if (typeof r !== "object") throw new Error(`esperava Comanda, recebeu "${r}"`);
   return r;
 }
