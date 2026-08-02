@@ -33,7 +33,7 @@ import {
 } from "@/lib/montagemManual"
 
 type StatusComanda = "aberta" | "enviada" | "fechada"
-type StatusRodada = "rascunho" | "enviada"
+type StatusRodada = "rascunho" | "enviando" | "enviada" | "falha_envio"
 type Rodada = {
   id: string
   numero: number
@@ -46,6 +46,7 @@ type Rodada = {
   enviadaEm?: string
   pedidoId?: string
   pedidoNumero?: number
+  erroUltimaTentativa?: string
 }
 type Comanda = {
   id: string
@@ -503,10 +504,10 @@ function ComandaBuilder({ comanda, menu, onVoltar, onAtualizado }: { comanda: Co
   )
 }
 
-// Rodada 1 já foi enviada (virou o pedido real) — esta tela é só para
-// acompanhar as rodadas e, se quiser, montar a próxima em rascunho. Nesta
-// etapa a rodada em rascunho nunca vira pedido: enviar para a cozinha fica
-// para uma etapa futura (ver src/lib/comandas.ts).
+// Rodada 1 já foi enviada (virou o pedido real) — esta tela acompanha as
+// rodadas e permite montar e enviar as próximas (Rodada 2+): cada rodada
+// enviada vira um pedido oficial independente, contendo só os itens daquela
+// rodada (ver POST .../rodadas/[rodadaId]/enviar e src/lib/comandas.ts).
 function RodadasView({ comanda, menu, onVoltar, onAtualizado }: { comanda: Comanda; menu: MenuManual; onVoltar: () => void; onAtualizado: () => void }) {
   const rodadas: Rodada[] = comanda.rodadas && comanda.rodadas.length > 0
     ? comanda.rodadas
@@ -522,7 +523,10 @@ function RodadasView({ comanda, menu, onVoltar, onAtualizado }: { comanda: Coman
         pedidoNumero: comanda.pedidoNumero,
       }]
 
-  const rodadaRascunho = rodadas.find((r) => r.status === "rascunho") || null
+  // Enquanto uma rodada não estiver "enviada", ela é a rodada "em
+  // andamento" (rascunho, enviando ou aguardando retry) — nunca duas ao
+  // mesmo tempo, então só pode existir uma.
+  const rodadaRascunho = rodadas.find((r) => r.status !== "enviada") || null
   const totalParcial = comanda.totalParcial ?? rodadas.reduce((s, r) => s + r.subtotal, 0)
 
   const [criando, setCriando] = useState(false)
@@ -567,7 +571,7 @@ function RodadasView({ comanda, menu, onVoltar, onAtualizado }: { comanda: Coman
 
       <div style={{ flex: 1, overflowY: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
         {rodadas.map((r) => (
-          r.status === "rascunho"
+          r.status !== "enviada"
             ? <RodadaRascunhoCard key={r.id} comandaId={comanda.id} rodada={r} menu={menu} onAtualizado={onAtualizado} />
             : <RodadaEnviadaCard key={r.id} rodada={r} />
         ))}
@@ -628,6 +632,39 @@ function RodadaRascunhoCard({ comandaId, rodada, menu, onAtualizado }: { comanda
   const [itens, setItens] = useState<ItemApp[]>(rodada.itens)
   const [salvando, setSalvando] = useState(false)
   const [erroSalvar, setErroSalvar] = useState<string | null>(null)
+  const editavel = rodada.status === "rascunho"
+
+  const [enviando, setEnviando] = useState(false)
+  const [erroEnviar, setErroEnviar] = useState<string | null>(rodada.erroUltimaTentativa || null)
+  const enviandoRef = useRef(false)
+  const clientRequestIdRodadaRef = useRef<string | null>(null)
+
+  async function enviarParaCozinha() {
+    if (enviandoRef.current || itens.length === 0) return
+    enviandoRef.current = true
+    setEnviando(true)
+    setErroEnviar(null)
+    try {
+      if (!clientRequestIdRodadaRef.current) clientRequestIdRodadaRef.current = gerarClientRequestId()
+      const r = await fetch(`/api/salao/comandas/${comandaId}/rodadas/${rodada.id}/enviar`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clientRequestId: clientRequestIdRodadaRef.current }),
+      })
+      const data = await r.json().catch(() => null)
+      if (!r.ok || !data?.ok) {
+        setErroEnviar(data?.error || "Não foi possível enviar agora.")
+        return
+      }
+      clientRequestIdRodadaRef.current = null
+      onAtualizado()
+    } catch {
+      setErroEnviar("Não foi possível enviar agora. Verifique a conexão.")
+    } finally {
+      enviandoRef.current = false
+      setEnviando(false)
+    }
+  }
 
   const salvar = useCallback(async (novosItens: ItemApp[]) => {
     setSalvando(true)
@@ -661,7 +698,7 @@ function RodadaRascunhoCard({ comandaId, rodada, menu, onAtualizado }: { comanda
   const completa = montagemCompleta(etapas, selecao)
 
   function abrirProduto(produto: ProdutoManual) {
-    if (produto.esgotado) return
+    if (!editavel || produto.esgotado) return
     if (!produto.requerMontagem) {
       const item = construirItemManual(produto, selecaoVazia(), menu)
       if (item) {
@@ -678,7 +715,7 @@ function RodadaRascunhoCard({ comandaId, rodada, menu, onAtualizado }: { comanda
   }
 
   function confirmarMontagem() {
-    if (!produtoAberto || !completa) return
+    if (!editavel || !produtoAberto || !completa) return
     const item = construirItemManual(produtoAberto, selecao, menu)
     if (item) {
       const novos = [...itens, item]
@@ -690,6 +727,7 @@ function RodadaRascunhoCard({ comandaId, rodada, menu, onAtualizado }: { comanda
   }
 
   function mudarQuantidade(i: number, delta: number) {
+    if (!editavel) return
     const novos = itens
       .map((item, idx) => (idx === i ? { ...item, qty: item.qty + delta } : item))
       .filter((item) => item.qty > 0)
@@ -697,6 +735,7 @@ function RodadaRascunhoCard({ comandaId, rodada, menu, onAtualizado }: { comanda
     salvar(novos)
   }
   function removerItem(i: number) {
+    if (!editavel) return
     const novos = itens.filter((_, idx) => idx !== i)
     setItens(novos)
     salvar(novos)
@@ -739,29 +778,33 @@ function RodadaRascunhoCard({ comandaId, rodada, menu, onAtualizado }: { comanda
     <div style={{ ...card, display: "grid", gap: 10 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <span style={{ fontSize: 14, fontWeight: 900, color: "var(--foreground)" }}>Rodada {rodada.numero}</span>
-        <span style={{ fontSize: 11, fontWeight: 800, color: "var(--attention-text)", textTransform: "uppercase", letterSpacing: ".4px" }}>
-          Rascunho · rodada em andamento
+        <span style={{ fontSize: 11, fontWeight: 800, color: rodada.status === "falha_envio" ? "var(--danger)" : "var(--attention-text)", textTransform: "uppercase", letterSpacing: ".4px" }}>
+          {rodada.status === "enviando" ? "Enviando…" : rodada.status === "falha_envio" ? "Falha no envio · tentar novamente" : "Rascunho · rodada em andamento"}
         </span>
       </div>
 
-      <input style={input} placeholder="Buscar produto…" value={termo} onChange={(e) => setTermo(e.target.value)} aria-label="Buscar produto" />
-      {!buscando && (
-        <div style={{ display: "flex", gap: 6, overflowX: "auto" }}>
-          {CATEGORIAS.map((c) => (
-            <button key={c.id} onClick={() => setCategoria(c.id)} style={{ ...btn, height: 34, padding: "0 12px", flexShrink: 0, border: "1px solid " + (categoria === c.id ? "var(--primary)" : "var(--surface-secondary)"), background: categoria === c.id ? "color-mix(in srgb, var(--primary) 15%, transparent)" : "transparent", color: "var(--foreground)", fontSize: 12.5 }}>
-              {c.label}
-            </button>
-          ))}
-        </div>
+      {editavel && (
+        <>
+          <input style={input} placeholder="Buscar produto…" value={termo} onChange={(e) => setTermo(e.target.value)} aria-label="Buscar produto" />
+          {!buscando && (
+            <div style={{ display: "flex", gap: 6, overflowX: "auto" }}>
+              {CATEGORIAS.map((c) => (
+                <button key={c.id} onClick={() => setCategoria(c.id)} style={{ ...btn, height: 34, padding: "0 12px", flexShrink: 0, border: "1px solid " + (categoria === c.id ? "var(--primary)" : "var(--surface-secondary)"), background: categoria === c.id ? "color-mix(in srgb, var(--primary) 15%, transparent)" : "transparent", color: "var(--foreground)", fontSize: 12.5 }}>
+                  {c.label}
+                </button>
+              ))}
+            </div>
+          )}
+          <div style={{ display: "grid", gap: 8, maxHeight: 260, overflowY: "auto" }}>
+            {resultados.map((p) => (
+              <button key={p.id} onClick={() => abrirProduto(p)} disabled={p.esgotado} style={{ ...card, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, textAlign: "left", cursor: p.esgotado ? "not-allowed" : "pointer", opacity: p.esgotado ? 0.5 : 1 }}>
+                <span style={{ fontSize: 14, fontWeight: 800, color: "var(--foreground)" }}>{p.nome}</span>
+                <span style={{ fontSize: 13, fontWeight: 900, color: "var(--brand-text)" }}>{p.precoBase === null ? "" : money(p.precoBase)}</span>
+              </button>
+            ))}
+          </div>
+        </>
       )}
-      <div style={{ display: "grid", gap: 8, maxHeight: 260, overflowY: "auto" }}>
-        {resultados.map((p) => (
-          <button key={p.id} onClick={() => abrirProduto(p)} disabled={p.esgotado} style={{ ...card, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, textAlign: "left", cursor: p.esgotado ? "not-allowed" : "pointer", opacity: p.esgotado ? 0.5 : 1 }}>
-            <span style={{ fontSize: 14, fontWeight: 800, color: "var(--foreground)" }}>{p.nome}</span>
-            <span style={{ fontSize: 13, fontWeight: 900, color: "var(--brand-text)" }}>{p.precoBase === null ? "" : money(p.precoBase)}</span>
-          </button>
-        ))}
-      </div>
 
       {itens.length > 0 && (
         <div style={{ display: "grid", gap: 8 }}>
@@ -772,10 +815,15 @@ function RodadaRascunhoCard({ comandaId, rodada, menu, onAtualizado }: { comanda
                 <span style={{ display: "block", fontSize: 13, fontWeight: 800, color: "var(--foreground)" }}>{item.name}</span>
                 {item.detail && <span style={{ display: "block", fontSize: 11.5, color: "var(--foreground-secondary)" }}>{item.detail}</span>}
               </span>
-              <button onClick={() => mudarQuantidade(i, -1)} aria-label={`Diminuir ${item.name}`} style={{ ...btn, height: 30, width: 30, border: "1px solid var(--surface-secondary)", background: "transparent", color: "var(--foreground)" }}>−</button>
-              <span style={{ fontSize: 13, fontWeight: 900, minWidth: 18, textAlign: "center" }}>{item.qty}</span>
-              <button onClick={() => mudarQuantidade(i, 1)} aria-label={`Aumentar ${item.name}`} style={{ ...btn, height: 30, width: 30, border: "1px solid var(--surface-secondary)", background: "transparent", color: "var(--foreground)" }}>+</button>
-              <button onClick={() => removerItem(i)} aria-label={`Remover ${item.name}`} style={{ ...btn, height: 30, width: 30, border: "none", background: "transparent", color: "var(--danger)" }}>×</button>
+              {editavel && (
+                <>
+                  <button onClick={() => mudarQuantidade(i, -1)} aria-label={`Diminuir ${item.name}`} style={{ ...btn, height: 30, width: 30, border: "1px solid var(--surface-secondary)", background: "transparent", color: "var(--foreground)" }}>−</button>
+                  <span style={{ fontSize: 13, fontWeight: 900, minWidth: 18, textAlign: "center" }}>{item.qty}</span>
+                  <button onClick={() => mudarQuantidade(i, 1)} aria-label={`Aumentar ${item.name}`} style={{ ...btn, height: 30, width: 30, border: "1px solid var(--surface-secondary)", background: "transparent", color: "var(--foreground)" }}>+</button>
+                  <button onClick={() => removerItem(i)} aria-label={`Remover ${item.name}`} style={{ ...btn, height: 30, width: 30, border: "none", background: "transparent", color: "var(--danger)" }}>×</button>
+                </>
+              )}
+              {!editavel && <span style={{ fontSize: 13, fontWeight: 900, minWidth: 18, textAlign: "center" }}>{item.qty}×</span>}
             </div>
           ))}
         </div>
@@ -787,9 +835,15 @@ function RodadaRascunhoCard({ comandaId, rodada, menu, onAtualizado }: { comanda
         <span style={{ color: "var(--foreground-secondary)" }}>Subtotal da rodada</span>
         <span>{money(subtotal)}</span>
       </div>
-      <p style={{ fontSize: 11.5, color: "var(--foreground-muted)", margin: 0, textAlign: "center" }}>
-        Você poderá enviar esta rodada para a cozinha na próxima etapa.
-      </p>
+
+      {erroEnviar && <p role="alert" style={{ fontSize: 12.5, fontWeight: 700, color: "var(--danger)", margin: 0 }}>{erroEnviar}</p>}
+      <button
+        onClick={enviarParaCozinha}
+        disabled={itens.length === 0 || enviando || rodada.status === "enviando"}
+        style={{ ...btn, border: "none", background: "var(--primary)", color: "var(--background)", opacity: itens.length === 0 || enviando || rodada.status === "enviando" ? 0.5 : 1 }}
+      >
+        {enviando || rodada.status === "enviando" ? "Enviando…" : erroEnviar ? "Tentar novamente" : "Enviar para cozinha"}
+      </button>
 
       {produtoAberto && etapaAtual && (
         <div role="dialog" aria-modal="true" aria-label={`Montar ${produtoAberto.nome}`} style={{ position: "fixed", inset: 0, zIndex: 2900, background: "var(--background)", display: "flex", flexDirection: "column", fontFamily: "'Archivo', sans-serif" }}>

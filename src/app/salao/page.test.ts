@@ -60,11 +60,24 @@ describe("/salao — Rodada 2 em rascunho", () => {
     expect(bloco).toContain("kind: i.kind, name: i.name, detail: i.detail, price: i.price, qty: i.qty");
   });
 
-  test("não existe botão/texto de enviar a Rodada 2 para a cozinha — só o aviso de que isso vem na próxima etapa", () => {
+  test("botão 'Enviar para cozinha' chama a rota dedicada de envio da rodada, nunca a rota de pagamento da Rodada 1", () => {
     const bloco = fonte.slice(fonte.indexOf("function RodadaRascunhoCard"), fonte.indexOf("function EnviarPedidoModal"));
     expect(bloco).not.toContain("Enviar pedido");
-    expect(bloco).not.toContain("/enviar");
-    expect(bloco).toContain("Você poderá enviar esta rodada para a cozinha na próxima etapa.");
+    expect(bloco).toContain("Enviar para cozinha");
+    expect(bloco).toContain("fetch(`/api/salao/comandas/${comandaId}/rodadas/${rodada.id}/enviar`");
+  });
+
+  test("envio usa clientRequestId (gerarClientRequestId), reaproveitado entre tentativas — nunca regenerado a cada clique", () => {
+    const bloco = fonte.slice(fonte.indexOf("async function enviarParaCozinha"), fonte.indexOf("function EnviarPedidoModal"));
+    expect(bloco).toContain("if (enviandoRef.current || itens.length === 0) return");
+    expect(bloco).toContain("clientRequestIdRodadaRef");
+    expect(bloco).toContain("if (!clientRequestIdRodadaRef.current) clientRequestIdRodadaRef.current = gerarClientRequestId()");
+  });
+
+  test("edição de itens só é permitida enquanto a rodada está em rascunho — bloqueada durante/depois do envio", () => {
+    const bloco = fonte.slice(fonte.indexOf("function RodadaRascunhoCard"), fonte.indexOf("function EnviarPedidoModal"));
+    expect(bloco).toContain('const editavel = rodada.status === "rascunho"');
+    expect(bloco).toContain("if (!editavel) return");
   });
 
   test("usa o mesmo seletor oficial de produtos (montagemManual) — categorias e busca reaproveitadas", () => {
