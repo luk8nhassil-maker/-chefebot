@@ -43,6 +43,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (comanda.itens.length === 0) {
     return NextResponse.json({ ok: false, error: "Adicione pelo menos um item antes de enviar" }, { status: 422 });
   }
+  if (!comanda.cliente?.trim()) {
+    return NextResponse.json({ ok: false, error: "Informe o nome do cliente antes de enviar" }, { status: 422 });
+  }
 
   const identificacaoCliente = identificacaoClienteComanda(comanda);
   const observacaoComanda = [

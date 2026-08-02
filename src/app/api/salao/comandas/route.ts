@@ -28,7 +28,10 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ ok: true, comandas });
 }
 
-// Abrir uma comanda é uma ação exclusiva do terminal do Salão.
+// Abrir uma comanda é uma ação exclusiva do terminal do Salão. Cliente/mesa
+// são opcionais aqui de propósito: "Começar novo atendimento" abre a
+// comanda (ainda anônima) direto no catálogo — a identificação só é exigida
+// mais tarde, na revisão, antes do envio (ver .../[id]/enviar).
 export async function POST(req: NextRequest) {
   const sessaoSalao = await lerSessaoSalao(req);
   if (!sessaoSalao) {
@@ -42,12 +45,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "Payload inválido" }, { status: 400 });
   }
 
-  const cliente = (body.cliente || "").trim();
-  if (!cliente) {
-    return NextResponse.json({ ok: false, error: "Informe o nome do cliente" }, { status: 400 });
-  }
-
-  const resultado = await abrirComanda({ cliente, mesa: body.mesa, complemento: body.complemento });
+  const resultado = await abrirComanda({ cliente: body.cliente, mesa: body.mesa, complemento: body.complemento });
   if (resultado === "mesa_ocupada") {
     return NextResponse.json({ ok: false, error: "Esta mesa já tem uma comanda aberta" }, { status: 409 });
   }

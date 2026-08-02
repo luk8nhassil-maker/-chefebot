@@ -44,6 +44,14 @@ export async function POST(
     return NextResponse.json({ ok: false, error: "Identificador de tentativa (clientRequestId) é obrigatório." }, { status: 400 });
   }
 
+  const comandaPreCheck = await buscarComanda(id);
+  if (!comandaPreCheck) {
+    return NextResponse.json({ ok: false, error: "Comanda não encontrada" }, { status: 404 });
+  }
+  if (!comandaPreCheck.cliente?.trim()) {
+    return NextResponse.json({ ok: false, error: "Informe o nome do cliente antes de enviar" }, { status: 422 });
+  }
+
   let reivindicacao;
   try {
     reivindicacao = await reivindicarEnvioRodada(id, rodadaId, clientRequestId);

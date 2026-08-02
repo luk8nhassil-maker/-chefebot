@@ -37,11 +37,13 @@ const CARDAPIO_TESTE = {
 
 import {
   abrirComanda,
+  atualizarIdentificacaoComanda,
   atualizarItensComanda,
   atualizarItensRodada,
   buscarComanda,
   comRodadasNormalizadas,
   criarRodadaEmRascunho,
+  descartarComandaVazia,
   fecharComanda,
   listarComandas,
   marcarComandaEnviada,
@@ -230,6 +232,68 @@ describe("fecharComanda", () => {
     await fecharComanda(c.id);
     const r = await fecharComanda(c.id);
     expect(r).toBe("ja_fechada");
+  });
+});
+
+describe("atualizarIdentificacaoComanda", () => {
+  it("grava cliente/mesa/whatsapp de uma comanda ainda anônima (aberta direto no catálogo)", async () => {
+    const anonima = await abrirComanda({});
+    if (typeof anonima !== "object") throw new Error("esperava Comanda");
+    const r = await atualizarIdentificacaoComanda(anonima.id, { cliente: "João", mesa: "4", whatsapp: "11999998888" });
+    if (typeof r !== "object") throw new Error(`esperava Comanda, recebeu "${r}"`);
+    expect(r.cliente).toBe("João");
+    expect(r.mesa).toBe("4");
+    expect(r.whatsapp).toBe("11999998888");
+  });
+
+  it("'semMesa' limpa a mesa mesmo que já tivesse sido informada antes", async () => {
+    const c = await abrirComandaOk("9");
+    const r = await atualizarIdentificacaoComanda(c.id, { cliente: "Bia", semMesa: true });
+    if (typeof r !== "object") throw new Error(`esperava Comanda, recebeu "${r}"`);
+    expect(r.mesa).toBeUndefined();
+  });
+
+  it("recusa mesa já ocupada por outra comanda aberta", async () => {
+    await abrirComandaOk("8");
+    const outra = await abrirComanda({});
+    if (typeof outra !== "object") throw new Error("esperava Comanda");
+    const r = await atualizarIdentificacaoComanda(outra.id, { cliente: "Ana", mesa: "8" });
+    expect(r).toBe("mesa_ocupada");
+  });
+
+  it("nao_encontrada para id inexistente", async () => {
+    const r = await atualizarIdentificacaoComanda("comanda_inexistente", { cliente: "Ana" });
+    expect(r).toBe("nao_encontrada");
+  });
+
+  it("nao_esta_aberta depois que a comanda já foi enviada", async () => {
+    const c = await abrirComandaOk("5");
+    await marcarComandaEnviada(c.id, "ped_1", 1);
+    const r = await atualizarIdentificacaoComanda(c.id, { cliente: "Outro nome" });
+    expect(r).toBe("nao_esta_aberta");
+  });
+});
+
+describe("descartarComandaVazia", () => {
+  it("remove uma comanda aberta que ainda não enviou nada, mesmo com itens no rascunho", async () => {
+    const c = await abrirComandaOk("3");
+    await atualizarItensComanda(c.id, [{ kind: "simple", name: "Refrigerante 2L", price: 12, qty: 1 }]);
+    const r = await descartarComandaVazia(c.id);
+    expect(r).toBe("ok");
+    expect(await buscarComanda(c.id)).toBeNull();
+  });
+
+  it("recusa descartar depois que já enviou ao menos um pedido", async () => {
+    const c = await abrirComandaOk("3");
+    await marcarComandaEnviada(c.id, "ped_1", 1);
+    const r = await descartarComandaVazia(c.id);
+    expect(r).toBe("ja_enviada");
+    expect(await buscarComanda(c.id)).not.toBeNull();
+  });
+
+  it("nao_encontrada para id inexistente", async () => {
+    const r = await descartarComandaVazia("comanda_inexistente");
+    expect(r).toBe("nao_encontrada");
   });
 });
 

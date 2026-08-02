@@ -105,17 +105,24 @@ describe("POST /api/salao/comandas (abrir)", () => {
     expect(res.status).toBe(401);
   });
 
-  it("abre uma comanda nova com cliente obrigatório e mesa opcional", async () => {
+  it("abre uma comanda nova com cliente e mesa opcionais", async () => {
     const token = await criarTokenSalao();
-    const semCliente = await POST(postReqSalao({ mesa: "5" }, token));
-    expect(semCliente.status).toBe(400);
-
     const res = await POST(postReqSalao({ cliente: "Ana", mesa: "5", complemento: "Varanda" }, token));
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.comanda.cliente).toBe("Ana");
     expect(data.comanda.mesa).toBe("5");
     expect(data.comanda.complemento).toBe("Varanda");
+    expect(data.comanda.status).toBe("aberta");
+  });
+
+  it("abre uma comanda anônima (sem cliente/mesa) — 'Começar novo atendimento' entra direto no catálogo", async () => {
+    const token = await criarTokenSalao();
+    const res = await POST(postReqSalao({}, token));
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.comanda.cliente).toBeUndefined();
+    expect(data.comanda.mesa).toBeUndefined();
     expect(data.comanda.status).toBe("aberta");
   });
 

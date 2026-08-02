@@ -116,6 +116,22 @@ describe("POST /api/salao/comandas/[id]/rodadas/[rodadaId]/enviar", () => {
     expect(res.status).toBe(422);
   });
 
+  it("422 quando a comanda ainda não tem cliente identificado", async () => {
+    const token = await criarTokenSalao();
+    const semCliente = await abrirComanda({ mesa: "6" });
+    if (typeof semCliente !== "object") throw new Error("esperava Comanda");
+    await marcarComandaEnviada(semCliente.id, "ped_1", 1);
+    const criada = await (await criarRodadaRoute(req(token, {}), { params: Promise.resolve({ id: semCliente.id }) })).json();
+    await atualizarRodada(
+      req(token, { itens: [{ kind: "simple", name: "Refrigerante 2L", qty: 1 }] }),
+      paramsFor(semCliente.id, criada.rodada.id)
+    );
+    const res = await enviarRodada(req(token, { clientRequestId: "a".repeat(20) }), paramsFor(semCliente.id, criada.rodada.id));
+    expect(res.status).toBe(422);
+    const data = await res.json();
+    expect(data.error).toMatch(/cliente/i);
+  });
+
   it("cria o pedido oficial da rodada via /api/pedido-app e marca a rodada como enviada, mantendo a comanda aberta", async () => {
     const token = await criarTokenSalao();
     const { comandaId, rodadaId } = await comandaComRodada2ComItens(token);

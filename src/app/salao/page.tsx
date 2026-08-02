@@ -6,12 +6,13 @@
 // POST /api/pedido-app, chamado internamente pelas rotas de envio do Salão) —
 // nenhuma lógica de catálogo/preço/pedido paralela vive aqui.
 //
-// Redesenho UX/UI: a navegação fala a língua do garçom (Fazer pedido /
-// Pedidos abertos; "Pedido inicial"/"Complemento N" em vez de "Rodada 1/2"),
-// nunca expõe termos técnicos (clientRequestId, status bruto, pedidoId) e
-// sempre oferece uma próxima ação — nenhuma tela é um beco sem saída. A
-// estrutura técnica de rodadas continua exatamente a mesma no backend; esta
-// tela só decide como e quando chamar cada rota já existente.
+// Fluxo direto ao catálogo: "Começar novo atendimento" abre a comanda (ainda
+// anônima — sem cliente/mesa) direto na tela de produtos, nunca num
+// formulário antes. Cliente/mesa/WhatsApp só são pedidos na revisão, depois
+// que já existe pelo menos um item — a identificação é a ÚLTIMA etapa antes
+// do envio, nunca a primeira. A estrutura técnica de rodadas continua
+// exatamente a mesma no backend; esta tela só decide como e quando chamar
+// cada rota já existente.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
@@ -24,6 +25,7 @@ import {
   ReceiptText,
   Search,
   Users,
+  X,
 } from "lucide-react"
 import type { ItemApp } from "@/lib/pedidoAppItens"
 import { gerarClientRequestId } from "@/survival/clientRequestId"
@@ -75,6 +77,7 @@ type Comanda = {
   numero: number
   cliente?: string
   mesa?: string
+  whatsapp?: string
   complemento?: string
   itens: ItemApp[]
   observacao?: string
@@ -160,6 +163,7 @@ function urlEnviarRodada(comandaId: string, rodada: Rodada): string {
 const FONT = "'Archivo', sans-serif"
 const card: React.CSSProperties = { background: "var(--surface)", border: "1px solid var(--surface-secondary)", borderRadius: 14, padding: 14 }
 const input: React.CSSProperties = { width: "100%", height: 48, background: "var(--background)", border: "1px solid var(--surface-secondary)", borderRadius: 10, padding: "0 14px", color: "var(--foreground)", fontSize: 15, fontWeight: 600, fontFamily: FONT, outline: "none", boxSizing: "border-box" }
+const textarea: React.CSSProperties = { ...input, height: 72, padding: "10px 14px", resize: "vertical" as const }
 const btnPrimario: React.CSSProperties = { height: 48, borderRadius: 12, fontSize: 15, fontWeight: 800, cursor: "pointer", fontFamily: FONT, border: "none", background: "var(--primary)", color: "var(--background)" }
 const btnSecundario: React.CSSProperties = { height: 48, borderRadius: 12, fontSize: 14, fontWeight: 800, cursor: "pointer", fontFamily: FONT, border: "1px solid var(--surface-secondary)", background: "transparent", color: "var(--foreground-secondary)" }
 const btnDesabilitado: React.CSSProperties = { opacity: 0.5, cursor: "not-allowed" }
@@ -180,8 +184,14 @@ function EstiloSalao() {
       .sal-navitem{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-height:48px;border:none;background:none;color:var(--foreground-secondary);font-family:${FONT};font-size:11.5px;font-weight:700;border-radius:12px;cursor:pointer;position:relative}
       .sal-navitem.ativo{color:var(--brand-text);font-weight:900}
       .sal-badge{position:absolute;top:2px;right:22%;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:var(--primary);color:var(--background);font-size:10px;font-weight:900;display:flex;align-items:center;justify-content:center}
+      .sal-catalogo-grid{display:grid;gap:8px}
       @media (min-width: 768px){
         .sal-content{max-width:760px;margin:0 auto;padding:24px}
+      }
+      @media (min-width: 1024px){
+        .sal-catalogo-shell{display:grid;grid-template-columns:1fr 340px;gap:20px;align-items:start;max-width:1080px;margin:0 auto;width:100%;padding:20px 24px}
+        .sal-catalogo-grid{grid-template-columns:repeat(2,1fr)}
+        .sal-catalogo-resumo{position:sticky;top:20px}
       }
     `}</style>
   )
@@ -190,15 +200,15 @@ function EstiloSalao() {
 /** true em tablet/desktop (>=768px) — decide qual navegação renderizar
  *  (nunca as duas ao mesmo tempo). Assume mobile até o primeiro efeito
  *  rodar (seguro para SSR: o servidor não sabe a largura real da tela). */
-function useEhDesktop(): boolean {
+function useEhDesktop(min = 768): boolean {
   const [ehDesktop, setEhDesktop] = useState(false)
   useEffect(() => {
-    const mq = window.matchMedia("(min-width: 768px)")
+    const mq = window.matchMedia(`(min-width: ${min}px)`)
     const ouvir = (e: MediaQueryListEvent) => setEhDesktop(e.matches)
     queueMicrotask(() => ouvir({ matches: mq.matches } as MediaQueryListEvent))
     mq.addEventListener("change", ouvir)
     return () => mq.removeEventListener("change", ouvir)
-  }, [])
+  }, [min])
   return ehDesktop
 }
 
@@ -239,8 +249,6 @@ type Aba = "pedido" | "abertos"
 
 type Tela =
   | { tipo: "home" }
-  | { tipo: "identificacao"; clientePreenchido?: string; mesaPreenchida?: string }
-  | { tipo: "mesa_ocupada"; cliente: string; mesa: string; comandaExistenteId: string }
   | { tipo: "catalogo"; comandaId: string }
   | { tipo: "revisao"; comandaId: string }
   | { tipo: "enviado"; comandaId: string; rotulo: string; pedidoNumero?: number; total: number }
@@ -255,6 +263,7 @@ export default function SalaoPage() {
   const [comandas, setComandas] = useState<Comanda[]>([])
   const [aba, setAba] = useState<Aba>("pedido")
   const [tela, setTela] = useState<Tela>({ tipo: "home" })
+  const [abrindoAtendimento, setAbrindoAtendimento] = useState(false)
   const ehDesktop = useEhDesktop()
 
   const carregarComandas = useCallback(async (): Promise<Comanda[] | null> => {
@@ -306,6 +315,28 @@ export default function SalaoPage() {
   const comandaAtual = (id: string) => comandas.find((c) => c.id === id) || null
   const abertasParaBadge = comandas.filter((c) => c.status !== "fechada").length
 
+  /** "Começar novo atendimento": abre a comanda AINDA ANÔNIMA (sem
+   *  cliente/mesa) e vai direto para o catálogo — nenhum formulário antes.
+   *  Cliente/mesa só são pedidos na revisão, no fim do fluxo. */
+  async function comecarNovoAtendimento() {
+    if (abrindoAtendimento) return
+    setAbrindoAtendimento(true)
+    try {
+      const r = await fetch("/api/salao/comandas", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      })
+      const data = await r.json().catch(() => null)
+      if (r.ok && data?.ok) {
+        setTela({ tipo: "catalogo", comandaId: data.comanda.id })
+        carregarComandas()
+      }
+    } finally {
+      setAbrindoAtendimento(false)
+    }
+  }
+
   if (carregando) {
     return (
       <div className="sal-shell" style={{ alignItems: "center", justifyContent: "center" }}>
@@ -325,34 +356,9 @@ export default function SalaoPage() {
     )
   }
 
-  // Qualquer sub-fluxo (identificação, catálogo, revisão, enviado, detalhe
-  // da comanda) ocupa a tela inteira, como já acontecia antes — só a tela
-  // "home" mostra o cabeçalho com as duas abas.
-  if (tela.tipo === "identificacao") {
-    return (
-      <AtendimentoForm
-        clienteInicial={tela.clientePreenchido || ""}
-        mesaInicial={tela.mesaPreenchida || ""}
-        comandas={comandas}
-        onVoltar={voltarParaInicio}
-        onMesaOcupada={(cliente, mesa, comandaExistenteId) => setTela({ tipo: "mesa_ocupada", cliente, mesa, comandaExistenteId })}
-        onCriada={(comandaId) => { setTela({ tipo: "catalogo", comandaId }); carregarComandas() }}
-      />
-    )
-  }
-
-  if (tela.tipo === "mesa_ocupada") {
-    return (
-      <MesaOcupadaResolver
-        cliente={tela.cliente}
-        mesa={tela.mesa}
-        onAbrirExistente={() => setTela({ tipo: "comanda", comandaId: tela.comandaExistenteId })}
-        onEscolherOutraMesa={() => setTela({ tipo: "identificacao", clientePreenchido: tela.cliente })}
-        onContinuarSemMesa={(comandaId) => { setTela({ tipo: "catalogo", comandaId }); carregarComandas() }}
-      />
-    )
-  }
-
+  // Qualquer sub-fluxo (catálogo, revisão, enviado, detalhe da comanda)
+  // ocupa a tela inteira, como já acontecia antes — só a tela "home" mostra
+  // o cabeçalho com as duas abas.
   if (tela.tipo === "catalogo" && menu) {
     const comanda = comandaAtual(tela.comandaId)
     const ativa = comanda ? rodadaAtiva(comanda) : undefined
@@ -364,7 +370,8 @@ export default function SalaoPage() {
         comanda={comanda}
         rodada={ativa}
         menu={menu}
-        onVoltarInicio={voltarParaInicio}
+        ehDesktop={ehDesktop}
+        onFechado={voltarParaInicio}
         onRevisar={() => setTela({ tipo: "revisao", comandaId: comanda.id })}
         onAtualizado={carregarComandas}
       />
@@ -440,8 +447,9 @@ export default function SalaoPage() {
         {aba === "pedido" && menu && (
           <HomeFazerPedido
             comandas={comandas}
-            onComecarNovoAtendimento={() => setTela({ tipo: "identificacao" })}
-            onContinuarPedido={(comandaId) => setTela({ tipo: "comanda", comandaId })}
+            abrindo={abrindoAtendimento}
+            onComecarNovoAtendimento={comecarNovoAtendimento}
+            onContinuarPedido={(comandaId) => setTela({ tipo: "catalogo", comandaId })}
           />
         )}
         {aba === "abertos" && (
@@ -495,10 +503,12 @@ function TelaSemDados({ onVoltar }: { onVoltar: () => void }) {
 
 function HomeFazerPedido({
   comandas,
+  abrindo,
   onComecarNovoAtendimento,
   onContinuarPedido,
 }: {
   comandas: Comanda[]
+  abrindo: boolean
   onComecarNovoAtendimento: () => void
   onContinuarPedido: (comandaId: string) => void
 }) {
@@ -538,178 +548,9 @@ function HomeFazerPedido({
 
       <div style={{ ...card, display: "grid", gap: 10, textAlign: "center", padding: 24 }}>
         <p style={{ margin: 0, fontSize: 18, fontWeight: 900, color: "var(--foreground)" }}>Novo atendimento</p>
-        <p style={{ margin: 0, fontSize: 13.5, color: "var(--foreground-secondary)" }}>Abra uma comanda e envie o pedido para a cozinha.</p>
-        <button onClick={onComecarNovoAtendimento} style={btnPrimario}>Começar novo atendimento</button>
-      </div>
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// Fluxo 2 — Identificação do atendimento
-// ---------------------------------------------------------------------------
-
-function AtendimentoForm({
-  clienteInicial,
-  mesaInicial,
-  comandas,
-  onVoltar,
-  onMesaOcupada,
-  onCriada,
-}: {
-  clienteInicial: string
-  mesaInicial: string
-  comandas: Comanda[]
-  onVoltar: () => void
-  onMesaOcupada: (cliente: string, mesa: string, comandaExistenteId: string) => void
-  onCriada: (comandaId: string) => void
-}) {
-  const [cliente, setCliente] = useState(clienteInicial)
-  const [mesa, setMesa] = useState(mesaInicial)
-  const [semMesa, setSemMesa] = useState(false)
-  const [enviando, setEnviando] = useState(false)
-  const [erro, setErro] = useState<string | null>(null)
-  const clienteRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => { clienteRef.current?.focus() }, [])
-
-  const podeAvancar = cliente.trim().length > 0 && !enviando
-
-  async function escolherProdutos() {
-    if (!podeAvancar) return
-    setEnviando(true)
-    setErro(null)
-    try {
-      const mesaFinal = semMesa ? undefined : mesa.trim() || undefined
-      const r = await fetch("/api/salao/comandas", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cliente: cliente.trim(), mesa: mesaFinal }),
-      })
-      const data = await r.json().catch(() => null)
-      if (r.status === 409) {
-        const existente = comandas.find((c) => c.mesa === mesaFinal && c.status !== "fechada")
-        if (existente) {
-          onMesaOcupada(cliente.trim(), mesaFinal || "", existente.id)
-          return
-        }
-        setErro("Esta mesa já possui uma comanda aberta.")
-        return
-      }
-      if (!r.ok || !data?.ok) {
-        setErro(data?.error || "Não foi possível abrir o atendimento agora.")
-        return
-      }
-      onCriada(data.comanda.id)
-    } catch {
-      setErro("Não foi possível abrir o atendimento agora. Verifique a conexão.")
-    } finally {
-      setEnviando(false)
-    }
-  }
-
-  return (
-    <div className="sal-shell">
-      <EstiloSalao />
-      <div style={{ padding: "14px 16px 10px", borderBottom: "1px solid var(--surface)", flexShrink: 0, display: "flex", alignItems: "center" }}>
-        <button onClick={onVoltar} style={{ background: "none", border: "none", color: "var(--foreground-secondary)", fontSize: 14, fontWeight: 800, cursor: "pointer", minHeight: 44 }}>‹ Voltar</button>
-      </div>
-      <div className="sal-content" style={{ flex: 1 }}>
-        <p style={{ margin: 0, fontSize: 20, fontWeight: 900, color: "var(--foreground)" }}>Novo atendimento</p>
-
-        <div style={{ display: "grid", gap: 6 }}>
-          <label htmlFor="sal-cliente" style={rotulo}>Nome do cliente</label>
-          <input
-            id="sal-cliente"
-            ref={clienteRef}
-            style={input}
-            placeholder="Ex.: Ana"
-            value={cliente}
-            onChange={(e) => setCliente(e.target.value)}
-            aria-describedby="sal-cliente-ajuda"
-          />
-          <p id="sal-cliente-ajuda" style={{ margin: 0, fontSize: 12, color: "var(--foreground-muted)" }}>Obrigatório — usado para identificar a comanda.</p>
-        </div>
-
-        <div style={{ display: "grid", gap: 6 }}>
-          <label htmlFor="sal-mesa" style={rotulo}>Mesa (opcional)</label>
-          <input
-            id="sal-mesa"
-            style={{ ...input, opacity: semMesa ? 0.5 : 1 }}
-            placeholder="Número da mesa"
-            value={mesa}
-            onChange={(e) => setMesa(e.target.value)}
-            disabled={semMesa}
-          />
-          <button
-            onClick={() => setSemMesa((v) => !v)}
-            aria-pressed={semMesa}
-            style={{ ...btnSecundario, height: 40, width: "fit-content", padding: "0 14px", border: "1px solid " + (semMesa ? "var(--primary)" : "var(--surface-secondary)"), background: semMesa ? "color-mix(in srgb, var(--primary) 15%, transparent)" : "transparent" }}
-          >
-            Sem mesa
-          </button>
-        </div>
-
-        {erro && <p role="alert" style={{ fontSize: 13, fontWeight: 700, color: "var(--danger)", margin: 0 }}>{erro}</p>}
-      </div>
-      <div style={{ borderTop: "1px solid var(--surface)", padding: "12px 16px calc(12px + env(safe-area-inset-bottom))", flexShrink: 0 }}>
-        <button onClick={escolherProdutos} disabled={!podeAvancar} style={{ ...btnPrimario, width: "100%", ...(podeAvancar ? {} : btnDesabilitado) }}>
-          {enviando ? "Abrindo…" : "Escolher produtos"}
-        </button>
-      </div>
-    </div>
-  )
-}
-
-function MesaOcupadaResolver({
-  cliente,
-  mesa,
-  onAbrirExistente,
-  onEscolherOutraMesa,
-  onContinuarSemMesa,
-}: {
-  cliente: string
-  mesa: string
-  onAbrirExistente: () => void
-  onEscolherOutraMesa: () => void
-  onContinuarSemMesa: (comandaId: string) => void
-}) {
-  const [enviando, setEnviando] = useState(false)
-  const [erro, setErro] = useState<string | null>(null)
-
-  async function continuarSemMesa() {
-    setEnviando(true)
-    setErro(null)
-    try {
-      const r = await fetch("/api/salao/comandas", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cliente }),
-      })
-      const data = await r.json().catch(() => null)
-      if (!r.ok || !data?.ok) {
-        setErro(data?.error || "Não foi possível abrir o atendimento agora.")
-        return
-      }
-      onContinuarSemMesa(data.comanda.id)
-    } catch {
-      setErro("Não foi possível abrir o atendimento agora. Verifique a conexão.")
-    } finally {
-      setEnviando(false)
-    }
-  }
-
-  return (
-    <div className="sal-shell" style={{ alignItems: "center", justifyContent: "center", padding: 20 }}>
-      <EstiloSalao />
-      <div style={{ ...card, width: "100%", maxWidth: 380, display: "grid", gap: 12 }}>
-        <p style={{ margin: 0, fontSize: 17, fontWeight: 900, color: "var(--foreground)" }}>Esta mesa já possui uma comanda aberta.</p>
-        <p style={{ margin: 0, fontSize: 13.5, color: "var(--foreground-secondary)" }}>Mesa {mesa} · {cliente}</p>
-        {erro && <p role="alert" style={{ fontSize: 12.5, fontWeight: 700, color: "var(--danger)", margin: 0 }}>{erro}</p>}
-        <button onClick={onAbrirExistente} style={btnPrimario}>Abrir comanda existente</button>
-        <button onClick={onEscolherOutraMesa} style={btnSecundario}>Escolher outra mesa</button>
-        <button onClick={continuarSemMesa} disabled={enviando} style={{ ...btnSecundario, ...(enviando ? btnDesabilitado : {}) }}>
-          {enviando ? "Abrindo…" : "Continuar sem mesa"}
+        <p style={{ margin: 0, fontSize: 13.5, color: "var(--foreground-secondary)" }}>Escolha os produtos e envie o pedido para a cozinha.</p>
+        <button onClick={onComecarNovoAtendimento} disabled={abrindo} style={{ ...btnPrimario, ...(abrindo ? btnDesabilitado : {}) }}>
+          {abrindo ? "Abrindo…" : "Começar novo atendimento"}
         </button>
       </div>
     </div>
@@ -717,18 +558,63 @@ function MesaOcupadaResolver({
 }
 
 // ---------------------------------------------------------------------------
-// Fluxo 3 — Escolher produtos (reaproveita o montador oficial)
+// Fluxo 2 — Escolher produtos (abre direto ao clicar em "Começar novo
+// atendimento"/"Continuar pedido"/"Adicionar itens" — reaproveita o
+// montador oficial)
 // ---------------------------------------------------------------------------
 
 function ContextoAtendimento({ comanda }: { comanda: Comanda }) {
+  const identificado = !!comanda.cliente
   return (
     <div style={{ padding: "14px 16px", borderBottom: "1px solid var(--surface)", flexShrink: 0, display: "flex", flexDirection: "column", gap: 2 }}>
       <span style={{ fontSize: 15, fontWeight: 900, color: "var(--foreground)", display: "flex", alignItems: "center", gap: 6 }}>
-        <Users size={16} aria-hidden="true" /> {identificacaoCliente(comanda)}
+        <Users size={16} aria-hidden="true" /> {identificado ? identificacaoCliente(comanda) : "Novo atendimento"}
       </span>
-      <span style={{ fontSize: 12.5, color: "var(--foreground-secondary)" }}>
-        {identificacaoMesa(comanda)} · Comanda #{comanda.numero}
-      </span>
+      {identificado && (
+        <span style={{ fontSize: 12.5, color: "var(--foreground-secondary)" }}>
+          {identificacaoMesa(comanda)} · Comanda #{comanda.numero}
+        </span>
+      )}
+    </div>
+  )
+}
+
+/** Modal de confirmação ao fechar o catálogo com itens já adicionados —
+ *  nunca perde o que já foi montado por engano (voltar/fechar/erro de
+ *  rede). */
+function ConfirmarSairModal({
+  onContinuarMontando,
+  onSalvarESair,
+  onDescartar,
+}: {
+  onContinuarMontando: () => void
+  onSalvarESair: () => void
+  onDescartar: () => void
+}) {
+  const [confirmandoDescarte, setConfirmandoDescarte] = useState(false)
+
+  if (confirmandoDescarte) {
+    return (
+      <div role="dialog" aria-modal="true" aria-label="Descartar pedido" style={{ position: "fixed", inset: 0, zIndex: 3100, background: "color-mix(in srgb, black 55%, transparent)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+        <div style={{ ...card, width: "100%", maxWidth: 380, display: "grid", gap: 12, background: "var(--background)" }}>
+          <p style={{ margin: 0, fontSize: 17, fontWeight: 900, color: "var(--foreground)" }}>Descartar este pedido?</p>
+          <p style={{ margin: 0, fontSize: 13.5, color: "var(--foreground-secondary)" }}>Os produtos adicionados serão perdidos. Esta ação não pode ser desfeita.</p>
+          <button onClick={onDescartar} style={{ ...btnPrimario, background: "var(--danger)" }}>Descartar pedido</button>
+          <button onClick={() => setConfirmandoDescarte(false)} style={btnSecundario}>Voltar</button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div role="dialog" aria-modal="true" aria-label="Sair deste pedido?" style={{ position: "fixed", inset: 0, zIndex: 3100, background: "color-mix(in srgb, black 55%, transparent)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div style={{ ...card, width: "100%", maxWidth: 380, display: "grid", gap: 12, background: "var(--background)" }}>
+        <p style={{ margin: 0, fontSize: 17, fontWeight: 900, color: "var(--foreground)" }}>Sair deste pedido?</p>
+        <p style={{ margin: 0, fontSize: 13.5, color: "var(--foreground-secondary)" }}>Os produtos adicionados continuarão salvos.</p>
+        <button onClick={onContinuarMontando} style={btnPrimario}>Continuar montando</button>
+        <button onClick={onSalvarESair} style={btnSecundario}>Salvar e sair</button>
+        <button onClick={() => setConfirmandoDescarte(true)} style={{ ...btnSecundario, color: "var(--danger)" }}>Descartar pedido</button>
+      </div>
     </div>
   )
 }
@@ -737,14 +623,16 @@ function ProdutoSelector({
   comanda,
   rodada,
   menu,
-  onVoltarInicio,
+  ehDesktop,
+  onFechado,
   onRevisar,
   onAtualizado,
 }: {
   comanda: Comanda
   rodada: Rodada
   menu: MenuManual
-  onVoltarInicio: () => void
+  ehDesktop: boolean
+  onFechado: () => void
   onRevisar: () => void
   onAtualizado: () => void
 }) {
@@ -757,6 +645,8 @@ function ProdutoSelector({
   const [itens, setItens] = useState<ItemApp[]>(rodada.itens)
   const [confirmacao, setConfirmacao] = useState<string | null>(null)
   const [erroSalvar, setErroSalvar] = useState<string | null>(null)
+  const [mostrarConfirmarSair, setMostrarConfirmarSair] = useState(false)
+  const [fechando, setFechando] = useState(false)
 
   const salvar = useCallback(async (novosItens: ItemApp[]) => {
     setErroSalvar(null)
@@ -847,48 +737,102 @@ function ProdutoSelector({
 
   const total = itens.reduce((s, i) => s + i.price * i.qty, 0)
 
+  function pedirFechar() {
+    if (itens.length === 0) {
+      descartarSemItens()
+      return
+    }
+    setMostrarConfirmarSair(true)
+  }
+
+  async function descartarSemItens() {
+    if (fechando) return
+    setFechando(true)
+    try {
+      await fetch(`/api/salao/comandas/${comanda.id}/descartar`, { method: "POST" }).catch(() => {})
+    } finally {
+      setFechando(false)
+      onFechado()
+    }
+  }
+
+  async function descartarComItens() {
+    if (fechando) return
+    setFechando(true)
+    try {
+      await fetch(`/api/salao/comandas/${comanda.id}/descartar`, { method: "POST" }).catch(() => {})
+    } finally {
+      setFechando(false)
+      setMostrarConfirmarSair(false)
+      onFechado()
+    }
+  }
+
   return (
     <div className="sal-shell">
       <EstiloSalao />
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 16px 0" }}>
-        <button onClick={onVoltarInicio} style={{ background: "none", border: "none", color: "var(--foreground-secondary)", fontSize: 14, fontWeight: 800, cursor: "pointer", minHeight: 44 }}>‹ Início</button>
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          <span style={{ fontSize: 17, fontWeight: 900, color: "var(--foreground)" }}>Adicionar produtos</span>
+          <span style={{ fontSize: 12, fontWeight: 700, color: "var(--foreground-muted)" }}>Novo atendimento</span>
+        </div>
+        <button onClick={pedirFechar} aria-label="Fechar" style={{ width: 44, height: 44, display: "flex", alignItems: "center", justifyContent: "center", background: "none", border: "none", color: "var(--foreground-secondary)", cursor: "pointer" }}>
+          <X size={22} aria-hidden="true" />
+        </button>
       </div>
       <ContextoAtendimento comanda={comanda} />
 
-      <div style={{ flex: 1, overflowY: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
-        <div style={{ position: "relative" }}>
-          <Search size={16} aria-hidden="true" style={{ position: "absolute", left: 12, top: 16, color: "var(--foreground-muted)" }} />
-          <input style={{ ...input, paddingLeft: 36 }} placeholder="Buscar produto…" value={termo} onChange={(e) => setTermo(e.target.value)} aria-label="Buscar produto" />
+      <div className="sal-catalogo-shell" style={{ flex: 1, overflowY: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={{ position: "relative" }}>
+            <Search size={16} aria-hidden="true" style={{ position: "absolute", left: 12, top: 16, color: "var(--foreground-muted)" }} />
+            <input style={{ ...input, paddingLeft: 36 }} placeholder="Buscar produto…" value={termo} onChange={(e) => setTermo(e.target.value)} aria-label="Buscar produto" />
+          </div>
+          <div style={{ display: "flex", gap: 6, overflowX: "auto" }}>
+            {CATEGORIAS.map((c) => (
+              <button key={c.id} onClick={() => setCategoria(c.id)} style={{ height: 40, padding: "0 14px", flexShrink: 0, borderRadius: 12, fontFamily: FONT, cursor: "pointer", border: "1px solid " + (categoria === c.id && !buscando ? "var(--primary)" : "var(--surface-secondary)"), background: categoria === c.id && !buscando ? "color-mix(in srgb, var(--primary) 15%, transparent)" : "transparent", color: "var(--foreground)", fontSize: 13 }}>
+                {c.label}
+              </button>
+            ))}
+          </div>
+          <div className="sal-catalogo-grid">
+            {resultados.map((p) => (
+              <button key={p.id} onClick={() => abrirProduto(p)} disabled={p.esgotado} style={{ ...card, minHeight: 48, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, textAlign: "left", cursor: p.esgotado ? "not-allowed" : "pointer", opacity: p.esgotado ? 0.5 : 1 }}>
+                <span style={{ fontSize: 14, fontWeight: 800, color: "var(--foreground)" }}>{p.nome}{p.esgotado ? " · esgotado" : ""}</span>
+                <span style={{ fontSize: 13, fontWeight: 900, color: "var(--brand-text)" }}>{p.precoBase === null ? "" : money(p.precoBase)}</span>
+              </button>
+            ))}
+            {resultados.length === 0 && <p style={{ fontSize: 13, color: "var(--foreground-muted)", textAlign: "center" }}>Nenhum produto encontrado.</p>}
+          </div>
+          <p role="status" aria-live="polite" style={{ margin: 0, fontSize: 12.5, fontWeight: 700, color: "var(--success)", minHeight: 16 }}>{confirmacao || ""}</p>
+          {erroSalvar && <p role="alert" style={{ fontSize: 12.5, color: "var(--danger)", margin: 0 }}>{erroSalvar}</p>}
         </div>
-        <div style={{ display: "flex", gap: 6, overflowX: "auto" }}>
-          {CATEGORIAS.map((c) => (
-            <button key={c.id} onClick={() => setCategoria(c.id)} style={{ height: 40, padding: "0 14px", flexShrink: 0, borderRadius: 12, fontFamily: FONT, cursor: "pointer", border: "1px solid " + (categoria === c.id && !buscando ? "var(--primary)" : "var(--surface-secondary)"), background: categoria === c.id && !buscando ? "color-mix(in srgb, var(--primary) 15%, transparent)" : "transparent", color: "var(--foreground)", fontSize: 13 }}>
-              {c.label}
+
+        {ehDesktop && (
+          <div className="sal-catalogo-resumo" style={{ ...card, display: "grid", gap: 10 }}>
+            <p style={rotulo}>Resumo do pedido</p>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, fontWeight: 900 }}>
+              <span style={{ color: "var(--foreground-secondary)" }}>{itens.length} item(ns)</span>
+              <span>{money(total)}</span>
+            </div>
+            <button onClick={onRevisar} disabled={itens.length === 0} style={{ ...btnPrimario, ...(itens.length === 0 ? btnDesabilitado : {}) }}>
+              {itens.length === 0 ? "Adicione pelo menos um produto" : "Revisar pedido"}
             </button>
-          ))}
-        </div>
-        <div style={{ display: "grid", gap: 8 }}>
-          {resultados.map((p) => (
-            <button key={p.id} onClick={() => abrirProduto(p)} disabled={p.esgotado} style={{ ...card, minHeight: 48, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, textAlign: "left", cursor: p.esgotado ? "not-allowed" : "pointer", opacity: p.esgotado ? 0.5 : 1 }}>
-              <span style={{ fontSize: 14, fontWeight: 800, color: "var(--foreground)" }}>{p.nome}{p.esgotado ? " · esgotado" : ""}</span>
-              <span style={{ fontSize: 13, fontWeight: 900, color: "var(--brand-text)" }}>{p.precoBase === null ? "" : money(p.precoBase)}</span>
-            </button>
-          ))}
-          {resultados.length === 0 && <p style={{ fontSize: 13, color: "var(--foreground-muted)", textAlign: "center" }}>Nenhum produto encontrado.</p>}
-        </div>
-        <p role="status" aria-live="polite" style={{ margin: 0, fontSize: 12.5, fontWeight: 700, color: "var(--success)", minHeight: 16 }}>{confirmacao || ""}</p>
-        {erroSalvar && <p role="alert" style={{ fontSize: 12.5, color: "var(--danger)", margin: 0 }}>{erroSalvar}</p>}
+          </div>
+        )}
       </div>
 
-      <div style={{ borderTop: "1px solid var(--surface)", padding: "12px 16px calc(12px + env(safe-area-inset-bottom))", flexShrink: 0, display: "grid", gap: 8 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, fontWeight: 900 }}>
-          <span style={{ color: "var(--foreground-secondary)" }}>{itens.length} item(ns)</span>
-          <span>{money(total)}</span>
+      {!ehDesktop && (
+        <div style={{ borderTop: "1px solid var(--surface)", padding: "12px 16px calc(12px + env(safe-area-inset-bottom))", flexShrink: 0, display: "grid", gap: 8 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, fontWeight: 900 }}>
+            <span style={{ color: "var(--foreground-secondary)" }}>{itens.length} item(ns)</span>
+            <span>{money(total)}</span>
+          </div>
+          <button onClick={onRevisar} disabled={itens.length === 0} style={{ ...btnPrimario, ...(itens.length === 0 ? btnDesabilitado : {}) }}>
+            {itens.length === 0 ? "Adicione pelo menos um produto" : "Revisar pedido"}
+          </button>
         </div>
-        <button onClick={onRevisar} disabled={itens.length === 0} style={{ ...btnPrimario, ...(itens.length === 0 ? btnDesabilitado : {}) }}>
-          {itens.length === 0 ? "Adicione pelo menos um produto" : "Revisar pedido"}
-        </button>
-      </div>
+      )}
 
       {produtoAberto && etapaAtual && (
         <div role="dialog" aria-modal="true" aria-label={`Montar ${produtoAberto.nome}`} style={{ position: "fixed", inset: 0, zIndex: 2900, background: "var(--background)", display: "flex", flexDirection: "column", fontFamily: FONT }}>
@@ -939,12 +883,22 @@ function ProdutoSelector({
           </div>
         </div>
       )}
+
+      {mostrarConfirmarSair && (
+        <ConfirmarSairModal
+          onContinuarMontando={() => setMostrarConfirmarSair(false)}
+          onSalvarESair={() => { setMostrarConfirmarSair(false); onFechado() }}
+          onDescartar={descartarComItens}
+        />
+      )}
     </div>
   )
 }
 
 // ---------------------------------------------------------------------------
-// Fluxo 4 — Revisar pedido (a própria tela já é a confirmação)
+// Fluxo 3 — Revisar pedido (itens → observação → identificação → total →
+// enviar). A identificação (cliente/mesa/WhatsApp) só é pedida aqui, no fim
+// do fluxo — nunca antes do catálogo.
 // ---------------------------------------------------------------------------
 
 function PedidoReview({
@@ -959,19 +913,37 @@ function PedidoReview({
   onEnviado: (pedidoNumero: number | undefined, total: number) => void
 }) {
   const [itens, setItens] = useState<ItemApp[]>(rodada.itens)
+  const [observacao, setObservacao] = useState(rodada.observacao || "")
   const [erroSalvar, setErroSalvar] = useState<string | null>(null)
+
+  const [cliente, setCliente] = useState(comanda.cliente || "")
+  const [mesa, setMesa] = useState(comanda.mesa || "")
+  const [semMesa, setSemMesa] = useState(false)
+  const [whatsapp, setWhatsapp] = useState(comanda.whatsapp || "")
+  const [erroIdentificacao, setErroIdentificacao] = useState<string | null>(null)
+  const clienteRef = useRef<HTMLInputElement>(null)
+
   const [enviando, setEnviando] = useState(false)
   const [erroEnviar, setErroEnviar] = useState<string | null>(rodada.erroUltimaTentativa || null)
   const enviandoRef = useRef(false)
   const clientRequestIdRef = useRef<string | null>(null)
 
-  const salvar = useCallback(async (novosItens: ItemApp[]) => {
+  const primeiraVez = rodada.numero === 1
+
+  useEffect(() => {
+    if (primeiraVez && !cliente) clienteRef.current?.focus()
+  }, [primeiraVez, cliente])
+
+  const salvar = useCallback(async (novosItens: ItemApp[], novaObservacao?: string) => {
     setErroSalvar(null)
     try {
       const r = await fetch(urlItensRodada(comanda.id, rodada), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ itens: novosItens.map((i) => ({ kind: i.kind, name: i.name, detail: i.detail, price: i.price, qty: i.qty })) }),
+        body: JSON.stringify({
+          itens: novosItens.map((i) => ({ kind: i.kind, name: i.name, detail: i.detail, price: i.price, qty: i.qty })),
+          observacao: novaObservacao ?? observacao,
+        }),
       })
       const data = await r.json().catch(() => null)
       if (!r.ok || !data?.ok) {
@@ -980,7 +952,7 @@ function PedidoReview({
     } catch {
       setErroSalvar("Não foi possível salvar agora. Verifique a conexão.")
     }
-  }, [comanda.id, rodada])
+  }, [comanda.id, rodada, observacao])
 
   function mudarQuantidade(i: number, delta: number) {
     const novos = itens.map((item, idx) => (idx === i ? { ...item, qty: item.qty + delta } : item)).filter((item) => item.qty > 0)
@@ -992,13 +964,46 @@ function PedidoReview({
     setItens(novos)
     salvar(novos)
   }
+  function salvarObservacao() {
+    salvar(itens, observacao)
+  }
+
+  async function salvarIdentificacao(): Promise<boolean> {
+    if (!primeiraVez) return true
+    setErroIdentificacao(null)
+    try {
+      const r = await fetch(`/api/salao/comandas/${comanda.id}/identificacao`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cliente, mesa, semMesa, whatsapp }),
+      })
+      const data = await r.json().catch(() => null)
+      if (!r.ok || !data?.ok) {
+        setErroIdentificacao(data?.error || "Não foi possível salvar a identificação agora.")
+        return false
+      }
+      return true
+    } catch {
+      setErroIdentificacao("Não foi possível salvar a identificação agora. Verifique a conexão.")
+      return false
+    }
+  }
 
   async function enviarParaCozinha() {
     if (enviandoRef.current || itens.length === 0) return
+    if (primeiraVez && !cliente.trim()) {
+      setErroIdentificacao("Informe o nome do cliente")
+      clienteRef.current?.focus()
+      return
+    }
     enviandoRef.current = true
     setEnviando(true)
     setErroEnviar(null)
     try {
+      if (primeiraVez) {
+        const ok = await salvarIdentificacao()
+        if (!ok) return
+      }
       if (!clientRequestIdRef.current) clientRequestIdRef.current = gerarClientRequestId()
       const r = await fetch(urlEnviarRodada(comanda.id, rodada), {
         method: "POST",
@@ -1020,6 +1025,7 @@ function PedidoReview({
   }
 
   const total = itens.reduce((s, i) => s + i.price * i.qty, 0)
+  const podeEnviar = itens.length > 0 && !enviando && (!primeiraVez || cliente.trim().length > 0)
 
   return (
     <div className="sal-shell">
@@ -1027,29 +1033,100 @@ function PedidoReview({
       <div style={{ padding: "14px 16px 0" }}>
         <p style={{ margin: 0, fontSize: 20, fontWeight: 900, color: "var(--foreground)" }}>Revisar pedido</p>
         <p style={{ margin: "2px 0 0", fontSize: 13, color: "var(--foreground-secondary)" }}>
-          {identificacaoCliente(comanda)} · {identificacaoMesa(comanda)} · {rotuloRodada(rodada)}
+          {rotuloRodada(rodada)}{comanda.cliente ? ` · ${identificacaoCliente(comanda)}` : ""}
         </p>
       </div>
 
-      <div style={{ flex: 1, overflowY: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
-        <div style={{ ...card, display: "grid", gap: 8 }}>
-          {itens.map((item, i) => (
-            <div key={`${item.name}-${item.detail}-${i}`} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ flex: 1, minWidth: 0 }}>
-                <span style={{ display: "block", fontSize: 13.5, fontWeight: 800, color: "var(--foreground)" }}>{item.name}</span>
-                {item.detail && <span style={{ display: "block", fontSize: 11.5, color: "var(--foreground-secondary)" }}>{item.detail}</span>}
-                <span style={{ display: "block", fontSize: 12, fontWeight: 700, color: "var(--brand-text)" }}>{money(item.price * item.qty)}</span>
-              </span>
-              <button onClick={() => mudarQuantidade(i, -1)} aria-label={`Diminuir ${item.name}`} style={{ height: 36, width: 36, borderRadius: 10, cursor: "pointer", border: "1px solid var(--surface-secondary)", background: "transparent", color: "var(--foreground)" }}>−</button>
-              <span style={{ fontSize: 14, fontWeight: 900, minWidth: 20, textAlign: "center" }}>{item.qty}</span>
-              <button onClick={() => mudarQuantidade(i, 1)} aria-label={`Aumentar ${item.name}`} style={{ height: 36, width: 36, borderRadius: 10, cursor: "pointer", border: "1px solid var(--surface-secondary)", background: "transparent", color: "var(--foreground)" }}>+</button>
-              <button onClick={() => removerItem(i)} aria-label={`Remover ${item.name}`} style={{ height: 36, width: 36, borderRadius: 10, cursor: "pointer", border: "none", background: "transparent", color: "var(--danger)" }}>×</button>
-            </div>
-          ))}
+      <div style={{ flex: 1, overflowY: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 14 }}>
+        <div style={{ display: "grid", gap: 4 }}>
+          <p style={rotulo}>Itens do pedido</p>
+          <div style={{ ...card, display: "grid", gap: 8 }}>
+            {itens.map((item, i) => (
+              <div key={`${item.name}-${item.detail}-${i}`} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ display: "block", fontSize: 13.5, fontWeight: 800, color: "var(--foreground)" }}>{item.name}</span>
+                  {item.detail && <span style={{ display: "block", fontSize: 11.5, color: "var(--foreground-secondary)" }}>{item.detail}</span>}
+                  <span style={{ display: "block", fontSize: 12, fontWeight: 700, color: "var(--brand-text)" }}>{money(item.price * item.qty)}</span>
+                </span>
+                <button onClick={() => mudarQuantidade(i, -1)} aria-label={`Diminuir ${item.name}`} style={{ height: 36, width: 36, borderRadius: 10, cursor: "pointer", border: "1px solid var(--surface-secondary)", background: "transparent", color: "var(--foreground)" }}>−</button>
+                <span style={{ fontSize: 14, fontWeight: 900, minWidth: 20, textAlign: "center" }}>{item.qty}</span>
+                <button onClick={() => mudarQuantidade(i, 1)} aria-label={`Aumentar ${item.name}`} style={{ height: 36, width: 36, borderRadius: 10, cursor: "pointer", border: "1px solid var(--surface-secondary)", background: "transparent", color: "var(--foreground)" }}>+</button>
+                <button onClick={() => removerItem(i)} aria-label={`Remover ${item.name}`} style={{ height: 36, width: 36, borderRadius: 10, cursor: "pointer", border: "none", background: "transparent", color: "var(--danger)" }}>×</button>
+              </div>
+            ))}
+          </div>
+          {erroSalvar && <p role="alert" style={{ fontSize: 12.5, color: "var(--danger)", margin: 0 }}>{erroSalvar}</p>}
+          <button onClick={onAdicionarMaisItens} style={{ ...btnSecundario, marginTop: 4 }}>Adicionar mais produtos</button>
         </div>
-        {erroSalvar && <p role="alert" style={{ fontSize: 12.5, color: "var(--danger)", margin: 0 }}>{erroSalvar}</p>}
 
-        <button onClick={onAdicionarMaisItens} style={btnSecundario}>Adicionar mais itens</button>
+        <div style={{ display: "grid", gap: 6 }}>
+          <label htmlFor="sal-observacao" style={rotulo}>Observação para a cozinha</label>
+          <textarea
+            id="sal-observacao"
+            style={textarea}
+            placeholder="Ex.: sem cebola, bem passado…"
+            value={observacao}
+            onChange={(e) => setObservacao(e.target.value)}
+            onBlur={salvarObservacao}
+          />
+        </div>
+
+        {primeiraVez && (
+          <div style={{ display: "grid", gap: 12 }}>
+            <p style={rotulo}>Identifique a comanda</p>
+
+            <div style={{ display: "grid", gap: 6 }}>
+              <label htmlFor="sal-cliente" style={rotulo}>Nome do cliente</label>
+              <input
+                id="sal-cliente"
+                ref={clienteRef}
+                style={input}
+                placeholder="Ex.: João"
+                value={cliente}
+                onChange={(e) => setCliente(e.target.value)}
+                onBlur={salvarIdentificacao}
+                aria-required="true"
+                aria-invalid={!!erroIdentificacao}
+              />
+            </div>
+
+            <div style={{ display: "grid", gap: 6 }}>
+              <label htmlFor="sal-mesa" style={rotulo}>Mesa (opcional)</label>
+              <input
+                id="sal-mesa"
+                style={{ ...input, opacity: semMesa ? 0.5 : 1 }}
+                placeholder="Ex.: 4"
+                value={mesa}
+                onChange={(e) => setMesa(e.target.value)}
+                onBlur={salvarIdentificacao}
+                disabled={semMesa}
+              />
+              <button
+                onClick={() => { setSemMesa((v) => !v); window.setTimeout(salvarIdentificacao, 0) }}
+                aria-pressed={semMesa}
+                style={{ ...btnSecundario, height: 40, width: "fit-content", padding: "0 14px", border: "1px solid " + (semMesa ? "var(--primary)" : "var(--surface-secondary)"), background: semMesa ? "color-mix(in srgb, var(--primary) 15%, transparent)" : "transparent" }}
+              >
+                Sem mesa
+              </button>
+            </div>
+
+            <div style={{ display: "grid", gap: 6 }}>
+              <label htmlFor="sal-whatsapp" style={rotulo}>WhatsApp do cliente (opcional)</label>
+              <input
+                id="sal-whatsapp"
+                style={input}
+                placeholder="(11) 90000-0000"
+                inputMode="tel"
+                value={whatsapp}
+                onChange={(e) => setWhatsapp(e.target.value)}
+                onBlur={salvarIdentificacao}
+              />
+              <p style={{ margin: 0, fontSize: 12, color: "var(--foreground-muted)" }}>O link de acompanhamento é enviado depois que o pedido chega à cozinha.</p>
+            </div>
+
+            {erroIdentificacao && <p role="alert" style={{ fontSize: 12.5, fontWeight: 700, color: "var(--danger)", margin: 0 }}>{erroIdentificacao}</p>}
+          </div>
+        )}
       </div>
 
       <div style={{ borderTop: "1px solid var(--surface)", padding: "12px 16px calc(12px + env(safe-area-inset-bottom))", flexShrink: 0, display: "grid", gap: 8 }}>
@@ -1062,10 +1139,10 @@ function PedidoReview({
         )}
         <button
           onClick={enviarParaCozinha}
-          disabled={itens.length === 0 || enviando}
-          style={{ ...btnPrimario, ...(itens.length === 0 || enviando ? btnDesabilitado : {}) }}
+          disabled={!podeEnviar}
+          style={{ ...btnPrimario, ...(!podeEnviar ? btnDesabilitado : {}) }}
         >
-          {enviando ? "Enviando pedido…" : erroEnviar ? "Tentar novamente" : "Enviar para cozinha"}
+          {enviando ? "Enviando para a cozinha…" : erroEnviar ? "Tentar novamente" : "Enviar para a cozinha"}
         </button>
       </div>
     </div>
@@ -1073,7 +1150,7 @@ function PedidoReview({
 }
 
 // ---------------------------------------------------------------------------
-// Fluxo 5 — Pedido enviado
+// Fluxo 4 — Pedido enviado
 // ---------------------------------------------------------------------------
 
 function PedidoEnviadoScreen({
@@ -1119,17 +1196,17 @@ function PedidoEnviadoScreen({
           <p style={{ margin: 0, fontSize: 12.5, color: "var(--foreground-muted)" }}>Pedido #{pedidoNumero}</p>
         )}
         <p style={{ margin: 0, fontSize: 18, fontWeight: 900, color: "var(--foreground)" }}>{money(total)}</p>
-        <button onClick={onVerPedidosAbertos} style={btnPrimario}>Ver pedidos abertos</button>
-        <button onClick={adicionarMaisItens} disabled={processando} style={{ ...btnSecundario, ...(processando ? btnDesabilitado : {}) }}>
+        <button onClick={adicionarMaisItens} disabled={processando} style={{ ...btnPrimario, ...(processando ? btnDesabilitado : {}) }}>
           {processando ? "Abrindo…" : "Adicionar mais itens"}
         </button>
+        <button onClick={onVerPedidosAbertos} style={btnSecundario}>Ver pedidos abertos</button>
       </div>
     </div>
   )
 }
 
 // ---------------------------------------------------------------------------
-// Fluxo 6 — Pedidos abertos
+// Fluxo 5 — Pedidos abertos
 // ---------------------------------------------------------------------------
 
 function PedidosAbertosList({ comandas, onAbrirComanda }: { comandas: Comanda[]; onAbrirComanda: (id: string) => void }) {
@@ -1175,7 +1252,7 @@ function ComandaCard({ comanda, onAbrir }: { comanda: Comanda; onAbrir: () => vo
 }
 
 // ---------------------------------------------------------------------------
-// Fluxo 7 — Visão da comanda
+// Fluxo 6 — Visão da comanda
 // ---------------------------------------------------------------------------
 
 function ComandaDetail({

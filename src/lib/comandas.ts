@@ -67,6 +67,10 @@ export type Comanda = {
   cliente?: string;
   /** Opcional — "Sem mesa" é um atendimento válido (balcão, viagem). */
   mesa?: string;
+  /** Opcional — só para o Salão saber o contato; nunca dispara mensagem
+   *  sozinho (o link de acompanhamento continua saindo do fluxo já
+   *  existente depois que o pedido chega na cozinha). */
+  whatsapp?: string;
   complemento?: string;
   /** Itens da Rodada 1 — mantido por compatibilidade (comandas antigas e o
    *  fluxo de envio existente leem/escrevem aqui). A fonte de verdade para
@@ -242,6 +246,78 @@ export async function abrirComanda(opcoes: AbrirComandaOpcoes): Promise<AbrirCom
     };
     await salvarComandas([...lista, comanda]);
     return comanda;
+  });
+}
+
+export type AtualizarIdentificacaoOpcoes = {
+  cliente?: string;
+  /** `mesa: undefined` não mexe no campo; `mesa: ""` (ou `semMesa: true`)
+   *  limpa a mesa — "Sem mesa" precisa continuar distinguível de "não
+   *  mudou nada". */
+  mesa?: string;
+  semMesa?: boolean;
+  whatsapp?: string;
+};
+
+export type AtualizarIdentificacaoResultado =
+  | Comanda
+  | "nao_encontrada"
+  | "nao_esta_aberta"
+  | "mesa_ocupada";
+
+/**
+ * Grava cliente/mesa/WhatsApp da comanda — chamada pela tela de revisão,
+ * no fim do fluxo, nunca na abertura do atendimento (o catálogo abre com a
+ * comanda ainda anônima). Reaplica a mesma checagem de mesa ocupada de
+ * `abrirComanda`, agora sob o mesmo mutex de leitura+escrita.
+ */
+export async function atualizarIdentificacaoComanda(
+  id: string,
+  opcoes: AtualizarIdentificacaoOpcoes
+): Promise<AtualizarIdentificacaoResultado> {
+  return comMutexComandas(async () => {
+    const lista = await listarComandas();
+    const idx = lista.findIndex((c) => c.id === id);
+    if (idx < 0) return "nao_encontrada";
+    if (lista[idx].status !== "aberta") return "nao_esta_aberta";
+
+    const mesaTrim = opcoes.semMesa ? undefined : opcoes.mesa?.trim() || undefined;
+    if (mesaTrim && mesaTrim !== lista[idx].mesa) {
+      const jaOcupada = lista.some((c) => c.id !== id && c.mesa === mesaTrim && c.status !== "fechada");
+      if (jaOcupada) return "mesa_ocupada";
+    }
+
+    lista[idx] = {
+      ...lista[idx],
+      ...(opcoes.cliente !== undefined ? { cliente: opcoes.cliente.trim() || undefined } : {}),
+      ...(opcoes.mesa !== undefined || opcoes.semMesa ? { mesa: mesaTrim } : {}),
+      ...(opcoes.whatsapp !== undefined ? { whatsapp: opcoes.whatsapp.trim() || undefined } : {}),
+    };
+    await salvarComandas(lista);
+    return lista[idx];
+  });
+}
+
+export type DescartarComandaResultado = "ok" | "nao_encontrada" | "ja_enviada";
+
+/**
+ * Descarta uma comanda que ainda não enviou nenhum pedido — usada só por
+ * "Fechar sem item"/"Descartar pedido" no catálogo/revisão, nunca depois do
+ * primeiro envio (aí é `fecharComanda`, que exige o oposto). Remove a
+ * comanda da lista por completo (nunca existiu pedido oficial ligado a
+ * ela), então não há nada para reverter em `/pedidos`.
+ */
+export async function descartarComandaVazia(id: string): Promise<DescartarComandaResultado> {
+  return comMutexComandas(async () => {
+    const lista = await listarComandas();
+    const idx = lista.findIndex((c) => c.id === id);
+    if (idx < 0) return "nao_encontrada";
+    if (lista[idx].status !== "aberta") return "ja_enviada";
+    const normalizada = comRodadasNormalizadas(lista[idx]);
+    const jaEnviouAlgo = normalizada.rodadas!.some((r) => r.status === "enviada" || r.status === "enviando");
+    if (jaEnviouAlgo) return "ja_enviada";
+    await salvarComandas(lista.filter((c) => c.id !== id));
+    return "ok";
   });
 }
 

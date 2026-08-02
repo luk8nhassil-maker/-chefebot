@@ -91,6 +91,19 @@ describe("POST /api/salao/comandas/[id]/enviar", () => {
     expect(res.status).toBe(422);
   });
 
+  it("recusa enviar uma comanda sem cliente identificado (catálogo abre antes da identificação)", async () => {
+    const token = await criarTokenSalao();
+    const aberta = await (await abrir(reqSalao({}, token))).json();
+    await atualizarComanda(
+      reqSalao({ itens: [{ kind: "simple", name: "Refrigerante 2L", qty: 2 }] }, token),
+      paramsFor(aberta.comanda.id)
+    );
+    const res = await enviar(reqSalao({}, token), paramsFor(aberta.comanda.id));
+    expect(res.status).toBe(422);
+    const data = await res.json();
+    expect(data.error).toMatch(/cliente/i);
+  });
+
   it("cria o pedido de verdade via /api/pedido-app (mesmo motor, sem telefone, sem cobrança) e marca a comanda como enviada", async () => {
     const token = await criarTokenSalao();
     const id = await abrirEComItens(token, "5");
