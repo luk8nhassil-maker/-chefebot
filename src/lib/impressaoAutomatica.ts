@@ -31,6 +31,13 @@ function chaveClaimImpressaoAutomatica(pedidoId: string): string {
  * do pedido.
  */
 export async function reivindicarImpressaoAutomatica(pedidoId: string): Promise<boolean> {
-  const ok = await redis.set(chaveClaimImpressaoAutomatica(pedidoId), String(Date.now()), { nx: true });
-  return !!ok;
+  try {
+    const ok = await redis.set(chaveClaimImpressaoAutomatica(pedidoId), String(Date.now()), { nx: true });
+    return !!ok;
+  } catch {
+    // Redis indisponível: nunca bloqueia a transição de status do pedido por
+    // causa da permissão de impressão automática — só nega o gatilho
+    // automático desta vez (a atendente sempre pode reimprimir manualmente).
+    return false;
+  }
 }

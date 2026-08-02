@@ -57,4 +57,9 @@ describe("reivindicarImpressaoAutomatica", () => {
     await reivindicarImpressaoAutomatica("ped_xyz");
     expect(redisMock.set).toHaveBeenCalledWith("pedido:auto-print-claim:ped_xyz", expect.any(String), { nx: true });
   });
+
+  it("Redis indisponível: nunca lança erro, apenas nega a impressão automática desta vez", async () => {
+    redisMock.set.mockRejectedValueOnce(new Error("ECONNREFUSED"));
+    await expect(reivindicarImpressaoAutomatica("ped_redis_fora")).resolves.toBe(false);
+  });
 });
