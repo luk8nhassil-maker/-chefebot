@@ -12,7 +12,7 @@ export const SALAO_COOKIE = "salao-session";
 const SESSAO_DURACAO = "12h";
 const CHAVE_CONFIG_SALAO = "config:salao";
 
-type ConfigSalao = { codigoAcesso?: string; epoch?: number };
+type ConfigSalao = { codigoAcesso?: string; epoch?: number; atualizadoEm?: string };
 
 function getSecretSalao() {
   return new TextEncoder().encode(
@@ -29,7 +29,7 @@ export async function obterConfigSalao(): Promise<ConfigSalao> {
  * Salão já emitidas — ver `epoch` abaixo. */
 export async function definirCodigoAcessoSalao(codigo: string): Promise<void> {
   const epoch = (await obterEpochAtual()) + 1;
-  await redis.set(CHAVE_CONFIG_SALAO, { codigoAcesso: codigo.trim(), epoch });
+  await redis.set(CHAVE_CONFIG_SALAO, { codigoAcesso: codigo.trim(), epoch, atualizadoEm: new Date().toISOString() });
 }
 
 /**
@@ -43,7 +43,7 @@ export async function definirCodigoAcessoSalao(codigo: string): Promise<void> {
 export async function revogarSessoesSalao(): Promise<void> {
   const config = await obterConfigSalao();
   const epoch = (config.epoch ?? 0) + 1;
-  await redis.set(CHAVE_CONFIG_SALAO, { ...config, epoch });
+  await redis.set(CHAVE_CONFIG_SALAO, { ...config, epoch, atualizadoEm: new Date().toISOString() });
 }
 
 async function obterEpochAtual(): Promise<number> {
