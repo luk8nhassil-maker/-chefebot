@@ -1042,12 +1042,18 @@ export default function PedidosPage() {
     try {
       const r = await fetch("/api/orders", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, status: novoStatus, entregador, ...(limpeza ? { limpeza } : {}) }) })
       if (!r.ok) throw new Error("Falha ao atualizar status")
+      const data = await r.json().catch(() => null)
       const firstName = pedido.cliente.split(" ")[0]
       if (novoStatus === "entregue") { tocarSomEntrega(); temposEntregaRef.current[id] = tempoDesde(pedido.horario, undefined, Date.now()) }
       setToast({ text: `${firstName} → ${STATUS_COLOR[novoStatus].label}`, expires: Date.now() + 5000, pedidoId: id, prevStatus })
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
       toastTimerRef.current = setTimeout(() => setToast(null), 5000)
-      if (prevStatus === "novo" && novoStatus === "em_preparo") {
+      // Quem dispara a impressão silenciosa é o SERVIDOR (claim atômico e
+      // persistente, ver src/lib/impressaoAutomatica.ts) — nunca mais a
+      // crença local de "eu vi o status novo". Isso é o que protege contra
+      // imprimir duas vezes o mesmo aceite quando duas abas/dispositivos
+      // tentam aceitar o mesmo pedido ao mesmo tempo.
+      if (data?.podeImprimirAutomaticamente) {
         imprimirPedidoSilencioso(id)
       }
       return true

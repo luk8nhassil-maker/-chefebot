@@ -38,6 +38,7 @@ import {
   sanitizarPedidoParaPainel,
   type PedidoComEdicao,
 } from '@/lib/pedidoEdicao'
+import { reivindicarImpressaoAutomatica } from '@/lib/impressaoAutomatica'
 
 const APP_BASE_URL = 'https://chefebot-pjif.vercel.app'
 
@@ -302,6 +303,20 @@ export async function PATCH(req: NextRequest) {
 
     const statusAnterior = pedidos[index].status
     const entregadorAnteriorId = pedidos[index].entregador?.id
+
+    // Proteção contra impressão automática duplicada (ver
+    // src/lib/impressaoAutomatica.ts): entre este PATCH e qualquer outra aba
+    // ou dispositivo tentando aceitar o MESMO pedido ao mesmo tempo, só um
+    // recebe o direito de disparar a impressão silenciosa — decidido aqui,
+    // dentro do mesmo mutex de edição já usado por esta rota, nunca em
+    // memória no navegador. Isto não é a impressão em si (a rota
+    // /pedidos/[id]/imprimir e o botão de reimpressão manual continuam
+    // exatamente iguais), só quem tem permissão de disparar o gatilho
+    // automático deste evento específico.
+    const podeImprimirAutomaticamente =
+      statusAnterior === 'novo' && status === 'em_preparo'
+        ? await reivindicarImpressaoAutomatica(id)
+        : false
 
     // A confirmação manual de Pix não passa mais por aqui: ela exige senha e
     // checklist de segurança e vive em /api/orders/confirmar-pix-manual, que
@@ -573,15 +588,13 @@ export async function PATCH(req: NextRequest) {
   }
 
     const resposta = sanitizarPedidoPixResposta(pedidos[index])
-    return NextResponse.json(
-      avisosOperacionais.length > 0
-        ? {
-            ...resposta,
-            avisoOperacional: avisosOperacionais.join(' '),
-            avisosOperacionais,
-          }
-        : resposta
-    )
+    return NextResponse.json({
+      ...resposta,
+      ...(avisosOperacionais.length > 0
+        ? { avisoOperacional: avisosOperacionais.join(' '), avisosOperacionais }
+        : {}),
+      ...(podeImprimirAutomaticamente ? { podeImprimirAutomaticamente: true } : {}),
+    })
   } finally {
     await liberarMutexEdicao(id, mutexToken)
   }
