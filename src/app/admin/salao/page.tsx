@@ -7,25 +7,6 @@ const SALAO_LOGIN_URL = 'https://chefedapizza.com.br/salao/login'
 const CODIGO_MIN_LENGTH = 4
 const ALFABETO_CODIGO = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789' // sem O/0/I/1 — evita confusão ao digitar num tablet
 
-function getUserRole(): string | null {
-  if (typeof document === 'undefined') return null
-  try {
-    const cookies = document.cookie.split(';')
-    for (const c of cookies) {
-      const trimmed = c.trim()
-      if (trimmed.startsWith('auth-user=')) {
-        const raw = trimmed.substring('auth-user='.length)
-        let decoded = raw
-        try { decoded = decodeURIComponent(raw) } catch { decoded = raw }
-        if (decoded.startsWith('%7B')) { try { decoded = decodeURIComponent(decoded) } catch {} }
-        const user = JSON.parse(decoded)
-        return user?.role ?? null
-      }
-    }
-  } catch { return null }
-  return null
-}
-
 // Nunca Math.random para o código do terminal (mesmo padrão já usado no
 // projeto — ver src/app/admin/jornada-chef/page.tsx): crypto.getRandomValues.
 function gerarCodigoAleatorio(): string {
@@ -59,9 +40,8 @@ const botaoDestrutivo: React.CSSProperties = { height: 46, padding: '0 18px', bo
 export default function AcessoDoSalaoPage() {
   const router = useRouter()
 
-  const [checking, setChecking] = useState(true)
-  const [isAdmin, setIsAdmin] = useState(false)
   const [carregando, setCarregando] = useState(true)
+  const [erroCarregar, setErroCarregar] = useState(false)
   const [configurado, setConfigurado] = useState(false)
   const [atualizadoEm, setAtualizadoEm] = useState<string | undefined>(undefined)
 
@@ -78,14 +58,16 @@ export default function AcessoDoSalaoPage() {
   const revogandoRef = useRef(false)
 
   useEffect(() => {
-    const role = getUserRole()
-    const admin = role === 'admin' || role === 'dev'
-    setIsAdmin(admin)
-    setChecking(false)
-
+    // A autorização de verdade é sempre do servidor (lerSessaoAdministrativa
+    // + admin/dev, ver /api/admin/salao/config): um 401 real redireciona
+    // para o login. Não há checagem de papel no cliente aqui — evita tanto
+    // uma segunda fonte de verdade quanto qualquer mismatch de hidratação
+    // entre o HTML gerado no servidor e a primeira renderização no cliente,
+    // já que nada nesta página depende de cookies durante a renderização.
     fetch('/api/admin/salao/config')
       .then((r) => {
         if (r.status === 401) { router.push('/login?callbackUrl=/admin/salao'); return null }
+        if (!r.ok) throw new Error('falha ao carregar')
         return r.json()
       })
       .then((data) => {
@@ -93,9 +75,9 @@ export default function AcessoDoSalaoPage() {
           setConfigurado(!!data.configurado)
           setAtualizadoEm(data.atualizadoEm)
         }
-        setCarregando(false)
       })
-      .catch(() => setCarregando(false))
+      .catch(() => setErroCarregar(true))
+      .finally(() => setCarregando(false))
   }, [router])
 
   function gerarCodigo() {
@@ -179,20 +161,6 @@ export default function AcessoDoSalaoPage() {
     }
   }
 
-  if (checking) return null
-
-  if (!isAdmin) {
-    return (
-      <PanelShell showGestaoNav>
-        <div style={{ padding: 24, maxWidth: 680 }}>
-          <p style={{ color: 'var(--foreground-secondary)', fontFamily: "'Archivo', sans-serif" }}>
-            Você não tem permissão para acessar esta página.
-          </p>
-        </div>
-      </PanelShell>
-    )
-  }
-
   return (
     <PanelShell showGestaoNav>
       <div style={{ padding: 24, maxWidth: 680, display: 'flex', flexDirection: 'column', gap: 20, fontFamily: "'Archivo', sans-serif" }}>
@@ -206,6 +174,12 @@ export default function AcessoDoSalaoPage() {
         {carregando ? (
           <div style={cardStyle}>
             <p style={{ color: 'var(--foreground-secondary)', fontSize: 13, margin: 0 }}>Carregando...</p>
+          </div>
+        ) : erroCarregar ? (
+          <div style={cardStyle}>
+            <p role="alert" style={{ color: 'var(--danger)', fontSize: 13, fontWeight: 700, margin: 0 }}>
+              Não foi possível carregar. Recarregue a página e tente de novo.
+            </p>
           </div>
         ) : (
           <>
