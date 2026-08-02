@@ -41,7 +41,7 @@ describe("NovoPedidoManual — bloqueio de avanço", () => {
   test("existe uma etapa alcançável derivada da validade de cada etapa anterior", () => {
     expect(fonte).toContain("const indiceAlcancavel");
     expect(fonte).toContain("function irParaPasso(destino: Passo)");
-    expect(fonte).toContain("if (indiceDestino <= indiceAlcancavel) setPasso(destino)");
+    expect(fonte).toContain("if (indiceDestino <= indiceAlcancavel) {");
   });
 
   test("o botão Continuar/Criar pedido fica desabilitado sem os dados obrigatórios da etapa atual", () => {
@@ -60,7 +60,7 @@ describe("NovoPedidoManual — bloqueio de avanço", () => {
 
 describe("NovoPedidoManual — telefone como primeiro campo e busca administrativa", () => {
   test("a etapa Cliente começa pelo telefone, antes do nome", () => {
-    const etapaCliente = fonte.slice(fonte.indexOf('passo === "cliente"'), fonte.indexOf('passo === "produtos"'));
+    const etapaCliente = fonte.slice(fonte.indexOf('passo === "cliente" && ('), fonte.indexOf('passo === "produtos" && produtoUiState === "resumo"'));
     const idxTelefone = etapaCliente.indexOf("TELEFONE *");
     const idxNome = etapaCliente.indexOf("NOME *");
     expect(idxTelefone).toBeGreaterThan(-1);
@@ -69,7 +69,7 @@ describe("NovoPedidoManual — telefone como primeiro campo e busca administrati
   });
 
   test("o campo de telefone tem ícone, máscara de exibição e texto de ajuda", () => {
-    const etapaCliente = fonte.slice(fonte.indexOf('passo === "cliente"'), fonte.indexOf('passo === "produtos"'));
+    const etapaCliente = fonte.slice(fonte.indexOf('passo === "cliente" && ('), fonte.indexOf('passo === "produtos" && produtoUiState === "resumo"'));
     expect(etapaCliente).toContain("<Phone");
     expect(etapaCliente).toContain("formatarTelefoneExibicao(telefone)");
     expect(etapaCliente).toContain("Assim que reconhecemos o telefone");
@@ -129,7 +129,7 @@ describe("NovoPedidoManual — cliente reconhecido em card compacto", () => {
 
 describe("NovoPedidoManual — card 'Sem número de telefone' (nunca um checkbox solto)", () => {
   test("é um card inteiro clicável com indicador de seleção, não um checkbox", () => {
-    const etapaCliente = fonte.slice(fonte.indexOf('passo === "cliente"'), fonte.indexOf('passo === "produtos"'));
+    const etapaCliente = fonte.slice(fonte.indexOf('passo === "cliente" && ('), fonte.indexOf('passo === "produtos" && produtoUiState === "resumo"'));
     expect(etapaCliente).toContain("Sem número de telefone");
     expect(etapaCliente).toContain("onClick={() => setSemTelefone((v) => !v)}");
     expect(etapaCliente).toContain("aria-pressed={semTelefone}");
@@ -197,11 +197,184 @@ describe("NovoPedidoManual — montadores no mesmo modal (nunca fullscreen)", ()
 
 describe("NovoPedidoManual — bilhete de itens escolhidos", () => {
   test("cada item do carrinho mostra nome, detalhe, preço e controles de ajuste/remoção", () => {
-    const etapaProdutos = fonte.slice(fonte.indexOf('passo === "produtos"'), fonte.indexOf('passo === "entrega"'));
+    const etapaProdutos = fonte.slice(fonte.indexOf('passo === "produtos" && produtoUiState === "resumo" && ('), fonte.indexOf('passo === "entrega"'));
     expect(etapaProdutos).toContain("money(item.price * item.qty)");
     expect(etapaProdutos).toContain("alterarQuantidade(itens, i, -1)");
     expect(etapaProdutos).toContain("alterarQuantidade(itens, i, 1)");
     expect(etapaProdutos).toContain("removerItem(itens, i)");
+  });
+});
+
+describe("NovoPedidoManual — etapa Produtos em dois estados (resumo/seletor)", () => {
+  const etapaResumo = fonte.slice(
+    fonte.indexOf('passo === "produtos" && produtoUiState === "resumo" && ('),
+    fonte.indexOf('passo === "produtos" && produtoUiState === "seletor" && (')
+  );
+  const etapaSeletor = fonte.slice(
+    fonte.indexOf('passo === "produtos" && produtoUiState === "seletor" && ('),
+    fonte.indexOf('passo === "entrega"')
+  );
+
+  test("a etapa inicia no resumo (ESTADO A), nunca no seletor", () => {
+    expect(fonte).toContain('const [produtoUiState, setProdutoUiState] = useState<"resumo" | "seletor">("resumo")');
+  });
+
+  test("resumo vazio mostra estado vazio claro e mantém o botão + Adicionar em destaque", () => {
+    expect(etapaResumo).toContain("Nenhum produto adicionado ainda");
+    // O botão + Adicionar é renderizado incondicionalmente, antes do ternário
+    // vazio/bilhete (`itens.length === 0 ? (` — o gate do estado vazio em si).
+    const idxBotaoAdicionar = etapaResumo.indexOf('onClick={() => setProdutoUiState("seletor")}');
+    const idxTernarioVazio = etapaResumo.indexOf("itens.length === 0 ? (");
+    expect(idxBotaoAdicionar).toBeGreaterThan(-1);
+    expect(idxTernarioVazio).toBeGreaterThan(-1);
+    expect(idxBotaoAdicionar).toBeLessThan(idxTernarioVazio);
+  });
+
+  test("+ Adicionar abre o seletor (ESTADO B)", () => {
+    expect(etapaResumo).toContain('onClick={() => setProdutoUiState("seletor")}');
+    expect(etapaResumo).toContain("<Plus size={18}");
+  });
+
+  test("+ Adicionar continua disponível depois do primeiro item (não é substituído pelo bilhete)", () => {
+    // O botão fica fora do ternário itens.length === 0 ? vazio : bilhete — sempre visível.
+    const idxBotao = etapaResumo.indexOf('onClick={() => setProdutoUiState("seletor")}');
+    const idxTernario = etapaResumo.indexOf("itens.length === 0 ? (");
+    expect(idxBotao).toBeLessThan(idxTernario);
+  });
+
+  test("Continuar bloqueado sem item e liberado com pelo menos um item", () => {
+    expect(fonte).toContain("const produtosValido = itens.length > 0");
+    expect(fonte).toContain("[clienteValido, produtosValido, entregaValida, pagamentoValido, pendencias.length === 0][indicePassoAtual]");
+  });
+
+  test("o rodapé com Voltar/Continuar (navegação entre etapas) some enquanto o seletor está aberto", () => {
+    expect(fonte).toContain("const emSeletorProdutos = passo === \"produtos\" && produtoUiState === \"seletor\"");
+    expect(fonte).toContain("{!emSeletorProdutos && (");
+  });
+
+  test("o seletor tem cabeçalho com botão de voltar ao resumo, título e subtítulo", () => {
+    expect(etapaSeletor).toContain('onClick={() => setProdutoUiState("resumo")}');
+    expect(etapaSeletor).toContain('aria-label="Voltar ao resumo do pedido"');
+    expect(etapaSeletor).toContain("Adicionar produto");
+    expect(etapaSeletor).toContain("Preços do cardápio oficial");
+  });
+
+  test("busca aparece no topo do seletor e pesquisa em todas as categorias", () => {
+    expect(etapaSeletor).toContain("<Search");
+    expect(etapaSeletor).toContain('placeholder="Buscar pizza, calzone, suco…"');
+    // A busca em si (useMemo) fica fora do JSX, mas alimenta `resultados`
+    // usado nesta camada — "todas" as categorias quando há termo digitado.
+    expect(fonte).toContain('buscarProdutos(produtos, termo, buscando ? "todas" : categoria)');
+  });
+
+  test("categorias aparecem e permanecem visíveis mesmo com busca ativa (nunca somem depois do clique)", () => {
+    expect(etapaSeletor).toContain("CATEGORIAS.map((c) => {");
+    // Diferente da versão anterior, a linha das categorias não está mais
+    // condicionada a `!buscando` — sempre renderiza.
+    expect(etapaSeletor).not.toMatch(/\{!buscando && \(\s*<div style=\{\{ display: "flex", gap: 8, overflowX: "auto" \}\}>\s*\{CATEGORIAS\.map/);
+  });
+
+  test("categoria selecionada fica claramente destacada e a troca de categoria filtra os produtos", () => {
+    expect(etapaSeletor).toContain("const ativo = !buscando && categoria === c.id");
+    expect(etapaSeletor).toContain("setCategoria(c.id)");
+    expect(etapaSeletor).toContain("setTermo(\"\")");
+  });
+
+  test("produtos filtrados mostram ícone/categoria, nome, preço, estado indisponível e um botão 'Escolher'", () => {
+    expect(etapaSeletor).toContain("const IconeProduto = ICONE_CATEGORIA[p.categoria]");
+    expect(etapaSeletor).toContain("Esgotado");
+    expect(etapaSeletor).toContain("Escolher");
+    expect(etapaSeletor).toContain("onClick={() => abrirProduto(p)}");
+    expect(etapaSeletor).toContain("disabled={p.esgotado}");
+  });
+
+  test("categorias e ícones usam exclusivamente os contratos oficiais do ChefeBot (CATEGORIAS/CategoriaManual)", () => {
+    expect(fonte).toContain("const ICONE_CATEGORIA: Record<CategoriaManual, LucideIcon>");
+    expect(fonte).toContain('from "@/lib/montagemManual"');
+  });
+});
+
+describe("NovoPedidoManual — ciclo completo (+ Adicionar → categoria → produto → montar → adicionar → resumo)", () => {
+  test("escolher produto sem montagem adiciona direto e volta ao resumo automaticamente", () => {
+    expect(fonte).toContain("function adicionarDireto(produto: ProdutoManual) {");
+    const corpo = fonte.slice(fonte.indexOf("function adicionarDireto("), fonte.indexOf("function confirmarMontagem("));
+    expect(corpo).toContain("adicionarAoCarrinho(atual, item)");
+    expect(corpo).toContain('setProdutoUiState("resumo")');
+  });
+
+  test("confirmar a montagem de um produto com opções adiciona ao carrinho e volta ao resumo automaticamente", () => {
+    const corpo = fonte.slice(fonte.indexOf("function confirmarMontagem("), fonte.indexOf("function avancarEtapa("));
+    expect(corpo).toContain("adicionarAoCarrinho(atual, item)");
+    expect(corpo).toContain("setProdutoAberto(null)");
+    expect(corpo).toContain('setProdutoUiState("resumo")');
+  });
+
+  test("cancelar o montador (voltar na primeira etapa) devolve ao seletor, não ao resumo", () => {
+    // voltarEtapa só fecha o montador (setProdutoAberto(null)); nunca toca em produtoUiState,
+    // então o seletor (ESTADO B) continua visível por baixo.
+    const corpo = fonte.slice(fonte.indexOf("function voltarEtapa("), fonte.indexOf("function escolher("));
+    expect(corpo).toContain("setProdutoAberto(null)");
+    expect(corpo).not.toContain("produtoUiState");
+  });
+
+  test("o montador é um painel centralizado dentro do mesmo modal — nunca fullscreen", () => {
+    const construtor = fonte.slice(fonte.indexOf("{/* Construtor guiado"), fonte.indexOf("{confirmarSaida && ("));
+    expect(construtor).toContain('width: "min(94vw, 560px)"');
+    expect(construtor).toContain('justifyContent: "center"');
+  });
+
+  test("segundo produto (de categoria diferente) pode ser adicionado sem perder o primeiro", () => {
+    // adicionarAoCarrinho só funde itens IDÊNTICOS (mesmo kind/name/detail);
+    // produtos diferentes coexistem na mesma lista `itens`, sem filtro por categoria.
+    expect(fonte).toContain("adicionarAoCarrinho");
+    expect(fonte).not.toMatch(/itens\.filter\([^)]*categoria/);
+  });
+});
+
+describe("NovoPedidoManual — o carrinho nunca é perdido no ciclo de Produtos", () => {
+  test("fechar o seletor (voltar ao resumo) não toca no carrinho", () => {
+    const handler = fonte.slice(
+      fonte.indexOf('onClick={() => setProdutoUiState("resumo")}'),
+      fonte.indexOf('onClick={() => setProdutoUiState("resumo")}') + 60
+    );
+    expect(handler).not.toContain("setItens");
+  });
+
+  test("trocar de categoria ou pesquisar não reseta `itens`", () => {
+    expect(fonte).not.toMatch(/setCategoria\([^)]*\)[\s\S]{0,20}setItens\(/);
+    expect(fonte).not.toMatch(/setTermo\([^)]*\)[\s\S]{0,20}setItens\(\[\]\)/);
+  });
+
+  test("sair de Produtos para outra etapa preserva o carrinho (só reseta a UI do seletor para a próxima visita)", () => {
+    const corpo = fonte.slice(fonte.indexOf("function irParaPasso("), fonte.indexOf("const bairros ="));
+    expect(corpo).toContain('if (passo === "produtos" && destino !== "produtos") setProdutoUiState("resumo")');
+    expect(corpo).not.toContain("setItens");
+  });
+
+  test("`itens` (o carrinho) só é alterado por adicionar/ajustar/remover — nunca por navegação de etapa ou de seletor", () => {
+    const setItensChamadas = [...fonte.matchAll(/setItens\(/g)].length;
+    // adicionarDireto, confirmarMontagem, aumentar, diminuir e remover — as
+    // únicas cinco origens legítimas de mutação do carrinho.
+    expect(setItensChamadas).toBe(5);
+  });
+});
+
+describe("NovoPedidoManual — teclado, foco e responsividade no fluxo Produtos", () => {
+  test("o campo de busca do seletor recebe foco automaticamente ao abrir", () => {
+    const etapaSeletor = fonte.slice(
+      fonte.indexOf('passo === "produtos" && produtoUiState === "seletor" && ('),
+      fonte.indexOf('passo === "entrega"')
+    );
+    expect(etapaSeletor).toContain("autoFocus");
+  });
+
+  test("categorias, produtos e o botão + Adicionar são <button> nativos (operáveis por teclado)", () => {
+    expect(fonte).toContain('onClick={() => abrirProduto(p)}');
+    expect(fonte).toContain('onClick={() => setProdutoUiState("seletor")}');
+  });
+
+  test("todo o modal (incluindo a etapa Produtos) é responsivo — largura relativa com teto para desktop", () => {
+    expect(fonte).toContain('width: "min(94vw, 640px)"');
   });
 });
 

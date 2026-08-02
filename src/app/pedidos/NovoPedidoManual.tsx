@@ -19,20 +19,28 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import {
+  ArrowLeft,
   ArrowRight,
   Bike,
   Banknote,
   CreditCard,
+  CupSoda,
+  GlassWater,
   LoaderCircle,
   Pencil,
   Phone,
   PhoneOff,
+  Pizza,
+  Plus,
+  Sandwich,
   Search,
   Shuffle,
+  ShoppingBag,
   Store,
   UtensilsCrossed,
   Wallet,
   X,
+  type LucideIcon,
 } from "lucide-react"
 import type { ItemApp } from "@/lib/pedidoAppItens"
 import { computeTaxaApp } from "@/lib/pedidoAppLogic"
@@ -85,6 +93,15 @@ const STEP_META: Record<Passo, { titulo: string; ajuda: string }> = {
 }
 
 const money = (v: number) => "R$ " + v.toFixed(2).replace(".", ",")
+
+/** Ícone por categoria — reaproveita o mesmo conjunto já usado no cardápio
+ * público (src/app/cardapio/page.tsx), nunca um ícone inventado por tela. */
+const ICONE_CATEGORIA: Record<CategoriaManual, LucideIcon> = {
+  pizza: Pizza,
+  lanches: Sandwich,
+  bebidas: CupSoda,
+  sucos: GlassWater,
+}
 
 type Props = {
   /** Cardápio JÁ validado pelo adaptador — a tela nunca recebe resposta crua. */
@@ -216,6 +233,12 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
   // volta a mostrar o card automaticamente, sem precisar de um efeito extra
   // só para "resetar" o estado a cada tecla digitada.
   const [editarNomeParaTelefone, setEditarNomeParaTelefone] = useState<string | null>(null)
+
+  // --- etapa Produtos: dois estados internos --------------------------------
+  // "resumo" (ESTADO A) mostra o bilhete e o botão + Adicionar; "seletor"
+  // (ESTADO B) é a camada de busca/categorias/produtos. O carrinho (itens)
+  // nunca é tocado por essa troca — só decide o que é renderizado.
+  const [produtoUiState, setProdutoUiState] = useState<"resumo" | "seletor">("resumo")
 
   // --- catálogo e busca ----------------------------------------------------
   // Recalculado só quando o cardápio muda, não a cada tecla digitada.
@@ -416,6 +439,10 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
     adicionandoRef.current = true
     const item = construirItemManual(produto, selecaoVazia(), menu)
     if (item) setItens((atual) => adicionarAoCarrinho(atual, item))
+    // Ciclo obrigatório: + Adicionar → escolher produto → adicionar ao
+    // pedido → volta automática ao resumo (ESTADO A), sem fechar a etapa.
+    setTermo("")
+    setProdutoUiState("resumo")
     window.setTimeout(() => { adicionandoRef.current = false }, 400)
   }
 
@@ -427,6 +454,8 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
     if (item) setItens((atual) => adicionarAoCarrinho(atual, item))
     setProdutoAberto(null)
     setTermo("")
+    // Mesmo ciclo do produto sem montagem: confirmar sempre volta ao resumo.
+    setProdutoUiState("resumo")
     window.setTimeout(() => { adicionandoRef.current = false }, 400)
   }
 
@@ -552,7 +581,12 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
 
   function irParaPasso(destino: Passo) {
     const indiceDestino = PASSOS.findIndex((p) => p.id === destino)
-    if (indiceDestino <= indiceAlcancavel) setPasso(destino)
+    if (indiceDestino <= indiceAlcancavel) {
+      // Sair de Produtos sempre devolve o resumo (ESTADO A) na próxima
+      // visita — nunca o carrinho (`itens`), só a camada visível.
+      if (passo === "produtos" && destino !== "produtos") setProdutoUiState("resumo")
+      setPasso(destino)
+    }
   }
 
   const bairros = menu.neighborhoods || []
@@ -586,6 +620,7 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
 
   const etapaValidaAtual = [clienteValido, produtosValido, entregaValida, pagamentoValido, pendencias.length === 0][indicePassoAtual]
   const proximoPasso = PASSOS[indicePassoAtual + 1]?.id ?? null
+  const emSeletorProdutos = passo === "produtos" && produtoUiState === "seletor"
 
   function irParaProximoPasso() {
     if (passo === "revisar") { enviar(); return }
@@ -808,99 +843,35 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
             </>
           )}
 
-          {passo === "produtos" && (
+          {passo === "produtos" && produtoUiState === "resumo" && (
             <>
-              <EtapaHeader indice={indicePassoAtual} titulo={STEP_META.produtos.titulo} ajuda={STEP_META.produtos.ajuda} />
-
-              <div style={{ position: "relative" }}>
-                <Search size={17} aria-hidden="true" style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", color: "var(--foreground-muted)" }} />
-                <input
-                  className="pm-input"
-                  style={{ ...input, paddingLeft: 40 }}
-                  placeholder="Buscar produto em todas as categorias…"
-                  value={termo}
-                  onChange={(e) => setTermo(e.target.value)}
-                  aria-label="Buscar produto"
-                />
-                {termo && (
-                  <button
-                    onClick={() => setTermo("")}
-                    aria-label="Limpar busca"
-                    style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: "var(--foreground-muted)", cursor: "pointer", display: "flex", padding: 4 }}
-                  >
-                    <X size={16} />
-                  </button>
-                )}
-              </div>
-
-              {!buscando && (
-                <div style={{ display: "flex", gap: 8, overflowX: "auto" }}>
-                  {CATEGORIAS.map((c) => (
-                    <button
-                      key={c.id}
-                      onClick={() => setCategoria(c.id)}
-                      style={{
-                        ...btn,
-                        height: 36,
-                        padding: "0 14px",
-                        flexShrink: 0,
-                        border: "1.5px solid " + (categoria === c.id ? "var(--primary)" : "var(--border)"),
-                        background: categoria === c.id ? "var(--primary-soft)" : "transparent",
-                        color: "var(--foreground)",
-                        fontSize: 12.5,
-                      }}
-                    >
-                      {c.label}
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              {buscando && (
-                <p aria-live="polite" style={{ fontSize: 12, fontWeight: 700, color: "var(--foreground-muted)", margin: 0 }}>
-                  {resultados.length === 0
-                    ? "Nenhum produto encontrado."
-                    : `${resultados.length} resultado${resultados.length > 1 ? "s" : ""} em todas as categorias`}
+              <div>
+                <p style={eyebrow}>ETAPA {indicePassoAtual + 1} DE {PASSOS.length}</p>
+                <h3 style={stepTitle}>Confira o pedido</h3>
+                <p style={stepHelp}>
+                  {itens.length === 0
+                    ? 'Toque em "+ Adicionar" para escolher os produtos do pedido.'
+                    : `${itens.length} item${itens.length > 1 ? "s" : ""} no pedido — toque em "+ Adicionar" para incluir mais.`}
                 </p>
-              )}
-
-              {resultados.length === 0 && !buscando && (
-                <p style={{ fontSize: 13, color: "var(--foreground-muted)", margin: 0 }}>Nenhum produto nesta categoria.</p>
-              )}
-
-              <div style={{ display: "grid", gap: 10 }}>
-                {resultados.map((p) => (
-                  <button
-                    key={p.id}
-                    onClick={() => abrirProduto(p)}
-                    disabled={p.esgotado}
-                    className="pm-select-card"
-                    style={{
-                      ...card,
-                      padding: 14,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      gap: 10,
-                      textAlign: "left",
-                      cursor: p.esgotado ? "not-allowed" : "pointer",
-                      opacity: p.esgotado ? 0.5 : 1,
-                    }}
-                  >
-                    <span style={{ minWidth: 0 }}>
-                      <span style={{ display: "block", fontSize: 14, fontWeight: 800, color: "var(--foreground)" }}>{p.nome}</span>
-                      <span style={{ display: "block", fontSize: 11.5, fontWeight: 700, color: "var(--foreground-muted)", marginTop: 2 }}>
-                        {p.esgotado ? "Esgotado" : buscando ? p.categoriaLabel : p.requerMontagem ? "Precisa escolher opções" : "Adiciona direto"}
-                      </span>
-                    </span>
-                    <span style={{ fontSize: 13, fontWeight: 900, color: "var(--brand-text)", flexShrink: 0 }}>
-                      {p.precoBase === null ? "" : (p.requerMontagem && p.categoria === "pizza" ? "a partir de " : "") + money(p.precoBase)}
-                    </span>
-                  </button>
-                ))}
               </div>
 
-              {itens.length > 0 && (
+              <button
+                onClick={() => setProdutoUiState("seletor")}
+                className="pm-cta"
+                style={{ ...btnPrimary, width: "100%" }}
+              >
+                <Plus size={18} aria-hidden="true" /> Adicionar
+              </button>
+
+              {itens.length === 0 ? (
+                <div style={{ ...card, display: "grid", justifyItems: "center", gap: 8, padding: 32, textAlign: "center" }}>
+                  <ShoppingBag size={28} aria-hidden="true" style={{ color: "var(--foreground-muted)" }} />
+                  <p style={{ fontSize: 14, fontWeight: 800, color: "var(--foreground)", margin: 0 }}>Nenhum produto adicionado ainda</p>
+                  <p style={{ fontSize: 12.5, color: "var(--foreground-secondary)", margin: 0 }}>
+                    Toque em “+ Adicionar” para abrir o cardápio.
+                  </p>
+                </div>
+              ) : (
                 <div style={{ ...card, display: "grid", gap: 10 }}>
                   <p style={rotulo}>No pedido ({itens.length})</p>
                   {itens.map((item, i) => (
@@ -923,8 +894,151 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
                       {totais.itensInvalidos} item(ns) saíram do cardápio e não entram no total. Remova antes de enviar.
                     </p>
                   )}
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, fontWeight: 900, color: "var(--foreground)", borderTop: "1px solid var(--border)", paddingTop: 8, marginTop: 2 }}>
+                    <span>Total da etapa</span>
+                    <span>{money(totais.subtotal)}</span>
+                  </div>
                 </div>
               )}
+            </>
+          )}
+
+          {/* ESTADO B — Adicionar produto: camada interna no mesmo contexto
+              do modal (nunca fullscreen, nunca uma tela nova). */}
+          {passo === "produtos" && produtoUiState === "seletor" && (
+            <>
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <button
+                  onClick={() => setProdutoUiState("resumo")}
+                  aria-label="Voltar ao resumo do pedido"
+                  className="pm-close"
+                  style={{ width: 38, height: 38, borderRadius: 10, border: "1.5px solid var(--border)", background: "var(--surface)", color: "var(--foreground-secondary)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}
+                >
+                  <ArrowLeft size={18} />
+                </button>
+                <div>
+                  <h3 style={{ ...stepTitle, fontSize: 18 }}>Adicionar produto</h3>
+                  <p style={stepHelp}>Preços do cardápio oficial</p>
+                </div>
+              </div>
+
+              <div style={{ position: "relative" }}>
+                <Search size={17} aria-hidden="true" style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", color: "var(--foreground-muted)" }} />
+                <input
+                  className="pm-input"
+                  style={{ ...input, paddingLeft: 40 }}
+                  placeholder="Buscar pizza, calzone, suco…"
+                  value={termo}
+                  onChange={(e) => setTermo(e.target.value)}
+                  aria-label="Buscar produto"
+                  autoFocus
+                />
+                {termo && (
+                  <button
+                    onClick={() => setTermo("")}
+                    aria-label="Limpar busca"
+                    style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: "var(--foreground-muted)", cursor: "pointer", display: "flex", padding: 4 }}
+                  >
+                    <X size={16} />
+                  </button>
+                )}
+              </div>
+
+              {/* Categorias sempre visíveis — nunca somem depois do clique
+                  ou enquanto há uma busca ativa. */}
+              <div style={{ display: "flex", gap: 8, overflowX: "auto" }}>
+                {CATEGORIAS.map((c) => {
+                  const Icone = ICONE_CATEGORIA[c.id]
+                  const ativo = !buscando && categoria === c.id
+                  return (
+                    <button
+                      key={c.id}
+                      onClick={() => {
+                        setTermo("")
+                        setCategoria(c.id)
+                      }}
+                      style={{
+                        ...btn,
+                        height: 36,
+                        padding: "0 14px",
+                        flexShrink: 0,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
+                        border: "1.5px solid " + (ativo ? "var(--primary)" : "var(--border)"),
+                        background: ativo ? "var(--primary-soft)" : "transparent",
+                        color: "var(--foreground)",
+                        fontSize: 12.5,
+                      }}
+                    >
+                      <Icone size={14} aria-hidden="true" />
+                      {c.label}
+                    </button>
+                  )
+                })}
+              </div>
+
+              {buscando && (
+                <p aria-live="polite" style={{ fontSize: 12, fontWeight: 700, color: "var(--foreground-muted)", margin: 0 }}>
+                  {resultados.length === 0
+                    ? "Nenhum produto encontrado."
+                    : `${resultados.length} resultado${resultados.length > 1 ? "s" : ""} em todas as categorias`}
+                </p>
+              )}
+
+              {resultados.length === 0 && !buscando && (
+                <p style={{ fontSize: 13, color: "var(--foreground-muted)", margin: 0 }}>Nenhum produto nesta categoria.</p>
+              )}
+
+              <div style={{ display: "grid", gap: 10 }}>
+                {resultados.map((p) => {
+                  const IconeProduto = ICONE_CATEGORIA[p.categoria]
+                  return (
+                    <button
+                      key={p.id}
+                      onClick={() => abrirProduto(p)}
+                      disabled={p.esgotado}
+                      className="pm-select-card"
+                      style={{
+                        ...card,
+                        padding: 14,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 10,
+                        textAlign: "left",
+                        cursor: p.esgotado ? "not-allowed" : "pointer",
+                        opacity: p.esgotado ? 0.5 : 1,
+                      }}
+                    >
+                      <IconeProduto size={18} aria-hidden="true" style={{ color: "var(--foreground-muted)", flexShrink: 0 }} />
+                      <span style={{ flex: 1, minWidth: 0 }}>
+                        <span style={{ display: "block", fontSize: 14, fontWeight: 800, color: "var(--foreground)" }}>{p.nome}</span>
+                        <span style={{ display: "block", fontSize: 11.5, fontWeight: 700, color: "var(--foreground-muted)", marginTop: 2 }}>
+                          {p.esgotado ? "Esgotado" : buscando ? p.categoriaLabel : p.requerMontagem ? "Precisa escolher opções" : "Adiciona direto"}
+                        </span>
+                      </span>
+                      <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
+                        <span style={{ fontSize: 13, fontWeight: 900, color: "var(--brand-text)" }}>
+                          {p.precoBase === null ? "" : (p.requerMontagem && p.categoria === "pizza" ? "a partir de " : "") + money(p.precoBase)}
+                        </span>
+                        <span
+                          aria-hidden="true"
+                          style={{
+                            fontSize: 11,
+                            fontWeight: 900,
+                            color: p.esgotado ? "var(--disabled-foreground)" : "var(--primary-foreground)",
+                            background: p.esgotado ? "var(--disabled-background)" : "var(--primary)",
+                            padding: "3px 10px",
+                            borderRadius: 999,
+                          }}
+                        >
+                          Escolher
+                        </span>
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
             </>
           )}
 
@@ -1124,7 +1238,11 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
           )}
         </div>
 
-        {/* Rodapé: sempre o próximo passo, e por que ele está bloqueado */}
+        {/* Rodapé: sempre o próximo passo, e por que ele está bloqueado. Some
+            enquanto a atendente está no seletor (ESTADO B) de Produtos — a
+            navegação de lá é o botão de voltar do próprio cabeçalho da
+            camada, não a navegação entre etapas do pedido. */}
+        {!emSeletorProdutos && (
         <div style={{ borderTop: "1px solid var(--border)", padding: "16px 24px calc(16px + env(safe-area-inset-bottom))", flexShrink: 0, display: "grid", gap: 10 }}>
           {mensagemFaltante && (
             <p style={{ fontSize: 12, fontWeight: 700, color: "var(--foreground-muted)", margin: 0, textAlign: "center" }}>
@@ -1165,6 +1283,7 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
             </button>
           </div>
         </div>
+        )}
       </div>
 
       {/* Construtor guiado — dentro do mesmo fluxo, nunca uma camada fullscreen */}
