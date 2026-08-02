@@ -224,6 +224,64 @@ function SelectionDot({ selecionado }: { selecionado: boolean }) {
   )
 }
 
+/**
+ * Barra horizontal de categorias do seletor de produtos ("+ Adicionar").
+ * SEMPRE montada enquanto o seletor estiver aberto — `categoriaAtiva` e
+ * `destacar` só decidem qual botão fica destacado (estado visual) e, via
+ * `onSelecionar`, qual categoria filtra a lista de produtos. Nenhum dos dois
+ * controla se esta barra existe no DOM: extrair para um componente próprio,
+ * chamado sem condição nenhuma no ESTADO B, é o que torna impossível
+ * reintroduzir por acidente um `{!buscando && (...)}` ou `{categoria && (...)}`
+ * envolvendo a barra inteira.
+ */
+function BarraCategorias({
+  categoriaAtiva,
+  destacar,
+  onSelecionar,
+}: {
+  categoriaAtiva: CategoriaManual
+  destacar: boolean
+  onSelecionar: (categoria: CategoriaManual) => void
+}) {
+  return (
+    <div
+      className="pm-categorias-bar"
+      role="tablist"
+      aria-label="Categorias do cardápio"
+      style={{ display: "flex", gap: 8, overflowX: "auto", flexShrink: 0, minHeight: 36 }}
+    >
+      {CATEGORIAS.map((c) => {
+        const Icone = ICONE_CATEGORIA[c.id]
+        const ativo = destacar && categoriaAtiva === c.id
+        return (
+          <button
+            key={c.id}
+            role="tab"
+            aria-selected={ativo}
+            onClick={() => onSelecionar(c.id)}
+            style={{
+              ...btn,
+              height: 36,
+              padding: "0 14px",
+              flexShrink: 0,
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              border: "1.5px solid " + (ativo ? "var(--primary)" : "var(--border)"),
+              background: ativo ? "var(--primary-soft)" : "transparent",
+              color: "var(--foreground)",
+              fontSize: 12.5,
+            }}
+          >
+            <Icone size={14} aria-hidden="true" />
+            {c.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
   const [passo, setPasso] = useState<Passo>("cliente")
   const [confirmarSaida, setConfirmarSaida] = useState(false)
@@ -944,39 +1002,17 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
                 )}
               </div>
 
-              {/* Categorias sempre visíveis — nunca somem depois do clique
-                  ou enquanto há uma busca ativa. */}
-              <div style={{ display: "flex", gap: 8, overflowX: "auto" }}>
-                {CATEGORIAS.map((c) => {
-                  const Icone = ICONE_CATEGORIA[c.id]
-                  const ativo = !buscando && categoria === c.id
-                  return (
-                    <button
-                      key={c.id}
-                      onClick={() => {
-                        setTermo("")
-                        setCategoria(c.id)
-                      }}
-                      style={{
-                        ...btn,
-                        height: 36,
-                        padding: "0 14px",
-                        flexShrink: 0,
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 6,
-                        border: "1.5px solid " + (ativo ? "var(--primary)" : "var(--border)"),
-                        background: ativo ? "var(--primary-soft)" : "transparent",
-                        color: "var(--foreground)",
-                        fontSize: 12.5,
-                      }}
-                    >
-                      <Icone size={14} aria-hidden="true" />
-                      {c.label}
-                    </button>
-                  )
-                })}
-              </div>
+              {/* Componente dedicado e sempre montado enquanto o seletor
+                  estiver aberto — `categoria`/`buscando` só decidem destaque
+                  e filtro, nunca a existência desta barra no DOM. */}
+              <BarraCategorias
+                categoriaAtiva={categoria}
+                destacar={!buscando}
+                onSelecionar={(id) => {
+                  setTermo("")
+                  setCategoria(id)
+                }}
+              />
 
               {buscando && (
                 <p aria-live="polite" style={{ fontSize: 12, fontWeight: 700, color: "var(--foreground-muted)", margin: 0 }}>

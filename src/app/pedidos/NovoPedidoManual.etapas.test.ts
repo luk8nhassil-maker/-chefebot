@@ -267,17 +267,55 @@ describe("NovoPedidoManual — etapa Produtos em dois estados (resumo/seletor)",
     expect(fonte).toContain('buscarProdutos(produtos, termo, buscando ? "todas" : categoria)');
   });
 
-  test("categorias aparecem e permanecem visíveis mesmo com busca ativa (nunca somem depois do clique)", () => {
-    expect(etapaSeletor).toContain("CATEGORIAS.map((c) => {");
-    // Diferente da versão anterior, a linha das categorias não está mais
-    // condicionada a `!buscando` — sempre renderiza.
-    expect(etapaSeletor).not.toMatch(/\{!buscando && \(\s*<div style=\{\{ display: "flex", gap: 8, overflowX: "auto" \}\}>\s*\{CATEGORIAS\.map/);
+  test("a barra de categorias é um componente próprio, chamado sem NENHUMA condição dentro do seletor", () => {
+    // <BarraCategorias .../> aparece cru dentro do JSX do seletor — nenhum
+    // `{condição && (` o envolve. Isso é o que torna estruturalmente
+    // impossível a barra inteira sumir por causa de `buscando`, `categoria`
+    // ou do resultado da busca.
+    expect(etapaSeletor).toContain("<BarraCategorias");
+    expect(etapaSeletor).not.toMatch(/\{[^{}]*&&\s*\(\s*<BarraCategorias/);
+    expect(etapaSeletor).not.toMatch(/\{buscando\s*\?\s*[^:]*:\s*<BarraCategorias/);
   });
 
-  test("categoria selecionada fica claramente destacada e a troca de categoria filtra os produtos", () => {
-    expect(etapaSeletor).toContain("const ativo = !buscando && categoria === c.id");
-    expect(etapaSeletor).toContain("setCategoria(c.id)");
+  test("função BarraCategorias sempre renderiza as 4 categorias — `destacar`/`categoriaAtiva` só mudam o estado visual", () => {
+    const corpo = fonte.slice(fonte.indexOf("function BarraCategorias("), fonte.indexOf("export default function NovoPedidoManual"));
+    expect(corpo).toContain("CATEGORIAS.map((c) => {");
+    expect(corpo).toContain("const ativo = destacar && categoriaAtiva === c.id");
+    // O map em si nunca é condicionado — só o atributo `ativo` de cada botão.
+    expect(corpo).not.toMatch(/\{destacar\s*&&\s*\(/);
+    expect(corpo).not.toMatch(/\{categoriaAtiva\s*&&\s*\(/);
+  });
+
+  test("clicar numa categoria só troca o filtro (via onSelecionar) — nunca desmonta ou reseta a barra", () => {
+    expect(etapaSeletor).toContain("destacar={!buscando}");
+    expect(etapaSeletor).toContain("onSelecionar={(id) => {");
     expect(etapaSeletor).toContain("setTermo(\"\")");
+    expect(etapaSeletor).toContain("setCategoria(id)");
+  });
+
+  test("categoria ativa recebe estado visual (aria-selected) e semântica de abas acessível por teclado", () => {
+    const corpo = fonte.slice(fonte.indexOf("function BarraCategorias("), fonte.indexOf("export default function NovoPedidoManual"));
+    expect(corpo).toContain('role="tablist"');
+    expect(corpo).toContain('role="tab"');
+    expect(corpo).toContain("aria-selected={ativo}");
+  });
+
+  test("a barra não encolhe/some por flex — flexShrink e altura mínima fixos, com rolagem horizontal", () => {
+    const corpo = fonte.slice(fonte.indexOf("function BarraCategorias("), fonte.indexOf("export default function NovoPedidoManual"));
+    expect(corpo).toContain('overflowX: "auto"');
+    expect(corpo).toContain("flexShrink: 0");
+    expect(corpo).toContain("minHeight: 36");
+  });
+
+  test("busca ativa e estado vazio (sem resultado na categoria) não desmontam a barra — só mudam o que vem depois dela", () => {
+    // A barra é renderizada ANTES dos blocos condicionais de busca/vazio, e
+    // nenhum desses blocos a envolve.
+    const idxBarra = etapaSeletor.indexOf("<BarraCategorias");
+    const idxBuscando = etapaSeletor.indexOf("{buscando && (");
+    const idxVazio = etapaSeletor.indexOf("resultados.length === 0 && !buscando");
+    expect(idxBarra).toBeGreaterThan(-1);
+    expect(idxBuscando).toBeGreaterThan(idxBarra);
+    expect(idxVazio).toBeGreaterThan(idxBarra);
   });
 
   test("produtos filtrados mostram ícone/categoria, nome, preço, estado indisponível e um botão 'Escolher'", () => {
