@@ -47,7 +47,7 @@ export type PedidoComEdicao = {
   editStartedAt?: string;
   editExpiresAt?: string;
   editedAt?: string;
-  editedBy?: "cliente";
+  editedBy?: "cliente" | "atendente";
   changesSummary?: string[];
   editHistory?: EditHistoryEntry[];
   lastEditSessionId?: string;
