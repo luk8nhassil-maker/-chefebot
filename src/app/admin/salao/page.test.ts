@@ -8,17 +8,26 @@ import { fileURLToPath } from "node:url";
 const fonte = readFileSync(fileURLToPath(new URL("./page.tsx", import.meta.url)), "utf-8");
 
 describe("/admin/salao — proteção de acesso", () => {
-  test("verifica o papel do usuário (admin/dev) antes de mostrar a tela", () => {
-    expect(fonte).toContain("role === 'admin' || role === 'dev'");
+  // A autorização é sempre decidida pelo servidor (lerSessaoAdministrativa +
+  // admin/dev em /api/admin/salao/config) — a página não faz uma segunda
+  // checagem de papel no cliente (isso exigiria ler cookie durante a
+  // renderização, arriscando mismatch de hidratação SSR/CSR). Um 401 real
+  // da API é a única coisa que decide "sem permissão" aqui.
+  test("não lê o papel do usuário a partir de cookie no cliente", () => {
+    expect(fonte).not.toContain("document.cookie");
+    expect(fonte).not.toContain("getUserRole");
   });
 
   test("redireciona para /login quando a API responde 401", () => {
     expect(fonte).toContain("router.push('/login?callbackUrl=/admin/salao')");
   });
 
-  test("usuário sem permissão nunca vê o formulário de código", () => {
-    const semAcesso = fonte.slice(fonte.indexOf("if (!isAdmin)"), fonte.indexOf("return (\n    <PanelShell showGestaoNav>"));
-    expect(semAcesso).not.toContain("salvarCodigo");
+  test("nenhum setState síncrono direto no corpo do efeito (sem cascading render) — só dentro de callbacks assíncronos", () => {
+    const efeito = fonte.slice(fonte.indexOf("useEffect(() => {"), fonte.indexOf("}, [router])"));
+    const linhas = efeito.split("\n").map((l) => l.trim());
+    const idxFetch = linhas.findIndex((l) => l.startsWith("fetch("));
+    const antesDoFetch = linhas.slice(0, idxFetch === -1 ? linhas.length : idxFetch);
+    expect(antesDoFetch.some((l) => /^set[A-Z]\w*\(/.test(l))).toBe(false);
   });
 });
 
@@ -73,12 +82,12 @@ describe("/admin/salao — gerar e salvar código", () => {
 
 describe("/admin/salao — revogação de sessões", () => {
   test("pede confirmação antes de revogar", () => {
-    const bloco = fonte.slice(fonte.indexOf("async function revogarSessoes"), fonte.indexOf("if (checking)"));
+    const bloco = fonte.slice(fonte.indexOf("async function revogarSessoes"), fonte.indexOf("  return (\n    <PanelShell showGestaoNav>"));
     expect(bloco).toContain("window.confirm(");
   });
 
   test("trava de clique duplo em revogarSessoes", () => {
-    const bloco = fonte.slice(fonte.indexOf("async function revogarSessoes"), fonte.indexOf("if (checking)"));
+    const bloco = fonte.slice(fonte.indexOf("async function revogarSessoes"), fonte.indexOf("  return (\n    <PanelShell showGestaoNav>"));
     expect(bloco).toContain("if (revogandoRef.current) return");
     expect(bloco).toContain("revogandoRef.current = true");
     expect(bloco).toContain("revogandoRef.current = false");
@@ -89,7 +98,7 @@ describe("/admin/salao — revogação de sessões", () => {
   });
 
   test("texto da confirmação não menciona apagar comandas, mesas ou pedidos", () => {
-    const bloco = fonte.slice(fonte.indexOf("async function revogarSessoes"), fonte.indexOf("if (checking)"));
+    const bloco = fonte.slice(fonte.indexOf("async function revogarSessoes"), fonte.indexOf("  return (\n    <PanelShell showGestaoNav>"));
     const confirmText = bloco.match(/window\.confirm\('([^']+)'\)/)?.[1] ?? "";
     expect(confirmText.toLowerCase()).toContain("comandas e pedidos não são afetados");
   });
