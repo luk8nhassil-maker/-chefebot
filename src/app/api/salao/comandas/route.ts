@@ -39,6 +39,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "Informe a mesa" }, { status: 400 });
   }
 
-  const comanda = await abrirComanda(mesa, body.complemento);
-  return NextResponse.json({ ok: true, comanda });
+  const resultado = await abrirComanda(mesa, body.complemento);
+  if (resultado === "mesa_ocupada") {
+    return NextResponse.json({ ok: false, error: "Esta mesa já tem uma comanda aberta" }, { status: 409 });
+  }
+  return NextResponse.json({ ok: true, comanda: resultado });
 }

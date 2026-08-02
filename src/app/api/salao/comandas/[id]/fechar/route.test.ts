@@ -4,9 +4,14 @@ const { store, redisMock } = vi.hoisted(() => {
   const store = new Map<string, unknown>();
   const redisMock = {
     get: vi.fn(async (key: string) => store.get(key) ?? null),
-    set: vi.fn(async (key: string, value: unknown) => {
+    set: vi.fn(async (key: string, value: unknown, opts?: { nx?: boolean; ex?: number }) => {
+      if (opts?.nx && store.has(key)) return null;
       store.set(key, value);
       return "OK";
+    }),
+    del: vi.fn(async (key: string) => {
+      store.delete(key);
+      return 1;
     }),
     incr: vi.fn(async (key: string) => {
       const next = Number(store.get(key) || 0) + 1;
@@ -21,7 +26,7 @@ const { store, redisMock } = vi.hoisted(() => {
 vi.mock("@/lib/redis", () => ({ redis: redisMock }));
 
 import { POST } from "./route";
-import { abrirComanda, marcarComandaEnviada } from "@/lib/comandas";
+import { abrirComanda, marcarComandaEnviada, type Comanda } from "@/lib/comandas";
 import { SALAO_COOKIE, criarTokenSalao } from "@/lib/salaoAuth";
 
 function paramsFor(id: string) {
@@ -29,6 +34,11 @@ function paramsFor(id: string) {
 }
 function req(token: string) {
   return { cookies: { get: (n: string) => (n === SALAO_COOKIE ? { value: token } : undefined) } } as never;
+}
+async function abrirComandaOk(mesa: string): Promise<Comanda> {
+  const r = await abrirComanda(mesa);
+  if (typeof r !== "object") throw new Error(`esperava Comanda, recebeu "${r}"`);
+  return r;
 }
 
 beforeEach(() => {
@@ -44,14 +54,14 @@ describe("POST /api/salao/comandas/[id]/fechar", () => {
 
   it("recusa fechar uma comanda ainda aberta (sem pedido enviado)", async () => {
     const token = await criarTokenSalao();
-    const comanda = await abrirComanda("5");
+    const comanda = await abrirComandaOk("5");
     const res = await POST(req(token), paramsFor(comanda.id));
     expect(res.status).toBe(409);
   });
 
   it("fecha uma comanda já enviada", async () => {
     const token = await criarTokenSalao();
-    const comanda = await abrirComanda("5");
+    const comanda = await abrirComandaOk("5");
     await marcarComandaEnviada(comanda.id, "ped_1", 1);
     const res = await POST(req(token), paramsFor(comanda.id));
     expect(res.status).toBe(200);

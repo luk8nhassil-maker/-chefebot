@@ -4,9 +4,14 @@ const { store, redisMock } = vi.hoisted(() => {
   const store = new Map<string, unknown>();
   const redisMock = {
     get: vi.fn(async (key: string) => store.get(key) ?? null),
-    set: vi.fn(async (key: string, value: unknown) => {
+    set: vi.fn(async (key: string, value: unknown, opts?: { nx?: boolean; ex?: number }) => {
+      if (opts?.nx && store.has(key)) return null;
       store.set(key, value);
       return "OK";
+    }),
+    del: vi.fn(async (key: string) => {
+      store.delete(key);
+      return 1;
     }),
     incr: vi.fn(async (key: string) => {
       const next = Number(store.get(key) || 0) + 1;
@@ -101,5 +106,16 @@ describe("POST /api/salao/comandas (abrir)", () => {
     expect(data.comanda.mesa).toBe("5");
     expect(data.comanda.complemento).toBe("Varanda");
     expect(data.comanda.status).toBe("aberta");
+  });
+
+  it("recusa abrir uma segunda comanda para uma mesa já ocupada (409)", async () => {
+    const token = await criarTokenSalao();
+    const primeira = await POST(postReqSalao({ mesa: "8" }, token));
+    expect(primeira.status).toBe(200);
+
+    const segunda = await POST(postReqSalao({ mesa: "8" }, token));
+    expect(segunda.status).toBe(409);
+    const data = await segunda.json();
+    expect(data.ok).toBe(false);
   });
 });

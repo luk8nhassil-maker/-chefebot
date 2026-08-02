@@ -4,9 +4,14 @@ const { store, redisMock } = vi.hoisted(() => {
   const store = new Map<string, unknown>();
   const redisMock = {
     get: vi.fn(async (key: string) => store.get(key) ?? null),
-    set: vi.fn(async (key: string, value: unknown) => {
+    set: vi.fn(async (key: string, value: unknown, opts?: { nx?: boolean; ex?: number }) => {
+      if (opts?.nx && store.has(key)) return null;
       store.set(key, value);
       return "OK";
+    }),
+    del: vi.fn(async (key: string) => {
+      store.delete(key);
+      return 1;
     }),
     incr: vi.fn(async (key: string) => {
       const next = Number(store.get(key) || 0) + 1;
@@ -38,7 +43,14 @@ import {
   listarComandas,
   marcarComandaEnviada,
   validarItensComanda,
+  type Comanda,
 } from "./comandas";
+
+async function abrirComandaOk(mesa: string, complemento?: string): Promise<Comanda> {
+  const r = await abrirComanda(mesa, complemento);
+  if (typeof r !== "object") throw new Error(`esperava Comanda, recebeu "${r}"`);
+  return r;
+}
 
 beforeEach(() => {
   store.clear();
@@ -50,6 +62,7 @@ describe("abrirComanda", () => {
   it("cria uma comanda aberta, sem itens, com número sequencial", async () => {
     const c1 = await abrirComanda("5");
     const c2 = await abrirComanda("6", "Terraço");
+    if (typeof c1 !== "object" || typeof c2 !== "object") throw new Error("esperava Comanda");
     expect(c1.status).toBe("aberta");
     expect(c1.itens).toEqual([]);
     expect(c1.numero).toBe(1);
@@ -59,6 +72,32 @@ describe("abrirComanda", () => {
 
   it("aparece na listagem", async () => {
     await abrirComanda("5");
+    expect(await listarComandas()).toHaveLength(1);
+  });
+
+  it("recusa abrir uma segunda comanda para a mesma mesa ainda não fechada", async () => {
+    const c1 = await abrirComanda("7");
+    if (typeof c1 !== "object") throw new Error("esperava Comanda");
+    const r2 = await abrirComanda("7");
+    expect(r2).toBe("mesa_ocupada");
+    expect(await listarComandas()).toHaveLength(1);
+  });
+
+  it("permite reabrir a mesma mesa depois que a comanda anterior foi fechada", async () => {
+    const c1 = await abrirComanda("7");
+    if (typeof c1 !== "object") throw new Error("esperava Comanda");
+    await marcarComandaEnviada(c1.id, "ped_1", 1);
+    await fecharComanda(c1.id);
+    const r2 = await abrirComanda("7");
+    expect(typeof r2).toBe("object");
+    expect(await listarComandas()).toHaveLength(2);
+  });
+
+  it("duas aberturas concorrentes da mesma mesa — só uma vira comanda, a outra é recusada", async () => {
+    const [a, b] = await Promise.all([abrirComanda("9"), abrirComanda("9")]);
+    const resultados = [a, b];
+    expect(resultados.filter((r) => typeof r === "object")).toHaveLength(1);
+    expect(resultados.filter((r) => r === "mesa_ocupada")).toHaveLength(1);
     expect(await listarComandas()).toHaveLength(1);
   });
 });
@@ -96,7 +135,7 @@ describe("validarItensComanda", () => {
 
 describe("atualizarItensComanda", () => {
   it("atualiza itens, observação e complemento de uma comanda aberta", async () => {
-    const c = await abrirComanda("5");
+    const c = await abrirComandaOk("5");
     const validacao = await validarItensComanda([{ kind: "simple", name: "Refrigerante 2L", qty: 1 }]);
     expect(validacao.ok).toBe(true);
     if (!validacao.ok) return;
@@ -116,7 +155,7 @@ describe("atualizarItensComanda", () => {
   });
 
   it("recusa atualizar uma comanda que não está mais aberta", async () => {
-    const c = await abrirComanda("5");
+    const c = await abrirComandaOk("5");
     await marcarComandaEnviada(c.id, "ped_1", 10);
     const r = await atualizarItensComanda(c.id, []);
     expect(r).toBe("nao_esta_aberta");
@@ -125,7 +164,7 @@ describe("atualizarItensComanda", () => {
 
 describe("marcarComandaEnviada", () => {
   it("marca como enviada e guarda o vínculo com o pedido", async () => {
-    const c = await abrirComanda("5");
+    const c = await abrirComandaOk("5");
     const r = await marcarComandaEnviada(c.id, "ped_123", 42);
     expect(r).not.toBe("nao_encontrada");
     if (typeof r === "object") {
@@ -137,7 +176,7 @@ describe("marcarComandaEnviada", () => {
   });
 
   it("recusa marcar como enviada uma comanda que já foi enviada", async () => {
-    const c = await abrirComanda("5");
+    const c = await abrirComandaOk("5");
     await marcarComandaEnviada(c.id, "ped_123", 42);
     const r = await marcarComandaEnviada(c.id, "ped_456", 43);
     expect(r).toBe("nao_esta_aberta");
@@ -146,13 +185,13 @@ describe("marcarComandaEnviada", () => {
 
 describe("fecharComanda", () => {
   it("recusa fechar uma comanda ainda aberta (sem pedido enviado)", async () => {
-    const c = await abrirComanda("5");
+    const c = await abrirComandaOk("5");
     const r = await fecharComanda(c.id);
     expect(r).toBe("ainda_aberta");
   });
 
   it("fecha uma comanda já enviada", async () => {
-    const c = await abrirComanda("5");
+    const c = await abrirComandaOk("5");
     await marcarComandaEnviada(c.id, "ped_123", 42);
     const r = await fecharComanda(c.id);
     expect(r).not.toBe("nao_encontrada");
@@ -163,7 +202,7 @@ describe("fecharComanda", () => {
   });
 
   it("recusa fechar uma comanda já fechada", async () => {
-    const c = await abrirComanda("5");
+    const c = await abrirComandaOk("5");
     await marcarComandaEnviada(c.id, "ped_123", 42);
     await fecharComanda(c.id);
     const r = await fecharComanda(c.id);
