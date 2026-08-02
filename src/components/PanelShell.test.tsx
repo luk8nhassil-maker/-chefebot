@@ -43,4 +43,25 @@ describe("PanelShell — item 'Acesso do salão' na sidebar", () => {
     const trecho = html.slice(html.indexOf("Acesso do salão") - 400, html.indexOf("Acesso do salão"));
     expect(trecho).toContain("ps-active");
   });
+
+  test("aparece com showEquipeNav mesmo sem showGestaoNav (uso em /pedidos)", () => {
+    const html = renderToStaticMarkup(<PanelShell showEquipeNav>{null}</PanelShell>);
+    expect(html).toContain("Acesso do salão");
+    expect(html).toContain("Equipe");
+  });
+
+  test("showEquipeNav não traz Dashboard/Configurações/Financeiro/Relatórios/Jornada do Chef — sem duplicar o painel administrativo em /pedidos", () => {
+    const html = renderToStaticMarkup(<PanelShell showEquipeNav>{null}</PanelShell>);
+    expect(html).not.toContain("Dashboard");
+    expect(html).not.toContain("Configurações");
+    expect(html).not.toContain("Financeiro");
+    expect(html).not.toContain("Relatórios");
+    expect(html).not.toContain("Jornada do Chef");
+  });
+
+  test("o item continua existindo uma única vez mesmo com showGestaoNav e showEquipeNav juntos", () => {
+    const html = renderToStaticMarkup(<PanelShell showGestaoNav showEquipeNav>{null}</PanelShell>);
+    const ocorrencias = html.split("Acesso do salão").length - 1;
+    expect(ocorrencias).toBe(1);
+  });
 });

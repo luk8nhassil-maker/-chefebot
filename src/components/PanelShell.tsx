@@ -12,6 +12,10 @@ interface PanelShellProps {
   /** Mostra o grupo "Gestão" (Dashboard, Configurações, Financeiro, Relatórios) na sidebar desktop.
    *  Desligado por padrão para não alterar o comportamento atual de /pedidos, /cardapio e /conversas. */
   showGestaoNav?: boolean
+  /** Mostra o grupo "Equipe" (hoje só "Acesso do salão") na sidebar desktop, independente do
+   *  grupo Gestão — usado em /pedidos, que não deve ganhar Dashboard/Configurações/Financeiro/
+   *  Relatórios só por causa deste item. `showGestaoNav` já implica este grupo também. */
+  showEquipeNav?: boolean
 }
 
 export default function PanelShell({
@@ -20,6 +24,7 @@ export default function PanelShell({
   conversasCount = 0,
   conversasUrgent = false,
   showGestaoNav = false,
+  showEquipeNav = false,
 }: PanelShellProps) {
   const router = useRouter()
   const pathname = usePathname()
@@ -156,7 +161,11 @@ export default function PanelShell({
               <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><path d="M12 3l2.4 4.9L20 9l-4 4 1 5.5L12 16l-5 2.5 1-5.5-4-4 5.6-1.1L12 3z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round"/></svg>
               Jornada do Chef
             </button>
+          </>
+        )}
 
+        {(showGestaoNav || showEquipeNav) && (
+          <>
             <div style={{ padding: "12px 12px 4px" }}>
               <div style={{ height: 1, background: "var(--surface)", marginBottom: 10 }} />
               <div style={{ padding: "0 8px", fontSize: 10, fontWeight: 800, letterSpacing: "0.4px", color: "var(--border-strong)", textTransform: "uppercase" }}>Equipe</div>
