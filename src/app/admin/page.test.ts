@@ -64,3 +64,30 @@ describe("/admin — ativar/desativar Pix automatico Mercado Pago", () => {
     expect(fonte).toContain("if (ativar && !mpConfig?.configured)");
   });
 });
+
+describe("/admin — trava de clique duplo em Adicionar bebida/suco", () => {
+  // Investigacao dos produtos "Teste" R$1,00: dois cliques rapidos no mesmo
+  // "+" usam o MESMO closure de `novaBebida` (React nao reprocessa entre os
+  // dois eventos), entao sem uma trava sincrona os dois passam pelo `if` e
+  // cada um chama setCardapio — duplicando o item a partir de um unico clique.
+  test("existe um ref de trava dedicado para bebidas e outro para sucos", () => {
+    expect(fonte).toContain("const adicionandoBebidaRef = useRef(false)");
+    expect(fonte).toContain("const adicionandoSucoRef = useRef(false)");
+  });
+
+  test("o botao de adicionar bebida verifica a trava antes do if e a libera depois", () => {
+    const inicio = fonte.indexOf("bebidas: [...prev.bebidas, { name: novaBebida.name");
+    const bloco = fonte.slice(fonte.lastIndexOf("onClick={() => {", inicio), inicio + 400);
+    expect(bloco).toContain("if (adicionandoBebidaRef.current) return");
+    expect(bloco).toContain("adicionandoBebidaRef.current = true");
+    expect(bloco).toContain("adicionandoBebidaRef.current = false");
+  });
+
+  test("o botao de adicionar suco verifica a trava antes do if e a libera depois", () => {
+    const inicio = fonte.indexOf("sucos: [...prev.sucos, { name: novaBebida.name");
+    const bloco = fonte.slice(fonte.lastIndexOf("onClick={() => {", inicio), inicio + 400);
+    expect(bloco).toContain("if (adicionandoSucoRef.current) return");
+    expect(bloco).toContain("adicionandoSucoRef.current = true");
+    expect(bloco).toContain("adicionandoSucoRef.current = false");
+  });
+});

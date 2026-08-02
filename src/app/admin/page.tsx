@@ -175,6 +175,12 @@ export default function AdminPage() {
   const [uploadando, setUploadando] = useState<string | null>(null)
   const [novoSabor, setNovoSabor] = useState('')
   const [novaBebida, setNovaBebida] = useState({ name: '', price: '' })
+  // Trava síncrona (ref, não state) contra duplo clique em "+ Adicionar bebida/suco":
+  // dois cliques no mesmo tick usam o mesmo closure de `novaBebida`, então sem
+  // essa trava os dois passariam pelo `if` e cada um chamaria `setCardapio`,
+  // resultando em DOIS itens idênticos adicionados de um único clique duplo.
+  const adicionandoBebidaRef = useRef(false)
+  const adicionandoSucoRef = useRef(false)
   const [novoBairro, setNovoBairro] = useState({ name: '', fee: '' })
   const [novoEntregador, setNovoEntregador] = useState({ nome: '', telefone: '' })
   const [salvandoEntregador, setSalvandoEntregador] = useState(false)
@@ -991,7 +997,15 @@ export default function AdminPage() {
               <div style={{ display: 'flex', gap: 8 }}>
                 <input placeholder="Nome" value={novaBebida.name} onChange={e => setNovaBebida(prev => ({ ...prev, name: e.target.value }))} style={{ ...inp, flex: 2 }} />
                 <input placeholder="R$" value={novaBebida.price} onChange={e => setNovaBebida(prev => ({ ...prev, price: e.target.value }))} style={{ ...inp, flex: 1 }} />
-                <button onClick={() => { if (novaBebida.name && novaBebida.price) { setCardapio(prev => ({ ...prev, bebidas: [...prev.bebidas, { name: novaBebida.name, price: parseFloat(novaBebida.price) }] })); setNovaBebida({ name: '', price: '' }) }}} style={{ background: 'var(--primary)', border: 'none', color: 'var(--primary-foreground)', borderRadius: 10, padding: '10px 12px', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>+</button>
+                <button onClick={() => {
+                  if (adicionandoBebidaRef.current) return
+                  if (novaBebida.name && novaBebida.price) {
+                    adicionandoBebidaRef.current = true
+                    setCardapio(prev => ({ ...prev, bebidas: [...prev.bebidas, { name: novaBebida.name, price: parseFloat(novaBebida.price) }] }))
+                    setNovaBebida({ name: '', price: '' })
+                    setTimeout(() => { adicionandoBebidaRef.current = false }, 400)
+                  }
+                }} style={{ background: 'var(--primary)', border: 'none', color: 'var(--primary-foreground)', borderRadius: 10, padding: '10px 12px', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>+</button>
               </div>
             </div>
 
@@ -1011,7 +1025,15 @@ export default function AdminPage() {
               <div style={{ display: 'flex', gap: 8 }}>
                 <input placeholder="Nome" value={novaBebida.name} onChange={e => setNovaBebida(prev => ({ ...prev, name: e.target.value }))} style={{ ...inp, flex: 2 }} />
                 <input placeholder="R$" value={novaBebida.price} onChange={e => setNovaBebida(prev => ({ ...prev, price: e.target.value }))} style={{ ...inp, flex: 1 }} />
-                <button onClick={() => { if (novaBebida.name && novaBebida.price) { setCardapio(prev => ({ ...prev, sucos: [...prev.sucos, { name: novaBebida.name, price: parseFloat(novaBebida.price) }] })); setNovaBebida({ name: '', price: '' }) }}} style={{ background: 'var(--primary)', border: 'none', color: 'var(--primary-foreground)', borderRadius: 10, padding: '10px 12px', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>+</button>
+                <button onClick={() => {
+                  if (adicionandoSucoRef.current) return
+                  if (novaBebida.name && novaBebida.price) {
+                    adicionandoSucoRef.current = true
+                    setCardapio(prev => ({ ...prev, sucos: [...prev.sucos, { name: novaBebida.name, price: parseFloat(novaBebida.price) }] }))
+                    setNovaBebida({ name: '', price: '' })
+                    setTimeout(() => { adicionandoSucoRef.current = false }, 400)
+                  }
+                }} style={{ background: 'var(--primary)', border: 'none', color: 'var(--primary-foreground)', borderRadius: 10, padding: '10px 12px', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>+</button>
               </div>
             </div>
 

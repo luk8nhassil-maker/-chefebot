@@ -233,11 +233,28 @@ export function listarProdutosManuais(menu: MenuManual | null | undefined): Prod
   const esgotados = menu.esgotados ?? [];
   const produtos: ProdutoManual[] = [];
 
+  // Dois registros com o MESMO nome na MESMA seção do catálogo (ex.: um item
+  // "Teste" cadastrado duas vezes por engano) produziriam o mesmo `id` base
+  // — e portanto a mesma `key` do React na lista do seletor. Key duplicada
+  // não é um detalhe cosmético: o React documenta que corrompe a
+  // reconciliação da lista inteira (itens somem/duplicam de forma
+  // imprevisível entre re-renders), o que já foi observado corrompendo as
+  // OUTRAS categorias também depois de trocar de aba repetidas vezes. Cada
+  // ocorrência repetida do mesmo `id` base ganha um sufixo `#N` — a primeira
+  // ocorrência mantém o `id` de sempre (compatível com o catálogo sem
+  // duplicatas, o caso comum).
+  const idsUsados = new Map<string, number>();
+  function idUnico(base: string): string {
+    const usos = idsUsados.get(base) ?? 0;
+    idsUsados.set(base, usos + 1);
+    return usos === 0 ? base : `${base}#${usos + 1}`;
+  }
+
   for (const size of menu.sizes ?? []) {
     if (!size || typeof size.code !== "string" || !Number.isFinite(size.price)) continue;
     const nome = `Pizza ${size.label || size.code}`;
     produtos.push({
-      id: `pizza:${norm(size.code)}`,
+      id: idUnico(`pizza:${norm(size.code)}`),
       nome,
       categoria: "pizza",
       categoriaLabel: "Pizzas",
@@ -254,7 +271,7 @@ export function listarProdutosManuais(menu: MenuManual | null | undefined): Prod
     const temTamanhos = ehMacarronada(lanche.name) && (lanche.sizes?.length ?? 0) > 0;
     const exigeSabor = ehCalzone(lanche.name) || ehMiniPizza(lanche.name);
     produtos.push({
-      id: `lanches:${norm(lanche.name)}`,
+      id: idUnico(`lanches:${norm(lanche.name)}`),
       nome: lanche.name,
       categoria: "lanches",
       categoriaLabel: "Lanches",
@@ -268,7 +285,7 @@ export function listarProdutosManuais(menu: MenuManual | null | undefined): Prod
   for (const bebida of menu.bebidas ?? []) {
     if (!bebida?.name) continue;
     produtos.push({
-      id: `bebidas:${norm(bebida.name)}`,
+      id: idUnico(`bebidas:${norm(bebida.name)}`),
       nome: bebida.name,
       categoria: "bebidas",
       categoriaLabel: "Bebidas",
@@ -282,7 +299,7 @@ export function listarProdutosManuais(menu: MenuManual | null | undefined): Prod
   for (const suco of menu.sucos ?? []) {
     if (!suco?.name) continue;
     produtos.push({
-      id: `sucos:${norm(suco.name)}`,
+      id: idUnico(`sucos:${norm(suco.name)}`),
       nome: suco.name,
       categoria: "sucos",
       categoriaLabel: "Sucos",
