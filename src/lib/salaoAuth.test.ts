@@ -20,6 +20,7 @@ import {
   definirCodigoAcessoSalao,
   lerSessaoSalao,
   obterConfigSalao,
+  revogarSessoesSalao,
   validarCodigoAcessoSalao,
 } from "./salaoAuth";
 
@@ -82,5 +83,53 @@ describe("lerSessaoSalao", () => {
     // administrativo (JWT diferente) não é aceito.
     const tokenQualquer = "cabecalho.corpo-invalido.assinatura";
     expect(await lerSessaoSalao(reqComToken(tokenQualquer))).toBeNull();
+  });
+
+  it("mesmo aparelho reconhece a sessão em chamadas repetidas, sem expirar entre elas", async () => {
+    await definirCodigoAcessoSalao("mesa2026");
+    const token = await criarTokenSalao();
+    expect(await lerSessaoSalao(reqComToken(token))).toEqual({ tipo: "salao" });
+    expect(await lerSessaoSalao(reqComToken(token))).toEqual({ tipo: "salao" });
+    expect(await lerSessaoSalao(reqComToken(token))).toEqual({ tipo: "salao" });
+  });
+});
+
+describe("revogação de sessões do Salão", () => {
+  it("revogarSessoesSalao invalida imediatamente um token já emitido, mesmo dentro da validade", async () => {
+    await definirCodigoAcessoSalao("mesa2026");
+    const token = await criarTokenSalao();
+    expect(await lerSessaoSalao(reqComToken(token))).toEqual({ tipo: "salao" });
+
+    await revogarSessoesSalao();
+
+    expect(await lerSessaoSalao(reqComToken(token))).toBeNull();
+  });
+
+  it("revogarSessoesSalao não muda o código de acesso configurado", async () => {
+    await definirCodigoAcessoSalao("mesa2026");
+    await revogarSessoesSalao();
+    expect(await validarCodigoAcessoSalao("mesa2026")).toBe(true);
+  });
+
+  it("um novo login depois da revogação funciona normalmente", async () => {
+    await definirCodigoAcessoSalao("mesa2026");
+    const tokenAntigo = await criarTokenSalao();
+    await revogarSessoesSalao();
+    expect(await lerSessaoSalao(reqComToken(tokenAntigo))).toBeNull();
+
+    const tokenNovo = await criarTokenSalao();
+    expect(await lerSessaoSalao(reqComToken(tokenNovo))).toEqual({ tipo: "salao" });
+  });
+
+  it("trocar o código de acesso também revoga implicitamente as sessões antigas", async () => {
+    await definirCodigoAcessoSalao("mesa2026");
+    const tokenAntigo = await criarTokenSalao();
+    expect(await lerSessaoSalao(reqComToken(tokenAntigo))).toEqual({ tipo: "salao" });
+
+    await definirCodigoAcessoSalao("mesa2027");
+
+    expect(await lerSessaoSalao(reqComToken(tokenAntigo))).toBeNull();
+    const tokenNovo = await criarTokenSalao();
+    expect(await lerSessaoSalao(reqComToken(tokenNovo))).toEqual({ tipo: "salao" });
   });
 });

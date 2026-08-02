@@ -12,7 +12,7 @@ export const SALAO_COOKIE = "salao-session";
 const SESSAO_DURACAO = "12h";
 const CHAVE_CONFIG_SALAO = "config:salao";
 
-type ConfigSalao = { codigoAcesso?: string };
+type ConfigSalao = { codigoAcesso?: string; epoch?: number };
 
 function getSecretSalao() {
   return new TextEncoder().encode(
@@ -24,9 +24,31 @@ export async function obterConfigSalao(): Promise<ConfigSalao> {
   return (await redis.get<ConfigSalao>(CHAVE_CONFIG_SALAO)) || {};
 }
 
-/** Só quem já tem uma sessão administrativa pode trocar o código — ver a rota que chama isto. */
+/** Só quem já tem uma sessão administrativa pode trocar o código — ver a rota que chama isto.
+ * Trocar o código sempre revoga (de forma implícita) todas as sessões do
+ * Salão já emitidas — ver `epoch` abaixo. */
 export async function definirCodigoAcessoSalao(codigo: string): Promise<void> {
-  await redis.set(CHAVE_CONFIG_SALAO, { codigoAcesso: codigo.trim() });
+  const epoch = (await obterEpochAtual()) + 1;
+  await redis.set(CHAVE_CONFIG_SALAO, { codigoAcesso: codigo.trim(), epoch });
+}
+
+/**
+ * Revoga imediatamente todas as sessões do Salão já emitidas, sem trocar o
+ * código de acesso — para quando o terminal foi perdido/comprometido mas o
+ * código continua o mesmo. Como o token não guarda estado no servidor
+ * (JWT), a revogação funciona por "época": todo token emitido antes desta
+ * chamada carrega uma época antiga e passa a ser rejeitado em
+ * `verificarTokenSalao`, mesmo ainda dentro das 12h de validade.
+ */
+export async function revogarSessoesSalao(): Promise<void> {
+  const config = await obterConfigSalao();
+  const epoch = (config.epoch ?? 0) + 1;
+  await redis.set(CHAVE_CONFIG_SALAO, { ...config, epoch });
+}
+
+async function obterEpochAtual(): Promise<number> {
+  const config = await obterConfigSalao();
+  return config.epoch ?? 0;
 }
 
 export async function validarCodigoAcessoSalao(codigo: string): Promise<boolean> {
@@ -40,7 +62,8 @@ export async function validarCodigoAcessoSalao(codigo: string): Promise<boolean>
 }
 
 export async function criarTokenSalao(): Promise<string> {
-  return new SignJWT({ tipo: "salao" })
+  const epoch = await obterEpochAtual();
+  return new SignJWT({ tipo: "salao", epoch })
     .setProtectedHeader({ alg: "HS256" })
     .setExpirationTime(SESSAO_DURACAO)
     .sign(getSecretSalao());
@@ -49,7 +72,13 @@ export async function criarTokenSalao(): Promise<string> {
 async function verificarTokenSalao(token: string): Promise<boolean> {
   try {
     const { payload } = await jwtVerify(token, getSecretSalao());
-    return payload.tipo === "salao";
+    if (payload.tipo !== "salao") return false;
+    // Sessão reconhecida no mesmo aparelho enquanto o cookie durar — mas se
+    // o código foi trocado ou uma revogação explícita aconteceu depois que
+    // este token foi emitido, a época não bate mais e a sessão é recusada,
+    // mesmo ainda dentro da validade do JWT.
+    const epochAtual = await obterEpochAtual();
+    return payload.epoch === epochAtual;
   } catch {
     return false;
   }
