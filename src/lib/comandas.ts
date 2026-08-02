@@ -13,7 +13,14 @@ import { officialUnitPrice, type ItemApp, type MenuPedidoApp } from "./pedidoApp
 
 export type StatusComanda = "aberta" | "enviada" | "fechada";
 
-export type StatusRodada = "rascunho" | "enviada";
+// "enviando" existe só entre a reivindicação do envio (reivindicarEnvioRodada)
+// e a confirmação (confirmarEnvioRodada) ou falha (falharEnvioRodada) —
+// nunca é gravada por edição normal. "falha_envio" preserva os itens e
+// permite tentar de novo (reivindicarEnvioRodada aceita reclamar a partir
+// dela), mas não pode mais ser editada por PATCH (mesma trilha seguida por
+// uma rodada "enviando": o Salão pode estar recriando o pedido a qualquer
+// momento).
+export type StatusRodada = "rascunho" | "enviando" | "enviada" | "falha_envio";
 
 // Rodada — um envio (ou tentativa de envio) de itens à cozinha dentro de uma
 // mesma comanda. A Rodada 1 é sempre o pedido original (o que a comanda já
@@ -21,7 +28,8 @@ export type StatusRodada = "rascunho" | "enviada";
 // adicionados sem tocar o que já foi enviado. Nesta etapa só existe
 // "rascunho" → os itens ainda não viraram pedido de verdade — e "enviada",
 // usada só para representar a Rodada 1 normalizada de comandas antigas
-// (nenhum código nesta etapa cria uma rodada 2+ já "enviada").
+// (nenhum código nesta etapa cria uma rodada 2+ já "enviada" diretamente —
+// toda Rodada 2+ passa por "enviando" antes).
 export type Rodada = {
   id: string;
   numero: number;
@@ -36,6 +44,9 @@ export type Rodada = {
   clientRequestId?: string;
   pedidoId?: string;
   pedidoNumero?: number;
+  /** Erro da última tentativa de envio, quando a rodada está em
+   *  "falha_envio" — só para exibição; nunca decide comportamento. */
+  erroUltimaTentativa?: string;
 };
 
 export type Comanda = {
@@ -303,11 +314,14 @@ export async function criarRodadaEmRascunho(
       }
     }
 
-    const rascunhoExistente = rodadas.find((r) => r.status === "rascunho");
-    if (rascunhoExistente) {
+    // Nunca duas rodadas "em edição/andamento" ao mesmo tempo — inclui
+    // "enviando" e "falha_envio" (uma tentativa em curso ou que precisa de
+    // retry), não só "rascunho".
+    const emAndamento = rodadas.find((r) => r.status !== "enviada");
+    if (emAndamento) {
       lista[idx] = comanda;
       await salvarComandas(lista);
-      return { ok: true, rodada: rascunhoExistente, comanda: lista[idx], criada: false };
+      return { ok: true, rodada: emAndamento, comanda: lista[idx], criada: false };
     }
 
     const agora = new Date().toISOString();
@@ -370,6 +384,158 @@ export async function atualizarItensRodada(
     lista[idx] = atualizada;
     await salvarComandas(lista);
     return { ok: true, rodada: novasRodadas[rodadaIdx], comanda: atualizada };
+  });
+}
+
+export type ReivindicarEnvioRodadaResultado =
+  | { ok: true; retomada: true; rodada: Rodada; comanda: Comanda }
+  | { ok: true; retomada: false; rodada: Rodada; comanda: Comanda }
+  | {
+      ok: false;
+      motivo: "nao_encontrada" | "comanda_fechada" | "rodada_nao_encontrada" | "rodada_vazia" | "conflito";
+      /** Só presente quando `motivo === "conflito"` — diferencia "já enviada
+       *  por outra tentativa" de "envio em andamento agora", para a rota
+       *  escolher a mensagem certa. */
+      statusAtual?: StatusRodada;
+    };
+
+/**
+ * Primeiro passo do envio de uma rodada (Beco 1): reivindica atomicamente o
+ * direito de criar o pedido oficial desta rodada, sob o mesmo mutex de
+ * `salao:comandas` — nunca dois pedidos para a mesma rodada. A criação do
+ * pedido de verdade (chamada a /api/pedido-app) acontece DEPOIS, fora do
+ * mutex (ver rota), então esta função só muda o status para "enviando" e
+ * devolve; quem chamou é responsável por confirmar ou desfazer a
+ * reivindicação (`confirmarEnvioRodada`/`falharEnvioRodada`).
+ *
+ * Idempotente por `clientRequestId`: se a MESMA tentativa já terminou
+ * ("enviada" com o mesmo clientRequestId), devolve `retomada: true` com o
+ * pedido já criado, sem reivindicar de novo. Qualquer outro conflito
+ * (rodada já enviada por outro request, ou já "enviando"/"falha_envio" por
+ * outra tentativa concorrente) devolve `motivo: "conflito"` — a rota decide
+ * o código HTTP.
+ */
+export async function reivindicarEnvioRodada(
+  comandaId: string,
+  rodadaId: string,
+  clientRequestId: string
+): Promise<ReivindicarEnvioRodadaResultado> {
+  return comMutexComandas(async () => {
+    const lista = await listarComandas();
+    const idx = lista.findIndex((c) => c.id === comandaId);
+    if (idx < 0) return { ok: false, motivo: "nao_encontrada" };
+    if (lista[idx].status === "fechada") return { ok: false, motivo: "comanda_fechada" };
+
+    const comanda = comRodadasNormalizadas(lista[idx]);
+    const rodadas = comanda.rodadas!;
+    const rodadaIdx = rodadas.findIndex((r) => r.id === rodadaId);
+    if (rodadaIdx < 0) return { ok: false, motivo: "rodada_nao_encontrada" };
+    const rodada = rodadas[rodadaIdx];
+
+    if (rodada.status === "enviada") {
+      if (rodada.clientRequestId && rodada.clientRequestId === clientRequestId) {
+        lista[idx] = comanda;
+        await salvarComandas(lista);
+        return { ok: true, retomada: true, rodada, comanda: lista[idx] };
+      }
+      return { ok: false, motivo: "conflito", statusAtual: "enviada" };
+    }
+    if (rodada.status === "enviando") {
+      // Outra tentativa (mesma aba retry rápido ou outra aba) já está com a
+      // reivindicação — nunca reivindicar duas vezes ao mesmo tempo.
+      return { ok: false, motivo: "conflito", statusAtual: "enviando" };
+    }
+    // "rascunho" ou "falha_envio": pode reivindicar.
+    if (rodada.itens.length === 0) return { ok: false, motivo: "rodada_vazia" };
+
+    const agora = new Date().toISOString();
+    const novasRodadas = [...rodadas];
+    novasRodadas[rodadaIdx] = {
+      ...rodada,
+      status: "enviando",
+      clientRequestId,
+      atualizadaEm: agora,
+      erroUltimaTentativa: undefined,
+    };
+    const atualizada: Comanda = { ...comanda, rodadas: novasRodadas };
+    lista[idx] = atualizada;
+    await salvarComandas(lista);
+    return { ok: true, retomada: false, rodada: novasRodadas[rodadaIdx], comanda: atualizada };
+  });
+}
+
+export type ConfirmarEnvioRodadaResultado = Comanda | "nao_encontrada" | "rodada_nao_encontrada";
+
+/** Segundo passo: o pedido oficial da rodada foi criado com sucesso — grava
+ *  pedidoId/pedidoNumero e marca a rodada como "enviada" (imutável daqui em
+ *  diante). Nunca falha por a comanda estar fechada: o pedido já existe de
+ *  verdade nesse ponto, e a marcação é só bookkeeping do Salão. */
+export async function confirmarEnvioRodada(
+  comandaId: string,
+  rodadaId: string,
+  pedidoId: string,
+  pedidoNumero: number | undefined
+): Promise<ConfirmarEnvioRodadaResultado> {
+  return comMutexComandas(async () => {
+    const lista = await listarComandas();
+    const idx = lista.findIndex((c) => c.id === comandaId);
+    if (idx < 0) return "nao_encontrada";
+    const comanda = comRodadasNormalizadas(lista[idx]);
+    const rodadaIdx = comanda.rodadas!.findIndex((r) => r.id === rodadaId);
+    if (rodadaIdx < 0) return "rodada_nao_encontrada";
+
+    const agora = new Date().toISOString();
+    const novasRodadas = [...comanda.rodadas!];
+    novasRodadas[rodadaIdx] = {
+      ...novasRodadas[rodadaIdx],
+      status: "enviada",
+      enviadaEm: agora,
+      atualizadaEm: agora,
+      pedidoId,
+      erroUltimaTentativa: undefined,
+      ...(pedidoNumero !== undefined ? { pedidoNumero } : {}),
+    };
+    const atualizada: Comanda = { ...comanda, rodadas: novasRodadas };
+    lista[idx] = atualizada;
+    await salvarComandas(lista);
+    return atualizada;
+  });
+}
+
+/**
+ * Terceiro passo (caminho de erro): desfaz a reivindicação — volta a rodada
+ * para "falha_envio" preservando os itens e guardando o motivo, para que o
+ * Salão possa tentar de novo sem perder nada (Beco 6). Só reverte se a
+ * rodada ainda estiver "enviando" DESTA MESMA tentativa (mesmo
+ * clientRequestId) — nunca pisa em cima de uma confirmação que já chegou
+ * (corrida rara entre a resposta de /api/pedido-app e uma falha tardia) nem
+ * em cima de uma reivindicação mais nova.
+ */
+export async function falharEnvioRodada(
+  comandaId: string,
+  rodadaId: string,
+  clientRequestId: string,
+  erro: string
+): Promise<void> {
+  await comMutexComandas(async () => {
+    const lista = await listarComandas();
+    const idx = lista.findIndex((c) => c.id === comandaId);
+    if (idx < 0) return;
+    const comanda = comRodadasNormalizadas(lista[idx]);
+    const rodadaIdx = comanda.rodadas!.findIndex((r) => r.id === rodadaId);
+    if (rodadaIdx < 0) return;
+    const rodada = comanda.rodadas![rodadaIdx];
+    if (rodada.status !== "enviando" || rodada.clientRequestId !== clientRequestId) return;
+
+    const novasRodadas = [...comanda.rodadas!];
+    novasRodadas[rodadaIdx] = {
+      ...rodada,
+      status: "falha_envio",
+      erroUltimaTentativa: erro,
+      atualizadaEm: new Date().toISOString(),
+    };
+    lista[idx] = { ...comanda, rodadas: novasRodadas };
+    await salvarComandas(lista);
   });
 }
 
