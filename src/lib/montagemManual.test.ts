@@ -95,6 +95,42 @@ describe("catálogo derivado", () => {
     expect(listarProdutosManuais({ ...MENU, sizes: [], lanches: [], bebidas: [], sucos: [] })).toEqual([]);
   });
 
+  test("dois registros com o MESMO nome na MESMA seção nunca geram o mesmo id (chave do React)", () => {
+    // Reproduz o cardápio real: dois itens de bebida cadastrados com o
+    // mesmo nome ("Teste"/"Teste"). Sem desambiguação, os dois ganhariam o
+    // MESMO `id` — e portanto a MESMA `key` do React na lista renderizada,
+    // o que o próprio React documenta como "não suportado" e que, na
+    // prática, corrompe a reconciliação da lista inteira entre categorias
+    // (comprovado: produtos de Bebidas vazavam para Pizzas/Lanches/Sucos
+    // depois de trocar de categoria repetidas vezes).
+    const menu: MenuManual = {
+      ...MENU,
+      bebidas: [...MENU.bebidas, { name: "Teste", price: 1 }, { name: "Teste", price: 1 }],
+    };
+    const produtos = listarProdutosManuais(menu);
+    const ids = produtos.map((p) => p.id);
+    expect(new Set(ids).size).toBe(ids.length);
+
+    const testes = produtos.filter((p) => p.nome === "Teste");
+    expect(testes).toHaveLength(2);
+    expect(testes[0].id).toBe("bebidas:teste");
+    expect(testes[1].id).toBe("bebidas:teste#2");
+    // A primeira ocorrência preserva o id de sempre — catálogo sem
+    // duplicatas (o caso comum) continua com os mesmos ids de antes.
+    expect(produtos.find((p) => p.id === "bebidas:refrigerante 2l")).toBeDefined();
+  });
+
+  test("três ou mais registros duplicados continuam com ids únicos e sequenciais", () => {
+    const menu: MenuManual = {
+      ...MENU,
+      sucos: [...MENU.sucos, { name: "Duplicado", price: 5 }, { name: "Duplicado", price: 5 }, { name: "Duplicado", price: 5 }],
+    };
+    const ids = listarProdutosManuais(menu)
+      .filter((p) => p.nome === "Duplicado")
+      .map((p) => p.id);
+    expect(ids).toEqual(["sucos:duplicado", "sucos:duplicado#2", "sucos:duplicado#3"]);
+  });
+
   test("descarta entradas malformadas do cardápio em vez de lançar", () => {
     const menu = {
       ...MENU,

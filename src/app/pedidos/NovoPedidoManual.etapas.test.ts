@@ -471,3 +471,25 @@ describe("NovoPedidoManual — não duplica catálogo, preço ou payload já exi
     expect(fonte).toContain("clientRequestId");
   });
 });
+
+describe("NovoPedidoManual — lista de produtos nunca acumula entre categorias", () => {
+  // Investigação dos produtos "Teste" R$1,00: a lista visível já era um
+  // `useMemo` recalculado do zero (produtos, termo, buscando, categoria) a
+  // cada troca — nunca um `[resultados, setResultados]` acumulativo. A trava
+  // aqui garante que essa arquitetura (substituir, nunca concatenar) não
+  // regrida por acidente no futuro.
+  test("resultados é um único useMemo derivado de produtos/termo/buscando/categoria, não um estado acumulável", () => {
+    expect(fonte).toContain(
+      "buscarProdutos(produtos, termo, buscando ? \"todas\" : categoria)"
+    );
+    expect(fonte).not.toMatch(/setResultados|resultados\s*\.\.\.\s*resultados|\[\.\.\.resultados/);
+  });
+
+  test("busca sem termo respeita a categoria ativa (não vira 'todas' por padrão)", () => {
+    expect(fonte).toContain('buscando ? "todas" : categoria');
+  });
+
+  test("ao escolher um produto durante a busca, a categoria muda para a do produto (nunca mistura estado antigo)", () => {
+    expect(fonte).toContain("setCategoria(produto.categoria)");
+  });
+});

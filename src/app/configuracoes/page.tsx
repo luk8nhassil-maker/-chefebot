@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import PanelShell from '@/components/PanelShell'
 import ThemeToggle from '@/components/ThemeToggle'
@@ -304,10 +304,19 @@ export default function ConfiguracoesPage() {
   const removerBebida = (tipo: 'bebidas' | 'sucos', idx: number) =>
     setCardapio(prev => ({ ...prev, [tipo]: prev[tipo].filter((_, i) => i !== idx) }))
 
+  // Trava síncrona (ref, não state): dois cliques rápidos no mesmo "+ Add"
+  // usam o mesmo closure de novoItem/novoPreco, então sem essa trava os dois
+  // passariam pelo `if` e cada um chamaria setCardapio, adicionando o mesmo
+  // item duas vezes a partir de um único clique duplo.
+  const adicionandoBebidaRef = useRef(false)
+
   const adicionarBebida = (tipo: 'bebidas' | 'sucos') => {
+    if (adicionandoBebidaRef.current) return
     if (!novoItem.trim() || !novoPreco.trim()) return
+    adicionandoBebidaRef.current = true
     setCardapio(prev => ({ ...prev, [tipo]: [...prev[tipo], { name: novoItem.trim(), price: parseFloat(novoPreco) }] }))
     setNovoItem(''); setNovoPreco('')
+    setTimeout(() => { adicionandoBebidaRef.current = false }, 400)
   }
 
   const removerBairro = (idx: number) =>
