@@ -195,6 +195,72 @@ describe("/salao — tela inicial (Fazer pedido)", () => {
   });
 });
 
+describe("/salao — cabeçalho e navegação (paridade visual com a referência)", () => {
+  it("cabeçalho mostra a identificação do terminal, a marca e o botão Sair acessível", async () => {
+    render(<SalaoPage />);
+    await screen.findByText("Novo atendimento");
+    expect(screen.getByText("Terminal do salão")).toBeInTheDocument();
+    expect(screen.getByText("Salão · ChefeBot")).toBeInTheDocument();
+    const sair = screen.getByRole("button", { name: "Sair" });
+    expect(sair).toBeInTheDocument();
+    expect(sair).toHaveAccessibleName("Sair");
+  });
+
+  it("clicar em Sair encerra a sessão (logout) antes de redirecionar", async () => {
+    const user = userEvent.setup();
+    render(<SalaoPage />);
+    await screen.findByText("Novo atendimento");
+    const chamadasAntes = (fetch as ReturnType<typeof vi.fn>).mock.calls.length;
+    await user.click(screen.getByRole("button", { name: "Sair" }));
+    await waitFor(() => {
+      const chamadasLogout = (fetch as ReturnType<typeof vi.fn>).mock.calls
+        .slice(chamadasAntes)
+        .filter(([url]) => String(url) === "/api/salao/logout");
+      expect(chamadasLogout.length).toBeGreaterThan(0);
+    });
+  });
+
+  it("existe somente UMA navegação principal no DOM — nunca duas (mobile e desktop nunca simultâneos)", async () => {
+    render(<SalaoPage />);
+    await screen.findByText("Novo atendimento");
+    expect(screen.getAllByRole("navigation", { name: "Navegação principal" })).toHaveLength(1);
+  });
+
+  it("item ativo tem aria-current, e trocar de aba move o aria-current e some com o card de novo atendimento", async () => {
+    const user = userEvent.setup();
+    render(<SalaoPage />);
+    await screen.findByText("Novo atendimento");
+
+    const fazerPedido = screen.getByRole("button", { name: "Fazer pedido" });
+    expect(fazerPedido).toHaveAttribute("aria-current", "page");
+
+    await user.click(screen.getByRole("button", { name: /Pedidos abertos/ }));
+    expect(screen.getByRole("button", { name: /Pedidos abertos/ })).toHaveAttribute("aria-current", "page");
+    expect(fazerPedido).not.toHaveAttribute("aria-current");
+    expect(screen.queryByText("Novo atendimento")).not.toBeInTheDocument();
+  });
+
+  it("badge de Pedidos abertos mostra a quantidade de comandas abertas, sem duplicar", async () => {
+    comandas.push({
+      id: "c1", numero: 1, cliente: "Carlos", mesa: "9", itens: [{ kind: "simple", name: "Refrigerante 2L", price: 12, qty: 1 }],
+      status: "enviada", abertaEm: new Date().toISOString(), pedidoId: "ped_1", pedidoNumero: 1,
+      rodadas: [{ id: "r1", numero: 1, status: "enviada", itens: [{ kind: "simple", name: "Refrigerante 2L", price: 12, qty: 1 }], subtotal: 12, criadaEm: "", atualizadaEm: "", enviadaEm: new Date().toISOString(), pedidoId: "ped_1", pedidoNumero: 1 }],
+    });
+    render(<SalaoPage />);
+    await screen.findByText("Novo atendimento");
+    expect(screen.getAllByText("1")).toHaveLength(1);
+  });
+
+  it("erro de carregamento mantém o cabeçalho (nunca uma tela branca sem navegação) e permite tentar novamente", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("falhou")));
+    render(<SalaoPage />);
+    expect(await screen.findByText("Não consegui carregar os dados agora.")).toBeInTheDocument();
+    expect(screen.getByText("Terminal do salão")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sair" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Tentar novamente" })).toBeInTheDocument();
+  });
+});
+
 describe("/salao — identificação do atendimento", () => {
   it("botão 'Escolher produtos' fica desabilitado até preencher o nome, e a mesa é opcional", async () => {
     const user = userEvent.setup();

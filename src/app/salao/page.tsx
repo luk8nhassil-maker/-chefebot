@@ -20,6 +20,9 @@ import {
   ChevronDown,
   ChevronUp,
   ClipboardList,
+  LogOut,
+  Pizza,
+  Plus,
   Printer,
   ReceiptText,
   Search,
@@ -173,15 +176,26 @@ function EstiloSalao() {
   return (
     <style>{`
       .sal-shell{min-height:100svh;background:var(--background);font-family:${FONT};display:flex;flex-direction:column}
+      .sal-header{flex-shrink:0;width:100%;box-sizing:border-box;min-height:66px;background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 16px}
+      .sal-header-brand{display:flex;align-items:center;gap:10px;min-width:0}
+      .sal-header-icon{flex-shrink:0;width:40px;height:40px;border-radius:11px;background:var(--primary);display:flex;align-items:center;justify-content:center}
+      .sal-header-text{min-width:0;overflow:hidden}
+      .sal-header-title{margin:0;font-size:16px;font-weight:800;color:var(--foreground);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .sal-header-subtitle{margin:0;font-size:12.5px;font-weight:600;color:var(--foreground-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .sal-header-sair{flex-shrink:0;display:flex;align-items:center;gap:6px;height:44px;padding:0 14px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--foreground-secondary);font-family:${FONT};font-size:13.5px;font-weight:800;cursor:pointer}
       .sal-content{flex:1;width:100%;box-sizing:border-box;padding:16px;display:flex;flex-direction:column;gap:14px}
-      .sal-topnav{display:flex;gap:6px;border:1px solid var(--surface-secondary);border-radius:12px;padding:4px;max-width:420px}
-      .sal-bottomnav{display:flex;position:fixed;bottom:0;left:0;right:0;z-index:60;background:var(--surface);border-top:1px solid var(--surface-secondary);padding:6px 8px calc(env(safe-area-inset-bottom) + 6px)}
-      .sal-bottomnav-spacer{height:64px}
-      .sal-navitem{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-height:48px;border:none;background:none;color:var(--foreground-secondary);font-family:${FONT};font-size:11.5px;font-weight:700;border-radius:12px;cursor:pointer;position:relative}
-      .sal-navitem.ativo{color:var(--brand-text);font-weight:900}
-      .sal-badge{position:absolute;top:2px;right:22%;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:var(--primary);color:var(--background);font-size:10px;font-weight:900;display:flex;align-items:center;justify-content:center}
+      .sal-content-central{max-width:560px;width:100%;margin:0 auto;box-sizing:border-box}
+      .sal-topnav{display:flex;gap:6px;border:1px solid var(--surface-secondary);border-radius:12px;padding:4px;max-width:420px;margin:0 auto}
+      .sal-bottomnav{display:flex;position:fixed;left:50%;bottom:16px;transform:translateX(-50%);width:min(540px, calc(100vw - 32px));z-index:60;background:var(--surface);border-radius:20px;box-shadow:0 6px 24px rgba(0,0,0,.12);padding:8px}
+      .sal-bottomnav-spacer{height:84px}
+      .sal-navitem{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-height:48px;border:none;background:none;color:var(--foreground-secondary);font-family:${FONT};font-size:11.5px;font-weight:700;border-radius:14px;cursor:pointer;position:relative}
+      .sal-navitem.ativo{color:var(--brand-text);font-weight:900;background:var(--primary-soft)}
+      .sal-badge{position:absolute;top:2px;right:22%;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:var(--danger);color:#fff;font-size:10px;font-weight:900;display:flex;align-items:center;justify-content:center}
       @media (min-width: 768px){
-        .sal-content{max-width:760px;margin:0 auto;padding:24px}
+        .sal-content{max-width:900px;margin:0 auto;padding:24px}
+      }
+      @media (prefers-reduced-motion: reduce){
+        .sal-navitem{transition:none}
       }
     `}</style>
   )
@@ -202,6 +216,30 @@ function useEhDesktop(): boolean {
   return ehDesktop
 }
 
+/** Cabeçalho fixo do módulo Salão — mesma identificação em toda tela
+ *  principal (carregando, erro, home): bloco de marca à esquerda, Sair à
+ *  direita. Nunca some com o restante da UI (nem em erro, nem em
+ *  carregamento) — o garçom sempre tem como sair. */
+function SalaoHeader({ identificacao, onSair }: { identificacao: string; onSair: () => void }) {
+  return (
+    <header className="sal-header">
+      <div className="sal-header-brand">
+        <div className="sal-header-icon">
+          <Pizza size={20} color="var(--primary-foreground)" aria-hidden="true" />
+        </div>
+        <div className="sal-header-text">
+          <p className="sal-header-title">{identificacao}</p>
+          <p className="sal-header-subtitle">Salão · ChefeBot</p>
+        </div>
+      </div>
+      <button onClick={onSair} className="sal-header-sair" aria-label="Sair">
+        <LogOut size={16} aria-hidden="true" />
+        Sair
+      </button>
+    </header>
+  )
+}
+
 function NavegacaoPrincipal({
   aba,
   setAba,
@@ -217,11 +255,11 @@ function NavegacaoPrincipal({
 }) {
   return (
     <nav className={className} aria-label="Navegação principal">
-      <button onClick={() => setAba("pedido")} className={`sal-navitem ${aba === "pedido" ? "ativo" : ""}`} style={{ minHeight: 44 }}>
+      <button onClick={() => setAba("pedido")} aria-current={aba === "pedido" ? "page" : undefined} className={`sal-navitem ${aba === "pedido" ? "ativo" : ""}`} style={{ minHeight: 44 }}>
         <ClipboardList size={iconSize} aria-hidden="true" />
         Fazer pedido
       </button>
-      <button onClick={() => setAba("abertos")} className={`sal-navitem ${aba === "abertos" ? "ativo" : ""}`} style={{ minHeight: 44 }}>
+      <button onClick={() => setAba("abertos")} aria-current={aba === "abertos" ? "page" : undefined} className={`sal-navitem ${aba === "abertos" ? "ativo" : ""}`} style={{ minHeight: 44 }}>
         <ReceiptText size={iconSize} aria-hidden="true" />
         Pedidos abertos
         {badge > 0 && <span className="sal-badge">{badge}</span>}
@@ -305,22 +343,31 @@ export default function SalaoPage() {
 
   const comandaAtual = (id: string) => comandas.find((c) => c.id === id) || null
   const abertasParaBadge = comandas.filter((c) => c.status !== "fechada").length
+  // Sessão do Salão não guarda nome individual do responsável (ver Beco 14,
+  // fora de escopo) — cai sempre para a identificação genérica do terminal.
+  const identificacaoTerminal = "Terminal do salão"
 
   if (carregando) {
     return (
-      <div className="sal-shell" style={{ alignItems: "center", justifyContent: "center" }}>
+      <div className="sal-shell">
         <EstiloSalao />
-        <p style={{ color: "var(--foreground-secondary)", fontFamily: FONT }}>Carregando…</p>
+        <SalaoHeader identificacao={identificacaoTerminal} onSair={sair} />
+        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <p style={{ color: "var(--foreground-secondary)", fontFamily: FONT }}>Carregando…</p>
+        </div>
       </div>
     )
   }
 
   if (erroCarregar) {
     return (
-      <div className="sal-shell" style={{ alignItems: "center", justifyContent: "center", padding: 20, gap: 12 }}>
+      <div className="sal-shell">
         <EstiloSalao />
-        <p style={{ color: "var(--foreground)", fontFamily: FONT, fontWeight: 800, textAlign: "center" }}>Não consegui carregar os dados agora.</p>
-        <button onClick={tentarNovamenteCarregar} style={{ ...btnPrimario, width: 220 }}>Tentar novamente</button>
+        <SalaoHeader identificacao={identificacaoTerminal} onSair={sair} />
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 20, gap: 12 }}>
+          <p style={{ color: "var(--foreground)", fontFamily: FONT, fontWeight: 800, textAlign: "center" }}>Não consegui carregar os dados agora.</p>
+          <button onClick={tentarNovamenteCarregar} style={{ ...btnPrimario, width: 220 }}>Tentar novamente</button>
+        </div>
       </div>
     )
   }
@@ -429,24 +476,27 @@ export default function SalaoPage() {
   return (
     <div className="sal-shell">
       <EstiloSalao />
-      <div className="sal-content" style={{ paddingBottom: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <span style={{ fontSize: 18, fontWeight: 900, color: "var(--foreground)" }}>ChefeBot <span style={{ color: "var(--foreground-muted)", fontWeight: 700 }}>· Terminal do salão</span></span>
-          <button onClick={sair} style={{ background: "none", border: "none", color: "var(--foreground-muted)", fontSize: 13, fontWeight: 800, cursor: "pointer", minHeight: 44 }}>Sair</button>
+      <SalaoHeader identificacao={identificacaoTerminal} onSair={sair} />
+
+      {ehDesktop && (
+        <div style={{ padding: "16px 16px 0" }}>
+          <NavegacaoPrincipal aba={aba} setAba={setAba} badge={abertasParaBadge} className="sal-topnav" iconSize={18} />
         </div>
+      )}
 
-        {ehDesktop && <NavegacaoPrincipal aba={aba} setAba={setAba} badge={abertasParaBadge} className="sal-topnav" iconSize={18} />}
-
-        {aba === "pedido" && menu && (
-          <HomeFazerPedido
-            comandas={comandas}
-            onComecarNovoAtendimento={() => setTela({ tipo: "identificacao" })}
-            onContinuarPedido={(comandaId) => setTela({ tipo: "comanda", comandaId })}
-          />
-        )}
-        {aba === "abertos" && (
-          <PedidosAbertosList comandas={comandas} onAbrirComanda={(id) => setTela({ tipo: "comanda", comandaId: id })} />
-        )}
+      <div className="sal-content" style={{ justifyContent: aba === "pedido" ? "center" : "flex-start", paddingBottom: ehDesktop ? 24 : 84 }}>
+        <div className="sal-content-central" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {aba === "pedido" && menu && (
+            <HomeFazerPedido
+              comandas={comandas}
+              onComecarNovoAtendimento={() => setTela({ tipo: "identificacao" })}
+              onContinuarPedido={(comandaId) => setTela({ tipo: "comanda", comandaId })}
+            />
+          )}
+          {aba === "abertos" && (
+            <PedidosAbertosList comandas={comandas} onAbrirComanda={(id) => setTela({ tipo: "comanda", comandaId: id })} />
+          )}
+        </div>
       </div>
 
       {!ehDesktop && (
@@ -536,10 +586,22 @@ function HomeFazerPedido({
         </div>
       )}
 
-      <div style={{ ...card, display: "grid", gap: 10, textAlign: "center", padding: 24 }}>
-        <p style={{ margin: 0, fontSize: 18, fontWeight: 900, color: "var(--foreground)" }}>Novo atendimento</p>
-        <p style={{ margin: 0, fontSize: 13.5, color: "var(--foreground-secondary)" }}>Abra uma comanda e envie o pedido para a cozinha.</p>
-        <button onClick={onComecarNovoAtendimento} style={btnPrimario}>Começar novo atendimento</button>
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 14, textAlign: "center", padding: "24px 16px" }}>
+        <div style={{ width: 58, height: 58, borderRadius: 20, background: "var(--primary-soft)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <Plus size={28} color="var(--brand-text)" aria-hidden="true" />
+        </div>
+        <p style={{ margin: 0, fontSize: 11.5, fontWeight: 800, letterSpacing: ".8px", textTransform: "uppercase", color: "var(--brand-text)" }}>Novo atendimento</p>
+        <p style={{ margin: 0, fontSize: 30, fontWeight: 800, color: "var(--foreground)", lineHeight: 1.2 }}>Fazer pedido</p>
+        <p style={{ margin: 0, maxWidth: 480, fontSize: 16, lineHeight: 1.5, color: "var(--foreground-secondary)" }}>
+          Abra uma nova comanda, envie o pedido à cozinha e mantenha o atendimento aberto para novos produtos.
+        </p>
+        <button
+          onClick={onComecarNovoAtendimento}
+          style={{ ...btnPrimario, width: "100%", maxWidth: 300, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
+        >
+          <Plus size={18} aria-hidden="true" />
+          Começar novo atendimento
+        </button>
       </div>
     </div>
   )
