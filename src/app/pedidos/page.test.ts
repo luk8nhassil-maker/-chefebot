@@ -227,3 +227,11 @@ describe("/pedidos — segurança: nenhuma confirmação acontece no frontend", 
     expect(fonte).not.toContain("serializarPixCliente");
   });
 });
+
+describe("/pedidos — item 'Acesso do salão' no menu lateral (Equipe)", () => {
+  test("liga showEquipeNav no PanelShell — mostra só 'Equipe', sem trazer o grupo Gestão inteiro", () => {
+    const blocoPanelShell = fonte.slice(fonte.indexOf("<PanelShell"), fonte.indexOf("<PanelShell") + 400);
+    expect(blocoPanelShell).toContain("showEquipeNav");
+    expect(blocoPanelShell).not.toContain("showGestaoNav");
+  });
+});

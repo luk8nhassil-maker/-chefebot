@@ -1752,6 +1752,7 @@ export default function PedidosPage() {
         pedidosCount={emAberto}
         conversasCount={escalonados.length}
         conversasUrgent={escalonados.some(p => Math.floor((Date.now() - (p.horarioEscalonado || parseInt(p.id))) / 60000) >= 8)}
+        showEquipeNav
       >
 
         {/* ── HEADER ── */}
