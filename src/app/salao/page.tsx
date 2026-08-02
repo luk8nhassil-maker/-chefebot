@@ -7,9 +7,10 @@
 // /api/salao/comandas/[id]/enviar) — nenhuma lógica de catálogo/preço/
 // pedido paralela vive aqui.
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import type { ItemApp } from "@/lib/pedidoAppItens"
+import { gerarClientRequestId } from "@/survival/clientRequestId"
 import { extrairPagamentoComposto, montarPagamentoComposto } from "@/lib/pagamentoComposto"
 import {
   CATEGORIAS,
@@ -32,6 +33,20 @@ import {
 } from "@/lib/montagemManual"
 
 type StatusComanda = "aberta" | "enviada" | "fechada"
+type StatusRodada = "rascunho" | "enviada"
+type Rodada = {
+  id: string
+  numero: number
+  status: StatusRodada
+  itens: ItemApp[]
+  observacao?: string
+  subtotal: number
+  criadaEm: string
+  atualizadaEm: string
+  enviadaEm?: string
+  pedidoId?: string
+  pedidoNumero?: number
+}
 type Comanda = {
   id: string
   numero: number
@@ -43,6 +58,8 @@ type Comanda = {
   abertaEm: string
   pedidoId?: string
   pedidoNumero?: number
+  rodadas?: Rodada[]
+  totalParcial?: number
 }
 
 const money = (v: number) => "R$ " + v.toFixed(2).replace(".", ",")
@@ -132,14 +149,26 @@ export default function SalaoPage() {
   }
 
   if (comandaAtiva && menu) {
-    return (
-      <ComandaBuilder
-        comanda={comandaAtiva}
-        menu={menu}
-        onVoltar={() => { setComandaAtivaId(null); carregarComandas() }}
-        onAtualizado={carregarComandas}
-      />
-    )
+    if (comandaAtiva.status === "aberta") {
+      return (
+        <ComandaBuilder
+          comanda={comandaAtiva}
+          menu={menu}
+          onVoltar={() => { setComandaAtivaId(null); carregarComandas() }}
+          onAtualizado={carregarComandas}
+        />
+      )
+    }
+    if (comandaAtiva.status === "enviada") {
+      return (
+        <RodadasView
+          comanda={comandaAtiva}
+          menu={menu}
+          onVoltar={() => { setComandaAtivaId(null); carregarComandas() }}
+          onAtualizado={carregarComandas}
+        />
+      )
+    }
   }
 
   return (
@@ -174,7 +203,7 @@ export default function SalaoPage() {
         <div style={{ display: "grid", gap: 8 }}>
           <p style={rotulo}>Aguardando fechamento</p>
           {enviadas.map((c) => (
-            <ComandaEnviadaCard key={c.id} comanda={c} onFechada={carregarComandas} />
+            <ComandaEnviadaCard key={c.id} comanda={c} onAbrir={() => setComandaAtivaId(c.id)} onFechada={carregarComandas} />
           ))}
         </div>
       )}
@@ -202,7 +231,7 @@ export default function SalaoPage() {
   )
 }
 
-function ComandaEnviadaCard({ comanda, onFechada }: { comanda: Comanda; onFechada: () => void }) {
+function ComandaEnviadaCard({ comanda, onAbrir, onFechada }: { comanda: Comanda; onAbrir: () => void; onFechada: () => void }) {
   const [fechando, setFechando] = useState(false)
   async function fechar() {
     if (fechando) return
@@ -214,12 +243,15 @@ function ComandaEnviadaCard({ comanda, onFechada }: { comanda: Comanda; onFechad
       setFechando(false)
     }
   }
+  const numeroRodadas = comanda.rodadas?.length ?? 1
   return (
     <div style={{ ...card, display: "grid", gap: 8 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <button onClick={onAbrir} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "none", border: "none", padding: 0, textAlign: "left", cursor: "pointer" }}>
         <span style={{ fontSize: 14, fontWeight: 900, color: "var(--foreground)" }}>Mesa {comanda.mesa}{comanda.complemento ? ` (${comanda.complemento})` : ""}</span>
-        <span style={{ fontSize: 12, color: "var(--foreground-secondary)" }}>Pedido #{comanda.pedidoNumero ?? "—"}</span>
-      </div>
+        <span style={{ fontSize: 12, color: "var(--foreground-secondary)" }}>
+          Pedido #{comanda.pedidoNumero ?? "—"}{numeroRodadas > 1 ? ` · ${numeroRodadas} rodadas` : ""}
+        </span>
+      </button>
       <div style={{ display: "flex", gap: 8 }}>
         {comanda.pedidoId && (
           <a href={`/pedidos/${comanda.pedidoId}/imprimir`} target="_blank" rel="noreferrer" style={{ ...btn, flex: 1, border: "1px solid var(--surface-secondary)", background: "transparent", color: "var(--foreground-secondary)", textAlign: "center", textDecoration: "none", display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -466,6 +498,347 @@ function ComandaBuilder({ comanda, menu, onVoltar, onAtualizado }: { comanda: Co
           onFechar={() => setModalEnviar(false)}
           onEnviado={() => { setModalEnviar(false); onAtualizado(); onVoltar() }}
         />
+      )}
+    </div>
+  )
+}
+
+// Rodada 1 já foi enviada (virou o pedido real) — esta tela é só para
+// acompanhar as rodadas e, se quiser, montar a próxima em rascunho. Nesta
+// etapa a rodada em rascunho nunca vira pedido: enviar para a cozinha fica
+// para uma etapa futura (ver src/lib/comandas.ts).
+function RodadasView({ comanda, menu, onVoltar, onAtualizado }: { comanda: Comanda; menu: MenuManual; onVoltar: () => void; onAtualizado: () => void }) {
+  const rodadas: Rodada[] = comanda.rodadas && comanda.rodadas.length > 0
+    ? comanda.rodadas
+    : [{
+        id: `rodada_${comanda.id}_1`,
+        numero: 1,
+        status: "enviada",
+        itens: comanda.itens,
+        subtotal: comanda.itens.reduce((s, i) => s + i.price * i.qty, 0),
+        criadaEm: comanda.abertaEm,
+        atualizadaEm: comanda.abertaEm,
+        pedidoId: comanda.pedidoId,
+        pedidoNumero: comanda.pedidoNumero,
+      }]
+
+  const rodadaRascunho = rodadas.find((r) => r.status === "rascunho") || null
+  const totalParcial = comanda.totalParcial ?? rodadas.reduce((s, r) => s + r.subtotal, 0)
+
+  const [criando, setCriando] = useState(false)
+  const [erroCriar, setErroCriar] = useState<string | null>(null)
+  const criandoRef = useRef(false)
+  const clientRequestIdRef = useRef<string | null>(null)
+
+  async function adicionarNovaRodada() {
+    if (criandoRef.current) return
+    criandoRef.current = true
+    setCriando(true)
+    setErroCriar(null)
+    try {
+      if (!clientRequestIdRef.current) clientRequestIdRef.current = gerarClientRequestId()
+      const r = await fetch(`/api/salao/comandas/${comanda.id}/rodadas`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clientRequestId: clientRequestIdRef.current }),
+      })
+      const data = await r.json().catch(() => null)
+      if (!r.ok || !data?.ok) {
+        setErroCriar(data?.error || "Não foi possível criar a rodada agora.")
+        return
+      }
+      clientRequestIdRef.current = null
+      onAtualizado()
+    } catch {
+      setErroCriar("Não foi possível criar a rodada agora. Verifique a conexão.")
+    } finally {
+      criandoRef.current = false
+      setCriando(false)
+    }
+  }
+
+  return (
+    <div style={{ minHeight: "100svh", background: "var(--background)", fontFamily: "'Archivo', sans-serif", display: "flex", flexDirection: "column" }}>
+      <div style={{ padding: "14px 16px 10px", borderBottom: "1px solid var(--surface)", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <button onClick={onVoltar} style={{ background: "none", border: "none", color: "var(--foreground-secondary)", fontSize: 14, fontWeight: 800, cursor: "pointer" }}>‹ Mesas</button>
+        <span style={{ fontSize: 15, fontWeight: 900, color: "var(--foreground)" }}>Mesa {comanda.mesa}{comanda.complemento ? ` (${comanda.complemento})` : ""}</span>
+        <span style={{ width: 60 }} />
+      </div>
+
+      <div style={{ flex: 1, overflowY: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+        {rodadas.map((r) => (
+          r.status === "rascunho"
+            ? <RodadaRascunhoCard key={r.id} comandaId={comanda.id} rodada={r} menu={menu} onAtualizado={onAtualizado} />
+            : <RodadaEnviadaCard key={r.id} rodada={r} />
+        ))}
+
+        {!rodadaRascunho && (
+          <div style={{ display: "grid", gap: 6 }}>
+            <button onClick={adicionarNovaRodada} disabled={criando} style={{ ...btn, border: "1px dashed var(--surface-secondary)", background: "transparent", color: "var(--foreground)", opacity: criando ? 0.6 : 1 }}>
+              {criando ? "Criando…" : "+ Adicionar nova rodada"}
+            </button>
+            {erroCriar && <p role="alert" style={{ fontSize: 12.5, color: "var(--danger)", margin: 0 }}>{erroCriar}</p>}
+          </div>
+        )}
+      </div>
+
+      <div style={{ borderTop: "1px solid var(--surface)", padding: "12px 16px calc(12px + env(safe-area-inset-bottom))", flexShrink: 0 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 15, fontWeight: 900 }}>
+          <span style={{ color: "var(--foreground-secondary)" }}>Total parcial</span>
+          <span>{money(totalParcial)}</span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function RodadaEnviadaCard({ rodada }: { rodada: Rodada }) {
+  const horario = rodada.enviadaEm ? new Date(rodada.enviadaEm).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) : null
+  return (
+    <div style={{ ...card, display: "grid", gap: 8 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span style={{ fontSize: 14, fontWeight: 900, color: "var(--foreground)" }}>Rodada {rodada.numero}</span>
+        <span style={{ fontSize: 11, fontWeight: 800, color: "var(--success)", textTransform: "uppercase", letterSpacing: ".4px" }}>
+          Enviada{horario ? ` · ${horario}` : ""}
+        </span>
+      </div>
+      <div style={{ display: "grid", gap: 4 }}>
+        {rodada.itens.map((item, i) => (
+          <div key={`${item.name}-${i}`} style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+            <span style={{ fontSize: 13, color: "var(--foreground)" }}>{item.qty}× {item.name}</span>
+            <span style={{ fontSize: 13, fontWeight: 700, color: "var(--foreground-secondary)" }}>{money(item.price * item.qty)}</span>
+          </div>
+        ))}
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 900, borderTop: "1px solid var(--surface)", paddingTop: 6 }}>
+        <span style={{ color: "var(--foreground-secondary)" }}>Subtotal</span>
+        <span>{money(rodada.subtotal)}</span>
+      </div>
+    </div>
+  )
+}
+
+function RodadaRascunhoCard({ comandaId, rodada, menu, onAtualizado }: { comandaId: string; rodada: Rodada; menu: MenuManual; onAtualizado: () => void }) {
+  const produtos = useMemo(() => listarProdutosManuais(menu), [menu])
+  const [categoria, setCategoria] = useState<CategoriaManual>("pizza")
+  const [termo, setTermo] = useState("")
+  const buscando = termo.trim().length > 0
+  const resultados = useMemo(() => buscarProdutos(produtos, termo, buscando ? "todas" : categoria), [produtos, termo, buscando, categoria])
+
+  const [itens, setItens] = useState<ItemApp[]>(rodada.itens)
+  const [salvando, setSalvando] = useState(false)
+  const [erroSalvar, setErroSalvar] = useState<string | null>(null)
+
+  const salvar = useCallback(async (novosItens: ItemApp[]) => {
+    setSalvando(true)
+    setErroSalvar(null)
+    try {
+      const r = await fetch(`/api/salao/comandas/${comandaId}/rodadas/${rodada.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ itens: novosItens.map((i) => ({ kind: i.kind, name: i.name, detail: i.detail, price: i.price, qty: i.qty })) }),
+      })
+      const data = await r.json().catch(() => null)
+      if (!r.ok || !data?.ok) {
+        setErroSalvar(data?.error || "Não foi possível salvar agora.")
+        return
+      }
+      setItens(data.rodada.itens)
+      onAtualizado()
+    } catch {
+      setErroSalvar("Não foi possível salvar agora. Verifique a conexão.")
+    } finally {
+      setSalvando(false)
+    }
+  }, [comandaId, rodada.id, onAtualizado])
+
+  const [produtoAberto, setProdutoAberto] = useState<ProdutoManual | null>(null)
+  const [selecao, setSelecao] = useState<SelecaoMontagem>(selecaoVazia())
+  const [etapaVisivel, setEtapaVisivel] = useState(0)
+  const etapas = useMemo(() => (produtoAberto ? montarEtapas(produtoAberto, menu) : []), [produtoAberto, menu])
+  const etapaAtual = etapas[etapaVisivel]
+  const bloqueio = motivoBloqueio(etapaAtual, selecao)
+  const completa = montagemCompleta(etapas, selecao)
+
+  function abrirProduto(produto: ProdutoManual) {
+    if (produto.esgotado) return
+    if (!produto.requerMontagem) {
+      const item = construirItemManual(produto, selecaoVazia(), menu)
+      if (item) {
+        const novos = [...itens, item]
+        setItens(novos)
+        salvar(novos)
+      }
+      return
+    }
+    setProdutoAberto(produto)
+    setSelecao(selecaoVazia())
+    setEtapaVisivel(0)
+    setCategoria(produto.categoria)
+  }
+
+  function confirmarMontagem() {
+    if (!produtoAberto || !completa) return
+    const item = construirItemManual(produtoAberto, selecao, menu)
+    if (item) {
+      const novos = [...itens, item]
+      setItens(novos)
+      salvar(novos)
+    }
+    setProdutoAberto(null)
+    setTermo("")
+  }
+
+  function mudarQuantidade(i: number, delta: number) {
+    const novos = itens
+      .map((item, idx) => (idx === i ? { ...item, qty: item.qty + delta } : item))
+      .filter((item) => item.qty > 0)
+    setItens(novos)
+    salvar(novos)
+  }
+  function removerItem(i: number) {
+    const novos = itens.filter((_, idx) => idx !== i)
+    setItens(novos)
+    salvar(novos)
+  }
+
+  function escolher(valor: string) {
+    if (!etapaAtual) return
+    if (etapaAtual.tipo === "sabores" || etapaAtual.tipo === "sabor_unico") {
+      setSelecao((s) => alternarSabor(s, valor, etapaAtual.maxEscolhas))
+    } else if (etapaAtual.tipo === "borda") {
+      setSelecao((s) => ({ ...s, borda: valor === "" ? null : valor }))
+    } else if (etapaAtual.tipo === "tamanho_item") {
+      setSelecao((s) => ({ ...s, tamanhoItem: valor }))
+    } else if (etapaAtual.tipo === "leite") {
+      setSelecao((s) => ({ ...s, leite: valor === "com" ? "com" : "sem" }))
+    }
+  }
+  function estaEscolhida(valor: string): boolean {
+    if (!etapaAtual) return false
+    switch (etapaAtual.tipo) {
+      case "sabores": case "sabor_unico": return selecao.sabores.includes(valor)
+      case "borda": return valor === "" ? selecao.borda === null : selecao.borda === valor
+      case "tamanho_item": return selecao.tamanhoItem === valor
+      case "leite": return selecao.leite === valor
+      default: return false
+    }
+  }
+  function avancarEtapa() {
+    if (!etapaAtual || !etapaSatisfeita(etapaAtual, selecao)) return
+    if (etapaVisivel < etapas.length - 1) setEtapaVisivel(etapaVisivel + 1)
+  }
+  function voltarEtapa() {
+    if (etapaVisivel > 0) setEtapaVisivel(etapaVisivel - 1)
+    else setProdutoAberto(null)
+  }
+
+  const subtotal = itens.reduce((s, i) => s + i.price * i.qty, 0)
+
+  return (
+    <div style={{ ...card, display: "grid", gap: 10 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span style={{ fontSize: 14, fontWeight: 900, color: "var(--foreground)" }}>Rodada {rodada.numero}</span>
+        <span style={{ fontSize: 11, fontWeight: 800, color: "var(--attention-text)", textTransform: "uppercase", letterSpacing: ".4px" }}>
+          Rascunho · rodada em andamento
+        </span>
+      </div>
+
+      <input style={input} placeholder="Buscar produto…" value={termo} onChange={(e) => setTermo(e.target.value)} aria-label="Buscar produto" />
+      {!buscando && (
+        <div style={{ display: "flex", gap: 6, overflowX: "auto" }}>
+          {CATEGORIAS.map((c) => (
+            <button key={c.id} onClick={() => setCategoria(c.id)} style={{ ...btn, height: 34, padding: "0 12px", flexShrink: 0, border: "1px solid " + (categoria === c.id ? "var(--primary)" : "var(--surface-secondary)"), background: categoria === c.id ? "color-mix(in srgb, var(--primary) 15%, transparent)" : "transparent", color: "var(--foreground)", fontSize: 12.5 }}>
+              {c.label}
+            </button>
+          ))}
+        </div>
+      )}
+      <div style={{ display: "grid", gap: 8, maxHeight: 260, overflowY: "auto" }}>
+        {resultados.map((p) => (
+          <button key={p.id} onClick={() => abrirProduto(p)} disabled={p.esgotado} style={{ ...card, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, textAlign: "left", cursor: p.esgotado ? "not-allowed" : "pointer", opacity: p.esgotado ? 0.5 : 1 }}>
+            <span style={{ fontSize: 14, fontWeight: 800, color: "var(--foreground)" }}>{p.nome}</span>
+            <span style={{ fontSize: 13, fontWeight: 900, color: "var(--brand-text)" }}>{p.precoBase === null ? "" : money(p.precoBase)}</span>
+          </button>
+        ))}
+      </div>
+
+      {itens.length > 0 && (
+        <div style={{ display: "grid", gap: 8 }}>
+          <p style={rotulo}>Itens da rodada ({itens.length})</p>
+          {itens.map((item, i) => (
+            <div key={`${item.name}-${item.detail}-${i}`} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ flex: 1, minWidth: 0 }}>
+                <span style={{ display: "block", fontSize: 13, fontWeight: 800, color: "var(--foreground)" }}>{item.name}</span>
+                {item.detail && <span style={{ display: "block", fontSize: 11.5, color: "var(--foreground-secondary)" }}>{item.detail}</span>}
+              </span>
+              <button onClick={() => mudarQuantidade(i, -1)} aria-label={`Diminuir ${item.name}`} style={{ ...btn, height: 30, width: 30, border: "1px solid var(--surface-secondary)", background: "transparent", color: "var(--foreground)" }}>−</button>
+              <span style={{ fontSize: 13, fontWeight: 900, minWidth: 18, textAlign: "center" }}>{item.qty}</span>
+              <button onClick={() => mudarQuantidade(i, 1)} aria-label={`Aumentar ${item.name}`} style={{ ...btn, height: 30, width: 30, border: "1px solid var(--surface-secondary)", background: "transparent", color: "var(--foreground)" }}>+</button>
+              <button onClick={() => removerItem(i)} aria-label={`Remover ${item.name}`} style={{ ...btn, height: 30, width: 30, border: "none", background: "transparent", color: "var(--danger)" }}>×</button>
+            </div>
+          ))}
+        </div>
+      )}
+      {erroSalvar && <p role="alert" style={{ fontSize: 12.5, color: "var(--danger)", margin: 0 }}>{erroSalvar}</p>}
+      {salvando && <p role="status" style={{ fontSize: 11.5, color: "var(--foreground-muted)", margin: 0 }}>Salvando…</p>}
+
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 900, borderTop: "1px solid var(--surface)", paddingTop: 6 }}>
+        <span style={{ color: "var(--foreground-secondary)" }}>Subtotal da rodada</span>
+        <span>{money(subtotal)}</span>
+      </div>
+      <p style={{ fontSize: 11.5, color: "var(--foreground-muted)", margin: 0, textAlign: "center" }}>
+        Você poderá enviar esta rodada para a cozinha na próxima etapa.
+      </p>
+
+      {produtoAberto && etapaAtual && (
+        <div role="dialog" aria-modal="true" aria-label={`Montar ${produtoAberto.nome}`} style={{ position: "fixed", inset: 0, zIndex: 2900, background: "var(--background)", display: "flex", flexDirection: "column", fontFamily: "'Archivo', sans-serif" }}>
+          <div style={{ padding: "14px 16px", borderBottom: "1px solid var(--surface)", flexShrink: 0 }}>
+            <p style={{ ...rotulo, margin: 0 }}>{produtoAberto.nome} · passo {etapaVisivel + 1} de {etapas.length}</p>
+            <p style={{ fontSize: 18, fontWeight: 900, color: "var(--foreground)", margin: "4px 0 2px" }}>{etapaAtual.titulo}</p>
+            <p style={{ fontSize: 12.5, fontWeight: 600, color: "var(--foreground-secondary)", margin: 0 }}>{etapaAtual.ajuda}</p>
+          </div>
+          <div style={{ padding: "8px 16px", display: "flex", flexWrap: "wrap", gap: 6, flexShrink: 0 }}>
+            {etapas.map((e, i) => {
+              const resumo = resumoEtapa(e, selecao)
+              if (!resumo) return null
+              return (
+                <button key={e.tipo} onClick={() => setEtapaVisivel(i)} style={{ ...btn, height: 28, padding: "0 10px", fontSize: 11.5, border: "1px solid var(--surface-secondary)", background: "var(--surface)", color: "var(--foreground-secondary)" }}>
+                  {e.titulo}: {resumo} ✎
+                </button>
+              )
+            })}
+          </div>
+          <div style={{ flex: 1, overflowY: "auto", padding: "4px 16px 16px", display: "grid", gap: 8, alignContent: "start" }}>
+            {etapaAtual.opcoes.map((o) => {
+              const sel = estaEscolhida(o.valor)
+              return (
+                <button key={o.valor || "__sem__"} onClick={() => !o.esgotado && escolher(o.valor)} disabled={o.esgotado} style={{ ...card, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, textAlign: "left", cursor: o.esgotado ? "not-allowed" : "pointer", opacity: o.esgotado ? 0.45 : 1, borderColor: sel ? "var(--primary)" : "var(--surface-secondary)", background: sel ? "color-mix(in srgb, var(--primary) 12%, transparent)" : "var(--surface)" }}>
+                  <span style={{ fontSize: 14, fontWeight: 800, color: "var(--foreground)" }}>{o.label}{o.esgotado ? " · esgotado" : ""}</span>
+                  <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    {o.extra ? <span style={{ fontSize: 12.5, fontWeight: 800, color: "var(--brand-text)" }}>+{money(o.extra)}</span> : null}
+                    {sel ? <span style={{ fontSize: 14, color: "var(--primary)" }}>✓</span> : null}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+          <div style={{ borderTop: "1px solid var(--surface)", padding: "12px 16px calc(12px + env(safe-area-inset-bottom))", flexShrink: 0, display: "grid", gap: 8 }}>
+            {bloqueio && <p role="status" aria-live="polite" style={{ fontSize: 12.5, fontWeight: 700, color: "var(--attention-text)", margin: 0, textAlign: "center" }}>{bloqueio}</p>}
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={voltarEtapa} style={{ ...btn, flex: 1, border: "1px solid var(--surface-secondary)", background: "transparent", color: "var(--foreground-secondary)" }}>
+                {etapaVisivel > 0 ? "Voltar" : "Cancelar item"}
+              </button>
+              {indiceEtapaPendente(etapas, selecao) === -1 ? (
+                <button onClick={confirmarMontagem} style={{ ...btn, flex: 2, border: "none", background: "var(--primary)", color: "var(--background)" }}>Adicionar</button>
+              ) : (
+                <button onClick={avancarEtapa} disabled={!!bloqueio} style={{ ...btn, flex: 2, border: "none", background: "var(--primary)", color: "var(--background)", opacity: bloqueio ? 0.5 : 1 }}>
+                  {etapaVisivel < etapas.length - 1 ? `Continuar para ${etapas[etapaVisivel + 1].titulo.toLowerCase()}` : "Continuar"}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

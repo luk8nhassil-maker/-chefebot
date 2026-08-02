@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { lerSessaoSalao } from "@/lib/salaoAuth";
 import { lerSessaoAdministrativa } from "@/lib/sessaoAdministrativa";
-import { abrirComanda, listarComandas } from "@/lib/comandas";
+import { abrirComanda, comRodadasNormalizadas, listarComandas, totalParcialComanda } from "@/lib/comandas";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +16,15 @@ export async function GET(req: NextRequest) {
 
   const status = req.nextUrl.searchParams.get("status");
   const todas = await listarComandas();
-  const comandas = status ? todas.filter((c) => c.status === status) : todas;
+  const filtradas = status ? todas.filter((c) => c.status === status) : todas;
+  // Normaliza rodadas na resposta — nunca grava aqui (leitura não escreve,
+  // ver comRodadasNormalizadas). A UI do Salão sempre pode contar com
+  // `comanda.rodadas` e `comanda.totalParcial`, mesmo para comandas
+  // criadas antes desta etapa.
+  const comandas = filtradas.map((c) => {
+    const normalizada = comRodadasNormalizadas(c);
+    return { ...normalizada, totalParcial: totalParcialComanda(normalizada) };
+  });
   return NextResponse.json({ ok: true, comandas });
 }
 

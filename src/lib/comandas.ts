@@ -13,11 +13,40 @@ import { officialUnitPrice, type ItemApp, type MenuPedidoApp } from "./pedidoApp
 
 export type StatusComanda = "aberta" | "enviada" | "fechada";
 
+export type StatusRodada = "rascunho" | "enviada";
+
+// Rodada — um envio (ou tentativa de envio) de itens à cozinha dentro de uma
+// mesma comanda. A Rodada 1 é sempre o pedido original (o que a comanda já
+// suportava antes desta etapa); a partir da Rodada 2, itens novos podem ser
+// adicionados sem tocar o que já foi enviado. Nesta etapa só existe
+// "rascunho" → os itens ainda não viraram pedido de verdade — e "enviada",
+// usada só para representar a Rodada 1 normalizada de comandas antigas
+// (nenhum código nesta etapa cria uma rodada 2+ já "enviada").
+export type Rodada = {
+  id: string;
+  numero: number;
+  status: StatusRodada;
+  itens: ItemApp[];
+  observacao?: string;
+  subtotal: number;
+  criadaEm: string;
+  atualizadaEm: string;
+  enviadaEm?: string;
+  responsavel?: string;
+  clientRequestId?: string;
+  pedidoId?: string;
+  pedidoNumero?: number;
+};
+
 export type Comanda = {
   id: string;
   numero: number;
   mesa: string;
   complemento?: string;
+  /** Itens da Rodada 1 — mantido por compatibilidade (comandas antigas e o
+   *  fluxo de envio existente leem/escrevem aqui). A fonte de verdade para
+   *  qualquer leitura que precise de todas as rodadas é sempre `rodadas`
+   *  (via `comRodadasNormalizadas`), nunca este campo isolado. */
   itens: ItemApp[];
   observacao?: string;
   status: StatusComanda;
@@ -26,6 +55,9 @@ export type Comanda = {
   fechadaEm?: string;
   pedidoId?: string;
   pedidoNumero?: number;
+  /** Ausente em comandas gravadas antes desta etapa — normalizado sob
+   *  demanda por `comRodadasNormalizadas`, nunca lido diretamente. */
+  rodadas?: Rodada[];
 };
 
 const CHAVE_COMANDAS = "salao:comandas";
@@ -85,6 +117,45 @@ export async function buscarComanda(id: string): Promise<Comanda | null> {
   return lista.find((c) => c.id === id) || null;
 }
 
+function calcularSubtotal(itens: ItemApp[]): number {
+  return itens.reduce((soma, item) => soma + item.price * item.qty, 0);
+}
+
+/**
+ * Devolve a comanda com `rodadas` sempre preenchido — nunca muta o
+ * argumento. Comandas que já têm `rodadas` (gravadas nesta etapa em
+ * diante) voltam como estão. Comandas antigas (só `itens`/`pedidoId`, sem
+ * `rodadas`) são normalizadas em memória como uma Rodada 1 única:
+ * "rascunho" se a comanda ainda está "aberta", "enviada" se já foi enviada
+ * ou fechada — sem apagar nenhum campo antigo (`itens`, `pedidoId`,
+ * `pedidoNumero`, `enviadaEm` continuam intactos na comanda). A gravação
+ * de `rodadas` só acontece na próxima escrita real (criar/atualizar
+ * rodada), nunca aqui — leitura nunca escreve.
+ */
+export function comRodadasNormalizadas(comanda: Comanda): Comanda {
+  if (comanda.rodadas && comanda.rodadas.length > 0) return comanda;
+  const rodada1: Rodada = {
+    id: `rodada_${comanda.id}_1`,
+    numero: 1,
+    status: comanda.status === "aberta" ? "rascunho" : "enviada",
+    itens: comanda.itens,
+    ...(comanda.observacao ? { observacao: comanda.observacao } : {}),
+    subtotal: calcularSubtotal(comanda.itens),
+    criadaEm: comanda.abertaEm,
+    atualizadaEm: comanda.enviadaEm || comanda.abertaEm,
+    ...(comanda.status !== "aberta" ? { enviadaEm: comanda.enviadaEm || comanda.abertaEm } : {}),
+    ...(comanda.pedidoId ? { pedidoId: comanda.pedidoId } : {}),
+    ...(comanda.pedidoNumero !== undefined ? { pedidoNumero: comanda.pedidoNumero } : {}),
+  };
+  return { ...comanda, rodadas: [rodada1] };
+}
+
+/** Soma o subtotal de todas as rodadas (rascunho + enviadas) — o total
+ *  parcial real da comanda, sempre a partir da visão normalizada. */
+export function totalParcialComanda(comanda: Comanda): number {
+  return comRodadasNormalizadas(comanda).rodadas!.reduce((soma, r) => soma + r.subtotal, 0);
+}
+
 async function proximoNumeroComanda(): Promise<number> {
   const hoje = new Date().toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" });
   const chave = `contador_comandas:${hoje}`;
@@ -133,8 +204,18 @@ export type ResultadoValidacaoItens =
  * nunca confia no preço vindo do painel do Salão. Itens promocionais não
  * são suportados aqui (mesmo escopo do pedido manual administrativo).
  */
-export async function validarItensComanda(itens: unknown): Promise<ResultadoValidacaoItens> {
-  if (!Array.isArray(itens) || itens.length === 0) {
+export async function validarItensComanda(
+  itens: unknown,
+  opcoes: { permitirVazio?: boolean } = {}
+): Promise<ResultadoValidacaoItens> {
+  if (!Array.isArray(itens)) {
+    return { ok: false, error: "Informe pelo menos um item" };
+  }
+  if (itens.length === 0) {
+    // Uma rodada em rascunho pode ficar momentaneamente sem itens (removeu
+    // o último produto antes de adicionar outro) — o pedido de verdade
+    // (Rodada 1) continua exigindo pelo menos um item para ser enviado.
+    if (opcoes.permitirVazio) return { ok: true, itens: [], total: 0 };
     return { ok: false, error: "Informe pelo menos um item" };
   }
   const menu = (await getMENUDinamico()) as MenuPedidoApp;
@@ -183,6 +264,112 @@ export async function atualizarItensComanda(
     };
     await salvarComandas(lista);
     return lista[idx];
+  });
+}
+
+export type CriarRodadaResultado =
+  | { ok: true; rodada: Rodada; comanda: Comanda; criada: boolean }
+  | { ok: false; motivo: "nao_encontrada" | "comanda_fechada" };
+
+/**
+ * Cria a próxima rodada em rascunho da comanda — idempotente por
+ * `clientRequestId` e por estado: nunca duas rodadas em rascunho ao mesmo
+ * tempo. Tudo (checar duplicidade, calcular o próximo número, gravar) sob o
+ * mesmo mutex de `salao:comandas`, então duas abas/cliques concorrentes
+ * nunca criam duas "Rodada 2" — a segunda chamada sempre enxerga o
+ * resultado da primeira e devolve `criada: false` com a mesma rodada.
+ * Só cria a estrutura em memória (nenhum pedido oficial, nenhuma
+ * impressão) — isso continua para uma etapa futura.
+ */
+export async function criarRodadaEmRascunho(
+  comandaId: string,
+  clientRequestId?: string
+): Promise<CriarRodadaResultado> {
+  return comMutexComandas(async () => {
+    const lista = await listarComandas();
+    const idx = lista.findIndex((c) => c.id === comandaId);
+    if (idx < 0) return { ok: false, motivo: "nao_encontrada" };
+    if (lista[idx].status === "fechada") return { ok: false, motivo: "comanda_fechada" };
+
+    const comanda = comRodadasNormalizadas(lista[idx]);
+    const rodadas = comanda.rodadas!;
+
+    if (clientRequestId) {
+      const existentePorRequestId = rodadas.find((r) => r.clientRequestId === clientRequestId);
+      if (existentePorRequestId) {
+        lista[idx] = comanda;
+        await salvarComandas(lista);
+        return { ok: true, rodada: existentePorRequestId, comanda: lista[idx], criada: false };
+      }
+    }
+
+    const rascunhoExistente = rodadas.find((r) => r.status === "rascunho");
+    if (rascunhoExistente) {
+      lista[idx] = comanda;
+      await salvarComandas(lista);
+      return { ok: true, rodada: rascunhoExistente, comanda: lista[idx], criada: false };
+    }
+
+    const agora = new Date().toISOString();
+    const proximoNumero = rodadas.reduce((max, r) => Math.max(max, r.numero), 0) + 1;
+    const novaRodada: Rodada = {
+      id: `rodada_${randomUUID()}`,
+      numero: proximoNumero,
+      status: "rascunho",
+      itens: [],
+      subtotal: 0,
+      criadaEm: agora,
+      atualizadaEm: agora,
+      ...(clientRequestId ? { clientRequestId } : {}),
+    };
+    const atualizada: Comanda = { ...comanda, rodadas: [...rodadas, novaRodada] };
+    lista[idx] = atualizada;
+    await salvarComandas(lista);
+    return { ok: true, rodada: novaRodada, comanda: atualizada, criada: true };
+  });
+}
+
+export type AtualizarRodadaResultado =
+  | { ok: true; rodada: Rodada; comanda: Comanda }
+  | { ok: false; motivo: "nao_encontrada" | "comanda_fechada" | "rodada_nao_encontrada" | "rodada_nao_e_rascunho" };
+
+/**
+ * Atualiza itens/observação de uma rodada específica em rascunho — nunca
+ * toca em outra rodada da mesma comanda (itens não vazam entre rodadas) e
+ * nunca altera uma rodada já enviada (imutável nesta etapa). Mesmo padrão
+ * de "carrinho completo" de `atualizarItensComanda`: o Salão sempre envia a
+ * lista atual e completa de itens da rodada, nunca um diff.
+ */
+export async function atualizarItensRodada(
+  comandaId: string,
+  rodadaId: string,
+  itens: ItemApp[],
+  campos: { observacao?: string } = {}
+): Promise<AtualizarRodadaResultado> {
+  return comMutexComandas(async () => {
+    const lista = await listarComandas();
+    const idx = lista.findIndex((c) => c.id === comandaId);
+    if (idx < 0) return { ok: false, motivo: "nao_encontrada" };
+    if (lista[idx].status === "fechada") return { ok: false, motivo: "comanda_fechada" };
+
+    const comanda = comRodadasNormalizadas(lista[idx]);
+    const rodadaIdx = comanda.rodadas!.findIndex((r) => r.id === rodadaId);
+    if (rodadaIdx < 0) return { ok: false, motivo: "rodada_nao_encontrada" };
+    if (comanda.rodadas![rodadaIdx].status !== "rascunho") return { ok: false, motivo: "rodada_nao_e_rascunho" };
+
+    const agora = new Date().toISOString();
+    const novasRodadas = [...comanda.rodadas!];
+    novasRodadas[rodadaIdx] = {
+      ...novasRodadas[rodadaIdx],
+      itens,
+      subtotal: calcularSubtotal(itens),
+      atualizadaEm: agora,
+      ...(campos.observacao !== undefined ? { observacao: campos.observacao.trim() || undefined } : {}),
+    };
+    const atualizada: Comanda = { ...comanda, rodadas: novasRodadas };
+    lista[idx] = atualizada;
+    await salvarComandas(lista);
+    return { ok: true, rodada: novasRodadas[rodadaIdx], comanda: atualizada };
   });
 }
 

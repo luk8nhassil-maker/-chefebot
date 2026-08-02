@@ -87,6 +87,16 @@ describe("GET /api/salao/comandas", () => {
     expect((await abertas.json()).comandas).toHaveLength(1);
     expect((await fechadas.json()).comandas).toHaveLength(0);
   });
+
+  it("cada comanda vem com rodadas normalizadas e totalParcial, mesmo sem nenhuma rodada gravada ainda", async () => {
+    const token = await criarTokenSalao();
+    await POST(postReqSalao({ mesa: "5" }, token));
+    const res = await GET(reqSalao(token));
+    const data = await res.json();
+    expect(data.comandas[0].rodadas).toHaveLength(1);
+    expect(data.comandas[0].rodadas[0].status).toBe("rascunho");
+    expect(data.comandas[0].totalParcial).toBe(0);
+  });
 });
 
 describe("POST /api/salao/comandas (abrir)", () => {

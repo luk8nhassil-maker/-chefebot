@@ -38,10 +38,14 @@ const CARDAPIO_TESTE = {
 import {
   abrirComanda,
   atualizarItensComanda,
+  atualizarItensRodada,
   buscarComanda,
+  comRodadasNormalizadas,
+  criarRodadaEmRascunho,
   fecharComanda,
   listarComandas,
   marcarComandaEnviada,
+  totalParcialComanda,
   validarItensComanda,
   type Comanda,
 } from "./comandas";
@@ -213,5 +217,294 @@ describe("fecharComanda", () => {
 describe("buscarComanda", () => {
   it("devolve null para id inexistente", async () => {
     expect(await buscarComanda("nao_existe")).toBeNull();
+  });
+});
+
+async function itensRefrigerante(qty: number) {
+  const v = await validarItensComanda([{ kind: "simple", name: "Refrigerante 2L", qty }]);
+  if (!v.ok) throw new Error("validação falhou no teste");
+  return v.itens;
+}
+
+describe("comRodadasNormalizadas — comandas antigas viram Rodada 1", () => {
+  it("comanda aberta (sem rodadas) vira Rodada 1 em rascunho", async () => {
+    const c = await abrirComandaOk("5");
+    const itens = await itensRefrigerante(2);
+    await atualizarItensComanda(c.id, itens);
+    const bruta = await buscarComanda(c.id);
+    const normalizada = comRodadasNormalizadas(bruta!);
+    expect(normalizada.rodadas).toHaveLength(1);
+    expect(normalizada.rodadas![0].numero).toBe(1);
+    expect(normalizada.rodadas![0].status).toBe("rascunho");
+    expect(normalizada.rodadas![0].itens).toEqual(itens);
+    expect(normalizada.rodadas![0].subtotal).toBe(24);
+  });
+
+  it("comanda enviada (sem rodadas) vira Rodada 1 enviada, com pedidoId preservado", async () => {
+    const c = await abrirComandaOk("5");
+    const r = await marcarComandaEnviada(c.id, "ped_123", 42);
+    if (typeof r !== "object") throw new Error("esperava Comanda");
+    const normalizada = comRodadasNormalizadas(r);
+    expect(normalizada.rodadas).toHaveLength(1);
+    expect(normalizada.rodadas![0].status).toBe("enviada");
+    expect(normalizada.rodadas![0].pedidoId).toBe("ped_123");
+    expect(normalizada.rodadas![0].pedidoNumero).toBe(42);
+    expect(normalizada.rodadas![0].enviadaEm).toBeTruthy();
+  });
+
+  it("nunca apaga os campos antigos (itens, pedidoId) ao normalizar", async () => {
+    const c = await abrirComandaOk("5");
+    const r = await marcarComandaEnviada(c.id, "ped_123", 42);
+    if (typeof r !== "object") throw new Error("esperava Comanda");
+    const normalizada = comRodadasNormalizadas(r);
+    expect(normalizada.itens).toEqual(r.itens);
+    expect(normalizada.pedidoId).toBe("ped_123");
+  });
+
+  it("comanda que já tem rodadas volta como está (não normaliza de novo)", async () => {
+    const c = await abrirComandaOk("5");
+    const criada = await criarRodadaEmRascunho(c.id);
+    if (!criada.ok) throw new Error("esperava sucesso");
+    const normalizada = comRodadasNormalizadas(criada.comanda);
+    expect(normalizada.rodadas).toBe(criada.comanda.rodadas);
+  });
+});
+
+describe("criarRodadaEmRascunho", () => {
+  it("recusa comanda inexistente", async () => {
+    const r = await criarRodadaEmRascunho("comanda_inexistente");
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.motivo).toBe("nao_encontrada");
+  });
+
+  it("recusa comanda fechada", async () => {
+    const c = await abrirComandaOk("5");
+    await marcarComandaEnviada(c.id, "ped_1", 1);
+    await fecharComanda(c.id);
+    const r = await criarRodadaEmRascunho(c.id);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.motivo).toBe("comanda_fechada");
+  });
+
+  it("cria a Rodada 2 em rascunho depois da Rodada 1 enviada, com número sequencial correto", async () => {
+    const c = await abrirComandaOk("5");
+    await marcarComandaEnviada(c.id, "ped_1", 1);
+    const r = await criarRodadaEmRascunho(c.id);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.criada).toBe(true);
+      expect(r.rodada.numero).toBe(2);
+      expect(r.rodada.status).toBe("rascunho");
+      expect(r.rodada.itens).toEqual([]);
+      expect(r.comanda.rodadas).toHaveLength(2);
+      expect(r.comanda.rodadas![0].numero).toBe(1);
+      expect(r.comanda.rodadas![0].status).toBe("enviada");
+    }
+  });
+
+  it("comanda 'aberta' (Rodada 1 ainda em rascunho) não ganha uma segunda rodada — devolve a própria Rodada 1", async () => {
+    const c = await abrirComandaOk("5");
+    const r = await criarRodadaEmRascunho(c.id);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.criada).toBe(false);
+      expect(r.rodada.numero).toBe(1);
+    }
+  });
+
+  it("nunca existem duas rodadas em rascunho — segunda chamada sem clientRequestId devolve a mesma rodada existente", async () => {
+    const c = await abrirComandaOk("5");
+    await marcarComandaEnviada(c.id, "ped_1", 1);
+    const primeira = await criarRodadaEmRascunho(c.id);
+    const segunda = await criarRodadaEmRascunho(c.id);
+    expect(primeira.ok && segunda.ok).toBe(true);
+    if (primeira.ok && segunda.ok) {
+      expect(segunda.criada).toBe(false);
+      expect(segunda.rodada.id).toBe(primeira.rodada.id);
+    }
+    const lista = await listarComandas();
+    expect(comRodadasNormalizadas(lista[0]).rodadas).toHaveLength(2);
+  });
+
+  it("idempotência por clientRequestId: mesma chamada duas vezes devolve a mesma rodada", async () => {
+    const c = await abrirComandaOk("5");
+    await marcarComandaEnviada(c.id, "ped_1", 1);
+    const primeira = await criarRodadaEmRascunho(c.id, "req-abc");
+    const segunda = await criarRodadaEmRascunho(c.id, "req-abc");
+    expect(primeira.ok && segunda.ok).toBe(true);
+    if (primeira.ok && segunda.ok) {
+      expect(primeira.criada).toBe(true);
+      expect(segunda.criada).toBe(false);
+      expect(segunda.rodada.id).toBe(primeira.rodada.id);
+    }
+  });
+
+  it("duplo clique / duas abas concorrentes — só uma Rodada 2 é criada", async () => {
+    const c = await abrirComandaOk("5");
+    await marcarComandaEnviada(c.id, "ped_1", 1);
+    const [a, b] = await Promise.all([criarRodadaEmRascunho(c.id), criarRodadaEmRascunho(c.id)]);
+    expect(a.ok && b.ok).toBe(true);
+    if (a.ok && b.ok) {
+      const criadas = [a.criada, b.criada].filter(Boolean);
+      expect(criadas).toHaveLength(1);
+      expect(a.rodada.id).toBe(b.rodada.id);
+    }
+    const lista = await listarComandas();
+    expect(comRodadasNormalizadas(lista[0]).rodadas).toHaveLength(2);
+  });
+
+  it("Redis indisponível: a operação rejeita (o chamador decide o erro seguro)", async () => {
+    const c = await abrirComandaOk("5");
+    redisMock.set.mockImplementationOnce(async () => {
+      throw new Error("ECONNREFUSED");
+    });
+    await expect(criarRodadaEmRascunho(c.id)).rejects.toThrow();
+  });
+
+  it("nunca cria pedido oficial nem toca em impressão — só devolve a estrutura da rodada", async () => {
+    const c = await abrirComandaOk("5");
+    await marcarComandaEnviada(c.id, "ped_1", 1);
+    const r = await criarRodadaEmRascunho(c.id);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.rodada.pedidoId).toBeUndefined();
+      expect(r.rodada.enviadaEm).toBeUndefined();
+    }
+  });
+});
+
+describe("atualizarItensRodada", () => {
+  async function comandaComRodada2() {
+    const c = await abrirComandaOk("5");
+    await marcarComandaEnviada(c.id, "ped_1", 1);
+    const r = await criarRodadaEmRascunho(c.id);
+    if (!r.ok) throw new Error("esperava sucesso");
+    return { comandaId: c.id, rodadaId: r.rodada.id };
+  }
+
+  it("adiciona itens à Rodada 2", async () => {
+    const { comandaId, rodadaId } = await comandaComRodada2();
+    const itens = await itensRefrigerante(1);
+    const r = await atualizarItensRodada(comandaId, rodadaId, itens);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.rodada.itens).toEqual(itens);
+      expect(r.rodada.subtotal).toBe(12);
+    }
+  });
+
+  it("altera quantidade (nova chamada substitui a lista completa)", async () => {
+    const { comandaId, rodadaId } = await comandaComRodada2();
+    await atualizarItensRodada(comandaId, rodadaId, await itensRefrigerante(1));
+    const r = await atualizarItensRodada(comandaId, rodadaId, await itensRefrigerante(3));
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.rodada.subtotal).toBe(36);
+  });
+
+  it("remove item (lista vazia é permitida numa rodada em rascunho)", async () => {
+    const { comandaId, rodadaId } = await comandaComRodada2();
+    await atualizarItensRodada(comandaId, rodadaId, await itensRefrigerante(1));
+    const r = await atualizarItensRodada(comandaId, rodadaId, []);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.rodada.itens).toEqual([]);
+      expect(r.rodada.subtotal).toBe(0);
+    }
+  });
+
+  it("salva observação da rodada", async () => {
+    const { comandaId, rodadaId } = await comandaComRodada2();
+    const r = await atualizarItensRodada(comandaId, rodadaId, [], { observacao: "Sem canudo" });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.rodada.observacao).toBe("Sem canudo");
+  });
+
+  it("a Rodada 1 permanece intacta ao editar a Rodada 2 — itens não vazam entre rodadas", async () => {
+    const c = await abrirComandaOk("5");
+    const r1 = await marcarComandaEnviada(c.id, "ped_1", 1);
+    if (typeof r1 !== "object") throw new Error("esperava Comanda");
+    const rodada1ItensAntes = comRodadasNormalizadas(r1).rodadas![0].itens;
+
+    const criada = await criarRodadaEmRascunho(c.id);
+    if (!criada.ok) throw new Error("esperava sucesso");
+    await atualizarItensRodada(c.id, criada.rodada.id, await itensRefrigerante(5));
+
+    const final = await buscarComanda(c.id);
+    const rodadas = comRodadasNormalizadas(final!).rodadas!;
+    expect(rodadas[0].itens).toEqual(rodada1ItensAntes);
+    expect(rodadas[1].itens).toHaveLength(1);
+  });
+
+  it("recusa editar uma rodada já enviada (imutável)", async () => {
+    const c = await abrirComandaOk("5");
+    const r1 = await marcarComandaEnviada(c.id, "ped_1", 1);
+    if (typeof r1 !== "object") throw new Error("esperava Comanda");
+    const rodada1Id = comRodadasNormalizadas(r1).rodadas![0].id;
+    const r = await atualizarItensRodada(c.id, rodada1Id, await itensRefrigerante(9));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.motivo).toBe("rodada_nao_e_rascunho");
+  });
+
+  it("recusa rodada inexistente", async () => {
+    const c = await abrirComandaOk("5");
+    const r = await atualizarItensRodada(c.id, "rodada_inexistente", []);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.motivo).toBe("rodada_nao_encontrada");
+  });
+
+  it("recusa comanda fechada", async () => {
+    const { comandaId, rodadaId } = await comandaComRodada2();
+    await fecharComanda(comandaId);
+    const r = await atualizarItensRodada(comandaId, rodadaId, []);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.motivo).toBe("comanda_fechada");
+  });
+
+  it("recusa comanda inexistente", async () => {
+    const r = await atualizarItensRodada("comanda_inexistente", "rodada_x", []);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.motivo).toBe("nao_encontrada");
+  });
+});
+
+describe("totalParcialComanda", () => {
+  it("soma o subtotal de todas as rodadas (enviada + rascunho)", async () => {
+    const c = await abrirComandaOk("5");
+    await marcarComandaEnviada(c.id, "ped_1", 1); // Rodada 1: sem itens reais neste teste (itens vazios = subtotal 0)
+    const criada = await criarRodadaEmRascunho(c.id);
+    if (!criada.ok) throw new Error("esperava sucesso");
+    await atualizarItensRodada(c.id, criada.rodada.id, await itensRefrigerante(2));
+
+    const final = await buscarComanda(c.id);
+    expect(totalParcialComanda(final!)).toBe(24);
+  });
+
+  it("Rodada 1 com itens reais soma junto com a Rodada 2", async () => {
+    const c = await abrirComandaOk("5");
+    await atualizarItensComanda(c.id, await itensRefrigerante(1)); // Rodada 1 = R$ 12
+    const r1 = await marcarComandaEnviada(c.id, "ped_1", 1);
+    if (typeof r1 !== "object") throw new Error("esperava Comanda");
+
+    const criada = await criarRodadaEmRascunho(c.id);
+    if (!criada.ok) throw new Error("esperava sucesso");
+    await atualizarItensRodada(c.id, criada.rodada.id, await itensRefrigerante(2)); // Rodada 2 = R$ 24
+
+    const final = await buscarComanda(c.id);
+    expect(totalParcialComanda(final!)).toBe(36);
+  });
+});
+
+describe("rodadas — isolamento de outros fluxos", () => {
+  it("criar/atualizar rodada nunca chama redis.set na chave de impressão automática", async () => {
+    const c = await abrirComandaOk("5");
+    await marcarComandaEnviada(c.id, "ped_1", 1);
+    const criada = await criarRodadaEmRascunho(c.id);
+    if (!criada.ok) throw new Error("esperava sucesso");
+    await atualizarItensRodada(c.id, criada.rodada.id, await itensRefrigerante(1));
+
+    const chamadasImpressao = redisMock.set.mock.calls.filter(([chave]: [string, ...unknown[]]) =>
+      typeof chave === "string" && chave.startsWith("pedido:auto-print-claim:")
+    );
+    expect(chamadasImpressao).toHaveLength(0);
   });
 });
