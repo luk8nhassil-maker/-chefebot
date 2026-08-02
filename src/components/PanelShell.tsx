@@ -33,6 +33,7 @@ export default function PanelShell({
   const onFinanceiro = pathname.startsWith("/financeiro")
   const onRelatorios = pathname.startsWith("/relatorios")
   const onJornadaChef = pathname.startsWith("/admin/jornada-chef")
+  const onSalaoAcesso = pathname.startsWith("/admin/salao")
 
   const convBadgeColor = conversasUrgent ? "var(--danger)" : "var(--primary)"
   const convBadgeForeground = conversasUrgent ? "var(--on-danger)" : "var(--primary-foreground)"
@@ -154,6 +155,15 @@ export default function PanelShell({
             <button className={`ps-sidebar-btn${onJornadaChef ? " ps-active" : ""}`} onClick={() => router.push("/admin/jornada-chef")}>
               <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><path d="M12 3l2.4 4.9L20 9l-4 4 1 5.5L12 16l-5 2.5 1-5.5-4-4 5.6-1.1L12 3z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round"/></svg>
               Jornada do Chef
+            </button>
+
+            <div style={{ padding: "12px 12px 4px" }}>
+              <div style={{ height: 1, background: "var(--surface)", marginBottom: 10 }} />
+              <div style={{ padding: "0 8px", fontSize: 10, fontWeight: 800, letterSpacing: "0.4px", color: "var(--border-strong)", textTransform: "uppercase" }}>Equipe</div>
+            </div>
+            <button className={`ps-sidebar-btn${onSalaoAcesso ? " ps-active" : ""}`} onClick={() => router.push("/admin/salao")}>
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><circle cx="8" cy="15" r="4" stroke="currentColor" strokeWidth="2.2"/><path d="M11 12l9-9M15 8l3 3M18 5l3 3" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              Acesso do salão
             </button>
           </>
         )}

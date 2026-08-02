@@ -17,7 +17,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "Não autorizado" }, { status: 401 });
   }
   const config = await obterConfigSalao();
-  return NextResponse.json({ ok: true, configurado: !!config.codigoAcesso });
+  return NextResponse.json({ ok: true, configurado: !!config.codigoAcesso, atualizadoEm: config.atualizadoEm });
 }
 
 export async function POST(req: NextRequest) {

@@ -87,4 +87,16 @@ describe("POST /api/admin/salao/config", () => {
     const check = await GET(req(true));
     expect((await check.json()).configurado).toBe(true);
   });
+
+  it("GET informa a data da última alteração depois de configurar o código", async () => {
+    const antes = await GET(req(true));
+    expect((await antes.json()).atualizadoEm).toBeUndefined();
+
+    await POST(postReq({ codigo: "mesa2026" }));
+
+    const depois = await GET(req(true));
+    const data = await depois.json();
+    expect(typeof data.atualizadoEm).toBe("string");
+    expect(new Date(data.atualizadoEm).toString()).not.toBe("Invalid Date");
+  });
 });
