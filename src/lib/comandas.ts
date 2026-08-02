@@ -13,6 +13,15 @@ import { officialUnitPrice, type ItemApp, type MenuPedidoApp } from "./pedidoApp
 
 export type StatusComanda = "aberta" | "enviada" | "fechada";
 
+// Forma de pagamento gravada no pedido oficial de QUALQUER envio do Salão
+// (Rodada 1 e Rodada 2+) — nunca "de verdade" ainda: o Salão só manda para a
+// cozinha; o caixa é quem recebe o pagamento de fato, em uma etapa futura
+// (Pedir conta / fechamento). Não é reconhecida como Pix nem dinheiro por
+// nenhuma checagem de /api/pedido-app (temPixNoPagamento/
+// temDinheiroNoPagamento), então nunca dispara cobrança Pix nem exige troco,
+// e nunca marca o pedido como pago.
+export const PAGAMENTO_COMANDA_EM_ABERTO = "Comanda em aberto";
+
 // "enviando" existe só entre a reivindicação do envio (reivindicarEnvioRodada)
 // e a confirmação (confirmarEnvioRodada) ou falha (falharEnvioRodada) —
 // nunca é gravada por edição normal. "falha_envio" preserva os itens e
@@ -52,7 +61,12 @@ export type Rodada = {
 export type Comanda = {
   id: string;
   numero: number;
-  mesa: string;
+  /** Nome do cliente informado ao abrir o atendimento. Ausente em comandas
+   *  gravadas antes desta etapa — nesse caso a UI cai para "Mesa X"/"Cliente"
+   *  como identificação, nunca falha por causa do campo faltando. */
+  cliente?: string;
+  /** Opcional — "Sem mesa" é um atendimento válido (balcão, viagem). */
+  mesa?: string;
   complemento?: string;
   /** Itens da Rodada 1 — mantido por compatibilidade (comandas antigas e o
    *  fluxo de envio existente leem/escrevem aqui). A fonte de verdade para
@@ -167,6 +181,16 @@ export function totalParcialComanda(comanda: Comanda): number {
   return comRodadasNormalizadas(comanda).rodadas!.reduce((soma, r) => soma + r.subtotal, 0);
 }
 
+/** Identificação do cliente gravada no pedido oficial (campo `cliente` de
+ *  /api/pedido-app) — nome informado no atendimento; cai para "Mesa X" em
+ *  comandas antigas sem o campo, e para "Cliente" no caso (raro) de nenhum
+ *  dos dois existir. Nunca decide preço/estoque — só identificação. */
+export function identificacaoClienteComanda(comanda: Comanda): string {
+  if (comanda.cliente) return comanda.cliente;
+  if (comanda.mesa) return `Mesa ${comanda.mesa}`;
+  return "Cliente";
+}
+
 async function proximoNumeroComanda(): Promise<number> {
   const hoje = new Date().toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" });
   const chave = `contador_comandas:${hoje}`;
@@ -177,26 +201,41 @@ async function proximoNumeroComanda(): Promise<number> {
 
 export type AbrirComandaResultado = Comanda | "mesa_ocupada";
 
+export type AbrirComandaOpcoes = {
+  /** Opcional para manter os testes/chamadores existentes funcionando sem
+   *  mudança — a exigência de preencher o nome é decidida na rota
+   *  (POST /api/salao/comandas), nunca aqui. */
+  cliente?: string;
+  mesa?: string;
+  complemento?: string;
+};
+
 /**
- * Abre uma comanda nova para a mesa — ou, se a mesa já tem uma comanda
- * "aberta" ou "enviada" (ainda não fechada), recusa em vez de abrir uma
- * segunda comanda concorrente para a mesma mesa. A checagem e a escrita
- * acontecem sob o mesmo mutex (`comMutexComandas`), então duas aberturas
- * simultâneas da mesma mesa nunca resultam em duas comandas.
+ * Abre uma comanda nova — para uma mesa, ou "Sem mesa" quando `mesa` vem
+ * vazio/ausente (atendimento de balcão). Quando a mesa é informada e já tem
+ * uma comanda "aberta" ou "enviada" (ainda não fechada), recusa em vez de
+ * abrir uma segunda comanda concorrente para a mesma mesa — comandas "sem
+ * mesa" nunca colidem entre si. A checagem e a escrita acontecem sob o
+ * mesmo mutex (`comMutexComandas`), então duas aberturas simultâneas da
+ * mesma mesa nunca resultam em duas comandas.
  */
-export async function abrirComanda(mesa: string, complemento?: string): Promise<AbrirComandaResultado> {
-  const mesaTrim = mesa.trim();
+export async function abrirComanda(opcoes: AbrirComandaOpcoes): Promise<AbrirComandaResultado> {
+  const mesaTrim = opcoes.mesa?.trim() || undefined;
+  const clienteTrim = opcoes.cliente?.trim() || undefined;
   return comMutexComandas(async () => {
     const lista = await listarComandas();
-    const jaOcupada = lista.some((c) => c.mesa === mesaTrim && c.status !== "fechada");
-    if (jaOcupada) return "mesa_ocupada";
+    if (mesaTrim) {
+      const jaOcupada = lista.some((c) => c.mesa === mesaTrim && c.status !== "fechada");
+      if (jaOcupada) return "mesa_ocupada";
+    }
 
     const numero = await proximoNumeroComanda();
     const comanda: Comanda = {
       id: `comanda_${randomUUID()}`,
       numero,
-      mesa: mesaTrim,
-      complemento: complemento?.trim() || undefined,
+      ...(clienteTrim ? { cliente: clienteTrim } : {}),
+      ...(mesaTrim ? { mesa: mesaTrim } : {}),
+      complemento: opcoes.complemento?.trim() || undefined,
       itens: [],
       status: "aberta",
       abertaEm: new Date().toISOString(),

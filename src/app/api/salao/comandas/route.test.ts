@@ -81,7 +81,7 @@ describe("GET /api/salao/comandas", () => {
 
   it("filtra por status quando informado", async () => {
     const token = await criarTokenSalao();
-    await POST(postReqSalao({ mesa: "5" }, token));
+    await POST(postReqSalao({ cliente: "Ana", mesa: "5" }, token));
     const abertas = await GET(reqSalao(token, "status=aberta"));
     const fechadas = await GET(reqSalao(token, "status=fechada"));
     expect((await abertas.json()).comandas).toHaveLength(1);
@@ -90,7 +90,7 @@ describe("GET /api/salao/comandas", () => {
 
   it("cada comanda vem com rodadas normalizadas e totalParcial, mesmo sem nenhuma rodada gravada ainda", async () => {
     const token = await criarTokenSalao();
-    await POST(postReqSalao({ mesa: "5" }, token));
+    await POST(postReqSalao({ cliente: "Ana", mesa: "5" }, token));
     const res = await GET(reqSalao(token));
     const data = await res.json();
     expect(data.comandas[0].rodadas).toHaveLength(1);
@@ -101,29 +101,39 @@ describe("GET /api/salao/comandas", () => {
 
 describe("POST /api/salao/comandas (abrir)", () => {
   it("bloqueia sem sessão do Salão (sessão administrativa não abre comanda)", async () => {
-    const res = await POST({ json: async () => ({ mesa: "5" }), cookies: { get: () => ({ value: "tok" }) } } as never);
+    const res = await POST({ json: async () => ({ cliente: "Ana", mesa: "5" }), cookies: { get: () => ({ value: "tok" }) } } as never);
     expect(res.status).toBe(401);
   });
 
-  it("abre uma comanda nova com mesa obrigatória", async () => {
+  it("abre uma comanda nova com cliente obrigatório e mesa opcional", async () => {
     const token = await criarTokenSalao();
-    const semMesa = await POST(postReqSalao({ mesa: "" }, token));
-    expect(semMesa.status).toBe(400);
+    const semCliente = await POST(postReqSalao({ mesa: "5" }, token));
+    expect(semCliente.status).toBe(400);
 
-    const res = await POST(postReqSalao({ mesa: "5", complemento: "Varanda" }, token));
+    const res = await POST(postReqSalao({ cliente: "Ana", mesa: "5", complemento: "Varanda" }, token));
     expect(res.status).toBe(200);
     const data = await res.json();
+    expect(data.comanda.cliente).toBe("Ana");
     expect(data.comanda.mesa).toBe("5");
     expect(data.comanda.complemento).toBe("Varanda");
     expect(data.comanda.status).toBe("aberta");
   });
 
+  it("abre uma comanda 'Sem mesa' quando a mesa não é informada", async () => {
+    const token = await criarTokenSalao();
+    const res = await POST(postReqSalao({ cliente: "Bia" }, token));
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.comanda.cliente).toBe("Bia");
+    expect(data.comanda.mesa).toBeUndefined();
+  });
+
   it("recusa abrir uma segunda comanda para uma mesa já ocupada (409)", async () => {
     const token = await criarTokenSalao();
-    const primeira = await POST(postReqSalao({ mesa: "8" }, token));
+    const primeira = await POST(postReqSalao({ cliente: "Ana", mesa: "8" }, token));
     expect(primeira.status).toBe(200);
 
-    const segunda = await POST(postReqSalao({ mesa: "8" }, token));
+    const segunda = await POST(postReqSalao({ cliente: "Ana", mesa: "8" }, token));
     expect(segunda.status).toBe(409);
     const data = await segunda.json();
     expect(data.ok).toBe(false);

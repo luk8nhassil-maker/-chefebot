@@ -49,7 +49,7 @@ function reqSemSessao(body: unknown = {}) {
   return { json: async () => body, cookies: { get: () => undefined } } as never;
 }
 async function abrirComandaOk(mesa: string): Promise<Comanda> {
-  const r = await abrirComanda(mesa);
+  const r = await abrirComanda({ cliente: "Cliente Teste", mesa });
   if (typeof r !== "object") throw new Error(`esperava Comanda, recebeu "${r}"`);
   return r;
 }

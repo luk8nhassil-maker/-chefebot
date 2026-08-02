@@ -51,7 +51,7 @@ import {
 } from "./comandas";
 
 async function abrirComandaOk(mesa: string, complemento?: string): Promise<Comanda> {
-  const r = await abrirComanda(mesa, complemento);
+  const r = await abrirComanda({ cliente: "Cliente Teste", mesa, complemento });
   if (typeof r !== "object") throw new Error(`esperava Comanda, recebeu "${r}"`);
   return r;
 }
@@ -64,10 +64,11 @@ beforeEach(() => {
 
 describe("abrirComanda", () => {
   it("cria uma comanda aberta, sem itens, com número sequencial", async () => {
-    const c1 = await abrirComanda("5");
-    const c2 = await abrirComanda("6", "Terraço");
+    const c1 = await abrirComanda({ cliente: "Ana", mesa: "5" });
+    const c2 = await abrirComanda({ cliente: "Bia", mesa: "6", complemento: "Terraço" });
     if (typeof c1 !== "object" || typeof c2 !== "object") throw new Error("esperava Comanda");
     expect(c1.status).toBe("aberta");
+    expect(c1.cliente).toBe("Ana");
     expect(c1.itens).toEqual([]);
     expect(c1.numero).toBe(1);
     expect(c2.numero).toBe(2);
@@ -75,34 +76,52 @@ describe("abrirComanda", () => {
   });
 
   it("aparece na listagem", async () => {
-    await abrirComanda("5");
+    await abrirComanda({ cliente: "Ana", mesa: "5" });
     expect(await listarComandas()).toHaveLength(1);
   });
 
   it("recusa abrir uma segunda comanda para a mesma mesa ainda não fechada", async () => {
-    const c1 = await abrirComanda("7");
+    const c1 = await abrirComanda({ cliente: "Ana", mesa: "7" });
     if (typeof c1 !== "object") throw new Error("esperava Comanda");
-    const r2 = await abrirComanda("7");
+    const r2 = await abrirComanda({ cliente: "Bia", mesa: "7" });
     expect(r2).toBe("mesa_ocupada");
     expect(await listarComandas()).toHaveLength(1);
   });
 
   it("permite reabrir a mesma mesa depois que a comanda anterior foi fechada", async () => {
-    const c1 = await abrirComanda("7");
+    const c1 = await abrirComanda({ cliente: "Ana", mesa: "7" });
     if (typeof c1 !== "object") throw new Error("esperava Comanda");
     await marcarComandaEnviada(c1.id, "ped_1", 1);
     await fecharComanda(c1.id);
-    const r2 = await abrirComanda("7");
+    const r2 = await abrirComanda({ cliente: "Bia", mesa: "7" });
     expect(typeof r2).toBe("object");
     expect(await listarComandas()).toHaveLength(2);
   });
 
   it("duas aberturas concorrentes da mesma mesa — só uma vira comanda, a outra é recusada", async () => {
-    const [a, b] = await Promise.all([abrirComanda("9"), abrirComanda("9")]);
+    const [a, b] = await Promise.all([
+      abrirComanda({ cliente: "Ana", mesa: "9" }),
+      abrirComanda({ cliente: "Bia", mesa: "9" }),
+    ]);
     const resultados = [a, b];
     expect(resultados.filter((r) => typeof r === "object")).toHaveLength(1);
     expect(resultados.filter((r) => r === "mesa_ocupada")).toHaveLength(1);
     expect(await listarComandas()).toHaveLength(1);
+  });
+
+  it("cliente obrigatório, mesa opcional — cria uma comanda 'Sem mesa'", async () => {
+    const c = await abrirComanda({ cliente: "Ana" });
+    if (typeof c !== "object") throw new Error("esperava Comanda");
+    expect(c.cliente).toBe("Ana");
+    expect(c.mesa).toBeUndefined();
+  });
+
+  it("duas comandas 'Sem mesa' nunca colidem entre si", async () => {
+    const c1 = await abrirComanda({ cliente: "Ana" });
+    const c2 = await abrirComanda({ cliente: "Bia" });
+    expect(typeof c1).toBe("object");
+    expect(typeof c2).toBe("object");
+    expect(await listarComandas()).toHaveLength(2);
   });
 });
 

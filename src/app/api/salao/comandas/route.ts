@@ -35,19 +35,19 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "Não autorizado" }, { status: 401 });
   }
 
-  let body: { mesa?: string; complemento?: string };
+  let body: { cliente?: string; mesa?: string; complemento?: string };
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ ok: false, error: "Payload inválido" }, { status: 400 });
   }
 
-  const mesa = (body.mesa || "").trim();
-  if (!mesa) {
-    return NextResponse.json({ ok: false, error: "Informe a mesa" }, { status: 400 });
+  const cliente = (body.cliente || "").trim();
+  if (!cliente) {
+    return NextResponse.json({ ok: false, error: "Informe o nome do cliente" }, { status: 400 });
   }
 
-  const resultado = await abrirComanda(mesa, body.complemento);
+  const resultado = await abrirComanda({ cliente, mesa: body.mesa, complemento: body.complemento });
   if (resultado === "mesa_ocupada") {
     return NextResponse.json({ ok: false, error: "Esta mesa já tem uma comanda aberta" }, { status: 409 });
   }
