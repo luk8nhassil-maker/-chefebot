@@ -38,6 +38,7 @@ import {
   sanitizarPedidoParaPainel,
   type PedidoComEdicao,
 } from '@/lib/pedidoEdicao'
+import { limparEscalonamentoExpiradoSeNecessario } from '@/lib/escalonamento'
 import { reivindicarImpressaoAutomatica } from '@/lib/impressaoAutomatica'
 
 const APP_BASE_URL = 'https://chefebot-pjif.vercel.app'
@@ -84,6 +85,9 @@ type Pedido = PedidoComEdicao & {
   /** Por que uma pendência operacional deste pedido foi resolvida. É o que
    * fecha o alerta de forma durável e preserva o histórico da decisão. */
   limpezaOperacional?: RegistroLimpeza
+  /** Pedido escalonado para atendimento humano (ver src/lib/escalonamento.ts) */
+  escalonado?: boolean
+  horarioEscalonado?: number
 }
 
 const FILA_ENTREGADOR_TTL_SEGUNDOS = 86400
@@ -231,11 +235,15 @@ export async function GET(req: NextRequest) {
   // polling já usado pelo painel — sem infraestrutura nova): se o cliente
   // fechou a aba ou perdeu a conexão sem descartar, o próximo carregamento
   // do painel libera o "Aceitar pedido" sozinho, sem precisar de cron.
+  // Mesma limpeza preguiçosa para escalonamento expirado (ver
+  // src/lib/escalonamento.ts): urgência que ninguém assumiu em 10 minutos
+  // volta ao fluxo normal sozinha, silenciosamente.
   let mudouAlgum = false
   const limpos = pedidos.map(p => {
-    const { pedido, mudou } = limparEdicaoExpiradaSeNecessario(p)
-    if (mudou) mudouAlgum = true
-    return mudou ? (pedido as Pedido) : p
+    const edicao = limparEdicaoExpiradaSeNecessario(p)
+    const escalonamento = limparEscalonamentoExpiradoSeNecessario(edicao.pedido)
+    if (edicao.mudou || escalonamento.mudou) mudouAlgum = true
+    return escalonamento.pedido as Pedido
   })
   if (mudouAlgum) {
     await redis.set('pedidos', limpos)
