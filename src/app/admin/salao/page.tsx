@@ -37,6 +37,7 @@ export default function AcessoDoSalaoPage() {
   const [salvando, setSalvando] = useState(false)
   const [erroWhatsapp, setErroWhatsapp] = useState('')
   const [mensagemWhatsapp, setMensagemWhatsapp] = useState('')
+  const [linkEnviadoOk, setLinkEnviadoOk] = useState(true)
   const salvandoRef = useRef(false)
 
   useEffect(() => {
@@ -83,7 +84,12 @@ export default function AcessoDoSalaoPage() {
       }
       setConfigurado(true)
       setAtualizadoEm(new Date().toISOString())
-      setMensagemWhatsapp('WhatsApp do atendimento salvo com sucesso.')
+      setLinkEnviadoOk(!!data.linkEnviado)
+      setMensagemWhatsapp(
+        data.linkEnviado
+          ? 'WhatsApp salvo e link do terminal enviado por mensagem.'
+          : 'WhatsApp salvo, mas não foi possível enviar o link por mensagem agora. Confira o número e tente salvar de novo.'
+      )
     } catch {
       setErroWhatsapp('Não foi possível salvar agora. Verifique a conexão e tente de novo.')
     } finally {
@@ -157,7 +163,7 @@ export default function AcessoDoSalaoPage() {
                 <p role="alert" style={{ margin: 0, fontSize: 12.5, fontWeight: 700, color: 'var(--danger)' }}>{erroWhatsapp}</p>
               )}
               {mensagemWhatsapp && (
-                <p role="status" style={{ margin: 0, fontSize: 12.5, fontWeight: 700, color: 'var(--success)' }}>{mensagemWhatsapp}</p>
+                <p role="status" style={{ margin: 0, fontSize: 12.5, fontWeight: 700, color: linkEnviadoOk ? 'var(--success)' : 'var(--danger)' }}>{mensagemWhatsapp}</p>
               )}
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 <button

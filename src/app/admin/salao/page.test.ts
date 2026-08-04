@@ -57,6 +57,13 @@ describe("/admin/salao — sem bloqueio de código, só o WhatsApp do atendiment
     expect(bloco).toContain("method: 'POST'");
     expect(bloco).toContain("whatsappAtendimento: whatsapp");
   });
+
+  test("mostra se o link do terminal foi enviado por mensagem ou não", () => {
+    const bloco = fonte.slice(fonte.indexOf("async function salvarWhatsapp"), fonte.indexOf("return ("));
+    expect(bloco).toContain("data.linkEnviado");
+    expect(bloco).toContain("terminal enviado por mensagem");
+    expect(bloco).toContain("não foi possível enviar o link por mensagem");
+  });
 });
 
 describe("/admin/salao — abrir terminal do salão", () => {

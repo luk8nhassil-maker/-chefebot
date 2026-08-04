@@ -2,8 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { lerSessaoAdministrativa } from "@/lib/sessaoAdministrativa";
 import { definirWhatsappAtendimentoSalao, obterConfigSalao } from "@/lib/salaoAuth";
 import { normalizarTelefoneBrasil } from "@/lib/telefone";
+import { enviarTextoWhatsApp } from "@/lib/whatsappMensagem";
 
 export const dynamic = "force-dynamic";
+
+const SALAO_LOGIN_URL = "https://chefedapizza.com.br/salao/login";
 
 // Configuração do WhatsApp do atendimento do Salão — só admin/dev (mesmo
 // nível de acesso restrito de /setup e /configuracoes sensíveis). Não é um
@@ -45,5 +48,14 @@ export async function POST(req: NextRequest) {
   }
 
   await definirWhatsappAtendimentoSalao(numero.nacional);
-  return NextResponse.json({ ok: true });
+
+  // Manda o link do terminal direto pro WhatsApp recém-cadastrado — falha de
+  // envio não desfaz o cadastro (o número já está salvo), só é reportada
+  // para o admin tentar reenviar.
+  const envio = await enviarTextoWhatsApp(
+    `55${numero.nacional}`,
+    `Este é o WhatsApp de atendimento cadastrado para o salão.\n\nAcesse o terminal aqui: ${SALAO_LOGIN_URL}`
+  );
+
+  return NextResponse.json({ ok: true, linkEnviado: envio.ok });
 }

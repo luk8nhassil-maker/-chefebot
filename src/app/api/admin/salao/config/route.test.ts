@@ -13,12 +13,16 @@ const { store, redisMock } = vi.hoisted(() => {
 });
 
 const { verifyTokenMock } = vi.hoisted(() => ({ verifyTokenMock: vi.fn() }));
+const { enviarTextoWhatsAppMock } = vi.hoisted(() => ({
+  enviarTextoWhatsAppMock: vi.fn(async () => ({ ok: true, latenciaMs: 1, tentativas: 1 })),
+}));
 
 vi.mock("@/lib/redis", () => ({ redis: redisMock }));
 vi.mock("@/lib/auth", async (original) => ({
   ...(await original<typeof import("@/lib/auth")>()),
   verifyToken: verifyTokenMock,
 }));
+vi.mock("@/lib/whatsappMensagem", () => ({ enviarTextoWhatsApp: enviarTextoWhatsAppMock }));
 
 import { GET, POST } from "./route";
 
@@ -86,6 +90,26 @@ describe("POST /api/admin/salao/config", () => {
     const data = await check.json();
     expect(data.configurado).toBe(true);
     expect(data.whatsappAtendimento).toBe("11999998888");
+  });
+
+  it("manda o link do terminal por WhatsApp para o número recém-cadastrado, com DDI 55", async () => {
+    const res = await POST(postReq({ whatsappAtendimento: "(11) 99999-8888" }));
+    const data = await res.json();
+    expect(data.linkEnviado).toBe(true);
+    expect(enviarTextoWhatsAppMock).toHaveBeenCalledWith(
+      "5511999998888",
+      expect.stringContaining("https://chefedapizza.com.br/salao/login")
+    );
+  });
+
+  it("o cadastro não é desfeito se o envio da mensagem falhar", async () => {
+    enviarTextoWhatsAppMock.mockResolvedValueOnce({ ok: false, motivo: "provider_not_configured", latenciaMs: 1, tentativas: 0 });
+    const res = await POST(postReq({ whatsappAtendimento: "11999998888" }));
+    const data = await res.json();
+    expect(res.status).toBe(200);
+    expect(data.linkEnviado).toBe(false);
+    const check = await GET(req(true));
+    expect((await check.json()).configurado).toBe(true);
   });
 
   it("GET informa a data da última alteração depois de configurar o WhatsApp", async () => {
