@@ -17,11 +17,9 @@ vi.mock("@/lib/redis", () => ({ redis: redisMock }));
 import {
   SALAO_COOKIE,
   criarTokenSalao,
-  definirCodigoAcessoSalao,
+  definirWhatsappAtendimentoSalao,
   lerSessaoSalao,
   obterConfigSalao,
-  revogarSessoesSalao,
-  validarCodigoAcessoSalao,
 } from "./salaoAuth";
 
 function reqComToken(token: string | undefined) {
@@ -33,33 +31,31 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-describe("configuração do código de acesso", () => {
-  it("sem código configurado, nenhum código é aceito", async () => {
+describe("configuração do WhatsApp do atendimento", () => {
+  it("sem número configurado, obterConfigSalao devolve vazio", async () => {
     expect(await obterConfigSalao()).toEqual({});
-    expect(await validarCodigoAcessoSalao("qualquer")).toBe(false);
-    expect(await validarCodigoAcessoSalao("")).toBe(false);
   });
 
-  it("depois de configurado, só o código exato é aceito", async () => {
-    await definirCodigoAcessoSalao("mesa2026");
-    expect(await validarCodigoAcessoSalao("mesa2026")).toBe(true);
-    expect(await validarCodigoAcessoSalao("MESA2026")).toBe(false);
-    expect(await validarCodigoAcessoSalao("mesa202")).toBe(false);
-    expect(await validarCodigoAcessoSalao("")).toBe(false);
+  it("definirWhatsappAtendimentoSalao grava o número e a data de atualização", async () => {
+    await definirWhatsappAtendimentoSalao("11999998888");
+    const config = await obterConfigSalao();
+    expect(config.whatsappAtendimento).toBe("11999998888");
+    expect(typeof config.atualizadoEm).toBe("string");
   });
 
-  it("espaços em volta do código são ignorados na configuração e na validação", async () => {
-    await definirCodigoAcessoSalao("  mesa2026  ");
-    expect(await validarCodigoAcessoSalao(" mesa2026 ")).toBe(true);
+  it("espaços em volta do número são ignorados na gravação", async () => {
+    await definirWhatsappAtendimentoSalao("  11999998888  ");
+    const config = await obterConfigSalao();
+    expect(config.whatsappAtendimento).toBe("11999998888");
   });
 });
 
-describe("lerSessaoSalao", () => {
+describe("lerSessaoSalao — sem código de acesso, a sessão é livre para quem tem o cookie", () => {
   it("sem cookie, sessão é null", async () => {
     expect(await lerSessaoSalao(reqComToken(undefined))).toBeNull();
   });
 
-  it("com um token real gerado por criarTokenSalao, a sessão é reconhecida", async () => {
+  it("com um token real gerado por criarTokenSalao, a sessão é reconhecida — sem precisar de nenhum código configurado", async () => {
     const token = await criarTokenSalao();
     const sessao = await lerSessaoSalao(reqComToken(token));
     expect(sessao).toEqual({ tipo: "salao" });
@@ -78,58 +74,14 @@ describe("lerSessaoSalao", () => {
   });
 
   it("nunca aceita um token de outro propósito (payload sem tipo: salao)", async () => {
-    // Simula um token bem formado (mesma lib jose) mas de outro contexto —
-    // aqui simulado só verificando que o formato de token do painel
-    // administrativo (JWT diferente) não é aceito.
     const tokenQualquer = "cabecalho.corpo-invalido.assinatura";
     expect(await lerSessaoSalao(reqComToken(tokenQualquer))).toBeNull();
   });
 
   it("mesmo aparelho reconhece a sessão em chamadas repetidas, sem expirar entre elas", async () => {
-    await definirCodigoAcessoSalao("mesa2026");
     const token = await criarTokenSalao();
     expect(await lerSessaoSalao(reqComToken(token))).toEqual({ tipo: "salao" });
     expect(await lerSessaoSalao(reqComToken(token))).toEqual({ tipo: "salao" });
     expect(await lerSessaoSalao(reqComToken(token))).toEqual({ tipo: "salao" });
-  });
-});
-
-describe("revogação de sessões do Salão", () => {
-  it("revogarSessoesSalao invalida imediatamente um token já emitido, mesmo dentro da validade", async () => {
-    await definirCodigoAcessoSalao("mesa2026");
-    const token = await criarTokenSalao();
-    expect(await lerSessaoSalao(reqComToken(token))).toEqual({ tipo: "salao" });
-
-    await revogarSessoesSalao();
-
-    expect(await lerSessaoSalao(reqComToken(token))).toBeNull();
-  });
-
-  it("revogarSessoesSalao não muda o código de acesso configurado", async () => {
-    await definirCodigoAcessoSalao("mesa2026");
-    await revogarSessoesSalao();
-    expect(await validarCodigoAcessoSalao("mesa2026")).toBe(true);
-  });
-
-  it("um novo login depois da revogação funciona normalmente", async () => {
-    await definirCodigoAcessoSalao("mesa2026");
-    const tokenAntigo = await criarTokenSalao();
-    await revogarSessoesSalao();
-    expect(await lerSessaoSalao(reqComToken(tokenAntigo))).toBeNull();
-
-    const tokenNovo = await criarTokenSalao();
-    expect(await lerSessaoSalao(reqComToken(tokenNovo))).toEqual({ tipo: "salao" });
-  });
-
-  it("trocar o código de acesso também revoga implicitamente as sessões antigas", async () => {
-    await definirCodigoAcessoSalao("mesa2026");
-    const tokenAntigo = await criarTokenSalao();
-    expect(await lerSessaoSalao(reqComToken(tokenAntigo))).toEqual({ tipo: "salao" });
-
-    await definirCodigoAcessoSalao("mesa2027");
-
-    expect(await lerSessaoSalao(reqComToken(tokenAntigo))).toBeNull();
-    const tokenNovo = await criarTokenSalao();
-    expect(await lerSessaoSalao(reqComToken(tokenNovo))).toEqual({ tipo: "salao" });
   });
 });

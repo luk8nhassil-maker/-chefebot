@@ -1,24 +1,11 @@
-import { NextRequest, NextResponse } from "next/server";
-import { SALAO_COOKIE, criarTokenSalao, validarCodigoAcessoSalao } from "@/lib/salaoAuth";
+import { NextResponse } from "next/server";
+import { SALAO_COOKIE, criarTokenSalao } from "@/lib/salaoAuth";
 
-export async function POST(req: NextRequest) {
-  let body: { codigo?: string };
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ ok: false, error: "Payload inválido" }, { status: 400 });
-  }
-
-  const codigo = (body.codigo || "").trim();
-  if (!codigo) {
-    return NextResponse.json({ ok: false, error: "Informe o código de acesso" }, { status: 400 });
-  }
-
-  const valido = await validarCodigoAcessoSalao(codigo);
-  if (!valido) {
-    return NextResponse.json({ ok: false, error: "Código de acesso incorreto" }, { status: 401 });
-  }
-
+// Sem código de acesso: qualquer requisição aqui recebe uma sessão do
+// Salão válida (ver src/lib/salaoAuth.ts para o contexto da decisão). O
+// terminal chama isto automaticamente ao abrir — não há mais formulário de
+// código para o garçom digitar.
+export async function POST() {
   const token = await criarTokenSalao();
   const res = NextResponse.json({ ok: true });
   res.cookies.set(SALAO_COOKIE, token, {

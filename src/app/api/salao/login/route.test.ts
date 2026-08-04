@@ -15,11 +15,7 @@ const { store, redisMock } = vi.hoisted(() => {
 vi.mock("@/lib/redis", () => ({ redis: redisMock }));
 
 import { POST } from "./route";
-import { SALAO_COOKIE, definirCodigoAcessoSalao, lerSessaoSalao } from "@/lib/salaoAuth";
-
-function req(body: unknown) {
-  return { json: async () => body } as never;
-}
+import { SALAO_COOKIE, lerSessaoSalao } from "@/lib/salaoAuth";
 
 beforeEach(() => {
   store.clear();
@@ -27,26 +23,8 @@ beforeEach(() => {
 });
 
 describe("POST /api/salao/login", () => {
-  it("recusa sem código configurado", async () => {
-    const res = await POST(req({ codigo: "1234" }));
-    expect(res.status).toBe(401);
-  });
-
-  it("recusa código vazio", async () => {
-    await definirCodigoAcessoSalao("1234");
-    const res = await POST(req({ codigo: "" }));
-    expect(res.status).toBe(400);
-  });
-
-  it("recusa código errado", async () => {
-    await definirCodigoAcessoSalao("1234");
-    const res = await POST(req({ codigo: "9999" }));
-    expect(res.status).toBe(401);
-  });
-
-  it("aceita o código certo e grava um cookie de sessão do Salão válido", async () => {
-    await definirCodigoAcessoSalao("1234");
-    const res = await POST(req({ codigo: "1234" }));
+  it("sempre emite uma sessão do Salão válida — não há mais código de acesso", async () => {
+    const res = await POST();
     expect(res.status).toBe(200);
     const cookie = res.cookies.get(SALAO_COOKIE);
     expect(cookie?.value).toBeTruthy();
@@ -56,8 +34,10 @@ describe("POST /api/salao/login", () => {
     expect(sessao).toEqual({ tipo: "salao" });
   });
 
-  it("payload inválido devolve 400, nunca 500", async () => {
-    const res = await POST({ json: async () => { throw new Error("bad json"); } } as never);
-    expect(res.status).toBe(400);
+  it("chamadas repetidas continuam emitindo sessão válida", async () => {
+    const res1 = await POST();
+    const res2 = await POST();
+    expect(res1.status).toBe(200);
+    expect(res2.status).toBe(200);
   });
 });

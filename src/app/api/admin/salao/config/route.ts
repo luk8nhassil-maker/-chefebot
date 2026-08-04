@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { lerSessaoAdministrativa } from "@/lib/sessaoAdministrativa";
-import { definirCodigoAcessoSalao, obterConfigSalao } from "@/lib/salaoAuth";
+import { definirWhatsappAtendimentoSalao, obterConfigSalao } from "@/lib/salaoAuth";
+import { normalizarTelefoneBrasil } from "@/lib/telefone";
 
 export const dynamic = "force-dynamic";
 
-// Configuração do código de acesso do Salão — só admin/dev, nunca atendente
-// (mesmo nível de acesso restrito de /setup e /configuracoes sensíveis).
-// Nunca devolve o código em texto claro em GET: só informa se já existe.
+// Configuração do WhatsApp do atendimento do Salão — só admin/dev (mesmo
+// nível de acesso restrito de /setup e /configuracoes sensíveis). Não é um
+// segredo (é um número de contato), então pode voltar em texto claro no GET.
 function autorizado(role: string | undefined): boolean {
   return role === "admin" || role === "dev";
 }
@@ -17,7 +18,12 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "Não autorizado" }, { status: 401 });
   }
   const config = await obterConfigSalao();
-  return NextResponse.json({ ok: true, configurado: !!config.codigoAcesso, atualizadoEm: config.atualizadoEm });
+  return NextResponse.json({
+    ok: true,
+    configurado: !!config.whatsappAtendimento,
+    whatsappAtendimento: config.whatsappAtendimento ?? "",
+    atualizadoEm: config.atualizadoEm,
+  });
 }
 
 export async function POST(req: NextRequest) {
@@ -26,18 +32,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "Não autorizado" }, { status: 401 });
   }
 
-  let body: { codigo?: string };
+  let body: { whatsappAtendimento?: string };
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ ok: false, error: "Payload inválido" }, { status: 400 });
   }
 
-  const codigo = (body.codigo || "").trim();
-  if (codigo.length < 4) {
-    return NextResponse.json({ ok: false, error: "Código precisa ter pelo menos 4 caracteres" }, { status: 400 });
+  const numero = normalizarTelefoneBrasil(body.whatsappAtendimento);
+  if (!numero) {
+    return NextResponse.json({ ok: false, error: "Informe um número de WhatsApp válido, com DDD" }, { status: 400 });
   }
 
-  await definirCodigoAcessoSalao(codigo);
+  await definirWhatsappAtendimentoSalao(numero.nacional);
   return NextResponse.json({ ok: true });
 }
