@@ -46,3 +46,63 @@ describe("limparEscalonamentoExpiradoSeNecessario", () => {
     expect(pedido.escalonado).toBe(false);
   });
 });
+
+describe("limparEscalonamentoExpiradoSeNecessario — pedido que é só um pedido de atendimento humano (sem carrinho real)", () => {
+  function placeholder(overrides: Record<string, unknown> = {}) {
+    return {
+      status: "novo",
+      total: 0,
+      itens: ["Cliente precisa de atendimento humano"],
+      escalonado: true,
+      horarioEscalonado: 1_000_000 - ESCALONAMENTO_TTL_MS,
+      isArchived: undefined as boolean | undefined,
+      archivedReason: undefined as string | undefined,
+      ...overrides,
+    };
+  }
+
+  it("mantém visível (não arquiva) enquanto ainda dentro do prazo do alerta", () => {
+    const { pedido, mudou } = limparEscalonamentoExpiradoSeNecessario(
+      placeholder({ horarioEscalonado: 1_000_000 - 1000 }),
+      1_000_000
+    );
+    expect(mudou).toBe(false);
+    expect(pedido.isArchived).toBeUndefined();
+  });
+
+  it("arquiva (não vira status 'entregue', não fica 'novo' acionável) quando o prazo estoura", () => {
+    const { pedido, mudou } = limparEscalonamentoExpiradoSeNecessario(placeholder(), 1_000_000);
+    expect(mudou).toBe(true);
+    expect(pedido.isArchived).toBe(true);
+    expect(pedido.archivedReason).toBe("atendimento_humano_sem_pedido");
+    expect(pedido.escalonado).toBe(false);
+    expect(pedido.status).toBe("novo"); // arquivado, não "entregue" — nunca aparece em Prontos
+  });
+
+  it("arquiva também um placeholder já quebrado (escalonado já tinha virado false antes desta correção existir)", () => {
+    const { pedido, mudou } = limparEscalonamentoExpiradoSeNecessario(
+      placeholder({ escalonado: false, horarioEscalonado: undefined }),
+      1_000_000
+    );
+    expect(mudou).toBe(true);
+    expect(pedido.isArchived).toBe(true);
+  });
+
+  it("nunca reprocessa um placeholder já arquivado", () => {
+    const { mudou } = limparEscalonamentoExpiradoSeNecessario(
+      placeholder({ isArchived: true, archivedReason: "atendimento_humano_sem_pedido" }),
+      1_000_000
+    );
+    expect(mudou).toBe(false);
+  });
+
+  it("um pedido real (itens de verdade) nunca é arquivado por este caminho, mesmo com total 0 por acaso", () => {
+    const { pedido, mudou } = limparEscalonamentoExpiradoSeNecessario(
+      placeholder({ itens: ["1x Pizza G Calabresa"], total: 0 }),
+      1_000_000
+    );
+    expect(mudou).toBe(true);
+    expect(pedido.isArchived).toBeUndefined();
+    expect(pedido.escalonado).toBe(false);
+  });
+});

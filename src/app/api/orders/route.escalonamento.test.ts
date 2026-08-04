@@ -95,3 +95,50 @@ describe("GET /api/orders — escalonamento expira sozinho (sem alerta preso na 
     expect(data[0].status).toBe("em_preparo");
   });
 });
+
+describe("GET /api/orders — pedido que é só um chamado de atendimento humano (sem carrinho) some sozinho", () => {
+  function seedPlaceholder(overrides: Record<string, unknown> = {}) {
+    return seedPedido({
+      itens: ["Cliente precisa de atendimento humano"],
+      total: 0,
+      escalonado: true,
+      horarioEscalonado: Date.now() - ESCALONAMENTO_TTL_MS - 1,
+      ...overrides,
+    });
+  }
+
+  test("some da lista principal (arquivado) depois do prazo — nunca aparece com botão de 'Começar a fazer'", async () => {
+    seedPlaceholder();
+    const res = await GET(getRequest());
+    const data = await res.json();
+    expect(data).toHaveLength(0);
+
+    const pedidos = redisStore.get("pedidos") as Array<Record<string, unknown>>;
+    expect(pedidos[0].isArchived).toBe(true);
+    expect(pedidos[0].status).toBe("novo"); // arquivado, não "entregue" — não aparece em Prontos
+  });
+
+  test("continua visível com o alerta enquanto dentro do prazo", async () => {
+    seedPlaceholder({ horarioEscalonado: Date.now() - 1000 });
+    const res = await GET(getRequest());
+    const data = await res.json();
+    expect(data).toHaveLength(1);
+    expect(data[0].escalonado).toBe(true);
+  });
+
+  test("limpa retroativamente um placeholder que já tinha ficado quebrado (escalonado=false, sem carrinho) antes desta correção", async () => {
+    seedPlaceholder({ escalonado: false, horarioEscalonado: undefined });
+    const res = await GET(getRequest());
+    const data = await res.json();
+    expect(data).toHaveLength(0);
+  });
+
+  test("aparece em ?arquivados=true depois de limpo — nada é apagado", async () => {
+    seedPlaceholder();
+    await GET(getRequest());
+    const res = await GET(new NextRequest("http://localhost/api/orders?arquivados=true", { headers: { cookie: "auth-token=token-admin" } }));
+    const data = await res.json();
+    expect(data).toHaveLength(1);
+    expect(data[0].archivedReason).toBe("atendimento_humano_sem_pedido");
+  });
+});
