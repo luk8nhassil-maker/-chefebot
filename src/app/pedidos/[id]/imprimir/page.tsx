@@ -40,7 +40,15 @@ function dataBrasiliaDe(id: string): string {
   })
 }
 
-function numeroDiarioCupom(
+// Fallback só para pedidos sem `numero` (campo atribuído atomicamente por
+// proximoNumeroPedido() na criação — ver src/lib/numeracao.ts). NUNCA usar
+// como fonte principal: essa posição é recalculada a partir da lista de
+// pedidos ATIVOS buscada a cada impressão, então dois pedidos diferentes
+// podem cair no mesmo índice se a lista mudar entre uma impressão e outra
+// (ex.: um pedido mais antigo foi arquivado no meio do caminho) — foi
+// exatamente isso que causou dois cupons "PEDIDO #8" para clientes
+// diferentes no mesmo dia.
+export function numeroDiarioCupom(
   pedido: Pedido,
   lista: Pedido[]
 ): { diario: number | null; idCurto: string } {
@@ -71,6 +79,17 @@ function numeroDiarioCupom(
   doMesmoDia.sort((a, b) => parseInt(a.id, 10) - parseInt(b.id, 10))
   const idx = doMesmoDia.findIndex(p => p.id === pedido.id)
   return { diario: idx >= 0 ? idx + 1 : null, idCurto }
+}
+
+// Número exibido no cupom impresso. `pedido.numero` é a fonte da verdade —
+// único e sequencial entre WhatsApp, painel e site (mesmo contador atômico,
+// proximoNumeroPedido()), então nunca colide entre delivery, retirada e
+// consumo no local. Só cai no cálculo por posição (instável, ver acima)
+// para pedidos antigos que não têm `numero` gravado.
+export function numeroCupomExibicao(pedido: Pedido, lista: Pedido[]): string {
+  if (pedido.numero != null) return `#${pedido.numero}`
+  const { diario, idCurto } = numeroDiarioCupom(pedido, lista)
+  return diario != null ? `#${diario}` : `#${idCurto}`
 }
 
 function parseHybrid(pagamento: string): { metodo: string; valor: number }[] | null {
@@ -157,8 +176,7 @@ export default function ImprimirPedidoPage({ params }: PageProps) {
   const tipoLabel = isDineIn ? 'CONSUMO NO LOCAL' : isRetirada ? 'RETIRADA' : 'DELIVERY'
 
   const { diario, idCurto } = numeroDiarioCupom(pedido, lista)
-  const numeroCupom =
-    diario != null ? `#${diario}` : pedido.numero != null ? `#${pedido.numero}` : `#${idCurto}`
+  const numeroCupom = numeroCupomExibicao(pedido, lista)
 
   const dataBrasilia = dataBrasiliaDe(pedido.id)
 
