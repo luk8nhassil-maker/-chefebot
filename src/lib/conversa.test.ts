@@ -30,6 +30,14 @@ vi.mock("./conversasHistorico", () => ({
   atualizarHistorico: atualizarHistoricoMock,
 }));
 
+const { sincronizarCronometroMock } = vi.hoisted(() => ({
+  sincronizarCronometroMock: vi.fn(async () => {}),
+}));
+
+vi.mock("./inatividadeConversa", () => ({
+  sincronizarCronometroInatividade: sincronizarCronometroMock,
+}));
+
 import { registrarMensagem } from "./conversa";
 
 const PHONE = "5586999990001";
@@ -119,6 +127,24 @@ describe("registrarMensagem — log curto continua sendo salvo", () => {
     atualizarHistoricoMock.mockRejectedValue(new Error("boom"));
     await registrarMensagem(PHONE, "bot", "oi");
     expect(redisMock.set).toHaveBeenCalledWith(`conversa:${PHONE}`, expect.any(Array), { ex: 1800 });
+  });
+});
+
+describe("registrarMensagem — sincroniza o cronômetro de cancelamento por inatividade", () => {
+  test("chama sincronizarCronometroInatividade com phone e autor, para todo autor", async () => {
+    await registrarMensagem(PHONE, "bot", "oi");
+    expect(sincronizarCronometroMock).toHaveBeenCalledWith(PHONE, "bot");
+
+    await registrarMensagem(PHONE, "cliente", "quero pizza");
+    expect(sincronizarCronometroMock).toHaveBeenCalledWith(PHONE, "cliente");
+
+    await registrarMensagem(PHONE, "atendente", "[Kellyne] oi");
+    expect(sincronizarCronometroMock).toHaveBeenCalledWith(PHONE, "atendente");
+  });
+
+  test("falha na sincronização do cronômetro nunca propaga (registrarMensagem continua best-effort)", async () => {
+    sincronizarCronometroMock.mockRejectedValueOnce(new Error("qstash indisponivel"));
+    await expect(registrarMensagem(PHONE, "bot", "oi")).resolves.toBeUndefined();
   });
 });
 

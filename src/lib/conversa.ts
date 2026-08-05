@@ -1,6 +1,7 @@
 import { redis } from "./redis";
 import type { AutorMensagem, MensagemRelevante } from "./bot";
 import { atualizarHistorico } from "./conversasHistorico";
+import { sincronizarCronometroInatividade } from "./inatividadeConversa";
 
 // Log curto e rotativo das mensagens da conversa por telefone. Serve apenas para
 // dar CONTEXTO à retomada inteligente pós-handoff (ver retomarFluxoAposHandoff).
@@ -39,6 +40,17 @@ export async function registrarMensagem(
     await atualizarHistorico(phone, autor, texto, ts);
   } catch {
     console.error("[ChefeBot] Falha ao gravar histórico permanente da conversa.");
+  }
+  // Ponto único de sincronização do cronômetro de cancelamento por
+  // inatividade (ver src/lib/inatividadeConversa.ts) — cobre automaticamente
+  // todo caminho que registra mensagem (bot, atendente via app ou painel,
+  // cliente), sem precisar duplicar a chamada em cada rota. A função já é
+  // best-effort internamente; o try/catch aqui é só uma segunda camada de
+  // segurança, mesmo padrão do histórico permanente acima.
+  try {
+    await sincronizarCronometroInatividade(phone, autor);
+  } catch {
+    // nunca propaga — perder um agendamento de cronômetro não pode derrubar o registro da mensagem
   }
 }
 

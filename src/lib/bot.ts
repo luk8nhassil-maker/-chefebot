@@ -1048,6 +1048,13 @@ export function textoLinkCardapioDigital(): string {
 export function mensagemSaudacaoPadrao(nomePizzaria = "Chefe da Pizza"): string {
   return `Oi! 👋 Bem-vindo à *${nomePizzaria}*! 🍕\n\nSe demorar aqui, peça pelo cardápio digital — é mais rápido:\n${LINK_CARDAPIO_DIGITAL}`;
 }
+// Mensagem de encerramento por inatividade — ver src/lib/inatividadeConversa.ts:
+// disparada quando o cliente fica 10 min em silêncio depois da nossa última
+// mensagem (bot ou atendente), numa etapa em que ainda não existe pedido de
+// verdade criado. Mesmo tom da saudação padrão, oferecendo a mesma saída.
+export function mensagemCancelamentoPorInatividade(): string {
+  return `Vi que você ficou um tempinho sem responder, então cancelei esse pedido por aqui — sem problema! 😊\n\nQuando quiser, é só chamar de novo ou pedir pelo cardápio digital, mais rápido:\n${LINK_CARDAPIO_DIGITAL}`;
+}
 // Anexa o link do cardápio a uma mensagem, evitando duplicar se ele já estiver presente.
 export function comLinkCardapio(mensagem: string): string {
   if (mensagem.includes(LINK_CARDAPIO_DIGITAL)) return mensagem;
