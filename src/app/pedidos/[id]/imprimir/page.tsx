@@ -307,10 +307,7 @@ export default function ImprimirPedidoPage({ params }: PageProps) {
         )}
 
         {isDineIn && (
-          <>
-            <div className="secao negrito">CONSUMO NO LOCAL</div>
-            <div className="secao"><span className="negrito">Taxa: </span>R$ 0,00</div>
-          </>
+          <div className="secao negrito">CONSUMO NO LOCAL</div>
         )}
 
         {/* Pagamento */}

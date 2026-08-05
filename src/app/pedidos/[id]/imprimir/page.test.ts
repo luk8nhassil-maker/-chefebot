@@ -1,5 +1,9 @@
 import { describe, test, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { numeroCupomExibicao, numeroDiarioCupom } from "./page";
+
+const fonte = readFileSync(fileURLToPath(new URL("./page.tsx", import.meta.url)), "utf-8");
 
 // Regressão: dois pedidos DIFERENTES (delivery, retirada e consumo no local
 // misturados no mesmo dia) saíram impressos com o mesmo "PEDIDO #8" — a
@@ -86,5 +90,19 @@ describe("numeroDiarioCupom — mantido só como fallback, comportamento inalter
   test("id não numérico devolve diario null", () => {
     const p = pedido({ id: "abc" });
     expect(numeroDiarioCupom(p, [p]).diario).toBeNull();
+  });
+});
+
+describe("cupom — pedido de consumo no local (salão) nunca mostra taxa de entrega", () => {
+  test("o bloco isDineIn do cupom não contém nenhuma linha de Taxa", () => {
+    const bloco = fonte.slice(fonte.indexOf("{isDineIn && ("), fonte.indexOf("{/* Pagamento */}"));
+    expect(bloco).not.toContain("Taxa");
+  });
+
+  test("delivery e retirada continuam mostrando a linha de Taxa normalmente (não mexeu nesses casos)", () => {
+    const blocoDelivery = fonte.slice(fonte.indexOf("{isDelivery && ("), fonte.indexOf("{isRetirada && ("));
+    const blocoRetirada = fonte.slice(fonte.indexOf("{isRetirada && ("), fonte.indexOf("{isDineIn && ("));
+    expect(blocoDelivery).toContain("Taxa");
+    expect(blocoRetirada).toContain("Taxa");
   });
 });
