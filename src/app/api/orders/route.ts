@@ -171,11 +171,38 @@ async function salvarAtribuicaoComFilas(
 }
 
 
-function getMensagemStatus(status: Status, nomeCliente: string): string | null {
+type ClassificacaoEntrega = 'delivery' | 'retirada' | 'dine_in'
+
+// Mesma convenção de classificação já usada no cupom impresso e no painel
+// (ver src/app/pedidos/[id]/imprimir/page.tsx e src/app/pedidos/page.tsx):
+// tipoEntrega é a fonte principal, endereco é o fallback pra pedidos antigos
+// que não tinham esse campo.
+function classificarEntrega(tipoEntrega: string | undefined, endereco: string | undefined): ClassificacaoEntrega {
+  if (tipoEntrega === 'dine_in' || endereco === 'Consumo no local') return 'dine_in'
+  if (tipoEntrega === 'retirada' || tipoEntrega === 'pickup' || endereco === 'Retirada na loja') return 'retirada'
+  return 'delivery'
+}
+
+// "saiu_entrega" é o único status cujo texto realmente depende de como o
+// cliente vai receber o pedido — "saiu pra entrega" não faz sentido nenhum
+// pra quem vai retirar no balcão ou está comendo no salão. Os demais status
+// (em_preparo, entregue, cancelado) já são genéricos o bastante pra
+// qualquer tipo de recebimento, por isso continuam com um texto só.
+function getMensagemStatus(status: Status, nomeCliente: string, entrega: ClassificacaoEntrega): string | null {
   const firstName = nomeCliente.split(' ')[0];
+
+  if (status === 'saiu_entrega') {
+    if (entrega === 'retirada') {
+      return `*${firstName}*, seu pedido está pronto! 🍕\n\nPode vir buscar na loja quando quiser. Te esperamos!`;
+    }
+    if (entrega === 'dine_in') {
+      return `*${firstName}*, seu pedido está pronto! 🍽️\n\nBom apetite!`;
+    }
+    return `*${firstName}*, seu pedido saiu pra entrega! 🛵\n\nJá já chega aí. Obrigado pela preferência!`;
+  }
+
   const mensagens: Partial<Record<Status, string>> = {
     em_preparo: `*${firstName}*, boa notícia! 🍕 Seu pedido já está sendo preparado com muito carinho.\n\nEm breve fica prontinho!`,
-    saiu_entrega: `*${firstName}*, seu pedido saiu pra entrega! 🛵\n\nJá já chega aí. Obrigado pela preferência!`,
     entregue: `*${firstName}*, pedido entregue! 😊\n\nEsperamos que tenha curtido muito. Volte sempre que quiser — estamos aqui! 🍕`,
     cancelado: `*${firstName}*, seu pedido foi cancelado conforme solicitado.\n\nQualquer dúvida é só chamar. 😊`,
   };
@@ -188,8 +215,8 @@ function sanitizePhone(telefone: string): string {
   return '55' + digits
 }
 
-async function notificarCliente(telefone: string, status: Status, nomeCliente: string): Promise<void> {
-  const mensagem = getMensagemStatus(status, nomeCliente)
+async function notificarCliente(telefone: string, status: Status, nomeCliente: string, tipoEntrega: string | undefined, endereco: string | undefined): Promise<void> {
+  const mensagem = getMensagemStatus(status, nomeCliente, classificarEntrega(tipoEntrega, endereco))
   if (!mensagem) return
   const config = obterConfigEvolution()
   if (!config) { console.error('[ChefeBot] Provider de WhatsApp não configurado — notificação de status não enviada.'); return }
@@ -378,7 +405,7 @@ export async function PATCH(req: NextRequest) {
     }
 
   if (!silent) {
-    await notificarCliente(pedidos[index].telefone, status, pedidos[index].cliente)
+    await notificarCliente(pedidos[index].telefone, status, pedidos[index].cliente, pedidos[index].tipoEntrega, pedidos[index].endereco)
   }
 
   // O acesso do entregador e o rastreamento do cliente são efeitos separados:
