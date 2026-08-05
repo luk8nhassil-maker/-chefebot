@@ -91,9 +91,25 @@ async function iniciarCanarioReal() {
 }
 
 describe("13. bot_ativo false continua pausando cliente normal", () => {
-  it("cliente comum não recebe resposta quando bot_ativo=false, mesmo com canário configurado", async () => {
+  it("cliente comum não recebe resposta de pedido quando bot_ativo=false, mesmo com canário configurado — só a saudação padrão de primeira mensagem", async () => {
     store.set("bot_ativo", false);
     const res = await POST(webhookMensagem("5511999998888", "Quero uma pizza"));
+    expect(res.status ?? 200).toBe(200);
+    // Única mensagem permitida aqui é a saudação padrão de primeiro contato
+    // (ver src/lib/bot.ts mensagemSaudacaoPadrao) — nunca uma resposta de
+    // pedido processada pelo bot, que continua pausado.
+    const chamadas = chamadasSendText();
+    expect(chamadas).toHaveLength(1);
+    const [, opcoes] = chamadas[0];
+    const corpo = JSON.parse(String((opcoes as RequestInit).body));
+    expect(corpo.text).toContain("Bem-vindo à");
+  });
+
+  it("segunda mensagem da mesma conversa (sessão já existe) não recebe nem a saudação nem resposta de pedido", async () => {
+    store.set("bot_ativo", false);
+    await POST(webhookMensagem("5511999998888", "Quero uma pizza"));
+    vi.mocked(fetch).mockClear();
+    const res = await POST(webhookMensagem("5511999998888", "Alguém aí?"));
     expect(res.status ?? 200).toBe(200);
     expect(chamadasSendText()).toHaveLength(0);
   });

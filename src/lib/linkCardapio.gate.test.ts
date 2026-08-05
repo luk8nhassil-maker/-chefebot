@@ -61,8 +61,10 @@ describe("gate central: mensagens reais do teste no WhatsApp recebem o link", ()
 
 describe("gate central: entradas de pedido pelo fluxo determinístico", () => {
   it("caso 4: cliente novo ('oi' em sessão welcome) recebe o link", () => {
+    // Saudação inicial usa a copy padrão (mensagemSaudacaoPadrao) — frase
+    // diferente do TEXTO_LINK genérico, mas o link continua presente.
     const res = processMessage("oi", createInitialSession());
-    expect(res.messages.join("\n")).toContain(TEXTO_LINK);
+    expect(res.messages.join("\n")).toContain(LINK_CARDAPIO_DIGITAL);
   });
 
   it("caso 5: cliente retornando recebe o link (saudação de retorno)", () => {

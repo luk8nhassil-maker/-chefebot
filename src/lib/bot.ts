@@ -1040,6 +1040,14 @@ export const LINK_CARDAPIO_DIGITAL = "https://chefedapizza.com.br/cardapio";
 export function textoLinkCardapioDigital(): string {
   return `Se preferir ver o cardápio digital, é só acessar:\n${LINK_CARDAPIO_DIGITAL}`;
 }
+// Saudação padrão do primeiro contato — mesma copy tanto com o bot ligado
+// (cliente cumprimenta e ainda não tem sessão) quanto com o bot pausado
+// (global ou aguardando atendente, também sem sessão prévia): garante que o
+// cliente nunca fique sem nenhuma resposta na primeira mensagem, mesmo que
+// ninguém tenha assumido a conversa ainda. Ver POST /api/whatsapp.
+export function mensagemSaudacaoPadrao(nomePizzaria = "Chefe da Pizza"): string {
+  return `Oi! 👋 Bem-vindo à *${nomePizzaria}*! 🍕\n\nSe demorar aqui, peça pelo cardápio digital — é mais rápido:\n${LINK_CARDAPIO_DIGITAL}`;
+}
 // Anexa o link do cardápio a uma mensagem, evitando duplicar se ele já estiver presente.
 export function comLinkCardapio(mensagem: string): string {
   if (mensagem.includes(LINK_CARDAPIO_DIGITAL)) return mensagem;
@@ -2294,7 +2302,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
     }
     case "welcome": {
       return {
-        messages: [comLinkCardapio(`Olá! Seja bem-vindo à *Chefe da Pizza*! 🍕\n\nVocê pode fazer seu pedido por aqui mesmo no WhatsApp.\n\nO que vai ser hoje? Temos coisa boa te esperando!`)],
+        messages: [mensagemSaudacaoPadrao(), mensagemCategorias()],
         session: { ...session, step: "category" },
       };
     }

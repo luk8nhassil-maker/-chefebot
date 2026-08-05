@@ -1,5 +1,5 @@
 ﻿import { NextRequest, NextResponse, after } from "next/server";
-import { processMessage, createInitialSession, createReturningSession, montarSaudacaoRetorno, garantirLinkCardapioEmMensagens, LINK_CARDAPIO_DIGITAL, textoLinkCardapioDigital, BotSession, ClienteHistorico, setMenuDinamico, setConfigDinamica, setEsgotados, setHorarioFuncionamento, temPixNoPagamento, valorPixEsperado } from "@/lib/bot";
+import { processMessage, createInitialSession, createReturningSession, montarSaudacaoRetorno, mensagemSaudacaoPadrao, garantirLinkCardapioEmMensagens, LINK_CARDAPIO_DIGITAL, BotSession, ClienteHistorico, setMenuDinamico, setConfigDinamica, setEsgotados, setHorarioFuncionamento, temPixNoPagamento, valorPixEsperado } from "@/lib/bot";
 import { criarOuReutilizarTokenCardapio, anexarTokenAoLinkCardapio } from "@/lib/cardapioToken";
 import { getMENUDinamico } from "@/lib/menu.server";
 import { redis } from "@/lib/redis";
@@ -1265,8 +1265,9 @@ export async function POST(req: NextRequest) {
 
     const botAtivo = await redis.get<boolean>("bot_ativo");
     if (botAtivo === false) {
-      // Bot global pausado ("Você no comando"): NÃO processa fluxo, NÃO responde.
-      // Garante que a conversa apareça no Tempo Real mesmo sem sessão prévia.
+      // Bot global pausado ("Você no comando"): NÃO processa fluxo, NÃO responde
+      // ao pedido em si. Garante que a conversa apareça no Tempo Real mesmo sem
+      // sessão prévia.
       const sessaoExistente = await redis.get<BotSession>(`session:${phone}`);
       if (!sessaoExistente) {
         await redis.set(
@@ -1274,6 +1275,10 @@ export async function POST(req: NextRequest) {
           { step: "escalado", cart: [], deliveryFee: 0, escalado: true },
           { ex: 1800 }
         );
+        // Primeira mensagem de uma conversa nova, mesmo com o bot pausado: o
+        // cliente nunca deve ficar em silêncio total só porque ninguém assumiu
+        // ainda — recebe a mesma saudação padrão do bot ligado, uma única vez.
+        await enviarMensagem(phone, mensagemSaudacaoPadrao(config.nomePizzaria));
       }
       // Mantém o rascunho vivo atualizado para o Resumo rápido da atendente.
       await atualizarRascunhoVivo(phone, messageText);
@@ -1441,7 +1446,8 @@ export async function POST(req: NextRequest) {
         if (eSaudacao(messageText)) {
           currentSession = createInitialSession();
           await redis.set(sessionKey, currentSession, { ex: 1800 });
-          await enviarMensagem(phone, `Ola! Seja bem-vindo a *${config.nomePizzaria}*! 🍕\n\nVocê pode fazer seu pedido por aqui mesmo no WhatsApp.\n\n${textoLinkCardapioDigital()}\n\nO que vai ser hoje? Temos coisa boa te esperando! 😋\n\n  1. Pizza\n  2. Lanches\n  3. Bebidas\n  4. Sucos e Vitaminas`);
+          await enviarMensagem(phone, mensagemSaudacaoPadrao(config.nomePizzaria));
+          await enviarMensagem(phone, `O que vai ser hoje? Temos coisa boa te esperando! 😋\n\n  1. Pizza\n  2. Lanches\n  3. Bebidas\n  4. Sucos e Vitaminas`);
           await redis.set(sessionKey, { ...currentSession, step: "category" }, { ex: 1800 });
           return NextResponse.json({ ok: true });
         }

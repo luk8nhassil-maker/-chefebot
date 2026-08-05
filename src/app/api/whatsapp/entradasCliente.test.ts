@@ -456,14 +456,18 @@ describe("14. domínio oficial do cardápio no WhatsApp real", () => {
 
     await POST(requestComHostPreview(webhookBody({ message: { conversation: "oi" } })));
 
-    const texto = ultimoTextoDoBot();
-    esperarLinkSeguro(texto);
+    // Primeiro contato agora chega em duas bolhas: a saudação padrão (com o
+    // link do cardápio) e, na sequência, as opções de categoria.
+    const textos = textosDoBot();
+    const saudacao = textos[0];
+    const opcoes = ultimoTextoDoBot();
+    esperarLinkSeguro(saudacao);
     esperarTodasAsMensagensDoBotSemOrigemTecnica();
-    expect(texto).toContain("Se preferir ver o cardápio digital");
-    expect(texto).toContain("1. Pizza");
-    expect(texto).toContain("2. Lanches");
-    expect(texto).toContain("3. Bebidas");
-    expect(texto).toContain("4. Sucos e Vitaminas");
+    expect(saudacao).toContain("cardápio digital");
+    expect(opcoes).toContain("1. Pizza");
+    expect(opcoes).toContain("2. Lanches");
+    expect(opcoes).toContain("3. Bebidas");
+    expect(opcoes).toContain("4. Sucos e Vitaminas");
   });
 
   test("cliente recorrente recebe o mesmo token no 'oi' e na opção 2", async () => {

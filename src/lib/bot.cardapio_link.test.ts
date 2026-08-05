@@ -23,11 +23,14 @@ function historicoFake(overrides: Partial<ClienteHistorico> = {}): ClienteHistor
 }
 
 describe("regra: link do cardápio digital nas mensagens de entrada", () => {
-  it("cliente novo (saudação inicial) recebe o link do cardápio", () => {
+  it("cliente novo (saudação inicial) recebe o link do cardápio, na saudação padrão", () => {
     const sess = createInitialSession(); // step: "welcome"
     const res = processMessage("oi", sess);
     const msg = res.messages.join("\n");
-    expect(msg).toContain(TEXTO_LINK_OBRIGATORIO);
+    // A saudação inicial usa a copy padrão (mensagemSaudacaoPadrao em
+    // src/lib/bot.ts), não a frase genérica usada nas outras entradas
+    // (retorno, reinício de sessão etc.) — mas o link continua obrigatório.
+    expect(msg).toContain("cardápio digital");
     expect(msg).toContain(LINK_CARDAPIO);
   });
 
