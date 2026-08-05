@@ -12,6 +12,13 @@ vi.mock("@/lib/redis", () => ({
   },
 }));
 
+const { sincronizarCronometroMock } = vi.hoisted(() => ({
+  sincronizarCronometroMock: vi.fn(async () => {}),
+}));
+vi.mock("@/lib/inatividadeConversa", () => ({
+  sincronizarCronometroInatividade: sincronizarCronometroMock,
+}));
+
 import { GET } from "./route";
 
 function requestSessao(token?: string) {
@@ -23,6 +30,7 @@ function requestSessao(token?: string) {
 
 beforeEach(() => {
   redisStore.clear();
+  sincronizarCronometroMock.mockClear();
 });
 
 describe("GET /api/cardapio-whatsapp-session — reconhecimento do WhatsApp do link", () => {
@@ -52,5 +60,27 @@ describe("GET /api/cardapio-whatsapp-session — reconhecimento do WhatsApp do l
     const res = await GET(requestSessao());
     const body = await res.json();
     expect(body).toEqual({ ok: false });
+  });
+});
+
+describe("GET /api/cardapio-whatsapp-session — pausa o cronômetro de cancelamento por inatividade", () => {
+  test("token válido avisa o cronômetro como 'cliente' (pausa sem registrar mensagem falsa)", async () => {
+    redisStore.set(`cardapio:token:${TOKEN}`, { phone: PHONE, createdAt: Date.now() });
+    await GET(requestSessao(TOKEN));
+    expect(sincronizarCronometroMock).toHaveBeenCalledWith(PHONE, "cliente");
+  });
+
+  test("token inválido/expirado nunca chama o cronômetro", async () => {
+    await GET(requestSessao(TOKEN));
+    expect(sincronizarCronometroMock).not.toHaveBeenCalled();
+  });
+
+  test("falha ao sincronizar o cronômetro nunca derruba a resolução do token", async () => {
+    redisStore.set(`cardapio:token:${TOKEN}`, { phone: PHONE, createdAt: Date.now() });
+    sincronizarCronometroMock.mockRejectedValueOnce(new Error("qstash indisponivel"));
+    const res = await GET(requestSessao(TOKEN));
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.phoneFinal).toBe("0691");
   });
 });
