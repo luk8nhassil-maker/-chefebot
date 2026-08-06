@@ -50,6 +50,37 @@ export async function buscarClientePorTelefone(telefone: string): Promise<Client
   return (await redis.get<Cliente>(chaveCliente(tel))) ?? null;
 }
 
+const LIMITE_SCAN_CLIENTES = 2000;
+
+/**
+ * Lista todos os perfis de cliente cadastrados (`perfil-cliente:*`), varrendo
+ * o Redis com SCAN (nunca KEYS, que bloqueia o servidor). Não existe um
+ * índice separado dessas chaves — a varredura é o único jeito de enumerar
+ * todos os clientes. Corta em `LIMITE_SCAN_CLIENTES` chaves varridas como
+ * rede de segurança (nunca deve ser atingido pelo volume real da pizzaria);
+ * se atingido, retorna o que já foi coletado em vez de rodar sem limite.
+ */
+export async function listarClientesCadastrados(): Promise<Cliente[]> {
+  const clientes: Cliente[] = [];
+  let cursor = 0;
+  let varridas = 0;
+
+  do {
+    const [proximoCursor, chaves] = await redis.scan(cursor, { match: "perfil-cliente:*", count: 100 });
+    cursor = Number(proximoCursor);
+    varridas += chaves.length;
+
+    if (chaves.length > 0) {
+      const registros = await Promise.all(chaves.map((chave) => redis.get<Cliente>(chave)));
+      for (const registro of registros) {
+        if (registro) clientes.push(registro);
+      }
+    }
+  } while (cursor !== 0 && varridas < LIMITE_SCAN_CLIENTES);
+
+  return clientes;
+}
+
 export async function buscarClientePorId(clienteId: string): Promise<Cliente | null> {
   const telefone = clienteId.startsWith("cli_") ? clienteId.slice(4) : clienteId;
   return buscarClientePorTelefone(telefone);

@@ -76,6 +76,22 @@ type Pendencia = {
   criadaEm: string
 }
 
+type ClienteCadastrado = {
+  telefone: string
+  nome: string | null
+  createdAt: string
+  fidelidadePontos: { ativo: boolean; disponivel: number; meta: number } | null
+  jornada: { participando: boolean; cicloAtual: number; pizzasNoCiclo: number; faseAtual: number; totalJornadasConcluidas: number } | null
+}
+
+function formatarTelefoneExibicao(telefone: string): string {
+  const d = telefone.replace(/\D/g, "")
+  if (d.length < 10) return telefone
+  const ddd = d.slice(0, 2)
+  const resto = d.slice(2)
+  return resto.length === 9 ? `(${ddd}) ${resto.slice(0, 5)}-${resto.slice(5)}` : `(${ddd}) ${resto.slice(0, 4)}-${resto.slice(4)}`
+}
+
 const cardStyle: React.CSSProperties = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 14, padding: 18 }
 const inputStyle: React.CSSProperties = { padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--foreground)', fontSize: 14, fontFamily: 'Archivo, sans-serif' }
 const botaoPrimario: React.CSSProperties = { padding: '10px 16px', borderRadius: 10, background: 'var(--primary)', color: 'var(--primary-foreground)', fontWeight: 700, fontSize: 13, border: 'none', cursor: 'pointer', fontFamily: 'Archivo, sans-serif' }
@@ -120,6 +136,9 @@ export default function AdminJornadaChefPage() {
   const [erroCanario, setErroCanario] = useState('')
   const [salvandoCanario, setSalvandoCanario] = useState(false)
 
+  const [clientesCadastrados, setClientesCadastrados] = useState<ClienteCadastrado[] | null>(null)
+  const [erroClientesCadastrados, setErroClientesCadastrados] = useState('')
+
   // Formulário de nova recompensa
   const [novoTipo, setNovoTipo] = useState<TipoRecompensa>('bebida_sobremesa')
   const [novoItemId, setNovoItemId] = useState('')
@@ -163,7 +182,19 @@ export default function AdminJornadaChefPage() {
     if (res.ok) setClientesCanario((await res.json()).clientes ?? [])
   }
 
-  useEffect(() => { carregarConfig(); carregarCatalogo(); carregarPendencias(); carregarCanario() }, [])
+  async function carregarClientesCadastrados() {
+    setErroClientesCadastrados('')
+    try {
+      const res = await fetch('/api/admin/clientes', { cache: 'no-store' })
+      const data = await res.json().catch(() => null)
+      if (res.ok) setClientesCadastrados(data.clientes ?? [])
+      else setErroClientesCadastrados(data?.error || 'Não foi possível carregar os clientes cadastrados.')
+    } catch {
+      setErroClientesCadastrados('Erro de conexão.')
+    }
+  }
+
+  useEffect(() => { carregarConfig(); carregarCatalogo(); carregarPendencias(); carregarCanario(); carregarClientesCadastrados() }, [])
 
   async function adicionarCanario() {
     setErroCanario('')
@@ -405,6 +436,55 @@ export default function AdminJornadaChefPage() {
     <PanelShell showGestaoNav>
       <div style={{ padding: 20, maxWidth: 1400, display: 'flex', flexDirection: 'column', gap: 20 }}>
         <h1 style={{ fontSize: 19, fontWeight: 800, margin: 0 }}>Jornada do Chef</h1>
+
+        {/* Clientes cadastrados — quem já tem perfil no app, além de você */}
+        <div style={cardStyle}>
+          <p style={titulo}>Clientes cadastrados{clientesCadastrados ? ` (${clientesCadastrados.length})` : ''}</p>
+          <p style={{ fontSize: 12.5, color: 'var(--foreground-muted)', margin: '0 0 12px' }}>
+            Todo mundo que já entrou com o WhatsApp na Área do Cliente, com o saldo de pontos e o progresso na Jornada do Chef de cada um.
+          </p>
+          {erroClientesCadastrados && <p style={{ color: 'var(--danger-text)', fontSize: 13 }}>{erroClientesCadastrados}</p>}
+          {!clientesCadastrados && !erroClientesCadastrados && <p style={{ fontSize: 13, color: 'var(--foreground-secondary)' }}>Carregando...</p>}
+          {clientesCadastrados && clientesCadastrados.length === 0 && (
+            <p style={{ fontSize: 13, color: 'var(--foreground-secondary)' }}>Nenhum cliente cadastrado ainda.</p>
+          )}
+          {clientesCadastrados && clientesCadastrados.length > 0 && (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                <thead>
+                  <tr style={{ textAlign: 'left', borderBottom: '1px solid var(--border)' }}>
+                    <th style={{ padding: '6px 8px' }}>Telefone</th>
+                    <th style={{ padding: '6px 8px' }}>Nome</th>
+                    <th style={{ padding: '6px 8px' }}>Cadastrado em</th>
+                    <th style={{ padding: '6px 8px' }}>Pontos</th>
+                    <th style={{ padding: '6px 8px' }}>Jornada do Chef</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {clientesCadastrados.map((c) => (
+                    <tr key={c.telefone} style={{ borderBottom: '1px solid var(--border)' }}>
+                      <td style={{ padding: '8px', fontFamily: 'monospace' }}>{formatarTelefoneExibicao(c.telefone)}</td>
+                      <td style={{ padding: '8px' }}>{c.nome || <span style={{ color: 'var(--foreground-muted)' }}>—</span>}</td>
+                      <td style={{ padding: '8px', color: 'var(--foreground-secondary)' }}>{new Date(c.createdAt).toLocaleDateString('pt-BR')}</td>
+                      <td style={{ padding: '8px' }}>
+                        {c.fidelidadePontos
+                          ? `${c.fidelidadePontos.disponivel}${c.fidelidadePontos.meta ? ` / ${c.fidelidadePontos.meta}` : ''}`
+                          : <span style={{ color: 'var(--foreground-muted)' }}>—</span>}
+                      </td>
+                      <td style={{ padding: '8px' }}>
+                        {c.jornada
+                          ? c.jornada.participando
+                            ? `Ciclo ${c.jornada.cicloAtual} · fase ${c.jornada.faseAtual} (${c.jornada.totalJornadasConcluidas} concluída${c.jornada.totalJornadasConcluidas === 1 ? '' : 's'})`
+                            : 'Não participa'
+                          : <span style={{ color: 'var(--foreground-muted)' }}>—</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
 
         {/* Configuração / feature flag */}
         <div style={cardStyle}>

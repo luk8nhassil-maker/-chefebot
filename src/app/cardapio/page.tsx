@@ -43,6 +43,7 @@ export type MenuType = {
   payments: string[];
   esgotados?: string[];
   esgotadosMetadata?: EsgMetadata;
+  horario?: { horaAbertura: number; horaFechamento: number; aberto: boolean };
 };
 
 // ==================== ADMIN CARDÁPIO ====================
@@ -1628,7 +1629,11 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
         {screen === "sc-start" && (
           <header className="header-min">
             <div className="head-row">
-              <div className="logo"><div className="logo-mark">🍕</div><div><h1>CHEFE DA PIZZA</h1><p>Alto Alegre do MA · <span style={{ color: "var(--green)", fontWeight: 600 }}>● Aberto agora</span> · 40 a 60 min</p></div></div>
+              <div className="logo"><div className="logo-mark">🍕</div><div><h1>CHEFE DA PIZZA</h1><p>Alto Alegre do MA · {menu.horario ? (
+                menu.horario.aberto
+                  ? <span style={{ color: "var(--green)", fontWeight: 600 }}>● Aberto agora</span>
+                  : <span style={{ color: "var(--danger)", fontWeight: 600 }}>● Fechado agora</span>
+              ) : <span style={{ color: "var(--green)", fontWeight: 600 }}>● Aberto agora</span>} · 40 a 60 min</p></div></div>
               <button className="theme-btn" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} aria-label="Trocar tema">{theme === "dark" ? <Moon size={18} aria-hidden="true" /> : <Sun size={18} aria-hidden="true" />}</button>
             </div>
           </header>

@@ -15,6 +15,19 @@ function hoje(): string {
   return new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })
 }
 
+type ConfigHorario = { horaAbertura: number; horaFechamento: number }
+
+const HORARIO_PADRAO: ConfigHorario = { horaAbertura: 18, horaFechamento: 23 }
+
+// Mesma regra usada pelo bot do WhatsApp (estaAberto em src/app/api/whatsapp/route.ts):
+// horário sempre calculado em America/Sao_Paulo, nunca no fuso do servidor/navegador.
+function estaAbertoAgora(config: ConfigHorario): boolean {
+  const agora = new Date()
+  const brasilia = new Date(agora.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }))
+  const hora = brasilia.getHours()
+  return hora >= config.horaAbertura && hora < config.horaFechamento
+}
+
 // ---------------------------------------------------------------------------
 // Validação estrutural do payload de POST /api/cardapio
 // ---------------------------------------------------------------------------
@@ -205,7 +218,13 @@ export async function GET() {
     const menu = await getMENUDinamico()
     const esgotados = (await redis.get<string[]>('esgotados')) || []
     const esgotadosMetadata = (await redis.get<EsgMetadata>('esgotadosMetadata')) || {}
-    return NextResponse.json({ ...menu, esgotados, esgotadosMetadata })
+    const config = (await redis.get<ConfigHorario>('config:pizzaria')) || HORARIO_PADRAO
+    const horario = {
+      horaAbertura: config.horaAbertura,
+      horaFechamento: config.horaFechamento,
+      aberto: estaAbertoAgora(config),
+    }
+    return NextResponse.json({ ...menu, esgotados, esgotadosMetadata, horario })
   } catch {
     return NextResponse.json(
       { ok: false, error: 'Cardápio temporariamente indisponível' },

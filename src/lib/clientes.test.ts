@@ -5,10 +5,15 @@ vi.mock("./redis", () => ({
   redis: {
     get: vi.fn(async (key: string) => (store.has(key) ? store.get(key) : null)),
     set: vi.fn(async (key: string, value: unknown) => { store.set(key, value); return "OK"; }),
+    scan: vi.fn(async (_cursor: number, opts: { match: string }) => {
+      const prefixo = opts.match.replace(/\*$/, "");
+      const chaves = [...store.keys()].filter((k) => k.startsWith(prefixo));
+      return ["0", chaves] as [string, string[]];
+    }),
   },
 }));
 
-import { clienteProximaEtapa, ativarFidelidadeCliente, obterOuCriarCliente, type Cliente } from "./clientes";
+import { clienteProximaEtapa, ativarFidelidadeCliente, obterOuCriarCliente, listarClientesCadastrados, type Cliente } from "./clientes";
 
 const TEL = "5599974000691";
 
@@ -54,5 +59,20 @@ describe("ativarFidelidadeCliente", () => {
   test("obterOuCriarCliente NUNCA marca ativacao sozinho", async () => {
     const c = await obterOuCriarCliente(TEL, "Qualquer Nome");
     expect(c.fidelidadeAtivadaEm).toBeUndefined();
+  });
+});
+
+describe("listarClientesCadastrados", () => {
+  test("sem nenhum perfil salvo retorna lista vazia", async () => {
+    expect(await listarClientesCadastrados()).toEqual([]);
+  });
+
+  test("retorna todos os perfis cadastrados via scan de perfil-cliente:*", async () => {
+    await obterOuCriarCliente(TEL, "Maria");
+    await obterOuCriarCliente("5599988887777", "Joao");
+
+    const lista = await listarClientesCadastrados();
+    expect(lista).toHaveLength(2);
+    expect(lista.map((c) => c.telefone).sort()).toEqual([TEL, "5599988887777"].sort());
   });
 });
