@@ -430,3 +430,60 @@ describe("/cardapio (PublicCardapio) — acessibilidade por teclado dos cartões
     expect(fonte).not.toContain("optA11yProps(");
   });
 });
+
+describe("/cardapio — Pizzas Especiais (Fase 2A)", () => {
+  test("importa o catálogo oficial de sabores/preços/tamanho da Fase 2A, não mais só as listas legadas", () => {
+    expect(fonte).toContain('from "@/lib/catalog/pizzaFlavors"');
+    expect(fonte).toContain('from "@/lib/catalog/pizzaSizes"');
+    expect(fonte).toContain('from "@/lib/pricing/pizzaEngine"');
+  });
+
+  test("navegação por categoria: Todos, Tradicionais, Especiais e Doces", () => {
+    expect(fonte).toContain('{ key: "all", label: "Todos" }');
+    expect(fonte).toContain('{ key: "traditional", label: "Tradicionais" }');
+    expect(fonte).toContain('{ key: "special", label: "Especiais" }');
+    expect(fonte).toContain('{ key: "sweet", label: "Doces" }');
+  });
+
+  test("mensagem oficial de meio a meio aparece na seleção e no resumo da pizza", () => {
+    const ocorrencias = (fonte.match(/Na pizza meio a meio, vale o sabor de maior preço\./g) || []).length;
+    expect(ocorrencias).toBeGreaterThanOrEqual(2);
+  });
+
+  test("selo Especial usa o token de cor de atenção já existente (roxo), nunca pinta o cartão inteiro", () => {
+    expect(fonte).toContain("const EspecialBadge = ()");
+    expect(fonte).toContain("var(--attention-soft)");
+    expect(fonte).toContain("var(--attention-soft-foreground)");
+    // O selo é um <span> pequeno dentro do card — não existe nenhum estilo
+    // aplicando --attention como background do próprio cartão de sabor.
+    expect(fonte).not.toMatch(/flavor-opt[^`]*background:\s*var\(--attention/);
+  });
+
+  test("selo Especial é renderizado nos 4 lugares exigidos: lista, seleção, resumo e sacola", () => {
+    const ocorrencias = (fonte.match(/<EspecialBadge \/>/g) || []).length;
+    // lista de sabores, progresso da seleção (2x, um sabor por vez), resumo
+    // da pizza no passo da borda (2x) e badge da sacola.
+    expect(ocorrencias).toBeGreaterThanOrEqual(5);
+  });
+
+  test("cada sabor mostra o preço real do tamanho escolhido, vindo do catálogo (não mais preço fixo por tamanho)", () => {
+    expect(fonte).toContain("pf.pricesCents[pizzaSizeCode]");
+  });
+
+  test("pizza montada pelo novo seletor carrega IDs estruturados para o servidor recalcular — nunca confia no preço do carrinho", () => {
+    expect(fonte).toContain("pizzaEstruturada?:");
+    expect(fonte).toContain("calcularPrecoPizzaEstruturada(");
+  });
+
+  test("mini-pizza e calzone continuam com a lista de sabores de sempre — Fase 2A não mexeu neles", () => {
+    expect(fonte).toContain("miniPizzaMode || calzoneMode ? (\n      flavorSections.map((section) => (");
+    expect(fonte).toContain('const pizzaFlavorSections = [{ title: "Salgadas", flavors: menu.saltyFlavors || [] }, { title: "Doces", flavors: menu.sweetFlavors || [] }];');
+  });
+
+  test("pizzas doces continuam no fluxo de pizza inteira, sem tratamento à parte", () => {
+    // A aba "Doces" filtra a mesma listPizzaFlavorsByCategory usada por
+    // Tradicionais/Especiais — não existe um caminho de código separado
+    // para pizza doce que pudesse regredir nesta fase.
+    expect(fonte).toContain("listPizzaFlavorsByCategory(cat)");
+  });
+});

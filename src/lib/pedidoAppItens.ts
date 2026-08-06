@@ -15,6 +15,18 @@ export type ItemApp = {
   // cliente), nunca soma pontos nem avança a trilha de novo (ver
   // contarPizzasElegiveisPedido em @/lib/jornadaChef).
   recompensaJornadaId?: string;
+  // Presente quando o item é uma pizza montada pelo fluxo estruturado da
+  // Fase 2A (seletor com Tradicionais/Especiais por ID) — ver
+  // @/lib/pricing/pizzaEngine. Quando presente, o preço é recalculado pelo
+  // novo motor (maior preço entre os sabores + borda + adicionais), nunca
+  // por este `officialUnitPrice`. Ausente em itens do fluxo legado (name/
+  // detail livres) — esses continuam validados exatamente como antes.
+  pizzaEstruturada?: {
+    sizeId: string;
+    flavorIds: string[];
+    borderId?: string;
+    additionalIds?: string[];
+  };
 };
 
 export type MenuSimpleItem = { name: string; price: number; sizes?: { code: string; price: number }[] };

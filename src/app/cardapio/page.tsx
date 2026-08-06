@@ -15,6 +15,11 @@ import LayoutDebugPanel from "./LayoutDebugPanel";
 import { fetchCliente } from "@/lib/clienteSessaoFront";
 import { lerReferenciaRecompensa, limparReferenciaRecompensa, migrarReferenciaLegada } from "@/lib/recompensaJornadaCarrinho";
 import { extrairPagamentoComposto, montarPagamentoComposto, parseValorMonetario } from "@/lib/pagamentoComposto";
+import { slugify } from "@/lib/catalog/ids";
+import { findPizzaFlavorByLegacyName, listPizzaFlavorsByCategory, type PizzaFlavorCategory } from "@/lib/catalog/pizzaFlavors";
+import { PIZZA_SIZES } from "@/lib/catalog/pizzaSizes";
+import { calcularPrecoPizzaEstruturada } from "@/lib/pricing/pizzaEngine";
+import type { CatalogBorder } from "@/lib/catalog/types";
 
 // Ícones de categoria da home (menu/navegação) — lucide-react, sem emoji.
 // Mantidos separados de ICONS (que continua usando emoji para os itens
@@ -631,6 +636,14 @@ type CartItem = {
   // o pedido final; o servidor valida contra os sabores permitidos da
   // recompensa antes de aceitar.
   recompensaEscolha?: { sabor?: string };
+  // Presente quando a pizza foi montada pelo seletor novo de Tradicionais/
+  // Especiais (Fase 2A) — carrega os IDs oficiais para o servidor recalcular
+  // o preço sozinho (nunca confia em `price` vindo do carrinho). Ausente em
+  // itens de fluxos que não mudaram nesta fase (mini-pizza, calzone, etc).
+  pizzaEstruturada?: { sizeId: string; flavorIds: string[]; borderId?: string };
+  // Pelo menos um dos sabores escolhidos é uma Pizza Especial — controla o
+  // badge "Especial" na sacola/revisão (a mesma regra usada na seleção).
+  especial?: boolean;
 };
 
 type PromocaoPublica = {
@@ -700,6 +713,37 @@ const PIX_STATUS_LABEL: Record<PagamentoPixClienteStatus, string> = {
 
 const money = (v: number) => "R$ " + v.toFixed(2).replace(".", ",");
 const bigBorder = (sz: string) => !(sz === "P" || sz === "M");
+
+// Selo discreto "Especial" (Fase 2A) — mesmo token de cor já usado pelo
+// sistema para estados de atenção (--attention, roxo), nunca pintando o
+// cartão inteiro. Aparece em todo lugar onde o sabor especial é mostrado:
+// lista de sabores, seleção em andamento, resumo da pizza e sacola.
+const EspecialBadge = () => (
+  <span
+    style={{
+      display: "inline-block",
+      fontSize: 11,
+      fontWeight: 700,
+      lineHeight: 1,
+      padding: "3px 7px",
+      borderRadius: 999,
+      background: "var(--attention-soft)",
+      color: "var(--attention-soft-foreground)",
+      border: "1px solid var(--attention-border)",
+      marginLeft: 6,
+      verticalAlign: "middle",
+    }}
+  >
+    Especial
+  </span>
+);
+
+const PIZZA_CATEGORY_TABS: { key: "all" | PizzaFlavorCategory; label: string }[] = [
+  { key: "all", label: "Todos" },
+  { key: "traditional", label: "Tradicionais" },
+  { key: "special", label: "Especiais" },
+  { key: "sweet", label: "Doces" },
+];
 
 // Cartões de opção (.opt) são <div onClick>, então nativamente inacessíveis
 // por teclado. Este helper só cobre role/tabIndex/aria-disabled — sem
@@ -884,6 +928,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const [border, setBorder] = useState<string | null>(null);
   const [borderPrice, setBorderPrice] = useState(0);
   const [flavorModalOpen, setFlavorModalOpen] = useState(false);
+  const [flavorCategoryFilter, setFlavorCategoryFilter] = useState<"all" | PizzaFlavorCategory>("all");
   const [plan, setPlan] = useState<{ total: number; current: number; openEnded: boolean }>({ total: 0, current: 0, openEnded: false });
   const [listCat, setListCat] = useState<"lanche" | "macarronada" | "bebida" | "suco">("lanche");
   // Upsell contextual de bebida: rastreia o tipo do último item adicionado e
@@ -1154,7 +1199,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const calzoneItem = (menu.lanches || []).find((it) => isCalzoneName(it.name) && Number.isFinite(it.price));
   const calzoneEsgotada = !!calzoneItem && esgotados.includes(calzoneItem.name);
 
-  function resetBuild() { setSize(null); setSizePrice(0); setF1(null); setF2(null); setBorder(null); setBorderPrice(0); setMiniPizzaMode(false); setCalzoneMode(false); setFlavorModalOpen(false); }
+  function resetBuild() { setSize(null); setSizePrice(0); setF1(null); setF2(null); setBorder(null); setBorderPrice(0); setMiniPizzaMode(false); setCalzoneMode(false); setFlavorModalOpen(false); setFlavorCategoryFilter("all"); }
   function goPizza() { setPlan({ total: 0, current: 1, openEnded: true }); resetBuild(); go("sc-build"); }
   function pizzasNoCarrinho() { return cart.filter((c) => c.kind === "pizza" || (c.kind === "simple" && isMiniPizzaName(c.name))).length; }
   function pickSize(code: string) { const s = (menu.sizes || []).find((x) => x.code === code); if (!s) return; setMiniPizzaMode(false); setCalzoneMode(false); setSize(code); setSizePrice(s.price); setFlavorModalOpen(true); }
@@ -1184,6 +1229,20 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const mam = !!(f1 && f2);
   const flavorOk = !!f1;
   const buildOk = !!size && flavorOk && !(miniPizzaMode && miniPizzaEsgotada) && !(calzoneMode && calzoneEsgotada);
+  // Fluxo de pizza inteira (não mini, não calzone) usa o catálogo oficial de
+  // sabores da Fase 2A — Tradicionais/Especiais/Doces, com IDs e preço por
+  // tamanho próprios (ver @/lib/catalog/pizzaFlavors). Mini-pizza e calzone
+  // continuam exatamente como antes: a mesma lista efetiva de nomes
+  // (pizzaFlavorSections legado) e o mesmo preço fixo do cardápio — não
+  // fazem parte do escopo desta fase.
+  const pizzaSizeCode = !miniPizzaMode && !calzoneMode && (size === "P" || size === "M" || size === "G" || size === "F") ? size : null;
+  const especialCategoriaLabel: Record<PizzaFlavorCategory, string> = { traditional: "Pizzas Tradicionais", special: "Pizzas Especiais", sweet: "Pizzas Doces" };
+  const categoriasParaExibir: PizzaFlavorCategory[] = flavorCategoryFilter === "all" ? ["traditional", "special", "sweet"] : [flavorCategoryFilter];
+  const pizzaFlavorCategorySections = categoriasParaExibir.map((cat) => ({
+    title: especialCategoriaLabel[cat],
+    category: cat,
+    pizzaFlavors: listPizzaFlavorsByCategory(cat),
+  }));
   // Fonte efetiva de sabores do fluxo de pizza (a mesma usada pela pizza
   // normal). O calzone consome exatamente essa lista — sem lista própria —
   // só limitando a escolha a 1 sabor (ver nextFlavorSelection/singleFlavor).
@@ -1191,6 +1250,25 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const flavorSections = miniPizzaMode
     ? [{ title: "Sabores da mini-pizza", flavors: miniPizzaFlavors }]
     : pizzaFlavorSections;
+  // Sabores oficiais escolhidos (só no fluxo de pizza inteira) — usados para
+  // mostrar o preço real, o selo "Especial" e montar a seleção estruturada
+  // que o servidor vai recalcular sozinho.
+  const flavor1 = pizzaSizeCode && f1 ? findPizzaFlavorByLegacyName(f1) : null;
+  const flavor2 = pizzaSizeCode && mam && f2 ? findPizzaFlavorByLegacyName(f2) : null;
+  const clientBorders: CatalogBorder[] = (menu.borders || []).map((b) => ({
+    id: `border-${slugify(b.label)}`,
+    label: b.label,
+    priceSmallCents: Math.round(b.priceSmall * 100),
+    priceLargeCents: Math.round(b.priceLarge * 100),
+  }));
+  const pizzaSizeObj = pizzaSizeCode ? PIZZA_SIZES.find((s) => s.code === pizzaSizeCode) : null;
+  const precoEstruturadoPreview = pizzaSizeObj && flavor1
+    ? calcularPrecoPizzaEstruturada(
+        { sizeId: pizzaSizeObj.id, flavorIds: [flavor1.id, flavor2 ? flavor2.id : undefined].filter(Boolean) as string[], quantity: 1 },
+        { borders: clientBorders }
+      )
+    : null;
+  const precoBasePizzaReais = precoEstruturadoPreview && precoEstruturadoPreview.ok ? precoEstruturadoPreview.unitPriceCents / 100 : sizePrice;
   const selectedSizeLabel = miniPizzaMode && miniPizzaItem ? miniPizzaItem.name : size ? ((menu.sizes || []).find((s) => s.code === size)?.label || size) : "";
   const buildFootHint = !size
     ? "Escolha um tamanho para continuar"
@@ -1207,21 +1285,117 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const flavorModalTitle = miniPizzaMode ? (miniPizzaItem?.name || "Mini-pizza") : calzoneMode ? (calzoneItem?.name || "Calzone") : `Pizza ${selectedSizeLabel}`;
   const flavorModalMessage = miniPizzaMode ? "Escolha o sabor da sua mini-pizza." : calzoneMode ? "Escolha o sabor do seu calzone." : "Você pode escolher até 2 sabores.";
   const flavorModalHint = miniPizzaMode || calzoneMode ? null : "Escolha 1 sabor para pizza inteira ou 2 sabores para meio a meio.";
-  const flavorProgressLabel = f2 ? `${f1} / ${f2}` : f1 ? `${f1} — toque em outro para meio a meio` : "Nenhum sabor escolhido ainda";
   const renderFlavorProgress = () => !miniPizzaMode && !calzoneMode && (
     <div className="flavor-progress">
       <div className="flavor-progress-dots">
         <span className={`pd ${f1 ? "done" : "cur"}`} />
         <span className={`pd ${f2 ? "done" : f1 ? "cur" : ""}`} />
       </div>
-      <span className="flavor-progress-label">{flavorProgressLabel}</span>
+      <span className="flavor-progress-label">
+        {f2 ? (<>{f1}{flavor1?.category === "special" && <EspecialBadge />} / {f2}{flavor2?.category === "special" && <EspecialBadge />}</>)
+          : f1 ? (<>{f1}{flavor1?.category === "special" && <EspecialBadge />} — toque em outro para meio a meio</>)
+          : "Nenhum sabor escolhido ainda"}
+      </span>
+      {mam && <div className="flavor-progress-hint" style={{ fontSize: 12, color: "var(--text-sub)", marginTop: 4 }}>Na pizza meio a meio, vale o sabor de maior preço.</div>}
+      {pizzaSizeCode && flavor1 && <div className="flavor-progress-price" style={{ fontSize: 15, fontWeight: 800, marginTop: 4 }}>{money(precoBasePizzaReais)}</div>}
     </div>
   );
+  const renderCategoryTabs = () => !miniPizzaMode && !calzoneMode && (
+    <div className="pizza-category-tabs" style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
+      {PIZZA_CATEGORY_TABS.map((tab) => (
+        <button
+          key={tab.key}
+          type="button"
+          onClick={() => setFlavorCategoryFilter(tab.key)}
+          style={{
+            padding: "6px 12px",
+            borderRadius: 999,
+            fontSize: 13,
+            fontWeight: 700,
+            cursor: "pointer",
+            border: flavorCategoryFilter === tab.key ? "1px solid var(--brand)" : "1px solid var(--border)",
+            background: flavorCategoryFilter === tab.key ? "var(--brand-soft)" : "var(--surface)",
+            color: flavorCategoryFilter === tab.key ? "var(--brand-text)" : "var(--text)",
+          }}
+        >
+          {tab.label}
+        </button>
+      ))}
+    </div>
+  );
+  // Renderiza a lista de sabores — reaproveitada pela tela sc-build e pelo
+  // modal de sabores (mesma origem de dados, dois lugares na tela). Mini-
+  // pizza continua com a lista de nomes de sempre; pizza inteira usa o
+  // catálogo oficial (Tradicionais/Especiais/Doces) com preço real e selo.
+  const renderPizzaFlavorList = (keyPrefix: string) =>
+    miniPizzaMode || calzoneMode ? (
+      flavorSections.map((section) => (
+        <div key={`${keyPrefix}-${section.title}`}>
+          <div className="section-label">{section.title}</div>
+          {section.flavors.map((f) => {
+            const esg = esgotados.includes(f);
+            return (
+              <div key={`${keyPrefix}-${section.title}-${f}`} className={`opt flavor-opt ${f === f1 || f === f2 ? "sel" : ""} ${esg ? "esg" : ""}`} onClick={() => !esg && pickFlavor(f)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }} {...optA11yAttrs(esg)} onKeyDown={(e) => { if (!esg && isActivateKey(e)) { e.preventDefault(); pickFlavor(f); } }}>
+                <div className="opt-emoji">🍕</div><div className="opt-body"><div className="opt-title">{f}</div>{esg && <div className="opt-desc" style={{ color: "var(--danger)" }}>Esgotado</div>}</div><div className="opt-check" />
+              </div>
+            );
+          })}
+        </div>
+      ))
+    ) : (
+      <>
+        {renderCategoryTabs()}
+        {pizzaFlavorCategorySections.map((section) => (
+          <div key={`${keyPrefix}-${section.title}`}>
+            <div className="section-label">{section.title}</div>
+            {section.pizzaFlavors.map((pf) => {
+              const esg = esgotados.includes(pf.name) || (pf.legacyAliases || []).some((alias) => esgotados.includes(alias));
+              const selecionado = pf.name === f1 || pf.name === f2;
+              const preco = pizzaSizeCode ? pf.pricesCents[pizzaSizeCode] / 100 : null;
+              return (
+                <div key={`${keyPrefix}-${section.title}-${pf.id}`} className={`opt flavor-opt ${selecionado ? "sel" : ""} ${esg ? "esg" : ""}`} onClick={() => !esg && pickFlavor(pf.name)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }} {...optA11yAttrs(esg)} onKeyDown={(e) => { if (!esg && isActivateKey(e)) { e.preventDefault(); pickFlavor(pf.name); } }}>
+                  <div className="opt-emoji">🍕</div>
+                  <div className="opt-body">
+                    <div className="opt-title">{pf.name}{pf.category === "special" && <EspecialBadge />}</div>
+                    {esg ? <div className="opt-desc" style={{ color: "var(--danger)" }}>Esgotado</div> : <div className="opt-desc">{pf.description}</div>}
+                  </div>
+                  {preco !== null && <div className="opt-price">{money(preco)}</div>}
+                  <div className="opt-check" />
+                </div>
+              );
+            })}
+          </div>
+        ))}
+      </>
+    );
   function addPizzaWithBorder(chosenBorder: string | null, chosenBorderPrice: number) {
     setBorder(chosenBorder); setBorderPrice(chosenBorderPrice);
     const flavor = mam ? `${f1} / ${f2}` : f1;
-    const keys = [f1, mam ? f2 : null, chosenBorder].filter(Boolean) as string[];
-    const newItem: CartItem = { emoji: "🍕", kind: "pizza", name: `Pizza ${size}${mam ? " (meio a meio)" : ""}`, detail: `${flavor}${chosenBorder ? ` · borda ${chosenBorder}` : ""}`, price: sizePrice + chosenBorderPrice, qty: 1, keys };
+    // Inclui também os aliases legados do sabor nas "keys" de detecção de
+    // esgotado — o painel de estoque ainda marca esgotado pelo nome antigo
+    // (não mudou nesta fase), então um sabor renomeado (ex.: "A Moda" →
+    // "À Moda da Casa") precisa continuar reconhecido dos dois lados.
+    const keys = [
+      f1,
+      mam ? f2 : null,
+      chosenBorder,
+      ...(flavor1?.legacyAliases || []),
+      ...(mam ? flavor2?.legacyAliases || [] : []),
+    ].filter(Boolean) as string[];
+    let price = sizePrice + chosenBorderPrice;
+    let pizzaEstruturada: CartItem["pizzaEstruturada"];
+    let especial = false;
+    if (pizzaSizeObj && flavor1) {
+      const flavorIds = [flavor1.id, flavor2 ? flavor2.id : undefined].filter(Boolean) as string[];
+      const borderId = chosenBorder ? clientBorders.find((b) => b.label === chosenBorder)?.id : undefined;
+      const resultado = calcularPrecoPizzaEstruturada({ sizeId: pizzaSizeObj.id, flavorIds, borderId, quantity: 1 }, { borders: clientBorders });
+      if (resultado.ok) {
+        price = resultado.unitPriceCents / 100;
+        pizzaEstruturada = { sizeId: pizzaSizeObj.id, flavorIds, borderId };
+        especial = resultado.flavors.some((fl) => fl.category === "special");
+      }
+    }
+    const newItem: CartItem = { emoji: "🍕", kind: "pizza", name: `Pizza ${size}${mam ? " (meio a meio)" : ""}`, detail: `${flavor}${chosenBorder ? ` · borda ${chosenBorder}` : ""}`, price, qty: 1, keys, pizzaEstruturada, especial };
     const newCart = [...cart, newItem];
     setCart(newCart);
     setLastAddedKind("pizza");
@@ -1718,19 +1892,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                   {miniPizzaMode && <div className="mini-flow-note">Mini-pizza usa preco e produto existentes do cardapio.</div>}
                   {renderFlavorProgress()}
                   <div className="flavor-list">
-                    {flavorSections.map((section) => (
-                      <div key={section.title}>
-                        <div className="section-label">{section.title}</div>
-                        {section.flavors.map((f) => {
-                          const esg = esgotados.includes(f)
-                          return (
-                            <div key={`${section.title}-${f}`} className={`opt flavor-opt ${f === f1 || f === f2 ? "sel" : ""} ${esg ? "esg" : ""}`} onClick={() => !esg && pickFlavor(f)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }} {...optA11yAttrs(esg)} onKeyDown={(e) => { if (!esg && isActivateKey(e)) { e.preventDefault(); pickFlavor(f); } }}>
-                              <div className="opt-emoji">🍕</div><div className="opt-body"><div className="opt-title">{f}</div>{esg && <div className="opt-desc" style={{ color: "var(--danger)" }}>Esgotado</div>}</div><div className="opt-check" />
-                            </div>
-                          )
-                        })}
-                      </div>
-                    ))}
+                    {renderPizzaFlavorList("scr")}
                   </div>
                 </>
               ) : (
@@ -1743,6 +1905,17 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
             <section className="screen active">
               <TopBack onClick={() => go("sc-build")} title="Borda" />
               <PizzaCtx />
+              {pizzaSizeCode && flavor1 && (
+                <div className="pizza-resumo" style={{ background: "var(--card)", borderRadius: 10, padding: "10px 14px", marginBottom: 12 }}>
+                  <div style={{ fontSize: 13, color: "var(--text-sub)", marginBottom: 2 }}>Resumo da pizza</div>
+                  <div style={{ fontSize: 15, fontWeight: 700 }}>
+                    {f1}{flavor1.category === "special" && <EspecialBadge />}
+                    {mam && (<>{" / "}{f2}{flavor2?.category === "special" && <EspecialBadge />}</>)}
+                  </div>
+                  {mam && <div style={{ fontSize: 12, color: "var(--text-sub)", marginTop: 2 }}>Na pizza meio a meio, vale o sabor de maior preço.</div>}
+                  <div style={{ fontSize: 16, fontWeight: 800, marginTop: 4 }}>{money(precoBasePizzaReais)}</div>
+                </div>
+              )}
               <div className="screen-head"><h2>Escolha a borda</h2><p>Toque em uma opcao para adicionar direto ao pedido.</p></div>
               <div className="opt" onClick={() => addPizzaWithBorder(null, 0)} {...optA11yAttrs()} onKeyDown={(e) => { if (isActivateKey(e)) { e.preventDefault(); addPizzaWithBorder(null, 0); } }}><div className="opt-emoji">⭕</div><div className="opt-body"><div className="opt-title">Sem borda</div></div><div className="opt-check" /></div>
               {(menu.borders || []).map((b, i) => { const p = bigBorder(size!) ? b.priceLarge : b.priceSmall; const esg = esgotados.includes(b.label); return (<div key={i} className={`opt ${border === b.label ? "sel" : ""}`} onClick={() => !esg && addPizzaWithBorder(b.label, p)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }} {...optA11yAttrs(esg)} onKeyDown={(e) => { if (!esg && isActivateKey(e)) { e.preventDefault(); addPizzaWithBorder(b.label, p); } }}><div className="opt-emoji">🧀</div><div className="opt-body"><div className="opt-title">{b.label}</div>{esg && <div className="opt-desc" style={{ color: "var(--danger)" }}>Esgotado</div>}</div><div className="opt-price">{esg ? "" : `+${money(p)}`}</div><div className="opt-check" /></div>); })}
@@ -1840,7 +2013,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
               )}
               <div className="screen-head"><h2>Confira os itens</h2><p>Tudo certo? Então bora finalizar.</p></div>
               {cart.length === 0 ? (<CardapioIllustration {...CARDAPIO_ILLUSTRATIONS.sacolaVazia} />) : (
-                <>{(() => { let pn = 0; return cart.map((it, i) => { let tag = null; if (it.recompensaJornadaId) { tag = <span className="ci-tag" style={{ background: "var(--secondary)", color: "var(--secondary-foreground)" }}>Presente da Jornada do Chef</span>; } else if (it.kind === "pizza") { pn++; tag = <span className="ci-tag">Pizza {pn}</span>; } const nm = it.kind === "pizza" ? it.name.replace(/^Pizza /, "") : it.name; const itemEsg = cartItemEsgotado(it.keys, esgotados); return (<div key={i} className="cart-item"><div className="ci-emoji">{it.emoji}</div><div className="ci-body"><div className="ci-name">{tag}{nm}{it.qty > 1 ? ` ×${it.qty}` : ""}{itemEsg && <span style={{ color: "var(--danger-text)", fontWeight: 800, marginLeft: 6 }}>· Esgotado</span>}</div>{it.detail && <div className="ci-detail">{it.detail}</div>}<div className="ci-price">{it.recompensaJornadaId ? <span style={{ color: "var(--success-text)", fontWeight: 800 }}>Grátis</span> : money(it.price * it.qty)}</div>{it.kind === "simple" && !it.recompensaJornadaId && (<div className="qty-pill"><button onClick={() => chQty(i, -1)}>−</button><span>{it.qty}</span><button onClick={() => chQty(i, 1)}>+</button></div>)}</div><button className="ci-remove" onClick={() => rmItem(i)}>{ICONS.remover}</button></div>); }); })()}<div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 4px 4px", fontWeight: 700, fontSize: 19 }}><span>Subtotal</span><span>{money(cartTotal)}</span></div>{descontoResgate > 0 && (<div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 4px 0", fontWeight: 700, fontSize: 14, color: "var(--success-text)" }}><span>Desconto fidelidade</span><span>−{money(descontoResgate)}</span></div>)}</>
+                <>{(() => { let pn = 0; return cart.map((it, i) => { let tag = null; if (it.recompensaJornadaId) { tag = <span className="ci-tag" style={{ background: "var(--secondary)", color: "var(--secondary-foreground)" }}>Presente da Jornada do Chef</span>; } else if (it.kind === "pizza") { pn++; tag = <span className="ci-tag">Pizza {pn}</span>; } const nm = it.kind === "pizza" ? it.name.replace(/^Pizza /, "") : it.name; const itemEsg = cartItemEsgotado(it.keys, esgotados); return (<div key={i} className="cart-item"><div className="ci-emoji">{it.emoji}</div><div className="ci-body"><div className="ci-name">{tag}{nm}{it.especial && <EspecialBadge />}{it.qty > 1 ? ` ×${it.qty}` : ""}{itemEsg && <span style={{ color: "var(--danger-text)", fontWeight: 800, marginLeft: 6 }}>· Esgotado</span>}</div>{it.detail && <div className="ci-detail">{it.detail}</div>}<div className="ci-price">{it.recompensaJornadaId ? <span style={{ color: "var(--success-text)", fontWeight: 800 }}>Grátis</span> : money(it.price * it.qty)}</div>{it.kind === "simple" && !it.recompensaJornadaId && (<div className="qty-pill"><button onClick={() => chQty(i, -1)}>−</button><span>{it.qty}</span><button onClick={() => chQty(i, 1)}>+</button></div>)}</div><button className="ci-remove" onClick={() => rmItem(i)}>{ICONS.remover}</button></div>); }); })()}<div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 4px 4px", fontWeight: 700, fontSize: 19 }}><span>Subtotal</span><span>{money(cartTotal)}</span></div>{descontoResgate > 0 && (<div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 4px 0", fontWeight: 700, fontSize: 14, color: "var(--success-text)" }}><span>Desconto fidelidade</span><span>−{money(descontoResgate)}</span></div>)}</>
               )}
               <button className="btn btn-ghost btn-sm" style={{ marginTop: 4 }} onClick={() => go("sc-start")}>+ Adicionar mais</button>
               {cartEsgotado && <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 10, background: "color-mix(in srgb, var(--danger) 10%, transparent)", color: "var(--danger)", fontSize: 13, fontWeight: 700 }}>{ICONS.alerta} Um item do seu pedido ficou esgotado. Remova para continuar.</div>}
@@ -2293,19 +2466,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
               <button type="button" className="payment-modal-close" aria-label="Fechar" onClick={() => setFlavorModalOpen(false)}>×</button>
             </div>
             <div className="flavor-modal-body">
-              {flavorSections.map((section) => (
-                <div key={section.title}>
-                  <div className="section-label">{section.title}</div>
-                  {section.flavors.map((f) => {
-                    const esg = esgotados.includes(f);
-                    return (
-                      <div key={`modal-${section.title}-${f}`} className={`opt flavor-opt ${f === f1 || f === f2 ? "sel" : ""} ${esg ? "esg" : ""}`} onClick={() => !esg && pickFlavor(f)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }} {...optA11yAttrs(esg)} onKeyDown={(e) => { if (!esg && isActivateKey(e)) { e.preventDefault(); pickFlavor(f); } }}>
-                        <div className="opt-emoji">🍕</div><div className="opt-body"><div className="opt-title">{f}</div>{esg && <div className="opt-desc" style={{ color: "var(--danger)" }}>Esgotado</div>}</div><div className="opt-check" />
-                      </div>
-                    );
-                  })}
-                </div>
-              ))}
+              {renderPizzaFlavorList("modal")}
             </div>
             <div className="payment-modal-actions single">
               <button type="button" className="btn" disabled={!buildOk} onClick={confirmFromModal}>{buildActionLabel}</button>

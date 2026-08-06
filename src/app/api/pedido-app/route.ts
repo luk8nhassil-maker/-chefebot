@@ -11,7 +11,8 @@ import { temDinheiroNoPagamento, valorDinheiroEsperado, temPixNoPagamento, valor
 import { verificarTokenCliente, CLIENTE_COOKIE } from "@/lib/clienteAuth";
 import { buscarClientePorId, sanitizeTelefoneCliente } from "@/lib/clientes";
 import { calcularPontosElegiveisPedido, registrarMovimentoPontosIdempotente, construirEventoIdPontos, derivarClienteIdPorTelefone, obterReservasResgatePontos, confirmarResgatePontos } from "@/lib/fidelidade";
-import { type ItemApp, type MenuPedidoApp, formatItem, officialUnitPrice, makePromoUnitPrice, contarPizzasPagasParaFidelidade } from "@/lib/pedidoAppItens";
+import { type ItemApp, formatItem, makePromoUnitPrice, contarPizzasPagasParaFidelidade } from "@/lib/pedidoAppItens";
+import { unitPriceReaisPizza } from "@/lib/pricing/pizzaEngine";
 import { prepararResgateParaPedido, confirmarReservaNoPedido, liberarVinculoRecompensaPedidoNaoCriado, type EscolhaRecompensaJornada } from "@/lib/jornadaChef";
 import { survivalModeEnabled, survivalClientRequestIdEnforcementEnabled } from "@/survival/flags";
 import { lerSessaoAdministrativa, origemDoPedido } from "@/lib/sessaoAdministrativa";
@@ -1096,7 +1097,7 @@ export async function POST(req: NextRequest) {
 
       const itensValidados = body.itens.map((item) => ({
         linha: formatItem(item),
-        unitPrice: item.kind === "promo" ? promoUnitPrice(item) : officialUnitPrice(item, menu as MenuPedidoApp),
+        unitPrice: item.kind === "promo" ? promoUnitPrice(item) : unitPriceReaisPizza(item, menu),
         qty: item.qty,
       }));
 
