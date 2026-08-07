@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyToken, validateCredentials } from '@/lib/auth'
 import { redis } from '@/lib/redis'
+import { mutarPedidos } from '@/lib/pedidosConcorrencia'
 import { confirmarPixMetadata, type PixMetadata } from '@/lib/pix'
 import { registrarAuditoriaPixManual } from '@/lib/pixAuditoria'
 import { encerrarSentinela } from '@/lib/pixSentinela'
@@ -47,6 +48,52 @@ function respostaJaConfirmado(pedido: Pedido) {
   )
 }
 
+type ResultadoConfirmacaoManual =
+  | { tipo: 'nao_encontrado' }
+  | { tipo: 'cancelado' }
+  | { tipo: 'ja_confirmado'; pedido: Pedido }
+  | { tipo: 'confirmado'; statusAnterior: string; valorConfirmado: number; pixConfirmadoMeta: PixMetadata }
+
+// Protegido pelo lock GLOBAL de "pedidos" (ver src/lib/pedidosConcorrencia.ts):
+// a revalidação (cancelado/já confirmado) e a gravação acontecem sobre uma
+// leitura FRESCA, DENTRO do lock — nunca sobre o snapshot lido antes da
+// senha ser verificada. validateCredentials já rodou antes de chamar esta
+// função (é local/síncrono, não uma chamada externa) — nada de rede
+// acontece dentro da seção crítica.
+async function confirmarPixManualAtomico(
+  id: string,
+  usuario: { username: string; name: string; role: string }
+): Promise<ResultadoConfirmacaoManual> {
+  return mutarPedidos<Pedido, ResultadoConfirmacaoManual>((pedidosFrescos) => {
+    const index = pedidosFrescos.findIndex(p => p.id === id)
+    if (index === -1) return { persistir: false, resultado: { tipo: 'nao_encontrado' } }
+    const pedido = pedidosFrescos[index]
+    if (pedido.status === 'cancelado') return { persistir: false, resultado: { tipo: 'cancelado' } }
+    if (pixJaConfirmado(pedido)) return { persistir: false, resultado: { tipo: 'ja_confirmado', pedido } }
+
+    const statusAnterior = pedido.pix?.status ?? 'pendente'
+    const confirmadoEm = new Date().toISOString()
+    const valorConfirmado =
+      typeof pedido.pix?.valorEsperado === 'number' && Number.isFinite(pedido.pix.valorEsperado)
+        ? pedido.pix.valorEsperado
+        : pedido.total
+
+    const pixConfirmadoMeta = confirmarPixMetadata(pedido.pix, 'manual', confirmadoEm, {
+      usuario: usuario.username,
+      nome: usuario.name,
+      role: usuario.role,
+    })
+
+    const atualizados = [...pedidosFrescos]
+    atualizados[index] = { ...pedido, pixConfirmado: true, pix: pixConfirmadoMeta }
+    return {
+      persistir: true,
+      pedidos: atualizados,
+      resultado: { tipo: 'confirmado', statusAnterior, valorConfirmado, pixConfirmadoMeta },
+    }
+  })
+}
+
 // Endpoint dedicado e restrito à confirmação manual segura do Pix no painel
 // /pedidos. Não confia em nada vindo do corpo além do id do pedido e da
 // senha: valor, status e identidade sempre vêm do servidor. A confirmação
@@ -87,33 +134,22 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Senha incorreta. O pagamento não foi confirmado.' }, { status: 401 })
   }
 
-  // Revalida direto no servidor, o mais próximo possível da gravação, para
-  // reduzir a janela de corrida com a confirmação automática que pode ter
-  // rodado enquanto o modal estava aberto (webhook/conciliador Mercado Pago).
-  const pedidosNaGravacao = await getPedidos()
-  const index = pedidosNaGravacao.findIndex(p => p.id === id)
-  if (index === -1) return NextResponse.json({ error: 'Pedido não encontrado.' }, { status: 404 })
-  const pedidoNaGravacao = pedidosNaGravacao[index]
-  if (pedidoNaGravacao.status === 'cancelado') {
+  // Revalida e grava dentro do lock GLOBAL de "pedidos" (ver
+  // confirmarPixManualAtomico acima), sobre uma leitura FRESCA — fecha por
+  // completo a janela de corrida com a confirmação automática (webhook/
+  // conciliador Mercado Pago) que antes só era reduzida por uma releitura
+  // manual sem proteção nenhuma contra escrita concorrente de outro escritor.
+  const resultado = await confirmarPixManualAtomico(id, usuario)
+  if (resultado.tipo === 'nao_encontrado') {
+    return NextResponse.json({ error: 'Pedido não encontrado.' }, { status: 404 })
+  }
+  if (resultado.tipo === 'cancelado') {
     return NextResponse.json({ error: 'Este pedido foi cancelado e não pode mais ser confirmado.' }, { status: 409 })
   }
-  if (pixJaConfirmado(pedidoNaGravacao)) return respostaJaConfirmado(pedidoNaGravacao)
+  if (resultado.tipo === 'ja_confirmado') return respostaJaConfirmado(resultado.pedido)
 
-  const statusAnterior = pedidoNaGravacao.pix?.status ?? 'pendente'
-  const confirmadoEm = new Date().toISOString()
-  const valorConfirmado =
-    typeof pedidoNaGravacao.pix?.valorEsperado === 'number' && Number.isFinite(pedidoNaGravacao.pix.valorEsperado)
-      ? pedidoNaGravacao.pix.valorEsperado
-      : pedidoNaGravacao.total
-
-  const pixConfirmadoMeta = confirmarPixMetadata(pedidoNaGravacao.pix, 'manual', confirmadoEm, {
-    usuario: usuario.username,
-    nome: usuario.name,
-    role: usuario.role,
-  })
-
-  pedidosNaGravacao[index] = { ...pedidoNaGravacao, pixConfirmado: true, pix: pixConfirmadoMeta }
-  await redis.set('pedidos', pedidosNaGravacao)
+  const { statusAnterior, valorConfirmado, pixConfirmadoMeta } = resultado
+  const confirmadoEm = pixConfirmadoMeta.confirmadoEm ?? new Date().toISOString()
 
   // Best-effort — nunca pode afetar a confirmação acima, que já foi
   // persistida. A confirmação manual NUNCA é bloqueada pelo Sentinela; aqui

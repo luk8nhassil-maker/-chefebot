@@ -6,9 +6,21 @@ const redisStore = new Map<string, unknown>();
 vi.mock("@/lib/redis", () => ({
   redis: {
     get: vi.fn(async (key: string) => (redisStore.has(key) ? redisStore.get(key) : null)),
-    set: vi.fn(async (key: string, value: unknown) => {
+    set: vi.fn(async (key: string, value: unknown, opts?: { nx?: boolean }) => {
+      if (opts?.nx && redisStore.has(key)) return null;
       redisStore.set(key, value);
       return "OK";
+    }),
+    // Compare-and-delete atômico do lock GLOBAL de "pedidos" (ver
+    // src/lib/pedidosConcorrencia.ts) — 1 chave + 1 arg (o token).
+    eval: vi.fn(async (_script: string, keys: string[], args: string[]) => {
+      const [chave] = keys;
+      const [tokenEsperado] = args;
+      if (redisStore.get(chave) === tokenEsperado) {
+        redisStore.delete(chave);
+        return 1;
+      }
+      return 0;
     }),
   },
 }));
@@ -165,8 +177,10 @@ describe("POST /api/orders/confirmar-pix-manual — segurança da confirmação 
       pixConfirmado: true,
       pix: { valorEsperado: 50, status: "confirmado" as const, confirmadoPor: "webhook" as const, confirmadoEm: "2026-07-14T10:00:00.000Z" },
     }];
-    // 1ª leitura (antes da senha): pedido ainda pendente. 2ª leitura, logo antes
-    // de gravar: o webhook já confirmou nesse meio-tempo (janela da corrida).
+    // 1ª leitura (antes da senha): pedido ainda pendente. 2ª leitura — a
+    // releitura FRESCA feita dentro do lock global (ver
+    // confirmarPixManualAtomico), depois do SET NX de aquisição — mostra
+    // que o webhook já confirmou nesse meio-tempo (janela da corrida).
     vi.mocked(redis.get)
       .mockImplementationOnce(async () => [pendente])
       .mockImplementationOnce(async () => confirmadoPorWebhook);
@@ -174,7 +188,9 @@ describe("POST /api/orders/confirmar-pix-manual — segurança da confirmação 
     const data = await res.json();
     expect(res.status).toBe(409);
     expect(data.confirmadoPor).toBe("webhook");
-    expect(redis.set).not.toHaveBeenCalled();
+    // Nenhuma escrita da chave "pedidos" ocorre — só o SET NX (adquirir) e o
+    // EVAL (liberar) do lock global, best-effort, nunca a mutação em si.
+    expect(vi.mocked(redis.set).mock.calls.some(([key]) => key === "pedidos")).toBe(false);
   });
 
   test("10. confirmação correta registra auditoria com os campos esperados (sem senha)", async () => {
