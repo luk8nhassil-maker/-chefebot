@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { redis } from "@/lib/redis";
+import { mutarPedidos } from "@/lib/pedidosConcorrencia";
 import { lerSessaoAdministrativa } from "@/lib/sessaoAdministrativa";
 import {
   criarPixMetadata,
@@ -41,6 +42,13 @@ type EditarPagamentoAdminBody = {
   pagamento?: string;
   troco?: string;
 };
+
+type ResultadoEditarPagamentoAdmin =
+  | { tipo: "nao_encontrado" }
+  | { tipo: "cancelado" }
+  | { tipo: "pagamento_confirmado" }
+  | { tipo: "edicao_cliente_ativa" }
+  | { tipo: "ok"; atualizado: PedidoRedis };
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const sessaoAdmin = await lerSessaoAdministrativa(req);
@@ -180,8 +188,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const revisaoAtual = pedido.revision ?? 1;
     const novaRevisao = revisaoAtual + 1;
     const pixSubstituidoAntes = pedido.pixSubstituido?.length || 0;
-    const atualizado: PedidoRedis = {
-      ...pedido,
+    const camposAtualizados: Partial<PedidoRedis> = {
       pagamento,
       ...(body.troco ? { troco: body.troco } : { troco: undefined }),
       pix: novoPix,
@@ -190,20 +197,57 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       editedAt: agora,
       editedBy: "atendente",
       changesSummary,
-      editHistory: [
-        ...(pedido.editHistory || []),
-        {
-          tipo: "salvo",
-          horario: agora,
-          revisaoAnterior: revisaoAtual,
-          revisaoNova: novaRevisao,
-          resumo: changesSummary,
-        },
-      ],
     };
-    pedidos[index] = atualizado;
-    await redis.set("pedidos", pedidos);
 
+    // Pix já foi preparado acima (chamada externa ao Mercado Pago, fora de
+    // qualquer lock). Daqui pra frente: protegido pelo lock GLOBAL de
+    // "pedidos" (ver src/lib/pedidosConcorrencia.ts) — releitura fresca,
+    // revalidação das mesmas invariantes contra esse estado fresco, e só
+    // então a escrita. O mutex por pedido continua segurado durante toda a
+    // rota.
+    const resultadoPersistencia = await mutarPedidos<PedidoRedis, ResultadoEditarPagamentoAdmin>((pedidosFrescos) => {
+      const indexFresco = pedidosFrescos.findIndex((p) => p.id === id);
+      if (indexFresco < 0) return { persistir: false, resultado: { tipo: "nao_encontrado" } };
+      const pedidoFresco = pedidosFrescos[indexFresco];
+      if (pedidoFresco.status === "cancelado") return { persistir: false, resultado: { tipo: "cancelado" } };
+      if (pagamentoJaConfirmado(pedidoFresco)) return { persistir: false, resultado: { tipo: "pagamento_confirmado" } };
+      if (pedidoFresco.editStatus === "editing" && lockEdicaoAtivo(pedidoFresco)) {
+        return { persistir: false, resultado: { tipo: "edicao_cliente_ativa" } };
+      }
+
+      const atualizadoFinal: PedidoRedis = {
+        ...pedidoFresco,
+        ...camposAtualizados,
+        editHistory: [
+          ...(pedidoFresco.editHistory || []),
+          { tipo: "salvo", horario: agora, revisaoAnterior: revisaoAtual, revisaoNova: novaRevisao, resumo: changesSummary },
+        ],
+      };
+      const atualizados = [...pedidosFrescos];
+      atualizados[indexFresco] = atualizadoFinal;
+      return { persistir: true, pedidos: atualizados, resultado: { tipo: "ok", atualizado: atualizadoFinal } };
+    });
+
+    if (resultadoPersistencia.tipo === "nao_encontrado") {
+      return NextResponse.json({ ok: false, error: "Pedido não encontrado" }, { status: 404 });
+    }
+    if (resultadoPersistencia.tipo === "cancelado") {
+      return NextResponse.json({ ok: false, error: "Pedido cancelado não pode ter o pagamento editado" }, { status: 409 });
+    }
+    if (resultadoPersistencia.tipo === "pagamento_confirmado") {
+      return NextResponse.json(
+        { ok: false, error: "O pagamento deste pedido já foi confirmado e não pode mais ser alterado." },
+        { status: 409 }
+      );
+    }
+    if (resultadoPersistencia.tipo === "edicao_cliente_ativa") {
+      return NextResponse.json(
+        { ok: false, error: "O cliente está editando este pedido agora. Tente novamente em instantes." },
+        { status: 409 }
+      );
+    }
+
+    const atualizado = resultadoPersistencia.atualizado;
     const pixCliente = serializarPixCliente(atualizado.pix, configPix);
     return NextResponse.json({
       ok: true,

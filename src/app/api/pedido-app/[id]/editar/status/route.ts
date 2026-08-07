@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { redis } from "@/lib/redis";
+import { mutarPedidos } from "@/lib/pedidosConcorrencia";
 import type { PedidoRedis } from "@/types/pedidoRedis";
 import { montarStatusPublicoPedido } from "@/lib/pedidoStatusPublico";
 import {
@@ -34,15 +35,20 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const mutexToken = await adquirirMutexEdicao(id);
     if (mutexToken) {
       try {
-        const atuais = (await redis.get<PedidoRedis[]>("pedidos")) || [];
-        const idx2 = atuais.findIndex((p) => p.id === id);
-        if (idx2 >= 0 && atuais[idx2].editStatus === "editing") {
-          const limpeza2 = limparEdicaoExpiradaSeNecessario(atuais[idx2]);
-          if (limpeza2.mudou) {
-            atuais[idx2] = limpeza2.pedido;
-            await redis.set("pedidos", atuais);
+        // Protegido pelo lock GLOBAL de "pedidos" (ver
+        // src/lib/pedidosConcorrencia.ts): releitura fresca dentro do lock,
+        // nunca sobre o snapshot lido antes do mutex por pedido.
+        await mutarPedidos<PedidoRedis, void>((pedidosFrescos) => {
+          const idx2 = pedidosFrescos.findIndex((p) => p.id === id);
+          if (idx2 < 0 || pedidosFrescos[idx2].editStatus !== "editing") {
+            return { persistir: false, resultado: undefined };
           }
-        }
+          const limpeza2 = limparEdicaoExpiradaSeNecessario(pedidosFrescos[idx2]);
+          if (!limpeza2.mudou) return { persistir: false, resultado: undefined };
+          const atuais = [...pedidosFrescos];
+          atuais[idx2] = limpeza2.pedido;
+          return { persistir: true, pedidos: atuais, resultado: undefined };
+        });
       } finally {
         await liberarMutexEdicao(id, mutexToken);
       }

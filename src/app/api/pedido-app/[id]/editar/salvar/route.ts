@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { redis } from "@/lib/redis";
+import { mutarPedidos } from "@/lib/pedidosConcorrencia";
 import { getMENUDinamico } from "@/lib/menu.server";
 import { computeTaxaApp, buildEnderecoApp } from "@/lib/pedidoAppLogic";
 import {
@@ -49,6 +50,13 @@ type ConfigPizzariaPix = {
   nomeTitularPix?: string;
   whatsappPizzaria?: string;
 };
+
+type ResultadoSalvarEdicao =
+  | { tipo: "nao_encontrado" }
+  | { tipo: "sessao_invalida" }
+  | { tipo: "tempo_esgotado" }
+  | { tipo: "revisao_mudou" }
+  | { tipo: "ok"; atualizado: PedidoRedis };
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -262,8 +270,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     const agora = new Date().toISOString();
     const novaRevisao = revisaoAtual + 1;
-    const atualizado: PedidoRedis = {
-      ...pedido,
+    const camposAtualizados: Partial<PedidoRedis> = {
       itens,
       itensDetalhados: body.itens,
       total,
@@ -286,14 +293,66 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       editedAt: agora,
       editedBy: "cliente",
       changesSummary,
-      editHistory: [
-        ...(pedido.editHistory || []),
-        { tipo: "salvo", horario: agora, revisaoAnterior: revisaoAtual, revisaoNova: novaRevisao, resumo: changesSummary },
-      ],
     };
-    pedidos[index] = atualizado;
-    await redis.set("pedidos", pedidos);
 
+    // Pix já foi preparado acima (chamada externa ao Mercado Pago, fora de
+    // qualquer lock). Daqui pra frente: protegido pelo lock GLOBAL de
+    // "pedidos" (ver src/lib/pedidosConcorrencia.ts) — releitura fresca,
+    // revalidação das mesmas invariantes de identidade/sessão/revisão contra
+    // esse estado fresco, e só então a escrita. O mutex por pedido continua
+    // segurado (adquirido acima) durante toda a rota.
+    const resultadoPersistencia = await mutarPedidos<PedidoRedis, ResultadoSalvarEdicao>((pedidosFrescos) => {
+      const indexFresco = pedidosFrescos.findIndex((p) => p.id === id);
+      if (indexFresco < 0 || !tokensIguais(pedidosFrescos[indexFresco].statusToken, statusToken)) {
+        return { persistir: false, resultado: { tipo: "nao_encontrado" } };
+      }
+      const pedidoFresco = pedidosFrescos[indexFresco];
+      if (pedidoFresco.editStatus !== "editing" || pedidoFresco.editSessionId !== editSessionId) {
+        return { persistir: false, resultado: { tipo: "sessao_invalida" } };
+      }
+      if (!lockEdicaoAtivo(pedidoFresco)) {
+        return { persistir: false, resultado: { tipo: "tempo_esgotado" } };
+      }
+      if ((pedidoFresco.revision ?? 1) !== revisaoAtual) {
+        return { persistir: false, resultado: { tipo: "revisao_mudou" } };
+      }
+
+      const atualizadoFinal: PedidoRedis = {
+        ...pedidoFresco,
+        ...camposAtualizados,
+        editHistory: [
+          ...(pedidoFresco.editHistory || []),
+          { tipo: "salvo", horario: agora, revisaoAnterior: revisaoAtual, revisaoNova: novaRevisao, resumo: changesSummary },
+        ],
+      };
+      const atualizados = [...pedidosFrescos];
+      atualizados[indexFresco] = atualizadoFinal;
+      return { persistir: true, pedidos: atualizados, resultado: { tipo: "ok", atualizado: atualizadoFinal } };
+    });
+
+    if (resultadoPersistencia.tipo === "nao_encontrado") {
+      return NextResponse.json({ ok: false, error: "Pedido não encontrado" }, { status: 404 });
+    }
+    if (resultadoPersistencia.tipo === "sessao_invalida") {
+      return NextResponse.json(
+        { ok: false, error: "Sessão de edição inválida. Toque em Editar pedido novamente." },
+        { status: 409 }
+      );
+    }
+    if (resultadoPersistencia.tipo === "tempo_esgotado") {
+      return NextResponse.json(
+        { ok: false, error: "O tempo para editar terminou. Seu pedido original foi mantido." },
+        { status: 410 }
+      );
+    }
+    if (resultadoPersistencia.tipo === "revisao_mudou") {
+      return NextResponse.json(
+        { ok: false, error: "O pedido mudou enquanto você editava. Recarregue e tente novamente." },
+        { status: 409 }
+      );
+    }
+
+    const atualizado = resultadoPersistencia.atualizado;
     const pixCliente = serializarPixCliente(atualizado.pix, configPix);
     return NextResponse.json({
       ok: true,
