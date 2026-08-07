@@ -1338,18 +1338,24 @@ describe("POST /api/pedido-app — idempotência (Modo Sobrevivência)", () => {
       expect(store.has(chaveClaim(clientRequestId))).toBe(true);
     });
 
-    // [7ª revisão de segurança, ponto 3] `pedido.id === pedidoId` sozinho não
-    // basta para reconciliar: um pedido de OUTRA tentativa (hash/fingerprint
-    // diferentes) pode ter, por colisão de pedidoId (derivado de Date.now()),
-    // o mesmo id. A reconciliação nunca pode devolver numero/statusToken/pix
-    // desse outro pedido como se fossem da tentativa atual.
-    it("dois pedidos com o MESMO pedidoId mas identidades DIFERENTES: reconciliação nunca vaza dados do pedido alheio, devolve 503", async () => {
+    // [7ª revisão de segurança, ponto 3 — ATUALIZADO pela correção do
+    // incidente de mistura de clientes] `pedido.id === pedidoId` sozinho não
+    // bastava para reconciliar: um pedido de OUTRA tentativa (hash/fingerprint
+    // diferentes) podia, por colisão de pedidoId (antes derivado só de
+    // Date.now(), sem reivindicação atômica), acabar com o mesmo id. Desde
+    // `gerarIdPedidoUnico` (src/lib/numeracao.ts), o id é reivindicado
+    // atomicamente (SET NX) no momento da criação — duas tentativas com
+    // Date.now() travado no MESMO valor não colidem mais. Este teste agora
+    // prova a garantia central do patch: mesmo sob timestamp idêntico, dois
+    // clientRequestIds diferentes NUNCA recebem o mesmo pedidoId, e cada um
+    // continua endereçável e recuperável (retry) pelo seu próprio id — nunca
+    // pelo do outro.
+    it("dois pedidos criados no MESMO milissegundo (clientRequestIds diferentes) recebem ids DIFERENTES; cada um permanece endereçável só pelo próprio id", async () => {
       vi.stubEnv("SURVIVAL_MODE_ENABLED", "true");
 
       const dateNowSpy = vi.spyOn(Date, "now").mockReturnValue(1732000000123);
       try {
-        // Pedido A: criado normalmente com clientRequestId A, ocupando o
-        // pedidoId "1732000000123".
+        // Pedido A: criado normalmente com clientRequestId A.
         const clientRequestIdA = "colisao-pedidoid-identidade-A";
         const resA = await POST(postReq({ ...basePayload, clientRequestId: clientRequestIdA }));
         expect(resA.status).toBe(200);
@@ -1357,37 +1363,33 @@ describe("POST /api/pedido-app — idempotência (Modo Sobrevivência)", () => {
         expect(bodyA.pedidoId).toBe("1732000000123");
         expect(bodyA.numero).toBeDefined();
 
-        // Tentativa B: MESMO Date.now() (mesmo pedidoId candidato), CLIENT
-        // REQUEST ID DIFERENTE — a persistência de "pedidos" lança (resposta
-        // perdida do ponto de vista do cliente), forçando a reconciliação a
-        // olhar para o pedido já existente com o MESMO id (o da tentativa A).
+        // Pedido B: MESMO Date.now() travado (mesmo candidato inicial),
+        // clientRequestId DIFERENTE — a reivindicação atômica do id detecta
+        // que "1732000000123" já foi reivindicado por A e desempata para um
+        // id diferente, ANTES de qualquer efeito (Jornada, Pix, persistência).
         const clientRequestIdB = "colisao-pedidoid-identidade-B";
-        let jaFalhouSet = false;
-        redisMock.set.mockImplementation(async (key: string, value: unknown, opts?: { nx?: boolean }) => {
-          if (key === "pedidos" && !jaFalhouSet && Array.isArray(value) && (value as unknown[]).length === 2) {
-            jaFalhouSet = true;
-            throw new Error("falha simulada ao persistir pedido (tentativa B)");
-          }
-          return defaultSetImpl(key, value, opts);
-        });
-
         const resB = await POST(postReq({ ...basePayload, clientRequestId: clientRequestIdB }));
-        // Identidade (hash/fingerprint) diverge do pedido encontrado com o
-        // mesmo id — NUNCA reconstrói sucesso com os dados do pedido A, NUNCA
-        // duplica: trata como inconsistência recuperável (503).
-        expect(resB.status).toBe(503);
+        expect(resB.status).toBe(200);
         const bodyB = await resB.json();
-        expect(bodyB.ok).toBe(false);
-        expect(bodyB.unresolved).toBe(true);
-        // Nenhum campo da resposta reaproveita numero/pedidoId/pix do pedido A.
-        expect(bodyB.numero).toBeUndefined();
-        expect(bodyB.pedidoId).toBeUndefined();
 
-        // O pedido de A continua intacto — reconciliação nunca o sobrescreve
-        // nem o remove por causa da tentativa B.
-        const pedidos = store.get("pedidos") as Array<{ id: string; survivalClientRequestIdHash?: string }>;
-        expect(pedidos).toHaveLength(1);
-        expect(pedidos[0].id).toBe("1732000000123");
+        // Garantia principal do patch: nunca mais o mesmo pedidoId, mesmo com
+        // timestamp idêntico.
+        expect(bodyB.pedidoId).toBeDefined();
+        expect(bodyB.pedidoId).not.toBe(bodyA.pedidoId);
+        expect(bodyB.numero).toBeDefined();
+        expect(bodyB.numero).not.toBe(bodyA.numero);
+
+        const pedidos = store.get("pedidos") as Array<{ id: string }>;
+        expect(pedidos).toHaveLength(2);
+        expect(new Set(pedidos.map((p) => p.id)).size).toBe(2);
+
+        // Retry de B (mesmo clientRequestId) continua devolvendo o MESMO
+        // pedido de B — nunca o de A, mesmo tendo nascido no mesmo milissegundo.
+        const retryB = await POST(postReq({ ...basePayload, clientRequestId: clientRequestIdB }));
+        expect(retryB.status).toBe(200);
+        const retryBody = await retryB.json();
+        expect(retryBody.pedidoId).toBe(bodyB.pedidoId);
+        expect(retryBody.pedidoId).not.toBe(bodyA.pedidoId);
       } finally {
         dateNowSpy.mockRestore();
       }

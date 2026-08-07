@@ -81,6 +81,7 @@ vi.mock("@/lib/redis", () => ({
 
 vi.mock("@/lib/numeracao", () => ({
   proximoNumeroPedido: vi.fn(async () => 100),
+  gerarIdPedidoUnico: vi.fn(async () => Date.now().toString()),
 }));
 
 vi.mock("@/lib/clienteAuth", () => ({

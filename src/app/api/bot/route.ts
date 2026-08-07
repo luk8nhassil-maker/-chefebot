@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { processMessage, createInitialSession, BotSession } from "@/lib/bot";
 import { resolverFallbackInteligente } from "@/lib/fallbackInteligente";
 import { redis } from "@/lib/redis";
-import { proximoNumeroPedido } from "@/lib/numeracao";
+import { gerarIdPedidoUnico, proximoNumeroPedido } from "@/lib/numeracao";
 import { criarPixMetadata, type PixMetadata } from "@/lib/pix";
 
 type Pedido = {
@@ -43,7 +43,7 @@ async function salvarPedido(session: BotSession, phone: string) {
 
   const numeroPedido = await proximoNumeroPedido();
   const agora = new Date();
-  const pedidoId = Date.now().toString();
+  const pedidoId = await gerarIdPedidoUnico();
   const pix = criarPixMetadata(pedidoId, session.paymentMethod, total);
   const novoPedido: Pedido = {
     id: pedidoId,
@@ -92,7 +92,15 @@ export async function POST(req: NextRequest) {
     currentSession.step === "confirm" &&
     (message.trim() === "1" || message.trim().toLowerCase() === "sim")
   ) {
-    await salvarPedido(currentSession, phone);
+    try {
+      await salvarPedido(currentSession, phone);
+    } catch (err) {
+      // gerarIdPedidoUnico nunca devolve um id não reivindicado — se não for
+      // possível garantir unicidade, prefere não criar o pedido do simulador
+      // a arriscar colidir com um pedido real em criação simultânea.
+      console.error("[ChefeBot] Simulador: não foi possível salvar o pedido:", err);
+      return NextResponse.json({ ...result, erro: "Não foi possível salvar o pedido agora. Tente novamente." }, { status: 503 });
+    }
   }
 
   return NextResponse.json(result);
