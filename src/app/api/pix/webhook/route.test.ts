@@ -4,9 +4,21 @@ const { store, redisMock } = vi.hoisted(() => {
   const store = new Map<string, unknown>();
   const redisMock = {
     get: vi.fn(async (key: string) => store.get(key) ?? null),
-    set: vi.fn(async (key: string, value: unknown) => {
+    set: vi.fn(async (key: string, value: unknown, opts?: { nx?: boolean }) => {
+      if (opts?.nx && store.has(key)) return null;
       store.set(key, value);
       return "OK";
+    }),
+    // Compare-and-delete atômico do lock GLOBAL de "pedidos" (ver
+    // src/lib/pedidosConcorrencia.ts) — 1 chave + 1 arg (o token).
+    eval: vi.fn(async (_script: string, keys: string[], args: string[]) => {
+      const [chave] = keys;
+      const [tokenEsperado] = args;
+      if (store.get(chave) === tokenEsperado) {
+        store.delete(chave);
+        return 1;
+      }
+      return 0;
     }),
   };
   return { store, redisMock };
@@ -46,6 +58,15 @@ async function json(res: Response) {
   return res.json() as Promise<Record<string, unknown>>;
 }
 
+// `redis.set` agora também é chamado para adquirir o lock GLOBAL de
+// "pedidos" (SET NX na chave "pedidos:mutex:global", ver
+// src/lib/pedidosConcorrencia.ts) mesmo quando a rota decide NÃO persistir
+// nenhuma mutação — por isso as asserções de "nada foi escrito" checam
+// especificamente a chave "pedidos", nunca `redisMock.set` como um todo.
+function pedidosFoiEscrito(): boolean {
+  return redisMock.set.mock.calls.some(([key]) => key === "pedidos");
+}
+
 const pedidoPix = {
   id: "pedido-1",
   total: 50,
@@ -79,7 +100,7 @@ describe("POST /api/pix/webhook", () => {
       valorRecebido: 50,
       providerPaymentId: "prov-1",
     });
-    expect(redisMock.set).not.toHaveBeenCalled();
+    expect(pedidosFoiEscrito()).toBe(false);
   });
 
   it("flag ligada + segredo correto confirma Pix e salva metadados", async () => {
@@ -105,11 +126,12 @@ describe("POST /api/pix/webhook", () => {
       providerPaymentId: "prov-1",
     });
     expect(typeof pedidos[0].pix.confirmadoEm).toBe("string");
-    // 1 gravação do pedido + 2 chamadas best-effort do Sentinela Pix
-    // (encerrarSentinela grava o estado; incrementarContadorPix grava o
-    // contador sentinela_encerrado_webhook) — nenhuma delas afeta a
-    // confirmação em si, que já está persistida antes dessas chamadas.
-    expect(redisMock.set).toHaveBeenCalledTimes(3);
+    // 1 SET NX para adquirir o lock GLOBAL de "pedidos" + 1 gravação do
+    // pedido + 2 chamadas best-effort do Sentinela Pix (encerrarSentinela
+    // grava o estado; incrementarContadorPix grava o contador
+    // sentinela_encerrado_webhook) — nenhuma delas afeta a confirmação em
+    // si, que já está persistida antes dessas chamadas.
+    expect(redisMock.set).toHaveBeenCalledTimes(4);
   });
 
   it("segredo ausente ou incorreto nao confirma", async () => {
@@ -125,7 +147,7 @@ describe("POST /api/pix/webhook", () => {
 
     expect(semSegredo).toMatchObject({ wouldConfirm: false, reason: "segredo_invalido" });
     expect(segredoErrado).toMatchObject({ wouldConfirm: false, reason: "segredo_invalido" });
-    expect(redisMock.set).not.toHaveBeenCalled();
+    expect(pedidosFoiEscrito()).toBe(false);
   });
 
   it("sem PIX_WEBHOOK_SECRET configurado nao confirma", async () => {
@@ -138,7 +160,7 @@ describe("POST /api/pix/webhook", () => {
     )));
 
     expect(body).toMatchObject({ wouldConfirm: false, reason: "segredo_invalido" });
-    expect(redisMock.set).not.toHaveBeenCalled();
+    expect(pedidosFoiEscrito()).toBe(false);
   });
 
   it("valor divergente nao confirma", async () => {
@@ -152,7 +174,7 @@ describe("POST /api/pix/webhook", () => {
     )));
 
     expect(body).toMatchObject({ wouldConfirm: false, reason: "valor_divergente" });
-    expect(redisMock.set).not.toHaveBeenCalled();
+    expect(pedidosFoiEscrito()).toBe(false);
   });
 
   it("status pendente nao confirma", async () => {
@@ -166,7 +188,7 @@ describe("POST /api/pix/webhook", () => {
     )));
 
     expect(body).toMatchObject({ wouldConfirm: false, reason: "status_nao_pago" });
-    expect(redisMock.set).not.toHaveBeenCalled();
+    expect(pedidosFoiEscrito()).toBe(false);
   });
 
   it("txid inexistente nao confirma", async () => {
@@ -180,7 +202,7 @@ describe("POST /api/pix/webhook", () => {
     )));
 
     expect(body).toMatchObject({ wouldConfirm: false, reason: "pedido_nao_encontrado" });
-    expect(redisMock.set).not.toHaveBeenCalled();
+    expect(pedidosFoiEscrito()).toBe(false);
   });
 
   it("pedido ja confirmado retorna resposta idempotente sem gravar de novo", async () => {
@@ -204,7 +226,7 @@ describe("POST /api/pix/webhook", () => {
       pedidoId: "pedido-1",
       txid: "tx-1",
     });
-    expect(redisMock.set).not.toHaveBeenCalled();
+    expect(pedidosFoiEscrito()).toBe(false);
   });
 
   it("Pix hibrido confirma usando somente pix.valorEsperado, nao o total do pedido", async () => {
@@ -257,7 +279,7 @@ describe("POST /api/pix/webhook — adaptador Mercado Pago", () => {
 
     expect(body).toMatchObject({ ok: true, passive: true, provider: "mercadopago", assinaturaValida: true });
     expect(buscarPagamentoMock).not.toHaveBeenCalled(); // passivo nunca chama a API do MP
-    expect(redisMock.set).not.toHaveBeenCalled();
+    expect(pedidosFoiEscrito()).toBe(false);
   });
 
   it("type diferente de payment é tratado pelo caminho genérico, não pelo MP", async () => {
@@ -270,7 +292,7 @@ describe("POST /api/pix/webhook — adaptador Mercado Pago", () => {
     expect(body.provider).toBeUndefined();
     expect(body).toMatchObject({ ok: true, passive: true });
     expect(buscarPagamentoMock).not.toHaveBeenCalled();
-    expect(redisMock.set).not.toHaveBeenCalled();
+    expect(pedidosFoiEscrito()).toBe(false);
   });
 
   it("ativo + assinatura válida + pagamento aprovado confirma e grava (external_reference casa com pix.txid)", async () => {
@@ -286,9 +308,9 @@ describe("POST /api/pix/webhook — adaptador Mercado Pago", () => {
     expect(body).toMatchObject({ passive: false, wouldConfirm: true, confirmed: true, pedidoId: "pedido-1", txid: "tx-1" });
     expect(pedidos[0].pixConfirmado).toBe(true);
     expect(pedidos[0].pix).toMatchObject({ status: "confirmado", confirmadoPor: "webhook", providerPaymentId: "MP-9001" });
-    // 1 gravação do pedido + 2 chamadas best-effort do Sentinela Pix (ver
-    // comentário equivalente acima).
-    expect(redisMock.set).toHaveBeenCalledTimes(3);
+    // 1 SET NX do lock GLOBAL + 1 gravação do pedido + 2 chamadas
+    // best-effort do Sentinela Pix (ver comentário equivalente acima).
+    expect(redisMock.set).toHaveBeenCalledTimes(4);
   });
 
   it("ativo + assinatura inválida/ausente retorna 401 e não grava (nem busca o pagamento)", async () => {
@@ -302,7 +324,7 @@ describe("POST /api/pix/webhook — adaptador Mercado Pago", () => {
     expect(res.status).toBe(401);
     expect(body).toMatchObject({ passive: false, provider: "mercadopago", wouldConfirm: false, reason: "assinatura_invalida" });
     expect(buscarPagamentoMock).not.toHaveBeenCalled();
-    expect(redisMock.set).not.toHaveBeenCalled();
+    expect(pedidosFoiEscrito()).toBe(false);
   });
 
   it("ativo + assinatura válida + pagamento pendente não confirma", async () => {
@@ -314,7 +336,7 @@ describe("POST /api/pix/webhook — adaptador Mercado Pago", () => {
     const body = await json(await POST(postReq(mpBody, mpHeaders)));
 
     expect(body).toMatchObject({ wouldConfirm: false, reason: "status_nao_pago" });
-    expect(redisMock.set).not.toHaveBeenCalled();
+    expect(pedidosFoiEscrito()).toBe(false);
   });
 
   it("ativo + assinatura válida + valor divergente não confirma", async () => {
@@ -326,7 +348,7 @@ describe("POST /api/pix/webhook — adaptador Mercado Pago", () => {
     const body = await json(await POST(postReq(mpBody, mpHeaders)));
 
     expect(body).toMatchObject({ wouldConfirm: false, reason: "valor_divergente" });
-    expect(redisMock.set).not.toHaveBeenCalled();
+    expect(pedidosFoiEscrito()).toBe(false);
   });
 
   it("ativo + pagamento indisponível na API do MP não confirma", async () => {
@@ -338,7 +360,7 @@ describe("POST /api/pix/webhook — adaptador Mercado Pago", () => {
     const body = await json(await POST(postReq(mpBody, mpHeaders)));
 
     expect(body).toMatchObject({ passive: false, provider: "mercadopago", wouldConfirm: false, reason: "pagamento_indisponivel" });
-    expect(redisMock.set).not.toHaveBeenCalled();
+    expect(pedidosFoiEscrito()).toBe(false);
   });
 
   it("idempotência: segunda notificação MP de pedido já confirmado não reconfirma", async () => {
@@ -352,7 +374,7 @@ describe("POST /api/pix/webhook — adaptador Mercado Pago", () => {
     const body = await json(await POST(postReq(mpBody, mpHeaders)));
 
     expect(body).toMatchObject({ confirmed: true, idempotent: true, reason: "pix_ja_confirmado", pedidoId: "pedido-1" });
-    expect(redisMock.set).not.toHaveBeenCalled();
+    expect(pedidosFoiEscrito()).toBe(false);
   });
 
   // Edição de pedido (ver AGENTS.md): quando o cliente troca de Pix para
@@ -373,7 +395,7 @@ describe("POST /api/pix/webhook — adaptador Mercado Pago", () => {
     const body = await json(res);
 
     expect(body).toMatchObject({ wouldConfirm: false, reason: "cobranca_substituida", pedidoId: "pedido-1" });
-    expect(redisMock.set).not.toHaveBeenCalled();
+    expect(pedidosFoiEscrito()).toBe(false);
     const pedidos = store.get("pedidos") as any[];
     expect(pedidos[0].pixConfirmado).toBeFalsy();
   });
