@@ -4,6 +4,7 @@ import { resolverFallbackInteligente } from "@/lib/fallbackInteligente";
 import { redis } from "@/lib/redis";
 import { gerarIdPedidoUnico, proximoNumeroPedido } from "@/lib/numeracao";
 import { criarPixMetadata, type PixMetadata } from "@/lib/pix";
+import { mutarPedidos } from "@/lib/pedidosConcorrencia";
 
 type Pedido = {
   id: string;
@@ -26,7 +27,6 @@ type Pedido = {
 };
 
 async function salvarPedido(session: BotSession, phone: string) {
-  const pedidos = (await redis.get<Pedido[]>("pedidos")) || [];
   const itens = session.cart.map((item) => {
     const border = item.border && item.border !== "Sem borda" ? ` + ${item.border}` : "";
     const size = item.size ? ` ${item.size}` : "";
@@ -64,7 +64,11 @@ async function salvarPedido(session: BotSession, phone: string) {
     ...(session.neighborhood ? { bairro: session.neighborhood } : {}),
     ...(session.observacao ? { observacao: session.observacao } : {}),
   };
-  await redis.set("pedidos", [...pedidos, novoPedido]);
+  await mutarPedidos<Pedido, void>((pedidosFrescos) => ({
+    persistir: true,
+    pedidos: [...pedidosFrescos, novoPedido],
+    resultado: undefined,
+  }));
 }
 
 export async function POST(req: NextRequest) {
@@ -106,6 +110,11 @@ export async function POST(req: NextRequest) {
   return NextResponse.json(result);
 }
 
+// Fora do lock global de propósito: é um wipe incondicional (reset do
+// simulador para desenvolvimento), não um read-modify-write — não há
+// snapshot desatualizado a proteger, o resultado pretendido já é "nada
+// sobrevive". Ver auditoria de lost update / ENTREGA para a lista completa
+// de escritores fora de escopo e o motivo de cada um.
 export async function DELETE(req: NextRequest) {
   await redis.del("pedidos");
   return NextResponse.json({ ok: true });

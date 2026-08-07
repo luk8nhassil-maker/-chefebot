@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import { redis } from "@/lib/redis";
+import { mutarPedidos } from "@/lib/pedidosConcorrencia";
 import { gerarIdPedidoUnico, proximoNumeroPedido } from "@/lib/numeracao";
 import { getMENUDinamico } from "@/lib/menu.server";
 import { computeTaxaApp, buildEnderecoApp } from "@/lib/pedidoAppLogic";
@@ -489,14 +490,17 @@ async function gravarResultadoDuravel(
 // Atualiza o campo survivalState DENTRO do pedido já persistido (read-modify-write
 // pontual sobre "pedidos", mesmo padrão já usado pelo rollback do resgate) —
 // nunca cria nem remove um pedido, só corrige seu estado de consistência.
+// Protegido pelo lock GLOBAL de "pedidos" (ver src/lib/pedidosConcorrencia.ts):
+// releitura fresca dentro do lock, nunca sobre um snapshot obtido antes dele.
 async function marcarSurvivalStateDoPedido(pedidoId: string, novoEstado: SurvivalPedidoState): Promise<boolean> {
   try {
-    const pedidosAtuais = (await redis.get<PedidoArmazenado[]>("pedidos")) || [];
-    const idx = pedidosAtuais.findIndex((p) => p && p.id === pedidoId);
-    if (idx < 0) return false;
-    pedidosAtuais[idx] = { ...pedidosAtuais[idx], survivalState: novoEstado };
-    await redis.set("pedidos", pedidosAtuais);
-    return true;
+    return await mutarPedidos<PedidoArmazenado, boolean>((pedidosFrescos) => {
+      const idx = pedidosFrescos.findIndex((p) => p && p.id === pedidoId);
+      if (idx < 0) return { persistir: false, resultado: false };
+      const atualizados = [...pedidosFrescos];
+      atualizados[idx] = { ...atualizados[idx], survivalState: novoEstado };
+      return { persistir: true, pedidos: atualizados, resultado: true };
+    });
   } catch (err) {
     logSurvivalErro("idempotencia_pedido", "estado_pedido", "atualizar_estado_falhou", err);
     return false;
@@ -1408,7 +1412,6 @@ export async function POST(req: NextRequest) {
     try {
       numeroPedido = await proximoNumeroPedido();
       statusToken = criarTokenPublicoAcompanhamento();
-      const pedidos = (await redis.get<unknown[]>("pedidos")) || [];
       const pixBase = criarPixMetadata(pedidoId, body.pagamento, total);
       pix = await prepararPixProviderMercadoPago({
         pedidoId,
@@ -1470,7 +1473,15 @@ export async function POST(req: NextRequest) {
         revision: 1,
       };
 
-      await redis.set("pedidos", [...pedidos, novoPedido]);
+      // Protegido pelo lock GLOBAL de "pedidos" (ver
+      // src/lib/pedidosConcorrencia.ts): a leitura de `pedidos` é feita
+      // FRESCA, DENTRO do lock, depois de toda preparação externa (Pix)
+      // já concluída acima — nunca sobre um snapshot lido antes do lock.
+      await mutarPedidos<unknown, void>((pedidosFrescos) => ({
+        persistir: true,
+        pedidos: [...pedidosFrescos, novoPedido],
+        resultado: undefined,
+      }));
       pedidoIdCriado = pedidoId;
     } catch (err) {
       // Revisão de segurança, 5ª rodada, ponto 3: uma exceção de
@@ -1602,11 +1613,14 @@ export async function POST(req: NextRequest) {
       } catch (err) {
         console.error("[ChefeBot] Erro ao confirmar resgate de fidelidade — tentando reverter o pedido:", err);
         try {
-          const pedidosAtuais = (await redis.get<unknown[]>("pedidos")) || [];
-          await redis.set(
-            "pedidos",
-            pedidosAtuais.filter((pedido) => (pedido as { id?: unknown } | null)?.id !== pedidoId)
-          );
+          // Protegido pelo lock GLOBAL de "pedidos" (ver
+          // src/lib/pedidosConcorrencia.ts): releitura fresca dentro do
+          // lock antes de filtrar, nunca sobre um snapshot obtido antes.
+          await mutarPedidos<unknown, void>((pedidosFrescos) => ({
+            persistir: true,
+            pedidos: pedidosFrescos.filter((pedido) => (pedido as { id?: unknown } | null)?.id !== pedidoId),
+            resultado: undefined,
+          }));
           // O pedido foi removido de verdade — nenhum :result foi gravado
           // ainda (era exatamente o que este bloco adiava), então não há
           // nada para invalidar. Agora é seguro (e correto) liberar o

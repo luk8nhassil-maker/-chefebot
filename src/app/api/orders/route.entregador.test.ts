@@ -13,9 +13,26 @@ const {
     store,
     redisMock: {
       get: vi.fn(async (key: string) => store.get(key) ?? null),
-      set: vi.fn(async (key: string, value: unknown) => { store.set(key, value); return "OK"; }),
+      set: vi.fn(async (key: string, value: unknown, opts?: { nx?: boolean }) => {
+        if (opts?.nx && store.has(key)) return null;
+        store.set(key, value);
+        return "OK";
+      }),
       del: vi.fn(async (key: string) => (store.delete(key) ? 1 : 0)),
       eval: vi.fn(async (_script: string, keys: string[], args: string[]) => {
+        // Compare-and-delete atômico do lock GLOBAL de "pedidos" (ver
+        // src/lib/pedidosConcorrencia.ts) — 1 chave + 1 arg (o token). Shape
+        // distinto de SALVAR_ATRIBUICAO_LUA (3 chaves), então despacha por
+        // formato em vez de assumir sempre o script do entregador.
+        if (keys.length === 1 && args.length === 1) {
+          const [chave] = keys;
+          const [tokenEsperado] = args;
+          if (store.get(chave) === tokenEsperado) {
+            store.delete(chave);
+            return 1;
+          }
+          return 0;
+        }
         store.set(keys[0], JSON.parse(args[0]));
         const pedidoId = args[1];
         const pedidoEntregador = JSON.parse(args[2]);

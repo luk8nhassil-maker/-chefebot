@@ -34,8 +34,16 @@ import { NextRequest } from "next/server";
 
 const redisStore = new Map<string, unknown>();
 
+// Deep clone no GET: o Redis real serializa/desserializa a cada leitura —
+// duas chamadas de redis.get nunca compartilham a MESMA referência de
+// objeto em memória. Um mock que devolvesse a referência guardada faria uma
+// mutação por índice (`pedidos[index] = {...}`, usada em várias rotas)
+// vazar silenciosamente entre duas leituras "independentes" concorrentes,
+// escondendo corridas reais atrás de um artefato do mock (já pego uma vez
+// nesta auditoria — ver route.lostUpdateAuditoria.test.ts).
 function defaultGetImpl(key: string) {
-  return Promise.resolve(redisStore.has(key) ? redisStore.get(key) : null);
+  if (!redisStore.has(key)) return Promise.resolve(null);
+  return Promise.resolve(JSON.parse(JSON.stringify(redisStore.get(key))));
 }
 function defaultSetImpl(key: string, value: unknown, opts?: { nx?: boolean }) {
   if (opts?.nx && redisStore.has(key)) return Promise.resolve(null);
@@ -53,6 +61,17 @@ function defaultIncrImpl(key: string) {
   redisStore.set(key, novo);
   return Promise.resolve(novo);
 }
+// Compare-and-delete atômico do lock GLOBAL de "pedidos" (ver
+// src/lib/pedidosConcorrencia.ts) — 1 chave + 1 arg (o token).
+function defaultEvalImpl(_script: string, keys: string[], args: string[]) {
+  const [chave] = keys;
+  const [tokenEsperado] = args;
+  if (redisStore.get(chave) === tokenEsperado) {
+    redisStore.delete(chave);
+    return Promise.resolve(1);
+  }
+  return Promise.resolve(0);
+}
 
 vi.mock("@/lib/redis", () => ({
   redis: {
@@ -61,6 +80,7 @@ vi.mock("@/lib/redis", () => ({
     del: vi.fn(defaultDelImpl),
     incr: vi.fn(defaultIncrImpl),
     expire: vi.fn(async () => 1),
+    eval: vi.fn(defaultEvalImpl),
   },
 }));
 
@@ -346,35 +366,35 @@ describe("Concorrência REAL (Promise.all) — não apenas Date.now travado com 
         .map(p => PATCH(patchRequest({ id: p.id, status: "em_preparo" })))
     );
 
+    // Nomes numerados (ClienteConcorrente1, ClienteConcorrente10, ...) exigem
+    // fronteira de dígito na checagem — senão "ClienteConcorrente1" bate como
+    // substring dentro de "ClienteConcorrente10" e mascara um falso positivo.
     const mensagens = envios();
     for (let i = 0; i < 20; i++) {
       const minhasMensagens = mensagens.filter(m => m.numero === clientes[i].telefone);
       for (const m of minhasMensagens) {
-        expect(m.texto).toContain(`ClienteConcorrente${i}`);
+        expect(m.texto).toMatch(new RegExp(`ClienteConcorrente${i}(?!\\d)`));
         for (let j = 0; j < 20; j++) {
           if (j === i) continue;
-          expect(m.texto).not.toContain(`ClienteConcorrente${j}`);
+          expect(m.texto).not.toMatch(new RegExp(`ClienteConcorrente${j}(?!\\d)`));
         }
       }
     }
   });
 });
 
-// BLOQUEIO 4 da revisão externa: POST /api/orders faz um read-modify-write
-// (getPedidos → redis.set('pedidos', [...pedidos, novoPedido])) sem lock
-// nem CAS na chave "pedidos" inteira. Isto é DISTINTO da causa raiz (colisão
-// de id) e NÃO foi corrigido por gerarIdPedidoUnico — ele só garante que o
-// `id` escolhido é único, não que a escrita da lista inteira seja atômica.
-// Este teste investigou (não assumiu) se duas criações concorrentes podem
-// perder uma da outra (lost update) — CONFIRMADO: perdem. `test.fails`
-// documenta isso como um gap CONHECIDO e JÁ REPORTADO (achado separado,
-// fora do escopo deste patch — ver relatório do incidente), em vez de deixar
-// a suíte permanentemente vermelha por um problema não corrigido aqui. Se
-// algum patch futuro corrigir o lost update, ESTE teste passa a passar de
-// verdade, e o `test.fails` vira ele mesmo uma falha (sinal para atualizar
-// a expectativa) — nunca fica verde silenciosamente.
-describe("BLOQUEIO 4 — lost update em POST /api/orders (achado separado, confirmado, NÃO corrigido por este patch)", () => {
-  test.fails("duas criações concorrentes (Promise.all): SEM correção, uma das duas é perdida na lista persistida (lost update conhecido)", async () => {
+// BLOQUEIO 4 da revisão externa: POST /api/orders fazia um read-modify-write
+// (getPedidos → redis.set('pedidos', [...pedidos, novoPedido])) sem lock nem
+// CAS na chave "pedidos" inteira. Isto era DISTINTO da causa raiz (colisão
+// de id) e NÃO tinha sido corrigido por gerarIdPedidoUnico — ele só garantia
+// que o `id` escolhido era único, não que a escrita da lista inteira fosse
+// atômica. Este teste provou (com `test.fails`) que duas criações
+// concorrentes podiam perder uma da outra (lost update). Corrigido pelo lock
+// GLOBAL de "pedidos" (ver src/lib/pedidosConcorrencia.ts e
+// route.lostUpdateAuditoria.test.ts para a auditoria completa) — agora é um
+// teste normal provando a garantia inversa.
+describe("BLOQUEIO 4 — lost update em POST /api/orders — corrigido pelo lock global de pedidos", () => {
+  test("duas criações concorrentes (Promise.all): as duas persistem, nenhuma é perdida", async () => {
     const FIXO_MS = 1_700_000_012_000;
     vi.spyOn(Date, "now").mockReturnValue(FIXO_MS);
 

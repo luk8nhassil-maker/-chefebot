@@ -10,9 +10,24 @@ const redisStore = new Map<string, unknown>();
 
 vi.mock("@/lib/redis", () => ({
   redis: {
-    get: vi.fn(async (key: string) => (redisStore.has(key) ? redisStore.get(key) : null)),
-    set: vi.fn(async (key: string, value: unknown) => { redisStore.set(key, value); return "OK"; }),
+    get: vi.fn(async (key: string) => (redisStore.has(key) ? JSON.parse(JSON.stringify(redisStore.get(key))) : null)),
+    set: vi.fn(async (key: string, value: unknown, opts?: { nx?: boolean }) => {
+      if (opts?.nx && redisStore.has(key)) return null;
+      redisStore.set(key, value);
+      return "OK";
+    }),
     del: vi.fn(async (key: string) => (redisStore.delete(key) ? 1 : 0)),
+    // Compare-and-delete atômico do lock GLOBAL de "pedidos" (ver
+    // src/lib/pedidosConcorrencia.ts) — 1 chave + 1 arg (o token).
+    eval: vi.fn(async (_script: string, keys: string[], args: string[]) => {
+      const [chave] = keys;
+      const [tokenEsperado] = args;
+      if (redisStore.get(chave) === tokenEsperado) {
+        redisStore.delete(chave);
+        return 1;
+      }
+      return 0;
+    }),
   },
 }));
 
