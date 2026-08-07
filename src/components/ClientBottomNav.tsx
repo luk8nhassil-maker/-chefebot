@@ -115,7 +115,7 @@ export default function ClientBottomNav({
         .cbn-icon{font-size:20px;line-height:1;display:inline-flex;align-items:center;justify-content:center}
         .cbn-icon-wrap{position:relative;display:inline-flex}
         .cbn-icon-circle{width:36px;height:36px;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;color:var(--text-secondary);background:transparent;transition:background-color .18s ease,color .18s ease,transform .18s ease,box-shadow .18s ease,width .18s ease,height .18s ease}
-        .cbn-item.active .cbn-icon-circle{width:54px;height:54px;background:var(--primary);color:var(--primary-foreground);transform:translateY(-16px);box-shadow:0 8px 16px rgba(0,0,0,.28), 0 0 0 5px var(--surface)}
+        .cbn-item.active .cbn-icon-circle{width:58px;height:58px;background:var(--primary);color:var(--primary-foreground);transform:translateY(-26px);box-shadow:0 12px 22px rgba(0,0,0,.32), 0 0 0 10px var(--surface)}
         .cbn-item.active .cbn-label{color:var(--text-primary);font-weight:800}
         .cbn-label{line-height:1.1}
         .cbn-badge{position:absolute;top:-5px;right:-9px;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:var(--danger);color:var(--on-danger);font-size:10px;font-weight:800;display:flex;align-items:center;justify-content:center;line-height:1;box-shadow:0 0 0 2px var(--surface)}
