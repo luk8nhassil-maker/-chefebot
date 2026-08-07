@@ -20,11 +20,19 @@ function sizeIdByCode(code: string): string {
 }
 
 describe("temSelecaoEstruturada", () => {
-  it("true quando pizzaSelection presente", () => {
+  it("true quando pizzaSelection presente com objeto válido", () => {
     expect(temSelecaoEstruturada({ pizzaSelection: { sizeId: "x", flavorIds: ["y"] } })).toBe(true);
   });
-  it("false quando ausente", () => {
+  it("false quando a propriedade está totalmente ausente", () => {
     expect(temSelecaoEstruturada({})).toBe(false);
+  });
+
+  // Detecta PRESENÇA da propriedade, nunca truthiness do valor — um payload
+  // adulterado com `pizzaSelection: null` (ou false/""/0/{}) ainda assim
+  // declarou a intenção de usar o formato novo e precisa ser tratado (e
+  // rejeitado) como tal, nunca reinterpretado como item legado.
+  it.each([null, false, 0, "", {}, "texto", 42, []])("true mesmo quando pizzaSelection é %p (presente, mas com valor falsy/malformado)", (valor) => {
+    expect(temSelecaoEstruturada({ pizzaSelection: valor })).toBe(true);
   });
 });
 
@@ -112,5 +120,25 @@ describe("resolverItemComSelecaoEstruturada", () => {
     };
     const resultado = resolverItemComSelecaoEstruturada(item, catalog);
     expect(resultado).toEqual({ ok: false, error: "Quantidade inválida" });
+  });
+
+  it("rejeita pizzaSelection: null explicitamente, sem lançar exceção", () => {
+    const item = {
+      kind: "pizza",
+      name: "Pizza G",
+      detail: "Calabresa",
+      price: 50,
+      qty: 1,
+      pizzaSelection: null,
+    } as unknown as ItemApp;
+    const resultado = resolverItemComSelecaoEstruturada(item, catalog);
+    expect(resultado).toEqual({ ok: false, error: "Seleção de pizza inválida" });
+  });
+
+  it.each([false, 0, "", "texto", 42, [], {}])("rejeita pizzaSelection malformado (%p), sem lançar exceção", (valor) => {
+    const item = { kind: "pizza", name: "Pizza G", detail: "Calabresa", price: 50, qty: 1, pizzaSelection: valor } as unknown as ItemApp;
+    const resultado = resolverItemComSelecaoEstruturada(item, catalog);
+    expect(resultado.ok).toBe(false);
+    if (!resultado.ok) expect(resultado.error).toBe("Seleção de pizza inválida");
   });
 });

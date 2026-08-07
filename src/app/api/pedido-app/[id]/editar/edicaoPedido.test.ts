@@ -456,6 +456,51 @@ describe("POST salvar — seleção estruturada de pizza por ID (Fase 2)", () =>
     expect(pedidos[0].total).toBe(15); // pedido original intacto
     expect(pedidos[0].revision).toBe(1);
   });
+
+  it("pizzaSelection: null com name/detail legado válido é tratado como formato estruturado inválido — 400, nunca cai no legado", async () => {
+    const editSessionId = await iniciarEdicao();
+    const res = await salvar(req({
+      statusToken: TOKEN, editSessionId, revision: 1,
+      itens: [{ kind: "pizza", name: "Pizza G", detail: "Calabresa", price: 50, qty: 1, pizzaSelection: null }],
+      tipoEntrega: "retirada", pagamento: "Dinheiro", troco: "Sem troco",
+    }), paramsFor(PEDIDO_ID));
+
+    expect(res.status).toBe(400);
+    const pedidos = store.get("pedidos") as Array<Record<string, unknown>>;
+    expect(pedidos[0].total).toBe(15); // pedido original intacto
+    expect(pedidos[0].revision).toBe(1);
+  });
+
+  it.each([false, 0, "", "texto", 42, [], {}])(
+    "pizzaSelection malformado (%p) com name/detail legado válido é tratado como formato estruturado inválido — 400",
+    async (valor) => {
+      const editSessionId = await iniciarEdicao();
+      const res = await salvar(req({
+        statusToken: TOKEN, editSessionId, revision: 1,
+        itens: [{ kind: "pizza", name: "Pizza G", detail: "Calabresa", price: 50, qty: 1, pizzaSelection: valor }],
+        tipoEntrega: "retirada", pagamento: "Dinheiro", troco: "Sem troco",
+      }), paramsFor(PEDIDO_ID));
+
+      expect(res.status).toBe(400);
+      const pedidos = store.get("pedidos") as Array<Record<string, unknown>>;
+      expect(pedidos[0].total).toBe(15); // pedido original intacto
+      expect(pedidos[0].revision).toBe(1);
+    }
+  );
+
+  it("ausência total de pizzaSelection continua 100% legado (name/detail funcionam normalmente)", async () => {
+    const editSessionId = await iniciarEdicao();
+    const res = await salvar(req({
+      statusToken: TOKEN, editSessionId, revision: 1,
+      itens: [{ kind: "pizza", name: "Pizza G", detail: "Calabresa", price: 999, qty: 1 }],
+      tipoEntrega: "retirada", pagamento: "Dinheiro", troco: "Sem troco",
+    }), paramsFor(PEDIDO_ID));
+
+    expect(res.status).toBe(200);
+    const data = await json(res);
+    const sizeG = MENU.sizes.find((s) => s.code === "G")!;
+    expect(data.total).toBe(sizeG.price); // preço do servidor, nunca o 999 enviado pelo cliente
+  });
 });
 
 describe("POST salvar — invariante do pagamento composto", () => {

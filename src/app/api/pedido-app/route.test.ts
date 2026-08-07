@@ -1920,6 +1920,60 @@ describe("POST /api/pedido-app — seleção estruturada de pizza por ID (Fase 2
     expect(store.get("pedidos")).toBeUndefined();
   });
 
+  it("pizzaSelection: null com name/detail legado válido é tratado como formato estruturado inválido — 400, nunca cria pelo caminho legado", async () => {
+    const res = await POST(postReq({
+      ...pizzaBasePayload,
+      itens: [{
+        kind: "pizza",
+        name: "Pizza G", // válido no formato legado
+        detail: "Calabresa", // válido no formato legado
+        price: 50,
+        qty: 1,
+        pizzaSelection: null,
+      }],
+    }));
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe("Item inválido");
+    expect(store.get("pedidos")).toBeUndefined();
+  });
+
+  it.each([false, 0, "", "texto", 42, [], {}])(
+    "pizzaSelection malformado (%p) com name/detail legado válido é tratado como formato estruturado inválido — 400, nunca cai no legado",
+    async (valor) => {
+      const res = await POST(postReq({
+        ...pizzaBasePayload,
+        itens: [{
+          kind: "pizza",
+          name: "Pizza G",
+          detail: "Calabresa",
+          price: 50,
+          qty: 1,
+          pizzaSelection: valor,
+        }],
+      }));
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toBe("Item inválido");
+      expect(store.get("pedidos")).toBeUndefined();
+    }
+  );
+
+  it("ausência total de pizzaSelection continua 100% legado (name/detail funcionam normalmente)", async () => {
+    const res = await POST(postReq({
+      ...pizzaBasePayload,
+      itens: [{ kind: "pizza", name: "Pizza G", detail: "Calabresa", price: 999, qty: 1 }],
+    }));
+
+    expect(res.status).toBe(200);
+    const pedidos = store.get("pedidos") as { itens: string[]; total: number }[];
+    expect(pedidos[0].itens).toEqual(["Pizza G Calabresa"]);
+    const sizeG = MENU.sizes.find((s) => s.code === "G")!;
+    expect(pedidos[0].total).toBe(sizeG.price); // preço do servidor, nunca o 999 enviado pelo cliente
+  });
+
   it("rejeita sabor repetido (meio a meio do mesmo sabor duas vezes)", async () => {
     const res = await POST(postReq({
       ...pizzaBasePayload,

@@ -19,8 +19,14 @@ function centavosParaReais(cents: number): number {
   return Math.round(cents) / 100;
 }
 
-export function temSelecaoEstruturada(item: Pick<ItemApp, "pizzaSelection">): boolean {
-  return !!item.pizzaSelection;
+// Detecta a PRESENÇA da propriedade, nunca a truthiness do valor. Um
+// payload adulterado com `pizzaSelection: null` (ou false, "", 0, {} etc.)
+// ainda assim declarou a intenção de usar o formato novo — precisa ser
+// validado e rejeitado como seleção estruturada inválida, nunca reinterpretado
+// como item legado (que cairia em officialUnitPrice com o name/detail que o
+// cliente possa ter mandado junto no mesmo objeto).
+export function temSelecaoEstruturada(item: object): boolean {
+  return Object.prototype.hasOwnProperty.call(item, "pizzaSelection");
 }
 
 export function resolverItemComSelecaoEstruturada(
