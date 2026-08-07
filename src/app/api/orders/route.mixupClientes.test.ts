@@ -83,7 +83,9 @@ vi.mock("@/lib/evolutionApi", () => ({
   })),
 }));
 
-const fetchMock = vi.fn(async (_url: string, _opts?: RequestInit) => ({ ok: true, json: async () => ({}) }));
+const fetchMock = vi.fn<(url: string, opts?: RequestInit) => Promise<{ ok: boolean; json: () => Promise<unknown> }>>(
+  async () => ({ ok: true, json: async () => ({}) })
+);
 vi.stubGlobal("fetch", fetchMock);
 
 import { PATCH, POST } from "./route";
@@ -248,6 +250,160 @@ describe("CAUSA RAIZ (corrigida): id de pedido não colide mais sob criação co
       expect(m.texto).toContain("Jessica");
       expect(m.texto).not.toContain("Adriano");
     }
+  });
+});
+
+// BLOQUEIO 3 da revisão externa: os testes acima usam `await POST(A); await
+// POST(B)` sequencial — prova a ausência de colisão com Date.now travado,
+// mas não prova nada sob execução REALMENTE concorrente (as duas requisições
+// disputando o mesmo instante, entrelaçadas pelo event loop). Os testes deste
+// bloco usam Promise.all/Promise.allSettled — o mock de redis.set usado neste
+// arquivo (defaultSetImpl) reproduz a semântica atômica real do SET NX:
+// checa-e-grava de forma síncrona dentro do próprio corpo da função mockada,
+// sem nenhum await antes da gravação, a mesma garantia que o Redis real dá
+// por processar comandos de forma serializada no servidor.
+//
+// IMPORTANTE: estes testes verificam SÓ a propriedade de unicidade de id sob
+// concorrência real (o que gerarIdPedidoUnico garante) — não que TODOS os
+// pedidos concorrentes sobrevivam na lista persistida. Essa segunda
+// propriedade depende da escrita read-modify-write de "pedidos" inteira ser
+// atômica, o que ELA NÃO É (ver bloco "BLOQUEIO 4" abaixo — achado separado,
+// pré-existente, não corrigido por este patch). Testar as duas propriedades
+// juntas aqui esconderia qual delas eventualmente falha; por isso a
+// verificação de notificação abaixo é feita só sobre os pedidos que
+// REALMENTE persistiram, nunca assumindo que todos os 201 retornados
+// corresponde a um pedido salvo.
+describe("Concorrência REAL (Promise.all) — não apenas Date.now travado com chamadas sequenciais", () => {
+  test("Promise.all([POST(A), POST(B)]) no mesmo milissegundo: as duas requisições concorrentes recebem ids DIFERENTES (nunca o mesmo id)", async () => {
+    const FIXO_MS = 1_700_000_010_000;
+    vi.spyOn(Date, "now").mockReturnValue(FIXO_MS);
+
+    const [resA, resB] = await Promise.all([
+      POST(postRequest({ cliente: "Fernanda Alves", telefone: "5591111111111", itens: ["Pizza G"], total: 50, endereco: "Rua 1", tipoEntrega: "delivery" })),
+      POST(postRequest({ cliente: "Ricardo Nunes", telefone: "5592222222222", itens: ["Pizza M"], total: 40, endereco: "Rua 2", tipoEntrega: "delivery" })),
+    ]);
+    vi.restoreAllMocks();
+
+    expect(resA.status).toBe(201);
+    expect(resB.status).toBe(201);
+    const pedidoA = await resA.json();
+    const pedidoB = await resB.json();
+    // Garantia central do patch, sob concorrência real (não sequencial):
+    // nunca o mesmo id, mesmo no mesmo milissegundo.
+    expect(pedidoA.id).not.toBe(pedidoB.id);
+
+    // Para o(s) pedido(s) que sobreviveram na persistência (ver nota acima
+    // sobre o BLOQUEIO 4), a notificação continua correta e isolada por id —
+    // nunca mistura nome/telefone entre A e B.
+    const persistidos = (redisStore.get("pedidos") as Record<string, unknown>[]) ?? [];
+    fetchMock.mockClear();
+    await Promise.all([
+      persistidos.some(p => p.id === pedidoA.id) ? PATCH(patchRequest({ id: pedidoA.id, status: "em_preparo" })) : Promise.resolve(),
+      persistidos.some(p => p.id === pedidoB.id) ? PATCH(patchRequest({ id: pedidoB.id, status: "em_preparo" })) : Promise.resolve(),
+    ]);
+    const mensagens = envios();
+    for (const m of mensagens) {
+      if (m.numero === "5591111111111") { expect(m.texto).toContain("Fernanda"); expect(m.texto).not.toContain("Ricardo"); }
+      if (m.numero === "5592222222222") { expect(m.texto).toContain("Ricardo"); expect(m.texto).not.toContain("Fernanda"); }
+    }
+  });
+
+  test("20 criações GENUINAMENTE concorrentes (Promise.all) no mesmo milissegundo: 20 ids ÚNICOS devolvidos, sem nenhuma colisão", async () => {
+    const FIXO_MS = 1_700_000_011_000;
+    vi.spyOn(Date, "now").mockReturnValue(FIXO_MS);
+
+    const clientes = Array.from({ length: 20 }, (_, i) => ({
+      cliente: `ClienteConcorrente${i}`,
+      telefone: `55900000${String(i).padStart(4, "0")}`,
+      itens: ["Pizza G"],
+      total: 30 + i,
+      endereco: `Rua ${i}`,
+      tipoEntrega: "delivery",
+    }));
+
+    const respostas = await Promise.all(clientes.map(c => POST(postRequest(c))));
+    vi.restoreAllMocks();
+
+    for (const r of respostas) expect(r.status).toBe(201);
+    const pedidos = await Promise.all(respostas.map(r => r.json()));
+
+    // Garantia central do patch: cada uma das 20 requisições concorrentes
+    // recebeu um pedidoId ÚNICO de gerarIdPedidoUnico — nenhuma colisão,
+    // mesmo com Date.now() travado no mesmo valor para as 20.
+    const ids = pedidos.map(p => p.id);
+    expect(ids).toHaveLength(20);
+    expect(new Set(ids).size).toBe(20);
+    for (const id of ids) expect(/^\d+$/.test(id)).toBe(true);
+
+    // Notificação correta e isolada por id para os que sobreviveram na
+    // persistência (ver nota do BLOQUEIO 4 acima do describe) — nunca mistura
+    // nome/telefone entre clientes concorrentes.
+    const persistidos = (redisStore.get("pedidos") as Record<string, unknown>[]) ?? [];
+    fetchMock.mockClear();
+    await Promise.all(
+      pedidos
+        .filter(p => persistidos.some(persisted => persisted.id === p.id))
+        .map(p => PATCH(patchRequest({ id: p.id, status: "em_preparo" })))
+    );
+
+    const mensagens = envios();
+    for (let i = 0; i < 20; i++) {
+      const minhasMensagens = mensagens.filter(m => m.numero === clientes[i].telefone);
+      for (const m of minhasMensagens) {
+        expect(m.texto).toContain(`ClienteConcorrente${i}`);
+        for (let j = 0; j < 20; j++) {
+          if (j === i) continue;
+          expect(m.texto).not.toContain(`ClienteConcorrente${j}`);
+        }
+      }
+    }
+  });
+});
+
+// BLOQUEIO 4 da revisão externa: POST /api/orders faz um read-modify-write
+// (getPedidos → redis.set('pedidos', [...pedidos, novoPedido])) sem lock
+// nem CAS na chave "pedidos" inteira. Isto é DISTINTO da causa raiz (colisão
+// de id) e NÃO foi corrigido por gerarIdPedidoUnico — ele só garante que o
+// `id` escolhido é único, não que a escrita da lista inteira seja atômica.
+// Este teste investigou (não assumiu) se duas criações concorrentes podem
+// perder uma da outra (lost update) — CONFIRMADO: perdem. `test.fails`
+// documenta isso como um gap CONHECIDO e JÁ REPORTADO (achado separado,
+// fora do escopo deste patch — ver relatório do incidente), em vez de deixar
+// a suíte permanentemente vermelha por um problema não corrigido aqui. Se
+// algum patch futuro corrigir o lost update, ESTE teste passa a passar de
+// verdade, e o `test.fails` vira ele mesmo uma falha (sinal para atualizar
+// a expectativa) — nunca fica verde silenciosamente.
+describe("BLOQUEIO 4 — lost update em POST /api/orders (achado separado, confirmado, NÃO corrigido por este patch)", () => {
+  test.fails("duas criações concorrentes (Promise.all): SEM correção, uma das duas é perdida na lista persistida (lost update conhecido)", async () => {
+    const FIXO_MS = 1_700_000_012_000;
+    vi.spyOn(Date, "now").mockReturnValue(FIXO_MS);
+
+    const [resA, resB] = await Promise.all([
+      POST(postRequest({ cliente: "Lost Update A", telefone: "5581111111111", itens: ["Pizza G"], total: 50, endereco: "Rua 1" })),
+      POST(postRequest({ cliente: "Lost Update B", telefone: "5582222222222", itens: ["Pizza M"], total: 40, endereco: "Rua 2" })),
+    ]);
+    vi.restoreAllMocks();
+
+    // Ambas as requisições HTTP retornam sucesso — isto sozinho NÃO prova que
+    // os dois pedidos foram persistidos (é exatamente o que este teste apura).
+    expect(resA.status).toBe(201);
+    expect(resB.status).toBe(201);
+    const pedidoA = await resA.json();
+    const pedidoB = await resB.json();
+
+    const persistidos = (redisStore.get("pedidos") as Record<string, unknown>[]) ?? [];
+    const idsPersistidos = persistidos.map(p => p.id);
+
+    console.log(
+      "[BLOQUEIO 4] pedidos persistidos:", idsPersistidos.length,
+      "esperado: 2 | pedidoA presente:", idsPersistidos.includes(pedidoA.id),
+      "| pedidoB presente:", idsPersistidos.includes(pedidoB.id)
+    );
+
+    // Comportamento ESPERADO (sem lost update): os dois sobrevivem.
+    expect(persistidos).toHaveLength(2);
+    expect(idsPersistidos).toContain(pedidoA.id);
+    expect(idsPersistidos).toContain(pedidoB.id);
   });
 });
 

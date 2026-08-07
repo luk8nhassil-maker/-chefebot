@@ -17,7 +17,23 @@ export async function proximoNumeroPedido(): Promise<number> {
 }
 
 const CLAIM_ID_PEDIDO_TTL_SEGUNDOS = 5;
-const MAX_TENTATIVAS_ID_PEDIDO = 5;
+// 50 dá margem folgada para rajadas reais (uma pizzaria não tem centenas de
+// checkouts fechando no mesmo milissegundo) sem deixar o pior caso caro: cada
+// tentativa extra é só mais um SET NX, e o caso comum (sem colisão) continua
+// gastando exatamente 1.
+const MAX_TENTATIVAS_ID_PEDIDO = 50;
+
+// Nunca devolvida com um id não reivindicado: se o Redis estiver indisponível
+// ou todas as tentativas de desempate colidirem, é sempre um erro explícito
+// — nunca um id "provavelmente" único. Ver AGENTS.md / auditoria do
+// incidente de mistura de clientes: preferir falha segura e visível a
+// arriscar duas requisições concorrentes acabando com o mesmo pedido.id.
+export class IdPedidoIndisponivelError extends Error {
+  constructor(motivo: string) {
+    super(`Não foi possível gerar um id de pedido com unicidade garantida: ${motivo}`);
+    this.name = "IdPedidoIndisponivelError";
+  }
+}
 
 // Gera o `id` de um pedido — chave usada em TODA busca/atualização de status
 // (PATCH, notificação, mutex de edição, etc.), portanto é o único campo cuja
@@ -33,16 +49,30 @@ const MAX_TENTATIVAS_ID_PEDIDO = 5;
 // existente (ordenação em timestampOrdenacaoPedido, txid do Pix em
 // gerarTxidPixInterno, etc.). Só no caso raro de colisão real o id ganha um
 // dígito extra de desempate, ainda como string puramente numérica.
+//
+// Propriedade garantida: a função SÓ retorna um candidato depois de reivindicá-lo
+// com sucesso (SET NX retornou true). Qualquer incerteza — o SET NX lança (o
+// Redis pode ou não ter aplicado a escrita antes de falhar a resposta) ou as
+// `MAX_TENTATIVAS_ID_PEDIDO` tentativas colidem todas — vira `IdPedidoIndisponivelError`,
+// nunca um id "torcendo para não colidir". Cada chamador decide como falhar
+// com segurança a partir daí (nunca criando o pedido sem um id garantido).
 export async function gerarIdPedidoUnico(): Promise<string> {
   for (let tentativa = 0; tentativa < MAX_TENTATIVAS_ID_PEDIDO; tentativa++) {
     const candidato = tentativa === 0 ? Date.now().toString() : `${Date.now()}${tentativa}`;
-    const reivindicado = await redis.set(`pedido_id_claim:${candidato}`, 1, {
-      nx: true,
-      ex: CLAIM_ID_PEDIDO_TTL_SEGUNDOS,
-    });
+    let reivindicado: unknown;
+    try {
+      reivindicado = await redis.set(`pedido_id_claim:${candidato}`, 1, {
+        nx: true,
+        ex: CLAIM_ID_PEDIDO_TTL_SEGUNDOS,
+      });
+    } catch (err) {
+      throw new IdPedidoIndisponivelError(
+        `SET NX falhou (resultado incerto — o Redis pode ou não ter aplicado a reivindicação): ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
     if (reivindicado) return candidato;
   }
-  // Praticamente inalcançável (5 colisões consecutivas no mesmo milissegundo):
-  // ainda assim nunca devolve um id sem tentar garantir unicidade.
-  return `${Date.now()}${Math.floor(100 + Math.random() * 900)}`;
+  throw new IdPedidoIndisponivelError(
+    `${MAX_TENTATIVAS_ID_PEDIDO} tentativas de desempate colidiram consecutivamente`
+  );
 }

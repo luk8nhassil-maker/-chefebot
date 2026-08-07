@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import { redis } from "@/lib/redis";
-import { proximoNumeroPedido } from "@/lib/numeracao";
+import { gerarIdPedidoUnico, proximoNumeroPedido } from "@/lib/numeracao";
 import { getMENUDinamico } from "@/lib/menu.server";
 import { computeTaxaApp, buildEnderecoApp } from "@/lib/pedidoAppLogic";
 import { criarPixMetadata, prepararPixProviderMercadoPago, serializarPixCliente, gerarTxidPixInterno, type PixMetadata } from "@/lib/pix";
@@ -1221,19 +1221,29 @@ export async function POST(req: NextRequest) {
     // clientRequestId está presente — todo o resto do fluxo (Jornada, Pix,
     // persistência) usa só esta variável, nunca um valor recalculado.
     //
-    // NOTA (auditoria da mistura de clientes em notificações de status): esta
-    // rota tem seu próprio claim atômico por clientRequestId/fingerprint
-    // (ver FASE 4 abaixo) que já protege contra duplicar o MESMO pedido em
-    // retries — mas, assim como as demais rotas de criação, ainda gera um
-    // pedidoId novo com `Date.now().toString()` sem checar colisão entre
-    // clientes DIFERENTES. Deliberadamente NÃO trocado por gerarIdPedidoUnico
-    // aqui: esta é a rota de checkout com Pix (fluxo protegido) e sua suíte
-    // de testes injeta falhas em pontos exatos da sequência de chamadas ao
-    // Redis — adicionar aqui a mesma reivindicação SET NX usada nas outras
-    // rotas desloca essa sequência e quebra dezenas de testes de concorrência
-    // já existentes. Ver relatório do incidente: risco residual documentado,
-    // fix desta rota fica para um patch dedicado e revisado à parte.
-    let pedidoId = attemptRecuperado ? attemptRecuperado.pedidoId : Date.now().toString();
+    // Precisa ser reivindicado ATOMICAMENTE aqui (candidato global único, mesmo
+    // mecanismo usado por src/app/api/whatsapp/route.ts, orders/route.ts e
+    // bot/route.ts — ver src/lib/numeracao.ts) e não mais tarde: o valor
+    // decidido aqui é gravado no attempt (FASE 4, `obterOuCriarAttempt`) junto
+    // com o txid do Pix — se o id mudasse depois de já ter sido usado para
+    // calcular o txid/X-Idempotency-Key do Mercado Pago, um retry poderia
+    // divergir da cobrança já feita. `attemptRecuperado` reaproveita o id já
+    // reivindicado por uma tentativa anterior do MESMO clientRequestId — não
+    // reivindica de novo (o próprio attempt já garante estabilidade nesse caso).
+    let pedidoId: string;
+    if (attemptRecuperado) {
+      pedidoId = attemptRecuperado.pedidoId;
+    } else {
+      try {
+        pedidoId = await gerarIdPedidoUnico();
+      } catch (err) {
+        // gerarIdPedidoUnico nunca devolve um id não reivindicado — mesma
+        // resposta recuperável (503, carrinho preservado, nada persistido)
+        // já usada para qualquer outra incerteza do claim de idempotência.
+        logSurvivalErro("idempotencia_pedido", "pedido_id", "gerar_id_falhou", err);
+        return respostaClaimIncerto();
+      }
+    }
 
     // Snapshot do valor Pix ESPERADO gravado no attempt (7ª revisão de
     // segurança, ponto 4) — usado só como referência de comparação em

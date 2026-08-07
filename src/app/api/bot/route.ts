@@ -92,7 +92,15 @@ export async function POST(req: NextRequest) {
     currentSession.step === "confirm" &&
     (message.trim() === "1" || message.trim().toLowerCase() === "sim")
   ) {
-    await salvarPedido(currentSession, phone);
+    try {
+      await salvarPedido(currentSession, phone);
+    } catch (err) {
+      // gerarIdPedidoUnico nunca devolve um id não reivindicado — se não for
+      // possível garantir unicidade, prefere não criar o pedido do simulador
+      // a arriscar colidir com um pedido real em criação simultânea.
+      console.error("[ChefeBot] Simulador: não foi possível salvar o pedido:", err);
+      return NextResponse.json({ ...result, erro: "Não foi possível salvar o pedido agora. Tente novamente." }, { status: 503 });
+    }
   }
 
   return NextResponse.json(result);

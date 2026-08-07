@@ -649,7 +649,16 @@ export async function POST(req: NextRequest) {
   const pedidos = await getPedidos()
   const numeroPedido = await proximoNumeroPedido()
   const agora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' })
-  const pedidoId = await gerarIdPedidoUnico()
+  // gerarIdPedidoUnico nunca devolve um id não reivindicado — se o Redis não
+  // conseguir garantir unicidade, prefere falhar aqui (nenhum pedido criado,
+  // nada gravado) a arriscar colidir com outro pedido em criação simultânea.
+  let pedidoId: string
+  try {
+    pedidoId = await gerarIdPedidoUnico()
+  } catch (err) {
+    console.error('[ChefeBot] Não foi possível gerar id de pedido único:', err)
+    return NextResponse.json({ error: 'Não foi possível criar o pedido agora. Tente novamente.' }, { status: 503 })
+  }
   const pix = criarPixMetadata(pedidoId, pagamento ? String(pagamento) : undefined, Number(total) || 0)
 
   const novoPedido: Pedido = {

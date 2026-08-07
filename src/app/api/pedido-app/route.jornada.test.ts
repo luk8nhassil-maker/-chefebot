@@ -62,6 +62,7 @@ vi.mock("@/lib/redis", () => ({
 
 vi.mock("@/lib/numeracao", () => ({
   proximoNumeroPedido: vi.fn(async () => 100),
+  gerarIdPedidoUnico: vi.fn(async () => Date.now().toString()),
 }));
 
 // Sessão da Área do Cliente: token no formato "valid:<telefone>" resolve para
