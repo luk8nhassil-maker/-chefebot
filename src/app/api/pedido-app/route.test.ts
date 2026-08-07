@@ -88,6 +88,8 @@ vi.mock("@/lib/mercadoPagoPix", () => ({
 
 import { POST } from "./route";
 import { encryptMercadoPagoToken } from "@/lib/mercadoPagoIntegracao";
+import { buildPizzaCatalog } from "@/lib/catalog/pizzas";
+import { MENU } from "@/lib/menu";
 
 function postReq(body: unknown) {
   return {
@@ -1826,5 +1828,133 @@ describe("POST /api/pedido-app — idempotência (Modo Sobrevivência)", () => {
     const body2 = await r2.json();
     expect(body1.pedidoId).not.toBe(body2.pedidoId);
     expect((store.get("pedidos") as unknown[]).length).toBe(2);
+  });
+});
+
+describe("POST /api/pedido-app — seleção estruturada de pizza por ID (Fase 2)", () => {
+  const catalog = buildPizzaCatalog(MENU);
+  const sizeIdG = catalog.sizes.find((s) => s.code === "G")!.id;
+  const sizeIdF = catalog.sizes.find((s) => s.code === "F")!.id;
+  const flavorCalabresa = catalog.flavors.find((f) => f.name === "Calabresa")!.id;
+  const flavorBaiana = catalog.flavors.find((f) => f.name === "Baiana")!.id;
+  const borderCatupiry = catalog.borders.find((b) => b.label === "Catupiry")!.id;
+
+  const pizzaBasePayload = {
+    cliente: "Lucas Brito",
+    telefone: "(99) 99999-9999",
+    tipoEntrega: "retirada" as const,
+    pagamento: "Dinheiro",
+    troco: "Sem troco",
+  };
+
+  it("calcula o preço nativamente e ignora name/detail/price adulterados pelo cliente", async () => {
+    const res = await POST(postReq({
+      ...pizzaBasePayload,
+      itens: [{
+        kind: "pizza",
+        name: "Pizza F", // adulterado: tamanho errado
+        detail: "sabor inventado · borda inventada",
+        price: 0.01, // adulterado: preço quase zero
+        qty: 1,
+        pizzaSelection: { sizeId: sizeIdG, flavorIds: [flavorCalabresa] },
+      }],
+    }));
+
+    expect(res.status).toBe(200);
+    const pedidos = store.get("pedidos") as { itens: string[]; itensDetalhados: { name: string; detail?: string; price: number }[]; total: number }[];
+    expect(pedidos[0].itens).toEqual(["Pizza G Calabresa"]);
+    expect(pedidos[0].itensDetalhados[0]).toMatchObject({ name: "Pizza G", detail: "Calabresa", price: 50 });
+    expect(pedidos[0].total).toBe(50); // preço oficial da Grande no Menu (retirada, sem taxa)
+  });
+
+  it("meio a meio por ID: ordem dos sabores não altera o preço nem o texto salvo", async () => {
+    const resA = await POST(postReq({
+      ...pizzaBasePayload,
+      itens: [{ kind: "pizza", name: "", price: 0, qty: 1, pizzaSelection: { sizeId: sizeIdG, flavorIds: [flavorCalabresa, flavorBaiana] } }],
+    }));
+    const resB = await POST(postReq({
+      ...pizzaBasePayload,
+      itens: [{ kind: "pizza", name: "", price: 0, qty: 1, pizzaSelection: { sizeId: sizeIdG, flavorIds: [flavorBaiana, flavorCalabresa] } }],
+    }));
+
+    expect(resA.status).toBe(200);
+    expect(resB.status).toBe(200);
+    const pedidos = store.get("pedidos") as { itens: string[]; total: number }[];
+    expect(pedidos[0].itens).toEqual(["Pizza G (meio a meio) Calabresa / Baiana"]);
+    expect(pedidos[1].itens).toEqual(["Pizza G (meio a meio) Baiana / Calabresa"]);
+    expect(pedidos[0].total).toBe(pedidos[1].total);
+  });
+
+  it("soma a borda depois, conforme a regra P/M usa priceSmall e G/F usa priceLarge", async () => {
+    const res = await POST(postReq({
+      ...pizzaBasePayload,
+      itens: [{
+        kind: "pizza", name: "", price: 0, qty: 1,
+        pizzaSelection: { sizeId: sizeIdF, flavorIds: [flavorCalabresa], borderId: borderCatupiry },
+      }],
+    }));
+
+    expect(res.status).toBe(200);
+    const border = MENU.borders.find((b) => b.label === "Catupiry")!;
+    const sizeF = MENU.sizes.find((s) => s.code === "F")!;
+    const pedidos = store.get("pedidos") as { total: number }[];
+    expect(pedidos[0].total).toBe(sizeF.price + border.priceLarge);
+  });
+
+  it("rejeita tamanho inexistente com 400, e NUNCA cria o pedido mesmo com name/detail legados válidos no mesmo item", async () => {
+    const res = await POST(postReq({
+      ...pizzaBasePayload,
+      itens: [{
+        kind: "pizza",
+        name: "Pizza G", // válido no formato legado
+        detail: "Calabresa", // válido no formato legado
+        price: 50,
+        qty: 1,
+        pizzaSelection: { sizeId: "size-inexistente", flavorIds: [flavorCalabresa] },
+      }],
+    }));
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe("Item inválido");
+    expect(store.get("pedidos")).toBeUndefined();
+  });
+
+  it("rejeita sabor repetido (meio a meio do mesmo sabor duas vezes)", async () => {
+    const res = await POST(postReq({
+      ...pizzaBasePayload,
+      itens: [{ kind: "pizza", name: "", price: 0, qty: 1, pizzaSelection: { sizeId: sizeIdG, flavorIds: [flavorCalabresa, flavorCalabresa] } }],
+    }));
+
+    expect(res.status).toBe(400);
+    expect(store.get("pedidos")).toBeUndefined();
+  });
+
+  it("rejeita sabor esgotado", async () => {
+    store.set("esgotados", ["Calabresa"]);
+    const res = await POST(postReq({
+      ...pizzaBasePayload,
+      itens: [{ kind: "pizza", name: "", price: 0, qty: 1, pizzaSelection: { sizeId: sizeIdG, flavorIds: [flavorCalabresa] } }],
+    }));
+
+    expect(res.status).toBe(400);
+    expect(store.get("pedidos")).toBeUndefined();
+  });
+
+  it("continua aceitando itens legados (name/detail) normalmente quando misturados com um item por ID no mesmo pedido", async () => {
+    const res = await POST(postReq({
+      ...pizzaBasePayload,
+      itens: [
+        { kind: "pizza", name: "", price: 0, qty: 1, pizzaSelection: { sizeId: sizeIdG, flavorIds: [flavorCalabresa] } },
+        { kind: "simple", name: "Refrigerante 2L", detail: "", price: 15, qty: 1 },
+      ],
+    }));
+
+    expect(res.status).toBe(200);
+    const pedidos = store.get("pedidos") as { itens: string[]; total: number }[];
+    expect(pedidos[0].itens).toEqual(["Pizza G Calabresa", "Refrigerante 2L"]);
+    const refri = MENU.bebidas.find((b) => b.name === "Refrigerante 2L")!;
+    const sizeG = MENU.sizes.find((s) => s.code === "G")!;
+    expect(pedidos[0].total).toBe(sizeG.price + refri.price);
   });
 });

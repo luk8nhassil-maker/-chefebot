@@ -15,6 +15,14 @@ export type ItemApp = {
   // cliente), nunca soma pontos nem avança a trilha de novo (ver
   // contarPizzasElegiveisPedido em @/lib/jornadaChef).
   recompensaJornadaId?: string;
+  // Presente quando o item de pizza foi selecionado por ID estável do
+  // catálogo oficial (Fase 2: @/lib/catalog/pizzas + @/lib/pricing/pizzaEngine)
+  // em vez de name/detail em texto livre. Quando presente, o servidor
+  // SEMPRE ignora `name`/`detail` enviados pelo cliente e reconstrói os
+  // dois a partir do catálogo (ver resolverItemComSelecaoEstruturada em
+  // @/lib/pedidoAppSelecaoEstruturada) — nunca usado pelo bot do WhatsApp,
+  // Salão ou pedido manual, que continuam só com name/detail.
+  pizzaSelection?: { sizeId: string; flavorIds: string[]; borderId?: string };
 };
 
 export type MenuSimpleItem = { name: string; price: number; sizes?: { code: string; price: number }[] };
