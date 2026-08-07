@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { redis } from "./redis";
+import { mutarPedidos } from "./pedidosConcorrencia";
 import { buscarPagamentoMercadoPagoDetalhado, mapearStatusMercadoPago } from "./mercadoPagoWebhook";
 import { enviarTextoWhatsApp } from "./whatsappMensagem";
 import type { PedidoComPix } from "./pix";
@@ -437,29 +438,38 @@ export async function reconciliarPixMercadoPago(opts?: ReconciliarPixOpts): Prom
       await redis.set(COOLDOWN_RATE_LIMIT_KEY, "1", { ex: COOLDOWN_RATE_LIMIT_TTL_SEGUNDOS });
     }
 
-    // Persistência com merge por id (Guardião Pix — corrida webhook x
-    // polling): em vez de sobrescrever "pedidos" com o snapshot lido no
-    // início da rodada (que pode estar desatualizado se o webhook ou a
-    // confirmação manual gravaram nesse meio-tempo), relê o estado mais
-    // recente e aplica só o patch dos pedidos que ESTA rodada confirmou —
-    // e, mesmo assim, nunca sobre um pedido que essa releitura já mostra
-    // confirmado por outro caminho ("primeira confirmação vence").
+    // Persistência com merge por id, protegida pelo lock GLOBAL de "pedidos"
+    // (ver src/lib/pedidosConcorrencia.ts): em vez de sobrescrever "pedidos"
+    // com o snapshot lido no início da rodada (que pode estar desatualizado
+    // se o webhook, a confirmação manual ou qualquer outro escritor gravaram
+    // nesse meio-tempo — inclusive DEPOIS de uma releitura sem lock, que
+    // ainda deixaria uma janela entre o GET e o SET), relê o estado mais
+    // recente DENTRO do lock e aplica só o patch dos pedidos que ESTA rodada
+    // confirmou — e, mesmo assim, nunca sobre um pedido que essa releitura
+    // já mostra confirmado por outro caminho ("primeira confirmação vence").
+    // Nenhuma chamada externa (Mercado Pago, WhatsApp) acontece dentro do
+    // lock — a verificação já terminou acima; só a fusão + persistência
+    // ficam na seção crítica.
     let resultadoFinal = atualizados;
     if (mudou) {
-      const maisRecente = (await redis.get<PedidoReconciliavel[]>("pedidos")) || atualizados;
-      const idsComDuplicidadeEvitada: string[] = [];
-      resultadoFinal = maisRecente.map((p) => {
-        const id = p.id as string;
-        if (!idsConfirmadosNestaRodada.has(id)) return p;
-        if (p.pixConfirmado === true || p.pix?.status === "confirmado") {
-          idsComDuplicidadeEvitada.push(id);
-          return p;
+      const merge = await mutarPedidos<PedidoReconciliavel, { pedidos: PedidoReconciliavel[]; idsComDuplicidadeEvitada: string[] }>(
+        (pedidosFrescos) => {
+          const idsComDuplicidadeEvitada: string[] = [];
+          const mesclado = pedidosFrescos.map((p) => {
+            const id = p.id as string;
+            if (!idsConfirmadosNestaRodada.has(id)) return p;
+            if (p.pixConfirmado === true || p.pix?.status === "confirmado") {
+              idsComDuplicidadeEvitada.push(id);
+              return p;
+            }
+            const patch = atualizados.find((a) => a.id === id);
+            return patch || p;
+          });
+          return { persistir: true, pedidos: mesclado, resultado: { pedidos: mesclado, idsComDuplicidadeEvitada } };
         }
-        const patch = atualizados.find((a) => a.id === id);
-        return patch || p;
-      });
-      await redis.set("pedidos", resultadoFinal);
-      await Promise.all(idsComDuplicidadeEvitada.map(() => incrementarContadorPix("duplicidade_evitada")));
+      );
+      resultadoFinal = merge.pedidos;
+      await Promise.all(merge.idsComDuplicidadeEvitada.map(() => incrementarContadorPix("duplicidade_evitada")));
     }
 
     // Notificação Nível 6.6A — roda só APÓS persistir a confirmação, e nunca

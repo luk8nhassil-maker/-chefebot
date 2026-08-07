@@ -878,14 +878,26 @@ describe("POST /api/pedido-app — idempotência (Modo Sobrevivência)", () => {
       // simula que OUTRA execução (TTL já expirado) reivindicou a mesma
       // chave com um ownerToken diferente — o compare-and-delete real,
       // rodando contra o Redis de verdade, veria exatamente essa foto.
+      //
+      // Intercepta especificamente o EVAL de liberação do CLAIM (1 chave =
+      // chaveClaim) — nunca "o próximo EVAL qualquer": a persistência agora
+      // passa pelo lock GLOBAL de "pedidos" (mutarPedidos), cuja própria
+      // liberação atômica (outro EVAL de 1 chave) acontece ANTES deste, no
+      // `finally` do helper — interceptar cegamente o primeiro EVAL pegaria
+      // o lock global, não o claim.
       const valorNovoDono = "novo-dono-token::" + "f".repeat(64);
-      redisMock.eval.mockImplementationOnce(async (_script: string, keys: string[], args: string[]) => {
-        store.set(keys[0], valorNovoDono);
-        if (store.get(keys[0]) === args[0]) {
-          store.delete(keys[0]);
-          return 1;
+      const chaveClaimId = chaveClaim(clientRequestId);
+      const evalOriginal = redisMock.eval.getMockImplementation()!;
+      redisMock.eval.mockImplementation(async (_script: string, keys: string[], args: string[]) => {
+        if (keys.length === 1 && keys[0] === chaveClaimId) {
+          store.set(keys[0], valorNovoDono);
+          if (store.get(keys[0]) === args[0]) {
+            store.delete(keys[0]);
+            return 1;
+          }
+          return 0;
         }
-        return 0;
+        return evalOriginal(_script, keys, args);
       });
 
       const res = await POST(postReq({ ...basePayload, clientRequestId }));

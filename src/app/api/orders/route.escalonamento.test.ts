@@ -5,7 +5,8 @@ import { ESCALONAMENTO_TTL_MS } from "@/lib/escalonamento";
 const redisStore = new Map<string, unknown>();
 
 function defaultGetImpl(key: string) {
-  return Promise.resolve(redisStore.has(key) ? redisStore.get(key) : null);
+  if (!redisStore.has(key)) return Promise.resolve(null);
+  return Promise.resolve(JSON.parse(JSON.stringify(redisStore.get(key))));
 }
 function defaultSetImpl(key: string, value: unknown, opts?: { nx?: boolean }) {
   if (opts?.nx && redisStore.has(key)) return Promise.resolve(null);
@@ -17,12 +18,24 @@ function defaultDelImpl(key: string) {
   redisStore.delete(key);
   return Promise.resolve(existed ? 1 : 0);
 }
+// Compare-and-delete atômico do lock GLOBAL de "pedidos" (ver
+// src/lib/pedidosConcorrencia.ts) — 1 chave + 1 arg (o token).
+function defaultEvalImpl(_script: string, keys: string[], args: string[]) {
+  const [chave] = keys;
+  const [tokenEsperado] = args;
+  if (redisStore.get(chave) === tokenEsperado) {
+    redisStore.delete(chave);
+    return Promise.resolve(1);
+  }
+  return Promise.resolve(0);
+}
 
 vi.mock("@/lib/redis", () => ({
   redis: {
     get: vi.fn(defaultGetImpl),
     set: vi.fn(defaultSetImpl),
     del: vi.fn(defaultDelImpl),
+    eval: vi.fn(defaultEvalImpl),
   },
 }));
 

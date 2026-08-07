@@ -7,8 +7,23 @@ const { store, redisMock, authMock, pontosMock } = vi.hoisted(() => {
     store,
     redisMock: {
       get: vi.fn(async (key: string) => store.get(key) ?? null),
-      set: vi.fn(async (key: string, value: unknown) => { store.set(key, value); return "OK"; }),
+      set: vi.fn(async (key: string, value: unknown, opts?: { nx?: boolean }) => {
+        if (opts?.nx && store.has(key)) return null;
+        store.set(key, value);
+        return "OK";
+      }),
+      // Dispatch por keys.length: 1 chave = compare-and-delete atômico do
+      // lock GLOBAL de "pedidos" (ver src/lib/pedidosConcorrencia.ts); 2
+      // chaves = a operação de conclusão de entrega (pedidos + fila do
+      // entregador, atômica na mesma chamada Lua).
       eval: vi.fn(async (_script: string, keys: string[], args: string[]) => {
+        if (keys.length === 1) {
+          if (store.get(keys[0]) === args[0]) {
+            store.delete(keys[0]);
+            return 1;
+          }
+          return 0;
+        }
         store.set(keys[0], JSON.parse(args[0]));
         store.set(keys[1], JSON.parse(args[1]));
         return 1;
@@ -132,21 +147,31 @@ describe("POST /api/entregador-pedidos", () => {
     store.set("entregador:pedidos:ent-a", [pedidoFila("pendente")]);
     store.set("pedidos", [pedidoMain()]);
     expect((await POST(postRequest({ pedidoId: "ped-1", acao: "entregar" }))).status).toBe(409);
-    expect(redisMock.eval).not.toHaveBeenCalled();
+    // O único EVAL possível aqui é a liberação (best-effort) do lock GLOBAL
+    // de "pedidos" (1 chave) — a operação atômica de conclusão de entrega
+    // (2 chaves) nunca chega a ser chamada para uma transição inválida.
+    expect(redisMock.eval.mock.calls.every(([, keys]) => keys.length === 1)).toBe(true);
+    expect((store.get("pedidos") as Array<{ status: string }>)[0].status).toBe("saiu_entrega");
+    expect((store.get("entregador:pedidos:ent-a") as Array<{ status: string }>)[0].status).toBe("pendente");
   });
 
   it("iniciar e entregar preservam o fluxo e a conclusão é atômica", async () => {
     store.set("entregador:pedidos:ent-a", [pedidoFila("em_rota")]);
     store.set("pedidos", [pedidoMain()]);
+    const chamadasDeConclusao = () =>
+      redisMock.eval.mock.calls.filter(([, keys]) => keys.length === 2);
+
     const res = await POST(postRequest({ pedidoId: "ped-1", acao: "entregar" }));
     expect(res.status).toBe(200);
-    expect(redisMock.eval).toHaveBeenCalledTimes(1);
+    expect(chamadasDeConclusao()).toHaveLength(1);
     expect((store.get("pedidos") as Array<{ status: string }>)[0].status).toBe("entregue");
     expect((store.get("entregador:pedidos:ent-a") as Array<{ status: string }>)[0].status).toBe("entregue");
     expect(pontosMock).toHaveBeenCalledTimes(1);
 
     const repetida = await POST(postRequest({ pedidoId: "ped-1", acao: "entregar" }));
     expect(repetida.status).toBe(200);
-    expect(redisMock.eval).toHaveBeenCalledTimes(1);
+    // Idempotente: a segunda chamada (pedido já entregue) não repete a
+    // operação atômica de conclusão — só adquire/libera o lock global à toa.
+    expect(chamadasDeConclusao()).toHaveLength(1);
   });
 });

@@ -14,6 +14,17 @@ const { store, redisMock } = vi.hoisted(() => {
       store.delete(key);
       return existed ? 1 : 0;
     }),
+    // Compare-and-delete atômico do lock GLOBAL de "pedidos" (ver
+    // src/lib/pedidosConcorrencia.ts) — 1 chave + 1 arg (o token).
+    eval: vi.fn(async (_script: string, keys: string[], args: string[]) => {
+      const [chave] = keys;
+      const [tokenEsperado] = args;
+      if (store.get(chave) === tokenEsperado) {
+        store.delete(chave);
+        return 1;
+      }
+      return 0;
+    }),
   };
   return { store, redisMock };
 });

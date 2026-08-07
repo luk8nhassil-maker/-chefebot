@@ -40,6 +40,7 @@ import {
 } from '@/lib/pedidoEdicao'
 import { limparEscalonamentoExpiradoSeNecessario } from '@/lib/escalonamento'
 import { reivindicarImpressaoAutomatica } from '@/lib/impressaoAutomatica'
+import { adquirirMutexPedidos, liberarMutexPedidos, mutarPedidos } from '@/lib/pedidosConcorrencia'
 
 const APP_BASE_URL = 'https://chefebot-pjif.vercel.app'
 
@@ -235,16 +236,6 @@ async function notificarCliente(telefone: string, status: Status, nomeCliente: s
   }
 }
 
-async function getPedidos(): Promise<Pedido[]> {
-  const data = await redis.get<Pedido[]>('pedidos')
-
-  if (!data) {
-    return []
-  }
-
-  return data
-}
-
 async function checkAuth(req: NextRequest) {
   const token = req.cookies.get('auth-token')?.value ?? null
   if (!token) return null
@@ -256,7 +247,6 @@ async function checkAuth(req: NextRequest) {
 export async function GET(req: NextRequest) {
   const auth = await checkAuth(req)
   if (!auth) return NextResponse.json({ error: 'Nao autorizado' }, { status: 401 })
-  const pedidos = await getPedidos()
 
   // Limpeza preguiçosa de locks de edição expirados (mesmo mecanismo de
   // polling já usado pelo painel — sem infraestrutura nova): se o cliente
@@ -265,16 +255,25 @@ export async function GET(req: NextRequest) {
   // Mesma limpeza preguiçosa para escalonamento expirado (ver
   // src/lib/escalonamento.ts): urgência que ninguém assumiu em 10 minutos
   // volta ao fluxo normal sozinha, silenciosamente.
-  let mudouAlgum = false
-  const limpos = pedidos.map(p => {
-    const edicao = limparEdicaoExpiradaSeNecessario(p)
-    const escalonamento = limparEscalonamentoExpiradoSeNecessario(edicao.pedido)
-    if (edicao.mudou || escalonamento.mudou) mudouAlgum = true
-    return escalonamento.pedido as Pedido
+  //
+  // Sob o lock GLOBAL de "pedidos" (ver src/lib/pedidosConcorrencia.ts):
+  // este é o escritor de MAIOR frequência prática (todo poll do painel), e
+  // antes da auditoria de lost update conseguia apagar silenciosamente uma
+  // criação/mudança de status concorrente por escrever um snapshot obtido
+  // antes do lock. Só a leitura+eventual escrita fica sob lock — o resto da
+  // resposta é montado fora, sem custo de concorrência extra.
+  const limpos = await mutarPedidos<Pedido, Pedido[]>((pedidosFrescos) => {
+    let mudouAlgum = false
+    const limpos = pedidosFrescos.map(p => {
+      const edicao = limparEdicaoExpiradaSeNecessario(p)
+      const escalonamento = limparEscalonamentoExpiradoSeNecessario(edicao.pedido)
+      if (edicao.mudou || escalonamento.mudou) mudouAlgum = true
+      return escalonamento.pedido as Pedido
+    })
+    return mudouAlgum
+      ? { persistir: true, pedidos: limpos, resultado: limpos }
+      : { persistir: false, resultado: limpos }
   })
-  if (mudouAlgum) {
-    await redis.set('pedidos', limpos)
-  }
 
   const url = new URL(req.url)
   const soArquivados = url.searchParams.get('arquivados') === 'true'
@@ -289,39 +288,47 @@ export async function GET(req: NextRequest) {
   return NextResponse.json([...ativos].reverse().map(sanitizarPedidoPixResposta).map(sanitizarPedidoParaPainel))
 }
 
-export async function PATCH(req: NextRequest) {
-  const auth = await checkAuth(req)
-  if (!auth) return NextResponse.json({ error: 'Nao autorizado' }, { status: 401 })
+type ResultadoAplicarStatus =
+  | { tipo: 'erro'; resposta: NextResponse }
+  | {
+      tipo: 'ok'
+      pedidos: Pedido[]
+      index: number
+      statusAnterior: Status
+      entregadorCanonico?: EntregadorCadastro
+      podeImprimirAutomaticamente: boolean
+    }
 
-  const { id, status, entregador, silent, limpeza } = await req.json()
-  const avisosOperacionais: string[] = []
-  // Resolução de pendência operacional: chega junto com a própria transição de
-  // status que a resolve, para não abrir uma segunda escrita concorrente no
-  // array "pedidos". Entrada malformada é ignorada (o status muda mesmo assim),
-  // nunca gravada como veio.
-  const limpezaResolvida = sanitizarEntradaLimpeza(limpeza)
-
-  // Toda transição de status (inclusive o aceite, novo → em_preparo) passa
-  // pelo mesmo mutex curto usado pela edição do cliente: garante que a
-  // Kellyne nunca aceita/altera um pedido no exato instante em que o
-  // cliente acabou de adquirir (ou está adquirindo) o lock de edição.
-  const mutexToken = await adquirirMutexEdicao(id)
-  if (!mutexToken) {
-    return NextResponse.json({ error: 'Não foi possível atualizar agora. Tente de novo.' }, { status: 409 })
-  }
-
+// Seção crítica de PATCH /api/orders: leitura FRESCA de "pedidos" + validação
+// + mutação + persistência, tudo sob o lock GLOBAL (src/lib/pedidosConcorrencia.ts)
+// — nunca segura o lock além disto (nenhuma chamada HTTP externa acontece
+// aqui dentro). O caso do entregador precisa combinar a escrita de "pedidos"
+// com a fila do entregador na MESMA operação atômica (SALVAR_ATRIBUICAO_LUA,
+// já existente) — por isso usa adquirirMutexPedidos/liberarMutexPedidos
+// diretamente em vez do helper mutarPedidos, que só sabe fazer um
+// redis.set('pedidos', ...) simples.
+async function aplicarMudancaDeStatus(
+  id: string,
+  status: Status,
+  entregador: unknown,
+  limpezaResolvida: ReturnType<typeof sanitizarEntradaLimpeza>,
+  authName: string | undefined
+): Promise<ResultadoAplicarStatus> {
+  const globalToken = await adquirirMutexPedidos()
   try {
-    const pedidos = await getPedidos()
+    const pedidos = (await redis.get<Pedido[]>('pedidos')) || []
     const index = pedidos.findIndex(p => p.id === id)
-    if (index === -1) return NextResponse.json({ error: 'Pedido nao encontrado' }, { status: 404 })
+    if (index === -1) {
+      return { tipo: 'erro', resposta: NextResponse.json({ error: 'Pedido nao encontrado' }, { status: 404 }) }
+    }
 
     let entregadorCanonico: EntregadorCadastro | undefined
     if (entregador) {
-      const entregadorId = typeof entregador?.id === 'string' ? entregador.id : ''
+      const entregadorId = typeof (entregador as { id?: unknown })?.id === 'string' ? (entregador as { id: string }).id : ''
       const cadastrados = await redis.get<EntregadorCadastro[]>('entregadores') || []
       entregadorCanonico = cadastrados.find(e => e.id === entregadorId && e.ativo)
       if (!entregadorCanonico) {
-        return NextResponse.json({ error: 'Entregador indisponível' }, { status: 409 })
+        return { tipo: 'erro', resposta: NextResponse.json({ error: 'Entregador indisponível' }, { status: 409 }) }
       }
     }
 
@@ -330,10 +337,13 @@ export async function PATCH(req: NextRequest) {
 
     if (lockEdicaoAtivo(pedidos[index])) {
       if (limpeza.mudou) await redis.set('pedidos', pedidos)
-      return NextResponse.json(
-        { error: 'O cliente está editando este pedido. Aguarde ele concluir ou o tempo de edição expirar.' },
-        { status: 409 }
-      )
+      return {
+        tipo: 'erro',
+        resposta: NextResponse.json(
+          { error: 'O cliente está editando este pedido. Aguarde ele concluir ou o tempo de edição expirar.' },
+          { status: 409 }
+        ),
+      }
     }
 
     const statusAnterior = pedidos[index].status
@@ -343,11 +353,10 @@ export async function PATCH(req: NextRequest) {
     // src/lib/impressaoAutomatica.ts): entre este PATCH e qualquer outra aba
     // ou dispositivo tentando aceitar o MESMO pedido ao mesmo tempo, só um
     // recebe o direito de disparar a impressão silenciosa — decidido aqui,
-    // dentro do mesmo mutex de edição já usado por esta rota, nunca em
-    // memória no navegador. Isto não é a impressão em si (a rota
-    // /pedidos/[id]/imprimir e o botão de reimpressão manual continuam
-    // exatamente iguais), só quem tem permissão de disparar o gatilho
-    // automático deste evento específico.
+    // dentro do mesmo lock já usado por esta rota, nunca em memória no
+    // navegador. Isto não é a impressão em si (a rota /pedidos/[id]/imprimir
+    // e o botão de reimpressão manual continuam exatamente iguais), só quem
+    // tem permissão de disparar o gatilho automático deste evento específico.
     const podeImprimirAutomaticamente =
       statusAnterior === 'novo' && status === 'em_preparo'
         ? await reivindicarImpressaoAutomatica(id)
@@ -370,7 +379,7 @@ export async function PATCH(req: NextRequest) {
               limpezaResolvida.motivo,
               limpezaResolvida.acao,
               Date.now(),
-              typeof auth.name === 'string' ? auth.name : undefined
+              authName
             ),
           }
         : {}),
@@ -395,6 +404,9 @@ export async function PATCH(req: NextRequest) {
         status: 'pendente',
         horarioSaida: agora,
       }
+      // Snapshot FRESCO (lido dentro deste mesmo lock, nunca um array obtido
+      // antes de adquirir) passado para a Lua existente, que continua sendo
+      // a operação atômica entre "pedidos" e a fila do entregador.
       await salvarAtribuicaoComFilas(
         pedidos,
         pedidoEntregador,
@@ -403,6 +415,48 @@ export async function PATCH(req: NextRequest) {
     } else {
       await redis.set('pedidos', pedidos)
     }
+
+    return { tipo: 'ok', pedidos, index, statusAnterior, entregadorCanonico, podeImprimirAutomaticamente }
+  } finally {
+    await liberarMutexPedidos(globalToken)
+  }
+}
+
+export async function PATCH(req: NextRequest) {
+  const auth = await checkAuth(req)
+  if (!auth) return NextResponse.json({ error: 'Nao autorizado' }, { status: 401 })
+
+  const { id, status, entregador, silent, limpeza } = await req.json()
+  const avisosOperacionais: string[] = []
+  // Resolução de pendência operacional: chega junto com a própria transição de
+  // status que a resolve, para não abrir uma segunda escrita concorrente no
+  // array "pedidos". Entrada malformada é ignorada (o status muda mesmo assim),
+  // nunca gravada como veio.
+  const limpezaResolvida = sanitizarEntradaLimpeza(limpeza)
+
+  // Toda transição de status (inclusive o aceite, novo → em_preparo) passa
+  // pelo mesmo mutex curto usado pela edição do cliente: garante que a
+  // Kellyne nunca aceita/altera um pedido no exato instante em que o
+  // cliente acabou de adquirir (ou está adquirindo) o lock de edição. Esse
+  // mutex é POR pedidoId — o lock global de "pedidos" (dentro de
+  // aplicarMudancaDeStatus) é quem protege contra qualquer OUTRO escritor,
+  // de qualquer outro id, sobrescrever esta mudança.
+  const mutexToken = await adquirirMutexEdicao(id)
+  if (!mutexToken) {
+    return NextResponse.json({ error: 'Não foi possível atualizar agora. Tente de novo.' }, { status: 409 })
+  }
+
+  try {
+    const resultado = await aplicarMudancaDeStatus(
+      id,
+      status,
+      entregador,
+      limpezaResolvida,
+      typeof auth.name === 'string' ? auth.name : undefined
+    )
+    if (resultado.tipo === 'erro') return resultado.resposta
+
+    const { pedidos, index, statusAnterior, entregadorCanonico, podeImprimirAutomaticamente } = resultado
 
   if (!silent) {
     await notificarCliente(pedidos[index].telefone, status, pedidos[index].cliente, pedidos[index].tipoEntrega, pedidos[index].endereco)
@@ -646,7 +700,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Pedido inválido' }, { status: 400 })
   }
 
-  const pedidos = await getPedidos()
   const numeroPedido = await proximoNumeroPedido()
   const agora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' })
   // gerarIdPedidoUnico nunca devolve um id não reivindicado — se o Redis não
@@ -681,7 +734,16 @@ export async function POST(req: NextRequest) {
     ...(observacao ? { observacao: String(observacao) } : {}),
   }
 
-  await redis.set('pedidos', [...pedidos, novoPedido])
+  try {
+    await mutarPedidos<Pedido, void>((pedidosFrescos) => ({
+      persistir: true,
+      pedidos: [...pedidosFrescos, novoPedido],
+      resultado: undefined,
+    }))
+  } catch (err) {
+    console.error('[ChefeBot] Não foi possível persistir o novo pedido:', err)
+    return NextResponse.json({ error: 'Não foi possível criar o pedido agora. Tente novamente.' }, { status: 503 })
+  }
   return NextResponse.json(novoPedido, { status: 201 })
 }
 
@@ -691,15 +753,11 @@ export async function DELETE(req: NextRequest) {
 
   const { searchParams } = new URL(req.url)
   const id = searchParams.get('id')
-  const pedidos = await getPedidos()
 
-  if (id) {
-    const filtered = pedidos.filter(p => p.id !== id)
-    await redis.set('pedidos', filtered)
-    return NextResponse.json({ ok: true })
-  }
-
-  const filtered = pedidos.filter(p => p.status !== 'entregue')
-  await redis.set('pedidos', filtered)
+  await mutarPedidos<Pedido, void>((pedidosFrescos) => ({
+    persistir: true,
+    pedidos: id ? pedidosFrescos.filter(p => p.id !== id) : pedidosFrescos.filter(p => p.status !== 'entregue'),
+    resultado: undefined,
+  }))
   return NextResponse.json({ ok: true })
 }

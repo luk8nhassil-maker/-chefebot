@@ -41,7 +41,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: 'Frase de confirmação incorreta' }, { status: 400 })
   }
 
-  // Reset: apenas dados operacionais
+  // Reset: apenas dados operacionais. Fora do lock global de propósito
+  // (mesma razão documentada em src/app/api/bot/route.ts DELETE): é um wipe
+  // incondicional gated por role=dev + senha + frase de confirmação, não um
+  // read-modify-write — não há snapshot desatualizado a proteger.
   await redis.del('pedidos')
   const nSessoes = await deletarPorPadrao('session:*')
   const nManuais = await deletarPorPadrao('manual:*')

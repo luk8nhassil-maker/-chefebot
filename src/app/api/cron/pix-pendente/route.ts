@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { redis } from "@/lib/redis";
+import { mutarPedidos } from "@/lib/pedidosConcorrencia";
 import { obterConfigEvolution } from "@/lib/evolutionApi";
 
 async function enviarMensagem(phone: string, text: string) {
@@ -36,17 +37,21 @@ export async function GET(req: Request) {
       const cobrancas = session.pixCobrancas || 0;
 
       if (minutos >= 6 && cobrancas < 3) {
-        // 6+ minutos sem comprovante — escala para Kellyne
-        const pedidos = await redis.get<any[]>("pedidos") || [];
-        const pedidoAtivo = pedidos.find(p => p.telefone === phone && p.status === "novo" && !p.escalonado);
-
-        if (pedidoAtivo) {
-          // Marca como escalado
-          const pedidosAtualizados = pedidos.map(p =>
-            p.id === pedidoAtivo.id ? { ...p, escalonado: true, cancelamentoSolicitado: false } : p
-          );
-          await redis.set("pedidos", pedidosAtualizados);
-        }
+        // 6+ minutos sem comprovante — escala para Kellyne. Protegido pelo
+        // lock GLOBAL de "pedidos" (ver src/lib/pedidosConcorrencia.ts):
+        // leitura+decisão+escrita sobre um snapshot fresco, dentro do lock
+        // — a mensagem WhatsApp continua fora, depois da persistência.
+        await mutarPedidos<any, void>((pedidosFrescos) => {
+          const pedidoAtivo = pedidosFrescos.find(p => p.telefone === phone && p.status === "novo" && !p.escalonado);
+          if (!pedidoAtivo) return { persistir: false, resultado: undefined };
+          return {
+            persistir: true,
+            pedidos: pedidosFrescos.map(p =>
+              p.id === pedidoAtivo.id ? { ...p, escalonado: true, cancelamentoSolicitado: false } : p
+            ),
+            resultado: undefined,
+          };
+        });
 
         await enviarMensagem(phone, `⏰ Ei! Seu pedido está aguardando o comprovante do Pix.\n\nNossa equipe vai entrar em contato para te ajudar. 😊`);
         await redis.set(key, { ...session, pixCobrancas: 3 }, { ex: 1800 });

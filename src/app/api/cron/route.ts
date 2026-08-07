@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { redis } from "@/lib/redis";
+import { mutarPedidos } from "@/lib/pedidosConcorrencia";
 
 type ConfigPizzaria = {
   horaFechamento?: number;
@@ -24,9 +25,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   try {
-    const pedidos = (await redis.get<Pedido[]>("pedidos")) || [];
     const agora = new Date();
-    const hojeStr = agora.toLocaleDateString("pt-BR");
 
     // Arquivamento automático de pedidos não-resolvidos no fechamento do expediente
     const config = await redis.get<ConfigPizzaria>("config:pizzaria");
@@ -39,40 +38,58 @@ export async function GET(req: Request) {
     const agoraISO = agora.toISOString();
 
     if (deveArquivar) {
-      const pedidosAtualizados = pedidos.map((p: Pedido) => {
-        if (p.isArchived) return p;
-        if (['entregue', 'cancelado'].includes(p.status)) return p;
-        return { ...p, isArchived: true, archivedAt: agoraISO, archivedBy: 'system', archivedReason: 'fim_expediente' };
+      // Protegido pelo lock GLOBAL de "pedidos" (ver
+      // src/lib/pedidosConcorrencia.ts): leitura e marcação sobre um
+      // snapshot fresco, dentro do lock.
+      const arquivados = await mutarPedidos<Pedido, number>((pedidosFrescos) => {
+        const pedidosAtualizados = pedidosFrescos.map((p: Pedido) => {
+          if (p.isArchived) return p;
+          if (['entregue', 'cancelado'].includes(p.status)) return p;
+          return { ...p, isArchived: true, archivedAt: agoraISO, archivedBy: 'system', archivedReason: 'fim_expediente' };
+        });
+        return {
+          persistir: true,
+          pedidos: pedidosAtualizados,
+          resultado: pedidosAtualizados.filter((p: Pedido) => p.isArchived && p.archivedAt === agoraISO).length,
+        };
       });
-      await redis.set("pedidos", pedidosAtualizados);
-      return NextResponse.json({ ok: true, acao: 'arquivamento_expediente', arquivados: pedidosAtualizados.filter((p: Pedido) => p.isArchived && p.archivedAt === agoraISO).length });
+      return NextResponse.json({ ok: true, acao: 'arquivamento_expediente', arquivados });
     }
 
+    // Protegido pelo lock GLOBAL de "pedidos": leitura, filtragem e escrita
+    // sobre um snapshot fresco, dentro do lock.
+    const { total, removidos, mantidos } = await mutarPedidos<
+      Pedido,
+      { total: number; removidos: number; mantidos: number }
+    >((pedidosFrescos) => {
+      const limpo = pedidosFrescos.filter((p: Pedido) => {
+        // Pedidos ativos nunca são removidos
+        if (!["entregue", "cancelado"].includes(p.status)) return true;
 
-    const limpo = pedidos.filter((p: Pedido) => {
-      // Pedidos ativos nunca são removidos
-      if (!["entregue", "cancelado"].includes(p.status)) return true;
+        // Se tem data salva, remove pedidos com mais de 7 dias
+        if (p.data) {
+          const [dia, mes, ano] = p.data.split("/").map(Number);
+          const dataPedido = new Date(ano, mes - 1, dia);
+          const diffDias = (agora.getTime() - dataPedido.getTime()) / 1000 / 60 / 60 / 24;
+          return diffDias < 7;
+        }
 
-      // Se tem data salva, remove pedidos com mais de 7 dias
-      if (p.data) {
-        const [dia, mes, ano] = p.data.split("/").map(Number);
-        const dataPedido = new Date(ano, mes - 1, dia);
-        const diffDias = (agora.getTime() - dataPedido.getTime()) / 1000 / 60 / 60 / 24;
-        return diffDias < 7;
-      }
+        // Pedidos sem data — mantém por 24h baseado no horário
+        const parts = p.horario.split(":");
+        const h = parseInt(parts[0]);
+        const m = parseInt(parts[1]);
+        const horarioPedido = new Date();
+        horarioPedido.setHours(h, m, 0, 0);
+        const diff = (agora.getTime() - horarioPedido.getTime()) / 1000 / 60 / 60;
+        return diff < 24;
+      });
 
-      // Pedidos sem data — mantém por 24h baseado no horário
-      const parts = p.horario.split(":");
-      const h = parseInt(parts[0]);
-      const m = parseInt(parts[1]);
-      const horarioPedido = new Date();
-      horarioPedido.setHours(h, m, 0, 0);
-      const diff = (agora.getTime() - horarioPedido.getTime()) / 1000 / 60 / 60;
-      return diff < 24;
+      return {
+        persistir: true,
+        pedidos: limpo,
+        resultado: { total: pedidosFrescos.length, removidos: pedidosFrescos.length - limpo.length, mantidos: limpo.length },
+      };
     });
-
-    // Limpa também chaves de sessão expiradas
-    await redis.set("pedidos", limpo);
 
     // Reset explícito do contador de numeração de pedidos do dia anterior.
     // A chave já expira sozinha em 36h e muda de nome a cada dia, mas a limpeza
@@ -82,12 +99,7 @@ export async function GET(req: Request) {
     const ontemStr = ontem.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" });
     await redis.del(`contador_pedidos:${ontemStr}`);
 
-    return NextResponse.json({
-      ok: true,
-      total: pedidos.length,
-      removidos: pedidos.length - limpo.length,
-      mantidos: limpo.length,
-    });
+    return NextResponse.json({ ok: true, total, removidos, mantidos });
   } catch {
     return NextResponse.json({ ok: false }, { status: 500 });
   }
