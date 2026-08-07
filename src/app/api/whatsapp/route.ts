@@ -1218,7 +1218,7 @@ export async function POST(req: NextRequest) {
         // pré-condição (status ainda "saiu_entrega") + mutação + persistência
         // — nunca durante os efeitos externos depois (WhatsApp, fidelidade,
         // Jornada), que continuam fora do lock como sempre.
-        const resultadoEntrega = await mutarPedidos<any, { pedido: any; pedidosAtualizados: any[] } | null>((pedidosFrescos) => {
+        const resultadoEntrega = await mutarPedidos<Pedido, { pedido: Pedido; pedidosAtualizados: Pedido[] } | null>((pedidosFrescos) => {
           const index = pedidosFrescos.findIndex(p => p.id === pedidoEntregadorId)
           if (index === -1 || pedidosFrescos[index].status !== 'saiu_entrega') {
             return { persistir: false, resultado: null }
