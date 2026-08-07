@@ -35,6 +35,8 @@ import { POST as iniciar } from "./iniciar/route";
 import { GET as status } from "./status/route";
 import { POST as salvar } from "./salvar/route";
 import { POST as descartar } from "./descartar/route";
+import { buildPizzaCatalog } from "@/lib/catalog/pizzas";
+import { MENU } from "@/lib/menu";
 
 function req(body: unknown) {
   return { json: async () => body } as never;
@@ -408,6 +410,96 @@ describe("POST salvar", () => {
     expect(res.status).toBe(200);
     const pedidos = store.get("pedidos") as Array<Record<string, unknown>>;
     expect(pedidos[0].pix).toBeTruthy();
+  });
+});
+
+describe("POST salvar — seleção estruturada de pizza por ID (Fase 2)", () => {
+  const catalog = buildPizzaCatalog(MENU);
+  const sizeIdG = catalog.sizes.find((s) => s.code === "G")!.id;
+  const flavorCalabresa = catalog.flavors.find((f) => f.name === "Calabresa")!.id;
+
+  async function iniciarEdicao() {
+    seedPedido();
+    const res = await iniciar(req({ statusToken: TOKEN }), paramsFor(PEDIDO_ID));
+    const data = await json(res);
+    return data.editSessionId as string;
+  }
+
+  it("recalcula nativamente e grava name/detail canônicos em itensDetalhados, ignorando o que o cliente mandou", async () => {
+    const editSessionId = await iniciarEdicao();
+    const res = await salvar(req({
+      statusToken: TOKEN, editSessionId, revision: 1,
+      itens: [{ kind: "pizza", name: "Pizza F", detail: "sabor inventado", price: 0.01, qty: 1, pizzaSelection: { sizeId: sizeIdG, flavorIds: [flavorCalabresa] } }],
+      tipoEntrega: "retirada", pagamento: "Dinheiro", troco: "Sem troco",
+    }), paramsFor(PEDIDO_ID));
+
+    expect(res.status).toBe(200);
+    const data = await json(res);
+    expect(data.total).toBe(50); // preço oficial da Grande no Menu
+
+    const pedidos = store.get("pedidos") as Array<Record<string, unknown>>;
+    expect(pedidos[0].itens).toEqual(["Pizza G Calabresa"]);
+    const itensDetalhados = pedidos[0].itensDetalhados as Array<Record<string, unknown>>;
+    expect(itensDetalhados[0]).toMatchObject({ name: "Pizza G", detail: "Calabresa", price: 50 });
+  });
+
+  it("rejeita seleção com tamanho inexistente e nunca cai para o caminho legado, mesmo com name/detail válidos", async () => {
+    const editSessionId = await iniciarEdicao();
+    const res = await salvar(req({
+      statusToken: TOKEN, editSessionId, revision: 1,
+      itens: [{ kind: "pizza", name: "Pizza G", detail: "Calabresa", price: 50, qty: 1, pizzaSelection: { sizeId: "size-inexistente", flavorIds: [flavorCalabresa] } }],
+      tipoEntrega: "retirada", pagamento: "Dinheiro", troco: "Sem troco",
+    }), paramsFor(PEDIDO_ID));
+
+    expect(res.status).toBe(400);
+    const pedidos = store.get("pedidos") as Array<Record<string, unknown>>;
+    expect(pedidos[0].total).toBe(15); // pedido original intacto
+    expect(pedidos[0].revision).toBe(1);
+  });
+
+  it("pizzaSelection: null com name/detail legado válido é tratado como formato estruturado inválido — 400, nunca cai no legado", async () => {
+    const editSessionId = await iniciarEdicao();
+    const res = await salvar(req({
+      statusToken: TOKEN, editSessionId, revision: 1,
+      itens: [{ kind: "pizza", name: "Pizza G", detail: "Calabresa", price: 50, qty: 1, pizzaSelection: null }],
+      tipoEntrega: "retirada", pagamento: "Dinheiro", troco: "Sem troco",
+    }), paramsFor(PEDIDO_ID));
+
+    expect(res.status).toBe(400);
+    const pedidos = store.get("pedidos") as Array<Record<string, unknown>>;
+    expect(pedidos[0].total).toBe(15); // pedido original intacto
+    expect(pedidos[0].revision).toBe(1);
+  });
+
+  it.each([false, 0, "", "texto", 42, [], {}])(
+    "pizzaSelection malformado (%p) com name/detail legado válido é tratado como formato estruturado inválido — 400",
+    async (valor) => {
+      const editSessionId = await iniciarEdicao();
+      const res = await salvar(req({
+        statusToken: TOKEN, editSessionId, revision: 1,
+        itens: [{ kind: "pizza", name: "Pizza G", detail: "Calabresa", price: 50, qty: 1, pizzaSelection: valor }],
+        tipoEntrega: "retirada", pagamento: "Dinheiro", troco: "Sem troco",
+      }), paramsFor(PEDIDO_ID));
+
+      expect(res.status).toBe(400);
+      const pedidos = store.get("pedidos") as Array<Record<string, unknown>>;
+      expect(pedidos[0].total).toBe(15); // pedido original intacto
+      expect(pedidos[0].revision).toBe(1);
+    }
+  );
+
+  it("ausência total de pizzaSelection continua 100% legado (name/detail funcionam normalmente)", async () => {
+    const editSessionId = await iniciarEdicao();
+    const res = await salvar(req({
+      statusToken: TOKEN, editSessionId, revision: 1,
+      itens: [{ kind: "pizza", name: "Pizza G", detail: "Calabresa", price: 999, qty: 1 }],
+      tipoEntrega: "retirada", pagamento: "Dinheiro", troco: "Sem troco",
+    }), paramsFor(PEDIDO_ID));
+
+    expect(res.status).toBe(200);
+    const data = await json(res);
+    const sizeG = MENU.sizes.find((s) => s.code === "G")!;
+    expect(data.total).toBe(sizeG.price); // preço do servidor, nunca o 999 enviado pelo cliente
   });
 });
 

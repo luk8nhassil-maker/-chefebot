@@ -13,6 +13,8 @@ import { verificarTokenCliente, CLIENTE_COOKIE } from "@/lib/clienteAuth";
 import { buscarClientePorId, sanitizeTelefoneCliente } from "@/lib/clientes";
 import { calcularPontosElegiveisPedido, registrarMovimentoPontosIdempotente, construirEventoIdPontos, derivarClienteIdPorTelefone, obterReservasResgatePontos, confirmarResgatePontos } from "@/lib/fidelidade";
 import { type ItemApp, type MenuPedidoApp, formatItem, officialUnitPrice, makePromoUnitPrice, contarPizzasPagasParaFidelidade } from "@/lib/pedidoAppItens";
+import { temSelecaoEstruturada, resolverItemComSelecaoEstruturada } from "@/lib/pedidoAppSelecaoEstruturada";
+import { buildPizzaCatalog } from "@/lib/catalog/pizzas";
 import { prepararResgateParaPedido, confirmarReservaNoPedido, liberarVinculoRecompensaPedidoNaoCriado, type EscolhaRecompensaJornada } from "@/lib/jornadaChef";
 import { survivalModeEnabled, survivalClientRequestIdEnforcementEnabled } from "@/survival/flags";
 import { lerSessaoAdministrativa, origemDoPedido } from "@/lib/sessaoAdministrativa";
@@ -1098,13 +1100,41 @@ export async function POST(req: NextRequest) {
         precoFinalPromocao: (promo) => precoFinalPromocao(promo, catalogoPromo),
       });
 
-      const itensValidados = body.itens.map((item) => ({
-        linha: formatItem(item),
-        unitPrice: item.kind === "promo" ? promoUnitPrice(item) : officialUnitPrice(item, menu as MenuPedidoApp),
-        qty: item.qty,
-      }));
+      // Itens com seleção estruturada por ID (Fase 2 — catálogo/motor nativo
+      // de pizza): resolvidos e precificados por @/lib/pricing/pizzaEngine,
+      // nunca por officialUnitPrice/name-detail. Um item reconhecido aqui
+      // como "novo formato" (tem pizzaSelection) que falhe a validação é
+      // definitivo — NUNCA cai para o caminho legado abaixo com o
+      // name/detail que o cliente possa ter mandado junto.
+      const temSelecaoPizzaEstruturada = body.itens.some((item) => temSelecaoEstruturada(item));
+      const esgotadosPizza = temSelecaoPizzaEstruturada ? ((await redis.get<string[]>("esgotados")) || []) : [];
+      const pizzaCatalog = temSelecaoPizzaEstruturada ? buildPizzaCatalog(menu, esgotadosPizza) : null;
 
-      if (itensValidados.some((item) => item.unitPrice === null)) {
+      let itensResolvidos: { itemCanonico: ItemApp; linha: string; unitPrice: number | null; qty: number }[];
+      try {
+        itensResolvidos = body.itens.map((item) => {
+          if (temSelecaoEstruturada(item)) {
+            const resolvido = resolverItemComSelecaoEstruturada(item, pizzaCatalog!);
+            if (!resolvido.ok) return { itemCanonico: item, linha: "", unitPrice: null, qty: item.qty };
+            return {
+              itemCanonico: resolvido.item,
+              linha: formatItem(resolvido.item),
+              unitPrice: resolvido.item.price,
+              qty: item.qty,
+            };
+          }
+          return {
+            itemCanonico: item,
+            linha: formatItem(item),
+            unitPrice: item.kind === "promo" ? promoUnitPrice(item) : officialUnitPrice(item, menu as MenuPedidoApp),
+            qty: item.qty,
+          };
+        });
+      } catch {
+        return NextResponse.json({ ok: false, error: "Item inválido" }, { status: 400 });
+      }
+
+      if (itensResolvidos.some((item) => item.unitPrice === null)) {
         return NextResponse.json({ ok: false, error: "Item inválido" }, { status: 400 });
       }
 
@@ -1159,8 +1189,8 @@ export async function POST(req: NextRequest) {
         unitPrice: 0,
         qty: item.qty,
       }));
-      itensDetalhadosFinais = [...body.itens, ...itensRecompensaMaterializados];
-      const itensValidadosFinais = [...itensValidados, ...itensRecompensaValidados];
+      itensDetalhadosFinais = [...itensResolvidos.map((r) => r.itemCanonico), ...itensRecompensaMaterializados];
+      const itensValidadosFinais = [...itensResolvidos, ...itensRecompensaValidados];
       itens = itensValidadosFinais.map((item) => item.linha);
       subtotal = itensValidadosFinais.reduce((s, item) => s + item.unitPrice! * item.qty, 0);
 

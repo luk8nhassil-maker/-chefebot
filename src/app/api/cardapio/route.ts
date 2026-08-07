@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { redis } from '@/lib/redis'
 import { getMENUDinamico } from '@/lib/menu.server'
+import { buildPizzaCatalog } from '@/lib/catalog/pizzas'
 import { verifyToken } from '@/lib/auth'
 import { registrarAuditoriaCardapio } from '@/lib/auditoriaCardapio'
 
@@ -224,7 +225,13 @@ export async function GET() {
       horaFechamento: config.horaFechamento,
       aberto: estaAbertoAgora(config),
     }
-    return NextResponse.json({ ...menu, esgotados, esgotadosMetadata, horario })
+    // Catálogo oficial de pizzas com IDs estáveis (Fase 2) — aditivo, ninguém
+    // ainda consome esta chave; a UI do cardápio continua 100% em name/detail
+    // (ver docs de entrega da Fase 2 sobre por que a interface não foi
+    // religada nesta mesma etapa). Serve pra religar a UI depois sem precisar
+    // reconstruir o catálogo em outro lugar.
+    const pizzaCatalog = buildPizzaCatalog(menu, esgotados)
+    return NextResponse.json({ ...menu, esgotados, esgotadosMetadata, horario, pizzaCatalog })
   } catch {
     return NextResponse.json(
       { ok: false, error: 'Cardápio temporariamente indisponível' },

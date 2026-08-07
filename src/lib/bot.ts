@@ -285,7 +285,7 @@ function permiteMeioAMeio(size?: string): boolean {
 // Apelidos: variações que o fuzzy sozinho não pegaria (números por extenso vs dígito,
 // abreviações, grafias alternativas e apelidos culturais comuns no WhatsApp).
 // Cobre pizza, lanches, bebidas e sucos.
-const APELIDOS_SABOR: Record<string, string[]> = {
+export const APELIDOS_SABOR: Record<string, string[]> = {
   // Pizza — sabores
   "Quatro Queijos": ["4 queijos", "4 queijo", "quatro queijo"],
   "Tres Queijos": ["3 queijos", "3 queijo", "tres queijo"],

@@ -104,4 +104,15 @@ describe("Esgotado reflete no cardápio público (GET) após PATCH", () => {
     const data = await (await GET()).json();
     expect(data.esgotados).toContain("Catupiry");
   });
+
+  it("GET expõe o catálogo oficial de pizzas (Fase 2), com sabor esgotado refletido em tempo real", async () => {
+    const antes = await (await GET()).json();
+    const calabresaAntes = antes.pizzaCatalog.flavors.find((f: { name: string }) => f.name === "Calabresa");
+    expect(calabresaAntes.available).toBe(true);
+
+    await marcar("Calabresa", true);
+    const depois = await (await GET()).json();
+    const calabresaDepois = depois.pizzaCatalog.flavors.find((f: { name: string }) => f.name === "Calabresa");
+    expect(calabresaDepois.available).toBe(false);
+  });
 });
