@@ -12,7 +12,7 @@ import { resumirCasoParaAprendizado, registrarCasoPendente, consumirCasoPendente
 import { log } from "@/lib/logger";
 import { analisarComprovantePix } from "@/lib/analisarComprovante";
 import { transcreverAudio } from "@/lib/transcribeAudio";
-import { proximoNumeroPedido } from "@/lib/numeracao";
+import { gerarIdPedidoUnico, proximoNumeroPedido } from "@/lib/numeracao";
 import { salvarStatusConexao, StatusConexao } from "@/lib/conexaoWhatsapp";
 import { ehConfirmacaoPedido } from "@/lib/confirmacaoPedido";
 import { escolherStepDeRetomada, detectarConversaMorta } from "@/lib/reviverConversa";
@@ -175,7 +175,7 @@ async function salvarPedido(session: BotSession, phone: string, _config: ConfigP
     : session.deliveryType === "dine_in"
     ? "Consumo no local"
     : "Retirada na loja";
-  const pedidoId = Date.now().toString();
+  const pedidoId = await gerarIdPedidoUnico();
   const numeroPedido = await proximoNumeroPedido();
   const pixBase = criarPixMetadata(pedidoId, session.paymentMethod, total);
   const pix = await prepararPixProviderMercadoPago({
@@ -244,8 +244,9 @@ async function salvarEscalonamento(phone: string, session: BotSession) {
     return;
   }
   const agora = Date.now();
+  const pedidoId = await gerarIdPedidoUnico();
   const novoPedido: Pedido = {
-    id: agora.toString(),
+    id: pedidoId,
     cliente: session.customerName || phone,
     telefone: phone,
     itens: ["Cliente precisa de atendimento humano"],

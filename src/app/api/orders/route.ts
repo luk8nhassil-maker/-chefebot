@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyToken } from '@/lib/auth'
 import { redis } from '@/lib/redis'
-import { proximoNumeroPedido } from '@/lib/numeracao'
+import { gerarIdPedidoUnico, proximoNumeroPedido } from '@/lib/numeracao'
 import { criarPixMetadata, sanitizarPedidoPixResposta, type PixMetadata } from '@/lib/pix'
 import type { EntregadorCadastro, PedidoEntregador } from '@/types/entregador'
 import {
@@ -649,7 +649,7 @@ export async function POST(req: NextRequest) {
   const pedidos = await getPedidos()
   const numeroPedido = await proximoNumeroPedido()
   const agora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' })
-  const pedidoId = Date.now().toString()
+  const pedidoId = await gerarIdPedidoUnico()
   const pix = criarPixMetadata(pedidoId, pagamento ? String(pagamento) : undefined, Number(total) || 0)
 
   const novoPedido: Pedido = {

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { processMessage, createInitialSession, BotSession } from "@/lib/bot";
 import { resolverFallbackInteligente } from "@/lib/fallbackInteligente";
 import { redis } from "@/lib/redis";
-import { proximoNumeroPedido } from "@/lib/numeracao";
+import { gerarIdPedidoUnico, proximoNumeroPedido } from "@/lib/numeracao";
 import { criarPixMetadata, type PixMetadata } from "@/lib/pix";
 
 type Pedido = {
@@ -43,7 +43,7 @@ async function salvarPedido(session: BotSession, phone: string) {
 
   const numeroPedido = await proximoNumeroPedido();
   const agora = new Date();
-  const pedidoId = Date.now().toString();
+  const pedidoId = await gerarIdPedidoUnico();
   const pix = criarPixMetadata(pedidoId, session.paymentMethod, total);
   const novoPedido: Pedido = {
     id: pedidoId,

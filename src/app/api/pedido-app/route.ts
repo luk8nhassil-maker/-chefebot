@@ -1220,6 +1220,19 @@ export async function POST(req: NextRequest) {
     // `let`: reatribuído na FASE 4 para o valor ESTÁVEL do "attempt" quando
     // clientRequestId está presente — todo o resto do fluxo (Jornada, Pix,
     // persistência) usa só esta variável, nunca um valor recalculado.
+    //
+    // NOTA (auditoria da mistura de clientes em notificações de status): esta
+    // rota tem seu próprio claim atômico por clientRequestId/fingerprint
+    // (ver FASE 4 abaixo) que já protege contra duplicar o MESMO pedido em
+    // retries — mas, assim como as demais rotas de criação, ainda gera um
+    // pedidoId novo com `Date.now().toString()` sem checar colisão entre
+    // clientes DIFERENTES. Deliberadamente NÃO trocado por gerarIdPedidoUnico
+    // aqui: esta é a rota de checkout com Pix (fluxo protegido) e sua suíte
+    // de testes injeta falhas em pontos exatos da sequência de chamadas ao
+    // Redis — adicionar aqui a mesma reivindicação SET NX usada nas outras
+    // rotas desloca essa sequência e quebra dezenas de testes de concorrência
+    // já existentes. Ver relatório do incidente: risco residual documentado,
+    // fix desta rota fica para um patch dedicado e revisado à parte.
     let pedidoId = attemptRecuperado ? attemptRecuperado.pedidoId : Date.now().toString();
 
     // Snapshot do valor Pix ESPERADO gravado no attempt (7ª revisão de
