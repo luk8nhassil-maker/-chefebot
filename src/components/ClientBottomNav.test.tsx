@@ -105,6 +105,27 @@ describe("ClientBottomNav — indicador de Pix pendente na aba Pedido", () => {
   });
 });
 
+describe("ClientBottomNav — bolha do item ativo não é cortada (overflow)", () => {
+  test("o item ativo recebe a classe active, e o CSS embutido garante overflow:visible tanto no .cbn-nav (fixed+transform) quanto no .cbn-nav-inner (pill arredondada) — sem isso o Chromium corta o topo do círculo elevado (translateY(-16px)) mesmo sem overflow:hidden explícito em nenhum dos dois", () => {
+    const html = renderToStaticMarkup(<ClientBottomNav active="sacola" cartCount={2} />);
+    const sacolaItem = html.match(/<(?:a|button)[^>]*class="cbn-item[^"]*"[^>]*>[\s\S]*?Sacola/)?.[0] ?? "";
+    expect(sacolaItem).toMatch(/class="cbn-item active"/);
+
+    const cssMatch = html.match(/\.cbn-nav\{[^}]*\}/);
+    const cssInnerMatch = html.match(/\.cbn-nav-inner\{[^}]*\}/);
+    expect(cssMatch?.[0]).toContain("overflow:visible");
+    expect(cssInnerMatch?.[0]).toContain("overflow:visible");
+  });
+
+  test("a bolha ativa cresce (36px→54px) e sobe (translateY(-16px)) — geometria que só fica visível com overflow:visible nos ancestrais", () => {
+    const html = renderToStaticMarkup(<ClientBottomNav active="inicio" />);
+    const activeRule = html.match(/\.cbn-item\.active \.cbn-icon-circle\{[^}]*\}/)?.[0] ?? "";
+    expect(activeRule).toContain("width:54px");
+    expect(activeRule).toContain("height:54px");
+    expect(activeRule).toContain("transform:translateY(-16px)");
+  });
+});
+
 describe("ClientBottomNav — Início/Sacola internos (cardápio) viram <button>, não <a>", () => {
   test("com onInicioClick/onSacolaClick, não navegam via href", () => {
     const html = renderToStaticMarkup(
