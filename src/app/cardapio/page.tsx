@@ -6,7 +6,7 @@ import PanelShell from "@/components/PanelShell";
 import { useLiveMenu, cartItemEsgotado } from "./liveMenu";
 import { CARDAPIO_ILLUSTRATIONS, CardapioIllustration } from "@/lib/cardapioVisuals";
 import { useTheme } from "@/components/ThemeToggle";
-import ClientBottomNav from "@/components/ClientBottomNav";
+import ClientBottomNav, { CLIENT_BOTTOM_NAV_HEIGHT_PX } from "@/components/ClientBottomNav";
 import { tabAtivaCardapio, consumirFlagAbrirSacola } from "@/lib/pedidoAtivoCliente";
 import { salvarReferenciaPixPendente } from "@/lib/pixPendenteLocal";
 import PixPendenteBar, { usePixPendente, PIX_PENDENTE_BAR_HEIGHT_PX } from "@/components/PixPendenteBar";
@@ -2591,7 +2591,7 @@ main{width:100%;padding:6px 20px 20px}
 .cartbar-count{font-size:12.5px;color:var(--text-sub);font-weight:500}
 .cartbar-total{font-family:var(--font-ui);font-weight:700;font-size:15px;line-height:1.2;letter-spacing:0}
 .cartbar-link{border:1px solid var(--line-strong);background:transparent;color:var(--text-sub);border-radius:999px;padding:9px 13px;font-size:12.5px;font-weight:700}
-.delivery-cta-bar.stacked{bottom:calc(58px + var(--pix-pendente-fixed-offset, 0px));transition:bottom .2s ease}
+.delivery-cta-bar.stacked{bottom:calc(${CLIENT_BOTTOM_NAV_HEIGHT_PX}px + var(--pix-pendente-fixed-offset, 0px));transition:bottom .2s ease}
 .checkout-summary{margin:14px 0 10px;color:var(--text-sub);font-size:13px;font-weight:700;text-align:center}
 .empty{text-align:center;padding:54px 20px;color:var(--text-sub)}
 .empty .big{font-size:56px;margin-bottom:14px;opacity:.4}

@@ -13,7 +13,7 @@ const blocoPixFinal = fonte.slice(
 
 describe("/cardapio (PublicCardapio) — menu inferior unificado com /cliente e /rastrear", () => {
   test("usa o componente compartilhado em vez de markup próprio duplicado", () => {
-    expect(fonte).toContain('import ClientBottomNav from "@/components/ClientBottomNav"');
+    expect(fonte).toContain('import ClientBottomNav, { CLIENT_BOTTOM_NAV_HEIGHT_PX } from "@/components/ClientBottomNav"');
     expect(fonte).toMatch(/<ClientBottomNav\b/);
     // CSS antiga do nav inline não deve sobrar duplicada nesta página.
     expect(fonte).not.toContain(".bottom-nav{");
@@ -101,10 +101,6 @@ describe("/cardapio (PublicCardapio) — Etapa 2: home limpa + barra global de P
 // compartilhada (--pix-pendente-fixed-offset) que os painéis fixos somam
 // ao próprio `bottom`.
 describe("/cardapio (PublicCardapio) — correção: barra Pix pendente não cobre ações fixas do fluxo", () => {
-  test("[caso 1 e 2] painel fixo (.delivery-cta-bar.stacked) soma o offset compartilhado ao bottom original, sem duplicar a altura como número novo", () => {
-    expect(fonte).toContain(".delivery-cta-bar.stacked{bottom:calc(58px + var(--pix-pendente-fixed-offset, 0px));transition:bottom .2s ease}");
-  });
-
   test("[caso 9] a variável compartilhada é derivada de PIX_PENDENTE_BAR_HEIGHT_PX (import da própria constante já usada pelo espaçador da barra), nunca de um valor novo", () => {
     expect(fonte).toContain('import PixPendenteBar, { usePixPendente, PIX_PENDENTE_BAR_HEIGHT_PX } from "@/components/PixPendenteBar"');
     expect(fonte).toContain("`:root{--pix-pendente-fixed-offset:${pixBarVisivel ? PIX_PENDENTE_BAR_HEIGHT_PX : 0}px}`");
@@ -126,6 +122,67 @@ describe("/cardapio (PublicCardapio) — correção: barra Pix pendente não cob
   test("[caso 11] telas sem painel .stacked (entrega/pagamento) não recebem o offset — showBottomNav (e portanto a barra) não aparece nessas etapas, então não há sobreposição a corrigir ali", () => {
     expect(fonte).toContain('.delivery-cta-bar{position:fixed;bottom:0;');
     expect(fonte).not.toMatch(/screen === "sc-delivery"[\s\S]{0,80}"delivery-cta-bar stacked"/);
+  });
+});
+
+// Correção: o CTA da Sacola (.delivery-cta-bar.stacked) usava um número
+// mágico (58px) desatualizado desde que o ClientBottomNav virou a "pill"
+// flutuante atual (105px de altura real) — a barra branca do CTA invadia a
+// pill do menu inferior. Corrigido reaproveitando CLIENT_BOTTOM_NAV_HEIGHT_PX
+// (já exportada por ClientBottomNav.tsx especificamente para isto, mesmo
+// padrão já usado por PixPendenteBar.tsx) em vez de duplicar a altura como
+// um número novo em page.tsx. Medido via harness real de layout (Playwright)
+// em 390×844 e 1440×900: sem sobreposição, sem espaço exagerado, e o último
+// item rolável da sacola não fica escondido atrás do CTA — .cart-screen/
+// .list-screen mantiveram o padding-bottom original porque a medição não
+// comprovou necessidade de ajuste.
+describe("/cardapio (PublicCardapio) — correção: CTA da sacola (.delivery-cta-bar.stacked) não sobrepõe o menu inferior", () => {
+  test("[1] page.tsx importa e reutiliza CLIENT_BOTTOM_NAV_HEIGHT_PX de ClientBottomNav.tsx, sem trocar o import padrão do componente", () => {
+    expect(fonte).toContain('import ClientBottomNav, { CLIENT_BOTTOM_NAV_HEIGHT_PX } from "@/components/ClientBottomNav"');
+  });
+
+  test("[2] .delivery-cta-bar.stacked não contém mais o número mágico 58px", () => {
+    expect(fonte).not.toMatch(/\.delivery-cta-bar\.stacked\{bottom:calc\(58px/);
+  });
+
+  test("[3] o bottom do painel empilhado é derivado da altura oficial do ClientBottomNav (interpolação da constante importada, nunca um número novo) somada ao offset do Pix pendente", () => {
+    expect(fonte).toContain(".delivery-cta-bar.stacked{bottom:calc(${CLIENT_BOTTOM_NAV_HEIGHT_PX}px + var(--pix-pendente-fixed-offset, 0px));transition:bottom .2s ease}");
+  });
+
+  test("[4] o offset compartilhado --pix-pendente-fixed-offset continua sendo somado ao bottom do CTA (não foi substituído, só a base 58px→CLIENT_BOTTOM_NAV_HEIGHT_PX mudou)", () => {
+    expect(fonte).toMatch(/\.delivery-cta-bar\.stacked\{bottom:calc\(\$\{CLIENT_BOTTOM_NAV_HEIGHT_PX\}px \+ var\(--pix-pendente-fixed-offset, 0px\)\)/);
+  });
+
+  test("[5 e 6] sem Pix pendente o offset é 0 (CTA fica exatamente CLIENT_BOTTOM_NAV_HEIGHT_PX acima do menu); com Pix pendente o offset soma PIX_PENDENTE_BAR_HEIGHT_PX, empurrando o CTA para cima da PixPendenteBar — mesma variável e mesma regra, sem duplicar lógica por caso", () => {
+    // Já provado pelos testes [caso 3]/[caso 9] acima que a variável assume
+    // 0 sem pendência e PIX_PENDENTE_BAR_HEIGHT_PX com pendência; aqui só
+    // confirmamos que é ESSA MESMA variável que o CTA soma ao seu bottom.
+    const reglaStacked = fonte.match(/\.delivery-cta-bar\.stacked\{bottom:calc\([^)]*\)/)?.[0] ?? "";
+    expect(reglaStacked).toContain("var(--pix-pendente-fixed-offset, 0px)");
+  });
+
+  test("[7] sc-cart continua usando delivery-cta-bar stacked (o painel com Subtotal/Adicionar/Ir para entrega)", () => {
+    expect(fonte).toMatch(/screen === "sc-cart" && \(\s*<div className=\{`delivery-cta-bar \$\{showBottomNav \? "stacked" : ""\}`\}>/);
+  });
+
+  test("[8] sc-delivery e sc-pay continuam sem bottom nav (fora de showBottomNav) e sem a classe stacked — não recebem nenhum deslocamento novo", () => {
+    expect(fonte).not.toContain('["sc-start", "sc-list", "sc-cart", "sc-done"].includes(screen) === false');
+    const showBottomNavDecl = fonte.match(/const showBottomNav = \[[^\]]*\]\.includes\(screen\);/)?.[0] ?? "";
+    expect(showBottomNavDecl).not.toContain('"sc-delivery"');
+    expect(showBottomNavDecl).not.toContain('"sc-pay"');
+    expect(fonte).toMatch(/screen === "sc-delivery" && \(\s*<div className="delivery-cta-bar">/);
+    expect(fonte).toMatch(/screen === "sc-pay" && \(\s*<div className="delivery-cta-bar">/);
+  });
+
+  test("[9] nenhum texto/ação funcional do CTA da sacola mudou (Subtotal, Adicionar, Ir para entrega, preço via money(cartTotal))", () => {
+    const blocoCtaSacola = fonte.slice(
+      fonte.indexOf('cartCount > 0 && screen === "sc-cart" && ('),
+      fonte.indexOf('cartCount > 0 && screen === "sc-delivery" && (')
+    );
+    expect(blocoCtaSacola).toContain('<div className="delivery-cta-label">Subtotal</div>');
+    expect(blocoCtaSacola).toContain('<div className="delivery-cta-total">{money(cartTotal)}</div>');
+    expect(blocoCtaSacola).toContain('<button className="delivery-cta-cart" onClick={() => go("sc-start")}>Adicionar</button>');
+    expect(blocoCtaSacola).toContain('onClick={() => !cartEsgotado && go("sc-delivery")}>Ir para entrega</button>');
   });
 });
 
