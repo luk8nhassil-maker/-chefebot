@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyToken } from '@/lib/auth'
 import { redis } from '@/lib/redis'
+import { mutarPedidos } from '@/lib/pedidosConcorrencia'
 import { sanitizarPedidoPixResposta } from '@/lib/pix'
 
 type PedidoArquivavel = {
@@ -41,31 +42,39 @@ export async function POST(req: NextRequest) {
   const body = await req.json()
   const { id, todos } = body as { id?: string; todos?: boolean }
 
-  const pedidos = (await redis.get<PedidoArquivavel[]>('pedidos')) || []
   const agora = new Date().toISOString()
 
+  // Protegido pelo lock GLOBAL de "pedidos" (ver
+  // src/lib/pedidosConcorrencia.ts): leitura, marcação e escrita sobre um
+  // snapshot fresco, dentro do lock — nenhuma chamada externa acontece
+  // nesta seção crítica.
   if (id) {
-    const updated = pedidos.map(p =>
-      p.id === id && !p.isArchived
-        ? { ...p, isArchived: true, archivedAt: agora, archivedBy: 'manual' as const, archivedReason: 'manual' }
-        : p
-    )
-    const found = pedidos.find(p => p.id === id)
-    if (!found) return NextResponse.json({ error: 'Pedido nao encontrado' }, { status: 404 })
-    await redis.set('pedidos', updated)
+    const resultado = await mutarPedidos<PedidoArquivavel, 'nao_encontrado' | 'ok'>((pedidosFrescos) => {
+      const found = pedidosFrescos.find(p => p.id === id)
+      if (!found) return { persistir: false, resultado: 'nao_encontrado' }
+      const updated = pedidosFrescos.map(p =>
+        p.id === id && !p.isArchived
+          ? { ...p, isArchived: true, archivedAt: agora, archivedBy: 'manual' as const, archivedReason: 'manual' }
+          : p
+      )
+      return { persistir: true, pedidos: updated, resultado: 'ok' }
+    })
+    if (resultado === 'nao_encontrado') return NextResponse.json({ error: 'Pedido nao encontrado' }, { status: 404 })
     return NextResponse.json({ ok: true, arquivados: 1 })
   }
 
   if (todos) {
-    let count = 0
-    const updated = pedidos.map(p => {
-      if (ehArquivavel(p)) {
-        count++
-        return { ...p, isArchived: true, archivedAt: agora, archivedBy: 'system' as const, archivedReason: 'fim_expediente' }
-      }
-      return p
+    const count = await mutarPedidos<PedidoArquivavel, number>((pedidosFrescos) => {
+      let count = 0
+      const updated = pedidosFrescos.map(p => {
+        if (ehArquivavel(p)) {
+          count++
+          return { ...p, isArchived: true, archivedAt: agora, archivedBy: 'system' as const, archivedReason: 'fim_expediente' }
+        }
+        return p
+      })
+      return { persistir: true, pedidos: updated, resultado: count }
     })
-    await redis.set('pedidos', updated)
     return NextResponse.json({ ok: true, arquivados: count })
   }
 
