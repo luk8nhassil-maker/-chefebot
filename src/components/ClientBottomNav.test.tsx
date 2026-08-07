@@ -117,13 +117,15 @@ describe("ClientBottomNav — bolha do item ativo não é cortada (overflow)", (
     expect(cssInnerMatch?.[0]).toContain("overflow:visible");
   });
 
-  test("a bolha ativa cresce (36px→58px), sobe (translateY(-26px)) e ganha um berço branco largo (anel de 10px na cor da superfície) — geometria que só fica visível com overflow:visible nos ancestrais", () => {
+  test("a bolha ativa cresce moderadamente (36px→42px) e permanece alinhada/dentro da pill (translateY(3px) recentraliza o círculo maior no mesmo eixo dos ícones inativos, sem flutuar acima da barra nem formar um berço/notch profundo)", () => {
     const html = renderToStaticMarkup(<ClientBottomNav active="inicio" />);
     const activeRule = html.match(/\.cbn-item\.active \.cbn-icon-circle\{[^}]*\}/)?.[0] ?? "";
-    expect(activeRule).toContain("width:58px");
-    expect(activeRule).toContain("height:58px");
-    expect(activeRule).toContain("transform:translateY(-26px)");
-    expect(activeRule).toContain("0 0 0 10px var(--surface)");
+    expect(activeRule).toContain("width:42px");
+    expect(activeRule).toContain("height:42px");
+    expect(activeRule).toContain("transform:translateY(3px)");
+    expect(activeRule).toContain("0 0 0 3px var(--surface)");
+    expect(activeRule).not.toContain("translateY(-26px)");
+    expect(activeRule).not.toContain("translateY(-16px)");
   });
 });
 
