@@ -108,14 +108,14 @@ export default function ClientBottomNav({
         </div>
       </nav>
       <style>{`
-        .cbn-nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:540px;z-index:54;padding:0 12px calc(env(safe-area-inset-bottom) + 14px);pointer-events:none}
-        .cbn-nav-inner{pointer-events:auto;display:flex;align-items:stretch;justify-content:space-around;gap:4px;min-height:52px;background:var(--surface);border:1px solid rgba(var(--overlay-rgb), 0.06);border-radius:999px;padding:8px 10px;box-shadow:0 12px 28px rgba(0,0,0,.16), 0 2px 8px rgba(0,0,0,.08)}
+        .cbn-nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:540px;z-index:54;padding:0 12px calc(env(safe-area-inset-bottom) + 14px);pointer-events:none;overflow:visible}
+        .cbn-nav-inner{pointer-events:auto;display:flex;align-items:stretch;justify-content:space-around;gap:4px;min-height:52px;background:var(--surface);border:1px solid rgba(var(--overlay-rgb), 0.06);border-radius:999px;padding:8px 10px;box-shadow:0 12px 28px rgba(0,0,0,.16), 0 2px 8px rgba(0,0,0,.08);overflow:visible}
         .cbn-item{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:3px;padding:2px 4px;border:none;background:none;color:var(--text-secondary);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:11px;font-weight:600;border-radius:12px;cursor:pointer;text-decoration:none;transition:color .15s}
         .cbn-item:active{transform:scale(.96)}
         .cbn-icon{font-size:20px;line-height:1;display:inline-flex;align-items:center;justify-content:center}
         .cbn-icon-wrap{position:relative;display:inline-flex}
         .cbn-icon-circle{width:36px;height:36px;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;color:var(--text-secondary);background:transparent;transition:background-color .18s ease,color .18s ease,transform .18s ease,box-shadow .18s ease,width .18s ease,height .18s ease}
-        .cbn-item.active .cbn-icon-circle{width:54px;height:54px;background:var(--primary);color:var(--primary-foreground);transform:translateY(-16px);box-shadow:0 8px 16px rgba(0,0,0,.28), 0 0 0 5px var(--surface)}
+        .cbn-item.active .cbn-icon-circle{width:58px;height:58px;background:var(--primary);color:var(--primary-foreground);transform:translateY(-26px);box-shadow:0 12px 22px rgba(0,0,0,.32), 0 0 0 10px var(--surface)}
         .cbn-item.active .cbn-label{color:var(--text-primary);font-weight:800}
         .cbn-label{line-height:1.1}
         .cbn-badge{position:absolute;top:-5px;right:-9px;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:var(--danger);color:var(--on-danger);font-size:10px;font-weight:800;display:flex;align-items:center;justify-content:center;line-height:1;box-shadow:0 0 0 2px var(--surface)}
