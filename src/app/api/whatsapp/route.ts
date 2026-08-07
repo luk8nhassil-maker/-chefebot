@@ -1050,12 +1050,15 @@ export async function POST(req: NextRequest) {
       console.error("[ChefeBot] Erro ao avaliar canário (sanitizado):", sanitizeErrorMessage(err));
     }
 
-    // Idempotência global: ignora mensagens já processadas (Evolution pode reenviar webhooks)
+    // Idempotência global: ignora mensagens já processadas (Evolution pode reenviar webhooks).
+    // Claim atômico (SET NX) em vez de get-then-set: duas entregas concorrentes do
+    // MESMO messageId (retry do provedor correndo em paralelo com a 1a tentativa)
+    // não podem mais passar as duas pelo mesmo `get` antes de qualquer `set` ter
+    // efeito — só uma delas ganha a chave, a outra é tratada como duplicata.
     if (msgId) {
       const idempotencyKey = `msg_processed:${msgId}`;
-      const jaProcessado = await redis.get(idempotencyKey);
-      if (jaProcessado) return NextResponse.json({ ok: true });
-      await redis.set(idempotencyKey, 1, { ex: 86400 }); // 24h TTL
+      const claimouProcessamento = await redis.set(idempotencyKey, 1, { ex: 86400, nx: true }); // 24h TTL
+      if (!claimouProcessamento) return NextResponse.json({ ok: true });
     }
 
     const config = await getConfig();
@@ -1428,32 +1431,59 @@ export async function POST(req: NextRequest) {
       // Sem sessão ativa (expirou) — segue o fluxo normal, que recria a sessão.
     }
 
-    // Sem sessao ativa — inicia nova
+    // Sem sessao ativa — inicia nova.
+    //
+    // Cada ramo abaixo faz um claim atômico (SET NX) da sessão em vez de um
+    // redis.set direto: duas mensagens reais e distintas do cliente chegando
+    // quase juntas (2 execuções concorrentes desta rota, nenhuma com sessão
+    // ainda gravada) não podem mais as duas cair em "sem sessão" — só a
+    // primeira a gravar (o "claim") manda a saudação/inicia o pedido; a outra
+    // encontra a sessão recém-criada e segue o fluxo normal do resto da
+    // função com o texto que ela realmente recebeu. Isso fechou o bug
+    // relatado: "oii" seguido de perto por "boa noite" (que também é
+    // reconhecida por eSaudacao) fazia as duas mensagens reenviarem a
+    // saudação completa de boas-vindas.
     if (!currentSession) {
       if (eDespedida(messageText)) return NextResponse.json({ ok: true });
 
       const historico = await redis.get<ClienteHistorico>(`cliente:${phone}`);
       if (historico) {
-        currentSession = createReturningSession(historico);
-        await redis.set(sessionKey, currentSession, { ex: 1800 });
-        await enviarMensagem(phone, montarSaudacaoRetorno(historico));
-        return NextResponse.json({ ok: true });
+        const sessaoRetorno = createReturningSession(historico);
+        const claimouRetorno = await redis.set(sessionKey, sessaoRetorno, { ex: 1800, nx: true });
+        if (!claimouRetorno) {
+          currentSession = (await redis.get<BotSession>(sessionKey)) ?? sessaoRetorno;
+        } else {
+          currentSession = sessaoRetorno;
+          await enviarMensagem(phone, montarSaudacaoRetorno(historico));
+          return NextResponse.json({ ok: true });
+        }
       } else {
         if (!estaAberto(config)) {
           await enviarMensagem(phone, mensagemFechado(config));
           return NextResponse.json({ ok: true });
         }
         if (eSaudacao(messageText)) {
-          currentSession = createInitialSession();
-          await redis.set(sessionKey, currentSession, { ex: 1800 });
-          await enviarMensagem(phone, mensagemSaudacaoPadrao(config.nomePizzaria));
-          await enviarMensagem(phone, `O que vai ser hoje? Temos coisa boa te esperando! 😋\n\n  1. Pizza\n  2. Lanches\n  3. Bebidas\n  4. Sucos e Vitaminas`);
-          await redis.set(sessionKey, { ...currentSession, step: "category" }, { ex: 1800 });
-          return NextResponse.json({ ok: true });
+          // Sessão já nasce direto no step final "category" — nunca fica
+          // persistida como "welcome" enquanto as mensagens de boas-vindas
+          // são enviadas (essa janela intermediária era a 2a causa da
+          // duplicidade: uma leitura concorrente via processMessage caindo
+          // no case "welcome" reenviava a saudação para qualquer texto).
+          const sessaoInicial = { ...createInitialSession(), step: "category" as const };
+          const claimouInicial = await redis.set(sessionKey, sessaoInicial, { ex: 1800, nx: true });
+          if (!claimouInicial) {
+            currentSession = (await redis.get<BotSession>(sessionKey)) ?? sessaoInicial;
+          } else {
+            currentSession = sessaoInicial;
+            await enviarMensagem(phone, mensagemSaudacaoPadrao(config.nomePizzaria));
+            await enviarMensagem(phone, `O que vai ser hoje? Temos coisa boa te esperando! 😋\n\n  1. Pizza\n  2. Lanches\n  3. Bebidas\n  4. Sucos e Vitaminas`);
+            return NextResponse.json({ ok: true });
+          }
+        } else {
+          // Nao e saudacao — cliente ja mandou o pedido direto. Cria sessao no step category e processa.
+          const sessaoDireta = { step: "category" as const, cart: [], deliveryFee: 0, tentativasInvalidas: 0 };
+          const claimouDireta = await redis.set(sessionKey, sessaoDireta, { ex: 1800, nx: true });
+          currentSession = claimouDireta ? sessaoDireta : ((await redis.get<BotSession>(sessionKey)) ?? sessaoDireta);
         }
-        // Nao e saudacao — cliente ja mandou o pedido direto. Cria sessao no step category e processa.
-        currentSession = { step: "category", cart: [], deliveryFee: 0, tentativasInvalidas: 0 };
-        await redis.set(sessionKey, currentSession, { ex: 1800 });
       }
     }
 
