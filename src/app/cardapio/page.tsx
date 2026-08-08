@@ -15,6 +15,7 @@ import LayoutDebugPanel from "./LayoutDebugPanel";
 import { fetchCliente } from "@/lib/clienteSessaoFront";
 import { lerReferenciaRecompensa, limparReferenciaRecompensa, migrarReferenciaLegada } from "@/lib/recompensaJornadaCarrinho";
 import { extrairPagamentoComposto, montarPagamentoComposto, parseValorMonetario } from "@/lib/pagamentoComposto";
+import type { PizzaCatalog } from "@/lib/catalog/pizzas";
 
 // Ícones de categoria da home (menu/navegação) — lucide-react, sem emoji.
 // Mantidos separados de ICONS (que continua usando emoji para os itens
@@ -44,6 +45,12 @@ export type MenuType = {
   esgotados?: string[];
   esgotadosMetadata?: EsgMetadata;
   horario?: { horaAbertura: number; horaFechamento: number; aberto: boolean };
+  // Catálogo oficial de pizzas com IDs estáveis (Fase 2) — aditivo, vem de
+  // GET /api/cardapio. Usado só para montar `pizzaSelection` no carrinho
+  // (ver addPizzaWithBorder); ausência (ex.: resposta antiga em cache) faz o
+  // item de pizza cair no comportamento 100% legado (name/detail), nunca
+  // bloqueia adicionar ao carrinho.
+  pizzaCatalog?: PizzaCatalog;
 };
 
 // ==================== ADMIN CARDÁPIO ====================
@@ -631,6 +638,15 @@ type CartItem = {
   // o pedido final; o servidor valida contra os sabores permitidos da
   // recompensa antes de aceitar.
   recompensaEscolha?: { sabor?: string };
+  // Presente só em pizzas normais (1/2 sabores + borda) quando o catálogo
+  // oficial (menu.pizzaCatalog) estava disponível no momento de montar o
+  // item — ver addPizzaWithBorder. name/detail/price continuam sendo
+  // calculados e enviados do mesmo jeito de sempre (exibição/compatibilidade
+  // com carrinho antigo); o servidor SEMPRE recalcula o preço a partir de
+  // pizzaSelection quando presente, nunca confia no price daqui. Ausente =
+  // item 100% legado (mini-pizza, calzone, ou pizza normal sem catálogo
+  // carregado ainda) — comportamento inalterado.
+  pizzaSelection?: { sizeId: string; flavorIds: string[]; borderId?: string };
 };
 
 type PromocaoPublica = {
@@ -737,6 +753,37 @@ export function nextFlavorSelection(
   if (!current.f1) return { f1: f, f2: current.f2 };
   if (!current.f2) return { f1: current.f1, f2: f };
   return { f1: current.f1, f2: f };
+}
+
+// Resolve a seleção de pizza normal (tamanho + 1/2 sabores + borda, os
+// mesmos já escolhidos pela UI hoje por nome) para os IDs estáveis do
+// catálogo oficial (Fase 2, GET /api/cardapio -> menu.pizzaCatalog) — puro,
+// sem nenhuma chamada de rede. Nunca inventa nem "corrige" nada: se o
+// catálogo ainda não carregou, ou qualquer nome não bate com um ID
+// conhecido (ex.: cardápio mudou entre a carga da tela e o clique), devolve
+// undefined — o item cai no formato 100% legado (name/detail), exatamente
+// o comportamento de antes desta etapa, nunca bloqueia adicionar à sacola.
+export function resolverPizzaSelectionIds(
+  pizzaCatalog: PizzaCatalog | undefined,
+  sizeCode: string,
+  flavor1: string,
+  flavor2: string | null,
+  borderLabel: string | null
+): { sizeId: string; flavorIds: string[]; borderId?: string } | undefined {
+  if (!pizzaCatalog) return undefined;
+  const size = pizzaCatalog.sizes.find((s) => s.code === sizeCode);
+  if (!size) return undefined;
+  const flavorNames = [flavor1, ...(flavor2 ? [flavor2] : [])];
+  const flavorIds: string[] = [];
+  for (const name of flavorNames) {
+    const flavor = pizzaCatalog.flavors.find((f) => f.name === name);
+    if (!flavor) return undefined;
+    flavorIds.push(flavor.id);
+  }
+  if (!borderLabel) return { sizeId: size.id, flavorIds };
+  const border = pizzaCatalog.borders.find((b) => b.label === borderLabel);
+  if (!border) return undefined;
+  return { sizeId: size.id, flavorIds, borderId: border.id };
 }
 
 // Pagamento misto (Pix + Dinheiro): mesma string canônica já validada no
@@ -1221,7 +1268,12 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     setBorder(chosenBorder); setBorderPrice(chosenBorderPrice);
     const flavor = mam ? `${f1} / ${f2}` : f1;
     const keys = [f1, mam ? f2 : null, chosenBorder].filter(Boolean) as string[];
-    const newItem: CartItem = { emoji: "🍕", kind: "pizza", name: `Pizza ${size}${mam ? " (meio a meio)" : ""}`, detail: `${flavor}${chosenBorder ? ` · borda ${chosenBorder}` : ""}`, price: sizePrice + chosenBorderPrice, qty: 1, keys };
+    // IDs estáveis do catálogo oficial (Fase 2) — undefined quando o
+    // catálogo não carregou ou algo não bate; nesse caso o item segue 100%
+    // legado (name/detail), sem bloquear a sacola. Preço aqui continua
+    // sendo só para exibição — o servidor recalcula sempre.
+    const pizzaSelection = resolverPizzaSelectionIds(menu.pizzaCatalog, size!, f1!, mam ? f2 : null, chosenBorder);
+    const newItem: CartItem = { emoji: "🍕", kind: "pizza", name: `Pizza ${size}${mam ? " (meio a meio)" : ""}`, detail: `${flavor}${chosenBorder ? ` · borda ${chosenBorder}` : ""}`, price: sizePrice + chosenBorderPrice, qty: 1, keys, ...(pizzaSelection ? { pizzaSelection } : {}) };
     const newCart = [...cart, newItem];
     setCart(newCart);
     setLastAddedKind("pizza");
@@ -1559,7 +1611,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     // usar e (pizza) o sabor escolhido.
     const itemRecompensaJornada = cart.find((c) => c.recompensaJornadaId);
     const itensSemRecompensa = cart.filter((c) => !c.recompensaJornadaId);
-    const payload = { cliente: nome.trim(), telefone: telefone.trim() || undefined, whatsappToken: waToken || undefined, usarOutroWhatsapp: usarOutroWhatsapp || undefined, itens: itensSemRecompensa.map((c) => ({ kind: c.kind, name: c.name, detail: c.detail, price: c.price, qty: c.qty, ...(c.promoId ? { promoId: c.promoId } : {}) })), ...(itemRecompensaJornada ? { recompensaJornada: { recompensaId: itemRecompensaJornada.recompensaJornadaId, ...(itemRecompensaJornada.recompensaEscolha ? { escolha: itemRecompensaJornada.recompensaEscolha } : {}) } } : {}), tipoEntrega: delType, bairro: delType === "delivery" ? menu.neighborhoods[+bairroIdx].name : undefined, rua: delType === "delivery" ? rua : undefined, numero: delType === "delivery" && numero.trim() ? numero.trim() : undefined, referencia: delType === "delivery" && referencia.trim() ? referencia.trim() : undefined, observacao: observacao.trim() || undefined, taxaEntrega: fee, pagamento: payment, troco: (payment === "Dinheiro" || isHibrido) ? (trocoOpcao === "nao" ? "Sem troco" : troco.trim()) : undefined, resgateId: resgatePontos && new Date(resgatePontos.expiraEm).getTime() > Date.now() ? resgatePontos.resgateId : undefined };
+    const payload = { cliente: nome.trim(), telefone: telefone.trim() || undefined, whatsappToken: waToken || undefined, usarOutroWhatsapp: usarOutroWhatsapp || undefined, itens: itensSemRecompensa.map((c) => ({ kind: c.kind, name: c.name, detail: c.detail, price: c.price, qty: c.qty, ...(c.promoId ? { promoId: c.promoId } : {}), ...(c.pizzaSelection ? { pizzaSelection: c.pizzaSelection } : {}) })), ...(itemRecompensaJornada ? { recompensaJornada: { recompensaId: itemRecompensaJornada.recompensaJornadaId, ...(itemRecompensaJornada.recompensaEscolha ? { escolha: itemRecompensaJornada.recompensaEscolha } : {}) } } : {}), tipoEntrega: delType, bairro: delType === "delivery" ? menu.neighborhoods[+bairroIdx].name : undefined, rua: delType === "delivery" ? rua : undefined, numero: delType === "delivery" && numero.trim() ? numero.trim() : undefined, referencia: delType === "delivery" && referencia.trim() ? referencia.trim() : undefined, observacao: observacao.trim() || undefined, taxaEntrega: fee, pagamento: payment, troco: (payment === "Dinheiro" || isHibrido) ? (trocoOpcao === "nao" ? "Sem troco" : troco.trim()) : undefined, resgateId: resgatePontos && new Date(resgatePontos.expiraEm).getTime() > Date.now() ? resgatePontos.resgateId : undefined };
     try {
       const r = await fetch("/api/pedido-app", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const data = await r.json();
