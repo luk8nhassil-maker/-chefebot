@@ -19,11 +19,13 @@ import {
   pendenciaIdentificadorTentativa,
   selecaoVazia,
   adaptarCardapioParaMontagem,
+  resolverPizzaSelectionIds,
   type MenuManual,
   type ProdutoManual,
   type DadosPedidoManual,
 } from "./montagemManual";
 import { officialUnitPrice, type ItemApp } from "./pedidoAppItens";
+import type { PizzaCatalog } from "./catalog/pizzas";
 
 // Cardápio de teste: nomes e valores inventados só para o teste, nunca
 // copiados de nenhum estabelecimento. O que importa aqui é a FORMA do
@@ -47,6 +49,25 @@ const MENU: MenuManual = {
   payments: ["Pix", "Dinheiro", "Cartao"],
   esgotados: [],
 };
+
+// Catálogo oficial de pizzas (Fase 2) correspondente ao MENU de teste acima —
+// mesmos nomes/códigos, IDs estáveis inventados só para o teste.
+const PIZZA_CATALOG: PizzaCatalog = {
+  sizes: [
+    { id: "size-p", code: "P", label: "Pequena", priceCents: 3000 },
+    { id: "size-g", code: "G", label: "Grande", priceCents: 5000 },
+  ],
+  flavors: [
+    { id: "flavor-quatro-queijos", name: "Quatro Queijos", category: "tradicional", aliases: [], available: true },
+    { id: "flavor-frango-requeijao", name: "Frango com Requeijão", category: "tradicional", aliases: [], available: true },
+    { id: "flavor-chocolate", name: "Chocolate", category: "doce", aliases: [], available: false },
+  ],
+  borders: [
+    { id: "border-requeijao", label: "Requeijão", priceSmallCents: 500, priceLargeCents: 800, available: true },
+  ],
+};
+
+const MENU_COM_CATALOGO: MenuManual = { ...MENU, pizzaCatalog: PIZZA_CATALOG };
 
 function produtoPorId(id: string, menu: MenuManual = MENU): ProdutoManual {
   const p = listarProdutosManuais(menu).find((x) => x.id === id);
@@ -390,6 +411,138 @@ describe("construção do item — mesma gramática do motor oficial", () => {
   });
 });
 
+describe("resolverPizzaSelectionIds — resolução de nomes para IDs do catálogo oficial (Fase 4)", () => {
+  test("1 sabor sem borda resolve sizeId + flavorIds", () => {
+    const r = resolverPizzaSelectionIds(PIZZA_CATALOG, "G", ["Quatro Queijos"], null);
+    expect(r).toEqual({ sizeId: "size-g", flavorIds: ["flavor-quatro-queijos"] });
+  });
+
+  test("meio a meio resolve os dois flavorIds, na ordem recebida", () => {
+    const r = resolverPizzaSelectionIds(PIZZA_CATALOG, "G", ["Quatro Queijos", "Frango com Requeijão"], null);
+    expect(r?.flavorIds).toEqual(["flavor-quatro-queijos", "flavor-frango-requeijao"]);
+  });
+
+  test("com borda resolve borderId também", () => {
+    const r = resolverPizzaSelectionIds(PIZZA_CATALOG, "P", ["Chocolate"], "Requeijão");
+    expect(r).toEqual({ sizeId: "size-p", flavorIds: ["flavor-chocolate"], borderId: "border-requeijao" });
+  });
+
+  test("catálogo ausente devolve undefined — nunca bloqueia, cai no legado", () => {
+    expect(resolverPizzaSelectionIds(undefined, "G", ["Chocolate"], null)).toBeUndefined();
+  });
+
+  test("tamanho fora do catálogo devolve undefined", () => {
+    expect(resolverPizzaSelectionIds(PIZZA_CATALOG, "F", ["Chocolate"], null)).toBeUndefined();
+  });
+
+  test("sabor fora do catálogo devolve undefined", () => {
+    expect(resolverPizzaSelectionIds(PIZZA_CATALOG, "G", ["Sabor Inexistente"], null)).toBeUndefined();
+  });
+
+  test("borda fora do catálogo devolve undefined", () => {
+    expect(resolverPizzaSelectionIds(PIZZA_CATALOG, "G", ["Chocolate"], "Borda Fantasma")).toBeUndefined();
+  });
+
+  test("0 ou 3+ sabores devolve undefined", () => {
+    expect(resolverPizzaSelectionIds(PIZZA_CATALOG, "G", [], null)).toBeUndefined();
+    expect(resolverPizzaSelectionIds(PIZZA_CATALOG, "G", ["Chocolate", "Quatro Queijos", "Frango com Requeijão"], null)).toBeUndefined();
+  });
+
+  test("sabor esgotado (available: false) ainda resolve o ID — disponibilidade é checagem do servidor, não da resolução de nome", () => {
+    // A UI já impede escolher um sabor esgotado (opção desabilitada), mas a
+    // resolução pura de nome→ID não é o lugar de checar estoque: quem barra
+    // um pizzaSelection com sabor indisponível é o motor nativo do servidor
+    // (precificarPizzaPorId), com a lista de esgotados fresca no momento do
+    // pedido — nunca uma cópia potencialmente desatualizada no cliente.
+    const r = resolverPizzaSelectionIds(PIZZA_CATALOG, "P", ["Chocolate"], null);
+    expect(r).toEqual({ sizeId: "size-p", flavorIds: ["flavor-chocolate"] });
+  });
+});
+
+describe("construirItemManual — pizzaSelection (Fase 4)", () => {
+  test("pizza de 1 sabor ganha pizzaSelection quando o catálogo resolve", () => {
+    const item = construirItemManual(
+      produtoPorId("pizza:g", MENU_COM_CATALOGO),
+      { sabores: ["Quatro Queijos"], borda: null },
+      MENU_COM_CATALOGO
+    );
+    expect(item?.pizzaSelection).toEqual({ sizeId: "size-g", flavorIds: ["flavor-quatro-queijos"] });
+    // name/detail continuam exatamente os mesmos — pizzaSelection é aditivo.
+    expect(item?.name).toBe("Pizza G");
+    expect(item?.detail).toBe("Quatro Queijos");
+    expect(item?.price).toBe(50);
+  });
+
+  test("meio a meio com borda ganha pizzaSelection com os dois flavorIds e borderId", () => {
+    const item = construirItemManual(
+      produtoPorId("pizza:g", MENU_COM_CATALOGO),
+      { sabores: ["Chocolate", "Quatro Queijos"], borda: "Requeijão" },
+      MENU_COM_CATALOGO
+    );
+    expect(item?.pizzaSelection).toEqual({
+      sizeId: "size-g",
+      flavorIds: ["flavor-chocolate", "flavor-quatro-queijos"],
+      borderId: "border-requeijao",
+    });
+    expect(item?.price).toBe(58);
+  });
+
+  test("quantidade maior que 1 não afeta a seleção estruturada (é por unidade)", () => {
+    const item = construirItemManual(
+      produtoPorId("pizza:g", MENU_COM_CATALOGO),
+      { sabores: ["Quatro Queijos"], borda: null },
+      MENU_COM_CATALOGO,
+      3
+    );
+    expect(item?.qty).toBe(3);
+    expect(item?.pizzaSelection).toEqual({ sizeId: "size-g", flavorIds: ["flavor-quatro-queijos"] });
+  });
+
+  test("sem pizzaCatalog no menu (compatibilidade), o item continua 100% legado — sem pizzaSelection", () => {
+    const item = construirItemManual(
+      produtoPorId("pizza:g", MENU), // MENU sem pizzaCatalog
+      { sabores: ["Quatro Queijos"], borda: null },
+      MENU
+    );
+    expect(item).not.toBeNull();
+    expect(item?.pizzaSelection).toBeUndefined();
+    expect(item?.price).toBe(50);
+  });
+
+  test("sabor sem correspondência no pizzaCatalog (catálogo desatualizado) não bloqueia — item legado sem pizzaSelection", () => {
+    const menuCatalogoIncompleto: MenuManual = {
+      ...MENU,
+      saltyFlavors: [...MENU.saltyFlavors, "Sabor Novo Ainda Sem Catalogo"],
+      pizzaCatalog: PIZZA_CATALOG, // não conhece "Sabor Novo Ainda Sem Catalogo"
+    };
+    const item = construirItemManual(
+      produtoPorId("pizza:g", menuCatalogoIncompleto),
+      { sabores: ["Sabor Novo Ainda Sem Catalogo"], borda: null },
+      menuCatalogoIncompleto
+    );
+    expect(item).not.toBeNull();
+    expect(item?.pizzaSelection).toBeUndefined();
+    expect(item?.price).toBe(50);
+  });
+
+  test("mini-pizza/calzone/macarronada/sucos/bebidas nunca ganham pizzaSelection (fora do escopo da Fase 4)", () => {
+    const calzone = construirItemManual(
+      produtoPorId("lanches:calzone", MENU_COM_CATALOGO),
+      { sabores: ["Chocolate"] },
+      MENU_COM_CATALOGO
+    );
+    const suco = construirItemManual(
+      produtoPorId("sucos:suco de acai", MENU_COM_CATALOGO),
+      { sabores: [], leite: "sem" },
+      MENU_COM_CATALOGO
+    );
+    const refri = construirItemManual(produtoPorId("bebidas:refrigerante 2l", MENU_COM_CATALOGO), selecaoVazia(), MENU_COM_CATALOGO);
+    expect(calzone && "pizzaSelection" in calzone).toBe(false);
+    expect(suco && "pizzaSelection" in suco).toBe(false);
+    expect(refri && "pizzaSelection" in refri).toBe(false);
+  });
+});
+
 describe("carrinho e total", () => {
   const refri = construirItemManual(produtoPorId("bebidas:refrigerante 2l"), selecaoVazia(), MENU) as ItemApp;
   const pizza = construirItemManual(produtoPorId("pizza:g"), { sabores: ["Chocolate"], borda: null }, MENU) as ItemApp;
@@ -608,5 +761,67 @@ describe("adaptarCardapioParaMontagem — fronteira validada, sem cast", () => {
       bebidas: [{ name: "A", price: Number.NaN }, { name: "B", price: Infinity }, { name: "C", price: 3 }],
     })!;
     expect(menu.bebidas).toEqual([{ name: "C", price: 3 }]);
+  });
+
+  describe("pizzaCatalog (campo aditivo, Fase 4)", () => {
+    const pizzaCatalogBruto = {
+      sizes: [{ id: "size-g", code: "G", label: "Grande", priceCents: 5000 }],
+      flavors: [{ id: "flavor-quatro-queijos", name: "Quatro Queijos", category: "tradicional", aliases: ["4 queijos"], available: true }],
+      borders: [{ id: "border-requeijao", label: "Requeijão", priceSmallCents: 500, priceLargeCents: 800, available: true }],
+    };
+
+    test("converte um pizzaCatalog bem formado", () => {
+      const menu = adaptarCardapioParaMontagem({ ...bruto, pizzaCatalog: pizzaCatalogBruto });
+      expect(menu?.pizzaCatalog).toEqual(pizzaCatalogBruto);
+    });
+
+    test("ausente não quebra nem bloqueia o resto do cardápio — vira undefined", () => {
+      const menu = adaptarCardapioParaMontagem(bruto); // bruto original não tem pizzaCatalog
+      expect(menu).not.toBeNull();
+      expect(menu?.pizzaCatalog).toBeUndefined();
+    });
+
+    test("malformado (ex.: priceCents como string) descarta só a entrada ruim, sem derrubar o cardápio inteiro", () => {
+      const menu = adaptarCardapioParaMontagem({
+        ...bruto,
+        pizzaCatalog: {
+          sizes: [{ id: "size-g", code: "G", label: "Grande", priceCents: "cinquenta" }, { id: "size-p", code: "P", label: "Pequena", priceCents: 3000 }],
+          flavors: pizzaCatalogBruto.flavors,
+          borders: pizzaCatalogBruto.borders,
+        },
+      });
+      expect(menu?.pizzaCatalog?.sizes).toEqual([{ id: "size-p", code: "P", label: "Pequena", priceCents: 3000 }]);
+    });
+
+    test("category fora do enum conhecido descarta o sabor", () => {
+      const menu = adaptarCardapioParaMontagem({
+        ...bruto,
+        pizzaCatalog: {
+          sizes: pizzaCatalogBruto.sizes,
+          flavors: [{ id: "x", name: "Sabor X", category: "categoria-inventada", aliases: [], available: true }],
+          borders: pizzaCatalogBruto.borders,
+        },
+      });
+      expect(menu?.pizzaCatalog?.flavors).toEqual([]);
+    });
+
+    test("totalmente vazio (sizes/flavors/borders todos []) vira undefined, não um catálogo vazio", () => {
+      const menu = adaptarCardapioParaMontagem({ ...bruto, pizzaCatalog: { sizes: [], flavors: [], borders: [] } });
+      expect(menu?.pizzaCatalog).toBeUndefined();
+    });
+
+    test("não é objeto (string/número/array) vira undefined", () => {
+      for (const v of ["nope", 42, []]) {
+        const menu = adaptarCardapioParaMontagem({ ...bruto, pizzaCatalog: v });
+        expect(menu?.pizzaCatalog).toBeUndefined();
+      }
+    });
+
+    test("o resultado é usável de ponta a ponta: construirItemManual anexa pizzaSelection", () => {
+      const menu = adaptarCardapioParaMontagem({ ...bruto, pizzaCatalog: pizzaCatalogBruto })!;
+      const pizza = listarProdutosManuais(menu).find((p) => p.id === "pizza:g")!;
+      const item = construirItemManual(pizza, { sabores: ["Quatro Queijos"], borda: "Requeijão" }, menu);
+      expect(item?.pizzaSelection).toEqual({ sizeId: "size-g", flavorIds: ["flavor-quatro-queijos"], borderId: "border-requeijao" });
+    });
   });
 });

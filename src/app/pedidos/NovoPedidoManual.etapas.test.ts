@@ -470,6 +470,10 @@ describe("NovoPedidoManual — não duplica catálogo, preço ou payload já exi
     expect(fonte).toContain('fetch("/api/pedido-app"');
     expect(fonte).toContain("clientRequestId");
   });
+
+  test("pizza normal envia pizzaSelection (IDs oficiais, Fase 4) quando o item a carrega, sem tocar name/detail/price", () => {
+    expect(fonte).toContain("...(i.pizzaSelection ? { pizzaSelection: i.pizzaSelection } : {})");
+  });
 });
 
 describe("NovoPedidoManual — lista de produtos nunca acumula entre categorias", () => {
