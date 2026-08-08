@@ -1252,7 +1252,23 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const esgotados = menu.esgotados || [];
   const miniPizzaItem = (menu.lanches || []).find((it) => isMiniPizzaName(it.name) && Number.isFinite(it.price));
   const miniPizzaEsgotada = !!miniPizzaItem && esgotados.includes(miniPizzaItem.name);
-  const miniPizzaFlavors = (menu.miniPizzaFlavors?.length ? menu.miniPizzaFlavors : [...(menu.saltyFlavors || []), ...(menu.sweetFlavors || [])]).filter(Boolean);
+  // Lista efetiva de sabores da Mini-Pizza: com o catálogo oficial presente,
+  // é SEMPRE `produto.flavors` (já calculada por buildSimpleCatalog conforme
+  // flavorsMode via resolverFlavorsModeEfetivo — mesma fonte que o Calzone
+  // usa logo abaixo) — nunca uma decisão própria daqui a partir de
+  // `menu.miniPizzaFlavors` bruto. HARDENING (auditoria independente, ciclo
+  // de autoauditoria pós-9ª rodada): antes desta correção, esta lista vinha
+  // direto de `menu.miniPizzaFlavors` com fallback próprio para os sabores
+  // inteiros da pizza quando vazia — segunda fonte de verdade, divergente do
+  // catálogo se flavorsMode algum dia deixasse de ser "own" (mostraria só a
+  // lista própria mesmo quando o modo efetivo fosse "pizza"). Só quando o
+  // catálogo está genuinamente ausente (resposta antiga em cache) o seletor
+  // cai para a heurística legada de sempre.
+  const miniPizzaCatalogProduto = menu.catalog?.lanches.find((l) => l.name === miniPizzaItem?.name);
+  const miniPizzaFlavors = (miniPizzaCatalogProduto
+    ? miniPizzaCatalogProduto.flavors?.map((f) => f.name) ?? []
+    : (menu.miniPizzaFlavors?.length ? menu.miniPizzaFlavors : [...(menu.saltyFlavors || []), ...(menu.sweetFlavors || [])])
+  ).filter(Boolean);
   const calzoneItem = (menu.lanches || []).find((it) => isCalzoneName(it.name) && Number.isFinite(it.price));
   const calzoneEsgotada = !!calzoneItem && esgotados.includes(calzoneItem.name);
 

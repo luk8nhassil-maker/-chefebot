@@ -45,9 +45,12 @@ export interface CatalogSimpleProduct {
   hasFlavors?: boolean;
   flavorsKey?: string;
   /** Passagem direta de menu.lanches[].flavorsMode — decide se os sabores
-   *  deste produto vêm da Pizza ("pizza", padrão quando ausente) ou de sua
-   *  própria lista apontada por `flavorsKey` ("own"). Configuração explícita
-   *  por produto — nunca inferida por nome nem por lista vazia. */
+   *  deste produto vêm da Pizza ("pizza") ou de sua própria lista apontada
+   *  por `flavorsKey` ("own"). Configuração explícita por produto — nunca
+   *  inferida por nome nem por lista vazia. AUSENTE não é sempre "pizza": o
+   *  modo efetivo é resolvido por `resolverFlavorsModeEfetivo`
+   *  (@/lib/pedidoAppItens, fonte única de compatibilidade) por
+   *  `flavorsKey`, não por este tipo. */
   flavorsMode?: "pizza" | "own";
 }
 

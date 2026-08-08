@@ -298,6 +298,35 @@ describe("etapas obrigatórias", () => {
     expect(montarEtapas(produtoPorId("lanches:macarronada"), MENU).map((e) => e.tipo)).toEqual(["tamanho_item"]);
   });
 
+  test("REGRESSÃO (auditoria independente, ciclo de autoauditoria pós-9ª rodada) — sem menu.catalog, calzone/mini-pizza continuam usando a lista cheia de sabores (compat legado, mesma regra de sempre)", () => {
+    const etapaCalzone = montarEtapas(produtoPorId("lanches:calzone"), MENU)[0];
+    const etapaMiniPizza = montarEtapas(produtoPorId("lanches:mini-pizza", MENU), MENU)[0];
+    const nomesEsperados = [...MENU.saltyFlavors, ...MENU.sweetFlavors].sort();
+    expect(etapaCalzone.opcoes.map((o) => o.valor).sort()).toEqual(nomesEsperados);
+    expect(etapaMiniPizza.opcoes.map((o) => o.valor).sort()).toEqual(nomesEsperados);
+  });
+
+  test("REGRESSÃO (auditoria independente, ciclo de autoauditoria pós-9ª rodada) — com menu.catalog presente, a etapa sabor_unico da mini-pizza usa SÓ produto.flavors (mode-aware), nunca a lista cheia da pizza", () => {
+    // No fixture SIMPLE_CATALOG, Mini-Pizza tem só 2 sabores permitidos
+    // ("Quatro Queijos", "Chocolate") — um SUBCONJUNTO de
+    // MENU.saltyFlavors+sweetFlavors (que também inclui "Frango com
+    // Requeijão"). Antes desta correção, esta etapa mostrava os 3 sabores
+    // incondicionalmente (mesmo bug do Calzone no Cardápio Público, agora
+    // também presente aqui) — o atendente podia escolher "Frango com
+    // Requeijão" para a Mini-Pizza, e construirItemManual SEMPRE recusaria
+    // (resolverSimpleSelectionIds não encontra esse sabor em produto.flavors).
+    const miniPizzaProduto = produtoPorId("lanches:mini-pizza", MENU_COM_CATALOGO_SIMPLES);
+    const etapaMiniPizza = montarEtapas(miniPizzaProduto, MENU_COM_CATALOGO_SIMPLES)[0];
+    expect(etapaMiniPizza.opcoes.map((o) => o.valor).sort()).toEqual(["Chocolate", "Quatro Queijos"]);
+    expect(etapaMiniPizza.opcoes.some((o) => o.valor === "Frango com Requeijão")).toBe(false);
+
+    // Calzone no mesmo fixture tem os 3 sabores liberados (equivalente ao
+    // modo "pizza") — continua mostrando todos, pela MESMA fonte (catálogo).
+    const calzoneProduto = produtoPorId("lanches:calzone", MENU_COM_CATALOGO_SIMPLES);
+    const etapaCalzone = montarEtapas(calzoneProduto, MENU_COM_CATALOGO_SIMPLES)[0];
+    expect(etapaCalzone.opcoes.map((o) => o.valor).sort()).toEqual(["Chocolate", "Frango com Requeijão", "Quatro Queijos"]);
+  });
+
   test("produto simples não tem etapa nenhuma", () => {
     expect(montarEtapas(produtoPorId("bebidas:refrigerante 2l"), MENU)).toEqual([]);
     expect(montarEtapas(produtoPorId("lanches:sanduiche simples"), MENU)).toEqual([]);

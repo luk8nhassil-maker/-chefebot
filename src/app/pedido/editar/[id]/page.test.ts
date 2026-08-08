@@ -80,3 +80,24 @@ describe("POST /api/pedido-app/[id]/editar/descartar — [caso 6] mantém o paga
     expect(fonteDescartar).not.toContain("randomUUID()");
   });
 });
+
+describe("/pedido/editar/[id] — REGRESSÃO (auditoria independente, ciclo de autoauditoria pós-9ª rodada): aba Calzone do modal 'Adicionar item' usa a lista EFETIVA de sabores do catálogo oficial, nunca a lista cheia da pizza incondicionalmente", () => {
+  // Mesma classe de bug já corrigida no Cardápio Público e no Pedido
+  // Manual/Salão: esta tela (admin, edição de um pedido já feito) monta o
+  // item do Calzone 100% pelo caminho legado (name/detail, sem
+  // simpleSelection) — o servidor (officialUnitPrice, em
+  // .../editar/salvar) já recusa um sabor fora da lista efetiva mesmo sem
+  // esta correção, mas o modal mostrava TODOS os sabores da pizza
+  // incondicionalmente, deixando o admin escolher uma opção que o servidor
+  // sempre rejeitaria ao salvar.
+  test("calzoneFlavorNames vem de menu.catalog (produto.flavors), só cai para a lista cheia da pizza quando o catálogo está genuinamente ausente", () => {
+    expect(fonte).toContain("const calzoneCatalogProduto = menu.catalog?.lanches.find((l) => l.name === calzoneItem?.name);");
+    expect(fonte).toContain("const calzoneFlavorNames = calzoneCatalogProduto ? calzoneCatalogProduto.flavors?.map((f) => f.name) ?? [] : flavors;");
+  });
+
+  test("a aba calzone do modal renderiza a partir de calzoneFlavorNames, não da lista cheia `flavors` (que continua servindo só a aba pizza)", () => {
+    const abaCalzone = fonte.slice(fonte.indexOf('{aba === "calzone"'), fonte.indexOf('{aba === "calzone"') + 600);
+    expect(abaCalzone).toContain("calzoneFlavorNames.map((f) =>");
+    expect(abaCalzone).not.toContain("flavors.map((f) =>");
+  });
+});

@@ -544,6 +544,24 @@ describe("/cardapio (PublicCardapio) — Calzone entra no mesmo fluxo de sabores
     expect(fonte).not.toContain("calzoneFlavorsList");
   });
 
+  test("REGRESSÃO (auditoria independente, ciclo de autoauditoria pós-9ª rodada) — mini-pizza usa a lista EFETIVA de sabores do catálogo oficial no MODAL (produto.flavors via menu.catalog), nunca `menu.miniPizzaFlavors` bruto como segunda fonte", () => {
+    // Mesmo bug de fundo do Calzone (teste acima), mas na Mini-Pizza: antes
+    // desta correção, `miniPizzaFlavors` (a lista mostrada no modal) vinha
+    // direto de `menu.miniPizzaFlavors` bruto — nunca de `menu.catalog`, o
+    // único lugar onde `flavorsMode` (via resolverFlavorsModeEfetivo) é
+    // resolvido. Isso divergia do Calzone (que já usava o catálogo) e criava
+    // uma segunda fonte de verdade: se o modo efetivo da Mini-Pizza algum dia
+    // deixasse de ser "own", o modal continuaria mostrando só a lista própria
+    // em vez dos sabores efetivos do catálogo.
+    expect(fonte).toContain("const miniPizzaCatalogProduto = menu.catalog?.lanches.find((l) => l.name === miniPizzaItem?.name);");
+    expect(fonte).toContain(
+      "const miniPizzaFlavors = (miniPizzaCatalogProduto\n" +
+      "    ? miniPizzaCatalogProduto.flavors?.map((f) => f.name) ?? []\n" +
+      "    : (menu.miniPizzaFlavors?.length ? menu.miniPizzaFlavors : [...(menu.saltyFlavors || []), ...(menu.sweetFlavors || [])])\n" +
+      "  ).filter(Boolean);"
+    );
+  });
+
   test("buildOk bloqueia confirmar quando o calzone escolhido está esgotado", () => {
     expect(fonte).toContain("const buildOk = !!size && flavorOk && !(miniPizzaMode && miniPizzaEsgotada) && !(calzoneMode && calzoneEsgotada);");
   });

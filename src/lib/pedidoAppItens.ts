@@ -45,9 +45,9 @@ export type MenuSimpleItem = {
   // caminho legado (ver officialUnitPrice) para respeitar o modo
   // configurado mesmo quando o cliente omite `simpleSelection`. A DECISÃO
   // de aplicar a validação de sabor é `hasFlavors && flavorsKey` — nunca o
-  // nome do produto. Dentro dela, `flavorsMode` ausente/"pizza" aceita
-  // qualquer sabor da pizza (mesmo comportamento de sempre); "own"
-  // restringe à lista apontada por `flavorsKey`.
+  // nome do produto. QUAL lista vale (pizza inteira vs. lista própria) é
+  // decidido por `resolverFlavorsModeEfetivo` (abaixo) — `flavorsMode`
+  // AUSENTE não é sempre "pizza": depende de `flavorsKey` (ver a função).
   hasFlavors?: boolean;
   flavorsKey?: string;
   flavorsMode?: "pizza" | "own";

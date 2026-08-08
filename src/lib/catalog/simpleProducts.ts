@@ -29,17 +29,23 @@
 // do catálogo de outro produto).
 //
 // DE ONDE VEM A LISTA de sabores permitidos de um produto "single_flavor" é
-// decidido por `produto.flavorsMode` — configuração explícita por produto
-// (menu.lanches[i].flavorsMode), NUNCA inferida por lista vazia nem pelo
-// nome do produto:
-//   - "pizza" (padrão/ausente) — reaproveita os mesmos sabores efetivos da
-//     Pizza (saltyFlavors + sweetFlavors inteiros), sem lista própria. É o
-//     comportamento comercial aprovado do Calzone: mudanças nos sabores
-//     disponíveis da Pizza refletem automaticamente aqui, porque é
-//     literalmente o mesmo cálculo sobre a mesma lista.
+// decidido por `resolverFlavorsModeEfetivo` (@/lib/pedidoAppItens) — FONTE
+// ÚNICA também usada pelo caminho legado (officialUnitPrice), NUNCA inferida
+// pelo nome do produto:
+//   - "pizza" — reaproveita os mesmos sabores efetivos da Pizza (saltyFlavors
+//     + sweetFlavors inteiros), sem lista própria. É o comportamento
+//     comercial aprovado do Calzone: mudanças nos sabores disponíveis da
+//     Pizza refletem automaticamente aqui, porque é literalmente o mesmo
+//     cálculo sobre a mesma lista.
 //   - "own" — usa a lista própria apontada por `flavorsKey` (ex.:
 //     "calzoneFlavors"), independente da Pizza — permite esconder um sabor
 //     só deste produto sem afetar a Pizza nem outro produto "own".
+//   - `flavorsMode` AUSENTE **não é sempre "pizza"**: um cardápio `lanches`
+//     persistido antes da introdução deste campo preserva o comportamento
+//     histórico por `flavorsKey` — "pizza" só para "calzoneFlavors" (exceção
+//     comercial aprovada), "own" para qualquer outro (inclui
+//     "miniPizzaFlavors" — nunca alterado). Ver `resolverFlavorsModeEfetivo`
+//     para a regra completa, incluindo fail-closed para config corrompida.
 import type { Menu } from "@/lib/menu";
 import { norm, resolverFlavorsModeEfetivo } from "@/lib/pedidoAppItens";
 import { buildCatalog } from "./adapter";

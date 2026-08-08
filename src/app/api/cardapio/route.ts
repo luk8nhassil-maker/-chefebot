@@ -137,8 +137,12 @@ function validarLanches(valor: unknown): string | null {
     }
     // flavorsMode (correção da regra comercial do Calzone): configuração
     // explícita de onde vêm os sabores deste produto — "pizza" (reaproveita
-    // a Pizza, padrão quando ausente) ou "own" (lista própria via
-    // flavorsKey). Só os dois valores oficiais são aceitos.
+    // a Pizza) ou "own" (lista própria via flavorsKey). Só os dois valores
+    // oficiais são aceitos aqui; o comportamento quando o campo está AUSENTE
+    // (compatibilidade com config persistida antes deste campo existir) não
+    // é sempre "pizza" — ver `resolverFlavorsModeEfetivo` em
+    // @/lib/pedidoAppItens (fonte única, usada em runtime, não nesta
+    // validação estrutural de escrita).
     if (obj.flavorsMode !== undefined && obj.flavorsMode !== 'pizza' && obj.flavorsMode !== 'own') {
       return `lanches: flavorsMode inválido em "${String(obj.name)}"`
     }

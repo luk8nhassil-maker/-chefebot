@@ -523,6 +523,31 @@ function opcoesSabores(menu: MenuManual): OpcaoEtapa[] {
 }
 
 /**
+ * Opções da etapa "sabor_unico" (Calzone/Mini-Pizza) — com o catálogo
+ * oficial presente, é SEMPRE `produto.flavors` (já calculada por
+ * buildSimpleCatalog conforme flavorsMode via resolverFlavorsModeEfetivo —
+ * mesma fonte usada por resolverSimpleSelectionIds/construirItemManual
+ * abaixo, nunca uma lista própria daqui). Só quando o catálogo está
+ * genuinamente ausente (resposta antiga em cache) cai para `opcoesSabores`
+ * (lista cheia de sabores da pizza), mesma regra de sempre.
+ *
+ * HARDENING (auditoria independente, ciclo de autoauditoria pós-9ª rodada):
+ * antes desta correção, esta etapa sempre usava `opcoesSabores(menu)`
+ * incondicionalmente para Calzone E Mini-Pizza — nunca refletia flavorsMode
+ * "own". A escolha errada nunca chegava a virar pedido (construirItemManual
+ * já rejeitava via `resolverSimpleSelectionIds` quando o sabor escolhido não
+ * resolvia para ID), mas o atendente via — e podia escolher — sabores que
+ * seriam sempre recusados.
+ */
+function opcoesSaborUnico(produto: ProdutoManual, menu: MenuManual): OpcaoEtapa[] {
+  const catalogProduto = menu.catalog
+    ? [...menu.catalog.lanches, ...menu.catalog.bebidas, ...menu.catalog.sucos].find((p) => p.name === produto.nome)
+    : undefined;
+  if (!catalogProduto) return opcoesSabores(menu);
+  return (catalogProduto.flavors ?? []).map((f) => ({ valor: f.name, label: f.name, esgotado: !f.available }));
+}
+
+/**
  * Etapas obrigatórias de um produto, na ordem em que devem ser resolvidas.
  * Produto sem etapas entra direto no carrinho.
  */
@@ -582,7 +607,7 @@ export function montarEtapas(produto: ProdutoManual, menu: MenuManual): Etapa[] 
           titulo: "Sabor",
           ajuda: "Escolha 1 sabor — este produto não é meio a meio.",
           maxEscolhas: 1,
-          opcoes: opcoesSabores(menu),
+          opcoes: opcoesSaborUnico(produto, menu),
         },
       ];
     }
