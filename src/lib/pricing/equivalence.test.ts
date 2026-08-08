@@ -195,7 +195,9 @@ describe("equivalência de preço: calzone por sabor", () => {
 });
 
 describe("equivalência de preço: mini-pizza por sabor", () => {
-  for (const flavor of [...menu.saltyFlavors, ...menu.sweetFlavors]) {
+  // Mini-Pizza está em flavorsMode "own" (lista própria miniPizzaFlavors,
+  // inalterada por esta correção) — só sabores dessa lista são aceitos.
+  for (const flavor of menu.miniPizzaFlavors) {
     it(`Mini-Pizza · ${flavor}`, () => {
       const legado: ItemApp = { kind: "simple", name: "Mini-Pizza", detail: `Sabor: ${flavor}`, price: 0, qty: 1 };
       const selection: SimpleSelection = {
@@ -210,6 +212,27 @@ describe("equivalência de preço: mini-pizza por sabor", () => {
 
       expect(resultado.ok).toBe(true);
       if (resultado.ok) expect(resultado.unitPriceCents).toBe(esperadoCents);
+    });
+  }
+
+  // REGRESSÃO (auditoria independente pós-7ª rodada) — um sabor de pizza
+  // válido mas FORA de miniPizzaFlavors precisa ser rejeitado, nunca aceito
+  // só por ser um flavorId oficial válido de outro produto (officialUnitPrice
+  // agora valida flavorsMode de QUALQUER produto single_flavor pela
+  // configuração oficial, não só pelo nome "Calzone" — ver
+  // src/lib/pedidoAppItens.test.ts).
+  const saboresForaDaListaPropria = [...menu.saltyFlavors, ...menu.sweetFlavors].filter(
+    (flavor) => !menu.miniPizzaFlavors.includes(flavor)
+  );
+  for (const flavor of saboresForaDaListaPropria) {
+    it(`Mini-Pizza · ${flavor} (fora de miniPizzaFlavors) é rejeitado`, () => {
+      const selection: SimpleSelection = {
+        kind: "simple",
+        productId: productIdByName("Mini-Pizza"),
+        flavorId: flavorIdByName(flavor),
+        quantity: 1,
+      };
+      expect(calcularPreco(selection, menu).ok).toBe(false);
     });
   }
 

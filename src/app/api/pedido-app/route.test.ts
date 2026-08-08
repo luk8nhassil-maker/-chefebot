@@ -2245,6 +2245,32 @@ describe("POST /api/pedido-app — seleção estruturada de produto simples por 
     expect(pedidos[0].itens).toEqual(["Calzone Sabor: Calabresa"]);
     expect(pedidos[0].total).toBe(35);
   });
+
+  it("REGRESSÃO (BLOQUEIO 1, auditoria independente pós-7ª rodada) — Mini-Pizza (own, inalterado): item legado (sem simpleSelection) com sabor fora de miniPizzaFlavors é rejeitado, nunca contorna flavorsMode pelo caminho legado", async () => {
+    // MENU real já tem Mini-Pizza em flavorsMode "own" — sem override.
+    expect(MENU.miniPizzaFlavors).not.toContain("Quatro Queijos");
+    const res = await POST(postReq({
+      ...simplePayload,
+      itens: [{ kind: "simple", name: "Mini-Pizza", detail: "Sabor: Quatro Queijos", price: 17, qty: 1 }],
+    }));
+
+    expect(res.status).toBe(400);
+    const pedidos = (store.get("pedidos") as unknown[] | undefined) ?? [];
+    expect(pedidos).toHaveLength(0);
+  });
+
+  it("Mini-Pizza: item legado com sabor DENTRO de miniPizzaFlavors continua funcionando normalmente", async () => {
+    expect(MENU.miniPizzaFlavors).toContain("Calabresa");
+    const res = await POST(postReq({
+      ...simplePayload,
+      itens: [{ kind: "simple", name: "Mini-Pizza", detail: "Sabor: Calabresa", price: 17, qty: 1 }],
+    }));
+
+    expect(res.status).toBe(200);
+    const pedidos = store.get("pedidos") as { itens: string[]; total: number }[];
+    expect(pedidos[0].itens).toEqual(["Mini-Pizza Sabor: Calabresa"]);
+    expect(pedidos[0].total).toBe(17);
+  });
 });
 
 describe("POST /api/pedido-app — snapshotOficial (Fase 3)", () => {

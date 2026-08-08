@@ -51,3 +51,30 @@ describe("/configuracoes — REGRESSÃO (BLOQUEIO 2, auditoria independente pós
     expect(ocorrencias.length).toBe(1);
   });
 });
+
+describe("/configuracoes — REGRESSÃO (BLOQUEIO 2, auditoria independente pós-7ª rodada): 'Salvar Cardápio' não apaga calzoneFlavors/miniPizzaFlavors/payments customizados", () => {
+  // A 7ª rodada só cobriu `lanches`. A tela ainda não preservava
+  // calzoneFlavors/miniPizzaFlavors/payments: um "Salvar Cardápio" depois de
+  // qualquer customização nessas 3 seções (mesmo a tela não as editando
+  // diretamente) apagava a customização porque POST /api/cardapio substitui
+  // o objeto inteiro. O contrato `Cardapio` (tipo) agora as enumera
+  // explicitamente.
+  test("o tipo `Cardapio` inclui calzoneFlavors, miniPizzaFlavors e payments", () => {
+    const corpo = fonte.slice(fonte.indexOf("type Cardapio = {"), fonte.indexOf("const CARDAPIO_PADRAO"));
+    expect(corpo).toContain("calzoneFlavors: string[]");
+    expect(corpo).toContain("miniPizzaFlavors: string[]");
+    expect(corpo).toContain("payments: string[]");
+  });
+
+  test("o cardápio carregado de GET /api/cardapio popula calzoneFlavors, miniPizzaFlavors e payments no estado `cardapio`", () => {
+    const corpo = fonte.slice(fonte.indexOf("if (data) setCardapio({"), fonte.indexOf("function showMsg"));
+    expect(corpo).toContain("calzoneFlavors: data.calzoneFlavors || []");
+    expect(corpo).toContain("miniPizzaFlavors: data.miniPizzaFlavors || []");
+    expect(corpo).toContain("payments: data.payments || []");
+  });
+
+  test("salvarCardapio envia o estado `cardapio` inteiro (já com calzoneFlavors/miniPizzaFlavors/payments) junto com `lanches`", () => {
+    const corpo = fonte.slice(fonte.indexOf("const salvarCardapio = async"), fonte.indexOf("const removerSabor"));
+    expect(corpo).toContain("body: JSON.stringify({ ...cardapio, lanches })");
+  });
+});

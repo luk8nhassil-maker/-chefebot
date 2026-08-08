@@ -39,13 +39,16 @@ export type MenuSimpleItem = {
   price: number;
   sizes?: { code: string; price: number }[];
   // Passagem opcional da configuração oficial de sabores
-  // (menu.lanches[].flavorsKey/flavorsMode — ver src/lib/menu.ts e
-  // @/lib/catalog/simpleProducts) — usada só pelo Calzone no caminho
-  // legado (ver officialUnitPrice) para respeitar o modo configurado
-  // mesmo quando o cliente omite `simpleSelection`. Ausente/"pizza" =
-  // aceita qualquer sabor da pizza (mesmo comportamento de sempre);
-  // "own" restringe à lista apontada por `flavorsKey`. Nunca inferido
-  // por nome.
+  // (menu.lanches[].hasFlavors/flavorsKey/flavorsMode — ver src/lib/menu.ts
+  // e @/lib/catalog/simpleProducts) — usada por QUALQUER produto de 1 sabor
+  // só (Calzone, Mini-Pizza, e qualquer outro que venha a existir) no
+  // caminho legado (ver officialUnitPrice) para respeitar o modo
+  // configurado mesmo quando o cliente omite `simpleSelection`. A DECISÃO
+  // de aplicar a validação de sabor é `hasFlavors && flavorsKey` — nunca o
+  // nome do produto. Dentro dela, `flavorsMode` ausente/"pizza" aceita
+  // qualquer sabor da pizza (mesmo comportamento de sempre); "own"
+  // restringe à lista apontada por `flavorsKey`.
+  hasFlavors?: boolean;
   flavorsKey?: string;
   flavorsMode?: "pizza" | "own";
 };
@@ -58,6 +61,7 @@ export type MenuPedidoApp = {
     name: string;
     price: number;
     sizes?: { code: string; price: number }[];
+    hasFlavors?: boolean;
     flavorsKey?: string;
     flavorsMode?: "pizza" | "own";
   }[];
@@ -123,26 +127,31 @@ export function officialUnitPrice(item: ItemApp, menu: MenuPedidoApp): number | 
       return size && Number.isFinite(size.price) ? size.price : null;
     }
 
-    // Calzone é vendido com exatamente 1 sabor (nunca meio a meio). O
-    // frontend manda `detail: "Sabor: <flavor>"` — payload adulterado com
-    // 2+ sabores, sem sabor ou com sabor fora da lista efetiva é rejeitado
-    // aqui (não confiamos em nada vindo do cliente além do nome/qty).
+    // Produto de 1 sabor só (nunca meio a meio) — Calzone, Mini-Pizza, ou
+    // qualquer outro que venha a existir. O frontend manda
+    // `detail: "Sabor: <flavor>"` — payload adulterado com 2+ sabores, sem
+    // sabor ou com sabor fora da lista efetiva é rejeitado aqui (não
+    // confiamos em nada vindo do cliente além do nome/qty).
     //
-    // HARDENING (auditoria independente pós-6ª rodada): mesmo um payload
+    // HARDENING (auditoria independente pós-7ª rodada): a decisão de QUAL
+    // produto passa por essa validação é `found.hasFlavors && found.flavorsKey`
+    // — a mesma configuração oficial explícita que buildSimpleCatalog usa
+    // para decidir `strategy === "single_flavor"` — NUNCA o nome do produto
+    // ("calzone", "mini-pizza" etc.). Isso fecha a mesma classe de bug para
+    // TODO produto configurado por sabor, não só o Calzone: um payload
     // legado que omite `simpleSelection` de propósito (para tentar contornar
-    // a validação por catálogo/ID) precisa respeitar a MESMA configuração
-    // oficial explícita de `flavorsMode` que buildSimpleCatalog usa — nunca
-    // uma segunda decisão, nunca inferida por nome. `flavorsMode === "own"`
-    // restringe à lista própria apontada por `flavorsKey` (ex.:
-    // calzoneFlavors); ausente/"pizza" (padrão) aceita qualquer sabor da
-    // pizza, exatamente como antes.
-    if (norm(found.name) === "calzone") {
+    // a validação por catálogo/ID) nunca escapa pela porta dos fundos só
+    // porque o produto tem outro nome. Dentro da validação,
+    // `flavorsMode === "own"` restringe à lista própria apontada por
+    // `flavorsKey` (ex.: calzoneFlavors/miniPizzaFlavors); ausente/"pizza"
+    // (padrão) aceita qualquer sabor da pizza, exatamente como sempre.
+    if (found.hasFlavors && found.flavorsKey) {
       const match = (item.detail || "").trim().match(/^Sabor:\s*(.+)$/i);
       if (!match) return null;
       const sabor = match[1].trim();
       if (!sabor || sabor.includes("/") || sabor.includes("·")) return null;
       const listaPropria =
-        found.flavorsMode === "own" && found.flavorsKey
+        found.flavorsMode === "own"
           ? (menu as unknown as Record<string, unknown>)[found.flavorsKey]
           : undefined;
       const saboresPermitidos = (Array.isArray(listaPropria) ? (listaPropria as string[]) : [...menu.saltyFlavors, ...menu.sweetFlavors]).map(norm);

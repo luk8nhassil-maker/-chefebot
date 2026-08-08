@@ -33,6 +33,13 @@ const FIDELIDADE_PADRAO: ConfigFidelidade = {
 
 type ItemCardapio = { name: string; price: number }
 
+// Contrato EXPLÍCITO do que é persistível em POST /api/cardapio — não é o
+// mesmo formato do GET (que também traz campos aditivos/somente-leitura:
+// catalog, pizzaCatalog, horario, esgotados, esgotadosMetadata). Precisa
+// cobrir toda seção que a tela não edita diretamente mas PODE já estar
+// customizada no Redis (calzoneFlavors/miniPizzaFlavors/payments/lanches) —
+// caso contrário "Salvar Cardápio" (que faz `redis.set` substituindo o
+// objeto inteiro) apaga essas seções silenciosamente.
 type Cardapio = {
   saltyFlavors: string[]
   sweetFlavors: string[]
@@ -41,6 +48,14 @@ type Cardapio = {
   neighborhoods: { name: string; fee: number }[]
   sizes: { code: string; label: string; price: number }[]
   borders: { label: string; priceSmall: number; priceLarge: number }[]
+  calzoneFlavors: string[]
+  miniPizzaFlavors: string[]
+  payments: string[]
+}
+
+const CARDAPIO_PADRAO: Cardapio = {
+  saltyFlavors: [], sweetFlavors: [], bebidas: [], sucos: [], neighborhoods: [], sizes: [], borders: [],
+  calzoneFlavors: [], miniPizzaFlavors: [], payments: [],
 }
 
 const CONFIG_PADRAO: Config = {
@@ -187,7 +202,7 @@ export default function ConfiguracoesPage() {
   const router = useRouter()
   const [aba, setAba] = useState<'geral' | 'cardapio'>('geral')
   const [config, setConfig] = useState<Config>(CONFIG_PADRAO)
-  const [cardapio, setCardapio] = useState<Cardapio>({ saltyFlavors: [], sweetFlavors: [], bebidas: [], sucos: [], neighborhoods: [], sizes: [], borders: [] })
+  const [cardapio, setCardapio] = useState<Cardapio>(CARDAPIO_PADRAO)
   const [loading, setLoading] = useState(true)
   const [checking, setChecking] = useState(true)
   const [salvando, setSalvando] = useState(false)
@@ -251,6 +266,12 @@ export default function ConfiguracoesPage() {
           neighborhoods: data.neighborhoods || [],
           sizes: data.sizes || [],
           borders: data.borders || [],
+          // Seções que esta tela não edita diretamente, mas que PODEM já
+          // estar customizadas no Redis — precisam sobreviver a "Salvar
+          // Cardápio" (POST /api/cardapio substitui o objeto inteiro).
+          calzoneFlavors: data.calzoneFlavors || [],
+          miniPizzaFlavors: data.miniPizzaFlavors || [],
+          payments: data.payments || [],
         })
         const lanchesData: Array<Record<string, unknown>> = Array.isArray(data?.lanches) ? data.lanches : []
         setLanches(lanchesData)
@@ -259,7 +280,7 @@ export default function ConfiguracoesPage() {
       })
       .catch(err => {
         console.error('Falha ao carregar cardapio:', err)
-        setCardapio({ saltyFlavors: [], sweetFlavors: [], bebidas: [], sucos: [], neighborhoods: [], sizes: [], borders: [] })
+        setCardapio(CARDAPIO_PADRAO)
       })
   }, [router])
 
@@ -331,10 +352,14 @@ export default function ConfiguracoesPage() {
   const salvarCardapio = async () => {
     setSalvando(true)
     try {
-      // Inclui `lanches` (com o flavorsMode do Calzone já em dia, ver acima)
-      // — POST /api/cardapio substitui o objeto inteiro persistido no Redis;
-      // sem isso, salvar qualquer sabor/bebida/bairro apagaria a
-      // configuração do Calzone.
+      // `cardapio` já é o contrato explícito persistível (tipo `Cardapio`,
+      // acima) — inclui calzoneFlavors/miniPizzaFlavors/payments mesmo sem
+      // esta tela os editar diretamente, e `lanches` (com o flavorsMode do
+      // Calzone sempre em dia, ver alternarCalzoneModo). POST /api/cardapio
+      // substitui o objeto INTEIRO persistido no Redis: qualquer seção
+      // persistível ausente daqui seria apagada. Nunca envia os campos
+      // aditivos/somente-leitura do GET (catalog, pizzaCatalog, horario,
+      // esgotados, esgotadosMetadata) — esses não são deste contrato.
       const res = await fetch('/api/cardapio', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...cardapio, lanches }) })
       if (res.ok) showMsg('✅ Cardápio salvo!')
       else showMsg('❌ Erro ao salvar.')
