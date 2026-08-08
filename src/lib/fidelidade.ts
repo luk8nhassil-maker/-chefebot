@@ -1,5 +1,6 @@
 import { redis } from "./redis";
 import { sanitizeTelefoneCliente, clienteIdDoTelefone } from "./clientes";
+import type { PedidoSnapshotOficial } from "./pedidoSnapshot";
 
 export type TipoRecompensa = "pizza_gratis" | "desconto_fixo" | "desconto_percentual";
 
@@ -524,6 +525,24 @@ export function calcularPontosElegiveisPedido(params: { total: number; taxaEntre
   const total = Number(params.total) || 0;
   const taxa = Number(params.taxaEntrega) || 0;
   return calcularPontosPorValor(total - taxa);
+}
+
+/**
+ * Mesma regra de `calcularPontosElegiveisPedido` (total menos taxa, taxa
+ * nunca gera pontos), mas a partir do snapshot oficial do pedido (Fase 3,
+ * @/lib/pedidoSnapshot) em vez dos campos legados `total`/`taxaEntrega`.
+ * `subtotalCents - descontoFidelidadeCents` já é, por construção do
+ * snapshot, exatamente `totalCents - taxaEntregaCents` — mas em centavos
+ * inteiros, sem a imprecisão de ponto flutuante de reais que os campos
+ * legados carregam, e explícito sobre o desconto (um resgate de pontos
+ * nunca gera pontos sobre o valor que ele mesmo abateu). `valorElegivel`
+ * retorna em reais só para manter a mesma unidade de
+ * `calcularPontosElegiveisPedido` (usada em log/auditoria).
+ */
+export function calcularPontosElegiveisDoSnapshot(snapshot: PedidoSnapshotOficial): { valorElegivel: number; pontos: number } {
+  const valorElegivelCents = Math.max(snapshot.subtotalCents - snapshot.descontoFidelidadeCents, 0);
+  const valorElegivel = valorElegivelCents / 100;
+  return { valorElegivel, pontos: calcularPontosPorValor(valorElegivel) };
 }
 
 /**
@@ -1066,6 +1085,11 @@ export type PedidoParaCreditoPontos = {
   clienteId?: string;
   total?: number;
   taxaEntrega?: number;
+  // Fase 10: quando presente, é a fonte usada para calcular o valor elegível
+  // e os pontos — ver calcularPontosElegiveisDoSnapshot. Ausente (WhatsApp,
+  // Salão, pedidos antigos) usa o cálculo legado (total/taxaEntrega) sem
+  // nenhuma mudança de comportamento.
+  snapshotOficial?: PedidoSnapshotOficial;
 };
 
 /**
@@ -1090,6 +1114,14 @@ export type PedidoParaCreditoPontos = {
  * entrega — taxa nunca gera pontos); fidelidade precisa estar ativa na
  * configuração; pontos <= 0 (valor zerado/negativo) não gera movimento.
  *
+ * Fonte do valor elegível (Fase 10): quando `pedido.snapshotOficial` está
+ * presente (hoje, pedidos criados/editados por `/api/pedido-app`), usa-o —
+ * `calcularPontosElegiveisDoSnapshot`, em centavos inteiros, já líquido do
+ * desconto de fidelidade aplicado no próprio pedido (um resgate nunca gera
+ * pontos sobre o valor que ele mesmo abateu). Sem snapshot (WhatsApp, Salão,
+ * pedido manual, pedidos antigos), usa exatamente o cálculo legado de sempre
+ * (`total` - `taxaEntrega`) — nenhuma mudança de comportamento nesses canais.
+ *
  * Nunca lança exceção que impeça o chamador de responder — mesma convenção
  * do crédito antigo (`creditarFidelidadePedido`): quem chama deve envolver
  * em try/catch, para que uma falha aqui nunca impeça o pedido de ser salvo
@@ -1113,8 +1145,12 @@ export async function creditarPontosPedidoEntregue(pedido: PedidoParaCreditoPont
   const config = await obterConfigFidelidadePontos();
   if (!config.ativo) return;
 
-  const valorElegivel = Math.max((Number(pedido.total) || 0) - (Number(pedido.taxaEntrega) || 0), 0);
-  const pontos = calcularPontosElegiveisPedido({ total: pedido.total ?? 0, taxaEntrega: pedido.taxaEntrega });
+  const { valorElegivel, pontos } = pedido.snapshotOficial
+    ? calcularPontosElegiveisDoSnapshot(pedido.snapshotOficial)
+    : {
+        valorElegivel: Math.max((Number(pedido.total) || 0) - (Number(pedido.taxaEntrega) || 0), 0),
+        pontos: calcularPontosElegiveisPedido({ total: pedido.total ?? 0, taxaEntrega: pedido.taxaEntrega }),
+      };
   if (pontos <= 0) return;
 
   await registrarMovimentoPontosIdempotente(clienteId, {
