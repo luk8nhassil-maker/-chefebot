@@ -2188,6 +2188,27 @@ describe("POST /api/pedido-app — seleção estruturada de produto simples por 
     expect(pedidos[0].itens).toEqual(["Pizza G Calabresa", "Calzone Sabor: Calabresa"]);
     expect(pedidos[0].total).toBe(sizeG.price + calzone.price);
   });
+
+  it("REGRESSÃO (hardening pós-auditoria, 5ª rodada) — item com pizzaSelection E simpleSelection ao mesmo tempo é rejeitado com 400, nunca resolvido por precedência silenciosa da pizza", async () => {
+    const pizzaCatalog = buildPizzaCatalog(MENU);
+    const sizeIdG = pizzaCatalog.sizes.find((s) => s.code === "G")!.id;
+    const flavorCalabresaPizza = pizzaCatalog.flavors.find((f) => f.name === "Calabresa")!.id;
+    const res = await POST(postReq({
+      ...simplePayload,
+      itens: [{
+        kind: "pizza",
+        name: "",
+        price: 0,
+        qty: 1,
+        pizzaSelection: { sizeId: sizeIdG, flavorIds: [flavorCalabresaPizza] },
+        simpleSelection: { productId: productIdCalzone, flavorId: flavorCalabresaCalzone },
+      }],
+    }));
+
+    expect(res.status).toBe(400);
+    const pedidos = (store.get("pedidos") as unknown[] | undefined) ?? [];
+    expect(pedidos).toHaveLength(0);
+  });
 });
 
 describe("POST /api/pedido-app — snapshotOficial (Fase 3)", () => {

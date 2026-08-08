@@ -7,6 +7,7 @@ import {
   resolverItemComSelecaoEstruturada,
   temSelecaoSimplesEstruturada,
   resolverItemComSelecaoSimplesEstruturada,
+  temSelecaoDupla,
 } from "./pedidoAppSelecaoEstruturada";
 import { buildPizzaCatalog, type PizzaCatalog } from "./catalog/pizzas";
 import { buildSimpleCatalog, type SimpleCatalog } from "./catalog/simpleProducts";
@@ -354,6 +355,14 @@ export async function validarItensComanda(
 
     if (item.kind === "promo") {
       return { ok: false, error: "Item promocional não é suportado no Salão" };
+    }
+
+    // Fail-closed (hardening pós-auditoria, 5ª rodada): pizzaSelection E
+    // simpleSelection juntas no mesmo item nunca são resolvidas por
+    // precedência silenciosa — o item inteiro é rejeitado ANTES de
+    // qualquer resolver ser escolhido.
+    if (temSelecaoDupla(bruto)) {
+      return { ok: false, error: "Seleção estruturada ambígua: item não pode ter pizzaSelection e simpleSelection ao mesmo tempo" };
     }
 
     if (temSelecaoEstruturada(bruto)) {

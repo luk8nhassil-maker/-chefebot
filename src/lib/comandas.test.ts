@@ -663,6 +663,22 @@ describe("validarItensComanda — simpleSelection (Fase 6)", () => {
     expect(r.itens[0].simpleSelection).toEqual({ productId: PRODUCT_CALZONE, flavorId: FLAVOR_QUATRO_QUEIJOS });
     expect(Object.keys(r.itens[0].simpleSelection!)).toEqual(["productId", "flavorId"]);
   });
+
+  it("REGRESSÃO (hardening pós-auditoria, 5ª rodada) — item com pizzaSelection E simpleSelection ao mesmo tempo é rejeitado, nunca resolvido por precedência silenciosa da pizza", async () => {
+    const r = await validarItensComanda([
+      {
+        kind: "pizza",
+        price: 0,
+        qty: 1,
+        pizzaSelection: { sizeId: SIZE_G, flavorIds: [FLAVOR_QUATRO_QUEIJOS] },
+        simpleSelection: { productId: PRODUCT_CALZONE, flavorId: FLAVOR_QUATRO_QUEIJOS },
+      },
+    ]);
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.error).toContain("pizzaSelection");
+    expect(r.error).toContain("simpleSelection");
+  });
 });
 
 describe("atualizarItensComanda", () => {

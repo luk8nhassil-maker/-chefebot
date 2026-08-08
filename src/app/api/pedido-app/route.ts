@@ -18,6 +18,7 @@ import {
   resolverItemComSelecaoEstruturada,
   temSelecaoSimplesEstruturada,
   resolverItemComSelecaoSimplesEstruturada,
+  temSelecaoDupla,
 } from "@/lib/pedidoAppSelecaoEstruturada";
 import { buildPizzaCatalog } from "@/lib/catalog/pizzas";
 import { buildSimpleCatalog } from "@/lib/catalog/simpleProducts";
@@ -1136,6 +1137,14 @@ export async function POST(req: NextRequest) {
       let itensResolvidos: { itemCanonico: ItemApp; linha: string; unitPrice: number | null; qty: number }[];
       try {
         itensResolvidos = body.itens.map((item) => {
+          // Fail-closed (hardening pós-auditoria, 5ª rodada): pizzaSelection
+          // E simpleSelection juntas no mesmo item nunca são resolvidas por
+          // precedência silenciosa (a pizza sempre "ganhava" antes, e a
+          // simpleSelection era descartada sem erro) — o item inteiro é
+          // rejeitado ANTES de qualquer resolver ser escolhido.
+          if (temSelecaoDupla(item)) {
+            return { itemCanonico: item, linha: "", unitPrice: null, qty: item.qty };
+          }
           if (temSelecaoEstruturada(item)) {
             const resolvido = resolverItemComSelecaoEstruturada(item, pizzaCatalog!);
             if (!resolvido.ok) return { itemCanonico: item, linha: "", unitPrice: null, qty: item.qty };

@@ -57,6 +57,16 @@ export function formatItem(item: ItemApp): string {
 }
 
 /**
+ * Acréscimo oficial do suco "com leite" — FONTE ÚNICA, em centavos.
+ * Reutilizada tanto por `officialUnitPrice` (abaixo, caminho legado
+ * name/detail) quanto pela precificação por estratégia/catálogo de
+ * `simpleSelection` (ver `resolverItemComSelecaoSimplesEstruturada` em
+ * @/lib/pedidoAppSelecaoEstruturada) — nenhum dos dois define o próprio
+ * valor. Mudar aqui muda os dois caminhos igualmente.
+ */
+export const ACRESCIMO_LEITE_CENTS = 100;
+
+/**
  * Conta pizzas PAGAS para a fidelidade antiga (compra N pizzas, ganha 1
  * grátis — `creditarFidelidadePedido`/`pizzasParaPremio`). Exclui
  * explicitamente o presente da Jornada do Chef (`recompensaJornadaId`) e
@@ -84,7 +94,7 @@ export function officialUnitPrice(item: ItemApp, menu: MenuPedidoApp): number | 
     if (suco) {
       const detail = norm(item.detail || "");
       if (!detail || detail === "sem leite") return Number.isFinite(suco.price) ? suco.price : null;
-      if (detail === "com leite") return Number.isFinite(suco.price) ? suco.price + 1 : null;
+      if (detail === "com leite") return Number.isFinite(suco.price) ? suco.price + ACRESCIMO_LEITE_CENTS / 100 : null;
       return null;
     }
     if (norm(found.name).includes("macarronada")) {

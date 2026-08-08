@@ -4,12 +4,13 @@ import { describe, expect, it } from "vitest";
 import { buildPizzaCatalog } from "@/lib/catalog/pizzas";
 import { buildSimpleCatalog } from "@/lib/catalog/simpleProducts";
 import { MENU } from "@/lib/menu";
-import type { ItemApp } from "@/lib/pedidoAppItens";
+import { ACRESCIMO_LEITE_CENTS, officialUnitPrice, type ItemApp, type MenuPedidoApp } from "@/lib/pedidoAppItens";
 import {
   resolverItemComSelecaoEstruturada,
   temSelecaoEstruturada,
   resolverItemComSelecaoSimplesEstruturada,
   temSelecaoSimplesEstruturada,
+  temSelecaoDupla,
 } from "./pedidoAppSelecaoEstruturada";
 
 const catalog = buildPizzaCatalog(MENU);
@@ -187,6 +188,69 @@ describe("temSelecaoSimplesEstruturada (Fase 6)", () => {
   });
   it.each([null, false, 0, "", {}, "texto", 42, []])("true mesmo quando simpleSelection é %p (presente, mas com valor falsy/malformado)", (valor) => {
     expect(temSelecaoSimplesEstruturada({ simpleSelection: valor })).toBe(true);
+  });
+});
+
+describe("temSelecaoDupla (hardening pós-auditoria, 5ª rodada)", () => {
+  it("true quando pizzaSelection E simpleSelection estão presentes ao mesmo tempo", () => {
+    expect(
+      temSelecaoDupla({
+        pizzaSelection: { sizeId: "size-g", flavorIds: ["flavor-calabresa"] },
+        simpleSelection: { productId: "product-calzone", flavorId: "flavor-calabresa" },
+      })
+    ).toBe(true);
+  });
+
+  it("true mesmo quando um dos dois valores é falsy/malformado — presença decide, não a validade", () => {
+    expect(temSelecaoDupla({ pizzaSelection: null, simpleSelection: { productId: "x" } })).toBe(true);
+    expect(temSelecaoDupla({ pizzaSelection: { sizeId: "x", flavorIds: [] }, simpleSelection: undefined })).toBe(true);
+  });
+
+  it("false quando só pizzaSelection está presente", () => {
+    expect(temSelecaoDupla({ pizzaSelection: { sizeId: "x", flavorIds: ["y"] } })).toBe(false);
+  });
+
+  it("false quando só simpleSelection está presente", () => {
+    expect(temSelecaoDupla({ simpleSelection: { productId: "x" } })).toBe(false);
+  });
+
+  it("false quando nenhuma das duas propriedades está presente (item legado)", () => {
+    expect(temSelecaoDupla({})).toBe(false);
+  });
+});
+
+describe("REGRESSÃO — fonte única do acréscimo de leite (hardening pós-auditoria, 5ª rodada)", () => {
+  it("officialUnitPrice (legado) e a precificação por estratégia de simpleSelection concordam EXATAMENTE no acréscimo de 'com leite'", () => {
+    const suco = MENU.sucos[0];
+    const menuLegado = MENU as unknown as MenuPedidoApp;
+
+    const semLeiteLegado = officialUnitPrice({ kind: "simple", name: suco.name, price: 0, qty: 1 }, menuLegado);
+    const comLeiteLegado = officialUnitPrice(
+      { kind: "simple", name: suco.name, detail: "com leite", price: 0, qty: 1 },
+      menuLegado
+    );
+    expect(semLeiteLegado).not.toBeNull();
+    expect(comLeiteLegado).not.toBeNull();
+    // O acréscimo do caminho legado É a fonte de comparação: precisa bater
+    // exatamente com ACRESCIMO_LEITE_CENTS, a mesma constante importada
+    // abaixo pela precificação por estratégia/catálogo.
+    expect(Math.round((comLeiteLegado! - semLeiteLegado!) * 100)).toBe(ACRESCIMO_LEITE_CENTS);
+
+    const item: ItemApp = {
+      kind: "simple",
+      name: "",
+      price: 0,
+      qty: 1,
+      simpleSelection: { productId: productIdByName(suco.name), milk: "com" },
+    };
+    const resultado = resolverItemComSelecaoSimplesEstruturada(item, MENU, simpleCatalog);
+    expect(resultado.ok).toBe(true);
+    if (resultado.ok) {
+      // Mesmo acréscimo, mesma fonte — nunca um valor divergente entre os
+      // dois caminhos de precificação.
+      expect(Math.round((resultado.item.price - semLeiteLegado!) * 100)).toBe(ACRESCIMO_LEITE_CENTS);
+      expect(resultado.item.price).toBe(comLeiteLegado);
+    }
   });
 });
 

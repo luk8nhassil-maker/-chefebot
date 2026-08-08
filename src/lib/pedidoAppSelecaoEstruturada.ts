@@ -15,19 +15,12 @@
 import type { PizzaCatalog } from "@/lib/catalog/pizzas";
 import { precificarPizzaPorId } from "@/lib/pricing/pizzaEngine";
 import type { SimpleCatalog } from "@/lib/catalog/simpleProducts";
-import { type ItemApp } from "@/lib/pedidoAppItens";
+import { ACRESCIMO_LEITE_CENTS, type ItemApp } from "@/lib/pedidoAppItens";
 import type { Menu } from "@/lib/menu";
 
 function centavosParaReais(cents: number): number {
   return Math.round(cents) / 100;
 }
-
-// Mesma regra de sempre para suco com leite (antes hardcoded dentro de
-// officialUnitPrice, em @/lib/pedidoAppItens: `suco.price + 1`) — 1 real,
-// nunca um valor novo. officialUnitPrice continua com essa regra intacta
-// para itens legados (sem simpleSelection); aqui ela é só espelhada em
-// centavos para a precificação por ID/estratégia.
-const ACRESCIMO_LEITE_CENTS = 100;
 
 // Detecta a PRESENÇA da propriedade, nunca a truthiness do valor. Um
 // payload adulterado com `pizzaSelection: null` (ou false, "", 0, {} etc.)
@@ -78,6 +71,22 @@ export function temSelecaoSimplesEstruturada(item: object): boolean {
 }
 
 /**
+ * Detecta um item que declara AMBAS pizzaSelection e simpleSelection ao
+ * mesmo tempo — payload ambíguo/adulterado que nenhuma tela legítima jamais
+ * produz (cada modal monta exatamente uma das duas). Hardening pós-auditoria
+ * (5ª rodada): antes, os três pontos de dispatch server-side (POST
+ * /api/pedido-app, .../editar/salvar, validarItensComanda/Salão) resolviam
+ * SEMPRE pela pizza quando as duas propriedades estavam presentes — uma
+ * `simpleSelection` tackada junto era ignorada em silêncio, sem erro. Este
+ * helper deve ser checado ANTES de qualquer resolver nesses três pontos, e o
+ * item inteiro rejeitado (fail-closed) — nunca precedência silenciosa entre
+ * os dois formatos.
+ */
+export function temSelecaoDupla(item: object): boolean {
+  return temSelecaoEstruturada(item) && temSelecaoSimplesEstruturada(item);
+}
+
+/**
  * Resolve um item "simple" com seleção estruturada (Calzone, Mini-Pizza,
  * Macarronada, sucos com/sem leite) — Fase 6, hardening pós-auditoria (2ª
  * rodada).
@@ -117,8 +126,9 @@ export function temSelecaoSimplesEstruturada(item: object): boolean {
  * exclusivamente o `priceCents` do `sizeId` validado (nunca o preço base do
  * produto); "fixed"/"single_flavor" usam o `priceCents` oficial do produto
  * (sabor nunca muda o preço); "milk" usa o `priceCents` do produto, com o
- * MESMO acréscimo de sempre para "com leite" (`ACRESCIMO_LEITE_CENTS`,
- * espelhando `officialUnitPrice` — nenhum valor novo). `officialUnitPrice`
+ * MESMO acréscimo de sempre para "com leite" — `ACRESCIMO_LEITE_CENTS`,
+ * importada de @/lib/pedidoAppItens: FONTE ÚNICA também usada por
+ * `officialUnitPrice`, nunca um valor duplicado aqui. `officialUnitPrice`
  * continua intacto e é quem precifica itens legados (sem `simpleSelection`).
  */
 export function resolverItemComSelecaoSimplesEstruturada(
