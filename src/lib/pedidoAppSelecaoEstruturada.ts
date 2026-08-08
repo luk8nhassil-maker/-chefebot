@@ -15,12 +15,19 @@
 import type { PizzaCatalog } from "@/lib/catalog/pizzas";
 import { precificarPizzaPorId } from "@/lib/pricing/pizzaEngine";
 import type { SimpleCatalog } from "@/lib/catalog/simpleProducts";
-import { officialUnitPrice, type ItemApp, type MenuPedidoApp } from "@/lib/pedidoAppItens";
+import { type ItemApp } from "@/lib/pedidoAppItens";
 import type { Menu } from "@/lib/menu";
 
 function centavosParaReais(cents: number): number {
   return Math.round(cents) / 100;
 }
+
+// Mesma regra de sempre para suco com leite (antes hardcoded dentro de
+// officialUnitPrice, em @/lib/pedidoAppItens: `suco.price + 1`) — 1 real,
+// nunca um valor novo. officialUnitPrice continua com essa regra intacta
+// para itens legados (sem simpleSelection); aqui ela é só espelhada em
+// centavos para a precificação por ID/estratégia.
+const ACRESCIMO_LEITE_CENTS = 100;
 
 // Detecta a PRESENÇA da propriedade, nunca a truthiness do valor. Um
 // payload adulterado com `pizzaSelection: null` (ou false, "", 0, {} etc.)
@@ -100,10 +107,19 @@ export function temSelecaoSimplesEstruturada(item: object): boolean {
  * um payload adulterado carregar campos de mais de uma estratégia ao mesmo
  * tempo torcendo para que algum "cole".
  *
- * O preço em si continua vindo de `officialUnitPrice` (a mesma fonte oficial
- * de sempre) a partir do name/detail reconstruído — nenhuma regra de preço
- * nova, só a validação/disponibilidade endereçada por ID em vez de texto
- * livre.
+ * PREÇO POR ESTRATÉGIA/CATÁLOGO (hardening pós-auditoria, 3ª rodada): o
+ * preço nunca mais passa por `officialUnitPrice`/name-detail para itens com
+ * `simpleSelection` — esse caminho legado compara o nome do produto
+ * (`.includes("macarronada")`, `=== "calzone"`) para decidir COMO precificar,
+ * e por isso quebra silenciosamente (preço 0, nunca `null`) quando o produto
+ * é renomeado. Em vez disso, o preço é lido em CENTAVOS diretamente do
+ * catálogo oficial já validado acima, pela própria `strategy`: "size" usa
+ * exclusivamente o `priceCents` do `sizeId` validado (nunca o preço base do
+ * produto); "fixed"/"single_flavor" usam o `priceCents` oficial do produto
+ * (sabor nunca muda o preço); "milk" usa o `priceCents` do produto, com o
+ * MESMO acréscimo de sempre para "com leite" (`ACRESCIMO_LEITE_CENTS`,
+ * espelhando `officialUnitPrice` — nenhum valor novo). `officialUnitPrice`
+ * continua intacto e é quem precifica itens legados (sem `simpleSelection`).
  */
 export function resolverItemComSelecaoSimplesEstruturada(
   item: ItemApp,
@@ -132,6 +148,10 @@ export function resolverItemComSelecaoSimplesEstruturada(
   if (!produto.available) return { ok: false, error: `Produto indisponível: ${produto.name}` };
 
   let detail: string | undefined;
+  // Preço base = priceCents oficial do produto no catálogo. "size" o
+  // substitui pelo priceCents do tamanho validado; "milk" soma o acréscimo
+  // de sempre para "com leite". Nunca lido de name/detail.
+  let priceCents = produto.priceCents;
 
   switch (produto.strategy) {
     case "milk": {
@@ -141,6 +161,7 @@ export function resolverItemComSelecaoSimplesEstruturada(
       }
       if (selecao.milk === undefined) return { ok: false, error: "Seleção de produto inválida" };
       detail = selecao.milk === "com" ? "com leite" : "sem leite";
+      if (selecao.milk === "com") priceCents += ACRESCIMO_LEITE_CENTS;
       break;
     }
     case "size": {
@@ -152,6 +173,10 @@ export function resolverItemComSelecaoSimplesEstruturada(
       const size = produto.sizes?.find((s) => s.id === selecao.sizeId);
       if (!size) return { ok: false, error: "Tamanho não encontrado" };
       detail = `Tamanho ${size.code}`;
+      // Preço exclusivo do tamanho validado — nunca o priceCents base do
+      // produto (que, para produtos vendidos só por tamanho, nem representa
+      // um preço vendável de verdade).
+      priceCents = size.priceCents;
       break;
     }
     case "single_flavor": {
@@ -164,6 +189,8 @@ export function resolverItemComSelecaoSimplesEstruturada(
       if (!flavor) return { ok: false, error: "Sabor não encontrado" };
       if (!flavor.available) return { ok: false, error: `Sabor indisponível: ${flavor.name}` };
       detail = `Sabor: ${flavor.name}`;
+      // Preço flat do produto — o sabor nunca muda o preço (mesma regra de
+      // sempre: Calzone/Mini-Pizza são vendidos por um preço único).
       break;
     }
     case "fixed": {
@@ -176,9 +203,14 @@ export function resolverItemComSelecaoSimplesEstruturada(
     }
   }
 
-  const resolvido: ItemApp = { kind: "simple", name: produto.name, ...(detail ? { detail } : {}), price: 0, qty: item.qty };
-  const unitPriceReais = officialUnitPrice(resolvido, menu as MenuPedidoApp);
-  if (unitPriceReais === null) return { ok: false, error: "Combinação inválida" };
-
-  return { ok: true, item: { ...resolvido, price: unitPriceReais } };
+  return {
+    ok: true,
+    item: {
+      kind: "simple",
+      name: produto.name,
+      ...(detail ? { detail } : {}),
+      price: centavosParaReais(priceCents),
+      qty: item.qty,
+    },
+  };
 }

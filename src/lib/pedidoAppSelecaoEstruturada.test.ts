@@ -784,4 +784,43 @@ describe("resolverItemComSelecaoSimplesEstruturada — estratégia deriva SÓ da
       error: "Seleção de produto inválida",
     });
   });
+
+  it("REGRESSÃO — renomear a Macarronada para um nome sem 'macarronada' preserva o preço oficial do tamanho (nunca cai para preço 0 acidental)", () => {
+    // officialUnitPrice (caminho legado) decide COMO precificar comparando
+    // o nome ("macarronada"), e por isso, se ainda fosse usado aqui, um
+    // produto renomeado cairia no ramo genérico `found.price` — que para a
+    // Macarronada é 0 (o preço de verdade mora só em `sizes`), nunca no
+    // preço do tamanho escolhido. A precificação por strategy/catálogo não
+    // tem esse problema: lê `size.priceCents` direto, seja qual for o nome.
+    const precoOficialGCents = simpleCatalog.lanches
+      .find((l) => l.name === "Macarronada de Carne")!
+      .sizes!.find((s) => s.code === "G")!.priceCents;
+    expect(precoOficialGCents).toBeGreaterThan(0);
+
+    const menuRenomeado = structuredClone(MENU);
+    const macarronada = menuRenomeado.lanches.find((l) => l.name === "Macarronada de Carne")!;
+    macarronada.name = "Prato Especial do Chef";
+
+    const catalogoRenomeado = buildSimpleCatalog(menuRenomeado);
+    const produtoRenomeado = catalogoRenomeado.lanches.find((l) => l.name === "Prato Especial do Chef")!;
+    expect(produtoRenomeado.strategy).toBe("size");
+    const sizeG = produtoRenomeado.sizes!.find((s) => s.code === "G")!;
+    expect(sizeG.priceCents).toBe(precoOficialGCents);
+
+    const item: ItemApp = {
+      kind: "simple",
+      name: "",
+      price: 0,
+      qty: 1,
+      simpleSelection: { productId: produtoRenomeado.id, sizeId: sizeG.id },
+    };
+    const resultado = resolverItemComSelecaoSimplesEstruturada(item, menuRenomeado, catalogoRenomeado);
+    expect(resultado.ok).toBe(true);
+    if (resultado.ok) {
+      expect(resultado.item.name).toBe("Prato Especial do Chef");
+      expect(resultado.item.detail).toBe("Tamanho G");
+      expect(resultado.item.price).toBe(precoOficialGCents / 100);
+      expect(resultado.item.price).not.toBe(0);
+    }
+  });
 });
