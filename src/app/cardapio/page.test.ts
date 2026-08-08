@@ -339,11 +339,31 @@ describe("/cardapio (PublicCardapio) — wiring de pizzaSelection (Fase 2C)", ()
 describe("resolverSimpleSelectionIds — resolução de IDs do catálogo oficial (Fase 6)", () => {
   const catalog = buildSimpleCatalog(MENU);
 
-  test("calzone: resolve productId + flavorId pela lista oficial calzoneFlavors", () => {
+  test("calzone: resolve productId + flavorId contra a lista efetiva de sabores do Calzone", () => {
     const sel = resolverSimpleSelectionIds(catalog, "Calzone", { flavorName: "Calabresa" });
     const produto = catalog.lanches.find((l) => l.name === "Calzone")!;
     const sabor = produto.flavors!.find((f) => f.name === "Calabresa")!;
     expect(sel).toEqual({ productId: produto.id, flavorId: sabor.id });
+  });
+
+  test("REGRESSÃO (correção da regra comercial do Calzone) — modo padrão 'pizza': calzone resolve um sabor fora de calzoneFlavors (Quatro Queijos), reaproveitando a Pizza", () => {
+    expect(MENU.calzoneFlavors).not.toContain("Quatro Queijos");
+    const sel = resolverSimpleSelectionIds(catalog, "Calzone", { flavorName: "Quatro Queijos" });
+    expect(sel).not.toBeUndefined();
+    const produto = catalog.lanches.find((l) => l.name === "Calzone")!;
+    const sabor = produto.flavors!.find((f) => f.name === "Quatro Queijos")!;
+    expect(sel).toEqual({ productId: produto.id, flavorId: sabor.id });
+  });
+
+  test("REGRESSÃO — modo 'own': calzone volta a aceitar SÓ calzoneFlavors quando configurado explicitamente, sem afetar a Pizza", () => {
+    const menuModoOwn = structuredClone(MENU);
+    menuModoOwn.lanches.find((l) => l.name === "Calzone")!.flavorsMode = "own";
+    const catalogModoOwn = buildSimpleCatalog(menuModoOwn);
+
+    expect(resolverSimpleSelectionIds(catalogModoOwn, "Calzone", { flavorName: "Quatro Queijos" })).toBeUndefined();
+
+    const pizzaCatalogModoOwn = buildPizzaCatalog(menuModoOwn);
+    expect(pizzaCatalogModoOwn.flavors.some((f) => f.name === "Quatro Queijos")).toBe(true);
   });
 
   test("mini-pizza: resolve productId + flavorId pela lista oficial miniPizzaFlavors", () => {

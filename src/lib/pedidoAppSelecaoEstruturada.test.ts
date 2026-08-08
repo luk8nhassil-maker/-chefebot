@@ -278,10 +278,13 @@ describe("resolverItemComSelecaoSimplesEstruturada (Fase 6)", () => {
     expect(miniPizzaFlavorIdByName("Baiana")).toBe(flavorIdByName("Baiana"));
   });
 
-  it("Calzone: flavorId de sabor de pizza fora da lista permitida (Quatro Queijos) é rejeitado, mesmo sendo um flavorId oficial válido (reutilizado da pizza)", () => {
-    // "Quatro Queijos" é um flavorId real e válido no catálogo de pizza, mas
-    // não está em menu.calzoneFlavors — a lista permitida do produto (não a
-    // mera existência do ID) decide.
+  it("REGRESSÃO (correção da regra comercial do Calzone) — Calzone aceita um sabor de pizza fora de calzoneFlavors (Quatro Queijos): modo padrão 'pizza' reaproveita a lista inteira da Pizza, calzoneFlavors não é mais restrição obrigatória", () => {
+    // "Quatro Queijos" é um flavorId real e válido no catálogo de pizza e
+    // NÃO está em menu.calzoneFlavors — mas o comportamento comercial
+    // aprovado é o Calzone aceitar os mesmos sabores da Pizza por padrão
+    // (menu.lanches[Calzone].flavorsMode === "pizza", ver src/lib/menu.ts).
+    // calzoneFlavors só restringe quando o produto está explicitamente em
+    // modo "own" (ver describe "flavorsMode" mais abaixo).
     const item: ItemApp = {
       kind: "simple",
       name: "",
@@ -290,7 +293,11 @@ describe("resolverItemComSelecaoSimplesEstruturada (Fase 6)", () => {
       simpleSelection: { productId: productIdByName("Calzone"), flavorId: flavorIdByName("Quatro Queijos") },
     };
     const resultado = resolverItemComSelecaoSimplesEstruturada(item, MENU, simpleCatalog);
-    expect(resultado).toEqual({ ok: false, error: "Sabor não encontrado" });
+    expect(resultado.ok).toBe(true);
+    if (resultado.ok) {
+      expect(resultado.item.detail).toBe("Sabor: Quatro Queijos");
+      expect(resultado.item.price).toBe(35); // preço do Calzone não varia por sabor
+    }
   });
 
   it("Mini-Pizza: flavorId de sabor de pizza fora da lista permitida (Quatro Queijos) é rejeitado", () => {
@@ -718,12 +725,15 @@ describe("resolverItemComSelecaoSimplesEstruturada — disponibilidade fresca (h
     });
   });
 
-  it("REGRESSÃO — um sabor fora da lista permitida do Calzone (Quatro Queijos) nunca afeta a pizza: continua 100% disponível e precificável normalmente lá", () => {
-    // "Quatro Queijos" nunca aparece nos flavors do Calzone (não está em
-    // menu.calzoneFlavors) — isso é uma restrição de LISTA PERMITIDA, não de
-    // disponibilidade, e não tem nenhum efeito sobre a pizza, que continua
-    // enxergando o sabor normalmente.
-    const catalogoSimples = buildSimpleCatalog(MENU); // sem nada esgotado
+  it("REGRESSÃO (correção da regra comercial do Calzone) — esconder um sabor no modo 'own' do Calzone (Quatro Queijos fora de calzoneFlavors) nunca afeta a Pizza: continua 100% disponível e precificável normalmente lá", () => {
+    // Modo "own": só aqui calzoneFlavors vira restrição de fato. "Quatro
+    // Queijos" não está em menu.calzoneFlavors — some da lista do Calzone
+    // (isso é LISTA PERMITIDA, não disponibilidade) — mas não tem nenhum
+    // efeito sobre a Pizza, que continua enxergando o sabor normalmente.
+    const menuCalzoneOwn = structuredClone(MENU);
+    menuCalzoneOwn.lanches.find((l) => l.name === "Calzone")!.flavorsMode = "own";
+
+    const catalogoSimples = buildSimpleCatalog(menuCalzoneOwn); // sem nada esgotado
     const calzoneSimples = catalogoSimples.lanches.find((l) => l.name === "Calzone")!;
     expect(calzoneSimples.flavors!.some((f) => f.name === "Quatro Queijos")).toBe(false);
 

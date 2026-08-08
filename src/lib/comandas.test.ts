@@ -398,9 +398,12 @@ const CARDAPIO_TESTE_SIMPLES = {
   calzoneFlavors: ["Quatro Queijos", "Chocolate"],
   miniPizzaFlavors: ["Quatro Queijos"],
   borders: [],
+  // flavorsMode: "own" nos dois — este bloco testa especificamente a lista
+  // PRÓPRIA (permitida) de cada produto, isolada da Pizza. O modo padrão
+  // ("pizza", reaproveita a Pizza) tem describe própria mais abaixo.
   lanches: [
-    { name: "Calzone", price: 35, hasFlavors: true, flavorsKey: "calzoneFlavors" },
-    { name: "Mini-Pizza", price: 18, hasFlavors: true, flavorsKey: "miniPizzaFlavors" },
+    { name: "Calzone", price: 35, hasFlavors: true, flavorsKey: "calzoneFlavors", flavorsMode: "own" },
+    { name: "Mini-Pizza", price: 18, hasFlavors: true, flavorsKey: "miniPizzaFlavors", flavorsMode: "own" },
     { name: "Macarronada", price: 0, hasFlavors: false, flavorsKey: "", sizes: [{ code: "P", price: 25 }, { code: "G", price: 45 }] },
   ],
   bebidas: [{ name: "Refrigerante 2L", price: 12 }],
@@ -678,6 +681,72 @@ describe("validarItensComanda — simpleSelection (Fase 6)", () => {
     if (r.ok) return;
     expect(r.error).toContain("pizzaSelection");
     expect(r.error).toContain("simpleSelection");
+  });
+});
+
+describe("validarItensComanda — Calzone flavorsMode 'pizza' (correção da regra comercial do Calzone, 6ª rodada)", () => {
+  // Mesmo cardápio de teste, mas o Calzone em modo "pizza" (padrão/aprovado,
+  // também o comportamento quando o campo está ausente) — reaproveita
+  // saltyFlavors/sweetFlavors inteiros, calzoneFlavors deixa de restringir.
+  const cardapioModoPizza = {
+    ...CARDAPIO_TESTE_SIMPLES,
+    lanches: CARDAPIO_TESTE_SIMPLES.lanches.map((l) =>
+      l.name === "Calzone" ? { ...l, flavorsMode: "pizza" as const } : l
+    ),
+  };
+
+  beforeEach(() => {
+    store.set("cardapio", cardapioModoPizza);
+  });
+
+  it("modo padrão/ausente — Calzone aceita os mesmos sabores da Pizza: 'Baiana' (fora de calzoneFlavors) é aceito", async () => {
+    const r = await validarItensComanda([
+      { kind: "simple", price: 0, qty: 1, simpleSelection: { productId: PRODUCT_CALZONE, flavorId: FLAVOR_BAIANA } },
+    ]);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.itens[0].detail).toBe("Sabor: Baiana");
+    expect(r.itens[0].price).toBe(35); // preço do Calzone não muda por sabor
+  });
+
+  it("mesmo sabor mantém o MESMO flavorId entre Pizza e Calzone em modo pizza", async () => {
+    const r = await validarItensComanda([
+      { kind: "simple", price: 0, qty: 1, simpleSelection: { productId: PRODUCT_CALZONE, flavorId: FLAVOR_QUATRO_QUEIJOS } },
+    ]);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.itens[0].simpleSelection).toEqual({ productId: PRODUCT_CALZONE, flavorId: FLAVOR_QUATRO_QUEIJOS });
+  });
+
+  it("exatamente 1 sabor continua obrigatório — Calzone sem flavorId é rejeitado mesmo em modo pizza", async () => {
+    const r = await validarItensComanda([
+      { kind: "simple", price: 0, qty: 1, simpleSelection: { productId: PRODUCT_CALZONE } },
+    ]);
+    expect(r.ok).toBe(false);
+  });
+
+  it("exatamente 1 sabor continua obrigatório — sizeId/milk anexados são rejeitados mesmo em modo pizza (estritamente tipada por estratégia)", async () => {
+    const r = await validarItensComanda([
+      { kind: "simple", price: 0, qty: 1, simpleSelection: { productId: PRODUCT_CALZONE, flavorId: FLAVOR_BAIANA, sizeId: SIZE_G } },
+    ]);
+    expect(r.ok).toBe(false);
+  });
+
+  it("payload adulterado não contorna a configuração: flavorId totalmente inventado é rejeitado mesmo em modo pizza", async () => {
+    const r = await validarItensComanda([
+      { kind: "simple", price: 0, qty: 1, simpleSelection: { productId: PRODUCT_CALZONE, flavorId: "flavor-inexistente" } },
+    ]);
+    expect(r.ok).toBe(false);
+  });
+
+  it("legado compatível: item sem simpleSelection continua funcionando normalmente com o Calzone em modo pizza", async () => {
+    const r = await validarItensComanda([
+      { kind: "simple", name: "Calzone", detail: "Sabor: Baiana", price: 0.01, qty: 1 },
+    ]);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.itens[0].simpleSelection).toBeUndefined();
+    expect(r.itens[0].price).toBe(35);
   });
 });
 

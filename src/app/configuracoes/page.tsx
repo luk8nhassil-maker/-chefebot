@@ -199,6 +199,13 @@ export default function ConfiguracoesPage() {
   const [fidelidade, setFidelidade] = useState<ConfigFidelidade>(FIDELIDADE_PADRAO)
   const [salvandoFidelidade, setSalvandoFidelidade] = useState(false)
   const [mensagemFidelidade, setMensagemFidelidade] = useState('')
+  // Correção da regra comercial do Calzone: `true` = "Reaproveitar sabores
+  // da Pizza" (modo padrão/aprovado), `false` = usa a lista própria
+  // calzoneFlavors. Espelha exatamente `flavorsMode` de
+  // menu.lanches[Calzone] (ausente = "pizza") — ver GET /api/cardapio.
+  const [calzoneModoPizza, setCalzoneModoPizza] = useState(true)
+  const [salvandoCalzoneModo, setSalvandoCalzoneModo] = useState(false)
+  const [mensagemCalzoneModo, setMensagemCalzoneModo] = useState('')
   const is24h = config.horaAbertura === 0 && config.horaFechamento === 24
 
   useEffect(() => {
@@ -237,6 +244,9 @@ export default function ConfiguracoesPage() {
           sizes: data.sizes || [],
           borders: data.borders || [],
         })
+        const lanchesData: Array<{ flavorsKey?: string; flavorsMode?: string }> = Array.isArray(data?.lanches) ? data.lanches : []
+        const calzone = lanchesData.find(l => l.flavorsKey === 'calzoneFlavors')
+        setCalzoneModoPizza(!calzone || calzone.flavorsMode !== 'own')
       })
       .catch(err => {
         console.error('Falha ao carregar cardapio:', err)
@@ -280,6 +290,29 @@ export default function ConfiguracoesPage() {
     } catch { setMensagemFidelidade('❌ Erro ao salvar.') }
     setSalvandoFidelidade(false)
     setTimeout(() => setMensagemFidelidade(''), 3000)
+  }
+
+  const alternarCalzoneModo = async () => {
+    const novoModo = calzoneModoPizza ? 'own' : 'pizza'
+    setSalvandoCalzoneModo(true)
+    setMensagemCalzoneModo('')
+    try {
+      const res = await fetch('/api/cardapio/calzone-flavors-mode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ modo: novoModo }),
+      })
+      if (res.ok) {
+        setCalzoneModoPizza(novoModo === 'pizza')
+        setMensagemCalzoneModo('✅ Configuração do Calzone salva!')
+      } else {
+        setMensagemCalzoneModo('❌ Erro ao salvar.')
+      }
+    } catch {
+      setMensagemCalzoneModo('❌ Erro ao salvar.')
+    }
+    setSalvandoCalzoneModo(false)
+    setTimeout(() => setMensagemCalzoneModo(''), 3000)
   }
 
   const salvarCardapio = async () => {
@@ -785,6 +818,29 @@ export default function ConfiguracoesPage() {
                       </div>
                     ))}
                   </div>
+                </SectionCard>
+
+                {/* Calzone — regra comercial dos sabores */}
+                <SectionCard>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: -4 }}>
+                    <span style={{ fontSize: 16, flexShrink: 0 }}>🥟</span>
+                    <span style={{ fontSize: 13, fontWeight: 900, color: TEXT, textTransform: 'uppercase', letterSpacing: '0.8px' }}>Calzone</span>
+                  </div>
+                  <button
+                    onClick={alternarCalzoneModo}
+                    disabled={salvandoCalzoneModo}
+                    style={{ width: '100%', background: calzoneModoPizza ? 'color-mix(in srgb, var(--success) 10%, transparent)' : 'rgba(var(--overlay-rgb), 0.04)', border: `1.5px solid ${calzoneModoPizza ? 'color-mix(in srgb, var(--success) 40%, transparent)' : 'var(--border)'}`, borderRadius: 12, padding: '13px 16px', color: calzoneModoPizza ? 'var(--success)' : TEXT2, fontSize: 13, fontWeight: 800, cursor: salvandoCalzoneModo ? 'not-allowed' : 'pointer', minHeight: 48, fontFamily: FONT, opacity: salvandoCalzoneModo ? 0.6 : 1 }}
+                  >
+                    {calzoneModoPizza ? '✅ Reaproveitar sabores da Pizza' : '⭕ Usar lista própria do Calzone'}
+                  </button>
+                  <p style={{ fontSize: 12, color: TEXT2, margin: 0, lineHeight: 1.5 }}>
+                    {calzoneModoPizza
+                      ? 'Padrão: o Calzone aceita os mesmos sabores disponíveis da Pizza (mesmos IDs, sem lista separada). Desmarque para usar a lista própria "Sabores do Calzone".'
+                      : 'O Calzone usa sua própria lista de sabores, independente da Pizza — mudanças na Pizza não afetam o Calzone.'}
+                  </p>
+                  {mensagemCalzoneModo && (
+                    <p style={{ textAlign: 'center', color: mensagemCalzoneModo.includes('✅') ? 'var(--success)' : 'var(--danger)', fontWeight: 800, fontSize: 13, margin: 0 }}>{mensagemCalzoneModo}</p>
+                  )}
                 </SectionCard>
 
                 <button

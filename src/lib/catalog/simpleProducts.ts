@@ -23,12 +23,23 @@
 // Sabores de um produto "single_flavor": um sabor como "Calabresa" é a
 // MESMA entidade comercial em pizza, calzone e mini-pizza — reutiliza o
 // MESMO flavorId oficial do catálogo canônico de sabores (o mesmo id que
-// @/lib/catalog/pizzas expõe para pizza), nunca um ID novo por produto. O
-// que muda por produto é só (a) a LISTA de sabores permitidos — apontada
-// pela própria configuração oficial (`flavorsKey`, ex.: "calzoneFlavors"),
-// nunca inventada aqui — e (b) a disponibilidade, recalculada de forma
-// independente para cada lista (mesmo cálculo, mesma fonte "esgotados", mas
-// nunca lida "por referência" do catálogo de outro produto).
+// @/lib/catalog/pizzas expõe para pizza), nunca um ID novo por produto. A
+// disponibilidade é sempre recalculada de forma independente por lista
+// (mesmo cálculo, mesma fonte "esgotados", mas nunca lida "por referência"
+// do catálogo de outro produto).
+//
+// DE ONDE VEM A LISTA de sabores permitidos de um produto "single_flavor" é
+// decidido por `produto.flavorsMode` — configuração explícita por produto
+// (menu.lanches[i].flavorsMode), NUNCA inferida por lista vazia nem pelo
+// nome do produto:
+//   - "pizza" (padrão/ausente) — reaproveita os mesmos sabores efetivos da
+//     Pizza (saltyFlavors + sweetFlavors inteiros), sem lista própria. É o
+//     comportamento comercial aprovado do Calzone: mudanças nos sabores
+//     disponíveis da Pizza refletem automaticamente aqui, porque é
+//     literalmente o mesmo cálculo sobre a mesma lista.
+//   - "own" — usa a lista própria apontada por `flavorsKey` (ex.:
+//     "calzoneFlavors"), independente da Pizza — permite esconder um sabor
+//     só deste produto sem afetar a Pizza nem outro produto "own".
 import type { Menu } from "@/lib/menu";
 import { norm } from "@/lib/pedidoAppItens";
 import { buildCatalog } from "./adapter";
@@ -87,11 +98,26 @@ export function buildSimpleCatalog(menu: Menu, esgotados: readonly string[] = []
   // (@/lib/catalog/adapter: `flavor-<slug>`), nunca um espaço de IDs novo.
   const flavoresCanonicos = [...catalog.saltyFlavors, ...catalog.sweetFlavors];
 
+  // Todos os sabores canônicos, cada um com a disponibilidade calculada uma
+  // única vez — é exatamente a mesma lista/cálculo que a Pizza usa. Modo
+  // "pizza" devolve isso direto; nenhuma lista própria é consultada.
+  const flavoresDaPizza: SimpleCatalogFlavor[] = flavoresCanonicos.map((flavor) => ({
+    id: flavor.id,
+    name: flavor.name,
+    available: !estaEsgotado(flavor.name, esgotadosNorm),
+  }));
+
   function flavoresPermitidos(flavorsKey: string | undefined): SimpleCatalogFlavor[] {
     const permitidosNorm = new Set(nomesDaListaOficial(menu, flavorsKey).map(norm));
     return flavoresCanonicos
       .filter((flavor) => permitidosNorm.has(norm(flavor.name)))
       .map((flavor) => ({ id: flavor.id, name: flavor.name, available: !estaEsgotado(flavor.name, esgotadosNorm) }));
+  }
+
+  /** Decide a lista efetiva de sabores de um produto "single_flavor" pela
+   *  sua própria `flavorsMode` — nunca por nome, nunca por lista vazia. */
+  function flavoresEfetivos(produto: { flavorsKey?: string; flavorsMode?: "pizza" | "own" }): SimpleCatalogFlavor[] {
+    return (produto.flavorsMode ?? "pizza") === "own" ? flavoresPermitidos(produto.flavorsKey) : flavoresDaPizza;
   }
 
   const lanches: SimpleCatalogProduct[] = catalog.lanches.map((produto) => {
@@ -102,7 +128,7 @@ export function buildSimpleCatalog(menu: Menu, esgotados: readonly string[] = []
       return { ...base, strategy: "size" as const, sizes: produto.sizes };
     }
     if (produto.hasFlavors && produto.flavorsKey) {
-      return { ...base, strategy: "single_flavor" as const, flavors: flavoresPermitidos(produto.flavorsKey) };
+      return { ...base, strategy: "single_flavor" as const, flavors: flavoresEfetivos(produto) };
     }
     return { ...base, strategy: "fixed" as const };
   });

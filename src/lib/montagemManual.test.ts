@@ -26,7 +26,8 @@ import {
 } from "./montagemManual";
 import { officialUnitPrice, type ItemApp } from "./pedidoAppItens";
 import type { PizzaCatalog } from "./catalog/pizzas";
-import type { SimpleCatalog } from "./catalog/simpleProducts";
+import { buildSimpleCatalog, type SimpleCatalog } from "./catalog/simpleProducts";
+import { MENU as MENU_OFICIAL } from "@/lib/menu";
 
 // Cardápio de teste: nomes e valores inventados só para o teste, nunca
 // copiados de nenhum estabelecimento. O que importa aqui é a FORMA do
@@ -712,6 +713,42 @@ describe("construirItemManual — simpleSelection (Fase 6)", () => {
     expect(item).not.toBeNull();
     expect(item?.simpleSelection).toBeUndefined();
     expect(item?.price).toBe(40);
+  });
+});
+
+describe("construirItemManual — Calzone flavorsMode 'pizza' com o catálogo oficial real (correção da regra comercial do Calzone, 6ª rodada)", () => {
+  const catalogoOficial = buildSimpleCatalog(MENU_OFICIAL);
+  const menuComCatalogoOficial: MenuManual = {
+    sizes: MENU_OFICIAL.sizes,
+    saltyFlavors: MENU_OFICIAL.saltyFlavors,
+    sweetFlavors: MENU_OFICIAL.sweetFlavors,
+    lanches: MENU_OFICIAL.lanches,
+    bebidas: MENU_OFICIAL.bebidas,
+    sucos: MENU_OFICIAL.sucos,
+    borders: MENU_OFICIAL.borders,
+    neighborhoods: MENU_OFICIAL.neighborhoods,
+    payments: MENU_OFICIAL.payments,
+    esgotados: [],
+    catalog: catalogoOficial,
+    catalogPresente: true,
+  };
+  const calzoneOficial = catalogoOficial.lanches.find((l) => l.name === "Calzone")!;
+
+  test("REGRESSÃO — Calzone aceita um sabor da Pizza fora de calzoneFlavors (Quatro Queijos): modo padrão 'pizza' reaproveita a lista inteira da Pizza no Pedido Manual", () => {
+    const produto = produtoPorId("lanches:calzone", menuComCatalogoOficial);
+    const item = construirItemManual(produto, { sabores: ["Quatro Queijos"] }, menuComCatalogoOficial);
+    expect(item).not.toBeNull();
+    const flavorId = calzoneOficial.flavors!.find((f) => f.name === "Quatro Queijos")!.id;
+    expect(item?.simpleSelection).toEqual({ productId: calzoneOficial.id, flavorId });
+    expect(item?.price).toBe(35);
+  });
+
+  test("mesmo sabor mantém o MESMO flavorId entre Pizza e Calzone no Pedido Manual — nenhum ID novo por produto", () => {
+    const produto = produtoPorId("lanches:calzone", menuComCatalogoOficial);
+    const item = construirItemManual(produto, { sabores: ["Calabresa"] }, menuComCatalogoOficial);
+    const flavorIdEsperado = calzoneOficial.flavors!.find((f) => f.name === "Calabresa")!.id;
+    expect(item?.simpleSelection?.flavorId).toBe(flavorIdEsperado);
+    expect(flavorIdEsperado).toBe("flavor-calabresa");
   });
 });
 

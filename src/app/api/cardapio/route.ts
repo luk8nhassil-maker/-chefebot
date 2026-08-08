@@ -135,6 +135,13 @@ function validarLanches(valor: unknown): string | null {
         if (!nomeValido(so.code) || !precoValido(so.price)) return `lanches: tamanho inválido em "${String(obj.name)}"`
       }
     }
+    // flavorsMode (correção da regra comercial do Calzone): configuração
+    // explícita de onde vêm os sabores deste produto — "pizza" (reaproveita
+    // a Pizza, padrão quando ausente) ou "own" (lista própria via
+    // flavorsKey). Só os dois valores oficiais são aceitos.
+    if (obj.flavorsMode !== undefined && obj.flavorsMode !== 'pizza' && obj.flavorsMode !== 'own') {
+      return `lanches: flavorsMode inválido em "${String(obj.name)}"`
+    }
     const chave = `${(obj.name as string).trim()}::${obj.price}`
     if (vistos.has(chave)) return `lanches: item duplicado ("${obj.name}", mesmo preço)`
     vistos.add(chave)

@@ -44,6 +44,11 @@ export interface CatalogSimpleProduct {
    *  "calzoneFlavors") que lista os sabores permitidos deste produto. */
   hasFlavors?: boolean;
   flavorsKey?: string;
+  /** Passagem direta de menu.lanches[].flavorsMode — decide se os sabores
+   *  deste produto vêm da Pizza ("pizza", padrão quando ausente) ou de sua
+   *  própria lista apontada por `flavorsKey` ("own"). Configuração explícita
+   *  por produto — nunca inferida por nome nem por lista vazia. */
+  flavorsMode?: "pizza" | "own";
 }
 
 export interface CatalogDrink {

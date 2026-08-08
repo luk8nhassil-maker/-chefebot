@@ -126,16 +126,21 @@ describe("Esgotado reflete no cardápio público (GET) após PATCH", () => {
     const macarronada = data.catalog.lanches.find((l: { name: string }) => l.name === "Macarronada de Carne");
     expect(macarronada?.strategy).toBe("size");
     expect(Array.isArray(macarronada?.sizes)).toBe(true);
-    // Sabores de Calzone e Mini-Pizza vêm das listas oficiais próprias de
-    // cada produto (menu.calzoneFlavors/miniPizzaFlavors), expostas em
-    // `produto.flavors` — nunca inventadas aqui, e nunca a mesma lista de
-    // sabores de pizza.
+    // Correção da regra comercial do Calzone: modo padrão "pizza" reaproveita
+    // a lista inteira da Pizza (calzoneFlavors não restringe) — expostos em
+    // `produto.flavors`. Mini-Pizza continua em modo "own" (miniPizzaFlavors
+    // restringe), comportamento inalterado.
     const miniPizza = data.catalog.lanches.find((l: { name: string }) => l.name === "Mini-Pizza");
     expect(miniPizza?.strategy).toBe("single_flavor");
     expect(Array.isArray(calzone?.flavors)).toBe(true);
     expect(calzone.flavors.length).toBeGreaterThan(0);
     expect(Array.isArray(miniPizza?.flavors)).toBe(true);
     expect(miniPizza.flavors.length).toBeGreaterThan(0);
+    // "Quatro Queijos" está fora de calzoneFlavors/miniPizzaFlavors: o
+    // Calzone aceita mesmo assim (modo pizza), a Mini-Pizza continua sem
+    // aceitar (modo own, inalterado).
+    expect(calzone.flavors.some((f: { name: string }) => f.name === "Quatro Queijos")).toBe(true);
+    expect(miniPizza.flavors.some((f: { name: string }) => f.name === "Quatro Queijos")).toBe(false);
   });
 
   it("GET reflete em tempo real um sabor de Calzone/Mini-Pizza esgotado no catálogo dos produtos configuráveis (Fase 6)", async () => {
