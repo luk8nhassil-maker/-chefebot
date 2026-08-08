@@ -346,14 +346,17 @@ describe("resolverSimpleSelectionIds — resolução de IDs do catálogo oficial
     expect(sel).toEqual({ productId: produto.id, flavorId: sabor.id });
   });
 
-  test("mini-pizza: resolve productId + flavorId pela lista oficial miniPizzaFlavors (não calzoneFlavors)", () => {
+  test("mini-pizza: resolve productId + flavorId pela lista oficial miniPizzaFlavors", () => {
     const sel = resolverSimpleSelectionIds(catalog, "Mini-Pizza", { flavorName: "Calabresa" });
     const produto = catalog.lanches.find((l) => l.name === "Mini-Pizza")!;
     const sabor = catalog.miniPizzaFlavors.find((f) => f.name === "Calabresa")!;
     expect(sel).toEqual({ productId: produto.id, flavorId: sabor.id });
-    // IDs de calzoneFlavors e miniPizzaFlavors nunca se confundem, mesmo
-    // quando os NOMES coincidem hoje.
-    expect(sel?.flavorId).not.toBe(catalog.calzoneFlavors.find((f) => f.name === "Calabresa")!.id);
+  });
+
+  test("calzone e mini-pizza reutilizam o MESMO flavorId oficial para o mesmo sabor — nenhum ID novo por produto", () => {
+    const selCalzone = resolverSimpleSelectionIds(catalog, "Calzone", { flavorName: "Calabresa" });
+    const selMiniPizza = resolverSimpleSelectionIds(catalog, "Mini-Pizza", { flavorName: "Calabresa" });
+    expect(selCalzone?.flavorId).toBe(selMiniPizza?.flavorId);
   });
 
   test("macarronada: resolve productId + sizeId pelo código do tamanho", () => {

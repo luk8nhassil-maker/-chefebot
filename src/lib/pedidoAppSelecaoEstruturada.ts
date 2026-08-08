@@ -80,7 +80,8 @@ function ehMiniPizza(nome: string): boolean {
 
 /**
  * Resolve um item "simple" com seleção estruturada (Calzone, Mini-Pizza,
- * Macarronada, sucos com/sem leite) — Fase 6, hardening pós-auditoria.
+ * Macarronada, sucos com/sem leite) — Fase 6, hardening pós-auditoria (2ª
+ * rodada).
  *
  * `catalog` (@/lib/catalog/simpleProducts, construído pelo chamador a partir
  * de getMENUDinamico() + a lista "esgotados" FRESCA do Redis) é a única
@@ -88,8 +89,17 @@ function ehMiniPizza(nome: string): boolean {
  * aqui, mesmo que o item tenha sido montado antes de esgotar (mesma garantia
  * que a pizza já tem via @/lib/pricing/pizzaEngine). Os sabores de Calzone e
  * Mini-Pizza vêm das listas oficiais já existentes no cardápio
- * (menu.calzoneFlavors / menu.miniPizzaFlavors via `catalog`), nunca da
- * lista de sabores de pizza — nenhuma regra nova é inventada aqui.
+ * (menu.calzoneFlavors / menu.miniPizzaFlavors via `catalog`), com o MESMO
+ * flavorId oficial que a pizza usa para o mesmo sabor — nunca um ID novo por
+ * produto, nunca a lista de sabores de pizza usada sem passar pela lista
+ * permitida do produto.
+ *
+ * ESTRITAMENTE TIPADA POR ESTRATÉGIA: cada tipo de produto aceita só os
+ * campos que fazem sentido para ele — um campo que não se aplica ao produto
+ * resolvido (ex.: `milk` numa Macarronada, `sizeId` num Calzone) é rejeitado
+ * como seleção inválida, nunca ignorado em silêncio. Isso fecha a brecha de
+ * um payload adulterado carregar campos de mais de uma estratégia ao mesmo
+ * tempo torcendo para que algum "cole".
  *
  * O preço em si continua vindo de `officialUnitPrice` (a mesma fonte oficial
  * de sempre) a partir do name/detail reconstruído — nenhuma regra de preço
@@ -123,24 +133,41 @@ export function resolverItemComSelecaoSimplesEstruturada(
   if (!produto.available) return { ok: false, error: `Produto indisponível: ${produto.name}` };
 
   const isSuco = catalog.sucos.some((s) => s.id === produto.id);
+  const isMacarronada = norm(produto.name).includes("macarronada");
+  const isCalzone = norm(produto.name) === "calzone";
+  const isMiniPizza = ehMiniPizza(produto.name);
+
   let detail: string | undefined;
 
   if (isSuco) {
+    // Suco EXIGE milk e REJEITA sizeId/flavorId.
+    if (selecao.sizeId !== undefined || selecao.flavorId !== undefined) {
+      return { ok: false, error: "Seleção de produto inválida" };
+    }
+    if (selecao.milk === undefined) return { ok: false, error: "Seleção de produto inválida" };
     detail = selecao.milk === "com" ? "com leite" : "sem leite";
-  } else if (norm(produto.name).includes("macarronada")) {
+  } else if (isMacarronada) {
+    // Macarronada EXIGE sizeId e REJEITA milk/flavorId.
+    if (selecao.milk !== undefined || selecao.flavorId !== undefined) {
+      return { ok: false, error: "Seleção de produto inválida" };
+    }
     const size = produto.sizes?.find((s) => s.id === selecao.sizeId);
     if (!size) return { ok: false, error: "Tamanho não encontrado" };
     detail = `Tamanho ${size.code}`;
-  } else if (norm(produto.name) === "calzone") {
-    const flavor = selecao.flavorId ? catalog.calzoneFlavors.find((f) => f.id === selecao.flavorId) : undefined;
+  } else if (isCalzone || isMiniPizza) {
+    // Calzone/Mini-Pizza EXIGEM flavorId e REJEITAM sizeId/milk.
+    if (selecao.sizeId !== undefined || selecao.milk !== undefined) {
+      return { ok: false, error: "Seleção de produto inválida" };
+    }
+    const flavors = isCalzone ? catalog.calzoneFlavors : catalog.miniPizzaFlavors;
+    const flavor = selecao.flavorId ? flavors.find((f) => f.id === selecao.flavorId) : undefined;
     if (!flavor) return { ok: false, error: "Sabor não encontrado" };
     if (!flavor.available) return { ok: false, error: `Sabor indisponível: ${flavor.name}` };
     detail = `Sabor: ${flavor.name}`;
-  } else if (ehMiniPizza(produto.name)) {
-    const flavor = selecao.flavorId ? catalog.miniPizzaFlavors.find((f) => f.id === selecao.flavorId) : undefined;
-    if (!flavor) return { ok: false, error: "Sabor não encontrado" };
-    if (!flavor.available) return { ok: false, error: `Sabor indisponível: ${flavor.name}` };
-    detail = `Sabor: ${flavor.name}`;
+  } else if (selecao.sizeId !== undefined || selecao.flavorId !== undefined || selecao.milk !== undefined) {
+    // Produto plano (sem tamanho/sabor/leite): REJEITA qualquer escolha
+    // extra — não há nada a configurar para ele.
+    return { ok: false, error: "Seleção de produto inválida" };
   }
 
   const resolvido: ItemApp = { kind: "simple", name: produto.name, ...(detail ? { detail } : {}), price: 0, qty: item.qty };

@@ -207,16 +207,33 @@ describe("resolverItemComSelecaoSimplesEstruturada (Fase 6)", () => {
     }
   });
 
-  it("Calzone: sabor de flavorId da Mini-Pizza é rejeitado (listas oficiais são independentes por produto)", () => {
-    // IDs de calzoneFlavors e miniPizzaFlavors nunca se confundem, mesmo
-    // quando os NOMES coincidem hoje — cada produto valida só contra a sua
-    // própria lista oficial (menu.calzoneFlavors / menu.miniPizzaFlavors).
+  it("Calzone e pizza reutilizam o MESMO flavorId oficial para o mesmo sabor — nenhum ID novo por produto", () => {
+    expect(calzoneFlavorIdByName("Calabresa")).toBe(flavorIdByName("Calabresa"));
+    expect(miniPizzaFlavorIdByName("Baiana")).toBe(flavorIdByName("Baiana"));
+  });
+
+  it("Calzone: flavorId de sabor de pizza fora da lista permitida (Quatro Queijos) é rejeitado, mesmo sendo um flavorId oficial válido (reutilizado da pizza)", () => {
+    // "Quatro Queijos" é um flavorId real e válido no catálogo de pizza, mas
+    // não está em menu.calzoneFlavors — a lista permitida do produto (não a
+    // mera existência do ID) decide.
     const item: ItemApp = {
       kind: "simple",
       name: "",
       price: 0,
       qty: 1,
-      simpleSelection: { productId: productIdByName("Calzone"), flavorId: miniPizzaFlavorIdByName("Calabresa") },
+      simpleSelection: { productId: productIdByName("Calzone"), flavorId: flavorIdByName("Quatro Queijos") },
+    };
+    const resultado = resolverItemComSelecaoSimplesEstruturada(item, MENU, simpleCatalog);
+    expect(resultado).toEqual({ ok: false, error: "Sabor não encontrado" });
+  });
+
+  it("Mini-Pizza: flavorId de sabor de pizza fora da lista permitida (Quatro Queijos) é rejeitado", () => {
+    const item: ItemApp = {
+      kind: "simple",
+      name: "",
+      price: 0,
+      qty: 1,
+      simpleSelection: { productId: productIdByName("Mini-Pizza"), flavorId: flavorIdByName("Quatro Queijos") },
     };
     const resultado = resolverItemComSelecaoSimplesEstruturada(item, MENU, simpleCatalog);
     expect(resultado).toEqual({ ok: false, error: "Sabor não encontrado" });
@@ -301,10 +318,10 @@ describe("resolverItemComSelecaoSimplesEstruturada (Fase 6)", () => {
     expect(resultado).toEqual({ ok: false, error: "Produto não encontrado" });
   });
 
-  it("IDs adulterados (productId de outro produto com flavorId de calzone): resolve normalmente pelo produto real do productId — nunca mistura o adulterado", () => {
-    // productId aponta para X-Burguer (sem sabor algum) — o flavorId
-    // "adulterado" simplesmente não é considerado, porque X-Burguer não cai
-    // em nenhum ramo que olhe para flavorId.
+  it("IDs adulterados (productId de produto plano com flavorId de calzone anexado): rejeitado — produto plano não aceita escolha extra alguma, mesmo com um flavorId oficial válido", () => {
+    // productId aponta para X-Burguer (produto sem configuração nenhuma) —
+    // um flavorId "de brinde" no payload, mesmo sendo um ID oficial válido
+    // de outro produto, é sempre rejeitado, nunca silenciosamente ignorado.
     const item: ItemApp = {
       kind: "simple",
       name: "",
@@ -313,8 +330,7 @@ describe("resolverItemComSelecaoSimplesEstruturada (Fase 6)", () => {
       simpleSelection: { productId: productIdByName("X-Burguer"), flavorId: calzoneFlavorIdByName("Calabresa") },
     };
     const resultado = resolverItemComSelecaoSimplesEstruturada(item, MENU, simpleCatalog);
-    expect(resultado.ok).toBe(true);
-    if (resultado.ok) expect(resultado.item.name).toBe("X-Burguer");
+    expect(resultado).toEqual({ ok: false, error: "Seleção de produto inválida" });
   });
 
   it("rejeita productId com formato de ID válido mas de outro catálogo (ex.: ID de pizza)", () => {
@@ -410,6 +426,152 @@ describe("resolverItemComSelecaoSimplesEstruturada (Fase 6)", () => {
   });
 });
 
+describe("resolverItemComSelecaoSimplesEstruturada — simpleSelection estritamente tipada por estratégia (hardening pós-auditoria, Fase 6)", () => {
+  it("suco EXIGE milk — sem ele, rejeitado (não é mais 'sem leite' por padrão)", () => {
+    const item: ItemApp = {
+      kind: "simple",
+      name: "",
+      price: 0,
+      qty: 1,
+      simpleSelection: { productId: productIdByName("Laranja") },
+    };
+    const resultado = resolverItemComSelecaoSimplesEstruturada(item, MENU, simpleCatalog);
+    expect(resultado).toEqual({ ok: false, error: "Seleção de produto inválida" });
+  });
+
+  it("suco REJEITA sizeId anexado, mesmo com milk válido", () => {
+    const item: ItemApp = {
+      kind: "simple",
+      name: "",
+      price: 0,
+      qty: 1,
+      simpleSelection: { productId: productIdByName("Laranja"), milk: "com", sizeId: simpleSizeIdByCode("Macarronada de Carne", "G") },
+    };
+    const resultado = resolverItemComSelecaoSimplesEstruturada(item, MENU, simpleCatalog);
+    expect(resultado).toEqual({ ok: false, error: "Seleção de produto inválida" });
+  });
+
+  it("suco REJEITA flavorId anexado, mesmo com milk válido", () => {
+    const item: ItemApp = {
+      kind: "simple",
+      name: "",
+      price: 0,
+      qty: 1,
+      simpleSelection: { productId: productIdByName("Laranja"), milk: "com", flavorId: calzoneFlavorIdByName("Calabresa") },
+    };
+    const resultado = resolverItemComSelecaoSimplesEstruturada(item, MENU, simpleCatalog);
+    expect(resultado).toEqual({ ok: false, error: "Seleção de produto inválida" });
+  });
+
+  it("macarronada REJEITA milk anexado, mesmo com sizeId válido", () => {
+    const item: ItemApp = {
+      kind: "simple",
+      name: "",
+      price: 0,
+      qty: 1,
+      simpleSelection: { productId: productIdByName("Macarronada de Carne"), sizeId: simpleSizeIdByCode("Macarronada de Carne", "G"), milk: "com" },
+    };
+    const resultado = resolverItemComSelecaoSimplesEstruturada(item, MENU, simpleCatalog);
+    expect(resultado).toEqual({ ok: false, error: "Seleção de produto inválida" });
+  });
+
+  it("macarronada REJEITA flavorId anexado, mesmo com sizeId válido", () => {
+    const item: ItemApp = {
+      kind: "simple",
+      name: "",
+      price: 0,
+      qty: 1,
+      simpleSelection: { productId: productIdByName("Macarronada de Carne"), sizeId: simpleSizeIdByCode("Macarronada de Carne", "G"), flavorId: calzoneFlavorIdByName("Calabresa") },
+    };
+    const resultado = resolverItemComSelecaoSimplesEstruturada(item, MENU, simpleCatalog);
+    expect(resultado).toEqual({ ok: false, error: "Seleção de produto inválida" });
+  });
+
+  it("calzone REJEITA sizeId anexado, mesmo com flavorId válido", () => {
+    const item: ItemApp = {
+      kind: "simple",
+      name: "",
+      price: 0,
+      qty: 1,
+      simpleSelection: { productId: productIdByName("Calzone"), flavorId: calzoneFlavorIdByName("Calabresa"), sizeId: simpleSizeIdByCode("Macarronada de Carne", "G") },
+    };
+    const resultado = resolverItemComSelecaoSimplesEstruturada(item, MENU, simpleCatalog);
+    expect(resultado).toEqual({ ok: false, error: "Seleção de produto inválida" });
+  });
+
+  it("calzone REJEITA milk anexado, mesmo com flavorId válido", () => {
+    const item: ItemApp = {
+      kind: "simple",
+      name: "",
+      price: 0,
+      qty: 1,
+      simpleSelection: { productId: productIdByName("Calzone"), flavorId: calzoneFlavorIdByName("Calabresa"), milk: "com" },
+    };
+    const resultado = resolverItemComSelecaoSimplesEstruturada(item, MENU, simpleCatalog);
+    expect(resultado).toEqual({ ok: false, error: "Seleção de produto inválida" });
+  });
+
+  it("mini-pizza REJEITA sizeId anexado, mesmo com flavorId válido", () => {
+    const item: ItemApp = {
+      kind: "simple",
+      name: "",
+      price: 0,
+      qty: 1,
+      simpleSelection: { productId: productIdByName("Mini-Pizza"), flavorId: miniPizzaFlavorIdByName("Baiana"), sizeId: simpleSizeIdByCode("Macarronada de Carne", "G") },
+    };
+    const resultado = resolverItemComSelecaoSimplesEstruturada(item, MENU, simpleCatalog);
+    expect(resultado).toEqual({ ok: false, error: "Seleção de produto inválida" });
+  });
+
+  it("mini-pizza REJEITA milk anexado, mesmo com flavorId válido", () => {
+    const item: ItemApp = {
+      kind: "simple",
+      name: "",
+      price: 0,
+      qty: 1,
+      simpleSelection: { productId: productIdByName("Mini-Pizza"), flavorId: miniPizzaFlavorIdByName("Baiana"), milk: "com" },
+    };
+    const resultado = resolverItemComSelecaoSimplesEstruturada(item, MENU, simpleCatalog);
+    expect(resultado).toEqual({ ok: false, error: "Seleção de produto inválida" });
+  });
+
+  it("produto plano REJEITA sizeId anexado", () => {
+    const item: ItemApp = {
+      kind: "simple",
+      name: "",
+      price: 0,
+      qty: 1,
+      simpleSelection: { productId: productIdByName("X-Burguer"), sizeId: simpleSizeIdByCode("Macarronada de Carne", "G") },
+    };
+    const resultado = resolverItemComSelecaoSimplesEstruturada(item, MENU, simpleCatalog);
+    expect(resultado).toEqual({ ok: false, error: "Seleção de produto inválida" });
+  });
+
+  it("produto plano REJEITA milk anexado", () => {
+    const item: ItemApp = {
+      kind: "simple",
+      name: "",
+      price: 0,
+      qty: 1,
+      simpleSelection: { productId: productIdByName("X-Burguer"), milk: "com" },
+    };
+    const resultado = resolverItemComSelecaoSimplesEstruturada(item, MENU, simpleCatalog);
+    expect(resultado).toEqual({ ok: false, error: "Seleção de produto inválida" });
+  });
+
+  it("produto plano REJEITA flavorId anexado", () => {
+    const item: ItemApp = {
+      kind: "simple",
+      name: "",
+      price: 0,
+      qty: 1,
+      simpleSelection: { productId: productIdByName("X-Burguer"), flavorId: calzoneFlavorIdByName("Calabresa") },
+    };
+    const resultado = resolverItemComSelecaoSimplesEstruturada(item, MENU, simpleCatalog);
+    expect(resultado).toEqual({ ok: false, error: "Seleção de produto inválida" });
+  });
+});
+
 describe("resolverItemComSelecaoSimplesEstruturada — disponibilidade fresca (hardening pós-auditoria, Fase 6)", () => {
   it("produto esgotado (Calzone inteiro): rejeitado mesmo com IDs válidos", () => {
     const catalogoComCalzoneEsgotado = buildSimpleCatalog(MENU, ["Calzone"]);
@@ -450,13 +612,62 @@ describe("resolverItemComSelecaoSimplesEstruturada — disponibilidade fresca (h
     expect(resultado).toEqual({ ok: false, error: "Sabor indisponível: Baiana" });
   });
 
-  it("esgotar um sabor de calzone não afeta o mesmo nome na lista de mini-pizza nem na de pizza (listas independentes)", () => {
-    // O nome "Calabresa" está esgotado tanto em calzoneFlavors quanto em
-    // miniPizzaFlavors E em saltyFlavors (a lista "esgotados" é por nome,
-    // compartilhada) — mas outro produto sem esse sabor continua disponível.
+  it("esgotar um sabor não afeta outro produto sem esse sabor (ex.: Refrigerante 2L)", () => {
     const catalogoComSaborEsgotado = buildSimpleCatalog(MENU, ["Calabresa"]);
     const refrigerante = catalogoComSaborEsgotado.bebidas.find((b) => b.name === "Refrigerante 2L")!;
     expect(refrigerante.available).toBe(true);
+  });
+
+  it("REGRESSÃO — disponibilidade específica por produto com ID compartilhado: 'Calabresa' esgotado reflete de forma consistente e independente em pizza, calzone e mini-pizza (mesma entidade, mesmo flavorId, cada catálogo calcula por conta própria)", () => {
+    const esgotados = ["Calabresa"];
+    const catalogoPizzaComEsgotado = buildPizzaCatalog(MENU, esgotados);
+    const catalogoSimplesComEsgotado = buildSimpleCatalog(MENU, esgotados);
+
+    const calabresaPizza = catalogoPizzaComEsgotado.flavors.find((f) => f.name === "Calabresa")!;
+    const calabresaCalzone = catalogoSimplesComEsgotado.calzoneFlavors.find((f) => f.name === "Calabresa")!;
+    const calabresaMiniPizza = catalogoSimplesComEsgotado.miniPizzaFlavors.find((f) => f.name === "Calabresa")!;
+
+    // Mesmo flavorId nos três — a entidade é a mesma.
+    expect(calabresaCalzone.id).toBe(calabresaPizza.id);
+    expect(calabresaMiniPizza.id).toBe(calabresaPizza.id);
+    // Disponibilidade consistente nos três, cada catálogo calculando por
+    // conta própria (nenhum lê o `.available` de outro catálogo).
+    expect(calabresaPizza.available).toBe(false);
+    expect(calabresaCalzone.available).toBe(false);
+    expect(calabresaMiniPizza.available).toBe(false);
+
+    // Um item de calzone com esse flavorId é corretamente rejeitado.
+    const item: ItemApp = {
+      kind: "simple",
+      name: "",
+      price: 0,
+      qty: 1,
+      simpleSelection: { productId: productIdByName("Calzone"), flavorId: calabresaCalzone.id },
+    };
+    expect(resolverItemComSelecaoSimplesEstruturada(item, MENU, catalogoSimplesComEsgotado)).toEqual({
+      ok: false,
+      error: "Sabor indisponível: Calabresa",
+    });
+  });
+
+  it("REGRESSÃO — um sabor fora da lista permitida do Calzone (Quatro Queijos) nunca afeta a pizza: continua 100% disponível e precificável normalmente lá", () => {
+    // "Quatro Queijos" nunca aparece em catalogoSimples.calzoneFlavors (não
+    // está em menu.calzoneFlavors) — isso é uma restrição de LISTA
+    // PERMITIDA, não de disponibilidade, e não tem nenhum efeito sobre a
+    // pizza, que continua enxergando o sabor normalmente.
+    const catalogoSimples = buildSimpleCatalog(MENU); // sem nada esgotado
+    expect(catalogoSimples.calzoneFlavors.some((f) => f.name === "Quatro Queijos")).toBe(false);
+
+    const item: ItemApp = {
+      kind: "pizza",
+      name: "",
+      price: 0,
+      qty: 1,
+      pizzaSelection: { sizeId: sizeIdByCode("G"), flavorIds: [flavorIdByName("Quatro Queijos")] },
+    };
+    const resultado = resolverItemComSelecaoEstruturada(item, catalog);
+    expect(resultado.ok).toBe(true);
+    if (resultado.ok) expect(resultado.item.detail).toBe("Quatro Queijos");
   });
 
   it("produto simples plano esgotado (ex.: bebida): rejeitado", () => {
