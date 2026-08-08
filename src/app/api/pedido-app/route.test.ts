@@ -2012,3 +2012,154 @@ describe("POST /api/pedido-app — seleção estruturada de pizza por ID (Fase 2
     expect(pedidos[0].total).toBe(sizeG.price + refri.price);
   });
 });
+
+describe("POST /api/pedido-app — snapshotOficial (Fase 3)", () => {
+  const catalog = buildPizzaCatalog(MENU);
+  const sizeIdG = catalog.sizes.find((s) => s.code === "G")!.id;
+  const flavorCalabresa = catalog.flavors.find((f) => f.name === "Calabresa")!.id;
+  const borderCatupiry = catalog.borders.find((b) => b.label === "Catupiry")!.id;
+  const sizeG = MENU.sizes.find((s) => s.code === "G")!;
+  const border = MENU.borders.find((b) => b.label === "Catupiry")!;
+  const refri = MENU.bebidas.find((b) => b.name === "Refrigerante 2L")!;
+  const bairroCentro = MENU.neighborhoods.find((n) => n.name === "Centro")!;
+
+  type PedidoComSnapshot = {
+    total: number;
+    taxaEntrega?: number;
+    snapshotOficial?: {
+      itens: { kind: string; nome: string; detalhe?: string; quantidade: number; precoUnitarioCents: number; totalCents: number; selecao?: { sizeId: string; flavorIds: string[]; borderId?: string } }[];
+      subtotalCents: number;
+      taxaEntregaCents: number;
+      totalCents: number;
+      entrega: { tipo: string; bairro?: string };
+      pagamento: string;
+      criadoEm: string;
+    };
+  };
+
+  it("pizza estruturada: item do snapshot carrega selecao (IDs) e preço oficial em centavos", async () => {
+    const res = await POST(postReq({
+      cliente: "Lucas Brito", telefone: "(99) 99999-9999", tipoEntrega: "retirada", pagamento: "Dinheiro", troco: "Sem troco",
+      itens: [{ kind: "pizza", name: "", price: 0, qty: 1, pizzaSelection: { sizeId: sizeIdG, flavorIds: [flavorCalabresa], borderId: borderCatupiry } }],
+    }));
+    expect(res.status).toBe(200);
+    const pedidos = store.get("pedidos") as PedidoComSnapshot[];
+    const snapshot = pedidos[0].snapshotOficial!;
+    expect(snapshot).toBeDefined();
+    expect(snapshot.itens).toEqual([{
+      kind: "pizza",
+      nome: "Pizza G",
+      detalhe: "Calabresa · borda Catupiry",
+      quantidade: 1,
+      precoUnitarioCents: Math.round((sizeG.price + border.priceLarge) * 100),
+      totalCents: Math.round((sizeG.price + border.priceLarge) * 100),
+      selecao: { sizeId: sizeIdG, flavorIds: [flavorCalabresa], borderId: borderCatupiry },
+    }]);
+  });
+
+  it("item legado: snapshot não tem selecao, preço vem de officialUnitPrice (nunca do price do cliente)", async () => {
+    const res = await POST(postReq({
+      cliente: "Lucas Brito", telefone: "(99) 99999-9999", tipoEntrega: "retirada", pagamento: "Dinheiro", troco: "Sem troco",
+      itens: [{ kind: "simple", name: "Refrigerante 2L", detail: "", price: 999999, qty: 1 }],
+    }));
+    expect(res.status).toBe(200);
+    const pedidos = store.get("pedidos") as PedidoComSnapshot[];
+    const snapshot = pedidos[0].snapshotOficial!;
+    expect(snapshot.itens[0]).not.toHaveProperty("selecao");
+    expect(snapshot.itens[0].precoUnitarioCents).toBe(Math.round(refri.price * 100));
+    expect(snapshot.itens[0].precoUnitarioCents).not.toBe(999999 * 100);
+  });
+
+  it("carrinho misto (item novo por ID + item legado): snapshot traz os dois corretamente", async () => {
+    const res = await POST(postReq({
+      cliente: "Lucas Brito", telefone: "(99) 99999-9999", tipoEntrega: "retirada", pagamento: "Dinheiro", troco: "Sem troco",
+      itens: [
+        { kind: "pizza", name: "", price: 0, qty: 1, pizzaSelection: { sizeId: sizeIdG, flavorIds: [flavorCalabresa] } },
+        { kind: "simple", name: "Refrigerante 2L", detail: "", price: 15, qty: 1 },
+      ],
+    }));
+    expect(res.status).toBe(200);
+    const pedidos = store.get("pedidos") as PedidoComSnapshot[];
+    const snapshot = pedidos[0].snapshotOficial!;
+    expect(snapshot.itens).toHaveLength(2);
+    expect(snapshot.itens[0].selecao).toBeDefined();
+    expect(snapshot.itens[1]).not.toHaveProperty("selecao");
+    expect(snapshot.subtotalCents).toBe(Math.round((sizeG.price + refri.price) * 100));
+  });
+
+  it("quantidade > 1: totalCents do item = precoUnitarioCents * quantidade", async () => {
+    const res = await POST(postReq({
+      cliente: "Lucas Brito", telefone: "(99) 99999-9999", tipoEntrega: "retirada", pagamento: "Dinheiro", troco: "Sem troco",
+      itens: [{ kind: "simple", name: "Refrigerante 2L", detail: "", price: 15, qty: 3 }],
+    }));
+    expect(res.status).toBe(200);
+    const pedidos = store.get("pedidos") as PedidoComSnapshot[];
+    const item = pedidos[0].snapshotOficial!.itens[0];
+    expect(item.quantidade).toBe(3);
+    expect(item.totalCents).toBe(item.precoUnitarioCents * 3);
+  });
+
+  it("preço adulterado no payload não afeta o snapshot (nem pizza por ID, nem item legado)", async () => {
+    const res = await POST(postReq({
+      cliente: "Lucas Brito", telefone: "(99) 99999-9999", tipoEntrega: "retirada", pagamento: "Dinheiro", troco: "Sem troco",
+      itens: [{ kind: "pizza", name: "Pizza G", detail: "Calabresa", price: 0.01, qty: 1, pizzaSelection: { sizeId: sizeIdG, flavorIds: [flavorCalabresa] } }],
+    }));
+    expect(res.status).toBe(200);
+    const pedidos = store.get("pedidos") as PedidoComSnapshot[];
+    expect(pedidos[0].snapshotOficial!.itens[0].precoUnitarioCents).toBe(Math.round(sizeG.price * 100));
+  });
+
+  it("total/taxa adulterados no payload (campos que nem existem no contrato do servidor) não afetam o snapshot", async () => {
+    const res = await POST(postReq({
+      cliente: "Lucas Brito", telefone: "(99) 99999-9999", tipoEntrega: "delivery", bairro: "Centro", rua: "Rua X", numero: "1",
+      pagamento: "Dinheiro", troco: "Sem troco",
+      // total/taxaEntrega adulterados — nem existem no tipo PedidoApp do servidor.
+      total: 1, taxaEntrega: 0,
+      itens: [{ kind: "simple", name: "Refrigerante 2L", detail: "", price: 15, qty: 1 }],
+    }));
+    expect(res.status).toBe(200);
+    const pedidos = store.get("pedidos") as PedidoComSnapshot[];
+    const snapshot = pedidos[0].snapshotOficial!;
+    expect(snapshot.taxaEntregaCents).toBe(Math.round(bairroCentro.fee * 100));
+    expect(snapshot.totalCents).toBe(Math.round((refri.price + bairroCentro.fee) * 100));
+    expect(snapshot.totalCents).not.toBe(100); // não aceitou o total:1 adulterado
+  });
+
+  it("taxa de entrega oficial (bairro real) aparece corretamente em centavos no snapshot", async () => {
+    const res = await POST(postReq({
+      cliente: "Lucas Brito", telefone: "(99) 99999-9999", tipoEntrega: "delivery", bairro: "Centro", rua: "Rua X", numero: "1",
+      pagamento: "Dinheiro", troco: "Sem troco",
+      itens: [{ kind: "simple", name: "Refrigerante 2L", detail: "", price: 15, qty: 1 }],
+    }));
+    expect(res.status).toBe(200);
+    const pedidos = store.get("pedidos") as PedidoComSnapshot[];
+    const snapshot = pedidos[0].snapshotOficial!;
+    expect(snapshot.entrega).toEqual({ tipo: "delivery", bairro: "Centro" });
+    expect(snapshot.taxaEntregaCents).toBe(Math.round(bairroCentro.fee * 100));
+  });
+
+  it("seleção estruturada inválida: pedido é rejeitado (400) e nenhum snapshot é criado", async () => {
+    const res = await POST(postReq({
+      cliente: "Lucas Brito", telefone: "(99) 99999-9999", tipoEntrega: "retirada", pagamento: "Dinheiro", troco: "Sem troco",
+      itens: [{ kind: "pizza", name: "Pizza G", detail: "Calabresa", price: 50, qty: 1, pizzaSelection: { sizeId: "size-inexistente", flavorIds: [flavorCalabresa] } }],
+    }));
+    expect(res.status).toBe(400);
+    expect(store.get("pedidos")).toBeUndefined();
+  });
+
+  it("snapshot persistido é consistente com o total oficial gravado no pedido (subtotal + taxa = total, sem resgate)", async () => {
+    const res = await POST(postReq({
+      cliente: "Lucas Brito", telefone: "(99) 99999-9999", tipoEntrega: "delivery", bairro: "Centro", rua: "Rua X", numero: "1",
+      pagamento: "Dinheiro", troco: "Sem troco",
+      itens: [{ kind: "pizza", name: "", price: 0, qty: 1, pizzaSelection: { sizeId: sizeIdG, flavorIds: [flavorCalabresa] } }],
+    }));
+    expect(res.status).toBe(200);
+    const pedidos = store.get("pedidos") as PedidoComSnapshot[];
+    const pedido = pedidos[0];
+    const snapshot = pedido.snapshotOficial!;
+    expect(snapshot.totalCents).toBe(Math.round(pedido.total * 100));
+    expect(snapshot.subtotalCents + snapshot.taxaEntregaCents).toBe(snapshot.totalCents);
+    const somaItens = snapshot.itens.reduce((s, i) => s + i.totalCents, 0);
+    expect(somaItens).toBe(snapshot.subtotalCents);
+  });
+});

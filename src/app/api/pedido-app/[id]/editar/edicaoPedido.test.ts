@@ -568,3 +568,97 @@ describe("POST salvar — invariante do pagamento composto", () => {
     expect(res.status).toBe(200);
   });
 });
+
+describe("POST salvar — snapshotOficial (Fase 3)", () => {
+  const catalog = buildPizzaCatalog(MENU);
+  const sizeIdG = catalog.sizes.find((s) => s.code === "G")!.id;
+  const flavorCalabresa = catalog.flavors.find((f) => f.name === "Calabresa")!.id;
+  const sizeG = MENU.sizes.find((s) => s.code === "G")!;
+  const refri = MENU.bebidas.find((b) => b.name === "Refrigerante 2L")!;
+
+  type PedidoComSnapshot = {
+    total: number;
+    snapshotOficial?: {
+      itens: { kind: string; nome: string; quantidade: number; precoUnitarioCents: number; totalCents: number; selecao?: { sizeId: string; flavorIds: string[]; borderId?: string } }[];
+      subtotalCents: number;
+      taxaEntregaCents: number;
+      totalCents: number;
+      entrega: { tipo: string; bairro?: string };
+    };
+  };
+
+  async function iniciarEdicao() {
+    seedPedido();
+    const res = await iniciar(req({ statusToken: TOKEN }), paramsFor(PEDIDO_ID));
+    const data = await json(res);
+    return data.editSessionId as string;
+  }
+
+  it("edição recalcula o snapshot do zero (nunca reaproveita o snapshot anterior, que ficaria desatualizado)", async () => {
+    const editSessionId = await iniciarEdicao();
+    const res = await salvar(req({
+      statusToken: TOKEN, editSessionId, revision: 1,
+      itens: [{ kind: "pizza", name: "", price: 0, qty: 1, pizzaSelection: { sizeId: sizeIdG, flavorIds: [flavorCalabresa] } }],
+      tipoEntrega: "retirada", pagamento: "Dinheiro", troco: "Sem troco",
+    }), paramsFor(PEDIDO_ID));
+
+    expect(res.status).toBe(200);
+    const pedidos = store.get("pedidos") as Array<PedidoComSnapshot>;
+    const snapshot = pedidos[0].snapshotOficial!;
+    expect(snapshot.itens).toEqual([{
+      kind: "pizza", nome: "Pizza G", detalhe: "Calabresa", quantidade: 1,
+      precoUnitarioCents: Math.round(sizeG.price * 100),
+      totalCents: Math.round(sizeG.price * 100),
+      selecao: { sizeId: sizeIdG, flavorIds: [flavorCalabresa] },
+    }]);
+    expect(snapshot.totalCents).toBe(Math.round(pedidos[0].total * 100));
+  });
+
+  it("preço adulterado no payload de edição não afeta o snapshot recalculado", async () => {
+    const editSessionId = await iniciarEdicao();
+    const res = await salvar(req({
+      statusToken: TOKEN, editSessionId, revision: 1,
+      itens: [{ kind: "simple", name: "Refrigerante 2L", detail: "", price: 999999, qty: 1 }],
+      tipoEntrega: "retirada", pagamento: "Dinheiro", troco: "Sem troco",
+    }), paramsFor(PEDIDO_ID));
+
+    expect(res.status).toBe(200);
+    const pedidos = store.get("pedidos") as Array<PedidoComSnapshot>;
+    const item = pedidos[0].snapshotOficial!.itens[0];
+    expect(item.precoUnitarioCents).toBe(Math.round(refri.price * 100));
+  });
+
+  it("seleção estruturada inválida na edição: 400 e o snapshot do pedido original permanece intocado", async () => {
+    const editSessionId = await iniciarEdicao();
+    const res = await salvar(req({
+      statusToken: TOKEN, editSessionId, revision: 1,
+      itens: [{ kind: "pizza", name: "Pizza G", detail: "Calabresa", price: 50, qty: 1, pizzaSelection: { sizeId: "size-inexistente", flavorIds: [flavorCalabresa] } }],
+      tipoEntrega: "retirada", pagamento: "Dinheiro", troco: "Sem troco",
+    }), paramsFor(PEDIDO_ID));
+
+    expect(res.status).toBe(400);
+    const pedidos = store.get("pedidos") as Array<PedidoComSnapshot>;
+    expect(pedidos[0].snapshotOficial).toBeUndefined(); // pedido original (seedPedido) nunca teve snapshot
+    expect(pedidos[0].total).toBe(15);
+  });
+
+  it("carrinho misto na edição (item novo por ID + item legado): snapshot traz os dois", async () => {
+    const editSessionId = await iniciarEdicao();
+    const res = await salvar(req({
+      statusToken: TOKEN, editSessionId, revision: 1,
+      itens: [
+        { kind: "pizza", name: "", price: 0, qty: 1, pizzaSelection: { sizeId: sizeIdG, flavorIds: [flavorCalabresa] } },
+        { kind: "simple", name: "Refrigerante 2L", detail: "", price: 15, qty: 1 },
+      ],
+      tipoEntrega: "retirada", pagamento: "Dinheiro", troco: "Sem troco",
+    }), paramsFor(PEDIDO_ID));
+
+    expect(res.status).toBe(200);
+    const pedidos = store.get("pedidos") as Array<PedidoComSnapshot>;
+    const snapshot = pedidos[0].snapshotOficial!;
+    expect(snapshot.itens).toHaveLength(2);
+    expect(snapshot.itens[0].selecao).toBeDefined();
+    expect(snapshot.itens[1]).not.toHaveProperty("selecao");
+    expect(snapshot.subtotalCents).toBe(Math.round((sizeG.price + refri.price) * 100));
+  });
+});
