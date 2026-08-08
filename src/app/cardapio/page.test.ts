@@ -1,7 +1,9 @@
 import { describe, test, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { nextFlavorSelection } from "./page";
+import { nextFlavorSelection, resolverPizzaSelectionIds } from "./page";
+import { buildPizzaCatalog } from "@/lib/catalog/pizzas";
+import { MENU } from "@/lib/menu";
 
 const fonte = readFileSync(fileURLToPath(new URL("./page.tsx", import.meta.url)), "utf-8");
 const fontePixCard = readFileSync(fileURLToPath(new URL("./PixPagamentoCard.tsx", import.meta.url)), "utf-8");
@@ -262,6 +264,74 @@ describe("nextFlavorSelection — regra de sabor compartilhada por pizza, mini-p
   test("calzone/mini-pizza: tocar no mesmo sabor selecionado desmarca (sem deixar f2 residual)", () => {
     const sel = nextFlavorSelection({ f1: "Calabresa", f2: null }, "Calabresa", true);
     expect(sel).toEqual({ f1: null, f2: null });
+  });
+});
+
+describe("resolverPizzaSelectionIds — resolução de IDs do catálogo oficial (Fase 2C)", () => {
+  const catalog = buildPizzaCatalog(MENU);
+
+  test("pizza de 1 sabor sem borda: resolve sizeId + 1 flavorId, sem borderId", () => {
+    const sel = resolverPizzaSelectionIds(catalog, "G", "Calabresa", null, null);
+    const sizeG = catalog.sizes.find((s) => s.code === "G")!;
+    const calabresa = catalog.flavors.find((f) => f.name === "Calabresa")!;
+    expect(sel).toEqual({ sizeId: sizeG.id, flavorIds: [calabresa.id] });
+  });
+
+  test("meio a meio: resolve os 2 flavorIds na mesma ordem do clique (servidor trata ordem como irrelevante)", () => {
+    const sel = resolverPizzaSelectionIds(catalog, "G", "Calabresa", "Baiana", null);
+    const calabresa = catalog.flavors.find((f) => f.name === "Calabresa")!;
+    const baiana = catalog.flavors.find((f) => f.name === "Baiana")!;
+    expect(sel?.flavorIds).toEqual([calabresa.id, baiana.id]);
+  });
+
+  test("com borda: inclui borderId resolvido pelo label", () => {
+    const sel = resolverPizzaSelectionIds(catalog, "F", "Calabresa", null, "Catupiry");
+    const border = catalog.borders.find((b) => b.label === "Catupiry")!;
+    expect(sel?.borderId).toBe(border.id);
+  });
+
+  test("catálogo ausente (ainda não carregado): undefined, nunca lança exceção", () => {
+    expect(resolverPizzaSelectionIds(undefined, "G", "Calabresa", null, null)).toBeUndefined();
+  });
+
+  test("tamanho que não existe no catálogo: undefined", () => {
+    expect(resolverPizzaSelectionIds(catalog, "XG-INEXISTENTE", "Calabresa", null, null)).toBeUndefined();
+  });
+
+  test("sabor que não existe no catálogo: undefined", () => {
+    expect(resolverPizzaSelectionIds(catalog, "G", "Sabor Inventado", null, null)).toBeUndefined();
+  });
+
+  test("borda que não existe no catálogo: undefined", () => {
+    expect(resolverPizzaSelectionIds(catalog, "G", "Calabresa", null, "Borda Inventada")).toBeUndefined();
+  });
+
+  test("resolve normalmente mesmo com sabor esgotado (disponibilidade é responsabilidade do servidor/motor nativo, não deste resolver)", () => {
+    const catalogComEsgotado = buildPizzaCatalog(MENU, ["Calabresa"]);
+    const sel = resolverPizzaSelectionIds(catalogComEsgotado, "G", "Calabresa", null, null);
+    expect(sel).toBeDefined();
+  });
+});
+
+describe("/cardapio (PublicCardapio) — wiring de pizzaSelection (Fase 2C)", () => {
+  test("addPizzaWithBorder monta pizzaSelection a partir do catálogo oficial e só o inclui no item quando resolvido", () => {
+    expect(fonte).toMatch(
+      /const pizzaSelection = resolverPizzaSelectionIds\(menu\.pizzaCatalog, size!, f1!, mam \? f2 : null, chosenBorder\);/
+    );
+    expect(fonte).toMatch(/\.\.\.\(pizzaSelection \? \{ pizzaSelection \} : \{\}\)/);
+  });
+
+  test("payload de POST /api/pedido-app envia pizzaSelection quando o item do carrinho tem (sem substituir name/detail/price)", () => {
+    expect(fonte).toMatch(
+      /kind: c\.kind, name: c\.name, detail: c\.detail, price: c\.price, qty: c\.qty, \.\.\.\(c\.promoId[^)]*\), \.\.\.\(c\.pizzaSelection \? \{ pizzaSelection: c\.pizzaSelection \} : \{\}\)/
+    );
+  });
+
+  test("mini-pizza e calzone continuam sem pizzaSelection (só a pizza normal usa o catálogo por ID)", () => {
+    const addMiniPizzaSrc = fonte.slice(fonte.indexOf("function addMiniPizza("), fonte.indexOf("function addCalzone("));
+    const addCalzoneSrc = fonte.slice(fonte.indexOf("function addCalzone("), fonte.indexOf("function continueBuild("));
+    expect(addMiniPizzaSrc).not.toContain("pizzaSelection");
+    expect(addCalzoneSrc).not.toContain("pizzaSelection");
   });
 });
 
