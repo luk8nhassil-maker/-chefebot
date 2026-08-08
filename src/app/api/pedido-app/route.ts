@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import { redis } from "@/lib/redis";
+import { obterEsgotadosEfetivos } from "@/lib/estoque";
 import { mutarPedidos } from "@/lib/pedidosConcorrencia";
 import { gerarIdPedidoUnico, proximoNumeroPedido } from "@/lib/numeracao";
 import { getMENUDinamico } from "@/lib/menu.server";
@@ -1104,7 +1105,7 @@ export async function POST(req: NextRequest) {
       // inativa, fora da janela ou com produto esgotado invalida o pedido.
       const temPromo = body.itens.some((item) => item.kind === "promo");
       const promos = temPromo ? ((await redis.get<Promocao[]>(PROMOS_KEY)) || []) : [];
-      const esgotadosPromo = temPromo ? ((await redis.get<string[]>("esgotados")) || []) : [];
+      const esgotadosPromo = temPromo ? (await obterEsgotadosEfetivos(menu)) : [];
       const catalogoPromo = temPromo ? catalogoDoMenu(menu as never) : [];
 
       const promoUnitPrice = makePromoUnitPrice({
@@ -1129,7 +1130,7 @@ export async function POST(req: NextRequest) {
       const temSelecaoPizzaEstruturada = body.itens.some((item) => temSelecaoEstruturada(item));
       const temSelecaoSimplesEstruturadaAlgumItem = body.itens.some((item) => temSelecaoSimplesEstruturada(item));
       const esgotadosFresco = temSelecaoPizzaEstruturada || temSelecaoSimplesEstruturadaAlgumItem
-        ? ((await redis.get<string[]>("esgotados")) || [])
+        ? (await obterEsgotadosEfetivos(menu))
         : [];
       const pizzaCatalog = temSelecaoPizzaEstruturada ? buildPizzaCatalog(menu, esgotadosFresco) : null;
       const simpleCatalog = temSelecaoSimplesEstruturadaAlgumItem ? buildSimpleCatalog(menu, esgotadosFresco) : null;

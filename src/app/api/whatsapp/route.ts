@@ -3,6 +3,7 @@ import { processMessage, createInitialSession, createReturningSession, montarSau
 import { criarOuReutilizarTokenCardapio, anexarTokenAoLinkCardapio } from "@/lib/cardapioToken";
 import { getMENUDinamico } from "@/lib/menu.server";
 import { redis } from "@/lib/redis";
+import { obterEsgotadosEfetivos } from "@/lib/estoque";
 import { interpretarMensagem, gerarRespostaGuardiao } from "@/lib/claude";
 import { registrarMensagem, ultimasMensagensRelevantes } from "@/lib/conversa";
 import { atualizarRascunhoAtendimentoTempoReal } from "@/lib/rascunhoAtendimentoTempoReal";
@@ -1092,7 +1093,7 @@ export async function POST(req: NextRequest) {
     // no Redis) — antes o bot tinha um horário próprio hardcoded ("22h") que nunca
     // acompanhava o horaFechamento real configurado pela pizzaria.
     setHorarioFuncionamento(`${config.horaFechamento}h`);
-    const esgotadosLista = (await redis.get<string[]>('esgotados')) || [];
+    const esgotadosLista = await obterEsgotadosEfetivos(menuDinamico);
     setEsgotados(esgotadosLista);
     console.log("[ChefeBot] Tamanhos carregados:", JSON.stringify(menuDinamico.sizes));
 

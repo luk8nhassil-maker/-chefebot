@@ -5,17 +5,17 @@ import { buildPizzaCatalog } from '@/lib/catalog/pizzas'
 import { buildSimpleCatalog } from '@/lib/catalog/simpleProducts'
 import { verifyToken } from '@/lib/auth'
 import { registrarAuditoriaCardapio } from '@/lib/auditoriaCardapio'
+import {
+  obterEsgotadosEfetivos,
+  obterEsgotadosMetadataEfetiva,
+  definirDisponibilidade,
+  marcarRevisaoHoje,
+} from '@/lib/estoque'
 
 // Esgotados precisam refletir em tempo real no cardapio publico: nunca cachear.
 export const dynamic = 'force-dynamic'
 
 const ROLES_PERMITIDAS = ['admin', 'atendente', 'dev']
-
-type EsgMetadata = Record<string, { desde: string; ultimaRevisao?: string }>
-
-function hoje(): string {
-  return new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })
-}
 
 type ConfigHorario = { horaAbertura: number; horaFechamento: number }
 
@@ -229,8 +229,8 @@ export function validarCardapio(body: unknown): ResultadoValidacao {
 export async function GET() {
   try {
     const menu = await getMENUDinamico()
-    const esgotados = (await redis.get<string[]>('esgotados')) || []
-    const esgotadosMetadata = (await redis.get<EsgMetadata>('esgotadosMetadata')) || {}
+    const esgotados = await obterEsgotadosEfetivos(menu)
+    const esgotadosMetadata = await obterEsgotadosMetadataEfetiva()
     const config = (await redis.get<ConfigHorario>('config:pizzaria')) || HORARIO_PADRAO
     const horario = {
       horaAbertura: config.horaAbertura,
@@ -295,29 +295,13 @@ export async function PATCH(req: NextRequest) {
     const { nome, esgotado, revisaoHoje } = await req.json()
     if (!nome) return NextResponse.json({ ok: false, error: 'nome obrigatorio' }, { status: 400 })
 
-    const metadata = (await redis.get<EsgMetadata>('esgotadosMetadata')) || {}
-
     if (revisaoHoje) {
-      if (metadata[nome]) {
-        metadata[nome] = { ...metadata[nome], ultimaRevisao: hoje() }
-        await redis.set('esgotadosMetadata', metadata)
-      }
+      const metadata = await marcarRevisaoHoje(nome)
       return NextResponse.json({ ok: true, esgotadosMetadata: metadata })
     }
 
-    const lista = (await redis.get<string[]>('esgotados')) || []
-    let nova: string[]
-    if (esgotado) {
-      nova = lista.includes(nome) ? lista : [...lista, nome]
-      if (!metadata[nome]) {
-        metadata[nome] = { desde: hoje(), ultimaRevisao: hoje() }
-      }
-    } else {
-      nova = lista.filter((n: string) => n !== nome)
-      delete metadata[nome]
-    }
-    await redis.set('esgotados', nova)
-    await redis.set('esgotadosMetadata', metadata)
+    const menu = await getMENUDinamico()
+    const { esgotados: nova, esgotadosMetadata: metadata } = await definirDisponibilidade({ menu, nome, esgotado })
     return NextResponse.json({ ok: true, esgotados: nova, esgotadosMetadata: metadata })
   } catch {
     return NextResponse.json({ ok: false }, { status: 500 })

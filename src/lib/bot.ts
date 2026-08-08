@@ -1,5 +1,6 @@
 import { MENU as MENU_PADRAO, getBorderPrice, getBorderByIndex } from "./menu";
 import { detectarContextoHumano } from "./contextoHumanoSkill";
+import { norm } from "./pedidoAppItens";
 
 let MENU = MENU_PADRAO;
 
@@ -13,8 +14,41 @@ export function setEsgotados(lista: string[]) {
   ESGOTADOS = lista;
 }
 
+// norm() (mesma normalização usada pelo catálogo oficial — @/lib/catalog/pizzas,
+// @/lib/catalog/simpleProducts, montagemManual, comandas) tira acento além de
+// caixa. Antes esta função só fazia toLowerCase(): "Açaí" esgotado não batia
+// com "Acai" digitado/gerado sem acento em outro lugar do fluxo, deixando um
+// item esgotado passar como disponível.
 function isEsgotado(nome: string): boolean {
-  return ESGOTADOS.some(e => e.toLowerCase() === nome.toLowerCase());
+  const alvo = norm(nome);
+  return ESGOTADOS.some(e => norm(e) === alvo);
+}
+
+// Identifica o nome que deve ser checado contra ESGOTADOS para um item do
+// carrinho: sabor da pizza (a categoria "pizza" sempre grava name="Pizza"
+// fixo — quem varia é o sabor), senão o nome do próprio item (lanche/bebida/
+// suco). Borda entra como uma checagem adicional independente.
+function nomesParaChecarEsgotado(item: CartItem): string[] {
+  const nomes = item.flavor ? [item.flavor] : [item.name];
+  if (item.border && item.border !== "Sem borda") nomes.push(item.border);
+  return nomes;
+}
+
+// Revalidação de disponibilidade no momento da confirmação final (fail-closed):
+// ESGOTADOS já é recarregado do Redis a cada mensagem recebida (ver
+// setEsgotados em src/app/api/whatsapp/route.ts), mas antes desta checagem só
+// era consultado no momento em que cada item era ADICIONADO ao carrinho — um
+// item que esgota nos minutos entre a montagem do pedido e o toque em
+// "Confirmar" seguia para a cozinha do mesmo jeito. Remove do carrinho
+// qualquer item que esgotou nesse meio-tempo, nunca o contrário.
+function separarItensEsgotados(cart: CartItem[]): { disponiveis: CartItem[]; removidos: CartItem[] } {
+  const disponiveis: CartItem[] = [];
+  const removidos: CartItem[] = [];
+  for (const item of cart) {
+    const esgotou = nomesParaChecarEsgotado(item).some((nome) => isEsgotado(nome));
+    (esgotou ? removidos : disponiveis).push(item);
+  }
+  return { disponiveis, removidos };
 }
 
 function respostaEsgotado(nome: string, alternativas: string[], session: BotSession): BotResponse {
@@ -3495,6 +3529,27 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
       const retira = n === "2" || n.includes("retirar") || n.includes("cancela") || n.includes("errado") ||
         (eNegativa(n) && !n.includes("nao obrigado"));
       if (confirma) {
+        // ESTOQUE — Fase 8: revalida disponibilidade no exato momento da
+        // confirmação (ESGOTADOS já foi recarregado do Redis nesta mesma
+        // requisição — ver setEsgotados em src/app/api/whatsapp/route.ts).
+        // Sem isso, um item que esgota nos minutos entre "adicionar ao
+        // carrinho" e "confirmar" seguia pra cozinha do mesmo jeito.
+        const { disponiveis, removidos } = separarItensEsgotados(session.cart);
+        if (removidos.length > 0) {
+          const nomesRemovidos = removidos.map((item) => item.flavor ? `${item.name} (${item.flavor})` : item.name).join(", ");
+          if (disponiveis.length === 0) {
+            return {
+              messages: [`Poxa, ${nomesRemovidos} esgotou agora e era o único item do seu pedido 😅\n\n${mensagemCategorias()}`],
+              session: resetaTentativas({ ...session, cart: [], step: "category", currentCategory: undefined }),
+            };
+          }
+          const sessionAtualizada = { ...session, cart: disponiveis };
+          const receipt = buildReceipt(sessionAtualizada);
+          return {
+            messages: [`Poxa, ${nomesRemovidos} esgotou agora e precisei tirar do seu pedido 😅\n\nConfere de novo 👇\n\n${receipt}\n\nTá certinho?\n  ✅ *1.* Confirmar\n  ❌ *2.* Cancelar`],
+            session: resetaTentativas({ ...sessionAtualizada, step: "confirm" }),
+          };
+        }
         // BLOQUEIO FINAL: entrega não pode ser confirmada sem bairro confirmado + taxa válida.
         if (session.deliveryType === "delivery" && !bairroConfirmadoValido(session)) {
           return {
