@@ -1262,11 +1262,21 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   // inteiros da pizza quando vazia — segunda fonte de verdade, divergente do
   // catálogo se flavorsMode algum dia deixasse de ser "own" (mostraria só a
   // lista própria mesmo quando o modo efetivo fosse "pizza"). Só quando o
-  // catálogo está genuinamente ausente (resposta antiga em cache) o seletor
-  // cai para a heurística legada de sempre.
-  const miniPizzaCatalogProduto = menu.catalog?.lanches.find((l) => l.name === miniPizzaItem?.name);
-  const miniPizzaFlavors = (miniPizzaCatalogProduto
-    ? miniPizzaCatalogProduto.flavors?.map((f) => f.name) ?? []
+  // catálogo está genuinamente ausente (`menu.catalog` — a MESMA condição
+  // que addMiniPizza usa para o fail-closed no envio, abaixo) o seletor cai
+  // para a heurística legada de sempre.
+  //
+  // HARDENING (auditoria independente, 2º ciclo de autoauditoria): a
+  // correção acima ainda decidia pelo RESULTADO do `.find` (produto
+  // encontrado ou não), não pela presença genuína de `menu.catalog` —
+  // com o catálogo presente mas sem a Mini-Pizza nele (produto removido,
+  // catálogo dessincronizado), caía de volta para a lista legada, que
+  // addMiniPizza sempre recusaria no envio (catálogo presente = fail-closed
+  // lá). Agora: `menu.catalog` ausente é o ÚNICO caso que autoriza a lista
+  // legada; com `menu.catalog` presente, produto ausente do catálogo
+  // sempre produz lista vazia — nunca a lista legada.
+  const miniPizzaFlavors = (menu.catalog
+    ? menu.catalog.lanches.find((l) => l.name === miniPizzaItem?.name)?.flavors?.map((f) => f.name) ?? []
     : (menu.miniPizzaFlavors?.length ? menu.miniPizzaFlavors : [...(menu.saltyFlavors || []), ...(menu.sweetFlavors || [])])
   ).filter(Boolean);
   const calzoneItem = (menu.lanches || []).find((it) => isCalzoneName(it.name) && Number.isFinite(it.price));
@@ -1308,11 +1318,17 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   // SEMPRE `produto.flavors` (já calculada por buildSimpleCatalog conforme
   // flavorsMode — "pizza" reaproveita a Pizza, "own" usa calzoneFlavors) —
   // nunca uma decisão própria daqui. Só quando o catálogo está genuinamente
-  // ausente (resposta antiga em cache) o seletor cai para a lista cheia de
-  // sabores da pizza, mesma regra de sempre.
-  const calzoneCatalogProduto = menu.catalog?.lanches.find((l) => l.name === calzoneItem?.name);
-  const calzoneFlavorNames = calzoneCatalogProduto
-    ? calzoneCatalogProduto.flavors?.map((f) => f.name) ?? []
+  // ausente (`menu.catalog`) o seletor cai para a lista cheia de sabores da
+  // pizza, mesma regra de sempre.
+  //
+  // HARDENING (auditoria independente, 2º ciclo de autoauditoria): mesma
+  // correção da Mini-Pizza acima — decidir pelo RESULTADO do `.find` (em
+  // vez da presença genuína de `menu.catalog`) fazia um catálogo presente
+  // mas sem o Calzone (produto removido) cair na lista legada, que
+  // addCalzone sempre recusaria no envio. Agora `menu.catalog` ausente é o
+  // ÚNICO caso que autoriza a lista legada.
+  const calzoneFlavorNames = menu.catalog
+    ? menu.catalog.lanches.find((l) => l.name === calzoneItem?.name)?.flavors?.map((f) => f.name) ?? []
     : [...(menu.saltyFlavors || []), ...(menu.sweetFlavors || [])];
   const flavorSections = miniPizzaMode
     ? [{ title: "Sabores da mini-pizza", flavors: miniPizzaFlavors }]

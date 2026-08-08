@@ -327,6 +327,36 @@ describe("etapas obrigatórias", () => {
     expect(etapaCalzone.opcoes.map((o) => o.valor).sort()).toEqual(["Chocolate", "Frango com Requeijão", "Quatro Queijos"]);
   });
 
+  test("REGRESSÃO (auditoria independente, 2º ciclo de autoauditoria) — catalogPresente=true + catalog malformado/undefined: sabor_unico fica SEM OPÇÕES, nunca cai para a lista cheia da pizza", () => {
+    // Distinção crítica: `catalogPresente` (o campo VEIO na resposta de GET
+    // /api/cardapio) é diferente de "o catálogo tem o produto esperado".
+    // Antes desta correção, `opcoesSaborUnico` decidia pela presença de
+    // `catalogProduto` (resultado do .find) — com catalogPresente=true mas
+    // catalog malformado/undefined, catalogProduto também dava undefined, e
+    // a função confundia isso com "catálogo genuinamente ausente", caindo
+    // para a lista cheia da pizza. `construirItemManual` (mais abaixo)
+    // SEMPRE recusaria essa escolha (catalogPresente=true → fail-closed) —
+    // então a UI oferecia uma opção que a própria montagem sempre recusaria.
+    const menuCatalogPresenteMasUndefined: MenuManual = { ...MENU, catalog: undefined, catalogPresente: true };
+    const etapaCalzone = montarEtapas(produtoPorId("lanches:calzone", menuCatalogPresenteMasUndefined), menuCatalogPresenteMasUndefined)[0];
+    const etapaMiniPizza = montarEtapas(produtoPorId("lanches:mini-pizza", menuCatalogPresenteMasUndefined), menuCatalogPresenteMasUndefined)[0];
+    expect(etapaCalzone.opcoes).toEqual([]);
+    expect(etapaMiniPizza.opcoes).toEqual([]);
+  });
+
+  test("REGRESSÃO (auditoria independente, 2º ciclo de autoauditoria) — catalogPresente=true + catálogo válido mas SEM o produto esperado: sabor_unico fica SEM OPÇÕES, nunca cai para a lista cheia da pizza", () => {
+    const catalogoSemCalzoneNemMiniPizza: SimpleCatalog = {
+      lanches: SIMPLE_CATALOG.lanches.filter((l) => l.name !== "Calzone" && l.name !== "Mini-Pizza"),
+      bebidas: SIMPLE_CATALOG.bebidas,
+      sucos: SIMPLE_CATALOG.sucos,
+    };
+    const menuProdutoAusenteDoCatalogo: MenuManual = { ...MENU, catalog: catalogoSemCalzoneNemMiniPizza, catalogPresente: true };
+    const etapaCalzone = montarEtapas(produtoPorId("lanches:calzone", menuProdutoAusenteDoCatalogo), menuProdutoAusenteDoCatalogo)[0];
+    const etapaMiniPizza = montarEtapas(produtoPorId("lanches:mini-pizza", menuProdutoAusenteDoCatalogo), menuProdutoAusenteDoCatalogo)[0];
+    expect(etapaCalzone.opcoes).toEqual([]);
+    expect(etapaMiniPizza.opcoes).toEqual([]);
+  });
+
   test("produto simples não tem etapa nenhuma", () => {
     expect(montarEtapas(produtoPorId("bebidas:refrigerante 2l"), MENU)).toEqual([]);
     expect(montarEtapas(produtoPorId("lanches:sanduiche simples"), MENU)).toEqual([]);

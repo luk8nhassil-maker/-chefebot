@@ -524,12 +524,13 @@ function opcoesSabores(menu: MenuManual): OpcaoEtapa[] {
 
 /**
  * Opções da etapa "sabor_unico" (Calzone/Mini-Pizza) — com o catálogo
- * oficial presente, é SEMPRE `produto.flavors` (já calculada por
- * buildSimpleCatalog conforme flavorsMode via resolverFlavorsModeEfetivo —
- * mesma fonte usada por resolverSimpleSelectionIds/construirItemManual
- * abaixo, nunca uma lista própria daqui). Só quando o catálogo está
- * genuinamente ausente (resposta antiga em cache) cai para `opcoesSabores`
- * (lista cheia de sabores da pizza), mesma regra de sempre.
+ * oficial presente (`menu.catalogPresente`), é SEMPRE `produto.flavors` (já
+ * calculada por buildSimpleCatalog conforme flavorsMode via
+ * resolverFlavorsModeEfetivo — mesma fonte usada por
+ * resolverSimpleSelectionIds/construirItemManual abaixo, nunca uma lista
+ * própria daqui). Só quando o catálogo está genuinamente AUSENTE
+ * (`catalogPresente` falso — resposta antiga em cache) cai para
+ * `opcoesSabores` (lista cheia de sabores da pizza), mesma regra de sempre.
  *
  * HARDENING (auditoria independente, ciclo de autoauditoria pós-9ª rodada):
  * antes desta correção, esta etapa sempre usava `opcoesSabores(menu)`
@@ -538,13 +539,27 @@ function opcoesSabores(menu: MenuManual): OpcaoEtapa[] {
  * já rejeitava via `resolverSimpleSelectionIds` quando o sabor escolhido não
  * resolvia para ID), mas o atendente via — e podia escolher — sabores que
  * seriam sempre recusados.
+ *
+ * HARDENING (auditoria independente, 2º ciclo de autoauditoria): a correção
+ * acima ainda confundia "catálogo AUSENTE" com "catálogo PRESENTE mas
+ * malformado/sem o produto esperado" — decidia pela presença de
+ * `catalogProduto` (o resultado do `.find`), não pela presença genuína do
+ * campo (`menu.catalogPresente`, a MESMA flag que `construirItemManual` usa
+ * para o fail-closed real). Com `catalogPresente === true` mas o catálogo
+ * malformado ou sem o produto, caía para a lista cheia da pizza — a mesma
+ * classe de divergência já corrigida no Cardápio Público e na edição de
+ * pedido, só que aqui. Agora: `catalogPresente` falso é o ÚNICO caso que
+ * autoriza a lista legada; com `catalogPresente` true, produto ausente ou
+ * catálogo malformado sempre produz lista vazia (fail-closed), nunca a
+ * lista cheia da pizza — coerente com o que `construirItemManual` já
+ * recusava de qualquer forma.
  */
 function opcoesSaborUnico(produto: ProdutoManual, menu: MenuManual): OpcaoEtapa[] {
+  if (!menu.catalogPresente) return opcoesSabores(menu);
   const catalogProduto = menu.catalog
     ? [...menu.catalog.lanches, ...menu.catalog.bebidas, ...menu.catalog.sucos].find((p) => p.name === produto.nome)
     : undefined;
-  if (!catalogProduto) return opcoesSabores(menu);
-  return (catalogProduto.flavors ?? []).map((f) => ({ valor: f.name, label: f.name, esgotado: !f.available }));
+  return (catalogProduto?.flavors ?? []).map((f) => ({ valor: f.name, label: f.name, esgotado: !f.available }));
 }
 
 /**

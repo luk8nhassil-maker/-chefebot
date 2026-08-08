@@ -537,8 +537,16 @@ function AdicionarItemModal({ menu, onFechar, onAdicionar }: { menu: MenuType; o
   // mostrava `flavors` incondicionalmente, nunca refletindo o modo "own". O
   // servidor (officialUnitPrice, em POST /api/pedido-app/[id]/editar/salvar)
   // já recusava a escolha errada — aqui só corrige o que É mostrado.
-  const calzoneCatalogProduto = menu.catalog?.lanches.find((l) => l.name === calzoneItem?.name);
-  const calzoneFlavorNames = calzoneCatalogProduto ? calzoneCatalogProduto.flavors?.map((f) => f.name) ?? [] : flavors;
+  //
+  // HARDENING (auditoria independente, 2º ciclo de autoauditoria): a
+  // condição decidia pelo RESULTADO do `.find` (produto encontrado ou não),
+  // não pela presença genuína de `menu.catalog` — com o catálogo presente
+  // mas sem o Calzone nele, caía de volta para `flavors` (lista legada da
+  // pizza), que o servidor sempre recusaria de qualquer forma. Agora
+  // `menu.catalog` ausente é o ÚNICO caso que autoriza `flavors`.
+  const calzoneFlavorNames = menu.catalog
+    ? menu.catalog.lanches.find((l) => l.name === calzoneItem?.name)?.flavors?.map((f) => f.name) ?? []
+    : flavors;
   const macarronadas = menu.lanches.filter((l) => norm(l.name).includes("macarronada") && l.sizes?.length);
   const simplesLanches = menu.lanches.filter((l) => norm(l.name) !== "calzone" && !norm(l.name).includes("macarronada"));
   const [macarronadaSel, setMacarronadaSel] = useState<{ name: string; price: number; sizes?: { code: string; price: number }[] } | null>(null);

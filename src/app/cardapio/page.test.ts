@@ -536,8 +536,11 @@ describe("/cardapio (PublicCardapio) — Calzone entra no mesmo fluxo de sabores
     // lista cheia da pizza quando `menu.catalog` está genuinamente ausente
     // (resposta antiga em cache) — mesma regra de sempre.
     expect(fonte).toContain('const pizzaFlavorSections = [{ title: "Salgadas", flavors: menu.saltyFlavors || [] }, { title: "Doces", flavors: menu.sweetFlavors || [] }];');
-    expect(fonte).toContain("const calzoneCatalogProduto = menu.catalog?.lanches.find((l) => l.name === calzoneItem?.name);");
-    expect(fonte).toContain("const calzoneFlavorNames = calzoneCatalogProduto\n    ? calzoneCatalogProduto.flavors?.map((f) => f.name) ?? []\n    : [...(menu.saltyFlavors || []), ...(menu.sweetFlavors || [])];");
+    expect(fonte).toContain(
+      "const calzoneFlavorNames = menu.catalog\n" +
+      "    ? menu.catalog.lanches.find((l) => l.name === calzoneItem?.name)?.flavors?.map((f) => f.name) ?? []\n" +
+      "    : [...(menu.saltyFlavors || []), ...(menu.sweetFlavors || [])];"
+    );
     expect(fonte).toContain(
       "const flavorSections = miniPizzaMode\n    ? [{ title: \"Sabores da mini-pizza\", flavors: miniPizzaFlavors }]\n    : calzoneMode\n      ? [{ title: \"Sabores do calzone\", flavors: calzoneFlavorNames }]\n      : pizzaFlavorSections;"
     );
@@ -553,13 +556,27 @@ describe("/cardapio (PublicCardapio) — Calzone entra no mesmo fluxo de sabores
     // uma segunda fonte de verdade: se o modo efetivo da Mini-Pizza algum dia
     // deixasse de ser "own", o modal continuaria mostrando só a lista própria
     // em vez dos sabores efetivos do catálogo.
-    expect(fonte).toContain("const miniPizzaCatalogProduto = menu.catalog?.lanches.find((l) => l.name === miniPizzaItem?.name);");
     expect(fonte).toContain(
-      "const miniPizzaFlavors = (miniPizzaCatalogProduto\n" +
-      "    ? miniPizzaCatalogProduto.flavors?.map((f) => f.name) ?? []\n" +
+      "const miniPizzaFlavors = (menu.catalog\n" +
+      "    ? menu.catalog.lanches.find((l) => l.name === miniPizzaItem?.name)?.flavors?.map((f) => f.name) ?? []\n" +
       "    : (menu.miniPizzaFlavors?.length ? menu.miniPizzaFlavors : [...(menu.saltyFlavors || []), ...(menu.sweetFlavors || [])])\n" +
       "  ).filter(Boolean);"
     );
+  });
+
+  test("REGRESSÃO (auditoria independente, 2º ciclo de autoauditoria) — calzone/mini-pizza decidem a lista legada pela presença GENUÍNA de `menu.catalog`, nunca pelo resultado do `.find` (catálogo presente + produto ausente nunca cai para a lista legada)", () => {
+    // Antes desta correção, a condição era `calzoneCatalogProduto ? ... :
+    // legado` / `miniPizzaCatalogProduto ? ... : legado` — o RESULTADO do
+    // `.find`, que também dá undefined quando o catálogo está presente mas
+    // não contém o produto esperado (catálogo dessincronizado/malformado).
+    // Isso confundia "catálogo ausente" (legado autorizado) com "catálogo
+    // presente mas sem o produto" (deveria ser fail-closed, igual ao envio:
+    // addCalzone/addMiniPizza já recusam quando `menu.catalog` existe mas a
+    // seleção não resolve). Agora a condição é `menu.catalog ? ... : legado`
+    // — a MESMA presença que addCalzone/addMiniPizza checam no envio.
+    expect(fonte).not.toContain("calzoneCatalogProduto");
+    expect(fonte).not.toContain("miniPizzaCatalogProduto");
+    expect(fonte).toContain("if (!simpleSelection && menu.catalog) {");
   });
 
   test("buildOk bloqueia confirmar quando o calzone escolhido está esgotado", () => {
