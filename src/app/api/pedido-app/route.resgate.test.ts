@@ -215,6 +215,36 @@ describe("POST /api/pedido-app — resgate de pontos no checkout (Etapa 5)", () 
     expect(saldo.disponivel).toBe(0); // 60 confirmados - 60 resgatados
   });
 
+  // Fase 3 (hardening): snapshotOficial.descontoFidelidadeCents precisa
+  // refletir o MESMO desconto de fidelidade já aplicado ao pedido, e a
+  // invariante subtotal - desconto + taxa = total precisa valer mesmo com
+  // desconto parcial (não capado no subtotal, ao contrário do teste acima).
+  test("snapshotOficial: descontoFidelidadeCents reflete o desconto de fidelidade e a invariante subtotal - desconto + taxa = total vale", async () => {
+    const { reserva } = await prepararRecompensaDisponivel();
+    // 2x Pizza G (R$50 cada) = subtotal R$100; desconto máximo da recompensa é
+    // R$60 (valorPizzaFamiliaReferencia), então aqui NÃO é capado pelo
+    // subtotal — é o próprio valorDescontoMaximo que decide.
+    const res = await POST(pedidoRequest({ resgateId: reserva.resgateId, itens: [{ ...itemPizza, qty: 2 }] }));
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.total).toBe(40); // 100 - 60 + 0
+
+    const pedidosSalvos = redisStore.get("pedidos") as Array<Record<string, unknown>>;
+    const pedido = pedidosSalvos[0];
+    expect(pedido.descontoFidelidade).toBe(60);
+    const snapshot = pedido.snapshotOficial as {
+      subtotalCents: number; descontoFidelidadeCents: number; taxaEntregaCents: number; totalCents: number;
+    };
+    expect(snapshot).toBeDefined();
+    expect(snapshot.subtotalCents).toBe(10000);
+    expect(snapshot.descontoFidelidadeCents).toBe(6000);
+    expect(snapshot.taxaEntregaCents).toBe(0);
+    expect(snapshot.totalCents).toBe(4000);
+    expect(snapshot.subtotalCents - snapshot.descontoFidelidadeCents + snapshot.taxaEntregaCents).toBe(snapshot.totalCents);
+    expect(snapshot.totalCents).toBe(Math.round((pedido.total as number) * 100));
+  });
+
   test("novos pontos previstos sao calculados sobre o valor JA com desconto (total pago)", async () => {
     const { reserva } = await prepararRecompensaDisponivel();
     const res = await POST(pedidoRequest({ resgateId: reserva.resgateId }));

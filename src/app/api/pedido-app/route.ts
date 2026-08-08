@@ -15,6 +15,7 @@ import { calcularPontosElegiveisPedido, registrarMovimentoPontosIdempotente, con
 import { type ItemApp, type MenuPedidoApp, formatItem, officialUnitPrice, makePromoUnitPrice, contarPizzasPagasParaFidelidade } from "@/lib/pedidoAppItens";
 import { temSelecaoEstruturada, resolverItemComSelecaoEstruturada } from "@/lib/pedidoAppSelecaoEstruturada";
 import { buildPizzaCatalog } from "@/lib/catalog/pizzas";
+import { construirSnapshotItem, construirSnapshotOficial, type PedidoSnapshotOficial } from "@/lib/pedidoSnapshot";
 import { prepararResgateParaPedido, confirmarReservaNoPedido, liberarVinculoRecompensaPedidoNaoCriado, type EscolhaRecompensaJornada } from "@/lib/jornadaChef";
 import { survivalModeEnabled, survivalClientRequestIdEnforcementEnabled } from "@/survival/flags";
 import { lerSessaoAdministrativa, origemDoPedido } from "@/lib/sessaoAdministrativa";
@@ -1019,6 +1020,13 @@ export async function POST(req: NextRequest) {
     let taxa: number;
     let total: number;
     let pizzasCount = 0;
+    // Fase 3 — só calculado no caminho de criação genuinamente nova (não
+    // recuperado de um attempt de retry: o snapshot financeiro do attempt
+    // não guarda o detalhamento por item, só os agregados). Revalidado
+    // contra o `total` final (pós FASE 4) antes de ir para `novoPedido` —
+    // nunca persiste um snapshot cujo total não bata com o cobrado de
+    // verdade.
+    let snapshotOficialCandidato: PedidoSnapshotOficial | undefined;
 
     if (attemptRecuperado) {
       // 7ª revisão de segurança, ponto 1 — RECUPERAÇÃO: reconstrói tudo a
@@ -1225,6 +1233,42 @@ export async function POST(req: NextRequest) {
 
       taxa = computeTaxaApp(body.tipoEntrega, body.bairro, menu.neighborhoods as Array<{ name: string; fee: number }>);
       total = subtotal - descontoFidelidade + taxa;
+
+      // Fase 3 — snapshot oficial estruturado (aditivo): construído aqui
+      // porque só aqui temos, item a item, o preço unitário oficial
+      // (`itensResolvidos[i].unitPrice`, nunca o `price` que o cliente
+      // mandou) junto com o ID estável quando o item veio por seleção
+      // estruturada (`body.itens[i].pizzaSelection`, na mesma ordem).
+      snapshotOficialCandidato = construirSnapshotOficial({
+        itens: [
+          ...itensResolvidos.map((resolvido, i) =>
+            construirSnapshotItem({
+              kind: resolvido.itemCanonico.kind,
+              nome: resolvido.itemCanonico.name,
+              detalhe: resolvido.itemCanonico.detail,
+              quantidade: resolvido.qty,
+              precoUnitarioReais: resolvido.unitPrice!,
+              selecao: body.itens[i].pizzaSelection,
+            })
+          ),
+          ...itensRecompensaMaterializados.map((item) =>
+            construirSnapshotItem({
+              kind: item.kind,
+              nome: item.name,
+              detalhe: item.detail,
+              quantidade: item.qty,
+              precoUnitarioReais: 0,
+            })
+          ),
+        ],
+        subtotalReais: subtotal,
+        descontoReais: descontoFidelidade,
+        taxaReais: taxa,
+        tipoEntrega: body.tipoEntrega,
+        bairro: body.bairro,
+        pagamento: body.pagamento,
+        criadoEm: new Date().toISOString(),
+      });
 
       try {
         pizzasCount = contarPizzasPagasParaFidelidade(itensDetalhadosFinais);
@@ -1439,6 +1483,17 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Fase 3 — o candidato foi montado ANTES da FASE 4 (idempotência), que
+    // pode substituir total/subtotal/taxa/descontoFidelidade pelo snapshot
+    // financeiro ESTÁVEL de um attempt já existente (retry). Na imensa
+    // maioria dos pedidos (sem retry) os dois batem sempre; se algum dia
+    // divergirem, nunca persiste um snapshot com total diferente do
+    // efetivamente cobrado — melhor não ter o campo novo do que tê-lo errado.
+    const snapshotOficial =
+      snapshotOficialCandidato && snapshotOficialCandidato.totalCents === Math.round(total * 100)
+        ? snapshotOficialCandidato
+        : undefined;
+
     try {
       numeroPedido = await proximoNumeroPedido();
       statusToken = criarTokenPublicoAcompanhamento();
@@ -1500,6 +1555,7 @@ export async function POST(req: NextRequest) {
         // de reinterpretar as strings formatadas de `itens`. Inclui o(s) item(ns)
         // materializados do presente da Jornada do Chef, se houver.
         itensDetalhados: itensDetalhadosFinais,
+        ...(snapshotOficial ? { snapshotOficial } : {}),
         revision: 1,
       };
 

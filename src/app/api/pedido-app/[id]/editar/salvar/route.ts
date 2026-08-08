@@ -20,6 +20,7 @@ import {
 } from "@/lib/pedidoAppItens";
 import { temSelecaoEstruturada, resolverItemComSelecaoEstruturada } from "@/lib/pedidoAppSelecaoEstruturada";
 import { buildPizzaCatalog } from "@/lib/catalog/pizzas";
+import { construirSnapshotItem, construirSnapshotOficial } from "@/lib/pedidoSnapshot";
 import type { PedidoRedis } from "@/types/pedidoRedis";
 import { montarResumoAlteracoes } from "@/lib/pedidoEdicaoResumo";
 import {
@@ -215,6 +216,40 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const taxa = computeTaxaApp(body.tipoEntrega || "retirada", body.bairro, menu.neighborhoods as Array<{ name: string; fee: number }>);
     const total = subtotalComDesconto + taxa;
 
+    // Fase 3 — snapshot oficial estruturado (aditivo), recalculado do zero a
+    // cada edição salva (nunca reaproveita o snapshot anterior, que ficaria
+    // inconsistente com os novos itens/total). Sem a complexidade de
+    // idempotência da criação (esta rota não tem attempt de retry) — os
+    // valores já são sempre os finais aqui.
+    //
+    // Desconto efetivo = subtotal - subtotalComDesconto (a MESMA derivação
+    // acima), nunca o descontoFidelidade cru: se os itens editados
+    // encolheram o subtotal abaixo do desconto concedido na criação,
+    // subtotalComDesconto já é clampado em 0 (nunca fica negativo) — usar
+    // descontoFidelidade cru aqui quebraria
+    // subtotalCents - descontoCents + taxaCents === totalCents.
+    const descontoEfetivo = subtotal - subtotalComDesconto;
+    const itensBody = body.itens;
+    const snapshotOficial = construirSnapshotOficial({
+      itens: itensValidados.map((item, i) =>
+        construirSnapshotItem({
+          kind: item.itemCanonico.kind,
+          nome: item.itemCanonico.name,
+          detalhe: item.itemCanonico.detail,
+          quantidade: item.qty,
+          precoUnitarioReais: item.unitPrice!,
+          selecao: itensBody[i].pizzaSelection,
+        })
+      ),
+      subtotalReais: subtotal,
+      descontoReais: descontoEfetivo,
+      taxaReais: taxa,
+      tipoEntrega: body.tipoEntrega || "retirada",
+      bairro: body.bairro,
+      pagamento,
+      criadoEm: new Date().toISOString(),
+    });
+
     // Invariante do pagamento composto: a soma das partes é revalidada contra
     // o total RECALCULADO agora, nunca contra o que foi gravado na criação.
     // Alterar itens muda o total, e um pagamento misto que fechava antes pode
@@ -303,6 +338,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const camposAtualizados: Partial<PedidoRedis> = {
       itens,
       itensDetalhados: itensCanonicos,
+      snapshotOficial,
       total,
       ...(taxa ? { taxaEntrega: taxa } : { taxaEntrega: undefined }),
       endereco,

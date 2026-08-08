@@ -335,6 +335,37 @@ describe("/cardapio (PublicCardapio) — wiring de pizzaSelection (Fase 2C)", ()
   });
 });
 
+describe("/cardapio (PublicCardapio) — carrinho preserva pizzaSelection (Fase 3)", () => {
+  test("chQty (mudar quantidade) faz spread do item inteiro por índice — nunca reconstrói o item, então pizzaSelection sobrevive", () => {
+    expect(fonte).toMatch(
+      /function chQty\(idx: number, d: number\) \{ setCart\(cart\.map\(\(c, i\) => \(i === idx \? \{ \.\.\.c, qty: Math\.max\(1, c\.qty \+ d\) \} : c\)\)\); \}/
+    );
+  });
+
+  test("rmItem remove por índice (nunca por nome/detail) — nunca remove o item errado quando há pizzas com o mesmo sabor no carrinho", () => {
+    const bloco = fonte.slice(fonte.indexOf("function rmItem(idx: number) {"), fonte.indexOf("function rmItem(idx: number) {") + 200);
+    expect(bloco).toContain("cart[idx]");
+  });
+
+  test("addPizzaWithBorder nunca funde/deduplica pizzas iguais por texto — cada confirmação é uma nova entrada no carrinho, preservando pizzaSelection de cada uma", () => {
+    const bloco = fonte.slice(fonte.indexOf("function addPizzaWithBorder("), fonte.indexOf("function addMiniPizza("));
+    // Ao contrário de addSimple/addSucoLeite/addMacarronadaSize/addMiniPizza/addCalzone
+    // (que fazem cart.find(...) para mesclar em qty+1), addPizzaWithBorder não procura
+    // um item existente — sempre `[...cart, newItem]`.
+    expect(bloco).not.toContain("cart.find(");
+    expect(bloco).toContain("const newCart = [...cart, newItem];");
+  });
+
+  test("o draft salvo em sessionStorage serializa o carrinho inteiro (JSON.stringify de `cart`), então pizzaSelection de cada item sobrevive à restauração de sessão", () => {
+    expect(fonte).toMatch(/sessionStorage\.setItem\("cf_draft", JSON\.stringify\(\{ cart, screen,/);
+    // A restauração usa JSON.parse(raw) e setCart(d.cart) diretamente, sem
+    // reconstruir os itens campo a campo — qualquer campo extra do item
+    // (incluindo pizzaSelection) volta intacto.
+    expect(fonte).toMatch(/const d = JSON\.parse\(raw\);/);
+    expect(fonte).toMatch(/setCart\(d\.cart\);/);
+  });
+});
+
 describe("/cardapio (PublicCardapio) — Calzone entra no mesmo fluxo de sabores das pizzas", () => {
   test("addSimple desvia o Calzone para pickCalzone antes de qualquer outra regra de lanche", () => {
     expect(fonte).toMatch(/function addSimple\([^)]*\)\s*\{\s*if \(isCalzoneName\(it\.name\)\) \{ pickCalzone\(\); return; \}/);

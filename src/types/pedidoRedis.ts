@@ -2,6 +2,7 @@ import type { PixMetadata } from "@/lib/pix";
 import type { PedidoComEdicao } from "@/lib/pedidoEdicao";
 import type { ItemApp } from "@/lib/pedidoAppItens";
 import type { ItemElegibilidadeJornada } from "@/lib/jornadaChef";
+import type { PedidoSnapshotOficial } from "@/lib/pedidoSnapshot";
 
 /** Forma do pedido tal como persistido em Redis (chave "pedidos"), usada pelos endpoints de edição. */
 export type PedidoRedis = PedidoComEdicao & {
@@ -41,4 +42,11 @@ export type PedidoRedis = PedidoComEdicao & {
   pix?: PixMetadata;
   pixConfirmado?: boolean;
   isArchived?: boolean;
+  // Fase 3 — representação estruturada e aditiva do que o servidor validou e
+  // cobrou (preços em centavos, IDs do catálogo quando disponíveis). Nunca
+  // substitui itens/total/taxaEntrega/itensDetalhados acima, que continuam
+  // sendo a fonte lida por WhatsApp/Pix/impressão/fidelidade/Salão/pedido
+  // manual — ver src/lib/pedidoSnapshot.ts. Ausente em pedidos antigos e em
+  // pedidos recuperados via idempotência de retry (Modo Sobrevivência).
+  snapshotOficial?: PedidoSnapshotOficial;
 };
