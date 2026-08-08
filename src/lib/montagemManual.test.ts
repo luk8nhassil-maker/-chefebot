@@ -67,7 +67,7 @@ const PIZZA_CATALOG: PizzaCatalog = {
   ],
 };
 
-const MENU_COM_CATALOGO: MenuManual = { ...MENU, pizzaCatalog: PIZZA_CATALOG };
+const MENU_COM_CATALOGO: MenuManual = { ...MENU, pizzaCatalog: PIZZA_CATALOG, pizzaCatalogPresente: true };
 
 function produtoPorId(id: string, menu: MenuManual = MENU): ProdutoManual {
   const p = listarProdutosManuais(menu).find((x) => x.id === id);
@@ -498,27 +498,13 @@ describe("construirItemManual — pizzaSelection (Fase 4)", () => {
     expect(item?.pizzaSelection).toEqual({ sizeId: "size-g", flavorIds: ["flavor-quatro-queijos"] });
   });
 
-  test("sem pizzaCatalog no menu (compatibilidade), o item continua 100% legado — sem pizzaSelection", () => {
+  test("campo pizzaCatalog GENUINAMENTE ausente: legado continua funcionando normalmente", () => {
+    // MENU não define pizzaCatalog nem pizzaCatalogPresente — reproduz uma
+    // resposta de GET /api/cardapio anterior à Fase 2 (ou cache antigo).
     const item = construirItemManual(
-      produtoPorId("pizza:g", MENU), // MENU sem pizzaCatalog
+      produtoPorId("pizza:g", MENU),
       { sabores: ["Quatro Queijos"], borda: null },
       MENU
-    );
-    expect(item).not.toBeNull();
-    expect(item?.pizzaSelection).toBeUndefined();
-    expect(item?.price).toBe(50);
-  });
-
-  test("sabor sem correspondência no pizzaCatalog (catálogo desatualizado) não bloqueia — item legado sem pizzaSelection", () => {
-    const menuCatalogoIncompleto: MenuManual = {
-      ...MENU,
-      saltyFlavors: [...MENU.saltyFlavors, "Sabor Novo Ainda Sem Catalogo"],
-      pizzaCatalog: PIZZA_CATALOG, // não conhece "Sabor Novo Ainda Sem Catalogo"
-    };
-    const item = construirItemManual(
-      produtoPorId("pizza:g", menuCatalogoIncompleto),
-      { sabores: ["Sabor Novo Ainda Sem Catalogo"], borda: null },
-      menuCatalogoIncompleto
     );
     expect(item).not.toBeNull();
     expect(item?.pizzaSelection).toBeUndefined();
@@ -540,6 +526,152 @@ describe("construirItemManual — pizzaSelection (Fase 4)", () => {
     expect(calzone && "pizzaSelection" in calzone).toBe(false);
     expect(suco && "pizzaSelection" in suco).toBe(false);
     expect(refri && "pizzaSelection" in refri).toBe(false);
+  });
+});
+
+describe("fail-closed: pizzaCatalog PRESENTE mas a seleção não resolve para IDs (hardening Fase 4)", () => {
+  // Regra: com `pizzaCatalog` presente na resposta, o legado NUNCA é um
+  // fallback silencioso — só a ausência genuína do campo autoriza name/detail
+  // sem pizzaSelection. Qualquer falha de resolução aqui devolve `null`
+  // (mesmo tratamento de erro já usado pela montagem, ex.: sabor fora do
+  // cardápio, quantidade inválida etc.) — nunca um item legado disfarçado.
+
+  test("sabor sem correspondência no catálogo: montagem recusada, nunca cai pro legado", () => {
+    const menuCatalogoIncompleto: MenuManual = {
+      ...MENU,
+      saltyFlavors: [...MENU.saltyFlavors, "Sabor Novo Ainda Sem Catalogo"],
+      pizzaCatalog: PIZZA_CATALOG, // não conhece "Sabor Novo Ainda Sem Catalogo"
+      pizzaCatalogPresente: true,
+    };
+    const item = construirItemManual(
+      produtoPorId("pizza:g", menuCatalogoIncompleto),
+      { sabores: ["Sabor Novo Ainda Sem Catalogo"], borda: null },
+      menuCatalogoIncompleto
+    );
+    expect(item).toBeNull();
+  });
+
+  test("tamanho sem correspondência no catálogo: montagem recusada", () => {
+    // PIZZA_CATALOG só conhece os tamanhos P e G — "pizza:g" do MENU base
+    // sempre existe, então simulamos um catálogo que não conhece o tamanho G.
+    const catalogoSemG: PizzaCatalog = { ...PIZZA_CATALOG, sizes: PIZZA_CATALOG.sizes.filter((s) => s.code !== "G") };
+    const menu: MenuManual = { ...MENU, pizzaCatalog: catalogoSemG, pizzaCatalogPresente: true };
+    const item = construirItemManual(produtoPorId("pizza:g", menu), { sabores: ["Chocolate"], borda: null }, menu);
+    expect(item).toBeNull();
+  });
+
+  test("borda sem correspondência no catálogo: montagem recusada", () => {
+    const item = construirItemManual(
+      produtoPorId("pizza:g", MENU_COM_CATALOGO),
+      { sabores: ["Chocolate"], borda: "Borda Fantasma" },
+      MENU_COM_CATALOGO
+    );
+    expect(item).toBeNull();
+  });
+
+  test("catálogo presente porém malformado (vazio): pizza recusada, sem fallback legado", () => {
+    const catalogoVazio: PizzaCatalog = { sizes: [], flavors: [], borders: [] };
+    const menu: MenuManual = { ...MENU, pizzaCatalog: catalogoVazio, pizzaCatalogPresente: true };
+    const item = construirItemManual(produtoPorId("pizza:g", menu), { sabores: ["Chocolate"], borda: null }, menu);
+    expect(item).toBeNull();
+  });
+
+  test("pizzaCatalogPresente true mas pizzaCatalog undefined (equivalente a resposta malformada já filtrada por adaptarCardapioParaMontagem): recusada", () => {
+    const menu: MenuManual = { ...MENU, pizzaCatalog: undefined, pizzaCatalogPresente: true };
+    const item = construirItemManual(produtoPorId("pizza:g", menu), { sabores: ["Chocolate"], borda: null }, menu);
+    expect(item).toBeNull();
+  });
+
+  test("meio a meio: só 1 dos 2 sabores resolve — recusada (nunca resolve parcial)", () => {
+    const menuUmSaborConhecido: MenuManual = {
+      ...MENU,
+      saltyFlavors: [...MENU.saltyFlavors, "Sabor Novo Ainda Sem Catalogo"],
+      pizzaCatalog: PIZZA_CATALOG,
+      pizzaCatalogPresente: true,
+    };
+    const item = construirItemManual(
+      produtoPorId("pizza:g", menuUmSaborConhecido),
+      { sabores: ["Chocolate", "Sabor Novo Ainda Sem Catalogo"], borda: null },
+      menuUmSaborConhecido
+    );
+    expect(item).toBeNull();
+  });
+
+  test("seleção válida com pizzaCatalogPresente=true continua funcionando normalmente (não é bloqueio geral)", () => {
+    const item = construirItemManual(
+      produtoPorId("pizza:g", MENU_COM_CATALOGO),
+      { sabores: ["Chocolate", "Quatro Queijos"], borda: "Requeijão" },
+      MENU_COM_CATALOGO
+    );
+    expect(item).not.toBeNull();
+    expect(item?.pizzaSelection).toEqual({
+      sizeId: "size-g",
+      flavorIds: ["flavor-chocolate", "flavor-quatro-queijos"],
+      borderId: "border-requeijao",
+    });
+  });
+});
+
+describe("adaptarCardapioParaMontagem — pizzaCatalogPresente distingue ausente de malformado (hardening Fase 4)", () => {
+  const bruto = {
+    sizes: [{ code: "G", label: "Grande", price: 50 }],
+    saltyFlavors: ["Quatro Queijos"],
+    sweetFlavors: ["Chocolate"],
+    borders: [{ label: "Requeijão", priceSmall: 5, priceLarge: 8 }],
+  };
+
+  test("campo pizzaCatalog ausente: pizzaCatalogPresente é false (ou ausente)", () => {
+    const menu = adaptarCardapioParaMontagem(bruto)!;
+    expect(menu.pizzaCatalog).toBeUndefined();
+    expect(menu.pizzaCatalogPresente).toBeFalsy();
+  });
+
+  test("campo pizzaCatalog presente e bem formado: presente=true e catálogo populado", () => {
+    const menu = adaptarCardapioParaMontagem({
+      ...bruto,
+      pizzaCatalog: {
+        sizes: [{ id: "size-g", code: "G", label: "Grande", priceCents: 5000 }],
+        flavors: [],
+        borders: [],
+      },
+    })!;
+    expect(menu.pizzaCatalogPresente).toBe(true);
+    expect(menu.pizzaCatalog?.sizes).toHaveLength(1);
+  });
+
+  test("campo pizzaCatalog presente porém totalmente vazio: presente=true, catálogo undefined (nunca um catálogo vazio disfarçado de ausente)", () => {
+    const menu = adaptarCardapioParaMontagem({ ...bruto, pizzaCatalog: { sizes: [], flavors: [], borders: [] } })!;
+    expect(menu.pizzaCatalogPresente).toBe(true);
+    expect(menu.pizzaCatalog).toBeUndefined();
+  });
+
+  test("campo pizzaCatalog presente porém com tipo errado (string/número/array): presente=true, catálogo undefined", () => {
+    for (const v of ["nope", 42, []]) {
+      const menu = adaptarCardapioParaMontagem({ ...bruto, pizzaCatalog: v })!;
+      expect(menu.pizzaCatalogPresente).toBe(true);
+      expect(menu.pizzaCatalog).toBeUndefined();
+    }
+  });
+
+  test("campo pizzaCatalog explicitamente null: conta como presente (a resposta tentou trazer o campo)", () => {
+    const menu = adaptarCardapioParaMontagem({ ...bruto, pizzaCatalog: null })!;
+    expect(menu.pizzaCatalogPresente).toBe(true);
+    expect(menu.pizzaCatalog).toBeUndefined();
+  });
+
+  test("ponta a ponta: catálogo presente + sabor sem correspondência via adaptarCardapioParaMontagem real bloqueia a montagem", () => {
+    const menu = adaptarCardapioParaMontagem({
+      ...bruto,
+      saltyFlavors: ["Quatro Queijos", "Sabor Sem Catalogo"],
+      pizzaCatalog: {
+        sizes: [{ id: "size-g", code: "G", label: "Grande", priceCents: 5000 }],
+        flavors: [{ id: "flavor-quatro-queijos", name: "Quatro Queijos", category: "tradicional", aliases: [], available: true }],
+        borders: [],
+      },
+    })!;
+    const pizza = listarProdutosManuais(menu).find((p) => p.id === "pizza:g")!;
+    const item = construirItemManual(pizza, { sabores: ["Sabor Sem Catalogo"], borda: null }, menu);
+    expect(item).toBeNull();
   });
 });
 

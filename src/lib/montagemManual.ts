@@ -27,8 +27,15 @@
 // mesma função usada pelo cardápio público (`resolverPizzaSelectionIds`).
 // Isso não cria um segundo motor: o servidor (POST /api/pedido-app) já sabe
 // ignorar name/detail/price e reprecificar pelo motor nativo sempre que esse
-// campo está presente, para qualquer canal. Ausência/erro de resolução cai
-// no formato 100% legado de sempre — nunca bloqueia a montagem.
+// campo está presente, para qualquer canal.
+//
+// FAIL-CLOSED (hardening): o formato legado só é permitido quando o campo
+// `pizzaCatalog` está GENUINAMENTE AUSENTE da resposta de GET /api/cardapio
+// (resposta anterior à Fase 2, ou cache antigo). Com o campo presente, uma
+// pizza que não resolve para IDs (nome sem correspondência, ou catálogo
+// malformado/vazio) é RECUSADA na montagem — nunca cai silenciosamente para
+// name/detail. Só a ausência de verdade do campo autoriza o legado. Ver
+// `pizzaCatalogPresente` em `MenuManual` e `construirItemManual`.
 
 import {
   norm,
@@ -51,9 +58,17 @@ export type MenuManual = MenuPedidoApp & {
   // Catálogo oficial de pizzas com IDs estáveis (Fase 2), já vem de
   // GET /api/cardapio (campo aditivo) — usado SÓ para resolver
   // sizeId/flavorIds/borderId da pizza normal (ver resolverPizzaSelectionIds
-  // abaixo). Ausente/malformado nunca bloqueia a montagem: o item cai no
-  // formato 100% legado (name/detail), exatamente como antes da Fase 4.
+  // abaixo). `undefined` quando ausente OU malformado — ver
+  // `pizzaCatalogPresente` para distinguir os dois casos (hardening Fase 4).
   pizzaCatalog?: PizzaCatalog;
+  // Flag interna (nunca lida fora deste módulo): `true` quando a resposta
+  // de GET /api/cardapio TINHA a propriedade `pizzaCatalog` (mesmo que
+  // malformada/vazia), `false`/ausente quando o campo realmente não veio
+  // (resposta anterior à Fase 2, ou cache antigo). `construirItemManual` usa
+  // isso para decidir fail-closed: com o campo PRESENTE, uma pizza que não
+  // resolve para IDs é RECUSADA (nunca cai pro formato legado); só a
+  // AUSÊNCIA genuína do campo permite o formato legado.
+  pizzaCatalogPresente?: boolean;
 };
 
 // ---------------------------------------------------------------------------
@@ -195,6 +210,11 @@ export function adaptarCardapioParaMontagem(bruto: unknown): MenuManual | null {
     payments: listaDeTextos(bruto.payments),
     esgotados: listaDeTextos(bruto.esgotados),
     pizzaCatalog: lerPizzaCatalog(bruto.pizzaCatalog),
+    // Presença bruta do campo — independente de `lerPizzaCatalog` ter
+    // conseguido validar algo. `null`/objeto vazio/tipo errado contam como
+    // PRESENTE (a resposta tentou trazer o campo e falhou), só a chave
+    // realmente ausente (`undefined`) conta como ausente de verdade.
+    pizzaCatalogPresente: bruto.pizzaCatalog !== undefined,
   };
 
   // Sem nenhum produto vendável não há pedido a montar: falhar aqui, com a
@@ -650,6 +670,17 @@ export function resolverPizzaSelectionIds(
  * exibição: os dois motores produzem o mesmo valor hoje (nenhum sabor tem
  * preço diferenciado no cardápio oficial) — quem decide de verdade é sempre
  * o servidor.
+ *
+ * FAIL-CLOSED (hardening Fase 4): o formato legado (name/detail, sem
+ * `pizzaSelection`) só é permitido quando `menu.pizzaCatalog` está
+ * GENUINAMENTE AUSENTE (`menu.pizzaCatalogPresente` falso — resposta anterior
+ * à Fase 2 ou cache antigo). Com o campo PRESENTE na resposta, a pizza
+ * SEMPRE precisa resolver para IDs: se o tamanho/sabor/borda escolhido não
+ * bate com o catálogo (nome sem correspondência) ou o catálogo veio
+ * malformado/vazio, a montagem é RECUSADA (`null`) — nunca cai
+ * silenciosamente para name/detail. Isso fecha a brecha de uma pizza escapar
+ * do caminho estruturado só porque um nome não bateu (cardápio dessincronizado
+ * entre o load da tela e a montagem, por exemplo).
  */
 export function construirItemManual(
   produto: ProdutoManual,
@@ -667,6 +698,12 @@ export function construirItemManual(
     const meioAMeio = selecao.sabores.length === 2;
     const bordaTexto = selecao.borda ? ` · borda ${selecao.borda}` : "";
     const pizzaSelection = resolverPizzaSelectionIds(menu.pizzaCatalog, code, selecao.sabores, selecao.borda ?? null);
+    if (!pizzaSelection && menu.pizzaCatalogPresente) {
+      // O cardápio trouxe pizzaCatalog, mas a seleção não resolveu para IDs
+      // (nome sem correspondência, ou o catálogo em si veio malformado/vazio)
+      // — nunca cai para o formato legado quando o campo estruturado existe.
+      return null;
+    }
     item = {
       kind: "pizza",
       name: `Pizza ${code}${meioAMeio ? " (meio a meio)" : ""}`,
