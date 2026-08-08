@@ -2,6 +2,8 @@ import { randomUUID } from "crypto";
 import { redis } from "./redis";
 import { getMENUDinamico } from "./menu.server";
 import { officialUnitPrice, type ItemApp, type MenuPedidoApp } from "./pedidoAppItens";
+import { temSelecaoEstruturada, resolverItemComSelecaoEstruturada } from "./pedidoAppSelecaoEstruturada";
+import { buildPizzaCatalog, type PizzaCatalog } from "./catalog/pizzas";
 
 // Comanda do Salão — mesa aberta que acumula itens antes de virar um pedido
 // de verdade. NÃO É um motor de pedido paralelo: preço e catálogo aqui vêm
@@ -249,10 +251,35 @@ export type ResultadoValidacaoItens =
   | { ok: true; itens: ItemApp[]; total: number }
   | { ok: false; error: string };
 
+/** Preserva SÓ os 3 campos oficiais da seleção estruturada já validada —
+ *  nunca uma propriedade extra adulterada que possa ter chegado junto no
+ *  mesmo objeto do cliente (mesmo padrão de `sanitizarSelecao` em
+ *  src/lib/pedidoSnapshot.ts, mas local a este módulo). Só é chamada depois
+ *  que `resolverItemComSelecaoEstruturada` já confirmou que sizeId/flavorIds/
+ *  borderId correspondem a entradas reais do catálogo. */
+function sanitizarPizzaSelecaoValidada(
+  selecao: { sizeId: string; flavorIds: string[]; borderId?: string }
+): { sizeId: string; flavorIds: string[]; borderId?: string } {
+  return {
+    sizeId: selecao.sizeId,
+    flavorIds: [...selecao.flavorIds],
+    ...(selecao.borderId !== undefined ? { borderId: selecao.borderId } : {}),
+  };
+}
+
 /**
  * Valida e reprecifica os itens da comanda contra o cardápio oficial —
  * nunca confia no preço vindo do painel do Salão. Itens promocionais não
  * são suportados aqui (mesmo escopo do pedido manual administrativo).
+ *
+ * Seleção estruturada de pizza (Fase 5, mesmo catálogo/motor nativo da
+ * Fase 2): a PRESENÇA (não a truthiness) de `item.pizzaSelection` decide —
+ * igual a POST /api/pedido-app. Um item que declarou a intenção de usar o
+ * formato novo e falhou a validação é DEFINITIVO: nunca cai para o caminho
+ * legado (officialUnitPrice) com o name/detail que possa ter mandado junto.
+ * Item sem essa propriedade continua 100% pelo caminho legado de sempre —
+ * comanda/rodada antiga, ou carrinho misto legado + estruturado, funcionam
+ * sem nenhuma mudança.
  */
 export async function validarItensComanda(
   itens: unknown,
@@ -268,18 +295,53 @@ export async function validarItensComanda(
     if (opcoes.permitirVazio) return { ok: true, itens: [], total: 0 };
     return { ok: false, error: "Informe pelo menos um item" };
   }
-  const menu = (await getMENUDinamico()) as MenuPedidoApp;
+  const menu = await getMENUDinamico();
+
+  // Catálogo oficial de pizza (Fase 2) só é montado quando algum item
+  // realmente precisa dele — mesmo padrão de custo sob demanda já usado em
+  // POST /api/pedido-app. `esgotados` é lido FRESCO do Redis a cada chamada
+  // desta função (nunca cacheado entre requisições), então um sabor/borda
+  // que esgota entre salvar a rodada e reenviá-la (reprecificação em
+  // profundidade da rota de envio da Rodada 2+) é pego aqui.
+  let pizzaCatalogCache: PizzaCatalog | null = null;
+  async function catalogoPizzaOficial(): Promise<PizzaCatalog> {
+    if (!pizzaCatalogCache) {
+      const esgotados = (await redis.get<string[]>("esgotados")) || [];
+      pizzaCatalogCache = buildPizzaCatalog(menu, esgotados);
+    }
+    return pizzaCatalogCache;
+  }
+
   const validados: ItemApp[] = [];
   let total = 0;
   for (const bruto of itens) {
+    if (bruto === null || typeof bruto !== "object") {
+      return { ok: false, error: "Item inválido" };
+    }
     const item = bruto as Partial<ItemApp>;
+
     if (item.kind === "promo") {
       return { ok: false, error: "Item promocional não é suportado no Salão" };
     }
+
+    if (temSelecaoEstruturada(bruto)) {
+      const catalogo = await catalogoPizzaOficial();
+      const resolvido = resolverItemComSelecaoEstruturada(item as ItemApp, catalogo);
+      if (!resolvido.ok) {
+        return { ok: false, error: resolvido.error };
+      }
+      // Ponto de resolução já provou que sizeId/flavorIds/borderId batem
+      // com o catálogo — seguro preservar só esses 3 campos no item validado.
+      const pizzaSelection = sanitizarPizzaSelecaoValidada((item as ItemApp).pizzaSelection!);
+      validados.push({ ...resolvido.item, pizzaSelection });
+      total += resolvido.item.price * resolvido.item.qty;
+      continue;
+    }
+
     if (item.kind !== "pizza" && item.kind !== "simple") {
       return { ok: false, error: "Item inválido" };
     }
-    const preco = officialUnitPrice(item as ItemApp, menu);
+    const preco = officialUnitPrice(item as ItemApp, menu as MenuPedidoApp);
     if (preco === null) {
       return { ok: false, error: `Item fora do cardápio: ${item.name || "desconhecido"}` };
     }

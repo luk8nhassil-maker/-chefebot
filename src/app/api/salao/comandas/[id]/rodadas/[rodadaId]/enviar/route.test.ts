@@ -36,6 +36,18 @@ const CARDAPIO_TESTE = {
   sucos: [], neighborhoods: [],
 };
 
+// Fase 5 — IDs determinísticos (slugify do nome/código, ver src/lib/catalog/ids.ts).
+const CARDAPIO_TESTE_PIZZA = {
+  sizes: [{ code: "G", label: "Grande", price: 50 }],
+  saltyFlavors: ["Quatro Queijos"],
+  sweetFlavors: ["Chocolate"],
+  borders: [],
+  bebidas: [{ name: "Refrigerante 2L", price: 12 }],
+  sucos: [], neighborhoods: [],
+};
+const SIZE_G = "size-g";
+const FLAVOR_CHOCOLATE = "flavor-chocolate";
+
 import { POST as enviarRodada } from "./route";
 import { POST as criarRodadaRoute } from "../../route";
 import { PATCH as atualizarRodada } from "../route";
@@ -255,5 +267,73 @@ describe("POST /api/salao/comandas/[id]/rodadas/[rodadaId]/enviar", () => {
     const pedidos = store.get("pedidos") as Array<Record<string, unknown>>;
     expect(pedidos[0].pagamento).toBe("Comanda em aberto");
     expect(pedidos[0].telefone).toBeFalsy();
+  });
+
+  describe("pizzaSelection (Fase 5)", () => {
+    async function comandaComRodada2ComPizza(token: string, mesa = "5") {
+      store.set("cardapio", CARDAPIO_TESTE_PIZZA);
+      const c = await abrirComandaOk(mesa);
+      await marcarComandaEnviada(c.id, "ped_1", 1);
+      const criada = await (await criarRodadaRoute(req(token, {}), { params: Promise.resolve({ id: c.id }) })).json();
+      const rodadaId = criada.rodada.id as string;
+      await atualizarRodada(
+        req(token, {
+          itens: [
+            {
+              kind: "pizza",
+              price: 0,
+              qty: 1,
+              pizzaSelection: { sizeId: SIZE_G, flavorIds: [FLAVOR_CHOCOLATE] },
+            },
+          ],
+        }),
+        paramsFor(c.id, rodadaId)
+      );
+      return { comandaId: c.id, rodadaId };
+    }
+
+    it("Rodada 2+ preserva pizzaSelection ao enviar — servidor reprecifica pelo motor nativo", async () => {
+      const token = await criarTokenSalao();
+      const { comandaId, rodadaId } = await comandaComRodada2ComPizza(token);
+      const res = await enviarRodada(req(token, { clientRequestId: "p1".padEnd(20, "0") }), paramsFor(comandaId, rodadaId));
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.ok).toBe(true);
+
+      const pedidos = store.get("pedidos") as Array<Record<string, unknown>>;
+      expect(pedidos[0].itensDetalhados).toEqual([
+        expect.objectContaining({ name: "Pizza G", detail: "Chocolate", price: 50, qty: 1 }),
+      ]);
+    });
+
+    it("sabor que ficou esgotado ENTRE salvar a rodada e enviá-la é rejeitado (422) — reprecificação em profundidade pega a mudança", async () => {
+      const token = await criarTokenSalao();
+      const { comandaId, rodadaId } = await comandaComRodada2ComPizza(token);
+      store.set("esgotados", ["Chocolate"]);
+
+      const res = await enviarRodada(req(token, { clientRequestId: "p2".padEnd(20, "0") }), paramsFor(comandaId, rodadaId));
+      expect(res.status).toBe(422);
+      expect(store.get("pedidos")).toBeUndefined();
+
+      const comanda = await buscarComanda(comandaId);
+      const rodada = comanda?.rodadas?.find((r) => r.id === rodadaId);
+      expect(rodada?.status).toBe("falha_envio");
+      expect(rodada?.itens).toHaveLength(1); // itens preservados para retry
+    });
+
+    it("retry depois do sabor voltar a ficar disponível cria o pedido normalmente", async () => {
+      const token = await criarTokenSalao();
+      const { comandaId, rodadaId } = await comandaComRodada2ComPizza(token);
+      store.set("esgotados", ["Chocolate"]);
+      const clientRequestId = "p3".padEnd(20, "0");
+      const falhou = await enviarRodada(req(token, { clientRequestId }), paramsFor(comandaId, rodadaId));
+      expect(falhou.status).toBe(422);
+
+      store.set("esgotados", []);
+      const res = await enviarRodada(req(token, { clientRequestId }), paramsFor(comandaId, rodadaId));
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.ok).toBe(true);
+    });
   });
 });

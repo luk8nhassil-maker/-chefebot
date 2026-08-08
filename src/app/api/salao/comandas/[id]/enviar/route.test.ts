@@ -36,6 +36,18 @@ const CARDAPIO_TESTE = {
   sucos: [], neighborhoods: [],
 };
 
+// Fase 5 — IDs determinísticos (slugify do nome/código, ver src/lib/catalog/ids.ts).
+const CARDAPIO_TESTE_PIZZA = {
+  sizes: [{ code: "G", label: "Grande", price: 50 }],
+  saltyFlavors: ["Quatro Queijos"],
+  sweetFlavors: [],
+  borders: [],
+  bebidas: [{ name: "Refrigerante 2L", price: 12 }],
+  sucos: [], neighborhoods: [],
+};
+const SIZE_G = "size-g";
+const FLAVOR_QUATRO_QUEIJOS = "flavor-quatro-queijos";
+
 import { POST as enviar } from "./route";
 import { POST as abrir } from "../../route";
 import { PATCH as atualizarComanda } from "../../[id]/route";
@@ -185,5 +197,75 @@ describe("POST /api/salao/comandas/[id]/enviar", () => {
     const res = await enviar(reqSalao({}, token), paramsFor(aberta.comanda.id));
     const data = await res.json();
     expect(data.total).toBe(12);
+  });
+
+  describe("pizzaSelection (Fase 5)", () => {
+    it("envia pizzaSelection para POST /api/pedido-app mantendo os IDs — servidor reprecifica pelo motor nativo", async () => {
+      store.set("cardapio", CARDAPIO_TESTE_PIZZA);
+      const token = await criarTokenSalao();
+      const aberta = await (await abrir(reqSalao({ cliente: "Ana", mesa: "5" }, token))).json();
+      await atualizarComanda(
+        reqSalao(
+          { itens: [{ kind: "pizza", price: 0, qty: 1, pizzaSelection: { sizeId: SIZE_G, flavorIds: [FLAVOR_QUATRO_QUEIJOS] } }] },
+          token
+        ),
+        paramsFor(aberta.comanda.id)
+      );
+      const res = await enviar(reqSalao({}, token), paramsFor(aberta.comanda.id));
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.total).toBe(50);
+
+      const pedidos = store.get("pedidos") as Array<Record<string, unknown>>;
+      expect(pedidos[0].itens).toEqual(["Pizza G Quatro Queijos"]);
+      const snapshot = pedidos[0].snapshotOficial as
+        | { itens: Array<{ selecao?: { sizeId: string; flavorIds: string[] } }> }
+        | undefined;
+      if (snapshot) {
+        expect(snapshot.itens[0].selecao).toEqual({ sizeId: SIZE_G, flavorIds: [FLAVOR_QUATRO_QUEIJOS] });
+      }
+    });
+
+    it("sizeId corrompido no que está persistido (defesa em profundidade) é recusado pelo pedido-app — nenhum pedido criado", async () => {
+      store.set("cardapio", CARDAPIO_TESTE_PIZZA);
+      const token = await criarTokenSalao();
+      const aberta = await (await abrir(reqSalao({ cliente: "Ana", mesa: "5" }, token))).json();
+      // Grava diretamente pela lib (bypassando o PATCH/validarItensComanda,
+      // que já recusaria isto na entrada) para simular um dado corrompido
+      // por outra via — prova que a rota de ENVIO não confia cegamente no
+      // que está salvo: quem tem a autoridade final é sempre POST /api/pedido-app.
+      const { atualizarItensComanda } = await import("@/lib/comandas");
+      await atualizarItensComanda(aberta.comanda.id, [
+        {
+          kind: "pizza",
+          name: "Pizza G",
+          detail: "Quatro Queijos",
+          price: 50,
+          qty: 1,
+          pizzaSelection: { sizeId: "size-inexistente", flavorIds: [FLAVOR_QUATRO_QUEIJOS] },
+        },
+      ]);
+      const res = await enviar(reqSalao({}, token), paramsFor(aberta.comanda.id));
+      expect(res.status).toBeGreaterThanOrEqual(400);
+      expect(store.get("pedidos")).toBeUndefined();
+    });
+
+    it("nenhum efeito de Pix/WhatsApp real — pagamento continua o marcador 'Comanda em aberto'", async () => {
+      store.set("cardapio", CARDAPIO_TESTE_PIZZA);
+      const token = await criarTokenSalao();
+      const aberta = await (await abrir(reqSalao({ cliente: "Ana", mesa: "5" }, token))).json();
+      await atualizarComanda(
+        reqSalao(
+          { itens: [{ kind: "pizza", price: 0, qty: 1, pizzaSelection: { sizeId: SIZE_G, flavorIds: [FLAVOR_QUATRO_QUEIJOS] } }] },
+          token
+        ),
+        paramsFor(aberta.comanda.id)
+      );
+      await enviar(reqSalao({}, token), paramsFor(aberta.comanda.id));
+      const pedidos = store.get("pedidos") as Array<Record<string, unknown>>;
+      expect(pedidos[0].pagamento).toBe("Comanda em aberto");
+      expect(pedidos[0].pix).toBeUndefined();
+      expect(pedidos[0].telefone).toBeFalsy();
+    });
   });
 });

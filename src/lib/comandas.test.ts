@@ -156,6 +156,221 @@ describe("validarItensComanda", () => {
   });
 });
 
+// ===========================================================================
+// Fase 5 — pizza do Salão usa os mesmos IDs oficiais (sizeId/flavorIds/
+// borderId) e o mesmo motor nativo do cardápio público/pedido manual
+// (Fase 2/4). IDs abaixo são determinísticos (slugify do nome/código já
+// existente no cardápio — ver src/lib/catalog/ids.ts), nunca inventados.
+// ===========================================================================
+
+const CARDAPIO_TESTE_PIZZA = {
+  sizes: [{ code: "P", label: "Pequena", price: 30 }, { code: "G", label: "Grande", price: 50 }],
+  saltyFlavors: ["Quatro Queijos", "Frango com Requeijão"],
+  sweetFlavors: ["Chocolate"],
+  borders: [{ label: "Requeijão", priceSmall: 5, priceLarge: 8 }],
+  bebidas: [{ name: "Refrigerante 2L", price: 12 }],
+  sucos: [],
+  neighborhoods: [],
+};
+
+const SIZE_G = "size-g";
+const SIZE_P = "size-p";
+const FLAVOR_QUATRO_QUEIJOS = "flavor-quatro-queijos";
+const FLAVOR_CHOCOLATE = "flavor-chocolate";
+const BORDER_REQUEIJAO = "border-requeijao";
+
+describe("validarItensComanda — pizzaSelection (Fase 5)", () => {
+  beforeEach(() => {
+    store.set("cardapio", CARDAPIO_TESTE_PIZZA);
+  });
+
+  it("pizza de 1 sabor sem borda: resolve pelo catálogo oficial e preserva pizzaSelection", async () => {
+    const r = await validarItensComanda([
+      { kind: "pizza", price: 0, qty: 1, pizzaSelection: { sizeId: SIZE_G, flavorIds: [FLAVOR_QUATRO_QUEIJOS] } },
+    ]);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.itens[0].name).toBe("Pizza G");
+    expect(r.itens[0].detail).toBe("Quatro Queijos");
+    expect(r.itens[0].price).toBe(50);
+    expect(r.itens[0].pizzaSelection).toEqual({ sizeId: SIZE_G, flavorIds: [FLAVOR_QUATRO_QUEIJOS] });
+    expect(r.total).toBe(50);
+  });
+
+  it("meio a meio com borda: preserva os dois flavorIds e o borderId", async () => {
+    const r = await validarItensComanda([
+      {
+        kind: "pizza",
+        price: 0,
+        qty: 1,
+        pizzaSelection: { sizeId: SIZE_G, flavorIds: [FLAVOR_CHOCOLATE, FLAVOR_QUATRO_QUEIJOS], borderId: BORDER_REQUEIJAO },
+      },
+    ]);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.itens[0].name).toBe("Pizza G (meio a meio)");
+    expect(r.itens[0].detail).toBe("Chocolate / Quatro Queijos · borda Requeijão");
+    expect(r.itens[0].price).toBe(58); // 50 + borda grande 8
+    expect(r.itens[0].pizzaSelection).toEqual({
+      sizeId: SIZE_G,
+      flavorIds: [FLAVOR_CHOCOLATE, FLAVOR_QUATRO_QUEIJOS],
+      borderId: BORDER_REQUEIJAO,
+    });
+  });
+
+  it("quantidade multiplica o total corretamente com pizzaSelection presente", async () => {
+    const r = await validarItensComanda([
+      { kind: "pizza", price: 0, qty: 3, pizzaSelection: { sizeId: SIZE_P, flavorIds: [FLAVOR_QUATRO_QUEIJOS] } },
+    ]);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.itens[0].qty).toBe(3);
+    expect(r.total).toBe(90); // Pizza P (30) x 3
+  });
+
+  it("preço, name e detail adulterados são ignorados quando pizzaSelection é válido — reconstrói do catálogo", async () => {
+    const r = await validarItensComanda([
+      {
+        kind: "pizza",
+        name: "Pizza de graça",
+        detail: "Qualquer coisa",
+        price: 0.01,
+        qty: 1,
+        pizzaSelection: { sizeId: SIZE_G, flavorIds: [FLAVOR_QUATRO_QUEIJOS] },
+      },
+    ]);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.itens[0].name).toBe("Pizza G");
+    expect(r.itens[0].detail).toBe("Quatro Queijos");
+    expect(r.itens[0].price).toBe(50);
+  });
+
+  it("sizeId inexistente é rejeitado, nunca cai para o legado", async () => {
+    const r = await validarItensComanda([
+      { kind: "pizza", price: 0, qty: 1, pizzaSelection: { sizeId: "size-inexistente", flavorIds: [FLAVOR_QUATRO_QUEIJOS] } },
+    ]);
+    expect(r.ok).toBe(false);
+  });
+
+  it("flavorId inexistente é rejeitado", async () => {
+    const r = await validarItensComanda([
+      { kind: "pizza", price: 0, qty: 1, pizzaSelection: { sizeId: SIZE_G, flavorIds: ["flavor-inexistente"] } },
+    ]);
+    expect(r.ok).toBe(false);
+  });
+
+  it("borderId inexistente é rejeitado", async () => {
+    const r = await validarItensComanda([
+      {
+        kind: "pizza",
+        price: 0,
+        qty: 1,
+        pizzaSelection: { sizeId: SIZE_G, flavorIds: [FLAVOR_QUATRO_QUEIJOS], borderId: "border-inexistente" },
+      },
+    ]);
+    expect(r.ok).toBe(false);
+  });
+
+  it("pizzaSelection: null é recusado — nunca cai para o legado mesmo com name/detail válidos junto", async () => {
+    const r = await validarItensComanda([
+      { kind: "pizza", name: "Pizza G", detail: "Quatro Queijos", price: 50, qty: 1, pizzaSelection: null },
+    ]);
+    expect(r.ok).toBe(false);
+  });
+
+  it.each([
+    ["objeto vazio", {}],
+    ["sizeId ausente", { flavorIds: [FLAVOR_QUATRO_QUEIJOS] }],
+    ["flavorIds não é array", { sizeId: SIZE_G, flavorIds: "Quatro Queijos" }],
+    ["string", "malformado"],
+    ["número", 42],
+  ])("pizzaSelection malformado (%s) é recusado, sem fallback legado", async (_desc, valor) => {
+    const r = await validarItensComanda([
+      { kind: "pizza", name: "Pizza G", detail: "Quatro Queijos", price: 50, qty: 1, pizzaSelection: valor },
+    ]);
+    expect(r.ok).toBe(false);
+  });
+
+  it("kind !== pizza com pizzaSelection presente é recusado (seleção estruturada só vale para pizza)", async () => {
+    const r = await validarItensComanda([
+      { kind: "simple", name: "Refrigerante 2L", price: 12, qty: 1, pizzaSelection: { sizeId: SIZE_G, flavorIds: [FLAVOR_QUATRO_QUEIJOS] } },
+    ]);
+    expect(r.ok).toBe(false);
+  });
+
+  it("sabor esgotado é rejeitado", async () => {
+    store.set("esgotados", ["Chocolate"]);
+    const r = await validarItensComanda([
+      { kind: "pizza", price: 0, qty: 1, pizzaSelection: { sizeId: SIZE_G, flavorIds: [FLAVOR_CHOCOLATE] } },
+    ]);
+    expect(r.ok).toBe(false);
+  });
+
+  it("borda esgotada é rejeitada", async () => {
+    store.set("esgotados", ["Requeijão"]);
+    const r = await validarItensComanda([
+      { kind: "pizza", price: 0, qty: 1, pizzaSelection: { sizeId: SIZE_G, flavorIds: [FLAVOR_QUATRO_QUEIJOS], borderId: BORDER_REQUEIJAO } },
+    ]);
+    expect(r.ok).toBe(false);
+  });
+
+  it("lista de esgotados é lida FRESCA a cada chamada — mesma seleção que passou antes agora é recusada", async () => {
+    const payload = [
+      { kind: "pizza" as const, price: 0, qty: 1, pizzaSelection: { sizeId: SIZE_G, flavorIds: [FLAVOR_CHOCOLATE] } },
+    ];
+    const antes = await validarItensComanda(payload);
+    expect(antes.ok).toBe(true);
+
+    store.set("esgotados", ["Chocolate"]); // esgotou DEPOIS de salvar, ANTES de reenviar
+
+    const depois = await validarItensComanda(payload);
+    expect(depois.ok).toBe(false);
+  });
+
+  it("carrinho misto — item legado (name/detail) e item estruturado (pizzaSelection) no mesmo carrinho", async () => {
+    const r = await validarItensComanda([
+      { kind: "simple", name: "Refrigerante 2L", price: 0.01, qty: 1 },
+      { kind: "pizza", price: 0, qty: 1, pizzaSelection: { sizeId: SIZE_G, flavorIds: [FLAVOR_QUATRO_QUEIJOS] } },
+    ]);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.itens[0].pizzaSelection).toBeUndefined();
+    expect(r.itens[0].price).toBe(12);
+    expect(r.itens[1].pizzaSelection).toEqual({ sizeId: SIZE_G, flavorIds: [FLAVOR_QUATRO_QUEIJOS] });
+    expect(r.total).toBe(62);
+  });
+
+  it("comanda antiga sem pizzaSelection: pizza continua 100% pelo caminho legado (name/detail)", async () => {
+    const r = await validarItensComanda([
+      { kind: "pizza", name: "Pizza G", detail: "Quatro Queijos", price: 0.01, qty: 1 },
+    ]);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.itens[0].pizzaSelection).toBeUndefined();
+    expect(r.itens[0].price).toBe(50);
+  });
+
+  it("propriedade extra adulterada dentro de pizzaSelection nunca chega ao item validado", async () => {
+    const r = await validarItensComanda([
+      {
+        kind: "pizza",
+        price: 0,
+        qty: 1,
+        pizzaSelection: {
+          sizeId: SIZE_G,
+          flavorIds: [FLAVOR_QUATRO_QUEIJOS],
+          precoForjado: 0.01, // propriedade adulterada de propósito, testando sanitização
+        },
+      },
+    ]);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.itens[0].pizzaSelection).toEqual({ sizeId: SIZE_G, flavorIds: [FLAVOR_QUATRO_QUEIJOS] });
+    expect(Object.keys(r.itens[0].pizzaSelection!)).toEqual(["sizeId", "flavorIds"]);
+  });
+});
+
 describe("atualizarItensComanda", () => {
   it("atualiza itens, observação e complemento de uma comanda aberta", async () => {
     const c = await abrirComandaOk("5");

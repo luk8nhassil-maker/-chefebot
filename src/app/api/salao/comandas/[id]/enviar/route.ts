@@ -67,7 +67,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const payloadPedidoApp = {
     cliente: identificacaoCliente,
     usarOutroWhatsapp: true,
-    itens: comanda.itens.map((i) => ({ kind: i.kind, name: i.name, detail: i.detail, price: i.price, qty: i.qty })),
+    // pizzaSelection (IDs oficiais, Fase 5) preservado quando o item o
+    // carrega — já validado/canonicalizado em validarItensComanda no PATCH
+    // que gravou este item; POST /api/pedido-app reprecifica de novo pelo
+    // motor nativo, nunca confia neste payload.
+    itens: comanda.itens.map((i) => ({
+      kind: i.kind,
+      name: i.name,
+      detail: i.detail,
+      price: i.price,
+      qty: i.qty,
+      ...(i.pizzaSelection ? { pizzaSelection: i.pizzaSelection } : {}),
+    })),
     tipoEntrega: "dine_in" as const,
     pagamento: PAGAMENTO_COMANDA_EM_ABERTO,
     observacao: observacaoComanda,
