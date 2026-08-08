@@ -576,8 +576,18 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
           telefone: semTelefone ? "" : telefone.trim(),
           ...(semTelefone ? { semTelefonePainel: true } : {}),
           usarOutroWhatsapp: true,
-          // Preço nunca é confiado: o servidor recalcula item a item.
-          itens: itens.map((i) => ({ kind: i.kind, name: i.name, detail: i.detail, price: i.price, qty: i.qty })),
+          // Preço nunca é confiado: o servidor recalcula item a item. Pizza
+          // normal carrega pizzaSelection (IDs estáveis, Fase 4) quando o
+          // catálogo oficial resolveu — o servidor ignora name/detail/price
+          // e reprecifica pelo motor nativo, igual ao cardápio público.
+          itens: itens.map((i) => ({
+            kind: i.kind,
+            name: i.name,
+            detail: i.detail,
+            price: i.price,
+            qty: i.qty,
+            ...(i.pizzaSelection ? { pizzaSelection: i.pizzaSelection } : {}),
+          })),
           tipoEntrega,
           ...(tipoEntrega === "delivery"
             ? { bairro, rua, numero: numero.trim() || undefined, referencia: referencia.trim() || undefined }

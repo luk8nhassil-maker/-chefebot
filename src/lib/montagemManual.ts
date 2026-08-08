@@ -20,6 +20,22 @@
 //    exatamente a gramática que `officialUnitPrice` sabe ler (a mesma que o
 //    cardápio público produz), para que pedido de painel e pedido de site
 //    sejam indistinguíveis para o resto do sistema.
+//
+// Fase 4 (aditiva às três decisões acima): a pizza normal também ganha
+// `pizzaSelection` (sizeId/flavorIds/borderId, catálogo oficial da Fase 2)
+// quando o cardápio traz `pizzaCatalog` e os nomes escolhidos resolvem —
+// mesma função usada pelo cardápio público (`resolverPizzaSelectionIds`).
+// Isso não cria um segundo motor: o servidor (POST /api/pedido-app) já sabe
+// ignorar name/detail/price e reprecificar pelo motor nativo sempre que esse
+// campo está presente, para qualquer canal.
+//
+// FAIL-CLOSED (hardening): o formato legado só é permitido quando o campo
+// `pizzaCatalog` está GENUINAMENTE AUSENTE da resposta de GET /api/cardapio
+// (resposta anterior à Fase 2, ou cache antigo). Com o campo presente, uma
+// pizza que não resolve para IDs (nome sem correspondência, ou catálogo
+// malformado/vazio) é RECUSADA na montagem — nunca cai silenciosamente para
+// name/detail. Só a ausência de verdade do campo autoriza o legado. Ver
+// `pizzaCatalogPresente` em `MenuManual` e `construirItemManual`.
 
 import {
   norm,
@@ -27,6 +43,7 @@ import {
   type ItemApp,
   type MenuPedidoApp,
 } from "./pedidoAppItens";
+import type { PizzaCatalog, PizzaCategoryId } from "./catalog/pizzas";
 
 /**
  * Contrato de cardápio da montagem manual. Declarado AQUI, em `src/lib`, e
@@ -38,6 +55,20 @@ export type MenuManual = MenuPedidoApp & {
   neighborhoods: { name: string; fee: number }[];
   payments: string[];
   esgotados?: string[];
+  // Catálogo oficial de pizzas com IDs estáveis (Fase 2), já vem de
+  // GET /api/cardapio (campo aditivo) — usado SÓ para resolver
+  // sizeId/flavorIds/borderId da pizza normal (ver resolverPizzaSelectionIds
+  // abaixo). `undefined` quando ausente OU malformado — ver
+  // `pizzaCatalogPresente` para distinguir os dois casos (hardening Fase 4).
+  pizzaCatalog?: PizzaCatalog;
+  // Flag interna (nunca lida fora deste módulo): `true` quando a resposta
+  // de GET /api/cardapio TINHA a propriedade `pizzaCatalog` (mesmo que
+  // malformada/vazia), `false`/ausente quando o campo realmente não veio
+  // (resposta anterior à Fase 2, ou cache antigo). `construirItemManual` usa
+  // isso para decidir fail-closed: com o campo PRESENTE, uma pizza que não
+  // resolve para IDs é RECUSADA (nunca cai pro formato legado); só a
+  // AUSÊNCIA genuína do campo permite o formato legado.
+  pizzaCatalogPresente?: boolean;
 };
 
 // ---------------------------------------------------------------------------
@@ -70,6 +101,55 @@ function listaValida<T>(bruto: unknown, ler: (item: Record<string, unknown>) => 
 
 function listaDeTextos(bruto: unknown): string[] {
   return Array.isArray(bruto) ? bruto.filter((v): v is string => typeof v === "string" && v.trim().length > 0) : [];
+}
+
+/**
+ * Valida `bruto.pizzaCatalog` (campo aditivo de GET /api/cardapio, Fase 2)
+ * campo a campo, na mesma linha dos demais leitores desta fronteira — nunca
+ * um cast. Qualquer coisa fora do formato esperado é descartada silenciosamente
+ * (`undefined`): a montagem de pizza cai no formato 100% legado, nunca quebra
+ * a tela por causa de um campo aditivo malformado.
+ */
+function lerPizzaCatalog(bruto: unknown): PizzaCatalog | undefined {
+  if (!ehObjeto(bruto)) return undefined;
+
+  const sizes = listaValida(bruto.sizes, (s) => {
+    const id = texto(s.id);
+    const code = texto(s.code);
+    const label = texto(s.label);
+    const priceCents = numeroFinito(s.priceCents);
+    return id !== null && code !== null && label !== null && priceCents !== null
+      ? { id, code, label, priceCents }
+      : null;
+  });
+
+  const flavors = listaValida(bruto.flavors, (f) => {
+    const id = texto(f.id);
+    const name = texto(f.name);
+    const category = texto(f.category);
+    if (id === null || name === null || category === null) return null;
+    if (category !== "tradicional" && category !== "especial" && category !== "doce") return null;
+    return {
+      id,
+      name,
+      category: category as PizzaCategoryId,
+      aliases: listaDeTextos(f.aliases),
+      available: typeof f.available === "boolean" ? f.available : true,
+    };
+  });
+
+  const borders = listaValida(bruto.borders, (b) => {
+    const id = texto(b.id);
+    const label = texto(b.label);
+    const priceSmallCents = numeroFinito(b.priceSmallCents);
+    const priceLargeCents = numeroFinito(b.priceLargeCents);
+    return id !== null && label !== null && priceSmallCents !== null && priceLargeCents !== null
+      ? { id, label, priceSmallCents, priceLargeCents, available: typeof b.available === "boolean" ? b.available : true }
+      : null;
+  });
+
+  if (sizes.length === 0 && flavors.length === 0 && borders.length === 0) return undefined;
+  return { sizes, flavors, borders };
 }
 
 /**
@@ -129,6 +209,12 @@ export function adaptarCardapioParaMontagem(bruto: unknown): MenuManual | null {
     }),
     payments: listaDeTextos(bruto.payments),
     esgotados: listaDeTextos(bruto.esgotados),
+    pizzaCatalog: lerPizzaCatalog(bruto.pizzaCatalog),
+    // Presença bruta do campo — independente de `lerPizzaCatalog` ter
+    // conseguido validar algo. `null`/objeto vazio/tipo errado contam como
+    // PRESENTE (a resposta tentou trazer o campo e falhou), só a chave
+    // realmente ausente (`undefined`) conta como ausente de verdade.
+    pizzaCatalogPresente: bruto.pizzaCatalog !== undefined,
   };
 
   // Sem nenhum produto vendável não há pedido a montar: falhar aqui, com a
@@ -527,6 +613,45 @@ export function alternarSabor(selecao: SelecaoMontagem, sabor: string, max: numb
 }
 
 // ---------------------------------------------------------------------------
+// Seleção estruturada de pizza (Fase 4)
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve a pizza normal (tamanho + 1/2 sabores + borda, os mesmos já
+ * escolhidos pela etapa guiada por NOME) para os IDs estáveis do catálogo
+ * oficial (Fase 2, `menu.pizzaCatalog`) — puro, sem I/O. Mesma regra da
+ * versão já usada pelo cardápio público (`resolverPizzaSelectionIds` em
+ * src/app/cardapio/page.tsx): nunca inventa nem "corrige" nada — catálogo
+ * ausente ou qualquer nome sem correspondência devolve `undefined`, e o item
+ * cai no formato 100% legado (name/detail), nunca bloqueia adicionar ao
+ * pedido.
+ */
+export function resolverPizzaSelectionIds(
+  catalog: PizzaCatalog | undefined,
+  sizeCode: string,
+  flavorNames: readonly string[],
+  borderLabel: string | null
+): { sizeId: string; flavorIds: string[]; borderId?: string } | undefined {
+  if (!catalog) return undefined;
+  if (flavorNames.length !== 1 && flavorNames.length !== 2) return undefined;
+
+  const size = catalog.sizes.find((s) => s.code === sizeCode);
+  if (!size) return undefined;
+
+  const flavorIds: string[] = [];
+  for (const name of flavorNames) {
+    const flavor = catalog.flavors.find((f) => f.name === name);
+    if (!flavor) return undefined;
+    flavorIds.push(flavor.id);
+  }
+
+  if (!borderLabel) return { sizeId: size.id, flavorIds };
+  const border = catalog.borders.find((b) => b.label === borderLabel);
+  if (!border) return undefined;
+  return { sizeId: size.id, flavorIds, borderId: border.id };
+}
+
+// ---------------------------------------------------------------------------
 // Construção do item
 // ---------------------------------------------------------------------------
 
@@ -536,6 +661,26 @@ export function alternarSabor(selecao: SelecaoMontagem, sabor: string, max: numb
  * motor oficial não souber precificar, devolve `null` e a montagem é recusada
  * aqui, em vez de o pedido falhar no servidor depois de o atendente já ter
  * desligado o telefone.
+ *
+ * Pizza normal também ganha `pizzaSelection` (IDs estáveis) quando o
+ * catálogo oficial resolve os nomes escolhidos (Fase 4) — o servidor
+ * (POST /api/pedido-app) já ignora name/detail/price e reprecifica pelo
+ * motor nativo sempre que esse campo está presente, igual ao cardápio
+ * público. `price` aqui continua vindo de `officialUnitPrice`, só para
+ * exibição: os dois motores produzem o mesmo valor hoje (nenhum sabor tem
+ * preço diferenciado no cardápio oficial) — quem decide de verdade é sempre
+ * o servidor.
+ *
+ * FAIL-CLOSED (hardening Fase 4): o formato legado (name/detail, sem
+ * `pizzaSelection`) só é permitido quando `menu.pizzaCatalog` está
+ * GENUINAMENTE AUSENTE (`menu.pizzaCatalogPresente` falso — resposta anterior
+ * à Fase 2 ou cache antigo). Com o campo PRESENTE na resposta, a pizza
+ * SEMPRE precisa resolver para IDs: se o tamanho/sabor/borda escolhido não
+ * bate com o catálogo (nome sem correspondência) ou o catálogo veio
+ * malformado/vazio, a montagem é RECUSADA (`null`) — nunca cai
+ * silenciosamente para name/detail. Isso fecha a brecha de uma pizza escapar
+ * do caminho estruturado só porque um nome não bateu (cardápio dessincronizado
+ * entre o load da tela e a montagem, por exemplo).
  */
 export function construirItemManual(
   produto: ProdutoManual,
@@ -552,12 +697,20 @@ export function construirItemManual(
     if (!code || selecao.sabores.length < 1) return null;
     const meioAMeio = selecao.sabores.length === 2;
     const bordaTexto = selecao.borda ? ` · borda ${selecao.borda}` : "";
+    const pizzaSelection = resolverPizzaSelectionIds(menu.pizzaCatalog, code, selecao.sabores, selecao.borda ?? null);
+    if (!pizzaSelection && menu.pizzaCatalogPresente) {
+      // O cardápio trouxe pizzaCatalog, mas a seleção não resolveu para IDs
+      // (nome sem correspondência, ou o catálogo em si veio malformado/vazio)
+      // — nunca cai para o formato legado quando o campo estruturado existe.
+      return null;
+    }
     item = {
       kind: "pizza",
       name: `Pizza ${code}${meioAMeio ? " (meio a meio)" : ""}`,
       detail: `${selecao.sabores.join(" / ")}${bordaTexto}`,
       price: 0,
       qty,
+      ...(pizzaSelection ? { pizzaSelection } : {}),
     };
   } else if (produto.categoria === "sucos") {
     if (selecao.leite !== "com" && selecao.leite !== "sem") return null;

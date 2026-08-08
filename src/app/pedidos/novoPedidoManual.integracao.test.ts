@@ -75,11 +75,13 @@ import {
   construirItemManual,
   calcularTotalManual,
   adicionarAoCarrinho,
+  buscarProdutos,
   selecaoVazia,
   adaptarCardapioParaMontagem,
   type MenuManual,
   type ProdutoManual,
 } from "@/lib/montagemManual";
+import { buildPizzaCatalog } from "@/lib/catalog/pizzas";
 import type { ItemApp } from "@/lib/pedidoAppItens";
 // Nomes reais das chaves — nunca reescritos à mão no teste, senão um erro de
 // prefixo faria a limpeza virar no-op e o teste passaria pelo caminho errado.
@@ -114,9 +116,17 @@ function postReqAdmin(body: unknown) {
   } as never;
 }
 
-async function menuDoServidor(): Promise<MenuManual> {
-  // Mesmo adaptador validado que o painel usa — nada de cast nem aqui.
-  const menu = adaptarCardapioParaMontagem(await getMENUDinamico());
+/**
+ * Reproduz exatamente o que GET /api/cardapio devolve (incluindo o campo
+ * aditivo `pizzaCatalog`, Fase 2) e passa pelo MESMO adaptador validado que o
+ * painel usa — nada de cast nem aqui. Sem isso, `menu.pizzaCatalog` nunca
+ * apareceria no teste e `construirItemManual` nunca anexaria `pizzaSelection`,
+ * mesmo sendo exatamente isso que a tela recebe em produção.
+ */
+async function menuDoServidor(esgotados: string[] = []): Promise<MenuManual> {
+  const menuBruto = await getMENUDinamico();
+  const pizzaCatalog = buildPizzaCatalog(menuBruto, esgotados);
+  const menu = adaptarCardapioParaMontagem({ ...menuBruto, esgotados, pizzaCatalog });
   if (!menu) throw new Error("cardápio de teste inválido");
   return menu;
 }
@@ -142,12 +152,23 @@ async function montarCarrinho(): Promise<{ menu: MenuManual; itens: ItemApp[] }>
   return { menu, itens: adicionarAoCarrinho([pizza as ItemApp], refri as ItemApp) };
 }
 
+/** Espelha exatamente o mapeamento de itens que NovoPedidoManual.tsx envia
+ * em POST /api/pedido-app (ver `enviar()`) — inclui `pizzaSelection` quando o
+ * item o carrega (Fase 4), do mesmo jeito aditivo que o cardápio público já
+ * fazia desde a Fase 2C. */
 function payload(itens: ItemApp[], extra: Record<string, unknown> = {}) {
   return {
     cliente: "Cliente de Teste",
     telefone: "(86) 99999-8888",
     usarOutroWhatsapp: true,
-    itens: itens.map((i) => ({ kind: i.kind, name: i.name, detail: i.detail, price: i.price, qty: i.qty })),
+    itens: itens.map((i) => ({
+      kind: i.kind,
+      name: i.name,
+      detail: i.detail,
+      price: i.price,
+      qty: i.qty,
+      ...(i.pizzaSelection ? { pizzaSelection: i.pizzaSelection } : {}),
+    })),
     tipoEntrega: "retirada",
     pagamento: "Pix",
     ...extra,
@@ -273,6 +294,207 @@ describe("montagem manual → POST /api/pedido-app", () => {
   it("carrinho vazio é recusado", async () => {
     const res = await POST(postReq(payload([])));
     expect(res.status).toBe(400);
+  });
+});
+
+// ===========================================================================
+// Fase 4 — pizza do pedido manual usa os mesmos IDs oficiais (sizeId/
+// flavorIds/borderId) e o mesmo motor nativo do cardápio público (Fase 2).
+// Estes testes provam o contrato ponta a ponta: `menuDoServidor()` /
+// `montarCarrinho()` já produzem pizza com `pizzaSelection` por padrão desde
+// esta fase (ver acima) — os testes anteriores deste arquivo já exercitam o
+// caminho estruturado implicitamente. Aqui ficam os casos que precisam de um
+// cenário dedicado (adulteração, inválido, esgotado, compatibilidade, busca,
+// observação, impressão).
+// ===========================================================================
+
+describe("Fase 4 — pizza do pedido manual via pizzaSelection (IDs oficiais)", () => {
+  it("pizza de 1 sabor sem borda ganha pizzaSelection e cria o pedido normalmente", async () => {
+    const menu = await menuDoServidor();
+    const produtos = listarProdutosManuais(menu);
+    const pizza = construirItemManual(
+      acharProduto(produtos, "pizza:g"),
+      { sabores: ["Quatro Queijos"], borda: null },
+      menu
+    )!;
+    expect(pizza.pizzaSelection).toBeDefined();
+    expect(pizza.pizzaSelection?.flavorIds).toHaveLength(1);
+    expect(pizza.pizzaSelection?.borderId).toBeUndefined();
+
+    const res = await POST(postReq(payload([pizza])));
+    const data = await res.json();
+    expect(data.ok).toBe(true);
+    expect(data.total).toBe(50); // Pizza G
+    expect(pedidosCriados()[0].itens).toEqual(["Pizza G Quatro Queijos"]);
+  });
+
+  it("meio a meio com borda: pizzaSelection carrega os dois flavorIds e o borderId, snapshot oficial guarda os IDs", async () => {
+    const { itens } = await montarCarrinho();
+    const pizza = itens.find((i) => i.kind === "pizza")!;
+    expect(pizza.pizzaSelection?.flavorIds).toHaveLength(2);
+    expect(pizza.pizzaSelection?.borderId).toBeDefined();
+
+    const res = await POST(postReq(payload(itens)));
+    const data = await res.json();
+    expect(data.ok).toBe(true);
+
+    const snapshot = pedidosCriados()[0].snapshotOficial as
+      | { itens: Array<{ selecao?: { sizeId: string; flavorIds: string[]; borderId?: string } }> }
+      | undefined;
+    // Aditivo (Fase 3): quando presente, os IDs estruturados persistidos são
+    // exatamente os que a montagem manual resolveu — nunca reconstruídos por
+    // adivinhação a partir do texto.
+    if (snapshot) {
+      expect(snapshot.itens[0].selecao).toEqual(pizza.pizzaSelection);
+    }
+  });
+
+  it("preço, name e detail adulterados são ignorados quando pizzaSelection é válido — servidor reconstrói do catálogo", async () => {
+    const { itens } = await montarCarrinho();
+    const corpo = payload(itens);
+    const pizzaAdulterada = {
+      ...(corpo.itens[0] as Record<string, unknown>),
+      name: "Pizza de Graça",
+      detail: "Qualquer coisa",
+      price: 0.01,
+    };
+    const res = await POST(postReq({ ...corpo, itens: [pizzaAdulterada, corpo.itens[1]] }));
+    const data = await res.json();
+
+    expect(data.ok).toBe(true);
+    expect(data.total).toBe(70); // recalculado do catálogo, nunca 0.01 + refri
+    // A LINHA persistida também vem do catálogo, nunca do name/detail forjado.
+    expect(pedidosCriados()[0].itens).toContain("Pizza G (meio a meio) Chocolate / Quatro Queijos · borda Requeijão");
+    expect(pedidosCriados()[0].itens).not.toContain("Pizza de Graça Qualquer coisa");
+  });
+
+  it("sizeId inexistente no pizzaSelection é rejeitado (400) — nunca cai para o formato legado", async () => {
+    const { itens } = await montarCarrinho();
+    const corpo = payload(itens);
+    const pizzaInvalida = {
+      ...(corpo.itens[0] as Record<string, unknown>),
+      pizzaSelection: { ...(itens[0].pizzaSelection as object), sizeId: "size-inexistente" },
+    };
+    const res = await POST(postReq({ ...corpo, itens: [pizzaInvalida, corpo.itens[1]] }));
+    expect(res.status).toBe(400);
+    expect(store.get("pedidos")).toBeUndefined();
+  });
+
+  it("flavorId inexistente no pizzaSelection é rejeitado (400)", async () => {
+    const { itens } = await montarCarrinho();
+    const corpo = payload(itens);
+    const pizzaInvalida = {
+      ...(corpo.itens[0] as Record<string, unknown>),
+      pizzaSelection: { sizeId: itens[0].pizzaSelection!.sizeId, flavorIds: ["flavor-inexistente"] },
+    };
+    const res = await POST(postReq({ ...corpo, itens: [pizzaInvalida, corpo.itens[1]] }));
+    expect(res.status).toBe(400);
+    expect(store.get("pedidos")).toBeUndefined();
+  });
+
+  it("borderId inexistente no pizzaSelection é rejeitado (400)", async () => {
+    const { itens } = await montarCarrinho();
+    const corpo = payload(itens);
+    const pizzaInvalida = {
+      ...(corpo.itens[0] as Record<string, unknown>),
+      pizzaSelection: { ...(itens[0].pizzaSelection as object), borderId: "border-inexistente" },
+    };
+    const res = await POST(postReq({ ...corpo, itens: [pizzaInvalida, corpo.itens[1]] }));
+    expect(res.status).toBe(400);
+    expect(store.get("pedidos")).toBeUndefined();
+  });
+
+  it("sabor que ficou esgotado ENTRE a montagem e o envio é rejeitado (400) — lacuna que o formato legado não cobria", async () => {
+    // A montagem aconteceu com o cardápio ainda disponível (mesmo padrão de
+    // `montarCarrinho`) — a UI já bloquearia escolher um sabor esgotado, mas
+    // isso não é o que protege o servidor: aqui simulamos a corrida em que o
+    // sabor esgota DEPOIS que o atendente já montou a pizza, antes de enviar.
+    const { itens } = await montarCarrinho();
+    const pizza = itens.find((i) => i.kind === "pizza")!;
+    expect(pizza.detail).toContain("Chocolate");
+
+    store.set("esgotados", ["Chocolate"]);
+
+    const res = await POST(postReq(payload(itens)));
+    expect(res.status).toBe(400);
+    expect(store.get("pedidos")).toBeUndefined();
+  });
+
+  it("borda que ficou esgotada entre a montagem e o envio é rejeitada (400)", async () => {
+    const { itens } = await montarCarrinho();
+    store.set("esgotados", ["Requeijão"]);
+
+    const res = await POST(postReq(payload(itens)));
+    expect(res.status).toBe(400);
+    expect(store.get("pedidos")).toBeUndefined();
+  });
+
+  it("quantidade multiplica o total corretamente com pizzaSelection presente", async () => {
+    const menu = await menuDoServidor();
+    const produtos = listarProdutosManuais(menu);
+    const pizza = construirItemManual(
+      acharProduto(produtos, "pizza:p"),
+      { sabores: ["Quatro Queijos"], borda: null },
+      menu,
+      3
+    )!;
+    expect(pizza.pizzaSelection).toBeDefined();
+
+    const res = await POST(postReq(payload([pizza])));
+    const data = await res.json();
+    expect(data.ok).toBe(true);
+    expect(data.total).toBe(90); // Pizza P (30) x 3
+  });
+
+  it("observação é persistida normalmente junto de um pedido com pizza estruturada", async () => {
+    const { itens } = await montarCarrinho();
+    const res = await POST(postReq(payload(itens, { observacao: "Sem cebola, campainha quebrada" })));
+    expect((await res.json()).ok).toBe(true);
+    expect(pedidosCriados()[0].observacao).toBe("Sem cebola, campainha quebrada");
+  });
+
+  it("busca continua funcionando em todas as categorias com pizzaCatalog anexado ao menu", async () => {
+    const menu = await menuDoServidor();
+    const produtos = listarProdutosManuais(menu);
+    expect(buscarProdutos(produtos, "grande", "pizza").some((p) => p.nome.includes("Grande"))).toBe(true);
+    expect(buscarProdutos(produtos, "acai").some((p) => p.categoria === "sucos")).toBe(true);
+    expect(buscarProdutos(produtos, "refrigerante").some((p) => p.categoria === "bebidas")).toBe(true);
+    const categorias = new Set(buscarProdutos(produtos, "").map((p) => p.categoria));
+    expect(categorias.has("pizza")).toBe(true);
+  });
+
+  it("compatibilidade: cardápio sem pizzaCatalog (pedido manual antigo) continua criando pedido 100% pelo caminho legado", async () => {
+    // Sem o campo aditivo pizzaCatalog — reproduz o estado ANTES da Fase 4
+    // (ou uma resposta de /api/cardapio ainda sem o campo).
+    const menuBruto = await getMENUDinamico();
+    const menuLegado = adaptarCardapioParaMontagem(menuBruto)!;
+    expect(menuLegado.pizzaCatalog).toBeUndefined();
+
+    const produtos = listarProdutosManuais(menuLegado);
+    const pizza = construirItemManual(
+      acharProduto(produtos, "pizza:g"),
+      { sabores: ["Chocolate", "Quatro Queijos"], borda: "Requeijão" },
+      menuLegado
+    )!;
+    expect(pizza.pizzaSelection).toBeUndefined();
+
+    const res = await POST(postReq(payload([pizza])));
+    const data = await res.json();
+    expect(data.ok).toBe(true);
+    expect(data.total).toBe(58); // 50 + borda grande 8, igual ao caminho legado de sempre
+  });
+
+  it("criar o pedido não aciona nenhum efeito de impressão — nasce 'novo', sem sinalização de auto-impressão na resposta", async () => {
+    const { itens } = await montarCarrinho();
+    const res = await POST(postReq(payload(itens)));
+    const data = await res.json();
+
+    expect(data.ok).toBe(true);
+    // A impressão automática só é decidida em PATCH /api/orders na transição
+    // novo → em_preparo (aceite) — POST /api/pedido-app nunca devolve nem
+    // avalia esse sinal; a resposta de criação não tem esse campo.
+    expect(data).not.toHaveProperty("podeImprimirAutomaticamente");
+    expect(pedidosCriados()[0].status).toBe("novo");
   });
 });
 
