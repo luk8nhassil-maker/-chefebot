@@ -38,6 +38,12 @@ export interface CatalogSimpleProduct {
   name: string;
   priceCents: number;
   sizes?: { id: SizeId; code: string; priceCents: number }[];
+  /** Passagem direta da configuração oficial já existente do cardápio
+   *  (menu.lanches[].hasFlavors/flavorsKey — ver src/lib/menu.ts) — nunca
+   *  inferida por nome. `flavorsKey` aponta para outra seção do Menu (ex.:
+   *  "calzoneFlavors") que lista os sabores permitidos deste produto. */
+  hasFlavors?: boolean;
+  flavorsKey?: string;
 }
 
 export interface CatalogDrink {

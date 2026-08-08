@@ -34,13 +34,15 @@ function productIdByName(name: string): string {
 }
 
 function calzoneFlavorIdByName(name: string): string {
-  const flavor = simpleCatalog.calzoneFlavors.find((entry) => entry.name === name);
+  const calzone = simpleCatalog.lanches.find((entry) => entry.name === "Calzone");
+  const flavor = calzone?.flavors?.find((entry) => entry.name === name);
   if (!flavor) throw new Error(`Sabor de calzone ${name} não encontrado`);
   return flavor.id;
 }
 
 function miniPizzaFlavorIdByName(name: string): string {
-  const flavor = simpleCatalog.miniPizzaFlavors.find((entry) => entry.name === name);
+  const miniPizza = simpleCatalog.lanches.find((entry) => entry.name === "Mini-Pizza");
+  const flavor = miniPizza?.flavors?.find((entry) => entry.name === name);
   if (!flavor) throw new Error(`Sabor de mini-pizza ${name} não encontrado`);
   return flavor.id;
 }
@@ -624,8 +626,10 @@ describe("resolverItemComSelecaoSimplesEstruturada — disponibilidade fresca (h
     const catalogoSimplesComEsgotado = buildSimpleCatalog(MENU, esgotados);
 
     const calabresaPizza = catalogoPizzaComEsgotado.flavors.find((f) => f.name === "Calabresa")!;
-    const calabresaCalzone = catalogoSimplesComEsgotado.calzoneFlavors.find((f) => f.name === "Calabresa")!;
-    const calabresaMiniPizza = catalogoSimplesComEsgotado.miniPizzaFlavors.find((f) => f.name === "Calabresa")!;
+    const calzoneComEsgotado = catalogoSimplesComEsgotado.lanches.find((l) => l.name === "Calzone")!;
+    const miniPizzaComEsgotado = catalogoSimplesComEsgotado.lanches.find((l) => l.name === "Mini-Pizza")!;
+    const calabresaCalzone = calzoneComEsgotado.flavors!.find((f) => f.name === "Calabresa")!;
+    const calabresaMiniPizza = miniPizzaComEsgotado.flavors!.find((f) => f.name === "Calabresa")!;
 
     // Mesmo flavorId nos três — a entidade é a mesma.
     expect(calabresaCalzone.id).toBe(calabresaPizza.id);
@@ -651,12 +655,13 @@ describe("resolverItemComSelecaoSimplesEstruturada — disponibilidade fresca (h
   });
 
   it("REGRESSÃO — um sabor fora da lista permitida do Calzone (Quatro Queijos) nunca afeta a pizza: continua 100% disponível e precificável normalmente lá", () => {
-    // "Quatro Queijos" nunca aparece em catalogoSimples.calzoneFlavors (não
-    // está em menu.calzoneFlavors) — isso é uma restrição de LISTA
-    // PERMITIDA, não de disponibilidade, e não tem nenhum efeito sobre a
-    // pizza, que continua enxergando o sabor normalmente.
+    // "Quatro Queijos" nunca aparece nos flavors do Calzone (não está em
+    // menu.calzoneFlavors) — isso é uma restrição de LISTA PERMITIDA, não de
+    // disponibilidade, e não tem nenhum efeito sobre a pizza, que continua
+    // enxergando o sabor normalmente.
     const catalogoSimples = buildSimpleCatalog(MENU); // sem nada esgotado
-    expect(catalogoSimples.calzoneFlavors.some((f) => f.name === "Quatro Queijos")).toBe(false);
+    const calzoneSimples = catalogoSimples.lanches.find((l) => l.name === "Calzone")!;
+    expect(calzoneSimples.flavors!.some((f) => f.name === "Quatro Queijos")).toBe(false);
 
     const item: ItemApp = {
       kind: "pizza",
@@ -706,5 +711,77 @@ describe("resolverItemComSelecaoSimplesEstruturada — disponibilidade fresca (h
     };
     const resultado = resolverItemComSelecaoSimplesEstruturada(item, MENU, simpleCatalog);
     expect(resultado.ok).toBe(true);
+  });
+});
+
+describe("resolverItemComSelecaoSimplesEstruturada — estratégia deriva SÓ da configuração oficial, nunca do nome (hardening pós-auditoria, 3ª rodada)", () => {
+  it("REGRESSÃO — renomear o Calzone para um nome sem qualquer relação com 'calzone' preserva strategy single_flavor, os sabores permitidos e o resultado da validação", () => {
+    const menuRenomeado = structuredClone(MENU);
+    const calzone = menuRenomeado.lanches.find((l) => l.name === "Calzone")!;
+    calzone.name = "Combo Dobrado";
+
+    const catalogoRenomeado = buildSimpleCatalog(menuRenomeado);
+    const produtoRenomeado = catalogoRenomeado.lanches.find((l) => l.name === "Combo Dobrado")!;
+    expect(produtoRenomeado.strategy).toBe("single_flavor");
+    const saborCalabresa = produtoRenomeado.flavors?.find((f) => f.name === "Calabresa");
+    expect(saborCalabresa).toBeDefined();
+
+    const item: ItemApp = {
+      kind: "simple",
+      name: "",
+      price: 0,
+      qty: 1,
+      simpleSelection: { productId: produtoRenomeado.id, flavorId: saborCalabresa!.id },
+    };
+    const resultado = resolverItemComSelecaoSimplesEstruturada(item, menuRenomeado, catalogoRenomeado);
+    expect(resultado.ok).toBe(true);
+    if (resultado.ok) {
+      expect(resultado.item.name).toBe("Combo Dobrado");
+      expect(resultado.item.detail).toBe("Sabor: Calabresa");
+      expect(resultado.item.price).toBe(35); // mesmo preço oficial do Calzone, só o nome mudou
+    }
+
+    // Continua exigindo flavorId e rejeitando sizeId/milk — a estratégia não
+    // "esqueceu" a regra do produto só porque o nome não é mais "Calzone".
+    const itemComSizeId: ItemApp = {
+      kind: "simple",
+      name: "",
+      price: 0,
+      qty: 1,
+      simpleSelection: { productId: produtoRenomeado.id, sizeId: "qualquer" },
+    };
+    expect(resolverItemComSelecaoSimplesEstruturada(itemComSizeId, menuRenomeado, catalogoRenomeado)).toEqual({
+      ok: false,
+      error: "Seleção de produto inválida",
+    });
+  });
+
+  it("REGRESSÃO — um produto batizado literalmente 'Calzone' mas SEM a configuração oficial de sabor (hasFlavors/flavorsKey) vira strategy 'fixed' e rejeita flavorId — o texto do nome sozinho nunca decide a estratégia", () => {
+    const menuFalsoCalzone = structuredClone(MENU);
+    // Livra o nome "Calzone" do produto real (evita duas entradas com o
+    // mesmo nome no mesmo cardápio) e o transplanta para o X-Burguer — que
+    // mantém sua configuração oficial 100% plana (hasFlavors:false,
+    // flavorsKey:"", sem sizes).
+    const calzoneReal = menuFalsoCalzone.lanches.find((l) => l.name === "Calzone")!;
+    calzoneReal.name = "Produto Sem Nome Especial";
+    const xBurguer = menuFalsoCalzone.lanches.find((l) => l.name === "X-Burguer")!;
+    xBurguer.name = "Calzone";
+
+    const catalogoFalso = buildSimpleCatalog(menuFalsoCalzone);
+    const produtoFalso = catalogoFalso.lanches.find((l) => l.name === "Calzone")!;
+    expect(produtoFalso.strategy).toBe("fixed");
+    expect(produtoFalso.flavors).toBeUndefined();
+
+    const item: ItemApp = {
+      kind: "simple",
+      name: "",
+      price: 0,
+      qty: 1,
+      simpleSelection: { productId: produtoFalso.id, flavorId: flavorIdByName("Calabresa") },
+    };
+    expect(resolverItemComSelecaoSimplesEstruturada(item, menuFalsoCalzone, catalogoFalso)).toEqual({
+      ok: false,
+      error: "Seleção de produto inválida",
+    });
   });
 });

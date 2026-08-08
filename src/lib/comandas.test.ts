@@ -399,9 +399,9 @@ const CARDAPIO_TESTE_SIMPLES = {
   miniPizzaFlavors: ["Quatro Queijos"],
   borders: [],
   lanches: [
-    { name: "Calzone", price: 35 },
-    { name: "Mini-Pizza", price: 18 },
-    { name: "Macarronada", price: 0, sizes: [{ code: "P", price: 25 }, { code: "G", price: 45 }] },
+    { name: "Calzone", price: 35, hasFlavors: true, flavorsKey: "calzoneFlavors" },
+    { name: "Mini-Pizza", price: 18, hasFlavors: true, flavorsKey: "miniPizzaFlavors" },
+    { name: "Macarronada", price: 0, hasFlavors: false, flavorsKey: "", sizes: [{ code: "P", price: 25 }, { code: "G", price: 45 }] },
   ],
   bebidas: [{ name: "Refrigerante 2L", price: 12 }],
   sucos: [{ name: "Laranja", price: 9 }],

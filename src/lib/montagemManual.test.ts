@@ -73,36 +73,52 @@ const MENU_COM_CATALOGO: MenuManual = { ...MENU, pizzaCatalog: PIZZA_CATALOG, pi
 
 // Catálogo oficial dos demais produtos configuráveis (Fase 6) correspondente
 // ao MENU de teste acima — mesmos nomes/códigos, IDs estáveis inventados só
-// para o teste. calzoneFlavors/miniPizzaFlavors modelam as listas oficiais
-// (menu.calzoneFlavors/miniPizzaFlavors), independentes da lista de sabores
-// de pizza (mesmo que os nomes coincidam aqui).
+// para o teste. Cada produto declara sua própria `strategy` (Fase 6,
+// hardening pós-auditoria 3ª rodada) e, quando `strategy === "single_flavor"`
+// (Calzone, Mini-Pizza), os sabores permitidos DAQUELE produto em
+// `flavors` — reutilizando o MESMO flavorId oficial (`flavor-*`) para o
+// mesmo sabor em ambos, igual ao catálogo real, nunca um ID novo por
+// produto.
 const SIMPLE_CATALOG: SimpleCatalog = {
   lanches: [
-    { id: "product-calzone", name: "Calzone", priceCents: 4000, available: true },
-    { id: "product-mini-pizza", name: "Mini-Pizza", priceCents: 2000, available: true },
+    {
+      id: "product-calzone",
+      name: "Calzone",
+      priceCents: 4000,
+      available: true,
+      strategy: "single_flavor",
+      flavors: [
+        { id: "flavor-quatro-queijos", name: "Quatro Queijos", available: true },
+        { id: "flavor-frango-com-requeijao", name: "Frango com Requeijão", available: true },
+        { id: "flavor-chocolate", name: "Chocolate", available: true },
+      ],
+    },
+    {
+      id: "product-mini-pizza",
+      name: "Mini-Pizza",
+      priceCents: 2000,
+      available: true,
+      strategy: "single_flavor",
+      flavors: [
+        { id: "flavor-quatro-queijos", name: "Quatro Queijos", available: true },
+        { id: "flavor-chocolate", name: "Chocolate", available: true },
+      ],
+    },
     {
       id: "product-macarronada",
       name: "Macarronada",
       priceCents: 0,
       available: true,
+      strategy: "size",
       sizes: [
         { id: "size-p", code: "P", priceCents: 2500 },
         { id: "size-g", code: "G", priceCents: 4500 },
       ],
     },
-    { id: "product-sanduiche-simples", name: "Sanduíche Simples", priceCents: 1800, available: true },
+    { id: "product-sanduiche-simples", name: "Sanduíche Simples", priceCents: 1800, available: true, strategy: "fixed" },
   ],
-  bebidas: [{ id: "product-refrigerante-2l", name: "Refrigerante 2L", priceCents: 1200, available: true }],
-  sucos: [{ id: "product-suco-de-acai", name: "Suco de Açaí", priceCents: 1000, available: true }],
-  calzoneFlavors: [
-    { id: "calzone-flavor-quatro-queijos", name: "Quatro Queijos", available: true },
-    { id: "calzone-flavor-frango-com-requeijao", name: "Frango com Requeijão", available: true },
-    { id: "calzone-flavor-chocolate", name: "Chocolate", available: true },
-  ],
-  miniPizzaFlavors: [
-    { id: "minipizza-flavor-quatro-queijos", name: "Quatro Queijos", available: true },
-    { id: "minipizza-flavor-chocolate", name: "Chocolate", available: true },
-  ],
+  bebidas: [{ id: "product-refrigerante-2l", name: "Refrigerante 2L", priceCents: 1200, available: true, strategy: "fixed" }],
+  sucos: [{ id: "product-suco-de-acai", name: "Suco de Açaí", priceCents: 1000, available: true, strategy: "milk" }],
 };
 
 const MENU_COM_CATALOGO_SIMPLES: MenuManual = { ...MENU, catalog: SIMPLE_CATALOG, catalogPresente: true };
@@ -658,7 +674,7 @@ describe("construirItemManual — simpleSelection (Fase 6)", () => {
       MENU_COM_CATALOGO_SIMPLES
     );
     expect(item).not.toBeNull();
-    expect(item?.simpleSelection).toEqual({ productId: "product-calzone", flavorId: "calzone-flavor-chocolate" });
+    expect(item?.simpleSelection).toEqual({ productId: "product-calzone", flavorId: "flavor-chocolate" });
   });
 
   test("macarronada: ganha productId + sizeId quando catalog resolve", () => {
@@ -726,7 +742,7 @@ describe("fail-closed: catalog PRESENTE mas a seleção não resolve para IDs (F
   });
 
   test("catálogo presente porém malformado (vazio): recusada, sem fallback legado", () => {
-    const catalogoVazio: SimpleCatalog = { lanches: [], bebidas: [], sucos: [], calzoneFlavors: [], miniPizzaFlavors: [] };
+    const catalogoVazio: SimpleCatalog = { lanches: [], bebidas: [], sucos: [] };
     const menu: MenuManual = { ...MENU, catalog: catalogoVazio, catalogPresente: true };
     const item = construirItemManual(produtoPorId("lanches:calzone", menu), { sabores: ["Chocolate"] }, menu);
     expect(item).toBeNull();
@@ -745,7 +761,7 @@ describe("fail-closed: catalog PRESENTE mas a seleção não resolve para IDs (F
       MENU_COM_CATALOGO_SIMPLES
     );
     expect(item).not.toBeNull();
-    expect(item?.simpleSelection).toEqual({ productId: "product-calzone", flavorId: "calzone-flavor-chocolate" });
+    expect(item?.simpleSelection).toEqual({ productId: "product-calzone", flavorId: "flavor-chocolate" });
   });
 });
 
@@ -763,36 +779,62 @@ describe("adaptarCardapioParaMontagem — catalogPresente distingue ausente de m
     expect(menu.catalogPresente).toBeFalsy();
   });
 
-  test("campo catalog presente e bem formado: presente=true e catálogo populado, incluindo calzoneFlavors/miniPizzaFlavors e available", () => {
+  test("campo catalog presente e bem formado: presente=true e catálogo populado, incluindo strategy/flavors por produto e available", () => {
     const menu = adaptarCardapioParaMontagem({
       ...bruto,
       catalog: {
-        lanches: [{ id: "product-calzone", name: "Calzone", priceCents: 4000, available: true }],
+        lanches: [
+          {
+            id: "product-calzone",
+            name: "Calzone",
+            priceCents: 4000,
+            available: true,
+            strategy: "single_flavor",
+            flavors: [{ id: "flavor-quatro-queijos", name: "Quatro Queijos", available: true }],
+          },
+          {
+            id: "product-mini-pizza",
+            name: "Mini-Pizza",
+            priceCents: 2000,
+            available: true,
+            strategy: "single_flavor",
+            flavors: [{ id: "flavor-quatro-queijos", name: "Quatro Queijos", available: false }],
+          },
+        ],
         bebidas: [],
         sucos: [],
-        calzoneFlavors: [{ id: "calzone-flavor-quatro-queijos", name: "Quatro Queijos", available: true }],
-        miniPizzaFlavors: [{ id: "minipizza-flavor-quatro-queijos", name: "Quatro Queijos", available: false }],
       },
     })!;
     expect(menu.catalogPresente).toBe(true);
-    expect(menu.catalog?.lanches).toHaveLength(1);
-    expect(menu.catalog?.lanches[0].available).toBe(true);
-    expect(menu.catalog?.calzoneFlavors).toEqual([{ id: "calzone-flavor-quatro-queijos", name: "Quatro Queijos", available: true }]);
-    expect(menu.catalog?.miniPizzaFlavors).toEqual([{ id: "minipizza-flavor-quatro-queijos", name: "Quatro Queijos", available: false }]);
+    expect(menu.catalog?.lanches).toHaveLength(2);
+    const calzone = menu.catalog?.lanches.find((l) => l.name === "Calzone");
+    const miniPizza = menu.catalog?.lanches.find((l) => l.name === "Mini-Pizza");
+    expect(calzone?.available).toBe(true);
+    expect(calzone?.strategy).toBe("single_flavor");
+    expect(calzone?.flavors).toEqual([{ id: "flavor-quatro-queijos", name: "Quatro Queijos", available: true }]);
+    expect(miniPizza?.flavors).toEqual([{ id: "flavor-quatro-queijos", name: "Quatro Queijos", available: false }]);
   });
 
   test("produto sem `available` explícito (fronteira antiga/malformada): assume disponível por padrão", () => {
     const menu = adaptarCardapioParaMontagem({
       ...bruto,
-      catalog: { lanches: [{ id: "product-calzone", name: "Calzone", priceCents: 4000 }], bebidas: [], sucos: [] },
+      catalog: { lanches: [{ id: "product-calzone", name: "Calzone", priceCents: 4000, strategy: "fixed" }], bebidas: [], sucos: [] },
     })!;
     expect(menu.catalog?.lanches[0].available).toBe(true);
+  });
+
+  test("produto sem `strategy` (fronteira malformada): descartado, nunca vira lanche sem estratégia definida", () => {
+    const menu = adaptarCardapioParaMontagem({
+      ...bruto,
+      catalog: { lanches: [{ id: "product-calzone", name: "Calzone", priceCents: 4000, available: true }], bebidas: [], sucos: [] },
+    })!;
+    expect(menu.catalog).toBeUndefined();
   });
 
   test("campo catalog presente porém totalmente vazio (sem nenhum produto): presente=true, catálogo undefined", () => {
     const menu = adaptarCardapioParaMontagem({
       ...bruto,
-      catalog: { lanches: [], bebidas: [], sucos: [], calzoneFlavors: [], miniPizzaFlavors: [] },
+      catalog: { lanches: [], bebidas: [], sucos: [] },
     })!;
     expect(menu.catalogPresente).toBe(true);
     expect(menu.catalog).toBeUndefined();

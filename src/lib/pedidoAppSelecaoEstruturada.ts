@@ -15,7 +15,7 @@
 import type { PizzaCatalog } from "@/lib/catalog/pizzas";
 import { precificarPizzaPorId } from "@/lib/pricing/pizzaEngine";
 import type { SimpleCatalog } from "@/lib/catalog/simpleProducts";
-import { officialUnitPrice, norm, type ItemApp, type MenuPedidoApp } from "@/lib/pedidoAppItens";
+import { officialUnitPrice, type ItemApp, type MenuPedidoApp } from "@/lib/pedidoAppItens";
 import type { Menu } from "@/lib/menu";
 
 function centavosParaReais(cents: number): number {
@@ -70,14 +70,6 @@ export function temSelecaoSimplesEstruturada(item: object): boolean {
   return Object.prototype.hasOwnProperty.call(item, "simpleSelection");
 }
 
-// Mesma normalização usada por @/lib/montagemManual (ehMiniPizza) e
-// @/lib/pricing/engine — remove tudo que não for letra/número antes de
-// comparar, para não depender de o nome cadastrado usar hífen, espaço ou
-// nenhum separador.
-function ehMiniPizza(nome: string): boolean {
-  return norm(nome).replace(/[^a-z0-9]/g, "") === "minipizza";
-}
-
 /**
  * Resolve um item "simple" com seleção estruturada (Calzone, Mini-Pizza,
  * Macarronada, sucos com/sem leite) — Fase 6, hardening pós-auditoria (2ª
@@ -88,11 +80,18 @@ function ehMiniPizza(nome: string): boolean {
  * fonte de IDs e disponibilidade: um produto ou sabor esgotado é rejeitado
  * aqui, mesmo que o item tenha sido montado antes de esgotar (mesma garantia
  * que a pizza já tem via @/lib/pricing/pizzaEngine). Os sabores de Calzone e
- * Mini-Pizza vêm das listas oficiais já existentes no cardápio
- * (menu.calzoneFlavors / menu.miniPizzaFlavors via `catalog`), com o MESMO
- * flavorId oficial que a pizza usa para o mesmo sabor — nunca um ID novo por
- * produto, nunca a lista de sabores de pizza usada sem passar pela lista
- * permitida do produto.
+ * Mini-Pizza vêm das listas oficiais já existentes no cardápio (expostas por
+ * produto em `produto.flavors`, ver @/lib/catalog/simpleProducts), com o
+ * MESMO flavorId oficial que a pizza usa para o mesmo sabor — nunca um ID
+ * novo por produto.
+ *
+ * ZERO acoplamento por nome: a decisão de quais campos são exigidos/
+ * rejeitados usa exclusivamente `produto.strategy` (calculada uma vez em
+ * @/lib/catalog/simpleProducts a partir da configuração oficial do Menu —
+ * hasFlavors/flavorsKey/sizes/categoria sucos). Nenhuma comparação com o
+ * nome do produto (ex.: `.includes("macarronada")`, `=== "calzone"`,
+ * normalização de "mini-pizza") — renomear o produto no cardápio nunca muda
+ * sua estratégia nem o resultado da validação.
  *
  * ESTRITAMENTE TIPADA POR ESTRATÉGIA: cada tipo de produto aceita só os
  * campos que fazem sentido para ele — um campo que não se aplica ao produto
@@ -132,42 +131,49 @@ export function resolverItemComSelecaoSimplesEstruturada(
   if (!produto) return { ok: false, error: "Produto não encontrado" };
   if (!produto.available) return { ok: false, error: `Produto indisponível: ${produto.name}` };
 
-  const isSuco = catalog.sucos.some((s) => s.id === produto.id);
-  const isMacarronada = norm(produto.name).includes("macarronada");
-  const isCalzone = norm(produto.name) === "calzone";
-  const isMiniPizza = ehMiniPizza(produto.name);
-
   let detail: string | undefined;
 
-  if (isSuco) {
-    // Suco EXIGE milk e REJEITA sizeId/flavorId.
-    if (selecao.sizeId !== undefined || selecao.flavorId !== undefined) {
-      return { ok: false, error: "Seleção de produto inválida" };
+  switch (produto.strategy) {
+    case "milk": {
+      // Suco EXIGE milk e REJEITA sizeId/flavorId.
+      if (selecao.sizeId !== undefined || selecao.flavorId !== undefined) {
+        return { ok: false, error: "Seleção de produto inválida" };
+      }
+      if (selecao.milk === undefined) return { ok: false, error: "Seleção de produto inválida" };
+      detail = selecao.milk === "com" ? "com leite" : "sem leite";
+      break;
     }
-    if (selecao.milk === undefined) return { ok: false, error: "Seleção de produto inválida" };
-    detail = selecao.milk === "com" ? "com leite" : "sem leite";
-  } else if (isMacarronada) {
-    // Macarronada EXIGE sizeId e REJEITA milk/flavorId.
-    if (selecao.milk !== undefined || selecao.flavorId !== undefined) {
-      return { ok: false, error: "Seleção de produto inválida" };
+    case "size": {
+      // Produto com tamanho (ex.: Macarronada) EXIGE sizeId e REJEITA
+      // milk/flavorId.
+      if (selecao.milk !== undefined || selecao.flavorId !== undefined) {
+        return { ok: false, error: "Seleção de produto inválida" };
+      }
+      const size = produto.sizes?.find((s) => s.id === selecao.sizeId);
+      if (!size) return { ok: false, error: "Tamanho não encontrado" };
+      detail = `Tamanho ${size.code}`;
+      break;
     }
-    const size = produto.sizes?.find((s) => s.id === selecao.sizeId);
-    if (!size) return { ok: false, error: "Tamanho não encontrado" };
-    detail = `Tamanho ${size.code}`;
-  } else if (isCalzone || isMiniPizza) {
-    // Calzone/Mini-Pizza EXIGEM flavorId e REJEITAM sizeId/milk.
-    if (selecao.sizeId !== undefined || selecao.milk !== undefined) {
-      return { ok: false, error: "Seleção de produto inválida" };
+    case "single_flavor": {
+      // Produto com sabor único (ex.: Calzone, Mini-Pizza) EXIGE flavorId e
+      // REJEITA sizeId/milk.
+      if (selecao.sizeId !== undefined || selecao.milk !== undefined) {
+        return { ok: false, error: "Seleção de produto inválida" };
+      }
+      const flavor = selecao.flavorId ? produto.flavors?.find((f) => f.id === selecao.flavorId) : undefined;
+      if (!flavor) return { ok: false, error: "Sabor não encontrado" };
+      if (!flavor.available) return { ok: false, error: `Sabor indisponível: ${flavor.name}` };
+      detail = `Sabor: ${flavor.name}`;
+      break;
     }
-    const flavors = isCalzone ? catalog.calzoneFlavors : catalog.miniPizzaFlavors;
-    const flavor = selecao.flavorId ? flavors.find((f) => f.id === selecao.flavorId) : undefined;
-    if (!flavor) return { ok: false, error: "Sabor não encontrado" };
-    if (!flavor.available) return { ok: false, error: `Sabor indisponível: ${flavor.name}` };
-    detail = `Sabor: ${flavor.name}`;
-  } else if (selecao.sizeId !== undefined || selecao.flavorId !== undefined || selecao.milk !== undefined) {
-    // Produto plano (sem tamanho/sabor/leite): REJEITA qualquer escolha
-    // extra — não há nada a configurar para ele.
-    return { ok: false, error: "Seleção de produto inválida" };
+    case "fixed": {
+      // Produto plano (sem tamanho/sabor/leite): REJEITA qualquer escolha
+      // extra — não há nada a configurar para ele.
+      if (selecao.sizeId !== undefined || selecao.flavorId !== undefined || selecao.milk !== undefined) {
+        return { ok: false, error: "Seleção de produto inválida" };
+      }
+      break;
+    }
   }
 
   const resolvido: ItemApp = { kind: "simple", name: produto.name, ...(detail ? { detail } : {}), price: 0, qty: item.qty };

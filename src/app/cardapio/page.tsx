@@ -807,9 +807,14 @@ export function resolverPizzaSelectionIds(
 // GET /api/cardapio -> menu.catalog) — puro, sem nenhuma chamada de rede.
 // Mesma regra de resolverPizzaSelectionIds: catálogo ausente ou nome sem
 // correspondência devolve undefined, e o item cai no formato 100% legado.
-// Sabor de Calzone/Mini-Pizza é resolvido contra a lista oficial DAQUELE
-// produto (calzoneFlavors/miniPizzaFlavors) — nunca contra a lista de
-// sabores de pizza, que é uma lista comercial diferente.
+//
+// ZERO acoplamento por nome: uma vez encontrado o produto (por `name`, só
+// para localizá-lo na lista), tamanho e sabor são lidos direto de
+// `produto.sizes`/`produto.flavors`, já filtrados pelo servidor conforme a
+// `strategy` daquele produto (ver @/lib/catalog/simpleProducts). Sabor de
+// Calzone/Mini-Pizza é resolvido contra a lista oficial DAQUELE produto
+// (`produto.flavors`) — nunca contra a lista de sabores de pizza, que é uma
+// lista comercial diferente.
 export function resolverSimpleSelectionIds(
   catalog: SimpleCatalog | undefined,
   productName: string,
@@ -822,15 +827,13 @@ export function resolverSimpleSelectionIds(
   if (opts.milk !== undefined) return { productId: produto.id, milk: opts.milk };
 
   if (opts.sizeCode !== undefined) {
-    const lanche = catalog.lanches.find((l) => l.id === produto.id);
-    const size = lanche?.sizes?.find((s) => s.code === opts.sizeCode);
+    const size = produto.sizes?.find((s) => s.code === opts.sizeCode);
     if (!size) return undefined;
     return { productId: produto.id, sizeId: size.id };
   }
 
   if (opts.flavorName !== undefined) {
-    const flavors = isCalzoneName(productName) ? catalog.calzoneFlavors : isMiniPizzaName(productName) ? catalog.miniPizzaFlavors : [];
-    const flavor = flavors.find((f) => f.name === opts.flavorName);
+    const flavor = produto.flavors?.find((f) => f.name === opts.flavorName);
     if (!flavor) return undefined;
     return { productId: produto.id, flavorId: flavor.id };
   }

@@ -33,6 +33,8 @@ export function buildCatalog(menu: Menu): Catalog {
       code: size.code,
       priceCents: toCents(size.price),
     })),
+    hasFlavors: lanche.hasFlavors,
+    flavorsKey: lanche.flavorsKey,
   }));
 
   const bebidas = menu.bebidas.map((bebida) => ({

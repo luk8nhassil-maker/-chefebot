@@ -44,7 +44,7 @@ import {
   type MenuPedidoApp,
 } from "./pedidoAppItens";
 import type { PizzaCatalog, PizzaCategoryId } from "./catalog/pizzas";
-import type { SimpleCatalog } from "./catalog/simpleProducts";
+import type { SimpleCatalog, SimpleCatalogStrategy } from "./catalog/simpleProducts";
 
 /**
  * Contrato de cardápio da montagem manual. Declarado AQUI, em `src/lib`, e
@@ -73,11 +73,14 @@ export type MenuManual = MenuPedidoApp & {
   // Catálogo oficial dos demais produtos configuráveis, com IDs estáveis e
   // disponibilidade em tempo real (Fase 6), já vem de GET /api/cardapio
   // (campo aditivo) — usado SÓ para resolver productId/sizeId/flavorId/milk
-  // (ver resolverSimpleSelectionIds abaixo). Sabores de Calzone/Mini-Pizza
-  // vêm das listas oficiais já existentes (calzoneFlavors/miniPizzaFlavors),
-  // nunca da lista de sabores de pizza. `undefined` quando ausente OU
-  // malformado — ver `catalogPresente` para distinguir os dois casos, mesma
-  // regra de `pizzaCatalogPresente`.
+  // (ver resolverSimpleSelectionIds abaixo). Cada produto declara sua própria
+  // `strategy` (fixed/size/single_flavor/milk, derivada só da configuração
+  // oficial do cardápio — ver @/lib/catalog/simpleProducts) e, quando
+  // `strategy === "single_flavor"` (ex.: Calzone, Mini-Pizza), a lista de
+  // sabores permitidos DESTE produto em `produto.flavors` — nunca a lista de
+  // sabores de pizza. `undefined` quando ausente OU malformado — ver
+  // `catalogPresente` para distinguir os dois casos, mesma regra de
+  // `pizzaCatalogPresente`.
   catalog?: SimpleCatalog;
   // Flag interna (nunca lida fora deste módulo): `true` quando a resposta de
   // GET /api/cardapio TINHA a propriedade `catalog` (mesmo que
@@ -168,13 +171,26 @@ function lerPizzaCatalog(bruto: unknown): PizzaCatalog | undefined {
   return { sizes, flavors, borders };
 }
 
+function lerStrategy(v: unknown): SimpleCatalogStrategy | null {
+  return v === "fixed" || v === "size" || v === "single_flavor" || v === "milk" ? v : null;
+}
+
+function lerFlavor(item: Record<string, unknown>) {
+  const id = texto(item.id);
+  const name = texto(item.name);
+  if (id === null || name === null) return null;
+  return { id, name, available: typeof item.available === "boolean" ? item.available : true };
+}
+
 /**
  * Valida `bruto.catalog` (campo aditivo de GET /api/cardapio, Fase 6) campo a
  * campo, mesma disciplina de `lerPizzaCatalog` acima — nunca um cast.
  * Qualquer coisa fora do formato esperado é descartada silenciosamente
  * (`undefined`): a montagem dos produtos configuráveis (Calzone, Mini-Pizza,
  * Macarronada, sucos) cai no formato 100% legado, nunca quebra a tela por
- * causa de um campo aditivo malformado.
+ * causa de um campo aditivo malformado. `strategy` é lida como veio do
+ * servidor (@/lib/catalog/simpleProducts) — nunca recalculada aqui a partir
+ * do nome do produto.
  */
 function lerCatalog(bruto: unknown): SimpleCatalog | undefined {
   if (!ehObjeto(bruto)) return undefined;
@@ -183,7 +199,8 @@ function lerCatalog(bruto: unknown): SimpleCatalog | undefined {
     const id = texto(item.id);
     const name = texto(item.name);
     const priceCents = numeroFinito(item.priceCents);
-    if (id === null || name === null || priceCents === null) return null;
+    const strategy = lerStrategy(item.strategy);
+    if (id === null || name === null || priceCents === null || strategy === null) return null;
     const available = typeof item.available === "boolean" ? item.available : true;
     const sizes = listaValida(item.sizes, (s) => {
       const sid = texto(s.id);
@@ -191,24 +208,24 @@ function lerCatalog(bruto: unknown): SimpleCatalog | undefined {
       const sPriceCents = numeroFinito(s.priceCents);
       return sid !== null && code !== null && sPriceCents !== null ? { id: sid, code, priceCents: sPriceCents } : null;
     });
-    return { id, name, priceCents, available, ...(sizes.length > 0 ? { sizes } : {}) };
+    const flavors = listaValida(item.flavors, lerFlavor);
+    return {
+      id,
+      name,
+      priceCents,
+      available,
+      strategy,
+      ...(sizes.length > 0 ? { sizes } : {}),
+      ...(flavors.length > 0 ? { flavors } : {}),
+    };
   }
 
   const lanches = listaValida(bruto.lanches, lerSimpleProduct);
   const bebidas = listaValida(bruto.bebidas, lerSimpleProduct);
   const sucos = listaValida(bruto.sucos, lerSimpleProduct);
 
-  function lerFlavor(item: Record<string, unknown>) {
-    const id = texto(item.id);
-    const name = texto(item.name);
-    if (id === null || name === null) return null;
-    return { id, name, available: typeof item.available === "boolean" ? item.available : true };
-  }
-  const calzoneFlavors = listaValida(bruto.calzoneFlavors, lerFlavor);
-  const miniPizzaFlavors = listaValida(bruto.miniPizzaFlavors, lerFlavor);
-
   if (lanches.length === 0 && bebidas.length === 0 && sucos.length === 0) return undefined;
-  return { lanches, bebidas, sucos, calzoneFlavors, miniPizzaFlavors };
+  return { lanches, bebidas, sucos };
 }
 
 /**
@@ -717,10 +734,15 @@ export function resolverPizzaSelectionIds(
  * Resolve a seleção de um produto simples configurável (Calzone, Mini-Pizza,
  * Macarronada, sucos) para os IDs estáveis do catálogo oficial (Fase 6,
  * `menu.catalog`) — puro, sem I/O. Mesma regra de resolverPizzaSelectionIds:
- * catálogo ausente ou nome sem correspondência devolve `undefined`. Sabor de
- * Calzone/Mini-Pizza é resolvido contra a lista oficial DAQUELE produto
- * (calzoneFlavors/miniPizzaFlavors) — nunca contra a lista de sabores de
- * pizza, que é uma lista comercial diferente.
+ * catálogo ausente ou nome sem correspondência devolve `undefined`.
+ *
+ * ZERO acoplamento por nome: uma vez encontrado o produto (por `name`, só
+ * para localizá-lo na lista — não para decidir nada), tamanho e sabor são
+ * lidos direto de `produto.sizes`/`produto.flavors`, já filtrados pelo
+ * servidor conforme a `strategy` daquele produto (ver
+ * @/lib/catalog/simpleProducts). Sabor de Calzone/Mini-Pizza é resolvido
+ * contra a lista oficial DAQUELE produto (`produto.flavors`) — nunca contra a
+ * lista de sabores de pizza, que é uma lista comercial diferente.
  */
 export function resolverSimpleSelectionIds(
   catalog: SimpleCatalog | undefined,
@@ -734,15 +756,13 @@ export function resolverSimpleSelectionIds(
   if (opts.milk !== undefined) return { productId: produto.id, milk: opts.milk };
 
   if (opts.sizeCode !== undefined) {
-    const lanche = catalog.lanches.find((l) => l.id === produto.id);
-    const size = lanche?.sizes?.find((s) => s.code === opts.sizeCode);
+    const size = produto.sizes?.find((s) => s.code === opts.sizeCode);
     if (!size) return undefined;
     return { productId: produto.id, sizeId: size.id };
   }
 
   if (opts.flavorName !== undefined) {
-    const flavors = ehCalzone(productName) ? catalog.calzoneFlavors : ehMiniPizza(productName) ? catalog.miniPizzaFlavors : [];
-    const flavor = flavors.find((f) => f.name === opts.flavorName);
+    const flavor = produto.flavors?.find((f) => f.name === opts.flavorName);
     if (!flavor) return undefined;
     return { productId: produto.id, flavorId: flavor.id };
   }

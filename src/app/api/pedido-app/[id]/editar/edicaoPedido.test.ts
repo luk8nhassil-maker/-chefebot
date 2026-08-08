@@ -509,7 +509,7 @@ describe("POST salvar — seleção estruturada de produto simples por ID (Fase 
   const productIdCalzone = simpleCatalog.lanches.find((l) => l.name === "Calzone")!.id;
   const productIdMacarronada = simpleCatalog.lanches.find((l) => l.name === "Macarronada de Carne")!.id;
   const sizeGMacarronada = simpleCatalog.lanches.find((l) => l.name === "Macarronada de Carne")!.sizes!.find((s) => s.code === "G")!.id;
-  const flavorCalabresaCalzone = simpleCatalog.calzoneFlavors.find((f) => f.name === "Calabresa")!.id;
+  const flavorCalabresaCalzone = simpleCatalog.lanches.find((l) => l.name === "Calzone")!.flavors!.find((f) => f.name === "Calabresa")!.id;
 
   async function iniciarEdicao() {
     seedPedido();

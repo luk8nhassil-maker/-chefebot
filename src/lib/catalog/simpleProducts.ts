@@ -1,6 +1,6 @@
 // Catálogo oficial dos demais produtos configuráveis (Calzone, Mini-Pizza,
 // Macarronada, sucos, e produtos simples planos) — Fase 6, hardening pós-
-// auditoria (2ª rodada).
+// auditoria (3ª rodada).
 //
 // Diferente do catálogo genérico de ./adapter (que não tem disponibilidade),
 // esta camada adiciona disponibilidade EM TEMPO REAL (mesma lista
@@ -9,29 +9,31 @@
 // simples (lanche/bebida/suco) — igual ao que @/lib/catalog/pizzas já faz
 // para pizza (Fase 2).
 //
-// Sabores de Calzone e Mini-Pizza: um sabor como "Calabresa" é a MESMA
-// entidade comercial em pizza, calzone e mini-pizza — reutiliza o MESMO
-// flavorId oficial do catálogo canônico de sabores (o mesmo id que
-// @/lib/catalog/pizzas expõe para pizza), nunca um ID novo por produto.
-// O que muda por produto são só (a) a LISTA de sabores permitidos — as
-// listas oficiais JÁ EXISTENTES no cardápio, menu.calzoneFlavors/
-// menu.miniPizzaFlavors, nunca inventadas aqui — e (b) a disponibilidade,
-// recalculada de forma independente para cada lista (mesmo cálculo, mesma
-// fonte "esgotados", mas nunca lida "por referência" do catálogo de outro
-// produto). Um sabor fora da lista permitida de um produto (ex.: "Sensação",
-// doce, fora de menu.calzoneFlavors) nunca resolve para aquele produto,
-// mesmo com um flavorId válido de pizza.
+// ZERO acoplamento por nome: cada produto recebe uma `strategy` explícita,
+// derivada SOMENTE da configuração oficial já existente do cardápio (nunca
+// do texto do nome do produto):
+//   - "milk"          — produto está na seção sucos do Menu (categoria).
+//   - "size"           — o produto tem `sizes` (ex.: Macarronada).
+//   - "single_flavor" — o produto tem `hasFlavors: true` + `flavorsKey`
+//                        (ex.: Calzone, Mini-Pizza — menu.lanches[i]).
+//   - "fixed"          — nenhuma das anteriores (produto sem configuração).
+// Nenhum `norm(nome) === "calzone"` nem `.includes("macarronada")` em
+// nenhum lugar: renomear o produto no cardápio nunca muda sua estratégia.
+//
+// Sabores de um produto "single_flavor": um sabor como "Calabresa" é a
+// MESMA entidade comercial em pizza, calzone e mini-pizza — reutiliza o
+// MESMO flavorId oficial do catálogo canônico de sabores (o mesmo id que
+// @/lib/catalog/pizzas expõe para pizza), nunca um ID novo por produto. O
+// que muda por produto é só (a) a LISTA de sabores permitidos — apontada
+// pela própria configuração oficial (`flavorsKey`, ex.: "calzoneFlavors"),
+// nunca inventada aqui — e (b) a disponibilidade, recalculada de forma
+// independente para cada lista (mesmo cálculo, mesma fonte "esgotados", mas
+// nunca lida "por referência" do catálogo de outro produto).
 import type { Menu } from "@/lib/menu";
 import { norm } from "@/lib/pedidoAppItens";
 import { buildCatalog } from "./adapter";
 
-export interface SimpleCatalogProduct {
-  id: string;
-  name: string;
-  priceCents: number;
-  available: boolean;
-  sizes?: { id: string; code: string; priceCents: number }[];
-}
+export type SimpleCatalogStrategy = "fixed" | "size" | "single_flavor" | "milk";
 
 export interface SimpleCatalogFlavor {
   id: string;
@@ -39,42 +41,38 @@ export interface SimpleCatalogFlavor {
   available: boolean;
 }
 
+export interface SimpleCatalogProduct {
+  id: string;
+  name: string;
+  priceCents: number;
+  available: boolean;
+  strategy: SimpleCatalogStrategy;
+  /** Presente só quando strategy === "size" (ex.: Macarronada). */
+  sizes?: { id: string; code: string; priceCents: number }[];
+  /** Presente só quando strategy === "single_flavor" (ex.: Calzone,
+   *  Mini-Pizza) — sabores permitidos DESTE produto, com o mesmo flavorId
+   *  oficial do catálogo canônico (nunca um ID novo por produto). */
+  flavors?: SimpleCatalogFlavor[];
+}
+
 export interface SimpleCatalog {
   lanches: SimpleCatalogProduct[];
   bebidas: SimpleCatalogProduct[];
   sucos: SimpleCatalogProduct[];
-  /** Sabores permitidos do Calzone (menu.calzoneFlavors), com o MESMO
-   *  flavorId do catálogo canônico de sabores — produto de 1 sabor só. */
-  calzoneFlavors: SimpleCatalogFlavor[];
-  /** Sabores permitidos da Mini-Pizza (menu.miniPizzaFlavors), com o MESMO
-   *  flavorId do catálogo canônico de sabores — produto de 1 sabor só. */
-  miniPizzaFlavors: SimpleCatalogFlavor[];
 }
 
 function estaEsgotado(nome: string, esgotadosNorm: string[]): boolean {
   return esgotadosNorm.includes(norm(nome));
 }
 
-function comDisponibilidade<T extends { name: string }>(produto: T, esgotadosNorm: string[]): T & { available: boolean } {
-  return { ...produto, available: !estaEsgotado(produto.name, esgotadosNorm) };
-}
-
-/**
- * Filtra o catálogo CANÔNICO de sabores (mesmos IDs/nomes que
- * @/lib/catalog/adapter e @/lib/catalog/pizzas usam para pizza) pelos nomes
- * permitidos de um produto específico, recalculando disponibilidade de
- * forma independente para essa lista — nunca por referência a outro
- * catálogo (pizza, ou o outro produto simples).
- */
-function flavoresPermitidos(
-  flavoresCanonicos: readonly { id: string; name: string }[],
-  nomesPermitidos: readonly string[] | undefined,
-  esgotadosNorm: string[]
-): SimpleCatalogFlavor[] {
-  const permitidosNorm = new Set((nomesPermitidos ?? []).map(norm));
-  return flavoresCanonicos
-    .filter((flavor) => permitidosNorm.has(norm(flavor.name)))
-    .map((flavor) => ({ id: flavor.id, name: flavor.name, available: !estaEsgotado(flavor.name, esgotadosNorm) }));
+/** Lê `menu[flavorsKey]` dinamicamente — a própria configuração oficial do
+ *  produto (menu.lanches[i].flavorsKey) já diz qual seção do Menu contém a
+ *  lista de sabores permitidos (ex.: "calzoneFlavors"). Nunca um nome de
+ *  produto decide isso. */
+function nomesDaListaOficial(menu: Menu, flavorsKey: string | undefined): readonly string[] {
+  if (!flavorsKey) return [];
+  const valor = (menu as unknown as Record<string, unknown>)[flavorsKey];
+  return Array.isArray(valor) ? (valor as string[]) : [];
 }
 
 /**
@@ -89,11 +87,43 @@ export function buildSimpleCatalog(menu: Menu, esgotados: readonly string[] = []
   // (@/lib/catalog/adapter: `flavor-<slug>`), nunca um espaço de IDs novo.
   const flavoresCanonicos = [...catalog.saltyFlavors, ...catalog.sweetFlavors];
 
-  return {
-    lanches: catalog.lanches.map((p) => comDisponibilidade(p, esgotadosNorm)),
-    bebidas: catalog.bebidas.map((p) => comDisponibilidade(p, esgotadosNorm)),
-    sucos: catalog.sucos.map((p) => comDisponibilidade(p, esgotadosNorm)),
-    calzoneFlavors: flavoresPermitidos(flavoresCanonicos, menu.calzoneFlavors, esgotadosNorm),
-    miniPizzaFlavors: flavoresPermitidos(flavoresCanonicos, menu.miniPizzaFlavors, esgotadosNorm),
-  };
+  function flavoresPermitidos(flavorsKey: string | undefined): SimpleCatalogFlavor[] {
+    const permitidosNorm = new Set(nomesDaListaOficial(menu, flavorsKey).map(norm));
+    return flavoresCanonicos
+      .filter((flavor) => permitidosNorm.has(norm(flavor.name)))
+      .map((flavor) => ({ id: flavor.id, name: flavor.name, available: !estaEsgotado(flavor.name, esgotadosNorm) }));
+  }
+
+  const lanches: SimpleCatalogProduct[] = catalog.lanches.map((produto) => {
+    const available = !estaEsgotado(produto.name, esgotadosNorm);
+    const base = { id: produto.id, name: produto.name, priceCents: produto.priceCents, available };
+
+    if (produto.sizes && produto.sizes.length > 0) {
+      return { ...base, strategy: "size" as const, sizes: produto.sizes };
+    }
+    if (produto.hasFlavors && produto.flavorsKey) {
+      return { ...base, strategy: "single_flavor" as const, flavors: flavoresPermitidos(produto.flavorsKey) };
+    }
+    return { ...base, strategy: "fixed" as const };
+  });
+
+  const bebidas: SimpleCatalogProduct[] = catalog.bebidas.map((produto) => ({
+    id: produto.id,
+    name: produto.name,
+    priceCents: produto.priceCents,
+    available: !estaEsgotado(produto.name, esgotadosNorm),
+    strategy: "fixed",
+  }));
+
+  // Categoria "sucos" (a própria seção do Menu) é o sinal — nunca o nome de
+  // um suco específico — de que a estratégia é "milk".
+  const sucos: SimpleCatalogProduct[] = catalog.sucos.map((produto) => ({
+    id: produto.id,
+    name: produto.name,
+    priceCents: produto.priceCents,
+    available: !estaEsgotado(produto.name, esgotadosNorm),
+    strategy: "milk",
+  }));
+
+  return { lanches, bebidas, sucos };
 }

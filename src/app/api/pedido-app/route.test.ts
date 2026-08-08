@@ -2024,8 +2024,8 @@ describe("POST /api/pedido-app — seleção estruturada de produto simples por 
   // Sabores de Calzone e Mini-Pizza vêm das listas oficiais PRÓPRIAS de cada
   // produto (calzoneFlavors/miniPizzaFlavors) — nunca a lista de sabores de
   // pizza — e nunca se confundem entre si, mesmo com o mesmo nome.
-  const flavorCalabresaCalzone = simpleCatalog.calzoneFlavors.find((f) => f.name === "Calabresa")!.id;
-  const flavorCalabresaMiniPizza = simpleCatalog.miniPizzaFlavors.find((f) => f.name === "Calabresa")!.id;
+  const flavorCalabresaCalzone = simpleCatalog.lanches.find((l) => l.name === "Calzone")!.flavors!.find((f) => f.name === "Calabresa")!.id;
+  const flavorCalabresaMiniPizza = simpleCatalog.lanches.find((l) => l.name === "Mini-Pizza")!.flavors!.find((f) => f.name === "Calabresa")!.id;
 
   const simplePayload = {
     cliente: "Lucas Brito",
@@ -2380,7 +2380,7 @@ describe("POST /api/pedido-app — snapshotOficial (Fase 3)", () => {
   it("produto simples estruturado (Fase 6): item do snapshot carrega selecao (productId/flavorId) e preço oficial em centavos", async () => {
     const simpleCatalog = buildSimpleCatalog(MENU);
     const productIdCalzone = simpleCatalog.lanches.find((l) => l.name === "Calzone")!.id;
-    const flavorCalabresaCalzone = simpleCatalog.calzoneFlavors.find((f) => f.name === "Calabresa")!.id;
+    const flavorCalabresaCalzone = simpleCatalog.lanches.find((l) => l.name === "Calzone")!.flavors!.find((f) => f.name === "Calabresa")!.id;
     const calzone = MENU.lanches.find((l) => l.name === "Calzone")!;
 
     const res = await POST(postReq({
@@ -2404,7 +2404,7 @@ describe("POST /api/pedido-app — snapshotOficial (Fase 3)", () => {
   it("REGRESSÃO — sabor esgota entre a montagem e o envio: rejeitado com 400, nunca cria o pedido com o preço/nome adulterado", async () => {
     const simpleCatalog = buildSimpleCatalog(MENU);
     const productIdCalzone = simpleCatalog.lanches.find((l) => l.name === "Calzone")!.id;
-    const flavorCalabresaCalzone = simpleCatalog.calzoneFlavors.find((f) => f.name === "Calabresa")!.id;
+    const flavorCalabresaCalzone = simpleCatalog.lanches.find((l) => l.name === "Calzone")!.flavors!.find((f) => f.name === "Calabresa")!.id;
     store.set("esgotados", ["Calabresa"]);
 
     const res = await POST(postReq({
@@ -2419,7 +2419,7 @@ describe("POST /api/pedido-app — snapshotOficial (Fase 3)", () => {
   it("REGRESSÃO — produto inteiro esgota entre a montagem e o envio: rejeitado com 400", async () => {
     const simpleCatalog = buildSimpleCatalog(MENU);
     const productIdCalzone = simpleCatalog.lanches.find((l) => l.name === "Calzone")!.id;
-    const flavorCalabresaCalzone = simpleCatalog.calzoneFlavors.find((f) => f.name === "Calabresa")!.id;
+    const flavorCalabresaCalzone = simpleCatalog.lanches.find((l) => l.name === "Calzone")!.flavors!.find((f) => f.name === "Calabresa")!.id;
     store.set("esgotados", ["Calzone"]);
 
     const res = await POST(postReq({

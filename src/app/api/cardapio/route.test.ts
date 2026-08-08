@@ -122,27 +122,35 @@ describe("Esgotado reflete no cardápio público (GET) após PATCH", () => {
     const calzone = data.catalog.lanches.find((l: { name: string }) => l.name === "Calzone");
     expect(calzone?.id).toBe("product-calzone");
     expect(calzone?.available).toBe(true);
+    expect(calzone?.strategy).toBe("single_flavor");
     const macarronada = data.catalog.lanches.find((l: { name: string }) => l.name === "Macarronada de Carne");
+    expect(macarronada?.strategy).toBe("size");
     expect(Array.isArray(macarronada?.sizes)).toBe(true);
     // Sabores de Calzone e Mini-Pizza vêm das listas oficiais próprias de
-    // cada produto (menu.calzoneFlavors/miniPizzaFlavors) — nunca inventadas
-    // aqui, e nunca a mesma lista de sabores de pizza.
-    expect(Array.isArray(data.catalog.calzoneFlavors)).toBe(true);
-    expect(data.catalog.calzoneFlavors.length).toBeGreaterThan(0);
-    expect(Array.isArray(data.catalog.miniPizzaFlavors)).toBe(true);
-    expect(data.catalog.miniPizzaFlavors.length).toBeGreaterThan(0);
+    // cada produto (menu.calzoneFlavors/miniPizzaFlavors), expostas em
+    // `produto.flavors` — nunca inventadas aqui, e nunca a mesma lista de
+    // sabores de pizza.
+    const miniPizza = data.catalog.lanches.find((l: { name: string }) => l.name === "Mini-Pizza");
+    expect(miniPizza?.strategy).toBe("single_flavor");
+    expect(Array.isArray(calzone?.flavors)).toBe(true);
+    expect(calzone.flavors.length).toBeGreaterThan(0);
+    expect(Array.isArray(miniPizza?.flavors)).toBe(true);
+    expect(miniPizza.flavors.length).toBeGreaterThan(0);
   });
 
   it("GET reflete em tempo real um sabor de Calzone/Mini-Pizza esgotado no catálogo dos produtos configuráveis (Fase 6)", async () => {
     const antes = await (await GET()).json();
-    const calabresaCalzoneAntes = antes.catalog.calzoneFlavors.find((f: { name: string }) => f.name === "Calabresa");
+    const calzoneAntes = antes.catalog.lanches.find((l: { name: string }) => l.name === "Calzone");
+    const calabresaCalzoneAntes = calzoneAntes.flavors.find((f: { name: string }) => f.name === "Calabresa");
     expect(calabresaCalzoneAntes.available).toBe(true);
 
     await marcar("Calabresa", true);
     const depois = await (await GET()).json();
-    const calabresaCalzoneDepois = depois.catalog.calzoneFlavors.find((f: { name: string }) => f.name === "Calabresa");
+    const calzoneDepois = depois.catalog.lanches.find((l: { name: string }) => l.name === "Calzone");
+    const calabresaCalzoneDepois = calzoneDepois.flavors.find((f: { name: string }) => f.name === "Calabresa");
     expect(calabresaCalzoneDepois.available).toBe(false);
-    const calabresaMiniPizzaDepois = depois.catalog.miniPizzaFlavors.find((f: { name: string }) => f.name === "Calabresa");
+    const miniPizzaDepois = depois.catalog.lanches.find((l: { name: string }) => l.name === "Mini-Pizza");
+    const calabresaMiniPizzaDepois = miniPizzaDepois.flavors.find((f: { name: string }) => f.name === "Calabresa");
     expect(calabresaMiniPizzaDepois.available).toBe(false);
   });
 

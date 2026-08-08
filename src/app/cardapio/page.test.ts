@@ -342,14 +342,14 @@ describe("resolverSimpleSelectionIds — resolução de IDs do catálogo oficial
   test("calzone: resolve productId + flavorId pela lista oficial calzoneFlavors", () => {
     const sel = resolverSimpleSelectionIds(catalog, "Calzone", { flavorName: "Calabresa" });
     const produto = catalog.lanches.find((l) => l.name === "Calzone")!;
-    const sabor = catalog.calzoneFlavors.find((f) => f.name === "Calabresa")!;
+    const sabor = produto.flavors!.find((f) => f.name === "Calabresa")!;
     expect(sel).toEqual({ productId: produto.id, flavorId: sabor.id });
   });
 
   test("mini-pizza: resolve productId + flavorId pela lista oficial miniPizzaFlavors", () => {
     const sel = resolverSimpleSelectionIds(catalog, "Mini-Pizza", { flavorName: "Calabresa" });
     const produto = catalog.lanches.find((l) => l.name === "Mini-Pizza")!;
-    const sabor = catalog.miniPizzaFlavors.find((f) => f.name === "Calabresa")!;
+    const sabor = produto.flavors!.find((f) => f.name === "Calabresa")!;
     expect(sel).toEqual({ productId: produto.id, flavorId: sabor.id });
   });
 
