@@ -33,6 +33,13 @@ const FIDELIDADE_PADRAO: ConfigFidelidade = {
 
 type ItemCardapio = { name: string; price: number }
 
+// Contrato EXPLÍCITO do que é persistível em POST /api/cardapio — não é o
+// mesmo formato do GET (que também traz campos aditivos/somente-leitura:
+// catalog, pizzaCatalog, horario, esgotados, esgotadosMetadata). Precisa
+// cobrir toda seção que a tela não edita diretamente mas PODE já estar
+// customizada no Redis (calzoneFlavors/miniPizzaFlavors/payments/lanches) —
+// caso contrário "Salvar Cardápio" (que faz `redis.set` substituindo o
+// objeto inteiro) apaga essas seções silenciosamente.
 type Cardapio = {
   saltyFlavors: string[]
   sweetFlavors: string[]
@@ -41,6 +48,14 @@ type Cardapio = {
   neighborhoods: { name: string; fee: number }[]
   sizes: { code: string; label: string; price: number }[]
   borders: { label: string; priceSmall: number; priceLarge: number }[]
+  calzoneFlavors: string[]
+  miniPizzaFlavors: string[]
+  payments: string[]
+}
+
+const CARDAPIO_PADRAO: Cardapio = {
+  saltyFlavors: [], sweetFlavors: [], bebidas: [], sucos: [], neighborhoods: [], sizes: [], borders: [],
+  calzoneFlavors: [], miniPizzaFlavors: [], payments: [],
 }
 
 const CONFIG_PADRAO: Config = {
@@ -187,7 +202,7 @@ export default function ConfiguracoesPage() {
   const router = useRouter()
   const [aba, setAba] = useState<'geral' | 'cardapio'>('geral')
   const [config, setConfig] = useState<Config>(CONFIG_PADRAO)
-  const [cardapio, setCardapio] = useState<Cardapio>({ saltyFlavors: [], sweetFlavors: [], bebidas: [], sucos: [], neighborhoods: [], sizes: [], borders: [] })
+  const [cardapio, setCardapio] = useState<Cardapio>(CARDAPIO_PADRAO)
   const [loading, setLoading] = useState(true)
   const [checking, setChecking] = useState(true)
   const [salvando, setSalvando] = useState(false)
@@ -199,6 +214,21 @@ export default function ConfiguracoesPage() {
   const [fidelidade, setFidelidade] = useState<ConfigFidelidade>(FIDELIDADE_PADRAO)
   const [salvandoFidelidade, setSalvandoFidelidade] = useState(false)
   const [mensagemFidelidade, setMensagemFidelidade] = useState('')
+  // Correção da regra comercial do Calzone: `true` = "Reaproveitar sabores
+  // da Pizza" (modo padrão/aprovado), `false` = usa a lista própria
+  // calzoneFlavors. Espelha exatamente `flavorsMode` de
+  // menu.lanches[Calzone] (ausente = "pizza") — ver GET /api/cardapio.
+  const [calzoneModoPizza, setCalzoneModoPizza] = useState(true)
+  const [salvandoCalzoneModo, setSalvandoCalzoneModo] = useState(false)
+  const [mensagemCalzoneModo, setMensagemCalzoneModo] = useState('')
+  // `lanches` cru (Calzone/Mini-Pizza/Macarronada/etc.), preservado tal como
+  // veio de GET /api/cardapio — NUNCA reconstruído campo a campo aqui. Existe
+  // só para "Salvar Cardápio" (abaixo) reenviar essa seção junto com o resto:
+  // POST /api/cardapio substitui o objeto INTEIRO persistido no Redis: sem
+  // isso, salvar qualquer sabor/bebida/bairro apagaria `lanches` (e com ele
+  // o flavorsMode do Calzone). Uma única fonte: o próprio alternarCalzoneModo
+  // também atualiza este estado, nunca cria um segundo lugar que guarde modo.
+  const [lanches, setLanches] = useState<Array<Record<string, unknown>>>([])
   const is24h = config.horaAbertura === 0 && config.horaFechamento === 24
 
   useEffect(() => {
@@ -236,11 +266,21 @@ export default function ConfiguracoesPage() {
           neighborhoods: data.neighborhoods || [],
           sizes: data.sizes || [],
           borders: data.borders || [],
+          // Seções que esta tela não edita diretamente, mas que PODEM já
+          // estar customizadas no Redis — precisam sobreviver a "Salvar
+          // Cardápio" (POST /api/cardapio substitui o objeto inteiro).
+          calzoneFlavors: data.calzoneFlavors || [],
+          miniPizzaFlavors: data.miniPizzaFlavors || [],
+          payments: data.payments || [],
         })
+        const lanchesData: Array<Record<string, unknown>> = Array.isArray(data?.lanches) ? data.lanches : []
+        setLanches(lanchesData)
+        const calzone = lanchesData.find(l => l.flavorsKey === 'calzoneFlavors')
+        setCalzoneModoPizza(!calzone || calzone.flavorsMode !== 'own')
       })
       .catch(err => {
         console.error('Falha ao carregar cardapio:', err)
-        setCardapio({ saltyFlavors: [], sweetFlavors: [], bebidas: [], sucos: [], neighborhoods: [], sizes: [], borders: [] })
+        setCardapio(CARDAPIO_PADRAO)
       })
   }, [router])
 
@@ -282,10 +322,45 @@ export default function ConfiguracoesPage() {
     setTimeout(() => setMensagemFidelidade(''), 3000)
   }
 
+  const alternarCalzoneModo = async () => {
+    const novoModo = calzoneModoPizza ? 'own' : 'pizza'
+    setSalvandoCalzoneModo(true)
+    setMensagemCalzoneModo('')
+    try {
+      const res = await fetch('/api/cardapio/calzone-flavors-mode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ modo: novoModo }),
+      })
+      if (res.ok) {
+        setCalzoneModoPizza(novoModo === 'pizza')
+        // Mantém `lanches` (usado por "Salvar Cardápio" abaixo) em dia com o
+        // que acabou de ser persistido — uma única fonte, nunca duas
+        // decisões independentes sobre o modo do Calzone.
+        setLanches(prev => prev.map(l => (l.flavorsKey === 'calzoneFlavors' ? { ...l, flavorsMode: novoModo } : l)))
+        setMensagemCalzoneModo('✅ Configuração do Calzone salva!')
+      } else {
+        setMensagemCalzoneModo('❌ Erro ao salvar.')
+      }
+    } catch {
+      setMensagemCalzoneModo('❌ Erro ao salvar.')
+    }
+    setSalvandoCalzoneModo(false)
+    setTimeout(() => setMensagemCalzoneModo(''), 3000)
+  }
+
   const salvarCardapio = async () => {
     setSalvando(true)
     try {
-      const res = await fetch('/api/cardapio', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cardapio) })
+      // `cardapio` já é o contrato explícito persistível (tipo `Cardapio`,
+      // acima) — inclui calzoneFlavors/miniPizzaFlavors/payments mesmo sem
+      // esta tela os editar diretamente, e `lanches` (com o flavorsMode do
+      // Calzone sempre em dia, ver alternarCalzoneModo). POST /api/cardapio
+      // substitui o objeto INTEIRO persistido no Redis: qualquer seção
+      // persistível ausente daqui seria apagada. Nunca envia os campos
+      // aditivos/somente-leitura do GET (catalog, pizzaCatalog, horario,
+      // esgotados, esgotadosMetadata) — esses não são deste contrato.
+      const res = await fetch('/api/cardapio', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...cardapio, lanches }) })
       if (res.ok) showMsg('✅ Cardápio salvo!')
       else showMsg('❌ Erro ao salvar.')
     } catch { showMsg('❌ Erro ao salvar.') }
@@ -785,6 +860,29 @@ export default function ConfiguracoesPage() {
                       </div>
                     ))}
                   </div>
+                </SectionCard>
+
+                {/* Calzone — regra comercial dos sabores */}
+                <SectionCard>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: -4 }}>
+                    <span style={{ fontSize: 16, flexShrink: 0 }}>🥟</span>
+                    <span style={{ fontSize: 13, fontWeight: 900, color: TEXT, textTransform: 'uppercase', letterSpacing: '0.8px' }}>Calzone</span>
+                  </div>
+                  <button
+                    onClick={alternarCalzoneModo}
+                    disabled={salvandoCalzoneModo}
+                    style={{ width: '100%', background: calzoneModoPizza ? 'color-mix(in srgb, var(--success) 10%, transparent)' : 'rgba(var(--overlay-rgb), 0.04)', border: `1.5px solid ${calzoneModoPizza ? 'color-mix(in srgb, var(--success) 40%, transparent)' : 'var(--border)'}`, borderRadius: 12, padding: '13px 16px', color: calzoneModoPizza ? 'var(--success)' : TEXT2, fontSize: 13, fontWeight: 800, cursor: salvandoCalzoneModo ? 'not-allowed' : 'pointer', minHeight: 48, fontFamily: FONT, opacity: salvandoCalzoneModo ? 0.6 : 1 }}
+                  >
+                    {calzoneModoPizza ? '✅ Reaproveitar sabores da Pizza' : '⭕ Usar lista própria do Calzone'}
+                  </button>
+                  <p style={{ fontSize: 12, color: TEXT2, margin: 0, lineHeight: 1.5 }}>
+                    {calzoneModoPizza
+                      ? 'Padrão: o Calzone aceita os mesmos sabores disponíveis da Pizza (mesmos IDs, sem lista separada). Desmarque para usar a lista própria "Sabores do Calzone".'
+                      : 'O Calzone usa sua própria lista de sabores, independente da Pizza — mudanças na Pizza não afetam o Calzone.'}
+                  </p>
+                  {mensagemCalzoneModo && (
+                    <p style={{ textAlign: 'center', color: mensagemCalzoneModo.includes('✅') ? 'var(--success)' : 'var(--danger)', fontWeight: 800, fontSize: 13, margin: 0 }}>{mensagemCalzoneModo}</p>
+                  )}
                 </SectionCard>
 
                 <button

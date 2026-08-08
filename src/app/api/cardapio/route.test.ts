@@ -115,4 +115,54 @@ describe("Esgotado reflete no cardápio público (GET) após PATCH", () => {
     const calabresaDepois = depois.pizzaCatalog.flavors.find((f: { name: string }) => f.name === "Calabresa");
     expect(calabresaDepois.available).toBe(false);
   });
+
+  it("GET expõe o catálogo oficial dos demais produtos configuráveis (Fase 6) com IDs estáveis para Calzone/Mini-Pizza/Macarronada", async () => {
+    const data = await (await GET()).json();
+    expect(data.catalog).toBeDefined();
+    const calzone = data.catalog.lanches.find((l: { name: string }) => l.name === "Calzone");
+    expect(calzone?.id).toBe("product-calzone");
+    expect(calzone?.available).toBe(true);
+    expect(calzone?.strategy).toBe("single_flavor");
+    const macarronada = data.catalog.lanches.find((l: { name: string }) => l.name === "Macarronada de Carne");
+    expect(macarronada?.strategy).toBe("size");
+    expect(Array.isArray(macarronada?.sizes)).toBe(true);
+    // Correção da regra comercial do Calzone: modo padrão "pizza" reaproveita
+    // a lista inteira da Pizza (calzoneFlavors não restringe) — expostos em
+    // `produto.flavors`. Mini-Pizza continua em modo "own" (miniPizzaFlavors
+    // restringe), comportamento inalterado.
+    const miniPizza = data.catalog.lanches.find((l: { name: string }) => l.name === "Mini-Pizza");
+    expect(miniPizza?.strategy).toBe("single_flavor");
+    expect(Array.isArray(calzone?.flavors)).toBe(true);
+    expect(calzone.flavors.length).toBeGreaterThan(0);
+    expect(Array.isArray(miniPizza?.flavors)).toBe(true);
+    expect(miniPizza.flavors.length).toBeGreaterThan(0);
+    // "Quatro Queijos" está fora de calzoneFlavors/miniPizzaFlavors: o
+    // Calzone aceita mesmo assim (modo pizza), a Mini-Pizza continua sem
+    // aceitar (modo own, inalterado).
+    expect(calzone.flavors.some((f: { name: string }) => f.name === "Quatro Queijos")).toBe(true);
+    expect(miniPizza.flavors.some((f: { name: string }) => f.name === "Quatro Queijos")).toBe(false);
+  });
+
+  it("GET reflete em tempo real um sabor de Calzone/Mini-Pizza esgotado no catálogo dos produtos configuráveis (Fase 6)", async () => {
+    const antes = await (await GET()).json();
+    const calzoneAntes = antes.catalog.lanches.find((l: { name: string }) => l.name === "Calzone");
+    const calabresaCalzoneAntes = calzoneAntes.flavors.find((f: { name: string }) => f.name === "Calabresa");
+    expect(calabresaCalzoneAntes.available).toBe(true);
+
+    await marcar("Calabresa", true);
+    const depois = await (await GET()).json();
+    const calzoneDepois = depois.catalog.lanches.find((l: { name: string }) => l.name === "Calzone");
+    const calabresaCalzoneDepois = calzoneDepois.flavors.find((f: { name: string }) => f.name === "Calabresa");
+    expect(calabresaCalzoneDepois.available).toBe(false);
+    const miniPizzaDepois = depois.catalog.lanches.find((l: { name: string }) => l.name === "Mini-Pizza");
+    const calabresaMiniPizzaDepois = miniPizzaDepois.flavors.find((f: { name: string }) => f.name === "Calabresa");
+    expect(calabresaMiniPizzaDepois.available).toBe(false);
+  });
+
+  it("GET reflete em tempo real um produto inteiro (ex.: Calzone) esgotado no catálogo dos produtos configuráveis (Fase 6)", async () => {
+    await marcar("Calzone", true);
+    const data = await (await GET()).json();
+    const calzone = data.catalog.lanches.find((l: { name: string }) => l.name === "Calzone");
+    expect(calzone.available).toBe(false);
+  });
 });

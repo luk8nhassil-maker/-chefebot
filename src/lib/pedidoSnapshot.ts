@@ -14,6 +14,13 @@
 // etapa futura, não uma migração deles agora.
 import type { ItemApp } from "@/lib/pedidoAppItens";
 
+/** Seleção estruturada de pizza — sizeId/flavorIds/borderId (Fase 2/2C). */
+export type SelecaoSnapshotPizza = { sizeId: string; flavorIds: string[]; borderId?: string };
+/** Seleção estruturada de produto simples — Calzone, Mini-Pizza, Macarronada,
+ * sucos (Fase 6). Discriminada de SelecaoSnapshotPizza por `productId`. */
+export type SelecaoSnapshotSimples = { productId: string; sizeId?: string; flavorId?: string; milk?: "com" | "sem" };
+export type SelecaoSnapshot = SelecaoSnapshotPizza | SelecaoSnapshotSimples;
+
 export type PedidoSnapshotItem = {
   kind: ItemApp["kind"];
   nome: string;
@@ -22,10 +29,10 @@ export type PedidoSnapshotItem = {
   precoUnitarioCents: number;
   totalCents: number;
   /** Presente só quando o item foi resolvido por seleção estruturada por ID
-   * (Fase 2/2C) — ausente em itens legados (name/detail) e no presente da
-   * Jornada do Chef (sempre reconstruído do snapshot da própria recompensa,
-   * nunca do catálogo de pizza). */
-  selecao?: { sizeId: string; flavorIds: string[]; borderId?: string };
+   * (Fase 2/2C, Fase 6) — ausente em itens legados (name/detail) e no
+   * presente da Jornada do Chef (sempre reconstruído do snapshot da própria
+   * recompensa, nunca do catálogo). */
+  selecao?: SelecaoSnapshot;
 };
 
 export type PedidoSnapshotOficial = {
@@ -53,15 +60,23 @@ function centavos(reais: number): number {
   return Math.round(reais * 100);
 }
 
-// `params.selecao` pode vir, em última instância, de `body.itens[i].pizzaSelection`
-// — JSON do cliente, sem garantia nenhuma em runtime de que só tem os campos
-// do tipo TS (que só protege object literals, nunca uma referência vinda de
-// fora). Copia explicitamente só os 3 campos oficiais — qualquer propriedade
-// extra adulterada no payload nunca chega a ser persistida.
-function sanitizarSelecao(
-  selecao: { sizeId: string; flavorIds: string[]; borderId?: string } | undefined
-): { sizeId: string; flavorIds: string[]; borderId?: string } | undefined {
+// `params.selecao` pode vir, em última instância, de
+// `body.itens[i].pizzaSelection`/`body.itens[i].simpleSelection` — JSON do
+// cliente, sem garantia nenhuma em runtime de que só tem os campos do tipo TS
+// (que só protege object literals, nunca uma referência vinda de fora). Copia
+// explicitamente só os campos oficiais de cada formato — qualquer propriedade
+// extra adulterada no payload nunca chega a ser persistida. Discrimina pela
+// PRESENÇA de `productId`: só a seleção de produto simples tem esse campo.
+function sanitizarSelecao(selecao: SelecaoSnapshot | undefined): SelecaoSnapshot | undefined {
   if (!selecao) return undefined;
+  if ("productId" in selecao) {
+    return {
+      productId: selecao.productId,
+      ...(selecao.sizeId !== undefined ? { sizeId: selecao.sizeId } : {}),
+      ...(selecao.flavorId !== undefined ? { flavorId: selecao.flavorId } : {}),
+      ...(selecao.milk !== undefined ? { milk: selecao.milk } : {}),
+    };
+  }
   return {
     sizeId: selecao.sizeId,
     flavorIds: [...selecao.flavorIds],
@@ -75,7 +90,7 @@ export function construirSnapshotItem(params: {
   detalhe?: string;
   quantidade: number;
   precoUnitarioReais: number;
-  selecao?: { sizeId: string; flavorIds: string[]; borderId?: string };
+  selecao?: SelecaoSnapshot;
 }): PedidoSnapshotItem {
   const precoUnitarioCents = centavos(params.precoUnitarioReais);
   const selecaoSanitizada = sanitizarSelecao(params.selecao);

@@ -7,7 +7,8 @@
 // bloqueia o merge — não deve haver nenhuma.
 import { describe, expect, it } from "vitest";
 import { buildCatalog } from "@/lib/catalog/adapter";
-import { MENU } from "@/lib/menu";
+import { buildSimpleCatalog } from "@/lib/catalog/simpleProducts";
+import { MENU, type Menu } from "@/lib/menu";
 import { officialUnitPrice, type ItemApp, type MenuPedidoApp } from "@/lib/pedidoAppItens";
 import { calcularPreco } from "./engine";
 import type { PizzaSelection, SimpleSelection } from "./types";
@@ -192,6 +193,93 @@ describe("equivalência de preço: calzone por sabor", () => {
       if (resultado.ok) expect(resultado.unitPriceCents).toBe(esperadoCents);
     });
   }
+});
+
+describe("equivalência de preço: mini-pizza por sabor", () => {
+  // Mini-Pizza está em flavorsMode "own" (lista própria miniPizzaFlavors,
+  // inalterada por esta correção) — só sabores dessa lista são aceitos.
+  for (const flavor of menu.miniPizzaFlavors) {
+    it(`Mini-Pizza · ${flavor}`, () => {
+      const legado: ItemApp = { kind: "simple", name: "Mini-Pizza", detail: `Sabor: ${flavor}`, price: 0, qty: 1 };
+      const selection: SimpleSelection = {
+        kind: "simple",
+        productId: productIdByName("Mini-Pizza"),
+        flavorId: flavorIdByName(flavor),
+        quantity: 1,
+      };
+
+      const esperadoCents = Math.round((precoLegadoReais(legado) ?? NaN) * 100);
+      const resultado = calcularPreco(selection, menu);
+
+      expect(resultado.ok).toBe(true);
+      if (resultado.ok) expect(resultado.unitPriceCents).toBe(esperadoCents);
+    });
+  }
+
+  // REGRESSÃO (auditoria independente pós-7ª rodada) — um sabor de pizza
+  // válido mas FORA de miniPizzaFlavors precisa ser rejeitado, nunca aceito
+  // só por ser um flavorId oficial válido de outro produto (officialUnitPrice
+  // agora valida flavorsMode de QUALQUER produto single_flavor pela
+  // configuração oficial, não só pelo nome "Calzone" — ver
+  // src/lib/pedidoAppItens.test.ts).
+  const saboresForaDaListaPropria = [...menu.saltyFlavors, ...menu.sweetFlavors].filter(
+    (flavor) => !menu.miniPizzaFlavors.includes(flavor)
+  );
+  for (const flavor of saboresForaDaListaPropria) {
+    it(`Mini-Pizza · ${flavor} (fora de miniPizzaFlavors) é rejeitado`, () => {
+      const selection: SimpleSelection = {
+        kind: "simple",
+        productId: productIdByName("Mini-Pizza"),
+        flavorId: flavorIdByName(flavor),
+        quantity: 1,
+      };
+      expect(calcularPreco(selection, menu).ok).toBe(false);
+    });
+  }
+
+  it("rejeita mini-pizza sem sabor escolhido", () => {
+    const selection: SimpleSelection = { kind: "simple", productId: productIdByName("Mini-Pizza"), quantity: 1 };
+    expect(calcularPreco(selection, menu).ok).toBe(false);
+  });
+});
+
+describe("REGRESSÃO E (BLOQUEIO, auditoria independente pós-8ª rodada) — caminho estruturado (buildSimpleCatalog) e legado (officialUnitPrice) concordam no modo efetivo, com e sem flavorsMode explícito", () => {
+  function menuSemFlavorsMode(): Menu {
+    const clone = structuredClone(MENU);
+    for (const lanche of clone.lanches) {
+      delete (lanche as { flavorsMode?: string }).flavorsMode;
+    }
+    return clone;
+  }
+
+  function verificaEquivalencia(menuAtual: Menu, nomeProduto: string) {
+    const simpleCatalog = buildSimpleCatalog(menuAtual);
+    const produtoNoCatalogo = simpleCatalog.lanches.find((l) => l.name === nomeProduto)!;
+    const flavorsAceitosPeloEstruturado = new Set((produtoNoCatalogo.flavors ?? []).map((f) => f.name));
+
+    for (const flavor of [...menuAtual.saltyFlavors, ...menuAtual.sweetFlavors]) {
+      const legado: ItemApp = { kind: "simple", name: nomeProduto, detail: `Sabor: ${flavor}`, price: 0, qty: 1 };
+      const aceitoPeloLegado = officialUnitPrice(legado, menuAtual as unknown as MenuPedidoApp) !== null;
+      const aceitoPeloEstruturado = flavorsAceitosPeloEstruturado.has(flavor);
+      expect({ flavor, aceitoPeloLegado }).toEqual({ flavor, aceitoPeloLegado: aceitoPeloEstruturado });
+    }
+  }
+
+  it("Calzone (flavorsMode explícito 'pizza' no MENU real) — os dois caminhos aceitam exatamente os mesmos sabores", () => {
+    verificaEquivalencia(MENU, "Calzone");
+  });
+
+  it("Mini-Pizza (flavorsMode explícito 'own' no MENU real) — os dois caminhos aceitam exatamente os mesmos sabores", () => {
+    verificaEquivalencia(MENU, "Mini-Pizza");
+  });
+
+  it("Calzone SEM flavorsMode (cardápio legado): os dois caminhos concordam no modo efetivo 'pizza'", () => {
+    verificaEquivalencia(menuSemFlavorsMode(), "Calzone");
+  });
+
+  it("Mini-Pizza SEM flavorsMode (cardápio legado): os dois caminhos concordam no modo efetivo 'own', nenhum dos dois amplia para os sabores da Pizza", () => {
+    verificaEquivalencia(menuSemFlavorsMode(), "Mini-Pizza");
+  });
 });
 
 describe("equivalência de preço: bebidas", () => {

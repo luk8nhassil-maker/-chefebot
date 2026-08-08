@@ -26,6 +26,8 @@ import {
 } from "./montagemManual";
 import { officialUnitPrice, type ItemApp } from "./pedidoAppItens";
 import type { PizzaCatalog } from "./catalog/pizzas";
+import { buildSimpleCatalog, type SimpleCatalog } from "./catalog/simpleProducts";
+import { MENU as MENU_OFICIAL } from "@/lib/menu";
 
 // Cardápio de teste: nomes e valores inventados só para o teste, nunca
 // copiados de nenhum estabelecimento. O que importa aqui é a FORMA do
@@ -39,6 +41,7 @@ const MENU: MenuManual = {
   sweetFlavors: ["Chocolate"],
   lanches: [
     { name: "Calzone", price: 40 },
+    { name: "Mini-Pizza", price: 20 },
     { name: "Macarronada", price: 0, sizes: [{ code: "P", price: 25 }, { code: "G", price: 45 }] },
     { name: "Sanduíche Simples", price: 18 },
   ],
@@ -68,6 +71,58 @@ const PIZZA_CATALOG: PizzaCatalog = {
 };
 
 const MENU_COM_CATALOGO: MenuManual = { ...MENU, pizzaCatalog: PIZZA_CATALOG, pizzaCatalogPresente: true };
+
+// Catálogo oficial dos demais produtos configuráveis (Fase 6) correspondente
+// ao MENU de teste acima — mesmos nomes/códigos, IDs estáveis inventados só
+// para o teste. Cada produto declara sua própria `strategy` (Fase 6,
+// hardening pós-auditoria 3ª rodada) e, quando `strategy === "single_flavor"`
+// (Calzone, Mini-Pizza), os sabores permitidos DAQUELE produto em
+// `flavors` — reutilizando o MESMO flavorId oficial (`flavor-*`) para o
+// mesmo sabor em ambos, igual ao catálogo real, nunca um ID novo por
+// produto.
+const SIMPLE_CATALOG: SimpleCatalog = {
+  lanches: [
+    {
+      id: "product-calzone",
+      name: "Calzone",
+      priceCents: 4000,
+      available: true,
+      strategy: "single_flavor",
+      flavors: [
+        { id: "flavor-quatro-queijos", name: "Quatro Queijos", available: true },
+        { id: "flavor-frango-com-requeijao", name: "Frango com Requeijão", available: true },
+        { id: "flavor-chocolate", name: "Chocolate", available: true },
+      ],
+    },
+    {
+      id: "product-mini-pizza",
+      name: "Mini-Pizza",
+      priceCents: 2000,
+      available: true,
+      strategy: "single_flavor",
+      flavors: [
+        { id: "flavor-quatro-queijos", name: "Quatro Queijos", available: true },
+        { id: "flavor-chocolate", name: "Chocolate", available: true },
+      ],
+    },
+    {
+      id: "product-macarronada",
+      name: "Macarronada",
+      priceCents: 0,
+      available: true,
+      strategy: "size",
+      sizes: [
+        { id: "size-p", code: "P", priceCents: 2500 },
+        { id: "size-g", code: "G", priceCents: 4500 },
+      ],
+    },
+    { id: "product-sanduiche-simples", name: "Sanduíche Simples", priceCents: 1800, available: true, strategy: "fixed" },
+  ],
+  bebidas: [{ id: "product-refrigerante-2l", name: "Refrigerante 2L", priceCents: 1200, available: true, strategy: "fixed" }],
+  sucos: [{ id: "product-suco-de-acai", name: "Suco de Açaí", priceCents: 1000, available: true, strategy: "milk" }],
+};
+
+const MENU_COM_CATALOGO_SIMPLES: MenuManual = { ...MENU, catalog: SIMPLE_CATALOG, catalogPresente: true };
 
 function produtoPorId(id: string, menu: MenuManual = MENU): ProdutoManual {
   const p = listarProdutosManuais(menu).find((x) => x.id === id);
@@ -241,6 +296,65 @@ describe("etapas obrigatórias", () => {
     expect(montarEtapas(produtoPorId("lanches:calzone"), MENU).map((e) => e.tipo)).toEqual(["sabor_unico"]);
     expect(montarEtapas(produtoPorId("sucos:suco de acai"), MENU).map((e) => e.tipo)).toEqual(["leite"]);
     expect(montarEtapas(produtoPorId("lanches:macarronada"), MENU).map((e) => e.tipo)).toEqual(["tamanho_item"]);
+  });
+
+  test("REGRESSÃO (auditoria independente, ciclo de autoauditoria pós-9ª rodada) — sem menu.catalog, calzone/mini-pizza continuam usando a lista cheia de sabores (compat legado, mesma regra de sempre)", () => {
+    const etapaCalzone = montarEtapas(produtoPorId("lanches:calzone"), MENU)[0];
+    const etapaMiniPizza = montarEtapas(produtoPorId("lanches:mini-pizza", MENU), MENU)[0];
+    const nomesEsperados = [...MENU.saltyFlavors, ...MENU.sweetFlavors].sort();
+    expect(etapaCalzone.opcoes.map((o) => o.valor).sort()).toEqual(nomesEsperados);
+    expect(etapaMiniPizza.opcoes.map((o) => o.valor).sort()).toEqual(nomesEsperados);
+  });
+
+  test("REGRESSÃO (auditoria independente, ciclo de autoauditoria pós-9ª rodada) — com menu.catalog presente, a etapa sabor_unico da mini-pizza usa SÓ produto.flavors (mode-aware), nunca a lista cheia da pizza", () => {
+    // No fixture SIMPLE_CATALOG, Mini-Pizza tem só 2 sabores permitidos
+    // ("Quatro Queijos", "Chocolate") — um SUBCONJUNTO de
+    // MENU.saltyFlavors+sweetFlavors (que também inclui "Frango com
+    // Requeijão"). Antes desta correção, esta etapa mostrava os 3 sabores
+    // incondicionalmente (mesmo bug do Calzone no Cardápio Público, agora
+    // também presente aqui) — o atendente podia escolher "Frango com
+    // Requeijão" para a Mini-Pizza, e construirItemManual SEMPRE recusaria
+    // (resolverSimpleSelectionIds não encontra esse sabor em produto.flavors).
+    const miniPizzaProduto = produtoPorId("lanches:mini-pizza", MENU_COM_CATALOGO_SIMPLES);
+    const etapaMiniPizza = montarEtapas(miniPizzaProduto, MENU_COM_CATALOGO_SIMPLES)[0];
+    expect(etapaMiniPizza.opcoes.map((o) => o.valor).sort()).toEqual(["Chocolate", "Quatro Queijos"]);
+    expect(etapaMiniPizza.opcoes.some((o) => o.valor === "Frango com Requeijão")).toBe(false);
+
+    // Calzone no mesmo fixture tem os 3 sabores liberados (equivalente ao
+    // modo "pizza") — continua mostrando todos, pela MESMA fonte (catálogo).
+    const calzoneProduto = produtoPorId("lanches:calzone", MENU_COM_CATALOGO_SIMPLES);
+    const etapaCalzone = montarEtapas(calzoneProduto, MENU_COM_CATALOGO_SIMPLES)[0];
+    expect(etapaCalzone.opcoes.map((o) => o.valor).sort()).toEqual(["Chocolate", "Frango com Requeijão", "Quatro Queijos"]);
+  });
+
+  test("REGRESSÃO (auditoria independente, 2º ciclo de autoauditoria) — catalogPresente=true + catalog malformado/undefined: sabor_unico fica SEM OPÇÕES, nunca cai para a lista cheia da pizza", () => {
+    // Distinção crítica: `catalogPresente` (o campo VEIO na resposta de GET
+    // /api/cardapio) é diferente de "o catálogo tem o produto esperado".
+    // Antes desta correção, `opcoesSaborUnico` decidia pela presença de
+    // `catalogProduto` (resultado do .find) — com catalogPresente=true mas
+    // catalog malformado/undefined, catalogProduto também dava undefined, e
+    // a função confundia isso com "catálogo genuinamente ausente", caindo
+    // para a lista cheia da pizza. `construirItemManual` (mais abaixo)
+    // SEMPRE recusaria essa escolha (catalogPresente=true → fail-closed) —
+    // então a UI oferecia uma opção que a própria montagem sempre recusaria.
+    const menuCatalogPresenteMasUndefined: MenuManual = { ...MENU, catalog: undefined, catalogPresente: true };
+    const etapaCalzone = montarEtapas(produtoPorId("lanches:calzone", menuCatalogPresenteMasUndefined), menuCatalogPresenteMasUndefined)[0];
+    const etapaMiniPizza = montarEtapas(produtoPorId("lanches:mini-pizza", menuCatalogPresenteMasUndefined), menuCatalogPresenteMasUndefined)[0];
+    expect(etapaCalzone.opcoes).toEqual([]);
+    expect(etapaMiniPizza.opcoes).toEqual([]);
+  });
+
+  test("REGRESSÃO (auditoria independente, 2º ciclo de autoauditoria) — catalogPresente=true + catálogo válido mas SEM o produto esperado: sabor_unico fica SEM OPÇÕES, nunca cai para a lista cheia da pizza", () => {
+    const catalogoSemCalzoneNemMiniPizza: SimpleCatalog = {
+      lanches: SIMPLE_CATALOG.lanches.filter((l) => l.name !== "Calzone" && l.name !== "Mini-Pizza"),
+      bebidas: SIMPLE_CATALOG.bebidas,
+      sucos: SIMPLE_CATALOG.sucos,
+    };
+    const menuProdutoAusenteDoCatalogo: MenuManual = { ...MENU, catalog: catalogoSemCalzoneNemMiniPizza, catalogPresente: true };
+    const etapaCalzone = montarEtapas(produtoPorId("lanches:calzone", menuProdutoAusenteDoCatalogo), menuProdutoAusenteDoCatalogo)[0];
+    const etapaMiniPizza = montarEtapas(produtoPorId("lanches:mini-pizza", menuProdutoAusenteDoCatalogo), menuProdutoAusenteDoCatalogo)[0];
+    expect(etapaCalzone.opcoes).toEqual([]);
+    expect(etapaMiniPizza.opcoes).toEqual([]);
   });
 
   test("produto simples não tem etapa nenhuma", () => {
@@ -609,6 +723,223 @@ describe("fail-closed: pizzaCatalog PRESENTE mas a seleção não resolve para I
       flavorIds: ["flavor-chocolate", "flavor-quatro-queijos"],
       borderId: "border-requeijao",
     });
+  });
+});
+
+describe("construirItemManual — simpleSelection (Fase 6)", () => {
+  test("calzone: ganha productId + flavorId quando catalog resolve", () => {
+    const item = construirItemManual(
+      produtoPorId("lanches:calzone", MENU_COM_CATALOGO_SIMPLES),
+      { sabores: ["Chocolate"] },
+      MENU_COM_CATALOGO_SIMPLES
+    );
+    expect(item).not.toBeNull();
+    expect(item?.simpleSelection).toEqual({ productId: "product-calzone", flavorId: "flavor-chocolate" });
+  });
+
+  test("macarronada: ganha productId + sizeId quando catalog resolve", () => {
+    const item = construirItemManual(
+      produtoPorId("lanches:macarronada", MENU_COM_CATALOGO_SIMPLES),
+      { sabores: [], tamanhoItem: "G" },
+      MENU_COM_CATALOGO_SIMPLES
+    );
+    expect(item).not.toBeNull();
+    expect(item?.simpleSelection).toEqual({ productId: "product-macarronada", sizeId: "size-g" });
+  });
+
+  test("suco: ganha productId + milk quando catalog resolve", () => {
+    const item = construirItemManual(
+      produtoPorId("sucos:suco de acai", MENU_COM_CATALOGO_SIMPLES),
+      { sabores: [], leite: "com" },
+      MENU_COM_CATALOGO_SIMPLES
+    );
+    expect(item).not.toBeNull();
+    expect(item?.simpleSelection).toEqual({ productId: "product-suco-de-acai", milk: "com" });
+  });
+
+  test("lanche plano (sem sabor/tamanho): nunca ganha simpleSelection — não há ID a resolver", () => {
+    const item = construirItemManual(
+      produtoPorId("lanches:sanduiche simples", MENU_COM_CATALOGO_SIMPLES),
+      selecaoVazia(),
+      MENU_COM_CATALOGO_SIMPLES
+    );
+    expect(item).not.toBeNull();
+    expect(item && "simpleSelection" in item).toBe(false);
+  });
+
+  test("campo catalog GENUINAMENTE ausente: legado continua funcionando normalmente", () => {
+    const item = construirItemManual(produtoPorId("lanches:calzone", MENU), { sabores: ["Chocolate"] }, MENU);
+    expect(item).not.toBeNull();
+    expect(item?.simpleSelection).toBeUndefined();
+    expect(item?.price).toBe(40);
+  });
+});
+
+describe("construirItemManual — Calzone flavorsMode 'pizza' com o catálogo oficial real (correção da regra comercial do Calzone, 6ª rodada)", () => {
+  const catalogoOficial = buildSimpleCatalog(MENU_OFICIAL);
+  const menuComCatalogoOficial: MenuManual = {
+    sizes: MENU_OFICIAL.sizes,
+    saltyFlavors: MENU_OFICIAL.saltyFlavors,
+    sweetFlavors: MENU_OFICIAL.sweetFlavors,
+    lanches: MENU_OFICIAL.lanches,
+    bebidas: MENU_OFICIAL.bebidas,
+    sucos: MENU_OFICIAL.sucos,
+    borders: MENU_OFICIAL.borders,
+    neighborhoods: MENU_OFICIAL.neighborhoods,
+    payments: MENU_OFICIAL.payments,
+    esgotados: [],
+    catalog: catalogoOficial,
+    catalogPresente: true,
+  };
+  const calzoneOficial = catalogoOficial.lanches.find((l) => l.name === "Calzone")!;
+
+  test("REGRESSÃO — Calzone aceita um sabor da Pizza fora de calzoneFlavors (Quatro Queijos): modo padrão 'pizza' reaproveita a lista inteira da Pizza no Pedido Manual", () => {
+    const produto = produtoPorId("lanches:calzone", menuComCatalogoOficial);
+    const item = construirItemManual(produto, { sabores: ["Quatro Queijos"] }, menuComCatalogoOficial);
+    expect(item).not.toBeNull();
+    const flavorId = calzoneOficial.flavors!.find((f) => f.name === "Quatro Queijos")!.id;
+    expect(item?.simpleSelection).toEqual({ productId: calzoneOficial.id, flavorId });
+    expect(item?.price).toBe(35);
+  });
+
+  test("mesmo sabor mantém o MESMO flavorId entre Pizza e Calzone no Pedido Manual — nenhum ID novo por produto", () => {
+    const produto = produtoPorId("lanches:calzone", menuComCatalogoOficial);
+    const item = construirItemManual(produto, { sabores: ["Calabresa"] }, menuComCatalogoOficial);
+    const flavorIdEsperado = calzoneOficial.flavors!.find((f) => f.name === "Calabresa")!.id;
+    expect(item?.simpleSelection?.flavorId).toBe(flavorIdEsperado);
+    expect(flavorIdEsperado).toBe("flavor-calabresa");
+  });
+});
+
+describe("fail-closed: catalog PRESENTE mas a seleção não resolve para IDs (Fase 6)", () => {
+  test("sabor sem correspondência no catálogo: montagem do calzone recusada, nunca cai pro legado", () => {
+    const menuCatalogoIncompleto: MenuManual = {
+      ...MENU_COM_CATALOGO_SIMPLES,
+      saltyFlavors: [...MENU.saltyFlavors, "Sabor Novo Ainda Sem Catalogo"],
+    };
+    const item = construirItemManual(
+      produtoPorId("lanches:calzone", menuCatalogoIncompleto),
+      { sabores: ["Sabor Novo Ainda Sem Catalogo"] },
+      menuCatalogoIncompleto
+    );
+    expect(item).toBeNull();
+  });
+
+  test("tamanho sem correspondência no catálogo: montagem da macarronada recusada", () => {
+    const catalogoSemG: SimpleCatalog = {
+      ...SIMPLE_CATALOG,
+      lanches: SIMPLE_CATALOG.lanches.map((l) =>
+        l.name === "Macarronada" ? { ...l, sizes: l.sizes?.filter((s) => s.code !== "G") } : l
+      ),
+    };
+    const menu: MenuManual = { ...MENU, catalog: catalogoSemG, catalogPresente: true };
+    const item = construirItemManual(produtoPorId("lanches:macarronada", menu), { sabores: [], tamanhoItem: "G" }, menu);
+    expect(item).toBeNull();
+  });
+
+  test("catálogo presente porém malformado (vazio): recusada, sem fallback legado", () => {
+    const catalogoVazio: SimpleCatalog = { lanches: [], bebidas: [], sucos: [] };
+    const menu: MenuManual = { ...MENU, catalog: catalogoVazio, catalogPresente: true };
+    const item = construirItemManual(produtoPorId("lanches:calzone", menu), { sabores: ["Chocolate"] }, menu);
+    expect(item).toBeNull();
+  });
+
+  test("catalogPresente true mas catalog undefined (equivalente a resposta malformada já filtrada por adaptarCardapioParaMontagem): recusada", () => {
+    const menu: MenuManual = { ...MENU, catalog: undefined, catalogPresente: true };
+    const item = construirItemManual(produtoPorId("lanches:calzone", menu), { sabores: ["Chocolate"] }, menu);
+    expect(item).toBeNull();
+  });
+
+  test("seleção válida com catalogPresente=true continua funcionando normalmente (não é bloqueio geral)", () => {
+    const item = construirItemManual(
+      produtoPorId("lanches:calzone", MENU_COM_CATALOGO_SIMPLES),
+      { sabores: ["Chocolate"] },
+      MENU_COM_CATALOGO_SIMPLES
+    );
+    expect(item).not.toBeNull();
+    expect(item?.simpleSelection).toEqual({ productId: "product-calzone", flavorId: "flavor-chocolate" });
+  });
+});
+
+describe("adaptarCardapioParaMontagem — catalogPresente distingue ausente de malformado (Fase 6)", () => {
+  const bruto = {
+    sizes: [{ code: "G", label: "Grande", price: 50 }],
+    saltyFlavors: ["Quatro Queijos"],
+    sweetFlavors: ["Chocolate"],
+    lanches: [{ name: "Calzone", price: 40, hasFlavors: true, flavorsKey: "calzoneFlavors" }],
+  };
+
+  test("campo catalog ausente: catalogPresente é false (ou ausente)", () => {
+    const menu = adaptarCardapioParaMontagem(bruto)!;
+    expect(menu.catalog).toBeUndefined();
+    expect(menu.catalogPresente).toBeFalsy();
+  });
+
+  test("campo catalog presente e bem formado: presente=true e catálogo populado, incluindo strategy/flavors por produto e available", () => {
+    const menu = adaptarCardapioParaMontagem({
+      ...bruto,
+      catalog: {
+        lanches: [
+          {
+            id: "product-calzone",
+            name: "Calzone",
+            priceCents: 4000,
+            available: true,
+            strategy: "single_flavor",
+            flavors: [{ id: "flavor-quatro-queijos", name: "Quatro Queijos", available: true }],
+          },
+          {
+            id: "product-mini-pizza",
+            name: "Mini-Pizza",
+            priceCents: 2000,
+            available: true,
+            strategy: "single_flavor",
+            flavors: [{ id: "flavor-quatro-queijos", name: "Quatro Queijos", available: false }],
+          },
+        ],
+        bebidas: [],
+        sucos: [],
+      },
+    })!;
+    expect(menu.catalogPresente).toBe(true);
+    expect(menu.catalog?.lanches).toHaveLength(2);
+    const calzone = menu.catalog?.lanches.find((l) => l.name === "Calzone");
+    const miniPizza = menu.catalog?.lanches.find((l) => l.name === "Mini-Pizza");
+    expect(calzone?.available).toBe(true);
+    expect(calzone?.strategy).toBe("single_flavor");
+    expect(calzone?.flavors).toEqual([{ id: "flavor-quatro-queijos", name: "Quatro Queijos", available: true }]);
+    expect(miniPizza?.flavors).toEqual([{ id: "flavor-quatro-queijos", name: "Quatro Queijos", available: false }]);
+  });
+
+  test("produto sem `available` explícito (fronteira antiga/malformada): assume disponível por padrão", () => {
+    const menu = adaptarCardapioParaMontagem({
+      ...bruto,
+      catalog: { lanches: [{ id: "product-calzone", name: "Calzone", priceCents: 4000, strategy: "fixed" }], bebidas: [], sucos: [] },
+    })!;
+    expect(menu.catalog?.lanches[0].available).toBe(true);
+  });
+
+  test("produto sem `strategy` (fronteira malformada): descartado, nunca vira lanche sem estratégia definida", () => {
+    const menu = adaptarCardapioParaMontagem({
+      ...bruto,
+      catalog: { lanches: [{ id: "product-calzone", name: "Calzone", priceCents: 4000, available: true }], bebidas: [], sucos: [] },
+    })!;
+    expect(menu.catalog).toBeUndefined();
+  });
+
+  test("campo catalog presente porém totalmente vazio (sem nenhum produto): presente=true, catálogo undefined", () => {
+    const menu = adaptarCardapioParaMontagem({
+      ...bruto,
+      catalog: { lanches: [], bebidas: [], sucos: [] },
+    })!;
+    expect(menu.catalogPresente).toBe(true);
+    expect(menu.catalog).toBeUndefined();
+  });
+
+  test.each([null, false, 0, "", "texto", 42, []])("campo catalog presente porém com tipo errado (%p): presente=true, catálogo undefined", (v) => {
+    const menu = adaptarCardapioParaMontagem({ ...bruto, catalog: v })!;
+    expect(menu.catalogPresente).toBe(true);
+    expect(menu.catalog).toBeUndefined();
   });
 });
 

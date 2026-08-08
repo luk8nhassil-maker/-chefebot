@@ -80,3 +80,36 @@ describe("POST /api/pedido-app/[id]/editar/descartar — [caso 6] mantém o paga
     expect(fonteDescartar).not.toContain("randomUUID()");
   });
 });
+
+describe("/pedido/editar/[id] — REGRESSÃO (auditoria independente, ciclo de autoauditoria pós-9ª rodada): aba Calzone do modal 'Adicionar item' usa a lista EFETIVA de sabores do catálogo oficial, nunca a lista cheia da pizza incondicionalmente", () => {
+  // Mesma classe de bug já corrigida no Cardápio Público e no Pedido
+  // Manual/Salão: esta tela (admin, edição de um pedido já feito) monta o
+  // item do Calzone 100% pelo caminho legado (name/detail, sem
+  // simpleSelection) — o servidor (officialUnitPrice, em
+  // .../editar/salvar) já recusa um sabor fora da lista efetiva mesmo sem
+  // esta correção, mas o modal mostrava TODOS os sabores da pizza
+  // incondicionalmente, deixando o admin escolher uma opção que o servidor
+  // sempre rejeitaria ao salvar.
+  test("calzoneFlavorNames vem de menu.catalog (produto.flavors), só cai para a lista cheia da pizza quando o catálogo está genuinamente ausente", () => {
+    expect(fonte).toContain(
+      "const calzoneFlavorNames = menu.catalog\n" +
+      "    ? menu.catalog.lanches.find((l) => l.name === calzoneItem?.name)?.flavors?.map((f) => f.name) ?? []\n" +
+      "    : flavors;"
+    );
+  });
+
+  test("a aba calzone do modal renderiza a partir de calzoneFlavorNames, não da lista cheia `flavors` (que continua servindo só a aba pizza)", () => {
+    const abaCalzone = fonte.slice(fonte.indexOf('{aba === "calzone"'), fonte.indexOf('{aba === "calzone"') + 600);
+    expect(abaCalzone).toContain("calzoneFlavorNames.map((f) =>");
+    expect(abaCalzone).not.toContain("flavors.map((f) =>");
+  });
+
+  test("REGRESSÃO (auditoria independente, 2º ciclo de autoauditoria) — a decisão é pela presença GENUÍNA de `menu.catalog`, nunca pelo resultado do `.find` (catálogo presente + Calzone ausente nunca cai para a lista legada)", () => {
+    // Antes desta correção, a condição era `calzoneCatalogProduto ? ... :
+    // flavors` — o RESULTADO do `.find`, que também dá undefined quando o
+    // catálogo está presente mas não contém o Calzone (catálogo
+    // dessincronizado/malformado). Agora a condição é `menu.catalog ? ... :
+    // flavors` — só a ausência genuína do campo autoriza a lista legada.
+    expect(fonte).not.toContain("calzoneCatalogProduto");
+  });
+});

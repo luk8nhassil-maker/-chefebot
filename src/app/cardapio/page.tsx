@@ -16,6 +16,7 @@ import { fetchCliente } from "@/lib/clienteSessaoFront";
 import { lerReferenciaRecompensa, limparReferenciaRecompensa, migrarReferenciaLegada } from "@/lib/recompensaJornadaCarrinho";
 import { extrairPagamentoComposto, montarPagamentoComposto, parseValorMonetario } from "@/lib/pagamentoComposto";
 import type { PizzaCatalog } from "@/lib/catalog/pizzas";
+import type { SimpleCatalog } from "@/lib/catalog/simpleProducts";
 
 // Ícones de categoria da home (menu/navegação) — lucide-react, sem emoji.
 // Mantidos separados de ICONS (que continua usando emoji para os itens
@@ -51,6 +52,15 @@ export type MenuType = {
   // item de pizza cair no comportamento 100% legado (name/detail), nunca
   // bloqueia adicionar ao carrinho.
   pizzaCatalog?: PizzaCatalog;
+  // Catálogo oficial dos demais produtos configuráveis, com IDs estáveis e
+  // disponibilidade (Fase 6), aditivo, vem de GET /api/cardapio. Usado só
+  // para montar `simpleSelection` no carrinho (Calzone, Mini-Pizza,
+  // Macarronada, sucos — ver addCalzone/addMiniPizza/addMacarronadaSize/
+  // addSucoLeite); ausência (ex.: resposta antiga em cache) faz o item cair
+  // no comportamento 100% legado (name/detail), nunca bloqueia adicionar ao
+  // carrinho. Sabores de Calzone/Mini-Pizza vêm das listas oficiais já
+  // existentes (calzoneFlavors/miniPizzaFlavors), nunca inventadas aqui.
+  catalog?: SimpleCatalog;
 };
 
 // ==================== ADMIN CARDÁPIO ====================
@@ -647,6 +657,12 @@ type CartItem = {
   // item 100% legado (mini-pizza, calzone, ou pizza normal sem catálogo
   // carregado ainda) — comportamento inalterado.
   pizzaSelection?: { sizeId: string; flavorIds: string[]; borderId?: string };
+  // Mesma ideia de pizzaSelection (Fase 6), para os demais produtos
+  // configuráveis do carrinho — Calzone, Mini-Pizza, Macarronada, sucos — a
+  // partir de menu.catalog. Ausente = item 100% legado (comportamento
+  // inalterado); nunca bloqueia adicionar à sacola quando o catálogo ainda
+  // não carregou ou o nome não bate.
+  simpleSelection?: { productId: string; sizeId?: string; flavorId?: string; milk?: "com" | "sem" };
 };
 
 type PromocaoPublica = {
@@ -784,6 +800,45 @@ export function resolverPizzaSelectionIds(
   const border = pizzaCatalog.borders.find((b) => b.label === borderLabel);
   if (!border) return undefined;
   return { sizeId: size.id, flavorIds, borderId: border.id };
+}
+
+// Resolve a seleção de um produto simples configurável (Calzone, Mini-Pizza,
+// Macarronada, sucos) para os IDs estáveis do catálogo oficial (Fase 6,
+// GET /api/cardapio -> menu.catalog) — puro, sem nenhuma chamada de rede.
+// Mesma regra de resolverPizzaSelectionIds: catálogo ausente ou nome sem
+// correspondência devolve undefined, e o item cai no formato 100% legado.
+//
+// ZERO acoplamento por nome: uma vez encontrado o produto (por `name`, só
+// para localizá-lo na lista), tamanho e sabor são lidos direto de
+// `produto.sizes`/`produto.flavors`, já filtrados pelo servidor conforme a
+// `strategy` daquele produto (ver @/lib/catalog/simpleProducts). Sabor de
+// Calzone/Mini-Pizza é resolvido contra a lista oficial DAQUELE produto
+// (`produto.flavors`) — nunca contra a lista de sabores de pizza, que é uma
+// lista comercial diferente.
+export function resolverSimpleSelectionIds(
+  catalog: SimpleCatalog | undefined,
+  productName: string,
+  opts: { sizeCode?: string; flavorName?: string; milk?: "com" | "sem" }
+): { productId: string; sizeId?: string; flavorId?: string; milk?: "com" | "sem" } | undefined {
+  if (!catalog) return undefined;
+  const produto = [...catalog.lanches, ...catalog.bebidas, ...catalog.sucos].find((p) => p.name === productName);
+  if (!produto) return undefined;
+
+  if (opts.milk !== undefined) return { productId: produto.id, milk: opts.milk };
+
+  if (opts.sizeCode !== undefined) {
+    const size = produto.sizes?.find((s) => s.code === opts.sizeCode);
+    if (!size) return undefined;
+    return { productId: produto.id, sizeId: size.id };
+  }
+
+  if (opts.flavorName !== undefined) {
+    const flavor = produto.flavors?.find((f) => f.name === opts.flavorName);
+    if (!flavor) return undefined;
+    return { productId: produto.id, flavorId: flavor.id };
+  }
+
+  return { productId: produto.id };
 }
 
 // Pagamento misto (Pix + Dinheiro): mesma string canônica já validada no
@@ -1197,7 +1252,33 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const esgotados = menu.esgotados || [];
   const miniPizzaItem = (menu.lanches || []).find((it) => isMiniPizzaName(it.name) && Number.isFinite(it.price));
   const miniPizzaEsgotada = !!miniPizzaItem && esgotados.includes(miniPizzaItem.name);
-  const miniPizzaFlavors = (menu.miniPizzaFlavors?.length ? menu.miniPizzaFlavors : [...(menu.saltyFlavors || []), ...(menu.sweetFlavors || [])]).filter(Boolean);
+  // Lista efetiva de sabores da Mini-Pizza: com o catálogo oficial presente,
+  // é SEMPRE `produto.flavors` (já calculada por buildSimpleCatalog conforme
+  // flavorsMode via resolverFlavorsModeEfetivo — mesma fonte que o Calzone
+  // usa logo abaixo) — nunca uma decisão própria daqui a partir de
+  // `menu.miniPizzaFlavors` bruto. HARDENING (auditoria independente, ciclo
+  // de autoauditoria pós-9ª rodada): antes desta correção, esta lista vinha
+  // direto de `menu.miniPizzaFlavors` com fallback próprio para os sabores
+  // inteiros da pizza quando vazia — segunda fonte de verdade, divergente do
+  // catálogo se flavorsMode algum dia deixasse de ser "own" (mostraria só a
+  // lista própria mesmo quando o modo efetivo fosse "pizza"). Só quando o
+  // catálogo está genuinamente ausente (`menu.catalog` — a MESMA condição
+  // que addMiniPizza usa para o fail-closed no envio, abaixo) o seletor cai
+  // para a heurística legada de sempre.
+  //
+  // HARDENING (auditoria independente, 2º ciclo de autoauditoria): a
+  // correção acima ainda decidia pelo RESULTADO do `.find` (produto
+  // encontrado ou não), não pela presença genuína de `menu.catalog` —
+  // com o catálogo presente mas sem a Mini-Pizza nele (produto removido,
+  // catálogo dessincronizado), caía de volta para a lista legada, que
+  // addMiniPizza sempre recusaria no envio (catálogo presente = fail-closed
+  // lá). Agora: `menu.catalog` ausente é o ÚNICO caso que autoriza a lista
+  // legada; com `menu.catalog` presente, produto ausente do catálogo
+  // sempre produz lista vazia — nunca a lista legada.
+  const miniPizzaFlavors = (menu.catalog
+    ? menu.catalog.lanches.find((l) => l.name === miniPizzaItem?.name)?.flavors?.map((f) => f.name) ?? []
+    : (menu.miniPizzaFlavors?.length ? menu.miniPizzaFlavors : [...(menu.saltyFlavors || []), ...(menu.sweetFlavors || [])])
+  ).filter(Boolean);
   const calzoneItem = (menu.lanches || []).find((it) => isCalzoneName(it.name) && Number.isFinite(it.price));
   const calzoneEsgotada = !!calzoneItem && esgotados.includes(calzoneItem.name);
 
@@ -1231,13 +1312,29 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const mam = !!(f1 && f2);
   const flavorOk = !!f1;
   const buildOk = !!size && flavorOk && !(miniPizzaMode && miniPizzaEsgotada) && !(calzoneMode && calzoneEsgotada);
-  // Fonte efetiva de sabores do fluxo de pizza (a mesma usada pela pizza
-  // normal). O calzone consome exatamente essa lista — sem lista própria —
-  // só limitando a escolha a 1 sabor (ver nextFlavorSelection/singleFlavor).
+  // Fonte efetiva de sabores do fluxo de pizza normal — inalterada.
   const pizzaFlavorSections = [{ title: "Salgadas", flavors: menu.saltyFlavors || [] }, { title: "Doces", flavors: menu.sweetFlavors || [] }];
+  // Lista efetiva de sabores do Calzone: com o catálogo oficial presente, é
+  // SEMPRE `produto.flavors` (já calculada por buildSimpleCatalog conforme
+  // flavorsMode — "pizza" reaproveita a Pizza, "own" usa calzoneFlavors) —
+  // nunca uma decisão própria daqui. Só quando o catálogo está genuinamente
+  // ausente (`menu.catalog`) o seletor cai para a lista cheia de sabores da
+  // pizza, mesma regra de sempre.
+  //
+  // HARDENING (auditoria independente, 2º ciclo de autoauditoria): mesma
+  // correção da Mini-Pizza acima — decidir pelo RESULTADO do `.find` (em
+  // vez da presença genuína de `menu.catalog`) fazia um catálogo presente
+  // mas sem o Calzone (produto removido) cair na lista legada, que
+  // addCalzone sempre recusaria no envio. Agora `menu.catalog` ausente é o
+  // ÚNICO caso que autoriza a lista legada.
+  const calzoneFlavorNames = menu.catalog
+    ? menu.catalog.lanches.find((l) => l.name === calzoneItem?.name)?.flavors?.map((f) => f.name) ?? []
+    : [...(menu.saltyFlavors || []), ...(menu.sweetFlavors || [])];
   const flavorSections = miniPizzaMode
     ? [{ title: "Sabores da mini-pizza", flavors: miniPizzaFlavors }]
-    : pizzaFlavorSections;
+    : calzoneMode
+      ? [{ title: "Sabores do calzone", flavors: calzoneFlavorNames }]
+      : pizzaFlavorSections;
   const selectedSizeLabel = miniPizzaMode && miniPizzaItem ? miniPizzaItem.name : size ? ((menu.sizes || []).find((s) => s.code === size)?.label || size) : "";
   const buildFootHint = !size
     ? "Escolha um tamanho para continuar"
@@ -1284,9 +1381,18 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   function addMiniPizza() {
     if (!miniPizzaItem || !f1) return;
     const detail = `Sabor: ${f1}`;
+    const simpleSelection = resolverSimpleSelectionIds(menu.catalog, miniPizzaItem.name, { flavorName: f1 });
+    // Fail-closed: com o catálogo oficial presente, uma seleção que não
+    // resolve para ID (ex.: sabor fora da lista efetiva) nunca cai
+    // silenciosamente pro legado — só a ausência genuína de `menu.catalog`
+    // autoriza isso (resposta antiga em cache).
+    if (!simpleSelection && menu.catalog) {
+      showToast("Não foi possível confirmar esse sabor. Escolha outro.");
+      return;
+    }
     const ex = cart.find((c) => c.kind === "simple" && isMiniPizzaName(c.name) && c.detail === detail);
     if (ex) setCart(cart.map((c) => (c === ex ? { ...c, qty: c.qty + 1 } : c)));
-    else setCart([...cart, { emoji: "🍕", kind: "simple", name: miniPizzaItem.name, detail, price: miniPizzaItem.price, qty: 1, keys: [miniPizzaItem.name, f1] }]);
+    else setCart([...cart, { emoji: "🍕", kind: "simple", name: miniPizzaItem.name, detail, price: miniPizzaItem.price, qty: 1, keys: [miniPizzaItem.name, f1], ...(simpleSelection ? { simpleSelection } : {}) }]);
     setLastAddedKind("pizza");
     if (!plan.openEnded && plan.current < plan.total) { setPlan({ ...plan, current: plan.current + 1 }); showToast("Mini-pizza adicionada!"); resetBuild(); go("sc-build"); }
     else if (plan.openEnded) { showToast("Mini-pizza adicionada!"); go("sc-another"); }
@@ -1295,9 +1401,18 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   function addCalzone() {
     if (!calzoneItem || !f1) return;
     const detail = `Sabor: ${f1}`;
+    const simpleSelection = resolverSimpleSelectionIds(menu.catalog, calzoneItem.name, { flavorName: f1 });
+    // Fail-closed (mesma regra de addMiniPizza acima): com o catálogo
+    // presente, a decisão oficial de flavorsMode ("pizza" reaproveita a
+    // Pizza, "own" usa a lista própria calzoneFlavors) nunca é contornada
+    // por um sabor que não resolve para ID.
+    if (!simpleSelection && menu.catalog) {
+      showToast("Não foi possível confirmar esse sabor. Escolha outro.");
+      return;
+    }
     const ex = cart.find((c) => c.kind === "simple" && isCalzoneName(c.name) && c.detail === detail);
     if (ex) setCart(cart.map((c) => (c === ex ? { ...c, qty: c.qty + 1 } : c)));
-    else setCart([...cart, { emoji: "🍽️", kind: "simple", name: calzoneItem.name, detail, price: calzoneItem.price, qty: 1, keys: [calzoneItem.name, f1] }]);
+    else setCart([...cart, { emoji: "🍽️", kind: "simple", name: calzoneItem.name, detail, price: calzoneItem.price, qty: 1, keys: [calzoneItem.name, f1], ...(simpleSelection ? { simpleSelection } : {}) }]);
     setLastAddedKind("lanche");
     showToast(`${calzoneItem.name} adicionado!`);
     resetBuild();
@@ -1327,9 +1442,15 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     if (!sucoPendente) return;
     const detail = comLeite ? "Com leite" : "Sem leite";
     const price = sucoPendente.price + (comLeite ? 1 : 0);
+    const simpleSelection = resolverSimpleSelectionIds(menu.catalog, sucoPendente.name, { milk: comLeite ? "com" : "sem" });
+    // Fail-closed: mesma regra de addCalzone/addMiniPizza acima.
+    if (!simpleSelection && menu.catalog) {
+      showToast("Não foi possível confirmar esse suco. Tente novamente.");
+      return;
+    }
     const ex = cart.find((c) => c.kind === "simple" && c.name === sucoPendente.name && c.detail === detail);
     if (ex) setCart(cart.map((c) => (c === ex ? { ...c, qty: c.qty + 1 } : c)));
-    else setCart([...cart, { emoji: "S", kind: "simple", name: sucoPendente.name, detail, price, qty: 1, keys: [sucoPendente.name] }]);
+    else setCart([...cart, { emoji: "S", kind: "simple", name: sucoPendente.name, detail, price, qty: 1, keys: [sucoPendente.name], ...(simpleSelection ? { simpleSelection } : {}) }]);
     setLastAddedKind("suco");
     showToast(`${sucoPendente.name} ${detail.toLowerCase()} adicionado!`);
     setSucoPendente(null);
@@ -1340,9 +1461,15 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     const sizeOption = macarronadaPendente.sizes?.find((s) => s.code === code);
     if (!sizeOption) return;
     const detail = `Tamanho ${sizeOption.code}`;
+    const simpleSelection = resolverSimpleSelectionIds(menu.catalog, macarronadaPendente.name, { sizeCode: sizeOption.code });
+    // Fail-closed: mesma regra de addCalzone/addMiniPizza acima.
+    if (!simpleSelection && menu.catalog) {
+      showToast("Não foi possível confirmar esse tamanho. Tente novamente.");
+      return;
+    }
     const ex = cart.find((c) => c.kind === "simple" && c.name === macarronadaPendente.name && c.detail === detail);
     if (ex) setCart(cart.map((c) => (c === ex ? { ...c, qty: c.qty + 1 } : c)));
-    else setCart([...cart, { emoji: "🍽️", kind: "simple", name: macarronadaPendente.name, detail, price: sizeOption.price, qty: 1, keys: [macarronadaPendente.name] }]);
+    else setCart([...cart, { emoji: "🍽️", kind: "simple", name: macarronadaPendente.name, detail, price: sizeOption.price, qty: 1, keys: [macarronadaPendente.name], ...(simpleSelection ? { simpleSelection } : {}) }]);
     setLastAddedKind("macarronada");
     showToast(`${macarronadaPendente.name} ${sizeOption.code} adicionada!`);
     setMacarronadaPendente(null);
@@ -1611,7 +1738,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     // usar e (pizza) o sabor escolhido.
     const itemRecompensaJornada = cart.find((c) => c.recompensaJornadaId);
     const itensSemRecompensa = cart.filter((c) => !c.recompensaJornadaId);
-    const payload = { cliente: nome.trim(), telefone: telefone.trim() || undefined, whatsappToken: waToken || undefined, usarOutroWhatsapp: usarOutroWhatsapp || undefined, itens: itensSemRecompensa.map((c) => ({ kind: c.kind, name: c.name, detail: c.detail, price: c.price, qty: c.qty, ...(c.promoId ? { promoId: c.promoId } : {}), ...(c.pizzaSelection ? { pizzaSelection: c.pizzaSelection } : {}) })), ...(itemRecompensaJornada ? { recompensaJornada: { recompensaId: itemRecompensaJornada.recompensaJornadaId, ...(itemRecompensaJornada.recompensaEscolha ? { escolha: itemRecompensaJornada.recompensaEscolha } : {}) } } : {}), tipoEntrega: delType, bairro: delType === "delivery" ? menu.neighborhoods[+bairroIdx].name : undefined, rua: delType === "delivery" ? rua : undefined, numero: delType === "delivery" && numero.trim() ? numero.trim() : undefined, referencia: delType === "delivery" && referencia.trim() ? referencia.trim() : undefined, observacao: observacao.trim() || undefined, taxaEntrega: fee, pagamento: payment, troco: (payment === "Dinheiro" || isHibrido) ? (trocoOpcao === "nao" ? "Sem troco" : troco.trim()) : undefined, resgateId: resgatePontos && new Date(resgatePontos.expiraEm).getTime() > Date.now() ? resgatePontos.resgateId : undefined };
+    const payload = { cliente: nome.trim(), telefone: telefone.trim() || undefined, whatsappToken: waToken || undefined, usarOutroWhatsapp: usarOutroWhatsapp || undefined, itens: itensSemRecompensa.map((c) => ({ kind: c.kind, name: c.name, detail: c.detail, price: c.price, qty: c.qty, ...(c.promoId ? { promoId: c.promoId } : {}), ...(c.pizzaSelection ? { pizzaSelection: c.pizzaSelection } : {}), ...(c.simpleSelection ? { simpleSelection: c.simpleSelection } : {}) })), ...(itemRecompensaJornada ? { recompensaJornada: { recompensaId: itemRecompensaJornada.recompensaJornadaId, ...(itemRecompensaJornada.recompensaEscolha ? { escolha: itemRecompensaJornada.recompensaEscolha } : {}) } } : {}), tipoEntrega: delType, bairro: delType === "delivery" ? menu.neighborhoods[+bairroIdx].name : undefined, rua: delType === "delivery" ? rua : undefined, numero: delType === "delivery" && numero.trim() ? numero.trim() : undefined, referencia: delType === "delivery" && referencia.trim() ? referencia.trim() : undefined, observacao: observacao.trim() || undefined, taxaEntrega: fee, pagamento: payment, troco: (payment === "Dinheiro" || isHibrido) ? (trocoOpcao === "nao" ? "Sem troco" : troco.trim()) : undefined, resgateId: resgatePontos && new Date(resgatePontos.expiraEm).getTime() > Date.now() ? resgatePontos.resgateId : undefined };
     try {
       const r = await fetch("/api/pedido-app", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const data = await r.json();

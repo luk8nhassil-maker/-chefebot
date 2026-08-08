@@ -526,6 +526,27 @@ function AdicionarItemModal({ menu, onFechar, onAdicionar }: { menu: MenuType; o
   const [border, setBorder] = useState<string | null>(null);
   const flavors = [...menu.saltyFlavors, ...menu.sweetFlavors];
   const calzoneItem = menu.lanches.find((l) => norm(l.name) === "calzone");
+  // Lista efetiva de sabores do Calzone (aba "calzone" abaixo): com o
+  // catálogo oficial presente, é SEMPRE `produto.flavors` (já calculada por
+  // buildSimpleCatalog conforme flavorsMode via resolverFlavorsModeEfetivo —
+  // mesma fonte que o Cardápio Público usa) — nunca `flavors` (lista cheia
+  // da pizza, usada pela aba "pizza" acima, sem relação com flavorsMode).
+  // HARDENING (auditoria independente, ciclo de autoauditoria pós-9ª
+  // rodada): esta tela de edição de pedido tinha a MESMA lacuna do Cardápio
+  // Público e do Pedido Manual/Salão (já corrigidas) — a aba calzone sempre
+  // mostrava `flavors` incondicionalmente, nunca refletindo o modo "own". O
+  // servidor (officialUnitPrice, em POST /api/pedido-app/[id]/editar/salvar)
+  // já recusava a escolha errada — aqui só corrige o que É mostrado.
+  //
+  // HARDENING (auditoria independente, 2º ciclo de autoauditoria): a
+  // condição decidia pelo RESULTADO do `.find` (produto encontrado ou não),
+  // não pela presença genuína de `menu.catalog` — com o catálogo presente
+  // mas sem o Calzone nele, caía de volta para `flavors` (lista legada da
+  // pizza), que o servidor sempre recusaria de qualquer forma. Agora
+  // `menu.catalog` ausente é o ÚNICO caso que autoriza `flavors`.
+  const calzoneFlavorNames = menu.catalog
+    ? menu.catalog.lanches.find((l) => l.name === calzoneItem?.name)?.flavors?.map((f) => f.name) ?? []
+    : flavors;
   const macarronadas = menu.lanches.filter((l) => norm(l.name).includes("macarronada") && l.sizes?.length);
   const simplesLanches = menu.lanches.filter((l) => norm(l.name) !== "calzone" && !norm(l.name).includes("macarronada"));
   const [macarronadaSel, setMacarronadaSel] = useState<{ name: string; price: number; sizes?: { code: string; price: number }[] } | null>(null);
@@ -669,7 +690,7 @@ function AdicionarItemModal({ menu, onFechar, onAdicionar }: { menu: MenuType; o
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <p style={{ fontSize: 12, color: "var(--foreground-secondary)", margin: 0 }}>Escolha 1 sabor:</p>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6, maxHeight: 200, overflowY: "auto" }}>
-              {flavors.map((f) => (
+              {calzoneFlavorNames.map((f) => (
                 <button key={f} style={{ ...btnBase, padding: "0 10px", height: 30, fontSize: 11, border: "1px solid var(--surface-secondary)", background: "transparent" }} onClick={() => onAdicionar({ kind: "simple", name: calzoneItem.name, detail: `Sabor: ${f}`, price: calzoneItem.price, qty: 1 })}>
                   {f}
                 </button>

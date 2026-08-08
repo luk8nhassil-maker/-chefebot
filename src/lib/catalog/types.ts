@@ -38,6 +38,20 @@ export interface CatalogSimpleProduct {
   name: string;
   priceCents: number;
   sizes?: { id: SizeId; code: string; priceCents: number }[];
+  /** Passagem direta da configuração oficial já existente do cardápio
+   *  (menu.lanches[].hasFlavors/flavorsKey — ver src/lib/menu.ts) — nunca
+   *  inferida por nome. `flavorsKey` aponta para outra seção do Menu (ex.:
+   *  "calzoneFlavors") que lista os sabores permitidos deste produto. */
+  hasFlavors?: boolean;
+  flavorsKey?: string;
+  /** Passagem direta de menu.lanches[].flavorsMode — decide se os sabores
+   *  deste produto vêm da Pizza ("pizza") ou de sua própria lista apontada
+   *  por `flavorsKey` ("own"). Configuração explícita por produto — nunca
+   *  inferida por nome nem por lista vazia. AUSENTE não é sempre "pizza": o
+   *  modo efetivo é resolvido por `resolverFlavorsModeEfetivo`
+   *  (@/lib/pedidoAppItens, fonte única de compatibilidade) por
+   *  `flavorsKey`, não por este tipo. */
+  flavorsMode?: "pizza" | "own";
 }
 
 export interface CatalogDrink {

@@ -36,6 +36,7 @@ import { GET as status } from "./status/route";
 import { POST as salvar } from "./salvar/route";
 import { POST as descartar } from "./descartar/route";
 import { buildPizzaCatalog } from "@/lib/catalog/pizzas";
+import { buildSimpleCatalog } from "@/lib/catalog/simpleProducts";
 import { MENU } from "@/lib/menu";
 
 function req(body: unknown) {
@@ -500,6 +501,154 @@ describe("POST salvar — seleção estruturada de pizza por ID (Fase 2)", () =>
     const data = await json(res);
     const sizeG = MENU.sizes.find((s) => s.code === "G")!;
     expect(data.total).toBe(sizeG.price); // preço do servidor, nunca o 999 enviado pelo cliente
+  });
+});
+
+describe("POST salvar — seleção estruturada de produto simples por ID (Fase 6)", () => {
+  const simpleCatalog = buildSimpleCatalog(MENU);
+  const productIdCalzone = simpleCatalog.lanches.find((l) => l.name === "Calzone")!.id;
+  const productIdMacarronada = simpleCatalog.lanches.find((l) => l.name === "Macarronada de Carne")!.id;
+  const sizeGMacarronada = simpleCatalog.lanches.find((l) => l.name === "Macarronada de Carne")!.sizes!.find((s) => s.code === "G")!.id;
+  const flavorCalabresaCalzone = simpleCatalog.lanches.find((l) => l.name === "Calzone")!.flavors!.find((f) => f.name === "Calabresa")!.id;
+
+  async function iniciarEdicao() {
+    seedPedido();
+    const res = await iniciar(req({ statusToken: TOKEN }), paramsFor(PEDIDO_ID));
+    const data = await json(res);
+    return data.editSessionId as string;
+  }
+
+  it("Calzone: recalcula nativamente e grava name/detail canônicos, ignorando o que o cliente mandou", async () => {
+    const editSessionId = await iniciarEdicao();
+    const res = await salvar(req({
+      statusToken: TOKEN, editSessionId, revision: 1,
+      itens: [{ kind: "simple", name: "Produto Inventado", detail: "sabor inventado", price: 0.01, qty: 1, simpleSelection: { productId: productIdCalzone, flavorId: flavorCalabresaCalzone } }],
+      tipoEntrega: "retirada", pagamento: "Dinheiro", troco: "Sem troco",
+    }), paramsFor(PEDIDO_ID));
+
+    expect(res.status).toBe(200);
+    const data = await json(res);
+    const calzone = MENU.lanches.find((l) => l.name === "Calzone")!;
+    expect(data.total).toBe(calzone.price);
+
+    const pedidos = store.get("pedidos") as Array<Record<string, unknown>>;
+    expect(pedidos[0].itens).toEqual(["Calzone Sabor: Calabresa"]);
+    const itensDetalhados = pedidos[0].itensDetalhados as Array<Record<string, unknown>>;
+    expect(itensDetalhados[0]).toMatchObject({ name: "Calzone", detail: "Sabor: Calabresa", price: calzone.price });
+  });
+
+  it("Macarronada: exige tamanho e recalcula pelo tamanho escolhido", async () => {
+    const editSessionId = await iniciarEdicao();
+    const res = await salvar(req({
+      statusToken: TOKEN, editSessionId, revision: 1,
+      itens: [{ kind: "simple", name: "", price: 0, qty: 1, simpleSelection: { productId: productIdMacarronada, sizeId: sizeGMacarronada } }],
+      tipoEntrega: "retirada", pagamento: "Dinheiro", troco: "Sem troco",
+    }), paramsFor(PEDIDO_ID));
+
+    expect(res.status).toBe(200);
+    const data = await json(res);
+    const macarronada = MENU.lanches.find((l) => l.name === "Macarronada de Carne")!;
+    const sizeG = macarronada.sizes!.find((s) => s.code === "G")!;
+    expect(data.total).toBe(sizeG.price);
+  });
+
+  it("rejeita seleção com productId inexistente e nunca cai para o caminho legado, mesmo com name/detail válidos", async () => {
+    const editSessionId = await iniciarEdicao();
+    const res = await salvar(req({
+      statusToken: TOKEN, editSessionId, revision: 1,
+      itens: [{ kind: "simple", name: "Calzone", detail: "Sabor: Calabresa", price: 35, qty: 1, simpleSelection: { productId: "product-inexistente" } }],
+      tipoEntrega: "retirada", pagamento: "Dinheiro", troco: "Sem troco",
+    }), paramsFor(PEDIDO_ID));
+
+    expect(res.status).toBe(400);
+    const pedidos = store.get("pedidos") as Array<Record<string, unknown>>;
+    expect(pedidos[0].total).toBe(15); // pedido original intacto
+    expect(pedidos[0].revision).toBe(1);
+  });
+
+  it("simpleSelection: null com name/detail legado válido é tratado como formato estruturado inválido — 400, nunca cai no legado", async () => {
+    const editSessionId = await iniciarEdicao();
+    const res = await salvar(req({
+      statusToken: TOKEN, editSessionId, revision: 1,
+      itens: [{ kind: "simple", name: "Calzone", detail: "Sabor: Calabresa", price: 35, qty: 1, simpleSelection: null }],
+      tipoEntrega: "retirada", pagamento: "Dinheiro", troco: "Sem troco",
+    }), paramsFor(PEDIDO_ID));
+
+    expect(res.status).toBe(400);
+    const pedidos = store.get("pedidos") as Array<Record<string, unknown>>;
+    expect(pedidos[0].total).toBe(15); // pedido original intacto
+    expect(pedidos[0].revision).toBe(1);
+  });
+
+  it.each([false, 0, "", "texto", 42, [], {}])(
+    "simpleSelection malformado (%p) com name/detail legado válido é tratado como formato estruturado inválido — 400",
+    async (valor) => {
+      const editSessionId = await iniciarEdicao();
+      const res = await salvar(req({
+        statusToken: TOKEN, editSessionId, revision: 1,
+        itens: [{ kind: "simple", name: "Calzone", detail: "Sabor: Calabresa", price: 35, qty: 1, simpleSelection: valor }],
+        tipoEntrega: "retirada", pagamento: "Dinheiro", troco: "Sem troco",
+      }), paramsFor(PEDIDO_ID));
+
+      expect(res.status).toBe(400);
+      const pedidos = store.get("pedidos") as Array<Record<string, unknown>>;
+      expect(pedidos[0].total).toBe(15); // pedido original intacto
+      expect(pedidos[0].revision).toBe(1);
+    }
+  );
+
+  it("ausência total de simpleSelection continua 100% legado (name/detail funcionam normalmente)", async () => {
+    const editSessionId = await iniciarEdicao();
+    const res = await salvar(req({
+      statusToken: TOKEN, editSessionId, revision: 1,
+      itens: [{ kind: "simple", name: "Calzone", detail: "Sabor: Calabresa", price: 999, qty: 1 }],
+      tipoEntrega: "retirada", pagamento: "Dinheiro", troco: "Sem troco",
+    }), paramsFor(PEDIDO_ID));
+
+    expect(res.status).toBe(200);
+    const data = await json(res);
+    const calzone = MENU.lanches.find((l) => l.name === "Calzone")!;
+    expect(data.total).toBe(calzone.price); // preço do servidor, nunca o 999 enviado pelo cliente
+  });
+
+  it("REGRESSÃO — sabor esgota ENTRE a montagem e o salvamento da edição: recusado, pedido original permanece intacto", async () => {
+    store.set("esgotados", ["Calabresa"]);
+    const editSessionId = await iniciarEdicao();
+    const res = await salvar(req({
+      statusToken: TOKEN, editSessionId, revision: 1,
+      itens: [{ kind: "simple", name: "Calzone", detail: "Sabor: Calabresa", price: 35, qty: 1, simpleSelection: { productId: productIdCalzone, flavorId: flavorCalabresaCalzone } }],
+      tipoEntrega: "retirada", pagamento: "Dinheiro", troco: "Sem troco",
+    }), paramsFor(PEDIDO_ID));
+
+    expect(res.status).toBe(400);
+    const pedidos = store.get("pedidos") as Array<Record<string, unknown>>;
+    expect(pedidos[0].total).toBe(15); // pedido original intacto
+    expect(pedidos[0].revision).toBe(1);
+  });
+
+  it("REGRESSÃO (hardening pós-auditoria, 5ª rodada) — item com pizzaSelection E simpleSelection ao mesmo tempo é rejeitado com 400, pedido original permanece intacto", async () => {
+    const pizzaCatalog = buildPizzaCatalog(MENU);
+    const sizeIdG = pizzaCatalog.sizes.find((s) => s.code === "G")!.id;
+    const flavorCalabresaPizza = pizzaCatalog.flavors.find((f) => f.name === "Calabresa")!.id;
+
+    const editSessionId = await iniciarEdicao();
+    const res = await salvar(req({
+      statusToken: TOKEN, editSessionId, revision: 1,
+      itens: [{
+        kind: "pizza",
+        name: "",
+        price: 0,
+        qty: 1,
+        pizzaSelection: { sizeId: sizeIdG, flavorIds: [flavorCalabresaPizza] },
+        simpleSelection: { productId: productIdCalzone, flavorId: flavorCalabresaCalzone },
+      }],
+      tipoEntrega: "retirada", pagamento: "Dinheiro", troco: "Sem troco",
+    }), paramsFor(PEDIDO_ID));
+
+    expect(res.status).toBe(400);
+    const pedidos = store.get("pedidos") as Array<Record<string, unknown>>;
+    expect(pedidos[0].total).toBe(15); // pedido original intacto
+    expect(pedidos[0].revision).toBe(1);
   });
 });
 

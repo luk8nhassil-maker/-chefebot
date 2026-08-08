@@ -123,6 +123,30 @@ describe("validarCardapio — validação estrutural pura", () => {
     });
     expect(resultado.ok).toBe(false);
   });
+
+  it.each(["pizza", "own"] as const)("aceita flavorsMode válido (%s) em um lanche", (flavorsMode) => {
+    const resultado = validarCardapio({
+      ...MENU,
+      lanches: [{ name: "Calzone", price: 35, hasFlavors: true, flavorsKey: "calzoneFlavors", flavorsMode }],
+    });
+    expect(resultado.ok).toBe(true);
+  });
+
+  it("aceita lanche sem flavorsMode (campo opcional — compatibilidade com cardápio antigo)", () => {
+    const resultado = validarCardapio({
+      ...MENU,
+      lanches: [{ name: "Calzone", price: 35, hasFlavors: true, flavorsKey: "calzoneFlavors" }],
+    });
+    expect(resultado.ok).toBe(true);
+  });
+
+  it.each([null, false, 0, "", "outro-valor", 42, [], {}])("rejeita flavorsMode inválido (%p) em um lanche", (flavorsMode) => {
+    const resultado = validarCardapio({
+      ...MENU,
+      lanches: [{ name: "Calzone", price: 35, hasFlavors: true, flavorsKey: "calzoneFlavors", flavorsMode }],
+    });
+    expect(resultado.ok).toBe(false);
+  });
 });
 
 describe("POST /api/cardapio — rejeita payload inválido antes de gravar", () => {

@@ -44,6 +44,7 @@ import {
   type MenuPedidoApp,
 } from "./pedidoAppItens";
 import type { PizzaCatalog, PizzaCategoryId } from "./catalog/pizzas";
+import type { SimpleCatalog, SimpleCatalogStrategy } from "./catalog/simpleProducts";
 
 /**
  * Contrato de cardápio da montagem manual. Declarado AQUI, em `src/lib`, e
@@ -69,6 +70,24 @@ export type MenuManual = MenuPedidoApp & {
   // resolve para IDs é RECUSADA (nunca cai pro formato legado); só a
   // AUSÊNCIA genuína do campo permite o formato legado.
   pizzaCatalogPresente?: boolean;
+  // Catálogo oficial dos demais produtos configuráveis, com IDs estáveis e
+  // disponibilidade em tempo real (Fase 6), já vem de GET /api/cardapio
+  // (campo aditivo) — usado SÓ para resolver productId/sizeId/flavorId/milk
+  // (ver resolverSimpleSelectionIds abaixo). Cada produto declara sua própria
+  // `strategy` (fixed/size/single_flavor/milk, derivada só da configuração
+  // oficial do cardápio — ver @/lib/catalog/simpleProducts) e, quando
+  // `strategy === "single_flavor"` (ex.: Calzone, Mini-Pizza), a lista de
+  // sabores permitidos DESTE produto em `produto.flavors` — nunca a lista de
+  // sabores de pizza. `undefined` quando ausente OU malformado — ver
+  // `catalogPresente` para distinguir os dois casos, mesma regra de
+  // `pizzaCatalogPresente`.
+  catalog?: SimpleCatalog;
+  // Flag interna (nunca lida fora deste módulo): `true` quando a resposta de
+  // GET /api/cardapio TINHA a propriedade `catalog` (mesmo que
+  // malformada/vazia), `false`/ausente quando o campo realmente não veio
+  // (resposta anterior à Fase 6, ou cache antigo). `construirItemManual` usa
+  // isso para decidir fail-closed, mesma regra de `pizzaCatalogPresente`.
+  catalogPresente?: boolean;
 };
 
 // ---------------------------------------------------------------------------
@@ -152,6 +171,63 @@ function lerPizzaCatalog(bruto: unknown): PizzaCatalog | undefined {
   return { sizes, flavors, borders };
 }
 
+function lerStrategy(v: unknown): SimpleCatalogStrategy | null {
+  return v === "fixed" || v === "size" || v === "single_flavor" || v === "milk" ? v : null;
+}
+
+function lerFlavor(item: Record<string, unknown>) {
+  const id = texto(item.id);
+  const name = texto(item.name);
+  if (id === null || name === null) return null;
+  return { id, name, available: typeof item.available === "boolean" ? item.available : true };
+}
+
+/**
+ * Valida `bruto.catalog` (campo aditivo de GET /api/cardapio, Fase 6) campo a
+ * campo, mesma disciplina de `lerPizzaCatalog` acima — nunca um cast.
+ * Qualquer coisa fora do formato esperado é descartada silenciosamente
+ * (`undefined`): a montagem dos produtos configuráveis (Calzone, Mini-Pizza,
+ * Macarronada, sucos) cai no formato 100% legado, nunca quebra a tela por
+ * causa de um campo aditivo malformado. `strategy` é lida como veio do
+ * servidor (@/lib/catalog/simpleProducts) — nunca recalculada aqui a partir
+ * do nome do produto.
+ */
+function lerCatalog(bruto: unknown): SimpleCatalog | undefined {
+  if (!ehObjeto(bruto)) return undefined;
+
+  function lerSimpleProduct(item: Record<string, unknown>) {
+    const id = texto(item.id);
+    const name = texto(item.name);
+    const priceCents = numeroFinito(item.priceCents);
+    const strategy = lerStrategy(item.strategy);
+    if (id === null || name === null || priceCents === null || strategy === null) return null;
+    const available = typeof item.available === "boolean" ? item.available : true;
+    const sizes = listaValida(item.sizes, (s) => {
+      const sid = texto(s.id);
+      const code = texto(s.code);
+      const sPriceCents = numeroFinito(s.priceCents);
+      return sid !== null && code !== null && sPriceCents !== null ? { id: sid, code, priceCents: sPriceCents } : null;
+    });
+    const flavors = listaValida(item.flavors, lerFlavor);
+    return {
+      id,
+      name,
+      priceCents,
+      available,
+      strategy,
+      ...(sizes.length > 0 ? { sizes } : {}),
+      ...(flavors.length > 0 ? { flavors } : {}),
+    };
+  }
+
+  const lanches = listaValida(bruto.lanches, lerSimpleProduct);
+  const bebidas = listaValida(bruto.bebidas, lerSimpleProduct);
+  const sucos = listaValida(bruto.sucos, lerSimpleProduct);
+
+  if (lanches.length === 0 && bebidas.length === 0 && sucos.length === 0) return undefined;
+  return { lanches, bebidas, sucos };
+}
+
 /**
  * Converte a resposta crua de `GET /api/cardapio` no contrato desta montagem,
  * validando campo a campo. Substitui o cast — um `as unknown as` aceitaria uma
@@ -215,6 +291,9 @@ export function adaptarCardapioParaMontagem(bruto: unknown): MenuManual | null {
     // PRESENTE (a resposta tentou trazer o campo e falhou), só a chave
     // realmente ausente (`undefined`) conta como ausente de verdade.
     pizzaCatalogPresente: bruto.pizzaCatalog !== undefined,
+    catalog: lerCatalog(bruto.catalog),
+    // Mesma regra de presença de `pizzaCatalogPresente`, para `catalog`.
+    catalogPresente: bruto.catalog !== undefined,
   };
 
   // Sem nenhum produto vendável não há pedido a montar: falhar aqui, com a
@@ -444,6 +523,46 @@ function opcoesSabores(menu: MenuManual): OpcaoEtapa[] {
 }
 
 /**
+ * Opções da etapa "sabor_unico" (Calzone/Mini-Pizza) — com o catálogo
+ * oficial presente (`menu.catalogPresente`), é SEMPRE `produto.flavors` (já
+ * calculada por buildSimpleCatalog conforme flavorsMode via
+ * resolverFlavorsModeEfetivo — mesma fonte usada por
+ * resolverSimpleSelectionIds/construirItemManual abaixo, nunca uma lista
+ * própria daqui). Só quando o catálogo está genuinamente AUSENTE
+ * (`catalogPresente` falso — resposta antiga em cache) cai para
+ * `opcoesSabores` (lista cheia de sabores da pizza), mesma regra de sempre.
+ *
+ * HARDENING (auditoria independente, ciclo de autoauditoria pós-9ª rodada):
+ * antes desta correção, esta etapa sempre usava `opcoesSabores(menu)`
+ * incondicionalmente para Calzone E Mini-Pizza — nunca refletia flavorsMode
+ * "own". A escolha errada nunca chegava a virar pedido (construirItemManual
+ * já rejeitava via `resolverSimpleSelectionIds` quando o sabor escolhido não
+ * resolvia para ID), mas o atendente via — e podia escolher — sabores que
+ * seriam sempre recusados.
+ *
+ * HARDENING (auditoria independente, 2º ciclo de autoauditoria): a correção
+ * acima ainda confundia "catálogo AUSENTE" com "catálogo PRESENTE mas
+ * malformado/sem o produto esperado" — decidia pela presença de
+ * `catalogProduto` (o resultado do `.find`), não pela presença genuína do
+ * campo (`menu.catalogPresente`, a MESMA flag que `construirItemManual` usa
+ * para o fail-closed real). Com `catalogPresente === true` mas o catálogo
+ * malformado ou sem o produto, caía para a lista cheia da pizza — a mesma
+ * classe de divergência já corrigida no Cardápio Público e na edição de
+ * pedido, só que aqui. Agora: `catalogPresente` falso é o ÚNICO caso que
+ * autoriza a lista legada; com `catalogPresente` true, produto ausente ou
+ * catálogo malformado sempre produz lista vazia (fail-closed), nunca a
+ * lista cheia da pizza — coerente com o que `construirItemManual` já
+ * recusava de qualquer forma.
+ */
+function opcoesSaborUnico(produto: ProdutoManual, menu: MenuManual): OpcaoEtapa[] {
+  if (!menu.catalogPresente) return opcoesSabores(menu);
+  const catalogProduto = menu.catalog
+    ? [...menu.catalog.lanches, ...menu.catalog.bebidas, ...menu.catalog.sucos].find((p) => p.name === produto.nome)
+    : undefined;
+  return (catalogProduto?.flavors ?? []).map((f) => ({ valor: f.name, label: f.name, esgotado: !f.available }));
+}
+
+/**
  * Etapas obrigatórias de um produto, na ordem em que devem ser resolvidas.
  * Produto sem etapas entra direto no carrinho.
  */
@@ -503,7 +622,7 @@ export function montarEtapas(produto: ProdutoManual, menu: MenuManual): Etapa[] 
           titulo: "Sabor",
           ajuda: "Escolha 1 sabor — este produto não é meio a meio.",
           maxEscolhas: 1,
-          opcoes: opcoesSabores(menu),
+          opcoes: opcoesSaborUnico(produto, menu),
         },
       ];
     }
@@ -651,6 +770,46 @@ export function resolverPizzaSelectionIds(
   return { sizeId: size.id, flavorIds, borderId: border.id };
 }
 
+/**
+ * Resolve a seleção de um produto simples configurável (Calzone, Mini-Pizza,
+ * Macarronada, sucos) para os IDs estáveis do catálogo oficial (Fase 6,
+ * `menu.catalog`) — puro, sem I/O. Mesma regra de resolverPizzaSelectionIds:
+ * catálogo ausente ou nome sem correspondência devolve `undefined`.
+ *
+ * ZERO acoplamento por nome: uma vez encontrado o produto (por `name`, só
+ * para localizá-lo na lista — não para decidir nada), tamanho e sabor são
+ * lidos direto de `produto.sizes`/`produto.flavors`, já filtrados pelo
+ * servidor conforme a `strategy` daquele produto (ver
+ * @/lib/catalog/simpleProducts). Sabor de Calzone/Mini-Pizza é resolvido
+ * contra a lista oficial DAQUELE produto (`produto.flavors`) — nunca contra a
+ * lista de sabores de pizza, que é uma lista comercial diferente.
+ */
+export function resolverSimpleSelectionIds(
+  catalog: SimpleCatalog | undefined,
+  productName: string,
+  opts: { sizeCode?: string; flavorName?: string; milk?: "com" | "sem" }
+): { productId: string; sizeId?: string; flavorId?: string; milk?: "com" | "sem" } | undefined {
+  if (!catalog) return undefined;
+  const produto = [...catalog.lanches, ...catalog.bebidas, ...catalog.sucos].find((p) => p.name === productName);
+  if (!produto) return undefined;
+
+  if (opts.milk !== undefined) return { productId: produto.id, milk: opts.milk };
+
+  if (opts.sizeCode !== undefined) {
+    const size = produto.sizes?.find((s) => s.code === opts.sizeCode);
+    if (!size) return undefined;
+    return { productId: produto.id, sizeId: size.id };
+  }
+
+  if (opts.flavorName !== undefined) {
+    const flavor = produto.flavors?.find((f) => f.name === opts.flavorName);
+    if (!flavor) return undefined;
+    return { productId: produto.id, flavorId: flavor.id };
+  }
+
+  return { productId: produto.id };
+}
+
 // ---------------------------------------------------------------------------
 // Construção do item
 // ---------------------------------------------------------------------------
@@ -681,6 +840,12 @@ export function resolverPizzaSelectionIds(
  * silenciosamente para name/detail. Isso fecha a brecha de uma pizza escapar
  * do caminho estruturado só porque um nome não bateu (cardápio dessincronizado
  * entre o load da tela e a montagem, por exemplo).
+ *
+ * Fase 6: a mesma ideia (IDs estáveis + fail-closed quando `menu.catalog`
+ * está presente) se aplica a Calzone, Mini-Pizza, Macarronada e sucos, via
+ * `simpleSelection` (ver resolverSimpleSelectionIds acima). Lanches/bebidas
+ * sem configuração alguma (sem sabor/tamanho/leite) continuam 100% legado —
+ * não há ID a resolver para eles.
  */
 export function construirItemManual(
   produto: ProdutoManual,
@@ -714,19 +879,43 @@ export function construirItemManual(
     };
   } else if (produto.categoria === "sucos") {
     if (selecao.leite !== "com" && selecao.leite !== "sem") return null;
+    // FAIL-CLOSED (Fase 6, mesma regra da pizza acima): com `catalog`
+    // presente, um suco que não resolve para ID é recusado, nunca cai
+    // silenciosamente para name/detail.
+    const simpleSelection = resolverSimpleSelectionIds(menu.catalog, produto.nome, { milk: selecao.leite });
+    if (!simpleSelection && menu.catalogPresente) return null;
     item = {
       kind: "simple",
       name: produto.nome,
       detail: selecao.leite === "com" ? "Com leite" : "Sem leite",
       price: 0,
       qty,
+      ...(simpleSelection ? { simpleSelection } : {}),
     };
   } else if (produto.categoria === "lanches") {
     if (ehCalzone(produto.nome) || ehMiniPizza(produto.nome)) {
       if (selecao.sabores.length !== 1) return null;
-      item = { kind: "simple", name: produto.nome, detail: `Sabor: ${selecao.sabores[0]}`, price: 0, qty };
+      const simpleSelection = resolverSimpleSelectionIds(menu.catalog, produto.nome, { flavorName: selecao.sabores[0] });
+      if (!simpleSelection && menu.catalogPresente) return null;
+      item = {
+        kind: "simple",
+        name: produto.nome,
+        detail: `Sabor: ${selecao.sabores[0]}`,
+        price: 0,
+        qty,
+        ...(simpleSelection ? { simpleSelection } : {}),
+      };
     } else if (ehMacarronada(produto.nome) && selecao.tamanhoItem) {
-      item = { kind: "simple", name: produto.nome, detail: `Tamanho ${selecao.tamanhoItem}`, price: 0, qty };
+      const simpleSelection = resolverSimpleSelectionIds(menu.catalog, produto.nome, { sizeCode: selecao.tamanhoItem });
+      if (!simpleSelection && menu.catalogPresente) return null;
+      item = {
+        kind: "simple",
+        name: produto.nome,
+        detail: `Tamanho ${selecao.tamanhoItem}`,
+        price: 0,
+        qty,
+        ...(simpleSelection ? { simpleSelection } : {}),
+      };
     } else {
       item = { kind: "simple", name: produto.nome, detail: "", price: 0, qty };
     }

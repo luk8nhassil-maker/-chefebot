@@ -20,18 +20,51 @@ export type ItemApp = {
   // em vez de name/detail em texto livre. Quando presente, o servidor
   // SEMPRE ignora `name`/`detail` enviados pelo cliente e reconstrói os
   // dois a partir do catálogo (ver resolverItemComSelecaoEstruturada em
-  // @/lib/pedidoAppSelecaoEstruturada) — nunca usado pelo bot do WhatsApp,
-  // Salão ou pedido manual, que continuam só com name/detail.
+  // @/lib/pedidoAppSelecaoEstruturada).
   pizzaSelection?: { sizeId: string; flavorIds: string[]; borderId?: string };
+  // Mesma ideia de pizzaSelection (Fase 6), para os demais produtos
+  // configuráveis do cardápio (Calzone, Mini-Pizza, Macarronada, sucos) por
+  // ID estável do catálogo oficial (@/lib/catalog/simpleProducts). Quando
+  // presente, o servidor SEMPRE ignora
+  // `name`/`detail` enviados pelo cliente e reconstrói os dois a partir do
+  // catálogo (ver resolverItemComSelecaoSimplesEstruturada em
+  // @/lib/pedidoAppSelecaoEstruturada). `sizeId` só se aplica a produtos com
+  // tamanho (macarronada); `flavorId` só a produtos de 1 sabor só (calzone,
+  // mini-pizza); `milk` só a sucos.
+  simpleSelection?: { productId: string; sizeId?: string; flavorId?: string; milk?: "com" | "sem" };
 };
 
-export type MenuSimpleItem = { name: string; price: number; sizes?: { code: string; price: number }[] };
+export type MenuSimpleItem = {
+  name: string;
+  price: number;
+  sizes?: { code: string; price: number }[];
+  // Passagem opcional da configuração oficial de sabores
+  // (menu.lanches[].hasFlavors/flavorsKey/flavorsMode — ver src/lib/menu.ts
+  // e @/lib/catalog/simpleProducts) — usada por QUALQUER produto de 1 sabor
+  // só (Calzone, Mini-Pizza, e qualquer outro que venha a existir) no
+  // caminho legado (ver officialUnitPrice) para respeitar o modo
+  // configurado mesmo quando o cliente omite `simpleSelection`. A DECISÃO
+  // de aplicar a validação de sabor é `hasFlavors && flavorsKey` — nunca o
+  // nome do produto. QUAL lista vale (pizza inteira vs. lista própria) é
+  // decidido por `resolverFlavorsModeEfetivo` (abaixo) — `flavorsMode`
+  // AUSENTE não é sempre "pizza": depende de `flavorsKey` (ver a função).
+  hasFlavors?: boolean;
+  flavorsKey?: string;
+  flavorsMode?: "pizza" | "own";
+};
 
 export type MenuPedidoApp = {
   sizes: { code: string; price: number }[];
   saltyFlavors: string[];
   sweetFlavors: string[];
-  lanches: { name: string; price: number; sizes?: { code: string; price: number }[] }[];
+  lanches: {
+    name: string;
+    price: number;
+    sizes?: { code: string; price: number }[];
+    hasFlavors?: boolean;
+    flavorsKey?: string;
+    flavorsMode?: "pizza" | "own";
+  }[];
   bebidas: { name: string; price: number }[];
   sucos: { name: string; price: number }[];
   borders: { label: string; priceSmall: number; priceLarge: number }[];
@@ -45,6 +78,58 @@ export function formatItem(item: ItemApp): string {
   const qtyPrefix = item.qty > 1 ? `${item.qty}x ` : "";
   const detalhe = item.detail ? ` ${item.detail}` : "";
   return `${qtyPrefix}${item.name}${detalhe}`.trim();
+}
+
+/**
+ * Acréscimo oficial do suco "com leite" — FONTE ÚNICA, em centavos.
+ * Reutilizada tanto por `officialUnitPrice` (abaixo, caminho legado
+ * name/detail) quanto pela precificação por estratégia/catálogo de
+ * `simpleSelection` (ver `resolverItemComSelecaoSimplesEstruturada` em
+ * @/lib/pedidoAppSelecaoEstruturada) — nenhum dos dois define o próprio
+ * valor. Mudar aqui muda os dois caminhos igualmente.
+ */
+export const ACRESCIMO_LEITE_CENTS = 100;
+
+export type FlavorsModeEfetivo = "pizza" | "own" | "invalido";
+
+/**
+ * Resolve o flavorsMode EFETIVO de um produto "single_flavor" (hasFlavors +
+ * flavorsKey) — FONTE ÚNICA reutilizada pelo caminho estruturado
+ * (buildSimpleCatalog, ver @/lib/catalog/simpleProducts) e pelo caminho
+ * legado (officialUnitPrice, abaixo). Nunca dois fallbacks diferentes para a
+ * mesma decisão.
+ *
+ * HARDENING (auditoria independente pós-8ª rodada): antes desta função,
+ * `flavorsMode` ausente virava sempre "pizza" — correto para o Calzone
+ * (regra comercial aprovada na 6ª rodada), mas ERRADO para um cardápio
+ * `lanches` persistido ANTES da introdução deste campo, onde a Mini-Pizza
+ * nunca teve `flavorsMode` gravado e dependia de `miniPizzaFlavors` sozinha
+ * — isso ampliava silenciosamente a Mini-Pizza para qualquer sabor de pizza.
+ * Também havia fail-open: um `flavorsMode` com valor desconhecido, ou modo
+ * "own" cujo `flavorsKey` não resolvia para uma lista, caíam para os
+ * sabores da Pizza em vez de rejeitar.
+ *
+ * Regras, nesta ordem — NUNCA pelo nome do produto:
+ * - flavorsMode explícito "pizza"  => "pizza"
+ * - flavorsMode explícito "own"    => "own"
+ * - flavorsMode presente com qualquer outro valor (config corrompida)
+ *   => "invalido" (fail-closed — nunca cai para sabores da Pizza)
+ * - flavorsMode AUSENTE (cardápio persistido anterior à introdução deste
+ *   campo): o comportamento histórico ANTES do modo "pizza" existir era
+ *   sempre usar a lista PRÓPRIA do produto (nunca os sabores inteiros da
+ *   Pizza) — tanto Calzone quanto Mini-Pizza dependiam só da própria lista
+ *   (`calzoneFlavors`/`miniPizzaFlavors`). A 6ª rodada mudou esse padrão só
+ *   para o Calzone, por decisão comercial explícita — uma exceção pelo
+ *   `flavorsKey` ("calzoneFlavors"), nunca pelo nome do produto. Qualquer
+ *   outro `flavorsKey` (Mini-Pizza — "miniPizzaFlavors" — ou um produto
+ *   futuro sem histórico comprovado) preserva o comportamento histórico
+ *   comprovável: lista própria ("own").
+ */
+export function resolverFlavorsModeEfetivo(produto: { flavorsKey?: string; flavorsMode?: string }): FlavorsModeEfetivo {
+  if (produto.flavorsMode === "pizza") return "pizza";
+  if (produto.flavorsMode === "own") return "own";
+  if (produto.flavorsMode !== undefined) return "invalido";
+  return produto.flavorsKey === "calzoneFlavors" ? "pizza" : "own";
 }
 
 /**
@@ -75,7 +160,7 @@ export function officialUnitPrice(item: ItemApp, menu: MenuPedidoApp): number | 
     if (suco) {
       const detail = norm(item.detail || "");
       if (!detail || detail === "sem leite") return Number.isFinite(suco.price) ? suco.price : null;
-      if (detail === "com leite") return Number.isFinite(suco.price) ? suco.price + 1 : null;
+      if (detail === "com leite") return Number.isFinite(suco.price) ? suco.price + ACRESCIMO_LEITE_CENTS / 100 : null;
       return null;
     }
     if (norm(found.name).includes("macarronada")) {
@@ -84,16 +169,46 @@ export function officialUnitPrice(item: ItemApp, menu: MenuPedidoApp): number | 
       return size && Number.isFinite(size.price) ? size.price : null;
     }
 
-    // Calzone é vendido com exatamente 1 sabor (nunca meio a meio). O
-    // frontend manda `detail: "Sabor: <flavor>"` — payload adulterado com
-    // 2+ sabores, sem sabor ou com sabor fora da lista da pizza é rejeitado
-    // aqui (não confiamos em nada vindo do cliente além do nome/qty).
-    if (norm(found.name) === "calzone") {
+    // Produto de 1 sabor só (nunca meio a meio) — Calzone, Mini-Pizza, ou
+    // qualquer outro que venha a existir. O frontend manda
+    // `detail: "Sabor: <flavor>"` — payload adulterado com 2+ sabores, sem
+    // sabor ou com sabor fora da lista efetiva é rejeitado aqui (não
+    // confiamos em nada vindo do cliente além do nome/qty).
+    //
+    // HARDENING (auditoria independente pós-7ª rodada): a decisão de QUAL
+    // produto passa por essa validação é `found.hasFlavors && found.flavorsKey`
+    // — a mesma configuração oficial explícita que buildSimpleCatalog usa
+    // para decidir `strategy === "single_flavor"` — NUNCA o nome do produto
+    // ("calzone", "mini-pizza" etc.). Isso fecha a mesma classe de bug para
+    // TODO produto configurado por sabor, não só o Calzone: um payload
+    // legado que omite `simpleSelection` de propósito (para tentar contornar
+    // a validação por catálogo/ID) nunca escapa pela porta dos fundos só
+    // porque o produto tem outro nome.
+    //
+    // HARDENING (auditoria independente pós-8ª rodada): QUAL lista de
+    // sabores vale (pizza inteira vs. lista própria) vem de
+    // `resolverFlavorsModeEfetivo` — a MESMA fonte única usada por
+    // buildSimpleCatalog, nunca um fallback próprio deste caminho. Modo
+    // "invalido" (config corrompida) e modo "own" cujo `flavorsKey` não
+    // resolve para uma lista rejeitam o item (fail-closed) — nenhum dos
+    // dois cai para os sabores da Pizza.
+    if (found.hasFlavors && found.flavorsKey) {
       const match = (item.detail || "").trim().match(/^Sabor:\s*(.+)$/i);
       if (!match) return null;
       const sabor = match[1].trim();
       if (!sabor || sabor.includes("/") || sabor.includes("·")) return null;
-      const saboresPermitidos = [...menu.saltyFlavors, ...menu.sweetFlavors].map(norm);
+
+      const modoEfetivo = resolverFlavorsModeEfetivo(found);
+      if (modoEfetivo === "invalido") return null;
+
+      let saboresPermitidos: string[];
+      if (modoEfetivo === "own") {
+        const listaPropria = (menu as unknown as Record<string, unknown>)[found.flavorsKey];
+        if (!Array.isArray(listaPropria)) return null;
+        saboresPermitidos = (listaPropria as string[]).map(norm);
+      } else {
+        saboresPermitidos = [...menu.saltyFlavors, ...menu.sweetFlavors].map(norm);
+      }
       if (!saboresPermitidos.includes(norm(sabor))) return null;
       return Number.isFinite(found.price) ? found.price : null;
     }

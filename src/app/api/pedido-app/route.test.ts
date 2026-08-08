@@ -89,6 +89,7 @@ vi.mock("@/lib/mercadoPagoPix", () => ({
 import { POST } from "./route";
 import { encryptMercadoPagoToken } from "@/lib/mercadoPagoIntegracao";
 import { buildPizzaCatalog } from "@/lib/catalog/pizzas";
+import { buildSimpleCatalog } from "@/lib/catalog/simpleProducts";
 import { MENU } from "@/lib/menu";
 
 function postReq(body: unknown) {
@@ -2013,6 +2014,265 @@ describe("POST /api/pedido-app — seleção estruturada de pizza por ID (Fase 2
   });
 });
 
+describe("POST /api/pedido-app — seleção estruturada de produto simples por ID (Fase 6)", () => {
+  const simpleCatalog = buildSimpleCatalog(MENU);
+  const productIdCalzone = simpleCatalog.lanches.find((l) => l.name === "Calzone")!.id;
+  const productIdMiniPizza = simpleCatalog.lanches.find((l) => l.name === "Mini-Pizza")!.id;
+  const productIdMacarronada = simpleCatalog.lanches.find((l) => l.name === "Macarronada de Carne")!.id;
+  const sizeGMacarronada = simpleCatalog.lanches.find((l) => l.name === "Macarronada de Carne")!.sizes!.find((s) => s.code === "G")!.id;
+  const productIdLaranja = simpleCatalog.sucos.find((s) => s.name === "Laranja")!.id;
+  // Sabores de Calzone e Mini-Pizza vêm das listas oficiais PRÓPRIAS de cada
+  // produto (calzoneFlavors/miniPizzaFlavors) — nunca a lista de sabores de
+  // pizza — e nunca se confundem entre si, mesmo com o mesmo nome.
+  const flavorCalabresaCalzone = simpleCatalog.lanches.find((l) => l.name === "Calzone")!.flavors!.find((f) => f.name === "Calabresa")!.id;
+  const flavorCalabresaMiniPizza = simpleCatalog.lanches.find((l) => l.name === "Mini-Pizza")!.flavors!.find((f) => f.name === "Calabresa")!.id;
+
+  const simplePayload = {
+    cliente: "Lucas Brito",
+    telefone: "(99) 99999-9999",
+    tipoEntrega: "retirada" as const,
+    pagamento: "Dinheiro",
+    troco: "Sem troco",
+  };
+
+  it("Calzone: calcula o preço nativamente e ignora name/detail/price adulterados pelo cliente", async () => {
+    const res = await POST(postReq({
+      ...simplePayload,
+      itens: [{
+        kind: "simple",
+        name: "Produto Inventado",
+        detail: "sabor inventado",
+        price: 0.01,
+        qty: 1,
+        simpleSelection: { productId: productIdCalzone, flavorId: flavorCalabresaCalzone },
+      }],
+    }));
+
+    expect(res.status).toBe(200);
+    const calzone = MENU.lanches.find((l) => l.name === "Calzone")!;
+    const pedidos = store.get("pedidos") as { itens: string[]; itensDetalhados: { name: string; detail?: string; price: number }[]; total: number }[];
+    expect(pedidos[0].itens).toEqual(["Calzone Sabor: Calabresa"]);
+    expect(pedidos[0].itensDetalhados[0]).toMatchObject({ name: "Calzone", detail: "Sabor: Calabresa", price: calzone.price });
+    expect(pedidos[0].total).toBe(calzone.price);
+  });
+
+  it("Mini-Pizza: exige sabor e calcula o preço oficial", async () => {
+    const res = await POST(postReq({
+      ...simplePayload,
+      itens: [{ kind: "simple", name: "", price: 0, qty: 1, simpleSelection: { productId: productIdMiniPizza, flavorId: flavorCalabresaMiniPizza } }],
+    }));
+    expect(res.status).toBe(200);
+    const miniPizza = MENU.lanches.find((l) => l.name === "Mini-Pizza")!;
+    const pedidos = store.get("pedidos") as { itens: string[]; total: number }[];
+    expect(pedidos[0].itens).toEqual(["Mini-Pizza Sabor: Calabresa"]);
+    expect(pedidos[0].total).toBe(miniPizza.price);
+  });
+
+  it("Macarronada: exige tamanho e calcula o preço por tamanho", async () => {
+    const res = await POST(postReq({
+      ...simplePayload,
+      itens: [{ kind: "simple", name: "", price: 0, qty: 1, simpleSelection: { productId: productIdMacarronada, sizeId: sizeGMacarronada } }],
+    }));
+    expect(res.status).toBe(200);
+    const macarronada = MENU.lanches.find((l) => l.name === "Macarronada de Carne")!;
+    const sizeG = macarronada.sizes!.find((s) => s.code === "G")!;
+    const pedidos = store.get("pedidos") as { itens: string[]; total: number }[];
+    expect(pedidos[0].itens).toEqual(["Macarronada de Carne Tamanho G"]);
+    expect(pedidos[0].total).toBe(sizeG.price);
+  });
+
+  it("suco com leite: soma o adicional oficial", async () => {
+    const res = await POST(postReq({
+      ...simplePayload,
+      itens: [{ kind: "simple", name: "", price: 0, qty: 1, simpleSelection: { productId: productIdLaranja, milk: "com" } }],
+    }));
+    expect(res.status).toBe(200);
+    const laranja = MENU.sucos.find((s) => s.name === "Laranja")!;
+    const pedidos = store.get("pedidos") as { itens: string[]; total: number }[];
+    expect(pedidos[0].itens).toEqual(["Laranja com leite"]);
+    expect(pedidos[0].total).toBe(laranja.price + 1);
+  });
+
+  it("rejeita productId inexistente com 400, e NUNCA cria o pedido mesmo com name/detail legados válidos no mesmo item", async () => {
+    const res = await POST(postReq({
+      ...simplePayload,
+      itens: [{
+        kind: "simple",
+        name: "Calzone", // válido no formato legado
+        detail: "Sabor: Calabresa", // válido no formato legado
+        price: 35,
+        qty: 1,
+        simpleSelection: { productId: "product-inexistente", flavorId: flavorCalabresaCalzone },
+      }],
+    }));
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe("Item inválido");
+    expect(store.get("pedidos")).toBeUndefined();
+  });
+
+  it("simpleSelection: null com name/detail legado válido é tratado como formato estruturado inválido — 400, nunca cria pelo caminho legado", async () => {
+    const res = await POST(postReq({
+      ...simplePayload,
+      itens: [{ kind: "simple", name: "Calzone", detail: "Sabor: Calabresa", price: 35, qty: 1, simpleSelection: null }],
+    }));
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe("Item inválido");
+    expect(store.get("pedidos")).toBeUndefined();
+  });
+
+  it.each([false, 0, "", "texto", 42, [], {}])(
+    "simpleSelection malformado (%p) com name/detail legado válido é tratado como formato estruturado inválido — 400, nunca cai no legado",
+    async (valor) => {
+      const res = await POST(postReq({
+        ...simplePayload,
+        itens: [{ kind: "simple", name: "Calzone", detail: "Sabor: Calabresa", price: 35, qty: 1, simpleSelection: valor }],
+      }));
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toBe("Item inválido");
+      expect(store.get("pedidos")).toBeUndefined();
+    }
+  );
+
+  it("ausência total de simpleSelection continua 100% legado (name/detail funcionam normalmente)", async () => {
+    const res = await POST(postReq({
+      ...simplePayload,
+      itens: [{ kind: "simple", name: "Calzone", detail: "Sabor: Calabresa", price: 999, qty: 1 }],
+    }));
+
+    expect(res.status).toBe(200);
+    const calzone = MENU.lanches.find((l) => l.name === "Calzone")!;
+    const pedidos = store.get("pedidos") as { itens: string[]; total: number }[];
+    expect(pedidos[0].itens).toEqual(["Calzone Sabor: Calabresa"]);
+    expect(pedidos[0].total).toBe(calzone.price); // preço do servidor, nunca o 999 enviado pelo cliente
+  });
+
+  it("continua aceitando itens legados (name/detail) normalmente quando misturados com um item por ID no mesmo pedido", async () => {
+    const res = await POST(postReq({
+      ...simplePayload,
+      itens: [
+        { kind: "simple", name: "", price: 0, qty: 1, simpleSelection: { productId: productIdCalzone, flavorId: flavorCalabresaCalzone } },
+        { kind: "simple", name: "Refrigerante 2L", detail: "", price: 15, qty: 1 },
+      ],
+    }));
+
+    expect(res.status).toBe(200);
+    const calzone = MENU.lanches.find((l) => l.name === "Calzone")!;
+    const refri = MENU.bebidas.find((b) => b.name === "Refrigerante 2L")!;
+    const pedidos = store.get("pedidos") as { itens: string[]; total: number }[];
+    expect(pedidos[0].itens).toEqual(["Calzone Sabor: Calabresa", "Refrigerante 2L"]);
+    expect(pedidos[0].total).toBe(calzone.price + refri.price);
+  });
+
+  it("continua aceitando itens de pizza por ID normalmente quando misturados com um item simples por ID no mesmo pedido", async () => {
+    const pizzaCatalog = buildPizzaCatalog(MENU);
+    const sizeIdG = pizzaCatalog.sizes.find((s) => s.code === "G")!.id;
+    const flavorCalabresaPizza = pizzaCatalog.flavors.find((f) => f.name === "Calabresa")!.id;
+    const res = await POST(postReq({
+      ...simplePayload,
+      itens: [
+        { kind: "pizza", name: "", price: 0, qty: 1, pizzaSelection: { sizeId: sizeIdG, flavorIds: [flavorCalabresaPizza] } },
+        { kind: "simple", name: "", price: 0, qty: 1, simpleSelection: { productId: productIdCalzone, flavorId: flavorCalabresaCalzone } },
+      ],
+    }));
+
+    expect(res.status).toBe(200);
+    const sizeG = MENU.sizes.find((s) => s.code === "G")!;
+    const calzone = MENU.lanches.find((l) => l.name === "Calzone")!;
+    const pedidos = store.get("pedidos") as { itens: string[]; total: number }[];
+    expect(pedidos[0].itens).toEqual(["Pizza G Calabresa", "Calzone Sabor: Calabresa"]);
+    expect(pedidos[0].total).toBe(sizeG.price + calzone.price);
+  });
+
+  it("REGRESSÃO (hardening pós-auditoria, 5ª rodada) — item com pizzaSelection E simpleSelection ao mesmo tempo é rejeitado com 400, nunca resolvido por precedência silenciosa da pizza", async () => {
+    const pizzaCatalog = buildPizzaCatalog(MENU);
+    const sizeIdG = pizzaCatalog.sizes.find((s) => s.code === "G")!.id;
+    const flavorCalabresaPizza = pizzaCatalog.flavors.find((f) => f.name === "Calabresa")!.id;
+    const res = await POST(postReq({
+      ...simplePayload,
+      itens: [{
+        kind: "pizza",
+        name: "",
+        price: 0,
+        qty: 1,
+        pizzaSelection: { sizeId: sizeIdG, flavorIds: [flavorCalabresaPizza] },
+        simpleSelection: { productId: productIdCalzone, flavorId: flavorCalabresaCalzone },
+      }],
+    }));
+
+    expect(res.status).toBe(400);
+    const pedidos = (store.get("pedidos") as unknown[] | undefined) ?? [];
+    expect(pedidos).toHaveLength(0);
+  });
+
+  it("REGRESSÃO (BLOQUEIO 1, auditoria independente pós-6ª rodada) — Calzone em modo 'own': item legado (sem simpleSelection) com sabor fora da lista própria é rejeitado, nunca contorna flavorsMode pelo caminho legado", async () => {
+    store.set("cardapio", {
+      ...MENU,
+      lanches: MENU.lanches.map((l) => (l.name === "Calzone" ? { ...l, flavorsMode: "own" as const } : l)),
+    });
+    // "Quatro Queijos" é um sabor de pizza válido, mas não está em
+    // calzoneFlavors — com o Calzone em modo "own", nenhum caminho (nem o
+    // legado, omitindo simpleSelection de propósito) pode aceitá-lo.
+    expect(MENU.calzoneFlavors).not.toContain("Quatro Queijos");
+    const res = await POST(postReq({
+      ...simplePayload,
+      itens: [{ kind: "simple", name: "Calzone", detail: "Sabor: Quatro Queijos", price: 35, qty: 1 }],
+    }));
+
+    expect(res.status).toBe(400);
+    const pedidos = (store.get("pedidos") as unknown[] | undefined) ?? [];
+    expect(pedidos).toHaveLength(0);
+  });
+
+  it("Calzone em modo 'own': item legado com sabor DENTRO da lista própria continua funcionando normalmente", async () => {
+    store.set("cardapio", {
+      ...MENU,
+      lanches: MENU.lanches.map((l) => (l.name === "Calzone" ? { ...l, flavorsMode: "own" as const } : l)),
+    });
+    expect(MENU.calzoneFlavors).toContain("Calabresa");
+    const res = await POST(postReq({
+      ...simplePayload,
+      itens: [{ kind: "simple", name: "Calzone", detail: "Sabor: Calabresa", price: 35, qty: 1 }],
+    }));
+
+    expect(res.status).toBe(200);
+    const pedidos = store.get("pedidos") as { itens: string[]; total: number }[];
+    expect(pedidos[0].itens).toEqual(["Calzone Sabor: Calabresa"]);
+    expect(pedidos[0].total).toBe(35);
+  });
+
+  it("REGRESSÃO (BLOQUEIO 1, auditoria independente pós-7ª rodada) — Mini-Pizza (own, inalterado): item legado (sem simpleSelection) com sabor fora de miniPizzaFlavors é rejeitado, nunca contorna flavorsMode pelo caminho legado", async () => {
+    // MENU real já tem Mini-Pizza em flavorsMode "own" — sem override.
+    expect(MENU.miniPizzaFlavors).not.toContain("Quatro Queijos");
+    const res = await POST(postReq({
+      ...simplePayload,
+      itens: [{ kind: "simple", name: "Mini-Pizza", detail: "Sabor: Quatro Queijos", price: 17, qty: 1 }],
+    }));
+
+    expect(res.status).toBe(400);
+    const pedidos = (store.get("pedidos") as unknown[] | undefined) ?? [];
+    expect(pedidos).toHaveLength(0);
+  });
+
+  it("Mini-Pizza: item legado com sabor DENTRO de miniPizzaFlavors continua funcionando normalmente", async () => {
+    expect(MENU.miniPizzaFlavors).toContain("Calabresa");
+    const res = await POST(postReq({
+      ...simplePayload,
+      itens: [{ kind: "simple", name: "Mini-Pizza", detail: "Sabor: Calabresa", price: 17, qty: 1 }],
+    }));
+
+    expect(res.status).toBe(200);
+    const pedidos = store.get("pedidos") as { itens: string[]; total: number }[];
+    expect(pedidos[0].itens).toEqual(["Mini-Pizza Sabor: Calabresa"]);
+    expect(pedidos[0].total).toBe(17);
+  });
+});
+
 describe("POST /api/pedido-app — snapshotOficial (Fase 3)", () => {
   const catalog = buildPizzaCatalog(MENU);
   const sizeIdG = catalog.sizes.find((s) => s.code === "G")!.id;
@@ -2027,7 +2287,17 @@ describe("POST /api/pedido-app — snapshotOficial (Fase 3)", () => {
     total: number;
     taxaEntrega?: number;
     snapshotOficial?: {
-      itens: { kind: string; nome: string; detalhe?: string; quantidade: number; precoUnitarioCents: number; totalCents: number; selecao?: { sizeId: string; flavorIds: string[]; borderId?: string } }[];
+      itens: {
+        kind: string;
+        nome: string;
+        detalhe?: string;
+        quantidade: number;
+        precoUnitarioCents: number;
+        totalCents: number;
+        selecao?:
+          | { sizeId: string; flavorIds: string[]; borderId?: string }
+          | { productId: string; sizeId?: string; flavorId?: string; milk?: "com" | "sem" };
+      }[];
       subtotalCents: number;
       descontoFidelidadeCents: number;
       taxaEntregaCents: number;
@@ -2188,5 +2458,59 @@ describe("POST /api/pedido-app — snapshotOficial (Fase 3)", () => {
     expect(snapshot.subtotalCents - snapshot.descontoFidelidadeCents + snapshot.taxaEntregaCents).toBe(snapshot.totalCents);
     const somaItens = snapshot.itens.reduce((s, i) => s + i.totalCents, 0);
     expect(somaItens).toBe(snapshot.subtotalCents);
+  });
+
+  it("produto simples estruturado (Fase 6): item do snapshot carrega selecao (productId/flavorId) e preço oficial em centavos", async () => {
+    const simpleCatalog = buildSimpleCatalog(MENU);
+    const productIdCalzone = simpleCatalog.lanches.find((l) => l.name === "Calzone")!.id;
+    const flavorCalabresaCalzone = simpleCatalog.lanches.find((l) => l.name === "Calzone")!.flavors!.find((f) => f.name === "Calabresa")!.id;
+    const calzone = MENU.lanches.find((l) => l.name === "Calzone")!;
+
+    const res = await POST(postReq({
+      cliente: "Lucas Brito", telefone: "(99) 99999-9999", tipoEntrega: "retirada", pagamento: "Dinheiro", troco: "Sem troco",
+      itens: [{ kind: "simple", name: "", price: 0, qty: 1, simpleSelection: { productId: productIdCalzone, flavorId: flavorCalabresaCalzone } }],
+    }));
+    expect(res.status).toBe(200);
+    const pedidos = store.get("pedidos") as PedidoComSnapshot[];
+    const snapshot = pedidos[0].snapshotOficial!;
+    expect(snapshot.itens).toEqual([{
+      kind: "simple",
+      nome: "Calzone",
+      detalhe: "Sabor: Calabresa",
+      quantidade: 1,
+      precoUnitarioCents: Math.round(calzone.price * 100),
+      totalCents: Math.round(calzone.price * 100),
+      selecao: { productId: productIdCalzone, flavorId: flavorCalabresaCalzone },
+    }]);
+  });
+
+  it("REGRESSÃO — sabor esgota entre a montagem e o envio: rejeitado com 400, nunca cria o pedido com o preço/nome adulterado", async () => {
+    const simpleCatalog = buildSimpleCatalog(MENU);
+    const productIdCalzone = simpleCatalog.lanches.find((l) => l.name === "Calzone")!.id;
+    const flavorCalabresaCalzone = simpleCatalog.lanches.find((l) => l.name === "Calzone")!.flavors!.find((f) => f.name === "Calabresa")!.id;
+    store.set("esgotados", ["Calabresa"]);
+
+    const res = await POST(postReq({
+      cliente: "Lucas Brito", telefone: "(99) 99999-9999", tipoEntrega: "retirada", pagamento: "Dinheiro", troco: "Sem troco",
+      itens: [{ kind: "simple", name: "Calzone", detail: "Sabor: Calabresa", price: 35, qty: 1, simpleSelection: { productId: productIdCalzone, flavorId: flavorCalabresaCalzone } }],
+    }));
+
+    expect(res.status).toBe(400);
+    expect(store.get("pedidos")).toBeUndefined();
+  });
+
+  it("REGRESSÃO — produto inteiro esgota entre a montagem e o envio: rejeitado com 400", async () => {
+    const simpleCatalog = buildSimpleCatalog(MENU);
+    const productIdCalzone = simpleCatalog.lanches.find((l) => l.name === "Calzone")!.id;
+    const flavorCalabresaCalzone = simpleCatalog.lanches.find((l) => l.name === "Calzone")!.flavors!.find((f) => f.name === "Calabresa")!.id;
+    store.set("esgotados", ["Calzone"]);
+
+    const res = await POST(postReq({
+      cliente: "Lucas Brito", telefone: "(99) 99999-9999", tipoEntrega: "retirada", pagamento: "Dinheiro", troco: "Sem troco",
+      itens: [{ kind: "simple", name: "", price: 0, qty: 1, simpleSelection: { productId: productIdCalzone, flavorId: flavorCalabresaCalzone } }],
+    }));
+
+    expect(res.status).toBe(400);
+    expect(store.get("pedidos")).toBeUndefined();
   });
 });

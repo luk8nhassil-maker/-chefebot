@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { redis } from '@/lib/redis'
 import { getMENUDinamico } from '@/lib/menu.server'
 import { buildPizzaCatalog } from '@/lib/catalog/pizzas'
+import { buildSimpleCatalog } from '@/lib/catalog/simpleProducts'
 import { verifyToken } from '@/lib/auth'
 import { registrarAuditoriaCardapio } from '@/lib/auditoriaCardapio'
 
@@ -134,6 +135,17 @@ function validarLanches(valor: unknown): string | null {
         if (!nomeValido(so.code) || !precoValido(so.price)) return `lanches: tamanho inválido em "${String(obj.name)}"`
       }
     }
+    // flavorsMode (correção da regra comercial do Calzone): configuração
+    // explícita de onde vêm os sabores deste produto — "pizza" (reaproveita
+    // a Pizza) ou "own" (lista própria via flavorsKey). Só os dois valores
+    // oficiais são aceitos aqui; o comportamento quando o campo está AUSENTE
+    // (compatibilidade com config persistida antes deste campo existir) não
+    // é sempre "pizza" — ver `resolverFlavorsModeEfetivo` em
+    // @/lib/pedidoAppItens (fonte única, usada em runtime, não nesta
+    // validação estrutural de escrita).
+    if (obj.flavorsMode !== undefined && obj.flavorsMode !== 'pizza' && obj.flavorsMode !== 'own') {
+      return `lanches: flavorsMode inválido em "${String(obj.name)}"`
+    }
     const chave = `${(obj.name as string).trim()}::${obj.price}`
     if (vistos.has(chave)) return `lanches: item duplicado ("${obj.name}", mesmo preço)`
     vistos.add(chave)
@@ -231,7 +243,15 @@ export async function GET() {
     // religada nesta mesma etapa). Serve pra religar a UI depois sem precisar
     // reconstruir o catálogo em outro lugar.
     const pizzaCatalog = buildPizzaCatalog(menu, esgotados)
-    return NextResponse.json({ ...menu, esgotados, esgotadosMetadata, horario, pizzaCatalog })
+    // Catálogo oficial dos demais produtos configuráveis, com IDs estáveis e
+    // disponibilidade em tempo real (Fase 6) — aditivo, igual pizzaCatalog:
+    // usado para montar `simpleSelection` (Calzone, Mini-Pizza, Macarronada,
+    // sucos). Sabores de Calzone/Mini-Pizza vêm das listas oficiais já
+    // existentes (menu.calzoneFlavors/miniPizzaFlavors), nunca inventadas
+    // aqui. Ausência (resposta antiga em cache) faz esses itens caírem no
+    // comportamento 100% legado (name/detail), nunca bloqueia o carrinho.
+    const catalog = buildSimpleCatalog(menu, esgotados)
+    return NextResponse.json({ ...menu, esgotados, esgotadosMetadata, horario, pizzaCatalog, catalog })
   } catch {
     return NextResponse.json(
       { ok: false, error: 'Cardápio temporariamente indisponível' },
