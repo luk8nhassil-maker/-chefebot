@@ -48,12 +48,12 @@ describe("construirSnapshotOficial", () => {
     construirSnapshotItem({ kind: "simple", nome: "Refrigerante 2L", quantidade: 2, precoUnitarioReais: 15 }),
   ];
 
-  it("monta o snapshot com valores agregados em centavos e entrega estruturada", () => {
+  it("monta o snapshot com valores agregados em centavos e entrega estruturada (sem desconto)", () => {
     const snapshot = construirSnapshotOficial({
       itens: baseItens,
       subtotalReais: 90,
+      descontoReais: 0,
       taxaReais: 5,
-      totalReais: 95,
       tipoEntrega: "delivery",
       bairro: "Centro",
       pagamento: "Pix",
@@ -63,6 +63,7 @@ describe("construirSnapshotOficial", () => {
     expect(snapshot).toEqual({
       itens: baseItens,
       subtotalCents: 9000,
+      descontoFidelidadeCents: 0,
       taxaEntregaCents: 500,
       totalCents: 9500,
       entrega: { tipo: "delivery", bairro: "Centro" },
@@ -75,8 +76,8 @@ describe("construirSnapshotOficial", () => {
     const snapshot = construirSnapshotOficial({
       itens: baseItens,
       subtotalReais: 90,
+      descontoReais: 0,
       taxaReais: 0,
-      totalReais: 90,
       tipoEntrega: "retirada",
       pagamento: "Dinheiro",
       criadoEm: "2026-08-08T12:00:00.000Z",
@@ -84,5 +85,83 @@ describe("construirSnapshotOficial", () => {
 
     expect(snapshot.entrega).toEqual({ tipo: "retirada" });
     expect(snapshot.taxaEntregaCents).toBe(0);
+  });
+
+  it("com desconto de fidelidade: descontoFidelidadeCents preenchido e invariante subtotal - desconto + taxa = total vale", () => {
+    const snapshot = construirSnapshotOficial({
+      itens: baseItens,
+      subtotalReais: 90,
+      descontoReais: 20,
+      taxaReais: 5,
+      tipoEntrega: "delivery",
+      bairro: "Centro",
+      pagamento: "Pix",
+      criadoEm: "2026-08-08T12:00:00.000Z",
+    });
+
+    expect(snapshot.descontoFidelidadeCents).toBe(2000);
+    expect(snapshot.totalCents).toBe(7500); // 9000 - 2000 + 500
+    expect(snapshot.subtotalCents - snapshot.descontoFidelidadeCents + snapshot.taxaEntregaCents).toBe(snapshot.totalCents);
+  });
+
+  it("sem desconto, descontoFidelidadeCents é sempre 0", () => {
+    const snapshot = construirSnapshotOficial({
+      itens: baseItens, subtotalReais: 90, descontoReais: 0, taxaReais: 5,
+      tipoEntrega: "delivery", bairro: "Centro", pagamento: "Pix", criadoEm: "2026-08-08T12:00:00.000Z",
+    });
+    expect(snapshot.descontoFidelidadeCents).toBe(0);
+  });
+
+  it("invariante subtotal - desconto + taxa = total vale sempre, para vários valores", () => {
+    for (const [subtotalReais, descontoReais, taxaReais] of [[100, 0, 0], [55.5, 10, 3], [30, 30, 7], [12.34, 5.67, 1.23]]) {
+      const snapshot = construirSnapshotOficial({
+        itens: [], subtotalReais, descontoReais, taxaReais,
+        tipoEntrega: "delivery", bairro: "Centro", pagamento: "Pix", criadoEm: "2026-08-08T12:00:00.000Z",
+      });
+      expect(snapshot.subtotalCents - snapshot.descontoFidelidadeCents + snapshot.taxaEntregaCents).toBe(snapshot.totalCents);
+    }
+  });
+});
+
+describe("construirSnapshotItem — sanitização de selecao", () => {
+  it("copia só sizeId/flavorIds/borderId, mesmo que o objeto de entrada (ex.: vindo de body.itens[i].pizzaSelection) tenha propriedades extras adulteradas", () => {
+    const selecaoAdulterada = {
+      sizeId: "size-g",
+      flavorIds: ["flavor-calabresa"],
+      borderId: "border-catupiry",
+      // Propriedades extras que NUNCA devem ser persistidas — simula um
+      // payload adulterado com campos fora do contrato oficial.
+      priceCents: 1,
+      admin: true,
+      __proto__: { evil: true },
+    } as unknown as { sizeId: string; flavorIds: string[]; borderId?: string };
+
+    const item = construirSnapshotItem({
+      kind: "pizza", nome: "Pizza G", quantidade: 1, precoUnitarioReais: 60, selecao: selecaoAdulterada,
+    });
+
+    expect(item.selecao).toEqual({ sizeId: "size-g", flavorIds: ["flavor-calabresa"], borderId: "border-catupiry" });
+    expect(Object.keys(item.selecao!).sort()).toEqual(["borderId", "flavorIds", "sizeId"]);
+    expect(item.selecao).not.toHaveProperty("priceCents");
+    expect(item.selecao).not.toHaveProperty("admin");
+  });
+
+  it("selecao sem borderId: campo omitido, nunca gravado como undefined/null", () => {
+    const item = construirSnapshotItem({
+      kind: "pizza", nome: "Pizza G", quantidade: 1, precoUnitarioReais: 50,
+      selecao: { sizeId: "size-g", flavorIds: ["flavor-calabresa"] },
+    });
+    expect(item.selecao).toEqual({ sizeId: "size-g", flavorIds: ["flavor-calabresa"] });
+    expect(item.selecao).not.toHaveProperty("borderId");
+  });
+
+  it("flavorIds sanitizado é uma cópia nova (mutar o array original não afeta o snapshot já construído)", () => {
+    const flavorIds = ["flavor-calabresa", "flavor-baiana"];
+    const item = construirSnapshotItem({
+      kind: "pizza", nome: "Pizza G", quantidade: 1, precoUnitarioReais: 60,
+      selecao: { sizeId: "size-g", flavorIds },
+    });
+    flavorIds.push("flavor-adulterado");
+    expect(item.selecao!.flavorIds).toEqual(["flavor-calabresa", "flavor-baiana"]);
   });
 });

@@ -221,6 +221,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     // inconsistente com os novos itens/total). Sem a complexidade de
     // idempotência da criação (esta rota não tem attempt de retry) — os
     // valores já são sempre os finais aqui.
+    //
+    // Desconto efetivo = subtotal - subtotalComDesconto (a MESMA derivação
+    // acima), nunca o descontoFidelidade cru: se os itens editados
+    // encolheram o subtotal abaixo do desconto concedido na criação,
+    // subtotalComDesconto já é clampado em 0 (nunca fica negativo) — usar
+    // descontoFidelidade cru aqui quebraria
+    // subtotalCents - descontoCents + taxaCents === totalCents.
+    const descontoEfetivo = subtotal - subtotalComDesconto;
     const itensBody = body.itens;
     const snapshotOficial = construirSnapshotOficial({
       itens: itensValidados.map((item, i) =>
@@ -234,8 +242,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         })
       ),
       subtotalReais: subtotal,
+      descontoReais: descontoEfetivo,
       taxaReais: taxa,
-      totalReais: total,
       tipoEntrega: body.tipoEntrega || "retirada",
       bairro: body.bairro,
       pagamento,

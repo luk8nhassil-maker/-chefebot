@@ -2029,6 +2029,7 @@ describe("POST /api/pedido-app — snapshotOficial (Fase 3)", () => {
     snapshotOficial?: {
       itens: { kind: string; nome: string; detalhe?: string; quantidade: number; precoUnitarioCents: number; totalCents: number; selecao?: { sizeId: string; flavorIds: string[]; borderId?: string } }[];
       subtotalCents: number;
+      descontoFidelidadeCents: number;
       taxaEntregaCents: number;
       totalCents: number;
       entrega: { tipo: string; bairro?: string };
@@ -2055,6 +2056,31 @@ describe("POST /api/pedido-app — snapshotOficial (Fase 3)", () => {
       totalCents: Math.round((sizeG.price + border.priceLarge) * 100),
       selecao: { sizeId: sizeIdG, flavorIds: [flavorCalabresa], borderId: borderCatupiry },
     }]);
+  });
+
+  it("pizzaSelection com propriedade extra adulterada: pedido é aceito normalmente (campos oficiais válidos), mas o campo extra nunca chega ao snapshot", async () => {
+    const res = await POST(postReq({
+      cliente: "Lucas Brito", telefone: "(99) 99999-9999", tipoEntrega: "retirada", pagamento: "Dinheiro", troco: "Sem troco",
+      itens: [{
+        kind: "pizza", name: "", price: 0, qty: 1,
+        pizzaSelection: {
+          sizeId: sizeIdG,
+          flavorIds: [flavorCalabresa],
+          borderId: borderCatupiry,
+          // Propriedades fora do contrato oficial — nunca devem sobreviver ao snapshot.
+          precoUnitarioCents: 1,
+          admin: true,
+        },
+      }],
+    }));
+
+    expect(res.status).toBe(200);
+    const pedidos = store.get("pedidos") as PedidoComSnapshot[];
+    const selecao = pedidos[0].snapshotOficial!.itens[0].selecao!;
+    expect(selecao).toEqual({ sizeId: sizeIdG, flavorIds: [flavorCalabresa], borderId: borderCatupiry });
+    expect(Object.keys(selecao).sort()).toEqual(["borderId", "flavorIds", "sizeId"]);
+    expect(selecao).not.toHaveProperty("precoUnitarioCents");
+    expect(selecao).not.toHaveProperty("admin");
   });
 
   it("item legado: snapshot não tem selecao, preço vem de officialUnitPrice (nunca do price do cliente)", async () => {
@@ -2158,7 +2184,8 @@ describe("POST /api/pedido-app — snapshotOficial (Fase 3)", () => {
     const pedido = pedidos[0];
     const snapshot = pedido.snapshotOficial!;
     expect(snapshot.totalCents).toBe(Math.round(pedido.total * 100));
-    expect(snapshot.subtotalCents + snapshot.taxaEntregaCents).toBe(snapshot.totalCents);
+    expect(snapshot.descontoFidelidadeCents).toBe(0); // sem resgate
+    expect(snapshot.subtotalCents - snapshot.descontoFidelidadeCents + snapshot.taxaEntregaCents).toBe(snapshot.totalCents);
     const somaItens = snapshot.itens.reduce((s, i) => s + i.totalCents, 0);
     expect(somaItens).toBe(snapshot.subtotalCents);
   });

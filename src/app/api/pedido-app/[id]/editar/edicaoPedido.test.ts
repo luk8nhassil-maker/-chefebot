@@ -578,9 +578,11 @@ describe("POST salvar — snapshotOficial (Fase 3)", () => {
 
   type PedidoComSnapshot = {
     total: number;
+    descontoFidelidade?: number;
     snapshotOficial?: {
       itens: { kind: string; nome: string; quantidade: number; precoUnitarioCents: number; totalCents: number; selecao?: { sizeId: string; flavorIds: string[]; borderId?: string } }[];
       subtotalCents: number;
+      descontoFidelidadeCents: number;
       taxaEntregaCents: number;
       totalCents: number;
       entrega: { tipo: string; bairro?: string };
@@ -660,5 +662,66 @@ describe("POST salvar — snapshotOficial (Fase 3)", () => {
     expect(snapshot.itens[0].selecao).toBeDefined();
     expect(snapshot.itens[1]).not.toHaveProperty("selecao");
     expect(snapshot.subtotalCents).toBe(Math.round((sizeG.price + refri.price) * 100));
+  });
+
+  // Fase 3 (hardening): a edição preserva o desconto de fidelidade concedido
+  // na criação (nunca revalida a reserva) — o snapshot precisa refletir
+  // exatamente essa mesma derivação, a que hoje produz `subtotalComDesconto`.
+  it("edição com desconto de fidelidade: descontoFidelidadeCents reflete o desconto preservado e a invariante vale", async () => {
+    seedPedido({ descontoFidelidade: 10 });
+    const iniciarRes = await iniciar(req({ statusToken: TOKEN }), paramsFor(PEDIDO_ID));
+    const editSessionId = (await json(iniciarRes)).editSessionId as string;
+
+    // subtotal 3x Refrigerante 2L = R$45; desconto R$10 não é capado (45 > 10).
+    const res = await salvar(req({
+      statusToken: TOKEN, editSessionId, revision: 1,
+      itens: [{ kind: "simple", name: "Refrigerante 2L", detail: "", price: 15, qty: 3 }],
+      tipoEntrega: "retirada", pagamento: "Dinheiro", troco: "Sem troco",
+    }), paramsFor(PEDIDO_ID));
+
+    expect(res.status).toBe(200);
+    const pedidos = store.get("pedidos") as Array<PedidoComSnapshot>;
+    const pedido = pedidos[0];
+    const snapshot = pedido.snapshotOficial!;
+    expect(snapshot.subtotalCents).toBe(Math.round(refri.price * 3 * 100));
+    expect(snapshot.descontoFidelidadeCents).toBe(1000);
+    expect(snapshot.subtotalCents - snapshot.descontoFidelidadeCents + snapshot.taxaEntregaCents).toBe(snapshot.totalCents);
+    expect(snapshot.totalCents).toBe(Math.round(pedido.total * 100));
+  });
+
+  it("edição com desconto MAIOR que o novo subtotal: descontoFidelidadeCents usa o valor efetivo (capado), igual a subtotalComDesconto — nunca o desconto bruto", async () => {
+    seedPedido({ descontoFidelidade: 20 });
+    const iniciarRes = await iniciar(req({ statusToken: TOKEN }), paramsFor(PEDIDO_ID));
+    const editSessionId = (await json(iniciarRes)).editSessionId as string;
+
+    // subtotal 1x Refrigerante 2L = R$15; desconto bruto é R$20 (> subtotal),
+    // então o efetivo é capado em R$15 (subtotalComDesconto = 0).
+    const res = await salvar(req({
+      statusToken: TOKEN, editSessionId, revision: 1,
+      itens: [{ kind: "simple", name: "Refrigerante 2L", detail: "", price: 15, qty: 1 }],
+      tipoEntrega: "retirada", pagamento: "Dinheiro", troco: "Sem troco",
+    }), paramsFor(PEDIDO_ID));
+
+    expect(res.status).toBe(200);
+    const pedidos = store.get("pedidos") as Array<PedidoComSnapshot>;
+    const pedido = pedidos[0];
+    const snapshot = pedido.snapshotOficial!;
+    expect(pedido.total).toBe(0);
+    expect(snapshot.subtotalCents).toBe(Math.round(refri.price * 100));
+    expect(snapshot.descontoFidelidadeCents).toBe(Math.round(refri.price * 100)); // capado no subtotal, não 2000
+    expect(snapshot.totalCents).toBe(0);
+    expect(snapshot.subtotalCents - snapshot.descontoFidelidadeCents + snapshot.taxaEntregaCents).toBe(snapshot.totalCents);
+  });
+
+  it("edição sem desconto: descontoFidelidadeCents é 0", async () => {
+    const editSessionId = await iniciarEdicao();
+    const res = await salvar(req({
+      statusToken: TOKEN, editSessionId, revision: 1,
+      itens: [{ kind: "simple", name: "Refrigerante 2L", detail: "", price: 15, qty: 1 }],
+      tipoEntrega: "retirada", pagamento: "Dinheiro", troco: "Sem troco",
+    }), paramsFor(PEDIDO_ID));
+    expect(res.status).toBe(200);
+    const pedidos = store.get("pedidos") as Array<PedidoComSnapshot>;
+    expect(pedidos[0].snapshotOficial!.descontoFidelidadeCents).toBe(0);
   });
 });
