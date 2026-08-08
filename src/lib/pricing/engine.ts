@@ -45,7 +45,21 @@ function resolverPizza(selection: PizzaSelection, menu: Menu): ItemApp | { error
   return { kind: "pizza", name, detail, price: 0, qty: selection.quantity };
 }
 
-function resolverSimples(selection: SimpleSelection, menu: Menu): ItemApp | { error: string } {
+// Mesma normalização usada por ehMiniPizza (@/lib/montagemManual): remove
+// tudo que não for letra/número antes de comparar, para não depender de o
+// nome cadastrado usar hífen, espaço ou nenhum separador ("Mini-Pizza",
+// "Mini Pizza", "MiniPizza" reconhecem igual).
+function ehMiniPizza(nome: string): boolean {
+  return norm(nome).replace(/[^a-z0-9]/g, "") === "minipizza";
+}
+
+/**
+ * Resolve uma seleção "simple" (lanche/bebida/suco) para o formato legado
+ * (name/detail) que `officialUnitPrice` sabe precificar — exportada para que
+ * @/lib/pedidoAppSelecaoEstruturada reconstrua o mesmo `ItemApp` canônico
+ * (nome/detalhe) sem duplicar esta resolução.
+ */
+export function resolverSimples(selection: SimpleSelection, menu: Menu): ItemApp | { error: string } {
   const catalog = buildCatalog(menu);
   const produtos = [...catalog.lanches, ...catalog.bebidas, ...catalog.sucos];
   const produto = produtos.find((entry) => entry.id === selection.productId);
@@ -64,7 +78,10 @@ function resolverSimples(selection: SimpleSelection, menu: Menu): ItemApp | { er
     return { kind: "simple", name: produto.name, detail: `Tamanho ${size.code}`, price: 0, qty: selection.quantity };
   }
 
-  if (norm(produto.name) === "calzone") {
+  // Calzone e Mini-Pizza são vendidos com exatamente 1 sabor (nunca meio a
+  // meio) — mesma regra e mesma lista de sabores válidos (salgados + doces
+  // da pizza) que `officialUnitPrice` já valida para os dois hoje.
+  if (norm(produto.name) === "calzone" || ehMiniPizza(produto.name)) {
     const flavors = [...catalog.saltyFlavors, ...catalog.sweetFlavors];
     const flavor = selection.flavorId ? flavors.find((entry) => entry.id === selection.flavorId) : undefined;
     if (!flavor) return { error: "Sabor não encontrado" };

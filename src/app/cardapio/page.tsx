@@ -16,6 +16,7 @@ import { fetchCliente } from "@/lib/clienteSessaoFront";
 import { lerReferenciaRecompensa, limparReferenciaRecompensa, migrarReferenciaLegada } from "@/lib/recompensaJornadaCarrinho";
 import { extrairPagamentoComposto, montarPagamentoComposto, parseValorMonetario } from "@/lib/pagamentoComposto";
 import type { PizzaCatalog } from "@/lib/catalog/pizzas";
+import type { Catalog } from "@/lib/catalog/types";
 
 // Ícones de categoria da home (menu/navegação) — lucide-react, sem emoji.
 // Mantidos separados de ICONS (que continua usando emoji para os itens
@@ -51,6 +52,13 @@ export type MenuType = {
   // item de pizza cair no comportamento 100% legado (name/detail), nunca
   // bloqueia adicionar ao carrinho.
   pizzaCatalog?: PizzaCatalog;
+  // Catálogo oficial genérico com IDs estáveis (Fase 1), aditivo, vem de
+  // GET /api/cardapio. Usado só para montar `simpleSelection` no carrinho
+  // (Calzone, Mini-Pizza, Macarronada, sucos — ver addCalzone/addMiniPizza/
+  // addMacarronadaSize/addSucoLeite); ausência (ex.: resposta antiga em
+  // cache) faz o item cair no comportamento 100% legado (name/detail), nunca
+  // bloqueia adicionar ao carrinho (Fase 6).
+  catalog?: Catalog;
 };
 
 // ==================== ADMIN CARDÁPIO ====================
@@ -647,6 +655,12 @@ type CartItem = {
   // item 100% legado (mini-pizza, calzone, ou pizza normal sem catálogo
   // carregado ainda) — comportamento inalterado.
   pizzaSelection?: { sizeId: string; flavorIds: string[]; borderId?: string };
+  // Mesma ideia de pizzaSelection (Fase 6), para os demais produtos
+  // configuráveis do carrinho — Calzone, Mini-Pizza, Macarronada, sucos — a
+  // partir de menu.catalog. Ausente = item 100% legado (comportamento
+  // inalterado); nunca bloqueia adicionar à sacola quando o catálogo ainda
+  // não carregou ou o nome não bate.
+  simpleSelection?: { productId: string; sizeId?: string; flavorId?: string; milk?: "com" | "sem" };
 };
 
 type PromocaoPublica = {
@@ -784,6 +798,39 @@ export function resolverPizzaSelectionIds(
   const border = pizzaCatalog.borders.find((b) => b.label === borderLabel);
   if (!border) return undefined;
   return { sizeId: size.id, flavorIds, borderId: border.id };
+}
+
+// Resolve a seleção de um produto simples configurável (Calzone, Mini-Pizza,
+// Macarronada, sucos) para os IDs estáveis do catálogo oficial (Fase 1,
+// GET /api/cardapio -> menu.catalog) — puro, sem nenhuma chamada de rede.
+// Mesma regra de resolverPizzaSelectionIds: catálogo ausente ou nome sem
+// correspondência devolve undefined, e o item cai no formato 100% legado
+// (Fase 6).
+export function resolverSimpleSelectionIds(
+  catalog: Catalog | undefined,
+  productName: string,
+  opts: { sizeCode?: string; flavorName?: string; milk?: "com" | "sem" }
+): { productId: string; sizeId?: string; flavorId?: string; milk?: "com" | "sem" } | undefined {
+  if (!catalog) return undefined;
+  const produto = [...catalog.lanches, ...catalog.bebidas, ...catalog.sucos].find((p) => p.name === productName);
+  if (!produto) return undefined;
+
+  if (opts.milk !== undefined) return { productId: produto.id, milk: opts.milk };
+
+  if (opts.sizeCode !== undefined) {
+    const lanche = catalog.lanches.find((l) => l.id === produto.id);
+    const size = lanche?.sizes?.find((s) => s.code === opts.sizeCode);
+    if (!size) return undefined;
+    return { productId: produto.id, sizeId: size.id };
+  }
+
+  if (opts.flavorName !== undefined) {
+    const flavor = [...catalog.saltyFlavors, ...catalog.sweetFlavors].find((f) => f.name === opts.flavorName);
+    if (!flavor) return undefined;
+    return { productId: produto.id, flavorId: flavor.id };
+  }
+
+  return { productId: produto.id };
 }
 
 // Pagamento misto (Pix + Dinheiro): mesma string canônica já validada no
@@ -1284,9 +1331,10 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   function addMiniPizza() {
     if (!miniPizzaItem || !f1) return;
     const detail = `Sabor: ${f1}`;
+    const simpleSelection = resolverSimpleSelectionIds(menu.catalog, miniPizzaItem.name, { flavorName: f1 });
     const ex = cart.find((c) => c.kind === "simple" && isMiniPizzaName(c.name) && c.detail === detail);
     if (ex) setCart(cart.map((c) => (c === ex ? { ...c, qty: c.qty + 1 } : c)));
-    else setCart([...cart, { emoji: "🍕", kind: "simple", name: miniPizzaItem.name, detail, price: miniPizzaItem.price, qty: 1, keys: [miniPizzaItem.name, f1] }]);
+    else setCart([...cart, { emoji: "🍕", kind: "simple", name: miniPizzaItem.name, detail, price: miniPizzaItem.price, qty: 1, keys: [miniPizzaItem.name, f1], ...(simpleSelection ? { simpleSelection } : {}) }]);
     setLastAddedKind("pizza");
     if (!plan.openEnded && plan.current < plan.total) { setPlan({ ...plan, current: plan.current + 1 }); showToast("Mini-pizza adicionada!"); resetBuild(); go("sc-build"); }
     else if (plan.openEnded) { showToast("Mini-pizza adicionada!"); go("sc-another"); }
@@ -1295,9 +1343,10 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   function addCalzone() {
     if (!calzoneItem || !f1) return;
     const detail = `Sabor: ${f1}`;
+    const simpleSelection = resolverSimpleSelectionIds(menu.catalog, calzoneItem.name, { flavorName: f1 });
     const ex = cart.find((c) => c.kind === "simple" && isCalzoneName(c.name) && c.detail === detail);
     if (ex) setCart(cart.map((c) => (c === ex ? { ...c, qty: c.qty + 1 } : c)));
-    else setCart([...cart, { emoji: "🍽️", kind: "simple", name: calzoneItem.name, detail, price: calzoneItem.price, qty: 1, keys: [calzoneItem.name, f1] }]);
+    else setCart([...cart, { emoji: "🍽️", kind: "simple", name: calzoneItem.name, detail, price: calzoneItem.price, qty: 1, keys: [calzoneItem.name, f1], ...(simpleSelection ? { simpleSelection } : {}) }]);
     setLastAddedKind("lanche");
     showToast(`${calzoneItem.name} adicionado!`);
     resetBuild();
@@ -1327,9 +1376,10 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     if (!sucoPendente) return;
     const detail = comLeite ? "Com leite" : "Sem leite";
     const price = sucoPendente.price + (comLeite ? 1 : 0);
+    const simpleSelection = resolverSimpleSelectionIds(menu.catalog, sucoPendente.name, { milk: comLeite ? "com" : "sem" });
     const ex = cart.find((c) => c.kind === "simple" && c.name === sucoPendente.name && c.detail === detail);
     if (ex) setCart(cart.map((c) => (c === ex ? { ...c, qty: c.qty + 1 } : c)));
-    else setCart([...cart, { emoji: "S", kind: "simple", name: sucoPendente.name, detail, price, qty: 1, keys: [sucoPendente.name] }]);
+    else setCart([...cart, { emoji: "S", kind: "simple", name: sucoPendente.name, detail, price, qty: 1, keys: [sucoPendente.name], ...(simpleSelection ? { simpleSelection } : {}) }]);
     setLastAddedKind("suco");
     showToast(`${sucoPendente.name} ${detail.toLowerCase()} adicionado!`);
     setSucoPendente(null);
@@ -1340,9 +1390,10 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     const sizeOption = macarronadaPendente.sizes?.find((s) => s.code === code);
     if (!sizeOption) return;
     const detail = `Tamanho ${sizeOption.code}`;
+    const simpleSelection = resolverSimpleSelectionIds(menu.catalog, macarronadaPendente.name, { sizeCode: sizeOption.code });
     const ex = cart.find((c) => c.kind === "simple" && c.name === macarronadaPendente.name && c.detail === detail);
     if (ex) setCart(cart.map((c) => (c === ex ? { ...c, qty: c.qty + 1 } : c)));
-    else setCart([...cart, { emoji: "🍽️", kind: "simple", name: macarronadaPendente.name, detail, price: sizeOption.price, qty: 1, keys: [macarronadaPendente.name] }]);
+    else setCart([...cart, { emoji: "🍽️", kind: "simple", name: macarronadaPendente.name, detail, price: sizeOption.price, qty: 1, keys: [macarronadaPendente.name], ...(simpleSelection ? { simpleSelection } : {}) }]);
     setLastAddedKind("macarronada");
     showToast(`${macarronadaPendente.name} ${sizeOption.code} adicionada!`);
     setMacarronadaPendente(null);
@@ -1611,7 +1662,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     // usar e (pizza) o sabor escolhido.
     const itemRecompensaJornada = cart.find((c) => c.recompensaJornadaId);
     const itensSemRecompensa = cart.filter((c) => !c.recompensaJornadaId);
-    const payload = { cliente: nome.trim(), telefone: telefone.trim() || undefined, whatsappToken: waToken || undefined, usarOutroWhatsapp: usarOutroWhatsapp || undefined, itens: itensSemRecompensa.map((c) => ({ kind: c.kind, name: c.name, detail: c.detail, price: c.price, qty: c.qty, ...(c.promoId ? { promoId: c.promoId } : {}), ...(c.pizzaSelection ? { pizzaSelection: c.pizzaSelection } : {}) })), ...(itemRecompensaJornada ? { recompensaJornada: { recompensaId: itemRecompensaJornada.recompensaJornadaId, ...(itemRecompensaJornada.recompensaEscolha ? { escolha: itemRecompensaJornada.recompensaEscolha } : {}) } } : {}), tipoEntrega: delType, bairro: delType === "delivery" ? menu.neighborhoods[+bairroIdx].name : undefined, rua: delType === "delivery" ? rua : undefined, numero: delType === "delivery" && numero.trim() ? numero.trim() : undefined, referencia: delType === "delivery" && referencia.trim() ? referencia.trim() : undefined, observacao: observacao.trim() || undefined, taxaEntrega: fee, pagamento: payment, troco: (payment === "Dinheiro" || isHibrido) ? (trocoOpcao === "nao" ? "Sem troco" : troco.trim()) : undefined, resgateId: resgatePontos && new Date(resgatePontos.expiraEm).getTime() > Date.now() ? resgatePontos.resgateId : undefined };
+    const payload = { cliente: nome.trim(), telefone: telefone.trim() || undefined, whatsappToken: waToken || undefined, usarOutroWhatsapp: usarOutroWhatsapp || undefined, itens: itensSemRecompensa.map((c) => ({ kind: c.kind, name: c.name, detail: c.detail, price: c.price, qty: c.qty, ...(c.promoId ? { promoId: c.promoId } : {}), ...(c.pizzaSelection ? { pizzaSelection: c.pizzaSelection } : {}), ...(c.simpleSelection ? { simpleSelection: c.simpleSelection } : {}) })), ...(itemRecompensaJornada ? { recompensaJornada: { recompensaId: itemRecompensaJornada.recompensaJornadaId, ...(itemRecompensaJornada.recompensaEscolha ? { escolha: itemRecompensaJornada.recompensaEscolha } : {}) } } : {}), tipoEntrega: delType, bairro: delType === "delivery" ? menu.neighborhoods[+bairroIdx].name : undefined, rua: delType === "delivery" ? rua : undefined, numero: delType === "delivery" && numero.trim() ? numero.trim() : undefined, referencia: delType === "delivery" && referencia.trim() ? referencia.trim() : undefined, observacao: observacao.trim() || undefined, taxaEntrega: fee, pagamento: payment, troco: (payment === "Dinheiro" || isHibrido) ? (trocoOpcao === "nao" ? "Sem troco" : troco.trim()) : undefined, resgateId: resgatePontos && new Date(resgatePontos.expiraEm).getTime() > Date.now() ? resgatePontos.resgateId : undefined };
     try {
       const r = await fetch("/api/pedido-app", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const data = await r.json();

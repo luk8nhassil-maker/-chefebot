@@ -44,6 +44,7 @@ import {
   type MenuPedidoApp,
 } from "./pedidoAppItens";
 import type { PizzaCatalog, PizzaCategoryId } from "./catalog/pizzas";
+import type { Catalog } from "./catalog/types";
 
 /**
  * Contrato de cardápio da montagem manual. Declarado AQUI, em `src/lib`, e
@@ -69,6 +70,20 @@ export type MenuManual = MenuPedidoApp & {
   // resolve para IDs é RECUSADA (nunca cai pro formato legado); só a
   // AUSÊNCIA genuína do campo permite o formato legado.
   pizzaCatalogPresente?: boolean;
+  // Catálogo oficial genérico com IDs estáveis (Fase 1), já vem de
+  // GET /api/cardapio (campo aditivo) — usado SÓ para resolver
+  // productId/sizeId/flavorId/milk dos demais produtos configuráveis
+  // (Calzone, Mini-Pizza, Macarronada, sucos — ver resolverSimpleSelectionIds
+  // abaixo). `undefined` quando ausente OU malformado — ver
+  // `catalogPresente` para distinguir os dois casos, mesma regra de
+  // `pizzaCatalogPresente` (Fase 6).
+  catalog?: Catalog;
+  // Flag interna (nunca lida fora deste módulo): `true` quando a resposta de
+  // GET /api/cardapio TINHA a propriedade `catalog` (mesmo que
+  // malformada/vazia), `false`/ausente quando o campo realmente não veio
+  // (resposta anterior à Fase 6, ou cache antigo). `construirItemManual` usa
+  // isso para decidir fail-closed, mesma regra de `pizzaCatalogPresente`.
+  catalogPresente?: boolean;
 };
 
 // ---------------------------------------------------------------------------
@@ -153,6 +168,69 @@ function lerPizzaCatalog(bruto: unknown): PizzaCatalog | undefined {
 }
 
 /**
+ * Valida `bruto.catalog` (campo aditivo de GET /api/cardapio, Fase 1/6) campo
+ * a campo, mesma disciplina de `lerPizzaCatalog` acima — nunca um cast.
+ * Qualquer coisa fora do formato esperado é descartada silenciosamente
+ * (`undefined`): a montagem dos produtos configuráveis (Calzone, Mini-Pizza,
+ * Macarronada, sucos) cai no formato 100% legado, nunca quebra a tela por
+ * causa de um campo aditivo malformado.
+ */
+function lerCatalog(bruto: unknown): Catalog | undefined {
+  if (!ehObjeto(bruto)) return undefined;
+
+  const sizes = listaValida(bruto.sizes, (s) => {
+    const id = texto(s.id);
+    const code = texto(s.code);
+    const label = texto(s.label);
+    const priceCents = numeroFinito(s.priceCents);
+    return id !== null && code !== null && label !== null && priceCents !== null
+      ? { id, code, label, priceCents }
+      : null;
+  });
+
+  function lerFlavors(bruto: unknown, group: "salty" | "sweet") {
+    return listaValida(bruto, (f) => {
+      const id = texto(f.id);
+      const name = texto(f.name);
+      return id !== null && name !== null ? { id, name, group } : null;
+    });
+  }
+  const saltyFlavors = lerFlavors(bruto.saltyFlavors, "salty");
+  const sweetFlavors = lerFlavors(bruto.sweetFlavors, "sweet");
+
+  function lerSimpleProduct(item: Record<string, unknown>) {
+    const id = texto(item.id);
+    const name = texto(item.name);
+    const priceCents = numeroFinito(item.priceCents);
+    if (id === null || name === null || priceCents === null) return null;
+    const sizes = listaValida(item.sizes, (s) => {
+      const sid = texto(s.id);
+      const code = texto(s.code);
+      const sPriceCents = numeroFinito(s.priceCents);
+      return sid !== null && code !== null && sPriceCents !== null ? { id: sid, code, priceCents: sPriceCents } : null;
+    });
+    return { id, name, priceCents, ...(sizes.length > 0 ? { sizes } : {}) };
+  }
+
+  const lanches = listaValida(bruto.lanches, lerSimpleProduct);
+  const bebidas = listaValida(bruto.bebidas, lerSimpleProduct);
+  const sucos = listaValida(bruto.sucos, lerSimpleProduct);
+
+  const borders = listaValida(bruto.borders, (b) => {
+    const id = texto(b.id);
+    const label = texto(b.label);
+    const priceSmallCents = numeroFinito(b.priceSmallCents);
+    const priceLargeCents = numeroFinito(b.priceLargeCents);
+    return id !== null && label !== null && priceSmallCents !== null && priceLargeCents !== null
+      ? { id, label, priceSmallCents, priceLargeCents }
+      : null;
+  });
+
+  if (lanches.length === 0 && bebidas.length === 0 && sucos.length === 0) return undefined;
+  return { sizes, saltyFlavors, sweetFlavors, lanches, bebidas, sucos, borders };
+}
+
+/**
  * Converte a resposta crua de `GET /api/cardapio` no contrato desta montagem,
  * validando campo a campo. Substitui o cast — um `as unknown as` aceitaria uma
  * resposta corrompida e só quebraria mais tarde, no meio de um atendimento.
@@ -215,6 +293,9 @@ export function adaptarCardapioParaMontagem(bruto: unknown): MenuManual | null {
     // PRESENTE (a resposta tentou trazer o campo e falhou), só a chave
     // realmente ausente (`undefined`) conta como ausente de verdade.
     pizzaCatalogPresente: bruto.pizzaCatalog !== undefined,
+    catalog: lerCatalog(bruto.catalog),
+    // Mesma regra de presença de `pizzaCatalogPresente`, para `catalog`.
+    catalogPresente: bruto.catalog !== undefined,
   };
 
   // Sem nenhum produto vendável não há pedido a montar: falhar aqui, com a
@@ -651,6 +732,39 @@ export function resolverPizzaSelectionIds(
   return { sizeId: size.id, flavorIds, borderId: border.id };
 }
 
+/**
+ * Resolve a seleção de um produto simples configurável (Calzone, Mini-Pizza,
+ * Macarronada, sucos) para os IDs estáveis do catálogo oficial (Fase 1,
+ * `menu.catalog`) — puro, sem I/O. Mesma regra de resolverPizzaSelectionIds:
+ * catálogo ausente ou nome sem correspondência devolve `undefined` (Fase 6).
+ */
+export function resolverSimpleSelectionIds(
+  catalog: Catalog | undefined,
+  productName: string,
+  opts: { sizeCode?: string; flavorName?: string; milk?: "com" | "sem" }
+): { productId: string; sizeId?: string; flavorId?: string; milk?: "com" | "sem" } | undefined {
+  if (!catalog) return undefined;
+  const produto = [...catalog.lanches, ...catalog.bebidas, ...catalog.sucos].find((p) => p.name === productName);
+  if (!produto) return undefined;
+
+  if (opts.milk !== undefined) return { productId: produto.id, milk: opts.milk };
+
+  if (opts.sizeCode !== undefined) {
+    const lanche = catalog.lanches.find((l) => l.id === produto.id);
+    const size = lanche?.sizes?.find((s) => s.code === opts.sizeCode);
+    if (!size) return undefined;
+    return { productId: produto.id, sizeId: size.id };
+  }
+
+  if (opts.flavorName !== undefined) {
+    const flavor = [...catalog.saltyFlavors, ...catalog.sweetFlavors].find((f) => f.name === opts.flavorName);
+    if (!flavor) return undefined;
+    return { productId: produto.id, flavorId: flavor.id };
+  }
+
+  return { productId: produto.id };
+}
+
 // ---------------------------------------------------------------------------
 // Construção do item
 // ---------------------------------------------------------------------------
@@ -681,6 +795,12 @@ export function resolverPizzaSelectionIds(
  * silenciosamente para name/detail. Isso fecha a brecha de uma pizza escapar
  * do caminho estruturado só porque um nome não bateu (cardápio dessincronizado
  * entre o load da tela e a montagem, por exemplo).
+ *
+ * Fase 6: a mesma ideia (IDs estáveis + fail-closed quando `menu.catalog`
+ * está presente) se aplica a Calzone, Mini-Pizza, Macarronada e sucos, via
+ * `simpleSelection` (ver resolverSimpleSelectionIds acima). Lanches/bebidas
+ * sem configuração alguma (sem sabor/tamanho/leite) continuam 100% legado —
+ * não há ID a resolver para eles.
  */
 export function construirItemManual(
   produto: ProdutoManual,
@@ -714,19 +834,43 @@ export function construirItemManual(
     };
   } else if (produto.categoria === "sucos") {
     if (selecao.leite !== "com" && selecao.leite !== "sem") return null;
+    // FAIL-CLOSED (Fase 6, mesma regra da pizza acima): com `catalog`
+    // presente, um suco que não resolve para ID é recusado, nunca cai
+    // silenciosamente para name/detail.
+    const simpleSelection = resolverSimpleSelectionIds(menu.catalog, produto.nome, { milk: selecao.leite });
+    if (!simpleSelection && menu.catalogPresente) return null;
     item = {
       kind: "simple",
       name: produto.nome,
       detail: selecao.leite === "com" ? "Com leite" : "Sem leite",
       price: 0,
       qty,
+      ...(simpleSelection ? { simpleSelection } : {}),
     };
   } else if (produto.categoria === "lanches") {
     if (ehCalzone(produto.nome) || ehMiniPizza(produto.nome)) {
       if (selecao.sabores.length !== 1) return null;
-      item = { kind: "simple", name: produto.nome, detail: `Sabor: ${selecao.sabores[0]}`, price: 0, qty };
+      const simpleSelection = resolverSimpleSelectionIds(menu.catalog, produto.nome, { flavorName: selecao.sabores[0] });
+      if (!simpleSelection && menu.catalogPresente) return null;
+      item = {
+        kind: "simple",
+        name: produto.nome,
+        detail: `Sabor: ${selecao.sabores[0]}`,
+        price: 0,
+        qty,
+        ...(simpleSelection ? { simpleSelection } : {}),
+      };
     } else if (ehMacarronada(produto.nome) && selecao.tamanhoItem) {
-      item = { kind: "simple", name: produto.nome, detail: `Tamanho ${selecao.tamanhoItem}`, price: 0, qty };
+      const simpleSelection = resolverSimpleSelectionIds(menu.catalog, produto.nome, { sizeCode: selecao.tamanhoItem });
+      if (!simpleSelection && menu.catalogPresente) return null;
+      item = {
+        kind: "simple",
+        name: produto.nome,
+        detail: `Tamanho ${selecao.tamanhoItem}`,
+        price: 0,
+        qty,
+        ...(simpleSelection ? { simpleSelection } : {}),
+      };
     } else {
       item = { kind: "simple", name: produto.nome, detail: "", price: 0, qty };
     }

@@ -18,7 +18,12 @@ import {
   officialUnitPrice,
   makePromoUnitPrice,
 } from "@/lib/pedidoAppItens";
-import { temSelecaoEstruturada, resolverItemComSelecaoEstruturada } from "@/lib/pedidoAppSelecaoEstruturada";
+import {
+  temSelecaoEstruturada,
+  resolverItemComSelecaoEstruturada,
+  temSelecaoSimplesEstruturada,
+  resolverItemComSelecaoSimplesEstruturada,
+} from "@/lib/pedidoAppSelecaoEstruturada";
 import { buildPizzaCatalog } from "@/lib/catalog/pizzas";
 import { construirSnapshotItem, construirSnapshotOficial } from "@/lib/pedidoSnapshot";
 import type { PedidoRedis } from "@/types/pedidoRedis";
@@ -191,6 +196,20 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             qty: item.qty,
           };
         }
+        // Itens simples com seleção estruturada por ID (Fase 6 — Calzone,
+        // Mini-Pizza, Macarronada, sucos): mesma regra da pizza acima —
+        // reconhecido pela presença de `simpleSelection`, e uma falha aqui é
+        // definitiva (nunca cai para o legado abaixo).
+        if (temSelecaoSimplesEstruturada(item)) {
+          const resolvido = resolverItemComSelecaoSimplesEstruturada(item, menu);
+          if (!resolvido.ok) return { itemCanonico: item, linha: "", unitPrice: null, qty: item.qty };
+          return {
+            itemCanonico: resolvido.item,
+            linha: formatItem(resolvido.item),
+            unitPrice: resolvido.item.price,
+            qty: item.qty,
+          };
+        }
         return {
           itemCanonico: item,
           linha: formatItem(item),
@@ -238,7 +257,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           detalhe: item.itemCanonico.detail,
           quantidade: item.qty,
           precoUnitarioReais: item.unitPrice!,
-          selecao: itensBody[i].pizzaSelection,
+          selecao: itensBody[i].pizzaSelection ?? itensBody[i].simpleSelection,
         })
       ),
       subtotalReais: subtotal,

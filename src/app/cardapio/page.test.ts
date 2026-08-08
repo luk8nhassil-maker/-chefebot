@@ -1,8 +1,9 @@
 import { describe, test, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { nextFlavorSelection, resolverPizzaSelectionIds } from "./page";
+import { nextFlavorSelection, resolverPizzaSelectionIds, resolverSimpleSelectionIds } from "./page";
 import { buildPizzaCatalog } from "@/lib/catalog/pizzas";
+import { buildCatalog } from "@/lib/catalog/adapter";
 import { MENU } from "@/lib/menu";
 
 const fonte = readFileSync(fileURLToPath(new URL("./page.tsx", import.meta.url)), "utf-8");
@@ -332,6 +333,88 @@ describe("/cardapio (PublicCardapio) — wiring de pizzaSelection (Fase 2C)", ()
     const addCalzoneSrc = fonte.slice(fonte.indexOf("function addCalzone("), fonte.indexOf("function continueBuild("));
     expect(addMiniPizzaSrc).not.toContain("pizzaSelection");
     expect(addCalzoneSrc).not.toContain("pizzaSelection");
+  });
+});
+
+describe("resolverSimpleSelectionIds — resolução de IDs do catálogo oficial (Fase 6)", () => {
+  const catalog = buildCatalog(MENU);
+
+  test("calzone/mini-pizza: resolve productId + flavorId pelo nome do sabor", () => {
+    const sel = resolverSimpleSelectionIds(catalog, "Calzone", { flavorName: "Calabresa" });
+    const produto = catalog.lanches.find((l) => l.name === "Calzone")!;
+    const sabor = [...catalog.saltyFlavors, ...catalog.sweetFlavors].find((f) => f.name === "Calabresa")!;
+    expect(sel).toEqual({ productId: produto.id, flavorId: sabor.id });
+  });
+
+  test("macarronada: resolve productId + sizeId pelo código do tamanho", () => {
+    const macarronada = MENU.lanches.find((l) => l.sizes && l.sizes.length > 0)!;
+    const sel = resolverSimpleSelectionIds(catalog, macarronada.name, { sizeCode: macarronada.sizes![0].code });
+    const produto = catalog.lanches.find((l) => l.name === macarronada.name)!;
+    const size = produto.sizes!.find((s) => s.code === macarronada.sizes![0].code)!;
+    expect(sel).toEqual({ productId: produto.id, sizeId: size.id });
+  });
+
+  test("suco: resolve productId + milk", () => {
+    const suco = MENU.sucos[0];
+    const sel = resolverSimpleSelectionIds(catalog, suco.name, { milk: "com" });
+    const produto = catalog.sucos.find((s) => s.name === suco.name)!;
+    expect(sel).toEqual({ productId: produto.id, milk: "com" });
+  });
+
+  test("produto plano (sem opts): resolve só productId", () => {
+    const bebida = MENU.bebidas[0];
+    const sel = resolverSimpleSelectionIds(catalog, bebida.name, {});
+    const produto = catalog.bebidas.find((b) => b.name === bebida.name)!;
+    expect(sel).toEqual({ productId: produto.id });
+  });
+
+  test("catálogo ausente (ainda não carregado): undefined, nunca lança exceção", () => {
+    expect(resolverSimpleSelectionIds(undefined, "Calzone", { flavorName: "Calabresa" })).toBeUndefined();
+  });
+
+  test("nome de produto que não existe no catálogo: undefined", () => {
+    expect(resolverSimpleSelectionIds(catalog, "Produto Inventado", {})).toBeUndefined();
+  });
+
+  test("sabor que não existe no catálogo: undefined", () => {
+    expect(resolverSimpleSelectionIds(catalog, "Calzone", { flavorName: "Sabor Inventado" })).toBeUndefined();
+  });
+
+  test("tamanho que não existe no catálogo para o produto: undefined", () => {
+    const macarronada = MENU.lanches.find((l) => l.sizes && l.sizes.length > 0)!;
+    expect(resolverSimpleSelectionIds(catalog, macarronada.name, { sizeCode: "TAMANHO-INEXISTENTE" })).toBeUndefined();
+  });
+});
+
+describe("/cardapio (PublicCardapio) — wiring de simpleSelection (Fase 6)", () => {
+  test("addCalzone monta simpleSelection a partir do catálogo oficial e só o inclui no item quando resolvido", () => {
+    const bloco = fonte.slice(fonte.indexOf("function addCalzone() {"), fonte.indexOf("function continueBuild("));
+    expect(bloco).toContain("const simpleSelection = resolverSimpleSelectionIds(menu.catalog, calzoneItem.name, { flavorName: f1 });");
+    expect(bloco).toContain("...(simpleSelection ? { simpleSelection } : {})");
+  });
+
+  test("addMiniPizza monta simpleSelection a partir do catálogo oficial e só o inclui no item quando resolvido", () => {
+    const bloco = fonte.slice(fonte.indexOf("function addMiniPizza() {"), fonte.indexOf("function addCalzone("));
+    expect(bloco).toContain("const simpleSelection = resolverSimpleSelectionIds(menu.catalog, miniPizzaItem.name, { flavorName: f1 });");
+    expect(bloco).toContain("...(simpleSelection ? { simpleSelection } : {})");
+  });
+
+  test("addMacarronadaSize monta simpleSelection a partir do catálogo oficial", () => {
+    const bloco = fonte.slice(fonte.indexOf("function addMacarronadaSize("), fonte.indexOf("function addMacarronadaSize(") + 800);
+    expect(bloco).toContain("const simpleSelection = resolverSimpleSelectionIds(menu.catalog, macarronadaPendente.name, { sizeCode: sizeOption.code });");
+    expect(bloco).toContain("...(simpleSelection ? { simpleSelection } : {})");
+  });
+
+  test("addSucoLeite monta simpleSelection a partir do catálogo oficial", () => {
+    const bloco = fonte.slice(fonte.indexOf("function addSucoLeite("), fonte.indexOf("function addMacarronadaSize("));
+    expect(bloco).toContain('const simpleSelection = resolverSimpleSelectionIds(menu.catalog, sucoPendente.name, { milk: comLeite ? "com" : "sem" });');
+    expect(bloco).toContain("...(simpleSelection ? { simpleSelection } : {})");
+  });
+
+  test("payload de POST /api/pedido-app envia simpleSelection quando o item do carrinho tem (sem substituir name/detail/price)", () => {
+    expect(fonte).toMatch(
+      /\.\.\.\(c\.pizzaSelection \? \{ pizzaSelection: c\.pizzaSelection \} : \{\}\), \.\.\.\(c\.simpleSelection \? \{ simpleSelection: c\.simpleSelection \} : \{\}\)/
+    );
   });
 });
 

@@ -162,6 +162,55 @@ describe("construirSnapshotItem — sanitização de selecao", () => {
       selecao: { sizeId: "size-g", flavorIds },
     });
     flavorIds.push("flavor-adulterado");
-    expect(item.selecao!.flavorIds).toEqual(["flavor-calabresa", "flavor-baiana"]);
+    const selecaoPizza = item.selecao as { sizeId: string; flavorIds: string[] };
+    expect(selecaoPizza.flavorIds).toEqual(["flavor-calabresa", "flavor-baiana"]);
+  });
+});
+
+describe("construirSnapshotItem — sanitização de selecao de produto simples (Fase 6)", () => {
+  it("copia só productId/sizeId/flavorId/milk, mesmo com propriedades extras adulteradas", () => {
+    const selecaoAdulterada = {
+      productId: "product-calzone",
+      flavorId: "flavor-calabresa",
+      // Propriedades extras que NUNCA devem ser persistidas.
+      priceCents: 1,
+      admin: true,
+      __proto__: { evil: true },
+    } as unknown as { productId: string; flavorId?: string };
+
+    const item = construirSnapshotItem({
+      kind: "simple", nome: "Calzone", detalhe: "Sabor: Calabresa", quantidade: 1, precoUnitarioReais: 35, selecao: selecaoAdulterada,
+    });
+
+    expect(item.selecao).toEqual({ productId: "product-calzone", flavorId: "flavor-calabresa" });
+    expect(Object.keys(item.selecao!).sort()).toEqual(["flavorId", "productId"]);
+    expect(item.selecao).not.toHaveProperty("priceCents");
+    expect(item.selecao).not.toHaveProperty("admin");
+  });
+
+  it("seleção de macarronada: só productId/sizeId, sem flavorId/milk", () => {
+    const item = construirSnapshotItem({
+      kind: "simple", nome: "Macarronada de Carne", detalhe: "Tamanho G", quantidade: 1, precoUnitarioReais: 50,
+      selecao: { productId: "product-macarronada-de-carne", sizeId: "size-g" },
+    });
+    expect(item.selecao).toEqual({ productId: "product-macarronada-de-carne", sizeId: "size-g" });
+    expect(item.selecao).not.toHaveProperty("flavorId");
+    expect(item.selecao).not.toHaveProperty("milk");
+  });
+
+  it("seleção de suco: só productId/milk", () => {
+    const item = construirSnapshotItem({
+      kind: "simple", nome: "Laranja", detalhe: "com leite", quantidade: 1, precoUnitarioReais: 10,
+      selecao: { productId: "product-laranja", milk: "com" },
+    });
+    expect(item.selecao).toEqual({ productId: "product-laranja", milk: "com" });
+  });
+
+  it("seleção sem nenhum campo opcional (produto simples plano): só productId", () => {
+    const item = construirSnapshotItem({
+      kind: "simple", nome: "X-Burguer", quantidade: 1, precoUnitarioReais: 15,
+      selecao: { productId: "product-x-burguer" },
+    });
+    expect(item.selecao).toEqual({ productId: "product-x-burguer" });
   });
 });

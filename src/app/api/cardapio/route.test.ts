@@ -115,4 +115,13 @@ describe("Esgotado reflete no cardápio público (GET) após PATCH", () => {
     const calabresaDepois = depois.pizzaCatalog.flavors.find((f: { name: string }) => f.name === "Calabresa");
     expect(calabresaDepois.available).toBe(false);
   });
+
+  it("GET expõe o catálogo oficial genérico (Fase 1/6) com IDs estáveis para Calzone/Mini-Pizza/Macarronada", async () => {
+    const data = await (await GET()).json();
+    expect(data.catalog).toBeDefined();
+    const calzone = data.catalog.lanches.find((l: { name: string }) => l.name === "Calzone");
+    expect(calzone?.id).toBe("product-calzone");
+    const macarronada = data.catalog.lanches.find((l: { name: string }) => l.name === "Macarronada de Carne");
+    expect(Array.isArray(macarronada?.sizes)).toBe(true);
+  });
 });

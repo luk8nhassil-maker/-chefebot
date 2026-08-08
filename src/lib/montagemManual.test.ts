@@ -26,6 +26,7 @@ import {
 } from "./montagemManual";
 import { officialUnitPrice, type ItemApp } from "./pedidoAppItens";
 import type { PizzaCatalog } from "./catalog/pizzas";
+import type { Catalog } from "./catalog/types";
 
 // Cardápio de teste: nomes e valores inventados só para o teste, nunca
 // copiados de nenhum estabelecimento. O que importa aqui é a FORMA do
@@ -68,6 +69,39 @@ const PIZZA_CATALOG: PizzaCatalog = {
 };
 
 const MENU_COM_CATALOGO: MenuManual = { ...MENU, pizzaCatalog: PIZZA_CATALOG, pizzaCatalogPresente: true };
+
+// Catálogo oficial genérico (Fase 1/6) correspondente ao MENU de teste acima
+// — mesmos nomes/códigos, IDs derivados por slugify (mesma fórmula de
+// @/lib/catalog/adapter), inventados só para o teste.
+const SIMPLE_CATALOG: Catalog = {
+  sizes: [
+    { id: "size-p", code: "P", label: "Pequena", priceCents: 3000 },
+    { id: "size-g", code: "G", label: "Grande", priceCents: 5000 },
+  ],
+  saltyFlavors: [
+    { id: "flavor-quatro-queijos", name: "Quatro Queijos", group: "salty" },
+    { id: "flavor-frango-com-requeijao", name: "Frango com Requeijão", group: "salty" },
+  ],
+  sweetFlavors: [{ id: "flavor-chocolate", name: "Chocolate", group: "sweet" }],
+  lanches: [
+    { id: "product-calzone", name: "Calzone", priceCents: 4000 },
+    {
+      id: "product-macarronada",
+      name: "Macarronada",
+      priceCents: 0,
+      sizes: [
+        { id: "size-p", code: "P", priceCents: 2500 },
+        { id: "size-g", code: "G", priceCents: 4500 },
+      ],
+    },
+    { id: "product-sanduiche-simples", name: "Sanduíche Simples", priceCents: 1800 },
+  ],
+  bebidas: [{ id: "product-refrigerante-2l", name: "Refrigerante 2L", priceCents: 1200 }],
+  sucos: [{ id: "product-suco-de-acai", name: "Suco de Açaí", priceCents: 1000 }],
+  borders: [{ id: "border-requeijao", label: "Requeijão", priceSmallCents: 500, priceLargeCents: 800 }],
+};
+
+const MENU_COM_CATALOGO_SIMPLES: MenuManual = { ...MENU, catalog: SIMPLE_CATALOG, catalogPresente: true };
 
 function produtoPorId(id: string, menu: MenuManual = MENU): ProdutoManual {
   const p = listarProdutosManuais(menu).find((x) => x.id === id);
@@ -609,6 +643,152 @@ describe("fail-closed: pizzaCatalog PRESENTE mas a seleção não resolve para I
       flavorIds: ["flavor-chocolate", "flavor-quatro-queijos"],
       borderId: "border-requeijao",
     });
+  });
+});
+
+describe("construirItemManual — simpleSelection (Fase 6)", () => {
+  test("calzone: ganha productId + flavorId quando catalog resolve", () => {
+    const item = construirItemManual(
+      produtoPorId("lanches:calzone", MENU_COM_CATALOGO_SIMPLES),
+      { sabores: ["Chocolate"] },
+      MENU_COM_CATALOGO_SIMPLES
+    );
+    expect(item).not.toBeNull();
+    expect(item?.simpleSelection).toEqual({ productId: "product-calzone", flavorId: "flavor-chocolate" });
+  });
+
+  test("macarronada: ganha productId + sizeId quando catalog resolve", () => {
+    const item = construirItemManual(
+      produtoPorId("lanches:macarronada", MENU_COM_CATALOGO_SIMPLES),
+      { sabores: [], tamanhoItem: "G" },
+      MENU_COM_CATALOGO_SIMPLES
+    );
+    expect(item).not.toBeNull();
+    expect(item?.simpleSelection).toEqual({ productId: "product-macarronada", sizeId: "size-g" });
+  });
+
+  test("suco: ganha productId + milk quando catalog resolve", () => {
+    const item = construirItemManual(
+      produtoPorId("sucos:suco de acai", MENU_COM_CATALOGO_SIMPLES),
+      { sabores: [], leite: "com" },
+      MENU_COM_CATALOGO_SIMPLES
+    );
+    expect(item).not.toBeNull();
+    expect(item?.simpleSelection).toEqual({ productId: "product-suco-de-acai", milk: "com" });
+  });
+
+  test("lanche plano (sem sabor/tamanho): nunca ganha simpleSelection — não há ID a resolver", () => {
+    const item = construirItemManual(
+      produtoPorId("lanches:sanduiche simples", MENU_COM_CATALOGO_SIMPLES),
+      selecaoVazia(),
+      MENU_COM_CATALOGO_SIMPLES
+    );
+    expect(item).not.toBeNull();
+    expect(item && "simpleSelection" in item).toBe(false);
+  });
+
+  test("campo catalog GENUINAMENTE ausente: legado continua funcionando normalmente", () => {
+    const item = construirItemManual(produtoPorId("lanches:calzone", MENU), { sabores: ["Chocolate"] }, MENU);
+    expect(item).not.toBeNull();
+    expect(item?.simpleSelection).toBeUndefined();
+    expect(item?.price).toBe(40);
+  });
+});
+
+describe("fail-closed: catalog PRESENTE mas a seleção não resolve para IDs (Fase 6)", () => {
+  test("sabor sem correspondência no catálogo: montagem do calzone recusada, nunca cai pro legado", () => {
+    const menuCatalogoIncompleto: MenuManual = {
+      ...MENU_COM_CATALOGO_SIMPLES,
+      saltyFlavors: [...MENU.saltyFlavors, "Sabor Novo Ainda Sem Catalogo"],
+    };
+    const item = construirItemManual(
+      produtoPorId("lanches:calzone", menuCatalogoIncompleto),
+      { sabores: ["Sabor Novo Ainda Sem Catalogo"] },
+      menuCatalogoIncompleto
+    );
+    expect(item).toBeNull();
+  });
+
+  test("tamanho sem correspondência no catálogo: montagem da macarronada recusada", () => {
+    const catalogoSemG: Catalog = {
+      ...SIMPLE_CATALOG,
+      lanches: SIMPLE_CATALOG.lanches.map((l) =>
+        l.name === "Macarronada" ? { ...l, sizes: l.sizes?.filter((s) => s.code !== "G") } : l
+      ),
+    };
+    const menu: MenuManual = { ...MENU, catalog: catalogoSemG, catalogPresente: true };
+    const item = construirItemManual(produtoPorId("lanches:macarronada", menu), { sabores: [], tamanhoItem: "G" }, menu);
+    expect(item).toBeNull();
+  });
+
+  test("catálogo presente porém malformado (vazio): recusada, sem fallback legado", () => {
+    const catalogoVazio: Catalog = { sizes: [], saltyFlavors: [], sweetFlavors: [], lanches: [], bebidas: [], sucos: [], borders: [] };
+    const menu: MenuManual = { ...MENU, catalog: catalogoVazio, catalogPresente: true };
+    const item = construirItemManual(produtoPorId("lanches:calzone", menu), { sabores: ["Chocolate"] }, menu);
+    expect(item).toBeNull();
+  });
+
+  test("catalogPresente true mas catalog undefined (equivalente a resposta malformada já filtrada por adaptarCardapioParaMontagem): recusada", () => {
+    const menu: MenuManual = { ...MENU, catalog: undefined, catalogPresente: true };
+    const item = construirItemManual(produtoPorId("lanches:calzone", menu), { sabores: ["Chocolate"] }, menu);
+    expect(item).toBeNull();
+  });
+
+  test("seleção válida com catalogPresente=true continua funcionando normalmente (não é bloqueio geral)", () => {
+    const item = construirItemManual(
+      produtoPorId("lanches:calzone", MENU_COM_CATALOGO_SIMPLES),
+      { sabores: ["Chocolate"] },
+      MENU_COM_CATALOGO_SIMPLES
+    );
+    expect(item).not.toBeNull();
+    expect(item?.simpleSelection).toEqual({ productId: "product-calzone", flavorId: "flavor-chocolate" });
+  });
+});
+
+describe("adaptarCardapioParaMontagem — catalogPresente distingue ausente de malformado (Fase 6)", () => {
+  const bruto = {
+    sizes: [{ code: "G", label: "Grande", price: 50 }],
+    saltyFlavors: ["Quatro Queijos"],
+    sweetFlavors: ["Chocolate"],
+    lanches: [{ name: "Calzone", price: 40, hasFlavors: true, flavorsKey: "calzoneFlavors" }],
+  };
+
+  test("campo catalog ausente: catalogPresente é false (ou ausente)", () => {
+    const menu = adaptarCardapioParaMontagem(bruto)!;
+    expect(menu.catalog).toBeUndefined();
+    expect(menu.catalogPresente).toBeFalsy();
+  });
+
+  test("campo catalog presente e bem formado: presente=true e catálogo populado", () => {
+    const menu = adaptarCardapioParaMontagem({
+      ...bruto,
+      catalog: {
+        sizes: [{ id: "size-g", code: "G", label: "Grande", priceCents: 5000 }],
+        saltyFlavors: [{ id: "flavor-quatro-queijos", name: "Quatro Queijos", group: "salty" }],
+        sweetFlavors: [],
+        lanches: [{ id: "product-calzone", name: "Calzone", priceCents: 4000 }],
+        bebidas: [],
+        sucos: [],
+        borders: [],
+      },
+    })!;
+    expect(menu.catalogPresente).toBe(true);
+    expect(menu.catalog?.lanches).toHaveLength(1);
+  });
+
+  test("campo catalog presente porém totalmente vazio (sem nenhum produto): presente=true, catálogo undefined", () => {
+    const menu = adaptarCardapioParaMontagem({
+      ...bruto,
+      catalog: { sizes: [], saltyFlavors: [], sweetFlavors: [], lanches: [], bebidas: [], sucos: [], borders: [] },
+    })!;
+    expect(menu.catalogPresente).toBe(true);
+    expect(menu.catalog).toBeUndefined();
+  });
+
+  test.each([null, false, 0, "", "texto", 42, []])("campo catalog presente porém com tipo errado (%p): presente=true, catálogo undefined", (v) => {
+    const menu = adaptarCardapioParaMontagem({ ...bruto, catalog: v })!;
+    expect(menu.catalogPresente).toBe(true);
+    expect(menu.catalog).toBeUndefined();
   });
 });
 

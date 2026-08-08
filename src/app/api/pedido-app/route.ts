@@ -13,7 +13,12 @@ import { verificarTokenCliente, CLIENTE_COOKIE } from "@/lib/clienteAuth";
 import { buscarClientePorId, sanitizeTelefoneCliente } from "@/lib/clientes";
 import { calcularPontosElegiveisPedido, registrarMovimentoPontosIdempotente, construirEventoIdPontos, derivarClienteIdPorTelefone, obterReservasResgatePontos, confirmarResgatePontos } from "@/lib/fidelidade";
 import { type ItemApp, type MenuPedidoApp, formatItem, officialUnitPrice, makePromoUnitPrice, contarPizzasPagasParaFidelidade } from "@/lib/pedidoAppItens";
-import { temSelecaoEstruturada, resolverItemComSelecaoEstruturada } from "@/lib/pedidoAppSelecaoEstruturada";
+import {
+  temSelecaoEstruturada,
+  resolverItemComSelecaoEstruturada,
+  temSelecaoSimplesEstruturada,
+  resolverItemComSelecaoSimplesEstruturada,
+} from "@/lib/pedidoAppSelecaoEstruturada";
 import { buildPizzaCatalog } from "@/lib/catalog/pizzas";
 import { construirSnapshotItem, construirSnapshotOficial, type PedidoSnapshotOficial } from "@/lib/pedidoSnapshot";
 import { prepararResgateParaPedido, confirmarReservaNoPedido, liberarVinculoRecompensaPedidoNaoCriado, type EscolhaRecompensaJornada } from "@/lib/jornadaChef";
@@ -1131,6 +1136,20 @@ export async function POST(req: NextRequest) {
               qty: item.qty,
             };
           }
+          // Itens simples com seleção estruturada por ID (Fase 6 — Calzone,
+          // Mini-Pizza, Macarronada, sucos): mesma regra da pizza acima —
+          // reconhecido pela presença de `simpleSelection`, e uma falha aqui
+          // é definitiva (nunca cai para o legado abaixo).
+          if (temSelecaoSimplesEstruturada(item)) {
+            const resolvido = resolverItemComSelecaoSimplesEstruturada(item, menu);
+            if (!resolvido.ok) return { itemCanonico: item, linha: "", unitPrice: null, qty: item.qty };
+            return {
+              itemCanonico: resolvido.item,
+              linha: formatItem(resolvido.item),
+              unitPrice: resolvido.item.price,
+              qty: item.qty,
+            };
+          }
           return {
             itemCanonico: item,
             linha: formatItem(item),
@@ -1248,7 +1267,7 @@ export async function POST(req: NextRequest) {
               detalhe: resolvido.itemCanonico.detail,
               quantidade: resolvido.qty,
               precoUnitarioReais: resolvido.unitPrice!,
-              selecao: body.itens[i].pizzaSelection,
+              selecao: body.itens[i].pizzaSelection ?? body.itens[i].simpleSelection,
             })
           ),
           ...itensRecompensaMaterializados.map((item) =>

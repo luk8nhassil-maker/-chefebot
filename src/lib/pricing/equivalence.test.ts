@@ -194,6 +194,31 @@ describe("equivalência de preço: calzone por sabor", () => {
   }
 });
 
+describe("equivalência de preço: mini-pizza por sabor", () => {
+  for (const flavor of [...menu.saltyFlavors, ...menu.sweetFlavors]) {
+    it(`Mini-Pizza · ${flavor}`, () => {
+      const legado: ItemApp = { kind: "simple", name: "Mini-Pizza", detail: `Sabor: ${flavor}`, price: 0, qty: 1 };
+      const selection: SimpleSelection = {
+        kind: "simple",
+        productId: productIdByName("Mini-Pizza"),
+        flavorId: flavorIdByName(flavor),
+        quantity: 1,
+      };
+
+      const esperadoCents = Math.round((precoLegadoReais(legado) ?? NaN) * 100);
+      const resultado = calcularPreco(selection, menu);
+
+      expect(resultado.ok).toBe(true);
+      if (resultado.ok) expect(resultado.unitPriceCents).toBe(esperadoCents);
+    });
+  }
+
+  it("rejeita mini-pizza sem sabor escolhido", () => {
+    const selection: SimpleSelection = { kind: "simple", productId: productIdByName("Mini-Pizza"), quantity: 1 };
+    expect(calcularPreco(selection, menu).ok).toBe(false);
+  });
+});
+
 describe("equivalência de preço: bebidas", () => {
   for (const bebida of menu.bebidas) {
     it(bebida.name, () => {
