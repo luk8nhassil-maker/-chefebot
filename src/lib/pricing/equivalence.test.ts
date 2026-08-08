@@ -7,7 +7,8 @@
 // bloqueia o merge — não deve haver nenhuma.
 import { describe, expect, it } from "vitest";
 import { buildCatalog } from "@/lib/catalog/adapter";
-import { MENU } from "@/lib/menu";
+import { buildSimpleCatalog } from "@/lib/catalog/simpleProducts";
+import { MENU, type Menu } from "@/lib/menu";
 import { officialUnitPrice, type ItemApp, type MenuPedidoApp } from "@/lib/pedidoAppItens";
 import { calcularPreco } from "./engine";
 import type { PizzaSelection, SimpleSelection } from "./types";
@@ -239,6 +240,45 @@ describe("equivalência de preço: mini-pizza por sabor", () => {
   it("rejeita mini-pizza sem sabor escolhido", () => {
     const selection: SimpleSelection = { kind: "simple", productId: productIdByName("Mini-Pizza"), quantity: 1 };
     expect(calcularPreco(selection, menu).ok).toBe(false);
+  });
+});
+
+describe("REGRESSÃO E (BLOQUEIO, auditoria independente pós-8ª rodada) — caminho estruturado (buildSimpleCatalog) e legado (officialUnitPrice) concordam no modo efetivo, com e sem flavorsMode explícito", () => {
+  function menuSemFlavorsMode(): Menu {
+    const clone = structuredClone(MENU);
+    for (const lanche of clone.lanches) {
+      delete (lanche as { flavorsMode?: string }).flavorsMode;
+    }
+    return clone;
+  }
+
+  function verificaEquivalencia(menuAtual: Menu, nomeProduto: string) {
+    const simpleCatalog = buildSimpleCatalog(menuAtual);
+    const produtoNoCatalogo = simpleCatalog.lanches.find((l) => l.name === nomeProduto)!;
+    const flavorsAceitosPeloEstruturado = new Set((produtoNoCatalogo.flavors ?? []).map((f) => f.name));
+
+    for (const flavor of [...menuAtual.saltyFlavors, ...menuAtual.sweetFlavors]) {
+      const legado: ItemApp = { kind: "simple", name: nomeProduto, detail: `Sabor: ${flavor}`, price: 0, qty: 1 };
+      const aceitoPeloLegado = officialUnitPrice(legado, menuAtual as unknown as MenuPedidoApp) !== null;
+      const aceitoPeloEstruturado = flavorsAceitosPeloEstruturado.has(flavor);
+      expect({ flavor, aceitoPeloLegado }).toEqual({ flavor, aceitoPeloLegado: aceitoPeloEstruturado });
+    }
+  }
+
+  it("Calzone (flavorsMode explícito 'pizza' no MENU real) — os dois caminhos aceitam exatamente os mesmos sabores", () => {
+    verificaEquivalencia(MENU, "Calzone");
+  });
+
+  it("Mini-Pizza (flavorsMode explícito 'own' no MENU real) — os dois caminhos aceitam exatamente os mesmos sabores", () => {
+    verificaEquivalencia(MENU, "Mini-Pizza");
+  });
+
+  it("Calzone SEM flavorsMode (cardápio legado): os dois caminhos concordam no modo efetivo 'pizza'", () => {
+    verificaEquivalencia(menuSemFlavorsMode(), "Calzone");
+  });
+
+  it("Mini-Pizza SEM flavorsMode (cardápio legado): os dois caminhos concordam no modo efetivo 'own', nenhum dos dois amplia para os sabores da Pizza", () => {
+    verificaEquivalencia(menuSemFlavorsMode(), "Mini-Pizza");
   });
 });
 

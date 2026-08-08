@@ -12,8 +12,14 @@
   //     MESMO flavorId oficial — nunca uma lista própria.
   //   - "own": usa a lista própria apontada por `flavorsKey` (ex.:
   //     calzoneFlavors), independente da Pizza.
-  // Ausente = "pizza" (ver buildSimpleCatalog) — preserva o comportamento
-  // já aprovado para cardápios antigos sem este campo.
+  // Ausente (cardápio persistido anterior à introdução deste campo): NÃO é
+  // sempre "pizza" — ver `resolverFlavorsModeEfetivo` em
+  // @/lib/pedidoAppItens (fonte única, usada tanto por buildSimpleCatalog
+  // quanto por officialUnitPrice). O default por ausência preserva o
+  // comportamento histórico COMPROVADO por `flavorsKey`: "pizza" só para
+  // "calzoneFlavors" (exceção comercial aprovada na 6ª rodada); "own" para
+  // qualquer outro `flavorsKey` (inclui "miniPizzaFlavors" — comportamento
+  // histórico da Mini-Pizza, nunca alterado).
   lanches: [{ name: "Calzone", price: 35, hasFlavors: true, flavorsKey: "calzoneFlavors", flavorsMode: "pizza" },{ name: "Mini-Pizza", price: 17, hasFlavors: true, flavorsKey: "miniPizzaFlavors", flavorsMode: "own" },{ name: "Macarronada de Carne", sizes: [{ code: "P", price: 28 },{ code: "M", price: 40 },{ code: "G", price: 50 }], hasFlavors: false, price: 0, flavorsKey: "" },{ name: "Macarronada de Frango", sizes: [{ code: "P", price: 28 },{ code: "M", price: 40 },{ code: "G", price: 50 }], hasFlavors: false, price: 0, flavorsKey: "" },{ name: "X-Burguer", price: 15, hasFlavors: false, flavorsKey: "" },{ name: "X-Bacon", price: 18, hasFlavors: false, flavorsKey: "" },{ name: "X-Tudo", price: 22, hasFlavors: false, flavorsKey: "" },{ name: "Porcao de Batatas", price: 12, hasFlavors: false, flavorsKey: "" }] as { name: string; price: number; hasFlavors: boolean; flavorsKey: string; flavorsMode?: "pizza" | "own"; sizes?: { code: string; price: number }[] }[],
   bebidas: [{ name: "Refrigerante 1L", price: 11 },{ name: "Refrigerante 1,5L", price: 13 },{ name: "Refrigerante 2L", price: 15 },{ name: "Refrigerante Lata", price: 6 },{ name: "Refrigerante Retornavel", price: 10 },{ name: "Agua sem Gas", price: 3 },{ name: "Agua com Gas", price: 4 },{ name: "Cerveja Long Neck", price: 10 },{ name: "Guarana 1L", price: 9 },{ name: "Guarana 1,5L", price: 11 },{ name: "Guarana 2L", price: 13 },{ name: "Guarana Lata", price: 6 },{ name: "Guarana Zero Lata", price: 5 },{ name: "Guarana Zero 1L", price: 9 },{ name: "Guarana Zero 2L", price: 13 },{ name: "Pepsi Lata", price: 5 }] as { name: string; price: number }[],
   sucos: [{ name: "Caja", price: 7 },{ name: "Caju", price: 7 },{ name: "Acerola", price: 7 },{ name: "Goiaba", price: 7 },{ name: "Bacuri", price: 9 },{ name: "Cupuacu", price: 8 },{ name: "Laranja", price: 9 },{ name: "Maracuja", price: 9 },{ name: "Vitamina de Banana", price: 9 }] as { name: string; price: number }[],

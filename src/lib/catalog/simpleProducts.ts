@@ -41,7 +41,7 @@
 //     "calzoneFlavors"), independente da Pizza — permite esconder um sabor
 //     só deste produto sem afetar a Pizza nem outro produto "own".
 import type { Menu } from "@/lib/menu";
-import { norm } from "@/lib/pedidoAppItens";
+import { norm, resolverFlavorsModeEfetivo } from "@/lib/pedidoAppItens";
 import { buildCatalog } from "./adapter";
 
 export type SimpleCatalogStrategy = "fixed" | "size" | "single_flavor" | "milk";
@@ -115,9 +115,15 @@ export function buildSimpleCatalog(menu: Menu, esgotados: readonly string[] = []
   }
 
   /** Decide a lista efetiva de sabores de um produto "single_flavor" pela
-   *  sua própria `flavorsMode` — nunca por nome, nunca por lista vazia. */
-  function flavoresEfetivos(produto: { flavorsKey?: string; flavorsMode?: "pizza" | "own" }): SimpleCatalogFlavor[] {
-    return (produto.flavorsMode ?? "pizza") === "own" ? flavoresPermitidos(produto.flavorsKey) : flavoresDaPizza;
+   *  MESMA resolução de compatibilidade usada pelo caminho legado
+   *  (`resolverFlavorsModeEfetivo`, ver @/lib/pedidoAppItens) — nunca por
+   *  nome, nunca um segundo fallback. Modo "invalido" (config corrompida)
+   *  devolve lista vazia: fail-closed, nenhum sabor selecionável, nunca os
+   *  sabores da Pizza. */
+  function flavoresEfetivos(produto: { flavorsKey?: string; flavorsMode?: string }): SimpleCatalogFlavor[] {
+    const modoEfetivo = resolverFlavorsModeEfetivo(produto);
+    if (modoEfetivo === "invalido") return [];
+    return modoEfetivo === "own" ? flavoresPermitidos(produto.flavorsKey) : flavoresDaPizza;
   }
 
   const lanches: SimpleCatalogProduct[] = catalog.lanches.map((produto) => {

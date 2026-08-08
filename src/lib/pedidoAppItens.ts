@@ -90,6 +90,48 @@ export function formatItem(item: ItemApp): string {
  */
 export const ACRESCIMO_LEITE_CENTS = 100;
 
+export type FlavorsModeEfetivo = "pizza" | "own" | "invalido";
+
+/**
+ * Resolve o flavorsMode EFETIVO de um produto "single_flavor" (hasFlavors +
+ * flavorsKey) — FONTE ÚNICA reutilizada pelo caminho estruturado
+ * (buildSimpleCatalog, ver @/lib/catalog/simpleProducts) e pelo caminho
+ * legado (officialUnitPrice, abaixo). Nunca dois fallbacks diferentes para a
+ * mesma decisão.
+ *
+ * HARDENING (auditoria independente pós-8ª rodada): antes desta função,
+ * `flavorsMode` ausente virava sempre "pizza" — correto para o Calzone
+ * (regra comercial aprovada na 6ª rodada), mas ERRADO para um cardápio
+ * `lanches` persistido ANTES da introdução deste campo, onde a Mini-Pizza
+ * nunca teve `flavorsMode` gravado e dependia de `miniPizzaFlavors` sozinha
+ * — isso ampliava silenciosamente a Mini-Pizza para qualquer sabor de pizza.
+ * Também havia fail-open: um `flavorsMode` com valor desconhecido, ou modo
+ * "own" cujo `flavorsKey` não resolvia para uma lista, caíam para os
+ * sabores da Pizza em vez de rejeitar.
+ *
+ * Regras, nesta ordem — NUNCA pelo nome do produto:
+ * - flavorsMode explícito "pizza"  => "pizza"
+ * - flavorsMode explícito "own"    => "own"
+ * - flavorsMode presente com qualquer outro valor (config corrompida)
+ *   => "invalido" (fail-closed — nunca cai para sabores da Pizza)
+ * - flavorsMode AUSENTE (cardápio persistido anterior à introdução deste
+ *   campo): o comportamento histórico ANTES do modo "pizza" existir era
+ *   sempre usar a lista PRÓPRIA do produto (nunca os sabores inteiros da
+ *   Pizza) — tanto Calzone quanto Mini-Pizza dependiam só da própria lista
+ *   (`calzoneFlavors`/`miniPizzaFlavors`). A 6ª rodada mudou esse padrão só
+ *   para o Calzone, por decisão comercial explícita — uma exceção pelo
+ *   `flavorsKey` ("calzoneFlavors"), nunca pelo nome do produto. Qualquer
+ *   outro `flavorsKey` (Mini-Pizza — "miniPizzaFlavors" — ou um produto
+ *   futuro sem histórico comprovado) preserva o comportamento histórico
+ *   comprovável: lista própria ("own").
+ */
+export function resolverFlavorsModeEfetivo(produto: { flavorsKey?: string; flavorsMode?: string }): FlavorsModeEfetivo {
+  if (produto.flavorsMode === "pizza") return "pizza";
+  if (produto.flavorsMode === "own") return "own";
+  if (produto.flavorsMode !== undefined) return "invalido";
+  return produto.flavorsKey === "calzoneFlavors" ? "pizza" : "own";
+}
+
 /**
  * Conta pizzas PAGAS para a fidelidade antiga (compra N pizzas, ganha 1
  * grátis — `creditarFidelidadePedido`/`pizzasParaPremio`). Exclui
@@ -141,20 +183,32 @@ export function officialUnitPrice(item: ItemApp, menu: MenuPedidoApp): number | 
     // TODO produto configurado por sabor, não só o Calzone: um payload
     // legado que omite `simpleSelection` de propósito (para tentar contornar
     // a validação por catálogo/ID) nunca escapa pela porta dos fundos só
-    // porque o produto tem outro nome. Dentro da validação,
-    // `flavorsMode === "own"` restringe à lista própria apontada por
-    // `flavorsKey` (ex.: calzoneFlavors/miniPizzaFlavors); ausente/"pizza"
-    // (padrão) aceita qualquer sabor da pizza, exatamente como sempre.
+    // porque o produto tem outro nome.
+    //
+    // HARDENING (auditoria independente pós-8ª rodada): QUAL lista de
+    // sabores vale (pizza inteira vs. lista própria) vem de
+    // `resolverFlavorsModeEfetivo` — a MESMA fonte única usada por
+    // buildSimpleCatalog, nunca um fallback próprio deste caminho. Modo
+    // "invalido" (config corrompida) e modo "own" cujo `flavorsKey` não
+    // resolve para uma lista rejeitam o item (fail-closed) — nenhum dos
+    // dois cai para os sabores da Pizza.
     if (found.hasFlavors && found.flavorsKey) {
       const match = (item.detail || "").trim().match(/^Sabor:\s*(.+)$/i);
       if (!match) return null;
       const sabor = match[1].trim();
       if (!sabor || sabor.includes("/") || sabor.includes("·")) return null;
-      const listaPropria =
-        found.flavorsMode === "own"
-          ? (menu as unknown as Record<string, unknown>)[found.flavorsKey]
-          : undefined;
-      const saboresPermitidos = (Array.isArray(listaPropria) ? (listaPropria as string[]) : [...menu.saltyFlavors, ...menu.sweetFlavors]).map(norm);
+
+      const modoEfetivo = resolverFlavorsModeEfetivo(found);
+      if (modoEfetivo === "invalido") return null;
+
+      let saboresPermitidos: string[];
+      if (modoEfetivo === "own") {
+        const listaPropria = (menu as unknown as Record<string, unknown>)[found.flavorsKey];
+        if (!Array.isArray(listaPropria)) return null;
+        saboresPermitidos = (listaPropria as string[]).map(norm);
+      } else {
+        saboresPermitidos = [...menu.saltyFlavors, ...menu.sweetFlavors].map(norm);
+      }
       if (!saboresPermitidos.includes(norm(sabor))) return null;
       return Number.isFinite(found.price) ? found.price : null;
     }

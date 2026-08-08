@@ -15,8 +15,21 @@
 // de aplicar a validação agora é `found.hasFlavors && found.flavorsKey` — a
 // MESMA configuração oficial que buildSimpleCatalog usa para
 // `strategy === "single_flavor"` — nunca o nome do produto.
+//
+// 8ª rodada: a correção da 7ª rodada decidia QUAL lista de sabores vale
+// (pizza inteira vs. lista própria) direto por `found.flavorsMode === "own"`
+// — ou seja, `flavorsMode` AUSENTE virava sempre "pizza". Isso era correto
+// para o Calzone (exceção comercial aprovada), mas ERRADO para um cardápio
+// `lanches` persistido antes da introdução do campo, onde a Mini-Pizza nunca
+// teve `flavorsMode` gravado (dependia só de `miniPizzaFlavors`) — o sabor
+// se ampliava silenciosamente para qualquer sabor de pizza. Havia também
+// fail-open: `flavorsMode` desconhecido, ou "own" cujo `flavorsKey` não
+// resolvia para uma lista, caíam para os sabores da Pizza. Corrigido:
+// `resolverFlavorsModeEfetivo` (fonte única, também usada por
+// buildSimpleCatalog) decide o modo efetivo por `flavorsKey` quando ausente
+// (nunca pelo nome), e rejeita (fail-closed) config corrompida.
 import { describe, expect, it } from "vitest";
-import { officialUnitPrice, ACRESCIMO_LEITE_CENTS, type ItemApp, type MenuPedidoApp } from "./pedidoAppItens";
+import { officialUnitPrice, resolverFlavorsModeEfetivo, ACRESCIMO_LEITE_CENTS, type ItemApp, type MenuPedidoApp } from "./pedidoAppItens";
 import { MENU } from "@/lib/menu";
 
 const menuLegado = MENU as unknown as MenuPedidoApp;
@@ -139,5 +152,80 @@ describe("officialUnitPrice — produto single_flavor renomeado mantém exatamen
   it("preço continua vindo 100% do servidor (found.price), nunca do price/detail que o cliente mandou", () => {
     const item: ItemApp = { kind: "simple", name: "Calzone", detail: "Sabor: Calabresa", price: 999.99, qty: 1 };
     expect(officialUnitPrice(item, menuLegado)).toBe(35);
+  });
+});
+
+describe("resolverFlavorsModeEfetivo — fonte única de compatibilidade (BLOQUEIO, auditoria independente pós-8ª rodada)", () => {
+  it("flavorsMode explícito 'pizza'/'own' é respeitado, independente de flavorsKey", () => {
+    expect(resolverFlavorsModeEfetivo({ flavorsKey: "miniPizzaFlavors", flavorsMode: "pizza" })).toBe("pizza");
+    expect(resolverFlavorsModeEfetivo({ flavorsKey: "calzoneFlavors", flavorsMode: "own" })).toBe("own");
+  });
+
+  it("flavorsMode com valor desconhecido é 'invalido' (fail-closed), nunca cai para 'pizza'", () => {
+    expect(resolverFlavorsModeEfetivo({ flavorsKey: "calzoneFlavors", flavorsMode: "modo-desconhecido" })).toBe("invalido");
+  });
+
+  it("flavorsMode ausente + flavorsKey 'calzoneFlavors' => 'pizza' (exceção comercial aprovada, só por essa flavorsKey)", () => {
+    expect(resolverFlavorsModeEfetivo({ flavorsKey: "calzoneFlavors" })).toBe("pizza");
+  });
+
+  it("flavorsMode ausente + flavorsKey 'miniPizzaFlavors' => 'own' (comportamento histórico da Mini-Pizza preservado)", () => {
+    expect(resolverFlavorsModeEfetivo({ flavorsKey: "miniPizzaFlavors" })).toBe("own");
+  });
+
+  it("flavorsMode ausente + qualquer outro flavorsKey (produto futuro sem histórico comprovado) => 'own', nunca inventa 'pizza'", () => {
+    expect(resolverFlavorsModeEfetivo({ flavorsKey: "outraListaQualquer" })).toBe("own");
+    expect(resolverFlavorsModeEfetivo({})).toBe("own");
+  });
+});
+
+describe("officialUnitPrice — REGRESSÃO (BLOQUEIO, auditoria independente pós-8ª rodada): flavorsMode ausente NÃO é sempre 'pizza' no caminho legado", () => {
+  function menuComFlavorsModeRemovidoDeAmbos(): MenuPedidoApp {
+    const menu = structuredClone(MENU);
+    const calzone = menu.lanches.find((l) => l.name === "Calzone")! as { flavorsMode?: string };
+    const miniPizza = menu.lanches.find((l) => l.name === "Mini-Pizza")! as { flavorsMode?: string };
+    delete calzone.flavorsMode;
+    delete miniPizza.flavorsMode;
+    return menu as unknown as MenuPedidoApp;
+  }
+
+  it("REGRESSÃO C — cardápio legado (lanches persistidos sem flavorsMode): Mini-Pizza continua rejeitando sabor fora de miniPizzaFlavors pelo caminho legado", () => {
+    const menuLegadoSemModo = menuComFlavorsModeRemovidoDeAmbos();
+    const item: ItemApp = { kind: "simple", name: "Mini-Pizza", detail: "Sabor: Quatro Queijos", price: 0, qty: 1 };
+    expect(officialUnitPrice(item, menuLegadoSemModo)).toBeNull();
+  });
+
+  it("REGRESSÃO C — cardápio legado: sabor permitido (dentro de miniPizzaFlavors) continua aceito pelo caminho legado", () => {
+    const menuLegadoSemModo = menuComFlavorsModeRemovidoDeAmbos();
+    const item: ItemApp = { kind: "simple", name: "Mini-Pizza", detail: "Sabor: Calabresa", price: 0, qty: 1 };
+    expect(officialUnitPrice(item, menuLegadoSemModo)).toBe(17);
+  });
+
+  it("REGRESSÃO C — cardápio legado: Calzone continua aceitando qualquer sabor da Pizza pelo caminho legado", () => {
+    const menuLegadoSemModo = menuComFlavorsModeRemovidoDeAmbos();
+    const item: ItemApp = { kind: "simple", name: "Calzone", detail: "Sabor: Quatro Queijos", price: 0, qty: 1 };
+    expect(officialUnitPrice(item, menuLegadoSemModo)).toBe(35);
+  });
+
+  it("REGRESSÃO D — flavorsMode com valor corrompido (config inválida) é rejeitado (fail-closed), nunca aceita sabor da Pizza", () => {
+    const menuCorrompido = structuredClone(MENU);
+    const calzone = menuCorrompido.lanches.find((l) => l.name === "Calzone")! as { flavorsMode?: string };
+    calzone.flavorsMode = "modo-desconhecido";
+    const item: ItemApp = { kind: "simple", name: "Calzone", detail: "Sabor: Quatro Queijos", price: 0, qty: 1 };
+    expect(officialUnitPrice(item, menuCorrompido as unknown as MenuPedidoApp)).toBeNull();
+
+    // Mesmo um sabor da lista própria (calzoneFlavors) é rejeitado — config
+    // corrompida rejeita TUDO, não seletivamente.
+    const itemPermitidoNaListaPropria: ItemApp = { kind: "simple", name: "Calzone", detail: "Sabor: Calabresa", price: 0, qty: 1 };
+    expect(officialUnitPrice(itemPermitidoNaListaPropria, menuCorrompido as unknown as MenuPedidoApp)).toBeNull();
+  });
+
+  it("REGRESSÃO D — modo 'own' cujo flavorsKey não resolve para uma lista válida é rejeitado (fail-closed), nunca cai para sabores da Pizza", () => {
+    const menuCorrompido = structuredClone(MENU);
+    const miniPizza = menuCorrompido.lanches.find((l) => l.name === "Mini-Pizza")! as { flavorsMode?: string; flavorsKey: string };
+    miniPizza.flavorsMode = "own";
+    miniPizza.flavorsKey = "secaoQueNaoExiste";
+    const item: ItemApp = { kind: "simple", name: "Mini-Pizza", detail: "Sabor: Quatro Queijos", price: 0, qty: 1 };
+    expect(officialUnitPrice(item, menuCorrompido as unknown as MenuPedidoApp)).toBeNull();
   });
 });

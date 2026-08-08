@@ -255,6 +255,38 @@ describe("REGRESSÃO (BLOQUEIO 2, auditoria independente pós-7ª rodada) — 'S
   });
 });
 
+describe("REGRESSÃO B (BLOQUEIO, auditoria independente pós-8ª rodada) — lanches persistidos ANTES da introdução de flavorsMode (sem o campo) produzem o modo efetivo histórico via GET/getMENUDinamico", () => {
+  it("GET produz Calzone com modo efetivo 'pizza' e Mini-Pizza com modo efetivo 'own', mesmo com `lanches` persistido sem flavorsMode em nenhum dos dois", async () => {
+    // Simula um Redis com `lanches` gravado ANTES da Fase 6 introduzir
+    // `flavorsMode` — só os campos que já existiam (hasFlavors/flavorsKey),
+    // sem `flavorsMode` em nenhum item. `getMENUDinamico` usa esse array
+    // persistido inteiro (substituindo MENU.lanches) porque a seção existe
+    // e não está vazia.
+    const lanchesLegado = MENU.lanches.map((l) => {
+      const { flavorsMode: _flavorsMode, ...resto } = l as typeof l & { flavorsMode?: string };
+      return resto;
+    });
+    expect(lanchesLegado.every((l) => !("flavorsMode" in l))).toBe(true);
+    store.set("cardapio", { lanches: lanchesLegado });
+
+    const depois = await (await GET()).json();
+    const calzoneNoCatalogo = depois.catalog.lanches.find((l: { name: string }) => l.name === "Calzone");
+    const miniPizzaNoCatalogo = depois.catalog.lanches.find((l: { name: string }) => l.name === "Mini-Pizza");
+
+    // Calzone: modo efetivo "pizza" — aceita todos os sabores da Pizza.
+    const pizzaFlavorsCount = [...MENU.saltyFlavors, ...MENU.sweetFlavors].length;
+    expect(calzoneNoCatalogo.flavors).toHaveLength(pizzaFlavorsCount);
+    expect(calzoneNoCatalogo.flavors.some((f: { name: string }) => f.name === "Quatro Queijos")).toBe(true);
+
+    // Mini-Pizza: modo efetivo "own" — restrita a miniPizzaFlavors, NUNCA
+    // ampliada para os sabores da Pizza.
+    const nomesEsperados = [...MENU.miniPizzaFlavors].sort();
+    const nomesObtidos = miniPizzaNoCatalogo.flavors.map((f: { name: string }) => f.name).sort();
+    expect(nomesObtidos).toEqual(nomesEsperados);
+    expect(miniPizzaNoCatalogo.flavors.some((f: { name: string }) => f.name === "Quatro Queijos")).toBe(false);
+  });
+});
+
 describe("MENU real (linha de base)", () => {
   it("Calzone e Mini-Pizza continuam com flavorsMode explícito no cardápio-base", () => {
     expect(MENU.lanches.find((l) => l.name === "Calzone")!.flavorsMode).toBe("pizza");

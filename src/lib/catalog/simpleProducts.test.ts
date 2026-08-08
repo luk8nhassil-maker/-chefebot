@@ -77,7 +77,7 @@ describe("buildSimpleCatalog — Calzone.flavorsMode (correção da regra comerc
     expect(pizzaCatalog.flavors.some((f) => f.name === SABOR_FORA_DAS_LISTAS_PROPRIAS)).toBe(true);
   });
 
-  it("modo 'own' explícito com valor diferente de 'pizza'/'own' nunca acontece via TypeScript, mas em runtime qualquer valor que não seja 'own' cai no padrão 'pizza' (fail-open só para o modo, nunca para a validação de sabor em si)", () => {
+  it("REGRESSÃO (auditoria independente pós-8ª rodada) — flavorsMode com valor desconhecido (config corrompida) é fail-closed: lista de sabores vazia, NUNCA cai para os sabores da Pizza", () => {
     const menuValorInesperado = structuredClone(MENU);
     // Simula um dado corrompido/desconhecido persistido em Redis (fronteira
     // de storage, não confiável) — o `as` é só para o teste burlar o tipo.
@@ -85,7 +85,7 @@ describe("buildSimpleCatalog — Calzone.flavorsMode (correção da regra comerc
 
     const simpleCatalog = buildSimpleCatalog(menuValorInesperado);
     const calzone = simpleCatalog.lanches.find((l) => l.name === "Calzone")!;
-    expect(calzone.flavors?.some((f) => f.name === SABOR_FORA_DAS_LISTAS_PROPRIAS)).toBe(true);
+    expect(calzone.flavors).toEqual([]);
   });
 
   it("Mini-Pizza continua em modo 'own' — comportamento preservado, não alterado por esta correção (escopo é só o Calzone)", () => {
@@ -128,5 +128,57 @@ describe("buildSimpleCatalog — Calzone.flavorsMode (correção da regra comerc
     expect(calabresa.available).toBe(false);
     const quatroQueijos = calzone.flavors!.find((f) => f.name === SABOR_FORA_DAS_LISTAS_PROPRIAS)!;
     expect(quatroQueijos.available).toBe(true);
+  });
+});
+
+describe("buildSimpleCatalog — REGRESSÃO (BLOQUEIO, auditoria independente pós-8ª rodada): flavorsMode ausente NÃO é sempre 'pizza' — compatibilidade decidida por flavorsKey, nunca pelo nome", () => {
+  function miniPizzaDe(menu: typeof MENU) {
+    return menu.lanches.find((l) => l.name === "Mini-Pizza")!;
+  }
+
+  it("REGRESSÃO A — cardápio legado sem flavorsMode em NENHUM dos dois produtos: Calzone continua usando os sabores da Pizza, Mini-Pizza continua restrita a miniPizzaFlavors", () => {
+    const menuLegado = structuredClone(MENU);
+    delete calzoneDe(menuLegado).flavorsMode;
+    delete miniPizzaDe(menuLegado).flavorsMode;
+
+    const simpleCatalog = buildSimpleCatalog(menuLegado);
+    const calzone = simpleCatalog.lanches.find((l) => l.name === "Calzone")!;
+    const miniPizza = simpleCatalog.lanches.find((l) => l.name === "Mini-Pizza")!;
+
+    // Calzone: comportamento "pizza" preservado (exceção comercial aprovada).
+    expect(calzone.flavors?.some((f) => f.name === SABOR_FORA_DAS_LISTAS_PROPRIAS)).toBe(true);
+    expect(calzone.flavors?.length).toBe(buildPizzaCatalog(menuLegado).flavors.length);
+
+    // Mini-Pizza: NUNCA deve se ampliar para os sabores da Pizza — só
+    // miniPizzaFlavors, exatamente como sempre foi (comportamento histórico).
+    expect(miniPizza.flavors?.some((f) => f.name === SABOR_FORA_DAS_LISTAS_PROPRIAS)).toBe(false);
+    const nomesEsperados = [...MENU.miniPizzaFlavors].sort();
+    const nomesObtidos = (miniPizza.flavors ?? []).map((f) => f.name).sort();
+    expect(nomesObtidos).toEqual(nomesEsperados);
+  });
+
+  it("REGRESSÃO D — modo 'own' com flavorsKey que não resolve para uma lista válida (config corrompida) é fail-closed: lista vazia, NUNCA os sabores da Pizza", () => {
+    const menuCorrompido = structuredClone(MENU);
+    const miniPizza = miniPizzaDe(menuCorrompido);
+    miniPizza.flavorsMode = "own";
+    (miniPizza as { flavorsKey: string }).flavorsKey = "secaoQueNaoExiste";
+
+    const simpleCatalog = buildSimpleCatalog(menuCorrompido);
+    const miniPizzaCatalogo = simpleCatalog.lanches.find((l) => l.name === "Mini-Pizza")!;
+    expect(miniPizzaCatalogo.flavors).toEqual([]);
+  });
+
+  it("produto single_flavor renomeado (nem 'Calzone' nem 'Mini-Pizza') sem flavorsMode preserva o comportamento histórico ('own', pela ausência de flavorsKey 'calzoneFlavors') — nunca decidido pelo nome", () => {
+    const menuRenomeado = structuredClone(MENU);
+    const calzone = calzoneDe(menuRenomeado);
+    delete calzone.flavorsMode;
+    calzone.name = "Combo Dobrado";
+    (calzone as { flavorsKey: string }).flavorsKey = "miniPizzaFlavors";
+
+    const simpleCatalog = buildSimpleCatalog(menuRenomeado);
+    const comboDobrado = simpleCatalog.lanches.find((l) => l.name === "Combo Dobrado")!;
+    // flavorsKey aponta para miniPizzaFlavors (não "calzoneFlavors") — a
+    // exceção comercial "pizza" não se aplica; comportamento histórico "own".
+    expect(comboDobrado.flavors?.some((f) => f.name === SABOR_FORA_DAS_LISTAS_PROPRIAS)).toBe(false);
   });
 });
