@@ -109,7 +109,19 @@ export async function POST(
   const payloadPedidoApp = {
     cliente: identificacaoCliente,
     usarOutroWhatsapp: true,
-    itens: validacao.itens.map((i) => ({ kind: i.kind, name: i.name, detail: i.detail, price: i.price, qty: i.qty })),
+    // pizzaSelection (IDs oficiais, Fase 5) preservado — validacao.itens já
+    // vem de validarItensComanda (reprecificação em profundidade acima),
+    // que só anexa esse campo quando resolveu contra o catálogo oficial
+    // fresco; POST /api/pedido-app reprecifica de novo pelo motor nativo,
+    // nunca confia neste payload.
+    itens: validacao.itens.map((i) => ({
+      kind: i.kind,
+      name: i.name,
+      detail: i.detail,
+      price: i.price,
+      qty: i.qty,
+      ...(i.pizzaSelection ? { pizzaSelection: i.pizzaSelection } : {}),
+    })),
     tipoEntrega: "dine_in" as const,
     pagamento: PAGAMENTO_COMANDA_EM_ABERTO,
     observacao: observacaoRodada,

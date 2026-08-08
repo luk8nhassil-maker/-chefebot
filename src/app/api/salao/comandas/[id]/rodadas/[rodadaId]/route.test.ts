@@ -31,6 +31,18 @@ const CARDAPIO_TESTE = {
   sucos: [], neighborhoods: [],
 };
 
+// Fase 5 — IDs determinísticos (slugify do nome/código, ver src/lib/catalog/ids.ts).
+const CARDAPIO_TESTE_PIZZA = {
+  sizes: [{ code: "G", label: "Grande", price: 50 }],
+  saltyFlavors: ["Quatro Queijos"],
+  sweetFlavors: [],
+  borders: [],
+  bebidas: [{ name: "Refrigerante 2L", price: 12 }],
+  sucos: [], neighborhoods: [],
+};
+const SIZE_G = "size-g";
+const FLAVOR_QUATRO_QUEIJOS = "flavor-quatro-queijos";
+
 import { PATCH } from "./route";
 import { POST as criarRodadaRoute } from "../route";
 import { abrirComanda, fecharComanda, marcarComandaEnviada, type Comanda } from "@/lib/comandas";
@@ -155,5 +167,35 @@ describe("PATCH /api/salao/comandas/[id]/rodadas/[rodadaId]", () => {
     });
     const res = await PATCH(req(token, { itens: [] }), paramsFor(comandaId, rodadaId));
     expect(res.status).toBe(503);
+  });
+
+  describe("pizzaSelection (Fase 5)", () => {
+    it("preserva pizzaSelection ao salvar a Rodada 2+ — persistido guarda os IDs", async () => {
+      store.set("cardapio", CARDAPIO_TESTE_PIZZA);
+      const token = await criarTokenSalao();
+      const { comandaId, rodadaId } = await comandaComRodada2(token);
+      const res = await PATCH(
+        req(token, { itens: [{ kind: "pizza", price: 0, qty: 1, pizzaSelection: { sizeId: SIZE_G, flavorIds: [FLAVOR_QUATRO_QUEIJOS] } }] }),
+        paramsFor(comandaId, rodadaId)
+      );
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.rodada.itens[0].pizzaSelection).toEqual({ sizeId: SIZE_G, flavorIds: [FLAVOR_QUATRO_QUEIJOS] });
+      expect(data.rodada.subtotal).toBe(50);
+    });
+
+    it("refresh: buscarComanda depois do PATCH preserva os IDs (persistência real, não só a resposta)", async () => {
+      store.set("cardapio", CARDAPIO_TESTE_PIZZA);
+      const token = await criarTokenSalao();
+      const { comandaId, rodadaId } = await comandaComRodada2(token);
+      await PATCH(
+        req(token, { itens: [{ kind: "pizza", price: 0, qty: 1, pizzaSelection: { sizeId: SIZE_G, flavorIds: [FLAVOR_QUATRO_QUEIJOS] } }] }),
+        paramsFor(comandaId, rodadaId)
+      );
+      const { buscarComanda } = await import("@/lib/comandas");
+      const persistida = await buscarComanda(comandaId);
+      const rodada2 = persistida?.rodadas?.find((r) => r.id === rodadaId);
+      expect(rodada2?.itens[0].pizzaSelection).toEqual({ sizeId: SIZE_G, flavorIds: [FLAVOR_QUATRO_QUEIJOS] });
+    });
   });
 });

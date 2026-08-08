@@ -36,6 +36,18 @@ const CARDAPIO_TESTE = {
   sucos: [], neighborhoods: [],
 };
 
+// Fase 5 — IDs determinísticos (slugify do nome/código, ver src/lib/catalog/ids.ts).
+const CARDAPIO_TESTE_PIZZA = {
+  sizes: [{ code: "G", label: "Grande", price: 50 }],
+  saltyFlavors: ["Quatro Queijos"],
+  sweetFlavors: [],
+  borders: [],
+  bebidas: [{ name: "Refrigerante 2L", price: 12 }],
+  sucos: [], neighborhoods: [],
+};
+const SIZE_G = "size-g";
+const FLAVOR_QUATRO_QUEIJOS = "flavor-quatro-queijos";
+
 function paramsFor(id: string) {
   return { params: Promise.resolve({ id }) };
 }
@@ -102,5 +114,39 @@ describe("PATCH /api/salao/comandas/[id]", () => {
       paramsFor(aberta.comanda.id)
     );
     expect(res.status).toBe(400);
+  });
+
+  describe("pizzaSelection (Fase 5)", () => {
+    it("preserva pizzaSelection ao salvar a Rodada 1 — comanda persistida guarda os IDs", async () => {
+      store.set("cardapio", CARDAPIO_TESTE_PIZZA);
+      const token = await criarTokenSalao();
+      const aberta = await (await abrir(abrirReq({ cliente: "Ana", mesa: "5" }, token))).json();
+      const res = await PATCH(
+        patchReq(
+          { itens: [{ kind: "pizza", price: 0, qty: 1, pizzaSelection: { sizeId: SIZE_G, flavorIds: [FLAVOR_QUATRO_QUEIJOS] } }] },
+          token
+        ),
+        paramsFor(aberta.comanda.id)
+      );
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.comanda.itens[0].pizzaSelection).toEqual({ sizeId: SIZE_G, flavorIds: [FLAVOR_QUATRO_QUEIJOS] });
+      expect(data.comanda.itens[0].name).toBe("Pizza G");
+      expect(data.total).toBe(50);
+    });
+
+    it("sizeId inexistente é recusado (400), nunca cai para o legado", async () => {
+      store.set("cardapio", CARDAPIO_TESTE_PIZZA);
+      const token = await criarTokenSalao();
+      const aberta = await (await abrir(abrirReq({ cliente: "Ana", mesa: "5" }, token))).json();
+      const res = await PATCH(
+        patchReq(
+          { itens: [{ kind: "pizza", price: 0, qty: 1, pizzaSelection: { sizeId: "size-inexistente", flavorIds: [FLAVOR_QUATRO_QUEIJOS] } }] },
+          token
+        ),
+        paramsFor(aberta.comanda.id)
+      );
+      expect(res.status).toBe(400);
+    });
   });
 });

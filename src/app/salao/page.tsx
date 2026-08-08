@@ -826,7 +826,19 @@ function ProdutoSelector({
       const r = await fetch(urlItensRodada(comanda.id, rodada), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ itens: novosItens.map((i) => ({ kind: i.kind, name: i.name, detail: i.detail, price: i.price, qty: i.qty })) }),
+        // pizzaSelection (IDs oficiais, Fase 5) preservado quando o item o
+        // carrega — mesmo padrão aditivo do pedido manual e do cardápio
+        // público; name/detail/price continuam enviados, nunca confiados.
+        body: JSON.stringify({
+          itens: novosItens.map((i) => ({
+            kind: i.kind,
+            name: i.name,
+            detail: i.detail,
+            price: i.price,
+            qty: i.qty,
+            ...(i.pizzaSelection ? { pizzaSelection: i.pizzaSelection } : {}),
+          })),
+        }),
       })
       const data = await r.json().catch(() => null)
       if (!r.ok || !data?.ok) {
@@ -1033,7 +1045,19 @@ function PedidoReview({
       const r = await fetch(urlItensRodada(comanda.id, rodada), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ itens: novosItens.map((i) => ({ kind: i.kind, name: i.name, detail: i.detail, price: i.price, qty: i.qty })) }),
+        // pizzaSelection (IDs oficiais, Fase 5) preservado quando o item o
+        // carrega — mesmo padrão aditivo do pedido manual e do cardápio
+        // público; name/detail/price continuam enviados, nunca confiados.
+        body: JSON.stringify({
+          itens: novosItens.map((i) => ({
+            kind: i.kind,
+            name: i.name,
+            detail: i.detail,
+            price: i.price,
+            qty: i.qty,
+            ...(i.pizzaSelection ? { pizzaSelection: i.pizzaSelection } : {}),
+          })),
+        }),
       })
       const data = await r.json().catch(() => null)
       if (!r.ok || !data?.ok) {
