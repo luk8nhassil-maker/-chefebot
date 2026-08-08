@@ -36,7 +36,7 @@ import { GET as status } from "./status/route";
 import { POST as salvar } from "./salvar/route";
 import { POST as descartar } from "./descartar/route";
 import { buildPizzaCatalog } from "@/lib/catalog/pizzas";
-import { buildCatalog } from "@/lib/catalog/adapter";
+import { buildSimpleCatalog } from "@/lib/catalog/simpleProducts";
 import { MENU } from "@/lib/menu";
 
 function req(body: unknown) {
@@ -505,11 +505,11 @@ describe("POST salvar — seleção estruturada de pizza por ID (Fase 2)", () =>
 });
 
 describe("POST salvar — seleção estruturada de produto simples por ID (Fase 6)", () => {
-  const simpleCatalog = buildCatalog(MENU);
+  const simpleCatalog = buildSimpleCatalog(MENU);
   const productIdCalzone = simpleCatalog.lanches.find((l) => l.name === "Calzone")!.id;
   const productIdMacarronada = simpleCatalog.lanches.find((l) => l.name === "Macarronada de Carne")!.id;
   const sizeGMacarronada = simpleCatalog.lanches.find((l) => l.name === "Macarronada de Carne")!.sizes!.find((s) => s.code === "G")!.id;
-  const flavorCalabresaSimples = simpleCatalog.saltyFlavors.find((f) => f.name === "Calabresa")!.id;
+  const flavorCalabresaCalzone = simpleCatalog.calzoneFlavors.find((f) => f.name === "Calabresa")!.id;
 
   async function iniciarEdicao() {
     seedPedido();
@@ -522,7 +522,7 @@ describe("POST salvar — seleção estruturada de produto simples por ID (Fase 
     const editSessionId = await iniciarEdicao();
     const res = await salvar(req({
       statusToken: TOKEN, editSessionId, revision: 1,
-      itens: [{ kind: "simple", name: "Produto Inventado", detail: "sabor inventado", price: 0.01, qty: 1, simpleSelection: { productId: productIdCalzone, flavorId: flavorCalabresaSimples } }],
+      itens: [{ kind: "simple", name: "Produto Inventado", detail: "sabor inventado", price: 0.01, qty: 1, simpleSelection: { productId: productIdCalzone, flavorId: flavorCalabresaCalzone } }],
       tipoEntrega: "retirada", pagamento: "Dinheiro", troco: "Sem troco",
     }), paramsFor(PEDIDO_ID));
 
@@ -609,6 +609,21 @@ describe("POST salvar — seleção estruturada de produto simples por ID (Fase 
     const data = await json(res);
     const calzone = MENU.lanches.find((l) => l.name === "Calzone")!;
     expect(data.total).toBe(calzone.price); // preço do servidor, nunca o 999 enviado pelo cliente
+  });
+
+  it("REGRESSÃO — sabor esgota ENTRE a montagem e o salvamento da edição: recusado, pedido original permanece intacto", async () => {
+    store.set("esgotados", ["Calabresa"]);
+    const editSessionId = await iniciarEdicao();
+    const res = await salvar(req({
+      statusToken: TOKEN, editSessionId, revision: 1,
+      itens: [{ kind: "simple", name: "Calzone", detail: "Sabor: Calabresa", price: 35, qty: 1, simpleSelection: { productId: productIdCalzone, flavorId: flavorCalabresaCalzone } }],
+      tipoEntrega: "retirada", pagamento: "Dinheiro", troco: "Sem troco",
+    }), paramsFor(PEDIDO_ID));
+
+    expect(res.status).toBe(400);
+    const pedidos = store.get("pedidos") as Array<Record<string, unknown>>;
+    expect(pedidos[0].total).toBe(15); // pedido original intacto
+    expect(pedidos[0].revision).toBe(1);
   });
 });
 

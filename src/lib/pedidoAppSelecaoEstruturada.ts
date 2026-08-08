@@ -14,9 +14,8 @@
 // que o cliente possa ter mandado junto — ver POST /api/pedido-app.
 import type { PizzaCatalog } from "@/lib/catalog/pizzas";
 import { precificarPizzaPorId } from "@/lib/pricing/pizzaEngine";
-import { resolverSimples } from "@/lib/pricing/engine";
-import type { SimpleSelection } from "@/lib/pricing/types";
-import { officialUnitPrice, type ItemApp, type MenuPedidoApp } from "@/lib/pedidoAppItens";
+import type { SimpleCatalog } from "@/lib/catalog/simpleProducts";
+import { officialUnitPrice, norm, type ItemApp, type MenuPedidoApp } from "@/lib/pedidoAppItens";
 import type { Menu } from "@/lib/menu";
 
 function centavosParaReais(cents: number): number {
@@ -71,18 +70,36 @@ export function temSelecaoSimplesEstruturada(item: object): boolean {
   return Object.prototype.hasOwnProperty.call(item, "simpleSelection");
 }
 
+// Mesma normalização usada por @/lib/montagemManual (ehMiniPizza) e
+// @/lib/pricing/engine — remove tudo que não for letra/número antes de
+// comparar, para não depender de o nome cadastrado usar hífen, espaço ou
+// nenhum separador.
+function ehMiniPizza(nome: string): boolean {
+  return norm(nome).replace(/[^a-z0-9]/g, "") === "minipizza";
+}
+
 /**
  * Resolve um item "simple" com seleção estruturada (Calzone, Mini-Pizza,
- * Macarronada, sucos com/sem leite) — Fase 6. Reaproveita
- * @/lib/pricing/engine (resolverSimples) para reconstruir o mesmo
- * name/detail que o cardápio público, o pedido manual e o Salão já produzem
- * hoje, e officialUnitPrice (a mesma fonte oficial de preço de sempre) para
- * o preço — nenhuma regra de preço nova, só o mesmo cálculo endereçado por
- * ID em vez de texto livre.
+ * Macarronada, sucos com/sem leite) — Fase 6, hardening pós-auditoria.
+ *
+ * `catalog` (@/lib/catalog/simpleProducts, construído pelo chamador a partir
+ * de getMENUDinamico() + a lista "esgotados" FRESCA do Redis) é a única
+ * fonte de IDs e disponibilidade: um produto ou sabor esgotado é rejeitado
+ * aqui, mesmo que o item tenha sido montado antes de esgotar (mesma garantia
+ * que a pizza já tem via @/lib/pricing/pizzaEngine). Os sabores de Calzone e
+ * Mini-Pizza vêm das listas oficiais já existentes no cardápio
+ * (menu.calzoneFlavors / menu.miniPizzaFlavors via `catalog`), nunca da
+ * lista de sabores de pizza — nenhuma regra nova é inventada aqui.
+ *
+ * O preço em si continua vindo de `officialUnitPrice` (a mesma fonte oficial
+ * de sempre) a partir do name/detail reconstruído — nenhuma regra de preço
+ * nova, só a validação/disponibilidade endereçada por ID em vez de texto
+ * livre.
  */
 export function resolverItemComSelecaoSimplesEstruturada(
   item: ItemApp,
-  menu: Menu
+  menu: Menu,
+  catalog: SimpleCatalog
 ): { ok: true; item: ItemApp } | { ok: false; error: string } {
   if (item.kind !== "simple") return { ok: false, error: "Seleção estruturada só é aceita para produto simples" };
   if (!Number.isInteger(item.qty) || item.qty < 1) return { ok: false, error: "Quantidade inválida" };
@@ -101,18 +118,32 @@ export function resolverItemComSelecaoSimplesEstruturada(
     return { ok: false, error: "Seleção de produto inválida" };
   }
 
-  const selection: SimpleSelection = {
-    kind: "simple",
-    productId: selecao.productId,
-    sizeId: selecao.sizeId,
-    flavorId: selecao.flavorId,
-    milk: selecao.milk,
-    quantity: item.qty,
-  };
+  const produto = [...catalog.lanches, ...catalog.bebidas, ...catalog.sucos].find((p) => p.id === selecao.productId);
+  if (!produto) return { ok: false, error: "Produto não encontrado" };
+  if (!produto.available) return { ok: false, error: `Produto indisponível: ${produto.name}` };
 
-  const resolvido = resolverSimples(selection, menu);
-  if ("error" in resolvido) return { ok: false, error: resolvido.error };
+  const isSuco = catalog.sucos.some((s) => s.id === produto.id);
+  let detail: string | undefined;
 
+  if (isSuco) {
+    detail = selecao.milk === "com" ? "com leite" : "sem leite";
+  } else if (norm(produto.name).includes("macarronada")) {
+    const size = produto.sizes?.find((s) => s.id === selecao.sizeId);
+    if (!size) return { ok: false, error: "Tamanho não encontrado" };
+    detail = `Tamanho ${size.code}`;
+  } else if (norm(produto.name) === "calzone") {
+    const flavor = selecao.flavorId ? catalog.calzoneFlavors.find((f) => f.id === selecao.flavorId) : undefined;
+    if (!flavor) return { ok: false, error: "Sabor não encontrado" };
+    if (!flavor.available) return { ok: false, error: `Sabor indisponível: ${flavor.name}` };
+    detail = `Sabor: ${flavor.name}`;
+  } else if (ehMiniPizza(produto.name)) {
+    const flavor = selecao.flavorId ? catalog.miniPizzaFlavors.find((f) => f.id === selecao.flavorId) : undefined;
+    if (!flavor) return { ok: false, error: "Sabor não encontrado" };
+    if (!flavor.available) return { ok: false, error: `Sabor indisponível: ${flavor.name}` };
+    detail = `Sabor: ${flavor.name}`;
+  }
+
+  const resolvido: ItemApp = { kind: "simple", name: produto.name, ...(detail ? { detail } : {}), price: 0, qty: item.qty };
   const unitPriceReais = officialUnitPrice(resolvido, menu as MenuPedidoApp);
   if (unitPriceReais === null) return { ok: false, error: "Combinação inválida" };
 

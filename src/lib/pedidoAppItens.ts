@@ -24,8 +24,8 @@ export type ItemApp = {
   pizzaSelection?: { sizeId: string; flavorIds: string[]; borderId?: string };
   // Mesma ideia de pizzaSelection (Fase 6), para os demais produtos
   // configuráveis do cardápio (Calzone, Mini-Pizza, Macarronada, sucos) por
-  // ID estável do catálogo oficial (@/lib/catalog/adapter +
-  // @/lib/pricing/engine). Quando presente, o servidor SEMPRE ignora
+  // ID estável do catálogo oficial (@/lib/catalog/simpleProducts). Quando
+  // presente, o servidor SEMPRE ignora
   // `name`/`detail` enviados pelo cliente e reconstrói os dois a partir do
   // catálogo (ver resolverItemComSelecaoSimplesEstruturada em
   // @/lib/pedidoAppSelecaoEstruturada). `sizeId` só se aplica a produtos com

@@ -371,6 +371,263 @@ describe("validarItensComanda — pizzaSelection (Fase 5)", () => {
   });
 });
 
+// ===========================================================================
+// Fase 6 — demais produtos configuráveis do Salão (Calzone, Mini-Pizza,
+// Macarronada, sucos) usam os mesmos IDs oficiais (productId/sizeId/
+// flavorId/milk) do cardápio público/pedido manual. IDs abaixo são
+// determinísticos (slugify do nome já existente no cardápio — ver
+// src/lib/catalog/ids.ts e src/lib/catalog/simpleProducts.ts), nunca
+// inventados. Sabores de Calzone/Mini-Pizza vêm das listas oficiais
+// próprias de cada produto (calzoneFlavors/miniPizzaFlavors), nunca da
+// lista de sabores de pizza.
+// ===========================================================================
+
+const CARDAPIO_TESTE_SIMPLES = {
+  sizes: [{ code: "P", label: "Pequena", price: 30 }, { code: "G", label: "Grande", price: 50 }],
+  saltyFlavors: ["Quatro Queijos"],
+  sweetFlavors: [],
+  calzoneFlavors: ["Quatro Queijos", "Chocolate"],
+  miniPizzaFlavors: ["Quatro Queijos"],
+  borders: [],
+  lanches: [
+    { name: "Calzone", price: 35 },
+    { name: "Mini-Pizza", price: 18 },
+    { name: "Macarronada", price: 0, sizes: [{ code: "P", price: 25 }, { code: "G", price: 45 }] },
+  ],
+  bebidas: [{ name: "Refrigerante 2L", price: 12 }],
+  sucos: [{ name: "Laranja", price: 9 }],
+  neighborhoods: [],
+};
+
+const PRODUCT_CALZONE = "product-calzone";
+const PRODUCT_MINI_PIZZA = "product-mini-pizza";
+const PRODUCT_MACARRONADA = "product-macarronada";
+const PRODUCT_LARANJA = "product-laranja";
+const SIZE_MACARRONADA_G = "size-g";
+const CALZONE_FLAVOR_QUATRO_QUEIJOS = "calzone-flavor-quatro-queijos";
+const CALZONE_FLAVOR_CHOCOLATE = "calzone-flavor-chocolate";
+const MINI_PIZZA_FLAVOR_QUATRO_QUEIJOS = "minipizza-flavor-quatro-queijos";
+
+describe("validarItensComanda — simpleSelection (Fase 6)", () => {
+  beforeEach(() => {
+    store.set("cardapio", CARDAPIO_TESTE_SIMPLES);
+  });
+
+  it("Calzone: resolve pelo catálogo oficial e preserva simpleSelection", async () => {
+    const r = await validarItensComanda([
+      { kind: "simple", price: 0, qty: 1, simpleSelection: { productId: PRODUCT_CALZONE, flavorId: CALZONE_FLAVOR_QUATRO_QUEIJOS } },
+    ]);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.itens[0].name).toBe("Calzone");
+    expect(r.itens[0].detail).toBe("Sabor: Quatro Queijos");
+    expect(r.itens[0].price).toBe(35);
+    expect(r.itens[0].simpleSelection).toEqual({ productId: PRODUCT_CALZONE, flavorId: CALZONE_FLAVOR_QUATRO_QUEIJOS });
+    expect(r.total).toBe(35);
+  });
+
+  it("Calzone: sabor doce (Chocolate) da lista oficial calzoneFlavors também resolve — preço não varia por sabor", async () => {
+    const r = await validarItensComanda([
+      { kind: "simple", price: 0, qty: 1, simpleSelection: { productId: PRODUCT_CALZONE, flavorId: CALZONE_FLAVOR_CHOCOLATE } },
+    ]);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.itens[0].detail).toBe("Sabor: Chocolate");
+    expect(r.itens[0].price).toBe(35);
+  });
+
+  it("Mini-Pizza: resolve pela lista oficial miniPizzaFlavors (nunca calzoneFlavors)", async () => {
+    const r = await validarItensComanda([
+      { kind: "simple", price: 0, qty: 1, simpleSelection: { productId: PRODUCT_MINI_PIZZA, flavorId: MINI_PIZZA_FLAVOR_QUATRO_QUEIJOS } },
+    ]);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.itens[0].name).toBe("Mini-Pizza");
+    expect(r.itens[0].detail).toBe("Sabor: Quatro Queijos");
+    expect(r.itens[0].price).toBe(18);
+  });
+
+  it("Mini-Pizza com flavorId da lista de Calzone é rejeitada (listas oficiais são independentes por produto)", async () => {
+    const r = await validarItensComanda([
+      { kind: "simple", price: 0, qty: 1, simpleSelection: { productId: PRODUCT_MINI_PIZZA, flavorId: CALZONE_FLAVOR_QUATRO_QUEIJOS } },
+    ]);
+    expect(r.ok).toBe(false);
+  });
+
+  it("Macarronada: resolve pelo tamanho e preserva simpleSelection", async () => {
+    const r = await validarItensComanda([
+      { kind: "simple", price: 0, qty: 1, simpleSelection: { productId: PRODUCT_MACARRONADA, sizeId: SIZE_MACARRONADA_G } },
+    ]);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.itens[0].name).toBe("Macarronada");
+    expect(r.itens[0].detail).toBe("Tamanho G");
+    expect(r.itens[0].price).toBe(45);
+    expect(r.itens[0].simpleSelection).toEqual({ productId: PRODUCT_MACARRONADA, sizeId: SIZE_MACARRONADA_G });
+  });
+
+  it("suco com leite: soma o adicional oficial", async () => {
+    const r = await validarItensComanda([
+      { kind: "simple", price: 0, qty: 1, simpleSelection: { productId: PRODUCT_LARANJA, milk: "com" } },
+    ]);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.itens[0].detail).toBe("com leite");
+    expect(r.itens[0].price).toBe(10); // 9 + 1
+  });
+
+  it("quantidade multiplica o total corretamente com simpleSelection presente", async () => {
+    const r = await validarItensComanda([
+      { kind: "simple", price: 0, qty: 3, simpleSelection: { productId: PRODUCT_CALZONE, flavorId: CALZONE_FLAVOR_QUATRO_QUEIJOS } },
+    ]);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.itens[0].qty).toBe(3);
+    expect(r.total).toBe(105); // Calzone (35) x 3
+  });
+
+  it("preço, name e detail adulterados são ignorados quando simpleSelection é válido — reconstrói do catálogo", async () => {
+    const r = await validarItensComanda([
+      {
+        kind: "simple",
+        name: "Calzone de graça",
+        detail: "Qualquer coisa",
+        price: 0.01,
+        qty: 1,
+        simpleSelection: { productId: PRODUCT_CALZONE, flavorId: CALZONE_FLAVOR_QUATRO_QUEIJOS },
+      },
+    ]);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.itens[0].name).toBe("Calzone");
+    expect(r.itens[0].detail).toBe("Sabor: Quatro Queijos");
+    expect(r.itens[0].price).toBe(35);
+  });
+
+  it("productId inexistente (ID adulterado) é rejeitado, nunca cai para o legado", async () => {
+    const r = await validarItensComanda([
+      { kind: "simple", name: "Calzone", detail: "Sabor: Quatro Queijos", price: 35, qty: 1, simpleSelection: { productId: "product-inexistente" } },
+    ]);
+    expect(r.ok).toBe(false);
+  });
+
+  it("flavorId inexistente (ID adulterado) é rejeitado", async () => {
+    const r = await validarItensComanda([
+      { kind: "simple", price: 0, qty: 1, simpleSelection: { productId: PRODUCT_CALZONE, flavorId: "flavor-inexistente" } },
+    ]);
+    expect(r.ok).toBe(false);
+  });
+
+  it("productId de outro catálogo (ex.: sizeId de pizza reaproveitado) é rejeitado", async () => {
+    const r = await validarItensComanda([
+      { kind: "simple", price: 0, qty: 1, simpleSelection: { productId: "size-g" } },
+    ]);
+    expect(r.ok).toBe(false);
+  });
+
+  it("simpleSelection: null é recusado — nunca cai para o legado mesmo com name/detail válidos junto", async () => {
+    const r = await validarItensComanda([
+      { kind: "simple", name: "Calzone", detail: "Sabor: Quatro Queijos", price: 35, qty: 1, simpleSelection: null },
+    ]);
+    expect(r.ok).toBe(false);
+  });
+
+  it.each([
+    ["objeto vazio", {}],
+    ["productId ausente", { flavorId: CALZONE_FLAVOR_QUATRO_QUEIJOS }],
+    ["milk fora de com/sem", { productId: PRODUCT_LARANJA, milk: "banana" }],
+    ["string", "malformado"],
+    ["número", 42],
+  ])("simpleSelection malformado (%s) é recusado, sem fallback legado", async (_desc, valor) => {
+    const r = await validarItensComanda([
+      { kind: "simple", name: "Calzone", detail: "Sabor: Quatro Queijos", price: 35, qty: 1, simpleSelection: valor },
+    ]);
+    expect(r.ok).toBe(false);
+  });
+
+  it("kind !== simple com simpleSelection presente é recusado (seleção estruturada só vale para produto simples)", async () => {
+    const r = await validarItensComanda([
+      { kind: "pizza", name: "Pizza G", price: 50, qty: 1, simpleSelection: { productId: PRODUCT_CALZONE, flavorId: CALZONE_FLAVOR_QUATRO_QUEIJOS } },
+    ]);
+    expect(r.ok).toBe(false);
+  });
+
+  it("produto inteiro esgotado é rejeitado", async () => {
+    store.set("esgotados", ["Calzone"]);
+    const r = await validarItensComanda([
+      { kind: "simple", price: 0, qty: 1, simpleSelection: { productId: PRODUCT_CALZONE, flavorId: CALZONE_FLAVOR_QUATRO_QUEIJOS } },
+    ]);
+    expect(r.ok).toBe(false);
+  });
+
+  it("sabor de Calzone esgotado é rejeitado", async () => {
+    store.set("esgotados", ["Quatro Queijos"]);
+    const r = await validarItensComanda([
+      { kind: "simple", price: 0, qty: 1, simpleSelection: { productId: PRODUCT_CALZONE, flavorId: CALZONE_FLAVOR_QUATRO_QUEIJOS } },
+    ]);
+    expect(r.ok).toBe(false);
+  });
+
+  it("REGRESSÃO — item esgota ENTRE a montagem (PATCH salvando a rodada) e o envio: mesma seleção que passou antes agora é recusada", async () => {
+    // Reproduz exatamente o cenário da auditoria: o atendente monta o item
+    // (PATCH salva com sucesso, esgotados ainda vazio) e só DEPOIS o sabor
+    // esgota — o reenvio (Beco de reprecificação em profundidade) precisa
+    // pegar isso, nunca confiar no que foi validado da primeira vez.
+    const payload = [
+      { kind: "simple" as const, price: 0, qty: 1, simpleSelection: { productId: PRODUCT_CALZONE, flavorId: CALZONE_FLAVOR_QUATRO_QUEIJOS } },
+    ];
+    const antes = await validarItensComanda(payload);
+    expect(antes.ok).toBe(true);
+
+    store.set("esgotados", ["Quatro Queijos"]); // esgotou DEPOIS de salvar, ANTES de reenviar
+
+    const depois = await validarItensComanda(payload);
+    expect(depois.ok).toBe(false);
+  });
+
+  it("carrinho misto — item legado (name/detail), pizza estruturada e produto simples estruturado no mesmo carrinho", async () => {
+    const r = await validarItensComanda([
+      { kind: "simple", name: "Refrigerante 2L", price: 0.01, qty: 1 },
+      { kind: "simple", price: 0, qty: 1, simpleSelection: { productId: PRODUCT_CALZONE, flavorId: CALZONE_FLAVOR_QUATRO_QUEIJOS } },
+    ]);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.itens[0].simpleSelection).toBeUndefined();
+    expect(r.itens[0].price).toBe(12);
+    expect(r.itens[1].simpleSelection).toEqual({ productId: PRODUCT_CALZONE, flavorId: CALZONE_FLAVOR_QUATRO_QUEIJOS });
+    expect(r.total).toBe(47);
+  });
+
+  it("comanda antiga sem simpleSelection: produto continua 100% pelo caminho legado (name/detail)", async () => {
+    const r = await validarItensComanda([
+      { kind: "simple", name: "Calzone", detail: "Sabor: Quatro Queijos", price: 0.01, qty: 1 },
+    ]);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.itens[0].simpleSelection).toBeUndefined();
+    expect(r.itens[0].price).toBe(35);
+  });
+
+  it("propriedade extra adulterada dentro de simpleSelection nunca chega ao item validado", async () => {
+    const r = await validarItensComanda([
+      {
+        kind: "simple",
+        price: 0,
+        qty: 1,
+        simpleSelection: {
+          productId: PRODUCT_CALZONE,
+          flavorId: CALZONE_FLAVOR_QUATRO_QUEIJOS,
+          precoForjado: 0.01, // propriedade adulterada de propósito, testando sanitização
+        },
+      },
+    ]);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.itens[0].simpleSelection).toEqual({ productId: PRODUCT_CALZONE, flavorId: CALZONE_FLAVOR_QUATRO_QUEIJOS });
+    expect(Object.keys(r.itens[0].simpleSelection!)).toEqual(["productId", "flavorId"]);
+  });
+});
+
 describe("atualizarItensComanda", () => {
   it("atualiza itens, observação e complemento de uma comanda aberta", async () => {
     const c = await abrirComandaOk("5");

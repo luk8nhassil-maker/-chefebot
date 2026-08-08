@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { redis } from '@/lib/redis'
 import { getMENUDinamico } from '@/lib/menu.server'
 import { buildPizzaCatalog } from '@/lib/catalog/pizzas'
-import { buildCatalog } from '@/lib/catalog/adapter'
+import { buildSimpleCatalog } from '@/lib/catalog/simpleProducts'
 import { verifyToken } from '@/lib/auth'
 import { registrarAuditoriaCardapio } from '@/lib/auditoriaCardapio'
 
@@ -232,12 +232,14 @@ export async function GET() {
     // religada nesta mesma etapa). Serve pra religar a UI depois sem precisar
     // reconstruir o catálogo em outro lugar.
     const pizzaCatalog = buildPizzaCatalog(menu, esgotados)
-    // Catálogo oficial genérico com IDs estáveis (Fase 1) — aditivo, igual
-    // pizzaCatalog: usado para montar `simpleSelection` dos demais produtos
-    // configuráveis (Calzone, Mini-Pizza, Macarronada, sucos — Fase 6).
-    // Ausência (resposta antiga em cache) faz esses itens caírem no
+    // Catálogo oficial dos demais produtos configuráveis, com IDs estáveis e
+    // disponibilidade em tempo real (Fase 6) — aditivo, igual pizzaCatalog:
+    // usado para montar `simpleSelection` (Calzone, Mini-Pizza, Macarronada,
+    // sucos). Sabores de Calzone/Mini-Pizza vêm das listas oficiais já
+    // existentes (menu.calzoneFlavors/miniPizzaFlavors), nunca inventadas
+    // aqui. Ausência (resposta antiga em cache) faz esses itens caírem no
     // comportamento 100% legado (name/detail), nunca bloqueia o carrinho.
-    const catalog = buildCatalog(menu)
+    const catalog = buildSimpleCatalog(menu, esgotados)
     return NextResponse.json({ ...menu, esgotados, esgotadosMetadata, horario, pizzaCatalog, catalog })
   } catch {
     return NextResponse.json(

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { nextFlavorSelection, resolverPizzaSelectionIds, resolverSimpleSelectionIds } from "./page";
 import { buildPizzaCatalog } from "@/lib/catalog/pizzas";
-import { buildCatalog } from "@/lib/catalog/adapter";
+import { buildSimpleCatalog } from "@/lib/catalog/simpleProducts";
 import { MENU } from "@/lib/menu";
 
 const fonte = readFileSync(fileURLToPath(new URL("./page.tsx", import.meta.url)), "utf-8");
@@ -337,13 +337,23 @@ describe("/cardapio (PublicCardapio) — wiring de pizzaSelection (Fase 2C)", ()
 });
 
 describe("resolverSimpleSelectionIds — resolução de IDs do catálogo oficial (Fase 6)", () => {
-  const catalog = buildCatalog(MENU);
+  const catalog = buildSimpleCatalog(MENU);
 
-  test("calzone/mini-pizza: resolve productId + flavorId pelo nome do sabor", () => {
+  test("calzone: resolve productId + flavorId pela lista oficial calzoneFlavors", () => {
     const sel = resolverSimpleSelectionIds(catalog, "Calzone", { flavorName: "Calabresa" });
     const produto = catalog.lanches.find((l) => l.name === "Calzone")!;
-    const sabor = [...catalog.saltyFlavors, ...catalog.sweetFlavors].find((f) => f.name === "Calabresa")!;
+    const sabor = catalog.calzoneFlavors.find((f) => f.name === "Calabresa")!;
     expect(sel).toEqual({ productId: produto.id, flavorId: sabor.id });
+  });
+
+  test("mini-pizza: resolve productId + flavorId pela lista oficial miniPizzaFlavors (não calzoneFlavors)", () => {
+    const sel = resolverSimpleSelectionIds(catalog, "Mini-Pizza", { flavorName: "Calabresa" });
+    const produto = catalog.lanches.find((l) => l.name === "Mini-Pizza")!;
+    const sabor = catalog.miniPizzaFlavors.find((f) => f.name === "Calabresa")!;
+    expect(sel).toEqual({ productId: produto.id, flavorId: sabor.id });
+    // IDs de calzoneFlavors e miniPizzaFlavors nunca se confundem, mesmo
+    // quando os NOMES coincidem hoje.
+    expect(sel?.flavorId).not.toBe(catalog.calzoneFlavors.find((f) => f.name === "Calabresa")!.id);
   });
 
   test("macarronada: resolve productId + sizeId pelo código do tamanho", () => {
@@ -471,11 +481,15 @@ describe("/cardapio (PublicCardapio) — Calzone entra no mesmo fluxo de sabores
     expect(fonte).toContain("const next = nextFlavorSelection({ f1, f2 }, f, miniPizzaMode || calzoneMode);");
   });
 
-  test("calzone consome a mesma lista efetiva de sabores da pizza (pizzaFlavorSections), sem lista própria", () => {
+  test("calzone consome a mesma lista efetiva de sabores da pizza no MODAL (pizzaFlavorSections), sem lista própria de exibição", () => {
+    // A UI do modal de escolha (o que é MOSTRADO ao cliente) continua igual:
+    // calzone reaproveita pizzaFlavorSections, nunca uma lista própria de
+    // exibição. `catalog.calzoneFlavors` (Fase 6, hardening pós-auditoria) é
+    // uma coisa diferente: só entra depois de escolhido, para resolver o ID
+    // oficial do sabor contra a lista comercial própria do Calzone — ver
+    // resolverSimpleSelectionIds/addCalzone.
     expect(fonte).toContain('const pizzaFlavorSections = [{ title: "Salgadas", flavors: menu.saltyFlavors || [] }, { title: "Doces", flavors: menu.sweetFlavors || [] }];');
     expect(fonte).toContain("const flavorSections = miniPizzaMode\n    ? [{ title: \"Sabores da mini-pizza\", flavors: miniPizzaFlavors }]\n    : pizzaFlavorSections;");
-    // Não existe mais lista própria de sabores do calzone no código do cardápio público.
-    expect(fonte).not.toContain("calzoneFlavors");
     expect(fonte).not.toContain("calzoneFlavorsList");
   });
 

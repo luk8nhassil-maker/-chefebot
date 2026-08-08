@@ -2,8 +2,14 @@ import { randomUUID } from "crypto";
 import { redis } from "./redis";
 import { getMENUDinamico } from "./menu.server";
 import { officialUnitPrice, type ItemApp, type MenuPedidoApp } from "./pedidoAppItens";
-import { temSelecaoEstruturada, resolverItemComSelecaoEstruturada } from "./pedidoAppSelecaoEstruturada";
+import {
+  temSelecaoEstruturada,
+  resolverItemComSelecaoEstruturada,
+  temSelecaoSimplesEstruturada,
+  resolverItemComSelecaoSimplesEstruturada,
+} from "./pedidoAppSelecaoEstruturada";
 import { buildPizzaCatalog, type PizzaCatalog } from "./catalog/pizzas";
+import { buildSimpleCatalog, type SimpleCatalog } from "./catalog/simpleProducts";
 
 // Comanda do Salão — mesa aberta que acumula itens antes de virar um pedido
 // de verdade. NÃO É um motor de pedido paralelo: preço e catálogo aqui vêm
@@ -267,19 +273,36 @@ function sanitizarPizzaSelecaoValidada(
   };
 }
 
+/** Mesma ideia de `sanitizarPizzaSelecaoValidada`, para a seleção de produto
+ *  simples (Fase 6) — só é chamada depois que
+ *  `resolverItemComSelecaoSimplesEstruturada` já confirmou que
+ *  productId/sizeId/flavorId/milk correspondem a entradas reais e
+ *  disponíveis do catálogo. */
+function sanitizarSimpleSelecaoValidada(
+  selecao: { productId: string; sizeId?: string; flavorId?: string; milk?: "com" | "sem" }
+): { productId: string; sizeId?: string; flavorId?: string; milk?: "com" | "sem" } {
+  return {
+    productId: selecao.productId,
+    ...(selecao.sizeId !== undefined ? { sizeId: selecao.sizeId } : {}),
+    ...(selecao.flavorId !== undefined ? { flavorId: selecao.flavorId } : {}),
+    ...(selecao.milk !== undefined ? { milk: selecao.milk } : {}),
+  };
+}
+
 /**
  * Valida e reprecifica os itens da comanda contra o cardápio oficial —
  * nunca confia no preço vindo do painel do Salão. Itens promocionais não
  * são suportados aqui (mesmo escopo do pedido manual administrativo).
  *
  * Seleção estruturada de pizza (Fase 5, mesmo catálogo/motor nativo da
- * Fase 2): a PRESENÇA (não a truthiness) de `item.pizzaSelection` decide —
- * igual a POST /api/pedido-app. Um item que declarou a intenção de usar o
- * formato novo e falhou a validação é DEFINITIVO: nunca cai para o caminho
- * legado (officialUnitPrice) com o name/detail que possa ter mandado junto.
- * Item sem essa propriedade continua 100% pelo caminho legado de sempre —
- * comanda/rodada antiga, ou carrinho misto legado + estruturado, funcionam
- * sem nenhuma mudança.
+ * Fase 2) e de produto simples (Fase 6 — Calzone, Mini-Pizza, Macarronada,
+ * sucos): a PRESENÇA (não a truthiness) de `item.pizzaSelection`/
+ * `item.simpleSelection` decide — igual a POST /api/pedido-app. Um item que
+ * declarou a intenção de usar o formato novo e falhou a validação é
+ * DEFINITIVO: nunca cai para o caminho legado (officialUnitPrice) com o
+ * name/detail que possa ter mandado junto. Item sem essa propriedade
+ * continua 100% pelo caminho legado de sempre — comanda/rodada antiga, ou
+ * carrinho misto legado + estruturado, funcionam sem nenhuma mudança.
  */
 export async function validarItensComanda(
   itens: unknown,
@@ -297,19 +320,28 @@ export async function validarItensComanda(
   }
   const menu = await getMENUDinamico();
 
-  // Catálogo oficial de pizza (Fase 2) só é montado quando algum item
-  // realmente precisa dele — mesmo padrão de custo sob demanda já usado em
-  // POST /api/pedido-app. `esgotados` é lido FRESCO do Redis a cada chamada
-  // desta função (nunca cacheado entre requisições), então um sabor/borda
-  // que esgota entre salvar a rodada e reenviá-la (reprecificação em
-  // profundidade da rota de envio da Rodada 2+) é pego aqui.
+  // Os catálogos oficiais (pizza — Fase 2 — e demais produtos configuráveis
+  // — Fase 6) só são montados quando algum item realmente precisa deles —
+  // mesmo padrão de custo sob demanda já usado em POST /api/pedido-app.
+  // `esgotados` é lido FRESCO do Redis uma única vez (compartilhado pelos
+  // dois catálogos) a cada chamada desta função (nunca cacheado entre
+  // requisições), então um sabor/borda/produto que esgota entre salvar a
+  // rodada e reenviá-la (reprecificação em profundidade da rota de envio da
+  // Rodada 1 e da Rodada 2+) é pego aqui.
+  let esgotadosCache: string[] | null = null;
+  async function esgotadosFrescos(): Promise<string[]> {
+    if (!esgotadosCache) esgotadosCache = (await redis.get<string[]>("esgotados")) || [];
+    return esgotadosCache;
+  }
   let pizzaCatalogCache: PizzaCatalog | null = null;
   async function catalogoPizzaOficial(): Promise<PizzaCatalog> {
-    if (!pizzaCatalogCache) {
-      const esgotados = (await redis.get<string[]>("esgotados")) || [];
-      pizzaCatalogCache = buildPizzaCatalog(menu, esgotados);
-    }
+    if (!pizzaCatalogCache) pizzaCatalogCache = buildPizzaCatalog(menu, await esgotadosFrescos());
     return pizzaCatalogCache;
+  }
+  let simpleCatalogCache: SimpleCatalog | null = null;
+  async function catalogoSimplesOficial(): Promise<SimpleCatalog> {
+    if (!simpleCatalogCache) simpleCatalogCache = buildSimpleCatalog(menu, await esgotadosFrescos());
+    return simpleCatalogCache;
   }
 
   const validados: ItemApp[] = [];
@@ -334,6 +366,22 @@ export async function validarItensComanda(
       // com o catálogo — seguro preservar só esses 3 campos no item validado.
       const pizzaSelection = sanitizarPizzaSelecaoValidada((item as ItemApp).pizzaSelection!);
       validados.push({ ...resolvido.item, pizzaSelection });
+      total += resolvido.item.price * resolvido.item.qty;
+      continue;
+    }
+
+    if (temSelecaoSimplesEstruturada(bruto)) {
+      const catalogo = await catalogoSimplesOficial();
+      const resolvido = resolverItemComSelecaoSimplesEstruturada(item as ItemApp, menu, catalogo);
+      if (!resolvido.ok) {
+        return { ok: false, error: resolvido.error };
+      }
+      // Ponto de resolução já provou que productId/sizeId/flavorId/milk
+      // batem com o catálogo (e estão disponíveis) — seguro preservar só
+      // esses 4 campos no item validado, para que a Rodada/comanda continue
+      // carregando o ID estável até o envio para /api/pedido-app.
+      const simpleSelection = sanitizarSimpleSelecaoValidada((item as ItemApp).simpleSelection!);
+      validados.push({ ...resolvido.item, simpleSelection });
       total += resolvido.item.price * resolvido.item.qty;
       continue;
     }

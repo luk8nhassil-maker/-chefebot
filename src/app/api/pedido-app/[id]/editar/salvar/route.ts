@@ -25,6 +25,7 @@ import {
   resolverItemComSelecaoSimplesEstruturada,
 } from "@/lib/pedidoAppSelecaoEstruturada";
 import { buildPizzaCatalog } from "@/lib/catalog/pizzas";
+import { buildSimpleCatalog } from "@/lib/catalog/simpleProducts";
 import { construirSnapshotItem, construirSnapshotOficial } from "@/lib/pedidoSnapshot";
 import type { PedidoRedis } from "@/types/pedidoRedis";
 import { montarResumoAlteracoes } from "@/lib/pedidoEdicaoResumo";
@@ -174,14 +175,22 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       precoFinalPromocao: (promo) => precoFinalPromocao(promo, catalogoPromo),
     });
 
-    // Itens com seleção estruturada por ID (Fase 2 — catálogo/motor nativo de
-    // pizza): resolvidos e precificados por @/lib/pricing/pizzaEngine, nunca
-    // por officialUnitPrice/name-detail. Um item reconhecido aqui como "novo
-    // formato" (tem pizzaSelection) que falhe a validação é definitivo —
-    // NUNCA cai para o caminho legado abaixo.
+    // Itens com seleção estruturada por ID (Fase 2/6 — catálogo/motor nativo
+    // de pizza e dos demais produtos configuráveis): resolvidos por
+    // @/lib/pricing/pizzaEngine / @/lib/catalog/simpleProducts, nunca por
+    // officialUnitPrice/name-detail às cegas. Um item reconhecido aqui como
+    // "novo formato" (tem pizzaSelection ou simpleSelection) que falhe a
+    // validação é definitivo — NUNCA cai para o caminho legado abaixo.
+    // `esgotados` é lido FRESCO do Redis (compartilhado pelos dois
+    // catálogos) sempre que algum item precisa dele — um sabor/produto que
+    // esgota entre a montagem da edição e o salvamento é pego aqui.
     const temSelecaoPizzaEstruturada = body.itens.some((item) => temSelecaoEstruturada(item));
-    const esgotadosPizza = temSelecaoPizzaEstruturada ? ((await redis.get<string[]>("esgotados")) || []) : [];
-    const pizzaCatalog = temSelecaoPizzaEstruturada ? buildPizzaCatalog(menu, esgotadosPizza) : null;
+    const temSelecaoSimplesEstruturadaAlgumItem = body.itens.some((item) => temSelecaoSimplesEstruturada(item));
+    const esgotadosFresco = temSelecaoPizzaEstruturada || temSelecaoSimplesEstruturadaAlgumItem
+      ? ((await redis.get<string[]>("esgotados")) || [])
+      : [];
+    const pizzaCatalog = temSelecaoPizzaEstruturada ? buildPizzaCatalog(menu, esgotadosFresco) : null;
+    const simpleCatalog = temSelecaoSimplesEstruturadaAlgumItem ? buildSimpleCatalog(menu, esgotadosFresco) : null;
 
     let itensValidados: { itemCanonico: ItemApp; linha: string; unitPrice: number | null; qty: number }[];
     try {
@@ -201,7 +210,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         // reconhecido pela presença de `simpleSelection`, e uma falha aqui é
         // definitiva (nunca cai para o legado abaixo).
         if (temSelecaoSimplesEstruturada(item)) {
-          const resolvido = resolverItemComSelecaoSimplesEstruturada(item, menu);
+          const resolvido = resolverItemComSelecaoSimplesEstruturada(item, menu, simpleCatalog!);
           if (!resolvido.ok) return { itemCanonico: item, linha: "", unitPrice: null, qty: item.qty };
           return {
             itemCanonico: resolvido.item,

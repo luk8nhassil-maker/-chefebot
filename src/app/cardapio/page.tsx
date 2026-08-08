@@ -16,7 +16,7 @@ import { fetchCliente } from "@/lib/clienteSessaoFront";
 import { lerReferenciaRecompensa, limparReferenciaRecompensa, migrarReferenciaLegada } from "@/lib/recompensaJornadaCarrinho";
 import { extrairPagamentoComposto, montarPagamentoComposto, parseValorMonetario } from "@/lib/pagamentoComposto";
 import type { PizzaCatalog } from "@/lib/catalog/pizzas";
-import type { Catalog } from "@/lib/catalog/types";
+import type { SimpleCatalog } from "@/lib/catalog/simpleProducts";
 
 // Ícones de categoria da home (menu/navegação) — lucide-react, sem emoji.
 // Mantidos separados de ICONS (que continua usando emoji para os itens
@@ -52,13 +52,15 @@ export type MenuType = {
   // item de pizza cair no comportamento 100% legado (name/detail), nunca
   // bloqueia adicionar ao carrinho.
   pizzaCatalog?: PizzaCatalog;
-  // Catálogo oficial genérico com IDs estáveis (Fase 1), aditivo, vem de
-  // GET /api/cardapio. Usado só para montar `simpleSelection` no carrinho
-  // (Calzone, Mini-Pizza, Macarronada, sucos — ver addCalzone/addMiniPizza/
-  // addMacarronadaSize/addSucoLeite); ausência (ex.: resposta antiga em
-  // cache) faz o item cair no comportamento 100% legado (name/detail), nunca
-  // bloqueia adicionar ao carrinho (Fase 6).
-  catalog?: Catalog;
+  // Catálogo oficial dos demais produtos configuráveis, com IDs estáveis e
+  // disponibilidade (Fase 6), aditivo, vem de GET /api/cardapio. Usado só
+  // para montar `simpleSelection` no carrinho (Calzone, Mini-Pizza,
+  // Macarronada, sucos — ver addCalzone/addMiniPizza/addMacarronadaSize/
+  // addSucoLeite); ausência (ex.: resposta antiga em cache) faz o item cair
+  // no comportamento 100% legado (name/detail), nunca bloqueia adicionar ao
+  // carrinho. Sabores de Calzone/Mini-Pizza vêm das listas oficiais já
+  // existentes (calzoneFlavors/miniPizzaFlavors), nunca inventadas aqui.
+  catalog?: SimpleCatalog;
 };
 
 // ==================== ADMIN CARDÁPIO ====================
@@ -801,13 +803,15 @@ export function resolverPizzaSelectionIds(
 }
 
 // Resolve a seleção de um produto simples configurável (Calzone, Mini-Pizza,
-// Macarronada, sucos) para os IDs estáveis do catálogo oficial (Fase 1,
+// Macarronada, sucos) para os IDs estáveis do catálogo oficial (Fase 6,
 // GET /api/cardapio -> menu.catalog) — puro, sem nenhuma chamada de rede.
 // Mesma regra de resolverPizzaSelectionIds: catálogo ausente ou nome sem
-// correspondência devolve undefined, e o item cai no formato 100% legado
-// (Fase 6).
+// correspondência devolve undefined, e o item cai no formato 100% legado.
+// Sabor de Calzone/Mini-Pizza é resolvido contra a lista oficial DAQUELE
+// produto (calzoneFlavors/miniPizzaFlavors) — nunca contra a lista de
+// sabores de pizza, que é uma lista comercial diferente.
 export function resolverSimpleSelectionIds(
-  catalog: Catalog | undefined,
+  catalog: SimpleCatalog | undefined,
   productName: string,
   opts: { sizeCode?: string; flavorName?: string; milk?: "com" | "sem" }
 ): { productId: string; sizeId?: string; flavorId?: string; milk?: "com" | "sem" } | undefined {
@@ -825,7 +829,8 @@ export function resolverSimpleSelectionIds(
   }
 
   if (opts.flavorName !== undefined) {
-    const flavor = [...catalog.saltyFlavors, ...catalog.sweetFlavors].find((f) => f.name === opts.flavorName);
+    const flavors = isCalzoneName(productName) ? catalog.calzoneFlavors : isMiniPizzaName(productName) ? catalog.miniPizzaFlavors : [];
+    const flavor = flavors.find((f) => f.name === opts.flavorName);
     if (!flavor) return undefined;
     return { productId: produto.id, flavorId: flavor.id };
   }

@@ -826,9 +826,10 @@ function ProdutoSelector({
       const r = await fetch(urlItensRodada(comanda.id, rodada), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        // pizzaSelection (IDs oficiais, Fase 5) preservado quando o item o
-        // carrega — mesmo padrão aditivo do pedido manual e do cardápio
-        // público; name/detail/price continuam enviados, nunca confiados.
+        // pizzaSelection (IDs oficiais, Fase 5) e simpleSelection (Fase 6)
+        // preservados quando o item os carrega — mesmo padrão aditivo do
+        // pedido manual e do cardápio público; name/detail/price continuam
+        // enviados, nunca confiados.
         body: JSON.stringify({
           itens: novosItens.map((i) => ({
             kind: i.kind,
@@ -837,6 +838,7 @@ function ProdutoSelector({
             price: i.price,
             qty: i.qty,
             ...(i.pizzaSelection ? { pizzaSelection: i.pizzaSelection } : {}),
+            ...(i.simpleSelection ? { simpleSelection: i.simpleSelection } : {}),
           })),
         }),
       })
@@ -1045,9 +1047,10 @@ function PedidoReview({
       const r = await fetch(urlItensRodada(comanda.id, rodada), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        // pizzaSelection (IDs oficiais, Fase 5) preservado quando o item o
-        // carrega — mesmo padrão aditivo do pedido manual e do cardápio
-        // público; name/detail/price continuam enviados, nunca confiados.
+        // pizzaSelection (IDs oficiais, Fase 5) e simpleSelection (Fase 6)
+        // preservados quando o item os carrega — mesmo padrão aditivo do
+        // pedido manual e do cardápio público; name/detail/price continuam
+        // enviados, nunca confiados.
         body: JSON.stringify({
           itens: novosItens.map((i) => ({
             kind: i.kind,
@@ -1056,6 +1059,7 @@ function PedidoReview({
             price: i.price,
             qty: i.qty,
             ...(i.pizzaSelection ? { pizzaSelection: i.pizzaSelection } : {}),
+            ...(i.simpleSelection ? { simpleSelection: i.simpleSelection } : {}),
           })),
         }),
       })
