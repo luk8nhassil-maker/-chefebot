@@ -2209,6 +2209,42 @@ describe("POST /api/pedido-app — seleção estruturada de produto simples por 
     const pedidos = (store.get("pedidos") as unknown[] | undefined) ?? [];
     expect(pedidos).toHaveLength(0);
   });
+
+  it("REGRESSÃO (BLOQUEIO 1, auditoria independente pós-6ª rodada) — Calzone em modo 'own': item legado (sem simpleSelection) com sabor fora da lista própria é rejeitado, nunca contorna flavorsMode pelo caminho legado", async () => {
+    store.set("cardapio", {
+      ...MENU,
+      lanches: MENU.lanches.map((l) => (l.name === "Calzone" ? { ...l, flavorsMode: "own" as const } : l)),
+    });
+    // "Quatro Queijos" é um sabor de pizza válido, mas não está em
+    // calzoneFlavors — com o Calzone em modo "own", nenhum caminho (nem o
+    // legado, omitindo simpleSelection de propósito) pode aceitá-lo.
+    expect(MENU.calzoneFlavors).not.toContain("Quatro Queijos");
+    const res = await POST(postReq({
+      ...simplePayload,
+      itens: [{ kind: "simple", name: "Calzone", detail: "Sabor: Quatro Queijos", price: 35, qty: 1 }],
+    }));
+
+    expect(res.status).toBe(400);
+    const pedidos = (store.get("pedidos") as unknown[] | undefined) ?? [];
+    expect(pedidos).toHaveLength(0);
+  });
+
+  it("Calzone em modo 'own': item legado com sabor DENTRO da lista própria continua funcionando normalmente", async () => {
+    store.set("cardapio", {
+      ...MENU,
+      lanches: MENU.lanches.map((l) => (l.name === "Calzone" ? { ...l, flavorsMode: "own" as const } : l)),
+    });
+    expect(MENU.calzoneFlavors).toContain("Calabresa");
+    const res = await POST(postReq({
+      ...simplePayload,
+      itens: [{ kind: "simple", name: "Calzone", detail: "Sabor: Calabresa", price: 35, qty: 1 }],
+    }));
+
+    expect(res.status).toBe(200);
+    const pedidos = store.get("pedidos") as { itens: string[]; total: number }[];
+    expect(pedidos[0].itens).toEqual(["Calzone Sabor: Calabresa"]);
+    expect(pedidos[0].total).toBe(35);
+  });
 });
 
 describe("POST /api/pedido-app — snapshotOficial (Fase 3)", () => {

@@ -102,4 +102,38 @@ describe("POST /api/cardapio/calzone-flavors-mode", () => {
     const cardapioGravado = store.get("cardapio") as typeof MENU;
     expect(cardapioGravado.lanches.find((l) => l.name === "Calzone")!.flavorsMode).toBe("pizza");
   });
+
+  it("REGRESSÃO (auditoria independente pós-6ª rodada) — patch cirúrgico: NUNCA materializa seções que ainda dependem do fallback estático (só `lanches` é persistido)", async () => {
+    // Cardápio nunca customizado (chave "cardapio" ausente no Redis) —
+    // getMENUDinamico() resolve tudo a partir do MENU estático.
+    const token = await tokenAdmin();
+    const res = await POST(postReq({ modo: "own" }, token));
+    expect(res.status).toBe(200);
+
+    const cardapioGravado = store.get("cardapio") as Record<string, unknown>;
+    // `lanches` foi persistido (é a seção que mudou)...
+    expect(Array.isArray(cardapioGravado.lanches)).toBe(true);
+    // ...mas nenhuma outra seção foi escrita "à toa" — continuam ausentes do
+    // objeto persistido, livres para seguir o fallback estático (MENU) em
+    // qualquer mudança futura no cardápio-base, exatamente como antes deste
+    // endpoint existir.
+    expect(cardapioGravado.sizes).toBeUndefined();
+    expect(cardapioGravado.saltyFlavors).toBeUndefined();
+    expect(cardapioGravado.sweetFlavors).toBeUndefined();
+    expect(cardapioGravado.bebidas).toBeUndefined();
+    expect(cardapioGravado.sucos).toBeUndefined();
+    expect(cardapioGravado.borders).toBeUndefined();
+    expect(cardapioGravado.neighborhoods).toBeUndefined();
+    expect(cardapioGravado.payments).toBeUndefined();
+  });
+
+  it("preserva a auditoria administrativa (registrarAuditoriaCardapio grava uma entrada de log)", async () => {
+    const token = await tokenAdmin();
+    const res = await POST(postReq({ modo: "own" }, token));
+    expect(res.status).toBe(200);
+    expect(redisMock.lpush).toHaveBeenCalledTimes(1);
+    const [, entradaJson] = redisMock.lpush.mock.calls[0] as [string, string];
+    const entrada = JSON.parse(entradaJson);
+    expect(entrada.admin).toBe("brito");
+  });
 });

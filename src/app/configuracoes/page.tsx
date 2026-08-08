@@ -206,6 +206,14 @@ export default function ConfiguracoesPage() {
   const [calzoneModoPizza, setCalzoneModoPizza] = useState(true)
   const [salvandoCalzoneModo, setSalvandoCalzoneModo] = useState(false)
   const [mensagemCalzoneModo, setMensagemCalzoneModo] = useState('')
+  // `lanches` cru (Calzone/Mini-Pizza/Macarronada/etc.), preservado tal como
+  // veio de GET /api/cardapio — NUNCA reconstruído campo a campo aqui. Existe
+  // só para "Salvar Cardápio" (abaixo) reenviar essa seção junto com o resto:
+  // POST /api/cardapio substitui o objeto INTEIRO persistido no Redis: sem
+  // isso, salvar qualquer sabor/bebida/bairro apagaria `lanches` (e com ele
+  // o flavorsMode do Calzone). Uma única fonte: o próprio alternarCalzoneModo
+  // também atualiza este estado, nunca cria um segundo lugar que guarde modo.
+  const [lanches, setLanches] = useState<Array<Record<string, unknown>>>([])
   const is24h = config.horaAbertura === 0 && config.horaFechamento === 24
 
   useEffect(() => {
@@ -244,7 +252,8 @@ export default function ConfiguracoesPage() {
           sizes: data.sizes || [],
           borders: data.borders || [],
         })
-        const lanchesData: Array<{ flavorsKey?: string; flavorsMode?: string }> = Array.isArray(data?.lanches) ? data.lanches : []
+        const lanchesData: Array<Record<string, unknown>> = Array.isArray(data?.lanches) ? data.lanches : []
+        setLanches(lanchesData)
         const calzone = lanchesData.find(l => l.flavorsKey === 'calzoneFlavors')
         setCalzoneModoPizza(!calzone || calzone.flavorsMode !== 'own')
       })
@@ -304,6 +313,10 @@ export default function ConfiguracoesPage() {
       })
       if (res.ok) {
         setCalzoneModoPizza(novoModo === 'pizza')
+        // Mantém `lanches` (usado por "Salvar Cardápio" abaixo) em dia com o
+        // que acabou de ser persistido — uma única fonte, nunca duas
+        // decisões independentes sobre o modo do Calzone.
+        setLanches(prev => prev.map(l => (l.flavorsKey === 'calzoneFlavors' ? { ...l, flavorsMode: novoModo } : l)))
         setMensagemCalzoneModo('✅ Configuração do Calzone salva!')
       } else {
         setMensagemCalzoneModo('❌ Erro ao salvar.')
@@ -318,7 +331,11 @@ export default function ConfiguracoesPage() {
   const salvarCardapio = async () => {
     setSalvando(true)
     try {
-      const res = await fetch('/api/cardapio', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cardapio) })
+      // Inclui `lanches` (com o flavorsMode do Calzone já em dia, ver acima)
+      // — POST /api/cardapio substitui o objeto inteiro persistido no Redis;
+      // sem isso, salvar qualquer sabor/bebida/bairro apagaria a
+      // configuração do Calzone.
+      const res = await fetch('/api/cardapio', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...cardapio, lanches }) })
       if (res.ok) showMsg('✅ Cardápio salvo!')
       else showMsg('❌ Erro ao salvar.')
     } catch { showMsg('❌ Erro ao salvar.') }

@@ -426,22 +426,43 @@ describe("/cardapio (PublicCardapio) — wiring de simpleSelection (Fase 6)", ()
     expect(bloco).toContain("...(simpleSelection ? { simpleSelection } : {})");
   });
 
+  test("REGRESSÃO (auditoria independente pós-6ª rodada) — addCalzone é fail-closed: com menu.catalog presente, uma seleção que não resolve NUNCA cai pro legado", () => {
+    const bloco = fonte.slice(fonte.indexOf("function addCalzone() {"), fonte.indexOf("function continueBuild("));
+    expect(bloco).toContain("if (!simpleSelection && menu.catalog) {");
+    expect(bloco).toMatch(/if \(!simpleSelection && menu\.catalog\) \{\s*showToast\([^)]*\);\s*return;\s*\}/);
+  });
+
   test("addMiniPizza monta simpleSelection a partir do catálogo oficial e só o inclui no item quando resolvido", () => {
     const bloco = fonte.slice(fonte.indexOf("function addMiniPizza() {"), fonte.indexOf("function addCalzone("));
     expect(bloco).toContain("const simpleSelection = resolverSimpleSelectionIds(menu.catalog, miniPizzaItem.name, { flavorName: f1 });");
     expect(bloco).toContain("...(simpleSelection ? { simpleSelection } : {})");
   });
 
+  test("REGRESSÃO — addMiniPizza é fail-closed: com menu.catalog presente, uma seleção que não resolve NUNCA cai pro legado", () => {
+    const bloco = fonte.slice(fonte.indexOf("function addMiniPizza() {"), fonte.indexOf("function addCalzone("));
+    expect(bloco).toContain("if (!simpleSelection && menu.catalog) {");
+  });
+
   test("addMacarronadaSize monta simpleSelection a partir do catálogo oficial", () => {
-    const bloco = fonte.slice(fonte.indexOf("function addMacarronadaSize("), fonte.indexOf("function addMacarronadaSize(") + 800);
+    const bloco = fonte.slice(fonte.indexOf("function addMacarronadaSize("), fonte.indexOf("const cartTotal ="));
     expect(bloco).toContain("const simpleSelection = resolverSimpleSelectionIds(menu.catalog, macarronadaPendente.name, { sizeCode: sizeOption.code });");
     expect(bloco).toContain("...(simpleSelection ? { simpleSelection } : {})");
+  });
+
+  test("REGRESSÃO — addMacarronadaSize é fail-closed: com menu.catalog presente, uma seleção que não resolve NUNCA cai pro legado", () => {
+    const bloco = fonte.slice(fonte.indexOf("function addMacarronadaSize("), fonte.indexOf("const cartTotal ="));
+    expect(bloco).toContain("if (!simpleSelection && menu.catalog) {");
   });
 
   test("addSucoLeite monta simpleSelection a partir do catálogo oficial", () => {
     const bloco = fonte.slice(fonte.indexOf("function addSucoLeite("), fonte.indexOf("function addMacarronadaSize("));
     expect(bloco).toContain('const simpleSelection = resolverSimpleSelectionIds(menu.catalog, sucoPendente.name, { milk: comLeite ? "com" : "sem" });');
     expect(bloco).toContain("...(simpleSelection ? { simpleSelection } : {})");
+  });
+
+  test("REGRESSÃO — addSucoLeite é fail-closed: com menu.catalog presente, uma seleção que não resolve NUNCA cai pro legado", () => {
+    const bloco = fonte.slice(fonte.indexOf("function addSucoLeite("), fonte.indexOf("function addMacarronadaSize("));
+    expect(bloco).toContain("if (!simpleSelection && menu.catalog) {");
   });
 
   test("payload de POST /api/pedido-app envia simpleSelection quando o item do carrinho tem (sem substituir name/detail/price)", () => {
@@ -504,15 +525,22 @@ describe("/cardapio (PublicCardapio) — Calzone entra no mesmo fluxo de sabores
     expect(fonte).toContain("const next = nextFlavorSelection({ f1, f2 }, f, miniPizzaMode || calzoneMode);");
   });
 
-  test("calzone consome a mesma lista efetiva de sabores da pizza no MODAL (pizzaFlavorSections), sem lista própria de exibição", () => {
-    // A UI do modal de escolha (o que é MOSTRADO ao cliente) continua igual:
-    // calzone reaproveita pizzaFlavorSections, nunca uma lista própria de
-    // exibição. `catalog.calzoneFlavors` (Fase 6, hardening pós-auditoria) é
-    // uma coisa diferente: só entra depois de escolhido, para resolver o ID
-    // oficial do sabor contra a lista comercial própria do Calzone — ver
-    // resolverSimpleSelectionIds/addCalzone.
+  test("REGRESSÃO (auditoria independente pós-6ª rodada) — calzone usa a lista EFETIVA de sabores do catálogo oficial no MODAL (produto.flavors via menu.catalog), nunca uma lista fixa independente de flavorsMode", () => {
+    // A UI do modal de escolha (o que é MOSTRADO ao cliente) precisa refletir
+    // exatamente o que resolverSimpleSelectionIds vai aceitar — nunca a lista
+    // cheia de sabores da pizza incondicionalmente (esse era o bug: modo
+    // "own" escondia um sabor da validação, mas o modal continuava
+    // oferecendo-o para escolha). `calzoneFlavorNames` vem de
+    // `menu.catalog.lanches[Calzone].flavors` — a mesma fonte, calculada uma
+    // única vez por buildSimpleCatalog conforme flavorsMode. Só cai para a
+    // lista cheia da pizza quando `menu.catalog` está genuinamente ausente
+    // (resposta antiga em cache) — mesma regra de sempre.
     expect(fonte).toContain('const pizzaFlavorSections = [{ title: "Salgadas", flavors: menu.saltyFlavors || [] }, { title: "Doces", flavors: menu.sweetFlavors || [] }];');
-    expect(fonte).toContain("const flavorSections = miniPizzaMode\n    ? [{ title: \"Sabores da mini-pizza\", flavors: miniPizzaFlavors }]\n    : pizzaFlavorSections;");
+    expect(fonte).toContain("const calzoneCatalogProduto = menu.catalog?.lanches.find((l) => l.name === calzoneItem?.name);");
+    expect(fonte).toContain("const calzoneFlavorNames = calzoneCatalogProduto\n    ? calzoneCatalogProduto.flavors?.map((f) => f.name) ?? []\n    : [...(menu.saltyFlavors || []), ...(menu.sweetFlavors || [])];");
+    expect(fonte).toContain(
+      "const flavorSections = miniPizzaMode\n    ? [{ title: \"Sabores da mini-pizza\", flavors: miniPizzaFlavors }]\n    : calzoneMode\n      ? [{ title: \"Sabores do calzone\", flavors: calzoneFlavorNames }]\n      : pizzaFlavorSections;"
+    );
     expect(fonte).not.toContain("calzoneFlavorsList");
   });
 

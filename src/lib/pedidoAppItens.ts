@@ -34,13 +34,33 @@ export type ItemApp = {
   simpleSelection?: { productId: string; sizeId?: string; flavorId?: string; milk?: "com" | "sem" };
 };
 
-export type MenuSimpleItem = { name: string; price: number; sizes?: { code: string; price: number }[] };
+export type MenuSimpleItem = {
+  name: string;
+  price: number;
+  sizes?: { code: string; price: number }[];
+  // Passagem opcional da configuração oficial de sabores
+  // (menu.lanches[].flavorsKey/flavorsMode — ver src/lib/menu.ts e
+  // @/lib/catalog/simpleProducts) — usada só pelo Calzone no caminho
+  // legado (ver officialUnitPrice) para respeitar o modo configurado
+  // mesmo quando o cliente omite `simpleSelection`. Ausente/"pizza" =
+  // aceita qualquer sabor da pizza (mesmo comportamento de sempre);
+  // "own" restringe à lista apontada por `flavorsKey`. Nunca inferido
+  // por nome.
+  flavorsKey?: string;
+  flavorsMode?: "pizza" | "own";
+};
 
 export type MenuPedidoApp = {
   sizes: { code: string; price: number }[];
   saltyFlavors: string[];
   sweetFlavors: string[];
-  lanches: { name: string; price: number; sizes?: { code: string; price: number }[] }[];
+  lanches: {
+    name: string;
+    price: number;
+    sizes?: { code: string; price: number }[];
+    flavorsKey?: string;
+    flavorsMode?: "pizza" | "own";
+  }[];
   bebidas: { name: string; price: number }[];
   sucos: { name: string; price: number }[];
   borders: { label: string; priceSmall: number; priceLarge: number }[];
@@ -105,14 +125,27 @@ export function officialUnitPrice(item: ItemApp, menu: MenuPedidoApp): number | 
 
     // Calzone é vendido com exatamente 1 sabor (nunca meio a meio). O
     // frontend manda `detail: "Sabor: <flavor>"` — payload adulterado com
-    // 2+ sabores, sem sabor ou com sabor fora da lista da pizza é rejeitado
+    // 2+ sabores, sem sabor ou com sabor fora da lista efetiva é rejeitado
     // aqui (não confiamos em nada vindo do cliente além do nome/qty).
+    //
+    // HARDENING (auditoria independente pós-6ª rodada): mesmo um payload
+    // legado que omite `simpleSelection` de propósito (para tentar contornar
+    // a validação por catálogo/ID) precisa respeitar a MESMA configuração
+    // oficial explícita de `flavorsMode` que buildSimpleCatalog usa — nunca
+    // uma segunda decisão, nunca inferida por nome. `flavorsMode === "own"`
+    // restringe à lista própria apontada por `flavorsKey` (ex.:
+    // calzoneFlavors); ausente/"pizza" (padrão) aceita qualquer sabor da
+    // pizza, exatamente como antes.
     if (norm(found.name) === "calzone") {
       const match = (item.detail || "").trim().match(/^Sabor:\s*(.+)$/i);
       if (!match) return null;
       const sabor = match[1].trim();
       if (!sabor || sabor.includes("/") || sabor.includes("·")) return null;
-      const saboresPermitidos = [...menu.saltyFlavors, ...menu.sweetFlavors].map(norm);
+      const listaPropria =
+        found.flavorsMode === "own" && found.flavorsKey
+          ? (menu as unknown as Record<string, unknown>)[found.flavorsKey]
+          : undefined;
+      const saboresPermitidos = (Array.isArray(listaPropria) ? (listaPropria as string[]) : [...menu.saltyFlavors, ...menu.sweetFlavors]).map(norm);
       if (!saboresPermitidos.includes(norm(sabor))) return null;
       return Number.isFinite(found.price) ? found.price : null;
     }
