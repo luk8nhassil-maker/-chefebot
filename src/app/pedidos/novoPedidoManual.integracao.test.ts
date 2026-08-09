@@ -69,6 +69,7 @@ vi.mock("@/lib/auth", async (original) => ({
 }));
 
 import { POST } from "@/app/api/pedido-app/route";
+import { POST as POST_ADMIN } from "@/app/api/admin/pedido-app/route";
 import { getMENUDinamico } from "@/lib/menu.server";
 import {
   listarProdutosManuais,
@@ -108,7 +109,13 @@ function postReq(body: unknown) {
   return { json: async () => body, cookies: { get: () => undefined } } as never;
 }
 
-/** Requisição do painel: cookie presente, sessão resolvida por verifyToken. */
+/**
+ * Requisição do painel: cookie presente, sessão resolvida por verifyToken.
+ * Usada com `POST_ADMIN` (POST /api/admin/pedido-app) para os cenários
+ * administrativos, e com `POST` (POST /api/pedido-app, cardápio público) nos
+ * testes de regressão do hotfix que provam que a rota pública IGNORA esse
+ * cookie mesmo quando ele é válido — ver `describe("origem do pedido")`.
+ */
 function postReqAdmin(body: unknown) {
   return {
     json: async () => body,
@@ -552,13 +559,13 @@ describe("idempotência administrativa (SURVIVAL_MODE_ENABLED desligada)", () =>
     const { itens } = await montarCarrinho();
     const corpo = payload(itens, { clientRequestId: TENTATIVA });
 
-    const primeira = await POST(postReqAdmin(corpo));
+    const primeira = await POST_ADMIN(postReqAdmin(corpo));
     const r1 = await primeira.json();
     expect(r1.ok).toBe(true);
     expect(pedidosCriados()).toHaveLength(1);
 
     // A resposta se perdeu na rede; o atendente toca em "tentar de novo".
-    const segunda = await POST(postReqAdmin(corpo));
+    const segunda = await POST_ADMIN(postReqAdmin(corpo));
     const r2 = await segunda.json();
     expect(r2.ok).toBe(true);
     expect(r2.pedidoId).toBe(r1.pedidoId);
@@ -570,7 +577,7 @@ describe("idempotência administrativa (SURVIVAL_MODE_ENABLED desligada)", () =>
     const { itens } = await montarCarrinho();
     const corpo = payload(itens, { clientRequestId: TENTATIVA });
 
-    const [a, b] = await Promise.all([POST(postReqAdmin(corpo)), POST(postReqAdmin(corpo))]);
+    const [a, b] = await Promise.all([POST_ADMIN(postReqAdmin(corpo)), POST_ADMIN(postReqAdmin(corpo))]);
     const [ra, rb] = [await a.json(), await b.json()];
 
     // Uma vence o claim e cria; a outra ou recupera a mesma, ou responde
@@ -587,11 +594,11 @@ describe("idempotência administrativa (SURVIVAL_MODE_ENABLED desligada)", () =>
   it("mesmo identificador com payload DIFERENTE é conflito (409), sem segundo pedido", async () => {
     const { itens } = await montarCarrinho();
 
-    const primeira = await POST(postReqAdmin(payload(itens, { clientRequestId: TENTATIVA })));
+    const primeira = await POST_ADMIN(postReqAdmin(payload(itens, { clientRequestId: TENTATIVA })));
     expect((await primeira.json()).ok).toBe(true);
 
     // Mesma tentativa, cliente diferente: não é retry, é reuso indevido.
-    const segunda = await POST(
+    const segunda = await POST_ADMIN(
       postReqAdmin(payload(itens, { clientRequestId: TENTATIVA, cliente: "Outro Cliente" }))
     );
     expect(segunda.status).toBe(409);
@@ -603,7 +610,7 @@ describe("idempotência administrativa (SURVIVAL_MODE_ENABLED desligada)", () =>
     const { itens } = await montarCarrinho();
     const corpo = payload(itens, { clientRequestId: TENTATIVA });
 
-    expect((await (await POST(postReqAdmin(corpo))).json()).ok).toBe(true);
+    expect((await (await POST_ADMIN(postReqAdmin(corpo))).json()).ok).toBe(true);
     expect(pedidosCriados()).toHaveLength(1);
     const antes = JSON.stringify(pedidosCriados());
 
@@ -619,7 +626,7 @@ describe("idempotência administrativa (SURVIVAL_MODE_ENABLED desligada)", () =>
       return defaultGetImpl(key);
     });
 
-    const incerta = await POST(postReqAdmin(corpo));
+    const incerta = await POST_ADMIN(postReqAdmin(corpo));
     expect(incerta.status).toBe(503);
     const data = await incerta.json();
     expect(data.ok).toBe(false);
@@ -634,10 +641,10 @@ describe("idempotência administrativa (SURVIVAL_MODE_ENABLED desligada)", () =>
     const { itens } = await montarCarrinho();
     const corpo = payload(itens, { clientRequestId: TENTATIVA, pagamento: "Pix" });
 
-    await POST(postReqAdmin(corpo));
+    await POST_ADMIN(postReqAdmin(corpo));
     const chamadasApos1 = criarCobrancaPixMock.mock.calls.length;
-    await POST(postReqAdmin(corpo));
-    await POST(postReqAdmin(corpo));
+    await POST_ADMIN(postReqAdmin(corpo));
+    await POST_ADMIN(postReqAdmin(corpo));
 
     expect(criarCobrancaPixMock.mock.calls.length).toBe(chamadasApos1);
     expect(pedidosCriados()).toHaveLength(1);
@@ -645,7 +652,7 @@ describe("idempotência administrativa (SURVIVAL_MODE_ENABLED desligada)", () =>
 
   it("identificador presente porém malformado é rejeitado na sessão de painel", async () => {
     const { itens } = await montarCarrinho();
-    const res = await POST(postReqAdmin(payload(itens, { clientRequestId: "curto" })));
+    const res = await POST_ADMIN(postReqAdmin(payload(itens, { clientRequestId: "curto" })));
     expect(res.status).toBe(400);
     expect(pedidosCriados()).toHaveLength(0);
   });
@@ -656,7 +663,7 @@ describe("idempotência administrativa (SURVIVAL_MODE_ENABLED desligada)", () =>
     // adulteração. Diferente do cardápio público, aqui NÃO existe fallback
     // "cria sem proteção".
     const { itens } = await montarCarrinho();
-    const res = await POST(postReqAdmin(payload(itens)));
+    const res = await POST_ADMIN(postReqAdmin(payload(itens)));
     expect(res.status).toBe(400);
     const data = await res.json();
     expect(data.ok).toBe(false);
@@ -685,10 +692,10 @@ describe("idempotência administrativa (SURVIVAL_MODE_ENABLED desligada)", () =>
 });
 
 describe("origem do pedido", () => {
-  it("pedido criado no painel é gravado com origem 'painel'", async () => {
+  it("pedido criado no painel (POST /api/admin/pedido-app) é gravado com origem 'painel'", async () => {
     const { itens } = await montarCarrinho();
     // Sessão administrativa genuína: precisa do clientRequestId (obrigatório).
-    await POST(postReqAdmin(payload(itens, { clientRequestId: "montagem-manual-tentativa-origem" })));
+    await POST_ADMIN(postReqAdmin(payload(itens, { clientRequestId: "montagem-manual-tentativa-origem" })));
     expect(pedidosCriados()[0].origem).toBe("painel");
   });
 
@@ -714,14 +721,51 @@ describe("origem do pedido", () => {
     expect(pedidosCriados()[0].origem).toBe("site");
   });
 
-  it("cookie presente mas de papel NÃO administrativo continua sendo 'site'", async () => {
-    verifyTokenMock.mockResolvedValue({ username: "ze", name: "Zé", role: "entregador" });
+  // REGRESSÃO DO INCIDENTE (hotfix "cardápio público vira pedido
+  // administrativo"): um atendente com o cookie `auth-token` válido (sessão
+  // administrativa genuína, verificada de verdade por verifyToken) faz um
+  // pedido pelo CARDÁPIO PÚBLICO — POST /api/pedido-app — no mesmo navegador.
+  // Antes do hotfix, esse cookie fazia o pedido público virar administrativo
+  // (exigindo clientRequestId, gravando origem "painel"). Agora a rota
+  // pública nunca lê a sessão administrativa: o pedido é aceito normalmente,
+  // sem exigir clientRequestId, e a origem é sempre "site".
+  it("cookie admin VÁLIDO na rota PÚBLICA não vira pedido administrativo — aceita sem clientRequestId, origem 'site'", async () => {
     const { itens } = await montarCarrinho();
-    await POST(postReqAdmin(payload(itens)));
+    const res = await POST(postReq(payload(itens)));
+    expect(res.status).toBe(200);
+    expect((await res.json()).ok).toBe(true);
     expect(pedidosCriados()[0].origem).toBe("site");
   });
 
-  it("cookie inválido/expirado continua sendo 'site' e sem idempotência por sessão", async () => {
+  it("cookie admin válido na rota PÚBLICA, mesmo com payload de pedido normal, continua 'site' (regressão do incidente real)", async () => {
+    const { itens } = await montarCarrinho();
+    const res = await POST(postReqAdmin(payload(itens)));
+    expect(res.status).toBe(200);
+    expect((await res.json()).ok).toBe(true);
+    expect(pedidosCriados()[0].origem).toBe("site");
+  });
+
+  it("POST /api/admin/pedido-app rejeita (401) quando o cookie presente é de papel NÃO administrativo", async () => {
+    verifyTokenMock.mockResolvedValue({ username: "ze", name: "Zé", role: "entregador" });
+    const { itens } = await montarCarrinho();
+    const res = await POST_ADMIN(
+      postReqAdmin(payload(itens, { clientRequestId: "montagem-manual-tentativa-role-invalido" }))
+    );
+    expect(res.status).toBe(401);
+    expect(pedidosCriados()).toHaveLength(0);
+  });
+
+  it("POST /api/admin/pedido-app rejeita (401) quando o cookie é inválido/expirado — nunca cai para o comportamento público", async () => {
+    verifyTokenMock.mockResolvedValue(null);
+    const { itens } = await montarCarrinho();
+    const corpo = payload(itens, { clientRequestId: TENTATIVA });
+
+    const res = await POST_ADMIN(postReqAdmin(corpo));
+    expect(res.status).toBe(401);
+    expect(pedidosCriados()).toHaveLength(0);
+  });
+
+  it("cookie inválido/expirado na rota PÚBLICA continua criando pedido normalmente, sem idempotência por sessão", async () => {
     verifyTokenMock.mockResolvedValue(null);
     const { itens } = await montarCarrinho();
     const corpo = payload(itens, { clientRequestId: TENTATIVA });

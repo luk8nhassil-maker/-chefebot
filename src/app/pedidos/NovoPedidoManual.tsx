@@ -8,11 +8,14 @@
 // 100% estado React controlado, sem MutationObserver, sem querySelector para
 // decidir fluxo, sem manipulação manual do DOM.
 //
-// O pedido é criado por POST /api/pedido-app — a MESMA rota do cardápio
-// público, com a mesma validação, o mesmo recálculo de preço no servidor e a
-// mesma idempotência do Modo Sobrevivência. Não há rota nem motor de pedido
-// paralelo: o pedido cai no painel como qualquer outro e imprime no aceite,
-// pelas regras que já existem.
+// O pedido é criado por POST /api/admin/pedido-app — entrada dedicada do
+// painel que exige sessão administrativa real e reaproveita o MESMO motor
+// de validação/preço/persistência de POST /api/pedido-app (cardápio
+// público). Rotas separadas por segurança (um cookie de painel presente no
+// mesmo navegador do cardápio público nunca pode virar pedido
+// administrativo — ver src/app/api/pedido-app/route.ts), mas o motor é um
+// só: sem rota nem regra de pedido paralela. O pedido cai no painel como
+// qualquer outro e imprime no aceite, pelas regras que já existem.
 //
 // A navegação é em passos curtos de propósito. Um modal único com tudo é
 // exatamente o que faz o atendente se perder no meio de uma ligação.
@@ -568,7 +571,7 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
     setEnviando(true)
     setErroEnvio(null)
     try {
-      const r = await fetch("/api/pedido-app", {
+      const r = await fetch("/api/admin/pedido-app", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

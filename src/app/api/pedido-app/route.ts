@@ -726,7 +726,24 @@ async function liberarClaimSeAdquirido(
     .catch((err) => logSurvivalErro("idempotencia_pedido", "liberacao", "eval_falhou", err));
 }
 
-export async function POST(req: NextRequest) {
+// Fronteira de contexto administrativo — ver REGRA DE ARQUITETURA no topo
+// deste comentário de auditoria (hotfix "cardápio público vira pedido
+// administrativo"). `sessaoAdministrativaPermitida` NUNCA vem do corpo, da
+// query, de header ou de qualquer coisa que o navegador controle: é um
+// literal passado pelo MÓDULO chamador (`export async function POST` logo
+// abaixo, para o cardápio público/Salão; `src/app/api/admin/pedido-app/
+// route.ts`, para o painel) — decidido em tempo de build por QUAL arquivo de
+// rota está invocando esta função, nunca por dado de requisição. Antes deste
+// hotfix, `lerSessaoAdministrativa(req)` rodava incondicionalmente aqui: um
+// navegador com o cookie `auth-token` do painel (ex.: atendente com o
+// cardápio público aberto na mesma sessão) fazia o pedido público ser tratado
+// como administrativo — exigindo clientRequestId, e potencialmente honrando
+// `semTelefonePainel`. Agora só a rota administrativa (que já autentica de
+// verdade e rejeita sem sessão válida) pode sequer TENTAR ler o cookie.
+async function processarPedidoApp(
+  req: NextRequest,
+  opts: { sessaoAdministrativaPermitida: boolean }
+): Promise<NextResponse> {
   let clientRequestId: string | null = null;
   let requestFingerprint: string | null = null;
   let ownerToken: string | null = null;
@@ -830,11 +847,22 @@ export async function POST(req: NextRequest) {
     // validações de negócio, como antes; só a RECUPERAÇÃO foi antecipada.
     // =================================================================
 
-    // Sessão administrativa: lida SOMENTE do cookie verificado no servidor.
-    // Nenhum campo do corpo participa desta decisão — se participasse,
-    // qualquer visitante do cardápio público poderia se declarar atendente e
-    // ganhar tanto a origem quanto o caminho de idempotência.
-    const sessaoAdmin = await lerSessaoAdministrativa(req);
+    // Sessão administrativa: lida SOMENTE do cookie verificado no servidor,
+    // e SÓ QUANDO a fronteira de rota (opts.sessaoAdministrativaPermitida,
+    // ver comentário acima da função) autoriza — o cardápio público/Salão
+    // nunca chega a chamar lerSessaoAdministrativa, então um cookie de
+    // painel presente no mesmo navegador simplesmente não tem como
+    // influenciar nada aqui. Nenhum campo do corpo participa desta decisão
+    // — se participasse, qualquer visitante do cardápio público poderia se
+    // declarar atendente e ganhar tanto a origem quanto o caminho de
+    // idempotência.
+    const sessaoAdmin = opts.sessaoAdministrativaPermitida ? await lerSessaoAdministrativa(req) : null;
+    // Rota administrativa sem sessão real: rejeição imediata, mesmo padrão
+    // de autenticação já usado em outras rotas server-side do painel (ex.:
+    // PATCH /api/cardapio) — nunca cai para o comportamento público.
+    if (opts.sessaoAdministrativaPermitida && !sessaoAdmin) {
+      return NextResponse.json({ ok: false, error: "Nao autorizado" }, { status: 401 });
+    }
     // Sessão do Módulo Salão (cookie e segredo totalmente separados do
     // painel administrativo — ver src/lib/salaoAuth.ts). Usada só para
     // dispensar o telefone obrigatório: mesa não tem telefone. Nunca
@@ -1917,3 +1945,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "Erro interno" }, { status: 500 });
   }
 }
+
+// Entrada EXCLUSIVA do cardápio público (e, por extensão, do Salão — ver
+// src/app/api/salao/comandas/**/enviar/route.ts, que repassa os cookies reais
+// do navegador para esta MESMA função). Nunca lê sessão administrativa,
+// mesmo que o cookie `auth-token` esteja presente e seja válido — só
+// POST /api/admin/pedido-app (src/app/api/admin/pedido-app/route.ts) chama
+// processarPedidoApp com sessaoAdministrativaPermitida: true. Isso é o que
+// corrige o incidente "cardápio público vira pedido administrativo": a
+// decisão não depende mais do cookie sozinho, depende de qual arquivo de
+// rota foi de fato invocado — uma fronteira que nenhum navegador controla.
+export async function POST(req: NextRequest): Promise<NextResponse> {
+  return processarPedidoApp(req, { sessaoAdministrativaPermitida: false });
+}
+
+export { processarPedidoApp };

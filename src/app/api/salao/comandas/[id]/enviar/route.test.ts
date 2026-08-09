@@ -27,8 +27,20 @@ const { store, redisMock } = vi.hoisted(() => {
   return { store, redisMock, defaultSetImpl, defaultGetImpl };
 });
 
+const { verifyTokenMock } = vi.hoisted(() => ({ verifyTokenMock: vi.fn() }));
+
 vi.mock("@/lib/redis", () => ({ redis: redisMock }));
 vi.mock("@/lib/mercadoPagoPix", () => ({ criarCobrancaPixMercadoPago: vi.fn() }));
+// Só usado pelo describe "Salão + cookie auth-token" abaixo, para simular um
+// cookie de painel REALMENTE válido (sessão administrativa genuína) no mesmo
+// navegador do Salão — sem mock, um JWT forjado como "tok-admin" já falharia
+// a verificação sozinho, o que provaria menos do que o cenário real do
+// incidente. Nos demais testes o mock fica em `null` (sem sessão admin),
+// idêntico ao comportamento do verifyToken real contra um cookie ausente.
+vi.mock("@/lib/auth", async (original) => ({
+  ...(await original<typeof import("@/lib/auth")>()),
+  verifyToken: verifyTokenMock,
+}));
 
 const CARDAPIO_TESTE = {
   sizes: [], saltyFlavors: [], sweetFlavors: [], borders: [],
@@ -52,6 +64,7 @@ import { POST as enviar } from "./route";
 import { POST as abrir } from "../../route";
 import { PATCH as atualizarComanda } from "../../[id]/route";
 import { SALAO_COOKIE, criarTokenSalao } from "@/lib/salaoAuth";
+import { COOKIE_AUTH } from "@/lib/sessaoAdministrativa";
 import { buscarComanda } from "@/lib/comandas";
 
 function reqSalao(body: unknown, token: string) {
@@ -60,6 +73,26 @@ function reqSalao(body: unknown, token: string) {
     cookies: { get: (n: string) => (n === SALAO_COOKIE ? { value: token } : undefined) },
   } as never;
 }
+
+/**
+ * Requisição do Salão com um cookie `auth-token` (painel) TAMBÉM presente —
+ * exatamente o navegador do incidente real: um atendente com sessão
+ * administrativa aberta que também opera o Salão. `verifyTokenMock` decide
+ * se esse cookie é válido; ver describe "Salão + cookie auth-token" abaixo.
+ */
+function reqSalaoComAdmin(body: unknown, salaoToken: string, authToken = "tok-admin") {
+  return {
+    json: async () => body,
+    cookies: {
+      get: (n: string) => {
+        if (n === SALAO_COOKIE) return { value: salaoToken };
+        if (n === COOKIE_AUTH) return { value: authToken };
+        return undefined;
+      },
+    },
+  } as never;
+}
+
 function paramsFor(id: string) {
   return { params: Promise.resolve({ id }) };
 }
@@ -78,6 +111,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   store.set("cardapio", CARDAPIO_TESTE);
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) }));
+  // Sem sessão administrativa por padrão — só o describe dedicado abaixo
+  // simula um cookie auth-token válido.
+  verifyTokenMock.mockResolvedValue(null);
 });
 
 describe("POST /api/salao/comandas/[id]/enviar", () => {
@@ -266,6 +302,55 @@ describe("POST /api/salao/comandas/[id]/enviar", () => {
       expect(pedidos[0].pagamento).toBe("Comanda em aberto");
       expect(pedidos[0].pix).toBeUndefined();
       expect(pedidos[0].telefone).toBeFalsy();
+    });
+  });
+
+  // REGRESSÃO DO INCIDENTE (hotfix "cardápio público vira pedido
+  // administrativo"): esta rota repassa `req.cookies` — os cookies REAIS do
+  // navegador — para POST /api/pedido-app (ver route.ts, `requisicaoInterna`).
+  // Um atendente com o painel aberto no MESMO navegador do Salão carrega os
+  // dois cookies (`salao-session` e `auth-token`) em toda requisição. Antes
+  // do hotfix, o `auth-token` válido fazia POST /api/pedido-app tratar esse
+  // pedido do Salão como administrativo (exigindo clientRequestId e, em
+  // tese, honrando semTelefonePainel). Agora a rota pública nunca lê a
+  // sessão administrativa, então o cookie de painel simplesmente não
+  // influencia nada aqui: o pedido do Salão continua exatamente como sem ele.
+  describe("Salão + cookie auth-token (painel) no mesmo navegador — nunca vira pedido administrativo", () => {
+    it("cookie admin válido e presente não muda nada: sem telefone, pagamento 'Comanda em aberto', origem 'site'", async () => {
+      verifyTokenMock.mockResolvedValue({ username: "kellyne", name: "Kellyne", role: "atendente" });
+      const token = await criarTokenSalao();
+      const aberta = await (await abrir(reqSalaoComAdmin({ cliente: "Ana", mesa: "5" }, token))).json();
+      await atualizarComanda(
+        reqSalaoComAdmin({ itens: [{ kind: "simple", name: "Refrigerante 2L", qty: 2 }] }, token),
+        paramsFor(aberta.comanda.id)
+      );
+      const res = await enviar(reqSalaoComAdmin({}, token), paramsFor(aberta.comanda.id));
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.ok).toBe(true);
+
+      const pedidos = store.get("pedidos") as Array<Record<string, unknown>>;
+      expect(pedidos).toHaveLength(1);
+      expect(pedidos[0].telefone).toBeFalsy();
+      expect(pedidos[0].pagamento).toBe("Comanda em aberto");
+      expect(pedidos[0].origem).toBe("site");
+    });
+
+    it("cookie admin válido não passa a exigir clientRequestId — comanda sem tentativa explícita ainda assim é criada", async () => {
+      verifyTokenMock.mockResolvedValue({ username: "kellyne", name: "Kellyne", role: "atendente" });
+      const token = await criarTokenSalao();
+      const aberta = await (await abrir(reqSalaoComAdmin({ cliente: "Bia", mesa: "9" }, token))).json();
+      await atualizarComanda(
+        reqSalaoComAdmin({ itens: [{ kind: "simple", name: "Refrigerante 2L", qty: 1 }] }, token),
+        paramsFor(aberta.comanda.id)
+      );
+      // A própria rota de envio sempre gera/reaproveita um clientRequestId
+      // (ver route.ts), então isto prova que a criação não passa a depender
+      // do reconhecimento de uma sessão administrativa: o resultado (200,
+      // pedido único) é idêntico ao caso sem cookie admin nenhum.
+      const res = await enviar(reqSalaoComAdmin({}, token), paramsFor(aberta.comanda.id));
+      expect(res.status).toBe(200);
+      expect(store.get("pedidos")).toHaveLength(1);
     });
   });
 });
