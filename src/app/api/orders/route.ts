@@ -196,18 +196,25 @@ function mensagemProntoDineIn(firstName: string): string {
   return `*${firstName}*, seu pedido está pronto! 🍽️\n\nBom apetite!`;
 }
 
-// "saiu_entrega" é o status cujo texto realmente depende de como o cliente
-// vai receber o pedido — "saiu pra entrega" não faz sentido nenhum pra quem
-// vai retirar no balcão ou está comendo no salão. em_preparo e cancelado já
-// são genéricos o bastante pra qualquer tipo, por isso continuam com um
-// texto só. "entregue" é a exceção: consumo no local normalmente PULA
-// "saiu_entrega" (em_preparo -> entregue direto — ver classificarEntrega/
-// painel), então é essa transição que precisa carregar a mensagem de
-// "pedido pronto" pra esse tipo — nunca a de "pedido entregue, volte
-// sempre", que só faz sentido depois que o cliente já recebeu/retirou/comeu.
-// `statusAnterior` é o que decide isso; sem ele (chamada antiga/desconhecida),
-// o comportamento cai pro texto genérico de sempre — nunca assume "pronto"
-// sem confirmar de onde veio a transição.
+// Regra final aprovada: o cliente só recebe mensagem automática de status em
+// dois momentos — (1) quando o pedido sai da cozinha/fica pronto, e (2)
+// quando é cancelado. "em_preparo" (aceite do pedido) e a finalização
+// "entregue" de delivery/retirada NUNCA mandam mensagem — o único aviso de
+// "pronto"/"saiu" já foi mandado antes (em saiu_entrega, pra delivery e
+// retirada), e mandar de novo em "entregue" seria duplicado/sem utilidade
+// pro cliente (ele já sabe que o pedido chegou/foi buscado).
+//
+// "saiu_entrega" é o status cujo texto depende de como o cliente vai
+// receber o pedido — "saiu pra entrega" não faz sentido nenhum pra quem vai
+// retirar no balcão ou está comendo no salão.
+//
+// "entregue" é a exceção que AINDA manda mensagem, só para consumo no
+// local: o fluxo normal do painel PULA "saiu_entrega" pra esse tipo
+// (em_preparo -> entregue direto — ver classificarEntrega/painel), então é
+// essa transição que carrega o único aviso de "pedido pronto" que o cliente
+// recebe. `statusAnterior` é o que decide isso; sem ele (chamada antiga/
+// desconhecida) ou vindo de "saiu_entrega" (caminho manual/atípico, que já
+// mandou o aviso de pronto ali), nunca manda de novo — nunca duplica.
 function getMensagemStatus(status: Status, nomeCliente: string, entrega: ClassificacaoEntrega, statusAnterior?: Status): string | null {
   const firstName = nomeCliente.split(' ')[0];
 
@@ -221,16 +228,18 @@ function getMensagemStatus(status: Status, nomeCliente: string, entrega: Classif
     return `*${firstName}*, seu pedido saiu para entrega! 🛵\n\nJá está a caminho.`;
   }
 
-  if (status === 'entregue' && entrega === 'dine_in' && statusAnterior === 'em_preparo') {
-    return mensagemProntoDineIn(firstName);
+  if (status === 'entregue') {
+    if (entrega === 'dine_in' && statusAnterior === 'em_preparo') {
+      return mensagemProntoDineIn(firstName);
+    }
+    return null;
   }
 
-  const mensagens: Partial<Record<Status, string>> = {
-    em_preparo: `*${firstName}*, boa notícia! 🍕 Seu pedido já está sendo preparado com muito carinho.\n\nEm breve fica prontinho!`,
-    entregue: `*${firstName}*, pedido entregue! 😊\n\nEsperamos que tenha curtido muito. Volte sempre que quiser — estamos aqui! 🍕`,
-    cancelado: `*${firstName}*, seu pedido foi cancelado conforme solicitado.\n\nQualquer dúvida é só chamar. 😊`,
-  };
-  return mensagens[status] ?? null;
+  if (status === 'cancelado') {
+    return `*${firstName}*, seu pedido foi cancelado conforme solicitado.\n\nQualquer dúvida é só chamar. 😊`;
+  }
+
+  return null;
 }
 
 function sanitizePhone(telefone: string): string {
