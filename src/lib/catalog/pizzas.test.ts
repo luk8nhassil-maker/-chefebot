@@ -1,32 +1,48 @@
-// Testes do catálogo oficial de pizzas — Fase 2.
+// Testes do catálogo oficial de pizzas — cardápio 2026.
 import { describe, expect, it } from "vitest";
 import { MENU } from "@/lib/menu";
+import { PIZZA_FLAVORS } from "./officialMenu2026";
 import { buildPizzaCatalog } from "./pizzas";
 
 describe("buildPizzaCatalog", () => {
-  it("inclui todo sabor salgado como categoria tradicional e todo sabor doce como categoria doce", () => {
+  it("expõe os 45 sabores oficiais (18 tradicionais + 20 especiais + 7 doces)", () => {
     const catalog = buildPizzaCatalog(MENU);
-    for (const nome of MENU.saltyFlavors) {
-      const flavor = catalog.flavors.find((f) => f.name === nome);
-      expect(flavor).toBeDefined();
-      expect(flavor?.category).toBe("tradicional");
-    }
-    for (const nome of MENU.sweetFlavors) {
-      const flavor = catalog.flavors.find((f) => f.name === nome);
-      expect(flavor).toBeDefined();
-      expect(flavor?.category).toBe("doce");
+    expect(catalog.flavors).toHaveLength(45);
+    expect(catalog.flavors.filter((f) => f.category === "tradicional")).toHaveLength(18);
+    expect(catalog.flavors.filter((f) => f.category === "especial")).toHaveLength(20);
+    expect(catalog.flavors.filter((f) => f.category === "doce")).toHaveLength(7);
+  });
+
+  it("expõe os 5 tamanhos oficiais (F/G/M/P/MINI)", () => {
+    const catalog = buildPizzaCatalog(MENU);
+    expect(catalog.sizes.map((s) => s.code)).toEqual(["F", "G", "M", "P", "MINI"]);
+  });
+
+  it("sabores Especiais não têm preço MINI no catálogo", () => {
+    const catalog = buildPizzaCatalog(MENU);
+    for (const flavor of catalog.flavors.filter((f) => f.category === "especial")) {
+      expect(flavor.pricesBySizeCode.MINI).toBeUndefined();
     }
   });
 
-  it("nenhum sabor é classificado como especial hoje (sem dado comercial oficial para essa distinção)", () => {
+  it("sabores Tradicionais e Doces têm preço para os 5 tamanhos", () => {
     const catalog = buildPizzaCatalog(MENU);
-    expect(catalog.flavors.some((f) => f.category === "especial")).toBe(false);
+    for (const flavor of catalog.flavors.filter((f) => f.category !== "especial")) {
+      expect(Object.keys(flavor.pricesBySizeCode).sort()).toEqual(["F", "G", "M", "MINI", "P"]);
+    }
   });
 
-  it("todo sabor está disponível por padrão (sem lista de esgotados)", () => {
+  it("expõe os 4 adicionais e as 4 bordas oficiais", () => {
+    const catalog = buildPizzaCatalog(MENU);
+    expect(catalog.addOns).toHaveLength(8);
+    expect(catalog.borders).toHaveLength(4);
+  });
+
+  it("todo sabor/borda/adicional está disponível por padrão (sem lista de esgotados)", () => {
     const catalog = buildPizzaCatalog(MENU);
     expect(catalog.flavors.every((f) => f.available)).toBe(true);
     expect(catalog.borders.every((b) => b.available)).toBe(true);
+    expect(catalog.addOns.every((a) => a.available)).toBe(true);
   });
 
   it("marca sabor esgotado como indisponível, comparação insensível a acento/maiúscula", () => {
@@ -36,21 +52,36 @@ describe("buildPizzaCatalog", () => {
   });
 
   it("marca borda esgotada como indisponível", () => {
-    const catalog = buildPizzaCatalog(MENU, ["catupiry"]);
-    const catupiry = catalog.borders.find((b) => b.label === "Catupiry");
+    const catalog = buildPizzaCatalog(MENU, ["catupiry original"]);
+    const catupiry = catalog.borders.find((b) => b.label === "Catupiry Original");
     expect(catupiry?.available).toBe(false);
   });
 
-  it("traz os apelidos conhecidos do bot do WhatsApp para os sabores que têm (ex.: Quatro Queijos)", () => {
-    const catalog = buildPizzaCatalog(MENU);
-    const quatroQueijos = catalog.flavors.find((f) => f.name === "Quatro Queijos");
-    expect(quatroQueijos?.aliases).toContain("4 queijos");
+  it("marca adicional esgotado como indisponível", () => {
+    const catalog = buildPizzaCatalog(MENU, ["bacon"]);
+    const bacon = catalog.addOns.find((a) => a.label === "Bacon");
+    expect(bacon?.available).toBe(false);
   });
 
-  it("sabor sem apelido conhecido tem lista vazia (nunca undefined)", () => {
-    const catalog = buildPizzaCatalog(MENU);
-    const semApelido = catalog.flavors.find((f) => f.name === "Baiana");
-    expect(semApelido?.aliases).toEqual([]);
+  it("esgotar um sabor de pizza não afeta outro sabor nem borda", () => {
+    // "Calabresa" é intencionalmente também o nome de um adicional — a
+    // mesma entidade física (calabresa faltando na cozinha) fica
+    // indisponível nos dois contextos, propositalmente (mesmo nome = mesmo
+    // ingrediente). Isso não é o mesmo que "esconder do Calzone remove da
+    // Pizza indevidamente" (curadoria de lista, não estoque compartilhado).
+    const catalog = buildPizzaCatalog(MENU, ["Peruana"]);
+    expect(catalog.flavors.find((f) => f.name === "Frango")?.available).toBe(true);
+    expect(catalog.borders.every((b) => b.available)).toBe(true);
+    expect(catalog.addOns.every((a) => a.available)).toBe(true);
+  });
+
+  it("esgotar 'Calabresa' (mesmo nome do sabor e do adicional) afeta os dois — mesmo ingrediente físico", () => {
+    const catalog = buildPizzaCatalog(MENU, ["Calabresa"]);
+    expect(catalog.flavors.find((f) => f.name === "Calabresa")?.available).toBe(false);
+    expect(catalog.addOns.find((a) => a.label === "Calabresa")?.available).toBe(false);
+    // Nenhum outro adicional/sabor é afetado.
+    expect(catalog.addOns.find((a) => a.label === "Bacon")?.available).toBe(true);
+    expect(catalog.flavors.find((f) => f.name === "Bacon")?.available).toBe(true);
   });
 
   it("IDs são estáveis entre duas construções (determinísticos por nome, não por posição/tempo)", () => {
@@ -60,11 +91,17 @@ describe("buildPizzaCatalog", () => {
     expect(a.sizes.map((s) => s.id)).toEqual(b.sizes.map((s) => s.id));
   });
 
-  it("tamanhos e bordas trazem preço em centavos inteiros, batendo com o Menu legado (reais * 100)", () => {
+  it("ingredientes vêm junto de cada sabor (para exibição no cardápio)", () => {
     const catalog = buildPizzaCatalog(MENU);
-    for (const size of MENU.sizes) {
-      const found = catalog.sizes.find((s) => s.code === size.code);
-      expect(found?.priceCents).toBe(Math.round(size.price * 100));
+    const calabresa = catalog.flavors.find((f) => f.name === "Calabresa");
+    expect(calabresa?.ingredients).toContain("Linguiça Calabresa");
+  });
+
+  it("todo preço do catálogo bate com a fonte oficial (officialMenu2026)", () => {
+    const catalog = buildPizzaCatalog(MENU);
+    for (const oficial of PIZZA_FLAVORS) {
+      const doCatalogo = catalog.flavors.find((f) => f.id === oficial.id);
+      expect(doCatalogo?.pricesBySizeCode).toEqual(oficial.pricesBySizeCode);
     }
   });
 });
