@@ -14,11 +14,19 @@
 // etapa futura, não uma migração deles agora.
 import type { ItemApp } from "@/lib/pedidoAppItens";
 
-/** Seleção estruturada de pizza — sizeId/flavorIds/borderId (Fase 2/2C). */
-export type SelecaoSnapshotPizza = { sizeId: string; flavorIds: string[]; borderId?: string };
-/** Seleção estruturada de produto simples — Calzone, Mini-Pizza, Macarronada,
- * sucos (Fase 6). Discriminada de SelecaoSnapshotPizza por `productId`. */
-export type SelecaoSnapshotSimples = { productId: string; sizeId?: string; flavorId?: string; milk?: "com" | "sem" };
+/** Seleção estruturada de pizza — sizeId/flavorIds/borderId/addOnIds
+ * (cardápio 2026). */
+export type SelecaoSnapshotPizza = { sizeId: string; flavorIds: string[]; borderId?: string; addOnIds?: string[] };
+/** Seleção estruturada de produto simples — Calzone, Pastel de Forno/Feira,
+ * Macarronada, sucos (cardápio 2026). Discriminada de SelecaoSnapshotPizza
+ * por `productId`. */
+export type SelecaoSnapshotSimples = {
+  productId: string;
+  sizeId?: string;
+  flavorId?: string;
+  milk?: "com" | "sem";
+  addOnId?: string;
+};
 export type SelecaoSnapshot = SelecaoSnapshotPizza | SelecaoSnapshotSimples;
 
 export type PedidoSnapshotItem = {
@@ -75,12 +83,14 @@ function sanitizarSelecao(selecao: SelecaoSnapshot | undefined): SelecaoSnapshot
       ...(selecao.sizeId !== undefined ? { sizeId: selecao.sizeId } : {}),
       ...(selecao.flavorId !== undefined ? { flavorId: selecao.flavorId } : {}),
       ...(selecao.milk !== undefined ? { milk: selecao.milk } : {}),
+      ...(selecao.addOnId !== undefined ? { addOnId: selecao.addOnId } : {}),
     };
   }
   return {
     sizeId: selecao.sizeId,
     flavorIds: [...selecao.flavorIds],
     ...(selecao.borderId !== undefined ? { borderId: selecao.borderId } : {}),
+    ...(selecao.addOnIds !== undefined ? { addOnIds: [...selecao.addOnIds] } : {}),
   };
 }
 

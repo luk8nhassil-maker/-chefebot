@@ -1161,7 +1161,7 @@ export async function POST(req: NextRequest) {
           // reconhecido pela presença de `simpleSelection`, e uma falha aqui
           // é definitiva (nunca cai para o legado abaixo).
           if (temSelecaoSimplesEstruturada(item)) {
-            const resolvido = resolverItemComSelecaoSimplesEstruturada(item, menu, simpleCatalog!);
+            const resolvido = resolverItemComSelecaoSimplesEstruturada(item, simpleCatalog!);
             if (!resolvido.ok) return { itemCanonico: item, linha: "", unitPrice: null, qty: item.qty, motivo: resolvido.error };
             return {
               itemCanonico: resolvido.item,
