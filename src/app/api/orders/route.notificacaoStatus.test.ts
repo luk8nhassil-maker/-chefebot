@@ -90,51 +90,74 @@ beforeEach(() => {
   fetchMock.mockClear();
 });
 
-describe("PATCH /api/orders — mensagem de 'saiu_entrega' varia por tipo de recebimento", () => {
-  test("delivery continua com a mensagem de sempre (comportamento inalterado)", async () => {
-    seedPedido({ tipoEntrega: "delivery", endereco: "Rua das Flores, 123" });
+describe("PATCH /api/orders — mensagem de status varia por tipo de recebimento", () => {
+  // 1. Delivery -> copy exata.
+  test("delivery: copy exata de 'saiu para entrega' (nunca a de retirada/consumo local)", async () => {
+    seedPedido({ cliente: "Wesley Dutra", tipoEntrega: "delivery", endereco: "Rua das Flores, 123" });
     const res = await PATCH(patchRequest({ id: "ped_notif_1", status: "saiu_entrega" }));
     expect(res.status).toBe(200);
-    expect(textoEnviado()).toContain("saiu pra entrega");
-    expect(textoEnviado()).toContain("🛵");
+    expect(textoEnviado()).toBe("*Wesley*, seu pedido saiu para entrega! 🛵\n\nJá está a caminho.");
   });
 
-  test("retirada recebe mensagem de pronto pra buscar, nunca 'saiu pra entrega'", async () => {
+  // 2. Retirada -> copy exata.
+  test("retirada: copy exata de 'pedido pronto' (nunca 'saiu para entrega')", async () => {
+    seedPedido({ cliente: "Wesley Dutra", tipoEntrega: "retirada", endereco: "Retirada na loja" });
+    await PATCH(patchRequest({ id: "ped_notif_1", status: "saiu_entrega" }));
+    expect(textoEnviado()).toBe("*Wesley*, seu pedido está pronto! 🍕\n\nPode vir buscar.");
+  });
+
+  // 3. Consumo no local no fluxo REAL (em_preparo -> entregue, pula saiu_entrega) -> copy exata.
+  test("consumo no local: fluxo real em_preparo -> entregue recebe a copy exata de 'pedido pronto'", async () => {
+    seedPedido({ cliente: "Wesley Dutra", tipoEntrega: "dine_in", endereco: "Consumo no local", status: "em_preparo" });
+    const res = await PATCH(patchRequest({ id: "ped_notif_1", status: "entregue" }));
+    expect(res.status).toBe(200);
+    expect(textoEnviado()).toBe("*Wesley*, seu pedido está pronto! 🍽️\n\nBom apetite!");
+  });
+
+  // 4. Retirada nunca contém "saiu para entrega".
+  test("retirada: nunca contém 'saiu para entrega'", async () => {
     seedPedido({ tipoEntrega: "retirada", endereco: "Retirada na loja" });
     await PATCH(patchRequest({ id: "ped_notif_1", status: "saiu_entrega" }));
-    const texto = textoEnviado();
-    expect(texto).not.toContain("saiu pra entrega");
-    expect(texto).toContain("pronto");
-    expect(texto).toContain("buscar");
+    expect(textoEnviado()).not.toContain("saiu para entrega");
   });
 
+  // 5. Consumo local nunca contém "saiu para entrega" — nem no fluxo real
+  // (em_preparo -> entregue) nem no caminho manual/legado (saiu_entrega).
+  test("consumo no local: nunca contém 'saiu para entrega', em nenhum dos dois caminhos possíveis", async () => {
+    seedPedido({ tipoEntrega: "dine_in", endereco: "Consumo no local", status: "em_preparo" });
+    await PATCH(patchRequest({ id: "ped_notif_1", status: "entregue" }));
+    expect(textoEnviado()).not.toContain("saiu para entrega");
+
+    fetchMock.mockClear();
+    seedPedido({ tipoEntrega: "dine_in", endereco: "Consumo no local", status: "em_preparo" });
+    await PATCH(patchRequest({ id: "ped_notif_1", status: "saiu_entrega" }));
+    expect(textoEnviado()).not.toContain("saiu para entrega");
+  });
+
+  // 6. Compatibilidade com pickup legado (retirada, saiu_entrega).
   test("retirada também funciona com tipoEntrega legado 'pickup'", async () => {
-    seedPedido({ tipoEntrega: "pickup", endereco: "Retirada na loja" });
+    seedPedido({ cliente: "Wesley Dutra", tipoEntrega: "pickup", endereco: "Retirada na loja" });
     await PATCH(patchRequest({ id: "ped_notif_1", status: "saiu_entrega" }));
-    expect(textoEnviado()).toContain("buscar");
+    expect(textoEnviado()).toBe("*Wesley*, seu pedido está pronto! 🍕\n\nPode vir buscar.");
   });
 
+  // 7. Compatibilidade por endereco legado "Retirada na loja" (sem tipoEntrega).
   test("retirada é reconhecida pelo endereco mesmo sem tipoEntrega (pedidos antigos)", async () => {
-    seedPedido({ endereco: "Retirada na loja" });
+    seedPedido({ cliente: "Wesley Dutra", endereco: "Retirada na loja" });
     await PATCH(patchRequest({ id: "ped_notif_1", status: "saiu_entrega" }));
-    expect(textoEnviado()).toContain("buscar");
+    expect(textoEnviado()).toBe("*Wesley*, seu pedido está pronto! 🍕\n\nPode vir buscar.");
   });
 
-  test("consumo no local recebe mensagem de pronto, nunca 'saiu pra entrega'", async () => {
-    seedPedido({ tipoEntrega: "dine_in", endereco: "Consumo no local" });
-    await PATCH(patchRequest({ id: "ped_notif_1", status: "saiu_entrega" }));
-    const texto = textoEnviado();
-    expect(texto).not.toContain("saiu pra entrega");
-    expect(texto).toContain("pronto");
+  // 8. Compatibilidade por endereco legado "Consumo no local" (sem tipoEntrega),
+  // no fluxo real em_preparo -> entregue.
+  test("consumo no local é reconhecido pelo endereco mesmo sem tipoEntrega, no fluxo real em_preparo -> entregue", async () => {
+    seedPedido({ cliente: "Wesley Dutra", endereco: "Consumo no local", status: "em_preparo" });
+    await PATCH(patchRequest({ id: "ped_notif_1", status: "entregue" }));
+    expect(textoEnviado()).toBe("*Wesley*, seu pedido está pronto! 🍽️\n\nBom apetite!");
   });
 
-  test("consumo no local é reconhecido pelo endereco mesmo sem tipoEntrega", async () => {
-    seedPedido({ endereco: "Consumo no local" });
-    await PATCH(patchRequest({ id: "ped_notif_1", status: "saiu_entrega" }));
-    expect(textoEnviado()).not.toContain("saiu pra entrega");
-  });
-
-  test("mensagens de em_preparo, entregue e cancelado continuam iguais para qualquer tipo (não mudou)", async () => {
+  // 10. Fluxos não relacionados continuam inalterados.
+  test("mensagens de em_preparo e cancelado continuam iguais para qualquer tipo (não mudou)", async () => {
     seedPedido({ tipoEntrega: "retirada", endereco: "Retirada na loja", status: "novo" });
     await PATCH(patchRequest({ id: "ped_notif_1", status: "em_preparo" }));
     expect(textoEnviado()).toContain("sendo preparado");
@@ -144,9 +167,37 @@ describe("PATCH /api/orders — mensagem de 'saiu_entrega' varia por tipo de rec
     expect(textoEnviado()).toContain("cancelado");
   });
 
-  test("silent:true não notifica ninguém, independente do tipo", async () => {
+  // 10. delivery/retirada em "entregue" continuam com a mensagem genérica de
+  // sempre — só consumo no local vindo de em_preparo ganha a copy de "pronto".
+  test("delivery e retirada em 'entregue' continuam com a mensagem genérica de sempre (não a de 'pronto')", async () => {
+    seedPedido({ tipoEntrega: "delivery", endereco: "Rua das Flores, 123", status: "saiu_entrega" });
+    await PATCH(patchRequest({ id: "ped_notif_1", status: "entregue" }));
+    expect(textoEnviado()).toContain("pedido entregue");
+    expect(textoEnviado()).not.toContain("está pronto");
+
+    fetchMock.mockClear();
+    seedPedido({ tipoEntrega: "retirada", endereco: "Retirada na loja", status: "saiu_entrega" });
+    await PATCH(patchRequest({ id: "ped_notif_1", status: "entregue" }));
+    expect(textoEnviado()).toContain("pedido entregue");
+    expect(textoEnviado()).not.toContain("está pronto");
+  });
+
+  test("consumo no local em 'entregue' vindo de 'saiu_entrega' (caminho manual/atípico) usa a mensagem genérica, não duplica o 'pronto'", async () => {
+    seedPedido({ tipoEntrega: "dine_in", endereco: "Consumo no local", status: "saiu_entrega" });
+    await PATCH(patchRequest({ id: "ped_notif_1", status: "entregue" }));
+    expect(textoEnviado()).toContain("pedido entregue");
+    expect(textoEnviado()).not.toContain("está pronto");
+  });
+
+  // 9. silent:true não envia WhatsApp.
+  test("silent:true não notifica ninguém, independente do tipo ou status", async () => {
     seedPedido({ tipoEntrega: "retirada", endereco: "Retirada na loja" });
     await PATCH(patchRequest({ id: "ped_notif_1", status: "saiu_entrega", silent: true }));
+    expect(fetchMock.mock.calls.find(([url]) => String(url).includes("/message/sendText/"))).toBeUndefined();
+
+    fetchMock.mockClear();
+    seedPedido({ tipoEntrega: "dine_in", endereco: "Consumo no local", status: "em_preparo" });
+    await PATCH(patchRequest({ id: "ped_notif_1", status: "entregue", silent: true }));
     expect(fetchMock.mock.calls.find(([url]) => String(url).includes("/message/sendText/"))).toBeUndefined();
   });
 });
