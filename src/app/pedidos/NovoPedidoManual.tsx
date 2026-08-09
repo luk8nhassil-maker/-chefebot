@@ -21,12 +21,15 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import {
   ArrowLeft,
   ArrowRight,
+  Beef,
   Bike,
   Banknote,
+  Croissant,
   CreditCard,
   CupSoda,
   GlassWater,
   LoaderCircle,
+  Milk,
   Pencil,
   Phone,
   PhoneOff,
@@ -36,6 +39,7 @@ import {
   Search,
   Shuffle,
   ShoppingBag,
+  Soup,
   Store,
   UtensilsCrossed,
   Wallet,
@@ -98,9 +102,14 @@ const money = (v: number) => "R$ " + v.toFixed(2).replace(".", ",")
  * público (src/app/cardapio/page.tsx), nunca um ícone inventado por tela. */
 const ICONE_CATEGORIA: Record<CategoriaManual, LucideIcon> = {
   pizza: Pizza,
+  calzone: UtensilsCrossed,
+  pastelForno: Croissant,
   lanches: Sandwich,
+  hamburgueres: Beef,
+  macarronada: Soup,
   bebidas: CupSoda,
   sucos: GlassWater,
+  vitaminas: Milk,
 }
 
 type Props = {
