@@ -194,7 +194,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const pizzaCatalog = temSelecaoPizzaEstruturada ? buildPizzaCatalog(menu, esgotadosFresco) : null;
     const simpleCatalog = temSelecaoSimplesEstruturadaAlgumItem ? buildSimpleCatalog(menu, esgotadosFresco) : null;
 
-    let itensValidados: { itemCanonico: ItemApp; linha: string; unitPrice: number | null; qty: number }[];
+    let itensValidados: { itemCanonico: ItemApp; linha: string; unitPrice: number | null; qty: number; motivo?: string }[];
     try {
       itensValidados = body.itens.map((item) => {
         // Fail-closed (hardening pós-auditoria, 5ª rodada): pizzaSelection
@@ -202,11 +202,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         // precedência silenciosa — o item inteiro é rejeitado ANTES de
         // qualquer resolver ser escolhido.
         if (temSelecaoDupla(item)) {
-          return { itemCanonico: item, linha: "", unitPrice: null, qty: item.qty };
+          return { itemCanonico: item, linha: "", unitPrice: null, qty: item.qty, motivo: "Seleção dupla (pizzaSelection e simpleSelection juntas)" };
         }
         if (temSelecaoEstruturada(item)) {
           const resolvido = resolverItemComSelecaoEstruturada(item, pizzaCatalog!);
-          if (!resolvido.ok) return { itemCanonico: item, linha: "", unitPrice: null, qty: item.qty };
+          if (!resolvido.ok) return { itemCanonico: item, linha: "", unitPrice: null, qty: item.qty, motivo: resolvido.error };
           return {
             itemCanonico: resolvido.item,
             linha: formatItem(resolvido.item),
@@ -220,7 +220,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         // definitiva (nunca cai para o legado abaixo).
         if (temSelecaoSimplesEstruturada(item)) {
           const resolvido = resolverItemComSelecaoSimplesEstruturada(item, menu, simpleCatalog!);
-          if (!resolvido.ok) return { itemCanonico: item, linha: "", unitPrice: null, qty: item.qty };
+          if (!resolvido.ok) return { itemCanonico: item, linha: "", unitPrice: null, qty: item.qty, motivo: resolvido.error };
           return {
             itemCanonico: resolvido.item,
             linha: formatItem(resolvido.item),
@@ -228,18 +228,25 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             qty: item.qty,
           };
         }
+        const unitPriceLegado = item.kind === "promo" ? promoUnitPrice(item) : officialUnitPrice(item, menu as MenuPedidoApp);
         return {
           itemCanonico: item,
           linha: formatItem(item),
-          unitPrice: item.kind === "promo" ? promoUnitPrice(item) : officialUnitPrice(item, menu as MenuPedidoApp),
+          unitPrice: unitPriceLegado,
           qty: item.qty,
+          ...(unitPriceLegado === null ? { motivo: "Item legado (name/detail) não reconhecido no cardápio atual" } : {}),
         };
       });
-    } catch {
+    } catch (err) {
+      // Hardening (hotfix "Item inválido" mascarado, ver POST /api/pedido-app):
+      // loga a causa real para diagnóstico; a resposta ao cliente continua genérica.
+      console.error("[ChefeBot] Erro inesperado ao resolver itens da edição do pedido:", err instanceof Error ? err.message : err);
       return NextResponse.json({ ok: false, error: "Item inválido" }, { status: 400 });
     }
-    if (itensValidados.some((item) => item.unitPrice === null)) {
-      return NextResponse.json({ ok: false, error: "Item inválido" }, { status: 400 });
+    const itemInvalido = itensValidados.find((item) => item.unitPrice === null);
+    if (itemInvalido) {
+      console.error("[ChefeBot] Item de edição de pedido rejeitado:", itemInvalido.motivo ?? "motivo não capturado");
+      return NextResponse.json({ ok: false, error: "Item inválido", motivo: itemInvalido.motivo }, { status: 400 });
     }
     const itensCanonicos = itensValidados.map((item) => item.itemCanonico);
     const itens = itensValidados.map((item) => item.linha);
