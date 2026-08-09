@@ -157,8 +157,8 @@ describe("Isolamento correto quando os ids NÃO colidem (Casos 1-4 do roteiro de
     ]);
 
     await Promise.all([
-      PATCH(patchRequest({ id: "1001", status: "em_preparo" })),
-      PATCH(patchRequest({ id: "1002", status: "em_preparo" })),
+      PATCH(patchRequest({ id: "1001", status: "saiu_entrega" })),
+      PATCH(patchRequest({ id: "1002", status: "saiu_entrega" })),
     ]);
 
     const mensagens = envios();
@@ -182,9 +182,9 @@ describe("Isolamento correto quando os ids NÃO colidem (Casos 1-4 do roteiro de
     ]);
 
     await Promise.all([
-      PATCH(patchRequest({ id: "2001", status: "em_preparo" })),
-      PATCH(patchRequest({ id: "2002", status: "em_preparo" })),
-      PATCH(patchRequest({ id: "2003", status: "em_preparo" })),
+      PATCH(patchRequest({ id: "2001", status: "saiu_entrega" })),
+      PATCH(patchRequest({ id: "2002", status: "saiu_entrega" })),
+      PATCH(patchRequest({ id: "2003", status: "saiu_entrega" })),
     ]);
 
     const mensagens = envios();
@@ -250,9 +250,15 @@ describe("CAUSA RAIZ (corrigida): id de pedido não colide mais sob criação co
     vi.restoreAllMocks(); // Date.now volta ao normal para as trocas de status.
     fetchMock.mockClear();
 
-    await PATCH(patchRequest({ id: pedidoB.id, status: "em_preparo" }));
-    await PATCH(patchRequest({ id: pedidoA.id, status: "em_preparo" }));
+    // Regra de notificação atual: só "saiu da cozinha/pronto" e "cancelado"
+    // mandam mensagem — em_preparo não manda mais nada (ver
+    // route.notificacaoStatus.test.ts). Adriano recebe só a de "saiu para
+    // entrega"; Jessica passa por duas transições que notificam (saiu para
+    // entrega e, depois, cancelamento) — cenário real: pedido já saiu e o
+    // cliente cancela em seguida.
+    await PATCH(patchRequest({ id: pedidoB.id, status: "saiu_entrega" }));
     await PATCH(patchRequest({ id: pedidoA.id, status: "saiu_entrega" }));
+    await PATCH(patchRequest({ id: pedidoA.id, status: "cancelado" }));
 
     const mensagens = envios();
     const paraJessica = mensagens.filter(m => m.numero === "5541111111111");
@@ -263,8 +269,8 @@ describe("CAUSA RAIZ (corrigida): id de pedido não colide mais sob criação co
     expect(paraAdriano[0].texto).toContain("Adriano");
     expect(paraAdriano[0].texto).not.toContain("Jessica");
 
-    // Jessica recebe as duas mensagens do próprio pedido (em_preparo e
-    // saiu_entrega) — nunca nada endereçado ao Adriano.
+    // Jessica recebe as duas mensagens do próprio pedido (saiu_entrega e
+    // cancelado) — nunca nada endereçado ao Adriano.
     expect(paraJessica.length).toBe(2);
     for (const m of paraJessica) {
       expect(m.texto).toContain("Jessica");
@@ -318,8 +324,8 @@ describe("Concorrência REAL (Promise.all) — não apenas Date.now travado com 
     const persistidos = (redisStore.get("pedidos") as Record<string, unknown>[]) ?? [];
     fetchMock.mockClear();
     await Promise.all([
-      persistidos.some(p => p.id === pedidoA.id) ? PATCH(patchRequest({ id: pedidoA.id, status: "em_preparo" })) : Promise.resolve(),
-      persistidos.some(p => p.id === pedidoB.id) ? PATCH(patchRequest({ id: pedidoB.id, status: "em_preparo" })) : Promise.resolve(),
+      persistidos.some(p => p.id === pedidoA.id) ? PATCH(patchRequest({ id: pedidoA.id, status: "saiu_entrega" })) : Promise.resolve(),
+      persistidos.some(p => p.id === pedidoB.id) ? PATCH(patchRequest({ id: pedidoB.id, status: "saiu_entrega" })) : Promise.resolve(),
     ]);
     const mensagens = envios();
     for (const m of mensagens) {
@@ -363,7 +369,7 @@ describe("Concorrência REAL (Promise.all) — não apenas Date.now travado com 
     await Promise.all(
       pedidos
         .filter(p => persistidos.some(persisted => persisted.id === p.id))
-        .map(p => PATCH(patchRequest({ id: p.id, status: "em_preparo" })))
+        .map(p => PATCH(patchRequest({ id: p.id, status: "saiu_entrega" })))
     );
 
     // Nomes numerados (ClienteConcorrente1, ClienteConcorrente10, ...) exigem
@@ -434,7 +440,7 @@ describe("Hipóteses alternativas descartadas pela auditoria", () => {
       { id: "3002", numero: 2, cliente: "Amanda Reis", telefone: "5552222222222", itens: ["x"], total: 10, status: "novo", horario: "10:00", endereco: "Rua 2", tipoEntrega: "delivery" },
     ]);
 
-    await PATCH(patchRequest({ id: "3002", status: "em_preparo" }));
+    await PATCH(patchRequest({ id: "3002", status: "saiu_entrega" }));
 
     const mensagens = envios();
     expect(mensagens).toHaveLength(1);
@@ -447,7 +453,7 @@ describe("Hipóteses alternativas descartadas pela auditoria", () => {
       { id: "4002", numero: 2, cliente: "Adriano Silva", telefone: "5561111111111", itens: ["x"], total: 10, status: "novo", horario: "10:00", endereco: "Rua 2", tipoEntrega: "delivery" },
     ]);
 
-    await PATCH(patchRequest({ id: "4001", status: "em_preparo" }));
+    await PATCH(patchRequest({ id: "4001", status: "saiu_entrega" }));
     fetchMock.mockClear();
     await PATCH(patchRequest({ id: "4002", status: "saiu_entrega" }));
 
@@ -464,7 +470,7 @@ describe("Hipóteses alternativas descartadas pela auditoria", () => {
       { id: "5002", numero: 2, cliente: "Outro Cliente", telefone: "5571234567890", itens: ["x"], total: 10, status: "novo", horario: "10:00", endereco: "Rua 2", tipoEntrega: "delivery" },
     ]);
 
-    await PATCH(patchRequest({ id: "5001", status: "em_preparo" }));
+    await PATCH(patchRequest({ id: "5001", status: "saiu_entrega" }));
 
     const mensagens = envios();
     expect(mensagens).toHaveLength(1);
