@@ -382,7 +382,7 @@ export async function validarItensComanda(
 
     if (temSelecaoSimplesEstruturada(bruto)) {
       const catalogo = await catalogoSimplesOficial();
-      const resolvido = resolverItemComSelecaoSimplesEstruturada(item as ItemApp, menu, catalogo);
+      const resolvido = resolverItemComSelecaoSimplesEstruturada(item as ItemApp, catalogo);
       if (!resolvido.ok) {
         return { ok: false, error: resolvido.error };
       }
