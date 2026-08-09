@@ -16,6 +16,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { processarPedidoApp } from "@/app/api/pedido-app/route";
 
+// Mesmo maxDuration de POST /api/pedido-app (route.ts) — processarPedidoApp
+// é o mesmo motor rodando aqui, com o mesmo tempo de execução esperado.
+export const maxDuration = 20;
+
 export async function POST(req: NextRequest): Promise<NextResponse> {
   return processarPedidoApp(req, { sessaoAdministrativaPermitida: true });
 }
