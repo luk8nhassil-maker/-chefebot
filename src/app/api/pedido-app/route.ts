@@ -1135,7 +1135,7 @@ export async function POST(req: NextRequest) {
       const pizzaCatalog = temSelecaoPizzaEstruturada ? buildPizzaCatalog(menu, esgotadosFresco) : null;
       const simpleCatalog = temSelecaoSimplesEstruturadaAlgumItem ? buildSimpleCatalog(menu, esgotadosFresco) : null;
 
-      let itensResolvidos: { itemCanonico: ItemApp; linha: string; unitPrice: number | null; qty: number }[];
+      let itensResolvidos: { itemCanonico: ItemApp; linha: string; unitPrice: number | null; qty: number; motivo?: string }[];
       try {
         itensResolvidos = body.itens.map((item) => {
           // Fail-closed (hardening pós-auditoria, 5ª rodada): pizzaSelection
@@ -1144,11 +1144,11 @@ export async function POST(req: NextRequest) {
           // simpleSelection era descartada sem erro) — o item inteiro é
           // rejeitado ANTES de qualquer resolver ser escolhido.
           if (temSelecaoDupla(item)) {
-            return { itemCanonico: item, linha: "", unitPrice: null, qty: item.qty };
+            return { itemCanonico: item, linha: "", unitPrice: null, qty: item.qty, motivo: "Seleção dupla (pizzaSelection e simpleSelection juntas)" };
           }
           if (temSelecaoEstruturada(item)) {
             const resolvido = resolverItemComSelecaoEstruturada(item, pizzaCatalog!);
-            if (!resolvido.ok) return { itemCanonico: item, linha: "", unitPrice: null, qty: item.qty };
+            if (!resolvido.ok) return { itemCanonico: item, linha: "", unitPrice: null, qty: item.qty, motivo: resolvido.error };
             return {
               itemCanonico: resolvido.item,
               linha: formatItem(resolvido.item),
@@ -1162,7 +1162,7 @@ export async function POST(req: NextRequest) {
           // é definitiva (nunca cai para o legado abaixo).
           if (temSelecaoSimplesEstruturada(item)) {
             const resolvido = resolverItemComSelecaoSimplesEstruturada(item, menu, simpleCatalog!);
-            if (!resolvido.ok) return { itemCanonico: item, linha: "", unitPrice: null, qty: item.qty };
+            if (!resolvido.ok) return { itemCanonico: item, linha: "", unitPrice: null, qty: item.qty, motivo: resolvido.error };
             return {
               itemCanonico: resolvido.item,
               linha: formatItem(resolvido.item),
@@ -1170,19 +1170,38 @@ export async function POST(req: NextRequest) {
               qty: item.qty,
             };
           }
+          const unitPriceLegado = item.kind === "promo" ? promoUnitPrice(item) : officialUnitPrice(item, menu as MenuPedidoApp);
           return {
             itemCanonico: item,
             linha: formatItem(item),
-            unitPrice: item.kind === "promo" ? promoUnitPrice(item) : officialUnitPrice(item, menu as MenuPedidoApp),
+            unitPrice: unitPriceLegado,
             qty: item.qty,
+            ...(unitPriceLegado === null ? { motivo: "Item legado (name/detail) não reconhecido no cardápio atual" } : {}),
           };
         });
-      } catch {
+      } catch (err) {
+        // Hardening (hotfix "Item inválido" mascarado): antes, qualquer exceção
+        // dentro do map acima (ex.: um resolver lançando por um formato
+        // inesperado) virava "Item inválido" sem nenhum rastro — impossível
+        // diagnosticar sem reproduzir localmente. Loga a causa real (nunca o
+        // payload do cliente inteiro, que pode conter dado de pagamento) para
+        // correlação em suporte; a resposta ao cliente continua genérica.
+        console.error("[ChefeBot] Erro inesperado ao resolver itens do pedido:", err instanceof Error ? err.message : err);
         return NextResponse.json({ ok: false, error: "Item inválido" }, { status: 400 });
       }
 
-      if (itensResolvidos.some((item) => item.unitPrice === null)) {
-        return NextResponse.json({ ok: false, error: "Item inválido" }, { status: 400 });
+      const itemInvalido = itensResolvidos.find((item) => item.unitPrice === null);
+      if (itemInvalido) {
+        // Mesmo hardening: o motivo real (ex.: "Sabor não encontrado",
+        // "Produto indisponível: X", "Seleção dupla") é logado para
+        // diagnóstico — nunca mais mascarado só como "Item inválido" nos
+        // logs do servidor. A resposta ao cliente segue sem detalhe interno
+        // (nenhum stack trace, nenhuma estrutura de catálogo), só o motivo
+        // operacional já produzido pelo próprio resolver (texto curto,
+        // comercial, sem dado sensível — mesmo texto que o admin já vê em
+        // outras validações do cardápio).
+        console.error("[ChefeBot] Item de pedido rejeitado:", itemInvalido.motivo ?? "motivo não capturado");
+        return NextResponse.json({ ok: false, error: "Item inválido", motivo: itemInvalido.motivo }, { status: 400 });
       }
 
       // Presente da Jornada do Chef (rule 1/2/3): produto, preço, quantidade,
