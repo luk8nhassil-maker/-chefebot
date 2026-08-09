@@ -7,6 +7,7 @@ import { creditarPontosPedidoEntregue } from "@/lib/fidelidade";
 import { processarConclusaoPedidoJornada } from "@/lib/jornadaChef";
 import type { ItemApp } from "@/lib/pedidoAppItens";
 import type { ItemElegibilidadeJornada } from "@/lib/jornadaChef";
+import type { PedidoSnapshotOficial } from "@/lib/pedidoSnapshot";
 
 type PedidoMain = {
   id: string;
@@ -19,6 +20,7 @@ type PedidoMain = {
   origem?: string;
   tipoEntrega?: string;
   itensDetalhados?: ItemApp[];
+  snapshotOficial?: PedidoSnapshotOficial;
   itensJornada?: ItemElegibilidadeJornada[];
   recompensaJornadaId?: string;
 };
@@ -199,6 +201,7 @@ export async function POST(req: NextRequest) {
         clienteId: pedidoMainAtualizado.clienteId,
         total: pedidoMainAtualizado.total ?? 0,
         taxaEntrega: pedidoMainAtualizado.taxaEntrega,
+        snapshotOficial: pedidoMainAtualizado.snapshotOficial,
       });
     } catch (error) {
       console.error("[ChefeBot] Erro ao creditar pontos de fidelidade do pedido entregue (ignorado):", error);

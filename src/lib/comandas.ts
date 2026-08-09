@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import { redis } from "./redis";
+import { obterEsgotadosEfetivos } from "./estoque";
 import { getMENUDinamico } from "./menu.server";
 import { officialUnitPrice, type ItemApp, type MenuPedidoApp } from "./pedidoAppItens";
 import {
@@ -331,7 +332,7 @@ export async function validarItensComanda(
   // Rodada 1 e da Rodada 2+) é pego aqui.
   let esgotadosCache: string[] | null = null;
   async function esgotadosFrescos(): Promise<string[]> {
-    if (!esgotadosCache) esgotadosCache = (await redis.get<string[]>("esgotados")) || [];
+    if (!esgotadosCache) esgotadosCache = await obterEsgotadosEfetivos(menu);
     return esgotadosCache;
   }
   let pizzaCatalogCache: PizzaCatalog | null = null;

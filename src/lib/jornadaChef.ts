@@ -7,6 +7,7 @@
 
 import { randomBytes, createHmac } from "crypto";
 import { redis } from "./redis";
+import { obterEsgotadosEfetivos } from "./estoque";
 import { derivarClienteIdPorTelefone } from "./fidelidade";
 import { enviarTextoWhatsApp } from "./whatsappMensagem";
 import { norm } from "./pedidoAppItens";
@@ -335,7 +336,7 @@ export async function obterConfigJornadaChef(tenantId: string = TENANT_PADRAO): 
  */
 export async function obterCatalogoJornada(): Promise<CatalogoJornada> {
   const menu = await getMENUDinamico();
-  const esgotados = ((await redis.get<string[]>("esgotados")) ?? []).map((nome) => norm(nome));
+  const esgotados = (await obterEsgotadosEfetivos(menu)).map((nome) => norm(nome));
   const catalogoCompleto = catalogoDoMenu(menu as never);
   const itensIndividuais = catalogoCompleto
     .filter((p) => p.category !== "pizza")

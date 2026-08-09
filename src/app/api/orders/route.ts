@@ -17,6 +17,7 @@ import {
 import { processarConclusaoPedidoJornada, reverterConclusaoPedidoJornada, liberarRecompensaDePedidoCancelado } from '@/lib/jornadaChef'
 import type { ItemElegibilidadeJornada } from '@/lib/jornadaChef'
 import type { ItemApp } from '@/lib/pedidoAppItens'
+import type { PedidoSnapshotOficial } from '@/lib/pedidoSnapshot'
 import { obterConfigEvolution } from '@/lib/evolutionApi'
 import {
   registrarResolucao,
@@ -72,6 +73,7 @@ type Pedido = PedidoComEdicao & {
   descontoFidelidade?: number
   origem?: string
   itensDetalhados?: ItemApp[]
+  snapshotOficial?: PedidoSnapshotOficial
   itensJornada?: ItemElegibilidadeJornada[]
   recompensaJornadaId?: string
   // Campos de arquivamento
@@ -590,6 +592,7 @@ export async function PATCH(req: NextRequest) {
         clienteId: pedidos[index].clienteId,
         total: pedidos[index].total,
         taxaEntrega: pedidos[index].taxaEntrega,
+        snapshotOficial: pedidos[index].snapshotOficial,
       })
     } catch (err) {
       console.error('[ChefeBot] Erro ao creditar pontos de fidelidade (ignorado):', err)

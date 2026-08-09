@@ -3,6 +3,7 @@ import { processMessage, createInitialSession, createReturningSession, montarSau
 import { criarOuReutilizarTokenCardapio, anexarTokenAoLinkCardapio } from "@/lib/cardapioToken";
 import { getMENUDinamico } from "@/lib/menu.server";
 import { redis } from "@/lib/redis";
+import { obterEsgotadosEfetivos } from "@/lib/estoque";
 import { interpretarMensagem, gerarRespostaGuardiao } from "@/lib/claude";
 import { registrarMensagem, ultimasMensagensRelevantes } from "@/lib/conversa";
 import { atualizarRascunhoAtendimentoTempoReal } from "@/lib/rascunhoAtendimentoTempoReal";
@@ -25,6 +26,9 @@ import { encontrarPedidoPixPendentePorTelefone } from "@/lib/pixPedidoMatching";
 import { telefonesCorrespondem } from "@/lib/telefone";
 import { creditarPontosPedidoEntregue } from "@/lib/fidelidade";
 import { itensJornadaDoCarrinhoWhatsApp, processarConclusaoPedidoJornada } from "@/lib/jornadaChef";
+import { buildCatalog } from "@/lib/catalog/adapter";
+import { norm, type ItemApp } from "@/lib/pedidoAppItens";
+import type { Menu } from "@/lib/menu";
 import type { BotStep } from "@/lib/bot";
 import { ehEventoQrAtualizado, extrairQrBase64, obterConfigEvolution } from "@/lib/evolutionApi";
 import { limparQrAtual, persistirQrAtual } from "@/lib/whatsappQrCache";
@@ -47,6 +51,12 @@ type Pedido = {
   cliente: string;
   telefone: string;
   itens: string[];
+  // Espelho estruturado (aditivo, Fase 7) de `itens` — IDs estáveis do
+  // catálogo oficial quando resolvíveis. `itens` (string[]) continua sendo
+  // a fonte que Pix/impressão leem, sem nenhuma mudança; este campo é só
+  // para consumidores que já sabem ler seleção estruturada (ex.: futura
+  // Fidelidade por item). Ver construirItensDetalhadosWhatsApp abaixo.
+  itensDetalhados?: ItemApp[];
   total: number;
   status: "novo" | "em_preparo" | "saiu_entrega" | "entregue" | "cancelado";
   horario: string;
@@ -162,6 +172,57 @@ type PedidoSalvoResultado = {
   pixCliente?: PixCliente;
 };
 
+// Fase 7 — WhatsApp: espelho estruturado (aditivo) do carrinho do bot, com
+// IDs estáveis do catálogo oficial quando resolvíveis. Não importamos o tipo
+// `CartItem` de `@/lib/bot` para não acoplar este módulo à lógica
+// conversacional (mesmo princípio de itensJornadaDoCarrinhoWhatsApp em
+// @/lib/jornadaChef) — só a forma estrutural mínima necessária.
+export type ItemCarrinhoParaDetalhes = { category: string; name: string; size?: string; flavor?: string; border?: string; price: number };
+
+export function construirItensDetalhadosWhatsApp(cart: ItemCarrinhoParaDetalhes[], menu: Menu): ItemApp[] {
+  const catalog = buildCatalog(menu);
+  const flavorId = (nome?: string) =>
+    nome ? [...catalog.saltyFlavors, ...catalog.sweetFlavors].find((f) => norm(f.name) === norm(nome))?.id : undefined;
+  const sizeId = (codigoOuLabel?: string) =>
+    codigoOuLabel ? catalog.sizes.find((s) => norm(s.code) === norm(codigoOuLabel) || norm(s.label) === norm(codigoOuLabel))?.id : undefined;
+  const borderId = (label?: string) =>
+    label && label !== "Sem borda" ? catalog.borders.find((b) => norm(b.label) === norm(label))?.id : undefined;
+  const productId = (nome?: string) =>
+    nome ? [...catalog.lanches, ...catalog.bebidas, ...catalog.sucos].find((p) => norm(p.name) === norm(nome))?.id : undefined;
+
+  return cart.map((item): ItemApp => {
+    const borderTxt = item.border && item.border !== "Sem borda" ? ` + ${item.border}` : "";
+    const sizeTxt = item.size ? ` ${item.size}` : "";
+    const flavorTxt = item.flavor ? ` ${item.flavor}` : "";
+    const name = `${item.name}${sizeTxt}${flavorTxt}${borderTxt}`.trim();
+
+    if (item.category === "pizza" && item.flavor) {
+      const fId = flavorId(item.flavor);
+      const sId = sizeId(item.size);
+      if (fId && sId) {
+        const bId = borderId(item.border);
+        return {
+          kind: "pizza",
+          name,
+          price: item.price,
+          qty: 1,
+          pizzaSelection: { sizeId: sId, flavorIds: [fId], ...(bId ? { borderId: bId } : {}) },
+        };
+      }
+    } else if (item.category !== "pizza") {
+      const pId = productId(item.name);
+      if (pId) {
+        return { kind: "simple", name, price: item.price, qty: 1, simpleSelection: { productId: pId } };
+      }
+    }
+    // Sabor/produto sem ID resolvível (cardápio mudou desde que o item foi
+    // adicionado ao carrinho, ou item não coberto pelo catálogo oficial
+    // ainda) — ItemApp válido só sem seleção estruturada. Nunca bloqueia o
+    // salvamento do pedido.
+    return { kind: item.category === "pizza" ? "pizza" : "simple", name, price: item.price, qty: 1 };
+  });
+}
+
 async function salvarPedido(session: BotSession, phone: string, _config: ConfigPizzaria): Promise<PedidoSalvoResultado> {
   const itens = session.cart.map((item) => {
     const border = item.border && item.border !== "Sem borda" ? ` + ${item.border}` : "";
@@ -169,6 +230,12 @@ async function salvarPedido(session: BotSession, phone: string, _config: ConfigP
     const flavor = item.flavor ? ` ${item.flavor}` : "";
     return `${item.name}${size}${flavor}${border}`;
   });
+  // Busca o cardápio dinâmico de novo aqui (em vez de receber por parâmetro):
+  // salvarPedido é chamada a partir de vários pontos do arquivo, nem todos
+  // com o Menu já em mãos — 1 leitura a mais no Redis num caminho que já faz
+  // várias (Pix, numeração, lock de pedidos), nunca um caminho quente.
+  const menuAtual = await getMENUDinamico();
+  const itensDetalhados = construirItensDetalhadosWhatsApp(session.cart, menuAtual);
   const total = session.cart.reduce((sum, item) => sum + item.price, 0) + session.deliveryFee;
   const endereco = session.deliveryType === "delivery"
     ? `${session.address} - ${session.neighborhood}`
@@ -190,6 +257,7 @@ async function salvarPedido(session: BotSession, phone: string, _config: ConfigP
     telefone: phone,
     origem: "whatsapp" as const,
     itens,
+    itensDetalhados,
     total,
     status: "novo" as const,
     horario: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" }),
@@ -1092,7 +1160,7 @@ export async function POST(req: NextRequest) {
     // no Redis) — antes o bot tinha um horário próprio hardcoded ("22h") que nunca
     // acompanhava o horaFechamento real configurado pela pizzaria.
     setHorarioFuncionamento(`${config.horaFechamento}h`);
-    const esgotadosLista = (await redis.get<string[]>('esgotados')) || [];
+    const esgotadosLista = await obterEsgotadosEfetivos(menuDinamico);
     setEsgotados(esgotadosLista);
     console.log("[ChefeBot] Tamanhos carregados:", JSON.stringify(menuDinamico.sizes));
 
