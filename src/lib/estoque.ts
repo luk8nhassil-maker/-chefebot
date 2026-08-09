@@ -24,6 +24,8 @@
 import { redis } from "./redis";
 import { norm } from "./pedidoAppItens";
 import { buildCatalog } from "./catalog/adapter";
+import { buildPizzaCatalog } from "./catalog/pizzas";
+import { buildSimpleCatalog, todosOsProdutos } from "./catalog/simpleProducts";
 import type { Menu } from "./menu";
 
 export const CHAVE_ESGOTADOS = "esgotados";
@@ -71,8 +73,30 @@ export async function obterEstoqueItens(): Promise<EstoqueItens> {
  */
 export function resolverIdsPorNome(menu: Menu, nome: string): string[] {
   const catalog = buildCatalog(menu);
+  const pizzaCatalog = buildPizzaCatalog(menu);
+  const simpleCatalog = buildSimpleCatalog(menu);
   const alvo = norm(nome);
   const ids: string[] = [];
+  // Catálogo oficial 2026 (fonte comercial atual) primeiro — cobre sabores/
+  // produtos que não existem no Menu legado (@/lib/menu).
+  for (const flavor of pizzaCatalog.flavors) {
+    if (norm(flavor.name) === alvo) ids.push(flavor.id);
+  }
+  for (const produto of todosOsProdutos(simpleCatalog)) {
+    if (norm(produto.name) === alvo) ids.push(produto.id);
+    for (const flavor of produto.flavors ?? []) {
+      if (norm(flavor.name) === alvo) ids.push(flavor.id);
+    }
+  }
+  for (const border of pizzaCatalog.borders) {
+    if (norm(border.label) === alvo) ids.push(border.id);
+  }
+  for (const addOn of pizzaCatalog.addOns) {
+    if (norm(addOn.label) === alvo) ids.push(addOn.id);
+  }
+  // Catálogo legado (Menu/Redis) — cobre nomes que só existem em pedidos/
+  // cardápios antigos, para que a migração (Fase 11) e revisões de itens
+  // esgotados anteriores ao cardápio 2026 continuem resolvendo.
   for (const flavor of [...catalog.saltyFlavors, ...catalog.sweetFlavors]) {
     if (norm(flavor.name) === alvo) ids.push(flavor.id);
   }
@@ -82,15 +106,27 @@ export function resolverIdsPorNome(menu: Menu, nome: string): string[] {
   for (const border of catalog.borders) {
     if (norm(border.label) === alvo) ids.push(border.id);
   }
-  return ids;
+  return Array.from(new Set(ids));
 }
 
 function nomeAtualParaId(menu: Menu): Map<string, string> {
   const catalog = buildCatalog(menu);
+  const pizzaCatalog = buildPizzaCatalog(menu);
+  const simpleCatalog = buildSimpleCatalog(menu);
   const mapa = new Map<string, string>();
+  // Catálogo legado primeiro, catálogo oficial 2026 por cima — em caso de
+  // colisão de ID (não deveria acontecer, espaços de nome distintos), a
+  // fonte comercial vigente sempre vence.
   for (const flavor of [...catalog.saltyFlavors, ...catalog.sweetFlavors]) mapa.set(flavor.id, flavor.name);
   for (const produto of [...catalog.lanches, ...catalog.bebidas, ...catalog.sucos]) mapa.set(produto.id, produto.name);
   for (const border of catalog.borders) mapa.set(border.id, border.label);
+  for (const flavor of pizzaCatalog.flavors) mapa.set(flavor.id, flavor.name);
+  for (const produto of todosOsProdutos(simpleCatalog)) {
+    mapa.set(produto.id, produto.name);
+    for (const flavor of produto.flavors ?? []) mapa.set(flavor.id, flavor.name);
+  }
+  for (const border of pizzaCatalog.borders) mapa.set(border.id, border.label);
+  for (const addOn of pizzaCatalog.addOns) mapa.set(addOn.id, addOn.label);
   return mapa;
 }
 
