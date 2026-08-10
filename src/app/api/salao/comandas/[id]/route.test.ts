@@ -46,7 +46,7 @@ const CARDAPIO_TESTE_PIZZA = {
   sucos: [], neighborhoods: [],
 };
 const SIZE_G = "size-g";
-const FLAVOR_QUATRO_QUEIJOS = "flavor-quatro-queijos";
+const FLAVOR_4_QUEIJOS = "flavor-4-queijos"; // G = R$50 (cardápio oficial 2026)
 
 function paramsFor(id: string) {
   return { params: Promise.resolve({ id }) };
@@ -123,14 +123,14 @@ describe("PATCH /api/salao/comandas/[id]", () => {
       const aberta = await (await abrir(abrirReq({ cliente: "Ana", mesa: "5" }, token))).json();
       const res = await PATCH(
         patchReq(
-          { itens: [{ kind: "pizza", price: 0, qty: 1, pizzaSelection: { sizeId: SIZE_G, flavorIds: [FLAVOR_QUATRO_QUEIJOS] } }] },
+          { itens: [{ kind: "pizza", price: 0, qty: 1, pizzaSelection: { sizeId: SIZE_G, flavorIds: [FLAVOR_4_QUEIJOS] } }] },
           token
         ),
         paramsFor(aberta.comanda.id)
       );
       expect(res.status).toBe(200);
       const data = await res.json();
-      expect(data.comanda.itens[0].pizzaSelection).toEqual({ sizeId: SIZE_G, flavorIds: [FLAVOR_QUATRO_QUEIJOS] });
+      expect(data.comanda.itens[0].pizzaSelection).toEqual({ sizeId: SIZE_G, flavorIds: [FLAVOR_4_QUEIJOS] });
       expect(data.comanda.itens[0].name).toBe("Pizza G");
       expect(data.total).toBe(50);
     });
@@ -141,7 +141,7 @@ describe("PATCH /api/salao/comandas/[id]", () => {
       const aberta = await (await abrir(abrirReq({ cliente: "Ana", mesa: "5" }, token))).json();
       const res = await PATCH(
         patchReq(
-          { itens: [{ kind: "pizza", price: 0, qty: 1, pizzaSelection: { sizeId: "size-inexistente", flavorIds: [FLAVOR_QUATRO_QUEIJOS] } }] },
+          { itens: [{ kind: "pizza", price: 0, qty: 1, pizzaSelection: { sizeId: "size-inexistente", flavorIds: [FLAVOR_4_QUEIJOS] } }] },
           token
         ),
         paramsFor(aberta.comanda.id)

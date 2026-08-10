@@ -1,26 +1,26 @@
-// Catálogo oficial de pizzas — Fase 2.
+// Catálogo oficial de pizzas — cardápio 2026.
 //
-// Camada especializada em cima do catálogo tipado genérico da Fase 1
-// (./adapter, ./types) e dos apelidos já usados pelo bot do WhatsApp para
-// reconhecer sabores digitados por clientes (APELIDOS_SABOR, @/lib/bot) —
-// nenhum dado comercial novo é inventado aqui: é só uma VIEW mais rica,
-// com IDs estáveis, agrupamento por categoria, apelidos e disponibilidade
-// em tempo real (a partir da lista "esgotados", já a fonte oficial única
-// de disponibilidade no ChefeBot — ver src/app/api/cardapio/route.ts).
+// Fonte comercial: @/lib/catalog/officialMenu2026 (versionada, em código —
+// ver o cabeçalho daquele arquivo para o porquê de preço/produto/sabor NÃO
+// morarem mais no Menu/Redis). Esta camada só ADICIONA o que só pode ser
+// calculado em tempo de requisição: disponibilidade (lista "esgotados",
+// Redis, a mesma fonte usada pelo bot do WhatsApp, pelo cardápio do
+// cliente e pela montagem manual — ver src/app/api/cardapio/route.ts).
 //
-// Categorização comercial (gap conhecido, ver docs de entrega da Fase 2):
-// hoje o cardápio oficial só distingue sabores "Salgados" e "Doces"
-// (menu.saltyFlavors / menu.sweetFlavors) — mesmo preço por tamanho para
-// qualquer sabor dentro de cada grupo. NÃO existe, em nenhuma fonte oficial
-// do ChefeBot, uma separação comercial entre "Tradicionais" e "Especiais"
-// dentro dos salgados (ex.: sabores mais caros). "especial" fica reservado
-// no tipo abaixo para o dia em que essa regra comercial existir de
-// verdade — nenhum sabor é classificado nela hoje, para não inventar uma
-// categoria/preço sem dado oficial.
+// `menu: Menu` continua no parâmetro por estabilidade de assinatura (todos
+// os chamadores existentes passam o Menu já lido) mas não é mais lido para
+// preço/produto/sabor de pizza — só a disponibilidade (`esgotados`) decide
+// algo aqui agora.
 import type { Menu } from "@/lib/menu";
 import { norm } from "@/lib/pedidoAppItens";
-import { APELIDOS_SABOR } from "@/lib/bot";
-import { buildCatalog } from "./adapter";
+import {
+  PIZZA_ADDONS,
+  PIZZA_BORDERS,
+  PIZZA_FLAVORS,
+  PIZZA_SIZES,
+  type OfficialPizzaFlavor,
+  type PizzaSizeCode,
+} from "./officialMenu2026";
 
 export type PizzaCategoryId = "tradicional" | "especial" | "doce";
 
@@ -28,25 +28,35 @@ export interface PizzaCatalogFlavor {
   id: string;
   name: string;
   category: PizzaCategoryId;
-  /** Apelidos/grafias alternativas já reconhecidas pelo bot do WhatsApp para este sabor (pode ser vazio). */
+  ingredients: string;
   aliases: string[];
   available: boolean;
-  /** Nenhuma fonte oficial de texto de marketing existe hoje — sempre undefined até que exista. */
+  /** Preço por tamanho, em centavos — chave ausente = tamanho não permitido
+   *  para este sabor (Especiais nunca têm MINI). */
+  pricesBySizeCode: Partial<Record<PizzaSizeCode, number>>;
   description?: string;
 }
 
 export interface PizzaCatalogSize {
   id: string;
-  code: string;
+  code: PizzaSizeCode;
   label: string;
-  priceCents: number;
+  fatias: number;
 }
 
 export interface PizzaCatalogBorder {
   id: string;
   label: string;
-  priceSmallCents: number;
-  priceLargeCents: number;
+  /** Preço por tamanho (P/M/G/F — nunca MINI), em centavos. */
+  pricesBySizeCode: Record<"P" | "M" | "G" | "F", number>;
+  available: boolean;
+}
+
+export interface PizzaCatalogAddOn {
+  id: string;
+  label: string;
+  /** Preço por tamanho (P/M/G/F — nunca MINI), em centavos. */
+  pricesBySizeCode: Record<"P" | "M" | "G" | "F", number>;
   available: boolean;
 }
 
@@ -54,47 +64,49 @@ export interface PizzaCatalog {
   sizes: PizzaCatalogSize[];
   flavors: PizzaCatalogFlavor[];
   borders: PizzaCatalogBorder[];
+  addOns: PizzaCatalogAddOn[];
 }
 
 function estaEsgotado(nome: string, esgotadosNorm: string[]): boolean {
   return esgotadosNorm.includes(norm(nome));
 }
 
+function toCatalogFlavor(flavor: OfficialPizzaFlavor, esgotadosNorm: string[], esgotadosIds: Set<string>): PizzaCatalogFlavor {
+  return {
+    id: flavor.id,
+    name: flavor.name,
+    category: flavor.category,
+    ingredients: flavor.ingredients,
+    aliases: flavor.aliases ?? [],
+    available: !estaEsgotado(flavor.name, esgotadosNorm) && !esgotadosIds.has(flavor.id),
+    pricesBySizeCode: flavor.pricesBySizeCode,
+  };
+}
+
 /**
- * Constrói o catálogo oficial de pizzas a partir do Menu já lido
- * (getMENUDinamico(), nunca de um valor vindo do cliente) e da lista de
- * esgotados atual (Redis, chave "esgotados" — mesma fonte usada pelo bot,
- * pelo cardápio do cliente e pela montagem manual). Não faz I/O.
+ * Constrói o catálogo oficial de pizzas — sabores, preços por tamanho
+ * (cardápio 2026, @/lib/catalog/officialMenu2026), bordas, adicionais — com
+ * disponibilidade em tempo real a partir de `esgotados` (Redis, nunca de um
+ * valor vindo do cliente). Não faz I/O.
  */
-export function buildPizzaCatalog(menu: Menu, esgotados: readonly string[] = []): PizzaCatalog {
-  const catalog = buildCatalog(menu);
+export function buildPizzaCatalog(_menu: Menu, esgotados: readonly string[] = [], idsEsgotados: readonly string[] = []): PizzaCatalog {
   const esgotadosNorm = esgotados.map(norm);
-
-  const tradicionais: PizzaCatalogFlavor[] = catalog.saltyFlavors.map((flavor) => ({
-    id: flavor.id,
-    name: flavor.name,
-    category: "tradicional",
-    aliases: APELIDOS_SABOR[flavor.name] ?? [],
-    available: !estaEsgotado(flavor.name, esgotadosNorm),
-  }));
-
-  const doces: PizzaCatalogFlavor[] = catalog.sweetFlavors.map((flavor) => ({
-    id: flavor.id,
-    name: flavor.name,
-    category: "doce",
-    aliases: APELIDOS_SABOR[flavor.name] ?? [],
-    available: !estaEsgotado(flavor.name, esgotadosNorm),
-  }));
+  const esgotadosIds = new Set(idsEsgotados);
 
   return {
-    sizes: catalog.sizes.map((size) => ({ id: size.id, code: size.code, label: size.label, priceCents: size.priceCents })),
-    flavors: [...tradicionais, ...doces],
-    borders: catalog.borders.map((border) => ({
+    sizes: PIZZA_SIZES.map((size) => ({ id: size.id, code: size.code, label: size.label, fatias: size.fatias })),
+    flavors: PIZZA_FLAVORS.map((flavor) => toCatalogFlavor(flavor, esgotadosNorm, esgotadosIds)),
+    borders: PIZZA_BORDERS.map((border) => ({
       id: border.id,
       label: border.label,
-      priceSmallCents: border.priceSmallCents,
-      priceLargeCents: border.priceLargeCents,
-      available: !estaEsgotado(border.label, esgotadosNorm),
+      pricesBySizeCode: border.pricesBySizeCode,
+      available: !estaEsgotado(border.label, esgotadosNorm) && !esgotadosIds.has(border.id),
+    })),
+    addOns: PIZZA_ADDONS.map((addOn) => ({
+      id: addOn.id,
+      label: addOn.label,
+      pricesBySizeCode: addOn.pricesBySizeCode,
+      available: !estaEsgotado(addOn.label, esgotadosNorm) && !esgotadosIds.has(addOn.id),
     })),
   };
 }

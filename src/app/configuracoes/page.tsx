@@ -2,6 +2,10 @@
 import { useEffect, useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import PanelShell from '@/components/PanelShell'
+
+// O catálogo comercial 2026 é versionado em código. O editor legado fica
+// preservado apenas para rollback técnico, nunca exposto como controle ativo.
+const EXIBIR_EDITOR_CARDAPIO_LEGADO = false
 import ThemeToggle from '@/components/ThemeToggle'
 
 type Config = {
@@ -704,6 +708,23 @@ export default function ConfiguracoesPage() {
             {aba === 'cardapio' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
 
+                {/* Aviso (cardápio oficial 2026): os campos abaixo (sabores,
+                    tamanhos, bordas, bebidas, sucos) são o cardápio LEGADO,
+                    gravado no Redis — só entram em vigor quando o cardápio
+                    oficial (código, @/lib/catalog/officialMenu2026) não
+                    carrega (fallback). Preço/produto/sabor reais que o
+                    cliente vê e paga vêm sempre do catálogo oficial em
+                    código; editar um preço aqui NÃO altera o preço oficial
+                    cobrado. Só Disponibilidade/Esgotados (painel do
+                    cardápio) afeta o catálogo oficial em tempo real. */}
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, background: 'color-mix(in srgb, var(--warning, orange) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--warning, orange) 40%, transparent)', borderRadius: 12, padding: '12px 14px' }}>
+                  <span style={{ fontSize: 18, flexShrink: 0 }}>⚠️</span>
+                  <div style={{ fontSize: 12.5, color: TEXT, lineHeight: 1.5 }}>
+                    <strong>Produtos e preços oficiais são protegidos.</strong> O cardápio comercial 2026 é versionado e não pode ser alterado nesta tela. Aqui você edita somente bairros e taxas de entrega. Para tirar um item de venda, use Disponibilidade/Esgotados no painel do cardápio.
+                  </div>
+                </div>
+
+                {EXIBIR_EDITOR_CARDAPIO_LEGADO && <>
                 {/* Sabores Salgados */}
                 <SectionCard>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: -4 }}>
@@ -793,6 +814,7 @@ export default function ConfiguracoesPage() {
                     <button onClick={() => adicionarBebida('sucos')} style={btnAdicionar}>+ Add</button>
                   </div>
                 </SectionCard>
+                </>}
 
                 {/* Bairros */}
                 <SectionCard>
@@ -818,6 +840,7 @@ export default function ConfiguracoesPage() {
                   </div>
                 </SectionCard>
 
+                {EXIBIR_EDITOR_CARDAPIO_LEGADO && <>
                 {/* Tamanhos */}
                 <SectionCard>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: -4 }}>
@@ -884,13 +907,14 @@ export default function ConfiguracoesPage() {
                     <p style={{ textAlign: 'center', color: mensagemCalzoneModo.includes('✅') ? 'var(--success)' : 'var(--danger)', fontWeight: 800, fontSize: 13, margin: 0 }}>{mensagemCalzoneModo}</p>
                   )}
                 </SectionCard>
+                </>}
 
                 <button
                   onClick={salvarCardapio}
                   disabled={salvando}
                   style={{ width: '100%', height: 56, background: salvando ? 'var(--background)' : `linear-gradient(180deg, ${ACCENT}, var(--primary))`, border: 'none', borderRadius: 14, color: 'var(--primary-foreground)', fontSize: 16, fontWeight: 900, cursor: salvando ? 'not-allowed' : 'pointer', fontFamily: FONT, letterSpacing: '-0.2px', opacity: salvando ? 0.6 : 1 }}
                 >
-                  {salvando ? 'Salvando...' : '💾 Salvar Cardápio'}
+                  {salvando ? 'Salvando...' : '💾 Salvar bairros e taxas'}
                 </button>
 
                 {mensagem && (

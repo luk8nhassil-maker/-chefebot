@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
 
 // A primeira mensagem de uma conversa nova nunca pode ficar sem resposta —
 // nem quando o bot está pausado (global ou porque a conversa já foi
@@ -60,10 +60,16 @@ function mensagensEnviadasAoCliente(): string[] {
 }
 
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  // 19h em São Paulo: o cenário "bot ligado" precisa testar a saudação de
+  // horário aberto independentemente da hora em que a suíte for executada.
+  vi.setSystemTime(new Date("2026-08-10T22:00:00.000Z"));
   store.clear();
   vi.clearAllMocks();
   enviarTextoWhatsAppMock.mockResolvedValue({ ok: true, latenciaMs: 1, tentativas: 1 });
 });
+
+afterEach(() => vi.useRealTimers());
 
 describe("bot global pausado (bot_ativo === false) + sem sessão prévia — primeira mensagem", () => {
   it("envia a saudação padrão automaticamente, mesmo sem ninguém assumir a conversa", async () => {

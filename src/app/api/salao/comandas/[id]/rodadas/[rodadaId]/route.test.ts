@@ -41,7 +41,7 @@ const CARDAPIO_TESTE_PIZZA = {
   sucos: [], neighborhoods: [],
 };
 const SIZE_G = "size-g";
-const FLAVOR_QUATRO_QUEIJOS = "flavor-quatro-queijos";
+const FLAVOR_4_QUEIJOS = "flavor-4-queijos"; // G = R$50 (cardápio oficial 2026)
 
 import { PATCH } from "./route";
 import { POST as criarRodadaRoute } from "../route";
@@ -175,12 +175,12 @@ describe("PATCH /api/salao/comandas/[id]/rodadas/[rodadaId]", () => {
       const token = await criarTokenSalao();
       const { comandaId, rodadaId } = await comandaComRodada2(token);
       const res = await PATCH(
-        req(token, { itens: [{ kind: "pizza", price: 0, qty: 1, pizzaSelection: { sizeId: SIZE_G, flavorIds: [FLAVOR_QUATRO_QUEIJOS] } }] }),
+        req(token, { itens: [{ kind: "pizza", price: 0, qty: 1, pizzaSelection: { sizeId: SIZE_G, flavorIds: [FLAVOR_4_QUEIJOS] } }] }),
         paramsFor(comandaId, rodadaId)
       );
       expect(res.status).toBe(200);
       const data = await res.json();
-      expect(data.rodada.itens[0].pizzaSelection).toEqual({ sizeId: SIZE_G, flavorIds: [FLAVOR_QUATRO_QUEIJOS] });
+      expect(data.rodada.itens[0].pizzaSelection).toEqual({ sizeId: SIZE_G, flavorIds: [FLAVOR_4_QUEIJOS] });
       expect(data.rodada.subtotal).toBe(50);
     });
 
@@ -189,13 +189,13 @@ describe("PATCH /api/salao/comandas/[id]/rodadas/[rodadaId]", () => {
       const token = await criarTokenSalao();
       const { comandaId, rodadaId } = await comandaComRodada2(token);
       await PATCH(
-        req(token, { itens: [{ kind: "pizza", price: 0, qty: 1, pizzaSelection: { sizeId: SIZE_G, flavorIds: [FLAVOR_QUATRO_QUEIJOS] } }] }),
+        req(token, { itens: [{ kind: "pizza", price: 0, qty: 1, pizzaSelection: { sizeId: SIZE_G, flavorIds: [FLAVOR_4_QUEIJOS] } }] }),
         paramsFor(comandaId, rodadaId)
       );
       const { buscarComanda } = await import("@/lib/comandas");
       const persistida = await buscarComanda(comandaId);
       const rodada2 = persistida?.rodadas?.find((r) => r.id === rodadaId);
-      expect(rodada2?.itens[0].pizzaSelection).toEqual({ sizeId: SIZE_G, flavorIds: [FLAVOR_QUATRO_QUEIJOS] });
+      expect(rodada2?.itens[0].pizzaSelection).toEqual({ sizeId: SIZE_G, flavorIds: [FLAVOR_4_QUEIJOS] });
     });
   });
 });

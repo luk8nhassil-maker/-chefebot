@@ -61,7 +61,7 @@ describe("Lanche por número — lista exibida bate com o item resolvido", () =>
 
   test('"7" resolve Porcao de Batatas', () => {
     const res = processMessage("7", abreLanches());
-    expect(res.session.cart.at(-1)?.name).toBe("Porcao de Batatas");
+    expect(res.session.cart.at(-1)?.name).toBe("Porção de Batatas");
   });
 });
 
@@ -73,27 +73,27 @@ describe("Sabor de pizza por número — com sabor esgotado antes do escolhido",
 
   test("sem esgotado: número 1 é o primeiro sabor salgado da lista", () => {
     const res = processMessage("1", abreFlavorComSize());
-    expect(res.session.currentFlavor).toBe("Calabresa");
+    expect(res.session.currentFlavor).toBe("Á Moda da Casa");
   });
 
   test("com o 1º sabor esgotado, número 1 vira o 2º sabor real (não desloca para o 1º, que sumiu da lista)", () => {
-    setEsgotados(["Calabresa"]);
+    setEsgotados(["Á Moda da Casa"]);
     const sess = abreFlavorComSize();
     // Lista exibida agora começa em "Frango Catupiry" (Calabresa sumiu)
     const listaMsg = processMessage("999", sess).messages.join("\n"); // resposta inválida reexibe a lista
-    expect(listaMsg).toContain("1. Frango Catupiry");
-    expect(listaMsg).not.toContain("Calabresa");
+    expect(listaMsg).toContain("1. Baiana");
+    expect(listaMsg).not.toContain("Á Moda da Casa");
 
     const res = processMessage("1", sess);
-    expect(res.session.currentFlavor).toBe("Frango Catupiry");
+    expect(res.session.currentFlavor).toBe("Baiana");
   });
 
   test("com o 1º sabor esgotado, número 2 (exibido) resolve para o 3º sabor real, não para o esgotado", () => {
-    setEsgotados(["Calabresa"]);
+    setEsgotados(["Á Moda da Casa"]);
     const sess = abreFlavorComSize();
     // Lista filtrada: 1. Frango Catupiry  2. Portuguesa  3. Carne Seca ...
     const res = processMessage("2", sess);
-    expect(res.session.currentFlavor).toBe("Portuguesa");
+    expect(res.session.currentFlavor).toBe("Frango com Chedder");
   });
 });
 
@@ -104,7 +104,7 @@ describe("Bebida por número — com bebida esgotada antes da escolhida", () => 
 
   test("sem esgotado: número 1 é a 1ª bebida da lista", () => {
     const res = processMessage("1", abreBebidas());
-    expect(res.session.cart.at(-1)?.name).toBe("Refrigerante 1L");
+    expect(res.session.cart.at(-1)?.name).toBe("Guaraná 1L");
   });
 
   // Nota: "número 1 vira a 2ª bebida real" não dá pra testar com input "1" puro aqui —
@@ -114,18 +114,18 @@ describe("Bebida por número — com bebida esgotada antes da escolhida", () => 
   // só não exercita o trecho corrigido. A seleção dupla abaixo testa exatamente esse trecho,
   // já que "1 e 2" não passa pelo casamento por nome.
   test("com a 1ª bebida esgotada, '1 e 2' resolve para a 2ª e a 3ª bebida real (lista filtrada)", () => {
-    setEsgotados(["Refrigerante 1L"]);
+    setEsgotados(["Guaraná 1L"]);
     const sess = abreBebidas();
     const res = processMessage("1 e 2", sess);
     const nomes = res.session.cart.slice(-2).map((i) => i.name);
-    expect(nomes).toEqual(["Refrigerante 1,5L", "Refrigerante 2L"]);
+    expect(nomes).toEqual(["Guaraná 1,5L", "Guaraná 2L"]);
   });
 
   test("com a 1ª bebida esgotada, número 2 (exibido) resolve para a 3ª bebida real", () => {
-    setEsgotados(["Refrigerante 1L"]);
+    setEsgotados(["Guaraná 1L"]);
     const sess = abreBebidas();
     const res = processMessage("2", sess);
-    expect(res.session.cart.at(-1)?.name).toBe("Refrigerante 2L");
+    expect(res.session.cart.at(-1)?.name).toBe("Guaraná 2L");
   });
 });
 
@@ -136,19 +136,19 @@ describe("Suco por número — com suco esgotado antes do escolhido", () => {
 
   test("sem esgotado: número 1 é o 1º suco da lista", () => {
     const res = processMessage("1", abreSucos());
-    expect(res.session.pendingSucosLeite?.[0]?.name ?? res.session.cart.at(-1)?.name).toBe("Caja");
+    expect(res.session.pendingSucosLeite?.[0]?.name ?? res.session.cart.at(-1)?.name).toBe("Cajá");
   });
 
   test("com o 1º suco esgotado, número 1 vira o 2º suco real", () => {
-    setEsgotados(["Caja"]);
+    setEsgotados(["Cajá"]);
     const sess = abreSucos();
     const res = processMessage("1", sess);
     const nome = res.session.pendingSucosLeite?.[0]?.name ?? res.session.cart.at(-1)?.name;
-    expect(nome).toBe("Caju");
+    expect(nome).toBe("Cajú");
   });
 
   test("com o 1º suco esgotado, número 2 (exibido) resolve para o 3º suco real", () => {
-    setEsgotados(["Caja"]);
+    setEsgotados(["Cajá"]);
     const sess = abreSucos();
     const res = processMessage("2", sess);
     const nome = res.session.pendingSucosLeite?.[0]?.name ?? res.session.cart.at(-1)?.name;
@@ -164,13 +164,13 @@ describe("Meio a meio por número — com sabor esgotado, os dois números batem
 
   test("sem esgotado: '1 e 2' resulta em Calabresa/Frango Catupiry", () => {
     const res = processMessage("1 e 2", abreFlavorComSize());
-    expect(res.session.currentFlavor).toBe("Calabresa/Frango Catupiry");
+    expect(res.session.currentFlavor).toBe("Á Moda da Casa/Baiana");
   });
 
   test("com o 1º sabor esgotado, '1 e 2' resulta nos dois primeiros da lista FILTRADA (Frango Catupiry/Portuguesa)", () => {
-    setEsgotados(["Calabresa"]);
+    setEsgotados(["Á Moda da Casa"]);
     const sess = abreFlavorComSize();
     const res = processMessage("1 e 2", sess);
-    expect(res.session.currentFlavor).toBe("Frango Catupiry/Portuguesa");
+    expect(res.session.currentFlavor).toBe("Baiana/Frango com Chedder");
   });
 });

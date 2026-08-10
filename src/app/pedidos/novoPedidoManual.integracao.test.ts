@@ -143,7 +143,7 @@ async function montarCarrinho(): Promise<{ menu: MenuManual; itens: ItemApp[] }>
   const produtos = listarProdutosManuais(menu);
   const pizza = construirItemManual(
     acharProduto(produtos, "pizza:g"),
-    { sabores: ["Chocolate", "Quatro Queijos"], borda: "Requeijão" },
+    { sabores: ["Chocolate", "4 Queijos"], borda: "Requeijão Cremoso" },
     menu
   );
   const refri = construirItemManual(acharProduto(produtos, "bebidas:refrigerante 2l"), selecaoVazia(), menu);
@@ -213,7 +213,7 @@ describe("montagem manual → POST /api/pedido-app", () => {
 
     expect(data.ok).toBe(true);
     // Pizza G meio a meio com borda grande (50 + 8) + refrigerante (12) = 70.
-    expect(totalTela.total).toBe(70);
+    expect(totalTela.total).toBe(72);
     expect(data.total).toBe(totalTela.total);
     expect(pedidosCriados()).toHaveLength(1);
   });
@@ -224,14 +224,14 @@ describe("montagem manual → POST /api/pedido-app", () => {
 
     const res = await POST(postReq(payload(adulterados)));
     const data = await res.json();
-    expect(data.total).toBe(70);
+    expect(data.total).toBe(72);
   });
 
   it("retirada não cobra taxa de entrega", async () => {
     const { itens } = await montarCarrinho();
     const res = await POST(postReq(payload(itens, { tipoEntrega: "retirada" })));
     const data = await res.json();
-    expect(data.total).toBe(70);
+    expect(data.total).toBe(72);
     expect(pedidosCriados()[0].taxaEntrega).toBeUndefined();
   });
 
@@ -242,8 +242,8 @@ describe("montagem manual → POST /api/pedido-app", () => {
     );
     const data = await res.json();
 
-    expect(data.total).toBe(77); // 70 + taxa 7
-    expect(calcularTotalManual(itens, menu, 7).total).toBe(77); // a tela previu o mesmo
+    expect(data.total).toBe(79); // 72 + taxa 7
+    expect(calcularTotalManual(itens, menu, 7).total).toBe(79); // a tela previu o mesmo
     expect(pedidosCriados()[0].taxaEntrega).toBe(7);
   });
 
@@ -263,14 +263,14 @@ describe("montagem manual → POST /api/pedido-app", () => {
 
   it("aceita pagamento misto na forma canônica do módulo central", async () => {
     const { itens } = await montarCarrinho();
-    const misto = "Pix (R$ 40,00) + Dinheiro (R$ 30,00)"; // fecha os R$ 70
+    const misto = "Pix (R$ 42,00) + Dinheiro (R$ 30,00)"; // fecha os R$ 72
     const res = await POST(postReq(payload(itens, { pagamento: misto, troco: "Sem troco" })));
     const data = await res.json();
 
     expect(data.ok).toBe(true);
     expect(pedidosCriados()[0].pagamento).toBe(misto);
     // A parte em Pix é a do misto, não o total do pedido.
-    expect((pedidosCriados()[0].pix as { valorEsperado: number }).valorEsperado).toBe(40);
+    expect((pedidosCriados()[0].pix as { valorEsperado: number }).valorEsperado).toBe(42);
   });
 
   it("pagamento com dinheiro sem troco informado é recusado", async () => {
@@ -314,7 +314,7 @@ describe("Fase 4 — pizza do pedido manual via pizzaSelection (IDs oficiais)", 
     const produtos = listarProdutosManuais(menu);
     const pizza = construirItemManual(
       acharProduto(produtos, "pizza:g"),
-      { sabores: ["Quatro Queijos"], borda: null },
+      { sabores: ["4 Queijos"], borda: null },
       menu
     )!;
     expect(pizza.pizzaSelection).toBeDefined();
@@ -324,8 +324,8 @@ describe("Fase 4 — pizza do pedido manual via pizzaSelection (IDs oficiais)", 
     const res = await POST(postReq(payload([pizza])));
     const data = await res.json();
     expect(data.ok).toBe(true);
-    expect(data.total).toBe(50); // Pizza G
-    expect(pedidosCriados()[0].itens).toEqual(["Pizza G Quatro Queijos"]);
+    expect(data.total).toBe(50); // cardápio oficial 2026 — 4 Queijos, tamanho G
+    expect(pedidosCriados()[0].itens).toEqual(["Pizza G 4 Queijos"]);
   });
 
   it("meio a meio com borda: pizzaSelection carrega os dois flavorIds e o borderId, snapshot oficial guarda os IDs", async () => {
@@ -362,9 +362,9 @@ describe("Fase 4 — pizza do pedido manual via pizzaSelection (IDs oficiais)", 
     const data = await res.json();
 
     expect(data.ok).toBe(true);
-    expect(data.total).toBe(70); // recalculado do catálogo, nunca 0.01 + refri
+    expect(data.total).toBe(72); // recalculado do catálogo, nunca 0.01 + refri
     // A LINHA persistida também vem do catálogo, nunca do name/detail forjado.
-    expect(pedidosCriados()[0].itens).toContain("Pizza G (meio a meio) Chocolate / Quatro Queijos · borda Requeijão");
+    expect(pedidosCriados()[0].itens).toContain("Pizza G (meio a meio) Chocolate / 4 Queijos · borda Requeijão Cremoso");
     expect(pedidosCriados()[0].itens).not.toContain("Pizza de Graça Qualquer coisa");
   });
 
@@ -422,7 +422,7 @@ describe("Fase 4 — pizza do pedido manual via pizzaSelection (IDs oficiais)", 
 
   it("borda que ficou esgotada entre a montagem e o envio é rejeitada (400)", async () => {
     const { itens } = await montarCarrinho();
-    store.set("esgotados", ["Requeijão"]);
+    store.set("esgotados", ["Requeijão Cremoso"]);
 
     const res = await POST(postReq(payload(itens)));
     expect(res.status).toBe(400);
@@ -434,7 +434,7 @@ describe("Fase 4 — pizza do pedido manual via pizzaSelection (IDs oficiais)", 
     const produtos = listarProdutosManuais(menu);
     const pizza = construirItemManual(
       acharProduto(produtos, "pizza:p"),
-      { sabores: ["Quatro Queijos"], borda: null },
+      { sabores: ["4 Queijos"], borda: null },
       menu,
       3
     )!;
@@ -443,7 +443,7 @@ describe("Fase 4 — pizza do pedido manual via pizzaSelection (IDs oficiais)", 
     const res = await POST(postReq(payload([pizza])));
     const data = await res.json();
     expect(data.ok).toBe(true);
-    expect(data.total).toBe(90); // Pizza P (30) x 3
+    expect(data.total).toBe(105); // cardápio oficial 2026 — 4 Queijos, tamanho P (35) x 3
   });
 
   it("observação é persistida normalmente junto de um pedido com pizza estruturada", async () => {

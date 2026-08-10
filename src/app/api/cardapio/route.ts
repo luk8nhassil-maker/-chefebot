@@ -7,7 +7,9 @@ import { verifyToken } from '@/lib/auth'
 import { registrarAuditoriaCardapio } from '@/lib/auditoriaCardapio'
 import {
   obterEsgotadosEfetivos,
+  obterEsgotadosLegado,
   obterEsgotadosMetadataEfetiva,
+  obterEstoqueItens,
   definirDisponibilidade,
   marcarRevisaoHoje,
 } from '@/lib/estoque'
@@ -229,7 +231,12 @@ export function validarCardapio(body: unknown): ResultadoValidacao {
 export async function GET() {
   try {
     const menu = await getMENUDinamico()
-    const esgotados = await obterEsgotadosEfetivos(menu)
+    const [esgotados, esgotadosLegado, estoqueItens] = await Promise.all([
+      obterEsgotadosEfetivos(menu),
+      obterEsgotadosLegado(),
+      obterEstoqueItens(),
+    ])
+    const esgotadosIds = Object.values(estoqueItens).filter(item => item.esgotado).map(item => item.id)
     const esgotadosMetadata = await obterEsgotadosMetadataEfetiva()
     const config = (await redis.get<ConfigHorario>('config:pizzaria')) || HORARIO_PADRAO
     const horario = {
@@ -242,7 +249,7 @@ export async function GET() {
     // (ver docs de entrega da Fase 2 sobre por que a interface não foi
     // religada nesta mesma etapa). Serve pra religar a UI depois sem precisar
     // reconstruir o catálogo em outro lugar.
-    const pizzaCatalog = buildPizzaCatalog(menu, esgotados)
+    const pizzaCatalog = buildPizzaCatalog(menu, esgotadosLegado, esgotadosIds)
     // Catálogo oficial dos demais produtos configuráveis, com IDs estáveis e
     // disponibilidade em tempo real (Fase 6) — aditivo, igual pizzaCatalog:
     // usado para montar `simpleSelection` (Calzone, Mini-Pizza, Macarronada,
@@ -250,8 +257,8 @@ export async function GET() {
     // existentes (menu.calzoneFlavors/miniPizzaFlavors), nunca inventadas
     // aqui. Ausência (resposta antiga em cache) faz esses itens caírem no
     // comportamento 100% legado (name/detail), nunca bloqueia o carrinho.
-    const catalog = buildSimpleCatalog(menu, esgotados)
-    return NextResponse.json({ ...menu, esgotados, esgotadosMetadata, horario, pizzaCatalog, catalog })
+    const catalog = buildSimpleCatalog(menu, esgotadosLegado, esgotadosIds)
+    return NextResponse.json({ ...menu, esgotados, esgotadosIds, esgotadosMetadata, horario, pizzaCatalog, catalog })
   } catch {
     return NextResponse.json(
       { ok: false, error: 'Cardápio temporariamente indisponível' },
@@ -292,7 +299,7 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ ok: false, error: 'Nao autorizado' }, { status: 401 })
     }
 
-    const { nome, esgotado, revisaoHoje } = await req.json()
+    const { id, nome, esgotado, revisaoHoje } = await req.json()
     if (!nome) return NextResponse.json({ ok: false, error: 'nome obrigatorio' }, { status: 400 })
 
     if (revisaoHoje) {
@@ -301,9 +308,12 @@ export async function PATCH(req: NextRequest) {
     }
 
     const menu = await getMENUDinamico()
-    const { esgotados: nova, esgotadosMetadata: metadata } = await definirDisponibilidade({ menu, nome, esgotado })
-    return NextResponse.json({ ok: true, esgotados: nova, esgotadosMetadata: metadata })
-  } catch {
+    const resultado = await definirDisponibilidade({ menu, id, nome, esgotado })
+    return NextResponse.json({ ok: true, ...resultado })
+  } catch (error) {
+    if (error instanceof Error && error.message === 'ID de catálogo inválido') {
+      return NextResponse.json({ ok: false, error: error.message }, { status: 400 })
+    }
     return NextResponse.json({ ok: false }, { status: 500 })
   }
 }
