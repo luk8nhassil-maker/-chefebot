@@ -315,11 +315,11 @@ describe("Macarronada — G/M/P/PP", () => {
     expect(produto.pricesBySizeCode).toEqual({ G: 5500, M: 4300, P: 3000, PP: 1700 });
   });
 
-  it("adicional opcional: Bacon OU Ovos, R$10,00 cada, no máximo 1", () => {
+  it("adicional opcional: Bacon OU Ovo, R$10,00 cada, no máximo 1", () => {
     expect(MACARRONADA_ADICIONAL_GRUPO.max).toBe(1);
     expect(MACARRONADA_ADICIONAL_GRUPO.options).toHaveLength(2);
     for (const opcao of MACARRONADA_ADICIONAL_GRUPO.options) {
-      expect(["Bacon", "Ovos"]).toContain(opcao.label);
+      expect(["Bacon", "Ovo"]).toContain(opcao.label);
       expect(opcao.priceCents).toBe(1000);
     }
   });
