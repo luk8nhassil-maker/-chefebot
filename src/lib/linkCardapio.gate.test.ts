@@ -16,7 +16,7 @@ import {
 import { resolverFallbackInteligente } from "./fallbackInteligente";
 
 const TEXTO_LINK =
-  "Se preferir ver o cardápio digital, é só acessar:\nhttps://chefedapizza.com.br/cardapio";
+  "Se preferir ver o cardápio digital, é só acessar:\nhttps://chefebot-pjif.vercel.app/cardapio";
 
 function historicoFake(over: Partial<ClienteHistorico> = {}): ClienteHistorico {
   return {
@@ -83,8 +83,8 @@ describe("gate central: entradas de pedido pelo fluxo determinístico", () => {
     const mensagem = res.messages.join("\n");
 
     expect(res.session.step).toBe("category");
-    expect(mensagem).toContain("https://chefedapizza.com.br/cardapio");
-    expect(mensagem).not.toContain("chefebot-pjif.vercel.app");
+    expect(mensagem).toContain("https://chefebot-pjif.vercel.app/cardapio");
+    expect(mensagem).not.toContain("chefedapizza.com.br");
     expect(mensagem).toContain("1. Pizza");
     expect(mensagem).toContain("2. Lanches");
     expect(mensagem).toContain("3. Bebidas");

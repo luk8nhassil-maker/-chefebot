@@ -107,13 +107,13 @@ describe("anexarTokenAoLinkCardapio", () => {
     const link = out.slice(out.indexOf("https://"));
     const url = new URL(link);
 
-    expect(url.origin).toBe("https://chefedapizza.com.br");
+    expect(url.origin).toBe("https://chefebot-pjif.vercel.app");
     expect(url.pathname).toBe("/cardapio");
     expect(url.searchParams.get("utm_source")).toBe("whatsapp");
     expect(url.searchParams.get("campanha")).toBe("julho");
     expect(url.searchParams.getAll("t")).toEqual([TOKEN]);
     expect(url.hash).toBe("#ofertas");
-    expect(link).not.toContain("chefedapizza.com.br//");
+    expect(link).not.toContain("chefebot-pjif.vercel.app//");
   });
 
   it("preserva um token existente mesmo quando ele não é o primeiro parâmetro", () => {
