@@ -224,6 +224,7 @@ export default function AdminPage() {
   const waExpiresAtRef = useRef<number | null>(null)
   const waAutoFetchingRef = useRef(false)
   const waLastAutoFetchAtRef = useRef(0)
+  const horarioSaveQueueRef = useRef<Promise<void>>(Promise.resolve())
   const mesAtual = new Date().toISOString().slice(0, 7)
   const mesLabel = new Date().toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
   const is24h = config.horaAbertura === 0 && config.horaFechamento === 24
@@ -540,13 +541,35 @@ export default function AdminPage() {
     setSalvando(false)
   }
 
-  const toggle24h = async () => {
-    const novaConfig = is24h ? { ...config, horaAbertura: 18, horaFechamento: 23 } : { ...config, horaAbertura: 0, horaFechamento: 24 }
+  const persistirHorario = (novaConfig: Config, mensagemSucesso = 'Horario atualizado!') => {
     setConfig(novaConfig)
-    try {
-      await fetch('/api/configuracoes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...novaConfig, limitePico }) })
-      msg(is24h ? 'Horario padrao!' : 'Aberto 24h!')
-    } catch { msg('Erro.') }
+    setSalvando(true)
+    horarioSaveQueueRef.current = horarioSaveQueueRef.current
+      .catch(() => undefined)
+      .then(async () => {
+        const res = await fetch('/api/configuracoes', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            horaAbertura: novaConfig.horaAbertura,
+            horaFechamento: novaConfig.horaFechamento,
+          }),
+        })
+        if (!res.ok) throw new Error('Falha ao atualizar horario')
+      })
+      .then(() => msg(mensagemSucesso))
+      .catch(() => msg('Erro ao atualizar horario.'))
+      .finally(() => setSalvando(false))
+  }
+
+  const atualizarHorario = (campo: 'horaAbertura' | 'horaFechamento', valor: number) => {
+    const novaConfig = { ...config, [campo]: valor }
+    persistirHorario(novaConfig)
+  }
+
+  const toggle24h = () => {
+    const novaConfig = is24h ? { ...config, horaAbertura: 18, horaFechamento: 23 } : { ...config, horaAbertura: 0, horaFechamento: 24 }
+    persistirHorario(novaConfig, is24h ? 'Horario padrao!' : 'Aberto 24h!')
   }
 
   const salvarFunc = async (username: string) => {
@@ -1083,11 +1106,11 @@ export default function AdminPage() {
               <div style={{ display: 'flex', gap: 10 }}>
                 <div style={{ flex: 1 }}>
                   <label style={{ color: 'var(--border-strong)', fontSize: 11, display: 'block', marginBottom: 4 }}>Abre as</label>
-                  <input type="number" min={0} max={23} value={config.horaAbertura} onChange={e => setConfig(p => ({ ...p, horaAbertura: Number(e.target.value) }))} style={inp} />
+                  <input type="number" min={0} max={23} value={config.horaAbertura} onChange={e => atualizarHorario('horaAbertura', Number(e.target.value))} style={inp} />
                 </div>
                 <div style={{ flex: 1 }}>
                   <label style={{ color: 'var(--border-strong)', fontSize: 11, display: 'block', marginBottom: 4 }}>Fecha as</label>
-                  <input type="number" min={0} max={24} value={config.horaFechamento} onChange={e => setConfig(p => ({ ...p, horaFechamento: Number(e.target.value) }))} style={inp} />
+                  <input type="number" min={1} max={24} value={config.horaFechamento} onChange={e => atualizarHorario('horaFechamento', Number(e.target.value))} style={inp} />
                 </div>
               </div>
             </div>

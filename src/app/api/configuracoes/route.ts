@@ -85,3 +85,29 @@ export async function POST(req: NextRequest) {
   }
   return NextResponse.json({ ok: true, config });
 }
+
+export async function PATCH(req: NextRequest) {
+  const auth = await checkAuth(req);
+  if (!auth) return NextResponse.json({ error: "Nao autorizado" }, { status: 401 });
+
+  const body = await req.json();
+  const horaAbertura = Number(body.horaAbertura);
+  const horaFechamento = Number(body.horaFechamento);
+  const horarioValido =
+    Number.isInteger(horaAbertura) &&
+    Number.isInteger(horaFechamento) &&
+    horaAbertura >= 0 &&
+    horaAbertura <= 23 &&
+    horaFechamento >= 1 &&
+    horaFechamento <= 24 &&
+    horaAbertura < horaFechamento;
+
+  if (!horarioValido) {
+    return NextResponse.json({ error: "Horario de funcionamento invalido" }, { status: 400 });
+  }
+
+  const existing = await redis.get<ConfigPizzaria>("config:pizzaria") ?? CONFIG_PADRAO;
+  const config: ConfigPizzaria = { ...existing, horaAbertura, horaFechamento };
+  await redis.set("config:pizzaria", config);
+  return NextResponse.json({ ok: true, config });
+}
