@@ -7,9 +7,9 @@ import {
   type ClienteHistorico,
 } from "./bot";
 
-const LINK_CARDAPIO = "https://chefedapizza.com.br/cardapio";
+const LINK_CARDAPIO = "https://chefebot-pjif.vercel.app/cardapio";
 const TEXTO_LINK_OBRIGATORIO =
-  "Se preferir ver o cardápio digital, é só acessar:\nhttps://chefedapizza.com.br/cardapio";
+  "Se preferir ver o cardápio digital, é só acessar:\nhttps://chefebot-pjif.vercel.app/cardapio";
 
 function historicoFake(overrides: Partial<ClienteHistorico> = {}): ClienteHistorico {
   return {
