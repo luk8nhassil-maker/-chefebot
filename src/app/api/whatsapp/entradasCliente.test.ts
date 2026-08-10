@@ -378,7 +378,7 @@ describe("13. montarMarcadorImagem/montarMarcadorDocumento — payload inseguro 
 });
 
 describe("14. domínio oficial do cardápio no WhatsApp real", () => {
-  const DOMINIO_ANTIGO = "chefebot-pjif.vercel.app";
+  const DOMINIO_NAO_CONFIGURADO = "chefedapizza.com.br";
 
   function configurarPizzariaAberta() {
     store.set("config:pizzaria", {
@@ -431,13 +431,13 @@ describe("14. domínio oficial do cardápio no WhatsApp real", () => {
     const link = extrairLinkOficial(texto);
     const url = new URL(link.href);
     expect(url.protocol).toBe("https:");
-    expect(url.origin).toBe("https://chefedapizza.com.br");
+    expect(url.origin).toBe("https://chefebot-pjif.vercel.app");
     expect(url.pathname).toBe("/cardapio");
     expect(url.searchParams.getAll("t")).toEqual([link.token]);
-    expect(texto).not.toContain(DOMINIO_ANTIGO);
+    expect(texto).not.toContain(DOMINIO_NAO_CONFIGURADO);
     expect(texto).not.toContain("chefebot-preview-123.vercel.app");
     expect(texto).not.toContain("localhost");
-    expect(texto).not.toContain("chefedapizza.com.br//");
+    expect(texto).not.toContain("chefebot-pjif.vercel.app//");
     return link;
   }
 
@@ -445,7 +445,7 @@ describe("14. domínio oficial do cardápio no WhatsApp real", () => {
     const textos = textosDoBot();
     expect(textos.length).toBeGreaterThan(0);
     for (const texto of textos) {
-      expect(texto).not.toContain(DOMINIO_ANTIGO);
+      expect(texto).not.toContain(DOMINIO_NAO_CONFIGURADO);
       expect(texto).not.toContain("chefebot-preview-123.vercel.app");
       expect(texto).not.toContain("localhost");
     }
