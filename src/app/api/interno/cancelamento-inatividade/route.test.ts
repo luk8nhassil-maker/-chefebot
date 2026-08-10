@@ -204,7 +204,7 @@ describe("/api/interno/cancelamento-inatividade — cancelamento efetivo", () =>
     expect(enviarTextoWhatsAppMock).toHaveBeenCalledTimes(1);
     const textoEnviado = enviarTextoWhatsAppMock.mock.calls[0][1];
     expect(textoEnviado).toContain("cardápio digital");
-    expect(textoEnviado).toContain("https://chefedapizza.com.br/cardapio");
+    expect(textoEnviado).toContain("https://chefebot-pjif.vercel.app/cardapio");
 
     expect(registrarMensagemMock).toHaveBeenCalledWith(PHONE, "bot", textoEnviado);
   });
