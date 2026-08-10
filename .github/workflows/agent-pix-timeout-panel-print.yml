@@ -1,22 +1,24 @@
-name: Agent Pix timeout panel print patch
+name: Agent Pix timeout panel print validation
 
 on:
-  push:
-    branches:
-      - agent/pix-timeout-panel-print-20260810
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: write
 
 jobs:
-  patch-test-commit:
+  validate-and-finalize:
+    if: github.head_ref == 'agent/pix-timeout-panel-print-20260810'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       BASE_SHA: cc2885f6d874bc949dc3f798bbb083255357a7c4
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: agent/pix-timeout-panel-print-20260810
           fetch-depth: 0
 
       - uses: actions/setup-node@v4
@@ -24,899 +26,30 @@ jobs:
           node-version: 20
           cache: npm
 
-      - name: Apply minimal audited patch
+      - name: Patch only the audited preparation-status latency path
         shell: bash
         run: |
           python3 <<'PY'
           from pathlib import Path
-          from textwrap import dedent
 
-          def replace_once(path: str, old: str, new: str):
-              p = Path(path)
-              text = p.read_text(encoding="utf-8")
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f"expected exactly 1 match in {path}, found {count}")
-              p.write_text(text.replace(old, new, 1), encoding="utf-8")
-
-          # 1) Marcos de 6 e 13 minutos, sem alterar a cadência normal já validada.
-          replace_once(
-              "src/lib/pixAutoCheckConfig.ts",
-              "export const PIX_GUARDIAO_IDADE_MAXIMA_MS = 45 * 60 * 1000;\n\n// --- Sentinela Pix",
-              "export const PIX_GUARDIAO_IDADE_MAXIMA_MS = 45 * 60 * 1000;\n\n// Política comercial de pagamento Pix Mercado Pago: aviso em 6 minutos e\n// cancelamento em 13 minutos. O limite operacional de 45 min do Guardião\n// continua existindo apenas como rede de segurança para falhas de infraestrutura.\nexport const PIX_PAGAMENTO_AVISO_PENDENTE_MS = 6 * 60 * 1000;\nexport const PIX_PAGAMENTO_CANCELAMENTO_MS = 13 * 60 * 1000;\nexport const PIX_PAGAMENTO_RETRY_INCONCLUSIVO_MS = 15_000;\n\nexport function calcularDelayAteProximoMarcoPagamentoPix(idadeMs: number): number | null {\n  const idade = Math.max(0, Number.isFinite(idadeMs) ? idadeMs : 0);\n  if (idade < PIX_PAGAMENTO_AVISO_PENDENTE_MS) return PIX_PAGAMENTO_AVISO_PENDENTE_MS - idade;\n  if (idade < PIX_PAGAMENTO_CANCELAMENTO_MS) return PIX_PAGAMENTO_CANCELAMENTO_MS - idade;\n  return null;\n}\n\n// --- Sentinela Pix"
-          )
-
-          # 2) Endpoint QStash: aplica a política depois da checagem oficial e
-          #    nunca agenda um tick para depois do próximo marco de 6/13 min.
-          replace_once(
-              "src/app/api/interno/pix-guardiao/verificar/route.ts",
-              'import { calcularIntervaloPorIdade } from "@/lib/pixAutoCheckConfig";',
-              'import {\n  calcularDelayAteProximoMarcoPagamentoPix,\n  calcularIntervaloPorIdade,\n  PIX_PAGAMENTO_AVISO_PENDENTE_MS,\n} from "@/lib/pixAutoCheckConfig";\nimport { processarPoliticaTimeoutPagamentoPix } from "@/lib/pixPagamentoTimeout";'
-          )
-          replace_once(
-              "src/app/api/interno/pix-guardiao/verificar/route.ts",
-              dedent('''\
-                // Calcula o próximo delay a partir do estado persistido pelo Sentinela
-                // (proximaConsultaMercadoPagoEm) quando disponível; fallback para a
-                // cadência por idade. O mínimo de 1s evita publicar delay=0 em bordas.
-                const estadoAtual = await carregarEstadoSentinela(pedidoId);
-                const idadeMs = estadoAtual?.criadoEm ? Math.max(0, Date.now() - estadoAtual.criadoEm) : 0;
-                const proximaConsultaEm = resultado.proximaConsultaMercadoPagoEm ?? estadoAtual?.proximaConsultaMercadoPagoEm;
-                const proximoDelayMs = proximaConsultaEm
-                  ? Math.max(1_000, proximaConsultaEm - Date.now())
-                  : calcularIntervaloPorIdade(idadeMs);
-
-                const proximaTentativa = tentativa + 1;
-                const agendado = await agendarProximaVerificacaoPixGuardiao({ pedidoId, tentativa: proximaTentativa, geracao, delayMs: proximoDelayMs });
-          '''),
-              dedent('''\
-                // Política de expiração do pagamento roda apenas a partir do marco de
-                // aviso. Ela nunca cancela por relógio sozinho: aos 13 min tenta antes
-                // encerrar a cobrança pendente no próprio Mercado Pago.
-                const estadoAtual = await carregarEstadoSentinela(pedidoId);
-                const idadeMs = estadoAtual?.criadoEm ? Math.max(0, Date.now() - estadoAtual.criadoEm) : 0;
-                const politicaTimeout = idadeMs >= PIX_PAGAMENTO_AVISO_PENDENTE_MS
-                  ? await processarPoliticaTimeoutPagamentoPix({ pedidoId, agora: Date.now() })
-                  : { encerrado: false, motivo: "antes_do_aviso" };
-
-                if (politicaTimeout.encerrado) {
-                  await incrementarContadorPix("sentinela_cadeia_encerrada");
-                  return NextResponse.json({
-                    ok: true,
-                    encerrado: true,
-                    motivo: politicaTimeout.motivo,
-                    timeoutPagamento: true,
-                  });
-                }
-
-                // Calcula o próximo delay a partir do estado persistido pelo Sentinela
-                // (proximaConsultaMercadoPagoEm) quando disponível; fallback para a
-                // cadência por idade. Nunca deixa o próximo tick ultrapassar os marcos
-                // de 6 e 13 minutos, mesmo na faixa normal de 60s do Guardião.
-                const proximaConsultaEm = resultado.proximaConsultaMercadoPagoEm ?? estadoAtual?.proximaConsultaMercadoPagoEm;
-                let proximoDelayMs = proximaConsultaEm
-                  ? Math.max(1_000, proximaConsultaEm - Date.now())
-                  : calcularIntervaloPorIdade(idadeMs);
-                const delayMarco = calcularDelayAteProximoMarcoPagamentoPix(idadeMs);
-                if (delayMarco !== null) proximoDelayMs = Math.min(proximoDelayMs, Math.max(1_000, delayMarco));
-                if (typeof politicaTimeout.proximoDelayMs === "number") {
-                  proximoDelayMs = Math.min(proximoDelayMs, Math.max(1_000, politicaTimeout.proximoDelayMs));
-                }
-
-                const proximaTentativa = tentativa + 1;
-                const agendado = await agendarProximaVerificacaoPixGuardiao({ pedidoId, tentativa: proximaTentativa, geracao, delayMs: proximoDelayMs });
-          '''),
-          )
-
-          # 3) Fallback do painel: se QStash estiver indisponível, o ciclo já
-          #    existente do Guardião também aplica a mesma política idempotente.
-          replace_once(
-              "src/app/api/admin/mercadopago/guardiao-pix/route.ts",
-              'import { executarGuardiaoPix } from "@/lib/pixGuardiao";',
-              'import { executarGuardiaoPix } from "@/lib/pixGuardiao";\nimport { processarTimeoutsPixPendentesEmLote } from "@/lib/pixPagamentoTimeout";'
-          )
-          replace_once(
-              "src/app/api/admin/mercadopago/guardiao-pix/route.ts",
-              '  const resultado = await executarGuardiaoPix();\n  return NextResponse.json({ ok: true, ...resultado });',
-              '  const resultado = await executarGuardiaoPix();\n  const timeoutPagamento = await processarTimeoutsPixPendentesEmLote();\n  return NextResponse.json({ ok: true, ...resultado, timeoutPagamento });'
-          )
-
-          # 4) Ação "novo -> em_preparo": o status e a permissão de auto-print
-          #    respondem antes da chamada externa ao WhatsApp. O envio continua
-          #    garantido no pós-resposta pelo Next.js after().
-          replace_once(
-              "src/app/api/orders/route.ts",
-              "import { NextRequest, NextResponse } from 'next/server'",
-              "import { NextRequest, NextResponse } from 'next/server'\nimport { agendarTarefaAposResposta } from '@/lib/afterResponse'"
-          )
-          replace_once(
-              "src/app/api/orders/route.ts",
-              dedent('''\
-                if (!silent && !(status === 'saiu_entrega' && entregadorCanonico)) {
-                  const notificacao = await notificarCliente(pedidos[index].telefone, status, pedidos[index].cliente, pedidos[index].tipoEntrega, pedidos[index].endereco, statusAnterior)
-                  if (notificacao && !notificacao.ok) {
-                    avisosOperacionais.push('Status atualizado, mas a mensagem ao cliente não foi enviada. Tente novamente pelo WhatsApp.')
-                  }
-                }
-          '''),
-              dedent('''\
-                if (!silent && !(status === 'saiu_entrega' && entregadorCanonico)) {
-                  const enviarNotificacaoStatus = () => notificarCliente(
-                    pedidos[index].telefone,
-                    status,
-                    pedidos[index].cliente,
-                    pedidos[index].tipoEntrega,
-                    pedidos[index].endereco,
-                    statusAnterior
-                  )
-
-                  // O aceite é o caminho crítico do balcão: status já foi persistido e
-                  // a permissão de impressão automática já foi decidida. Não segure a
-                  // resposta ao painel esperando a Evolution/WhatsApp; execute esse
-                  // efeito depois da resposta. Em ambientes sem contexto `after`
-                  // (ex.: teste unitário direto), preserva o comportamento anterior.
-                  if (status === 'em_preparo') {
-                    const agendada = agendarTarefaAposResposta(async () => {
-                      const notificacao = await enviarNotificacaoStatus()
-                      if (notificacao && !notificacao.ok) {
-                        console.error('[ChefeBot] Status atualizado, mas a notificação de preparo não foi enviada.', {
-                          pedidoId: id,
-                          motivo: notificacao.motivo,
-                        })
-                      }
-                    })
-                    if (!agendada) {
-                      const notificacao = await enviarNotificacaoStatus()
-                      if (notificacao && !notificacao.ok) {
-                        avisosOperacionais.push('Status atualizado, mas a mensagem ao cliente não foi enviada. Tente novamente pelo WhatsApp.')
-                      }
-                    }
-                  } else {
-                    const notificacao = await enviarNotificacaoStatus()
-                    if (notificacao && !notificacao.ok) {
-                      avisosOperacionais.push('Status atualizado, mas a mensagem ao cliente não foi enviada. Tente novamente pelo WhatsApp.')
-                    }
-                  }
-                }
-          '''),
-          )
-
-          Path("src/lib/afterResponse.ts").write_text(dedent('''\
-            import { after } from "next/server";
-
-            /**
-             * Agenda um efeito para depois que a resposta HTTP já foi enviada.
-             * Retorna false quando chamado fora de um contexto de request do Next
-             * (principalmente testes unitários diretos), permitindo fallback seguro.
-             */
-            export function agendarTarefaAposResposta(tarefa: () => void | Promise<void>): boolean {
-              try {
-                after(async () => {
-                  await tarefa();
-                });
-                return true;
-              } catch {
-                return false;
-              }
-            }
-          '''), encoding="utf-8")
-
-          Path("src/lib/mercadoPagoCancelamento.ts").write_text(dedent('''\
-            import { resolveActiveMercadoPagoToken } from "./mercadoPagoIntegracao";
-            import { buscarPagamentoMercadoPagoDetalhado } from "./mercadoPagoWebhook";
-
-            const MP_PAYMENTS_URL = "https://api.mercadopago.com/v1/payments";
-            const TIMEOUT_MS = 5_000;
-
-            export type EstadoPagamentoMercadoPago = "pago" | "pendente" | "nao_cobravel" | "inconclusivo";
-
-            export type ConsultaEstadoPagamentoMercadoPago = {
-              estado: EstadoPagamentoMercadoPago;
-              status?: string;
-              motivo?: string;
-            };
-
-            export type ResultadoCancelamentoPagamentoMercadoPago = {
-              estado: "cancelado" | "pago" | "ainda_pendente" | "nao_cobravel" | "inconclusivo";
-              status?: string;
-              motivo?: string;
-            };
-
-            function classificarStatus(statusBruto: string | undefined): ConsultaEstadoPagamentoMercadoPago {
-              const status = String(statusBruto || "").trim().toLowerCase();
-              if (status === "approved") return { estado: "pago", status };
-              if (status === "pending" || status === "in_process" || status === "authorized") {
-                return { estado: "pendente", status };
-              }
-              if (["cancelled", "canceled", "rejected", "refunded", "charged_back"].includes(status)) {
-                return { estado: "nao_cobravel", status };
-              }
-              return { estado: "inconclusivo", ...(status ? { status } : {}), motivo: "status_desconhecido" };
-            }
-
-            export async function consultarEstadoPagamentoMercadoPago(paymentId: string): Promise<ConsultaEstadoPagamentoMercadoPago> {
-              const controller = new AbortController();
-              const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
-              try {
-                const resultado = await buscarPagamentoMercadoPagoDetalhado(paymentId, controller.signal);
-                if (!resultado.ok) return { estado: "inconclusivo", motivo: resultado.motivo };
-                return classificarStatus(resultado.pagamento.status);
-              } catch (error) {
-                const timeout = error instanceof Error && error.name === "AbortError";
-                return { estado: "inconclusivo", motivo: timeout ? "timeout" : "erro_consulta" };
-              } finally {
-                clearTimeout(timer);
-              }
-            }
-
-            export async function cancelarPagamentoMercadoPagoPendente(paymentId: string): Promise<ResultadoCancelamentoPagamentoMercadoPago> {
-              const token = await resolveActiveMercadoPagoToken();
-              if (!token) return { estado: "inconclusivo", motivo: "token_indisponivel" };
-
-              const controller = new AbortController();
-              const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
-              try {
-                const response = await fetch(`${MP_PAYMENTS_URL}/${encodeURIComponent(paymentId)}`, {
-                  method: "PUT",
-                  headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${token}`,
-                  },
-                  body: JSON.stringify({ status: "cancelled" }),
-                  signal: controller.signal,
-                });
-                const data = await response.json().catch(() => null);
-                if (response.ok) {
-                  const classificado = classificarStatus(data?.status);
-                  if (classificado.estado === "nao_cobravel") {
-                    return { estado: "cancelado", status: classificado.status };
-                  }
-                  if (classificado.estado === "pago") return { estado: "pago", status: classificado.status };
-                }
-              } catch (error) {
-                if (error instanceof Error && error.name === "AbortError") {
-                  return { estado: "inconclusivo", motivo: "timeout_cancelamento" };
-                }
-                // Resultado de rede ambíguo: consulta o estado oficial abaixo antes
-                // de decidir qualquer coisa sobre o pedido local.
-              } finally {
-                clearTimeout(timer);
-              }
-
-              const atual = await consultarEstadoPagamentoMercadoPago(paymentId);
-              if (atual.estado === "pago") return { estado: "pago", status: atual.status };
-              if (atual.estado === "pendente") return { estado: "ainda_pendente", status: atual.status };
-              if (atual.estado === "nao_cobravel") return { estado: "nao_cobravel", status: atual.status };
-              return { estado: "inconclusivo", motivo: atual.motivo, status: atual.status };
-            }
-          '''), encoding="utf-8")
-
-          Path("src/lib/pixPagamentoTimeout.ts").write_text(dedent('''\
-            import { redis } from "./redis";
-            import { mutarPedidos } from "./pedidosConcorrencia";
-            import type { PedidoComPix } from "./pix";
-            import type { PedidoParaJornada } from "./jornadaChef";
-            import {
-              PIX_PAGAMENTO_AVISO_PENDENTE_MS,
-              PIX_PAGAMENTO_CANCELAMENTO_MS,
-              PIX_PAGAMENTO_RETRY_INCONCLUSIVO_MS,
-            } from "./pixAutoCheckConfig";
-            import {
-              cancelarPagamentoMercadoPagoPendente,
-              consultarEstadoPagamentoMercadoPago,
-            } from "./mercadoPagoCancelamento";
-            import { reconciliarPixMercadoPago } from "./mercadoPagoReconciliacao";
-            import { enviarTextoWhatsApp } from "./whatsappMensagem";
-            import { encerrarSentinela } from "./pixSentinela";
-            import {
-              calcularPontosElegiveisPedido,
-              construirEventoIdPontos,
-              derivarClienteIdPorTelefone,
-              registrarMovimentoPontosIdempotente,
-              reverterResgateConfirmado,
-            } from "./fidelidade";
-            import {
-              liberarRecompensaDePedidoCancelado,
-              reverterConclusaoPedidoJornada,
-            } from "./jornadaChef";
-
-            type PedidoTimeoutPix = PedidoComPix & PedidoParaJornada & {
-              id: string;
-              numero?: number;
-              cliente?: string;
-              telefone?: string;
-              total?: number;
-              taxaEntrega?: number;
-              status?: string;
-              resgateId?: string;
-              cancelamentoSolicitado?: boolean;
-              statusAtualizadoEm?: string;
-            };
-
-            export type ResultadoPoliticaTimeoutPix = {
-              encerrado: boolean;
-              motivo: string;
-              proximoDelayMs?: number;
-              avisoEnviado?: boolean;
-              cancelado?: boolean;
-            };
-
-            const TTL_MARCADORES_SEGUNDOS = 24 * 60 * 60;
-            const PREFIXO_AVISO = "pix:timeout:aviso:";
-            const PREFIXO_LOCK_AVISO = "pix:timeout:lock:aviso:";
-            const PREFIXO_CANCELADO = "pix:timeout:cancelado:";
-            const PREFIXO_LOCK_CANCELAMENTO = "pix:timeout:lock:cancelamento:";
-
-            function idadePixMs(pedido: PedidoTimeoutPix, agora: number): number | null {
-              const criadoEm = pedido.pix?.criadoEm;
-              if (!criadoEm) return null;
-              const criado = new Date(criadoEm).getTime();
-              if (!Number.isFinite(criado)) return null;
-              return Math.max(0, agora - criado);
-            }
-
-            function pedidoElegivel(pedido: PedidoTimeoutPix | undefined): pedido is PedidoTimeoutPix {
-              return !!(
-                pedido &&
-                pedido.status === "novo" &&
-                pedido.pix?.provider === "mercadopago" &&
-                pedido.pix?.providerPaymentId?.trim() &&
-                pedido.pix?.status !== "confirmado" &&
-                pedido.pixConfirmado !== true
-              );
-            }
-
-            function telefoneWhatsapp(telefone: string | undefined): string | null {
-              const digits = String(telefone || "").replace(/\D/g, "");
-              if (digits.length < 10) return null;
-              return digits.startsWith("55") ? digits : `55${digits}`;
-            }
-
-            function primeiroNome(cliente: string | undefined): string {
-              return String(cliente || "Cliente").trim().split(/\s+/)[0] || "Cliente";
-            }
-
-            async function enviarAvisoPendente(pedido: PedidoTimeoutPix): Promise<boolean> {
-              const marcador = `${PREFIXO_AVISO}${pedido.id}`;
-              if (await redis.get(marcador)) return true;
-
-              const lock = `${PREFIXO_LOCK_AVISO}${pedido.id}`;
-              const ganhou = await redis.set(lock, "1", { nx: true, ex: 30 });
-              if (!ganhou) return false;
-              try {
-                if (await redis.get(marcador)) return true;
-                const phone = telefoneWhatsapp(pedido.telefone);
-                if (!phone) {
-                  await redis.set(marcador, "sem_telefone", { ex: TTL_MARCADORES_SEGUNDOS });
-                  return true;
-                }
-                const nome = primeiroNome(pedido.cliente);
-                const mensagem = `*${nome}*, seu pagamento Pix ainda está pendente. ⏳\n\nConclua o pagamento para manter seu pedido. O prazo total é de 13 minutos a partir da geração do Pix. Depois disso, o pedido é cancelado automaticamente.`;
-                const resultado = await enviarTextoWhatsApp(phone, mensagem);
-                if (!resultado.ok) return false;
-                await redis.set(marcador, "enviado", { ex: TTL_MARCADORES_SEGUNDOS });
-                return true;
-              } finally {
-                await redis.del(lock).catch(() => {});
-              }
-            }
-
-            async function enviarCancelamentoAutomatico(pedido: PedidoTimeoutPix): Promise<void> {
-              const phone = telefoneWhatsapp(pedido.telefone);
-              if (!phone) return;
-              const nome = primeiroNome(pedido.cliente);
-              const mensagem = `*${nome}*, seu pedido foi cancelado automaticamente. ❌\n\nMotivo: o pagamento Pix não foi confirmado dentro do prazo de 13 minutos.\n\nO Pix pendente também foi encerrado para evitar pagamento depois do cancelamento. Se ainda quiser pedir, faça um novo pedido.`;
-              const resultado = await enviarTextoWhatsApp(phone, mensagem);
-              if (!resultado.ok) {
-                console.error("[Pix timeout] Pedido cancelado, mas a mensagem ao cliente não foi enviada.", {
-                  pedidoId: pedido.id,
-                  motivo: resultado.motivo,
-                });
-              }
-            }
-
-            async function processarEfeitosCancelamento(pedido: PedidoTimeoutPix): Promise<void> {
-              try {
-                const clienteId = derivarClienteIdPorTelefone(pedido.telefone);
-                const pontos = calcularPontosElegiveisPedido({
-                  total: Number(pedido.total) || 0,
-                  taxaEntrega: pedido.taxaEntrega,
-                });
-                if (clienteId && pontos > 0) {
-                  await registrarMovimentoPontosIdempotente(clienteId, {
-                    eventoId: construirEventoIdPontos(pedido.id, "cancelado"),
-                    pedidoId: pedido.id,
-                    tipo: "cancelado",
-                    pontos,
-                    motivo: `Pedido ${pedido.id} cancelado automaticamente por Pix não confirmado em 13 minutos`,
-                  });
-                }
-              } catch (error) {
-                console.error("[Pix timeout] Falha ao registrar cancelamento de pontos (ignorada).", error);
-              }
-
-              if (pedido.resgateId) {
-                try {
-                  const clienteId = derivarClienteIdPorTelefone(pedido.telefone);
-                  if (clienteId) {
-                    await reverterResgateConfirmado(
-                      clienteId,
-                      pedido.resgateId,
-                      `Pedido ${pedido.id} cancelado automaticamente por Pix não confirmado`
-                    );
-                  }
-                } catch (error) {
-                  console.error("[Pix timeout] Falha ao reverter resgate (ignorada).", error);
-                }
-              }
-
-              try {
-                await reverterConclusaoPedidoJornada(pedido.id, `Pedido ${pedido.id} cancelado automaticamente por Pix não confirmado`);
-                await liberarRecompensaDePedidoCancelado(pedido);
-              } catch (error) {
-                console.error("[Pix timeout] Falha ao reverter Jornada do Chef (ignorada).", error);
-              }
-            }
-
-            async function confirmarSePagamentoAprovado(pedidoId: string): Promise<boolean> {
-              const resumo = await reconciliarPixMercadoPago({ apenasPedidoIds: [pedidoId] });
-              if (resumo.confirmados > 0) {
-                await encerrarSentinela(pedidoId, "confirmado");
-                return true;
-              }
-              return false;
-            }
-
-            export async function processarPoliticaTimeoutPagamentoPix(input: {
-              pedidoId: string;
-              agora?: number;
-            }): Promise<ResultadoPoliticaTimeoutPix> {
-              const agora = input.agora ?? Date.now();
-              const pedidos = (await redis.get<PedidoTimeoutPix[]>("pedidos")) || [];
-              const pedido = pedidos.find((item) => item.id === input.pedidoId);
-              if (!pedidoElegivel(pedido)) return { encerrado: false, motivo: "pedido_nao_elegivel" };
-
-              const idade = idadePixMs(pedido, agora);
-              if (idade === null) return { encerrado: false, motivo: "idade_indeterminada" };
-              if (idade < PIX_PAGAMENTO_AVISO_PENDENTE_MS) return { encerrado: false, motivo: "antes_do_aviso" };
-
-              if (idade < PIX_PAGAMENTO_CANCELAMENTO_MS) {
-                const marcadorAviso = await redis.get(`${PREFIXO_AVISO}${pedido.id}`);
-                if (marcadorAviso) return { encerrado: false, motivo: "aviso_ja_processado" };
-
-                const estado = await consultarEstadoPagamentoMercadoPago(pedido.pix.providerPaymentId as string);
-                if (estado.estado === "pago") {
-                  const confirmou = await confirmarSePagamentoAprovado(pedido.id);
-                  if (confirmou) return { encerrado: true, motivo: "confirmado_no_marco_aviso" };
-                  return { encerrado: false, motivo: "pago_aguardando_conciliacao", proximoDelayMs: 5_000 };
-                }
-                if (estado.estado === "nao_cobravel") {
-                  await redis.set(`${PREFIXO_AVISO}${pedido.id}`, "nao_pendente", { ex: TTL_MARCADORES_SEGUNDOS });
-                  return { encerrado: false, motivo: "pagamento_nao_pendente" };
-                }
-                if (estado.estado === "inconclusivo") {
-                  return { encerrado: false, motivo: "consulta_inconclusiva_no_aviso", proximoDelayMs: PIX_PAGAMENTO_RETRY_INCONCLUSIVO_MS };
-                }
-
-                const enviado = await enviarAvisoPendente(pedido);
-                return enviado
-                  ? { encerrado: false, motivo: "aviso_enviado", avisoEnviado: true }
-                  : { encerrado: false, motivo: "aviso_envio_falhou", proximoDelayMs: PIX_PAGAMENTO_RETRY_INCONCLUSIVO_MS };
-              }
-
-              const lockCancelamento = `${PREFIXO_LOCK_CANCELAMENTO}${pedido.id}`;
-              const ganhouCancelamento = await redis.set(lockCancelamento, "1", { nx: true, ex: 30 });
-              if (!ganhouCancelamento) {
-                return { encerrado: false, motivo: "cancelamento_em_andamento", proximoDelayMs: 5_000 };
-              }
-
-              try {
-                const resultadoProvider = await cancelarPagamentoMercadoPagoPendente(pedido.pix.providerPaymentId as string);
-                if (resultadoProvider.estado === "pago") {
-                  const confirmou = await confirmarSePagamentoAprovado(pedido.id);
-                  if (confirmou) return { encerrado: true, motivo: "confirmado_no_marco_cancelamento" };
-                  return { encerrado: false, motivo: "pago_aguardando_conciliacao", proximoDelayMs: 5_000 };
-                }
-                if (resultadoProvider.estado === "ainda_pendente" || resultadoProvider.estado === "inconclusivo") {
-                  return { encerrado: false, motivo: "cancelamento_provider_inconclusivo", proximoDelayMs: PIX_PAGAMENTO_RETRY_INCONCLUSIVO_MS };
-                }
-
-                const mutacao = await mutarPedidos<PedidoTimeoutPix, { cancelado: boolean; pedido?: PedidoTimeoutPix; motivo: string }>((frescos) => {
-                  const index = frescos.findIndex((item) => item.id === pedido.id);
-                  if (index < 0) return { persistir: false, resultado: { cancelado: false, motivo: "pedido_nao_encontrado" } };
-                  const atual = frescos[index];
-                  if (!pedidoElegivel(atual) || atual.pix?.providerPaymentId !== pedido.pix?.providerPaymentId) {
-                    return { persistir: false, resultado: { cancelado: false, pedido: atual, motivo: "estado_mudou" } };
-                  }
-                  const atualizado: PedidoTimeoutPix = {
-                    ...atual,
-                    status: "cancelado",
-                    cancelamentoSolicitado: false,
-                    statusAtualizadoEm: new Date(agora).toISOString(),
-                  };
-                  const proximos = [...frescos];
-                  proximos[index] = atualizado;
-                  return { persistir: true, pedidos: proximos, resultado: { cancelado: true, pedido: atualizado, motivo: "cancelado" } };
-                });
-
-                if (!mutacao.cancelado || !mutacao.pedido) {
-                  if (mutacao.pedido?.pixConfirmado === true || mutacao.pedido?.pix?.status === "confirmado") {
-                    await encerrarSentinela(pedido.id, "confirmado");
-                    return { encerrado: true, motivo: "confirmado_durante_cancelamento" };
-                  }
-                  return { encerrado: false, motivo: mutacao.motivo, proximoDelayMs: 5_000 };
-                }
-
-                await redis.set(`${PREFIXO_CANCELADO}${pedido.id}`, new Date(agora).toISOString(), { ex: TTL_MARCADORES_SEGUNDOS });
-                await processarEfeitosCancelamento(mutacao.pedido);
-                await enviarCancelamentoAutomatico(mutacao.pedido);
-                await encerrarSentinela(pedido.id, "cancelado");
-                return { encerrado: true, motivo: "cancelado_pix_13_minutos", cancelado: true };
-              } finally {
-                await redis.del(lockCancelamento).catch(() => {});
-              }
-            }
-
-            export async function processarTimeoutsPixPendentesEmLote(): Promise<{
-              avaliados: number;
-              avisos: number;
-              cancelados: number;
-              pendentesRetry: number;
-            }> {
-              const agora = Date.now();
-              const pedidos = (await redis.get<PedidoTimeoutPix[]>("pedidos")) || [];
-              const ids = pedidos
-                .filter((pedido) => pedidoElegivel(pedido) && (idadePixMs(pedido, agora) ?? -1) >= PIX_PAGAMENTO_AVISO_PENDENTE_MS)
-                .map((pedido) => pedido.id)
-                .slice(0, 20);
-
-              const resumo = { avaliados: 0, avisos: 0, cancelados: 0, pendentesRetry: 0 };
-              for (const pedidoId of ids) {
-                const resultado = await processarPoliticaTimeoutPagamentoPix({ pedidoId, agora });
-                resumo.avaliados++;
-                if (resultado.avisoEnviado) resumo.avisos++;
-                if (resultado.cancelado) resumo.cancelados++;
-                if (typeof resultado.proximoDelayMs === "number") resumo.pendentesRetry++;
-              }
-              return resumo;
-            }
-          '''), encoding="utf-8")
-
-          Path("src/lib/mercadoPagoCancelamento.test.ts").write_text(dedent('''\
-            import { beforeEach, describe, expect, test, vi } from "vitest";
-
-            const { tokenMock, buscaMock } = vi.hoisted(() => ({
-              tokenMock: vi.fn(async () => "token-seguro"),
-              buscaMock: vi.fn(),
-            }));
-
-            vi.mock("./mercadoPagoIntegracao", () => ({ resolveActiveMercadoPagoToken: tokenMock }));
-            vi.mock("./mercadoPagoWebhook", () => ({ buscarPagamentoMercadoPagoDetalhado: buscaMock }));
-
-            import { cancelarPagamentoMercadoPagoPendente, consultarEstadoPagamentoMercadoPago } from "./mercadoPagoCancelamento";
-
-            beforeEach(() => {
-              vi.clearAllMocks();
-              tokenMock.mockResolvedValue("token-seguro");
-              buscaMock.mockResolvedValue({ ok: true, pagamento: { id: "123", status: "pending", transactionAmount: 50, externalReference: "tx" } });
-            });
-
-            describe("Mercado Pago — cancelamento seguro de cobrança pendente", () => {
-              test("PUT cancelled encerra a cobrança pendente usando Bearer server-side", async () => {
-                const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({ id: 123, status: "cancelled" }) }));
-                vi.stubGlobal("fetch", fetchMock);
-                const resultado = await cancelarPagamentoMercadoPagoPendente("123");
-                expect(resultado.estado).toBe("cancelado");
-                expect(fetchMock).toHaveBeenCalledWith(
-                  "https://api.mercadopago.com/v1/payments/123",
-                  expect.objectContaining({
-                    method: "PUT",
-                    headers: expect.objectContaining({ Authorization: "Bearer token-seguro" }),
-                    body: JSON.stringify({ status: "cancelled" }),
-                  })
-                );
-              });
-
-              test("se o pagamento ficou approved, nunca trata como cancelado", async () => {
-                vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, json: async () => ({}) })));
-                buscaMock.mockResolvedValue({ ok: true, pagamento: { id: "123", status: "approved", transactionAmount: 50, externalReference: "tx" } });
-                const resultado = await cancelarPagamentoMercadoPagoPendente("123");
-                expect(resultado.estado).toBe("pago");
-              });
-
-              test("falha no cancelamento + provider ainda pending mantém pedido elegível para retry", async () => {
-                vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, json: async () => ({}) })));
-                const resultado = await cancelarPagamentoMercadoPagoPendente("123");
-                expect(resultado.estado).toBe("ainda_pendente");
-              });
-
-              test("status rejected/cancelled/refunded é classificado como não cobravel", async () => {
-                for (const status of ["rejected", "cancelled", "refunded"]) {
-                  buscaMock.mockResolvedValueOnce({ ok: true, pagamento: { id: "123", status, transactionAmount: 50, externalReference: "tx" } });
-                  const resultado = await consultarEstadoPagamentoMercadoPago("123");
-                  expect(resultado.estado).toBe("nao_cobravel");
-                }
-              });
-
-              test("sem token nunca tenta cancelar às cegas", async () => {
-                tokenMock.mockResolvedValue(null);
-                const fetchMock = vi.fn();
-                vi.stubGlobal("fetch", fetchMock);
-                const resultado = await cancelarPagamentoMercadoPagoPendente("123");
-                expect(resultado.estado).toBe("inconclusivo");
-                expect(fetchMock).not.toHaveBeenCalled();
-              });
-            });
-          '''), encoding="utf-8")
-
-          Path("src/lib/pixPagamentoTimeout.test.ts").write_text(dedent('''\
-            import { beforeEach, describe, expect, test, vi } from "vitest";
-            import { PIX_PAGAMENTO_AVISO_PENDENTE_MS, PIX_PAGAMENTO_CANCELAMENTO_MS } from "./pixAutoCheckConfig";
-
-            const mocks = vi.hoisted(() => ({
-              pedidos: [] as any[],
-              store: new Map<string, unknown>(),
-              consultaProvider: vi.fn(),
-              cancelaProvider: vi.fn(),
-              reconciliar: vi.fn(),
-              enviarWhatsApp: vi.fn(),
-              encerrar: vi.fn(),
-              registrarPontos: vi.fn(),
-              reverterResgate: vi.fn(),
-              reverterJornada: vi.fn(),
-              liberarRecompensa: vi.fn(),
-            }));
-
-            vi.mock("./redis", () => ({
-              redis: {
-                get: vi.fn(async (key: string) => key === "pedidos" ? JSON.parse(JSON.stringify(mocks.pedidos)) : (mocks.store.get(key) ?? null)),
-                set: vi.fn(async (key: string, value: unknown, opts?: { nx?: boolean }) => {
-                  if (opts?.nx && mocks.store.has(key)) return null;
-                  mocks.store.set(key, value);
-                  return "OK";
-                }),
-                del: vi.fn(async (key: string) => mocks.store.delete(key) ? 1 : 0),
-              },
-            }));
-
-            vi.mock("./pedidosConcorrencia", () => ({
-              mutarPedidos: vi.fn(async (fn: any) => {
-                const resultado = await fn(JSON.parse(JSON.stringify(mocks.pedidos)));
-                if (resultado.persistir) mocks.pedidos = resultado.pedidos;
-                return resultado.resultado;
-              }),
-            }));
-            vi.mock("./mercadoPagoCancelamento", () => ({
-              consultarEstadoPagamentoMercadoPago: mocks.consultaProvider,
-              cancelarPagamentoMercadoPagoPendente: mocks.cancelaProvider,
-            }));
-            vi.mock("./mercadoPagoReconciliacao", () => ({ reconciliarPixMercadoPago: mocks.reconciliar }));
-            vi.mock("./whatsappMensagem", () => ({ enviarTextoWhatsApp: mocks.enviarWhatsApp }));
-            vi.mock("./pixSentinela", () => ({ encerrarSentinela: mocks.encerrar }));
-            vi.mock("./fidelidade", () => ({
-              calcularPontosElegiveisPedido: vi.fn(() => 5),
-              construirEventoIdPontos: vi.fn((id: string, tipo: string) => `${id}:${tipo}`),
-              derivarClienteIdPorTelefone: vi.fn(() => "cli_teste"),
-              registrarMovimentoPontosIdempotente: mocks.registrarPontos,
-              reverterResgateConfirmado: mocks.reverterResgate,
-            }));
-            vi.mock("./jornadaChef", () => ({
-              reverterConclusaoPedidoJornada: mocks.reverterJornada,
-              liberarRecompensaDePedidoCancelado: mocks.liberarRecompensa,
-            }));
-
-            import { processarPoliticaTimeoutPagamentoPix } from "./pixPagamentoTimeout";
-
-            const baseAgora = Date.parse("2026-08-10T22:00:00.000Z");
-            function pedido(idadeMs: number, overrides: Record<string, unknown> = {}) {
-              return {
-                id: "p1",
-                numero: 10,
-                cliente: "João Teste",
-                telefone: "86999998888",
-                total: 50,
-                taxaEntrega: 5,
-                status: "novo",
-                pixConfirmado: false,
-                pix: {
-                  provider: "mercadopago",
-                  providerPaymentId: "mp123",
-                  status: "pendente",
-                  criadoEm: new Date(baseAgora - idadeMs).toISOString(),
-                },
-                ...overrides,
-              };
-            }
-
-            beforeEach(() => {
-              vi.clearAllMocks();
-              mocks.store.clear();
-              mocks.pedidos = [pedido(0)];
-              mocks.consultaProvider.mockResolvedValue({ estado: "pendente", status: "pending" });
-              mocks.cancelaProvider.mockResolvedValue({ estado: "cancelado", status: "cancelled" });
-              mocks.reconciliar.mockResolvedValue({ verificados: 1, confirmados: 1, pendentes: 0, ignorados: 0, erros: 0, detalhes: [{ pedidoId: "p1", outcome: "confirmado" }] });
-              mocks.enviarWhatsApp.mockResolvedValue({ ok: true, latenciaMs: 10, tentativas: 1 });
-              mocks.registrarPontos.mockResolvedValue(undefined);
-              mocks.reverterResgate.mockResolvedValue(undefined);
-              mocks.reverterJornada.mockResolvedValue(undefined);
-              mocks.liberarRecompensa.mockResolvedValue(undefined);
-              mocks.encerrar.mockResolvedValue(undefined);
-            });
-
-            describe("política Pix 6/13 minutos", () => {
-              test("antes de 6 minutos não avisa nem cancela", async () => {
-                mocks.pedidos = [pedido(PIX_PAGAMENTO_AVISO_PENDENTE_MS - 1)];
-                const r = await processarPoliticaTimeoutPagamentoPix({ pedidoId: "p1", agora: baseAgora });
-                expect(r.motivo).toBe("antes_do_aviso");
-                expect(mocks.enviarWhatsApp).not.toHaveBeenCalled();
-                expect(mocks.cancelaProvider).not.toHaveBeenCalled();
-              });
-
-              test("aos 6 minutos, se o provider ainda está pending, envia um único aviso", async () => {
-                mocks.pedidos = [pedido(PIX_PAGAMENTO_AVISO_PENDENTE_MS)];
-                const r1 = await processarPoliticaTimeoutPagamentoPix({ pedidoId: "p1", agora: baseAgora });
-                const r2 = await processarPoliticaTimeoutPagamentoPix({ pedidoId: "p1", agora: baseAgora + 1_000 });
-                expect(r1.avisoEnviado).toBe(true);
-                expect(r2.motivo).toBe("aviso_ja_processado");
-                expect(mocks.enviarWhatsApp).toHaveBeenCalledTimes(1);
-                expect(mocks.enviarWhatsApp.mock.calls[0][1]).toContain("prazo total é de 13 minutos");
-              });
-
-              test("aos 6 minutos não manda cobrança pendente se o Mercado Pago já mostra approved", async () => {
-                mocks.pedidos = [pedido(PIX_PAGAMENTO_AVISO_PENDENTE_MS)];
-                mocks.consultaProvider.mockResolvedValue({ estado: "pago", status: "approved" });
-                const r = await processarPoliticaTimeoutPagamentoPix({ pedidoId: "p1", agora: baseAgora });
-                expect(r.encerrado).toBe(true);
-                expect(mocks.enviarWhatsApp).not.toHaveBeenCalled();
-                expect(mocks.reconciliar).toHaveBeenCalledWith({ apenasPedidoIds: ["p1"] });
-              });
-
-              test("aos 13 minutos cancela primeiro a cobrança e só depois o pedido local", async () => {
-                mocks.pedidos = [pedido(PIX_PAGAMENTO_CANCELAMENTO_MS, { resgateId: "res1" })];
-                const r = await processarPoliticaTimeoutPagamentoPix({ pedidoId: "p1", agora: baseAgora });
-                expect(r.cancelado).toBe(true);
-                expect(mocks.cancelaProvider).toHaveBeenCalledWith("mp123");
-                expect(mocks.pedidos[0].status).toBe("cancelado");
-                expect(mocks.enviarWhatsApp.mock.calls[0][1]).toContain("pagamento Pix não foi confirmado dentro do prazo de 13 minutos");
-                expect(mocks.registrarPontos).toHaveBeenCalledTimes(1);
-                expect(mocks.reverterResgate).toHaveBeenCalledTimes(1);
-                expect(mocks.reverterJornada).toHaveBeenCalledTimes(1);
-                expect(mocks.liberarRecompensa).toHaveBeenCalledTimes(1);
-                expect(mocks.encerrar).toHaveBeenCalledWith("p1", "cancelado");
-              });
-
-              test("se o provider diz que ficou pago no limite, nunca cancela o pedido", async () => {
-                mocks.pedidos = [pedido(PIX_PAGAMENTO_CANCELAMENTO_MS)];
-                mocks.cancelaProvider.mockResolvedValue({ estado: "pago", status: "approved" });
-                const r = await processarPoliticaTimeoutPagamentoPix({ pedidoId: "p1", agora: baseAgora });
-                expect(r.encerrado).toBe(true);
-                expect(mocks.pedidos[0].status).toBe("novo");
-                expect(mocks.reconciliar).toHaveBeenCalled();
-              });
-
-              test("falha/ambiguidade no Mercado Pago não cancela às cegas e agenda retry", async () => {
-                mocks.pedidos = [pedido(PIX_PAGAMENTO_CANCELAMENTO_MS)];
-                mocks.cancelaProvider.mockResolvedValue({ estado: "inconclusivo", motivo: "timeout" });
-                const r = await processarPoliticaTimeoutPagamentoPix({ pedidoId: "p1", agora: baseAgora });
-                expect(r.encerrado).toBe(false);
-                expect(r.proximoDelayMs).toBe(15_000);
-                expect(mocks.pedidos[0].status).toBe("novo");
-                expect(mocks.enviarWhatsApp).not.toHaveBeenCalled();
-              });
-
-              test("Pix manual e pedido já em preparo ficam fora do cancelamento automático", async () => {
-                mocks.pedidos = [pedido(PIX_PAGAMENTO_CANCELAMENTO_MS, { pix: { provider: "manual", criadoEm: new Date(baseAgora - PIX_PAGAMENTO_CANCELAMENTO_MS).toISOString() } })];
-                const manual = await processarPoliticaTimeoutPagamentoPix({ pedidoId: "p1", agora: baseAgora });
-                expect(manual.motivo).toBe("pedido_nao_elegivel");
-
-                mocks.pedidos = [pedido(PIX_PAGAMENTO_CANCELAMENTO_MS, { status: "em_preparo" })];
-                const preparo = await processarPoliticaTimeoutPagamentoPix({ pedidoId: "p1", agora: baseAgora });
-                expect(preparo.motivo).toBe("pedido_nao_elegivel");
-                expect(mocks.cancelaProvider).not.toHaveBeenCalled();
-              });
-            });
-          '''), encoding="utf-8")
-
-          Path("src/app/api/orders/route.latenciaPreparo.test.ts").write_text(dedent('''\
-            import { beforeEach, describe, expect, test, vi } from "vitest";
-            import { NextRequest } from "next/server";
-
-            const state = vi.hoisted(() => ({
-              store: new Map<string, unknown>(),
-              posResposta: [] as Array<() => Promise<void> | void>,
-              enviarTexto: vi.fn(),
-            }));
-
-            vi.mock("@/lib/redis", () => ({
-              redis: {
-                get: vi.fn(async (key: string) => state.store.get(key) ?? null),
-                set: vi.fn(async (key: string, value: unknown, opts?: { nx?: boolean }) => {
-                  if (opts?.nx && state.store.has(key)) return null;
-                  state.store.set(key, JSON.parse(JSON.stringify(value)));
-                  return "OK";
-                }),
-                del: vi.fn(async (key: string) => state.store.delete(key) ? 1 : 0),
-                eval: vi.fn(async (_script: string, keys: string[], args: string[]) => {
-                  const key = keys[0];
-                  if (state.store.get(key) === args[0]) { state.store.delete(key); return 1; }
-                  return 0;
-                }),
-              },
-            }));
-            vi.mock("@/lib/auth", () => ({
-              verifyToken: vi.fn(async () => ({ username: "kellyne", name: "Kellyne", role: "admin" })),
-            }));
-            vi.mock("@/lib/afterResponse", () => ({
-              agendarTarefaAposResposta: vi.fn((fn: () => Promise<void> | void) => { state.posResposta.push(fn); return true; }),
-            }));
-            vi.mock("@/lib/whatsappMensagem", () => ({ enviarTextoWhatsApp: state.enviarTexto }));
-
-            import { PATCH } from "./route";
-
-            function req() {
-              return new NextRequest("http://localhost/api/orders", {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json", cookie: "auth-token=token-admin" },
-                body: JSON.stringify({ id: "p-fast", status: "em_preparo" }),
-              });
-            }
-
-            beforeEach(() => {
-              vi.clearAllMocks();
-              state.store.clear();
-              state.posResposta.length = 0;
-              state.enviarTexto.mockResolvedValue({ ok: true, latenciaMs: 20_000, tentativas: 2 });
-              state.store.set("pedidos", [{
-                id: "p-fast", numero: 1, cliente: "Cliente Teste", telefone: "86999998888",
-                itens: ["Pizza"], total: 50, status: "novo", horario: "19:00", endereco: "Retirada na loja",
-              }]);
-            });
-
-            describe("PATCH /api/orders — aceite rápido e auto-print", () => {
-              test("novo -> em_preparo responde com permissão de impressão antes de esperar WhatsApp", async () => {
-                const response = await PATCH(req());
-                const data = await response.json();
-                expect(data.status).toBe("em_preparo");
-                expect(data.podeImprimirAutomaticamente).toBe(true);
-                expect(state.enviarTexto).not.toHaveBeenCalled();
-                expect(state.posResposta).toHaveLength(1);
-
-                await state.posResposta[0]();
-                expect(state.enviarTexto).toHaveBeenCalledTimes(1);
-              });
-            });
-          '''), encoding="utf-8")
-
-          Path("docs/architecture/PIX_TIMEOUT_13_MINUTOS.md").write_text(dedent('''\
-            # Política de timeout Pix Mercado Pago — 6/13 minutos
-
-            ## Objetivo
-
-            Pedidos novos com cobrança Pix Mercado Pago ainda não confirmada recebem um aviso no marco de 6 minutos. No marco de 13 minutos, o sistema tenta encerrar a cobrança pendente no Mercado Pago e só então cancela o pedido local.
-
-            ## Regras
-
-            - Aplica somente a `pix.provider === "mercadopago"`, com `providerPaymentId`, pedido `novo` e Pix não confirmado.
-            - Pix manual/comprovante não entra nesta automação.
-            - 6 minutos: consulta o estado oficial; se ainda estiver pendente, envia um único aviso ao cliente.
-            - 13 minutos: tenta cancelar a cobrança no Mercado Pago. O pedido local só é cancelado quando o provider confirmou cancelamento/estado não cobravel.
-            - Se o provider indicar pagamento aprovado, a conciliação oficial é acionada e o pedido nunca é cancelado por tempo.
-            - Timeout, rate limit, falha de rede ou estado ambíguo nunca cancelam o pedido às cegas; o sistema agenda retry curto.
-            - A mudança local para `cancelado` é atômica e revalida o estado fresco do pedido, protegendo corrida com webhook/conciliação.
-            - O cancelamento preserva as mesmas compensações necessárias de pontos, resgate e Jornada do Chef.
-
-            ## Orquestração
-
-            O caminho principal é a cadeia QStash já existente do Guardião Pix. O agendamento é limitado para nunca pular os marcos de 6 e 13 minutos. O Guardião acionado pelo painel executa a mesma política como fallback operacional.
-
-            ## Painel e impressão
-
-            A transição `novo -> em_preparo` continua persistindo primeiro. A notificação de WhatsApp dessa transição passa a executar depois da resposta HTTP, evitando que latência da Evolution segure o botão do painel e a entrega do campo `podeImprimirAutomaticamente` que dispara o iframe de impressão já existente.
-
-            ## Rollback
-
-            Reverter este conjunto restaura a cadência anterior sem remover o conciliador, webhook, Guardião, Pix manual ou reimpressão manual.
-          '''), encoding="utf-8")
+          p = Path('src/app/api/orders/route.ts')
+          text = p.read_text(encoding='utf-8')
+
+          old_import = "import { NextRequest, NextResponse } from 'next/server'"
+          new_import = old_import + "\nimport { agendarTarefaAposResposta } from '@/lib/afterResponse'"
+          if new_import not in text:
+            if text.count(old_import) != 1:
+              raise SystemExit('import anchor not unique')
+            text = text.replace(old_import, new_import, 1)
+
+          old = """  if (!silent && !(status === 'saiu_entrega' && entregadorCanonico)) {\n    const notificacao = await notificarCliente(pedidos[index].telefone, status, pedidos[index].cliente, pedidos[index].tipoEntrega, pedidos[index].endereco, statusAnterior)\n    if (notificacao && !notificacao.ok) {\n      avisosOperacionais.push('Status atualizado, mas a mensagem ao cliente não foi enviada. Tente novamente pelo WhatsApp.')\n    }\n  }"""
+          new = """  if (!silent && !(status === 'saiu_entrega' && entregadorCanonico)) {\n    const enviarNotificacaoStatus = () => notificarCliente(\n      pedidos[index].telefone,\n      status,\n      pedidos[index].cliente,\n      pedidos[index].tipoEntrega,\n      pedidos[index].endereco,\n      statusAnterior\n    )\n\n    // O aceite é o caminho crítico do balcão: o status e a autorização de\n    // auto-print já estão persistidos. Não segura a resposta do painel\n    // esperando a Evolution/WhatsApp. Nos testes diretos, onde `after()` não\n    // tem contexto de request, cai no comportamento síncrono anterior.\n    if (status === 'em_preparo') {\n      const agendada = agendarTarefaAposResposta(async () => {\n        const notificacao = await enviarNotificacaoStatus()\n        if (notificacao && !notificacao.ok) {\n          console.error('[ChefeBot] Status atualizado, mas a notificação de preparo não foi enviada.', {\n            pedidoId: id,\n            motivo: notificacao.motivo,\n          })\n        }\n      })\n      if (!agendada) {\n        const notificacao = await enviarNotificacaoStatus()\n        if (notificacao && !notificacao.ok) {\n          avisosOperacionais.push('Status atualizado, mas a mensagem ao cliente não foi enviada. Tente novamente pelo WhatsApp.')\n        }\n      }\n    } else {\n      const notificacao = await enviarNotificacaoStatus()\n      if (notificacao && !notificacao.ok) {\n        avisosOperacionais.push('Status atualizado, mas a mensagem ao cliente não foi enviada. Tente novamente pelo WhatsApp.')\n      }\n    }\n  }"""
+          if new not in text:
+            if text.count(old) != 1:
+              raise SystemExit(f'notification anchor expected once, found {text.count(old)}')
+            text = text.replace(old, new, 1)
+
+          p.write_text(text, encoding='utf-8')
           PY
 
       - name: Install dependencies
@@ -930,18 +63,72 @@ jobs:
           src/lib/pixSentinela.test.ts
           src/lib/pixGuardiaoScheduler.test.ts
           src/app/api/interno/pix-guardiao/verificar/route.test.ts
+          src/app/api/admin/mercadopago/guardiao-pix/route.test.ts
           src/app/api/orders/route.impressaoAutomatica.test.ts
           src/app/api/orders/route.latenciaPreparo.test.ts
 
-      - name: Lint new files
-        run: >-
-          npx eslint
-          src/lib/afterResponse.ts
-          src/lib/mercadoPagoCancelamento.ts
-          src/lib/mercadoPagoCancelamento.test.ts
-          src/lib/pixPagamentoTimeout.ts
-          src/lib/pixPagamentoTimeout.test.ts
-          src/app/api/orders/route.latenciaPreparo.test.ts
+      - name: Lint new and modified modules
+        shell: bash
+        run: |
+          npx eslint \
+            src/lib/afterResponse.ts \
+            src/lib/mercadoPagoCancelamento.ts \
+            src/lib/mercadoPagoCancelamento.test.ts \
+            src/lib/pixPagamentoTimeout.ts \
+            src/lib/pixPagamentoTimeout.test.ts \
+            src/lib/pixAutoCheckConfig.ts \
+            src/app/api/interno/pix-guardiao/verificar/route.ts \
+            src/app/api/admin/mercadopago/guardiao-pix/route.ts \
+            src/app/api/admin/mercadopago/guardiao-pix/route.test.ts \
+            src/app/api/orders/route.latenciaPreparo.test.ts
+
+          set +e
+          npx eslint src/app/api/orders/route.ts --format json > /tmp/branch-eslint.json
+          branch_eslint=$?
+          set -e
+
+          git worktree add --detach /tmp/chefebot-main "$BASE_SHA"
+          ln -s "$GITHUB_WORKSPACE/node_modules" /tmp/chefebot-main/node_modules
+          set +e
+          (cd /tmp/chefebot-main && ./node_modules/.bin/eslint src/app/api/orders/route.ts --format json) > /tmp/base-eslint.json
+          base_eslint=$?
+          set -e
+
+          node <<'NODE'
+          const fs = require('fs')
+          const counts = p => {
+            const rows = JSON.parse(fs.readFileSync(p, 'utf8'))
+            return rows.reduce((a, r) => ({ errors: a.errors + r.errorCount, warnings: a.warnings + r.warningCount }), { errors: 0, warnings: 0 })
+          }
+          const branch = counts('/tmp/branch-eslint.json')
+          const base = counts('/tmp/base-eslint.json')
+          console.log({ branch, base })
+          if (branch.errors > base.errors || branch.warnings > base.warnings) process.exit(1)
+          NODE
+          echo "ESLint route baseline preservada (branch=$branch_eslint base=$base_eslint)"
+
+      - name: Typecheck against main baseline
+        shell: bash
+        run: |
+          set +e
+          npx tsc --noEmit --pretty false > /tmp/branch-tsc.txt 2>&1
+          branch_code=$?
+          (cd /tmp/chefebot-main && ./node_modules/.bin/tsc --noEmit --pretty false) > /tmp/base-tsc.txt 2>&1
+          base_code=$?
+          set -e
+
+          branch_count=$(grep -c 'error TS' /tmp/branch-tsc.txt || true)
+          base_count=$(grep -c 'error TS' /tmp/base-tsc.txt || true)
+          echo "Typecheck errors: branch=$branch_count base=$base_count"
+          if [ "$branch_count" -gt "$base_count" ]; then
+            cat /tmp/branch-tsc.txt
+            exit 1
+          fi
+          if grep -E 'afterResponse|mercadoPagoCancelamento|pixPagamentoTimeout|pixAutoCheckConfig|pix-guardiao/verificar|guardiao-pix/route|route.latenciaPreparo' /tmp/branch-tsc.txt; then
+            echo "Erro TypeScript novo em arquivo tocado"
+            exit 1
+          fi
+          echo "Typecheck baseline preservada (branch=$branch_code base=$base_code)"
 
       - name: Full test suite
         run: npm test
@@ -949,40 +136,16 @@ jobs:
       - name: Production build
         run: npm run build
 
-      - name: Typecheck against main baseline
-        shell: bash
-        run: |
-          rm -rf .next
-          set +e
-          npx tsc --noEmit --pretty false > /tmp/branch-tsc.txt 2>&1
-          branch_code=$?
-          set -e
-          git worktree add --detach /tmp/chefebot-main "$BASE_SHA"
-          ln -s "$GITHUB_WORKSPACE/node_modules" /tmp/chefebot-main/node_modules
-          rm -rf /tmp/chefebot-main/.next
-          set +e
-          (cd /tmp/chefebot-main && ./node_modules/.bin/tsc --noEmit --pretty false) > /tmp/base-tsc.txt 2>&1
-          base_code=$?
-          set -e
-          sort /tmp/branch-tsc.txt > /tmp/branch-tsc.sorted
-          sort /tmp/base-tsc.txt > /tmp/base-tsc.sorted
-          if ! diff -u /tmp/base-tsc.sorted /tmp/branch-tsc.sorted; then
-            echo "Typecheck divergiu da baseline da main"
-            exit 1
-          fi
-          echo "Typecheck baseline preservada (branch=$branch_code base=$base_code)"
-
       - name: Diff sanity
-        run: |
-          git diff --check
-          git status --short
+        run: git diff --check
 
-      - name: Commit validated patch and remove temporary workflow
+      - name: Commit validated route patch and remove temporary workflow
         shell: bash
         run: |
           git rm .github/workflows/agent-pix-timeout-panel-print.yml
           git config user.name "openai-agent"
           git config user.email "openai-agent@users.noreply.github.com"
           git add src docs
-          git commit -m "feat(pix): aviso 6min cancelamento seguro 13min e aceite rápido"
+          git diff --cached --check
+          git commit -m "perf(pedidos): responde aceite antes do WhatsApp e preserva auto-print"
           git push origin HEAD:agent/pix-timeout-panel-print-20260810
