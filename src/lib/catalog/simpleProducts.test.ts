@@ -128,11 +128,11 @@ describe("buildSimpleCatalog — Macarronada (size + addOnGroup opcional)", () =
     expect(porCodigo).toEqual({ G: 5000, M: 4000, P: 2800, PP: 1500 });
   });
 
-  it("addOnGroup com Bacon e Ovos, R$10 cada, max 1", () => {
+  it("addOnGroup com Bacon e Ovo, R$10 cada, max 1", () => {
     const catalog = buildSimpleCatalog(MENU);
     const carne = produto("Macarronada de Carne", catalog);
     expect(carne.addOnGroup?.max).toBe(1);
-    expect(carne.addOnGroup?.options.map((o) => o.label).sort()).toEqual(["Bacon", "Ovos"]);
+    expect(carne.addOnGroup?.options.map((o) => o.label).sort()).toEqual(["Bacon", "Ovo"]);
     for (const opcao of carne.addOnGroup!.options) expect(opcao.priceCents).toBe(1000);
   });
 });
