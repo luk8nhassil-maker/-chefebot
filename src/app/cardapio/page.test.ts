@@ -770,12 +770,31 @@ describe("/cardapio (PublicCardapio) — Calzone entra no mesmo fluxo de sabores
     expect(fonte).not.toContain("calzoneFlavorsList");
   });
 
-  test("pizzaFlavorSections: com o catálogo oficial presente, monta as 3 categorias reais (Tradicionais/Especiais/Doces) filtradas por preço no tamanho atual — nunca mais as 2 seções legadas Salgadas/Doces nesse caso; sem catálogo, cai pro legado", () => {
+  test("pizzaFlavorSections: separa Tradicionais/Especiais/Doces pela aba ativa e filtra por preço no tamanho atual; sem catálogo, cai pro legado", () => {
     const bloco = fonte.slice(fonte.indexOf("const pizzaFlavorSections ="), fonte.indexOf("const calzoneFlavorNames ="));
     expect(bloco).toContain('const pizzaFlavorSections = menu.pizzaCatalog && size');
-    expect(bloco).toContain('(["tradicional", "especial", "doce"] as const)');
+    expect(bloco).toContain('([pizzaCategoryFilter] as const)');
     expect(bloco).toContain("f.pricesBySizeCode[size as \"P\" | \"M\" | \"G\" | \"F\" | \"MINI\"] !== undefined");
     expect(bloco).toContain('{ title: "Salgadas", flavors: menu.saltyFlavors || [] }, { title: "Doces", flavors: menu.sweetFlavors || [] }');
+  });
+
+  test("Pizzas Especiais é categoria própria na home e abre diretamente a aba especial", () => {
+    expect(fonte).toContain('onClick={() => goPizza("tradicional")}');
+    expect(fonte).toContain('className="home-cat home-cat-special" onClick={() => goPizza("especial")}');
+    expect(fonte).toContain("<strong>Pizzas Especiais</strong>");
+  });
+
+  test("seletor oferece abas acessíveis e limpa sabores ao trocar de categoria", () => {
+    expect(fonte).toContain('role="tablist" aria-label="Categoria dos sabores"');
+    expect(fonte).toContain('role="tab" aria-selected={pizzaCategoryFilter === category}');
+    expect(fonte).toContain('onClick={() => { setPizzaCategoryFilter(category); setF1(null); setF2(null); }}');
+  });
+
+  test("selos de novidade usam IDs oficiais tanto em sabores quanto em produtos simples", () => {
+    expect(fonte).toContain('noveltyActive && isNewCatalogItemId(menu.pizzaCatalog?.flavors.find((flavor) => flavor.name === f)?.id)');
+    expect(fonte).toContain('noveltyActive && isNewCatalogItemId("id" in it ? it.id : undefined)');
+    expect(fonte).toContain('{noveltyActive && <NoveltyBadge className="home-novelty" />}');
+    expect(fonte).toContain('timer = window.setTimeout(updateAndScheduleNovelty');
   });
 
   test("REGRESSÃO — Mini-Pizza como produto simples está desativada no site público (nunca resolve mais contra o catálogo oficial): o botão fica oculto quando o catálogo carregou", () => {

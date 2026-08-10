@@ -17,6 +17,7 @@ import { lerReferenciaRecompensa, limparReferenciaRecompensa, migrarReferenciaLe
 import { extrairPagamentoComposto, montarPagamentoComposto, parseValorMonetario } from "@/lib/pagamentoComposto";
 import type { PizzaCatalog } from "@/lib/catalog/pizzas";
 import { todosOsProdutos, type SimpleCatalog } from "@/lib/catalog/simpleProducts";
+import { isNewCatalogItemId, isNoveltyPeriodActive, noveltyExpiresAt } from "@/lib/catalog/novelties";
 
 // Ícones de categoria da home (menu/navegação) — lucide-react, sem emoji.
 // Mantidos separados de ICONS (que continua usando emoji para os itens
@@ -811,6 +812,10 @@ const itemSlug = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, ""
 const isMiniPizzaName = (value: string) => itemSlug(value) === "minipizza";
 const isCalzoneName = (value: string) => itemSlug(value) === "calzone";
 
+function NoveltyBadge({ className = "" }: { className?: string }) {
+  return <span className={`novelty-badge ${className}`.trim()}>Novidade</span>;
+}
+
 // Converte um produto do catálogo oficial 2026 (preço em centavos, ver
 // @/lib/catalog/simpleProducts) para o formato de exibição (reais) já usado
 // pela grade genérica de Lanches/Macarronada/Bebidas/Sucos/Hambúrguer/Pastel
@@ -820,6 +825,7 @@ const isCalzoneName = (value: string) => itemSlug(value) === "calzone";
 // Pastel de Forno, Pastel de Feira), usado por addSimple para desviar para
 // o seletor de sabor (ver pickPastel) em vez de adicionar direto.
 function catalogParaListagem(p: {
+  id: string;
   available: boolean;
   name: string;
   priceCents: number;
@@ -827,6 +833,7 @@ function catalogParaListagem(p: {
   flavors?: { name: string; available: boolean }[];
   addOnGroup?: { max: 1; options: { id: string; label: string; priceCents: number; available: boolean }[] };
 }): {
+  id: string;
   name: string;
   price: number;
   available: boolean;
@@ -835,6 +842,7 @@ function catalogParaListagem(p: {
   addOnGroup?: { max: 1; options: { id: string; label: string; price: number; available: boolean }[] };
 } {
   return {
+    id: p.id,
     name: p.name,
     price: p.priceCents / 100,
     available: p.available,
@@ -1509,8 +1517,22 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const pastelFornoEfetivo = menu.catalog ? menu.catalog.pastelForno.map(catalogParaListagem) : [];
   const vitaminasEfetivas = menu.catalog ? menu.catalog.vitaminas.map(catalogParaListagem) : [];
 
+  const [pizzaCategoryFilter, setPizzaCategoryFilter] = useState<"tradicional" | "especial" | "doce">("tradicional");
+  const [noveltyActive, setNoveltyActive] = useState(false);
+  useEffect(() => {
+    let timer: number | undefined;
+    const updateAndScheduleNovelty = () => {
+      setNoveltyActive(isNoveltyPeriodActive());
+      const remainingMs = noveltyExpiresAt().getTime() - Date.now();
+      if (remainingMs > 0) {
+        timer = window.setTimeout(updateAndScheduleNovelty, Math.min(remainingMs + 100, 2_147_483_647));
+      }
+    };
+    timer = window.setTimeout(updateAndScheduleNovelty, 0);
+    return () => { if (timer !== undefined) window.clearTimeout(timer); };
+  }, []);
   function resetBuild() { setSize(null); setSizePrice(0); setF1(null); setF2(null); setBorder(null); setBorderPrice(0); setAddOnIds([]); setMiniPizzaMode(false); setCalzoneMode(false); setPastelMode(false); setPastelPendente(null); setFlavorModalOpen(false); }
-  function goPizza() { setPlan({ total: 0, current: 1, openEnded: true }); resetBuild(); go("sc-build"); }
+  function goPizza(category: "tradicional" | "especial" | "doce" = "tradicional") { setPizzaCategoryFilter(category); setPlan({ total: 0, current: 1, openEnded: true }); resetBuild(); go("sc-build"); }
   function pizzasNoCarrinho() { return cart.filter((c) => c.kind === "pizza" || (c.kind === "simple" && isMiniPizzaName(c.name))).length; }
   // Tamanho: com o catálogo oficial presente, a fonte é sempre
   // `menu.pizzaCatalog.sizes` (inclui MINI como tamanho real — ver
@@ -1607,7 +1629,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   // genuinamente ausente (resposta antiga em cache) cai para as 2 seções
   // legadas (Salgadas/Doces, sem preço por sabor).
   const pizzaFlavorSections = menu.pizzaCatalog && size
-    ? (["tradicional", "especial", "doce"] as const)
+    ? ([pizzaCategoryFilter] as const)
         .map((cat) => ({
           title: CATEGORIA_PIZZA_LABEL[cat],
           flavors: menu.pizzaCatalog!.flavors
@@ -2231,7 +2253,12 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                 <p>Escolha uma categoria pra começar do seu jeito.</p>
               </div>
               <div className="home-grid">
-                <button className="home-cat" onClick={goPizza}><CATEGORIA_ICON.pizza size={27} color="var(--gold)" aria-hidden="true" /><strong>Pizzas</strong></button>
+                <button className="home-cat" onClick={() => goPizza("tradicional")}><CATEGORIA_ICON.pizza size={27} color="var(--gold)" aria-hidden="true" /><strong>Pizzas</strong></button>
+                <button className="home-cat home-cat-special" onClick={() => goPizza("especial")}>
+                  {noveltyActive && <NoveltyBadge className="home-novelty" />}
+                  <Sparkles size={27} color="#a78bfa" aria-hidden="true" />
+                  <strong>Pizzas Especiais</strong>
+                </button>
                 <button className="home-cat" onClick={() => goCat("lanche")}><CATEGORIA_ICON.lanche size={27} color="var(--gold)" aria-hidden="true" /><strong>Lanches</strong></button>
                 <button className="home-cat" onClick={() => goCat("macarronada")}><CATEGORIA_ICON.macarronada size={27} color="var(--gold)" aria-hidden="true" /><strong>Macarronada</strong></button>
                 <button className="home-cat" onClick={() => goCat("bebida")}><CATEGORIA_ICON.bebidas size={27} color="var(--gold)" aria-hidden="true" /><strong>Bebidas</strong></button>
@@ -2291,6 +2318,15 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
               {size ? (
                 <>
                   {miniPizzaMode && <div className="mini-flow-note">Mini-pizza usa preco e produto existentes do cardapio.</div>}
+                  {!miniPizzaMode && !calzoneMode && !pastelMode && menu.pizzaCatalog && (
+                    <div className="pizza-category-tabs" role="tablist" aria-label="Categoria dos sabores">
+                      {(["tradicional", "especial", "doce"] as const).map((category) => (
+                        <button key={category} type="button" role="tab" aria-selected={pizzaCategoryFilter === category} className={pizzaCategoryFilter === category ? "active" : ""} onClick={() => { setPizzaCategoryFilter(category); setF1(null); setF2(null); }}>
+                          {CATEGORIA_PIZZA_LABEL[category]}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   {renderFlavorProgress()}
                   <div className="flavor-list">
                     {flavorSections.map((section) => {
@@ -2304,7 +2340,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                             const esg = esgotados.includes(f)
                             return (
                               <div key={`${section.title}-${f}`} className={`opt flavor-opt ${especial ? "flavor-opt-especial" : ""} ${f === f1 || f === f2 ? "sel" : ""} ${esg ? "esg" : ""}`} onClick={() => !esg && pickFlavor(f)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }} {...optA11yAttrs(esg)} onKeyDown={(e) => { if (!esg && isActivateKey(e)) { e.preventDefault(); pickFlavor(f); } }}>
-                                <div className="opt-emoji">🍕</div><div className="opt-body"><div className="opt-title">{f}</div>{esg && <div className="opt-desc" style={{ color: "var(--danger)" }}>Esgotado</div>}</div><div className="opt-check" />
+                                <div className="opt-emoji">🍕</div><div className="opt-body"><div className="opt-title opt-title-with-badge">{f}{noveltyActive && isNewCatalogItemId(menu.pizzaCatalog?.flavors.find((flavor) => flavor.name === f)?.id) && <NoveltyBadge />}</div>{esg && <div className="opt-desc" style={{ color: "var(--danger)" }}>Esgotado</div>}</div><div className="opt-check" />
                               </div>
                             )
                           })}
@@ -2430,7 +2466,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                   pastelForno: { eb: "", t: "Escolha o sabor", data: pastelFornoEfetivo, emoji: "🥟" },
                   vitamina: { eb: "", t: "Vitaminas da casa", data: vitaminasEfetivas, emoji: "🥛" },
                 }[listCat];
-                return (<><div className="screen-head">{cfg.eb && <div className="eyebrow">{cfg.eb}</div>}<h2>{cfg.t}</h2><p>Toque para adicionar.</p></div>{cfg.data.length === 0 ? <CardapioIllustration {...CARDAPIO_ILLUSTRATIONS.semResultado} /> : cfg.data.map((it, i) => { const esg = ("available" in it && it.available === false) || esgotados.includes(it.name); return (<div key={i} className="opt" onClick={() => !esg && addSimple(it, cfg.emoji)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }} {...optA11yAttrs(esg)} onKeyDown={(e) => { if (!esg && isActivateKey(e)) { e.preventDefault(); addSimple(it, cfg.emoji); } }}><div className="opt-emoji">{cfg.emoji}</div><div className="opt-body"><div className="opt-title">{it.name}</div>{esg && <div className="opt-desc" style={{ color: "var(--danger)" }}>Esgotado</div>}</div><div className="opt-price">{simplePriceLabel(it)}</div></div>); })}</>);
+                return (<><div className="screen-head">{cfg.eb && <div className="eyebrow">{cfg.eb}</div>}<h2>{cfg.t}</h2><p>Toque para adicionar.</p></div>{cfg.data.length === 0 ? <CardapioIllustration {...CARDAPIO_ILLUSTRATIONS.semResultado} /> : cfg.data.map((it, i) => { const esg = ("available" in it && it.available === false) || esgotados.includes(it.name); return (<div key={"id" in it ? it.id : i} className="opt" onClick={() => !esg && addSimple(it, cfg.emoji)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }} {...optA11yAttrs(esg)} onKeyDown={(e) => { if (!esg && isActivateKey(e)) { e.preventDefault(); addSimple(it, cfg.emoji); } }}><div className="opt-emoji">{cfg.emoji}</div><div className="opt-body"><div className="opt-title opt-title-with-badge">{it.name}{noveltyActive && isNewCatalogItemId("id" in it ? it.id : undefined) && <NoveltyBadge />}</div>{esg && <div className="opt-desc" style={{ color: "var(--danger)" }}>Esgotado</div>}</div><div className="opt-price">{simplePriceLabel(it)}</div></div>); })}</>);
               })()}
             </section>
           )}
@@ -2933,6 +2969,15 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
               <button type="button" className="payment-modal-close" aria-label="Fechar" onClick={() => setFlavorModalOpen(false)}>×</button>
             </div>
             <div className="flavor-modal-body">
+              {!miniPizzaMode && !calzoneMode && !pastelMode && menu.pizzaCatalog && (
+                <div className="pizza-category-tabs modal-tabs" role="tablist" aria-label="Categoria dos sabores">
+                  {(["tradicional", "especial", "doce"] as const).map((category) => (
+                    <button key={category} type="button" role="tab" aria-selected={pizzaCategoryFilter === category} className={pizzaCategoryFilter === category ? "active" : ""} onClick={() => { setPizzaCategoryFilter(category); setF1(null); setF2(null); }}>
+                      {CATEGORIA_PIZZA_LABEL[category]}
+                    </button>
+                  ))}
+                </div>
+              )}
               {flavorSections.map((section) => {
                 const especial = section.title === "Especiais";
                 return (
@@ -2942,7 +2987,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                       const esg = esgotados.includes(f);
                       return (
                         <div key={`modal-${section.title}-${f}`} className={`opt flavor-opt ${especial ? "flavor-opt-especial" : ""} ${f === f1 || f === f2 ? "sel" : ""} ${esg ? "esg" : ""}`} onClick={() => !esg && pickFlavor(f)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }} {...optA11yAttrs(esg)} onKeyDown={(e) => { if (!esg && isActivateKey(e)) { e.preventDefault(); pickFlavor(f); } }}>
-                          <div className="opt-emoji">🍕</div><div className="opt-body"><div className="opt-title">{f}</div>{esg && <div className="opt-desc" style={{ color: "var(--danger)" }}>Esgotado</div>}</div><div className="opt-check" />
+                          <div className="opt-emoji">🍕</div><div className="opt-body"><div className="opt-title opt-title-with-badge">{f}{noveltyActive && isNewCatalogItemId(menu.pizzaCatalog?.flavors.find((flavor) => flavor.name === f)?.id) && <NoveltyBadge />}</div>{esg && <div className="opt-desc" style={{ color: "var(--danger)" }}>Esgotado</div>}</div><div className="opt-check" />
                         </div>
                       );
                     })}
@@ -3090,6 +3135,17 @@ main{width:100%;padding:6px 20px 20px}
 .home-cat:active{transform:scale(.98);border-color:color-mix(in srgb, var(--primary) 50%, transparent)}
 .home-cat span{font-size:27px}
 .home-cat strong{font-size:15.5px;font-weight:800;letter-spacing:0}
+.home-cat{position:relative}
+.home-cat-special{border-color:color-mix(in srgb, #a78bfa 48%, var(--line));background:color-mix(in srgb, #a78bfa 7%, var(--surface))}
+.novelty-badge{display:inline-flex;align-items:center;width:max-content;border-radius:999px;background:#facc15;color:#3f3100;font-size:9.5px;font-weight:900;line-height:1;padding:5px 7px;text-transform:uppercase;letter-spacing:.55px;white-space:nowrap}
+.home-novelty{position:absolute;top:10px;right:10px}
+.opt-title-with-badge{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.pizza-category-tabs{display:flex;gap:8px;overflow-x:auto;padding:2px 0 10px;margin-bottom:8px;scrollbar-width:none}
+.pizza-category-tabs::-webkit-scrollbar{display:none}
+.pizza-category-tabs button{flex:0 0 auto;border:1px solid var(--line);background:var(--surface);color:var(--text-sub);border-radius:999px;padding:9px 13px;font-family:var(--font-ui);font-size:12.5px;font-weight:800;cursor:pointer}
+.pizza-category-tabs button.active{border-color:var(--brand);background:var(--brand-soft);color:var(--text)}
+.pizza-category-tabs button[aria-selected="true"]:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+.modal-tabs{position:sticky;top:0;z-index:2;background:var(--surface);padding-top:4px}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:11px}
 .grid2 .opt{flex-direction:column;align-items:flex-start;gap:7px;padding:17px;position:relative}
 .grid2 .opt-check{position:absolute;top:13px;right:13px;width:20px;height:20px}
