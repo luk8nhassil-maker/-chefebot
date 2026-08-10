@@ -480,7 +480,7 @@ describe("Hipóteses alternativas descartadas pela auditoria", () => {
 });
 
 describe("Achado secundário (não é a causa raiz, mas é duplicidade real e distinta da corrigida no PR #288)", () => {
-  test("Caso 5: repetir o mesmo status no mesmo pedido reenvia a notificação (sem idempotência de notificação)", async () => {
+  test("Caso 5: repetir o mesmo status no mesmo pedido não duplica a notificação", async () => {
     seedPedidos([
       { id: "6001", numero: 1, cliente: "Cliente Único", telefone: "5581111111111", itens: ["x"], total: 10, status: "em_preparo", horario: "10:00", endereco: "Rua 1", tipoEntrega: "delivery" },
     ]);
@@ -489,7 +489,6 @@ describe("Achado secundário (não é a causa raiz, mas é duplicidade real e di
     await PATCH(patchRequest({ id: "6001", status: "saiu_entrega" }));
 
     const mensagens = envios().filter(m => m.numero === "5581111111111");
-    // Documenta o comportamento atual: cada PATCH reenvia, mesmo sem mudança real de status.
-    expect(mensagens.length).toBe(2);
+    expect(mensagens.length).toBe(1);
   });
 });

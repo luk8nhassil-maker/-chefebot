@@ -105,13 +105,12 @@ function textosEnviados(): string[] {
     .map(([, opts]) => JSON.parse(String((opts as RequestInit).body)).text as string);
 }
 
-describe("PATCH /api/orders — mensagem de status só em 'saiu da cozinha/pronto' e 'cancelado'", () => {
-  // em_preparo não envia mensagem.
-  test("em_preparo (aceite do pedido) NÃO envia WhatsApp, pra nenhum tipo de recebimento", async () => {
+describe("PATCH /api/orders — cliente recebe a sequência completa de status", () => {
+  test("em_preparo avisa que o pedido foi enviado para a cozinha", async () => {
     seedPedido({ tipoEntrega: "retirada", endereco: "Retirada na loja", status: "novo" });
     const res = await PATCH(patchRequest({ id: "ped_notif_1", status: "em_preparo" }));
     expect(res.status).toBe(200);
-    expect(nenhumaMensagemEnviada()).toBe(true);
+    expect(textoEnviado()).toBe("*Wesley*, seu pedido foi enviado para a cozinha! 👨‍🍳🍕\n\nJá começamos o preparo e avisaremos você a cada etapa.");
   });
 
   // Delivery envia somente no saiu_entrega — 1. copy exata.
@@ -139,37 +138,22 @@ describe("PATCH /api/orders — mensagem de status só em 'saiu da cozinha/pront
     expect(textoEnviado()).not.toContain("saiu para entrega");
   });
 
-  // entregue de delivery/retirada NÃO envia mensagem de status (o único
-  // aviso já foi mandado antes, em saiu_entrega). A pesquisa de avaliação
-  // (fluxo separado, fora de escopo) continua disparando normalmente em
-  // "entregue" — por isso o teste checa o CONTEÚDO enviado, não a ausência
-  // de qualquer chamada de WhatsApp.
-  test("delivery e retirada em 'entregue' NÃO enviam a mensagem de status (só a pesquisa de avaliação, fluxo à parte)", async () => {
+  test("delivery e retirada em 'entregue' avisam que o pedido foi finalizado", async () => {
     seedPedido({ tipoEntrega: "delivery", endereco: "Rua das Flores, 123", status: "saiu_entrega" });
     await PATCH(patchRequest({ id: "ped_notif_1", status: "entregue" }));
-    for (const texto of textosEnviados()) {
-      expect(texto).not.toContain("saiu para entrega");
-      expect(texto).not.toContain("está pronto");
-    }
+    expect(textosEnviados()).toContain("*Wesley*, seu pedido foi finalizado! ✅🍕\n\nObrigado pela preferência. Bom apetite!");
 
     fetchMock.mockClear();
     seedPedido({ tipoEntrega: "retirada", endereco: "Retirada na loja", status: "saiu_entrega" });
     await PATCH(patchRequest({ id: "ped_notif_1", status: "entregue" }));
-    for (const texto of textosEnviados()) {
-      expect(texto).not.toContain("saiu para entrega");
-      expect(texto).not.toContain("está pronto");
-    }
+    expect(textosEnviados()).toContain("*Wesley*, seu pedido foi finalizado! ✅🍕\n\nObrigado pela preferência. Bom apetite!");
   });
 
-  // dine_in não duplica mensagem: se por algum caminho manual/atípico já
-  // passou por saiu_entrega (que já mandou o "pronto"), "entregue" depois
-  // não manda de novo (a pesquisa de avaliação continua disparando à parte).
-  test("consumo no local: 'entregue' vindo de 'saiu_entrega' (caminho manual/atípico) NÃO duplica a mensagem de pronto", async () => {
+  test("consumo no local vindo de saiu_entrega finaliza sem repetir a mensagem de pronto", async () => {
     seedPedido({ tipoEntrega: "dine_in", endereco: "Consumo no local", status: "saiu_entrega" });
     await PATCH(patchRequest({ id: "ped_notif_1", status: "entregue" }));
-    for (const texto of textosEnviados()) {
-      expect(texto).not.toContain("está pronto");
-    }
+    expect(textosEnviados()).toContain("*Wesley*, seu pedido foi finalizado! ✅🍕\n\nObrigado pela preferência. Bom apetite!");
+    expect(textosEnviados().filter(texto => texto.includes("está pronto"))).toHaveLength(0);
   });
 
   // cancelado continua notificando — mensagem preservada.
@@ -210,5 +194,21 @@ describe("PATCH /api/orders — mensagem de status só em 'saiu da cozinha/pront
     seedPedido({ tipoEntrega: "dine_in", endereco: "Consumo no local", status: "em_preparo" });
     await PATCH(patchRequest({ id: "ped_notif_1", status: "entregue", silent: true }));
     expect(nenhumaMensagemEnviada()).toBe(true);
+  });
+
+  test("repetir o mesmo status não duplica a mensagem", async () => {
+    seedPedido({ tipoEntrega: "delivery", status: "em_preparo" });
+    await PATCH(patchRequest({ id: "ped_notif_1", status: "em_preparo" }));
+    expect(nenhumaMensagemEnviada()).toBe(true);
+  });
+
+  test("falha da Evolution preserva o status e retorna aviso operacional", async () => {
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 400, json: async () => ({}) });
+    seedPedido({ tipoEntrega: "delivery", status: "novo" });
+    const res = await PATCH(patchRequest({ id: "ped_notif_1", status: "em_preparo" }));
+    const data = await res.json();
+    expect(res.status).toBe(200);
+    expect(data.status).toBe("em_preparo");
+    expect(data.avisoOperacional).toMatch(/mensagem ao cliente não foi enviada/i);
   });
 });

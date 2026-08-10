@@ -48,12 +48,18 @@ vi.mock("@/lib/pixAuditoria", () => ({
   registrarAuditoriaPixManual: (entry: Record<string, unknown>) => registrarAuditoriaPixManualMock(entry),
 }));
 
+const enviarTextoWhatsAppMock = vi.fn(async () => ({ ok: true, latenciaMs: 1, tentativas: 1 }));
+vi.mock("@/lib/whatsappMensagem", () => ({
+  enviarTextoWhatsApp: (...args: unknown[]) => enviarTextoWhatsAppMock(...args),
+}));
+
 import { POST } from "./route";
 import { redis } from "@/lib/redis";
 
 type PedidoTeste = {
   id: string;
   cliente: string;
+  telefone?: string;
   total: number;
   status: string;
   pagamento: string;
@@ -74,6 +80,7 @@ function seedPedido(overrides: Record<string, unknown> = {}): PedidoTeste {
   const pedido: PedidoTeste = {
     id: "ped_1",
     cliente: "Fulano",
+    telefone: "86999998888",
     total: 50,
     status: "novo",
     pagamento: "Pix",
@@ -96,6 +103,8 @@ function req(body: Record<string, unknown>, cookie = "auth-token=token-kellyne")
 beforeEach(() => {
   redisStore.clear();
   registrarAuditoriaPixManualMock.mockClear();
+  enviarTextoWhatsAppMock.mockClear();
+  enviarTextoWhatsAppMock.mockResolvedValue({ ok: true, latenciaMs: 1, tentativas: 1 });
   vi.mocked(redis.get).mockClear();
   vi.mocked(redis.set).mockClear();
 });
@@ -135,6 +144,10 @@ describe("POST /api/orders/confirmar-pix-manual — segurança da confirmação 
     expect(pedidos[0].pixConfirmado).toBe(true);
     expect(pedidos[0].pix!.status).toBe("confirmado");
     expect(pedidos[0].pix!.confirmadoPor).toBe("manual");
+    expect(enviarTextoWhatsAppMock).toHaveBeenCalledWith(
+      "5586999998888",
+      "*Fulano*, pagamento confirmado! ✅\n\nRecebemos seu Pix e seu pedido foi liberado para a cozinha. 🍕"
+    );
   });
 
   test("5. valor enviado pelo frontend não é confiado — servidor usa o valor do pedido", async () => {
@@ -237,6 +250,18 @@ describe("POST /api/orders/confirmar-pix-manual — segurança da confirmação 
     expect(res.status).toBe(400);
     const pedidos = redisStore.get("pedidos") as PedidoTeste[];
     expect(pedidos[0].pixConfirmado).toBeUndefined();
+  });
+
+  test("15. falha no WhatsApp não desfaz a confirmação e retorna aviso operacional", async () => {
+    enviarTextoWhatsAppMock.mockResolvedValueOnce({ ok: false, motivo: "http_400", latenciaMs: 1, tentativas: 1 });
+    seedPedido();
+    const res = await POST(req({ id: "ped_1", senha: "senha-correta" }));
+    const data = await res.json();
+    expect(res.status).toBe(200);
+    expect(data.ok).toBe(true);
+    expect(data.avisoOperacional).toMatch(/mensagem ao cliente não foi enviada/i);
+    const pedidos = redisStore.get("pedidos") as PedidoTeste[];
+    expect(pedidos[0].pixConfirmado).toBe(true);
   });
 });
 

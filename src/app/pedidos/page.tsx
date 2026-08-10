@@ -1045,7 +1045,12 @@ export default function PedidosPage() {
       const data = await r.json().catch(() => null)
       const firstName = pedido.cliente.split(" ")[0]
       if (novoStatus === "entregue") { tocarSomEntrega(); temposEntregaRef.current[id] = tempoDesde(pedido.horario, undefined, Date.now()) }
-      setToast({ text: `${firstName} → ${STATUS_COLOR[novoStatus].label}`, expires: Date.now() + 5000, pedidoId: id, prevStatus })
+      setToast({
+        text: data?.avisoOperacional ? `⚠️ ${data.avisoOperacional}` : `${firstName} → ${STATUS_COLOR[novoStatus].label}`,
+        expires: Date.now() + 5000,
+        pedidoId: id,
+        prevStatus,
+      })
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
       toastTimerRef.current = setTimeout(() => setToast(null), 5000)
       // Quem dispara a impressão silenciosa é o SERVIDOR (claim atômico e
@@ -1255,7 +1260,9 @@ export default function PedidosPage() {
           pixConfirmado: true,
           pix: { ...p.pix, status: "confirmado", confirmadoPor: data.confirmadoPor || "manual", confirmadoEm: data.confirmadoEm, confirmadoPorNome: data.confirmadoPorNome },
         } : p))
-        showSimpleToast(`PAGAMENTO CONFIRMADO COM SEGURANÇA — ${formatarValorReais(data.valorConfirmado)} foi registrado como recebido.`)
+        showSimpleToast(data.avisoOperacional
+          ? `⚠️ ${data.avisoOperacional}`
+          : `PAGAMENTO CONFIRMADO COM SEGURANÇA — ${formatarValorReais(data.valorConfirmado)} foi registrado como recebido.`)
         setPixConfirmando(false)
         fecharVerificacaoPix()
         return

@@ -196,27 +196,15 @@ function mensagemProntoDineIn(firstName: string): string {
   return `*${firstName}*, seu pedido está pronto! 🍽️\n\nBom apetite!`;
 }
 
-// Regra final aprovada: o cliente só recebe mensagem automática de status em
-// dois momentos — (1) quando o pedido sai da cozinha/fica pronto, e (2)
-// quando é cancelado. "em_preparo" (aceite do pedido) e a finalização
-// "entregue" de delivery/retirada NUNCA mandam mensagem — o único aviso de
-// "pronto"/"saiu" já foi mandado antes (em saiu_entrega, pra delivery e
-// retirada), e mandar de novo em "entregue" seria duplicado/sem utilidade
-// pro cliente (ele já sabe que o pedido chegou/foi buscado).
-//
-// "saiu_entrega" é o status cujo texto depende de como o cliente vai
-// receber o pedido — "saiu pra entrega" não faz sentido nenhum pra quem vai
-// retirar no balcão ou está comendo no salão.
-//
-// "entregue" é a exceção que AINDA manda mensagem, só para consumo no
-// local: o fluxo normal do painel PULA "saiu_entrega" pra esse tipo
-// (em_preparo -> entregue direto — ver classificarEntrega/painel), então é
-// essa transição que carrega o único aviso de "pedido pronto" que o cliente
-// recebe. `statusAnterior` é o que decide isso; sem ele (chamada antiga/
-// desconhecida) ou vindo de "saiu_entrega" (caminho manual/atípico, que já
-// mandou o aviso de pronto ali), nunca manda de novo — nunca duplica.
 function getMensagemStatus(status: Status, nomeCliente: string, entrega: ClassificacaoEntrega, statusAnterior?: Status): string | null {
   const firstName = nomeCliente.split(' ')[0];
+
+  // Repetir o mesmo PATCH não pode repetir mensagem para o cliente.
+  if (statusAnterior === status) return null;
+
+  if (status === 'em_preparo') {
+    return `*${firstName}*, seu pedido foi enviado para a cozinha! 👨‍🍳🍕\n\nJá começamos o preparo e avisaremos você a cada etapa.`;
+  }
 
   if (status === 'saiu_entrega') {
     if (entrega === 'retirada') {
@@ -232,7 +220,7 @@ function getMensagemStatus(status: Status, nomeCliente: string, entrega: Classif
     if (entrega === 'dine_in' && statusAnterior === 'em_preparo') {
       return mensagemProntoDineIn(firstName);
     }
-    return null;
+    return `*${firstName}*, seu pedido foi finalizado! ✅🍕\n\nObrigado pela preferência. Bom apetite!`;
   }
 
   if (status === 'cancelado') {
@@ -248,23 +236,20 @@ function sanitizePhone(telefone: string): string {
   return '55' + digits
 }
 
-async function notificarCliente(telefone: string, status: Status, nomeCliente: string, tipoEntrega: string | undefined, endereco: string | undefined, statusAnterior?: Status): Promise<void> {
+async function notificarCliente(telefone: string, status: Status, nomeCliente: string, tipoEntrega: string | undefined, endereco: string | undefined, statusAnterior?: Status): Promise<{ ok: boolean; motivo?: string } | null> {
   const mensagem = getMensagemStatus(status, nomeCliente, classificarEntrega(tipoEntrega, endereco), statusAnterior)
-  if (!mensagem) return
-  const config = obterConfigEvolution()
-  if (!config) { console.error('[ChefeBot] Provider de WhatsApp não configurado — notificação de status não enviada.'); return }
+  if (!mensagem) return null
   const phone = sanitizePhone(telefone)
   try {
-    await fetch(`${config.baseUrl}/message/sendText/${config.instanceName}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'apikey': config.apiKey,
-      },
-      body: JSON.stringify({ number: phone, text: mensagem }),
-    })
+    const resultado = await enviarTextoWhatsApp(phone, mensagem)
+    if (!resultado.ok) {
+      console.error('[ChefeBot] Notificação de status não enviada.', { status, motivo: resultado.motivo })
+      return { ok: false, motivo: resultado.motivo }
+    }
+    return { ok: true }
   } catch (err) {
     console.error('[ChefeBot] Erro ao notificar cliente:', err)
+    return { ok: false, motivo: 'erro_inesperado' }
   }
 }
 
@@ -490,8 +475,14 @@ export async function PATCH(req: NextRequest) {
 
     const { pedidos, index, statusAnterior, entregadorCanonico, podeImprimirAutomaticamente } = resultado
 
-  if (!silent) {
-    await notificarCliente(pedidos[index].telefone, status, pedidos[index].cliente, pedidos[index].tipoEntrega, pedidos[index].endereco, statusAnterior)
+  // Com entregador atribuído, o bloco logo abaixo já envia ao cliente uma
+  // mensagem mais completa (nome + rastreamento). Não mande também a copy
+  // genérica de saída, evitando duas mensagens para o mesmo evento.
+  if (!silent && !(status === 'saiu_entrega' && entregadorCanonico)) {
+    const notificacao = await notificarCliente(pedidos[index].telefone, status, pedidos[index].cliente, pedidos[index].tipoEntrega, pedidos[index].endereco, statusAnterior)
+    if (notificacao && !notificacao.ok) {
+      avisosOperacionais.push('Status atualizado, mas a mensagem ao cliente não foi enviada. Tente novamente pelo WhatsApp.')
+    }
   }
 
   // O acesso do entregador e o rastreamento do cliente são efeitos separados:
