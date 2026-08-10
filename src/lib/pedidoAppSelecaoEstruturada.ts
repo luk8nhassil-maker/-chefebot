@@ -14,9 +14,8 @@
 // que o cliente possa ter mandado junto — ver POST /api/pedido-app.
 import type { PizzaCatalog } from "@/lib/catalog/pizzas";
 import { precificarPizzaPorId } from "@/lib/pricing/pizzaEngine";
-import type { SimpleCatalog } from "@/lib/catalog/simpleProducts";
+import { todosOsProdutos, type SimpleCatalog } from "@/lib/catalog/simpleProducts";
 import { ACRESCIMO_LEITE_CENTS, type ItemApp } from "@/lib/pedidoAppItens";
-import type { Menu } from "@/lib/menu";
 
 function centavosParaReais(cents: number): number {
   return Math.round(cents) / 100;
@@ -43,18 +42,28 @@ export function resolverItemComSelecaoEstruturada(
   if (!selecao || typeof selecao.sizeId !== "string" || !Array.isArray(selecao.flavorIds)) {
     return { ok: false, error: "Seleção de pizza inválida" };
   }
+  if (selecao.addOnIds !== undefined && !Array.isArray(selecao.addOnIds)) {
+    return { ok: false, error: "Seleção de pizza inválida" };
+  }
 
   const resultado = precificarPizzaPorId(
-    { sizeId: selecao.sizeId, flavorIds: selecao.flavorIds, borderId: selecao.borderId, quantity: item.qty },
+    {
+      sizeId: selecao.sizeId,
+      flavorIds: selecao.flavorIds,
+      borderId: selecao.borderId,
+      addOnIds: selecao.addOnIds,
+      quantity: item.qty,
+    },
     catalog
   );
   if (!resultado.ok) return { ok: false, error: resultado.error };
 
   const meioAMeio = resultado.resolved.flavorNames.length > 1;
   const name = `Pizza ${resultado.resolved.sizeCode}${meioAMeio ? " (meio a meio)" : ""}`;
-  const detail = resultado.resolved.borderLabel
-    ? `${resultado.resolved.flavorNames.join(" / ")} · borda ${resultado.resolved.borderLabel}`
-    : resultado.resolved.flavorNames.join(" / ");
+  const partes = [resultado.resolved.flavorNames.join(" / ")];
+  if (resultado.resolved.borderLabel) partes.push(`borda ${resultado.resolved.borderLabel}`);
+  if (resultado.resolved.addOnLabels.length > 0) partes.push(`adicional ${resultado.resolved.addOnLabels.join(", ")}`);
+  const detail = partes.join(" · ");
 
   return {
     ok: true,
@@ -130,10 +139,14 @@ export function temSelecaoDupla(item: object): boolean {
  * importada de @/lib/pedidoAppItens: FONTE ÚNICA também usada por
  * `officialUnitPrice`, nunca um valor duplicado aqui. `officialUnitPrice`
  * continua intacto e é quem precifica itens legados (sem `simpleSelection`).
+ *
+ * Não recebe `Menu` (Redis/legado): o cardápio 2026 (produto/sabor/preço)
+ * vem inteiramente de `catalog` (@/lib/catalog/simpleProducts, construído a
+ * partir de @/lib/catalog/officialMenu2026) — não há mais nenhuma leitura de
+ * `Menu` nesta função.
  */
 export function resolverItemComSelecaoSimplesEstruturada(
   item: ItemApp,
-  menu: Menu,
   catalog: SimpleCatalog
 ): { ok: true; item: ItemApp } | { ok: false; error: string } {
   if (item.kind !== "simple") return { ok: false, error: "Seleção estruturada só é aceita para produto simples" };
@@ -152,21 +165,25 @@ export function resolverItemComSelecaoSimplesEstruturada(
   if (selecao.milk !== undefined && selecao.milk !== "com" && selecao.milk !== "sem") {
     return { ok: false, error: "Seleção de produto inválida" };
   }
+  if (selecao.addOnId !== undefined && typeof selecao.addOnId !== "string") {
+    return { ok: false, error: "Seleção de produto inválida" };
+  }
 
-  const produto = [...catalog.lanches, ...catalog.bebidas, ...catalog.sucos].find((p) => p.id === selecao.productId);
+  const produto = todosOsProdutos(catalog).find((p) => p.id === selecao.productId);
   if (!produto) return { ok: false, error: "Produto não encontrado" };
   if (!produto.available) return { ok: false, error: `Produto indisponível: ${produto.name}` };
 
   let detail: string | undefined;
   // Preço base = priceCents oficial do produto no catálogo. "size" o
-  // substitui pelo priceCents do tamanho validado; "milk" soma o acréscimo
-  // de sempre para "com leite". Nunca lido de name/detail.
+  // substitui pelo priceCents do tamanho validado; "flavor_priced" pelo
+  // priceCents do sabor validado; "milk" soma o acréscimo de sempre para
+  // "com leite". Nunca lido de name/detail.
   let priceCents = produto.priceCents;
 
   switch (produto.strategy) {
     case "milk": {
-      // Suco EXIGE milk e REJEITA sizeId/flavorId.
-      if (selecao.sizeId !== undefined || selecao.flavorId !== undefined) {
+      // Suco EXIGE milk e REJEITA sizeId/flavorId/addOnId.
+      if (selecao.sizeId !== undefined || selecao.flavorId !== undefined || selecao.addOnId !== undefined) {
         return { ok: false, error: "Seleção de produto inválida" };
       }
       if (selecao.milk === undefined) return { ok: false, error: "Seleção de produto inválida" };
@@ -176,37 +193,66 @@ export function resolverItemComSelecaoSimplesEstruturada(
     }
     case "size": {
       // Produto com tamanho (ex.: Macarronada) EXIGE sizeId e REJEITA
-      // milk/flavorId.
+      // milk/flavorId. `addOnId` é opcional — só válido quando o produto
+      // tem addOnGroup (Macarronada — Bacon OU Ovos, nunca os dois).
       if (selecao.milk !== undefined || selecao.flavorId !== undefined) {
         return { ok: false, error: "Seleção de produto inválida" };
       }
       const size = produto.sizes?.find((s) => s.id === selecao.sizeId);
       if (!size) return { ok: false, error: "Tamanho não encontrado" };
-      detail = `Tamanho ${size.code}`;
       // Preço exclusivo do tamanho validado — nunca o priceCents base do
       // produto (que, para produtos vendidos só por tamanho, nem representa
       // um preço vendável de verdade).
       priceCents = size.priceCents;
+      const detalhes = [`Tamanho ${size.code}`];
+      if (selecao.addOnId !== undefined) {
+        if (!produto.addOnGroup) return { ok: false, error: "Seleção de produto inválida" };
+        const opcao = produto.addOnGroup.options.find((o) => o.id === selecao.addOnId);
+        if (!opcao) return { ok: false, error: "Adicional não encontrado" };
+        if (!opcao.available) return { ok: false, error: `Adicional indisponível: ${opcao.label}` };
+        priceCents += opcao.priceCents;
+        detalhes.push(opcao.label);
+      }
+      detail = detalhes.join(" + ");
       break;
     }
     case "single_flavor": {
-      // Produto com sabor único (ex.: Calzone, Mini-Pizza) EXIGE flavorId e
-      // REJEITA sizeId/milk.
-      if (selecao.sizeId !== undefined || selecao.milk !== undefined) {
+      // Produto com sabor/recheio único (ex.: Pastel de Forno, Pastel de
+      // Feira) EXIGE flavorId e REJEITA sizeId/milk/addOnId.
+      if (selecao.sizeId !== undefined || selecao.milk !== undefined || selecao.addOnId !== undefined) {
         return { ok: false, error: "Seleção de produto inválida" };
       }
       const flavor = selecao.flavorId ? produto.flavors?.find((f) => f.id === selecao.flavorId) : undefined;
       if (!flavor) return { ok: false, error: "Sabor não encontrado" };
       if (!flavor.available) return { ok: false, error: `Sabor indisponível: ${flavor.name}` };
       detail = `Sabor: ${flavor.name}`;
-      // Preço flat do produto — o sabor nunca muda o preço (mesma regra de
-      // sempre: Calzone/Mini-Pizza são vendidos por um preço único).
+      // Preço flat do produto — o sabor nunca muda o preço (Pastel de
+      // Forno/Feira são vendidos por um preço único).
+      break;
+    }
+    case "flavor_priced": {
+      // Produto cujo preço vem do SABOR, não do produto (Calzone) — EXIGE
+      // flavorId e REJEITA sizeId/milk/addOnId.
+      if (selecao.sizeId !== undefined || selecao.milk !== undefined || selecao.addOnId !== undefined) {
+        return { ok: false, error: "Seleção de produto inválida" };
+      }
+      const flavor = selecao.flavorId ? produto.flavors?.find((f) => f.id === selecao.flavorId) : undefined;
+      if (!flavor) return { ok: false, error: "Sabor não encontrado" };
+      if (!flavor.available) return { ok: false, error: `Sabor indisponível: ${flavor.name}` };
+      if (flavor.priceCents === undefined) return { ok: false, error: "Sabor sem preço configurado" };
+      detail = `Sabor: ${flavor.name}`;
+      priceCents = flavor.priceCents;
       break;
     }
     case "fixed": {
-      // Produto plano (sem tamanho/sabor/leite): REJEITA qualquer escolha
-      // extra — não há nada a configurar para ele.
-      if (selecao.sizeId !== undefined || selecao.flavorId !== undefined || selecao.milk !== undefined) {
+      // Produto plano (sem tamanho/sabor/leite/adicional): REJEITA qualquer
+      // escolha extra — não há nada a configurar para ele.
+      if (
+        selecao.sizeId !== undefined ||
+        selecao.flavorId !== undefined ||
+        selecao.milk !== undefined ||
+        selecao.addOnId !== undefined
+      ) {
         return { ok: false, error: "Seleção de produto inválida" };
       }
       break;

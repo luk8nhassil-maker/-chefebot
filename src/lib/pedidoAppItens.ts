@@ -21,17 +21,21 @@ export type ItemApp = {
   // SEMPRE ignora `name`/`detail` enviados pelo cliente e reconstrói os
   // dois a partir do catálogo (ver resolverItemComSelecaoEstruturada em
   // @/lib/pedidoAppSelecaoEstruturada).
-  pizzaSelection?: { sizeId: string; flavorIds: string[]; borderId?: string };
+  // `addOnIds` (cardápio oficial 2026): adicionais de pizza por ID estável
+  // (@/lib/catalog/officialMenu2026 PIZZA_ADDONS) — nunca presente quando
+  // sizeId é MINI (ver @/lib/pricing/pizzaEngine).
+  pizzaSelection?: { sizeId: string; flavorIds: string[]; borderId?: string; addOnIds?: string[] };
   // Mesma ideia de pizzaSelection (Fase 6), para os demais produtos
-  // configuráveis do cardápio (Calzone, Mini-Pizza, Macarronada, sucos) por
-  // ID estável do catálogo oficial (@/lib/catalog/simpleProducts). Quando
-  // presente, o servidor SEMPRE ignora
-  // `name`/`detail` enviados pelo cliente e reconstrói os dois a partir do
-  // catálogo (ver resolverItemComSelecaoSimplesEstruturada em
+  // configuráveis do cardápio (Calzone, Pastel de Forno, Pastel de Feira,
+  // Macarronada, Hambúrguer, sucos) por ID estável do catálogo oficial
+  // (@/lib/catalog/simpleProducts). Quando presente, o servidor SEMPRE
+  // ignora `name`/`detail` enviados pelo cliente e reconstrói os dois a
+  // partir do catálogo (ver resolverItemComSelecaoSimplesEstruturada em
   // @/lib/pedidoAppSelecaoEstruturada). `sizeId` só se aplica a produtos com
-  // tamanho (macarronada); `flavorId` só a produtos de 1 sabor só (calzone,
-  // mini-pizza); `milk` só a sucos.
-  simpleSelection?: { productId: string; sizeId?: string; flavorId?: string; milk?: "com" | "sem" };
+  // tamanho (macarronada); `flavorId` só a produtos de 1 sabor/recheio só
+  // (calzone, pastel de forno, pastel de feira); `milk` só a sucos;
+  // `addOnId` só ao grupo opcional único da macarronada (Bacon OU Ovos).
+  simpleSelection?: { productId: string; sizeId?: string; flavorId?: string; milk?: "com" | "sem"; addOnId?: string };
 };
 
 export type MenuSimpleItem = {

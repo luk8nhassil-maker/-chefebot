@@ -1,4 +1,4 @@
-// HOTFIX — "Item inválido" no checkout (Calzone/Mini-Pizza via simpleSelection).
+// HOTFIX — "Item inválido" no checkout (Calzone via simpleSelection).
 //
 // Regressão obrigatória desta suíte: tudo que o catálogo público (GET
 // /api/cardapio -> menu.catalog) oferece como seleção válida precisa ser
@@ -8,9 +8,13 @@
 //   -> resolverSimpleSelectionIds (equivalente ao frontend)
 //   -> POST /api/pedido-app
 //
-// Cobre explicitamente cardápio persistido no Redis (não só o MENU
-// estático), incluindo o formato legado anterior à Fase 6 (sem
-// hasFlavors/flavorsKey/flavorsMode por item).
+// Cardápio oficial 2026: produto/sabor/preço do Calzone vêm de
+// @/lib/catalog/officialMenu2026 (CALZONE_FLAVORS), NUNCA mais de
+// menu.lanches/Redis — persistir um cardápio customizado no Redis não muda
+// mais o Calzone (só afeta os campos legados usados por officialUnitPrice/
+// itens 100% legados, cobertos à parte abaixo). "Mini-Pizza" como produto
+// simples não existe mais (virou tamanho de pizza — decisão comercial
+// aprovada).
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { store, redisMock, defaultSetImpl, defaultGetImpl } = vi.hoisted(() => {
@@ -115,11 +119,10 @@ async function catalogoPublico(): Promise<SimpleCatalog> {
   return data.catalog as SimpleCatalog;
 }
 
-describe("HOTFIX — Calzone/Mini-Pizza via catálogo persistido (não só MENU estático)", () => {
-  it("cardápio persistido = round-trip fiel do MENU (como /configuracoes salva hoje): Calzone + Frango Catupiry => 200", async () => {
-    persistirCardapio(JSON.parse(JSON.stringify(MENU)));
+describe("HOTFIX — Calzone via catálogo oficial 2026 (GET /api/cardapio -> menu.catalog)", () => {
+  it("fluxo real do cliente (sem cardápio customizado no Redis): Calzone + Calabresa => 200, preço vem do sabor", async () => {
     const catalog = await catalogoPublico();
-    const simpleSelection = resolverSimpleSelectionIds(catalog, "Calzone", { flavorName: "Frango Catupiry" });
+    const simpleSelection = resolverSimpleSelectionIds(catalog, "Calzone", { flavorName: "Calabresa" });
     expect(simpleSelection).toBeDefined();
 
     const res = await POST(postReq({
@@ -128,17 +131,20 @@ describe("HOTFIX — Calzone/Mini-Pizza via catálogo persistido (não só MENU 
     }));
     const body = await res.json();
     expect(res.status).toBe(200);
-    const calzone = MENU.lanches.find((l) => l.name === "Calzone")!;
     const pedidos = store.get("pedidos") as { itens: string[]; total: number }[];
-    expect(pedidos[0].itens).toEqual(["Calzone Sabor: Frango Catupiry"]);
-    expect(pedidos[0].total).toBe(calzone.price);
+    expect(pedidos[0].itens).toEqual(["Calzone Sabor: Calabresa"]);
+    expect(pedidos[0].total).toBe(30); // cardápio oficial 2026 — Calzone Calabresa = R$30
     expect(body.ok).toBe(true);
   });
 
-  it("cardápio persistido = round-trip fiel do MENU: Mini-Pizza (R$17) + sabor permitido => 200", async () => {
+  it("REGRESSÃO — cardápio customizado persistido no Redis NUNCA muda produto/sabor/preço do Calzone (fonte é sempre @/lib/catalog/officialMenu2026, nunca menu.lanches/Redis)", async () => {
+    // Cenário que antes desta arquitetura teria mudado o Calzone (round-trip
+    // do Menu legado persistido pela tela /configuracoes) — agora é
+    // irrelevante para o catálogo oficial: mesmo produto, mesmo sabor, mesmo
+    // preço, apesar do Redis ter um cardápio completamente diferente salvo.
     persistirCardapio(JSON.parse(JSON.stringify(MENU)));
     const catalog = await catalogoPublico();
-    const simpleSelection = resolverSimpleSelectionIds(catalog, "Mini-Pizza", { flavorName: "Calabresa" });
+    const simpleSelection = resolverSimpleSelectionIds(catalog, "Calzone", { flavorName: "Calabresa" });
     expect(simpleSelection).toBeDefined();
 
     const res = await POST(postReq({
@@ -146,43 +152,17 @@ describe("HOTFIX — Calzone/Mini-Pizza via catálogo persistido (não só MENU 
       itens: [{ kind: "simple", name: "", price: 0, qty: 1, simpleSelection }],
     }));
     expect(res.status).toBe(200);
-    const miniPizza = MENU.lanches.find((l) => l.name === "Mini-Pizza")!;
-    expect(miniPizza.price).toBe(17);
     const pedidos = store.get("pedidos") as { total: number }[];
-    expect(pedidos[0].total).toBe(17);
+    expect(pedidos[0].total).toBe(30);
   });
 
-  it("Calzone com flavorsMode explicitamente 'own' (persistido) + Frango Catupiry (está em calzoneFlavors) => 200", async () => {
-    const cardapio = JSON.parse(JSON.stringify(MENU));
-    cardapio.lanches = cardapio.lanches.map((l: { flavorsKey?: string; flavorsMode?: string }) =>
-      l.flavorsKey === "calzoneFlavors" ? { ...l, flavorsMode: "own" } : l
-    );
-    persistirCardapio(cardapio);
+  it("'Mini-Pizza' não existe mais como produto simples (virou tamanho de pizza): nunca resolve, mesmo com um cardápio legado persistido", async () => {
+    persistirCardapio(JSON.parse(JSON.stringify(MENU)));
     const catalog = await catalogoPublico();
-    const simpleSelection = resolverSimpleSelectionIds(catalog, "Calzone", { flavorName: "Frango Catupiry" });
-    expect(simpleSelection).toBeDefined();
-
-    const res = await POST(postReq({ ...simplePayload, itens: [{ kind: "simple", name: "", price: 0, qty: 1, simpleSelection }] }));
-    expect(res.status).toBe(200);
+    expect(resolverSimpleSelectionIds(catalog, "Mini-Pizza", { flavorName: "Calabresa" })).toBeUndefined();
   });
 
-  it("cardápio persistido no formato LEGADO (pré-Fase 6, lanches só com name/price): cliente falha-fechado antes do POST — nunca envia seleção quebrada", async () => {
-    persistirCardapio({
-      lanches: [
-        { name: "Calzone", price: 35 },
-        { name: "Mini-Pizza", price: 17 },
-      ],
-    });
-    const catalog = await catalogoPublico();
-    const calzone = catalog.lanches.find((l) => l.name === "Calzone");
-    // Sem hasFlavors/flavorsKey, a estratégia cai para "fixed" — fail-closed,
-    // nunca finge ter sabores que a config atual não garante.
-    expect(calzone?.strategy).toBe("fixed");
-    const simpleSelection = resolverSimpleSelectionIds(catalog, "Calzone", { flavorName: "Frango Catupiry" });
-    expect(simpleSelection).toBeUndefined();
-  });
-
-  it("cardápio persistido no formato LEGADO: pedido 100% legado (name/detail, sem simpleSelection) continua funcionando — preço fixo, sabor no detail é só texto", async () => {
+  it("cardápio persistido no formato LEGADO (pré-cardápio oficial 2026, lanches só com name/price): pedido 100% legado (name/detail, sem simpleSelection) continua funcionando — preço fixo do Menu legado, sabor no detail é só texto", async () => {
     persistirCardapio({
       lanches: [{ name: "Calzone", price: 35 }],
     });
@@ -193,7 +173,10 @@ describe("HOTFIX — Calzone/Mini-Pizza via catálogo persistido (não só MENU 
     const body = await res.json();
     expect(res.status).toBe(200);
     const pedidos = store.get("pedidos") as { total: number }[];
-    // Preço sempre o oficial (35), nunca o 999 que o cliente mandou.
+    // Item legado (sem simpleSelection) continua precificado pelo caminho
+    // officialUnitPrice/Menu legado, intacto por design (pedidos antigos
+    // nunca recalculam com o preço novo) — preço sempre o persistido (35),
+    // nunca o 999 que o cliente mandou.
     expect(pedidos[0].total).toBe(35);
     expect(body.ok).toBe(true);
   });
@@ -212,9 +195,8 @@ describe("HOTFIX — servidor não mascara mais a causa real como \"Item inváli
   });
 
   it("flavorId inexistente: 400 com motivo \"Sabor não encontrado\"", async () => {
-    persistirCardapio(JSON.parse(JSON.stringify(MENU)));
     const catalog = await catalogoPublico();
-    const calzone = catalog.lanches.find((l) => l.name === "Calzone")!;
+    const calzone = catalog.calzone.find((l) => l.name === "Calzone")!;
     const res = await POST(postReq({
       ...simplePayload,
       itens: [{ kind: "simple", name: "", price: 0, qty: 1, simpleSelection: { productId: calzone.id, flavorId: "flavor-inexistente" } }],
@@ -225,12 +207,11 @@ describe("HOTFIX — servidor não mascara mais a causa real como \"Item inváli
   });
 
   it("produto realmente esgotado: 400 com motivo \"Produto indisponível: ...\"", async () => {
-    persistirCardapio(JSON.parse(JSON.stringify(MENU)));
     store.set("esgotados", ["Calzone"]);
     const catalog = await catalogoPublico();
-    const calzone = catalog.lanches.find((l) => l.name === "Calzone")!;
+    const calzone = catalog.calzone.find((l) => l.name === "Calzone")!;
     expect(calzone.available).toBe(false);
-    const flavor = calzone.flavors!.find((f) => f.name === "Frango Catupiry")!;
+    const flavor = calzone.flavors!.find((f) => f.name === "Calabresa")!;
     const res = await POST(postReq({
       ...simplePayload,
       itens: [{ kind: "simple", name: "", price: 0, qty: 1, simpleSelection: { productId: calzone.id, flavorId: flavor.id } }],
@@ -241,11 +222,10 @@ describe("HOTFIX — servidor não mascara mais a causa real como \"Item inváli
   });
 
   it("sabor realmente esgotado: 400 com motivo \"Sabor indisponível: ...\"", async () => {
-    persistirCardapio(JSON.parse(JSON.stringify(MENU)));
-    store.set("esgotados", ["Frango Catupiry"]);
+    store.set("esgotados", ["Calabresa"]);
     const catalog = await catalogoPublico();
-    const calzone = catalog.lanches.find((l) => l.name === "Calzone")!;
-    const flavor = calzone.flavors!.find((f) => f.name === "Frango Catupiry")!;
+    const calzone = catalog.calzone.find((l) => l.name === "Calzone")!;
+    const flavor = calzone.flavors!.find((f) => f.name === "Calabresa")!;
     expect(flavor.available).toBe(false);
     const res = await POST(postReq({
       ...simplePayload,
@@ -257,9 +237,8 @@ describe("HOTFIX — servidor não mascara mais a causa real como \"Item inváli
   });
 
   it("seleção dupla (pizzaSelection + simpleSelection juntas): 400 com motivo explicando a rejeição", async () => {
-    persistirCardapio(JSON.parse(JSON.stringify(MENU)));
     const catalog = await catalogoPublico();
-    const calzone = catalog.lanches.find((l) => l.name === "Calzone")!;
+    const calzone = catalog.calzone.find((l) => l.name === "Calzone")!;
     const flavor = calzone.flavors!.find((f) => f.name === "Calabresa")!;
     const res = await POST(postReq({
       ...simplePayload,
@@ -290,17 +269,16 @@ describe("HOTFIX — servidor não mascara mais a causa real como \"Item inváli
 });
 
 describe("HOTFIX — preço sempre recalculado no servidor, nunca confia no navegador", () => {
-  it("preço adulterado pelo cliente é ignorado mesmo com simpleSelection persistido válido", async () => {
-    persistirCardapio(JSON.parse(JSON.stringify(MENU)));
+  it("preço adulterado pelo cliente é ignorado mesmo com simpleSelection válido", async () => {
     const catalog = await catalogoPublico();
-    const calzone = catalog.lanches.find((l) => l.name === "Calzone")!;
-    const flavor = calzone.flavors!.find((f) => f.name === "Frango Catupiry")!;
+    const calzone = catalog.calzone.find((l) => l.name === "Calzone")!;
+    const flavor = calzone.flavors!.find((f) => f.name === "Calabresa")!;
     const res = await POST(postReq({
       ...simplePayload,
-      itens: [{ kind: "simple", name: "Calzone", detail: "Sabor: Frango Catupiry", price: 0.01, qty: 1, simpleSelection: { productId: calzone.id, flavorId: flavor.id } }],
+      itens: [{ kind: "simple", name: "Calzone", detail: "Sabor: Calabresa", price: 0.01, qty: 1, simpleSelection: { productId: calzone.id, flavorId: flavor.id } }],
     }));
     expect(res.status).toBe(200);
     const pedidos = store.get("pedidos") as { total: number }[];
-    expect(pedidos[0].total).toBe(35);
+    expect(pedidos[0].total).toBe(30); // cardápio oficial 2026 — Calzone Calabresa = R$30
   });
 });

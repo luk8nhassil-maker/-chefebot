@@ -1,184 +1,186 @@
-// Testes de buildSimpleCatalog — correção da regra comercial do Calzone
-// (Fase 6, 6ª rodada de hardening pós-auditoria).
+// Testes de buildSimpleCatalog — cardápio oficial 2026.
 //
-// `flavorsMode` decide de onde vêm os sabores de um produto "single_flavor"
-// (Calzone, Mini-Pizza): "pizza" (padrão/ausente) reaproveita a lista
-// inteira da Pizza; "own" usa a lista própria apontada por `flavorsKey`.
-// Configuração explícita por produto — nunca inferida por lista vazia nem
-// pelo nome do produto.
+// A Mini-Pizza (produto separado, sabor único, flavorsMode) deixou de
+// existir — MINI agora é um TAMANHO de pizza (ver @/lib/pricing/pizzaEngine
+// e @/lib/catalog/officialMenu2026, decisão comercial aprovada). Calzone
+// deixou de reaproveitar a lista inteira de sabores da Pizza: agora tem uma
+// lista PRÓPRIA e fixa de 12 sabores, cada um com preço individual
+// ("flavor_priced") — não depende mais de `flavorsMode`/`calzoneFlavors`
+// (esses campos continuam existindo no Menu legado só para o caminho
+// officialUnitPrice, nunca lidos por este módulo).
 import { describe, expect, it } from "vitest";
-import { buildSimpleCatalog } from "./simpleProducts";
-import { buildPizzaCatalog } from "./pizzas";
+import { buildSimpleCatalog, todosOsProdutos } from "./simpleProducts";
 import { MENU } from "@/lib/menu";
 
-// "Quatro Queijos" está em saltyFlavors mas de propósito NÃO está em
-// calzoneFlavors nem miniPizzaFlavors no cardápio real — usado em todo este
-// arquivo para provar a diferença entre os dois modos.
-const SABOR_FORA_DAS_LISTAS_PROPRIAS = "Quatro Queijos";
-
-function calzoneDe(menu: typeof MENU) {
-  return menu.lanches.find((l) => l.name === "Calzone")!;
+function produto(nome: string, catalog: ReturnType<typeof buildSimpleCatalog>) {
+  const p = todosOsProdutos(catalog).find((entry) => entry.name === nome);
+  if (!p) throw new Error(`Produto "${nome}" não encontrado`);
+  return p;
 }
 
-describe("buildSimpleCatalog — Calzone.flavorsMode (correção da regra comercial do Calzone)", () => {
-  it("pré-condição do arquivo: 'Quatro Queijos' está fora de calzoneFlavors e miniPizzaFlavors no cardápio real", () => {
-    expect(MENU.saltyFlavors).toContain(SABOR_FORA_DAS_LISTAS_PROPRIAS);
-    expect(MENU.calzoneFlavors).not.toContain(SABOR_FORA_DAS_LISTAS_PROPRIAS);
-    expect(MENU.miniPizzaFlavors).not.toContain(SABOR_FORA_DAS_LISTAS_PROPRIAS);
+describe("buildSimpleCatalog — Calzone (flavor_priced, 12 sabores, preço por sabor)", () => {
+  it("é UM produto com strategy flavor_priced e 12 sabores", () => {
+    const catalog = buildSimpleCatalog(MENU);
+    const calzone = produto("Calzone", catalog);
+    expect(calzone.strategy).toBe("flavor_priced");
+    expect(calzone.flavors).toHaveLength(12);
   });
 
-  it("MENU real: Calzone está em modo 'pizza' (padrão aprovado) e aceita todos os sabores efetivos da Pizza, calzoneFlavors não restringe", () => {
-    expect(calzoneDe(MENU).flavorsMode).toBe("pizza");
-
-    const pizzaCatalog = buildPizzaCatalog(MENU);
-    const simpleCatalog = buildSimpleCatalog(MENU);
-    const calzone = simpleCatalog.lanches.find((l) => l.name === "Calzone")!;
-
-    expect(calzone.strategy).toBe("single_flavor");
-    expect(calzone.flavors?.length).toBe(pizzaCatalog.flavors.length);
-    expect(calzone.flavors?.some((f) => f.name === SABOR_FORA_DAS_LISTAS_PROPRIAS)).toBe(true);
+  it("cada sabor carrega seu PRÓPRIO priceCents — Carne Seca (R$40) ≠ Frango (R$30)", () => {
+    const catalog = buildSimpleCatalog(MENU);
+    const calzone = produto("Calzone", catalog);
+    const carneSeca = calzone.flavors!.find((f) => f.name === "Carne Seca")!;
+    const frango = calzone.flavors!.find((f) => f.name === "Frango")!;
+    expect(carneSeca.priceCents).toBe(4000);
+    expect(frango.priceCents).toBe(3000);
   });
 
-  it("mesmo sabor reutiliza o MESMO flavorId entre Pizza e Calzone em modo 'pizza' — nenhum ID novo", () => {
-    const pizzaCatalog = buildPizzaCatalog(MENU);
-    const simpleCatalog = buildSimpleCatalog(MENU);
-    const calzone = simpleCatalog.lanches.find((l) => l.name === "Calzone")!;
-
-    for (const flavor of pizzaCatalog.flavors) {
-      const mesmoSaborNoCalzone = calzone.flavors!.find((f) => f.name === flavor.name)!;
-      expect(mesmoSaborNoCalzone.id).toBe(flavor.id);
-    }
+  it("sabores compartilhados com a Pizza reaproveitam o mesmo flavorId — nunca um ID novo", () => {
+    const catalog = buildSimpleCatalog(MENU);
+    const calzone = produto("Calzone", catalog);
+    const delicia = calzone.flavors!.find((f) => f.name === "Delicia")!;
+    expect(delicia.id).toBe("flavor-delicia");
   });
 
-  it("REGRESSÃO — cardápio antigo sem `flavorsMode` (campo ausente, ex.: config gravada antes desta correção): Calzone continua reaproveitando a Pizza — compatibilidade preservada", () => {
-    const menuSemCampo = structuredClone(MENU);
-    delete calzoneDe(menuSemCampo).flavorsMode;
-
-    const simpleCatalog = buildSimpleCatalog(menuSemCampo);
-    const calzone = simpleCatalog.lanches.find((l) => l.name === "Calzone")!;
-    expect(calzone.flavors?.some((f) => f.name === SABOR_FORA_DAS_LISTAS_PROPRIAS)).toBe(true);
+  it("Mazine exibe o rótulo do Calzone, mas reaproveita o flavorId da Mazini (pizza)", () => {
+    const catalog = buildSimpleCatalog(MENU);
+    const calzone = produto("Calzone", catalog);
+    const mazine = calzone.flavors!.find((f) => f.name === "Mazine")!;
+    expect(mazine.id).toBe("flavor-mazini");
+    expect(mazine.displayLabel).toBe("Mazine");
   });
 
-  it("modo 'own': Calzone passa a aceitar SÓ os sabores de calzoneFlavors — esconder um sabor não afeta a Pizza", () => {
-    const menuModoOwn = structuredClone(MENU);
-    calzoneDe(menuModoOwn).flavorsMode = "own";
-
-    const simpleCatalog = buildSimpleCatalog(menuModoOwn);
-    const pizzaCatalog = buildPizzaCatalog(menuModoOwn);
-    const calzone = simpleCatalog.lanches.find((l) => l.name === "Calzone")!;
-
-    // "Quatro Queijos" some da lista do Calzone (lista permitida, modo own)...
-    expect(calzone.flavors?.some((f) => f.name === SABOR_FORA_DAS_LISTAS_PROPRIAS)).toBe(false);
-    // ...mas cada sabor que SOBROU continua com o mesmo flavorId oficial.
-    const calabresaPizza = pizzaCatalog.flavors.find((f) => f.name === "Calabresa")!;
-    const calabresaCalzone = calzone.flavors!.find((f) => f.name === "Calabresa")!;
-    expect(calabresaCalzone.id).toBe(calabresaPizza.id);
-    // ...e a Pizza continua 100% disponível/precificável para esse sabor, sem nenhum efeito.
-    expect(pizzaCatalog.flavors.some((f) => f.name === SABOR_FORA_DAS_LISTAS_PROPRIAS)).toBe(true);
-  });
-
-  it("REGRESSÃO (auditoria independente pós-8ª rodada) — flavorsMode com valor desconhecido (config corrompida) é fail-closed: lista de sabores vazia, NUNCA cai para os sabores da Pizza", () => {
-    const menuValorInesperado = structuredClone(MENU);
-    // Simula um dado corrompido/desconhecido persistido em Redis (fronteira
-    // de storage, não confiável) — o `as` é só para o teste burlar o tipo.
-    (calzoneDe(menuValorInesperado) as { flavorsMode?: string }).flavorsMode = "modo-desconhecido";
-
-    const simpleCatalog = buildSimpleCatalog(menuValorInesperado);
-    const calzone = simpleCatalog.lanches.find((l) => l.name === "Calzone")!;
-    expect(calzone.flavors).toEqual([]);
-  });
-
-  it("Mini-Pizza continua em modo 'own' — comportamento preservado, não alterado por esta correção (escopo é só o Calzone)", () => {
-    expect(MENU.lanches.find((l) => l.name === "Mini-Pizza")!.flavorsMode).toBe("own");
-
-    const simpleCatalog = buildSimpleCatalog(MENU);
-    const miniPizza = simpleCatalog.lanches.find((l) => l.name === "Mini-Pizza")!;
-    expect(miniPizza.flavors?.some((f) => f.name === SABOR_FORA_DAS_LISTAS_PROPRIAS)).toBe(false);
-  });
-
-  it("preço do Calzone não muda por sabor nem por modo", () => {
-    const calzoneMenu = calzoneDe(MENU);
-    const simpleCatalogPizza = buildSimpleCatalog(MENU);
-    const calzonePizzaModo = simpleCatalogPizza.lanches.find((l) => l.name === "Calzone")!;
-    expect(calzonePizzaModo.priceCents).toBe(Math.round(calzoneMenu.price * 100));
-
-    const menuModoOwn = structuredClone(MENU);
-    calzoneDe(menuModoOwn).flavorsMode = "own";
-    const calzoneOwnModo = buildSimpleCatalog(menuModoOwn).lanches.find((l) => l.name === "Calzone")!;
-    expect(calzoneOwnModo.priceCents).toBe(calzonePizzaModo.priceCents);
-  });
-
-  it("preço, id e strategy do Calzone são idênticos entre os dois modos — só a lista de sabores muda", () => {
-    const menuModoOwn = structuredClone(MENU);
-    calzoneDe(menuModoOwn).flavorsMode = "own";
-
-    const calzonePizza = buildSimpleCatalog(MENU).lanches.find((l) => l.name === "Calzone")!;
-    const calzoneOwn = buildSimpleCatalog(menuModoOwn).lanches.find((l) => l.name === "Calzone")!;
-
-    expect(calzoneOwn.id).toBe(calzonePizza.id);
-    expect(calzoneOwn.priceCents).toBe(calzonePizza.priceCents);
-    expect(calzoneOwn.strategy).toBe(calzonePizza.strategy);
-    expect(calzoneOwn.flavors!.length).toBeLessThan(calzonePizza.flavors!.length);
-  });
-
-  it("disponibilidade (esgotados) continua recalculada por sabor independentemente do modo", () => {
-    const simpleCatalog = buildSimpleCatalog(MENU, ["Calabresa"]);
-    const calzone = simpleCatalog.lanches.find((l) => l.name === "Calzone")!;
+  it("esgotar 'Calabresa' também esgota o sabor Calabresa do Calzone (mesmo flavorId/ingrediente)", () => {
+    const catalog = buildSimpleCatalog(MENU, ["Calabresa"]);
+    const calzone = produto("Calzone", catalog);
     const calabresa = calzone.flavors!.find((f) => f.name === "Calabresa")!;
     expect(calabresa.available).toBe(false);
-    const quatroQueijos = calzone.flavors!.find((f) => f.name === SABOR_FORA_DAS_LISTAS_PROPRIAS)!;
-    expect(quatroQueijos.available).toBe(true);
+  });
+
+  it("esconder um sabor do Calzone (curadoria) não é confundido com esgotar a Pizza — outros sabores do Calzone continuam disponíveis", () => {
+    const catalog = buildSimpleCatalog(MENU, ["Carne Seca"]);
+    const calzone = produto("Calzone", catalog);
+    expect(calzone.flavors!.find((f) => f.name === "Frango")?.available).toBe(true);
   });
 });
 
-describe("buildSimpleCatalog — REGRESSÃO (BLOQUEIO, auditoria independente pós-8ª rodada): flavorsMode ausente NÃO é sempre 'pizza' — compatibilidade decidida por flavorsKey, nunca pelo nome", () => {
-  function miniPizzaDe(menu: typeof MENU) {
-    return menu.lanches.find((l) => l.name === "Mini-Pizza")!;
-  }
-
-  it("REGRESSÃO A — cardápio legado sem flavorsMode em NENHUM dos dois produtos: Calzone continua usando os sabores da Pizza, Mini-Pizza continua restrita a miniPizzaFlavors", () => {
-    const menuLegado = structuredClone(MENU);
-    delete calzoneDe(menuLegado).flavorsMode;
-    delete miniPizzaDe(menuLegado).flavorsMode;
-
-    const simpleCatalog = buildSimpleCatalog(menuLegado);
-    const calzone = simpleCatalog.lanches.find((l) => l.name === "Calzone")!;
-    const miniPizza = simpleCatalog.lanches.find((l) => l.name === "Mini-Pizza")!;
-
-    // Calzone: comportamento "pizza" preservado (exceção comercial aprovada).
-    expect(calzone.flavors?.some((f) => f.name === SABOR_FORA_DAS_LISTAS_PROPRIAS)).toBe(true);
-    expect(calzone.flavors?.length).toBe(buildPizzaCatalog(menuLegado).flavors.length);
-
-    // Mini-Pizza: NUNCA deve se ampliar para os sabores da Pizza — só
-    // miniPizzaFlavors, exatamente como sempre foi (comportamento histórico).
-    expect(miniPizza.flavors?.some((f) => f.name === SABOR_FORA_DAS_LISTAS_PROPRIAS)).toBe(false);
-    const nomesEsperados = [...MENU.miniPizzaFlavors].sort();
-    const nomesObtidos = (miniPizza.flavors ?? []).map((f) => f.name).sort();
-    expect(nomesObtidos).toEqual(nomesEsperados);
+describe("buildSimpleCatalog — Pastel de Forno (single_flavor, 12 sabores, todos R$25)", () => {
+  it("12 sabores, todos com priceCents do PRODUTO (25,00), sabor nunca muda o preço", () => {
+    const catalog = buildSimpleCatalog(MENU);
+    const pastel = produto("Pastel de Forno", catalog);
+    expect(pastel.strategy).toBe("single_flavor");
+    expect(pastel.priceCents).toBe(2500);
+    expect(pastel.flavors).toHaveLength(12);
   });
 
-  it("REGRESSÃO D — modo 'own' com flavorsKey que não resolve para uma lista válida (config corrompida) é fail-closed: lista vazia, NUNCA os sabores da Pizza", () => {
-    const menuCorrompido = structuredClone(MENU);
-    const miniPizza = miniPizzaDe(menuCorrompido);
-    miniPizza.flavorsMode = "own";
-    (miniPizza as { flavorsKey: string }).flavorsKey = "secaoQueNaoExiste";
+  it("os mesmos 12 nomes de sabor do Calzone", () => {
+    const catalog = buildSimpleCatalog(MENU);
+    const calzone = produto("Calzone", catalog);
+    const pastel = produto("Pastel de Forno", catalog);
+    expect(pastel.flavors!.map((f) => f.name).sort()).toEqual(calzone.flavors!.map((f) => f.name).sort());
+  });
+});
 
-    const simpleCatalog = buildSimpleCatalog(menuCorrompido);
-    const miniPizzaCatalogo = simpleCatalog.lanches.find((l) => l.name === "Mini-Pizza")!;
-    expect(miniPizzaCatalogo.flavors).toEqual([]);
+describe("buildSimpleCatalog — Pastel de Feira (single_flavor, dentro de Lanches, 6 recheios próprios)", () => {
+  it("está em `lanches`, R$8,00, 6 recheios, recheios NÃO reaproveitam flavorId de pizza", () => {
+    const catalog = buildSimpleCatalog(MENU);
+    const pastelFeira = catalog.lanches.find((l) => l.name === "Pastel de Feira")!;
+    expect(pastelFeira.strategy).toBe("single_flavor");
+    expect(pastelFeira.priceCents).toBe(800);
+    expect(pastelFeira.flavors).toHaveLength(6);
+    for (const recheio of pastelFeira.flavors!) {
+      expect(recheio.id.startsWith("pastel-feira-")).toBe(true);
+    }
   });
 
-  it("produto single_flavor renomeado (nem 'Calzone' nem 'Mini-Pizza') sem flavorsMode preserva o comportamento histórico ('own', pela ausência de flavorsKey 'calzoneFlavors') — nunca decidido pelo nome", () => {
-    const menuRenomeado = structuredClone(MENU);
-    const calzone = calzoneDe(menuRenomeado);
-    delete calzone.flavorsMode;
-    calzone.name = "Combo Dobrado";
-    (calzone as { flavorsKey: string }).flavorsKey = "miniPizzaFlavors";
+  it("ID próprio de Calabresa esgota só o recheio do Pastel de Feira", () => {
+    const catalog = buildSimpleCatalog(MENU, [], ["pastel-feira-calabresa"]);
+    const pastelFeira = catalog.lanches.find((l) => l.name === "Pastel de Feira")!;
+    const calzone = produto("Calzone", catalog);
+    expect(pastelFeira.flavors!.find((f) => f.name === "Calabresa")?.available).toBe(false);
+    expect(calzone.flavors!.find((f) => f.name === "Calabresa")?.available).toBe(true);
+  });
+});
 
-    const simpleCatalog = buildSimpleCatalog(menuRenomeado);
-    const comboDobrado = simpleCatalog.lanches.find((l) => l.name === "Combo Dobrado")!;
-    // flavorsKey aponta para miniPizzaFlavors (não "calzoneFlavors") — a
-    // exceção comercial "pizza" não se aplica; comportamento histórico "own".
-    expect(comboDobrado.flavors?.some((f) => f.name === SABOR_FORA_DAS_LISTAS_PROPRIAS)).toBe(false);
+describe("buildSimpleCatalog — Hambúrguer (fixed, categoria própria)", () => {
+  it("5 produtos, cada um fixed com o próprio preço", () => {
+    const catalog = buildSimpleCatalog(MENU);
+    expect(catalog.hamburgueres).toHaveLength(5);
+    for (const h of catalog.hamburgueres) expect(h.strategy).toBe("fixed");
+    expect(produto("X-Tudo", catalog).priceCents).toBe(2500);
+  });
+});
+
+describe("buildSimpleCatalog — Macarronada (size + addOnGroup opcional)", () => {
+  it("2 produtos, 4 tamanhos cada (G/M/P/PP)", () => {
+    const catalog = buildSimpleCatalog(MENU);
+    expect(catalog.macarronadas).toHaveLength(2);
+    for (const m of catalog.macarronadas) {
+      expect(m.strategy).toBe("size");
+      expect(m.sizes!.map((s) => s.code).sort()).toEqual(["G", "M", "P", "PP"]);
+    }
+  });
+
+  it("Macarronada de Carne: G=5000 M=4000 P=2800 PP=1500", () => {
+    const catalog = buildSimpleCatalog(MENU);
+    const carne = produto("Macarronada de Carne", catalog);
+    const porCodigo = Object.fromEntries(carne.sizes!.map((s) => [s.code, s.priceCents]));
+    expect(porCodigo).toEqual({ G: 5000, M: 4000, P: 2800, PP: 1500 });
+  });
+
+  it("addOnGroup com Bacon e Ovos, R$10 cada, max 1", () => {
+    const catalog = buildSimpleCatalog(MENU);
+    const carne = produto("Macarronada de Carne", catalog);
+    expect(carne.addOnGroup?.max).toBe(1);
+    expect(carne.addOnGroup?.options.map((o) => o.label).sort()).toEqual(["Bacon", "Ovos"]);
+    for (const opcao of carne.addOnGroup!.options) expect(opcao.priceCents).toBe(1000);
+  });
+});
+
+describe("buildSimpleCatalog — Sucos (milk) e Vitaminas (fixed, sem herdar regra do leite)", () => {
+  it("11 sucos, strategy milk, preço-base próprio por sabor", () => {
+    const catalog = buildSimpleCatalog(MENU);
+    expect(catalog.sucos).toHaveLength(11);
+    for (const s of catalog.sucos) expect(s.strategy).toBe("milk");
+    expect(produto("Bacuri", catalog).priceCents).toBe(1000);
+    expect(produto("Cajú", catalog).priceCents).toBe(700);
+  });
+
+  it("Vitamina de Banana é fixed (R$10) — categoria própria, nunca strategy milk", () => {
+    const catalog = buildSimpleCatalog(MENU);
+    expect(catalog.vitaminas).toHaveLength(1);
+    const vitamina = produto("Vitamina de Banana", catalog);
+    expect(vitamina.strategy).toBe("fixed");
+    expect(vitamina.priceCents).toBe(1000);
+  });
+});
+
+describe("buildSimpleCatalog — Bebidas (fixed, 23 itens exatamente do PDF)", () => {
+  it("23 produtos, todos fixed", () => {
+    const catalog = buildSimpleCatalog(MENU);
+    expect(catalog.bebidas).toHaveLength(23);
+    for (const b of catalog.bebidas) expect(b.strategy).toBe("fixed");
+  });
+
+  it("preço nunca reaproveitado do Menu antigo — ex.: Água sem Gás agora R$3 (antes R$3 coincide, mas Refrigerante 1L agora R$11 sem ambiguidade com o antigo 'Refrigerante 1L' R$11 coincide; Guaraná 1L novo R$9 == antigo)", () => {
+    // Verificação direta: todo preço bate com a fonte oficial 2026, não com
+    // MENU.bebidas (que é o cardápio ANTIGO, propositalmente não tocado).
+    const catalog = buildSimpleCatalog(MENU);
+    expect(produto("Cerveja Long Neck", catalog).priceCents).toBe(1000);
+    expect(produto("Refrigerante Lata", catalog).priceCents).toBe(600);
+  });
+});
+
+describe("buildSimpleCatalog — IDs estáveis e disponibilidade", () => {
+  it("IDs determinísticos entre duas construções", () => {
+    const a = buildSimpleCatalog(MENU);
+    const b = buildSimpleCatalog(MENU);
+    expect(todosOsProdutos(a).map((p) => p.id)).toEqual(todosOsProdutos(b).map((p) => p.id));
+  });
+
+  it("produto esgotado por nome fica indisponível", () => {
+    const catalog = buildSimpleCatalog(MENU, ["X-Tudo"]);
+    expect(produto("X-Tudo", catalog).available).toBe(false);
+    expect(produto("X-Burguer", catalog).available).toBe(true);
   });
 });

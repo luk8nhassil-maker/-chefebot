@@ -46,7 +46,7 @@ const CARDAPIO_TESTE_PIZZA = {
   sucos: [], neighborhoods: [],
 };
 const SIZE_G = "size-g";
-const FLAVOR_QUATRO_QUEIJOS = "flavor-quatro-queijos";
+const FLAVOR_4_QUEIJOS = "flavor-4-queijos"; // G = R$50 (cardápio oficial 2026)
 
 import { POST as enviar } from "./route";
 import { POST as abrir } from "../../route";
@@ -206,7 +206,7 @@ describe("POST /api/salao/comandas/[id]/enviar", () => {
       const aberta = await (await abrir(reqSalao({ cliente: "Ana", mesa: "5" }, token))).json();
       await atualizarComanda(
         reqSalao(
-          { itens: [{ kind: "pizza", price: 0, qty: 1, pizzaSelection: { sizeId: SIZE_G, flavorIds: [FLAVOR_QUATRO_QUEIJOS] } }] },
+          { itens: [{ kind: "pizza", price: 0, qty: 1, pizzaSelection: { sizeId: SIZE_G, flavorIds: [FLAVOR_4_QUEIJOS] } }] },
           token
         ),
         paramsFor(aberta.comanda.id)
@@ -217,12 +217,12 @@ describe("POST /api/salao/comandas/[id]/enviar", () => {
       expect(data.total).toBe(50);
 
       const pedidos = store.get("pedidos") as Array<Record<string, unknown>>;
-      expect(pedidos[0].itens).toEqual(["Pizza G Quatro Queijos"]);
+      expect(pedidos[0].itens).toEqual(["Pizza G 4 Queijos"]);
       const snapshot = pedidos[0].snapshotOficial as
         | { itens: Array<{ selecao?: { sizeId: string; flavorIds: string[] } }> }
         | undefined;
       if (snapshot) {
-        expect(snapshot.itens[0].selecao).toEqual({ sizeId: SIZE_G, flavorIds: [FLAVOR_QUATRO_QUEIJOS] });
+        expect(snapshot.itens[0].selecao).toEqual({ sizeId: SIZE_G, flavorIds: [FLAVOR_4_QUEIJOS] });
       }
     });
 
@@ -242,7 +242,7 @@ describe("POST /api/salao/comandas/[id]/enviar", () => {
           detail: "Quatro Queijos",
           price: 50,
           qty: 1,
-          pizzaSelection: { sizeId: "size-inexistente", flavorIds: [FLAVOR_QUATRO_QUEIJOS] },
+          pizzaSelection: { sizeId: "size-inexistente", flavorIds: [FLAVOR_4_QUEIJOS] },
         },
       ]);
       const res = await enviar(reqSalao({}, token), paramsFor(aberta.comanda.id));
@@ -256,7 +256,7 @@ describe("POST /api/salao/comandas/[id]/enviar", () => {
       const aberta = await (await abrir(reqSalao({ cliente: "Ana", mesa: "5" }, token))).json();
       await atualizarComanda(
         reqSalao(
-          { itens: [{ kind: "pizza", price: 0, qty: 1, pizzaSelection: { sizeId: SIZE_G, flavorIds: [FLAVOR_QUATRO_QUEIJOS] } }] },
+          { itens: [{ kind: "pizza", price: 0, qty: 1, pizzaSelection: { sizeId: SIZE_G, flavorIds: [FLAVOR_4_QUEIJOS] } }] },
           token
         ),
         paramsFor(aberta.comanda.id)

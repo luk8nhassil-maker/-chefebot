@@ -1838,7 +1838,7 @@ describe("POST /api/pedido-app — seleção estruturada de pizza por ID (Fase 2
   const sizeIdF = catalog.sizes.find((s) => s.code === "F")!.id;
   const flavorCalabresa = catalog.flavors.find((f) => f.name === "Calabresa")!.id;
   const flavorBaiana = catalog.flavors.find((f) => f.name === "Baiana")!.id;
-  const borderCatupiry = catalog.borders.find((b) => b.label === "Catupiry")!.id;
+  const borderCatupiry = catalog.borders.find((b) => b.label === "Catupiry Original")!.id;
 
   const pizzaBasePayload = {
     cliente: "Lucas Brito",
@@ -1864,8 +1864,8 @@ describe("POST /api/pedido-app — seleção estruturada de pizza por ID (Fase 2
     expect(res.status).toBe(200);
     const pedidos = store.get("pedidos") as { itens: string[]; itensDetalhados: { name: string; detail?: string; price: number }[]; total: number }[];
     expect(pedidos[0].itens).toEqual(["Pizza G Calabresa"]);
-    expect(pedidos[0].itensDetalhados[0]).toMatchObject({ name: "Pizza G", detail: "Calabresa", price: 50 });
-    expect(pedidos[0].total).toBe(50); // preço oficial da Grande no Menu (retirada, sem taxa)
+    expect(pedidos[0].itensDetalhados[0]).toMatchObject({ name: "Pizza G", detail: "Calabresa", price: 45 });
+    expect(pedidos[0].total).toBe(45); // cardápio oficial 2026 — Calabresa, tamanho G (retirada, sem taxa)
   });
 
   it("meio a meio por ID: ordem dos sabores não altera o preço nem o texto salvo", async () => {
@@ -1886,7 +1886,7 @@ describe("POST /api/pedido-app — seleção estruturada de pizza por ID (Fase 2
     expect(pedidos[0].total).toBe(pedidos[1].total);
   });
 
-  it("soma a borda depois, conforme a regra P/M usa priceSmall e G/F usa priceLarge", async () => {
+  it("soma a borda depois do preço-base do sabor no tamanho escolhido", async () => {
     const res = await POST(postReq({
       ...pizzaBasePayload,
       itens: [{
@@ -1896,10 +1896,9 @@ describe("POST /api/pedido-app — seleção estruturada de pizza por ID (Fase 2
     }));
 
     expect(res.status).toBe(200);
-    const border = MENU.borders.find((b) => b.label === "Catupiry")!;
-    const sizeF = MENU.sizes.find((s) => s.code === "F")!;
     const pedidos = store.get("pedidos") as { total: number }[];
-    expect(pedidos[0].total).toBe(sizeF.price + border.priceLarge);
+    // cardápio oficial 2026 — Calabresa (F) = R$50 + borda Catupiry Original (F) = R$15
+    expect(pedidos[0].total).toBe(65);
   });
 
   it("rejeita tamanho inexistente com 400, e NUNCA cria o pedido mesmo com name/detail legados válidos no mesmo item", async () => {
@@ -2009,23 +2008,20 @@ describe("POST /api/pedido-app — seleção estruturada de pizza por ID (Fase 2
     const pedidos = store.get("pedidos") as { itens: string[]; total: number }[];
     expect(pedidos[0].itens).toEqual(["Pizza G Calabresa", "Refrigerante 2L"]);
     const refri = MENU.bebidas.find((b) => b.name === "Refrigerante 2L")!;
-    const sizeG = MENU.sizes.find((s) => s.code === "G")!;
-    expect(pedidos[0].total).toBe(sizeG.price + refri.price);
+    expect(pedidos[0].total).toBe(45 + refri.price); // Pizza G Calabresa (catálogo oficial 2026) + Refrigerante (legado)
   });
 });
 
 describe("POST /api/pedido-app — seleção estruturada de produto simples por ID (Fase 6)", () => {
   const simpleCatalog = buildSimpleCatalog(MENU);
-  const productIdCalzone = simpleCatalog.lanches.find((l) => l.name === "Calzone")!.id;
-  const productIdMiniPizza = simpleCatalog.lanches.find((l) => l.name === "Mini-Pizza")!.id;
-  const productIdMacarronada = simpleCatalog.lanches.find((l) => l.name === "Macarronada de Carne")!.id;
-  const sizeGMacarronada = simpleCatalog.lanches.find((l) => l.name === "Macarronada de Carne")!.sizes!.find((s) => s.code === "G")!.id;
+  const productIdCalzone = simpleCatalog.calzone.find((l) => l.name === "Calzone")!.id;
+  const productIdMacarronada = simpleCatalog.macarronadas.find((l) => l.name === "Macarronada de Carne")!.id;
+  const sizeGMacarronada = simpleCatalog.macarronadas.find((l) => l.name === "Macarronada de Carne")!.sizes!.find((s) => s.code === "G")!.id;
   const productIdLaranja = simpleCatalog.sucos.find((s) => s.name === "Laranja")!.id;
-  // Sabores de Calzone e Mini-Pizza vêm das listas oficiais PRÓPRIAS de cada
-  // produto (calzoneFlavors/miniPizzaFlavors) — nunca a lista de sabores de
-  // pizza — e nunca se confundem entre si, mesmo com o mesmo nome.
-  const flavorCalabresaCalzone = simpleCatalog.lanches.find((l) => l.name === "Calzone")!.flavors!.find((f) => f.name === "Calabresa")!.id;
-  const flavorCalabresaMiniPizza = simpleCatalog.lanches.find((l) => l.name === "Mini-Pizza")!.flavors!.find((f) => f.name === "Calabresa")!.id;
+  // Sabor do Calzone vem da lista OFICIAL e fixa do cardápio 2026
+  // (CALZONE_FLAVORS, ver @/lib/catalog/officialMenu2026) — cada sabor com
+  // preço próprio, nunca fixo por produto.
+  const flavorCalabresaCalzone = simpleCatalog.calzone.find((l) => l.name === "Calzone")!.flavors!.find((f) => f.name === "Calabresa")!.id;
 
   const simplePayload = {
     cliente: "Lucas Brito",
@@ -2049,23 +2045,19 @@ describe("POST /api/pedido-app — seleção estruturada de produto simples por 
     }));
 
     expect(res.status).toBe(200);
-    const calzone = MENU.lanches.find((l) => l.name === "Calzone")!;
     const pedidos = store.get("pedidos") as { itens: string[]; itensDetalhados: { name: string; detail?: string; price: number }[]; total: number }[];
     expect(pedidos[0].itens).toEqual(["Calzone Sabor: Calabresa"]);
-    expect(pedidos[0].itensDetalhados[0]).toMatchObject({ name: "Calzone", detail: "Sabor: Calabresa", price: calzone.price });
-    expect(pedidos[0].total).toBe(calzone.price);
+    expect(pedidos[0].itensDetalhados[0]).toMatchObject({ name: "Calzone", detail: "Sabor: Calabresa", price: 30 });
+    expect(pedidos[0].total).toBe(30); // cardápio oficial 2026 — Calzone Calabresa = R$30
   });
 
-  it("Mini-Pizza: exige sabor e calcula o preço oficial", async () => {
+  it("REGRESSÃO — 'Mini-Pizza' não existe mais como produto simples (virou tamanho de pizza, decisão comercial aprovada): productId inexistente é rejeitado com 400", async () => {
     const res = await POST(postReq({
       ...simplePayload,
-      itens: [{ kind: "simple", name: "", price: 0, qty: 1, simpleSelection: { productId: productIdMiniPizza, flavorId: flavorCalabresaMiniPizza } }],
+      itens: [{ kind: "simple", name: "", price: 0, qty: 1, simpleSelection: { productId: "product-mini-pizza", flavorId: flavorCalabresaCalzone } }],
     }));
-    expect(res.status).toBe(200);
-    const miniPizza = MENU.lanches.find((l) => l.name === "Mini-Pizza")!;
-    const pedidos = store.get("pedidos") as { itens: string[]; total: number }[];
-    expect(pedidos[0].itens).toEqual(["Mini-Pizza Sabor: Calabresa"]);
-    expect(pedidos[0].total).toBe(miniPizza.price);
+    expect(res.status).toBe(400);
+    expect(store.get("pedidos")).toBeUndefined();
   });
 
   it("Macarronada: exige tamanho e calcula o preço por tamanho", async () => {
@@ -2074,11 +2066,9 @@ describe("POST /api/pedido-app — seleção estruturada de produto simples por 
       itens: [{ kind: "simple", name: "", price: 0, qty: 1, simpleSelection: { productId: productIdMacarronada, sizeId: sizeGMacarronada } }],
     }));
     expect(res.status).toBe(200);
-    const macarronada = MENU.lanches.find((l) => l.name === "Macarronada de Carne")!;
-    const sizeG = macarronada.sizes!.find((s) => s.code === "G")!;
     const pedidos = store.get("pedidos") as { itens: string[]; total: number }[];
     expect(pedidos[0].itens).toEqual(["Macarronada de Carne Tamanho G"]);
-    expect(pedidos[0].total).toBe(sizeG.price);
+    expect(pedidos[0].total).toBe(50); // cardápio oficial 2026 — Macarronada de Carne, tamanho G
   });
 
   it("suco com leite: soma o adicional oficial", async () => {
@@ -2087,10 +2077,9 @@ describe("POST /api/pedido-app — seleção estruturada de produto simples por 
       itens: [{ kind: "simple", name: "", price: 0, qty: 1, simpleSelection: { productId: productIdLaranja, milk: "com" } }],
     }));
     expect(res.status).toBe(200);
-    const laranja = MENU.sucos.find((s) => s.name === "Laranja")!;
     const pedidos = store.get("pedidos") as { itens: string[]; total: number }[];
     expect(pedidos[0].itens).toEqual(["Laranja com leite"]);
-    expect(pedidos[0].total).toBe(laranja.price + 1);
+    expect(pedidos[0].total).toBe(11); // cardápio oficial 2026 — Laranja (R$10) + leite (R$1)
   });
 
   it("rejeita productId inexistente com 400, e NUNCA cria o pedido mesmo com name/detail legados válidos no mesmo item", async () => {
@@ -2162,11 +2151,10 @@ describe("POST /api/pedido-app — seleção estruturada de produto simples por 
     }));
 
     expect(res.status).toBe(200);
-    const calzone = MENU.lanches.find((l) => l.name === "Calzone")!;
     const refri = MENU.bebidas.find((b) => b.name === "Refrigerante 2L")!;
     const pedidos = store.get("pedidos") as { itens: string[]; total: number }[];
     expect(pedidos[0].itens).toEqual(["Calzone Sabor: Calabresa", "Refrigerante 2L"]);
-    expect(pedidos[0].total).toBe(calzone.price + refri.price);
+    expect(pedidos[0].total).toBe(30 + refri.price); // Calzone Calabresa (30, catálogo oficial) + Refrigerante (legado)
   });
 
   it("continua aceitando itens de pizza por ID normalmente quando misturados com um item simples por ID no mesmo pedido", async () => {
@@ -2182,11 +2170,9 @@ describe("POST /api/pedido-app — seleção estruturada de produto simples por 
     }));
 
     expect(res.status).toBe(200);
-    const sizeG = MENU.sizes.find((s) => s.code === "G")!;
-    const calzone = MENU.lanches.find((l) => l.name === "Calzone")!;
     const pedidos = store.get("pedidos") as { itens: string[]; total: number }[];
     expect(pedidos[0].itens).toEqual(["Pizza G Calabresa", "Calzone Sabor: Calabresa"]);
-    expect(pedidos[0].total).toBe(sizeG.price + calzone.price);
+    expect(pedidos[0].total).toBe(45 + 30); // Pizza G Calabresa (45) + Calzone Calabresa (30), cardápio oficial 2026
   });
 
   it("REGRESSÃO (hardening pós-auditoria, 5ª rodada) — item com pizzaSelection E simpleSelection ao mesmo tempo é rejeitado com 400, nunca resolvido por precedência silenciosa da pizza", async () => {
@@ -2277,9 +2263,10 @@ describe("POST /api/pedido-app — snapshotOficial (Fase 3)", () => {
   const catalog = buildPizzaCatalog(MENU);
   const sizeIdG = catalog.sizes.find((s) => s.code === "G")!.id;
   const flavorCalabresa = catalog.flavors.find((f) => f.name === "Calabresa")!.id;
-  const borderCatupiry = catalog.borders.find((b) => b.label === "Catupiry")!.id;
-  const sizeG = MENU.sizes.find((s) => s.code === "G")!;
-  const border = MENU.borders.find((b) => b.label === "Catupiry")!;
+  const borderCatupiry = catalog.borders.find((b) => b.label === "Catupiry Original")!.id;
+  // cardápio oficial 2026 — Calabresa (G) = R$45, borda Catupiry Original (G) = R$15
+  const precoCalabresaG = 45;
+  const precoBordaCatupiryOriginalG = 15;
   const refri = MENU.bebidas.find((b) => b.name === "Refrigerante 2L")!;
   const bairroCentro = MENU.neighborhoods.find((n) => n.name === "Centro")!;
 
@@ -2320,10 +2307,10 @@ describe("POST /api/pedido-app — snapshotOficial (Fase 3)", () => {
     expect(snapshot.itens).toEqual([{
       kind: "pizza",
       nome: "Pizza G",
-      detalhe: "Calabresa · borda Catupiry",
+      detalhe: "Calabresa · borda Catupiry Original",
       quantidade: 1,
-      precoUnitarioCents: Math.round((sizeG.price + border.priceLarge) * 100),
-      totalCents: Math.round((sizeG.price + border.priceLarge) * 100),
+      precoUnitarioCents: Math.round((precoCalabresaG + precoBordaCatupiryOriginalG) * 100),
+      totalCents: Math.round((precoCalabresaG + precoBordaCatupiryOriginalG) * 100),
       selecao: { sizeId: sizeIdG, flavorIds: [flavorCalabresa], borderId: borderCatupiry },
     }]);
   });
@@ -2380,7 +2367,7 @@ describe("POST /api/pedido-app — snapshotOficial (Fase 3)", () => {
     expect(snapshot.itens).toHaveLength(2);
     expect(snapshot.itens[0].selecao).toBeDefined();
     expect(snapshot.itens[1]).not.toHaveProperty("selecao");
-    expect(snapshot.subtotalCents).toBe(Math.round((sizeG.price + refri.price) * 100));
+    expect(snapshot.subtotalCents).toBe(Math.round((precoCalabresaG + refri.price) * 100));
   });
 
   it("quantidade > 1: totalCents do item = precoUnitarioCents * quantidade", async () => {
@@ -2402,7 +2389,7 @@ describe("POST /api/pedido-app — snapshotOficial (Fase 3)", () => {
     }));
     expect(res.status).toBe(200);
     const pedidos = store.get("pedidos") as PedidoComSnapshot[];
-    expect(pedidos[0].snapshotOficial!.itens[0].precoUnitarioCents).toBe(Math.round(sizeG.price * 100));
+    expect(pedidos[0].snapshotOficial!.itens[0].precoUnitarioCents).toBe(Math.round(precoCalabresaG * 100));
   });
 
   it("total/taxa adulterados no payload (campos que nem existem no contrato do servidor) não afetam o snapshot", async () => {
@@ -2462,9 +2449,8 @@ describe("POST /api/pedido-app — snapshotOficial (Fase 3)", () => {
 
   it("produto simples estruturado (Fase 6): item do snapshot carrega selecao (productId/flavorId) e preço oficial em centavos", async () => {
     const simpleCatalog = buildSimpleCatalog(MENU);
-    const productIdCalzone = simpleCatalog.lanches.find((l) => l.name === "Calzone")!.id;
-    const flavorCalabresaCalzone = simpleCatalog.lanches.find((l) => l.name === "Calzone")!.flavors!.find((f) => f.name === "Calabresa")!.id;
-    const calzone = MENU.lanches.find((l) => l.name === "Calzone")!;
+    const productIdCalzone = simpleCatalog.calzone.find((l) => l.name === "Calzone")!.id;
+    const flavorCalabresaCalzone = simpleCatalog.calzone.find((l) => l.name === "Calzone")!.flavors!.find((f) => f.name === "Calabresa")!.id;
 
     const res = await POST(postReq({
       cliente: "Lucas Brito", telefone: "(99) 99999-9999", tipoEntrega: "retirada", pagamento: "Dinheiro", troco: "Sem troco",
@@ -2478,16 +2464,16 @@ describe("POST /api/pedido-app — snapshotOficial (Fase 3)", () => {
       nome: "Calzone",
       detalhe: "Sabor: Calabresa",
       quantidade: 1,
-      precoUnitarioCents: Math.round(calzone.price * 100),
-      totalCents: Math.round(calzone.price * 100),
+      precoUnitarioCents: 3000, // cardápio oficial 2026 — Calzone Calabresa = R$30
+      totalCents: 3000,
       selecao: { productId: productIdCalzone, flavorId: flavorCalabresaCalzone },
     }]);
   });
 
   it("REGRESSÃO — sabor esgota entre a montagem e o envio: rejeitado com 400, nunca cria o pedido com o preço/nome adulterado", async () => {
     const simpleCatalog = buildSimpleCatalog(MENU);
-    const productIdCalzone = simpleCatalog.lanches.find((l) => l.name === "Calzone")!.id;
-    const flavorCalabresaCalzone = simpleCatalog.lanches.find((l) => l.name === "Calzone")!.flavors!.find((f) => f.name === "Calabresa")!.id;
+    const productIdCalzone = simpleCatalog.calzone.find((l) => l.name === "Calzone")!.id;
+    const flavorCalabresaCalzone = simpleCatalog.calzone.find((l) => l.name === "Calzone")!.flavors!.find((f) => f.name === "Calabresa")!.id;
     store.set("esgotados", ["Calabresa"]);
 
     const res = await POST(postReq({
@@ -2501,8 +2487,8 @@ describe("POST /api/pedido-app — snapshotOficial (Fase 3)", () => {
 
   it("REGRESSÃO — produto inteiro esgota entre a montagem e o envio: rejeitado com 400", async () => {
     const simpleCatalog = buildSimpleCatalog(MENU);
-    const productIdCalzone = simpleCatalog.lanches.find((l) => l.name === "Calzone")!.id;
-    const flavorCalabresaCalzone = simpleCatalog.lanches.find((l) => l.name === "Calzone")!.flavors!.find((f) => f.name === "Calabresa")!.id;
+    const productIdCalzone = simpleCatalog.calzone.find((l) => l.name === "Calzone")!.id;
+    const flavorCalabresaCalzone = simpleCatalog.calzone.find((l) => l.name === "Calzone")!.flavors!.find((f) => f.name === "Calabresa")!.id;
     store.set("esgotados", ["Calzone"]);
 
     const res = await POST(postReq({
