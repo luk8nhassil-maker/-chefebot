@@ -2017,6 +2017,8 @@ describe("POST /api/pedido-app — seleção estruturada de produto simples por 
   const productIdCalzone = simpleCatalog.calzone.find((l) => l.name === "Calzone")!.id;
   const productIdMacarronada = simpleCatalog.macarronadas.find((l) => l.name === "Macarronada de Carne")!.id;
   const sizeGMacarronada = simpleCatalog.macarronadas.find((l) => l.name === "Macarronada de Carne")!.sizes!.find((s) => s.code === "G")!.id;
+  const addOnBaconMacarronada = simpleCatalog.macarronadas.find((l) => l.name === "Macarronada de Carne")!.addOnGroup!.options.find((o) => o.label === "Bacon")!.id;
+  const addOnOvoMacarronada = simpleCatalog.macarronadas.find((l) => l.name === "Macarronada de Carne")!.addOnGroup!.options.find((o) => o.label === "Ovo")!.id;
   const productIdLaranja = simpleCatalog.sucos.find((s) => s.name === "Laranja")!.id;
   // Sabor do Calzone vem da lista OFICIAL e fixa do cardápio 2026
   // (CALZONE_FLAVORS, ver @/lib/catalog/officialMenu2026) — cada sabor com
@@ -2069,6 +2071,28 @@ describe("POST /api/pedido-app — seleção estruturada de produto simples por 
     const pedidos = store.get("pedidos") as { itens: string[]; total: number }[];
     expect(pedidos[0].itens).toEqual(["Macarronada de Carne Tamanho G"]);
     expect(pedidos[0].total).toBe(50); // cardápio oficial 2026 — Macarronada de Carne, tamanho G
+  });
+
+  it("Macarronada: soma adicional oficial de Bacon ou Ovo, R$10 cada, sem confiar no preço do cliente", async () => {
+    const resBacon = await POST(postReq({
+      ...simplePayload,
+      itens: [{ kind: "simple", name: "", price: 0, qty: 1, simpleSelection: { productId: productIdMacarronada, sizeId: sizeGMacarronada, addOnId: addOnBaconMacarronada } }],
+    }));
+    expect(resBacon.status).toBe(200);
+    let pedidos = store.get("pedidos") as { itens: string[]; total: number }[];
+    expect(pedidos[0].itens).toEqual(["Macarronada de Carne Tamanho G + Bacon"]);
+    expect(pedidos[0].total).toBe(60);
+
+    store.delete("pedidos");
+
+    const resOvo = await POST(postReq({
+      ...simplePayload,
+      itens: [{ kind: "simple", name: "", price: 999, qty: 1, simpleSelection: { productId: productIdMacarronada, sizeId: sizeGMacarronada, addOnId: addOnOvoMacarronada } }],
+    }));
+    expect(resOvo.status).toBe(200);
+    pedidos = store.get("pedidos") as { itens: string[]; total: number }[];
+    expect(pedidos[0].itens).toEqual(["Macarronada de Carne Tamanho G + Ovo"]);
+    expect(pedidos[0].total).toBe(60);
   });
 
   it("suco com leite: soma o adicional oficial", async () => {
