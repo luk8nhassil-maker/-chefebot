@@ -12,7 +12,7 @@
 //                         Lanches fixos, Vitaminas, Bebidas).
 //   - "size"           — o produto tem `sizes[]` (Macarronada); pode
 //                         carregar `addOnGroup` (grupo opcional, no máximo
-//                         1 escolha — Bacon OU Ovos).
+//                         1 escolha — Bacon OU Ovo).
 //   - "single_flavor"  — exige exatamente 1 sabor/recheio, preço do
 //                         PRODUTO nunca muda por sabor (Pastel de Forno,
 //                         Pastel de Feira).
@@ -82,7 +82,7 @@ export interface SimpleCatalogProduct {
   /** Presente só quando strategy === "single_flavor" ou "flavor_priced". */
   flavors?: SimpleCatalogFlavor[];
   /** Grupo de adicional opcional, no máximo 1 escolha (ex.: Macarronada —
-   *  Bacon OU Ovos, nunca os dois). Só presente quando o produto tem esse
+   *  Bacon OU Ovo, nunca os dois). Só presente quando o produto tem esse
    *  grupo. */
   addOnGroup?: { max: 1; options: SimpleCatalogAddOnOption[] };
   ingredients?: string;
