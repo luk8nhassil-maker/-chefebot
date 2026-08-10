@@ -32,7 +32,7 @@ vi.mock("@/lib/auth", async () => {
 });
 
 import { redis } from "@/lib/redis";
-import { GET, POST } from "./route";
+import { GET, PATCH, POST } from "./route";
 
 function requestComCookie(token?: string) {
   const url = "http://localhost/api/configuracoes";
@@ -40,11 +40,15 @@ function requestComCookie(token?: string) {
   return new NextRequest(url, init);
 }
 
-function postRequestComCookie(token: string | undefined, body: Record<string, unknown>) {
+function requestComBody(method: "POST" | "PATCH", token: string | undefined, body: Record<string, unknown>) {
   const url = "http://localhost/api/configuracoes";
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (token) headers.cookie = `auth-token=${token}`;
-  return new NextRequest(url, { method: "POST", headers, body: JSON.stringify(body) });
+  return new NextRequest(url, { method, headers, body: JSON.stringify(body) });
+}
+
+function postRequestComCookie(token: string | undefined, body: Record<string, unknown>) {
+  return requestComBody("POST", token, body);
 }
 
 describe("GET /api/configuracoes — autorizacao e sanitizacao por role", () => {
@@ -135,5 +139,41 @@ describe("POST /api/configuracoes — autorizacao e protecao do Pix por role", (
     const configSalva = vi.mocked(redis.set).mock.calls.at(-1)?.[1] as Record<string, unknown>;
     expect(configSalva.chavePix).toBe(CONFIG_MOCK.chavePix);
     expect(configSalva.nomeTitularPix).toBe(CONFIG_MOCK.nomeTitularPix);
+  });
+});
+
+describe("PATCH /api/configuracoes — horario instantaneo", () => {
+  test("atualiza somente o horario e preserva as demais configuracoes", async () => {
+    vi.mocked(redis.set).mockClear();
+    const res = await PATCH(requestComBody("PATCH", "token-admin", { horaAbertura: 18, horaFechamento: 23 }));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.config).toMatchObject({
+      horaAbertura: 18,
+      horaFechamento: 23,
+      chavePix: CONFIG_MOCK.chavePix,
+      limitePico: CONFIG_MOCK.limitePico,
+    });
+    expect(redis.set).toHaveBeenCalledWith("config:pizzaria", body.config);
+  });
+
+  test.each([
+    { horaAbertura: -1, horaFechamento: 23 },
+    { horaAbertura: 18, horaFechamento: 25 },
+    { horaAbertura: 23, horaFechamento: 18 },
+    { horaAbertura: 18.5, horaFechamento: 23 },
+  ])("rejeita horario invalido sem alterar o Redis: $horaAbertura-$horaFechamento", async (payload) => {
+    vi.mocked(redis.set).mockClear();
+    const res = await PATCH(requestComBody("PATCH", "token-admin", payload));
+    expect(res.status).toBe(400);
+    expect(redis.set).not.toHaveBeenCalled();
+  });
+
+  test("exige autenticacao", async () => {
+    vi.mocked(redis.set).mockClear();
+    const res = await PATCH(requestComBody("PATCH", undefined, { horaAbertura: 18, horaFechamento: 23 }));
+    expect(res.status).toBe(401);
+    expect(redis.set).not.toHaveBeenCalled();
   });
 });
