@@ -51,6 +51,7 @@ export type MenuType = {
   neighborhoods: { name: string; fee: number }[];
   payments: string[];
   esgotados?: string[];
+  esgotadosIds?: string[];
   esgotadosMetadata?: EsgMetadata;
   horario?: { horaAbertura: number; horaFechamento: number; aberto: boolean };
   // Catálogo oficial de pizzas com IDs estáveis (Fase 2) — aditivo, vem de
@@ -75,7 +76,7 @@ export type MenuType = {
 
 // ==================== ADMIN CARDÁPIO ====================
 
-type Produto = { nome: string; categoria: string; preco?: number }
+type Produto = { id?: string; nome: string; categoria: string; preco?: number }
 
 function normStr(s: string) {
   return s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase()
@@ -84,9 +85,10 @@ function normStr(s: string) {
 function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void }) {
   const router = useRouter()
   const [esgotados, setEsgotados] = useState<string[]>(menu.esgotados || [])
+  const [esgotadosIds, setEsgotadosIds] = useState<string[]>(menu.esgotadosIds || [])
   const [esgotadosMetadata, setEsgotadosMetadata] = useState<EsgMetadata>(menu.esgotadosMetadata || {})
   const [salvando, setSalvando] = useState<Set<string>>(new Set())
-  const [toast, setToast] = useState<{ msg: string; nome: string; era: boolean } | null>(null)
+  const [toast, setToast] = useState<{ msg: string; nome: string; id?: string; era: boolean } | null>(null)
   const [busca, setBusca] = useState("")
   const [filtroStatus, setFiltroStatus] = useState<"todos" | "disponivel" | "esgotado">("todos")
   const [filtroCat, setFiltroCat] = useState("todas")
@@ -129,24 +131,25 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
   const todos: Produto[] = (menu.pizzaCatalog || menu.catalog)
     ? [
         ...(menu.pizzaCatalog?.flavors || []).map(f => ({
+          id: f.id,
           nome: f.name,
           categoria: f.category === "tradicional" ? "Tradicionais" : f.category === "especial" ? "Especiais" : "Doces",
         })),
-        ...(menu.pizzaCatalog?.borders || []).map(b => ({ nome: b.label, categoria: "Bordas" })),
-        ...(menu.pizzaCatalog?.addOns || []).map(a => ({ nome: a.label, categoria: "Adicionais" })),
+        ...(menu.pizzaCatalog?.borders || []).map(b => ({ id: b.id, nome: b.label, categoria: "Bordas" })),
+        ...(menu.pizzaCatalog?.addOns || []).map(a => ({ id: a.id, nome: a.label, categoria: "Adicionais" })),
         ...(menu.catalog?.lanches || []).flatMap(l =>
           l.flavors && l.flavors.length > 0
-            ? l.flavors.map(f => ({ nome: f.name, categoria: l.name }))
-            : [{ nome: l.name, categoria: "Lanches", preco: l.priceCents > 0 ? l.priceCents / 100 : undefined }]
+            ? l.flavors.map(f => ({ id: f.id, nome: f.name, categoria: l.name }))
+            : [{ id: l.id, nome: l.name, categoria: "Lanches", preco: l.priceCents > 0 ? l.priceCents / 100 : undefined }]
         ),
-        ...(menu.catalog?.calzone || []).flatMap(c => (c.flavors || []).map(f => ({ nome: f.name, categoria: "Calzone", preco: f.priceCents !== undefined ? f.priceCents / 100 : undefined }))),
-        ...(menu.catalog?.pastelForno || []).flatMap(p => (p.flavors || []).map(f => ({ nome: f.name, categoria: "Pastel de Forno" }))),
-        ...(menu.catalog?.hamburgueres || []).map(h => ({ nome: h.name, categoria: "Hambúrguer", preco: h.priceCents / 100 })),
-        ...(menu.catalog?.macarronadas || []).map(m => ({ nome: m.name, categoria: "Macarronada" })),
-        ...(menu.catalog?.macarronadas?.[0]?.addOnGroup?.options || []).map(o => ({ nome: o.label, categoria: "Adicionais" })),
-        ...(menu.catalog?.sucos || []).map(s => ({ nome: s.name, categoria: "Sucos", preco: s.priceCents / 100 })),
-        ...(menu.catalog?.vitaminas || []).map(v => ({ nome: v.name, categoria: "Vitaminas", preco: v.priceCents / 100 })),
-        ...(menu.catalog?.bebidas || []).map(b => ({ nome: b.name, categoria: "Bebidas", preco: b.priceCents / 100 })),
+        ...(menu.catalog?.calzone || []).flatMap(c => (c.flavors || []).map(f => ({ id: f.id, nome: f.name, categoria: "Calzone", preco: f.priceCents !== undefined ? f.priceCents / 100 : undefined }))),
+        ...(menu.catalog?.pastelForno || []).flatMap(p => (p.flavors || []).map(f => ({ id: f.id, nome: f.name, categoria: "Pastel de Forno" }))),
+        ...(menu.catalog?.hamburgueres || []).map(h => ({ id: h.id, nome: h.name, categoria: "Hambúrguer", preco: h.priceCents / 100 })),
+        ...(menu.catalog?.macarronadas || []).map(m => ({ id: m.id, nome: m.name, categoria: "Macarronada" })),
+        ...(menu.catalog?.macarronadas?.[0]?.addOnGroup?.options || []).map(o => ({ id: o.id, nome: o.label, categoria: "Adicionais" })),
+        ...(menu.catalog?.sucos || []).map(s => ({ id: s.id, nome: s.name, categoria: "Sucos", preco: s.priceCents / 100 })),
+        ...(menu.catalog?.vitaminas || []).map(v => ({ id: v.id, nome: v.name, categoria: "Vitaminas", preco: v.priceCents / 100 })),
+        ...(menu.catalog?.bebidas || []).map(b => ({ id: b.id, nome: b.name, categoria: "Bebidas", preco: b.priceCents / 100 })),
       ]
     : [
         ...(menu.saltyFlavors || []).map(f => ({ nome: f, categoria: "Salgados" })),
@@ -169,7 +172,9 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
   }
 
   const totalProd = todos.length
-  const totalEsg = esgotados.filter(e => todos.some(p => p.nome === e)).length
+  const produtoEsgotado = (produto: Produto) => esgotados.includes(produto.nome) || (!!produto.id && esgotadosIds.includes(produto.id))
+  const chaveProduto = (produto: Produto) => `${produto.categoria}:${produto.id ?? produto.nome}`
+  const totalEsg = todos.filter(produtoEsgotado).length
   const totalDisp = totalProd - totalEsg
 
   const produtosParaRevisar = esgotados.filter(nome => {
@@ -183,38 +188,40 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
     .filter(p => {
       if (bNorm && !normStr(p.nome).includes(bNorm)) return false
       if (filtroCat !== "todas" && p.categoria !== filtroCat) return false
-      if (filtroStatus === "disponivel" && esgotados.includes(p.nome)) return false
-      if (filtroStatus === "esgotado" && !esgotados.includes(p.nome)) return false
+      if (filtroStatus === "disponivel" && produtoEsgotado(p)) return false
+      if (filtroStatus === "esgotado" && !produtoEsgotado(p)) return false
       return true
     })
     .sort((a, b) => {
-      const ae = esgotados.includes(a.nome), be = esgotados.includes(b.nome)
+      const ae = produtoEsgotado(a), be = produtoEsgotado(b)
       return ae === be ? 0 : ae ? -1 : 1
     })
 
-  async function toggleEsgotado(nome: string, novoEstado: boolean, withToast = true) {
-    setSalvando(prev => new Set([...prev, nome]))
+  async function toggleEsgotado(nome: string, novoEstado: boolean, withToast = true, id?: string) {
+    const chave = id ?? nome
+    setSalvando(prev => new Set([...prev, chave]))
     try {
       const r = await fetch("/api/cardapio", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ nome, esgotado: novoEstado }),
+        body: JSON.stringify({ id, nome, esgotado: novoEstado }),
       })
       const d = await r.json()
       if (d.ok) {
         setEsgotados(d.esgotados || [])
+        setEsgotadosIds(d.esgotadosIds || [])
         if (d.esgotadosMetadata) setEsgotadosMetadata(d.esgotadosMetadata)
         if (withToast) {
           clearTimeout(toastTimer.current)
           const msg = novoEstado
             ? `${nome} esgotado. O bot não vai vender esse produto.`
             : `${nome} disponível. O bot já pode vender novamente.`
-          setToast({ msg, nome, era: !novoEstado })
+          setToast({ msg, nome, id, era: !novoEstado })
           toastTimer.current = setTimeout(() => setToast(null), 5500)
         }
       }
     } catch {}
-    setSalvando(prev => { const n = new Set(prev); n.delete(nome); return n })
+    setSalvando(prev => { const n = new Set(prev); n.delete(chave); return n })
   }
 
   async function desfazer() {
@@ -222,13 +229,13 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
     clearTimeout(toastTimer.current)
     const voltarPara = toast.era
     setToast(null)
-    await toggleEsgotado(toast.nome, voltarPara, false)
+    await toggleEsgotado(toast.nome, voltarPara, false, toast.id)
   }
 
-  function toggleSel(nome: string) {
+  function toggleSel(chave: string) {
     setSelecionados(prev => {
       const n = new Set(prev)
-      if (n.has(nome)) n.delete(nome); else n.add(nome)
+      if (n.has(chave)) n.delete(chave); else n.add(chave)
       return n
     })
   }
@@ -247,9 +254,9 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
 
   async function aplicarLote(esgotado: boolean) {
     setConfirmLote(null)
-    const nomes = Array.from(selecionados)
-    for (const nome of nomes) await toggleEsgotado(nome, esgotado, false)
-    const count = nomes.length
+    const produtos = todos.filter(produto => selecionados.has(chaveProduto(produto)))
+    for (const produto of produtos) await toggleEsgotado(produto.nome, esgotado, false, produto.id)
+    const count = produtos.length
     setSelecionados(new Set())
     setModoSel(false)
     clearTimeout(toastTimer.current)
@@ -511,15 +518,16 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
           )}
 
           {lista.map(produto => {
-            const esg = esgotados.includes(produto.nome)
-            const loading = salvando.has(produto.nome)
-            const sel = selecionados.has(produto.nome)
+            const esg = produtoEsgotado(produto)
+            const chave = chaveProduto(produto)
+            const loading = salvando.has(produto.id ?? produto.nome)
+            const sel = selecionados.has(chave)
 
             return (
               <div
-                key={produto.nome}
+                key={chave}
                 className="cbItem"
-                onClick={() => modoSel && toggleSel(produto.nome)}
+                onClick={() => modoSel && toggleSel(chave)}
                 style={{
                   background: sel ? "color-mix(in srgb, var(--primary) 5%, transparent)" : esg ? "color-mix(in srgb, var(--danger) 3%, transparent)" : "var(--surface)",
                   border: `1px solid ${sel ? "color-mix(in srgb, var(--primary) 50%, transparent)" : esg ? "color-mix(in srgb, var(--danger) 20%, transparent)" : "var(--surface)"}`,
@@ -576,7 +584,7 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
                 {!modoSel && (
                   <button
                     className="cbBtn"
-                    onClick={e => { e.stopPropagation(); if (!loading) toggleEsgotado(produto.nome, !esg) }}
+                    onClick={e => { e.stopPropagation(); if (!loading) toggleEsgotado(produto.nome, !esg, true, produto.id) }}
                     disabled={loading}
                     style={{
                       height: 40,
@@ -812,14 +820,16 @@ const isCalzoneName = (value: string) => itemSlug(value) === "calzone";
 // Pastel de Forno, Pastel de Feira), usado por addSimple para desviar para
 // o seletor de sabor (ver pickPastel) em vez de adicionar direto.
 function catalogParaListagem(p: {
+  available: boolean;
   name: string;
   priceCents: number;
   sizes?: { code: string; priceCents: number }[];
-  flavors?: { name: string }[];
+  flavors?: { name: string; available: boolean }[];
   addOnGroup?: { max: 1; options: { id: string; label: string; priceCents: number; available: boolean }[] };
 }): {
   name: string;
   price: number;
+  available: boolean;
   sizes?: { code: string; price: number }[];
   flavors?: string[];
   addOnGroup?: { max: 1; options: { id: string; label: string; price: number; available: boolean }[] };
@@ -827,8 +837,9 @@ function catalogParaListagem(p: {
   return {
     name: p.name,
     price: p.priceCents / 100,
+    available: p.available,
     ...(p.sizes ? { sizes: p.sizes.map((s) => ({ code: s.code, price: s.priceCents / 100 })) } : {}),
-    ...(p.flavors && p.flavors.length > 0 ? { flavors: p.flavors.map((f) => f.name) } : {}),
+    ...(p.flavors && p.flavors.length > 0 ? { flavors: p.flavors.filter((f) => f.available).map((f) => f.name) } : {}),
     ...(p.addOnGroup
       ? { addOnGroup: { max: 1 as const, options: p.addOnGroup.options.map((o) => ({ id: o.id, label: o.label, price: o.priceCents / 100, available: o.available })) } }
       : {}),
@@ -1600,7 +1611,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
         .map((cat) => ({
           title: CATEGORIA_PIZZA_LABEL[cat],
           flavors: menu.pizzaCatalog!.flavors
-            .filter((f) => f.category === cat && f.pricesBySizeCode[size as "P" | "M" | "G" | "F" | "MINI"] !== undefined)
+            .filter((f) => f.available && f.category === cat && f.pricesBySizeCode[size as "P" | "M" | "G" | "F" | "MINI"] !== undefined)
             .map((f) => f.name),
         }))
         .filter((section) => section.flavors.length > 0)
@@ -1614,7 +1625,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   // cache) o seletor cai para a lista cheia de sabores da pizza, mesma regra
   // de sempre.
   const calzoneFlavorNames = menu.catalog
-    ? menu.catalog.calzone.find((l) => l.name === calzoneItem?.name)?.flavors?.map((f) => f.name) ?? []
+    ? menu.catalog.calzone.find((l) => l.name === calzoneItem?.name)?.flavors?.filter((f) => f.available).map((f) => f.name) ?? []
     : [...(menu.saltyFlavors || []), ...(menu.sweetFlavors || [])];
   const flavorSections = miniPizzaMode
     ? [{ title: "Sabores da mini-pizza", flavors: miniPizzaFlavors }]
@@ -1774,7 +1785,8 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     if (Array.isArray(it.sizes) && it.sizes.length > 0) return `A partir de ${money(Math.min(...it.sizes.map((s) => s.price)))}`;
     return money(it.price);
   }
-  function addSimple(it: { name: string; price: number; sizes?: { code: string; price: number }[]; flavors?: string[] }, emoji: string) {
+  function addSimple(it: { name: string; price: number; available?: boolean; sizes?: { code: string; price: number }[]; flavors?: string[] }, emoji: string) {
+    if (it.available === false) return;
     if (isCalzoneName(it.name)) { pickCalzone(); return; }
     // Produtos de sabor único do catálogo oficial fora do Calzone (Pastel de
     // Forno, Pastel de Feira) — exigem 1 sabor antes de ir pra sacola, mesmo
@@ -1782,9 +1794,14 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     if (it.flavors && it.flavors.length > 0) { pickPastel(it as { name: string; price: number; flavors: string[] }); return; }
     if (isMacarronada(it)) { setMacarronadaPendente(it); go("sc-macarronada-size"); return; }
     if (listCat === "suco") { setSucoPendente(it); go("sc-suco-leite"); return; }
+    const simpleSelection = resolverSimpleSelectionIds(menu.catalog, it.name, {});
+    if (!simpleSelection && menu.catalog) {
+      showToast("Não foi possível confirmar esse produto. Tente novamente.");
+      return;
+    }
     const ex = cart.find((c) => c.kind === "simple" && c.name === it.name);
     if (ex) { setCart(cart.map((c) => (c === ex ? { ...c, qty: c.qty + 1 } : c))); }
-    else { setCart([...cart, { emoji, kind: "simple", name: it.name, detail: "", price: it.price, qty: 1, keys: [it.name] }]); }
+    else { setCart([...cart, { emoji, kind: "simple", name: it.name, detail: "", price: it.price, qty: 1, keys: [it.name], ...(simpleSelection ? { simpleSelection } : {}) }]); }
     setLastAddedKind(listCat === "bebida" ? "bebida" : "lanche");
     showToast(`${it.name} adicionado!`);
   }
@@ -2413,7 +2430,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                   pastelForno: { eb: "", t: "Escolha o sabor", data: pastelFornoEfetivo, emoji: "🥟" },
                   vitamina: { eb: "", t: "Vitaminas da casa", data: vitaminasEfetivas, emoji: "🥛" },
                 }[listCat];
-                return (<><div className="screen-head">{cfg.eb && <div className="eyebrow">{cfg.eb}</div>}<h2>{cfg.t}</h2><p>Toque para adicionar.</p></div>{cfg.data.length === 0 ? <CardapioIllustration {...CARDAPIO_ILLUSTRATIONS.semResultado} /> : cfg.data.map((it, i) => { const esg = esgotados.includes(it.name); return (<div key={i} className="opt" onClick={() => !esg && addSimple(it, cfg.emoji)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }} {...optA11yAttrs(esg)} onKeyDown={(e) => { if (!esg && isActivateKey(e)) { e.preventDefault(); addSimple(it, cfg.emoji); } }}><div className="opt-emoji">{cfg.emoji}</div><div className="opt-body"><div className="opt-title">{it.name}</div>{esg && <div className="opt-desc" style={{ color: "var(--danger)" }}>Esgotado</div>}</div><div className="opt-price">{simplePriceLabel(it)}</div></div>); })}</>);
+                return (<><div className="screen-head">{cfg.eb && <div className="eyebrow">{cfg.eb}</div>}<h2>{cfg.t}</h2><p>Toque para adicionar.</p></div>{cfg.data.length === 0 ? <CardapioIllustration {...CARDAPIO_ILLUSTRATIONS.semResultado} /> : cfg.data.map((it, i) => { const esg = ("available" in it && it.available === false) || esgotados.includes(it.name); return (<div key={i} className="opt" onClick={() => !esg && addSimple(it, cfg.emoji)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }} {...optA11yAttrs(esg)} onKeyDown={(e) => { if (!esg && isActivateKey(e)) { e.preventDefault(); addSimple(it, cfg.emoji); } }}><div className="opt-emoji">{cfg.emoji}</div><div className="opt-body"><div className="opt-title">{it.name}</div>{esg && <div className="opt-desc" style={{ color: "var(--danger)" }}>Esgotado</div>}</div><div className="opt-price">{simplePriceLabel(it)}</div></div>); })}</>);
               })()}
             </section>
           )}

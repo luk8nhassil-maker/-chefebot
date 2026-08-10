@@ -71,14 +71,14 @@ function estaEsgotado(nome: string, esgotadosNorm: string[]): boolean {
   return esgotadosNorm.includes(norm(nome));
 }
 
-function toCatalogFlavor(flavor: OfficialPizzaFlavor, esgotadosNorm: string[]): PizzaCatalogFlavor {
+function toCatalogFlavor(flavor: OfficialPizzaFlavor, esgotadosNorm: string[], esgotadosIds: Set<string>): PizzaCatalogFlavor {
   return {
     id: flavor.id,
     name: flavor.name,
     category: flavor.category,
     ingredients: flavor.ingredients,
     aliases: flavor.aliases ?? [],
-    available: !estaEsgotado(flavor.name, esgotadosNorm),
+    available: !estaEsgotado(flavor.name, esgotadosNorm) && !esgotadosIds.has(flavor.id),
     pricesBySizeCode: flavor.pricesBySizeCode,
   };
 }
@@ -89,23 +89,24 @@ function toCatalogFlavor(flavor: OfficialPizzaFlavor, esgotadosNorm: string[]): 
  * disponibilidade em tempo real a partir de `esgotados` (Redis, nunca de um
  * valor vindo do cliente). Não faz I/O.
  */
-export function buildPizzaCatalog(_menu: Menu, esgotados: readonly string[] = []): PizzaCatalog {
+export function buildPizzaCatalog(_menu: Menu, esgotados: readonly string[] = [], idsEsgotados: readonly string[] = []): PizzaCatalog {
   const esgotadosNorm = esgotados.map(norm);
+  const esgotadosIds = new Set(idsEsgotados);
 
   return {
     sizes: PIZZA_SIZES.map((size) => ({ id: size.id, code: size.code, label: size.label, fatias: size.fatias })),
-    flavors: PIZZA_FLAVORS.map((flavor) => toCatalogFlavor(flavor, esgotadosNorm)),
+    flavors: PIZZA_FLAVORS.map((flavor) => toCatalogFlavor(flavor, esgotadosNorm, esgotadosIds)),
     borders: PIZZA_BORDERS.map((border) => ({
       id: border.id,
       label: border.label,
       pricesBySizeCode: border.pricesBySizeCode,
-      available: !estaEsgotado(border.label, esgotadosNorm),
+      available: !estaEsgotado(border.label, esgotadosNorm) && !esgotadosIds.has(border.id),
     })),
     addOns: PIZZA_ADDONS.map((addOn) => ({
       id: addOn.id,
       label: addOn.label,
       pricesBySizeCode: addOn.pricesBySizeCode,
-      available: !estaEsgotado(addOn.label, esgotadosNorm),
+      available: !estaEsgotado(addOn.label, esgotadosNorm) && !esgotadosIds.has(addOn.id),
     })),
   };
 }

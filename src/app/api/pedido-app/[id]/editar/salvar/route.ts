@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { redis } from "@/lib/redis";
-import { obterEsgotadosEfetivos } from "@/lib/estoque";
+import { obterEsgotadosEfetivos, obterEsgotadosLegado, obterEstoqueItens } from "@/lib/estoque";
 import { mutarPedidos } from "@/lib/pedidosConcorrencia";
 import { getMENUDinamico } from "@/lib/menu.server";
 import { computeTaxaApp, buildEnderecoApp } from "@/lib/pedidoAppLogic";
@@ -188,11 +188,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     // esgota entre a montagem da edição e o salvamento é pego aqui.
     const temSelecaoPizzaEstruturada = body.itens.some((item) => temSelecaoEstruturada(item));
     const temSelecaoSimplesEstruturadaAlgumItem = body.itens.some((item) => temSelecaoSimplesEstruturada(item));
-    const esgotadosFresco = temSelecaoPizzaEstruturada || temSelecaoSimplesEstruturadaAlgumItem
-      ? (await obterEsgotadosEfetivos(menu))
-      : [];
-    const pizzaCatalog = temSelecaoPizzaEstruturada ? buildPizzaCatalog(menu, esgotadosFresco) : null;
-    const simpleCatalog = temSelecaoSimplesEstruturadaAlgumItem ? buildSimpleCatalog(menu, esgotadosFresco) : null;
+    const precisaCatalogoEstruturado = temSelecaoPizzaEstruturada || temSelecaoSimplesEstruturadaAlgumItem;
+    const [esgotadosLegado, estoqueItens] = precisaCatalogoEstruturado
+      ? await Promise.all([obterEsgotadosLegado(), obterEstoqueItens()])
+      : [[], {}];
+    const esgotadosIds = Object.values(estoqueItens).filter((item) => item.esgotado).map((item) => item.id);
+    const pizzaCatalog = temSelecaoPizzaEstruturada ? buildPizzaCatalog(menu, esgotadosLegado, esgotadosIds) : null;
+    const simpleCatalog = temSelecaoSimplesEstruturadaAlgumItem ? buildSimpleCatalog(menu, esgotadosLegado, esgotadosIds) : null;
 
     let itensValidados: { itemCanonico: ItemApp; linha: string; unitPrice: number | null; qty: number; motivo?: string }[];
     try {

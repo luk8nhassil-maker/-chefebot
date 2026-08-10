@@ -63,6 +63,24 @@ describe("resolverIdsPorNome", () => {
 });
 
 describe("definirDisponibilidade + obterEsgotadosEfetivos — dual-write", () => {
+  it("escrita por ID altera só a entidade escolhida e não contamina a lista legada por nome", async () => {
+    const resultado = await definirDisponibilidade({
+      menu: MENU,
+      id: "pastel-feira-calabresa",
+      nome: "Calabresa",
+      esgotado: true,
+    });
+    expect(store.get(CHAVE_ESGOTADOS) ?? []).not.toContain("Calabresa");
+    expect(resultado.esgotadosIds).toEqual(["pastel-feira-calabresa"]);
+    expect((await obterEstoqueItens())["flavor-calabresa"]).toBeUndefined();
+  });
+
+  it("recusa ID que não pertence ao catálogo oficial", async () => {
+    await expect(definirDisponibilidade({ menu: MENU, id: "produto-inventado", nome: "Calabresa", esgotado: true }))
+      .rejects.toThrow("ID de catálogo inválido");
+    expect(store.has(CHAVE_ESTOQUE_ITENS)).toBe(false);
+  });
+
   it("marcar esgotado grava na lista legada E na estrutura por ID", async () => {
     await definirDisponibilidade({ menu: MENU, nome: "Calabresa", esgotado: true });
     expect(store.get(CHAVE_ESGOTADOS)).toContain("Calabresa");

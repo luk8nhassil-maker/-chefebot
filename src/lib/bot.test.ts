@@ -125,7 +125,7 @@ describe("fluxo macarronada estilo pizza (sabor → tamanho)", () => {
     expect(resTam.session.step).toBe("add_more");
     expect(resTam.session.cart[0].name).toBe("Macarronada de Frango");
     expect(resTam.session.cart[0].size).toBe("M");
-    expect(resTam.session.cart[0].price).toBe(40);
+    expect(resTam.session.cart[0].price).toBe(43);
   });
 
   test("escolher por número '2' seleciona Frango", () => {

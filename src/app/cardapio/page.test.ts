@@ -732,7 +732,9 @@ describe("/cardapio (PublicCardapio) — carrinho preserva pizzaSelection (Fase 
 
 describe("/cardapio (PublicCardapio) — Calzone entra no mesmo fluxo de sabores das pizzas", () => {
   test("addSimple desvia o Calzone para pickCalzone antes de qualquer outra regra de lanche", () => {
-    expect(fonte).toMatch(/function addSimple\([^)]*\)\s*\{\s*if \(isCalzoneName\(it\.name\)\) \{ pickCalzone\(\); return; \}/);
+    const bloco = fonte.slice(fonte.indexOf("function addSimple("), fonte.indexOf("function addSimple(") + 500);
+    expect(bloco).toContain("if (it.available === false) return;");
+    expect(bloco).toContain("if (isCalzoneName(it.name)) { pickCalzone(); return; }");
   });
 
   test("pickCalzone abre o mesmo modal de sabores (flavorModalOpen) e zera qualquer sabor anterior", () => {
@@ -761,7 +763,7 @@ describe("/cardapio (PublicCardapio) — Calzone entra no mesmo fluxo de sabores
     // está genuinamente ausente (resposta antiga em cache) — mesma regra de sempre.
     expect(fonte).toContain(
       "const calzoneFlavorNames = menu.catalog\n" +
-      "    ? menu.catalog.calzone.find((l) => l.name === calzoneItem?.name)?.flavors?.map((f) => f.name) ?? []\n" +
+      "    ? menu.catalog.calzone.find((l) => l.name === calzoneItem?.name)?.flavors?.filter((f) => f.available).map((f) => f.name) ?? []\n" +
       "    : [...(menu.saltyFlavors || []), ...(menu.sweetFlavors || [])];"
     );
     expect(fonte).not.toContain("menu.catalog.lanches.find((l) => l.name === calzoneItem");
@@ -1002,7 +1004,7 @@ describe("AdminCardapio (painel de esgotados) — cobre TODAS as categorias do c
     // categoria vem do próprio nome do produto (l.name), sem precisar
     // hard-codar "Pastel de Feira" separadamente.
     expect(bloco).toContain("l.flavors && l.flavors.length > 0");
-    expect(bloco).toContain("l.flavors.map(f => ({ nome: f.name, categoria: l.name }))");
+    expect(bloco).toContain("l.flavors.map(f => ({ id: f.id, nome: f.name, categoria: l.name }))");
   });
 
   test("inclui Hambúrguer, Macarronada (+ o grupo Bacon/Ovos extraído 1x só, nunca duplicado por produto), Sucos, Vitaminas, Bebidas", () => {

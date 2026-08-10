@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import { redis } from "./redis";
-import { obterEsgotadosEfetivos } from "./estoque";
+import { obterEsgotadosLegado, obterEstoqueItens } from "./estoque";
 import { getMENUDinamico } from "./menu.server";
 import { officialUnitPrice, type ItemApp, type MenuPedidoApp } from "./pedidoAppItens";
 import {
@@ -330,19 +330,28 @@ export async function validarItensComanda(
   // requisições), então um sabor/borda/produto que esgota entre salvar a
   // rodada e reenviá-la (reprecificação em profundidade da rota de envio da
   // Rodada 1 e da Rodada 2+) é pego aqui.
-  let esgotadosCache: string[] | null = null;
-  async function esgotadosFrescos(): Promise<string[]> {
-    if (!esgotadosCache) esgotadosCache = await obterEsgotadosEfetivos(menu);
-    return esgotadosCache;
+  let disponibilidadeCache: { nomes: string[]; ids: string[] } | null = null;
+  async function disponibilidadeFresca(): Promise<{ nomes: string[]; ids: string[] }> {
+    if (!disponibilidadeCache) {
+      const [nomes, estoque] = await Promise.all([obterEsgotadosLegado(), obterEstoqueItens()]);
+      disponibilidadeCache = { nomes, ids: Object.values(estoque).filter((item) => item.esgotado).map((item) => item.id) };
+    }
+    return disponibilidadeCache;
   }
   let pizzaCatalogCache: PizzaCatalog | null = null;
   async function catalogoPizzaOficial(): Promise<PizzaCatalog> {
-    if (!pizzaCatalogCache) pizzaCatalogCache = buildPizzaCatalog(menu, await esgotadosFrescos());
+    if (!pizzaCatalogCache) {
+      const disponibilidade = await disponibilidadeFresca();
+      pizzaCatalogCache = buildPizzaCatalog(menu, disponibilidade.nomes, disponibilidade.ids);
+    }
     return pizzaCatalogCache;
   }
   let simpleCatalogCache: SimpleCatalog | null = null;
   async function catalogoSimplesOficial(): Promise<SimpleCatalog> {
-    if (!simpleCatalogCache) simpleCatalogCache = buildSimpleCatalog(menu, await esgotadosFrescos());
+    if (!simpleCatalogCache) {
+      const disponibilidade = await disponibilidadeFresca();
+      simpleCatalogCache = buildSimpleCatalog(menu, disponibilidade.nomes, disponibilidade.ids);
+    }
     return simpleCatalogCache;
   }
 

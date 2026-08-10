@@ -92,6 +92,14 @@ describe("buildSimpleCatalog — Pastel de Feira (single_flavor, dentro de Lanch
       expect(recheio.id.startsWith("pastel-feira-")).toBe(true);
     }
   });
+
+  it("ID próprio de Calabresa esgota só o recheio do Pastel de Feira", () => {
+    const catalog = buildSimpleCatalog(MENU, [], ["pastel-feira-calabresa"]);
+    const pastelFeira = catalog.lanches.find((l) => l.name === "Pastel de Feira")!;
+    const calzone = produto("Calzone", catalog);
+    expect(pastelFeira.flavors!.find((f) => f.name === "Calabresa")?.available).toBe(false);
+    expect(calzone.flavors!.find((f) => f.name === "Calabresa")?.available).toBe(true);
+  });
 });
 
 describe("buildSimpleCatalog — Hambúrguer (fixed, categoria própria)", () => {

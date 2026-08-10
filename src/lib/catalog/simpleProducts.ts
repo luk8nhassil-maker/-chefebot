@@ -108,16 +108,17 @@ function estaEsgotado(nome: string, esgotadosNorm: string[]): boolean {
  * cardápio 2026 (@/lib/catalog/officialMenu2026) e da lista de esgotados
  * atual (Redis, chave "esgotados"). Não faz I/O.
  */
-export function buildSimpleCatalog(_menu: Menu, esgotados: readonly string[] = []): SimpleCatalog {
+export function buildSimpleCatalog(_menu: Menu, esgotados: readonly string[] = [], idsEsgotados: readonly string[] = []): SimpleCatalog {
   const esgotadosNorm = esgotados.map(norm);
-  const disponivel = (nome: string) => !estaEsgotado(nome, esgotadosNorm);
+  const esgotadosIds = new Set(idsEsgotados);
+  const disponivel = (nome: string, id: string) => !estaEsgotado(nome, esgotadosNorm) && !esgotadosIds.has(id);
 
   const lanches: SimpleCatalogProduct[] = [
     ...LANCHES_FIXOS.map((produto) => ({
       id: produto.id,
       name: produto.name,
       priceCents: produto.priceCents,
-      available: disponivel(produto.name),
+      available: disponivel(produto.name, produto.id),
       strategy: "fixed" as const,
       ingredients: produto.ingredients,
     })),
@@ -125,12 +126,12 @@ export function buildSimpleCatalog(_menu: Menu, esgotados: readonly string[] = [
       id: "product-pastel-de-feira",
       name: "Pastel de Feira",
       priceCents: PASTEL_FEIRA_PRICE_CENTS,
-      available: disponivel("Pastel de Feira"),
+      available: disponivel("Pastel de Feira", "product-pastel-de-feira"),
       strategy: "single_flavor",
       flavors: PASTEL_FEIRA_RECHEIOS.map((recheio) => ({
         id: recheio.id,
         name: recheio.name,
-        available: disponivel(recheio.name),
+        available: disponivel(recheio.name, recheio.id),
         ingredients: recheio.ingredients,
       })),
     },
@@ -140,7 +141,7 @@ export function buildSimpleCatalog(_menu: Menu, esgotados: readonly string[] = [
     id: produto.id,
     name: produto.name,
     priceCents: produto.priceCents,
-    available: disponivel(produto.name),
+    available: disponivel(produto.name, produto.id),
     strategy: "fixed",
     ingredients: produto.ingredients,
   }));
@@ -148,7 +149,7 @@ export function buildSimpleCatalog(_menu: Menu, esgotados: readonly string[] = [
   const calzoneFlavors: SimpleCatalogFlavor[] = CALZONE_FLAVORS.map((sabor) => ({
     id: sabor.flavorId,
     name: sabor.displayLabel ?? sabor.name,
-    available: disponivel(sabor.name),
+    available: disponivel(sabor.name, sabor.flavorId),
     priceCents: sabor.priceCents,
     displayLabel: sabor.displayLabel,
     ingredients: sabor.ingredients,
@@ -161,7 +162,7 @@ export function buildSimpleCatalog(_menu: Menu, esgotados: readonly string[] = [
       // sabores; a precificação real vem sempre do sabor escolhido (ver
       // resolverItemComSelecaoSimplesEstruturada, strategy "flavor_priced").
       priceCents: Math.min(...calzoneFlavors.map((f) => f.priceCents ?? Infinity)),
-      available: disponivel("Calzone"),
+      available: disponivel("Calzone", "product-calzone"),
       strategy: "flavor_priced",
       flavors: calzoneFlavors,
     },
@@ -170,7 +171,7 @@ export function buildSimpleCatalog(_menu: Menu, esgotados: readonly string[] = [
   const pastelFornoFlavors: SimpleCatalogFlavor[] = PASTEL_FORNO_FLAVORS.map((sabor) => ({
     id: sabor.flavorId,
     name: sabor.displayLabel ?? sabor.name,
-    available: disponivel(sabor.name),
+    available: disponivel(sabor.name, sabor.flavorId),
     displayLabel: sabor.displayLabel,
     ingredients: sabor.ingredients,
   }));
@@ -179,7 +180,7 @@ export function buildSimpleCatalog(_menu: Menu, esgotados: readonly string[] = [
       id: "product-pastel-de-forno",
       name: "Pastel de Forno",
       priceCents: PASTEL_FORNO_FLAVORS[0]?.priceCents ?? 0,
-      available: disponivel("Pastel de Forno"),
+      available: disponivel("Pastel de Forno", "product-pastel-de-forno"),
       strategy: "single_flavor",
       flavors: pastelFornoFlavors,
     },
@@ -191,14 +192,14 @@ export function buildSimpleCatalog(_menu: Menu, esgotados: readonly string[] = [
       id: opt.id,
       label: opt.label,
       priceCents: opt.priceCents,
-      available: disponivel(opt.label),
+      available: disponivel(opt.label, opt.id),
     })),
   };
   const macarronadas: SimpleCatalogProduct[] = MACARRONADAS.map((produto) => ({
     id: produto.id,
     name: produto.name,
     priceCents: Math.min(...Object.values(produto.pricesBySizeCode)),
-    available: disponivel(produto.name),
+    available: disponivel(produto.name, produto.id),
     strategy: "size",
     ingredients: produto.ingredients,
     sizes: (Object.entries(produto.pricesBySizeCode) as [string, number][]).map(([code, priceCents]) => ({
@@ -213,7 +214,7 @@ export function buildSimpleCatalog(_menu: Menu, esgotados: readonly string[] = [
     id: produto.id,
     name: produto.name,
     priceCents: produto.priceCents,
-    available: disponivel(produto.name),
+    available: disponivel(produto.name, produto.id),
     strategy: "milk",
   }));
 
@@ -221,7 +222,7 @@ export function buildSimpleCatalog(_menu: Menu, esgotados: readonly string[] = [
     id: produto.id,
     name: produto.name,
     priceCents: produto.priceCents,
-    available: disponivel(produto.name),
+    available: disponivel(produto.name, produto.id),
     strategy: "fixed",
   }));
 
@@ -229,7 +230,7 @@ export function buildSimpleCatalog(_menu: Menu, esgotados: readonly string[] = [
     id: produto.id,
     name: produto.name,
     priceCents: produto.priceCents,
-    available: disponivel(produto.name),
+    available: disponivel(produto.name, produto.id),
     strategy: "fixed",
   }));
 

@@ -18,22 +18,22 @@ beforeEach(() => {
 });
 
 describe("add_more — upsell de bebidas (sem bebida no carrinho)", () => {
-  it('1 → adiciona Refrigerante 1L', () => {
+  it('1 → adiciona Guaraná 1L', () => {
     const res = processMessage("1", makeSession());
     expect(res.session.step).toBe("add_more");
-    expect(res.session.cart.some(i => i.name === "Refrigerante 1L")).toBe(true);
+    expect(res.session.cart.some(i => i.name === "Guaraná 1L")).toBe(true);
   });
 
-  it('2 → adiciona Refrigerante 1,5L', () => {
+  it('2 → adiciona Guaraná 1,5L', () => {
     const res = processMessage("2", makeSession());
     expect(res.session.step).toBe("add_more");
-    expect(res.session.cart.some(i => i.name === "Refrigerante 1,5L")).toBe(true);
+    expect(res.session.cart.some(i => i.name === "Guaraná 1,5L")).toBe(true);
   });
 
-  it('3 → adiciona Refrigerante 2L', () => {
+  it('3 → adiciona Guaraná 2L', () => {
     const res = processMessage("3", makeSession());
     expect(res.session.step).toBe("add_more");
-    expect(res.session.cart.some(i => i.name === "Refrigerante 2L")).toBe(true);
+    expect(res.session.cart.some(i => i.name === "Guaraná 2L")).toBe(true);
   });
 
   it('4 → abre lista completa de bebidas (bebida_escolha)', () => {
@@ -53,10 +53,10 @@ describe("add_more — texto livre de bebidas", () => {
     expect(res.session.step).toBe("bebida_escolha");
   });
 
-  it('"refrigerante 2l" → adiciona Refrigerante 2L diretamente', () => {
-    const res = processMessage("refrigerante 2l", makeSession());
+  it('"coca-cola 2l" → adiciona Coca-Cola 2L diretamente', () => {
+    const res = processMessage("coca-cola 2l", makeSession());
     expect(res.session.step).toBe("add_more");
-    expect(res.session.cart.some(i => i.name === "Refrigerante 2L")).toBe(true);
+    expect(res.session.cart.some(i => i.name === "Coca-Cola 2L")).toBe(true);
   });
 });
 
@@ -86,7 +86,7 @@ describe("add_more — regressão: copy do carrinho após bebida adicionada", ()
   });
 
   it('pizza + bebida por nome → carrinho não contém "Ou fechar pedido"', () => {
-    const res = processMessage("refrigerante 2l", makeSession());
+    const res = processMessage("coca-cola 2l", makeSession());
     const cartMsg = res.messages.find(m => m.includes("Total até aqui") || m.includes("Subtotal") || m.includes("fechar pedido"));
     expect(cartMsg).toBeDefined();
     expect(cartMsg).not.toContain("Ou fechar pedido");

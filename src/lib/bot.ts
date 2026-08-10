@@ -1,11 +1,13 @@
-import { MENU as MENU_PADRAO, getBorderPrice, getBorderByIndex } from "./menu";
+import { MENU as MENU_PADRAO } from "./menu";
 import { detectarContextoHumano } from "./contextoHumanoSkill";
 import { norm } from "./pedidoAppItens";
+import { PIZZA_FLAVORS } from "./catalog/officialMenu2026";
+import { buildBotMenu2026, type BotMenu, type BotMenuItem } from "./catalog/botMenu2026";
 
-let MENU = MENU_PADRAO;
+let MENU: BotMenu = buildBotMenu2026(MENU_PADRAO);
 
 export function setMenuDinamico(menu: typeof MENU_PADRAO) {
-  MENU = menu;
+  MENU = buildBotMenu2026(menu);
 }
 
 let ESGOTADOS: string[] = [];
@@ -62,7 +64,7 @@ function respostaEsgotado(nome: string, alternativas: string[], session: BotSess
   };
 }
 
-let CONFIG_BOT = {
+const CONFIG_BOT = {
   tempoEntregaDelivery: "40-60 minutos",
   tempoEntregaRetirada: "20-30 minutos",
 };
@@ -78,8 +80,59 @@ export function setHorarioFuncionamento(horario: string) {
   HORARIO_FUNCIONAMENTO = horario;
 }
 
-function getSizePrice(size: string): number {
-  return MENU.sizes.find((s) => s.code === size)?.price ?? 0;
+function getPizzaBasePrice(size: string, flavorText: string): number | null {
+  const nomes = flavorText.split("/").map((nome) => nome.trim()).filter(Boolean);
+  if (nomes.length === 0) return null;
+  const precos: number[] = [];
+  for (const nome of nomes) {
+    const flavor = PIZZA_FLAVORS.find((entry) => entry.name === nome);
+    const cents = flavor?.pricesBySizeCode[size as keyof typeof flavor.pricesBySizeCode];
+    if (cents === undefined) return null;
+    precos.push(cents / 100);
+  }
+  return Math.max(...precos);
+}
+
+function getBorderPriceFor(size: string, label: string): number {
+  if (label === "Sem borda") return 0;
+  if (size === "MINI") return 0;
+  const border = MENU.borders.find((entry) => entry.label === label);
+  return border?.pricesBySizeCode[size as "P" | "M" | "G" | "F"] ?? 0;
+}
+
+function criarItemPizza(size: string, flavor: string, border = "Sem borda"): CartItem | null {
+  const basePrice = getPizzaBasePrice(size, flavor);
+  if (basePrice === null) return null;
+  if (size === "MINI" && border !== "Sem borda") return null;
+  return {
+    category: "pizza",
+    name: "Pizza",
+    size,
+    flavor,
+    border,
+    price: basePrice + getBorderPriceFor(size, border),
+  };
+}
+
+function respostaCombinacaoPizzaIndisponivel(size: string, session: BotSession): BotResponse {
+  return {
+    messages: [`Esse sabor não está disponível no tamanho *${size}* 😅\n\nEscolha outro sabor:\n\n${listaFlavors()}`],
+    session: resetaTentativas({ ...session, step: "flavor", currentSize: size, currentFlavor: undefined }),
+  };
+}
+
+function getBorderByIndex(index: number, size: string): { label: string; price: number } | null {
+  const border = MENU.borders[index];
+  if (!border) return null;
+  return { label: border.label, price: getBorderPriceFor(size, border.label) };
+}
+
+function saboresLanche(item: BotMenuItem): string[] {
+  return item.flavors ?? [];
+}
+
+function precoLancheComSabor(item: BotMenuItem, flavor: string): number {
+  return item.flavorPrices?.[flavor] ?? item.price;
 }
 
 function formatCurrency(value: number): string {
@@ -87,11 +140,10 @@ function formatCurrency(value: number): string {
 }
 
 function sizeList(): string {
-  return MENU.sizes.map((s, i) => `  ${i + 1}. ${s.label} (${s.code}) · *${formatCurrency(s.price)}*`).join("\n");
+  return MENU.sizes.map((s, i) => `  ${i + 1}. ${s.label} (${s.code}) · *a partir de ${formatCurrency(s.price)}*`).join("\n");
 }
 function sizeListComMiniPizza(): string {
-  const sizes = MENU.sizes.map((s, i) => `  ${i + 2}. ${s.label} (${s.code}) · *${formatCurrency(s.price)}*`).join("\n");
-  return `  1. Mini-Pizza · *R$ 17,00*\n${sizes}`;
+  return sizeList();
 }
 
 // Fonte única de verdade para a lista numerada de sabores: tanto o texto exibido
@@ -312,8 +364,7 @@ function respostaEscaladaPorLoop(): BotResponse {
   };
 }
 function permiteMeioAMeio(size?: string): boolean {
-  // Todos os tamanhos permitem meio a meio (inclusive a Pequena).
-  return !!size;
+  return !!size && size !== "MINI";
 }
 // ===== MOTOR DE RECONHECIMENTO DE SABOR (tolerante a erro humano) =====
 // Apelidos: variações que o fuzzy sozinho não pegaria (números por extenso vs dígito,
@@ -367,7 +418,11 @@ function resolveUmSabor(termo: string, flavors: string[]): string | null {
   const n = normalizar(termo);
   if (!n) return null;
   // Nível 1: substring exata normalizada (+ plural opcional)
-  for (const f of flavors) {
+  const exato = flavors.find((f) => normalizar(f) === n);
+  if (exato) return exato;
+  // Nomes mais específicos vêm primeiro: "Calabresa Suprema" nunca pode
+  // ser reduzida silenciosamente a "Calabresa".
+  for (const f of [...flavors].sort((a, b) => normalizar(b).length - normalizar(a).length)) {
     const nf = normalizar(f);
     for (const v of variantesPlural(nf)) {
       if (n.includes(v)) return f;
@@ -822,13 +877,16 @@ function detectaTamanho(n: string): string | null {
   if (n === "2" || n.includes("medi")) return "M";
   if (n === "3" || n.includes("grand")) return "G";
   if (n === "4" || n.includes("famil")) return "F";
+  if (n === "5" || n.includes("mini")) return "MINI";
   if (n === "p") return "P";
   if (n === "m") return "M";
   if (n === "g") return "G";
   if (n === "f") return "F";
+  if (n === "mini") return "MINI";
   return null;
 }
 function detectaTamanhoDaMensagem(n: string): string | null {
+  if (n.includes("mini")) return "MINI";
   if (n.includes("pequen")) return "P";
   if (n.includes("medi")) return "M";
   if (n.includes("grand")) return "G";
@@ -946,9 +1004,8 @@ function montarPizzaDoPedido(text: string, session: BotSession, prefixo?: string
 
   // 4) Pedido completo (tamanho + sabor + borda) -> adiciona pizza e segue pro "mais alguma coisa"
   const { size, flavor, border } = parcial;
-  const basePrice = getSizePrice(size);
-  const borderPrice = border !== "Sem borda" ? getBorderPrice(size) : 0;
-  const newItem: CartItem = { category: "pizza", name: "Pizza", size, flavor, border, price: basePrice + borderPrice };
+  const newItem = criarItemPizza(size, flavor, border);
+  if (!newItem) return respostaCombinacaoPizzaIndisponivel(size, session);
   const newCart = [...session.cart, newItem];
   const bordaTxt = border !== "Sem borda" ? ` com borda de *${border}*` : "";
   return {
@@ -1041,7 +1098,7 @@ export function detectarLancheEspecifico(text: string, session: BotSession): Bot
   if (isEsgotado(lanche.name)) return respostaEsgotado(lanche.name, nomesLanches, session);
 
   if (lanche.hasFlavors) {
-    const flavors = MENU[lanche.flavorsKey as keyof typeof MENU] as string[];
+    const flavors = saboresLanche(lanche);
     const lista = flavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n");
     return {
       messages: [`*${lanche.name}* selecionado! 😋 Qual sabor?\n\n${lista}`],
@@ -1156,8 +1213,7 @@ export function garantirLinkCardapioEmMensagens(messages: string[], step?: BotSt
   return messages;
 }
 function listaBordas(size: string): string {
-  const preco = getBorderPrice(size);
-  return MENU.borders.map((b, i) => `  ${i + 1}. *${b.label}* · *${formatCurrency(preco)}*`).join("\n") +
+  return MENU.borders.map((b, i) => `  ${i + 1}. *${b.label}* · *${formatCurrency(getBorderPriceFor(size, b.label))}*`).join("\n") +
     `\n  ${MENU.borders.length + 1}. Sem borda`;
 }
 // Mesma lógica de fonte única aplicada a bebidas/sucos/lanches (ver flavorsDisponiveis).
@@ -1517,11 +1573,11 @@ function processarPedidoCompleto(text: string, session: BotSession): BotResponse
   const enderecoDetectado = extrairEndereco(text);
   if (enderecoDetectado) sessionBase = { ...sessionBase, address: enderecoDetectado };
 
-  // ---- Mini-pizza ----
+  // ---- Mini-pizza (tamanho oficial, sem borda) ----
   if (isMiniPizza) {
     return {
       messages: [`Perfeito! 😄 Mini-Pizza anotada! 🍕 Qual sabor?\n\n${MENU.miniPizzaFlavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n")}`],
-      session: resetaTentativas({ ...sessionBase, step: "lanche_flavor", currentCategory: "pizza", currentLanche: "Mini-Pizza" }),
+      session: resetaTentativas({ ...sessionBase, step: "flavor", currentCategory: "pizza", currentSize: "MINI" }),
     };
   }
 
@@ -1541,9 +1597,8 @@ function processarPedidoCompleto(text: string, session: BotSession): BotResponse
           session: resetaTentativas({ ...sessionBase, step: "border_escolha", currentCategory: "pizza", currentSize: parcial.size, currentFlavor: parcial.flavor }),
         };
       }
-      const basePrice = getSizePrice(parcial.size);
-      const borderPrice = parcial.border !== "Sem borda" ? getBorderPrice(parcial.size) : 0;
-      const item: CartItem = { category: "pizza", name: "Pizza", size: parcial.size, flavor: parcial.flavor, border: parcial.border, price: basePrice + borderPrice };
+      const item = criarItemPizza(parcial.size, parcial.flavor, parcial.border);
+      if (!item) return respostaCombinacaoPizzaIndisponivel(parcial.size, sessionBase);
       const bordaTxt = parcial.border !== "Sem borda" ? ` com borda de *${parcial.border}*` : "";
       return continuarAposItemCompleto([...sessionBase.cart, item], sessionBase, `Pizza *${parcial.size}* de *${parcial.flavor}*${bordaTxt} anotada! 🤤`);
     }
@@ -1561,6 +1616,16 @@ function processarPedidoCompleto(text: string, session: BotSession): BotResponse
 
   // ---- Lanche ----
   if (lanche) {
+    if (lanche.sizes && lanche.sizes.length > 0) {
+      return { messages: [mensagemTamanhoProduto(lanche)], session: resetaTentativas({ ...sessionBase, step: "lanche_macarronada_size", currentLanche: lanche.name }) };
+    }
+    if (lanche.hasFlavors) {
+      const flavors = saboresLanche(lanche);
+      return {
+        messages: [`*${lanche.name}* selecionado! 😋 Qual sabor?\n\n${flavors.map((flavor, i) => `  ${i + 1}. ${flavor}`).join("\n")}`],
+        session: resetaTentativas({ ...sessionBase, step: "lanche_flavor", currentLanche: lanche.name }),
+      };
+    }
     const item: CartItem = { category: "lanche", name: lanche.name, price: lanche.price };
     return continuarAposItemCompleto([...sessionBase.cart, item], sessionBase, `*${lanche.name}* anotado! 😋`);
   }
@@ -1568,8 +1633,8 @@ function processarPedidoCompleto(text: string, session: BotSession): BotResponse
   // ---- Sucos ----
   if (sucosItems.length > 0) {
     const leiteDetectado = detectaLeiteTexto(text);
-    const todosBanana = sucosItems.every(i => normalizar(i.name).includes("banana"));
-    const leite = leiteDetectado ?? (todosBanana ? "com" : null);
+    const algumAceitaLeite = sucosItems.some(aceitaLeite);
+    const leite = algumAceitaLeite ? leiteDetectado : "sem";
     const labels = [...new Map(sucosItems.map(i => [i.name, i])).keys()].map(nome => `*${nome}*`).join(" e ");
     if (leite) {
       const itensComLeite = aplicarLeite(sucosItems, leite);
@@ -1802,19 +1867,21 @@ function detectaLeiteTexto(text: string): "com" | "sem" | null {
   if (n.includes("sem leite") || n.includes("s/ leite") || n.includes("puro") || n.includes("pura") || n === "sem") return "sem";
   return null;
 }
+function aceitaLeite(item: CartItem): boolean {
+  if (item.category !== "suco") return false;
+  return MENU.sucos.find((produto) => produto.name === item.name)?.acceptsMilk !== false;
+}
 function aplicarLeite(items: CartItem[], leite: "com" | "sem"): CartItem[] {
   return items.map(item => {
-    if (item.category !== "suco") return item;
-    const isBanana = normalizar(item.name).includes("banana");
-    if (isBanana) return { ...item, name: `${item.name} com leite`, price: item.price + 1 };
+    if (!aceitaLeite(item)) return item;
     return { ...item, name: `${item.name}${leite === "com" ? " com leite" : " sem leite"}`, price: leite === "com" ? item.price + 1 : item.price };
   });
 }
 function finalizarSucos(novosItens: CartItem[], text: string, session: BotSession, label: string): BotResponse {
   const leiteTexto = detectaLeiteTexto(text);
-  const todosBanana = novosItens.every(i => normalizar(i.name).includes("banana"));
-  if (leiteTexto || todosBanana) {
-    const itensComLeite = aplicarLeite(novosItens, leiteTexto ?? "com");
+  const algumAceitaLeite = novosItens.some(aceitaLeite);
+  if (leiteTexto || !algumAceitaLeite) {
+    const itensComLeite = aplicarLeite(novosItens, leiteTexto ?? "sem");
     const newCart = [...session.cart, ...itensComLeite];
     return { messages: [`${label} anotado${novosItens.length > 1 ? "s" : ""}! 😋`, mensagemAddMore(newCart)], session: resetaTentativas({ ...session, step: "add_more", cart: newCart, pendingQtdSuco: undefined, pendingSucosLeite: undefined }) };
   }
@@ -2214,10 +2281,9 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       const pedidoCompleto = detectaPedidoCompleto(text);
       if (pedidoCompleto) {
         const { size, flavor, border } = pedidoCompleto;
-        const basePrice = getSizePrice(size);
-        const borderPrice = border !== "Sem borda" ? getBorderPrice(size) : 0;
-        const itemPrice = basePrice + borderPrice;
-        const novasPizzas: CartItem[] = Array.from({ length: qtd }, () => ({ category: "pizza", name: "Pizza", size, flavor, border, price: itemPrice }));
+        const item = criarItemPizza(size, flavor, border);
+        if (!item) return respostaCombinacaoPizzaIndisponivel(size, session);
+        const novasPizzas: CartItem[] = Array.from({ length: qtd }, () => ({ ...item }));
         const newCart = [...session.cart, ...novasPizzas];
         return {
           messages: [
@@ -2367,7 +2433,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
         if (intencaoRet.category === "pizza" && (n.includes("mini-pizza") || n.includes("mini pizza"))) {
           return {
             messages: [`Pode deixar, *${firstName}*! 😄\n\nMini-Pizza anotada! 🍕 Qual sabor?\n\n${MENU.miniPizzaFlavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n")}`],
-            session: resetaTentativas({ ...session, step: "lanche_flavor", currentCategory: "pizza", currentLanche: "Mini-Pizza", customerName: historico.nome }),
+            session: resetaTentativas({ ...session, step: "flavor", currentCategory: "pizza", currentSize: "MINI", customerName: historico.nome }),
           };
         }
         const resp = handleCategory(intencaoRet.category, { ...session, step: "category", customerName: historico.nome });
@@ -2385,14 +2451,10 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
         n.includes("mesmo") || n.includes("igual") || ePositiva(n);
       if (querRepetir) {
         if (historico.ultimoCart && historico.ultimoCart.length > 0) {
-          const cart = historico.ultimoCart.map(item => {
-            if (item.category === "pizza" && item.size) {
-              const basePrice = getSizePrice(item.size);
-              const borderPrice = item.border && item.border !== "Sem borda" ? getBorderPrice(item.size) : 0;
-              return { ...item, price: basePrice + borderPrice };
-            }
-            return item;
-          });
+          // Repetição preserva o snapshot comercial do pedido anterior. A taxa
+          // de entrega continua sendo atualizada abaixo, mas produto já vendido
+          // nunca é reprecificado silenciosamente.
+          const cart = historico.ultimoCart.map(item => ({ ...item }));
 
           // Se temos histórico completo de entrega, pré-preenche e vai direto para confirmação
           if (historico.ultimoDeliveryType && historico.ultimoPayment) {
@@ -2485,7 +2547,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
         if (intencao.category === "pizza" && (nName.includes("mini-pizza") || nName.includes("mini pizza"))) {
           return {
             messages: [`Perfeito! 😄\n\nMini-Pizza anotada! 🍕 Qual sabor?\n\n${MENU.miniPizzaFlavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n")}`],
-            session: resetaTentativas({ ...session, step: "lanche_flavor", currentCategory: "pizza", currentLanche: "Mini-Pizza" }),
+            session: resetaTentativas({ ...session, step: "flavor", currentCategory: "pizza", currentSize: "MINI" }),
           };
         }
         const response = handleCategory(intencao.category, { ...session, step: "category" });
@@ -2575,7 +2637,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
         if (n.includes("mini-pizza") || n.includes("mini pizza")) {
           return {
             messages: [`Mini-Pizza anotada! 🍕 Qual sabor?\n\n${MENU.miniPizzaFlavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n")}`],
-            session: resetaTentativas({ ...session, step: "lanche_flavor", currentCategory: "pizza", currentLanche: "Mini-Pizza" }),
+            session: resetaTentativas({ ...session, step: "flavor", currentCategory: "pizza", currentSize: "MINI" }),
           };
         }
         const pedidoPizza = montarPizzaDoPedido(text, session);
@@ -2679,7 +2741,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       if (!quer) return respostaInvalida(`  1. Sim, quero pedir\n  2. Ver outro produto`, session);
       // Iniciar pedido conforme categoria
       if (c.categoria === "pizza_mini") {
-        return { messages: [`Mini-Pizza anotada! 🍕 Qual sabor?\n\n${MENU.miniPizzaFlavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n")}`], session: resetaTentativas({ ...session, step: "lanche_flavor", currentCategory: "pizza", currentLanche: "Mini-Pizza", pendingConsultaPreco: undefined }) };
+        return { messages: [`Mini-Pizza anotada! 🍕 Qual sabor?\n\n${MENU.miniPizzaFlavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n")}`], session: resetaTentativas({ ...session, step: "flavor", currentCategory: "pizza", currentSize: "MINI", pendingConsultaPreco: undefined }) };
       }
       if (c.categoria === "pizza_size") {
         return { messages: [`Pizza *${c.size}* anotada! 👌\n\nQual o sabor? 😋 Você pode escolher até *2 sabores*!\n\n${listaFlavors()}\n\n_(Digite *voltar* para corrigir a etapa anterior)_`], session: resetaTentativas({ ...session, step: "flavor", currentCategory: "pizza", currentSize: c.size, pendingConsultaPreco: undefined }) };
@@ -2743,15 +2805,7 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       if (mudanca) return mudanca;
       const resFatiasSize = verificaConsultaFatias(text, session);
       if (resFatiasSize) return resFatiasSize;
-      if (n === "1" || n === "mini" || n.includes("mini-pizza") || n.includes("mini pizza")) {
-        return {
-          messages: [`Mini-Pizza anotada! 🍕 Qual sabor?\n\n${MENU.miniPizzaFlavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n")}`],
-          session: resetaTentativas({ ...session, step: "lanche_flavor", currentCategory: "pizza", currentLanche: "Mini-Pizza" }),
-        };
-      }
-      // Números 2-5 mapeiam para tamanhos (opção 1 é Mini-Pizza, interceptada acima)
-      const numShiftSize: Record<string, string> = { "2": "1", "3": "2", "4": "3", "5": "4" };
-      const size = detectaTamanho(numShiftSize[n] ?? n);
+      const size = detectaTamanho(n);
       const allFlavors = [...MENU.saltyFlavors, ...MENU.sweetFlavors];
       if (size) {
         // Se o tamanho permite meio a meio, tenta DOIS sabores primeiro (evita capturar só o primeiro)
@@ -2761,10 +2815,8 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
             const flavorFinal = `${dois[0]}/${dois[1]}`;
             const bordaJunta = detectaBordaDaMensagem(n);
             if (bordaJunta) {
-              const basePrice = getSizePrice(size);
-              const borderPrice = bordaJunta !== "Sem borda" ? getBorderPrice(size) : 0;
-              const itemPrice = basePrice + borderPrice;
-              const newItem: CartItem = { category: "pizza", name: "Pizza", size, flavor: flavorFinal, border: bordaJunta, price: itemPrice };
+              const newItem = criarItemPizza(size, flavorFinal, bordaJunta);
+              if (!newItem) return respostaCombinacaoPizzaIndisponivel(size, session);
               const newCart = [...session.cart, newItem];
               return {
                 messages: [
@@ -2787,10 +2839,8 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
         if (saborJunto) {
           const bordaJunta = detectaBordaDaMensagem(n);
           if (bordaJunta) {
-            const basePrice = getSizePrice(size);
-            const borderPrice = bordaJunta !== "Sem borda" ? getBorderPrice(size) : 0;
-            const itemPrice = basePrice + borderPrice;
-            const newItem: CartItem = { category: "pizza", name: "Pizza", size, flavor: saborJunto, border: bordaJunta, price: itemPrice };
+            const newItem = criarItemPizza(size, saborJunto, bordaJunta);
+            if (!newItem) return respostaCombinacaoPizzaIndisponivel(size, session);
             const newCart = [...session.cart, newItem];
             return {
               messages: [
@@ -2879,6 +2929,15 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
         flavor = session.currentFlavor;
       }
       if (isEsgotado(flavor)) return respostaEsgotado(flavor, allFlavors, session);
+      if (session.currentSize === "MINI") {
+        const newItem = criarItemPizza("MINI", flavor);
+        if (!newItem) return respostaCombinacaoPizzaIndisponivel("MINI", session);
+        const newCart = [...session.cart, newItem];
+        return {
+          messages: [`Mini-Pizza de *${flavor}* anotada! 🍕`, mensagemAddMore(newCart)],
+          session: resetaTentativas({ ...session, step: "add_more", cart: newCart, currentSize: undefined, currentFlavor: undefined }),
+        };
+      }
       return {
         messages: [
           `*${flavor}*! Excelente escolha! 🤤`,
@@ -2901,6 +2960,15 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       if (isEsgotado(escolhido)) {
         const allF = [...MENU.saltyFlavors, ...MENU.sweetFlavors];
         return respostaEsgotado(escolhido, allF, { ...session, candidatosSaborAmbiguo: undefined });
+      }
+      if (session.currentSize === "MINI") {
+        const newItem = criarItemPizza("MINI", escolhido);
+        if (!newItem) return respostaCombinacaoPizzaIndisponivel("MINI", session);
+        const newCart = [...session.cart, newItem];
+        return {
+          messages: [`Mini-Pizza de *${escolhido}* anotada! 🍕`, mensagemAddMore(newCart)],
+          session: resetaTentativas({ ...session, step: "add_more", cart: newCart, currentSize: undefined, currentFlavor: undefined, candidatosSaborAmbiguo: undefined }),
+        };
       }
       return {
         messages: [
@@ -2957,8 +3025,8 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       const totalOpcoes = MENU.borders.length + 1;
       const semBorda = n.includes("sem borda") || eNegativa(n) || n === String(totalOpcoes);
       if (semBorda) {
-        const basePrice = getSizePrice(session.currentSize!);
-        const newItem: CartItem = { category: "pizza", name: "Pizza", size: session.currentSize!, flavor: session.currentFlavor!, border: "Sem borda", price: basePrice };
+        const newItem = criarItemPizza(session.currentSize!, session.currentFlavor!);
+        if (!newItem) return respostaCombinacaoPizzaIndisponivel(session.currentSize!, session);
         const newCart = [...session.cart, newItem];
         const subtotal = cartSubtotal(newCart);
         if (session.pendingPizzas && session.pizzaAtualIndex && session.pizzaAtualIndex < session.pendingPizzas) {
@@ -2981,15 +3049,13 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
       }
       const num = parseInt(text);
       let borderLabel: string | undefined;
-      let borderPrice = 0;
       if (!isNaN(num) && num >= 1 && num <= MENU.borders.length) {
         const b = getBorderByIndex(num - 1, session.currentSize!);
-        if (b) { borderLabel = b.label; borderPrice = b.price; }
+        if (b) borderLabel = b.label;
       } else {
         const found = MENU.borders.find(b => n.includes(normalizar(b.label)));
         if (found) {
           borderLabel = found.label;
-          borderPrice = getBorderPrice(session.currentSize!);
         }
       }
       if (!borderLabel) {
@@ -2999,9 +3065,8 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
         }
         return respostaInvalida(`Vai querer borda recheada? 😋\n\nResponda *sim* pra ver as opções, ou *não* pra seguir sem borda.`, session);
       }
-      const basePrice = getSizePrice(session.currentSize!);
-      const itemPrice = basePrice + borderPrice;
-      const newItem: CartItem = { category: "pizza", name: "Pizza", size: session.currentSize!, flavor: session.currentFlavor!, border: borderLabel, price: itemPrice };
+      const newItem = criarItemPizza(session.currentSize!, session.currentFlavor!, borderLabel);
+      if (!newItem) return respostaCombinacaoPizzaIndisponivel(session.currentSize!, session);
       const newCart = [...session.cart, newItem];
       const subtotal = cartSubtotal(newCart);
       if (session.pendingPizzas && session.pizzaAtualIndex && session.pizzaAtualIndex < session.pendingPizzas) {
@@ -3160,11 +3225,11 @@ function processMessageInner(input: string, session: BotSession): BotResponse {
           session: resetaTentativas({ ...session, step: "delivery_type" }),
         };
       }
-      // Mini-Pizza vai para lanche_flavor (reusa fluxo existente)
+      // Mini-Pizza usa o mesmo fluxo de sabor de pizza, sem borda.
       if (querMiniPizza) {
         return {
           messages: [`Mini-Pizza anotada! 🍕 Qual sabor?\n\n${MENU.miniPizzaFlavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n")}`],
-          session: resetaTentativas({ ...session, step: "lanche_flavor", currentCategory: "pizza", currentLanche: "Mini-Pizza" }),
+          session: resetaTentativas({ ...session, step: "flavor", currentCategory: "pizza", currentSize: "MINI" }),
         };
       }
       // Pizza só se pedida explicitamente (regra: não voltar a pizza por engano)
@@ -3611,7 +3676,7 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
         return { messages: [mensagemTamanhoProduto(lanche)], session: resetaTentativas({ ...session, step: "lanche_macarronada_size", currentLanche: lanche.name }) };
       }
       if (lanche.hasFlavors) {
-        const flavors = MENU[lanche.flavorsKey as keyof typeof MENU] as string[];
+        const flavors = saboresLanche(lanche);
         const lista = flavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n");
         return { messages: [`*${lanche.name}* selecionado! 😋 Qual sabor?\n\n${lista}`], session: resetaTentativas({ ...session, step: "lanche_flavor", currentLanche: lanche.name }) };
       }
@@ -3620,10 +3685,8 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
       return { messages: [mensagemAddMore(newCart)], session: resetaTentativas({ ...session, step: "add_more", cart: newCart, currentLanche: undefined }) };
     }
     case "lanche_flavor": {
-      const mudanca = tentaMudanca(text, session);
-      if (mudanca) return mudanca;
       const lanche = MENU.lanches.find(l => l.name === session.currentLanche)!;
-      const flavors = MENU[lanche.flavorsKey as keyof typeof MENU] as string[];
+      const flavors = saboresLanche(lanche);
       const num = parseInt(text);
       let flavor: string | undefined;
       if (!isNaN(num) && num >= 1 && num <= flavors.length) flavor = flavors[num - 1];
@@ -3639,8 +3702,12 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
           };
         }
       }
-      if (!flavor) return respostaInvalida(flavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n"), session);
-      const newItem: CartItem = { category: "lanche", name: lanche.name, flavor, price: lanche.price };
+      if (!flavor) {
+        const mudanca = tentaMudanca(text, session);
+        if (mudanca) return mudanca;
+        return respostaInvalida(flavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n"), session);
+      }
+      const newItem: CartItem = { category: "lanche", name: lanche.name, flavor, price: precoLancheComSabor(lanche, flavor) };
       const newCart = [...session.cart, newItem];
       return { messages: [mensagemAddMore(newCart)], session: resetaTentativas({ ...session, step: "add_more", cart: newCart, currentLanche: undefined }) };
     }
@@ -3662,7 +3729,7 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
           return { messages: [mensagemTamanhoProduto(lanche)], session: resetaTentativas({ ...session, step: "lanche_macarronada_size", currentLanche: lanche.name, candidatosItemAmbiguo: undefined }) };
         }
         if (lanche.hasFlavors) {
-          const flavors = MENU[lanche.flavorsKey as keyof typeof MENU] as string[];
+          const flavors = saboresLanche(lanche);
           const lista = flavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n");
           return { messages: [`*${lanche.name}* selecionado! 😋 Qual sabor?\n\n${lista}`], session: resetaTentativas({ ...session, step: "lanche_flavor", currentLanche: lanche.name, candidatosItemAmbiguo: undefined }) };
         }
@@ -3687,8 +3754,6 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
       return respostaInvalida(mensagemCategorias(), session);
     }
     case "product_family_choice": {
-      const mudancaFam = tentaMudanca(text, session);
-      if (mudancaFam) return mudancaFam;
       const candidatosFam = (session.candidatosFamilia ?? []) as typeof MENU.lanches;
       const labelFam = session.familiaLabel ?? "produto";
       if (candidatosFam.length === 0) return respostaInvalida(mensagemCategorias(), { ...session, step: "category" });
@@ -3725,6 +3790,8 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
       }
 
       if (!escolhidoFam) {
+        const mudancaFam = tentaMudanca(text, session);
+        if (mudancaFam) return mudancaFam;
         return respostaInvalida(mensagemFamilia(labelFam, candidatosFam), session);
       }
 
@@ -3752,7 +3819,7 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
       }
       // Produto com sabores
       if (escolhidoFam.hasFlavors) {
-        const flavors = MENU[escolhidoFam.flavorsKey as keyof typeof MENU] as string[];
+        const flavors = saboresLanche(escolhidoFam);
         const lista = flavors.map((f, i) => `  ${i + 1}. ${f}`).join("\n");
         return {
           messages: [`*${escolhidoFam.name}* selecionado! 😋 Qual sabor?\n\n${lista}`],
@@ -3774,11 +3841,14 @@ function detectaPagamentoHibrido(text: string): { metodos: string[]; valores: Re
       // dos tamanhos do próprio item do cardápio — nada hardcoded.
       const lancheTam = MENU.lanches.find(l => l.name === session.currentLanche);
       const sizes = lancheTam?.sizes ?? [];
-      const size = detectaTamanho(n);
-      const sizeItem = size ? sizes.find(s => s.code === size) : undefined;
-      if (!size || !sizeItem) {
+      const numero = /^\d+$/.test(n) ? Number(n) : NaN;
+      const sizeItem = !Number.isNaN(numero) && numero >= 1 && numero <= sizes.length
+        ? sizes[numero - 1]
+        : sizes.find((entry) => normalizar(entry.code) === n);
+      if (!sizeItem) {
         return respostaInvalida(mensagemTamanhoProduto(lancheTam ?? MENU.lanches.find(l => l.name === "Macarronada de Carne")!), session);
       }
+      const size = sizeItem.code;
       const newItem: CartItem = { category: "lanche", name: lancheTam!.name, size, price: sizeItem.price };
       const newCart = [...session.cart, newItem];
       return { messages: [mensagemAddMore(newCart)], session: resetaTentativas({ ...session, step: "add_more", cart: newCart, currentLanche: undefined }) };

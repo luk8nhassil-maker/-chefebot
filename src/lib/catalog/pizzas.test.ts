@@ -51,6 +51,12 @@ describe("buildPizzaCatalog", () => {
     expect(calabresa?.available).toBe(false);
   });
 
+  it("aceita indisponibilidade estruturada por ID sem depender do nome", () => {
+    const catalog = buildPizzaCatalog(MENU, [], ["flavor-peruana"]);
+    expect(catalog.flavors.find((f) => f.name === "Peruana")?.available).toBe(false);
+    expect(catalog.flavors.find((f) => f.name === "Calabresa")?.available).toBe(true);
+  });
+
   it("marca borda esgotada como indisponível", () => {
     const catalog = buildPizzaCatalog(MENU, ["catupiry original"]);
     const catupiry = catalog.borders.find((b) => b.label === "Catupiry Original");

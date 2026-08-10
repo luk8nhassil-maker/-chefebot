@@ -172,10 +172,33 @@ export async function obterEsgotadosMetadataEfetiva(): Promise<EsgMetadata> {
 export async function definirDisponibilidade(params: {
   menu: Menu;
   nome: string;
+  id?: string;
   esgotado: boolean;
-}): Promise<{ esgotados: string[]; esgotadosMetadata: EsgMetadata }> {
-  const { menu, nome, esgotado } = params;
+}): Promise<{ esgotados: string[]; esgotadosMetadata: EsgMetadata; esgotadosIds: string[] }> {
+  const { menu, nome, id, esgotado } = params;
   const [metadata, lista] = await Promise.all([obterEsgotadosMetadataLegado(), obterEsgotadosLegado()]);
+
+  // Escrita moderna: um ID oficial representa exatamente um item dentro de
+  // uma categoria. Não toca na lista legada por nome, pois nomes como
+  // "Calabresa" coexistem em Pizza, Calzone e Pastel de Forno.
+  if (id) {
+    const nomeOficial = nomeAtualParaId(menu).get(id);
+    if (!nomeOficial) throw new Error("ID de catálogo inválido");
+    const estoque = await obterEstoqueItens();
+    const agora = hoje();
+    if (esgotado) {
+      const existente = estoque[id];
+      estoque[id] = { id, nome: nomeOficial, esgotado: true, desde: existente?.desde ?? agora, ultimaRevisao: agora };
+    } else {
+      delete estoque[id];
+    }
+    await redis.set(CHAVE_ESTOQUE_ITENS, estoque);
+    return {
+      esgotados: lista,
+      esgotadosMetadata: metadata,
+      esgotadosIds: Object.values(estoque).filter((item) => item.esgotado).map((item) => item.id),
+    };
+  }
 
   let novaLista: string[];
   if (esgotado) {
@@ -203,7 +226,12 @@ export async function definirDisponibilidade(params: {
     await redis.set(CHAVE_ESTOQUE_ITENS, estoque);
   }
 
-  return { esgotados: novaLista, esgotadosMetadata: metadata };
+  const estoqueFinal = await obterEstoqueItens();
+  return {
+    esgotados: novaLista,
+    esgotadosMetadata: metadata,
+    esgotadosIds: Object.values(estoqueFinal).filter((item) => item.esgotado).map((item) => item.id),
+  };
 }
 
 /** Marca "revisado hoje" nas duas fontes — não muda disponibilidade, só a data de revisão. */

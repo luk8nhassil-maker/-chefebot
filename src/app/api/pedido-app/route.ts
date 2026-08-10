@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import { redis } from "@/lib/redis";
-import { obterEsgotadosEfetivos } from "@/lib/estoque";
+import { obterEsgotadosEfetivos, obterEsgotadosLegado, obterEstoqueItens } from "@/lib/estoque";
 import { mutarPedidos } from "@/lib/pedidosConcorrencia";
 import { gerarIdPedidoUnico, proximoNumeroPedido } from "@/lib/numeracao";
 import { getMENUDinamico } from "@/lib/menu.server";
@@ -1129,11 +1129,13 @@ export async function POST(req: NextRequest) {
       // pedido é pego aqui.
       const temSelecaoPizzaEstruturada = body.itens.some((item) => temSelecaoEstruturada(item));
       const temSelecaoSimplesEstruturadaAlgumItem = body.itens.some((item) => temSelecaoSimplesEstruturada(item));
-      const esgotadosFresco = temSelecaoPizzaEstruturada || temSelecaoSimplesEstruturadaAlgumItem
-        ? (await obterEsgotadosEfetivos(menu))
-        : [];
-      const pizzaCatalog = temSelecaoPizzaEstruturada ? buildPizzaCatalog(menu, esgotadosFresco) : null;
-      const simpleCatalog = temSelecaoSimplesEstruturadaAlgumItem ? buildSimpleCatalog(menu, esgotadosFresco) : null;
+      const precisaCatalogoEstruturado = temSelecaoPizzaEstruturada || temSelecaoSimplesEstruturadaAlgumItem;
+      const [esgotadosLegado, estoqueItens] = precisaCatalogoEstruturado
+        ? await Promise.all([obterEsgotadosLegado(), obterEstoqueItens()])
+        : [[], {}];
+      const esgotadosIds = Object.values(estoqueItens).filter((item) => item.esgotado).map((item) => item.id);
+      const pizzaCatalog = temSelecaoPizzaEstruturada ? buildPizzaCatalog(menu, esgotadosLegado, esgotadosIds) : null;
+      const simpleCatalog = temSelecaoSimplesEstruturadaAlgumItem ? buildSimpleCatalog(menu, esgotadosLegado, esgotadosIds) : null;
 
       let itensResolvidos: { itemCanonico: ItemApp; linha: string; unitPrice: number | null; qty: number; motivo?: string }[];
       try {
@@ -1847,14 +1849,18 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Dispara notificação push para a Kellyne (mesmo canal do WhatsApp)
-    try {
+    // Dispara notificação push para a Kellyne (mesmo canal do WhatsApp).
+    // Testes nunca acionam integração externa real.
+    if (process.env.NODE_ENV !== "test") try {
       const baseUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "https://chefebot-pjif.vercel.app";
       const firstName = body.cliente.split(" ")[0];
       const itensResumo = itens.slice(0, 2).join(", ") + (itens.length > 2 ? "..." : "");
       await fetch(`${baseUrl}/api/push`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        // Notificação é best-effort e nunca pode atrasar ou derrubar a
+        // confirmação do pedido quando o canal push está indisponível.
+        signal: AbortSignal.timeout(1500),
         body: JSON.stringify({
           action: "notify",
           title: `Pedido #${numeroPedido} (site) — ${firstName} 🍕`,
