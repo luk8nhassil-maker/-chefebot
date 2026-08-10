@@ -194,7 +194,7 @@ export function resolverItemComSelecaoSimplesEstruturada(
     case "size": {
       // Produto com tamanho (ex.: Macarronada) EXIGE sizeId e REJEITA
       // milk/flavorId. `addOnId` é opcional — só válido quando o produto
-      // tem addOnGroup (Macarronada — Bacon OU Ovos, nunca os dois).
+      // tem addOnGroup (Macarronada — Bacon OU Ovo, nunca os dois).
       if (selecao.milk !== undefined || selecao.flavorId !== undefined) {
         return { ok: false, error: "Seleção de produto inválida" };
       }
