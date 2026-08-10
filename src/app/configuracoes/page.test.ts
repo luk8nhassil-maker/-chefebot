@@ -6,6 +6,14 @@ import { fileURLToPath } from "node:url";
 // sem jsdom/testing-library, requisitos garantidos estruturalmente na fonte.
 const fonte = readFileSync(fileURLToPath(new URL("./page.tsx", import.meta.url)), "utf-8");
 
+describe("/configuracoes — cardápio comercial 2026 não é editável pelo painel legado", () => {
+  test("editor comercial legado fica desativado e a tela explicita que só bairros/taxas são editáveis", () => {
+    expect(fonte).toContain("const EXIBIR_EDITOR_CARDAPIO_LEGADO = false");
+    expect(fonte).toContain("O cardápio comercial 2026 é versionado e não pode ser alterado nesta tela");
+    expect(fonte).toContain("Salvar bairros e taxas");
+  });
+});
+
 describe("/configuracoes — trava de clique duplo em adicionarBebida", () => {
   // Mesma causa raiz investigada nos produtos "Teste" R$1,00: dois cliques
   // rapidos no "+ Add" usam o mesmo closure de novoItem/novoPreco, entao sem

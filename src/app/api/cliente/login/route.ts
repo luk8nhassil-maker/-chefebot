@@ -68,7 +68,9 @@ export async function POST(req: NextRequest) {
 
     // Código de suporte da tentativa (traceId): aleatório, curto, sem PII —
     // correlaciona telemetria/logs de UMA tentativa sem expor nada.
-    const traceId = `P3-${randomUUID().replace(/[^A-Z0-9]/gi, "").slice(0, 6).toUpperCase()}`;
+    // Prefixo alfabético garante que o identificador de suporte nunca forme
+    // uma sequência de 6 dígitos confundível com o OTP nos logs.
+    const traceId = `P3-X${randomUUID().replace(/[^A-Z0-9]/gi, "").slice(0, 5).toUpperCase()}`;
     console.log(`[ChefeBot] perfil3-telemetria evt=otp_requested ok=- motivo=- v=srv trace=${traceId}`);
     return NextResponse.json({ ok: true, traceId });
   } catch (error) {

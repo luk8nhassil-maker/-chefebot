@@ -35,24 +35,52 @@ beforeEach(() => {
 });
 
 describe("resolverIdsPorNome", () => {
-  it("resolve o ID estável de um sabor de pizza existente", () => {
-    expect(resolverIdsPorNome(MENU, "Calabresa")).toEqual(["flavor-calabresa"]);
+  it("resolve o ID estável de um sabor de pizza existente (cardápio oficial 2026)", () => {
+    // "Calabresa" também é o nome de um adicional de pizza e de um recheio
+    // de Pastel de Feira — entidades comerciais distintas que legitimamente
+    // compartilham o nome; resolverIdsPorNome resolve todas.
+    expect(resolverIdsPorNome(MENU, "Calabresa")).toEqual(
+      expect.arrayContaining(["flavor-calabresa", "addon-calabresa", "pastel-feira-calabresa"])
+    );
+    expect(resolverIdsPorNome(MENU, "Calabresa")).toHaveLength(3);
   });
 
-  it("resolve o ID de uma borda pelo label", () => {
+  it("resolve o ID de uma borda pelo label (catálogo legado, compatibilidade)", () => {
     expect(resolverIdsPorNome(MENU, "Catupiry")).toContain("border-catupiry");
   });
 
-  it("nome que não existe mais no cardápio atual não resolve nenhum ID", () => {
+  it("resolve o ID de um sabor que só existe no cardápio oficial 2026 (ausente do Menu legado)", () => {
+    expect(resolverIdsPorNome(MENU, "Nordestina")).toEqual(["flavor-nordestina"]);
+  });
+
+  it("nome que não existe em nenhum catálogo não resolve nenhum ID", () => {
     expect(resolverIdsPorNome(MENU, "Produto Que Não Existe Mais")).toEqual([]);
   });
 
   it("comparação é insensível a acento/maiúscula", () => {
-    expect(resolverIdsPorNome(MENU, "CALABRESA")).toEqual(["flavor-calabresa"]);
+    expect(resolverIdsPorNome(MENU, "CALABRESA")).toEqual(expect.arrayContaining(["flavor-calabresa"]));
   });
 });
 
 describe("definirDisponibilidade + obterEsgotadosEfetivos — dual-write", () => {
+  it("escrita por ID altera só a entidade escolhida e não contamina a lista legada por nome", async () => {
+    const resultado = await definirDisponibilidade({
+      menu: MENU,
+      id: "pastel-feira-calabresa",
+      nome: "Calabresa",
+      esgotado: true,
+    });
+    expect(store.get(CHAVE_ESGOTADOS) ?? []).not.toContain("Calabresa");
+    expect(resultado.esgotadosIds).toEqual(["pastel-feira-calabresa"]);
+    expect((await obterEstoqueItens())["flavor-calabresa"]).toBeUndefined();
+  });
+
+  it("recusa ID que não pertence ao catálogo oficial", async () => {
+    await expect(definirDisponibilidade({ menu: MENU, id: "produto-inventado", nome: "Calabresa", esgotado: true }))
+      .rejects.toThrow("ID de catálogo inválido");
+    expect(store.has(CHAVE_ESTOQUE_ITENS)).toBe(false);
+  });
+
   it("marcar esgotado grava na lista legada E na estrutura por ID", async () => {
     await definirDisponibilidade({ menu: MENU, nome: "Calabresa", esgotado: true });
     expect(store.get(CHAVE_ESGOTADOS)).toContain("Calabresa");

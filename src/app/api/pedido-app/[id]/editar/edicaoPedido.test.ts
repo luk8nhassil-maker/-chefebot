@@ -436,12 +436,13 @@ describe("POST salvar — seleção estruturada de pizza por ID (Fase 2)", () =>
 
     expect(res.status).toBe(200);
     const data = await json(res);
-    expect(data.total).toBe(50); // preço oficial da Grande no Menu
+    const precoCalabresaG = 45; // cardápio oficial 2026 — Calabresa (tradicional), tamanho G
+    expect(data.total).toBe(precoCalabresaG);
 
     const pedidos = store.get("pedidos") as Array<Record<string, unknown>>;
     expect(pedidos[0].itens).toEqual(["Pizza G Calabresa"]);
     const itensDetalhados = pedidos[0].itensDetalhados as Array<Record<string, unknown>>;
-    expect(itensDetalhados[0]).toMatchObject({ name: "Pizza G", detail: "Calabresa", price: 50 });
+    expect(itensDetalhados[0]).toMatchObject({ name: "Pizza G", detail: "Calabresa", price: precoCalabresaG });
   });
 
   it("rejeita seleção com tamanho inexistente e nunca cai para o caminho legado, mesmo com name/detail válidos", async () => {
@@ -506,10 +507,10 @@ describe("POST salvar — seleção estruturada de pizza por ID (Fase 2)", () =>
 
 describe("POST salvar — seleção estruturada de produto simples por ID (Fase 6)", () => {
   const simpleCatalog = buildSimpleCatalog(MENU);
-  const productIdCalzone = simpleCatalog.lanches.find((l) => l.name === "Calzone")!.id;
-  const productIdMacarronada = simpleCatalog.lanches.find((l) => l.name === "Macarronada de Carne")!.id;
-  const sizeGMacarronada = simpleCatalog.lanches.find((l) => l.name === "Macarronada de Carne")!.sizes!.find((s) => s.code === "G")!.id;
-  const flavorCalabresaCalzone = simpleCatalog.lanches.find((l) => l.name === "Calzone")!.flavors!.find((f) => f.name === "Calabresa")!.id;
+  const productIdCalzone = simpleCatalog.calzone.find((l) => l.name === "Calzone")!.id;
+  const productIdMacarronada = simpleCatalog.macarronadas.find((l) => l.name === "Macarronada de Carne")!.id;
+  const sizeGMacarronada = simpleCatalog.macarronadas.find((l) => l.name === "Macarronada de Carne")!.sizes!.find((s) => s.code === "G")!.id;
+  const flavorCalabresaCalzone = simpleCatalog.calzone.find((l) => l.name === "Calzone")!.flavors!.find((f) => f.name === "Calabresa")!.id;
 
   async function iniciarEdicao() {
     seedPedido();
@@ -528,13 +529,13 @@ describe("POST salvar — seleção estruturada de produto simples por ID (Fase 
 
     expect(res.status).toBe(200);
     const data = await json(res);
-    const calzone = MENU.lanches.find((l) => l.name === "Calzone")!;
-    expect(data.total).toBe(calzone.price);
+    const precoCalzoneCalabresa = 30; // cardápio oficial 2026 — Calzone Calabresa = R$30 (preço vem do sabor)
+    expect(data.total).toBe(precoCalzoneCalabresa);
 
     const pedidos = store.get("pedidos") as Array<Record<string, unknown>>;
     expect(pedidos[0].itens).toEqual(["Calzone Sabor: Calabresa"]);
     const itensDetalhados = pedidos[0].itensDetalhados as Array<Record<string, unknown>>;
-    expect(itensDetalhados[0]).toMatchObject({ name: "Calzone", detail: "Sabor: Calabresa", price: calzone.price });
+    expect(itensDetalhados[0]).toMatchObject({ name: "Calzone", detail: "Sabor: Calabresa", price: precoCalzoneCalabresa });
   });
 
   it("Macarronada: exige tamanho e recalcula pelo tamanho escolhido", async () => {
@@ -547,9 +548,8 @@ describe("POST salvar — seleção estruturada de produto simples por ID (Fase 
 
     expect(res.status).toBe(200);
     const data = await json(res);
-    const macarronada = MENU.lanches.find((l) => l.name === "Macarronada de Carne")!;
-    const sizeG = macarronada.sizes!.find((s) => s.code === "G")!;
-    expect(data.total).toBe(sizeG.price);
+    const precoMacarronadaCarneG = 50; // cardápio oficial 2026 — Macarronada de Carne, tamanho G = R$50
+    expect(data.total).toBe(precoMacarronadaCarneG);
   });
 
   it("rejeita seleção com productId inexistente e nunca cai para o caminho legado, mesmo com name/detail válidos", async () => {
@@ -722,8 +722,8 @@ describe("POST salvar — snapshotOficial (Fase 3)", () => {
   const catalog = buildPizzaCatalog(MENU);
   const sizeIdG = catalog.sizes.find((s) => s.code === "G")!.id;
   const flavorCalabresa = catalog.flavors.find((f) => f.name === "Calabresa")!.id;
-  const sizeG = MENU.sizes.find((s) => s.code === "G")!;
   const refri = MENU.bebidas.find((b) => b.name === "Refrigerante 2L")!;
+  const precoCalabresaG = 45; // cardápio oficial 2026 — Calabresa (tradicional), tamanho G
 
   type PedidoComSnapshot = {
     total: number;
@@ -758,8 +758,8 @@ describe("POST salvar — snapshotOficial (Fase 3)", () => {
     const snapshot = pedidos[0].snapshotOficial!;
     expect(snapshot.itens).toEqual([{
       kind: "pizza", nome: "Pizza G", detalhe: "Calabresa", quantidade: 1,
-      precoUnitarioCents: Math.round(sizeG.price * 100),
-      totalCents: Math.round(sizeG.price * 100),
+      precoUnitarioCents: Math.round(precoCalabresaG * 100),
+      totalCents: Math.round(precoCalabresaG * 100),
       selecao: { sizeId: sizeIdG, flavorIds: [flavorCalabresa] },
     }]);
     expect(snapshot.totalCents).toBe(Math.round(pedidos[0].total * 100));
@@ -810,7 +810,7 @@ describe("POST salvar — snapshotOficial (Fase 3)", () => {
     expect(snapshot.itens).toHaveLength(2);
     expect(snapshot.itens[0].selecao).toBeDefined();
     expect(snapshot.itens[1]).not.toHaveProperty("selecao");
-    expect(snapshot.subtotalCents).toBe(Math.round((sizeG.price + refri.price) * 100));
+    expect(snapshot.subtotalCents).toBe(Math.round((precoCalabresaG + refri.price) * 100));
   });
 
   // Fase 3 (hardening): a edição preserva o desconto de fidelidade concedido
