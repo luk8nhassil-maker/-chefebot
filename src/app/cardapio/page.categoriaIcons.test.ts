@@ -13,7 +13,7 @@ const EMOJI_RE = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u;
 
 describe("categorias da home do cardápio não usam emoji como ícone de navegação", () => {
   test("botão Pizzas usa ícone lucide (CATEGORIA_ICON.pizza), não ICONS.pizza (emoji)", () => {
-    const trecho = fonte.match(/<button className="home-cat" onClick=\{goPizza\}>[\s\S]*?<\/button>/)?.[0] ?? "";
+    const trecho = fonte.match(/<button className="home-cat" onClick=\{\(\) => goPizza\("tradicional"\)\}>[\s\S]*?<\/button>/)?.[0] ?? "";
     expect(trecho).toContain("CATEGORIA_ICON.pizza");
     expect(trecho).not.toMatch(EMOJI_RE);
   });
