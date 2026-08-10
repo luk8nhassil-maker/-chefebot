@@ -34,6 +34,7 @@ type PedidoTimeoutPix = PedidoComPix & PedidoParaJornada & {
   total?: number;
   taxaEntrega?: number;
   status?: string;
+  pixConfirmado?: boolean;
   resgateId?: string;
   cancelamentoSolicitado?: boolean;
   statusAtualizadoEm?: string;
@@ -182,6 +183,9 @@ export async function processarPoliticaTimeoutPagamentoPix(input: {
   const pedido = pedidos.find((item) => item.id === input.pedidoId);
   if (!pedidoElegivel(pedido)) return { encerrado: false, motivo: "pedido_nao_elegivel" };
 
+  const providerPaymentId = pedido.pix?.providerPaymentId?.trim();
+  if (!providerPaymentId) return { encerrado: false, motivo: "payment_id_ausente" };
+
   const idade = idadePixMs(pedido, agora);
   if (idade === null) return { encerrado: false, motivo: "idade_indeterminada" };
   if (idade < PIX_PAGAMENTO_AVISO_PENDENTE_MS) return { encerrado: false, motivo: "antes_do_aviso" };
@@ -190,7 +194,7 @@ export async function processarPoliticaTimeoutPagamentoPix(input: {
     const marcadorAviso = await redis.get(`${PREFIXO_AVISO}${pedido.id}`);
     if (marcadorAviso) return { encerrado: false, motivo: "aviso_ja_processado" };
 
-    const estado = await consultarEstadoPagamentoMercadoPago(pedido.pix.providerPaymentId as string);
+    const estado = await consultarEstadoPagamentoMercadoPago(providerPaymentId);
     if (estado.estado === "pago") {
       const confirmou = await confirmarSePagamentoAprovado(pedido.id);
       if (confirmou) return { encerrado: true, motivo: "confirmado_no_marco_aviso" };
@@ -217,7 +221,7 @@ export async function processarPoliticaTimeoutPagamentoPix(input: {
   }
 
   try {
-    const resultadoProvider = await cancelarPagamentoMercadoPagoPendente(pedido.pix.providerPaymentId as string);
+    const resultadoProvider = await cancelarPagamentoMercadoPagoPendente(providerPaymentId);
     if (resultadoProvider.estado === "pago") {
       const confirmou = await confirmarSePagamentoAprovado(pedido.id);
       if (confirmou) return { encerrado: true, motivo: "confirmado_no_marco_cancelamento" };
@@ -231,7 +235,7 @@ export async function processarPoliticaTimeoutPagamentoPix(input: {
       const index = frescos.findIndex((item) => item.id === pedido.id);
       if (index < 0) return { persistir: false, resultado: { cancelado: false, motivo: "pedido_nao_encontrado" } };
       const atual = frescos[index];
-      if (!pedidoElegivel(atual) || atual.pix?.providerPaymentId !== pedido.pix?.providerPaymentId) {
+      if (!pedidoElegivel(atual) || atual.pix?.providerPaymentId?.trim() !== providerPaymentId) {
         return { persistir: false, resultado: { cancelado: false, pedido: atual, motivo: "estado_mudou" } };
       }
       const atualizado: PedidoTimeoutPix = {
