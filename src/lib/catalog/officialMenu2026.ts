@@ -400,7 +400,7 @@ export const MACARRONADA_ADICIONAL_GRUPO: { max: 1; options: OfficialAddOnGroupO
   max: 1,
   options: [
     { id: "macarronada-adicional-bacon", label: "Bacon", priceCents: centavos(10) },
-    { id: "macarronada-adicional-ovos", label: "Ovos", priceCents: centavos(10) },
+    { id: "macarronada-adicional-ovos", label: "Ovo", priceCents: centavos(10) },
   ],
 };
 

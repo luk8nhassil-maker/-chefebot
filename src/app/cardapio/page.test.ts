@@ -440,10 +440,10 @@ describe("resolverSimpleSelectionIds — resolução de IDs do catálogo oficial
     expect(resolverSimpleSelectionIds(catalog, macarronada.name, { sizeCode: size.code, addOnLabel: "Camarão" })).toBeUndefined();
   });
 
-  test("Bacon e Ovos nunca resolvem juntos (addOnGroup.max é 1 — a UI só oferece um seletor de escolha única, nunca multi-seleção aqui)", () => {
+  test("Bacon e Ovo nunca resolvem juntos (addOnGroup.max é 1 — a UI só oferece um seletor de escolha única, nunca multi-seleção aqui)", () => {
     const macarronada = catalog.macarronadas[0];
     expect(macarronada.addOnGroup!.max).toBe(1);
-    expect(macarronada.addOnGroup!.options.map((o) => o.label).sort()).toEqual(["Bacon", "Ovos"]);
+    expect(macarronada.addOnGroup!.options.map((o) => o.label).sort()).toEqual(["Bacon", "Ovo"]);
   });
 });
 

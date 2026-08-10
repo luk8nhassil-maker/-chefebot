@@ -122,7 +122,7 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
   // 2026 presente (menu.pizzaCatalog/menu.catalog), cobre TODAS as
   // categorias reais do cardápio — pizza (sabores por categoria, bordas,
   // adicionais), Calzone/Pastel de Forno/Pastel de Feira (por sabor ou
-  // recheio), Hambúrguer, Macarronada (+ o grupo compartilhado Bacon/Ovos,
+  // recheio), Hambúrguer, Macarronada (+ o grupo compartilhado Bacon/Ovo,
   // extraído uma única vez, nunca duplicado por produto), Sucos, Vitaminas,
   // Bebidas — nunca só os campos legados (o painel de disponibilidade
   // precisa cobrir o mesmo cardápio que o cliente vê, senão o produto
@@ -719,7 +719,7 @@ type CartItem = {
   // sucos — a partir de menu.catalog. Ausente = item 100% legado
   // (comportamento inalterado); nunca bloqueia adicionar à sacola quando o
   // catálogo ainda não carregou ou o nome não bate. `addOnId` só é usado
-  // pela Macarronada (Bacon OU Ovos, nunca os dois — ver addOnGroup).
+  // pela Macarronada (Bacon OU Ovo, nunca os dois — ver addOnGroup).
   simpleSelection?: { productId: string; sizeId?: string; flavorId?: string; milk?: "com" | "sem"; addOnId?: string };
 };
 
@@ -1010,7 +1010,7 @@ export function resolverSimpleSelectionIds(
     const size = produto.sizes?.find((s) => s.code === opts.sizeCode);
     if (!size) return undefined;
     // `addOnLabel` é opcional mesmo quando o produto tem addOnGroup (ex.:
-    // Macarronada sem Bacon nem Ovos é uma escolha válida) — só resolve
+    // Macarronada sem Bacon nem Ovo é uma escolha válida) — só resolve
     // quando o cliente escolheu um dos dois.
     if (opts.addOnLabel !== undefined) {
       const opcao = produto.addOnGroup?.options.find((o) => o.label === opts.addOnLabel);
@@ -1211,7 +1211,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     sizes?: { code: string; price: number }[];
     addOnGroup?: { max: 1; options: { id: string; label: string; price: number; available: boolean }[] };
   } | null>(null);
-  // Tamanho já escolhido, aguardando a escolha opcional de Bacon/Ovos (nunca
+  // Tamanho já escolhido, aguardando a escolha opcional de Bacon/Ovo (nunca
   // os dois — ver addOnGroup) antes de ir para a sacola.
   const [macarronadaSizeEscolhido, setMacarronadaSizeEscolhido] = useState<{ code: string; price: number } | null>(null);
   const [sucoPendente, setSucoPendente] = useState<{ name: string; price: number } | null>(null);
@@ -1845,7 +1845,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     setSucoPendente(null);
     go("sc-cart");
   }
-  // Tamanho escolhido: se há Bacon OU Ovos disponível (nunca os dois — ver
+  // Tamanho escolhido: se há Bacon OU Ovo disponível (nunca os dois — ver
   // addOnGroup), abre a etapa opcional antes da sacola; senão finaliza
   // direto (nenhuma etapa vazia).
   function addMacarronadaSize(code: string) {
@@ -1860,7 +1860,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     }
     finalizarMacarronada(sizeOption, undefined);
   }
-  // Fecha a macarronada — `addOnLabel` undefined = "Nenhum" (Bacon e Ovos são
+  // Fecha a macarronada — `addOnLabel` undefined = "Nenhum" (Bacon e Ovo são
   // sempre opcionais, nunca os dois juntos — ver MACARRONADA_ADICIONAL_GRUPO).
   function finalizarMacarronada(sizeOption: { code: string; price: number }, addOnLabel: string | undefined) {
     if (!macarronadaPendente) return;
@@ -2489,7 +2489,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
           {screen === "sc-macarronada-addon" && macarronadaPendente && macarronadaSizeEscolhido && (
             <section className="screen active">
               <TopBack onClick={() => { setMacarronadaSizeEscolhido(null); go("sc-macarronada-size"); }} title={macarronadaPendente.name} />
-              <div className="screen-head"><h2>Bacon ou ovos?</h2><p>Opcional — escolha no máximo 1.</p></div>
+              <div className="screen-head"><h2>Bacon ou ovo?</h2><p>Opcional — escolha no máximo 1.</p></div>
               <div className="opt" onClick={() => finalizarMacarronada(macarronadaSizeEscolhido, undefined)} {...optA11yAttrs()} onKeyDown={(e) => { if (isActivateKey(e)) { e.preventDefault(); finalizarMacarronada(macarronadaSizeEscolhido, undefined); } }}><div className="opt-emoji">🚫</div><div className="opt-body"><div className="opt-title">Nenhum</div></div><div className="opt-check" /></div>
               {(macarronadaPendente.addOnGroup?.options || []).map((o) => {
                 const esg = !o.available;
