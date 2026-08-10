@@ -6,11 +6,13 @@ import { confirmarPixMetadata, type PixMetadata } from '@/lib/pix'
 import { registrarAuditoriaPixManual } from '@/lib/pixAuditoria'
 import { encerrarSentinela } from '@/lib/pixSentinela'
 import { incrementarContadorPix } from '@/lib/pixMetricas'
+import { enviarTextoWhatsApp } from '@/lib/whatsappMensagem'
 
 type Status = 'novo' | 'em_preparo' | 'saiu_entrega' | 'entregue' | 'cancelado'
 type Pedido = {
   id: string
   cliente: string
+  telefone?: string
   total: number
   status: Status
   pagamento?: string
@@ -52,7 +54,7 @@ type ResultadoConfirmacaoManual =
   | { tipo: 'nao_encontrado' }
   | { tipo: 'cancelado' }
   | { tipo: 'ja_confirmado'; pedido: Pedido }
-  | { tipo: 'confirmado'; statusAnterior: string; valorConfirmado: number; pixConfirmadoMeta: PixMetadata }
+  | { tipo: 'confirmado'; statusAnterior: string; valorConfirmado: number; pixConfirmadoMeta: PixMetadata; pedido: Pedido }
 
 // Protegido pelo lock GLOBAL de "pedidos" (ver src/lib/pedidosConcorrencia.ts):
 // a revalidação (cancelado/já confirmado) e a gravação acontecem sobre uma
@@ -89,7 +91,7 @@ async function confirmarPixManualAtomico(
     return {
       persistir: true,
       pedidos: atualizados,
-      resultado: { tipo: 'confirmado', statusAnterior, valorConfirmado, pixConfirmadoMeta },
+      resultado: { tipo: 'confirmado', statusAnterior, valorConfirmado, pixConfirmadoMeta, pedido: atualizados[index] },
     }
   })
 }
@@ -148,7 +150,7 @@ export async function POST(req: NextRequest) {
   }
   if (resultado.tipo === 'ja_confirmado') return respostaJaConfirmado(resultado.pedido)
 
-  const { statusAnterior, valorConfirmado, pixConfirmadoMeta } = resultado
+  const { statusAnterior, valorConfirmado, pixConfirmadoMeta, pedido: pedidoConfirmado } = resultado
   const confirmadoEm = pixConfirmadoMeta.confirmadoEm ?? new Date().toISOString()
 
   // Best-effort — nunca pode afetar a confirmação acima, que já foi
@@ -179,11 +181,27 @@ export async function POST(req: NextRequest) {
     console.error('[ChefeBot] Falha ao registrar auditoria de confirmação manual de Pix (ignorado):', err)
   }
 
+  let avisoOperacional: string | undefined
+  if (pedidoConfirmado.telefone) {
+    const firstName = pedidoConfirmado.cliente.split(' ')[0]
+    const telefone = pedidoConfirmado.telefone.replace(/\D/g, '')
+    const phone = telefone.startsWith('55') && telefone.length >= 12 ? telefone : `55${telefone}`
+    const envio = await enviarTextoWhatsApp(
+      phone,
+      `*${firstName}*, pagamento confirmado! ✅\n\nRecebemos seu Pix e seu pedido foi liberado para a cozinha. 🍕`
+    ).catch(() => ({ ok: false, motivo: 'erro_inesperado', latenciaMs: 0, tentativas: 0 }))
+    if (!envio.ok) {
+      avisoOperacional = 'Pagamento confirmado, mas a mensagem ao cliente não foi enviada. Tente novamente pelo WhatsApp.'
+      console.error('[ChefeBot] Confirmação manual salva sem aviso ao cliente.', { pedidoId: id, motivo: envio.motivo })
+    }
+  }
+
   return NextResponse.json({
     ok: true,
     confirmadoPor: pixConfirmadoMeta.confirmadoPor,
     confirmadoPorNome: pixConfirmadoMeta.confirmadoPorNome,
     confirmadoEm: pixConfirmadoMeta.confirmadoEm,
     valorConfirmado,
+    ...(avisoOperacional ? { avisoOperacional } : {}),
   })
 }
