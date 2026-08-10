@@ -704,6 +704,22 @@ export default function ConfiguracoesPage() {
             {aba === 'cardapio' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
 
+                {/* Aviso (cardápio oficial 2026): os campos abaixo (sabores,
+                    tamanhos, bordas, bebidas, sucos) são o cardápio LEGADO,
+                    gravado no Redis — só entram em vigor quando o cardápio
+                    oficial (código, @/lib/catalog/officialMenu2026) não
+                    carrega (fallback). Preço/produto/sabor reais que o
+                    cliente vê e paga vêm sempre do catálogo oficial em
+                    código; editar um preço aqui NÃO altera o preço oficial
+                    cobrado. Só Disponibilidade/Esgotados (painel do
+                    cardápio) afeta o catálogo oficial em tempo real. */}
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, background: 'color-mix(in srgb, var(--warning, orange) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--warning, orange) 40%, transparent)', borderRadius: 12, padding: '12px 14px' }}>
+                  <span style={{ fontSize: 18, flexShrink: 0 }}>⚠️</span>
+                  <div style={{ fontSize: 12.5, color: TEXT, lineHeight: 1.5 }}>
+                    <strong>Estes campos não controlam mais o preço oficial.</strong> Desde o cardápio oficial 2026, produtos/sabores/preços reais vêm do catálogo em código — editar aqui só afeta o cardápio de reserva (usado apenas se o catálogo oficial não carregar). Para tirar um item de venda, use Disponibilidade/Esgotados no painel do cardápio.
+                  </div>
+                </div>
+
                 {/* Sabores Salgados */}
                 <SectionCard>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: -4 }}>

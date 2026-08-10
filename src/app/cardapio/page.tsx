@@ -55,7 +55,7 @@ export type MenuType = {
   horario?: { horaAbertura: number; horaFechamento: number; aberto: boolean };
   // Catálogo oficial de pizzas com IDs estáveis (Fase 2) — aditivo, vem de
   // GET /api/cardapio. Usado só para montar `pizzaSelection` no carrinho
-  // (ver addPizzaWithBorder); ausência (ex.: resposta antiga em cache) faz o
+  // (ver finalizarPizza); ausência (ex.: resposta antiga em cache) faz o
   // item de pizza cair no comportamento 100% legado (name/detail), nunca
   // bloqueia adicionar ao carrinho.
   pizzaCatalog?: PizzaCatalog;
@@ -115,20 +115,58 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
     return () => clearInterval(iv)
   }, [])
 
-  // Bebidas + Sucos unificados numa categoria só
-  const todos: Produto[] = [
-    ...(menu.saltyFlavors || []).map(f => ({ nome: f, categoria: "Salgados" })),
-    ...(menu.sweetFlavors || []).map(f => ({ nome: f, categoria: "Doces" })),
-    ...(menu.lanches || []).map(l => ({ nome: l.name, categoria: "Lanches", preco: l.price > 0 ? l.price : undefined })),
-    ...(menu.bebidas || []).map(b => ({ nome: b.name, categoria: "Bebidas", preco: b.price })),
-    ...(menu.sucos || []).map(s => ({ nome: s.name, categoria: "Bebidas", preco: s.price })),
-    ...(menu.borders || []).map(b => ({ nome: b.label, categoria: "Bordas" })),
-  ]
+  // Lista "achatada" para o painel de esgotados: com o catálogo oficial
+  // 2026 presente (menu.pizzaCatalog/menu.catalog), cobre TODAS as
+  // categorias reais do cardápio — pizza (sabores por categoria, bordas,
+  // adicionais), Calzone/Pastel de Forno/Pastel de Feira (por sabor ou
+  // recheio), Hambúrguer, Macarronada (+ o grupo compartilhado Bacon/Ovos,
+  // extraído uma única vez, nunca duplicado por produto), Sucos, Vitaminas,
+  // Bebidas — nunca só os campos legados (o painel de disponibilidade
+  // precisa cobrir o mesmo cardápio que o cliente vê, senão o produto
+  // esgotado no catálogo novo não aparece pra ninguém marcar). Sem o
+  // catálogo (resposta antiga em cache), cai para a lista legada de sempre,
+  // comportamento inalterado.
+  const todos: Produto[] = (menu.pizzaCatalog || menu.catalog)
+    ? [
+        ...(menu.pizzaCatalog?.flavors || []).map(f => ({
+          nome: f.name,
+          categoria: f.category === "tradicional" ? "Tradicionais" : f.category === "especial" ? "Especiais" : "Doces",
+        })),
+        ...(menu.pizzaCatalog?.borders || []).map(b => ({ nome: b.label, categoria: "Bordas" })),
+        ...(menu.pizzaCatalog?.addOns || []).map(a => ({ nome: a.label, categoria: "Adicionais" })),
+        ...(menu.catalog?.lanches || []).flatMap(l =>
+          l.flavors && l.flavors.length > 0
+            ? l.flavors.map(f => ({ nome: f.name, categoria: l.name }))
+            : [{ nome: l.name, categoria: "Lanches", preco: l.priceCents > 0 ? l.priceCents / 100 : undefined }]
+        ),
+        ...(menu.catalog?.calzone || []).flatMap(c => (c.flavors || []).map(f => ({ nome: f.name, categoria: "Calzone", preco: f.priceCents !== undefined ? f.priceCents / 100 : undefined }))),
+        ...(menu.catalog?.pastelForno || []).flatMap(p => (p.flavors || []).map(f => ({ nome: f.name, categoria: "Pastel de Forno" }))),
+        ...(menu.catalog?.hamburgueres || []).map(h => ({ nome: h.name, categoria: "Hambúrguer", preco: h.priceCents / 100 })),
+        ...(menu.catalog?.macarronadas || []).map(m => ({ nome: m.name, categoria: "Macarronada" })),
+        ...(menu.catalog?.macarronadas?.[0]?.addOnGroup?.options || []).map(o => ({ nome: o.label, categoria: "Adicionais" })),
+        ...(menu.catalog?.sucos || []).map(s => ({ nome: s.name, categoria: "Sucos", preco: s.priceCents / 100 })),
+        ...(menu.catalog?.vitaminas || []).map(v => ({ nome: v.name, categoria: "Vitaminas", preco: v.priceCents / 100 })),
+        ...(menu.catalog?.bebidas || []).map(b => ({ nome: b.name, categoria: "Bebidas", preco: b.priceCents / 100 })),
+      ]
+    : [
+        ...(menu.saltyFlavors || []).map(f => ({ nome: f, categoria: "Salgados" })),
+        ...(menu.sweetFlavors || []).map(f => ({ nome: f, categoria: "Doces" })),
+        ...(menu.lanches || []).map(l => ({ nome: l.name, categoria: "Lanches", preco: l.price > 0 ? l.price : undefined })),
+        ...(menu.bebidas || []).map(b => ({ nome: b.name, categoria: "Bebidas", preco: b.price })),
+        ...(menu.sucos || []).map(s => ({ nome: s.name, categoria: "Bebidas", preco: s.price })),
+        ...(menu.borders || []).map(b => ({ nome: b.label, categoria: "Bordas" })),
+      ]
 
-  const CATS = ["todas", "Salgados", "Doces", "Lanches", "Bebidas", "Bordas"].filter(
-    c => c === "todas" || todos.some(p => p.categoria === c)
-  )
-  const CAT_ICON: Record<string, string> = { todas: "Tudo", Salgados: "🍕", Doces: "🍬", Lanches: "🍔", Bebidas: "🥤", Bordas: "🧀" }
+  const CATS = [
+    "todas", "Tradicionais", "Especiais", "Doces", "Bordas", "Adicionais",
+    "Lanches", "Calzone", "Pastel de Forno", "Pastel de Feira", "Hambúrguer",
+    "Macarronada", "Sucos", "Vitaminas", "Bebidas", "Salgados",
+  ].filter(c => c === "todas" || todos.some(p => p.categoria === c))
+  const CAT_ICON: Record<string, string> = {
+    todas: "Tudo", Salgados: "🍕", Tradicionais: "🍕", Especiais: "🍕", Doces: "🍬", Bordas: "🧀", Adicionais: "➕",
+    Lanches: "🍔", Calzone: "🥟", "Pastel de Forno": "🥟", "Pastel de Feira": "🥟", Hambúrguer: "🍔",
+    Macarronada: "🍝", Sucos: "🧃", Vitaminas: "🥛", Bebidas: "🥤",
+  }
 
   const totalProd = todos.length
   const totalEsg = esgotados.filter(e => todos.some(p => p.nome === e)).length
@@ -660,19 +698,20 @@ type CartItem = {
   recompensaEscolha?: { sabor?: string };
   // Presente só em pizzas normais (1/2 sabores + borda) quando o catálogo
   // oficial (menu.pizzaCatalog) estava disponível no momento de montar o
-  // item — ver addPizzaWithBorder. name/detail/price continuam sendo
+  // item — ver finalizarPizza. name/detail/price continuam sendo
   // calculados e enviados do mesmo jeito de sempre (exibição/compatibilidade
   // com carrinho antigo); o servidor SEMPRE recalcula o preço a partir de
   // pizzaSelection quando presente, nunca confia no price daqui. Ausente =
   // item 100% legado (mini-pizza, calzone, ou pizza normal sem catálogo
   // carregado ainda) — comportamento inalterado.
-  pizzaSelection?: { sizeId: string; flavorIds: string[]; borderId?: string };
+  pizzaSelection?: { sizeId: string; flavorIds: string[]; borderId?: string; addOnIds?: string[] };
   // Mesma ideia de pizzaSelection (Fase 6), para os demais produtos
-  // configuráveis do carrinho — Calzone, Mini-Pizza, Macarronada, sucos — a
-  // partir de menu.catalog. Ausente = item 100% legado (comportamento
-  // inalterado); nunca bloqueia adicionar à sacola quando o catálogo ainda
-  // não carregou ou o nome não bate.
-  simpleSelection?: { productId: string; sizeId?: string; flavorId?: string; milk?: "com" | "sem" };
+  // configuráveis do carrinho — Calzone, Pastel de Forno/Feira, Macarronada,
+  // sucos — a partir de menu.catalog. Ausente = item 100% legado
+  // (comportamento inalterado); nunca bloqueia adicionar à sacola quando o
+  // catálogo ainda não carregou ou o nome não bate. `addOnId` só é usado
+  // pela Macarronada (Bacon OU Ovos, nunca os dois — ver addOnGroup).
+  simpleSelection?: { productId: string; sizeId?: string; flavorId?: string; milk?: "com" | "sem"; addOnId?: string };
 };
 
 type PromocaoPublica = {
@@ -777,12 +816,22 @@ function catalogParaListagem(p: {
   priceCents: number;
   sizes?: { code: string; priceCents: number }[];
   flavors?: { name: string }[];
-}): { name: string; price: number; sizes?: { code: string; price: number }[]; flavors?: string[] } {
+  addOnGroup?: { max: 1; options: { id: string; label: string; priceCents: number; available: boolean }[] };
+}): {
+  name: string;
+  price: number;
+  sizes?: { code: string; price: number }[];
+  flavors?: string[];
+  addOnGroup?: { max: 1; options: { id: string; label: string; price: number; available: boolean }[] };
+} {
   return {
     name: p.name,
     price: p.priceCents / 100,
     ...(p.sizes ? { sizes: p.sizes.map((s) => ({ code: s.code, price: s.priceCents / 100 })) } : {}),
     ...(p.flavors && p.flavors.length > 0 ? { flavors: p.flavors.map((f) => f.name) } : {}),
+    ...(p.addOnGroup
+      ? { addOnGroup: { max: 1 as const, options: p.addOnGroup.options.map((o) => ({ id: o.id, label: o.label, price: o.priceCents / 100, available: o.available })) } }
+      : {}),
   };
 }
 
@@ -816,8 +865,9 @@ export function resolverPizzaSelectionIds(
   sizeCode: string,
   flavor1: string,
   flavor2: string | null,
-  borderLabel: string | null
-): { sizeId: string; flavorIds: string[]; borderId?: string } | undefined {
+  borderLabel: string | null,
+  addOnLabels: readonly string[] = []
+): { sizeId: string; flavorIds: string[]; borderId?: string; addOnIds?: string[] } | undefined {
   if (!pizzaCatalog) return undefined;
   const size = pizzaCatalog.sizes.find((s) => s.code === sizeCode);
   if (!size) return undefined;
@@ -828,10 +878,81 @@ export function resolverPizzaSelectionIds(
     if (!flavor) return undefined;
     flavorIds.push(flavor.id);
   }
-  if (!borderLabel) return { sizeId: size.id, flavorIds };
-  const border = pizzaCatalog.borders.find((b) => b.label === borderLabel);
-  if (!border) return undefined;
-  return { sizeId: size.id, flavorIds, borderId: border.id };
+  let borderId: string | undefined;
+  if (borderLabel) {
+    const border = pizzaCatalog.borders.find((b) => b.label === borderLabel);
+    if (!border) return undefined;
+    borderId = border.id;
+  }
+  const addOnIds: string[] = [];
+  for (const label of addOnLabels) {
+    const addOn = pizzaCatalog.addOns.find((a) => a.label === label);
+    if (!addOn) return undefined;
+    addOnIds.push(addOn.id);
+  }
+  return {
+    sizeId: size.id,
+    flavorIds,
+    ...(borderId ? { borderId } : {}),
+    ...(addOnIds.length > 0 ? { addOnIds } : {}),
+  };
+}
+
+// Preço local (só para EXIBIÇÃO — o servidor sempre recalcula do zero a
+// partir de pizzaSelection, nunca confia neste valor) de uma pizza normal
+// (1/2 sabores + borda opcional + adicionais opcionais) no tamanho
+// escolhido — mesma regra do motor nativo (@/lib/pricing/pizzaEngine):
+// meio a meio cobra o MAIOR preço entre os sabores, nunca a média; borda e
+// adicionais são somados depois. Devolve `undefined` quando o catálogo
+// ainda não carregou ou algum nome não bate com um sabor/borda/adicional
+// válido para este tamanho (ex.: sabor Especial + MINI) — o chamador cai
+// para "preço indisponível" (nunca inventa um número).
+export function precoPizzaLocalCents(
+  pizzaCatalog: PizzaCatalog | undefined,
+  sizeCode: string,
+  flavor1: string,
+  flavor2: string | null,
+  borderLabel: string | null,
+  addOnLabels: readonly string[] = []
+): number | undefined {
+  if (!pizzaCatalog) return undefined;
+  const flavor1Entry = pizzaCatalog.flavors.find((f) => f.name === flavor1);
+  const preco1 = flavor1Entry?.pricesBySizeCode[sizeCode as "P" | "M" | "G" | "F" | "MINI"];
+  if (preco1 === undefined) return undefined;
+  let base = preco1;
+  if (flavor2) {
+    const flavor2Entry = pizzaCatalog.flavors.find((f) => f.name === flavor2);
+    const preco2 = flavor2Entry?.pricesBySizeCode[sizeCode as "P" | "M" | "G" | "F" | "MINI"];
+    if (preco2 === undefined) return undefined;
+    base = Math.max(preco1, preco2);
+  }
+  let total = base;
+  if (borderLabel) {
+    const border = pizzaCatalog.borders.find((b) => b.label === borderLabel);
+    if (!border) return undefined;
+    total += border.pricesBySizeCode[sizeCode as "P" | "M" | "G" | "F"];
+  }
+  for (const label of addOnLabels) {
+    const addOn = pizzaCatalog.addOns.find((a) => a.label === label);
+    if (!addOn) return undefined;
+    total += addOn.pricesBySizeCode[sizeCode as "P" | "M" | "G" | "F"];
+  }
+  return total;
+}
+
+// Menor preço entre os sabores disponíveis de um tamanho — usado para
+// exibir "A partir de R$X" no seletor de tamanho antes de escolher sabor.
+// `undefined` quando o catálogo ainda não carregou ou nenhum sabor
+// disponível tem preço para este tamanho (nunca deveria acontecer com o
+// cardápio oficial, mas nunca inventa um número nesse caso).
+export function precoMinimoPorTamanho(pizzaCatalog: PizzaCatalog | undefined, sizeCode: string): number | undefined {
+  if (!pizzaCatalog) return undefined;
+  const precos = pizzaCatalog.flavors
+    .filter((f) => f.available)
+    .map((f) => f.pricesBySizeCode[sizeCode as "P" | "M" | "G" | "F" | "MINI"])
+    .filter((p): p is number => p !== undefined);
+  if (precos.length === 0) return undefined;
+  return Math.min(...precos);
 }
 
 // Resolve a seleção de um produto simples configurável (Calzone, Macarronada,
@@ -858,8 +979,8 @@ export function resolverPizzaSelectionIds(
 export function resolverSimpleSelectionIds(
   catalog: SimpleCatalog | undefined,
   productName: string,
-  opts: { sizeCode?: string; flavorName?: string; milk?: "com" | "sem" }
-): { productId: string; sizeId?: string; flavorId?: string; milk?: "com" | "sem" } | undefined {
+  opts: { sizeCode?: string; flavorName?: string; milk?: "com" | "sem"; addOnLabel?: string }
+): { productId: string; sizeId?: string; flavorId?: string; milk?: "com" | "sem"; addOnId?: string } | undefined {
   if (!catalog) return undefined;
   const produto = todosOsProdutos(catalog).find((p) => p.name === productName);
   if (!produto) return undefined;
@@ -869,6 +990,14 @@ export function resolverSimpleSelectionIds(
   if (opts.sizeCode !== undefined) {
     const size = produto.sizes?.find((s) => s.code === opts.sizeCode);
     if (!size) return undefined;
+    // `addOnLabel` é opcional mesmo quando o produto tem addOnGroup (ex.:
+    // Macarronada sem Bacon nem Ovos é uma escolha válida) — só resolve
+    // quando o cliente escolheu um dos dois.
+    if (opts.addOnLabel !== undefined) {
+      const opcao = produto.addOnGroup?.options.find((o) => o.label === opts.addOnLabel);
+      if (!opcao) return undefined;
+      return { productId: produto.id, sizeId: size.id, addOnId: opcao.id };
+    }
     return { productId: produto.id, sizeId: size.id };
   }
 
@@ -933,6 +1062,25 @@ const ICONS = {
 // pedido em preparo / saiu para entrega (STATUS_PEDIDO_LABEL), cardápio
 // vazio e erro de carregamento — este último some no fallback isolado de
 // `CardapioPage` (fora do <style>{CSS}</style> de PublicCardapio).
+
+// Definidos fora de PublicCardapio (nunca dentro do corpo do componente):
+// componentes recriados a cada render perderiam estado interno a cada
+// re-render do pai — aqui nenhum dos dois tem estado próprio, mas mantê-los
+// como closures locais ainda paga o custo de uma nova identidade de função
+// (e de componente) a cada render, sem necessidade.
+function PizzaCtx({ badge, txt, dots }: { badge: string; txt: string; dots: { cls: string }[] }) {
+  return badge ? (
+    <div className="pizza-ctx"><span className="pc-badge">{badge}</span><span className="pc-txt" dangerouslySetInnerHTML={{ __html: txt }} />{dots.length > 0 && <span className="pizza-dots">{dots.map((d, i) => <span key={i} className={`pd ${d.cls}`} />)}</span>}</div>
+  ) : null;
+}
+function TopBack({ onClick, title }: { onClick: () => void; title?: string }) {
+  return (
+    <div className="top-back">
+      <button type="button" onClick={onClick} aria-label="Voltar">{ICONS.voltar}</button>
+      {title && <span className="top-back-title">{title}</span>}
+    </div>
+  );
+}
 
 export function PublicCardapio({ menu }: { menu: MenuType }) {
   // Tema compartilhado com o resto do site (localStorage['chefebot-theme']):
@@ -1025,6 +1173,12 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const [f2, setF2] = useState<string | null>(null);
   const [border, setBorder] = useState<string | null>(null);
   const [borderPrice, setBorderPrice] = useState(0);
+  // Adicionais de pizza (Fase — cardápio oficial 2026): multi-seleção por
+  // ID, nunca por nome (o mesmo rótulo nunca aparece duas vezes na lista
+  // oficial, então guardar o `id` já impede duplicidade por construção —
+  // ver toggleAddOn). Ausente/vazio em MINI (nunca oferecido) e no caminho
+  // 100% legado (catálogo ausente).
+  const [addOnIds, setAddOnIds] = useState<string[]>([]);
   const [flavorModalOpen, setFlavorModalOpen] = useState(false);
   const [plan, setPlan] = useState<{ total: number; current: number; openEnded: boolean }>({ total: 0, current: 0, openEnded: false });
   const [listCat, setListCat] = useState<"lanche" | "macarronada" | "bebida" | "suco" | "hamburguer" | "pastelForno" | "vitamina">("lanche");
@@ -1032,7 +1186,15 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   // se o cliente já ignorou a sugestão nesta compra (reseta só em resetAll()).
   const [lastAddedKind, setLastAddedKind] = useState<"pizza" | "lanche" | "macarronada" | "bebida" | "suco" | null>(null);
   const [upsellBebidaIgnorado, setUpsellBebidaIgnorado] = useState(false);
-  const [macarronadaPendente, setMacarronadaPendente] = useState<{ name: string; price: number; sizes?: { code: string; price: number }[] } | null>(null);
+  const [macarronadaPendente, setMacarronadaPendente] = useState<{
+    name: string;
+    price: number;
+    sizes?: { code: string; price: number }[];
+    addOnGroup?: { max: 1; options: { id: string; label: string; price: number; available: boolean }[] };
+  } | null>(null);
+  // Tamanho já escolhido, aguardando a escolha opcional de Bacon/Ovos (nunca
+  // os dois — ver addOnGroup) antes de ir para a sacola.
+  const [macarronadaSizeEscolhido, setMacarronadaSizeEscolhido] = useState<{ code: string; price: number } | null>(null);
   const [sucoPendente, setSucoPendente] = useState<{ name: string; price: number } | null>(null);
   const [delType, setDelType] = useState<"delivery" | "retirada" | "dine_in" | null>(null);
   const [bairroIdx, setBairroIdx] = useState<string>("");
@@ -1275,7 +1437,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     setPromoSel(null); setPromoSabor(null);
     go("sc-cart");
   }
-  const safeCartReturnScreens = ["sc-start", "sc-build", "sc-border", "sc-list", "sc-suco-leite", "sc-macarronada-size", "sc-another", "sc-delivery", "sc-pay", "sc-promo"];
+  const safeCartReturnScreens = ["sc-start", "sc-build", "sc-border", "sc-addons", "sc-list", "sc-suco-leite", "sc-macarronada-size", "sc-macarronada-addon", "sc-another", "sc-delivery", "sc-pay", "sc-promo"];
   function go(s: string) {
     if (s === "sc-cart" && screen !== "sc-cart" && safeCartReturnScreens.includes(screen)) {
       setPreviousStepBeforeCart(screen);
@@ -1299,14 +1461,14 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   // Mini-Pizza como produto simples NÃO existe mais no catálogo oficial 2026
   // (decisão comercial aprovada: MINI virou TAMANHO de pizza Tradicional/
   // Doce, nunca mais um produto à parte — ver PIZZA_SIZES em
-  // @/lib/catalog/officialMenu2026). `menu.lanches` legado (compatibilidade,
-  // resposta antiga em cache) ainda pode listar uma entrada "Mini-Pizza",
-  // mas com `menu.catalog` presente ela nunca resolve para IDs — em vez de
-  // deixar um botão que sempre falha ao adicionar (fail-closed silencioso),
-  // o botão fica oculto (ver renderização abaixo). RESIDUAL CONHECIDO: MINI
-  // como tamanho de pizza ainda não está integrado ao construtor de pizza
-  // deste site público (funciona no Pedido Manual/Salão/servidor) — ver
-  // relatório final.
+  // @/lib/catalog/officialMenu2026). MINI agora é só mais uma opção no
+  // seletor de tamanho normal da pizza (ver tamanhosCatalogo abaixo), com o
+  // mesmo motor nativo (pizzaSelection por ID) das demais — nunca borda,
+  // nunca adicional (ver isMiniSize). `menu.lanches` legado (compatibilidade,
+  // resposta antiga em cache) ainda pode listar uma entrada "Mini-Pizza"
+  // separada; com `menu.catalog` presente ela nunca resolve para IDs — em
+  // vez de deixar um botão que sempre falha ao adicionar (fail-closed
+  // silencioso), esse botão legado fica oculto (ver miniPizzaIndisponivel).
   const miniPizzaItem = (menu.lanches || []).find((it) => isMiniPizzaName(it.name) && Number.isFinite(it.price));
   const miniPizzaEsgotada = !!miniPizzaItem && esgotados.includes(miniPizzaItem.name);
   const miniPizzaIndisponivel = !!menu.catalog; // catálogo oficial presente = Mini-Pizza nunca resolve mais
@@ -1336,10 +1498,34 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const pastelFornoEfetivo = menu.catalog ? menu.catalog.pastelForno.map(catalogParaListagem) : [];
   const vitaminasEfetivas = menu.catalog ? menu.catalog.vitaminas.map(catalogParaListagem) : [];
 
-  function resetBuild() { setSize(null); setSizePrice(0); setF1(null); setF2(null); setBorder(null); setBorderPrice(0); setMiniPizzaMode(false); setCalzoneMode(false); setPastelMode(false); setPastelPendente(null); setFlavorModalOpen(false); }
+  function resetBuild() { setSize(null); setSizePrice(0); setF1(null); setF2(null); setBorder(null); setBorderPrice(0); setAddOnIds([]); setMiniPizzaMode(false); setCalzoneMode(false); setPastelMode(false); setPastelPendente(null); setFlavorModalOpen(false); }
   function goPizza() { setPlan({ total: 0, current: 1, openEnded: true }); resetBuild(); go("sc-build"); }
   function pizzasNoCarrinho() { return cart.filter((c) => c.kind === "pizza" || (c.kind === "simple" && isMiniPizzaName(c.name))).length; }
-  function pickSize(code: string) { const s = (menu.sizes || []).find((x) => x.code === code); if (!s) return; setMiniPizzaMode(false); setCalzoneMode(false); setPastelMode(false); setSize(code); setSizePrice(s.price); setFlavorModalOpen(true); }
+  // Tamanho: com o catálogo oficial presente, a fonte é sempre
+  // `menu.pizzaCatalog.sizes` (inclui MINI como tamanho real — ver
+  // isMiniSize abaixo); `sizePrice` some (0) porque o preço real por
+  // tamanho depende do sabor escolhido (ver precoPizzaLocalCents), nunca
+  // mais um preço fixo por tamanho. Só quando o catálogo está genuinamente
+  // ausente (resposta antiga em cache) o seletor legado por `menu.sizes`
+  // (preço fixo por tamanho) continua valendo. Trocar de tamanho sempre
+  // reseta sabor/borda/adicionais — cada um só é válido para o tamanho em
+  // que foi escolhido.
+  function pickSize(code: string) {
+    setMiniPizzaMode(false); setCalzoneMode(false); setPastelMode(false);
+    if (menu.pizzaCatalog) {
+      const s = menu.pizzaCatalog.sizes.find((x) => x.code === code);
+      if (!s) return;
+      setSize(code);
+      setSizePrice(0);
+    } else {
+      const s = (menu.sizes || []).find((x) => x.code === code);
+      if (!s) return;
+      setSize(code);
+      setSizePrice(s.price);
+    }
+    setF1(null); setF2(null); setBorder(null); setBorderPrice(0); setAddOnIds([]);
+    setFlavorModalOpen(true);
+  }
   function pickMiniPizza() { if (!miniPizzaItem || miniPizzaEsgotada || miniPizzaIndisponivel) return; setMiniPizzaMode(true); setCalzoneMode(false); setPastelMode(false); setSize("MINI"); setSizePrice(miniPizzaItem.price); setF2(null); setFlavorModalOpen(true); }
   // Calzone abre o mesmo modal de sabores da pizza (sem sair da lista de
   // Lanches): trava em 1 sabor só, sem meio a meio. Ver pickFlavor abaixo.
@@ -1375,16 +1561,50 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   // em outro sabor troca a escolha em vez de somar um 2º (nunca formam meio
   // a meio), mesmo chamando pickFlavor várias vezes seguidas — ver
   // nextFlavorSelection.
+  // MINI como tamanho real de pizza (fluxo novo, distinto do produto
+  // legado "Mini-pizza" de `pickMiniPizza`/`miniPizzaMode` acima): trava em
+  // 1 sabor só (nunca meio a meio), nunca borda, nunca adicional — ver
+  // pickFlavor/continueBuild abaixo.
+  const isMiniSize = size === "MINI" && !miniPizzaMode;
   function pickFlavor(f: string) {
-    const next = nextFlavorSelection({ f1, f2 }, f, miniPizzaMode || calzoneMode || pastelMode);
+    const next = nextFlavorSelection({ f1, f2 }, f, miniPizzaMode || calzoneMode || pastelMode || isMiniSize);
     setF1(next.f1);
     setF2(next.f2);
   }
   const mam = !!(f1 && f2);
   const flavorOk = !!f1;
   const buildOk = !!size && flavorOk && !(miniPizzaMode && miniPizzaEsgotada) && !(calzoneMode && calzoneEsgotada);
-  // Fonte efetiva de sabores do fluxo de pizza normal — inalterada.
-  const pizzaFlavorSections = [{ title: "Salgadas", flavors: menu.saltyFlavors || [] }, { title: "Doces", flavors: menu.sweetFlavors || [] }];
+  // Preço real em tempo de montagem — só para exibição (o servidor sempre
+  // recalcula, ver finalizarPizza). undefined enquanto o catálogo não
+  // resolve (sabor ainda não escolhido, ausência de menu.pizzaCatalog etc.).
+  function pizzaPrecoPreview(borderLabel: string | null, addOnLabels: readonly string[]): number | undefined {
+    if (!size || !f1) return undefined;
+    const cents = precoPizzaLocalCents(menu.pizzaCatalog, size, f1, mam ? f2 : null, borderLabel, addOnLabels);
+    return cents === undefined ? undefined : cents / 100;
+  }
+  const precoPizzaBaseReais = pizzaPrecoPreview(null, []);
+  const CATEGORIA_PIZZA_LABEL: Record<string, string> = { tradicional: "Tradicionais", especial: "Especiais", doce: "Doces" };
+  // Fonte efetiva de sabores do fluxo de pizza normal (inclui MINI, que usa
+  // o mesmo seletor): com o catálogo oficial presente, monta as 3
+  // categorias reais (Tradicionais/Especiais/Doces), cada uma filtrada
+  // pelos sabores que têm preço definido para o tamanho atual
+  // (`pricesBySizeCode[size]`) — esse filtro sozinho já exclui Especiais do
+  // MINI (nenhum sabor Especial tem chave "MINI"), sem precisar de uma
+  // lista paralela de "tamanhos permitidos". Esgotado continua aparecendo
+  // (cinza, "Esgotado" — ver `esg` no JSX), nunca some da lista: a
+  // disponibilidade não filtra aqui. Só quando o catálogo está
+  // genuinamente ausente (resposta antiga em cache) cai para as 2 seções
+  // legadas (Salgadas/Doces, sem preço por sabor).
+  const pizzaFlavorSections = menu.pizzaCatalog && size
+    ? (["tradicional", "especial", "doce"] as const)
+        .map((cat) => ({
+          title: CATEGORIA_PIZZA_LABEL[cat],
+          flavors: menu.pizzaCatalog!.flavors
+            .filter((f) => f.category === cat && f.pricesBySizeCode[size as "P" | "M" | "G" | "F" | "MINI"] !== undefined)
+            .map((f) => f.name),
+        }))
+        .filter((section) => section.flavors.length > 0)
+    : [{ title: "Salgadas", flavors: menu.saltyFlavors || [] }, { title: "Doces", flavors: menu.sweetFlavors || [] }];
   // Lista efetiva de sabores do Calzone: com o catálogo oficial presente, é
   // SEMPRE a lista OFICIAL e fixa do Calzone (`menu.catalog.calzone[0].flavors`
   // — cada sabor com preço próprio, decisão comercial aprovada) — nunca mais
@@ -1403,7 +1623,8 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
       : pastelMode
         ? [{ title: "Sabores", flavors: pastelPendente?.flavors || [] }]
         : pizzaFlavorSections;
-  const selectedSizeLabel = miniPizzaMode && miniPizzaItem ? miniPizzaItem.name : pastelMode && pastelPendente ? pastelPendente.name : size ? ((menu.sizes || []).find((s) => s.code === size)?.label || size) : "";
+  const catalogSizeLabel = menu.pizzaCatalog?.sizes.find((s) => s.code === size)?.label;
+  const selectedSizeLabel = miniPizzaMode && miniPizzaItem ? miniPizzaItem.name : pastelMode && pastelPendente ? pastelPendente.name : size ? (catalogSizeLabel || (menu.sizes || []).find((s) => s.code === size)?.label || size) : "";
   const buildFootHint = !size
     ? "Escolha um tamanho para continuar"
     : miniPizzaMode
@@ -1412,17 +1633,19 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
         ? (flavorOk ? "Calzone pronto para a sacola" : "Escolha 1 sabor para o calzone")
         : pastelMode
           ? (flavorOk ? "Pronto para a sacola" : "Escolha 1 sabor")
-          : !f1
-            ? "Escolha até 2 sabores"
-            : !f2
-              ? "Você pode escolher até 2 sabores"
-              : "Sabores prontos — agora escolha a borda";
-  const buildActionLabel = miniPizzaMode ? "Adicionar mini-pizza" : calzoneMode ? "Adicionar calzone" : pastelMode ? "Adicionar" : "Confirmar pizza";
+          : isMiniSize
+            ? (flavorOk ? `Mini pronta para a sacola${precoPizzaBaseReais !== undefined ? ` · ${money(precoPizzaBaseReais)}` : ""}` : "Escolha 1 sabor para a pizza Mini")
+            : !f1
+              ? "Escolha até 2 sabores"
+              : !f2
+                ? `Você pode escolher até 2 sabores${precoPizzaBaseReais !== undefined ? ` · a partir de ${money(precoPizzaBaseReais)}` : ""}`
+                : `Sabores prontos — agora escolha a borda${precoPizzaBaseReais !== undefined ? ` · ${money(precoPizzaBaseReais)}` : ""}`;
+  const buildActionLabel = miniPizzaMode ? "Adicionar mini-pizza" : calzoneMode ? "Adicionar calzone" : pastelMode ? "Adicionar" : isMiniSize ? "Adicionar mini" : "Confirmar pizza";
   const flavorModalTitle = miniPizzaMode ? (miniPizzaItem?.name || "Mini-pizza") : calzoneMode ? (calzoneItem?.name || "Calzone") : pastelMode ? (pastelPendente?.name || "Sabor") : `Pizza ${selectedSizeLabel}`;
-  const flavorModalMessage = miniPizzaMode ? "Escolha o sabor da sua mini-pizza." : calzoneMode ? "Escolha o sabor do seu calzone." : pastelMode ? "Escolha o sabor." : "Você pode escolher até 2 sabores.";
-  const flavorModalHint = miniPizzaMode || calzoneMode || pastelMode ? null : "Escolha 1 sabor para pizza inteira ou 2 sabores para meio a meio.";
+  const flavorModalMessage = miniPizzaMode ? "Escolha o sabor da sua mini-pizza." : calzoneMode ? "Escolha o sabor do seu calzone." : pastelMode ? "Escolha o sabor." : isMiniSize ? "Escolha 1 sabor para a pizza Mini." : "Você pode escolher até 2 sabores.";
+  const flavorModalHint = miniPizzaMode || calzoneMode || pastelMode || isMiniSize ? null : "Escolha 1 sabor para pizza inteira ou 2 sabores para meio a meio.";
   const flavorProgressLabel = f2 ? `${f1} / ${f2}` : f1 ? `${f1} — toque em outro para meio a meio` : "Nenhum sabor escolhido ainda";
-  const renderFlavorProgress = () => !miniPizzaMode && !calzoneMode && !pastelMode && (
+  const renderFlavorProgress = () => !miniPizzaMode && !calzoneMode && !pastelMode && !isMiniSize && (
     <div className="flavor-progress">
       <div className="flavor-progress-dots">
         <span className={`pd ${f1 ? "done" : "cur"}`} />
@@ -1431,22 +1654,55 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
       <span className="flavor-progress-label">{flavorProgressLabel}</span>
     </div>
   );
-  function addPizzaWithBorder(chosenBorder: string | null, chosenBorderPrice: number) {
-    setBorder(chosenBorder); setBorderPrice(chosenBorderPrice);
+  // Fecha a pizza (com borda e adicionais já escolhidos, ambos opcionais —
+  // MINI nunca chega aqui com nenhum dos dois, ver continueBuild). Preço:
+  // com o catálogo oficial presente, SEMPRE o valor real calculado por
+  // sabor/tamanho/borda/adicionais (precoPizzaLocalCents) — nunca o preço
+  // fixo antigo por tamanho. Fail-closed: se o catálogo está presente mas a
+  // combinação escolhida não resolve preço (não deveria acontecer, a UI só
+  // oferece opções válidas), a pizza NÃO entra na sacola — evita cobrar
+  // errado. Só a ausência genuína de `menu.pizzaCatalog` (resposta antiga
+  // em cache) autoriza o fallback legado (`sizePrice + chosenBorderPrice`).
+  function finalizarPizza(chosenBorder: string | null, chosenBorderPrice: number, addOnIdsFinal: string[]) {
     const flavor = mam ? `${f1} / ${f2}` : f1;
-    const keys = [f1, mam ? f2 : null, chosenBorder].filter(Boolean) as string[];
-    // IDs estáveis do catálogo oficial (Fase 2) — undefined quando o
-    // catálogo não carregou ou algo não bate; nesse caso o item segue 100%
-    // legado (name/detail), sem bloquear a sacola. Preço aqui continua
-    // sendo só para exibição — o servidor recalcula sempre.
-    const pizzaSelection = resolverPizzaSelectionIds(menu.pizzaCatalog, size!, f1!, mam ? f2 : null, chosenBorder);
-    const newItem: CartItem = { emoji: "🍕", kind: "pizza", name: `Pizza ${size}${mam ? " (meio a meio)" : ""}`, detail: `${flavor}${chosenBorder ? ` · borda ${chosenBorder}` : ""}`, price: sizePrice + chosenBorderPrice, qty: 1, keys, ...(pizzaSelection ? { pizzaSelection } : {}) };
+    const addOnLabels = addOnIdsFinal
+      .map((id) => menu.pizzaCatalog?.addOns.find((a) => a.id === id)?.label)
+      .filter((l): l is string => !!l);
+    const precoCatalogo = f1 && size ? precoPizzaLocalCents(menu.pizzaCatalog, size, f1, mam ? f2 : null, chosenBorder, addOnLabels) : undefined;
+    if (menu.pizzaCatalog && precoCatalogo === undefined) {
+      showToast("Não foi possível confirmar o preço desta pizza. Tente novamente.");
+      return;
+    }
+    const price = precoCatalogo !== undefined ? precoCatalogo / 100 : sizePrice + chosenBorderPrice;
+    const keys = [f1, mam ? f2 : null, chosenBorder, ...addOnLabels].filter(Boolean) as string[];
+    // IDs estáveis do catálogo oficial (Fase 2+) — undefined quando o
+    // catálogo não carregou; nesse caso o item segue 100% legado
+    // (name/detail), sem bloquear a sacola.
+    const pizzaSelection = resolverPizzaSelectionIds(menu.pizzaCatalog, size!, f1!, mam ? f2 : null, chosenBorder, addOnLabels);
+    const detail = `${flavor}${chosenBorder ? ` · borda ${chosenBorder}` : ""}${addOnLabels.length > 0 ? ` · adicional ${addOnLabels.join(", ")}` : ""}`;
+    const newItem: CartItem = { emoji: "🍕", kind: "pizza", name: `Pizza ${size}${mam ? " (meio a meio)" : ""}`, detail, price, qty: 1, keys, ...(pizzaSelection ? { pizzaSelection } : {}) };
     const newCart = [...cart, newItem];
     setCart(newCart);
     setLastAddedKind("pizza");
     if (!plan.openEnded && plan.current < plan.total) { setPlan({ ...plan, current: plan.current + 1 }); showToast(`Pizza pronta! 🍕`); resetBuild(); go("sc-build"); }
     else if (plan.openEnded) { showToast("Pizza adicionada! 🍕"); go("sc-another"); }
     else { showToast("Tudo pronto! 🍕"); go("sc-cart"); }
+  }
+  // Borda escolhida: se há algum adicional disponível no catálogo, segue
+  // para a etapa de adicionais (sc-addons); senão finaliza direto — nunca
+  // oferece uma etapa vazia. MINI nunca chega aqui (ver continueBuild).
+  function chooseBorder(chosenBorder: string | null, chosenBorderPrice: number) {
+    setBorder(chosenBorder);
+    setBorderPrice(chosenBorderPrice);
+    const temAdicionalDisponivel = !!menu.pizzaCatalog && menu.pizzaCatalog.addOns.some((a) => a.available);
+    if (temAdicionalDisponivel) go("sc-addons");
+    else finalizarPizza(chosenBorder, chosenBorderPrice, []);
+  }
+  // Multi-seleção por ID: nunca permite o mesmo adicional duas vezes (é uma
+  // lista de IDs únicos por construção — toggle nunca duplica uma entrada
+  // já presente).
+  function toggleAddOn(id: string) {
+    setAddOnIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   }
   function addMiniPizza() {
     if (!miniPizzaItem || !f1) return;
@@ -1507,7 +1763,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     showToast(`${pastelPendente.name} adicionado!`);
     resetBuild();
   }
-  function continueBuild() { if (!buildOk) return; if (miniPizzaMode) addMiniPizza(); else if (calzoneMode) addCalzone(); else if (pastelMode) addPastel(); else go("sc-border"); }
+  function continueBuild() { if (!buildOk) return; if (miniPizzaMode) addMiniPizza(); else if (calzoneMode) addCalzone(); else if (pastelMode) addPastel(); else if (isMiniSize) finalizarPizza(null, 0, []); else go("sc-border"); }
   function confirmFromModal() { if (!buildOk) return; setFlavorModalOpen(false); continueBuild(); }
   function addAnother() { setPlan({ total: 0, current: pizzasNoCarrinho() + 1, openEnded: true }); resetBuild(); go("sc-build"); }
   function goCat(cat: "lanche" | "macarronada" | "bebida" | "suco" | "hamburguer" | "pastelForno" | "vitamina") { setListCat(cat); go("sc-list"); }
@@ -1550,23 +1806,41 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     setSucoPendente(null);
     go("sc-cart");
   }
+  // Tamanho escolhido: se há Bacon OU Ovos disponível (nunca os dois — ver
+  // addOnGroup), abre a etapa opcional antes da sacola; senão finaliza
+  // direto (nenhuma etapa vazia).
   function addMacarronadaSize(code: string) {
     if (!macarronadaPendente) return;
     const sizeOption = macarronadaPendente.sizes?.find((s) => s.code === code);
     if (!sizeOption) return;
-    const detail = `Tamanho ${sizeOption.code}`;
-    const simpleSelection = resolverSimpleSelectionIds(menu.catalog, macarronadaPendente.name, { sizeCode: sizeOption.code });
-    // Fail-closed: mesma regra de addCalzone/addMiniPizza acima.
-    if (!simpleSelection && menu.catalog) {
-      showToast("Não foi possível confirmar esse tamanho. Tente novamente.");
+    const temOpcaoDisponivel = !!macarronadaPendente.addOnGroup?.options.some((o) => o.available);
+    if (temOpcaoDisponivel) {
+      setMacarronadaSizeEscolhido(sizeOption);
+      go("sc-macarronada-addon");
       return;
     }
+    finalizarMacarronada(sizeOption, undefined);
+  }
+  // Fecha a macarronada — `addOnLabel` undefined = "Nenhum" (Bacon e Ovos são
+  // sempre opcionais, nunca os dois juntos — ver MACARRONADA_ADICIONAL_GRUPO).
+  function finalizarMacarronada(sizeOption: { code: string; price: number }, addOnLabel: string | undefined) {
+    if (!macarronadaPendente) return;
+    const detail = `Tamanho ${sizeOption.code}${addOnLabel ? ` · ${addOnLabel}` : ""}`;
+    const simpleSelection = resolverSimpleSelectionIds(menu.catalog, macarronadaPendente.name, { sizeCode: sizeOption.code, ...(addOnLabel !== undefined ? { addOnLabel } : {}) });
+    // Fail-closed: mesma regra de addCalzone/addMiniPizza acima.
+    if (!simpleSelection && menu.catalog) {
+      showToast("Não foi possível confirmar essa escolha. Tente novamente.");
+      return;
+    }
+    const addOnOption = addOnLabel ? macarronadaPendente.addOnGroup?.options.find((o) => o.label === addOnLabel) : undefined;
+    const price = sizeOption.price + (addOnOption?.price || 0);
     const ex = cart.find((c) => c.kind === "simple" && c.name === macarronadaPendente.name && c.detail === detail);
     if (ex) setCart(cart.map((c) => (c === ex ? { ...c, qty: c.qty + 1 } : c)));
-    else setCart([...cart, { emoji: "🍽️", kind: "simple", name: macarronadaPendente.name, detail, price: sizeOption.price, qty: 1, keys: [macarronadaPendente.name], ...(simpleSelection ? { simpleSelection } : {}) }]);
+    else setCart([...cart, { emoji: "🍽️", kind: "simple", name: macarronadaPendente.name, detail, price, qty: 1, keys: [macarronadaPendente.name], ...(simpleSelection ? { simpleSelection } : {}) }]);
     setLastAddedKind("macarronada");
     showToast(`${macarronadaPendente.name} ${sizeOption.code} adicionada!`);
     setMacarronadaPendente(null);
+    setMacarronadaSizeEscolhido(null);
     go("sc-another");
   }
   const cartTotal = cart.reduce((s, i) => s + i.price * i.qty, 0);
@@ -1841,7 +2115,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   }
   function resetAll() { setCart([]); resetBuild(); setDelType(null); setBairroIdx(""); setRua(""); setNumero(""); setReferencia(""); setPayment(null); setTroco(""); setTrocoOpcao(null); setPaymentModal(null); setMistoPixInput(""); setMistoDinheiroInput(""); setErroMisto(""); setObservacao(""); setErroNome(""); setErroTelefone(""); setErroPagamento(""); setErroEntrega(""); setErroTroco(""); setPedidoConfirmado(null); setStatusPedidoConfirmado("novo"); setStatusPixCliente("aguardando_pix"); setRestoredDraft(false); setEditandoIdentidade(false); setLastAddedKind(null); setUpsellBebidaIgnorado(false); try { sessionStorage.removeItem("cf_draft"); } catch {} go("sc-start"); }
 
-  const stepMap: Record<string, number> = { "sc-start": 0, "sc-build": 0, "sc-border": 0, "sc-list": 0, "sc-suco-leite": 0, "sc-macarronada-size": 0, "sc-promo": 0, "sc-another": 1, "sc-cart": 1, "sc-delivery": 2, "sc-pay": 3, "sc-done": 3 };
+  const stepMap: Record<string, number> = { "sc-start": 0, "sc-build": 0, "sc-border": 0, "sc-addons": 0, "sc-list": 0, "sc-suco-leite": 0, "sc-macarronada-size": 0, "sc-macarronada-addon": 0, "sc-promo": 0, "sc-another": 1, "sc-cart": 1, "sc-delivery": 2, "sc-pay": 3, "sc-done": 3 };
   const stepIdx = stepMap[screen] ?? 0;
   const STEPS = ["Itens", "Sacola", "Entrega", "Pagar"];
   const showStrongCartCta = cartCount > 0 && ["sc-list", "sc-suco-leite", "sc-macarronada-size", "sc-promo"].includes(screen);
@@ -1861,15 +2135,6 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   if (plan.openEnded) { ctxBadge = `Pizza ${feitas + 1}`; ctxTxt = feitas === 0 ? "Sua 1ª pizza" : `${feitas} já no carrinho`; }
   else if (plan.total > 0) { ctxBadge = `Pizza ${plan.current} de ${plan.total}`; ctxTxt = `Montando a pizza ${plan.current}`; for (let i = 1; i <= plan.total; i++) ctxDots.push({ cls: i < plan.current ? "done" : i === plan.current ? "cur" : "" }); }
 
-  const PizzaCtx = () => (ctxBadge ? (
-    <div className="pizza-ctx"><span className="pc-badge">{ctxBadge}</span><span className="pc-txt" dangerouslySetInnerHTML={{ __html: ctxTxt }} />{ctxDots.length > 0 && <span className="pizza-dots">{ctxDots.map((d, i) => <span key={i} className={`pd ${d.cls}`} />)}</span>}</div>
-  ) : null);
-  const TopBack = ({ onClick, title }: { onClick: () => void; title?: string }) => (
-    <div className="top-back">
-      <button type="button" onClick={onClick} aria-label="Voltar">{ICONS.voltar}</button>
-      {title && <span className="top-back-title">{title}</span>}
-    </div>
-  );
   const pixPedido = pedidoConfirmado?.pix;
   const isPagamentoPix = (!!payment && payment.toLowerCase().includes("pix")) || !!pixPedido;
   const pixCodigoCopiaECola = (pixPedido?.copiaECola || pixPedido?.qrCode || "").trim();
@@ -1971,19 +2236,30 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
           {screen === "sc-build" && (
             <section className="screen active sc-build-screen">
               <TopBack onClick={() => go("sc-start")} title="Monte sua pizza" />
-              <PizzaCtx />
+              <PizzaCtx badge={ctxBadge} txt={ctxTxt} dots={ctxDots} />
               <div className="screen-head"><h2>Escolha o tamanho</h2><p>Toque em uma opcao para liberar os sabores.</p></div>
               <div className="choice-block size-choice">
                 <div className="section-label">Tamanho</div>
                 <div className={`choice-nudge ${size ? "ok" : ""}`}>{size ? `Selecionado: ${selectedSizeLabel}` : "Escolha uma opcao antes de avancar."}</div>
                 <div className="grid2 size-grid">
-                  {(menu.sizes || []).map((s) => (
-                    <div key={s.code} className={`opt ${!miniPizzaMode && size === s.code ? "sel" : ""}`} onClick={() => pickSize(s.code)} {...optA11yAttrs()} onKeyDown={(e) => { if (isActivateKey(e)) { e.preventDefault(); pickSize(s.code); } }}>
-                      <div className="opt-check" />
-                      <div className="opt-emoji">🍕</div>
-                      <div className="opt-body"><div className="opt-title">{s.label}</div><div className="opt-desc">{money(s.price)}</div></div>
-                    </div>
-                  ))}
+                  {menu.pizzaCatalog
+                    ? menu.pizzaCatalog.sizes.map((s) => {
+                        const precoMinCents = precoMinimoPorTamanho(menu.pizzaCatalog, s.code);
+                        return (
+                          <div key={s.code} className={`opt ${!miniPizzaMode && size === s.code ? "sel" : ""}`} onClick={() => pickSize(s.code)} {...optA11yAttrs()} onKeyDown={(e) => { if (isActivateKey(e)) { e.preventDefault(); pickSize(s.code); } }}>
+                            <div className="opt-check" />
+                            <div className="opt-emoji">🍕</div>
+                            <div className="opt-body"><div className="opt-title">{s.label}</div><div className="opt-desc">{precoMinCents !== undefined ? `A partir de ${money(precoMinCents / 100)}` : ""}</div></div>
+                          </div>
+                        );
+                      })
+                    : (menu.sizes || []).map((s) => (
+                        <div key={s.code} className={`opt ${!miniPizzaMode && size === s.code ? "sel" : ""}`} onClick={() => pickSize(s.code)} {...optA11yAttrs()} onKeyDown={(e) => { if (isActivateKey(e)) { e.preventDefault(); pickSize(s.code); } }}>
+                          <div className="opt-check" />
+                          <div className="opt-emoji">🍕</div>
+                          <div className="opt-body"><div className="opt-title">{s.label}</div><div className="opt-desc">{money(s.price)}</div></div>
+                        </div>
+                      ))}
                   {miniPizzaItem && !miniPizzaIndisponivel && (
                     <div className={`opt mini-size-opt ${miniPizzaMode ? "sel" : ""}`} onClick={pickMiniPizza} style={{ opacity: miniPizzaEsgotada ? 0.5 : 1, cursor: miniPizzaEsgotada ? "not-allowed" : "pointer" }} {...optA11yAttrs(miniPizzaEsgotada)} onKeyDown={(e) => { if (!miniPizzaEsgotada && isActivateKey(e)) { e.preventDefault(); pickMiniPizza(); } }}>
                       <div className="opt-check" />
@@ -2000,19 +2276,24 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                   {miniPizzaMode && <div className="mini-flow-note">Mini-pizza usa preco e produto existentes do cardapio.</div>}
                   {renderFlavorProgress()}
                   <div className="flavor-list">
-                    {flavorSections.map((section) => (
-                      <div key={section.title}>
-                        <div className="section-label">{section.title}</div>
-                        {section.flavors.map((f) => {
-                          const esg = esgotados.includes(f)
-                          return (
-                            <div key={`${section.title}-${f}`} className={`opt flavor-opt ${f === f1 || f === f2 ? "sel" : ""} ${esg ? "esg" : ""}`} onClick={() => !esg && pickFlavor(f)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }} {...optA11yAttrs(esg)} onKeyDown={(e) => { if (!esg && isActivateKey(e)) { e.preventDefault(); pickFlavor(f); } }}>
-                              <div className="opt-emoji">🍕</div><div className="opt-body"><div className="opt-title">{f}</div>{esg && <div className="opt-desc" style={{ color: "var(--danger)" }}>Esgotado</div>}</div><div className="opt-check" />
-                            </div>
-                          )
-                        })}
-                      </div>
-                    ))}
+                    {flavorSections.map((section) => {
+                      // Especiais (cardápio oficial 2026): identidade visual discreta
+                      // lilás/roxa — só um contorno sutil, nunca uma cor de marca nova.
+                      const especial = section.title === "Especiais";
+                      return (
+                        <div key={section.title}>
+                          <div className={`section-label ${especial ? "section-label-especial" : ""}`}>{section.title}</div>
+                          {section.flavors.map((f) => {
+                            const esg = esgotados.includes(f)
+                            return (
+                              <div key={`${section.title}-${f}`} className={`opt flavor-opt ${especial ? "flavor-opt-especial" : ""} ${f === f1 || f === f2 ? "sel" : ""} ${esg ? "esg" : ""}`} onClick={() => !esg && pickFlavor(f)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }} {...optA11yAttrs(esg)} onKeyDown={(e) => { if (!esg && isActivateKey(e)) { e.preventDefault(); pickFlavor(f); } }}>
+                                <div className="opt-emoji">🍕</div><div className="opt-body"><div className="opt-title">{f}</div>{esg && <div className="opt-desc" style={{ color: "var(--danger)" }}>Esgotado</div>}</div><div className="opt-check" />
+                              </div>
+                            )
+                          })}
+                        </div>
+                      );
+                    })}
                   </div>
                 </>
               ) : (
@@ -2024,10 +2305,48 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
           {screen === "sc-border" && (
             <section className="screen active">
               <TopBack onClick={() => go("sc-build")} title="Borda" />
-              <PizzaCtx />
-              <div className="screen-head"><h2>Escolha a borda</h2><p>Toque em uma opcao para adicionar direto ao pedido.</p></div>
-              <div className="opt" onClick={() => addPizzaWithBorder(null, 0)} {...optA11yAttrs()} onKeyDown={(e) => { if (isActivateKey(e)) { e.preventDefault(); addPizzaWithBorder(null, 0); } }}><div className="opt-emoji">⭕</div><div className="opt-body"><div className="opt-title">Sem borda</div></div><div className="opt-check" /></div>
-              {(menu.borders || []).map((b, i) => { const p = bigBorder(size!) ? b.priceLarge : b.priceSmall; const esg = esgotados.includes(b.label); return (<div key={i} className={`opt ${border === b.label ? "sel" : ""}`} onClick={() => !esg && addPizzaWithBorder(b.label, p)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }} {...optA11yAttrs(esg)} onKeyDown={(e) => { if (!esg && isActivateKey(e)) { e.preventDefault(); addPizzaWithBorder(b.label, p); } }}><div className="opt-emoji">🧀</div><div className="opt-body"><div className="opt-title">{b.label}</div>{esg && <div className="opt-desc" style={{ color: "var(--danger)" }}>Esgotado</div>}</div><div className="opt-price">{esg ? "" : `+${money(p)}`}</div><div className="opt-check" /></div>); })}
+              <PizzaCtx badge={ctxBadge} txt={ctxTxt} dots={ctxDots} />
+              <div className="screen-head"><h2>Escolha a borda</h2><p>Toque em uma opcao para continuar.</p></div>
+              <div className="opt" onClick={() => chooseBorder(null, 0)} {...optA11yAttrs()} onKeyDown={(e) => { if (isActivateKey(e)) { e.preventDefault(); chooseBorder(null, 0); } }}><div className="opt-emoji">⭕</div><div className="opt-body"><div className="opt-title">Sem borda</div></div><div className="opt-check" /></div>
+              {menu.pizzaCatalog
+                ? menu.pizzaCatalog.borders.map((b) => {
+                    const p = b.pricesBySizeCode[size as "P" | "M" | "G" | "F"];
+                    if (p === undefined) return null;
+                    const esg = !b.available;
+                    const precoReais = p / 100;
+                    return (
+                      <div key={b.id} className={`opt ${border === b.label ? "sel" : ""}`} onClick={() => !esg && chooseBorder(b.label, precoReais)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }} {...optA11yAttrs(esg)} onKeyDown={(e) => { if (!esg && isActivateKey(e)) { e.preventDefault(); chooseBorder(b.label, precoReais); } }}>
+                        <div className="opt-emoji">🧀</div><div className="opt-body"><div className="opt-title">{b.label}</div>{esg && <div className="opt-desc" style={{ color: "var(--danger)" }}>Esgotado</div>}</div><div className="opt-price">{esg ? "" : `+${money(precoReais)}`}</div><div className="opt-check" />
+                      </div>
+                    );
+                  })
+                : (menu.borders || []).map((b, i) => { const p = bigBorder(size!) ? b.priceLarge : b.priceSmall; const esg = esgotados.includes(b.label); return (<div key={i} className={`opt ${border === b.label ? "sel" : ""}`} onClick={() => !esg && chooseBorder(b.label, p)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }} {...optA11yAttrs(esg)} onKeyDown={(e) => { if (!esg && isActivateKey(e)) { e.preventDefault(); chooseBorder(b.label, p); } }}><div className="opt-emoji">🧀</div><div className="opt-body"><div className="opt-title">{b.label}</div>{esg && <div className="opt-desc" style={{ color: "var(--danger)" }}>Esgotado</div>}</div><div className="opt-price">{esg ? "" : `+${money(p)}`}</div><div className="opt-check" /></div>); })}
+            </section>
+          )}
+          {screen === "sc-addons" && (
+            <section className="screen active">
+              <TopBack onClick={() => go("sc-border")} title="Adicionais" />
+              <PizzaCtx badge={ctxBadge} txt={ctxTxt} dots={ctxDots} />
+              <div className="screen-head"><h2>Adicionais (opcional)</h2><p>Toque para adicionar — pode escolher mais de um.</p></div>
+              {(menu.pizzaCatalog?.addOns || []).map((a) => {
+                const p = a.pricesBySizeCode[size as "P" | "M" | "G" | "F"];
+                if (p === undefined) return null;
+                const esg = !a.available;
+                const sel = addOnIds.includes(a.id);
+                return (
+                  <div key={a.id} className={`opt ${sel ? "sel" : ""}`} onClick={() => !esg && toggleAddOn(a.id)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }} {...optA11yAttrs(esg)} onKeyDown={(e) => { if (!esg && isActivateKey(e)) { e.preventDefault(); toggleAddOn(a.id); } }}>
+                    <div className="opt-emoji">➕</div><div className="opt-body"><div className="opt-title">{a.label}</div>{esg && <div className="opt-desc" style={{ color: "var(--danger)" }}>Esgotado</div>}</div><div className="opt-price">{esg ? "" : `+${money(p / 100)}`}</div><div className="opt-check" />
+                  </div>
+                );
+              })}
+              <div className="build-foot">
+                <div className="build-foot-hint">{(() => {
+                  const labels = addOnIds.map((id) => menu.pizzaCatalog?.addOns.find((a) => a.id === id)?.label).filter((l): l is string => !!l);
+                  const total = pizzaPrecoPreview(border, labels);
+                  return total !== undefined ? `Total: ${money(total)}` : "Escolha os adicionais (opcional)";
+                })()}</div>
+                <button className="btn" onClick={() => finalizarPizza(border, borderPrice, addOnIds)}>Finalizar pizza</button>
+              </div>
             </section>
           )}
           {screen === "sc-promo" && promoSel && (
@@ -2112,6 +2431,21 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
               {(macarronadaPendente.sizes || []).map((s) => (
                 <div key={s.code} className="opt" onClick={() => addMacarronadaSize(s.code)} {...optA11yAttrs()} onKeyDown={(e) => { if (isActivateKey(e)) { e.preventDefault(); addMacarronadaSize(s.code); } }}><div className="opt-emoji">🍽️</div><div className="opt-body"><div className="opt-title">Tamanho {s.code}</div></div><div className="opt-price">{money(s.price)}</div></div>
               ))}
+            </section>
+          )}
+          {screen === "sc-macarronada-addon" && macarronadaPendente && macarronadaSizeEscolhido && (
+            <section className="screen active">
+              <TopBack onClick={() => { setMacarronadaSizeEscolhido(null); go("sc-macarronada-size"); }} title={macarronadaPendente.name} />
+              <div className="screen-head"><h2>Bacon ou ovos?</h2><p>Opcional — escolha no máximo 1.</p></div>
+              <div className="opt" onClick={() => finalizarMacarronada(macarronadaSizeEscolhido, undefined)} {...optA11yAttrs()} onKeyDown={(e) => { if (isActivateKey(e)) { e.preventDefault(); finalizarMacarronada(macarronadaSizeEscolhido, undefined); } }}><div className="opt-emoji">🚫</div><div className="opt-body"><div className="opt-title">Nenhum</div></div><div className="opt-check" /></div>
+              {(macarronadaPendente.addOnGroup?.options || []).map((o) => {
+                const esg = !o.available;
+                return (
+                  <div key={o.id} className="opt" onClick={() => !esg && finalizarMacarronada(macarronadaSizeEscolhido, o.label)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }} {...optA11yAttrs(esg)} onKeyDown={(e) => { if (!esg && isActivateKey(e)) { e.preventDefault(); finalizarMacarronada(macarronadaSizeEscolhido, o.label); } }}>
+                    <div className="opt-emoji">➕</div><div className="opt-body"><div className="opt-title">{o.label}</div>{esg && <div className="opt-desc" style={{ color: "var(--danger)" }}>Esgotado</div>}</div><div className="opt-price">{esg ? "" : `+${money(o.price)}`}</div><div className="opt-check" />
+                  </div>
+                );
+              })}
             </section>
           )}
           {screen === "sc-cart" && (
@@ -2582,19 +2916,22 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
               <button type="button" className="payment-modal-close" aria-label="Fechar" onClick={() => setFlavorModalOpen(false)}>×</button>
             </div>
             <div className="flavor-modal-body">
-              {flavorSections.map((section) => (
-                <div key={section.title}>
-                  <div className="section-label">{section.title}</div>
-                  {section.flavors.map((f) => {
-                    const esg = esgotados.includes(f);
-                    return (
-                      <div key={`modal-${section.title}-${f}`} className={`opt flavor-opt ${f === f1 || f === f2 ? "sel" : ""} ${esg ? "esg" : ""}`} onClick={() => !esg && pickFlavor(f)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }} {...optA11yAttrs(esg)} onKeyDown={(e) => { if (!esg && isActivateKey(e)) { e.preventDefault(); pickFlavor(f); } }}>
-                        <div className="opt-emoji">🍕</div><div className="opt-body"><div className="opt-title">{f}</div>{esg && <div className="opt-desc" style={{ color: "var(--danger)" }}>Esgotado</div>}</div><div className="opt-check" />
-                      </div>
-                    );
-                  })}
-                </div>
-              ))}
+              {flavorSections.map((section) => {
+                const especial = section.title === "Especiais";
+                return (
+                  <div key={section.title}>
+                    <div className={`section-label ${especial ? "section-label-especial" : ""}`}>{section.title}</div>
+                    {section.flavors.map((f) => {
+                      const esg = esgotados.includes(f);
+                      return (
+                        <div key={`modal-${section.title}-${f}`} className={`opt flavor-opt ${especial ? "flavor-opt-especial" : ""} ${f === f1 || f === f2 ? "sel" : ""} ${esg ? "esg" : ""}`} onClick={() => !esg && pickFlavor(f)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }} {...optA11yAttrs(esg)} onKeyDown={(e) => { if (!esg && isActivateKey(e)) { e.preventDefault(); pickFlavor(f); } }}>
+                          <div className="opt-emoji">🍕</div><div className="opt-body"><div className="opt-title">{f}</div>{esg && <div className="opt-desc" style={{ color: "var(--danger)" }}>Esgotado</div>}</div><div className="opt-check" />
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })}
             </div>
             <div className="payment-modal-actions single">
               <button type="button" className="btn" disabled={!buildOk} onClick={confirmFromModal}>{buildActionLabel}</button>
@@ -2761,6 +3098,9 @@ main{width:100%;padding:6px 20px 20px}
 .mini-flow-note{margin:-2px 0 12px;padding:11px 12px;border-radius:13px;background:var(--brand-soft);color:var(--text-sub);font-size:13px;font-weight:700}
 .flavor-list{max-height:470px;overflow-y:auto;padding-right:2px;padding-bottom:86px;scrollbar-width:thin}
 .flavor-opt{padding:14px 16px;margin-bottom:8px}
+.section-label-especial{color:#a78bfa}
+.flavor-opt-especial{border-left:3px solid color-mix(in srgb, #a78bfa 55%, transparent)}
+.flavor-opt-especial.sel{border-color:#a78bfa;background:color-mix(in srgb, #a78bfa 10%, var(--surface))}
 .switch{width:48px;height:28px;border-radius:20px;background:var(--line-strong);position:relative;flex:0 0 auto;transition:.22s}
 .switch::after{content:"";position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;background:var(--foreground);transition:.22s;box-shadow:0 1px 3px rgba(0,0,0,.3)}
 .mam.on .switch{background:var(--brand)}
