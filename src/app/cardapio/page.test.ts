@@ -1,7 +1,7 @@
 import { describe, test, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { nextFlavorSelection, resolverPizzaSelectionIds, resolverSimpleSelectionIds } from "./page";
+import { nextFlavorSelection, resolverPizzaSelectionIds, resolverSimpleSelectionIds, precoPizzaLocalCents, precoMinimoPorTamanho } from "./page";
 import { buildPizzaCatalog } from "@/lib/catalog/pizzas";
 import { buildSimpleCatalog } from "@/lib/catalog/simpleProducts";
 import { MENU } from "@/lib/menu";
@@ -315,9 +315,9 @@ describe("resolverPizzaSelectionIds — resolução de IDs do catálogo oficial 
 });
 
 describe("/cardapio (PublicCardapio) — wiring de pizzaSelection (Fase 2C)", () => {
-  test("addPizzaWithBorder monta pizzaSelection a partir do catálogo oficial e só o inclui no item quando resolvido", () => {
+  test("finalizarPizza monta pizzaSelection a partir do catálogo oficial (incluindo adicionais) e só o inclui no item quando resolvido", () => {
     expect(fonte).toMatch(
-      /const pizzaSelection = resolverPizzaSelectionIds\(menu\.pizzaCatalog, size!, f1!, mam \? f2 : null, chosenBorder\);/
+      /const pizzaSelection = resolverPizzaSelectionIds\(menu\.pizzaCatalog, size!, f1!, mam \? f2 : null, chosenBorder, addOnLabels\);/
     );
     expect(fonte).toMatch(/\.\.\.\(pizzaSelection \? \{ pizzaSelection \} : \{\}\)/);
   });
@@ -417,6 +417,215 @@ describe("resolverSimpleSelectionIds — resolução de IDs do catálogo oficial
     const macarronada = catalog.macarronadas[0];
     expect(resolverSimpleSelectionIds(catalog, macarronada.name, { sizeCode: "TAMANHO-INEXISTENTE" })).toBeUndefined();
   });
+
+  test("macarronada com addOnLabel (Bacon OU Ovos): resolve productId + sizeId + addOnId", () => {
+    const macarronada = catalog.macarronadas[0];
+    const size = macarronada.sizes![0];
+    const opcao = macarronada.addOnGroup!.options[0];
+    const sel = resolverSimpleSelectionIds(catalog, macarronada.name, { sizeCode: size.code, addOnLabel: opcao.label });
+    expect(sel).toEqual({ productId: macarronada.id, sizeId: size.id, addOnId: opcao.id });
+  });
+
+  test("macarronada sem addOnLabel (Bacon/Ovos são sempre opcionais — 'Nenhum' é uma escolha válida): resolve sem addOnId", () => {
+    const macarronada = catalog.macarronadas[0];
+    const size = macarronada.sizes![0];
+    const sel = resolverSimpleSelectionIds(catalog, macarronada.name, { sizeCode: size.code });
+    expect(sel).toEqual({ productId: macarronada.id, sizeId: size.id });
+    expect(sel).not.toHaveProperty("addOnId");
+  });
+
+  test("macarronada com addOnLabel inexistente: undefined (fail-closed, mesmo com tamanho válido)", () => {
+    const macarronada = catalog.macarronadas[0];
+    const size = macarronada.sizes![0];
+    expect(resolverSimpleSelectionIds(catalog, macarronada.name, { sizeCode: size.code, addOnLabel: "Camarão" })).toBeUndefined();
+  });
+
+  test("Bacon e Ovos nunca resolvem juntos (addOnGroup.max é 1 — a UI só oferece um seletor de escolha única, nunca multi-seleção aqui)", () => {
+    const macarronada = catalog.macarronadas[0];
+    expect(macarronada.addOnGroup!.max).toBe(1);
+    expect(macarronada.addOnGroup!.options.map((o) => o.label).sort()).toEqual(["Bacon", "Ovos"]);
+  });
+});
+
+describe("precoPizzaLocalCents / precoMinimoPorTamanho — preço local para exibição (nunca autoridade de preço, o servidor sempre recalcula)", () => {
+  const catalog = buildPizzaCatalog(MENU);
+
+  test("1 sabor, sem borda/adicional: preço = pricesBySizeCode do sabor no tamanho", () => {
+    const calabresa = catalog.flavors.find((f) => f.name === "Calabresa")!;
+    expect(precoPizzaLocalCents(catalog, "G", "Calabresa", null, null)).toBe(calabresa.pricesBySizeCode.G);
+  });
+
+  test("meio a meio: usa o MAIOR preço entre os 2 sabores no tamanho (nunca média, nunca depende da ordem do clique)", () => {
+    const calabresa = catalog.flavors.find((f) => f.name === "Calabresa")!;
+    const baiana = catalog.flavors.find((f) => f.name === "Baiana")!;
+    const esperado = Math.max(calabresa.pricesBySizeCode.G!, baiana.pricesBySizeCode.G!);
+    expect(precoPizzaLocalCents(catalog, "G", "Calabresa", "Baiana", null)).toBe(esperado);
+    expect(precoPizzaLocalCents(catalog, "G", "Baiana", "Calabresa", null)).toBe(esperado);
+  });
+
+  test("soma borda e adicionais ao preço-base", () => {
+    const calabresa = catalog.flavors.find((f) => f.name === "Calabresa")!;
+    const border = catalog.borders.find((b) => b.label === "Catupiry Original")!;
+    const addOn = catalog.addOns.find((a) => a.label === "Bacon")!;
+    const esperado = calabresa.pricesBySizeCode.G! + border.pricesBySizeCode.G + addOn.pricesBySizeCode.G;
+    expect(precoPizzaLocalCents(catalog, "G", "Calabresa", null, "Catupiry Original", ["Bacon"])).toBe(esperado);
+  });
+
+  test("Especial + MINI nunca resolve preço (nenhum sabor Especial tem chave MINI) — undefined, nunca 0 nem um preço de outro tamanho", () => {
+    const especial = catalog.flavors.find((f) => f.category === "especial")!;
+    expect(especial.pricesBySizeCode.MINI).toBeUndefined();
+    expect(precoPizzaLocalCents(catalog, "MINI", especial.name, null, null)).toBeUndefined();
+  });
+
+  test("catálogo ausente: undefined, nunca lança exceção", () => {
+    expect(precoPizzaLocalCents(undefined, "G", "Calabresa", null, null)).toBeUndefined();
+  });
+
+  test("sabor/borda/adicional inexistentes: undefined (fail-closed, nunca um preço parcial)", () => {
+    expect(precoPizzaLocalCents(catalog, "G", "Sabor Inventado", null, null)).toBeUndefined();
+    expect(precoPizzaLocalCents(catalog, "G", "Calabresa", null, "Borda Inventada")).toBeUndefined();
+    expect(precoPizzaLocalCents(catalog, "G", "Calabresa", null, null, ["Adicional Inventado"])).toBeUndefined();
+  });
+
+  test("precoMinimoPorTamanho: o menor preço entre os sabores DISPONÍVEIS naquele tamanho — usado pra exibir 'A partir de' antes do sabor ser escolhido", () => {
+    const min = precoMinimoPorTamanho(catalog, "G");
+    const menor = Math.min(...catalog.flavors.filter((f) => f.available && f.pricesBySizeCode.G !== undefined).map((f) => f.pricesBySizeCode.G!));
+    expect(min).toBe(menor);
+  });
+
+  test("precoMinimoPorTamanho: sabor esgotado nunca entra no cálculo do mínimo", () => {
+    const nomesComMini = catalog.flavors.filter((f) => f.pricesBySizeCode.MINI !== undefined).map((f) => f.name);
+    const catalogTodoMiniEsgotado = buildPizzaCatalog(MENU, nomesComMini);
+    expect(precoMinimoPorTamanho(catalogTodoMiniEsgotado, "MINI")).toBeUndefined();
+  });
+
+  test("catálogo ausente: undefined", () => {
+    expect(precoMinimoPorTamanho(undefined, "G")).toBeUndefined();
+  });
+});
+
+describe("resolverPizzaSelectionIds — adicionais (extensão da Fase 2C, cardápio oficial 2026)", () => {
+  const catalog = buildPizzaCatalog(MENU);
+
+  test("com 1 adicional: inclui addOnIds resolvido pelo label", () => {
+    const sel = resolverPizzaSelectionIds(catalog, "G", "Calabresa", null, null, ["Bacon"]);
+    const addOn = catalog.addOns.find((a) => a.label === "Bacon")!;
+    expect(sel?.addOnIds).toEqual([addOn.id]);
+  });
+
+  test("sem adicionais: nunca inclui a chave addOnIds no resultado", () => {
+    const sel = resolverPizzaSelectionIds(catalog, "G", "Calabresa", null, null);
+    expect(sel).not.toHaveProperty("addOnIds");
+  });
+
+  test("adicional que não existe no catálogo: undefined (fail-closed, mesmo com sabor/tamanho válidos)", () => {
+    expect(resolverPizzaSelectionIds(catalog, "G", "Calabresa", null, null, ["Adicional Inventado"])).toBeUndefined();
+  });
+
+  test("múltiplos adicionais válidos: resolve todos os IDs, na mesma ordem escolhida", () => {
+    const sel = resolverPizzaSelectionIds(catalog, "G", "Calabresa", null, null, ["Bacon", "Calabresa"]);
+    const bacon = catalog.addOns.find((a) => a.label === "Bacon")!;
+    const calabresaAddOn = catalog.addOns.find((a) => a.label === "Calabresa")!;
+    expect(sel?.addOnIds).toEqual([bacon.id, calabresaAddOn.id]);
+  });
+});
+
+describe("/cardapio (PublicCardapio) — MINI como tamanho real de pizza (cardápio oficial 2026)", () => {
+  test("isMiniSize distingue o novo fluxo (tamanho MINI real) do produto legado 'Mini-pizza' (miniPizzaMode)", () => {
+    expect(fonte).toContain('const isMiniSize = size === "MINI" && !miniPizzaMode;');
+  });
+
+  test("pickSize: com o catálogo oficial presente, a fonte de tamanhos é sempre menu.pizzaCatalog.sizes (inclui MINI); trocar de tamanho zera sabor/borda/adicionais", () => {
+    const bloco = fonte.slice(fonte.indexOf("function pickSize(code: string) {"), fonte.indexOf("function pickMiniPizza("));
+    expect(bloco).toContain("menu.pizzaCatalog.sizes.find((x) => x.code === code)");
+    expect(bloco).toContain("setF1(null); setF2(null); setBorder(null); setBorderPrice(0); setAddOnIds([]);");
+  });
+
+  test("continueBuild: MINI finaliza direto (sem borda nem adicionais), nunca passa pela tela sc-border", () => {
+    expect(fonte).toContain("else if (isMiniSize) finalizarPizza(null, 0, []);");
+  });
+
+  test("buildActionLabel/flavorModalHint tratam MINI como 1 sabor só, sem hint de meio a meio", () => {
+    expect(fonte).toContain('const buildActionLabel = miniPizzaMode ? "Adicionar mini-pizza" : calzoneMode ? "Adicionar calzone" : pastelMode ? "Adicionar" : isMiniSize ? "Adicionar mini" : "Confirmar pizza";');
+    expect(fonte).toContain("const flavorModalHint = miniPizzaMode || calzoneMode || pastelMode || isMiniSize ? null : \"Escolha 1 sabor para pizza inteira ou 2 sabores para meio a meio.\";");
+  });
+
+  test("grade de tamanho: com o catálogo presente, mostra 'A partir de' via precoMinimoPorTamanho — nunca o preço fixo antigo por tamanho", () => {
+    const bloco = fonte.slice(fonte.indexOf('<div className="grid2 size-grid">'), fonte.indexOf("{miniPizzaItem && !miniPizzaIndisponivel && ("));
+    expect(bloco).toContain("menu.pizzaCatalog.sizes.map((s) => {");
+    expect(bloco).toContain("precoMinimoPorTamanho(menu.pizzaCatalog, s.code)");
+    expect(bloco).toContain("`A partir de ${money(precoMinCents / 100)}`");
+  });
+});
+
+describe("/cardapio (PublicCardapio) — Especial: identidade visual discreta lilás/roxa (cardápio oficial 2026)", () => {
+  test("a seção 'Especiais' ganha uma classe própria discreta, nunca a cor de marca (amarelo/dourado) usada pelo resto do cardápio", () => {
+    expect(fonte).toContain('const especial = section.title === "Especiais";');
+    expect(fonte).toContain('className={`section-label ${especial ? "section-label-especial" : ""}`}');
+    expect(fonte).toContain('flavor-opt-especial');
+  });
+
+  test("o CSS do lilás/roxa é discreto (contorno sutil, sem preencher o cartão inteiro) e nunca reaproveita --brand/--gold", () => {
+    expect(fonte).toContain(".section-label-especial{color:#a78bfa}");
+    expect(fonte).toContain(".flavor-opt-especial{border-left:3px solid color-mix(in srgb, #a78bfa 55%, transparent)}");
+  });
+});
+
+describe("/cardapio (PublicCardapio) — tela de borda usa o catálogo oficial (preço real por tamanho)", () => {
+  test("sc-border: com o catálogo presente, lista menu.pizzaCatalog.borders com preço real do tamanho atual, nunca priceSmall/priceLarge fixos", () => {
+    const bloco = fonte.slice(fonte.indexOf('{screen === "sc-border" && ('), fonte.indexOf('{screen === "sc-addons" && ('));
+    expect(bloco).toContain("menu.pizzaCatalog.borders.map((b) => {");
+    expect(bloco).toContain('b.pricesBySizeCode[size as "P" | "M" | "G" | "F"]');
+    expect(bloco).toContain("chooseBorder(b.label, precoReais)");
+  });
+
+  test("'Sem borda' e as demais opções chamam chooseBorder (nunca mais addPizzaWithBorder direto) — decide entre ir pra sc-addons ou finalizar", () => {
+    const bloco = fonte.slice(fonte.indexOf('{screen === "sc-border" && ('), fonte.indexOf('{screen === "sc-addons" && ('));
+    expect(bloco).toContain("chooseBorder(null, 0)");
+    expect(bloco).not.toContain("addPizzaWithBorder(");
+  });
+
+  test("chooseBorder só abre sc-addons quando há algum adicional disponível no catálogo; senão finaliza direto (nenhuma etapa vazia)", () => {
+    const bloco = fonte.slice(fonte.indexOf("function chooseBorder("), fonte.indexOf("function toggleAddOn("));
+    expect(bloco).toContain("menu.pizzaCatalog.addOns.some((a) => a.available)");
+    expect(bloco).toContain('go("sc-addons")');
+    expect(bloco).toContain("finalizarPizza(chosenBorder, chosenBorderPrice, [])");
+  });
+});
+
+describe("/cardapio (PublicCardapio) — nova etapa de adicionais de pizza (sc-addons, cardápio oficial 2026)", () => {
+  test("toggleAddOn nunca duplica o mesmo ID (lista de IDs únicos por construção)", () => {
+    const bloco = fonte.slice(fonte.indexOf("function toggleAddOn("), fonte.indexOf("function addMiniPizza("));
+    expect(bloco).toContain("prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]");
+  });
+
+  test("sc-addons lista menu.pizzaCatalog.addOns com preço real do tamanho atual e finaliza chamando finalizarPizza com border/borderPrice/addOnIds já escolhidos", () => {
+    const bloco = fonte.slice(fonte.indexOf('{screen === "sc-addons" && ('), fonte.indexOf('{screen === "sc-promo" && promoSel && ('));
+    expect(bloco).toContain("(menu.pizzaCatalog?.addOns || []).map((a) => {");
+    expect(bloco).toContain('a.pricesBySizeCode[size as "P" | "M" | "G" | "F"]');
+    expect(bloco).toContain("toggleAddOn(a.id)");
+    expect(bloco).toContain("finalizarPizza(border, borderPrice, addOnIds)");
+  });
+
+  test("sc-addons e sc-macarronada-addon estão nas listas de navegação (safeCartReturnScreens/stepMap) — nunca telas órfãs pro botão voltar/carrinho", () => {
+    expect(fonte).toContain('const safeCartReturnScreens = ["sc-start", "sc-build", "sc-border", "sc-addons", "sc-list", "sc-suco-leite", "sc-macarronada-size", "sc-macarronada-addon", "sc-another", "sc-delivery", "sc-pay", "sc-promo"];');
+    expect(fonte).toContain('"sc-addons": 0');
+    expect(fonte).toContain('"sc-macarronada-addon": 0');
+  });
+});
+
+describe("/cardapio (PublicCardapio) — Macarronada: Bacon OU Ovos, nunca os dois (etapa opcional sc-macarronada-addon)", () => {
+  test("sc-macarronada-addon oferece 'Nenhum' + as opções do addOnGroup, cada uma chamando finalizarMacarronada com um addOnLabel diferente (escolha única, nunca soma)", () => {
+    const bloco = fonte.slice(fonte.indexOf('{screen === "sc-macarronada-addon" && '), fonte.indexOf('{screen === "sc-cart" && ('));
+    expect(bloco).toContain("finalizarMacarronada(macarronadaSizeEscolhido, undefined)");
+    expect(bloco).toContain("(macarronadaPendente.addOnGroup?.options || []).map((o) => {");
+    expect(bloco).toContain("finalizarMacarronada(macarronadaSizeEscolhido, o.label)");
+  });
+
+  test("finalizarMacarronada soma o preço da opção (Bacon/Ovos) ao preço do tamanho, nunca cobra os dois ao mesmo tempo (addOnGroup.max é 1)", () => {
+    const bloco = fonte.slice(fonte.indexOf("function finalizarMacarronada("), fonte.indexOf("const cartTotal ="));
+    expect(bloco).toContain("const price = sizeOption.price + (addOnOption?.price || 0);");
+  });
 });
 
 describe("/cardapio (PublicCardapio) — wiring de simpleSelection (Fase 6)", () => {
@@ -443,15 +652,22 @@ describe("/cardapio (PublicCardapio) — wiring de simpleSelection (Fase 6)", ()
     expect(bloco).toContain("if (!simpleSelection && menu.catalog) {");
   });
 
-  test("addMacarronadaSize monta simpleSelection a partir do catálogo oficial", () => {
-    const bloco = fonte.slice(fonte.indexOf("function addMacarronadaSize("), fonte.indexOf("const cartTotal ="));
-    expect(bloco).toContain("const simpleSelection = resolverSimpleSelectionIds(menu.catalog, macarronadaPendente.name, { sizeCode: sizeOption.code });");
+  test("finalizarMacarronada monta simpleSelection a partir do catálogo oficial (incluindo o addOnLabel opcional de Bacon/Ovos)", () => {
+    const bloco = fonte.slice(fonte.indexOf("function finalizarMacarronada("), fonte.indexOf("const cartTotal ="));
+    expect(bloco).toContain("const simpleSelection = resolverSimpleSelectionIds(menu.catalog, macarronadaPendente.name, { sizeCode: sizeOption.code, ...(addOnLabel !== undefined ? { addOnLabel } : {}) });");
     expect(bloco).toContain("...(simpleSelection ? { simpleSelection } : {})");
   });
 
-  test("REGRESSÃO — addMacarronadaSize é fail-closed: com menu.catalog presente, uma seleção que não resolve NUNCA cai pro legado", () => {
-    const bloco = fonte.slice(fonte.indexOf("function addMacarronadaSize("), fonte.indexOf("const cartTotal ="));
+  test("REGRESSÃO — finalizarMacarronada é fail-closed: com menu.catalog presente, uma seleção que não resolve NUNCA cai pro legado", () => {
+    const bloco = fonte.slice(fonte.indexOf("function finalizarMacarronada("), fonte.indexOf("const cartTotal ="));
     expect(bloco).toContain("if (!simpleSelection && menu.catalog) {");
+  });
+
+  test("addMacarronadaSize decide entre a etapa opcional de Bacon/Ovos e finalizar direto, nunca finaliza sem checar o addOnGroup", () => {
+    const bloco = fonte.slice(fonte.indexOf("function addMacarronadaSize("), fonte.indexOf("function finalizarMacarronada("));
+    expect(bloco).toContain("const temOpcaoDisponivel = !!macarronadaPendente.addOnGroup?.options.some((o) => o.available);");
+    expect(bloco).toContain('go("sc-macarronada-addon");');
+    expect(bloco).toContain("finalizarMacarronada(sizeOption, undefined);");
   });
 
   test("addSucoLeite monta simpleSelection a partir do catálogo oficial", () => {
@@ -484,13 +700,24 @@ describe("/cardapio (PublicCardapio) — carrinho preserva pizzaSelection (Fase 
     expect(bloco).toContain("cart[idx]");
   });
 
-  test("addPizzaWithBorder nunca funde/deduplica pizzas iguais por texto — cada confirmação é uma nova entrada no carrinho, preservando pizzaSelection de cada uma", () => {
-    const bloco = fonte.slice(fonte.indexOf("function addPizzaWithBorder("), fonte.indexOf("function addMiniPizza("));
-    // Ao contrário de addSimple/addSucoLeite/addMacarronadaSize/addMiniPizza/addCalzone
-    // (que fazem cart.find(...) para mesclar em qty+1), addPizzaWithBorder não procura
+  test("finalizarPizza nunca funde/deduplica pizzas iguais por texto — cada confirmação é uma nova entrada no carrinho, preservando pizzaSelection de cada uma", () => {
+    const bloco = fonte.slice(fonte.indexOf("function finalizarPizza("), fonte.indexOf("function chooseBorder("));
+    // Ao contrário de addSimple/addSucoLeite/finalizarMacarronada/addMiniPizza/addCalzone
+    // (que fazem cart.find(...) para mesclar em qty+1), finalizarPizza não procura
     // um item existente — sempre `[...cart, newItem]`.
     expect(bloco).not.toContain("cart.find(");
     expect(bloco).toContain("const newCart = [...cart, newItem];");
+  });
+
+  test("finalizarPizza monta o detail da sacola com sabor(es) + borda + adicionais, cada parte opcional (nenhuma informação importante fica só implícita)", () => {
+    const bloco = fonte.slice(fonte.indexOf("function finalizarPizza("), fonte.indexOf("function chooseBorder("));
+    expect(bloco).toContain(
+      'const detail = `${flavor}${chosenBorder ? ` · borda ${chosenBorder}` : ""}${addOnLabels.length > 0 ? ` · adicional ${addOnLabels.join(", ")}` : ""}`;'
+    );
+  });
+
+  test("a sacola (sc-cart) renderiza it.detail de todo item — sabor/borda/adicionais da pizza aparecem ali, nunca dependem de um campo separado", () => {
+    expect(fonte).toContain("{it.detail && <div className=\"ci-detail\">{it.detail}</div>}");
   });
 
   test("o draft salvo em sessionStorage serializa o carrinho inteiro (JSON.stringify de `cart`), então pizzaSelection de cada item sobrevive à restauração de sessão", () => {
@@ -521,8 +748,8 @@ describe("/cardapio (PublicCardapio) — Calzone entra no mesmo fluxo de sabores
     expect(fonte).toContain('{(screen === "sc-build" || (screen === "sc-list" && (calzoneMode || pastelMode))) && flavorModalOpen && size && (');
   });
 
-  test("pickFlavor usa nextFlavorSelection travando calzone/mini-pizza/pastel em 1 sabor (sem duplicar a lógica da pizza)", () => {
-    expect(fonte).toContain("const next = nextFlavorSelection({ f1, f2 }, f, miniPizzaMode || calzoneMode || pastelMode);");
+  test("pickFlavor usa nextFlavorSelection travando calzone/mini-pizza/pastel/MINI em 1 sabor (sem duplicar a lógica da pizza)", () => {
+    expect(fonte).toContain("const next = nextFlavorSelection({ f1, f2 }, f, miniPizzaMode || calzoneMode || pastelMode || isMiniSize);");
   });
 
   test("REGRESSÃO (correção da regra comercial do Calzone, cardápio oficial 2026) — calzone usa a lista OFICIAL e FIXA de sabores (menu.catalog.calzone, nunca mais menu.catalog.lanches nem uma configuração dinâmica de flavorsMode/calzoneFlavors do Menu legado, que foi removida)", () => {
@@ -532,7 +759,6 @@ describe("/cardapio (PublicCardapio) — Calzone entra no mesmo fluxo de sabores
     // uma única vez por buildSimpleCatalog a partir do cardápio oficial 2026
     // (CALZONE_FLAVORS). Só cai para a lista cheia da pizza quando `menu.catalog`
     // está genuinamente ausente (resposta antiga em cache) — mesma regra de sempre.
-    expect(fonte).toContain('const pizzaFlavorSections = [{ title: "Salgadas", flavors: menu.saltyFlavors || [] }, { title: "Doces", flavors: menu.sweetFlavors || [] }];');
     expect(fonte).toContain(
       "const calzoneFlavorNames = menu.catalog\n" +
       "    ? menu.catalog.calzone.find((l) => l.name === calzoneItem?.name)?.flavors?.map((f) => f.name) ?? []\n" +
@@ -540,6 +766,14 @@ describe("/cardapio (PublicCardapio) — Calzone entra no mesmo fluxo de sabores
     );
     expect(fonte).not.toContain("menu.catalog.lanches.find((l) => l.name === calzoneItem");
     expect(fonte).not.toContain("calzoneFlavorsList");
+  });
+
+  test("pizzaFlavorSections: com o catálogo oficial presente, monta as 3 categorias reais (Tradicionais/Especiais/Doces) filtradas por preço no tamanho atual — nunca mais as 2 seções legadas Salgadas/Doces nesse caso; sem catálogo, cai pro legado", () => {
+    const bloco = fonte.slice(fonte.indexOf("const pizzaFlavorSections ="), fonte.indexOf("const calzoneFlavorNames ="));
+    expect(bloco).toContain('const pizzaFlavorSections = menu.pizzaCatalog && size');
+    expect(bloco).toContain('(["tradicional", "especial", "doce"] as const)');
+    expect(bloco).toContain("f.pricesBySizeCode[size as \"P\" | \"M\" | \"G\" | \"F\" | \"MINI\"] !== undefined");
+    expect(bloco).toContain('{ title: "Salgadas", flavors: menu.saltyFlavors || [] }, { title: "Doces", flavors: menu.sweetFlavors || [] }');
   });
 
   test("REGRESSÃO — Mini-Pizza como produto simples está desativada no site público (nunca resolve mais contra o catálogo oficial): o botão fica oculto quando o catálogo carregou", () => {
@@ -571,8 +805,8 @@ describe("/cardapio (PublicCardapio) — Calzone entra no mesmo fluxo de sabores
     expect(bloco).toContain("if (!simpleSelection && menu.catalog) {");
   });
 
-  test("continueBuild roteia calzoneMode/pastelMode para addCalzone/addPastel sem tocar no fluxo de borda/plan das pizzas", () => {
-    expect(fonte).toContain('function continueBuild() { if (!buildOk) return; if (miniPizzaMode) addMiniPizza(); else if (calzoneMode) addCalzone(); else if (pastelMode) addPastel(); else go("sc-border"); }');
+  test("continueBuild roteia calzoneMode/pastelMode para addCalzone/addPastel, isMiniSize direto para finalizarPizza (sem borda/adicionais), sem tocar no fluxo de borda/plan das pizzas normais", () => {
+    expect(fonte).toContain('function continueBuild() { if (!buildOk) return; if (miniPizzaMode) addMiniPizza(); else if (calzoneMode) addCalzone(); else if (pastelMode) addPastel(); else if (isMiniSize) finalizarPizza(null, 0, []); else go("sc-border"); }');
   });
 
   test("calzone não conta como pizza no contador 'Pizza N' (pizzasNoCarrinho continua só pizza/mini-pizza)", () => {
@@ -749,5 +983,48 @@ describe("/cardapio (PublicCardapio) — acessibilidade por teclado dos cartões
 
   test("nenhum cartão passa onActivate por closure para uma função helper — evita falso positivo de react-hooks/refs", () => {
     expect(fonte).not.toContain("optA11yProps(");
+  });
+});
+
+describe("AdminCardapio (painel de esgotados) — cobre TODAS as categorias do cardápio oficial 2026, nunca só os campos legados", () => {
+  test("com o catálogo oficial presente, a lista 'todos' inclui as 3 categorias reais de sabor de pizza (Tradicionais/Especiais/Doces), bordas e adicionais", () => {
+    const bloco = fonte.slice(fonte.indexOf("const todos: Produto[] = (menu.pizzaCatalog"), fonte.indexOf("const CATS = ["));
+    expect(bloco).toContain('categoria: f.category === "tradicional" ? "Tradicionais" : f.category === "especial" ? "Especiais" : "Doces"');
+    expect(bloco).toContain('categoria: "Bordas"');
+    expect(bloco).toContain('categoria: "Adicionais"');
+  });
+
+  test("inclui Calzone/Pastel de Forno/Pastel de Feira por sabor/recheio individual (nunca só o produto agregado)", () => {
+    const bloco = fonte.slice(fonte.indexOf("const todos: Produto[] = (menu.pizzaCatalog"), fonte.indexOf("const CATS = ["));
+    expect(bloco).toContain('categoria: "Calzone"');
+    expect(bloco).toContain('categoria: "Pastel de Forno"');
+    // Pastel de Feira é um item de menu.catalog.lanches com .flavors — a
+    // categoria vem do próprio nome do produto (l.name), sem precisar
+    // hard-codar "Pastel de Feira" separadamente.
+    expect(bloco).toContain("l.flavors && l.flavors.length > 0");
+    expect(bloco).toContain("l.flavors.map(f => ({ nome: f.name, categoria: l.name }))");
+  });
+
+  test("inclui Hambúrguer, Macarronada (+ o grupo Bacon/Ovos extraído 1x só, nunca duplicado por produto), Sucos, Vitaminas, Bebidas", () => {
+    const bloco = fonte.slice(fonte.indexOf("const todos: Produto[] = (menu.pizzaCatalog"), fonte.indexOf("const CATS = ["));
+    expect(bloco).toContain('categoria: "Hambúrguer"');
+    expect(bloco).toContain('categoria: "Macarronada"');
+    expect(bloco).toContain("menu.catalog?.macarronadas?.[0]?.addOnGroup?.options");
+    expect(bloco).toContain('categoria: "Sucos"');
+    expect(bloco).toContain('categoria: "Vitaminas"');
+    expect(bloco).toContain('categoria: "Bebidas"');
+  });
+
+  test("sem o catálogo oficial (resposta antiga em cache), cai pra lista legada de sempre — comportamento inalterado", () => {
+    const bloco = fonte.slice(fonte.indexOf("const todos: Produto[] = (menu.pizzaCatalog"), fonte.indexOf("const CATS = ["));
+    expect(bloco).toContain('categoria: "Salgados"');
+    expect(bloco).toContain("(menu.saltyFlavors || []).map(f => ({ nome: f, categoria: \"Salgados\" }))");
+  });
+
+  test("CATS/CAT_ICON cobrem todas as categorias novas (só aparecem no filtro quando têm produtos, via .filter)", () => {
+    expect(fonte).toContain('"Tradicionais", "Especiais", "Doces", "Bordas", "Adicionais",');
+    expect(fonte).toContain('"Lanches", "Calzone", "Pastel de Forno", "Pastel de Feira", "Hambúrguer",');
+    expect(fonte).toContain('"Macarronada", "Sucos", "Vitaminas", "Bebidas", "Salgados",');
+    expect(fonte).toContain("].filter(c => c === \"todas\" || todos.some(p => p.categoria === c))");
   });
 });
