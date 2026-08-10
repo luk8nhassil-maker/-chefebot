@@ -137,14 +137,14 @@ describe("enviarMensagem — chamada direta (bug real anterior) agora registra",
 
 describe("enviarMensagem — mensagem com link do cardápio registra o texto final (com token)", () => {
   test("registra a versão com ?t=token, não a mensagem original sem token", async () => {
-    const original = "Segue nosso cardápio: https://chefedapizza.com.br/cardapio";
+    const original = "Segue nosso cardápio: https://chefebot-pjif.vercel.app/cardapio";
     await enviarMensagem(PHONE, original);
 
     expect(registrarMensagemMock).toHaveBeenCalledTimes(1);
     const [, , textoRegistrado] = registrarMensagemMock.mock.calls[0];
     expect(textoRegistrado).not.toBe(original);
-    expect(textoRegistrado).toMatch(/^Segue nosso cardápio: https:\/\/chefedapizza\.com\.br\/cardapio\?t=[a-f0-9]{32}$/);
-    expect(textoRegistrado).not.toContain("chefebot-pjif.vercel.app");
+    expect(textoRegistrado).toMatch(/^Segue nosso cardápio: https:\/\/chefebot-pjif\.vercel\.app\/cardapio\?t=[a-f0-9]{32}$/);
+    expect(textoRegistrado).not.toContain("chefedapizza.com.br");
 
     // O texto enviado pela Evolution e o texto registrado devem ser o MESMO
     // texto final (com token) — nunca a versão anterior à transformação.
