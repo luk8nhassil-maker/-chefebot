@@ -1,0 +1,137 @@
+name: Agent busca sabores bootstrap
+
+on:
+  push:
+    branches:
+      - agent/busca-sabores-autoprint-painel-20260810
+
+permissions:
+  contents: write
+
+jobs:
+  validate-and-finalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      BASE_SHA: cc2885f6d874bc949dc3f798bbb083255357a7c4
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/busca-sabores-autoprint-painel-20260810
+          fetch-depth: 0
+
+      - name: Apply exact patch audited in the PR workflow
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          p = Path('.github/workflows/agent-busca-sabores-autoprint-painel.yml')
+          raw = p.read_text(encoding='utf-8')
+          marker = "          python3 <<'PY'\n"
+          start = raw.index(marker) + len(marker)
+          end = raw.index("\n          PY", start)
+          block = raw[start:end]
+          script = "\n".join(line[10:] if line.startswith("          ") else line for line in block.splitlines())
+          exec(compile(script, '<audited-patch>', 'exec'))
+          PY
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Targeted tests
+        run: >-
+          npx vitest run
+          src/app/cardapio/buscaEscolhas.test.ts
+          src/app/cardapio/page.test.ts
+          src/app/pedidos/[id]/imprimir/page.quantidade.test.ts
+          src/app/pedidos/page.autoPrintPainel.test.ts
+          src/lib/impressaoAutomatica.test.ts
+          src/app/api/orders/auto-print-painel/route.test.ts
+          src/app/api/orders/route.impressaoAutomatica.test.ts
+          src/app/api/pedido-app/route.test.ts
+
+      - name: Lint without adding regressions
+        shell: bash
+        run: |
+          git worktree add --detach /tmp/chefebot-main "$BASE_SHA"
+          ln -s "$GITHUB_WORKSPACE/node_modules" /tmp/chefebot-main/node_modules
+
+          existing=(
+            src/app/cardapio/page.tsx
+            src/app/pedidos/page.tsx
+            'src/app/pedidos/[id]/imprimir/page.tsx'
+            src/app/api/orders/route.ts
+            src/app/api/orders/route.impressaoAutomatica.test.ts
+          )
+          added=(
+            src/app/cardapio/buscaEscolhas.test.ts
+            src/app/pedidos/page.autoPrintPainel.test.ts
+            'src/app/pedidos/[id]/imprimir/page.quantidade.test.ts'
+            src/app/api/orders/auto-print-painel/route.ts
+            src/app/api/orders/auto-print-painel/route.test.ts
+          )
+
+          npx eslint "${added[@]}" --max-warnings=0
+          set +e
+          npx eslint "${existing[@]}" --format json > /tmp/branch-eslint.json
+          branch_code=$?
+          (cd /tmp/chefebot-main && ./node_modules/.bin/eslint "${existing[@]}" --format json) > /tmp/base-eslint.json
+          base_code=$?
+          set -e
+          node <<'NODE'
+          const fs = require('fs')
+          const count = p => JSON.parse(fs.readFileSync(p, 'utf8')).reduce((a, r) => ({errors:a.errors+r.errorCount,warnings:a.warnings+r.warningCount}), {errors:0,warnings:0})
+          const branch = count('/tmp/branch-eslint.json')
+          const base = count('/tmp/base-eslint.json')
+          console.log({ branch, base })
+          if (branch.errors > base.errors || branch.warnings > base.warnings) process.exit(1)
+          NODE
+          echo "ESLint baseline preserved (branch=$branch_code base=$base_code)"
+
+      - name: Typecheck against main baseline
+        shell: bash
+        run: |
+          set +e
+          npx tsc --noEmit --pretty false > /tmp/branch-tsc.txt 2>&1
+          branch_code=$?
+          (cd /tmp/chefebot-main && ./node_modules/.bin/tsc --noEmit --pretty false) > /tmp/base-tsc.txt 2>&1
+          base_code=$?
+          set -e
+          branch_count=$(grep -c 'error TS' /tmp/branch-tsc.txt || true)
+          base_count=$(grep -c 'error TS' /tmp/base-tsc.txt || true)
+          echo "Typecheck errors: branch=$branch_count base=$base_count"
+          if [ "$branch_count" -gt "$base_count" ]; then
+            cat /tmp/branch-tsc.txt
+            exit 1
+          fi
+          if grep -E 'buscaEscolhas|auto-print-painel|page.autoPrintPainel|page.quantidade' /tmp/branch-tsc.txt; then
+            echo "New TypeScript error in touched file"
+            exit 1
+          fi
+          echo "Typecheck baseline preserved (branch=$branch_code base=$base_code)"
+
+      - name: Full regression suite
+        run: npm test
+
+      - name: Production build
+        run: npm run build
+
+      - name: Diff sanity
+        run: git diff --check
+
+      - name: Commit only validated source and remove temporary workflows
+        shell: bash
+        run: |
+          git rm .github/workflows/agent-busca-sabores-autoprint-painel.yml
+          git rm .github/workflows/agent-busca-sabores-autoprint-bootstrap.yml
+          git config user.name "openai-agent"
+          git config user.email "openai-agent@users.noreply.github.com"
+          git add src
+          git diff --cached --check
+          git commit -m "feat(pedidos): busca rapida e autoimpressao segura do painel"
+          git push origin HEAD:agent/busca-sabores-autoprint-painel-20260810
