@@ -1,0 +1,570 @@
+name: Agent busca sabores e auto-print painel
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  validate-and-finalize:
+    if: github.head_ref == 'agent/busca-sabores-autoprint-painel-20260810'
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      BASE_SHA: cc2885f6d874bc949dc3f798bbb083255357a7c4
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/busca-sabores-autoprint-painel-20260810
+          fetch-depth: 0
+
+      - name: Apply audited minimal patch
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: anchor expected once, found {count}: {old[:120]!r}')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          def replace_after(path: str, anchor: str, old: str, new: str):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              pos = text.find(anchor)
+              if pos < 0:
+                  raise SystemExit(f'{path}: section anchor not found: {anchor!r}')
+              before, after = text[:pos], text[pos:]
+              count = after.count(old)
+              if count < 1:
+                  raise SystemExit(f'{path}: target after anchor not found: {old[:120]!r}')
+              after = after.replace(old, new, 1)
+              p.write_text(before + after, encoding='utf-8')
+
+          cardapio = 'src/app/cardapio/page.tsx'
+          replace_once(
+              cardapio,
+              '  const [flavorModalOpen, setFlavorModalOpen] = useState(false);\n',
+              '  const [flavorModalOpen, setFlavorModalOpen] = useState(false);\n'
+              '  const [flavorSearch, setFlavorSearch] = useState("");\n'
+              '  const flavorSearchInputRef = useRef<HTMLInputElement>(null);\n'
+          )
+          replace_once(
+              cardapio,
+              '  const [listCat, setListCat] = useState<"lanche" | "macarronada" | "bebida" | "suco" | "hamburguer" | "pastelForno" | "vitamina">("lanche");\n',
+              '  const [listCat, setListCat] = useState<"lanche" | "macarronada" | "bebida" | "suco" | "hamburguer" | "pastelForno" | "vitamina">("lanche");\n'
+              '  const [productSearch, setProductSearch] = useState("");\n'
+              '  const productSearchInputRef = useRef<HTMLInputElement>(null);\n'
+          )
+          replace_once(
+              cardapio,
+              '  const telefoneRef = useRef<HTMLInputElement>(null);\n\n  // Vínculo WhatsApp:',
+              '  const telefoneRef = useRef<HTMLInputElement>(null);\n\n'
+              '  // Busca guiada: ao abrir o modal de sabores ou entrar em uma categoria\n'
+              '  // de bebidas, o campo já recebe foco. `autoFocus` cobre a montagem e o\n'
+              '  // foco programático reforça navegadores móveis que montam o sheet em\n'
+              '  // seguida. O sistema operacional continua soberano sobre abrir o teclado.\n'
+              '  useEffect(() => {\n'
+              '    if (!flavorModalOpen) return;\n'
+              '    setFlavorSearch("");\n'
+              '    const timer = window.setTimeout(() => flavorSearchInputRef.current?.focus(), 0);\n'
+              '    return () => window.clearTimeout(timer);\n'
+              '  }, [flavorModalOpen]);\n\n'
+              '  useEffect(() => {\n'
+              '    const bebidaAtiva = screen === "sc-list" && (["bebida", "suco", "vitamina"] as const).includes(listCat as "bebida" | "suco" | "vitamina");\n'
+              '    if (!bebidaAtiva) return;\n'
+              '    setProductSearch("");\n'
+              '    const timer = window.setTimeout(() => productSearchInputRef.current?.focus(), 0);\n'
+              '    return () => window.clearTimeout(timer);\n'
+              '  }, [screen, listCat]);\n\n'
+              '  // Vínculo WhatsApp:'
+          )
+          replace_once(
+              cardapio,
+              '  const catalogSizeLabel = menu.pizzaCatalog?.sizes.find((s) => s.code === size)?.label;\n',
+              '  const flavorSearchNormalized = normStr(flavorSearch.trim());\n'
+              '  const filteredFlavorSections = flavorSections\n'
+              '    .map((section) => ({\n'
+              '      ...section,\n'
+              '      flavors: section.flavors.filter((flavor) => !flavorSearchNormalized || normStr(flavor).includes(flavorSearchNormalized)),\n'
+              '    }))\n'
+              '    .filter((section) => section.flavors.length > 0);\n'
+              '  const catalogSizeLabel = menu.pizzaCatalog?.sizes.find((s) => s.code === size)?.label;\n'
+          )
+          replace_once(
+              cardapio,
+              '            <div className="flavor-modal-body">\n              {!miniPizzaMode && !calzoneMode && !pastelMode && menu.pizzaCatalog && (',
+              '            <div className="flavor-modal-body">\n'
+              '              <div className="choice-search">\n'
+              '                <input\n'
+              '                  ref={flavorSearchInputRef}\n'
+              '                  type="search"\n'
+              '                  value={flavorSearch}\n'
+              '                  onChange={(e) => setFlavorSearch(e.target.value)}\n'
+              '                  placeholder="Pesquisar sabor por nome..."\n'
+              '                  aria-label="Pesquisar sabor por nome"\n'
+              '                  autoFocus\n'
+              '                  autoComplete="off"\n'
+              '                />\n'
+              '                {flavorSearch && <button type="button" aria-label="Limpar pesquisa de sabor" onClick={() => { setFlavorSearch(""); flavorSearchInputRef.current?.focus(); }}>×</button>}\n'
+              '              </div>\n'
+              '              {!miniPizzaMode && !calzoneMode && !pastelMode && menu.pizzaCatalog && ('
+          )
+          replace_after(
+              cardapio,
+              '            <div className="flavor-modal-body">',
+              '              {flavorSections.map((section) => {',
+              '              {filteredFlavorSections.length === 0 ? (\n'
+              '                <CardapioIllustration {...CARDAPIO_ILLUSTRATIONS.semResultado} />\n'
+              '              ) : filteredFlavorSections.map((section) => {'
+          )
+          old_list_return = '                return (<><div className="screen-head">{cfg.eb && <div className="eyebrow">{cfg.eb}</div>}<h2>{cfg.t}</h2><p>Toque para adicionar.</p></div>{cfg.data.length === 0 ? <CardapioIllustration {...CARDAPIO_ILLUSTRATIONS.semResultado} /> : cfg.data.map((it, i) => { const esg = ("available" in it && it.available === false) || esgotados.includes(it.name); return (<div key={"id" in it ? it.id : i} className="opt" onClick={() => !esg && addSimple(it, cfg.emoji)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }} {...optA11yAttrs(esg)} onKeyDown={(e) => { if (!esg && isActivateKey(e)) { e.preventDefault(); addSimple(it, cfg.emoji); } }}><div className="opt-emoji">{cfg.emoji}</div><div className="opt-body"><div className="opt-title opt-title-with-badge">{it.name}{noveltyActive && isNewCatalogItemId("id" in it ? it.id : undefined) && <NoveltyBadge />}</div>{esg && <div className="opt-desc" style={{ color: "var(--danger)" }}>Esgotado</div>}</div><div className="opt-price">{simplePriceLabel(it)}</div></div>); })}</>);'
+          new_list_return = '''                const bebidaBuscaAtiva = (["bebida", "suco", "vitamina"] as const).includes(listCat as "bebida" | "suco" | "vitamina");
+                const productSearchNormalized = normStr(productSearch.trim());
+                const dataFiltrada = bebidaBuscaAtiva
+                  ? cfg.data.filter((it) => !productSearchNormalized || normStr(it.name).includes(productSearchNormalized))
+                  : cfg.data;
+                return (<><div className="screen-head">{cfg.eb && <div className="eyebrow">{cfg.eb}</div>}<h2>{cfg.t}</h2><p>Toque para adicionar.</p></div>{bebidaBuscaAtiva && <div className="choice-search list-search"><input ref={productSearchInputRef} type="search" value={productSearch} onChange={(e) => setProductSearch(e.target.value)} placeholder="Pesquisar produto por nome..." aria-label="Pesquisar produto por nome" autoFocus autoComplete="off" />{productSearch && <button type="button" aria-label="Limpar pesquisa de produto" onClick={() => { setProductSearch(""); productSearchInputRef.current?.focus(); }}>×</button>}</div>}{dataFiltrada.length === 0 ? <CardapioIllustration {...CARDAPIO_ILLUSTRATIONS.semResultado} /> : dataFiltrada.map((it, i) => { const esg = ("available" in it && it.available === false) || esgotados.includes(it.name); return (<div key={"id" in it ? it.id : i} className="opt" onClick={() => !esg && addSimple(it, cfg.emoji)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }} {...optA11yAttrs(esg)} onKeyDown={(e) => { if (!esg && isActivateKey(e)) { e.preventDefault(); addSimple(it, cfg.emoji); } }}><div className="opt-emoji">{cfg.emoji}</div><div className="opt-body"><div className="opt-title opt-title-with-badge">{it.name}{noveltyActive && isNewCatalogItemId("id" in it ? it.id : undefined) && <NoveltyBadge />}</div>{esg && <div className="opt-desc" style={{ color: "var(--danger)" }}>Esgotado</div>}</div><div className="opt-price">{simplePriceLabel(it)}</div></div>); })}</>);'''
+          replace_once(cardapio, old_list_return, new_list_return)
+          replace_once(
+              cardapio,
+              '.flavor-modal-body .opt{margin-bottom:8px}\n',
+              '.flavor-modal-body .opt{margin-bottom:8px}\n'
+              '.choice-search{position:relative;margin:2px 0 12px}\n'
+              '.choice-search input{width:100%;height:48px;border:1px solid var(--line-strong);border-radius:14px;background:var(--surface2);color:var(--text);font-family:var(--font-ui);font-size:15px;font-weight:600;padding:0 44px 0 14px;outline:none}\n'
+              '.choice-search input:focus{border-color:var(--brand);box-shadow:0 0 0 2px var(--brand-soft)}\n'
+              '.choice-search button{position:absolute;right:7px;top:50%;transform:translateY(-50%);width:34px;height:34px;border:0;border-radius:999px;background:var(--surface);color:var(--text-sub);font-size:20px;line-height:1;cursor:pointer}\n'
+              '.list-search{margin:-6px 0 14px}\n'
+          )
+
+          print_page = 'src/app/pedidos/[id]/imprimir/page.tsx'
+          replace_once(
+              print_page,
+              '          <div key={i} className="secao">1x {item}</div>\n',
+              '          <div key={i} className="secao">{item}</div>\n'
+          )
+
+          orders_route = 'src/app/api/orders/route.ts'
+          replace_once(
+              orders_route,
+              "import { reivindicarImpressaoAutomatica } from '@/lib/impressaoAutomatica'\n",
+              "import { reivindicarImpressaoAutomatica } from '@/lib/impressaoAutomatica'\nimport { ehOrigemAdministrativa } from '@/lib/sessaoAdministrativa'\n"
+          )
+          replace_once(
+              orders_route,
+              "    const podeImprimirAutomaticamente =\n      statusAnterior === 'novo' && status === 'em_preparo'\n        ? await reivindicarImpressaoAutomatica(id)\n        : false\n",
+              "    const podeImprimirAutomaticamente =\n      statusAnterior === 'novo' && status === 'em_preparo' && !ehOrigemAdministrativa(pedidos[index].origem)\n        ? await reivindicarImpressaoAutomatica(id)\n        : false\n"
+          )
+
+          painel = 'src/app/pedidos/page.tsx'
+          replace_once(
+              painel,
+              'function imprimirPedidoSilencioso(id: string) {\n',
+              'async function tentarImpressaoAutomaticaPainel(id: string) {\n'
+              '  if (!id) return\n'
+              '  try {\n'
+              '    const res = await fetch("/api/orders/auto-print-painel", {\n'
+              '      method: "POST",\n'
+              '      headers: { "Content-Type": "application/json" },\n'
+              '      body: JSON.stringify({ id }),\n'
+              '    })\n'
+              '    if (!res.ok) return\n'
+              '    const data = await res.json().catch(() => null)\n'
+              '    if (data?.podeImprimirAutomaticamente) imprimirPedidoSilencioso(id)\n'
+              '  } catch {}\n'
+              '}\n\n'
+              'function imprimirPedidoSilencioso(id: string) {\n'
+          )
+          replace_once(
+              painel,
+              '            data.forEach((p: Pedido) => { if (p.pixConfirmado && prevPixRef.current[p.id] === false) tocarSomPix(); prevPixRef.current[p.id] = !!p.pixConfirmado })\n',
+              '            data.forEach((p: Pedido) => {\n'
+              '              if (p.pixConfirmado && prevPixRef.current[p.id] === false) {\n'
+              '                tocarSomPix()\n'
+              '                void tentarImpressaoAutomaticaPainel(p.id)\n'
+              '              }\n'
+              '              prevPixRef.current[p.id] = !!p.pixConfirmado\n'
+              '            })\n'
+          )
+          replace_once(
+              painel,
+              '          } else {\n            data.forEach((p: Pedido) => { prevPixRef.current[p.id] = !!p.pixConfirmado })\n          }\n',
+              '          } else {\n'
+              '            data.forEach((p: Pedido) => {\n'
+              '              prevPixRef.current[p.id] = !!p.pixConfirmado\n'
+              '              if (p.pixConfirmado) void tentarImpressaoAutomaticaPainel(p.id)\n'
+              '            })\n'
+              '          }\n'
+          )
+          replace_once(
+              painel,
+              '            // O pedido entra no painel como qualquer outro canal e imprime no\n            // aceite, pelas regras que já existem — nada especial aqui.\n            carregarPedidos()\n',
+              '            // Pedido montado no painel tem regra própria de impressão:\n'
+              '            // não-Pix imprime agora; Pix só imprime depois da confirmação.\n'
+              '            void tentarImpressaoAutomaticaPainel(pedidoId)\n'
+              '            carregarPedidos()\n'
+          )
+
+          route_new = Path('src/app/api/orders/auto-print-painel/route.ts')
+          route_new.parent.mkdir(parents=True, exist_ok=True)
+          route_new.write_text('''import { NextRequest, NextResponse } from "next/server";
+import { redis } from "@/lib/redis";
+import { reivindicarImpressaoAutomatica } from "@/lib/impressaoAutomatica";
+import { ehOrigemAdministrativa, lerSessaoAdministrativa } from "@/lib/sessaoAdministrativa";
+
+type PedidoPainel = {
+  id?: string;
+  origem?: unknown;
+  pagamento?: string;
+  pixConfirmado?: boolean;
+  pix?: { status?: string };
+  status?: string;
+  isArchived?: boolean;
+};
+
+function pagamentoTemPix(pagamento: unknown): boolean {
+  return typeof pagamento === "string" && /\\bpix\\b/i.test(pagamento);
+}
+
+function pixEstaConfirmado(pedido: PedidoPainel): boolean {
+  return pedido.pixConfirmado === true || pedido.pix?.status === "confirmado";
+}
+
+export async function POST(req: NextRequest) {
+  const sessao = await lerSessaoAdministrativa(req);
+  if (!sessao) return NextResponse.json({ ok: false, error: "Nao autorizado" }, { status: 401 });
+
+  const body = await req.json().catch(() => null) as { id?: unknown } | null;
+  const id = typeof body?.id === "string" ? body.id.trim() : "";
+  if (!id) return NextResponse.json({ ok: false, error: "Pedido invalido" }, { status: 400 });
+
+  const pedidos = (await redis.get<PedidoPainel[]>("pedidos")) || [];
+  const pedido = pedidos.find((item) => item?.id === id);
+  if (!pedido) return NextResponse.json({ ok: false, error: "Pedido nao encontrado" }, { status: 404 });
+
+  // Regra exclusiva do Novo Pedido do painel. A origem foi derivada de uma
+  // sessao autenticada no servidor na criacao; nunca confiamos em um campo
+  // enviado pelo navegador para liberar impressao.
+  if (!ehOrigemAdministrativa(pedido.origem)) {
+    return NextResponse.json({ ok: true, podeImprimirAutomaticamente: false, motivo: "origem_nao_painel" });
+  }
+
+  if (pedido.isArchived || pedido.status === "cancelado" || pedido.status === "entregue") {
+    return NextResponse.json({ ok: true, podeImprimirAutomaticamente: false, motivo: "pedido_finalizado" });
+  }
+
+  // Qualquer pagamento que contenha Pix (inclusive misto Pix + Dinheiro)
+  // precisa estar confirmado antes de liberar a cozinha. Importante: quando
+  // ainda esta pendente, NAO consumimos o claim — a confirmacao posterior
+  // ainda podera reivindicar a unica impressao automatica permitida.
+  if (pagamentoTemPix(pedido.pagamento) && !pixEstaConfirmado(pedido)) {
+    return NextResponse.json({ ok: true, podeImprimirAutomaticamente: false, motivo: "pix_pendente" });
+  }
+
+  const podeImprimirAutomaticamente = await reivindicarImpressaoAutomatica(id);
+  return NextResponse.json({
+    ok: true,
+    podeImprimirAutomaticamente,
+    ...(!podeImprimirAutomaticamente ? { motivo: "ja_reivindicado" } : {}),
+  });
+}
+''', encoding='utf-8')
+
+          test_route = Path('src/app/api/orders/auto-print-painel/route.test.ts')
+          test_route.write_text('''import { beforeEach, describe, expect, test, vi } from "vitest";
+import { NextRequest } from "next/server";
+
+const { store, redisMock, sessaoMock } = vi.hoisted(() => {
+  const store = new Map<string, unknown>();
+  const redisMock = {
+    get: vi.fn(async (key: string) => store.get(key) ?? null),
+    set: vi.fn(async (key: string, value: unknown, opts?: { nx?: boolean }) => {
+      if (opts?.nx && store.has(key)) return null;
+      store.set(key, value);
+      return "OK";
+    }),
+  };
+  const sessaoMock = vi.fn(async () => ({ username: "kellyne", nome: "Kellyne", role: "admin" }));
+  return { store, redisMock, sessaoMock };
+});
+
+vi.mock("@/lib/redis", () => ({ redis: redisMock }));
+vi.mock("@/lib/sessaoAdministrativa", () => ({
+  lerSessaoAdministrativa: sessaoMock,
+  ehOrigemAdministrativa: (origem: unknown) => origem === "painel",
+}));
+
+import { POST } from "./route";
+
+function req(id = "ped_1") {
+  return new NextRequest("http://localhost/api/orders/auto-print-painel", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id }),
+  });
+}
+
+function seed(overrides: Record<string, unknown> = {}) {
+  store.set("pedidos", [{ id: "ped_1", origem: "painel", status: "novo", pagamento: "Dinheiro", ...overrides }]);
+}
+
+beforeEach(() => {
+  store.clear();
+  vi.clearAllMocks();
+  sessaoMock.mockResolvedValue({ username: "kellyne", nome: "Kellyne", role: "admin" });
+});
+
+describe("POST /api/orders/auto-print-painel", () => {
+  test("exige sessao administrativa real", async () => {
+    sessaoMock.mockResolvedValueOnce(null);
+    expect((await POST(req())).status).toBe(401);
+  });
+
+  test("pedido do site nunca usa a regra especial do painel", async () => {
+    seed({ origem: "site" });
+    const data = await (await POST(req())).json();
+    expect(data).toMatchObject({ podeImprimirAutomaticamente: false, motivo: "origem_nao_painel" });
+    expect(store.has("pedido:auto-print-claim:ped_1")).toBe(false);
+  });
+
+  test("pedido do painel sem Pix imprime imediatamente e apenas uma vez", async () => {
+    seed({ pagamento: "Cartao" });
+    const primeira = await (await POST(req())).json();
+    const segunda = await (await POST(req())).json();
+    expect(primeira.podeImprimirAutomaticamente).toBe(true);
+    expect(segunda.podeImprimirAutomaticamente).toBe(false);
+  });
+
+  test("Pix pendente nao imprime e nao consome o claim", async () => {
+    seed({ pagamento: "Pix", pixConfirmado: false, pix: { status: "pendente" } });
+    const data = await (await POST(req())).json();
+    expect(data).toMatchObject({ podeImprimirAutomaticamente: false, motivo: "pix_pendente" });
+    expect(store.has("pedido:auto-print-claim:ped_1")).toBe(false);
+  });
+
+  test("Pix confirmado libera a mesma impressao unica", async () => {
+    seed({ pagamento: "Pix", pixConfirmado: true, pix: { status: "confirmado" } });
+    const data = await (await POST(req())).json();
+    expect(data.podeImprimirAutomaticamente).toBe(true);
+    expect(store.has("pedido:auto-print-claim:ped_1")).toBe(true);
+  });
+
+  test("pagamento misto contendo Pix tambem aguarda confirmacao", async () => {
+    seed({ pagamento: "Pix (R$ 20,00) + Dinheiro (R$ 30,00)", pixConfirmado: false });
+    const data = await (await POST(req())).json();
+    expect(data.motivo).toBe("pix_pendente");
+  });
+
+  test("pedido finalizado ou arquivado nunca dispara", async () => {
+    seed({ status: "cancelado" });
+    expect((await (await POST(req())).json()).podeImprimirAutomaticamente).toBe(false);
+    store.clear();
+    seed({ isArchived: true });
+    expect((await (await POST(req())).json()).podeImprimirAutomaticamente).toBe(false);
+  });
+});
+''', encoding='utf-8')
+
+          test_search = Path('src/app/cardapio/buscaEscolhas.test.ts')
+          test_search.write_text('''import { describe, expect, test } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+const fonte = readFileSync(fileURLToPath(new URL("./page.tsx", import.meta.url)), "utf-8");
+
+describe("/cardapio — busca em sabores e bebidas", () => {
+  test("modal de sabores abre com pesquisa focada e filtra por nome normalizado", () => {
+    expect(fonte).toContain('placeholder="Pesquisar sabor por nome..."');
+    expect(fonte).toContain('ref={flavorSearchInputRef}');
+    expect(fonte).toContain('aria-label="Pesquisar sabor por nome"');
+    expect(fonte).toMatch(/ref=\{flavorSearchInputRef\}[\s\S]{0,260}autoFocus/);
+    expect(fonte).toContain('normStr(flavor).includes(flavorSearchNormalized)');
+    expect(fonte).toContain('filteredFlavorSections.map');
+  });
+
+  test("bebida, suco e vitamina recebem pesquisa por nome com foco automatico", () => {
+    expect(fonte).toContain('["bebida", "suco", "vitamina"] as const');
+    expect(fonte).toContain('placeholder="Pesquisar produto por nome..."');
+    expect(fonte).toContain('ref={productSearchInputRef}');
+    expect(fonte).toMatch(/ref=\{productSearchInputRef\}[\s\S]{0,300}autoFocus/);
+    expect(fonte).toContain('normStr(it.name).includes(productSearchNormalized)');
+  });
+
+  test("a pesquisa nao altera preco nem disponibilidade — so filtra a lista de exibicao", () => {
+    expect(fonte).toContain('const dataFiltrada = bebidaBuscaAtiva');
+    expect(fonte).toContain('simplePriceLabel(it)');
+    expect(fonte).toContain('esgotados.includes(it.name)');
+  });
+});
+''', encoding='utf-8')
+
+          test_print = Path('src/app/pedidos/[id]/imprimir/page.quantidade.test.ts')
+          test_print.write_text('''import { describe, expect, test } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+const fonte = readFileSync(fileURLToPath(new URL("./page.tsx", import.meta.url)), "utf-8");
+
+describe("cupom da cozinha — quantidade sem prefixo duplicado", () => {
+  test("imprime exatamente o texto do item sem adicionar 1x por fora", () => {
+    expect(fonte).toContain('<div key={i} className="secao">{item}</div>');
+    expect(fonte).not.toContain('<div key={i} className="secao">1x {item}</div>');
+  });
+
+  test("nao remove quantidades que ja fazem parte do item", () => {
+    const linha = fonte.match(/<div key=\{i\} className="secao">\{item\}<\/div>/)?.[0];
+    expect(linha).toBe('<div key={i} className="secao">{item}</div>');
+    expect(fonte).not.toContain('.replace(/^1x');
+  });
+});
+''', encoding='utf-8')
+
+          test_painel = Path('src/app/pedidos/page.autoPrintPainel.test.ts')
+          test_painel.write_text('''import { describe, expect, test } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+const fonte = readFileSync(fileURLToPath(new URL("./page.tsx", import.meta.url)), "utf-8");
+
+describe("/pedidos — autoimpressao exclusiva do pedido montado no painel", () => {
+  test("apos criar pedido manual consulta a autorizacao server-side de auto-print", () => {
+    expect(fonte).toContain('void tentarImpressaoAutomaticaPainel(pedidoId)');
+    expect(fonte).toContain('fetch("/api/orders/auto-print-painel"');
+  });
+
+  test("transicao Pix pendente -> confirmado tenta imprimir e o servidor decide a origem", () => {
+    expect(fonte).toMatch(/p\.pixConfirmado && prevPixRef\.current\[p\.id\] === false[\s\S]{0,220}tentarImpressaoAutomaticaPainel\(p\.id\)/);
+  });
+
+  test("primeira carga recupera Pix confirmado que ainda nao consumiu o claim", () => {
+    expect(fonte).toContain('if (p.pixConfirmado) void tentarImpressaoAutomaticaPainel(p.id)');
+  });
+});
+''', encoding='utf-8')
+
+          route_test = 'src/app/api/orders/route.impressaoAutomatica.test.ts'
+          replace_once(
+              route_test,
+              '  test("cancelar um pedido novo nunca concede a permissão de imprimir", async () => {\n',
+              '  test("pedido criado no painel nao imprime de novo no aceite — a regra especial acontece na criacao/confirmacao Pix", async () => {\n'
+              '    seedPedido({ origem: "painel" });\n'
+              '    const res = await PATCH(patchRequest({ id: "ped_print_1", status: "em_preparo", silent: true }));\n'
+              '    const data = await res.json();\n'
+              '    expect(data.podeImprimirAutomaticamente).toBeUndefined();\n'
+              '    expect(redisStore.has("pedido:auto-print-claim:ped_print_1")).toBe(false);\n'
+              '  });\n\n'
+              '  test("cancelar um pedido novo nunca concede a permissão de imprimir", async () => {\n'
+          )
+          PY
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Targeted tests
+        run: >-
+          npx vitest run
+          src/app/cardapio/buscaEscolhas.test.ts
+          src/app/cardapio/page.test.ts
+          src/app/pedidos/[id]/imprimir/page.quantidade.test.ts
+          src/app/pedidos/page.autoPrintPainel.test.ts
+          src/lib/impressaoAutomatica.test.ts
+          src/app/api/orders/auto-print-painel/route.test.ts
+          src/app/api/orders/route.impressaoAutomatica.test.ts
+          src/app/api/pedido-app/route.test.ts
+
+      - name: Lint touched files against main baseline
+        shell: bash
+        run: |
+          git worktree add --detach /tmp/chefebot-main "$BASE_SHA"
+          ln -s "$GITHUB_WORKSPACE/node_modules" /tmp/chefebot-main/node_modules
+
+          files=(
+            src/app/cardapio/page.tsx
+            src/app/cardapio/buscaEscolhas.test.ts
+            src/app/pedidos/page.tsx
+            src/app/pedidos/page.autoPrintPainel.test.ts
+            'src/app/pedidos/[id]/imprimir/page.tsx'
+            'src/app/pedidos/[id]/imprimir/page.quantidade.test.ts'
+            src/app/api/orders/route.ts
+            src/app/api/orders/route.impressaoAutomatica.test.ts
+            src/app/api/orders/auto-print-painel/route.ts
+            src/app/api/orders/auto-print-painel/route.test.ts
+          )
+
+          set +e
+          npx eslint "${files[@]}" --format json > /tmp/branch-eslint.json
+          branch_code=$?
+          set -e
+
+          # Novos arquivos nao existem na main; compara os arquivos preexistentes
+          # e exige zero erro nos novos.
+          base_files=(
+            src/app/cardapio/page.tsx
+            src/app/pedidos/page.tsx
+            'src/app/pedidos/[id]/imprimir/page.tsx'
+            src/app/api/orders/route.ts
+            src/app/api/orders/route.impressaoAutomatica.test.ts
+          )
+          set +e
+          (cd /tmp/chefebot-main && ./node_modules/.bin/eslint "${base_files[@]}" --format json) > /tmp/base-eslint.json
+          base_code=$?
+          set -e
+
+          node <<'NODE'
+          const fs = require('fs')
+          const count = (p) => JSON.parse(fs.readFileSync(p, 'utf8')).reduce((a, r) => ({ errors:a.errors+r.errorCount, warnings:a.warnings+r.warningCount }), {errors:0,warnings:0})
+          const branch = count('/tmp/branch-eslint.json')
+          const base = count('/tmp/base-eslint.json')
+          console.log({ branch, base })
+          if (branch.errors > base.errors || branch.warnings > base.warnings) process.exit(1)
+          NODE
+          echo "ESLint baseline preservada (branch=$branch_code base=$base_code)"
+
+      - name: Typecheck against main baseline
+        shell: bash
+        run: |
+          set +e
+          npx tsc --noEmit --pretty false > /tmp/branch-tsc.txt 2>&1
+          branch_code=$?
+          (cd /tmp/chefebot-main && ./node_modules/.bin/tsc --noEmit --pretty false) > /tmp/base-tsc.txt 2>&1
+          base_code=$?
+          set -e
+          branch_count=$(grep -c 'error TS' /tmp/branch-tsc.txt || true)
+          base_count=$(grep -c 'error TS' /tmp/base-tsc.txt || true)
+          echo "Typecheck errors: branch=$branch_count base=$base_count"
+          if [ "$branch_count" -gt "$base_count" ]; then
+            cat /tmp/branch-tsc.txt
+            exit 1
+          fi
+          if grep -E 'buscaEscolhas|auto-print-painel|page.autoPrintPainel|page.quantidade' /tmp/branch-tsc.txt; then
+            echo "Erro TypeScript em arquivo novo/tocado"
+            exit 1
+          fi
+          echo "Typecheck baseline preservada (branch=$branch_code base=$base_code)"
+
+      - name: Full test suite
+        run: npm test
+
+      - name: Production build
+        run: npm run build
+
+      - name: Diff sanity
+        run: git diff --check
+
+      - name: Commit validated patch and remove temporary workflow
+        shell: bash
+        run: |
+          git rm .github/workflows/agent-busca-sabores-autoprint-painel.yml
+          git config user.name "openai-agent"
+          git config user.email "openai-agent@users.noreply.github.com"
+          git add src
+          git diff --cached --check
+          git commit -m "feat(pedidos): busca rapida e autoimpressao segura do painel"
+          git push origin HEAD:agent/busca-sabores-autoprint-painel-20260810
