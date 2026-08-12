@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { nextFlavorSelection, saboresEscolhidosForaDasSecoes, resolverPizzaSelectionIds, resolverSimpleSelectionIds, precoPizzaLocalCents, precoMinimoPorTamanho } from "./page";
 import { precificarPizzaPorId } from "@/lib/pricing/pizzaEngine";
+import type { SelecaoSabores } from "@/lib/pizzaSabores";
 import { resolverItemComSelecaoEstruturada } from "@/lib/pedidoAppSelecaoEstruturada";
 import { construirSnapshotItem, type SelecaoSnapshotPizza } from "@/lib/pedidoSnapshot";
 import { buildPizzaCatalog } from "@/lib/catalog/pizzas";
@@ -250,9 +251,10 @@ describe("nextFlavorSelection — regra de sabor compartilhada por pizza, mini-p
     expect(sel).toEqual({ f1: "Calabresa", f2: "Portuguesa" });
   });
 
-  test("pizza normal: tocar num 3º sabor substitui o 2º, nunca ultrapassa 2", () => {
+  test("pizza normal: com 2 sabores escolhidos, o 3º é RECUSADO e a seleção fica intacta (nunca substitui em silêncio)", () => {
     const sel = nextFlavorSelection({ f1: "Calabresa", f2: "Portuguesa" }, "Baiana", false);
-    expect(sel).toEqual({ f1: "Calabresa", f2: "Baiana" });
+    expect(sel).toEqual({ f1: "Calabresa", f2: "Portuguesa" });
+    expect([sel.f1, sel.f2]).not.toContain("Baiana");
   });
 
   test("calzone/mini-pizza (singleFlavor=true) aceita só 1 sabor, mesmo tentando escolher um 2º em seguida", () => {
@@ -304,16 +306,52 @@ describe("REGRESSÃO — pizza de 2 sabores de ponta a ponta (montagem → carri
     expect(sel).toEqual({ f1: tradicionais[0], f2: especiais[0] });
   });
 
-  test("Caso C — com 2 sabores escolhidos, o 3º nunca vira um terceiro sabor (limite do tamanho respeitado)", () => {
-    const sel = nextFlavorSelection({ f1: tradicionais[0], f2: especiais[0] }, tradicionais[1], false);
-    expect([sel.f1, sel.f2].filter(Boolean)).toHaveLength(2);
-    expect(sel).toEqual({ f1: tradicionais[0], f2: tradicionais[1] });
+  test("Caso C — com 2 sabores escolhidos, o 3º é recusado SEM trocar nenhum dos dois (e o preço não muda)", () => {
+    const antes = { f1: tradicionais[0], f2: especiais[0] };
+    const precoAntes = precoPizzaLocalCents(catalog, "G", antes.f1, antes.f2, null);
+    const sel = nextFlavorSelection(antes, tradicionais[1], false);
+    // Identidade exata: [A, B] continua [A, B] — não basta ter 2 sabores,
+    // porque [A, C] também teria 2.
+    expect(sel).toEqual({ f1: tradicionais[0], f2: especiais[0] });
+    expect([sel.f1, sel.f2]).not.toContain(tradicionais[1]);
+    // O toque recusado não pode mexer no preço nem na resolução para IDs.
+    expect(precoPizzaLocalCents(catalog, "G", sel.f1!, sel.f2, null)).toBe(precoAntes);
+    expect(resolverPizzaSelectionIds(catalog, "G", sel.f1!, sel.f2, null)!.flavorIds).toEqual([idPorNome(tradicionais[0]), idPorNome(especiais[0])]);
     // E o motor de preço recusa 3 sabores mesmo se um payload adulterado tentar.
     const tres = precificarPizzaPorId(
       { sizeId: sizeIdG, flavorIds: [idPorNome(tradicionais[0]), idPorNome(tradicionais[1]), idPorNome(especiais[0])], quantity: 1 },
       catalog
     );
     expect(tres.ok).toBe(false);
+  });
+
+  test("Caso C2 — trocar o 2º sabor pelo caminho oficial (desmarca B, escolhe C) atualiza sabores e preço", () => {
+    let sel: SelecaoSabores = { f1: tradicionais[0], f2: especiais[0] };
+    const precoComEspecial = precoPizzaLocalCents(catalog, "G", sel.f1!, sel.f2, null)!;
+    sel = nextFlavorSelection(sel, especiais[0], false);
+    expect(sel).toEqual({ f1: tradicionais[0], f2: null });
+    sel = nextFlavorSelection(sel, tradicionais[1], false);
+    expect(sel).toEqual({ f1: tradicionais[0], f2: tradicionais[1] });
+    const precoSoTradicionais = precoPizzaLocalCents(catalog, "G", sel.f1!, sel.f2, null)!;
+    expect(precoSoTradicionais).toBe(Math.max(
+      catalog.flavors.find((f) => f.name === tradicionais[0])!.pricesBySizeCode.G!,
+      catalog.flavors.find((f) => f.name === tradicionais[1])!.pricesBySizeCode.G!,
+    ));
+    // Sanidade: o par com Especial custava o preço do Especial (mais caro).
+    expect(precoComEspecial).toBe(catalog.flavors.find((f) => f.name === especiais[0])!.pricesBySizeCode.G!);
+  });
+
+  test("Caso C3 — o 3º sabor recusado também não muda nada quando a seleção veio de abas diferentes", () => {
+    // A na aba Tradicionais, B na aba Especiais (a correção anterior), e o
+    // 3º toque vindo de uma terceira aba não pode desfazer o meio a meio.
+    let sel: SelecaoSabores = nextFlavorSelection({ f1: null, f2: null }, tradicionais[0], false);
+    expect(saboresEscolhidosForaDasSecoes([sel.f1, sel.f2], secoesDaAba("especial"))).toEqual([tradicionais[0]]);
+    sel = nextFlavorSelection(sel, especiais[0], false);
+    const doces = nomePorCategoria("doce", "G");
+    const depois = nextFlavorSelection(sel, doces[0], false);
+    expect(depois).toEqual({ f1: tradicionais[0], f2: especiais[0] });
+    // Ambos continuam "conhecidos" pela UI mesmo com a aba Doces visível.
+    expect(saboresEscolhidosForaDasSecoes([depois.f1, depois.f2], secoesDaAba("doce")).sort()).toEqual([tradicionais[0], especiais[0]].sort());
   });
 
   test("Caso D — desmarcar um dos dois mantém o outro selecionado", () => {
@@ -878,7 +916,19 @@ describe("/cardapio (PublicCardapio) — Calzone entra no mesmo fluxo de sabores
   });
 
   test("pickFlavor usa nextFlavorSelection travando calzone/mini-pizza/pastel/MINI em 1 sabor (sem duplicar a lógica da pizza)", () => {
-    expect(fonte).toContain("const next = nextFlavorSelection({ f1, f2 }, f, miniPizzaMode || calzoneMode || pastelMode || isMiniSize);");
+    expect(fonte).toContain("const next = nextFlavorSelection(atual, f, miniPizzaMode || calzoneMode || pastelMode || isMiniSize);");
+    expect(fonte).toContain('import { nextFlavorSelection } from "@/lib/pizzaSabores";');
+  });
+
+  test("3º sabor recusado avisa o cliente em vez de virar clique morto, e não toca no estado", () => {
+    const bloco = fonte.slice(fonte.indexOf("function pickFlavor"), fonte.indexOf("const mam = !!(f1 && f2);"));
+    // A recusa é detectada pela identidade da seleção devolvida (contrato
+    // testado em @/lib/pizzaSabores), nunca por uma segunda regra de limite
+    // reimplementada aqui.
+    expect(bloco).toContain("if (next === atual) {");
+    expect(bloco).toContain('showToast("Máximo de 2 sabores. Toque em um sabor já escolhido para trocar.");');
+    // O caminho de recusa sai antes de qualquer setF1/setF2.
+    expect(bloco.indexOf("showToast")).toBeLessThan(bloco.indexOf("setF1(next.f1)"));
   });
 
   test("REGRESSÃO (correção da regra comercial do Calzone, cardápio oficial 2026) — calzone usa a lista OFICIAL e FIXA de sabores (menu.catalog.calzone, nunca mais menu.catalog.lanches nem uma configuração dinâmica de flavorsMode/calzoneFlavors do Menu legado, que foi removida)", () => {

@@ -18,6 +18,7 @@ import { extrairPagamentoComposto, montarPagamentoComposto, parseValorMonetario 
 import type { PizzaCatalog } from "@/lib/catalog/pizzas";
 import { todosOsProdutos, type SimpleCatalog } from "@/lib/catalog/simpleProducts";
 import { isNewCatalogItemId, isNoveltyPeriodActive, noveltyExpiresAt } from "@/lib/catalog/novelties";
+import { nextFlavorSelection } from "@/lib/pizzaSabores";
 
 // Ícones de categoria da home (menu/navegação) — lucide-react, sem emoji.
 // Mantidos separados de ICONS (que continua usando emoji para os itens
@@ -856,20 +857,11 @@ function catalogParaListagem(p: {
 
 // Regra central de seleção de sabor, compartilhada pela pizza normal (até 2
 // sabores, o 2º vira meio a meio), pela mini-pizza e pelo calzone (1 sabor
-// só, travado por singleFlavor). Extraída para função pura para poder testar
-// a trava de "nunca aceitar um 2º sabor" sem depender de estado do React.
-export function nextFlavorSelection(
-  current: { f1: string | null; f2: string | null },
-  f: string,
-  singleFlavor: boolean
-): { f1: string | null; f2: string | null } {
-  if (singleFlavor) return { f1: current.f1 === f ? null : f, f2: null };
-  if (current.f1 === f) return { f1: current.f2, f2: null };
-  if (current.f2 === f) return { f1: current.f1, f2: null };
-  if (!current.f1) return { f1: f, f2: current.f2 };
-  if (!current.f2) return { f1: current.f1, f2: f };
-  return { f1: current.f1, f2: f };
-}
+// só, travado por singleFlavor). Mora em @/lib/pizzaSabores para ser a MESMA
+// função usada também pela edição de pedido do cliente (/pedido/editar/[id]),
+// que antes mantinha uma cópia divergente; re-exportada aqui porque esta
+// página é o consumidor histórico da regra.
+export { nextFlavorSelection };
 
 // Sabores já escolhidos que NÃO aparecem nas seções visíveis no momento.
 //
@@ -1623,7 +1615,16 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   // pickFlavor/continueBuild abaixo.
   const isMiniSize = size === "MINI" && !miniPizzaMode;
   function pickFlavor(f: string) {
-    const next = nextFlavorSelection({ f1, f2 }, f, miniPizzaMode || calzoneMode || pastelMode || isMiniSize);
+    const atual = { f1, f2 };
+    const next = nextFlavorSelection(atual, f, miniPizzaMode || calzoneMode || pastelMode || isMiniSize);
+    // Limite de 2 sabores atingido: nextFlavorSelection recusa o toque
+    // devolvendo a MESMA seleção (nenhum sabor é substituído em silêncio).
+    // Sem aviso, o toque vira um clique morto — o cliente acha que a tela
+    // travou. Diz o que fazer para trocar, sem mexer na escolha atual.
+    if (next === atual) {
+      showToast("Máximo de 2 sabores. Toque em um sabor já escolhido para trocar.");
+      return;
+    }
     setF1(next.f1);
     setF2(next.f2);
   }
@@ -3418,7 +3419,13 @@ main{width:100%;padding:6px 20px 20px}
 @keyframes pixPop{0%{transform:scale(1)}40%{transform:scale(1.04)}100%{transform:scale(1)}}
 @media(min-width:640px){.pix-como-funciona-passos{flex-direction:row}.pix-passo{flex-direction:column;text-align:center;flex:1;gap:6px}}
 @media(prefers-reduced-motion:reduce){.pix-alerta,.pix-hibrido-card,.pix-qr-card,.pix-copia-cola-card,.pix-chave-manual,.pix-como-funciona,.pix-chave-manual-conteudo,.pix-reforco{animation:none}.pix-alerta,.pix-qr-glow,.pix-alerta-eyebrow .pix-alerta-dot,.pix-alerta-seta{animation:none}.pix-copiar-btn{transition:none}.pix-copiar-btn.copiado{animation:none}}
-.toast{position:fixed;bottom:168px;left:50%;transform:translateX(-50%);background:var(--green);color:var(--green-foreground);padding:12px 22px;border-radius:30px;font-size:13.5px;font-weight:500;z-index:60;white-space:nowrap}
+/* Camada de notificação: precisa ficar ACIMA dos modais (payment 80,
+   flavor 85) — é dentro do modal de sabores que nascem os avisos de limite
+   de 2 sabores e de sabor esgotado; com z-index 60 eles apareciam atrás do
+   backdrop e o cliente nunca lia a mensagem. Mensagens longas (estas duas)
+   não cabem numa linha em telas de 390px: white-space nowrap cortava o
+   texto, então quebram dentro da largura da tela em vez de vazar. */
+.toast{position:fixed;bottom:168px;left:50%;transform:translateX(-50%);background:var(--green);color:var(--green-foreground);padding:12px 22px;border-radius:30px;font-size:13.5px;font-weight:500;z-index:95;max-width:calc(100vw - 32px);text-align:center}
 .qty-grid{display:flex;flex-direction:column;gap:10px}
 @media(min-width:480px){.qty-grid{display:grid;grid-template-columns:1fr 1fr;gap:11px}}
 .qty-card{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:16px 18px;cursor:pointer;display:flex;align-items:center;gap:14px;transition:transform .14s,border-color .14s,background .14s;box-shadow:var(--shadow-sm)}
