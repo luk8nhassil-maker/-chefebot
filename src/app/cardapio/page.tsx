@@ -871,6 +871,29 @@ export function nextFlavorSelection(
   return { f1: current.f1, f2: f };
 }
 
+// Sabores já escolhidos que NÃO aparecem nas seções visíveis no momento.
+//
+// A aba de categoria do seletor de pizza (Tradicionais/Especiais/Doces) é só
+// um FILTRO DE EXIBIÇÃO: trocar de aba nunca pode apagar o que já foi
+// escolhido, senão o meio a meio entre categorias diferentes (Tradicional +
+// Especial, o caso mais pedido) fica impossível — o 1º sabor sumia no exato
+// momento em que o cliente abria a aba onde o 2º estava. Estes sabores
+// voltam numa seção fixa no topo da lista, marcados e desmarcáveis, para o
+// cliente sempre enxergar os dois. Fora do fluxo de pizza (mini-pizza,
+// calzone, pastel — 1 sabor só, sem abas) o sabor escolhido sempre está na
+// própria seção, então a lista devolvida é vazia e nada muda.
+export function saboresEscolhidosForaDasSecoes(
+  escolhidos: readonly (string | null)[],
+  secoes: readonly { flavors: readonly string[] }[]
+): string[] {
+  const visiveis = new Set(secoes.flatMap((section) => [...section.flavors]));
+  const fora: string[] = [];
+  for (const sabor of escolhidos) {
+    if (sabor && !visiveis.has(sabor) && !fora.includes(sabor)) fora.push(sabor);
+  }
+  return fora;
+}
+
 // Resolve a seleção de pizza normal (tamanho + 1/2 sabores + borda, os
 // mesmos já escolhidos pela UI hoje por nome) para os IDs estáveis do
 // catálogo oficial (Fase 2, GET /api/cardapio -> menu.pizzaCatalog) — puro,
@@ -1649,13 +1672,20 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const calzoneFlavorNames = menu.catalog
     ? menu.catalog.calzone.find((l) => l.name === calzoneItem?.name)?.flavors?.filter((f) => f.available).map((f) => f.name) ?? []
     : [...(menu.saltyFlavors || []), ...(menu.sweetFlavors || [])];
-  const flavorSections = miniPizzaMode
+  const flavorSectionsDaAba = miniPizzaMode
     ? [{ title: "Sabores da mini-pizza", flavors: miniPizzaFlavors }]
     : calzoneMode
       ? [{ title: "Sabores do calzone", flavors: calzoneFlavorNames }]
       : pastelMode
         ? [{ title: "Sabores", flavors: pastelPendente?.flavors || [] }]
         : pizzaFlavorSections;
+  // Meio a meio entre categorias diferentes: a aba só filtra o que é
+  // MOSTRADO, nunca o que está escolhido (ver saboresEscolhidosForaDasSecoes)
+  // — o sabor da outra aba fica fixo no topo, selecionado e desmarcável.
+  const flavorSectionsEscolhidosForaDaAba = saboresEscolhidosForaDasSecoes([f1, f2], flavorSectionsDaAba);
+  const flavorSections = flavorSectionsEscolhidosForaDaAba.length > 0
+    ? [{ title: "Escolhidos", flavors: flavorSectionsEscolhidosForaDaAba }, ...flavorSectionsDaAba]
+    : flavorSectionsDaAba;
   const catalogSizeLabel = menu.pizzaCatalog?.sizes.find((s) => s.code === size)?.label;
   const selectedSizeLabel = miniPizzaMode && miniPizzaItem ? miniPizzaItem.name : pastelMode && pastelPendente ? pastelPendente.name : size ? (catalogSizeLabel || (menu.sizes || []).find((s) => s.code === size)?.label || size) : "";
   const buildFootHint = !size
@@ -1676,7 +1706,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const buildActionLabel = miniPizzaMode ? "Adicionar mini-pizza" : calzoneMode ? "Adicionar calzone" : pastelMode ? "Adicionar" : isMiniSize ? "Adicionar mini" : "Confirmar pizza";
   const flavorModalTitle = miniPizzaMode ? (miniPizzaItem?.name || "Mini-pizza") : calzoneMode ? (calzoneItem?.name || "Calzone") : pastelMode ? (pastelPendente?.name || "Sabor") : `Pizza ${selectedSizeLabel}`;
   const flavorModalMessage = miniPizzaMode ? "Escolha o sabor da sua mini-pizza." : calzoneMode ? "Escolha o sabor do seu calzone." : pastelMode ? "Escolha o sabor." : isMiniSize ? "Escolha 1 sabor para a pizza Mini." : "Você pode escolher até 2 sabores.";
-  const flavorModalHint = miniPizzaMode || calzoneMode || pastelMode || isMiniSize ? null : "Escolha 1 sabor para pizza inteira ou 2 sabores para meio a meio.";
+  const flavorModalHint = miniPizzaMode || calzoneMode || pastelMode || isMiniSize ? null : "Escolha 1 sabor para pizza inteira ou 2 sabores para meio a meio — pode misturar categorias.";
   const flavorProgressLabel = f2 ? `${f1} / ${f2}` : f1 ? `${f1} — toque em outro para meio a meio` : "Nenhum sabor escolhido ainda";
   const renderFlavorProgress = () => !miniPizzaMode && !calzoneMode && !pastelMode && !isMiniSize && (
     <div className="flavor-progress">
@@ -2321,7 +2351,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                   {!miniPizzaMode && !calzoneMode && !pastelMode && menu.pizzaCatalog && (
                     <div className="pizza-category-tabs" role="tablist" aria-label="Categoria dos sabores">
                       {(["tradicional", "especial", "doce"] as const).map((category) => (
-                        <button key={category} type="button" role="tab" aria-selected={pizzaCategoryFilter === category} className={pizzaCategoryFilter === category ? "active" : ""} onClick={() => { setPizzaCategoryFilter(category); setF1(null); setF2(null); }}>
+                        <button key={category} type="button" role="tab" aria-selected={pizzaCategoryFilter === category} className={pizzaCategoryFilter === category ? "active" : ""} onClick={() => setPizzaCategoryFilter(category)}>
                           {CATEGORIA_PIZZA_LABEL[category]}
                         </button>
                       ))}
@@ -2972,7 +3002,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
               {!miniPizzaMode && !calzoneMode && !pastelMode && menu.pizzaCatalog && (
                 <div className="pizza-category-tabs modal-tabs" role="tablist" aria-label="Categoria dos sabores">
                   {(["tradicional", "especial", "doce"] as const).map((category) => (
-                    <button key={category} type="button" role="tab" aria-selected={pizzaCategoryFilter === category} className={pizzaCategoryFilter === category ? "active" : ""} onClick={() => { setPizzaCategoryFilter(category); setF1(null); setF2(null); }}>
+                    <button key={category} type="button" role="tab" aria-selected={pizzaCategoryFilter === category} className={pizzaCategoryFilter === category ? "active" : ""} onClick={() => setPizzaCategoryFilter(category)}>
                       {CATEGORIA_PIZZA_LABEL[category]}
                     </button>
                   ))}
