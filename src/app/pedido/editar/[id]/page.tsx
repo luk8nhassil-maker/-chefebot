@@ -10,6 +10,7 @@ import {
   pagamentoAindaValido,
 } from "@/lib/pagamentoComposto";
 import { nextFlavorSelection } from "@/lib/pizzaSabores";
+import { useDialogA11y } from "@/components/useDialogA11y";
 
 type ItemApp = {
   kind: "pizza" | "simple" | "promo";
@@ -552,6 +553,8 @@ function AdicionarItemModal({ menu, onFechar, onAdicionar }: { menu: MenuType; o
   const simplesLanches = menu.lanches.filter((l) => norm(l.name) !== "calzone" && !norm(l.name).includes("macarronada"));
   const [macarronadaSel, setMacarronadaSel] = useState<{ name: string; price: number; sizes?: { code: string; price: number }[] } | null>(null);
   const [sucoSel, setSucoSel] = useState<{ name: string; price: number } | null>(null);
+  // ESC/armadilha de foco: o modal de adicionar item só fechava clicando fora.
+  const modalRef = useDialogA11y(true, onFechar);
 
   // Mesma regra do Cardápio Público, literalmente a mesma função
   // (@/lib/pizzaSabores): até 2 sabores, tocar num sabor já escolhido
@@ -583,7 +586,7 @@ function AdicionarItemModal({ menu, onFechar, onAdicionar }: { menu: MenuType; o
 
   return (
     <div style={overlayStyle} onClick={onFechar}>
-      <div style={{ ...cardStyle, maxWidth: 420, width: "100%", maxHeight: "80vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+      <div ref={modalRef} role="dialog" aria-modal="true" aria-label="Adicionar item ao pedido" style={{ ...cardStyle, maxWidth: 420, width: "100%", maxHeight: "80vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
         <p style={{ fontSize: 17, fontWeight: 900, margin: "0 0 10px" }}>Adicionar item</p>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 14 }}>
           {([

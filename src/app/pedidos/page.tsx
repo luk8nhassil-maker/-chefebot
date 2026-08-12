@@ -1,6 +1,8 @@
 "use client"
 import { useEffect, useState, useRef } from "react"
 import { useRouter } from "next/navigation"
+import ConfirmDialog from '@/components/ConfirmDialog'
+import { useDialogA11y } from '@/components/useDialogA11y'
 import PanelShell from "@/components/PanelShell"
 import {
   calcularIntervaloPorIdade,
@@ -383,6 +385,9 @@ export default function PedidosPage() {
   const [pixConfirmando, setPixConfirmando] = useState(false)
   const [pixErro, setPixErro] = useState<string | null>(null)
   const [modalEditarPagamento, setModalEditarPagamento] = useState<string | null>(null)
+  // ESC/armadilha de foco no formulário de troca de pagamento (não tinha
+  // nenhum dos dois; o Tab passeava pelo painel atrás do backdrop).
+  const editarPagamentoRef = useDialogA11y(!!modalEditarPagamento, () => setModalEditarPagamento(null))
   const [formEditarPagamento, setFormEditarPagamento] = useState<{ pagamento: string; troco: string }>({ pagamento: "", troco: "" })
   const [salvandoEdicaoPagamento, setSalvandoEdicaoPagamento] = useState(false)
   const [erroEdicaoPagamento, setErroEdicaoPagamento] = useState<string | null>(null)
@@ -2418,55 +2423,39 @@ export default function PedidosPage() {
           </>
         )}
 
-        {/* Modal limpar histórico */}
-        {modalLimpar && (
-          <>
-            <div onClick={() => setModalLimpar(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.7)", zIndex: 60, animation: "cbFadeIn .2s ease both" }} />
-            <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, margin: "0 auto", maxWidth: 375, background: "var(--background)", border: "1px solid var(--surface-secondary)", borderBottom: "none", borderRadius: "26px 26px 0 0", zIndex: 61, animation: "cbSheetUp .32s cubic-bezier(.2,.9,.3,1) both", padding: "20px 20px 36px", display: "flex", flexDirection: "column", gap: 16 }}>
-              <div style={{ width: 44, height: 5, borderRadius: 3, background: "var(--surface-elevated)", margin: "0 auto 4px" }} />
-              <div style={{ width: 48, height: 48, borderRadius: 14, background: "color-mix(in srgb, var(--danger) 10%, transparent)", border: "1px solid color-mix(in srgb, var(--danger) 25%, transparent)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><polyline points="3,6 5,6 21,6" stroke="var(--danger)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" stroke="var(--danger)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/><path d="M10 11v6M14 11v6" stroke="var(--danger)" strokeWidth="2.2" strokeLinecap="round"/><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" stroke="var(--danger)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                <p style={{ margin: 0, fontSize: 19, fontWeight: 900, letterSpacing: "-0.4px", lineHeight: 1.2 }}>Tem certeza?</p>
-                <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "var(--foreground-secondary)", lineHeight: 1.5 }}>Isso vai arquivar todos os pedidos entregues. Pedidos em aberto não serão afetados.</p>
-              </div>
-              <button onClick={limparHistorico} disabled={limpando} style={{ height: 56, border: "none", borderRadius: 16, background: limpando ? "var(--danger)" : "var(--danger)", color: "var(--foreground)", fontSize: 16, fontWeight: 900, letterSpacing: "-0.2px", opacity: limpando ? 0.7 : 1 }}>
-                {limpando ? "Arquivando..." : "Sim, arquivar entregues"}
-              </button>
-              <button onClick={() => setModalLimpar(false)} disabled={limpando} style={{ height: 46, border: "none", background: "transparent", color: "var(--foreground-secondary)", fontSize: 14, fontWeight: 800 }}>Cancelar</button>
-            </div>
-          </>
-        )}
+        {/* Confirmação: arquivar entregues — decisão de sim/não, resolvida
+            sem rolar (ver @/components/ConfirmDialog). */}
+        <ConfirmDialog
+          aberto={modalLimpar}
+          titulo="Arquivar todos os pedidos entregues?"
+          descricao="Pedidos em aberto não são afetados."
+          confirmarLabel="Sim, arquivar"
+          tom="perigo"
+          ocupado={limpando}
+          ocupadoLabel="Arquivando..."
+          onConfirmar={limparHistorico}
+          onCancelar={() => setModalLimpar(false)}
+        />
 
-        {/* Modal Arquivar Expediente */}
-        {modalArquivarExpediente && (
-          <>
-            <div onClick={() => setModalArquivarExpediente(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.7)", zIndex: 60, animation: "cbFadeIn .2s ease both" }} />
-            <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, margin: "0 auto", maxWidth: 375, background: "var(--background)", border: "1px solid var(--surface-secondary)", borderBottom: "none", borderRadius: "26px 26px 0 0", zIndex: 61, animation: "cbSheetUp .32s cubic-bezier(.2,.9,.3,1) both", padding: "20px 20px 36px", display: "flex", flexDirection: "column", gap: 16 }}>
-              <div style={{ width: 44, height: 5, borderRadius: 3, background: "var(--surface-elevated)", margin: "0 auto 4px" }} />
-              <div style={{ width: 48, height: 48, borderRadius: 14, background: "color-mix(in srgb, var(--attention) 10%, transparent)", border: "1px solid color-mix(in srgb, var(--attention) 25%, transparent)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <span style={{ fontSize: 22 }}>📦</span>
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                <p style={{ margin: 0, fontSize: 19, fontWeight: 900, letterSpacing: "-0.4px", lineHeight: 1.2 }}>Arquivar não resolvidos?</p>
-                <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "var(--foreground-secondary)", lineHeight: 1.5 }}>Pedidos pendentes, em preparo, na rua, aguardando Pix e conversas abertas serão movidos para a aba Arquivados. Nenhum dado será apagado.</p>
-                <p style={{ margin: 0, fontSize: 12, fontWeight: 700, color: "var(--foreground-muted)", lineHeight: 1.5 }}>Pedidos entregues e cancelados não são afetados.</p>
-              </div>
-              <button onClick={arquivarExpediente} disabled={arquivandoExpediente} style={{ height: 56, border: "none", borderRadius: 16, background: arquivandoExpediente ? "var(--attention)" : "var(--attention)", color: "var(--foreground)", fontSize: 16, fontWeight: 900, letterSpacing: "-0.2px", opacity: arquivandoExpediente ? 0.7 : 1 }}>
-                {arquivandoExpediente ? "Arquivando..." : "📦 Sim, arquivar não resolvidos"}
-              </button>
-              <button onClick={() => setModalArquivarExpediente(false)} disabled={arquivandoExpediente} style={{ height: 46, border: "none", background: "transparent", color: "var(--foreground-secondary)", fontSize: 14, fontWeight: 800 }}>Cancelar</button>
-            </div>
-          </>
-        )}
+        {/* Confirmação: arquivar não resolvidos. */}
+        <ConfirmDialog
+          aberto={modalArquivarExpediente}
+          titulo="Arquivar os pedidos não resolvidos?"
+          descricao="Pendentes, em preparo, na rua, aguardando Pix e conversas abertas vão para a aba Arquivados. Entregues e cancelados não são afetados, e nenhum dado é apagado."
+          confirmarLabel="Sim, arquivar"
+          tom="atencao"
+          ocupado={arquivandoExpediente}
+          ocupadoLabel="Arquivando..."
+          onConfirmar={arquivarExpediente}
+          onCancelar={() => setModalArquivarExpediente(false)}
+        />
 
       {/* Editar forma de pagamento (administrativo) — troca controlada, nunca confirma Pix sozinha */}
       {modalEditarPagamento && (() => {
         const pedidoModal = pedidos.find(p => p.id === modalEditarPagamento)
         const dinheiroSelecionado = /dinheiro/i.test(formEditarPagamento.pagamento)
         return (
-          <div role="dialog" aria-modal="true" aria-label="Editar forma de pagamento" style={{ position: "fixed", inset: 0, zIndex: 3200, background: "rgba(var(--overlay-rgb), 0.7)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div ref={editarPagamentoRef} role="dialog" aria-modal="true" aria-label="Editar forma de pagamento" style={{ position: "fixed", inset: 0, zIndex: 3200, background: "rgba(var(--overlay-rgb), 0.7)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
             <div style={{ background: "var(--surface)", borderRadius: 18, padding: 20, width: "100%", maxWidth: 380, display: "flex", flexDirection: "column", gap: 12 }}>
               <p style={{ fontSize: 16, fontWeight: 900, margin: 0, color: "var(--foreground)" }}>Editar forma de pagamento</p>
               {pedidoModal && (
@@ -2663,23 +2652,16 @@ export default function PedidosPage() {
       })()}
 
       {/* Modal Finalizar Pedido */}
-      {finalizarModal && (
-        <>
-          <div onClick={() => setFinalizarModal(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.7)", zIndex: 70, animation: "cbFadeIn .2s ease both" }} />
-          <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, margin: "0 auto", maxWidth: 480, background: "var(--background)", border: "1px solid var(--surface-secondary)", borderBottom: "none", borderRadius: "26px 26px 0 0", zIndex: 71, animation: "cbSheetUp .32s cubic-bezier(.2,.9,.3,1) both", padding: "20px 20px 36px", display: "flex", flexDirection: "column", gap: 16 }}>
-            <div style={{ width: 44, height: 5, borderRadius: 3, background: "var(--surface-elevated)", margin: "0 auto 4px" }} />
-            <div style={{ width: 48, height: 48, borderRadius: 14, background: "color-mix(in srgb, var(--success) 10%, transparent)", border: "1px solid color-mix(in srgb, var(--success) 25%, transparent)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M22 11.08V12a10 10 0 11-5.93-9.14" stroke="var(--success)" strokeWidth="2.2" strokeLinecap="round"/><polyline points="22,4 12,14.01 9,11.01" stroke="var(--success)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <p style={{ margin: 0, fontSize: 19, fontWeight: 900, letterSpacing: "-0.4px", lineHeight: 1.2 }}>Finalizar pedido?</p>
-              <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "var(--foreground-secondary)", lineHeight: 1.5 }}>O pedido será marcado como finalizado no painel. Nenhuma mensagem será enviada ao cliente.</p>
-            </div>
-            <button onClick={() => finalizarPedidoSilencioso(finalizarModal)} style={{ height: 56, border: "none", borderRadius: 16, background: "var(--success)", color: "var(--background)", fontSize: 16, fontWeight: 900 }}>Finalizar pedido</button>
-            <button onClick={() => setFinalizarModal(null)} style={{ height: 46, border: "none", background: "transparent", color: "var(--foreground-secondary)", fontSize: 14, fontWeight: 800 }}>Cancelar</button>
-          </div>
-        </>
-      )}
+      {/* Confirmação: finalizar pedido em silêncio. */}
+      <ConfirmDialog
+        aberto={!!finalizarModal}
+        titulo="Finalizar pedido?"
+        descricao="O pedido é marcado como finalizado no painel. Nenhuma mensagem é enviada ao cliente."
+        confirmarLabel="Finalizar"
+        tom="sucesso"
+        onConfirmar={() => { if (finalizarModal) finalizarPedidoSilencioso(finalizarModal) }}
+        onCancelar={() => setFinalizarModal(null)}
+      />
 
       {/* Modal Pedido Combinado */}
       {modalPedidoCombinado && pedidoCombinadoRascunho && (

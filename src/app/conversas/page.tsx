@@ -1,5 +1,6 @@
 "use client"
 import { useEffect, useState, useRef } from "react"
+import ConfirmDialog from '@/components/ConfirmDialog'
 import { useRouter } from "next/navigation"
 import PanelShell from "@/components/PanelShell"
 
@@ -1009,50 +1010,26 @@ export default function ConversasPage() {
       </PanelShell>
 
       {/* ── MODAL CONFIRMAÇÃO ── */}
-      {confirmando && (
-        <>
-          <div onClick={() => setConfirmando(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", zIndex: 90 }} />
-          <div style={{
-            position: "fixed", bottom: 0, left: 0, right: 0, margin: "0 auto", maxWidth: 480,
-            background: "var(--foreground)", border: "1px solid var(--primary)", borderBottom: "none",
-            borderRadius: "22px 22px 0 0", zIndex: 91,
-            animation: "cbSheetUp .3s cubic-bezier(.2,.9,.3,1) both",
-            padding: "18px 20px calc(env(safe-area-inset-bottom) + 28px)",
-            display: "flex", flexDirection: "column", gap: 10,
-          }}>
-            <div style={{ width: 40, height: 4, borderRadius: 2, background: "var(--primary)", margin: "0 auto 6px" }} />
-
-            {temPixPendente(confirmando) && (
-              <div style={{ background: "color-mix(in srgb, var(--primary) 7%, transparent)", border: "1px solid color-mix(in srgb, var(--primary) 22%, transparent)", borderRadius: 10, padding: "10px 14px" }}>
-                <div style={{ fontSize: 12, fontWeight: 900, color: "var(--brand-text)", marginBottom: 3 }}>⚠ Pix pendente</div>
-                <div style={{ fontSize: 12, fontWeight: 600, color: "var(--foreground-secondary)", lineHeight: 1.5 }}>
-                  Esse pedido aguarda confirmação de Pix. Finalizar removerá o atendimento da fila.
-                </div>
-              </div>
-            )}
-
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <div style={{ width: 44, height: 44, borderRadius: "50%", background: "color-mix(in srgb, var(--foreground-muted) 10%, transparent)", border: "1px solid var(--primary)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, fontWeight: 900, color: "var(--foreground-secondary)", flexShrink: 0 }}>
-                {getInitials(confirmando.cliente)}
-              </div>
-              <div>
-                <div style={{ fontSize: 17, fontWeight: 900, letterSpacing: "-0.3px", color: "var(--surface)" }}>Finalizar atendimento?</div>
-                <div style={{ fontSize: 12, fontWeight: 600, color: "var(--foreground-secondary)" }}>{ss(confirmando.cliente).split(" ")[0] || "Cliente"}</div>
-              </div>
+      {/* Confirmação: finalizar atendimento. O alerta de Pix pendente
+          continua aparecendo, agora como aviso dentro do diálogo compacto —
+          é a informação que muda a decisão, então nunca é escondida. */}
+      <ConfirmDialog
+        aberto={!!confirmando}
+        titulo={`Finalizar o atendimento de ${confirmando ? (ss(confirmando.cliente).split(" ")[0] || "cliente") : ""}?`}
+        descricao="O atendimento sai da tela de conversas. Nenhuma mensagem é enviada ao cliente."
+        aviso={confirmando && temPixPendente(confirmando) ? (
+          <div style={{ background: "color-mix(in srgb, var(--primary) 7%, transparent)", border: "1px solid color-mix(in srgb, var(--primary) 22%, transparent)", borderRadius: 10, padding: "10px 12px" }}>
+            <div style={{ fontSize: 12, fontWeight: 900, color: "var(--brand-text)", marginBottom: 3 }}>⚠ Pix pendente</div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: "var(--foreground-secondary)", lineHeight: 1.45 }}>
+              Esse pedido ainda aguarda confirmação de Pix.
             </div>
-
-            <div style={{ fontSize: 13, fontWeight: 600, color: "var(--foreground-secondary)", lineHeight: 1.55 }}>
-              Esse atendimento será removido da tela de conversas. Nenhuma mensagem será enviada ao cliente.
-            </div>
-            <button onClick={() => finalizarAtendimento(confirmando)} style={{ height: 52, borderRadius: 13, background: "var(--success-surface)", border: "1px solid var(--success-border)", color: "var(--success-text)", fontSize: 15, fontWeight: 900 }}>
-              Sim, finalizar
-            </button>
-            <button onClick={() => setConfirmando(null)} style={{ height: 42, background: "transparent", color: "var(--foreground-secondary)", fontSize: 13, fontWeight: 800, border: "none" }}>
-              Cancelar
-            </button>
           </div>
-        </>
-      )}
+        ) : undefined}
+        confirmarLabel="Finalizar"
+        tom="sucesso"
+        onConfirmar={() => { if (confirmando) finalizarAtendimento(confirmando) }}
+        onCancelar={() => setConfirmando(null)}
+      />
 
       {/* Toast */}
       {toast && (

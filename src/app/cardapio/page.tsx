@@ -19,6 +19,8 @@ import type { PizzaCatalog } from "@/lib/catalog/pizzas";
 import { todosOsProdutos, type SimpleCatalog } from "@/lib/catalog/simpleProducts";
 import { isNewCatalogItemId, isNoveltyPeriodActive, noveltyExpiresAt } from "@/lib/catalog/novelties";
 import { nextFlavorSelection } from "@/lib/pizzaSabores";
+import ConfirmDialog from "@/components/ConfirmDialog";
+import { useDialogA11y } from "@/components/useDialogA11y";
 
 // Ícones de categoria da home (menu/navegação) — lucide-react, sem emoji.
 // Mantidos separados de ICONS (que continua usando emoji para os itens
@@ -642,41 +644,19 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
       )}
 
       {/* Modal confirmação lote */}
-      {confirmLote && (
-        <>
-          <div onClick={() => setConfirmLote(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.75)", zIndex: 90, animation: "cbFadeIn .2s ease" }} />
-          <div style={{
-            position: "fixed", bottom: 0, left: 0, right: 0,
-            margin: "0 auto", maxWidth: 390,
-            background: "var(--background)",
-            border: "1px solid var(--surface-secondary)", borderBottom: "none",
-            borderRadius: "22px 22px 0 0",
-            zIndex: 91,
-            animation: "cbSheetUp .3s cubic-bezier(.2,.9,.3,1) both",
-            padding: "18px 20px calc(env(safe-area-inset-bottom) + 28px)",
-            display: "flex", flexDirection: "column", gap: 12,
-          }}>
-            <div style={{ width: 40, height: 4, borderRadius: 2, background: "var(--surface-elevated)", margin: "0 auto 6px" }} />
-            <p style={{ margin: 0, fontSize: 17, fontWeight: 900, letterSpacing: "-0.3px" }}>
-              {confirmLote === "esgotado"
-                ? `Esgotar ${selecionados.size} produto${selecionados.size > 1 ? "s" : ""}?`
-                : `Disponibilizar ${selecionados.size} produto${selecionados.size > 1 ? "s" : ""}?`}
-            </p>
-            <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: "var(--foreground-secondary)", lineHeight: 1.5 }}>
-              {confirmLote === "esgotado"
-                ? "O bot vai parar de vender esses produtos imediatamente."
-                : "O bot vai voltar a oferecer esses produtos."}
-            </p>
-            <button
-              onClick={() => aplicarLote(confirmLote === "esgotado")}
-              style={{ height: 52, borderRadius: 13, background: confirmLote === "esgotado" ? "var(--danger)" : "var(--success)", color: "var(--foreground)", fontSize: 15, fontWeight: 900 }}
-            >
-              {confirmLote === "esgotado" ? "Confirmar — marcar esgotados" : "Confirmar — disponibilizar"}
-            </button>
-            <button onClick={() => setConfirmLote(null)} style={{ height: 42, background: "transparent", color: "var(--foreground-muted)", fontSize: 13, fontWeight: 800 }}>Cancelar</button>
-          </div>
-        </>
-      )}
+      <ConfirmDialog
+        aberto={!!confirmLote}
+        titulo={confirmLote === "esgotado"
+          ? `Esgotar ${selecionados.size} produto${selecionados.size > 1 ? "s" : ""}?`
+          : `Disponibilizar ${selecionados.size} produto${selecionados.size > 1 ? "s" : ""}?`}
+        descricao={confirmLote === "esgotado"
+          ? "O bot para de vender esses produtos imediatamente."
+          : "O bot volta a oferecer esses produtos."}
+        confirmarLabel={confirmLote === "esgotado" ? "Esgotar" : "Disponibilizar"}
+        tom={confirmLote === "esgotado" ? "perigo" : "sucesso"}
+        onConfirmar={() => aplicarLote(confirmLote === "esgotado")}
+        onCancelar={() => setConfirmLote(null)}
+      />
     </>
   )
 }
@@ -862,29 +842,6 @@ function catalogParaListagem(p: {
 // que antes mantinha uma cópia divergente; re-exportada aqui porque esta
 // página é o consumidor histórico da regra.
 export { nextFlavorSelection };
-
-// Sabores já escolhidos que NÃO aparecem nas seções visíveis no momento.
-//
-// A aba de categoria do seletor de pizza (Tradicionais/Especiais/Doces) é só
-// um FILTRO DE EXIBIÇÃO: trocar de aba nunca pode apagar o que já foi
-// escolhido, senão o meio a meio entre categorias diferentes (Tradicional +
-// Especial, o caso mais pedido) fica impossível — o 1º sabor sumia no exato
-// momento em que o cliente abria a aba onde o 2º estava. Estes sabores
-// voltam numa seção fixa no topo da lista, marcados e desmarcáveis, para o
-// cliente sempre enxergar os dois. Fora do fluxo de pizza (mini-pizza,
-// calzone, pastel — 1 sabor só, sem abas) o sabor escolhido sempre está na
-// própria seção, então a lista devolvida é vazia e nada muda.
-export function saboresEscolhidosForaDasSecoes(
-  escolhidos: readonly (string | null)[],
-  secoes: readonly { flavors: readonly string[] }[]
-): string[] {
-  const visiveis = new Set(secoes.flatMap((section) => [...section.flavors]));
-  const fora: string[] = [];
-  for (const sabor of escolhidos) {
-    if (sabor && !visiveis.has(sabor) && !fora.includes(sabor)) fora.push(sabor);
-  }
-  return fora;
-}
 
 // Resolve a seleção de pizza normal (tamanho + 1/2 sabores + borda, os
 // mesmos já escolhidos pela UI hoje por nome) para os IDs estáveis do
@@ -1532,6 +1489,12 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const pastelFornoEfetivo = menu.catalog ? menu.catalog.pastelForno.map(catalogParaListagem) : [];
   const vitaminasEfetivas = menu.catalog ? menu.catalog.vitaminas.map(catalogParaListagem) : [];
 
+  // ESC, armadilha de foco e devolução do foco nos dois modais do cliente —
+  // antes só dava para sair clicando no × ou no fundo, e o Tab passeava pela
+  // página atrás do backdrop.
+  const flavorModalRef = useDialogA11y(flavorModalOpen, () => setFlavorModalOpen(false));
+  const paymentModalRef = useDialogA11y(!!paymentModal, () => setPaymentModal(null));
+
   const [pizzaCategoryFilter, setPizzaCategoryFilter] = useState<"tradicional" | "especial" | "doce">("tradicional");
   const [noveltyActive, setNoveltyActive] = useState(false);
   useEffect(() => {
@@ -1673,20 +1636,13 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const calzoneFlavorNames = menu.catalog
     ? menu.catalog.calzone.find((l) => l.name === calzoneItem?.name)?.flavors?.filter((f) => f.available).map((f) => f.name) ?? []
     : [...(menu.saltyFlavors || []), ...(menu.sweetFlavors || [])];
-  const flavorSectionsDaAba = miniPizzaMode
+  const flavorSections = miniPizzaMode
     ? [{ title: "Sabores da mini-pizza", flavors: miniPizzaFlavors }]
     : calzoneMode
       ? [{ title: "Sabores do calzone", flavors: calzoneFlavorNames }]
       : pastelMode
         ? [{ title: "Sabores", flavors: pastelPendente?.flavors || [] }]
         : pizzaFlavorSections;
-  // Meio a meio entre categorias diferentes: a aba só filtra o que é
-  // MOSTRADO, nunca o que está escolhido (ver saboresEscolhidosForaDasSecoes)
-  // — o sabor da outra aba fica fixo no topo, selecionado e desmarcável.
-  const flavorSectionsEscolhidosForaDaAba = saboresEscolhidosForaDasSecoes([f1, f2], flavorSectionsDaAba);
-  const flavorSections = flavorSectionsEscolhidosForaDaAba.length > 0
-    ? [{ title: "Escolhidos", flavors: flavorSectionsEscolhidosForaDaAba }, ...flavorSectionsDaAba]
-    : flavorSectionsDaAba;
   const catalogSizeLabel = menu.pizzaCatalog?.sizes.find((s) => s.code === size)?.label;
   const selectedSizeLabel = miniPizzaMode && miniPizzaItem ? miniPizzaItem.name : pastelMode && pastelPendente ? pastelPendente.name : size ? (catalogSizeLabel || (menu.sizes || []).find((s) => s.code === size)?.label || size) : "";
   const buildFootHint = !size
@@ -1706,16 +1662,91 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                 : `Sabores prontos — agora escolha a borda${precoPizzaBaseReais !== undefined ? ` · ${money(precoPizzaBaseReais)}` : ""}`;
   const buildActionLabel = miniPizzaMode ? "Adicionar mini-pizza" : calzoneMode ? "Adicionar calzone" : pastelMode ? "Adicionar" : isMiniSize ? "Adicionar mini" : "Confirmar pizza";
   const flavorModalTitle = miniPizzaMode ? (miniPizzaItem?.name || "Mini-pizza") : calzoneMode ? (calzoneItem?.name || "Calzone") : pastelMode ? (pastelPendente?.name || "Sabor") : `Pizza ${selectedSizeLabel}`;
-  const flavorModalMessage = miniPizzaMode ? "Escolha o sabor da sua mini-pizza." : calzoneMode ? "Escolha o sabor do seu calzone." : pastelMode ? "Escolha o sabor." : isMiniSize ? "Escolha 1 sabor para a pizza Mini." : "Você pode escolher até 2 sabores.";
-  const flavorModalHint = miniPizzaMode || calzoneMode || pastelMode || isMiniSize ? null : "Escolha 1 sabor para pizza inteira ou 2 sabores para meio a meio — pode misturar categorias.";
-  const flavorProgressLabel = f2 ? `${f1} / ${f2}` : f1 ? `${f1} — toque em outro para meio a meio` : "Nenhum sabor escolhido ainda";
-  const renderFlavorProgress = () => !miniPizzaMode && !calzoneMode && !pastelMode && !isMiniSize && (
-    <div className="flavor-progress">
-      <div className="flavor-progress-dots">
-        <span className={`pd ${f1 ? "done" : "cur"}`} />
-        <span className={`pd ${f2 ? "done" : f1 ? "cur" : ""}`} />
+  // UMA linha de instrução, a que responde "o que eu faço aqui?". Antes eram
+  // duas (mensagem + hint) dizendo a mesma coisa com palavras diferentes,
+  // mais os dots de progresso — três blocos de texto empurrando a lista de
+  // sabores para fora da primeira tela. A partir do 1º sabor escolhido a
+  // linha some: quem informa o estado dali em diante são os chips.
+  const flavorModalMessage = miniPizzaMode
+    ? "Escolha o sabor da sua mini-pizza."
+    : calzoneMode
+      ? "Escolha o sabor do seu calzone."
+      : pastelMode
+        ? "Escolha o sabor."
+        : isMiniSize
+          ? "Escolha 1 sabor — a Mini não é meio a meio."
+          : "Escolha 1 ou 2 sabores — pode misturar categorias.";
+  // Preço real da pizza em montagem (mesma fonte que finalizarPizza cobra,
+  // antes de borda/adicionais). Fica no CTA porque, com o modal aberto, o
+  // rodapé que mostrava o valor fica escondido atrás do backdrop — o cliente
+  // escolhia sabor sem ver o preço em momento nenhum.
+  const precoCtaSufixo = !miniPizzaMode && !calzoneMode && !pastelMode && precoPizzaBaseReais !== undefined
+    ? ` · ${money(precoPizzaBaseReais)}`
+    : "";
+  // Sabores escolhidos como CHIPS compactos, não como cards.
+  //
+  // Antes existia uma seção "Escolhidos" com os mesmos cards grandes da lista
+  // (~70px de altura cada) só para repetir um nome que cabe em duas palavras
+  // — empurrava a lista para baixo e competia visualmente com a decisão. Os
+  // chips dizem a mesma coisa em uma linha, mostram os dois slots de uma vez
+  // (inclusive quando cada sabor veio de uma aba diferente, que é o caso do
+  // meio a meio) e trazem o × para remover no próprio lugar onde o cliente
+  // está olhando — sem precisar caçar o sabor na aba de origem.
+  // Preço do sabor no tamanho atual — mesma leitura que já filtra a lista
+  // (`pricesBySizeCode[size]`), agora também exibida. Sem preço na linha o
+  // cliente não tinha como comparar sabores (variam de R$40 a R$62) e só
+  // descobria o valor depois de confirmar. O total real do meio a meio (o
+  // MAIOR dos dois, regra existente) continua sendo o do CTA.
+  function precoSaborReais(nome: string): number | undefined {
+    if (!menu.pizzaCatalog || !size) return undefined;
+    const cents = menu.pizzaCatalog.flavors.find((f) => f.name === nome)?.pricesBySizeCode[size as "P" | "M" | "G" | "F" | "MINI"];
+    return cents === undefined ? undefined : cents / 100;
+  }
+  // Linha de sabor: nome (+ selos) → preço → estado. Sem o 🍕 repetido em
+  // toda linha (não distingue nada entre sabores de pizza) e mais baixa, para
+  // caber mais opção por tela sem apertar o alvo de toque.
+  const renderFlavorRow = (f: string, section: { title: string }, keyPrefix: string) => {
+    const especial = section.title === "Especiais";
+    const esg = esgotados.includes(f);
+    const precoReais = precoSaborReais(f);
+    const novidade = noveltyActive && isNewCatalogItemId(menu.pizzaCatalog?.flavors.find((flavor) => flavor.name === f)?.id);
+    return (
+      <div
+        key={`${keyPrefix}-${section.title}-${f}`}
+        className={`opt flavor-opt ${especial ? "flavor-opt-especial" : ""} ${f === f1 || f === f2 ? "sel" : ""} ${esg ? "esg" : ""}`}
+        onClick={() => !esg && pickFlavor(f)}
+        style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }}
+        {...optA11yAttrs(esg)}
+        onKeyDown={(e) => { if (!esg && isActivateKey(e)) { e.preventDefault(); pickFlavor(f); } }}
+      >
+        <div className="opt-body">
+          <div className="opt-title opt-title-with-badge">{f}{novidade && <NoveltyBadge />}</div>
+          {esg && <div className="opt-desc" style={{ color: "var(--danger)" }}>Esgotado</div>}
+        </div>
+        {!esg && precoReais !== undefined && <div className="opt-price flavor-opt-price">{money(precoReais)}</div>}
+        <div className="opt-check" />
       </div>
-      <span className="flavor-progress-label">{flavorProgressLabel}</span>
+    );
+  };
+  const saboresEscolhidos = [f1, f2].filter((s): s is string => !!s);
+  const limiteSabores = miniPizzaMode || calzoneMode || pastelMode || isMiniSize ? 1 : 2;
+  const renderFlavorChips = () => saboresEscolhidos.length > 0 && (
+    <div className="sabor-chips" aria-label="Sabores escolhidos">
+      {saboresEscolhidos.map((sabor) => (
+        <button
+          key={`chip-${sabor}`}
+          type="button"
+          className="sabor-chip"
+          onClick={() => pickFlavor(sabor)}
+          aria-label={`Remover ${sabor}`}
+        >
+          <span className="sabor-chip-nome">{sabor}</span>
+          <span className="sabor-chip-x" aria-hidden="true">×</span>
+        </button>
+      ))}
+      {limiteSabores === 2 && saboresEscolhidos.length === 1 && (
+        <span className="sabor-chip-vazio">+ 2º sabor (opcional)</span>
+      )}
     </div>
   );
   // Fecha a pizza (com borda e adicionais já escolhidos, ambos opcionais —
@@ -2358,7 +2389,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                       ))}
                     </div>
                   )}
-                  {renderFlavorProgress()}
+                  {renderFlavorChips()}
                   <div className="flavor-list">
                     {flavorSections.map((section) => {
                       // Especiais (cardápio oficial 2026): identidade visual discreta
@@ -2366,15 +2397,10 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                       const especial = section.title === "Especiais";
                       return (
                         <div key={section.title}>
-                          <div className={`section-label ${especial ? "section-label-especial" : ""}`}>{section.title}</div>
-                          {section.flavors.map((f) => {
-                            const esg = esgotados.includes(f)
-                            return (
-                              <div key={`${section.title}-${f}`} className={`opt flavor-opt ${especial ? "flavor-opt-especial" : ""} ${f === f1 || f === f2 ? "sel" : ""} ${esg ? "esg" : ""}`} onClick={() => !esg && pickFlavor(f)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }} {...optA11yAttrs(esg)} onKeyDown={(e) => { if (!esg && isActivateKey(e)) { e.preventDefault(); pickFlavor(f); } }}>
-                                <div className="opt-emoji">🍕</div><div className="opt-body"><div className="opt-title opt-title-with-badge">{f}{noveltyActive && isNewCatalogItemId(menu.pizzaCatalog?.flavors.find((flavor) => flavor.name === f)?.id) && <NoveltyBadge />}</div>{esg && <div className="opt-desc" style={{ color: "var(--danger)" }}>Esgotado</div>}</div><div className="opt-check" />
-                              </div>
-                            )
-                          })}
+                          {flavorSections.length > 1 && (
+                            <div className={`section-label ${especial ? "section-label-especial" : ""}`}>{section.title}</div>
+                          )}
+                          {section.flavors.map((f) => renderFlavorRow(f, section, "build"))}
                         </div>
                       );
                     })}
@@ -2882,7 +2908,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
       )}
       {paymentModal && (
         <div className="payment-modal-backdrop" role="presentation" onClick={() => setPaymentModal(null)}>
-          <div className="payment-modal" role="dialog" aria-modal="true" aria-labelledby="payment-modal-title" onClick={(e) => e.stopPropagation()}>
+          <div ref={paymentModalRef} className="payment-modal" role="dialog" aria-modal="true" aria-labelledby="payment-modal-title" onClick={(e) => e.stopPropagation()}>
             <div className="payment-modal-head">
               <div>
                 {paymentModal === "Dinheiro" ? (
@@ -2989,16 +3015,17 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
       )}
       {(screen === "sc-build" || (screen === "sc-list" && (calzoneMode || pastelMode))) && flavorModalOpen && size && (
         <div className="flavor-modal-backdrop" role="presentation" onClick={() => setFlavorModalOpen(false)}>
-          <div className="flavor-modal payment-modal" role="dialog" aria-modal="true" aria-labelledby="flavor-modal-title" onClick={(e) => e.stopPropagation()}>
-            <div className="payment-modal-head">
-              <div>
+          <div ref={flavorModalRef} className="flavor-modal payment-modal" role="dialog" aria-modal="true" aria-labelledby="flavor-modal-title" onClick={(e) => e.stopPropagation()}>
+            {/* Cabeçalho enxuto: título (onde estou) + uma linha de instrução
+                que some assim que os chips passam a contar o estado. */}
+            <div className="payment-modal-head flavor-modal-head">
+              <div className="flavor-modal-head-text">
                 <h3 id="flavor-modal-title">{flavorModalTitle}</h3>
-                <p className="flavor-modal-msg">{flavorModalMessage}</p>
-                {flavorModalHint && <p className="flavor-modal-hint">{flavorModalHint}</p>}
-                {renderFlavorProgress()}
+                {saboresEscolhidos.length === 0 && <p className="flavor-modal-msg">{flavorModalMessage}</p>}
               </div>
               <button type="button" className="payment-modal-close" aria-label="Fechar" onClick={() => setFlavorModalOpen(false)}>×</button>
             </div>
+            {renderFlavorChips()}
             <div className="flavor-modal-body">
               {!miniPizzaMode && !calzoneMode && !pastelMode && menu.pizzaCatalog && (
                 <div className="pizza-category-tabs modal-tabs" role="tablist" aria-label="Categoria dos sabores">
@@ -3009,25 +3036,20 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                   ))}
                 </div>
               )}
-              {flavorSections.map((section) => {
-                const especial = section.title === "Especiais";
-                return (
-                  <div key={section.title}>
-                    <div className={`section-label ${especial ? "section-label-especial" : ""}`}>{section.title}</div>
-                    {section.flavors.map((f) => {
-                      const esg = esgotados.includes(f);
-                      return (
-                        <div key={`modal-${section.title}-${f}`} className={`opt flavor-opt ${especial ? "flavor-opt-especial" : ""} ${f === f1 || f === f2 ? "sel" : ""} ${esg ? "esg" : ""}`} onClick={() => !esg && pickFlavor(f)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }} {...optA11yAttrs(esg)} onKeyDown={(e) => { if (!esg && isActivateKey(e)) { e.preventDefault(); pickFlavor(f); } }}>
-                          <div className="opt-emoji">🍕</div><div className="opt-body"><div className="opt-title opt-title-with-badge">{f}{noveltyActive && isNewCatalogItemId(menu.pizzaCatalog?.flavors.find((flavor) => flavor.name === f)?.id) && <NoveltyBadge />}</div>{esg && <div className="opt-desc" style={{ color: "var(--danger)" }}>Esgotado</div>}</div><div className="opt-check" />
-                        </div>
-                      );
-                    })}
-                  </div>
-                );
-              })}
+              {flavorSections.map((section) => (
+                <div key={section.title}>
+                  {/* Com as abas ativas existe UMA seção só e o rótulo repetia
+                      o nome da aba logo acima — ruído puro. Ele volta quando
+                      há mais de uma seção (cardápio legado: Salgadas/Doces). */}
+                  {flavorSections.length > 1 && (
+                    <div className={`section-label ${section.title === "Especiais" ? "section-label-especial" : ""}`}>{section.title}</div>
+                  )}
+                  {section.flavors.map((f) => renderFlavorRow(f, section, "modal"))}
+                </div>
+              ))}
             </div>
             <div className="payment-modal-actions single">
-              <button type="button" className="btn" disabled={!buildOk} onClick={confirmFromModal}>{buildActionLabel}</button>
+              <button type="button" className="btn" disabled={!buildOk} onClick={confirmFromModal}>{buildActionLabel}{precoCtaSufixo}</button>
             </div>
           </div>
         </div>
@@ -3170,7 +3192,11 @@ main{width:100%;padding:6px 20px 20px}
 .home-cat-special{border-color:color-mix(in srgb, #a78bfa 48%, var(--line));background:color-mix(in srgb, #a78bfa 7%, var(--surface))}
 .novelty-badge{display:inline-flex;align-items:center;width:max-content;border-radius:999px;background:#facc15;color:#3f3100;font-size:9.5px;font-weight:900;line-height:1;padding:5px 7px;text-transform:uppercase;letter-spacing:.55px;white-space:nowrap}
 .home-novelty{position:absolute;top:10px;right:10px}
-.opt-title-with-badge{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+/* O selo acompanha o texto como se fosse mais uma palavra (inline), em vez de
+   ser um item flex que quebra sozinho para a linha de baixo — era isso que
+   fazia a linha do sabor variar de 56px para 90px conforme o nome. */
+.opt-title-with-badge{display:block}
+.opt-title-with-badge .novelty-badge{margin-left:7px;vertical-align:middle;position:relative;top:-1px}
 .pizza-category-tabs{display:flex;gap:8px;overflow-x:auto;padding:2px 0 10px;margin-bottom:8px;scrollbar-width:none}
 .pizza-category-tabs::-webkit-scrollbar{display:none}
 .pizza-category-tabs button{flex:0 0 auto;border:1px solid var(--line);background:var(--surface);color:var(--text-sub);border-radius:999px;padding:9px 13px;font-family:var(--font-ui);font-size:12.5px;font-weight:800;cursor:pointer}
@@ -3201,7 +3227,30 @@ main{width:100%;padding:6px 20px 20px}
 .flavor-mode-card span{display:block;font-size:12.5px;color:var(--text-sub);margin-top:3px;line-height:1.35}
 .mini-flow-note{margin:-2px 0 12px;padding:11px 12px;border-radius:13px;background:var(--brand-soft);color:var(--text-sub);font-size:13px;font-weight:700}
 .flavor-list{max-height:470px;overflow-y:auto;padding-right:2px;padding-bottom:86px;scrollbar-width:thin}
-.flavor-opt{padding:14px 16px;margin-bottom:8px}
+/* Linha de sabor mais baixa e sem emoji decorativo: cabem ~2 opções a mais
+   por tela e o olho percorre nome → preço → estado sem desviar. O alvo de
+   toque continua com 56px de altura mínima. */
+.flavor-opt{padding:11px 14px;margin-bottom:6px;gap:12px;min-height:56px;border-radius:14px;box-shadow:none}
+.flavor-opt .opt-title{font-size:15px}
+.flavor-opt-price{font-size:13.5px;font-weight:700;color:var(--text-sub);white-space:nowrap}
+.flavor-opt.sel .flavor-opt-price{color:var(--text)}
+/* Telas estreitas (320/360): sem este ajuste, nome longo + selo "Novidade"
+   ocupava TRÊS linhas (92px) e empurrava metade da lista para fora da tela. */
+@media(max-width:380px){
+  .flavor-opt{padding:10px 12px;gap:9px}
+  .flavor-opt .opt-title{font-size:14px}
+  .flavor-opt .novelty-badge{font-size:8.5px;padding:4px 5px;letter-spacing:.4px}
+  .flavor-opt-price{font-size:12.5px}
+}
+/* 320px é o piso: aqui o nome mais longo do cardápio ainda precisava de uma
+   3ª linha, então o preço e a marca de seleção cedem alguns pixels para o
+   nome — que é a informação que não pode encolher nem ser cortada. */
+@media(max-width:340px){
+  .flavor-opt{padding:9px 10px;gap:7px}
+  .flavor-opt .opt-title{font-size:13.5px}
+  .flavor-opt .opt-check{width:20px;height:20px}
+  .flavor-opt-price{font-size:12px}
+}
 .section-label-especial{color:#a78bfa}
 .flavor-opt-especial{border-left:3px solid color-mix(in srgb, #a78bfa 55%, transparent)}
 .flavor-opt-especial.sel{border-color:#a78bfa;background:color-mix(in srgb, #a78bfa 10%, var(--surface))}
@@ -3210,9 +3259,21 @@ main{width:100%;padding:6px 20px 20px}
 .mam.on .switch{background:var(--brand)}
 .mam.on .switch::after{left:23px}
 .half-hint{font-size:13.5px;color:var(--gold);margin:-4px 0 12px;font-weight:500;padding-left:2px}
-.flavor-progress{display:flex;align-items:center;gap:10px;margin:2px 0 14px;padding-left:2px}
-.flavor-progress-dots{display:flex;gap:6px;flex:0 0 auto}
-.flavor-progress-label{font-size:13px;color:var(--text-sub);font-weight:500}
+/* Sabores escolhidos: chips de UMA linha, no lugar dos cards de ~70px que a
+   seção "Escolhidos" usava. Cada chip é o próprio botão de remover (alvo de
+   toque cheio, ≥40px), então tirar um sabor não exige achá-lo na aba de
+   origem. */
+.sabor-chips{display:flex;flex-wrap:wrap;align-items:center;gap:7px;margin:0 0 10px}
+.sabor-chip{display:inline-flex;align-items:center;gap:7px;min-height:40px;padding:8px 12px;border-radius:999px;border:1px solid var(--brand);background:var(--brand-soft);color:var(--text);font-family:var(--font-ui);font-size:13px;font-weight:700;cursor:pointer;max-width:100%}
+.sabor-chip-nome{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sabor-chip-x{font-size:16px;line-height:1;color:var(--text-sub);flex:0 0 auto}
+.sabor-chip:hover .sabor-chip-x,.sabor-chip:focus-visible .sabor-chip-x{color:var(--danger)}
+.sabor-chip:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+.sabor-chip-vazio{display:inline-flex;align-items:center;min-height:40px;padding:8px 12px;border-radius:999px;border:1px dashed var(--line-strong);color:var(--text-sub);font-size:12.5px;font-weight:600}
+/* Cabeçalho do modal de sabores: título + no máximo uma linha de instrução. */
+.flavor-modal-head{margin-bottom:10px}
+.flavor-modal-head-text{min-width:0}
+.flavor-modal .sabor-chips{margin:0 0 8px}
 .btn{width:100%;background:var(--brand);color:var(--brand-foreground);border:none;border-radius:14px;padding:16px;font-family:var(--font-ui);font-size:15.5px;font-weight:600;cursor:pointer;transition:transform .14s,background .14s;box-shadow:0 3px 12px var(--brand-soft);letter-spacing:.1px}
 .btn:active{transform:scale(.98);background:var(--brand-press)}
 .btn:disabled{opacity:.35;box-shadow:none;cursor:not-allowed}
