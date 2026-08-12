@@ -9,6 +9,7 @@ import {
   montarPagamentoComposto,
   pagamentoAindaValido,
 } from "@/lib/pagamentoComposto";
+import { nextFlavorSelection } from "@/lib/pizzaSabores";
 
 type ItemApp = {
   kind: "pizza" | "simple" | "promo";
@@ -552,13 +553,15 @@ function AdicionarItemModal({ menu, onFechar, onAdicionar }: { menu: MenuType; o
   const [macarronadaSel, setMacarronadaSel] = useState<{ name: string; price: number; sizes?: { code: string; price: number }[] } | null>(null);
   const [sucoSel, setSucoSel] = useState<{ name: string; price: number } | null>(null);
 
+  // Mesma regra do Cardápio Público, literalmente a mesma função
+  // (@/lib/pizzaSabores): até 2 sabores, tocar num sabor já escolhido
+  // desmarca, e com o limite atingido o 3º toque não muda nada (antes esta
+  // tela tinha uma cópia própria que, no 3º toque, apagava OS DOIS sabores e
+  // ficava só com o novo).
   function pickFlavor(f: string) {
-    if (f1 === f) { setF1(f2); setF2(null); return; }
-    if (f2 === f) { setF2(null); return; }
-    if (!f1) { setF1(f); return; }
-    if (!f2) { setF2(f); return; }
-    setF1(f);
-    setF2(null);
+    const next = nextFlavorSelection({ f1, f2 }, f, false);
+    setF1(next.f1);
+    setF2(next.f2);
   }
 
   function confirmarPizza() {

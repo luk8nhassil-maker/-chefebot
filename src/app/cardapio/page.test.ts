@@ -1,7 +1,11 @@
 import { describe, test, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { nextFlavorSelection, resolverPizzaSelectionIds, resolverSimpleSelectionIds, precoPizzaLocalCents, precoMinimoPorTamanho } from "./page";
+import { nextFlavorSelection, saboresEscolhidosForaDasSecoes, resolverPizzaSelectionIds, resolverSimpleSelectionIds, precoPizzaLocalCents, precoMinimoPorTamanho } from "./page";
+import { precificarPizzaPorId } from "@/lib/pricing/pizzaEngine";
+import type { SelecaoSabores } from "@/lib/pizzaSabores";
+import { resolverItemComSelecaoEstruturada } from "@/lib/pedidoAppSelecaoEstruturada";
+import { construirSnapshotItem, type SelecaoSnapshotPizza } from "@/lib/pedidoSnapshot";
 import { buildPizzaCatalog } from "@/lib/catalog/pizzas";
 import { buildSimpleCatalog } from "@/lib/catalog/simpleProducts";
 import { MENU } from "@/lib/menu";
@@ -247,9 +251,10 @@ describe("nextFlavorSelection — regra de sabor compartilhada por pizza, mini-p
     expect(sel).toEqual({ f1: "Calabresa", f2: "Portuguesa" });
   });
 
-  test("pizza normal: tocar num 3º sabor substitui o 2º, nunca ultrapassa 2", () => {
+  test("pizza normal: com 2 sabores escolhidos, o 3º é RECUSADO e a seleção fica intacta (nunca substitui em silêncio)", () => {
     const sel = nextFlavorSelection({ f1: "Calabresa", f2: "Portuguesa" }, "Baiana", false);
-    expect(sel).toEqual({ f1: "Calabresa", f2: "Baiana" });
+    expect(sel).toEqual({ f1: "Calabresa", f2: "Portuguesa" });
+    expect([sel.f1, sel.f2]).not.toContain("Baiana");
   });
 
   test("calzone/mini-pizza (singleFlavor=true) aceita só 1 sabor, mesmo tentando escolher um 2º em seguida", () => {
@@ -265,6 +270,166 @@ describe("nextFlavorSelection — regra de sabor compartilhada por pizza, mini-p
   test("calzone/mini-pizza: tocar no mesmo sabor selecionado desmarca (sem deixar f2 residual)", () => {
     const sel = nextFlavorSelection({ f1: "Calabresa", f2: null }, "Calabresa", true);
     expect(sel).toEqual({ f1: null, f2: null });
+  });
+});
+
+describe("REGRESSÃO — pizza de 2 sabores de ponta a ponta (montagem → carrinho → payload → pedido), inclusive entre categorias diferentes", () => {
+  const catalog = buildPizzaCatalog(MENU);
+  const nomePorCategoria = (categoria: "tradicional" | "especial" | "doce", sizeCode: string) =>
+    catalog.flavors.filter((f) => f.available && f.category === categoria && f.pricesBySizeCode[sizeCode as "P" | "M" | "G" | "F" | "MINI"] !== undefined).map((f) => f.name);
+  const tradicionais = nomePorCategoria("tradicional", "G");
+  const especiais = nomePorCategoria("especial", "G");
+  const idPorNome = (nome: string) => catalog.flavors.find((f) => f.name === nome)!.id;
+  const sizeIdG = catalog.sizes.find((s) => s.code === "G")!.id;
+  // Seções exatamente como a UI monta: SÓ a aba ativa (ver pizzaFlavorSections).
+  const secoesDaAba = (categoria: "tradicional" | "especial" | "doce") => [{ title: categoria, flavors: nomePorCategoria(categoria, "G") }];
+
+  test("Caso A — 1 sabor só continua válido do início ao fim (não passou a exigir 2)", () => {
+    const sel = nextFlavorSelection({ f1: null, f2: null }, tradicionais[0], false);
+    expect(sel).toEqual({ f1: tradicionais[0], f2: null });
+    const selecao = resolverPizzaSelectionIds(catalog, "G", sel.f1!, sel.f2, null);
+    expect(selecao!.flavorIds).toEqual([idPorNome(tradicionais[0])]);
+    const pedido = resolverItemComSelecaoEstruturada({ kind: "pizza", name: "", detail: "", price: 0, qty: 1, pizzaSelection: selecao }, catalog);
+    expect(pedido.ok).toBe(true);
+    if (pedido.ok) expect(pedido.item.name).toBe("Pizza G");
+  });
+
+  test("Caso B — o 2º sabor é somado ao 1º (nunca substitui), inclusive vindo de outra aba de categoria", () => {
+    // 1º clique na aba Tradicionais.
+    let sel = nextFlavorSelection({ f1: null, f2: null }, tradicionais[0], false);
+    // Cliente troca para a aba Especiais: a aba é só filtro de exibição, o
+    // estado da montagem NÃO é tocado (era exatamente aqui que o 1º sabor
+    // sumia — causa raiz do bug).
+    expect(saboresEscolhidosForaDasSecoes([sel.f1, sel.f2], secoesDaAba("especial"))).toEqual([tradicionais[0]]);
+    // 2º clique, agora num Especial.
+    sel = nextFlavorSelection(sel, especiais[0], false);
+    expect(sel).toEqual({ f1: tradicionais[0], f2: especiais[0] });
+  });
+
+  test("Caso C — com 2 sabores escolhidos, o 3º é recusado SEM trocar nenhum dos dois (e o preço não muda)", () => {
+    const antes = { f1: tradicionais[0], f2: especiais[0] };
+    const precoAntes = precoPizzaLocalCents(catalog, "G", antes.f1, antes.f2, null);
+    const sel = nextFlavorSelection(antes, tradicionais[1], false);
+    // Identidade exata: [A, B] continua [A, B] — não basta ter 2 sabores,
+    // porque [A, C] também teria 2.
+    expect(sel).toEqual({ f1: tradicionais[0], f2: especiais[0] });
+    expect([sel.f1, sel.f2]).not.toContain(tradicionais[1]);
+    // O toque recusado não pode mexer no preço nem na resolução para IDs.
+    expect(precoPizzaLocalCents(catalog, "G", sel.f1!, sel.f2, null)).toBe(precoAntes);
+    expect(resolverPizzaSelectionIds(catalog, "G", sel.f1!, sel.f2, null)!.flavorIds).toEqual([idPorNome(tradicionais[0]), idPorNome(especiais[0])]);
+    // E o motor de preço recusa 3 sabores mesmo se um payload adulterado tentar.
+    const tres = precificarPizzaPorId(
+      { sizeId: sizeIdG, flavorIds: [idPorNome(tradicionais[0]), idPorNome(tradicionais[1]), idPorNome(especiais[0])], quantity: 1 },
+      catalog
+    );
+    expect(tres.ok).toBe(false);
+  });
+
+  test("Caso C2 — trocar o 2º sabor pelo caminho oficial (desmarca B, escolhe C) atualiza sabores e preço", () => {
+    let sel: SelecaoSabores = { f1: tradicionais[0], f2: especiais[0] };
+    const precoComEspecial = precoPizzaLocalCents(catalog, "G", sel.f1!, sel.f2, null)!;
+    sel = nextFlavorSelection(sel, especiais[0], false);
+    expect(sel).toEqual({ f1: tradicionais[0], f2: null });
+    sel = nextFlavorSelection(sel, tradicionais[1], false);
+    expect(sel).toEqual({ f1: tradicionais[0], f2: tradicionais[1] });
+    const precoSoTradicionais = precoPizzaLocalCents(catalog, "G", sel.f1!, sel.f2, null)!;
+    expect(precoSoTradicionais).toBe(Math.max(
+      catalog.flavors.find((f) => f.name === tradicionais[0])!.pricesBySizeCode.G!,
+      catalog.flavors.find((f) => f.name === tradicionais[1])!.pricesBySizeCode.G!,
+    ));
+    // Sanidade: o par com Especial custava o preço do Especial (mais caro).
+    expect(precoComEspecial).toBe(catalog.flavors.find((f) => f.name === especiais[0])!.pricesBySizeCode.G!);
+  });
+
+  test("Caso C3 — o 3º sabor recusado também não muda nada quando a seleção veio de abas diferentes", () => {
+    // A na aba Tradicionais, B na aba Especiais (a correção anterior), e o
+    // 3º toque vindo de uma terceira aba não pode desfazer o meio a meio.
+    let sel: SelecaoSabores = nextFlavorSelection({ f1: null, f2: null }, tradicionais[0], false);
+    expect(saboresEscolhidosForaDasSecoes([sel.f1, sel.f2], secoesDaAba("especial"))).toEqual([tradicionais[0]]);
+    sel = nextFlavorSelection(sel, especiais[0], false);
+    const doces = nomePorCategoria("doce", "G");
+    const depois = nextFlavorSelection(sel, doces[0], false);
+    expect(depois).toEqual({ f1: tradicionais[0], f2: especiais[0] });
+    // Ambos continuam "conhecidos" pela UI mesmo com a aba Doces visível.
+    expect(saboresEscolhidosForaDasSecoes([depois.f1, depois.f2], secoesDaAba("doce")).sort()).toEqual([tradicionais[0], especiais[0]].sort());
+  });
+
+  test("Caso D — desmarcar um dos dois mantém o outro selecionado", () => {
+    const semOSegundo = nextFlavorSelection({ f1: tradicionais[0], f2: especiais[0] }, especiais[0], false);
+    expect(semOSegundo).toEqual({ f1: tradicionais[0], f2: null });
+    const semOPrimeiro = nextFlavorSelection({ f1: tradicionais[0], f2: especiais[0] }, tradicionais[0], false);
+    expect(semOPrimeiro).toEqual({ f1: especiais[0], f2: null });
+  });
+
+  test("Caso E — os dois sabores chegam ao item do carrinho (nome, detalhe e pizzaSelection)", () => {
+    const f1 = tradicionais[0];
+    const f2 = especiais[0];
+    const selecao = resolverPizzaSelectionIds(catalog, "G", f1, f2, null);
+    expect(selecao!.flavorIds).toEqual([idPorNome(f1), idPorNome(f2)]);
+    // Mesmos campos que finalizarPizza monta para o CartItem.
+    expect(`Pizza G${f2 ? " (meio a meio)" : ""}`).toBe("Pizza G (meio a meio)");
+    expect(`${f1} / ${f2}`).toContain(f2);
+  });
+
+  test("Caso F — a pizza de 2 sabores é reconstruída com os dois sabores a partir do que foi persistido", () => {
+    const selecao = resolverPizzaSelectionIds(catalog, "G", tradicionais[0], especiais[0], null)!;
+    const snapshot = construirSnapshotItem({ kind: "pizza", nome: "Pizza G (meio a meio)", detalhe: `${tradicionais[0]} / ${especiais[0]}`, quantidade: 1, precoUnitarioReais: 0, selecao });
+    const selecaoPersistida = snapshot.selecao as SelecaoSnapshotPizza;
+    expect(selecaoPersistida.flavorIds).toEqual([idPorNome(tradicionais[0]), idPorNome(especiais[0])]);
+    const refeito = resolverItemComSelecaoEstruturada({ kind: "pizza", name: "", detail: "", price: 0, qty: 1, pizzaSelection: selecaoPersistida }, catalog);
+    expect(refeito.ok).toBe(true);
+    if (refeito.ok) expect(refeito.item.detail).toBe(`${tradicionais[0]} / ${especiais[0]}`);
+  });
+
+  test("Caso G — o servidor mantém os dois sabores ao criar o pedido (nome '(meio a meio)' e os dois no detalhe)", () => {
+    const selecao = resolverPizzaSelectionIds(catalog, "G", tradicionais[0], especiais[0], null);
+    const pedido = resolverItemComSelecaoEstruturada({ kind: "pizza", name: "", detail: "", price: 0, qty: 1, pizzaSelection: selecao }, catalog);
+    expect(pedido.ok).toBe(true);
+    if (pedido.ok) {
+      expect(pedido.item.name).toBe("Pizza G (meio a meio)");
+      expect(pedido.item.detail).toBe(`${tradicionais[0]} / ${especiais[0]}`);
+    }
+  });
+
+  test("Caso H — Tradicional + Especial cobra o MAIOR preço (regra existente), e a prévia da tela bate com o servidor", () => {
+    const f1 = tradicionais[0];
+    const f2 = especiais[0];
+    const preco1 = catalog.flavors.find((f) => f.name === f1)!.pricesBySizeCode.G!;
+    const preco2 = catalog.flavors.find((f) => f.name === f2)!.pricesBySizeCode.G!;
+    const esperado = Math.max(preco1, preco2);
+    expect(precoPizzaLocalCents(catalog, "G", f1, f2, null)).toBe(esperado);
+    const servidor = precificarPizzaPorId({ sizeId: sizeIdG, flavorIds: [idPorNome(f1), idPorNome(f2)], quantity: 1 }, catalog);
+    expect(servidor.ok).toBe(true);
+    if (servidor.ok) expect(servidor.unitPriceCents).toBe(esperado);
+    // Tradicional + Tradicional e Especial + Especial seguem a mesma regra.
+    for (const [a, b] of [[tradicionais[0], tradicionais[1]], [especiais[0], especiais[1]]] as const) {
+      const maior = Math.max(catalog.flavors.find((f) => f.name === a)!.pricesBySizeCode.G!, catalog.flavors.find((f) => f.name === b)!.pricesBySizeCode.G!);
+      expect(precoPizzaLocalCents(catalog, "G", a, b, null)).toBe(maior);
+    }
+  });
+
+  test("Caso I — pizza de 1 sabor tem o preço do próprio sabor (sem regressão de preço)", () => {
+    const preco = catalog.flavors.find((f) => f.name === tradicionais[0])!.pricesBySizeCode.G!;
+    expect(precoPizzaLocalCents(catalog, "G", tradicionais[0], null, null)).toBe(preco);
+  });
+
+  test("MINI continua travada em 1 sabor (a correção não afrouxou o limite por tamanho)", () => {
+    const sel = nextFlavorSelection({ f1: "Calabresa", f2: null }, "Portuguesa", true);
+    expect(sel.f2).toBeNull();
+  });
+});
+
+describe("saboresEscolhidosForaDasSecoes — a aba de categoria é só filtro de exibição", () => {
+  test("devolve o sabor escolhido que não está na aba visível, sem duplicar", () => {
+    const secoes = [{ title: "Especiais", flavors: ["Especial A", "Especial B"] }];
+    expect(saboresEscolhidosForaDasSecoes(["Calabresa", "Especial A"], secoes)).toEqual(["Calabresa"]);
+    expect(saboresEscolhidosForaDasSecoes(["Calabresa", "Calabresa"], secoes)).toEqual(["Calabresa"]);
+  });
+
+  test("nada a fixar quando os dois sabores já estão visíveis, ou quando nada foi escolhido", () => {
+    const secoes = [{ title: "Tradicionais", flavors: ["Calabresa", "Portuguesa"] }];
+    expect(saboresEscolhidosForaDasSecoes(["Calabresa", "Portuguesa"], secoes)).toEqual([]);
+    expect(saboresEscolhidosForaDasSecoes([null, null], secoes)).toEqual([]);
   });
 });
 
@@ -547,7 +712,7 @@ describe("/cardapio (PublicCardapio) — MINI como tamanho real de pizza (cardá
 
   test("buildActionLabel/flavorModalHint tratam MINI como 1 sabor só, sem hint de meio a meio", () => {
     expect(fonte).toContain('const buildActionLabel = miniPizzaMode ? "Adicionar mini-pizza" : calzoneMode ? "Adicionar calzone" : pastelMode ? "Adicionar" : isMiniSize ? "Adicionar mini" : "Confirmar pizza";');
-    expect(fonte).toContain("const flavorModalHint = miniPizzaMode || calzoneMode || pastelMode || isMiniSize ? null : \"Escolha 1 sabor para pizza inteira ou 2 sabores para meio a meio.\";");
+    expect(fonte).toContain("const flavorModalHint = miniPizzaMode || calzoneMode || pastelMode || isMiniSize ? null : \"Escolha 1 sabor para pizza inteira ou 2 sabores para meio a meio — pode misturar categorias.\";");
   });
 
   test("grade de tamanho: com o catálogo presente, mostra 'A partir de' via precoMinimoPorTamanho — nunca o preço fixo antigo por tamanho", () => {
@@ -751,7 +916,19 @@ describe("/cardapio (PublicCardapio) — Calzone entra no mesmo fluxo de sabores
   });
 
   test("pickFlavor usa nextFlavorSelection travando calzone/mini-pizza/pastel/MINI em 1 sabor (sem duplicar a lógica da pizza)", () => {
-    expect(fonte).toContain("const next = nextFlavorSelection({ f1, f2 }, f, miniPizzaMode || calzoneMode || pastelMode || isMiniSize);");
+    expect(fonte).toContain("const next = nextFlavorSelection(atual, f, miniPizzaMode || calzoneMode || pastelMode || isMiniSize);");
+    expect(fonte).toContain('import { nextFlavorSelection } from "@/lib/pizzaSabores";');
+  });
+
+  test("3º sabor recusado avisa o cliente em vez de virar clique morto, e não toca no estado", () => {
+    const bloco = fonte.slice(fonte.indexOf("function pickFlavor"), fonte.indexOf("const mam = !!(f1 && f2);"));
+    // A recusa é detectada pela identidade da seleção devolvida (contrato
+    // testado em @/lib/pizzaSabores), nunca por uma segunda regra de limite
+    // reimplementada aqui.
+    expect(bloco).toContain("if (next === atual) {");
+    expect(bloco).toContain('showToast("Máximo de 2 sabores. Toque em um sabor já escolhido para trocar.");');
+    // O caminho de recusa sai antes de qualquer setF1/setF2.
+    expect(bloco.indexOf("showToast")).toBeLessThan(bloco.indexOf("setF1(next.f1)"));
   });
 
   test("REGRESSÃO (correção da regra comercial do Calzone, cardápio oficial 2026) — calzone usa a lista OFICIAL e FIXA de sabores (menu.catalog.calzone, nunca mais menu.catalog.lanches nem uma configuração dinâmica de flavorsMode/calzoneFlavors do Menu legado, que foi removida)", () => {
@@ -784,10 +961,22 @@ describe("/cardapio (PublicCardapio) — Calzone entra no mesmo fluxo de sabores
     expect(fonte).toContain("<strong>Pizzas Especiais</strong>");
   });
 
-  test("seletor oferece abas acessíveis e limpa sabores ao trocar de categoria", () => {
+  test("REGRESSÃO (meio a meio entre categorias) — a aba é só filtro de EXIBIÇÃO: trocar de categoria nunca apaga os sabores já escolhidos", () => {
     expect(fonte).toContain('role="tablist" aria-label="Categoria dos sabores"');
     expect(fonte).toContain('role="tab" aria-selected={pizzaCategoryFilter === category}');
-    expect(fonte).toContain('onClick={() => { setPizzaCategoryFilter(category); setF1(null); setF2(null); }}');
+    expect(fonte).toContain("onClick={() => setPizzaCategoryFilter(category)}");
+    // A causa raiz do bug "não consigo escolher 2 sabores": o handler da aba
+    // zerava f1/f2, então abrir a aba do 2º sabor descartava o 1º e o meio a
+    // meio Tradicional + Especial (ou + Doce) era impossível.
+    expect(fonte).not.toContain("setPizzaCategoryFilter(category); setF1(null); setF2(null);");
+  });
+
+  test("REGRESSÃO (meio a meio entre categorias) — sabor escolhido fora da aba visível continua na lista, no topo, marcado e desmarcável", () => {
+    expect(fonte).toContain("const flavorSectionsEscolhidosForaDaAba = saboresEscolhidosForaDasSecoes([f1, f2], flavorSectionsDaAba);");
+    expect(fonte).toContain('[{ title: "Escolhidos", flavors: flavorSectionsEscolhidosForaDaAba }, ...flavorSectionsDaAba]');
+    // O `sel` do JSX (mesma linha usada pelas seções normais) marca o sabor
+    // escolhido venha ele da aba atual ou da seção "Escolhidos".
+    expect(fonte).toContain("${f === f1 || f === f2 ? \"sel\" : \"\"}");
   });
 
   test("selos de novidade usam IDs oficiais tanto em sabores quanto em produtos simples", () => {

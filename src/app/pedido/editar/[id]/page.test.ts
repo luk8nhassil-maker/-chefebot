@@ -113,3 +113,21 @@ describe("/pedido/editar/[id] — REGRESSÃO (auditoria independente, ciclo de a
     expect(fonte).not.toContain("calzoneCatalogProduto");
   });
 });
+
+describe("/pedido/editar/[id] — REGRESSÃO (missão 2 sabores): a aba pizza usa a MESMA regra central de sabor do Cardápio Público", () => {
+  test("pickFlavor delega para nextFlavorSelection (@/lib/pizzaSabores), sem cópia local da regra", () => {
+    expect(fonte).toContain('import { nextFlavorSelection } from "@/lib/pizzaSabores";');
+    expect(fonte).toContain("const next = nextFlavorSelection({ f1, f2 }, f, false);");
+  });
+
+  test("a cópia divergente antiga sumiu — no 3º toque ela apagava OS DOIS sabores e ficava só com o novo", () => {
+    const bloco = fonte.slice(fonte.indexOf("function pickFlavor"), fonte.indexOf("function confirmarPizza"));
+    expect(bloco).not.toContain("if (!f2) { setF2(f); return; }");
+    expect(bloco).not.toContain("setF1(f);\n    setF2(null);");
+  });
+
+  test("a tela continua montando meio a meio a partir de f1/f2 (nome e detalhe com os dois sabores)", () => {
+    expect(fonte).toContain("const mam = !!f2;");
+    expect(fonte).toContain("const flavorText = mam ? `${f1} / ${f2}` : f1;");
+  });
+});
