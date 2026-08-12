@@ -25,8 +25,14 @@ export function useDialogA11y(
   opts?: { focoInicial?: React.RefObject<HTMLElement | null>; travarScroll?: boolean }
 ) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  // A ref é sincronizada num efeito, nunca durante o render (escrever em ref
+  // no corpo do componente é justamente o que a regra "Cannot access refs
+  // during render" proíbe). O handler de tecla só roda depois de um evento
+  // do usuário, ou seja, sempre depois deste efeito.
   const fecharRef = useRef(onFechar);
-  fecharRef.current = onFechar;
+  useEffect(() => {
+    fecharRef.current = onFechar;
+  });
   const focoInicial = opts?.focoInicial;
   const travarScroll = opts?.travarScroll !== false;
 

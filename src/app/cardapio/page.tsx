@@ -20,6 +20,7 @@ import { todosOsProdutos, type SimpleCatalog } from "@/lib/catalog/simpleProduct
 import { isNewCatalogItemId, isNoveltyPeriodActive, noveltyExpiresAt } from "@/lib/catalog/novelties";
 import { nextFlavorSelection } from "@/lib/pizzaSabores";
 import ConfirmDialog from "@/components/ConfirmDialog";
+import { useDialogA11y } from "@/components/useDialogA11y";
 
 // Ícones de categoria da home (menu/navegação) — lucide-react, sem emoji.
 // Mantidos separados de ICONS (que continua usando emoji para os itens
@@ -1488,6 +1489,12 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const pastelFornoEfetivo = menu.catalog ? menu.catalog.pastelForno.map(catalogParaListagem) : [];
   const vitaminasEfetivas = menu.catalog ? menu.catalog.vitaminas.map(catalogParaListagem) : [];
 
+  // ESC, armadilha de foco e devolução do foco nos dois modais do cliente —
+  // antes só dava para sair clicando no × ou no fundo, e o Tab passeava pela
+  // página atrás do backdrop.
+  const flavorModalRef = useDialogA11y(flavorModalOpen, () => setFlavorModalOpen(false));
+  const paymentModalRef = useDialogA11y(!!paymentModal, () => setPaymentModal(null));
+
   const [pizzaCategoryFilter, setPizzaCategoryFilter] = useState<"tradicional" | "especial" | "doce">("tradicional");
   const [noveltyActive, setNoveltyActive] = useState(false);
   useEffect(() => {
@@ -2901,7 +2908,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
       )}
       {paymentModal && (
         <div className="payment-modal-backdrop" role="presentation" onClick={() => setPaymentModal(null)}>
-          <div className="payment-modal" role="dialog" aria-modal="true" aria-labelledby="payment-modal-title" onClick={(e) => e.stopPropagation()}>
+          <div ref={paymentModalRef} className="payment-modal" role="dialog" aria-modal="true" aria-labelledby="payment-modal-title" onClick={(e) => e.stopPropagation()}>
             <div className="payment-modal-head">
               <div>
                 {paymentModal === "Dinheiro" ? (
@@ -3008,7 +3015,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
       )}
       {(screen === "sc-build" || (screen === "sc-list" && (calzoneMode || pastelMode))) && flavorModalOpen && size && (
         <div className="flavor-modal-backdrop" role="presentation" onClick={() => setFlavorModalOpen(false)}>
-          <div className="flavor-modal payment-modal" role="dialog" aria-modal="true" aria-labelledby="flavor-modal-title" onClick={(e) => e.stopPropagation()}>
+          <div ref={flavorModalRef} className="flavor-modal payment-modal" role="dialog" aria-modal="true" aria-labelledby="flavor-modal-title" onClick={(e) => e.stopPropagation()}>
             {/* Cabeçalho enxuto: título (onde estou) + uma linha de instrução
                 que some assim que os chips passam a contar o estado. */}
             <div className="payment-modal-head flavor-modal-head">
@@ -3225,8 +3232,25 @@ main{width:100%;padding:6px 20px 20px}
    toque continua com 56px de altura mínima. */
 .flavor-opt{padding:11px 14px;margin-bottom:6px;gap:12px;min-height:56px;border-radius:14px;box-shadow:none}
 .flavor-opt .opt-title{font-size:15px}
-.flavor-opt-price{font-size:13.5px;font-weight:700;color:var(--text-sub)}
+.flavor-opt-price{font-size:13.5px;font-weight:700;color:var(--text-sub);white-space:nowrap}
 .flavor-opt.sel .flavor-opt-price{color:var(--text)}
+/* Telas estreitas (320/360): sem este ajuste, nome longo + selo "Novidade"
+   ocupava TRÊS linhas (92px) e empurrava metade da lista para fora da tela. */
+@media(max-width:380px){
+  .flavor-opt{padding:10px 12px;gap:9px}
+  .flavor-opt .opt-title{font-size:14px}
+  .flavor-opt .novelty-badge{font-size:8.5px;padding:4px 5px;letter-spacing:.4px}
+  .flavor-opt-price{font-size:12.5px}
+}
+/* 320px é o piso: aqui o nome mais longo do cardápio ainda precisava de uma
+   3ª linha, então o preço e a marca de seleção cedem alguns pixels para o
+   nome — que é a informação que não pode encolher nem ser cortada. */
+@media(max-width:340px){
+  .flavor-opt{padding:9px 10px;gap:7px}
+  .flavor-opt .opt-title{font-size:13.5px}
+  .flavor-opt .opt-check{width:20px;height:20px}
+  .flavor-opt-price{font-size:12px}
+}
 .section-label-especial{color:#a78bfa}
 .flavor-opt-especial{border-left:3px solid color-mix(in srgb, #a78bfa 55%, transparent)}
 .flavor-opt-especial.sel{border-color:#a78bfa;background:color-mix(in srgb, #a78bfa 10%, var(--surface))}

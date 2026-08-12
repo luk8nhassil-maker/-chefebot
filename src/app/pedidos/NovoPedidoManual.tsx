@@ -18,6 +18,8 @@
 // exatamente o que faz o atendente se perder no meio de uma ligação.
 
 import { useEffect, useMemo, useRef, useState } from "react"
+import ConfirmDialog from '@/components/ConfirmDialog'
+import { useDialogA11y } from '@/components/useDialogA11y'
 import {
   ArrowLeft,
   ArrowRight,
@@ -294,6 +296,10 @@ function BarraCategorias({
 export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
   const [passo, setPasso] = useState<Passo>("cliente")
   const [confirmarSaida, setConfirmarSaida] = useState(false)
+  // ESC/armadilha de foco no modal principal do pedido manual. O ESC pede
+  // confirmação em vez de fechar direto: o atendente pode ter meia comanda
+  // montada, e perder isso por um toque na tecla errada seria pior.
+  const dialogRef = useDialogA11y(true, () => setConfirmarSaida(true), { travarScroll: false })
   // Confirmado (telefone reconhecido) esconde o campo de nome atrás de um
   // card compacto; o lápis abre esta edição explícita sem apagar o nome.
   // Guarda PARA QUAL telefone a edição foi pedida — assim um telefone novo
@@ -709,6 +715,7 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
 
   return (
     <div
+      ref={dialogRef}
       role="dialog"
       aria-modal="true"
       aria-label="Novo pedido manual"
@@ -1447,18 +1454,18 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
         </div>
       )}
 
-      {confirmarSaida && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 3100, background: "rgba(var(--overlay-rgb), 0.7)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
-          <div style={{ ...card, maxWidth: 320, display: "grid", gap: 10 }}>
-            <p style={{ fontSize: 16, fontWeight: 900, margin: 0, color: "var(--foreground)" }}>Descartar este pedido?</p>
-            <p style={{ fontSize: 13, color: "var(--foreground-secondary)", margin: 0 }}>
-              O que já foi montado será perdido. O pedido ainda não foi criado.
-            </p>
-            <button onClick={() => setConfirmarSaida(false)} style={{ ...btnSecondary }}>Continuar montando</button>
-            <button onClick={onFechar} style={{ ...btn, border: "none", background: "var(--danger)", color: "#fff" }}>Descartar</button>
-          </div>
-        </div>
-      )}
+      {/* Confirmação de descarte: diálogo compacto, ação destrutiva à
+          direita e "continuar" como secundária (ver @/components/ConfirmDialog). */}
+      <ConfirmDialog
+        aberto={confirmarSaida}
+        titulo="Descartar este pedido?"
+        descricao="O que já foi montado será perdido. O pedido ainda não foi criado."
+        confirmarLabel="Descartar"
+        cancelarLabel="Continuar montando"
+        tom="perigo"
+        onConfirmar={onFechar}
+        onCancelar={() => setConfirmarSaida(false)}
+      />
 
       <style jsx>{`
         .pm-input { transition: border-color .15s ease, box-shadow .15s ease; }

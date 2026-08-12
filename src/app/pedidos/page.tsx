@@ -2,6 +2,7 @@
 import { useEffect, useState, useRef } from "react"
 import { useRouter } from "next/navigation"
 import ConfirmDialog from '@/components/ConfirmDialog'
+import { useDialogA11y } from '@/components/useDialogA11y'
 import PanelShell from "@/components/PanelShell"
 import {
   calcularIntervaloPorIdade,
@@ -384,6 +385,9 @@ export default function PedidosPage() {
   const [pixConfirmando, setPixConfirmando] = useState(false)
   const [pixErro, setPixErro] = useState<string | null>(null)
   const [modalEditarPagamento, setModalEditarPagamento] = useState<string | null>(null)
+  // ESC/armadilha de foco no formulário de troca de pagamento (não tinha
+  // nenhum dos dois; o Tab passeava pelo painel atrás do backdrop).
+  const editarPagamentoRef = useDialogA11y(!!modalEditarPagamento, () => setModalEditarPagamento(null))
   const [formEditarPagamento, setFormEditarPagamento] = useState<{ pagamento: string; troco: string }>({ pagamento: "", troco: "" })
   const [salvandoEdicaoPagamento, setSalvandoEdicaoPagamento] = useState(false)
   const [erroEdicaoPagamento, setErroEdicaoPagamento] = useState<string | null>(null)
@@ -2451,7 +2455,7 @@ export default function PedidosPage() {
         const pedidoModal = pedidos.find(p => p.id === modalEditarPagamento)
         const dinheiroSelecionado = /dinheiro/i.test(formEditarPagamento.pagamento)
         return (
-          <div role="dialog" aria-modal="true" aria-label="Editar forma de pagamento" style={{ position: "fixed", inset: 0, zIndex: 3200, background: "rgba(var(--overlay-rgb), 0.7)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div ref={editarPagamentoRef} role="dialog" aria-modal="true" aria-label="Editar forma de pagamento" style={{ position: "fixed", inset: 0, zIndex: 3200, background: "rgba(var(--overlay-rgb), 0.7)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
             <div style={{ background: "var(--surface)", borderRadius: 18, padding: 20, width: "100%", maxWidth: 380, display: "flex", flexDirection: "column", gap: 12 }}>
               <p style={{ fontSize: 16, fontWeight: 900, margin: 0, color: "var(--foreground)" }}>Editar forma de pagamento</p>
               {pedidoModal && (
