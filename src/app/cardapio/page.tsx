@@ -19,6 +19,7 @@ import type { PizzaCatalog } from "@/lib/catalog/pizzas";
 import { todosOsProdutos, type SimpleCatalog } from "@/lib/catalog/simpleProducts";
 import { isNewCatalogItemId, isNoveltyPeriodActive, noveltyExpiresAt } from "@/lib/catalog/novelties";
 import { nextFlavorSelection } from "@/lib/pizzaSabores";
+import ConfirmDialog from "@/components/ConfirmDialog";
 
 // Ícones de categoria da home (menu/navegação) — lucide-react, sem emoji.
 // Mantidos separados de ICONS (que continua usando emoji para os itens
@@ -642,41 +643,19 @@ function AdminCardapio({ menu, onSair }: { menu: MenuType; onSair: () => void })
       )}
 
       {/* Modal confirmação lote */}
-      {confirmLote && (
-        <>
-          <div onClick={() => setConfirmLote(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.75)", zIndex: 90, animation: "cbFadeIn .2s ease" }} />
-          <div style={{
-            position: "fixed", bottom: 0, left: 0, right: 0,
-            margin: "0 auto", maxWidth: 390,
-            background: "var(--background)",
-            border: "1px solid var(--surface-secondary)", borderBottom: "none",
-            borderRadius: "22px 22px 0 0",
-            zIndex: 91,
-            animation: "cbSheetUp .3s cubic-bezier(.2,.9,.3,1) both",
-            padding: "18px 20px calc(env(safe-area-inset-bottom) + 28px)",
-            display: "flex", flexDirection: "column", gap: 12,
-          }}>
-            <div style={{ width: 40, height: 4, borderRadius: 2, background: "var(--surface-elevated)", margin: "0 auto 6px" }} />
-            <p style={{ margin: 0, fontSize: 17, fontWeight: 900, letterSpacing: "-0.3px" }}>
-              {confirmLote === "esgotado"
-                ? `Esgotar ${selecionados.size} produto${selecionados.size > 1 ? "s" : ""}?`
-                : `Disponibilizar ${selecionados.size} produto${selecionados.size > 1 ? "s" : ""}?`}
-            </p>
-            <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: "var(--foreground-secondary)", lineHeight: 1.5 }}>
-              {confirmLote === "esgotado"
-                ? "O bot vai parar de vender esses produtos imediatamente."
-                : "O bot vai voltar a oferecer esses produtos."}
-            </p>
-            <button
-              onClick={() => aplicarLote(confirmLote === "esgotado")}
-              style={{ height: 52, borderRadius: 13, background: confirmLote === "esgotado" ? "var(--danger)" : "var(--success)", color: "var(--foreground)", fontSize: 15, fontWeight: 900 }}
-            >
-              {confirmLote === "esgotado" ? "Confirmar — marcar esgotados" : "Confirmar — disponibilizar"}
-            </button>
-            <button onClick={() => setConfirmLote(null)} style={{ height: 42, background: "transparent", color: "var(--foreground-muted)", fontSize: 13, fontWeight: 800 }}>Cancelar</button>
-          </div>
-        </>
-      )}
+      <ConfirmDialog
+        aberto={!!confirmLote}
+        titulo={confirmLote === "esgotado"
+          ? `Esgotar ${selecionados.size} produto${selecionados.size > 1 ? "s" : ""}?`
+          : `Disponibilizar ${selecionados.size} produto${selecionados.size > 1 ? "s" : ""}?`}
+        descricao={confirmLote === "esgotado"
+          ? "O bot para de vender esses produtos imediatamente."
+          : "O bot volta a oferecer esses produtos."}
+        confirmarLabel={confirmLote === "esgotado" ? "Esgotar" : "Disponibilizar"}
+        tom={confirmLote === "esgotado" ? "perigo" : "sucesso"}
+        onConfirmar={() => aplicarLote(confirmLote === "esgotado")}
+        onCancelar={() => setConfirmLote(null)}
+      />
     </>
   )
 }

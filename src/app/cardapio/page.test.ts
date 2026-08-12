@@ -1,7 +1,7 @@
 import { describe, test, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { nextFlavorSelection, saboresEscolhidosForaDasSecoes, resolverPizzaSelectionIds, resolverSimpleSelectionIds, precoPizzaLocalCents, precoMinimoPorTamanho } from "./page";
+import { nextFlavorSelection, resolverPizzaSelectionIds, resolverSimpleSelectionIds, precoPizzaLocalCents, precoMinimoPorTamanho } from "./page";
 import { precificarPizzaPorId } from "@/lib/pricing/pizzaEngine";
 import type { SelecaoSabores } from "@/lib/pizzaSabores";
 import { resolverItemComSelecaoEstruturada } from "@/lib/pedidoAppSelecaoEstruturada";
@@ -281,8 +281,6 @@ describe("REGRESSÃO — pizza de 2 sabores de ponta a ponta (montagem → carri
   const especiais = nomePorCategoria("especial", "G");
   const idPorNome = (nome: string) => catalog.flavors.find((f) => f.name === nome)!.id;
   const sizeIdG = catalog.sizes.find((s) => s.code === "G")!.id;
-  // Seções exatamente como a UI monta: SÓ a aba ativa (ver pizzaFlavorSections).
-  const secoesDaAba = (categoria: "tradicional" | "especial" | "doce") => [{ title: categoria, flavors: nomePorCategoria(categoria, "G") }];
 
   test("Caso A — 1 sabor só continua válido do início ao fim (não passou a exigir 2)", () => {
     const sel = nextFlavorSelection({ f1: null, f2: null }, tradicionais[0], false);
@@ -299,8 +297,9 @@ describe("REGRESSÃO — pizza de 2 sabores de ponta a ponta (montagem → carri
     let sel = nextFlavorSelection({ f1: null, f2: null }, tradicionais[0], false);
     // Cliente troca para a aba Especiais: a aba é só filtro de exibição, o
     // estado da montagem NÃO é tocado (era exatamente aqui que o 1º sabor
-    // sumia — causa raiz do bug).
-    expect(saboresEscolhidosForaDasSecoes([sel.f1, sel.f2], secoesDaAba("especial"))).toEqual([tradicionais[0]]);
+    // sumia — causa raiz do bug). Trocar de aba não chama nada além de
+    // setPizzaCategoryFilter, então a seleção segue intacta.
+    expect(sel).toEqual({ f1: tradicionais[0], f2: null });
     // 2º clique, agora num Especial.
     sel = nextFlavorSelection(sel, especiais[0], false);
     expect(sel).toEqual({ f1: tradicionais[0], f2: especiais[0] });
@@ -345,13 +344,13 @@ describe("REGRESSÃO — pizza de 2 sabores de ponta a ponta (montagem → carri
     // A na aba Tradicionais, B na aba Especiais (a correção anterior), e o
     // 3º toque vindo de uma terceira aba não pode desfazer o meio a meio.
     let sel: SelecaoSabores = nextFlavorSelection({ f1: null, f2: null }, tradicionais[0], false);
-    expect(saboresEscolhidosForaDasSecoes([sel.f1, sel.f2], secoesDaAba("especial"))).toEqual([tradicionais[0]]);
     sel = nextFlavorSelection(sel, especiais[0], false);
     const doces = nomePorCategoria("doce", "G");
     const depois = nextFlavorSelection(sel, doces[0], false);
     expect(depois).toEqual({ f1: tradicionais[0], f2: especiais[0] });
-    // Ambos continuam "conhecidos" pela UI mesmo com a aba Doces visível.
-    expect(saboresEscolhidosForaDasSecoes([depois.f1, depois.f2], secoesDaAba("doce")).sort()).toEqual([tradicionais[0], especiais[0]].sort());
+    // Os dois continuam visíveis para o cliente mesmo com a aba Doces
+    // aberta: os chips são montados de [f1, f2], não da aba (ver abaixo).
+    expect([depois.f1, depois.f2].filter(Boolean)).toEqual([tradicionais[0], especiais[0]]);
   });
 
   test("Caso D — desmarcar um dos dois mantém o outro selecionado", () => {
@@ -419,17 +418,27 @@ describe("REGRESSÃO — pizza de 2 sabores de ponta a ponta (montagem → carri
   });
 });
 
-describe("saboresEscolhidosForaDasSecoes — a aba de categoria é só filtro de exibição", () => {
-  test("devolve o sabor escolhido que não está na aba visível, sem duplicar", () => {
-    const secoes = [{ title: "Especiais", flavors: ["Especial A", "Especial B"] }];
-    expect(saboresEscolhidosForaDasSecoes(["Calabresa", "Especial A"], secoes)).toEqual(["Calabresa"]);
-    expect(saboresEscolhidosForaDasSecoes(["Calabresa", "Calabresa"], secoes)).toEqual(["Calabresa"]);
+describe("chips de sabor escolhido — compactos e independentes da aba visível", () => {
+  const fonteChips = fonte.slice(fonte.indexOf("const saboresEscolhidos ="), fonte.indexOf("// Fecha a pizza (com borda e adicionais"));
+
+  test("os chips saem de [f1, f2], nunca da aba de categoria em exibição", () => {
+    expect(fonteChips).toContain("const saboresEscolhidos = [f1, f2].filter((s): s is string => !!s);");
+    expect(fonteChips).toContain("saboresEscolhidos.map((sabor) => (");
   });
 
-  test("nada a fixar quando os dois sabores já estão visíveis, ou quando nada foi escolhido", () => {
-    const secoes = [{ title: "Tradicionais", flavors: ["Calabresa", "Portuguesa"] }];
-    expect(saboresEscolhidosForaDasSecoes(["Calabresa", "Portuguesa"], secoes)).toEqual([]);
-    expect(saboresEscolhidosForaDasSecoes([null, null], secoes)).toEqual([]);
+  test("o chip inteiro é o botão de remover (desmarca pelo mesmo pickFlavor da lista)", () => {
+    expect(fonteChips).toContain("onClick={() => pickFlavor(sabor)}");
+    expect(fonteChips).toContain("aria-label={`Remover ${sabor}`}");
+  });
+
+  test("a seção 'Escolhidos' de cards grandes não existe mais (o chip diz o mesmo em uma linha)", () => {
+    expect(fonte).not.toContain('title: "Escolhidos"');
+    expect(fonte).not.toContain("saboresEscolhidosForaDasSecoes");
+  });
+
+  test("com 1 sabor e limite 2, o slot livre é anunciado como opcional (nunca obriga o 2º)", () => {
+    expect(fonteChips).toContain("limiteSabores === 2 && saboresEscolhidos.length === 1");
+    expect(fonteChips).toContain("+ 2º sabor (opcional)");
   });
 });
 
@@ -710,9 +719,13 @@ describe("/cardapio (PublicCardapio) — MINI como tamanho real de pizza (cardá
     expect(fonte).toContain("else if (isMiniSize) finalizarPizza(null, 0, []);");
   });
 
-  test("buildActionLabel/flavorModalHint tratam MINI como 1 sabor só, sem hint de meio a meio", () => {
+  test("buildActionLabel/mensagem do modal tratam MINI como 1 sabor só, sem promessa de meio a meio", () => {
     expect(fonte).toContain('const buildActionLabel = miniPizzaMode ? "Adicionar mini-pizza" : calzoneMode ? "Adicionar calzone" : pastelMode ? "Adicionar" : isMiniSize ? "Adicionar mini" : "Confirmar pizza";');
-    expect(fonte).toContain("const flavorModalHint = miniPizzaMode || calzoneMode || pastelMode || isMiniSize ? null : \"Escolha 1 sabor para pizza inteira ou 2 sabores para meio a meio — pode misturar categorias.\";");
+    // Uma linha só de instrução (a segunda, redundante, foi removida) e a
+    // MINI nunca é convidada ao meio a meio.
+    expect(fonte).toContain('? "Escolha 1 sabor — a Mini não é meio a meio."');
+    expect(fonte).toContain(': "Escolha 1 ou 2 sabores — pode misturar categorias.";');
+    expect(fonte).not.toContain("flavorModalHint");
   });
 
   test("grade de tamanho: com o catálogo presente, mostra 'A partir de' via precoMinimoPorTamanho — nunca o preço fixo antigo por tamanho", () => {
@@ -972,8 +985,11 @@ describe("/cardapio (PublicCardapio) — Calzone entra no mesmo fluxo de sabores
   });
 
   test("REGRESSÃO (meio a meio entre categorias) — sabor escolhido fora da aba visível continua na lista, no topo, marcado e desmarcável", () => {
-    expect(fonte).toContain("const flavorSectionsEscolhidosForaDaAba = saboresEscolhidosForaDasSecoes([f1, f2], flavorSectionsDaAba);");
-    expect(fonte).toContain('[{ title: "Escolhidos", flavors: flavorSectionsEscolhidosForaDaAba }, ...flavorSectionsDaAba]');
+    // Os chips são montados de [f1, f2] e renderizados fora do corpo
+    // rolável, então um sabor escolhido em outra aba continua visível e
+    // removível sem voltar para a aba de origem.
+    expect(fonte).toContain("const saboresEscolhidos = [f1, f2].filter((s): s is string => !!s);");
+    expect(fonte).toContain("{renderFlavorChips()}");
     // O `sel` do JSX (mesma linha usada pelas seções normais) marca o sabor
     // escolhido venha ele da aba atual ou da seção "Escolhidos".
     expect(fonte).toContain("${f === f1 || f === f2 ? \"sel\" : \"\"}");

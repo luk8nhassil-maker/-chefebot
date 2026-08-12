@@ -47,8 +47,13 @@ export function useDialogA11y(
         return;
       }
       if (e.key !== "Tab" || !container) return;
+      // Sem filtro por `offsetParent`: ele é null para qualquer descendente
+      // de um elemento `position: fixed` — que é exatamente o caso de todo
+      // backdrop daqui — e a armadilha de foco parava de circular. O próprio
+      // seletor já exclui desabilitados e tabindex="-1"; o que sobra a
+      // descartar é conteúdo explicitamente escondido.
       const focaveis = [...container.querySelectorAll<HTMLElement>(FOCAVEIS)].filter(
-        (el) => el.offsetParent !== null || el === document.activeElement
+        (el) => !el.closest("[hidden]") && el.getAttribute("aria-hidden") !== "true"
       );
       if (focaveis.length === 0) return;
       const primeiro = focaveis[0];
