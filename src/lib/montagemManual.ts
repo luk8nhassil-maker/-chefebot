@@ -388,6 +388,10 @@ export type OpcaoEtapa = {
   /** Acréscimo sobre o preço base, só para exibição. */
   extra?: number;
   esgotado: boolean;
+  /** Ingredientes/descrição do catálogo, só para leitura (referência visual
+   *  — nunca usado em lógica de seleção/preço). Ausente quando a etapa não
+   *  tem essa informação (borda, adicionais, tamanho, leite). */
+  ingredientes?: string;
 };
 
 export type Etapa = {
@@ -419,6 +423,10 @@ export type ProdutoManual = {
   catalogProductId?: string;
   /** Texto já normalizado para busca — montado uma vez, não a cada tecla. */
   textoBusca: string;
+  /** Ingredientes/composição do catálogo oficial, só para leitura (referência
+   *  visual) — presente apenas quando a fonte já tem o campo (produtos de
+   *  composição fixa como Hambúrguer; nunca inventado aqui). */
+  ingredients?: string;
 };
 
 export type SelecaoMontagem = {
@@ -536,7 +544,8 @@ export function listarProdutosManuais(menu: MenuManual | null | undefined): Prod
           esgotado: !produto.available,
           requerMontagem: produto.strategy !== "fixed",
           catalogProductId: produto.id,
-          textoBusca: textoBuscavel(produto.name, label),
+          textoBusca: textoBuscavel(produto.name, label, produto.ingredients),
+          ...(produto.ingredients ? { ingredients: produto.ingredients } : {}),
         });
       }
     }
@@ -633,7 +642,7 @@ function opcoesSaboresPizza(menu: MenuManual, sizeCode: string | undefined): Opc
     // MINI) — nunca oferece na tela uma combinação que o servidor rejeitaria.
     return menu.pizzaCatalog.flavors
       .filter((f) => !sizeCode || f.pricesBySizeCode[sizeCode as keyof typeof f.pricesBySizeCode] !== undefined)
-      .map((f) => ({ valor: f.name, label: f.name, esgotado: !f.available }));
+      .map((f) => ({ valor: f.name, label: f.name, esgotado: !f.available, ingredientes: f.ingredients }));
   }
   return [...(menu.saltyFlavors ?? []), ...(menu.sweetFlavors ?? [])]
     .filter(Boolean)
@@ -739,6 +748,7 @@ export function montarEtapas(produto: ProdutoManual, menu: MenuManual): Etapa[] 
             label: f.displayLabel ?? f.name,
             extra: f.priceCents !== undefined ? f.priceCents / 100 : undefined,
             esgotado: !f.available,
+            ingredientes: f.ingredients,
           })),
         },
       ];
