@@ -194,19 +194,20 @@ describe("/cardapio (PublicCardapio) — correção: CTA da sacola (.delivery-ct
     expect(fonte).toContain('onClick={() => go("sc-start")}>+ Adicionar mais</button>');
   });
 
-  test("[10] dock flutuante da Entrega só renderiza quando o teclado mobile não está ativo (some por completo, não só opacity)", () => {
-    expect(fonte).toMatch(/cartCount > 0 && screen === "sc-delivery" && !mobileKeyboardActive && \(\s*<div className="delivery-cta-bar">/);
+  test("[10] dock flutuante da Entrega só renderiza quando a busca de bairro não está ativa no mobile (some por completo, não só opacity)", () => {
+    expect(fonte).toMatch(/cartCount > 0 && screen === "sc-delivery" && !bairroSearchActive && \(\s*<div className="delivery-cta-bar">/);
   });
 });
 
-// Detecção de teclado virtual mobile (correção do dock cobrindo a busca de
-// bairro em produção/iPhone real). Causa raiz da versão anterior: não existia
-// nenhuma detecção de teclado no código — o dock da Entrega sempre renderizava
-// incondicionalmente. Estes testes travam a regra robusta para não regredir
-// pra uma versão ingênua (só `focus`, ou um pixel mágico tipo innerHeight<500).
-describe("/cardapio (PublicCardapio) — detecção de teclado virtual mobile (dock da Entrega)", () => {
-  test("mobileKeyboardActive cruza 3 condições — nunca só foco: mobile de toque (pointer:coarse) + campo de endereço focado + visualViewport encolhida", () => {
-    expect(fonte).toContain("const mobileKeyboardActive = isCoarsePointer && enderecoCampoFocado && viewportEncolhida;");
+// Busca de bairro no mobile (correção do dock cobrindo os resultados em
+// produção/iPhone real). Causa raiz da versão anterior: o dock só sumia
+// depois que o teclado de fato encolhia o visualViewport — animação/resize
+// do Safari atrasava (ou nunca disparava) o desaparecimento, escondendo os
+// resultados. A correção usa a ativação da própria busca (bairroDropdownOpen,
+// aberto ao focar) como fonte de verdade, nunca detecção de teclado.
+describe("/cardapio (PublicCardapio) — busca de bairro ativa esconde o dock da Entrega (bairroSearchActive)", () => {
+  test("bairroSearchActive cruza mobile de toque (pointer:coarse) + busca de bairro aberta — nunca detecção de teclado/visualViewport", () => {
+    expect(fonte).toContain("const bairroSearchActive = isCoarsePointer && bairroDropdownOpen;");
   });
 
   test("detecção de mobile usa matchMedia(pointer:coarse) — nunca largura de janela (desktop redimensionado não deve contar)", () => {
@@ -214,43 +215,68 @@ describe("/cardapio (PublicCardapio) — detecção de teclado virtual mobile (d
     expect(fonte).not.toMatch(/isCoarsePointer[\s\S]{0,80}innerWidth/);
   });
 
-  test("viewport encolhida é uma PROPORÇÃO (visualViewport.height / innerHeight), não um pixel fixo tipo innerHeight < 500", () => {
-    expect(fonte).toContain("const ratio = vv.height / window.innerHeight;");
-    expect(fonte).toContain("setViewportEncolhida(ratio < 0.75);");
+  test("dock da Entrega renderiza (ou não) só com base em bairroSearchActive — nunca mais mobileKeyboardActive/visualViewport como fonte de verdade pra escondê-lo", () => {
+    expect(fonte).not.toContain("mobileKeyboardActive");
+    expect(fonte).not.toContain("enderecoCampoFocado");
+    expect(fonte).not.toContain("viewportEncolhida");
   });
 
-  test("sem window.visualViewport (browser antigo): fallback seguro, nunca ativa o modo teclado (dock permanece visível, sem regressão)", () => {
+  test("visualViewport, quando disponível, só alimenta a altura visível (viewportAlturaVisivel) — nunca decide se o dock aparece", () => {
     expect(fonte).toMatch(/if \(typeof window === "undefined" \|\| !window\.visualViewport\) return;/);
+    expect(fonte).toContain("const onVVResize = () => setViewportAlturaVisivel(vv.height);");
   });
 
-  test("blur do campo de endereço tem atraso (debounce) antes de desativar o foco — evita pisca-pisca ao trocar de campo dentro do mesmo formulário", () => {
-    expect(fonte).toContain("enderecoBlurTimerRef.current = setTimeout(() => setEnderecoCampoFocado(false), 150);");
-  });
-
-  test("wrapper do formulário de endereço usa onFocusCapture/onBlurCapture — cobre bairro, rua, número e referência de uma vez, sem wiring manual por campo", () => {
-    expect(fonte).toMatch(/<div ref=\{enderecoRef\} onFocusCapture=\{handleEnderecoFocus\} onBlurCapture=\{handleEnderecoBlur\}>/);
-  });
-
-  test("focar 'Buscar bairro' sobe o campo pro topo útil (scrollIntoView) além de abrir a lista", () => {
+  test("focar 'Buscar bairro' abre a lista (fonte de bairroSearchActive) e sobe o campo pro topo útil (scrollIntoView)", () => {
     expect(fonte).toContain("function handleBairroFocus() {");
+    expect(fonte).toContain("setBairroDropdownOpen(true);");
     expect(fonte).toContain('bairroInputRef.current?.scrollIntoView({ block: "start", behavior: "smooth" });');
     expect(fonte).toContain("onFocus={handleBairroFocus}");
   });
 
-  test("buscador de bairro fica sticky (não fixed/100vh) só enquanto a lista está aberta com teclado ativo", () => {
-    expect(fonte).toContain('`combo has-icon ${mobileKeyboardActive && bairroDropdownOpen ? "combo-sticky" : ""}`');
-    expect(fonte).toContain(".combo-sticky{position:sticky;top:8px;");
+  test("selecionar um bairro fecha a busca (setBairroDropdownOpen(false)) — bairroSearchActive volta a false e o dock reaparece", () => {
+    expect(fonte).toMatch(/setBairroIdx\(String\(b\.i\)\); setBairroQuery\(""\); setBairroDropdownOpen\(false\);/);
+  });
+
+  test("blur seguro: perder foco pra fora do combo fecha a busca, mas o mousedown da opção previne o blur antes do clique ser registrado (sem onBlur cru fechando tudo)", () => {
+    expect(fonte).toContain('onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setBairroDropdownOpen(false); }}');
+    expect(fonte).toMatch(/onMouseDown=\{\(e\) => \{ e\.preventDefault\(\); setBairroIdx/);
+  });
+
+  test("buscador de bairro fica sticky (não fixed/100vh) assim que a busca está ativa no mobile — não espera o teclado abrir", () => {
+    expect(fonte).toContain('`combo has-icon ${bairroSearchActive ? "combo-sticky" : ""}`');
     expect(fonte).not.toMatch(/\.combo-sticky\{[^}]*position:fixed/);
     expect(fonte).not.toMatch(/\.combo-sticky\{[^}]*100vh/);
   });
 
-  test("lista de resultados nunca fica escondida pelo teclado: altura máxima calculada pela viewport visível real quando o teclado está ativo", () => {
-    expect(fonte).toContain("maxHeight: Math.max(160, viewportAlturaVisivel - 220)");
+  test("offset do buscador sticky usa a altura REAL do stepper medida via ResizeObserver (--steps-h) + respiro — nunca top:8px cego que ficava atrás do stepper fixo", () => {
+    expect(fonte).toContain("const [stepsHeight, setStepsHeight] = useState(46);");
+    expect(fonte).toContain("new ResizeObserver(medir);");
+    expect(fonte).toContain(".combo-sticky{position:sticky;top:calc(var(--steps-h, 46px) + 10px);");
   });
 
-  test("dock da Sacola e do Pagamento não são afetados pela detecção de teclado — regra é exclusiva da tela de Entrega", () => {
-    expect(fonte).not.toMatch(/screen === "sc-cart" && !mobileKeyboardActive/);
-    expect(fonte).not.toMatch(/screen === "sc-pay" && !mobileKeyboardActive/);
+  test("lista de resultados nunca fica escondida pelo teclado: altura máxima calculada pela viewport visível real, descontando o stepper, quando a busca está ativa", () => {
+    expect(fonte).toContain("maxHeight: Math.max(160, viewportAlturaVisivel - stepsHeight - 140)");
+  });
+
+  test("dock da Sacola e do Pagamento não são afetados pela busca de bairro — regra é exclusiva da tela de Entrega", () => {
+    expect(fonte).not.toMatch(/screen === "sc-cart" && !bairroSearchActive/);
+    expect(fonte).not.toMatch(/screen === "sc-pay" && !bairroSearchActive/);
+  });
+
+  test("dock flutuante da Entrega some por completo (deixa de renderizar) enquanto bairroSearchActive — nunca só opacity", () => {
+    expect(fonte).toMatch(/cartCount > 0 && screen === "sc-delivery" && !bairroSearchActive && \(\s*<div className="delivery-cta-bar">/);
+  });
+});
+
+// Divisória sutil entre os bairros da lista (objetivo 9): 10% de respiro em
+// cada lado, nunca 100% da largura; nunca depois do último item.
+describe("/cardapio (PublicCardapio) — divisória entre bairros da busca (combo-opt)", () => {
+  test("pseudo-elemento :not(:last-child)::after com 10% de respiro em cada lado — sem markup extra, sem linha após o último item nem com resultado único", () => {
+    expect(fonte).toContain(".combo-opt:not(:last-child)::after{content:\"\";position:absolute;left:10%;right:10%;bottom:0;height:1px;background:var(--line-strong);opacity:.7}");
+  });
+
+  test(".combo-opt é position:relative (ancora o pseudo-elemento da divisória) sem alterar o clique/seleção da opção", () => {
+    expect(fonte).toContain(".combo-opt{position:relative;padding:13px 14px;");
   });
 });
 
