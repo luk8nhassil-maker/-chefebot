@@ -786,7 +786,7 @@ describe("/cardapio (PublicCardapio) — nova etapa de adicionais de pizza (sc-a
   });
 
   test("sc-addons e sc-macarronada-addon estão nas listas de navegação (safeCartReturnScreens/stepMap) — nunca telas órfãs pro botão voltar/carrinho", () => {
-    expect(fonte).toContain('const safeCartReturnScreens = ["sc-start", "sc-build", "sc-border", "sc-addons", "sc-list", "sc-suco-leite", "sc-macarronada-size", "sc-macarronada-addon", "sc-another", "sc-delivery", "sc-pay", "sc-promo"];');
+    expect(fonte).toContain('const safeCartReturnScreens = ["sc-start", "sc-build", "sc-border", "sc-addons", "sc-list", "sc-novidades", "sc-suco-leite", "sc-macarronada-size", "sc-macarronada-addon", "sc-another", "sc-delivery", "sc-pay", "sc-promo"];');
     expect(fonte).toContain('"sc-addons": 0');
     expect(fonte).toContain('"sc-macarronada-addon": 0');
   });
@@ -998,7 +998,12 @@ describe("/cardapio (PublicCardapio) — Calzone entra no mesmo fluxo de sabores
   test("selos de novidade usam IDs oficiais tanto em sabores quanto em produtos simples", () => {
     expect(fonte).toContain('noveltyActive && isNewCatalogItemId(menu.pizzaCatalog?.flavors.find((flavor) => flavor.name === f)?.id)');
     expect(fonte).toContain('noveltyActive && isNewCatalogItemId("id" in it ? it.id : undefined)');
-    expect(fonte).toContain('{noveltyActive && <NoveltyBadge className="home-novelty" />}');
+    // Card da home: selo só aparece quando aquela categoria específica tem
+    // novidade de verdade (não mistura "existe alguma novidade em qualquer
+    // lugar" com "esta categoria tem novidade"), derivado de
+    // NEW_CATALOG_ITEM_IDS via pizzaFlavorsNovos/catNovelty.
+    expect(fonte).toContain('{pizzaEspecialNovelty && <NoveltyBadge className="home-novelty" />}');
+    expect(fonte).toContain('const pizzaFlavorsNovos = noveltyActive ? (menu.pizzaCatalog?.flavors || []).filter((f) => isNewCatalogItemId(f.id)) : [];');
     expect(fonte).toContain('timer = window.setTimeout(updateAndScheduleNovelty');
   });
 
