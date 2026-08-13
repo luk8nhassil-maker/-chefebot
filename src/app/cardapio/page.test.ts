@@ -280,6 +280,35 @@ describe("/cardapio (PublicCardapio) — divisória entre bairros da busca (comb
   });
 });
 
+// Refino visual (ajuste fino de UI, CSS puro): buscador branco em primeiro
+// plano vs. área de resultados em cinza muito leve (token neutro existente,
+// --surface2 — nunca hex novo), e divisor alinhado exatamente ao inset do
+// texto/valor (nunca width/porcentagem fixa) — escopado só ao dropdown de
+// bairro via classes extras, sem tocar no dropdown de rua nem em lógica.
+describe("/cardapio (PublicCardapio) — contraste buscador x resultados e grid do divisor (bairro)", () => {
+  test("dropdown de bairro tem classe extra combo-dropdown-bairro e cada opção tem combo-opt-bairro (rua não é afetada)", () => {
+    expect(fonte).toContain('className="combo-dropdown combo-dropdown-bairro"');
+    expect(fonte).toContain('className="combo-opt combo-opt-bairro"');
+    expect(fonte).toContain('<div className="combo-dropdown" id="rua-combo-list"');
+    expect(fonte).toContain('<div key={r} className="combo-opt" role="option" aria-selected={r === rua}');
+  });
+
+  test("fundo da lista de bairros usa token neutro do design system (--surface2), nunca hex novo", () => {
+    expect(fonte).toContain(".combo-dropdown-bairro{background:var(--surface2)}");
+  });
+
+  test("buscador continua branco (var(--surface)) — não escurecido pelo refino", () => {
+    expect(fonte).toContain(".combo-sticky{position:sticky;top:calc(var(--steps-h, 46px) + 10px);z-index:22;background:var(--surface);border-radius:12px}");
+    expect(fonte).toContain(".combo .flavor-search-input{padding:12px 14px;border-radius:12px;border:1px solid var(--line-strong);background:var(--surface);font-size:15px}");
+  });
+
+  test("padding horizontal do item de bairro e inset do divisor compartilham a MESMA variável (--bairro-x) — nunca width/porcentagem fixa", () => {
+    expect(fonte).toContain(".combo-opt-bairro{--bairro-x:22px;padding-inline:var(--bairro-x);padding-block:14px}");
+    expect(fonte).toContain(".combo-opt-bairro:not(:last-child)::after{left:var(--bairro-x);right:var(--bairro-x);opacity:1}");
+    expect(fonte).not.toMatch(/\.combo-opt-bairro[^}]*width:\s*80%/);
+  });
+});
+
 // Nível "UI premium do Pix aguardando" — o card Pix da tela sc-done foi
 // extraído para PixPagamentoCard.tsx (reorganização visual apenas). Estes
 // testes garantem que nenhuma regra funcional foi perdida na extração:

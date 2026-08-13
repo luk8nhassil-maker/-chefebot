@@ -3012,7 +3012,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                         // não um valor fixo — sobra o máximo de espaço entre
                         // o buscador e o teclado, sempre rolável dentro dele.
                         <div
-                          className="combo-dropdown"
+                          className="combo-dropdown combo-dropdown-bairro"
                           id="bairro-combo-list"
                           role="listbox"
                           style={bairroSearchActive && viewportAlturaVisivel ? { maxHeight: Math.max(160, viewportAlturaVisivel - stepsHeight - 140) } : undefined}
@@ -3020,7 +3020,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                           {bairrosFiltrados.length === 0 ? (
                             <div className="combo-empty">Nenhum bairro encontrado.<br />Confira o nome e tente novamente.</div>
                           ) : bairrosFiltrados.map((b) => (
-                            <div key={b.i} className="combo-opt" role="option" aria-selected={String(b.i) === bairroIdx} onMouseDown={(e) => { e.preventDefault(); setBairroIdx(String(b.i)); setBairroQuery(""); setBairroDropdownOpen(false); if (erroEntrega) setErroEntrega(""); }}>
+                            <div key={b.i} className="combo-opt combo-opt-bairro" role="option" aria-selected={String(b.i) === bairroIdx} onMouseDown={(e) => { e.preventDefault(); setBairroIdx(String(b.i)); setBairroQuery(""); setBairroDropdownOpen(false); if (erroEntrega) setErroEntrega(""); }}>
                               <span>{b.name}</span>
                               <span className="combo-opt-fee">{money(b.fee)}</span>
                             </div>
@@ -3914,6 +3914,17 @@ main{width:100%;padding:6px 20px 20px}
 .combo-opt:not(:last-child)::after{content:"";position:absolute;left:10%;right:10%;bottom:0;height:1px;background:var(--line-strong);opacity:.7}
 .combo-opt-fee{color:var(--text-sub);font-size:12.5px;white-space:nowrap;flex:0 0 auto}
 .combo-empty{padding:14px;font-size:13px;color:var(--text-sub);text-align:center}
+/* Lista de bairros: fundo cinza muito leve (token neutro já existente,
+   --surface2) para separar visualmente do buscador branco (.combo-sticky) —
+   igual autocomplete moderno (busca em primeiro plano, resultados discretos
+   atrás). Escopado só ao dropdown de bairro (não à sugestão de rua) via
+   .combo-dropdown-bairro/.combo-opt-bairro. */
+.combo-dropdown-bairro{background:var(--surface2)}
+.combo-opt-bairro{--bairro-x:22px;padding-inline:var(--bairro-x);padding-block:14px}
+/* Divisor alinhado exatamente com o texto do bairro e o valor da taxa (nunca
+   width/porcentagem fixa) — o mesmo inset do padding horizontal do item, via
+   a mesma variável --bairro-x, então acompanha qualquer largura de tela. */
+.combo-opt-bairro:not(:last-child)::after{left:var(--bairro-x);right:var(--bairro-x);opacity:1}
 .opt-desc-ingredients{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .cartbar{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:540px;z-index:50;background:transparent;padding:0 20px calc(env(safe-area-inset-bottom) + 14px);pointer-events:none}
 .cartbar-inner{margin:0 auto;display:flex;align-items:center;gap:14px;background:var(--surface-elevated);border:1px solid var(--line-strong);border-radius:20px;padding:12px 12px 12px 16px;box-shadow:0 -10px 34px rgba(0,0,0,.35);pointer-events:auto}
