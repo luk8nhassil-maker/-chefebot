@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { Pizza, Sandwich, Soup, CupSoda, GlassWater, Zap, Banknote, CreditCard, Shuffle, Wallet, Bike, Store, UtensilsCrossed, Sun, Moon, Receipt, Gift, Pencil, Plus, Clock, ChevronRight, Sparkles, Beef, Croissant, Milk } from "lucide-react";
+import { Pizza, Sandwich, Soup, CupSoda, GlassWater, Zap, Banknote, CreditCard, Shuffle, Wallet, Bike, Store, UtensilsCrossed, Sun, Moon, Receipt, Gift, Pencil, Plus, Minus, Clock, ChevronRight, Sparkles, Beef, Croissant, Milk, Search, PartyPopper } from "lucide-react";
 import PanelShell from "@/components/PanelShell";
 import { useLiveMenu, cartItemEsgotado } from "./liveMenu";
 import { CARDAPIO_ILLUSTRATIONS, CardapioIllustration } from "@/lib/cardapioVisuals";
@@ -1241,7 +1241,21 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const [sucoPendente, setSucoPendente] = useState<{ name: string; price: number } | null>(null);
   const [delType, setDelType] = useState<"delivery" | "retirada" | "dine_in" | null>(null);
   const [bairroIdx, setBairroIdx] = useState<string>("");
+  // Combobox pesquisável de bairro (objetivo 7): `bairroQuery` é o texto
+  // digitado/exibido no campo, `bairroDropdownOpen` controla a lista. A
+  // regra de negócio não muda — `bairroIdx` continua sendo a única fonte de
+  // verdade pra taxa/payload, só é setado quando o cliente escolhe uma
+  // opção válida da lista (nunca por texto livre).
+  const [bairroQuery, setBairroQuery] = useState("");
+  const [bairroDropdownOpen, setBairroDropdownOpen] = useState(false);
   const [rua, setRua] = useState("");
+  // Autocomplete de rua com memória universal (objetivo 8): sugestões vêm
+  // de /api/enderecos/ruas (Redis, ver src/lib/ruasConhecidas.ts). Puramente
+  // aditivo — se a busca falhar ou não haver sugestão, o campo segue como
+  // digitação livre normal.
+  const [ruaSugestoes, setRuaSugestoes] = useState<string[]>([]);
+  const [ruaDropdownOpen, setRuaDropdownOpen] = useState(false);
+  const ruaDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [nome, setNome] = useState("");
   const [payment, setPayment] = useState<string | null>(null);
   const [troco, setTroco] = useState("");
@@ -1373,6 +1387,26 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     setHydrated(true);
   }, []);
 
+  // Autocomplete de rua (objetivo 8): busca sugestões da memória universal
+  // com debounce, só quando o campo tem >=2 caracteres. Puramente aditivo —
+  // erro de rede não bloqueia nada, só deixa a lista vazia.
+  useEffect(() => {
+    if (delType !== "delivery") return;
+    if (ruaDebounceRef.current) clearTimeout(ruaDebounceRef.current);
+    const termo = rua.trim();
+    // O próprio setState (mesmo o de "limpar lista") sempre dentro do
+    // timeout, nunca direto no corpo do efeito — evita disparar
+    // set-state-in-effect à toa a cada tecla digitada.
+    ruaDebounceRef.current = setTimeout(() => {
+      if (termo.length < 2) { setRuaSugestoes([]); return; }
+      fetch(`/api/enderecos/ruas?q=${encodeURIComponent(termo)}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => { if (data?.ok && Array.isArray(data.ruas)) setRuaSugestoes(data.ruas); })
+        .catch(() => {});
+    }, 250);
+    return () => { if (ruaDebounceRef.current) clearTimeout(ruaDebounceRef.current); };
+  }, [rua, delType]);
+
   useEffect(() => {
     if (!hydrated) return;
     if (screen === "sc-done") return;
@@ -1480,7 +1514,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     setPromoSel(null); setPromoSabor(null);
     go("sc-cart");
   }
-  const safeCartReturnScreens = ["sc-start", "sc-build", "sc-border", "sc-addons", "sc-list", "sc-suco-leite", "sc-macarronada-size", "sc-macarronada-addon", "sc-another", "sc-delivery", "sc-pay", "sc-promo"];
+  const safeCartReturnScreens = ["sc-start", "sc-build", "sc-border", "sc-addons", "sc-list", "sc-novidades", "sc-suco-leite", "sc-macarronada-size", "sc-macarronada-addon", "sc-another", "sc-delivery", "sc-pay", "sc-promo"];
   function go(s: string) {
     if (s === "sc-cart" && screen !== "sc-cart" && safeCartReturnScreens.includes(screen)) {
       setPreviousStepBeforeCart(screen);
@@ -1561,6 +1595,36 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     timer = window.setTimeout(updateAndScheduleNovelty, 0);
     return () => { if (timer !== undefined) window.clearTimeout(timer); };
   }, []);
+  // Novidades por categoria (objetivo 2 — selo no card da home) e a lista
+  // agregada usada pela tela "Novidades" própria (objetivo 3). Puramente
+  // derivado do catálogo já carregado — nunca uma segunda fonte de verdade,
+  // só filtra por isNewCatalogItemId (a mesma checagem do selo individual).
+  const pizzaFlavorsNovos = noveltyActive ? (menu.pizzaCatalog?.flavors || []).filter((f) => isNewCatalogItemId(f.id)) : [];
+  const pizzaTradNovelty = pizzaFlavorsNovos.some((f) => f.category === "tradicional" || f.category === "doce");
+  const pizzaEspecialNovelty = pizzaFlavorsNovos.some((f) => f.category === "especial");
+  const catNovelty = (lista: { id?: string }[]) => noveltyActive && lista.some((it) => isNewCatalogItemId(it.id));
+  const lancheNovelty = catNovelty(lanchesEfetivos as { id?: string }[]);
+  const macarronadaNovelty = catNovelty(macarronadasEfetivas as { id?: string }[]);
+  const bebidaNovelty = catNovelty(bebidasEfetivas as { id?: string }[]);
+  const sucoNovelty = catNovelty(sucosEfetivos as { id?: string }[]);
+  const hamburguerNovelty = catNovelty(hamburguesEfetivos as { id?: string }[]);
+  const pastelFornoNovelty = catNovelty(pastelFornoEfetivo as { id?: string }[]);
+  const vitaminaNovelty = catNovelty(vitaminasEfetivas as { id?: string }[]);
+  const algumaNovidade = pizzaTradNovelty || pizzaEspecialNovelty || lancheNovelty || macarronadaNovelty || bebidaNovelty || sucoNovelty || hamburguerNovelty || pastelFornoNovelty || vitaminaNovelty;
+  // Seções agrupadas por categoria pra tela "Novidades" — só itens simples
+  // (sabor único de pizza fica de fora daqui de propósito: escolher e
+  // montar a pizza continua exigindo o fluxo normal de tamanho/sabor, então
+  // pizza entra como um cartão de atalho separado, não uma linha "toque pra
+  // adicionar").
+  type NovidadeItem = { id?: string; name: string; price: number; available?: boolean; sizes?: { code: string; price: number }[]; flavors?: string[] };
+  const novidadeSecoesSimples: { titulo: string; emoji: string; cat: "lanche" | "hamburguer" | "pastelForno" | "suco" | "bebida"; data: NovidadeItem[] }[] = [
+    { titulo: "Lanches", emoji: "🍽️", cat: "lanche" as const, data: (lanchesEfetivos as NovidadeItem[]).filter((it) => isNewCatalogItemId(it.id)) },
+    { titulo: "Hambúrguer", emoji: "🍔", cat: "hamburguer" as const, data: (hamburguesEfetivos as NovidadeItem[]).filter((it) => isNewCatalogItemId(it.id)) },
+    { titulo: "Pastel de Forno", emoji: "🥟", cat: "pastelForno" as const, data: (pastelFornoEfetivo as NovidadeItem[]).filter((it) => isNewCatalogItemId(it.id)) },
+    { titulo: "Sucos", emoji: ICONS.sucos, cat: "suco" as const, data: (sucosEfetivos as NovidadeItem[]).filter((it) => isNewCatalogItemId(it.id)) },
+    { titulo: "Bebidas", emoji: ICONS.bebidas, cat: "bebida" as const, data: (bebidasEfetivas as NovidadeItem[]).filter((it) => isNewCatalogItemId(it.id)) },
+  ].filter((s) => s.data.length > 0);
+  function goNovidades() { go("sc-novidades"); }
   function resetBuild() { setSize(null); setSizePrice(0); setF1(null); setF2(null); setBorder(null); setBorderPrice(0); setAddOnIds([]); setMiniPizzaMode(false); setCalzoneMode(false); setPastelMode(false); setPastelPendente(null); setFlavorModalOpen(false); }
   function goPizza(category: "tradicional" | "especial" | "doce" = "tradicional") { setPizzaCategoryFilter(category); setPlan({ total: 0, current: 1, openEnded: true }); resetBuild(); go("sc-build"); }
   function pizzasNoCarrinho() { return cart.filter((c) => c.kind === "pizza" || (c.kind === "simple" && isMiniPizzaName(c.name))).length; }
@@ -1979,6 +2043,17 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     setLastAddedKind(listCat === "bebida" ? "bebida" : "lanche");
     showToast(`${it.name} adicionado!`);
   }
+  // Toque num item da tela "Novidades" (objetivo 3). Sucos sempre exigem a
+  // etapa extra "com/sem leite" (que só funciona corretamente com
+  // `listCat === "suco"`, ver addSimple acima) — pra não duplicar essa
+  // regra aqui, esse caso navega pra lista normal da categoria (ainda um
+  // atalho curto, 1 toque) em vez de tentar adicionar direto. Os demais
+  // (lanche, hambúrguer, bebida) não dependem de `listCat` dentro de
+  // addSimple e podem ser adicionados direto da própria linha.
+  function addNovidadeItem(it: { name: string; price: number; available?: boolean; flavors?: string[] }, emoji: string, cat: "lanche" | "hamburguer" | "pastelForno" | "suco" | "bebida") {
+    if (cat === "suco" || cat === "pastelForno") { setListCat(cat); go("sc-list"); return; }
+    addSimple(it, emoji);
+  }
   function addSucoLeite(comLeite: boolean) {
     if (!sucoPendente) return;
     const detail = comLeite ? "Com leite" : "Sem leite";
@@ -2074,6 +2149,10 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     trocoOpcao === "nao" || (trocoOpcao === "sim" && !isNaN(parseValorInput(troco)) && parseValorInput(troco) > hibridoAtual.dinheiro)
   );
   const hibridoBloqueado = isHibrido && (!hibridoSomaValida || !hibridoTrocoValido);
+  const bairroSelecionado = bairroIdx !== "" ? (menu.neighborhoods || [])[+bairroIdx] : undefined;
+  const bairrosFiltrados = (menu.neighborhoods || [])
+    .map((b, i) => ({ ...b, i }))
+    .filter((b) => norm(b.name).includes(norm(bairroQuery.trim())));
   const ruaOk = rua.trim().length > 0;
   const numeroOk = numero.trim().length > 0;
   const delOk = delType === "retirada" || delType === "dine_in" || (delType === "delivery" && bairroIdx !== "" && ruaOk && numeroOk);
@@ -2082,12 +2161,6 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const ruaErro = enderecoErroAtivo && !ruaOk;
   const numeroErro = enderecoErroAtivo && !numeroOk;
   const enderecoErroStyle = { borderColor: "var(--danger)", background: "color-mix(in srgb, var(--danger) 8%, transparent)", boxShadow: "0 0 0 1px color-mix(in srgb, var(--danger) 18%, transparent)" };
-  const bairroSelectStyle = {
-    ...(bairroErro ? enderecoErroStyle : {}),
-    background: bairroErro ? "color-mix(in srgb, var(--danger) 8%, transparent)" : "var(--surface)",
-    color: "var(--text)",
-  };
-  const bairroOptionStyle = { background: "var(--foreground)", color: "var(--surface-secondary)" };
   const payOk = !!nome.trim() && (telefoneValido(telefone) || vinculoWhatsappAtivo) && !!payment;
 
   const esgotadosKey = esgotados.join("|");
@@ -2304,12 +2377,12 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
       if (data.ok) { try { localStorage.setItem("cf_nome", nome.trim()); if (telefone.trim()) localStorage.setItem("cf_tel", telefone.trim()); } catch {} try { sessionStorage.removeItem("cf_draft"); } catch {} if (itemRecompensaJornada) limparReferenciaRecompensa(localStorage); try { sessionStorage.removeItem("cf_resgate_pontos"); } catch {} setResgatePontos(null); try { const resumo = { id: String(data.pedidoId), numero: typeof data.numero === "number" ? data.numero : undefined, ts: Date.now(), statusToken: typeof data.statusToken === "string" ? data.statusToken : undefined }; localStorage.setItem("cf_ultimo_pedido", JSON.stringify(resumo)); } catch {} setStatusPedidoConfirmado("novo"); setStatusPixCliente(payment?.toLowerCase().includes("pix") ? "aguardando_pix" : "nao_pix"); setPedidoConfirmado({ id: data.pedidoId, numero: data.numero, total: data.total, ...(typeof data.statusToken === "string" ? { statusToken: data.statusToken } : {}), ...(data.pix ? { pix: data.pix } : {}) }); if (payment?.toLowerCase().includes("pix") && typeof data.statusToken === "string") { salvarReferenciaPixPendente(localStorage, { pedidoId: String(data.pedidoId), statusToken: data.statusToken, numero: typeof data.numero === "number" ? data.numero : undefined }); } go("sc-done"); } else { if (resgatePontos && typeof data.error === "string" && /resgate/i.test(data.error)) { try { sessionStorage.removeItem("cf_resgate_pontos"); } catch {} setResgatePontos(null); } showToast(typeof data.error === "string" ? data.error : "Erro ao enviar. Tente de novo."); }
     } catch { showToast("Sem conexão. Tente de novo."); } finally { setSending(false); }
   }
-  function resetAll() { setCart([]); resetBuild(); setDelType(null); setBairroIdx(""); setRua(""); setNumero(""); setReferencia(""); setPayment(null); setTroco(""); setTrocoOpcao(null); setPaymentModal(null); setMistoPixInput(""); setMistoDinheiroInput(""); setErroMisto(""); setObservacao(""); setErroNome(""); setErroTelefone(""); setErroPagamento(""); setErroEntrega(""); setErroTroco(""); setPedidoConfirmado(null); setStatusPedidoConfirmado("novo"); setStatusPixCliente("aguardando_pix"); setRestoredDraft(false); setEditandoIdentidade(false); setLastAddedKind(null); setUpsellBebidaIgnorado(false); try { sessionStorage.removeItem("cf_draft"); } catch {} go("sc-start"); }
+  function resetAll() { setCart([]); resetBuild(); setDelType(null); setBairroIdx(""); setBairroQuery(""); setBairroDropdownOpen(false); setRua(""); setRuaSugestoes([]); setRuaDropdownOpen(false); setNumero(""); setReferencia(""); setPayment(null); setTroco(""); setTrocoOpcao(null); setPaymentModal(null); setMistoPixInput(""); setMistoDinheiroInput(""); setErroMisto(""); setObservacao(""); setErroNome(""); setErroTelefone(""); setErroPagamento(""); setErroEntrega(""); setErroTroco(""); setPedidoConfirmado(null); setStatusPedidoConfirmado("novo"); setStatusPixCliente("aguardando_pix"); setRestoredDraft(false); setEditandoIdentidade(false); setLastAddedKind(null); setUpsellBebidaIgnorado(false); try { sessionStorage.removeItem("cf_draft"); } catch {} go("sc-start"); }
 
-  const stepMap: Record<string, number> = { "sc-start": 0, "sc-build": 0, "sc-border": 0, "sc-addons": 0, "sc-list": 0, "sc-suco-leite": 0, "sc-macarronada-size": 0, "sc-macarronada-addon": 0, "sc-promo": 0, "sc-another": 1, "sc-cart": 1, "sc-delivery": 2, "sc-pay": 3, "sc-done": 3 };
+  const stepMap: Record<string, number> = { "sc-start": 0, "sc-build": 0, "sc-border": 0, "sc-addons": 0, "sc-list": 0, "sc-novidades": 0, "sc-suco-leite": 0, "sc-macarronada-size": 0, "sc-macarronada-addon": 0, "sc-promo": 0, "sc-another": 1, "sc-cart": 1, "sc-delivery": 2, "sc-pay": 3, "sc-done": 3 };
   const stepIdx = stepMap[screen] ?? 0;
   const STEPS = ["Itens", "Sacola", "Entrega", "Pagar"];
-  const showStrongCartCta = cartCount > 0 && ["sc-list", "sc-suco-leite", "sc-macarronada-size", "sc-promo"].includes(screen);
+  const showStrongCartCta = cartCount > 0 && ["sc-list", "sc-novidades", "sc-suco-leite", "sc-macarronada-size", "sc-promo"].includes(screen);
   // Bottom nav só nas telas de navegação/exploração — some nas telas de
   // escolha/foco (tamanho, sabor, borda, com/sem leite, entrega, pagamento
   // etc.) pra não competir com o CTA principal daquela etapa.
@@ -2400,31 +2473,70 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                   ))}
                 </div>
               )}
+              {algumaNovidade && (
+                // Ponto de entrada PRÓPRIO de Novidades (objetivo 3): abre
+                // sc-novidades, uma lista filtrada SÓ com itens marcados
+                // como novos — nunca mais aponta pro card "Pizzas
+                // Especiais", que continua sendo uma categoria real à
+                // parte (goPizza("especial") abaixo, intocado).
+                <button className="home-novidades-card" onClick={goNovidades}>
+                  <PartyPopper size={22} aria-hidden="true" />
+                  <span className="home-novidades-body">
+                    <strong>Novidades</strong>
+                    <span>Acabou de chegar — confira os lançamentos</span>
+                  </span>
+                  <ChevronRight size={18} aria-hidden="true" />
+                </button>
+              )}
               <div className="home-copy">
                 <h2>Ou monte seu pedido</h2>
                 <p>Escolha uma categoria pra começar do seu jeito.</p>
               </div>
               <div className="home-grid">
-                <button className="home-cat" onClick={() => goPizza("tradicional")}><CATEGORIA_ICON.pizza size={27} color="var(--gold)" aria-hidden="true" /><strong>Pizzas</strong></button>
+                <button className="home-cat" onClick={() => goPizza("tradicional")}>
+                  {pizzaTradNovelty && <NoveltyBadge className="home-novelty" />}
+                  <CATEGORIA_ICON.pizza size={27} color="var(--gold)" aria-hidden="true" /><strong>Pizzas</strong>
+                </button>
                 <button className="home-cat home-cat-special" onClick={() => goPizza("especial")}>
-                  {noveltyActive && <NoveltyBadge className="home-novelty" />}
+                  {pizzaEspecialNovelty && <NoveltyBadge className="home-novelty" />}
                   <Sparkles size={27} color="#a78bfa" aria-hidden="true" />
                   <strong>Pizzas Especiais</strong>
                 </button>
-                <button className="home-cat" onClick={() => goCat("lanche")}><CATEGORIA_ICON.lanche size={27} color="var(--gold)" aria-hidden="true" /><strong>Lanches</strong></button>
-                <button className="home-cat" onClick={() => goCat("macarronada")}><CATEGORIA_ICON.macarronada size={27} color="var(--gold)" aria-hidden="true" /><strong>Macarronada</strong></button>
-                <button className="home-cat" onClick={() => goCat("bebida")}><CATEGORIA_ICON.bebidas size={27} color="var(--gold)" aria-hidden="true" /><strong>Bebidas</strong></button>
+                <button className="home-cat" onClick={() => goCat("lanche")}>
+                  {lancheNovelty && <NoveltyBadge className="home-novelty" />}
+                  <CATEGORIA_ICON.lanche size={27} color="var(--gold)" aria-hidden="true" /><strong>Lanches</strong>
+                </button>
+                <button className="home-cat" onClick={() => goCat("macarronada")}>
+                  {macarronadaNovelty && <NoveltyBadge className="home-novelty" />}
+                  <CATEGORIA_ICON.macarronada size={27} color="var(--gold)" aria-hidden="true" /><strong>Macarronada</strong>
+                </button>
+                <button className="home-cat" onClick={() => goCat("bebida")}>
+                  {bebidaNovelty && <NoveltyBadge className="home-novelty" />}
+                  <CATEGORIA_ICON.bebidas size={27} color="var(--gold)" aria-hidden="true" /><strong>Bebidas</strong>
+                </button>
                 {sucosEfetivos.length > 0 && (
-                  <button className="home-cat" onClick={() => goCat("suco")}><CATEGORIA_ICON.sucos size={27} color="var(--gold)" aria-hidden="true" /><strong>Sucos</strong></button>
+                  <button className="home-cat" onClick={() => goCat("suco")}>
+                    {sucoNovelty && <NoveltyBadge className="home-novelty" />}
+                    <CATEGORIA_ICON.sucos size={27} color="var(--gold)" aria-hidden="true" /><strong>Sucos</strong>
+                  </button>
                 )}
                 {hamburguesEfetivos.length > 0 && (
-                  <button className="home-cat" onClick={() => goCat("hamburguer")}><CATEGORIA_ICON.hamburguer size={27} color="var(--gold)" aria-hidden="true" /><strong>Hambúrguer</strong></button>
+                  <button className="home-cat" onClick={() => goCat("hamburguer")}>
+                    {hamburguerNovelty && <NoveltyBadge className="home-novelty" />}
+                    <CATEGORIA_ICON.hamburguer size={27} color="var(--gold)" aria-hidden="true" /><strong>Hambúrguer</strong>
+                  </button>
                 )}
                 {pastelFornoEfetivo.length > 0 && (
-                  <button className="home-cat" onClick={() => goCat("pastelForno")}><CATEGORIA_ICON.pastelForno size={27} color="var(--gold)" aria-hidden="true" /><strong>Pastel de Forno</strong></button>
+                  <button className="home-cat" onClick={() => goCat("pastelForno")}>
+                    {pastelFornoNovelty && <NoveltyBadge className="home-novelty" />}
+                    <CATEGORIA_ICON.pastelForno size={27} color="var(--gold)" aria-hidden="true" /><strong>Pastel de Forno</strong>
+                  </button>
                 )}
                 {vitaminasEfetivas.length > 0 && (
-                  <button className="home-cat" onClick={() => goCat("vitamina")}><CATEGORIA_ICON.vitamina size={27} color="var(--gold)" aria-hidden="true" /><strong>Vitaminas</strong></button>
+                  <button className="home-cat" onClick={() => goCat("vitamina")}>
+                    {vitaminaNovelty && <NoveltyBadge className="home-novelty" />}
+                    <CATEGORIA_ICON.vitamina size={27} color="var(--gold)" aria-hidden="true" /><strong>Vitaminas</strong>
+                  </button>
                 )}
               </div>
             </section>
@@ -2619,7 +2731,8 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                 return (<>
                   <div className="screen-head">{cfg.eb && <div className="eyebrow">{cfg.eb}</div>}<h2>{cfg.t}</h2><p>Toque para adicionar.</p></div>
                   {mostrarBuscaLista && (
-                    <div className="flavor-search">
+                    <div className="flavor-search has-icon">
+                      <Search size={16} className="flavor-search-icon" aria-hidden="true" />
                       <input
                         type="search"
                         inputMode="search"
@@ -2637,9 +2750,72 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                     <div className="flavor-search-empty">Nenhum produto encontrado para &quot;{listSearchQuery.trim()}&quot;.</div>
                   ) : cfg.data.map((it, i) => {
                       if (!itemBateBusca(it, termoListaNorm)) return null;
-                      const esg = ("available" in it && it.available === false) || esgotados.includes(it.name); const ing = ingredientesDoItem(it); return (<div key={"id" in it ? it.id : i} className="opt" onClick={() => !esg && addSimple(it, cfg.emoji)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }} {...optA11yAttrs(esg)} onKeyDown={(e) => { if (!esg && isActivateKey(e)) { e.preventDefault(); addSimple(it, cfg.emoji); } }}><div className="opt-emoji">{cfg.emoji}</div><div className="opt-body"><div className="opt-title opt-title-with-badge">{it.name}{noveltyActive && isNewCatalogItemId("id" in it ? it.id : undefined) && <NoveltyBadge />}</div>{esg ? <div className="opt-desc" style={{ color: "var(--danger)" }}>Esgotado</div> : ing ? <div className="opt-desc opt-desc-ingredients">{ing}</div> : null}</div><div className="opt-price">{simplePriceLabel(it)}</div></div>); })}
+                      const esg = ("available" in it && it.available === false) || esgotados.includes(it.name); const ing = ingredientesDoItem(it);
+                      // Stepper de quantidade (objetivo 6): só para SKU único
+                      // de verdade — sem sabores/tamanhos pra escolher e sem
+                      // a etapa extra do suco (com/sem leite). Calzone e
+                      // demais produtos com `flavors` já caem fora por não
+                      // baterem essa condição, então continuam abrindo o
+                      // fluxo de escolha de sabor normalmente.
+                      const semConfig = !("flavors" in it && it.flavors && it.flavors.length > 0) && !("sizes" in it && it.sizes && it.sizes.length > 0) && listCat !== "suco";
+                      const cartIdx = semConfig ? cart.findIndex((c) => c.kind === "simple" && c.name === it.name && !c.recompensaJornadaId) : -1;
+                      const cartQty = cartIdx >= 0 ? cart[cartIdx].qty : 0;
+                      return (<div key={"id" in it ? it.id : i} className="opt" onClick={() => !esg && addSimple(it, cfg.emoji)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }} {...optA11yAttrs(esg)} onKeyDown={(e) => { if (!esg && isActivateKey(e)) { e.preventDefault(); addSimple(it, cfg.emoji); } }}><div className="opt-emoji">{cfg.emoji}</div><div className="opt-body"><div className="opt-title opt-title-with-badge">{it.name}{noveltyActive && isNewCatalogItemId("id" in it ? it.id : undefined) && <NoveltyBadge />}</div>{esg ? <div className="opt-desc" style={{ color: "var(--danger)" }}>Esgotado</div> : ing ? <div className="opt-desc opt-desc-ingredients">{ing}</div> : null}</div>{!esg && semConfig && cartQty > 0 ? (
+                        <div className="qty-pill qty-pill-sm" onClick={(e) => e.stopPropagation()}>
+                          <button type="button" aria-label={`Diminuir quantidade de ${it.name}`} onClick={() => chQty(cartIdx, -1)}><Minus size={13} aria-hidden="true" /></button>
+                          <span>{cartQty}</span>
+                          <button type="button" aria-label={`Aumentar quantidade de ${it.name}`} onClick={() => addSimple(it, cfg.emoji)}><Plus size={13} aria-hidden="true" /></button>
+                        </div>
+                      ) : <div className="opt-price">{simplePriceLabel(it)}</div>}</div>); })}
                 </>);
               })()}
+            </section>
+          )}
+          {screen === "sc-novidades" && (
+            <section className="screen active list-screen">
+              <TopBack onClick={() => go("sc-start")} title="Novidades" />
+              <div className="screen-head"><div className="eyebrow">Acabou de chegar</div><h2>Novidades</h2><p>Só os itens mais novos do cardápio, por categoria.</p></div>
+              {pizzaFlavorsNovos.length > 0 && (
+                <div className="novidade-secao">
+                  <div className="section-label">Pizzas</div>
+                  {(["tradicional", "especial", "doce"] as const).map((cat) => {
+                    const doCat = pizzaFlavorsNovos.filter((f) => f.category === cat);
+                    if (doCat.length === 0) return null;
+                    return (
+                      <div key={cat} className="opt" onClick={() => goPizza(cat)} {...optA11yAttrs()} onKeyDown={(e) => { if (isActivateKey(e)) { e.preventDefault(); goPizza(cat); } }}>
+                        <div className="opt-emoji">🍕</div>
+                        <div className="opt-body">
+                          <div className="opt-title">{CATEGORIA_PIZZA_LABEL[cat]}</div>
+                          <div className="opt-desc opt-desc-ingredients">{doCat.map((f) => f.name).join(", ")}</div>
+                        </div>
+                        <ChevronRight size={18} color="var(--text-sub)" aria-hidden="true" />
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              {novidadeSecoesSimples.map((secao) => (
+                <div key={secao.titulo} className="novidade-secao">
+                  <div className="section-label">{secao.titulo}</div>
+                  {secao.data.map((it) => {
+                    const esg = ("available" in it && it.available === false) || esgotados.includes(it.name);
+                    const ing = ingredientesDoItem(it);
+                    return (
+                      <div key={it.id || it.name} className="opt" onClick={() => !esg && addNovidadeItem(it, secao.emoji, secao.cat)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }} {...optA11yAttrs(esg)} onKeyDown={(e) => { if (!esg && isActivateKey(e)) { e.preventDefault(); addNovidadeItem(it, secao.emoji, secao.cat); } }}>
+                        <div className="opt-emoji">{secao.emoji}</div>
+                        <div className="opt-body">
+                          <div className="opt-title opt-title-with-badge">{it.name}<NoveltyBadge /></div>
+                          {esg ? <div className="opt-desc" style={{ color: "var(--danger)" }}>Esgotado</div> : ing ? <div className="opt-desc opt-desc-ingredients">{ing}</div> : null}
+                        </div>
+                        <div className="opt-price">{simplePriceLabel(it)}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
+              {pizzaFlavorsNovos.length === 0 && novidadeSecoesSimples.length === 0 && (
+                <CardapioIllustration {...CARDAPIO_ILLUSTRATIONS.semResultado} />
+              )}
             </section>
           )}
           {screen === "sc-suco-leite" && sucoPendente && (
@@ -2707,15 +2883,67 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                   {erroEntrega && <div style={{ color: "var(--danger)", fontSize: 12, fontWeight: 700, margin: "-4px 0 10px" }}>{erroEntrega}</div>}
                   <div className="field">
                     <label>Bairro</label>
-                    <select value={bairroIdx} onChange={(e) => { setBairroIdx(e.target.value); if (erroEntrega) setErroEntrega(""); }} style={bairroSelectStyle}>
-                      <option value="" style={bairroOptionStyle}>Selecione o bairro...</option>
-                      {(menu.neighborhoods || []).map((b, i) => <option key={i} value={i} style={bairroOptionStyle}>{b.name} - {money(b.fee)}</option>)}
-                    </select>
+                    {/* Combobox pesquisável (objetivo 7): a regra de negócio
+                        não muda — só `bairroIdx` (setado ao ESCOLHER uma
+                        opção da lista) alimenta taxa/payload, nunca o texto
+                        livre digitado aqui. */}
+                    <div className="combo has-icon" onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setBairroDropdownOpen(false); }}>
+                      <Search size={16} className="flavor-search-icon" aria-hidden="true" />
+                      <input
+                        type="text"
+                        role="combobox"
+                        aria-expanded={bairroDropdownOpen}
+                        aria-autocomplete="list"
+                        aria-haspopup="listbox"
+                        aria-controls="bairro-combo-list"
+                        className="flavor-search-input"
+                        placeholder="Buscar bairro"
+                        style={bairroErro ? enderecoErroStyle : undefined}
+                        value={bairroDropdownOpen ? bairroQuery : (bairroSelecionado ? `${bairroSelecionado.name} · ${money(bairroSelecionado.fee)}` : "")}
+                        onFocus={() => { setBairroDropdownOpen(true); setBairroQuery(""); }}
+                        onChange={(e) => { setBairroQuery(e.target.value); if (erroEntrega) setErroEntrega(""); }}
+                      />
+                      {bairroDropdownOpen && (
+                        <div className="combo-dropdown" id="bairro-combo-list" role="listbox">
+                          {bairrosFiltrados.length === 0 ? (
+                            <div className="combo-empty">Nenhum bairro encontrado.</div>
+                          ) : bairrosFiltrados.map((b) => (
+                            <div key={b.i} className="combo-opt" role="option" aria-selected={String(b.i) === bairroIdx} onMouseDown={(e) => { e.preventDefault(); setBairroIdx(String(b.i)); setBairroQuery(""); setBairroDropdownOpen(false); if (erroEntrega) setErroEntrega(""); }}>
+                              <span>{b.name}</span>
+                              <span className="combo-opt-fee">{money(b.fee)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                     {bairroErro && <div style={{ color: "var(--danger)", fontSize: 12, marginTop: 4 }}>Selecione o bairro</div>}
                   </div>
                   <div className="field">
                     <label>Rua</label>
-                    <input value={rua} onChange={(e) => { setRua(e.target.value); if (erroEntrega) setErroEntrega(""); }} placeholder="Rua das Flores" style={ruaErro ? enderecoErroStyle : undefined} />
+                    <div className="combo" onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setRuaDropdownOpen(false); }}>
+                      <input
+                        type="text"
+                        role="combobox"
+                        aria-expanded={ruaDropdownOpen && ruaSugestoes.length > 0}
+                        aria-autocomplete="list"
+                        aria-haspopup="listbox"
+                        aria-controls="rua-combo-list"
+                        value={rua}
+                        onChange={(e) => { setRua(e.target.value); setRuaDropdownOpen(true); if (erroEntrega) setErroEntrega(""); }}
+                        onFocus={() => setRuaDropdownOpen(true)}
+                        placeholder="Rua das Flores"
+                        style={ruaErro ? enderecoErroStyle : undefined}
+                      />
+                      {ruaDropdownOpen && ruaSugestoes.length > 0 && (
+                        <div className="combo-dropdown" id="rua-combo-list" role="listbox">
+                          {ruaSugestoes.map((r) => (
+                            <div key={r} className="combo-opt" role="option" aria-selected={r === rua} onMouseDown={(e) => { e.preventDefault(); setRua(r); setRuaDropdownOpen(false); if (erroEntrega) setErroEntrega(""); }}>
+                              <span>{r}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                     {ruaErro && <div style={{ color: "var(--danger)", fontSize: 12, marginTop: 4 }}>Preencha a rua</div>}
                   </div>
                   <div className="field">
@@ -3142,7 +3370,8 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
             </div>
             {renderFlavorChips()}
             {showFlavorSearch && (
-              <div className="flavor-search">
+              <div className="flavor-search has-icon">
+                <Search size={16} className="flavor-search-icon" aria-hidden="true" />
                 <input
                   type="search"
                   inputMode="search"
@@ -3321,6 +3550,17 @@ main{width:100%;padding:6px 20px 20px}
 .home-cat strong{font-size:15.5px;font-weight:800;letter-spacing:0}
 .home-cat{position:relative}
 .home-cat-special{border-color:color-mix(in srgb, #a78bfa 48%, var(--line));background:color-mix(in srgb, #a78bfa 7%, var(--surface))}
+/* Ponto de entrada próprio de Novidades — banner discreto entre a promoção
+   do dia e a grade de categorias, nunca confundido com "Pizzas Especiais"
+   (essa continua sendo uma categoria real, ver home-cat-special acima). */
+.home-novidades-card{width:100%;display:flex;align-items:center;gap:12px;text-align:left;background:color-mix(in srgb, #facc15 10%, var(--surface));border:1px solid color-mix(in srgb, #facc15 42%, var(--line));border-radius:16px;padding:13px 14px;margin-bottom:14px;color:var(--text-primary);box-shadow:var(--shadow-sm)}
+.home-novidades-card:active{transform:scale(.98)}
+.home-novidades-card svg:first-child{flex:0 0 auto;color:#b8860b}
+.home-novidades-card svg:last-child{flex:0 0 auto;color:var(--text-sub)}
+.home-novidades-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.home-novidades-body strong{font-size:15px;font-weight:800}
+.home-novidades-body span{font-size:12.5px;color:var(--text-sub);font-weight:400}
+.novidade-secao{margin-bottom:18px}
 .novelty-badge{display:inline-flex;align-items:center;width:max-content;border-radius:999px;background:#facc15;color:#3f3100;font-size:9.5px;font-weight:900;line-height:1;padding:5px 7px;text-transform:uppercase;letter-spacing:.55px;white-space:nowrap}
 .home-novelty{position:absolute;top:10px;right:10px}
 /* O selo acompanha o texto como se fosse mais uma palavra (inline), em vez de
@@ -3422,8 +3662,11 @@ main{width:100%;padding:6px 20px 20px}
 .ci-price{font-weight:600;color:var(--gold);font-size:14.5px;margin-top:6px}
 .ci-remove{background:none;border:none;color:var(--text-faint);font-size:18px;cursor:pointer;padding:2px 4px;line-height:1}
 .qty-pill{display:inline-flex;align-items:center;gap:14px;background:var(--surface2);border:1px solid var(--line);border-radius:30px;padding:5px 7px;margin-top:9px}
-.qty-pill button{width:30px;height:30px;border-radius:50%;border:none;background:var(--brand);color:var(--brand-foreground);font-size:18px;cursor:pointer;font-weight:600}
+.qty-pill button{width:30px;height:30px;border-radius:50%;border:none;background:var(--brand);color:var(--brand-foreground);font-size:18px;cursor:pointer;font-weight:600;display:flex;align-items:center;justify-content:center}
 .qty-pill span{font-weight:600;min-width:20px;text-align:center}
+.qty-pill-sm{flex:0 0 auto;margin-top:0;gap:8px;padding:3px 5px}
+.qty-pill-sm button{width:24px;height:24px}
+.qty-pill-sm span{font-size:13px;min-width:14px}
 .field{margin-bottom:14px}
 .field label{display:block;font-size:13px;font-weight:600;margin-bottom:7px;letter-spacing:0}
 .field input,.field select{width:100%;background:var(--surface);border:1px solid var(--line-strong);border-radius:13px;padding:14px;color:var(--text);font-family:var(--font-ui);font-size:15.5px;transition:.16s;font-weight:400}
@@ -3510,11 +3753,23 @@ main{width:100%;padding:6px 20px 20px}
 .flavor-modal-body .opt{margin-bottom:8px}
 .flavor-modal-msg{font-size:13.5px;font-weight:700;color:var(--text);margin-top:4px}
 .flavor-modal-hint{font-size:12.5px;color:var(--text-sub);margin-top:3px;line-height:1.35}
-.flavor-search{flex:0 0 auto;margin:0 0 10px}
-.flavor-search-input{width:100%;box-sizing:border-box;padding:11px 14px;border-radius:12px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:14.5px;line-height:1.3}
-.flavor-search-input:focus{outline:none;border-color:var(--gold)}
-.flavor-search-input::placeholder{color:var(--text-sub)}
+.flavor-search{flex:0 0 auto;margin:0 0 10px;position:relative}
+.flavor-search-input{width:100%;box-sizing:border-box;padding:11px 14px;border-radius:12px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:14.5px;line-height:1.3;font-weight:400}
+.flavor-search.has-icon .flavor-search-input{padding-left:38px}
+.flavor-search-icon{position:absolute;left:13px;top:50%;transform:translateY(-50%);color:var(--text-sub);pointer-events:none}
+.flavor-search-input:focus{outline:none;border-color:var(--gold);box-shadow:0 0 0 3px color-mix(in srgb, var(--gold) 18%, transparent)}
+.flavor-search-input::placeholder{color:var(--text-sub);font-weight:400}
 .flavor-search-empty{font-size:13.5px;color:var(--text-sub);text-align:center;padding:18px 8px}
+/* Combobox pesquisável (bairro/rua) — mesmo visual do campo de texto do
+   formulário (.field input), com dropdown de sugestões ancorado abaixo. */
+.combo{position:relative}
+.combo.has-icon input{padding-left:38px}
+.combo .flavor-search-input{padding:12px 14px;border-radius:12px;border:1px solid var(--line-strong);background:var(--surface);font-size:15px}
+.combo-dropdown{position:absolute;left:0;right:0;top:calc(100% + 6px);background:var(--surface);border:1px solid var(--line-strong);border-radius:12px;box-shadow:var(--shadow-md, 0 8px 24px rgba(0,0,0,.18));max-height:230px;overflow-y:auto;z-index:20}
+.combo-opt{padding:11px 14px;font-size:14px;color:var(--text);cursor:pointer;display:flex;justify-content:space-between;gap:10px;align-items:center}
+.combo-opt:hover,.combo-opt[aria-selected="true"]{background:var(--brand-soft)}
+.combo-opt-fee{color:var(--text-sub);font-size:12.5px;white-space:nowrap;flex:0 0 auto}
+.combo-empty{padding:14px;font-size:13px;color:var(--text-sub);text-align:center}
 .opt-desc-ingredients{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .cartbar{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:540px;z-index:50;background:transparent;padding:0 20px calc(env(safe-area-inset-bottom) + 14px);pointer-events:none}
 .cartbar-inner{margin:0 auto;display:flex;align-items:center;gap:14px;background:var(--surface-elevated);border:1px solid var(--line-strong);border-radius:20px;padding:12px 12px 12px 16px;box-shadow:0 -10px 34px rgba(0,0,0,.35);pointer-events:auto}

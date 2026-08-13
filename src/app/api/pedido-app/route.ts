@@ -28,6 +28,7 @@ import { prepararResgateParaPedido, confirmarReservaNoPedido, liberarVinculoReco
 import { survivalModeEnabled, survivalClientRequestIdEnforcementEnabled } from "@/survival/flags";
 import { lerSessaoAdministrativa, origemDoPedido } from "@/lib/sessaoAdministrativa";
 import { lerSessaoSalao } from "@/lib/salaoAuth";
+import { registrarRuaConhecida } from "@/lib/ruasConhecidas";
 import { hashClientRequestId, sanitizeClientRequestId } from "@/survival/clientRequestId";
 import { calcularRequestFingerprint } from "@/survival/requestFingerprint";
 import { logSurvivalErro } from "@/survival/logging";
@@ -1846,6 +1847,18 @@ export async function POST(req: NextRequest) {
         }
       } catch (err) {
         console.error("[ChefeBot] Erro ao registrar pontos previstos (ignorado):", err);
+      }
+    }
+
+    // Memória universal de ruas (autocomplete do checkout, ver
+    // src/lib/ruasConhecidas.ts) — grava SOMENTE após o pedido já estar
+    // persistido de verdade (nunca antes, para não acumular lixo de
+    // digitação incompleta). Best-effort: nunca pode afetar a resposta.
+    if (body.tipoEntrega === "delivery" && body.rua?.trim()) {
+      try {
+        await registrarRuaConhecida(body.rua);
+      } catch (err) {
+        console.error("[ChefeBot] Erro ao registrar rua conhecida (ignorado):", err);
       }
     }
 
