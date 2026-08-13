@@ -29,6 +29,7 @@ import {
   Users,
 } from "lucide-react"
 import type { ItemApp } from "@/lib/pedidoAppItens"
+import { norm } from "@/lib/pedidoAppItens"
 import { gerarClientRequestId } from "@/survival/clientRequestId"
 import { useDialogA11y } from "@/components/useDialogA11y"
 import {
@@ -865,6 +866,25 @@ function ProdutoSelector({
   const produtoAbertoRef = useDialogA11y(!!produtoAberto, () => voltarEtapa(), { travarScroll: false })
   const etapas = useMemo(() => (produtoAberto ? montarEtapas(produtoAberto, menu) : []), [produtoAberto, menu])
   const etapaAtual = etapas[etapaVisivel]
+  // Busca dentro da etapa de sabor — mesma regra do pedido manual (só nas
+  // etapas de sabor, com lista longa o bastante pra valer a pena; reseta ao
+  // trocar de etapa/produto).
+  const [termoEtapa, setTermoEtapa] = useState("")
+  // Reseta durante a renderização (não em efeito) ao detectar troca de etapa
+  // ou de produto — padrão recomendado pelo React pra "resetar estado quando
+  // algo muda", sem o round-trip extra de um useEffect.
+  const [termoEtapaChave, setTermoEtapaChave] = useState({ etapaVisivel, produtoAberto })
+  if (termoEtapaChave.etapaVisivel !== etapaVisivel || termoEtapaChave.produtoAberto !== produtoAberto) {
+    setTermoEtapaChave({ etapaVisivel, produtoAberto })
+    setTermoEtapa("")
+  }
+  const etapaTemBusca = (etapaAtual?.tipo === "sabores" || etapaAtual?.tipo === "sabor_unico") && (etapaAtual?.opcoes.length ?? 0) > 6
+  const termoEtapaNorm = norm(termoEtapa.trim())
+  const opcoesEtapaFiltradas = etapaAtual
+    ? (termoEtapaNorm
+        ? etapaAtual.opcoes.filter((o) => norm(o.label).includes(termoEtapaNorm) || (o.ingredientes ? norm(o.ingredientes).includes(termoEtapaNorm) : false))
+        : etapaAtual.opcoes)
+    : []
   const bloqueio = motivoBloqueio(etapaAtual, selecao)
   const completa = montagemCompleta(etapas, selecao)
 
@@ -953,8 +973,15 @@ function ProdutoSelector({
         <div style={{ display: "grid", gap: 8 }}>
           {resultados.map((p) => (
             <button key={p.id} onClick={() => abrirProduto(p)} disabled={p.esgotado} style={{ ...card, minHeight: 48, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, textAlign: "left", cursor: p.esgotado ? "not-allowed" : "pointer", opacity: p.esgotado ? 0.5 : 1 }}>
-              <span style={{ fontSize: 14, fontWeight: 800, color: "var(--foreground)" }}>{p.nome}{p.esgotado ? " · esgotado" : ""}</span>
-              <span style={{ fontSize: 13, fontWeight: 900, color: "var(--brand-text)" }}>{p.precoBase === null ? "" : money(p.precoBase)}</span>
+              <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+                <span style={{ fontSize: 14, fontWeight: 800, color: "var(--foreground)" }}>{p.nome}{p.esgotado ? " · esgotado" : ""}</span>
+                {!p.esgotado && p.ingredients ? (
+                  <span style={{ display: "-webkit-box", WebkitLineClamp: 1, WebkitBoxOrient: "vertical", overflow: "hidden", fontSize: 11.5, color: "var(--foreground-muted)" }}>
+                    {p.ingredients}
+                  </span>
+                ) : null}
+              </span>
+              <span style={{ fontSize: 13, fontWeight: 900, color: "var(--brand-text)", flexShrink: 0 }}>{p.precoBase === null ? "" : money(p.precoBase)}</span>
             </button>
           ))}
           {resultados.length === 0 && <p style={{ fontSize: 13, color: "var(--foreground-muted)", textAlign: "center" }}>Nenhum produto encontrado.</p>}
@@ -991,13 +1018,29 @@ function ProdutoSelector({
               )
             })}
           </div>
+          {etapaTemBusca && (
+            <div style={{ position: "relative", padding: "0 16px 4px", flexShrink: 0 }}>
+              <Search size={16} aria-hidden="true" style={{ position: "absolute", left: 28, top: 16, color: "var(--foreground-muted)" }} />
+              <input style={{ ...input, paddingLeft: 36 }} placeholder="Buscar sabor…" value={termoEtapa} onChange={(e) => setTermoEtapa(e.target.value)} aria-label="Buscar sabor" />
+            </div>
+          )}
           <div style={{ flex: 1, overflowY: "auto", padding: "4px 16px 16px", display: "grid", gap: 8, alignContent: "start" }}>
-            {etapaAtual.opcoes.map((o) => {
+            {etapaTemBusca && opcoesEtapaFiltradas.length === 0 && (
+              <p style={{ fontSize: 13, color: "var(--foreground-muted)", textAlign: "center" }}>Nenhum sabor encontrado.</p>
+            )}
+            {opcoesEtapaFiltradas.map((o) => {
               const sel = estaEscolhida(o.valor)
               return (
                 <button key={o.valor || "__sem__"} onClick={() => !o.esgotado && escolher(o.valor)} disabled={o.esgotado} style={{ ...card, minHeight: 48, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, textAlign: "left", cursor: o.esgotado ? "not-allowed" : "pointer", opacity: o.esgotado ? 0.45 : 1, borderColor: sel ? "var(--primary)" : "var(--surface-secondary)", background: sel ? "color-mix(in srgb, var(--primary) 12%, transparent)" : "var(--surface)" }}>
-                  <span style={{ fontSize: 14, fontWeight: 800, color: "var(--foreground)" }}>{o.label}{o.esgotado ? " · esgotado" : ""}</span>
-                  <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+                    <span style={{ fontSize: 14, fontWeight: 800, color: "var(--foreground)" }}>{o.label}{o.esgotado ? " · esgotado" : ""}</span>
+                    {!o.esgotado && o.ingredientes ? (
+                      <span style={{ fontSize: 11.5, color: "var(--foreground-muted)", lineHeight: 1.35, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+                        {o.ingredientes}
+                      </span>
+                    ) : null}
+                  </span>
+                  <span style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
                     {o.extra ? <span style={{ fontSize: 12.5, fontWeight: 800, color: "var(--brand-text)" }}>+{money(o.extra)}</span> : null}
                     {sel ? <span style={{ fontSize: 14, color: "var(--primary)" }}>✓</span> : null}
                   </span>

@@ -262,6 +262,17 @@ describe("Pastel de Feira — R$8,00, exige exatamente 1 dos 6 recheios", () => 
       ["Frango", "Frango com Catupiri", "Queijo", "Calabresa", "Carne seca", "Queijo com Presunto"].sort()
     );
   });
+
+  // Auditoria completa do CARDAPIO_CHEFE.pdf (ago/2026) contra este arquivo:
+  // a seção "PASTEL DE FEIRA" do PDF lista um 7º recheio — "Carne (carne
+  // moída, milho e ervilha)" — que não existe aqui. Registrado, não
+  // adicionado: esta missão sincroniza descrição/busca, não expande o
+  // catálogo (decisão comercial explícita — "produto oficial não localizado
+  // no sistema" fica marcado, nunca criado sozinho). Este teste documenta a
+  // divergência para não ser perdida; remover-lo exige decisão comercial.
+  it("[divergência conhecida] PDF lista 7 recheios (inclui 'Carne'), sistema tem 6 — não expandido nesta missão", () => {
+    expect(PASTEL_FEIRA_RECHEIOS.some((r) => r.name === "Carne")).toBe(false);
+  });
 });
 
 describe("Hambúrguer — exatamente 5 itens", () => {
@@ -397,6 +408,60 @@ describe("Bebidas — exatamente as do PDF (23 itens)", () => {
       expect(porNome(BEBIDAS, nome).priceCents).toBe(Math.round(preco * 100));
     });
   }
+});
+
+// Ingredientes/composição — protege a associação produto ↔ composição
+// contra o PDF oficial (CARDAPIO_CHEFE.pdf, ago/2026), um representante por
+// categoria com composição explícita (preços já cobertos acima item a item;
+// aqui o foco é o texto exato do ingrediente, fonte única para a UI de
+// "nome + ingredientes" e para a busca por ingrediente).
+describe("Ingredientes — um representante por categoria, texto exato do PDF", () => {
+  it("pizza tradicional: Á Moda da Casa", () => {
+    expect(porNome(PIZZA_FLAVORS_TRADICIONAIS, "Á Moda da Casa").ingredients).toBe(
+      "Molho, Calabresa, Bacon, Requeijão Cremoso, Mussarela e Orégano."
+    );
+  });
+
+  it("pizza especial: Nordestina", () => {
+    expect(porNome(PIZZA_FLAVORS_ESPECIAIS, "Nordestina").ingredients).toBe(
+      "Molho de Tomate, Mussarela, Carne Seca, Requeijão Cremoso, Pimentão, Tomate, Cebola, Azeitona e Orégano."
+    );
+  });
+
+  it("pizza doce: Romeu e Julieta", () => {
+    expect(porNome(PIZZA_FLAVORS_DOCES, "Romeu e Julieta").ingredients).toBe("Creme de Leite, Queijo e Goiabada.");
+  });
+
+  it("calzone: Portuguesa", () => {
+    expect(porNome(CALZONE_FLAVORS, "Portuguesa").ingredients).toBe(
+      "Molho, Presunto, Ervilha, Milho, Mussarela, Cebola, Azeitona, e Orégano."
+    );
+  });
+
+  it("pastel de forno: Mexicana", () => {
+    expect(porNome(PASTEL_FORNO_FLAVORS, "Mexicana").ingredients).toBe(
+      "Molho, Calabresa, Bacon, Requeijão Cremoso, Mussarela, Cebola, Pimenta e Orégano."
+    );
+  });
+
+  it("hambúrguer: X-Tudo", () => {
+    expect(porNome(HAMBURGUERES, "X-Tudo").ingredients).toBe(
+      "2 hambúrguer: Ovo, Salada, Mussarela, Cheddar, Molho Especial, Bacon, Catupiry, Batata Palha, Milho Verde e Presunto."
+    );
+  });
+
+  it("macarronada: Macarronada de Frango", () => {
+    expect(porNome(MACARRONADAS, "Macarronada de Frango").ingredients).toBe(
+      "Creme de Leite, Frango, Queijo mussarela, Molho, Milho, Ervilha, Batata Palha."
+    );
+  });
+
+  it("lanches fixos e bebidas/sucos/vitaminas nunca recebem ingrediente inventado (PDF só dá nome e preço)", () => {
+    for (const item of LANCHES_FIXOS) expect(item.ingredients).toBeUndefined();
+    for (const item of BEBIDAS) expect(item.ingredients).toBeUndefined();
+    for (const item of SUCOS) expect(item.ingredients).toBeUndefined();
+    for (const item of VITAMINAS) expect(item.ingredients).toBeUndefined();
+  });
 });
 
 describe("Todos os preços em centavos inteiros (nunca fração de centavo)", () => {

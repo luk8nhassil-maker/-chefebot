@@ -1,7 +1,7 @@
 import { describe, test, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { nextFlavorSelection, resolverPizzaSelectionIds, resolverSimpleSelectionIds, precoPizzaLocalCents, precoMinimoPorTamanho } from "./page";
+import { nextFlavorSelection, resolverPizzaSelectionIds, resolverSimpleSelectionIds, precoPizzaLocalCents, precoMinimoPorTamanho, ingredientesDoItem, itemBateBusca, catalogParaListagem } from "./page";
 import { precificarPizzaPorId } from "@/lib/pricing/pizzaEngine";
 import type { SelecaoSabores } from "@/lib/pizzaSabores";
 import { resolverItemComSelecaoEstruturada } from "@/lib/pedidoAppSelecaoEstruturada";
@@ -1252,5 +1252,65 @@ describe("AdminCardapio (painel de esgotados) — cobre TODAS as categorias do c
     expect(fonte).toContain('"Lanches", "Calzone", "Pastel de Forno", "Pastel de Feira", "Hambúrguer",');
     expect(fonte).toContain('"Macarronada", "Sucos", "Vitaminas", "Bebidas", "Salgados",');
     expect(fonte).toContain("].filter(c => c === \"todas\" || todos.some(p => p.categoria === c))");
+  });
+});
+
+describe("Ingredientes + busca no cardápio do cliente (sabores/produtos)", () => {
+  test("ingredientesDoItem lê o campo quando existe, nunca inventa quando ausente", () => {
+    expect(ingredientesDoItem({ name: "Calabresa", ingredients: "Molho, Mussarela, Calabresa e Orégano." })).toBe(
+      "Molho, Mussarela, Calabresa e Orégano."
+    );
+    expect(ingredientesDoItem({ name: "Guaraná 1L" })).toBeUndefined();
+    expect(ingredientesDoItem(null)).toBeUndefined();
+    expect(ingredientesDoItem("string qualquer")).toBeUndefined();
+  });
+
+  test("catalogParaListagem repassa ingredients quando a fonte tem o campo, e não inventa quando não tem", () => {
+    const comIngredientes = catalogParaListagem({ id: "x-tudo", available: true, name: "X-Tudo", priceCents: 2500, ingredients: "Ovo, Bacon e Catupiry." });
+    expect(comIngredientes.ingredients).toBe("Ovo, Bacon e Catupiry.");
+    const semIngredientes = catalogParaListagem({ id: "guarana-1l", available: true, name: "Guaraná 1L", priceCents: 900 });
+    expect(semIngredientes.ingredients).toBeUndefined();
+  });
+
+  test("itemBateBusca: nome sem termo sempre bate (lista completa por padrão)", () => {
+    expect(itemBateBusca({ name: "Calabresa" }, "")).toBe(true);
+  });
+
+  test("itemBateBusca: acha por nome (buscar 'calabresa' acha 'Calabresa')", () => {
+    expect(itemBateBusca({ name: "Calabresa", ingredients: "Molho, Mussarela e Orégano." }, "calabresa")).toBe(true);
+  });
+
+  test("itemBateBusca: acha por ingrediente (buscar 'bacon' acha item com bacon na composição, mesmo sem bacon no nome)", () => {
+    expect(itemBateBusca({ name: "À Moda da Casa", ingredients: "Molho, Calabresa, Bacon, Requeijão Cremoso, Mussarela e Orégano." }, "bacon")).toBe(true);
+  });
+
+  test("itemBateBusca: normaliza acento (buscar 'requeijao' acha 'Requeijão Cremoso')", () => {
+    expect(itemBateBusca({ name: "4 Queijos", ingredients: "Molho, Mussarela, Requeijão Cremoso, Gongorzola e Parmesão." }, "requeijao")).toBe(true);
+  });
+
+  test("itemBateBusca: termo sem correspondência não bate", () => {
+    expect(itemBateBusca({ name: "Mussarela", ingredients: "Molho, Mussarela, Rodelas de Tomate, e Orégano." }, "camarao")).toBe(false);
+  });
+
+  test("modal de sabores: ingredientesDoSabor busca no catálogo certo por modo (pizza/calzone/pastel), nunca escreve texto fixo no JSX", () => {
+    expect(fonte).toMatch(/function ingredientesDoSabor\(nome: string\): string \| undefined \{/);
+    expect(fonte).not.toMatch(/opt-desc-ingredients">\s*(Molho|Chocolate|Creme)/); // sem texto de ingrediente hardcoded no JSX
+  });
+
+  test("modal de sabores tem busca por texto (nome + ingredientes), some quando a lista é curta, filtra sem duplicar itens", () => {
+    expect(fonte).toContain('placeholder={calzoneMode ? "Buscar sabor do calzone..." : pastelMode ? "Buscar sabor..." : "Buscar sabor da pizza..."}');
+    expect(fonte).toContain("const showFlavorSearch = flavorSectionsSemBusca.reduce((n, s) => n + s.flavors.length, 0) > 5;");
+    // Limpar busca (flavorSearchNorm vazio) sempre volta pra lista original sem filtro.
+    expect(fonte).toContain("const flavorSections = flavorSearchNorm");
+    expect(fonte).toContain("flavorSectionsSemBusca");
+  });
+
+  test("busca do modal de sabores reseta ao fechar o modal, nunca filtra silenciosamente a próxima abertura", () => {
+    expect(fonte).toContain("if (!flavorModalOpen) setFlavorSearchQuery(\"\");");
+  });
+
+  test("tela de lista (Lanches/Hambúrguer/Bebidas/...) mostra busca só quando há volume (>6 itens) e ingredientes quando existem, sem inventar para bebidas/sucos/vitaminas", () => {
+    expect(fonte).toContain("const mostrarBuscaLista = cfg.data.length > 6;");
+    expect(fonte).toContain('placeholder="Buscar produto..."');
   });
 });

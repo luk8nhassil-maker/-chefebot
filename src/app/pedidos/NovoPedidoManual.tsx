@@ -49,6 +49,7 @@ import {
   type LucideIcon,
 } from "lucide-react"
 import type { ItemApp } from "@/lib/pedidoAppItens"
+import { norm } from "@/lib/pedidoAppItens"
 import { computeTaxaApp } from "@/lib/pedidoAppLogic"
 import { montarPagamentoComposto, extrairPagamentoComposto } from "@/lib/pagamentoComposto"
 import { gerarClientRequestId } from "@/survival/clientRequestId"
@@ -345,6 +346,26 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
     [produtoAberto, menu]
   )
   const etapaAtual = etapas[etapaVisivel]
+  // Busca dentro da etapa de sabor — só existe para as etapas que listam
+  // sabor (pizza meio a meio ou sabor único), nunca para borda/adicional/
+  // tamanho/leite. Reseta ao trocar de etapa ou de produto, pra nunca
+  // filtrar silenciosamente a etapa seguinte.
+  const [termoEtapa, setTermoEtapa] = useState("")
+  // Reseta durante a renderização (não em efeito) ao detectar troca de etapa
+  // ou de produto — padrão recomendado pelo React pra "resetar estado quando
+  // algo muda", sem o round-trip extra de um useEffect.
+  const [termoEtapaChave, setTermoEtapaChave] = useState({ etapaVisivel, produtoAberto })
+  if (termoEtapaChave.etapaVisivel !== etapaVisivel || termoEtapaChave.produtoAberto !== produtoAberto) {
+    setTermoEtapaChave({ etapaVisivel, produtoAberto })
+    setTermoEtapa("")
+  }
+  const etapaTemBusca = (etapaAtual?.tipo === "sabores" || etapaAtual?.tipo === "sabor_unico") && (etapaAtual?.opcoes.length ?? 0) > 6
+  const termoEtapaNorm = norm(termoEtapa.trim())
+  const opcoesEtapaFiltradas = etapaAtual
+    ? (termoEtapaNorm
+        ? etapaAtual.opcoes.filter((o) => norm(o.label).includes(termoEtapaNorm) || (o.ingredientes ? norm(o.ingredientes).includes(termoEtapaNorm) : false))
+        : etapaAtual.opcoes)
+    : []
   const bloqueio = motivoBloqueio(etapaAtual, selecao)
   const completa = montagemCompleta(etapas, selecao)
   // Radio (uma escolha) para tipos de decisão única; checkbox (múltiplas)
@@ -1079,9 +1100,15 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
                       <IconeProduto size={18} aria-hidden="true" style={{ color: "var(--foreground-muted)", flexShrink: 0 }} />
                       <span style={{ flex: 1, minWidth: 0 }}>
                         <span style={{ display: "block", fontSize: 14, fontWeight: 800, color: "var(--foreground)" }}>{p.nome}</span>
-                        <span style={{ display: "block", fontSize: 11.5, fontWeight: 700, color: "var(--foreground-muted)", marginTop: 2 }}>
-                          {p.esgotado ? "Esgotado" : buscando ? p.categoriaLabel : p.requerMontagem ? "Precisa escolher opções" : "Adiciona direto"}
-                        </span>
+                        {!p.esgotado && !buscando && p.ingredients ? (
+                          <span style={{ display: "-webkit-box", WebkitLineClamp: 1, WebkitBoxOrient: "vertical", overflow: "hidden", fontSize: 11.5, fontWeight: 600, color: "var(--foreground-muted)", marginTop: 2 }}>
+                            {p.ingredients}
+                          </span>
+                        ) : (
+                          <span style={{ display: "block", fontSize: 11.5, fontWeight: 700, color: "var(--foreground-muted)", marginTop: 2 }}>
+                            {p.esgotado ? "Esgotado" : buscando ? p.categoriaLabel : p.requerMontagem ? "Precisa escolher opções" : "Adiciona direto"}
+                          </span>
+                        )}
                       </span>
                       <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
                         <span style={{ fontSize: 13, fontWeight: 900, color: "var(--brand-text)" }}>
@@ -1387,8 +1414,35 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
               })}
             </div>
 
+            {etapaTemBusca && (
+              <div style={{ position: "relative", padding: "0 22px", flexShrink: 0 }}>
+                <Search size={17} aria-hidden="true" style={{ position: "absolute", left: 36, top: "50%", transform: "translateY(-50%)", color: "var(--foreground-muted)" }} />
+                <input
+                  className="pm-input"
+                  style={{ ...input, paddingLeft: 40 }}
+                  placeholder="Buscar sabor…"
+                  value={termoEtapa}
+                  onChange={(e) => setTermoEtapa(e.target.value)}
+                  aria-label="Buscar sabor"
+                />
+                {termoEtapa && (
+                  <button
+                    onClick={() => setTermoEtapa("")}
+                    aria-label="Limpar busca"
+                    style={{ position: "absolute", right: 32, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: "var(--foreground-muted)", cursor: "pointer", display: "flex", padding: 4 }}
+                  >
+                    <X size={16} />
+                  </button>
+                )}
+              </div>
+            )}
             <div style={{ flex: 1, overflowY: "auto", padding: "14px 22px 22px", display: "grid", gap: 10, alignContent: "start" }}>
-              {etapaAtual.opcoes.map((o) => {
+              {etapaTemBusca && opcoesEtapaFiltradas.length === 0 && (
+                <p style={{ fontSize: 12.5, fontWeight: 600, color: "var(--foreground-muted)", margin: 0, textAlign: "center" }}>
+                  Nenhum sabor encontrado para &quot;{termoEtapa.trim()}&quot;.
+                </p>
+              )}
+              {opcoesEtapaFiltradas.map((o) => {
                 const sel = estaEscolhida(o.valor)
                 return (
                   <label
@@ -1405,11 +1459,16 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
                       opacity: o.esgotado ? 0.45 : 1,
                     }}
                   >
-                    <span style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                    <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
                       <span style={{ fontSize: 14, fontWeight: 800, color: "var(--foreground)" }}>
                         {o.label}
                         {o.esgotado ? " · esgotado" : ""}
                       </span>
+                      {!o.esgotado && o.ingredientes ? (
+                        <span style={{ fontSize: 12, color: "var(--foreground-muted)", lineHeight: 1.35, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+                          {o.ingredientes}
+                        </span>
+                      ) : null}
                       {o.extra ? <span style={{ fontSize: 12.5, fontWeight: 800, color: "var(--brand-text)" }}>+{money(o.extra)}</span> : null}
                     </span>
                     <input
