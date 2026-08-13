@@ -178,19 +178,79 @@ describe("/cardapio (PublicCardapio) — correção: CTA da sacola (.delivery-ct
     const showBottomNavDecl = fonte.match(/const showBottomNav = \[[^\]]*\]\.includes\(screen\);/)?.[0] ?? "";
     expect(showBottomNavDecl).not.toContain('"sc-delivery"');
     expect(showBottomNavDecl).not.toContain('"sc-pay"');
-    expect(fonte).toMatch(/screen === "sc-delivery" && \(\s*<div className="delivery-cta-bar">/);
     expect(fonte).toMatch(/screen === "sc-pay" && \(\s*<div className="delivery-cta-bar">/);
   });
 
-  test("[9] nenhum texto/ação funcional do CTA da sacola mudou (Subtotal, Adicionar, Ir para entrega, preço via money(cartTotal))", () => {
+  test("[9] CTA da sacola: Subtotal e Ir para entrega intactos; botão Adicionar removido do dock (redundante com + Adicionar mais)", () => {
     const blocoCtaSacola = fonte.slice(
       fonte.indexOf('cartCount > 0 && screen === "sc-cart" && ('),
       fonte.indexOf('cartCount > 0 && screen === "sc-delivery" && (')
     );
     expect(blocoCtaSacola).toContain('<div className="delivery-cta-label">Subtotal</div>');
     expect(blocoCtaSacola).toContain('<div className="delivery-cta-total">{money(cartTotal)}</div>');
-    expect(blocoCtaSacola).toContain('<button className="delivery-cta-cart" onClick={() => go("sc-start")}>Adicionar</button>');
+    expect(blocoCtaSacola).not.toContain('<button className="delivery-cta-cart" onClick={() => go("sc-start")}>Adicionar</button>');
     expect(blocoCtaSacola).toContain('onClick={() => !cartEsgotado && go("sc-delivery")}>Ir para entrega</button>');
+    // "+ Adicionar mais" continua existindo na área principal da Sacola (fora do dock):
+    expect(fonte).toContain('onClick={() => go("sc-start")}>+ Adicionar mais</button>');
+  });
+
+  test("[10] dock flutuante da Entrega só renderiza quando o teclado mobile não está ativo (some por completo, não só opacity)", () => {
+    expect(fonte).toMatch(/cartCount > 0 && screen === "sc-delivery" && !mobileKeyboardActive && \(\s*<div className="delivery-cta-bar">/);
+  });
+});
+
+// Detecção de teclado virtual mobile (correção do dock cobrindo a busca de
+// bairro em produção/iPhone real). Causa raiz da versão anterior: não existia
+// nenhuma detecção de teclado no código — o dock da Entrega sempre renderizava
+// incondicionalmente. Estes testes travam a regra robusta para não regredir
+// pra uma versão ingênua (só `focus`, ou um pixel mágico tipo innerHeight<500).
+describe("/cardapio (PublicCardapio) — detecção de teclado virtual mobile (dock da Entrega)", () => {
+  test("mobileKeyboardActive cruza 3 condições — nunca só foco: mobile de toque (pointer:coarse) + campo de endereço focado + visualViewport encolhida", () => {
+    expect(fonte).toContain("const mobileKeyboardActive = isCoarsePointer && enderecoCampoFocado && viewportEncolhida;");
+  });
+
+  test("detecção de mobile usa matchMedia(pointer:coarse) — nunca largura de janela (desktop redimensionado não deve contar)", () => {
+    expect(fonte).toContain('window.matchMedia("(pointer: coarse)").matches');
+    expect(fonte).not.toMatch(/isCoarsePointer[\s\S]{0,80}innerWidth/);
+  });
+
+  test("viewport encolhida é uma PROPORÇÃO (visualViewport.height / innerHeight), não um pixel fixo tipo innerHeight < 500", () => {
+    expect(fonte).toContain("const ratio = vv.height / window.innerHeight;");
+    expect(fonte).toContain("setViewportEncolhida(ratio < 0.75);");
+  });
+
+  test("sem window.visualViewport (browser antigo): fallback seguro, nunca ativa o modo teclado (dock permanece visível, sem regressão)", () => {
+    expect(fonte).toMatch(/if \(typeof window === "undefined" \|\| !window\.visualViewport\) return;/);
+  });
+
+  test("blur do campo de endereço tem atraso (debounce) antes de desativar o foco — evita pisca-pisca ao trocar de campo dentro do mesmo formulário", () => {
+    expect(fonte).toContain("enderecoBlurTimerRef.current = setTimeout(() => setEnderecoCampoFocado(false), 150);");
+  });
+
+  test("wrapper do formulário de endereço usa onFocusCapture/onBlurCapture — cobre bairro, rua, número e referência de uma vez, sem wiring manual por campo", () => {
+    expect(fonte).toMatch(/<div ref=\{enderecoRef\} onFocusCapture=\{handleEnderecoFocus\} onBlurCapture=\{handleEnderecoBlur\}>/);
+  });
+
+  test("focar 'Buscar bairro' sobe o campo pro topo útil (scrollIntoView) além de abrir a lista", () => {
+    expect(fonte).toContain("function handleBairroFocus() {");
+    expect(fonte).toContain('bairroInputRef.current?.scrollIntoView({ block: "start", behavior: "smooth" });');
+    expect(fonte).toContain("onFocus={handleBairroFocus}");
+  });
+
+  test("buscador de bairro fica sticky (não fixed/100vh) só enquanto a lista está aberta com teclado ativo", () => {
+    expect(fonte).toContain('`combo has-icon ${mobileKeyboardActive && bairroDropdownOpen ? "combo-sticky" : ""}`');
+    expect(fonte).toContain(".combo-sticky{position:sticky;top:8px;");
+    expect(fonte).not.toMatch(/\.combo-sticky\{[^}]*position:fixed/);
+    expect(fonte).not.toMatch(/\.combo-sticky\{[^}]*100vh/);
+  });
+
+  test("lista de resultados nunca fica escondida pelo teclado: altura máxima calculada pela viewport visível real quando o teclado está ativo", () => {
+    expect(fonte).toContain("maxHeight: Math.max(160, viewportAlturaVisivel - 220)");
+  });
+
+  test("dock da Sacola e do Pagamento não são afetados pela detecção de teclado — regra é exclusiva da tela de Entrega", () => {
+    expect(fonte).not.toMatch(/screen === "sc-cart" && !mobileKeyboardActive/);
+    expect(fonte).not.toMatch(/screen === "sc-pay" && !mobileKeyboardActive/);
   });
 });
 
