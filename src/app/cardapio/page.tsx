@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { Pizza, Sandwich, Soup, CupSoda, GlassWater, Zap, Banknote, CreditCard, Shuffle, Wallet, Bike, Store, UtensilsCrossed, Sun, Moon, Receipt, Gift, Pencil, Plus, Minus, Clock, ChevronRight, Sparkles, Beef, Croissant, Milk, Search, PartyPopper } from "lucide-react";
 import PanelShell from "@/components/PanelShell";
@@ -1276,19 +1276,18 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const [ruaSugestoes, setRuaSugestoes] = useState<string[]>([]);
   const [ruaDropdownOpen, setRuaDropdownOpen] = useState(false);
   const ruaDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const enderecoRef = useRef<HTMLDivElement | null>(null);
   const bairroInputRef = useRef<HTMLInputElement | null>(null);
-  const enderecoBlurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Teclado virtual mobile (correção do dock cobrindo a busca de bairro):
-  // "campo relevante focado" (endereco) + "visualViewport visivelmente menor
-  // que a viewport de layout" — as duas condições juntas, nunca só foco (o
-  // input pode estar focado com teclado ainda fechado em desktop, ou nem
-  // existir teclado físico). `isCoarsePointer` restringe a mobile/tablet de
-  // toque (matchMedia pointer:coarse), nunca desktop com janela estreita.
+  // `isCoarsePointer` restringe a busca de bairro ativando o modo mobile
+  // (dock ausente + sticky) a telas de toque de verdade (matchMedia
+  // pointer:coarse), nunca desktop com janela estreita.
   const [isCoarsePointer] = useState(() => typeof window !== "undefined" && !!window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
-  const [enderecoCampoFocado, setEnderecoCampoFocado] = useState(false);
-  const [viewportEncolhida, setViewportEncolhida] = useState(false);
   const [viewportAlturaVisivel, setViewportAlturaVisivel] = useState<number | null>(null);
+  // Altura real do stepper fixo (Itens/Sacola/Entrega/Pagar), medida via
+  // ResizeObserver — usada como offset do buscador de bairro sticky (nunca
+  // um número mágico fixo: a barra muda de altura por tema/fonte/idioma).
+  // 46 é só o fallback inicial, igual ao padding-top já usado em `.wrap`.
+  const stepsRef = useRef<HTMLDivElement | null>(null);
+  const [stepsHeight, setStepsHeight] = useState(46);
   const [nome, setNome] = useState("");
   const [payment, setPayment] = useState<string | null>(null);
   const [troco, setTroco] = useState("");
@@ -1440,49 +1439,40 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     return () => { if (ruaDebounceRef.current) clearTimeout(ruaDebounceRef.current); };
   }, [rua, delType]);
 
-  // Teclado virtual (dock cobrindo a busca de bairro em produção, iPhone
-  // real): a causa raiz de uma implementação baseada só em `focus` é que
-  // foco no input NÃO significa teclado aberto (ex.: teclado físico
-  // bluetooth, ou o próprio instante entre o toque e a animação do teclado
-  // abrir no Safari/iOS). A correção robusta cruza duas fontes:
-  // 1) o campo relevante estar de fato focado (enderecoCampoFocado, ver
-  //    onFocusCapture/onBlurCapture no wrapper do formulário de endereço);
-  // 2) `visualViewport.height` visivelmente menor que `window.innerHeight`.
-  //    No Safari/iOS (e Chrome Android modernos) o layout viewport
-  //    (innerHeight) NÃO encolhe quando o teclado abre — só o
-  //    visualViewport encolhe. Comparar um contra o outro (proporção, não
-  //    um pixel fixo tipo "innerHeight < 500") se adapta a qualquer
-  //    aparelho/orientação sem número mágico.
-  // Sem window.visualViewport (browser antigo): fallback seguro — nunca
-  // marca teclado aberto, o dock permanece visível (comportamento atual,
-  // sem regressão).
+  // `visualViewport.height` real (Safari/iOS e Chrome Android encolhem só o
+  // visualViewport, nunca o innerHeight, quando o teclado abre) — usado
+  // apenas para calcular a altura disponível da lista de bairros (nunca como
+  // fonte de verdade para esconder o dock, ver `bairroSearchActive` abaixo).
+  // Sem window.visualViewport (browser antigo): fallback seguro, sem quebra.
   useEffect(() => {
     if (typeof window === "undefined" || !window.visualViewport) return;
     const vv = window.visualViewport;
-    const onVVResize = () => {
-      const ratio = vv.height / window.innerHeight;
-      setViewportEncolhida(ratio < 0.75);
-      setViewportAlturaVisivel(vv.height);
-    };
+    const onVVResize = () => setViewportAlturaVisivel(vv.height);
     vv.addEventListener("resize", onVVResize);
     onVVResize();
     return () => vv.removeEventListener("resize", onVVResize);
   }, []);
 
-  const mobileKeyboardActive = isCoarsePointer && enderecoCampoFocado && viewportEncolhida;
+  // Fonte de verdade para esconder o dock da Entrega durante a busca de
+  // bairro no mobile: o próprio ato de focar o buscador (bairroDropdownOpen),
+  // nunca a detecção do teclado — não espera animação/resize do Safari.
+  // Reaproveita o mesmo estado que já fecha de forma segura ao selecionar uma
+  // opção ou perder foco pra fora do combo (ver handleBairroFocus e o onBlur
+  // do wrapper .combo mais abaixo) — sem duplicar uma segunda fonte de
+  // verdade que precisaria ser sincronizada. Desktop nunca ativa (dock
+  // sempre visível lá, comportamento já existente).
+  const bairroSearchActive = isCoarsePointer && bairroDropdownOpen;
 
-  function handleEnderecoFocus() {
-    if (enderecoBlurTimerRef.current) { clearTimeout(enderecoBlurTimerRef.current); enderecoBlurTimerRef.current = null; }
-    setEnderecoCampoFocado(true);
-  }
-  // Pequeno atraso no blur (em vez de esconder o dock na hora) evita
-  // "pisca-pisca" ao trocar de campo dentro do mesmo formulário (blur de um
-  // input seguido de focus do próximo, no mesmo tick) — estado estável
-  // enquanto o cliente navega entre bairro/rua/número/referência.
-  function handleEnderecoBlur() {
-    if (enderecoBlurTimerRef.current) clearTimeout(enderecoBlurTimerRef.current);
-    enderecoBlurTimerRef.current = setTimeout(() => setEnderecoCampoFocado(false), 150);
-  }
+  useEffect(() => {
+    const el = stepsRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const medir = () => setStepsHeight(el.offsetHeight);
+    const ro = new ResizeObserver(medir);
+    ro.observe(el);
+    medir();
+    return () => ro.disconnect();
+  }, [screen]);
+
   // Ao focar "Buscar bairro": abre a lista (comportamento já existente) e
   // sobe o campo pro topo útil da tela — o pequeno atraso deixa a animação
   // do teclado iniciar antes do scroll, evita medir a viewport ainda no
@@ -2499,9 +2489,9 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     <>
       <style>{CSS}</style>
       <LayoutDebugPanel />
-      <div className={`wrap ${screen === "sc-start" ? "wrap-start" : ""}`}>
+      <div className={`wrap ${screen === "sc-start" ? "wrap-start" : ""}`} style={{ "--steps-h": `${stepsHeight}px` } as CSSProperties}>
         {screen !== "sc-start" && (
-          <div className="steps">
+          <div className="steps" ref={stepsRef}>
             {STEPS.map((s, i) => (
               <span key={s} style={{ display: "contents" }}>
                 <div className={`step-chip ${i === stepIdx ? "active" : i < stepIdx ? "done" : ""}`}><span className="num">{i < stepIdx ? ICONS.check : i + 1}</span>{s}</div>
@@ -2984,7 +2974,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
               <div className={`opt ${delType === "retirada" ? "sel" : ""}`} onClick={() => { setDelType("retirada"); setBairroIdx(""); setErroEntrega(""); }} {...optA11yAttrs()} onKeyDown={(e) => { if (isActivateKey(e)) { e.preventDefault(); setDelType("retirada"); setBairroIdx(""); setErroEntrega(""); } }}><div className="opt-emoji"><Store size={22} aria-hidden="true" /></div><div className="opt-body"><div className="opt-title">Buscar na loja</div><div className="opt-desc">Sem taxa de entrega</div></div><div className="opt-check" /></div>
               <div className={`opt ${delType === "dine_in" ? "sel" : ""}`} onClick={() => { setDelType("dine_in"); setBairroIdx(""); setErroEntrega(""); }} {...optA11yAttrs()} onKeyDown={(e) => { if (isActivateKey(e)) { e.preventDefault(); setDelType("dine_in"); setBairroIdx(""); setErroEntrega(""); } }}><div className="opt-emoji"><UtensilsCrossed size={22} aria-hidden="true" /></div><div className="opt-body"><div className="opt-title">Consumo no local</div><div className="opt-desc">Comer aqui na pizzaria</div></div><div className="opt-check" /></div>
               {delType === "delivery" && (
-                <div ref={enderecoRef} onFocusCapture={handleEnderecoFocus} onBlurCapture={handleEnderecoBlur}>
+                <div>
                   <div className="section-label">Endereço</div>
                   {erroEntrega && <div style={{ color: "var(--danger)", fontSize: 12, fontWeight: 700, margin: "-4px 0 10px" }}>{erroEntrega}</div>}
                   <div className="field">
@@ -2992,11 +2982,13 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                     {/* Combobox pesquisável (objetivo 7): a regra de negócio
                         não muda — só `bairroIdx` (setado ao ESCOLHER uma
                         opção da lista) alimenta taxa/payload, nunca o texto
-                        livre digitado aqui. Sticky enquanto a lista está
-                        aberta (mobileKeyboardActive) pra manter o buscador
-                        visível enquanto o cliente rola os resultados — sem
-                        `fixed`/`100vh`, só `position:sticky` de verdade. */}
-                    <div className={`combo has-icon ${mobileKeyboardActive && bairroDropdownOpen ? "combo-sticky" : ""}`} onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setBairroDropdownOpen(false); }}>
+                        livre digitado aqui. Sticky enquanto a busca está
+                        ativa no mobile (bairroSearchActive) pra manter o
+                        buscador visível logo abaixo do stepper enquanto o
+                        cliente rola os resultados — sem `fixed`/`100vh`, só
+                        `position:sticky` de verdade, com offset calculado
+                        pela altura real do stepper (--steps-h). */}
+                    <div className={`combo has-icon ${bairroSearchActive ? "combo-sticky" : ""}`} onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setBairroDropdownOpen(false); }}>
                       <Search size={16} className="flavor-search-icon" aria-hidden="true" />
                       <input
                         ref={bairroInputRef}
@@ -3023,7 +3015,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                           className="combo-dropdown"
                           id="bairro-combo-list"
                           role="listbox"
-                          style={mobileKeyboardActive && viewportAlturaVisivel ? { maxHeight: Math.max(160, viewportAlturaVisivel - 220) } : undefined}
+                          style={bairroSearchActive && viewportAlturaVisivel ? { maxHeight: Math.max(160, viewportAlturaVisivel - stepsHeight - 140) } : undefined}
                         >
                           {bairrosFiltrados.length === 0 ? (
                             <div className="combo-empty">Nenhum bairro encontrado.<br />Confira o nome e tente novamente.</div>
@@ -3316,13 +3308,14 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
           </div>
         </div>
       )}
-      {/* Dock flutuante da Entrega fica em cima da lista de bairros quando o
-          teclado mobile está aberto (mobileKeyboardActive) — some por
-          completo (não renderiza, nunca só opacity/translate) até o teclado
-          fechar. Só nessa tela: Sacola/Pagamento não têm esse problema (sem
-          busca sobreposta pelo teclado) e continuam com o dock sempre
-          visível. */}
-      {cartCount > 0 && screen === "sc-delivery" && !mobileKeyboardActive && (
+      {/* Dock flutuante da Entrega escondia os resultados da busca de bairro
+          no mobile. Fonte de verdade: `bairroSearchActive` (busca ativada),
+          não detecção de teclado — o dock some assim que o cliente toca no
+          buscador, sem esperar animação/resize do Safari. Some por completo
+          (não renderiza, nunca só opacity) até a busca encerrar (seleção ou
+          blur pra fora do combo). Só nessa tela: Sacola/Pagamento não têm
+          esse problema e continuam com o dock sempre visível. */}
+      {cartCount > 0 && screen === "sc-delivery" && !bairroSearchActive && (
         <div className="delivery-cta-bar">
           <div className="delivery-cta-inner">
             <div className="delivery-cta-info">
@@ -3905,12 +3898,20 @@ main{width:100%;padding:6px 20px 20px}
 /* Combobox pesquisável (bairro/rua) — mesmo visual do campo de texto do
    formulário (.field input), com dropdown de sugestões ancorado abaixo. */
 .combo{position:relative}
-.combo-sticky{position:sticky;top:8px;z-index:22;background:var(--surface);border-radius:12px}
+/* Offset = altura real do stepper (--steps-h, medida via ResizeObserver) +
+   10px de respiro — nunca top:8px cego, que ficava atrás do stepper fixo
+   (z-index maior) e escondia o buscador atrás do fluxo Itens/Sacola/Entrega/
+   Pagar. */
+.combo-sticky{position:sticky;top:calc(var(--steps-h, 46px) + 10px);z-index:22;background:var(--surface);border-radius:12px}
 .combo.has-icon input{padding-left:38px}
 .combo .flavor-search-input{padding:12px 14px;border-radius:12px;border:1px solid var(--line-strong);background:var(--surface);font-size:15px}
 .combo-dropdown{position:absolute;left:0;right:0;top:calc(100% + 6px);background:var(--surface);border:1px solid var(--line-strong);border-radius:12px;box-shadow:var(--shadow-md, 0 8px 24px rgba(0,0,0,.18));max-height:230px;overflow-y:auto;z-index:20}
-.combo-opt{padding:11px 14px;font-size:14px;color:var(--text);cursor:pointer;display:flex;justify-content:space-between;gap:10px;align-items:center}
+.combo-opt{position:relative;padding:13px 14px;font-size:14px;color:var(--text);cursor:pointer;display:flex;justify-content:space-between;gap:10px;align-items:center}
 .combo-opt:hover,.combo-opt[aria-selected="true"]{background:var(--brand-soft)}
+/* Divisória sutil entre bairros: 10% de respiro em cada lado, nunca 100% da
+   largura. Pseudo-elemento (sem markup extra); :not(:last-child) já cobre
+   "sem linha após o último item" e "sem linha com resultado único". */
+.combo-opt:not(:last-child)::after{content:"";position:absolute;left:10%;right:10%;bottom:0;height:1px;background:var(--line-strong);opacity:.7}
 .combo-opt-fee{color:var(--text-sub);font-size:12.5px;white-space:nowrap;flex:0 0 auto}
 .combo-empty{padding:14px;font-size:13px;color:var(--text-sub);text-align:center}
 .opt-desc-ingredients{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
