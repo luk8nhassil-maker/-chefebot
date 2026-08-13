@@ -829,6 +829,26 @@ export function itemBateBusca(it: { name: string; ingredients?: string }, termoN
   return !!ing && norm(ing).includes(termoNorm);
 }
 
+// Busca de bairro do checkout: sempre sobre `neighborhoods` vindo do menu
+// (mesma fonte do Admin — nunca uma lista paralela hardcoded). Query vazia
+// devolve todos, na ordem do Admin (útil ao focar o campo com busca em
+// branco). Com texto, normaliza acento/caixa/espaços extras só para
+// comparar (nunca muda nome/taxa reais) e prioriza quem COMEÇA com o termo
+// antes de quem só CONTÉM o termo em outra posição — `.sort` é estável, então
+// a ordem do Admin é preservada dentro de cada grupo.
+export function filtrarBairros<T extends { name: string }>(neighborhoods: T[], query: string): (T & { i: number })[] {
+  const termoNorm = norm(query.trim().replace(/\s+/g, " "));
+  return neighborhoods
+    .map((b, i) => ({ ...b, i }))
+    .filter((b) => norm(b.name).includes(termoNorm))
+    .sort((a, b) => {
+      if (!termoNorm) return 0;
+      const aPrefix = norm(a.name).startsWith(termoNorm) ? 0 : 1;
+      const bPrefix = norm(b.name).startsWith(termoNorm) ? 0 : 1;
+      return aPrefix - bPrefix;
+    });
+}
+
 export function catalogParaListagem(p: {
   id: string;
   available: boolean;
@@ -2150,9 +2170,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   );
   const hibridoBloqueado = isHibrido && (!hibridoSomaValida || !hibridoTrocoValido);
   const bairroSelecionado = bairroIdx !== "" ? (menu.neighborhoods || [])[+bairroIdx] : undefined;
-  const bairrosFiltrados = (menu.neighborhoods || [])
-    .map((b, i) => ({ ...b, i }))
-    .filter((b) => norm(b.name).includes(norm(bairroQuery.trim())));
+  const bairrosFiltrados = filtrarBairros(menu.neighborhoods || [], bairroQuery);
   const ruaOk = rua.trim().length > 0;
   const numeroOk = numero.trim().length > 0;
   const delOk = delType === "retirada" || delType === "dine_in" || (delType === "delivery" && bairroIdx !== "" && ruaOk && numeroOk);
@@ -2928,7 +2946,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                       {bairroDropdownOpen && (
                         <div className="combo-dropdown" id="bairro-combo-list" role="listbox">
                           {bairrosFiltrados.length === 0 ? (
-                            <div className="combo-empty">Nenhum bairro encontrado.</div>
+                            <div className="combo-empty">Nenhum bairro encontrado.<br />Confira o nome e tente novamente.</div>
                           ) : bairrosFiltrados.map((b) => (
                             <div key={b.i} className="combo-opt" role="option" aria-selected={String(b.i) === bairroIdx} onMouseDown={(e) => { e.preventDefault(); setBairroIdx(String(b.i)); setBairroQuery(""); setBairroDropdownOpen(false); if (erroEntrega) setErroEntrega(""); }}>
                               <span>{b.name}</span>

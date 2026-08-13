@@ -1,7 +1,7 @@
 import { describe, test, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { nextFlavorSelection, resolverPizzaSelectionIds, resolverSimpleSelectionIds, precoPizzaLocalCents, precoMinimoPorTamanho, ingredientesDoItem, itemBateBusca, catalogParaListagem } from "./page";
+import { nextFlavorSelection, resolverPizzaSelectionIds, resolverSimpleSelectionIds, precoPizzaLocalCents, precoMinimoPorTamanho, ingredientesDoItem, itemBateBusca, catalogParaListagem, filtrarBairros } from "./page";
 import { precificarPizzaPorId } from "@/lib/pricing/pizzaEngine";
 import type { SelecaoSabores } from "@/lib/pizzaSabores";
 import { resolverItemComSelecaoEstruturada } from "@/lib/pedidoAppSelecaoEstruturada";
@@ -1296,6 +1296,75 @@ describe("Ingredientes + busca no cardápio do cliente (sabores/produtos)", () =
 
   test("itemBateBusca: termo sem correspondência não bate", () => {
     expect(itemBateBusca({ name: "Mussarela", ingredients: "Molho, Mussarela, Rodelas de Tomate, e Orégano." }, "camarao")).toBe(false);
+  });
+
+  // filtrarBairros: busca de bairro do checkout — sempre sobre a mesma fonte
+  // do Admin (`menu.neighborhoods`), nunca uma lista paralela.
+  describe("filtrarBairros — busca de bairro sobre a fonte do Admin (nunca lista paralela)", () => {
+    const bairros = [
+      { name: "Centro", fee: 300 },
+      { name: "Mocambo", fee: 500 },
+      { name: "Santos Antônio", fee: 500 },
+      { name: "Tucum", fee: 400 },
+      { name: "Santa Luzia", fee: 500 },
+      { name: "Macaranã", fee: 500 },
+      { name: "Matinha", fee: 500 },
+      { name: "São Francisco", fee: 500 },
+    ];
+
+    test("[A] campo vazio (ex.: ao focar) devolve TODOS os bairros cadastrados, na ordem do Admin", () => {
+      const r = filtrarBairros(bairros, "");
+      expect(r.map((b) => b.name)).toEqual(bairros.map((b) => b.name));
+    });
+
+    test("[B] primeira letra filtra a lista", () => {
+      const r = filtrarBairros(bairros, "m");
+      expect(r.map((b) => b.name).sort()).toEqual(["Macaranã", "Matinha", "Mocambo", "Tucum"].sort());
+    });
+
+    test("[C] cada caractere a mais deixa o resultado progressivamente mais específico", () => {
+      expect(filtrarBairros(bairros, "m").map((b) => b.name).sort()).toEqual(["Macaranã", "Matinha", "Mocambo", "Tucum"].sort());
+      expect(filtrarBairros(bairros, "ma").map((b) => b.name).sort()).toEqual(["Macaranã", "Matinha"].sort());
+      expect(filtrarBairros(bairros, "mac").map((b) => b.name)).toEqual(["Macaranã"]);
+    });
+
+    test("[ranking] prefixo vem antes de substring (\"san\" acha \"Santos Antônio\"/\"Santa Luzia\" antes de qualquer match só por conter)", () => {
+      const r = filtrarBairros(bairros, "san");
+      expect(r.map((b) => b.name)).toEqual(["Santos Antônio", "Santa Luzia"]);
+    });
+
+    test("[D] busca sem acento encontra nome com acento (\"sao\" acha \"São Francisco\", \"antonio\" acha \"Santos Antônio\")", () => {
+      expect(filtrarBairros(bairros, "sao").map((b) => b.name)).toEqual(["São Francisco"]);
+      expect(filtrarBairros(bairros, "antonio").map((b) => b.name)).toEqual(["Santos Antônio"]);
+    });
+
+    test("normaliza caixa e espaços extras (não afeta o nome/dado real devolvido)", () => {
+      const maiusculo = filtrarBairros(bairros, "SANTA LUZIA");
+      const comEspacos = filtrarBairros(bairros, "  santa   luzia  ");
+      expect(maiusculo.map((b) => b.name)).toEqual(["Santa Luzia"]);
+      expect(comEspacos.map((b) => b.name)).toEqual(["Santa Luzia"]);
+      // o nome devolvido é o oficial cadastrado, nunca o texto normalizado da busca:
+      expect(maiusculo[0].name).toBe("Santa Luzia");
+    });
+
+    test("[E] apagar a pesquisa (query volta a \"\") devolve todos os bairros de novo, nunca lista vazia", () => {
+      expect(filtrarBairros(bairros, "cent").map((b) => b.name)).toEqual(["Centro"]);
+      expect(filtrarBairros(bairros, "").length).toBe(bairros.length);
+    });
+
+    test("sem correspondência devolve lista vazia (UI decide a mensagem \"Nenhum bairro encontrado\")", () => {
+      expect(filtrarBairros(bairros, "xyz-nao-existe")).toEqual([]);
+    });
+
+    test("[F] cada resultado preserva o índice original (b.i) — é o que alimenta bairroIdx/taxa no payload, nunca o texto da busca", () => {
+      const r = filtrarBairros(bairros, "tucum");
+      expect(r).toEqual([{ name: "Tucum", fee: 400, i: 3 }]);
+    });
+
+    test("[G] usa diretamente a lista recebida (menu.neighborhoods) — sem fallback nem dado hardcoded paralelo", () => {
+      expect(filtrarBairros([], "qualquer")).toEqual([]);
+      expect(filtrarBairros([{ name: "Único Bairro", fee: 700 }], "").map((b) => b.name)).toEqual(["Único Bairro"]);
+    });
   });
 
   test("modal de sabores: ingredientesDoSabor busca no catálogo certo por modo (pizza/calzone/pastel), nunca escreve texto fixo no JSX", () => {
