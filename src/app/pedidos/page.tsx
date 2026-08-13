@@ -353,7 +353,12 @@ export default function PedidosPage() {
   // conteúdo é de LEITURA primeiro (status, itens, pagamento) e só depois
   // ação — focoNoContainer evita que o foco pule direto para o 1º botão
   // condicional (ex.: "VERIFICAR PAGAMENTO") antes do atendente ler o resto.
-  const detalheRef = useDialogA11y(!!detailId, () => setDetailId(null), { focoNoContainer: true })
+  // travarScroll:false porque este mesmo estado também controla o <aside>
+  // inline do desktop (cb-detail-col, não é overlay — ver comentário perto
+  // do bottom sheet abaixo); nele travar o scroll do body impedia rolar até
+  // o fim do bilhete. O bottom sheet do mobile (que é overlay de verdade)
+  // trava o scroll por CSS logo abaixo, só em telas < 768px.
+  const detalheRef = useDialogA11y(!!detailId, () => setDetailId(null), { focoNoContainer: true, travarScroll: false })
   const [cardUrgenciaFechado, setCardUrgenciaFechado] = useState(false)
   const [toast, setToast] = useState<{ text: string; expires: number; pedidoId: string; prevStatus: Status } | null>(null)
   const [now, setNow] = useState(Date.now())
@@ -1685,6 +1690,14 @@ export default function PedidosPage() {
            a lista de mensagens rolar (flex-1/min-h-0/overflow) e o composer ficar
            sempre fixo no rodapé. Não afeta a listagem normal de pedidos. */
         html:has(.cb-chat-mode),body:has(.cb-chat-mode) { overflow:hidden; height:100%; }
+        /* Bottom sheet do detalhe do pedido é overlay de verdade só no
+           mobile (< 768px); nessa faixa trava o scroll do fundo enquanto
+           está aberto. No desktop o detalhe é o <aside> inline (não é
+           overlay) e o body precisa continuar rolando — ver useDialogA11y
+           com travarScroll:false acima. */
+        @media (max-width: 767px) {
+          html:has(.cb-mob-sheet-wrap),body:has(.cb-mob-sheet-wrap) { overflow:hidden; }
+        }
         .ps-content:has(.cb-chat-mode) { display:flex; flex-direction:column; height:100svh; min-height:0; overflow:hidden; }
         .ps-content:has(.cb-chat-mode) .cb-header { flex-shrink:0; }
         .cb-chat-root { display:flex; flex:1; min-height:0; overflow:hidden; }
