@@ -78,8 +78,9 @@ describe("/cardapio (PublicCardapio) — Etapa 2: home limpa + barra global de P
     expect(fonte).toContain('className="promo-scroll"');
   });
 
-  test("convite não-operacional de fidelidade (não é estado de pedido) continua permitido na home", () => {
-    expect(fonte).toContain("Entre com seu WhatsApp e acompanhe suas pizzas");
+  test("card de convite de login por WhatsApp (/cliente) foi removido da home — rota e login continuam intocados em outro lugar", () => {
+    expect(fonte).not.toContain("Entre com seu WhatsApp e acompanhe suas pizzas");
+    expect(blocoHome).not.toContain('<a href="/cliente"');
   });
 
   test("usa o hook central usePixPendente (uma única fonte, evita fetch duplicado com o badge do menu)", () => {
