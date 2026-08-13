@@ -91,10 +91,19 @@ describe("/pedidos — modal de segurança da confirmação manual (copy, checkl
   });
 
   test("Escape fecha sem confirmar (não chama confirmarPixManual) e não fecha durante o envio", () => {
-    const efeitoFoco = fonte.slice(fonte.indexOf("Acessibilidade do modal de segurança"), fonte.indexOf("const abrirVerificacaoPix"));
-    expect(efeitoFoco).toContain('e.key === "Escape"');
-    expect(efeitoFoco).toContain("if (pixConfirmandoRef.current) return");
-    expect(efeitoFoco).not.toContain("confirmarPixManual(");
+    // ESC é tratado pelo hook compartilhado @/components/useDialogA11y —
+    // chama fecharVerificacaoPix como onFechar, que por sua vez recusa
+    // fechar enquanto pixConfirmando é true (nunca interrompe um envio em
+    // andamento) e nunca confirma o pagamento sozinho.
+    expect(fonte).toContain("const pixModalRef = useDialogA11y(!!confirmPixModal, fecharVerificacaoPix)");
+    const fecharVerificacaoPixSrc = fonte.slice(fonte.indexOf("function fecharVerificacaoPix"), fonte.indexOf("const checklistCompleto ="));
+    expect(fecharVerificacaoPixSrc).toContain("if (pixConfirmando) return");
+    expect(fecharVerificacaoPixSrc).not.toContain("confirmarPixManual(");
+  });
+
+  test("o modal não duplica a lógica de foco/ESC/Tab: usa useDialogA11y como os demais diálogos do painel", () => {
+    expect(fonte).toContain("import { useDialogA11y } from '@/components/useDialogA11y'");
+    expect(fonte).not.toContain("pixConfirmandoRef");
   });
 });
 

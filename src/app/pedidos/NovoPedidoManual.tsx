@@ -296,10 +296,6 @@ function BarraCategorias({
 export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
   const [passo, setPasso] = useState<Passo>("cliente")
   const [confirmarSaida, setConfirmarSaida] = useState(false)
-  // ESC/armadilha de foco no modal principal do pedido manual. O ESC pede
-  // confirmação em vez de fechar direto: o atendente pode ter meia comanda
-  // montada, e perder isso por um toque na tecla errada seria pior.
-  const dialogRef = useDialogA11y(true, () => setConfirmarSaida(true), { travarScroll: false })
   // Confirmado (telefone reconhecido) esconde o campo de nome atrás de um
   // card compacto; o lápis abre esta edição explícita sem apagar o nome.
   // Guarda PARA QUAL telefone a edição foi pedida — assim um telefone novo
@@ -329,6 +325,19 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
 
   // --- montagem guiada -----------------------------------------------------
   const [produtoAberto, setProdutoAberto] = useState<ProdutoManual | null>(null)
+  // Dois diálogos empilhados (o pedido manual inteiro, e por cima dele o
+  // construtor guiado de um item) — cada um trava foco/ESC só enquanto é o
+  // de cima, para nunca deixar o Tab escapar do que está realmente visível
+  // nem o ESC "vazar" para o diálogo de baixo:
+  // - o de baixo (dialogRef) fica ativo só quando produtoAberto é null;
+  // - o de cima (produtoAbertoRef) assume sozinho enquanto produtoAberto
+  //   existe, e o ESC dele só fecha o construtor (volta pra lista), nunca
+  //   pergunta se quer descartar o pedido inteiro.
+  // Nenhum dos dois trava scroll: o pedido manual inteiro já é uma camada
+  // fixed inset:0 sem nada rolável atrás (ver style abaixo), então travar
+  // aqui só duplicaria o cleanup entre os dois hooks sem necessidade.
+  const dialogRef = useDialogA11y(!produtoAberto, () => tentarSair(), { travarScroll: false })
+  const produtoAbertoRef = useDialogA11y(!!produtoAberto, () => setProdutoAberto(null), { travarScroll: false })
   const [selecao, setSelecao] = useState<SelecaoMontagem>(selecaoVazia())
   const [etapaVisivel, setEtapaVisivel] = useState(0)
   const etapas = useMemo(
@@ -437,17 +446,9 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
     ...pendenciasDoPedido(dados, itens),
   ]
 
-  // Fechar com Esc passa pela mesma confirmação do botão de fechar: nunca
-  // perder um pedido inteiro por um toque acidental.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return
-      if (produtoAberto) setProdutoAberto(null)
-      else tentarSair()
-    }
-    document.addEventListener("keydown", onKey)
-    return () => document.removeEventListener("keydown", onKey)
-  })
+  // ESC agora é tratado por useDialogA11y (dialogRef, acima) — este handler
+  // próprio foi removido porque os dois competiam pelo mesmo evento (ver
+  // comentário em dialogRef).
 
   // Busca administrativa por telefone, com debounce — reconhece o cliente
   // enquanto a atendente digita, sem disparar uma requisição por tecla.
@@ -1354,6 +1355,7 @@ export default function NovoPedidoManual({ menu, onFechar, onCriado }: Props) {
       {/* Construtor guiado — dentro do mesmo fluxo, nunca uma camada fullscreen */}
       {produtoAberto && etapaAtual && (
         <div
+          ref={produtoAbertoRef}
           role="dialog"
           aria-modal="true"
           aria-label={`Montar ${produtoAberto.nome}`}

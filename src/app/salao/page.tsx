@@ -30,6 +30,7 @@ import {
 } from "lucide-react"
 import type { ItemApp } from "@/lib/pedidoAppItens"
 import { gerarClientRequestId } from "@/survival/clientRequestId"
+import { useDialogA11y } from "@/components/useDialogA11y"
 import {
   CATEGORIAS,
   listarProdutosManuais,
@@ -856,6 +857,12 @@ function ProdutoSelector({
   const [produtoAberto, setProdutoAberto] = useState<ProdutoManual | null>(null)
   const [selecao, setSelecao] = useState<SelecaoMontagem>(selecaoVazia())
   const [etapaVisivel, setEtapaVisivel] = useState(0)
+  // ESC/armadilha de foco no construtor guiado (tela cheia, sem página
+  // rolável embaixo — não precisa travar scroll). ESC chama a mesma
+  // voltarEtapa do botão "Voltar": recua um passo, e no primeiro passo
+  // fecha o construtor — nunca perde o item sem avisar de forma diferente
+  // do que o próprio botão já faz.
+  const produtoAbertoRef = useDialogA11y(!!produtoAberto, () => voltarEtapa(), { travarScroll: false })
   const etapas = useMemo(() => (produtoAberto ? montarEtapas(produtoAberto, menu) : []), [produtoAberto, menu])
   const etapaAtual = etapas[etapaVisivel]
   const bloqueio = motivoBloqueio(etapaAtual, selecao)
@@ -967,7 +974,7 @@ function ProdutoSelector({
       </div>
 
       {produtoAberto && etapaAtual && (
-        <div role="dialog" aria-modal="true" aria-label={`Montar ${produtoAberto.nome}`} style={{ position: "fixed", inset: 0, zIndex: 2900, background: "var(--background)", display: "flex", flexDirection: "column", fontFamily: FONT }}>
+        <div ref={produtoAbertoRef} role="dialog" aria-modal="true" aria-label={`Montar ${produtoAberto.nome}`} style={{ position: "fixed", inset: 0, zIndex: 2900, background: "var(--background)", display: "flex", flexDirection: "column", fontFamily: FONT }}>
           <div style={{ padding: "14px 16px", borderBottom: "1px solid var(--surface)", flexShrink: 0 }}>
             <p style={{ ...rotulo, margin: 0 }}>{produtoAberto.nome} · passo {etapaVisivel + 1} de {etapas.length}</p>
             <p style={{ fontSize: 18, fontWeight: 900, color: "var(--foreground)", margin: "4px 0 2px" }}>{etapaAtual.titulo}</p>
