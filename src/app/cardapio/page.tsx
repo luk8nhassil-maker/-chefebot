@@ -3562,7 +3562,12 @@ main{width:100%;padding:6px 20px 20px}
 .home-novidades-body span{font-size:12.5px;color:var(--text-sub);font-weight:400}
 .novidade-secao{margin-bottom:18px}
 .novelty-badge{display:inline-flex;align-items:center;width:max-content;border-radius:999px;background:#facc15;color:#3f3100;font-size:9.5px;font-weight:900;line-height:1;padding:5px 7px;text-transform:uppercase;letter-spacing:.55px;white-space:nowrap}
-.home-novelty{position:absolute;top:10px;right:10px}
+/* No card de categoria da home o selo é só apoio — nome + ícone continuam
+   sendo o elemento dominante. Escala reduzida e canto discreto, sem alterar
+   .novelty-badge base (usado em listas/modais de sabor, calibrado à parte
+   em .flavor-opt .novelty-badge abaixo). */
+.home-novelty{position:absolute;top:8px;right:8px;font-size:8px;font-weight:700;padding:3px 5.5px;letter-spacing:.3px}
+@media (max-width:380px){.home-novelty{font-size:7.5px;padding:2.5px 5px}}
 /* O selo acompanha o texto como se fosse mais uma palavra (inline), em vez de
    ser um item flex que quebra sozinho para a linha de baixo — era isso que
    fazia a linha do sabor variar de 56px para 90px conforme o nome. */
