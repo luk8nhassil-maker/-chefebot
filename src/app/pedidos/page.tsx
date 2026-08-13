@@ -349,6 +349,11 @@ export default function PedidosPage() {
   const atualizandoRef = useRef<string | null>(null)
   const [_manuais, setManuais] = useState<Record<string, boolean>>({})
   const [detailId, setDetailId] = useState<string | null>(null)
+  // ESC/armadilha de foco na sacola de detalhe do pedido (mobile). O
+  // conteúdo é de LEITURA primeiro (status, itens, pagamento) e só depois
+  // ação — focoNoContainer evita que o foco pule direto para o 1º botão
+  // condicional (ex.: "VERIFICAR PAGAMENTO") antes do atendente ler o resto.
+  const detalheRef = useDialogA11y(!!detailId, () => setDetailId(null), { focoNoContainer: true })
   const [cardUrgenciaFechado, setCardUrgenciaFechado] = useState(false)
   const [toast, setToast] = useState<{ text: string; expires: number; pedidoId: string; prevStatus: Status } | null>(null)
   const [now, setNow] = useState(Date.now())
@@ -361,6 +366,10 @@ export default function PedidosPage() {
   const reconciliandoPixRef = useRef(false)
   const [ultimaVerificacaoPix, setUltimaVerificacaoPix] = useState("")
   const [modalEntrega, setModalEntrega] = useState<{pedidoId: string; proxStatus: Status} | null>(null)
+  // ESC/armadilha de foco: selecionar entregador é uma lista de escolha
+  // única, então o foco inicial no 1º nome (padrão do hook) já é o
+  // comportamento certo — o atendente pode confirmar com Enter direto.
+  const modalEntregaRef = useDialogA11y(!!modalEntrega, () => setModalEntrega(null))
   const [muteado, setMuteado] = useState(false)
   const [busca, setBusca] = useState("")
   // Montagem manual de pedido. O cardápio é buscado sob demanda, só quando
@@ -391,40 +400,14 @@ export default function PedidosPage() {
   const [formEditarPagamento, setFormEditarPagamento] = useState<{ pagamento: string; troco: string }>({ pagamento: "", troco: "" })
   const [salvandoEdicaoPagamento, setSalvandoEdicaoPagamento] = useState(false)
   const [erroEdicaoPagamento, setErroEdicaoPagamento] = useState<string | null>(null)
-  const pixModalRef = useRef<HTMLDivElement | null>(null)
   const pixSenhaInputRef = useRef<HTMLInputElement | null>(null)
-  const pixConfirmandoRef = useRef(false)
-  useEffect(() => { pixConfirmandoRef.current = pixConfirmando }, [pixConfirmando])
-
-  // Acessibilidade do modal de segurança: foco inicial no diálogo, Tab preso
-  // dentro dele, Escape fecha sem confirmar (exceto durante o envio).
-  useEffect(() => {
-    if (!confirmPixModal) return
-    pixModalRef.current?.focus()
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault()
-        if (pixConfirmandoRef.current) return
-        setConfirmPixModal(null)
-        setPixChecklist({ conferiu: false, valorBate: false, clienteCorreto: false })
-        setPixSenha("")
-        setPixSenhaVisivel(false)
-        setPixErro(null)
-        return
-      }
-      if (e.key !== "Tab") return
-      const container = pixModalRef.current
-      if (!container) return
-      const focusables = container.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), [tabindex]:not([tabindex="-1"])')
-      if (focusables.length === 0) return
-      const first = focusables[0]
-      const last = focusables[focusables.length - 1]
-      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus() }
-      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus() }
-    }
-    document.addEventListener("keydown", onKeyDown)
-    return () => document.removeEventListener("keydown", onKeyDown)
-  }, [confirmPixModal])
+  // Acessibilidade do modal de segurança financeira (mesmo hook usado nos
+  // demais diálogos do painel): foco inicial, Tab preso dentro do modal,
+  // Escape chama fecharVerificacaoPix — que já recusa fechar sozinho
+  // enquanto pixConfirmando é true, então nenhuma checagem extra é
+  // necessária aqui. Substituiu um useEffect próprio que duplicava
+  // exatamente essa lógica.
+  const pixModalRef = useDialogA11y(!!confirmPixModal, fecharVerificacaoPix)
   const [finalizarModal, setFinalizarModal] = useState<string | null>(null)
   const [simpleToast, setSimpleToast] = useState("")
   const [arquivandoConversa, setArquivandoConversa] = useState<string | null>(null)
@@ -439,6 +422,12 @@ export default function PedidosPage() {
   type MensagemRelevante = { autor: "cliente" | "atendente" | "bot"; texto: string; ts?: number }
 
   const [modalPedidoCombinado, setModalPedidoCombinado] = useState(false)
+  // ESC/armadilha de foco na revisão do pedido combinado (Salão). O
+  // conteúdo é revisão antes de agir (itens, dados, pendências), então o
+  // foco inicial vai para o contêiner — não para "Criar pedido" nem para
+  // "Voltar", que teriam peso desigual dependendo de qual vem primeiro no
+  // DOM conforme pendências existirem ou não.
+  const pedidoCombinadoRef = useDialogA11y(modalPedidoCombinado, () => setModalPedidoCombinado(false), { focoNoContainer: true })
   const [pedidoCombinadoPhone, setPedidoCombinadoPhone] = useState<string | null>(null)
   const [pedidoCombinadoRascunho, setPedidoCombinadoRascunho] = useState<PedidoCombinadoRascunho | null>(null)
   const [pedidoCombinadoPendencias, setPedidoCombinadoPendencias] = useState<string[]>([])
@@ -1237,7 +1226,10 @@ export default function PedidosPage() {
     setPixErro(null)
     setConfirmPixModal(id)
   }
-  const fecharVerificacaoPix = () => {
+  // Declaração de função (hoisted) em vez de const: precisa ser referenciável
+  // por useDialogA11y logo acima de confirmPixModal, antes deste ponto do
+  // arquivo — ver o comentário junto de pixModalRef.
+  function fecharVerificacaoPix() {
     if (pixConfirmando) return
     setConfirmPixModal(null)
     setPixChecklist({ conferiu: false, valorBate: false, clienteCorreto: false })
@@ -2399,11 +2391,12 @@ export default function PedidosPage() {
         </div>
       )}
 
-      {/* Bottom sheet detalhe — mobile only */}
+      {/* Bottom sheet detalhe — mobile only (desktop usa o <aside> inline
+          acima, que não é um overlay e por isso não leva role="dialog"). */}
         {detalhePedido && (
           <div className="cb-mob-sheet-wrap">
             <div onClick={() => setDetailId(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 60, animation: "cbFadeIn .2s ease both" }} />
-            <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, margin: "0 auto", maxWidth: 375, background: "var(--background)", border: "1px solid var(--surface-secondary)", borderBottom: "none", borderRadius: "26px 26px 0 0", zIndex: 61, animation: "cbSheetUp .32s cubic-bezier(.2,.9,.3,1) both", padding: "10px 20px 26px", display: "flex", flexDirection: "column", gap: 12, maxHeight: "88vh", overflowY: "auto" }}>
+            <div ref={detalheRef} role="dialog" aria-modal="true" aria-label={`Detalhe do pedido${detalhePedido.numero != null ? ` #${detalhePedido.numero}` : ""}`} tabIndex={-1} style={{ position: "fixed", bottom: 0, left: 0, right: 0, margin: "0 auto", maxWidth: 375, background: "var(--background)", border: "1px solid var(--surface-secondary)", borderBottom: "none", borderRadius: "26px 26px 0 0", zIndex: 61, animation: "cbSheetUp .32s cubic-bezier(.2,.9,.3,1) both", padding: "10px 20px 26px", display: "flex", flexDirection: "column", gap: 12, maxHeight: "88vh", overflowY: "auto", outline: "none" }}>
               <div style={{ width: 44, height: 5, borderRadius: 3, background: "var(--surface-elevated)", margin: "2px auto 0", flexShrink: 0 }} />
               {renderDetalhe(detalhePedido)}
             </div>
@@ -2414,9 +2407,9 @@ export default function PedidosPage() {
         {modalEntrega && (
           <>
             <div onClick={() => setModalEntrega(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", zIndex: 60, animation: "cbFadeIn .2s ease both" }} />
-            <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, margin: "0 auto", maxWidth: 375, background: "var(--background)", border: "1px solid var(--surface-secondary)", borderBottom: "none", borderRadius: "26px 26px 0 0", zIndex: 61, animation: "cbSheetUp .32s cubic-bezier(.2,.9,.3,1) both", padding: "20px 20px 36px", display: "flex", flexDirection: "column", gap: 14 }}>
+            <div ref={modalEntregaRef} role="dialog" aria-modal="true" aria-labelledby="entrega-modal-titulo" style={{ position: "fixed", bottom: 0, left: 0, right: 0, margin: "0 auto", maxWidth: 375, background: "var(--background)", border: "1px solid var(--surface-secondary)", borderBottom: "none", borderRadius: "26px 26px 0 0", zIndex: 61, animation: "cbSheetUp .32s cubic-bezier(.2,.9,.3,1) both", padding: "20px 20px 36px", display: "flex", flexDirection: "column", gap: 14 }}>
               <div style={{ width: 44, height: 5, borderRadius: 3, background: "var(--surface-elevated)", margin: "0 auto 6px" }} />
-              <p style={{ margin: 0, fontSize: 18, fontWeight: 900, letterSpacing: "-0.3px" }}>Selecionar entregador</p>
+              <p id="entrega-modal-titulo" style={{ margin: 0, fontSize: 18, fontWeight: 900, letterSpacing: "-0.3px" }}>Selecionar entregador</p>
               {entregadores.filter(e => e.ativo).map(e => (<button key={e.id} onClick={() => avancarStatus(modalEntrega.pedidoId, modalEntrega.proxStatus, e)} style={{ height: 56, border: "1px solid var(--surface-secondary)", borderRadius: 16, background: "var(--surface)", color: "var(--foreground)", fontSize: 16, fontWeight: 800, textAlign: "left", padding: "0 16px" }}>{e.nome}</button>))}
               <button onClick={() => avancarStatus(modalEntrega.pedidoId, modalEntrega.proxStatus)} style={{ height: 48, border: "1px solid var(--border)", borderRadius: 14, background: "transparent", color: "var(--foreground-secondary)", fontSize: 14, fontWeight: 800 }}>Sem entregador</button>
             </div>
@@ -2526,10 +2519,9 @@ export default function PedidosPage() {
               role="dialog"
               aria-modal="true"
               aria-labelledby="pix-modal-titulo"
-              tabIndex={-1}
               style={{
                 position: "fixed", inset: 0, zIndex: 301, display: "flex", alignItems: "flex-end", justifyContent: "center",
-                padding: 0, outline: "none",
+                padding: 0,
               }}
             >
               <div style={{
@@ -2667,9 +2659,9 @@ export default function PedidosPage() {
       {modalPedidoCombinado && pedidoCombinadoRascunho && (
         <>
           <div onClick={() => { setModalPedidoCombinado(false) }} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.75)", zIndex: 70, animation: "cbFadeIn .2s ease both" }} />
-          <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, margin: "0 auto", maxWidth: 480, background: "var(--background)", border: "1px solid var(--surface-secondary)", borderBottom: "none", borderRadius: "26px 26px 0 0", zIndex: 71, animation: "cbSheetUp .32s cubic-bezier(.2,.9,.3,1) both", padding: "12px 20px 36px", display: "flex", flexDirection: "column", gap: 14, maxHeight: "90vh", overflowY: "auto" }}>
+          <div ref={pedidoCombinadoRef} role="dialog" aria-modal="true" aria-labelledby="pedido-combinado-titulo" tabIndex={-1} style={{ position: "fixed", bottom: 0, left: 0, right: 0, margin: "0 auto", maxWidth: 480, background: "var(--background)", border: "1px solid var(--surface-secondary)", borderBottom: "none", borderRadius: "26px 26px 0 0", zIndex: 71, animation: "cbSheetUp .32s cubic-bezier(.2,.9,.3,1) both", padding: "12px 20px 36px", display: "flex", flexDirection: "column", gap: 14, maxHeight: "90vh", overflowY: "auto", outline: "none" }}>
             <div style={{ width: 44, height: 5, borderRadius: 3, background: "var(--surface-elevated)", margin: "0 auto 4px", flexShrink: 0 }} />
-            <p style={{ margin: 0, fontSize: 18, fontWeight: 900, letterSpacing: "-0.3px", flexShrink: 0 }}>Revise o pedido antes de enviar para a cozinha</p>
+            <p id="pedido-combinado-titulo" style={{ margin: 0, fontSize: 18, fontWeight: 900, letterSpacing: "-0.3px", flexShrink: 0 }}>Revise o pedido antes de enviar para a cozinha</p>
 
             {/* Itens */}
             <div style={{ background: "var(--background)", borderRadius: 12, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 6 }}>

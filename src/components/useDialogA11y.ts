@@ -22,7 +22,16 @@ const FOCAVEIS =
 export function useDialogA11y(
   aberto: boolean,
   onFechar: () => void,
-  opts?: { focoInicial?: React.RefObject<HTMLElement | null>; travarScroll?: boolean }
+  opts?: {
+    focoInicial?: React.RefObject<HTMLElement | null>;
+    travarScroll?: boolean;
+    /** Foca o próprio diálogo em vez do 1º controle focável — para
+     * conteúdo de LEITURA antes de agir (ex.: uma sacola de detalhe com
+     * vários botões condicionais): o foco inicial não deve pular direto
+     * para "o primeiro botão que existir", pulando o que o usuário
+     * precisa ler primeiro. Requer `tabIndex={-1}` no nó com `ref`. */
+    focoNoContainer?: boolean;
+  }
 ) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   // A ref é sincronizada num efeito, nunca durante o render (escrever em ref
@@ -35,6 +44,7 @@ export function useDialogA11y(
   });
   const focoInicial = opts?.focoInicial;
   const travarScroll = opts?.travarScroll !== false;
+  const focoNoContainer = opts?.focoNoContainer;
 
   useEffect(() => {
     if (!aberto) return;
@@ -42,8 +52,10 @@ export function useDialogA11y(
     const container = containerRef.current;
 
     // Foco inicial: o alvo pedido pelo chamador (normalmente a ação
-    // principal, ou o primeiro campo num formulário) ou o próprio diálogo.
-    const alvo = focoInicial?.current ?? container?.querySelector<HTMLElement>(FOCAVEIS) ?? container;
+    // principal, ou o primeiro campo num formulário), o próprio diálogo
+    // quando `focoNoContainer` pede leitura antes de agir, senão o 1º
+    // controle focável, e por fim o diálogo como último recurso.
+    const alvo = focoInicial?.current ?? (focoNoContainer ? container : container?.querySelector<HTMLElement>(FOCAVEIS)) ?? container;
     alvo?.focus?.();
 
     function onKeyDown(e: KeyboardEvent) {
@@ -81,7 +93,7 @@ export function useDialogA11y(
       if (travarScroll) document.body.style.overflow = overflowAnterior;
       anterior?.focus?.();
     };
-  }, [aberto, focoInicial, travarScroll]);
+  }, [aberto, focoInicial, travarScroll, focoNoContainer]);
 
   return containerRef;
 }

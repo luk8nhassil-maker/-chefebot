@@ -497,3 +497,28 @@ describe("NovoPedidoManual — lista de produtos nunca acumula entre categorias"
     expect(fonte).toContain("setCategoria(produto.categoria)");
   });
 });
+
+describe("NovoPedidoManual — REGRESSÃO (dois diálogos empilhados, ESC não vaza entre eles)", () => {
+  // Bug real desta rodada: o modal principal tinha um useDialogA11y próprio
+  // com ESC em fase de CAPTURA, e o construtor guiado de item (produtoAberto)
+  // tinha um useEffect com ESC em fase de BOLHA. stopPropagation() na
+  // captura nunca deixa o evento voltar para a bolha — então TODO ESC
+  // disparava "descartar o pedido inteiro?", mesmo com só o construtor
+  // guiado aberto (que deveria só voltar um passo / fechar o construtor).
+  const fonte = readFileSync(fileURLToPath(new URL("./NovoPedidoManual.tsx", import.meta.url)), "utf-8");
+
+  test("existem DOIS useDialogA11y, cada um ativo só quando é o diálogo de cima", () => {
+    expect(fonte).toContain("const dialogRef = useDialogA11y(!produtoAberto, () => tentarSair(), { travarScroll: false })");
+    expect(fonte).toContain("const produtoAbertoRef = useDialogA11y(!!produtoAberto, () => setProdutoAberto(null), { travarScroll: false })");
+  });
+
+  test("o construtor guiado usa produtoAbertoRef (ref próprio), nunca o dialogRef do modal principal", () => {
+    const blocoConstrutor = fonte.slice(fonte.indexOf("Construtor guiado"), fonte.indexOf("Sabores já escolhidos"));
+    expect(blocoConstrutor).toContain("ref={produtoAbertoRef}");
+  });
+
+  test("o useEffect próprio de ESC que causava o conflito foi removido (só sobra o comentário explicando a remoção)", () => {
+    expect(fonte).not.toContain('document.addEventListener("keydown", onKey)');
+    expect(fonte).toContain("ESC agora é tratado por useDialogA11y");
+  });
+});
