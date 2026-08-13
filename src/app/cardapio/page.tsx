@@ -2446,17 +2446,13 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
               {/* Home limpa (Etapa 2): nenhum card de estado operacional aqui —
                   acompanhamento de pedido e Pix pendente vivem na barra
                   global (PixPendenteBar) e no indicador da aba Pedido, nunca
-                  dentro do conteúdo rolável da home. Só promoção ativa e
-                  convites não-operacionais (ex.: fidelidade abaixo) seguem.
+                  dentro do conteúdo rolável da home. O convite de login por
+                  WhatsApp (/cliente) foi removido como ponto de entrada
+                  visual da home — a rota, o login e a fidelidade continuam
+                  intactos, só não têm mais este card aqui. Promoção ativa
+                  segue normalmente.
                   A edição de pedido (main) não depende deste banner: usa
                   pedidoConfirmado.statusToken na própria tela sc-done. */}
-              <a href="/cliente" style={{ display: "flex", alignItems: "center", gap: 10, background: "var(--surface)", border: "1px solid var(--line-strong)", borderRadius: 14, padding: "10px 12px", marginBottom: 14, textDecoration: "none" }}>
-                <span style={{ fontSize: 20, flexShrink: 0 }}>🎁</span>
-                <span style={{ flex: 1 }}>
-                  <span style={{ display: "block", fontSize: 14, fontWeight: 700, color: "var(--text)" }}>Entre com seu WhatsApp e acompanhe suas pizzas</span>
-                  <span style={{ display: "block", fontSize: 12.5, color: "var(--text-sub)", marginTop: 2 }}>Rumo à sua recompensa — sem precisar entrar para pedir.</span>
-                </span>
-              </a>
               {promos.length > 0 && (
                 <div
                   className="promo-scroll"
