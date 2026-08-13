@@ -19,6 +19,7 @@ import type { PizzaCatalog } from "@/lib/catalog/pizzas";
 import { todosOsProdutos, type SimpleCatalog } from "@/lib/catalog/simpleProducts";
 import { isNewCatalogItemId, isNoveltyPeriodActive, noveltyExpiresAt } from "@/lib/catalog/novelties";
 import { nextFlavorSelection } from "@/lib/pizzaSabores";
+import { norm } from "@/lib/pedidoAppItens";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import { useDialogA11y } from "@/components/useDialogA11y";
 
@@ -805,7 +806,30 @@ function NoveltyBadge({ className = "" }: { className?: string }) {
 // produto exige exatamente 1 sabor (single_flavor/flavor_priced — Calzone,
 // Pastel de Forno, Pastel de Feira), usado por addSimple para desviar para
 // o seletor de sabor (ver pickPastel) em vez de adicionar direto.
-function catalogParaListagem(p: {
+// Leitura segura de `ingredients` num item de união heterogênea (catálogo
+// oficial vs. formato legado do Menu) sem `any` — string quando o item
+// carrega o campo, `undefined` quando não (nunca inventa).
+export function ingredientesDoItem(it: unknown): string | undefined {
+  if (it && typeof it === "object" && "ingredients" in it) {
+    const v = (it as { ingredients?: unknown }).ingredients;
+    return typeof v === "string" ? v : undefined;
+  }
+  return undefined;
+}
+
+// Se um item bate a busca por texto (nome OU ingredientes). Função solta
+// (não `.filter()` encadeado) porque `cfg.data` é uma união de 7 formatos de
+// produto diferentes — o TypeScript perde o tipo específico do elemento ao
+// encadear `.filter()` sobre essa união (mas preserva bem em `.map()`), então
+// a lista renderizada usa `.map()` sempre e só decide null/render aqui.
+export function itemBateBusca(it: { name: string; ingredients?: string }, termoNorm: string): boolean {
+  if (!termoNorm) return true;
+  if (norm(it.name).includes(termoNorm)) return true;
+  const ing = ingredientesDoItem(it);
+  return !!ing && norm(ing).includes(termoNorm);
+}
+
+export function catalogParaListagem(p: {
   id: string;
   available: boolean;
   name: string;
@@ -813,6 +837,7 @@ function catalogParaListagem(p: {
   sizes?: { code: string; priceCents: number }[];
   flavors?: { name: string; available: boolean }[];
   addOnGroup?: { max: 1; options: { id: string; label: string; priceCents: number; available: boolean }[] };
+  ingredients?: string;
 }): {
   id: string;
   name: string;
@@ -821,6 +846,7 @@ function catalogParaListagem(p: {
   sizes?: { code: string; price: number }[];
   flavors?: string[];
   addOnGroup?: { max: 1; options: { id: string; label: string; price: number; available: boolean }[] };
+  ingredients?: string;
 } {
   return {
     id: p.id,
@@ -832,6 +858,11 @@ function catalogParaListagem(p: {
     ...(p.addOnGroup
       ? { addOnGroup: { max: 1 as const, options: p.addOnGroup.options.map((o) => ({ id: o.id, label: o.label, price: o.priceCents / 100, available: o.available })) } }
       : {}),
+    // Só produtos de composição fixa (Hambúrguer, Macarronada) carregam este
+    // campo na fonte (ver officialMenu2026.ts) — Bebidas/Sucos/Vitaminas nunca
+    // têm `ingredients` definido lá, então aqui continuam sem descrição
+    // nenhuma (nunca inventada nesta camada, só repassada quando já existe).
+    ...(p.ingredients ? { ingredients: p.ingredients } : {}),
   };
 }
 
@@ -1171,8 +1202,29 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   // 100% legado (catálogo ausente).
   const [addOnIds, setAddOnIds] = useState<string[]>([]);
   const [flavorModalOpen, setFlavorModalOpen] = useState(false);
+  // Busca dentro do modal de sabores — filtra por nome OU ingredientes (ver
+  // ingredientesDoSabor). Some sozinha quando o modal fecha, pra não filtrar
+  // silenciosamente a próxima abertura.
+  const [flavorSearchQuery, setFlavorSearchQuery] = useState("");
+  // Reseta durante a renderização (não em efeito) ao detectar que o modal
+  // fechou — padrão recomendado pelo React pra "resetar estado quando algo
+  // muda", sem o round-trip extra de um useEffect.
+  const [prevFlavorModalOpen, setPrevFlavorModalOpen] = useState(flavorModalOpen);
+  if (flavorModalOpen !== prevFlavorModalOpen) {
+    setPrevFlavorModalOpen(flavorModalOpen);
+    if (!flavorModalOpen) setFlavorSearchQuery("");
+  }
   const [plan, setPlan] = useState<{ total: number; current: number; openEnded: boolean }>({ total: 0, current: 0, openEnded: false });
   const [listCat, setListCat] = useState<"lanche" | "macarronada" | "bebida" | "suco" | "hamburguer" | "pastelForno" | "vitamina">("lanche");
+  // Busca da tela "sc-list" (Lanches/Hambúrguer/Bebidas/Sucos/etc.) — mesma
+  // regra da busca de sabores: reseta ao trocar de categoria, nunca filtra
+  // silenciosamente a lista seguinte.
+  const [listSearchQuery, setListSearchQuery] = useState("");
+  const [prevListCat, setPrevListCat] = useState(listCat);
+  if (listCat !== prevListCat) {
+    setPrevListCat(listCat);
+    setListSearchQuery("");
+  }
   // Upsell contextual de bebida: rastreia o tipo do último item adicionado e
   // se o cliente já ignorou a sugestão nesta compra (reseta só em resetAll()).
   const [lastAddedKind, setLastAddedKind] = useState<"pizza" | "lanche" | "macarronada" | "bebida" | "suco" | null>(null);
@@ -1636,13 +1688,30 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
   const calzoneFlavorNames = menu.catalog
     ? menu.catalog.calzone.find((l) => l.name === calzoneItem?.name)?.flavors?.filter((f) => f.available).map((f) => f.name) ?? []
     : [...(menu.saltyFlavors || []), ...(menu.sweetFlavors || [])];
-  const flavorSections = miniPizzaMode
+  const flavorSectionsSemBusca = miniPizzaMode
     ? [{ title: "Sabores da mini-pizza", flavors: miniPizzaFlavors }]
     : calzoneMode
       ? [{ title: "Sabores do calzone", flavors: calzoneFlavorNames }]
       : pastelMode
         ? [{ title: "Sabores", flavors: pastelPendente?.flavors || [] }]
         : pizzaFlavorSections;
+  // Busca do modal de sabores: filtra por nome OU ingredientes, sem tocar em
+  // quais sabores existem (flavorSectionsSemBusca continua a única fonte de
+  // verdade da lista) — limpar o campo sempre devolve a lista original.
+  const flavorSearchNorm = norm(flavorSearchQuery.trim());
+  const flavorSections = flavorSearchNorm
+    ? flavorSectionsSemBusca
+        .map((section) => ({
+          ...section,
+          flavors: section.flavors.filter((f) => {
+            if (norm(f).includes(flavorSearchNorm)) return true;
+            const ingredientes = ingredientesDoSabor(f);
+            return !!ingredientes && norm(ingredientes).includes(flavorSearchNorm);
+          }),
+        }))
+        .filter((section) => section.flavors.length > 0)
+    : flavorSectionsSemBusca;
+  const showFlavorSearch = flavorSectionsSemBusca.reduce((n, s) => n + s.flavors.length, 0) > 5;
   const catalogSizeLabel = menu.pizzaCatalog?.sizes.find((s) => s.code === size)?.label;
   const selectedSizeLabel = miniPizzaMode && miniPizzaItem ? miniPizzaItem.name : pastelMode && pastelPendente ? pastelPendente.name : size ? (catalogSizeLabel || (menu.sizes || []).find((s) => s.code === size)?.label || size) : "";
   const buildFootHint = !size
@@ -1702,6 +1771,22 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     const cents = menu.pizzaCatalog.flavors.find((f) => f.name === nome)?.pricesBySizeCode[size as "P" | "M" | "G" | "F" | "MINI"];
     return cents === undefined ? undefined : cents / 100;
   }
+  // Ingredientes do sabor, direto da fonte de verdade do catálogo (nunca
+  // inventados aqui) — usados como referência visual (linha secundária) e
+  // como campo de busca do modal. Cada modo de montagem tem sua própria
+  // lista de sabores/produto de origem, então a busca segue a mesma ordem
+  // de prioridade que já decide quais sabores aparecem (calzone > pastel >
+  // pizza/mini, ver flavorSections acima).
+  function ingredientesDoSabor(nome: string): string | undefined {
+    if (calzoneMode) {
+      return menu.catalog?.calzone.find((l) => l.name === (calzoneItem?.name ?? "Calzone"))?.flavors?.find((f) => f.name === nome)?.ingredients;
+    }
+    if (pastelMode && pastelPendente) {
+      const produtos = pastelPendente.name === "Pastel de Forno" ? menu.catalog?.pastelForno : menu.catalog?.lanches;
+      return produtos?.find((l) => l.name === pastelPendente.name)?.flavors?.find((f) => f.name === nome)?.ingredients;
+    }
+    return menu.pizzaCatalog?.flavors.find((f) => f.name === nome)?.ingredients;
+  }
   // Linha de sabor: nome (+ selos) → preço → estado. Sem o 🍕 repetido em
   // toda linha (não distingue nada entre sabores de pizza) e mais baixa, para
   // caber mais opção por tela sem apertar o alvo de toque.
@@ -1710,6 +1795,7 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
     const esg = esgotados.includes(f);
     const precoReais = precoSaborReais(f);
     const novidade = noveltyActive && isNewCatalogItemId(menu.pizzaCatalog?.flavors.find((flavor) => flavor.name === f)?.id);
+    const ingredientes = ingredientesDoSabor(f);
     return (
       <div
         key={`${keyPrefix}-${section.title}-${f}`}
@@ -1721,7 +1807,11 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
       >
         <div className="opt-body">
           <div className="opt-title opt-title-with-badge">{f}{novidade && <NoveltyBadge />}</div>
-          {esg && <div className="opt-desc" style={{ color: "var(--danger)" }}>Esgotado</div>}
+          {esg ? (
+            <div className="opt-desc" style={{ color: "var(--danger)" }}>Esgotado</div>
+          ) : ingredientes ? (
+            <div className="opt-desc opt-desc-ingredients">{ingredientes}</div>
+          ) : null}
         </div>
         {!esg && precoReais !== undefined && <div className="opt-price flavor-opt-price">{money(precoReais)}</div>}
         <div className="opt-check" />
@@ -2523,7 +2613,32 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                   pastelForno: { eb: "", t: "Escolha o sabor", data: pastelFornoEfetivo, emoji: "🥟" },
                   vitamina: { eb: "", t: "Vitaminas da casa", data: vitaminasEfetivas, emoji: "🥛" },
                 }[listCat];
-                return (<><div className="screen-head">{cfg.eb && <div className="eyebrow">{cfg.eb}</div>}<h2>{cfg.t}</h2><p>Toque para adicionar.</p></div>{cfg.data.length === 0 ? <CardapioIllustration {...CARDAPIO_ILLUSTRATIONS.semResultado} /> : cfg.data.map((it, i) => { const esg = ("available" in it && it.available === false) || esgotados.includes(it.name); return (<div key={"id" in it ? it.id : i} className="opt" onClick={() => !esg && addSimple(it, cfg.emoji)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }} {...optA11yAttrs(esg)} onKeyDown={(e) => { if (!esg && isActivateKey(e)) { e.preventDefault(); addSimple(it, cfg.emoji); } }}><div className="opt-emoji">{cfg.emoji}</div><div className="opt-body"><div className="opt-title opt-title-with-badge">{it.name}{noveltyActive && isNewCatalogItemId("id" in it ? it.id : undefined) && <NoveltyBadge />}</div>{esg && <div className="opt-desc" style={{ color: "var(--danger)" }}>Esgotado</div>}</div><div className="opt-price">{simplePriceLabel(it)}</div></div>); })}</>);
+                const mostrarBuscaLista = cfg.data.length > 6;
+                const termoListaNorm = norm(listSearchQuery.trim());
+                const algumResultado = cfg.data.some((it) => itemBateBusca(it, termoListaNorm));
+                return (<>
+                  <div className="screen-head">{cfg.eb && <div className="eyebrow">{cfg.eb}</div>}<h2>{cfg.t}</h2><p>Toque para adicionar.</p></div>
+                  {mostrarBuscaLista && (
+                    <div className="flavor-search">
+                      <input
+                        type="search"
+                        inputMode="search"
+                        className="flavor-search-input"
+                        placeholder="Buscar produto..."
+                        aria-label="Buscar produto"
+                        value={listSearchQuery}
+                        onChange={(e) => setListSearchQuery(e.target.value)}
+                      />
+                    </div>
+                  )}
+                  {cfg.data.length === 0 ? (
+                    <CardapioIllustration {...CARDAPIO_ILLUSTRATIONS.semResultado} />
+                  ) : mostrarBuscaLista && !algumResultado ? (
+                    <div className="flavor-search-empty">Nenhum produto encontrado para &quot;{listSearchQuery.trim()}&quot;.</div>
+                  ) : cfg.data.map((it, i) => {
+                      if (!itemBateBusca(it, termoListaNorm)) return null;
+                      const esg = ("available" in it && it.available === false) || esgotados.includes(it.name); const ing = ingredientesDoItem(it); return (<div key={"id" in it ? it.id : i} className="opt" onClick={() => !esg && addSimple(it, cfg.emoji)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }} {...optA11yAttrs(esg)} onKeyDown={(e) => { if (!esg && isActivateKey(e)) { e.preventDefault(); addSimple(it, cfg.emoji); } }}><div className="opt-emoji">{cfg.emoji}</div><div className="opt-body"><div className="opt-title opt-title-with-badge">{it.name}{noveltyActive && isNewCatalogItemId("id" in it ? it.id : undefined) && <NoveltyBadge />}</div>{esg ? <div className="opt-desc" style={{ color: "var(--danger)" }}>Esgotado</div> : ing ? <div className="opt-desc opt-desc-ingredients">{ing}</div> : null}</div><div className="opt-price">{simplePriceLabel(it)}</div></div>); })}
+                </>);
               })()}
             </section>
           )}
@@ -3026,6 +3141,19 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
               <button type="button" className="payment-modal-close" aria-label="Fechar" onClick={() => setFlavorModalOpen(false)}>×</button>
             </div>
             {renderFlavorChips()}
+            {showFlavorSearch && (
+              <div className="flavor-search">
+                <input
+                  type="search"
+                  inputMode="search"
+                  className="flavor-search-input"
+                  placeholder={calzoneMode ? "Buscar sabor do calzone..." : pastelMode ? "Buscar sabor..." : "Buscar sabor da pizza..."}
+                  aria-label="Buscar sabor"
+                  value={flavorSearchQuery}
+                  onChange={(e) => setFlavorSearchQuery(e.target.value)}
+                />
+              </div>
+            )}
             <div className="flavor-modal-body">
               {!miniPizzaMode && !calzoneMode && !pastelMode && menu.pizzaCatalog && (
                 <div className="pizza-category-tabs modal-tabs" role="tablist" aria-label="Categoria dos sabores">
@@ -3035,6 +3163,9 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
                     </button>
                   ))}
                 </div>
+              )}
+              {flavorSearchNorm && flavorSections.length === 0 && (
+                <div className="flavor-search-empty">Nenhum sabor encontrado para &quot;{flavorSearchQuery.trim()}&quot;.</div>
               )}
               {flavorSections.map((section) => (
                 <div key={section.title}>
@@ -3379,6 +3510,12 @@ main{width:100%;padding:6px 20px 20px}
 .flavor-modal-body .opt{margin-bottom:8px}
 .flavor-modal-msg{font-size:13.5px;font-weight:700;color:var(--text);margin-top:4px}
 .flavor-modal-hint{font-size:12.5px;color:var(--text-sub);margin-top:3px;line-height:1.35}
+.flavor-search{flex:0 0 auto;margin:0 0 10px}
+.flavor-search-input{width:100%;box-sizing:border-box;padding:11px 14px;border-radius:12px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:14.5px;line-height:1.3}
+.flavor-search-input:focus{outline:none;border-color:var(--gold)}
+.flavor-search-input::placeholder{color:var(--text-sub)}
+.flavor-search-empty{font-size:13.5px;color:var(--text-sub);text-align:center;padding:18px 8px}
+.opt-desc-ingredients{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .cartbar{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:540px;z-index:50;background:transparent;padding:0 20px calc(env(safe-area-inset-bottom) + 14px);pointer-events:none}
 .cartbar-inner{margin:0 auto;display:flex;align-items:center;gap:14px;background:var(--surface-elevated);border:1px solid var(--line-strong);border-radius:20px;padding:12px 12px 12px 16px;box-shadow:0 -10px 34px rgba(0,0,0,.35);pointer-events:auto}
 .cartbar-info{flex:1}

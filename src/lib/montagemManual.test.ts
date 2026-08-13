@@ -211,6 +211,20 @@ describe("busca", () => {
   test("termo vazio devolve o conjunto inteiro", () => {
     expect(buscarProdutos(produtos, "")).toHaveLength(produtos.length);
   });
+
+  test("busca também por ingrediente (não só nome) para produtos com composição oficial", () => {
+    // X-Tudo tem "Catupiry" na composição mas não no nome — a busca por
+    // ingrediente precisa achar o produto assim como acharia pelo nome.
+    const achados = buscarProdutos(produtos, "catupiry", "hamburgueres");
+    expect(achados.map((p) => p.nome)).toContain("X-Tudo");
+  });
+
+  test("busca por ingrediente normaliza acento (com/sem acento acham o mesmo conjunto)", () => {
+    const comAcento = buscarProdutos(produtos, "hambúrguer", "hamburgueres");
+    const semAcento = buscarProdutos(produtos, "hamburguer", "hamburgueres");
+    expect(comAcento).toEqual(semAcento);
+    expect(comAcento.length).toBeGreaterThan(0);
+  });
 });
 
 describe("etapas obrigatórias — pizza", () => {
@@ -263,6 +277,25 @@ describe("etapas obrigatórias — pizza", () => {
     expect(etapas.map((e) => e.tipo)).toEqual(["sabores", "borda"]);
     expect(etapas[1].opcoes.find((o) => o.valor === "Requeijão")?.extra).toBe(8);
   });
+
+  // Sincronização com o cardápio oficial (CARDAPIO_CHEFE.pdf): a etapa de
+  // sabores carrega os ingredientes vindos do catálogo (nunca inventados
+  // aqui) — protege a associação sabor ↔ composição usada pela UX de
+  // ingredientes do pedido manual/Salão.
+  test("cada opção de sabor carrega os ingredientes oficiais do catálogo (nunca inventados)", () => {
+    const sabores = montarEtapas(produtoPorId("pizza:g"), MENU)[0];
+    const calabresa = sabores.opcoes.find((o) => o.valor === "Calabresa")!;
+    expect(calabresa.ingredientes).toBe("Molho, Mussarela, Linguiça Calabresa, Cebola e Orégano.");
+    const chocolate = sabores.opcoes.find((o) => o.valor === "Chocolate")!;
+    expect(chocolate.ingredientes).toBe("Chocolate Preto.");
+    const carneSecaEspecial = sabores.opcoes.find((o) => o.valor === "Carne Seca Especial")!;
+    expect(carneSecaEspecial.ingredientes).toBe("Molho, Mussarela, Carne Seca, Catupiry Original, Queijo Coalho, Geleia de Pimenta, Pimenta Biquinho e Orégano.");
+  });
+
+  test("caminho legado (sem pizzaCatalog) não inventa ingredientes — opção fica sem o campo", () => {
+    const sabores = montarEtapas(produtoPorId("pizza:g", MENU_LEGADO), MENU_LEGADO)[0];
+    for (const opcao of sabores.opcoes) expect(opcao.ingredientes).toBeUndefined();
+  });
 });
 
 describe("etapas obrigatórias — demais categorias", () => {
@@ -307,6 +340,26 @@ describe("etapas obrigatórias — demais categorias", () => {
   test("produto fixed (Hambúrguer/Bebida) não tem etapa nenhuma", () => {
     expect(montarEtapas(produtoPorId("hamburgueres:x-burguer"), MENU)).toEqual([]);
     expect(montarEtapas(produtoPorId("bebidas:cerveja long neck"), MENU)).toEqual([]);
+  });
+
+  test("Calzone/Pastel de Forno/Pastel de Feira: sabor único também carrega ingredientes oficiais", () => {
+    const calzone = montarEtapas(produtoPorId("calzone:calzone"), MENU)[0];
+    expect(calzone.opcoes.find((o) => o.valor === "Carne Seca")?.ingredientes).toBe("Molho, Mussarela, Carne seca, Requeijão Cremoso e Orégano.");
+    const pastelForno = montarEtapas(produtoPorId("pastelForno:pastel de forno"), MENU)[0];
+    expect(pastelForno.opcoes.find((o) => o.valor === "Baiana")?.ingredientes).toBe("Molho, Mussarela, Calabresa Processada, Azeite de Dedê, Orégano e Pimenta.");
+    const pastelFeira = montarEtapas(produtoPorId("lanches:pastel de feira"), MENU)[0];
+    expect(pastelFeira.opcoes.find((o) => o.valor === "Queijo")?.ingredientes).toBe("queijo coalho");
+  });
+
+  test("Hambúrguer (produto fixed, sem etapa) carrega ingredientes no próprio ProdutoManual — pedido manual consegue exibi-los sem abrir etapa", () => {
+    const xTudo = produtoPorId("hamburgueres:x-tudo");
+    expect(xTudo.ingredients).toContain("Bacon");
+    expect(xTudo.ingredients).toContain("Catupiry");
+  });
+
+  test("Macarronada (etapa de tamanho, sem sabor): sem campo ingredientes na opção de tamanho — nada inventado", () => {
+    const tamanho = montarEtapas(produtoPorId("macarronada:macarronada de carne"), MENU)[0];
+    for (const opcao of tamanho.opcoes) expect(opcao.ingredientes).toBeUndefined();
   });
 });
 
