@@ -2494,48 +2494,74 @@ export function PublicCardapio({ menu }: { menu: MenuType }) {
               </div>
               <div className="home-grid">
                 <button className="home-cat" onClick={() => goPizza("tradicional")}>
-                  {pizzaTradNovelty && <NoveltyBadge className="home-novelty" />}
-                  <CATEGORIA_ICON.pizza size={27} color="var(--gold)" aria-hidden="true" /><strong>Pizzas</strong>
+                  <div className="home-cat-top">
+                    <CATEGORIA_ICON.pizza size={26} color="var(--gold)" aria-hidden="true" />
+                    {pizzaTradNovelty && <NoveltyBadge className="home-novelty" />}
+                  </div>
+                  <strong>Pizzas</strong>
                 </button>
                 <button className="home-cat home-cat-special" onClick={() => goPizza("especial")}>
-                  {pizzaEspecialNovelty && <NoveltyBadge className="home-novelty" />}
-                  <Sparkles size={27} color="#a78bfa" aria-hidden="true" />
+                  <div className="home-cat-top">
+                    <Sparkles size={26} color="#a78bfa" aria-hidden="true" />
+                    {pizzaEspecialNovelty && <NoveltyBadge className="home-novelty" />}
+                  </div>
                   <strong>Pizzas Especiais</strong>
                 </button>
                 <button className="home-cat" onClick={() => goCat("lanche")}>
-                  {lancheNovelty && <NoveltyBadge className="home-novelty" />}
-                  <CATEGORIA_ICON.lanche size={27} color="var(--gold)" aria-hidden="true" /><strong>Lanches</strong>
+                  <div className="home-cat-top">
+                    <CATEGORIA_ICON.lanche size={26} color="var(--gold)" aria-hidden="true" />
+                    {lancheNovelty && <NoveltyBadge className="home-novelty" />}
+                  </div>
+                  <strong>Lanches</strong>
                 </button>
                 <button className="home-cat" onClick={() => goCat("macarronada")}>
-                  {macarronadaNovelty && <NoveltyBadge className="home-novelty" />}
-                  <CATEGORIA_ICON.macarronada size={27} color="var(--gold)" aria-hidden="true" /><strong>Macarronada</strong>
+                  <div className="home-cat-top">
+                    <CATEGORIA_ICON.macarronada size={26} color="var(--gold)" aria-hidden="true" />
+                    {macarronadaNovelty && <NoveltyBadge className="home-novelty" />}
+                  </div>
+                  <strong>Macarronada</strong>
                 </button>
                 <button className="home-cat" onClick={() => goCat("bebida")}>
-                  {bebidaNovelty && <NoveltyBadge className="home-novelty" />}
-                  <CATEGORIA_ICON.bebidas size={27} color="var(--gold)" aria-hidden="true" /><strong>Bebidas</strong>
+                  <div className="home-cat-top">
+                    <CATEGORIA_ICON.bebidas size={26} color="var(--gold)" aria-hidden="true" />
+                    {bebidaNovelty && <NoveltyBadge className="home-novelty" />}
+                  </div>
+                  <strong>Bebidas</strong>
                 </button>
                 {sucosEfetivos.length > 0 && (
                   <button className="home-cat" onClick={() => goCat("suco")}>
-                    {sucoNovelty && <NoveltyBadge className="home-novelty" />}
-                    <CATEGORIA_ICON.sucos size={27} color="var(--gold)" aria-hidden="true" /><strong>Sucos</strong>
+                    <div className="home-cat-top">
+                      <CATEGORIA_ICON.sucos size={26} color="var(--gold)" aria-hidden="true" />
+                      {sucoNovelty && <NoveltyBadge className="home-novelty" />}
+                    </div>
+                    <strong>Sucos</strong>
                   </button>
                 )}
                 {hamburguesEfetivos.length > 0 && (
                   <button className="home-cat" onClick={() => goCat("hamburguer")}>
-                    {hamburguerNovelty && <NoveltyBadge className="home-novelty" />}
-                    <CATEGORIA_ICON.hamburguer size={27} color="var(--gold)" aria-hidden="true" /><strong>Hambúrguer</strong>
+                    <div className="home-cat-top">
+                      <CATEGORIA_ICON.hamburguer size={26} color="var(--gold)" aria-hidden="true" />
+                      {hamburguerNovelty && <NoveltyBadge className="home-novelty" />}
+                    </div>
+                    <strong>Hambúrguer</strong>
                   </button>
                 )}
                 {pastelFornoEfetivo.length > 0 && (
                   <button className="home-cat" onClick={() => goCat("pastelForno")}>
-                    {pastelFornoNovelty && <NoveltyBadge className="home-novelty" />}
-                    <CATEGORIA_ICON.pastelForno size={27} color="var(--gold)" aria-hidden="true" /><strong>Pastel de Forno</strong>
+                    <div className="home-cat-top">
+                      <CATEGORIA_ICON.pastelForno size={26} color="var(--gold)" aria-hidden="true" />
+                      {pastelFornoNovelty && <NoveltyBadge className="home-novelty" />}
+                    </div>
+                    <strong>Pastel de Forno</strong>
                   </button>
                 )}
                 {vitaminasEfetivas.length > 0 && (
                   <button className="home-cat" onClick={() => goCat("vitamina")}>
-                    {vitaminaNovelty && <NoveltyBadge className="home-novelty" />}
-                    <CATEGORIA_ICON.vitamina size={27} color="var(--gold)" aria-hidden="true" /><strong>Vitaminas</strong>
+                    <div className="home-cat-top">
+                      <CATEGORIA_ICON.vitamina size={26} color="var(--gold)" aria-hidden="true" />
+                      {vitaminaNovelty && <NoveltyBadge className="home-novelty" />}
+                    </div>
+                    <strong>Vitaminas</strong>
                   </button>
                 )}
               </div>
@@ -3544,11 +3570,14 @@ main{width:100%;padding:6px 20px 20px}
 .home-copy h2{color:var(--text-primary);font-size:22px;font-weight:850;letter-spacing:0;line-height:1.15}
 .home-copy p{color:var(--text-secondary);font-size:14px;margin-top:6px}
 .home-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-.home-cat{min-height:118px;text-align:left;background:var(--surface);border:1px solid var(--line);border-radius:20px;padding:16px;display:flex;flex-direction:column;justify-content:space-between;color:var(--text-primary);box-shadow:var(--shadow-sm)}
+.home-cat{position:relative;min-height:112px;text-align:left;background:var(--surface);border:1px solid var(--line);border-radius:20px;padding:14px 14px 15px;display:flex;flex-direction:column;color:var(--text-primary);box-shadow:var(--shadow-sm)}
 .home-cat:active{transform:scale(.98);border-color:color-mix(in srgb, var(--primary) 50%, transparent)}
-.home-cat span{font-size:27px}
-.home-cat strong{font-size:15.5px;font-weight:800;letter-spacing:0}
-.home-cat{position:relative}
+/* Duas zonas claras no topo do card: ícone à esquerda, selo (quando existe)
+   à direita — ambos elementos reais do fluxo, nunca sobrepostos por
+   position:absolute. O nome fica isolado embaixo, livre para ser o
+   elemento mais forte do card (ver .home-cat strong). */
+.home-cat-top{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:15px}
+.home-cat strong{display:block;font-size:15.5px;font-weight:800;letter-spacing:0;line-height:1.25}
 .home-cat-special{border-color:color-mix(in srgb, #a78bfa 48%, var(--line));background:color-mix(in srgb, #a78bfa 7%, var(--surface))}
 /* Ponto de entrada próprio de Novidades — banner discreto entre a promoção
    do dia e a grade de categorias, nunca confundido com "Pizzas Especiais"
@@ -3563,11 +3592,15 @@ main{width:100%;padding:6px 20px 20px}
 .novidade-secao{margin-bottom:18px}
 .novelty-badge{display:inline-flex;align-items:center;width:max-content;border-radius:999px;background:#facc15;color:#3f3100;font-size:9.5px;font-weight:900;line-height:1;padding:5px 7px;text-transform:uppercase;letter-spacing:.55px;white-space:nowrap}
 /* No card de categoria da home o selo é só apoio — nome + ícone continuam
-   sendo o elemento dominante. Escala reduzida e canto discreto, sem alterar
-   .novelty-badge base (usado em listas/modais de sabor, calibrado à parte
-   em .flavor-opt .novelty-badge abaixo). */
-.home-novelty{position:absolute;top:8px;right:8px;font-size:8px;font-weight:700;padding:3px 5.5px;letter-spacing:.3px}
-@media (max-width:380px){.home-novelty{font-size:7.5px;padding:2.5px 5px}}
+   sendo o elemento dominante. Microbadge de verdade: fonte pequena, peso
+   moderado (não 900 como o .novelty-badge base), padding mínimo, sem
+   letter-spacing chamativo. Fica dentro de .home-cat-top (flex row), nunca
+   position:absolute — reserva espaço real em vez de flutuar por cima do
+   ícone. Escopado só aqui, sem alterar .novelty-badge base (usado em
+   listas/modais de sabor, calibrado à parte em .flavor-opt .novelty-badge
+   abaixo). */
+.home-novelty{flex:0 0 auto;font-size:8px;font-weight:700;line-height:1.4;padding:2.5px 6px;letter-spacing:.2px}
+@media (min-width:640px){.home-novelty{font-size:9px}}
 /* O selo acompanha o texto como se fosse mais uma palavra (inline), em vez de
    ser um item flex que quebra sozinho para a linha de baixo — era isso que
    fazia a linha do sabor variar de 56px para 90px conforme o nome. */
