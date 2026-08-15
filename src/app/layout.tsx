@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Archivo, Geist_Mono } from "next/font/google";
+import PainelAutoPrintWatcher from "@/components/PainelAutoPrintWatcher";
 import "./globals.css";
 
 const archivo = Archivo({
@@ -66,7 +67,10 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        <PainelAutoPrintWatcher />
+        {children}
+      </body>
     </html>
   );
 }

@@ -3,41 +3,46 @@ import { redis } from "./redis";
 // Proteção contra impressão automática duplicada do mesmo pedido — nunca
 // substitui nem altera a impressão em si (a rota /pedidos/[id]/imprimir
 // continua exatamente igual), só decide QUEM tem o direito de disparar o
-// gatilho AUTOMÁTICO (window.print silencioso ao aceitar um pedido).
+// gatilho AUTOMÁTICO.
 //
 // Por que persistente em vez de em memória: duas abas do painel (ou dois
-// dispositivos) podem estar olhando o mesmo pedido "novo" e clicar em
-// "aceitar" quase ao mesmo tempo — cada uma roda seu próprio processo de
-// navegador, então qualquer guarda em memória (useRef, variável de módulo)
-// só protege a própria aba. Um SET NX no Redis é a única forma de garantir
-// que, entre todos os concorrentes possíveis, só um recebe o direito de
-// imprimir automaticamente — mesmo sob concorrência real, mesmo depois de
-// reiniciar o servidor.
-//
-// A reimpressão manual (botão "Imprimir" em /pedidos, sempre visível) NUNCA
-// passa por aqui: ela é uma ação explícita e autorizada da atendente, não o
-// disparo automático que este módulo protege.
+// dispositivos) podem observar o mesmo pedido quase ao mesmo tempo. Um SET
+// NX no Redis garante que só um recebe o direito de imprimir automaticamente.
+// A reimpressão manual nunca passa por aqui.
 
 function chaveClaimImpressaoAutomatica(pedidoId: string): string {
   return `pedido:auto-print-claim:${pedidoId}`;
 }
 
+type OpcoesClaimImpressao = {
+  permitirPedidoPainel?: boolean;
+};
+
+type PedidoOrigem = { id?: string; origem?: unknown };
+
 /**
  * Reivindica, de forma atômica e permanente, o direito de disparar a
- * impressão automática deste pedido. `true` só para quem chega primeiro —
- * todo mundo depois (outra aba, outro dispositivo, um retry) recebe `false`
- * e não deve chamar a impressão silenciosa de novo. Nunca expira: o mesmo
- * evento automático (aceite novo → em_preparo) só acontece uma vez na vida
- * do pedido.
+ * impressão automática deste pedido. Por padrão, pedidos criados no painel
+ * NÃO podem reivindicar por caminhos legados (como o aceite novo -> preparo):
+ * eles têm a regra própria de criação/Pix, que chama esta função explicitando
+ * `permitirPedidoPainel` somente depois de todas as travas server-side.
  */
-export async function reivindicarImpressaoAutomatica(pedidoId: string): Promise<boolean> {
+export async function reivindicarImpressaoAutomatica(
+  pedidoId: string,
+  opcoes: OpcoesClaimImpressao = {},
+): Promise<boolean> {
   try {
+    if (!opcoes.permitirPedidoPainel) {
+      const pedidos = (await redis.get<PedidoOrigem[]>("pedidos")) || [];
+      const pedido = Array.isArray(pedidos) ? pedidos.find((item) => item?.id === pedidoId) : undefined;
+      if (pedido?.origem === "painel") return false;
+    }
+
     const ok = await redis.set(chaveClaimImpressaoAutomatica(pedidoId), String(Date.now()), { nx: true });
     return !!ok;
   } catch {
     // Redis indisponível: nunca bloqueia a transição de status do pedido por
-    // causa da permissão de impressão automática — só nega o gatilho
-    // automático desta vez (a atendente sempre pode reimprimir manualmente).
+    // causa da permissão de impressão automática — só nega o gatilho.
     return false;
   }
 }
