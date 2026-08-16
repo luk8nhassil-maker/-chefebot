@@ -12,8 +12,6 @@ on:
       - "src/lib/limpezaOperacionalPedidos.ts"
       - "src/lib/limpezaOperacionalPedidos.test.ts"
       - "src/components/LimpezaOperacionalPainel.tsx"
-      - "src/app/pedidos/page.tsx"
-      - "src/app/pedidos/page.test.ts"
       - "src/app/api/orders-painel/route.ts"
       - "src/app/api/cron/route.ts"
       - "src/lib/numeracao.ts"
@@ -47,7 +45,6 @@ jobs:
           src/lib/expedienteOperacional.test.ts
           src/lib/pedidosPainelOperacional.test.ts
           src/lib/limpezaOperacionalPedidos.test.ts
-          src/app/pedidos/page.test.ts
 
       - name: Lint dos arquivos da mudança
         run: >-
@@ -59,7 +56,6 @@ jobs:
           src/lib/limpezaOperacionalPedidos.ts
           src/lib/limpezaOperacionalPedidos.test.ts
           src/components/LimpezaOperacionalPainel.tsx
-          src/app/pedidos/page.test.ts
           src/app/api/orders-painel/route.ts
           src/app/api/cron/route.ts
           src/lib/numeracao.ts
