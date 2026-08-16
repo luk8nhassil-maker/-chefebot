@@ -1,16 +1,10 @@
 "use client"
 
-// Gate de limpeza operacional — apresentação. Toda a regra (quem é pendência,
-// qual é o motivo, qual ação é oferecida) vive em
-// src/lib/limpezaOperacionalPedidos.ts, testável sem montar componente.
-//
-// O gate é BLOQUEANTE de propósito: uma lista de alertas que dá para ignorar é
-// uma lista que ninguém lê. Ele apresenta uma pendência por vez, com contador
-// de progresso, e não oferece "fechar" nem "ignorar" — só as duas saídas
-// derivadas do estado do pedido.
-//
-// A ativação é por flag (ver `limpezaOperacionalAtiva`): enquanto desligada, o
-// painel de pedidos se comporta exatamente como antes deste componente.
+// Gate operacional bloqueante. Toda regra de tempo, prioridade e ações vive em
+// src/lib/limpezaOperacionalPedidos.ts; este componente só apresenta uma
+// decisão por vez. Não existe fechar, ESC, clique no fundo ou "ignorar" porque
+// isso recriaria exatamente o problema que o gate precisa eliminar: pedido
+// esquecido no meio do processo.
 
 import { useMemo, useState, useSyncExternalStore } from "react"
 import {
@@ -18,18 +12,18 @@ import {
   calcularAnaliseOperacional,
   acaoPrincipal,
   acaoSecundaria,
+  acaoTerciaria,
   type PedidoLimpeza,
   type Pendencia,
   type OpcaoResolucao,
 } from "@/lib/limpezaOperacionalPedidos"
 
 /**
- * NEXT_PUBLIC_* é a única forma de uma env var chegar ao bundle do navegador —
- * mesma convenção já usada em src/lib/pixAutoCheckConfig.ts. Padrão desligado:
- * o gate só aparece quando a loja decidir adotá-lo.
+ * A cobrança operacional passa a ser padrão. `false` explícito continua sendo
+ * o rollback rápido caso a loja precise desativar o gate sem novo deploy.
  */
 export function limpezaOperacionalAtiva(): boolean {
-  return process.env.NEXT_PUBLIC_LIMPEZA_OPERACIONAL_ENABLED === "true"
+  return process.env.NEXT_PUBLIC_LIMPEZA_OPERACIONAL_ENABLED !== "false"
 }
 
 export type ResolverPendencia = (pendencia: Pendencia, opcao: OpcaoResolucao) => Promise<void>
@@ -37,20 +31,12 @@ export type ResolverPendencia = (pendencia: Pendencia, opcao: OpcaoResolucao) =>
 type Props = {
   pedidos: readonly PedidoLimpeza[]
   onResolver: ResolverPendencia
-  /** Permite desligar o gate sem remover a montagem (ex.: aba de arquivados). */
+  /** Permite desligar o gate em contextos que não são operação ativa. */
   ativo?: boolean
 }
 
-const CADENCIA_RECLASSIFICACAO_MS = 60_000
+const CADENCIA_RECLASSIFICACAO_MS = 15_000
 
-// Relógio como fonte externa. A idade de uma pendência depende do tempo, que
-// é estado de fora do React: `useSyncExternalStore` é a primitiva certa para
-// isso. O instantâneo fica em cache e só muda quando o relógio avança, o que
-// mantém o render puro (nada de Date.now() no corpo) e dispensa setState
-// dentro de efeito.
-//
-// Aba em segundo plano não avança o relógio: ninguém está olhando, e o retorno
-// à aba dispara um passe imediato pelo `visibilitychange`.
 let relogioAgora = 0
 const ouvintesRelogio = new Set<() => void>()
 let intervaloRelogio: number | null = null
@@ -79,19 +65,15 @@ function assinarRelogio(onChange: () => void): () => void {
 }
 
 const lerRelogio = () => relogioAgora
-// No servidor o relógio é 0: todas as idades ficam zeradas e nenhuma pendência
-// é acusada, de modo que a marcação renderizada no servidor e a da primeira
-// renderização no cliente são idênticas.
 const lerRelogioNoServidor = () => 0
+
+type BotaoOcupado = "principal" | "secundaria" | "terciaria"
 
 export default function LimpezaOperacionalGate({ pedidos, onResolver, ativo = true }: Props) {
   const agora = useSyncExternalStore(assinarRelogio, lerRelogio, lerRelogioNoServidor)
-  const [ocupado, setOcupado] = useState<null | "principal" | "secundaria">(null)
+  const [ocupado, setOcupado] = useState<BotaoOcupado | null>(null)
   const [erro, setErro] = useState<string | null>(null)
 
-  // Reclassifica quando a lista de pedidos muda (o painel já faz polling) ou
-  // quando o relógio avança — o segundo existe para o caso de nada mudar na
-  // lista e mesmo assim uma pendência amadurecer.
   const { pendencias, analise } = useMemo(
     () => ({
       pendencias: listarPendencias(pedidos, agora),
@@ -105,18 +87,17 @@ export default function LimpezaOperacionalGate({ pedidos, onResolver, ativo = tr
 
   const principal = acaoPrincipal(atual)
   const secundaria = acaoSecundaria(atual)
+  const terciaria = acaoTerciaria(atual)
   const total = pendencias.length
 
-  async function resolver(opcao: OpcaoResolucao, qual: "principal" | "secundaria") {
+  async function resolver(opcao: OpcaoResolucao, qual: BotaoOcupado) {
     if (ocupado) return
     setOcupado(qual)
     setErro(null)
     try {
       await onResolver(atual, opcao)
     } catch {
-      // Linguagem de recuperação, não de falha técnica: a pendência continua
-      // na tela e a operadora pode tentar de novo ou usar a outra saída.
-      setErro("Não consegui registrar agora. Tente de novo ou use a outra opção.")
+      setErro("Não consegui registrar agora. Tente novamente. Esta pendência continuará aberta.")
     } finally {
       setOcupado(null)
     }
@@ -127,11 +108,12 @@ export default function LimpezaOperacionalGate({ pedidos, onResolver, ativo = tr
       role="dialog"
       aria-modal="true"
       aria-labelledby="limpeza-titulo"
+      aria-describedby="limpeza-descricao"
       style={{
         position: "fixed",
         inset: 0,
         zIndex: 3000,
-        background: "rgba(var(--overlay-rgb), 0.72)",
+        background: "rgba(var(--overlay-rgb), 0.76)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -142,78 +124,130 @@ export default function LimpezaOperacionalGate({ pedidos, onResolver, ativo = tr
       <div
         style={{
           width: "100%",
-          maxWidth: 420,
+          maxWidth: 430,
           background: "var(--surface)",
           border: "1px solid var(--surface-secondary)",
-          borderRadius: 18,
+          borderRadius: 20,
           padding: 20,
           boxSizing: "border-box",
+          boxShadow: "0 24px 80px rgba(0,0,0,.35)",
         }}
       >
-        <p
-          style={{
-            fontSize: 11,
-            fontWeight: 900,
-            letterSpacing: ".6px",
-            textTransform: "uppercase",
-            color: "var(--foreground-muted)",
-            margin: 0,
-          }}
-        >
-          Pendência {total > 1 ? `1 de ${total}` : "operacional"}
-        </p>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <p
+            style={{
+              fontSize: 11,
+              fontWeight: 900,
+              letterSpacing: ".7px",
+              textTransform: "uppercase",
+              color: "var(--attention-text)",
+              margin: 0,
+            }}
+          >
+            ⚠ Ação necessária
+          </p>
+          <p style={{ fontSize: 11, fontWeight: 800, color: "var(--foreground-muted)", margin: 0 }}>
+            {total > 1 ? `1 de ${total}` : "1 pendência"}
+          </p>
+        </div>
 
         <h2
           id="limpeza-titulo"
-          style={{ fontSize: 19, fontWeight: 900, color: "var(--foreground)", margin: "8px 0 0" }}
+          style={{
+            fontSize: 20,
+            lineHeight: 1.2,
+            fontWeight: 900,
+            color: "var(--foreground)",
+            margin: "10px 0 0",
+          }}
         >
           {atual.titulo}
         </h2>
 
-        <p style={{ fontSize: 13, fontWeight: 700, color: "var(--foreground-secondary)", margin: "6px 0 0" }}>
-          {atual.numero ? `#${atual.numero}` : atual.pedidoId}
+        <p style={{ fontSize: 13, fontWeight: 800, color: "var(--foreground-secondary)", margin: "7px 0 0" }}>
+          {atual.numero ? `Pedido #${atual.numero}` : `Pedido ${atual.pedidoId}`}
           {atual.cliente ? ` · ${atual.cliente}` : ""}
         </p>
 
-        <p style={{ fontSize: 13.5, fontWeight: 600, color: "var(--foreground-secondary)", lineHeight: 1.5, margin: "12px 0 0" }}>
+        <p
+          id="limpeza-descricao"
+          style={{
+            fontSize: 13.5,
+            fontWeight: 600,
+            color: "var(--foreground-secondary)",
+            lineHeight: 1.5,
+            margin: "13px 0 0",
+          }}
+        >
           {atual.descricao}
         </p>
 
+        <div
+          style={{
+            marginTop: 14,
+            borderRadius: 12,
+            background: "color-mix(in srgb, var(--attention) 10%, transparent)",
+            border: "1px solid color-mix(in srgb, var(--attention) 26%, transparent)",
+            padding: "9px 11px",
+          }}
+        >
+          <p style={{ margin: 0, fontSize: 11.5, lineHeight: 1.45, fontWeight: 700, color: "var(--foreground-secondary)" }}>
+            O painel só continua depois que uma ação for registrada. Se o pedido ainda estiver nesta etapa, escolha a opção de aguardar e o ChefeBot voltará a cobrar no prazo correto.
+          </p>
+        </div>
+
         {erro && (
-          <p role="status" aria-live="polite" style={{ fontSize: 12.5, fontWeight: 700, color: "var(--attention-text)", margin: "12px 0 0" }}>
+          <p
+            role="status"
+            aria-live="polite"
+            style={{
+              fontSize: 12.5,
+              fontWeight: 800,
+              color: "var(--danger)",
+              margin: "12px 0 0",
+              lineHeight: 1.45,
+            }}
+          >
             {erro}
           </p>
         )}
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 18 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 9, marginTop: 18 }}>
           <button
+            autoFocus
             onClick={() => resolver(principal, "principal")}
             disabled={!!ocupado}
             style={{
-              height: 46,
+              minHeight: 54,
               border: "none",
-              borderRadius: 12,
+              borderRadius: 13,
+              padding: "12px 14px",
               background: "var(--primary)",
-              color: "var(--background)",
+              color: "var(--primary-foreground)",
               fontSize: 14,
-              fontWeight: 900,
+              lineHeight: 1.2,
+              fontWeight: 950,
+              letterSpacing: ".2px",
               cursor: ocupado ? "default" : "pointer",
               opacity: ocupado ? 0.6 : 1,
+              boxShadow: "0 8px 24px color-mix(in srgb, var(--primary) 28%, transparent)",
             }}
           >
-            {ocupado === "principal" ? "Registrando…" : principal.label}
+            {ocupado === "principal" ? "REGISTRANDO…" : principal.label}
           </button>
 
           <button
             onClick={() => resolver(secundaria, "secundaria")}
             disabled={!!ocupado}
             style={{
-              height: 46,
+              minHeight: 48,
               border: "1px solid var(--surface-secondary)",
               borderRadius: 12,
+              padding: "11px 13px",
               background: "transparent",
-              color: "var(--danger)",
-              fontSize: 14,
+              color: "var(--foreground-secondary)",
+              fontSize: 13,
+              lineHeight: 1.25,
               fontWeight: 800,
               cursor: ocupado ? "default" : "pointer",
               opacity: ocupado ? 0.6 : 1,
@@ -221,9 +255,31 @@ export default function LimpezaOperacionalGate({ pedidos, onResolver, ativo = tr
           >
             {ocupado === "secundaria" ? "Registrando…" : secundaria.label}
           </button>
+
+          {terciaria && (
+            <button
+              onClick={() => resolver(terciaria, "terciaria")}
+              disabled={!!ocupado}
+              style={{
+                minHeight: 42,
+                border: "none",
+                borderRadius: 10,
+                padding: "9px 12px",
+                background: "transparent",
+                color: "var(--danger)",
+                fontSize: 12.5,
+                lineHeight: 1.2,
+                fontWeight: 800,
+                cursor: ocupado ? "default" : "pointer",
+                opacity: ocupado ? 0.6 : 1,
+              }}
+            >
+              {ocupado === "terciaria" ? "Registrando…" : terciaria.label}
+            </button>
+          )}
         </div>
 
-        {analise && analise.resolvidasHoje > 0 && (
+        {analise.resolvidasHoje > 0 && (
           <p style={{ fontSize: 11.5, fontWeight: 700, color: "var(--foreground-muted)", margin: "14px 0 0", textAlign: "center" }}>
             {analise.resolvidasHoje} pendência{analise.resolvidasHoje > 1 ? "s" : ""} resolvida
             {analise.resolvidasHoje > 1 ? "s" : ""} hoje

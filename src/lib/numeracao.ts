@@ -1,15 +1,17 @@
 import { redis } from "./redis";
+import { chaveExpedienteOperacional } from "./expedienteOperacional";
 
-// Gera o número sequencial do pedido para o dia atual (1, 2, 3...).
-// Usa INCR atômico no Redis — seguro mesmo se dois pedidos chegarem ao mesmo tempo.
-// A chave inclui a data (America/Sao_Paulo) para resetar naturalmente todos os dias.
-// O cron das 3am também limpa essa chave explicitamente (ver /api/cron), então o reset
-// acontece tanto pela troca de data quanto por limpeza ativa — não depende de timestamp nem de ID aleatório.
+// Gera o número sequencial do pedido para o EXPEDIENTE atual (1, 2, 3...).
+// O expediente vira às 03:00 em America/Sao_Paulo, então 00:00–02:59 ainda
+// usam a chave iniciada no dia anterior. A identidade do dia é matemática e
+// não depende do cron ter rodado no horário.
+// Usa INCR atômico no Redis — seguro mesmo se dois pedidos chegarem juntos.
 export async function proximoNumeroPedido(): Promise<number> {
-  const hoje = new Date().toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" }); // ex: "17/06/2026"
-  const chave = `contador_pedidos:${hoje}`;
+  const expediente = chaveExpedienteOperacional();
+  const chave = `contador_pedidos:${expediente}`;
   const numero = await redis.incr(chave);
-  // Garante que a chave não fique acumulando para sempre (expira em 36h, bem depois do reset das 3am)
+  // Garante que a chave não fique acumulando para sempre. 36h cobre todo o
+  // expediente e uma margem operacional sem permitir crescimento indefinido.
   if (numero === 1) {
     await redis.expire(chave, 60 * 60 * 36);
   }
@@ -24,10 +26,8 @@ const CLAIM_ID_PEDIDO_TTL_SEGUNDOS = 5;
 const MAX_TENTATIVAS_ID_PEDIDO = 50;
 
 // Nunca devolvida com um id não reivindicado: se o Redis estiver indisponível
-// ou todas as tentativas de desempate colidirem, é sempre um erro explícito
-// — nunca um id "provavelmente" único. Ver AGENTS.md / auditoria do
-// incidente de mistura de clientes: preferir falha segura e visível a
-// arriscar duas requisições concorrentes acabando com o mesmo pedido.id.
+// ou todas as tentativas de desempate colidirem, prefere falhar aqui (nenhum
+// pedido criado, nada gravado) a arriscar colidir com outro pedido.
 export class IdPedidoIndisponivelError extends Error {
   constructor(motivo: string) {
     super(`Não foi possível gerar um id de pedido com unicidade garantida: ${motivo}`);
