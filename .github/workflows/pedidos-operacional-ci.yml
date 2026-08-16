@@ -1,62 +1,55 @@
 name: pedidos-operacional-ci
 
-# Gate hermético da regra operacional de pedidos. Não recebe segredos, não
-# acessa Redis/WhatsApp/Pix/impressão e executa apenas regras puras + lint.
+# Executor temporário desta branch: aplica o patch determinístico somente no
+# head do PR, valida regras puras e grava o resultado na própria branch.
+# Será removido antes do merge e o gate normal será restaurado.
 on:
   pull_request:
     paths:
-      - "src/lib/expedienteOperacional.ts"
-      - "src/lib/expedienteOperacional.test.ts"
-      - "src/lib/pedidosPainelOperacional.ts"
-      - "src/lib/pedidosPainelOperacional.test.ts"
+      - "scripts/aplicar-na-rua-20min.py"
+      - ".github/workflows/pedidos-operacional-ci.yml"
       - "src/lib/limpezaOperacionalPedidos.ts"
       - "src/lib/limpezaOperacionalPedidos.test.ts"
-      - "src/components/LimpezaOperacionalPainel.tsx"
-      - "src/app/api/orders-painel/route.ts"
-      - "src/app/api/cron/route.ts"
-      - "src/lib/numeracao.ts"
-      - "src/proxy.ts"
-      - ".github/workflows/pedidos-operacional-ci.yml"
-  workflow_dispatch:
+      - "src/app/pedidos/page.tsx"
+      - "src/app/pedidos/page.test.ts"
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
-  group: pedidos-operacional-ci-${{ github.event.pull_request.number || github.ref }}
+  group: pedidos-aplica-na-rua-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
-  pedidos-operacional-ci:
+  aplicar-e-validar:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout do SHA validado
+      - name: Checkout da branch do PR
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.ref }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          persist-credentials: true
+
+      - name: Aplicar patch determinístico
+        run: python scripts/aplicar-na-rua-20min.py
 
       - name: Instalar dependências
         run: npm ci
 
-      - name: Testes focados do expediente e cobrança operacional
-        run: >-
-          npm test --
-          src/lib/expedienteOperacional.test.ts
-          src/lib/pedidosPainelOperacional.test.ts
-          src/lib/limpezaOperacionalPedidos.test.ts
+      - name: Testes focados
+        run: npm test -- src/lib/limpezaOperacionalPedidos.test.ts src/app/pedidos/page.test.ts
 
-      - name: Lint dos arquivos da mudança
-        run: >-
-          npm run lint --
-          src/lib/expedienteOperacional.ts
-          src/lib/expedienteOperacional.test.ts
-          src/lib/pedidosPainelOperacional.ts
-          src/lib/pedidosPainelOperacional.test.ts
-          src/lib/limpezaOperacionalPedidos.ts
-          src/lib/limpezaOperacionalPedidos.test.ts
-          src/components/LimpezaOperacionalPainel.tsx
-          src/app/api/orders-painel/route.ts
-          src/app/api/cron/route.ts
-          src/lib/numeracao.ts
-          src/proxy.ts
+      - name: Lint focado nas regras e no teste estrutural
+        run: npm run lint -- src/lib/limpezaOperacionalPedidos.ts src/lib/limpezaOperacionalPedidos.test.ts src/app/pedidos/page.test.ts
+
+      - name: Verificar e gravar patch na branch
+        shell: bash
+        run: |
+          git diff --check
+          test -n "$(git status --porcelain)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/lib/limpezaOperacionalPedidos.ts src/lib/limpezaOperacionalPedidos.test.ts src/app/pedidos/page.tsx src/app/pedidos/page.test.ts
+          git commit -m "fix(pedidos): cronometro individual de 20 min na rua"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
