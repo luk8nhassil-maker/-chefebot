@@ -12,7 +12,13 @@ import {
 import LimpezaOperacionalGate, { limpezaOperacionalAtiva } from "@/components/LimpezaOperacionalPainel"
 import NovoPedidoManual from "./NovoPedidoManual"
 import { adaptarCardapioParaMontagem, type MenuManual } from "@/lib/montagemManual"
-import type { Pendencia, OpcaoResolucao, RegistroLimpeza } from "@/lib/limpezaOperacionalPedidos"
+import {
+  LIMIAR_ENTREGA_MIN,
+  idadeDaEtapaMinutos,
+  type Pendencia,
+  type OpcaoResolucao,
+  type RegistroLimpeza,
+} from "@/lib/limpezaOperacionalPedidos"
 
 function whatsappLink(telefoneBruto: string, mensagem?: string): string {
   let numero = (telefoneBruto || "").replace(/\D/g, "")
@@ -1029,13 +1035,19 @@ export default function PedidosPage() {
     const pedido = pedidos.find(p => p.id === id)
     if (!pedido) return false
     const prevStatus = pedido.status
+    const statusAtualizadoEmAnterior = pedido.statusAtualizadoEm
+    const statusAtualizadoEmOtimista = new Date().toISOString()
     const F2S: Record<string, Status> = { novo: "novo", em_preparo: "em_preparo", saiu_entrega: "saiu_entrega", entregue: "entregue" }
     const willLeave = filtro !== "todos" && F2S[filtro] === prevStatus
     atualizandoRef.current = id
     setAtualizando(id)
     // Atualização otimista: o painel reflete o novo status na hora do clique;
     // se a API falhar, o status é revertido e a equipe vê o aviso de erro.
-    setPedidos(prev => prev.map(p => p.id === id ? { ...p, status: novoStatus } : p))
+    setPedidos(prev => prev.map(p => p.id === id ? {
+      ...p,
+      status: novoStatus,
+      statusAtualizadoEm: statusAtualizadoEmOtimista,
+    } : p))
     if (willLeave) { setLeavingId(id); if (leaveTimerRef.current) clearTimeout(leaveTimerRef.current); leaveTimerRef.current = setTimeout(() => setLeavingId(null), 350) }
     else { setFlashId(id); if (flashTimerRef.current) clearTimeout(flashTimerRef.current); flashTimerRef.current = setTimeout(() => setFlashId(null), 750) }
     try {
@@ -1062,7 +1074,11 @@ export default function PedidosPage() {
       }
       return true
     } catch {
-      setPedidos(prev => prev.map(p => p.id === id ? { ...p, status: prevStatus } : p))
+      setPedidos(prev => prev.map(p => p.id === id ? {
+        ...p,
+        status: prevStatus,
+        statusAtualizadoEm: statusAtualizadoEmAnterior,
+      } : p))
       const firstName = pedido.cliente.split(" ")[0]
       setToast({ text: `⚠️ Não consegui atualizar ${firstName}. Tente de novo.`, expires: Date.now() + 5000, pedidoId: id, prevStatus })
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
@@ -1356,8 +1372,10 @@ export default function PedidosPage() {
   )
 
   const renderDetalhe = (p: Pedido) => {
-    const mins = tempoDesde(p.horario, p.horarioInicio, now)
-    const meta = 40
+    const mins = p.status === "saiu_entrega"
+      ? idadeDaEtapaMinutos(p, now)
+      : tempoDesde(p.horario, p.horarioInicio, now)
+    const meta = p.status === "saiu_entrega" ? LIMIAR_ENTREGA_MIN : 40
     const { dash, color: ringColor } = timerDash(mins, meta)
     const sc = STATUS_COLOR[p.status]
     const isDone = p.status === "entregue"
@@ -1379,7 +1397,7 @@ export default function PedidosPage() {
           <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 7 }}>
             <span style={{ alignSelf: "flex-start", background: sc.accentBg, color: sc.accent, fontSize: 11, fontWeight: 900, letterSpacing: "1.2px", padding: "5px 10px", borderRadius: 8, textTransform: "uppercase", border: `1px solid ${sc.accentBorder}` }}>{sc.label}</span>
             <h2 style={{ margin: 0, fontSize: 22, fontWeight: 900, letterSpacing: "-0.6px", lineHeight: 1.1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.numero != null ? `#${p.numero} · ` : ""}{p.cliente}</h2>
-            <span style={{ fontSize: 12, color: "var(--foreground-secondary)", fontWeight: 600 }}>Recebido às {p.horario} · há {mins} min</span>
+            <span style={{ fontSize: 12, color: "var(--foreground-secondary)", fontWeight: 600 }}>{p.status === "saiu_entrega" ? `Na rua há ${mins} min` : `Recebido às ${p.horario} · há ${mins} min`}</span>
           </div>
           <div style={{ position: "relative", width: 50, height: 50, flexShrink: 0 }}>
             <svg width="50" height="50" viewBox="0 0 50 50" style={{ transform: "rotate(-90deg)", display: "block" }}>
@@ -2240,13 +2258,20 @@ export default function PedidosPage() {
             const sc = STATUS_COLOR[pedido.status]
             const minsDesde = tempoDesde(pedido.horario, undefined, now)
             const minsPrep = tempoDesde(pedido.horario, pedido.horarioInicio, now)
+            const minsRua = pedido.status === "saiu_entrega" ? idadeDaEtapaMinutos(pedido, now) : 0
             const isDineIn = pedido.tipoEntrega === "dine_in" || pedido.endereco === "Consumo no local"
             const nextStatus = (isDineIn && pedido.status === "em_preparo") ? "entregue" as Status : NEXT_STATUS[pedido.status]
             const isDone = pedido.status === "entregue"
             const isCanceled = pedido.status === "cancelado"
             const isNovo = pedido.status === "novo"
-            const timerMins = isNovo ? minsDesde : minsPrep
-            const timerColor = isNovo ? (minsDesde < 3 ? "var(--success)" : minsDesde < 7 ? "var(--primary)" : "var(--danger)") : isDone ? "var(--success)" : minsPrep < 20 ? "var(--success)" : minsPrep < 34 ? "var(--primary)" : "var(--danger)"
+            const timerMins = isNovo ? minsDesde : pedido.status === "saiu_entrega" ? minsRua : minsPrep
+            const timerColor = isNovo
+              ? (minsDesde < 3 ? "var(--success)" : minsDesde < 7 ? "var(--primary)" : "var(--danger)")
+              : isDone
+                ? "var(--success)"
+                : pedido.status === "saiu_entrega"
+                  ? (timerMins < 10 ? "var(--success)" : timerMins < LIMIAR_ENTREGA_MIN ? "var(--primary)" : "var(--danger)")
+                  : minsPrep < 20 ? "var(--success)" : minsPrep < 34 ? "var(--primary)" : "var(--danger)"
             const firstName = pedido.cliente.split(" ")[0]
             const pagamento = pedido.pagamento || ""
             const isPix = pagamento.toLowerCase().includes("pix")
