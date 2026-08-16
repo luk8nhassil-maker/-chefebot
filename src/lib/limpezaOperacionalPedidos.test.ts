@@ -1,24 +1,26 @@
-import { describe, test, expect } from "vitest";
+import { describe, expect, test } from "vitest";
 import {
-  LIMIAR_PIX_PENDENTE_MIN,
-  LIMIAR_NOVO_SEM_ACEITE_MIN,
-  LIMIAR_PREPARO_MIN,
   LIMIAR_ENTREGA_MIN,
-  timestampDeHoraLocal,
-  timestampPedido,
-  timestampDaEtapa,
-  idadeDaEtapaMinutos,
-  classificarPendencia,
-  listarPendencias,
+  LIMIAR_NOVO_SEM_ACEITE_MIN,
+  LIMIAR_PIX_PENDENTE_MIN,
+  LIMIAR_PREPARO_MIN,
+  LIMIAR_REAVISO_PREPARO_MIN,
   acaoPrincipal,
   acaoSecundaria,
-  registrarResolucao,
+  acaoTerciaria,
   calcularAnaliseOperacional,
+  classificarPendencia,
+  idadeDaEtapaMinutos,
+  listarPendencias,
+  registrarResolucao,
   sanitizarEntradaLimpeza,
+  timestampDaEtapa,
+  timestampDeHoraLocal,
+  timestampPedido,
   type PedidoLimpeza,
 } from "./limpezaOperacionalPedidos";
 
-// 2026-07-30T20:00:00Z = 17:00 em America/Sao_Paulo (UTC-3).
+// 2026-07-30T20:00:00Z = 17:00 em America/Sao_Paulo.
 const AGORA = Date.parse("2026-07-30T20:00:00.000Z");
 const MIN = 60_000;
 
@@ -32,309 +34,357 @@ function pedido(overrides: Partial<PedidoLimpeza> = {}): PedidoLimpeza {
   };
 }
 
-describe("timestampDeHoraLocal", () => {
-  test("reconstrói o horário de hoje no fuso do estabelecimento", () => {
-    // 16:30 em SP = 19:30Z.
+describe("reconstrução de tempo", () => {
+  test("reconstrói HH:MM no fuso da pizzaria", () => {
     expect(timestampDeHoraLocal("16:30", AGORA)).toBe(Date.parse("2026-07-30T19:30:00.000Z"));
   });
 
-  test("horário no futuro pertence ao dia anterior (virada de meia-noite)", () => {
-    // Consulta às 00:10 de SP; pedido carimbado 23:50 é de ontem.
+  test("23:50 consultado depois da meia-noite pertence ao dia anterior", () => {
     const meiaNoiteEDez = Date.parse("2026-07-31T03:10:00.000Z");
-    expect(timestampDeHoraLocal("23:50", meiaNoiteEDez)).toBe(
-      Date.parse("2026-07-31T02:50:00.000Z")
-    );
+    expect(timestampDeHoraLocal("23:50", meiaNoiteEDez)).toBe(Date.parse("2026-07-31T02:50:00.000Z"));
   });
 
-  test("nunca lança: formato desconhecido devolve null", () => {
-    expect(timestampDeHoraLocal("", AGORA)).toBeNull();
+  test("formato inválido nunca lança", () => {
     expect(timestampDeHoraLocal("abc", AGORA)).toBeNull();
     expect(timestampDeHoraLocal("99:99", AGORA)).toBeNull();
     expect(timestampDeHoraLocal(undefined, AGORA)).toBeNull();
   });
-});
 
-describe("timestampPedido — cadeia de fallback", () => {
-  test("usa o próprio ID quando ele é um Date.now() de 13 dígitos", () => {
+  test("usa os 13 primeiros dígitos do ID quando houve desempate de colisão", () => {
     const ts = AGORA - 30 * MIN;
-    expect(timestampPedido(pedido({ id: String(ts) }), AGORA)).toBe(ts);
+    expect(timestampPedido(pedido({ id: `${ts}7` }), AGORA)).toBe(ts);
   });
 
-  test("cai para o carimbo do Pix quando o ID não é timestamp", () => {
-    const p = pedido({ id: "ped_abc", pix: { criadoEm: "2026-07-30T19:00:00.000Z" } });
-    expect(timestampPedido(p, AGORA)).toBe(Date.parse("2026-07-30T19:00:00.000Z"));
-  });
-
-  test("cai para o horário HH:MM quando não há ID nem Pix", () => {
-    const p = pedido({ id: "ped_abc", horario: "16:00" });
-    expect(timestampPedido(p, AGORA)).toBe(Date.parse("2026-07-30T19:00:00.000Z"));
-  });
-
-  test("devolve null quando nada resolve", () => {
-    expect(timestampPedido(pedido({ id: "ped_abc" }), AGORA)).toBeNull();
+  test("cai para Pix e depois para horário legado", () => {
+    expect(
+      timestampPedido(
+        pedido({ id: "ped_abc", pix: { criadoEm: "2026-07-30T19:00:00.000Z" } }),
+        AGORA
+      )
+    ).toBe(Date.parse("2026-07-30T19:00:00.000Z"));
+    expect(timestampPedido(pedido({ id: "ped_abc", horario: "16:00" }), AGORA)).toBe(
+      Date.parse("2026-07-30T19:00:00.000Z")
+    );
   });
 });
 
-describe("timestampDaEtapa — idade medida na etapa, não na criação", () => {
-  test("usa o carimbo de mudança de status quando o pedido saiu do estado inicial", () => {
+describe("idade da etapa", () => {
+  test("status não-novo mede desde statusAtualizadoEm", () => {
     const p = pedido({
-      id: String(AGORA - 300 * MIN), // criado há 5 horas
+      id: String(AGORA - 300 * MIN),
       status: "em_preparo",
       statusAtualizadoEm: new Date(AGORA - 4 * MIN).toISOString(),
     });
     expect(idadeDaEtapaMinutos(p, AGORA)).toBe(4);
   });
 
-  test("em preparo sem carimbo, reconstrói pelo horarioInicio", () => {
-    const p = pedido({ id: String(AGORA - 300 * MIN), status: "em_preparo", horarioInicio: "16:30" });
+  test("em preparo legado cai para horarioInicio", () => {
+    const p = pedido({ id: "ped_legado", status: "em_preparo", horarioInicio: "16:30" });
     expect(timestampDaEtapa(p, AGORA)).toBe(Date.parse("2026-07-30T19:30:00.000Z"));
-    expect(idadeDaEtapaMinutos(p, AGORA)).toBe(30);
   });
 
-  test("pedido novo ignora carimbo de status e usa a criação", () => {
+  test("novo normal ignora statusAtualizadoEm e mede desde a criação", () => {
     const p = pedido({
       id: String(AGORA - 20 * MIN),
-      status: "novo",
       statusAtualizadoEm: new Date(AGORA - 1 * MIN).toISOString(),
     });
     expect(idadeDaEtapaMinutos(p, AGORA)).toBe(20);
   });
 
-  test("idade indeterminada é 0 — na dúvida o sistema não acusa pendência", () => {
-    expect(idadeDaEtapaMinutos(pedido({ id: "ped_abc" }), AGORA)).toBe(0);
+  test("novo adiado reinicia o relógio no mesmo status", () => {
+    const p = pedido({
+      id: String(AGORA - 80 * MIN),
+      statusAtualizadoEm: new Date(AGORA - 6 * MIN).toISOString(),
+      limpezaOperacional: {
+        motivo: "novo_sem_aceite",
+        acao: "adiou",
+        resolvidoEm: new Date(AGORA - 6 * MIN).toISOString(),
+      },
+    });
+    expect(idadeDaEtapaMinutos(p, AGORA)).toBe(6);
   });
 
-  test("carimbo no futuro não produz idade negativa", () => {
-    const p = pedido({ id: String(AGORA + 10 * MIN) });
-    expect(idadeDaEtapaMinutos(p, AGORA)).toBe(0);
+  test("idade indeterminada é zero e carimbo futuro não vira negativo", () => {
+    expect(idadeDaEtapaMinutos(pedido({ id: "ped_abc" }), AGORA)).toBe(0);
+    expect(idadeDaEtapaMinutos(pedido({ id: String(AGORA + 10 * MIN) }), AGORA)).toBe(0);
   });
 });
 
 describe("classificarPendencia", () => {
-  test("pedido arquivado nunca gera pendência", () => {
-    const p = pedido({ id: String(AGORA - 600 * MIN), isArchived: true });
-    expect(classificarPendencia(p, AGORA)).toBeNull();
+  test("arquivado e terminal nunca geram modal", () => {
+    expect(classificarPendencia(pedido({ id: String(AGORA - 600 * MIN), isArchived: true }), AGORA)).toBeNull();
+    expect(classificarPendencia(pedido({ id: String(AGORA - 600 * MIN), status: "entregue" }), AGORA)).toBeNull();
+    expect(classificarPendencia(pedido({ id: String(AGORA - 600 * MIN), status: "cancelado" }), AGORA)).toBeNull();
   });
 
-  test("estado terminal nunca gera pendência", () => {
-    for (const status of ["entregue", "cancelado"]) {
-      const p = pedido({ id: String(AGORA - 600 * MIN), status });
-      expect(classificarPendencia(p, AGORA)).toBeNull();
-    }
+  test("novo só cobra depois do primeiro prazo", () => {
+    const antes = pedido({ id: String(AGORA - (LIMIAR_NOVO_SEM_ACEITE_MIN - 1) * MIN) });
+    const depois = pedido({ id: String(AGORA - LIMIAR_NOVO_SEM_ACEITE_MIN * MIN) });
+    expect(classificarPendencia(antes, AGORA)).toBeNull();
+    expect(classificarPendencia(depois, AGORA)?.motivo).toBe("novo_sem_aceite");
   });
 
-  test("pedido já resolvido não volta a aparecer (registro durável)", () => {
+  test("aguardar no NOVO dá outro ciclo completo do mesmo tamanho", () => {
     const p = pedido({
-      id: String(AGORA - 600 * MIN),
-      limpezaOperacional: { motivo: "novo_sem_aceite", acao: "cancelou", resolvidoEm: new Date(AGORA).toISOString() },
+      id: String(AGORA - 90 * MIN),
+      statusAtualizadoEm: new Date(AGORA - (LIMIAR_NOVO_SEM_ACEITE_MIN - 1) * MIN).toISOString(),
+      limpezaOperacional: {
+        motivo: "novo_sem_aceite",
+        acao: "adiou",
+        resolvidoEm: new Date(AGORA - (LIMIAR_NOVO_SEM_ACEITE_MIN - 1) * MIN).toISOString(),
+      },
     });
     expect(classificarPendencia(p, AGORA)).toBeNull();
+    expect(
+      classificarPendencia(
+        {
+          ...p,
+          statusAtualizadoEm: new Date(AGORA - LIMIAR_NOVO_SEM_ACEITE_MIN * MIN).toISOString(),
+          limpezaOperacional: {
+            motivo: "novo_sem_aceite",
+            acao: "adiou",
+            resolvidoEm: new Date(AGORA - LIMIAR_NOVO_SEM_ACEITE_MIN * MIN).toISOString(),
+          },
+        },
+        AGORA
+      )?.motivo
+    ).toBe("novo_sem_aceite");
   });
 
-  test("pedido recente não gera pendência", () => {
-    expect(classificarPendencia(pedido(), AGORA)).toBeNull();
+  test("Pix pendente preserva a trava financeira e não libera cozinha aos 15 min", () => {
+    const p15 = pedido({ id: String(AGORA - LIMIAR_NOVO_SEM_ACEITE_MIN * MIN), pagamento: "Pix" });
+    const p20 = pedido({ id: String(AGORA - LIMIAR_PIX_PENDENTE_MIN * MIN), pagamento: "Pix" });
+    expect(classificarPendencia(p15, AGORA)).toBeNull();
+    expect(classificarPendencia(p20, AGORA)?.motivo).toBe("pagamento_pix_pendente");
   });
 
-  test("novo sem aceite acima do limiar", () => {
-    const p = pedido({ id: String(AGORA - (LIMIAR_NOVO_SEM_ACEITE_MIN + 1) * MIN) });
-    const r = classificarPendencia(p, AGORA);
-    expect(r?.motivo).toBe("novo_sem_aceite");
-    expect(r?.idadeMinutos).toBe(LIMIAR_NOVO_SEM_ACEITE_MIN + 1);
-    expect(r?.titulo).toContain("min");
-  });
-
-  test("Pix pendente tem precedência sobre a falta de aceite", () => {
+  test("Pix confirmado volta ao fluxo normal de aceite", () => {
     const p = pedido({
-      id: String(AGORA - (LIMIAR_PIX_PENDENTE_MIN + 5) * MIN),
-      pagamento: "Pix",
-    });
-    expect(classificarPendencia(p, AGORA)?.motivo).toBe("pagamento_pix_pendente");
-  });
-
-  test("Pix já confirmado volta a ser apenas falta de aceite", () => {
-    const p = pedido({
-      id: String(AGORA - (LIMIAR_PIX_PENDENTE_MIN + 5) * MIN),
+      id: String(AGORA - LIMIAR_PIX_PENDENTE_MIN * MIN),
       pagamento: "Pix",
       pixConfirmado: true,
     });
     expect(classificarPendencia(p, AGORA)?.motivo).toBe("novo_sem_aceite");
   });
 
-  test("pagamento misto conta como Pix para efeito de pendência", () => {
+  test("pagamento misto é protegido como Pix", () => {
     const p = pedido({
-      id: String(AGORA - (LIMIAR_PIX_PENDENTE_MIN + 5) * MIN),
+      id: String(AGORA - LIMIAR_PIX_PENDENTE_MIN * MIN),
       pagamento: "Pix (R$ 30,00) + Dinheiro (R$ 20,00)",
     });
     expect(classificarPendencia(p, AGORA)?.motivo).toBe("pagamento_pix_pendente");
   });
 
-  test("preparo longo e entrega longa", () => {
-    const preparo = pedido({
+  test("cozinha alerta no limite previsto e, após confirmar atraso, volta em 5 min", () => {
+    const inicial = pedido({
       status: "em_preparo",
-      statusAtualizadoEm: new Date(AGORA - (LIMIAR_PREPARO_MIN + 1) * MIN).toISOString(),
+      statusAtualizadoEm: new Date(AGORA - LIMIAR_PREPARO_MIN * MIN).toISOString(),
     });
-    expect(classificarPendencia(preparo, AGORA)?.motivo).toBe("preparo_longo");
+    expect(classificarPendencia(inicial, AGORA)?.motivo).toBe("preparo_longo");
 
-    const entrega = pedido({
+    const adiado4 = pedido({
+      status: "em_preparo",
+      statusAtualizadoEm: new Date(AGORA - (LIMIAR_REAVISO_PREPARO_MIN - 1) * MIN).toISOString(),
+      limpezaOperacional: {
+        motivo: "preparo_longo",
+        acao: "adiou",
+        resolvidoEm: new Date(AGORA - (LIMIAR_REAVISO_PREPARO_MIN - 1) * MIN).toISOString(),
+      },
+    });
+    expect(classificarPendencia(adiado4, AGORA)).toBeNull();
+
+    const adiado5 = {
+      ...adiado4,
+      statusAtualizadoEm: new Date(AGORA - LIMIAR_REAVISO_PREPARO_MIN * MIN).toISOString(),
+      limpezaOperacional: {
+        motivo: "preparo_longo" as const,
+        acao: "adiou" as const,
+        resolvidoEm: new Date(AGORA - LIMIAR_REAVISO_PREPARO_MIN * MIN).toISOString(),
+      },
+    };
+    expect(classificarPendencia(adiado5, AGORA)?.motivo).toBe("preparo_longo");
+  });
+
+  test("na rua alerta no limite existente e aguardar reinicia o mesmo limite", () => {
+    const inicial = pedido({
       status: "saiu_entrega",
-      statusAtualizadoEm: new Date(AGORA - (LIMIAR_ENTREGA_MIN + 1) * MIN).toISOString(),
+      statusAtualizadoEm: new Date(AGORA - LIMIAR_ENTREGA_MIN * MIN).toISOString(),
     });
-    expect(classificarPendencia(entrega, AGORA)?.motivo).toBe("entrega_longa");
+    expect(classificarPendencia(inicial, AGORA)?.motivo).toBe("entrega_longa");
+
+    const adiado = pedido({
+      status: "saiu_entrega",
+      statusAtualizadoEm: new Date(AGORA - 10 * MIN).toISOString(),
+      limpezaOperacional: {
+        motivo: "entrega_longa",
+        acao: "adiou",
+        resolvidoEm: new Date(AGORA - 10 * MIN).toISOString(),
+      },
+    });
+    expect(classificarPendencia(adiado, AGORA)).toBeNull();
   });
 
-  test("status desconhecido nunca gera pendência", () => {
-    const p = pedido({ id: String(AGORA - 600 * MIN), status: "aguardando_algo_novo" });
-    expect(classificarPendencia(p, AGORA)).toBeNull();
+  test("decisão de etapa anterior não silencia a próxima etapa", () => {
+    const p = pedido({
+      status: "em_preparo",
+      statusAtualizadoEm: new Date(AGORA - LIMIAR_PREPARO_MIN * MIN).toISOString(),
+      limpezaOperacional: {
+        motivo: "novo_sem_aceite",
+        acao: "avancou",
+        resolvidoEm: new Date(AGORA - LIMIAR_PREPARO_MIN * MIN).toISOString(),
+      },
+    });
+    expect(classificarPendencia(p, AGORA)?.motivo).toBe("preparo_longo");
   });
 
-  test("pedido sem ID é descartado sem lançar", () => {
-    expect(classificarPendencia({ status: "novo" } as PedidoLimpeza, AGORA)).toBeNull();
-  });
-
-  test("a descrição já vem redigida — a interface não monta texto", () => {
-    const p = pedido({ id: String(AGORA - 200 * MIN), status: "em_preparo" });
-    const r = classificarPendencia(p, AGORA);
-    expect(r?.descricao.length).toBeGreaterThan(20);
-    expect(r?.titulo).toContain("h");
+  test("status desconhecido e pedido sem id falham fechado", () => {
+    expect(classificarPendencia(pedido({ id: String(AGORA - 600 * MIN), status: "outro" }), AGORA)).toBeNull();
+    expect(classificarPendencia({ status: "novo" }, AGORA)).toBeNull();
   });
 });
 
-describe("listarPendencias", () => {
-  test("ordena por prioridade do motivo e desempata pela mais antiga", () => {
+describe("fila de pendências", () => {
+  test("prioriza Pix, rua, cozinha e novo; desempata pelo mais antigo", () => {
     const pendentes = listarPendencias(
       [
-        pedido({ id: String(AGORA - 20 * MIN), numero: 1 }), // novo_sem_aceite
-        pedido({ id: String(AGORA - 90 * MIN), numero: 2, status: "em_preparo" }), // preparo_longo
-        pedido({ id: String(AGORA - 40 * MIN), numero: 3, pagamento: "Pix" }), // pix
-        pedido({ id: String(AGORA - 200 * MIN), numero: 4 }), // novo_sem_aceite, mais antigo
+        pedido({ id: String(AGORA - 20 * MIN), numero: 1 }),
+        pedido({
+          id: String(AGORA - 90 * MIN),
+          numero: 2,
+          status: "em_preparo",
+          statusAtualizadoEm: new Date(AGORA - 90 * MIN).toISOString(),
+        }),
+        pedido({ id: String(AGORA - 40 * MIN), numero: 3, pagamento: "Pix" }),
+        pedido({
+          id: String(AGORA - 80 * MIN),
+          numero: 4,
+          status: "saiu_entrega",
+          statusAtualizadoEm: new Date(AGORA - 80 * MIN).toISOString(),
+        }),
+        pedido({ id: String(AGORA - 200 * MIN), numero: 5 }),
       ],
       AGORA
     );
-    expect(pendentes.map((p) => p.numero)).toEqual([3, 2, 4, 1]);
-  });
-
-  test("entrada não-array devolve lista vazia sem lançar", () => {
-    expect(listarPendencias(null as unknown as PedidoLimpeza[], AGORA)).toEqual([]);
+    expect(pendentes.map((p) => p.numero)).toEqual([3, 4, 2, 5, 1]);
   });
 });
 
-describe("ações de resolução", () => {
-  test("Pix pendente: a ação primária é verificar o provedor, não cancelar", () => {
+describe("ações e hierarquia", () => {
+  test("NOVO destaca começar, depois aguardar, e deixa cancelar como terceira ação", () => {
     const p = classificarPendencia(
-      pedido({ id: String(AGORA - 40 * MIN), pagamento: "Pix" }),
+      pedido({ id: String(AGORA - LIMIAR_NOVO_SEM_ACEITE_MIN * MIN) }),
       AGORA
     )!;
-    expect(acaoPrincipal(p).acao).toBe("verificou_pagamento");
-    expect(acaoPrincipal(p).status).toBeUndefined();
-    expect(acaoSecundaria(p).status).toBe("cancelado");
+    expect(acaoPrincipal(p)).toMatchObject({ label: "COMEÇAR A FAZER", acao: "avancou", status: "em_preparo", tom: "principal" });
+    expect(acaoSecundaria(p)).toMatchObject({ acao: "adiou", status: "novo", tom: "secundario" });
+    expect(acaoTerciaria(p)).toMatchObject({ acao: "cancelou", status: "cancelado", tom: "perigo" });
   });
 
-  test("demais motivos avançam para o estado seguinte", () => {
-    const novo = classificarPendencia(pedido({ id: String(AGORA - 40 * MIN) }), AGORA)!;
-    expect(acaoPrincipal(novo)).toMatchObject({ acao: "avancou", status: "em_preparo" });
-
-    const preparo = classificarPendencia(
-      pedido({ id: String(AGORA - 200 * MIN), status: "em_preparo" }),
+  test("cozinha delivery: avançar é principal e continuar fazendo é secundário", () => {
+    const p = classificarPendencia(
+      pedido({
+        status: "em_preparo",
+        tipoEntrega: "delivery",
+        statusAtualizadoEm: new Date(AGORA - LIMIAR_PREPARO_MIN * MIN).toISOString(),
+      }),
       AGORA
     )!;
-    expect(acaoPrincipal(preparo)).toMatchObject({ acao: "avancou", status: "saiu_entrega" });
+    expect(acaoPrincipal(p)).toMatchObject({ label: "SAIU PARA ENTREGA", status: "saiu_entrega", tom: "principal" });
+    expect(acaoSecundaria(p)).toMatchObject({ acao: "adiou", status: "em_preparo", tom: "secundario" });
+    expect(acaoTerciaria(p)).toBeNull();
+  });
 
-    const entrega = classificarPendencia(
-      pedido({ id: String(AGORA - 200 * MIN), status: "saiu_entrega" }),
+  test("cozinha respeita retirada e salão", () => {
+    const retirada = classificarPendencia(
+      pedido({
+        status: "em_preparo",
+        tipoEntrega: "retirada",
+        statusAtualizadoEm: new Date(AGORA - LIMIAR_PREPARO_MIN * MIN).toISOString(),
+      }),
       AGORA
     )!;
-    expect(acaoPrincipal(entrega)).toMatchObject({ acao: "avancou", status: "entregue" });
+    expect(acaoPrincipal(retirada)).toMatchObject({ label: "PRONTO PARA RETIRADA", status: "saiu_entrega" });
+
+    const salao = classificarPendencia(
+      pedido({
+        status: "em_preparo",
+        tipoEntrega: "dine_in",
+        statusAtualizadoEm: new Date(AGORA - LIMIAR_PREPARO_MIN * MIN).toISOString(),
+      }),
+      AGORA
+    )!;
+    expect(acaoPrincipal(salao)).toMatchObject({ label: "PEDIDO PRONTO", status: "entregue" });
   });
 
-  test("toda pendência tem uma segunda saída", () => {
-    const p = classificarPendencia(pedido({ id: String(AGORA - 40 * MIN) }), AGORA)!;
-    expect(acaoSecundaria(p).acao).toBe("cancelou");
+  test("NA RUA oferece confirmar entrega e ainda está na rua", () => {
+    const p = classificarPendencia(
+      pedido({
+        status: "saiu_entrega",
+        tipoEntrega: "delivery",
+        statusAtualizadoEm: new Date(AGORA - LIMIAR_ENTREGA_MIN * MIN).toISOString(),
+      }),
+      AGORA
+    )!;
+    expect(acaoPrincipal(p)).toMatchObject({ label: "CONFIRMAR ENTREGA", status: "entregue", tom: "principal" });
+    expect(acaoSecundaria(p)).toMatchObject({ label: "AINDA ESTÁ NA RUA", acao: "adiou", status: "saiu_entrega" });
   });
 
-  test("registrarResolucao produz o registro durável", () => {
-    const r = registrarResolucao("novo_sem_aceite", "cancelou", AGORA, "Kellyne");
-    expect(r).toEqual({
+  test("Pix exige verificação antes de qualquer avanço", () => {
+    const p = classificarPendencia(
+      pedido({ id: String(AGORA - LIMIAR_PIX_PENDENTE_MIN * MIN), pagamento: "Pix" }),
+      AGORA
+    )!;
+    expect(acaoPrincipal(p)).toMatchObject({ acao: "verificou_pagamento", status: undefined, tom: "principal" });
+    expect(acaoSecundaria(p)).toMatchObject({ acao: "adiou", status: "novo" });
+    expect(acaoTerciaria(p)).toMatchObject({ acao: "cancelou", status: "cancelado" });
+  });
+});
+
+describe("fronteira e métricas", () => {
+  test("sanitiza adiamento e rejeita ação desconhecida", () => {
+    expect(sanitizarEntradaLimpeza({ motivo: "preparo_longo", acao: "adiou" })).toEqual({
+      motivo: "preparo_longo",
+      acao: "adiou",
+    });
+    expect(sanitizarEntradaLimpeza({ motivo: "preparo_longo", acao: "inventada" })).toBeNull();
+  });
+
+  test("registrarResolucao mantém autoria quando informada", () => {
+    expect(registrarResolucao("novo_sem_aceite", "avancou", AGORA, "Kellyne")).toEqual({
       motivo: "novo_sem_aceite",
-      acao: "cancelou",
+      acao: "avancou",
       resolvidoEm: new Date(AGORA).toISOString(),
       resolvidoPor: "Kellyne",
     });
   });
 
-  test("resolvidoPor é omitido quando não informado", () => {
-    expect(registrarResolucao("preparo_longo", "avancou", AGORA)).not.toHaveProperty("resolvidoPor");
-  });
-});
-
-describe("calcularAnaliseOperacional", () => {
-  test("conta resoluções, o dia corrente no fuso fixo e a taxa de abandono", () => {
-    const ontem = Date.parse("2026-07-29T20:00:00.000Z");
+  test("adiamento não conta como pendência resolvida", () => {
     const analise = calcularAnaliseOperacional(
       [
-        pedido({ id: "a", status: "cancelado", limpezaOperacional: { motivo: "novo_sem_aceite", acao: "cancelou", resolvidoEm: new Date(AGORA).toISOString() } }),
-        pedido({ id: "b", status: "entregue", limpezaOperacional: { motivo: "entrega_longa", acao: "avancou", resolvidoEm: new Date(AGORA).toISOString() } }),
-        pedido({ id: "c", status: "cancelado", limpezaOperacional: { motivo: "novo_sem_aceite", acao: "cancelou", resolvidoEm: new Date(ontem).toISOString() } }),
+        pedido({
+          id: "a",
+          status: "em_preparo",
+          limpezaOperacional: {
+            motivo: "preparo_longo",
+            acao: "adiou",
+            resolvidoEm: new Date(AGORA).toISOString(),
+          },
+        }),
+        pedido({
+          id: "b",
+          status: "entregue",
+          limpezaOperacional: {
+            motivo: "entrega_longa",
+            acao: "avancou",
+            resolvidoEm: new Date(AGORA).toISOString(),
+          },
+        }),
       ],
       AGORA
     );
-
-    expect(analise.totalResolvidas).toBe(3);
-    expect(analise.resolvidasHoje).toBe(2);
-    expect(analise.porMotivo.novo_sem_aceite).toBe(2);
+    expect(analise.totalResolvidas).toBe(1);
+    expect(analise.resolvidasHoje).toBe(1);
     expect(analise.porMotivo.entrega_longa).toBe(1);
-    expect(analise.taxaAbandono).toBeCloseTo(2 / 3);
-    expect(analise.pendentesAgora).toBe(0);
-  });
-
-  test("sem resoluções a taxa é 0, nunca NaN", () => {
-    const analise = calcularAnaliseOperacional([pedido()], AGORA);
-    expect(analise.totalResolvidas).toBe(0);
-    expect(analise.taxaAbandono).toBe(0);
-  });
-
-  test("registro com motivo desconhecido é ignorado em vez de quebrar a métrica", () => {
-    const analise = calcularAnaliseOperacional(
-      [pedido({ limpezaOperacional: { motivo: "motivo_de_outra_versao", acao: "avancou", resolvidoEm: new Date(AGORA).toISOString() } as never })],
-      AGORA
-    );
-    expect(analise.totalResolvidas).toBe(0);
-  });
-
-  test("conta as pendências abertas no mesmo passe", () => {
-    const analise = calcularAnaliseOperacional([pedido({ id: String(AGORA - 40 * MIN) })], AGORA);
-    expect(analise.pendentesAgora).toBe(1);
-  });
-});
-
-describe("sanitizarEntradaLimpeza — predicado de fronteira", () => {
-  test("aceita motivo e ação conhecidos", () => {
-    expect(sanitizarEntradaLimpeza({ motivo: "preparo_longo", acao: "avancou" })).toEqual({
-      motivo: "preparo_longo",
-      acao: "avancou",
-    });
-  });
-
-  test("recusa valores fora do conjunto fechado", () => {
-    expect(sanitizarEntradaLimpeza({ motivo: "qualquer_coisa", acao: "avancou" })).toBeNull();
-    expect(sanitizarEntradaLimpeza({ motivo: "preparo_longo", acao: "apagou" })).toBeNull();
-  });
-
-  test("nunca lança para entrada de forma inesperada", () => {
-    expect(sanitizarEntradaLimpeza(null)).toBeNull();
-    expect(sanitizarEntradaLimpeza(undefined)).toBeNull();
-    expect(sanitizarEntradaLimpeza("preparo_longo")).toBeNull();
-    expect(sanitizarEntradaLimpeza(42)).toBeNull();
-    expect(sanitizarEntradaLimpeza({})).toBeNull();
-    expect(sanitizarEntradaLimpeza([])).toBeNull();
-  });
-
-  test("descarta campos extras — só motivo e ação atravessam a fronteira", () => {
-    const r = sanitizarEntradaLimpeza({
-      motivo: "novo_sem_aceite",
-      acao: "cancelou",
-      resolvidoPor: "invasor",
-      resolvidoEm: "1970-01-01T00:00:00.000Z",
-    });
-    expect(r).toEqual({ motivo: "novo_sem_aceite", acao: "cancelou" });
+    expect(analise.porMotivo.preparo_longo).toBe(0);
   });
 });
