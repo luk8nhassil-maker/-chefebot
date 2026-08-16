@@ -205,23 +205,54 @@ describe("classificarPendencia", () => {
     expect(classificarPendencia(adiado5, AGORA)?.motivo).toBe("preparo_longo");
   });
 
-  test("na rua alerta no limite existente e aguardar reinicia o mesmo limite", () => {
-    const inicial = pedido({
-      status: "saiu_entrega",
-      statusAtualizadoEm: new Date(AGORA - LIMIAR_ENTREGA_MIN * MIN).toISOString(),
-    });
-    expect(classificarPendencia(inicial, AGORA)?.motivo).toBe("entrega_longa");
+  test("na rua usa cronômetro próprio e cobra exatamente aos 20 min", () => {
+    expect(LIMIAR_ENTREGA_MIN).toBe(20);
 
-    const adiado = pedido({
+    const antes = pedido({
+      id: String(AGORA - 180 * MIN),
       status: "saiu_entrega",
-      statusAtualizadoEm: new Date(AGORA - 10 * MIN).toISOString(),
+      statusAtualizadoEm: new Date(AGORA - 19 * MIN).toISOString(),
+    });
+    expect(idadeDaEtapaMinutos(antes, AGORA)).toBe(19);
+    expect(classificarPendencia(antes, AGORA)).toBeNull();
+
+    const noLimite = {
+      ...antes,
+      statusAtualizadoEm: new Date(AGORA - 20 * MIN).toISOString(),
+    };
+    const pendencia = classificarPendencia(noLimite, AGORA);
+    expect(pendencia).toMatchObject({
+      motivo: "entrega_longa",
+      titulo: "Essa entrega precisa de uma confirmação",
+      idadeMinutos: 20,
+    });
+    expect(pendencia?.descricao).toContain("Já faz 20 min");
+    expect(pendencia?.descricao).toContain("eu te lembro de novo em 20 min");
+  });
+
+  test("ainda na rua reinicia o cronômetro e só cobra depois de outros 20 min", () => {
+    const adiado19 = pedido({
+      id: String(AGORA - 180 * MIN),
+      status: "saiu_entrega",
+      statusAtualizadoEm: new Date(AGORA - 19 * MIN).toISOString(),
       limpezaOperacional: {
         motivo: "entrega_longa",
         acao: "adiou",
-        resolvidoEm: new Date(AGORA - 10 * MIN).toISOString(),
+        resolvidoEm: new Date(AGORA - 19 * MIN).toISOString(),
       },
     });
-    expect(classificarPendencia(adiado, AGORA)).toBeNull();
+    expect(classificarPendencia(adiado19, AGORA)).toBeNull();
+
+    const adiado20 = {
+      ...adiado19,
+      statusAtualizadoEm: new Date(AGORA - 20 * MIN).toISOString(),
+      limpezaOperacional: {
+        motivo: "entrega_longa" as const,
+        acao: "adiou" as const,
+        resolvidoEm: new Date(AGORA - 20 * MIN).toISOString(),
+      },
+    };
+    expect(classificarPendencia(adiado20, AGORA)?.motivo).toBe("entrega_longa");
   });
 
   test("decisão de etapa anterior não silencia a próxima etapa", () => {
@@ -325,8 +356,8 @@ describe("ações e hierarquia", () => {
       }),
       AGORA
     )!;
-    expect(acaoPrincipal(p)).toMatchObject({ label: "CONFIRMAR ENTREGA", status: "entregue", tom: "principal" });
-    expect(acaoSecundaria(p)).toMatchObject({ label: "AINDA ESTÁ NA RUA", acao: "adiou", status: "saiu_entrega" });
+    expect(acaoPrincipal(p)).toMatchObject({ label: "JÁ FOI ENTREGUE", status: "entregue", tom: "principal" });
+    expect(acaoSecundaria(p)).toMatchObject({ label: "AINDA ESTÁ NA RUA · LEMBRAR EM 20 MIN", acao: "adiou", status: "saiu_entrega" });
   });
 
   test("Pix exige verificação antes de qualquer avanço", () => {

@@ -228,6 +228,26 @@ describe("/pedidos — segurança: nenhuma confirmação acontece no frontend", 
   });
 });
 
+
+describe("/pedidos — cronômetro individual da etapa NA RUA", () => {
+  test("o timer da rua usa a hora oficial da etapa e o limite de 20 minutos", () => {
+    expect(fonte).toContain('pedido.status === "saiu_entrega" ? idadeDaEtapaMinutos(pedido, now) : 0');
+    expect(fonte).toContain('p.status === "saiu_entrega" ? LIMIAR_ENTREGA_MIN : 40');
+    expect(fonte).toContain('p.status === "saiu_entrega" ? `Na rua há ${mins} min`');
+  });
+
+  test("o clique que muda de etapa zera o relógio otimista imediatamente e rollback restaura o carimbo anterior", () => {
+    const corpo = fonte.slice(
+      fonte.indexOf("const avancarStatus = async"),
+      fonte.indexOf("// Resolução de uma pendência do gate")
+    );
+    expect(corpo).toContain("const statusAtualizadoEmAnterior = pedido.statusAtualizadoEm");
+    expect(corpo).toContain("const statusAtualizadoEmOtimista = new Date().toISOString()");
+    expect(corpo).toContain("statusAtualizadoEm: statusAtualizadoEmOtimista");
+    expect(corpo).toContain("statusAtualizadoEm: statusAtualizadoEmAnterior");
+  });
+});
+
 describe("/pedidos — item 'Acesso do salão' no menu lateral (Equipe)", () => {
   test("liga showEquipeNav no PanelShell — mostra só 'Equipe', sem trazer o grupo Gestão inteiro", () => {
     const blocoPanelShell = fonte.slice(fonte.indexOf("<PanelShell"), fonte.indexOf("<PanelShell") + 400);

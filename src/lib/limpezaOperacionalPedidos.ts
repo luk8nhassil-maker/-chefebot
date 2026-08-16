@@ -12,7 +12,7 @@ export const LIMIAR_NOVO_SEM_ACEITE_MIN = 15;
 /** Pedido em preparo há mais que isto. */
 export const LIMIAR_PREPARO_MIN = 75;
 /** Pedido que saiu para entrega há mais que isto. */
-export const LIMIAR_ENTREGA_MIN = 60;
+export const LIMIAR_ENTREGA_MIN = 20;
 /** Depois de confirmar que a cozinha ainda está fazendo, cobrar de novo. */
 export const LIMIAR_REAVISO_PREPARO_MIN = 5;
 
@@ -308,9 +308,9 @@ export function classificarPendencia(pedido: PedidoLimpeza, agora: number): Pend
     return {
       ...base,
       motivo: "entrega_longa",
-      titulo: `Pedido ainda não finalizado · ${idade}`,
+      titulo: "Essa entrega precisa de uma confirmação",
       descricao:
-        "Este pedido continua na etapa de saída. Confirme a conclusão ou informe que ele ainda está nessa etapa.",
+        `Já faz ${idade} que esse pedido está marcado como NA RUA. Se o cliente recebeu, finalize agora. Se o motoboy ainda estiver a caminho, me avise aqui e eu te lembro de novo em ${LIMIAR_ENTREGA_MIN} min.`,
     };
   }
 
@@ -397,7 +397,7 @@ export function acaoPrincipal(pendencia: Pendencia): OpcaoResolucao {
   if (pendencia.status === "saiu_entrega") {
     const entrega = classificarEntrega(pendencia);
     return {
-      label: entrega === "retirada" ? "FINALIZAR RETIRADA" : "CONFIRMAR ENTREGA",
+      label: entrega === "retirada" ? "FINALIZAR RETIRADA" : entrega === "dine_in" ? "FINALIZAR PEDIDO" : "JÁ FOI ENTREGUE",
       acao: "avancou",
       status: "entregue",
       tom: "principal",
@@ -438,7 +438,7 @@ export function acaoSecundaria(pendencia: Pendencia): OpcaoResolucao {
   if (pendencia.status === "saiu_entrega") {
     const entrega = classificarEntrega(pendencia);
     return {
-      label: entrega === "retirada" ? "AINDA AGUARDANDO RETIRADA" : "AINDA ESTÁ NA RUA",
+      label: entrega === "retirada" ? "AINDA AGUARDANDO RETIRADA" : entrega === "dine_in" ? "AINDA NÃO FINALIZOU" : `AINDA ESTÁ NA RUA · LEMBRAR EM ${LIMIAR_ENTREGA_MIN} MIN`,
       acao: "adiou",
       status: "saiu_entrega",
       tom: "secundario",
