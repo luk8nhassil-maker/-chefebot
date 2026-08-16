@@ -334,7 +334,8 @@ describe("ações e hierarquia", () => {
       pedido({ id: String(AGORA - LIMIAR_PIX_PENDENTE_MIN * MIN), pagamento: "Pix" }),
       AGORA
     )!;
-    expect(acaoPrincipal(p)).toMatchObject({ acao: "verificou_pagamento", status: undefined, tom: "principal" });
+    expect(acaoPrincipal(p)).toMatchObject({ acao: "verificou_pagamento", tom: "principal" });
+    expect(acaoPrincipal(p)).not.toHaveProperty("status");
     expect(acaoSecundaria(p)).toMatchObject({ acao: "adiou", status: "novo" });
     expect(acaoTerciaria(p)).toMatchObject({ acao: "cancelou", status: "cancelado" });
   });
