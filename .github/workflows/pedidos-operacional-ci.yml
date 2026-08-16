@@ -1,0 +1,62 @@
+name: pedidos-operacional-ci
+
+# Gate hermético da regra operacional de pedidos. Não recebe segredos, não
+# acessa Redis/WhatsApp/Pix/impressão e executa apenas regras puras + lint.
+on:
+  pull_request:
+    paths:
+      - "src/lib/expedienteOperacional.ts"
+      - "src/lib/expedienteOperacional.test.ts"
+      - "src/lib/pedidosPainelOperacional.ts"
+      - "src/lib/pedidosPainelOperacional.test.ts"
+      - "src/lib/limpezaOperacionalPedidos.ts"
+      - "src/lib/limpezaOperacionalPedidos.test.ts"
+      - "src/components/LimpezaOperacionalPainel.tsx"
+      - "src/app/api/orders-painel/route.ts"
+      - "src/app/api/cron/route.ts"
+      - "src/lib/numeracao.ts"
+      - "src/proxy.ts"
+      - ".github/workflows/pedidos-operacional-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pedidos-operacional-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pedidos-operacional-ci:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do SHA validado
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Testes focados do expediente e cobrança operacional
+        run: >-
+          npm test --
+          src/lib/expedienteOperacional.test.ts
+          src/lib/pedidosPainelOperacional.test.ts
+          src/lib/limpezaOperacionalPedidos.test.ts
+
+      - name: Lint dos arquivos da mudança
+        run: >-
+          npm run lint --
+          src/lib/expedienteOperacional.ts
+          src/lib/expedienteOperacional.test.ts
+          src/lib/pedidosPainelOperacional.ts
+          src/lib/pedidosPainelOperacional.test.ts
+          src/lib/limpezaOperacionalPedidos.ts
+          src/lib/limpezaOperacionalPedidos.test.ts
+          src/components/LimpezaOperacionalPainel.tsx
+          src/app/api/orders-painel/route.ts
+          src/app/api/cron/route.ts
+          src/lib/numeracao.ts
+          src/proxy.ts
