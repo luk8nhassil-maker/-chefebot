@@ -41,15 +41,15 @@ export async function GET(req: Request) {
         return agoraMs - criadoEm < SETE_DIAS_MS;
       });
 
-      return {
-        persistir: pedidosFrescos.length !== limpo.length,
-        ...(pedidosFrescos.length !== limpo.length ? { pedidos: limpo } : {}),
-        resultado: {
-          total: pedidosFrescos.length,
-          removidos: pedidosFrescos.length - limpo.length,
-          mantidos: limpo.length,
-        },
+      const resultado = {
+        total: pedidosFrescos.length,
+        removidos: pedidosFrescos.length - limpo.length,
+        mantidos: limpo.length,
       };
+
+      return pedidosFrescos.length !== limpo.length
+        ? { persistir: true, pedidos: limpo, resultado }
+        : { persistir: false, resultado };
     });
 
     // O contador usa uma chave por expediente e TTL próprio. Deletar uma chave
