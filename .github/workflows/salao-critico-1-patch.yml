@@ -1,0 +1,44 @@
+name: Salao critico 1 patch temporario
+
+on:
+  push:
+    branches:
+      - codex/salao-status-operacional-critico-1
+
+permissions:
+  contents: write
+
+jobs:
+  aplicar-patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: codex/salao-status-operacional-critico-1
+          fetch-depth: 0
+
+      - name: Aplicar patch deterministico
+        run: |
+          if grep -q 'descreverStatusPedidoSalao' src/app/salao/page.tsx; then
+            echo 'Patch ja aplicado.'
+            exit 0
+          fi
+          node scripts/patch-salao-status-operacional-critico-1.mjs
+
+      - name: Conferir escopo do patch
+        run: |
+          git diff --check
+          git diff -- src/app/salao/page.tsx src/app/salao/page.test.tsx
+
+      - name: Gravar patch na branch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/app/salao/page.tsx src/app/salao/page.test.tsx
+          if git diff --cached --quiet; then
+            echo 'Nenhuma alteracao nova.'
+            exit 0
+          fi
+          git commit -m 'feat(salao): mostra status real da cozinha ao garcom'
+          git push origin HEAD:codex/salao-status-operacional-critico-1
