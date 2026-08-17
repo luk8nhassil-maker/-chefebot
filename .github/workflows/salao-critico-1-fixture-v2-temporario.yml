@@ -1,0 +1,27 @@
+name: Salao critico 1 fixture v2 temporario
+
+on:
+  push:
+    branches:
+      - codex/salao-status-operacional-critico-1
+
+permissions:
+  contents: write
+
+jobs:
+  aplicar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/salao-status-operacional-critico-1
+          fetch-depth: 0
+      - run: |
+          node scripts/patch-salao-critico-1-fixture-v2.mjs
+          git diff --check
+      - run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/app/salao/page.test.tsx
+          git commit -m 'test(salao): informa status oficial no fixture legado'
+          git push origin HEAD:codex/salao-status-operacional-critico-1
