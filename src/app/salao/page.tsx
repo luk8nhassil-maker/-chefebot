@@ -316,22 +316,49 @@ export default function SalaoPage() {
   const [tela, setTela] = useState<Tela>({ tipo: "home" })
   const ehDesktop = useEhDesktop()
 
-  const carregarComandas = useCallback(async (): Promise<Comanda[] | null> => {
-    const r = await fetch("/api/salao/comandas", { cache: "no-store" })
-    if (r.status === 401) { setNaoAutorizado(true); return null }
-    const data = await r.json().catch(() => null)
-    if (data?.ok) { setComandas(data.comandas); return data.comandas as Comanda[] }
-    return null
+  const marcarStatusOperacionalComoPendente = useCallback(() => {
+    // Se a atualização falha, mantemos comanda/itens/total na tela, mas nunca
+    // deixamos um status antigo parecer atual. Só o estágio operacional do
+    // pedido oficial é invalidado; preço, carrinho e bookkeeping não mudam.
+    setComandas((atuais) => atuais.map((comanda) => ({
+      ...comanda,
+      rodadas: comanda.rodadas?.map((rodada) => rodada.status === "enviada"
+        ? { ...rodada, pedidoStatus: undefined, pedidoStatusAtualizadoEm: undefined }
+        : rodada),
+    })))
   }, [])
+
+  const carregarComandas = useCallback(async (): Promise<Comanda[] | null> => {
+    try {
+      const r = await fetch("/api/salao/comandas", { cache: "no-store" })
+      if (r.status === 401) { setNaoAutorizado(true); return null }
+      const data = await r.json().catch(() => null)
+      if (r.ok && data?.ok && Array.isArray(data.comandas)) {
+        setComandas(data.comandas)
+        return data.comandas as Comanda[]
+      }
+      marcarStatusOperacionalComoPendente()
+      return null
+    } catch {
+      marcarStatusOperacionalComoPendente()
+      return null
+    }
+  }, [marcarStatusOperacionalComoPendente])
 
   const carregarTudo = useCallback(async () => {
     try {
-      const [rCardapio] = await Promise.all([fetch("/api/cardapio", { cache: "no-store" }), carregarComandas()])
-      setErroCarregar(false)
-      if (rCardapio.ok) {
-        const validado = adaptarCardapioParaMontagem(await rCardapio.json())
-        if (validado) setMenu(validado)
+      const [rCardapio, listaComandas] = await Promise.all([fetch("/api/cardapio", { cache: "no-store" }), carregarComandas()])
+      if (!rCardapio.ok || !listaComandas) {
+        setErroCarregar(true)
+        return
       }
+      const validado = adaptarCardapioParaMontagem(await rCardapio.json())
+      if (!validado) {
+        setErroCarregar(true)
+        return
+      }
+      setMenu(validado)
+      setErroCarregar(false)
     } catch {
       setErroCarregar(true)
     } finally {

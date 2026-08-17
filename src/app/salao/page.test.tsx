@@ -47,12 +47,14 @@ function precoOficial(name: string): number | null {
 let seq = 0;
 let comandas: ComandaMock[] = [];
 let falharProximoEnvio = false;
+let falharProximaListagem = false;
 let enviosCriados = 0;
 
 function resetMock() {
   seq = 0;
   comandas = [];
   falharProximoEnvio = false;
+  falharProximaListagem = false;
   enviosCriados = 0;
 }
 
@@ -68,6 +70,10 @@ async function mockFetch(url: string, opts?: RequestInit): Promise<Response> {
   if (url === "/api/salao/logout") return jsonRes(200, { ok: true });
 
   if (url === "/api/salao/comandas" && method === "GET") {
+    if (falharProximaListagem) {
+      falharProximaListagem = false;
+      return jsonRes(503, { ok: false, error: "Falha simulada de sincronização" });
+    }
     return jsonRes(200, { ok: true, comandas: comandas.map((c) => ({ ...c, totalParcial: totalParcialDe(c) })) });
   }
 
@@ -490,6 +496,50 @@ describe("/salao — acompanhamento operacional da cozinha", () => {
     window.dispatchEvent(new Event("focus"));
 
     await waitFor(() => expect(screen.getByText("Pronto para servir")).toBeInTheDocument());
+  });
+
+  it("se uma atualização falha, invalida o status antigo em vez de continuar mostrando informação velha como atual", async () => {
+    const user = userEvent.setup();
+    comandas.push({
+      id: "c-stale", numero: 24, cliente: "Marta", mesa: "6", itens: [{ kind: "simple", name: "Água com gás", price: 6, qty: 1 }],
+      status: "enviada", abertaEm: new Date().toISOString(), pedidoId: "ped-stale", pedidoNumero: 24,
+      rodadas: [{
+        id: "r-stale", numero: 1, status: "enviada", itens: [{ kind: "simple", name: "Água com gás", price: 6, qty: 1 }], subtotal: 6,
+        criadaEm: new Date().toISOString(), atualizadaEm: new Date().toISOString(), enviadaEm: new Date().toISOString(), pedidoId: "ped-stale", pedidoNumero: 24,
+        pedidoStatus: "saiu_entrega",
+      }],
+    });
+
+    render(<SalaoPage />);
+    await screen.findByText("Novo atendimento");
+    await user.click(screen.getByRole("button", { name: /Pedidos abertos/ }));
+    expect(await screen.findByText("Pronto para servir")).toBeInTheDocument();
+
+    falharProximaListagem = true;
+    window.dispatchEvent(new Event("focus"));
+
+    await waitFor(() => expect(screen.getByText("Atualização pendente")).toBeInTheDocument());
+    expect(screen.queryByText("Pronto para servir")).not.toBeInTheDocument();
+  });
+
+  it("em uma comanda com vários envios, o pedido pronto sobe como ação mais urgente", async () => {
+    const user = userEvent.setup();
+    const agora = new Date().toISOString();
+    comandas.push({
+      id: "c-multi", numero: 25, cliente: "Nina", mesa: "7", itens: [{ kind: "simple", name: "Refrigerante 2L", price: 12, qty: 1 }],
+      status: "enviada", abertaEm: agora, pedidoId: "ped-multi-1", pedidoNumero: 25,
+      rodadas: [
+        { id: "r-multi-1", numero: 1, status: "enviada", itens: [{ kind: "simple", name: "Refrigerante 2L", price: 12, qty: 1 }], subtotal: 12, criadaEm: agora, atualizadaEm: agora, enviadaEm: agora, pedidoId: "ped-multi-1", pedidoNumero: 25, pedidoStatus: "em_preparo" },
+        { id: "r-multi-2", numero: 2, status: "enviada", itens: [{ kind: "simple", name: "Água com gás", price: 6, qty: 1 }], subtotal: 6, criadaEm: agora, atualizadaEm: agora, enviadaEm: agora, pedidoId: "ped-multi-2", pedidoNumero: 26, pedidoStatus: "saiu_entrega" },
+      ],
+    });
+
+    render(<SalaoPage />);
+    await screen.findByText("Novo atendimento");
+    await user.click(screen.getByRole("button", { name: /Pedidos abertos/ }));
+
+    expect(await screen.findByText("Pronto para servir")).toBeInTheDocument();
+    expect(screen.getByText(/Retire o pedido na cozinha e leve até a mesa/)).toBeInTheDocument();
   });
 
   it("não mente quando a rodada enviada ainda não conseguiu sincronizar com o pedido oficial", async () => {
