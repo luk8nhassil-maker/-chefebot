@@ -31,6 +31,7 @@ import {
 import type { ItemApp } from "@/lib/pedidoAppItens"
 import { norm } from "@/lib/pedidoAppItens"
 import { gerarClientRequestId } from "@/survival/clientRequestId"
+import { descreverStatusPedidoSalao, prioridadeStatusPedidoSalao, type StatusPedidoSalao } from "@/lib/salaoOperacao"
 import { useDialogA11y } from "@/components/useDialogA11y"
 import {
   CATEGORIAS,
@@ -72,6 +73,8 @@ type Rodada = {
   enviadaEm?: string
   pedidoId?: string
   pedidoNumero?: number
+  pedidoStatus?: StatusPedidoSalao
+  pedidoStatusAtualizadoEm?: string
   erroUltimaTentativa?: string
 }
 
@@ -128,22 +131,38 @@ function rodadaAtiva(comanda: Comanda): Rodada | undefined {
 
 /** Estado humano da comanda para a lista de Pedidos abertos — nunca expõe
  *  status técnico bruto. */
+function rodadaEnviadaMaisUrgente(comanda: Comanda): Rodada | undefined {
+  return comanda.rodadas
+    ?.filter((rodada) => rodada.status === "enviada")
+    .slice()
+    .sort((a, b) => prioridadeStatusPedidoSalao(a.pedidoStatus) - prioridadeStatusPedidoSalao(b.pedidoStatus))[0]
+}
+
 function estadoHumano(comanda: Comanda): string {
   const ativa = rodadaAtiva(comanda)
-  if (!ativa) return "Aguardando cozinha"
-  if (ativa.status === "falha_envio") return "Falha ao enviar"
-  if (ativa.status === "enviando") return "Enviando para cozinha"
-  if (ativa.itens.length > 0) return "Montando novo pedido"
+  if (ativa?.status === "falha_envio") return "Falha ao enviar"
+  if (ativa?.status === "enviando") return "Enviando para cozinha"
+  if (ativa?.status === "rascunho" && ativa.itens.length > 0) return "Montando novo pedido"
+  const enviadaUrgente = rodadaEnviadaMaisUrgente(comanda)
+  if (enviadaUrgente) return descreverStatusPedidoSalao(enviadaUrgente.pedidoStatus).rotulo
   return "Em atendimento"
 }
 
-/** Prioridade de ordenação da lista de Pedidos abertos: 1) falha que precisa
- *  de ação; 2) rascunho em andamento; 3) mais antigas primeiro. */
+function orientacaoHumana(comanda: Comanda): string | null {
+  const enviadaUrgente = rodadaEnviadaMaisUrgente(comanda)
+  return enviadaUrgente ? descreverStatusPedidoSalao(enviadaUrgente.pedidoStatus).orientacao : null
+}
+
+/** Prioriza primeiro falhas locais de envio e depois a situação REAL da
+ * cozinha. Pedido pronto/cancelado/sincronização pendente sobe acima de
+ * pedidos que só estão aguardando ou em preparo. */
 function prioridadeOrdenacao(comanda: Comanda): number {
   const ativa = rodadaAtiva(comanda)
   if (ativa?.status === "falha_envio") return 0
-  if (ativa && (ativa.status === "rascunho" || ativa.status === "enviando") && ativa.itens.length > 0) return 1
-  return 2
+  const enviadaUrgente = rodadaEnviadaMaisUrgente(comanda)
+  if (enviadaUrgente) return 1 + prioridadeStatusPedidoSalao(enviadaUrgente.pedidoStatus)
+  if (ativa && (ativa.status === "rascunho" || ativa.status === "enviando") && ativa.itens.length > 0) return 4
+  return 8
 }
 
 /** Endpoint de itens da rodada ativa — a Rodada 1 ainda vive nos campos
@@ -323,6 +342,19 @@ export default function SalaoPage() {
   useEffect(() => {
     (async () => { await carregarTudo() })()
   }, [carregarTudo])
+
+  // O status da cozinha muda em outro aparelho. Sem atualização periódica o
+  // garçom continuava vendo "Aguardando cozinha" até recarregar a página.
+  // A leitura é silenciosa, não dispara impressão, WhatsApp nem mutação.
+  useEffect(() => {
+    const atualizar = () => { void carregarComandas() }
+    const intervalo = window.setInterval(atualizar, 4000)
+    window.addEventListener("focus", atualizar)
+    return () => {
+      window.clearInterval(intervalo)
+      window.removeEventListener("focus", atualizar)
+    }
+  }, [carregarComandas])
 
   function tentarNovamenteCarregar() {
     setCarregando(true)
@@ -1295,8 +1327,15 @@ function PedidosAbertosList({ comandas, onAbrirComanda }: { comandas: Comanda[];
 
 function ComandaCard({ comanda, onAbrir }: { comanda: Comanda; onAbrir: () => void }) {
   const estado = estadoHumano(comanda)
+  const orientacao = orientacaoHumana(comanda)
   const envios = comanda.rodadas?.filter((r) => r.status === "enviada").length ?? 0
-  const corEstado = estado === "Falha ao enviar" ? "var(--danger)" : estado === "Aguardando cozinha" ? "var(--success)" : "var(--attention-text)"
+  const corEstado = estado === "Falha ao enviar" || estado === "Pedido cancelado"
+    ? "var(--danger)"
+    : estado === "Servido"
+      ? "var(--success)"
+      : estado === "Pronto para servir" || estado === "Atualização pendente"
+        ? "var(--attention-text)"
+        : "var(--foreground-secondary)"
   return (
     <button onClick={onAbrir} style={{ ...card, minHeight: 48, display: "grid", gap: 6, textAlign: "left", cursor: "pointer" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
@@ -1306,6 +1345,11 @@ function ComandaCard({ comanda, onAbrir }: { comanda: Comanda; onAbrir: () => vo
       <span style={{ fontSize: 12.5, color: "var(--foreground-secondary)" }}>
         {identificacaoMesa(comanda)} · Comanda #{comanda.numero} · {tempoDecorrido(comanda.abertaEm)}
       </span>
+      {orientacao && (
+        <span style={{ fontSize: 12.5, lineHeight: 1.4, color: "var(--foreground)", padding: "8px 10px", borderRadius: 9, background: "var(--background)" }}>
+          <strong>O que fazer agora:</strong> {orientacao}
+        </span>
+      )}
       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 800 }}>
         <span style={{ color: "var(--foreground-secondary)" }}>{envios} envio(s)</span>
         <span style={{ color: "var(--brand-text)" }}>{money(comanda.totalParcial ?? 0)}</span>
@@ -1401,17 +1445,31 @@ function ComandaDetail({
       <div style={{ flex: 1, overflowY: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
         {rodadas.map((r) => {
           const aberta2 = expandidas.has(r.id)
-          const humano = r.status === "enviada" ? "Enviado" : r.status === "enviando" ? "Enviando…" : r.status === "falha_envio" ? "Falha ao enviar" : "Em rascunho"
+          const estadoPedido = r.status === "enviada" ? descreverStatusPedidoSalao(r.pedidoStatus) : null
+          const humano = estadoPedido?.rotulo ?? (r.status === "enviando" ? "Enviando…" : r.status === "falha_envio" ? "Falha ao enviar" : "Em rascunho")
+          const corHumano = r.status === "falha_envio" || estadoPedido?.tom === "perigo"
+            ? "var(--danger)"
+            : estadoPedido?.tom === "sucesso"
+              ? "var(--success)"
+              : estadoPedido?.tom === "atencao"
+                ? "var(--attention-text)"
+                : "var(--foreground-secondary)"
           const horario = r.enviadaEm ? new Date(r.enviadaEm).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) : null
           return (
             <div key={r.id} style={{ ...card, display: "grid", gap: 8 }}>
               <button onClick={() => alternarExpandido(r.id)} aria-expanded={aberta2} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "none", border: "none", padding: 0, textAlign: "left", cursor: "pointer", minHeight: 44 }}>
                 <span style={{ fontSize: 14, fontWeight: 900, color: "var(--foreground)" }}>{rotuloRodada(r)}{horario ? ` · ${horario}` : ""}</span>
                 <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <span style={{ fontSize: 11, fontWeight: 800, color: r.status === "falha_envio" ? "var(--danger)" : r.status === "enviada" ? "var(--success)" : "var(--attention-text)", textTransform: "uppercase" }}>{humano}</span>
+                  <span style={{ fontSize: 11, fontWeight: 800, color: corHumano, textTransform: "uppercase" }}>{humano}</span>
                   {aberta2 ? <ChevronUp size={16} aria-hidden="true" /> : <ChevronDown size={16} aria-hidden="true" />}
                 </span>
               </button>
+              {estadoPedido && (
+                <div style={{ padding: "8px 10px", borderRadius: 9, background: "var(--background)", display: "grid", gap: 2 }}>
+                  <strong style={{ fontSize: 11.5, color: corHumano }}>O que fazer agora</strong>
+                  <span style={{ fontSize: 12.5, lineHeight: 1.4, color: "var(--foreground-secondary)" }}>{estadoPedido.orientacao}</span>
+                </div>
+              )}
               {aberta2 && (
                 <div style={{ display: "grid", gap: 6 }}>
                   {r.itens.map((item, i) => (

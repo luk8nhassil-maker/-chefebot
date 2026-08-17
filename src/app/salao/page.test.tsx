@@ -25,7 +25,7 @@ type ItemMock = { kind: "simple" | "pizza"; name: string; detail?: string; price
 type RodadaMock = {
   id: string; numero: number; status: "rascunho" | "enviando" | "enviada" | "falha_envio";
   itens: ItemMock[]; subtotal: number; criadaEm: string; atualizadaEm: string;
-  enviadaEm?: string; pedidoId?: string; pedidoNumero?: number; erroUltimaTentativa?: string;
+  enviadaEm?: string; pedidoId?: string; pedidoNumero?: number; pedidoStatus?: "novo" | "em_preparo" | "saiu_entrega" | "entregue" | "cancelado"; pedidoStatusAtualizadoEm?: string; erroUltimaTentativa?: string;
 };
 type ComandaMock = {
   id: string; numero: number; cliente?: string; mesa?: string; complemento?: string;
@@ -444,5 +444,70 @@ describe("/salao — Pedidos abertos e complemento", () => {
     await user.click(await screen.findByText("Carlos"));
     await user.click(await screen.findByText(/Pedido inicial/));
     expect(within(screen.getByText(/Pedido inicial/).closest("div")!.parentElement!).getByText("1× Refrigerante 2L")).toBeInTheDocument();
+  });
+});
+
+
+describe("/salao — acompanhamento operacional da cozinha", () => {
+  it("mostra o estado real e uma orientação objetiva quando o pedido fica pronto", async () => {
+    const user = userEvent.setup();
+    comandas.push({
+      id: "c-pronto", numero: 21, cliente: "Joana", mesa: "3", itens: [{ kind: "simple", name: "Refrigerante 2L", price: 12, qty: 1 }],
+      status: "enviada", abertaEm: new Date().toISOString(), pedidoId: "ped-pronto", pedidoNumero: 21,
+      rodadas: [{
+        id: "r-pronto", numero: 1, status: "enviada", itens: [{ kind: "simple", name: "Refrigerante 2L", price: 12, qty: 1 }], subtotal: 12,
+        criadaEm: new Date().toISOString(), atualizadaEm: new Date().toISOString(), enviadaEm: new Date().toISOString(), pedidoId: "ped-pronto", pedidoNumero: 21,
+        pedidoStatus: "saiu_entrega",
+      }],
+    });
+
+    render(<SalaoPage />);
+    await screen.findByText("Novo atendimento");
+    await user.click(screen.getByRole("button", { name: /Pedidos abertos/ }));
+
+    expect(await screen.findByText("Pronto para servir")).toBeInTheDocument();
+    expect(screen.getByText(/Retire o pedido na cozinha e leve até a mesa/)).toBeInTheDocument();
+  });
+
+  it("atualiza o estágio quando o aparelho volta ao foco, sem exigir recarregar a página", async () => {
+    const user = userEvent.setup();
+    comandas.push({
+      id: "c-foco", numero: 22, cliente: "Rita", mesa: "4", itens: [{ kind: "simple", name: "Refrigerante 2L", price: 12, qty: 1 }],
+      status: "enviada", abertaEm: new Date().toISOString(), pedidoId: "ped-foco", pedidoNumero: 22,
+      rodadas: [{
+        id: "r-foco", numero: 1, status: "enviada", itens: [{ kind: "simple", name: "Refrigerante 2L", price: 12, qty: 1 }], subtotal: 12,
+        criadaEm: new Date().toISOString(), atualizadaEm: new Date().toISOString(), enviadaEm: new Date().toISOString(), pedidoId: "ped-foco", pedidoNumero: 22,
+        pedidoStatus: "em_preparo",
+      }],
+    });
+
+    render(<SalaoPage />);
+    await screen.findByText("Novo atendimento");
+    await user.click(screen.getByRole("button", { name: /Pedidos abertos/ }));
+    expect(await screen.findByText("Em preparo")).toBeInTheDocument();
+
+    comandas[0].rodadas[0].pedidoStatus = "saiu_entrega";
+    window.dispatchEvent(new Event("focus"));
+
+    await waitFor(() => expect(screen.getByText("Pronto para servir")).toBeInTheDocument());
+  });
+
+  it("não mente quando a rodada enviada ainda não conseguiu sincronizar com o pedido oficial", async () => {
+    const user = userEvent.setup();
+    comandas.push({
+      id: "c-sync", numero: 23, cliente: "Lia", mesa: "5", itens: [{ kind: "simple", name: "Água com gás", price: 6, qty: 1 }],
+      status: "enviada", abertaEm: new Date().toISOString(), pedidoId: "ped-sync", pedidoNumero: 23,
+      rodadas: [{
+        id: "r-sync", numero: 1, status: "enviada", itens: [{ kind: "simple", name: "Água com gás", price: 6, qty: 1 }], subtotal: 6,
+        criadaEm: new Date().toISOString(), atualizadaEm: new Date().toISOString(), enviadaEm: new Date().toISOString(), pedidoId: "ped-sync", pedidoNumero: 23,
+      }],
+    });
+
+    render(<SalaoPage />);
+    await screen.findByText("Novo atendimento");
+    await user.click(screen.getByRole("button", { name: /Pedidos abertos/ }));
+
+    expect(await screen.findByText("Atualização pendente")).toBeInTheDocument();
+    expect(screen.getByText(/Atualize antes de tomar uma decisão sobre a mesa/)).toBeInTheDocument();
   });
 });
