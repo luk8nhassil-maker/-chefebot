@@ -1,0 +1,50 @@
+name: salao-operacional-ci
+
+# Gate hermético do Salão. Não recebe segredos e não acessa Redis/WhatsApp/
+# Pix/impressão reais: todos os testes abaixo usam mocks locais.
+on:
+  pull_request:
+    paths:
+      - "src/app/salao/**"
+      - "src/app/api/salao/**"
+      - "src/lib/salaoOperacao.ts"
+      - "src/lib/salaoOperacao.test.ts"
+      - ".github/workflows/salao-operacional-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: salao-operacional-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  salao-operacional-ci:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do SHA validado
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Testes focados do Salão
+        run: >-
+          npm test --
+          src/lib/salaoOperacao.test.ts
+          src/app/api/salao/comandas/route.test.ts
+          src/app/salao/page.test.tsx
+
+      - name: Lint dos arquivos da mudança
+        run: >-
+          npm run lint --
+          src/lib/salaoOperacao.ts
+          src/lib/salaoOperacao.test.ts
+          src/app/api/salao/comandas/route.ts
+          src/app/api/salao/comandas/route.test.ts
+          src/app/salao/page.tsx
+          src/app/salao/page.test.tsx
