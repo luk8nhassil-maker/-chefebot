@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { lerSessaoSalao } from "@/lib/salaoAuth";
 import { atualizarItensComanda, validarItensComanda } from "@/lib/comandas";
-import { podeAdicionarItensNaComanda } from "@/lib/salaoConta.server";
+import { executarMutacaoComContaAbertaSalao } from "@/lib/salaoConta.server";
 import { ERRO_ESCRITA_SALAO_PREVIEW, escritaSalaoBloqueadaNoPreview } from "@/lib/salaoAmbiente";
 
 export const dynamic = "force-dynamic";
@@ -20,10 +20,6 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
 
   const { id } = await params;
-  if (!(await podeAdicionarItensNaComanda(id))) {
-    return NextResponse.json({ ok: false, error: "A conta já foi solicitada. Continue o atendimento antes de alterar os itens." }, { status: 409 });
-  }
-
   let body: { itens?: unknown; observacao?: string; complemento?: string };
   try {
     body = await req.json();
@@ -36,10 +32,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     return NextResponse.json({ ok: false, error: validacao.error }, { status: 400 });
   }
 
-  const resultado = await atualizarItensComanda(id, validacao.itens, {
-    observacao: body.observacao,
-    complemento: body.complemento,
-  });
+  const mutacao = await executarMutacaoComContaAbertaSalao(id, () =>
+    atualizarItensComanda(id, validacao.itens, {
+      observacao: body.observacao,
+      complemento: body.complemento,
+    })
+  );
+  if (!mutacao.ok) {
+    return NextResponse.json({ ok: false, error: mutacao.error }, { status: mutacao.status });
+  }
+  const resultado = mutacao.valor;
 
   if (resultado === "nao_encontrada") {
     return NextResponse.json({ ok: false, error: "Comanda não encontrada" }, { status: 404 });
