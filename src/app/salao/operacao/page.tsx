@@ -73,11 +73,12 @@ export default function SalaoOperacaoPage() {
   }, []);
 
   useEffect(() => {
-    void carregar();
+    const inicial = window.setTimeout(() => void carregar(), 0);
     const timer = window.setInterval(() => void carregar(), 4000);
     const onFocus = () => void carregar();
     window.addEventListener("focus", onFocus);
     return () => {
+      window.clearTimeout(inicial);
       window.clearInterval(timer);
       window.removeEventListener("focus", onFocus);
     };
