@@ -28,7 +28,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       valorPix: (body as { valorPix?: unknown }).valorPix,
       valorDinheiro: (body as { valorDinheiro?: unknown }).valorDinheiro,
     });
-    if (!resultado.ok) return NextResponse.json({ ok: false, error: resultado.error, ...(result && "code" in resultado && resultado.code ? { code: resultado.code } : {}) }, { status: resultado.status });
+    if (!resultado.ok) {
+      const code = "code" in resultado && typeof resultado.code === "string" ? resultado.code : undefined;
+      return NextResponse.json({ ok: false, error: resultado.error, ...(code ? { code } : {}) }, { status: resultado.status });
+    }
     return NextResponse.json({ ok: true, estado: resultado.estado, deduplicado: resultado.deduplicado });
   } catch (error) {
     console.error("[Salão] Falha ao fechar conta:", error instanceof Error ? error.message : "erro desconhecido");
