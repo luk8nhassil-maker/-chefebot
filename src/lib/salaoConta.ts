@@ -94,6 +94,23 @@ export function subtotalParaCentavos(valor: number): number {
   return Math.round(valor * 100);
 }
 
+/**
+ * Depois que uma rodada virou pedido oficial, o total histórico daquele pedido
+ * passa a ser a fonte da conta. O subtotal salvo na comanda serve apenas para
+ * rascunho/exibição antes do envio e nunca pode sobrescrever um total já
+ * validado e persistido pelo servidor de pedidos.
+ */
+export function subtotalEnvioCentavos(params: {
+  subtotalRodada: number;
+  pedidoId?: string;
+  totalPedidoOficial?: number;
+}): number {
+  if (params.pedidoId && typeof params.totalPedidoOficial === "number" && Number.isFinite(params.totalPedidoOficial) && params.totalPedidoOficial >= 0) {
+    return subtotalParaCentavos(params.totalPedidoOficial);
+  }
+  return subtotalParaCentavos(params.subtotalRodada);
+}
+
 export function totalAtivoCentavos(envios: EnvioOperacionalSalao[]): number {
   return envios.reduce((total, envio) => {
     if (!envio.pedidoId || envio.status === "cancelado") return total;
