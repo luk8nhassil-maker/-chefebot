@@ -64,16 +64,25 @@ describe("buildSimpleCatalog — Calzone (flavor_priced, 12 sabores, preço por 
   });
 });
 
-describe("buildSimpleCatalog — Pastéis atualizados", () => {
-  it("a seção compatível `pastelForno` contém somente Carne Seca e Feira", () => {
+describe("buildSimpleCatalog — Pastéis", () => {
+  it("mantém o Pastel de Forno de R$25 e adiciona Carne Seca e Feira junto dele", () => {
     const catalog = buildSimpleCatalog(MENU);
     expect(catalog.pastelForno.map((p) => p.name)).toEqual([
+      "Pastel de Forno",
       "Pastel de Carne Seca",
       "Pastel de Feira",
     ]);
     expect(catalog.lanches.some((p) => p.name === "Pastel de Carne Seca")).toBe(false);
     expect(catalog.lanches.some((p) => p.name === "Pastel de Feira")).toBe(false);
-    expect(todosOsProdutos(catalog).some((p) => p.name === "Pastel de Forno")).toBe(false);
+  });
+
+  it("Pastel de Forno continua single_flavor, R$25 e com os 12 sabores anteriores", () => {
+    const catalog = buildSimpleCatalog(MENU);
+    const pastel = produto("Pastel de Forno", catalog);
+    expect(pastel.id).toBe("product-pastel-de-forno");
+    expect(pastel.strategy).toBe("single_flavor");
+    expect(pastel.priceCents).toBe(2500);
+    expect(pastel.flavors).toHaveLength(12);
   });
 
   it("Pastel de Carne Seca é fixed, R$12, com ID histórico preservado", () => {
