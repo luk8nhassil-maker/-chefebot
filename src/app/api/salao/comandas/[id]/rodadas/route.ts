@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { lerSessaoSalao } from "@/lib/salaoAuth";
 import { criarRodadaEmRascunho, totalParcialComanda } from "@/lib/comandas";
-import { podeAdicionarItensNaComanda } from "@/lib/salaoConta.server";
+import { executarMutacaoComContaAbertaSalao } from "@/lib/salaoConta.server";
 import { ERRO_ESCRITA_SALAO_PREVIEW, escritaSalaoBloqueadaNoPreview } from "@/lib/salaoAmbiente";
 
 export const dynamic = "force-dynamic";
 
 // Cria a próxima rodada em rascunho da comanda — idempotente (clientRequestId
 // e por estado: nunca duas rodadas em rascunho ao mesmo tempo, ver
-// src/lib/comandas.ts). Nesta etapa isto só cria a estrutura em memória:
-// nenhum pedido oficial é criado, nenhuma impressão é disparada.
+// src/lib/comandas.ts). A criação é serializada com "Pedir conta": nenhum
+// complemento pode nascer depois que a conta já foi solicitada.
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const sessaoSalao = await lerSessaoSalao(req);
   if (!sessaoSalao) {
@@ -20,10 +20,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   }
 
   const { id } = await params;
-  if (!(await podeAdicionarItensNaComanda(id))) {
-    return NextResponse.json({ ok: false, error: "A conta já foi solicitada. Continue o atendimento antes de adicionar novos itens." }, { status: 409 });
-  }
-
   let body: { clientRequestId?: string };
   try {
     body = await req.json();
@@ -31,12 +27,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     body = {};
   }
 
-  let resultado;
+  let mutacao;
   try {
-    resultado = await criarRodadaEmRascunho(id, body.clientRequestId);
+    mutacao = await executarMutacaoComContaAbertaSalao(id, () =>
+      criarRodadaEmRascunho(id, body.clientRequestId)
+    );
   } catch {
     return NextResponse.json({ ok: false, error: "Não foi possível criar a rodada agora. Tente de novo." }, { status: 503 });
   }
+  if (!mutacao.ok) {
+    return NextResponse.json({ ok: false, error: mutacao.error }, { status: mutacao.status });
+  }
+  const resultado = mutacao.valor;
 
   if (!resultado.ok) {
     if (resultado.motivo === "nao_encontrada") {
