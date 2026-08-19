@@ -1,0 +1,88 @@
+name: salao-operacional-ci
+
+# Gate hermético do Salão. Não recebe segredos e não acessa Redis/WhatsApp/
+# Pix/impressão reais: testes usam mocks locais e o build não executa writes.
+on:
+  pull_request:
+    paths:
+      - "src/app/salao/**"
+      - "src/app/pedidos/salao/**"
+      - "src/app/pedidos/layout.tsx"
+      - "src/app/api/salao/**"
+      - "src/components/SalaoOperacaoNav.tsx"
+      - "src/components/PedidosSalaoNav.tsx"
+      - "src/lib/comandas.ts"
+      - "src/lib/comandas.test.ts"
+      - "src/lib/salao*.ts"
+      - "src/lib/salao*.test.ts"
+      - ".github/workflows/salao-operacional-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: salao-operacional-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  salao-operacional-ci:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do SHA validado
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Testes focados e regressão do Salão
+        run: >-
+          npm test --
+          src/lib/comandas.test.ts
+          src/lib/salaoConta.test.ts
+          src/lib/salaoPagamento.test.ts
+          src/lib/salaoOperacao.test.ts
+          src/app/api/salao/comandas/route.test.ts
+          src/app/salao/page.test.tsx
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Lint dos arquivos alterados
+        run: >-
+          npm run lint --
+          src/lib/salaoAmbiente.ts
+          src/lib/salaoConta.ts
+          src/lib/salaoConta.server.ts
+          src/lib/salaoConta.test.ts
+          src/lib/salaoEnvioInicial.server.ts
+          src/lib/salaoOperacao.ts
+          src/lib/salaoOperacao.test.ts
+          src/lib/salaoPagamento.ts
+          src/lib/salaoPagamento.test.ts
+          src/app/api/salao/comandas/route.ts
+          src/app/api/salao/comandas/route.test.ts
+          src/app/api/salao/comandas/[id]/route.ts
+          src/app/api/salao/comandas/[id]/enviar/route.ts
+          src/app/api/salao/comandas/[id]/fechar/route.ts
+          src/app/api/salao/comandas/[id]/conta/route.ts
+          src/app/api/salao/comandas/[id]/rodadas/route.ts
+          src/app/api/salao/comandas/[id]/rodadas/[rodadaId]/route.ts
+          src/app/api/salao/comandas/[id]/rodadas/[rodadaId]/enviar/route.ts
+          src/app/api/salao/comandas/[id]/envios/[pedidoId]/servir/route.ts
+          src/app/api/salao/caixa/[id]/fechar/route.ts
+          src/app/api/salao/operacao/route.ts
+          src/app/salao/page.tsx
+          src/app/salao/page.test.tsx
+          src/app/salao/operacao/page.tsx
+          src/app/salao/layout.tsx
+          src/app/pedidos/salao/page.tsx
+          src/app/pedidos/layout.tsx
+          src/components/SalaoOperacaoNav.tsx
+          src/components/PedidosSalaoNav.tsx
+
+      - name: Build de produção
+        run: npm run build
