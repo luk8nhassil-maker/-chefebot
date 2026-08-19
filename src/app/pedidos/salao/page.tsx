@@ -83,11 +83,12 @@ export default function CaixaSalaoPage() {
   }, []);
 
   useEffect(() => {
-    void carregar();
+    const inicial = window.setTimeout(() => void carregar(), 0);
     const timer = window.setInterval(() => void carregar(), 4000);
     const onFocus = () => void carregar();
     window.addEventListener("focus", onFocus);
     return () => {
+      window.clearTimeout(inicial);
       window.clearInterval(timer);
       window.removeEventListener("focus", onFocus);
     };
@@ -139,8 +140,6 @@ export default function CaixaSalaoPage() {
       const data = await response.json().catch(() => null);
       if (!response.ok) {
         setErro(data?.error || "Não foi possível fechar esta conta.");
-        // Erros determinísticos significam que nenhum fechamento ficou
-        // pendente. Em falha 5xx/rede, mantemos o mesmo requestId para retry.
         if (response.status < 500) delete requestIds.current[comanda.id];
         await carregar();
         return;
