@@ -1,8 +1,8 @@
 // Atualização comercial dos pastéis, aprovada em 19/08/2026.
 //
-// Esta fonte é deliberadamente pequena e isolada para substituir somente o
-// bloco antigo "Pastel de Forno R$25" sem tocar nas demais categorias do
-// cardápio oficial. IDs são estáveis e preços ficam em centavos inteiros.
+// Esta fonte é deliberadamente pequena e isolada para ADICIONAR os novos
+// produtos ao cardápio sem remover o Pastel de Forno de R$25 já existente.
+// IDs são estáveis e preços ficam em centavos inteiros.
 
 export const PASTEL_CARNE_SECA_ATUAL = {
   id: "lanche-pastel-de-carne-seca",
