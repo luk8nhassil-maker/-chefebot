@@ -1,3 +1,4 @@
+import { deveSilenciarNovoAtendimentoWhatsapp } from "./assinaturaWhatsappGuard";
 import { obterConfigEvolution } from "./evolutionApi";
 import { maskMessageId } from "./sanitizeLog";
 
@@ -71,6 +72,20 @@ export async function enviarTextoWhatsApp(
   opts?: { delay?: number; presence?: "composing"; timeoutMs?: number }
 ): Promise<ResultadoEnvioWhatsApp> {
   const inicio = Date.now();
+
+  // Somente mensagens automáticas do bot (identificadas pelo `delay`) passam
+  // pelo gate de assinatura. Mensagens administrativas/operacionais sem
+  // delay continuam disponíveis, e o guard preserva conversas e pedidos já
+  // em andamento para nunca abandonar cliente no meio do fluxo.
+  if (opts?.delay !== undefined && await deveSilenciarNovoAtendimentoWhatsapp(phone)) {
+    return {
+      ok: true,
+      motivo: "subscription_silenced_new_contact",
+      latenciaMs: Date.now() - inicio,
+      tentativas: 0,
+    };
+  }
+
   const config = obterConfigEvolution();
   if (!config) {
     return { ok: false, motivo: "provider_not_configured", latenciaMs: Date.now() - inicio, tentativas: 0 };

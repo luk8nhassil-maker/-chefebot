@@ -1,0 +1,70 @@
+name: assinatura-chefebot-ci
+
+# Gate hermético das regras comerciais da mensalidade. Não recebe credencial
+# InfinitePay e, portanto, nunca cria cobrança real durante CI/Preview.
+on:
+  pull_request:
+    paths:
+      - "src/lib/assinaturaChefeBot.ts"
+      - "src/lib/assinaturaChefeBot.test.ts"
+      - "src/lib/assinaturaChefeBot.server.ts"
+      - "src/lib/assinaturaChefeBotUi.ts"
+      - "src/lib/assinaturaChefeBotUi.test.ts"
+      - "src/lib/assinaturaApiAuth.ts"
+      - "src/lib/assinaturaWhatsappGuard.ts"
+      - "src/lib/infinitePayAssinatura.ts"
+      - "src/lib/whatsappMensagem.ts"
+      - "src/components/AssinaturaChefeBotGate.tsx"
+      - "src/app/api/assinatura/**"
+      - "src/app/layout.tsx"
+      - "src/middleware.ts"
+      - ".env.example"
+      - ".github/workflows/assinatura-chefebot-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: assinatura-chefebot-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  assinatura-chefebot-ci:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do SHA validado
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Testes focados da assinatura
+        run: >-
+          npm test --
+          src/lib/assinaturaChefeBot.test.ts
+          src/lib/assinaturaChefeBotUi.test.ts
+
+      - name: Lint dos arquivos da assinatura
+        run: >-
+          npm run lint --
+          src/lib/assinaturaChefeBot.ts
+          src/lib/assinaturaChefeBot.test.ts
+          src/lib/assinaturaChefeBot.server.ts
+          src/lib/assinaturaChefeBotUi.ts
+          src/lib/assinaturaChefeBotUi.test.ts
+          src/lib/assinaturaApiAuth.ts
+          src/lib/assinaturaWhatsappGuard.ts
+          src/lib/infinitePayAssinatura.ts
+          src/lib/whatsappMensagem.ts
+          src/components/AssinaturaChefeBotGate.tsx
+          src/app/api/assinatura/status/route.ts
+          src/app/api/assinatura/checkout/route.ts
+          src/app/api/assinatura/confirmar/route.ts
+          src/app/api/assinatura/webhook/infinitepay/route.ts
+          src/app/api/assinatura/operacao/route.ts
+          src/app/layout.tsx
+          src/middleware.ts
