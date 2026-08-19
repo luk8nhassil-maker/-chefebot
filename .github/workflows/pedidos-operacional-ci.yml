@@ -15,7 +15,7 @@ on:
       - "src/app/api/orders-painel/route.ts"
       - "src/app/api/cron/route.ts"
       - "src/lib/numeracao.ts"
-      - "src/proxy.ts"
+      - "src/middleware.ts"
       - ".github/workflows/pedidos-operacional-ci.yml"
   workflow_dispatch:
 
@@ -59,4 +59,4 @@ jobs:
           src/app/api/orders-painel/route.ts
           src/app/api/cron/route.ts
           src/lib/numeracao.ts
-          src/proxy.ts
+          src/middleware.ts
