@@ -6,6 +6,14 @@ export type PagamentoContaSalao = {
   troco?: string;
 };
 
+type EntradaMonetaria = string | number | null | undefined;
+
+function entradaMonetaria(valor: unknown): EntradaMonetaria {
+  return typeof valor === "string" || typeof valor === "number" || valor === null || valor === undefined
+    ? valor
+    : undefined;
+}
+
 function pagamentoOficialSelecionado(valor: unknown, formasOficiais: string[]): string | null {
   if (typeof valor !== "string" || !valor.trim()) return null;
   const procurado = norm(valor);
@@ -36,7 +44,11 @@ export function validarPagamentoContaSalao(params: {
 
   const total = params.totalCentavos / 100;
   if (ehMisto(forma)) {
-    const composto = montarPagamentoComposto(params.valorPix, params.valorDinheiro, total);
+    const composto = montarPagamentoComposto(
+      entradaMonetaria(params.valorPix),
+      entradaMonetaria(params.valorDinheiro),
+      total,
+    );
     if (!composto.ok) return { ok: false, error: composto.erro };
     return { ok: true, valor: { pagamento: composto.valor } };
   }
