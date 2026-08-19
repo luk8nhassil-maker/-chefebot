@@ -11,12 +11,19 @@ import {
   type EstadoAssinaturaChefeBot,
   type PlanoAssinaturaId,
 } from "./assinaturaChefeBot";
+import {
+  ACESSO_TEMPORARIO_CHEFEBOT_MINUTOS,
+  avaliarAcessoTemporarioChefeBot,
+  criarRegistroAcessoTemporarioChefeBot,
+  type RegistroAcessoTemporarioChefeBot,
+} from "./assinaturaChefeBotAcessoTemporario";
 
 // Namespace exclusivo do ChefeBot. Nunca reutiliza chaves/dados da São Francisco.
 const STATE_KEY = "assinatura:chefebot:v1:state";
 const INVOICE_PREFIX = "assinatura:chefebot:v1:invoice:";
 const TRANSACTION_PREFIX = "assinatura:chefebot:v1:transaction:";
 const SETTLEMENT_PREFIX = "assinatura:chefebot:v1:settlement:";
+const TEMPORARY_ACCESS_PREFIX = "assinatura:chefebot:v1:temporary-access:";
 
 export type TipoFaturaAssinatura = "monthly" | "upgrade";
 
@@ -61,19 +68,47 @@ export async function salvarEstadoAssinaturaChefeBot(estado: EstadoAssinaturaChe
   await redis.set(STATE_KEY, { ...estado, updatedAt: new Date().toISOString() });
 }
 
-export async function statusAssinaturaChefeBot(hoje = formatarDataLocalChefeBot()) {
+function temporaryAccessKey(dueDate: string) {
+  return `${TEMPORARY_ACCESS_PREFIX}${dueDate}`;
+}
+
+async function lerRegistroAcessoTemporarioChefeBot(dueDate: string): Promise<RegistroAcessoTemporarioChefeBot | null> {
+  return redis.get<RegistroAcessoTemporarioChefeBot>(temporaryAccessKey(dueDate)).catch(() => null);
+}
+
+export async function statusAssinaturaChefeBot(
+  hoje = formatarDataLocalChefeBot(),
+  agora = new Date(),
+) {
   const estado = await lerEstadoAssinaturaChefeBot();
   const avaliacao = avaliarAssinaturaChefeBot(estado, hoje);
   const configured = assinaturaInfinitePayConfigurada();
+  const registroAcesso = await lerRegistroAcessoTemporarioChefeBot(estado.nextDueDate);
+  const acesso = avaliarAcessoTemporarioChefeBot({
+    registro: registroAcesso,
+    dueDate: estado.nextDueDate,
+    agora,
+  });
+  const cobrancaBloqueante = configured && avaliacao.blocked;
+  const acessoAtivo = cobrancaBloqueante && acesso.active;
+
   return {
     estado,
     avaliacao: {
       ...avaliacao,
-      // Fail-open operacional: sem a credencial própria do ChefeBot não há lockout.
-      blocked: configured && avaliacao.blocked,
+      // A janela de 60 min suspende somente o bloqueio operacional. A dívida continua pendente.
+      blocked: cobrancaBloqueante && !acessoAtivo,
     },
     configured,
     plans: Object.values(PLANOS_ASSINATURA_CHEFEBOT),
+    temporaryAccess: {
+      active: acessoAtivo,
+      available: cobrancaBloqueante && !acesso.used,
+      used: acesso.used,
+      endsAt: acessoAtivo ? acesso.endsAt : null,
+      remainingMs: acessoAtivo ? acesso.remainingMs : 0,
+      durationMinutes: ACESSO_TEMPORARIO_CHEFEBOT_MINUTOS,
+    },
   };
 }
 
@@ -81,6 +116,48 @@ export async function assinaturaBloqueiaOperacao(): Promise<boolean> {
   if (!assinaturaInfinitePayConfigurada()) return false;
   const { avaliacao } = await statusAssinaturaChefeBot();
   return avaliacao.blocked;
+}
+
+export async function iniciarAcessoTemporarioChefeBot(
+  agora = new Date(),
+): Promise<
+  | { ok: true; alreadyStarted: boolean; endsAt: string }
+  | { ok: false; reason: "billing_not_configured" | "subscription_not_blocked" | "temporary_access_already_used" }
+> {
+  if (!assinaturaInfinitePayConfigurada()) return { ok: false, reason: "billing_not_configured" };
+
+  const estado = await lerEstadoAssinaturaChefeBot();
+  const hoje = formatarDataLocalChefeBot(agora);
+  const avaliacao = avaliarAssinaturaChefeBot(estado, hoje);
+  if (!avaliacao.blocked) return { ok: false, reason: "subscription_not_blocked" };
+
+  const atual = await lerRegistroAcessoTemporarioChefeBot(estado.nextDueDate);
+  const estadoAtual = avaliarAcessoTemporarioChefeBot({
+    registro: atual,
+    dueDate: estado.nextDueDate,
+    agora,
+  });
+  if (estadoAtual.active && estadoAtual.endsAt) {
+    return { ok: true, alreadyStarted: true, endsAt: estadoAtual.endsAt };
+  }
+  if (estadoAtual.used) return { ok: false, reason: "temporary_access_already_used" };
+
+  const novoRegistro = criarRegistroAcessoTemporarioChefeBot(estado.nextDueDate, agora);
+  const claimed = await redis.set(temporaryAccessKey(estado.nextDueDate), novoRegistro, { nx: true });
+  if (claimed) return { ok: true, alreadyStarted: false, endsAt: novoRegistro.expiresAt };
+
+  // Duas telas podem clicar ao mesmo tempo. O segundo processo reaproveita a janela vencedora.
+  const vencedor = await lerRegistroAcessoTemporarioChefeBot(estado.nextDueDate);
+  const estadoVencedor = avaliarAcessoTemporarioChefeBot({
+    registro: vencedor,
+    dueDate: estado.nextDueDate,
+    agora,
+  });
+  if (estadoVencedor.active && estadoVencedor.endsAt) {
+    return { ok: true, alreadyStarted: true, endsAt: estadoVencedor.endsAt };
+  }
+
+  return { ok: false, reason: "temporary_access_already_used" };
 }
 
 function invoiceKey(orderNsu: string) {
