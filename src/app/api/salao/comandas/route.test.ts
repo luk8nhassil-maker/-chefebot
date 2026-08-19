@@ -97,6 +97,70 @@ describe("GET /api/salao/comandas", () => {
     expect(data.comandas[0].rodadas[0].status).toBe("rascunho");
     expect(data.comandas[0].totalParcial).toBe(0);
   });
+
+  it("anexa à rodada enviada somente o status real do pedido oficial correspondente", async () => {
+    const token = await criarTokenSalao();
+    store.set("salao:comandas", [{
+      id: "comanda_1",
+      numero: 1,
+      cliente: "Ana",
+      mesa: "5",
+      itens: [],
+      status: "enviada",
+      abertaEm: "2026-08-16T20:00:00.000Z",
+      rodadas: [{
+        id: "rodada_1",
+        numero: 1,
+        status: "enviada",
+        itens: [],
+        subtotal: 30,
+        criadaEm: "2026-08-16T20:00:00.000Z",
+        atualizadaEm: "2026-08-16T20:02:00.000Z",
+        enviadaEm: "2026-08-16T20:02:00.000Z",
+        pedidoId: "pedido_abc",
+      }],
+    }]);
+    store.set("pedidos", [
+      { id: "pedido_outro", status: "entregue", cliente: "Não deve vazar" },
+      { id: "pedido_abc", status: "saiu_entrega", statusAtualizadoEm: "2026-08-16T20:15:00.000Z", cliente: "Dado privado" },
+    ]);
+
+    const res = await GET(reqSalao(token));
+    const data = await res.json();
+    expect(data.comandas[0].rodadas[0]).toMatchObject({
+      pedidoId: "pedido_abc",
+      pedidoStatus: "saiu_entrega",
+      pedidoStatusAtualizadoEm: "2026-08-16T20:15:00.000Z",
+    });
+    expect(data.comandas[0].rodadas[0].cliente).toBeUndefined();
+  });
+
+  it("status ausente ou desconhecido não é inventado na resposta", async () => {
+    const token = await criarTokenSalao();
+    store.set("salao:comandas", [{
+      id: "comanda_1",
+      numero: 1,
+      cliente: "Ana",
+      itens: [],
+      status: "enviada",
+      abertaEm: "2026-08-16T20:00:00.000Z",
+      rodadas: [{
+        id: "rodada_1",
+        numero: 1,
+        status: "enviada",
+        itens: [],
+        subtotal: 0,
+        criadaEm: "2026-08-16T20:00:00.000Z",
+        atualizadaEm: "2026-08-16T20:00:00.000Z",
+        pedidoId: "pedido_abc",
+      }],
+    }]);
+    store.set("pedidos", [{ id: "pedido_abc", status: "estado_desconhecido" }]);
+
+    const res = await GET(reqSalao(token));
+    const data = await res.json();
+    expect(data.comandas[0].rodadas[0].pedidoStatus).toBeUndefined();
+  });
 });
 
 describe("POST /api/salao/comandas (abrir)", () => {
