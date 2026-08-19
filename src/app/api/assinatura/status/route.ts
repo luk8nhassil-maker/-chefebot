@@ -24,6 +24,7 @@ export async function GET(req: NextRequest) {
       paidThroughDate: status.estado.paidThroughDate ?? null,
       plans: status.plans,
       canManage: ["admin", "dev", "financeiro"].includes(user.role),
+      temporaryAccess: status.temporaryAccess,
     }, { headers: { "Cache-Control": "no-store" } });
   } catch {
     return NextResponse.json({ ok: false, error: "billing_status_unavailable", blocked: false }, { status: 503 });
