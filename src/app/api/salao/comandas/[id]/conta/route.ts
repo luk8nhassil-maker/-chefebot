@@ -24,7 +24,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       const code = "code" in resultado && typeof resultado.code === "string" ? resultado.code : undefined;
       return NextResponse.json({ ok: false, error: resultado.error, ...(code ? { code } : {}) }, { status: resultado.status });
     }
-    return NextResponse.json({ ok: true, ...resultado });
+    return NextResponse.json(resultado);
   } catch (error) {
     console.error("[Salão] Falha ao atualizar conta:", error instanceof Error ? error.message : "erro desconhecido");
     return NextResponse.json({ ok: false, error: "Não foi possível atualizar a conta agora." }, { status: 503 });
