@@ -5,6 +5,7 @@ import {
   HAMBURGUERES,
   LANCHES_FIXOS,
   MACARRONADAS,
+  PASTEL_FORNO_FLAVORS,
   PIZZA_BORDERS,
   PIZZA_FLAVORS,
   PIZZA_SIZES,
@@ -55,6 +56,7 @@ function menorPrecoPizza(sizeCode: string): number {
  */
 export function buildBotMenu2026(operationalMenu: Menu): BotMenu {
   const calzoneFlavors = CALZONE_FLAVORS.map((flavor) => flavor.displayLabel ?? flavor.name);
+  const pastelFornoFlavors = PASTEL_FORNO_FLAVORS.map((flavor) => flavor.displayLabel ?? flavor.name);
   const flavorPriceMap = Object.fromEntries(
     CALZONE_FLAVORS.map((flavor) => [flavor.displayLabel ?? flavor.name, reais(flavor.priceCents)]),
   );
@@ -80,9 +82,14 @@ export function buildBotMenu2026(operationalMenu: Menu): BotMenu {
     ...LANCHES_FIXOS.slice(0, 1).map((produto) => ({ name: produto.name, price: reais(produto.priceCents), hasFlavors: false, flavorsKey: "" })),
     ...HAMBURGUERES.slice(3).map((produto) => ({ name: produto.name, price: reais(produto.priceCents), hasFlavors: false, flavorsKey: "" })),
     ...LANCHES_FIXOS.slice(1).map((produto) => ({ name: produto.name, price: reais(produto.priceCents), hasFlavors: false, flavorsKey: "" })),
-    // O item genérico antigo "Pastel de Forno" de R$25 foi removido.
-    // Pastel de Carne Seca (R$12) já está em LANCHES_FIXOS com o ID histórico
-    // preservado; o Pastel de Feira usa agora os 6 recheios aprovados.
+    {
+      name: "Pastel de Forno",
+      price: reais(PASTEL_FORNO_FLAVORS[0]?.priceCents ?? 0),
+      hasFlavors: true,
+      flavorsKey: "pastelFornoFlavors",
+      flavorsMode: "own",
+      flavors: pastelFornoFlavors,
+    },
     {
       name: PASTEL_FEIRA_ATUAL.name,
       price: reais(PASTEL_FEIRA_ATUAL.priceCents),
