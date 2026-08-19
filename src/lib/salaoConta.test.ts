@@ -5,6 +5,7 @@ import {
   contaBloqueiaNovosItens,
   descreverStatusPedidoSalao,
   estadoInicialContaSalao,
+  subtotalEnvioCentavos,
   totalAtivoCentavos,
   type EnvioOperacionalSalao,
 } from "./salaoConta";
@@ -61,6 +62,19 @@ describe("Salão — pedir conta", () => {
     const envios = [envio(), envio({ rodadaId: "r2", numero: 2, pedidoId: "pedido-2", subtotalCentavos: 9000, status: "cancelado" })];
     expect(totalAtivoCentavos(envios)).toBe(1000);
     expect(avaliarSolicitacaoConta({ envios, temRodadaEmAndamento: false })).toEqual({ ok: true, totalCentavos: 1000 });
+  });
+
+  it("depois do envio usa o total histórico do pedido oficial, não o subtotal antigo da comanda", () => {
+    expect(subtotalEnvioCentavos({
+      subtotalRodada: 39,
+      pedidoId: "pedido-1",
+      totalPedidoOficial: 42.5,
+    })).toBe(4250);
+
+    expect(subtotalEnvioCentavos({
+      subtotalRodada: 39,
+      pedidoId: "pedido-1",
+    })).toBe(3900);
   });
 });
 
