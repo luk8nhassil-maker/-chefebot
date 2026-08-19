@@ -64,38 +64,49 @@ describe("buildSimpleCatalog — Calzone (flavor_priced, 12 sabores, preço por 
   });
 });
 
-describe("buildSimpleCatalog — Pastel de Forno (single_flavor, 12 sabores, todos R$25)", () => {
-  it("12 sabores, todos com priceCents do PRODUTO (25,00), sabor nunca muda o preço", () => {
+describe("buildSimpleCatalog — Pastéis atualizados", () => {
+  it("a seção compatível `pastelForno` contém somente Carne Seca e Feira", () => {
     const catalog = buildSimpleCatalog(MENU);
-    const pastel = produto("Pastel de Forno", catalog);
+    expect(catalog.pastelForno.map((p) => p.name)).toEqual([
+      "Pastel de Carne Seca",
+      "Pastel de Feira",
+    ]);
+    expect(catalog.lanches.some((p) => p.name === "Pastel de Carne Seca")).toBe(false);
+    expect(catalog.lanches.some((p) => p.name === "Pastel de Feira")).toBe(false);
+    expect(todosOsProdutos(catalog).some((p) => p.name === "Pastel de Forno")).toBe(false);
+  });
+
+  it("Pastel de Carne Seca é fixed, R$12, com ID histórico preservado", () => {
+    const catalog = buildSimpleCatalog(MENU);
+    const pastel = produto("Pastel de Carne Seca", catalog);
+    expect(pastel.id).toBe("lanche-pastel-de-carne-seca");
+    expect(pastel.strategy).toBe("fixed");
+    expect(pastel.priceCents).toBe(1200);
+    expect(pastel.ingredients).toContain("Carne de sol");
+  });
+
+  it("Pastel de Feira custa R$8 e exige 1 dos 6 recheios do cardápio", () => {
+    const catalog = buildSimpleCatalog(MENU);
+    const pastel = produto("Pastel de Feira", catalog);
     expect(pastel.strategy).toBe("single_flavor");
-    expect(pastel.priceCents).toBe(2500);
-    expect(pastel.flavors).toHaveLength(12);
-  });
-
-  it("os mesmos 12 nomes de sabor do Calzone", () => {
-    const catalog = buildSimpleCatalog(MENU);
-    const calzone = produto("Calzone", catalog);
-    const pastel = produto("Pastel de Forno", catalog);
-    expect(pastel.flavors!.map((f) => f.name).sort()).toEqual(calzone.flavors!.map((f) => f.name).sort());
-  });
-});
-
-describe("buildSimpleCatalog — Pastel de Feira (single_flavor, dentro de Lanches, 6 recheios próprios)", () => {
-  it("está em `lanches`, R$8,00, 6 recheios, recheios NÃO reaproveitam flavorId de pizza", () => {
-    const catalog = buildSimpleCatalog(MENU);
-    const pastelFeira = catalog.lanches.find((l) => l.name === "Pastel de Feira")!;
-    expect(pastelFeira.strategy).toBe("single_flavor");
-    expect(pastelFeira.priceCents).toBe(800);
-    expect(pastelFeira.flavors).toHaveLength(6);
-    for (const recheio of pastelFeira.flavors!) {
-      expect(recheio.id.startsWith("pastel-feira-")).toBe(true);
-    }
+    expect(pastel.priceCents).toBe(800);
+    expect(pastel.flavors?.map((f) => f.name)).toEqual([
+      "Carne",
+      "Frango",
+      "Frango com Catupiri",
+      "Queijo",
+      "Calabresa",
+      "Queijo com Presunto",
+    ]);
+    expect(pastel.flavors?.find((f) => f.name === "Carne")).toMatchObject({
+      id: "pastel-feira-carne",
+      ingredients: "Carne moída, milho e ervilha.",
+    });
   });
 
   it("ID próprio de Calabresa esgota só o recheio do Pastel de Feira", () => {
     const catalog = buildSimpleCatalog(MENU, [], ["pastel-feira-calabresa"]);
-    const pastelFeira = catalog.lanches.find((l) => l.name === "Pastel de Feira")!;
+    const pastelFeira = produto("Pastel de Feira", catalog);
     const calzone = produto("Calzone", catalog);
     expect(pastelFeira.flavors!.find((f) => f.name === "Calabresa")?.available).toBe(false);
     expect(calzone.flavors!.find((f) => f.name === "Calabresa")?.available).toBe(true);
