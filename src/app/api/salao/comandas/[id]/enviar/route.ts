@@ -3,29 +3,35 @@ import { lerSessaoSalao } from "@/lib/salaoAuth";
 import { buscarComanda, identificacaoClienteComanda, marcarComandaEnviada, PAGAMENTO_COMANDA_EM_ABERTO } from "@/lib/comandas";
 import { gerarClientRequestId, sanitizeClientRequestId } from "@/survival/clientRequestId";
 import { POST as criarPedidoApp } from "@/app/api/pedido-app/route";
+import { podeAdicionarItensNaComanda } from "@/lib/salaoConta.server";
+import { ERRO_ESCRITA_SALAO_PREVIEW, escritaSalaoBloqueadaNoPreview } from "@/lib/salaoAmbiente";
+import {
+  confirmarEnvioInicialSalao,
+  liberarEnvioInicialSalao,
+  reivindicarEnvioInicialSalao,
+} from "@/lib/salaoEnvioInicial.server";
 
 export const dynamic = "force-dynamic";
 
-// "Enviar para a cozinha" do primeiro pedido (Rodada 1/"Pedido inicial") da
-// comanda: cria o pedido de verdade chamando a MESMA rota de criação de
-// pedido de sempre (POST /api/pedido-app, em processo — nunca um segundo
-// motor de pedido). Preço, catálogo, estoque e idempotência continuam
-// sendo decididos inteiramente por aquela rota; esta só monta o payload a
-// partir da comanda e repassa o cookie de sessão do Salão real (a mesma
-// verificação server-side roda de novo lá dentro).
-//
-// Sem pagamento aqui: assim como Rodada 2+ (ver .../rodadas/[rodadaId]/
-// enviar), o Salão só manda para a cozinha — o pagamento de verdade só
-// acontece quando o caixa fechar a conta, em uma etapa futura. O pedido é
-// gravado com PAGAMENTO_COMANDA_EM_ABERTO, o mesmo marcador "pendente" já
-// usado por Rodada 2+, nunca Pix/Dinheiro/Cartão/Misto.
+// "Enviar para a cozinha" do primeiro pedido: cria o pedido de verdade pela
+// MESMA rota oficial /api/pedido-app. O claim por comanda fecha o duplo-clique
+// mesmo quando duas abas chegam com clientRequestId diferentes. Resultado é
+// persistido antes do bookkeeping da comanda, então retry recupera o mesmo
+// pedido se a resposta se perder depois da criação.
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const sessaoSalao = await lerSessaoSalao(req);
   if (!sessaoSalao) {
     return NextResponse.json({ ok: false, error: "Não autorizado" }, { status: 401 });
   }
+  if (escritaSalaoBloqueadaNoPreview()) {
+    return NextResponse.json({ ok: false, error: ERRO_ESCRITA_SALAO_PREVIEW }, { status: 403 });
+  }
 
   const { id } = await params;
+  if (!(await podeAdicionarItensNaComanda(id))) {
+    return NextResponse.json({ ok: false, error: "A conta já foi solicitada. Continue o atendimento antes de enviar novos itens." }, { status: 409 });
+  }
+
   let body: { clientRequestId?: string };
   try {
     body = await req.json();
@@ -37,10 +43,38 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!comanda) {
     return NextResponse.json({ ok: false, error: "Comanda não encontrada" }, { status: 404 });
   }
+  if (comanda.status === "fechada") {
+    return NextResponse.json({ ok: false, error: "Esta comanda já está fechada" }, { status: 409 });
+  }
+
+  const reivindicacao = await reivindicarEnvioInicialSalao(id);
+  if (!reivindicacao.ok) {
+    return NextResponse.json(
+      {
+        ok: false,
+        unresolved: reivindicacao.motivo === "indisponivel",
+        error: reivindicacao.motivo === "em_processamento"
+          ? "O pedido inicial já está sendo enviado. Aguarde alguns segundos antes de tentar novamente."
+          : "Não foi possível confirmar se o envio inicial já começou. Aguarde e tente novamente.",
+      },
+      { status: reivindicacao.motivo === "em_processamento" ? 409 : 503 },
+    );
+  }
+
+  if (reivindicacao.tipo === "resultado") {
+    if (comanda.status === "aberta") {
+      await marcarComandaEnviada(id, reivindicacao.resultado.pedidoId, reivindicacao.resultado.numero).catch(() => null);
+    }
+    return NextResponse.json({ ok: true, ...reivindicacao.resultado, recuperado: true });
+  }
+
+  const claimToken = reivindicacao.token;
   if (comanda.status !== "aberta") {
-    return NextResponse.json({ ok: false, error: "Esta comanda não está mais aberta" }, { status: 409 });
+    await liberarEnvioInicialSalao(id, claimToken);
+    return NextResponse.json({ ok: false, error: "O pedido inicial desta comanda já foi enviado" }, { status: 409 });
   }
   if (comanda.itens.length === 0) {
+    await liberarEnvioInicialSalao(id, claimToken);
     return NextResponse.json({ ok: false, error: "Adicione pelo menos um item antes de enviar" }, { status: 422 });
   }
 
@@ -53,9 +87,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     .filter(Boolean)
     .join(" — ");
 
-  // Reaproveita o clientRequestId gerado pela tela de revisão (retry da
-  // mesma tentativa) — só gera um novo se, por algum motivo, nenhum vier no
-  // corpo (nunca deixa a requisição sem idempotência).
   const clientRequestId = sanitizeClientRequestId(body.clientRequestId) ?? (() => {
     try {
       return gerarClientRequestId();
@@ -67,10 +98,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const payloadPedidoApp = {
     cliente: identificacaoCliente,
     usarOutroWhatsapp: true,
-    // pizzaSelection (IDs oficiais, Fase 5) e simpleSelection (Fase 6)
-    // preservados quando o item os carrega — já validados/canonicalizados em
-    // validarItensComanda no PATCH que gravou este item; POST /api/pedido-app
-    // reprecifica de novo pelo motor nativo, nunca confia neste payload.
     itens: comanda.itens.map((i) => ({
       kind: i.kind,
       name: i.name,
@@ -86,37 +113,41 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     ...(clientRequestId ? { clientRequestId } : {}),
   };
 
-  // Mesma requisição real (mesmos cookies do navegador do Salão) — a rota
-  // de criação de pedido verifica a sessão do Salão de novo, por conta
-  // própria, antes de dispensar o telefone.
   const requisicaoInterna = {
     json: async () => payloadPedidoApp,
     cookies: req.cookies,
   } as unknown as NextRequest;
 
-  const respostaPedido = await criarPedidoApp(requisicaoInterna);
-  const dadosPedido = await respostaPedido.json().catch(() => null);
+  let respostaPedido;
+  let dadosPedido;
+  try {
+    respostaPedido = await criarPedidoApp(requisicaoInterna);
+    dadosPedido = await respostaPedido.json().catch(() => null);
+  } catch {
+    // Resultado incerto: NÃO libera o claim. O TTL impede um segundo pedido
+    // enquanto não sabemos se o primeiro chegou a ser persistido.
+    return NextResponse.json({ ok: false, unresolved: true, error: "Não foi possível confirmar o envio. Aguarde antes de tentar novamente." }, { status: 503 });
+  }
 
   if (!respostaPedido.ok || !dadosPedido?.ok) {
+    const resultadoIncerto = respostaPedido.status >= 500 || dadosPedido?.unresolved === true;
+    if (!resultadoIncerto) await liberarEnvioInicialSalao(id, claimToken);
     return NextResponse.json(
-      { ok: false, error: dadosPedido?.error || "Não foi possível criar o pedido agora." },
-      { status: respostaPedido.status || 500 }
+      { ok: false, ...(resultadoIncerto ? { unresolved: true } : {}), error: dadosPedido?.error || "Não foi possível criar o pedido agora." },
+      { status: respostaPedido.status || 500 },
     );
   }
 
-  const resultado = await marcarComandaEnviada(id, String(dadosPedido.pedidoId ?? ""), dadosPedido.numero);
+  const pedidoId = String(dadosPedido.pedidoId ?? "");
+  const numero = typeof dadosPedido.numero === "number" ? dadosPedido.numero : undefined;
+  const total = typeof dadosPedido.total === "number" ? dadosPedido.total : 0;
+  const resultadoDuravel = { pedidoId, numero, total, criadoEm: new Date().toISOString() };
+
+  await confirmarEnvioInicialSalao(id, claimToken, resultadoDuravel);
+  const resultado = await marcarComandaEnviada(id, pedidoId, numero);
   if (resultado === "nao_encontrada" || resultado === "nao_esta_aberta") {
-    // O pedido já foi criado com sucesso; só a marcação da comanda é que não
-    // pôde ser feita (corrida rara). Nunca reportamos falha ao Salão por
-    // isto — o pedido está correto e visível no painel de qualquer forma.
-    return NextResponse.json({ ok: true, pedidoId: dadosPedido.pedidoId, numero: dadosPedido.numero, total: dadosPedido.total });
+    return NextResponse.json({ ok: true, ...resultadoDuravel });
   }
 
-  return NextResponse.json({
-    ok: true,
-    pedidoId: dadosPedido.pedidoId,
-    numero: dadosPedido.numero,
-    total: dadosPedido.total,
-    comanda: resultado,
-  });
+  return NextResponse.json({ ok: true, ...resultadoDuravel, comanda: resultado });
 }
