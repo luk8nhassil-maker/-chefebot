@@ -2,8 +2,8 @@
 //
 // Fonte comercial principal: @/lib/catalog/officialMenu2026. O bloco de
 // pastéis recebeu uma atualização comercial isolada em
-// @/lib/catalog/pasteisAtualizados para substituir o item antigo de R$25 sem
-// mexer nas demais categorias já validadas.
+// @/lib/catalog/pasteisAtualizados para ADICIONAR novos produtos sem remover
+// o Pastel de Forno já existente.
 //
 // Esta camada só ADICIONA disponibilidade EM TEMPO REAL (mesma lista
 // "esgotados" usada pelo bot do WhatsApp, pelo cardápio do cliente e pela
@@ -15,7 +15,8 @@
 //   - "size"           — o produto tem `sizes[]` (Macarronada); pode
 //                         carregar `addOnGroup`.
 //   - "single_flavor"  — exige exatamente 1 sabor/recheio, preço do
-//                         PRODUTO nunca muda por sabor (Pastel de Feira).
+//                         PRODUTO nunca muda por sabor (Pastel de Forno e
+//                         Pastel de Feira).
 //   - "flavor_priced"  — exige exatamente 1 sabor, e o preço vem do
 //                         PRÓPRIO SABOR (Calzone).
 //   - "milk"           — produto está na seção Sucos; com/sem leite.
@@ -28,6 +29,7 @@ import {
   LANCHES_FIXOS,
   MACARRONADAS,
   MACARRONADA_ADICIONAL_GRUPO,
+  PASTEL_FORNO_FLAVORS,
   SUCOS,
   VITAMINAS,
 } from "./officialMenu2026";
@@ -75,11 +77,7 @@ export interface SimpleCatalog {
   lanches: SimpleCatalogProduct[];
   hamburgueres: SimpleCatalogProduct[];
   calzone: SimpleCatalogProduct[];
-  /**
-   * Nome interno histórico mantido para compatibilidade com a UI já
-   * publicada. A seção agora representa "Pastéis" e contém exatamente:
-   * Pastel de Carne Seca + Pastel de Feira.
-   */
+  /** Nome interno histórico mantido para compatibilidade com a UI. */
   pastelForno: SimpleCatalogProduct[];
   macarronadas: SimpleCatalogProduct[];
   sucos: SimpleCatalogProduct[];
@@ -100,9 +98,8 @@ export function buildSimpleCatalog(_menu: Menu, esgotados: readonly string[] = [
   const esgotadosIds = new Set(idsEsgotados);
   const disponivel = (nome: string, id: string) => !estaEsgotado(nome, esgotadosNorm) && !esgotadosIds.has(id);
 
-  // Pastel de Carne Seca saiu de "Lanches" e agora vive junto do Pastel de
-  // Feira na seção de pastéis. O ID foi PRESERVADO para não perder estado de
-  // disponibilidade/novidade já existente.
+  // Pastel de Carne Seca vive junto dos demais pastéis na tela, mas preserva
+  // o ID histórico para não perder estado de disponibilidade/novidade.
   const lanches: SimpleCatalogProduct[] = LANCHES_FIXOS
     .filter((produto) => produto.id !== PASTEL_CARNE_SECA_ATUAL.id)
     .map((produto) => ({
@@ -144,10 +141,25 @@ export function buildSimpleCatalog(_menu: Menu, esgotados: readonly string[] = [
     },
   ];
 
-  // Mantém a chave interna `pastelForno` para não quebrar a UI já publicada,
-  // mas remove o produto genérico antigo "Pastel de Forno" de R$25.
-  // A tela passa a receber exatamente os dois produtos aprovados agora.
+  const pastelFornoFlavors: SimpleCatalogFlavor[] = PASTEL_FORNO_FLAVORS.map((sabor) => ({
+    id: sabor.flavorId,
+    name: sabor.displayLabel ?? sabor.name,
+    available: disponivel(sabor.name, sabor.flavorId),
+    displayLabel: sabor.displayLabel,
+    ingredients: sabor.ingredients,
+  }));
+
+  // Mantém os três produtos juntos: o Pastel de Forno original de R$25 e os
+  // dois produtos adicionados agora. Nada do cardápio anterior é removido.
   const pastelForno: SimpleCatalogProduct[] = [
+    {
+      id: "product-pastel-de-forno",
+      name: "Pastel de Forno",
+      priceCents: PASTEL_FORNO_FLAVORS[0]?.priceCents ?? 0,
+      available: disponivel("Pastel de Forno", "product-pastel-de-forno"),
+      strategy: "single_flavor",
+      flavors: pastelFornoFlavors,
+    },
     {
       id: PASTEL_CARNE_SECA_ATUAL.id,
       name: PASTEL_CARNE_SECA_ATUAL.name,
