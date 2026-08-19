@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { lerSessaoSalao } from "@/lib/salaoAuth";
 import { atualizarItensComanda, validarItensComanda } from "@/lib/comandas";
+import { podeAdicionarItensNaComanda } from "@/lib/salaoConta.server";
+import { ERRO_ESCRITA_SALAO_PREVIEW, escritaSalaoBloqueadaNoPreview } from "@/lib/salaoAmbiente";
 
 export const dynamic = "force-dynamic";
 
@@ -13,8 +15,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (!sessaoSalao) {
     return NextResponse.json({ ok: false, error: "Não autorizado" }, { status: 401 });
   }
+  if (escritaSalaoBloqueadaNoPreview()) {
+    return NextResponse.json({ ok: false, error: ERRO_ESCRITA_SALAO_PREVIEW }, { status: 403 });
+  }
 
   const { id } = await params;
+  if (!(await podeAdicionarItensNaComanda(id))) {
+    return NextResponse.json({ ok: false, error: "A conta já foi solicitada. Continue o atendimento antes de alterar os itens." }, { status: 409 });
+  }
+
   let body: { itens?: unknown; observacao?: string; complemento?: string };
   try {
     body = await req.json();
