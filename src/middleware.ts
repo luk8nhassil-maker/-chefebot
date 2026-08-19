@@ -11,13 +11,7 @@ function veioDaTelaPedidos(req: NextRequest): boolean {
   }
 }
 
-/**
- * Next.js 16 Proxy, restrito EXCLUSIVAMENTE a GET /api/orders originado da
- * tela /pedidos. Assim o painel ganha a projeção do expediente sem alterar o
- * contrato histórico de /api/orders para Financeiro, detalhe, integrações ou
- * qualquer outro consumidor.
- */
-export function proxy(req: NextRequest) {
+export function middleware(req: NextRequest) {
   if (req.method !== "GET") return NextResponse.next();
   if (req.nextUrl.searchParams.get("arquivados") === "true") return NextResponse.next();
   if (!veioDaTelaPedidos(req)) return NextResponse.next();
