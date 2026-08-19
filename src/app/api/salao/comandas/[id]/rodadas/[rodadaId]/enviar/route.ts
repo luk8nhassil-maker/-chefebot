@@ -12,6 +12,8 @@ import {
 } from "@/lib/comandas";
 import { sanitizeClientRequestId } from "@/survival/clientRequestId";
 import { POST as criarPedidoApp } from "@/app/api/pedido-app/route";
+import { podeAdicionarItensNaComanda } from "@/lib/salaoConta.server";
+import { ERRO_ESCRITA_SALAO_PREVIEW, escritaSalaoBloqueadaNoPreview } from "@/lib/salaoAmbiente";
 
 export const dynamic = "force-dynamic";
 
@@ -30,8 +32,15 @@ export async function POST(
   if (!sessaoSalao) {
     return NextResponse.json({ ok: false, error: "Não autorizado" }, { status: 401 });
   }
+  if (escritaSalaoBloqueadaNoPreview()) {
+    return NextResponse.json({ ok: false, error: ERRO_ESCRITA_SALAO_PREVIEW }, { status: 403 });
+  }
 
   const { id, rodadaId } = await params;
+  if (!(await podeAdicionarItensNaComanda(id))) {
+    return NextResponse.json({ ok: false, error: "A conta já foi solicitada. Continue o atendimento antes de enviar novos itens." }, { status: 409 });
+  }
+
   let body: { clientRequestId?: string };
   try {
     body = await req.json();
@@ -109,11 +118,6 @@ export async function POST(
   const payloadPedidoApp = {
     cliente: identificacaoCliente,
     usarOutroWhatsapp: true,
-    // pizzaSelection (IDs oficiais, Fase 5) e simpleSelection (Fase 6)
-    // preservados — validacao.itens já vem de validarItensComanda
-    // (reprecificação em profundidade acima), que só anexa esses campos
-    // quando resolveu contra o catálogo oficial fresco; POST /api/pedido-app
-    // reprecifica de novo pelo motor nativo, nunca confia neste payload.
     itens: validacao.itens.map((i) => ({
       kind: i.kind,
       name: i.name,
@@ -129,9 +133,6 @@ export async function POST(
     clientRequestId,
   };
 
-  // Mesma requisição real (mesmos cookies do navegador do Salão) — a rota de
-  // criação de pedido verifica a sessão do Salão de novo, por conta própria,
-  // antes de dispensar o telefone.
   const requisicaoInterna = {
     json: async () => payloadPedidoApp,
     cookies: req.cookies,
