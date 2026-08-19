@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { lerSessaoSalao } from "@/lib/salaoAuth";
 import { atualizarItensRodada, totalParcialComanda, validarItensComanda } from "@/lib/comandas";
+import { podeAdicionarItensNaComanda } from "@/lib/salaoConta.server";
+import { ERRO_ESCRITA_SALAO_PREVIEW, escritaSalaoBloqueadaNoPreview } from "@/lib/salaoAmbiente";
 
 export const dynamic = "force-dynamic";
 
@@ -10,7 +12,7 @@ export const dynamic = "force-dynamic";
 // atual e completa de itens da rodada, nunca um diff. Preço sempre
 // recalculado no servidor contra o cardápio oficial. Uma rodada em
 // rascunho pode ficar momentaneamente vazia (removeu o último item antes
-// de adicionar outro) — só a Rodada 1/envio para a cozinha exige itens.
+// de adicionar outro) — só o envio para a cozinha exige itens.
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; rodadaId: string }> }
@@ -19,8 +21,15 @@ export async function PATCH(
   if (!sessaoSalao) {
     return NextResponse.json({ ok: false, error: "Não autorizado" }, { status: 401 });
   }
+  if (escritaSalaoBloqueadaNoPreview()) {
+    return NextResponse.json({ ok: false, error: ERRO_ESCRITA_SALAO_PREVIEW }, { status: 403 });
+  }
 
   const { id, rodadaId } = await params;
+  if (!(await podeAdicionarItensNaComanda(id))) {
+    return NextResponse.json({ ok: false, error: "A conta já foi solicitada. Continue o atendimento antes de alterar os itens." }, { status: 409 });
+  }
+
   let body: { itens?: unknown; observacao?: string };
   try {
     body = await req.json();
