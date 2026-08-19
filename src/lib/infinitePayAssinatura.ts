@@ -12,8 +12,18 @@ function handleInfinitePay(): string {
 
 function baseUrl(): string {
   const configured = process.env.NEXT_PUBLIC_URL?.trim().replace(/\/$/, "");
-  if (!configured) throw new Error("NEXT_PUBLIC_URL_not_configured");
-  return configured;
+  if (configured) return configured;
+
+  // Vercel injeta a URL de produção do próprio projeto. Isso evita exigir
+  // uma segunda variável só para construir redirect/webhook e, sobretudo,
+  // impede acoplamento a qualquer URL de outro projeto.
+  const vercelProductionUrl = process.env.VERCEL_PROJECT_PRODUCTION_URL
+    ?.trim()
+    .replace(/^https?:\/\//, "")
+    .replace(/\/$/, "");
+  if (vercelProductionUrl) return `https://${vercelProductionUrl}`;
+
+  throw new Error("production_url_not_configured");
 }
 
 function garantirProducao() {
