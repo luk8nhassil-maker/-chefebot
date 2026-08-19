@@ -157,6 +157,34 @@ export async function podeAdicionarItensNaComanda(comandaId: string): Promise<bo
   return !contaBloqueiaNovosItens(estado);
 }
 
+/**
+ * Serializa qualquer mutação de uma comanda aberta com as transições da conta.
+ * O check de "conta aberta" acontece dentro do MESMO lock usado por
+ * solicitar/reabrir/fechar conta. Assim uma requisição que começou um instante
+ * antes do clique em "Pedir conta" não consegue gravar itens depois da conta
+ * ter sido solicitada, e o pedido da conta não consegue ultrapassar uma
+ * mutação de itens ainda não concluída.
+ */
+export async function executarMutacaoComContaAbertaSalao<T>(
+  comandaId: string,
+  fn: () => Promise<T>,
+): Promise<{ ok: true; valor: T } | { ok: false; status: number; error: string }> {
+  try {
+    return await comLockComanda(comandaId, async () => {
+      const estado = await lerEstadoContaSalao(comandaId);
+      if (contaBloqueiaNovosItens(estado)) {
+        return { ok: false as const, status: 409, error: "A conta já foi solicitada. Continue o atendimento antes de alterar a comanda." };
+      }
+      return { ok: true as const, valor: await fn() };
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === "comanda_em_atualizacao") {
+      return { ok: false as const, status: 409, error: "Esta comanda está sendo atualizada em outro aparelho. Tente novamente." };
+    }
+    throw error;
+  }
+}
+
 export async function solicitarContaSalao(comandaId: string, responsavel: string) {
   if (escritaBloqueadaNoPreview()) return { ok: false as const, status: 403, error: "Ações reais do Salão ficam bloqueadas no Preview." };
   try {
