@@ -3,7 +3,7 @@ import { lerSessaoSalao } from "@/lib/salaoAuth";
 import { buscarComanda, identificacaoClienteComanda, marcarComandaEnviada, PAGAMENTO_COMANDA_EM_ABERTO } from "@/lib/comandas";
 import { gerarClientRequestId, sanitizeClientRequestId } from "@/survival/clientRequestId";
 import { POST as criarPedidoApp } from "@/app/api/pedido-app/route";
-import { podeAdicionarItensNaComanda } from "@/lib/salaoConta.server";
+import { executarMutacaoComContaAbertaSalao } from "@/lib/salaoConta.server";
 import { ERRO_ESCRITA_SALAO_PREVIEW, escritaSalaoBloqueadaNoPreview } from "@/lib/salaoAmbiente";
 import {
   confirmarEnvioInicialSalao,
@@ -14,10 +14,10 @@ import {
 export const dynamic = "force-dynamic";
 
 // "Enviar para a cozinha" do primeiro pedido: cria o pedido de verdade pela
-// MESMA rota oficial /api/pedido-app. O claim por comanda fecha o duplo-clique
-// mesmo quando duas abas chegam com clientRequestId diferentes. Resultado é
-// persistido antes do bookkeeping da comanda, então retry recupera o mesmo
-// pedido se a resposta se perder depois da criação.
+// MESMA rota oficial /api/pedido-app. O claim por comanda fecha duplo clique
+// e duas abas, e sua aquisição é serializada com "Pedir conta". O lock da
+// conta é liberado antes da chamada ao motor de pedidos; enquanto o envio
+// estiver em curso, a própria Rodada 1 ainda não enviada impede pedir conta.
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const sessaoSalao = await lerSessaoSalao(req);
   if (!sessaoSalao) {
@@ -28,10 +28,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   }
 
   const { id } = await params;
-  if (!(await podeAdicionarItensNaComanda(id))) {
-    return NextResponse.json({ ok: false, error: "A conta já foi solicitada. Continue o atendimento antes de enviar novos itens." }, { status: 409 });
-  }
-
   let body: { clientRequestId?: string };
   try {
     body = await req.json();
@@ -39,15 +35,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     body = {};
   }
 
-  const comanda = await buscarComanda(id);
-  if (!comanda) {
-    return NextResponse.json({ ok: false, error: "Comanda não encontrada" }, { status: 404 });
+  const claim = await executarMutacaoComContaAbertaSalao(id, () => reivindicarEnvioInicialSalao(id));
+  if (!claim.ok) {
+    return NextResponse.json({ ok: false, error: claim.error }, { status: claim.status });
   }
-  if (comanda.status === "fechada") {
-    return NextResponse.json({ ok: false, error: "Esta comanda já está fechada" }, { status: 409 });
-  }
-
-  const reivindicacao = await reivindicarEnvioInicialSalao(id);
+  const reivindicacao = claim.valor;
   if (!reivindicacao.ok) {
     return NextResponse.json(
       {
@@ -59,6 +51,16 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       },
       { status: reivindicacao.motivo === "em_processamento" ? 409 : 503 },
     );
+  }
+
+  const comanda = await buscarComanda(id);
+  if (!comanda) {
+    if (reivindicacao.tipo === "claim") await liberarEnvioInicialSalao(id, reivindicacao.token);
+    return NextResponse.json({ ok: false, error: "Comanda não encontrada" }, { status: 404 });
+  }
+  if (comanda.status === "fechada") {
+    if (reivindicacao.tipo === "claim") await liberarEnvioInicialSalao(id, reivindicacao.token);
+    return NextResponse.json({ ok: false, error: "Esta comanda já está fechada" }, { status: 409 });
   }
 
   if (reivindicacao.tipo === "resultado") {
