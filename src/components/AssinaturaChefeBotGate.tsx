@@ -29,6 +29,14 @@ type StatusResponse = {
   paidThroughDate?: string | null;
   plans?: Plano[];
   canManage?: boolean;
+  temporaryAccess?: {
+    active: boolean;
+    available: boolean;
+    used: boolean;
+    endsAt: string | null;
+    remainingMs: number;
+    durationMinutes: number;
+  };
 };
 
 const ROTAS_GESTAO = ["/admin", "/financeiro", "/configuracoes"] as const;
@@ -47,6 +55,13 @@ function ehRotaGestao(pathname: string) {
   return ROTAS_GESTAO.some((rota) => pathname === rota || pathname.startsWith(`${rota}/`));
 }
 
+function formatarContagem(segundos: number) {
+  const total = Math.max(0, Math.floor(segundos));
+  const minutos = Math.floor(total / 60);
+  const segundosRestantes = total % 60;
+  return `${String(minutos).padStart(2, "0")}:${String(segundosRestantes).padStart(2, "0")}`;
+}
+
 export default function AssinaturaChefeBotGate() {
   const pathname = usePathname();
   const router = useRouter();
@@ -55,6 +70,8 @@ export default function AssinaturaChefeBotGate() {
   const [planoSelecionado, setPlanoSelecionado] = useState<Plano["id"] | null>(null);
   const [message, setMessage] = useState("");
   const [gestaoAberta, setGestaoAberta] = useState(false);
+  const [iniciandoTemporario, setIniciandoTemporario] = useState(false);
+  const [remainingSeconds, setRemainingSeconds] = useState(0);
 
   const sessaoOperacional = typeof document !== "undefined" && temSessaoOperacionalAssinatura(document.cookie);
   const ativo = sessaoOperacional && ehRotaOperacionalAssinatura(pathname);
@@ -83,6 +100,24 @@ export default function AssinaturaChefeBotGate() {
       window.removeEventListener("focus", onFocus);
     };
   }, [ativo, carregar]);
+
+  useEffect(() => {
+    const endsAt = status?.temporaryAccess?.active ? status.temporaryAccess.endsAt : null;
+    if (!endsAt) {
+      setRemainingSeconds(0);
+      return;
+    }
+
+    const atualizar = () => {
+      const restante = Math.max(0, Math.ceil((Date.parse(endsAt) - Date.now()) / 1000));
+      setRemainingSeconds(restante);
+      if (restante === 0) void carregar();
+    };
+
+    atualizar();
+    const timer = window.setInterval(atualizar, 1000);
+    return () => window.clearInterval(timer);
+  }, [status?.temporaryAccess?.active, status?.temporaryAccess?.endsAt, carregar]);
 
   useEffect(() => {
     if (!ativo || typeof window === "undefined") return;
@@ -161,18 +196,74 @@ export default function AssinaturaChefeBotGate() {
     }
   }
 
+  async function iniciarAcessoTemporario() {
+    if (!status?.canManage || iniciandoTemporario) return;
+    setIniciandoTemporario(true);
+    setMessage("");
+    try {
+      const res = await fetch("/api/assinatura/acesso-temporario", {
+        method: "POST",
+        credentials: "same-origin",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setMessage(data.error === "temporary_access_already_used"
+          ? "Os 60 minutos já foram usados nesta mensalidade. O sistema fica bloqueado até o pagamento."
+          : data.error === "temporary_access_blocked_outside_production"
+            ? "Preview seguro: a liberação real de 60 minutos está bloqueada neste ambiente."
+            : "Não foi possível liberar os 60 minutos agora.");
+        return;
+      }
+      setGestaoAberta(false);
+      await carregar();
+    } finally {
+      setIniciandoTemporario(false);
+    }
+  }
+
   if (!ativo || !status?.ok || !status.configured) return null;
 
-  const bloqueado = status.blocked === true;
+  const segundosDoServidor = status.temporaryAccess?.endsAt
+    ? Math.max(0, Math.ceil((Date.parse(status.temporaryAccess.endsAt) - Date.now()) / 1000))
+    : 0;
+  const segundosExibidos = remainingSeconds > 0 ? remainingSeconds : segundosDoServidor;
+  const acessoTemporarioAtivo = status.temporaryAccess?.active === true && segundosExibidos > 0;
+  const temporarioExpirouNoCliente = status.temporaryAccess?.active === true && segundosExibidos <= 0;
+  const bloqueado = status.blocked === true || temporarioExpirouNoCliente;
   const regular = status.status === "regular";
   const mensalidadeVencida = (status.daysLate ?? 0) > 0;
   const podeAbrirGestaoRegular = regular && status.canManage === true && ehRotaGestao(pathname);
+  const podeFecharGestao = regular || acessoTemporarioAtivo;
   const cta = estadoCtaAssinatura({
     planoSelecionado: planoSelecionado !== null,
     regular,
     canManage: status.canManage === true,
     loading: loadingPlan !== null,
   });
+
+  if (acessoTemporarioAtivo && !gestaoAberta) {
+    return (
+      <div className="fixed inset-x-0 top-0 z-[9998] flex justify-center p-3 pointer-events-none">
+        <div className="pointer-events-auto flex w-full max-w-3xl flex-col gap-3 rounded-2xl border border-amber-300 bg-white p-4 text-zinc-950 shadow-2xl sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-xs font-black uppercase tracking-[0.16em] text-amber-700">Acesso temporário ativo</p>
+            <p className="mt-1 text-sm font-semibold text-zinc-700">
+              Você pode usar o sistema por mais <strong className="text-zinc-950">{formatarContagem(segundosExibidos)}</strong>. Quando zerar, a tela de cobrança ficará bloqueada até o pagamento ser confirmado.
+            </p>
+          </div>
+          {status.canManage && (
+            <button
+              type="button"
+              onClick={() => { setMessage(""); setPlanoSelecionado(null); setGestaoAberta(true); }}
+              className="shrink-0 rounded-xl bg-amber-400 px-4 py-3 text-sm font-black text-zinc-950"
+            >
+              Pagar agora
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   if (regular && !gestaoAberta) {
     if (!podeAbrirGestaoRegular) return null;
@@ -189,17 +280,19 @@ export default function AssinaturaChefeBotGate() {
 
   const titulo = regular
     ? "Plano do sistema"
-    : bloqueado
-      ? "Assinatura pendente"
-      : status.status === "warning"
-        ? `Vencimento em ${Math.max(0, status.daysUntilDue ?? 0)} dia${status.daysUntilDue === 1 ? "" : "s"}`
-        : status.status === "due"
-          ? "A assinatura vence hoje"
-          : `Pagamento pendente — ${status.daysLate ?? 0} dia${status.daysLate === 1 ? "" : "s"}`;
+    : acessoTemporarioAtivo
+      ? `Acesso temporário — ${formatarContagem(segundosExibidos)}`
+      : bloqueado
+        ? "Assinatura pendente"
+        : status.status === "warning"
+          ? `Vencimento em ${Math.max(0, status.daysUntilDue ?? 0)} dia${status.daysUntilDue === 1 ? "" : "s"}`
+          : status.status === "due"
+            ? "A assinatura vence hoje"
+            : `Pagamento pendente — ${status.daysLate ?? 0} dia${status.daysLate === 1 ? "" : "s"}`;
 
   const conteudo = (
     <div className="relative w-full max-w-3xl rounded-3xl border border-zinc-200 bg-white p-5 text-zinc-950 shadow-2xl sm:p-7">
-      {regular && (
+      {podeFecharGestao && (
         <button
           type="button"
           onClick={() => { setPlanoSelecionado(null); setGestaoAberta(false); }}
@@ -215,16 +308,35 @@ export default function AssinaturaChefeBotGate() {
           Plano atual: <strong>{planoAtual?.nome ?? "Básico"}</strong>. Vencimento: <strong>{dataBr(status.dueDate)}</strong>.
           {regular
             ? " Sua assinatura está em dia. Você pode trocar de plano quando quiser."
-            : mensalidadeVencida
-              ? " A mensalidade pendente mantém o valor do plano daquele ciclo. Quite a pendência antes de trocar de plano."
-              : bloqueado
-                ? " O acesso operacional será liberado automaticamente após a confirmação do pagamento."
-                : " Você pode pagar agora ou trocar de plano."}
+            : acessoTemporarioAtivo
+              ? ` O acesso temporário termina em ${formatarContagem(segundosExibidos)}. O pagamento continua pendente e o bloqueio volta automaticamente quando o contador zerar.`
+              : mensalidadeVencida
+                ? " A mensalidade pendente mantém o valor do plano daquele ciclo. Quite a pendência antes de trocar de plano."
+                : bloqueado
+                  ? " O acesso operacional será liberado automaticamente após a confirmação do pagamento."
+                  : " Você pode pagar agora ou trocar de plano."}
         </p>
         <p className="mt-2 text-xs leading-5 text-zinc-500">
           Todos os planos mantêm as funcionalidades disponíveis e a gestão autônoma do cardápio/configurações. Projetos de maior complexidade são orçados à parte.
         </p>
       </div>
+
+      {bloqueado && status.temporaryAccess?.available && status.canManage && (
+        <div className="mb-5 rounded-2xl border border-amber-300 bg-amber-50 p-4">
+          <p className="text-sm font-black text-zinc-950">Precisa terminar alguma operação antes de pagar?</p>
+          <p className="mt-1 text-xs leading-5 text-zinc-600">
+            Você pode liberar o sistema uma única vez por 60 minutos nesta mensalidade. O contador continua mesmo se fechar ou atualizar a página. Depois disso, a cobrança fica bloqueante até o pagamento ser confirmado.
+          </p>
+          <button
+            type="button"
+            disabled={iniciandoTemporario}
+            onClick={() => void iniciarAcessoTemporario()}
+            className="mt-3 w-full rounded-xl border border-zinc-950 bg-zinc-950 px-4 py-3 text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {iniciandoTemporario ? "Liberando..." : "USAR O SISTEMA POR 60 MINUTOS"}
+          </button>
+        </div>
+      )}
 
       <div className="grid gap-3 sm:grid-cols-3">
         {status.plans?.map((plano) => {
@@ -298,7 +410,7 @@ export default function AssinaturaChefeBotGate() {
   if (bloqueado) {
     return <div className="fixed inset-0 z-[9999] flex items-center justify-center overflow-y-auto bg-black/70 p-4 backdrop-blur-sm" role="dialog" aria-modal="true">{conteudo}</div>;
   }
-  if (regular) {
+  if (regular || acessoTemporarioAtivo) {
     return <div className="fixed inset-0 z-[9998] flex items-center justify-center overflow-y-auto bg-black/50 p-4 backdrop-blur-sm" role="dialog" aria-modal="true">{conteudo}</div>;
   }
   return <div className="fixed inset-x-0 top-0 z-[9998] flex justify-center p-3 pointer-events-none"><div className="pointer-events-auto w-full max-w-3xl">{conteudo}</div></div>;
