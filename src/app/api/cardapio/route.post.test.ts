@@ -1,6 +1,5 @@
 import { vi, describe, it, expect, beforeEach } from "vitest";
 import { MENU } from "@/lib/menu";
-import { validarCardapio } from "@/lib/cardapioValidacao";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/cardapio precisa validar a ESTRUTURA do payload antes de gravar no
@@ -32,7 +31,7 @@ const { store, redisMock } = vi.hoisted(() => {
 
 vi.mock("@/lib/redis", () => ({ redis: redisMock }));
 
-import { POST } from "./route";
+import { POST, validarCardapio } from "./route";
 import { createToken } from "@/lib/auth";
 
 function postReq(body: unknown, token?: string) {
@@ -212,6 +211,7 @@ describe("POST /api/cardapio — auditoria administrativa", () => {
     expect(entrada.acao).toBe("atualizacao_cardapio");
     expect(typeof entrada.data).toBe("string");
     expect(Array.isArray(entrada.secoes)).toBe(true);
+    // nunca deve logar token/sessão
     expect(JSON.stringify(entrada)).not.toContain(token);
   });
 

@@ -1,7 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 import { redis } from "@/lib/redis";
 import { verifyToken } from "@/lib/auth";
-import { getFuncionarios, type Funcionario } from "@/lib/funcionarios";
+
+export type Funcionario = {
+  username: string;
+  name: string;
+  password: string;
+  ativo: boolean;
+  role: "atendente" | "contador" | "financeiro" | "entregador" | "admin" | "dev";
+};
+
+const FUNCIONARIOS_PADRAO: Funcionario[] = [
+  { username: "kellyne", name: "Kellyne", password: process.env.KELLYNE_PASSWORD!, ativo: true, role: "atendente" },
+  { username: "salao", name: "Atendente Salao", password: process.env.SALAO_PASSWORD!, ativo: true, role: "atendente" },
+];
+
+export async function getFuncionarios(): Promise<Funcionario[]> {
+  const saved = await redis.get<Funcionario[]>("funcionarios");
+  return saved ?? FUNCIONARIOS_PADRAO;
+}
 
 async function checkAuth(req: NextRequest) {
   const token = req.cookies.get("auth-token")?.value;
@@ -49,9 +66,7 @@ export async function DELETE(req: NextRequest) {
   const filtered = funcs.filter(f => f.username !== body.username);
   await redis.set("funcionarios", filtered);
   return NextResponse.json({ ok: true });
-}
-
-export async function PUT(req: NextRequest) {
+}export async function PUT(req: NextRequest) {
   if (!await checkAuth(req)) return NextResponse.json({ error: "Nao autorizado" }, { status: 401 });
   const body = await req.json();
   if (!body.username || !body.name || !body.password) return NextResponse.json({ error: "Dados incompletos" }, { status: 400 });
