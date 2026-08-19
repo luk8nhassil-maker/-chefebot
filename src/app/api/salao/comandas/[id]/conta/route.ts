@@ -20,7 +20,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         ? await reabrirAtendimentoSalao(id, responsavel)
         : { ok: false as const, status: 400, error: "Ação inválida." };
 
-    if (!resultado.ok) return NextResponse.json({ ok: false, error: resultado.error, ...(result && "code" in resultado && resultado.code ? { code: resultado.code } : {}) }, { status: resultado.status });
+    if (!resultado.ok) {
+      const code = "code" in resultado && typeof resultado.code === "string" ? resultado.code : undefined;
+      return NextResponse.json({ ok: false, error: resultado.error, ...(code ? { code } : {}) }, { status: resultado.status });
+    }
     return NextResponse.json({ ok: true, ...resultado });
   } catch (error) {
     console.error("[Salão] Falha ao atualizar conta:", error instanceof Error ? error.message : "erro desconhecido");
