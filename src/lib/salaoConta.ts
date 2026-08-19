@@ -68,7 +68,7 @@ const ESTADOS: Record<StatusPedidoSalao, EstadoPedidoSalao> = {
 
 const SINCRONIZACAO_PENDENTE: EstadoPedidoSalao = {
   rotulo: "Atualização pendente",
-  orientacao: "Não foi possível confirmar a etapa deste envio. Atualize antes de agir sobre a mesa.",
+  orientacao: "Não foi possível confirmar a etapa deste envio. Atualize antes de tomar uma decisão sobre a mesa.",
   prioridade: 2,
   tom: "atencao",
 };
