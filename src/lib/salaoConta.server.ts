@@ -14,7 +14,7 @@ import {
   contaBloqueiaNovosItens,
   ehStatusPedidoSalao,
   estadoInicialContaSalao,
-  subtotalParaCentavos,
+  subtotalEnvioCentavos,
   totalAtivoCentavos,
   type EnvioOperacionalSalao,
   type EstadoContaSalao,
@@ -35,6 +35,7 @@ return 0
 
 type PedidoSalaoOperacional = {
   id: string;
+  total?: number;
   status?: unknown;
   statusAtualizadoEm?: string;
   pagamento?: string;
@@ -120,7 +121,11 @@ export async function resumoOperacionalComanda(comandaId: string): Promise<Resum
       rodadaId: rodada.id,
       numero: rodada.numero,
       ...(rodada.pedidoId ? { pedidoId: rodada.pedidoId } : {}),
-      subtotalCentavos: subtotalParaCentavos(rodada.subtotal),
+      subtotalCentavos: subtotalEnvioCentavos({
+        subtotalRodada: rodada.subtotal,
+        pedidoId: rodada.pedidoId,
+        totalPedidoOficial: pedido?.total,
+      }),
       ...(status ? { status } : {}),
       ...(typeof pedido?.statusAtualizadoEm === "string" ? { statusAtualizadoEm: pedido.statusAtualizadoEm } : {}),
     };
