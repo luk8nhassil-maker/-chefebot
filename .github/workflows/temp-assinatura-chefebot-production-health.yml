@@ -1,0 +1,28 @@
+name: temp-assinatura-chefebot-production-health
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/temp-assinatura-chefebot-production-health.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Confirmar bloqueio da assinatura em produção
+        shell: bash
+        run: |
+          set -euo pipefail
+          for url in \
+            "https://chefedapizza.com.br/api/assinatura/operacao" \
+            "https://chefebot-contingencia.vercel.app/api/assinatura/operacao"
+          do
+            body="$(curl --fail --silent --show-error --location --max-time 20 "$url")"
+            printf '%s\n' "$url -> $body"
+            node -e 'const body=JSON.parse(process.argv[1]); if (body.blocked !== true) { console.error("ASSINATURA_NAO_BLOQUEADA", body); process.exit(1); }' "$body"
+          done
+          echo "HEALTH_OK: assinatura bloqueada em produção até confirmação de pagamento"
