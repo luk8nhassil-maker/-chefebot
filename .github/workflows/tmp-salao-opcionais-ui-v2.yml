@@ -1,17 +1,16 @@
 name: tmp-salao-opcionais-ui-v2
 
 on:
-  pull_request:
+  push:
     branches:
-      - main
-    paths:
-      - .github/workflows/tmp-salao-opcionais-ui-v2.yml
+      - fix/opcionais-sem-saida-emojis-v2
 
 permissions:
   contents: write
 
 jobs:
   patch-test:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
