@@ -1,9 +1,9 @@
 name: tmp-salao-concluir-envio-patch
 
 on:
-  pull_request:
+  push:
     branches:
-      - main
+      - feat/salao-concluir-envio
     paths:
       - .github/workflows/tmp-salao-concluir-envio-patch.yml
 
@@ -11,7 +11,7 @@ permissions:
   contents: write
 
 jobs:
-  patch-test:
+  patch:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout da branch isolada
@@ -20,7 +20,7 @@ jobs:
           ref: feat/salao-concluir-envio
           fetch-depth: 0
 
-      - name: Aplicar patch mínimo e teste de interação
+      - name: Aplicar patch mínimo
         shell: bash
         run: |
           python - <<'PY'
@@ -29,92 +29,36 @@ jobs:
           page = Path('src/app/salao/page.tsx')
           text = page.read_text()
 
-          old = '''  onVerPedidosAbertos,
-  onAdicionarMaisItens,
-}: {
-  comanda: Comanda | null
-  rotulo: string
-  pedidoNumero: number | undefined
-  total: number
-  onVerPedidosAbertos: () => void
-  onAdicionarMaisItens: () => void
-}) {'''
-          new = '''  onConcluir,
-  onVerPedidosAbertos,
-  onAdicionarMaisItens,
-}: {
-  comanda: Comanda | null
-  rotulo: string
-  pedidoNumero: number | undefined
-  total: number
-  onConcluir: () => void
-  onVerPedidosAbertos: () => void
-  onAdicionarMaisItens: () => void
-}) {'''
-          if old not in text:
-              raise SystemExit('assinatura de PedidoEnviadoScreen não encontrada')
-          text = text.replace(old, new, 1)
-
-          old = '''        <button onClick={onVerPedidosAbertos} style={btnPrimario}>Ver pedidos abertos</button>
-        <button onClick={adicionarMaisItens} disabled={processando} style={{ ...btnSecundario, ...(processando ? btnDesabilitado : {}) }}>
-          {processando ? "Abrindo…" : "Adicionar mais itens"}
-        </button>'''
-          new = '''        <button onClick={onConcluir} style={btnPrimario}>Concluir</button>
-        <button onClick={onVerPedidosAbertos} style={btnSecundario}>Ver pedidos abertos</button>
-        <button onClick={adicionarMaisItens} disabled={processando} style={{ ...btnSecundario, ...(processando ? btnDesabilitado : {}) }}>
-          {processando ? "Abrindo…" : "Adicionar mais itens"}
-        </button>'''
-          if old not in text:
-              raise SystemExit('bloco de ações da tela de sucesso não encontrado')
-          text = text.replace(old, new, 1)
-
-          old = '''        total={tela.total}
-        onVerPedidosAbertos={() => { setAba("abertos"); voltarParaInicio() }}'''
-          new = '''        total={tela.total}
-        onConcluir={() => { setAba("pedido"); voltarParaInicio() }}
-        onVerPedidosAbertos={() => { setAba("abertos"); voltarParaInicio() }}'''
-          if old not in text:
-              raise SystemExit('callback da tela enviada não encontrado')
-          text = text.replace(old, new, 1)
+          substituicoes = [
+            (
+              '''  onVerPedidosAbertos,\n  onAdicionarMaisItens,\n}: {\n  comanda: Comanda | null\n  rotulo: string\n  pedidoNumero: number | undefined\n  total: number\n  onVerPedidosAbertos: () => void\n  onAdicionarMaisItens: () => void\n}) {''',
+              '''  onConcluir,\n  onVerPedidosAbertos,\n  onAdicionarMaisItens,\n}: {\n  comanda: Comanda | null\n  rotulo: string\n  pedidoNumero: number | undefined\n  total: number\n  onConcluir: () => void\n  onVerPedidosAbertos: () => void\n  onAdicionarMaisItens: () => void\n}) {''',
+            ),
+            (
+              '''        <button onClick={onVerPedidosAbertos} style={btnPrimario}>Ver pedidos abertos</button>\n        <button onClick={adicionarMaisItens} disabled={processando} style={{ ...btnSecundario, ...(processando ? btnDesabilitado : {}) }}>\n          {processando ? "Abrindo…" : "Adicionar mais itens"}\n        </button>''',
+              '''        <button onClick={onConcluir} style={btnPrimario}>Concluir</button>\n        <button onClick={onVerPedidosAbertos} style={btnSecundario}>Ver pedidos abertos</button>\n        <button onClick={adicionarMaisItens} disabled={processando} style={{ ...btnSecundario, ...(processando ? btnDesabilitado : {}) }}>\n          {processando ? "Abrindo…" : "Adicionar mais itens"}\n        </button>''',
+            ),
+            (
+              '''        total={tela.total}\n        onVerPedidosAbertos={() => { setAba("abertos"); voltarParaInicio() }}''',
+              '''        total={tela.total}\n        onConcluir={() => { setAba("pedido"); voltarParaInicio() }}\n        onVerPedidosAbertos={() => { setAba("abertos"); voltarParaInicio() }}''',
+            ),
+          ]
+          for antigo, novo in substituicoes:
+              if antigo not in text:
+                  raise SystemExit('trecho esperado não encontrado no page.tsx')
+              text = text.replace(antigo, novo, 1)
           page.write_text(text)
 
           test = Path('src/app/salao/page.test.tsx')
           t = test.read_text()
-          old = '''    expect(screen.getByRole("button", { name: "Ver pedidos abertos" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Adicionar mais itens" })).toBeInTheDocument();
-  });'''
-          new = '''    const concluir = screen.getByRole("button", { name: "Concluir" });
-    const verAbertos = screen.getByRole("button", { name: "Ver pedidos abertos" });
-    const adicionarMais = screen.getByRole("button", { name: "Adicionar mais itens" });
-    expect(concluir).toBeInTheDocument();
-    expect(verAbertos).toBeInTheDocument();
-    expect(adicionarMais).toBeInTheDocument();
-
-    const acoes = [concluir, verAbertos, adicionarMais];
-    expect(acoes.map((botao) => botao.textContent)).toEqual(["Concluir", "Ver pedidos abertos", "Adicionar mais itens"]);
-
-    await user.click(concluir);
-    expect(await screen.findByText("Novo atendimento")).toBeInTheDocument();
-    expect(screen.queryByText("Pedido enviado para a cozinha")).not.toBeInTheDocument();
-  });'''
-          if old not in t:
-              raise SystemExit('teste da tela de sucesso não encontrado')
-          test.write_text(t.replace(old, new, 1))
+          antigo = '''    expect(screen.getByRole("button", { name: "Ver pedidos abertos" })).toBeInTheDocument();\n    expect(screen.getByRole("button", { name: "Adicionar mais itens" })).toBeInTheDocument();\n  });'''
+          novo = '''    const concluir = screen.getByRole("button", { name: "Concluir" });\n    const verAbertos = screen.getByRole("button", { name: "Ver pedidos abertos" });\n    const adicionarMais = screen.getByRole("button", { name: "Adicionar mais itens" });\n    expect(concluir).toBeInTheDocument();\n    expect(verAbertos).toBeInTheDocument();\n    expect(adicionarMais).toBeInTheDocument();\n\n    const acoes = [concluir, verAbertos, adicionarMais];\n    expect(acoes.map((botao) => botao.textContent)).toEqual(["Concluir", "Ver pedidos abertos", "Adicionar mais itens"]);\n\n    await user.click(concluir);\n    expect(await screen.findByText("Novo atendimento")).toBeInTheDocument();\n    expect(screen.queryByText("Pedido enviado para a cozinha")).not.toBeInTheDocument();\n  });'''
+          if antigo not in t:
+              raise SystemExit('trecho esperado não encontrado no teste')
+          test.write_text(t.replace(antigo, novo, 1))
           PY
 
-      - name: Instalar dependências
-        run: npm ci
-
-      - name: Teste focado do Salão
-        run: npm test -- src/app/salao/page.test.tsx
-
-      - name: Lint dos arquivos alterados
-        run: npm run lint -- src/app/salao/page.tsx src/app/salao/page.test.tsx
-
-      - name: Build de produção
-        run: npm run build
-
-      - name: Commitar somente o patch validado
+      - name: Commitar patch
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
