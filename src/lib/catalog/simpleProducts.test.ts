@@ -199,24 +199,27 @@ describe("buildSimpleCatalog — Sucos exclusivos do Salão", () => {
     expect(produto("Maracujá", catalog).priceCents).toBe(1000);
   });
 
-  it("o escopo Salão substitui a seção Sucos pelos 11 sabores com Copo/Jarra e preços exatos", () => {
+  it("o escopo Salão contém os 11 sabores Copo/Jarra com preços exatos e mantém IDs antigos só para compatibilidade", () => {
     const catalog = buildSimpleCatalog(MENU, [], [], "salao");
-    expect(catalog.sucos).toHaveLength(Object.keys(precos).length);
-    expect(catalog.sucos.every((s) => s.strategy === "size")).toBe(true);
+    const exclusivos = catalog.sucos.filter((s) => s.id.startsWith("salao-suco-"));
+    const antigos = catalog.sucos.filter((s) => !s.id.startsWith("salao-suco-"));
+    expect(exclusivos).toHaveLength(Object.keys(precos).length);
+    expect(antigos).toHaveLength(11);
+    expect(exclusivos.every((s) => s.strategy === "size")).toBe(true);
+    expect(antigos.every((s) => s.strategy === "milk")).toBe(true);
 
     for (const [nome, esperado] of Object.entries(precos)) {
-      const suco = catalog.sucos.find((s) => s.name === nome);
+      const suco = exclusivos.find((s) => s.name === nome);
       expect(suco, `suco ${nome}`).toBeDefined();
-      expect(suco!.id.startsWith("salao-suco-")).toBe(true);
       expect(Object.fromEntries(suco!.sizes!.map((size) => [size.code, size.priceCents]))).toEqual(esperado);
     }
   });
 
   it("disponibilidade do Salão continua respeitando nome e ID estável", () => {
     const porNome = buildSimpleCatalog(MENU, ["Cajá"], [], "salao");
-    expect(porNome.sucos.find((s) => s.name === "Cajá")?.available).toBe(false);
+    expect(porNome.sucos.find((s) => s.id === "salao-suco-caja")?.available).toBe(false);
     const porId = buildSimpleCatalog(MENU, [], ["salao-suco-laranja"], "salao");
-    expect(porId.sucos.find((s) => s.name === "Laranja")?.available).toBe(false);
+    expect(porId.sucos.find((s) => s.id === "salao-suco-laranja")?.available).toBe(false);
   });
 });
 
