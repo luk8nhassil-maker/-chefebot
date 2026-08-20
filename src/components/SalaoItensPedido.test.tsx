@@ -23,7 +23,7 @@ describe("SalaoItensPedido", () => {
 
     const resumo = screen.getByRole("region", { name: "Itens adicionados ao pedido" })
     expect(within(resumo).getByText("Itens no pedido")).toBeInTheDocument()
-    expect(within(resumo).getByText("2 item(ns) · R$ 24,00")).toBeInTheDocument()
+    expect(within(resumo).getByText("2 itens · R$ 24,00")).toBeInTheDocument()
     expect(within(resumo).getByText("2×")).toBeInTheDocument()
     expect(within(resumo).getByText("Água")).toBeInTheDocument()
     expect(within(resumo).getByText("Com gás")).toBeInTheDocument()
