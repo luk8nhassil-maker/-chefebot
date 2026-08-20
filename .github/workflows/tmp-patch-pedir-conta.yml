@@ -1,0 +1,64 @@
+name: tmp-patch-pedir-conta
+
+on:
+  push:
+    branches:
+      - fix/salao-feedback-pedir-conta-20260820
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[tmp-patch-done]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/salao-feedback-pedir-conta-20260820
+      - name: Aplicar patch mínimo
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          page = Path('src/app/salao/page.tsx')
+          s = page.read_text()
+
+          old = '''  const [processandoAcao, setProcessandoAcao] = useState(false)\n  const [fechando, setFechando] = useState(false)'''
+          new = '''  const [processandoAcao, setProcessandoAcao] = useState(false)\n  const [fechando, setFechando] = useState(false)\n  const [erroConta, setErroConta] = useState<string | null>(null)'''
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          old = '''  async function fecharMesa() {\n    if (fechando) return\n    setFechando(true)\n    try {\n      const r = await fetch(`/api/salao/comandas/${comanda.id}/fechar`, { method: "POST" })\n      if (r.ok) { onAtualizado(); window.location.assign(`/salao/receber/${comanda.id}`) }\n    } finally {\n      setFechando(false)\n    }\n  }'''
+          new = '''  async function fecharMesa() {\n    if (fechando) return\n    setFechando(true)\n    setErroConta(null)\n    try {\n      const r = await fetch(`/api/salao/comandas/${comanda.id}/fechar`, { method: "POST" })\n      const data = await r.json().catch(() => null)\n      if (!r.ok || !data?.ok) {\n        setErroConta(data?.error || "Não foi possível pedir a conta agora.")\n        return\n      }\n      onAtualizado()\n      window.location.assign(`/salao/receber/${comanda.id}`)\n    } catch {\n      setErroConta("Não foi possível pedir a conta agora. Verifique a conexão.")\n    } finally {\n      setFechando(false)\n    }\n  }'''
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          old = '''        {comanda.status === "enviada" && (\n          <button onClick={fecharMesa} disabled={fechando} style={{ ...btnSecundario, ...(fechando ? btnDesabilitado : {}) }}>'''
+          new = '''        {erroConta && (\n          <p role="alert" aria-live="assertive" style={{ fontSize: 12.5, fontWeight: 700, color: "var(--danger)", margin: 0, textAlign: "center" }}>{erroConta}</p>\n        )}\n        {comanda.status === "enviada" && (\n          <button onClick={fecharMesa} disabled={fechando} style={{ ...btnSecundario, ...(fechando ? btnDesabilitado : {}) }}>'''
+          assert old in s
+          s = s.replace(old, new, 1)
+          page.write_text(s)
+
+          test = Path('src/app/salao/page.test.tsx')
+          t = test.read_text()
+          old = '''  const fechar = url.match(/^\\/api\\/salao\\/comandas\\/([^/]+)\\/fechar$/);\n  if (fechar && method === "POST") {\n    const c = comandas.find((x) => x.id === fechar[1]);\n    if (!c) return jsonRes(404, { ok: false, error: "Comanda não encontrada" });\n    c.status = "fechada";\n    return jsonRes(200, { ok: true, comanda: c });\n  }'''
+          new = '''  const fechar = url.match(/^\\/api\\/salao\\/comandas\\/([^/]+)\\/fechar$/);\n  if (fechar && method === "POST") {\n    const c = comandas.find((x) => x.id === fechar[1]);\n    if (!c) return jsonRes(404, { ok: false, error: "Comanda não encontrada" });\n    const ativoPendente = c.rodadas.some((r) => r.status === "enviada" && r.pedidoStatus !== "entregue" && r.pedidoStatus !== "cancelado");\n    if (ativoPendente) return jsonRes(409, { ok: false, code: "envio_pendente", error: "Todos os pedidos ativos precisam estar servidos antes de pedir a conta." });\n    c.status = "fechada";\n    return jsonRes(200, { ok: true, comanda: c });\n  }'''
+          assert old in t
+          t = t.replace(old, new, 1)
+
+          anchor = '''  it("abrir a comanda mostra o Pedido inicial no histórico e 'Adicionar itens' cria um Complemento 2 no catálogo", async () => {'''
+          inserted = '''  it("mostra o motivo quando Pedir conta é bloqueado pelo servidor, sem parecer um clique morto", async () => {\n    const agora = new Date().toISOString();\n    comandas.push({\n      id: "c-conta-pendente", numero: 32, cliente: "Teste Conta", itens: [], status: "enviada", abertaEm: agora,\n      rodadas: [{ id: "r-conta-pendente", numero: 1, status: "enviada", itens: [{ kind: "simple", name: "Refrigerante 2L", price: 12, qty: 1 }], subtotal: 12, criadaEm: agora, atualizadaEm: agora, enviadaEm: agora, pedidoId: "ped-conta-pendente", pedidoNumero: 103, pedidoStatus: "em_preparo" }],\n    });\n\n    const user = userEvent.setup();\n    render(<SalaoPage />);\n    await user.click(await screen.findByRole("button", { name: /Pedidos abertos/ }));\n    await user.click(await screen.findByText("Teste Conta"));\n    await user.click(screen.getByRole("button", { name: "Pedir conta" }));\n\n    expect(await screen.findByRole("alert")).toHaveTextContent("Todos os pedidos ativos precisam estar servidos antes de pedir a conta.");\n    expect(screen.getByRole("button", { name: "Pedir conta" })).toBeEnabled();\n  });\n\n'''
+          assert anchor in t
+          t = t.replace(anchor, inserted + anchor, 1)
+          test.write_text(t)
+
+          Path('.github/workflows/tmp-patch-pedir-conta.yml').unlink()
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/app/salao/page.tsx src/app/salao/page.test.tsx .github/workflows/tmp-patch-pedir-conta.yml
+          git commit -m "[tmp-patch-done] fix(salao): mostra motivo ao pedir conta bloqueada"
+          git push origin HEAD:fix/salao-feedback-pedir-conta-20260820
