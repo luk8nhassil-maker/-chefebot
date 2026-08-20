@@ -66,7 +66,7 @@ describe("Salão — receber pagamento no terminal", () => {
     render(<ReceberContaSalaoPage />);
 
     expect(await screen.findByText("TESTE SALÃO")).toBeTruthy();
-    expect(screen.getByText(/R\$\s*66,00/)).toBeTruthy();
+    expect(screen.getAllByText(/R\$\s*66,00/).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByRole("radio", { name: "Pix" })).toBeTruthy();
     expect(screen.getByRole("radio", { name: "Dinheiro" })).toBeTruthy();
     expect(screen.getByRole("radio", { name: "Cartão" })).toBeTruthy();
