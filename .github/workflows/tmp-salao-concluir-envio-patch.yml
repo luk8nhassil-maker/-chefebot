@@ -1,9 +1,9 @@
 name: tmp-salao-concluir-envio-patch
 
 on:
-  push:
+  pull_request:
     branches:
-      - feat/salao-concluir-envio
+      - main
     paths:
       - .github/workflows/tmp-salao-concluir-envio-patch.yml
 
