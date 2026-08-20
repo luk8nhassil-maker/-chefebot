@@ -1136,7 +1136,9 @@ export async function POST(req: NextRequest) {
         : [[], {}];
       const esgotadosIds = Object.values(estoqueItens).filter((item) => item.esgotado).map((item) => item.id);
       const pizzaCatalog = temSelecaoPizzaEstruturada ? buildPizzaCatalog(menu, esgotadosLegado, esgotadosIds) : null;
-      const simpleCatalog = temSelecaoSimplesEstruturadaAlgumItem ? buildSimpleCatalog(menu, esgotadosLegado, esgotadosIds) : null;
+      const simpleCatalog = temSelecaoSimplesEstruturadaAlgumItem
+        ? buildSimpleCatalog(menu, esgotadosLegado, esgotadosIds, sessaoSalao ? "salao" : "public")
+        : null;
 
       let itensResolvidos: { itemCanonico: ItemApp; linha: string; unitPrice: number | null; qty: number; motivo?: string }[];
       try {
