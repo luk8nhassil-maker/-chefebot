@@ -117,7 +117,7 @@ export default function ReceberContaSalaoPage() {
     setProcessando(true)
     setErro("")
     try {
-      const response = await fetch(`/api/salao/caixa/${comanda.id}/fechar`, {
+      const response = await fetch(`/api/salao/comandas/${comanda.id}/pagamento`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "same-origin",

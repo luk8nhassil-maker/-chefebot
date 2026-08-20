@@ -40,7 +40,7 @@ async function mockFetch(input: RequestInfo | URL, init?: RequestInit): Promise<
     return jsonRes(200, { payments: ["Pix", "Dinheiro", "Cartão"] });
   }
 
-  if (url === "/api/salao/caixa/comanda_1/fechar" && method === "POST") {
+  if (url === "/api/salao/comandas/comanda_1/pagamento" && method === "POST") {
     fechamentoBody = init?.body ? JSON.parse(String(init.body)) : null;
     return jsonRes(200, { ok: true, estado: { status: "fechada" }, deduplicado: false });
   }
