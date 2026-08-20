@@ -25,6 +25,6 @@ jobs:
           test "$operacao_status" = "200"
           grep -Eq '"blocked"[[:space:]]*:[[:space:]]*false' "$operacao_body"
 
-          pedidos_status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' "$base/pedidos")"
-          echo "/pedidos -> HTTP $pedidos_status"
+          pedidos_status="$(curl --silent --show-error --location --output /dev/null --write-out '%{http_code}' "$base/pedidos")"
+          echo "/pedidos (seguindo auth redirect) -> HTTP $pedidos_status"
           test "$pedidos_status" = "200"
