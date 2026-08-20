@@ -1,0 +1,37 @@
+name: health-gate-operacional-prod-readonly
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  health:
+    if: github.head_ref == 'health/gate-operacional-prod-20260820'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirmar SHA de produção validado
+        shell: bash
+        run: |
+          test '${{ github.event.pull_request.base.sha }}' = '5f3066448c71a5ae1f29389f64c6857282348828'
+
+      - name: Health check somente leitura do domínio oficial
+        shell: bash
+        run: |
+          set -euo pipefail
+          for path in / /pedidos /salao; do
+            url="https://chefedapizza.com.br${path}"
+            out="/tmp/health$(echo "$path" | tr '/' '_').html"
+            code=$(curl --location --max-time 25 --connect-timeout 10 --silent --show-error --output "$out" --write-out '%{http_code}' "$url")
+            size=$(wc -c < "$out")
+            echo "$path -> HTTP $code, $size bytes"
+            test "$code" != "000"
+            test "$code" -lt 500
+            test "$size" -gt 0
+          done
+
+      - name: Garantir que o check não executou mutações
+        run: echo 'Health executado apenas com GET público; nenhum POST/PATCH/PUT/DELETE, autenticação, Pix, WhatsApp ou escrita.'
