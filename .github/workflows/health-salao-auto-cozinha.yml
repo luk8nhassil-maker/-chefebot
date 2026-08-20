@@ -1,0 +1,34 @@
+name: health-salao-auto-cozinha
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/health-salao-auto-cozinha.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validar domínio oficial após deploy do Salão
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://chefedapizza.com.br"
+
+          assinatura_body="$(mktemp)"
+          assinatura_status="$(curl --silent --show-error --output "$assinatura_body" --write-out '%{http_code}' "$base/api/assinatura/operacao")"
+          echo "/api/assinatura/operacao -> HTTP $assinatura_status"
+          cat "$assinatura_body"
+          test "$assinatura_status" = "200"
+          grep -Eq '"blocked"[[:space:]]*:[[:space:]]*false' "$assinatura_body"
+
+          pedidos_status="$(curl --silent --show-error --location --output /dev/null --write-out '%{http_code}' "$base/pedidos")"
+          echo "/pedidos (seguindo auth redirect) -> HTTP $pedidos_status"
+          test "$pedidos_status" = "200"
+
+          orders_status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' "$base/api/orders")"
+          echo "/api/orders sem sessão -> HTTP $orders_status"
+          test "$orders_status" = "401"
