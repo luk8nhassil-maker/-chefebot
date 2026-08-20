@@ -183,6 +183,7 @@ function urlEnviarRodada(comandaId: string, rodada: Rodada): string {
 // ---------------------------------------------------------------------------
 
 const FONT = "'Archivo', sans-serif"
+const COR_TEXTO_CTA = "#374151"
 const EMOJI_CATEGORIA_PEDIDO: Record<CategoriaManual, string> = {
   pizza: "🍕",
   calzone: "🥟",
@@ -203,7 +204,7 @@ function emojiOpcaoMontagem(tipo: string | undefined, categoria: CategoriaManual
 }
 const card: React.CSSProperties = { background: "var(--surface)", border: "1px solid var(--surface-secondary)", borderRadius: 14, padding: 14 }
 const input: React.CSSProperties = { width: "100%", height: 48, background: "var(--background)", border: "1px solid var(--surface-secondary)", borderRadius: 10, padding: "0 14px", color: "var(--foreground)", fontSize: 15, fontWeight: 600, fontFamily: FONT, outline: "none", boxSizing: "border-box" }
-const btnPrimario: React.CSSProperties = { height: 48, borderRadius: 12, fontSize: 15, fontWeight: 800, cursor: "pointer", fontFamily: FONT, border: "none", background: "var(--primary)", color: "var(--background)" }
+const btnPrimario: React.CSSProperties = { height: 48, borderRadius: 12, fontSize: 15, fontWeight: 800, cursor: "pointer", fontFamily: FONT, border: "none", background: "var(--primary)", color: COR_TEXTO_CTA }
 const btnSecundario: React.CSSProperties = { height: 48, borderRadius: 12, fontSize: 14, fontWeight: 800, cursor: "pointer", fontFamily: FONT, border: "1px solid var(--surface-secondary)", background: "transparent", color: "var(--foreground-secondary)" }
 const btnDesabilitado: React.CSSProperties = { opacity: 0.5, cursor: "not-allowed" }
 const rotulo: React.CSSProperties = { fontSize: 11, fontWeight: 900, letterSpacing: ".5px", textTransform: "uppercase", color: "var(--foreground-muted)", margin: "0 0 6px" }
@@ -228,9 +229,13 @@ function EstiloSalao() {
       .sal-topnav{display:flex;gap:6px;border:1px solid var(--surface-secondary);border-radius:12px;padding:4px;max-width:420px;margin:0 auto}
       .sal-bottomnav{display:flex;position:fixed;left:50%;bottom:16px;transform:translateX(-50%);width:min(540px, calc(100vw - 32px));z-index:60;background:var(--surface);border-radius:20px;box-shadow:0 6px 24px rgba(0,0,0,.12);padding:8px}
       .sal-bottomnav-spacer{height:84px}
+      .sal-action-footer{background:var(--background);border-top:1px solid var(--surface);padding:12px 16px calc(12px + env(safe-area-inset-bottom));flex-shrink:0;display:grid;gap:8px}
       .sal-navitem{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-height:48px;border:none;background:none;color:var(--foreground-secondary);font-family:${FONT};font-size:11.5px;font-weight:700;border-radius:14px;cursor:pointer;position:relative}
       .sal-navitem.ativo{color:var(--brand-text);font-weight:900;background:var(--primary-soft)}
       .sal-badge{position:absolute;top:2px;right:22%;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:var(--danger);color:#fff;font-size:10px;font-weight:900;display:flex;align-items:center;justify-content:center}
+      @media (max-width: 767px){
+        .sal-action-footer{position:sticky;bottom:0;z-index:70;padding-left:max(16px, env(safe-area-inset-left));padding-right:max(16px, env(safe-area-inset-right));box-shadow:0 -10px 28px color-mix(in srgb, var(--foreground) 8%, transparent)}
+      }
       @media (min-width: 768px){
         .sal-content{max-width:900px;margin:0 auto;padding:24px}
       }
@@ -1178,7 +1183,7 @@ function ProdutoSelector({
         {erroSalvar && !produtoAberto && <p role="alert" style={{ fontSize: 12.5, color: "var(--danger)", margin: 0 }}>{erroSalvar}</p>}
       </div>
 
-      <div style={{ borderTop: "1px solid var(--surface)", padding: "12px 16px calc(12px + env(safe-area-inset-bottom))", flexShrink: 0, display: "grid", gap: 8 }}>
+      <div className="sal-action-footer">
         <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, fontWeight: 900 }}>
           <span style={{ color: "var(--foreground-secondary)" }}>{itens.length} item(ns)</span>
           <span>{money(total)}</span>
@@ -1254,7 +1259,7 @@ function ProdutoSelector({
               </div>
             </>
           )}
-          <div style={{ borderTop: "1px solid var(--surface)", padding: "12px 16px calc(12px + env(safe-area-inset-bottom))", flexShrink: 0, display: "grid", gap: 8 }}>
+          <div className="sal-action-footer">
             {erroSalvar && <p role="alert" style={{ fontSize: 12.5, color: "var(--danger)", margin: 0, textAlign: "center" }}>{erroSalvar}</p>}
             {!mostrarPerguntaOpcional && bloqueio && <p role="status" aria-live="polite" style={{ fontSize: 12.5, fontWeight: 700, color: "var(--attention-text)", margin: 0, textAlign: "center" }}>{bloqueio}</p>}
             <div style={{ display: "flex", gap: 8 }}>
@@ -1397,7 +1402,7 @@ function PedidoReview({
         <button onClick={onAdicionarMaisItens} style={btnSecundario}>Adicionar mais itens</button>
       </div>
 
-      <div style={{ borderTop: "1px solid var(--surface)", padding: "12px 16px calc(12px + env(safe-area-inset-bottom))", flexShrink: 0, display: "grid", gap: 8 }}>
+      <div className="sal-action-footer">
         <div style={{ display: "flex", justifyContent: "space-between", fontSize: 16, fontWeight: 900 }}>
           <span style={{ color: "var(--foreground-secondary)" }}>Total</span>
           <span>{money(total)}</span>
@@ -1670,7 +1675,7 @@ function ComandaDetail({
         })}
       </div>
 
-      <div style={{ borderTop: "1px solid var(--surface)", padding: "12px 16px calc(12px + env(safe-area-inset-bottom))", flexShrink: 0, display: "grid", gap: 8 }}>
+      <div className="sal-action-footer">
         <div style={{ display: "flex", justifyContent: "space-between", fontSize: 15, fontWeight: 900 }}>
           <span style={{ color: "var(--foreground-secondary)" }}>Total acumulado</span>
           <span>{money(comanda.totalParcial ?? 0)}</span>
