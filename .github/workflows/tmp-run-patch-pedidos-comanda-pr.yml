@@ -33,6 +33,9 @@ jobs:
           fim = workflow.index("\n          PY", inicio)
           linhas = workflow[inicio:fim].splitlines()
           script = "\n".join(linha[10:] if linha.startswith("          ") else linha for linha in linhas)
+          for numero, linha in enumerate(script.splitlines(), 1):
+              if 32 <= numero <= 42:
+                  print(f"PATCH_LINE {numero}: {linha!r}")
           exec(compile(script, '<patch-pedidos-comanda>', 'exec'))
           PY
           rm -f .tmp-trigger-pedidos-comanda README.tmp-noop .github/workflows/tmp-run-patch-pedidos-comanda-pr.yml
