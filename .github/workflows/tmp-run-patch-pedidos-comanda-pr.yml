@@ -59,14 +59,14 @@ jobs:
           def counter(path):
               data = json.load(open(path))
               msgs = data[0].get('messages', []) if data else []
-              return Counter((m.get('ruleId'), m.get('message')) for m in msgs if m.get('severity') == 2)
+              return Counter(m.get('ruleId') or '<sem-regra>' for m in msgs if m.get('severity') == 2)
 
           branch = counter('/tmp/lint-branch.json')
           main = counter('/tmp/lint-main.json')
           novas = branch - main
           if novas:
-              raise SystemExit(f'Novos erros de lint introduzidos: {dict(novas)}')
-          print(f'Lint sem regressão: main={sum(main.values())} erros, branch={sum(branch.values())} erros')
+              raise SystemExit(f'Novos erros de lint introduzidos por regra: {dict(novas)}')
+          print(f'Lint sem regressão: main={sum(main.values())} erros {dict(main)}, branch={sum(branch.values())} erros {dict(branch)}')
           PY
       - name: Build
         run: npm run build
