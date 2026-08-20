@@ -4,6 +4,7 @@ import { getMENUDinamico } from '@/lib/menu.server'
 import { buildPizzaCatalog } from '@/lib/catalog/pizzas'
 import { buildSimpleCatalog } from '@/lib/catalog/simpleProducts'
 import { verifyToken } from '@/lib/auth'
+import { lerSessaoSalao } from '@/lib/salaoAuth'
 import { registrarAuditoriaCardapio } from '@/lib/auditoriaCardapio'
 import {
   obterEsgotadosEfetivos,
@@ -228,7 +229,7 @@ export function validarCardapio(body: unknown): ResultadoValidacao {
   return { ok: true, cardapio: obj }
 }
 
-export async function GET() {
+export async function GET(req?: NextRequest) {
   try {
     const menu = await getMENUDinamico()
     const [esgotados, esgotadosLegado, estoqueItens] = await Promise.all([
@@ -244,6 +245,15 @@ export async function GET() {
       horaFechamento: config.horaFechamento,
       aberto: estaAbertoAgora(config),
     }
+    // O catálogo exclusivo do Salão só é entregue quando DUAS condições são
+    // verdadeiras: a UI pediu explicitamente `?scope=salao` E o cookie do
+    // Salão foi validado no servidor. Sem qualquer uma delas o resultado é
+    // público. Assim, adicionar o parâmetro manualmente no link do cliente
+    // nunca revela os produtos/preços exclusivos.
+    const solicitouSalao = req?.nextUrl?.searchParams.get('scope') === 'salao'
+    const sessaoSalao = solicitouSalao ? await lerSessaoSalao(req) : null
+    const catalogScope = solicitouSalao && sessaoSalao ? 'salao' : 'public'
+
     // Catálogo oficial de pizzas com IDs estáveis (Fase 2) — aditivo, ninguém
     // ainda consome esta chave; a UI do cardápio continua 100% em name/detail
     // (ver docs de entrega da Fase 2 sobre por que a interface não foi
@@ -251,13 +261,10 @@ export async function GET() {
     // reconstruir o catálogo em outro lugar.
     const pizzaCatalog = buildPizzaCatalog(menu, esgotadosLegado, esgotadosIds)
     // Catálogo oficial dos demais produtos configuráveis, com IDs estáveis e
-    // disponibilidade em tempo real (Fase 6) — aditivo, igual pizzaCatalog:
-    // usado para montar `simpleSelection` (Calzone, Mini-Pizza, Macarronada,
-    // sucos). Sabores de Calzone/Mini-Pizza vêm das listas oficiais já
-    // existentes (menu.calzoneFlavors/miniPizzaFlavors), nunca inventadas
-    // aqui. Ausência (resposta antiga em cache) faz esses itens caírem no
-    // comportamento 100% legado (name/detail), nunca bloqueia o carrinho.
-    const catalog = buildSimpleCatalog(menu, esgotadosLegado, esgotadosIds)
+    // disponibilidade em tempo real (Fase 6). O escopo público continua como
+    // default; somente uma sessão do Salão autenticada recebe a extensão
+    // comercial de sucos Copo/Jarra.
+    const catalog = buildSimpleCatalog(menu, esgotadosLegado, esgotadosIds, catalogScope)
     return NextResponse.json({ ...menu, esgotados, esgotadosIds, esgotadosMetadata, horario, pizzaCatalog, catalog })
   } catch {
     return NextResponse.json(
