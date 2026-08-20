@@ -1,0 +1,61 @@
+name: tmp-health-salao-sticky-cta-prod
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/tmp-health-salao-sticky-cta-prod.yml
+
+permissions:
+  contents: read
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Health check somente leitura no domínio oficial
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://chefedapizza.com.br'
+          root_code=$(curl -sS -L -o /tmp/root.html -w '%{http_code}' --max-time 30 "$base/")
+          salao_code=$(curl -sS -L -o /tmp/salao.html -w '%{http_code}' --max-time 30 "$base/salao")
+          assinatura_code=$(curl -sS -o /tmp/assinatura.json -w '%{http_code}' --max-time 30 "$base/api/assinatura/operacao")
+          echo "root=$root_code salao=$salao_code assinatura=$assinatura_code"
+          test "$root_code" = "200"
+          test "$salao_code" = "200"
+          test "$assinatura_code" = "200"
+          grep -q '"blocked":false' /tmp/assinatura.json
+
+      - name: Confirmar build novo no Salão
+        shell: python
+        run: |
+          import re
+          import urllib.request
+          from pathlib import Path
+
+          base = 'https://chefedapizza.com.br'
+          html = Path('/tmp/salao.html').read_text(errors='ignore')
+          scripts = sorted(set(re.findall(r'<script[^>]+src=["\']([^"\']+\.js[^"\']*)', html)))
+          if not scripts:
+              raise SystemExit('nenhum chunk JS encontrado em /salao')
+
+          payload = []
+          for src in scripts:
+              url = src if src.startswith('http') else base + (src if src.startswith('/') else '/' + src)
+              try:
+                  with urllib.request.urlopen(url, timeout=20) as r:
+                      payload.append(r.read().decode('utf-8', errors='ignore'))
+              except Exception as exc:
+                  print(f'chunk ignorado {url}: {exc}')
+
+          bundle = '\n'.join(payload)
+          has_footer = 'sal-action-footer' in bundle
+          has_sticky = 'position:sticky' in bundle and 'bottom:0' in bundle
+          has_contrast = '#374151' in bundle
+          has_safe_area = 'safe-area-inset-bottom' in bundle
+          print(f'chunks={len(payload)} footer={has_footer} sticky={has_sticky} contraste={has_contrast} safe_area={has_safe_area}')
+          if not all((has_footer, has_sticky, has_contrast, has_safe_area)):
+              raise SystemExit('o domínio oficial ainda não está servindo o patch sticky/contraste completo')
