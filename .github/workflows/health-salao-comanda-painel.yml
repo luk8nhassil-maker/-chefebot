@@ -1,0 +1,37 @@
+name: health-salao-comanda-painel
+
+on:
+  push:
+    branches:
+      - health/salao-comanda-painel-20260820
+    paths:
+      - .github/workflows/health-salao-comanda-painel.yml
+
+permissions:
+  contents: read
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Health check somente leitura
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          pedidos_code=$(curl -L -sS -o /tmp/pedidos.html -w '%{http_code}' --max-time 20 https://chefedapizza.com.br/pedidos)
+          echo "GET /pedidos -> HTTP $pedidos_code"
+          if [[ "$pedidos_code" != "200" ]]; then
+            echo "::error::/pedidos não respondeu 200"
+            exit 1
+          fi
+
+          orders_code=$(curl -sS -o /tmp/orders.json -w '%{http_code}' --max-time 20 https://chefedapizza.com.br/api/orders)
+          echo "GET /api/orders sem autenticação -> HTTP $orders_code"
+          if [[ "$orders_code" != "401" ]]; then
+            echo "::error::/api/orders deveria proteger a rota com 401 sem autenticação"
+            cat /tmp/orders.json | head -c 300
+            exit 1
+          fi
+
+          echo "Health OK: domínio responde e API de pedidos mantém autenticação. Nenhuma escrita foi executada."
