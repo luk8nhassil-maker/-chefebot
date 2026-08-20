@@ -7,6 +7,8 @@ on:
     paths:
       - "src/lib/assinaturaChefeBot.ts"
       - "src/lib/assinaturaChefeBot.test.ts"
+      - "src/lib/assinaturaChefeBotAtivacao.ts"
+      - "src/lib/assinaturaChefeBotAtivacao.test.ts"
       - "src/lib/assinaturaChefeBot.server.ts"
       - "src/lib/assinaturaChefeBotUi.ts"
       - "src/lib/assinaturaChefeBotUi.test.ts"
@@ -46,6 +48,7 @@ jobs:
         run: >-
           npm test --
           src/lib/assinaturaChefeBot.test.ts
+          src/lib/assinaturaChefeBotAtivacao.test.ts
           src/lib/assinaturaChefeBotUi.test.ts
 
       - name: Lint dos arquivos da assinatura
@@ -53,6 +56,8 @@ jobs:
           npm run lint --
           src/lib/assinaturaChefeBot.ts
           src/lib/assinaturaChefeBot.test.ts
+          src/lib/assinaturaChefeBotAtivacao.ts
+          src/lib/assinaturaChefeBotAtivacao.test.ts
           src/lib/assinaturaChefeBot.server.ts
           src/lib/assinaturaChefeBotUi.ts
           src/lib/assinaturaChefeBotUi.test.ts
