@@ -5,6 +5,7 @@ import {
   LIMIAR_PIX_PENDENTE_MIN,
   LIMIAR_PREPARO_MIN,
   LIMIAR_REAVISO_PREPARO_MIN,
+  LIMIAR_REAVISO_ENTREGA_MIN,
   acaoPrincipal,
   acaoSecundaria,
   acaoTerciaria,
@@ -211,6 +212,7 @@ describe("classificarPendencia", () => {
     const antes = pedido({
       id: String(AGORA - 180 * MIN),
       status: "saiu_entrega",
+      tipoEntrega: "delivery",
       statusAtualizadoEm: new Date(AGORA - 19 * MIN).toISOString(),
     });
     expect(idadeDaEtapaMinutos(antes, AGORA)).toBe(19);
@@ -227,32 +229,35 @@ describe("classificarPendencia", () => {
       idadeMinutos: 20,
     });
     expect(pendencia?.descricao).toContain("Já faz 20 min");
-    expect(pendencia?.descricao).toContain("eu te lembro de novo em 20 min");
+    expect(pendencia?.descricao).toContain(`eu te lembro de novo em ${LIMIAR_REAVISO_ENTREGA_MIN} min`);
   });
 
-  test("ainda na rua reinicia o cronômetro e só cobra depois de outros 20 min", () => {
-    const adiado19 = pedido({
+  test("ainda na rua reinicia o cronômetro e cobra novamente em 5 min", () => {
+    expect(LIMIAR_REAVISO_ENTREGA_MIN).toBe(5);
+    const adiado4 = pedido({
       id: String(AGORA - 180 * MIN),
       status: "saiu_entrega",
-      statusAtualizadoEm: new Date(AGORA - 19 * MIN).toISOString(),
+      statusAtualizadoEm: new Date(AGORA - 4 * MIN).toISOString(),
       limpezaOperacional: {
         motivo: "entrega_longa",
         acao: "adiou",
-        resolvidoEm: new Date(AGORA - 19 * MIN).toISOString(),
+        resolvidoEm: new Date(AGORA - 4 * MIN).toISOString(),
+        tentativas: 1,
       },
     });
-    expect(classificarPendencia(adiado19, AGORA)).toBeNull();
+    expect(classificarPendencia(adiado4, AGORA)).toBeNull();
 
-    const adiado20 = {
-      ...adiado19,
-      statusAtualizadoEm: new Date(AGORA - 20 * MIN).toISOString(),
+    const adiado5 = {
+      ...adiado4,
+      statusAtualizadoEm: new Date(AGORA - LIMIAR_REAVISO_ENTREGA_MIN * MIN).toISOString(),
       limpezaOperacional: {
         motivo: "entrega_longa" as const,
         acao: "adiou" as const,
-        resolvidoEm: new Date(AGORA - 20 * MIN).toISOString(),
+        resolvidoEm: new Date(AGORA - LIMIAR_REAVISO_ENTREGA_MIN * MIN).toISOString(),
+        tentativas: 1,
       },
     };
-    expect(classificarPendencia(adiado20, AGORA)?.motivo).toBe("entrega_longa");
+    expect(classificarPendencia(adiado5, AGORA)?.motivo).toBe("entrega_longa");
   });
 
   test("decisão de etapa anterior não silencia a próxima etapa", () => {
@@ -344,7 +349,7 @@ describe("ações e hierarquia", () => {
       }),
       AGORA
     )!;
-    expect(acaoPrincipal(salao)).toMatchObject({ label: "PEDIDO PRONTO", status: "entregue" });
+    expect(acaoPrincipal(salao)).toMatchObject({ label: "PRONTO PARA SERVIR", status: "saiu_entrega" });
   });
 
   test("NA RUA oferece confirmar entrega e ainda está na rua", () => {
@@ -357,7 +362,7 @@ describe("ações e hierarquia", () => {
       AGORA
     )!;
     expect(acaoPrincipal(p)).toMatchObject({ label: "JÁ FOI ENTREGUE", status: "entregue", tom: "principal" });
-    expect(acaoSecundaria(p)).toMatchObject({ label: "AINDA ESTÁ NA RUA · LEMBRAR EM 20 MIN", acao: "adiou", status: "saiu_entrega" });
+    expect(acaoSecundaria(p)).toMatchObject({ label: "AINDA ESTÁ NA RUA · LEMBRAR EM 5 MIN", acao: "adiou", status: "saiu_entrega" });
   });
 
   test("Pix exige verificação antes de qualquer avanço", () => {
@@ -367,8 +372,8 @@ describe("ações e hierarquia", () => {
     )!;
     expect(acaoPrincipal(p)).toMatchObject({ acao: "verificou_pagamento", tom: "principal" });
     expect(acaoPrincipal(p)).not.toHaveProperty("status");
-    expect(acaoSecundaria(p)).toMatchObject({ acao: "adiou", status: "novo" });
-    expect(acaoTerciaria(p)).toMatchObject({ acao: "cancelou", status: "cancelado" });
+    expect(acaoSecundaria(p)).toBeNull();
+    expect(acaoTerciaria(p)).toBeNull();
   });
 });
 

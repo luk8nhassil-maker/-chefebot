@@ -242,6 +242,10 @@ function sanitizePhone(telefone: string): string {
 async function notificarCliente(telefone: string, status: Status, nomeCliente: string, tipoEntrega: string | undefined, endereco: string | undefined, statusAnterior?: Status): Promise<{ ok: boolean; motivo?: string } | null> {
   const mensagem = getMensagemStatus(status, nomeCliente, classificarEntrega(tipoEntrega, endereco), statusAnterior)
   if (!mensagem) return null
+  const digitos = String(telefone || '').replace(/\D/g, '')
+  // Pedidos de mesa do Salão são criados sem telefone. Nunca tente disparar
+  // uma mensagem para um número sintético (ex.: apenas "55").
+  if (digitos.length < 10) return null
   const phone = sanitizePhone(telefone)
   try {
     const resultado = await enviarTextoWhatsApp(phone, mensagem)
@@ -401,11 +405,35 @@ async function aplicarMudancaDeStatus(
           ),
         }
       }
-      if (limpezaResolvida.acao === 'adiou' && status !== statusAnterior) {
+
+      // A ação também é revalidada contra a transição real. O cliente não
+      // pode rotular uma mudança arbitrária como "avançou"/"cancelou" e
+      // poluir o histórico operacional. Verificação de Pix nunca muda status
+      // por este PATCH — ela usa o conciliador dedicado.
+      const acaoEsperada = status === statusAnterior
+        ? 'adiou'
+        : status === 'cancelado' && statusAnterior === 'novo'
+          ? 'cancelou'
+          : 'avancou'
+      const statusEsperadoAoAvancar = pendenciaAtual.status === 'novo'
+        ? 'em_preparo'
+        : pendenciaAtual.status === 'em_preparo'
+          ? 'saiu_entrega'
+          : pendenciaAtual.status === 'saiu_entrega'
+            ? 'entregue'
+            : null
+      const transicaoCompativel = limpezaResolvida.acao === 'adiou'
+        ? status === statusAnterior
+        : limpezaResolvida.acao === 'cancelou'
+          ? statusAnterior === 'novo' && status === 'cancelado'
+          : limpezaResolvida.acao === 'avancou'
+            ? statusEsperadoAoAvancar === status
+            : false
+      if (limpezaResolvida.acao !== acaoEsperada || !transicaoCompativel) {
         return {
           tipo: 'erro',
           resposta: NextResponse.json(
-            { error: 'A opção de aguardar só pode manter o pedido na etapa atual.' },
+            { error: 'A ação informada não corresponde à etapa atual deste pedido.' },
             { status: 409 }
           ),
         }
