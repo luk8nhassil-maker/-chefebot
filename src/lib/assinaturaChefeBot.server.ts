@@ -1,4 +1,5 @@
 import { redis } from "./redis";
+import { assinaturaChefeBotAtiva } from "./assinaturaChefeBotAtivacao";
 import {
   PLANOS_ASSINATURA_CHEFEBOT,
   avaliarAssinaturaChefeBot,
@@ -41,7 +42,7 @@ export type FaturaAssinaturaChefeBot = {
 };
 
 export function assinaturaInfinitePayConfigurada(): boolean {
-  return Boolean(process.env.INFINITEPAY_HANDLE?.trim());
+  return assinaturaChefeBotAtiva() && Boolean(process.env.INFINITEPAY_HANDLE?.trim());
 }
 
 export async function lerEstadoAssinaturaChefeBot(): Promise<EstadoAssinaturaChefeBot> {
@@ -69,7 +70,7 @@ export async function statusAssinaturaChefeBot(hoje = formatarDataLocalChefeBot(
     estado,
     avaliacao: {
       ...avaliacao,
-      // Fail-open operacional: sem a credencial própria do ChefeBot não há lockout.
+      // Fail-open operacional: sem ativação explícita/credencial própria do ChefeBot não há lockout.
       blocked: configured && avaliacao.blocked,
     },
     configured,
