@@ -1,0 +1,64 @@
+name: tmp-patch-gate-operacional
+
+on:
+  push:
+    branches:
+      - fix/pedidos-gate-operacional-paridade-sf-20260820
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/pedidos-gate-operacional-paridade-sf-20260820
+          fetch-depth: 0
+      - name: Patch server revalidation
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('src/app/api/orders/route.ts')
+          s = p.read_text()
+
+          old = """import {\n  registrarResolucao,\n  sanitizarEntradaLimpeza,\n  type RegistroLimpeza,\n} from '@/lib/limpezaOperacionalPedidos'"""
+          new = """import {\n  classificarPendencia,\n  registrarResolucao,\n  sanitizarEntradaLimpeza,\n  type RegistroLimpeza,\n} from '@/lib/limpezaOperacionalPedidos'"""
+          assert s.count(old) == 1, 'import anchor changed'
+          s = s.replace(old, new)
+
+          old = """    const statusAnterior = pedidos[index].status\n    const entregadorAnteriorId = pedidos[index].entregador?.id\n\n    // Proteção contra impressão automática duplicada"""
+          new = """    const statusAnterior = pedidos[index].status\n    const entregadorAnteriorId = pedidos[index].entregador?.id\n    const agoraMs = Date.now()\n\n    // O navegador só propõe a resolução. A fonte da verdade é sempre o pedido\n    // FRESCO lido sob o mutex global. Se a tela envelheceu, falha fechado em\n    // vez de aplicar uma decisão que já não corresponde ao estado real.\n    if (limpezaResolvida) {\n      const pendenciaAtual = classificarPendencia(pedidos[index], agoraMs)\n      if (!pendenciaAtual || pendenciaAtual.motivo !== limpezaResolvida.motivo) {\n        return {\n          tipo: 'erro',\n          resposta: NextResponse.json(\n            { error: 'Este pedido não está mais pendente. Atualize o painel antes de continuar.' },\n            { status: 409 }\n          ),\n        }\n      }\n      if (limpezaResolvida.acao === 'adiou' && status !== statusAnterior) {\n        return {\n          tipo: 'erro',\n          resposta: NextResponse.json(\n            { error: 'A opção de aguardar só pode manter o pedido na etapa atual.' },\n            { status: 409 }\n          ),\n        }\n      }\n    }\n\n    // Proteção contra impressão automática duplicada"""
+          assert s.count(old) == 1, 'status anchor changed'
+          s = s.replace(old, new)
+
+          old = """    const agora = new Date().toLocaleTimeString(\"pt-BR\", { hour: \"2-digit\", minute: \"2-digit\", timeZone: \"America/Sao_Paulo\" })\n    pedidos[index] = {\n      ...pedidos[index],\n      status,\n      statusAtualizadoEm: new Date().toISOString(),"""
+          new = """    const agora = new Date(agoraMs).toLocaleTimeString(\"pt-BR\", { hour: \"2-digit\", minute: \"2-digit\", timeZone: \"America/Sao_Paulo\" })\n    pedidos[index] = {\n      ...pedidos[index],\n      status,\n      statusAtualizadoEm: new Date(agoraMs).toISOString(),"""
+          assert s.count(old) == 1, 'timestamp anchor changed'
+          s = s.replace(old, new)
+
+          old = """              limpezaResolvida.acao,\n              Date.now(),\n              authName"""
+          new = """              limpezaResolvida.acao,\n              agoraMs,\n              authName"""
+          assert s.count(old) == 1, 'resolution timestamp anchor changed'
+          s = s.replace(old, new)
+
+          old = """  const limpezaResolvida = sanitizarEntradaLimpeza(limpeza)\n\n  // Toda transição de status"""
+          new = """  const limpezaResolvida = sanitizarEntradaLimpeza(limpeza)\n  if (limpeza !== undefined && !limpezaResolvida) {\n    return NextResponse.json({ error: 'Resolução operacional inválida.' }, { status: 400 })\n  }\n\n  // Toda transição de status"""
+          assert s.count(old) == 1, 'body cleanup anchor changed'
+          s = s.replace(old, new)
+
+          p.write_text(s)
+          PY
+          git diff --check
+          git diff -- src/app/api/orders/route.ts
+      - name: Commit patch
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/app/api/orders/route.ts
+          git commit -m "fix(pedidos): revalida pendencia operacional no servidor"
+          git push origin HEAD:fix/pedidos-gate-operacional-paridade-sf-20260820
