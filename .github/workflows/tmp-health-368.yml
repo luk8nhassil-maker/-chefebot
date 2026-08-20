@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - fix/salao-remove-legendas-detalhe-20260820
+  pull_request:
 
 permissions:
   contents: read
