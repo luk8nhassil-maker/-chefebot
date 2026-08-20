@@ -1,0 +1,228 @@
+name: tmp-salao-opcionais-ui-v2
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/tmp-salao-opcionais-ui-v2.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout da branch isolada
+        uses: actions/checkout@v4
+        with:
+          ref: fix/opcionais-sem-saida-emojis-v2
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Criar prova de regressão
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          path = Path('src/app/salao/page.test.tsx')
+          text = path.read_text()
+
+          pattern = r'''  it\("Sim revela somente as opções reais de borda/adicionais e exige escolha", async \(\) => \{.*?\n  \}\);\n\n  it\("adicional opcional único também usa Sim/Não antes de mostrar opções",'''
+          replacement = '''  it("Sim revela opções com emojis e permite mudar de ideia sem ficar preso", async () => {
+    const user = userEvent.setup();
+    await abrirPizzaComSabor(user);
+
+    await user.click(await screen.findByRole("button", { name: "Sim" }));
+    expect(await screen.findByRole("button", { name: /🧀 Catupiry/ })).toBeInTheDocument();
+    const semBorda = screen.getByRole("button", { name: "Sem borda" });
+    expect(semBorda).toBeEnabled();
+    await user.click(semBorda);
+
+    expect(await screen.findByText("Vai querer adicionais?")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Sim" }));
+    expect(await screen.findByRole("button", { name: /➕ Bacon/ })).toBeInTheDocument();
+    const semAdicionais = screen.getByRole("button", { name: "Sem adicionais" });
+    expect(semAdicionais).toBeEnabled();
+    await user.click(semAdicionais);
+
+    expect(await screen.findByText("1 item(ns)")).toBeInTheDocument();
+    expect(screen.getAllByText("R$ 33,00").length).toBeGreaterThan(0);
+  });
+
+  it("adicional opcional único também usa Sim/Não antes de mostrar opções",'''
+          new, count = re.subn(pattern, replacement, text, count=1, flags=re.S)
+          if count != 1:
+            raise SystemExit(f'teste alvo não encontrado: {count}')
+          path.write_text(new)
+
+      - name: Confirmar que a main reproduz o defeito
+        shell: bash
+        run: |
+          set +e
+          npx vitest run src/app/salao/page.test.tsx -t "Sim revela opções com emojis e permite mudar de ideia sem ficar preso"
+          status=$?
+          set -e
+          if [ "$status" -eq 0 ]; then
+            echo "::error::O teste novo passou antes do patch; a prova de regressão não é válida."
+            exit 1
+          fi
+          echo "Defeito reproduzido: CTA reversível/emojis ainda não existem na base."
+
+      - name: Aplicar patch mínimo
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          path = Path('src/app/salao/page.tsx')
+          text = path.read_text()
+
+          def replace_once(old: str, new: str):
+            global text
+            count = text.count(old)
+            if count != 1:
+              raise SystemExit(f'esperado 1 trecho, encontrado {count}: {old[:140]!r}')
+            text = text.replace(old, new, 1)
+
+          replace_once(
+            'const FONT = "\'Archivo\', sans-serif"\n',
+            '''const FONT = "'Archivo', sans-serif"
+const EMOJI_CATEGORIA_PEDIDO: Record<CategoriaManual, string> = {
+  pizza: "🍕",
+  calzone: "🥟",
+  pastelForno: "🥟",
+  lanches: "🍔",
+  hamburgueres: "🍔",
+  macarronada: "🍝",
+  bebidas: "🥤",
+  sucos: "🧃",
+  vitaminas: "🥛",
+}
+
+function emojiOpcaoMontagem(tipo: string | undefined, categoria: CategoriaManual): string {
+  if (tipo === "borda") return "🧀"
+  if (tipo === "adicionais" || tipo === "adicional_opcional") return "➕"
+  if (tipo === "leite") return "🥛"
+  return EMOJI_CATEGORIA_PEDIDO[categoria]
+}
+'''
+          )
+
+          pattern = r'''  const bloqueioOpcional = mostrarPerguntaOpcional.*?  const perguntaOpcional = etapaAtual\?\.tipo === "borda"'''
+          replacement = '''  // Borda e adicionais são opcionais. Depois de tocar em “Sim”, a pessoa
+  // ainda pode mudar de ideia sem ficar presa na lista: o CTA vira “Sem …”.
+  const opcionalTemSelecao = etapaAtual?.tipo === "borda"
+    ? !!selecao.borda
+    : etapaAtual?.tipo === "adicionais"
+      ? (selecao.adicionais?.length ?? 0) > 0
+      : etapaAtual?.tipo === "adicional_opcional"
+        ? !!selecao.adicionalOpcional
+        : false
+  const bloqueio = mostrarPerguntaOpcional || etapaOpcional ? null : motivoBloqueio(etapaAtual, selecao)
+  const rotuloCtaOpcional = etapaAtual?.tipo === "borda"
+    ? (opcionalTemSelecao ? "Continuar" : "Sem borda")
+    : etapaAtual?.tipo === "adicionais"
+      ? (opcionalTemSelecao ? "Continuar" : "Sem adicionais")
+      : etapaAtual?.tipo === "adicional_opcional"
+        ? (opcionalTemSelecao ? "Continuar" : "Sem adicional")
+        : "Continuar"
+  const perguntaOpcional = etapaAtual?.tipo === "borda"'''
+          text, count = re.subn(pattern, replacement, text, count=1, flags=re.S)
+          if count != 1:
+            raise SystemExit(f'bloco de bloqueio opcional não encontrado: {count}')
+
+          replace_once(
+            '''    : etapaAtual?.tipo === "borda"
+      ? "Escolha a borda."
+      : etapaAtual?.tipo === "adicionais"
+        ? "Escolha um ou mais adicionais."
+        : etapaAtual?.tipo === "adicional_opcional"
+          ? "Escolha 1 adicional."
+          : etapaAtual?.ajuda''',
+            '''    : etapaAtual?.tipo === "borda"
+      ? "Escolha uma borda ou continue sem borda."
+      : etapaAtual?.tipo === "adicionais"
+        ? "Escolha os adicionais ou continue sem adicionais."
+        : etapaAtual?.tipo === "adicional_opcional"
+          ? "Escolha 1 adicional ou continue sem adicional."
+          : etapaAtual?.ajuda'''
+          )
+
+          old = '''  function avancarEtapa() {
+    if (!etapaAtual || mostrarPerguntaOpcional || bloqueio || salvandoItemRef.current) return
+    if (!etapaOpcional && !etapaSatisfeita(etapaAtual, selecao)) return
+    if (etapaVisivel < etapas.length - 1) {
+      setEtapaVisivel(etapaVisivel + 1)
+      return
+    }
+    finalizarMontagem(selecao)
+  }
+'''
+          new = '''  function normalizarOpcionalSemEscolha(atual: SelecaoMontagem): SelecaoMontagem {
+    if (!etapaAtual || !etapaOpcional) return atual
+    if (etapaAtual.tipo === "borda" && !atual.borda) return { ...atual, borda: null }
+    if (etapaAtual.tipo === "adicionais" && (atual.adicionais?.length ?? 0) === 0) return { ...atual, adicionais: [] }
+    if (etapaAtual.tipo === "adicional_opcional" && !atual.adicionalOpcional) return { ...atual, adicionalOpcional: null }
+    return atual
+  }
+
+  function avancarEtapa() {
+    if (!etapaAtual || mostrarPerguntaOpcional || bloqueio || salvandoItemRef.current) return
+    if (!etapaOpcional && !etapaSatisfeita(etapaAtual, selecao)) return
+    const selecaoFinal = etapaOpcional ? normalizarOpcionalSemEscolha(selecao) : selecao
+    if (selecaoFinal !== selecao) setSelecao(selecaoFinal)
+    if (etapaVisivel < etapas.length - 1) {
+      setEtapaVisivel(etapaVisivel + 1)
+      return
+    }
+    finalizarMontagem(selecaoFinal)
+  }
+'''
+          replace_once(old, new)
+
+          replace_once(
+            '              {c.label}\n            </button>',
+            '              {EMOJI_CATEGORIA_PEDIDO[c.id]} {c.label}\n            </button>'
+          )
+          replace_once(
+            '<span style={{ fontSize: 14, fontWeight: 800, color: "var(--foreground)" }}>{p.nome}{p.esgotado ? " · esgotado" : ""}</span>',
+            '<span style={{ fontSize: 14, fontWeight: 800, color: "var(--foreground)" }}>{EMOJI_CATEGORIA_PEDIDO[p.categoria]} {p.nome}{p.esgotado ? " · esgotado" : ""}</span>'
+          )
+          replace_once(
+            '<span style={{ fontSize: 14, fontWeight: 800, color: "var(--foreground)" }}>{o.label}{o.esgotado ? " · esgotado" : ""}</span>',
+            '<span style={{ fontSize: 14, fontWeight: 800, color: "var(--foreground)" }}>{emojiOpcaoMontagem(etapaAtual.tipo, produtoAberto.categoria)} {o.label}{o.esgotado ? " · esgotado" : ""}</span>'
+          )
+          replace_once(
+            '{salvandoItem ? "Salvando…" : etapaVisivel < etapas.length - 1 ? `Continuar para ${etapas[etapaVisivel + 1].titulo.toLowerCase()}` : "Adicionar"}',
+            '{salvandoItem ? "Salvando…" : etapaOpcional ? rotuloCtaOpcional : etapaVisivel < etapas.length - 1 ? `Continuar para ${etapas[etapaVisivel + 1].titulo.toLowerCase()}` : "Adicionar"}'
+          )
+
+          path.write_text(text)
+
+      - name: Validar Salão completo
+        run: npx vitest run src/app/salao/page.test.tsx
+
+      - name: Lint dos arquivos alterados
+        run: npx eslint src/app/salao/page.tsx src/app/salao/page.test.tsx
+
+      - name: Remover harness e publicar commit validado
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/tmp-salao-opcionais-ui-v2.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/app/salao/page.tsx src/app/salao/page.test.tsx .github/workflows/tmp-salao-opcionais-ui-v2.yml
+          git commit -m "fix(salao): libera opcionais e exibe emojis"
+          git push origin HEAD:fix/opcionais-sem-saida-emojis-v2
