@@ -6,6 +6,9 @@ on:
       - health/salao-comanda-painel-20260820
     paths:
       - .github/workflows/health-salao-comanda-painel.yml
+  pull_request:
+    paths:
+      - .github/workflows/health-salao-comanda-painel.yml
 
 permissions:
   contents: read
