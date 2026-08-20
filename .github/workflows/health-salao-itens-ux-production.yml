@@ -1,0 +1,35 @@
+name: health-salao-itens-ux-production
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validar sessão e leitura do Salão em produção
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://chefebot-contingencia.vercel.app"
+          jar="$(mktemp)"
+          headers="$(mktemp)"
+          body="$(mktemp)"
+
+          login_status="$(curl --silent --show-error --output "$body" --dump-header "$headers" --cookie-jar "$jar" --write-out '%{http_code}' -X POST "$base/api/salao/login")"
+          echo "/api/salao/login -> HTTP $login_status"
+          test "$login_status" = "200"
+          grep -qi '^set-cookie: salao-session=' "$headers"
+
+          comandas_status="$(curl --silent --show-error --output /dev/null --cookie "$jar" --write-out '%{http_code}' "$base/api/salao/comandas")"
+          echo "/api/salao/comandas com salao-session -> HTTP $comandas_status"
+          test "$comandas_status" = "200"
+
+          page_status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' "$base/salao")"
+          echo "/salao -> HTTP $page_status"
+          test "$page_status" = "200"
