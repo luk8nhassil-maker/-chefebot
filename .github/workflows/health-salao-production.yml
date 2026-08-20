@@ -1,0 +1,43 @@
+name: health-salao-production
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/health-salao-production.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verificar rotas novas do Salão em produção
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://chefebot-contingencia.vercel.app"
+
+          check_unauthorized() {
+            local path="$1"
+            local body_file
+            body_file="$(mktemp)"
+            local status
+            status="$(curl --fail-with-body --silent --show-error --output "$body_file" --write-out '%{http_code}' "$base$path" || true)"
+            echo "$path -> HTTP $status"
+            cat "$body_file"
+            echo
+            test "$status" = "401"
+            grep -q 'Não autorizado' "$body_file"
+          }
+
+          check_unauthorized "/api/salao/operacao"
+          check_unauthorized "/api/salao/comandas"
+
+          page_status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' "$base/salao/operacao" || true)"
+          echo "/salao/operacao -> HTTP $page_status"
+          case "$page_status" in
+            200|301|302|303|307|308) ;;
+            *) exit 1 ;;
+          esac
