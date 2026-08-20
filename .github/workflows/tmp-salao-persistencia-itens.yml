@@ -1,0 +1,146 @@
+name: tmp-salao-persistencia-itens
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/tmp-salao-persistencia-itens.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout da branch isolada
+        uses: actions/checkout@v4
+        with:
+          ref: fix/salao-persistencia-itens-20260820
+          fetch-depth: 0
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Reproduzir bug, corrigir e validar
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python - <<'PY'
+          from pathlib import Path
+
+          test = Path('src/app/salao/page.test.tsx')
+          text = test.read_text()
+
+          old = '''let falharProximoEnvio = false;\nlet falharProximaListagem = false;\nlet enviosCriados = 0;'''
+          new = '''let falharProximoEnvio = false;\nlet falharProximaListagem = false;\nlet falharProximoSalvamentoItens = false;\nlet enviosCriados = 0;'''
+          if old not in text:
+              raise SystemExit('anchor das flags de teste não encontrado')
+          text = text.replace(old, new, 1)
+
+          old = '''  falharProximoEnvio = false;\n  falharProximaListagem = false;\n  enviosCriados = 0;'''
+          new = '''  falharProximoEnvio = false;\n  falharProximaListagem = false;\n  falharProximoSalvamentoItens = false;\n  enviosCriados = 0;'''
+          if old not in text:
+              raise SystemExit('anchor do reset não encontrado')
+          text = text.replace(old, new, 1)
+
+          old = '''  if (patchComanda && method === "PATCH") {\n    const c = comandas.find((x) => x.id === patchComanda[1]);\n    if (!c) return jsonRes(404, { ok: false, error: "Comanda não encontrada" });\n    const itens: ItemMock[] = (body.itens || []).map((i: ItemMock) => ({ ...i, price: precoOficial(i.name) ?? i.price }));'''
+          new = '''  if (patchComanda && method === "PATCH") {\n    const c = comandas.find((x) => x.id === patchComanda[1]);\n    if (!c) return jsonRes(404, { ok: false, error: "Comanda não encontrada" });\n    if (falharProximoSalvamentoItens) {\n      falharProximoSalvamentoItens = false;\n      return jsonRes(503, { ok: false, error: "Falha simulada ao salvar itens" });\n    }\n    const itens: ItemMock[] = (body.itens || []).map((i: ItemMock) => ({ ...i, price: precoOficial(i.name) ?? i.price }));'''
+          if old not in text:
+              raise SystemExit('anchor PATCH comanda não encontrado')
+          text = text.replace(old, new, 1)
+
+          old = '''  if (patchRodada && method === "PATCH") {\n    const c = comandas.find((x) => x.id === patchRodada[1]);\n    const r = c?.rodadas.find((x) => x.id === patchRodada[2]);\n    if (!c || !r) return jsonRes(404, { ok: false, error: "Rodada não encontrada" });\n    const itens: ItemMock[] = (body.itens || []).map((i: ItemMock) => ({ ...i, price: precoOficial(i.name) ?? i.price }));'''
+          new = '''  if (patchRodada && method === "PATCH") {\n    const c = comandas.find((x) => x.id === patchRodada[1]);\n    const r = c?.rodadas.find((x) => x.id === patchRodada[2]);\n    if (!c || !r) return jsonRes(404, { ok: false, error: "Rodada não encontrada" });\n    if (falharProximoSalvamentoItens) {\n      falharProximoSalvamentoItens = false;\n      return jsonRes(503, { ok: false, error: "Falha simulada ao salvar itens" });\n    }\n    const itens: ItemMock[] = (body.itens || []).map((i: ItemMock) => ({ ...i, price: precoOficial(i.name) ?? i.price }));'''
+          if old not in text:
+              raise SystemExit('anchor PATCH rodada não encontrado')
+          text = text.replace(old, new, 1)
+
+          anchor = '''  it("revisão permite aumentar/diminuir/remover item e recalcula o total", async () => {'''
+          regression = '''  it("não confirma nem exibe item quando o servidor falha ao salvar", async () => {\n    const user = userEvent.setup();\n    await iniciarAtendimento(user);\n\n    falharProximoSalvamentoItens = true;\n    await user.type(screen.getByPlaceholderText("Buscar produto…"), "Refrigerante");\n    await user.click(await screen.findByRole("button", { name: /Refrigerante 2L/ }));\n\n    expect(await screen.findByRole("alert")).toHaveTextContent("Falha simulada ao salvar itens");\n    expect(screen.queryByText("Refrigerante 2L adicionado")).not.toBeInTheDocument();\n    expect(screen.getByText("0 item(ns)")).toBeInTheDocument();\n    expect(screen.getByRole("button", { name: "Adicione pelo menos um produto" })).toBeDisabled();\n    expect(comandas[0].itens).toHaveLength(0);\n  });\n\n'''
+          if anchor not in text:
+              raise SystemExit('anchor do teste de revisão não encontrado')
+          text = text.replace(anchor, regression + anchor, 1)
+          test.write_text(text)
+          PY
+
+          set +e
+          npm test -- src/app/salao/page.test.tsx -t "não confirma nem exibe item quando o servidor falha ao salvar"
+          regression_before=$?
+          set -e
+          if [ "$regression_before" -eq 0 ]; then
+            echo "::error::O teste de regressão não reproduziu o defeito na main."
+            exit 1
+          fi
+          echo "Teste de regressão reproduziu o defeito esperado antes do patch."
+
+          python - <<'PY'
+          from pathlib import Path
+
+          page = Path('src/app/salao/page.tsx')
+          text = page.read_text()
+
+          old = '''  const [itens, setItens] = useState<ItemApp[]>(rodada.itens)\n  const [confirmacao, setConfirmacao] = useState<string | null>(null)\n  const [erroSalvar, setErroSalvar] = useState<string | null>(null)\n\n  const salvar = useCallback(async (novosItens: ItemApp[]) => {\n    setErroSalvar(null)\n    try {\n      const r = await fetch(urlItensRodada(comanda.id, rodada), {\n        method: "PATCH",\n        headers: { "Content-Type": "application/json" },\n        // pizzaSelection (IDs oficiais, Fase 5) e simpleSelection (Fase 6)\n        // preservados quando o item os carrega — mesmo padrão aditivo do\n        // pedido manual e do cardápio público; name/detail/price continuam\n        // enviados, nunca confiados.\n        body: JSON.stringify({\n          itens: novosItens.map((i) => ({\n            kind: i.kind,\n            name: i.name,\n            detail: i.detail,\n            price: i.price,\n            qty: i.qty,\n            ...(i.pizzaSelection ? { pizzaSelection: i.pizzaSelection } : {}),\n            ...(i.simpleSelection ? { simpleSelection: i.simpleSelection } : {}),\n          })),\n        }),\n      })\n      const data = await r.json().catch(() => null)\n      if (!r.ok || !data?.ok) {\n        setErroSalvar(data?.error || "Não foi possível salvar agora.")\n        return\n      }\n      onAtualizado()\n    } catch {\n      setErroSalvar("Não foi possível salvar agora. Verifique a conexão.")\n    }\n  }, [comanda.id, rodada, onAtualizado])'''
+          new = '''  const [itens, setItens] = useState<ItemApp[]>(rodada.itens)\n  const [confirmacao, setConfirmacao] = useState<string | null>(null)\n  const [erroSalvar, setErroSalvar] = useState<string | null>(null)\n  const [salvandoItem, setSalvandoItem] = useState(false)\n  const salvandoItemRef = useRef(false)\n\n  const salvar = useCallback(async (novosItens: ItemApp[]): Promise<boolean> => {\n    setErroSalvar(null)\n    try {\n      const r = await fetch(urlItensRodada(comanda.id, rodada), {\n        method: "PATCH",\n        headers: { "Content-Type": "application/json" },\n        // pizzaSelection (IDs oficiais, Fase 5) e simpleSelection (Fase 6)\n        // preservados quando o item os carrega — mesmo padrão aditivo do\n        // pedido manual e do cardápio público; name/detail/price continuam\n        // enviados, nunca confiados.\n        body: JSON.stringify({\n          itens: novosItens.map((i) => ({\n            kind: i.kind,\n            name: i.name,\n            detail: i.detail,\n            price: i.price,\n            qty: i.qty,\n            ...(i.pizzaSelection ? { pizzaSelection: i.pizzaSelection } : {}),\n            ...(i.simpleSelection ? { simpleSelection: i.simpleSelection } : {}),\n          })),\n        }),\n      })\n      const data = await r.json().catch(() => null)\n      if (!r.ok || !data?.ok) {\n        setErroSalvar(data?.error || "Não foi possível salvar agora.")\n        return false\n      }\n      onAtualizado()\n      return true\n    } catch {\n      setErroSalvar("Não foi possível salvar agora. Verifique a conexão.")\n      return false\n    }\n  }, [comanda.id, rodada, onAtualizado])'''
+          if old not in text:
+              raise SystemExit('bloco de persistência do catálogo não encontrado')
+          text = text.replace(old, new, 1)
+
+          old = '''  function confirmarAdicao(item: ItemApp) {\n    const novos = [...itens, item]\n    setItens(novos)\n    salvar(novos)\n    setConfirmacao(`${item.name} adicionado`)\n    window.setTimeout(() => setConfirmacao(null), 1600)\n  }\n\n  function abrirProduto(produto: ProdutoManual) {\n    if (produto.esgotado) return\n    if (!produto.requerMontagem) {\n      const item = construirItemManual(produto, selecaoVazia(), menu)\n      if (item) confirmarAdicao(item)\n      return\n    }\n    setProdutoAberto(produto)\n    setSelecao(selecaoVazia())\n    setEtapaVisivel(0)\n    setOpcionaisAbertas(new Set())\n    setCategoria(produto.categoria)\n  }\n\n  function finalizarMontagem(selecaoFinal: SelecaoMontagem) {\n    if (!produtoAberto || !montagemCompleta(etapas, selecaoFinal)) return\n    const item = construirItemManual(produtoAberto, selecaoFinal, menu)\n    if (item) confirmarAdicao(item)\n    setProdutoAberto(null)\n    setOpcionaisAbertas(new Set())\n    setTermo("")\n  }'''
+          new = '''  async function confirmarAdicao(item: ItemApp): Promise<boolean> {\n    if (salvandoItemRef.current) return false\n    salvandoItemRef.current = true\n    setSalvandoItem(true)\n    const novos = [...itens, item]\n    try {\n      const persistiu = await salvar(novos)\n      if (!persistiu) return false\n      setItens(novos)\n      setConfirmacao(`${item.name} adicionado`)\n      window.setTimeout(() => setConfirmacao(null), 1600)\n      return true\n    } finally {\n      salvandoItemRef.current = false\n      setSalvandoItem(false)\n    }\n  }\n\n  function abrirProduto(produto: ProdutoManual) {\n    if (produto.esgotado || salvandoItemRef.current) return\n    if (!produto.requerMontagem) {\n      const item = construirItemManual(produto, selecaoVazia(), menu)\n      if (item) void confirmarAdicao(item)\n      return\n    }\n    setProdutoAberto(produto)\n    setSelecao(selecaoVazia())\n    setEtapaVisivel(0)\n    setOpcionaisAbertas(new Set())\n    setCategoria(produto.categoria)\n  }\n\n  async function finalizarMontagem(selecaoFinal: SelecaoMontagem) {\n    if (!produtoAberto || !montagemCompleta(etapas, selecaoFinal)) return\n    const item = construirItemManual(produtoAberto, selecaoFinal, menu)\n    if (!item) return\n    const persistiu = await confirmarAdicao(item)\n    if (!persistiu) return\n    setProdutoAberto(null)\n    setOpcionaisAbertas(new Set())\n    setTermo("")\n  }'''
+          if old not in text:
+              raise SystemExit('bloco de confirmação do item não encontrado')
+          text = text.replace(old, new, 1)
+
+          text = text.replace('''  function avancarEtapa() {\n    if (!etapaAtual || mostrarPerguntaOpcional || bloqueio) return''', '''  function avancarEtapa() {\n    if (!etapaAtual || mostrarPerguntaOpcional || bloqueio || salvandoItemRef.current) return''', 1)
+
+          old = '''            <button key={p.id} onClick={() => abrirProduto(p)} disabled={p.esgotado} style={{ ...card, minHeight: 48, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, textAlign: "left", cursor: p.esgotado ? "not-allowed" : "pointer", opacity: p.esgotado ? 0.5 : 1 }}>'''
+          new = '''            <button key={p.id} onClick={() => abrirProduto(p)} disabled={p.esgotado || salvandoItem} style={{ ...card, minHeight: 48, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, textAlign: "left", cursor: p.esgotado || salvandoItem ? "not-allowed" : "pointer", opacity: p.esgotado ? 0.5 : salvandoItem ? 0.7 : 1 }}>'''
+          if old not in text:
+              raise SystemExit('botão do produto não encontrado')
+          text = text.replace(old, new, 1)
+
+          old = '''        {erroSalvar && <p role="alert" style={{ fontSize: 12.5, color: "var(--danger)", margin: 0 }}>{erroSalvar}</p>}'''
+          new = '''        {erroSalvar && !produtoAberto && <p role="alert" style={{ fontSize: 12.5, color: "var(--danger)", margin: 0 }}>{erroSalvar}</p>}'''
+          if old not in text:
+              raise SystemExit('alerta do catálogo não encontrado')
+          text = text.replace(old, new, 1)
+
+          old = '''        <button onClick={onRevisar} disabled={itens.length === 0} style={{ ...btnPrimario, ...(itens.length === 0 ? btnDesabilitado : {}) }}>\n          {itens.length === 0 ? "Adicione pelo menos um produto" : "Revisar pedido"}\n        </button>'''
+          new = '''        <button onClick={onRevisar} disabled={itens.length === 0 || salvandoItem} style={{ ...btnPrimario, ...(itens.length === 0 || salvandoItem ? btnDesabilitado : {}) }}>\n          {salvandoItem ? "Salvando item…" : itens.length === 0 ? "Adicione pelo menos um produto" : "Revisar pedido"}\n        </button>'''
+          if old not in text:
+              raise SystemExit('botão revisar não encontrado')
+          text = text.replace(old, new, 1)
+
+          old = '''          <div style={{ borderTop: "1px solid var(--surface)", padding: "12px 16px calc(12px + env(safe-area-inset-bottom))", flexShrink: 0, display: "grid", gap: 8 }}>\n            {!mostrarPerguntaOpcional && bloqueio && <p role="status" aria-live="polite" style={{ fontSize: 12.5, fontWeight: 700, color: "var(--attention-text)", margin: 0, textAlign: "center" }}>{bloqueio}</p>}'''
+          new = '''          <div style={{ borderTop: "1px solid var(--surface)", padding: "12px 16px calc(12px + env(safe-area-inset-bottom))", flexShrink: 0, display: "grid", gap: 8 }}>\n            {erroSalvar && <p role="alert" style={{ fontSize: 12.5, color: "var(--danger)", margin: 0, textAlign: "center" }}>{erroSalvar}</p>}\n            {!mostrarPerguntaOpcional && bloqueio && <p role="status" aria-live="polite" style={{ fontSize: 12.5, fontWeight: 700, color: "var(--attention-text)", margin: 0, textAlign: "center" }}>{bloqueio}</p>}'''
+          if old not in text:
+              raise SystemExit('rodapé do construtor não encontrado')
+          text = text.replace(old, new, 1)
+
+          old = '''              <button onClick={voltarEtapa} style={{ ...btnSecundario, flex: 1 }}>\n                {etapaVisivel > 0 ? "Voltar" : "Cancelar item"}\n              </button>\n              {!mostrarPerguntaOpcional && (\n                <button onClick={avancarEtapa} disabled={!!bloqueio} style={{ ...btnPrimario, flex: 2, ...(bloqueio ? btnDesabilitado : {}) }}>\n                  {etapaVisivel < etapas.length - 1 ? `Continuar para ${etapas[etapaVisivel + 1].titulo.toLowerCase()}` : "Adicionar"}\n                </button>\n              )}'''
+          new = '''              <button onClick={voltarEtapa} disabled={salvandoItem} style={{ ...btnSecundario, flex: 1, ...(salvandoItem ? btnDesabilitado : {}) }}>\n                {etapaVisivel > 0 ? "Voltar" : "Cancelar item"}\n              </button>\n              {!mostrarPerguntaOpcional && (\n                <button onClick={avancarEtapa} disabled={!!bloqueio || salvandoItem} style={{ ...btnPrimario, flex: 2, ...(bloqueio || salvandoItem ? btnDesabilitado : {}) }}>\n                  {salvandoItem ? "Salvando…" : etapaVisivel < etapas.length - 1 ? `Continuar para ${etapas[etapaVisivel + 1].titulo.toLowerCase()}` : "Adicionar"}\n                </button>\n              )}'''
+          if old not in text:
+              raise SystemExit('ações do construtor não encontradas')
+          text = text.replace(old, new, 1)
+
+          old = '''                  <button onClick={() => responderOpcional(true)} style={btnPrimario}>Sim</button>\n                  <button onClick={() => responderOpcional(false)} style={btnSecundario}>Não</button>'''
+          new = '''                  <button onClick={() => responderOpcional(true)} disabled={salvandoItem} style={{ ...btnPrimario, ...(salvandoItem ? btnDesabilitado : {}) }}>Sim</button>\n                  <button onClick={() => responderOpcional(false)} disabled={salvandoItem} style={{ ...btnSecundario, ...(salvandoItem ? btnDesabilitado : {}) }}>Não</button>'''
+          if old not in text:
+              raise SystemExit('ações Sim/Não não encontradas')
+          text = text.replace(old, new, 1)
+
+          page.write_text(text)
+          PY
+
+          npm test -- src/app/salao/page.test.tsx
+          npm run lint -- src/app/salao/page.tsx src/app/salao/page.test.tsx
+
+          rm .github/workflows/tmp-salao-persistencia-itens.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/app/salao/page.tsx src/app/salao/page.test.tsx .github/workflows/tmp-salao-persistencia-itens.yml
+          git commit -m "fix(salao): confirma item somente após persistir"
+          git push origin HEAD:fix/salao-persistencia-itens-20260820
