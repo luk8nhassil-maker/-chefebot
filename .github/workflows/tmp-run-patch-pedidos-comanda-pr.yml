@@ -1,0 +1,54 @@
+name: tmp-run-patch-pedidos-comanda-pr
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ github.head_ref == 'fix/pedidos-comanda-card-unificado-20260820' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/pedidos-comanda-card-unificado-20260820
+          persist-credentials: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Aplicar patch preparado
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import textwrap
+
+          workflow = Path('.github/workflows/tmp-patch-pedidos-comanda-card.yml').read_text()
+          marcador_inicio = "          python - <<'PY'\n"
+          inicio = workflow.index(marcador_inicio) + len(marcador_inicio)
+          fim = workflow.index("\n          PY", inicio)
+          script = textwrap.dedent(workflow[inicio:fim])
+          exec(compile(script, '<patch-pedidos-comanda>', 'exec'))
+          PY
+          rm -f .tmp-trigger-pedidos-comanda .github/workflows/tmp-run-patch-pedidos-comanda-pr.yml
+      - name: Instalar dependências
+        run: npm ci
+      - name: Testes focados
+        run: npx vitest run src/lib/pedidoComandaPainel.test.ts src/app/pedidos/page.test.ts
+      - name: Lint focado
+        run: npx eslint src/app/pedidos/page.tsx src/app/pedidos/page.test.ts src/lib/pedidoComandaPainel.ts src/lib/pedidoComandaPainel.test.ts
+      - name: Build
+        run: npm run build
+      - name: Commitar patch validado e limpar temporários
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "[tmp-patch-done] fix(pedidos): unifica comanda do salão no painel"
+          git push origin HEAD:fix/pedidos-comanda-card-unificado-20260820
