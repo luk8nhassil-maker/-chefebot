@@ -1,0 +1,27 @@
+name: health-salao-concluir-envio
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/health-salao-concluir-envio.yml
+
+permissions:
+  contents: read
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Health check somente leitura
+        shell: bash
+        run: |
+          set -euo pipefail
+          salao_code=$(curl -L -sS -o /tmp/salao.html -w '%{http_code}' --max-time 20 https://chefedapizza.com.br/salao)
+          echo "GET /salao -> HTTP $salao_code"
+          test "$salao_code" = "200"
+
+          pedidos_code=$(curl -L -sS -o /tmp/pedidos.html -w '%{http_code}' --max-time 20 https://chefedapizza.com.br/pedidos)
+          echo "GET /pedidos -> HTTP $pedidos_code"
+          test "$pedidos_code" = "200"
+
+          echo "Health OK: rotas operacionais respondem sem qualquer mutação."
