@@ -22,7 +22,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
       - run: npm ci
       - name: Teste primeiro, patch depois
@@ -59,14 +59,15 @@ jobs:
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add .tmp/salao-prepatch.log .tmp/salao-validation.log
-            git commit -m "test: registra falha dos opcionais do salão"
+            git commit -m "test: registra falha dos opcionais do salão" || true
             git push origin HEAD:fix/salao-opcionais-emojis-20260820
             exit 1
           fi
 
-          rm .github/workflows/tmp-salao-opcionais-emojis.yml scripts/tmp_salao_opcionais_patch.py
+          rm -f .github/workflows/tmp-salao-opcionais-emojis.yml scripts/tmp_salao_opcionais_patch.py
+          rm -rf .tmp
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/app/salao/page.tsx src/app/salao/page.test.tsx .github/workflows/tmp-salao-opcionais-emojis.yml scripts/tmp_salao_opcionais_patch.py
+          git add -A
           git commit -m "fix(salao): libera opcionais e exibe emojis"
           git push origin HEAD:fix/salao-opcionais-emojis-20260820
