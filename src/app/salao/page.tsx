@@ -507,6 +507,7 @@ export default function SalaoPage() {
         rotulo={tela.rotulo}
         pedidoNumero={tela.pedidoNumero}
         total={tela.total}
+        onConcluir={() => { setAba("pedido"); voltarParaInicio() }}
         onVerPedidosAbertos={() => { setAba("abertos"); voltarParaInicio() }}
         onAdicionarMaisItens={async () => {
           const atualizada = await garantirRodadaEmAndamento(tela.comandaId)
@@ -1282,6 +1283,7 @@ function PedidoEnviadoScreen({
   rotulo: rotuloEnviado,
   pedidoNumero,
   total,
+  onConcluir,
   onVerPedidosAbertos,
   onAdicionarMaisItens,
 }: {
@@ -1289,6 +1291,7 @@ function PedidoEnviadoScreen({
   rotulo: string
   pedidoNumero: number | undefined
   total: number
+  onConcluir: () => void
   onVerPedidosAbertos: () => void
   onAdicionarMaisItens: () => void
 }) {
@@ -1320,7 +1323,8 @@ function PedidoEnviadoScreen({
           <p style={{ margin: 0, fontSize: 12.5, color: "var(--foreground-muted)" }}>Pedido #{pedidoNumero}</p>
         )}
         <p style={{ margin: 0, fontSize: 18, fontWeight: 900, color: "var(--foreground)" }}>{money(total)}</p>
-        <button onClick={onVerPedidosAbertos} style={btnPrimario}>Ver pedidos abertos</button>
+        <button onClick={onConcluir} style={btnPrimario}>Concluir</button>
+        <button onClick={onVerPedidosAbertos} style={btnSecundario}>Ver pedidos abertos</button>
         <button onClick={adicionarMaisItens} disabled={processando} style={{ ...btnSecundario, ...(processando ? btnDesabilitado : {}) }}>
           {processando ? "Abrindo…" : "Adicionar mais itens"}
         </button>

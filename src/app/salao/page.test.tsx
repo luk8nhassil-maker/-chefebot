@@ -381,8 +381,19 @@ describe("/salao — escolher produtos e revisar", () => {
     expect(await screen.findByText("Pedido enviado para a cozinha")).toBeInTheDocument();
     expect(screen.getByText(/Ana/)).toBeInTheDocument();
     expect(screen.getByText(/Sem mesa/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Ver pedidos abertos" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Adicionar mais itens" })).toBeInTheDocument();
+    const concluir = screen.getByRole("button", { name: "Concluir" });
+    const verAbertos = screen.getByRole("button", { name: "Ver pedidos abertos" });
+    const adicionarMais = screen.getByRole("button", { name: "Adicionar mais itens" });
+    expect(concluir).toBeInTheDocument();
+    expect(verAbertos).toBeInTheDocument();
+    expect(adicionarMais).toBeInTheDocument();
+
+    const acoes = [concluir, verAbertos, adicionarMais];
+    expect(acoes.map((botao) => botao.textContent)).toEqual(["Concluir", "Ver pedidos abertos", "Adicionar mais itens"]);
+
+    await user.click(concluir);
+    expect(await screen.findByText("Novo atendimento")).toBeInTheDocument();
+    expect(screen.queryByText("Pedido enviado para a cozinha")).not.toBeInTheDocument();
   });
 
   it("erro ao enviar preserva os itens e oferece 'Tentar novamente' sem duplicar o pedido", async () => {
