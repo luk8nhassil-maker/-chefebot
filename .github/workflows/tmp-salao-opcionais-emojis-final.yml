@@ -1,0 +1,63 @@
+name: tmp-salao-opcionais-emojis-final
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/tmp-salao-opcionais-emojis-final.yml
+      - scripts/tmp_salao_opcionais_emojis_final.py
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/salao-opcionais-emojis-final3-20260820
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Provar defeito antes do patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/tmp_salao_opcionais_emojis_final.py tests
+          set +e
+          npx vitest run src/app/salao/page.test.tsx -t "mostra emojis no fluxo e mantém sabor obrigatório" > /tmp/prepatch.log 2>&1
+          pre=$?
+          set -e
+          cat /tmp/prepatch.log
+          if [ "$pre" -eq 0 ]; then
+            echo "::error::Teste novo passou antes da correção; prova de regressão inválida."
+            exit 1
+          fi
+          grep -Eq "Unable to find|TestingLibraryElementError|🍕" /tmp/prepatch.log || {
+            echo "::error::A falha pré-patch não corresponde ao defeito visual esperado."
+            exit 1
+          }
+      - name: Aplicar patch mínimo
+        run: python scripts/tmp_salao_opcionais_emojis_final.py page
+      - name: Validar fluxo completo do Salão
+        run: npx vitest run src/app/salao/page.test.tsx
+      - name: Lint dos arquivos alterados
+        run: npx eslint src/app/salao/page.tsx src/app/salao/page.test.tsx
+      - name: Build
+        run: npm run build
+      - name: Publicar somente o patch validado
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/tmp-salao-opcionais-emojis-final.yml scripts/tmp_salao_opcionais_emojis_final.py
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix(salao): restaura CTAs opcionais e emojis"
+          git push origin HEAD:fix/salao-opcionais-emojis-final3-20260820
