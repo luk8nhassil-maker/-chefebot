@@ -1,0 +1,70 @@
+name: tmp-salao-opcionais-emojis
+
+on:
+  push:
+    branches:
+      - fix/salao-opcionais-emojis-20260820
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/salao-opcionais-emojis-20260820
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Teste primeiro, patch depois
+        shell: bash
+        run: |
+          set -u
+          python scripts/tmp_salao_opcionais_patch.py tests
+
+          set +e
+          npx vitest run src/app/salao/page.test.tsx -t "Sim revela opções com emojis e permite mudar de ideia sem ficar preso" > /tmp/prepatch.log 2>&1
+          pre=$?
+          set -e
+          if [ "$pre" -eq 0 ]; then
+            echo "Teste de regressão passou antes do patch; abortando." | tee /tmp/validation.log
+            exit 1
+          fi
+
+          python scripts/tmp_salao_opcionais_patch.py page
+
+          set +e
+          npx vitest run src/app/salao/page.test.tsx > /tmp/validation.log 2>&1
+          tests=$?
+          npx eslint src/app/salao/page.tsx src/app/salao/page.test.tsx >> /tmp/validation.log 2>&1
+          lint=$?
+          set -e
+
+          cat /tmp/prepatch.log
+          cat /tmp/validation.log
+
+          if [ "$tests" -ne 0 ] || [ "$lint" -ne 0 ]; then
+            mkdir -p .tmp
+            cp /tmp/prepatch.log .tmp/salao-prepatch.log
+            cp /tmp/validation.log .tmp/salao-validation.log
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add .tmp/salao-prepatch.log .tmp/salao-validation.log
+            git commit -m "test: registra falha dos opcionais do salão"
+            git push origin HEAD:fix/salao-opcionais-emojis-20260820
+            exit 1
+          fi
+
+          rm .github/workflows/tmp-salao-opcionais-emojis.yml scripts/tmp_salao_opcionais_patch.py
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/app/salao/page.tsx src/app/salao/page.test.tsx .github/workflows/tmp-salao-opcionais-emojis.yml scripts/tmp_salao_opcionais_patch.py
+          git commit -m "fix(salao): libera opcionais e exibe emojis"
+          git push origin HEAD:fix/salao-opcionais-emojis-20260820
