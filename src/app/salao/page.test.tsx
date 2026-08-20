@@ -205,6 +205,8 @@ async function mockFetch(url: string, opts?: RequestInit): Promise<Response> {
   if (fechar && method === "POST") {
     const c = comandas.find((x) => x.id === fechar[1]);
     if (!c) return jsonRes(404, { ok: false, error: "Comanda não encontrada" });
+    const ativoPendente = c.rodadas.some((r) => r.status === "enviada" && r.pedidoStatus !== "entregue" && r.pedidoStatus !== "cancelado");
+    if (ativoPendente) return jsonRes(409, { ok: false, code: "envio_pendente", error: "Todos os pedidos ativos precisam estar servidos antes de pedir a conta." });
     c.status = "fechada";
     return jsonRes(200, { ok: true, comanda: c });
   }
@@ -625,6 +627,23 @@ describe("/salao — Pedidos abertos e complemento", () => {
     expect(await screen.findByText("Comanda #41")).toBeInTheDocument();
     expect(screen.getByText("Comanda #42")).toBeInTheDocument();
     expect(screen.getAllByText("Teste B")).toHaveLength(2);
+  });
+
+  it("mostra o motivo quando Pedir conta é bloqueado pelo servidor, sem parecer um clique morto", async () => {
+    const agora = new Date().toISOString();
+    comandas.push({
+      id: "c-conta-pendente", numero: 32, cliente: "Teste Conta", itens: [], status: "enviada", abertaEm: agora,
+      rodadas: [{ id: "r-conta-pendente", numero: 1, status: "enviada", itens: [{ kind: "simple", name: "Refrigerante 2L", price: 12, qty: 1 }], subtotal: 12, criadaEm: agora, atualizadaEm: agora, enviadaEm: agora, pedidoId: "ped-conta-pendente", pedidoNumero: 103, pedidoStatus: "em_preparo" }],
+    });
+
+    const user = userEvent.setup();
+    render(<SalaoPage />);
+    await user.click(await screen.findByRole("button", { name: /Pedidos abertos/ }));
+    await user.click(await screen.findByText("Teste Conta"));
+    await user.click(screen.getByRole("button", { name: "Pedir conta" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Todos os pedidos ativos precisam estar servidos antes de pedir a conta.");
+    expect(screen.getByRole("button", { name: "Pedir conta" })).toBeEnabled();
   });
 
   it("abrir a comanda mostra o Pedido inicial no histórico e 'Adicionar itens' cria um Complemento 2 no catálogo", async () => {

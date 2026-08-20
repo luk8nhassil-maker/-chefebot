@@ -1612,6 +1612,7 @@ function ComandaDetail({
   })
   const [processandoAcao, setProcessandoAcao] = useState(false)
   const [fechando, setFechando] = useState(false)
+  const [erroConta, setErroConta] = useState<string | null>(null)
 
   function alternarExpandido(id: string) {
     setExpandidas((atual) => {
@@ -1639,9 +1640,18 @@ function ComandaDetail({
   async function fecharMesa() {
     if (fechando) return
     setFechando(true)
+    setErroConta(null)
     try {
       const r = await fetch(`/api/salao/comandas/${comanda.id}/fechar`, { method: "POST" })
-      if (r.ok) { onAtualizado(); window.location.assign(`/salao/receber/${comanda.id}`) }
+      const data = await r.json().catch(() => null)
+      if (!r.ok || !data?.ok) {
+        setErroConta(data?.error || "Não foi possível pedir a conta agora.")
+        return
+      }
+      onAtualizado()
+      window.location.assign(`/salao/receber/${comanda.id}`)
+    } catch {
+      setErroConta("Não foi possível pedir a conta agora. Verifique a conexão.")
     } finally {
       setFechando(false)
     }
@@ -1730,6 +1740,9 @@ function ComandaDetail({
         <button onClick={acaoPrincipal} disabled={acaoDesabilitada} style={{ ...btnPrimario, ...(acaoDesabilitada ? btnDesabilitado : {}) }}>
           {rotuloAcao}
         </button>
+        {erroConta && (
+          <p role="alert" aria-live="assertive" style={{ fontSize: 12.5, fontWeight: 700, color: "var(--danger)", margin: 0, textAlign: "center" }}>{erroConta}</p>
+        )}
         {comanda.status === "enviada" && (
           <button onClick={fecharMesa} disabled={fechando} style={{ ...btnSecundario, ...(fechando ? btnDesabilitado : {}) }}>
             {fechando ? "Pedindo conta…" : "Pedir conta"}
