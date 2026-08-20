@@ -8,6 +8,7 @@ export default function SalaoItensPedido({ itens }: { itens: ItemApp[] }) {
   if (itens.length === 0) return null
 
   const total = itens.reduce((soma, item) => soma + item.price * item.qty, 0)
+  const rotuloQuantidade = itens.length === 1 ? "1 item" : `${itens.length} itens`
 
   return (
     <section
@@ -26,7 +27,7 @@ export default function SalaoItensPedido({ itens }: { itens: ItemApp[] }) {
           Itens no pedido
         </span>
         <span style={{ fontSize: 12.5, fontWeight: 900, color: "var(--brand-text)", whiteSpace: "nowrap" }}>
-          {itens.length} item(ns) · {money(total)}
+          {rotuloQuantidade} · {money(total)}
         </span>
       </div>
 
