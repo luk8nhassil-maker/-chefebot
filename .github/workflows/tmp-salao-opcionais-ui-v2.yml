@@ -63,7 +63,23 @@ jobs:
           new, count = re.subn(pattern, replacement, text, count=1, flags=re.S)
           if count != 1:
             raise SystemExit(f'teste alvo não encontrado: {count}')
-          path.write_text(new)
+          text = new
+
+          old_optional = '''    await user.click(screen.getByRole("button", { name: /Ovo/ }));
+    await user.click(screen.getByRole("button", { name: "Adicionar" }));
+
+    expect(await screen.findByText("1 item(ns)")).toBeInTheDocument();
+    expect(screen.getAllByText("R$ 35,00").length).toBeGreaterThan(0);'''
+          new_optional = '''    await user.click(screen.getByRole("button", { name: /Ovo/ }));
+    expect(screen.getByRole("button", { name: "Continuar" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "Continuar" }));
+
+    expect(await screen.findByText("1 item(ns)")).toBeInTheDocument();
+    expect(screen.getAllByText("R$ 35,00").length).toBeGreaterThan(0);'''
+          if text.count(old_optional) != 1:
+            raise SystemExit(f'teste do adicional único não encontrado: {text.count(old_optional)}')
+          text = text.replace(old_optional, new_optional, 1)
+          path.write_text(text)
 
       - name: Confirmar que a main reproduz o defeito
         shell: bash
