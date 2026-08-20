@@ -1,0 +1,66 @@
+name: tmp-preserva-delivery-legado-chefe
+
+on:
+  push:
+    branches:
+      - fix/pedidos-gate-operacional-paridade-sf-20260820
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/pedidos-gate-operacional-paridade-sf-20260820
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Preservar compatibilidade histórica do Delivery do Chefe
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('src/lib/limpezaOperacionalPedidos.ts')
+          s = p.read_text()
+          old = '  if (!pedido.tipoEntrega || pedido.tipoEntrega === "pickup" || pedido.tipoEntrega === "retirada" || pedido.endereco === "Retirada na loja") return "retirada";'
+          new = '  if (pedido.tipoEntrega === "pickup" || pedido.tipoEntrega === "retirada" || pedido.endereco === "Retirada na loja") return "retirada";'
+          if s.count(old) != 1:
+              raise SystemExit(f'âncora de modalidade mudou: {s.count(old)}')
+          p.write_text(s.replace(old, new))
+
+          test = Path('src/lib/limpezaOperacionalPedidos.compatChefe.test.ts')
+          if test.exists():
+              raise SystemExit('teste de compatibilidade já existe')
+          test.write_text('''import { describe, expect, test } from "vitest";\nimport { acaoPrincipal, classificarPendencia, modalidadePedidoOperacional, type PedidoLimpeza } from "./limpezaOperacionalPedidos";\n\nconst AGORA = Date.parse("2026-07-30T20:00:00.000Z");\nconst MIN = 60_000;\n\ndescribe("compatibilidade operacional histórica do Chefe", () => {\n  test("pedido legado sem tipoEntrega continua sendo Delivery, nunca retirada", () => {\n    const pedido: PedidoLimpeza = {\n      id: String(AGORA - 180 * MIN),\n      cliente: "Cliente legado",\n      status: "saiu_entrega",\n      endereco: "Rua Exemplo, 123",\n      statusAtualizadoEm: new Date(AGORA - 20 * MIN).toISOString(),\n    };\n\n    expect(modalidadePedidoOperacional(pedido)).toBe("delivery");\n    const pendencia = classificarPendencia(pedido, AGORA);\n    expect(pendencia).toMatchObject({\n      motivo: "entrega_longa",\n      modalidade: "delivery",\n      titulo: "Essa entrega precisa de uma confirmação",\n    });\n    expect(acaoPrincipal(pendencia!)).toMatchObject({ label: "JÁ FOI ENTREGUE", status: "entregue" });\n  });\n});\n''')
+          PY
+          git diff --check
+      - name: Instalar dependências
+        run: npm ci
+      - name: Testes focados do gate e compatibilidade
+        run: >-
+          npx vitest run
+          src/lib/limpezaOperacionalPedidos.compatChefe.test.ts
+          src/lib/limpezaOperacionalPedidos.test.ts
+          src/lib/limpezaOperacionalPedidos.paridadeSf.test.ts
+          src/app/pedidos/page.gateOperacional.test.ts
+          src/app/api/orders/route.gateOperacional.test.ts
+          src/app/api/orders/problema-entrega/route.safety.test.ts
+          src/lib/expedienteOperacional.test.ts
+          src/lib/pedidoComandaPainel.test.ts
+          src/app/pedidos/page.test.ts
+      - name: Build de produção
+        run: npm run build
+      - name: Publicar somente se tudo passar
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/lib/limpezaOperacionalPedidos.ts src/lib/limpezaOperacionalPedidos.compatChefe.test.ts
+          git commit -m 'fix(pedidos): preserva delivery legado do Chefe'
+          git push origin HEAD:fix/pedidos-gate-operacional-paridade-sf-20260820
