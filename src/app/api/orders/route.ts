@@ -20,6 +20,7 @@ import type { ItemApp } from '@/lib/pedidoAppItens'
 import type { PedidoSnapshotOficial } from '@/lib/pedidoSnapshot'
 import { obterConfigEvolution } from '@/lib/evolutionApi'
 import {
+  classificarPendencia,
   registrarResolucao,
   sanitizarEntradaLimpeza,
   type RegistroLimpeza,
@@ -384,6 +385,32 @@ async function aplicarMudancaDeStatus(
 
     const statusAnterior = pedidos[index].status
     const entregadorAnteriorId = pedidos[index].entregador?.id
+    const agoraMs = Date.now()
+
+    // O navegador só propõe a resolução. A fonte da verdade é sempre o pedido
+    // FRESCO lido sob o mutex global. Se a tela envelheceu, falha fechado em
+    // vez de aplicar uma decisão que já não corresponde ao estado real.
+    if (limpezaResolvida) {
+      const pendenciaAtual = classificarPendencia(pedidos[index], agoraMs)
+      if (!pendenciaAtual || pendenciaAtual.motivo !== limpezaResolvida.motivo) {
+        return {
+          tipo: 'erro',
+          resposta: NextResponse.json(
+            { error: 'Este pedido não está mais pendente. Atualize o painel antes de continuar.' },
+            { status: 409 }
+          ),
+        }
+      }
+      if (limpezaResolvida.acao === 'adiou' && status !== statusAnterior) {
+        return {
+          tipo: 'erro',
+          resposta: NextResponse.json(
+            { error: 'A opção de aguardar só pode manter o pedido na etapa atual.' },
+            { status: 409 }
+          ),
+        }
+      }
+    }
 
     // Proteção contra impressão automática duplicada (ver
     // src/lib/impressaoAutomatica.ts): entre este PATCH e qualquer outra aba
@@ -402,11 +429,11 @@ async function aplicarMudancaDeStatus(
     // checklist de segurança e vive em /api/orders/confirmar-pix-manual, que
     // reaproveita confirmarPixMetadata (mesma idempotência de sempre).
 
-    const agora = new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" })
+    const agora = new Date(agoraMs).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" })
     pedidos[index] = {
       ...pedidos[index],
       status,
-      statusAtualizadoEm: new Date().toISOString(),
+      statusAtualizadoEm: new Date(agoraMs).toISOString(),
       ...(status === 'cancelado' ? { cancelamentoSolicitado: false } : {}),
       ...(status === 'em_preparo' && !pedidos[index].horarioInicio ? { horarioInicio: agora } : {}),
       ...(limpezaResolvida
@@ -414,7 +441,7 @@ async function aplicarMudancaDeStatus(
             limpezaOperacional: registrarResolucao(
               limpezaResolvida.motivo,
               limpezaResolvida.acao,
-              Date.now(),
+              agoraMs,
               authName
             ),
           }
@@ -469,6 +496,9 @@ export async function PATCH(req: NextRequest) {
   // array "pedidos". Entrada malformada é ignorada (o status muda mesmo assim),
   // nunca gravada como veio.
   const limpezaResolvida = sanitizarEntradaLimpeza(limpeza)
+  if (limpeza !== undefined && !limpezaResolvida) {
+    return NextResponse.json({ error: 'Resolução operacional inválida.' }, { status: 400 })
+  }
 
   // Toda transição de status (inclusive o aceite, novo → em_preparo) passa
   // pelo mesmo mutex curto usado pela edição do cliente: garante que a
