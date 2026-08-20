@@ -1,1 +1,0 @@
-Arquivo temporário para reacionar os checks da PR após o commit validado do harness.
