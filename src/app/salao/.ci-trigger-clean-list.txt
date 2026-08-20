@@ -1,0 +1,1 @@
+gatilho temporário para validar o CSS do Salão; removido no commit seguinte
