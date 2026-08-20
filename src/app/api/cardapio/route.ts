@@ -246,12 +246,21 @@ export async function GET(req?: NextRequest) {
       aberto: estaAbertoAgora(config),
     }
     // O catálogo exclusivo do Salão só é entregue quando DUAS condições são
-    // verdadeiras: a UI pediu explicitamente `?scope=salao` E o cookie do
-    // Salão foi validado no servidor. Sem qualquer uma delas o resultado é
-    // público. Assim, adicionar o parâmetro manualmente no link do cliente
-    // nunca revela os produtos/preços exclusivos.
-    const solicitouSalao = req?.nextUrl?.searchParams.get('scope') === 'salao'
-    const sessaoSalao = solicitouSalao ? await lerSessaoSalao(req) : null
+    // verdadeiras: a requisição veio da interface `/salao` (ou pediu o escopo
+    // explicitamente para testes internos) E o cookie do Salão foi validado
+    // no servidor. O referer nunca autoriza sozinho. Assim, o cardápio público
+    // continua público mesmo no navegador em que o terminal do Salão está logado.
+    const referer = req?.headers.get('referer')
+    let origemSalao = false
+    if (referer) {
+      try {
+        origemSalao = new URL(referer).pathname.startsWith('/salao')
+      } catch {
+        origemSalao = false
+      }
+    }
+    const solicitouSalao = req?.nextUrl?.searchParams.get('scope') === 'salao' || origemSalao
+    const sessaoSalao = solicitouSalao && req ? await lerSessaoSalao(req) : null
     const catalogScope = solicitouSalao && sessaoSalao ? 'salao' : 'public'
 
     // Catálogo oficial de pizzas com IDs estáveis (Fase 2) — aditivo, ninguém
