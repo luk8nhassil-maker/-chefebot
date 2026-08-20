@@ -1,0 +1,1 @@
+gatilho temporário para validar o ajuste CSS da visão interna; removido no commit seguinte
