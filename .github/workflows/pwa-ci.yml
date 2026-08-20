@@ -1,0 +1,52 @@
+name: pwa-ci
+
+on:
+  pull_request:
+    paths:
+      - "public/manifest.json"
+      - "public/sw.js"
+      - "public/icon-192.png"
+      - "public/icon-512.png"
+      - "src/app/layout.tsx"
+      - "src/app/offline/page.tsx"
+      - "src/lib/pwaFiles.test.ts"
+      - "next.config.ts"
+      - ".github/workflows/pwa-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pwa-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pwa-ci:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do SHA validado
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Validar sintaxe do service worker
+        run: node --check public/sw.js
+
+      - name: Testar invariantes da PWA
+        run: npm test -- src/lib/pwaFiles.test.ts
+
+      - name: Lint do patch PWA
+        run: >-
+          npm run lint --
+          src/app/layout.tsx
+          src/app/offline/page.tsx
+          src/lib/pwaFiles.test.ts
+          next.config.ts
+
+      - name: Build de produção
+        run: npm run build
