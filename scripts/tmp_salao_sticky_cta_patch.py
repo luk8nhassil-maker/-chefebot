@@ -29,7 +29,7 @@ def patch_tests() -> None:
     expect(revisar.closest(".sal-action-footer")).not.toBeNull();
     expect(revisar).toHaveStyle({ color: "#374151" });
 
-    const estilos = Array.from(document.querySelectorAll("style")).map((el) => el.textContent || "").join("\n");
+    const estilos = Array.from(document.querySelectorAll("style")).map((el) => el.textContent || "").join("");
     expect(estilos).toContain(".sal-action-footer");
     expect(estilos).toContain("position:sticky");
     expect(estilos).toContain("bottom:0");
