@@ -1,16 +1,18 @@
 name: tmp-salao-opcionais-emojis
 
 on:
-  push:
+  pull_request:
     branches:
-      - fix/salao-opcionais-emojis-20260820
+      - main
+    paths:
+      - .github/workflows/tmp-salao-opcionais-emojis.yml
+      - scripts/tmp_salao_opcionais_patch.py
 
 permissions:
   contents: write
 
 jobs:
   patch-test:
-    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
