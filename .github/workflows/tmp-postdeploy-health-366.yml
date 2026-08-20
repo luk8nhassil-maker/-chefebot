@@ -1,0 +1,40 @@
+name: tmp-postdeploy-health-366
+
+on:
+  push:
+    branches:
+      - fix/salao-comanda-card-pedidos-ux-20260820
+
+permissions:
+  contents: read
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Health check somente leitura
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          check_page() {
+            local url="$1"
+            local out="$2"
+            local code
+            code=$(curl -sS -L --max-time 25 -o "$out" -w '%{http_code}' "$url")
+            echo "$url -> HTTP $code"
+            test "$code" = "200"
+            test -s "$out"
+          }
+
+          check_page "https://chefebot-contingencia.vercel.app/" /tmp/home-vercel.html
+          check_page "https://chefebot-contingencia.vercel.app/api/cardapio" /tmp/cardapio-vercel.json
+          node -e 'const fs=require("fs"); const v=JSON.parse(fs.readFileSync("/tmp/cardapio-vercel.json","utf8")); if(!v || typeof v!=="object") process.exit(1); console.log("cardapio vercel: JSON válido")'
+
+          check_page "https://chefedapizza.com.br/" /tmp/home-domain.html
+          check_page "https://chefedapizza.com.br/api/cardapio" /tmp/cardapio-domain.json
+          node -e 'const fs=require("fs"); const v=JSON.parse(fs.readFileSync("/tmp/cardapio-domain.json","utf8")); if(!v || typeof v!=="object") process.exit(1); console.log("cardapio domínio: JSON válido")'
+
+          check_page "https://chefedapizza.com.br/salao" /tmp/salao-domain.html
+          echo "Health check pós-deploy concluído sem escrita."
