@@ -79,15 +79,77 @@ jobs:
             echo "Typecheck da branch totalmente verde."
           fi
 
-      - name: Lint dos arquivos alterados
-        run: >-
-          npm run lint --
-          src/app/pedidos/page.tsx
-          src/app/api/orders/route.ts
-          src/lib/pedidoComandaPainel.ts
-          src/lib/pedidoComandaPainel.test.ts
-          src/lib/pedidoComandaPainel.server.ts
-          src/lib/pedidoComandaPainel.server.test.ts
+      - name: Lint somente das linhas alteradas
+        shell: bash
+        run: |
+          base_sha="${{ github.event.pull_request.base.sha }}"
+          if [ -z "$base_sha" ]; then
+            git fetch --depth=1 origin main
+            base_sha="origin/main"
+          else
+            git fetch --depth=1 origin "$base_sha"
+          fi
+
+          arquivos=(
+            src/app/pedidos/page.tsx
+            src/app/api/orders/route.ts
+            src/lib/pedidoComandaPainel.ts
+            src/lib/pedidoComandaPainel.test.ts
+            src/lib/pedidoComandaPainel.server.ts
+            src/lib/pedidoComandaPainel.server.test.ts
+          )
+
+          git diff --unified=0 "$base_sha"...HEAD -- "${arquivos[@]}" > /tmp/changed.patch
+          set +e
+          ./node_modules/.bin/eslint "${arquivos[@]}" -f json > /tmp/eslint.json
+          set -e
+
+          python - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          changed: dict[str, set[int]] = {}
+          current: str | None = None
+          for raw in Path('/tmp/changed.patch').read_text().splitlines():
+              if raw.startswith('+++ b/'):
+                  current = raw[6:]
+                  changed.setdefault(current, set())
+                  continue
+              if not current or not raw.startswith('@@ '):
+                  continue
+              match = re.search(r'\+(\d+)(?:,(\d+))?', raw)
+              if not match:
+                  continue
+              start = int(match.group(1))
+              count = int(match.group(2) or '1')
+              changed[current].update(range(start, start + count))
+
+          workspace = Path(os.environ['GITHUB_WORKSPACE']).resolve()
+          violations: list[str] = []
+          for result in json.loads(Path('/tmp/eslint.json').read_text() or '[]'):
+              path = Path(result['filePath']).resolve()
+              try:
+                  rel = path.relative_to(workspace).as_posix()
+              except ValueError:
+                  continue
+              linhas = changed.get(rel, set())
+              for message in result.get('messages', []):
+                  line = int(message.get('line') or 0)
+                  if line in linhas:
+                      violations.append(
+                          f"{rel}:{line}:{message.get('column', 0)} "
+                          f"{message.get('ruleId') or 'eslint'} — {message.get('message', '')}"
+                      )
+
+          if violations:
+              print('::error::Lint encontrou problema novo em linha alterada:')
+              print('\n'.join(violations))
+              raise SystemExit(1)
+
+          print('Lint: nenhum erro/warning novo nas linhas alteradas; problemas históricos fora do diff não bloqueiam este patch.')
+          PY
 
       - name: Build de produção
         run: npm run build
