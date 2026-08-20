@@ -29,7 +29,7 @@ def patch_tests() -> None:
     expect(revisar.closest(".sal-action-footer")).not.toBeNull();
     expect(revisar).toHaveStyle({ color: "#374151" });
 
-    const estilos = Array.from(document.querySelectorAll("style")).map((el) => el.textContent || "").join("\\n");
+    const estilos = Array.from(document.querySelectorAll("style")).map((el) => el.textContent || "").join("\n");
     expect(estilos).toContain(".sal-action-footer");
     expect(estilos).toContain("position:sticky");
     expect(estilos).toContain("bottom:0");
@@ -67,15 +67,27 @@ def patch_page() -> None:
 
     text = replace_once(
         text,
-        '      .sal-bottomnav-spacer{height:84px}\\n',
-        '      .sal-bottomnav-spacer{height:84px}\\n      .sal-action-footer{background:var(--background);border-top:1px solid var(--surface);padding:12px 16px calc(12px + env(safe-area-inset-bottom));flex-shrink:0;display:grid;gap:8px}\\n',
+        '''      .sal-bottomnav-spacer{height:84px}
+''',
+        '''      .sal-bottomnav-spacer{height:84px}
+      .sal-action-footer{background:var(--background);border-top:1px solid var(--surface);padding:12px 16px calc(12px + env(safe-area-inset-bottom));flex-shrink:0;display:grid;gap:8px}
+''',
         "estilo base do rodapé de ação",
     )
 
     text = replace_once(
         text,
-        '      @media (min-width: 768px){\\n        .sal-content{max-width:900px;margin:0 auto;padding:24px}\\n      }\\n',
-        '      @media (max-width: 767px){\\n        .sal-action-footer{position:sticky;bottom:0;z-index:70;padding-left:max(16px, env(safe-area-inset-left));padding-right:max(16px, env(safe-area-inset-right));box-shadow:0 -10px 28px color-mix(in srgb, var(--foreground) 8%, transparent)}\\n      }\\n      @media (min-width: 768px){\\n        .sal-content{max-width:900px;margin:0 auto;padding:24px}\\n      }\\n',
+        '''      @media (min-width: 768px){
+        .sal-content{max-width:900px;margin:0 auto;padding:24px}
+      }
+''',
+        '''      @media (max-width: 767px){
+        .sal-action-footer{position:sticky;bottom:0;z-index:70;padding-left:max(16px, env(safe-area-inset-left));padding-right:max(16px, env(safe-area-inset-right));box-shadow:0 -10px 28px color-mix(in srgb, var(--foreground) 8%, transparent)}
+      }
+      @media (min-width: 768px){
+        .sal-content{max-width:900px;margin:0 auto;padding:24px}
+      }
+''',
         "responsividade do rodapé de ação",
     )
 
