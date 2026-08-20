@@ -1,0 +1,119 @@
+name: patch-salao-comanda-painel
+
+on:
+  push:
+    branches:
+      - feat/salao-agrupar-comanda-painel
+    paths:
+      - .github/workflows/patch-salao-comanda-painel.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout da branch isolada
+        uses: actions/checkout@v4
+        with:
+          ref: feat/salao-agrupar-comanda-painel
+          fetch-depth: 0
+
+      - name: Aplicar patch mínimo no painel e API
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              if old not in text:
+                  raise SystemExit(f"âncora não encontrada: {label}")
+              if text.count(old) != 1:
+                  raise SystemExit(f"âncora não é única ({text.count(old)}): {label}")
+              return text.replace(old, new, 1)
+
+          page_path = Path("src/app/pedidos/page.tsx")
+          page = page_path.read_text()
+
+          page = replace_once(
+              page,
+              '''} from "@/lib/limpezaOperacionalPedidos"\n\nfunction whatsappLink''',
+              '''} from "@/lib/limpezaOperacionalPedidos"\nimport { mapearFamiliasVisiveis, selecionarPedidosPainel } from "@/lib/pedidoComandaPainel"\n\nfunction whatsappLink''',
+              "import agrupamento",
+          )
+
+          page = replace_once(
+              page,
+              '''  origem?: string\n  // Edição de pedido pelo cliente antes da aceitação (ver AGENTS.md).''',
+              '''  origem?: string\n  // Metadados SOMENTE de apresentação, derivados no GET /api/orders a partir\n  // dos pedidoIds oficiais gravados na própria comanda. Nunca controlam preço,\n  // pagamento, impressão ou status individual das rodadas.\n  comandaId?: string\n  comandaNumero?: number\n  rodadaNumero?: number\n  comandaMesa?: string\n  comandaComplemento?: string\n  // Edição de pedido pelo cliente antes da aceitação (ver AGENTS.md).''',
+              "tipo Pedido",
+          )
+
+          old_filter = '''  const buscaNorm = busca.toLowerCase().trim()\n  const pedidosFiltrados = (filtro === "todos" || filtro === "tempo_real" || filtro === "arquivados" ? pedidos : pedidos.filter(p => p.status === filtro))\n    .filter(p => {\n      if (!buscaNorm) return true\n      const num = String(p.numero || "")\n      const statusLabel = STATUS_COLOR[p.status]?.label?.toLowerCase() || ""\n      return (\n        p.cliente.toLowerCase().includes(buscaNorm) ||\n        p.telefone.replace(/\\D/g, "").includes(buscaNorm.replace(/\\D/g, "")) ||\n        (p.bairro || "").toLowerCase().includes(buscaNorm) ||\n        num.includes(buscaNorm) ||\n        statusLabel.includes(buscaNorm) ||\n        (p.pagamento || "").toLowerCase().includes(buscaNorm)\n      )\n    })\n    .sort((a, b) => {\n      const prio = (p: Pedido) => {\n        if (p.escalonado) return 0\n        if (p.cancelamentoSolicitado) return 1\n        if (p.status === "novo" && (p.pagamento || "").toLowerCase().includes("pix") && !p.pixConfirmado) return 2\n        if (p.status === "novo") return 3\n        if (p.status === "em_preparo") return 4\n        if (p.status === "saiu_entrega") return 5\n        return 6\n      }\n      const pa = prio(a), pb = prio(b)\n      if (pa !== pb) return pa - pb\n      return parseInt(a.id) - parseInt(b.id)\n    })'''
+          new_filter = '''  // A unidade visual do Salão é a COMANDA. Cada rodada continua sendo um\n  // Pedido real separado por baixo; este helper só mantém a família junta na\n  // lista e faz filtro/busca operarem sobre a comanda inteira. Delivery e\n  // retirada continuam individuais.\n  const pedidosFiltrados = selecionarPedidosPainel(pedidos, filtro, busca)\n  const familiasSalaoVisiveis = mapearFamiliasVisiveis(pedidosFiltrados)'''
+          page = replace_once(page, old_filter, new_filter, "filtro/busca")
+
+          page = replace_once(
+              page,
+              '''            const emEdicao = pedidoEmEdicao(pedido)\n            const foiEditado = pedidoFoiEditado(pedido)\n\n            let rowBorder''',
+              '''            const emEdicao = pedidoEmEdicao(pedido)\n            const foiEditado = pedidoFoiEditado(pedido)\n            const familiaSalao = pedido.comandaId ? familiasSalaoVisiveis.get(pedido.comandaId) : undefined\n            const indiceFamilia = familiaSalao ? familiaSalao.findIndex(p => p.id === pedido.id) : -1\n            const primeiraDaFamilia = !!familiaSalao && indiceFamilia === 0\n            const ultimaDaFamilia = !!familiaSalao && indiceFamilia === familiaSalao.length - 1\n            const totalFamilia = familiaSalao?.reduce((soma, p) => soma + p.total, 0) ?? 0\n            const localFamilia = pedido.comandaMesa\n              ? `Mesa ${pedido.comandaMesa}${pedido.comandaComplemento ? ` · ${pedido.comandaComplemento}` : ""}`\n              : "Sem mesa"\n\n            let rowBorder''',
+              "metadados família no render",
+          )
+
+          page = replace_once(
+              page,
+              '''            return (\n              <article\n                key={pedido.id}''',
+              '''            return (\n              <div key={pedido.id} style={{ display: "contents" }}>\n                {primeiraDaFamilia && familiaSalao && (\n                  <div\n                    aria-label={`Comanda ${pedido.comandaNumero ?? ""} de ${pedido.cliente}`}\n                    style={{\n                      padding: "10px 13px",\n                      background: "color-mix(in srgb, var(--primary) 7%, var(--surface))",\n                      border: "1.5px solid color-mix(in srgb, var(--primary) 34%, transparent)",\n                      borderRadius: "14px 14px 8px 8px",\n                      marginBottom: -8,\n                      display: "flex",\n                      alignItems: "center",\n                      justifyContent: "space-between",\n                      gap: 10,\n                    }}\n                  >\n                    <div style={{ minWidth: 0 }}>\n                      <div style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 0 }}>\n                        <span style={{ fontSize: 11, fontWeight: 900, color: "var(--brand-text)", textTransform: "uppercase", letterSpacing: ".55px", flexShrink: 0 }}>\n                          Comanda {pedido.comandaNumero != null ? `#${pedido.comandaNumero}` : ""}\n                        </span>\n                        <span style={{ fontSize: 13, fontWeight: 900, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>\n                          {pedido.cliente}\n                        </span>\n                      </div>\n                      <div style={{ marginTop: 3, fontSize: 10.5, fontWeight: 700, color: "var(--foreground-muted)" }}>\n                        {localFamilia} · {familiaSalao.length} {familiaSalao.length === 1 ? "envio" : "envios"}\n                      </div>\n                    </div>\n                    <span style={{ fontSize: 13, fontWeight: 900, color: "var(--foreground-secondary)", flexShrink: 0 }}>\n                      R$ {totalFamilia.toFixed(2).replace(".", ",")}\n                    </span>\n                  </div>\n                )}\n              <article\n                key={pedido.id}''',
+              "cabeçalho de comanda",
+          )
+
+          page = replace_once(
+              page,
+              '''                  borderRadius: 14,\n                  padding: "11px 13px",''',
+              '''                  borderRadius: familiaSalao\n                    ? (familiaSalao.length === 1\n                        ? 14\n                        : primeiraDaFamilia\n                          ? "8px 8px 4px 4px"\n                          : ultimaDaFamilia\n                            ? "4px 4px 14px 14px"\n                            : 4)\n                    : 14,\n                  marginTop: familiaSalao && !primeiraDaFamilia ? -8 : undefined,\n                  padding: "11px 13px",''',
+              "união visual dos cards",
+          )
+
+          page = replace_once(
+              page,
+              '''                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>\n                      {pedido.numero != null && <span style={{ fontSize: 10, fontWeight: 900, color: "var(--border-strong)", flexShrink: 0 }}>#{pedido.numero}</span>}''',
+              '''                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>\n                      {familiaSalao && (\n                        <span style={{ fontSize: 9, fontWeight: 900, color: "var(--brand-text)", background: "color-mix(in srgb, var(--primary) 10%, transparent)", border: "1px solid color-mix(in srgb, var(--primary) 24%, transparent)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>\n                          {pedido.rodadaNumero === 1 ? "Pedido inicial" : `Complemento ${pedido.rodadaNumero ?? indiceFamilia + 1}`}\n                        </span>\n                      )}\n                      {pedido.numero != null && <span style={{ fontSize: 10, fontWeight: 900, color: "var(--border-strong)", flexShrink: 0 }}>#{pedido.numero}</span>}''',
+              "rótulo de rodada",
+          )
+
+          page = replace_once(
+              page,
+              '''              </article>\n            )\n          })}\n        </main>''',
+              '''              </article>\n              </div>\n            )\n          })}\n        </main>''',
+              "fechamento wrapper família",
+          )
+
+          page_path.write_text(page)
+
+          route_path = Path("src/app/api/orders/route.ts")
+          route = route_path.read_text()
+          route = replace_once(
+              route,
+              '''import { adquirirMutexPedidos, liberarMutexPedidos, mutarPedidos } from '@/lib/pedidosConcorrencia'\n''',
+              '''import { adquirirMutexPedidos, liberarMutexPedidos, mutarPedidos } from '@/lib/pedidosConcorrencia'\nimport { listarComandas, PAGAMENTO_COMANDA_EM_ABERTO } from '@/lib/comandas'\nimport { enriquecerPedidosComComanda } from '@/lib/pedidoComandaPainel.server'\n''',
+              "imports API orders",
+          )
+
+          old_get_tail = '''  const url = new URL(req.url)\n  const soArquivados = url.searchParams.get('arquivados') === 'true'\n\n  if (soArquivados) {\n    const arquivados = limpos.filter(p => p.isArchived)\n    return NextResponse.json([...arquivados].reverse().map(sanitizarPedidoPixResposta).map(sanitizarPedidoParaPainel))\n  }\n\n  // Padrão: exclui arquivados da área de trabalho principal\n  const ativos = limpos.filter(p => !p.isArchived)\n  return NextResponse.json([...ativos].reverse().map(sanitizarPedidoPixResposta).map(sanitizarPedidoParaPainel))'''
+          new_get_tail = '''  // Enriquecimento SOMENTE de leitura para a apresentação do Salão. A fonte\n  // continua sendo o pedidoId oficial de cada rodada da comanda; nada é\n  // persistido no pedido e nenhuma regra de status/preço/impressão muda.\n  // Se a leitura das comandas falhar, o painel mantém o comportamento antigo\n  // (pedidos individuais) em vez de derrubar a operação.\n  let pedidosPainel = limpos\n  const precisaVinculoSalao = limpos.some(\n    p => classificarEntrega(p.tipoEntrega, p.endereco) === 'dine_in' && p.pagamento === PAGAMENTO_COMANDA_EM_ABERTO\n  )\n  if (precisaVinculoSalao) {\n    try {\n      pedidosPainel = enriquecerPedidosComComanda(limpos, await listarComandas())\n    } catch (err) {\n      console.error('[ChefeBot] Não foi possível agrupar pedidos do Salão por comanda; mantendo lista individual.', err)\n    }\n  }\n\n  const url = new URL(req.url)\n  const soArquivados = url.searchParams.get('arquivados') === 'true'\n\n  if (soArquivados) {\n    const arquivados = pedidosPainel.filter(p => p.isArchived)\n    return NextResponse.json([...arquivados].reverse().map(sanitizarPedidoPixResposta).map(sanitizarPedidoParaPainel))\n  }\n\n  // Padrão: exclui arquivados da área de trabalho principal\n  const ativos = pedidosPainel.filter(p => !p.isArchived)\n  return NextResponse.json([...ativos].reverse().map(sanitizarPedidoPixResposta).map(sanitizarPedidoParaPainel))'''
+          route = replace_once(route, old_get_tail, new_get_tail, "GET /api/orders")
+          route_path.write_text(route)
+          PY
+
+          git diff --check
+          git diff --stat
+
+      - name: Commitar somente o patch de produto
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/app/pedidos/page.tsx src/app/api/orders/route.ts
+          git commit -m "feat(salao): agrupa rodadas por comanda no painel"
+          git push origin HEAD:feat/salao-agrupar-comanda-painel
