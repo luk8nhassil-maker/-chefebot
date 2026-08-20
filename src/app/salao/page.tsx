@@ -1506,34 +1506,81 @@ function PedidosAbertosList({ comandas, onAbrirComanda }: { comandas: Comanda[];
   )
 }
 
-function ComandaCard({ comanda, onAbrir }: { comanda: Comanda; onAbrir: () => void }) {
-  const estado = estadoHumano(comanda)
-  const orientacao = orientacaoHumana(comanda)
-  const envios = comanda.rodadas?.filter((r) => r.status === "enviada").length ?? 0
-  const corEstado = estado === "Falha ao enviar" || estado === "Pedido cancelado"
+function resumoVisualRodada(r: Rodada): { rotulo: string; orientacao: string | null; cor: string } {
+  if (r.status === "falha_envio") return { rotulo: "Falha ao enviar", orientacao: null, cor: "var(--danger)" }
+  if (r.status === "enviando") return { rotulo: "Enviando para cozinha", orientacao: null, cor: "var(--foreground-secondary)" }
+  if (r.status === "rascunho") return { rotulo: "Montando novo pedido", orientacao: null, cor: "var(--foreground-secondary)" }
+
+  const estado = descreverStatusPedidoSalao(r.pedidoStatus)
+  const cor = estado.tom === "perigo"
     ? "var(--danger)"
-    : estado === "Servido"
+    : estado.tom === "sucesso"
       ? "var(--success)"
-      : estado === "Pronto para servir" || estado === "Atualização pendente"
+      : estado.tom === "atencao"
         ? "var(--attention-text)"
         : "var(--foreground-secondary)"
+  return { rotulo: estado.rotulo, orientacao: estado.orientacao, cor }
+}
+
+function ComandaCard({ comanda, onAbrir }: { comanda: Comanda; onAbrir: () => void }) {
+  const rodadas = (comanda.rodadas ?? [])
+    .filter((r) => r.status !== "rascunho" || r.itens.length > 0)
+    .slice()
+    .sort((a, b) => a.numero - b.numero)
+  const estadoFallback = estadoHumano(comanda)
+  const orientacaoFallback = orientacaoHumana(comanda)
+  const quantidadePedidos = rodadas.length
+
   return (
-    <button onClick={onAbrir} style={{ ...card, minHeight: 48, display: "grid", gap: 6, textAlign: "left", cursor: "pointer" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-        <span style={{ fontSize: 15, fontWeight: 900, color: "var(--foreground)" }}>{identificacaoCliente(comanda)}</span>
-        <span style={{ fontSize: 11, fontWeight: 800, color: corEstado, textTransform: "uppercase", letterSpacing: ".3px", textAlign: "right" }}>{estado}</span>
+    <button onClick={onAbrir} style={{ ...card, minHeight: 48, display: "grid", gap: 10, textAlign: "left", cursor: "pointer", padding: 12 }}>
+      <div style={{ display: "grid", gap: 3 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+          <span style={{ fontSize: 16, fontWeight: 950, color: "var(--foreground)", letterSpacing: "-.2px" }}>Comanda #{comanda.numero}</span>
+          <span style={{ fontSize: 11.5, fontWeight: 800, color: "var(--foreground-muted)", whiteSpace: "nowrap" }}>{tempoDecorrido(comanda.abertaEm)}</span>
+        </div>
+        <span style={{ fontSize: 14.5, fontWeight: 850, color: "var(--foreground)" }}>{identificacaoCliente(comanda)}</span>
+        <span style={{ fontSize: 12.5, color: "var(--foreground-secondary)" }}>{identificacaoMesa(comanda)}</span>
       </div>
-      <span style={{ fontSize: 12.5, color: "var(--foreground-secondary)" }}>
-        {identificacaoMesa(comanda)} · Comanda #{comanda.numero} · {tempoDecorrido(comanda.abertaEm)}
-      </span>
-      {orientacao && (
-        <span style={{ fontSize: 12.5, lineHeight: 1.4, color: "var(--foreground)", padding: "8px 10px", borderRadius: 9, background: "var(--background)" }}>
-          <strong>O que fazer agora:</strong> {orientacao}
-        </span>
+
+      {rodadas.length > 0 ? (
+        <div aria-label={`Pedidos da comanda ${comanda.numero}`} style={{ display: "grid", gap: 7 }}>
+          {rodadas.map((r) => {
+            const visual = resumoVisualRodada(r)
+            const horario = r.enviadaEm ? new Date(r.enviadaEm).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) : null
+            return (
+              <div key={r.id} style={{ display: "grid", gap: 5, padding: "9px 10px", borderRadius: 10, background: "var(--background)", border: "1px solid var(--surface-secondary)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                  <span style={{ fontSize: 13.5, fontWeight: 900, color: "var(--foreground)" }}>{rotuloRodada(r)}</span>
+                  <span style={{ fontSize: 10.5, fontWeight: 900, color: visual.cor, textTransform: "uppercase", letterSpacing: ".25px", textAlign: "right" }}>{visual.rotulo}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 11.5, color: "var(--foreground-muted)" }}>
+                    {r.itens.length} item(ns){horario ? ` · ${horario}` : ""}
+                  </span>
+                  <span style={{ fontSize: 13, fontWeight: 900, color: "var(--brand-text)", whiteSpace: "nowrap" }}>{money(r.subtotal)}</span>
+                </div>
+                {visual.orientacao && (
+                  <span style={{ fontSize: 11.5, lineHeight: 1.35, color: "var(--foreground-secondary)" }}>{visual.orientacao}</span>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      ) : (
+        <div style={{ padding: "8px 10px", borderRadius: 9, background: "var(--background)", display: "grid", gap: 2 }}>
+          <strong style={{ fontSize: 11.5, color: "var(--foreground-secondary)" }}>{estadoFallback}</strong>
+          {orientacaoFallback && <span style={{ fontSize: 12, lineHeight: 1.4, color: "var(--foreground-secondary)" }}>{orientacaoFallback}</span>}
+        </div>
       )}
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 800 }}>
-        <span style={{ color: "var(--foreground-secondary)" }}>{envios} envio(s)</span>
-        <span style={{ color: "var(--brand-text)" }}>{money(comanda.totalParcial ?? 0)}</span>
+
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, paddingTop: 2 }}>
+        <span style={{ fontSize: 12, fontWeight: 800, color: "var(--foreground-secondary)" }}>
+          {quantidadePedidos} {quantidadePedidos === 1 ? "pedido" : "pedidos"}
+        </span>
+        <span style={{ display: "flex", alignItems: "baseline", gap: 5 }}>
+          <span style={{ fontSize: 11.5, fontWeight: 750, color: "var(--foreground-muted)" }}>Total da comanda</span>
+          <strong style={{ fontSize: 14, color: "var(--brand-text)" }}>{money(comanda.totalParcial ?? 0)}</strong>
+        </span>
       </div>
     </button>
   )
