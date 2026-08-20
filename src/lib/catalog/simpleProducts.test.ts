@@ -175,6 +175,51 @@ describe("buildSimpleCatalog — Sucos (milk) e Vitaminas (fixed, sem herdar reg
   });
 });
 
+describe("buildSimpleCatalog — Sucos exclusivos do Salão", () => {
+  const precos: Record<string, { Copo: number; Jarra: number }> = {
+    "Maracujá": { Copo: 2000, Jarra: 4000 },
+    "Acerola": { Copo: 1400, Jarra: 2800 },
+    "Goiaba": { Copo: 1400, Jarra: 2800 },
+    "Caju": { Copo: 1400, Jarra: 2800 },
+    "Cajá": { Copo: 1400, Jarra: 3200 },
+    "Bacuri": { Copo: 2000, Jarra: 4000 },
+    "Cupuaçu": { Copo: 1900, Jarra: 3800 },
+    "Graviola": { Copo: 2000, Jarra: 4000 },
+    "Abacaxi": { Copo: 1400, Jarra: 2800 },
+    "Abacate + hortelã": { Copo: 2000, Jarra: 4000 },
+    "Laranja": { Copo: 2000, Jarra: 4000 },
+  };
+
+  it("o escopo público continua com os sucos antigos e nunca expõe IDs/preços do Salão", () => {
+    const catalog = buildSimpleCatalog(MENU);
+    expect(catalog.sucos).toHaveLength(11);
+    expect(catalog.sucos.every((s) => s.strategy === "milk")).toBe(true);
+    expect(catalog.sucos.some((s) => s.id.startsWith("salao-suco-"))).toBe(false);
+    expect(catalog.sucos.some((s) => s.name === "Abacate + hortelã")).toBe(false);
+    expect(produto("Maracujá", catalog).priceCents).toBe(1000);
+  });
+
+  it("o escopo Salão substitui a seção Sucos pelos 11 sabores com Copo/Jarra e preços exatos", () => {
+    const catalog = buildSimpleCatalog(MENU, [], [], "salao");
+    expect(catalog.sucos).toHaveLength(Object.keys(precos).length);
+    expect(catalog.sucos.every((s) => s.strategy === "size")).toBe(true);
+
+    for (const [nome, esperado] of Object.entries(precos)) {
+      const suco = catalog.sucos.find((s) => s.name === nome);
+      expect(suco, `suco ${nome}`).toBeDefined();
+      expect(suco!.id.startsWith("salao-suco-")).toBe(true);
+      expect(Object.fromEntries(suco!.sizes!.map((size) => [size.code, size.priceCents]))).toEqual(esperado);
+    }
+  });
+
+  it("disponibilidade do Salão continua respeitando nome e ID estável", () => {
+    const porNome = buildSimpleCatalog(MENU, ["Cajá"], [], "salao");
+    expect(porNome.sucos.find((s) => s.name === "Cajá")?.available).toBe(false);
+    const porId = buildSimpleCatalog(MENU, [], ["salao-suco-laranja"], "salao");
+    expect(porId.sucos.find((s) => s.name === "Laranja")?.available).toBe(false);
+  });
+});
+
 describe("buildSimpleCatalog — Bebidas (fixed, 23 itens exatamente do PDF)", () => {
   it("23 produtos, todos fixed", () => {
     const catalog = buildSimpleCatalog(MENU);
