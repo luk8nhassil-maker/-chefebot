@@ -385,6 +385,29 @@ describe("/salao — escolher produtos e revisar", () => {
     await user.click(screen.getByRole("button", { name: "Continuar para borda" }));
   }
 
+  it("mantém o CTA principal visível no rodapé mobile e com contraste escuro suave", async () => {
+    const user = userEvent.setup();
+    await iniciarAtendimento(user);
+
+    await user.type(screen.getByPlaceholderText("Buscar produto…"), "Refrigerante");
+    await user.click(await screen.findByRole("button", { name: /Refrigerante 2L/ }));
+
+    const revisar = await screen.findByRole("button", { name: "Revisar pedido" });
+    expect(revisar.closest(".sal-action-footer")).not.toBeNull();
+    expect(revisar).toHaveStyle({ color: "#374151" });
+
+    const estilos = Array.from(document.querySelectorAll("style")).map((el) => el.textContent || "").join("");
+    expect(estilos).toContain(".sal-action-footer");
+    expect(estilos).toContain("position:sticky");
+    expect(estilos).toContain("bottom:0");
+    expect(estilos).toContain("env(safe-area-inset-bottom)");
+
+    await user.click(revisar);
+    const enviar = await screen.findByRole("button", { name: "Enviar para cozinha" });
+    expect(enviar.closest(".sal-action-footer")).not.toBeNull();
+    expect(enviar).toHaveStyle({ color: "#374151" });
+  });
+
   it("mostra emojis no fluxo e mantém sabor obrigatório", async () => {
     const user = userEvent.setup();
     cardapioAtual = CARDAPIO_PIZZA_OPCIONAIS;
