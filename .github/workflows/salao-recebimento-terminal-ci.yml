@@ -4,7 +4,7 @@ on:
   pull_request:
     paths:
       - "src/app/salao/**"
-      - "src/app/api/salao/caixa/**"
+      - "src/app/api/salao/comandas/**"
       - "src/lib/salaoConta*"
       - "src/lib/salaoPagamento*"
       - ".github/workflows/salao-recebimento-terminal-ci.yml"
@@ -32,7 +32,7 @@ jobs:
       - name: Testes focados e regressão do Salão
         run: >-
           npm test --
-          "src/app/api/salao/caixa/[id]/fechar/route.test.ts"
+          "src/app/api/salao/comandas/[id]/pagamento/route.test.ts"
           "src/app/salao/receber/[id]/page.test.tsx"
           src/lib/salaoConta.test.ts
           src/lib/salaoPagamento.test.ts
@@ -74,8 +74,8 @@ jobs:
           src/app/salao/page.tsx
           "src/app/salao/receber/[id]/page.tsx"
           "src/app/salao/receber/[id]/page.test.tsx"
-          "src/app/api/salao/caixa/[id]/fechar/route.ts"
-          "src/app/api/salao/caixa/[id]/fechar/route.test.ts"
+          "src/app/api/salao/comandas/[id]/pagamento/route.ts"
+          "src/app/api/salao/comandas/[id]/pagamento/route.test.ts"
 
       - name: Build de produção
         run: npm run build
