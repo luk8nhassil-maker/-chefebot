@@ -196,10 +196,21 @@ function calcularProximoIntervaloAutoVerificacaoPix(lista: Pick<Pedido, "pix" | 
 }
 function getActionLabel(p: Pedido): string {
   if (p.status === "em_preparo") {
-    if (isPedidoDineIn(p)) return "Pronto"
+    if (isPedidoDineIn(p)) return "Pronto para servir"
     if (isPedidoRetirada(p)) return "Pronto para retirada"
   }
+  if (p.status === "saiu_entrega") {
+    if (isPedidoDineIn(p)) return "Pedido servido"
+    if (isPedidoRetirada(p)) return "Cliente retirou"
+  }
   return ACTION_LABEL[p.status]
+}
+function getStatusLabel(p: Pedido): string {
+  if (p.status === "saiu_entrega") {
+    if (isPedidoDineIn(p)) return "Pronto para servir"
+    if (isPedidoRetirada(p)) return "Pronto para retirada"
+  }
+  return STATUS_COLOR[p.status].label
 }
 const STATUS_OPTS: { value: Status; label: string }[] = [
   { value: "novo", label: "Novo" },
@@ -1066,7 +1077,7 @@ export default function PedidosPage() {
       const firstName = pedido.cliente.split(" ")[0]
       if (novoStatus === "entregue") { tocarSomEntrega(); temposEntregaRef.current[id] = tempoDesde(pedido.horario, undefined, Date.now()) }
       setToast({
-        text: data?.avisoOperacional ? `⚠️ ${data.avisoOperacional}` : `${firstName} → ${STATUS_COLOR[novoStatus].label}`,
+        text: data?.avisoOperacional ? `⚠️ ${data.avisoOperacional}` : `${firstName} → ${getStatusLabel({ ...pedido, status: novoStatus })}`,
         expires: Date.now() + 5000,
         pedidoId: id,
         prevStatus,
@@ -1367,7 +1378,7 @@ export default function PedidosPage() {
     const isDone = p.status === "entregue"
     const isCanceled = p.status === "cancelado"
     const isDineInDetail = p.tipoEntrega === "dine_in" || p.endereco === "Consumo no local"
-    const nextStatus = (isDineInDetail && p.status === "em_preparo") ? "entregue" as Status : NEXT_STATUS[p.status]
+    const nextStatus = NEXT_STATUS[p.status]
     const firstName = p.cliente.split(" ")[0]
     const pagamento = p.pagamento || ""
     const isPix = pagamento.toLowerCase().includes("pix")
@@ -1381,7 +1392,7 @@ export default function PedidosPage() {
         {/* Cabeçalho */}
         <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
           <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 7 }}>
-            <span style={{ alignSelf: "flex-start", background: sc.accentBg, color: sc.accent, fontSize: 11, fontWeight: 900, letterSpacing: "1.2px", padding: "5px 10px", borderRadius: 8, textTransform: "uppercase", border: `1px solid ${sc.accentBorder}` }}>{sc.label}</span>
+            <span style={{ alignSelf: "flex-start", background: sc.accentBg, color: sc.accent, fontSize: 11, fontWeight: 900, letterSpacing: "1.2px", padding: "5px 10px", borderRadius: 8, textTransform: "uppercase", border: `1px solid ${sc.accentBorder}` }}>{getStatusLabel(p)}</span>
             <h2 style={{ margin: 0, fontSize: 22, fontWeight: 900, letterSpacing: "-0.6px", lineHeight: 1.1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.numero != null ? `#${p.numero} · ` : ""}{p.cliente}</h2>
             <span style={{ fontSize: 12, color: "var(--foreground-secondary)", fontWeight: 600 }}>{p.status === "saiu_entrega" ? `Na rua há ${mins} min` : `Recebido às ${p.horario} · há ${mins} min`}</span>
           </div>
@@ -1760,7 +1771,7 @@ export default function PedidosPage() {
 
       {/* Gate de limpeza operacional — bloqueante enquanto houver pendência, e
           só na visão de pedidos ativos: em "arquivados" e "tempo real" a
-          operadora está fazendo outra coisa. Desligado por padrão (flag). */}
+          operadora está fazendo outra coisa. Ativo por padrão; false explícito é rollback. */}
       {limpezaOperacionalAtiva() && (
         <LimpezaOperacionalGate
           pedidos={pedidos}
@@ -2246,7 +2257,7 @@ export default function PedidosPage() {
             const minsPrep = tempoDesde(pedido.horario, pedido.horarioInicio, now)
             const minsRua = pedido.status === "saiu_entrega" ? idadeDaEtapaMinutos(pedido, now) : 0
             const isDineIn = pedido.tipoEntrega === "dine_in" || pedido.endereco === "Consumo no local"
-            const nextStatus = (isDineIn && pedido.status === "em_preparo") ? "entregue" as Status : NEXT_STATUS[pedido.status]
+            const nextStatus = NEXT_STATUS[pedido.status]
             const isDone = pedido.status === "entregue"
             const isCanceled = pedido.status === "cancelado"
             const isNovo = pedido.status === "novo"
@@ -2281,9 +2292,7 @@ export default function PedidosPage() {
               ? selecionarProximaAcaoFamilia(familiaSalao, filtro)
               : undefined
             const alvoNextStatusFamilia = alvoAcaoFamilia
-              ? ((isPedidoDineIn(alvoAcaoFamilia) && alvoAcaoFamilia.status === "em_preparo")
-                  ? "entregue" as Status
-                  : NEXT_STATUS[alvoAcaoFamilia.status])
+              ? NEXT_STATUS[alvoAcaoFamilia.status]
               : null
             const alvoEmEdicaoFamilia = alvoAcaoFamilia ? pedidoEmEdicao(alvoAcaoFamilia) : false
             const alvoPixPendenteFamilia = !!alvoAcaoFamilia
@@ -2392,7 +2401,7 @@ export default function PedidosPage() {
                       {emEdicao && <span style={{ fontSize: 9, fontWeight: 900, color: "var(--info)", background: "color-mix(in srgb, var(--info) 14%, transparent)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>✎ Cliente editando</span>}
                       {!emEdicao && foiEditado && <span style={{ fontSize: 9, fontWeight: 900, color: "var(--attention-text)", background: "var(--attention-surface)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>✎ Alterado pelo cliente</span>}
                       {pedido.cancelamentoSolicitado && <span style={{ fontSize: 11, flexShrink: 0 }}>⚠️</span>}
-                      <span style={{ fontSize: 10, fontWeight: 900, color: pixPendente ? "var(--attention-text)" : (isPix && pedido.pixConfirmado && pedido.status === "novo" ? "var(--success)" : sc.accent), background: pixPendente ? "var(--attention-surface)" : (isPix && pedido.pixConfirmado && pedido.status === "novo" ? "color-mix(in srgb, var(--success) 12%, transparent)" : sc.accentBg), padding: "2px 7px", borderRadius: 6, border: `1px solid ${pixPendente ? "var(--attention-border)" : (isPix && pedido.pixConfirmado && pedido.status === "novo" ? "color-mix(in srgb, var(--success) 35%, transparent)" : sc.accentBorder)}`, textTransform: "uppercase", letterSpacing: ".4px", flexShrink: 0 }}>{pixPendente ? (hibridoParts ? "Aguardando Pix parcial" : "Aguardando Pix") : (isPix && pedido.pixConfirmado && pedido.status === "novo" ? (hibridoParts ? "Pix parcial pago" : "Pago") : sc.label)}</span>
+                      <span style={{ fontSize: 10, fontWeight: 900, color: pixPendente ? "var(--attention-text)" : (isPix && pedido.pixConfirmado && pedido.status === "novo" ? "var(--success)" : sc.accent), background: pixPendente ? "var(--attention-surface)" : (isPix && pedido.pixConfirmado && pedido.status === "novo" ? "color-mix(in srgb, var(--success) 12%, transparent)" : sc.accentBg), padding: "2px 7px", borderRadius: 6, border: `1px solid ${pixPendente ? "var(--attention-border)" : (isPix && pedido.pixConfirmado && pedido.status === "novo" ? "color-mix(in srgb, var(--success) 35%, transparent)" : sc.accentBorder)}`, textTransform: "uppercase", letterSpacing: ".4px", flexShrink: 0 }}>{pixPendente ? (hibridoParts ? "Aguardando Pix parcial" : "Aguardando Pix") : (isPix && pedido.pixConfirmado && pedido.status === "novo" ? (hibridoParts ? "Pix parcial pago" : "Pago") : getStatusLabel(pedido))}</span>
                     </div>
 
                     {/* Linha 2: infos compactas */}
@@ -2451,7 +2460,7 @@ export default function PedidosPage() {
                         <button
                           onClick={() => {
                             if (emEdicao) return
-                            if (nextStatus === "saiu_entrega" && entregadores.length > 0 && pedido.tipoEntrega !== "pickup") {
+                            if (nextStatus === "saiu_entrega" && entregadores.length > 0 && !isPedidoDineIn(pedido) && !isPedidoRetirada(pedido)) {
                               setModalEntrega({ pedidoId: pedido.id, proxStatus: nextStatus })
                             } else {
                               avancarStatus(pedido.id, nextStatus)
@@ -2483,7 +2492,7 @@ export default function PedidosPage() {
                     <button
                       onClick={() => {
                         if (alvoEmEdicaoFamilia) return
-                        if (alvoNextStatusFamilia === "saiu_entrega" && entregadores.length > 0 && alvoAcaoFamilia.tipoEntrega !== "pickup") {
+                        if (alvoNextStatusFamilia === "saiu_entrega" && entregadores.length > 0 && !isPedidoDineIn(alvoAcaoFamilia) && !isPedidoRetirada(alvoAcaoFamilia)) {
                           setModalEntrega({ pedidoId: alvoAcaoFamilia.id, proxStatus: alvoNextStatusFamilia })
                         } else {
                           avancarStatus(alvoAcaoFamilia.id, alvoNextStatusFamilia)
