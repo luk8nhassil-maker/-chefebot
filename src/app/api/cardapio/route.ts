@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { redis } from '@/lib/redis'
 import { getMENUDinamico } from '@/lib/menu.server'
 import { buildPizzaCatalog } from '@/lib/catalog/pizzas'
-import { buildSimpleCatalog } from '@/lib/catalog/simpleProducts'
+import { buildSimpleCatalog, ehSucoExclusivoSalao } from '@/lib/catalog/simpleProducts'
 import { verifyToken } from '@/lib/auth'
 import { lerSessaoSalao } from '@/lib/salaoAuth'
 import { registrarAuditoriaCardapio } from '@/lib/auditoriaCardapio'
@@ -270,10 +270,14 @@ export async function GET(req?: NextRequest) {
     // reconstruir o catálogo em outro lugar.
     const pizzaCatalog = buildPizzaCatalog(menu, esgotadosLegado, esgotadosIds)
     // Catálogo oficial dos demais produtos configuráveis, com IDs estáveis e
-    // disponibilidade em tempo real (Fase 6). O escopo público continua como
-    // default; somente uma sessão do Salão autenticada recebe a extensão
-    // comercial de sucos Copo/Jarra.
-    const catalog = buildSimpleCatalog(menu, esgotadosLegado, esgotadosIds, catalogScope)
+    // disponibilidade em tempo real (Fase 6). No escopo Salão, o catálogo
+    // interno também carrega os IDs públicos antigos só para comandas abertas
+    // antes do deploy; eles são removidos desta resposta e nunca aparecem na
+    // tela nova do garçom.
+    const catalogInterno = buildSimpleCatalog(menu, esgotadosLegado, esgotadosIds, catalogScope)
+    const catalog = catalogScope === 'salao'
+      ? { ...catalogInterno, sucos: catalogInterno.sucos.filter(ehSucoExclusivoSalao) }
+      : catalogInterno
     return NextResponse.json({ ...menu, esgotados, esgotadosIds, esgotadosMetadata, horario, pizzaCatalog, catalog })
   } catch {
     return NextResponse.json(
