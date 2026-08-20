@@ -71,6 +71,7 @@ let seq = 0;
 let comandas: ComandaMock[] = [];
 let falharProximoEnvio = false;
 let falharProximaListagem = false;
+let falharProximoSalvamentoItens = false;
 let enviosCriados = 0;
 let cardapioAtual: unknown = CARDAPIO_TESTE;
 
@@ -79,6 +80,7 @@ function resetMock() {
   comandas = [];
   falharProximoEnvio = false;
   falharProximaListagem = false;
+  falharProximoSalvamentoItens = false;
   enviosCriados = 0;
   cardapioAtual = CARDAPIO_TESTE;
 }
@@ -123,6 +125,10 @@ async function mockFetch(url: string, opts?: RequestInit): Promise<Response> {
   if (patchComanda && method === "PATCH") {
     const c = comandas.find((x) => x.id === patchComanda[1]);
     if (!c) return jsonRes(404, { ok: false, error: "Comanda não encontrada" });
+    if (falharProximoSalvamentoItens) {
+      falharProximoSalvamentoItens = false;
+      return jsonRes(503, { ok: false, error: "Falha simulada ao salvar itens" });
+    }
     const itens: ItemMock[] = (body.itens || []).map((i: ItemMock) => ({ ...i, price: precoOficial(i.name) ?? i.price }));
     c.itens = itens;
     c.rodadas[0].itens = itens;
@@ -165,6 +171,10 @@ async function mockFetch(url: string, opts?: RequestInit): Promise<Response> {
     const c = comandas.find((x) => x.id === patchRodada[1]);
     const r = c?.rodadas.find((x) => x.id === patchRodada[2]);
     if (!c || !r) return jsonRes(404, { ok: false, error: "Rodada não encontrada" });
+    if (falharProximoSalvamentoItens) {
+      falharProximoSalvamentoItens = false;
+      return jsonRes(503, { ok: false, error: "Falha simulada ao salvar itens" });
+    }
     const itens: ItemMock[] = (body.itens || []).map((i: ItemMock) => ({ ...i, price: precoOficial(i.name) ?? i.price }));
     r.itens = itens;
     r.subtotal = subtotalDe(itens);
@@ -445,6 +455,21 @@ describe("/salao — escolher produtos e revisar", () => {
     expect(await screen.findByText("Refrigerante 2L adicionado")).toBeInTheDocument();
     expect(await screen.findByText("1 item(ns)")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Revisar pedido" })).toBeEnabled();
+  });
+
+  it("não confirma nem exibe item quando o servidor falha ao salvar", async () => {
+    const user = userEvent.setup();
+    await iniciarAtendimento(user);
+
+    falharProximoSalvamentoItens = true;
+    await user.type(screen.getByPlaceholderText("Buscar produto…"), "Refrigerante");
+    await user.click(await screen.findByRole("button", { name: /Refrigerante 2L/ }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Falha simulada ao salvar itens");
+    expect(screen.queryByText("Refrigerante 2L adicionado")).not.toBeInTheDocument();
+    expect(screen.getByText("0 item(ns)")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Adicione pelo menos um produto" })).toBeDisabled();
+    expect(comandas[0].itens).toHaveLength(0);
   });
 
   it("revisão permite aumentar/diminuir/remover item e recalcula o total", async () => {
