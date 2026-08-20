@@ -1,0 +1,59 @@
+name: tmp-salao-comanda-card-ux
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/tmp-salao-comanda-card-ux.yml
+      - scripts/tmp_salao_comanda_card_ux.py
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/salao-comanda-card-pedidos-ux-20260820
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Provar UX anterior antes do patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/tmp_salao_comanda_card_ux.py tests
+          set +e
+          npx vitest run src/app/salao/page.test.tsx -t "organiza uma comanda em um único card com número forte" > /tmp/prepatch.log 2>&1
+          pre=$?
+          set -e
+          cat /tmp/prepatch.log
+          if [ "$pre" -eq 0 ]; then
+            echo "::error::Teste novo passou antes do patch; prova de regressão inválida."
+            exit 1
+          fi
+      - name: Aplicar patch mínimo
+        run: python scripts/tmp_salao_comanda_card_ux.py page
+      - name: Validar Salão completo
+        run: npx vitest run src/app/salao/page.test.tsx
+      - name: Lint dos arquivos alterados
+        run: npx eslint src/app/salao/page.tsx src/app/salao/page.test.tsx
+      - name: Build de produção
+        run: npm run build
+      - name: Publicar somente o patch validado
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/tmp-salao-comanda-card-ux.yml scripts/tmp_salao_comanda_card_ux.py
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix(salao): organiza pedidos por comanda"
+          git push origin HEAD:fix/salao-comanda-card-pedidos-ux-20260820
