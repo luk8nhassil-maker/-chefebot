@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { jwtVerify } from "jose";
-import { ROUTE_ROLES } from "@/lib/auth";
+import { ROUTE_ROLES, type Role } from "@/lib/auth";
 import { ehRotaOperacionalAssinatura } from "@/lib/assinaturaChefeBotUi";
 
 function getSecret() {
@@ -33,6 +33,20 @@ export async function middleware(req: NextRequest) {
     return NextResponse.redirect(url, 308);
   }
 
+  // O cardápio do alias já é redirecionado para o domínio oficial. Este guard
+  // fecha também o bypass direto da API de criação de pedido pelo host legado.
+  // Pedidos já existentes e suas rotas administrativas não são afetados.
+  if (hostname === LEGACY_PRODUCTION_ALIAS && pathname === "/api/pedido-app" && req.method === "POST") {
+    return NextResponse.json(
+      {
+        ok: false,
+        code: "PEDIDOS_TEMPORARIAMENTE_INDISPONIVEIS",
+        error: "Pedidos temporariamente indisponíveis. Tente novamente mais tarde.",
+      },
+      { status: 503, headers: { "Retry-After": "300" } },
+    );
+  }
+
   if (pathname === "/" && hostname === CARDAPIO_DOMAIN) {
     const url = req.nextUrl.clone();
     url.pathname = "/cardapio";
@@ -51,8 +65,8 @@ export async function middleware(req: NextRequest) {
 
   try {
     const { payload } = await jwtVerify(token, getSecret());
-    const role = payload.role as string;
-    if (!rule.roles.includes(role as any)) {
+    const role = payload.role as Role;
+    if (!rule.roles.includes(role)) {
       const loginUrl = new URL("/login", req.url);
       loginUrl.searchParams.set("callbackUrl", pathname);
       return NextResponse.redirect(loginUrl);
@@ -79,5 +93,6 @@ export const config = {
     "/setup/:path*",
     "/financeiro/:path*",
     "/contador/:path*",
+    "/api/pedido-app",
   ],
 };
