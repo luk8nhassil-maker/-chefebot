@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import { NextRequest } from "next/server";
 import { middleware } from "./middleware";
 
-function request(url: string) {
+function request(url: string, method = "GET") {
   const parsed = new URL(url);
-  return new NextRequest(url, { headers: { host: parsed.host } });
+  return new NextRequest(url, { method, headers: { host: parsed.host } });
 }
 
 describe("middleware — alias operacional do ChefeBot", () => {
@@ -23,8 +23,25 @@ describe("middleware — alias operacional do ChefeBot", () => {
     }
   });
 
+  it("bloqueia criação direta de pedido pelo alias legado", async () => {
+    const response = await middleware(request("https://chefebot-pjif.vercel.app/api/pedido-app", "POST"));
+    const body = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("Retry-After")).toBe("300");
+    expect(body).toMatchObject({
+      ok: false,
+      code: "PEDIDOS_TEMPORARIAMENTE_INDISPONIVEIS",
+    });
+  });
+
+  it("não aplica o guard do alias à API do domínio oficial", async () => {
+    const response = await middleware(request("https://chefedapizza.com.br/api/pedido-app", "POST"));
+    expect(response.status).toBe(200);
+  });
+
   it("não redireciona rotas públicas que não pertencem ao gate operacional", async () => {
-    for (const pathname of ["/pedido", "/entregador", "/login"] ) {
+    for (const pathname of ["/pedido", "/entregador", "/login"]) {
       const response = await middleware(request(`https://chefebot-pjif.vercel.app${pathname}`));
       expect(response.status, pathname).toBe(200);
       expect(response.headers.get("location"), pathname).toBeNull();
