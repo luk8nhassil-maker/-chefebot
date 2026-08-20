@@ -33,7 +33,6 @@ function imprimirPedidoSilencioso(pedidoId: string): Promise<void> {
     iframe.setAttribute("aria-hidden", "true");
 
     let finalizado = false;
-    let timeoutId: number | undefined;
 
     const remover = () => {
       window.setTimeout(() => {
@@ -44,7 +43,7 @@ function imprimirPedidoSilencioso(pedidoId: string): Promise<void> {
     const finalizar = (erro?: Error) => {
       if (finalizado) return;
       finalizado = true;
-      if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+      window.clearTimeout(timeoutId);
       remover();
       if (erro) reject(erro);
       else resolve();
@@ -64,7 +63,7 @@ function imprimirPedidoSilencioso(pedidoId: string): Promise<void> {
     };
 
     iframe.onerror = () => finalizar(new Error("falha_ao_carregar_cupom"));
-    timeoutId = window.setTimeout(
+    const timeoutId = window.setTimeout(
       () => finalizar(new Error("timeout_de_impressao")),
       TIMEOUT_IMPRESSAO_MS,
     );
