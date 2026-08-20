@@ -1,0 +1,30 @@
+name: health-assinatura-chefebot-reativada-prod
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/health-assinatura-chefebot-reativada-prod.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validar domínio oficial com assinatura reativada
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://chefedapizza.com.br"
+
+          operacao_body="$(mktemp)"
+          operacao_status="$(curl --silent --show-error --output "$operacao_body" --write-out '%{http_code}' "$base/api/assinatura/operacao")"
+          echo "/api/assinatura/operacao -> HTTP $operacao_status"
+          cat "$operacao_body"
+          test "$operacao_status" = "200"
+          grep -Eq '"blocked"[[:space:]]*:[[:space:]]*true' "$operacao_body"
+
+          pedidos_status="$(curl --silent --show-error --location --output /dev/null --write-out '%{http_code}' "$base/pedidos")"
+          echo "/pedidos (seguindo auth redirect) -> HTTP $pedidos_status"
+          test "$pedidos_status" = "200"
