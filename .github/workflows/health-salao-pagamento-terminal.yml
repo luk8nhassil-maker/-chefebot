@@ -1,0 +1,46 @@
+name: health-salao-pagamento-terminal
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/health-salao-pagamento-terminal.yml
+
+permissions:
+  contents: read
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Health check somente leitura
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          salao_code=$(curl -L -sS -o /tmp/salao.html -w '%{http_code}' --max-time 20 https://chefedapizza.com.br/salao)
+          echo "GET /salao -> HTTP $salao_code"
+          if [[ "$salao_code" != "200" ]]; then
+            echo "::error::/salao não respondeu 200 após redirecionamentos"
+            exit 1
+          fi
+
+          pagamento_code=$(curl -sS -o /tmp/pagamento.json -w '%{http_code}' --max-time 20 \
+            -X POST \
+            -H 'Content-Type: application/json' \
+            --data '{"requestId":"health_terminal_1234567890","totalEsperadoCentavos":1,"pagamento":"invalido"}' \
+            https://chefedapizza.com.br/api/salao/comandas/health-nao-existe/pagamento)
+          echo "POST pagamento sem sessão -> HTTP $pagamento_code"
+          if [[ "$pagamento_code" != "401" ]]; then
+            echo "::error::Endpoint de pagamento deveria bloquear sem sessão do Salão"
+            cat /tmp/pagamento.json | head -c 300
+            exit 1
+          fi
+
+          pedidos_code=$(curl -L -sS -o /tmp/pedidos.html -w '%{http_code}' --max-time 20 https://chefedapizza.com.br/pedidos)
+          echo "GET /pedidos -> HTTP $pedidos_code"
+          if [[ "$pedidos_code" != "200" ]]; then
+            echo "::error::/pedidos não respondeu 200"
+            exit 1
+          fi
+
+          echo "Health OK: Salão e painel respondem; pagamento sem sessão permanece bloqueado. Nenhuma comanda foi alterada."
