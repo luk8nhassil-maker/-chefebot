@@ -26,16 +26,16 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
-          import textwrap
 
           workflow = Path('.github/workflows/tmp-patch-pedidos-comanda-card.yml').read_text()
           marcador_inicio = "          python - <<'PY'\n"
           inicio = workflow.index(marcador_inicio) + len(marcador_inicio)
           fim = workflow.index("\n          PY", inicio)
-          script = textwrap.dedent(workflow[inicio:fim])
+          linhas = workflow[inicio:fim].splitlines()
+          script = "\n".join(linha[10:] if linha.startswith("          ") else linha for linha in linhas)
           exec(compile(script, '<patch-pedidos-comanda>', 'exec'))
           PY
-          rm -f .tmp-trigger-pedidos-comanda .github/workflows/tmp-run-patch-pedidos-comanda-pr.yml
+          rm -f .tmp-trigger-pedidos-comanda README.tmp-noop .github/workflows/tmp-run-patch-pedidos-comanda-pr.yml
       - name: Instalar dependências
         run: npm ci
       - name: Testes focados
