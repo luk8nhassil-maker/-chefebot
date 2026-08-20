@@ -1,18 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { lerSessaoAdministrativa } from "@/lib/sessaoAdministrativa";
-import { lerSessaoSalao } from "@/lib/salaoAuth";
 import { fecharContaSalao } from "@/lib/salaoConta.server";
 import { sanitizeClientRequestId } from "@/survival/clientRequestId";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const [sessaoAdmin, sessaoSalao] = await Promise.all([
-    lerSessaoAdministrativa(req),
-    lerSessaoSalao(req),
-  ]);
-  const adminAutorizado = Boolean(sessaoAdmin && ["admin", "atendente", "dev"].includes(sessaoAdmin.role));
-  if (!adminAutorizado && !sessaoSalao) {
+  const sessao = await lerSessaoAdministrativa(req);
+  if (!sessao || !["admin", "atendente", "dev"].includes(sessao.role)) {
     return NextResponse.json({ ok: false, error: "Não autorizado" }, { status: 401 });
   }
 
@@ -22,14 +17,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const requestId = sanitizeClientRequestId((body as { requestId?: unknown }).requestId);
   if (!requestId) return NextResponse.json({ ok: false, error: "Identificador de fechamento é obrigatório." }, { status: 400 });
 
-  const responsavel = adminAutorizado && sessaoAdmin
-    ? sessaoAdmin.nome || sessaoAdmin.username || "Caixa"
-    : "Terminal do salão";
-
   try {
     const resultado = await fecharContaSalao({
       comandaId: id,
-      responsavel,
+      responsavel: sessao.nome || sessao.username || "Caixa",
       requestId,
       totalEsperadoCentavos: (body as { totalEsperadoCentavos?: unknown }).totalEsperadoCentavos,
       pagamento: (body as { pagamento?: unknown }).pagamento,
