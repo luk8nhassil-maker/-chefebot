@@ -1,1 +1,0 @@
-gatilho temporário para reexecutar os checks no HEAD validado
