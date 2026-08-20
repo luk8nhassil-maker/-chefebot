@@ -28,6 +28,12 @@ export type ResultadoEnvioWhatsApp = {
 
 const TIMEOUT_PADRAO_MS = 10_000;
 const MAX_TENTATIVAS = 2;
+const LINK_CARDAPIO_OFICIAL = "https://chefedapizza.com.br/cardapio";
+const LINK_CARDAPIO_LEGADO = /https?:\/\/chefebot-pjif\.vercel\.app\/cardapio(?=$|[\s/?#])/gi;
+
+export function normalizarLinksPublicosWhatsApp(text: string) {
+  return text.replace(LINK_CARDAPIO_LEGADO, LINK_CARDAPIO_OFICIAL);
+}
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -92,7 +98,7 @@ export async function enviarTextoWhatsApp(
   }
 
   const url = `${config.baseUrl}/message/sendText/${config.instanceName}`;
-  const body: Record<string, unknown> = { number: phone, text };
+  const body: Record<string, unknown> = { number: phone, text: normalizarLinksPublicosWhatsApp(text) };
   if (opts?.delay !== undefined) {
     body.delay = opts.delay;
     body.options = { delay: opts.delay, presence: opts.presence ?? "composing" };
