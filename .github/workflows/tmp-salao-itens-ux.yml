@@ -1,0 +1,117 @@
+name: tmp-salao-itens-ux
+
+on:
+  push:
+    branches:
+      - fix/salao-itens-visiveis-ux-20260820
+
+permissions:
+  contents: write
+
+jobs:
+  aplicar-patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout da branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/salao-itens-visiveis-ux-20260820
+
+      - name: Aplicar patch mínimo de UX e regressão
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          page_path = Path('src/app/salao/page.tsx')
+          page = page_path.read_text()
+
+          alvo = '''      <ContextoAtendimento comanda={comanda} />
+
+      <div style={{ flex: 1, overflowY: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+        <div style={{ position: "relative" }}>'''
+
+          novo = '''      <ContextoAtendimento comanda={comanda} />
+
+      <div style={{ flex: 1, overflowY: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+        {itens.length > 0 && (
+          <section
+            aria-label="Itens adicionados ao pedido"
+            style={{ ...card, padding: "10px 12px", display: "grid", gap: 8 }}
+          >
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+              <span style={{ fontSize: 11, fontWeight: 900, letterSpacing: ".45px", textTransform: "uppercase", color: "var(--foreground-muted)" }}>
+                Itens no pedido
+              </span>
+              <span style={{ fontSize: 12.5, fontWeight: 900, color: "var(--brand-text)", whiteSpace: "nowrap" }}>
+                {itens.length} item(ns) · {money(total)}
+              </span>
+            </div>
+            <div style={{ display: "grid", gap: 6, maxHeight: 132, overflowY: "auto" }}>
+              {itens.slice().reverse().map((item, i) => (
+                <div key={`${item.name}-${item.detail}-${i}`} style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr) auto", alignItems: "center", gap: 8, minHeight: 32 }}>
+                  <span style={{ minWidth: 28, height: 28, padding: "0 6px", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", background: "var(--primary-soft)", color: "var(--brand-text)", fontSize: 12, fontWeight: 900 }}>
+                    {item.qty}×
+                  </span>
+                  <span style={{ minWidth: 0 }}>
+                    <span style={{ display: "block", fontSize: 13.5, fontWeight: 800, color: "var(--foreground)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {item.name}
+                    </span>
+                    {item.detail && (
+                      <span style={{ display: "block", fontSize: 11, color: "var(--foreground-muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {item.detail}
+                      </span>
+                    )}
+                  </span>
+                  <span style={{ fontSize: 12.5, fontWeight: 800, color: "var(--foreground-secondary)", whiteSpace: "nowrap" }}>
+                    {money(item.price * item.qty)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+        <div style={{ position: "relative" }}>'''
+
+          if page.count(alvo) != 1:
+              raise SystemExit(f'marcador do catálogo inesperado: {page.count(alvo)} ocorrência(s)')
+          page_path.write_text(page.replace(alvo, novo, 1))
+
+          test_path = Path('src/app/salao/page.test.tsx')
+          test = test_path.read_text()
+          alvo_teste = '''    expect(await screen.findByText("Refrigerante 2L adicionado")).toBeInTheDocument();
+    expect(await screen.findByText("1 item(ns)")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Revisar pedido" })).toBeEnabled();'''
+          novo_teste = '''    expect(await screen.findByText("Refrigerante 2L adicionado")).toBeInTheDocument();
+    const resumoItens = screen.getByRole("region", { name: "Itens adicionados ao pedido" });
+    expect(within(resumoItens).getByText("Itens no pedido")).toBeInTheDocument();
+    expect(within(resumoItens).getByText("1×")).toBeInTheDocument();
+    expect(within(resumoItens).getByText("Refrigerante 2L")).toBeInTheDocument();
+    expect(within(resumoItens).getByText("R$ 12,00")).toBeInTheDocument();
+    expect(await screen.findByText("1 item(ns)")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Revisar pedido" })).toBeEnabled();'''
+          if test.count(alvo_teste) != 1:
+              raise SystemExit(f'marcador do teste inesperado: {test.count(alvo_teste)} ocorrência(s)')
+          test_path.write_text(test.replace(alvo_teste, novo_teste, 1))
+          PY
+
+          git diff --check
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Testar UX do Salão
+        run: npm test -- src/app/salao/page.test.tsx
+
+      - name: Lint focado
+        run: npm run lint -- src/app/salao/page.tsx src/app/salao/page.test.tsx
+
+      - name: Gravar somente o patch final
+        shell: bash
+        run: |
+          rm .github/workflows/tmp-salao-itens-ux.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/app/salao/page.tsx src/app/salao/page.test.tsx .github/workflows/tmp-salao-itens-ux.yml
+          git commit -m "fix(salao): destaca itens adicionados no catálogo"
+          git push origin HEAD:fix/salao-itens-visiveis-ux-20260820
