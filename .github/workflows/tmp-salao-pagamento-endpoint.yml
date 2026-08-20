@@ -1,0 +1,54 @@
+name: tmp-salao-pagamento-endpoint
+
+on:
+  push:
+    branches:
+      - feat/salao-receber-pagamento-terminal
+    paths:
+      - .github/workflows/tmp-salao-pagamento-endpoint.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/salao-receber-pagamento-terminal
+      - name: Isolar endpoint de pagamento do terminal
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          trocas = {
+            Path('src/app/salao/receber/[id]/page.tsx'): (
+              '/api/salao/caixa/${comanda.id}/fechar',
+              '/api/salao/comandas/${comanda.id}/pagamento',
+            ),
+            Path('src/app/salao/receber/[id]/page.test.tsx'): (
+              '/api/salao/caixa/comanda_1/fechar',
+              '/api/salao/comandas/comanda_1/pagamento',
+            ),
+          }
+
+          for path, (antigo, novo) in trocas.items():
+            text = path.read_text()
+            if text.count(antigo) != 1:
+              raise SystemExit(f'{path}: esperava 1 ocorrência de {antigo!r}, encontrei {text.count(antigo)}')
+            path.write_text(text.replace(antigo, novo))
+          PY
+
+          git diff --check
+          git diff -- src/app/salao/receber/[id]/page.tsx src/app/salao/receber/[id]/page.test.tsx
+
+      - name: Commitar patch na branch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add 'src/app/salao/receber/[id]/page.tsx' 'src/app/salao/receber/[id]/page.test.tsx'
+          git commit -m "refactor(salao): isola endpoint de pagamento do terminal"
+          git push origin HEAD:feat/salao-receber-pagamento-terminal
