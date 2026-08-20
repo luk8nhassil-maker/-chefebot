@@ -95,7 +95,7 @@ export default function ReceberContaSalaoPage() {
   }, [comandaId, router])
 
   useEffect(() => {
-    void carregar()
+    (async () => { await carregar() })()
   }, [carregar])
 
   async function confirmarPagamento() {
