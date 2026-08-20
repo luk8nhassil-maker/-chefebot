@@ -28,6 +28,7 @@ jobs:
           awk '/^          python - <<'"'"'PY'"'"'$/{capt=1;next} /^          PY$/{if(capt){exit}} capt{sub(/^          /,""); print}' .github/workflows/tmp-patch-gate-operacional.yml > /tmp/gate-patch.py
           test -s /tmp/gate-patch.py
           python /tmp/gate-patch.py
+          python scripts/tmp-fix-gate-test-expectations.py
           git diff --check
 
       - name: Install dependencies
