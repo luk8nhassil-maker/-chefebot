@@ -3,7 +3,6 @@ const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const OFFLINE_URL = "/offline";
 const PRECACHE_URLS = [
   OFFLINE_URL,
-  "/manifest.json",
   "/icon-192.png",
   "/icon-512.png",
 ];
@@ -28,7 +27,6 @@ self.addEventListener("activate", event => {
 
 function ehRecursoEstaticoSeguro(url) {
   return url.pathname.startsWith("/_next/static/") ||
-    url.pathname === "/manifest.json" ||
     url.pathname === "/icon-192.png" ||
     url.pathname === "/icon-512.png";
 }
@@ -43,6 +41,10 @@ self.addEventListener("fetch", event => {
   // Dados operacionais, autenticação, pedidos, Pix e integrações nunca entram
   // no cache do PWA. O servidor continua sendo sempre a fonte da verdade.
   if (url.pathname.startsWith("/api/")) return;
+
+  // Manifesto e service worker ficam sempre fora do Cache Storage para que
+  // atualizações de instalação e segurança cheguem sem uma cópia antiga local.
+  if (url.pathname === "/manifest.json" || url.pathname === "/sw.js") return;
 
   if (request.mode === "navigate") {
     event.respondWith(
