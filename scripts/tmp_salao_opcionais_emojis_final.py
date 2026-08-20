@@ -82,6 +82,13 @@ def patch_tests() -> None:
     expect(screen.getAllByText("R$ 35,00").length).toBeGreaterThan(0);'''
     text = replace_once(text, old_optional, new_optional, "CTA do adicional opcional")
 
+    text = replace_once(
+        text,
+        'await screen.findByRole("button", { name: "Tamanho P" })',
+        'await screen.findByRole("button", { name: /Tamanho P/ })',
+        "expectativa do tamanho com emoji",
+    )
+
     TEST.write_text(text)
 
 
