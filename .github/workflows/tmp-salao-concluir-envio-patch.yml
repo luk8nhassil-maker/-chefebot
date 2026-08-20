@@ -1,0 +1,125 @@
+name: tmp-salao-concluir-envio-patch
+
+on:
+  push:
+    branches:
+      - feat/salao-concluir-envio
+    paths:
+      - .github/workflows/tmp-salao-concluir-envio-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout da branch isolada
+        uses: actions/checkout@v4
+        with:
+          ref: feat/salao-concluir-envio
+          fetch-depth: 0
+
+      - name: Aplicar patch mínimo e teste de interação
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          page = Path('src/app/salao/page.tsx')
+          text = page.read_text()
+
+          old = '''  onVerPedidosAbertos,
+  onAdicionarMaisItens,
+}: {
+  comanda: Comanda | null
+  rotulo: string
+  pedidoNumero: number | undefined
+  total: number
+  onVerPedidosAbertos: () => void
+  onAdicionarMaisItens: () => void
+}) {'''
+          new = '''  onConcluir,
+  onVerPedidosAbertos,
+  onAdicionarMaisItens,
+}: {
+  comanda: Comanda | null
+  rotulo: string
+  pedidoNumero: number | undefined
+  total: number
+  onConcluir: () => void
+  onVerPedidosAbertos: () => void
+  onAdicionarMaisItens: () => void
+}) {'''
+          if old not in text:
+              raise SystemExit('assinatura de PedidoEnviadoScreen não encontrada')
+          text = text.replace(old, new, 1)
+
+          old = '''        <button onClick={onVerPedidosAbertos} style={btnPrimario}>Ver pedidos abertos</button>
+        <button onClick={adicionarMaisItens} disabled={processando} style={{ ...btnSecundario, ...(processando ? btnDesabilitado : {}) }}>
+          {processando ? "Abrindo…" : "Adicionar mais itens"}
+        </button>'''
+          new = '''        <button onClick={onConcluir} style={btnPrimario}>Concluir</button>
+        <button onClick={onVerPedidosAbertos} style={btnSecundario}>Ver pedidos abertos</button>
+        <button onClick={adicionarMaisItens} disabled={processando} style={{ ...btnSecundario, ...(processando ? btnDesabilitado : {}) }}>
+          {processando ? "Abrindo…" : "Adicionar mais itens"}
+        </button>'''
+          if old not in text:
+              raise SystemExit('bloco de ações da tela de sucesso não encontrado')
+          text = text.replace(old, new, 1)
+
+          old = '''        total={tela.total}
+        onVerPedidosAbertos={() => { setAba("abertos"); voltarParaInicio() }}'''
+          new = '''        total={tela.total}
+        onConcluir={() => { setAba("pedido"); voltarParaInicio() }}
+        onVerPedidosAbertos={() => { setAba("abertos"); voltarParaInicio() }}'''
+          if old not in text:
+              raise SystemExit('callback da tela enviada não encontrado')
+          text = text.replace(old, new, 1)
+          page.write_text(text)
+
+          test = Path('src/app/salao/page.test.tsx')
+          t = test.read_text()
+          old = '''    expect(screen.getByRole("button", { name: "Ver pedidos abertos" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Adicionar mais itens" })).toBeInTheDocument();
+  });'''
+          new = '''    const concluir = screen.getByRole("button", { name: "Concluir" });
+    const verAbertos = screen.getByRole("button", { name: "Ver pedidos abertos" });
+    const adicionarMais = screen.getByRole("button", { name: "Adicionar mais itens" });
+    expect(concluir).toBeInTheDocument();
+    expect(verAbertos).toBeInTheDocument();
+    expect(adicionarMais).toBeInTheDocument();
+
+    const acoes = [concluir, verAbertos, adicionarMais];
+    expect(acoes.map((botao) => botao.textContent)).toEqual(["Concluir", "Ver pedidos abertos", "Adicionar mais itens"]);
+
+    await user.click(concluir);
+    expect(await screen.findByText("Novo atendimento")).toBeInTheDocument();
+    expect(screen.queryByText("Pedido enviado para a cozinha")).not.toBeInTheDocument();
+  });'''
+          if old not in t:
+              raise SystemExit('teste da tela de sucesso não encontrado')
+          test.write_text(t.replace(old, new, 1))
+          PY
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Teste focado do Salão
+        run: npm test -- src/app/salao/page.test.tsx
+
+      - name: Lint dos arquivos alterados
+        run: npm run lint -- src/app/salao/page.tsx src/app/salao/page.test.tsx
+
+      - name: Build de produção
+        run: npm run build
+
+      - name: Commitar somente o patch validado
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/app/salao/page.tsx src/app/salao/page.test.tsx
+          git diff --cached --check
+          git commit -m "feat(salao): adiciona concluir após envio"
+          git push origin HEAD:feat/salao-concluir-envio
