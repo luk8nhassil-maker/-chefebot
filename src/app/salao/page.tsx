@@ -882,8 +882,10 @@ function ProdutoSelector({
   const [itens, setItens] = useState<ItemApp[]>(rodada.itens)
   const [confirmacao, setConfirmacao] = useState<string | null>(null)
   const [erroSalvar, setErroSalvar] = useState<string | null>(null)
+  const [salvandoItem, setSalvandoItem] = useState(false)
+  const salvandoItemRef = useRef(false)
 
-  const salvar = useCallback(async (novosItens: ItemApp[]) => {
+  const salvar = useCallback(async (novosItens: ItemApp[]): Promise<boolean> => {
     setErroSalvar(null)
     try {
       const r = await fetch(urlItensRodada(comanda.id, rodada), {
@@ -908,11 +910,13 @@ function ProdutoSelector({
       const data = await r.json().catch(() => null)
       if (!r.ok || !data?.ok) {
         setErroSalvar(data?.error || "Não foi possível salvar agora.")
-        return
+        return false
       }
       onAtualizado()
+      return true
     } catch {
       setErroSalvar("Não foi possível salvar agora. Verifique a conexão.")
+      return false
     }
   }, [comanda.id, rodada, onAtualizado])
 
@@ -976,19 +980,29 @@ function ProdutoSelector({
           ? "Escolha 1 adicional."
           : etapaAtual?.ajuda
 
-  function confirmarAdicao(item: ItemApp) {
+  async function confirmarAdicao(item: ItemApp): Promise<boolean> {
+    if (salvandoItemRef.current) return false
+    salvandoItemRef.current = true
+    setSalvandoItem(true)
     const novos = [...itens, item]
-    setItens(novos)
-    salvar(novos)
-    setConfirmacao(`${item.name} adicionado`)
-    window.setTimeout(() => setConfirmacao(null), 1600)
+    try {
+      const persistiu = await salvar(novos)
+      if (!persistiu) return false
+      setItens(novos)
+      setConfirmacao(`${item.name} adicionado`)
+      window.setTimeout(() => setConfirmacao(null), 1600)
+      return true
+    } finally {
+      salvandoItemRef.current = false
+      setSalvandoItem(false)
+    }
   }
 
   function abrirProduto(produto: ProdutoManual) {
-    if (produto.esgotado) return
+    if (produto.esgotado || salvandoItemRef.current) return
     if (!produto.requerMontagem) {
       const item = construirItemManual(produto, selecaoVazia(), menu)
-      if (item) confirmarAdicao(item)
+      if (item) void confirmarAdicao(item)
       return
     }
     setProdutoAberto(produto)
@@ -998,17 +1012,19 @@ function ProdutoSelector({
     setCategoria(produto.categoria)
   }
 
-  function finalizarMontagem(selecaoFinal: SelecaoMontagem) {
+  async function finalizarMontagem(selecaoFinal: SelecaoMontagem) {
     if (!produtoAberto || !montagemCompleta(etapas, selecaoFinal)) return
     const item = construirItemManual(produtoAberto, selecaoFinal, menu)
-    if (item) confirmarAdicao(item)
+    if (!item) return
+    const persistiu = await confirmarAdicao(item)
+    if (!persistiu) return
     setProdutoAberto(null)
     setOpcionaisAbertas(new Set())
     setTermo("")
   }
 
   function avancarEtapa() {
-    if (!etapaAtual || mostrarPerguntaOpcional || bloqueio) return
+    if (!etapaAtual || mostrarPerguntaOpcional || bloqueio || salvandoItemRef.current) return
     if (!etapaOpcional && !etapaSatisfeita(etapaAtual, selecao)) return
     if (etapaVisivel < etapas.length - 1) {
       setEtapaVisivel(etapaVisivel + 1)
@@ -1109,7 +1125,7 @@ function ProdutoSelector({
         </div>
         <div style={{ display: "grid", gap: 8 }}>
           {resultados.map((p) => (
-            <button key={p.id} onClick={() => abrirProduto(p)} disabled={p.esgotado} style={{ ...card, minHeight: 48, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, textAlign: "left", cursor: p.esgotado ? "not-allowed" : "pointer", opacity: p.esgotado ? 0.5 : 1 }}>
+            <button key={p.id} onClick={() => abrirProduto(p)} disabled={p.esgotado || salvandoItem} style={{ ...card, minHeight: 48, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, textAlign: "left", cursor: p.esgotado || salvandoItem ? "not-allowed" : "pointer", opacity: p.esgotado ? 0.5 : salvandoItem ? 0.7 : 1 }}>
               <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
                 <span style={{ fontSize: 14, fontWeight: 800, color: "var(--foreground)" }}>{p.nome}{p.esgotado ? " · esgotado" : ""}</span>
                 {!p.esgotado && p.ingredients ? (
@@ -1124,7 +1140,7 @@ function ProdutoSelector({
           {resultados.length === 0 && <p style={{ fontSize: 13, color: "var(--foreground-muted)", textAlign: "center" }}>Nenhum produto encontrado.</p>}
         </div>
         <p role="status" aria-live="polite" style={{ margin: 0, fontSize: 12.5, fontWeight: 700, color: "var(--success)", minHeight: 16 }}>{confirmacao || ""}</p>
-        {erroSalvar && <p role="alert" style={{ fontSize: 12.5, color: "var(--danger)", margin: 0 }}>{erroSalvar}</p>}
+        {erroSalvar && !produtoAberto && <p role="alert" style={{ fontSize: 12.5, color: "var(--danger)", margin: 0 }}>{erroSalvar}</p>}
       </div>
 
       <div style={{ borderTop: "1px solid var(--surface)", padding: "12px 16px calc(12px + env(safe-area-inset-bottom))", flexShrink: 0, display: "grid", gap: 8 }}>
@@ -1132,8 +1148,8 @@ function ProdutoSelector({
           <span style={{ color: "var(--foreground-secondary)" }}>{itens.length} item(ns)</span>
           <span>{money(total)}</span>
         </div>
-        <button onClick={onRevisar} disabled={itens.length === 0} style={{ ...btnPrimario, ...(itens.length === 0 ? btnDesabilitado : {}) }}>
-          {itens.length === 0 ? "Adicione pelo menos um produto" : "Revisar pedido"}
+        <button onClick={onRevisar} disabled={itens.length === 0 || salvandoItem} style={{ ...btnPrimario, ...(itens.length === 0 || salvandoItem ? btnDesabilitado : {}) }}>
+          {salvandoItem ? "Salvando item…" : itens.length === 0 ? "Adicione pelo menos um produto" : "Revisar pedido"}
         </button>
       </div>
 
@@ -1164,8 +1180,8 @@ function ProdutoSelector({
               <div style={{ ...card, width: "100%", maxWidth: 360, display: "grid", gap: 14, textAlign: "center" }}>
                 <p style={{ margin: 0, fontSize: 20, fontWeight: 900, color: "var(--foreground)" }}>{perguntaOpcional}</p>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                  <button onClick={() => responderOpcional(true)} style={btnPrimario}>Sim</button>
-                  <button onClick={() => responderOpcional(false)} style={btnSecundario}>Não</button>
+                  <button onClick={() => responderOpcional(true)} disabled={salvandoItem} style={{ ...btnPrimario, ...(salvandoItem ? btnDesabilitado : {}) }}>Sim</button>
+                  <button onClick={() => responderOpcional(false)} disabled={salvandoItem} style={{ ...btnSecundario, ...(salvandoItem ? btnDesabilitado : {}) }}>Não</button>
                 </div>
               </div>
             </div>
@@ -1204,14 +1220,15 @@ function ProdutoSelector({
             </>
           )}
           <div style={{ borderTop: "1px solid var(--surface)", padding: "12px 16px calc(12px + env(safe-area-inset-bottom))", flexShrink: 0, display: "grid", gap: 8 }}>
+            {erroSalvar && <p role="alert" style={{ fontSize: 12.5, color: "var(--danger)", margin: 0, textAlign: "center" }}>{erroSalvar}</p>}
             {!mostrarPerguntaOpcional && bloqueio && <p role="status" aria-live="polite" style={{ fontSize: 12.5, fontWeight: 700, color: "var(--attention-text)", margin: 0, textAlign: "center" }}>{bloqueio}</p>}
             <div style={{ display: "flex", gap: 8 }}>
-              <button onClick={voltarEtapa} style={{ ...btnSecundario, flex: 1 }}>
+              <button onClick={voltarEtapa} disabled={salvandoItem} style={{ ...btnSecundario, flex: 1, ...(salvandoItem ? btnDesabilitado : {}) }}>
                 {etapaVisivel > 0 ? "Voltar" : "Cancelar item"}
               </button>
               {!mostrarPerguntaOpcional && (
-                <button onClick={avancarEtapa} disabled={!!bloqueio} style={{ ...btnPrimario, flex: 2, ...(bloqueio ? btnDesabilitado : {}) }}>
-                  {etapaVisivel < etapas.length - 1 ? `Continuar para ${etapas[etapaVisivel + 1].titulo.toLowerCase()}` : "Adicionar"}
+                <button onClick={avancarEtapa} disabled={!!bloqueio || salvandoItem} style={{ ...btnPrimario, flex: 2, ...(bloqueio || salvandoItem ? btnDesabilitado : {}) }}>
+                  {salvandoItem ? "Salvando…" : etapaVisivel < etapas.length - 1 ? `Continuar para ${etapas[etapaVisivel + 1].titulo.toLowerCase()}` : "Adicionar"}
                 </button>
               )}
             </div>
