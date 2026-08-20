@@ -20,6 +20,8 @@ on:
       - "src/app/api/assinatura/**"
       - "src/app/layout.tsx"
       - "src/middleware.ts"
+      - "middleware.ts"
+      - "middleware.assinatura-alias.test.ts"
       - ".env.example"
       - ".github/workflows/assinatura-chefebot-ci.yml"
   workflow_dispatch:
@@ -50,6 +52,7 @@ jobs:
           src/lib/assinaturaChefeBot.test.ts
           src/lib/assinaturaChefeBotAtivacao.test.ts
           src/lib/assinaturaChefeBotUi.test.ts
+          middleware.assinatura-alias.test.ts
 
       - name: Lint dos arquivos da assinatura
         run: >-
@@ -73,3 +76,5 @@ jobs:
           src/app/api/assinatura/operacao/route.ts
           src/app/layout.tsx
           src/middleware.ts
+          middleware.ts
+          middleware.assinatura-alias.test.ts
