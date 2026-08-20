@@ -1,9 +1,9 @@
 name: tmp-salao-opcionais-sim-nao
 
 on:
-  push:
+  pull_request:
     branches:
-      - feat/salao-opcionais-sim-nao
+      - main
     paths:
       - .github/workflows/tmp-salao-opcionais-sim-nao.yml
 
