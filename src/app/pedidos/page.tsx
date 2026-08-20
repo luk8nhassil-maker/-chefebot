@@ -19,6 +19,7 @@ import {
   type OpcaoResolucao,
   type RegistroLimpeza,
 } from "@/lib/limpezaOperacionalPedidos"
+import { mapearFamiliasVisiveis, selecionarPedidosPainel } from "@/lib/pedidoComandaPainel"
 
 function whatsappLink(telefoneBruto: string, mensagem?: string): string {
   let numero = (telefoneBruto || "").replace(/\D/g, "")
@@ -67,6 +68,14 @@ type Pedido = {
   archivedBy?: string
   archivedReason?: string
   origem?: string
+  // Metadados SOMENTE de apresentação, derivados no GET /api/orders a partir
+  // dos pedidoIds oficiais gravados na própria comanda. Nunca controlam preço,
+  // pagamento, impressão ou status individual das rodadas.
+  comandaId?: string
+  comandaNumero?: number
+  rodadaNumero?: number
+  comandaMesa?: string
+  comandaComplemento?: string
   // Edição de pedido pelo cliente antes da aceitação (ver AGENTS.md).
   editStatus?: "none" | "editing" | "edited"
   editExpiresAt?: string
@@ -1153,35 +1162,12 @@ export default function PedidosPage() {
   const totalHoje = pedidos.length
   const contagemPorStatus = (s: Status) => pedidos.filter(p => p.status === s).length
 
-  const buscaNorm = busca.toLowerCase().trim()
-  const pedidosFiltrados = (filtro === "todos" || filtro === "tempo_real" || filtro === "arquivados" ? pedidos : pedidos.filter(p => p.status === filtro))
-    .filter(p => {
-      if (!buscaNorm) return true
-      const num = String(p.numero || "")
-      const statusLabel = STATUS_COLOR[p.status]?.label?.toLowerCase() || ""
-      return (
-        p.cliente.toLowerCase().includes(buscaNorm) ||
-        p.telefone.replace(/\D/g, "").includes(buscaNorm.replace(/\D/g, "")) ||
-        (p.bairro || "").toLowerCase().includes(buscaNorm) ||
-        num.includes(buscaNorm) ||
-        statusLabel.includes(buscaNorm) ||
-        (p.pagamento || "").toLowerCase().includes(buscaNorm)
-      )
-    })
-    .sort((a, b) => {
-      const prio = (p: Pedido) => {
-        if (p.escalonado) return 0
-        if (p.cancelamentoSolicitado) return 1
-        if (p.status === "novo" && (p.pagamento || "").toLowerCase().includes("pix") && !p.pixConfirmado) return 2
-        if (p.status === "novo") return 3
-        if (p.status === "em_preparo") return 4
-        if (p.status === "saiu_entrega") return 5
-        return 6
-      }
-      const pa = prio(a), pb = prio(b)
-      if (pa !== pb) return pa - pb
-      return parseInt(a.id) - parseInt(b.id)
-    })
+  // A unidade visual do Salão é a COMANDA. Cada rodada continua sendo um
+  // Pedido real separado por baixo; este helper só mantém a família junta na
+  // lista e faz filtro/busca operarem sobre a comanda inteira. Delivery e
+  // retirada continuam individuais.
+  const pedidosFiltrados = selecionarPedidosPainel(pedidos, filtro, busca)
+  const familiasSalaoVisiveis = mapearFamiliasVisiveis(pedidosFiltrados)
 
   const detalhePedido = pedidos.find(p => p.id === detailId) || null
 
@@ -2281,6 +2267,14 @@ export default function PedidosPage() {
             const isRetirada = !isDineIn && (!pedido.tipoEntrega || pedido.tipoEntrega === "pickup" || pedido.tipoEntrega === "retirada" || pedido.endereco === "Retirada na loja")
             const emEdicao = pedidoEmEdicao(pedido)
             const foiEditado = pedidoFoiEditado(pedido)
+            const familiaSalao = pedido.comandaId ? familiasSalaoVisiveis.get(pedido.comandaId) : undefined
+            const indiceFamilia = familiaSalao ? familiaSalao.findIndex(p => p.id === pedido.id) : -1
+            const primeiraDaFamilia = !!familiaSalao && indiceFamilia === 0
+            const ultimaDaFamilia = !!familiaSalao && indiceFamilia === familiaSalao.length - 1
+            const totalFamilia = familiaSalao?.reduce((soma, p) => soma + p.total, 0) ?? 0
+            const localFamilia = pedido.comandaMesa
+              ? `Mesa ${pedido.comandaMesa}${pedido.comandaComplemento ? ` · ${pedido.comandaComplemento}` : ""}`
+              : "Sem mesa"
 
             let rowBorder = sc.accentBorder
             if (pedido.escalonado) rowBorder = "color-mix(in srgb, var(--danger) 70%, transparent)"
@@ -2295,6 +2289,40 @@ export default function PedidosPage() {
             const isSelected = detailId === pedido.id
 
             return (
+              <div key={pedido.id} style={{ display: "contents" }}>
+                {primeiraDaFamilia && familiaSalao && (
+                  <div
+                    aria-label={`Comanda ${pedido.comandaNumero ?? ""} de ${pedido.cliente}`}
+                    style={{
+                      padding: "10px 13px",
+                      background: "color-mix(in srgb, var(--primary) 7%, var(--surface))",
+                      border: "1.5px solid color-mix(in srgb, var(--primary) 34%, transparent)",
+                      borderRadius: "14px 14px 8px 8px",
+                      marginBottom: -8,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 10,
+                    }}
+                  >
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 0 }}>
+                        <span style={{ fontSize: 11, fontWeight: 900, color: "var(--brand-text)", textTransform: "uppercase", letterSpacing: ".55px", flexShrink: 0 }}>
+                          Comanda {pedido.comandaNumero != null ? `#${pedido.comandaNumero}` : ""}
+                        </span>
+                        <span style={{ fontSize: 13, fontWeight: 900, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {pedido.cliente}
+                        </span>
+                      </div>
+                      <div style={{ marginTop: 3, fontSize: 10.5, fontWeight: 700, color: "var(--foreground-muted)" }}>
+                        {localFamilia} · {familiaSalao.length} {familiaSalao.length === 1 ? "envio" : "envios"}
+                      </div>
+                    </div>
+                    <span style={{ fontSize: 13, fontWeight: 900, color: "var(--foreground-secondary)", flexShrink: 0 }}>
+                      R$ {totalFamilia.toFixed(2).replace(".", ",")}
+                    </span>
+                  </div>
+                )}
               <article
                 key={pedido.id}
                 className="cb-row"
@@ -2302,7 +2330,16 @@ export default function PedidosPage() {
                 style={{
                   background: isSelected ? "var(--background)" : "var(--background)",
                   border: `1.5px solid ${isSelected ? sc.accentBorder : rowBorder}`,
-                  borderRadius: 14,
+                  borderRadius: familiaSalao
+                    ? (familiaSalao.length === 1
+                        ? 14
+                        : primeiraDaFamilia
+                          ? "8px 8px 4px 4px"
+                          : ultimaDaFamilia
+                            ? "4px 4px 14px 14px"
+                            : 4)
+                    : 14,
+                  marginTop: familiaSalao && !primeiraDaFamilia ? -8 : undefined,
                   padding: "11px 13px",
                   display: "flex",
                   flexDirection: "column",
@@ -2323,6 +2360,11 @@ export default function PedidosPage() {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     {/* Linha 1: nome + badges + timer */}
                     <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
+                      {familiaSalao && (
+                        <span style={{ fontSize: 9, fontWeight: 900, color: "var(--brand-text)", background: "color-mix(in srgb, var(--primary) 10%, transparent)", border: "1px solid color-mix(in srgb, var(--primary) 24%, transparent)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>
+                          {pedido.rodadaNumero === 1 ? "Pedido inicial" : `Complemento ${pedido.rodadaNumero ?? indiceFamilia + 1}`}
+                        </span>
+                      )}
                       {pedido.numero != null && <span style={{ fontSize: 10, fontWeight: 900, color: "var(--border-strong)", flexShrink: 0 }}>#{pedido.numero}</span>}
                       <span style={{ fontSize: 14, fontWeight: 900, color: "var(--text-primary)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{firstName}</span>
                       {pedido.escalonado && <span style={{ fontSize: 11, flexShrink: 0 }}>🚨</span>}
@@ -2401,6 +2443,7 @@ export default function PedidosPage() {
                   </div>
                 </div>
               </article>
+              </div>
             )
           })}
         </main>
