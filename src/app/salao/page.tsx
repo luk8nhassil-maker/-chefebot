@@ -40,10 +40,10 @@ import {
   buscarProdutos,
   montarEtapas,
   etapaSatisfeita,
-  indiceEtapaPendente,
   montagemCompleta,
   motivoBloqueio,
   resumoEtapa,
+  alternarAdicional,
   alternarSabor,
   construirItemManual,
   selecaoVazia,
@@ -919,35 +919,62 @@ function ProdutoSelector({
   const [produtoAberto, setProdutoAberto] = useState<ProdutoManual | null>(null)
   const [selecao, setSelecao] = useState<SelecaoMontagem>(selecaoVazia())
   const [etapaVisivel, setEtapaVisivel] = useState(0)
+  const [opcionaisAbertas, setOpcionaisAbertas] = useState<Set<number>>(() => new Set())
   // ESC/armadilha de foco no construtor guiado (tela cheia, sem página
   // rolável embaixo — não precisa travar scroll). ESC chama a mesma
-  // voltarEtapa do botão "Voltar": recua um passo, e no primeiro passo
-  // fecha o construtor — nunca perde o item sem avisar de forma diferente
-  // do que o próprio botão já faz.
+  // voltarEtapa do botão "Voltar": em opcionais já abertos volta primeiro
+  // para a pergunta Sim/Não; nas demais etapas recua normalmente.
   const produtoAbertoRef = useDialogA11y(!!produtoAberto, () => voltarEtapa(), { travarScroll: false })
   const etapas = useMemo(() => (produtoAberto ? montarEtapas(produtoAberto, menu) : []), [produtoAberto, menu])
   const etapaAtual = etapas[etapaVisivel]
-  // Busca dentro da etapa de sabor — mesma regra do pedido manual (só nas
-  // etapas de sabor, com lista longa o bastante pra valer a pena; reseta ao
-  // trocar de etapa/produto).
+  const etapaOpcional = etapaAtual?.tipo === "borda" || etapaAtual?.tipo === "adicionais" || etapaAtual?.tipo === "adicional_opcional"
+  const opcionalAberta = !!etapaOpcional && opcionaisAbertas.has(etapaVisivel)
+  const mostrarPerguntaOpcional = !!etapaOpcional && !opcionalAberta
+
+  // Busca dentro da etapa de sabor — mesma regra do pedido manual. As opções
+  // sentinela "Sem borda"/"Nenhum" ficam escondidas no Salão: a decisão de
+  // não querer adicional acontece na pergunta simples anterior.
   const [termoEtapa, setTermoEtapa] = useState("")
-  // Reseta durante a renderização (não em efeito) ao detectar troca de etapa
-  // ou de produto — padrão recomendado pelo React pra "resetar estado quando
-  // algo muda", sem o round-trip extra de um useEffect.
   const [termoEtapaChave, setTermoEtapaChave] = useState({ etapaVisivel, produtoAberto })
   if (termoEtapaChave.etapaVisivel !== etapaVisivel || termoEtapaChave.produtoAberto !== produtoAberto) {
     setTermoEtapaChave({ etapaVisivel, produtoAberto })
     setTermoEtapa("")
   }
-  const etapaTemBusca = (etapaAtual?.tipo === "sabores" || etapaAtual?.tipo === "sabor_unico") && (etapaAtual?.opcoes.length ?? 0) > 6
-  const termoEtapaNorm = norm(termoEtapa.trim())
-  const opcoesEtapaFiltradas = etapaAtual
-    ? (termoEtapaNorm
-        ? etapaAtual.opcoes.filter((o) => norm(o.label).includes(termoEtapaNorm) || (o.ingredientes ? norm(o.ingredientes).includes(termoEtapaNorm) : false))
-        : etapaAtual.opcoes)
+  const opcoesEtapaVisiveis = etapaAtual
+    ? etapaAtual.opcoes.filter((o) => !((etapaAtual.tipo === "borda" || etapaAtual.tipo === "adicional_opcional") && o.valor === ""))
     : []
-  const bloqueio = motivoBloqueio(etapaAtual, selecao)
-  const completa = montagemCompleta(etapas, selecao)
+  const etapaTemBusca = !mostrarPerguntaOpcional && (etapaAtual?.tipo === "sabores" || etapaAtual?.tipo === "sabor_unico") && opcoesEtapaVisiveis.length > 6
+  const termoEtapaNorm = norm(termoEtapa.trim())
+  const opcoesEtapaFiltradas = termoEtapaNorm
+    ? opcoesEtapaVisiveis.filter((o) => norm(o.label).includes(termoEtapaNorm) || (o.ingredientes ? norm(o.ingredientes).includes(termoEtapaNorm) : false))
+    : opcoesEtapaVisiveis
+
+  const bloqueioOpcional = mostrarPerguntaOpcional
+    ? null
+    : etapaAtual?.tipo === "borda" && !selecao.borda
+      ? "Escolha uma borda para continuar."
+      : etapaAtual?.tipo === "adicionais" && (selecao.adicionais?.length ?? 0) === 0
+        ? "Escolha pelo menos 1 adicional para continuar."
+        : etapaAtual?.tipo === "adicional_opcional" && !selecao.adicionalOpcional
+          ? "Escolha 1 adicional para continuar."
+          : null
+  const bloqueio = mostrarPerguntaOpcional ? null : (bloqueioOpcional ?? motivoBloqueio(etapaAtual, selecao))
+  const perguntaOpcional = etapaAtual?.tipo === "borda"
+    ? "Vai querer borda?"
+    : etapaAtual?.tipo === "adicionais"
+      ? "Vai querer adicionais?"
+      : etapaAtual?.tipo === "adicional_opcional"
+        ? "Vai querer adicional?"
+        : null
+  const ajudaEtapa = mostrarPerguntaOpcional
+    ? "Escolha Sim ou Não."
+    : etapaAtual?.tipo === "borda"
+      ? "Escolha a borda."
+      : etapaAtual?.tipo === "adicionais"
+        ? "Escolha um ou mais adicionais."
+        : etapaAtual?.tipo === "adicional_opcional"
+          ? "Escolha 1 adicional."
+          : etapaAtual?.ajuda
 
   function confirmarAdicao(item: ItemApp) {
     const novos = [...itens, item]
@@ -967,42 +994,90 @@ function ProdutoSelector({
     setProdutoAberto(produto)
     setSelecao(selecaoVazia())
     setEtapaVisivel(0)
+    setOpcionaisAbertas(new Set())
     setCategoria(produto.categoria)
   }
 
-  function confirmarMontagem() {
-    if (!produtoAberto || !completa) return
-    const item = construirItemManual(produtoAberto, selecao, menu)
+  function finalizarMontagem(selecaoFinal: SelecaoMontagem) {
+    if (!produtoAberto || !montagemCompleta(etapas, selecaoFinal)) return
+    const item = construirItemManual(produtoAberto, selecaoFinal, menu)
     if (item) confirmarAdicao(item)
     setProdutoAberto(null)
+    setOpcionaisAbertas(new Set())
     setTermo("")
   }
 
   function avancarEtapa() {
-    if (!etapaAtual || !etapaSatisfeita(etapaAtual, selecao)) return
-    if (etapaVisivel < etapas.length - 1) setEtapaVisivel(etapaVisivel + 1)
+    if (!etapaAtual || mostrarPerguntaOpcional || bloqueio) return
+    if (!etapaOpcional && !etapaSatisfeita(etapaAtual, selecao)) return
+    if (etapaVisivel < etapas.length - 1) {
+      setEtapaVisivel(etapaVisivel + 1)
+      return
+    }
+    finalizarMontagem(selecao)
   }
+
+  function responderOpcional(quer: boolean) {
+    if (!etapaAtual || !etapaOpcional) return
+    if (quer) {
+      setOpcionaisAbertas((atuais) => {
+        const proximas = new Set(atuais)
+        proximas.add(etapaVisivel)
+        return proximas
+      })
+      return
+    }
+
+    const novaSelecao: SelecaoMontagem = etapaAtual.tipo === "borda"
+      ? { ...selecao, borda: null }
+      : etapaAtual.tipo === "adicionais"
+        ? { ...selecao, adicionais: [] }
+        : { ...selecao, adicionalOpcional: null }
+    setSelecao(novaSelecao)
+    if (etapaVisivel < etapas.length - 1) {
+      setEtapaVisivel(etapaVisivel + 1)
+      return
+    }
+    finalizarMontagem(novaSelecao)
+  }
+
   function voltarEtapa() {
+    if (etapaOpcional && opcionaisAbertas.has(etapaVisivel)) {
+      setOpcionaisAbertas((atuais) => {
+        const proximas = new Set(atuais)
+        proximas.delete(etapaVisivel)
+        return proximas
+      })
+      return
+    }
     if (etapaVisivel > 0) setEtapaVisivel(etapaVisivel - 1)
     else setProdutoAberto(null)
   }
+
   function escolher(valor: string) {
     if (!etapaAtual) return
     if (etapaAtual.tipo === "sabores" || etapaAtual.tipo === "sabor_unico") {
       setSelecao((s) => alternarSabor(s, valor, etapaAtual.maxEscolhas))
     } else if (etapaAtual.tipo === "borda") {
-      setSelecao((s) => ({ ...s, borda: valor === "" ? null : valor }))
+      setSelecao((s) => ({ ...s, borda: valor || null }))
+    } else if (etapaAtual.tipo === "adicionais") {
+      setSelecao((s) => alternarAdicional(s, valor))
+    } else if (etapaAtual.tipo === "adicional_opcional") {
+      setSelecao((s) => ({ ...s, adicionalOpcional: valor || null }))
     } else if (etapaAtual.tipo === "tamanho_item") {
       setSelecao((s) => ({ ...s, tamanhoItem: valor }))
     } else if (etapaAtual.tipo === "leite") {
       setSelecao((s) => ({ ...s, leite: valor === "com" ? "com" : "sem" }))
     }
   }
+
   function estaEscolhida(valor: string): boolean {
     if (!etapaAtual) return false
     switch (etapaAtual.tipo) {
       case "sabores": case "sabor_unico": return selecao.sabores.includes(valor)
-      case "borda": return valor === "" ? selecao.borda === null : selecao.borda === valor
+      case "borda": return selecao.borda === valor
+      case "adicionais": return selecao.adicionais?.includes(valor) ?? false
+      case "adicional_opcional": return selecao.adicionalOpcional === valor
       case "tamanho_item": return selecao.tamanhoItem === valor
       case "leite": return selecao.leite === valor
       default: return false
@@ -1067,10 +1142,14 @@ function ProdutoSelector({
           <div style={{ padding: "14px 16px", borderBottom: "1px solid var(--surface)", flexShrink: 0 }}>
             <p style={{ ...rotulo, margin: 0 }}>{produtoAberto.nome} · passo {etapaVisivel + 1} de {etapas.length}</p>
             <p style={{ fontSize: 18, fontWeight: 900, color: "var(--foreground)", margin: "4px 0 2px" }}>{etapaAtual.titulo}</p>
-            <p style={{ fontSize: 12.5, fontWeight: 600, color: "var(--foreground-secondary)", margin: 0 }}>{etapaAtual.ajuda}</p>
+            <p style={{ fontSize: 12.5, fontWeight: 600, color: "var(--foreground-secondary)", margin: 0 }}>{ajudaEtapa}</p>
           </div>
           <div style={{ padding: "8px 16px", display: "flex", flexWrap: "wrap", gap: 6, flexShrink: 0 }}>
             {etapas.map((e, i) => {
+              const opcionalAindaNaoDecidida =
+                (e.tipo === "adicionais" && selecao.adicionais === undefined) ||
+                (e.tipo === "adicional_opcional" && selecao.adicionalOpcional === undefined)
+              if (opcionalAindaNaoDecidida) return null
               const resumo = resumoEtapa(e, selecao)
               if (!resumo) return null
               return (
@@ -1080,47 +1159,59 @@ function ProdutoSelector({
               )
             })}
           </div>
-          {etapaTemBusca && (
-            <div style={{ position: "relative", padding: "0 16px 4px", flexShrink: 0 }}>
-              <Search size={16} aria-hidden="true" style={{ position: "absolute", left: 28, top: 16, color: "var(--foreground-muted)" }} />
-              <input style={{ ...input, paddingLeft: 36 }} placeholder="Buscar sabor…" value={termoEtapa} onChange={(e) => setTermoEtapa(e.target.value)} aria-label="Buscar sabor" />
+          {mostrarPerguntaOpcional ? (
+            <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+              <div style={{ ...card, width: "100%", maxWidth: 360, display: "grid", gap: 14, textAlign: "center" }}>
+                <p style={{ margin: 0, fontSize: 20, fontWeight: 900, color: "var(--foreground)" }}>{perguntaOpcional}</p>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <button onClick={() => responderOpcional(true)} style={btnPrimario}>Sim</button>
+                  <button onClick={() => responderOpcional(false)} style={btnSecundario}>Não</button>
+                </div>
+              </div>
             </div>
-          )}
-          <div style={{ flex: 1, overflowY: "auto", padding: "4px 16px 16px", display: "grid", gap: 8, alignContent: "start" }}>
-            {etapaTemBusca && opcoesEtapaFiltradas.length === 0 && (
-              <p style={{ fontSize: 13, color: "var(--foreground-muted)", textAlign: "center" }}>Nenhum sabor encontrado.</p>
-            )}
-            {opcoesEtapaFiltradas.map((o) => {
-              const sel = estaEscolhida(o.valor)
-              return (
-                <button key={o.valor || "__sem__"} onClick={() => !o.esgotado && escolher(o.valor)} disabled={o.esgotado} style={{ ...card, minHeight: 48, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, textAlign: "left", cursor: o.esgotado ? "not-allowed" : "pointer", opacity: o.esgotado ? 0.45 : 1, borderColor: sel ? "var(--primary)" : "var(--surface-secondary)", background: sel ? "color-mix(in srgb, var(--primary) 12%, transparent)" : "var(--surface)" }}>
-                  <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
-                    <span style={{ fontSize: 14, fontWeight: 800, color: "var(--foreground)" }}>{o.label}{o.esgotado ? " · esgotado" : ""}</span>
-                    {!o.esgotado && o.ingredientes ? (
-                      <span style={{ fontSize: 11.5, color: "var(--foreground-muted)", lineHeight: 1.35, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
-                        {o.ingredientes}
+          ) : (
+            <>
+              {etapaTemBusca && (
+                <div style={{ position: "relative", padding: "0 16px 4px", flexShrink: 0 }}>
+                  <Search size={16} aria-hidden="true" style={{ position: "absolute", left: 28, top: 16, color: "var(--foreground-muted)" }} />
+                  <input style={{ ...input, paddingLeft: 36 }} placeholder="Buscar sabor…" value={termoEtapa} onChange={(e) => setTermoEtapa(e.target.value)} aria-label="Buscar sabor" />
+                </div>
+              )}
+              <div style={{ flex: 1, overflowY: "auto", padding: "4px 16px 16px", display: "grid", gap: 8, alignContent: "start" }}>
+                {etapaTemBusca && opcoesEtapaFiltradas.length === 0 && (
+                  <p style={{ fontSize: 13, color: "var(--foreground-muted)", textAlign: "center" }}>Nenhum sabor encontrado.</p>
+                )}
+                {opcoesEtapaFiltradas.map((o) => {
+                  const sel = estaEscolhida(o.valor)
+                  return (
+                    <button key={o.valor || "__sem__"} onClick={() => !o.esgotado && escolher(o.valor)} disabled={o.esgotado} style={{ ...card, minHeight: 48, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, textAlign: "left", cursor: o.esgotado ? "not-allowed" : "pointer", opacity: o.esgotado ? 0.45 : 1, borderColor: sel ? "var(--primary)" : "var(--surface-secondary)", background: sel ? "color-mix(in srgb, var(--primary) 12%, transparent)" : "var(--surface)" }}>
+                      <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+                        <span style={{ fontSize: 14, fontWeight: 800, color: "var(--foreground)" }}>{o.label}{o.esgotado ? " · esgotado" : ""}</span>
+                        {!o.esgotado && o.ingredientes ? (
+                          <span style={{ fontSize: 11.5, color: "var(--foreground-muted)", lineHeight: 1.35, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+                            {o.ingredientes}
+                          </span>
+                        ) : null}
                       </span>
-                    ) : null}
-                  </span>
-                  <span style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-                    {o.extra ? <span style={{ fontSize: 12.5, fontWeight: 800, color: "var(--brand-text)" }}>+{money(o.extra)}</span> : null}
-                    {sel ? <span style={{ fontSize: 14, color: "var(--primary)" }}>✓</span> : null}
-                  </span>
-                </button>
-              )
-            })}
-          </div>
+                      <span style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                        {o.extra ? <span style={{ fontSize: 12.5, fontWeight: 800, color: "var(--brand-text)" }}>+{money(o.extra)}</span> : null}
+                        {sel ? <span style={{ fontSize: 14, color: "var(--primary)" }}>✓</span> : null}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            </>
+          )}
           <div style={{ borderTop: "1px solid var(--surface)", padding: "12px 16px calc(12px + env(safe-area-inset-bottom))", flexShrink: 0, display: "grid", gap: 8 }}>
-            {bloqueio && <p role="status" aria-live="polite" style={{ fontSize: 12.5, fontWeight: 700, color: "var(--attention-text)", margin: 0, textAlign: "center" }}>{bloqueio}</p>}
+            {!mostrarPerguntaOpcional && bloqueio && <p role="status" aria-live="polite" style={{ fontSize: 12.5, fontWeight: 700, color: "var(--attention-text)", margin: 0, textAlign: "center" }}>{bloqueio}</p>}
             <div style={{ display: "flex", gap: 8 }}>
               <button onClick={voltarEtapa} style={{ ...btnSecundario, flex: 1 }}>
                 {etapaVisivel > 0 ? "Voltar" : "Cancelar item"}
               </button>
-              {indiceEtapaPendente(etapas, selecao) === -1 ? (
-                <button onClick={confirmarMontagem} style={{ ...btnPrimario, flex: 2 }}>Adicionar</button>
-              ) : (
+              {!mostrarPerguntaOpcional && (
                 <button onClick={avancarEtapa} disabled={!!bloqueio} style={{ ...btnPrimario, flex: 2, ...(bloqueio ? btnDesabilitado : {}) }}>
-                  {etapaVisivel < etapas.length - 1 ? `Continuar para ${etapas[etapaVisivel + 1].titulo.toLowerCase()}` : "Continuar"}
+                  {etapaVisivel < etapas.length - 1 ? `Continuar para ${etapas[etapaVisivel + 1].titulo.toLowerCase()}` : "Adicionar"}
                 </button>
               )}
             </div>
