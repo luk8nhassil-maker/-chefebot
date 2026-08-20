@@ -4,12 +4,16 @@ on:
   push:
     branches:
       - fix/salao-itens-visiveis-ux-20260820
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write
 
 jobs:
   aplicar-patch:
+    if: github.event_name == 'push' || github.head_ref == 'fix/salao-itens-visiveis-ux-20260820'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout da branch
