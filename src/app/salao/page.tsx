@@ -33,6 +33,7 @@ import { norm } from "@/lib/pedidoAppItens"
 import { gerarClientRequestId } from "@/survival/clientRequestId"
 import { descreverStatusPedidoSalao, prioridadeStatusPedidoSalao, type StatusPedidoSalao } from "@/lib/salaoOperacao"
 import { useDialogA11y } from "@/components/useDialogA11y"
+import SalaoItensPedido from "@/components/SalaoItensPedido"
 import {
   CATEGORIAS,
   listarProdutosManuais,
@@ -1018,6 +1019,7 @@ function ProdutoSelector({
       <ContextoAtendimento comanda={comanda} />
 
       <div style={{ flex: 1, overflowY: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+        <SalaoItensPedido itens={itens} />
         <div style={{ position: "relative" }}>
           <Search size={16} aria-hidden="true" style={{ position: "absolute", left: 12, top: 16, color: "var(--foreground-muted)" }} />
           <input style={{ ...input, paddingLeft: 36 }} placeholder="Buscar produto…" value={termo} onChange={(e) => setTermo(e.target.value)} aria-label="Buscar produto" />

@@ -11,6 +11,7 @@ on:
       - "src/app/api/salao/**"
       - "src/components/SalaoOperacaoNav.tsx"
       - "src/components/PedidosSalaoNav.tsx"
+      - "src/components/SalaoItensPedido*.tsx"
       - "src/lib/comandas.ts"
       - "src/lib/comandas.test.ts"
       - "src/lib/salao*.ts"
@@ -47,6 +48,7 @@ jobs:
           src/lib/salaoOperacao.test.ts
           src/app/api/salao/comandas/route.test.ts
           src/app/salao/page.test.tsx
+          src/components/SalaoItensPedido.test.tsx
 
       - name: Typecheck comparado com a main
         shell: bash
@@ -124,6 +126,8 @@ jobs:
           src/app/pedidos/layout.tsx
           src/components/SalaoOperacaoNav.tsx
           src/components/PedidosSalaoNav.tsx
+          src/components/SalaoItensPedido.tsx
+          src/components/SalaoItensPedido.test.tsx
 
       - name: Build de produção
         run: npm run build
