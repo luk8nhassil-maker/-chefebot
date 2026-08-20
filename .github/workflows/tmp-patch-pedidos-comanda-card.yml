@@ -1,0 +1,286 @@
+name: tmp-patch-pedidos-comanda-card
+
+on:
+  push:
+    branches:
+      - fix/pedidos-comanda-card-unificado-20260820
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[tmp-patch-done]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/pedidos-comanda-card-unificado-20260820
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Aplicar patch mínimo
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          page = Path('src/app/pedidos/page.tsx')
+          s = page.read_text()
+
+          old = 'import { mapearFamiliasVisiveis, selecionarPedidosPainel } from "@/lib/pedidoComandaPainel"'
+          new = 'import { mapearFamiliasVisiveis, selecionarPedidosPainel, selecionarProximaAcaoFamilia } from "@/lib/pedidoComandaPainel"'
+          assert s.count(old) == 1, s.count(old)
+          s = s.replace(old, new, 1)
+
+          anchor = '''            const localFamilia = pedido.comandaMesa
+              ? `Mesa ${pedido.comandaMesa}${pedido.comandaComplemento ? ` · ${pedido.comandaComplemento}` : ""}`
+              : "Sem mesa"
+'''
+          insert = anchor + '''            const filtroAcaoFamilia = filtro === "novo" || filtro === "em_preparo" || filtro === "saiu_entrega" ? filtro : undefined
+            const familiaPermiteAcao = filtro !== "arquivados" && filtro !== "entregue" && filtro !== "cancelado"
+            const alvoAcaoFamilia = familiaSalao && familiaPermiteAcao
+              ? selecionarProximaAcaoFamilia(familiaSalao, filtroAcaoFamilia)
+              : undefined
+            const alvoNextStatusFamilia = alvoAcaoFamilia
+              ? ((isPedidoDineIn(alvoAcaoFamilia) && alvoAcaoFamilia.status === "em_preparo")
+                  ? "entregue" as Status
+                  : NEXT_STATUS[alvoAcaoFamilia.status])
+              : null
+            const alvoEmEdicaoFamilia = alvoAcaoFamilia ? pedidoEmEdicao(alvoAcaoFamilia) : false
+            const alvoPagamentoFamilia = alvoAcaoFamilia?.pagamento || ""
+            const alvoPixPendenteFamilia = !!alvoAcaoFamilia
+              && alvoAcaoFamilia.status === "novo"
+              && alvoPagamentoFamilia.toLowerCase().includes("pix")
+              && !alvoAcaoFamilia.pixConfirmado
+            const alvoScFamilia = alvoAcaoFamilia ? STATUS_CONFIG[alvoAcaoFamilia.status] : null
+            const alvoRotuloFamilia = alvoAcaoFamilia?.rodadaNumero === 1
+              ? "Pedido inicial"
+              : `Complemento ${alvoAcaoFamilia?.rodadaNumero ?? ""}`
+'''
+          assert s.count(anchor) == 1, s.count(anchor)
+          s = s.replace(anchor, insert, 1)
+
+          old = '''                      border: "1.5px solid color-mix(in srgb, var(--primary) 34%, transparent)",
+                      borderRadius: "14px 14px 8px 8px",
+                      marginBottom: -8,'''
+          new = '''                      border: "1.5px solid color-mix(in srgb, var(--primary) 34%, transparent)",
+                      borderBottom: "none",
+                      borderRadius: "14px 14px 0 0",
+                      marginBottom: 0,'''
+          assert s.count(old) == 1, s.count(old)
+          s = s.replace(old, new, 1)
+
+          old = '{localFamilia} · {familiaSalao.length} {familiaSalao.length === 1 ? "envio" : "envios"}'
+          new = '{localFamilia} · {familiaSalao.length} {familiaSalao.length === 1 ? "pedido" : "pedidos"}'
+          assert s.count(old) == 1, s.count(old)
+          s = s.replace(old, new, 1)
+
+          old = '''                  border: `1.5px solid ${isSelected ? sc.accentBorder : rowBorder}`,
+                  borderRadius: familiaSalao
+                    ? (familiaSalao.length === 1
+                        ? 14
+                        : primeiraDaFamilia
+                          ? "8px 8px 4px 4px"
+                          : ultimaDaFamilia
+                            ? "4px 4px 14px 14px"
+                            : 4)
+                    : 14,
+                  marginTop: familiaSalao && !primeiraDaFamilia ? -8 : undefined,'''
+          new = '''                  border: familiaSalao ? "none" : `1.5px solid ${isSelected ? sc.accentBorder : rowBorder}`,
+                  borderLeft: familiaSalao ? "1.5px solid color-mix(in srgb, var(--primary) 34%, transparent)" : undefined,
+                  borderRight: familiaSalao ? "1.5px solid color-mix(in srgb, var(--primary) 34%, transparent)" : undefined,
+                  borderTop: familiaSalao ? "1px solid var(--surface-secondary)" : undefined,
+                  borderBottom: familiaSalao && (!ultimaDaFamilia || !!alvoAcaoFamilia) ? "none" : (familiaSalao ? "1.5px solid color-mix(in srgb, var(--primary) 34%, transparent)" : undefined),
+                  borderRadius: familiaSalao
+                    ? (ultimaDaFamilia && !alvoAcaoFamilia ? "0 0 14px 14px" : 0)
+                    : 14,
+                  marginTop: undefined,'''
+          assert s.count(old) == 1, s.count(old)
+          s = s.replace(old, new, 1)
+
+          old = '''                      <span style={{ fontSize: 14, fontWeight: 900, color: "var(--text-primary)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{firstName}</span>
+                      {pedido.escalonado && <span style={{ fontSize: 11, flexShrink: 0 }}>🚨</span>}
+                      {pedido.origem === "painel" && <span style={{ fontSize: 9, fontWeight: 900, color: "var(--brand-text)", background: "color-mix(in srgb, var(--primary) 14%, transparent)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>🧑‍🍳 Painel</span>}
+                      {(pedido.origem === "site" || pedido.origem === "app") && <span style={{ fontSize: 9, fontWeight: 900, color: "var(--info)", background: "color-mix(in srgb, var(--info) 12%, transparent)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>🌐 Site</span>}'''
+          new = '''                      {familiaSalao ? <span style={{ flex: 1 }} /> : <span style={{ fontSize: 14, fontWeight: 900, color: "var(--text-primary)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{firstName}</span>}
+                      {pedido.escalonado && <span style={{ fontSize: 11, flexShrink: 0 }}>🚨</span>}
+                      {!familiaSalao && pedido.origem === "painel" && <span style={{ fontSize: 9, fontWeight: 900, color: "var(--brand-text)", background: "color-mix(in srgb, var(--primary) 14%, transparent)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>🧑‍🍳 Painel</span>}
+                      {!familiaSalao && (pedido.origem === "site" || pedido.origem === "app") && <span style={{ fontSize: 9, fontWeight: 900, color: "var(--info)", background: "color-mix(in srgb, var(--info) 12%, transparent)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>🌐 Site</span>}'''
+          assert s.count(old) == 1, s.count(old)
+          s = s.replace(old, new, 1)
+
+          old = '''                    {/* Linha 2: infos compactas */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 700, color: "var(--foreground-muted)", marginBottom: 9 }}>
+                      <span style={{ flexShrink: 0 }}>{isDineIn ? "🍽️" : isRetirada ? "🏪" : "🛵"}</span>
+                      <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--foreground-muted)" }}>{isDineIn ? "No local" : isRetirada ? "Retirada" : (pedido.bairro || pedido.endereco || "—")}</span>
+                      <span style={{ flexShrink: 0, color: "var(--border-strong)" }}>·</span>
+                      <span style={{ flexShrink: 0 }}>{pedido.itens.length}it</span>
+                      <span style={{ flexShrink: 0, color: "var(--border-strong)" }}>·</span>
+                      <span style={{ flexShrink: 0, color: isPix ? "var(--success)" : "var(--foreground-muted)" }}>{isPix ? "Pix" : (pagamento.split(" ")[0] || "—")}</span>
+                      <span style={{ flexShrink: 0, color: "var(--border-strong)" }}>·</span>
+                      <span style={{ flexShrink: 0, fontWeight: 900, color: "var(--foreground-secondary)" }}>R${pedido.total.toFixed(2).replace(".", ",")}</span>
+                      <span style={{ flexShrink: 0, fontWeight: 900, color: timerColor, marginLeft: 2, fontSize: 11 }}>{timerMins}m</span>
+                    </div>'''
+          new = '''                    {/* Linha 2: infos compactas */}
+                    {familiaSalao ? (
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 700, color: "var(--foreground-muted)", marginBottom: 6 }}>
+                        <span style={{ flexShrink: 0 }}>{pedido.itens.length} {pedido.itens.length === 1 ? "item" : "itens"}</span>
+                        <span style={{ color: "var(--border-strong)" }}>·</span>
+                        <span style={{ flexShrink: 0, fontWeight: 900, color: "var(--foreground-secondary)" }}>R${pedido.total.toFixed(2).replace(".", ",")}</span>
+                        <span style={{ flex: 1 }} />
+                        <span style={{ flexShrink: 0, fontWeight: 900, color: timerColor, fontSize: 11 }}>{timerMins}m</span>
+                      </div>
+                    ) : (
+                      <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 700, color: "var(--foreground-muted)", marginBottom: 9 }}>
+                        <span style={{ flexShrink: 0 }}>{isDineIn ? "🍽️" : isRetirada ? "🏪" : "🛵"}</span>
+                        <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--foreground-muted)" }}>{isDineIn ? "No local" : isRetirada ? "Retirada" : (pedido.bairro || pedido.endereco || "—")}</span>
+                        <span style={{ flexShrink: 0, color: "var(--border-strong)" }}>·</span>
+                        <span style={{ flexShrink: 0 }}>{pedido.itens.length}it</span>
+                        <span style={{ flexShrink: 0, color: "var(--border-strong)" }}>·</span>
+                        <span style={{ flexShrink: 0, color: isPix ? "var(--success)" : "var(--foreground-muted)" }}>{isPix ? "Pix" : (pagamento.split(" ")[0] || "—")}</span>
+                        <span style={{ flexShrink: 0, color: "var(--border-strong)" }}>·</span>
+                        <span style={{ flexShrink: 0, fontWeight: 900, color: "var(--foreground-secondary)" }}>R${pedido.total.toFixed(2).replace(".", ",")}</span>
+                        <span style={{ flexShrink: 0, fontWeight: 900, color: timerColor, marginLeft: 2, fontSize: 11 }}>{timerMins}m</span>
+                      </div>
+                    )}'''
+          assert s.count(old) == 1, s.count(old)
+          s = s.replace(old, new, 1)
+
+          old = '''                    {/* Linha 3: botão de ação */}
+                    <div onClick={e => e.stopPropagation()}>'''
+          new = '''                    {/* Linha 3: botão de ação — pedidos avulsos mantêm o fluxo existente; comandas usam um único CTA no rodapé da família */}
+                    {!familiaSalao && <div onClick={e => e.stopPropagation()}>'''
+          assert s.count(old) == 1, s.count(old)
+          s = s.replace(old, new, 1)
+
+          old = '''                      {isCanceled && <span style={{ fontSize: 11, fontWeight: 800, color: "var(--foreground-muted)" }}>✗ Cancelado</span>}
+                    </div>
+                  </div>'''
+          new = '''                      {isCanceled && <span style={{ fontSize: 11, fontWeight: 800, color: "var(--foreground-muted)" }}>✗ Cancelado</span>}
+                    </div>}
+                  </div>'''
+          assert s.count(old) == 1, s.count(old)
+          s = s.replace(old, new, 1)
+
+          old = '''              </article>
+              </div>'''
+          footer = '''              </article>
+              {ultimaDaFamilia && familiaSalao && alvoAcaoFamilia && alvoScFamilia && (
+                <div
+                  onClick={e => e.stopPropagation()}
+                  style={{
+                    display: "flex",
+                    justifyContent: "flex-end",
+                    padding: "9px 12px 11px",
+                    background: "var(--background)",
+                    borderLeft: "1.5px solid color-mix(in srgb, var(--primary) 34%, transparent)",
+                    borderRight: "1.5px solid color-mix(in srgb, var(--primary) 34%, transparent)",
+                    borderBottom: "1.5px solid color-mix(in srgb, var(--primary) 34%, transparent)",
+                    borderTop: "1px solid var(--surface-secondary)",
+                    borderRadius: "0 0 14px 14px",
+                  }}
+                >
+                  {alvoAcaoFamilia.escalonado ? (
+                    <button
+                      className="cb-comanda-cta"
+                      onClick={() => { assumirConversa(alvoAcaoFamilia.telefone); setCardUrgenciaFechado(true) }}
+                      style={{ height: 34, minWidth: 210, padding: "0 16px", border: "none", borderRadius: 9, background: "var(--danger)", color: "var(--foreground)", fontSize: 12, fontWeight: 900 }}
+                    >🚨 Assumir conversa · {alvoRotuloFamilia}</button>
+                  ) : alvoPixPendenteFamilia ? (
+                    <button
+                      className="cb-comanda-cta"
+                      onClick={() => abrirVerificacaoPix(alvoAcaoFamilia.id)}
+                      style={{ height: 34, minWidth: 210, padding: "0 16px", border: "1px solid var(--attention-border)", borderRadius: 9, background: "var(--attention-surface)", color: "var(--attention-text)", fontSize: 12, fontWeight: 900 }}
+                    >VERIFICAR PAGAMENTO · {alvoRotuloFamilia}</button>
+                  ) : alvoNextStatusFamilia ? (
+                    <button
+                      className="cb-comanda-cta"
+                      onClick={() => {
+                        if (alvoEmEdicaoFamilia) return
+                        if (alvoNextStatusFamilia === "saiu_entrega" && entregadores.length > 0 && alvoAcaoFamilia.tipoEntrega !== "pickup") {
+                          setModalEntrega({ pedidoId: alvoAcaoFamilia.id, proxStatus: alvoNextStatusFamilia })
+                        } else {
+                          avancarStatus(alvoAcaoFamilia.id, alvoNextStatusFamilia)
+                        }
+                      }}
+                      disabled={atualizando === alvoAcaoFamilia.id || alvoEmEdicaoFamilia}
+                      style={{ height: 34, minWidth: 210, padding: "0 16px", border: "none", borderRadius: 9, background: alvoEmEdicaoFamilia ? "var(--surface-secondary)" : alvoScFamilia.btnBg, color: alvoEmEdicaoFamilia ? "var(--foreground-muted)" : alvoScFamilia.btnFg, fontSize: 12, fontWeight: 900, opacity: atualizando === alvoAcaoFamilia.id ? 0.6 : 1, cursor: alvoEmEdicaoFamilia ? "not-allowed" : "pointer" }}
+                    >
+                      {atualizando === alvoAcaoFamilia.id ? "Atualizando…" : alvoEmEdicaoFamilia ? `Edição em andamento · ${alvoRotuloFamilia}` : `${getActionLabel(alvoAcaoFamilia)} · ${alvoRotuloFamilia}`}
+                    </button>
+                  ) : null}
+                </div>
+              )}
+              </div>'''
+          # A lista tem um único fechamento com esta indentação; o detalhe usa outra estrutura.
+          assert s.count(old) == 1, s.count(old)
+          s = s.replace(old, footer, 1)
+
+          # CTA único ocupa a largura no mobile, sem virar um botão gigante no desktop.
+          css_anchor = '''        .cb-row { transition: background .15s ease, border-color .15s ease; }
+'''
+          if css_anchor in s:
+            css_new = css_anchor + '''        .cb-comanda-cta { width: 100%; }
+        @media (min-width: 700px) { .cb-comanda-cta { width: auto; } }
+'''
+            s = s.replace(css_anchor, css_new, 1)
+          else:
+            # Fallback seguro: injeta junto da primeira media query sem depender do resto do CSS.
+            marker = '''        @media (max-width: 700px) {'''
+            assert marker in s
+            s = s.replace(marker, '''        .cb-comanda-cta { width: auto; }
+        @media (max-width: 700px) { .cb-comanda-cta { width: 100%; }\n''' + marker, 1)
+
+          page.write_text(s)
+
+          test = Path('src/app/pedidos/page.test.ts')
+          t = test.read_text()
+          addition = r'''
+
+describe("/pedidos — comanda do Salão como uma unidade operacional visual", () => {
+  test("comandas usam um único CTA no rodapé da família e não repetem a ação em cada rodada", () => {
+    expect(fonte).toContain("selecionarProximaAcaoFamilia");
+    expect(fonte).toContain("!familiaSalao && <div onClick={e => e.stopPropagation()}>");
+    expect(fonte).toContain("ultimaDaFamilia && familiaSalao && alvoAcaoFamilia && alvoScFamilia");
+    expect(fonte).toContain("`${getActionLabel(alvoAcaoFamilia)} · ${alvoRotuloFamilia}`");
+  });
+
+  test("a ação unificada avança somente o pedido-alvo e nunca faz atualização em lote da comanda", () => {
+    expect(fonte).toContain("avancarStatus(alvoAcaoFamilia.id, alvoNextStatusFamilia)");
+    expect(fonte).not.toContain("familiaSalao.forEach(avancarStatus");
+    expect(fonte).not.toContain("Promise.all(familiaSalao");
+  });
+
+  test("as rodadas continuam exibindo status, valor e tempo próprios dentro do mesmo card", () => {
+    expect(fonte).toContain("pedido.rodadaNumero === 1 ? \"Pedido inicial\"");
+    expect(fonte).toContain("R${pedido.total.toFixed(2).replace(\".\", \",\")}");
+    expect(fonte).toContain("{timerMins}m");
+    expect(fonte).toContain("{pixPendente ?");
+  });
+});
+'''
+          assert 'comanda do Salão como uma unidade operacional visual' not in t
+          test.write_text(t + addition)
+
+          Path('.github/workflows/tmp-patch-pedidos-comanda-card.yml').unlink()
+          PY
+
+      - name: Instalar dependências
+        run: npm ci
+      - name: Testes focados
+        run: npx vitest run src/lib/pedidoComandaPainel.test.ts src/app/pedidos/page.test.ts
+      - name: Lint focado
+        run: npx eslint src/app/pedidos/page.tsx src/app/pedidos/page.test.ts src/lib/pedidoComandaPainel.ts src/lib/pedidoComandaPainel.test.ts
+      - name: Build
+        run: npm run build
+      - name: Commitar patch validado
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/app/pedidos/page.tsx src/app/pedidos/page.test.ts src/lib/pedidoComandaPainel.ts src/lib/pedidoComandaPainel.test.ts .github/workflows/tmp-patch-pedidos-comanda-card.yml
+          git commit -m "[tmp-patch-done] fix(pedidos): unifica comanda do salão no painel"
+          git push origin HEAD:fix/pedidos-comanda-card-unificado-20260820
