@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { jwtVerify } from "jose";
-import { ROUTE_ROLES } from "@/lib/auth";
+import { ROUTE_ROLES, type Role } from "@/lib/auth";
+import { ehRotaOperacionalAssinatura } from "@/lib/assinaturaChefeBotUi";
 
 function getSecret() {
   return new TextEncoder().encode(
@@ -15,11 +16,38 @@ function getHostname(req: NextRequest): string {
 }
 
 const CARDAPIO_DOMAIN = "chefedapizza.com.br";
+const LEGACY_PRODUCTION_ALIAS = "chefebot-pjif.vercel.app";
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
+  const hostname = getHostname(req);
 
-  if (pathname === "/" && getHostname(req) === CARDAPIO_DOMAIN) {
+  // O alias antigo é outro ambiente Vercel e pode ter configuração financeira
+  // diferente. Rotas cobertas pelo gate operacional sempre usam o domínio
+  // oficial, que é a única entrada canônica para a assinatura em produção.
+  if (hostname === LEGACY_PRODUCTION_ALIAS && ehRotaOperacionalAssinatura(pathname)) {
+    const url = req.nextUrl.clone();
+    url.protocol = "https:";
+    url.hostname = CARDAPIO_DOMAIN;
+    url.port = "";
+    return NextResponse.redirect(url, 308);
+  }
+
+  // O cardápio do alias já é redirecionado para o domínio oficial. Este guard
+  // fecha também o bypass direto da API de criação de pedido pelo host legado.
+  // Pedidos já existentes e suas rotas administrativas não são afetados.
+  if (hostname === LEGACY_PRODUCTION_ALIAS && pathname === "/api/pedido-app" && req.method === "POST") {
+    return NextResponse.json(
+      {
+        ok: false,
+        code: "PEDIDOS_TEMPORARIAMENTE_INDISPONIVEIS",
+        error: "Pedidos temporariamente indisponíveis. Tente novamente mais tarde.",
+      },
+      { status: 503, headers: { "Retry-After": "300" } },
+    );
+  }
+
+  if (pathname === "/" && hostname === CARDAPIO_DOMAIN) {
     const url = req.nextUrl.clone();
     url.pathname = "/cardapio";
     return NextResponse.rewrite(url);
@@ -37,8 +65,8 @@ export async function middleware(req: NextRequest) {
 
   try {
     const { payload } = await jwtVerify(token, getSecret());
-    const role = payload.role as string;
-    if (!rule.roles.includes(role as any)) {
+    const role = payload.role as Role;
+    if (!rule.roles.includes(role)) {
       const loginUrl = new URL("/login", req.url);
       loginUrl.searchParams.set("callbackUrl", pathname);
       return NextResponse.redirect(loginUrl);
@@ -52,5 +80,19 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/", "/pedidos/:path*", "/relatorios/:path*", "/admin/:path*", "/dev/:path*", "/configuracoes/:path*", "/setup/:path*", "/financeiro/:path*", "/contador/:path*"],
+  matcher: [
+    "/",
+    "/pedidos/:path*",
+    "/conversas/:path*",
+    "/cardapio/:path*",
+    "/relatorios/:path*",
+    "/admin/:path*",
+    "/dev/:path*",
+    "/configuracoes/:path*",
+    "/integracoes/:path*",
+    "/setup/:path*",
+    "/financeiro/:path*",
+    "/contador/:path*",
+    "/api/pedido-app",
+  ],
 };
