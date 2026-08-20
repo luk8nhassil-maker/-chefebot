@@ -42,6 +42,8 @@ import {
 import { limparEscalonamentoExpiradoSeNecessario } from '@/lib/escalonamento'
 import { reivindicarImpressaoAutomatica } from '@/lib/impressaoAutomatica'
 import { adquirirMutexPedidos, liberarMutexPedidos, mutarPedidos } from '@/lib/pedidosConcorrencia'
+import { listarComandas, PAGAMENTO_COMANDA_EM_ABERTO } from '@/lib/comandas'
+import { enriquecerPedidosComComanda } from '@/lib/pedidoComandaPainel.server'
 
 const APP_BASE_URL = 'https://chefebot-pjif.vercel.app'
 
@@ -292,16 +294,33 @@ export async function GET(req: NextRequest) {
       : { persistir: false, resultado: limpos }
   })
 
+  // Enriquecimento SOMENTE de leitura para a apresentação do Salão. A fonte
+  // continua sendo o pedidoId oficial de cada rodada da comanda; nada é
+  // persistido no pedido e nenhuma regra de status/preço/impressão muda.
+  // Se a leitura das comandas falhar, o painel mantém o comportamento antigo
+  // (pedidos individuais) em vez de derrubar a operação.
+  let pedidosPainel = limpos
+  const precisaVinculoSalao = limpos.some(
+    p => classificarEntrega(p.tipoEntrega, p.endereco) === 'dine_in' && p.pagamento === PAGAMENTO_COMANDA_EM_ABERTO
+  )
+  if (precisaVinculoSalao) {
+    try {
+      pedidosPainel = enriquecerPedidosComComanda(limpos, await listarComandas())
+    } catch (err) {
+      console.error('[ChefeBot] Não foi possível agrupar pedidos do Salão por comanda; mantendo lista individual.', err)
+    }
+  }
+
   const url = new URL(req.url)
   const soArquivados = url.searchParams.get('arquivados') === 'true'
 
   if (soArquivados) {
-    const arquivados = limpos.filter(p => p.isArchived)
+    const arquivados = pedidosPainel.filter(p => p.isArchived)
     return NextResponse.json([...arquivados].reverse().map(sanitizarPedidoPixResposta).map(sanitizarPedidoParaPainel))
   }
 
   // Padrão: exclui arquivados da área de trabalho principal
-  const ativos = limpos.filter(p => !p.isArchived)
+  const ativos = pedidosPainel.filter(p => !p.isArchived)
   return NextResponse.json([...ativos].reverse().map(sanitizarPedidoPixResposta).map(sanitizarPedidoParaPainel))
 }
 
