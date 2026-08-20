@@ -34,6 +34,8 @@ const STATUS_BUSCA: Record<string, string> = {
   cancelado: "cancelado",
 };
 
+const STATUS_ACIONAVEL = new Set(["novo", "em_preparo", "saiu_entrega"]);
+
 function prioridade(p: PedidoAgrupavelPainel): number {
   if (p.escalonado) return 0;
   if (p.cancelamentoSolicitado) return 1;
@@ -55,6 +57,13 @@ function compararOperacional(a: PedidoAgrupavelPainel, b: PedidoAgrupavelPainel)
   const pa = prioridade(a);
   const pb = prioridade(b);
   if (pa !== pb) return pa - pb;
+  return numeroOrdenacao(a) - numeroOrdenacao(b);
+}
+
+function compararRodada(a: PedidoAgrupavelPainel, b: PedidoAgrupavelPainel): number {
+  const ra = a.rodadaNumero ?? Number.MAX_SAFE_INTEGER;
+  const rb = b.rodadaNumero ?? Number.MAX_SAFE_INTEGER;
+  if (ra !== rb) return ra - rb;
   return numeroOrdenacao(a) - numeroOrdenacao(b);
 }
 
@@ -129,11 +138,7 @@ export function selecionarPedidosPainel<T extends PedidoAgrupavelPainel>(
     .map((bloco) => ({
       ...bloco,
       pedidos: [...bloco.pedidos].sort((a, b) => {
-        if (a.comandaId && b.comandaId) {
-          const ra = a.rodadaNumero ?? Number.MAX_SAFE_INTEGER;
-          const rb = b.rodadaNumero ?? Number.MAX_SAFE_INTEGER;
-          if (ra !== rb) return ra - rb;
-        }
+        if (a.comandaId && b.comandaId) return compararRodada(a, b);
         return compararOperacional(a, b);
       }),
     }))
@@ -145,6 +150,32 @@ export function selecionarPedidosPainel<T extends PedidoAgrupavelPainel>(
     });
 
   return blocos.flatMap((bloco) => bloco.pedidos);
+}
+
+/**
+ * Uma comanda continua tendo pedidos oficiais independentes, mas o painel deve
+ * oferecer somente UMA próxima ação por vez. Quando a aba representa uma etapa
+ * operacional (Novo/Fazendo/Na rua), priorizamos uma rodada daquela etapa; em
+ * empate, a rodada mais antiga vem primeiro. Fora dessas abas, escolhemos a
+ * pendência operacional mais urgente sem nunca fundir ou atualizar em lote.
+ */
+export function selecionarProximaAcaoFamilia<T extends PedidoAgrupavelPainel>(
+  pedidos: T[],
+  filtroPreferido?: FiltroPedidosPainel,
+): T | undefined {
+  const acionaveis = pedidos.filter((pedido) => STATUS_ACIONAVEL.has(pedido.status));
+  if (acionaveis.length === 0) return undefined;
+
+  const filtroEhEtapa = filtroPreferido != null && STATUS_ACIONAVEL.has(filtroPreferido);
+  if (filtroEhEtapa) {
+    const daEtapa = acionaveis.filter((pedido) => pedido.status === filtroPreferido);
+    if (daEtapa.length > 0) return [...daEtapa].sort(compararRodada)[0];
+  }
+
+  return [...acionaveis].sort((a, b) => {
+    const operacional = compararOperacional(a, b);
+    return operacional !== 0 ? operacional : compararRodada(a, b);
+  })[0];
 }
 
 export function mapearFamiliasVisiveis<T extends PedidoAgrupavelPainel>(pedidos: T[]): Map<string, T[]> {

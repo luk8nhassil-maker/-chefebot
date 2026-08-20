@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { mapearFamiliasVisiveis, selecionarPedidosPainel } from "./pedidoComandaPainel";
+import { mapearFamiliasVisiveis, selecionarPedidosPainel, selecionarProximaAcaoFamilia } from "./pedidoComandaPainel";
 
 type PedidoTeste = {
   id: string;
   numero: number;
   cliente: string;
   telefone: string;
-  status: "novo" | "em_preparo" | "entregue";
+  status: "novo" | "em_preparo" | "saiu_entrega" | "entregue" | "cancelado";
   pagamento: string;
   comandaId?: string;
   comandaNumero?: number;
@@ -86,5 +86,36 @@ describe("painel — família visual da comanda", () => {
     const mapa = mapearFamiliasVisiveis([...familia, delivery]);
     expect(mapa.get("c-9")?.map((p) => p.id)).toEqual(["p-20", "p-19"]);
     expect(mapa.size).toBe(1);
+  });
+
+  it("escolhe uma única próxima ação e respeita a etapa aberta no painel", () => {
+    const duasRodadas: PedidoTeste[] = [
+      { ...familia[1], id: "r1", numero: 31, rodadaNumero: 1, status: "em_preparo" },
+      { ...familia[1], id: "r2", numero: 32, rodadaNumero: 2, status: "em_preparo" },
+    ];
+
+    expect(selecionarProximaAcaoFamilia(duasRodadas, "em_preparo")?.id).toBe("r1");
+
+    duasRodadas[0] = { ...duasRodadas[0], status: "entregue" };
+    expect(selecionarProximaAcaoFamilia(duasRodadas, "em_preparo")?.id).toBe("r2");
+  });
+
+  it("não atualiza em lote: uma rodada nova pode ser a ação enquanto outra mantém seu status próprio", () => {
+    const mistas: PedidoTeste[] = [
+      { ...familia[1], id: "fazendo", numero: 41, rodadaNumero: 1, status: "em_preparo" },
+      { ...familia[1], id: "novo", numero: 42, rodadaNumero: 2, status: "novo" },
+    ];
+
+    expect(selecionarProximaAcaoFamilia(mistas, "em_preparo")?.id).toBe("fazendo");
+    expect(selecionarProximaAcaoFamilia(mistas, "novo")?.id).toBe("novo");
+    expect(mistas.map((p) => p.status)).toEqual(["em_preparo", "novo"]);
+  });
+
+  it("não oferece ação de comanda quando todas as rodadas terminaram", () => {
+    const concluidas: PedidoTeste[] = [
+      { ...familia[1], id: "fim-1", status: "entregue" },
+      { ...familia[0], id: "fim-2", status: "cancelado" },
+    ];
+    expect(selecionarProximaAcaoFamilia(concluidas, "todos")).toBeUndefined();
   });
 });
