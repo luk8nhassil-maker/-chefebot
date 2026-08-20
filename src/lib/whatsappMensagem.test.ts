@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { enviarTextoWhatsApp } from "./whatsappMensagem";
+import { enviarTextoWhatsApp, normalizarLinksPublicosWhatsApp } from "./whatsappMensagem";
 
 const ENV_KEYS = ["EVOLUTION_API_URL", "EVOLUTION_API_KEY", "EVOLUTION_INSTANCE_NAME"] as const;
 const originais: Record<string, string | undefined> = {};
@@ -22,6 +22,21 @@ afterEach(() => {
 function respostaOk(data: unknown = {}) {
   return { ok: true, status: 200, json: async () => data } as Response;
 }
+
+describe("normalizarLinksPublicosWhatsApp", () => {
+  test("troca o cardápio legado pelo domínio oficial e preserva query/token", () => {
+    const texto = "Veja aqui: https://chefebot-pjif.vercel.app/cardapio?token=abc123";
+    const normalizado = normalizarLinksPublicosWhatsApp(texto);
+
+    expect(normalizado).toBe("Veja aqui: https://chefedapizza.com.br/cardapio?token=abc123");
+    expect(normalizado).not.toContain("chefebot-pjif.vercel.app");
+  });
+
+  test("não altera mensagem que já usa o domínio oficial", () => {
+    const texto = "Veja aqui: https://chefedapizza.com.br/cardapio";
+    expect(normalizarLinksPublicosWhatsApp(texto)).toBe(texto);
+  });
+});
 
 describe("enviarTextoWhatsApp", () => {
   test("provider não configurado retorna ok:false sem chamar fetch", async () => {
@@ -53,6 +68,21 @@ describe("enviarTextoWhatsApp", () => {
     expect(init.method).toBe("POST");
     expect(init.headers).toEqual({ "Content-Type": "application/json", apikey: "chave-teste" });
     expect(JSON.parse(init.body)).toEqual({ number: "5511999998888", text: "oi" });
+  });
+
+  test("nunca envia o link legado do cardápio para a Evolution", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(respostaOk());
+    vi.stubGlobal("fetch", fetchMock);
+
+    await enviarTextoWhatsApp(
+      "5511999998888",
+      "Cardápio: https://chefebot-pjif.vercel.app/cardapio?token=cliente-123",
+    );
+
+    const [, init] = fetchMock.mock.calls[0];
+    const body = JSON.parse(init.body);
+    expect(body.text).toBe("Cardápio: https://chefedapizza.com.br/cardapio?token=cliente-123");
+    expect(body.text).not.toContain("chefebot-pjif.vercel.app");
   });
 
   test("inclui delay/options quando opts.delay é passado", async () => {
