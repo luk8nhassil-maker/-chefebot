@@ -385,6 +385,18 @@ describe("/salao — escolher produtos e revisar", () => {
     await user.click(screen.getByRole("button", { name: "Continuar para borda" }));
   }
 
+  it("mostra emojis no fluxo e mantém sabor obrigatório", async () => {
+    const user = userEvent.setup();
+    cardapioAtual = CARDAPIO_PIZZA_OPCIONAIS;
+    await iniciarAtendimento(user);
+
+    await user.click(await screen.findByRole("button", { name: /🍕 Pizza Pequena/ }));
+    const continuar = screen.getByRole("button", { name: "Continuar para borda" });
+    expect(continuar).toBeDisabled();
+    await user.click(await screen.findByRole("button", { name: /🍕 Mussarela/ }));
+    expect(continuar).toBeEnabled();
+  });
+
   it("opcionais perguntam Sim/Não e Não pula borda/adicionais sem exibir listas", async () => {
     const user = userEvent.setup();
     await abrirPizzaComSabor(user);
@@ -401,26 +413,25 @@ describe("/salao — escolher produtos e revisar", () => {
     expect(await screen.findByText("1 item(ns)")).toBeInTheDocument();
   });
 
-  it("Sim revela somente as opções reais de borda/adicionais e exige escolha", async () => {
+  it("Sim revela opções com emojis e permite seguir sem marcar se mudar de ideia", async () => {
     const user = userEvent.setup();
     await abrirPizzaComSabor(user);
 
     await user.click(await screen.findByRole("button", { name: "Sim" }));
-    expect(await screen.findByRole("button", { name: /Catupiry/ })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Sem borda" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Continuar para adicionais" })).toBeDisabled();
-    await user.click(screen.getByRole("button", { name: /Catupiry/ }));
-    await user.click(screen.getByRole("button", { name: "Continuar para adicionais" }));
+    expect(await screen.findByRole("button", { name: /🧀 Catupiry/ })).toBeInTheDocument();
+    const semBorda = screen.getByRole("button", { name: "Sem borda" });
+    expect(semBorda).toBeEnabled();
+    await user.click(semBorda);
 
     expect(await screen.findByText("Vai querer adicionais?")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Sim" }));
-    expect(await screen.findByRole("button", { name: /Bacon/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Adicionar" })).toBeDisabled();
-    await user.click(screen.getByRole("button", { name: /Bacon/ }));
-    await user.click(screen.getByRole("button", { name: "Adicionar" }));
+    expect(await screen.findByRole("button", { name: /➕ Bacon/ })).toBeInTheDocument();
+    const semAdicionais = screen.getByRole("button", { name: "Sem adicionais" });
+    expect(semAdicionais).toBeEnabled();
+    await user.click(semAdicionais);
 
     expect(await screen.findByText("1 item(ns)")).toBeInTheDocument();
-    expect(screen.getAllByText("R$ 45,00").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("R$ 33,00").length).toBeGreaterThan(0);
   });
 
   it("adicional opcional único também usa Sim/Não antes de mostrar opções", async () => {
@@ -429,7 +440,7 @@ describe("/salao — escolher produtos e revisar", () => {
     await iniciarAtendimento(user);
     await user.type(screen.getByPlaceholderText("Buscar produto…"), "Macarronada Teste");
     await user.click(await screen.findByRole("button", { name: /Macarronada Teste/ }));
-    await user.click(await screen.findByRole("button", { name: "Tamanho P" }));
+    await user.click(await screen.findByRole("button", { name: /Tamanho P/ }));
     await user.click(screen.getByRole("button", { name: "Continuar para adicional" }));
 
     expect(await screen.findByText("Vai querer adicional?")).toBeInTheDocument();
@@ -438,7 +449,8 @@ describe("/salao — escolher produtos e revisar", () => {
     expect(await screen.findByRole("button", { name: /Ovo/ })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Nenhum" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /Ovo/ }));
-    await user.click(screen.getByRole("button", { name: "Adicionar" }));
+    expect(screen.getByRole("button", { name: "Continuar" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "Continuar" }));
 
     expect(await screen.findByText("1 item(ns)")).toBeInTheDocument();
     expect(screen.getAllByText("R$ 35,00").length).toBeGreaterThan(0);
