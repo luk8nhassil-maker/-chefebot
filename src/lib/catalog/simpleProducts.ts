@@ -4,8 +4,10 @@
 // pastéis recebeu uma atualização comercial isolada em
 // @/lib/catalog/pasteisAtualizados para ADICIONAR novos produtos sem remover
 // o Pastel de Forno já existente. O Salão possui uma extensão comercial
-// própria de sucos (copo/jarra), aprovada em 2026-08-20, que substitui SOMENTE
-// a seção de sucos quando o catálogo é construído com escopo "salao".
+// própria de sucos (copo/jarra), aprovada em 2026-08-20. No escopo "salao",
+// os novos IDs convivem internamente com os IDs públicos antigos apenas para
+// que comandas abertas antes do deploy continuem validáveis; a rota de
+// cardápio projeta para a UI somente os novos sucos do Salão.
 //
 // Esta camada só ADICIONA disponibilidade EM TEMPO REAL (mesma lista
 // "esgotados" usada pelo bot do WhatsApp, pelo cardápio do cliente e pela
@@ -111,6 +113,10 @@ const SUCOS_SALAO: readonly SucoSalao[] = [
   { id: "salao-suco-laranja", name: "Laranja", copoCents: 2000, jarraCents: 4000 },
 ];
 
+export function ehSucoExclusivoSalao(produto: Pick<SimpleCatalogProduct, "id">): boolean {
+  return produto.id.startsWith("salao-suco-");
+}
+
 function estaEsgotado(nome: string, esgotadosNorm: string[]): boolean {
   return esgotadosNorm.includes(norm(nome));
 }
@@ -120,9 +126,9 @@ function estaEsgotado(nome: string, esgotadosNorm: string[]): boolean {
  * disponibilidade operacional atual. Não faz I/O.
  *
  * `scope="public"` é o comportamento histórico e continua sendo o default.
- * `scope="salao"` troca SOMENTE a seção `sucos` pelos produtos exclusivos do
- * atendimento de mesa. Isso evita duplicar os mesmos sabores na UI e impede
- * que preços de Copo/Jarra vazem para o link do cliente.
+ * `scope="salao"` adiciona os IDs exclusivos de Copo/Jarra e mantém, somente
+ * para compatibilidade de validação, os IDs públicos antigos. A resposta de
+ * GET /api/cardapio remove esses IDs antigos antes de chegar à UI do Salão.
  */
 export function buildSimpleCatalog(
   _menu: Menu,
@@ -264,7 +270,7 @@ export function buildSimpleCatalog(
     ],
   }));
 
-  const sucos = scope === "salao" ? sucosSalao : sucosPublicos;
+  const sucos = scope === "salao" ? [...sucosSalao, ...sucosPublicos] : sucosPublicos;
 
   const vitaminas: SimpleCatalogProduct[] = VITAMINAS.map((produto) => ({
     id: produto.id,
