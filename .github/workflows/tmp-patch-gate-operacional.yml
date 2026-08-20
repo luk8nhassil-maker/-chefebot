@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  patch:
+  patch-and-test:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
@@ -17,48 +17,361 @@ jobs:
         with:
           ref: fix/pedidos-gate-operacional-paridade-sf-20260820
           fetch-depth: 0
-      - name: Patch server revalidation
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Apply anchored final patch
         shell: bash
         run: |
           python - <<'PY'
           from pathlib import Path
+
+          def replace_once(text, old, new, label):
+              if text.count(old) != 1:
+                  raise SystemExit(f'{label}: expected exactly 1 anchor, got {text.count(old)}')
+              return text.replace(old, new)
+
+          # 1) Server: never trust the browser action and never send to an invalid phone.
           p = Path('src/app/api/orders/route.ts')
           s = p.read_text()
+          s = replace_once(s,
+          """async function notificarCliente(telefone: string, status: Status, nomeCliente: string, tipoEntrega: string | undefined, endereco: string | undefined, statusAnterior?: Status): Promise<{ ok: boolean; motivo?: string } | null> {\n  const mensagem = getMensagemStatus(status, nomeCliente, classificarEntrega(tipoEntrega, endereco), statusAnterior)\n  if (!mensagem) return null\n  const phone = sanitizePhone(telefone)""",
+          """async function notificarCliente(telefone: string, status: Status, nomeCliente: string, tipoEntrega: string | undefined, endereco: string | undefined, statusAnterior?: Status): Promise<{ ok: boolean; motivo?: string } | null> {\n  const mensagem = getMensagemStatus(status, nomeCliente, classificarEntrega(tipoEntrega, endereco), statusAnterior)\n  if (!mensagem) return null\n  const digitos = String(telefone || '').replace(/\\D/g, '')\n  // Pedidos de mesa do Salão são criados sem telefone. Nunca tente disparar\n  // uma mensagem para um número sintético (ex.: apenas \"55\").\n  if (digitos.length < 10) return null\n  const phone = sanitizePhone(telefone)""", 'phone guard')
 
-          old = """import {\n  registrarResolucao,\n  sanitizarEntradaLimpeza,\n  type RegistroLimpeza,\n} from '@/lib/limpezaOperacionalPedidos'"""
-          new = """import {\n  classificarPendencia,\n  registrarResolucao,\n  sanitizarEntradaLimpeza,\n  type RegistroLimpeza,\n} from '@/lib/limpezaOperacionalPedidos'"""
-          assert s.count(old) == 1, 'import anchor changed'
-          s = s.replace(old, new)
-
-          old = """    const statusAnterior = pedidos[index].status\n    const entregadorAnteriorId = pedidos[index].entregador?.id\n\n    // Proteção contra impressão automática duplicada"""
-          new = """    const statusAnterior = pedidos[index].status\n    const entregadorAnteriorId = pedidos[index].entregador?.id\n    const agoraMs = Date.now()\n\n    // O navegador só propõe a resolução. A fonte da verdade é sempre o pedido\n    // FRESCO lido sob o mutex global. Se a tela envelheceu, falha fechado em\n    // vez de aplicar uma decisão que já não corresponde ao estado real.\n    if (limpezaResolvida) {\n      const pendenciaAtual = classificarPendencia(pedidos[index], agoraMs)\n      if (!pendenciaAtual || pendenciaAtual.motivo !== limpezaResolvida.motivo) {\n        return {\n          tipo: 'erro',\n          resposta: NextResponse.json(\n            { error: 'Este pedido não está mais pendente. Atualize o painel antes de continuar.' },\n            { status: 409 }\n          ),\n        }\n      }\n      if (limpezaResolvida.acao === 'adiou' && status !== statusAnterior) {\n        return {\n          tipo: 'erro',\n          resposta: NextResponse.json(\n            { error: 'A opção de aguardar só pode manter o pedido na etapa atual.' },\n            { status: 409 }\n          ),\n        }\n      }\n    }\n\n    // Proteção contra impressão automática duplicada"""
-          assert s.count(old) == 1, 'status anchor changed'
-          s = s.replace(old, new)
-
-          old = """    const agora = new Date().toLocaleTimeString(\"pt-BR\", { hour: \"2-digit\", minute: \"2-digit\", timeZone: \"America/Sao_Paulo\" })\n    pedidos[index] = {\n      ...pedidos[index],\n      status,\n      statusAtualizadoEm: new Date().toISOString(),"""
-          new = """    const agora = new Date(agoraMs).toLocaleTimeString(\"pt-BR\", { hour: \"2-digit\", minute: \"2-digit\", timeZone: \"America/Sao_Paulo\" })\n    pedidos[index] = {\n      ...pedidos[index],\n      status,\n      statusAtualizadoEm: new Date(agoraMs).toISOString(),"""
-          assert s.count(old) == 1, 'timestamp anchor changed'
-          s = s.replace(old, new)
-
-          old = """              limpezaResolvida.acao,\n              Date.now(),\n              authName"""
-          new = """              limpezaResolvida.acao,\n              agoraMs,\n              authName"""
-          assert s.count(old) == 1, 'resolution timestamp anchor changed'
-          s = s.replace(old, new)
-
-          old = """  const limpezaResolvida = sanitizarEntradaLimpeza(limpeza)\n\n  // Toda transição de status"""
-          new = """  const limpezaResolvida = sanitizarEntradaLimpeza(limpeza)\n  if (limpeza !== undefined && !limpezaResolvida) {\n    return NextResponse.json({ error: 'Resolução operacional inválida.' }, { status: 400 })\n  }\n\n  // Toda transição de status"""
-          assert s.count(old) == 1, 'body cleanup anchor changed'
-          s = s.replace(old, new)
-
+          old = """    if (limpezaResolvida) {\n      const pendenciaAtual = classificarPendencia(pedidos[index], agoraMs)\n      if (!pendenciaAtual || pendenciaAtual.motivo !== limpezaResolvida.motivo) {\n        return {\n          tipo: 'erro',\n          resposta: NextResponse.json(\n            { error: 'Este pedido não está mais pendente. Atualize o painel antes de continuar.' },\n            { status: 409 }\n          ),\n        }\n      }\n      if (limpezaResolvida.acao === 'adiou' && status !== statusAnterior) {\n        return {\n          tipo: 'erro',\n          resposta: NextResponse.json(\n            { error: 'A opção de aguardar só pode manter o pedido na etapa atual.' },\n            { status: 409 }\n          ),\n        }\n      }\n    }"""
+          new = """    if (limpezaResolvida) {\n      const pendenciaAtual = classificarPendencia(pedidos[index], agoraMs)\n      if (!pendenciaAtual || pendenciaAtual.motivo !== limpezaResolvida.motivo) {\n        return {\n          tipo: 'erro',\n          resposta: NextResponse.json(\n            { error: 'Este pedido não está mais pendente. Atualize o painel antes de continuar.' },\n            { status: 409 }\n          ),\n        }\n      }\n\n      // A ação também é revalidada contra a transição real. O cliente não\n      // pode rotular uma mudança arbitrária como \"avançou\"/\"cancelou\" e\n      // poluir o histórico operacional. Verificação de Pix nunca muda status\n      // por este PATCH — ela usa o conciliador dedicado.\n      const acaoEsperada = status === statusAnterior\n        ? 'adiou'\n        : status === 'cancelado' && statusAnterior === 'novo'\n          ? 'cancelou'\n          : 'avancou'\n      const statusEsperadoAoAvancar = pendenciaAtual.status === 'novo'\n        ? 'em_preparo'\n        : pendenciaAtual.status === 'em_preparo'\n          ? 'saiu_entrega'\n          : pendenciaAtual.status === 'saiu_entrega'\n            ? 'entregue'\n            : null\n      const transicaoCompativel = limpezaResolvida.acao === 'adiou'\n        ? status === statusAnterior\n        : limpezaResolvida.acao === 'cancelou'\n          ? statusAnterior === 'novo' && status === 'cancelado'\n          : limpezaResolvida.acao === 'avancou'\n            ? statusEsperadoAoAvancar === status\n            : false\n      if (limpezaResolvida.acao !== acaoEsperada || !transicaoCompativel) {\n        return {\n          tipo: 'erro',\n          resposta: NextResponse.json(\n            { error: 'A ação informada não corresponde à etapa atual deste pedido.' },\n            { status: 409 }\n          ),\n        }\n      }\n    }"""
+          s = replace_once(s, old, new, 'server action validation')
           p.write_text(s)
+
+          # 2) Panel: Salão must go Fazendo -> Pronto para servir -> Servido.
+          p = Path('src/app/pedidos/page.tsx')
+          s = p.read_text()
+          old = """function getActionLabel(p: Pedido): string {\n  if (p.status === \"em_preparo\") {\n    if (isPedidoDineIn(p)) return \"Pronto\"\n    if (isPedidoRetirada(p)) return \"Pronto para retirada\"\n  }\n  return ACTION_LABEL[p.status]\n}"""
+          new = """function getActionLabel(p: Pedido): string {\n  if (p.status === \"em_preparo\") {\n    if (isPedidoDineIn(p)) return \"Pronto para servir\"\n    if (isPedidoRetirada(p)) return \"Pronto para retirada\"\n  }\n  if (p.status === \"saiu_entrega\") {\n    if (isPedidoDineIn(p)) return \"Pedido servido\"\n    if (isPedidoRetirada(p)) return \"Cliente retirou\"\n  }\n  return ACTION_LABEL[p.status]\n}\nfunction getStatusLabel(p: Pedido): string {\n  if (p.status === \"saiu_entrega\") {\n    if (isPedidoDineIn(p)) return \"Pronto para servir\"\n    if (isPedidoRetirada(p)) return \"Pronto para retirada\"\n  }\n  return STATUS_COLOR[p.status].label\n}"""
+          s = replace_once(s, old, new, 'action labels')
+
+          s = replace_once(s,
+              'const nextStatus = (isDineInDetail && p.status === "em_preparo") ? "entregue" as Status : NEXT_STATUS[p.status]',
+              'const nextStatus = NEXT_STATUS[p.status]',
+              'detail next status')
+          s = replace_once(s,
+              'const nextStatus = (isDineIn && pedido.status === "em_preparo") ? "entregue" as Status : NEXT_STATUS[pedido.status]',
+              'const nextStatus = NEXT_STATUS[pedido.status]',
+              'row next status')
+          s = replace_once(s,
+          """const alvoNextStatusFamilia = alvoAcaoFamilia\n              ? ((isPedidoDineIn(alvoAcaoFamilia) && alvoAcaoFamilia.status === \"em_preparo\")\n                  ? \"entregue\" as Status\n                  : NEXT_STATUS[alvoAcaoFamilia.status])\n              : null""",
+          """const alvoNextStatusFamilia = alvoAcaoFamilia\n              ? NEXT_STATUS[alvoAcaoFamilia.status]\n              : null""", 'family next status')
+
+          s = replace_once(s,
+              'if (nextStatus === "saiu_entrega" && entregadores.length > 0 && pedido.tipoEntrega !== "pickup") {',
+              'if (nextStatus === "saiu_entrega" && entregadores.length > 0 && !isPedidoDineIn(pedido) && !isPedidoRetirada(pedido)) {',
+              'row courier condition')
+          s = replace_once(s,
+              'if (alvoNextStatusFamilia === "saiu_entrega" && entregadores.length > 0 && alvoAcaoFamilia.tipoEntrega !== "pickup") {',
+              'if (alvoNextStatusFamilia === "saiu_entrega" && entregadores.length > 0 && !isPedidoDineIn(alvoAcaoFamilia) && !isPedidoRetirada(alvoAcaoFamilia)) {',
+              'family courier condition')
+
+          # Contextual status labels in detail/list/toast; leave filter names unchanged.
+          s = replace_once(s,
+              '${firstName} → ${STATUS_COLOR[novoStatus].label}',
+              '${firstName} → ${getStatusLabel({ ...pedido, status: novoStatus })}',
+              'toast status label')
+          s = replace_once(s,
+              '>{sc.label}</span>\n            <h2',
+              '>{getStatusLabel(p)}</span>\n            <h2',
+              'detail status label')
+          s = replace_once(s,
+              '(isPix && pedido.pixConfirmado && pedido.status === "novo" ? (hibridoParts ? "Pix parcial pago" : "Pago") : sc.label)',
+              '(isPix && pedido.pixConfirmado && pedido.status === "novo" ? (hibridoParts ? "Pix parcial pago" : "Pago") : getStatusLabel(pedido))',
+              'row status label')
+
+          # The comment used to describe the old skip and is now false.
+          s = s.replace(
+              'só na visão de pedidos ativos: em "arquivados" e "tempo real" a\n          operadora está fazendo outra coisa. Desligado por padrão (flag).',
+              'só na visão de pedidos ativos: em "arquivados" e "tempo real" a\n          operadora está fazendo outra coisa. Ativo por padrão; false explícito é rollback.')
+          p.write_text(s)
+
+          # 3) Update stale unit expectations to the new 5-minute route retry and Salão stages.
+          p = Path('src/lib/limpezaOperacionalPedidos.test.ts')
+          s = p.read_text()
+          s = replace_once(s,
+              '  LIMIAR_REAVISO_PREPARO_MIN,\n',
+              '  LIMIAR_REAVISO_PREPARO_MIN,\n  LIMIAR_REAVISO_ENTREGA_MIN,\n',
+              'test retry import')
+          s = replace_once(s,
+              'expect(pendencia?.descricao).toContain("eu te lembro de novo em 20 min");',
+              'expect(pendencia?.descricao).toContain(`eu te lembro de novo em ${LIMIAR_REAVISO_ENTREGA_MIN} min`);',
+              'delivery description')
+
+          old = """  test(\"ainda na rua reinicia o cronômetro e só cobra depois de outros 20 min\", () => {\n    const adiado19 = pedido({\n      id: String(AGORA - 180 * MIN),\n      status: \"saiu_entrega\",\n      statusAtualizadoEm: new Date(AGORA - 19 * MIN).toISOString(),\n      limpezaOperacional: {\n        motivo: \"entrega_longa\",\n        acao: \"adiou\",\n        resolvidoEm: new Date(AGORA - 19 * MIN).toISOString(),\n      },\n    });\n    expect(classificarPendencia(adiado19, AGORA)).toBeNull();\n\n    const adiado20 = {\n      ...adiado19,\n      statusAtualizadoEm: new Date(AGORA - 20 * MIN).toISOString(),\n      limpezaOperacional: {\n        motivo: \"entrega_longa\" as const,\n        acao: \"adiou\" as const,\n        resolvidoEm: new Date(AGORA - 20 * MIN).toISOString(),\n      },\n    };\n    expect(classificarPendencia(adiado20, AGORA)?.motivo).toBe(\"entrega_longa\");\n  });"""
+          new = """  test(\"ainda na rua reinicia o cronômetro e cobra novamente em 5 min\", () => {\n    expect(LIMIAR_REAVISO_ENTREGA_MIN).toBe(5);\n    const adiado4 = pedido({\n      id: String(AGORA - 180 * MIN),\n      status: \"saiu_entrega\",\n      statusAtualizadoEm: new Date(AGORA - 4 * MIN).toISOString(),\n      limpezaOperacional: {\n        motivo: \"entrega_longa\",\n        acao: \"adiou\",\n        resolvidoEm: new Date(AGORA - 4 * MIN).toISOString(),\n        tentativas: 1,\n      },\n    });\n    expect(classificarPendencia(adiado4, AGORA)).toBeNull();\n\n    const adiado5 = {\n      ...adiado4,\n      statusAtualizadoEm: new Date(AGORA - LIMIAR_REAVISO_ENTREGA_MIN * MIN).toISOString(),\n      limpezaOperacional: {\n        motivo: \"entrega_longa\" as const,\n        acao: \"adiou\" as const,\n        resolvidoEm: new Date(AGORA - LIMIAR_REAVISO_ENTREGA_MIN * MIN).toISOString(),\n        tentativas: 1,\n      },\n    };\n    expect(classificarPendencia(adiado5, AGORA)?.motivo).toBe(\"entrega_longa\");\n  });"""
+          s = replace_once(s, old, new, 'route retry test')
+
+          s = replace_once(s,
+              'expect(acaoPrincipal(salao)).toMatchObject({ label: "PEDIDO PRONTO", status: "entregue" });',
+              'expect(acaoPrincipal(salao)).toMatchObject({ label: "PRONTO PARA SERVIR", status: "saiu_entrega" });',
+              'dine in action')
+          s = replace_once(s,
+              'expect(acaoSecundaria(p)).toMatchObject({ label: "AINDA ESTÁ NA RUA · LEMBRAR EM 20 MIN", acao: "adiou", status: "saiu_entrega" });',
+              'expect(acaoSecundaria(p)).toMatchObject({ label: "AINDA ESTÁ NA RUA · LEMBRAR EM 5 MIN", acao: "adiou", status: "saiu_entrega" });',
+              'route secondary label')
+          s = replace_once(s,
+          """    expect(acaoPrincipal(p)).toMatchObject({ acao: \"verificou_pagamento\", tom: \"principal\" });\n    expect(acaoPrincipal(p)).not.toHaveProperty(\"status\");\n    expect(acaoSecundaria(p)).toMatchObject({ acao: \"adiou\", status: \"novo\" });\n    expect(acaoTerciaria(p)).toMatchObject({ acao: \"cancelou\", status: \"cancelado\" });""",
+          """    expect(acaoPrincipal(p)).toMatchObject({ acao: \"verificou_pagamento\", tom: \"principal\" });\n    expect(acaoPrincipal(p)).not.toHaveProperty(\"status\");\n    expect(acaoSecundaria(p)).toBeNull();\n    expect(acaoTerciaria(p)).toBeNull();""", 'pix actions')
+          p.write_text(s)
+
+          # 4) Dedicated parity tests: 03:00 carry-over, Pix review, escalation, Salão route.
+          Path('src/lib/limpezaOperacionalPedidos.paridadeSf.test.ts').write_text(r'''import { describe, expect, test } from "vitest";
+import {
+  LIMIAR_ENTREGA_MIN,
+  LIMIAR_REAVISO_ENTREGA_MIN,
+  acaoPrincipal,
+  acaoSecundaria,
+  classificarPendencia,
+  type PedidoLimpeza,
+} from "./limpezaOperacionalPedidos";
+
+const MIN = 60_000;
+
+function pedido(base: Partial<PedidoLimpeza>): PedidoLimpeza {
+  return { id: String(Date.now()), cliente: "Teste operacional", status: "novo", ...base };
+}
+
+describe("paridade do gate operacional com a referência São Francisco", () => {
+  test("pedido não resolvido do expediente anterior bloqueia imediatamente após 03:00", () => {
+    const criado = Date.parse("2026-08-20T05:55:00.000Z"); // 02:55 BRT
+    const agora = Date.parse("2026-08-20T06:01:00.000Z"); // 03:01 BRT
+    const p = pedido({ id: String(criado), status: "novo" });
+    const pendencia = classificarPendencia(p, agora);
+    expect(pendencia).toMatchObject({ motivo: "novo_sem_aceite", expedienteAnterior: true });
+  });
+
+  test.each(["em_revisao", "suspeito", "comprovante_recebido"])("Pix %s nunca cai na cozinha genérica", (statusPix) => {
+    const agora = Date.parse("2026-08-20T20:00:00.000Z");
+    const p = pedido({
+      id: String(agora - 90 * MIN),
+      status: "novo",
+      pagamento: "Pix",
+      pix: { status: statusPix },
+    });
+    expect(classificarPendencia(p, agora)).toBeNull();
+  });
+
+  test("delivery cobra em 20 min e depois a cada 5 min", () => {
+    const agora = Date.parse("2026-08-20T20:00:00.000Z");
+    const inicial = pedido({
+      id: String(agora - 200 * MIN),
+      status: "saiu_entrega",
+      tipoEntrega: "delivery",
+      statusAtualizadoEm: new Date(agora - LIMIAR_ENTREGA_MIN * MIN).toISOString(),
+    });
+    expect(classificarPendencia(inicial, agora)?.motivo).toBe("entrega_longa");
+
+    const adiado = pedido({
+      ...inicial,
+      statusAtualizadoEm: new Date(agora - LIMIAR_REAVISO_ENTREGA_MIN * MIN).toISOString(),
+      limpezaOperacional: {
+        motivo: "entrega_longa",
+        acao: "adiou",
+        resolvidoEm: new Date(agora - LIMIAR_REAVISO_ENTREGA_MIN * MIN).toISOString(),
+        tentativas: 1,
+      },
+    });
+    expect(classificarPendencia(adiado, agora)?.motivo).toBe("entrega_longa");
+  });
+
+  test("depois de duas confirmações delivery exige problema ou conclusão", () => {
+    const agora = Date.parse("2026-08-20T20:00:00.000Z");
+    const p = pedido({
+      id: String(agora - 200 * MIN),
+      status: "saiu_entrega",
+      tipoEntrega: "delivery",
+      statusAtualizadoEm: new Date(agora - 5 * MIN).toISOString(),
+      limpezaOperacional: {
+        motivo: "entrega_longa",
+        acao: "adiou",
+        resolvidoEm: new Date(agora - 5 * MIN).toISOString(),
+        tentativas: 2,
+      },
+    });
+    const pendencia = classificarPendencia(p, agora)!;
+    expect(pendencia.exigirProblema).toBe(true);
+    expect(pendencia.podeRelatarProblema).toBe(true);
+    expect(acaoSecundaria(pendencia)).toBeNull();
+  });
+
+  test("Salão preserva Pronto para servir antes de Servido", () => {
+    const agora = Date.parse("2026-08-20T20:00:00.000Z");
+    const cozinha = classificarPendencia(pedido({
+      id: String(agora - 200 * MIN),
+      status: "em_preparo",
+      tipoEntrega: "dine_in",
+      statusAtualizadoEm: new Date(agora - 75 * MIN).toISOString(),
+    }), agora)!;
+    expect(acaoPrincipal(cozinha)).toMatchObject({ label: "PRONTO PARA SERVIR", status: "saiu_entrega" });
+
+    const pronto = classificarPendencia(pedido({
+      id: String(agora - 200 * MIN),
+      status: "saiu_entrega",
+      tipoEntrega: "dine_in",
+      statusAtualizadoEm: new Date(agora - 20 * MIN).toISOString(),
+    }), agora)!;
+    expect(pronto.titulo).toContain("pronto para servir");
+    expect(acaoPrincipal(pronto)).toMatchObject({ label: "PEDIDO SERVIDO", status: "entregue" });
+    expect(acaoSecundaria(pronto)?.label).toContain("5 MIN");
+  });
+
+  test("retirada após duas confirmações exige contato se cliente não foi avisado", () => {
+    const agora = Date.parse("2026-08-20T20:00:00.000Z");
+    const pronto = classificarPendencia(pedido({
+      id: String(agora - 200 * MIN),
+      status: "saiu_entrega",
+      tipoEntrega: "retirada",
+      statusAtualizadoEm: new Date(agora - 5 * MIN).toISOString(),
+      limpezaOperacional: {
+        motivo: "entrega_longa",
+        acao: "adiou",
+        resolvidoEm: new Date(agora - 5 * MIN).toISOString(),
+        tentativas: 2,
+      },
+    }), agora)!;
+    expect(pronto.podeRelatarProblema).toBe(true);
+    expect(acaoSecundaria(pronto)).toBeNull();
+  });
+});
+''')
+
+          # 5) Source-level guard for the large /pedidos UI contract.
+          Path('src/app/pedidos/page.gateOperacional.test.ts').write_text(r'''import { readFileSync } from "node:fs";
+import { describe, expect, test } from "vitest";
+
+const source = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+
+describe("/pedidos — contrato do Salão para o gate operacional", () => {
+  test("não pula Fazendo direto para Servido", () => {
+    expect(source).not.toContain('(isDineInDetail && p.status === "em_preparo") ? "entregue"');
+    expect(source).not.toContain('(isDineIn && pedido.status === "em_preparo") ? "entregue"');
+    expect(source).toContain('const nextStatus = NEXT_STATUS[p.status]');
+    expect(source).toContain('const nextStatus = NEXT_STATUS[pedido.status]');
+  });
+
+  test("comanda também usa a progressão canônica", () => {
+    expect(source).toContain('const alvoNextStatusFamilia = alvoAcaoFamilia\n              ? NEXT_STATUS[alvoAcaoFamilia.status]');
+  });
+
+  test("pedido de Salão/retirada nunca abre seleção de entregador ao ficar pronto", () => {
+    expect(source).toContain('!isPedidoDineIn(pedido) && !isPedidoRetirada(pedido)');
+    expect(source).toContain('!isPedidoDineIn(alvoAcaoFamilia) && !isPedidoRetirada(alvoAcaoFamilia)');
+  });
+
+  test("rótulos distinguem Pronto para servir de Servido", () => {
+    expect(source).toContain('return "Pronto para servir"');
+    expect(source).toContain('return "Pedido servido"');
+  });
+});
+''')
+
+          # 6) Server boundary tests against implementation text plus pure behavior.
+          Path('src/app/api/orders/route.gateOperacional.test.ts').write_text(r'''import { readFileSync } from "node:fs";
+import { describe, expect, test } from "vitest";
+
+const source = readFileSync(new URL("./route.ts", import.meta.url), "utf8");
+
+describe("PATCH /api/orders — fronteira do gate operacional", () => {
+  test("revalida a pendência no pedido fresco sob mutex", () => {
+    expect(source).toContain("const pendenciaAtual = classificarPendencia(pedidos[index], agoraMs)");
+    expect(source).toContain("Este pedido não está mais pendente. Atualize o painel antes de continuar.");
+  });
+
+  test("não confia na ação declarada pelo navegador", () => {
+    expect(source).toContain("const acaoEsperada = status === statusAnterior");
+    expect(source).toContain("const transicaoCompativel = limpezaResolvida.acao === 'adiou'");
+    expect(source).toContain("A ação informada não corresponde à etapa atual deste pedido.");
+  });
+
+  test("payload de resolução malformado falha fechado", () => {
+    expect(source).toContain("limpeza !== undefined && !limpezaResolvida");
+    expect(source).toContain("Resolução operacional inválida.");
+  });
+
+  test("mesa sem telefone não tenta WhatsApp sintético", () => {
+    expect(source).toContain("if (digitos.length < 10) return null");
+  });
+});
+''')
+
+          # 7) Problem-route safety contract.
+          Path('src/app/api/orders/problema-entrega/route.safety.test.ts').write_text(r'''import { readFileSync } from "node:fs";
+import { describe, expect, test } from "vitest";
+
+const source = readFileSync(new URL("./route.ts", import.meta.url), "utf8");
+
+describe("problema-entrega — segurança e escalada", () => {
+  test("Preview não pode escrever nem mandar WhatsApp", () => {
+    const guard = source.indexOf('process.env.VERCEL_ENV !== "production"');
+    const prepare = source.indexOf("const preparado = await prepararAcao");
+    const send = source.indexOf("await enviarTextoWhatsApp");
+    expect(guard).toBeGreaterThan(-1);
+    expect(prepare).toBeGreaterThan(guard);
+    expect(send).toBeGreaterThan(guard);
+  });
+
+  test("revalida a pendência antes de qualquer mutação de rota", () => {
+    expect(source).toContain("const pendencia = classificarPendencia(pedido, agora)");
+    expect(source).toContain('pendencia?.motivo !== "entrega_longa"');
+  });
+
+  test("delivery não pode adiar indefinidamente", () => {
+    expect(source).toContain('modo === "delivery" && !clienteRespondeu && tentativasAtuais >= 2');
+    expect(source).toContain("Agora informe o problema da entrega ou confirme que ela foi concluída.");
+  });
+
+  test("Salão nunca usa contato externo de entrega", () => {
+    expect(source).toContain('modo === "dine_in"');
+    expect(source).toContain("Consumo no local não usa contato de entrega.");
+  });
+});
+''')
+
+          # Basic patch integrity.
+          for path in [
+              'src/app/api/orders/route.ts',
+              'src/app/pedidos/page.tsx',
+              'src/lib/limpezaOperacionalPedidos.test.ts',
+          ]:
+              if '\r\n' in Path(path).read_text():
+                  raise SystemExit(f'unexpected CRLF in {path}')
           PY
           git diff --check
-          git diff -- src/app/api/orders/route.ts
-      - name: Commit patch
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Focused operational tests
+        run: >-
+          npx vitest run
+          src/lib/limpezaOperacionalPedidos.test.ts
+          src/lib/limpezaOperacionalPedidos.paridadeSf.test.ts
+          src/app/pedidos/page.gateOperacional.test.ts
+          src/app/api/orders/route.gateOperacional.test.ts
+          src/app/api/orders/problema-entrega/route.safety.test.ts
+          src/lib/expedienteOperacional.test.ts
+          src/lib/pedidoComandaPainel.test.ts
+          src/app/pedidos/page.test.ts
+
+      - name: Lint changed product files
+        run: npx eslint src/lib/limpezaOperacionalPedidos.ts src/lib/problemaEntrega.ts src/components/LimpezaOperacionalPainel.tsx src/app/api/orders/problema-entrega/route.ts src/app/api/orders/route.ts src/app/pedidos/page.tsx || true
+
+      - name: Production build
+        run: npm run build
+
+      - name: Commit validated patch
         shell: bash
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add src/app/api/orders/route.ts
-          git commit -m "fix(pedidos): revalida pendencia operacional no servidor"
+          git add src/app/api/orders/route.ts src/app/pedidos/page.tsx src/lib/limpezaOperacionalPedidos.test.ts src/lib/limpezaOperacionalPedidos.paridadeSf.test.ts src/app/pedidos/page.gateOperacional.test.ts src/app/api/orders/route.gateOperacional.test.ts src/app/api/orders/problema-entrega/route.safety.test.ts
+          git commit -m "fix(pedidos): fecha paridade do gate operacional"
           git push origin HEAD:fix/pedidos-gate-operacional-paridade-sf-20260820
