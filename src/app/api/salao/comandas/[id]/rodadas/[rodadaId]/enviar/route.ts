@@ -12,16 +12,17 @@ import {
 } from "@/lib/comandas";
 import { sanitizeClientRequestId } from "@/survival/clientRequestId";
 import { POST as criarPedidoApp } from "@/app/api/pedido-app/route";
+import { executarMutacaoComContaAbertaSalao } from "@/lib/salaoConta.server";
+import { ERRO_ESCRITA_SALAO_PREVIEW, escritaSalaoBloqueadaNoPreview } from "@/lib/salaoAmbiente";
 
 export const dynamic = "force-dynamic";
 
 // Envia uma rodada (Rodada 2+) da comanda para a cozinha: cada rodada
 // enviada vira um pedido oficial independente, contendo somente os itens
-// daquela rodada — nunca os itens acumulados da comanda inteira. Mesmo
-// motor de sempre (POST /api/pedido-app, em processo — nunca um segundo
-// motor de pedido); esta rota só reivindica o direito de enviar (mutex +
-// status "enviando", ver src/lib/comandas.ts), repassa o payload e confirma
-// ou desfaz a reivindicação conforme o resultado.
+// daquela rodada — nunca os itens acumulados da comanda inteira. O direito
+// de iniciar o envio é serializado com "Pedir conta" e, dentro dele, a
+// própria rodada passa atomicamente para "enviando" antes da chamada ao
+// motor oficial. O lock da conta não fica preso durante I/O externo.
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; rodadaId: string }> }
@@ -29,6 +30,9 @@ export async function POST(
   const sessaoSalao = await lerSessaoSalao(req);
   if (!sessaoSalao) {
     return NextResponse.json({ ok: false, error: "Não autorizado" }, { status: 401 });
+  }
+  if (escritaSalaoBloqueadaNoPreview()) {
+    return NextResponse.json({ ok: false, error: ERRO_ESCRITA_SALAO_PREVIEW }, { status: 403 });
   }
 
   const { id, rodadaId } = await params;
@@ -44,12 +48,18 @@ export async function POST(
     return NextResponse.json({ ok: false, error: "Identificador de tentativa (clientRequestId) é obrigatório." }, { status: 400 });
   }
 
-  let reivindicacao;
+  let mutacao;
   try {
-    reivindicacao = await reivindicarEnvioRodada(id, rodadaId, clientRequestId);
+    mutacao = await executarMutacaoComContaAbertaSalao(id, () =>
+      reivindicarEnvioRodada(id, rodadaId, clientRequestId)
+    );
   } catch {
     return NextResponse.json({ ok: false, error: "Não foi possível enviar agora. Tente de novo." }, { status: 503 });
   }
+  if (!mutacao.ok) {
+    return NextResponse.json({ ok: false, error: mutacao.error }, { status: mutacao.status });
+  }
+  const reivindicacao = mutacao.valor;
 
   if (!reivindicacao.ok) {
     if (reivindicacao.motivo === "nao_encontrada") {
@@ -109,11 +119,6 @@ export async function POST(
   const payloadPedidoApp = {
     cliente: identificacaoCliente,
     usarOutroWhatsapp: true,
-    // pizzaSelection (IDs oficiais, Fase 5) e simpleSelection (Fase 6)
-    // preservados — validacao.itens já vem de validarItensComanda
-    // (reprecificação em profundidade acima), que só anexa esses campos
-    // quando resolveu contra o catálogo oficial fresco; POST /api/pedido-app
-    // reprecifica de novo pelo motor nativo, nunca confia neste payload.
     itens: validacao.itens.map((i) => ({
       kind: i.kind,
       name: i.name,
@@ -129,9 +134,6 @@ export async function POST(
     clientRequestId,
   };
 
-  // Mesma requisição real (mesmos cookies do navegador do Salão) — a rota de
-  // criação de pedido verifica a sessão do Salão de novo, por conta própria,
-  // antes de dispensar o telefone.
   const requisicaoInterna = {
     json: async () => payloadPedidoApp,
     cookies: req.cookies,

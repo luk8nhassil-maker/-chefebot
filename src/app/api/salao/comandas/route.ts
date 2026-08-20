@@ -2,12 +2,35 @@ import { NextRequest, NextResponse } from "next/server";
 import { lerSessaoSalao } from "@/lib/salaoAuth";
 import { lerSessaoAdministrativa } from "@/lib/sessaoAdministrativa";
 import { abrirComanda, comRodadasNormalizadas, listarComandas, totalParcialComanda } from "@/lib/comandas";
+import { redis } from "@/lib/redis";
+import { ehStatusPedidoSalao } from "@/lib/salaoConta";
+import { lerEstadoContaSalao } from "@/lib/salaoConta.server";
+import { ERRO_ESCRITA_SALAO_PREVIEW, escritaSalaoBloqueadaNoPreview } from "@/lib/salaoAmbiente";
 
 export const dynamic = "force-dynamic";
 
-// Lista de comandas: o próprio Salão consulta (para saber quais mesas estão
-// abertas) e o painel administrativo também consulta (visão de comandas
-// integrada só onde necessário) — duas sessões diferentes, mesmo dado.
+type PedidoOperacionalSalao = {
+  id?: string;
+  status?: unknown;
+  statusAtualizadoEm?: unknown;
+};
+
+async function mapaPedidosOperacionaisSalao(): Promise<Map<string, { status: string; statusAtualizadoEm?: string }>> {
+  const pedidos = await redis.get<PedidoOperacionalSalao[]>("pedidos").catch(() => null);
+  const mapa = new Map<string, { status: string; statusAtualizadoEm?: string }>();
+  if (!Array.isArray(pedidos)) return mapa;
+  for (const pedido of pedidos) {
+    if (!pedido || typeof pedido.id !== "string" || !ehStatusPedidoSalao(pedido.status)) continue;
+    mapa.set(pedido.id, {
+      status: pedido.status,
+      ...(typeof pedido.statusAtualizadoEm === "string" ? { statusAtualizadoEm: pedido.statusAtualizadoEm } : {}),
+    });
+  }
+  return mapa;
+}
+
+// Lista de comandas: Salão e painel administrativo leem a MESMA comanda.
+// O status da cozinha é anexado a partir do pedido oficial, nunca inferido.
 export async function GET(req: NextRequest) {
   const [sessaoSalao, sessaoAdmin] = await Promise.all([lerSessaoSalao(req), lerSessaoAdministrativa(req)]);
   if (!sessaoSalao && !sessaoAdmin) {
@@ -15,17 +38,28 @@ export async function GET(req: NextRequest) {
   }
 
   const status = req.nextUrl.searchParams.get("status");
-  const todas = await listarComandas();
+  const [todas, pedidosOperacionais] = await Promise.all([listarComandas(), mapaPedidosOperacionaisSalao()]);
   const filtradas = status ? todas.filter((c) => c.status === status) : todas;
-  // Normaliza rodadas na resposta — nunca grava aqui (leitura não escreve,
-  // ver comRodadasNormalizadas). A UI do Salão sempre pode contar com
-  // `comanda.rodadas` e `comanda.totalParcial`, mesmo para comandas
-  // criadas antes desta etapa.
-  const comandas = filtradas.map((c) => {
+  const comandas = await Promise.all(filtradas.map(async (c) => {
     const normalizada = comRodadasNormalizadas(c);
-    return { ...normalizada, totalParcial: totalParcialComanda(normalizada) };
-  });
-  return NextResponse.json({ ok: true, comandas });
+    const rodadas = normalizada.rodadas!.map((rodada) => {
+      if (rodada.status !== "enviada" || !rodada.pedidoId) return rodada;
+      const pedido = pedidosOperacionais.get(rodada.pedidoId);
+      if (!pedido) return rodada;
+      return {
+        ...rodada,
+        pedidoStatus: pedido.status,
+        ...(pedido.statusAtualizadoEm ? { pedidoStatusAtualizadoEm: pedido.statusAtualizadoEm } : {}),
+      };
+    });
+    return {
+      ...normalizada,
+      rodadas,
+      totalParcial: totalParcialComanda(normalizada),
+      conta: await lerEstadoContaSalao(normalizada.id),
+    };
+  }));
+  return NextResponse.json({ ok: true, comandas }, { headers: { "Cache-Control": "no-store" } });
 }
 
 // Abrir uma comanda é uma ação exclusiva do terminal do Salão.
@@ -33,6 +67,9 @@ export async function POST(req: NextRequest) {
   const sessaoSalao = await lerSessaoSalao(req);
   if (!sessaoSalao) {
     return NextResponse.json({ ok: false, error: "Não autorizado" }, { status: 401 });
+  }
+  if (escritaSalaoBloqueadaNoPreview()) {
+    return NextResponse.json({ ok: false, error: ERRO_ESCRITA_SALAO_PREVIEW }, { status: 403 });
   }
 
   let body: { cliente?: string; mesa?: string; complemento?: string };

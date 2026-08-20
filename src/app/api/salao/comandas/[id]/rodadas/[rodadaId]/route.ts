@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { lerSessaoSalao } from "@/lib/salaoAuth";
 import { atualizarItensRodada, totalParcialComanda, validarItensComanda } from "@/lib/comandas";
+import { executarMutacaoComContaAbertaSalao } from "@/lib/salaoConta.server";
+import { ERRO_ESCRITA_SALAO_PREVIEW, escritaSalaoBloqueadaNoPreview } from "@/lib/salaoAmbiente";
 
 export const dynamic = "force-dynamic";
 
@@ -10,7 +12,7 @@ export const dynamic = "force-dynamic";
 // atual e completa de itens da rodada, nunca um diff. Preço sempre
 // recalculado no servidor contra o cardápio oficial. Uma rodada em
 // rascunho pode ficar momentaneamente vazia (removeu o último item antes
-// de adicionar outro) — só a Rodada 1/envio para a cozinha exige itens.
+// de adicionar outro) — só o envio para a cozinha exige itens.
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; rodadaId: string }> }
@@ -18,6 +20,9 @@ export async function PATCH(
   const sessaoSalao = await lerSessaoSalao(req);
   if (!sessaoSalao) {
     return NextResponse.json({ ok: false, error: "Não autorizado" }, { status: 401 });
+  }
+  if (escritaSalaoBloqueadaNoPreview()) {
+    return NextResponse.json({ ok: false, error: ERRO_ESCRITA_SALAO_PREVIEW }, { status: 403 });
   }
 
   const { id, rodadaId } = await params;
@@ -33,12 +38,18 @@ export async function PATCH(
     return NextResponse.json({ ok: false, error: validacao.error }, { status: 400 });
   }
 
-  let resultado;
+  let mutacao;
   try {
-    resultado = await atualizarItensRodada(id, rodadaId, validacao.itens, { observacao: body.observacao });
+    mutacao = await executarMutacaoComContaAbertaSalao(id, () =>
+      atualizarItensRodada(id, rodadaId, validacao.itens, { observacao: body.observacao })
+    );
   } catch {
     return NextResponse.json({ ok: false, error: "Não foi possível salvar agora. Tente de novo." }, { status: 503 });
   }
+  if (!mutacao.ok) {
+    return NextResponse.json({ ok: false, error: mutacao.error }, { status: mutacao.status });
+  }
+  const resultado = mutacao.valor;
 
   if (!resultado.ok) {
     if (resultado.motivo === "nao_encontrada") {
