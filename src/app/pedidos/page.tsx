@@ -19,7 +19,7 @@ import {
   type OpcaoResolucao,
   type RegistroLimpeza,
 } from "@/lib/limpezaOperacionalPedidos"
-import { mapearFamiliasVisiveis, selecionarPedidosPainel } from "@/lib/pedidoComandaPainel"
+import { mapearFamiliasVisiveis, selecionarPedidosPainel, selecionarProximaAcaoFamilia } from "@/lib/pedidoComandaPainel"
 
 function whatsappLink(telefoneBruto: string, mensagem?: string): string {
   let numero = (telefoneBruto || "").replace(/\D/g, "")
@@ -2276,6 +2276,24 @@ export default function PedidosPage() {
               ? `Mesa ${pedido.comandaMesa}${pedido.comandaComplemento ? ` · ${pedido.comandaComplemento}` : ""}`
               : "Sem mesa"
 
+            const familiaPermiteAcao = filtro !== "entregue" && filtro !== "cancelado"
+            const alvoAcaoFamilia = familiaSalao && familiaPermiteAcao
+              ? selecionarProximaAcaoFamilia(familiaSalao, filtro)
+              : undefined
+            const alvoNextStatusFamilia = alvoAcaoFamilia
+              ? ((isPedidoDineIn(alvoAcaoFamilia) && alvoAcaoFamilia.status === "em_preparo")
+                  ? "entregue" as Status
+                  : NEXT_STATUS[alvoAcaoFamilia.status])
+              : null
+            const alvoEmEdicaoFamilia = alvoAcaoFamilia ? pedidoEmEdicao(alvoAcaoFamilia) : false
+            const alvoPixPendenteFamilia = !!alvoAcaoFamilia
+              && alvoAcaoFamilia.status === "novo"
+              && (alvoAcaoFamilia.pagamento || "").toLowerCase().includes("pix")
+              && !alvoAcaoFamilia.pixConfirmado
+            const alvoScFamilia = alvoAcaoFamilia ? STATUS_COLOR[alvoAcaoFamilia.status] : null
+            const alvoRotuloFamilia = alvoAcaoFamilia?.rodadaNumero === 1
+              ? "Pedido inicial"
+              : `Complemento ${alvoAcaoFamilia?.rodadaNumero ?? ""}`
             let rowBorder = sc.accentBorder
             if (pedido.escalonado) rowBorder = "color-mix(in srgb, var(--danger) 70%, transparent)"
             if (pedido.cancelamentoSolicitado) rowBorder = "color-mix(in srgb, var(--danger) 50%, transparent)"
@@ -2297,8 +2315,9 @@ export default function PedidosPage() {
                       padding: "10px 13px",
                       background: "color-mix(in srgb, var(--primary) 7%, var(--surface))",
                       border: "1.5px solid color-mix(in srgb, var(--primary) 34%, transparent)",
-                      borderRadius: "14px 14px 8px 8px",
-                      marginBottom: -8,
+                      borderBottom: "none",
+                      borderRadius: "14px 14px 0 0",
+                      marginBottom: 0,
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "space-between",
@@ -2315,7 +2334,7 @@ export default function PedidosPage() {
                         </span>
                       </div>
                       <div style={{ marginTop: 3, fontSize: 10.5, fontWeight: 700, color: "var(--foreground-muted)" }}>
-                        {localFamilia} · {familiaSalao.length} {familiaSalao.length === 1 ? "envio" : "envios"}
+                        {localFamilia} · {familiaSalao.length} {familiaSalao.length === 1 ? "pedido" : "pedidos"}
                       </div>
                     </div>
                     <span style={{ fontSize: 13, fontWeight: 900, color: "var(--foreground-secondary)", flexShrink: 0 }}>
@@ -2329,17 +2348,15 @@ export default function PedidosPage() {
                 onClick={() => setDetailId(pedido.id === detailId ? null : pedido.id)}
                 style={{
                   background: isSelected ? "var(--background)" : "var(--background)",
-                  border: `1.5px solid ${isSelected ? sc.accentBorder : rowBorder}`,
+                  border: familiaSalao ? "none" : `1.5px solid ${isSelected ? sc.accentBorder : rowBorder}`,
+                  borderLeft: familiaSalao ? "1.5px solid color-mix(in srgb, var(--primary) 34%, transparent)" : undefined,
+                  borderRight: familiaSalao ? "1.5px solid color-mix(in srgb, var(--primary) 34%, transparent)" : undefined,
+                  borderTop: familiaSalao ? "1px solid var(--surface-secondary)" : undefined,
+                  borderBottom: familiaSalao && (!ultimaDaFamilia || !!alvoAcaoFamilia) ? "none" : (familiaSalao ? "1.5px solid color-mix(in srgb, var(--primary) 34%, transparent)" : undefined),
                   borderRadius: familiaSalao
-                    ? (familiaSalao.length === 1
-                        ? 14
-                        : primeiraDaFamilia
-                          ? "8px 8px 4px 4px"
-                          : ultimaDaFamilia
-                            ? "4px 4px 14px 14px"
-                            : 4)
+                    ? (ultimaDaFamilia && !alvoAcaoFamilia ? "0 0 14px 14px" : 0)
                     : 14,
-                  marginTop: familiaSalao && !primeiraDaFamilia ? -8 : undefined,
+                  marginTop: undefined,
                   padding: "11px 13px",
                   display: "flex",
                   flexDirection: "column",
@@ -2365,11 +2382,11 @@ export default function PedidosPage() {
                           {pedido.rodadaNumero === 1 ? "Pedido inicial" : `Complemento ${pedido.rodadaNumero ?? indiceFamilia + 1}`}
                         </span>
                       )}
-                      {pedido.numero != null && <span style={{ fontSize: 10, fontWeight: 900, color: "var(--border-strong)", flexShrink: 0 }}>#{pedido.numero}</span>}
-                      <span style={{ fontSize: 14, fontWeight: 900, color: "var(--text-primary)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{firstName}</span>
+                      {!familiaSalao && pedido.numero != null && <span style={{ fontSize: 10, fontWeight: 900, color: "var(--border-strong)", flexShrink: 0 }}>#{pedido.numero}</span>}
+                      {familiaSalao ? <span style={{ flex: 1 }} /> : <span style={{ fontSize: 14, fontWeight: 900, color: "var(--text-primary)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{firstName}</span>}
                       {pedido.escalonado && <span style={{ fontSize: 11, flexShrink: 0 }}>🚨</span>}
-                      {pedido.origem === "painel" && <span style={{ fontSize: 9, fontWeight: 900, color: "var(--brand-text)", background: "color-mix(in srgb, var(--primary) 14%, transparent)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>🧑‍🍳 Painel</span>}
-                      {(pedido.origem === "site" || pedido.origem === "app") && <span style={{ fontSize: 9, fontWeight: 900, color: "var(--info)", background: "color-mix(in srgb, var(--info) 12%, transparent)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>🌐 Site</span>}
+                      {!familiaSalao && pedido.origem === "painel" && <span style={{ fontSize: 9, fontWeight: 900, color: "var(--brand-text)", background: "color-mix(in srgb, var(--primary) 14%, transparent)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>🧑‍🍳 Painel</span>}
+                      {!familiaSalao && (pedido.origem === "site" || pedido.origem === "app") && <span style={{ fontSize: 9, fontWeight: 900, color: "var(--info)", background: "color-mix(in srgb, var(--info) 12%, transparent)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>🌐 Site</span>}
                       {pixPendente && <span style={{ fontSize: 9, fontWeight: 900, color: "var(--attention-text)", background: "var(--attention-surface)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>{hibridoParts ? "PIX parcial ⏳" : "PIX⏳"}</span>}
                       {pixEmRevisaoOuSuspeito && <span style={{ fontSize: 9, fontWeight: 900, color: pedido.pix?.status === "suspeito" ? "var(--danger)" : "var(--attention-text)", background: pedido.pix?.status === "suspeito" ? "color-mix(in srgb, var(--danger) 12%, transparent)" : "var(--attention-surface)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>{pixEmRevisaoOuSuspeito}</span>}
                       {emEdicao && <span style={{ fontSize: 9, fontWeight: 900, color: "var(--info)", background: "color-mix(in srgb, var(--info) 14%, transparent)", padding: "2px 5px", borderRadius: 5, flexShrink: 0 }}>✎ Cliente editando</span>}
@@ -2379,17 +2396,27 @@ export default function PedidosPage() {
                     </div>
 
                     {/* Linha 2: infos compactas */}
-                    <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 700, color: "var(--foreground-muted)", marginBottom: 9 }}>
-                      <span style={{ flexShrink: 0 }}>{isDineIn ? "🍽️" : isRetirada ? "🏪" : "🛵"}</span>
-                      <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--foreground-muted)" }}>{isDineIn ? "No local" : isRetirada ? "Retirada" : (pedido.bairro || pedido.endereco || "—")}</span>
-                      <span style={{ flexShrink: 0, color: "var(--border-strong)" }}>·</span>
-                      <span style={{ flexShrink: 0 }}>{pedido.itens.length}it</span>
-                      <span style={{ flexShrink: 0, color: "var(--border-strong)" }}>·</span>
-                      <span style={{ flexShrink: 0, color: isPix ? "var(--success)" : "var(--foreground-muted)" }}>{isPix ? "Pix" : (pagamento.split(" ")[0] || "—")}</span>
-                      <span style={{ flexShrink: 0, color: "var(--border-strong)" }}>·</span>
-                      <span style={{ flexShrink: 0, fontWeight: 900, color: "var(--foreground-secondary)" }}>R${pedido.total.toFixed(2).replace(".", ",")}</span>
-                      <span style={{ flexShrink: 0, fontWeight: 900, color: timerColor, marginLeft: 2, fontSize: 11 }}>{timerMins}m</span>
-                    </div>
+                    {familiaSalao ? (
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 700, color: "var(--foreground-muted)", marginBottom: 6 }}>
+                        <span style={{ flexShrink: 0 }}>{pedido.itens.length} {pedido.itens.length === 1 ? "item" : "itens"}</span>
+                        <span style={{ color: "var(--border-strong)" }}>·</span>
+                        <span style={{ flexShrink: 0, fontWeight: 900, color: "var(--foreground-secondary)" }}>R${pedido.total.toFixed(2).replace(".", ",")}</span>
+                        <span style={{ flex: 1 }} />
+                        <span style={{ flexShrink: 0, fontWeight: 900, color: timerColor, fontSize: 11 }}>{timerMins}m</span>
+                      </div>
+                    ) : (
+                      <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 700, color: "var(--foreground-muted)", marginBottom: 9 }}>
+                        <span style={{ flexShrink: 0 }}>{isDineIn ? "🍽️" : isRetirada ? "🏪" : "🛵"}</span>
+                        <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--foreground-muted)" }}>{isDineIn ? "No local" : isRetirada ? "Retirada" : (pedido.bairro || pedido.endereco || "—")}</span>
+                        <span style={{ flexShrink: 0, color: "var(--border-strong)" }}>·</span>
+                        <span style={{ flexShrink: 0 }}>{pedido.itens.length}it</span>
+                        <span style={{ flexShrink: 0, color: "var(--border-strong)" }}>·</span>
+                        <span style={{ flexShrink: 0, color: isPix ? "var(--success)" : "var(--foreground-muted)" }}>{isPix ? "Pix" : (pagamento.split(" ")[0] || "—")}</span>
+                        <span style={{ flexShrink: 0, color: "var(--border-strong)" }}>·</span>
+                        <span style={{ flexShrink: 0, fontWeight: 900, color: "var(--foreground-secondary)" }}>R${pedido.total.toFixed(2).replace(".", ",")}</span>
+                        <span style={{ flexShrink: 0, fontWeight: 900, color: timerColor, marginLeft: 2, fontSize: 11 }}>{timerMins}m</span>
+                      </div>
+                    )}
 
                     {/* Aviso de edição em andamento — pedido continua na fila, só o aceite fica bloqueado */}
                     {emEdicao && (
@@ -2403,8 +2430,8 @@ export default function PedidosPage() {
                       </div>
                     )}
 
-                    {/* Linha 3: botão de ação */}
-                    <div onClick={e => e.stopPropagation()}>
+                    {/* Linha 3: pedido avulso mantém sua ação; comanda usa um único CTA no rodapé */}
+                    {!familiaSalao && <div onClick={e => e.stopPropagation()}>
                       {pedido.escalonado && (
                         <button
                           onClick={() => { assumirConversa(pedido.telefone); setCardUrgenciaFechado(true) }}
@@ -2439,10 +2466,37 @@ export default function PedidosPage() {
                       )}
                       {isDone && <span style={{ fontSize: 11, fontWeight: 800, color: "var(--success)" }}>✓ Entregue</span>}
                       {isCanceled && <span style={{ fontSize: 11, fontWeight: 800, color: "var(--foreground-muted)" }}>✗ Cancelado</span>}
-                    </div>
+                    </div>}
                   </div>
                 </div>
               </article>
+              {ultimaDaFamilia && familiaSalao && alvoAcaoFamilia && alvoScFamilia && (
+                <div
+                  onClick={e => e.stopPropagation()}
+                  style={{ display: "flex", justifyContent: "flex-end", padding: "9px 12px 11px", background: "var(--background)", borderLeft: "1.5px solid color-mix(in srgb, var(--primary) 34%, transparent)", borderRight: "1.5px solid color-mix(in srgb, var(--primary) 34%, transparent)", borderBottom: "1.5px solid color-mix(in srgb, var(--primary) 34%, transparent)", borderTop: "1px solid var(--surface-secondary)", borderRadius: "0 0 14px 14px" }}
+                >
+                  {alvoAcaoFamilia.escalonado ? (
+                    <button onClick={() => { assumirConversa(alvoAcaoFamilia.telefone); setCardUrgenciaFechado(true) }} style={{ width: "min(100%, 320px)", height: 34, padding: "0 16px", border: "none", borderRadius: 9, background: "var(--danger)", color: "var(--foreground)", fontSize: 12, fontWeight: 900 }}>🚨 Assumir conversa · {alvoRotuloFamilia}</button>
+                  ) : alvoPixPendenteFamilia ? (
+                    <button onClick={() => abrirVerificacaoPix(alvoAcaoFamilia.id)} style={{ width: "min(100%, 320px)", height: 34, padding: "0 16px", border: "1px solid var(--attention-border)", borderRadius: 9, background: "var(--attention-surface)", color: "var(--attention-text)", fontSize: 12, fontWeight: 900 }}>VERIFICAR PAGAMENTO · {alvoRotuloFamilia}</button>
+                  ) : alvoNextStatusFamilia ? (
+                    <button
+                      onClick={() => {
+                        if (alvoEmEdicaoFamilia) return
+                        if (alvoNextStatusFamilia === "saiu_entrega" && entregadores.length > 0 && alvoAcaoFamilia.tipoEntrega !== "pickup") {
+                          setModalEntrega({ pedidoId: alvoAcaoFamilia.id, proxStatus: alvoNextStatusFamilia })
+                        } else {
+                          avancarStatus(alvoAcaoFamilia.id, alvoNextStatusFamilia)
+                        }
+                      }}
+                      disabled={atualizando === alvoAcaoFamilia.id || alvoEmEdicaoFamilia}
+                      style={{ width: "min(100%, 320px)", height: 34, padding: "0 16px", border: "none", borderRadius: 9, background: alvoEmEdicaoFamilia ? "var(--surface-secondary)" : alvoScFamilia.btnBg, color: alvoEmEdicaoFamilia ? "var(--foreground-muted)" : alvoScFamilia.btnFg, fontSize: 12, fontWeight: 900, opacity: atualizando === alvoAcaoFamilia.id ? 0.6 : 1, cursor: alvoEmEdicaoFamilia ? "not-allowed" : "pointer" }}
+                    >
+                      {atualizando === alvoAcaoFamilia.id ? "Atualizando…" : alvoEmEdicaoFamilia ? `Edição em andamento · ${alvoRotuloFamilia}` : `${getActionLabel(alvoAcaoFamilia)} · ${alvoRotuloFamilia}`}
+                    </button>
+                  ) : null}
+                </div>
+              )}
               </div>
             )
           })}

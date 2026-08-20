@@ -255,3 +255,23 @@ describe("/pedidos — item 'Acesso do salão' no menu lateral (Equipe)", () => 
     expect(blocoPanelShell).not.toContain("showGestaoNav");
   });
 });
+
+describe("/pedidos — comanda do Salão como uma unidade operacional visual", () => {
+  test("renderiza um único CTA operacional no rodapé da comanda", () => {
+    expect(fonte).toContain("selecionarProximaAcaoFamilia")
+    expect(fonte).toContain("!familiaSalao && <div onClick={e => e.stopPropagation()}>")
+    expect(fonte).toContain("ultimaDaFamilia && familiaSalao && alvoAcaoFamilia && alvoScFamilia")
+  })
+
+  test("o CTA unificado avança somente a rodada-alvo, nunca a família em lote", () => {
+    expect(fonte).toContain("avancarStatus(alvoAcaoFamilia.id, alvoNextStatusFamilia)")
+    expect(fonte).not.toContain("familiaSalao.forEach(avancarStatus")
+    expect(fonte).not.toContain("Promise.all(familiaSalao")
+  })
+
+  test("mantém status, valor, itens e tempo próprios em cada rodada", () => {
+    expect(fonte).toContain("pedido.rodadaNumero === 1 ? \"Pedido inicial\"")
+    expect(fonte).toContain("R${pedido.total.toFixed(2).replace(\".\", \",\")}")
+    expect(fonte).toContain("{timerMins}m")
+  })
+})
