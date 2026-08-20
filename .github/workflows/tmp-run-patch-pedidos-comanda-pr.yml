@@ -21,24 +21,210 @@ jobs:
         with:
           node-version: 24
           cache: npm
-      - name: Aplicar patch preparado
+      - name: Aplicar patch mínimo
         shell: bash
         run: |
           python - <<'PY'
           from pathlib import Path
 
-          workflow = Path('.github/workflows/tmp-patch-pedidos-comanda-card.yml').read_text()
-          marcador_inicio = "          python - <<'PY'\n"
-          inicio = workflow.index(marcador_inicio) + len(marcador_inicio)
-          fim = workflow.index("\n          PY", inicio)
-          linhas = workflow[inicio:fim].splitlines()
-          script = "\n".join(linha[10:] if linha.startswith("          ") else linha for linha in linhas)
-          for numero, linha in enumerate(script.splitlines(), 1):
-              if 32 <= numero <= 42:
-                  print(f"PATCH_LINE {numero}: {linha!r}")
-          exec(compile(script, '<patch-pedidos-comanda>', 'exec'))
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              count = text.count(old)
+              assert count == 1, f"{label}: esperado 1, encontrado {count}"
+              return text.replace(old, new, 1)
+
+          page = Path('src/app/pedidos/page.tsx')
+          s = page.read_text()
+
+          s = replace_once(
+              s,
+              'import { mapearFamiliasVisiveis, selecionarPedidosPainel } from "@/lib/pedidoComandaPainel"',
+              'import { mapearFamiliasVisiveis, selecionarPedidosPainel, selecionarProximaAcaoFamilia } from "@/lib/pedidoComandaPainel"',
+              'import helper',
+          )
+
+          marker = '            let rowBorder = sc.accentBorder'
+          assert s.count(marker) == 1, f"marker ação família: {s.count(marker)}"
+          insert = "\n".join([
+              '            const familiaPermiteAcao = filtro !== "entregue" && filtro !== "cancelado"',
+              '            const alvoAcaoFamilia = familiaSalao && familiaPermiteAcao',
+              '              ? selecionarProximaAcaoFamilia(familiaSalao, filtro)',
+              '              : undefined',
+              '            const alvoNextStatusFamilia = alvoAcaoFamilia',
+              '              ? ((isPedidoDineIn(alvoAcaoFamilia) && alvoAcaoFamilia.status === "em_preparo")',
+              '                  ? "entregue" as Status',
+              '                  : NEXT_STATUS[alvoAcaoFamilia.status])',
+              '              : null',
+              '            const alvoEmEdicaoFamilia = alvoAcaoFamilia ? pedidoEmEdicao(alvoAcaoFamilia) : false',
+              '            const alvoPixPendenteFamilia = !!alvoAcaoFamilia',
+              '              && alvoAcaoFamilia.status === "novo"',
+              '              && (alvoAcaoFamilia.pagamento || "").toLowerCase().includes("pix")',
+              '              && !alvoAcaoFamilia.pixConfirmado',
+              '            const alvoScFamilia = alvoAcaoFamilia ? STATUS_COLOR[alvoAcaoFamilia.status] : null',
+              '            const alvoRotuloFamilia = alvoAcaoFamilia?.rodadaNumero === 1',
+              '              ? "Pedido inicial"',
+              '              : `Complemento ${alvoAcaoFamilia?.rodadaNumero ?? ""}`',
+              '',
+          ])
+          s = s.replace(marker, insert + marker, 1)
+
+          s = replace_once(
+              s,
+              '                      borderRadius: "14px 14px 8px 8px",',
+              '                      borderBottom: "none",\n                      borderRadius: "14px 14px 0 0",',
+              'header radius',
+          )
+          s = replace_once(s, '                      marginBottom: -8,', '                      marginBottom: 0,', 'header gap')
+          s = replace_once(
+              s,
+              '{localFamilia} · {familiaSalao.length} {familiaSalao.length === 1 ? "envio" : "envios"}',
+              '{localFamilia} · {familiaSalao.length} {familiaSalao.length === 1 ? "pedido" : "pedidos"}',
+              'header count',
+          )
+
+          s = replace_once(
+              s,
+              '                  border: `1.5px solid ${isSelected ? sc.accentBorder : rowBorder}`,',
+              '                  border: familiaSalao ? "none" : `1.5px solid ${isSelected ? sc.accentBorder : rowBorder}`,\n                  borderLeft: familiaSalao ? "1.5px solid color-mix(in srgb, var(--primary) 34%, transparent)" : undefined,\n                  borderRight: familiaSalao ? "1.5px solid color-mix(in srgb, var(--primary) 34%, transparent)" : undefined,\n                  borderTop: familiaSalao ? "1px solid var(--surface-secondary)" : undefined,\n                  borderBottom: familiaSalao && (!ultimaDaFamilia || !!alvoAcaoFamilia) ? "none" : (familiaSalao ? "1.5px solid color-mix(in srgb, var(--primary) 34%, transparent)" : undefined),',
+              'family borders',
+          )
+
+          start_token = '                  borderRadius: familiaSalao\n'
+          end_token = '                  marginTop: familiaSalao && !primeiraDaFamilia ? -8 : undefined,\n'
+          assert s.count(start_token) == 1 and s.count(end_token) == 1, 'family radius markers'
+          start = s.index(start_token)
+          end = s.index(end_token, start) + len(end_token)
+          radius_block = "\n".join([
+              '                  borderRadius: familiaSalao',
+              '                    ? (ultimaDaFamilia && !alvoAcaoFamilia ? "0 0 14px 14px" : 0)',
+              '                    : 14,',
+              '                  marginTop: undefined,',
+              '',
+          ])
+          s = s[:start] + radius_block + s[end:]
+
+          s = replace_once(
+              s,
+              '                      {pedido.numero != null && <span style={{ fontSize: 10, fontWeight: 900, color: "var(--border-strong)", flexShrink: 0 }}>#{pedido.numero}</span>}',
+              '                      {!familiaSalao && pedido.numero != null && <span style={{ fontSize: 10, fontWeight: 900, color: "var(--border-strong)", flexShrink: 0 }}>#{pedido.numero}</span>}',
+              'hide order number in family',
+          )
+          s = replace_once(
+              s,
+              '                      <span style={{ fontSize: 14, fontWeight: 900, color: "var(--text-primary)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{firstName}</span>',
+              '                      {familiaSalao ? <span style={{ flex: 1 }} /> : <span style={{ fontSize: 14, fontWeight: 900, color: "var(--text-primary)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{firstName}</span>}',
+              'hide repeated customer',
+          )
+          s = replace_once(s, '{pedido.origem === "painel" && <span', '{!familiaSalao && pedido.origem === "painel" && <span', 'hide panel origin')
+          s = replace_once(s, '{(pedido.origem === "site" || pedido.origem === "app") && <span', '{!familiaSalao && (pedido.origem === "site" || pedido.origem === "app") && <span', 'hide site origin')
+
+          info_start = '                    {/* Linha 2: infos compactas */}\n'
+          info_end = '\n\n                    {/* Aviso de edição em andamento'
+          assert s.count(info_start) == 1 and s.count(info_end) == 1, 'info markers'
+          start = s.index(info_start)
+          end = s.index(info_end, start)
+          info_block = "\n".join([
+              '                    {/* Linha 2: infos compactas */}',
+              '                    {familiaSalao ? (',
+              '                      <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 700, color: "var(--foreground-muted)", marginBottom: 6 }}>',
+              '                        <span style={{ flexShrink: 0 }}>{pedido.itens.length} {pedido.itens.length === 1 ? "item" : "itens"}</span>',
+              '                        <span style={{ color: "var(--border-strong)" }}>·</span>',
+              '                        <span style={{ flexShrink: 0, fontWeight: 900, color: "var(--foreground-secondary)" }}>R${pedido.total.toFixed(2).replace(".", ",")}</span>',
+              '                        <span style={{ flex: 1 }} />',
+              '                        <span style={{ flexShrink: 0, fontWeight: 900, color: timerColor, fontSize: 11 }}>{timerMins}m</span>',
+              '                      </div>',
+              '                    ) : (',
+              '                      <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 700, color: "var(--foreground-muted)", marginBottom: 9 }}>',
+              '                        <span style={{ flexShrink: 0 }}>{isDineIn ? "🍽️" : isRetirada ? "🏪" : "🛵"}</span>',
+              '                        <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--foreground-muted)" }}>{isDineIn ? "No local" : isRetirada ? "Retirada" : (pedido.bairro || pedido.endereco || "—")}</span>',
+              '                        <span style={{ flexShrink: 0, color: "var(--border-strong)" }}>·</span>',
+              '                        <span style={{ flexShrink: 0 }}>{pedido.itens.length}it</span>',
+              '                        <span style={{ flexShrink: 0, color: "var(--border-strong)" }}>·</span>',
+              '                        <span style={{ flexShrink: 0, color: isPix ? "var(--success)" : "var(--foreground-muted)" }}>{isPix ? "Pix" : (pagamento.split(" ")[0] || "—")}</span>',
+              '                        <span style={{ flexShrink: 0, color: "var(--border-strong)" }}>·</span>',
+              '                        <span style={{ flexShrink: 0, fontWeight: 900, color: "var(--foreground-secondary)" }}>R${pedido.total.toFixed(2).replace(".", ",")}</span>',
+              '                        <span style={{ flexShrink: 0, fontWeight: 900, color: timerColor, marginLeft: 2, fontSize: 11 }}>{timerMins}m</span>',
+              '                      </div>',
+              '                    )}',
+          ])
+          s = s[:start] + info_block + s[end:]
+
+          s = replace_once(
+              s,
+              '                    {/* Linha 3: botão de ação */}\n                    <div onClick={e => e.stopPropagation()}>',
+              '                    {/* Linha 3: pedido avulso mantém sua ação; comanda usa um único CTA no rodapé */}\n                    {!familiaSalao && <div onClick={e => e.stopPropagation()}>',
+              'row action open',
+          )
+          close_old = '                      {isCanceled && <span style={{ fontSize: 11, fontWeight: 800, color: "var(--foreground-muted)" }}>✗ Cancelado</span>}\n                    </div>\n                  </div>'
+          close_new = '                      {isCanceled && <span style={{ fontSize: 11, fontWeight: 800, color: "var(--foreground-muted)" }}>✗ Cancelado</span>}\n                    </div>}\n                  </div>'
+          s = replace_once(s, close_old, close_new, 'row action close')
+
+          footer_marker = '              </article>\n              </div>\n            )\n          })}'
+          assert s.count(footer_marker) == 1, f"footer marker: {s.count(footer_marker)}"
+          footer = "\n".join([
+              '              </article>',
+              '              {ultimaDaFamilia && familiaSalao && alvoAcaoFamilia && alvoScFamilia && (',
+              '                <div',
+              '                  onClick={e => e.stopPropagation()}',
+              '                  style={{ display: "flex", justifyContent: "flex-end", padding: "9px 12px 11px", background: "var(--background)", borderLeft: "1.5px solid color-mix(in srgb, var(--primary) 34%, transparent)", borderRight: "1.5px solid color-mix(in srgb, var(--primary) 34%, transparent)", borderBottom: "1.5px solid color-mix(in srgb, var(--primary) 34%, transparent)", borderTop: "1px solid var(--surface-secondary)", borderRadius: "0 0 14px 14px" }}',
+              '                >',
+              '                  {alvoAcaoFamilia.escalonado ? (',
+              '                    <button onClick={() => { assumirConversa(alvoAcaoFamilia.telefone); setCardUrgenciaFechado(true) }} style={{ width: "min(100%, 320px)", height: 34, padding: "0 16px", border: "none", borderRadius: 9, background: "var(--danger)", color: "var(--foreground)", fontSize: 12, fontWeight: 900 }}>🚨 Assumir conversa · {alvoRotuloFamilia}</button>',
+              '                  ) : alvoPixPendenteFamilia ? (',
+              '                    <button onClick={() => abrirVerificacaoPix(alvoAcaoFamilia.id)} style={{ width: "min(100%, 320px)", height: 34, padding: "0 16px", border: "1px solid var(--attention-border)", borderRadius: 9, background: "var(--attention-surface)", color: "var(--attention-text)", fontSize: 12, fontWeight: 900 }}>VERIFICAR PAGAMENTO · {alvoRotuloFamilia}</button>',
+              '                  ) : alvoNextStatusFamilia ? (',
+              '                    <button',
+              '                      onClick={() => {',
+              '                        if (alvoEmEdicaoFamilia) return',
+              '                        if (alvoNextStatusFamilia === "saiu_entrega" && entregadores.length > 0 && alvoAcaoFamilia.tipoEntrega !== "pickup") {',
+              '                          setModalEntrega({ pedidoId: alvoAcaoFamilia.id, proxStatus: alvoNextStatusFamilia })',
+              '                        } else {',
+              '                          avancarStatus(alvoAcaoFamilia.id, alvoNextStatusFamilia)',
+              '                        }',
+              '                      }}',
+              '                      disabled={atualizando === alvoAcaoFamilia.id || alvoEmEdicaoFamilia}',
+              '                      style={{ width: "min(100%, 320px)", height: 34, padding: "0 16px", border: "none", borderRadius: 9, background: alvoEmEdicaoFamilia ? "var(--surface-secondary)" : alvoScFamilia.btnBg, color: alvoEmEdicaoFamilia ? "var(--foreground-muted)" : alvoScFamilia.btnFg, fontSize: 12, fontWeight: 900, opacity: atualizando === alvoAcaoFamilia.id ? 0.6 : 1, cursor: alvoEmEdicaoFamilia ? "not-allowed" : "pointer" }}',
+              '                    >',
+              '                      {atualizando === alvoAcaoFamilia.id ? "Atualizando…" : alvoEmEdicaoFamilia ? `Edição em andamento · ${alvoRotuloFamilia}` : `${getActionLabel(alvoAcaoFamilia)} · ${alvoRotuloFamilia}`}',
+              '                    </button>',
+              '                  ) : null}',
+              '                </div>',
+              '              )}',
+              '              </div>',
+              '            )',
+              '          })}',
+          ])
+          s = s.replace(footer_marker, footer, 1)
+          page.write_text(s)
+
+          test = Path('src/app/pedidos/page.test.ts')
+          t = test.read_text()
+          marcador_teste = 'comanda do Salão como uma unidade operacional visual'
+          assert marcador_teste not in t, 'teste já existe'
+          t += "\n" + "\n".join([
+              'describe("/pedidos — comanda do Salão como uma unidade operacional visual", () => {',
+              '  test("renderiza um único CTA operacional no rodapé da comanda", () => {',
+              '    expect(fonte).toContain("selecionarProximaAcaoFamilia")',
+              '    expect(fonte).toContain("!familiaSalao && <div onClick={e => e.stopPropagation()}>")',
+              '    expect(fonte).toContain("ultimaDaFamilia && familiaSalao && alvoAcaoFamilia && alvoScFamilia")',
+              '  })',
+              '',
+              '  test("o CTA unificado avança somente a rodada-alvo, nunca a família em lote", () => {',
+              '    expect(fonte).toContain("avancarStatus(alvoAcaoFamilia.id, alvoNextStatusFamilia)")',
+              '    expect(fonte).not.toContain("familiaSalao.forEach(avancarStatus")',
+              '    expect(fonte).not.toContain("Promise.all(familiaSalao")',
+              '  })',
+              '',
+              '  test("mantém status, valor, itens e tempo próprios em cada rodada", () => {',
+              '    expect(fonte).toContain("pedido.rodadaNumero === 1 ? \\\"Pedido inicial\\\"")',
+              '    expect(fonte).toContain("R${pedido.total.toFixed(2).replace(\\\".\\\", \\\",\\\")}")',
+              '    expect(fonte).toContain("{timerMins}m")',
+              '  })',
+              '})',
+              '',
+          ])
+          test.write_text(t)
           PY
-          rm -f .tmp-trigger-pedidos-comanda README.tmp-noop .github/workflows/tmp-run-patch-pedidos-comanda-pr.yml
+          rm -f .tmp-trigger-pedidos-comanda README.tmp-noop .github/workflows/tmp-patch-pedidos-comanda-card.yml .github/workflows/tmp-run-patch-pedidos-comanda-pr.yml
       - name: Instalar dependências
         run: npm ci
       - name: Testes focados
