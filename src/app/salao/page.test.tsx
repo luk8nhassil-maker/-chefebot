@@ -21,6 +21,29 @@ const CARDAPIO_TESTE = {
   sucos: [], neighborhoods: [],
 };
 
+const CARDAPIO_PIZZA_OPCIONAIS = {
+  ...CARDAPIO_TESTE,
+  pizzaCatalog: {
+    sizes: [{ id: "pizza-p", code: "P", label: "Pequena", fatias: 4 }],
+    flavors: [{ id: "mussarela", name: "Mussarela", category: "tradicional", ingredients: "", available: true, pricesBySizeCode: { P: 3300 } }],
+    borders: [{ id: "borda-catupiry", label: "Catupiry", available: true, pricesBySizeCode: { P: 500, M: 500, G: 500, F: 500 } }],
+    addOns: [{ id: "add-bacon", label: "Bacon", available: true, pricesBySizeCode: { P: 700, M: 700, G: 700, F: 700 } }],
+  },
+};
+
+const CARDAPIO_PRODUTO_ADICIONAL = {
+  ...CARDAPIO_TESTE,
+  catalog: {
+    lanches: [], hamburgueres: [], calzone: [], pastelForno: [],
+    macarronadas: [{
+      id: "mac-teste", name: "Macarronada Teste", priceCents: 3000, available: true, strategy: "size",
+      sizes: [{ id: "mac-p", code: "P", priceCents: 3000 }],
+      addOnGroup: { max: 1, options: [{ id: "add-ovo", label: "Ovo", priceCents: 500, available: true }] },
+    }],
+    sucos: [], vitaminas: [], bebidas: [],
+  },
+};
+
 type ItemMock = { kind: "simple" | "pizza"; name: string; detail?: string; price: number; qty: number };
 type RodadaMock = {
   id: string; numero: number; status: "rascunho" | "enviando" | "enviada" | "falha_envio";
@@ -49,6 +72,7 @@ let comandas: ComandaMock[] = [];
 let falharProximoEnvio = false;
 let falharProximaListagem = false;
 let enviosCriados = 0;
+let cardapioAtual: unknown = CARDAPIO_TESTE;
 
 function resetMock() {
   seq = 0;
@@ -56,6 +80,7 @@ function resetMock() {
   falharProximoEnvio = false;
   falharProximaListagem = false;
   enviosCriados = 0;
+  cardapioAtual = CARDAPIO_TESTE;
 }
 
 function jsonRes(status: number, body: unknown) {
@@ -66,7 +91,7 @@ async function mockFetch(url: string, opts?: RequestInit): Promise<Response> {
   const method = (opts?.method || "GET").toUpperCase();
   const body = opts?.body ? JSON.parse(String(opts.body)) : {};
 
-  if (url === "/api/cardapio" && method === "GET") return jsonRes(200, CARDAPIO_TESTE);
+  if (url === "/api/cardapio" && method === "GET") return jsonRes(200, cardapioAtual);
   if (url === "/api/salao/logout") return jsonRes(200, { ok: true });
 
   if (url === "/api/salao/comandas" && method === "GET") {
@@ -341,6 +366,73 @@ describe("/salao — escolher produtos e revisar", () => {
     await user.click(screen.getByRole("button", { name: "Escolher produtos" }));
     await screen.findByPlaceholderText("Buscar produto…");
   }
+
+  async function abrirPizzaComSabor(user: ReturnType<typeof userEvent.setup>) {
+    cardapioAtual = CARDAPIO_PIZZA_OPCIONAIS;
+    await iniciarAtendimento(user);
+    await user.click(await screen.findByRole("button", { name: /Pizza Pequena/ }));
+    await user.click(await screen.findByRole("button", { name: /Mussarela/ }));
+    await user.click(screen.getByRole("button", { name: "Continuar para borda" }));
+  }
+
+  it("opcionais perguntam Sim/Não e Não pula borda/adicionais sem exibir listas", async () => {
+    const user = userEvent.setup();
+    await abrirPizzaComSabor(user);
+
+    expect(await screen.findByText("Vai querer borda?")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Catupiry" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Não" }));
+
+    expect(await screen.findByText("Vai querer adicionais?")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Bacon" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Não" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: /Montar Pizza Pequena/ })).not.toBeInTheDocument());
+    expect(await screen.findByText("1 item(ns)")).toBeInTheDocument();
+  });
+
+  it("Sim revela somente as opções reais de borda/adicionais e exige escolha", async () => {
+    const user = userEvent.setup();
+    await abrirPizzaComSabor(user);
+
+    await user.click(await screen.findByRole("button", { name: "Sim" }));
+    expect(await screen.findByRole("button", { name: /Catupiry/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Sem borda" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Continuar para adicionais" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: /Catupiry/ }));
+    await user.click(screen.getByRole("button", { name: "Continuar para adicionais" }));
+
+    expect(await screen.findByText("Vai querer adicionais?")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Sim" }));
+    expect(await screen.findByRole("button", { name: /Bacon/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Adicionar" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: /Bacon/ }));
+    await user.click(screen.getByRole("button", { name: "Adicionar" }));
+
+    expect(await screen.findByText("1 item(ns)")).toBeInTheDocument();
+    expect(screen.getAllByText("R$ 45,00").length).toBeGreaterThan(0);
+  });
+
+  it("adicional opcional único também usa Sim/Não antes de mostrar opções", async () => {
+    const user = userEvent.setup();
+    cardapioAtual = CARDAPIO_PRODUTO_ADICIONAL;
+    await iniciarAtendimento(user);
+    await user.type(screen.getByPlaceholderText("Buscar produto…"), "Macarronada Teste");
+    await user.click(await screen.findByRole("button", { name: /Macarronada Teste/ }));
+    await user.click(await screen.findByRole("button", { name: "Tamanho P" }));
+    await user.click(screen.getByRole("button", { name: "Continuar para adicional" }));
+
+    expect(await screen.findByText("Vai querer adicional?")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Ovo" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Sim" }));
+    expect(await screen.findByRole("button", { name: /Ovo/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Nenhum" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Ovo/ }));
+    await user.click(screen.getByRole("button", { name: "Adicionar" }));
+
+    expect(await screen.findByText("1 item(ns)")).toBeInTheDocument();
+    expect(screen.getAllByText("R$ 35,00").length).toBeGreaterThan(0);
+  });
 
   it("busca filtra produtos e adicionar um produto simples mostra confirmação e atualiza o total", async () => {
     const user = userEvent.setup();
