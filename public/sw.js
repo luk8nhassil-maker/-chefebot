@@ -1,24 +1,77 @@
-const CACHE = "chefebot-v2";
-const OFFLINE = ["/pedidos", "/login"];
+const CACHE_VERSION = "chefebot-pwa-v3";
+const STATIC_CACHE = `${CACHE_VERSION}-static`;
+const OFFLINE_URL = "/offline";
+const PRECACHE_URLS = [
+  OFFLINE_URL,
+  "/manifest.json",
+  "/icon-192.png",
+  "/icon-512.png",
+];
 
-self.addEventListener("install", e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(OFFLINE)));
-  self.skipWaiting();
+self.addEventListener("install", event => {
+  event.waitUntil(
+    caches.open(STATIC_CACHE).then(cache => cache.addAll(PRECACHE_URLS))
+  );
 });
 
-self.addEventListener("activate", e => {
-  e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))));
-  self.clients.claim();
+self.addEventListener("activate", event => {
+  event.waitUntil(
+    caches.keys().then(keys =>
+      Promise.all(
+        keys
+          .filter(key => key.startsWith("chefebot-") && key !== STATIC_CACHE)
+          .map(key => caches.delete(key))
+      )
+    ).then(() => self.clients.claim())
+  );
 });
 
-self.addEventListener("fetch", e => {
-  if (e.request.method !== "GET") return;
-  e.respondWith(fetch(e.request).catch(() => caches.match(e.request)));
+function ehRecursoEstaticoSeguro(url) {
+  return url.pathname.startsWith("/_next/static/") ||
+    url.pathname === "/manifest.json" ||
+    url.pathname === "/icon-192.png" ||
+    url.pathname === "/icon-512.png";
+}
+
+self.addEventListener("fetch", event => {
+  const request = event.request;
+  if (request.method !== "GET") return;
+
+  const url = new URL(request.url);
+  if (url.origin !== self.location.origin) return;
+
+  // Dados operacionais, autenticação, pedidos, Pix e integrações nunca entram
+  // no cache do PWA. O servidor continua sendo sempre a fonte da verdade.
+  if (url.pathname.startsWith("/api/")) return;
+
+  if (request.mode === "navigate") {
+    event.respondWith(
+      fetch(request).catch(async () => {
+        const offline = await caches.match(OFFLINE_URL);
+        return offline || Response.error();
+      })
+    );
+    return;
+  }
+
+  if (!ehRecursoEstaticoSeguro(url)) return;
+
+  event.respondWith(
+    caches.match(request).then(cached => {
+      if (cached) return cached;
+      return fetch(request).then(response => {
+        if (!response || !response.ok) return response;
+        const copia = response.clone();
+        caches.open(STATIC_CACHE).then(cache => cache.put(request, copia));
+        return response;
+      });
+    })
+  );
 });
 
-self.addEventListener("push", e => {
-  const data = e.data?.json() || { title: "Novo pedido! 🍕", body: "Tem pedido novo na fila." };
-  e.waitUntil(
+self.addEventListener("push", event => {
+  const data = event.data?.json() || { title: "Novo pedido! 🍕", body: "Tem pedido novo na fila." };
+  event.waitUntil(
     self.registration.showNotification(data.title, {
       body: data.body,
       icon: "/icon-192.png",
@@ -35,9 +88,9 @@ self.addEventListener("push", e => {
   );
 });
 
-self.addEventListener("notificationclick", e => {
-  e.notification.close();
-  if (e.action === "abrir" || !e.action) {
-    e.waitUntil(clients.openWindow("/pedidos"));
+self.addEventListener("notificationclick", event => {
+  event.notification.close();
+  if (event.action === "abrir" || !event.action) {
+    event.waitUntil(clients.openWindow("/pedidos"));
   }
 });
