@@ -1,0 +1,30 @@
+name: tmp-limpeza-pedidos-teste-ci
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validar:
+    if: ${{ github.head_ref == 'maintenance/limpa-pedidos-teste-20260820' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Teste do critério de limpeza
+        run: npx vitest run src/lib/limpezaPedidosTeste.test.ts
+      - name: Lint do código temporário
+        run: npx eslint src/lib/limpezaPedidosTeste.ts src/lib/limpezaPedidosTeste.test.ts src/app/api/internal/limpeza-pedidos-teste-20260820/route.ts
+      - name: Build de produção
+        run: npm run build
