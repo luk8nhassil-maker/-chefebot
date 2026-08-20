@@ -1,35 +1,319 @@
 
 [1m[30m[46m RUN [49m[39m[22m [36mv4.1.9 [39m[90m/home/runner/work/-chefebot/-chefebot[39m
 
-[31m⎯⎯⎯⎯⎯⎯[39m[1m[41m Unhandled Errors [49m[22m[31m⎯⎯⎯⎯⎯⎯[39m
-[31m[1m
-Vitest caught 1 unhandled error during the test run.
-This might cause false positive tests. Resolve unhandled errors to make sure your tests are not affected.[22m[39m
+ [31m❯[39m src/app/salao/page.test.tsx [2m([22m[2m26 tests[22m[2m | [22m[31m1 failed[39m[2m | [22m[33m25 skipped[39m[2m)[22m[33m 1597[2mms[22m[39m
+     [2m[90m↓[39m[22m mostra o card de novo atendimento quando não há pedido em andamento
+     [2m[90m↓[39m[22m cabeçalho mostra a identificação do terminal, a marca e o botão Sair acessível
+     [2m[90m↓[39m[22m clicar em Sair encerra a sessão (logout) antes de redirecionar
+     [2m[90m↓[39m[22m existe somente UMA navegação principal no DOM — nunca duas (mobile e desktop nunca simultâneos)
+     [2m[90m↓[39m[22m item ativo tem aria-current, e trocar de aba move o aria-current e some com o card de novo atendimento
+     [2m[90m↓[39m[22m badge de Pedidos abertos mostra a quantidade de comandas abertas, sem duplicar
+     [2m[90m↓[39m[22m erro de carregamento mantém o cabeçalho (nunca uma tela branca sem navegação) e permite tentar novamente
+     [2m[90m↓[39m[22m botão 'Escolher produtos' fica desabilitado até preencher o nome, e a mesa é opcional
+     [2m[90m↓[39m[22m 'Sem mesa' desabilita o campo de mesa e permite avançar
+     [2m[90m↓[39m[22m mesa ocupada mostra as três saídas — nunca só um erro técnico
+     [2m[90m↓[39m[22m 'Abrir comanda existente' leva direto para a comanda da mesa ocupada
+     [2m[90m↓[39m[22m opcionais perguntam Sim/Não e Não pula borda/adicionais sem exibir listas
+[31m     [31m×[31m Sim revela opções com emojis e permite mudar de ideia sem ficar preso[39m[33m 1596[2mms[22m[39m
+     [2m[90m↓[39m[22m adicional opcional único também usa Sim/Não antes de mostrar opções
+     [2m[90m↓[39m[22m busca filtra produtos e adicionar um produto simples mostra confirmação e atualiza o total
+     [2m[90m↓[39m[22m não confirma nem exibe item quando o servidor falha ao salvar
+     [2m[90m↓[39m[22m revisão permite aumentar/diminuir/remover item e recalcula o total
+     [2m[90m↓[39m[22m enviar para cozinha mostra 'Enviando…' e depois a tela de sucesso com cliente/mesa/total
+     [2m[90m↓[39m[22m erro ao enviar preserva os itens e oferece 'Tentar novamente' sem duplicar o pedido
+     [2m[90m↓[39m[22m lista mostra cliente em destaque e o estado em linguagem humana, nunca status técnico cru
+     [2m[90m↓[39m[22m abrir a comanda mostra o Pedido inicial no histórico e 'Adicionar itens' cria um Complemento 2 no catálogo
+     [2m[90m↓[39m[22m mostra o estado real e uma orientação objetiva quando o pedido fica pronto
+     [2m[90m↓[39m[22m atualiza o estágio quando o aparelho volta ao foco, sem exigir recarregar a página
+     [2m[90m↓[39m[22m se uma atualização falha, invalida o status antigo em vez de continuar mostrando informação velha como atual
+     [2m[90m↓[39m[22m em uma comanda com vários envios, o pedido pronto sobe como ação mais urgente
+     [2m[90m↓[39m[22m não mente quando a rodada enviada ainda não conseguiu sincronizar com o pedido oficial
 
-[31m⎯⎯⎯⎯⎯⎯[39m[1m[41m Unhandled Error [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
-[31m[1mError[22m: [vitest-pool]: Failed to start forks worker for test files /home/runner/work/-chefebot/-chefebot/src/app/salao/page.test.tsx.[39m
-[90m [2m❯[22m node_modules/vitest/dist/chunks/cli-api.24X8XwN1.js:[2m3465:94[22m[39m
-[90m [2m❯[22m processTicksAndRejections node:internal/process/task_queues:[2m95:5[22m[39m
-[90m [2m❯[22m Pool.schedule node_modules/vitest/dist/chunks/cli-api.24X8XwN1.js:[2m3465:5[22m[39m
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 1 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
 
-[31m[1mCaused by: TypeError[22m: webidl.util.markAsUncloneable is not a function[39m
-[90m [2m❯[22m new CacheStorage node_modules/undici/lib/web/cache/cachestorage.js:[2m20:17[22m[39m
-[90m [2m❯[22m Object.<anonymous> node_modules/undici/index.js:[2m179:25[22m[39m
-[90m [2m❯[22m Module._compile node:internal/modules/cjs/loader:[2m1521:14[22m[39m
-[90m [2m❯[22m Module._extensions..js node:internal/modules/cjs/loader:[2m1623:10[22m[39m
-[90m [2m❯[22m Module.load node:internal/modules/cjs/loader:[2m1266:32[22m[39m
-[90m [2m❯[22m Module._load node:internal/modules/cjs/loader:[2m1091:12[22m[39m
-[90m [2m❯[22m Module.require node:internal/modules/cjs/loader:[2m1289:19[22m[39m
-[90m [2m❯[22m require node:internal/modules/helpers:[2m182:18[22m[39m
-[90m [2m❯[22m Object.<anonymous> node_modules/jsdom/lib/api.js:[2m12:33[22m[39m
-[90m [2m❯[22m Module._compile node:internal/modules/cjs/loader:[2m1521:14[22m[39m
+[41m[1m FAIL [22m[49m src/app/salao/page.test.tsx[2m > [22m/salao — escolher produtos e revisar[2m > [22mSim revela opções com emojis e permite mudar de ideia sem ficar preso
+[31m[1mTestingLibraryElementError[22m[39m: Unable to find role="button" and name `/🧀 Catupiry/`
 
-[31m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[39m
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"sal-shell"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mstyle[39m=[32m"display: flex; align-items: center; justify-content: space-between; padding: 10px 16px 0px;"[39m
+      [36m>[39m
+        [36m<button[39m
+          [33mstyle[39m=[32m"background: none; border: medium; color: var(--foreground-secondary); font-size: 14px; font-weight: 800; cursor: pointer; min-height: 44px;"[39m
+        [36m>[39m
+          [0m‹ Início[0m
+        [36m</button>[39m
+      [36m</div>[39m
+      [36m<div[39m
+        [33mstyle[39m=[32m"padding: 14px 16px; border-bottom: 1px solid var(--surface); flex-shrink: 0; display: flex; flex-direction: column; gap: 2px;"[39m
+      [36m>[39m
+        [36m<span[39m
+          [33mstyle[39m=[32m"font-size: 15px; font-weight: 900; color: var(--foreground); display: flex; align-items: center; gap: 6px;"[39m
+        [36m>[39m
+          [36m<svg[39m
+            [33maria-hidden[39m=[32m"true"[39m
+            [33mclass[39m=[32m"lucide lucide-users"[39m
+            [33mfill[39m=[32m"none"[39m
+            [33mheight[39m=[32m"16"[39m
+            [33mstroke[39m=[32m"currentColor"[39m
+            [33mstroke-linecap[39m=[32m"round"[39m
+            [33mstroke-linejoin[39m=[32m"round"[39m
+            [33mstroke-width[39m=[32m"2"[39m
+            [33mviewBox[39m=[32m"0 0 24 24"[39m
+            [33mwidth[39m=[32m"16"[39m
+            [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+          [36m>[39m
+            [36m<path[39m
+              [33md[39m=[32m"M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"[39m
+            [36m/>[39m
+            [36m<path[39m
+              [33md[39m=[32m"M16 3.128a4 4 0 0 1 0 7.744"[39m
+            [36m/>[39m
+            [36m<path[39m
+              [33md[39m=[32m"M22 21v-2a4 4 0 0 0-3-3.87"[39m
+            [36m/>[39m
+            [36m<circle[39m
+              [33mcx[39m=[32m"9"[39m
+              [33mcy[39m=[32m"7"[39m
+              [33mr[39m=[32m"4"[39m
+            [36m/>[39m
+          [36m</svg>[39m
+          [0m [0m
+          [0mAna[0m
+        [36m</span>[39m
+        [36m<span[39m
+          [33mstyle[39m=[32m"font-size: 12.5px; color: var(--foreground-secondary);"[39m
+        [36m>[39m
+          [0mSem mesa[0m
+          [0m · Comanda #[0m
+          [0m1[0m
+        [36m</span>[39m
+      [36m</div>[39m
+      [36m<div[39m
+        [33mstyle[39m=[32m"flex: 1 1 0%; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px;"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mstyle[39m=[32m"position: relative;"[39m
+        [36m>[39m
+          [36m<svg[39m
+            [33maria-hidden[39m=[32m"true"[39m
+            [33mclass[39m=[32m"lucide lucide-search"[39m
+            [33mfill[39m=[32m"none"[39m
+            [33mheight[39m=[32m"16"[39m
+            [33mstroke[39m=[32m"currentColor"[39m
+            [33mstroke-linecap[39m=[32m"round"[39m
+            [33mstroke-linejoin[39m=[32m"round"[39m
+            [33mstroke-width[39m=[32m"2"[39m
+            [33mstyle[39m=[32m"position: absolute; left: 12px; top: 16px; color: var(--foreground-muted);"[39m
+            [33mviewBox[39m=[32m"0 0 24 24"[39m
+            [33mwidth[39m=[32m"16"[39m
+            [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+          [36m>[39m
+            [36m<path[39m
+              [33md[39m=[32m"m21 21-4.34-4.34"[39m
+            [36m/>[39m
+            [36m<circle[39m
+              [33mcx[39m=[32m"11"[39m
+              [33mcy[39m=[32m"11"[39m
+              [33mr[39m=[32m"8"[39m
+            [36m/>[39m
+          [36m</svg>[39m
+          [36m<input[39m
+            [33maria-label[39m=[32m"Buscar produto"[39m
+            [33mplaceholder[39m=[32m"Buscar produto…"[39m
+            [33mstyle[39m=[32m"width: 100%; height: 48px; background: var(--background); border: 1px solid var(--surface-secondary); border-radius: 10px; color: var(--foreground); font-size: 15px; font-weight: 600; font-family: \"Archivo\", sans-serif; outline: none; box-sizing: border-box; padding: 0px 14px 0px 36px;"[39m
+            [33mvalue[39m=[32m""[39m
+          [36m/>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mstyle[39m=[32m"display: flex; gap: 6px; overflow-x: auto;"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33mstyle[39m=[32m"height: 40px; padding: 0px 14px; flex-shrink: 0; border-radius: 12px; font-family: \"Archivo\", sans-serif; cursor: pointer; border: 1px solid var(--primary); background: color-mix(in srgb, var(--primary) 15%, transparent); color: var(--foreground); font-size: 13px;"[39m
+          [36m>[39m
+            [0mPizzas[0m
+          [36m</button>[39m
+          [36m<button[39m
+            [33mstyle[39m=[32m"height: 40px; padding: 0px 14px; flex-shrink: 0; border-radius: 12px; font-family: \"Archivo\", sans-serif; cursor: pointer; border: 1px solid var(--surface-secondary); background: transparent; color: var(--foreground); font-size: 13px;"[39m
+          [36m>[39m
+            [0mCalzone[0m
+          [36m</button>[39m
+          [36m<button[39m
+            [33mstyle[39m=[32m"height: 40px; padding: 0px 14px; flex-shrink: 0; border-radius: 12px; font-family: \"Archivo\", sans-serif; cursor: pointer; border: 1px solid var(--surface-secondary); background: transparent; color: var(--foreground); font-size: 13px;"[39m
+          [36m>[39m
+            [0mPastel de Forno[0m
+          [36m</button>[39m
+          [36m<button[39m
+            [33mstyle[39m=[32m"height: 40px; padding: 0px 14px; flex-shrink: 0; border-radius: 12px; font-family: \"Archivo\", sans-serif; cursor: pointer; border: 1px solid var(--surface-secondary); background: transparent; color: var(--foreground); font-size: 13px;"[39m
+          [36m>[39m
+            [0mLanches[0m
+          [36m</button>[39m
+          [36m<button[39m
+            [33mstyle[39m=[32m"height: 40px; padding: 0px 14px; flex-shrink: 0; border-radius: 12px; font-family: \"Archivo\", sans-serif; cursor: pointer; border: 1px solid var(--surface-secondary); background: transparent; color: var(--foreground); font-size: 13px;"[39m
+          [36m>[39m
+            [0mHambúrguer[0m
+          [36m</button>[39m
+          [36m<button[39m
+            [33mstyle[39m=[32m"height: 40px; padding: 0px 14px; flex-shrink: 0; border-radius: 12px; font-family: \"Archivo\", sans-serif; cursor: pointer; border: 1px solid var(--surface-secondary); background: transparent; color: var(--foreground); font-size: 13px;"[39m
+          [36m>[39m
+            [0mMacarronada[0m
+          [36m</button>[39m
+          [36m<button[39m
+            [33mstyle[39m=[32m"height: 40px; padding: 0px 14px; flex-shrink: 0; border-radius: 12p...
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<div[39m
+      [33mclass[39m=[32m"sal-shell"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33mstyle[39m=[32m"display: flex; align-items: center; justify-content: space-between; padding: 10px 16px 0px;"[39m
+      [36m>[39m
+        [36m<button[39m
+          [33mstyle[39m=[32m"background: none; border: medium; color: var(--foreground-secondary); font-size: 14px; font-weight: 800; cursor: pointer; min-height: 44px;"[39m
+        [36m>[39m
+          [0m‹ Início[0m
+        [36m</button>[39m
+      [36m</div>[39m
+      [36m<div[39m
+        [33mstyle[39m=[32m"padding: 14px 16px; border-bottom: 1px solid var(--surface); flex-shrink: 0; display: flex; flex-direction: column; gap: 2px;"[39m
+      [36m>[39m
+        [36m<span[39m
+          [33mstyle[39m=[32m"font-size: 15px; font-weight: 900; color: var(--foreground); display: flex; align-items: center; gap: 6px;"[39m
+        [36m>[39m
+          [36m<svg[39m
+            [33maria-hidden[39m=[32m"true"[39m
+            [33mclass[39m=[32m"lucide lucide-users"[39m
+            [33mfill[39m=[32m"none"[39m
+            [33mheight[39m=[32m"16"[39m
+            [33mstroke[39m=[32m"currentColor"[39m
+            [33mstroke-linecap[39m=[32m"round"[39m
+            [33mstroke-linejoin[39m=[32m"round"[39m
+            [33mstroke-width[39m=[32m"2"[39m
+            [33mviewBox[39m=[32m"0 0 24 24"[39m
+            [33mwidth[39m=[32m"16"[39m
+            [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+          [36m>[39m
+            [36m<path[39m
+              [33md[39m=[32m"M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"[39m
+            [36m/>[39m
+            [36m<path[39m
+              [33md[39m=[32m"M16 3.128a4 4 0 0 1 0 7.744"[39m
+            [36m/>[39m
+            [36m<path[39m
+              [33md[39m=[32m"M22 21v-2a4 4 0 0 0-3-3.87"[39m
+            [36m/>[39m
+            [36m<circle[39m
+              [33mcx[39m=[32m"9"[39m
+              [33mcy[39m=[32m"7"[39m
+              [33mr[39m=[32m"4"[39m
+            [36m/>[39m
+          [36m</svg>[39m
+          [0m [0m
+          [0mAna[0m
+        [36m</span>[39m
+        [36m<span[39m
+          [33mstyle[39m=[32m"font-size: 12.5px; color: var(--foreground-secondary);"[39m
+        [36m>[39m
+          [0mSem mesa[0m
+          [0m · Comanda #[0m
+          [0m1[0m
+        [36m</span>[39m
+      [36m</div>[39m
+      [36m<div[39m
+        [33mstyle[39m=[32m"flex: 1 1 0%; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px;"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mstyle[39m=[32m"position: relative;"[39m
+        [36m>[39m
+          [36m<svg[39m
+            [33maria-hidden[39m=[32m"true"[39m
+            [33mclass[39m=[32m"lucide lucide-search"[39m
+            [33mfill[39m=[32m"none"[39m
+            [33mheight[39m=[32m"16"[39m
+            [33mstroke[39m=[32m"currentColor"[39m
+            [33mstroke-linecap[39m=[32m"round"[39m
+            [33mstroke-linejoin[39m=[32m"round"[39m
+            [33mstroke-width[39m=[32m"2"[39m
+            [33mstyle[39m=[32m"position: absolute; left: 12px; top: 16px; color: var(--foreground-muted);"[39m
+            [33mviewBox[39m=[32m"0 0 24 24"[39m
+            [33mwidth[39m=[32m"16"[39m
+            [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+          [36m>[39m
+            [36m<path[39m
+              [33md[39m=[32m"m21 21-4.34-4.34"[39m
+            [36m/>[39m
+            [36m<circle[39m
+              [33mcx[39m=[32m"11"[39m
+              [33mcy[39m=[32m"11"[39m
+              [33mr[39m=[32m"8"[39m
+            [36m/>[39m
+          [36m</svg>[39m
+          [36m<input[39m
+            [33maria-label[39m=[32m"Buscar produto"[39m
+            [33mplaceholder[39m=[32m"Buscar produto…"[39m
+            [33mstyle[39m=[32m"width: 100%; height: 48px; background: var(--background); border: 1px solid var(--surface-secondary); border-radius: 10px; color: var(--foreground); font-size: 15px; font-weight: 600; font-family: \"Archivo\", sans-serif; outline: none; box-sizing: border-box; padding: 0px 14px 0px 36px;"[39m
+            [33mvalue[39m=[32m""[39m
+          [36m/>[39m
+        [36m</div>[39m
+        [36m<div[39m
+          [33mstyle[39m=[32m"display: flex; gap: 6px; overflow-x: auto;"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33mstyle[39m=[32m"height: 40px; padding: 0px 14px; flex-shrink: 0; border-radius: 12px; font-family: \"Archivo\", sans-serif; cursor: pointer; border: 1px solid var(--primary); background: color-mix(in srgb, var(--primary) 15%, transparent); color: var(--foreground); font-size: 13px;"[39m
+          [36m>[39m
+            [0mPizzas[0m
+          [36m</button>[39m
+          [36m<button[39m
+            [33mstyle[39m=[32m"height: 40px; padding: 0px 14px; flex-shrink: 0; border-radius: 12px; font-family: \"Archivo\", sans-serif; cursor: pointer; border: 1px solid var(--surface-secondary); background: transparent; color: var(--foreground); font-size: 13px;"[39m
+          [36m>[39m
+            [0mCalzone[0m
+          [36m</button>[39m
+          [36m<button[39m
+            [33mstyle[39m=[32m"height: 40px; padding: 0px 14px; flex-shrink: 0; border-radius: 12px; font-family: \"Archivo\", sans-serif; cursor: pointer; border: 1px solid var(--surface-secondary); background: transparent; color: var(--foreground); font-size: 13px;"[39m
+          [36m>[39m
+            [0mPastel de Forno[0m
+          [36m</button>[39m
+          [36m<button[39m
+            [33mstyle[39m=[32m"height: 40px; padding: 0px 14px; flex-shrink: 0; border-radius: 12px; font-family: \"Archivo\", sans-serif; cursor: pointer; border: 1px solid var(--surface-secondary); background: transparent; color: var(--foreground); font-size: 13px;"[39m
+          [36m>[39m
+            [0mLanches[0m
+          [36m</button>[39m
+          [36m<button[39m
+            [33mstyle[39m=[32m"height: 40px; padding: 0px 14px; flex-shrink: 0; border-radius: 12px; font-family: \"Archivo\", sans-serif; cursor: pointer; border: 1px solid var(--surface-secondary); background: transparent; color: var(--foreground); font-size: 13px;"[39m
+          [36m>[39m
+            [0mHambúrguer[0m
+          [36m</button>[39m
+          [36m<button[39m
+            [33mstyle[39m=[32m"height: 40px; padding: 0px 14px; flex-shrink: 0; border-radius: 12px; font-family: \"Archivo\", sans-serif; cursor: pointer; border: 1px solid var(--surface-secondary); background: transparent; color: var(--foreground); font-size: 13px;"[39m
+          [36m>[39m
+            [0mMacarronada[0m
+          [36m</button>[39m
+          [36m<button[39m
+            [33mstyle[39m=[32m"height: 40px; padding: 0px 14px; flex-shrink: 0; border-radius: 12p...
+[90m [2m❯[22m waitForWrapper node_modules/@testing-library/dom/dist/wait-for.js:[2m163:27[22m[39m
+[90m [2m❯[22m node_modules/@testing-library/dom/dist/query-helpers.js:[2m86:33[22m[39m
+[36m [2m❯[22m src/app/salao/page.test.tsx:[2m409:25[22m[39m
+    [90m407|[39m
+    [90m408|[39m     await user.click(await screen.findByRole("button", { name: "Sim" }…
+    [90m409|[39m     expect(await screen.findByRole("button", { name: /🧀 Catupiry/ }))…
+    [90m   |[39m                         [31m^[39m
+    [90m410|[39m     [35mconst[39m semBorda [33m=[39m screen[33m.[39m[34mgetByRole[39m([32m"button"[39m[33m,[39m { name[33m:[39m [32m"Sem borda"[39m })[33m;[39m
+    [90m411|[39m     [34mexpect[39m(semBorda)[33m.[39m[34mtoBeEnabled[39m()[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯[22m[39m
 
 
-[2m Test Files [22m [2mno tests[22m
-[2m      Tests [22m [2mno tests[22m
-[2m     Errors [22m [1m[31m1 error[39m[22m
-[2m   Start at [22m 15:14:01
-[2m   Duration [22m 243ms[2m (transform 0ms, setup 0ms, import 0ms, tests 0ms, environment 0ms)[22m
+[2m Test Files [22m [1m[31m1 failed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[31m1 failed[39m[22m[2m | [22m[33m25 skipped[39m[90m (26)[39m
+[2m   Start at [22m 15:16:15
+[2m   Duration [22m 2.96s[2m (transform 290ms, setup 137ms, import 445ms, tests 1.60s, environment 637ms)[22m
 
+
+::error file=/home/runner/work/-chefebot/-chefebot/src/app/salao/page.test.tsx,title=src/app/salao/page.test.tsx > /salao — escolher produtos e revisar > Sim revela opções com emojis e permite mudar de ideia sem ficar preso,line=409,column=25::TestingLibraryElementError: Unable to find role="button" and name `/🧀 Catupiry/`%0A%0AIgnored nodes: comments, script, style%0A<body>%0A  <div>%0A    <div%0A      class="sal-shell"%0A    >%0A      <div%0A        style="display: flex; align-items: center; justify-content: space-between; padding: 10px 16px 0px;"%0A      >%0A        <button%0A          style="background: none; border: medium; color: var(--foreground-secondary); font-size: 14px; font-weight: 800; cursor: pointer; min-height: 44px;"%0A        >%0A          ‹ Início%0A        </button>%0A      </div>%0A      <div%0A        style="padding: 14px 16px; border-bottom: 1px solid var(--surface); flex-shrink: 0; display: flex; flex-direction: column; gap: 2px;"%0A      >%0A        <span%0A          style="font-size: 15px; font-weight: 900; color: var(--foreground); display: flex; align-items: center; gap: 6px;"%0A        >%0A          <svg%0A            aria-hidden="true"%0A            class="lucide lucide-users"%0A            fill="none"%0A            height="16"%0A            stroke="currentColor"%0A            stroke-linecap="round"%0A            stroke-linejoin="round"%0A            stroke-width="2"%0A            viewBox="0 0 24 24"%0A            width="16"%0A            xmlns="http://www.w3.org/2000/svg"%0A          >%0A            <path%0A              d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"%0A            />%0A            <path%0A              d="M16 3.128a4 4 0 0 1 0 7.744"%0A            />%0A            <path%0A              d="M22 21v-2a4 4 0 0 0-3-3.87"%0A            />%0A            <circle%0A              cx="9"%0A              cy="7"%0A              r="4"%0A            />%0A          </svg>%0A           %0A          Ana%0A        </span>%0A        <span%0A          style="font-size: 12.5px; color: var(--foreground-secondary);"%0A        >%0A          Sem mesa%0A           · Comanda #%0A          1%0A        </span>%0A      </div>%0A      <div%0A        style="flex: 1 1 0%25; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px;"%0A      >%0A        <div%0A          style="position: relative;"%0A        >%0A          <svg%0A            aria-hidden="true"%0A            class="lucide lucide-search"%0A            fill="none"%0A            height="16"%0A            stroke="currentColor"%0A            stroke-linecap="round"%0A            stroke-linejoin="round"%0A            stroke-width="2"%0A            style="position: absolute; left: 12px; top: 16px; color: var(--foreground-muted);"%0A            viewBox="0 0 24 24"%0A            width="16"%0A            xmlns="http://www.w3.org/2000/svg"%0A          >%0A            <path%0A              d="m21 21-4.34-4.34"%0A            />%0A            <circle%0A              cx="11"%0A              cy="11"%0A              r="8"%0A            />%0A          </svg>%0A          <input%0A            aria-label="Buscar produto"%0A            placeholder="Buscar produto…"%0A            style="width: 100%25; height: 48px; background: var(--background); border: 1px solid var(--surface-secondary); border-radius: 10px; color: var(--foreground); font-size: 15px; font-weight: 600; font-family: \"Archivo\", sans-serif; outline: none; box-sizing: border-box; padding: 0px 14px 0px 36px;"%0A            value=""%0A          />%0A        </div>%0A        <div%0A          style="display: flex; gap: 6px; overflow-x: auto;"%0A        >%0A          <button%0A            style="height: 40px; padding: 0px 14px; flex-shrink: 0; border-radius: 12px; font-family: \"Archivo\", sans-serif; cursor: pointer; border: 1px solid var(--primary); background: color-mix(in srgb, var(--primary) 15%25, transparent); color: var(--foreground); font-size: 13px;"%0A          >%0A            Pizzas%0A          </button>%0A          <button%0A            style="height: 40px; padding: 0px 14px; flex-shrink: 0; border-radius: 12px; font-family: \"Archivo\", sans-serif; cursor: pointer; border: 1px solid var(--surface-secondary); background: transparent; color: var(--foreground); font-size: 13px;"%0A          >%0A            Calzone%0A          </button>%0A          <button%0A            style="height: 40px; padding: 0px 14px; flex-shrink: 0; border-radius: 12px; font-family: \"Archivo\", sans-serif; cursor: pointer; border: 1px solid var(--surface-secondary); background: transparent; color: var(--foreground); font-size: 13px;"%0A          >%0A            Pastel de Forno%0A          </button>%0A          <button%0A            style="height: 40px; padding: 0px 14px; flex-shrink: 0; border-radius: 12px; font-family: \"Archivo\", sans-serif; cursor: pointer; border: 1px solid var(--surface-secondary); background: transparent; color: var(--foreground); font-size: 13px;"%0A          >%0A            Lanches%0A          </button>%0A          <button%0A            style="height: 40px; padding: 0px 14px; flex-shrink: 0; border-radius: 12px; font-family: \"Archivo\", sans-serif; cursor: pointer; border: 1px solid var(--surface-secondary); background: transparent; color: var(--foreground); font-size: 13px;"%0A          >%0A            Hambúrguer%0A          </button>%0A          <button%0A            style="height: 40px; padding: 0px 14px; flex-shrink: 0; border-radius: 12px; font-family: \"Archivo\", sans-serif; cursor: pointer; border: 1px solid var(--surface-secondary); background: transparent; color: var(--foreground); font-size: 13px;"%0A          >%0A            Macarronada%0A          </button>%0A          <button%0A            style="height: 40px; padding: 0px 14px; flex-shrink: 0; border-radius: 12p...%0A%0AIgnored nodes: comments, script, style%0A<body>%0A  <div>%0A    <div%0A      class="sal-shell"%0A    >%0A      <div%0A        style="display: flex; align-items: center; justify-content: space-between; padding: 10px 16px 0px;"%0A      >%0A        <button%0A          style="background: none; border: medium; color: var(--foreground-secondary); font-size: 14px; font-weight: 800; cursor: pointer; min-height: 44px;"%0A        >%0A          ‹ Início%0A        </button>%0A      </div>%0A      <div%0A        style="padding: 14px 16px; border-bottom: 1px solid var(--surface); flex-shrink: 0; display: flex; flex-direction: column; gap: 2px;"%0A      >%0A        <span%0A          style="font-size: 15px; font-weight: 900; color: var(--foreground); display: flex; align-items: center; gap: 6px;"%0A        >%0A          <svg%0A            aria-hidden="true"%0A            class="lucide lucide-users"%0A            fill="none"%0A            height="16"%0A            stroke="currentColor"%0A            stroke-linecap="round"%0A            stroke-linejoin="round"%0A            stroke-width="2"%0A            viewBox="0 0 24 24"%0A            width="16"%0A            xmlns="http://www.w3.org/2000/svg"%0A          >%0A            <path%0A              d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"%0A            />%0A            <path%0A              d="M16 3.128a4 4 0 0 1 0 7.744"%0A            />%0A            <path%0A              d="M22 21v-2a4 4 0 0 0-3-3.87"%0A            />%0A            <circle%0A              cx="9"%0A              cy="7"%0A              r="4"%0A            />%0A          </svg>%0A           %0A          Ana%0A        </span>%0A        <span%0A          style="font-size: 12.5px; color: var(--foreground-secondary);"%0A        >%0A          Sem mesa%0A           · Comanda #%0A          1%0A        </span>%0A      </div>%0A      <div%0A        style="flex: 1 1 0%25; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px;"%0A      >%0A        <div%0A          style="position: relative;"%0A        >%0A          <svg%0A            aria-hidden="true"%0A            class="lucide lucide-search"%0A            fill="none"%0A            height="16"%0A            stroke="currentColor"%0A            stroke-linecap="round"%0A            stroke-linejoin="round"%0A            stroke-width="2"%0A            style="position: absolute; left: 12px; top: 16px; color: var(--foreground-muted);"%0A            viewBox="0 0 24 24"%0A            width="16"%0A            xmlns="http://www.w3.org/2000/svg"%0A          >%0A            <path%0A              d="m21 21-4.34-4.34"%0A            />%0A            <circle%0A              cx="11"%0A              cy="11"%0A              r="8"%0A            />%0A          </svg>%0A          <input%0A            aria-label="Buscar produto"%0A            placeholder="Buscar produto…"%0A            style="width: 100%25; height: 48px; background: var(--background); border: 1px solid var(--surface-secondary); border-radius: 10px; color: var(--foreground); font-size: 15px; font-weight: 600; font-family: \"Archivo\", sans-serif; outline: none; box-sizing: border-box; padding: 0px 14px 0px 36px;"%0A            value=""%0A          />%0A        </div>%0A        <div%0A          style="display: flex; gap: 6px; overflow-x: auto;"%0A        >%0A          <button%0A            style="height: 40px; padding: 0px 14px; flex-shrink: 0; border-radius: 12px; font-family: \"Archivo\", sans-serif; cursor: pointer; border: 1px solid var(--primary); background: color-mix(in srgb, var(--primary) 15%25, transparent); color: var(--foreground); font-size: 13px;"%0A          >%0A            Pizzas%0A          </button>%0A          <button%0A            style="height: 40px; padding: 0px 14px; flex-shrink: 0; border-radius: 12px; font-family: \"Archivo\", sans-serif; cursor: pointer; border: 1px solid var(--surface-secondary); background: transparent; color: var(--foreground); font-size: 13px;"%0A          >%0A            Calzone%0A          </button>%0A          <button%0A            style="height: 40px; padding: 0px 14px; flex-shrink: 0; border-radius: 12px; font-family: \"Archivo\", sans-serif; cursor: pointer; border: 1px solid var(--surface-secondary); background: transparent; color: var(--foreground); font-size: 13px;"%0A          >%0A            Pastel de Forno%0A          </button>%0A          <button%0A            style="height: 40px; padding: 0px 14px; flex-shrink: 0; border-radius: 12px; font-family: \"Archivo\", sans-serif; cursor: pointer; border: 1px solid var(--surface-secondary); background: transparent; color: var(--foreground); font-size: 13px;"%0A          >%0A            Lanches%0A          </button>%0A          <button%0A            style="height: 40px; padding: 0px 14px; flex-shrink: 0; border-radius: 12px; font-family: \"Archivo\", sans-serif; cursor: pointer; border: 1px solid var(--surface-secondary); background: transparent; color: var(--foreground); font-size: 13px;"%0A          >%0A            Hambúrguer%0A          </button>%0A          <button%0A            style="height: 40px; padding: 0px 14px; flex-shrink: 0; border-radius: 12px; font-family: \"Archivo\", sans-serif; cursor: pointer; border: 1px solid var(--surface-secondary); background: transparent; color: var(--foreground); font-size: 13px;"%0A          >%0A            Macarronada%0A          </button>%0A          <button%0A            style="height: 40px; padding: 0px 14px; flex-shrink: 0; border-radius: 12p...%0A ❯ waitForWrapper node_modules/@testing-library/dom/dist/wait-for.js:163:27%0A ❯ node_modules/@testing-library/dom/dist/query-helpers.js:86:33%0A ❯ src/app/salao/page.test.tsx:409:25%0A%0A
