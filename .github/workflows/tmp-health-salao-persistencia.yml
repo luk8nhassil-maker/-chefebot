@@ -1,0 +1,28 @@
+name: tmp-health-salao-persistencia
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/tmp-health-salao-persistencia.yml
+
+permissions:
+  contents: read
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Health check somente leitura
+        shell: bash
+        run: |
+          set -euo pipefail
+          root_code=$(curl -sS -L -o /tmp/root.html -w '%{http_code}' --max-time 30 https://chefedapizza.com.br/)
+          salao_code=$(curl -sS -L -o /tmp/salao.html -w '%{http_code}' --max-time 30 https://chefedapizza.com.br/salao)
+          assinatura=$(curl -sS -o /tmp/assinatura.json -w '%{http_code}' --max-time 30 https://chefedapizza.com.br/api/assinatura/operacao)
+          echo "root=$root_code salao=$salao_code assinatura=$assinatura"
+          test "$root_code" = "200"
+          test "$salao_code" = "200"
+          test "$assinatura" = "200"
+          grep -q '"blocked":false' /tmp/assinatura.json
