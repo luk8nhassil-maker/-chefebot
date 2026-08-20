@@ -65,6 +65,10 @@ function correspondeFiltro(p: PedidoAgrupavelPainel, filtro: FiltroPedidosPainel
 function correspondeBusca(p: PedidoAgrupavelPainel, buscaNorm: string): boolean {
   if (!buscaNorm) return true;
   const buscaDigitos = buscaNorm.replace(/\D/g, "");
+  // Telefone só participa quando a consulta realmente parece um telefone.
+  // Assim "comanda 9" ou "mesa 4" nunca trazem um Delivery só porque o
+  // telefone dele contém o mesmo algarismo.
+  const buscaEhTelefone = buscaDigitos.length >= 4 && !/[a-zà-ÿ]/i.test(buscaNorm) && !buscaNorm.startsWith("#");
   const numeroPedido = String(p.numero ?? "");
   const numeroComanda = String(p.comandaNumero ?? "");
   const status = STATUS_BUSCA[p.status] || p.status;
@@ -73,7 +77,7 @@ function correspondeBusca(p: PedidoAgrupavelPainel, buscaNorm: string): boolean 
 
   return (
     p.cliente.toLowerCase().includes(buscaNorm) ||
-    (!!buscaDigitos && p.telefone.replace(/\D/g, "").includes(buscaDigitos)) ||
+    (buscaEhTelefone && p.telefone.replace(/\D/g, "").includes(buscaDigitos)) ||
     (p.bairro || "").toLowerCase().includes(buscaNorm) ||
     numeroPedido.includes(buscaNorm) ||
     numeroComanda.includes(buscaNorm) ||
