@@ -99,7 +99,7 @@ jobs:
             src/lib/pedidoComandaPainel.server.test.ts
           )
 
-          git diff --unified=0 "$base_sha"...HEAD -- "${arquivos[@]}" > /tmp/changed.patch
+          git diff --unified=0 "$base_sha" HEAD -- "${arquivos[@]}" > /tmp/changed.patch
           set +e
           ./node_modules/.bin/eslint "${arquivos[@]}" -f json > /tmp/eslint.json
           set -e
