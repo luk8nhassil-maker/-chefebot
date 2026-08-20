@@ -1,0 +1,251 @@
+name: tmp-opcionais-ui-patch
+
+on:
+  push:
+    branches:
+      - feat/opcionais-sem-saida-emojis
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-commit:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/opcionais-sem-saida-emojis
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Aplicar patch mínimo
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          def replace_once(path: str, old: str, new: str):
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: esperado 1 trecho, encontrado {count}: {old[:120]!r}")
+              p.write_text(text.replace(old, new, 1))
+
+          def sub_once(path: str, pattern: str, repl: str):
+              p = Path(path)
+              text = p.read_text()
+              new, count = re.subn(pattern, repl, text, count=1, flags=re.S)
+              if count != 1:
+                  raise SystemExit(f"{path}: regex deveria casar 1 vez, casou {count}: {pattern[:120]!r}")
+              p.write_text(new)
+
+          # -----------------------------------------------------------------
+          # SALÃO: preserva Sim/Não, elimina beco sem saída após o Sim e
+          # acrescenta emojis vindos da mesma linguagem visual do cardápio.
+          # -----------------------------------------------------------------
+          salao = "src/app/salao/page.tsx"
+          replace_once(
+              salao,
+              'const FONT = "\'Archivo\', sans-serif"\n',
+              '''const FONT = "'Archivo', sans-serif"\nconst EMOJI_CATEGORIA_PEDIDO: Record<CategoriaManual, string> = {\n  pizza: "🍕",\n  calzone: "🥟",\n  pastelForno: "🥟",\n  lanches: "🍔",\n  hamburgueres: "🍔",\n  macarronada: "🍝",\n  bebidas: "🥤",\n  sucos: "🧃",\n  vitaminas: "🥛",\n}\n\nfunction emojiOpcaoMontagem(tipo: string | undefined, categoria: CategoriaManual): string {\n  if (tipo === "borda") return "🧀"\n  if (tipo === "adicionais" || tipo === "adicional_opcional") return "➕"\n  if (tipo === "leite") return "🥛"\n  return EMOJI_CATEGORIA_PEDIDO[categoria]\n}\n'''
+          )
+
+          sub_once(
+              salao,
+              r'  const bloqueioOpcional = mostrarPerguntaOpcional.*?  const perguntaOpcional = etapaAtual\?\.tipo === "borda"',
+              '''  const bloqueio = mostrarPerguntaOpcional ? null : motivoBloqueio(etapaAtual, selecao)\n  const opcionalTemSelecao = etapaAtual?.tipo === "borda"\n    ? !!selecao.borda\n    : etapaAtual?.tipo === "adicionais"\n      ? (selecao.adicionais?.length ?? 0) > 0\n      : etapaAtual?.tipo === "adicional_opcional"\n        ? !!selecao.adicionalOpcional\n        : false\n  const rotuloCtaOpcional = etapaAtual?.tipo === "borda"\n    ? (opcionalTemSelecao ? "Continuar" : "Sem borda")\n    : etapaAtual?.tipo === "adicionais"\n      ? (opcionalTemSelecao ? "Continuar" : "Sem adicionais")\n      : etapaAtual?.tipo === "adicional_opcional"\n        ? (opcionalTemSelecao ? "Continuar" : "Sem adicional")\n        : "Continuar"\n  const perguntaOpcional = etapaAtual?.tipo === "borda"'''
+          )
+
+          replace_once(
+              salao,
+              '''  function avancarEtapa() {\n    if (!etapaAtual || mostrarPerguntaOpcional || bloqueio) return\n    if (!etapaOpcional && !etapaSatisfeita(etapaAtual, selecao)) return\n    if (etapaVisivel < etapas.length - 1) {\n      setEtapaVisivel(etapaVisivel + 1)\n      return\n    }\n    finalizarMontagem(selecao)\n  }\n''',
+              '''  function normalizarOpcionalSemEscolha(atual: SelecaoMontagem): SelecaoMontagem {\n    if (!etapaAtual || !etapaOpcional) return atual\n    if (etapaAtual.tipo === "borda" && !atual.borda) return { ...atual, borda: null }\n    if (etapaAtual.tipo === "adicionais" && (atual.adicionais?.length ?? 0) === 0) return { ...atual, adicionais: [] }\n    if (etapaAtual.tipo === "adicional_opcional" && !atual.adicionalOpcional) return { ...atual, adicionalOpcional: null }\n    return atual\n  }\n\n  function avancarEtapa() {\n    if (!etapaAtual || mostrarPerguntaOpcional || bloqueio) return\n    if (!etapaOpcional && !etapaSatisfeita(etapaAtual, selecao)) return\n    const selecaoFinal = etapaOpcional ? normalizarOpcionalSemEscolha(selecao) : selecao\n    if (selecaoFinal !== selecao) setSelecao(selecaoFinal)\n    if (etapaVisivel < etapas.length - 1) {\n      setEtapaVisivel(etapaVisivel + 1)\n      return\n    }\n    finalizarMontagem(selecaoFinal)\n  }\n'''
+          )
+
+          replace_once(
+              salao,
+              '              {c.label}\n            </button>',
+              '              {EMOJI_CATEGORIA_PEDIDO[c.id]} {c.label}\n            </button>'
+          )
+          replace_once(
+              salao,
+              '<span style={{ fontSize: 14, fontWeight: 800, color: "var(--foreground)" }}>{p.nome}{p.esgotado ? " · esgotado" : ""}</span>',
+              '<span style={{ fontSize: 14, fontWeight: 800, color: "var(--foreground)" }}>{EMOJI_CATEGORIA_PEDIDO[p.categoria]} {p.nome}{p.esgotado ? " · esgotado" : ""}</span>'
+          )
+          replace_once(
+              salao,
+              '<span style={{ fontSize: 14, fontWeight: 800, color: "var(--foreground)" }}>{o.label}{o.esgotado ? " · esgotado" : ""}</span>',
+              '<span style={{ fontSize: 14, fontWeight: 800, color: "var(--foreground)" }}>{emojiOpcaoMontagem(etapaAtual.tipo, produtoAberto.categoria)} {o.label}{o.esgotado ? " · esgotado" : ""}</span>'
+          )
+          replace_once(
+              salao,
+              '{etapaVisivel < etapas.length - 1 ? `Continuar para ${etapas[etapaVisivel + 1].titulo.toLowerCase()}` : "Adicionar"}',
+              '{etapaOpcional ? rotuloCtaOpcional : etapaVisivel < etapas.length - 1 ? `Continuar para ${etapas[etapaVisivel + 1].titulo.toLowerCase()}` : "Adicionar"}'
+          )
+
+          # Atualiza testes de interação do Salão para provar a mudança de ideia.
+          salao_test = "src/app/salao/page.test.tsx"
+          replace_once(
+              salao_test,
+              '  it("Sim revela somente as opções reais de borda/adicionais e exige escolha", async () => {',
+              '  it("Sim revela as opções e permite continuar sem marcar nada se a pessoa mudar de ideia", async () => {'
+          )
+          replace_once(
+              salao_test,
+              '''    expect(await screen.findByRole("button", { name: /Catupiry/ })).toBeInTheDocument();\n    expect(screen.queryByRole("button", { name: "Sem borda" })).not.toBeInTheDocument();\n    expect(screen.getByRole("button", { name: "Continuar para adicionais" })).toBeDisabled();\n    await user.click(screen.getByRole("button", { name: /Catupiry/ }));\n    await user.click(screen.getByRole("button", { name: "Continuar para adicionais" }));\n\n    expect(await screen.findByText("Vai querer adicionais?")).toBeInTheDocument();\n    await user.click(screen.getByRole("button", { name: "Sim" }));\n    expect(await screen.findByRole("button", { name: /Bacon/ })).toBeInTheDocument();\n    expect(screen.getByRole("button", { name: "Adicionar" })).toBeDisabled();\n    await user.click(screen.getByRole("button", { name: /Bacon/ }));\n    await user.click(screen.getByRole("button", { name: "Adicionar" }));\n\n    expect(await screen.findByText("1 item(ns)")).toBeInTheDocument();\n    expect(screen.getAllByText("R$ 45,00").length).toBeGreaterThan(0);\n''',
+              '''    expect(await screen.findByRole("button", { name: /Catupiry/ })).toBeInTheDocument();\n    expect(screen.queryByRole("button", { name: "Sem borda" })).not.toBeInTheDocument();\n    expect(screen.getByRole("button", { name: "Sem borda" })).toBeEnabled();\n    await user.click(screen.getByRole("button", { name: "Sem borda" }));\n\n    expect(await screen.findByText("Vai querer adicionais?")).toBeInTheDocument();\n    await user.click(screen.getByRole("button", { name: "Sim" }));\n    expect(await screen.findByRole("button", { name: /Bacon/ })).toBeInTheDocument();\n    expect(screen.getByRole("button", { name: "Sem adicionais" })).toBeEnabled();\n    await user.click(screen.getByRole("button", { name: "Sem adicionais" }));\n\n    expect(await screen.findByText("1 item(ns)")).toBeInTheDocument();\n    expect(screen.getAllByText("R$ 33,00").length).toBeGreaterThan(0);\n'''
+          )
+          replace_once(
+              salao_test,
+              '    await user.click(screen.getByRole("button", { name: "Adicionar" }));\n\n    expect(await screen.findByText("1 item(ns)")).toBeInTheDocument();\n    expect(screen.getAllByText("R$ 35,00").length).toBeGreaterThan(0);',
+              '    expect(screen.getByRole("button", { name: "Continuar" })).toBeEnabled();\n    await user.click(screen.getByRole("button", { name: "Continuar" }));\n\n    expect(await screen.findByText("1 item(ns)")).toBeInTheDocument();\n    expect(screen.getAllByText("R$ 35,00").length).toBeGreaterThan(0);'
+          )
+
+          # -----------------------------------------------------------------
+          # PEDIDO MANUAL: recebe o mesmo Sim/Não + CTA reversível do Salão.
+          # -----------------------------------------------------------------
+          manual = "src/app/pedidos/NovoPedidoManual.tsx"
+          replace_once(manual, '  resumoEtapa,\n  alternarSabor,', '  resumoEtapa,\n  alternarAdicional,\n  alternarSabor,')
+          replace_once(
+              manual,
+              '''const ICONE_CATEGORIA: Record<CategoriaManual, LucideIcon> = {\n  pizza: Pizza,\n  calzone: UtensilsCrossed,\n  pastelForno: Croissant,\n  lanches: Sandwich,\n  hamburgueres: Beef,\n  macarronada: Soup,\n  bebidas: CupSoda,\n  sucos: GlassWater,\n  vitaminas: Milk,\n}\n''',
+              '''const ICONE_CATEGORIA: Record<CategoriaManual, LucideIcon> = {\n  pizza: Pizza,\n  calzone: UtensilsCrossed,\n  pastelForno: Croissant,\n  lanches: Sandwich,\n  hamburgueres: Beef,\n  macarronada: Soup,\n  bebidas: CupSoda,\n  sucos: GlassWater,\n  vitaminas: Milk,\n}\nconst EMOJI_CATEGORIA: Record<CategoriaManual, string> = {\n  pizza: "🍕",\n  calzone: "🥟",\n  pastelForno: "🥟",\n  lanches: "🍔",\n  hamburgueres: "🍔",\n  macarronada: "🍝",\n  bebidas: "🥤",\n  sucos: "🧃",\n  vitaminas: "🥛",\n}\nfunction emojiOpcaoMontagemManual(tipo: string | undefined, categoria: CategoriaManual): string {\n  if (tipo === "borda") return "🧀"\n  if (tipo === "adicionais" || tipo === "adicional_opcional") return "➕"\n  if (tipo === "leite") return "🥛"\n  return EMOJI_CATEGORIA[categoria]\n}\n'''
+          )
+          replace_once(manual, '            <Icone size={14} aria-hidden="true" />\n            {c.label}', '            <span aria-hidden="true">{EMOJI_CATEGORIA[c.id]}</span>\n            <Icone size={14} aria-hidden="true" />\n            {c.label}')
+          replace_once(manual, '  const [etapaVisivel, setEtapaVisivel] = useState(0)\n', '  const [etapaVisivel, setEtapaVisivel] = useState(0)\n  const [opcionaisAbertas, setOpcionaisAbertas] = useState<Set<number>>(() => new Set())\n')
+          replace_once(
+              manual,
+              '  const etapaAtual = etapas[etapaVisivel]\n',
+              '  const etapaAtual = etapas[etapaVisivel]\n  const etapaOpcional = etapaAtual?.tipo === "borda" || etapaAtual?.tipo === "adicionais" || etapaAtual?.tipo === "adicional_opcional"\n  const opcionalAberta = !!etapaOpcional && opcionaisAbertas.has(etapaVisivel)\n  const mostrarPerguntaOpcional = !!etapaOpcional && !opcionalAberta\n'
+          )
+          replace_once(
+              manual,
+              '  const etapaTemBusca = (etapaAtual?.tipo === "sabores" || etapaAtual?.tipo === "sabor_unico") && (etapaAtual?.opcoes.length ?? 0) > 6\n',
+              '  const opcoesEtapaVisiveis = etapaAtual\n    ? etapaAtual.opcoes.filter((o) => !((etapaAtual.tipo === "borda" || etapaAtual.tipo === "adicional_opcional") && o.valor === ""))\n    : []\n  const etapaTemBusca = !mostrarPerguntaOpcional && (etapaAtual?.tipo === "sabores" || etapaAtual?.tipo === "sabor_unico") && opcoesEtapaVisiveis.length > 6\n'
+          )
+          sub_once(
+              manual,
+              r'  const opcoesEtapaFiltradas = etapaAtual\n    \? \(termoEtapaNorm.*?    : \[\]\n  const bloqueio = motivoBloqueio\(etapaAtual, selecao\)',
+              '''  const opcoesEtapaFiltradas = mostrarPerguntaOpcional\n    ? []\n    : (termoEtapaNorm\n        ? opcoesEtapaVisiveis.filter((o) => norm(o.label).includes(termoEtapaNorm) || (o.ingredientes ? norm(o.ingredientes).includes(termoEtapaNorm) : false))\n        : opcoesEtapaVisiveis)\n  const bloqueio = mostrarPerguntaOpcional ? null : motivoBloqueio(etapaAtual, selecao)'''
+          )
+          replace_once(
+              manual,
+              '  const tipoControleEtapa: "radio" | "checkbox" = etapaAtual?.tipo === "sabores" ? "checkbox" : "radio"\n',
+              '''  const tipoControleEtapa: "radio" | "checkbox" = etapaAtual?.tipo === "sabores" || etapaAtual?.tipo === "adicionais" ? "checkbox" : "radio"\n  const perguntaOpcional = etapaAtual?.tipo === "borda"\n    ? "Vai querer borda?"\n    : etapaAtual?.tipo === "adicionais"\n      ? "Vai querer adicionais?"\n      : etapaAtual?.tipo === "adicional_opcional"\n        ? "Vai querer adicional?"\n        : null\n  const ajudaEtapa = mostrarPerguntaOpcional\n    ? "Escolha Sim ou Não."\n    : etapaAtual?.tipo === "borda"\n      ? "Escolha a borda ou continue sem borda."\n      : etapaAtual?.tipo === "adicionais"\n        ? "Escolha um ou mais adicionais, ou continue sem adicionais."\n        : etapaAtual?.tipo === "adicional_opcional"\n          ? "Escolha 1 adicional, ou continue sem adicional."\n          : etapaAtual?.ajuda\n  const opcionalTemSelecao = etapaAtual?.tipo === "borda"\n    ? !!selecao.borda\n    : etapaAtual?.tipo === "adicionais"\n      ? (selecao.adicionais?.length ?? 0) > 0\n      : etapaAtual?.tipo === "adicional_opcional"\n        ? !!selecao.adicionalOpcional\n        : false\n  const rotuloCtaOpcional = etapaAtual?.tipo === "borda"\n    ? (opcionalTemSelecao ? "Continuar" : "Sem borda")\n    : etapaAtual?.tipo === "adicionais"\n      ? (opcionalTemSelecao ? "Continuar" : "Sem adicionais")\n      : etapaAtual?.tipo === "adicional_opcional"\n        ? (opcionalTemSelecao ? "Continuar" : "Sem adicional")\n        : "Continuar"\n'''
+          )
+          replace_once(manual, '    setEtapaVisivel(0)\n    // Sair da busca', '    setEtapaVisivel(0)\n    setOpcionaisAbertas(new Set())\n    // Sair da busca')
+          replace_once(manual, '    setProdutoAberto(null)\n    setTermo("")\n    // Mesmo ciclo', '    setProdutoAberto(null)\n    setOpcionaisAbertas(new Set())\n    setTermo("")\n    // Mesmo ciclo')
+          replace_once(
+              manual,
+              '''  function avancarEtapa() {\n    if (!etapaAtual || !etapaSatisfeita(etapaAtual, selecao)) return\n    if (etapaVisivel < etapas.length - 1) setEtapaVisivel(etapaVisivel + 1)\n  }\n\n  function voltarEtapa() {\n    // Recua uma etapa por vez sem tocar na seleção; na primeira, fecha o\n    // construtor. Nunca há um "voltar" que descarte escolhas silenciosamente.\n    if (etapaVisivel > 0) setEtapaVisivel(etapaVisivel - 1)\n    else setProdutoAberto(null)\n  }\n''',
+              '''  function normalizarOpcionalSemEscolha(atual: SelecaoMontagem): SelecaoMontagem {\n    if (!etapaAtual || !etapaOpcional) return atual\n    if (etapaAtual.tipo === "borda" && !atual.borda) return { ...atual, borda: null }\n    if (etapaAtual.tipo === "adicionais" && (atual.adicionais?.length ?? 0) === 0) return { ...atual, adicionais: [] }\n    if (etapaAtual.tipo === "adicional_opcional" && !atual.adicionalOpcional) return { ...atual, adicionalOpcional: null }\n    return atual\n  }\n\n  function avancarEtapa() {\n    if (!etapaAtual || mostrarPerguntaOpcional || bloqueio) return\n    if (!etapaOpcional && !etapaSatisfeita(etapaAtual, selecao)) return\n    const selecaoFinal = etapaOpcional ? normalizarOpcionalSemEscolha(selecao) : selecao\n    if (selecaoFinal !== selecao) setSelecao(selecaoFinal)\n    if (etapaVisivel < etapas.length - 1) {\n      setEtapaVisivel(etapaVisivel + 1)\n      return\n    }\n    finalizarMontagemComSelecao(selecaoFinal)\n  }\n\n  function finalizarMontagemComSelecao(selecaoFinal: SelecaoMontagem) {\n    if (!produtoAberto || !montagemCompleta(etapas, selecaoFinal)) return\n    if (adicionandoRef.current) return\n    adicionandoRef.current = true\n    const item = construirItemManual(produtoAberto, selecaoFinal, menu)\n    if (item) setItens((atual) => adicionarAoCarrinho(atual, item))\n    setProdutoAberto(null)\n    setOpcionaisAbertas(new Set())\n    setTermo("")\n    setProdutoUiState("resumo")\n    window.setTimeout(() => { adicionandoRef.current = false }, 400)\n  }\n\n  function responderOpcional(quer: boolean) {\n    if (!etapaAtual || !etapaOpcional) return\n    if (quer) {\n      setOpcionaisAbertas((atuais) => {\n        const proximas = new Set(atuais)\n        proximas.add(etapaVisivel)\n        return proximas\n      })\n      return\n    }\n    const novaSelecao: SelecaoMontagem = etapaAtual.tipo === "borda"\n      ? { ...selecao, borda: null }\n      : etapaAtual.tipo === "adicionais"\n        ? { ...selecao, adicionais: [] }\n        : { ...selecao, adicionalOpcional: null }\n    setSelecao(novaSelecao)\n    if (etapaVisivel < etapas.length - 1) {\n      setEtapaVisivel(etapaVisivel + 1)\n      return\n    }\n    finalizarMontagemComSelecao(novaSelecao)\n  }\n\n  function voltarEtapa() {\n    if (etapaOpcional && opcionaisAbertas.has(etapaVisivel)) {\n      setOpcionaisAbertas((atuais) => {\n        const proximas = new Set(atuais)\n        proximas.delete(etapaVisivel)\n        return proximas\n      })\n      return\n    }\n    if (etapaVisivel > 0) setEtapaVisivel(etapaVisivel - 1)\n    else setProdutoAberto(null)\n  }\n'''
+          )
+          replace_once(
+              manual,
+              '''    } else if (etapaAtual.tipo === "borda") {\n      setSelecao((s) => ({ ...s, borda: valor === "" ? null : valor }))\n    } else if (etapaAtual.tipo === "tamanho_item") {''',
+              '''    } else if (etapaAtual.tipo === "borda") {\n      setSelecao((s) => ({ ...s, borda: s.borda === valor ? null : (valor || null) }))\n    } else if (etapaAtual.tipo === "adicionais") {\n      setSelecao((s) => alternarAdicional(s, valor))\n    } else if (etapaAtual.tipo === "adicional_opcional") {\n      setSelecao((s) => ({ ...s, adicionalOpcional: s.adicionalOpcional === valor ? null : (valor || null) }))\n    } else if (etapaAtual.tipo === "tamanho_item") {'''
+          )
+          replace_once(
+              manual,
+              '''      case "borda":\n        return valor === "" ? selecao.borda === null : selecao.borda === valor\n      case "tamanho_item":''',
+              '''      case "borda":\n        return valor === "" ? selecao.borda === null : selecao.borda === valor\n      case "adicionais":\n        return selecao.adicionais?.includes(valor) ?? false\n      case "adicional_opcional":\n        return selecao.adicionalOpcional === valor\n      case "tamanho_item":'''
+          )
+          replace_once(manual, '<IconeProduto size={18} aria-hidden="true" style={{ color: "var(--foreground-muted)", flexShrink: 0 }} />', '<span aria-hidden="true" style={{ fontSize: 20, flexShrink: 0 }}>{EMOJI_CATEGORIA[p.categoria]}</span>\n                      <IconeProduto size={18} aria-hidden="true" style={{ color: "var(--foreground-muted)", flexShrink: 0 }} />')
+          replace_once(manual, '{etapaAtual.ajuda}</p>', '{ajudaEtapa}</p>')
+          replace_once(
+              manual,
+              '            {etapaTemBusca && (\n',
+              '''            {mostrarPerguntaOpcional && (\n              <div style={{ padding: "18px 22px 0", flexShrink: 0 }}>\n                <div style={{ ...card, display: "grid", gap: 14, textAlign: "center" }}>\n                  <p style={{ margin: 0, fontSize: 19, fontWeight: 900, color: "var(--foreground)" }}>{perguntaOpcional}</p>\n                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>\n                    <button onClick={() => responderOpcional(true)} style={btnPrimary}>Sim</button>\n                    <button onClick={() => responderOpcional(false)} style={btnSecondary}>Não</button>\n                  </div>\n                </div>\n              </div>\n            )}\n\n            {etapaTemBusca && (\n'''
+          )
+          replace_once(manual, '                        {o.label}\n                        {o.esgotado ? " · esgotado" : ""}', '                        {emojiOpcaoMontagemManual(etapaAtual.tipo, produtoAberto.categoria)} {o.label}\n                        {o.esgotado ? " · esgotado" : ""}')
+          replace_once(manual, '              {bloqueio && (', '              {!mostrarPerguntaOpcional && bloqueio && (')
+          replace_once(
+              manual,
+              '                {indiceEtapaPendente(etapas, selecao) === -1 ? (',
+              '                {!mostrarPerguntaOpcional && (!etapaOpcional && indiceEtapaPendente(etapas, selecao) === -1 ? ('
+          )
+          replace_once(
+              manual,
+              '''                  </button>\n                )}\n              </div>\n''',
+              '''                  </button>\n                ))}\n              </div>\n'''
+          )
+          replace_once(
+              manual,
+              '{etapaVisivel < etapas.length - 1 ? `Continuar para ${etapas[etapaVisivel + 1].titulo.toLowerCase()}` : "Continuar"} <ArrowRight size={16} aria-hidden="true" />',
+              '{etapaOpcional ? rotuloCtaOpcional : etapaVisivel < etapas.length - 1 ? `Continuar para ${etapas[etapaVisivel + 1].titulo.toLowerCase()}` : "Continuar"} <ArrowRight size={16} aria-hidden="true" />'
+          )
+
+          # Tests estruturais do pedido manual: Sim/Não, CTA reversível e emojis.
+          manual_test = "src/app/pedidos/NovoPedidoManual.etapas.test.ts"
+          replace_once(
+              manual_test,
+              '  test("radio para escolha única (borda, tamanho, leite, sabor único); checkbox só para sabores de pizza (até 2)", () => {\n    expect(fonte).toContain(\'const tipoControleEtapa: "radio" | "checkbox" = etapaAtual?.tipo === "sabores" ? "checkbox" : "radio"\');',
+              '  test("radio para escolha única; checkbox para sabores de pizza e adicionais múltiplos", () => {\n    expect(fonte).toContain(\'const tipoControleEtapa: "radio" | "checkbox" = etapaAtual?.tipo === "sabores" || etapaAtual?.tipo === "adicionais" ? "checkbox" : "radio"\');'
+          )
+          with Path(manual_test).open("a") as f:
+              f.write('''\n\ndescribe("NovoPedidoManual — opcionais sem beco sem saída e emojis", () => {\n  test("borda/adicionais/adicional único usam pergunta Sim/Não antes das opções", () => {\n    expect(fonte).toContain('const mostrarPerguntaOpcional = !!etapaOpcional && !opcionalAberta');\n    expect(fonte).toContain('"Vai querer borda?"');\n    expect(fonte).toContain('"Vai querer adicionais?"');\n    expect(fonte).toContain('"Vai querer adicional?"');\n    expect(fonte).toContain('onClick={() => responderOpcional(true)}');\n    expect(fonte).toContain('onClick={() => responderOpcional(false)}');\n  });\n\n  test("após Sim, nenhum marcado mantém CTA ativo Sem..., e qualquer seleção muda para Continuar", () => {\n    expect(fonte).toContain('(opcionalTemSelecao ? "Continuar" : "Sem borda")');\n    expect(fonte).toContain('(opcionalTemSelecao ? "Continuar" : "Sem adicionais")');\n    expect(fonte).toContain('(opcionalTemSelecao ? "Continuar" : "Sem adicional")');\n    expect(fonte).toContain('const selecaoFinal = etapaOpcional ? normalizarOpcionalSemEscolha(selecao) : selecao');\n  });\n\n  test("listas do pedido manual usam os mesmos emojis de produto do cardápio público", () => {\n    for (const emoji of ["🍕", "🥟", "🍔", "🍝", "🥤", "🧃", "🥛", "🧀", "➕"]) expect(fonte).toContain(emoji);\n    expect(fonte).toContain('EMOJI_CATEGORIA[p.categoria]');\n    expect(fonte).toContain('emojiOpcaoMontagemManual(etapaAtual.tipo, produtoAberto.categoria)');\n  });\n});\n''')
+
+          # -----------------------------------------------------------------
+          # CARDÁPIO PÚBLICO: aplica a mesma decisão Sim/Não em borda,
+          # adicionais de pizza e adicional único da macarronada.
+          # -----------------------------------------------------------------
+          publico = "src/app/cardapio/page.tsx"
+          replace_once(
+              publico,
+              '  const [macarronadaSizeEscolhido, setMacarronadaSizeEscolhido] = useState<{ code: string; price: number } | null>(null);\n',
+              '  const [macarronadaSizeEscolhido, setMacarronadaSizeEscolhido] = useState<{ code: string; price: number } | null>(null);\n  const [macarronadaAddOnEscolhido, setMacarronadaAddOnEscolhido] = useState<string | null>(null);\n'
+          )
+          replace_once(
+              publico,
+              '''  function chooseBorder(chosenBorder: string | null, chosenBorderPrice: number) {\n    setBorder(chosenBorder);\n    setBorderPrice(chosenBorderPrice);\n    const temAdicionalDisponivel = !!menu.pizzaCatalog && menu.pizzaCatalog.addOns.some((a) => a.available);\n    if (temAdicionalDisponivel) go("sc-addons");\n    else finalizarPizza(chosenBorder, chosenBorderPrice, []);\n  }\n''',
+              '''  function selecionarBorda(chosenBorder: string, chosenBorderPrice: number) {\n    const desmarcando = border === chosenBorder;\n    setBorder(desmarcando ? null : chosenBorder);\n    setBorderPrice(desmarcando ? 0 : chosenBorderPrice);\n  }\n  function chooseBorder(chosenBorder: string | null, chosenBorderPrice: number) {\n    setBorder(chosenBorder);\n    setBorderPrice(chosenBorderPrice);\n    const temAdicionalDisponivel = !!menu.pizzaCatalog && menu.pizzaCatalog.addOns.some((a) => a.available);\n    if (temAdicionalDisponivel) go("sc-addons-question");\n    else finalizarPizza(chosenBorder, chosenBorderPrice, []);\n  }\n'''
+          )
+          replace_once(publico, '      go("sc-macarronada-addon");', '      setMacarronadaAddOnEscolhido(null);\n      go("sc-macarronada-addon-question");')
+          replace_once(publico, '    setMacarronadaSizeEscolhido(null);\n    go("sc-another");', '    setMacarronadaSizeEscolhido(null);\n    setMacarronadaAddOnEscolhido(null);\n    go("sc-another");')
+
+          sub_once(
+              publico,
+              r'          \{screen === "sc-border" && \(.*?          \{screen === "sc-addons" && \(',
+              '''          {screen === "sc-border" && (\n            <section className="screen active">\n              <TopBack onClick={() => go("sc-build")} title="Borda" />\n              <PizzaCtx badge={ctxBadge} txt={ctxTxt} dots={ctxDots} />\n              <div className="screen-head"><h2>Vai querer borda?</h2><p>Escolha Sim ou Não.</p></div>\n              <div className="grid2">\n                <button className="btn" onClick={() => go("sc-border-options")}>Sim</button>\n                <button className="btn btn-ghost" onClick={() => chooseBorder(null, 0)}>Não</button>\n              </div>\n            </section>\n          )}\n          {screen === "sc-border-options" && (\n            <section className="screen active">\n              <TopBack onClick={() => go("sc-border")} title="Borda" />\n              <PizzaCtx badge={ctxBadge} txt={ctxTxt} dots={ctxDots} />\n              <div className="screen-head"><h2>Escolha a borda</h2><p>Se mudar de ideia, use o botão abaixo para continuar sem borda.</p></div>\n              {menu.pizzaCatalog\n                ? menu.pizzaCatalog.borders.map((b) => {\n                    const p = b.pricesBySizeCode[size as "P" | "M" | "G" | "F"];\n                    if (p === undefined) return null;\n                    const esg = !b.available;\n                    const precoReais = p / 100;\n                    return (\n                      <div key={b.id} className={`opt ${border === b.label ? "sel" : ""}`} onClick={() => !esg && selecionarBorda(b.label, precoReais)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }} {...optA11yAttrs(esg)} onKeyDown={(e) => { if (!esg && isActivateKey(e)) { e.preventDefault(); selecionarBorda(b.label, precoReais); } }}>\n                        <div className="opt-emoji">🧀</div><div className="opt-body"><div className="opt-title">{b.label}</div>{esg && <div className="opt-desc" style={{ color: "var(--danger)" }}>Esgotado</div>}</div><div className="opt-price">{esg ? "" : `+${money(precoReais)}`}</div><div className="opt-check" />\n                      </div>\n                    );\n                  })\n                : (menu.borders || []).map((b, i) => { const p = bigBorder(size!) ? b.priceLarge : b.priceSmall; const esg = esgotados.includes(b.label); return (<div key={i} className={`opt ${border === b.label ? "sel" : ""}`} onClick={() => !esg && selecionarBorda(b.label, p)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }} {...optA11yAttrs(esg)} onKeyDown={(e) => { if (!esg && isActivateKey(e)) { e.preventDefault(); selecionarBorda(b.label, p); } }}><div className="opt-emoji">🧀</div><div className="opt-body"><div className="opt-title">{b.label}</div>{esg && <div className="opt-desc" style={{ color: "var(--danger)" }}>Esgotado</div>}</div><div className="opt-price">{esg ? "" : `+${money(p)}`}</div><div className="opt-check" /></div>); })}\n              <div className="build-foot">\n                <div className="build-foot-hint">{border ? `Borda: ${border}` : "Nenhuma borda selecionada"}</div>\n                <button className="btn" onClick={() => chooseBorder(border, borderPrice)}>{border ? "Continuar" : "Sem borda"}</button>\n              </div>\n            </section>\n          )}\n          {screen === "sc-addons-question" && (\n            <section className="screen active">\n              <TopBack onClick={() => go(border ? "sc-border-options" : "sc-border")} title="Adicionais" />\n              <PizzaCtx badge={ctxBadge} txt={ctxTxt} dots={ctxDots} />\n              <div className="screen-head"><h2>Vai querer adicionais?</h2><p>Escolha Sim ou Não.</p></div>\n              <div className="grid2">\n                <button className="btn" onClick={() => go("sc-addons")}>Sim</button>\n                <button className="btn btn-ghost" onClick={() => { setAddOnIds([]); finalizarPizza(border, borderPrice, []); }}>Não</button>\n              </div>\n            </section>\n          )}\n          {screen === "sc-addons" && ('''
+          )
+          replace_once(publico, '<TopBack onClick={() => go("sc-border")} title="Adicionais" />', '<TopBack onClick={() => go("sc-addons-question")} title="Adicionais" />')
+          replace_once(publico, '<button className="btn" onClick={() => finalizarPizza(border, borderPrice, addOnIds)}>Finalizar pizza</button>', '<button className="btn" onClick={() => finalizarPizza(border, borderPrice, addOnIds)}>{addOnIds.length > 0 ? "Continuar" : "Sem adicionais"}</button>')
+
+          sub_once(
+              publico,
+              r'          \{screen === "sc-macarronada-addon" && macarronadaPendente && macarronadaSizeEscolhido && \(.*?          \)\}          \{screen === "sc-delivery" && \(',
+              '''          {screen === "sc-macarronada-addon-question" && macarronadaPendente && macarronadaSizeEscolhido && (\n            <section className="screen active">\n              <TopBack onClick={() => { setMacarronadaSizeEscolhido(null); setMacarronadaAddOnEscolhido(null); go("sc-macarronada-size"); }} title={macarronadaPendente.name} />\n              <div className="screen-head"><h2>Vai querer adicional?</h2><p>Escolha Sim ou Não.</p></div>\n              <div className="grid2">\n                <button className="btn" onClick={() => go("sc-macarronada-addon")}>Sim</button>\n                <button className="btn btn-ghost" onClick={() => finalizarMacarronada(macarronadaSizeEscolhido, undefined)}>Não</button>\n              </div>\n            </section>\n          )}\n          {screen === "sc-macarronada-addon" && macarronadaPendente && macarronadaSizeEscolhido && (\n            <section className="screen active">\n              <TopBack onClick={() => go("sc-macarronada-addon-question")} title={macarronadaPendente.name} />\n              <div className="screen-head"><h2>Escolha o adicional</h2><p>Opcional — escolha no máximo 1.</p></div>\n              {(macarronadaPendente.addOnGroup?.options || []).map((o) => {\n                const esg = !o.available;\n                const sel = macarronadaAddOnEscolhido === o.label;\n                return (\n                  <div key={o.id} className={`opt ${sel ? "sel" : ""}`} onClick={() => !esg && setMacarronadaAddOnEscolhido((atual) => atual === o.label ? null : o.label)} style={{ opacity: esg ? 0.5 : 1, cursor: esg ? "not-allowed" : "pointer" }} {...optA11yAttrs(esg)} onKeyDown={(e) => { if (!esg && isActivateKey(e)) { e.preventDefault(); setMacarronadaAddOnEscolhido((atual) => atual === o.label ? null : o.label); } }}>\n                    <div className="opt-emoji">➕</div><div className="opt-body"><div className="opt-title">{o.label}</div>{esg && <div className="opt-desc" style={{ color: "var(--danger)" }}>Esgotado</div>}</div><div className="opt-price">{esg ? "" : `+${money(o.price)}`}</div><div className="opt-check" />\n                  </div>\n                );\n              })}\n              <div className="build-foot">\n                <div className="build-foot-hint">{macarronadaAddOnEscolhido ? `Adicional: ${macarronadaAddOnEscolhido}` : "Nenhum adicional selecionado"}</div>\n                <button className="btn" onClick={() => finalizarMacarronada(macarronadaSizeEscolhido, macarronadaAddOnEscolhido ?? undefined)}>{macarronadaAddOnEscolhido ? "Continuar" : "Sem adicional"}</button>\n              </div>\n            </section>\n          )}          {screen === "sc-delivery" && ('''
+          )
+
+          publico_test = "src/app/cardapio/page.test.ts"
+          with Path(publico_test).open("a") as f:
+              f.write('''\n\ndescribe("/cardapio — opcionais sem beco sem saída", () => {\n  test("pizza pergunta Sim/Não para borda e adicionais antes de abrir as listas", () => {\n    expect(fonte).toContain('screen === "sc-border"');\n    expect(fonte).toContain('Vai querer borda?');\n    expect(fonte).toContain('screen === "sc-addons-question"');\n    expect(fonte).toContain('Vai querer adicionais?');\n  });\n\n  test("após Sim, CTA sem seleção fica ativo como Sem borda/Sem adicionais e vira Continuar ao selecionar", () => {\n    expect(fonte).toContain('{border ? "Continuar" : "Sem borda"}');\n    expect(fonte).toContain('{addOnIds.length > 0 ? "Continuar" : "Sem adicionais"}');\n    expect(fonte).toContain('selecionarBorda(b.label');\n    expect(fonte).not.toContain('<div className="opt-title">Sem borda</div>');\n  });\n\n  test("macarronada usa a mesma pergunta e permite Sem adicional/Continuar sem opção Nenhum na lista", () => {\n    expect(fonte).toContain('screen === "sc-macarronada-addon-question"');\n    expect(fonte).toContain('{macarronadaAddOnEscolhido ? "Continuar" : "Sem adicional"}');\n    const bloco = fonte.slice(fonte.indexOf('screen === "sc-macarronada-addon"'), fonte.indexOf('screen === "sc-delivery"'));\n    expect(bloco).not.toContain('<div className="opt-title">Nenhum</div>');\n  });\n});\n''')
+
+          # Regressão estática transversal dos emojis e CTAs.
+          transversal = Path("src/app/opcionaisUx.regression.test.ts")
+          transversal.write_text('''import { describe, expect, test } from "vitest";\nimport { readFileSync } from "node:fs";\nimport { resolve } from "node:path";\n\nconst salao = readFileSync(resolve("src/app/salao/page.tsx"), "utf8");\nconst manual = readFileSync(resolve("src/app/pedidos/NovoPedidoManual.tsx"), "utf8");\nconst publico = readFileSync(resolve("src/app/cardapio/page.tsx"), "utf8");\n\ndescribe("opcionais uniformes nos três fluxos", () => {\n  test("Salão e pedido manual mantêm Sim/Não e CTA Sem adicionais quando vazio", () => {\n    for (const fonte of [salao, manual]) {\n      expect(fonte).toContain("Vai querer adicionais?");\n      expect(fonte).toContain('"Sem adicionais"');\n      expect(fonte).toContain('"Continuar"');\n    }\n  });\n  test("cardápio público aplica a mesma decisão a borda/adicionais/macarronada", () => {\n    expect(publico).toContain("Vai querer borda?");\n    expect(publico).toContain("Vai querer adicionais?");\n    expect(publico).toContain("Vai querer adicional?");\n    expect(publico).toContain('"Sem adicionais"');\n  });\n  test("Salão e manual exibem emojis por categoria e opção", () => {\n    for (const fonte of [salao, manual]) {\n      for (const emoji of ["🍕", "🥟", "🍔", "🍝", "🥤", "🧃", "🥛", "🧀", "➕"]) expect(fonte).toContain(emoji);\n    }\n  });\n});\n''')
+
+      - name: Testes focados
+        run: npx vitest run src/app/salao/page.test.tsx src/app/pedidos/NovoPedidoManual.etapas.test.ts src/app/cardapio/page.test.ts src/app/opcionaisUx.regression.test.ts
+
+      - name: ESLint do patch
+        run: npx eslint src/app/salao/page.tsx src/app/salao/page.test.tsx src/app/pedidos/NovoPedidoManual.tsx src/app/pedidos/NovoPedidoManual.etapas.test.ts src/app/cardapio/page.tsx src/app/cardapio/page.test.ts src/app/opcionaisUx.regression.test.ts
+
+      - name: Remover harness e publicar commit validado na branch
+        run: |
+          git rm .github/workflows/tmp-opcionais-ui-patch.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/app/salao/page.tsx src/app/salao/page.test.tsx src/app/pedidos/NovoPedidoManual.tsx src/app/pedidos/NovoPedidoManual.etapas.test.ts src/app/cardapio/page.tsx src/app/cardapio/page.test.ts src/app/opcionaisUx.regression.test.ts
+          git diff --cached --check
+          git commit -m "feat: unifica opcionais e emojis nos pedidos"
+          git push origin HEAD:feat/opcionais-sem-saida-emojis
