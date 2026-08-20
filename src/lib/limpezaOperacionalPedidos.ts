@@ -204,7 +204,7 @@ export function pedidoPixConfirmado(pedido: PedidoLimpeza): boolean {
 
 export function modalidadePedidoOperacional(pedido: Pick<PedidoLimpeza, "tipoEntrega" | "endereco">): ModalidadePedidoOperacional {
   if (pedido.tipoEntrega === "dine_in" || pedido.endereco === "Consumo no local") return "dine_in";
-  if (!pedido.tipoEntrega || pedido.tipoEntrega === "pickup" || pedido.tipoEntrega === "retirada" || pedido.endereco === "Retirada na loja") return "retirada";
+  if (pedido.tipoEntrega === "pickup" || pedido.tipoEntrega === "retirada" || pedido.endereco === "Retirada na loja") return "retirada";
   return "delivery";
 }
 
