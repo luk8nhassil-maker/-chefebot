@@ -252,3 +252,77 @@ body {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
+
+/* ---------------------------------------------------------------------------
+   Salão — Pedidos abertos / lista compacta de pedidos dentro da comanda
+   --------------------------------------------------------------------------
+   Somente apresentação: não altera ordem, status, preço, itens ou ações.
+   As rodadas continuam no mesmo DOM/fluxo; apenas deixam de parecer cards
+   independentes e passam a formar uma lista única, separada por linhas.
+   -------------------------------------------------------------------------- */
+div[aria-label^="Pedidos da comanda "] {
+  gap: 0 !important;
+  overflow: hidden;
+  border: 1px solid var(--surface-secondary);
+  border-radius: 10px;
+  background: var(--background);
+}
+
+div[aria-label^="Pedidos da comanda "] > div {
+  gap: 4px !important;
+  padding: 10px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+}
+
+div[aria-label^="Pedidos da comanda "] > div + div {
+  border-top: 1px solid var(--border) !important;
+}
+
+/* A orientação longa ("O pedido já foi enviado...", etc.) fica escondida
+   só na listagem compacta. O status humano continua visível e prioritário. */
+div[aria-label^="Pedidos da comanda "] > div > span {
+  display: none !important;
+}
+
+/* Status é a informação operacional de maior prioridade na linha. */
+div[aria-label^="Pedidos da comanda "] > div > div:first-child > span:last-child {
+  font-size: 11.5px !important;
+  font-weight: 950 !important;
+  line-height: 1.15 !important;
+  white-space: nowrap;
+}
+
+/* Quantidade + horário ficam discretos à esquerda; valor permanece à direita. */
+div[aria-label^="Pedidos da comanda "] > div > div:nth-child(2) {
+  align-items: baseline !important;
+}
+
+div[aria-label^="Pedidos da comanda "] > div > div:nth-child(2) > span:first-child {
+  font-size: 11px !important;
+  line-height: 1.2 !important;
+}
+
+div[aria-label^="Pedidos da comanda "] > div > div:nth-child(2) > span:last-child {
+  font-size: 13px !important;
+  font-weight: 900 !important;
+}
+
+@media (max-width: 420px) {
+  div[aria-label^="Pedidos da comanda "] > div {
+    padding: 9px !important;
+  }
+
+  div[aria-label^="Pedidos da comanda "] > div > div:first-child {
+    gap: 6px !important;
+  }
+
+  div[aria-label^="Pedidos da comanda "] > div > div:first-child > span:first-child {
+    font-size: 13px !important;
+  }
+
+  div[aria-label^="Pedidos da comanda "] > div > div:first-child > span:last-child {
+    font-size: 10.5px !important;
+  }
+}
