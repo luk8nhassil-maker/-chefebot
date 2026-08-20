@@ -183,6 +183,24 @@ function urlEnviarRodada(comandaId: string, rodada: Rodada): string {
 // ---------------------------------------------------------------------------
 
 const FONT = "'Archivo', sans-serif"
+const EMOJI_CATEGORIA_PEDIDO: Record<CategoriaManual, string> = {
+  pizza: "🍕",
+  calzone: "🥟",
+  pastelForno: "🥟",
+  lanches: "🍔",
+  hamburgueres: "🍔",
+  macarronada: "🍝",
+  bebidas: "🥤",
+  sucos: "🧃",
+  vitaminas: "🥛",
+}
+
+function emojiOpcaoMontagem(tipo: string | undefined, categoria: CategoriaManual): string {
+  if (tipo === "borda") return "🧀"
+  if (tipo === "adicionais" || tipo === "adicional_opcional") return "➕"
+  if (tipo === "leite") return "🥛"
+  return EMOJI_CATEGORIA_PEDIDO[categoria]
+}
 const card: React.CSSProperties = { background: "var(--surface)", border: "1px solid var(--surface-secondary)", borderRadius: 14, padding: 14 }
 const input: React.CSSProperties = { width: "100%", height: 48, background: "var(--background)", border: "1px solid var(--surface-secondary)", borderRadius: 10, padding: "0 14px", color: "var(--foreground)", fontSize: 15, fontWeight: 600, fontFamily: FONT, outline: "none", boxSizing: "border-box" }
 const btnPrimario: React.CSSProperties = { height: 48, borderRadius: 12, fontSize: 15, fontWeight: 800, cursor: "pointer", fontFamily: FONT, border: "none", background: "var(--primary)", color: "var(--background)" }
@@ -953,16 +971,23 @@ function ProdutoSelector({
     ? opcoesEtapaVisiveis.filter((o) => norm(o.label).includes(termoEtapaNorm) || (o.ingredientes ? norm(o.ingredientes).includes(termoEtapaNorm) : false))
     : opcoesEtapaVisiveis
 
-  const bloqueioOpcional = mostrarPerguntaOpcional
-    ? null
-    : etapaAtual?.tipo === "borda" && !selecao.borda
-      ? "Escolha uma borda para continuar."
-      : etapaAtual?.tipo === "adicionais" && (selecao.adicionais?.length ?? 0) === 0
-        ? "Escolha pelo menos 1 adicional para continuar."
-        : etapaAtual?.tipo === "adicional_opcional" && !selecao.adicionalOpcional
-          ? "Escolha 1 adicional para continuar."
-          : null
-  const bloqueio = mostrarPerguntaOpcional ? null : (bloqueioOpcional ?? motivoBloqueio(etapaAtual, selecao))
+  // Borda e adicionais são opcionais: depois do “Sim”, a lista aparece,
+  // mas o atendente ainda pode seguir sem marcar nada se mudar de ideia.
+  const opcionalTemSelecao = etapaAtual?.tipo === "borda"
+    ? !!selecao.borda
+    : etapaAtual?.tipo === "adicionais"
+      ? (selecao.adicionais?.length ?? 0) > 0
+      : etapaAtual?.tipo === "adicional_opcional"
+        ? !!selecao.adicionalOpcional
+        : false
+  const bloqueio = mostrarPerguntaOpcional || etapaOpcional ? null : motivoBloqueio(etapaAtual, selecao)
+  const rotuloCtaOpcional = etapaAtual?.tipo === "borda"
+    ? (opcionalTemSelecao ? "Continuar" : "Sem borda")
+    : etapaAtual?.tipo === "adicionais"
+      ? (opcionalTemSelecao ? "Continuar" : "Sem adicionais")
+      : etapaAtual?.tipo === "adicional_opcional"
+        ? (opcionalTemSelecao ? "Continuar" : "Sem adicional")
+        : "Continuar"
   const perguntaOpcional = etapaAtual?.tipo === "borda"
     ? "Vai querer borda?"
     : etapaAtual?.tipo === "adicionais"
@@ -973,11 +998,11 @@ function ProdutoSelector({
   const ajudaEtapa = mostrarPerguntaOpcional
     ? "Escolha Sim ou Não."
     : etapaAtual?.tipo === "borda"
-      ? "Escolha a borda."
+      ? "Escolha uma borda ou continue sem borda."
       : etapaAtual?.tipo === "adicionais"
-        ? "Escolha um ou mais adicionais."
+        ? "Escolha os adicionais ou continue sem adicionais."
         : etapaAtual?.tipo === "adicional_opcional"
-          ? "Escolha 1 adicional."
+          ? "Escolha 1 adicional ou continue sem adicional."
           : etapaAtual?.ajuda
 
   async function confirmarAdicao(item: ItemApp): Promise<boolean> {
@@ -1023,14 +1048,24 @@ function ProdutoSelector({
     setTermo("")
   }
 
+  function normalizarOpcionalSemEscolha(atual: SelecaoMontagem): SelecaoMontagem {
+    if (!etapaAtual || !etapaOpcional) return atual
+    if (etapaAtual.tipo === "borda" && !atual.borda) return { ...atual, borda: null }
+    if (etapaAtual.tipo === "adicionais" && (atual.adicionais?.length ?? 0) === 0) return { ...atual, adicionais: [] }
+    if (etapaAtual.tipo === "adicional_opcional" && !atual.adicionalOpcional) return { ...atual, adicionalOpcional: null }
+    return atual
+  }
+
   function avancarEtapa() {
     if (!etapaAtual || mostrarPerguntaOpcional || bloqueio || salvandoItemRef.current) return
     if (!etapaOpcional && !etapaSatisfeita(etapaAtual, selecao)) return
+    const selecaoFinal = etapaOpcional ? normalizarOpcionalSemEscolha(selecao) : selecao
+    if (selecaoFinal !== selecao) setSelecao(selecaoFinal)
     if (etapaVisivel < etapas.length - 1) {
       setEtapaVisivel(etapaVisivel + 1)
       return
     }
-    finalizarMontagem(selecao)
+    void finalizarMontagem(selecaoFinal)
   }
 
   function responderOpcional(quer: boolean) {
@@ -1119,7 +1154,7 @@ function ProdutoSelector({
         <div style={{ display: "flex", gap: 6, overflowX: "auto" }}>
           {CATEGORIAS.map((c) => (
             <button key={c.id} onClick={() => setCategoria(c.id)} style={{ height: 40, padding: "0 14px", flexShrink: 0, borderRadius: 12, fontFamily: FONT, cursor: "pointer", border: "1px solid " + (categoria === c.id && !buscando ? "var(--primary)" : "var(--surface-secondary)"), background: categoria === c.id && !buscando ? "color-mix(in srgb, var(--primary) 15%, transparent)" : "transparent", color: "var(--foreground)", fontSize: 13 }}>
-              {c.label}
+              {EMOJI_CATEGORIA_PEDIDO[c.id]} {c.label}
             </button>
           ))}
         </div>
@@ -1127,7 +1162,7 @@ function ProdutoSelector({
           {resultados.map((p) => (
             <button key={p.id} onClick={() => abrirProduto(p)} disabled={p.esgotado || salvandoItem} style={{ ...card, minHeight: 48, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, textAlign: "left", cursor: p.esgotado || salvandoItem ? "not-allowed" : "pointer", opacity: p.esgotado ? 0.5 : salvandoItem ? 0.7 : 1 }}>
               <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
-                <span style={{ fontSize: 14, fontWeight: 800, color: "var(--foreground)" }}>{p.nome}{p.esgotado ? " · esgotado" : ""}</span>
+                <span style={{ fontSize: 14, fontWeight: 800, color: "var(--foreground)" }}>{EMOJI_CATEGORIA_PEDIDO[p.categoria]} {p.nome}{p.esgotado ? " · esgotado" : ""}</span>
                 {!p.esgotado && p.ingredients ? (
                   <span style={{ display: "-webkit-box", WebkitLineClamp: 1, WebkitBoxOrient: "vertical", overflow: "hidden", fontSize: 11.5, color: "var(--foreground-muted)" }}>
                     {p.ingredients}
@@ -1202,7 +1237,7 @@ function ProdutoSelector({
                   return (
                     <button key={o.valor || "__sem__"} onClick={() => !o.esgotado && escolher(o.valor)} disabled={o.esgotado} style={{ ...card, minHeight: 48, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, textAlign: "left", cursor: o.esgotado ? "not-allowed" : "pointer", opacity: o.esgotado ? 0.45 : 1, borderColor: sel ? "var(--primary)" : "var(--surface-secondary)", background: sel ? "color-mix(in srgb, var(--primary) 12%, transparent)" : "var(--surface)" }}>
                       <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
-                        <span style={{ fontSize: 14, fontWeight: 800, color: "var(--foreground)" }}>{o.label}{o.esgotado ? " · esgotado" : ""}</span>
+                        <span style={{ fontSize: 14, fontWeight: 800, color: "var(--foreground)" }}>{emojiOpcaoMontagem(etapaAtual.tipo, produtoAberto.categoria)} {o.label}{o.esgotado ? " · esgotado" : ""}</span>
                         {!o.esgotado && o.ingredientes ? (
                           <span style={{ fontSize: 11.5, color: "var(--foreground-muted)", lineHeight: 1.35, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
                             {o.ingredientes}
@@ -1228,7 +1263,7 @@ function ProdutoSelector({
               </button>
               {!mostrarPerguntaOpcional && (
                 <button onClick={avancarEtapa} disabled={!!bloqueio || salvandoItem} style={{ ...btnPrimario, flex: 2, ...(bloqueio || salvandoItem ? btnDesabilitado : {}) }}>
-                  {salvandoItem ? "Salvando…" : etapaVisivel < etapas.length - 1 ? `Continuar para ${etapas[etapaVisivel + 1].titulo.toLowerCase()}` : "Adicionar"}
+                  {salvandoItem ? "Salvando…" : etapaOpcional ? rotuloCtaOpcional : etapaVisivel < etapas.length - 1 ? `Continuar para ${etapas[etapaVisivel + 1].titulo.toLowerCase()}` : "Adicionar"}
                 </button>
               )}
             </div>
