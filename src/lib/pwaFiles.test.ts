@@ -53,6 +53,13 @@ describe("PWA do ChefeBot", () => {
     expect(serviceWorker).not.toContain('const OFFLINE = ["/pedidos", "/login"]');
   });
 
+  it("mantém manifesto e worker fora do Cache Storage para evitar versões antigas", () => {
+    expect(serviceWorker).toContain(
+      'if (url.pathname === "/manifest.json" || url.pathname === "/sw.js") return;',
+    );
+    expect(serviceWorker).not.toContain('  "/manifest.json",\n  "/icon-192.png"');
+  });
+
   it("usa somente uma tela neutra como fallback de navegação offline", () => {
     expect(serviceWorker).toContain('const OFFLINE_URL = "/offline";');
     expect(serviceWorker).toContain('if (request.mode === "navigate")');
