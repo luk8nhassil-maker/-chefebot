@@ -585,6 +585,48 @@ describe("/salao — Pedidos abertos e complemento", () => {
     expect(screen.queryByText(/^enviada$/)).not.toBeInTheDocument();
   });
 
+  it("organiza uma comanda em um único card com número forte, cliente e pedidos/status individuais", async () => {
+    const agora = new Date().toISOString();
+    comandas.push({
+      id: "c-ux", numero: 31, cliente: "Teste B", itens: [], status: "enviada", abertaEm: agora, totalParcial: 77,
+      rodadas: [
+        { id: "r-ux-1", numero: 1, status: "enviada", itens: [{ kind: "simple", name: "Pizza P", price: 68, qty: 1 }], subtotal: 68, criadaEm: agora, atualizadaEm: agora, enviadaEm: agora, pedidoId: "ped-ux-1", pedidoNumero: 101, pedidoStatus: "em_preparo" },
+        { id: "r-ux-2", numero: 2, status: "enviada", itens: [{ kind: "simple", name: "Guaraná 1L", price: 9, qty: 1 }], subtotal: 9, criadaEm: agora, atualizadaEm: agora, enviadaEm: agora, pedidoId: "ped-ux-2", pedidoNumero: 102, pedidoStatus: "novo" },
+      ],
+    });
+
+    const user = userEvent.setup();
+    render(<SalaoPage />);
+    await user.click(await screen.findByRole("button", { name: /Pedidos abertos/ }));
+
+    expect(await screen.findByText("Comanda #31")).toBeInTheDocument();
+    expect(screen.getAllByText("Teste B")).toHaveLength(1);
+    expect(screen.getByText("Pedido inicial")).toBeInTheDocument();
+    expect(screen.getByText("Complemento 2")).toBeInTheDocument();
+    expect(screen.getByText("Em preparo")).toBeInTheDocument();
+    expect(screen.getByText("Aguardando cozinha")).toBeInTheDocument();
+    expect(screen.getByText("R$ 68,00")).toBeInTheDocument();
+    expect(screen.getByText("R$ 9,00")).toBeInTheDocument();
+    expect(screen.getByText("Total da comanda")).toBeInTheDocument();
+    expect(screen.getByText("R$ 77,00")).toBeInTheDocument();
+  });
+
+  it("não junta clientes iguais quando o número da comanda é diferente", async () => {
+    const agora = new Date().toISOString();
+    comandas.push(
+      { id: "c-ux-a", numero: 41, cliente: "Teste B", itens: [], status: "enviada", abertaEm: agora, totalParcial: 10, rodadas: [{ id: "r-a", numero: 1, status: "enviada", itens: [{ kind: "simple", name: "Item A", price: 10, qty: 1 }], subtotal: 10, criadaEm: agora, atualizadaEm: agora, enviadaEm: agora, pedidoStatus: "novo" }] },
+      { id: "c-ux-b", numero: 42, cliente: "Teste B", itens: [], status: "enviada", abertaEm: agora, totalParcial: 12, rodadas: [{ id: "r-b", numero: 1, status: "enviada", itens: [{ kind: "simple", name: "Item B", price: 12, qty: 1 }], subtotal: 12, criadaEm: agora, atualizadaEm: agora, enviadaEm: agora, pedidoStatus: "novo" }] },
+    );
+
+    const user = userEvent.setup();
+    render(<SalaoPage />);
+    await user.click(await screen.findByRole("button", { name: /Pedidos abertos/ }));
+
+    expect(await screen.findByText("Comanda #41")).toBeInTheDocument();
+    expect(screen.getByText("Comanda #42")).toBeInTheDocument();
+    expect(screen.getAllByText("Teste B")).toHaveLength(2);
+  });
+
   it("abrir a comanda mostra o Pedido inicial no histórico e 'Adicionar itens' cria um Complemento 2 no catálogo", async () => {
     comandas.push({
       id: "c1", numero: 1, cliente: "Carlos", mesa: "9", itens: [{ kind: "simple", name: "Refrigerante 2L", price: 12, qty: 1 }],
