@@ -1442,7 +1442,7 @@ function ComandaDetail({
     setFechando(true)
     try {
       const r = await fetch(`/api/salao/comandas/${comanda.id}/fechar`, { method: "POST" })
-      if (r.ok) { onAtualizado(); onVoltar() }
+      if (r.ok) { onAtualizado(); window.location.assign(`/salao/receber/${comanda.id}`) }
     } finally {
       setFechando(false)
     }
@@ -1533,7 +1533,7 @@ function ComandaDetail({
         </button>
         {comanda.status === "enviada" && (
           <button onClick={fecharMesa} disabled={fechando} style={{ ...btnSecundario, ...(fechando ? btnDesabilitado : {}) }}>
-            {fechando ? "Fechando…" : "Fechar mesa"}
+            {fechando ? "Pedindo conta…" : "Pedir conta"}
           </button>
         )}
       </div>

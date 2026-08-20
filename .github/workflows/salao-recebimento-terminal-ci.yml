@@ -1,0 +1,81 @@
+name: salao-recebimento-terminal-ci
+
+on:
+  pull_request:
+    paths:
+      - "src/app/salao/**"
+      - "src/app/api/salao/comandas/**"
+      - "src/lib/salaoConta*"
+      - "src/lib/salaoPagamento*"
+      - ".github/workflows/salao-recebimento-terminal-ci.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: salao-recebimento-terminal-ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  salao-recebimento-terminal-ci:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do SHA validado
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Testes focados e regressão do Salão
+        run: >-
+          npm test --
+          "src/app/api/salao/comandas/[id]/pagamento/route.test.ts"
+          "src/app/salao/receber/[id]/page.test.tsx"
+          src/lib/salaoConta.test.ts
+          src/lib/salaoPagamento.test.ts
+          src/app/salao/page.test.tsx
+
+      - name: Typecheck comparado com a main
+        shell: bash
+        run: |
+          set +e
+          ./node_modules/.bin/tsc --noEmit > /tmp/typecheck-branch.log 2>&1
+          branch_status=$?
+          set -e
+
+          base_sha="${{ github.event.pull_request.base.sha }}"
+          git fetch --depth=1 origin "$base_sha"
+          git worktree add --detach /tmp/chefebot-main "$base_sha"
+          ln -s "$GITHUB_WORKSPACE/node_modules" /tmp/chefebot-main/node_modules
+
+          set +e
+          (cd /tmp/chefebot-main && "$GITHUB_WORKSPACE/node_modules/.bin/tsc" --noEmit) > /tmp/typecheck-main.log 2>&1
+          main_status=$?
+          set -e
+
+          sed -E 's#^([^(:]+\([^)]*\): error TS[0-9]+:).*#\1#' /tmp/typecheck-branch.log | grep 'error TS' | sort -u > /tmp/branch-errors.txt || true
+          sed -E 's#^([^(:]+\([^)]*\): error TS[0-9]+:).*#\1#' /tmp/typecheck-main.log | grep 'error TS' | sort -u > /tmp/main-errors.txt || true
+          comm -13 /tmp/main-errors.txt /tmp/branch-errors.txt > /tmp/new-errors.txt
+
+          if [ -s /tmp/new-errors.txt ]; then
+            echo "::error::A branch introduziu novos erros de typecheck:"
+            cat /tmp/new-errors.txt
+            exit 1
+          fi
+
+          echo "Branch status=$branch_status; main status=$main_status; nenhum erro novo de typecheck."
+
+      - name: Lint dos arquivos alterados
+        run: >-
+          npm run lint --
+          src/app/salao/page.tsx
+          "src/app/salao/receber/[id]/page.tsx"
+          "src/app/salao/receber/[id]/page.test.tsx"
+          "src/app/api/salao/comandas/[id]/pagamento/route.ts"
+          "src/app/api/salao/comandas/[id]/pagamento/route.test.ts"
+
+      - name: Build de produção
+        run: npm run build
