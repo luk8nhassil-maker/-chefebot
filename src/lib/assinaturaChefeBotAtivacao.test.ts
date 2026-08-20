@@ -2,18 +2,18 @@ import { describe, expect, it } from "vitest";
 import { assinaturaChefeBotAtiva } from "./assinaturaChefeBotAtivacao";
 
 describe("assinatura ChefeBot — ativação operacional", () => {
-  it("fica desligada em produção quando a flag está ausente", () => {
-    expect(assinaturaChefeBotAtiva({ VERCEL_ENV: "production" })).toBe(false);
+  it("fica ativa em produção quando a flag está ausente", () => {
+    expect(assinaturaChefeBotAtiva({ VERCEL_ENV: "production" })).toBe(true);
   });
 
-  it("fica desligada em produção quando a flag está false", () => {
+  it("fica desligada em produção somente quando a flag está false", () => {
     expect(assinaturaChefeBotAtiva({
       VERCEL_ENV: "production",
       ASSINATURA_CHEFEBOT_ENABLED: "false",
     })).toBe(false);
   });
 
-  it("só reativa produção com opt-in explícito true", () => {
+  it("permanece ativa em produção quando a flag está true", () => {
     expect(assinaturaChefeBotAtiva({
       VERCEL_ENV: "production",
       ASSINATURA_CHEFEBOT_ENABLED: "true",
