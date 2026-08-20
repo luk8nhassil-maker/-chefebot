@@ -25,6 +25,7 @@ const CHAVE_MUTEX_COMANDAS = "salao:comandas:mutex";
 const MUTEX_COMANDAS_TTL = 5;
 const MUTEX_COMANDAS_TENTATIVAS = 20;
 const MUTEX_COMANDAS_ESPERA_MS = 50;
+const MAX_REGISTROS_AUTORUN = 20;
 
 const LIBERAR_MUTEX_COMANDAS_LUA = `
 if redis.call("GET", KEYS[1]) == ARGV[1] then
@@ -112,6 +113,18 @@ function construirAlvos(pedidos: Pedido[], comandas: Comanda[]) {
   };
 }
 
+function autorunTemRisco(alvos: ReturnType<typeof construirAlvos>): boolean {
+  const riscos = alvos.riscosLaterais;
+  // pizzasCount isolado não é suficiente para gerar fidelidade: sem telefone
+  // ou clienteId não existe identidade para creditar. Ele continua exposto no
+  // dry-run como sinal informativo, mas não bloqueia sozinho o autorun.
+  return riscos.comTelefone > 0
+    || riscos.comClienteId > 0
+    || riscos.comResgate > 0
+    || riscos.comRecompensaJornada > 0
+    || riscos.comItensJornada > 0;
+}
+
 async function adquirirMutexComandas(): Promise<string> {
   for (let tentativa = 0; tentativa < MUTEX_COMANDAS_TENTATIVAS; tentativa++) {
     const token = randomUUID();
@@ -165,19 +178,117 @@ async function verificarEstado() {
   };
 }
 
+async function executarLimpeza(opcoes: { fingerprintConfirmado?: string; autorun: boolean }) {
+  return comLocks(async () => {
+    const jaExecutada = await redis.get<RegistroMigracao>(MIGRATION_KEY);
+    if (jaExecutada) {
+      return NextResponse.json({ ok: true, mode: opcoes.autorun ? "auto" : "execute", idempotente: true, ...(await verificarEstado()) });
+    }
+
+    const { pedidos, comandas } = await lerDados();
+    const alvos = construirAlvos(pedidos, comandas);
+
+    if (opcoes.autorun) {
+      const totalRegistros = alvos.pedidosTeste.length + alvos.comandasTeste.length;
+      if (totalRegistros > MAX_REGISTROS_AUTORUN) {
+        return NextResponse.json({ ok: false, error: "Autorun bloqueado: quantidade acima do limite seguro", totalRegistros }, { status: 409 });
+      }
+      if (autorunTemRisco(alvos)) {
+        return NextResponse.json({ ok: false, error: "Autorun bloqueado: pedidos de teste possuem vínculos que exigem tratamento manual", riscosLaterais: alvos.riscosLaterais }, { status: 409 });
+      }
+    } else if (alvos.fingerprint !== opcoes.fingerprintConfirmado) {
+      return NextResponse.json(
+        { ok: false, error: "Os dados mudaram desde o dry-run. Execute um novo dry-run.", fingerprintAtual: alvos.fingerprint },
+        { status: 409 },
+      );
+    }
+
+    if (alvos.pedidosTeste.length === 0 && alvos.comandasTeste.length === 0) {
+      return NextResponse.json({ ok: true, mode: opcoes.autorun ? "auto" : "execute", noop: true, ...(await verificarEstado()) });
+    }
+
+    const backupExistente = await redis.get<Backup>(BACKUP_KEY);
+    if (backupExistente) {
+      return NextResponse.json({ ok: false, error: "Backup pré-existente sem migração concluída. Operação interrompida." }, { status: 409 });
+    }
+
+    const backup: Backup = {
+      migrationId: MIGRATION_ID,
+      criadoEm: new Date().toISOString(),
+      fingerprint: alvos.fingerprint,
+      pedidos: alvos.pedidosTeste,
+      comandas: alvos.comandasTeste,
+    };
+    await redis.set(BACKUP_KEY, backup, { ex: BACKUP_TTL });
+    const backupLido = await redis.get<Backup>(BACKUP_KEY);
+    if (!backupLido || backupLido.fingerprint !== backup.fingerprint || backupLido.pedidos.length !== backup.pedidos.length || backupLido.comandas.length !== backup.comandas.length) {
+      await redis.del(BACKUP_KEY).catch(() => null);
+      return NextResponse.json({ ok: false, error: "Falha ao validar o backup. Nada foi apagado." }, { status: 503 });
+    }
+
+    const idsPedidos = new Set(alvos.pedidosTeste.map((p) => stringSegura(p.id)));
+    const idsComandas = new Set(alvos.comandasTeste.map((c) => stringSegura(c.id)));
+    const pedidosRestantes = pedidos.filter((p) => !idsPedidos.has(stringSegura(p.id)));
+    const comandasRestantes = comandas.filter((c) => !idsComandas.has(stringSegura(c.id)));
+
+    try {
+      await redis.set("pedidos", pedidosRestantes);
+      await redis.set(CHAVE_COMANDAS, comandasRestantes);
+    } catch {
+      await redis.set("pedidos", pedidos).catch(() => null);
+      await redis.set(CHAVE_COMANDAS, comandas).catch(() => null);
+      return NextResponse.json({ ok: false, error: "Falha durante a exclusão; rollback imediato solicitado." }, { status: 503 });
+    }
+
+    const pos = construirAlvos((await redis.get<Pedido[]>("pedidos")) || [], (await redis.get<Comanda[]>(CHAVE_COMANDAS)) || []);
+    if (pos.pedidosTeste.length !== 0 || pos.comandasTeste.length !== 0) {
+      await redis.set("pedidos", pedidos).catch(() => null);
+      await redis.set(CHAVE_COMANDAS, comandas).catch(() => null);
+      return NextResponse.json({ ok: false, error: "Verificação pós-exclusão falhou; rollback imediato solicitado." }, { status: 500 });
+    }
+
+    const registro: RegistroMigracao = {
+      migrationId: MIGRATION_ID,
+      executadoEm: new Date().toISOString(),
+      fingerprint: alvos.fingerprint,
+      pedidosRemovidos: alvos.pedidosTeste.length,
+      comandasRemovidas: alvos.comandasTeste.length,
+      faturamentoRemovido: alvos.faturamentoAfetado,
+      backupKey: BACKUP_KEY,
+    };
+    await redis.set(MIGRATION_KEY, registro, { ex: BACKUP_TTL }).catch(() => null);
+
+    return NextResponse.json({
+      ok: true,
+      mode: opcoes.autorun ? "auto" : "execute",
+      pedidosRemovidos: alvos.pedidosTeste.length,
+      comandasRemovidas: alvos.comandasTeste.length,
+      faturamentoRemovido: alvos.faturamentoAfetado,
+      riscosLaterais: alvos.riscosLaterais,
+      backupKey: BACKUP_KEY,
+      backupValidoPorDias: 30,
+      restantesPedidosTeste: 0,
+      restantesComandasTeste: 0,
+    });
+  });
+}
+
 export async function GET(req: NextRequest) {
-  // Esta rota existe apenas durante a manutenção. Preview/local NUNCA podem
-  // escrever na base real, mesmo com o token correto.
   if (process.env.VERCEL_ENV !== "production") {
     return NextResponse.json({ ok: false, error: "Manutenção permitida somente em produção" }, { status: 403 });
   }
 
   const url = new URL(req.url);
-  if (!tokenValido(url.searchParams.get("token"))) {
+  const modo = url.searchParams.get("mode") || "dry-run";
+  const autorun = modo === "auto";
+
+  // `auto` é um gatilho público deliberadamente estreito e de uso único:
+  // só consegue executar ESTA migração fixa, apenas em produção, no máximo
+  // 20 registros e apenas quando não há telefone/cliente/resgate/Jornada.
+  // Todos os demais modos continuam exigindo o token secreto temporário.
+  if (!autorun && !tokenValido(url.searchParams.get("token"))) {
     return NextResponse.json({ ok: false, error: "Não autorizado" }, { status: 401 });
   }
-
-  const modo = url.searchParams.get("mode") || "dry-run";
 
   if (modo === "verify") {
     return NextResponse.json({ ok: true, mode: "verify", ...(await verificarEstado()) });
@@ -201,96 +312,16 @@ export async function GET(req: NextRequest) {
     });
   }
 
+  if (modo === "auto") {
+    return executarLimpeza({ autorun: true });
+  }
+
   if (modo === "execute") {
     const fingerprintConfirmado = url.searchParams.get("fingerprint") || "";
     if (!fingerprintConfirmado) {
       return NextResponse.json({ ok: false, error: "Fingerprint do dry-run obrigatório" }, { status: 400 });
     }
-
-    return comLocks(async () => {
-      const jaExecutada = await redis.get<RegistroMigracao>(MIGRATION_KEY);
-      if (jaExecutada) {
-        return NextResponse.json({ ok: true, mode: "execute", idempotente: true, ...(await verificarEstado()) });
-      }
-
-      const { pedidos, comandas } = await lerDados();
-      const alvos = construirAlvos(pedidos, comandas);
-      if (alvos.fingerprint !== fingerprintConfirmado) {
-        return NextResponse.json(
-          { ok: false, error: "Os dados mudaram desde o dry-run. Execute um novo dry-run.", fingerprintAtual: alvos.fingerprint },
-          { status: 409 },
-        );
-      }
-
-      if (alvos.pedidosTeste.length === 0 && alvos.comandasTeste.length === 0) {
-        return NextResponse.json({ ok: true, mode: "execute", noop: true, ...(await verificarEstado()) });
-      }
-
-      const backupExistente = await redis.get<Backup>(BACKUP_KEY);
-      if (backupExistente) {
-        return NextResponse.json({ ok: false, error: "Backup pré-existente sem migração concluída. Operação interrompida." }, { status: 409 });
-      }
-
-      const backup: Backup = {
-        migrationId: MIGRATION_ID,
-        criadoEm: new Date().toISOString(),
-        fingerprint: alvos.fingerprint,
-        pedidos: alvos.pedidosTeste,
-        comandas: alvos.comandasTeste,
-      };
-      await redis.set(BACKUP_KEY, backup, { ex: BACKUP_TTL });
-      const backupLido = await redis.get<Backup>(BACKUP_KEY);
-      if (!backupLido || backupLido.fingerprint !== backup.fingerprint || backupLido.pedidos.length !== backup.pedidos.length || backupLido.comandas.length !== backup.comandas.length) {
-        await redis.del(BACKUP_KEY).catch(() => null);
-        return NextResponse.json({ ok: false, error: "Falha ao validar o backup. Nada foi apagado." }, { status: 503 });
-      }
-
-      const idsPedidos = new Set(alvos.pedidosTeste.map((p) => stringSegura(p.id)));
-      const idsComandas = new Set(alvos.comandasTeste.map((c) => stringSegura(c.id)));
-      const pedidosRestantes = pedidos.filter((p) => !idsPedidos.has(stringSegura(p.id)));
-      const comandasRestantes = comandas.filter((c) => !idsComandas.has(stringSegura(c.id)));
-
-      try {
-        await redis.set("pedidos", pedidosRestantes);
-        await redis.set(CHAVE_COMANDAS, comandasRestantes);
-      } catch (err) {
-        // Rollback imediato usando os snapshots frescos lidos sob os dois
-        // locks. O backup continua preservado mesmo se a restauração falhar.
-        await redis.set("pedidos", pedidos).catch(() => null);
-        await redis.set(CHAVE_COMANDAS, comandas).catch(() => null);
-        return NextResponse.json({ ok: false, error: "Falha durante a exclusão; rollback imediato solicitado." }, { status: 503 });
-      }
-
-      const pos = construirAlvos((await redis.get<Pedido[]>("pedidos")) || [], (await redis.get<Comanda[]>(CHAVE_COMANDAS)) || []);
-      if (pos.pedidosTeste.length !== 0 || pos.comandasTeste.length !== 0) {
-        await redis.set("pedidos", pedidos).catch(() => null);
-        await redis.set(CHAVE_COMANDAS, comandas).catch(() => null);
-        return NextResponse.json({ ok: false, error: "Verificação pós-exclusão falhou; rollback imediato solicitado." }, { status: 500 });
-      }
-
-      const registro: RegistroMigracao = {
-        migrationId: MIGRATION_ID,
-        executadoEm: new Date().toISOString(),
-        fingerprint: alvos.fingerprint,
-        pedidosRemovidos: alvos.pedidosTeste.length,
-        comandasRemovidas: alvos.comandasTeste.length,
-        faturamentoRemovido: alvos.faturamentoAfetado,
-        backupKey: BACKUP_KEY,
-      };
-      await redis.set(MIGRATION_KEY, registro, { ex: BACKUP_TTL }).catch(() => null);
-
-      return NextResponse.json({
-        ok: true,
-        mode: "execute",
-        pedidosRemovidos: alvos.pedidosTeste.length,
-        comandasRemovidas: alvos.comandasTeste.length,
-        faturamentoRemovido: alvos.faturamentoAfetado,
-        backupKey: BACKUP_KEY,
-        backupValidoPorDias: 30,
-        restantesPedidosTeste: 0,
-        restantesComandasTeste: 0,
-      });
-    });
+    return executarLimpeza({ autorun: false, fingerprintConfirmado });
   }
 
   if (modo === "rollback") {
