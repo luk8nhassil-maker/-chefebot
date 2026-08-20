@@ -326,3 +326,14 @@ div[aria-label^="Pedidos da comanda "] > div > div:nth-child(2) > span:last-chil
     font-size: 10.5px !important;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Salão — visão interna da comanda
+   --------------------------------------------------------------------------
+   O status curto no cabeçalho da rodada já informa a ação operacional.
+   Ocultamos somente o bloco explicativo longo que vem logo após o botão da
+   rodada; detalhes do pedido, itens, subtotal e impressão permanecem intactos.
+   -------------------------------------------------------------------------- */
+.sal-shell button[aria-expanded] + div:has(> strong) {
+  display: none !important;
+}
